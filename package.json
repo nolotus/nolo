@@ -1,0 +1,77 @@
+{
+  "name": "nolo-ssr",
+  "version": "0.0.1",
+  "description": "nolo create it for ssr",
+  "main": "server/index.js",
+  "babel": {
+    "presets": [
+      "@babel/preset-env",
+      "@babel/preset-react"
+    ]
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "react": "^17.0.1",
+    "react-dom": "^17.0.1",
+    "react-redux": "^7.2.2",
+    "react-router": "^5.2.0",
+    "react-router-config": "^5.1.1",
+    "react-router-dom": "^5.2.0",
+    "redux": "^4.0.5"
+  },
+  "devDependencies": {
+    "webpack-node-externals": "^2.5.2",
+    "@babel/cli": "^7.12.8",
+    "@babel/core": "^7.12.9",
+    "@babel/preset-env": "^7.12.7",
+    "@babel/preset-react": "^7.12.7",
+    "babel-loader": "^8.2.1",
+    "cross-env": "^7.0.2",
+    "jest": "^25.1.0",
+    "nodemon": "^2.0.6",
+    "npm-run-all": "^4.1.5",
+    "path": "^0.12.7",
+    "rimraf": "^3.0.2",
+    "webpack": "^5.7.0",
+    "webpack-cli": "^4.2.0"
+  },
+  "nodemonConfig": {
+    "exec": "npm run dev",
+    "watch": [
+      "server/*",
+      "public/*"
+    ],
+    "ignore": [
+      "**/__tests__/**",
+      "*.test.js",
+      "*.spec.js"
+    ]
+  },
+  "jest": {
+    "testEnvironment": "node"
+  },
+  "scripts": {
+    "start": "npm run prod",
+    "server": "node ./build/server.js",
+    "dev": "cross-env NODE_ENV=development  npm-run-all  build:client build:server server ",
+    "prod": "cross-env NODE_ENV=production npm-run-all build:client build:server server",
+    "build:server": "webpack  --config config/webpack.server.js ",
+    "build:client": "webpack  --config config/webpack.client.js ",
+    "clean": "rimraf build",
+    "watch:dev": "nodemon",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nolotus/nolo-ssr.git"
+  },
+  "keywords": [
+    "ssr"
+  ],
+  "author": "nolotus",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nolotus/nolo-ssr/issues"
+  },
+  "homepage": "https://github.com/nolotus/nolo-ssr#readme"
+}
