@@ -1,3 +1,4 @@
 node_modules/
 build
-pacjage-lock.json
+package-lock.json
+public/bundle.js

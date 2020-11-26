@@ -4,11 +4,16 @@ import { StaticRouter } from "react-router-dom";
 import { Provider } from "react-redux";
 import { renderRoutes } from "react-router-config";
 import Routes from "../common/Routes";
+import Template from '../template/index';
 
 const render = (req, store) => {
   const content = renderToString(
     <Provider store={store}>
-      <StaticRouter location={req.path}>{renderRoutes(Routes)}</StaticRouter>
+      <StaticRouter location={req.path}>
+    
+      {renderRoutes(Routes)}
+   
+      </StaticRouter>
     </Provider>
   );
 
