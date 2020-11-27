@@ -4,6 +4,7 @@ import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
 const app = express();
+
 app.use(express.static("public"));
 app.get("*", (req, res) => {
   const promises = matchRoutes(Routes, req.path).map(({ route }) => {

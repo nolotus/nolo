@@ -1,8 +1,8 @@
 import Home from "../pages/Home";
 import Create from "../pages/Create";
-import Life from "../pages/Create";
-import Find from "../pages/Create";
-import Self from "../pages/Create";
+import Life from "../pages/Life";
+import Find from "../pages/Find";
+import Self from "../pages/Self";
 const Routes = [
   {
     exact: true,
