@@ -1,10 +1,9 @@
 import React from 'react'
+import Template from "../../template"
 
 const Life = () => {
   return (
-    <div>
-      life
-    </div>
+    <Template></Template>
   )
 }
 

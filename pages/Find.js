@@ -1,10 +1,9 @@
 import React from 'react'
+import Template from "../template"
 
 const Find = () => {
   return (
-    <div>
-      find
-    </div>
+    <Template></Template>
   )
 }
 

@@ -1,10 +1,9 @@
 import React from 'react'
+import Template from "../template"
 
 const Self = () => {
   return (
-    <div>
-      self
-    </div>
+    <Template></Template>
   )
 }
 

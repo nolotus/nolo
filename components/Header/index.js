@@ -1,17 +1,10 @@
 import React, { useState, useEffect } from "react";
-import styled from "styled-components";
 import { Link } from "react-router-dom";
-import { dbGet } from "../common/api";
-import { hostDb } from "../common/db";
+import { dbGet } from "../../common/api";
+import { hostDb } from "../../common/db";
 import { useSelector } from "react-redux";
-import { selectUserInfo } from "../common/selector";
-export const Logo = styled.a`
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  margin-right: 10px;
-  width: calc(100% / 6);
-`;
+import { selectUserInfo } from "../../common/selector";
+import {WrapHeader,Menu,Nav,Logo}from "./styled"
 const Header = () => {
   const [menu, setmenu] = useState([{ title: "加载中", path: "" }]);
   const userInfo = useSelector(selectUserInfo);
@@ -28,21 +21,21 @@ const Header = () => {
     return () => {};
   }, []);
   return (
-    <header>
-      <div className="menu">
+    <WrapHeader>
+      <Menu>
         <Logo href="/">Nolotus</Logo>
 
-        <nav>
+        <Nav>
           {menu.map((item, index) => {
             return (
               <Link key={index} to={`/${item.path}`}>
-                {item.path === "self" ? userInfo.name : item.title}
+                {item.path === "self"&&userInfo.name ? userInfo.name : item.title}
               </Link>
             );
           })}
-        </nav>
-      </div>
-    </header>
+        </Nav>
+      </Menu>
+    </WrapHeader>
   );
 };
 

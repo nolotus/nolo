@@ -1,10 +1,9 @@
 import React from 'react'
+import Template from "../template"
 
 const Create = () => {
   return (
-    <div>
-      create
-    </div>
+    <Template></Template>
   )
 }
 

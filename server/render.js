@@ -5,7 +5,6 @@ import { StaticRouter } from "react-router-dom";
 import { Provider } from "react-redux";
 import { renderRoutes } from "react-router-config";
 import Routes from "../common/Routes";
-import Template from '../template/index';
 
 const render = (req, store) => {
   const content = renderToString(
@@ -22,6 +21,8 @@ const render = (req, store) => {
   const html = `
     <html ${helmet.htmlAttributes.toString()}>
       <head>
+    <link rel="stylesheet" href="/common.css" type="text/css" />
+
       ${helmet.title.toString()}
       ${helmet.meta.toString()}
       ${helmet.link.toString()}
