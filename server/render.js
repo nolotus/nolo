@@ -1,4 +1,5 @@
 import React from "react";
+import Helmet from 'react-helmet';
 import { renderToString } from "react-dom/server";
 import { StaticRouter } from "react-router-dom";
 import { Provider } from "react-redux";
@@ -16,11 +17,16 @@ const render = (req, store) => {
       </StaticRouter>
     </Provider>
   );
+  const helmet = Helmet.renderStatic();
 
   const html = `
-    <html>
-      <head></head>
-      <body>
+    <html ${helmet.htmlAttributes.toString()}>
+      <head>
+      ${helmet.title.toString()}
+      ${helmet.meta.toString()}
+      ${helmet.link.toString()}
+      </head>
+      <body ${helmet.bodyAttributes.toString()}>
         <div id="root">${content}</div>
         <script src="bundle.js"></script>
       </body>
