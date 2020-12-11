@@ -1,7 +1,9 @@
 
 const initState ={
   templateName:'simple',
-  userInfo:{}
+  userInfo:{},
+  menu:[],
+  setting:{}
 }
 const reducer = (state = initState, action) => {
   switch (action.type) {
