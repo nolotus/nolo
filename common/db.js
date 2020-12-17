@@ -51,6 +51,6 @@ export const connectDb = (dbName) => {
 // export const remoteDb = connectDb(dbName);
 
 export const hostDb = connectDb(hostDbName);
-
+export const localDb = new PouchDB("localDb");
 
 // PouchDB.sync(dbName, remoteAdress);

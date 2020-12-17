@@ -56,7 +56,12 @@
     "slate": "^0.59.0",
     "slate-history": "^0.59.0",
     "slate-hyperscript": "^0.59.0",
-    "slate-react": "^0.59.0"
+    "slate-react": "^0.59.0",
+    "@fortawesome/fontawesome-svg-core": "^1.2.32",
+    "@fortawesome/free-brands-svg-icons": "^5.15.1",
+    "@fortawesome/free-regular-svg-icons": "^5.15.1",
+    "@fortawesome/free-solid-svg-icons": "^5.15.1",
+    "@fortawesome/react-fontawesome": "^0.1.12"
   },
   "nodemonConfig": {
     "exec": "npm run dev",
@@ -66,7 +71,6 @@
       "pages/*",
       "components/*",
       "template/*"
-
     ],
     "ignore": [
       "**/__tests__/**",
