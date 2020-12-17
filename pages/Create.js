@@ -1,9 +1,12 @@
 import React from 'react'
 import Template from "../template"
-
+import {CurrentEditor} from "../components/Editor"
 const Create = () => {
   return (
-    <Template></Template>
+    <Template>
+      
+<CurrentEditor></CurrentEditor>
+    </Template>
   )
 }
 

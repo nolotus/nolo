@@ -15,6 +15,9 @@
     ]
   },
   "dependencies": {
+    "@emotion/core": "^10.0.22",
+    "@emotion/styled": "^10.0.23",
+    "emotion": "^10.0.27",
     "express": "^4.17.1",
     "global": "^4.4.0",
     "pouchdb": "^7.2.2",
@@ -49,7 +52,11 @@
     "rimraf": "^3.0.2",
     "webpack": "^5.7.0",
     "webpack-cli": "^4.2.0",
-    "webpack-node-externals": "^2.5.2"
+    "webpack-node-externals": "^2.5.2",
+    "slate": "^0.59.0",
+    "slate-history": "^0.59.0",
+    "slate-hyperscript": "^0.59.0",
+    "slate-react": "^0.59.0"
   },
   "nodemonConfig": {
     "exec": "npm run dev",
@@ -57,7 +64,9 @@
       "server/*",
       "public/*",
       "pages/*",
-      "components/*"
+      "components/*",
+      "template/*"
+
     ],
     "ignore": [
       "**/__tests__/**",

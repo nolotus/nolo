@@ -2,15 +2,15 @@ import React from 'react'
 import {useSelector} from "react-redux" 
 
 import Simple from './Simple'
-const index = () => {
+const Template = (props) => {
 const templateName = useSelector(state => state.templateName)
 switch (templateName) {
     case 'simple':
-        return <Simple></Simple>
+        return <Simple {...props}></Simple>
 
     default:
-        return <Simple></Simple>
+        return <Simple {...props}></Simple>
 }
 }
 
-export default index
+export default Template
