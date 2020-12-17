@@ -1,5 +1,7 @@
 import React from "react";
 import styled from "styled-components";
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+
 const StyledLoading = styled.div`
 
   body {
@@ -111,7 +113,7 @@ const StyledLoading = styled.div`
     }
   }
 `;
-export const Loading = () => {
+export const LoadingPage = () => {
   return (
     <StyledLoading>
       <div className="header">
@@ -165,3 +167,15 @@ export const Loading = () => {
     </StyledLoading>
   );
 };
+
+export const LoadingBox =()=>{
+return      <div className="loadding-box">
+
+<FontAwesomeIcon className="loading" icon={['fas', 'spinner']}></FontAwesomeIcon>
+
+</div>
+  
+}
+export const Loading=()=>{
+  <FontAwesomeIcon className="loading" icon={['fas', 'spinner']}></FontAwesomeIcon>;
+}
