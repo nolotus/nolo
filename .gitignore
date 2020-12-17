@@ -3,3 +3,5 @@ build
 package-lock.json
 public/bundle.js
 admin
+localDb
+_users

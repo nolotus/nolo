@@ -1,6 +1,5 @@
-import React ,{useState,useEffect}from 'react'
-import {Loading} from '../components/Loading'
-import {Artcile} from '../components/Artcile'
+import React, { useState, useEffect } from "react";
+import { Loading } from "../components/Loading";
 
 // import Template from "../template"
 const Home = () => {
@@ -16,4 +15,4 @@ const Home = () => {
     )
 }
 
-export default Home
+export default Home;
