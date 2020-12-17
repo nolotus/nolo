@@ -5,15 +5,13 @@ import {Artcile} from '../components/Artcile'
 // import Template from "../template"
 const Home = () => {
     const [loading, setLoading] = useState(true)
-    useEffect(() => {
-        setLoading
-        return () => {
-            
-        }
-    }, [])
+
     return (
+        <>
+            {loading? <Loading/>:<Artcile/>}
+        </>
    
-            <Loading></Loading>
+           
    
     )
 }
