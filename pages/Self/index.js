@@ -13,7 +13,6 @@ import { connectDb, hostDb } from "../../common/db";
 const Self = (props) => {
   let history = useHistory();
   const dispatch = useDispatch();
-
   const [type, setType] = useState("signin");
   const [error, setError] = useState();
   const { isLogin } = useSelector((state) => state.authData);
@@ -46,7 +45,6 @@ const Self = (props) => {
       return err;
     }
   };
-
   isLogin && history.push("/setting");
   const [state, setstate] = useState({
     username: "",
@@ -69,7 +67,6 @@ const Self = (props) => {
   };
   const submit = (e) => {
     e.preventDefault();
-    console.log(type);
     type === "signin" ? login() : signup();
   };
 

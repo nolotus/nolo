@@ -3,6 +3,8 @@ import Create from "../pages/Create";
 import Life from "../pages/Life";
 import Find from "../pages/Find";
 import Self from "../pages/Self";
+import {Setting} from "../pages/Setting";
+
 import {Page} from "../pages/Page";
 
 const Routes = [
@@ -26,6 +28,10 @@ const Routes = [
   {
     path: "/self",
     component: Self,
+  },
+  {
+    path: "/setting",
+    component: Setting,
   },
   {
     path: "/:id",

@@ -12,7 +12,6 @@ export const Page = (props) => {
 
   useEffect(() => {
     const getdata = async () => {
-      console.log("_id", _id);
       const doc = await dbGet(hostDb.remote, _id);
       doc !== undefined && setDoc(doc);
     };

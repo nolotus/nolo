@@ -13,7 +13,6 @@ const Header = () => {
     //get menu and setting from hostDb
     const fetchData = async () => {
       const menu = await dbGet(hostDb.remote, "menu");
-      console.log("menu", menu);
       // const setting = await dbGet(hostDb.remote, "setting");
       menu && menu.result && setmenu(menu.result);
     };
