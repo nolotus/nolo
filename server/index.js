@@ -3,9 +3,20 @@ import render from "./render";
 import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
-
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
+app.use('/db', createProxyMiddleware({ target: 'http://tw.db.nolotus.com:5984', changeOrigin: true }));
 app.use(express.static("public"));
+app.get("*", (req, res) => {
+  const promises = matchRoutes(Routes, req.path).map(({ route }) => {
+    const component = route.component;
+    return component.getInitialData ? component.getInitialData(store) : null;
+  });
+  Promise.all(promises).then(() => {
+    const html = render(req, store);
+    res.send(html);
+  });
+});
 require("greenlock-express")
     .init({
         packageRoot: process.cwd(),
@@ -20,13 +31,3 @@ require("greenlock-express")
     // Serves on 80 and 443
     // Get's SSL certificates magically!
     .serve(app);
-app.get("*", (req, res) => {
-  const promises = matchRoutes(Routes, req.path).map(({ route }) => {
-    const component = route.component;
-    return component.getInitialData ? component.getInitialData(store) : null;
-  });
-  Promise.all(promises).then(() => {
-    const html = render(req, store);
-    res.send(html);
-  });
-});

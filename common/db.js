@@ -3,7 +3,7 @@ import PouchDBAuth from "pouchdb-authentication";
 import find from "pouchdb-find";
 import { toHex } from "../common/tools";
 
-const dbArray = ["103.103.130.33:5984"];
+const dbArray = ["nolotus.xyz/db","tw.db.nolotus.com"];
 
 // if in electron host is undefined ,so need default
 // let hostname = window.location.hostname || defaultDBname;
@@ -26,7 +26,7 @@ PouchDB.plugin(PouchDBAuth).plugin(find);
 //remote dbname is different local dbname
 export const connectDb = (dbName) => {
   const remoteDbName= "userdb-" + toHex(dbName)
-  const remoteAdress = `http://${dbArray[0]}/${remoteDbName}/`;
+  const remoteAdress = `https://${dbArray[0]}/${remoteDbName}/`;
   const remote = new PouchDB(remoteAdress);
    const local = new PouchDB(dbName);
    local.sync(remote, {
