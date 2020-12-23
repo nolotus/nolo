@@ -500,6 +500,22 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
 
 /***/ }),
 
+/***/ "./common/theme.js":
+/*!*************************!*\
+  !*** ./common/theme.js ***!
+  \*************************/
+/*! namespace exports */
+/*! export themeMap [provided] [no usage info] [missing usage info prevents renaming] */
+/*! export useTheme [provided] [no usage info] [missing usage info prevents renaming] */
+/*! other exports [not provided] [no usage info] */
+/*! runtime requirements: __webpack_require__, __webpack_require__.r, __webpack_exports__, __webpack_require__.d, __webpack_require__.* */
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpack_require__.d(__webpack_exports__, {\n/* harmony export */   \"themeMap\": () => /* binding */ themeMap,\n/* harmony export */   \"useTheme\": () => /* binding */ useTheme\n/* harmony export */ });\n/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! react */ \"./node_modules/react/index.js\");\n\nvar themeMap = new Map([[\"dark\", {\n  \"button-color\": \"#FFF\"\n}], [\"light\", {\n  primaryColor: \"#03a9f4\",\n  backgroundColor: \"#fff\",\n  borderRadius: \" 6px\",\n  neutralShade3: \"#d1d3d4\",\n  neutralShade4: '#babdbf'\n}]]);\nfunction useTheme(theme) {\n  (0,react__WEBPACK_IMPORTED_MODULE_0__.useLayoutEffect)(function () {\n    // Iterate through each value in theme object\n    for (var key in theme) {\n      // Update css variables in document's root element\n      document.documentElement.style.setProperty(\"--\".concat(key), theme[key]);\n    }\n  }, [theme] // Only call again if theme object reference changes\n  );\n}\n\n//# sourceURL=webpack://nolo-ssr/./common/theme.js?");
+
+/***/ }),
+
 /***/ "./common/tools.js":
 /*!*************************!*\
   !*** ./common/tools.js ***!
@@ -897,7 +913,7 @@ eval("__webpack_require__.r(__webpack_exports__);\n/* harmony export */ __webpac
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
 "use strict";
-eval("__webpack_require__.r(__webpack_exports__);\n/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! react */ \"./node_modules/react/index.js\");\n/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! react-dom */ \"./node_modules/react-dom/index.js\");\n/* harmony import */ var react_router_dom__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! react-router-dom */ \"./node_modules/react-router-dom/esm/react-router-dom.js\");\n/* harmony import */ var react_router_config__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! react-router-config */ \"./node_modules/react-router-config/esm/react-router-config.js\");\n/* harmony import */ var _common_Routes__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../common/Routes */ \"./common/Routes.js\");\n/* harmony import */ var _common_store__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ../common/store */ \"./common/store.js\");\n/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! react-redux */ \"./node_modules/react-redux/es/index.js\");\n\n\n\n\n\n\n\nreact_dom__WEBPACK_IMPORTED_MODULE_1__.hydrate( /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0__.createElement(react_redux__WEBPACK_IMPORTED_MODULE_4__.Provider, {\n  store: _common_store__WEBPACK_IMPORTED_MODULE_3__.default\n}, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0__.createElement(react_router_dom__WEBPACK_IMPORTED_MODULE_5__.BrowserRouter, null, (0,react_router_config__WEBPACK_IMPORTED_MODULE_6__.renderRoutes)(_common_Routes__WEBPACK_IMPORTED_MODULE_2__.default))), document.getElementById(\"root\"));\n\n//# sourceURL=webpack://nolo-ssr/./web/client.js?");
+eval("__webpack_require__.r(__webpack_exports__);\n/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! react */ \"./node_modules/react/index.js\");\n/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! react-dom */ \"./node_modules/react-dom/index.js\");\n/* harmony import */ var react_router_dom__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! react-router-dom */ \"./node_modules/react-router-dom/esm/react-router-dom.js\");\n/* harmony import */ var react_router_config__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! react-router-config */ \"./node_modules/react-router-config/esm/react-router-config.js\");\n/* harmony import */ var _common_Routes__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ../common/Routes */ \"./common/Routes.js\");\n/* harmony import */ var _common_store__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! ../common/store */ \"./common/store.js\");\n/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! react-redux */ \"./node_modules/react-redux/es/index.js\");\n/* harmony import */ var _common_theme__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ../common/theme */ \"./common/theme.js\");\n\n\n\n\n\n\n\n\n\nfunction Root() {\n  var theme = _common_theme__WEBPACK_IMPORTED_MODULE_5__.themeMap.get('light');\n  (0,_common_theme__WEBPACK_IMPORTED_MODULE_5__.useTheme)(theme);\n  return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0__.createElement(react_redux__WEBPACK_IMPORTED_MODULE_4__.Provider, {\n    store: _common_store__WEBPACK_IMPORTED_MODULE_3__.default\n  }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0__.createElement(react_router_dom__WEBPACK_IMPORTED_MODULE_6__.BrowserRouter, null, (0,react_router_config__WEBPACK_IMPORTED_MODULE_7__.renderRoutes)(_common_Routes__WEBPACK_IMPORTED_MODULE_2__.default)));\n}\n\nreact_dom__WEBPACK_IMPORTED_MODULE_1__.hydrate( /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0__.createElement(Root, null), document.getElementById(\"root\"));\n\n//# sourceURL=webpack://nolo-ssr/./web/client.js?");
 
 /***/ }),
 
