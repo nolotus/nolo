@@ -1,0 +1,34 @@
+{
+  "defaults": {
+    "store": {
+      "module": "greenlock-store-fs"
+    },
+    "challenges": {
+      "http-01": {
+        "module": "acme-http-01-standalone"
+      }
+    },
+    "renewOffset": "-45d",
+    "renewStagger": "3d",
+    "accountKeyType": "EC-P256",
+    "serverKeyType": "RSA-2048",
+    "subscriberEmail": "s@nolotus.com"
+  },
+  "sites": [
+    {
+      "subject": "nolotus.com",
+      "altnames": [
+        "nolotus.com"
+      ],
+      "renewAt": 1
+    },
+    {
+      "subject": "test.com",
+      "altnames": [
+        "test.com",
+        "www.test.com"
+      ],
+      "renewAt": 1
+    }
+  ]
+}
