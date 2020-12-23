@@ -3,7 +3,7 @@ import PouchDBAuth from "pouchdb-authentication";
 import find from "pouchdb-find";
 import { toHex } from "../common/tools";
 
-const dbArray = ["nolotus.xyz/db","tw.db.nolotus.com"];
+const dbArray = ["nolotus.com/db","nolotus.xyz/db"];
 
 // if in electron host is undefined ,so need default
 // let hostname = window.location.hostname || defaultDBname;
