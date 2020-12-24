@@ -12,6 +12,7 @@ const filter = function (pathname, req) {
   };
 const dbProxy = createProxyMiddleware(filter, {
     target: 'http://localhost:5984',
+    changeOrigin: true,
   });
 app.use('/', dbProxy);
 // public

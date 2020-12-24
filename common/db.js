@@ -25,7 +25,7 @@ PouchDB.plugin(PouchDBAuth).plugin(find);
 //remote dbname is different local dbname
 export const connectDb = (dbName) => {
   const remoteDbName= "userdb-" + toHex(dbName)
-  const remoteAdress = `http://${dbArray[0]}/${remoteDbName}/`;
+  const remoteAdress = `https://${dbArray[0]}/${remoteDbName}/`;
   const remote = new PouchDB(remoteAdress);
    const local = new PouchDB(dbName);
    local.sync(remote, {
