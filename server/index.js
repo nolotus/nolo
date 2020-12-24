@@ -3,7 +3,7 @@ import render from "./render";
 import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
-import { isDevEnv, isProdEnv } from "./config";
+import {  isProdEnv } from "./config";
 const app = express();
 
 const { createProxyMiddleware } = require("http-proxy-middleware");
@@ -31,9 +31,7 @@ app.get("*", (req, res) => {
     res.send(html);
   });
 });
-if (isDevEnv) {
-  app.listen(80, () => console.log("localhost develop 80!"));
-} else {
+if (isProdEnv) {
   require("greenlock-express")
     .init({
       packageRoot: process.cwd(),
@@ -48,4 +46,6 @@ if (isDevEnv) {
     // Serves on 80 and 443
     // Get's SSL certificates magically!
     .serve(app);
+} else {
+  app.listen(80, () => console.log("localhost develop 80!"));
 }
