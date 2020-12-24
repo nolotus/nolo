@@ -18,6 +18,7 @@
     "@emotion/core": "^10.0.22",
     "@emotion/styled": "^10.0.23",
     "cors": "^2.8.5",
+    "electron-squirrel-startup": "^1.0.0",
     "emotion": "^10.0.27",
     "express": "^4.17.1",
     "global": "^4.4.0",
@@ -42,6 +43,11 @@
     "@babel/plugin-transform-runtime": "^7.12.1",
     "@babel/preset-env": "^7.12.7",
     "@babel/preset-react": "^7.12.7",
+    "@electron-forge/cli": "^6.0.0-beta.54",
+    "@electron-forge/maker-deb": "^6.0.0-beta.54",
+    "@electron-forge/maker-rpm": "^6.0.0-beta.54",
+    "@electron-forge/maker-squirrel": "^6.0.0-beta.54",
+    "@electron-forge/maker-zip": "^6.0.0-beta.54",
     "@fortawesome/fontawesome-svg-core": "^1.2.32",
     "@fortawesome/free-brands-svg-icons": "^5.15.1",
     "@fortawesome/free-regular-svg-icons": "^5.15.1",
@@ -86,7 +92,7 @@
     "testEnvironment": "node"
   },
   "scripts": {
-    "start": "npm run prod",
+    "start": "electron-forge start",
     "server": "node ./build/server.js",
     "server:prod": "cross-env NODE_ENV=production node ./build/server.js",
     "build": "cross-env NODE_ENV=production npm-run-all build:client build:server",
@@ -97,7 +103,9 @@
     "clean": "rimraf build",
     "watch:dev": "nodemon",
     "test": "jest",
-    "electron": "electron ."
+    "electron": "electron .",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
   },
   "repository": {
     "type": "git",
@@ -111,5 +119,32 @@
   "bugs": {
     "url": "https://github.com/nolotus/nolo-ssr/issues"
   },
-  "homepage": "https://github.com/nolotus/nolo-ssr#readme"
+  "homepage": "https://github.com/nolotus/nolo-ssr#readme",
+  "config": {
+    "forge": {
+      "packagerConfig": {},
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "nolo_ssr"
+          }
+        },
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "darwin"
+          ]
+        },
+        {
+          "name": "@electron-forge/maker-deb",
+          "config": {}
+        },
+        {
+          "name": "@electron-forge/maker-rpm",
+          "config": {}
+        }
+      ]
+    }
+  }
 }
