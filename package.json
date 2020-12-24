@@ -86,6 +86,7 @@
   "scripts": {
     "start": "npm run prod",
     "server": "node ./build/server.js",
+    "server:prod": "cross-env NODE_ENV=production node ./build/server.js",
     "build":"cross-env NODE_ENV=production npm-run-all build:client build:server",
     "dev": "cross-env NODE_ENV=development  npm-run-all  build:client build:server server ",
     "prod": "cross-env NODE_ENV=production npm-run-all build:client build:server server",
