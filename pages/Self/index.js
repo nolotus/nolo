@@ -9,7 +9,6 @@ import { Tab, Tabs } from "../../components/Tabs";
 import { useSelector, useDispatch } from "react-redux";
 import { connectDb, hostDb } from "../../common/db";
 
-
 const Self = (props) => {
   let history = useHistory();
   const dispatch = useDispatch();
@@ -18,6 +17,7 @@ const Self = (props) => {
   const { isLogin } = useSelector((state) => state.authData);
   const dbLogin = async (username, password) => {
     try {
+      console.log('hostDb',hostDb)
       const doc = await hostDb.remote.login(username, password);
       console.log("logininfo", doc);
       if (doc.ok) {

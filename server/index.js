@@ -5,8 +5,13 @@ import Routes from "../common/Routes";
 import store from "../common/store";
 import {isProdEnv} from './config'
 const app = express();
-var proxy = require("express-http-proxy");
-app.use("/db", proxy("http://localhost:5984"));
+// var proxy = require("express-http-proxy");
+// app.use("/db", proxy("http://localhost:5984"));
+
+app.get("*", (req, res) => {
+  console.log('req',req)
+
+});
 app.use(express.static("public"));
 app.get("*", (req, res) => {
   const promises = matchRoutes(Routes, req.path).map(({ route }) => {
