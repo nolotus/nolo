@@ -4,25 +4,29 @@ import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
 import {isProdEnv} from './config'
+var cors = require('cors')
 const app = express();
-// var proxy = require("express-http-proxy");
-// app.use("/db", proxy("http://localhost:5984"));
-
-app.get("*", (req, res) => {
-  console.log('req',req)
-
-});
+var proxy = require("express-http-proxy");
+// app.use("/db", );
 app.use(express.static("public"));
+app.use(cors())
 app.get("*", (req, res) => {
-  const promises = matchRoutes(Routes, req.path).map(({ route }) => {
-    const component = route.component;
-    return component.getInitialData ? component.getInitialData(store) : null;
-  });
-  Promise.all(promises).then(() => {
-    const html = render(req, store);
-    res.send(html);
-  });
+  console.log('req',req.hostname)
+  if(req.hostname==='tw.db.nolotus.com'){
+     proxy("http://localhost:5984")
+  }else{
+    const promises = matchRoutes(Routes, req.path).map(({ route }) => {
+      const component = route.component;
+      return component.getInitialData ? component.getInitialData(store) : null;
+    });
+    Promise.all(promises).then(() => {
+      const html = render(req, store);
+      res.send(html);
+    });
+  }
+
 });
+
 
 if(isProdEnv){
   require("greenlock-express")
@@ -39,7 +43,6 @@ if(isProdEnv){
   // Serves on 80 and 443
   // Get's SSL certificates magically!
   .serve(app);
-
 }else{
   app.listen(80, () => console.log("Example app listening on port 80!"));
 }
