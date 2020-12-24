@@ -18,15 +18,15 @@
     {
       "subject": "nolotus.com",
       "altnames": [
-        "nolotus.com"
+        "nolotus.com",
+        "tw.db.nolotus.com"
       ],
       "renewAt": 1
     },
     {
-      "subject": "test.com",
+      "subject": "nolotus.xyz",
       "altnames": [
-        "test.com",
-        "www.test.com"
+        "nolotus.xyz"
       ],
       "renewAt": 1
     }
