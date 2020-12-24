@@ -4,12 +4,10 @@ import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
 import {isProdEnv} from './config'
-var cors = require('cors')
 const app = express();
 var proxy = require("express-http-proxy");
 // app.use("/db", );
 app.use(express.static("public"));
-app.use(cors())
 app.get("*", (req, res) => {
   console.log('req',req.hostname)
   if(req.hostname==='tw.db.nolotus.com'){

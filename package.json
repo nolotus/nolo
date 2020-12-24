@@ -17,7 +17,6 @@
   "dependencies": {
     "@emotion/core": "^10.0.22",
     "@emotion/styled": "^10.0.23",
-    "cors": "^2.8.5",
     "emotion": "^10.0.27",
     "express": "^4.17.1",
     "express-http-proxy": "^1.6.2",
@@ -87,6 +86,7 @@
   "scripts": {
     "start": "npm run prod",
     "server": "node ./build/server.js",
+    "build":"cross-env NODE_ENV=production npm-run-all build:client build:server",
     "dev": "cross-env NODE_ENV=development  npm-run-all  build:client build:server server ",
     "prod": "cross-env NODE_ENV=production npm-run-all build:client build:server server",
     "build:server": "webpack  --config config/webpack.server.js ",
