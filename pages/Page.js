@@ -21,7 +21,6 @@ export const Page = (props) => {
   return (
     <Template>
     {doc ? <Article doc={doc} />:<LoadingBox/>}
-      
     </Template>
   );
 };

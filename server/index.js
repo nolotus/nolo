@@ -5,9 +5,7 @@ import Routes from "../common/Routes";
 import store from "../common/store";
 import {  isProdEnv,env } from "./config";
 const app = express();
-
 const { createProxyMiddleware } = require("http-proxy-middleware");
-
 if (isProdEnv) {
   const filter = function (pathname, req) {
     return req.hostname === "tw.db.nolotus.com";
@@ -31,9 +29,7 @@ app.get("*", (req, res) => {
     res.send(html);
   });
 });
-console.log('isProdEnv',isProdEnv)
 console.log('env',env)
-
 if (isProdEnv) {
   require("greenlock-express")
     .init({

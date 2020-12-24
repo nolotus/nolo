@@ -159,6 +159,7 @@ const withShortcuts = (editor) => {
 };
 
 const WrapEditor = (props) => {
+  const {readOnly}=props
   const onChange = (value) => {
     console.log("value", value);
     const headingOneArray =
@@ -178,6 +179,7 @@ const WrapEditor = (props) => {
   return (
     <Slate editor={editor} value={value} onChange={onChange}>
       <Editable
+       readOnly={readOnly}
         renderElement={renderElement}
         renderLeaf={renderLeaf}
         placeholder="Write some markdown..."

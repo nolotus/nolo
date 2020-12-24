@@ -8,14 +8,15 @@ const StyledArticle = styled.div`
   margin: 3em auto 0;
 `;
 export const Article = (props) => {
-  const { doc } = props;
+  const { doc ,readOnly=true} = props;
   console.log("doc", doc);
   return (
     <StyledArticle>
-      <CurrentEditor value={doc.content} />
+      <CurrentEditor readOnly={readOnly} value={doc.content} />
     </StyledArticle>
   );
 };
 Article.propTypes = {
   doc: PropTypes.object,
+  readOnly:PropTypes.bool
 };
