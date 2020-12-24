@@ -3,21 +3,23 @@ import render from "./render";
 import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
+import { isDevEnv, isProdEnv } from "./config";
 const app = express();
 
-//proxy
-const { createProxyMiddleware } = require('http-proxy-middleware');
-const filter = function (pathname, req) {
-    return  req.hostname === 'tw.db.nolotus.com';
+const { createProxyMiddleware } = require("http-proxy-middleware");
+
+if (isProdEnv) {
+  const filter = function (pathname, req) {
+    return req.hostname === "tw.db.nolotus.com";
   };
-const dbProxy = createProxyMiddleware(filter, {
-    target: 'http://localhost:5984',
+  const dbProxy = createProxyMiddleware(filter, {
+    target: "http://localhost:5984",
     changeOrigin: true,
   });
-app.use('/', dbProxy);
-// public
-app.use(express.static("public"));
+  app.use("/", dbProxy);
+}
 
+app.use(express.static("public"));
 // get request
 app.get("*", (req, res) => {
   const promises = matchRoutes(Routes, req.path).map(({ route }) => {
@@ -29,17 +31,21 @@ app.get("*", (req, res) => {
     res.send(html);
   });
 });
-require("greenlock-express")
+if (isDevEnv) {
+  app.listen(80, () => console.log("localhost develop 80!"));
+} else {
+  require("greenlock-express")
     .init({
-        packageRoot: process.cwd(),
-        configDir: "./greenlock.d",
- 
-        // contact for security and critical bug notices
-        maintainerEmail: "s@nolotus.com",
- 
-        // whether or not to run at cloudscale
-        cluster: false
+      packageRoot: process.cwd(),
+      configDir: "./greenlock.d",
+
+      // contact for security and critical bug notices
+      maintainerEmail: "s@nolotus.com",
+
+      // whether or not to run at cloudscale
+      cluster: false,
     })
     // Serves on 80 and 443
     // Get's SSL certificates magically!
     .serve(app);
+}
