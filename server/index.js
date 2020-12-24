@@ -31,15 +31,14 @@ app.get("*", (req, res) => {
     res.send(html);
   });
 });
+console.log('isProdEnv',isProdEnv)
 if (isProdEnv) {
   require("greenlock-express")
     .init({
       packageRoot: process.cwd(),
       configDir: "./greenlock.d",
-
       // contact for security and critical bug notices
       maintainerEmail: "s@nolotus.com",
-
       // whether or not to run at cloudscale
       cluster: false,
     })
