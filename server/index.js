@@ -3,7 +3,7 @@ import render from "./render";
 import { matchRoutes } from "react-router-config";
 import Routes from "../common/Routes";
 import store from "../common/store";
-import {  isProdEnv } from "./config";
+import {  isProdEnv,env } from "./config";
 const app = express();
 
 const { createProxyMiddleware } = require("http-proxy-middleware");
@@ -32,6 +32,8 @@ app.get("*", (req, res) => {
   });
 });
 console.log('isProdEnv',isProdEnv)
+console.log('env',env)
+
 if (isProdEnv) {
   require("greenlock-express")
     .init({
