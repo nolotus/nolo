@@ -1,6 +1,6 @@
-import React from 'react'
-import Header from '../components/Header'
-import { createGlobalStyle } from 'styled-components'
+import React from 'react';
+import Header from '../components/Header';
+import {createGlobalStyle} from 'styled-components';
 const GlobalStyle = createGlobalStyle`
  body {
   margin: 0;
@@ -11,16 +11,16 @@ const GlobalStyle = createGlobalStyle`
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-`
+`;
 const simple = (props) => {
-    const {children} =props
-    return (
-        <>
-        <GlobalStyle  />
-            <Header/>
-            {children}
-        </>
-    )
-}
+  const {children} = props;
+  return (
+    <>
+      <GlobalStyle />
+      <Header />
+      {children}
+    </>
+  );
+};
 
-export default simple
+export default simple;

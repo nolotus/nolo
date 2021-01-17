@@ -1,18 +1,13 @@
-import React, { useState, useRef } from "react";
-import ReactDOM, { unstable_batchedUpdates } from "react-dom";
-// import escapeHtml from 'escape-html'
-const deserialize = (el) => {
-  console.log("el");
-};
+import React, {useState, useRef} from 'react';
+import ReactDOM, {unstable_batchedUpdates} from 'react-dom';
+import {logOption} from './log';
+
 const Editor = (props) => {
-  const { onChange } = props;
+  const {onChange} = props;
 
   const editorEl = useRef(null);
-  if (editorEl.current) {
-    console.log("editorEl", editorEl.onCompositionStart);
-  }
 
-  const [state, setstate] = useState("");
+  const [state, setstate] = useState('');
   // useEffect(() => {
   //   effect
   //   return () => {
@@ -22,43 +17,34 @@ const Editor = (props) => {
 
   const onBeforeInput = (e) => {
     e.preventDefault();
-    const html = e.target;
-    // console.log('compositionStart',html)
-
-    // const deState = deserialize(html);
-    // onChange("deState", deState);
   };
 
-  const compositionupdate = (e) => {
+  const compositionUpdate = (e) => {
     e.preventDefault();
-    const html = e.target;
-    console.log("compositionupdate", html);
-    // const deState = deserialize(html);
-    // onChange("deState", deState);
+    if (logOption.compositionUpdate) {
+      console.log('compositionUpdate', e);
+    }
   };
   const compositionStart = (e) => {
     e.preventDefault();
-    const html = e.target;
-    console.log("compositionStart", e.data);
-    reallyChange(e.data);
-    // const deState = deserialize(html);
-    // onChange("deState", deState);
+    if (logOption.compositionStart) {
+      console.log('compositionStart', e);
+    }
   };
 
   const compositionEnd = (e) => {
     e.preventDefault();
-
-    // const html = e.target;
-    console.log("compositionEnd", e.data);
+    if (logOption.compositionEnd) {
+      console.log('compositionEnd', e);
+    }
     reallyChange(e.data);
-
-    // const deState = deserialize(html);
-    // onChange("deState", deState);
   };
-  const reallyChange = (data) => {
-    console.log("reallyChange", data);
+  const reallyChange = (e) => {
+    console.log('reallyChange', e);
     unstable_batchedUpdates(() => {
-      setstate(` +${Math.random()}\n${Math.random()}`);
+      setstate(
+        `<div style="display: inline;background:yellow;>${Math.random()}\n${Math.random()}</div>`,
+      );
     });
   };
   // const onInput = (e) => {
@@ -76,18 +62,17 @@ const Editor = (props) => {
         onBlur={onBlur}
         onBeforeInput={onBeforeInput}
         ref={editorEl}
-        onCompositionUpdate={compositionupdate}
+        onCompositionUpdate={compositionUpdate}
         onCompositionStart={compositionStart}
         onCompositionEnd={compositionEnd}
         dangerouslySetInnerHTML={{
           __html: state,
         }}
-      ></div>
+      />
       <button
         onClick={() => {
           setstate(`${Math.random()}\n${Math.random()}`);
-        }}
-      >
+        }}>
         Click me to change contnet
       </button>
     </>
