@@ -748,12 +748,13 @@ eval("var _interopRequireDefault=__webpack_require__(/*! @babel/runtime/helpers/
   \*******************************************/
 /*! flagged exports */
 /*! export __esModule [provided] [no usage info] [missing usage info prevents renaming] */
+/*! export logFliter [provided] [no usage info] [missing usage info prevents renaming] */
 /*! export logOption [provided] [no usage info] [missing usage info prevents renaming] */
 /*! other exports [not provided] [no usage info] */
-/*! runtime requirements: __webpack_exports__, __webpack_require__ */
-/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+/*! runtime requirements: __webpack_exports__ */
+/***/ ((__unused_webpack_module, exports) => {
 
-eval("Object.defineProperty(exports, \"__esModule\", ({value:true}));exports.logOption=void 0;var _reactDom=__webpack_require__(/*! react-dom */ \"./node_modules/react-dom/index.js\");var logOption={compositionUpdate:false,compositionStart:false,compositionEnd:false};exports.logOption=logOption;\n\n//# sourceURL=webpack://nolo/./components/Editor/myeditor/log.js?");
+eval("Object.defineProperty(exports, \"__esModule\", ({value:true}));exports.logFliter=exports.logOption=void 0;var logOption={onBeforeInput:true,compositionUpdate:false,compositionStart:false,compositionEnd:true,onlyShowData:true};exports.logOption=logOption;var logFliter=function logFliter(e,from){logOption[from]?logOption.onlyShowData?console.log(from,e.data):console.log(from,e):null;};exports.logFliter=logFliter;\n\n//# sourceURL=webpack://nolo/./components/Editor/myeditor/log.js?");
 
 /***/ }),
 

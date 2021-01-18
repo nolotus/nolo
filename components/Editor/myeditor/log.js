@@ -1,7 +1,14 @@
-import {render} from 'react-dom';
-
 export const logOption = {
+  onBeforeInput: true,
   compositionUpdate: false,
   compositionStart: false,
-  compositionEnd: false,
+  compositionEnd: true,
+  onlyShowData: true,
+};
+export const logFliter = (e, from) => {
+  logOption[from]
+    ? logOption.onlyShowData
+      ? console.log(from, e.data)
+      : console.log(from, e)
+    : null;
 };
