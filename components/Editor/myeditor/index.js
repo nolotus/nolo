@@ -1,13 +1,14 @@
 import React, {useState, useRef} from 'react';
 import ReactDOM, {unstable_batchedUpdates} from 'react-dom';
 import {logOption} from './log';
-
+import {stateToHtmlString} from './render';
 const Editor = (props) => {
   const {onChange} = props;
 
   const editorEl = useRef(null);
 
-  const [state, setstate] = useState('');
+  const [htmlString, setHtmlString] = useState('');
+  const [state, setstate] = useState([{type: 'text', text: 'test'}]);
   // useEffect(() => {
   //   effect
   //   return () => {
@@ -17,6 +18,7 @@ const Editor = (props) => {
 
   const onBeforeInput = (e) => {
     e.preventDefault();
+    reallyChange(e, 'input');
   };
 
   const compositionUpdate = (e) => {
@@ -37,14 +39,15 @@ const Editor = (props) => {
     if (logOption.compositionEnd) {
       console.log('compositionEnd', e);
     }
-    reallyChange(e.data);
+    reallyChange(e, 'composition');
   };
-  const reallyChange = (e) => {
-    console.log('reallyChange', e);
+  const reallyChange = (e, from) => {
+    //compositionEnd will force dom update, so we need render every time with random、
+
     unstable_batchedUpdates(() => {
-      setstate(
-        `<div style="display: inline;background:yellow;>${Math.random()}\n${Math.random()}</div>`,
-      );
+      setHtmlString(`
+        <div>${stateToHtmlString(state)}</div>
+        <div style="display:inline;background:yellow;">${Math.random()}</div>`);
     });
   };
   // const onInput = (e) => {
@@ -66,15 +69,9 @@ const Editor = (props) => {
         onCompositionStart={compositionStart}
         onCompositionEnd={compositionEnd}
         dangerouslySetInnerHTML={{
-          __html: state,
+          __html: htmlString,
         }}
       />
-      <button
-        onClick={() => {
-          setstate(`${Math.random()}\n${Math.random()}`);
-        }}>
-        Click me to change contnet
-      </button>
     </>
   );
 };
