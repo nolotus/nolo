@@ -25,103 +25,104 @@
 
 // export default Index;
 
-import React, { useState, useCallback, useMemo } from "react";
-import { Slate, Editable, withReact } from "slate-react";
-import { Transforms, createEditor } from "slate";
-import { withHistory } from "slate-history";
-import { jsx } from "slate-hyperscript";
-import isHotkey from "is-hotkey";
+import React, {useState, useCallback, useMemo} from 'react';
+import {Slate, Editable, withReact} from '../slate-react/index.es';
 
-import { Toolbar } from "./components";
-import Element from "./Element";
-import Leaf from "./Leaf";
+import {Transforms, createEditor} from 'slate';
+import {withHistory} from 'slate-history';
+import {jsx} from 'slate-hyperscript';
+import isHotkey from 'is-hotkey';
 
-import { withLayout, withLinks, toggleMark } from "./tools";
+import {Toolbar} from './components';
+import Element from './Element';
+import Leaf from './Leaf';
+
+import {withLayout, withLinks, toggleMark} from './tools';
 import {
   InsertImageButton,
   LinkButton,
   MarkButton,
   BlockButton,
-} from "./buttons";
+} from './buttons';
 
 const ELEMENT_TAGS = {
-  A: (el) => ({ type: "link", url: el.getAttribute("href") }),
-  BLOCKQUOTE: () => ({ type: "quote" }),
-  H1: () => ({ type: "heading-one" }),
-  H2: () => ({ type: "heading-two" }),
-  H3: () => ({ type: "heading-three" }),
-  H4: () => ({ type: "heading-four" }),
-  H5: () => ({ type: "heading-five" }),
-  H6: () => ({ type: "heading-six" }),
-  IMG: (el) => ({ type: "image", url: el.getAttribute("src") }),
-  LI: () => ({ type: "list-item" }),
-  OL: () => ({ type: "numbered-list" }),
-  P: () => ({ type: "paragraph" }),
-  PRE: () => ({ type: "code" }),
-  UL: () => ({ type: "bulleted-list" }),
+  A: (el) => ({type: 'link', url: el.getAttribute('href')}),
+  BLOCKQUOTE: () => ({type: 'quote'}),
+  H1: () => ({type: 'heading-one'}),
+  H2: () => ({type: 'heading-two'}),
+  H3: () => ({type: 'heading-three'}),
+  H4: () => ({type: 'heading-four'}),
+  H5: () => ({type: 'heading-five'}),
+  H6: () => ({type: 'heading-six'}),
+  IMG: (el) => ({type: 'image', url: el.getAttribute('src')}),
+  LI: () => ({type: 'list-item'}),
+  OL: () => ({type: 'numbered-list'}),
+  P: () => ({type: 'paragraph'}),
+  PRE: () => ({type: 'code'}),
+  UL: () => ({type: 'bulleted-list'}),
 };
 const TEXT_TAGS = {
-  CODE: () => ({ code: true }),
-  DEL: () => ({ strikethrough: true }),
-  EM: () => ({ italic: true }),
-  I: () => ({ italic: true }),
-  S: () => ({ strikethrough: true }),
-  STRONG: () => ({ bold: true }),
-  U: () => ({ underline: true }),
+  CODE: () => ({code: true}),
+  DEL: () => ({strikethrough: true}),
+  EM: () => ({italic: true}),
+  I: () => ({italic: true}),
+  S: () => ({strikethrough: true}),
+  STRONG: () => ({bold: true}),
+  U: () => ({underline: true}),
 };
 export const deserialize = (el) => {
   if (el.nodeType === 3) {
     return el.textContent;
   } else if (el.nodeType !== 1) {
     return null;
-  } else if (el.nodeName === "BR") {
-    return "\n";
+  } else if (el.nodeName === 'BR') {
+    return '\n';
   }
 
-  const { nodeName } = el;
+  const {nodeName} = el;
   let parent = el;
 
   if (
-    nodeName === "PRE" &&
+    nodeName === 'PRE' &&
     el.childNodes[0] &&
-    el.childNodes[0].nodeName === "CODE"
+    el.childNodes[0].nodeName === 'CODE'
   ) {
     parent = el.childNodes[0];
   }
   const children = Array.from(parent.childNodes).map(deserialize).flat();
 
-  if (el.nodeName === "BODY") {
-    return jsx("fragment", {}, children);
+  if (el.nodeName === 'BODY') {
+    return jsx('fragment', {}, children);
   }
 
   if (ELEMENT_TAGS[nodeName]) {
     const attrs = ELEMENT_TAGS[nodeName](el);
-    return jsx("element", attrs, children);
+    return jsx('element', attrs, children);
   }
 
   if (TEXT_TAGS[nodeName]) {
     const attrs = TEXT_TAGS[nodeName](el);
-    return children.map((child) => jsx("text", attrs, child));
+    return children.map((child) => jsx('text', attrs, child));
   }
 
   return children;
 };
 const withHtml = (editor) => {
-  const { insertData, isInline, isVoid } = editor;
+  const {insertData, isInline, isVoid} = editor;
 
   editor.isInline = (element) => {
-    return element.type === "link" ? true : isInline(element);
+    return element.type === 'link' ? true : isInline(element);
   };
 
   editor.isVoid = (element) => {
-    return element.type === "image" ? true : isVoid(element);
+    return element.type === 'image' ? true : isVoid(element);
   };
 
   editor.insertData = (data) => {
-    const html = data.getData("text/html");
+    const html = data.getData('text/html');
 
     if (html) {
-      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const parsed = new DOMParser().parseFromString(html, 'text/html');
       const fragment = deserialize(parsed.body);
       Transforms.insertFragment(editor, fragment);
       return;
@@ -135,22 +136,20 @@ const withHtml = (editor) => {
 
 const initialValue = [
   {
-    type: "paragraph",
+    type: 'paragraph',
     children: [
       {
-        text:
-          "谢谢你的支持，本站还在持续开发中",
+        text: '谢谢你的支持，本站还在持续开发中',
       },
     ],
   },
- 
 ];
 
 const HOTKEYS = {
-  "mod+b": "bold",
-  "mod+i": "italic",
-  "mod+u": "underline",
-  "mod+`": "code",
+  'mod+b': 'bold',
+  'mod+i': 'italic',
+  'mod+u': 'underline',
+  'mod+`': 'code',
 };
 const Editor = (props) => {
   const [value, setValue] = useState(initialValue);
@@ -159,7 +158,7 @@ const Editor = (props) => {
   const editor = useMemo(
     () =>
       withHtml(withLayout(withLinks(withHistory(withReact(createEditor()))))),
-    []
+    [],
   );
   const onChange = async (value) => {
     props.onChange(value);

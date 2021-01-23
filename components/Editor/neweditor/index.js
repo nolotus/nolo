@@ -2,7 +2,7 @@ import React, {useState, useCallback, useMemo} from 'react';
 import {jsx} from 'slate-hyperscript';
 import {Editor, Transforms, Range, Point, createEditor} from 'slate';
 import {withHistory} from 'slate-history';
-import {Slate, Editable, withReact} from 'slate-react';
+import {Slate, Editable, withReact} from '../slate-react/index.es';
 import {initialValue} from './constant';
 import Element from './Element';
 const ELEMENT_TAGS = {
@@ -182,7 +182,6 @@ const WrapEditor = (props) => {
         readOnly={readOnly}
         renderElement={renderElement}
         renderLeaf={renderLeaf}
-        placeholder="Write some markdown..."
         spellCheck
         autoFocus
       />

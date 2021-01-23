@@ -1,8 +1,8 @@
-import React from "react";
-import { useSelected, useFocused } from "slate-react";
-import { css } from "emotion";
+import React from 'react';
+import {useSelected, useFocused} from '../slate-react/index.es';
+import {css} from 'emotion';
 
-const ImageElement = ({ attributes, children, element }) => {
+const ImageElement = ({attributes, children, element}) => {
   const selected = useSelected();
   const focused = useFocused();
   return (
@@ -14,54 +14,54 @@ const ImageElement = ({ attributes, children, element }) => {
           display: block;
           max-width: 100%;
           max-height: 20em;
-          box-shadow: ${selected && focused ? "0 0 0 2px blue;" : "none"};
+          box-shadow: ${selected && focused ? '0 0 0 2px blue;' : 'none'};
         `}
       />
     </div>
   );
 };
 const Element = (props) => {
-  const { attributes, children, element } = props;
+  const {attributes, children, element} = props;
 
   switch (element.type) {
     default:
       return <p {...attributes}>{children}</p>;
-    case "block-quote":
-    case "quote":
+    case 'block-quote':
+    case 'quote':
       return <blockquote {...attributes}>{children}</blockquote>;
-    case "code":
+    case 'code':
       return (
         <pre>
           <code {...attributes}>{children}</code>
         </pre>
       );
-    case "bulleted-list":
+    case 'bulleted-list':
       return <ul {...attributes}>{children}</ul>;
-    case "title":
+    case 'title':
       return <h1 {...attributes}>{children}</h1>;
-    case "heading-one":
+    case 'heading-one':
       return <h1 {...attributes}>{children}</h1>;
-    case "heading-two":
+    case 'heading-two':
       return <h2 {...attributes}>{children}</h2>;
-    case "heading-three":
+    case 'heading-three':
       return <h3 {...attributes}>{children}</h3>;
-    case "heading-four":
+    case 'heading-four':
       return <h4 {...attributes}>{children}</h4>;
-    case "heading-five":
+    case 'heading-five':
       return <h5 {...attributes}>{children}</h5>;
-    case "heading-six":
+    case 'heading-six':
       return <h6 {...attributes}>{children}</h6>;
-    case "list-item":
+    case 'list-item':
       return <li {...attributes}>{children}</li>;
-    case "numbered-list":
+    case 'numbered-list':
       return <ol {...attributes}>{children}</ol>;
-    case "link":
+    case 'link':
       return (
         <a href={element.url} {...attributes}>
           {children}
         </a>
       );
-    case "image":
+    case 'image':
       return <ImageElement {...props} />;
   }
 };

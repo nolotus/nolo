@@ -44,7 +44,7 @@ const Create = () => {
     <Template>
       <CreateWrapper>
         {_rev}
-        <NextEditor onChange={onChange} />
+        <CurrentEditor onChange={onChange}/>
       </CreateWrapper>
     </Template>
   );
