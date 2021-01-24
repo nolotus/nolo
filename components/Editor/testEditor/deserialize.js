@@ -1,5 +1,4 @@
 import {jsx} from 'slate-hyperscript';
-
 const ELEMENT_TAGS = {
   A: (el) => ({type: 'link', url: el.getAttribute('href')}),
   BLOCKQUOTE: () => ({type: 'quote'}),
@@ -16,7 +15,6 @@ const ELEMENT_TAGS = {
   PRE: () => ({type: 'code'}),
   UL: () => ({type: 'bulleted-list'}),
 };
-// COMPAT: `B` is omitted here because Google Docs uses `<b>` in weird ways.
 const TEXT_TAGS = {
   CODE: () => ({code: true}),
   DEL: () => ({strikethrough: true}),
@@ -35,10 +33,8 @@ export const deserialize = (el) => {
   } else if (el.nodeName === 'BR') {
     return '\n';
   }
-
   const {nodeName} = el;
   let parent = el;
-
   if (
     nodeName === 'PRE' &&
     el.childNodes[0] &&
@@ -46,21 +42,19 @@ export const deserialize = (el) => {
   ) {
     parent = el.childNodes[0];
   }
+
   const children = Array.from(parent.childNodes).map(deserialize).flat();
 
   if (el.nodeName === 'BODY') {
     return jsx('fragment', {}, children);
   }
-
   if (ELEMENT_TAGS[nodeName]) {
     const attrs = ELEMENT_TAGS[nodeName](el);
     return jsx('element', attrs, children);
   }
-
   if (TEXT_TAGS[nodeName]) {
     const attrs = TEXT_TAGS[nodeName](el);
     return children.map((child) => jsx('text', attrs, child));
   }
-
   return children;
 };

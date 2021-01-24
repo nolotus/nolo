@@ -1,4 +1,5 @@
-import CurrentEditor from './neweditor';
 import NextEditor from './myeditor';
+import TestEditor from './testEditor';
+
 // import OldEditor  from "./editor"
-export {CurrentEditor, NextEditor};
+export {NextEditor, TestEditor};

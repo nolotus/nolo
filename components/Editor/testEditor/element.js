@@ -1,32 +1,37 @@
 import React from 'react';
+import {ImageElement} from './image';
 import {useSelected, useFocused} from '../slate-react/index.es';
 import {css} from 'emotion';
 
-const ImageElement = ({attributes, children, element}) => {
+const MentionElement = ({attributes, children, element}) => {
   const selected = useSelected();
   const focused = useFocused();
   return (
-    <div {...attributes}>
+    <span
+      {...attributes}
+      contentEditable={false}
+      style={{
+        padding: '3px 3px 2px',
+        margin: '0 1px',
+        verticalAlign: 'baseline',
+        display: 'inline-block',
+        borderRadius: '4px',
+        backgroundColor: '#eee',
+        fontSize: '0.9em',
+        boxShadow: selected && focused ? '0 0 0 2px #B4D5FF' : 'none',
+      }}>
+      @{element.character}
       {children}
-      <img
-        src={element.url}
-        className={css`
-          display: block;
-          max-width: 100%;
-          max-height: 20em;
-          box-shadow: ${selected && focused ? '0 0 0 2px blue;' : 'none'};
-        `}
-      />
-    </div>
+    </span>
   );
 };
-const Element = (props) => {
+
+export const Element = (props) => {
   const {attributes, children, element} = props;
 
   switch (element.type) {
     default:
       return <p {...attributes}>{children}</p>;
-    case 'block-quote':
     case 'quote':
       return <blockquote {...attributes}>{children}</blockquote>;
     case 'code':
@@ -37,8 +42,6 @@ const Element = (props) => {
       );
     case 'bulleted-list':
       return <ul {...attributes}>{children}</ul>;
-    case 'title':
-      return <h1 {...attributes}>{children}</h1>;
     case 'heading-one':
       return <h1 {...attributes}>{children}</h1>;
     case 'heading-two':
@@ -63,7 +66,7 @@ const Element = (props) => {
       );
     case 'image':
       return <ImageElement {...props} />;
+    case 'mention':
+      return <MentionElement {...props} />;
   }
 };
-
-export default Element;
