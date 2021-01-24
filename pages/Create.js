@@ -1,8 +1,8 @@
 import React, {useState} from 'react';
 import Template from '../template';
-import {TestEditor} from '../components/Editor';
+import {CurrentEditor} from '../components/Editor';
 import _ from 'lodash';
-import {initialValue} from '../components/Editor/testEditor/constant';
+import {initialValue} from '../components/Editor/currentEditor/constant';
 import {dbNew, dbUpdate} from '../common/api';
 import {localDb} from '../common/db';
 import styled from '@emotion/styled';
@@ -44,7 +44,7 @@ const Create = () => {
     <Template>
       <CreateWrapper>
         {_rev}
-        <TestEditor onChange={onChange} />
+        <CurrentEditor onChange={onChange} />
       </CreateWrapper>
     </Template>
   );

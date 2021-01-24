@@ -1,7 +1,6 @@
 import React from 'react';
 import {ImageElement} from './image';
 import {useSelected, useFocused} from '../slate-react/index.es';
-import {css} from 'emotion';
 
 const MentionElement = ({attributes, children, element}) => {
   const selected = useSelected();

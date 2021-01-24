@@ -33,9 +33,9 @@ const SHORTCUTS = {
   '######': 'heading-six',
 };
 
-const TestEditor = () => {
+const CurrentEditor = (props) => {
   const ref = useRef();
-  const [value, setValue] = useState(initialValue);
+  const [value, setValue] = useState(props.value || initialValue);
   const [target, setTarget] = useState();
   const [search, setSearch] = useState('');
   const [index, setIndex] = useState(0);
@@ -128,6 +128,14 @@ const TestEditor = () => {
         }
 
         setTarget(null);
+
+        const headingOneArray =
+          value.filter((item) => item.type === 'heading-one') || [];
+        const title = headingOneArray[0] && headingOneArray[0].children[0].text;
+        const json = {title: title, content: value};
+        if (props.onChange) {
+          props.onChange(json);
+        }
       }}>
       <Editable
         renderElement={renderElement}
@@ -337,4 +345,4 @@ const initialValue = [
   },
 ];
 
-export default TestEditor;
+export default CurrentEditor;
