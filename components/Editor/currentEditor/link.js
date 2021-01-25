@@ -1,4 +1,13 @@
 import {Editor, Transforms, Range, Element as SlateElement} from 'slate';
+import isUrl from 'is-url';
+
+const unwrapLink = (editor) => {
+  Transforms.unwrapNodes(editor, {
+    match: (n) =>
+      !Editor.isEditor(n) && SlateElement.isElement(n) && n.type === 'link',
+  });
+};
+
 const isLinkActive = (editor) => {
   const [link] = Editor.nodes(editor, {
     match: (n) =>
@@ -7,13 +16,7 @@ const isLinkActive = (editor) => {
   return !!link;
 };
 
-const unwrapLink = (editor) => {
-  Transforms.unwrapNodes(editor, {
-    match: (n) =>
-      !Editor.isEditor(n) && SlateElement.isElement(n) && n.type === 'link',
-  });
-};
-export const wrapLink = (editor, url) => {
+const wrapLink = (editor, url) => {
   if (isLinkActive(editor)) {
     unwrapLink(editor);
   }
@@ -32,4 +35,31 @@ export const wrapLink = (editor, url) => {
     Transforms.wrapNodes(editor, link, {split: true});
     Transforms.collapse(editor, {edge: 'end'});
   }
+};
+export const withLinks = (editor) => {
+  const {insertData, insertText, isInline} = editor;
+
+  editor.isInline = (element) => {
+    return element.type === 'link' ? true : isInline(element);
+  };
+
+  editor.insertText = (text) => {
+    if (text && isUrl(text)) {
+      wrapLink(editor, text);
+    } else {
+      insertText(text);
+    }
+  };
+
+  editor.insertData = (data) => {
+    const text = data.getData('text/plain');
+
+    if (text && isUrl(text)) {
+      wrapLink(editor, text);
+    } else {
+      insertData(data);
+    }
+  };
+
+  return editor;
 };

@@ -16,7 +16,7 @@ import {Element} from './element';
 import {Leaf} from './leaf';
 import {insertImage, isImageUrl} from './image';
 import {CHARACTERS} from './constant';
-
+import {withLinks} from './link';
 export const Portal = ({children}) => {
   return ReactDOM.createPortal(children, document.body);
 };
@@ -85,7 +85,10 @@ const CurrentEditor = (props) => {
     [index, search, target],
   );
   const editor = useMemo(
-    () => withMentions(withNoloEditor(withReact(withHistory(createEditor())))),
+    () =>
+      withLinks(
+        withMentions(withNoloEditor(withReact(withHistory(createEditor())))),
+      ),
     [],
   );
 
@@ -174,6 +177,7 @@ const CurrentEditor = (props) => {
     </Slate>
   );
 };
+
 const withMentions = (editor) => {
   const {isInline, isVoid} = editor;
 
