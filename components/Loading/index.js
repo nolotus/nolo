@@ -1,21 +1,20 @@
-import React from "react";
-import styled from "styled-components";
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-
+import React from 'react';
+import styled from 'styled-components';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {faCoffee} from '@fortawesome/free-solid-svg-icons';
 const StyledLoading = styled.div`
-
   body {
     margin: 0;
   }
 
   h1 {
-    font-family: "Lato", sans-serif;
+    font-family: 'Lato', sans-serif;
     font-weight: 300;
     letter-spacing: 2px;
     font-size: 48px;
   }
   p {
-    font-family: "Lato", sans-serif;
+    font-family: 'Lato', sans-serif;
     letter-spacing: 1px;
     font-size: 14px;
     color: #333333;
@@ -118,7 +117,6 @@ export const LoadingPage = () => {
     <StyledLoading>
       <div className="header">
         <div className="inner-header flex">
-
           <h1>Loading</h1>
         </div>
 
@@ -128,8 +126,7 @@ export const LoadingPage = () => {
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 24 150 28"
             preserveAspectRatio="none"
-            shapeRendering="auto"
-          >
+            shapeRendering="auto">
             <defs>
               <path
                 id="gentle-wave"
@@ -168,14 +165,13 @@ export const LoadingPage = () => {
   );
 };
 
-export const LoadingBox =()=>{
-return      <div className="loadding-box">
-
-<FontAwesomeIcon className="loading" icon={['fas', 'spinner']}></FontAwesomeIcon>
-
-</div>
-  
-}
-export const Loading=()=>{
-  <FontAwesomeIcon className="loading" icon={['fas', 'spinner']}></FontAwesomeIcon>;
-}
+export const LoadingBox = () => {
+  return (
+    <div className="loadding-box">
+      <FontAwesomeIcon className="loading" icon={faCoffee} />
+    </div>
+  );
+};
+export const Loading = () => {
+  <FontAwesomeIcon className="loading" icon={faCoffee} />;
+};
