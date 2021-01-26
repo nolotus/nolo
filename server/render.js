@@ -7,9 +7,9 @@ import {renderRoutes} from 'react-router-config';
 import {ServerStyleSheet} from 'styled-components';
 
 import Routes from '../common/Routes';
-const sheet = new ServerStyleSheet();
 
 const render = (req, store) => {
+  const sheet = new ServerStyleSheet();
   try {
     const content = renderToString(
       sheet.collectStyles(
@@ -20,7 +20,6 @@ const render = (req, store) => {
         </Provider>,
       ),
     );
-
     const styleTags = sheet.getStyleTags();
     const helmet = Helmet.renderStatic();
 
