@@ -1,26 +1,26 @@
-import express from "express";
-import render from "./render";
-import { matchRoutes } from "react-router-config";
-import Routes from "../common/Routes";
-import store from "../common/store";
-import {  isProdEnv,env } from "./config";
+import express from 'express';
+import render from './render';
+import {matchRoutes} from 'react-router-config';
+import Routes from '../common/Routes';
+import store from '../common/store';
+import {isProdEnv, env} from './config';
 const app = express();
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const {createProxyMiddleware} = require('http-proxy-middleware');
 if (isProdEnv) {
   const filter = function (pathname, req) {
-    return req.hostname === "tw.db.nolotus.com";
+    return req.hostname === 'tw.db.nolotus.com';
   };
   const dbProxy = createProxyMiddleware(filter, {
-    target: "http://localhost:5984",
+    target: 'http://localhost:5984',
     changeOrigin: true,
   });
-  app.use("/", dbProxy);
+  app.use('/', dbProxy);
 }
 
-app.use(express.static("public"));
+app.use(express.static('public'));
 // get request
-app.get("*", (req, res) => {
-  const promises = matchRoutes(Routes, req.path).map(({ route }) => {
+app.get('*', (req, res) => {
+  const promises = matchRoutes(Routes, req.path).map(({route}) => {
     const component = route.component;
     return component.getInitialData ? component.getInitialData(store) : null;
   });
@@ -29,14 +29,14 @@ app.get("*", (req, res) => {
     res.send(html);
   });
 });
-console.log('env',env)
+console.log('env', env);
 if (isProdEnv) {
-  require("greenlock-express")
+  require('greenlock-express')
     .init({
       packageRoot: process.cwd(),
-      configDir: "./greenlock.d",
+      configDir: './greenlock.d',
       // contact for security and critical bug notices
-      maintainerEmail: "s@nolotus.com",
+      maintainerEmail: 's@nolotus.com',
       // whether or not to run at cloudscale
       cluster: false,
     })
@@ -44,5 +44,5 @@ if (isProdEnv) {
     // Get's SSL certificates magically!
     .serve(app);
 } else {
-  app.listen(80, () => console.log("localhost develop 80!"));
+  app.listen(80, () => console.log('localhost develop 80!'));
 }
