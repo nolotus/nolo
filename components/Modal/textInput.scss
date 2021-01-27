@@ -1,0 +1,30 @@
+.text-input {
+  width: 527px;
+
+  border-radius: 10px;
+
+  box-shadow: 0 2px 11px 0 rgba(158, 158, 166, 0.32);
+
+  border: solid 1px #dadada;
+
+  background-color: #ffffff;
+
+  padding: 33px;
+
+  textarea {
+    padding: 9px 13px;
+    min-height: 134px;
+    width: 100%;
+    border-radius: 4px;
+    border: 1px solid rgba(199, 200, 203, 1);
+  }
+
+  .button-area {
+    button {
+      margin-left: 9px;
+    }
+    display: flex;
+    justify-content: right;
+    margin-top: 10px;
+  }
+}

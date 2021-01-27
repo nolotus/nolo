@@ -19,6 +19,7 @@ const Life = () => {
   const [list, setList] = useState([]);
   const [currentDb, setCurrentDb] = useState(hostDb.remote);
   const dispatch = useDispatch();
+
   const getData = () => {
     dbAll(currentDb).then((result) => {
       if (result) {
@@ -37,14 +38,18 @@ const Life = () => {
         closeModal();
       })
       .catch(function (err) {
+        modal({
+          modalType: 'warning',
+          content: err.message,
+          hasClose: true,
+        });
         console.log(err);
       });
   };
   const modal = (modalInfo) => {
-    dispatch({type: 'modal', modalInfo: {...modalInfo, isVisible: true}});
+    dispatch({type: 'modal', payload: {modalInfo: {...modalInfo}}});
   };
-  const closeModal = () =>
-    dispatch({type: 'modal', modalInfo: {isVisible: false}});
+  const closeModal = () => dispatch({type: 'closeModal'});
   useEffect(() => {
     dbAll(currentDb).then((result) => {
       if (result) {

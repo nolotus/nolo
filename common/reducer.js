@@ -1,32 +1,44 @@
 const initState = {
-  templateName: "simple",
+  templateName: 'simple',
   userInfo: {},
   menu: [],
   setting: {},
-  authData: { isLogin: false },
+  authData: {isLogin: false},
   userDb: {},
+  modalInfo: {isVisible: false},
 };
 const reducer = (state = initState, action) => {
+  const {payload} = action;
   switch (action.type) {
-    case "fetch":
+    case 'fetch':
       return {
         ...state,
         users: action.payload,
       };
-    case "loginSuccess":
+    case 'modal':
       return {
         ...state,
-        authData: { isLogin: true },
+        modalInfo: {isVisible: true, ...payload.modalInfo},
+      };
+    case 'closeModal':
+      return {
+        ...state,
+        modalInfo: {isVisible: false},
+      };
+    case 'loginSuccess':
+      return {
+        ...state,
+        authData: {isLogin: true},
         userInfo: action.payload.userInfo,
         userDb: action.payload.userDb,
       };
-      case "logout":
-        return {
-          ...state,
-          authData: { isLogin: false },
-          userInfo: {},
-        };
-    case "initSuccess":
+    case 'logout':
+      return {
+        ...state,
+        authData: {isLogin: false},
+        userInfo: {},
+      };
+    case 'initSuccess':
       return {
         ...state,
         menu: action.payload.menu,

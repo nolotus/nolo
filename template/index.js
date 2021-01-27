@@ -1,7 +1,7 @@
 import React, {useEffect} from 'react';
 import {useSelector, useDispatch} from 'react-redux';
 import {hostDb, connectDb} from '../common/db';
-
+import Modal from '../components/Modal';
 async function getSession() {
   try {
     const doc = await hostDb.remote.getSession();
@@ -13,6 +13,8 @@ async function getSession() {
 import Simple from './Simple';
 const Template = (props) => {
   const templateName = useSelector((state) => state.templateName);
+  const modalInfo = useSelector((state) => state.modalInfo);
+
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -25,13 +27,12 @@ const Template = (props) => {
     });
     return () => {};
   }, []);
-  switch (templateName) {
-    case 'simple':
-      return <Simple {...props} />;
-
-    default:
-      return <Simple {...props} />;
-  }
+  return (
+    <>
+      <Simple {...props} />
+      {modalInfo.isVisible && <Modal modalInfo={modalInfo} />}
+    </>
+  );
 };
 
 export default Template;
