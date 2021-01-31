@@ -1,40 +1,40 @@
-import Home from "../pages/Home";
-import Create from "../pages/Create";
-import Life from "../pages/Life";
-import Find from "../pages/Find";
-import Self from "../pages/Self";
-import {Setting} from "../pages/Setting";
+import Home from '../pages/Home';
+import Create from '../pages/Create';
+import Life from '../pages/Life';
+import Find from '../pages/Find';
+import Self from '../pages/Self';
+import {Setting} from '../pages/Setting';
 
-import {Page} from "../pages/Page";
+import {Page} from '../pages/Page';
 
 const Routes = [
   {
     exact: true,
-    path: "/",
+    path: '/',
     component: Home,
   },
   {
-    path: "/create",
+    path: '/create',
     component: Create,
   },
   {
-    path: "/life",
+    path: '/life',
     component: Life,
   },
   {
-    path: "/find",
+    path: '/find',
     component: Find,
   },
   {
-    path: "/self",
+    path: '/self',
     component: Self,
   },
   {
-    path: "/setting",
+    path: '/setting',
     component: Setting,
   },
   {
-    path: "/:id",
+    path: '/:id',
     component: Page,
   },
 ];

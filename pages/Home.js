@@ -21,7 +21,7 @@ const Home = () => {
     fetchData();
     return () => {};
   }, [dispatch]);
-  return <>{loading ? <LoadingPage /> : <Page _id={home} />}</>;
+  return <>{loading ? <LoadingPage /> : <Page id={home} />}</>;
 };
 
 export default Home;

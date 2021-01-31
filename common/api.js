@@ -13,7 +13,7 @@ export const dbGet = async (db, _id, option) => {
     const doc = await db.get(_id, option ? option : {attachments: true});
     return doc;
   } catch (err) {
-    // console.log("err", err);
+    console.log('err', err);
   }
 };
 
