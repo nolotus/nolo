@@ -28,7 +28,16 @@ export const dbNew = (db, params) => {
     // console.log(error);
   }
 };
-
+export const dbDelete = async (db, id) => {
+  try {
+    const doc = await db.get(id);
+    const result = await db.remove(doc);
+    console.log('result', result);
+    return result;
+  } catch (err) {
+    console.log('err', err);
+  }
+};
 export const dbUpdate = async (db, params) => {
   let res = await dbGet(db, params._id);
   // console.log("getResult", res);

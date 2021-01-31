@@ -6,7 +6,7 @@ import {faTimes} from '@fortawesome/free-solid-svg-icons';
 
 import {hostDb, localDb} from '../common/db';
 import Template from '../template';
-import {dbAll} from '../common/api';
+import {dbAll, dbDelete} from '../common/api';
 import {Link} from 'react-router-dom';
 import ArticleTitle from '../components/ArticleTitle';
 import {Tab, Tabs} from '../components/Tabs';
@@ -28,50 +28,44 @@ const Life = () => {
   const getData = () => {
     dbAll(currentDb).then((result) => {
       if (result) {
-        console.log('result', result);
-        setList(result.rows);
+        setRemoteList(result.rows);
+      }
+    });
+    dbAll(localDb).then((result) => {
+      if (result) {
+        setLocalList(result.rows);
       }
     });
   };
-  const goDelete = (id) => {
-    currentDb
-      .get(id)
-      .then(async (doc) => {
-        const result = await currentDb.remove(doc);
-        console.log('handleDetele', result);
+  const goDelete = async (id) => {
+    //delete will go ??
+    try {
+      const deleteResult = await dbDelete(localDb, id);
+      console.log('deleteResult', deleteResult);
+      if (deleteResult) {
         getData();
         closeModal();
-      })
-      .catch(function (err) {
-        modal({
-          modalType: 'warning',
-          content: err.message,
-          hasClose: true,
-        });
-        console.log(err);
+      }
+    } catch (err) {
+      modal({
+        modalType: 'warning',
+        content: err.message,
+        hasClose: true,
       });
+      console.log(err);
+    }
   };
   const modal = (modalInfo) => {
     dispatch({type: 'modal', payload: {modalInfo: {...modalInfo}}});
   };
   const closeModal = () => dispatch({type: 'closeModal'});
   useEffect(() => {
-    dbAll(currentDb).then((result) => {
-      if (result) {
-        console.log('remote', result);
-        setRemoteList(result.rows);
-      }
-    });
-    dbAll(localDb).then((result) => {
-      if (result) {
-        console.log('local', result);
-        setLocalList(result.rows);
-      }
-    });
+    getData();
     return () => {};
   }, []);
 
   const handleDetele = async (id) => {
+    console.log('id', id);
     modal({
       modalType: 'warning',
       title: `确认删除？`,
