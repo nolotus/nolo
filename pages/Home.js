@@ -14,7 +14,8 @@ const Home = () => {
     //get menu and setting from hostDb
     const fetchData = async () => {
       console.log('hostDb.remote', hostDb.remote);
-      const menu = (await dbGet(hostDb.remote, 'menu').result) || [];
+      const menu = await dbGet(hostDb.remote, 'menu');
+      console.log('menu xxx', menu);
       const setting = (await dbGet(hostDb.remote, 'setting')) || {};
       dispatch({type: 'initSuccess', payload: {menu, setting}});
       setLoading(false);

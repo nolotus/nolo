@@ -1,4 +1,4 @@
-export const defaultMenuConfig = [
+export const defaultNavConfig = [
   {title: '记录', path: 'create'},
   {title: '生活', path: 'life'},
   {title: '发现', path: 'find'},

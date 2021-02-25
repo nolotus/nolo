@@ -1,7 +1,9 @@
+import {defaultNavConfig} from '../config/menu';
+
 const initState = {
   templateName: 'simple',
   userInfo: {},
-  menu: [],
+  nav: defaultNavConfig,
   setting: {},
   authData: {isLogin: false},
   userDb: {},
@@ -41,7 +43,7 @@ const reducer = (state = initState, action) => {
     case 'initSuccess':
       return {
         ...state,
-        menu: action.payload.menu,
+        nav: action.payload.nav,
         setting: action.payload.setting,
       };
     default:

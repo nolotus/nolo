@@ -1,19 +1,19 @@
-import { useLayoutEffect } from "react";
+import {useLayoutEffect} from 'react';
 export const themeMap = new Map([
-  ["dark", { "button-color": "#FFF" }],
+  ['dark', {'button-color': '#FFF'}],
   [
-    "light",
+    'light',
     {
-      primaryColor: "#03a9f4",
-      backgroundColor: "#fff",
-      borderRadius: " 6px",
-      neutralShade3:"#d1d3d4",
+      primaryColor: '#03a9f4',
+      backgroundColor: '#fff',
+      borderRadius: ' 6px',
+      neutralShade3: '#d1d3d4',
       neutralShade4: '#babdbf',
     },
   ],
 ]);
 export const toHex = (str) => {
-  let result = "";
+  let result = '';
   for (var i = 0; i < str.length; i++) {
     result += str.charCodeAt(i).toString(16);
   }
@@ -35,6 +35,6 @@ export function useTheme(theme) {
         document.documentElement.style.setProperty(`--${key}`, theme[key]);
       }
     },
-    [theme] // Only call again if theme object reference changes
+    [theme], // Only call again if theme object reference changes
   );
 }

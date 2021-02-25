@@ -68,8 +68,8 @@ const Life = () => {
     console.log('id', id);
     modal({
       modalType: 'warning',
-      title: `确认删除？`,
-      content: `删除内容不可恢复！`,
+      title: '确认删除？',
+      content: '删除内容不可恢复！',
       buttons: [
         {
           text: '取消',
