@@ -1,6 +1,6 @@
 {
   "name": "nolo",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "nolo create it for ssr",
   "main": "electron/index.js",
   "babel": {},

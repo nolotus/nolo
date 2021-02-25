@@ -36,6 +36,9 @@ const SHORTCUTS = {
 const CurrentEditor = (props) => {
   const ref = useRef();
   const [value, setValue] = useState(props.value || initialValue);
+  useEffect(() => {
+    props.value && setValue(props.value);
+  }, [props.value]);
   const [target, setTarget] = useState();
   const [search, setSearch] = useState('');
   const [index, setIndex] = useState(0);
@@ -132,12 +135,8 @@ const CurrentEditor = (props) => {
 
         setTarget(null);
 
-        const headingOneArray =
-          value.filter((item) => item.type === 'heading-one') || [];
-        const title = headingOneArray[0] && headingOneArray[0].children[0].text;
-        const json = {title: title, content: value};
         if (props.onChange) {
-          props.onChange(json);
+          props.onChange(value);
         }
       }}>
       <Editable

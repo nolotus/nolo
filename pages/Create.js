@@ -16,27 +16,31 @@ const Create = () => {
   const [_id, setId] = useState();
   const [_rev, setRev] = useState();
   //handle  change
-  const onChange = async (json) => {
-    const {title, content} = json;
-    const isSame = _.isEqual(content, initialValue);
+  const onChange = async (value) => {
+    console.log('value', value);
+    const isSame = _.isEqual(value, initialValue);
     if (!isSame) {
       if (_id) {
         const type = 'article';
-        let data = {title, type, content, _id};
-        let res = await dbUpdate(localDb, data);
-        console.log('update', res);
+        const children = [];
+        value.map((doc) => {
+          console.log('doc', doc);
+          // return {id:belong: [], ...doc};
+        });
+
+        let data = {type, children, _id};
+        // let res = await dbUpdate(localDb, data);
         res && setRev(res.rev);
-        console.log('result', res);
       } else {
         const data = {
-          title,
           type: 'article',
-          content,
+          children: value,
           status: 'draft',
+          version: '0.0.2',
         };
-        const res = await dbNew(localDb, data);
-        console.log('res', res);
-        setId(res.id);
+        // const res = await dbNew(localDb, data);
+        // console.log('res', res);
+        // setId(res.id);
       }
     }
   };
@@ -44,7 +48,7 @@ const Create = () => {
     <Template>
       <CreateWrapper>
         {_rev}
-        <CurrentEditor onChange={onChange} />
+        <CurrentEditor onChange={_.debounce(onChange, 2000)} />
       </CreateWrapper>
     </Template>
   );

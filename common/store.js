@@ -1,8 +1,8 @@
-import { createStore } from "redux";
-import reducer from "./reducer";
-import window from 'global'
+import {createStore} from 'redux';
+import reducer from './reducer';
+import window from 'global';
 const store = createStore(
-    reducer, /* preloadedState, */
-    window.__REDUX_DEVTOOLS_EXTENSION__ && window.__REDUX_DEVTOOLS_EXTENSION__()
-   );
+  reducer /* preloadedState, */,
+  window.__REDUX_DEVTOOLS_EXTENSION__ && window.__REDUX_DEVTOOLS_EXTENSION__(),
+);
 export default store;
