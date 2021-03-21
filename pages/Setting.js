@@ -3,7 +3,10 @@ import {useDispatch} from 'react-redux';
 import Template from '../template';
 import {hostDb} from '../common/db';
 import {BlockEditor} from '../components/Editor/blockEditor';
+import {useHistory} from 'react-router-dom';
+
 export const Setting = () => {
+  const history = useHistory();
   const dispatch = useDispatch();
   const logout = () => {
     hostDb.remote.logOut(function (err, response) {

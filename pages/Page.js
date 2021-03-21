@@ -1,10 +1,12 @@
 import React, {useEffect, useState} from 'react';
 import {dbGet} from '../common/api';
+import {useSelector} from 'react-redux';
 import {useParams, useLocation} from 'react-router-dom';
 import {Article} from '../components/Article';
 import Template from '../template';
 import {LoadingBox} from '../components/Loading';
-import {localDb, hostDb} from '../common/db';
+import {localDb} from '../common/db';
+import {selectCurrentDb} from '../common/selector';
 
 export const Page = (props) => {
   // function useQuery() {
@@ -15,7 +17,8 @@ export const Page = (props) => {
   //props id from url or home
   const id = useParams().id || props.id;
   const [doc, setDoc] = useState();
-
+  const currentDb = useSelector(selectCurrentDb);
+  console.log('currentDb', currentDb);
   useEffect(() => {
     const getdata = async () => {
       const localDoc = await dbGet(localDb, id);
@@ -23,7 +26,7 @@ export const Page = (props) => {
         setDoc(localDoc);
         return;
       } else {
-        const hostDoc = await dbGet(hostDb.remote, id);
+        const hostDoc = await dbGet(currentDb.remote, id);
 
         if (hostDoc) {
           hostDoc !== undefined && setDoc(hostDoc);

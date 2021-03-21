@@ -6,7 +6,6 @@ import {WrapHeader, Menu, Nav, Logo} from './styled';
 const Header = () => {
   const userInfo = useSelector(selectUserInfo);
   const navs = useSelector(selectNavs);
-  console.log('navs', navs);
   return (
     <WrapHeader>
       <Menu>
@@ -16,7 +15,7 @@ const Header = () => {
             ? navs.map((item, index) => {
                 return (
                   <Link key={index} to={`/${item.path}`}>
-                    {item.path === 'self' && userInfo.name
+                    {item.path === 'self' && userInfo?.name
                       ? userInfo.name
                       : item.title}
                   </Link>

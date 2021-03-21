@@ -1,12 +1,13 @@
 import {defaultNavConfig} from '../config/menu';
+import {hostDb} from './db';
 
 const initState = {
   templateName: 'simple',
-  userInfo: {},
+  userInfo: null,
   navs: defaultNavConfig,
   setting: {},
   authData: {isLogin: false},
-  userDb: {},
+  userDb: null,
   modalInfo: {isVisible: false},
 };
 const reducer = (state = initState, action) => {

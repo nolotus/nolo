@@ -1,15 +1,16 @@
 import React, {useState, useEffect} from 'react';
-import {useDispatch} from 'react-redux';
+import {useDispatch, useSelector} from 'react-redux';
 import styled from 'styled-components';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faTimes} from '@fortawesome/free-solid-svg-icons';
 
-import {hostDb, localDb} from '../common/db';
+import {localDb} from '../common/db';
 import Template from '../template';
 import {dbAll, dbDelete} from '../common/api';
 import {Link} from 'react-router-dom';
 import ArticleTitle from '../components/ArticleTitle';
 import {Tab, Tabs} from '../components/Tabs';
+import {selectCurrentDb, selectUserInfo} from '../common/selector';
 
 const StyledLife = styled.div`
   width: 90%;
@@ -19,15 +20,18 @@ const StyledLife = styled.div`
 const Life = () => {
   const [remoteList, setRemoteList] = useState([]);
   const [localList, setLocalList] = useState([]);
-  const [list, setList] = useState([]);
+  const currentDb = useSelector(selectCurrentDb);
+  const userInfo = useSelector(selectUserInfo);
 
-  const [currentDb, setCurrentDb] = useState(hostDb.remote);
+  console.log('currentDb', currentDb);
+
   const [choose, setchoose] = useState('local');
   const dispatch = useDispatch();
 
   const getData = () => {
-    dbAll(currentDb).then((result) => {
+    dbAll(currentDb.remote).then((result) => {
       if (result) {
+        console.log('result', result);
         setRemoteList(result.rows);
       }
     });
@@ -62,7 +66,7 @@ const Life = () => {
   useEffect(() => {
     getData();
     return () => {};
-  }, []);
+  }, [userInfo]);
 
   const handleDetele = async (id) => {
     console.log('id', id);

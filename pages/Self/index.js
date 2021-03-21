@@ -10,7 +10,7 @@ import {useSelector, useDispatch} from 'react-redux';
 import {connectDb, hostDb} from '../../common/db';
 
 const Self = (props) => {
-  let history = useHistory();
+  const history = useHistory();
   const dispatch = useDispatch();
   const [type, setType] = useState('signin');
   const [error, setError] = useState();
