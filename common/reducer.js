@@ -3,7 +3,7 @@ import {defaultNavConfig} from '../config/menu';
 const initState = {
   templateName: 'simple',
   userInfo: {},
-  nav: defaultNavConfig,
+  navs: defaultNavConfig,
   setting: {},
   authData: {isLogin: false},
   userDb: {},

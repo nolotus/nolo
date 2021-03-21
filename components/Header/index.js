@@ -1,11 +1,12 @@
 import React from 'react';
 import {Link} from 'react-router-dom';
 import {useSelector} from 'react-redux';
-import {selectUserInfo, selectNav} from '../../common/selector';
+import {selectUserInfo, selectNavs} from '../../common/selector';
 import {WrapHeader, Menu, Nav, Logo} from './styled';
 const Header = () => {
   const userInfo = useSelector(selectUserInfo);
-  const navs = useSelector(selectNav);
+  const navs = useSelector(selectNavs);
+  console.log('navs', navs);
   return (
     <WrapHeader>
       <Menu>

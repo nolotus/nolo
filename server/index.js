@@ -44,5 +44,5 @@ if (isProdEnv) {
     // Get's SSL certificates magically!
     .serve(app);
 } else {
-  app.listen(80, () => console.log('localhost develop 80!'));
+  app.listen(3000, () => console.log('localhost develop 80!'));
 }
