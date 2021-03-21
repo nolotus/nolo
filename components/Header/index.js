@@ -11,15 +11,17 @@ const Header = () => {
       <Menu>
         <Logo href="/">Nolotus</Logo>
         <Nav>
-          {navs.map((item, index) => {
-            return (
-              <Link key={index} to={`/${item.path}`}>
-                {item.path === 'self' && userInfo.name
-                  ? userInfo.name
-                  : item.title}
-              </Link>
-            );
-          })}
+          {navs
+            ? navs.map((item, index) => {
+                return (
+                  <Link key={index} to={`/${item.path}`}>
+                    {item.path === 'self' && userInfo.name
+                      ? userInfo.name
+                      : item.title}
+                  </Link>
+                );
+              })
+            : '加载中'}
         </Nav>
       </Menu>
     </WrapHeader>
