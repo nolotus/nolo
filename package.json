@@ -3,7 +3,6 @@
   "version": "0.0.2",
   "description": "nolo create it for ssr",
   "main": "electron/index.js",
-  "babel": {},
   "dependencies": {
     "@emotion/core": "^10.0.22",
     "@emotion/styled": "^10.0.23",
