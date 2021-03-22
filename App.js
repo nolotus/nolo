@@ -1,12 +1,6 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- * @flow strict-local
- */
-
+/* eslint-disable import/named */
 import React from 'react';
+
 import {
   SafeAreaView,
   StyleSheet,
@@ -15,11 +9,13 @@ import {
   Text,
   StatusBar,
   Button,
+  TextInput,
 } from 'react-native';
+import {FontAwesomeIcon} from '@fortawesome/react-native-fontawesome';
+import store from './common/store';
 
+import {Provider} from 'react-redux';
 import {
-  Header,
-  LearnMoreLinks,
   Colors,
   DebugInstructions,
   ReloadInstructions,
@@ -27,39 +23,22 @@ import {
 import 'react-native-gesture-handler';
 import {NavigationContainer} from '@react-navigation/native';
 import {createStackNavigator} from '@react-navigation/stack';
-function HomeScreen() {
+import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import {faCoffee} from '@fortawesome/free-solid-svg-icons';
+function HomeScreen({navigation, route}) {
+  React.useEffect(() => {
+    if (route.params?.post) {
+      // Post updated, do something with `route.params.post`
+      // For example, send the post to the server
+    }
+  }, [route.params?.post]);
   return (
     <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-      <Text>Home Screen</Text>
-      <Button
-        title="Go to Details"
-        onPress={() => navigation.navigate('Details')}
-      />
-    </View>
-  );
-}
-function DetailsScreen() {
-  return (
-    <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
-      <Text>Details Screen</Text>
-    </View>
-  );
-}
-const Stack = createStackNavigator();
-const App = () => {
-  return (
-    <NavigationContainer>
-      {/* <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" />
       <SafeAreaView>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           style={styles.scrollView}>
-          <Header />
-          {global.HermesInternal == null ? null : (
-            <View style={styles.engine}>
-              <Text style={styles.footer}>Engine: Hermes</Text>
-            </View>
-          )}
           <View style={styles.body}>
             <View style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>Step One</Text>
@@ -86,15 +65,112 @@ const App = () => {
                 Read the docs to discover what to do next:
               </Text>
             </View>
-            <LearnMoreLinks />
           </View>
+          <Button
+            title="Go to Details"
+            onPress={() => {
+              /* 1. Navigate to the Details route with params */
+              navigation.navigate('Details', {
+                itemId: 86,
+                otherParam: 'anything you want here',
+              });
+            }}
+          />
+          <Button
+            title="Create post"
+            onPress={() => navigation.navigate('CreatePost')}
+          />
+          <Button
+            title="Go to Settings"
+            onPress={() => navigation.navigate('Settings')}
+          />
+          <Text style={{margin: 10}}>Post: {route.params?.post}</Text>
         </ScrollView>
-      </SafeAreaView> */}
-      <Stack.Navigator>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Details" component={DetailsScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+function DetailsScreen({route, navigation}) {
+  /* 2. Get the param */
+  const {itemId, otherParam} = route.params;
+  return (
+    <View style={{flex: 1, alignItems: 'center', justifyContent: 'center'}}>
+      <Text>Details Screen</Text>
+      <Text>itemId: {JSON.stringify(itemId)}</Text>
+      <Text>otherParam: {JSON.stringify(otherParam)}</Text>
+      <Button
+        title="Go to Details... again"
+        onPress={() =>
+          navigation.push('Details', {
+            itemId: Math.floor(Math.random() * 100),
+          })
+        }
+      />
+      <Button title="Go to Home" onPress={() => navigation.navigate('Home')} />
+      <Button title="Go back" onPress={() => navigation.goBack()} />
+    </View>
+  );
+}
+function CreatePostScreen({navigation, route}) {
+  const [postText, setPostText] = React.useState('');
+
+  return (
+    <>
+      <TextInput
+        multiline
+        placeholder="What's on your mind?"
+        style={{height: 200, padding: 10, backgroundColor: 'white'}}
+        value={postText}
+        onChangeText={setPostText}
+      />
+      <Button
+        title="Done"
+        onPress={() => {
+          // Pass params back to home screen
+          navigation.navigate('Home', {post: postText});
+        }}
+      />
+    </>
+  );
+}
+const Stack = createStackNavigator();
+const Tab = createBottomTabNavigator();
+function SettingsScreen({navigation}) {
+  return (
+    <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+      <Text>Settings!</Text>
+      <Button title="Go to Home" onPress={() => navigation.navigate('Home')} />
+    </View>
+  );
+}
+const App = () => {
+  return (
+    <Provider store={store}>
+      <NavigationContainer>
+        <Tab.Navigator
+          screenOptions={({route}) => ({
+            tabBarIcon: ({focused, color, size}) => {
+              let iconName;
+
+              if (route.name === 'Home') {
+                iconName = focused ? faCoffee : faCoffee;
+              } else if (route.name === 'Settings') {
+                iconName = focused ? faCoffee : faCoffee;
+              }
+
+              return <FontAwesomeIcon icon={iconName} color={color} />;
+            },
+          })}
+          tabBarOptions={{
+            activeTintColor: 'tomato',
+            inactiveTintColor: 'gray',
+          }}>
+          <Tab.Screen name="Home" component={HomeScreen} />
+          <Tab.Screen name="Settings" component={SettingsScreen} />
+        </Tab.Navigator>
+      </NavigationContainer>
+    </Provider>
   );
 };
 
@@ -102,10 +178,7 @@ const styles = StyleSheet.create({
   scrollView: {
     backgroundColor: Colors.lighter,
   },
-  engine: {
-    position: 'absolute',
-    right: 0,
-  },
+
   body: {
     backgroundColor: Colors.white,
   },
@@ -126,14 +199,6 @@ const styles = StyleSheet.create({
   },
   highlight: {
     fontWeight: '700',
-  },
-  footer: {
-    color: Colors.dark,
-    fontSize: 12,
-    fontWeight: '600',
-    padding: 4,
-    paddingRight: 12,
-    textAlign: 'right',
   },
 });
 
