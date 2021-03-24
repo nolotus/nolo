@@ -149,25 +149,14 @@ const App = () => {
     <Provider store={store}>
       <NavigationContainer>
         <Tab.Navigator
-          screenOptions={({route}) => ({
-            tabBarIcon: ({focused, color, size}) => {
-              let iconName;
-
-              if (route.name === 'Home') {
-                iconName = focused ? faCoffee : faCoffee;
-              } else if (route.name === 'Settings') {
-                iconName = focused ? faCoffee : faCoffee;
-              }
-
-              return <FontAwesomeIcon icon={iconName} color={color} />;
-            },
-          })}
           tabBarOptions={{
             activeTintColor: 'tomato',
             inactiveTintColor: 'gray',
           }}>
-          <Tab.Screen name="Home" component={HomeScreen} />
-          <Tab.Screen name="Settings" component={SettingsScreen} />
+          <Tab.Screen name="记录" component={HomeScreen} />
+          <Tab.Screen name="生活" component={SettingsScreen} />
+          <Tab.Screen name="发现" component={SettingsScreen} />
+          <Tab.Screen name="自己" component={SettingsScreen} />
         </Tab.Navigator>
       </NavigationContainer>
     </Provider>
