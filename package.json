@@ -115,6 +115,7 @@
     "electron": "electron .",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "mobile": "react-native start",
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint ."
