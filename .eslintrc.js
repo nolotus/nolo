@@ -13,8 +13,6 @@ module.exports = {
     'eslint:recommended',
     'plugin:react/recommended',
     'plugin:react-hooks/recommended',
-    'plugin:import/errors',
-    'plugin:import/warnings',
     '@react-native-community',
   ],
   rules: {

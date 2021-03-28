@@ -1,35 +1,57 @@
-import React from 'react';
-import {View, StyleSheet, TextInput, Text} from 'react-native';
+import React, {useState} from 'react';
+import {View, TextInput} from 'react-native';
+import styled from 'styled-components';
+import {h1} from '../../common/text';
+
+const getNewId = id => {
+  console.log('id', id);
+  const idArray = id.split('-');
+  const nextId = Number(idArray[idArray.length - 1]) + 1;
+  idArray.splice(-1, 1, nextId);
+  return idArray.join('-');
+};
+const StyledTextInput = styled(TextInput)`
+  ${h1}
+`;
 const UselessTextInput = props => {
   return (
-    <TextInput
+    <StyledTextInput
       {...props} // Inherit any props passed to it; e.g., multiline, numberOfLines below
       editable
     />
   );
 };
 export const CreateScreen = ({navigation, route}) => {
-  const [value, setValue] = React.useState('Useless Multiline Placeholder');
-  const textChange = text => {
-    console.log('text', text);
-    setValue(text);
+  const [contentArray, setContentArray] = useState([
+    {id: 'local-1-1', value: 'test'},
+    {id: 'local-2-1', value: 'test'},
+  ]);
+  console.log('contentArray', contentArray);
+  const textChange = (text, id) => {
+    const nextContentArray = [...contentArray];
+    // const nextId = getNewId(id);
+    nextContentArray[0] = {id, value: text};
+    setContentArray(nextContentArray);
+    // for test
     const textArray = text.split('\n');
     textArray.map(eachLine => {
-      console.log('eachLine', eachLine);
       const singleLineArray = eachLine.split(' ');
     });
   };
   return (
     <View>
-      <UselessTextInput multiline onChangeText={textChange} value={value} />
-      <Text>{value}</Text>
+      {contentArray.map(item => {
+        const {id, value} = item;
+        console.log('render id', id);
+        return (
+          <UselessTextInput
+            multiline
+            key={id}
+            onChangeText={text => textChange(text, id)}
+            value={value}
+          />
+        );
+      })}
     </View>
   );
 };
-const styles = StyleSheet.create({
-  input: {
-    height: 40,
-    margin: 12,
-    borderWidth: 1,
-  },
-});
