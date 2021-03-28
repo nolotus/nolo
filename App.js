@@ -25,6 +25,7 @@ import {NavigationContainer} from '@react-navigation/native';
 import {createStackNavigator} from '@react-navigation/stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {faCoffee} from '@fortawesome/free-solid-svg-icons';
+import {CreateScreen} from './pages/screen/Create';
 function HomeScreen({navigation, route}) {
   React.useEffect(() => {
     if (route.params?.post) {
@@ -153,7 +154,7 @@ const App = () => {
             activeTintColor: 'tomato',
             inactiveTintColor: 'gray',
           }}>
-          <Tab.Screen name="记录" component={HomeScreen} />
+          <Tab.Screen name="记录" component={CreateScreen} />
           <Tab.Screen name="生活" component={SettingsScreen} />
           <Tab.Screen name="发现" component={SettingsScreen} />
           <Tab.Screen name="自己" component={SettingsScreen} />
