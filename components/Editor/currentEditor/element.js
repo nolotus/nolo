@@ -25,7 +25,7 @@ const MentionElement = ({attributes, children, element}) => {
   );
 };
 
-export const Element = (props) => {
+export const Element = props => {
   const {attributes, children, element} = props;
 
   switch (element.type) {
