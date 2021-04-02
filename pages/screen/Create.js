@@ -30,6 +30,9 @@ export const CreateScreen = ({navigation, route}) => {
     {id: 'local-2-1', value: 'test'},
   ]);
   console.log('contentArray', contentArray);
+  const keyChange = ({nativeEvent}) => {
+    console.log(nativeEvent, nativeEvent);
+  };
   const textChange = (text, id) => {
     const nextContentArray = [...contentArray];
     // const nextId = getNewId(id);
@@ -40,7 +43,7 @@ export const CreateScreen = ({navigation, route}) => {
     textArray.map(eachLine => {
       const singleLineArray = eachLine.split(' ');
       console.log('singleLineArray', singleLineArray);
-      if (singleLineArray[0]) {
+      if (singleLineArray[0] && singleLineArray.length > 1) {
         switch (singleLineArray[0]) {
           case '#':
             nextContentArray[index] = {id, value: text, type: 'heading-one'};
@@ -53,6 +56,9 @@ export const CreateScreen = ({navigation, route}) => {
             break;
           case '####':
             nextContentArray[index] = {id, value: text, type: 'heading-four'};
+            break;
+          case '1.':
+            nextContentArray[index] = {id, value: text, type: 'heading-one'};
             break;
           default:
             break;
@@ -71,6 +77,7 @@ export const CreateScreen = ({navigation, route}) => {
             multiline
             key={id}
             onChangeText={text => textChange(text, id)}
+            onKeyPress={keyChange}
             value={value}
             type={type}
           />
