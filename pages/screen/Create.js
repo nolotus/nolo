@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {View, TextInput} from 'react-native';
 import styled from 'styled-components';
 import {h1, h2} from '../../common/text';
+import _ from 'lodash';
 const styleConfig = new Map([
   ['heading-one', h1],
   ['heading-two', h2],
@@ -30,11 +31,24 @@ export const CreateScreen = ({navigation, route}) => {
     {id: 'local-2-1', value: 'test'},
   ]);
   console.log('contentArray', contentArray);
+
   const keyChange = ({nativeEvent}) => {
-    console.log(nativeEvent, nativeEvent);
+    const {key} = nativeEvent;
+    console.log('keyChange', key);
+    if (key === 'Backspace') {
+      console.log('delete');
+      //delete
+      const nextContentArray = [...contentArray];
+      nextContentArray.splice(contentArray.length - 1, 1);
+      console.log('nextContentArray', nextContentArray);
+      setContentArray(nextContentArray);
+    }
   };
   const textChange = (text, id) => {
+    return;
     const nextContentArray = [...contentArray];
+    _.isEqual();
+    console.log('text', text);
     // const nextId = getNewId(id);
     const index = nextContentArray.findIndex(item => item.id === id);
     nextContentArray[index] = {id, value: text};
@@ -65,19 +79,38 @@ export const CreateScreen = ({navigation, route}) => {
         }
       }
     });
-
+    setContentArray(nextContentArray);
+  };
+  const selectChange = ({nativeEvent}) => {
+    console.log(' selectChange nativeEvent', nativeEvent);
+  };
+  const submitChange = ({nativeEvent}, index) => {
+    console.log(' submitChange nativeEvent', nativeEvent);
+    console.log('index', index);
+    //insert
+    setContentArray([...contentArray, {value: ''}]);
+  };
+  const onChange = ({nativeEvent}, index) => {
+    console.log(' onChange nativeEvent', nativeEvent);
+    const {text} = nativeEvent;
+    const nextContentArray = [...contentArray];
+    nextContentArray[index].value = text;
+    console.log('nextContentArray', nextContentArray);
     setContentArray(nextContentArray);
   };
   return (
     <View>
-      {contentArray.map(item => {
+      {contentArray.map((item, index) => {
         const {id, value, type} = item;
         return (
           <UselessTextInput
-            multiline
-            key={id}
+            key={index}
             onChangeText={text => textChange(text, id)}
-            onKeyPress={keyChange}
+            onKeyPress={e => keyChange(e, index)}
+            onSelectionChange={e => selectChange(e, index)}
+            onSubmitEditing={e => submitChange(e, index)}
+            onChange={e => onChange(e, index)}
+            blurOnSubmit={false}
             value={value}
             type={type}
           />
