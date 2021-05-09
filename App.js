@@ -1,4 +1,3 @@
-/* eslint-disable import/named */
 import React from 'react';
 
 import {
@@ -26,6 +25,8 @@ import {createStackNavigator} from '@react-navigation/stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {faCoffee} from '@fortawesome/free-solid-svg-icons';
 import {CreateScreen} from './pages/screen/Create';
+import {Welcome} from './pages/screen/ledger/Welcome';
+
 function HomeScreen({navigation, route}) {
   React.useEffect(() => {
     if (route.params?.post) {
@@ -155,6 +156,7 @@ const App = () => {
             inactiveTintColor: 'gray',
           }}>
           <Tab.Screen name="记录" component={CreateScreen} />
+          <Tab.Screen name="记帐" component={Welcome} />
           <Tab.Screen name="生活" component={SettingsScreen} />
           <Tab.Screen name="发现" component={SettingsScreen} />
           <Tab.Screen name="自己" component={SettingsScreen} />
