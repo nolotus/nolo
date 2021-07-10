@@ -23,7 +23,7 @@ let hostDbName = 'admin';
 PouchDB.plugin(PouchDBAuth).plugin(find);
 
 //remote dbname is different local dbname
-export const connectDb = (dbName) => {
+export const connectDb = dbName => {
   const remoteDbName = 'userdb-' + toHex(dbName);
   const remoteAdress = `https://${dbArray[0]}/${remoteDbName}/`;
   const remote = new PouchDB(remoteAdress);

@@ -1,4 +1,4 @@
-export const dbAll = async (db) => {
+export const dbAll = async db => {
   try {
     const result = await db.allDocs({
       include_docs: true,
@@ -22,10 +22,10 @@ export const dbNew = (db, params) => {
     let res = db.post({
       ...params,
     });
-    // console.log(res);
+    console.log('dbNew', res);
     return res;
   } catch (error) {
-    // console.log(error);
+    console.log('dbNew err', error);
   }
 };
 export const dbDelete = async (db, id) => {

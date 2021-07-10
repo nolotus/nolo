@@ -65,7 +65,6 @@ export const CreateScreen = ({navigation, route}) => {
         }
       }
     });
-
     setContentArray(nextContentArray);
   };
   return (
