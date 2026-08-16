@@ -1,0 +1,293 @@
+/* TextField.css — react-aria-TextField / Input / TextArea styles for packages/render/web/form/{Input,TextArea}.tsx
+ *
+ * Color tokens come from runtime-injected CSS variables (see packages/app/settings/themeSelectors.ts
+ * and packages/app/theme/GlobalThemeController.tsx) — there is no static theme.css to @import.
+ *
+ * Token mapping (all resolve at runtime, fallbacks included where the runtime value may be unset):
+ *   --text / --textSecondary / --placeholder
+ *   --background / --backgroundSecondary
+ *   --border / --borderHover
+ *   --primary (+ --primaryGhost for the focus ring)
+ *   --error
+ *   --space-1 / --space-2 / --space-3 / --space-4
+ *   --control-md / --control-lg
+ *   --radius-sm
+ *   --fontSize-base (used as the base font size; `--font-size` does not exist in this repo)
+ *   --leading-normal
+ */
+
+/* ── Outer TextField wrapper ──────────────────────────────────── */
+.react-aria-TextField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+
+/* ── Label ────────────────────────────────────────────────────── */
+.react-aria-Label {
+  font-size: var(--fontSize-base);
+  font-weight: 550;
+  color: var(--text);
+  line-height: var(--leading-normal, 1.5);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.react-aria-Label.is-invalid {
+  color: var(--error);
+}
+
+/* ── Shared base for input + textarea ────────────────────────── */
+.react-aria-Input,
+.react-aria-TextArea {
+  width: 100%;
+  min-height: var(--control-lg);
+  margin: 0;
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, sans-serif;
+  font-size: var(--fontSize-base, 14px);
+  font-weight: 450;
+  line-height: 1.4;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 120ms ease, box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.react-aria-Input::placeholder,
+.react-aria-TextArea::placeholder {
+  color: var(--placeholder, var(--textTertiary, var(--textSecondary)));
+  opacity: 0.8;
+}
+
+/* ── Focused ──────────────────────────────────────────────────── */
+.react-aria-Input[data-focused],
+.react-aria-TextArea[data-focused] {
+  border-color: var(--primary);
+  /* primaryGhost is the theme's 8-12% alpha primary tint; falls back to a neutral
+     indigo at 10% if the runtime theme didn't define one. */
+  box-shadow: 0 0 0 3px var(--primaryGhost, rgba(99, 102, 241, 0.1));
+}
+
+/* ── Disabled ─────────────────────────────────────────────────── */
+.react-aria-Input[data-disabled],
+.react-aria-TextArea[data-disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--backgroundTertiary, var(--backgroundSecondary));
+}
+
+.react-aria-Input[data-disabled]::placeholder,
+.react-aria-TextArea[data-disabled]::placeholder {
+  color: var(--textTertiary, var(--textSecondary));
+  opacity: 0.7;
+}
+
+/* ── Invalid ──────────────────────────────────────────────────── */
+.react-aria-Input[data-invalid],
+.react-aria-TextArea[data-invalid],
+.react-aria-Input.is-invalid,
+.react-aria-TextArea.is-invalid {
+  border-color: var(--error);
+}
+
+.react-aria-Input[data-invalid][data-focused],
+.react-aria-TextArea[data-invalid][data-focused] {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+/* ── TextArea specifics ───────────────────────────────────────── */
+.react-aria-TextArea {
+  min-height: 64px;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.react-aria-TextArea.auto-resize {
+  resize: none;
+  overflow: hidden;
+}
+
+/* ── Size variants (Input only) ───────────────────────────────── */
+.react-aria-Input.size-md {
+  min-height: var(--control-lg);
+  padding: 0 var(--space-4);
+}
+
+.react-aria-Input.size-sm {
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+}
+
+/* ── Variant: filled ──────────────────────────────────────────── */
+.react-aria-Input.variant-filled,
+.react-aria-TextArea.variant-filled {
+  background: var(--backgroundSecondary);
+  border-color: transparent;
+}
+
+.react-aria-Input.variant-filled[data-focused],
+.react-aria-TextArea.variant-filled[data-focused] {
+  border-color: var(--primary);
+}
+
+/* ── Variant: ghost ───────────────────────────────────────────── */
+.react-aria-Input.variant-ghost,
+.react-aria-TextArea.variant-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.react-aria-Input.variant-ghost[data-focused],
+.react-aria-TextArea.variant-ghost[data-focused] {
+  background: var(--background);
+  border-color: var(--primary);
+}
+
+/* ── Icon / password slot padding ─────────────────────────────── */
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.input-wrapper .react-aria-Input,
+.input-wrapper .react-aria-TextArea {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.input-wrapper.has-icon .react-aria-Input,
+.input-wrapper.has-icon .react-aria-TextArea {
+  padding-left: 44px;
+}
+
+.input-wrapper.has-password .react-aria-Input {
+  padding-right: 44px;
+}
+
+.input-wrapper.has-icon.has-password .react-aria-Input {
+  padding-left: 44px;
+  padding-right: 44px;
+}
+
+/* TextArea wrapper has its own class but shares icon padding behavior */
+.textarea-wrapper {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.textarea-wrapper.has-icon .react-aria-TextArea {
+  padding-left: 44px;
+}
+
+/* ── Inline icon ──────────────────────────────────────────────── */
+.input-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--space-4);
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--textSecondary);
+  pointer-events: none;
+  transition: color 120ms ease;
+}
+
+.textarea-wrapper .input-icon,
+.input-icon.textarea-icon {
+  top: var(--space-3);
+  transform: none;
+}
+
+.input-icon.error {
+  color: var(--error);
+}
+
+/* Focused input flips the icon to primary (kept consistent with prior form.css) */
+.react-aria-Input[data-focused] ~ .input-icon,
+.react-aria-TextArea[data-focused] ~ .input-icon {
+  color: var(--primary);
+}
+
+/* ── Password toggle ──────────────────────────────────────────── */
+.password-toggle {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-sm, 32px);
+  height: var(--control-sm, 32px);
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--textSecondary);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+  z-index: 2;
+}
+
+.password-toggle:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--backgroundHover, var(--backgroundTertiary));
+}
+
+.password-toggle:focus-visible {
+  outline: none;
+  color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primaryGhost, rgba(99, 102, 241, 0.1));
+}
+
+.password-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.password-toggle.error {
+  color: var(--error);
+}
+
+/* ── Helper / description text ────────────────────────────────── */
+.input-helper {
+  margin: 0;
+  font-size: var(--fontSize-base, 14px);
+  line-height: var(--leading-normal, 1.5);
+  letter-spacing: -0.01em;
+  color: var(--textSecondary);
+}
+
+.input-helper.normal {
+  color: var(--textSecondary);
+}
+
+.input-helper.error,
+.input-helper.is-invalid {
+  color: var(--error);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .react-aria-Input,
+  .react-aria-TextArea,
+  .input-icon,
+  .password-toggle {
+    transition: none;
+  }
+}

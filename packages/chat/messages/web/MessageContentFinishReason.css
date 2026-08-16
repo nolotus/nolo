@@ -1,0 +1,8 @@
+/* ── 截断提示（finish_reason: length）────────────────── */
+
+.msg-finish-reason-length {
+  margin-top: 6px;
+  font-size: var(--fontSize-sm);
+  color: var(--textTertiary);
+  line-height: var(--leading-normal);
+}

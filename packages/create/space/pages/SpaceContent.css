@@ -1,0 +1,333 @@
+/* ── SpaceContent ────────────────────────────────────── */
+
+.space-content {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          background: var(--background);
+          color: var(--text);
+          position: relative;
+        }
+
+        .content-body {
+          flex: 1;
+          overflow-y: auto;
+          overflow-x: hidden;
+          scrollbar-gutter: stable;
+          padding: var(--space-5) var(--space-6) 80px;
+          background: var(--background);
+          position: relative;
+          scroll-behavior: smooth;
+        }
+
+        /* Desktop: visible thin scrollbar (avoids double white tracks but stays clearly visible) */
+        html[data-nolo-desktop="1"] .content-body {
+          scrollbar-gutter: auto;
+          scrollbar-width: thin;
+          scrollbar-color: color-mix(in srgb, var(--textTertiary) 70%, transparent 30%) transparent;
+        }
+        html[data-nolo-desktop="1"] .content-body::-webkit-scrollbar {
+          width: 8px !important;
+          height: 8px !important;
+        }
+        html[data-nolo-desktop="1"] .content-body::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        html[data-nolo-desktop="1"] .content-body::-webkit-scrollbar-thumb {
+          background: color-mix(in srgb, var(--textTertiary) 70%, transparent 30%);
+          border-radius: 999px;
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+        html[data-nolo-desktop="1"] .content-body::-webkit-scrollbar-thumb:hover {
+          background: color-mix(in srgb, var(--textSecondary) 88%, transparent 12%);
+          background-clip: padding-box;
+        }
+
+        /* Compact AI-route search only — no empty row on home/files */
+        .content-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: var(--space-3);
+          margin-bottom: var(--space-3);
+          padding: 0;
+          background: transparent;
+        }
+
+        .content-toolbar--compact {
+          margin-bottom: var(--space-3);
+        }
+
+        .content-toolbar__search {
+          display: flex;
+          align-items: center;
+        }
+
+        .space-content__header-search {
+          display: flex;
+          align-items: center;
+          min-width: 0;
+        }
+
+        .space-content-search {
+          width: min(240px, 36vw);
+          max-width: 260px;
+        }
+
+        .back-to-top-btn {
+          position: absolute;
+          right: 32px;
+          bottom: 32px;
+          z-index: 30;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+          border: 1px solid var(--borderLight) !important;
+          animation: slideUp 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        /* Compact automatic Quick Chat above “空间的数据” (Space Home only). */
+        .space-content__quick-chat {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          /* Tighten follow-on gap so data section reads as the next block. */
+          margin-bottom: var(--space-3);
+        }
+
+        .space-content__data-section {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
+          margin-bottom: var(--space-4);
+        }
+
+        /* Title left; search + clear + view toggle right — one row, no wasted toolbar */
+        .space-content__data-section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-3);
+          padding: 0 4px;
+          flex-wrap: nowrap;
+        }
+
+        .space-content__header-actions {
+          display: flex;
+          align-items: center;
+          gap: var(--space-2);
+          flex: 1 1 auto;
+          justify-content: flex-end;
+          min-width: 0;
+          flex-wrap: nowrap;
+        }
+
+        .space-view-toggle {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          background: var(--backgroundTertiary);
+          border-radius: var(--radius-md);
+          padding: 2px;
+        }
+
+        .space-view-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          border: none;
+          border-radius: var(--radius-sm);
+          background: transparent;
+          color: var(--textTertiary);
+          cursor: pointer;
+          transition: background 0.15s, color 0.15s;
+        }
+
+        .space-view-btn:hover {
+          background: var(--backgroundHover);
+          color: var(--text);
+        }
+
+        .space-view-btn.is-active {
+          background: var(--primary);
+          color: #fff;
+        }
+
+        .space-content__data-section-title {
+          margin: 0;
+          font-size: var(--fontSize-md);
+          font-weight: 600;
+          color: var(--text);
+          letter-spacing: 0.01em;
+        }
+
+        /* My Content–style tabs: primary row + collapsible attachment chips */
+        .space-data-tabs {
+          width: 100%;
+        }
+
+        .space-data-tabs.react-aria-Tabs {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .space-data-tabs-wrapper {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          width: 100%;
+        }
+
+        .space-data-tabs__list {
+          align-items: center;
+          border-bottom: 0.5px solid var(--borderLight);
+          gap: var(--space-1);
+        }
+
+        .space-data-tabs .react-aria-Tab {
+          padding: 10px clamp(0.55rem, 1.2vw + 0.15rem, 1.2rem);
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          cursor: pointer;
+        }
+
+        .space-data-tabs .react-aria-Tab[data-hovered] {
+          color: var(--textHeading, var(--text));
+        }
+
+        .space-data-tabs .react-aria-Tab[data-selected],
+        .space-data-tabs .react-aria-Tab.is-active {
+          color: var(--textHeading, var(--text));
+        }
+
+        .space-data-tabs .react-aria-SelectionIndicator {
+          background: var(--primary);
+          height: 2px;
+          border-radius: 2px 2px 0 0;
+        }
+
+        .space-data-tab {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          white-space: nowrap;
+        }
+
+        .space-data-tab__chevron {
+          transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          margin-left: 1px;
+        }
+
+        .space-data-tab__chevron.is-open {
+          transform: rotate(180deg);
+        }
+
+        .space-data-sub-tabs {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+          scrollbar-width: none;
+          max-height: 0;
+          opacity: 0;
+          transition: max-height 0.2s ease, opacity 0.2s ease, padding 0.2s ease;
+          padding: 0;
+          margin: 0;
+          pointer-events: none;
+          background: transparent;
+          border: none;
+        }
+
+        .space-data-sub-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .space-data-sub-tabs.is-open {
+          max-height: 44px;
+          opacity: 1;
+          padding: 8px 0 0;
+          pointer-events: auto;
+        }
+
+        .space-data-sub-tab {
+          appearance: none;
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          padding: 5px 11px;
+          height: auto;
+          background: transparent;
+          color: var(--textSecondary);
+          border: 1px solid transparent;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+          cursor: pointer;
+          white-space: nowrap;
+          font-family: inherit;
+        }
+
+        .space-data-sub-tab:hover {
+          background: var(--backgroundSecondary);
+          color: var(--text);
+        }
+
+        .space-data-sub-tab.is-active {
+          background: var(--primaryGhost, rgba(var(--primary-rgb, 59, 130, 246), 0.12));
+          color: var(--primary);
+          border-color: var(--primaryAlpha, var(--primaryGhost));
+          font-weight: 600;
+        }
+
+        .space-data-sub-tab.is-active svg {
+          color: var(--primary);
+        }
+
+        @keyframes slideUp {
+          from { transform: translateY(12px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Large desktop ≥ 1440px */
+        @media (min-width: 1440px) {
+          .content-body { padding: var(--space-6) var(--space-8) 80px; }
+        }
+
+        /* Small laptop 1024-1280 (13-inch) */
+        @media (max-width: 1280px) and (min-width: 1025px) {
+          .content-body { padding: var(--space-4) var(--space-4) 80px; }
+        }
+
+        /* Tablet */
+        @media (max-width: 1024px) {
+          .content-body { padding: var(--space-4) var(--space-4) 80px; }
+        }
+
+        /* Mobile */
+        @media (max-width: 640px) {
+          .content-body { padding: var(--space-3) var(--space-3) 80px; }
+          .back-to-top-btn { right: 16px; bottom: 16px; }
+          .space-content__data-section-header {
+            flex-wrap: wrap;
+          }
+          .space-content__header-actions {
+            width: 100%;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+          }
+          .space-content__header-search {
+            width: 100%;
+            order: -1;
+          }
+          .space-content-search {
+            width: 100%;
+            max-width: 100%;
+          }
+          .content-toolbar__search {
+            width: 100%;
+          }
+        }
+
+        [data-theme="dark"] .back-to-top-btn { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }

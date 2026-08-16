@@ -1,0 +1,13 @@
+{
+  "name": "form",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./useForm.ts",
+  "module": "./useForm.ts",
+  "types": "./useForm.ts",
+  "exports": {
+    ".": "./useForm.ts",
+    "./useForm": "./useForm.ts"
+  }
+}

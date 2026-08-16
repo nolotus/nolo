@@ -1,0 +1,38 @@
+/* ── PagePreviewDialog ── */
+.page-preview-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.page-preview-title-text {
+  font-weight: 500;
+  font-size: var(--fontSize-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-preview-body {
+  padding: var(--space-4);
+  min-height: 300px;
+}
+
+.page-preview-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+}
+
+.page-preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: var(--textTertiary);
+}
+
+.page-preview-content {
+  padding: var(--space-4);
+}

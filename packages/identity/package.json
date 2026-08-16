@@ -1,0 +1,59 @@
+{
+  "name": "identity",
+  "module": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "nolo-cloud": "./index.cloud.ts",
+      "default": "./index.local.ts"
+    },
+    "./selectors": {
+      "nolo-cloud": "./selectors.cloud.ts",
+      "default": "./selectors.local.ts"
+    },
+    "./actions": {
+      "nolo-cloud": "./actions.cloud.ts",
+      "default": "./actions.local.ts"
+    },
+    "./RequireSignedIn": {
+      "nolo-cloud": "./RequireSignedIn.cloud.tsx",
+      "default": "./RequireSignedIn.local.tsx"
+    },
+    "./cloudRoutes": {
+      "nolo-cloud": "./cloudRoutes.cloud.ts",
+      "default": "./cloudRoutes.local.ts"
+    },
+    "./cloudBootstrap": {
+      "nolo-cloud": "./cloudBootstrap.cloud.ts",
+      "default": "./cloudBootstrap.local.ts"
+    },
+    "./authReducer": {
+      "nolo-cloud": "./authReducer.cloud.ts",
+      "default": "./authReducer.local.ts"
+    },
+    "./authTypes": {
+      "nolo-cloud": "./authTypes.cloud.ts",
+      "default": "./authTypes.local.ts"
+    },
+    "./useDeleteOwnAccountFlow": {
+      "nolo-cloud": "./useDeleteOwnAccountFlow.cloud.ts",
+      "default": "./useDeleteOwnAccountFlow.local.ts"
+    },
+    "./cloudLazy": {
+      "default": "./cloudLazy.tsx"
+    },
+    "./types": {
+      "default": "./types.ts"
+    }
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2",
+    "react": "^18.0.0",
+    "react-redux": "^8.0.0"
+  },
+  "dependencies": {
+  }
+}

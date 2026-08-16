@@ -1,0 +1,174 @@
+/* packages/chat/web/AgentPickerControl.css
+   首页 QuickChat 与对话页 composer 共用的 agent 切换器：
+   trigger 为 compact pill，popover 列表复用全站弹层语言。 */
+
+.agent-picker {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.agent-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--borderMuted, var(--borderLight));
+  border-radius: 999px;
+  background: var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)));
+  color: var(--textMuted, var(--textSecondary));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.agent-picker__trigger:hover,
+.agent-picker.is-open .agent-picker__trigger {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+  color: var(--primary);
+  border-color: var(--borderSubtle);
+}
+
+.agent-picker__trigger-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.agent-picker__trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-picker__trigger-caret {
+  flex-shrink: 0;
+  color: var(--textTertiary);
+  transition: transform 0.2s ease;
+}
+
+.agent-picker.is-open .agent-picker__trigger-caret {
+  transform: rotate(180deg);
+}
+
+/* 弹层壳（圆角/阴影/毛玻璃/动画）由 .app-popover + --popover-* token 提供 */
+.agent-picker__popover {
+  min-width: 280px;
+  max-width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-picker__hint {
+  padding: 8px 14px 4px;
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textTertiary);
+  line-height: 1.4;
+}
+
+.agent-picker__list {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.agent-picker__item > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.agent-picker__item > button:hover {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+}
+
+.agent-picker__item.is-active > button {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--primary);
+}
+
+.agent-picker__item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--textSecondary);
+}
+
+/* 来源层 badge：收藏★ / 我的 user / 广场 bot / 默认 zap */
+.agent-picker__item-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  color: var(--textSecondary);
+  background: var(--bg-subtle, var(--surfaceInset, var(--backgroundSecondary)));
+}
+.agent-picker__item-badge.is-favorite {
+  color: var(--warning, #f5a623);
+  background: rgba(245, 166, 35, 0.12);
+}
+.agent-picker__item-badge.is-owned {
+  color: var(--primary);
+  background: rgba(0, 120, 212, 0.12);
+}
+.agent-picker__item-badge.is-public {
+  color: var(--textSecondary);
+}
+.agent-picker__item-badge.is-default {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.agent-picker__item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-picker__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.agent-picker__item-intro {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--textSecondary);
+}
+
+.agent-picker__item-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.agent-picker__empty {
+  padding: 4px 14px 10px;
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textTertiary);
+  line-height: 1.5;
+}

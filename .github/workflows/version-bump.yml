@@ -1,0 +1,75 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [alpha, main]
+  workflow_dispatch:
+
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install
+
+      - name: Verify release compatibility
+        run: bun scripts/verify/verifyReleaseUpdateCompatibility.ts
+
+      - name: CLI semantic-release (dry-run)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOLO_RELEASE_CONFIG: cli
+        run: npx semantic-release --dry-run
+
+      - name: CLI semantic-release
+        id: cli-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOLO_RELEASE_CONFIG: cli
+        run: npx semantic-release
+
+      - name: Desktop semantic-release
+        id: desktop-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOLO_RELEASE_CONFIG: desktop
+        run: npx semantic-release
+
+      - name: Dispatch CLI npm publish
+        if: always() && steps.cli-release.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            gh workflow run cli-publish.yml -f dist_tag=latest
+          elif [ "${GITHUB_REF}" = "refs/heads/alpha" ]; then
+            gh workflow run cli-publish.yml -f dist_tag=alpha
+          fi
+
+      - name: Dispatch desktop build
+        if: always() && steps.desktop-release.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            gh workflow run desktop-build.yml -f targets=all
+          elif [ "${GITHUB_REF}" = "refs/heads/alpha" ]; then
+            gh workflow run desktop-build.yml -f targets=all
+          fi

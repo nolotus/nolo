@@ -1,0 +1,49 @@
+  .agents-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5, 20px);
+    align-items: stretch;
+    width: 100%;
+  }
+
+  @media (max-width: 1200px) {
+    .agents-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 768px) {
+    .agents-grid {
+      /* minmax(0,1fr) 而不是 1fr：1fr 轨道的自动最小值是卡片的 min-content
+         （价格胶囊等 nowrap 内容能顶到 400px），会把整页撑出横向溢出。 */
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+    }
+  }
+
+/* ── masonry 瀑布流变体（用于 Favorites / Space 等有封面图的场景） ── */
+.agents-grid--masonry {
+  display: block;
+  columns: 280px;
+  column-gap: var(--space-5, 20px);
+}
+
+.agents-grid--masonry > * {
+  break-inside: avoid;
+  margin-bottom: var(--space-5, 20px);
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .agents-grid--masonry {
+    columns: 220px;
+    column-gap: 12px;
+  }
+  .agents-grid--masonry > * {
+    margin-bottom: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .agents-grid--masonry { columns: 1; }
+}

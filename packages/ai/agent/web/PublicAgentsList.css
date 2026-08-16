@@ -1,0 +1,203 @@
+/* ── PublicAgentsList ────────────────────────────────── */
+
+:root {
+            --public-agents-skeleton-bg: var(--surfaceInset, var(--backgroundSecondary));
+            /* 更柔和的微光效果，使用透明度而非纯色，自动适应深浅模式 */
+            --public-agents-skeleton-shimmer: linear-gradient(
+              90deg, 
+              rgba(255, 255, 255, 0) 0%, 
+              var(--backgroundTertiary) 50%, 
+              rgba(255, 255, 255, 0) 100%
+            );
+          }
+
+          .public-agents__list-wrapper { 
+            width: 100%; 
+            animation: fadeIn 0.4s ease-out;
+          }
+
+          .public-agents__retry-btn {
+            appearance: none;
+            border: 1px solid var(--border);
+            background: var(--surfaceRaised, var(--backgroundSecondary));
+            color: var(--text);
+            border-radius: var(--radius-md);
+            padding: 8px 16px;
+            font-size: var(--fontSize-sm);
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .public-agents__retry-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+          }
+
+          .agents-grid.public-agents__grid,
+          .agents-grid .react-aria-GridListItem {
+            display: block;
+            outline: none;
+            text-decoration: none;
+            color: inherit;
+            border-radius: var(--radius-md);
+          }
+
+          .agents-grid.public-agents__grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--space-5, 20px);
+            align-items: stretch;
+            width: 100%;
+          }
+
+          @media (max-width: 1200px) {
+            .agents-grid.public-agents__grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+          }
+
+          @media (max-width: 768px) {
+            .agents-grid.public-agents__grid {
+              grid-template-columns: 1fr;
+              gap: 12px;
+            }
+          }
+
+          .agents-grid .react-aria-GridListItem[data-focus-visible] {
+            outline: 2px solid var(--focusRing);
+            outline-offset: 2px;
+          }
+
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+
+          .public-agents__loading-more { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            gap: 8px; 
+            padding: 16px 0 4px; 
+            color: var(--textSubtle, var(--textTertiary)); 
+            font-size: var(--fontSize-sm);
+            letter-spacing: 0.01em;
+          }
+
+          .public-agents__icon--spin { 
+            animation: spin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite; 
+            color: var(--primary);
+            opacity: 0.65;
+          }
+
+          /* 骨架屏公共动画 */
+          .public-agents__shimmer { 
+            position: relative;
+            overflow: hidden;
+            background: var(--surfaceInteractive, var(--backgroundTertiary));
+            opacity: 0.6;
+          }
+
+          .public-agents__shimmer::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--public-agents-skeleton-shimmer);
+            background-size: 200% 100%;
+            animation: shimmer 1.8s infinite;
+          }
+
+          @keyframes shimmer { 
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); } 
+          }
+
+          .public-agents__skeleton-card { 
+            padding: 18px; 
+            border-radius: var(--radius-md); 
+            background: var(--surfaceCard, var(--public-agents-skeleton-bg)); 
+            border: 1px solid var(--borderMuted, var(--borderLight));
+            height: 268px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 20px -22px var(--shadowMedium);
+          }
+
+          .public-agents__placeholder-card {
+            height: 268px;
+            border-radius: var(--radius-md);
+            background: var(--backgroundSecondary);
+            border: 1px dashed var(--borderMuted, var(--borderLight));
+            opacity: 0.35;
+          }
+
+          .public-agents__skeleton-header { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            margin-bottom: 14px; 
+          }
+
+          .public-agents__skeleton-avatar { 
+            width: 48px; 
+            height: var(--control-xl); 
+            border-radius: var(--radius-sm); /* 匹配 Avatar 的圆角风格 */
+            flex-shrink: 0;
+          }
+
+          .public-agents__skeleton-header-text { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 6px; 
+          }
+
+          .public-agents__skeleton-body { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 8px; 
+            margin-bottom: auto; 
+          }
+
+          .public-agents__skeleton-footer { 
+            display: flex; 
+            align-items: center; 
+            gap: 8px; 
+            margin-top: 14px;
+          }
+          
+          .public-agents__skeleton-line { 
+            height: 8px; 
+            border-radius: var(--radius-sm); 
+          }
+
+          .public-agents__skeleton-line--title { 
+            width: 50%; 
+            height: 13px; 
+            border-radius: var(--radius-md);
+          }
+
+          .public-agents__skeleton-line--subtitle { 
+            width: 30%; 
+          }
+
+          .public-agents__skeleton-line--short { 
+            width: 40%; 
+          }
+          
+          .public-agents__skeleton-pill { 
+            height: var(--control-md); 
+            border-radius: var(--radius-sm); 
+            flex: 1; /* 底部主按钮骨架 */
+          }
+
+          @media (max-width: 768px) {
+            .public-agents__skeleton-card {
+              height: auto;
+              min-height: 188px;
+              padding: 16px;
+            }
+          }
+

@@ -1,0 +1,8 @@
+{
+  "name": "create",
+  "module": "index.tsx",
+  "type": "module",
+  "dependencies": {
+    "unist-util-visit": "^5.0.0"
+  }
+}

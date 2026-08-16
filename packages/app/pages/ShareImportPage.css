@@ -1,0 +1,422 @@
+/* ── ShareImportPage ─────────────────────────────────── */
+
+.AppShareLanding-root {
+          max-width: 640px;
+          margin: 60px auto;
+          padding: 0 20px;
+        }
+        .AppShareLanding-card {
+          border: 1px solid var(--border);
+          border-radius: var(--radius-xl);
+          overflow: hidden;
+          background: var(--background);
+          box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        .AppShareLanding-cover {
+          width: 100%;
+          height: 220px;
+          object-fit: cover;
+          display: block;
+        }
+        .AppShareLanding-coverFallback {
+          width: 100%;
+          height: 180px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+          color: white;
+        }
+        .AppShareLanding-body { padding: 24px; }
+        .AppShareLanding-meta { margin-bottom: 12px; }
+        .AppShareLanding-author {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .AppShareLanding-authorName {
+          font-size: var(--fontSize-base);
+          font-weight: 500;
+          color: var(--text);
+        }
+        .AppShareLanding-date {
+          font-size: var(--fontSize-base);
+          color: var(--textTertiary);
+        }
+        .AppShareLanding-title {
+          margin: 0 0 10px;
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: var(--text);
+          line-height: var(--leading-tight);
+        }
+        .AppShareLanding-desc {
+          margin: 0 0 20px;
+          font-size: 0.95rem;
+          color: var(--textSecondary);
+          line-height: var(--leading-relaxed);
+        }
+        .AppShareLanding-openBtn {
+          display: inline-block;
+          padding: 12px 28px;
+          background: #0ea5e9;
+          color: white;
+          border-radius: var(--radius-lg);
+          font-size: 1rem;
+          font-weight: 600;
+          text-decoration: none;
+          transition: background 0.15s, transform 0.1s;
+        }
+        .AppShareLanding-openBtn:hover {
+          background: #0284c7;
+          transform: translateY(-1px);
+        }
+        .AppShareLanding-hint {
+          margin: 12px 0 0;
+          font-size: var(--fontSize-base);
+          color: var(--textTertiary);
+        }
+        .AppShareLanding-noUrl {
+          margin: 0;
+          font-size: var(--fontSize-base);
+          color: var(--textSecondary);
+        }
+.ShareImportPage-root { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+          .ShareImportPage-errorCard {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            padding: 20px;
+            background: var(--backgroundSecondary);
+          }
+          .ShareImportPage-errorCard h1 { margin: 0 0 8px; font-size: var(--fontSize-xl); }
+          .ShareImportPage-errorCard p { margin: 0; color: var(--textSecondary); line-height: var(--leading-relaxed); }
+          .ShareImportPage-errorActions { margin-top: 14px; display: flex; gap: 10px; }
+          .ShareImportPage-retryBtn, .ShareImportPage-homeLink {
+            border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 8px 12px;
+            font-size: var(--fontSize-sm); text-decoration: none; background: var(--background);
+            color: var(--textPrimary);
+          }
+          .ShareImportPage-retryBtn:hover, .ShareImportPage-homeLink:hover {
+            background: var(--backgroundSecondary);
+            border-color: var(--textSecondary);
+          }
+          .ShareImportPage-retryBtn { cursor: pointer; }
+.ShareImportPage-root {
+          width: 100%;
+          max-width: 1600px;
+          margin: 0 auto;
+          padding: 12px 16px 40px;
+        }
+        .ShareImportPage-topBar {
+          margin-bottom: 12px;
+        }
+        .ShareImportPage-topBar--doc {
+          max-width: 900px;
+          margin-left: auto;
+          margin-right: auto;
+          padding-left: var(--space-4);
+          padding-right: var(--space-4);
+        }
+        .ShareImportPage-topBarMain {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 8px 0 14px;
+        }
+        .ShareImportPage-titleBlock {
+          min-width: 0;
+          flex: 1;
+        }
+        .ShareImportPage-breadcrumb {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: var(--fontSize-sm);
+          color: var(--textSecondary);
+          font-weight: 500;
+          margin-bottom: 4px;
+        }
+        .ShareImportPage-breadcrumbLink {
+          color: var(--textTertiary);
+          text-decoration: none;
+          transition: color 0.15s ease;
+        }
+        .ShareImportPage-breadcrumbLink:hover {
+          color: var(--primary);
+        }
+        .ShareImportPage-breadcrumbSeparator {
+          color: var(--textQuaternary);
+          user-select: none;
+        }
+        .ShareImportPage-breadcrumbCurrent {
+          color: var(--textSecondary);
+        }
+        .ShareImportPage-pageTitle {
+          margin: 0;
+          font-size: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+          font-weight: 700;
+          line-height: 1.15;
+          color: var(--text);
+        }
+        .ShareImportPage-pageDescription {
+          margin: 10px 0 0;
+          color: var(--textSecondary);
+          font-size: var(--fontSize-base);
+          line-height: var(--leading-relaxed);
+        }
+        .ShareImportPage-agentCta,
+        .ShareImportPage-agentCard {
+          min-width: 240px;
+          max-width: 320px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 12px 16px;
+          border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--border));
+          border-radius: var(--radius-xl);
+          background: linear-gradient(135deg, var(--backgroundSecondary) 0%, color-mix(in srgb, var(--primary) 3%, var(--backgroundSecondary)) 100%);
+          text-decoration: none;
+          transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+          position: relative;
+          overflow: hidden;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        }
+        .ShareImportPage-agentCta:hover {
+          border-color: var(--primary);
+          background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 6%, var(--background)) 100%);
+          transform: translateY(-2px);
+          box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 12%, rgba(0, 0, 0, 0.05));
+        }
+        /* shimmer scanning shine */
+        .ShareImportPage-agentCta::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: -150%;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.12),
+            transparent
+          );
+          transform: skewX(-25deg);
+        }
+        .ShareImportPage-agentCta:hover::before {
+          animation: ShareImportPage-shimmer 0.85s ease-in-out forwards;
+        }
+        @keyframes ShareImportPage-shimmer {
+          0% {
+            left: -150%;
+          }
+          100% {
+            left: 150%;
+          }
+        }
+        .ShareImportPage-agentCtaEyebrow {
+          color: var(--textTertiary);
+          font-size: var(--fontSize-sm);
+          line-height: 1.2;
+        }
+        .ShareImportPage-agentCtaTitle {
+          color: var(--text);
+          font-size: var(--fontSize-base);
+          font-weight: 600;
+          line-height: 1.35;
+        }
+        .ShareImportPage-metaHeader {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-top: 16px;
+          margin-bottom: 24px;
+          padding: 14px 20px;
+          background: var(--backgroundSecondary);
+          border: 1px solid var(--borderSubtle);
+          border-radius: var(--radius-xl);
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.01);
+        }
+        .ShareImportPage-metaHeader--doc {
+          max-width: 900px;
+          margin-left: auto;
+          margin-right: auto;
+          padding-left: var(--space-4);
+          padding-right: var(--space-4);
+        }
+        .ShareImportPage-author {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .ShareImportPage-authorInfo {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .ShareImportPage-authorName {
+          font-weight: 600;
+          font-size: var(--fontSize-base);
+          color: var(--text);
+        }
+        .ShareImportPage-authorLink {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          text-decoration: none;
+          border-radius: var(--radius-md);
+          padding: 4px 8px;
+          margin: -4px -8px;
+          transition: background 0.15s;
+        }
+        @media (max-width: 768px) {
+          .ShareImportPage-metaHeader--doc {
+            padding-left: var(--space-3);
+            padding-right: var(--space-3);
+          }
+        }
+        .ShareImportPage-authorLink:hover {
+          background: var(--backgroundSecondary);
+        }
+        .ShareImportPage-authorLink:hover .ShareImportPage-authorName {
+          color: var(--primary);
+        }
+        .ShareImportPage-date {
+          font-size: var(--fontSize-base);
+          color: var(--textTertiary);
+        }
+        .ShareImportPage-deleteBtn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          min-height: 34px;
+          padding: 7px 14px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          background: var(--background);
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          line-height: 1;
+          cursor: pointer;
+          transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+        }
+        .ShareImportPage-deleteBtn:hover:not(:disabled) {
+          border-color: #ef4444;
+          color: #ef4444;
+          background: color-mix(in srgb, #ef4444 8%, var(--background));
+          transform: translateY(-1px);
+        }
+        .ShareImportPage-deleteBtn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
+        .ShareImportPage-header p {
+          margin: 0 0 16px;
+          color: var(--textSecondary);
+          font-size: var(--fontSize-base);
+          line-height: var(--leading-relaxed);
+        }
+        .ShareImportPage-dialog {
+          max-width: 760px;
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 4px 0 32px;
+        }
+        .ShareImportPage-emptyMsg {
+          text-align: center;
+          color: var(--textSecondary);
+          padding: 40px 0;
+          font-size: var(--fontSize-base);
+        }
+        .ShareImportPage-table {
+          max-width: 100%;
+          margin: 0 auto;
+          padding: 4px 0 24px;
+        }
+        .ShareImportPage-tableCard {
+          background: var(--background);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-xl);
+          overflow: hidden;
+          box-shadow: 0 10px 30px color-mix(in srgb, var(--text) 8%, transparent);
+        }
+        .ShareImportPage-tableScrollHint {
+          margin: 0;
+          padding: 12px 16px 0;
+          color: var(--textTertiary);
+          font-size: var(--fontSize-sm);
+          line-height: 1.4;
+        }
+        .ShareImportPage-tableScroller {
+          overflow-x: auto;
+          overscroll-behavior-x: contain;
+          scrollbar-width: thin;
+          scrollbar-color: var(--textQuaternary) transparent;
+          touch-action: pan-x;
+        }
+        .ShareImportPage-tableGrid {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 640px;
+        }
+        .ShareImportPage-tableGrid th,
+        .ShareImportPage-tableGrid td {
+          padding: 12px 14px;
+          text-align: left;
+          border-bottom: 1px solid var(--borderSubtle);
+          vertical-align: top;
+          font-size: var(--fontSize-base);
+          line-height: var(--leading-relaxed);
+        }
+        .ShareImportPage-tableGrid th {
+          background: var(--backgroundSecondary);
+          color: var(--text);
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        .ShareImportPage-tableGrid td {
+          color: var(--textSecondary);
+        }
+        .ShareImportPage-tableHint,
+        .ShareImportPage-tableEmptyCell {
+          margin: 0;
+          padding: 20px 16px;
+          color: var(--textSecondary);
+          text-align: center;
+        }
+        .ShareImportPage-unsupported { padding: 24px 0; }
+        .ShareImportPage-typeLabel {
+          margin: 0;
+          font-size: var(--fontSize-base);
+          color: var(--textSecondary);
+        }
+        .ShareImportPage-imageContainer {
+          text-align: center;
+          padding: 24px 0;
+        }
+        .ShareImportPage-image {
+          max-width: 100%;
+          border-radius: var(--radius-lg);
+        }
+        @media (max-width: 768px) {
+          .ShareImportPage-topBar--doc {
+            padding-left: var(--space-3);
+            padding-right: var(--space-3);
+          }
+          .ShareImportPage-topBarMain,
+          .ShareImportPage-metaHeader {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .ShareImportPage-agentCta,
+          .ShareImportPage-agentCard {
+            min-width: 0;
+            max-width: none;
+          }
+        }

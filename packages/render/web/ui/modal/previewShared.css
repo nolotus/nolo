@@ -1,0 +1,36 @@
+/* 预览弹窗共享标题（Docx / Table） */
+.dialog-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dialog-title-wrapper .title-icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.dialog-title-wrapper .title-text {
+  font-weight: 500;
+  font-size: var(--fontSize-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 预览加载态（Docx / Table 共用） */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  gap: 12px;
+  color: var(--textTertiary);
+}
+
+.loading-text {
+  font-size: var(--fontSize-base);
+  margin-top: 8px;
+}

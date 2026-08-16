@@ -1,0 +1,341 @@
+import type { Message } from "app/types";
+import { isRecord } from "core/isRecord";
+import { asOptionalTrimmedString } from "core/optionalString";
+
+type MessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
+
+type ToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+type ResponseInputTextPart =
+  | { type: "input_text"; text: string }
+  | { type: "output_text"; text: string };
+type ResponseInputImagePart = {
+  type: "input_image";
+  image_url: string;
+  detail?: "low" | "high" | "auto";
+};
+
+type ResponseInputMessage = {
+  type: "message";
+  role: "system" | "developer" | "user" | "assistant";
+  content: Array<ResponseInputTextPart | ResponseInputImagePart>;
+};
+
+type ResponseFunctionCall = {
+  type: "function_call";
+  call_id: string;
+  name: string;
+  arguments: string;
+};
+
+type ResponseFunctionCallOutput = {
+  type: "function_call_output";
+  call_id: string;
+  output: string;
+};
+type ResponseReasoning = {
+  type: "reasoning";
+  content: Array<{ type: "reasoning_text"; text: string }>;
+};
+
+export type ResponseInputItem =
+  | ResponseInputMessage
+  | ResponseFunctionCall
+  | ResponseFunctionCallOutput
+  | ResponseReasoning;
+
+export type AssistantToolCall = ToolCall;
+
+const RESPONSES_TOP_LEVEL_SCHEMA_KEYS = ["anyOf", "oneOf", "allOf", "enum", "not"] as const;
+
+const sanitizeResponsesParameters = (parameters: any): any => {
+  if (!isRecord(parameters)) {
+    return parameters;
+  }
+
+  const next = { ...parameters };
+  for (const key of RESPONSES_TOP_LEVEL_SCHEMA_KEYS) {
+    delete next[key];
+  }
+  return next;
+};
+
+const appendTextPart = (
+  parts: Array<ResponseInputTextPart | ResponseInputImagePart>,
+  text: string,
+  role: "system" | "developer" | "user" | "assistant"
+) => {
+  if (!text) return;
+  const last = parts.at(-1);
+  const textType = role === "assistant" ? "output_text" : "input_text";
+  if (last?.type === textType) {
+    last.text += text;
+    return;
+  }
+  parts.push({ type: textType, text });
+};
+
+const normalizeMessageParts = (
+  content: Message["content"],
+  role: "system" | "developer" | "user" | "assistant"
+): Array<ResponseInputTextPart | ResponseInputImagePart> => {
+  if (typeof content === "string") {
+    if (!content) return [];
+    return [
+      {
+        type: role === "assistant" ? "output_text" : "input_text",
+        text: content,
+      },
+    ];
+  }
+
+  const parts: Array<ResponseInputTextPart | ResponseInputImagePart> = [];
+  for (const part of content ?? []) {
+    const typedPart = part as MessageContentPart;
+    if (typedPart?.type === "text" && typeof typedPart.text === "string") {
+      appendTextPart(parts, typedPart.text, role);
+      continue;
+    }
+
+    if (
+      typedPart?.type === "image_url" &&
+      typeof typedPart.image_url?.url === "string" &&
+      typedPart.image_url.url
+    ) {
+      if (role === "assistant") continue;
+      parts.push({
+        type: "input_image",
+        image_url: typedPart.image_url.url,
+        detail: typedPart.image_url.detail,
+      });
+    }
+  }
+
+  return parts;
+};
+
+const normalizeToolOutput = (content: Message["content"]): string => {
+  if (typeof content === "string") return content;
+  return JSON.stringify(content ?? "");
+};
+
+export const toResponsesTools = (tools: any[] | undefined): any[] | undefined => {
+  if (!Array.isArray(tools) || tools.length === 0) return undefined;
+
+  const normalized = tools
+    .map((tool) => {
+      // Accept both OpenAI Chat Completions tools and already-normalized
+      // Responses tools. The chat proxy may receive either shape depending on
+      // whether the caller has already selected its target wire.
+      const fn = tool?.function;
+      const name = fn?.name ?? tool?.name;
+      if (!name) return null;
+      const parameters = fn?.parameters ?? tool?.parameters;
+      return {
+        type: "function",
+        name,
+        ...(typeof (fn?.description ?? tool?.description) === "string"
+          ? { description: fn?.description ?? tool?.description }
+          : {}),
+        parameters: sanitizeResponsesParameters(parameters),
+        ...(fn?.strict !== undefined || tool?.strict !== undefined
+          ? { strict: fn?.strict ?? tool?.strict }
+          : {}),
+      };
+    })
+    .filter(Boolean);
+  return normalized.length > 0 ? normalized : undefined;
+};
+
+export const convertMessagesToResponsesInput = (
+  messages: Array<Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown }>,
+  options?: { stripReasoningContent?: boolean },
+): ResponseInputItem[] => {
+  const input: ResponseInputItem[] = [];
+
+  for (const message of messages) {
+    if (!message?.role) continue;
+
+    if (message.role === "tool") {
+      if (!message.tool_call_id) continue;
+      input.push({
+        type: "function_call_output",
+        call_id: message.tool_call_id,
+        output: normalizeToolOutput(message.content),
+      });
+      continue;
+    }
+
+    const role = message.role as ResponseInputMessage["role"];
+    if (
+      role === "assistant" &&
+      !options?.stripReasoningContent &&
+      typeof message.reasoning_content === "string" &&
+      message.reasoning_content
+    ) {
+      // 数组 content（reasoning_text parts）是 OpenAI 官方与 DeepSeek 官方
+      // Responses API 都接受的格式；字符串 content 会被 DeepSeek 拒绝
+      // （serde "expected a sequence"，实测 400）。
+      input.push({
+        type: "reasoning",
+        content: [
+          { type: "reasoning_text", text: message.reasoning_content },
+        ],
+      });
+    }
+    const contentParts = normalizeMessageParts(message.content, role);
+    if (contentParts.length > 0) {
+      input.push({
+        type: "message",
+        role,
+        content: contentParts,
+      });
+    }
+
+    if (role === "assistant" && Array.isArray(message.content)) {
+      const replayImages = message.content
+        .map((part) => part as MessageContentPart)
+        .filter(
+          (part): part is Extract<MessageContentPart, { type: "image_url" }> =>
+            part?.type === "image_url" &&
+            typeof part.image_url?.url === "string" &&
+            Boolean(part.image_url.url)
+        )
+        .map((part) => ({
+          type: "input_image" as const,
+          image_url: part.image_url.url,
+          detail: part.image_url.detail,
+        }));
+
+      if (replayImages.length > 0) {
+        input.push({
+          type: "message",
+          role: "user",
+          content: replayImages,
+        });
+      }
+    }
+
+    if (role === "assistant" && Array.isArray(message.tool_calls)) {
+      for (const toolCall of message.tool_calls as ToolCall[]) {
+        if (!toolCall?.id || !toolCall.function?.name) continue;
+        input.push({
+          type: "function_call",
+          call_id: toolCall.id,
+          name: toolCall.function.name,
+          arguments:
+            typeof toolCall.function.arguments === "string"
+              ? toolCall.function.arguments
+              : JSON.stringify(toolCall.function.arguments ?? {}),
+        });
+      }
+    }
+  }
+
+  return input;
+};
+
+export const extractTextFromResponseOutput = (response: any): string => {
+  const parts: string[] = [];
+  for (const item of response?.output ?? []) {
+    if (item?.type !== "message") continue;
+    for (const content of item.content ?? []) {
+      if (content?.type === "output_text" && typeof content.text === "string") {
+        parts.push(content.text);
+      }
+    }
+  }
+  return parts.join("");
+};
+
+export const extractReasoningFromResponseOutput = (response: any): string => {
+  const parts: string[] = [];
+  for (const item of response?.output ?? []) {
+    if (item?.type !== "reasoning") continue;
+    if (typeof item.content === "string") {
+      parts.push(item.content);
+      continue;
+    }
+    for (const content of item.content ?? []) {
+      if (typeof content === "string") parts.push(content);
+      else if (typeof content?.text === "string") parts.push(content.text);
+    }
+  }
+  return parts.join("");
+};
+
+const toDataUrl = (base64Data: string, mimeType?: string | null): string => {
+  const normalizedMimeType = asOptionalTrimmedString(mimeType) ?? "image/png";
+  return `data:${normalizedMimeType};base64,${base64Data}`;
+};
+
+export const extractImagePartsFromResponseOutput = (
+  response: any
+): Array<{ type: "image_url"; image_url: { url: string } }> => {
+  const images: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+
+  for (const item of response?.output ?? []) {
+    if (item?.type === "image_generation_call") {
+      const result = asOptionalTrimmedString(item.result);
+      if (result) {
+        const outputFormat = asOptionalTrimmedString(item.output_format);
+        images.push({
+          type: "image_url",
+          image_url: {
+            url: toDataUrl(
+              result,
+              outputFormat ? `image/${outputFormat}` : undefined
+            ),
+          },
+        });
+      }
+      continue;
+    }
+
+    if (item?.type !== "message") continue;
+    for (const content of item.content ?? []) {
+      const result = asOptionalTrimmedString(content?.result);
+      if (content?.type === "output_image" && result) {
+        images.push({
+          type: "image_url",
+          image_url: {
+            url: toDataUrl(
+              result,
+              content.mime_type ?? content.mimeType ?? null
+            ),
+          },
+        });
+      }
+    }
+  }
+
+  return images;
+};
+
+export const extractToolCallsFromResponseOutput = (
+  response: any
+): AssistantToolCall[] => {
+  const calls: AssistantToolCall[] = [];
+  for (const item of response?.output ?? []) {
+    if (item?.type !== "function_call") continue;
+    if (!item.call_id || !item.name) continue;
+    calls.push({
+      id: item.call_id,
+      type: "function",
+      function: {
+        name: item.name,
+        arguments:
+          typeof item.arguments === "string"
+            ? item.arguments
+            : JSON.stringify(item.arguments ?? {}),
+      },
+    });
+  }
+  return calls;
+};

@@ -1,0 +1,77 @@
+/* ── FileDropZone ────────────────────────────────────── */
+
+.file-drop-zone {
+          position: relative;
+          width: 100%;
+          min-height: 100px;
+        }
+
+        .file-drop-zone.disabled {
+          pointer-events: none;
+        }
+
+        .drop-indicator {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          /* Visual only: nested drop targets (dialog entries, quick-chat)
+             must keep receiving drag events through the overlay. */
+          pointer-events: none;
+          background: var(--backgroundGhost, rgba(249, 250, 251, 0.95));
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10;
+          border-radius: var(--radius-md);
+          border: 2px dashed var(--primary);
+          animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+          0% {
+            opacity: 0.9;
+          }
+          50% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0.9;
+          }
+        }
+
+        .indicator-content {
+          text-align: center;
+          padding: 24px;
+        }
+
+        .indicator-icon {
+          width: 80px;
+          height: 80px;
+          background: var(--primary);
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          margin: 0 auto 16px auto;
+        }
+
+        .indicator-content p {
+          margin: 0;
+          font-size: var(--fontSize-lg);
+          font-weight: 500;
+          color: var(--primary);
+        }
+
+        @media (max-width: 768px) {
+          .indicator-icon {
+            width: 60px;
+            height: 60px;
+          }
+
+          .indicator-content p {
+            font-size: var(--fontSize-lg);
+          }
+        }

@@ -1,0 +1,407 @@
+        .quick-chat-wrapper {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+        }
+
+        .quick-chat-wrapper.is-empty-state {
+          align-items: center;
+          margin-top: 8vh;
+        }
+
+        .quick-chat-wrapper.is-compact {
+          margin: 0;
+          align-items: stretch;
+        }
+
+        .quick-chat-greeting {
+          font-size: clamp(20px, 2.4vw, 28px);
+          font-weight: 600;
+          color: var(--text);
+          margin-bottom: clamp(10px, 1.5vw, 16px);
+          text-align: center;
+          letter-spacing: 0;
+        }
+
+        /* 登录首页作为吸底 Shell 时，隐藏其内部的 Greeting，防止浮动文字盖在 Widget 卡片正中间 */
+        .quick-chat-wrapper[data-surface="home-primary"] .quick-chat-greeting {
+          display: none !important;
+        }
+
+        .quick-chat-container {
+          width: 100%; 
+          max-width: var(--home-content-max-width, 1040px);
+          margin: 0 auto;
+        }
+
+        .quick-chat-workspace-indicator {
+          margin: 0 0 6px;
+          overflow: hidden;
+          color: var(--textSecondary, var(--text));
+          font-size: 12px;
+          line-height: 1.4;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .quick-chat-wrapper.is-compact .quick-chat-container {
+          max-width: none;
+          margin: 0;
+        }
+
+        /* Home primary：输入框上限 760px，窄于上方内容列（widgets 880px），
+           宽屏下不再拉成通栏；窗口缩放/侧栏开合时居中稳定。 */
+        .quick-chat-container[data-surface="home-primary"] {
+          max-width: min(760px, var(--home-content-max-width, 1040px));
+        }
+
+        /* Home primary：收紧垂直节奏（textarea 30+12、按钮 36、间距 4），
+           整盒高约 98px，替代原 ~122px。 */
+        .quick-chat-container[data-surface="home-primary"] .message-input__controls {
+          margin-top: 4px;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .upload-button,
+        .quick-chat-container[data-surface="home-primary"] .send-button {
+          --button-size: 36px;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .voice-btn-in-send {
+          width: 36px;
+          height: 36px;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .quick-chat-box,
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box {
+          /* Home primary keeps the shell clean; focus supplies the affordance. */
+          min-height: 66px;
+          padding: 8px 14px;
+          border-radius: 20px;
+          /* Premium soft glow background with a hint of brand tint to solve white-on-white contrast issues */
+          background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--surfaceRaised, var(--background)) 95%, var(--primary) 3%),
+            color-mix(in srgb, var(--surfaceRaised, var(--background)) 98%, var(--primary) 1%)
+          );
+          -webkit-backdrop-filter: blur(16px);
+          backdrop-filter: blur(16px);
+          /* Elevated soft brand shadow to float elegantly above the pure white background */
+          box-shadow: 
+            0 8px 30px -4px color-mix(in srgb, var(--shadowMedium) 12%, transparent),
+            0 2px 6px color-mix(in srgb, var(--shadowLight) 70%, transparent),
+            0 4px 16px -2px color-mix(in srgb, var(--primary) 6%, transparent);
+          border-color: color-mix(in srgb, var(--primary) 16%, var(--borderLight));
+          /* Smooth physical state transition */
+          transition: border-color 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), 
+                      box-shadow 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), 
+                      background 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
+                      transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        /* Space Home: denser entry above the data section (no hero). */
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box {
+          min-height: 72px;
+          padding: 10px 14px;
+          border-radius: 22px;
+        }
+
+        /*
+         * Space Home compact: single-row composer at wide desktop only.
+         * Visual order: [flexible message] [mode + upload] [voice/send]
+         * Narrower viewports keep the default two-row stack (no horizontal overflow).
+         * Scoped to data-surface="space-home-compact" — home-primary is untouched.
+         */
+        @media (min-width: 900px) {
+          .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box {
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            min-height: 72px;
+            /* 12 vertical + 36 control + 12 ≈ 60–76 with borders/min-height */
+            padding: 12px 14px;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea-wrap {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: auto;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea {
+            min-height: 36px;
+            padding: 6px 0;
+            line-height: 1.35;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__controls {
+            display: flex;
+            flex: 0 0 auto;
+            width: auto;
+            margin-top: 0;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 8px;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__controls-left,
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__controls-right {
+            gap: 8px;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .upload-button,
+          .quick-chat-container[data-surface="space-home-compact"] .send-button {
+            --button-size: 36px;
+          }
+
+          .quick-chat-container[data-surface="space-home-compact"] .voice-btn-in-send {
+            width: 36px;
+            height: 36px;
+          }
+
+        }
+
+        /* Hover micro-interaction for premium affordance */
+        .quick-chat-container[data-surface="home-primary"] .quick-chat-box:hover,
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:hover {
+          background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--surfaceRaised, var(--background)) 93%, var(--primary) 5%),
+            color-mix(in srgb, var(--surfaceRaised, var(--background)) 97%, var(--primary) 2%)
+          );
+          border-color: color-mix(in srgb, var(--primary) 45%, var(--borderLight));
+          transform: translateY(-3px); /* Lift higher (3px) for noticeable desktop feedback */
+          box-shadow: 
+            0 20px 48px -12px color-mix(in srgb, var(--shadowMedium) 20%, transparent),
+            0 4px 12px color-mix(in srgb, var(--shadowLight) 80%, transparent),
+            0 8px 24px -4px color-mix(in srgb, var(--primary) 16%, transparent);
+        }
+
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:hover {
+          transform: translateY(-2px);
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .quick-chat-box:focus-within,
+        .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:focus-within {
+          background: var(--surfaceRaised, var(--background));
+          transform: translateY(-1px);
+          box-shadow:
+            0 0 0 3px var(--focusRing),
+            0 12px 32px -16px color-mix(in srgb, var(--shadowMedium) 18%, transparent);
+        }
+        .quick-chat-box.drag-over {
+          border-color: var(--primaryBorder, var(--primary));
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          box-shadow: 0 0 0 3px var(--focusRing);
+        }
+
+        /* Base input layout — needed because MessageInputContainer styles aren't loaded on home page */
+        .quick-chat-box .message-input__controls {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+          margin-top: var(--space-2, 8px);
+        }
+        .quick-chat-box .message-input__controls-left,
+        .quick-chat-box .message-input__controls-right {
+          display: flex;
+          align-items: center;
+          gap: var(--space-3);
+        }
+        .quick-chat-box .message-input__textarea-wrap {
+          position: relative;
+          width: 100%;
+          display: flex;
+        }
+        .quick-chat-box .message-input__textarea {
+          flex: 1;
+          max-height: 360px;
+          padding: 8px 0;
+          font-size: var(--fontSize-base);
+          line-height: var(--leading-relaxed);
+          border-radius: 0 !important;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--text);
+          resize: none;
+          outline: none !important;
+          box-shadow: none;
+          font-family: inherit;
+          transition: height 0.15s ease-out, max-height 0.15s ease-out;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .message-input__textarea {
+          min-height: 30px;
+          padding: 6px 0;
+          font-size: var(--fontSize-lg);
+        }
+
+        .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea {
+          min-height: 36px;
+          font-size: var(--fontSize-base);
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .message-input__textarea::placeholder,
+        .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea::placeholder {
+          opacity: 0.9;
+        }
+        .quick-chat-box .message-input__textarea::placeholder {
+          color: var(--textTertiary);
+          opacity: 0.8;
+        }
+        .quick-chat-box .message-input__textarea:focus {
+          border-color: transparent;
+          background: transparent;
+          box-shadow: none;
+          transform: none;
+        }
+
+        /* 发送中：输入半透明、明确告知用户在等待。整 box 视觉上仍是活动态。 */
+        .quick-chat-box.is-sending .message-input__textarea-wrap {
+          opacity: 0.55;
+        }
+        .quick-chat-box.is-sending .message-input__textarea,
+        .quick-chat-box.is-sending .message-input__textarea-wrap:focus-within {
+          cursor: progress;
+        }
+
+        @media (max-width: 640px) {
+          .quick-chat-container { padding: 0; }
+          .quick-chat-box .message-input__controls-left,
+          .quick-chat-box .message-input__controls-right {
+            gap: var(--space-2);
+          }
+          .quick-chat-container[data-surface="home-primary"] .quick-chat-box {
+            min-height: 72px;
+            padding: 10px 12px;
+            border-radius: 22px;
+          }
+          .quick-chat-container[data-surface="home-primary"] .message-input__textarea {
+            min-height: 38px;
+            font-size: var(--fontSize-base);
+          }
+          .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box {
+            min-height: 68px;
+            padding: 8px 12px;
+            border-radius: 20px;
+          }
+          .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea {
+            min-height: 34px;
+            font-size: var(--fontSize-base);
+          }
+        }
+
+        /* Smaller buttons inside quick-chat card */
+        .quick-chat-box .upload-button { --button-size: 40px; }
+        .quick-chat-box .send-button { --button-size: 40px; }
+        .quick-chat-box .voice-btn-in-send { width: 40px; height: 40px; }
+
+        .quick-chat-box .upload-button,
+        .quick-chat-box .send-button {
+          width: var(--button-size);
+          height: var(--button-size);
+          border-radius: 50%;
+          border: 1px solid var(--borderMuted, var(--borderLight));
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)));
+          color: var(--textMuted, var(--textSecondary));
+          cursor: pointer;
+          flex-shrink: 0;
+          box-shadow: 0 1px 2px var(--shadowLight);
+        }
+
+        .quick-chat-box .upload-button:hover,
+        .quick-chat-box .send-button:hover:not(:disabled) {
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+          color: var(--primary);
+          border-color: var(--borderSubtle);
+        }
+
+        .quick-chat-box .send-button[aria-disabled="true"] {
+          opacity: 0.75;
+          cursor: pointer;
+        }
+
+        .personalization-button {
+          display: flex;
+          align-items: center;
+          gap: var(--space-1, 4px);
+          background: transparent;
+          border: none;
+          color: var(--textSecondary);
+          padding: 6px 10px;
+          border-radius: var(--radius-full);
+          font-size: var(--fontSize-sm, 14px);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          margin-right: 4px; /* Space between personalization and send */
+        }
+
+        .personalization-button:hover {
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+          color: var(--primary);
+        }
+
+        .personalization-button-text {
+          white-space: nowrap;
+          font-weight: 500;
+        }
+
+        @media (max-width: 640px) {
+          .personalization-button-text {
+            display: none;
+          }
+        }
+      
+        .quick-chat-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: center;
+          margin-top: clamp(6px, 1.2vw, 12px);
+          max-width: 800px;
+        }
+
+        .quick-chat-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+          border: 1px solid var(--borderLight);
+          border-radius: var(--radius-full, 9999px);
+          padding: 4px 12px;
+          font-size: var(--fontSize-xs, 12px);
+          font-weight: 500;
+          color: var(--textSecondary);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          box-shadow: 0 1px 2px var(--shadowLight);
+        }
+
+        .quick-chat-chip:hover {
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+          border-color: var(--borderSubtle);
+          color: var(--text);
+          transform: translateY(-1px);
+          box-shadow: 0 2px 6px var(--shadowLight);
+        }
+      
+        /* ── Shared AgentPickerControl surface overrides (home QuickChat) ── */
+        .quick-chat-mode-selector {
+          display: inline-flex;
+          align-items: center;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger,
+        .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger {
+          font-size: var(--fontSize-base, 14px);
+          max-width: 220px;
+          padding: 7px 12px;
+        }
+
+        .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger-label,
+        .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger-label {
+          max-width: 160px;
+        }

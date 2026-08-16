@@ -1,0 +1,143 @@
+        .app-deploy-card {
+          border: 1px solid var(--borderMuted, var(--border));
+          border-radius: var(--radius-md);
+          overflow: hidden;
+          margin-top: 8px;
+          background: var(--surfaceInset, var(--background));
+          box-shadow: 0 10px 24px -22px var(--shadowMedium);
+        }
+        .adc-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 10px 14px;
+          gap: 10px;
+          background: var(--surfaceInset, var(--backgroundGhost));
+        }
+        .adc-info {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+        .adc-icon { color: var(--primary); flex-shrink: 0; }
+        .adc-name {
+          font-size: var(--fontSize-base);
+          font-weight: 600;
+          color: var(--text);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .adc-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+        .adc-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 12px;
+          border-radius: 999px;
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          cursor: pointer;
+          border: 1px solid var(--borderMuted, var(--border));
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          color: var(--textSecondary);
+          text-decoration: none;
+          transition: background 0.15s, border-color 0.15s, transform 0.15s;
+        }
+        .adc-btn--editor {
+          border: 1px solid var(--primaryBorder, var(--primary));
+          background: var(--accentSoft, var(--primaryGhost));
+          color: var(--primary);
+        }
+        .adc-btn--editor:hover {
+          border-color: var(--primaryBorder, var(--primary));
+        }
+        .adc-btn--editor svg {
+          flex-shrink: 0;
+        }
+        .adc-btn:hover {
+          background: var(--surfaceInteractiveHover, var(--backgroundTertiary));
+          border-color: var(--borderSubtle);
+          transform: translateY(-1px);
+        }
+        .adc-btn--preview.is-active {
+          background: var(--accentSoft, var(--primaryBg));
+          border-color: var(--primaryBorder, var(--primary));
+          color: var(--primary);
+        }
+        .adc-frame-wrap {
+          border-top: 1px solid var(--borderMuted, var(--border));
+          background: var(--surfaceCode, #fff);
+          position: relative;
+        }
+        .adc-loading {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          padding: 10px 14px;
+          border-bottom: 1px solid var(--borderMuted, var(--border));
+          background: var(--surfaceInset, var(--backgroundSecondary));
+          color: var(--textSecondary, var(--text));
+          font-size: var(--fontSize-sm);
+        }
+        .adc-loading.is-slow {
+          background: var(--warningGhost, var(--surfaceInset, var(--backgroundSecondary)));
+        }
+        .adc-loading-icon {
+          margin-top: 1px;
+          flex-shrink: 0;
+          animation: adc-spin 1s linear infinite;
+        }
+        .adc-loading-text {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .adc-loading-sub {
+          font-size: var(--fontSize-sm);
+          opacity: 0.72;
+        }
+        .adc-frame {
+          display: block;
+          width: 100%;
+          height: clamp(520px, 68vh, 860px);
+          border: none;
+        }
+        @keyframes adc-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        [data-theme="dark"] .adc-frame-wrap {
+          background: var(--surfaceCode, #1a1a1a);
+        }
+        @media (max-width: 768px) {
+          .adc-header {
+            flex-wrap: wrap;
+          }
+          .adc-actions {
+            width: 100%;
+            justify-content: flex-end;
+          }
+          .adc-frame {
+            height: min(72vh, 620px);
+          }
+        }
+        @container right-panel (max-width: 380px) {
+          .adc-header { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+          .adc-name { font-size: var(--fontSize-base); }
+          .adc-actions { width: 100%; justify-content: flex-end; gap: 4px; }
+          .adc-btn { padding: 5px 10px; font-size: var(--fontSize-sm); gap: 4px; }
+          .adc-btn--editor span { font-size: var(--fontSize-sm); }
+        }
+        @container right-panel (max-width: 300px) {
+          .adc-btn span { display: none; }
+          .adc-btn--editor span { display: inline; }
+          .adc-btn { padding: 6px 8px; }
+        }
+      

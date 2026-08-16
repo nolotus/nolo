@@ -1,0 +1,172 @@
+/* ── SpaceHomeFeaturedAgent ──────────────────────────────── */
+
+.SpaceHomeFeaturedAgent {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
+          margin-bottom: var(--space-5);
+        }
+
+        .SpaceHomeFeaturedAgent__header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-3);
+          padding: 0 4px;
+        }
+
+        .SpaceHomeFeaturedAgent__title {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--text);
+          font-size: var(--fontSize-md);
+          font-weight: 600;
+        }
+
+        .SpaceHomeFeaturedAgent__title-icon {
+          color: var(--primary);
+        }
+
+        .SpaceHomeFeaturedAgent__more {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 6px 12px;
+          border: 1px solid var(--borderLight);
+          border-radius: var(--radius-sm);
+          background: var(--background);
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .SpaceHomeFeaturedAgent__more:hover {
+          color: var(--primary);
+          border-color: color-mix(in srgb, var(--primary) 40%, var(--borderLight));
+          background: color-mix(in srgb, var(--primary) 5%, var(--background));
+        }
+
+        .SpaceHomeFeaturedAgent__body {
+          min-width: 0;
+        }
+
+        .SpaceHomeFeaturedAgent__grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: var(--space-3);
+        }
+
+        .SpaceHomeFeaturedAgent__grid > .agent {
+          max-width: 100%;
+          min-width: 0;
+        }
+
+        @media (max-width: 1024px) {
+          .SpaceHomeFeaturedAgent__grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .SpaceHomeFeaturedAgent__grid > .agent:last-child:nth-child(odd) {
+            grid-column: 1 / -1;
+            max-width: calc(50% - var(--space-2));
+          }
+        }
+
+        @media (max-width: 640px) {
+          .SpaceHomeFeaturedAgent__grid {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .SpaceHomeFeaturedAgent__grid > .agent:last-child:nth-child(odd) {
+            grid-column: auto;
+            max-width: 100%;
+          }
+        }
+
+        .SpaceHomeFeaturedAgent__empty {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: var(--space-3);
+          padding: var(--space-5) var(--space-6);
+          border: 1px dashed var(--borderLight);
+          border-radius: var(--radius-md);
+          background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--primaryGhost) 60%, var(--backgroundSecondary)) 0%,
+            var(--backgroundSecondary) 70%
+          );
+        }
+
+        .SpaceHomeFeaturedAgent__empty-icon {
+          width: 40px;
+          height: 40px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: var(--radius-sm);
+          background: color-mix(in srgb, var(--primary) 12%, var(--background));
+          color: var(--primary);
+          border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
+          box-shadow: inset 0 1px 0 color-mix(in srgb, white 40%, transparent);
+          flex-shrink: 0;
+        }
+
+        .SpaceHomeFeaturedAgent__empty-text {
+          min-width: 0;
+        }
+
+        .SpaceHomeFeaturedAgent__empty-title {
+          margin: 0 0 6px 0;
+          font-size: var(--fontSize-md);
+          font-weight: 600;
+          color: var(--text);
+          letter-spacing: 0.01em;
+        }
+
+        .SpaceHomeFeaturedAgent__empty-desc {
+          margin: 0;
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          line-height: 1.6;
+          max-width: 560px;
+        }
+
+        .SpaceHomeFeaturedAgent__empty-actions {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: var(--space-3);
+          margin-top: var(--space-1);
+        }
+
+        .SpaceHomeFeaturedAgent__primary {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          height: 36px;
+          padding: 0 14px;
+          border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+          background: color-mix(in srgb, var(--primary) 8%, var(--background));
+          color: var(--primary);
+          border-radius: var(--radius-sm);
+          font-size: var(--fontSize-sm);
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .SpaceHomeFeaturedAgent__primary:hover {
+          background: var(--primary);
+          color: #fff;
+          border-color: var(--primary);
+          box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--primary) 40%, transparent);
+          transform: translateY(-1px);
+        }
+
+        .SpaceHomeFeaturedAgent__empty-hint {
+          color: var(--textTertiary);
+          font-size: var(--fontSize-xs);
+          line-height: 1.5;
+        }

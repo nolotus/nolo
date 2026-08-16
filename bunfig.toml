@@ -1,0 +1,25 @@
+[install]
+registry = "https://registry.npmjs.org"
+linker = "hoisted"
+
+# SSR 端（Bun server）必须和客户端（esbuild）用同一套 condition，
+# 否则 identity/authReducer 走 local noopReducer（返回 null）vs cloud authSlice（真实 state），
+# 导致 SSR preloaded state 里 auth:null，客户端 hydrate 崩。
+conditions = ["nolo-cloud", "default"]
+
+[test]
+preload = ["./scripts/test/setupDomGlobals.ts"]
+# Playwright e2e/**/*.spec.ts → bun run test:e2e / playwright
+# Detox e2e/{home,space}.test.ts → detox (not bun)
+# Keep e2e/*.source.test.ts discoverable as bun unit contracts
+# dist/ 是 gitignore 的构建产物。构建会把测试文件一并拷进去，陈旧副本被 bun test
+# 收集后会以 "X is not a function" 之类的假失败出现（require 路径已失效），
+# 数量还会盖过真实失败。仓库里没有任何被跟踪的测试住在 dist 下，可安全排除。
+pathIgnorePatterns = [
+  "**/dist/**",
+  "scripts/benchmarks/fixtures/**",
+  "**/benchmarks/fixtures/**",
+  "e2e/**/*.spec.ts",
+  "e2e/home.test.ts",
+  "e2e/space.test.ts",
+]

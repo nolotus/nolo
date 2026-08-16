@@ -1,0 +1,52 @@
+/* ── MessageToolConfirmBar ───────────────────────────── */
+
+.tool-confirm-row {
+          margin-top: 12px;
+          padding: 10px 12px;
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--borderMuted, var(--borderLight));
+          background: var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)));
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
+        .tool-confirm-button {
+          height: 32px;
+          padding: 0 12px;
+          border-radius: 999px;
+          border: 1px solid var(--borderMuted, var(--borderLight));
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+        }
+
+        .tool-confirm-button:hover:not(:disabled) {
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+          color: var(--text);
+          border-color: var(--borderSubtle);
+        }
+
+        .tool-confirm-button:disabled {
+          opacity: 0.72;
+          cursor: default;
+        }
+
+        .tool-confirm-status {
+          font-size: var(--fontSize-sm);
+          line-height: 1.55;
+          color: var(--textMuted, var(--textSecondary));
+        }
+
+        .tool-confirm-status.success {
+          color: var(--success, #10b981);
+        }
+
+        .tool-confirm-status.failed {
+          color: var(--error);
+        }
+

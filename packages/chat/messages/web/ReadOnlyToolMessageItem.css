@@ -1,0 +1,56 @@
+/* ── ReadOnlyToolMessageItem ─────────────────────────── */
+
+.ro-tool-pre {
+          font-size: var(--fontSize-sm); color: var(--textSecondary); white-space: pre-wrap;
+          word-break: break-all; margin: 0; line-height: var(--leading-normal);
+          font-family: var(--font-mono, monospace);
+        }
+
+.tool-msg-row--handoff {
+  max-width: 720px;
+}
+
+.handoff-tool__body {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.handoff-tool__detail-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  font-size: var(--fontSize-sm);
+  line-height: var(--leading-normal);
+}
+
+.handoff-tool__label {
+  color: var(--textQuaternary, var(--textTertiary));
+  white-space: nowrap;
+}
+
+.handoff-tool__value {
+  min-width: 0;
+  color: var(--textSecondary);
+  overflow-wrap: anywhere;
+}
+
+.handoff-tool__link {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 0;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.handoff-tool__link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 560px) {
+  .handoff-tool__detail-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

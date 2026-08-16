@@ -1,0 +1,118 @@
+/* 首页操作卡片样式（创建笔记/创建表格/价格/下载客户端等 action widgets） */
+.home-custom-actions__card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--surfaceCard, var(--background));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  min-height: 70px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left;
+  transition:
+    border-color var(--home-motion-duration, 0.18s) ease,
+    background var(--home-motion-duration, 0.18s) ease,
+    box-shadow var(--home-motion-duration, 0.18s) ease,
+    transform var(--home-motion-duration, 0.18s) ease;
+  box-shadow: 0 1px 2px var(--shadowLight);
+}
+
+.home-custom-actions__card:hover {
+  border-color: var(--borderStrong);
+  background: var(--backgroundHover, var(--surfaceCard));
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px var(--shadowLight);
+}
+
+.home-custom-actions__header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+}
+
+.home-custom-actions__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm, 8px);
+  background: color-mix(
+    in srgb,
+    var(--accentSoft, var(--primaryGhost)) 28%,
+    var(--surfaceInteractive, var(--backgroundTertiary)) 72%
+  );
+  color: var(--primary);
+  display: grid;
+  place-items: center;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.home-custom-actions__card:hover .home-custom-actions__icon {
+  background: var(--accentSoft, var(--primaryGhost));
+  color: var(--primary);
+}
+
+.home-custom-actions__title {
+  font-size: var(--fontSize-sm, 14px);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.home-custom-actions__desc {
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary);
+  margin: 2px 0 0 0;
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+/* 移动端：横向紧凑排布（图标 + 标题），描述隐藏。
+   卡片在 WidgetsSection.css 里是两列网格，这里必须足够矮，
+   否则首页 widget 区会把 quick-chat 输入条挤出首屏。 */
+@media (max-width: 768px) {
+  .home-custom-actions__card {
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 10px;
+    min-height: auto;
+    border-radius: var(--radius-md, 10px);
+  }
+
+  .home-custom-actions__header {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .home-custom-actions__icon {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+  }
+
+  .home-custom-actions__icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .home-custom-actions__desc {
+    display: none;
+  }
+
+  .home-custom-actions__title {
+    font-size: var(--fontSize-sm, 14px);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

@@ -1,0 +1,133 @@
+name: Desktop Build
+
+on:
+  push:
+    branches: [alpha, main]
+    paths:
+      - "packages/desktop/**"
+      - "packages/app/**"
+      - "packages/chat/**"
+      - "packages/render/**"
+      - "packages/ai/**"
+      - "packages/agent-runtime/**"
+      - "packages/core/**"
+      - "packages/identity/**"
+      - "packages/web/**"
+      - "packages/shared/**"
+      - "scripts/dev/**"
+      - ".github/workflows/desktop-build.yml"
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "Build targets"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - linux
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  select-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      channel: ${{ steps.channel.outputs.channel }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: channel
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=alpha" >> "$GITHUB_OUTPUT"
+          fi
+      - id: tag
+        run: |
+          echo "tag=desktop-${{ steps.channel.outputs.channel }}-v$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+      - id: targets
+        run: |
+          TARGETS="${{ github.event_name == 'push' && 'all' || inputs.targets }}"
+          case "$TARGETS" in
+            all) echo 'matrix={"include":[{"os":"ubuntu-latest","label":"linux"},{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"}]}' >> "$GITHUB_OUTPUT" ;;
+            windows) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"}]}' >> "$GITHUB_OUTPUT" ;;
+            macos) echo 'matrix={"include":[{"os":"macos-latest","label":"macos"}]}' >> "$GITHUB_OUTPUT" ;;
+            linux) echo 'matrix={"include":[{"os":"ubuntu-latest","label":"linux"}]}' >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  build:
+    needs: select-targets
+    strategy:
+      matrix: ${{ fromJson(needs.select-targets.outputs.matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install
+
+      - name: Build desktop (${{ matrix.label }})
+        env:
+          TMPDIR: ${{ runner.temp }}
+          ELECTROBUN_RELEASE_BASE_URL: https://github.com/nolotus/nolo/releases/latest/download
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "${{ needs.select-targets.outputs.channel }}" = "stable" ]; then
+            bun run --cwd packages/desktop build:stable
+          else
+            bun run --cwd packages/desktop build:alpha
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: packages/desktop/artifacts
+          retention-days: 30
+
+  release:
+    needs: [select-targets, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.select-targets.outputs.tag }}
+          CHANNEL: ${{ needs.select-targets.outputs.channel }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp -r artifacts/desktop-linux/* release-assets/ 2>/dev/null || true
+          cp -r artifacts/desktop-windows/* release-assets/ 2>/dev/null || true
+          cp -r artifacts/desktop-macos/* release-assets/ 2>/dev/null || true
+          FLAGS="--notes 'Desktop ${CHANNEL} build from ${{ github.sha }}'"
+          if [ "$CHANNEL" = "alpha" ]; then
+            FLAGS="$FLAGS --prerelease"
+          fi
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" release-assets/* \
+            --title "Desktop ${CHANNEL} $(date -u +%Y-%m-%d)" \
+            $FLAGS

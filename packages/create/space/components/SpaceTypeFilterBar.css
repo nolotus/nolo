@@ -1,0 +1,85 @@
+/* ── SpaceTypeFilterBar ──────────────────────────────── */
+
+/* Scroll-fade mask: register stops as animatable <percentage> values */
+@property --filter-mask-left {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%; /* no left fade when at start / no overflow */
+}
+@property --filter-mask-right {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 100%; /* no right fade when timeline inactive (no overflow) */
+}
+@keyframes filter-mask-left-reveal {
+  from { --filter-mask-left: 0%; }
+  to   { --filter-mask-left: 12%; }
+}
+@keyframes filter-mask-right-hide {
+  from { --filter-mask-right: 88%; }
+  to   { --filter-mask-right: 100%; }
+}
+
+.SpaceTypeFilterBar {
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          overflow-x: auto;
+          scrollbar-width: none;
+          gap: 2px;
+          padding: 0 4px;
+
+          /* Horizontal scroll-driven fade mask */
+          mask-image: linear-gradient(
+            to right,
+            transparent 0%,
+            black var(--filter-mask-left),
+            black var(--filter-mask-right),
+            transparent 100%
+          );
+          animation:
+            filter-mask-left-reveal linear both,
+            filter-mask-right-hide linear both;
+          animation-timeline: scroll(self inline), scroll(self inline);
+          animation-range:
+            0px 40px,
+            calc(100% - 40px) 100%;
+        }
+
+        .SpaceTypeFilterBar::-webkit-scrollbar {
+          display: none;
+        }
+
+        .SpaceTypeFilterBar__item {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          min-width: 32px;
+          height: 32px;
+          padding: 0 8px;
+          border: none;
+          background: transparent;
+          border-radius: var(--radius-xs);
+          color: var(--textSecondary);
+          cursor: pointer;
+          transition: all 0.15s ease;
+          flex-shrink: 0;
+          position: relative;
+        }
+
+        .SpaceTypeFilterBar__item:hover {
+          color: var(--text);
+          background: var(--backgroundHover);
+        }
+
+        .SpaceTypeFilterBar__item.is-active {
+          color: var(--primary);
+          font-weight: 500;
+          background: var(--primaryGhost);
+        }
+
+        .SpaceTypeFilterBar__label {
+          font-size: var(--fontSize-sm);
+          white-space: nowrap;
+        }

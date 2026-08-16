@@ -1,0 +1,88 @@
+/* ── ThinkingSection ─────────────────────────────────── */
+
+.thinking-container {
+            margin-bottom: 10px;
+          }
+          .thinking-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            background: transparent;
+            border: none;
+            border-radius: 999px;
+            color: var(--textMuted, var(--textTertiary));
+            font-size: var(--fontSize-xs);
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.18s ease, color 0.18s ease;
+            width: fit-content;
+            margin-left: -2px;
+            user-select: none;
+          }
+          .thinking-toggle:hover {
+            background: var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)));
+            color: var(--textSecondary);
+          }
+          .thinking-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: inherit;
+            opacity: 0.72;
+          }
+          .thinking-label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+          }
+          .thinking-status-indicator {
+            width: 5px;
+            height: 5px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--primary) 32%, var(--textTertiary));
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 8%, transparent);
+            flex-shrink: 0;
+            opacity: 0.9;
+          }
+          .thinking-content {
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          }
+          .thinking-content.collapsed {
+            max-height: 0;
+            opacity: 0;
+            margin-top: 0;
+          }
+          .thinking-content.expanded {
+            max-height: 2000px;
+            opacity: 1;
+            margin-top: 6px;
+          }
+          .thinking-inner {
+            margin-left: 8px;
+            padding-left: 12px;
+            border-left: 1px solid var(--borderMuted, var(--borderLight));
+            position: relative;
+          }
+          .thinking-editor-wrapper {
+            font-size: var(--fontSize-sm);
+            color: var(--textMuted, var(--textTertiary));
+            line-height: var(--leading-relaxed);
+            opacity: 0.9;
+          }
+          /* Override Editor padding specifically for thinking section */
+          .thinking-editor-wrapper :global(.nolo-editor-container) {
+            padding: 0 !important;
+          }
+          .thinking-editor-wrapper :global([data-slate-editor]) {
+            font-size: var(--fontSize-sm) !important;
+            color: var(--textMuted, var(--textTertiary)) !important;
+            opacity: 0.92 !important;
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .thinking-content {
+              transition: none;
+            }
+          }

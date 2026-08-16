@@ -1,0 +1,52 @@
+        .agent-fav-btn-optimized {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: color-mix(in srgb, var(--background) 78%, transparent);
+          backdrop-filter: blur(8px);
+          border: none;
+          padding: 8px;
+          cursor: pointer;
+          border-radius: 999px;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          color: var(--textTertiary);
+          position: relative;
+          box-shadow: inset 0 0 0 1px var(--borderSubtle);
+        }
+        
+        .agent-fav-btn-optimized .fav-icon {
+          color: var(--textTertiary);
+          transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s ease, fill 0.25s ease;
+        }
+
+        /* 普通态 Hover */
+        .agent-fav-btn-optimized:hover {
+          background: var(--background);
+          color: var(--textSecondary);
+        }
+        
+        .agent-fav-btn-optimized:hover .fav-icon {
+          transform: scale(1.08);
+          color: var(--textSecondary);
+        }
+
+        /* 收藏态 */
+        .agent-fav-btn-optimized.is-favorited {
+          color: var(--primary);
+        }
+        
+        .agent-fav-btn-optimized.is-favorited .fav-icon {
+          color: var(--primary);
+        }
+
+        /* 收藏态 Hover */
+        .agent-fav-btn-optimized.is-favorited:hover {
+          background: var(--primaryBg);
+          opacity: 0.96;
+        }
+
+        /* 点击反馈 */
+        .agent-fav-btn-optimized:active .fav-icon {
+          transform: scale(0.92);
+        }
+      

@@ -1,0 +1,493 @@
+          .DialogPage-shell {
+            display: flex;
+            flex: 1 1 auto;
+            min-height: 0;
+            width: 100%;
+          }
+
+          .DialogPage-shell--withDraftPanel .DialogPage-root,
+          .DialogPage-shell--withChildRunObserver .DialogPage-root {
+            min-width: 0;
+          }
+
+          .DialogPage-root {
+            --dialog-content-max-width: 960px;
+            max-width: none !important;
+            margin: 0;
+            width: 100%;
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            height: 100%;
+            overflow: hidden;
+            background: var(--background);
+            background-color: var(--background);
+          }
+
+          .DialogPage__messages {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
+            padding-inline: 16px;
+            padding-top: 12px;
+            /* Overlay scrollbar: invisible until hover (no permanent bright track). */
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+          }
+
+          .DialogPage__messages:hover {
+            scrollbar-color: color-mix(
+                in srgb,
+                var(--textQuaternary) 42%,
+                transparent
+              )
+              transparent;
+          }
+
+          .DialogPage__messages::-webkit-scrollbar {
+            width: 4px;
+          }
+
+          .DialogPage__messages::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .DialogPage__messages::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 999px;
+          }
+
+          .DialogPage__messages:hover::-webkit-scrollbar-thumb {
+            background-color: color-mix(
+              in srgb,
+              var(--textQuaternary) 42%,
+              transparent
+            );
+          }
+
+          .DialogPage__messages::-webkit-scrollbar-thumb:hover {
+            background-color: color-mix(
+              in srgb,
+              var(--textTertiary, var(--textQuaternary)) 58%,
+              transparent
+            );
+          }
+
+          /* Desktop shell: hide chrome entirely (scroll still works; use ↑↓ buttons). */
+          html[data-nolo-desktop="1"] .DialogPage__messages {
+            scrollbar-width: none;
+            scrollbar-gutter: auto;
+          }
+
+          html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
+            width: 0 !important;
+            height: 0 !important;
+            display: none !important;
+          }
+
+          .DialogPage__context-banner {
+            flex-shrink: 0;
+            padding: 10px 16px 0;
+          }
+
+          .DialogPage__context-banner-inner {
+            width: min(100%, var(--dialog-content-max-width));
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--borderMuted, var(--borderLight));
+            background: var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)));
+            color: var(--textSecondary);
+            font-size: var(--fontSize-sm);
+          }
+
+          .DialogPage__context-banner-text {
+            min-width: 0;
+          }
+
+          .DialogPage__context-banner-link {
+            border: none;
+            background: transparent;
+            color: var(--primary);
+            cursor: pointer;
+            font-size: var(--fontSize-sm);
+            font-weight: 600;
+            padding: 0;
+            flex-shrink: 0;
+          }
+
+          .DialogPage__context-banner-link:hover {
+            text-decoration: underline;
+          }
+
+          .DialogPage__messages > .chat-messages__list-wrapper {
+            width: min(100%, var(--dialog-content-max-width));
+            margin: 0 auto;
+          }
+
+          .DialogPage__messages .chat-messages__list {
+            padding-bottom: var(--space-4);
+          }
+
+          .DialogPage__messages .scroll-to-bottom-button {
+            bottom: 16px;
+          }
+
+          .DialogPage__messages .scroll-buttons {
+            bottom: 16px;
+          }
+
+          .DialogPage-root .message-input {
+            position: static;
+            bottom: auto;
+            background: var(--background);
+            background-color: var(--background);
+            padding-top: var(--space-2);
+            padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+            padding-inline: 16px;
+            border-top: none;
+            backdrop-filter: none;
+            box-shadow: none;
+            box-sizing: border-box;
+          }
+
+          .DialogPage-root .message-input__wrapper {
+            /* 与首页 home-primary composer（QuickChat.css, 760px）同宽：
+               主页→对话页 shared-element morph 尺寸稳定，宽屏下输入框不再随内容列拉宽。 */
+            max-width: min(760px, var(--dialog-content-max-width));
+            margin: 0 auto;
+            padding: 0 var(--space-4);
+            box-sizing: border-box;
+          }
+
+          @media (max-width: 960px) {
+            .DialogPage-shell {
+              display: block;
+            }
+          }
+
+          /* 小屏手机（<= 480px）：几乎铺满，减少左右留白 */
+          @media (max-width: 480px) {
+            .DialogPage-root {
+              --dialog-content-max-width: 100%;
+            }
+
+            .DialogPage__messages {
+              padding-inline: 10px;
+              padding-block: var(--space-3);
+            }
+
+            .DialogPage-root .message-input {
+              padding-inline: 10px;
+            }
+
+            .DialogPage__context-banner {
+              padding-inline: 10px;
+            }
+
+            .DialogPage__context-banner-inner {
+              align-items: flex-start;
+              flex-direction: column;
+            }
+
+            .DialogPage__messages .chat-messages__list {
+              padding-bottom: var(--space-3);
+            }
+
+            .DialogPage__messages .scroll-to-bottom-button {
+              bottom: 12px;
+            }
+
+            .DialogPage__messages .scroll-buttons {
+              bottom: 12px;
+            }
+          }
+
+          /* 一般手机 / 小平板（481~768px） */
+          @media (min-width: 481px) and (max-width: 768px) {
+            .DialogPage-root {
+              --dialog-content-max-width: 100%;
+            }
+
+            .DialogPage__messages {
+              padding-inline: 12px;
+              padding-block: var(--space-3);
+            }
+
+            .DialogPage-root .message-input {
+              padding-inline: 12px;
+            }
+
+            .DialogPage__context-banner {
+              padding-inline: 12px;
+            }
+
+            .DialogPage__context-banner-inner {
+              align-items: flex-start;
+              flex-direction: column;
+            }
+
+            .DialogPage__messages .chat-messages__list {
+              padding-bottom: var(--space-3);
+            }
+
+            .DialogPage__messages .scroll-to-bottom-button {
+              bottom: 12px;
+            }
+
+            .DialogPage__messages .scroll-buttons {
+              bottom: 12px;
+            }
+          }
+
+          /* 笔记本 / 小桌面（769~1199px） */
+          @media (min-width: 769px) and (max-width: 1199px) {
+            .DialogPage-root {
+              --dialog-content-max-width: 960px;
+            }
+
+            .DialogPage__messages {
+              padding-inline: 20px;
+            }
+
+            .DialogPage-root .message-input {
+              padding-inline: 20px;
+            }
+
+            .DialogPage__context-banner {
+              padding-inline: 20px;
+            }
+          }
+
+          /* 大屏桌面（1200~1599px，例如 24 寸） */
+          @media (min-width: 1200px) and (max-width: 1599px) {
+            .DialogPage-root {
+              --dialog-content-max-width: 1040px;
+            }
+
+            .DialogPage__messages {
+              padding-inline: 24px;
+            }
+
+            .DialogPage-root .message-input {
+              padding-inline: 24px;
+            }
+
+            .DialogPage__context-banner {
+              padding-inline: 24px;
+            }
+          }
+
+          /* 超大屏（>= 1600px，例如 27 寸） */
+          @media (min-width: 1600px) {
+            .DialogPage-root {
+              --dialog-content-max-width: 1180px;
+            }
+
+            .DialogPage__messages {
+              padding-inline: 32px;
+            }
+
+            .DialogPage-root .message-input {
+              padding-inline: 32px;
+            }
+
+            .DialogPage__context-banner {
+              padding-inline: 32px;
+            }
+          }
+
+          @media (min-width: 1100px) {
+            .DialogPage__messages .scroll-buttons {
+              position: fixed;
+              right: calc(24px + env(safe-area-inset-right, 0px));
+              bottom: calc(var(--message-input-height, 80px) + 24px);
+              margin-right: 0;
+            }
+          }
+        
+
+
+/* ── PageAssistantPanel ──────────────────────────────── */
+
+.page-assistant-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
+    padding: var(--space-3);
+    border-left: 1px solid var(--borderLight);
+    background: var(--background);
+  }
+
+  .page-assistant-panel__header {
+    margin-bottom: var(--space-2);
+  }
+
+  .page-assistant-panel__title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--textSecondary);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .page-assistant-panel__title-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--primaryGhost);
+    display: grid;
+    place-items: center;
+    color: var(--primary);
+  }
+
+  .page-assistant-panel__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* 把滚动交给内部具体区域 */
+  }
+
+  .page-assistant-panel__loading {
+    flex: 1;
+    min-height: 160px;
+    display: grid;
+    place-items: center;
+  }
+
+  .page-assistant-panel__chat {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  /* ⭐ 只让消息区域滚动，顶部标题和底部输入固定 */
+  .page-assistant-panel__chat-messages {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  /* 侧边栏消息：加内边距 + 宽松间距 + 隐藏头像节省宽度 */
+  .page-assistant-panel__chat-messages .chat-messages__list {
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-top: var(--space-4);
+    gap: var(--space-4);
+  }
+  .page-assistant-panel__chat-messages .avatar-area { display: none; }
+  .page-assistant-panel__chat-messages .msg-body.robot {
+    box-sizing: border-box;
+    background: var(--backgroundSecondary);
+    border-radius: var(--radius-xs);
+    padding: 12px 14px;
+    border: 1px solid var(--borderSubtle);
+  }
+  .page-assistant-panel__chat-messages .msg-body.self { max-width: 92%; }
+
+  /* 覆盖全局 .message-input 样式：在侧边栏内不再 sticky，而是普通流布局贴底 */
+  .page-assistant-panel__chat .message-input {
+    position: static;
+    bottom: auto;
+    padding-bottom: var(--space-3);
+    padding-top: var(--space-2);
+    background: transparent;
+    border-top: 1px solid var(--borderLight);
+  }
+
+  .page-assistant-panel__chat .message-input__wrapper {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  /* 侧边栏内缩小按钮，防止溢出 */
+  .page-assistant-panel__chat .upload-button { --button-size: 36px; }
+  .page-assistant-panel__chat .send-button { --button-size: 36px; }
+  .page-assistant-panel__chat .voice-btn-in-send { width: 36px; height: 36px; }
+  .page-assistant-panel__chat .message-input__controls { gap: var(--space-2); }
+  .page-assistant-panel__chat .message-input__textarea {
+    padding: 8px 12px;
+    font-size: 15px;
+    line-height: 1.55;
+    min-height: 40px;
+    border-radius: var(--radius-xs);
+  }
+
+  /* 空状态 */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    min-height: 220px;
+    color: var(--textTertiary);
+    text-align: center;
+  }
+
+  .empty-state__icon {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--primary), var(--primaryLight));
+    color: var(--background);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 4px 12px 0 var(--shadowMedium);
+  }
+
+  .empty-state__text {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin: 0;
+  }
+
+  .empty-state__btn {
+    margin-top: var(--space-1);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-4);
+    border-radius: 9999px;
+    border: 1px solid var(--primaryGhost);
+    background: var(--primary);
+    color: var(--background);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px 0 var(--shadowLight);
+  }
+
+  .empty-state__btn:hover {
+    background: var(--hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px -2px var(--primaryGhost);
+  }
+
+  .empty-state__btn:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 960px) {
+    .page-assistant-panel {
+      display: none;
+    }
+  }

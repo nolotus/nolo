@@ -1,0 +1,400 @@
+/* Theme UI — ThemePicker, DarkModeSwitch, GlobalBaseStyles */
+
+
+/* ── GlobalBaseStyles ────────────────────────────────── */
+
+/* ── Body ── */
+    html, body {
+      background-color: var(--background);
+      color: var(--text);
+    }
+
+    /* ── Scrollbar (WebKit) ── */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--textQuaternary) 64%, transparent 36%);
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: color-mix(in srgb, var(--textTertiary) 72%, transparent 28%);
+    }
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+
+    /* ── Scrollbar (Firefox) ── */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--textQuaternary) 64%, transparent 36%) transparent;
+    }
+
+    html[data-nolo-desktop="1"],
+    html[data-nolo-desktop="1"] body,
+    html[data-nolo-desktop="1"] #root {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    html[data-nolo-desktop="1"] * {
+      scrollbar-width: none;
+    }
+
+    html[data-nolo-desktop="1"] ::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+    }
+
+    html[data-nolo-desktop="1"],
+    html[data-nolo-desktop="1"] body,
+    html[data-nolo-desktop="1"] #root {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    html[data-nolo-desktop="1"] * {
+      scrollbar-width: none;
+    }
+
+    html[data-nolo-desktop="1"] ::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+    }
+
+    /* ── Text Selection ── */
+    ::selection {
+      background: var(--selectionBg, var(--primaryGhost));
+      color: var(--primary);
+    }
+
+    /* ── Focus outline — 统一使用主题色环 ── */
+    :focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+      border-radius: var(--radius-xs);
+    }
+
+    /* Remove outline for mouse users */
+    :focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    /* ── Windows high contrast mode — 系统颜色映射 ── */
+    @media (forced-colors: active) {
+      :root {
+        --background: Canvas;
+        --backgroundSecondary: Canvas;
+        --backgroundTertiary: Canvas;
+        --text: ButtonText;
+        --textSecondary: ButtonText;
+        --textTertiary: GrayText;
+        --textQuaternary: GrayText;
+        --border: ButtonBorder;
+        --borderLight: ButtonBorder;
+        --borderHover: ButtonBorder;
+        --primary: Highlight;
+        --primaryGhost: Highlight;
+        --focus: Highlight;
+        --focusRing: Highlight;
+        --error: LinkText;
+        --warning: LinkText;
+        --success: LinkText;
+        --info: LinkText;
+        --shadowLight: none;
+        --shadowMedium: none;
+        --shadowHeavy: none;
+      }
+    }
+
+    /* ── Smooth scroll ── */
+    html {
+      scroll-behavior: smooth;
+    }
+
+    /* ── Link ──
+     * Baseline for ALL anchors: no hover underline.
+     * Card / nav roots are often real <a> (middle-click friendly); forcing
+     * `a:hover { text-decoration: underline }` made Agent plaza cards and
+     * other UI shells show “text link” underlines on whole-card hover.
+     * Prose/content links opt in via container (markdown already styles its a).
+     */
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+    a:hover {
+      color: var(--primaryLight, var(--primary));
+    }
+    /* Explicit content-link hover underline (prose only). */
+    .prose a:hover,
+    .markdown-body a:hover {
+      text-decoration: underline;
+      text-underline-offset: 0.14em;
+    }
+
+    /* ── Heading hierarchy ── */
+    h1 {
+      font-size: var(--fontSize-3xl, 30px);
+      font-weight: var(--fontWeight-bold, 700);
+      letter-spacing: var(--tracking-tight, -0.02em);
+      line-height: 1.2;
+      color: var(--textHeading, var(--text));
+    }
+    h2 {
+      font-size: var(--fontSize-2xl, 24px);
+      font-weight: var(--fontWeight-semibold, 600);
+      letter-spacing: var(--tracking-tight, -0.02em);
+      line-height: 1.3;
+      color: var(--textHeading, var(--text));
+    }
+    h3 {
+      font-size: var(--fontSize-xl, 20px);
+      font-weight: var(--fontWeight-semibold, 600);
+      line-height: 1.4;
+      color: var(--textHeading, var(--text));
+    }
+    h4 {
+      font-size: var(--fontSize-lg, 16px);
+      font-weight: var(--fontWeight-medium, 500);
+      line-height: 1.5;
+      color: var(--textHeading, var(--text));
+    }
+    h5, h6 {
+      color: var(--textHeading, var(--text));
+    }
+    strong, b {
+      color: var(--textHeading, var(--text));
+    }
+
+    /* ── Code baseline ── */
+    code, kbd, pre, samp {
+      font-family: var(--font-mono, monospace);
+      background: var(--surfaceCode, var(--backgroundTertiary));
+      border-radius: var(--radius-xs);
+    }
+    code { padding: 0.1em 0.35em; }
+    pre code { background: none; padding: 0; }
+
+/* ── DarkModeSwitch ──────────────────────────────────── */
+
+.mode-tabs-container {
+          display: inline-flex;
+          position: relative;
+          padding: 2px;
+          background: var(--backgroundTertiary);
+          border-radius: var(--radius-xs);
+          height: var(--control-md);
+          align-items: stretch;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+        
+        .mode-tab-item {
+          position: relative;
+          z-index: 1;
+          border: none;
+          background: transparent;
+          padding: 0 12px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--textSecondary);
+          transition: color var(--motionDuration, 0.32s) var(--motionEaseBreath, cubic-bezier(0.4, 0, 0.6, 1));
+          gap: 6px;
+          font-size: var(--fontSize-sm);
+          min-width: 44px;
+        }
+        
+        .mode-tab-item[data-active="true"] {
+          color: var(--primary);
+          font-weight: 600;
+        }
+        
+        .mode-tab-item:hover:not([data-active="true"]) {
+          color: var(--text);
+        }
+
+        .mode-tabs-container--compact {
+          height: 32px;
+          min-width: 0;
+        }
+
+        .mode-tabs-container--compact .mode-tab-item {
+          padding: 0 8px;
+        }
+        
+        /* 滑块动画 */
+        .mode-tabs-container::after {
+          content: "";
+          position: absolute;
+          top: 2px;
+          bottom: 2px;
+          left: 0;
+          width: var(--s-width);
+          transform: translateX(var(--s-left));
+          background: var(--background);
+          border-radius: var(--radius-xs);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+          transition: transform var(--motionDuration, 0.32s) var(--motionEaseBreath, cubic-bezier(0.4, 0, 0.6, 1)),
+            width var(--motionDuration, 0.32s) var(--motionEaseBreath, cubic-bezier(0.4, 0, 0.6, 1));
+          z-index: 0;
+        }
+
+        /* ── 夜间模式滑块可见性 ── */
+        [data-theme='dark'] .mode-tabs-container::after {
+          background: var(--backgroundHover);
+          box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+        }
+
+        @media (max-width: 640px) {
+          .mode-tab-item {
+            padding: 0 10px;
+          }
+        }
+
+/* ── ThemePicker ─────────────────────────────────────── */
+
+.theme-grid { 
+          display: grid; 
+          grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); 
+          gap: 12px; 
+          max-width: 280px;
+          padding: 4px;
+        }
+        .theme-item { 
+          aspect-ratio: 1;
+          border-radius: var(--radius-xl); 
+          cursor: pointer; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center;
+          background: var(--background); 
+          border: 1.5px solid var(--borderLight);
+          transition: all var(--motionDuration, 0.32s) var(--motionEaseTide, cubic-bezier(0.22, 1, 0.36, 1));
+          position: relative;
+          overflow: hidden;
+        }
+        .theme-item:hover { 
+          border-color: var(--border); 
+          background: var(--backgroundAccent);
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.06); 
+        }
+        .theme-item:active { 
+          transform: translateY(0) scale(0.96); 
+        }
+        .theme-item[data-active='true'] { 
+          border-color: var(--theme-color); 
+          background: var(--primaryGhost); 
+          box-shadow: 0 0 0 2px var(--theme-color); 
+        }
+        .theme-dot { 
+          width: 20px; 
+          height: 20px; 
+          border-radius: 50%; 
+          background: var(--theme-gradient);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          transition: transform var(--motionDurationSlow, 0.52s) var(--motionEaseTide, cubic-bezier(0.22, 1, 0.36, 1));
+        }
+        .theme-item[data-active='true'] .theme-dot { 
+          transform: scale(1.15); 
+          box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+        }
+        
+        @media (max-width: 480px) {
+          .theme-grid {
+            grid-template-columns: repeat(5, 1fr);
+            max-width: 100%;
+          }
+        }
+
+        .theme-picker-container {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .theme-info {
+          min-height: 42px;
+          padding: 2px 4px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .theme-info-name {
+          font-size: var(--fontSize-sm, 13px);
+          font-weight: 600;
+          color: var(--textHeading, var(--text));
+        }
+
+        .theme-info-desc {
+          font-size: var(--fontSize-xs, 12px);
+          color: var(--textSecondary);
+        }
+
+:root {
+  --expo-out: linear(
+    0 0%, 0.1684 2.66%, 0.3165 5.49%,
+    0.446 8.52%, 0.5581 11.78%,
+    0.6535 15.29%, 0.7341 19.11%,
+    0.8011 23.3%, 0.8557 27.93%,
+    0.8962 32.68%, 0.9283 38.01%,
+    0.9529 44.08%, 0.9711 51.14%,
+    0.9833 59.06%, 0.9915 68.74%, 1 100%
+  );
+}
+
+/* ── Theme transition (View Transitions API) ────────────────── */
+
+::view-transition-group(root) {
+  animation-timing-function: var(--expo-out);
+}
+
+::view-transition-new(root) {
+  mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><filter id="blur"><feGaussianBlur stdDeviation="2"/></filter></defs><circle cx="0" cy="0" r="18" fill="white" filter="url(%23blur)"/></svg>') top left / 0 no-repeat;
+  mask-origin: content-box;
+  animation: theme-reveal 1s;
+  animation-fill-mode: both;
+  transform-origin: top left;
+}
+
+::view-transition-old(root) {
+  animation: theme-reveal 1s;
+  animation-fill-mode: both;
+  transform-origin: top left;
+  z-index: -1;
+}
+
+@keyframes theme-reveal {
+  to {
+    mask-size: 350vmax;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .mode-tabs-container::after,
+  .theme-item,
+  .theme-dot {
+    transition: none !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+

@@ -1,0 +1,68 @@
+import { TokenUsageData, TokenRecord } from "ai/token/types";
+import { toErrorMessage } from "core/errorMessage";
+import { DataType } from "create/types";
+import { createTokenKey } from "database/keys";
+import { write } from "database/dbSlice";
+import { toast } from "app/utils/toast";
+import { createClientLogger } from "core/clientLogger";
+
+const logger = createClientLogger("token-record");
+
+type TokenCount = { input: number; output: number };
+
+export interface ModelStats {
+  count: number;
+  tokens: TokenCount;
+  cost: number;
+}
+
+/** Draft built before id/username/type are stamped at save time. */
+export type TokenRecordDraft = TokenUsageData & {
+  cost: number;
+  inputPrice?: number;
+  outputPrice?: number;
+};
+
+export const createTokenRecord = (
+  data: TokenUsageData,
+  { cost, inputPrice, outputPrice }: Partial<TokenRecord> = {}
+): TokenRecordDraft => ({
+  ...data,
+  cost: cost || data.cost,
+  inputPrice,
+  outputPrice,
+});
+
+export const saveTokenRecord = async (
+  tokenData: TokenUsageData,
+  record: TokenRecord,
+  thunkApi: { dispatch: (action: unknown) => unknown },
+  callId?: string,
+) => {
+  const ownerUserId = tokenData.userId || record.userId;
+  const eventTime =
+    tokenData.timestamp ?? record.createdAt ?? Date.now();
+  const key = callId
+    ? createTokenKey.recordForStableCall(ownerUserId, callId)
+    : createTokenKey.record(ownerUserId, eventTime);
+  try {
+    await (thunkApi.dispatch(
+      write({
+        data: { ...record, id: key, type: DataType.TOKEN, userId: ownerUserId },
+        customKey: key,
+        userId: ownerUserId,
+      })
+    ) as any).unwrap();
+  } catch (error) {
+    logger.error(
+      {
+        key,
+        userId: tokenData.userId,
+        error: toErrorMessage(error),
+      },
+      "Failed to save token record"
+    );
+    toast.error("Failed to save token record");
+    throw error;
+  }
+};
