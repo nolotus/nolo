@@ -1,3 +1,5 @@
+## 1.0.0 (2026-08-16)
+
 ## [0.30.0-alpha.12](https://github.com/nolotus/bun-nolo/compare/desktop-v0.30.0-alpha.11...desktop-v0.30.0-alpha.12) (2026-08-16)
 
 ## [0.30.0-alpha.11](https://github.com/nolotus/bun-nolo/compare/desktop-v0.30.0-alpha.10...desktop-v0.30.0-alpha.11) (2026-08-16)
