@@ -1,3 +1,5 @@
+## 1.0.0 (2026-08-16)
+
 ## [0.30.0-alpha.12](https://github.com/nolotus/bun-nolo/compare/cli-v0.30.0-alpha.11...cli-v0.30.0-alpha.12) (2026-08-16)
 
 ## [0.30.0-alpha.11](https://github.com/nolotus/bun-nolo/compare/cli-v0.30.0-alpha.10...cli-v0.30.0-alpha.11) (2026-08-16)

@@ -1,7 +1,7 @@
 import { getClientDownloadChannel } from "./clientDownloads";
 
 export const NOLO_CLI_PACKAGE_NAME = "nolo-cli";
-export const NOLO_CLI_VERSION = "0.30.0-alpha.12";
+export const NOLO_CLI_VERSION = "1.0.0";
 export const NOLO_CLI_NPM_URL = "https://www.npmjs.com/package/nolo-cli";
 
 export type CliReleaseChannel = "alpha" | "latest";
