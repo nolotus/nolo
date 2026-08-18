@@ -1,0 +1,87 @@
+/* App components */
+
+
+/* ── AppSourceFilesSidebar ───────────────────────────── */
+
+.AppSourceFilesSidebar {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 14px;
+    background: var(--background);
+  }
+
+  .AppSourceFilesSidebar__header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .AppSourceFilesSidebar__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--primary);
+    font-size: var(--fontSize-sm);
+    font-weight: 600;
+  }
+
+  .AppSourceFilesSidebar__hint {
+    margin: 0;
+    color: var(--textSecondary);
+    font-size: var(--fontSize-sm);
+    line-height: var(--leading-normal);
+  }
+
+  .AppSourceFilesSidebar__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .AppSourceFilesSidebar__item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--backgroundSecondary) 86%, transparent);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  }
+
+  .AppSourceFilesSidebar__item:hover {
+    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+    background: color-mix(in srgb, var(--backgroundSecondary) 96%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .AppSourceFilesSidebar__item.is-active {
+    border-color: color-mix(in srgb, var(--primary) 38%, var(--border));
+    background: color-mix(in srgb, var(--primary) 10%, var(--background));
+  }
+
+  .AppSourceFilesSidebar__item span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fontSize-base);
+    font-weight: 600;
+  }
+
+  .AppSourceFilesSidebar__item small,
+  .AppSourceFilesSidebar__empty {
+    color: var(--textSecondary);
+    font-size: var(--fontSize-sm);
+    line-height: var(--leading-normal);
+  }

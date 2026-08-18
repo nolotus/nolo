@@ -1,0 +1,125 @@
+"use client";
+import {
+  TITLE
+} from "/public/assets/chunks/chunk-YST5FFXD.js";
+import {
+  require_jsx_runtime
+} from "/public/assets/chunks/chunk-VU4ZNPEP.js";
+import {
+  require_react
+} from "/public/assets/chunks/chunk-JXB3DLZU.js";
+import {
+  __toESM
+} from "/public/assets/chunks/chunk-PKRG6ODM.js";
+
+// node_modules/@lobehub/icons/es/Kimi/components/Mono.js
+var import_react = __toESM(require_react());
+var import_jsx_runtime = __toESM(require_jsx_runtime());
+var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+function _typeof(o) {
+  "@babel/helpers - typeof";
+  return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function(o2) {
+    return typeof o2;
+  } : function(o2) {
+    return o2 && "function" == typeof Symbol && o2.constructor === Symbol && o2 !== Symbol.prototype ? "symbol" : typeof o2;
+  }, _typeof(o);
+}
+var _excluded = ["size", "style"];
+function ownKeys(e, r) {
+  var t = Object.keys(e);
+  if (Object.getOwnPropertySymbols) {
+    var o = Object.getOwnPropertySymbols(e);
+    r && (o = o.filter(function(r2) {
+      return Object.getOwnPropertyDescriptor(e, r2).enumerable;
+    })), t.push.apply(t, o);
+  }
+  return t;
+}
+function _objectSpread(e) {
+  for (var r = 1; r < arguments.length; r++) {
+    var t = null != arguments[r] ? arguments[r] : {};
+    r % 2 ? ownKeys(Object(t), true).forEach(function(r2) {
+      _defineProperty(e, r2, t[r2]);
+    }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function(r2) {
+      Object.defineProperty(e, r2, Object.getOwnPropertyDescriptor(t, r2));
+    });
+  }
+  return e;
+}
+function _defineProperty(obj, key, value) {
+  key = _toPropertyKey(key);
+  if (key in obj) {
+    Object.defineProperty(obj, key, { value, enumerable: true, configurable: true, writable: true });
+  } else {
+    obj[key] = value;
+  }
+  return obj;
+}
+function _toPropertyKey(t) {
+  var i = _toPrimitive(t, "string");
+  return "symbol" == _typeof(i) ? i : String(i);
+}
+function _toPrimitive(t, r) {
+  if ("object" != _typeof(t) || !t) return t;
+  var e = t[Symbol.toPrimitive];
+  if (void 0 !== e) {
+    var i = e.call(t, r || "default");
+    if ("object" != _typeof(i)) return i;
+    throw new TypeError("@@toPrimitive must return a primitive value.");
+  }
+  return ("string" === r ? String : Number)(t);
+}
+function _objectWithoutProperties(source, excluded) {
+  if (source == null) return {};
+  var target = _objectWithoutPropertiesLoose(source, excluded);
+  var key, i;
+  if (Object.getOwnPropertySymbols) {
+    var sourceSymbolKeys = Object.getOwnPropertySymbols(source);
+    for (i = 0; i < sourceSymbolKeys.length; i++) {
+      key = sourceSymbolKeys[i];
+      if (excluded.indexOf(key) >= 0) continue;
+      if (!Object.prototype.propertyIsEnumerable.call(source, key)) continue;
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+function _objectWithoutPropertiesLoose(source, excluded) {
+  if (source == null) return {};
+  var target = {};
+  var sourceKeys = Object.keys(source);
+  var key, i;
+  for (i = 0; i < sourceKeys.length; i++) {
+    key = sourceKeys[i];
+    if (excluded.indexOf(key) >= 0) continue;
+    target[key] = source[key];
+  }
+  return target;
+}
+var Icon = /* @__PURE__ */ (0, import_react.memo)(function(_ref) {
+  var _ref$size = _ref.size, size = _ref$size === void 0 ? "1em" : _ref$size, style = _ref.style, rest = _objectWithoutProperties(_ref, _excluded);
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("svg", _objectSpread(_objectSpread({
+    fill: "currentColor",
+    fillRule: "evenodd",
+    height: size,
+    style: _objectSpread({
+      flex: "none",
+      lineHeight: 1
+    }, style),
+    viewBox: "0 0 24 24",
+    width: size,
+    xmlns: "http://www.w3.org/2000/svg"
+  }, rest), {}, {
+    children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("title", {
+      children: TITLE
+    }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", {
+      d: "M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z"
+    }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", {
+      d: "M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z"
+    })]
+  }));
+});
+var Mono_default = Icon;
+export {
+  Mono_default as default
+};

@@ -1,0 +1,22 @@
+// create/types.ts
+export enum DataType {
+  AGENT = "agent",
+  DOC = "page",
+  DIALOG = "dialog",
+  NOTIFICATION = "notification",
+  MSG = "msg",
+  TOKEN = "token",
+  SPACE = "space",
+  TRANSACTION = "transaction",
+  SETTING = "setting",
+  TASK = "task",
+  AGENT_AUTOMATION = "agent-automation",
+
+  TABLE = "table",
+  TABLE_ROW = "table_row",
+  FILE = "file",
+  IMAGE = "image",
+  APP = "app",
+  EMAIL = "email",
+  Category = "category",
+}

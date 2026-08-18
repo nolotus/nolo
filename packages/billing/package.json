@@ -1,0 +1,17 @@
+{
+  "name": "billing",
+  "module": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./index.local.ts"
+    }
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {}
+}

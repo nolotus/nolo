@@ -1,0 +1,102 @@
+/* packages/chat/web/queue-badge.css */
+
+.queue-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+.queue-badge__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--nolo-border, rgba(120, 120, 120, 0.35));
+  background: var(--nolo-surface-2, rgba(120, 120, 120, 0.12));
+  color: var(--nolo-text-secondary, inherit);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.queue-badge__pill:hover {
+  background: var(--nolo-surface-3, rgba(120, 120, 120, 0.2));
+}
+
+.queue-badge__pill--running {
+  border-color: var(--nolo-accent, #6b8afd);
+  color: var(--nolo-accent, #6b8afd);
+}
+
+.queue-badge__icon {
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+.queue-badge__count {
+  font-weight: 600;
+}
+
+.queue-badge__label {
+  opacity: 0.8;
+}
+
+.queue-badge__popover {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 220px;
+  max-width: 320px;
+  border-radius: 8px;
+  border: 1px solid var(--nolo-border, rgba(120, 120, 120, 0.3));
+  background: var(--nolo-surface, #fff);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  padding: 0.5rem 0;
+}
+
+.queue-badge__popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.6rem 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--nolo-border, rgba(120, 120, 120, 0.2));
+}
+
+.queue-badge__clear {
+  border: none;
+  background: none;
+  color: var(--nolo-danger, #d33);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+
+.queue-badge__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.queue-badge__item {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--nolo-text, inherit);
+  border-bottom: 1px solid var(--nolo-border-faint, rgba(120, 120, 120, 0.1));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-badge__item--more {
+  color: var(--nolo-text-secondary, rgba(120, 120, 120, 0.8));
+  font-style: italic;
+}

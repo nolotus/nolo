@@ -1,0 +1,49 @@
+{
+  "name": "identity",
+  "module": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./index.local.ts"
+    },
+    "./selectors": {
+      "default": "./selectors.local.ts"
+    },
+    "./actions": {
+      "default": "./actions.local.ts"
+    },
+    "./RequireSignedIn": {
+      "default": "./RequireSignedIn.local.tsx"
+    },
+    "./cloudRoutes": {
+      "default": "./cloudRoutes.local.ts"
+    },
+    "./cloudBootstrap": {
+      "default": "./cloudBootstrap.local.ts"
+    },
+    "./authReducer": {
+      "default": "./authReducer.local.ts"
+    },
+    "./authTypes": {
+      "default": "./authTypes.local.ts"
+    },
+    "./useDeleteOwnAccountFlow": {
+      "default": "./useDeleteOwnAccountFlow.local.ts"
+    },
+    "./cloudLazy": {
+      "default": "./cloudLazy.tsx"
+    },
+    "./types": {
+      "default": "./types.ts"
+    }
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2",
+    "react": "^18.0.0",
+    "react-redux": "^8.0.0"
+  },
+  "dependencies": {}
+}

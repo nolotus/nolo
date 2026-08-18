@@ -1,0 +1,196 @@
+.home-widgets {
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  /* 列数与 WidgetsSection.tsx 的 MAX_SPAN 保持一致，改列数需两边同步 */
+  grid-template-columns: repeat(6, 1fr);
+  gap: clamp(8px, 1.2vw, 12px);
+}
+
+/* ---- widget grid items ---- */
+.home-widgets__item {
+  position: relative;
+  min-width: 0;
+}
+
+.home-widgets__item.is-editing {
+  cursor: grab;
+  outline: 1px dashed var(--border);
+  outline-offset: 2px;
+  border-radius: var(--radius-xl);
+  transition: outline-color 0.15s;
+}
+
+.home-widgets__item.is-editing:active {
+  cursor: grabbing;
+}
+
+.home-widgets__item.is-editing[draggable="true"]:hover {
+  outline-color: var(--primary);
+}
+
+/* column spans */
+.home-widgets__item.w-col-1 { grid-column: span 1; }
+.home-widgets__item.w-col-2 { grid-column: span 2; }
+.home-widgets__item.w-col-3 { grid-column: span 3; }
+.home-widgets__item.w-col-4 { grid-column: span 4; }
+.home-widgets__item.w-col-5 { grid-column: span 5; }
+.home-widgets__item.w-col-6 { grid-column: span 6; }
+
+/* featured widget（对应 WidgetsSection.tsx 的 FEATURED_WIDGET_ID）spans two rows so the action cards stack beside it */
+.home-widgets__item--featured {
+  grid-row: span 2;
+}
+
+/* height classes：吸附落点 min-height 与 WidgetsSection.tsx 的 HEIGHT_TIER_THRESHOLDS 触发线对应，改档位需两边同步 */
+.home-widgets__item.h-0 { min-height: auto; }
+.home-widgets__item.h-1 { min-height: 80px; }
+.home-widgets__item.h-2 { min-height: 160px; }
+.home-widgets__item.h-3 { min-height: 280px; }
+
+/* ---- edit action bar ---- */
+.home-widgets__edit-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-1);
+}
+
+.home-widgets__reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--borderSubtle, transparent);
+  background: var(--surfaceInteractive, var(--backgroundSecondary));
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.home-widgets__reset-btn:hover {
+  color: var(--primary);
+  border-color: var(--primaryBorder, var(--border));
+  background: var(--backgroundHover, var(--surfaceCard));
+}
+
+/* ---- toolbar on each widget (edit mode) ---- */
+.home-widgets__toolbar {
+  position: absolute;
+  top: -10px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.home-widgets__item.is-editing:hover .home-widgets__toolbar {
+  opacity: 1;
+}
+
+.home-widgets__tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--borderSubtle);
+  background: var(--surfaceCard, var(--background));
+  color: var(--textSecondary);
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  transition: background 0.12s, color 0.12s;
+}
+
+.home-widgets__tb-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primaryGhost, var(--surfaceCard));
+}
+
+.home-widgets__tb-btn--del:hover {
+  color: var(--danger, #dc2626);
+  background: var(--dangerBg, #fee2e2);
+  border-color: var(--danger, #dc2626);
+}
+
+.home-widgets__resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 10;
+  touch-action: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--borderSubtle);
+  background: var(--surfaceCard, var(--background));
+  color: var(--textSecondary);
+  cursor: nwse-resize;
+  opacity: 0.75;
+  padding: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.home-widgets__resize-handle:hover {
+  opacity: 1;
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+/* ---- empty state ---- */
+.home-widgets__empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--textSecondary);
+  padding: var(--space-10) 0;
+  font-size: var(--fontSize-sm);
+}
+
+@media (max-width: 768px) {
+  /* 移动端两列：操作卡片两两并排，日历/用量这类信息卡才独占整行，
+     否则 5~6 个 widget 会把首屏顶掉（quick-chat 输入条要留在一屏内）。 */
+  .home-widgets {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2);
+    /* 卡片按内容高度排，不被同行的日历撑成等高 */
+    align-items: start;
+  }
+
+  .home-widgets__item.w-col-1,
+  .home-widgets__item.w-col-2,
+  .home-widgets__item.w-col-3,
+  .home-widgets__item.w-col-4,
+  .home-widgets__item.w-col-5,
+  .home-widgets__item.w-col-6 {
+    grid-column: span 1;
+  }
+
+  /* 选择器必须和上面的 .home-widgets__item.w-col-N 同权重（0,2,0）且写在其后，
+     否则 span 1 会赢，日历/用量就退回半宽。 */
+  .home-widgets__item.home-widgets__item--featured,
+  .home-widgets__item[data-widget-id="usage"] {
+    grid-column: span 2;
+  }
+
+  .home-widgets__item.home-widgets__item--featured {
+    grid-row: auto;
+  }
+
+  /* 移动端不参与拖拽 resize，高度档位不该再撑高卡片 */
+  .home-widgets__item.h-1,
+  .home-widgets__item.h-2,
+  .home-widgets__item.h-3 {
+    min-height: auto;
+  }
+}

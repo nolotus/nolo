@@ -1,0 +1,57 @@
+/* ── TablePreviewDialog ── */
+.table-preview-modal .preview-body-content {
+  max-height: 60vh;
+  overflow: hidden;
+  background: var(--background);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 固定表头——滚动时表头停留在可见区域 */
+.table-preview-modal .data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--backgroundSecondary);
+  z-index: 1;
+}
+/* 让 .table-container 作为 flex item 能缩到比内容矮，从而真正滚动 */
+.table-preview-modal .table-container {
+  min-height: 0;
+}
+/* 避免 data-table 的 overflow:hidden 裁剪 sticky header */
+.table-preview-modal .data-table {
+  overflow: visible;
+}
+
+
+
+.table-header-cell {
+  padding: var(--space-2) var(--space-3);
+  font-weight: 600;
+  font-size: var(--fontSize-sm);
+  color: var(--textSecondary);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  background: var(--backgroundSecondary);
+  border-bottom: 1px solid var(--borderLight);
+}
+
+.table-data-cell {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fontSize-base);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-bottom: 1px solid var(--borderLight);
+}
+
+.empty-rows-message {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--textQuaternary);
+  font-style: italic;
+}
+
+.spin { animation: spin 1s linear infinite; }

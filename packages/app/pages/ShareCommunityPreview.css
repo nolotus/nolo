@@ -1,0 +1,38 @@
+/* ── ShareCommunityPreview ───────────────────────────── */
+
+.ShareCommunityPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ShareCommunityPreview__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5, 20px);
+  align-items: stretch;
+}
+
+.ShareCommunityPreview__loading,
+.ShareCommunityPreview__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--textMuted, var(--textSecondary));
+  background: var(--surfaceInset, var(--surfaceCard, var(--backgroundSecondary)));
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--borderMuted, var(--borderLight));
+  font-size: var(--fontSize-sm);
+}
+
+@media (max-width: 1200px) {
+  .ShareCommunityPreview__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .ShareCommunityPreview__grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}

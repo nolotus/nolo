@@ -1,0 +1,10 @@
+{
+  "basePath": "/public/assets/",
+  "js": "/public/assets/entry.js?v=1786972273994",
+  "css": "/public/assets/entry.css?v=1786972273994",
+  "artifactRuntimeJs": "/public/assets/artifactRuntime.js?v=1786972273994",
+  "artifactRuntimePreloads": [],
+  "timestamp": "dev",
+  "buildTime": "2026-08-17T13:11:13.994Z",
+  "buildSha": null
+}

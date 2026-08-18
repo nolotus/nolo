@@ -1,0 +1,18 @@
+// node_modules/@lobehub/icons/es/HuggingFace/style.js
+var TITLE = "HuggingFace";
+var COMBINE_TEXT_MULTIPLE = 0.6;
+var COMBINE_SPACE_MULTIPLE = 0.3;
+var COLOR_PRIMARY = "#fff";
+var AVATAR_BACKGROUND = COLOR_PRIMARY;
+var AVATAR_COLOR = "#fff";
+var AVATAR_ICON_MULTIPLE = 0.75;
+
+export {
+  TITLE,
+  COMBINE_TEXT_MULTIPLE,
+  COMBINE_SPACE_MULTIPLE,
+  COLOR_PRIMARY,
+  AVATAR_BACKGROUND,
+  AVATAR_COLOR,
+  AVATAR_ICON_MULTIPLE
+};

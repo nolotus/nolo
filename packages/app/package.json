@@ -1,0 +1,13 @@
+{
+  "name": "app",
+  "module": "index.ts",
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "database": "workspace:database"
+  }
+}

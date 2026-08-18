@@ -1,0 +1,20 @@
+// node_modules/@lobehub/icons/es/Tiangong/style.js
+var TITLE = "Tiangong";
+var COMBINE_TEXT_MULTIPLE = 1;
+var COMBINE_SPACE_MULTIPLE = 0.25;
+var COLOR_PRIMARY = "#0057ff";
+var COLOR_GRADIENT = "linear-gradient(to right, #6865FC, #467DF9)";
+var AVATAR_BACKGROUND = COLOR_GRADIENT;
+var AVATAR_COLOR = "#fff";
+var AVATAR_ICON_MULTIPLE = 0.75;
+
+export {
+  TITLE,
+  COMBINE_TEXT_MULTIPLE,
+  COMBINE_SPACE_MULTIPLE,
+  COLOR_PRIMARY,
+  COLOR_GRADIENT,
+  AVATAR_BACKGROUND,
+  AVATAR_COLOR,
+  AVATAR_ICON_MULTIPLE
+};

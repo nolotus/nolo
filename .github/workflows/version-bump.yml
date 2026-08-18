@@ -1,0 +1,48 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [alpha, main]
+  workflow_dispatch:
+
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install
+
+      - name: Verify release compatibility
+        run: bun scripts/verify/verifyReleaseUpdateCompatibility.ts
+
+      - name: Dispatch CLI npm publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            gh workflow run cli-publish.yml -f dist_tag=latest
+          elif [ "${GITHUB_REF}" = "refs/heads/alpha" ]; then
+            gh workflow run cli-publish.yml -f dist_tag=alpha
+          fi
+
+      - name: Dispatch desktop build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run desktop-build.yml -f targets=all

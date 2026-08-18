@@ -1,0 +1,265 @@
+/* ── SpaceContentList ────────────────────────────────── */
+
+        /* CSS Grid (not multi-column): multi-column breaks position:absolute
+           hover actions so preview/delete float in the gutter. */
+        .content-display.grid {
+          display: grid;
+          /* Prefer fewer, roomier cards over packing 4+ skinny columns. */
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: var(--space-5);
+          padding: 4px;
+          padding-bottom: var(--space-10);
+          align-items: start;
+        }
+
+        .content-display.grid > * {
+          min-width: 0;
+          max-width: 100%;
+          width: 100%;
+          position: relative;
+          z-index: 0;
+        }
+
+        .content-display.grid > *:hover,
+        .content-display.grid > *:focus-within {
+          z-index: 2;
+        }
+
+        .content-display.list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding-bottom: var(--space-10);
+        }
+
+        .agent-block-wrapper {
+          position: relative;
+          transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        
+        .agent-block-wrapper:hover {
+          transform: translateY(-4px);
+        }
+
+        .agent-block-wrapper.selected .agent {
+          border-color: var(--primary);
+          background: var(--primaryGhost, rgba(var(--primary-rgb), 0.05));
+          box-shadow: 0 0 0 2px var(--primary);
+        }
+
+        .selection-overlay {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 10;
+        }
+
+        .selection-checkbox {
+          width: 22px;
+          height: 22px;
+          border: 2px solid var(--primary);
+          border-radius: var(--radius-md);
+          background: var(--background);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--primary);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          opacity: 0;
+          transition: opacity 0.15s ease, background 0.15s ease;
+        }
+
+        .agent-block-wrapper:hover .selection-checkbox,
+        .agent-block-wrapper.selected .selection-checkbox {
+          opacity: 1;
+        }
+
+        .selection-checkbox.is-checked {
+          background: var(--primary);
+          color: #fff;
+          opacity: 1;
+        }
+
+        .content-list-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 10px 16px;
+          background: var(--backgroundSecondary);
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--borderLight);
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          cursor: pointer;
+        }
+
+        .content-list-item:hover {
+          background: var(--backgroundHover);
+          border-color: var(--primary);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .content-list-item.selected {
+          background: var(--primaryGhost, rgba(var(--primary-rgb), 0.05));
+          border-color: var(--primary);
+        }
+
+        .content-list-item.file-drop-active {
+          background: var(--primaryGhost, rgba(var(--primary-rgb), 0.05));
+          border-color: var(--primary);
+          box-shadow: 0 0 0 2px var(--primary);
+        }
+
+        .item-left {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex: 1;
+          min-width: 0;
+        }
+
+        /* icon/checkbox zone — hover reveals checkbox (Google Drive style) */
+        .item-icon-zone {
+          position: relative;
+          width: 40px;
+          height: var(--control-lg);
+          flex-shrink: 0;
+          cursor: pointer;
+        }
+
+        .item-icon {
+          width: 40px;
+          height: var(--control-lg);
+          background: var(--background);
+          border-radius: var(--radius-sm);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid var(--borderLight);
+          font-size: var(--fontSize-lg);
+          color: var(--textSecondary);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+          transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+          position: absolute;
+          inset: 0;
+        }
+
+        .item-checkbox-overlay {
+          width: 40px;
+          height: var(--control-lg);
+          border: 2px solid var(--primary);
+          border-radius: var(--radius-sm);
+          background: var(--background);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--primary);
+          position: absolute;
+          inset: 0;
+          opacity: 0;
+          transition: opacity 0.15s ease, background 0.15s ease;
+        }
+
+        /* show checkbox on row hover */
+        .content-list-item:hover .item-icon-zone .item-icon { opacity: 0; }
+        .content-list-item:hover .item-icon-zone .item-checkbox-overlay { opacity: 1; }
+        /* always show checkbox when selected or in selection mode */
+        .content-list-item.selected .item-icon-zone .item-icon,
+        .content-list-item.selection-mode .item-icon-zone .item-icon { opacity: 0; }
+        .content-list-item.selected .item-icon-zone .item-checkbox-overlay,
+        .content-list-item.selection-mode .item-icon-zone .item-checkbox-overlay { opacity: 1; }
+
+        .item-checkbox-overlay.is-checked {
+          background: var(--primary);
+          color: #fff;
+          opacity: 1;
+        }
+
+        .item-info {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          gap: 1px;
+        }
+
+        .item-title {
+          font-weight: 600;
+          font-size: var(--fontSize-base);
+          color: var(--text);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .item-meta {
+          font-size: var(--fontSize-sm);
+          color: var(--textTertiary, var(--textSecondary));
+          opacity: 0.8;
+        }
+
+        .item-actions {
+          display: flex;
+          gap: 4px;
+          opacity: 0;
+          transition: opacity 0.2s ease, transform 0.2s ease;
+          transform: translateX(8px);
+        }
+
+        .content-list-item:hover .item-actions {
+          opacity: 1;
+          transform: translateX(0);
+        }
+
+        .btn-danger-ghost {
+          color: var(--error, #ef4444) !important;
+        }
+        .btn-danger-ghost:hover {
+          background: var(--errorGhost, rgba(239, 68, 68, 0.1)) !important;
+        }
+
+        @media (max-width: 1280px) {
+          .content-display.grid {
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: var(--space-4);
+          }
+        }
+
+        @media (max-width: 768px) {
+          .content-display.grid {
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: var(--space-3);
+          }
+        }
+
+        @media (max-width: 640px) {
+          .content-display.grid {
+            grid-template-columns: 1fr;
+          }
+          .content-list-item { padding: 10px 12px; }
+          .item-left { gap: 12px; }
+          .item-icon-zone, .item-icon, .item-checkbox-overlay {
+            width: 36px; height: var(--control-md); font-size: var(--fontSize-lg); border-radius: var(--radius-md);
+          }
+          .item-actions { opacity: 1; transform: none; }
+        }
+
+        .item-icon__img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .agent-block-wrapper,
+          .agent-block-wrapper:hover,
+          .content-list-item,
+          .content-list-item:hover,
+          .item-icon,
+          .item-checkbox-overlay,
+          .item-actions,
+          .content-list-item:hover .item-actions {
+            transition: none !important;
+            transform: none !important;
+          }
+        }

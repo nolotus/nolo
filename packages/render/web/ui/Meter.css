@@ -1,0 +1,76 @@
+/* packages/render/web/ui/Meter.css */
+
+.react-aria-Meter.nolo-meter,
+.nolo-meter {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "label value"
+    "bar bar";
+  gap: 4px 8px;
+  width: 100%;
+  font-size: var(--fontSize-sm, 0.875rem);
+  color: var(--text, #18181b);
+  forced-color-adjust: none;
+}
+
+.nolo-meter[data-hide-label] {
+  display: block;
+  grid-template-areas: none;
+  grid-template-columns: none;
+  gap: 0;
+}
+
+.nolo-meter-label {
+  grid-area: label;
+  color: var(--textSecondary, #71717a);
+  font-size: var(--fontSize-xs, 0.75rem);
+  line-height: 1.3;
+}
+
+.nolo-meter-value {
+  grid-area: value;
+  color: var(--textSecondary, #71717a);
+  font-size: var(--fontSize-xs, 0.75rem);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.nolo-meter-track {
+  grid-area: bar;
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--backgroundSecondary, var(--borderLight, #e4e4e7));
+  overflow: hidden;
+}
+
+.nolo-meter[data-hide-label] .nolo-meter-track {
+  grid-area: auto;
+}
+
+.nolo-meter-fill {
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--meter-fill-color, var(--primary, #1677ff));
+  transition: width 200ms ease, background-color 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nolo-meter-fill {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .nolo-meter-track {
+    background: Canvas;
+    border: 1px solid ButtonText;
+  }
+
+  .nolo-meter-fill {
+    background: Highlight;
+  }
+}

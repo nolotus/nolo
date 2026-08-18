@@ -1,0 +1,337 @@
+/* packages/render/web/ui/popover.css */
+.app-popover {
+  box-sizing: border-box;
+  padding: var(--popover-pad);
+  background: var(--popover-bg);
+  border: 1px solid var(--popover-border);
+  border-radius: var(--popover-radius);
+  box-shadow: var(--popover-shadow);
+  backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
+  color: var(--text);
+  z-index: var(--z-dropdown, 1000);
+  outline: none;
+  overflow: visible;
+  transition: transform var(--popover-duration) var(--popover-ease), opacity var(--popover-duration) var(--popover-ease);
+}
+.app-popover[data-entering],
+.app-popover[data-exiting] {
+  transform: var(--origin);
+  opacity: 0;
+}
+.app-popover[data-exiting] {
+  transition-duration: var(--popover-durationExit);
+}
+.app-popover[data-placement^=bottom] {
+  --origin: translateY(calc(-1 * var(--popover-travel))) scale(0.97);
+  transform-origin: top center;
+}
+.app-popover[data-placement^=top] {
+  --origin: translateY(var(--popover-travel)) scale(0.97);
+  transform-origin: bottom center;
+}
+.app-popover[data-placement^=right] {
+  --origin: translateX(calc(-1 * var(--popover-travel))) scale(0.97);
+  transform-origin: left center;
+}
+.app-popover[data-placement^=left] {
+  --origin: translateX(var(--popover-travel)) scale(0.97);
+  transform-origin: right center;
+}
+.app-popover .react-aria-OverlayArrow svg {
+  display: block;
+  fill: var(--popover-bg);
+  stroke: var(--popover-border);
+  paint-order: stroke;
+  stroke-width: 2px;
+  overflow: visible;
+}
+.app-popover[data-placement^=top] .react-aria-OverlayArrow svg {
+  transform: translateY(-1px);
+}
+.app-popover[data-placement^=bottom] .react-aria-OverlayArrow svg {
+  transform: translateY(1px) rotate(180deg);
+}
+.app-popover[data-placement^=right] .react-aria-OverlayArrow svg {
+  transform: translateX(1px) rotate(90deg);
+}
+.app-popover[data-placement^=left] .react-aria-OverlayArrow svg {
+  transform: translateX(-1px) rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-popover {
+    transition: opacity 0.1s linear;
+  }
+  .app-popover[data-entering],
+  .app-popover[data-exiting] {
+    transform: none;
+  }
+}
+
+/* packages/render/web/ui/Menu.css */
+.app-menu-popover {
+  min-width: 180px;
+}
+.app-menu-popover .react-aria-Menu {
+  max-height: min(60vh, 420px);
+}
+.app-menu-popover.app-menu-popover--submenu {
+  min-width: 260px;
+}
+.app-menu-popover--submenu .react-aria-Menu {
+  max-height: min(70vh, 480px);
+}
+.react-aria-Menu {
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  min-width: 150px;
+  outline: none;
+  padding: 0;
+  border-radius: var(--popover-itemRadius);
+  display: flex;
+  flex-direction: column;
+}
+.react-aria-Menu[data-empty] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-style: italic;
+  min-height: 32px;
+  color: var(--textTertiary);
+}
+.react-aria-MenuItem {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--popover-itemRadius);
+  outline: none;
+  cursor: default;
+  color: var(--text);
+  font-size: var(--fontSize-sm);
+  font-weight: 500;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  forced-color-adjust: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition: background-color var(--popover-durationExit) var(--popover-ease), color var(--popover-durationExit) var(--popover-ease);
+}
+.react-aria-MenuItem > svg:not(.app-menu-check, .app-menu-dot, .app-menu-chevron) {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--textSecondary);
+  transition: color var(--popover-durationExit) var(--popover-ease);
+}
+.react-aria-MenuItem[data-open],
+.react-aria-MenuItem[data-pressed],
+.react-aria-MenuItem[data-focused] {
+  background: var(--backgroundHover);
+}
+.react-aria-MenuItem[data-open] > svg:not(.app-menu-chevron),
+.react-aria-MenuItem[data-pressed] > svg:not(.app-menu-chevron),
+.react-aria-MenuItem[data-focused] > svg:not(.app-menu-chevron) {
+  color: var(--text);
+}
+.react-aria-MenuItem[data-disabled] {
+  color: var(--textQuaternary);
+  opacity: 0.7;
+}
+.react-aria-MenuItem [slot=label],
+.react-aria-MenuItem > span:not(.app-menu-check, .app-menu-dot) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.react-aria-MenuItem .app-menu-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--textQuaternary);
+}
+.react-aria-MenuItem .app-menu-check,
+.react-aria-MenuItem .app-menu-dot {
+  flex-shrink: 0;
+}
+.react-aria-MenuSection {
+  display: flex;
+  flex-direction: column;
+}
+.react-aria-Menu .react-aria-Separator {
+  margin: var(--space-1) var(--space-2);
+  border: 0;
+  border-top: 1px solid var(--borderLight, var(--border));
+  height: auto;
+  width: auto;
+}
+
+/* packages/render/web/ui/Toast.css */
+.toast-viewport {
+  position: fixed;
+  bottom: var(--space-4, 16px);
+  right: var(--space-4, 16px);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--space-2, 8px);
+  z-index: var(--z-toast, 1030);
+  outline: none;
+  pointer-events: none;
+  max-width: calc(100vw - var(--space-8, 32px));
+}
+.toast-root {
+  --toast-accent: var(--textSecondary, #52525b);
+  width: 240px;
+  max-width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background: var(--background, #ffffff);
+  color: var(--text, #18181b);
+  border: 1px solid var(--borderMuted, var(--borderLight, rgba(0, 0, 0, 0.08)));
+  border-radius: var(--radius-lg, var(--radius-md, 12px));
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  outline: none;
+  forced-color-adjust: none;
+  pointer-events: auto;
+  transition:
+    transform var(--motionDuration, 320ms) var(--motionEase, cubic-bezier(0.33, 0, 0.2, 1)),
+    opacity var(--motionDuration, 320ms) var(--motionEase, cubic-bezier(0.33, 0, 0.2, 1)),
+    background-color var(--motionDuration, 150ms) ease,
+    border-color var(--motionDuration, 150ms) ease,
+    box-shadow var(--motionDuration, 150ms) ease;
+}
+.toast-root[data-type=success] {
+  --toast-accent: var(--success, #10b981);
+}
+.toast-root[data-type=error] {
+  --toast-accent: var(--error, #ef4444);
+}
+.toast-root[data-type=loading] {
+  --toast-accent: var(--info, var(--primary, #3b82f6));
+}
+[data-theme=dark] .toast-root {
+  background: var(--surfaceRaised, var(--backgroundSecondary, #18181b));
+  border: 1px solid var(--borderMuted, var(--borderLight, rgba(255, 255, 255, 0.12)));
+  box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+}
+.toast-root[data-focus-visible] {
+  outline: 2px solid var(--focus, var(--primaryGhost, rgba(22, 119, 255, 0.22)));
+  outline-offset: 2px;
+}
+.toast-root[data-starting-style],
+.toast-root[data-ending-style] {
+  transform: translateX(calc(100% + var(--space-8, 32px)));
+  opacity: 0;
+}
+.toast-root[data-positioned] {
+  max-width: min(240px, calc(100vw - var(--space-4, 16px)));
+}
+.toast-content {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.toast-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--toast-accent);
+}
+.toast-icon.loading {
+  animation: toast-spin 1s linear infinite;
+}
+.toast-text-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font: var(--fontSize-base, 14px) / var(--leading-normal, 1.5) var(--font, system-ui);
+  color: var(--text, #18181b);
+}
+.toast-title {
+  font-weight: var(--fontWeight-semibold, 600);
+  color: var(--text, inherit);
+  margin: 0;
+}
+.toast-description {
+  font-size: var(--fontSize-sm, 13px);
+  color: var(--textSecondary, inherit);
+  margin: var(--space-1, 4px) 0 0;
+}
+.toast-close {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  appearance: none;
+  border-radius: var(--radius-sm, var(--radius-xs, 6px));
+  height: 28px;
+  width: 28px;
+  color: var(--textTertiary, #71717a);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motionDuration, 150ms) ease, color var(--motionDuration, 150ms) ease;
+}
+.toast-close:hover {
+  background: var(--hoverBg, var(--backgroundHover, #f3f4f6));
+  color: var(--text, #18181b);
+}
+.toast-close[data-focus-visible] {
+  outline: 2px solid var(--focus, var(--primaryGhost, rgba(22, 119, 255, 0.22)));
+  outline-offset: 2px;
+}
+.toast-close[data-pressed] {
+  background: var(--activeBg, var(--backgroundTertiary, #e4e4e7));
+}
+[data-theme=dark] .toast-close:hover {
+  background: var(--hoverBg, rgba(255, 255, 255, 0.06));
+}
+@keyframes toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.toast-action {
+  align-self: flex-start;
+  margin-top: var(--space-2, 8px);
+  padding: var(--space-1, 4px) var(--space-3, 12px);
+  font: inherit;
+  font-size: var(--fontSize-sm, 13px);
+  font-weight: var(--fontWeight-semibold, 600);
+  color: var(--primary, #3b82f6);
+  background: var(--primaryGhost, rgba(59, 130, 246, 0.1));
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, var(--radius-xs, 6px));
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.toast-action:hover {
+  background: var(--primaryGhostHover, rgba(59, 130, 246, 0.18));
+}
+.toast-action:focus-visible {
+  outline: 2px solid var(--focus, var(--primaryGhost, rgba(22, 119, 255, 0.22)));
+  outline-offset: 2px;
+}
+.toast-action:active {
+  background: var(--primaryGhostActive, rgba(59, 130, 246, 0.26));
+}
+[data-theme=dark] .toast-action {
+  color: var(--primary, #60a5fa);
+  background: var(--primaryGhost, rgba(96, 165, 250, 0.14));
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-root,
+  .toast-close {
+    transition-duration: 0ms;
+  }
+}

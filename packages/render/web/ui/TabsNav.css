@@ -1,0 +1,5 @@
+/* ── 夜间模式标签页可见性 ── */
+[data-theme='dark'] .tabs::after {
+  background: var(--backgroundHover);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+}

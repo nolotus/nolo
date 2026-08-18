@@ -1,0 +1,29 @@
+{
+  "name": "connector-experimental",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "module": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./capabilities": "./capabilities.ts",
+    "./codexBinary": "./codexBinary.ts",
+    "./heartbeatLoop": "./heartbeatLoop.ts",
+    "./machineInfo": "./machineInfo.ts",
+    "./protocol": "./protocol.ts"
+  },
+  "files": [
+    "index.ts",
+    "capabilities.ts",
+    "codexBinary.ts",
+    "heartbeatLoop.ts",
+    "machineInfo.ts",
+    "protocol.ts"
+  ],
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

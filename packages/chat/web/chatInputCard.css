@@ -1,0 +1,39 @@
+/* Shared chat input card shell — used by .message-input__box and .quick-chat-box */
+
+.chat-input-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: var(--space-3) var(--space-4);
+  position: relative;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  border: 1px solid var(--borderMuted, var(--borderLight));
+  box-shadow: 0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight);
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 夜间悬浮感:顶部 1px 内发光模拟受光面,投影加深拉开与画布的距离 */
+[data-theme="dark"] .chat-input-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px var(--shadowLight),
+    0 16px 32px -20px var(--shadowHeavy);
+}
+
+.chat-input-card:focus-within {
+  background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+  border-color: var(--primaryBorder, var(--primary));
+  box-shadow:
+    0 0 0 3px var(--focusRing),
+    0 16px 34px -28px var(--shadowMedium);
+}
+
+@media (max-width: 768px) {
+  .chat-input-card {
+    padding: var(--inputPadding, 10px 14px);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+}

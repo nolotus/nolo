@@ -1,0 +1,166 @@
+.content-icon {
+  flex: 0 0 auto;
+  color: var(--textSecondary);
+}
+
+.content-icon--emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.content-icon-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--textSecondary);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+/* Editable icon button: clean and non-intrusive at rest. */
+.content-icon-button--editable {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--textSecondary);
+  border-radius: var(--radius-md, 8px);
+}
+
+.content-icon-button:hover,
+.content-icon-button:focus-visible {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-color: transparent;
+  color: var(--text);
+  outline: none;
+}
+
+.content-icon-button--editable:hover,
+.content-icon-button--editable:focus-visible {
+  background: color-mix(in srgb, var(--primary) 8%, var(--backgroundSecondary, #f4f4f5));
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+  border-style: solid;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.content-icon-button__badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--background, #fff);
+  color: var(--textSecondary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease;
+}
+
+.content-icon-button--editable:hover .content-icon-button__badge,
+.content-icon-button--editable:focus-visible .content-icon-button__badge {
+  opacity: 1;
+  transform: scale(1);
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+
+.content-icon-picker {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: min(336px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 120px));
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--background);
+  box-shadow: var(--shadow-lg, 0 18px 44px rgba(15, 23, 42, 0.18));
+}
+
+.content-icon-picker__search {
+  margin-bottom: 10px;
+}
+
+.content-icon-picker__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.content-icon-picker__section + .content-icon-picker__section {
+  margin-top: 12px;
+}
+
+.content-icon-picker__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fontSize-xs);
+  font-weight: 700;
+  color: var(--textSecondary);
+}
+
+.content-icon-picker__label span {
+  font-weight: 600;
+  color: var(--textTertiary);
+}
+
+.content-icon-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+}
+
+.content-icon-picker__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--backgroundSecondary);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.content-icon-picker__option:hover,
+.content-icon-picker__option:focus-visible {
+  border-color: var(--primary);
+  background: var(--primaryGhost);
+  outline: none;
+}
+
+.content-icon-picker__empty {
+  padding: 12px 4px 4px;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  text-align: center;
+}
+
+.content-icon-picker__clear {
+  margin-top: 10px;
+}

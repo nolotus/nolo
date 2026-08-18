@@ -1,0 +1,641 @@
+/* === Welcome base === */
+        /* === Container & Variables === */
+        .ws-container {
+          --ws-primary: var(--primary, #1677ff);
+          --ws-bg: var(--background, #ffffff);
+          --ws-bg-sub: var(--backgroundSecondary, #f5f5f5);
+          --ws-text: var(--text, #000);
+          --ws-text-sub: var(--textSecondary, #666);
+          --ws-border: var(--border, #e5e5e5);
+          --ws-radius: 24px;
+
+          padding: 56px 0 80px;
+          max-width: var(--home-content-max-width, 1040px);
+          margin: 0 auto;
+          position: relative;
+        }
+
+
+.ws-page {
+  position: relative;
+  z-index: 1;
+}
+
+.ws-reveal {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ws-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ws-faq-section.is-visible .ws-faq-item {
+  animation: home-scroll-reveal var(--home-motion-duration-slow) var(--home-motion-ease) both;
+}
+
+.ws-faq-section.is-visible .ws-faq-item:nth-child(1) { animation-delay: 0s; }
+.ws-faq-section.is-visible .ws-faq-item:nth-child(2) { animation-delay: 0.06s; }
+.ws-faq-section.is-visible .ws-faq-item:nth-child(3) { animation-delay: 0.12s; }
+.ws-faq-section.is-visible .ws-faq-item:nth-child(4) { animation-delay: 0.18s; }
+
+.ws-faq-section {
+  position: relative;
+  z-index: 2;
+  padding-top: 64px;
+  margin-bottom: 88px;
+  content-visibility: auto;
+  /* 只给块轴占位高度。简写 `contain-intrinsic-size: auto 520px` 会同时把
+     内联轴的固有宽度设成 520px，未渲染时把整页 min-content 撑到 520，
+     移动端就变成横向溢出 + 内容被裁。 */
+  contain-intrinsic-width: none;
+  contain-intrinsic-height: auto 520px;
+}
+
+.ws-section--editorial {
+  text-align: left;
+}
+
+.ws-section--editorial .ws-faq-head {
+  text-align: left;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.ws-section--editorial .ws-builder-cta {
+  align-self: flex-start;
+}
+
+.ws-section-kicker {
+  display: inline-flex;
+  margin-bottom: 12px;
+  color: var(--primary, #1677ff);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ws-section-title {
+  margin: 0 0 12px;
+  color: var(--ws-text);
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.ws-section-desc {
+  margin: 0;
+  color: var(--ws-text-sub);
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.ws-faq-head {
+  max-width: 760px;
+  margin: 0 auto 48px;
+  text-align: center;
+}
+
+.ws-faq-accordion {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-faq-item {
+  border-radius: 18px;
+  border: 1px solid var(--borderLight, #e5e5e5);
+  background: var(--background);
+  box-shadow: 0 10px 24px -22px var(--shadowMedium);
+  overflow: hidden;
+  transition:
+    border-color var(--home-motion-duration) ease,
+    box-shadow var(--home-motion-duration) ease;
+}
+
+.ws-faq-item[data-expanded] {
+  border-color: var(--primaryGhost, rgba(22, 119, 255, 0.28));
+  box-shadow:
+    0 14px 28px -18px var(--shadowMedium),
+    0 4px 12px var(--primaryGhost, rgba(22, 119, 255, 0.06));
+}
+
+.ws-faq-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ws-text);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.ws-faq-trigger-icon {
+  flex-shrink: 0;
+  color: var(--ws-text-sub);
+  transition: transform var(--home-motion-duration) var(--home-motion-ease);
+}
+
+.ws-faq-item[data-expanded] .ws-faq-trigger-icon {
+  transform: rotate(180deg);
+  color: var(--primary, #1677ff);
+}
+
+.ws-faq-trigger:hover,
+.ws-faq-trigger:focus-visible {
+  color: var(--primary, #1677ff);
+}
+
+.ws-faq-trigger:focus-visible {
+  outline: 2px solid var(--primary, #1677ff);
+  outline-offset: -2px;
+}
+
+.ws-faq-panel {
+  display: block;
+  height: var(--disclosure-panel-height);
+  transition: height var(--home-motion-duration) var(--home-motion-ease);
+  interpolate-size: allow-keywords;
+  overflow: hidden;
+}
+
+.ws-faq-panel p {
+  padding: 0 22px 20px;
+  margin: 0;
+  color: var(--ws-text-sub);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.ws-bottom-cta.ws-final-cta {
+  content-visibility: auto;
+  /* 同上：不要让占位尺寸约束内联轴宽度 */
+  contain-intrinsic-width: none;
+  contain-intrinsic-height: auto 320px;
+}
+.ws-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  max-width: 640px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
+        @supports (content-visibility: auto) {
+          /* 首屏 LCP 在 hero 文案，下面的大网格延后布局/绘制更划算。 */
+          .ws-grid {
+            content-visibility: auto;
+            contain-intrinsic-width: none;
+            contain-intrinsic-height: 760px;
+          }
+        }
+
+        /* === Generic Card Styles === */
+        .ws-card {
+          background: var(--ws-bg-sub);
+          border-radius: var(--ws-radius);
+          padding: 8px; /* Inner padding for the "frame" look */
+          transition: transform 0.4s ease, box-shadow 0.4s ease;
+          border: 1px solid transparent;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .ws-card:hover {
+          background: var(--ws-bg);
+          border-color: var(--ws-border);
+          box-shadow: 0 16px 32px -12px rgba(0,0,0,0.06);
+        }
+
+        .ws-card-visual {
+          background: var(--ws-bg);
+          border-radius: 18px;
+          height: 280px;
+          width: 100%;
+          position: relative;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 24px;
+          border: 1px solid rgba(0,0,0,0.03);
+        }
+
+        /* Dark visuals overrides */
+        .ws-card-night .ws-card-visual {
+           background: linear-gradient(160deg, #1e293b, #0f172a);
+           border: 1px solid #334155;
+        }
+
+.ws-card-text { padding: 0 24px 24px; text-align: left; }
+.ws-card-text h3 { font-size: 1.4rem; margin: 0 0 8px; color: var(--textHeading, var(--ws-text)); letter-spacing: -0.02em; }
+.ws-card-text p { font-size: 1rem; margin: 0; color: var(--ws-text-sub); line-height: 1.5; }
+
+/* === Card 1: Context Pipeline === */
+.ws-flow-pipeline {
+          display: flex; flex-direction: column; align-items: center; gap: 0; position: relative;
+        }
+        .ws-input-zone { display: flex; align-items: center; gap: 8px; z-index: 2; }
+        .ws-file-pill {
+          background: var(--ws-bg); border: 1px solid var(--ws-border);
+          padding: 6px 12px; border-radius: 8px; font-size: 0.8125rem;
+          display: flex; gap: 6px; align-items: center; color: var(--ws-text-sub);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .ws-file-pill-rule {
+          background: var(--primaryGhost, rgba(22, 119, 255, 0.1));
+          border-color: rgba(22, 119, 255, 0.24);
+          color: var(--ws-text);
+        }
+
+        .ws-stream-line {
+          width: 2px; height: 60px; background: var(--ws-border); position: relative; margin: 4px 0; overflow: hidden;
+        }
+        .ws-stream-pulse {
+          position: absolute; top: -100%; left: 0; width: 100%; height: 50%;
+          background: linear-gradient(to bottom, transparent, var(--ws-primary), transparent);
+          animation: ws-stream 2s infinite;
+        }
+
+        .ws-output-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; z-index: 2; width: 200px; }
+        .ws-ai-badge {
+           color: #06b6d4; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+           display: flex; align-items: center; gap: 4px;
+        }
+        .ws-chat-bubble {
+          background: #ecfeff; color: #164e63; padding: 12px; border-radius: var(--radius-lg);
+          font-size: var(--fontSize-base); width: 100%; border: 1px solid #cffafe;
+          opacity: 0; animation: ws-pop-in 0.5s forwards 1s;
+        }
+        .ws-memory-replay {
+          margin-top: 2px;
+          display: flex;
+          gap: 6px;
+        }
+        .ws-memory-step {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.62rem;
+          font-weight: 700;
+          color: var(--ws-text);
+          background: var(--ws-bg);
+          border: 1px solid var(--ws-border);
+          opacity: 0.45;
+          animation: ws-memory-step 2.4s ease-in-out infinite;
+        }
+        .ws-memory-step:nth-child(2) { animation-delay: 0.25s; }
+        .ws-memory-step:nth-child(3) { animation-delay: 0.5s; }
+
+        /* === Card 2: Debate Arena === */
+        /* === Card 2: Council Gravity === */
+        .ws-council-system {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transform: translateY(-16px);
+        }
+        .ws-orbit-ring {
+          position: absolute; border-radius: 50%; border: 1px dashed rgba(0,0,0,0.1);
+          pointer-events: none;
+        }
+        .ring-1 { width: 110px; height: 110px; animation: ws-spin 40s linear infinite; }
+        .ws-core-energy {
+          width: 44px; height: 44px; background: var(--ws-bg); border-radius: 50%;
+          box-shadow: 0 0 20px rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: center;
+          color: var(--ws-primary); z-index: 5;
+        }
+        .ws-model-avatar {
+          position: absolute;
+          display: flex; flex-direction: column; align-items: center; gap: 4px;
+          z-index: 4;
+        }
+        .ws-avatar-icon {
+          width: 32px; height: 32px; border-radius: 50%;
+          color: white; display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        .ws-avatar-name {
+          font-size: 0.58rem; font-weight: 600; color: var(--ws-text-sub);
+          line-height: 1; white-space: nowrap;
+        }
+        /* Pentagon centered via calc — r=55px, visual height 240px, center_y=120px
+           All avatars use translateX(-50%) so left = horizontal center of icon.
+           Icon center coords: GPT(0,-55) Gemini(+52,-17) Claude(+32,+45) DeepSeek(-32,+45) Kimi(-52,-17)
+           top = center_y + dy - 16px (half of 32px icon height) */
+        .pos-gpt      { top: 49px;  left: 50%;             transform: translateX(-50%); animation: ws-float   4s   ease-in-out infinite; }
+        .pos-gemini   { top: 87px;  left: calc(50% + 52px); transform: translateX(-50%); animation: ws-float-b 4.5s ease-in-out infinite 0.3s; }
+        .pos-claude   { top: 149px; left: calc(50% + 32px); transform: translateX(-50%); animation: ws-float-b 5s   ease-in-out infinite 0.8s; }
+        .pos-deepseek { top: 149px; left: calc(50% - 32px); transform: translateX(-50%); animation: ws-float-b 6s   ease-in-out infinite 1.2s; }
+        .pos-kimi     { top: 87px;  left: calc(50% - 52px); transform: translateX(-50%); animation: ws-float-b 5.5s ease-in-out infinite 1.8s; }
+
+        .ws-success-dot { width: 16px; height: 16px; background: #10b981; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+
+        /* === Card 3: Create Bloom === */
+        .ws-bloom-container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        .ws-magic-trigger {
+           width: 56px; height: 56px; background: var(--ws-text); color: var(--ws-bg);
+           border-radius: 50%; display: flex; align-items: center; justify-content: center;
+           z-index: 10; box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+           transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .ws-card-create:hover .ws-magic-trigger { transform: scale(1.1); }
+        .ws-zap-icon { fill: currentColor; }
+
+        .ws-bloom-beams { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 1; }
+        .ws-beam { stroke: var(--ws-primary); stroke-width: 2; stroke-dasharray: 5; opacity: 0; transition: all 0.5s ease; }
+        .ws-card-create:hover .ws-beam { opacity: 0.3; stroke-dashoffset: -10; }
+
+        .ws-bloom-item {
+           position: absolute; display: flex; flex-direction: column; align-items: center; gap: 6px;
+           transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+           opacity: 0.5; transform: scale(0.8);
+        }
+        .item-doc { top: 18px; left: calc(50% - 20px); }
+        .item-3d { top: 46px; left: 34px; }
+        .item-web { top: 46px; right: 34px; }
+        .item-image { bottom: 34px; left: 42px; }
+        .item-video { bottom: 34px; right: 42px; }
+
+        .ws-card-create:hover .item-doc { top: 10px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-3d { top: 36px; left: 24px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-web { top: 36px; right: 24px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-image { bottom: 24px; left: 30px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-video { bottom: 24px; right: 30px; opacity: 1; transform: scale(1); }
+
+        .ws-icon-box {
+           width: 40px; height: 40px; background: var(--ws-bg); border: 1px solid var(--ws-border);
+           border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center;
+           box-shadow: 0 4px 12px rgba(0,0,0,0.1); color: var(--ws-text);
+        }
+        .ws-label-tiny { font-size: 0.75rem; font-weight: 600; color: var(--ws-text-sub); }
+
+        /* === Card 4: Night Workflow === */
+        .ws-visual-night { display: flex; flex-direction: column; justify-content: center; position: relative; }
+        .ws-night-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+        .ws-moon { position: absolute; top: 20px; right: 20px; color: #fefce8; opacity: 0.8; }
+        .ws-star { position: absolute; background: white; border-radius: 50%; opacity: 0; animation: ws-twinkle 3s infinite; }
+        .s1 { width: 2px; height: 2px; top: 40%; left: 20%; animation-delay: 0s; }
+        .s2 { width: 3px; height: 3px; top: 20%; left: 50%; animation-delay: 1s; }
+        .s3 { width: 1px; height: 1px; bottom: 30%; right: 30%; animation-delay: 2s; }
+        .ws-dawn-glow {
+           position: absolute;
+           left: 0;
+           right: 0;
+           bottom: 0;
+           height: 44%;
+           background: linear-gradient(180deg, rgba(251, 191, 36, 0), rgba(251, 191, 36, 0.18));
+           opacity: 0;
+           animation: ws-dawn 6s ease-in-out infinite;
+        }
+
+        .ws-workflow-dock {
+           display: flex; align-items: center; gap: 8px; z-index: 2;
+           background: rgba(255,255,255,0.05); padding: 16px 24px; border-radius: var(--radius-xl);
+           border: 1px solid rgba(255,255,255,0.1);
+           backdrop-filter: blur(4px);
+        }
+        .ws-flow-step { display: flex; align-items: center; gap: 8px; }
+        .ws-step-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); }
+        .step-done .ws-step-dot { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+        .step-active .ws-step-dot { background: #3b82f6; box-shadow: 0 0 8px rgba(59, 130, 246, 0.4); }
+        .ws-step-line { width: 40px; height: 2px; background: rgba(255,255,255,0.1); }
+        .ws-step-line.dashed { background: transparent; border-top: 1px dashed rgba(255,255,255,0.3); }
+        .ws-night-progress {
+           width: 66px;
+           height: 4px;
+           border-radius: 999px;
+           background: rgba(255,255,255,0.16);
+           overflow: hidden;
+           margin-left: 4px;
+        }
+        .ws-night-progress-fill {
+           width: 100%;
+           height: 100%;
+           transform-origin: left center;
+           background: linear-gradient(90deg, #60a5fa, #facc15);
+           animation: ws-progress-fill 3.2s ease-in-out infinite;
+        }
+
+        .ws-sleep-badge {
+           margin-top: 20px; z-index: 2; display: flex; align-items: center; gap: 8px;
+           color: #94a3b8; font-size: 0.8125rem; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 99px;
+        }
+
+        /* === Animations === */
+        @keyframes ws-stream { 0% { top: -100%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+        @keyframes ws-pop-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        @keyframes ws-memory-step {
+          0%, 100% { opacity: 0.35; transform: translateY(0); }
+          40% { opacity: 1; transform: translateY(-2px); }
+        }
+        @keyframes ws-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes ws-spin-rev { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+        @keyframes ws-float { 0%,100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -6px); } }
+        @keyframes ws-float-b { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-6px); } }
+        @keyframes ws-flow-run { from { background-position: 0% 0%; } to { background-position: 200% 0%; } }
+        @keyframes ws-twinkle { 0%,100% { opacity: 0.2; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.5); } }
+        @keyframes ws-dawn {
+          0%, 20% { opacity: 0; }
+          65% { opacity: 1; }
+          100% { opacity: 0.3; }
+        }
+        @keyframes ws-progress-fill {
+          0% { transform: scaleX(0.12); }
+          70% { transform: scaleX(1); }
+          100% { transform: scaleX(0.32); }
+        }
+
+        .pulse { animation: ws-pulse 2s infinite; }
+        @keyframes ws-pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
+
+        /* === Responsive === */
+@media (min-width: 769px) and (max-width: 960px) {
+  .ws-cards-section .ws-grid {
+    gap: 20px;
+  }
+  .ws-card-visual {
+    height: 240px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 900px) {
+  .ws-cards-section .ws-grid {
+    grid-template-columns: 1fr;
+    max-width: 640px;
+  }
+}
+
+/* 移动端断点统一放在文件末尾（见文件底部）：媒体查询不提升优先级，
+   写在中间会被后面的基础规则覆盖。 */
+
+/* === Builder Bridge (orchestration 收尾承接) === */
+.ws-builder-bridge {
+  display: flex;
+  align-items: flex-start;
+  gap: 48px;
+  padding: 48px 0 32px;
+}
+
+.ws-builder-bridge-lead {
+  flex: 0 0 36%;
+}
+
+.ws-builder-bridge-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 8px 0 12px;
+  color: var(--ws-text);
+}
+
+.ws-builder-bridge-desc {
+  font-size: 0.9rem;
+  color: var(--ws-text-sub);
+  margin: 0 0 20px;
+  line-height: 1.6;
+}
+
+.ws-builder-bridge-cta {
+  font-size: 0.85rem;
+  padding: 10px 22px;
+}
+
+.ws-builder-bridge-caps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  flex: 1;
+}
+
+.ws-builder-bridge-cap {
+  padding: 18px;
+  border-radius: var(--ws-radius, 24px);
+  background: var(--ws-bg-sub);
+  border: 1px solid var(--ws-border);
+}
+
+.ws-builder-bridge-cap h3 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--ws-text);
+}
+
+.ws-builder-bridge-cap p {
+  font-size: 0.8rem;
+  color: var(--ws-text-sub);
+  margin: 0;
+  line-height: 1.55;
+}
+
+/* === Deliverables (多模态产出) === */
+.ws-deliverables {
+  padding: 32px 0 64px;
+}
+
+.ws-deliverables-head {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.ws-deliverables-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 8px 0 12px;
+  color: var(--ws-text);
+}
+
+.ws-deliverables-desc {
+  font-size: 0.9rem;
+  color: var(--ws-text-sub);
+  margin: 0;
+}
+
+.ws-deliverables-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+.ws-deliverable-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 16px;
+  border-radius: var(--ws-radius, 24px);
+  background: var(--ws-bg-sub);
+  border: 1px solid var(--ws-border);
+  transition: transform var(--home-motion-duration) var(--home-motion-ease),
+              border-color var(--home-motion-duration) var(--home-motion-ease);
+}
+
+.ws-deliverable-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--ws-primary);
+}
+
+.ws-deliverable-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ws-text);
+  margin-bottom: 6px;
+}
+
+.ws-deliverable-example {
+  font-size: 0.75rem;
+  color: var(--ws-text-sub);
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-faq-section.is-visible .ws-faq-item {
+    animation: none;
+  }
+}
+
+/* === 移动端 ===
+   必须留在文件末尾：同权重下后写的赢，之前这段放在中间，
+   .ws-builder-bridge / .ws-deliverables-grid 等后定义的规则会把它整段吃掉。
+   hero 相关覆写在 WelcomeSection.hero.css 末尾，orchestration 的在
+   WelcomeSection.orchestration.css 末尾（各自文件 import 更晚）。 */
+@media (max-width: 768px) {
+  .ws-grid { grid-template-columns: 1fr; }
+  .ws-cards-section .ws-grid {
+    grid-template-columns: 1fr;
+    max-width: 640px;
+  }
+  .ws-cards-section { margin-bottom: 64px; }
+  .ws-faq-trigger { padding: 18px 16px; }
+  .ws-faq-panel { padding: 0 16px 18px; }
+  .ws-section-title { font-size: 1.55rem; }
+  .ws-section--editorial { text-align: center; }
+  .ws-section--editorial .ws-faq-head { text-align: center; }
+  .ws-section--editorial .ws-builder-cta { align-self: center; }
+  .ws-builder-bridge { flex-direction: column; gap: 32px; padding: 32px 0 24px; }
+  .ws-builder-bridge-caps { grid-template-columns: 1fr; }
+  .ws-deliverables-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .ws-container { padding: 24px 0 48px; }
+}

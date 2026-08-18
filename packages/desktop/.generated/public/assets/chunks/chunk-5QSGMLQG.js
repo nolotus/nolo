@@ -1,0 +1,1 @@
+import{a as n}from"/public/assets/chunks/chunk-EFFT3IGY.js";import{e}from"/public/assets/chunks/chunk-HA3VNNOB.js";var t=e(n(),1),a=p=>{let{inputRef:i,className:l,style:s,type:o="text",...r}=p,u=["inline-edit-input",l].filter(Boolean).join(" ");return(0,t.jsx)(t.Fragment,{children:(0,t.jsx)("input",{ref:i,type:o,className:u,style:s,...r})})},I=a;export{I as a};

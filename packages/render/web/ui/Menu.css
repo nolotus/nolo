@@ -1,0 +1,128 @@
+/* App Menu — RAC Menu styles, themed with project tokens. */
+
+/* Shell (surface, elevation, motion) comes from `.app-popover`; this only adds
+ * the sizing a menu needs.
+ *
+ * The height bound lives on the scroll container, not the shell: the shell pads
+ * and borders, so a max-height there would let the list — which cannot see that
+ * chrome — grow past the panel's rounded edge. Bounding the scroller instead
+ * means the shell simply wraps it. */
+.app-menu-popover {
+  min-width: 180px;
+}
+
+.app-menu-popover .react-aria-Menu {
+  max-height: min(60vh, 420px);
+}
+
+.app-menu-popover.app-menu-popover--submenu {
+  min-width: 260px;
+}
+
+.app-menu-popover--submenu .react-aria-Menu {
+  max-height: min(70vh, 480px);
+}
+
+.react-aria-Menu {
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  min-width: 150px;
+  outline: none;
+  /* Shell already pads; the scroll box hugs it and clips to the inner radius. */
+  padding: 0;
+  border-radius: var(--popover-itemRadius);
+  display: flex;
+  flex-direction: column;
+}
+
+.react-aria-Menu[data-empty] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-style: italic;
+  min-height: 32px;
+  color: var(--textTertiary);
+}
+
+.react-aria-MenuItem {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--popover-itemRadius);
+  outline: none;
+  cursor: default;
+  /* An actionable row reads at full text weight at rest; the icon sits one step
+   * back so the label leads. Reserving primary contrast for hover would make
+   * every resting row look disabled. */
+  color: var(--text);
+  font-size: var(--fontSize-sm);
+  font-weight: 500;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  forced-color-adjust: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition:
+    background-color var(--popover-durationExit) var(--popover-ease),
+    color var(--popover-durationExit) var(--popover-ease);
+}
+
+.react-aria-MenuItem > svg:not(.app-menu-check, .app-menu-dot, .app-menu-chevron) {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--textSecondary);
+  transition: color var(--popover-durationExit) var(--popover-ease);
+}
+
+/* The label is already at full contrast, so the background alone carries the
+ * highlight; the icon catches up to the label. */
+.react-aria-MenuItem[data-open],
+.react-aria-MenuItem[data-pressed],
+.react-aria-MenuItem[data-focused] {
+  background: var(--backgroundHover);
+}
+
+.react-aria-MenuItem[data-open] > svg:not(.app-menu-chevron),
+.react-aria-MenuItem[data-pressed] > svg:not(.app-menu-chevron),
+.react-aria-MenuItem[data-focused] > svg:not(.app-menu-chevron) {
+  color: var(--text);
+}
+
+.react-aria-MenuItem[data-disabled] {
+  color: var(--textQuaternary);
+  opacity: 0.7;
+}
+
+.react-aria-MenuItem [slot="label"],
+.react-aria-MenuItem > span:not(.app-menu-check, .app-menu-dot) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.react-aria-MenuItem .app-menu-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--textQuaternary);
+}
+
+.react-aria-MenuItem .app-menu-check,
+.react-aria-MenuItem .app-menu-dot {
+  flex-shrink: 0;
+}
+
+.react-aria-MenuSection {
+  display: flex;
+  flex-direction: column;
+}
+
+.react-aria-Menu .react-aria-Separator {
+  margin: var(--space-1) var(--space-2);
+  border: 0;
+  border-top: 1px solid var(--borderLight, var(--border));
+  height: auto;
+  width: auto;
+}

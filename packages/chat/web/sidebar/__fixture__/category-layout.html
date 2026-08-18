@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sidebar Category Layout Fixture</title>
+  <style>
+    :root {
+      --background: #ffffff;
+      --surfaceSidebar: #f8f9fa;
+      --backgroundSecondary: #f1f3f4;
+      --backgroundHover: #e8eaed;
+      --borderSubtle: #dadce0;
+      --borderLight: #e8eaed;
+      --borderMuted: #dadce0;
+      --text: #202124;
+      --textSecondary: #5f6368;
+      --textTertiary: #80868b;
+      --primary: #1a73e8;
+      --primaryGhost: rgba(26, 115, 232, 0.08);
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --fontSize-sm: 13px;
+      --fontSize-xs: 11px;
+      --fontSize-base: 14px;
+      --control-md: 36px;
+      --control-xs: 28px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --shadowLight: rgba(60,64,67,0.08);
+      --shadowMedium: rgba(60,64,67,0.16);
+      --scrollbar-thumb-idle: rgba(128,134,139,0.24);
+      --scrollbar-thumb: rgba(128,134,139,0.40);
+      --scrollbar-thumb-hover: rgba(128,134,139,0.56);
+      --scrollbar-size-thin: 4px;
+      --scrollbar-radius: 999px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--background);
+      height: 100vh;
+      display: flex;
+    }
+
+    /* Simulated app shell */
+    .app-shell {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Sidebar container */
+    .ChatSidebar {
+      width: 320px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--surfaceSidebar, var(--background));
+      border-right: 1px solid var(--borderSubtle);
+      font-size: var(--fontSize-base);
+      user-select: none;
+    }
+
+    .ChatSidebar__scroll-area {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      padding: 14px 12px 0;
+      scrollbar-width: none;
+      overscroll-behavior: contain;
+    }
+
+    .ChatSidebar__content {
+      flex: 0 1 auto;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 12px;
+    }
+
+    /* ── CategorySection (from sidebar.css) ── */
+    .CategorySection {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .CategorySection__content-wrapper {
+      display: grid;
+      grid-template-rows: 1fr;
+      transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: clip;
+      min-height: 0;
+    }
+
+    .CategorySection__content-wrapper--collapsed {
+      grid-template-rows: 0fr;
+      flex: 0 0 0px;
+    }
+
+    .CategorySection__content-inner {
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 6px 4px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb-idle) transparent;
+      -webkit-overflow-scrolling: touch;
+      max-height: min(420px, 55vh);
+    }
+
+    .CategorySection__content-inner::-webkit-scrollbar {
+      width: var(--scrollbar-size-thin, 4px);
+    }
+
+    .CategorySection__content-inner::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .CategorySection__content-inner::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-thumb-idle, rgba(255, 255, 255, 0.16));
+      border-radius: var(--scrollbar-radius, 999px);
+    }
+
+    .CategorySection__content-inner:hover::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.28));
+    }
+
+    .CategorySection__content-inner::-webkit-scrollbar-thumb:hover {
+      background-color: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.38));
+    }
+
+    .CategorySection__overflow-hint {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 5px 8px 7px;
+      font-size: var(--fontSize-xs);
+      color: var(--textTertiary);
+      background: var(--surfaceSidebar, var(--background));
+      border-top: 1px dashed var(--borderLight);
+      cursor: default;
+      user-select: none;
+      flex-shrink: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .CategorySection__overflow-hint:hover {
+      color: var(--textSecondary);
+      background: var(--backgroundHover);
+    }
+
+    .CategorySection__empty-hint {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: var(--sidebarItemHeight, var(--control-md));
+      margin: 4px 0 8px;
+      border: 1px dashed var(--borderLight);
+      border-radius: var(--radius-lg);
+      background: var(--backgroundSecondary);
+      color: var(--textSecondary);
+      font-size: var(--fontSize-sm);
+      opacity: 0.72;
+      transition: all 0.15s;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+
+    /* CategoryHeader styles */
+    .CategoryHeader {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--space-2);
+      min-height: var(--control-md);
+      transition: background-color 0.15s ease;
+      user-select: none;
+      background-color: var(--surfaceSidebar, var(--background));
+      flex-shrink: 0;
+    }
+
+    .CategoryHeader:hover {
+      background-color: var(--backgroundHover);
+    }
+
+    .CategoryHeader__collapse-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--control-xs);
+      height: var(--control-xs);
+      padding: 0;
+      background: none;
+      border: none;
+      color: var(--textTertiary);
+      cursor: pointer;
+      border-radius: var(--space-1);
+      transition: background-color 0.1s ease, color 0.1s ease;
+      flex-shrink: 0;
+    }
+
+    .CategoryHeader__collapse-btn svg {
+      transition: transform 0.2s ease;
+    }
+
+    .CategoryHeader__name {
+      flex: 1;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: var(--space-1) 0;
+    }
+
+    .CategoryHeader__badge {
+      flex-shrink: 0;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 18px;
+      text-align: center;
+      background: var(--backgroundSecondary);
+      color: var(--textSecondary);
+      transition: opacity 0.15s ease;
+      margin-left: auto;
+      margin-right: 4px;
+    }
+
+    .CategoryHeader__actions {
+      display: flex;
+      gap: 1px;
+      align-items: center;
+      opacity: 0;
+      transform: translateX(4px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .CategoryHeader:hover .CategoryHeader__actions {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .CategoryHeader__action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      background: none;
+      border: none;
+      color: var(--textTertiary);
+      cursor: pointer;
+      border-radius: var(--space-1);
+      transition: background-color 0.1s ease, color 0.1s ease;
+      flex-shrink: 0;
+    }
+
+    .CategoryHeader__action-btn:hover {
+      color: var(--textSecondary);
+      background-color: var(--backgroundTertiary);
+    }
+
+    /* SidebarItem styles */
+    .SidebarItem {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 34px;
+      padding: 7px 10px;
+      background: none;
+      border: none;
+      border-radius: var(--radius-md);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.12s ease;
+      text-align: left;
+      font-size: var(--fontSize-sm);
+    }
+
+    .SidebarItem:hover {
+      background: var(--backgroundHover);
+    }
+
+    .SidebarItem__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      color: var(--textSecondary);
+    }
+
+    .SidebarItem__title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Main content area */
+    .main-content {
+      flex: 1;
+      background: var(--background);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--textSecondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div class="ChatSidebar">
+      <div style="padding: 12px; border-bottom: 1px solid var(--borderSubtle); display: flex; align-items: center; gap: 8px;">
+        <div style="width: 100%; height: 38px; background: var(--backgroundSecondary); border-radius: 8px; border: 1px solid var(--borderSubtle); display: flex; align-items: center; padding: 0 12px; color: var(--textSecondary); font-size: 13px;">
+          园艺种植
+        </div>
+      </div>
+      <div class="ChatSidebar__scroll-area">
+        <div class="ChatSidebar__content">
+
+          <!-- Category: 未分类 (4 items) -->
+          <div class="CategorySection">
+            <div class="CategoryHeader">
+              <button class="CategoryHeader__collapse-btn" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <span class="CategoryHeader__name">未分类</span>
+              <div class="CategoryHeader__actions">
+                <button class="CategoryHeader__action-btn">+</button>
+                <button class="CategoryHeader__action-btn">✎</button>
+                <button class="CategoryHeader__action-btn">🗑</button>
+              </div>
+            </div>
+            <div class="CategorySection__content-wrapper">
+              <div class="CategorySection__content-inner">
+                <div class="SidebarItem"><span class="SidebarItem__icon">💬</span><span class="SidebarItem__title">朝南客厅植物光照与摆放</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">💬</span><span class="SidebarItem__title">白色恋人海芋档案更新</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">🤖</span><span class="SidebarItem__title">园艺助手</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">💬</span><span class="SidebarItem__title">散尾葵根部干黄发黑原因分析</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category: 我的绿植和花花档案 (4 items) -->
+          <div class="CategorySection">
+            <div class="CategoryHeader">
+              <button class="CategoryHeader__collapse-btn" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <span class="CategoryHeader__name">我的绿植和花花档案</span>
+              <div class="CategoryHeader__actions">
+                <button class="CategoryHeader__action-btn">+</button>
+                <button class="CategoryHeader__action-btn">✎</button>
+                <button class="CategoryHeader__action-btn">🗑</button>
+              </div>
+            </div>
+            <div class="CategorySection__content-wrapper">
+              <div class="CategorySection__content-inner">
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">🌿 龟背竹</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">春羽 - 水培档案（第一盆水培已死）</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">🪴 白色恋人彩叶海芋</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">🌴 散尾葵</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category: 任务清单 (3 items) -->
+          <div class="CategorySection">
+            <div class="CategoryHeader">
+              <button class="CategoryHeader__collapse-btn" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <span class="CategoryHeader__name">任务清单</span>
+              <div class="CategoryHeader__actions">
+                <button class="CategoryHeader__action-btn">+</button>
+                <button class="CategoryHeader__action-btn">✎</button>
+                <button class="CategoryHeader__action-btn">🗑</button>
+              </div>
+            </div>
+            <div class="CategorySection__content-wrapper">
+              <div class="CategorySection__content-inner">
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">📝 园艺任务清单</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">待办事项-园艺</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">白色恋人彩叶海芋 - 待办事项</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category: 指南和经验 (2 items) -->
+          <div class="CategorySection">
+            <div class="CategoryHeader">
+              <button class="CategoryHeader__collapse-btn" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <span class="CategoryHeader__name">指南和经验</span>
+              <div class="CategoryHeader__actions">
+                <button class="CategoryHeader__action-btn">+</button>
+                <button class="CategoryHeader__action-btn">✎</button>
+                <button class="CategoryHeader__action-btn">🗑</button>
+              </div>
+            </div>
+            <div class="CategorySection__content-wrapper">
+              <div class="CategorySection__content-inner">
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">🪴 植物档案总览 - 朝南客厅阳台</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">关于配土</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category: 长列表测试 (overflow category with 15 items to show affordance) -->
+          <div class="CategorySection">
+            <div class="CategoryHeader">
+              <button class="CategoryHeader__collapse-btn" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <span class="CategoryHeader__name">植物百科大全</span>
+              <div class="CategoryHeader__actions">
+                <button class="CategoryHeader__action-btn">+</button>
+                <button class="CategoryHeader__action-btn">✎</button>
+                <button class="CategoryHeader__action-btn">🗑</button>
+              </div>
+            </div>
+            <div class="CategorySection__content-wrapper">
+              <div class="CategorySection__content-inner" id="overflow-category">
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">龟背竹养护指南</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">春羽水培技巧</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">白色恋人彩叶海芋</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">散尾葵常见问题</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">琴叶榕修剪方法</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">天堂鸟换盆教程</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">虎皮兰繁殖方法</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">绿萝水培转土培</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">多肉度夏攻略</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">月季病虫害防治</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">绣球调色技巧</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">铁线莲修剪分类</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">兰花植料配比</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">蕨类植物湿度管理</span></div>
+                <div class="SidebarItem"><span class="SidebarItem__icon">📄</span><span class="SidebarItem__title">秋海棠扦插繁殖</span></div>
+              </div>
+            </div>
+            <!-- Overflow hint (simulating what React component renders when isOverflowing=true) -->
+            <div class="CategorySection__overflow-hint" aria-hidden="true">
+              <span>共 15 项</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+    <div class="main-content">
+      <div style="text-align: center;">
+        <h2 style="font-size: 24px; color: var(--textTertiary); margin-bottom: 8px;">主内容区</h2>
+        <p style="font-size: 14px; color: var(--textSecondary);">Fixture: Sidebar Layout 方案 B</p>
+        <p style="font-size: 12px; color: var(--textTertiary); margin-top: 8px;">短分类自适应高度 · 长分类限制 max-height 并显示滚动提示</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

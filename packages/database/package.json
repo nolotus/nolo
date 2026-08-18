@@ -1,0 +1,16 @@
+{
+  "name": "database",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "core": "workspace:core",
+    "date-fns-tz": "^2.0.0",
+    "level": "^10.0.0"
+  }
+}

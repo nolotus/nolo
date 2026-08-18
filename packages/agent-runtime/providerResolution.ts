@@ -1,0 +1,468 @@
+import { asOptionalTrimmedString } from "core/optionalString";
+import { normalizeServerOrigin } from "core/serverOrigin";
+import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { asTrimmedString } from "core/trimmedString";
+import type { AgentRuntimeAgentConfig } from "./hostAdapter";
+import { pickAgentRuntimeInferenceOptions } from "./agentConfigOptions";
+import type { CredentialBroker } from "./credentialBroker";
+import {
+  isOpenAiResponsesModel,
+  resolvePlatformResponsesEndpoint,
+  resolvePlatformChatCompletionsEndpoint,
+} from "./platformProviderEndpoints";
+
+type EnvLike = Record<string, string | undefined>;
+
+function resolvePlatformProviderEndpoint(agentConfig: AgentRuntimeAgentConfig) {
+  const customProviderUrl = agentConfig.customProviderUrl?.trim();
+  if (customProviderUrl) return resolveChatCompletionsEndpoint(customProviderUrl);
+
+  const provider = asTrimmedLowercaseString(
+    agentConfig.provider ?? agentConfig.apiSource ?? "openai"
+  );
+  if (!provider) {
+    throw new Error("Platform chat provider requires agentConfig.provider.");
+  }
+  if (isOpenAiResponsesModel({
+    provider,
+    model: agentConfig.model,
+    endpointKey: (agentConfig as any).endpointKey,
+  })) {
+    return resolvePlatformResponsesEndpoint(provider) ?? "";
+  }
+  const endpoint = resolvePlatformChatCompletionsEndpoint(
+    provider,
+    agentConfig.model,
+  );
+  if (!endpoint) {
+    throw new Error(`Platform chat provider does not support provider "${provider}".`);
+  }
+  return endpoint;
+}
+
+export type AgentProviderMode = "cli" | "platform" | "custom";
+export type ProviderExecutionTransport = "direct" | "proxy";
+export type AgentRuntimeLocation = "server" | "bound-machine" | "local-host";
+
+/**
+ * Resolves an `apiKeyRef` (e.g. "chatgpt") into a fresh OAuth access token.
+ * Injected by the caller so agent-runtime stays free of provider-specific OAuth
+ * wiring (which lives in packages/cli/oauth).
+ */
+export type ApiKeyRefResolver = (
+  ref: string,
+  opts?: { force?: boolean },
+) => Promise<string | null>;
+
+/**
+ * Load a secret from the local credential broker by explicit ref.
+ * Prefer this for metered API keys stored under ~/.nolo/credentials/keys/.
+ */
+export async function resolveCredentialFromBroker(
+  broker: CredentialBroker,
+  ref: string,
+): Promise<string | null> {
+  const trimmed = asTrimmedString(ref);
+  if (!trimmed) return null;
+  try {
+    if (!(await broker.has(trimmed))) return null;
+    const secret = await broker.get(trimmed);
+    return asOptionalTrimmedString(secret) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build an ApiKeyRefResolver that reads from a CredentialBroker first.
+ * Callers may compose with OAuth resolvers (try broker, then OAuth).
+ */
+export function createBrokerApiKeyRefResolver(broker: CredentialBroker): ApiKeyRefResolver {
+  return (ref) => resolveCredentialFromBroker(broker, ref);
+}
+
+export type ProviderTransportDecision = {
+  mode: AgentProviderMode;
+  transport: ProviderExecutionTransport;
+  reason:
+    | "cli-provider"
+    | "custom-provider"
+    | "custom-server-proxy"
+    | "platform-agent"
+    | "forced-platform-env"
+    | "forced-direct-env"
+    | "direct-provider-env"
+    | "platform-proxy-fallback";
+};
+
+type ProviderExecutionPlanBase = {
+  mode: AgentProviderMode;
+  transport: ProviderExecutionTransport;
+  model: string;
+  provider: string;
+  requestOptions: Record<string, number | string>;
+};
+
+export type CliProviderExecutionPlan = ProviderExecutionPlanBase & {
+  mode: "cli";
+  transport: "direct";
+  cliProvider: string;
+};
+
+export type DirectProviderExecutionPlan = ProviderExecutionPlanBase & {
+  mode: "platform" | "custom";
+  transport: "direct";
+  endpoint: string;
+  apiKey: string;
+  apiKeyHeader?: string;
+};
+
+export type ProxyProviderExecutionPlan = ProviderExecutionPlanBase & {
+  mode: "platform" | "custom";
+  transport: "proxy";
+  endpoint: string;
+  serverUrl: string;
+  authToken: string;
+  agentKey: string;
+  apiSource?: string;
+  apiKey?: string;
+  apiKeyHeader?: string;
+};
+
+export type ProviderExecutionPlan =
+  | CliProviderExecutionPlan
+  | DirectProviderExecutionPlan
+  | ProxyProviderExecutionPlan;
+
+export function trimTrailingSlash(value: string) {
+  return normalizeServerOrigin(value);
+}
+
+export function resolveChatCompletionsEndpoint(value: string) {
+  const trimmed = trimTrailingSlash(value);
+  return trimmed.endsWith("/chat/completions")
+    ? trimmed
+    : `${trimmed}/chat/completions`;
+}
+
+export function resolveOpenAiCompatibleBaseUrl(env: EnvLike) {
+  return env.NOLO_LOCAL_OPENAI_BASE_URL || env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+}
+
+export function resolveOpenAiCompatibleApiKey(env: EnvLike) {
+  return env.OPENAI_API_KEY || env.NOLO_LOCAL_OPENAI_API_KEY || "";
+}
+
+export function resolvePlatformServerUrl(env: EnvLike) {
+  return trimTrailingSlash(env.NOLO_SERVER || env.BASE_URL || "https://nolo.chat");
+}
+
+export function resolvePlatformAuthToken(env: EnvLike) {
+  // Single source of truth for "which env vars count as a valid server-proxy
+  // bearer". A machine key (NOLO_MACHINE_API_KEY) is a valid bearer for the
+  // builtin title/summary LLM even though it is not a JWT, so it counts here.
+  // CLI-side resolveRuntimeAuthToken delegates to this — do not duplicate the
+  // token list anywhere else.
+  return (
+    env.AUTH_TOKEN ||
+    env.AUTH ||
+    env.NOLO_MACHINE_API_KEY ||
+    env.BENCHMARK_AUTH_TOKEN ||
+    ""
+  );
+}
+
+export function canUsePlatformChatProvider(env: EnvLike) {
+  return Boolean(resolvePlatformAuthToken(env));
+}
+
+export function hasDirectOpenAiCompatibleProvider(env: EnvLike) {
+  return Boolean(
+    env.NOLO_LOCAL_OPENAI_API_KEY ||
+      env.OPENAI_API_KEY ||
+      env.NOLO_LOCAL_OPENAI_BASE_URL ||
+      env.OPENAI_BASE_URL ||
+      env.OLLAMA_BASE_URL
+  );
+}
+
+export function resolveAgentProviderMode(agentConfig: AgentRuntimeAgentConfig): AgentProviderMode {
+  if (agentConfig.apiSource === "cli" || agentConfig.provider === "cli" || agentConfig.cliProvider) {
+    return "cli";
+  }
+  if (agentConfig.apiSource === "custom" || agentConfig.customProviderUrl) {
+    return "custom";
+  }
+  return "platform";
+}
+
+export function resolveAgentRuntimeLocation(args: {
+  agentConfig: AgentRuntimeAgentConfig;
+  runtimeKind: "local" | "desktop" | "server";
+}): AgentRuntimeLocation {
+  const runtimeBinding = args.agentConfig.runtimeBinding;
+  const machineId = asTrimmedString(runtimeBinding?.machineId);
+  if (machineId) return "bound-machine";
+  if (args.runtimeKind === "server") return "server";
+  return "local-host";
+}
+
+export function resolveProviderTransportDecision(args: {
+  agentConfig: AgentRuntimeAgentConfig;
+  env: EnvLike;
+  runtimeLocation: AgentRuntimeLocation;
+}): ProviderTransportDecision {
+  const mode = resolveAgentProviderMode(args.agentConfig);
+  if (mode === "cli") {
+    return { mode, transport: "direct", reason: "cli-provider" };
+  }
+  if (mode === "custom") {
+    if (args.runtimeLocation === "server" && args.agentConfig.useServerProxy === true) {
+      return { mode, transport: "proxy", reason: "custom-server-proxy" };
+    }
+    return { mode, transport: "direct", reason: "custom-provider" };
+  }
+  if (args.agentConfig.apiSource === "platform" || args.agentConfig.useServerProxy === true) {
+    return { mode, transport: "proxy", reason: "platform-agent" };
+  }
+  if (args.env.NOLO_LOCAL_LLM === "platform") {
+    return { mode, transport: "proxy", reason: "forced-platform-env" };
+  }
+  if (args.env.NOLO_LOCAL_LLM === "direct") {
+    return { mode, transport: "direct", reason: "forced-direct-env" };
+  }
+  if (hasDirectOpenAiCompatibleProvider(args.env)) {
+    return { mode, transport: "direct", reason: "direct-provider-env" };
+  }
+  if (canUsePlatformChatProvider(args.env)) {
+    return { mode, transport: "proxy", reason: "platform-proxy-fallback" };
+  }
+  return { mode, transport: "direct", reason: "direct-provider-env" };
+}
+
+export function resolveProviderAuthHeaderName(args: {
+  endpoint: string;
+  apiKeyHeader?: string;
+}) {
+  const explicitHeader = args.apiKeyHeader?.trim();
+  if (explicitHeader) return explicitHeader;
+  if (/xiaomimimo\.com/i.test(args.endpoint)) return "api-key";
+  return "Authorization";
+}
+
+export function buildProviderAuthHeaders(args: {
+  endpoint: string;
+  apiKey: string;
+  apiKeyHeader?: string;
+}): Record<string, string> {
+  if (!args.apiKey) return {};
+  const headerName = resolveProviderAuthHeaderName(args);
+  return headerName.toLowerCase() === "authorization"
+    ? { Authorization: `Bearer ${args.apiKey}` }
+    : { [headerName]: args.apiKey };
+}
+
+export async function buildProviderExecutionPlan(args: {
+  agentConfig: AgentRuntimeAgentConfig;
+  env: EnvLike;
+  runtimeKind: "local" | "desktop" | "server";
+  apiKeyRefResolver?: ApiKeyRefResolver;
+  /** Local-first OS credential broker (API keys). Prefer over raw agent.apiKey. */
+  credentialBroker?: CredentialBroker;
+  /** Server sync fallback; only invoked when credentialSynced is true and broker misses. */
+  syncFetcher?: (credentialRef: string) => Promise<string | null>;
+}): Promise<ProviderExecutionPlan> {
+  const { agentConfig, env } = args;
+  const mode = resolveAgentProviderMode(agentConfig);
+  const runtimeLocation = resolveAgentRuntimeLocation({
+    agentConfig,
+    runtimeKind: args.runtimeKind,
+  });
+  const transportDecision = resolveProviderTransportDecision({
+    agentConfig,
+    env,
+    runtimeLocation,
+  });
+  const model = agentConfig.model || "gpt-4.1-mini";
+  const requestOptions = pickAgentRuntimeInferenceOptions(agentConfig);
+
+  if (mode === "cli") {
+    return {
+      mode,
+      transport: "direct",
+      cliProvider: agentConfig.cliProvider || agentConfig.provider || "codex",
+      model,
+      provider: agentConfig.provider || "cli",
+      requestOptions,
+    };
+  }
+
+  if (mode === "custom") {
+    const endpoint = resolveChatCompletionsEndpoint(agentConfig.customProviderUrl || resolveOpenAiCompatibleBaseUrl(env));
+    let apiKey = "";
+    const credentialRef = agentConfig.credentialRef?.trim();
+    const apiKeyRef = agentConfig.apiKeyRef?.trim();
+
+    // Prefer local broker (migrated API keys) before raw record fields / OAuth resolver.
+    if (args.credentialBroker) {
+      const brokerRefs = [credentialRef, apiKeyRef].filter(
+        (ref): ref is string => Boolean(ref),
+      );
+      for (const ref of brokerRefs) {
+        const fromBroker = await resolveCredentialFromBroker(args.credentialBroker, ref);
+        if (fromBroker) {
+          apiKey = fromBroker;
+          break;
+        }
+      }
+    }
+
+    // broker miss → server sync fallback (only when opted in)
+    if (!apiKey && agentConfig.credentialSynced && args.syncFetcher && credentialRef) {
+      let synced: string | null = null;
+      try {
+        synced = await args.syncFetcher(credentialRef);
+      } catch {
+        // Local execution must survive a transient server deployment; a
+        // missing synced copy is handled by the normal local credential hint.
+      }
+      const trimmed = asTrimmedString(synced);
+      if (trimmed) {
+        try { await args.credentialBroker?.put(credentialRef, trimmed); } catch {}
+        apiKey = trimmed;
+      }
+    }
+
+    // Provider-level shared key (provider-key:xxx): lives in the user-secrets
+    // store, not the agent-credentials store. Try syncFetcher with the ref
+    // itself — the caller's syncFetcher implementation is expected to detect
+    // the provider-key: prefix and route to /api/user-secrets/get.
+    // No credentialSynced opt-in required here: the user explicitly checked
+    // "记住此服务商密钥" when creating the agent, which is the consent for
+    // storing and retrieving this shared key from the server.
+    if (!apiKey && apiKeyRef && apiKeyRef.startsWith("provider-key:") && args.syncFetcher) {
+      try {
+        const shared = await args.syncFetcher(apiKeyRef);
+        const trimmed = asTrimmedString(shared);
+        if (trimmed) {
+          try { await args.credentialBroker?.put(apiKeyRef, trimmed); } catch {}
+          apiKey = trimmed;
+        }
+      } catch {
+        // Best-effort: a missing provider key falls through to the hint below.
+      }
+    }
+
+    if (!apiKey && apiKeyRef && args.apiKeyRefResolver) {
+      const resolved = await args.apiKeyRefResolver(apiKeyRef);
+      if (resolved) {
+        apiKey = resolved;
+      } else if (!agentConfig.apiKey?.trim() && !agentConfig.apiKeyFromAgentKey?.trim()) {
+        const isApiKeyRef = apiKeyRef.startsWith("api-key:");
+        const hint = isApiKeyRef
+          ? (agentConfig.credentialSynced
+            ? `Local credential for "${apiKeyRef}" not found. It is synced to your account — run this agent once on a device that has the key, or re-enter it in agent settings.`
+            : `Local credential for "${apiKeyRef}" not found. Re-enter the API key in agent settings, or enable cross-device sync.`)
+          : `OAuth credential for "${apiKeyRef}" not found locally. Run \`nolo auth ${apiKeyRef}\` (and \`--sync-to-server\` for server-side agent runs).`;
+        throw new Error(hint);
+      }
+    }
+
+    if (!apiKey) {
+      apiKey =
+        asOptionalTrimmedString(agentConfig.apiKey) ??
+        asOptionalTrimmedString(agentConfig.apiKeyFromAgentKey) ??
+        "";
+    }
+
+    const apiKeyHeader = resolveProviderAuthHeaderName({
+      endpoint,
+      apiKeyHeader: agentConfig.apiKeyHeader,
+    });
+    if (transportDecision.transport === "proxy") {
+      return {
+        mode,
+        transport: "proxy",
+        model,
+        provider: agentConfig.provider || "custom",
+        endpoint,
+        requestOptions,
+        serverUrl: resolvePlatformServerUrl(env),
+        authToken: resolvePlatformAuthToken(env),
+        agentKey: agentConfig.key,
+        ...(agentConfig.apiSource ? { apiSource: agentConfig.apiSource } : {}),
+        ...(apiKey ? { apiKey } : {}),
+        ...(apiKeyHeader ? { apiKeyHeader } : {}),
+      };
+    }
+    return {
+      mode,
+      transport: "direct",
+      model,
+      provider: agentConfig.provider || "custom",
+      endpoint,
+      requestOptions,
+      apiKey,
+      ...(apiKeyHeader ? { apiKeyHeader } : {}),
+    };
+  }
+
+  const provider = agentConfig.provider || agentConfig.apiSource || "openai";
+  const endpoint = transportDecision.transport === "proxy"
+    ? resolvePlatformProviderEndpoint(agentConfig)
+    : resolveChatCompletionsEndpoint(resolveOpenAiCompatibleBaseUrl(env));
+  if (transportDecision.transport === "proxy") {
+    return {
+      mode,
+      transport: "proxy",
+      model,
+      provider,
+      endpoint,
+      requestOptions,
+      serverUrl: resolvePlatformServerUrl(env),
+      authToken: resolvePlatformAuthToken(env),
+      agentKey: agentConfig.key,
+      ...(agentConfig.apiSource ? { apiSource: agentConfig.apiSource } : {}),
+      // Platform agents use the server-managed provider credential. Never
+      // forward a raw credential from a stale/local agent record through the
+      // platform proxy; credentials are resolved by the platform server.
+    };
+  }
+  // Platform direct: prefer brokered credentialRef (migrated keys) before env.
+  let apiKey = "";
+  const credentialRef = agentConfig.credentialRef?.trim();
+  if (args.credentialBroker && credentialRef) {
+    const fromBroker = await resolveCredentialFromBroker(args.credentialBroker, credentialRef);
+    if (fromBroker) {
+      apiKey = fromBroker;
+    }
+  }
+  // broker miss → server sync fallback (only when opted in)
+  if (!apiKey && agentConfig.credentialSynced && args.syncFetcher && credentialRef) {
+    let synced: string | null = null;
+    try {
+      synced = await args.syncFetcher(credentialRef);
+    } catch {
+      // Local execution must survive a transient server deployment; a
+      // missing synced copy is handled by the normal local credential hint.
+    }
+    const trimmed = asTrimmedString(synced);
+    if (trimmed) {
+      try { await args.credentialBroker?.put(credentialRef, trimmed); } catch {}
+      apiKey = trimmed;
+    }
+  }
+  if (!apiKey) {
+    apiKey = resolveOpenAiCompatibleApiKey(env);
+  }
+
+  return {
+    mode,
+    transport: "direct",
+    model,
+    provider: agentConfig.provider || "openai-compatible",
+    endpoint,
+    requestOptions,
+    apiKey,
+  };
+}

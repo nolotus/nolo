@@ -1,0 +1,158 @@
+/* ── AgentExplore ────────────────────────────────────── */
+
+        .agent-explore {
+          min-height: 100vh;
+          background-color: var(--surfaceCanvas, var(--background));
+        }
+
+        .agent-explore__inner {
+          max-width: 1160px;
+          margin: 0 auto;
+          padding: var(--space-12) var(--space-6) var(--space-16);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-8);
+        }
+
+        @keyframes agentExploreFadeIn {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .agent-explore-header {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
+          padding: 0 var(--space-1);
+        }
+
+        .agent-explore-title {
+          font-size: clamp(1.875rem, 3vw, 2.25rem);
+          font-weight: 700;
+          color: var(--text);
+          margin: 0;
+          letter-spacing: -0.03em;
+          line-height: 1.1;
+        }
+
+        .agent-explore-subtitle {
+          font-size: var(--fontSize-base);
+          color: var(--textSecondary);
+          margin: 0;
+          line-height: var(--leading-relaxed);
+          max-width: 640px;
+        }
+
+        .agent-explore-tabs {
+          padding: 0 var(--space-1);
+        }
+
+        .agent-explore-tablist {
+          display: flex;
+          gap: var(--space-6);
+          border-bottom: 1px solid var(--borderSubtle, var(--border, #e4e4e7));
+        }
+
+        .agent-explore-tab {
+          padding: var(--space-2) 0 var(--space-3);
+          font-size: var(--fontSize-base);
+          font-weight: 500;
+          color: var(--textSecondary);
+          cursor: pointer;
+          background: none;
+          border: none;
+          outline: none;
+          position: relative;
+          transition: color 0.15s ease;
+        }
+
+        .agent-explore-tab[data-hovered] {
+          color: var(--text);
+        }
+
+        .agent-explore-tab[data-selected] {
+          color: var(--text);
+          font-weight: 600;
+        }
+
+        .agent-explore-tab .react-aria-SelectionIndicator {
+          position: absolute;
+          bottom: -1px;
+          left: 0;
+          right: 0;
+          height: 2px;
+          background-color: var(--primary, #1677ff);
+          border-radius: 1px;
+        }
+
+        .agent-explore-content {
+          width: 100%;
+          opacity: 0;
+          animation: agentExploreFadeIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.05s forwards;
+        }
+
+        .agent-explore-content .public-agents {
+          max-width: none;
+          margin: 0;
+        }
+
+        .agent-explore-content .public-agents__controls {
+          padding: 0 var(--space-1);
+        }
+
+        .agent-explore-community {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-6);
+          padding: 0 var(--space-1);
+        }
+
+        .agent-explore-community-footer {
+          display: flex;
+          justify-content: center;
+          padding-top: var(--space-4);
+        }
+
+        .agent-explore-community-link {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-1);
+          padding: var(--space-2) var(--space-4);
+          font-size: var(--fontSize-sm, 14px);
+          font-weight: 500;
+          color: var(--textSecondary);
+          background-color: var(--surfaceSecondary, var(--surface, #f4f4f5));
+          border-radius: var(--radius-md, 8px);
+          text-decoration: none;
+          transition: all 0.15s ease;
+        }
+
+        .agent-explore-community-link:hover {
+          color: var(--text);
+          background-color: var(--surfaceHover, #e4e4e7);
+          text-decoration: none;
+        }
+
+        @media (max-width: 1200px) {
+          .agent-explore__inner {
+            padding: var(--space-8) var(--space-5) var(--space-12);
+          }
+        }
+
+        @media (max-width: 640px) {
+          .agent-explore__inner {
+            padding: var(--space-6) var(--space-4) var(--space-10);
+            gap: var(--space-6);
+          }
+
+          .agent-explore-header,
+          .agent-explore-tabs,
+          .agent-explore-community,
+          .agent-explore-content .public-agents__controls {
+            padding: 0;
+          }
+
+          .agent-explore-subtitle {
+            font-size: var(--fontSize-base);
+          }
+        }

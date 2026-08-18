@@ -1,0 +1,20 @@
+// node_modules/@lobehub/icons/es/Qwen/style.js
+var TITLE = "Qwen";
+var COMBINE_TEXT_MULTIPLE = 0.7;
+var COMBINE_SPACE_MULTIPLE = 0.2;
+var COLOR_PRIMARY = "#615ced";
+var COLOR_GRADIENT = "linear-gradient(to right, #6336E7,  #6F69F7)";
+var AVATAR_BACKGROUND = COLOR_PRIMARY;
+var AVATAR_COLOR = "#fff";
+var AVATAR_ICON_MULTIPLE = 0.75;
+
+export {
+  TITLE,
+  COMBINE_TEXT_MULTIPLE,
+  COMBINE_SPACE_MULTIPLE,
+  COLOR_PRIMARY,
+  COLOR_GRADIENT,
+  AVATAR_BACKGROUND,
+  AVATAR_COLOR,
+  AVATAR_ICON_MULTIPLE
+};

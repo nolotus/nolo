@@ -1,0 +1,1 @@
+var O="OpenAI",_=.75,A=.1,r="#000",L="#19C37D",C="#AB68FF",R="#F86AA4",e="#F9C322",p="#0099FF",T="#0000FE",a=r,o="#fff",t=.75;export{O as a,_ as b,A as c,r as d,L as e,C as f,R as g,e as h,p as i,T as j,a as k,o as l,t as m};

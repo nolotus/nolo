@@ -1,0 +1,1 @@
+import{e as o}from"/public/assets/chunks/chunk-BHUMEZ7R.js";import{a as e}from"/public/assets/chunks/chunk-EFFT3IGY.js";import{e as r}from"/public/assets/chunks/chunk-HA3VNNOB.js";var t=r(e(),1);function c({children:i}){return(0,t.jsx)(o,{slot:"description",children:i})}export{c as a};

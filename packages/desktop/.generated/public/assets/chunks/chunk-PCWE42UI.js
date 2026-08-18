@@ -1,0 +1,1 @@
+import{a as o}from"/public/assets/chunks/chunk-EFFT3IGY.js";import{e as r}from"/public/assets/chunks/chunk-HA3VNNOB.js";var i=r(o(),1),c=({children:l,fontSize:e,marginBottom:t})=>(0,i.jsx)("h2",{className:"form-title",style:e||t?{...e?{fontSize:e}:{},...t?{marginBottom:t}:{}}:void 0,children:l}),s=c;export{s as a};

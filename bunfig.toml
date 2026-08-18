@@ -1,0 +1,27 @@
+[install]
+registry = "https://registry.npmjs.org"
+linker = "hoisted"
+
+# ⚠️ 这些 conditions 只影响 `bun install` 的依赖解析，不影响 `bun run` 的 runtime module resolution。
+# Runtime module resolution 需要 CLI flag --conditions=nolo-cloud（见 deployRemote.sh / restartAlphaNolo.sh）。
+# 如果遗漏 --conditions=nolo-cloud，identity/cloudRoutes 会走 local 分支（空数组），
+# cloud-only 路由（login/signup/life/*）在 SSR 不注册 → 白屏。
+# server/entry.ts 的 bootstrapServer 有 boot assert 会在 production 模式下检测并崩溃。
+conditions = ["nolo-cloud", "default"]
+
+[test]
+preload = ["./scripts/test/setupDomGlobals.ts"]
+# Playwright e2e/**/*.spec.ts → bun run test:e2e / playwright
+# Detox e2e/{home,space}.test.ts → detox (not bun)
+# Keep e2e/*.source.test.ts discoverable as bun unit contracts
+# dist/ 是 gitignore 的构建产物。构建会把测试文件一并拷进去，陈旧副本被 bun test
+# 收集后会以 "X is not a function" 之类的假失败出现（require 路径已失效），
+# 数量还会盖过真实失败。仓库里没有任何被跟踪的测试住在 dist 下，可安全排除。
+pathIgnorePatterns = [
+  "**/dist/**",
+  "scripts/benchmarks/fixtures/**",
+  "**/benchmarks/fixtures/**",
+  "e2e/**/*.spec.ts",
+  "e2e/home.test.ts",
+  "e2e/space.test.ts",
+]

@@ -1,0 +1,645 @@
+/* ─── Page wrapper ──────────────────────────────────── */
+.client-downloads-page {
+  /* border-box：否则 width:100% + 左右 padding 会在移动端把页面撑出横向滚动 */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px) var(--space-4) var(--space-12);
+}
+
+/* ─── Hero ──────────────────────────────────────────── */
+.client-downloads-page__hero {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(20px, 3.5vw, 32px) clamp(24px, 4vw, 40px);
+  border-radius: 20px;
+  background:
+    radial-gradient(
+      circle at top left,
+      color-mix(in srgb, var(--primary) 14%, transparent) 0%,
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at right center,
+      color-mix(in srgb, var(--secondary, var(--primary)) 10%, transparent) 0%,
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surfaceRaised, var(--background)) 92%, var(--primaryGhost) 8%) 0%,
+      var(--surfaceInset, var(--backgroundSecondary)) 100%
+    );
+  border: 1px solid color-mix(in srgb, var(--primaryBorder, var(--primary)) 30%, var(--borderSubtle) 70%);
+  box-shadow: 0 16px 40px -32px var(--shadowMedium);
+}
+
+/* Hero content sits in normal flow */
+.client-downloads-page__hero-content {
+  position: relative;
+}
+
+.client-downloads-page__title {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.client-downloads-page__subtitle {
+  max-width: 640px;
+  margin: var(--space-2) 0 0;
+  color: var(--textSecondary);
+  font-size: clamp(13px, 1.5vw, 15px);
+  line-height: 1.5;
+}
+
+/* ─── Download grid ─────────────────────────────────── */
+.client-downloads-page__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: var(--space-5);
+}
+
+/* ─── Card ──────────────────────────────────────────── */
+.client-download-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border-radius: 20px;
+  background: var(--surfaceCard, var(--background));
+  border: 1px solid var(--borderSubtle);
+  box-shadow: 0 1px 3px var(--shadowLight);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
+}
+
+/* Platform-colored top accent line */
+.client-download-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  border-radius: 0 0 3px 3px;
+  background: var(--platform-accent, var(--primary));
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.client-download-card:hover::before {
+  opacity: 0.7;
+}
+
+.client-download-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--borderStrong);
+  box-shadow: 0 8px 28px -12px var(--shadowMedium), 0 1px 3px var(--shadowLight);
+}
+
+/* Card head: icon + serial number */
+.client-download-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+/* Platform-specific accent colors */
+.client-download-card[data-platform="android"] { --platform-accent: #3ddc84; }
+.client-download-card[data-platform="windows"] { --platform-accent: #4da6ff; }
+.client-download-card[data-platform="linux"]   { --platform-accent: #e8a020; }
+.client-download-card[data-platform="macos"]   { --platform-accent: var(--textTertiary, #888); }
+
+.client-download-card__icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--platform-bg, color-mix(in srgb, var(--primary) 12%, transparent));
+  color: var(--platform-color, var(--primary));
+  border: 1px solid color-mix(in srgb, var(--platform-color, var(--primary)) 20%, transparent);
+}
+
+.client-download-card__icon[data-platform="android"] {
+  --platform-color: #3ddc84;
+  --platform-bg: color-mix(in srgb, #3ddc84 13%, transparent);
+}
+.client-download-card__icon[data-platform="windows"] {
+  --platform-color: #4da6ff;
+  --platform-bg: color-mix(in srgb, #4da6ff 13%, transparent);
+}
+.client-download-card__icon[data-platform="linux"] {
+  --platform-color: #e8a020;
+  --platform-bg: color-mix(in srgb, #e8a020 13%, transparent);
+}
+.client-download-card__icon[data-platform="macos"] {
+  --platform-color: var(--textTertiary, #888);
+  --platform-bg: color-mix(in srgb, var(--textTertiary, #888) 10%, transparent);
+}
+
+/* Editorial serial number */
+.client-download-card__serial {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--textQuaternary, var(--borderSubtle));
+  font-variant-numeric: tabular-nums;
+  line-height: 44px;
+}
+
+/* Card body */
+.client-download-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: 18px;
+}
+
+.client-download-card__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.client-download-card__meta {
+  margin: 0;
+  color: var(--textTertiary, var(--textSecondary));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.client-download-card__desc {
+  margin: var(--space-1) 0 0;
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  line-height: 1.65;
+}
+
+/* Action button — full-width, pinned to card bottom */
+.client-download-card__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 0;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
+  text-decoration: none;
+  font-size: var(--fontSize-sm);
+  font-weight: 700;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.client-download-card__action svg {
+  color: inherit;
+}
+
+.client-download-card__action:hover {
+  background: color-mix(in srgb, var(--primary) 88%, #ffffff 12%);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.client-download-card__action:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ─── Linux package format options ─── */
+.client-download-card__linux-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.client-download-card__linux-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--platform-accent, var(--primary)) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--platform-accent, var(--primary)) 15%, var(--borderSubtle));
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.client-download-card__linux-option:hover {
+  background: color-mix(in srgb, var(--platform-accent, var(--primary)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--platform-accent, var(--primary)) 30%, var(--borderSubtle));
+  transform: translateY(-1px);
+}
+
+.client-download-card__linux-format {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--platform-accent, var(--primary));
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.client-download-card__linux-option__desc {
+  flex: 1;
+  font-size: 12px;
+  color: var(--textSecondary);
+  line-height: 1.35;
+}
+
+.client-download-card__linux-option__hint {
+  width: 100%;
+  color: var(--textTertiary, var(--textSecondary));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.client-download-card__linux-option__hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+}
+
+.client-download-card__linux-option > svg {
+  flex-shrink: 0;
+  color: var(--platform-accent, var(--primary));
+}
+
+/* ─── CLI Card (Full Width) ─────────────────────────── */
+.client-download-cli-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 14px;
+  padding: 24px;
+  border-radius: 20px;
+  background: var(--surfaceCard, var(--background));
+  border: 1px solid var(--borderSubtle);
+  box-shadow: 0 1px 3px var(--shadowLight);
+}
+
+.client-download-cli-card__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  width: 120px;
+}
+
+.client-download-cli-card__icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: color-mix(in srgb, #e8a020 12%, transparent);
+  color: #e8a020;
+  border: 1px solid color-mix(in srgb, #e8a020 20%, transparent);
+}
+
+.client-download-cli-card__badges {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.client-download-cli-card__badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderSubtle);
+  color: var(--textSecondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.client-download-cli-card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.client-download-cli-card__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.client-download-cli-card__desc {
+  margin: 4px 0 16px;
+  color: var(--textSecondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.client-download-cli-card__command-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: var(--surfaceInset, var(--backgroundSecondary));
+  border: 1px solid var(--borderSubtle);
+  border-radius: 12px;
+}
+
+.client-download-cli-card__command-box code {
+  flex: 1;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.command-prompt {
+  color: #e8a020;
+  margin-right: 6px;
+  user-select: none;
+}
+
+.client-download-cli-card__copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.client-download-cli-card__copy:hover {
+  background: color-mix(in srgb, var(--primary) 88%, #ffffff 12%);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+.client-download-cli-card__copy:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.client-download-cli-card__copy.copied {
+  background: #3ddc84;
+  color: #0f0e17;
+}
+
+.client-download-cli-card__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--borderSubtle);
+}
+
+.client-download-cli-card__requirement {
+  color: var(--textTertiary, var(--textSecondary));
+  font-size: 12px;
+}
+
+.client-download-cli-card__link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  transition: opacity 0.2s ease;
+}
+
+.client-download-cli-card__link:hover {
+  opacity: 0.8;
+}
+
+/* ─── iOS coming-soon strip ─────────────────────────── */
+.client-downloads-page__soon {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background: var(--surfaceInset, var(--backgroundSecondary));
+  border: 1px solid var(--borderSubtle);
+}
+
+.client-soon__icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--textTertiary, #888) 10%, transparent);
+  color: var(--textSecondary);
+  border: 1px solid var(--borderSubtle);
+}
+
+.client-soon__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.client-soon__title {
+  color: var(--text);
+  font-size: var(--fontSize-sm);
+  font-weight: 700;
+}
+
+.client-soon__desc {
+  color: var(--textSecondary);
+  font-size: var(--fontSize-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.client-soon__badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderSubtle);
+  color: var(--textSecondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ─── Responsive ────────────────────────────────────── */
+@media (max-width: 960px) {
+  .client-downloads-page__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .client-downloads-page {
+    padding-bottom: var(--space-10);
+  }
+
+  .client-downloads-page__grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .client-downloads-page__soon {
+    flex-wrap: wrap;
+  }
+
+  .client-download-cli-card {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 20px;
+    gap: 16px;
+  }
+
+  .client-download-cli-card__head {
+    width: 100%;
+    flex-direction: row;
+  }
+
+  .client-download-cli-card__badges {
+    flex-direction: row;
+  }
+
+  /* 竖排后 body 是 shrink-to-fit：不给 width/min-width 的话，
+     命令行 code 的 nowrap 会把整卡片撑出屏幕。 */
+  .client-download-cli-card__body {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .client-download-cli-card__command-box {
+    min-width: 0;
+    padding: 6px 6px 6px 12px;
+  }
+
+  .client-download-cli-card__command-box code {
+    min-width: 0;
+  }
+
+  /* ── 卡片紧凑化：图标与标题同排，减少每张卡的高度 ──
+     用 grid 把 head（图标）放左列、body 放右列，按钮跨整行，
+     省掉图标独占一行带来的高度。 */
+  .client-download-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .client-download-card__head {
+    grid-column: 1;
+    margin-bottom: 0;
+  }
+
+  .client-download-card__body {
+    grid-column: 2;
+  }
+
+  /* 按钮和 Linux 包列表都要跨整行，否则会落进左侧 auto 列并把它撑宽 */
+  .client-download-card__action,
+  .client-download-card__linux-options {
+    grid-column: 1 / -1;
+  }
+
+  /* 序号在窄列里会被挤到图标下方，移动端直接去掉 */
+  .client-download-card__serial {
+    display: none;
+  }
+
+  .client-download-card__icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+
+  .client-download-card__serial {
+    line-height: 36px;
+  }
+
+  .client-download-card__body {
+    gap: 2px;
+    margin-bottom: 12px;
+  }
+
+  .client-download-card__title {
+    font-size: 16px;
+  }
+
+  .client-download-card__desc {
+    margin-top: 2px;
+    font-size: var(--fontSize-xs);
+    line-height: 1.45;
+  }
+
+  .client-download-card__action {
+    padding: 9px 0;
+  }
+
+  .client-downloads-page__hero {
+    padding: 16px 18px;
+    border-radius: 16px;
+  }
+
+  .client-download-cli-card__footer {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: 0;
+    padding-top: 16px;
+    border-left: none;
+    border-top: 1px solid var(--borderSubtle);
+  }
+
+  .client-soon__desc {
+    white-space: normal;
+  }
+
+  .client-soon__badge {
+    margin-left: auto;
+  }
+}
+
+

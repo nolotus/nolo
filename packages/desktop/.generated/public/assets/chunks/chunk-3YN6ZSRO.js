@@ -1,0 +1,1 @@
+import{a as u}from"/public/assets/chunks/chunk-CLEBNC37.js";import{e as o}from"/public/assets/chunks/chunk-HA3VNNOB.js";var e=o(u()),n=()=>{let[t,s]=(0,e.useState)(!1);return(0,e.useEffect)(()=>{s(!0)},[]),t};export{n as a};
