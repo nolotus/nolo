@@ -1,1 +1,0 @@
-var i=e=>{let l=e?.skillConfig;return e?.kind!=="skill"&&!l?null:{isSkill:!0,...l?.id?{skillId:l.id}:{},...l?.name?{name:l.name}:{},...l?.description?{description:l.description}:{},...l?.toolNames?.length?{toolNames:l.toolNames}:{},...l?.triggerMode?{triggerMode:l.triggerMode}:{}}},r=e=>!!e?.isSkill;export{i as a,r as b};

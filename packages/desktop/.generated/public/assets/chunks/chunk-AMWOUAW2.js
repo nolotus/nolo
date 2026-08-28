@@ -1,1 +1,0 @@
-function i(r,e){if(!r)return r;if(e){let n=e.endsWith("/")?e.slice(0,-1):e;if(r===n)return"~";if(r.startsWith(n+"/"))return`~${r.slice(n.length)}`}return r.replace(/^(\/Users\/[^/]+|\/home\/[^/]+)(\/|$)/,"~$2")}export{i as a};

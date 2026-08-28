@@ -1,1 +1,0 @@
-var e=typeof process<"u"?process.env:void 0,o=typeof globalThis<"u"&&"__DEV__"in globalThis?globalThis.__DEV__:void 0,n=e?.NOLO_FORCE_PRODUCTION==="1"||e?.NODE_ENV==="production"||o===!1,t=!n,s=()=>(typeof process<"u"?process.env?.NOLO_DESKTOP:e?.NOLO_DESKTOP)==="1"||typeof window<"u"&&window.__NOLO_DESKTOP__===!0,_=s();export{n as a,t as b,s as c,_ as d};

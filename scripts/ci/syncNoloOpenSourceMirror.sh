@@ -23,6 +23,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PUBLIC_REPO="${SYNC_PUBLIC_REPO:-git@github.com:nolotus/nolo.git}"
+# CI 中无 SSH key：提供 SYNC_GH_TOKEN（或映射 CLI_MIRROR_GH_TOKEN）时改走
+# https + token push；git 自身会 redact 输出中的凭据。
+SYNC_GH_TOKEN="${SYNC_GH_TOKEN:-$CLI_MIRROR_GH_TOKEN}"
+if [ -n "$SYNC_GH_TOKEN" ]; then
+  PUBLIC_REPO="https://x-access-token:${SYNC_GH_TOKEN}@github.com/nolotus/nolo.git"
+fi
 MIRROR_DIR="${SYNC_MIRROR_DIR:-/tmp/nolo-open-source-mirror-push}"
 STAGE_DIR="${SYNC_STAGE_DIR:-/tmp/nolo-open-source-mirror-stage}"
 PUBLIC_BRANCH="${SYNC_PUBLIC_BRANCH:-main}"

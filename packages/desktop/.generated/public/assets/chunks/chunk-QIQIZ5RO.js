@@ -1,1 +1,0 @@
-var o=(A=>(A.AGENT="agent",A.DOC="page",A.DIALOG="dialog",A.NOTIFICATION="notification",A.MSG="msg",A.TOKEN="token",A.SPACE="space",A.TRANSACTION="transaction",A.SETTING="setting",A.TASK="task",A.AGENT_AUTOMATION="agent-automation",A.TABLE="table",A.TABLE_ROW="table_row",A.FILE="file",A.IMAGE="image",A.APP="app",A.EMAIL="email",A.Category="category",A))(o||{});export{o as a};

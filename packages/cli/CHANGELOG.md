@@ -1,3 +1,9 @@
+## [0.33.0-alpha.34](https://github.com/nolotus/bun-nolo/compare/cli-v0.33.0-alpha.33...cli-v0.33.0-alpha.34) (2026-08-28)
+
+### Features
+
+* **release:** append-only mirror sync, dual-repo audit reconciliation, publish gate ([4410e8d](https://github.com/nolotus/bun-nolo/commit/4410e8d51b66bf6fd0cd9347823659ae433d12b5))
+
 ## [0.33.0-alpha.33](https://github.com/nolotus/bun-nolo/compare/cli-v0.33.0-alpha.32...cli-v0.33.0-alpha.33) (2026-08-28)
 
 ### Bug Fixes

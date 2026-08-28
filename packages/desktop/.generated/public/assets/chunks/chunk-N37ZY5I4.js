@@ -1,1 +1,0 @@
-var t="[localFirst]";function i(e,o){let n=e.trim()||"unknown";if(o&&Object.keys(o).length>0){try{console.info(t,n,JSON.stringify(o))}catch{console.info(t,n,o)}return}console.info(t,n)}export{i as a};

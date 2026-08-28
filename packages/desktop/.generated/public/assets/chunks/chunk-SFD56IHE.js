@@ -1,1 +1,0 @@
-var t=e=>e&&e.imageWorkflow?e.imageWorkflow:null,o=e=>e==="generate"?{quality:"medium",size:"1024x1024",outputFormat:"png"}:e==="edit"?{quality:"medium",size:"auto",outputFormat:"png"}:{quality:"low",size:"auto",outputFormat:"png"};export{t as a,o as b};

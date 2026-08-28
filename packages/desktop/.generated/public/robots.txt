@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://nolo.chat/sitemap.xml

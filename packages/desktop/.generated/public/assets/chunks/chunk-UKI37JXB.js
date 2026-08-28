@@ -1,1 +1,0 @@
-function t(r,i){let n=String(i||"").toLowerCase(),e=String(r||"").toLowerCase();return!!(n==="google"&&e.includes("live")||e.includes("live-preview")||e.includes("live-001")||e.includes("native-audio"))}export{t as a};
