@@ -61,6 +61,7 @@ export type AuditOptions = {
   branch?: string;
   repositoryRoot?: string;
   localOnly?: boolean;
+  fetchTags?: boolean;
   npmAdapter?: NpmAdapter;
   s3Adapter?: S3Adapter;
   ghAdapter?: GhAdapter;
@@ -500,6 +501,22 @@ export async function auditReleaseState(
   const localOnly = options.localOnly ?? false;
   const npmAdapter = options.npmAdapter ?? defaultNpmAdapter;
   const s3Adapter = options.s3Adapter;
+
+  // Refresh local tags so developer machines don't report stale-tag false
+  // positives right after a remote tag was created. Only when running in
+  // situ (no explicit repositoryRoot — tests always pass one, pointing at
+  // fixtures whose remote must not be fetched). Failures silently ignored.
+  if (options.fetchTags !== false && !options.repositoryRoot) {
+    try {
+      execFileSync("git", ["fetch", "--quiet", "--tags", "origin"], {
+        cwd: repositoryRoot,
+        stdio: ["ignore", "ignore", "ignore"],
+        timeout: 30_000,
+      });
+    } catch {
+      // offline: proceed with local refs
+    }
+  }
 
   const sources: Record<string, Source> = {};
 
