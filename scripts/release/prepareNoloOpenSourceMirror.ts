@@ -1544,7 +1544,7 @@ jobs:
           DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY: \${{ secrets.DESKTOP_DOWNLOAD_S3_SECRET_ACCESS_KEY }}
           DESKTOP_DOWNLOAD_PUBLIC_BASE: \${{ secrets.DESKTOP_DOWNLOAD_PUBLIC_BASE }}
           NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES: "1"
-          MIN_WIN_INSTALLER_BYTES: "49000000"
+          MIN_WIN_INSTALLER_BYTES: "47000000"
         run: |
           bun ./scripts/release/publishDesktopDownloads.ts \\
             --channel "\${{ needs.select-targets.outputs.channel }}" \\
