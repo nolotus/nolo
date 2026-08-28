@@ -1,12 +1,12 @@
 export const OPEN_SOURCE_PACKAGE_OVERLAY = {
   repository: {
     type: "git",
-    url: "git+https://github.com/nolotus/nolo-cli.git",
+    url: "git+https://github.com/nolotus/nolo.git",
   },
   bugs: {
-    url: "https://github.com/nolotus/nolo-cli/issues",
+    url: "https://github.com/nolotus/nolo/issues",
   },
-  homepage: "https://github.com/nolotus/nolo-cli#readme",
+  homepage: "https://github.com/nolotus/nolo#readme",
   scripts: {
     test: "bun test",
     "pack:dry-run": "npm pack --dry-run",

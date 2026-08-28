@@ -13,7 +13,7 @@ on:
           - latest
 
 concurrency:
-  group: cli-publish-${{ inputs.dist_tag }}
+  group: cli-npm-publish-${{ inputs.dist_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -23,13 +23,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Verify snapshot carries Source-Commit trailer
-        run: |
-          set -euo pipefail
-          if ! git log -1 --format=%B | grep -q '^Source-Commit:'; then
-            echo "::error::Snapshot HEAD commit is missing 'Source-Commit:' trailer; refusing to publish."
-            exit 1
-          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   auditReleaseState,
+  type GhAdapter,
   type NpmAdapter,
   type S3Adapter,
 } from "./auditReleaseState";
@@ -104,6 +105,18 @@ function s3Adapter(objects: Array<{ key: string; lastModified?: string }>): S3Ad
   return async () => ({ status: "ok", objects });
 }
 
+function ghAdapter(projection: {
+  cliVersion?: string;
+  sourceCommit?: string;
+  syncCommitterDate?: string;
+}): GhAdapter {
+  return async () => ({ status: "ok", projection });
+}
+
+function skipGhAdapter(): GhAdapter {
+  return async () => ({ status: "skip" });
+}
+
 describe("auditReleaseState", () => {
   it("reports PASS when all five sources are consistent", async () => {
     const repository = createReleaseHistory();
@@ -115,6 +128,7 @@ describe("auditReleaseState", () => {
         { key: "nolo-darwin-arm64.tar.gz", lastModified: "2026-01-01T00:00:00Z" },
         { key: "install-nolo.sh", lastModified: "2026-01-01T00:00:00Z" },
       ]),
+      ghAdapter: skipGhAdapter(),
     });
     expect(result.ok).toBe(true);
     expect(result.drifts).toEqual([]);
@@ -133,6 +147,7 @@ describe("auditReleaseState", () => {
       repositoryRoot: repository,
       npmAdapter: npmAdapter("1.1.0-alpha.0"),
       s3Adapter: s3Adapter([]),
+      ghAdapter: skipGhAdapter(),
     });
     expect(result.ok).toBe(false);
     expect(result.drifts).toContainEqual(
@@ -153,6 +168,7 @@ describe("auditReleaseState", () => {
       repositoryRoot: repository,
       npmAdapter: npmAdapter("1.1.0-alpha.1"),
       s3Adapter: s3Adapter([]),
+      ghAdapter: skipGhAdapter(),
     });
     expect(result.ok).toBe(false);
     expect(result.orphans.cli).toContain("cli-v1.2.0-alpha.1");
@@ -171,6 +187,7 @@ describe("auditReleaseState", () => {
       repositoryRoot: repository,
       npmAdapter: npmAdapter("1.1.0-alpha.1"),
       env: {},
+      ghAdapter: skipGhAdapter(),
     });
     expect(result.sources.s3.status).toBe("skip");
     expect(result.ok).toBe(true);
@@ -183,6 +200,7 @@ describe("auditReleaseState", () => {
       repositoryRoot: repository,
       npmAdapter: () => ({ status: "unknown", error: "network down" }),
       s3Adapter: s3Adapter([]),
+      ghAdapter: skipGhAdapter(),
     });
     expect(result.sources.npmAlpha.status).toBe("unknown");
     // cli tag vs cliDownloads / package.json still reconcile.
@@ -200,7 +218,89 @@ describe("auditReleaseState", () => {
     expect(result.sources.npmAlpha.status).toBe("skip");
     expect(result.sources.npmLatest.status).toBe("skip");
     expect(result.sources.s3.status).toBe("skip");
+    expect(result.sources.publicProjection.status).toBe("skip");
     expect(result.sources.cliTag.value).toBe("cli-v1.1.0-alpha.1");
     expect(result.sources.cliDownloads.value).toBe("1.1.0-alpha.1");
+  });
+
+  it("reports DRIFT when the public projection cli version lags the cli tag", async () => {
+    const repository = createReleaseHistory();
+    const result = await auditReleaseState({
+      branch: "alpha",
+      repositoryRoot: repository,
+      npmAdapter: npmAdapter("1.1.0-alpha.1"),
+      s3Adapter: s3Adapter([]),
+      ghAdapter: ghAdapter({ cliVersion: "1.1.0-alpha.0" }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.drifts).toContainEqual(
+      expect.objectContaining({
+        left: "public projection cli version",
+        right: "cli tag",
+        leftValue: "1.1.0-alpha.0",
+        rightValue: "1.1.0-alpha.1",
+      }),
+    );
+  });
+
+  it("reports DRIFT when the public projection Source-Commit mismatches the private HEAD", async () => {
+    const repository = createReleaseHistory();
+    const result = await auditReleaseState({
+      branch: "alpha",
+      repositoryRoot: repository,
+      npmAdapter: npmAdapter("1.1.0-alpha.1"),
+      s3Adapter: s3Adapter([]),
+      ghAdapter: ghAdapter({ cliVersion: "1.1.0-alpha.1", sourceCommit: "abc123" }),
+      env: { NOLO_SOURCE_COMMIT: "def456" },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.drifts).toContainEqual(
+      expect.objectContaining({
+        left: "public projection Source-Commit",
+        leftValue: "abc123",
+        rightValue: "def456",
+      }),
+    );
+  });
+
+  it("reports DRIFT when the public projection sync is older than 24h", async () => {
+    const repository = createReleaseHistory();
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const result = await auditReleaseState({
+      branch: "alpha",
+      repositoryRoot: repository,
+      npmAdapter: npmAdapter("1.1.0-alpha.1"),
+      s3Adapter: s3Adapter([]),
+      ghAdapter: ghAdapter({
+        cliVersion: "1.1.0-alpha.1",
+        syncCommitterDate: stale,
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.drifts).toContainEqual(
+      expect.objectContaining({
+        left: "public projection sync age",
+        right: "24h threshold",
+      }),
+    );
+  });
+
+  it("passes when the public projection is consistent and fresh", async () => {
+    const repository = createReleaseHistory();
+    const fresh = new Date().toISOString();
+    const result = await auditReleaseState({
+      branch: "alpha",
+      repositoryRoot: repository,
+      npmAdapter: npmAdapter("1.1.0-alpha.1"),
+      s3Adapter: s3Adapter([]),
+      ghAdapter: ghAdapter({
+        cliVersion: "1.1.0-alpha.1",
+        sourceCommit: "abc123",
+        syncCommitterDate: fresh,
+      }),
+      env: { NOLO_SOURCE_COMMIT: "abc123" },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.sources.publicProjection.status).toBe("ok");
   });
 });

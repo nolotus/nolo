@@ -2,12 +2,14 @@
 /**
  * Release state reconciliation (read-only).
  *
- * Cross-checks the five release truth sources:
+ * Cross-checks the release truth sources:
  *   ① component tags (reachable + channel-matched + highest semver)
  *   ② npm dist-tags (alpha / latest)
  *   ③ packages/app/constants/cliDownloads.ts NOLO_CLI_VERSION
  *   ④ S3 binary listing (nolo-*.tar.gz + install-nolo.sh lastModified)
  *   ⑤ packages/<component>/package.json version
+ *   ⑥ public projection reconciliation (nolotus/nolo cli version + Source-Commit)
+ *   ⑦ sync health (recent "chore: sync" committer date within 24h)
  *
  * Emits a human report and a `--json` machine-readable report. Exits 1 when
  * any consistency rule is violated (DRIFT). npm/S3 failures are marked
@@ -48,12 +50,20 @@ export type S3Adapter = (args: {
   config: DesktopPublishS3Config;
 }) => Promise<Source & { objects?: S3Object[] }>;
 
+export type PublicProjection = {
+  cliVersion?: string;
+  sourceCommit?: string;
+  syncCommitterDate?: string;
+};
+export type GhAdapter = () => Promise<Source & { projection?: PublicProjection }>;
+
 export type AuditOptions = {
   branch?: string;
   repositoryRoot?: string;
   localOnly?: boolean;
   npmAdapter?: NpmAdapter;
   s3Adapter?: S3Adapter;
+  ghAdapter?: GhAdapter;
   env?: NodeJS.ProcessEnv;
 };
 
@@ -222,6 +232,71 @@ function defaultNpmAdapter({ distTag }: { distTag: string }): Source {
   }
 }
 
+// ⑥ 公开仓投影对账 adapter：gh api 只读。无 gh 时返回 SKIP。
+// 取公开仓 packages/cli/package.json 版本 + main HEAD commit message 解析
+// Source-Commit trailer + 最近 "chore: sync" commit 的 committer date。
+async function defaultGhAdapter(): Promise<Source & { projection?: PublicProjection }> {
+  try {
+    const gh = spawnSync("gh", ["--version"], { encoding: "utf8" });
+    if (gh.status !== 0) {
+      return { status: "skip", error: "gh CLI not available" };
+    }
+    const pkg = spawnSync(
+      "gh",
+      ["api", "repos/nolotus/nolo/contents/packages/cli/package.json", "--jq", ".content"],
+      { encoding: "utf8" },
+    );
+    if (pkg.status !== 0) {
+      return {
+        status: "unknown",
+        error: (pkg.stderr || pkg.stdout || "").trim() || "gh api package.json failed",
+      };
+    }
+    const cliVersion = JSON.parse(
+      Buffer.from(pkg.stdout.trim(), "base64").toString("utf8"),
+    ).version as string;
+
+    const head = spawnSync(
+      "gh",
+      ["api", "repos/nolotus/nolo/commits/main", "--jq", ".commit.message"],
+      { encoding: "utf8" },
+    );
+    if (head.status !== 0) {
+      return {
+        status: "unknown",
+        error: (head.stderr || head.stdout || "").trim() || "gh api commits/main failed",
+      };
+    }
+    const sourceCommit = /^Source-Commit:\s*(\S+)/m.exec(head.stdout)?.[1];
+
+    // ⑦ sync 健康度：最近 "chore: sync" commit 的 committer date
+    const syncCommit = spawnSync(
+      "gh",
+      [
+        "api",
+        "repos/nolotus/nolo/commits",
+        "--jq",
+        "[.[] | select(.commit.message | startswith(\"chore: sync open-source public projection\"))][0].commit.committer.date",
+      ],
+      { encoding: "utf8" },
+    );
+    const syncCommitterDate =
+      syncCommit.status === 0 && syncCommit.stdout.trim()
+        ? syncCommit.stdout.trim()
+        : undefined;
+
+    return {
+      status: "ok",
+      projection: { cliVersion, sourceCommit, syncCommitterDate },
+    };
+  } catch (error) {
+    return {
+      status: "unknown",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function parseS3ListXml(xml: string): S3Object[] {
   const objects: S3Object[] = [];
   const contents = xml.match(/<Contents>[\s\S]*?<\/Contents>/g) ?? [];
@@ -307,6 +382,7 @@ async function collectS3(options: AuditOptions): Promise<Source & { objects?: S3
 function reconcile(
   sources: Record<string, Source>,
   branch: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Array<{ left: string; right: string; leftValue?: string; rightValue?: string }> {
   const drifts: Array<{
     left: string;
@@ -368,7 +444,52 @@ function reconcile(
     }
   }
 
+  // ⑥ 公开仓投影对账：公开仓 cli 版本 vs 私有仓 cli tag/package.json；
+  // 公开仓 main HEAD 的 Source-Commit vs 私有仓 bot commit（私有仓 HEAD）。
+  const projection = sources.publicProjection?.projection;
+  if (projection) {
+    check("public projection cli version", "cli tag", projection.cliVersion, cliTag);
+    check("public projection cli version", "cli package.json", projection.cliVersion, cliPkg);
+    if (projection.sourceCommit) {
+      // 私有仓 bot commit sha 由调用方通过 env 传入（NOLO_SOURCE_COMMIT），
+      // 缺省时仅报告公开仓 Source-Commit 存在性，不强制比对。
+      const expectedSourceCommit = env.NOLO_SOURCE_COMMIT;
+      if (expectedSourceCommit && projection.sourceCommit !== expectedSourceCommit) {
+        drifts.push({
+          left: "public projection Source-Commit",
+          right: "private repo HEAD",
+          leftValue: projection.sourceCommit,
+          rightValue: expectedSourceCommit,
+        });
+      }
+    }
+  }
+
+  // ⑦ sync 健康度：最近 "chore: sync" commit 的 committer date 超过 24h 标 DRIFT。
+  const syncDate = projection?.syncCommitterDate;
+  if (syncDate) {
+    const ageMs = Date.now() - new Date(syncDate).getTime();
+    if (Number.isFinite(ageMs) && ageMs > 24 * 60 * 60 * 1000) {
+      drifts.push({
+        left: "public projection sync age",
+        right: "24h threshold",
+        leftValue: syncDate,
+        rightValue: ">24h (DRIFT)",
+      });
+    }
+  }
+
   return drifts;
+}
+
+// ⑥ 公开仓投影对账 + ⑦ sync 健康度：通过可注入 ghAdapter 只读拉取。
+// 无 gh / localOnly 时 SKIP，不阻断其余检查。
+async function collectPublicProjection(
+  options: AuditOptions,
+): Promise<Source & { projection?: PublicProjection }> {
+  if (options.localOnly) return { status: "skip" };
+  const adapter = options.ghAdapter ?? defaultGhAdapter;
+  return await adapter();
 }
 
 export async function auditReleaseState(
@@ -406,9 +527,18 @@ export async function auditReleaseState(
     npmAdapter,
     s3Adapter,
   });
+  // ⑥ 公开仓投影对账 + ⑦ sync 健康度
+  sources.publicProjection = await collectPublicProjection({
+    ...options,
+    branch,
+    repositoryRoot,
+    localOnly,
+    npmAdapter,
+    s3Adapter,
+  });
 
   const orphans = collectOrphans(branch, repositoryRoot);
-  const drifts = reconcile(sources, branch);
+  const drifts = reconcile(sources, branch, options.env);
   // Orphan tags are a form of release-state drift (historical rewrite or
   // abandoned release): report each as a DRIFT line and fail the audit.
   for (const [component, tags] of Object.entries(orphans)) {
