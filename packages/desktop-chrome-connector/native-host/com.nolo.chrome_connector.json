@@ -1,0 +1,9 @@
+{
+  "name": "com.nolo.chrome_connector",
+  "description": "Nolo Desktop Chrome connector native messaging host",
+  "path": "__REPLACE_WITH_ABSOLUTE_PATH__/nolo-chrome-native-host.mjs",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}

@@ -1,0 +1,321 @@
+import {
+  buildPageKey,
+  buildPageRecord,
+  readBodyArg,
+} from "./docPageHelpers";
+import {
+  buildSkillPageKey,
+  buildSkillPageRecord,
+  parseJsonArg,
+} from "./docSkillHelpers";
+import {
+  buildSkillSummaryForRecord,
+  hasFlag,
+  hasHelpArg,
+  readPageRecord,
+  readTitle,
+  requireTokenUser,
+  resolveDocKind,
+  resolveWriteTargets,
+  writePageRecord,
+} from "./docCommandShared";
+import { parseSkillDocProtocol, resolvePageSkillMetadata } from "../ai/skills/skillDocProtocol";
+import { readOption } from "./cliEnvHelpers";
+import { findPotentialSecrets, formatSecretFindings } from "./secretScan";
+import type { DocKind, DocWriteDeps } from "./docCommandShared";
+
+function printDocUpdateUsage(output: { write(chunk: string): unknown }) {
+  output.write(`Usage:
+  nolo doc update (--id <pageId> | --key <pageKey>) [--title ...] [--body ... | --body-file path] [--space ...]
+
+Options:
+  --id <pageId>             Page id (without user prefix).
+  --key <pageKey>           Full dbKey, e.g. page-<userId>-<pageId>.
+  --title <text>            New title.
+  --description <text>      New page description stored in meta.
+  --body <text>             New page body.
+  --body-file <path>       Read body from file.
+  --space <spaceId>         Move/attach the page to this space.
+  --sync local,main,us      Choose write targets. Values may also be full URLs.
+  --local-only              Write only to the local server target.
+  --no-local                Exclude local targets when --sync includes them.
+  --dry-run                 Build and validate without writing.
+  --json                    Print machine-readable JSON.
+  --allow-secrets           Allow bodies that look like credentials.
+  --server <url>            Default write target when --sync is omitted.
+  --token <jwt>             Auth token. Required for writes.
+`);
+}
+
+function printSkillDocUpdateUsage(output: { write(chunk: string): unknown }) {
+  output.write(`Usage:
+  nolo skill-doc update (--id <skillId> | --key <pageKey>) [--title ...] [--description ...] [--body ... | --body-file path]
+
+Options:
+  --id <skillId>            Skill id (without user prefix).
+  --key <pageKey>           Full dbKey, e.g. page-<userId>-<skillId>.
+  --title <text>            New page title. Also renames the skill unless --name is given.
+  --name <text>             New skill name only, leaving the page title untouched.
+                            The name is the skill's identity that other docs
+                            reference, so prefer this over --title when you only
+                            want a nicer title.
+  --description <text>      New skill description.
+  --body <text>             New skill body.
+  --body-file <path>       Read body from file.
+  --space <spaceId>         Move/attach the skill page to this space.
+  --tools '["readDoc"]'                 Replace tool names this skill expects.
+  --required-skills '["skill-a"]'       Replace required skill references.
+  --recommended-skills '["skill-b"]'    Replace recommended skill references.
+  --trigger-mode explicit|required|recommended
+  --prompt-patch <text>
+  --sync local,main,us                  Choose write targets. Values may also be full URLs.
+  --local-only                          Write only to the local server target.
+  --no-local                            Exclude local targets when --sync includes them.
+  --dry-run                             Build and validate without writing.
+  --json                                Print machine-readable JSON.
+  --allow-secrets                       Allow bodies that look like credentials.
+  --token <jwt>                         Auth token. Required for writes.
+
+Promotion:
+  If the target is a plain page whose body already contains a valid
+  <!-- skill-config ... --> block, this command adopts it: the block is parsed,
+  normalized and written back into record.meta (kind="skill" + skillConfig),
+  keeping the same dbKey. Use --dry-run first to preview.
+`);
+}
+
+async function resolveExistingRecord(args: {
+  authToken: string;
+  dbKey: string;
+  targets: string[];
+}) {
+  for (const serverUrl of args.targets) {
+    try {
+      const record = await readPageRecord({
+        authToken: args.authToken,
+        dbKey: args.dbKey,
+        serverUrl,
+      });
+      if (record) {
+        return { record, serverUrl };
+      }
+    } catch {
+      // try next target
+    }
+  }
+  throw new Error(`doc not found on any target: ${args.dbKey}`);
+}
+
+async function runUpdateCommand(
+  args: string[],
+  deps: DocWriteDeps,
+  options: { defaultKind: DocKind; usage: (output: { write(chunk: string): unknown }) => void }
+) {
+  if (hasHelpArg(args)) {
+    options.usage(process.stdout);
+    return 0;
+  }
+
+  const explicitId = readOption(args, "--id");
+  const explicitKey = readOption(args, "--key");
+  if (!explicitId && !explicitKey) {
+    options.usage(process.stderr);
+    return 1;
+  }
+
+  const docKind = resolveDocKind(args, options.defaultKind);
+  const shouldDryRun = hasFlag(args, "--dry-run");
+  const shouldOutputJson = hasFlag(args, "--json");
+  const allowSecrets = hasFlag(args, "--allow-secrets");
+
+  const { authToken, userId } = requireTokenUser(args, deps.env, shouldDryRun);
+  const targets = resolveWriteTargets(args, deps.env);
+  if (!targets.length) {
+    throw new Error("No write targets resolved. Check --sync / --local-only / --no-local.");
+  }
+
+  const dbKey = explicitKey ?? (docKind === "skill"
+    ? buildSkillPageKey(userId, explicitId!)
+    : buildPageKey(userId, explicitId!));
+
+  const { record: existing } = await resolveExistingRecord({ authToken, dbKey, targets });
+
+  // Body-level truth: a page whose content carries a valid `skill-config` block is
+  // already a skill doc for every runtime reader, even when record.meta was never
+  // promoted. Resolving here lets skill-doc update take over such a page and write
+  // the metadata back, instead of dead-locking on the raw meta.kind.
+  const existingSkillMeta = resolvePageSkillMetadata(existing);
+  const metaKindIsSkill = existing?.meta?.kind === "skill";
+  const bodyDeclaresSkill = Boolean(existingSkillMeta?.skillConfig);
+
+  // Symmetric with the skill branch below: a body-declared skill counts as a skill
+  // doc here too. Letting `doc update --body ...` through would silently overwrite
+  // the skill-config block and demote a mountable skill back to a plain page.
+  if (docKind === "page" && (metaKindIsSkill || bodyDeclaresSkill)) {
+    throw new Error(`Target page is a skill doc. Use nolo skill-doc update --key ${dbKey}`);
+  }
+  if (docKind === "skill" && !metaKindIsSkill && !bodyDeclaresSkill) {
+    throw new Error(
+      `Target page is not a skill doc and its body has no valid skill-config block. Use nolo doc update --key ${dbKey}`
+    );
+  }
+
+  const isPromotion = docKind === "skill" && !metaKindIsSkill && bodyDeclaresSkill;
+
+  const explicitTitle = readTitle(args);
+  const title = explicitTitle ?? existing?.title;
+  if (!title) {
+    throw new Error(`doc has no title and none was provided: ${dbKey}`);
+  }
+
+  const newSpaceId = readOption(args, "--space");
+  const spaceId = newSpaceId !== undefined ? newSpaceId : (existing?.spaceId ?? null);
+
+  let record: Record<string, any>;
+  let skillSummary: Record<string, any> | undefined;
+
+  if (docKind === "skill") {
+    const meta = existingSkillMeta;
+    const currentConfig = meta?.skillConfig;
+    if (!currentConfig) {
+      throw new Error(`existing skill doc is missing skillConfig: ${dbKey}`);
+    }
+
+    const parsed = parseSkillDocProtocol(existing?.content ?? "", meta);
+    const description = readOption(args, "--description") ?? currentConfig.description;
+
+    const explicitName = readOption(args, "--name");
+    if (explicitName !== undefined && !explicitName.trim()) {
+      throw new Error("--name cannot be empty. Omit it to keep the current skill name.");
+    }
+    const body = readBodyArg(args, parsed.content ?? "");
+
+    const secretFindings = findPotentialSecrets(body);
+    if (secretFindings.length && !allowSecrets) {
+      throw new Error(
+        [
+          "Document body appears to contain credentials or secrets. Pass --allow-secrets to write it anyway.",
+          formatSecretFindings(secretFindings),
+        ].join("\n")
+      );
+    }
+
+    const mergedConfig = {
+      ...currentConfig,
+      // The skill's `name` is its identity (other docs reference it), while the
+      // page title is prose. They coincide for docs created via skill-doc create,
+      // but diverge when promoting a page. --name targets the identity alone, so
+      // a doc can get a readable title without breaking references; without it,
+      // only an explicit --title renames.
+      name: explicitName ?? explicitTitle ?? currentConfig.name ?? title,
+      description,
+      ...(parseJsonArg<string[]>(readOption(args, "--tools"), currentConfig.toolNames ?? []).length
+        ? { toolNames: parseJsonArg<string[]>(readOption(args, "--tools"), currentConfig.toolNames ?? []) }
+        : {}),
+      ...(parseJsonArg<string[]>(readOption(args, "--required-skills"), currentConfig.requiredSkills ?? []).length
+        ? { requiredSkills: parseJsonArg<string[]>(readOption(args, "--required-skills"), currentConfig.requiredSkills ?? []) }
+        : {}),
+      ...(parseJsonArg<string[]>(readOption(args, "--recommended-skills"), currentConfig.recommendedSkills ?? []).length
+        ? { recommendedSkills: parseJsonArg<string[]>(readOption(args, "--recommended-skills"), currentConfig.recommendedSkills ?? []) }
+        : {}),
+      ...(readOption(args, "--trigger-mode")
+        ? { triggerMode: readOption(args, "--trigger-mode") as "explicit" | "required" | "recommended" }
+        : {}),
+      ...(readOption(args, "--prompt-patch") !== undefined
+        ? { promptPatch: readOption(args, "--prompt-patch") }
+        : {}),
+    };
+
+    const skillId = typeof existing?.id === "string" ? existing.id : dbKey.split("-").pop()!;
+    record = buildSkillPageRecord({
+      dbKey,
+      skillId,
+      title,
+      spaceId,
+      body,
+      skillConfig: mergedConfig,
+      evalConfig: meta?.evalConfig,
+      workflowConfig: meta?.workflowConfig,
+      existing,
+    });
+    skillSummary = buildSkillSummaryForRecord(record) ?? undefined;
+  } else {
+    const description = readOption(args, "--description") ?? existing?.meta?.description ?? "";
+    const body = readBodyArg(args, typeof existing?.content === "string" ? existing.content : "");
+
+    const secretFindings = findPotentialSecrets(body);
+    if (secretFindings.length && !allowSecrets) {
+      throw new Error(
+        [
+          "Document body appears to contain credentials or secrets. Pass --allow-secrets to write it anyway.",
+          formatSecretFindings(secretFindings),
+        ].join("\n")
+      );
+    }
+
+    const pageId = typeof existing?.id === "string" ? existing.id : dbKey.split("-").pop()!;
+    record = buildPageRecord({
+      dbKey,
+      pageId,
+      title,
+      spaceId,
+      content: body,
+      existing,
+      meta: description ? { description } : undefined,
+    });
+  }
+
+  const summary = {
+    dryRun: shouldDryRun,
+    kind: docKind,
+    promotedFromPage: isPromotion,
+    title,
+    dbKey,
+    userId,
+    spaceId,
+    syncTargets: targets,
+    writtenTargets: [] as string[],
+  };
+
+  if (!shouldDryRun) {
+    for (const serverUrl of targets) {
+      await writePageRecord({
+        authToken,
+        dbKey,
+        record,
+        serverUrl,
+        spaceId,
+        title,
+        userId,
+        skillSummary,
+      });
+      summary.writtenTargets.push(serverUrl);
+    }
+  }
+
+  if (shouldOutputJson) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  } else if (shouldDryRun) {
+    process.stdout.write(`dry-run ok${isPromotion ? " (promote page -> skill)" : ""}: ${dbKey}\n`);
+  } else if (isPromotion) {
+    process.stdout.write(`promoted page to skill: ${dbKey}\n`);
+  } else {
+    process.stdout.write(`updated ${docKind}: ${dbKey}\n`);
+  }
+
+  return 0;
+}
+
+export async function runDocUpdateCommand(args: string[], deps: DocWriteDeps) {
+  return runUpdateCommand(args, deps, {
+    defaultKind: "page",
+    usage: printDocUpdateUsage,
+  });
+}
+
+export async function runSkillDocUpdateCommand(args: string[], deps: DocWriteDeps) {
+  return runUpdateCommand(args, deps, {
+    defaultKind: "skill",
+    usage: printSkillDocUpdateUsage,
+  });
+}

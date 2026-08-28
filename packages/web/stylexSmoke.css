@@ -1,0 +1,3 @@
+/* stylex smoke: 本文件被 stylexSmoke.ts 导入，作为 StyleX 聚合 CSS 的宿主。
+ * esbuild 会把它并入 entry CSS 产物，@stylexjs/unplugin 在构建结束后把
+ * 全应用的 StyleX 规则追加到该 CSS 产物（见 scripts/dev/esbuild.config.js）。 */

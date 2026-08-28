@@ -1,0 +1,1 @@
+import{a as p}from"/public/assets/chunks/chunk-DYHF2IZM.js";import{d as o}from"/public/assets/chunks/chunk-WEOWWZTJ.js";var t=o(p()),d=null,u=new Set;function l(e){d=e,u.forEach(n=>n(e))}function a(e){return u.add(e),e(d),()=>{u.delete(e)}}function r(){let[e,n]=(0,t.useState)(d);return(0,t.useEffect)(()=>a(n),[]),e}export{l as a,a as b,r as c};

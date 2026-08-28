@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Nihaisha course study avatar</title>
+  <desc id="desc">A traditional Chinese medicine course-study avatar with a book, herb leaf, meridian line, and seal mark.</desc>
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="25%" r="80%">
+      <stop offset="0%" stop-color="#f8ecd2"/>
+      <stop offset="52%" stop-color="#d9b56f"/>
+      <stop offset="100%" stop-color="#5b2b1f"/>
+    </radialGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7df"/>
+      <stop offset="100%" stop-color="#d7b26a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#2b130d" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <circle cx="256" cy="256" r="248" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="220" fill="none" stroke="#f6dfad" stroke-width="10" opacity="0.55"/>
+
+  <g filter="url(#shadow)">
+    <path d="M126 160c44-19 83-17 130 8v210c-43-24-87-29-130-10V160Z" fill="url(#page)" stroke="#6e3a23" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M256 168c47-25 86-27 130-8v208c-43-19-87-14-130 10V168Z" fill="url(#page)" stroke="#6e3a23" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M256 168v210" stroke="#7b4328" stroke-width="8" stroke-linecap="round"/>
+  </g>
+
+  <path d="M158 206c24-7 45-5 66 5M158 248c25-5 46-3 66 6M158 290c22-3 43 0 66 8" fill="none" stroke="#8a5131" stroke-width="8" stroke-linecap="round" opacity="0.85"/>
+  <path d="M288 210c22-9 44-11 68-5M288 252c22-8 44-10 68-4M288 294c22-5 44-6 68 0" fill="none" stroke="#8a5131" stroke-width="8" stroke-linecap="round" opacity="0.85"/>
+
+  <path d="M151 123c39 34 69 65 91 107 26 50 51 92 103 120" fill="none" stroke="#203f2b" stroke-width="13" stroke-linecap="round" opacity="0.82"/>
+  <circle cx="181" cy="154" r="8" fill="#f5e4b7"/>
+  <circle cx="222" cy="206" r="8" fill="#f5e4b7"/>
+  <circle cx="265" cy="276" r="8" fill="#f5e4b7"/>
+  <circle cx="327" cy="337" r="8" fill="#f5e4b7"/>
+
+  <path d="M361 138c-48 1-80 25-94 69 45 3 82-21 94-69Z" fill="#2d6b42" stroke="#163822" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M274 201c25-20 51-36 82-53" fill="none" stroke="#dbe9c7" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+
+  <g transform="translate(315 308)">
+    <rect x="0" y="0" width="86" height="86" rx="18" fill="#8f1f18" stroke="#f6d8aa" stroke-width="7"/>
+    <text x="43" y="58" text-anchor="middle" font-family="serif" font-size="44" font-weight="700" fill="#fff1d0">倪</text>
+  </g>
+
+  <path d="M116 407c85 42 193 44 280 0" fill="none" stroke="#f8dfad" stroke-width="12" stroke-linecap="round" opacity="0.58"/>
+</svg>

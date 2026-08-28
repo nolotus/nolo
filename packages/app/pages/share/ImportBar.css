@@ -1,0 +1,86 @@
+/* ── ImportBar ───────────────────────────────────────── */
+
+.ImportBar-root {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 20px 24px;
+          background: linear-gradient(135deg, var(--backgroundSecondary) 0%, color-mix(in srgb, var(--primary) 2%, var(--backgroundSecondary)) 100%);
+          border: 1px solid var(--borderSubtle);
+          border-radius: var(--radius-xl);
+          margin-top: 48px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.02);
+        }
+        .ImportBar-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          min-height: 44px;
+          padding: 10px 24px;
+          border-radius: var(--radius-lg);
+          font-size: var(--fontSize-base);
+          font-weight: 600;
+          cursor: pointer;
+          border: none;
+          transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+        }
+        .ImportBar-btn--primary {
+          background: var(--primary);
+          color: #fff;
+          box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 25%, transparent);
+        }
+        .ImportBar-btn--primary:hover:not(:disabled) {
+          transform: translateY(-1.5px);
+          box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 35%, transparent);
+        }
+        .ImportBar-btn--primary:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+        .ImportBar-btn--ghost {
+          background: var(--background);
+          border: 1px solid var(--border);
+          color: var(--textSecondary);
+        }
+        .ImportBar-btn--ghost:hover {
+          background: var(--backgroundSecondary);
+          transform: translateY(-1.5px);
+        }
+        .ImportBar-spinner { animation: spin 1s linear infinite; }
+        .ImportBar-success {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--success, #10B981);
+          font-size: var(--fontSize-base);
+          font-weight: 600;
+        }
+        .ImportBar-link {
+          color: var(--primary);
+          text-decoration: none;
+          font-size: var(--fontSize-base);
+          font-weight: 600;
+          margin-left: 4px;
+        }
+        .ImportBar-link:hover {
+          text-decoration: underline;
+        }
+        .ImportBar-purchaseBar {
+          display: inline-flex;
+          align-items: center;
+          gap: 16px;
+        }
+        .ImportBar-price {
+          font-size: var(--fontSize-base);
+          font-weight: 700;
+          color: var(--text);
+        }
+        .ImportBar-error {
+          font-size: var(--fontSize-sm);
+          color: var(--error, #EF4444);
+          font-weight: 500;
+        }

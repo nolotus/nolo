@@ -1,0 +1,318 @@
+import { toErrorMessage } from "core/errorMessage";
+import { toSafeAgentSummary, sortSafeAgentSummaries } from "ai/agent/safeAgentSummary";
+import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
+import {
+  decorateAgentsWithPublicStatusAcrossServers,
+  listFavoriteAgentIdsAcrossServers,
+  listLocalCachedAgents,
+  listRemoteAgentsAcrossServers,
+  listRemoteAgents,
+  normalizeListedAgent,
+  parseAgentListArgs,
+  isAgentUnavailableNow,
+  toSafeListedAgentSummary,
+  type ListedAgent,
+} from "./agentListHelpers";
+import {
+  applyCredentialAvailability,
+  readCredentialAvailability,
+} from "./credentialAvailability";
+import {
+  queryUserRecords,
+  readDbRecord,
+} from "./agentRecordHelpers";
+import { buildSpaceLookup, getSpaceContentKeys } from "./cliSpaceHelpers";
+import {
+  parseUserIdFromAuthToken,
+  readOption,
+  resolveAuthToken,
+  resolveServerCandidates,
+  resolveServerUrl,
+} from "./cliEnvHelpers";
+import { readLiveDbRecordAfterTombstoneMerge } from "./globalRecordOperations";
+
+export async function runAgentListCommand(
+  args: string[],
+  deps: AgentCommandDeps = {}
+) {
+  const env = deps.env ?? process.env;
+  const output = deps.output ?? process.stdout;
+  const { wantJson, wantSafe, publicOnly, idsOnly, showUnavailable } = parseAgentListArgs(args);
+  const spaceInput = readOption(args, "--space") ?? readOption(args, "--space-id");
+
+  const authToken = resolveAuthToken(args, env);
+  if (!authToken) {
+    output.write("[nolo] agent list requires an auth token. Run `nolo login` or set AUTH_TOKEN.\n");
+    return 1;
+  }
+
+  const userId = parseUserIdFromAuthToken(authToken);
+  if (!userId) {
+    output.write("[nolo] agent list could not read userId from AUTH_TOKEN.\n");
+    return 1;
+  }
+
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fallbackFetchImpl = deps.fallbackFetchImpl;
+  const serverUrl = resolveServerUrl(args, env);
+  const serverUrls = resolveServerCandidates(args, env, serverUrl);
+
+  try {
+    let agents: ListedAgent[];
+    let source: "local-cache" | "remote-cache" | "global-cache";
+    let serverFailures: Array<{ serverUrl: string; error: string }> = [];
+    try {
+      const remoteResult = await listRemoteAgentsAcrossServers({
+        authToken,
+        fallbackFetchImpl,
+        fetchImpl,
+        serverUrls,
+        userId,
+      });
+      agents = remoteResult.agents;
+      serverFailures = remoteResult.failures;
+      source = "global-cache";
+    } catch {
+      try {
+        const db = deps.db ?? await getReadableCliDb(output);
+        agents = await listLocalCachedAgents({ db, userId });
+        source = "local-cache";
+      } catch {
+        agents = await listRemoteAgents({
+          authToken,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrl,
+          userId,
+          queryUserRecords,
+          readDbRecord,
+        });
+        source = "remote-cache";
+      }
+    }
+
+    agents = agents.filter((agent) => agent.privateKey.startsWith("agent-"));
+    let resolvedSpaceId: string | null = null;
+    let spaceContentKeys: Set<string> | null = null;
+    if (spaceInput) {
+      const { spaceId, spaceKey } = buildSpaceLookup(spaceInput);
+      resolvedSpaceId = spaceId;
+      const spaceRead = await readLiveDbRecordAfterTombstoneMerge({
+        authToken,
+        dbKey: spaceKey,
+        fallbackFetchImpl,
+        fetchImpl,
+        serverUrls,
+      });
+      serverFailures = [...serverFailures, ...spaceRead.failures];
+      const spaceRecord = spaceRead.record;
+      const currentSpaceContentKeys = getSpaceContentKeys(spaceRecord);
+      spaceContentKeys = currentSpaceContentKeys;
+      agents = agents.filter((agent) =>
+        currentSpaceContentKeys.has(agent.privateKey) ||
+        currentSpaceContentKeys.has(agent.publicKey) ||
+        currentSpaceContentKeys.has(agent.id)
+      );
+    }
+    if (source === "global-cache") {
+      await decorateAgentsWithPublicStatusAcrossServers({
+        agents,
+        authToken,
+        fallbackFetchImpl,
+        fetchImpl,
+        serverUrls,
+      });
+    }
+    if (publicOnly) {
+      agents = agents.filter((agent) => agent.publicRecordExists);
+    }
+
+    // 合并 credential 级冷却：限流是 provider 凭证的属性，共用同一 OAuth
+    // （chatgpt / claude / antigravity）的 agent 必须一起被判定为不可用，
+    // 否则列表会把「凭证已耗尽但自己还没撞过」的 agent 显示成可用，用户选中
+    // 后必然再撞一次。与 agent 自身的 nextAvailableAt 取更晚者。
+    agents = applyCredentialAvailability(
+      agents,
+      await readCredentialAvailability(env).catch(() => ({})),
+    );
+
+    // 429 限流中（nextAvailableAt 在未来）的 agent 默认不列出，避免误选到
+    // 打不了的 agent。--show-unavailable 可见全量（脚本/排障需要）。
+    // 在 space/publicOnly 过滤之后计算总数，避免把无关排除的 agent 计入。
+    const unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
+    const agentsForOutput = showUnavailable
+      ? agents
+      : agents.filter((agent) => !isAgentUnavailableNow(agent));
+
+    if (idsOnly) {
+      output.write(`${agentsForOutput.map((agent) => agent.id).join("\n")}\n`);
+      return 0;
+    }
+
+    if (wantSafe) {
+      const favoritesMap = await listFavoriteAgentIdsAcrossServers({
+        authToken,
+        fetchImpl,
+        serverUrls,
+      }).catch(() => ({} as Record<string, number>));
+
+      const existingKeys = new Set<string>();
+      for (const agent of agents) {
+        existingKeys.add(agent.privateKey);
+        existingKeys.add(agent.publicKey);
+        existingKeys.add(agent.id);
+      }
+      const extraFavoriteRecords: any[] = [];
+      const hydratedFavoriteAgents: ListedAgent[] = [];
+
+      for (const favKey of Object.keys(favoritesMap)) {
+        if (existingKeys.has(favKey)) continue;
+        try {
+          const favRead = await readLiveDbRecordAfterTombstoneMerge({
+            authToken,
+            dbKey: favKey,
+            fallbackFetchImpl,
+            fetchImpl,
+            serverUrls,
+          });
+          const record = favRead.record;
+          if (!record || (record.type && record.type !== "agent")) continue;
+          const norm = normalizeListedAgent(record);
+          const candidateKeys = [record.dbKey, record.publicKey, record.id]
+            .filter((key): key is string => typeof key === "string" && key.length > 0);
+          if (
+            spaceContentKeys &&
+            !candidateKeys.some((key) => spaceContentKeys?.has(key))
+          ) {
+            continue;
+          }
+          if (norm) {
+            agents.push(norm);
+            hydratedFavoriteAgents.push(norm);
+            existingKeys.add(norm.privateKey);
+            existingKeys.add(norm.publicKey);
+            existingKeys.add(norm.id);
+          } else {
+            extraFavoriteRecords.push(record);
+            for (const key of candidateKeys) existingKeys.add(key);
+          }
+        } catch {
+          // orphan favorite key, skip it.
+        }
+      }
+
+      if (source === "global-cache" && hydratedFavoriteAgents.length > 0) {
+        await decorateAgentsWithPublicStatusAcrossServers({
+          agents: hydratedFavoriteAgents,
+          authToken,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrls,
+        });
+      }
+
+      // 从完整补入后的集合（agents 已含 favkey hydration 的 norm）构建候选，
+      // 先做 publicOnly 维度过滤并计算 unavailableCount（与最终 list 同口径），
+      // 再统一执行 429 过滤。favorite-only（extraFavoriteRecords）同口径纳入。
+      let safeCandidates = [
+        ...agents.map((agent) => toSafeListedAgentSummary(agent, { favoritesMap, userId })),
+        ...extraFavoriteRecords.map((record) =>
+          toSafeAgentSummary(record, { favoritesMap, userId })
+        ),
+      ];
+      if (publicOnly) {
+        safeCandidates = safeCandidates.filter((agent) => agent.isPublic);
+      }
+      const safeUnavailableCount = safeCandidates.filter((agent) =>
+        isAgentUnavailableNow(agent as any)
+      ).length;
+      const safeAgents = showUnavailable
+        ? safeCandidates
+        : safeCandidates.filter((agent) => !isAgentUnavailableNow(agent as any));
+      const sortedSafeAgents = sortSafeAgentSummaries(safeAgents);
+
+      output.write(JSON.stringify({
+        success: true,
+        userId,
+        ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
+        total: sortedSafeAgents.length,
+        unavailableCount: safeUnavailableCount,
+        agents: sortedSafeAgents,
+      }, null, 2));
+      output.write("\n");
+      return 0;
+    }
+
+    if (wantJson) {
+      output.write(JSON.stringify({
+        userId,
+        ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
+        targetServers: serverUrls,
+        ...(serverFailures.length ? { serverFailures } : {}),
+        total: agentsForOutput.length,
+        publicCount: agentsForOutput.filter((agent) => agent.publicRecordExists).length,
+        unavailableCount,
+        source,
+        agents: agentsForOutput,
+      }, null, 2));
+      output.write("\n");
+      return 0;
+    }
+
+    output.write(`userId: ${userId}\n`);
+    if (resolvedSpaceId) {
+      output.write(`spaceId: ${resolvedSpaceId}\n`);
+    }
+    output.write(`targetServers: ${serverUrls.join(", ")}\n`);
+    if (serverFailures.length) {
+      output.write(`serverFailures: ${serverFailures.length}\n`);
+    }
+    output.write(`total agents: ${agentsForOutput.length}\n`);
+    output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
+    if (unavailableCount > 0 && !showUnavailable) {
+      output.write(`⛔ ${unavailableCount} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n`);
+    }
+    output.write(`source: ${source}\n`);
+    if (agentsForOutput.length === 0) {
+      output.write("\n(no agents found)\n");
+      return 0;
+    }
+    for (const agent of agentsForOutput) {
+      const status = agent.publicRecordExists ? "public" : "private";
+      const flagMismatch = agent.isPublicFlag !== agent.publicRecordExists
+        ? ` flag=${agent.isPublicFlag}`
+        : "";
+      const credentialLine = agent.credentialConfigured
+        ? `credentialConfigured=true${agent.credentialRef ? ` credentialRef=${agent.credentialRef}` : ""}${agent.apiKeyRef ? ` apiKeyRef=${agent.apiKeyRef}` : ""}`
+        : "credentialConfigured=false";
+      const availabilityLine =
+        typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > Date.now()
+          ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()}`
+          : "nextAvailableAt=now";
+      output.write(
+        [
+          `\n[${status}] ${agent.name}`,
+          `id=${agent.id}`,
+          `type=${agent.type ?? "-"}`,
+          `model=${agent.model}`,
+          `updatedAt=${agent.updatedAt ?? "-"}`,
+          // 不输出 privateKey（dbKey 属敏感标识，与 web 端 listAgentsFunc 降权
+          // 对齐；需要完整记录请用 --json）。
+          // 私有 agent（publicRecordExists=false）的公开记录不存在，输出 "-" 而非
+          // 一个库里不存在的 agent-pub-<id>，避免误导调用方拿它去 readAgent。
+          `publicKey=${agent.publicRecordExists ? agent.publicKey : "-"}${flagMismatch}`,
+          `tools=${agent.tools.join(", ") || "-"}`,
+          credentialLine,
+          availabilityLine,
+        ].join("\n")
+      );
+      output.write("\n");
+    }
+    return 0;
+  } catch (error) {
+    output.write(
+      `[nolo] agent list failed: ${toErrorMessage(error)}\n`
+    );
+    return 1;
+  }
+}

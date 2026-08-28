@@ -1,0 +1,104 @@
+/* The one popover shell.
+ *
+ * Every floating panel — menus, dropdowns, the space switcher, the user menu —
+ * renders through `<Popover>` and gets this. There is deliberately no second
+ * way to build one: shape, elevation and motion all read from --popover-*
+ * (see `popover` in app/settings/themeSelectors.ts).
+ *
+ * Motion is placement-aware via a single --origin custom property, so one
+ * transition covers all four sides instead of a keyframe set per surface.
+ */
+
+.app-popover {
+  box-sizing: border-box;
+  padding: var(--popover-pad);
+  background: var(--popover-bg);
+  border: 1px solid var(--popover-border);
+  border-radius: var(--popover-radius);
+  box-shadow: var(--popover-shadow);
+  backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--popover-blur)) saturate(1.8);
+  color: var(--text);
+  z-index: var(--z-dropdown, 1000);
+  outline: none;
+  /* The arrow lives outside the panel box; inner scroll containers clip
+   * themselves rather than relying on the shell. */
+  overflow: visible;
+  transition:
+    transform var(--popover-duration) var(--popover-ease),
+    opacity var(--popover-duration) var(--popover-ease);
+}
+
+/* RAC keeps the node mounted while these are set, which is what lets a popover
+ * animate out instead of vanishing. */
+.app-popover[data-entering],
+.app-popover[data-exiting] {
+  transform: var(--origin);
+  opacity: 0;
+}
+
+.app-popover[data-exiting] {
+  transition-duration: var(--popover-durationExit);
+}
+
+/* Travel away from the trigger, and scale from the anchored edge. Together they
+ * make the panel read as growing out of the button that opened it. */
+.app-popover[data-placement^="bottom"] {
+  --origin: translateY(calc(-1 * var(--popover-travel))) scale(0.97);
+  transform-origin: top center;
+}
+
+.app-popover[data-placement^="top"] {
+  --origin: translateY(var(--popover-travel)) scale(0.97);
+  transform-origin: bottom center;
+}
+
+.app-popover[data-placement^="right"] {
+  --origin: translateX(calc(-1 * var(--popover-travel))) scale(0.97);
+  transform-origin: left center;
+}
+
+.app-popover[data-placement^="left"] {
+  --origin: translateX(var(--popover-travel)) scale(0.97);
+  transform-origin: right center;
+}
+
+/* Arrow: filled with the panel background and stroked with its border, drawn
+ * border-first so the stroke sits behind the fill and the seam disappears.
+ * Each placement also nests the arrow 1px into the panel so its open base
+ * covers the border it grows out of. */
+.app-popover .react-aria-OverlayArrow svg {
+  display: block;
+  fill: var(--popover-bg);
+  stroke: var(--popover-border);
+  paint-order: stroke;
+  stroke-width: 2px;
+  overflow: visible;
+}
+
+.app-popover[data-placement^="top"] .react-aria-OverlayArrow svg {
+  transform: translateY(-1px);
+}
+
+.app-popover[data-placement^="bottom"] .react-aria-OverlayArrow svg {
+  transform: translateY(1px) rotate(180deg);
+}
+
+.app-popover[data-placement^="right"] .react-aria-OverlayArrow svg {
+  transform: translateX(1px) rotate(90deg);
+}
+
+.app-popover[data-placement^="left"] .react-aria-OverlayArrow svg {
+  transform: translateX(-1px) rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-popover {
+    transition: opacity 0.1s linear;
+  }
+
+  .app-popover[data-entering],
+  .app-popover[data-exiting] {
+    transform: none;
+  }
+}

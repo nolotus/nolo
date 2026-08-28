@@ -1,0 +1,89 @@
+name: Setup Windows Desktop Build
+description: Prepare a Windows runner for Nolo Desktop packaging.
+
+inputs:
+  bun-install-args:
+    description: Arguments passed to bun install.
+    required: false
+    default: --frozen-lockfile
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare reusable Windows workspace
+      shell: pwsh
+      run: |
+        if ("${{ runner.os }}" -ne "Windows") {
+          throw "setup-windows-desktop must only run on Windows runners."
+        }
+
+        if (Test-Path packages/desktop/build) {
+          Remove-Item -Recurse -Force packages/desktop/build
+        }
+        if (Test-Path packages/desktop/artifacts) {
+          Remove-Item -Recurse -Force packages/desktop/artifacts
+        }
+        if (Test-Path packages/desktop/smoke-artifacts) {
+          Remove-Item -Recurse -Force packages/desktop/smoke-artifacts
+        }
+
+    - name: Setup isolated Bun
+      shell: pwsh
+      run: |
+        $bunVersion = (Get-Content .bun-version -Raw).Trim()
+        if (-not $bunVersion) {
+          throw "Missing Bun version in .bun-version"
+        }
+
+        $bunRoot = Join-Path $env:RUNNER_TEMP "nolo-bun-$bunVersion"
+        $bunBin = Join-Path $bunRoot "bun-windows-x64"
+        $bunExe = Join-Path $bunBin "bun.exe"
+        if (-not (Test-Path $bunExe)) {
+          Remove-Item -Recurse -Force $bunRoot -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $bunRoot | Out-Null
+          $zipPath = Join-Path $env:RUNNER_TEMP "bun-windows-x64-$bunVersion.zip"
+          $url = "https://github.com/oven-sh/bun/releases/download/bun-v$bunVersion/bun-windows-x64.zip"
+          Write-Host "Downloading isolated Bun $bunVersion from $url"
+          Invoke-WebRequest -Uri $url -OutFile $zipPath
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $bunRoot -Force
+        }
+
+        & $bunExe --revision
+        Add-Content -Path $env:GITHUB_PATH -Value $bunBin
+        Add-Content -Path $env:GITHUB_ENV -Value "BUN_INSTALL=$bunRoot"
+
+    - name: Install dependencies
+      shell: pwsh
+      run: bun install ${{ inputs.bun-install-args }}
+
+    - name: Install Inno Setup
+      shell: pwsh
+      run: |
+        $innoPaths = @(
+          "C:\Program Files (x86)\Inno Setup 6",
+          "C:\Program Files\Inno Setup 6"
+        )
+        foreach ($path in $innoPaths) {
+          if (Test-Path "$path\ISCC.exe") {
+            Write-Host "检测到预装 Inno Setup，加入 PATH: $path"
+            $env:PATH = "$path;" + $env:PATH
+            if ($env:GITHUB_PATH) {
+              Add-Content -Path $env:GITHUB_PATH -Value $path
+            }
+            break
+          }
+        }
+
+        if (Get-Command ISCC.exe -ErrorAction SilentlyContinue) {
+          Write-Host "Inno Setup is already available."
+          exit 0
+        }
+
+        winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
+        if ($LASTEXITCODE -ne 0) {
+          if (Get-Command ISCC.exe -ErrorAction SilentlyContinue) {
+            Write-Host "winget returned $LASTEXITCODE, but Inno Setup is available."
+            exit 0
+          }
+          exit $LASTEXITCODE
+        }

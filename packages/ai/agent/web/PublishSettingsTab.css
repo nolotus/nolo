@@ -1,0 +1,39 @@
+/* ── PublishSettingsTab ──────────────────────────────── */
+
+.tab-content-wrapper {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-5);
+          padding: var(--space-2) 0;
+        }
+
+        .public-settings-group {
+          margin-top: var(--space-2);
+          padding: var(--space-6);
+          background-color: var(--backgroundSecondary);
+          border-radius: var(--radius-lg, 14px);
+          border: none;
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-6);
+          box-shadow:
+            0 1px 2px var(--shadowLight),
+            0 12px 28px -24px var(--shadowMedium);
+          animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-2px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        [data-theme='dark'] .public-settings-group {
+          background: var(--backgroundTertiary);
+        }
+

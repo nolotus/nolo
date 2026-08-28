@@ -1,0 +1,43 @@
+// ai/llm/models.ts
+
+import type { Model } from "./types";
+import { getModelAbility } from "./modelAbility";
+
+// 导入所有提供商的模型数据
+import { openrouterModels } from "./openrouterModels";
+import { platformHostedModels } from "./platformHosted";
+import { cloudflareModels } from "./cloudflare";
+import { gmiModels } from "./gmi";
+import { zaiModels } from "./zai";
+
+/**
+ * @interface ModelWithProvider
+ * 扩展基础 Model 类型，增加了 provider 字段，用于UI显示和逻辑处理。
+ */
+export interface ModelWithProvider extends Model {
+  provider: string;
+}
+
+/**
+ * 将一组模型打上 provider 标记的纯函数，方便复用和测试
+ */
+const withProvider =
+  (provider: ModelWithProvider["provider"]) =>
+    (models: Model[]): ModelWithProvider[] =>
+      models.map((model) => ({ ...model, provider }));
+
+/**
+ * @const ALL_MODELS
+ * 聚合了所有来源的模型数据，并为每个模型附加了其提供商信息。
+ * 这是整个应用中模型选择器的唯一数据源。
+ */
+export const ALL_MODELS: ModelWithProvider[] = [
+  ...withProvider("nolo")(platformHostedModels),
+  ...withProvider("openrouter")(openrouterModels),
+  ...withProvider("cloudflare")(cloudflareModels),
+  ...withProvider("gmi")(gmiModels),
+  ...withProvider("zai")(zaiModels),
+].map((model) => {
+  const ability = getModelAbility(model.name);
+  return ability ? { ...model, ability } : model;
+});

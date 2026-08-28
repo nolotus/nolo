@@ -1,0 +1,246 @@
+        @keyframes vhp-spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes vhp-fade-in {
+          from { opacity: 0; transform: translateX(12px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        .vhp-overlay {
+          position: fixed;
+          inset: 0;
+          margin: 0;
+          padding: 0;
+          border: none;
+          background: rgba(0, 0, 0, 0.25);
+          backdrop-filter: blur(2px);
+          -webkit-backdrop-filter: blur(2px);
+          z-index: 1000;
+          cursor: pointer;
+        }
+        .vhp-panel {
+          position: fixed;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 360px;
+          max-width: 100vw;
+          background: var(--background);
+          border-left: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          z-index: 1001;
+          box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+          animation: vhp-fade-in 0.2s ease;
+        }
+        [data-theme="dark"] .vhp-panel {
+          box-shadow: -8px 0 32px rgba(0, 0, 0, 0.45);
+        }
+        .vhp-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 14px 16px;
+          border-bottom: 1px solid var(--border);
+          font-weight: 600;
+          font-size: var(--fontSize-base);
+          color: var(--text);
+          flex-shrink: 0;
+          background: var(--backgroundSecondary);
+        }
+        .vhp-header-icon {
+          color: var(--primary);
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+        }
+        .vhp-stats {
+          margin-left: auto;
+          display: flex;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+        .vhp-stat-badge {
+          font-size: var(--fontSize-xs);
+          font-weight: 500;
+          color: var(--textTertiary);
+          background: var(--backgroundTertiary);
+          border: 1px solid var(--borderLight);
+          border-radius: var(--radius-lg);
+          padding: 1px 7px;
+          white-space: nowrap;
+        }
+        .vhp-close {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 5px;
+          display: flex;
+          align-items: center;
+          color: var(--textTertiary);
+          border-radius: var(--radius-md);
+          transition: background 0.15s, color 0.15s;
+          margin-left: 4px;
+          flex-shrink: 0;
+        }
+        .vhp-close:hover {
+          background: var(--backgroundHover);
+          color: var(--text);
+        }
+        .vhp-body {
+          flex: 1;
+          overflow-y: auto;
+          padding: 4px 0 16px;
+        }
+        .vhp-body::-webkit-scrollbar {
+          width: 4px;
+        }
+        .vhp-body::-webkit-scrollbar-thumb {
+          background: var(--border);
+          border-radius: 2px;
+        }
+        .vhp-section-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 10px 16px 4px;
+          font-size: var(--fontSize-xs);
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+          color: var(--textTertiary);
+        }
+        .vhp-section-label::after {
+          content: '';
+          flex: 1;
+          height: 1px;
+          background: var(--borderLight);
+        }
+        .vhp-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          padding: 9px 16px;
+          border-radius: 0;
+          transition: background 0.12s;
+          cursor: default;
+        }
+        .vhp-item:hover {
+          background: var(--backgroundHover);
+        }
+        .vhp-item-icon {
+          color: var(--textTertiary);
+          margin-top: 2px;
+          flex-shrink: 0;
+          transition: color 0.15s;
+        }
+        .vhp-item-icon.pinned {
+          color: var(--primary);
+        }
+        .vhp-item-main {
+          flex: 1;
+          min-width: 0;
+        }
+        .vhp-item-label {
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          color: var(--text);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: var(--leading-normal);
+        }
+        .vhp-item-time {
+          font-size: var(--fontSize-xs);
+          color: var(--textTertiary);
+          margin-top: 2px;
+          line-height: var(--leading-tight);
+        }
+        .vhp-label-edit {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          margin-top: 2px;
+        }
+        .vhp-label-input {
+          flex: 1;
+          font-size: var(--fontSize-sm);
+          padding: 3px 8px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-sm);
+          background: var(--background);
+          color: var(--text);
+          outline: none;
+          transition: border-color 0.15s;
+        }
+        .vhp-label-input:focus {
+          border-color: var(--primary);
+          box-shadow: 0 0 0 2px var(--primaryGhost);
+        }
+        .vhp-actions {
+          display: flex;
+          gap: 1px;
+          flex-shrink: 0;
+          align-items: center;
+          opacity: 0;
+          transition: opacity 0.12s;
+          pointer-events: none;
+        }
+        .vhp-item:hover .vhp-actions,
+        .vhp-item:focus-within .vhp-actions,
+        .vhp-actions:focus-within {
+          opacity: 1;
+          pointer-events: auto;
+        }
+        .vhp-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 5px;
+          border-radius: var(--radius-sm);
+          display: flex;
+          align-items: center;
+          color: var(--textTertiary);
+          transition: background 0.12s, color 0.12s;
+        }
+        .vhp-btn:hover {
+          background: var(--backgroundTertiary);
+          color: var(--text);
+        }
+        .vhp-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+        .vhp-btn.restore:hover { color: var(--success); }
+        .vhp-btn.delete:hover  { color: var(--error); }
+        .vhp-btn.pin-active    { color: var(--primary); opacity: 1; }
+        .vhp-spin {
+          animation: vhp-spin 0.9s linear infinite;
+        }
+        .vhp-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 56px 16px;
+          text-align: center;
+          color: var(--textTertiary);
+          font-size: var(--fontSize-sm);
+        }
+        .vhp-empty-icon {
+          color: var(--textQuaternary);
+          opacity: 0.6;
+        }
+        .vhp-loading {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 56px 16px;
+          color: var(--textTertiary);
+        }
+        .vhp-divider {
+          height: 1px;
+          background: var(--borderLight);
+          margin: 0 16px;
+        }
+      

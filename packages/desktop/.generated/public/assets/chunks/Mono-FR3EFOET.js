@@ -1,0 +1,1 @@
+"use client";import{a}from"/public/assets/chunks/chunk-SYCXVG7C.js";import"/public/assets/chunks/chunk-FW55VAVZ.js";import"/public/assets/chunks/chunk-U3FV4FR4.js";import"/public/assets/chunks/chunk-DYHF2IZM.js";import"/public/assets/chunks/chunk-WEOWWZTJ.js";export{a as default};

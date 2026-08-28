@@ -1,0 +1,643 @@
+/* ── MyContentCollection ─────────────────────────────── */
+
+        .MyContentCollection {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          width: 100%;
+          flex: 1;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        /* ── Chrome: search stays full width; batch is a sibling button ── */
+        .MyContentCollection__toolbar {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          min-height: 40px;
+        }
+
+        .MyContentCollection__toolbar-spacer {
+          flex: 1;
+        }
+
+        .MyContentCollection__search {
+          position: relative;
+          display: flex;
+          align-items: center;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .MyContentCollection__search-icon {
+          position: absolute;
+          left: 12px;
+          color: var(--textTertiary);
+          pointer-events: none;
+        }
+
+        .MyContentCollection__search-input {
+          width: 100%;
+          height: 40px;
+          border-radius: 999px;
+          border: 1px solid var(--borderLight);
+          background: var(--backgroundSecondary);
+          color: var(--text);
+          padding: 0 14px 0 36px;
+          outline: none;
+        }
+
+        .MyContentCollection__search-input:focus {
+          border-color: var(--primary);
+          background: var(--background);
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }
+
+        .MyContentCollection__batch-entry {
+          flex-shrink: 0;
+          white-space: nowrap;
+        }
+
+        /* Full-width selection bar — never shares a row with search */
+        .MyContentCollection__selection-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          width: 100%;
+          box-sizing: border-box;
+          padding: 10px 14px;
+          border-radius: 14px;
+          background: var(--backgroundSecondary);
+          border: 1px solid var(--borderLight);
+        }
+
+        .MyContentCollection__selection-bar-start,
+        .MyContentCollection__selection-bar-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .MyContentCollection__selection-bar-actions {
+          flex-shrink: 0;
+        }
+
+        .MyContentCollection__batch-bar-meta {
+          font-size: 0.8125rem;
+          font-weight: 600;
+          color: var(--text);
+          white-space: nowrap;
+        }
+
+        /* ── Tabs + attachment chips as one navigation block ── */
+        .MyContentCollection__tabs-wrapper {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          width: 100%;
+        }
+
+        .MyContentCollection__tabs {
+          align-items: center;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .MyContentCollection__tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .MyContentCollection__tab[data-selected] {
+          color: var(--textHeading, var(--text));
+        }
+
+        .MyContentCollection__tab[data-hovered] {
+          color: var(--textHeading, var(--text));
+        }
+
+        .MyContentCollection__tab[data-selected] .react-aria-SelectionIndicator {
+          background: var(--primary);
+        }
+
+        /* Compact chips under tabs — no dashed box / no "island" */
+        .MyContentCollection__sub-tabs {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+          scrollbar-width: none;
+          max-height: 0;
+          opacity: 0;
+          transition: max-height 0.2s ease, opacity 0.2s ease, padding 0.2s ease;
+          padding: 0;
+          margin: 0;
+          pointer-events: none;
+          background: transparent;
+          border: none;
+        }
+
+        .MyContentCollection__sub-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .MyContentCollection__sub-tabs.is-open {
+          max-height: 44px;
+          opacity: 1;
+          padding: 8px 0 0;
+          pointer-events: auto;
+        }
+
+        .MyContentCollection__sub-tab {
+          appearance: none;
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          padding: 5px 11px;
+          height: auto;
+          background: transparent;
+          color: var(--textSecondary);
+          border: 1px solid transparent;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+          cursor: pointer;
+          white-space: nowrap;
+          font-family: inherit;
+        }
+
+        .MyContentCollection__sub-tab:hover {
+          background: var(--backgroundSecondary);
+          color: var(--text);
+        }
+
+        .MyContentCollection__sub-tab.is-active {
+          background: var(--primaryGhost, rgba(var(--primary-rgb, 59, 130, 246), 0.12));
+          color: var(--primary);
+          border-color: var(--primaryAlpha, var(--primaryGhost));
+          font-weight: 600;
+        }
+
+        .MyContentCollection__sub-tab.is-active svg {
+          color: var(--primary);
+        }
+
+        .MyContentCollection__chevron {
+          transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          margin-left: 2px;
+        }
+
+        .MyContentCollection__chevron.is-open {
+          transform: rotate(180deg);
+        }
+
+        .MyContentCollection__tab {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          white-space: nowrap;
+        }
+
+        .MyContentCollection__grid {
+          position: relative;
+          width: 100%;
+        }
+
+
+        .react-aria-GridList {
+          outline: none;
+        }
+
+        .MyContentCollection__grid-item {
+          outline: none;
+          border-radius: 20px;
+          /* Keep virtualized cells a hard clip box so selection rings/hover
+             never paint "ghost" fragments into neighboring slots. */
+          overflow: hidden;
+          height: 100%;
+          min-height: 0;
+        }
+
+        .MyContentCollection__grid-item:focus-visible {
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }
+
+        .MyContentCollection__grid > * {
+          min-width: 0;
+        }
+
+
+
+        .MyContentCollection__agent-card {
+          height: 100%;
+          display: flex;
+        }
+
+        .MyContentCollection__agent-card > .agent {
+          width: 100%;
+          height: 100%;
+        }
+
+        .MyContentCollection__card {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          text-align: left;
+          padding: 20px;
+          border-radius: 18px;
+          border: 1px solid var(--borderLight);
+          background: var(--backgroundSecondary);
+          cursor: pointer;
+          transition: border-color 0.2s ease,
+                      box-shadow 0.2s ease,
+                      background-color 0.2s ease;
+          min-height: 0;
+          height: 100%;
+          width: 100%;
+          box-shadow: 0 1px 2px var(--shadowLight);
+          box-sizing: border-box;
+          /* Avoid transform: translateY — it desyncs RAC Virtualizer slots. */
+        }
+
+        .MyContentCollection__card[data-type="image"] {
+          padding: 0;
+          gap: 0;
+          overflow: hidden;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__preview {
+          width: 100%;
+          height: 148px;
+          flex-shrink: 0;
+          background: var(--background);
+          border-bottom: 1px solid var(--borderLight);
+          position: relative;
+          overflow: hidden;
+          /* Checkbox sits inside preview (Space-style) */
+        }
+
+        .MyContentCollection__card[data-type="image"] .MyContentCollection__checkbox-wrapper {
+          /* Keep circle on the image surface */
+          top: 10px;
+          left: 10px;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .MyContentCollection__card[data-type="image"]:hover .content-block__img {
+          transform: scale(1.03);
+        }
+
+        .MyContentCollection.is-selecting .MyContentCollection__card[data-type="image"]:hover .content-block__img {
+          transform: none;
+        }
+
+        .MyContentCollection__image-fallback {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--textTertiary);
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__info {
+          padding: 12px 14px 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          flex: 1;
+          min-height: 0;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__title {
+          font-weight: 500;
+          color: var(--text);
+          font-size: 0.875rem;
+          line-height: 1.35;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__meta {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          font-size: 0.75rem;
+          color: var(--textTertiary);
+          min-width: 0;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__meta > span {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .MyContentCollection__card:hover {
+          background: var(--background);
+          border-color: var(--primaryAlpha);
+          box-shadow: 0 2px 8px var(--shadowLight);
+        }
+
+        .MyContentCollection.is-selecting .MyContentCollection__card:hover {
+          /* Keep hover quiet while multi-selecting */
+          box-shadow: 0 1px 2px var(--shadowLight);
+        }
+
+        .MyContentCollection__card-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .MyContentCollection__icon {
+          width: 40px;
+          height: 40px;
+          border-radius: var(--radius-lg);
+          display: grid;
+          place-items: center;
+          /* 极致简洁的冷灰色背景与中性色调 */
+          background: var(--backgroundTertiary);
+          color: var(--textSecondary);
+          border: 1px solid var(--borderSubtle);
+          flex-shrink: 0;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .MyContentCollection__card:hover .MyContentCollection__icon {
+          background: var(--primaryGhost);
+          color: var(--primary);
+          border-color: var(--primaryAlpha);
+        }
+
+        .MyContentCollection__avatar-wrapper {
+          width: 40px;
+          height: 40px;
+          border-radius: var(--radius-lg);
+          overflow: hidden;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid var(--borderSubtle);
+          background: var(--backgroundTertiary);
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .MyContentCollection__card:hover .MyContentCollection__avatar-wrapper {
+          border-color: var(--primaryAlpha);
+        }
+
+        .MyContentCollection__agent-avatar {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover;
+          border-radius: var(--radius-lg) !important;
+        }
+
+        .MyContentCollection__space {
+          max-width: 100%;
+          font-size: 0.8125rem;
+          color: var(--textSecondary);
+          padding: 4px 8px;
+          border-radius: 999px;
+          background: var(--background);
+          border: 1px solid var(--borderLight);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .MyContentCollection__title {
+          font-size: 1rem;
+          font-weight: 700;
+          color: var(--text);
+          line-height: var(--leading-normal);
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          min-height: 2.9em;
+        }
+
+        .MyContentCollection__meta {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 10px;
+          font-size: 0.8125rem;
+          color: var(--textSecondary);
+          margin-top: auto;
+          padding-top: 14px;
+          border-top: 1px solid var(--borderSubtle);
+        }
+
+        .MyContentCollection__meta-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+
+        .MyContentCollection__type {
+          display: inline-flex;
+          align-items: center;
+          padding: 4px 8px;
+          border-radius: 999px;
+          background: var(--background);
+          border: 1px solid var(--borderLight);
+        }
+
+        .MyContentCollection__file-meta {
+          color: var(--textTertiary);
+          min-width: 0;
+        }
+
+        .MyContentCollection__time {
+          min-width: 0;
+          text-align: right;
+        }
+
+        .MyContentCollection__status,
+        .MyContentCollection__empty {
+          border-radius: var(--radius-xl);
+          border: 1px solid var(--borderLight);
+          background: var(--backgroundSecondary);
+          padding: 24px 18px;
+          text-align: center;
+          color: var(--textSecondary);
+        }
+
+        .MyContentCollection__empty-title {
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--text);
+        }
+
+        .MyContentCollection__empty-hint {
+          margin: 8px 0 0;
+          color: var(--textTertiary);
+          line-height: var(--leading-normal);
+        }
+
+        @media (max-width: 640px) {
+          .MyContentCollection__grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* Dialog Card Specific Styles */
+        .MyContentCollection__dialog-card {
+          justify-content: space-between;
+        }
+
+        .MyContentCollection__dialog-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          width: 100%;
+        }
+
+        .MyContentCollection__dialog-agent {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex: 1;
+          min-width: 0; 
+        }
+
+        .MyContentCollection__dialog-avatar,
+        .MyContentCollection__dialog-icon {
+          width: 24px;
+          height: 24px;
+          border-radius: 50% !important;
+          flex-shrink: 0;
+        }
+
+        .MyContentCollection__dialog-icon {
+          display: grid;
+          place-items: center;
+          background: var(--backgroundTertiary);
+          color: var(--textSecondary);
+          border: 1px solid var(--borderSubtle);
+        }
+
+        .MyContentCollection__dialog-agent-name {
+          font-size: 0.8125rem;
+          font-weight: 500;
+          color: var(--textSecondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .MyContentCollection__dialog-title {
+          font-size: 1.125rem;
+          font-weight: 600;
+          line-height: 1.4;
+          color: var(--text);
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: normal;
+          margin-bottom: auto;
+        }
+
+        /* Selection visuals — match Space content-block checkbox language */
+        .MyContentCollection__grid-item.is-selected .MyContentCollection__card,
+        .MyContentCollection__card.is-selected,
+        .MyContentCollection__card[data-selected="true"] {
+          border-color: var(--primary) !important;
+          box-shadow: 0 0 0 2px var(--primary) !important;
+          background: var(--background) !important;
+        }
+
+        .MyContentCollection__card.is-selection-mode {
+          cursor: pointer;
+        }
+
+        .MyContentCollection__card[data-type="image"] .content-block__preview {
+          /* already position relative via rules above; keep stacking for check */
+        }
+
+        .MyContentCollection__checkbox-wrapper {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          z-index: 12;
+          pointer-events: auto;
+        }
+
+        /* Empty ring (unselected) / filled (selected) — like Space */
+        .MyContentCollection__selection-check {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          margin: 0;
+          padding: 0;
+          border-radius: 50%;
+          border: 2px solid var(--primary);
+          background: rgba(255, 255, 255, 0.95);
+          color: #fff;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+          cursor: pointer;
+          outline: none;
+          appearance: none;
+          font: inherit;
+          transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .MyContentCollection__card:not([data-type="image"]) .MyContentCollection__selection-check {
+          background: var(--background);
+        }
+
+        .MyContentCollection__selection-check.is-checked {
+          background: var(--primary);
+          border-color: var(--primary);
+          color: #fff;
+        }
+
+        .MyContentCollection__selection-check:hover {
+          transform: scale(1.06);
+        }
+
+        .MyContentCollection__selection-check:focus-visible {
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }
+
+        .MyContentCollection__dialog-card,
+        .MyContentCollection__card[data-type="table"],
+        .MyContentCollection__card[data-type="page"] {
+          position: relative;
+        }
+
+        @media (max-width: 720px) {
+          .MyContentCollection__selection-bar {
+            flex-wrap: wrap;
+            border-radius: 12px;
+          }
+
+          .MyContentCollection__selection-bar-actions {
+            width: 100%;
+            justify-content: flex-end;
+          }
+        }
+

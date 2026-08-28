@@ -1,0 +1,145 @@
+/* ── GreetingMenuEditor ──────────────────────────────── */
+
+.greeting-menu {
+      margin-top: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
+      background: var(--backgroundSecondary);
+      box-shadow:
+        0 1px 3px var(--shadowLight),
+        inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+
+    .greeting-menu__header {
+      margin-bottom: var(--space-2);
+    }
+
+    .greeting-menu__title {
+      font-size: var(--fontSize-sm);
+      font-weight: 550;
+      color: var(--textSecondary);
+      letter-spacing: -0.01em;
+    }
+
+    .greeting-menu__desc {
+      margin-top: 2px;
+      font-size: var(--fontSize-sm);
+      color: var(--textTertiary);
+      line-height: var(--leading-normal);
+    }
+
+    .greeting-menu__list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+      margin-top: var(--space-2);
+    }
+
+    .greeting-menu__item {
+      padding: var(--space-2);
+      border-radius: var(--radius-sm);
+      background: var(--background);
+      border: 1px solid var(--borderLight);
+      box-shadow: 0 1px 2px var(--shadowLight);
+    }
+
+    .greeting-menu__row {
+      display: flex;
+      gap: var(--space-2);
+      align-items: flex-end;
+    }
+
+    .greeting-menu__col {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .greeting-menu__field-label {
+      display: block;
+      font-size: var(--fontSize-xs);
+      color: var(--textTertiary);
+      margin-bottom: 2px;
+      letter-spacing: -0.01em;
+    }
+
+    .greeting-menu__optional {
+      font-size: var(--fontSize-xs);
+      color: var(--textQuaternary);
+      margin-left: 4px;
+    }
+
+    .greeting-menu__remove {
+      margin-left: var(--space-1);
+      margin-bottom: var(--space-1);
+      border: none;
+      background: transparent;
+      color: var(--textQuaternary);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: var(--radius-xs);
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition:
+        background-color 0.18s ease-out,
+        color 0.18s ease-out,
+        transform 0.16s ease-out;
+    }
+
+    .greeting-menu__remove:hover {
+      background: var(--backgroundHover);
+      color: var(--error);
+      transform: translateY(-0.5px);
+    }
+
+    .greeting-menu__remove:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--focus);
+      color: var(--error);
+    }
+
+    .greeting-menu__add {
+      margin-top: var(--space-2);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-1);
+      border-radius: 999px;
+      border: 1px dashed var(--border);
+      background: transparent;
+      color: var(--primary);
+      font-size: var(--fontSize-sm);
+      padding: 3px 10px;
+      cursor: pointer;
+      transition:
+        background-color 0.18s ease-out,
+        border-color 0.18s ease-out,
+        transform 0.16s ease-out,
+        box-shadow 0.18s ease-out;
+    }
+
+    .greeting-menu__add:hover {
+      background: var(--background);
+      border-color: var(--borderHover);
+      box-shadow: 0 1px 3px var(--shadowLight);
+      transform: translateY(-0.5px);
+    }
+
+    .greeting-menu__add:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--focus);
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+      .greeting-menu__row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .greeting-menu__remove {
+        align-self: flex-end;
+        margin-top: var(--space-1);
+      }
+    }
+

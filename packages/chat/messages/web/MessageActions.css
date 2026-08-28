@@ -1,0 +1,283 @@
+/* ── MessageActions ──────────────────────────────────── */
+
+/*
+ * Desktop actions sit in-flow under .msg-hover-target (pattern A).
+ * Reveal rules live here only — do not duplicate in MessageLayout.css.
+ */
+
+.actions.desktop {
+  position: static;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+/* Sole reveal truth for desktop action chrome */
+.msg-hover-target:hover .actions.desktop,
+.msg-hover-target.is-actions-hover .actions.desktop,
+.msg:hover .actions.desktop,
+.msg.actions-visible .actions.desktop,
+.actions.desktop.show,
+.actions.desktop:focus-within {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.actions.desktop .action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--textMuted, var(--textSecondary));
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.actions.desktop .action-btn:hover:not(:disabled) {
+  color: var(--primary);
+  background: var(--primaryGhost, color-mix(in srgb, var(--primary) 12%, transparent));
+}
+
+.actions.desktop .action-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  color: var(--primary);
+  background: var(--primaryGhost, color-mix(in srgb, var(--primary) 12%, transparent));
+}
+
+.actions.desktop .action-btn.active {
+  color: var(--success, #10B981);
+  background: var(--successGhost, color-mix(in srgb, var(--success, #10B981) 12%, transparent));
+}
+
+.actions.desktop .action-btn.busy,
+.actions.desktop .action-btn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+  pointer-events: none;
+}
+
+.actions.desktop .action-btn.danger:hover:not(:disabled) {
+  color: var(--error);
+  background: var(--errorGhost, color-mix(in srgb, var(--error) 12%, transparent));
+}
+
+/* 忙碌 spinner（桌面 / 触控共用） */
+.action-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: actionSpin 0.7s linear infinite;
+  box-sizing: border-box;
+}
+
+.action-item .action-spinner {
+  width: 18px;
+  height: 18px;
+}
+
+@keyframes actionSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* 移动端覆盖式操作面板 */
+.actions-overlay.mobile {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  animation: overlayFadeIn 0.25s ease-out;
+}
+
+.overlay-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+.actions-panel {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  max-width: none;
+  /* Neutralize native <dialog> UA defaults so the sheet matches the old div panel. */
+  padding: 0;
+  color: inherit;
+  background: var(--background);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  box-shadow: 0 -8px 32px var(--shadowHeavy);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: panelSlideUp 0.25s ease-out;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0 var(--space-2) 0;
+}
+
+.panel-indicator {
+  width: 36px;
+  height: 4px;
+  background: var(--borderAccent);
+  border-radius: 2px;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-5) var(--space-4);
+}
+
+.action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease;
+  color: var(--text);
+}
+
+.action-item:active:not(:disabled) {
+  transform: scale(0.95);
+  background: var(--backgroundHover);
+}
+
+.action-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.action-item.danger {
+  color: var(--error);
+}
+
+.action-item.active {
+  color: var(--success, #10B981);
+}
+
+.action-item.busy,
+.action-item:disabled {
+  opacity: 0.65;
+  cursor: progress;
+  pointer-events: none;
+}
+
+.action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--backgroundSecondary);
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.action-item:active:not(:disabled) .action-icon {
+  background: var(--primaryGhost);
+  border-color: var(--primary);
+}
+
+.action-item.active .action-icon {
+  background: var(--successGhost, rgba(16, 185, 129, 0.1));
+  border-color: var(--success, #10B981);
+}
+
+.action-item.danger:active:not(:disabled) .action-icon {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: var(--error);
+}
+
+.action-label {
+  font-size: var(--fontSize-sm);
+  font-weight: 500;
+  text-align: center;
+  line-height: var(--leading-tight);
+}
+
+/* 动画 */
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes panelSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* 减弱动效：无大幅位移/淡入动画 */
+@media (prefers-reduced-motion: reduce) {
+  .actions.desktop {
+    transition: none;
+  }
+
+  .actions.desktop .action-btn {
+    transition: none;
+  }
+
+  .actions-overlay.mobile {
+    animation: none;
+  }
+
+  .actions-panel {
+    animation: none;
+  }
+
+  .action-item {
+    transition: none;
+  }
+
+  .action-item:active:not(:disabled) {
+    transform: none;
+  }
+
+  .action-icon {
+    transition: none;
+  }
+
+  .action-spinner {
+    animation: none;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    opacity: 0.85;
+  }
+}

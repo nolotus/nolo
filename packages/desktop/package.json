@@ -1,0 +1,23 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.32.0-alpha.62",
+  "type": "module",
+  "scripts": {
+    "prepare:web": "cd ../.. && NODE_ENV=production bun ./scripts/dev/esBuild.js",
+    "dev:web": "cd ../.. && NODE_ENV=development bun ./scripts/dev/esDev.js",
+    "dev": "concurrently -k \"bun run dev:web\" \"bun run dev:electrobun\"",
+    "dev:electrobun": "NOLO_DESKTOP_SKIP_WEB_BUILD=1 electrobun dev --watch",
+    "refresh-dev-ui": "bun ./scripts/refresh-dev-ui.ts",
+    "build": "electrobun build",
+    "build:alpha": "electrobun build --env=canary",
+    "build:local": "NOLO_DESKTOP_SKIP_PATCH=1 NOLO_DESKTOP_SKIP_DMG=1 electrobun build --env=canary",
+    "build:stable": "electrobun build --env=stable",
+    "build:stable:electrobun": "electrobun build --env=stable",
+    "build:stable:windows-installer": "bun ./scripts/build-stable-windows-installer.ts"
+  },
+  "dependencies": {
+    "electrobun": "1.18.4-beta.6",
+    "rcedit": "^5.0.2"
+  }
+}

@@ -1,0 +1,168 @@
+/* 文件路径: render/layout/MobileDownloadBanner.css */
+
+.mobile-download-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 10000; /* Ensure it is above all drawer overlays and views */
+  
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  padding: 12px 14px;
+  
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surfaceCard, var(--background)) 78%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--borderSubtle) 80%);
+  
+  box-shadow: 
+    0 10px 30px -10px color-mix(in srgb, var(--shadowMedium, #000) 25%, transparent),
+    0 1px 3px 0 color-mix(in srgb, var(--primary) 8%, transparent);
+  
+  animation: mobile-banner-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+[data-theme="dark"] .mobile-download-banner {
+  background: color-mix(in srgb, var(--surfaceCard, #1a1a1a) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--borderSubtle) 75%);
+}
+
+/* Content Area (semantic button for banner body click) */
+.mobile-download-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-download-banner__content:active {
+  opacity: 0.92;
+}
+
+.mobile-download-banner__icon-box {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 70%, #000) 100%);
+  color: var(--primaryText, #fff);
+  box-shadow: 0 4px 10px -3px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.mobile-download-banner__dl-icon {
+  animation: mobile-dl-bounce 2s infinite ease-in-out;
+}
+
+.mobile-download-banner__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobile-download-banner__title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.mobile-download-banner__subtitle {
+  color: var(--textSecondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Actions Section */
+.mobile-download-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mobile-download-banner__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--primaryText, #fff);
+  font-size: 12px;
+  font-weight: 700;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+  box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.mobile-download-banner__btn:hover {
+  opacity: 0.92;
+}
+
+.mobile-download-banner__btn:active {
+  transform: translateY(1px);
+}
+
+.mobile-download-banner__close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--textSecondary) 8%, transparent);
+  color: var(--textSecondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  cursor: pointer;
+}
+
+.mobile-download-banner__close:hover {
+  background: color-mix(in srgb, var(--textSecondary) 15%, transparent);
+  color: var(--text);
+}
+
+/* Slide Up Entry Animation */
+@keyframes mobile-banner-slide-up {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Icon Bouncing Animation */
+@keyframes mobile-dl-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}

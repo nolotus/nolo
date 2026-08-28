@@ -1,0 +1,50 @@
+{
+  // CF builder Worker 配置模板。部署前需把占位符替换为真实值：
+  //   <YOUR_WORKER_NAME>   worker 名称，例如 cf-builder
+  //   <BUILDER_CONTAINER_NAME>  容器实例名，例如 cf-builder-container
+  //   <CLASS_NAME>        容器类名（必须与 worker.ts 中 CLASS_NAME 常量一致），例如 Cfbuilder
+  //   <DO_BINDING_NAME>   容器 Durable Object 绑定名（必须与 worker.ts BUILDER_BINDING 一致），例如 CF_BUILDER
+  //
+  // 秘密（wrangler secret put，勿写入本文件）：
+  //   GITHUB_DEPLOY_KEY   只读 deploy key 的 PEM 内容（容器内 clone 用）
+  //   BUILDER_TOKEN       /build 与 /artifact 的访问令牌（worker 层 X-Builder-Token 校验）
+  //
+  // 实测约束（来自 /tmp/cf-bun-smoke 原型）：
+  //   - instance_type 不要配（standard-4 在当前套餐不可调度，容器启动失败；默认规格实测全流程 ~50s 足够）
+  //   - 容器镜像/代码变更后需强制换新实例（改名或删除旧实例），否则 Wrangler 复用旧镜像
+//   - 容器应用名（containers[].name）绑定一个 DO 命名空间；删 worker 后重建会生成
+//     新命名空间，若容器名不变会报「already deployed with different durable object
+//     namespace」→ 必须换容器名（如 -v2）重建
+//   - instance_type standard-4 实测可用（不要去掉，默认规格/或缺失会导致容器启动失败）
+//   - 删除重建会清空 secret，需重新 wrangler secret put
+  //   - containers / durable_objects / migrations 三段缺一不可（缺 migrations 部署会失败）
+
+  "name": "<YOUR_WORKER_NAME>",
+  "main": "worker.ts",
+  "compatibility_date": "2025-05-01",
+  "containers": [
+    {
+      "name": "<BUILDER_CONTAINER_NAME>",
+      "class_name": "<CLASS_NAME>",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "standard-4"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "<DO_BINDING_NAME>",
+        "class_name": "<CLASS_NAME>"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "<CLASS_NAME>"
+      ]
+    }
+  ]
+}

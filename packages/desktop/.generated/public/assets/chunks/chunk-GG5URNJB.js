@@ -1,0 +1,1 @@
+import{q as o}from"/public/assets/chunks/chunk-5NMWODED.js";import{bi as i,oi as n}from"/public/assets/chunks/chunk-K6SBFEEZ.js";import{a as t}from"/public/assets/chunks/chunk-U3FV4FR4.js";import{d as r}from"/public/assets/chunks/chunk-WEOWWZTJ.js";var e=r(t(),1),p=({children:d})=>n(i)?(0,e.jsx)(e.Fragment,{children:d}):(0,e.jsx)(o,{to:"/auth/login",replace:!0}),a=p;export{a};

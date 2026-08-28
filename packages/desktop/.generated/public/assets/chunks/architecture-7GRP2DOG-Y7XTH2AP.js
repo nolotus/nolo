@@ -1,0 +1,1 @@
+import{a as e,b as r}from"/public/assets/chunks/chunk-CNS2M32H.js";import"/public/assets/chunks/chunk-VDXMQZZZ.js";import"/public/assets/chunks/chunk-WEOWWZTJ.js";export{e as ArchitectureModule,r as createArchitectureServices};

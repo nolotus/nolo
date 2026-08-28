@@ -1,0 +1,45 @@
+{
+  // CF builder Worker 配置模板。部署前需把占位符替换为真实值：
+  //   nolo-cf-builder   worker 名称，例如 cf-builder
+  //   nolo-cf-builder-container-v2  容器实例名，例如 cf-builder-container
+  //   Cfbuilder        容器类名（必须与 worker.ts 中 CLASS_NAME 常量一致），例如 Cfbuilder
+  //   CF_BUILDER   容器 Durable Object 绑定名（必须与 worker.ts BUILDER_BINDING 一致），例如 CF_BUILDER
+  //
+  // 秘密（wrangler secret put，勿写入本文件）：
+  //   GITHUB_DEPLOY_KEY   只读 deploy key 的 PEM 内容（容器内 clone 用）
+  //   BUILDER_TOKEN       /build 与 /artifact 的访问令牌（worker 层 X-Builder-Token 校验）
+  //
+  // 实测约束（来自 /tmp/cf-bun-smoke 原型）：
+  //   - instance_type 用 standard-4（实测全流程 ~50s）
+  //   - 容器镜像/代码变更后需强制换新实例（改名或删除旧实例），否则 Wrangler 复用旧镜像
+  //   - containers / durable_objects / migrations 三段缺一不可（缺 migrations 部署会失败）
+
+  "name": "nolo-cf-builder",
+  "main": "worker.ts",
+  "compatibility_date": "2025-05-01",
+  "containers": [
+    {
+      "name": "nolo-cf-builder-container-v2",
+      "class_name": "Cfbuilder",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "standard-4",
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CF_BUILDER",
+        "class_name": "Cfbuilder"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Cfbuilder"
+      ]
+    }
+  ]
+}

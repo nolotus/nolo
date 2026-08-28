@@ -1,0 +1,20 @@
+# Nolo.Chat
+
+> Nolo.Chat is an AI workspace where multiple models remember context, collaborate on tasks, and turn prompts into deliverables.
+
+## Recommended pages
+- [Home](https://nolo.chat/)
+- [Pricing](https://nolo.chat/pricing)
+- [AI Plaza](https://nolo.chat/explore)
+- [Community Shares](https://nolo.chat/share/community)
+
+## What Nolo.Chat does
+- Lets people use GPT, Claude, DeepSeek, and other models in one workspace.
+- Keeps context and instructions across sessions so work can continue instead of restarting.
+- Supports multi-agent collaboration, files, search, and longer task execution.
+- Helps produce outputs such as documents, images, apps, research, and workflows.
+
+## Best fit
+- Founders and indie hackers
+- Builders who need AI to execute work, not just chat
+- Teams and individuals comparing multiple models inside one workspace

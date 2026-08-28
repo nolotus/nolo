@@ -1,0 +1,1 @@
+import{j as o,rf as t}from"/public/assets/chunks/chunk-K6SBFEEZ.js";var h=o("db/fetchUserData",async({types:a,userId:n,includeDeleted:e},{extra:i})=>{let{db:r}=i;if(!r)throw console.error("Database not available in fetchUserDataThunk"),new Error("Database not available");return Array.isArray(a)?await t(r,a,n,{includeDeleted:e}):await t(r,a,n,{includeDeleted:e})});export{h as a};

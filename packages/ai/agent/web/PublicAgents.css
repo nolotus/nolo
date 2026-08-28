@@ -1,0 +1,218 @@
+        :root {
+          --public-agents-control-height: 40px;
+          --public-agents-radius: 12px;
+          --public-agents-pill-radius: 21px;
+        }
+
+        .public-agents {
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-5, 20px);
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+
+        .public-agents__controls {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+        }
+
+        .public-agents__left {
+          flex: 1 1 auto;
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          flex-wrap: nowrap;
+          gap: 10px;
+        }
+
+        .public-agents__search {
+          flex: 0 1 440px;
+          min-width: 260px;
+          max-width: 440px;
+          transition: max-width 0.3s ease;
+        }
+
+        .public-agents__search:focus-within {
+          max-width: 480px;
+        }
+
+        :global(.public-agents__search-input .search-input) {
+          height: var(--public-agents-control-height);
+          border-radius: var(--public-agents-pill-radius);
+          border: none;
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          box-shadow: inset 0 0 0 1px var(--borderMuted, var(--borderLight));
+          transition: all 0.2s ease;
+        }
+
+        :global(.public-agents__search-input .search-input:focus-within) {
+          background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+          border-color: var(--primaryBorder, var(--primary));
+          box-shadow: 0 0 0 3px var(--focusRing);
+        }
+
+        .public-agents__filter-chip {
+          height: var(--public-agents-control-height);
+          border-radius: var(--public-agents-pill-radius);
+          border: 1px solid var(--borderMuted, var(--borderLight));
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          color: var(--textSecondary);
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          padding: 0 16px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .public-agents__filter-chip:hover {
+          color: var(--text);
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+          border-color: var(--borderSubtle);
+        }
+
+        .public-agents__filter-chip--active {
+          color: var(--primary);
+          border-color: var(--primaryBorder, var(--primary));
+          background: var(--accentSoft, var(--surfaceInteractive, var(--background)));
+        }
+        
+        .public-agents__filter-chip--active:hover {
+          background: var(--accentSoft, var(--surfaceInteractive, var(--background)));
+        }
+
+        .public-agents__sort {
+          flex: 0 0 auto;
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          align-self: flex-end;
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          padding: 2px 3px;
+          border-radius: var(--public-agents-pill-radius);
+          height: var(--public-agents-control-height);
+          border: 1px solid var(--borderMuted, var(--borderLight));
+        }
+
+        .public-agents__sort-label {
+          font-size: var(--fontSize-xs);
+          color: var(--textSubtle, var(--textTertiary));
+          margin-left: 10px;
+          margin-right: 6px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+        }
+
+        .public-agents__sort-pill {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          height: 100%;
+          padding: 0 12px;
+          border-radius: calc(var(--public-agents-pill-radius) - 3px);
+          border: none;
+          background: transparent;
+          color: var(--textMuted, var(--textSecondary));
+          font-size: var(--fontSize-sm);
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s ease, color 0.2s ease;
+          white-space: nowrap;
+        }
+
+        .public-agents__sort-pill:hover:not(.public-agents__sort-pill--active) {
+          color: var(--text);
+          background: var(--surfaceInteractiveHover, var(--backgroundHover));
+        }
+
+        .public-agents__sort-pill--active {
+          background: var(--surfaceRaised, var(--background));
+          color: var(--primary);
+          box-shadow: inset 0 0 0 1px var(--borderMuted, var(--borderLight)), 0 1px 2px var(--shadowLight);
+          font-weight: 600;
+        }
+
+        .public-agents__sort-icon {
+          display: flex;
+          align-items: center;
+          transition: transform 0.2s ease;
+        }
+
+        .public-agents__sort-pill--active .public-agents__sort-icon {
+          transform: scale(1.05);
+        }
+
+        /* 控制栏响应式 */
+        @media (max-width: 992px) {
+          .public-agents__search {
+            max-width: 100%;
+          }
+
+          .public-agents__sort {
+            align-self: center;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .public-agents {
+            gap: var(--space-4, 16px);
+          }
+
+          .public-agents__controls {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+          }
+
+          .public-agents__left {
+            width: 100%;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
+          .public-agents__search {
+            max-width: none;
+            min-width: 0;
+            flex: 1;
+            order: 1;
+          }
+
+          .public-agents__filter-chip {
+            order: 2;
+            padding: 0 12px;
+            font-size: var(--fontSize-sm);
+          }
+
+          .public-agents__sort {
+            order: 3;
+            justify-content: space-between;
+            width: 100%;
+            height: 38px;
+            align-self: stretch;
+          }
+
+          .public-agents__sort-label {
+            display: none;
+          }
+
+          .public-agents__sort-pill {
+            flex: 1;
+            justify-content: center;
+            padding: 0 8px;
+            font-size: var(--fontSize-sm);
+          }
+        }
+
+
+/* ── 夜间模式排序激活态可见性 ── */
+[data-theme='dark'] .public-agents__sort-pill--active {
+  background: var(--backgroundHover);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+}

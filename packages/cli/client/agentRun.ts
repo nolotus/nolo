@@ -1,0 +1,1111 @@
+import {
+  LOCAL_AGENT_CONFIG_MISSING_CODE,
+  LOCAL_TURN_ABORTED_CODE,
+} from "../../agent-runtime/localLoop";
+import { resolveAgentRuntimeConfigFromRecord } from "../../agent-runtime/agentRecordConfig";
+import {
+  applyModelLayerOverride,
+  type ModelLayerOverride,
+} from "../../agent-runtime/modelLayerOverride";
+import type { AgentRuntimeHostAdapter } from "../agentRuntimeLocal";
+import {
+  createCliLocalRuntimeAdapter,
+  isBuiltinNoloAgentRef,
+} from "./localRuntimeAdapter";
+import { isTransientFetchError } from "./localRuntimeFetchRetry";
+import type {
+  LocalAgentTurnInput,
+} from "../../agent-runtime/localLoop";
+import { buildTurnTokenUsage, formatUsage, shouldShowUsage } from "./tokenUsage";
+
+import {
+  createCliTurnOutput,
+  formatAssistantResponseForCli,
+} from "./agentRunOutput";
+import { readStreamingAgentRun } from "./agentRunStream";
+
+import {
+  type DispatchPlan,
+  resolveAuthToken,
+  isMachineBoundLocalhostCustomProvider,
+  resolveBoundMachineId,
+  detectCurrentMachineId,
+  isCliProviderAgentConfig,
+  type AgentRunSubjectRef,
+  type RunAgentTurnOptions,
+  type RunAgentTurnResult,
+  type TaskEvidenceInput,
+} from "./agentRunTypes";
+
+export type { RunAgentTurnOptions, RunAgentTurnResult, TaskEvidenceInput };
+import { Spinner } from "./agentRunSpinner";
+import {
+  resolveServerPlatformToolNames,
+  isKnownServerPlatformAgent,
+} from "./agentRunPlatformTools";
+import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
+import { expandCollapsedPastes } from "../../core/collapsedPaste";
+
+import { ulid } from "ulid";
+import { asOptionalTrimmedString } from "core/optionalString";
+import { asTrimmedString } from "core/trimmedString";
+import { toErrorMessage } from "core/errorMessage";
+
+/** Local loop is heavy; load only when a local turn actually runs. */
+async function loadRunLocalAgentTurn() {
+  const { runLocalAgentTurn } = await import("../agentRuntimeLocal");
+  return runLocalAgentTurn;
+}
+
+type ReviewDecisionStatus = "passed" | "needs_changes" | "blocked";
+
+async function resolveCurrentMachineId(options: RunAgentTurnOptions) {
+  return options.currentMachineIdResolver
+    ? options.currentMachineIdResolver(options.env)
+    : detectCurrentMachineId(options.env);
+}
+
+function resolveRequestedRuntimeMode(options: RunAgentTurnOptions) {
+  const envMode = options.env.NOLO_RUNTIME_MODE;
+  if (options.runtimeMode) return options.runtimeMode;
+  if (envMode === "local" || envMode === "server" || envMode === "auto")
+    return envMode;
+  return "auto";
+}
+
+function canResolveCollapsedPasteReference(
+  store: import("../../core/collapsedPaste").CollapsedPasteStore,
+  content: import("../../agent-runtime/types").AgentRuntimeMessageContent,
+) {
+  const expand = (text: string) => expandCollapsedPastes(text, store) !== text;
+  if (typeof content === "string") return expand(content);
+  if (!Array.isArray(content)) return false;
+  return content.some((part) => part.type === "text" && expand(part.text));
+}
+
+function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
+  return createCliLocalRuntimeAdapter({
+    env: options.env,
+    fetchImpl: options.fetchImpl,
+    cwd: options.localRuntimeCwd,
+    output: options.output,
+    ...(options.confirmDestructiveAction
+      ? { confirmDestructiveAction: options.confirmDestructiveAction }
+      : {}),
+    ...(options.requestUserChoice
+      ? { requestUserChoice: options.requestUserChoice }
+      : {}),
+    ...(options.pastedTextStore?.items.size
+      ? { pastedTextStore: options.pastedTextStore }
+      : {}),
+    ...(options.activityReporter
+      ? { activityReporter: options.activityReporter }
+      : {}),
+  });
+}
+
+function resolveLocalRuntimeAdapter(options: RunAgentTurnOptions) {
+  return (
+    options.localRuntimeAdapter ||
+    options.localRuntimeAdapterFactory?.(options.env, {
+      cwd: options.localRuntimeCwd,
+    }) ||
+    buildDefaultLocalRuntimeAdapter(options)
+  );
+}
+
+/**
+ * Ephemeral / memory-only adapter wrapper. Replaces `saveTurn` with an
+ * in-memory no-op (returns the turn's dialogId without writing to any store
+ * or syncing to a remote server) and `loadDialogHistory` with an empty
+ * history (ephemeral dialogs are never persisted, so they have no history to
+ * load). Capabilities are intentionally left untouched — persistence
+ * *capability* is descriptive host metadata consumed by runtime decision
+ * logic (runtimeFacts/runtimeDecision); ephemeral changes *behavior* on
+ * this turn, not the host's capability set. Everything else (agent config,
+ * provider, tools) is unchanged so a liveness probe still exercises the real
+ * runtime path — only persistence is stripped out.
+ */
+function wrapAdapterEphemeral(
+  adapter: AgentRuntimeHostAdapter,
+): AgentRuntimeHostAdapter {
+  return {
+    ...adapter,
+    loadDialogHistory: async () => [],
+    saveTurn: async (input) => ({
+      dialogId: input.continueDialogId ?? "ephemeral",
+    }),
+  };
+}
+
+function applyEphemeralIfRequested(
+  options: RunAgentTurnOptions,
+  adapter: AgentRuntimeHostAdapter,
+): AgentRuntimeHostAdapter {
+  return options.ephemeral ? wrapAdapterEphemeral(adapter) : adapter;
+}
+
+/**
+ * quick-chat 自动路由的 model 层覆盖（local 模式）：tier agent 的配置从
+ * adapter 读出后，用覆盖包替换其 model 层再交给 local loop；
+ * 其余 agentRef 透传，不影响 startAgentRun 子代理。
+ */
+function wrapLoadAgentConfigWithModelOverride(
+  adapter: AgentRuntimeHostAdapter,
+  targetAgentKey: string,
+  override: ModelLayerOverride,
+): AgentRuntimeHostAdapter {
+  return {
+    ...adapter,
+    loadAgentConfig: async (agentRef: string) => {
+      const config = await adapter.loadAgentConfig(agentRef);
+      if (!config || agentRef !== targetAgentKey) return config;
+      const baseRecord =
+        (config as { rawRecord?: Record<string, unknown> }).rawRecord ??
+        (config as unknown as Record<string, unknown>);
+      return resolveAgentRuntimeConfigFromRecord(
+        agentRef,
+        applyModelLayerOverride(baseRecord, override),
+      );
+    },
+  };
+}
+
+async function shouldSkipAutoLocalForServerPlatformTools(
+  options: RunAgentTurnOptions,
+) {
+  if (isBuiltinNoloAgentRef(options.agentKey)) return false;
+  if (options.localRuntimeCwd) {
+    return false;
+  }
+  const knownServerPlatformAgent = isKnownServerPlatformAgent(options);
+  const adapter = resolveLocalRuntimeAdapter(options);
+  if (!adapter) return knownServerPlatformAgent;
+  let agentConfig;
+  try {
+    agentConfig = await adapter.loadAgentConfig(options.agentKey);
+  } catch {
+    if (knownServerPlatformAgent) {
+      options.output.write(
+        `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a known platform agent. ` +
+          "Use --local explicitly to force local workspace tools.\n",
+      );
+      return true;
+    }
+    return false;
+  }
+  if (isCliProviderAgentConfig(agentConfig)) {
+    const boundMachineId = resolveBoundMachineId(agentConfig);
+    if (!boundMachineId) return false;
+    const currentMachineId =
+      (await resolveCurrentMachineId(options))?.trim() || "";
+    if (currentMachineId && currentMachineId === boundMachineId) return false;
+    options.output.write(
+      `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is bound to ${boundMachineId}` +
+        (currentMachineId ? ` and this machine is ${currentMachineId}.` : ".") +
+        " Use --local explicitly to force the current machine.\n",
+    );
+    return true;
+  }
+  if (knownServerPlatformAgent) {
+    options.output.write(
+      `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a known platform agent. ` +
+        "Use --local explicitly to force local workspace tools.\n",
+    );
+    return true;
+  }
+  if (isMachineBoundLocalhostCustomProvider(agentConfig)) {
+    options.output.write(
+      `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a machine-bound localhost custom provider. ` +
+        "Use --local explicitly to force the current machine.\n",
+    );
+    return true;
+  }
+  const serverTools = resolveServerPlatformToolNames(agentConfig);
+  if (serverTools.length === 0) return false;
+  options.output.write(
+    `[nolo] auto runtime: skipping local runtime because ${options.agentKey} declares server platform tools ` +
+      `(${serverTools.join(", ")}). Use --local explicitly to force local workspace tools.\n`,
+  );
+  return true;
+}
+
+function buildUserInputContent(message: string, imageUrls: string[] = []) {
+  if (imageUrls.length === 0) return message;
+  return [
+    ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
+    ...imageUrls.map((url) => ({
+      type: "image_url" as const,
+      image_url: { url },
+    })),
+  ];
+}
+
+function buildSubjectRefs(options: RunAgentTurnOptions) {
+  const refs: AgentRunSubjectRef[] = [];
+  const seen = new Set<string>();
+  const pushRef = (ref: AgentRunSubjectRef) => {
+    const kind = ref.kind.trim();
+    const id = ref.id.trim();
+    const role = ref.role?.trim();
+    if (!kind || !id) return;
+    const key = `${kind}\u0000${id}\u0000${role ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push({ kind, id, ...(role ? { role } : {}) });
+  };
+  for (const ref of options.subjectRefs ?? []) pushRef(ref);
+  if (options.subjectDialogKey) {
+    pushRef({
+      kind: "dialog",
+      id: options.subjectDialogKey,
+      role: "subject",
+    });
+  }
+  if (options.taskEvidence?.rowDbKey) {
+    pushRef({
+      kind: "table-row",
+      id: options.taskEvidence.rowDbKey,
+      role: "task",
+    });
+  }
+  for (const artifactId of options.taskEvidence?.artifactIds ?? []) {
+    pushRef({
+      kind: "artifact",
+      id: artifactId,
+      role: "evidence",
+    });
+  }
+  return refs.length ? refs : undefined;
+}
+
+function isMissingLocalAgentConfigError(error: unknown, agentRef: string) {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: string; agentRef?: string }).code ===
+      LOCAL_AGENT_CONFIG_MISSING_CODE &&
+    (error as { code?: string; agentRef?: string }).agentRef === agentRef,
+  );
+}
+
+/**
+ * Detect failures raised by a provider HTTP transport. A provider transport
+ * is anything that called an upstream chat-completions endpoint and got a
+ * non-OK response — that includes the local runtime calling an upstream
+ * directly (`local provider failed:`, `local antigravity provider failed:`,
+ * `local Claude OAuth provider failed:`, `local Codex OAuth provider
+ * failed:`, `gemini native tool provider failed:`) and the nolo server
+ * proxying the chat request (`platform provider failed:`, `desktop platform
+ * provider failed:`).
+ *
+ * All of these mean the *upstream* returned non-OK, NOT that the local OS
+ * credential broker is broken — so they should never be reported as "fix
+ * the local credential/config" unless the status is an explicit auth failure
+ * (401/403).
+ *
+ * The regex matches the common shape `<label> provider failed: HTTP <status>`
+ * shared by every adapter, so newly added transports are covered without
+ * editing this function. `scripts/benchmarks/localAgentToolsetBenchmark.ts`
+ * uses the same shape.
+ *
+ * Empty body (`{}`) is typical of a gateway 502/504, not of an application-
+ * layer nolo error (which always returns a JSON `{error:{message,code}}`).
+ */
+const PROVIDER_HTTP_FAILED_RE =
+  /(.+?) provider failed:\s*HTTP\s+(\d+)\b/i;
+
+/**
+ * Platform transports (nolo server proxying the request) are identified by the
+ * label containing `platform provider failed`. Everything else is a local
+ * transport. `desktop platform provider failed` is the desktop-adapter flavor
+ * of the same platform hop and is intentionally covered by this substring.
+ */
+const PLATFORM_TRANSPORT_RE = /\bplatform provider failed\b/i;
+
+type ProviderTransport = "local" | "platform";
+
+type LocalRunErrorClass =
+  | { kind: "generic" }
+  | {
+      kind:
+        | "auth"
+        | "rejected-payload"
+        | "rate-limit"
+        | "transient"
+        | "upstream";
+      transport: ProviderTransport;
+      status: number;
+    };
+
+/**
+ * Classify a provider HTTP failure into a user-facing category.
+ *
+ * Status → kind mapping (applies to both local and platform transports):
+ *   401 / 403          → auth            (credential/permission — legit "fix local credential")
+ *   400 / 422          → rejected-payload (upstream rejected the *request body*; NOT a credential
+ *                                         issue — e.g. `invalid tool call arguments` when a dialog
+ *                                         history contains tool_calls from a different model after
+ *                                         `/switch`, or any `invalid_request_error`)
+ *   429                → rate-limit      (provider throttling — retry)
+ *   500–599            → transient       (gateway/upstream hiccup — retry)
+ *   other 4xx          → upstream        (provider-side rejection, not local config)
+ *   no HTTP match      → generic         (genuinely local config/runtime — "fix local credential")
+ */
+function classifyLocalRunError(message: string): LocalRunErrorClass {
+  const m = message.match(PROVIDER_HTTP_FAILED_RE);
+  if (!m) return { kind: "generic" };
+  const status = Number(m[2]);
+  const transport: ProviderTransport = PLATFORM_TRANSPORT_RE.test(message)
+    ? "platform"
+    : "local";
+
+  if (status === 401 || status === 403) {
+    return { kind: "auth", transport, status };
+  }
+  if (status === 400 || status === 422) {
+    return { kind: "rejected-payload", transport, status };
+  }
+  if (status === 429) {
+    return { kind: "rate-limit", transport, status };
+  }
+  if (status >= 500 && status <= 599) {
+    return { kind: "transient", transport, status };
+  }
+  return { kind: "upstream", transport, status };
+}
+
+/**
+ * Hint that the rejection looks like a history-replay problem (the upstream
+ * refused tool_calls / arguments carried over from a prior model), as opposed
+ * to a generic 400. Detected from the upstream `error.message` /
+ * `invalid_request_error` body that `describeProviderFailure` already inlined
+ * into the error string.
+ *
+ * Keep this narrow: only fire the history-replay hint when the body explicitly
+ * mentions `tool_call` arguments or an `invalid_request_error` type. A bare
+ * `invalid arguments` (e.g. Google's INVALID_ARGUMENT for a bad request field)
+ * is NOT necessarily a history-replay problem and should not trigger the
+ * "/switch history" lecture.
+ */
+const HISTORY_REPLAY_REJECTION_RE =
+  /invalid_request_error|invalid\s+tool\s+call\s+arguments?/i;
+
+/**
+ * Shared framing for every local-run failure message. Keeps the wording of
+ * the "auto runtime: local run unavailable" line consistent so the TUI and
+ * tests can match on a stable prefix/suffix.
+ */
+const RUN_UNAVAILABLE_PREFIX = "[nolo] auto runtime: local run unavailable";
+const NO_FALLBACK = "Not falling back to server.";
+const SERVER_FALLBACK_HINT = "or use --server to run on the server explicitly.";
+
+/**
+ * Per-kind message builders. Each is a small pure function that returns the
+ * user-facing line for one failure category. Adding a new kind (e.g. 408
+ * timeout) is now a one-line entry here + the classifyLocalRunError status
+ * map, instead of editing a 70-line switch body.
+ */
+type FailureCtx = {
+  message: string;
+  /** Human-readable transport label: "server chat proxy" or "local provider". */
+  where: "server chat proxy" | "local provider";
+  status: number;
+};
+
+function buildAuthFailure(ctx: FailureCtx): string {
+  // 401/403 is the one case where "fix the local credential" is correct.
+  // For the platform transport the credential lives on nolo.chat, not the
+  // local machine, so point there instead.
+  const fix = ctx.where === "server chat proxy"
+    ? `Check the agent's provider/api-key settings on nolo.chat`
+    : `Fix the local credential/config and retry`;
+  return (
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected). Detail: ${ctx.message} ` +
+    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
+  );
+}
+
+function buildRejectedPayloadFailure(ctx: FailureCtx): string {
+  // 400/422: the upstream rejected the request BODY. This is never a local
+  // credential issue. The most common cause is replaying a dialog history
+  // that contains tool_calls / reasoning produced by a different model
+  // (e.g. after `/switch`), which the new provider's gateway validates more
+  // strictly and rejects with `invalid tool call arguments` /
+  // `invalid_request_error`.
+  const looksLikeHistoryReplay = HISTORY_REPLAY_REJECTION_RE.test(ctx.message);
+  const cause = looksLikeHistoryReplay
+    ? ` This usually happens when the dialog history contains tool_calls or reasoning produced by a different model/provider (e.g. after /switch); the new provider rejects that history. Start a fresh dialog, or clean the offending history.`
+    : "";
+  return (
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the provider rejected the request body — this is NOT a local credential/config issue). Detail: ${ctx.message}${cause} ` +
+    `${NO_FALLBACK} Use --server to run on the server explicitly, or start a fresh dialog.\n`
+  );
+}
+
+function buildRateLimitFailure(ctx: FailureCtx): string {
+  return (
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, rate limited). Detail: ${ctx.message} ` +
+    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.\n`
+  );
+}
+
+function buildTransientFailure(ctx: FailureCtx): string {
+  return (
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}; this is an upstream/gateway issue, not your local credential or config). Detail: ${ctx.message} ` +
+    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.\n`
+  );
+}
+
+function buildUpstreamFailure(ctx: FailureCtx): string {
+  // Other 4xx (404/405/451/…): provider-side rejection that is neither auth
+  // nor a request-body validation error. For the platform transport the fix
+  // is on nolo.chat; for the local transport it's the agent's endpoint/model.
+  const fix = ctx.where === "server chat proxy"
+    ? `Check the agent's provider/api-key settings on nolo.chat`
+    : `Check the agent's endpoint/model settings`;
+  return (
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}). Detail: ${ctx.message} ` +
+    `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
+  );
+}
+
+/**
+ * Map each classified kind to its message builder. Keys mirror the `kind`
+ * union in LocalRunErrorClass. `auth`/`upstream` branch on transport inside
+ * their builder, so the table is a flat lookup.
+ */
+const FAILURE_BUILDERS: Record<
+  Exclude<LocalRunErrorClass, { kind: "generic" }>["kind"],
+  (ctx: FailureCtx) => string
+> = {
+  auth: buildAuthFailure,
+  "rejected-payload": buildRejectedPayloadFailure,
+  "rate-limit": buildRateLimitFailure,
+  transient: buildTransientFailure,
+  upstream: buildUpstreamFailure,
+};
+
+function describeLocalRunFailure(message: string): string {
+  // Balance/402 is the common "I just topped up / please continue" case —
+  // never tell the user to fix local credentials.
+  if (
+    /UPSTREAM_402|Insufficient Balance|余额不足|insufficient\s+balance/i.test(
+      message,
+    )
+  ) {
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
+      `Top up your balance, then send again (or say "继续") — if a dialog was kept, context is preserved.\n`
+    );
+  }
+
+  const cls = classifyLocalRunError(message);
+  if (cls.kind === "generic") {
+    // Socket/network deaths mid-stream are upstream transport failures —
+    // telling the user to "fix the local credential/config" points the
+    // investigation in the wrong direction (this exact wording misled a real
+    // mid-stream kill investigation; the 502/503 branches already carry
+    // "not your local credential" disclaimers).
+    if (isTransientFetchError(message)) {
+      return (
+        `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
+        `The upstream connection dropped mid-request (transient network/gateway issue — not a local credential or config problem). Send again (or say "continue") to retry in the same conversation.\n`
+      );
+    }
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
+      `Fix the local credential/config and retry, ${SERVER_FALLBACK_HINT}.\n`
+    );
+  }
+
+  const ctx: FailureCtx = {
+    message,
+    where: cls.transport === "platform" ? "server chat proxy" : "local provider",
+    status: cls.status,
+  };
+  return FAILURE_BUILDERS[cls.kind](ctx);
+}
+
+function shouldAttemptAutoLocal(options: RunAgentTurnOptions) {
+  if (options.localRuntimeAdapter || options.localRuntimeAdapterFactory)
+    return true;
+  if (
+    options.env.NOLO_DISABLE_CLI_WORKSPACE_TOOLS !== "1" &&
+    isBuiltinNoloAgentRef(options.agentKey) &&
+    resolveAuthToken(options.env)
+  ) {
+    return true;
+  }
+  if (
+    options.env.NOLO_DISABLE_CLI_WORKSPACE_TOOLS !== "1" &&
+    resolveAuthToken(options.env) &&
+    !isKnownServerPlatformAgent(options)
+  ) {
+    return true;
+  }
+  return Boolean(
+    options.env.NOLO_LOCAL_OPENAI_API_KEY ||
+    options.env.OPENAI_API_KEY ||
+    options.env.NOLO_LOCAL_OPENAI_BASE_URL ||
+    options.env.OPENAI_BASE_URL ||
+    options.env.NOLO_LOCAL_AGENT_KEY,
+  );
+}
+
+export function classifyReviewDecisionStatus(
+  summary?: string,
+): ReviewDecisionStatus | undefined {
+  const normalized = summary?.toLowerCase().trim();
+  if (!normalized) return undefined;
+
+  const explicit = normalized.match(
+    /review\s+decision\s*:\s*(passed|needs_changes|blocked)/,
+  );
+  if (explicit?.[1]) return explicit[1] as ReviewDecisionStatus;
+
+  if (
+    /\b(blocked|cannot review|unable to review)\b|无法审查|阻塞/.test(
+      normalized,
+    )
+  ) {
+    return "blocked";
+  }
+  if (
+    /\b(needs changes|request changes|changes requested|not approved)\b|需要修改|需修改|发现问题/.test(
+      normalized,
+    )
+  ) {
+    return "needs_changes";
+  }
+  if (/\b(approved|lgtm|no issues|passed)\b|通过|无问题/.test(normalized)) {
+    return "passed";
+  }
+  return undefined;
+}
+
+function buildTransportErrorHint(serverUrl: string, error: unknown) {
+  const endpoint = `${serverUrl}/api/agent/run`;
+  const reason = toErrorMessage(error);
+
+  let detail = `[nolo] Could not reach ${endpoint}.\n` + `Reason: ${reason}\n`;
+
+  try {
+    const parsed = new URL(serverUrl);
+    if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
+      detail +=
+        "If you meant local dev, start the local API first.\n" +
+        "Otherwise set NOLO_SERVER to a reachable server, or re-run `nolo login --server https://nolo.chat`.\n";
+      return detail;
+    }
+  } catch {
+    // Keep the generic hint below when serverUrl is not a valid absolute URL.
+  }
+
+  detail +=
+    "Check NOLO_SERVER / BASE_URL and make sure the configured server is reachable.\n";
+  return detail;
+}
+
+async function readAgentRunFailureMetadata(
+  res: Response,
+): Promise<{ dialogId?: string }> {
+  const data = await res
+    .clone()
+    .json()
+    .catch(() => ({}));
+  return {
+    ...(asOptionalTrimmedString(data?.dialogId)
+      ? { dialogId: asOptionalTrimmedString(data?.dialogId) }
+      : {}),
+  };
+}
+
+async function runHttpAgentTurn(
+  options: RunAgentTurnOptions,
+  authToken: string,
+): Promise<RunAgentTurnResult> {
+  const spinner = new Spinner(
+    options.output,
+    `${options.agentName} -> working`,
+    // 与 createCliTurnOutput 的兜底构造一致：传入 activityReporter 时
+    // Spinner 静默，避免 TUI docked 活动行与 spinner 帧重复 live 指示。
+    Boolean(options.activityReporter),
+  );
+  spinner.start();
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const subjectRefs = buildSubjectRefs(options);
+  const allowedChildAgentKeys = options.allowedChildAgentKeys?.filter((key) =>
+    key.trim(),
+  );
+  const allowedToolNames = options.allowedToolNames?.filter((name) =>
+    name.trim(),
+  );
+  const blockedToolNames = options.blockedToolNames?.filter((name) =>
+    name.trim(),
+  );
+  const shouldStream = !options.noStream && !options.background;
+  const expandedMessage = options.pastedTextStore?.items.size
+    ? expandCollapsedPastes(options.message, options.pastedTextStore)
+    : options.message;
+  // Server path: pass context blocks as canonical contextBlockScopes request
+  // field instead of prepending to userInput. Prefer the already-scoped
+  // representation; fall back to converting plain extraContextBlocks to
+  // turn-scope blocks (the CLI client doesn't know session vs turn).
+  const serverContextBlockScopes =
+    options.contextBlockScopes && options.contextBlockScopes.length > 0
+      ? options.contextBlockScopes
+      : options.extraContextBlocks && options.extraContextBlocks.length > 0
+        ? options.extraContextBlocks.map((block) => ({
+            content: block,
+            cacheScope: "turn" as const,
+          }))
+        : undefined;
+  const buildRequestBody = (stream: boolean) =>
+    JSON.stringify({
+      agentKey: options.agentKey,
+      userInput: buildUserInputContent(expandedMessage, options.imageUrls),
+      runtimeContext: {
+        surface: "cli",
+        host: "terminal",
+        runtime: "bun",
+        entrypoint: "nolo-cli",
+        capabilities: ["text-io", "streaming", "slash-commands"],
+        ...(options.dialogAgentMode
+          ? { dialogAgentMode: options.dialogAgentMode }
+          : {}),
+        ...(subjectRefs ? { subjectRefs } : {}),
+        ...(allowedChildAgentKeys?.length ? { allowedChildAgentKeys } : {}),
+        ...(blockedToolNames?.length ? { blockedToolNames } : {}),
+        ...(allowedToolNames?.length ? { allowedToolNames } : {}),
+      },
+      ...(options.continueDialogId
+        ? { continueDialogId: options.continueDialogId }
+        : {}),
+      ...(options.spaceId ? { spaceId: options.spaceId } : {}),
+      ...(options.category ? { category: options.category } : {}),
+      ...(options.inheritedFromDialogKey
+        ? { inheritedFromDialogKey: options.inheritedFromDialogKey }
+        : {}),
+      ...(options.parentDialogId
+        ? { parentDialogId: options.parentDialogId }
+        : {}),
+      ...(options.background ? { background: true } : {}),
+      ...(options.ephemeral ? { ephemeral: true } : {}),
+      ...(typeof options.timeoutMs === "number"
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
+      ...(options.modelOverride
+        ? { runtimeOptions: { quickChatModelOverride: options.modelOverride } }
+        : {}),
+      ...(serverContextBlockScopes ? { contextBlockScopes: serverContextBlockScopes } : {}),
+      stream,
+    });
+  const postAgentRun = (stream: boolean) =>
+    fetchImpl(`${options.serverUrl}/api/agent/run`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        "Content-Type": "application/json",
+      },
+      body: buildRequestBody(stream),
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+    });
+  let res: Response;
+  try {
+    res = await postAgentRun(shouldStream);
+  } catch (error) {
+    spinner.stop();
+    if (options.abortSignal?.aborted) {
+      return { exitCode: 0, streamInterrupted: true };
+    }
+    options.output.write(buildTransportErrorHint(options.serverUrl, error));
+    return { exitCode: 1 };
+  }
+
+  if (shouldStream && isGatewayHttpStatus(res.status)) {
+    const failureMeta = await readAgentRunFailureMetadata(res);
+    if (!failureMeta.dialogId) {
+      spinner.stop();
+      options.output.write(
+        `[nolo] streaming request returned HTTP ${res.status}; retrying once without streaming.\n`,
+      );
+      spinner.start();
+      try {
+        res = await postAgentRun(false);
+      } catch (error) {
+        spinner.stop();
+        options.output.write(buildTransportErrorHint(options.serverUrl, error));
+        return { exitCode: 1 };
+      }
+    }
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("text/event-stream") && res.body) {
+    const result = await readStreamingAgentRun(options, res, spinner);
+    return result;
+  }
+
+  spinner.stop();
+  let data: any = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+
+  if (!res.ok) {
+    options.output.write(`[nolo] Agent request failed: HTTP ${res.status}\n`);
+    const errorText = asTrimmedString(data?.error);
+    const messageText = asTrimmedString(data?.message);
+    const reasonText = asTrimmedString(data?.reason);
+    const codeText = asTrimmedString(data?.code);
+    const dialogIdText = asTrimmedString(data?.dialogId);
+    if (errorText || messageText) {
+      options.output.write(`${errorText || messageText}\n`);
+      if (messageText && messageText !== errorText) {
+        options.output.write(`${messageText}\n`);
+      }
+      if (codeText && codeText !== errorText && codeText !== messageText) {
+        options.output.write(`code=${codeText}\n`);
+      }
+      if (
+        reasonText &&
+        reasonText !== errorText &&
+        reasonText !== messageText
+      ) {
+        options.output.write(`reason=${reasonText}\n`);
+      }
+    }
+    if (dialogIdText) {
+      options.output.write(`[nolo] failed dialog: ${dialogIdText}\n`);
+      options.output.write(
+        `[nolo] continue with: nolo agent run ${options.agentKey} --continue ${dialogIdText} --msg "retry"\n`,
+      );
+    }
+    return dialogIdText
+      ? { exitCode: 1, dialogId: dialogIdText }
+      : { exitCode: 1 };
+  }
+
+  const content = formatAssistantResponseForCli(
+    String(data?.content ?? data?.message ?? ""),
+  );
+  if (content) {
+    options.output.write(`\n${options.agentName} > ${content}\n`);
+  } else {
+    options.output.write(`\n${options.agentName} > (no text response)\n`);
+  }
+
+  const usage = formatUsage(data?.usage, data?.dialogId);
+  if (usage && shouldShowUsage(options.env)) options.output.write(`${usage}\n`);
+  return {
+    exitCode: 0,
+    ...(typeof data?.dialogId === "string" && data.dialogId
+      ? { dialogId: data.dialogId }
+      : {}),
+    turnTokens: buildTurnTokenUsage(
+      data?.usage,
+      typeof data?.model === "string" ? data.model : options.agentKey,
+    ),
+  };
+}
+
+async function runInjectedLocalAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
+  return runLocalAgentTurnForCli(options, { reportFailure: true });
+}
+
+async function refreshMissingLocalAgentConfig(options: RunAgentTurnOptions) {
+  const adapter = resolveLocalRuntimeAdapter(options);
+  if (!adapter) return false;
+  const agentConfig = await adapter.loadAgentConfig(options.agentKey);
+  return Boolean(agentConfig);
+}
+
+async function runLocalAgentTurnForCli(
+  options: RunAgentTurnOptions,
+  settings: { reportFailure: boolean },
+): Promise<RunAgentTurnResult> {
+  const resolvedBaseAdapter = resolveLocalRuntimeAdapter(options);
+  const baseAdapter = (() => {
+    let adapter =
+      resolvedBaseAdapter && options.modelOverride
+        ? wrapLoadAgentConfigWithModelOverride(
+            resolvedBaseAdapter,
+            options.agentKey,
+            options.modelOverride,
+          )
+        : resolvedBaseAdapter;
+    if (adapter) adapter = applyEphemeralIfRequested(options, adapter);
+    return adapter;
+  })();
+  if (!baseAdapter) {
+    options.output.write(
+      "[nolo] Local runtime was requested but no local runtime adapter is available.\n",
+    );
+    return { exitCode: 1 };
+  }
+
+  const subjectRefs = buildSubjectRefs(options);
+  const allowedChildAgentKeys = options.allowedChildAgentKeys?.filter((key) =>
+    key.trim(),
+  );
+  const allowedToolNames = options.allowedToolNames?.filter((name) =>
+    name.trim(),
+  );
+  const blockedToolNames = options.blockedToolNames?.filter((name) =>
+    name.trim(),
+  );
+  const runtimeContext: Record<string, any> | undefined =
+    subjectRefs ||
+    allowedChildAgentKeys?.length ||
+    allowedToolNames?.length ||
+    blockedToolNames?.length ||
+    options.parentWakeOnTerminal ||
+    options.dialogAgentMode
+      ? {
+          ...(subjectRefs ? { subjectRefs } : {}),
+          ...(options.dialogAgentMode
+            ? { dialogAgentMode: options.dialogAgentMode }
+            : {}),
+          ...(allowedChildAgentKeys?.length ? { allowedChildAgentKeys } : {}),
+          ...(allowedToolNames?.length ? { allowedToolNames } : {}),
+          ...(blockedToolNames?.length ? { blockedToolNames } : {}),
+          ...(options.parentWakeOnTerminal
+            ? { parentWakeOnTerminal: true }
+            : {}),
+          ...(options.parentDialogId
+            ? { parentThreadId: options.parentDialogId }
+            : {}),
+        }
+      : undefined;
+  const currentDialogId = options.continueDialogId ?? ulid();
+
+  const adapter = baseAdapter;
+  const expandedMessage = options.pastedTextStore?.items.size
+    ? expandCollapsedPastes(options.message, options.pastedTextStore)
+    : options.message;
+
+  const workingLabel = `${options.agentName} -> working locally`;
+  const turnOutput = createCliTurnOutput({
+    options,
+    workingLabel,
+  });
+  turnOutput.spinner.start();
+  try {
+    const runLocalAgentTurn = await loadRunLocalAgentTurn();
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: options.agentKey,
+      userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
+      input: buildUserInputContent(options.message, options.imageUrls),
+      ...(expandedMessage !== options.message
+        ? {
+            persistedInput: buildUserInputContent(
+              expandedMessage,
+              options.imageUrls,
+            ),
+            persistedInputReference: buildUserInputContent(
+              options.message,
+              options.imageUrls,
+            ),
+          }
+        : {}),
+      ...(options.pastedTextStore
+        ? {
+            contextReferenceResolver: (reference: LocalAgentTurnInput["input"]) =>
+              canResolveCollapsedPasteReference(options.pastedTextStore!, reference),
+          }
+        : {}),
+      continueDialogId: currentDialogId,
+      spaceId: options.spaceId,
+      category: options.category,
+      inheritedFromDialogKey: options.inheritedFromDialogKey,
+      parentDialogId: options.parentDialogId,
+      background: options.background,
+      noStream: options.noStream,
+      ...(runtimeContext ? { runtimeContext } : {}),
+      ...(options.contextBlockScopes?.length
+        ? { contextBlockScopes: options.contextBlockScopes }
+        : options.extraContextBlocks?.length
+          ? { contextBlocks: options.extraContextBlocks }
+          : {}),
+      ...(typeof options.timeoutMs === "number"
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
+      ...(options.actionGateHandler
+        ? { onActionGate: options.actionGateHandler }
+        : {}),
+      onLoopEvent: (event) => {
+        if (event.kind === "llm-start") {
+          turnOutput.showWorking();
+        }
+        if (event.kind === "image-downgraded") {
+          // 第 4 级降级提示：模型不支持图片，已用占位文本替代；给用户 escape hatch。
+          // 不阻断当前轮——agent 拿到的是 [Image content omitted...] 占位文本，能继续跑。
+          options.output.write(
+            "[nolo] 当前 agent 不支持图片输入，已用占位文本替代。要完整图片理解可 /switch 到 Kimi K2.6。\n",
+          );
+        }
+        options.onLoopEvent?.(event);
+      },
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      ...(turnOutput.traceLocalTools
+        ? {
+            onToolEvent: (event) => {
+              turnOutput.handleToolEvent(event);
+            },
+          }
+        : {}),
+      ...(!options.noStream
+        ? {
+            onTextDelta: (chunk) => {
+              turnOutput.pushText(chunk);
+            },
+            onReasoningDelta: (chunk) => {
+              turnOutput.pushThinking(chunk);
+            },
+          }
+        : {}),
+    });
+    turnOutput.finish(result.content);
+    return {
+      exitCode: 0,
+      dialogId: result.dialogId,
+      title: result.title,
+      ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
+      turnTokens: buildTurnTokenUsage(result.usage, result.model),
+    };
+  } catch (error) {
+    turnOutput.spinner.stop();
+    // localLoop saveTurn()s on failure/abort and hangs dialogId on the error
+    // so TUI can keep state.dialogId and the next message --continues instead
+    // of opening a fresh dialog (402 / provider errors used to "amnesia").
+    const savedDialogId = (error as { dialogId?: string })?.dialogId;
+    if (
+      (error as { code?: string })?.code === LOCAL_TURN_ABORTED_CODE ||
+      options.abortSignal?.aborted
+    ) {
+      // User-initiated stop: the TUI reports it; nothing failed.
+      // If a tool was still running when the stop landed, localLoop attaches
+      // its name (error.pendingToolName) so the caller can tell the user the
+      // tool may still finish in the background.
+      const pendingToolName = (error as { pendingToolName?: string })
+        ?.pendingToolName;
+      return {
+        exitCode: 0,
+        streamInterrupted: true,
+        ...(savedDialogId ? { dialogId: savedDialogId } : {}),
+        ...(pendingToolName ? { pendingToolName } : {}),
+      };
+    }
+    if (settings.reportFailure) {
+      options.output.write(
+        `[nolo] Local agent run failed: ${toErrorMessage(error)}\n`,
+      );
+    }
+    return {
+      exitCode: 1,
+      localError: error,
+      ...(savedDialogId ? { dialogId: savedDialogId } : {}),
+    };
+  }
+}
+
+export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
+  const authToken = resolveAuthToken(options.env);
+  const runtimeMode = resolveRequestedRuntimeMode(options);
+
+  if (runtimeMode === "local") {
+    return runInjectedLocalAgentTurn(options);
+  }
+
+  if (runtimeMode === "auto" && shouldAttemptAutoLocal(options)) {
+    const skipLocal = await shouldSkipAutoLocalForServerPlatformTools(options);
+    if (!skipLocal) {
+      const localResult = await runLocalAgentTurnForCli(options, {
+        reportFailure: false,
+      });
+      if (localResult.exitCode === 0) {
+        return {
+          exitCode: localResult.exitCode,
+          ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
+          title: localResult.title,
+          ...(localResult.titlePatchPromise
+            ? { titlePatchPromise: localResult.titlePatchPromise }
+            : {}),
+          ...(localResult.turnTokens
+            ? { turnTokens: localResult.turnTokens }
+            : {}),
+          ...(localResult.streamInterrupted
+            ? { streamInterrupted: localResult.streamInterrupted }
+            : {}),
+          ...(localResult.pendingToolName
+            ? { pendingToolName: localResult.pendingToolName }
+            : {}),
+        };
+      }
+      if (
+        isMissingLocalAgentConfigError(localResult.localError, options.agentKey)
+      ) {
+        // Local config refresh is local-adapter only; still prefer local before any server path.
+        options.output.write(
+          `[nolo] Local agent config was missing; refreshing local config and retrying local once.\n`,
+        );
+        try {
+          const refreshed = await refreshMissingLocalAgentConfig(options);
+          if (refreshed) {
+            const retriedLocalResult = await runLocalAgentTurnForCli(options, {
+              reportFailure: false,
+            });
+            if (retriedLocalResult.exitCode === 0) {
+              return {
+                exitCode: retriedLocalResult.exitCode,
+                ...(retriedLocalResult.dialogId
+                  ? { dialogId: retriedLocalResult.dialogId }
+                  : {}),
+                title: retriedLocalResult.title,
+                ...(retriedLocalResult.titlePatchPromise
+                  ? { titlePatchPromise: retriedLocalResult.titlePatchPromise }
+                  : {}),
+                ...(retriedLocalResult.turnTokens
+                  ? { turnTokens: retriedLocalResult.turnTokens }
+                  : {}),
+              };
+            }
+          }
+        } catch {
+          // Fall through to surface local runtime failure.
+        }
+      }
+      const localErrorMessage = localResult.localError
+        ? toErrorMessage(localResult.localError)
+        : "local runtime failed";
+      options.output.write(describeLocalRunFailure(localErrorMessage));
+      return {
+        exitCode: 1,
+        ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
+        // Keep localError so TUI can show balance/quota/dialog-preserved hints
+        // instead of only the raw auto-runtime line.
+        ...(localResult.localError ? { localError: localResult.localError } : {}),
+      };
+    }
+  }
+
+  if (!authToken) {
+    options.output.write(
+      "[nolo] This install needs an auth token before it can talk to agents.\n" +
+        "Run `nolo login`, or set AUTH_TOKEN / NOLO_SERVER for non-interactive runs.\n",
+    );
+    return { exitCode: 1 };
+  }
+
+  // HTTP/server path 同样支持 ephemeral（请求体透传 ephemeral: true，
+  // 服务端据此跳过 dialog 持久化），与本地 wrapAdapterEphemeral 一致。
+  // 无需在此警告"仅 local 生效"——那是修复前的过时语义。
+
+  return runHttpAgentTurn(options, authToken);
+}

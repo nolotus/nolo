@@ -1,0 +1,167 @@
+        .AppCard {
+          background: var(--background);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-md);
+          padding: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          transition: box-shadow 0.18s, transform 0.18s;
+        }
+        .AppCard:hover {
+          box-shadow: 0 6px 20px rgba(0,0,0,0.09);
+          transform: translateY(-2px);
+        }
+        .AppCard__body {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .AppCard__body--interactive {
+          cursor: pointer;
+          border-radius: var(--radius-sm);
+          outline: none;
+          transition: background 0.15s ease;
+        }
+        .AppCard__body--interactive:hover {
+          background: var(--backgroundSecondary);
+        }
+        .AppCard__body--interactive:focus-visible {
+          box-shadow: 0 0 0 3px var(--primaryGhost);
+        }
+        .AppCard__body--interactive:hover .AppCard__name,
+        .AppCard__body--interactive:focus-visible .AppCard__name {
+          color: var(--primary);
+        }
+        .AppCard__header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .AppCard__name {
+          font-size: 1rem;
+          font-weight: 700;
+          color: var(--text);
+          line-height: var(--leading-tight);
+        }
+        .AppCard__nameWrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+        .AppCard__nameWrap .content-icon {
+          color: var(--textSecondary);
+        }
+        .AppCard__badges {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        .AppCard__context {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 0.8125rem;
+          padding: 5px 9px;
+          border-radius: 999px;
+          border: 1px solid var(--border);
+          background: var(--backgroundSecondary);
+          color: var(--textSecondary);
+          white-space: nowrap;
+        }
+        .AppCard__deploy,
+        .AppCard__vis {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 0.8125rem;
+          padding: 5px 9px;
+          border-radius: 999px;
+          border: 1px solid transparent;
+          white-space: nowrap;
+        }
+        .AppCard__deploy--platform {
+          background: #eff6ff;
+          color: #1d4ed8;
+          border-color: #bfdbfe;
+        }
+        [data-theme="dark"] .AppCard__deploy--platform {
+          background: rgba(29,78,216,0.12);
+          color: #93c5fd;
+          border-color: rgba(29,78,216,0.3);
+        }
+        .AppCard__vis {
+          cursor: pointer;
+          user-select: none;
+        }
+        .AppCard__vis--private { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+        .AppCard__vis--unlisted { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+        .AppCard__vis--public { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+        .AppCard__date {
+          font-size: 0.8125rem;
+          color: var(--textSecondary);
+        }
+        .AppCard__url {
+          font-size: 0.9rem;
+          color: var(--primary);
+          text-decoration: none;
+          word-break: break-all;
+        }
+        .AppCard__actions {
+          display: flex;
+          align-items: stretch;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .AppCard__actions:not(.AppCard__actions--browse) .AppCard__btn {
+          min-width: 112px;
+        }
+        .AppCard__btn {
+          justify-content: center;
+        }
+        .AppCard__btn--domains.is-active.btn-secondary {
+          border-color: #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
+        }
+        .AppCard__btn--publish.btn-secondary {
+          background: #f0fdf4;
+          color: #166534;
+          border-color: #bbf7d0;
+          box-shadow: 0 1px 2px rgba(22,101,52,0.08);
+        }
+        .AppCard__btn--publish.btn-secondary:hover:not(.btn-disabled) {
+          background: #dcfce7;
+        }
+        .AppCard__btn--delete.btn-secondary {
+          background: #fff1f2;
+          color: #be123c;
+          border-color: #fecdd3;
+          box-shadow: none;
+        }
+        .AppCard__btn--delete.btn-secondary:hover:not(.btn-disabled) {
+          background: #ffe4e6;
+          border-color: #fda4af;
+          color: #9f1239;
+        }
+
+
+        /* browse 模式：actions 默认隐藏，hover 时显示 */
+        .AppCard__actions--browse {
+          opacity: 0;
+          max-height: 0;
+          overflow: hidden;
+          transition: opacity 0.18s ease, max-height 0.18s ease;
+          padding-top: 0;
+        }
+
+        .AppCard:hover .AppCard__actions--browse,
+        .AppCard:focus-within .AppCard__actions--browse {
+          opacity: 1;
+          max-height: 60px;
+          padding-top: 0;
+        }

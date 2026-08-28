@@ -1,0 +1,174 @@
+import type { AgentRuntimeRequestedMode } from "../agentRuntimeLocal";
+import type { TurnTokenUsage } from "../client/tokenUsage";
+import type { ToolDisplayMode } from "../client/toolOutput";
+import type { CliUpdateInfo } from "../updateCommands";
+import type { AttachedImage } from "./pasteImage";
+import type { GitStatus } from "./gitStatus";
+
+export type TuiState = {
+  agentKey: string;
+  agentName: string;
+  dialogId?: string;
+  /**
+   * dialogLabel 是状态/窗口标题用的显示名（title 优先、回退 id）；
+   * dialogTitle 只在服务端真的产出标题时才有值，供状态栏独立标题段使用
+   * （无标题时该段不渲染）。
+   */
+  dialogTitle?: string;
+  dialogKey?: string;
+  dialogOwnerId?: string;
+  dialogLabel: string;
+  profileName: string;
+  serverUrl: string;
+  cliVersion?: string;
+  /**
+   * npm registry 异步检查结果：当前通道有新版本时非空，欢迎页据此提示
+   * /update 升级。null / undefined 表示无更新或检查不可用（离线等），
+   * 一律不打扰用户。
+   */
+  updateAvailable?: CliUpdateInfo;
+  /**
+   * 用于解析 paste 行里的相对路径。workspace 启动时从 process.cwd() 取。
+   * 保留在 state 里是为了让 handleTuiInput 这种纯函数也能做路径解析。
+   */
+  cwd: string;
+  attachedDocs: string[];
+  /**
+   * Skill refs attached to the workspace via /skill attach.
+   * Each entry is a dbKey (page-xxx) or a bare skill name resolved
+   * against .agents/skills/<name>/SKILL.md.
+   * Passed to buildSkillContextBlocks on every chat turn so the agent
+   * sees the skill content in system context blocks.
+   * /new clears these, same semantics as attachedDocs.
+   */
+  attachedSkills: string[];
+  /**
+   * 暂存 / paste 行解析到的图片附件。
+   * 提交 chat 时会消费这些,转成 imageUrls 一起送出去。
+   * /new 时清空,跟 attachedDocs 同语义。
+   */
+  attachedImages: AttachedImage[];
+  runtimeMode: AgentRuntimeRequestedMode;
+  /**
+   * 显示在状态栏里的模式标签,默认等于 runtimeMode。
+   * 可通过 NOLO_CLI_STATUS_MODE 覆盖,例如设置为 high。
+   */
+  modeLabel: string;
+  /** Platform response language used by both the real turn and context estimate. */
+  userLanguage?: string;
+  gitStatus?: GitStatus;
+  toolDisplay: ToolDisplayMode;
+  turnTokens?: TurnTokenUsage;
+  /**
+   * 整个对话累计消耗的平台积分（与 web 端 `selectCurrentDialogTokens` 的
+   * 持久化 totalCost 一致）。由服务端每轮把 `dialog.totalCost += 本轮cost`
+   * 累计而来（见 serverDialogProjection.ts），状态行据此展示「这段对话从
+   * 开始到现在累计烧了多少积分」，而不是只显示本轮 `turnTokens.credits`。
+   * platform 计费才有值；custom / cli 无该语义。
+   */
+  dialogTotalCredits?: number;
+  /**
+   * Measured estimate of built-in system+tools context (AGENTS.md, guidance,
+   * skill index, tool schemas). Used by the status chip until provider usage
+   * arrives in turnTokens.
+   */
+  estimatedContextTokens?: number;
+  /** Resolved from agentName at init / agent-switch; fallback when turnTokens has no contextWindow. */
+  contextWindow?: number;
+  /** 执行来源：platform=平台API(计费) custom=自定义API cli=订阅制。platform 时状态行显示积分。 */
+  apiSource?: string;
+  /**
+   * 会话级记忆缓存——对话开始时加载一次，后续轮次复用。
+   * /new 或切换对话时清空，下一轮重新加载。
+   * null = 已加载但无记忆；undefined = 尚未加载。
+   */
+  cachedMemoryOverlay?: string | null;
+};
+
+export type TuiAction =
+  | {
+      type: "chat";
+      message: string;
+      agentKey: string;
+      runtimeMode: AgentRuntimeRequestedMode;
+      continueDialogId?: string;
+      /**
+       * 行内或 /attach 命令解析到的图片绝对路径。
+       * 这里只携带路径,workspace loop 会异步读成 data URL 后拼 imageUrls。
+       * 失败(ENOENT/超过大小/不是图片)的会被丢弃,留在 message 里给用户文本。
+       */
+      imagePaths?: string[];
+    }
+  | {
+      type: "compact";
+      dialogId: string;
+    }
+  | {
+      type: "self-update";
+    }
+  | {
+      type: "theme-refresh";
+    }
+  | {
+      type: "shell-command";
+      command: string;
+    }
+  | {
+      type: "pick-agent";
+    }
+  | {
+      type: "list-agents";
+    }
+  | {
+      type: "pick-dialog";
+    }
+  | {
+      type: "set-locale";
+      locale: "zh" | "en";
+    }
+  | {
+      type: "copy-last";
+    }
+  | {
+      type: "copy-all";
+    }
+  | {
+      type: "set-mouse";
+      enabled: boolean;
+    }
+  | {
+      type: "set-math";
+      enabled: boolean;
+    }
+  | {
+      type: "set-altscreen";
+      enabled: boolean;
+    }
+  | {
+      type: "clear";
+      dialogId?: string;
+    }
+  | {
+      type: "exit";
+    };
+
+export type TuiInputResult = {
+  nextState: TuiState;
+  output: string;
+  action?: TuiAction;
+};
+
+export type TuiKeyInfo = {
+  name?: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+};
+
+export type TuiInputKeyResult = {
+  buffer: string;
+  cursorPos?: number;
+  submit?: string;
+  abort?: boolean;
+  redraw?: boolean;
+};

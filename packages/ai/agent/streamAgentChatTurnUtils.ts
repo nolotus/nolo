@@ -1,0 +1,1039 @@
+// 文件路径: packages/ai/agent/streamAgentChatTurnUtils.ts
+
+import type { RootState } from "app/store";
+import { read, selectById } from "database/dbSlice";
+import { fetchReferenceContents } from "ai/context/buildReferenceContext";
+import {
+    selectPendingFiles,
+    type PendingFile,
+} from "chat/dialog/dialogSlice";
+import { selectAllMsgs } from "chat/messages/messageSlice";
+// Wave A: viewMode 已剥至 module store; thunk 内通过 getViewMode() 读 module store
+// （setViewMode Redux action 会同步写 module store，两者一致）。
+import { getViewMode, getCurrentSpaceIdRaw } from "create/space/spaceCurrentStore";
+import {
+    buildLinkedSpacesSection,
+    buildSpaceContextLayer,
+    type TurnContextSource,
+} from "agent-runtime/turnContext";
+import {
+    selectAiRecentContentLimit,
+    selectGlobalPrompt,
+    selectKnowledgeCaptureLevel,
+    selectSpaceContextLevel,
+    selectUserTonePreset,
+} from "app/settings/settingSlice";
+import {
+    getFullChatContextKeys,
+    deduplicateContextKeys,
+} from "ai/agent/getFullChatContextKeys";
+import type { Agent, DialogConfig } from "app/types";
+import type { Contexts } from "ai/types";
+import { getModelContextWindow } from "ai/llm/getModelContextWindow";
+import { projectToolMessageContent } from "./toolOutputPolicy";
+import { selectIdentityUserBalance } from "identity/selectors";
+import { selectIdentityUserId } from "identity/selectors";
+import {
+    getModelPricing,
+    getPrices,
+    getFinalPrice,
+    hasExplicitAgentPricing,
+} from "ai/llm/getPricing";
+import {
+    buildStaticUserPolicyContext,
+    resolveSpaceContextPreloadPlan,
+} from "ai/policy/runtimePolicy";
+import { asOptionalTrimmedString } from "core/optionalString";
+import { asNonEmptyStringArray } from "core/stringArray";
+import {
+    PERSONALIZATION_DIALOG_CATEGORY,
+    buildPersonalizationDialogPolicyContext,
+} from "ai/policy/personalizationDialog";
+import { buildEditingContextSummary } from "./buildEditingContext";
+import { estimateTokenCount } from "ai/context/tokenUtils";
+import type { OpenAIMessage } from "integrations/openai/filterAndCleanMessages";
+import {
+    ConversationLoad,
+    planContextUsage,
+} from "ai/context/retention";
+// Prefer the lightweight packs module so mergeAgentToolsWithRuntime does not
+// force a full tools/index (all schemas + executors) load on the chat hot path.
+import { TOOL_PACKS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, expandEnabledPackPromptPatches, applyDefaultWebToolPacks, applySystemBuiltinSkillFilter, addDefaultSystemCapabilityTools } from "ai/tools/toolPacks";
+import { resolveAgentRecommendedSkillNames, resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
+import { canonicalizeToolNames, prioritizeToolNames } from "ai/tools/toolNameAliases";
+import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
+import {
+    getAllToolRuns,
+} from "ai/tools/toolRunStore";
+import { buildRecentAppToolMemory } from "./appWorkingMemory";
+import type { AgentRuntimeOptions } from "./types";
+import { getModelConfig, getProviderByModelName, type Provider } from "ai/llm/providers";
+import type { ImageGenerationState } from "chat/messages/types";
+import { resolveToolBaseUrl } from "ai/tools/toolApiClient";
+
+const BROWSER_UNAVAILABLE_CORE_TOOLS: Record<string, true> = {
+    createAgentAutomation: true,
+    notifyUser: true,
+};
+
+const getRuntimeCoreTools = (): string[] => {
+    if (typeof window === "undefined") {
+        return [...TOOL_PACKS.CORE];
+    }
+    return TOOL_PACKS.CORE.filter(
+        (toolName) => !BROWSER_UNAVAILABLE_CORE_TOOLS[toolName],
+    );
+};
+
+const isInlineVisualArtifactAgent = (agentConfig: Agent): boolean => {
+    const tags = Array.isArray((agentConfig as any).tags)
+        ? ((agentConfig as any).tags as unknown[])
+        : [];
+    return tags.some(
+        (tag) =>
+            typeof tag === "string" &&
+            ["inline-artifact", "streaming-ui"].includes(tag)
+    );
+};
+
+/**
+ * 估算单条 OpenAI 消息的 token 数（包括 tool_calls）。
+ */
+export const estimateTokensOfMessage = (msg: OpenAIMessage): number => {
+    let content = "";
+
+    if (typeof msg.content === "string") {
+        content = msg.content;
+    } else if (Array.isArray(msg.content)) {
+        content = msg.content
+            .map((p: any) => {
+                if (p.type === "text") return p.text || "";
+                if (p.type === "image_url") return "[image]";
+                return "[non-text]";
+            })
+            .join("");
+    } else if (msg.content && typeof msg.content === "object") {
+        content = JSON.stringify(msg.content);
+    }
+
+    let extraTokens = 0;
+    if (Array.isArray((msg as any).tool_calls)) {
+        const toolsStr = JSON.stringify((msg as any).tool_calls);
+        extraTokens = estimateTokenCount(toolsStr);
+    }
+
+    return estimateTokenCount(content) + extraTokens;
+};
+
+/**
+ * 基于最近 N 条消息的 token 分布，粗略评估会话负载等级。
+ */
+export const classifyConversationLoad = (
+    messages: OpenAIMessage[],
+): ConversationLoad => {
+    const N = 20;
+    if (!Array.isArray(messages) || messages.length === 0) return "light";
+
+    const tail = messages.slice(-N);
+    const tokenSamples = tail.map(estimateTokensOfMessage);
+    if (tokenSamples.length === 0) return "light";
+
+    const sum = tokenSamples.reduce((acc, v) => acc + v, 0);
+    const avg = sum / tokenSamples.length;
+    const sorted = [...tokenSamples].sort((a, b) => a - b);
+    const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)];
+
+    if (p95 < 200 && avg < 120) {
+        return "light";
+    }
+
+    if (p95 > 2000 || avg > 1200) {
+        return "heavy";
+    }
+
+    return "medium";
+};
+
+/**
+ * 根据上下文窗口和对话摘要，对消息历史做截断。
+ */
+/**
+ * 压缩历史 tool_result 内容，防止大体积工具返回值撑爆上下文。
+ *
+ * 策略（两档，见 toolOutputPolicy.projectToolMessageContent）：
+ * - 最近一个 tool 轮次（最后一条 assistant tool_calls + 对应 tool 结果）：
+ *   优先保留完整，但超过 FRESH_TOOL_OUTPUT_MAX_CHARS (32,000) 时按头尾裁剪。
+ *   此前该档无任何上限，一条 13M 字符的工具结果会原样进请求、超出模型上下文窗口。
+ * - 更早的 tool 消息：内容截断到 maxChars (默认 800)，并追加截断标记
+ *
+ * 在 filterAndCleanMessages 之后、trimMessagesWithSummary 之前调用。
+ */
+export const compressOldToolResults = (
+    messages: OpenAIMessage[],
+    maxChars = 800,
+): OpenAIMessage[] => {
+    // 找到最后一条 assistant 消息（含 tool_calls）的索引
+    let lastToolCallAssistantIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (
+            messages[i].role === "assistant" &&
+            Array.isArray((messages[i] as any).tool_calls) &&
+            (messages[i] as any).tool_calls.length > 0
+        ) {
+            lastToolCallAssistantIdx = i;
+            break;
+        }
+    }
+
+    return messages.map((msg, idx) => {
+        // 只处理 tool 消息
+        if (msg.role !== "tool") return msg;
+
+        const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+
+        // 决策逻辑统一在 toolOutputPolicy.projectToolMessageContent（纯函数，
+        // 可被独立测试且不受本模块的 mock.module 桩影响）。
+        const projected = projectToolMessageContent({
+            content,
+            isFresh: idx > lastToolCallAssistantIdx,
+            toolName: (msg as any).name,
+            historicalMaxChars: maxChars,
+        });
+
+        if (projected === content) return msg;
+        return { ...msg, content: projected };
+    });
+};
+
+
+export const trimMessagesWithSummary = (
+    messages: OpenAIMessage[],
+    contextWindow: number,
+    summaryTokenCount: number,
+): OpenAIMessage[] => {
+    const recentLoad = classifyConversationLoad(messages);
+
+    const { rawMessageBudget, minTailTokens } = planContextUsage({
+        contextWindow,
+        summaryTokens: summaryTokenCount,
+        recentLoad,
+    });
+
+    if (!Array.isArray(messages) || messages.length === 0) return messages;
+
+    let totalTokens = 0;
+    let keepCount = 0;
+
+    // 从后往前保留，直到填满 rawMessageBudget
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const t = estimateTokensOfMessage(messages[i]);
+        if (totalTokens + t > rawMessageBudget) break;
+        totalTokens += t;
+        keepCount++;
+    }
+
+    if (keepCount >= messages.length) {
+        return messages;
+    }
+
+    // 二次兜底：如果保留下来的 token 太少，尝试多保留几条，
+    // 直到达到 minTailTokens，允许轻微超过 rawMessageBudget（最多 20%）。
+    if (totalTokens < minTailTokens) {
+        const maxBudgetWithSlack = rawMessageBudget * 1.2;
+        for (let i = messages.length - 1 - keepCount; i >= 0; i--) {
+            const t = estimateTokensOfMessage(messages[i]);
+            if (totalTokens + t > maxBudgetWithSlack) break;
+            totalTokens += t;
+            keepCount++;
+            if (totalTokens >= minTailTokens) break;
+        }
+    }
+
+    // 再兜一层底：至少保留 2 条消息（如果存在）
+    if (keepCount === 0 && messages.length > 0) {
+        keepCount = Math.min(2, messages.length);
+    }
+
+    let cutIndex = messages.length - keepCount;
+    if (cutIndex < 0) cutIndex = 0;
+
+    // 避免从 tool 消息中间开始：向前带上调用方 assistant 和完整的
+    // tool-result 配对，不能为了规避孤儿结果而把这一轮工具状态直接丢掉。
+    while (cutIndex > 0 && messages[cutIndex]?.role === "tool") {
+        cutIndex--;
+    }
+
+    return messages.slice(cutIndex);
+};
+
+/**
+ * 安全读取数据库记录，失败时返回 null。
+ */
+export const readSafe = async <T>(
+    dispatch: any,
+    dbKey: string,
+): Promise<T | null> => {
+    try {
+        return (await dispatch(read({
+            dbKey: dbKey
+        })).unwrap()) as T;
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * 渲染层 TurnContextSource 适配器：把共享 builder 的抽象读取接口接到
+ * dbSlice 的 `read` action 上。space 真值来自 dialog 记录的 spaceId，
+ * 这里只负责按 dbKey 取记录，不做任何 Redux currentSpace/viewMode 判断。
+ *
+ * 失败可见：`read` reject 时把错误抛给共享 builder，由 builder 决定是
+ * 输出显式失败 layer（spaceContext）还是 `[无法访问]` 标记（linkedSpaces），
+ * 绝不静默丢块。
+ */
+export const createDbSliceTurnContextSource = (
+    dispatch: any,
+): TurnContextSource => ({
+    readRecord: async (dbKey: string) => {
+        const result = await dispatch(read({ dbKey })).unwrap();
+        return (result as Record<string, unknown> | null) ?? null;
+    },
+});
+
+/** 将 Map 的所有 value 拼接为一个字符串 */
+export const joinMapValues = (map: Map<string, string>): string =>
+    Array.from(map.values()).join("");
+
+/** 检查 OpenAI 消息数组中是否包含 image_url 片段 */
+export const hasImageInMessages = (messages: any[]): boolean => {
+    if (!Array.isArray(messages)) return false;
+
+    return messages.some((msg) => {
+        const content = (msg as any).content;
+        if (!Array.isArray(content)) return false;
+
+        return content.some(
+            (part: any) =>
+                part &&
+                typeof part === "object" &&
+                part.type === "image_url" &&
+                part.image_url &&
+                typeof part.image_url.url === "string" &&
+                part.image_url.url.trim() !== "",
+        );
+    });
+};
+
+/**
+ * 图片输入 + 无视觉能力的拒绝判断。server/web 端 streamAgentChatTurn 有两处
+ * 相同的 if 块（quick-chat 请求构造前 + 正常 turn 请求构造前），抽成共享判断。
+ *
+ * 返回值：需要拒绝时返回拒绝文案；不需要时返回 null。调用方负责 setLoopStopReason
+ * + rejectWithValue（redux thunk 上下文留在调用方）。
+ */
+export const REJECT_NO_VISION_MESSAGE = "当前 Agent 不支持图片输入，请改用文本或文档。";
+
+export function shouldRejectImageInputForAgent(
+    agentConfig: any,
+    messages: any[],
+): string | null {
+    const agentHasVision = resolveAgentImageInputSupport(agentConfig);
+    if (!agentHasVision && hasImageInMessages(messages)) {
+        return REJECT_NO_VISION_MESSAGE;
+    }
+    return null;
+}
+
+/** 根据 pendingFiles 和 currentInputMap 构造“当前输入上下文”字符串 */
+export const formatCurrentInputContext = (
+    pendingFiles: PendingFile[],
+    currentInputMap: Map<string, string>,
+): string => {
+    if (pendingFiles.length === 0 || currentInputMap.size === 0) {
+        return joinMapValues(currentInputMap);
+    }
+
+    const relevantPendingFiles = pendingFiles.filter((file) => {
+        const key = file.sourceDialogKey || file.dialogKey || file.pageKey;
+        return key && currentInputMap.has(key);
+    });
+
+    if (relevantPendingFiles.length === 0) {
+        return joinMapValues(currentInputMap);
+    }
+
+    const filesByGroup = new Map<string, PendingFile[]>();
+    for (const file of relevantPendingFiles) {
+        const groupKey = file.groupId || file.id;
+        const group = filesByGroup.get(groupKey);
+        if (group) {
+            group.push(file);
+        } else {
+            filesByGroup.set(groupKey, [file]);
+        }
+    }
+
+    let sourceCounter = 1;
+    let output = "";
+
+    filesByGroup.forEach((filesInGroup) => {
+        const isGroup = filesInGroup.length > 1;
+        const sourceName = isGroup
+            ? filesInGroup[0].name.split(" (")[0]
+            : filesInGroup[0].name;
+
+        output += `--- Source ${sourceCounter}: "${sourceName}" ---\n`;
+
+        filesInGroup.forEach((file) => {
+            const key = file.sourceDialogKey || file.dialogKey || file.pageKey;
+            if (!key) return; // Skip if no key
+            const content = currentInputMap.get(key);
+            if (!content) return;
+
+            if (isGroup) {
+                output += `### Document: "${file.name}"\n${content}\n`;
+            } else {
+                output += `${content}\n`;
+            }
+        });
+
+        output += `--- End of Source ${sourceCounter} ---\n\n`;
+        sourceCounter++;
+    });
+
+    return output;
+};
+
+/** 校验当前用户是否有权限使用该 Agent，并且余额是否充足（每轮调用） */
+export const validateAccessAndBalance = (
+    agentConfig: Agent,
+    state: RootState,
+): string | null => {
+    const userBalance = selectIdentityUserBalance(state);
+    const currentUserId = selectIdentityUserId(state);
+
+    const isCustomApi = agentConfig.apiSource === "custom";
+    const isCliApi = agentConfig.apiSource === "cli";
+    // M3: device-local owner when logged out; account match when logged in.
+    const isDeviceLocalOwner =
+        agentConfig.userId === "local" && !currentUserId;
+    const isOwner =
+        isDeviceLocalOwner ||
+        (Boolean(currentUserId) && agentConfig.userId === currentUserId);
+
+    if (!isOwner) {
+        const hasWhitelist =
+            Array.isArray(agentConfig.whitelist) &&
+            agentConfig.whitelist.length > 0;
+
+        if (hasWhitelist) {
+            const isUserInWhitelist =
+                !!currentUserId && agentConfig.whitelist?.includes(currentUserId);
+
+            if (!isUserInWhitelist) {
+                return "您不在该应用的白名单中，无法使用。";
+            }
+        }
+    }
+
+    // M3: custom/cli (and local-owner non-platform) skip balance before the
+    // "balance is still loading" gate so logged-out local runs are not blocked.
+    if (isCustomApi || isCliApi) {
+        return null;
+    }
+    // Subscription OAuth providers (Cursor/ChatGPT/xAI/Antigravity/Claude) are
+    // billed by the upstream subscription, not per-token via Nolo balance.
+    const SUBSCRIPTION_OAUTH_REFS = new Set([
+        "cursor", "chatgpt", "xai", "antigravity", "claude",
+    ]);
+    if (SUBSCRIPTION_OAUTH_REFS.has((agentConfig.apiKeyRef ?? "").trim().toLowerCase())) {
+        return null;
+    }
+    // Local-owner agents without explicit platform apiSource are treated as
+    // non-platform for the balance gate (credentials live on-device).
+    const isPlatformApi =
+        agentConfig.apiSource === "platform" ||
+        agentConfig.useServerProxy === true;
+    if (isDeviceLocalOwner && !isPlatformApi) {
+        return null;
+    }
+
+    if (typeof userBalance !== "number") {
+        // Platform path without balance: ask for login instead of a false "loading" state.
+        // Prefer the session object over selectors alone so parallel test mocks of
+        // `selectIdentityUserId` cannot mis-classify a logged-out client as "balance loading".
+        const hasSessionUser = Boolean(
+            (state as { auth?: { currentUser?: { userId?: string } | null } })
+                ?.auth?.currentUser?.userId,
+        );
+        if (!currentUserId || !hasSessionUser) {
+            return "请登录后使用平台模型，或改用本地自定义/API/CLI Agent。";
+        }
+        return "正在获取用户余额，请稍候...";
+    }
+
+    const serverPrices = getModelPricing(agentConfig.provider || "", agentConfig.model);
+
+    if (!serverPrices && !hasExplicitAgentPricing(agentConfig)) {
+        return "无法获取模型定价信息，请稍后重试。";
+    }
+
+    const prices = getPrices(agentConfig, serverPrices ?? null);
+    const maxPrice = getFinalPrice(prices);
+
+    if (userBalance < maxPrice) {
+        return "余额不足，请充值后再试。";
+    }
+
+    return null;
+};
+
+/** 静态上下文：Loop 期间稳定不变的部分 */
+export interface StaticContexts {
+    botInstructionsContext: string;
+    botKnowledgeContext: string;
+    spaceContext: string | null;
+    userGlobalPrompt: string | null;
+    userPolicyContext: string | null;
+}
+
+/** 动态上下文：每轮 Loop 需要更新的部分 */
+export interface DynamicContexts {
+    currentInputContext: string | null;
+    historyContext: string;
+    editingContext: string | null;
+    appWorkingMemory: string | null;
+    memoryOverlay: string | null;
+    dialogSummary: string | null;
+    referenceKeys: string[];
+}
+
+export const fetchMemoryOverlayContext = async (
+    state: RootState,
+    agentConfig: Agent,
+    userInput: string | any[],
+    dialogConfig?: DialogConfig,
+): Promise<string | null> => {
+    const token = typeof (state as any)?.auth?.currentToken === "string"
+        ? (state as any).auth.currentToken
+        : null;
+    const currentServer = typeof (state as any)?.settings?.currentServer === "string"
+        ? (state as any).settings.currentServer
+        : null;
+    const agentKey = asOptionalTrimmedString(agentConfig.dbKey) ?? "";
+    if (!token || !currentServer || !agentKey) return null;
+
+    const baseUrl = resolveToolBaseUrl(currentServer);
+    if (!baseUrl) return null;
+
+    const inputText = typeof userInput === "string"
+        ? userInput
+        : JSON.stringify(userInput ?? "");
+    const spaceId =
+        asOptionalTrimmedString((dialogConfig as any)?.spaceId) ??
+        (getViewMode() === "all"
+            ? undefined
+            : asOptionalTrimmedString(getCurrentSpaceIdRaw()));
+
+    try {
+        const response = await fetch(`${baseUrl}/api/memory/query`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                agentKey,
+                userInput: inputText,
+                ...(spaceId ? { spaceId } : {}),
+            }),
+        });
+        if (!response.ok) return null;
+        const payload = await response.json().catch(() => null);
+        return asOptionalTrimmedString(payload?.promptBlock) ?? null;
+    } catch {
+        return null;
+    }
+};
+
+
+/**
+ * 构建静态上下文（Loop 外调用一次）
+ * 包含：botInstructions、botKnowledge、spaceContext、userGlobalPrompt
+ * 这些内容在 Agent Loop 期间是稳定的，不需要每轮重新构建
+ */
+export const buildStaticContexts = async (
+    state: RootState,
+    dispatch: any,
+    agentConfig: Agent,
+    dialogConfig?: DialogConfig,
+    referenceContentCache?: Map<string, any>,
+): Promise<StaticContexts> => {
+    // 获取上下文 keys
+    const keySets = await getFullChatContextKeys(
+        state,
+        dispatch,
+        agentConfig,
+        "", // 静态上下文不需要 userInput
+        undefined, // 静态上下文不需要 dialogConfig
+    );
+    const finalKeys = deduplicateContextKeys(keySets);
+
+    const fetchReferences = (keys: string[]) =>
+        fetchReferenceContents(keys, dispatch, {
+            format: "simplified_markdown",
+            inlineMentionMeta: true,
+            preloaded: referenceContentCache,
+        });
+
+    // 并行获取静态引用内容
+    const [botInstructionsMap, botKnowledgeMap] = await Promise.all([
+        fetchReferences(finalKeys.botInstructionsContext),
+        fetchReferences(finalKeys.botKnowledgeContext),
+    ]);
+
+    // 构建 spaceContext
+    const globalPrompt = selectGlobalPrompt(state);
+    const userTonePreset = selectUserTonePreset(state);
+    const knowledgeCaptureLevel = selectKnowledgeCaptureLevel(state);
+    const spaceContextLevel = selectSpaceContextLevel(state);
+    const userRecentLimit = selectAiRecentContentLimit(state);
+    const contextWindow = getModelContextWindow(agentConfig.model) || 128000;
+    const preloadPlan = resolveSpaceContextPreloadPlan(spaceContextLevel);
+    const dynamicLimit = Math.floor((contextWindow * preloadPlan.preloadBudgetRatio) / 150);
+    const recentLimit = preloadPlan.includeRecentContent
+        ? Math.max(3, Math.min(userRecentLimit, Math.max(3, dynamicLimit)))
+        : 0;
+
+    // space 真值统一为 dialog 记录的 spaceId（不再依赖 Redux currentSpace/viewMode）。
+    // 用户设置门控保留：spaceContextLevel > 1 才注入。
+    // recent contents 条数的 token 预算算法保留，算出的上限交给共享 builder。
+    // 失败可见：spaceId 存在但记录读不到时，共享 builder 输出显式失败 layer。
+    const turnContextSource = createDbSliceTurnContextSource(dispatch);
+    let spaceContext: string | null = null;
+
+    if (spaceContextLevel > 1) {
+        const spaceLayer = await buildSpaceContextLayer({
+            source: turnContextSource,
+            spaceId: dialogConfig?.spaceId,
+            recentContentLimit: recentLimit,
+        });
+        spaceContext = spaceLayer ? spaceLayer.content.trim() : null;
+    }
+
+    // 处理 linkedSpaces（保持现有输出语义：粗略上下文列表 + [无法访问] 标记）
+    const linkedSpaceIds = agentConfig.linkedSpaces || [];
+    if (linkedSpaceIds.length > 0 && spaceContextLevel > 1) {
+        const linkedSection = await buildLinkedSpacesSection({
+            source: turnContextSource,
+            linkedSpaceIds,
+        });
+        if (linkedSection) {
+            spaceContext = (spaceContext ?? "") + `\n\n${linkedSection}`;
+        }
+    }
+
+    // 当前仓库里只有 personalization 这一类“特殊流程对话”需要在普通 agent 之外
+    // 额外追加工具/策略约束，因此先按 dialog category 做最小分流。
+    // 如果未来出现多个稳定存在的流程型入口（例如 onboarding / agent-authoring / skill-authoring），
+    // 再考虑把这层升级成统一的 dialog mode 抽象。
+    const dialogPolicyContext =
+        dialogConfig?.category === PERSONALIZATION_DIALOG_CATEGORY
+            ? buildPersonalizationDialogPolicyContext()
+            : null;
+
+    return {
+        botInstructionsContext: joinMapValues(botInstructionsMap),
+        botKnowledgeContext: joinMapValues(botKnowledgeMap),
+        spaceContext,
+        userGlobalPrompt: globalPrompt,
+        userPolicyContext: [
+            buildStaticUserPolicyContext({
+                agentConfig,
+                settingsRecord: {
+                    userTonePreset,
+                    knowledgeCaptureLevel,
+                    spaceContextLevel,
+                    enableReadCurrentSpace: spaceContextLevel > 1,
+                },
+            }),
+            dialogPolicyContext,
+        ]
+            .filter(Boolean)
+            .join("\n"),
+    };
+};
+
+/**
+ * 构建动态上下文（每轮 Loop 调用）
+ * 包含：currentInput、history、editingContext、dialogSummary
+ * 这些内容可能每轮变化，需要实时更新
+ */
+export const buildDynamicContexts = async (
+    state: RootState,
+    dispatch: any,
+    agentConfig: Agent,
+    userInput: string | any[],
+    runtimeOptions?: AgentRuntimeOptions,
+    referenceContentCache?: Map<string, any>,
+    dialogKey?: string,
+): Promise<DynamicContexts> => {
+    // 读取 dialog summary 和 config
+    let dialogSummary: string | null = null;
+    let dialogConfig: DialogConfig | undefined;
+    if (dialogKey) {
+        dialogConfig = selectById(state, dialogKey) as DialogConfig | undefined;
+        if (dialogConfig?.summary) {
+            dialogSummary = dialogConfig.summary;
+        }
+    }
+
+    const keySets = await getFullChatContextKeys(
+        state,
+        dispatch,
+        agentConfig,
+        userInput,
+        dialogConfig,
+    );
+    const finalKeys = deduplicateContextKeys(keySets);
+
+    const fetchReferences = (keys: string[]) =>
+        fetchReferenceContents(keys, dispatch, {
+            format: "simplified_markdown",
+            inlineMentionMeta: true,
+            preloaded: referenceContentCache,
+        });
+
+    // 只获取动态引用内容
+    const [currentInputMap, historyMap] = await Promise.all([
+        fetchReferences(finalKeys.currentInputContext),
+        fetchReferences(finalKeys.historyContext),
+    ]);
+
+    const pendingFiles = selectPendingFiles(state);
+    const formattedCurrentInputContext = formatCurrentInputContext(
+        pendingFiles,
+        currentInputMap,
+    );
+
+    const dialogId = dialogConfig?.id ?? null;
+    const currentDialogMessages = selectAllMsgs(state, dialogId);
+    const currentDialogMessageIds = new Set(currentDialogMessages.map((msg) => msg.id));
+    const currentDialogToolRuns = getAllToolRuns().filter((run) =>
+        currentDialogMessageIds.has(run.messageId)
+    );
+
+    const editingContext = buildEditingContextSummary(state, runtimeOptions);
+    const appWorkingMemory = buildRecentAppToolMemory(
+        currentDialogMessages,
+        currentDialogToolRuns,
+    );
+    const memoryOverlay = await fetchMemoryOverlayContext(
+        state,
+        agentConfig,
+        userInput,
+        dialogConfig,
+    );
+
+    return {
+        currentInputContext: formattedCurrentInputContext.trim() || null,
+        historyContext: joinMapValues(historyMap),
+        editingContext,
+        appWorkingMemory,
+        memoryOverlay,
+        dialogSummary,
+        referenceKeys: dialogConfig?.referenceKeys || [],
+    };
+};
+
+/**
+ * 合并静态和动态上下文为完整的 Contexts 对象
+ */
+export const mergeContexts = (
+    staticCtx: StaticContexts,
+    dynamicCtx: DynamicContexts,
+): Contexts => ({
+    botInstructionsContext: staticCtx.botInstructionsContext || undefined,
+    botKnowledgeContext: staticCtx.botKnowledgeContext || undefined,
+    spaceContext: staticCtx.spaceContext || undefined,
+    userGlobalPrompt: staticCtx.userGlobalPrompt || undefined,
+    userPolicyContext: staticCtx.userPolicyContext || undefined,
+    currentInputContext: dynamicCtx.currentInputContext,
+    historyContext: dynamicCtx.historyContext || undefined,
+    editingContext: dynamicCtx.editingContext,
+    appWorkingMemory: dynamicCtx.appWorkingMemory,
+    memoryOverlay: dynamicCtx.memoryOverlay,
+    dialogSummary: dynamicCtx.dialogSummary,
+    referenceKeys: dynamicCtx.referenceKeys,
+});
+
+/** 合并 Agent.tools + Context Page Tools + Mentioned Tools + runtimeOptions.extraTools */
+export const mergeAgentToolsWithRuntime = (
+    agentConfig: Agent,
+    referencedTools: string[],
+    mentionedTools: string[],
+    runtimeOptions?: AgentRuntimeOptions,
+    state?: RootState,
+): Agent => {
+    const rawBaseTools = Array.isArray((agentConfig as any).tools)
+        ? ((agentConfig as any).tools as string[])
+        : [];
+    // Expand capability packs into tool names, merged with explicit tools.
+    // Web 端能力包解析：共享 resolveEffectiveEnabledPacks，本端只声明差异。
+    //
+    // ALWAYS_ON_PACK_IDS（long-term-memory / skills）由共享层
+    // 幂等补齐，无论 enabledPacks 是否配置过——「默认全挂、可单关」，要单关走
+    // disabledTools。这三个包此前在三端各自硬编码，于是各飘各的：CLI 漏了
+    // long-term-memory（TUI agent 就是不记事，「记住 X」只能退回 shell 跑 CLI），
+    // web 的非空分支漏了 skills（勾过任意包的 agent 拿不到 loadSkill）。共享常量后
+    // 新增 host-wide 默认包只需改 toolPacks 一处。
+    //
+    // inline-artifact agent 走 declaredOnly：一个包都不补，保持「纯产物生成、
+    // 无交互工具」语义。注意这个守卫必须覆盖空/非空两种输入——历史上只挂在
+    // 「空 enabledPacks」那侧，导致勾过任意包的 inline-artifact agent 照样被塞进
+    // 强制包；共享层按 declaredOnly 统一短路，结构上不再可能漏一侧。
+    //
+    // 不补 web-search 和其他 DEFAULT_ENABLED_PACKS——避免改变空配置 agent 的 web
+    // 能力边界。历史上 enabledPacks:[] 的 agent 不通过 expandEnabledPacks 获得
+    // web-search（空数组返回空），web 能力靠 applyDefaultWebToolPacks 的 LIGHT_WEB
+    // 自动注入。该注入只补 web-search 包工具（exa_search/fetchWebpage），
+    // 不会旁路注入 social-reader（read_x_post/read_xhs_profile）。
+    // 历史上 length>0 曾误伤；现已收紧为 some(web-search tool)。
+    // 能力来源走 agent.skills（缺失时自动从 enabledPacks 派生），
+    // 只取「完整启用」那一档——recommended 的语义就是工具不常驻。
+    const agentEnabledPacks = resolveAgentRequiredPackIds(agentConfig as any);
+    const isInlineArtifact = isInlineVisualArtifactAgent(agentConfig);
+    const effectiveEnabledPacks = resolveEffectiveEnabledPacks({
+      enabledPacks: agentEnabledPacks,
+      declaredOnly: isInlineArtifact,
+    });
+    const expandedPackTools = expandEnabledPacks(
+        effectiveEnabledPacks,
+        rawBaseTools,
+    );
+    const baseTools = canonicalizeToolNames(expandedPackTools);
+    const requiredSkillTools = canonicalizeToolNames(
+        (agentConfig as any).referencedTools ?? []
+    );
+    const recommendedSkillTools = canonicalizeToolNames(
+        (agentConfig as any).recommendedSkillTools ?? []
+    );
+    // 「启用」档（recommended）的能力名进「相关技能」一行。这一档的工具刻意不
+    // 常驻，所以模型必须先知道它存在、才谈得上按需 loadSkill——不给提示的话，
+    // recommended 与「禁用」在运行时就没有区别了。
+    // 对应 product-truth 的 US-1：QuickChat 里顺手改 page/doc/table，
+    // 能力要够得着但不常驻。
+    const recommendedSkillHints = [
+        ...new Set([
+            ...asNonEmptyStringArray((agentConfig as any).recommendedSkillHints),
+            ...resolveAgentRecommendedSkillNames(agentConfig as any),
+        ]),
+    ];
+    const skillPromptPatches = [
+        ...new Set([
+            ...asNonEmptyStringArray((agentConfig as any).skillPromptPatches),
+            // 能力包的 promptPatch（方法论文档）与 skill reference 的 patch 走同一条
+            // 注入链（buildSkillGuidanceBlock → buildSkillGuidancePromptBlock），
+            // 让「工具 + 配套纪律」作为一个能力包整体注入 system prompt。
+            ...expandEnabledPackPromptPatches(effectiveEnabledPacks),
+        ]),
+    ];
+    // LIGHT_WEB + FULL_BROWSER auto-injection (shared with server runtime).
+    // skipWeb for inline-visual-artifact agents (pure output generators).
+    const webPadded = applyDefaultWebToolPacks({
+        toolNames: baseTools,
+        skipWeb: isInlineVisualArtifactAgent(agentConfig),
+    });
+    const enhancedTools = new Set<string>([
+        ...webPadded,
+        ...(isInlineVisualArtifactAgent(agentConfig) ? [] : getRuntimeCoreTools()),
+        ...(isInlineVisualArtifactAgent(agentConfig) ? [] : requiredSkillTools),
+        ...(isInlineVisualArtifactAgent(agentConfig)
+            ? []
+            : canonicalizeToolNames(referencedTools)),
+        ...(isInlineVisualArtifactAgent(agentConfig)
+            ? []
+            : canonicalizeToolNames(mentionedTools)),
+    ]);
+
+    const extraTools = isInlineVisualArtifactAgent(agentConfig)
+        ? []
+        : canonicalizeToolNames(runtimeOptions?.extraTools ?? []);
+    for (const t of extraTools) {
+        enhancedTools.add(t);
+    }
+
+    if (!isInlineVisualArtifactAgent(agentConfig)) {
+        const viewMode = state ? getViewMode() : "categories";
+        if (viewMode === "all") {
+            // 全部视图没有「当前空间」：search_workspace 移除（与历史行为一致）。
+            // search_all_spaces 不再随 CORE 常驻（见 TOOL_PACKS.CORE），也不自动
+            // 注入——改为推荐 search-all-spaces 内置 skill，让模型知道可以按需
+            // loadSkill；载入后下一轮经 extraReferences 才把工具挂进工具面。
+            enhancedTools.delete("search_workspace");
+            if (!recommendedSkillHints.includes("search-all-spaces")) {
+                recommendedSkillHints.push("search-all-spaces");
+            }
+        } else {
+            enhancedTools.add("search_workspace");
+        }
+    }
+
+    // 系统内置 Skill 全局开关：用户在设置页关闭「联网搜索」等内置 skill 后，
+    // 从工具面过滤掉对应 pack 的工具。三端统一走 applySystemBuiltinSkillFilter。
+    // Web 端直接从 Redux state 读 systemBuiltinSkills（已 hydrate 归一化）；
+    // 缺失 key 视为开启（默认全开）。
+    const systemBuiltinSkills = (state as any)?.settings?.systemBuiltinSkills;
+    // Default-on system capabilities (agent-orchestration) are mounted right
+    // before the global filter — same pipeline order as the CLI
+    // (resolveCliRequestedToolNames): mount first, then the user's global
+    // "off" removes them again.
+    const mountedTools = isInlineVisualArtifactAgent(agentConfig)
+        ? Array.from(enhancedTools)
+        : addDefaultSystemCapabilityTools(Array.from(enhancedTools));
+    const filteredTools = applySystemBuiltinSkillFilter(
+        mountedTools,
+        systemBuiltinSkills,
+    );
+
+    return {
+        ...agentConfig,
+        tools: applyDisabledTools(
+            prioritizeToolNames(
+                filteredTools,
+                recommendedSkillTools,
+            ),
+            (agentConfig as any)?.disabledTools,
+        ),
+        recommendedSkillTools,
+        recommendedSkillHints,
+        skillPromptPatches,
+    };
+};
+
+/** 应用本轮图片配置 override */
+export const applyImageConfigRuntimeOverride = (
+    agentConfig: Agent,
+    runtimeOptions?: AgentRuntimeOptions,
+): Agent => {
+    const override = runtimeOptions?.imageConfigOverride;
+    if (!override) {
+        return agentConfig;
+    }
+
+    const baseImageConfig = (agentConfig as any).imageConfig ?? {};
+
+    return {
+        ...agentConfig,
+        ...(override.imageModelOverride
+            ? { model: override.imageModelOverride }
+            : {}),
+        imageConfig: {
+            ...baseImageConfig,
+            ...override,
+        },
+    };
+};
+
+const formatImageWaitHint = (
+    range?: {
+        min: number;
+        max: number;
+    },
+) => {
+    if (!range || typeof range.min !== "number" || typeof range.max !== "number") {
+        return undefined;
+    }
+    return `通常需要 ${range.min}-${range.max} 秒`;
+};
+
+const resolveAgentImageModelIdentity = (agentConfig: Partial<Agent>) => {
+    let providerKey = (agentConfig.provider || "").toLowerCase();
+    let modelName = agentConfig.model ?? "";
+
+    if (modelName.includes("/")) {
+        const slash = modelName.indexOf("/");
+        if (!providerKey) providerKey = modelName.slice(0, slash);
+        modelName = modelName.slice(slash + 1);
+    }
+
+    try {
+        return {
+            providerKey,
+            modelConfig: getModelConfig(providerKey as Provider, modelName),
+        };
+    } catch {
+        try {
+            const detected = getProviderByModelName(modelName);
+            if (!detected) {
+                return { providerKey, modelConfig: null };
+            }
+            return {
+                providerKey: detected,
+                modelConfig: getModelConfig(detected, modelName),
+            };
+        } catch {
+            return { providerKey, modelConfig: null };
+        }
+    }
+};
+
+const EXPLICIT_IMAGE_GENERATION_TOOL_NAMES = new Set([
+    "openAIGptImage",
+    "openAIGptImageGenerate",
+    "openAIGptImageEdit",
+    "chatgptWebImageGenerate",
+    "geminiFlashImage",
+    "geminiProImagePreview",
+]);
+
+const agentUsesExplicitImageGenerationTool = (agentConfig: Agent): boolean => {
+    const toolNames = Array.isArray((agentConfig as any).tools)
+        ? (agentConfig as any).tools
+        : Array.isArray((agentConfig as any).toolNames)
+          ? (agentConfig as any).toolNames
+          : [];
+    return toolNames.some(
+        (name: unknown) =>
+            typeof name === "string" &&
+            EXPLICIT_IMAGE_GENERATION_TOOL_NAMES.has(name.trim()),
+    );
+};
+
+export const resolveImageGenerationStreamingState = (
+    agentConfig: Agent,
+    args?: {
+        stage?: ImageGenerationState["stage"];
+        previous?: ImageGenerationState | null;
+    },
+): ImageGenerationState | undefined => {
+    const { modelConfig } = resolveAgentImageModelIdentity(agentConfig);
+    const hasImageOutput =
+        !!(modelConfig?.hasImageOutput ?? (modelConfig as any)?.supportsImageOutput) ||
+        agentConfig.imageConfig?.enabled === true ||
+        agentUsesExplicitImageGenerationTool(agentConfig);
+    if (!hasImageOutput) {
+        return undefined;
+    }
+
+    const currentProfile = modelConfig?.imageGenerationProfiles?.find(
+        (profile) => profile.imageModel === modelConfig.name,
+    );
+    const usesWebImageTool = agentUsesExplicitImageGenerationTool(agentConfig) &&
+        (Array.isArray((agentConfig as any).tools)
+            ? (agentConfig as any).tools
+            : []
+        ).includes("chatgptWebImageGenerate");
+
+    return {
+        kind: "image_generation",
+        stage: args?.stage ?? args?.previous?.stage ?? "submitted",
+        startedAt: args?.previous?.startedAt ?? Date.now(),
+        waitHint:
+            formatImageWaitHint(modelConfig?.imageGenerationWaitTimeSeconds) ??
+            (usesWebImageTool
+                ? "网页生图通常需要 30 秒到几分钟，切换对话不会中断"
+                : "通常需要几十秒"),
+        profileLabel: currentProfile?.label,
+    };
+};

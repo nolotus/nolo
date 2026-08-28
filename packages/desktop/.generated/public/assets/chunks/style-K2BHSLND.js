@@ -1,0 +1,1 @@
+import{a,b,c,d,e,f,g,h}from"/public/assets/chunks/chunk-IGHG75ML.js";import"/public/assets/chunks/chunk-WEOWWZTJ.js";export{f as AVATAR_BACKGROUND,g as AVATAR_COLOR,h as AVATAR_ICON_MULTIPLE,e as COLOR_GRADIENT,d as COLOR_PRIMARY,c as COMBINE_SPACE_MULTIPLE,b as COMBINE_TEXT_MULTIPLE,a as TITLE};

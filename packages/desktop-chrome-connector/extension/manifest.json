@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Nolo Browser Connector",
+  "description": "Connects Nolo Desktop local agents to the user's Chrome tabs.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0+h2MeLR++tIgvFv3L1HEkEM5+DXeMucdrzF3Ez2YBT8r8a1qEJthKOxKvulwLoWaw5KOEkliYVxDl3Pmbtev5HrAFy5L/GYL14fg5Jdu1pQ7xZu9jZi9CIFub2ob3PMNizHAUjCJRlluzrRdrght/g8WxICYPBjJ8sdI2ppGw5/lSereuLOKceZkX0NS0ODr9ex+5ApStO1Zp90JZ5FoHNWdpP9+owWkhn1LUWnGipeZIXl3x+yog+ClWHBt6WmwQX/S88oMQkQvvwMunFMSct0ZcnNMA3ymDmYEpKskYWGgUw5sgp2cSJwV8JCE5hJQjWKjbXYoMz03vLFizBBxwIDAQAB",
+  "permissions": [
+    "activeTab",
+    "debugger",
+    "nativeMessaging",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Nolo Browser Connector"
+  }
+}

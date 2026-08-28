@@ -1,0 +1,18 @@
+{
+  "branches": [
+    {"name": "alpha", "prerelease": "alpha"},
+    "main"
+  ],
+  "tagFormat": "desktop-v${version}",
+  "plugins": [
+    ["./scripts/release/componentSemanticRelease.mjs", {"component": "desktop"}],
+    ["@semantic-release/changelog", {"changelogFile": "packages/desktop/CHANGELOG.md"}],
+    ["@semantic-release/exec", {
+      "prepareCmd": "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('packages/desktop/package.json','utf8'));p.version='${nextRelease.version}';fs.writeFileSync('packages/desktop/package.json',JSON.stringify(p,null,2)+'\\n');console.log('bumped to ${nextRelease.version}')\""
+    }],
+    ["@semantic-release/git", {
+      "assets": ["packages/desktop/package.json", "packages/desktop/CHANGELOG.md"],
+      "message": "chore(release): desktop-v${nextRelease.version}\n\nAssistant-Model: glm-5.2\nAssistant-Harness: nolo-agent-run"
+    }]
+  ]
+}

@@ -1,0 +1,370 @@
+/* ── AppDetailPage ───────────────────────────────────── */
+
+.AppDetailPage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 18px 22px;
+    gap: 14px;
+  }
+
+.AppDetailPage__previewSection {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .AppDetailPage__previewCard {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 22px;
+  }
+
+  .AppDetailPage__frameWrap {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+  }
+
+  /* 流式响应式：预览壳撑满容器，iframe 按真实容器宽度渲染（与编辑器一致），
+     不再用固定 1440px 桌面 mockup 缩放。 */
+  .AppDetailPage__browserShell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 24px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    background: #0f172a;
+    box-shadow:
+      0 24px 80px rgba(15, 23, 42, 0.22),
+      0 2px 12px rgba(15, 23, 42, 0.10);
+  }
+
+  .AppDetailPage__browserBar {
+    height: 54px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  }
+
+  .AppDetailPage__browserDots {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .AppDetailPage__browserDots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .AppDetailPage__browserDots span:nth-child(1) {
+    background: #fb7185;
+  }
+
+  .AppDetailPage__browserDots span:nth-child(2) {
+    background: #fbbf24;
+  }
+
+  .AppDetailPage__browserDots span:nth-child(3) {
+    background: #34d399;
+  }
+
+  .AppDetailPage__browserUrl {
+    min-width: 0;
+    flex: 1;
+    padding: 9px 12px;
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: var(--fontSize-base);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .AppDetailPage__browserBadge {
+    flex-shrink: 0;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(96, 165, 250, 0.16);
+    color: #93c5fd;
+    font-size: var(--fontSize-sm);
+    font-weight: 700;
+    text-transform: lowercase;
+  }
+
+  .AppDetailPage__loadingOverlay {
+    position: absolute;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    padding: 9px 12px;
+    border-radius: var(--radius-lg);
+    background: rgba(15, 23, 42, 0.74);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: var(--fontSize-base);
+    font-weight: 600;
+    backdrop-filter: blur(6px);
+  }
+
+  .AppDetailPage__frame {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    border: none;
+    background: #fff;
+    display: block;
+  }
+
+  .AppDetailPage__status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    padding: 24px;
+    color: var(--textSecondary);
+    text-align: center;
+    line-height: var(--leading-relaxed);
+  }
+
+.AppDetailPage__status--error {
+    border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+    background: color-mix(in srgb, var(--error) 8%, transparent);
+    color: var(--error);
+    border-radius: var(--radius-xl);
+    padding: 24px;
+    margin: 24px;
+  }
+
+  @media (max-width: 768px) {
+    .AppDetailPage {
+      padding: 10px 10px 14px;
+    }
+
+    .AppDetailPage__frameWrap {
+      padding: 10px;
+    }
+
+    .AppDetailPage__browserShell {
+      border-radius: 18px;
+    }
+
+    .AppDetailPage__browserBar {
+      padding: 0 12px;
+      gap: 8px;
+    }
+
+    .AppDetailPage__browserBadge {
+      display: none;
+    }
+  }
+
+
+/* ── Topbar 操作按钮 ───────────────────────────────────── */
+
+.AppDetailPage__topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.AppDetailPage__topbarBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.AppDetailPage__topbarBtn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 1);
+}
+
+/* ── 三点菜单 ──────────────────────────────────────────── */
+
+.AppDetailPage__menuWrap {
+  position: relative;
+}
+
+.AppDetailPage__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: var(--radius-xl);
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.AppDetailPage__menuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--fontSize-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.AppDetailPage__menuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.AppDetailPage__menuItem:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.AppDetailPage__menuItem--danger {
+  color: #f87171;
+}
+
+.AppDetailPage__menuItem--danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+/* ── 版本管理弹窗 ──────────────────────────────────────── */
+
+.AppDetailPage__modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.AppDetailPage__modal {
+  width: 90%;
+  max-width: 520px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-xl);
+  background: var(--surface, #1e293b);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.AppDetailPage__modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.AppDetailPage__modalHeader h3 {
+  margin: 0;
+  font-size: var(--fontSize-lg);
+  font-weight: 700;
+}
+
+.AppDetailPage__modalClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--textSecondary);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.AppDetailPage__modalClose:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.AppDetailPage__versionList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.AppDetailPage__versionItem {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  transition: background 0.12s;
+}
+
+.AppDetailPage__versionItem:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.AppDetailPage__versionInfo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.AppDetailPage__versionId {
+  font-family: monospace;
+  font-size: var(--fontSize-sm);
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__versionDate {
+  font-size: var(--fontSize-sm);
+  color: var(--textTertiary);
+}
+
+.AppDetailPage__versionPinned {
+  font-size: 14px;
+}
+
+.AppDetailPage__versionStatus {
+  padding: 24px;
+  text-align: center;
+  color: var(--textSecondary);
+}
+
+.AppDetailPage__versionStatus--error {
+  color: var(--error);
+}

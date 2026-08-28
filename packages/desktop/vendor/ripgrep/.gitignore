@@ -1,0 +1,6 @@
+.cache/
+staged/
+# Platform caches can be large; pre-build re-downloads. Keep README only in git.
+darwin-*/
+linux-*/
+win32-*/

@@ -1,0 +1,25 @@
+.chat-area {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-area__drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: var(--primary);
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--background) 86%, transparent);
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(6px);
+  animation: message-input-fade-in 0.2s ease-out forwards;
+}

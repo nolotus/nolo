@@ -1,0 +1,34 @@
+/* ── DeleteContentButton ─────────────────────────────── */
+
+.DeleteButton {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: var(--textTertiary);
+          border-radius: var(--radius-xs);
+          padding: var(--space-1);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          flex-shrink: 0;
+        }
+
+        .DeleteButton:hover:not(:disabled) {
+          color: var(--error);
+          background-color: var(--backgroundTertiary);
+        }
+
+        .DeleteButton:disabled {
+          cursor: not-allowed;
+          opacity: 0.5;
+        }
+        
+        /* 
+          When rendered as a MenuItem (or any component that receives this class), 
+          it will adopt the danger color on hover.
+        */
+        .DeleteButton.SidebarItem__menu-item:hover:not(:disabled) {
+          background-color: color-mix(in srgb, var(--error) 15%, transparent);
+          color: var(--error);
+        }

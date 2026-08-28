@@ -1,0 +1,11 @@
+{
+  "name": "render",
+  "module": "index.ts",
+  "type": "module",
+  "dependencies": {
+    "app": "workspace:app",
+    "database": "workspace:database",
+    "react-aria-components": "^1.19.0",
+    "sucrase": "^3.35.0"
+  }
+}
