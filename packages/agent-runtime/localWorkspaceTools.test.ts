@@ -1172,15 +1172,23 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     expect(execShellProperties.cmd.description).toContain("Compatibility alias");
   });
 
-  test("can vary globFiles description and parameters for tool-surface experiments", () => {
+  test("readFile/globFiles expose the single canonical schema (no variant layer)", () => {
     const tools = buildLocalWorkspaceOpenAiTools({
-      toolNames: ["globFiles"],
-      globFilesDescriptionVariant: "antiShell",
-      globFilesParameterVariant: "rich",
+      toolNames: ["readFile", "globFiles"],
     });
-    const globFiles = tools[0]?.function as any;
+    const readFile = tools.find((tool) => (tool.function as any).name === "readFile")?.function as any;
+    const globFiles = tools.find((tool) => (tool.function as any).name === "globFiles")?.function as any;
 
-    expect(globFiles.description).toContain("Prefer globFiles over shell find/ls commands");
+    expect(readFile.description).toBe(
+      "Read a UTF-8 text file inside the workspace. Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).",
+    );
+    expect(readFile.parameters.required).toEqual(["path"]);
+    expect(Object.keys(readFile.parameters.properties)).toEqual(["path", "lines", "force"]);
+    expect(readFile.parameters.properties).not.toHaveProperty("_activity");
+
+    expect(globFiles.description).toBe(
+      "Find file paths by glob pattern without reading file contents. Use brace groups (e.g. '**/*.{ts,tsx}') to match multiple patterns in one call.",
+    );
     expect(globFiles.parameters.required).toEqual(["pattern"]);
     expect(Object.keys(globFiles.parameters.properties)).toEqual([
       "pattern",
@@ -1189,8 +1197,7 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
       "includeIgnored",
       "maxResults",
     ]);
-    expect(globFiles.parameters.properties.maxResults.description).toContain("Max file paths to return");
-    expect(globFiles.parameters.properties.pattern.description).toContain("**/*.{ts,tsx}");
+    expect(globFiles.parameters.properties).not.toHaveProperty("glob");
     expect(globFiles.parameters.properties).not.toHaveProperty("_activity");
   });
 
@@ -1204,21 +1211,6 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     expect(readFile.parameters.properties).not.toHaveProperty("startLine");
     expect(readFile.parameters.properties).not.toHaveProperty("tailLines");
     expect(readFile.parameters.properties.lines.type).toBe("string");
-  });
-
-  test("can vary readFile description and parameters for tool-surface experiments", () => {
-    const tools = buildLocalWorkspaceOpenAiTools({
-      toolNames: ["readFile"],
-      readFileDescriptionVariant: "strategy",
-      readFileParameterVariant: "rich",
-    });
-
-    const readFile = tools[0]?.function as any;
-    expect(readFile.description).toContain("Use lines for focused range reads");
-    expect(readFile.parameters.properties.lines.description).toContain("40-120");
-    expect(readFile.parameters.required).toEqual(["path"]);
-    expect(Object.keys(readFile.parameters.properties)).toEqual(["path", "lines", "force"]);
-    expect(readFile.parameters.properties).not.toHaveProperty("_activity");
   });
 
   test("builds a semantic local coding toolset from declared names only (no baseline)", () => {

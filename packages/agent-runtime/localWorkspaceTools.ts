@@ -173,10 +173,6 @@ type WorkspaceFileArgs = {
 
 import {
   type OpenAiCompatibleTool,
-  type GlobFilesDescriptionVariant,
-  type GlobFilesParameterVariant,
-  type ReadFileDescriptionVariant,
-  type ReadFileParameterVariant,
   WORKSPACE_TOOL_NAMES,
   SHELL_TOOL_NAMES,
   WORKSPACE_TOOL_NAME_SET,
@@ -260,10 +256,6 @@ export function buildLocalWorkspacePolicyToolNames(args: {
 export function buildLocalWorkspaceOpenAiTools(args: {
   toolNames?: string[];
   exposeShellTools?: boolean;
-  readFileDescriptionVariant?: ReadFileDescriptionVariant;
-  readFileParameterVariant?: ReadFileParameterVariant;
-  globFilesDescriptionVariant?: GlobFilesDescriptionVariant;
-  globFilesParameterVariant?: GlobFilesParameterVariant;
 }) {
   const declaredTools = new Set(args.toolNames ?? []);
   return WORKSPACE_TOOL_NAMES
@@ -274,12 +266,7 @@ export function buildLocalWorkspaceOpenAiTools(args: {
       }
       return true;
     })
-    .map((toolName) => buildWorkspaceToolDefinition(toolName, {
-      readFileDescriptionVariant: args.readFileDescriptionVariant,
-      readFileParameterVariant: args.readFileParameterVariant,
-      globFilesDescriptionVariant: args.globFilesDescriptionVariant,
-      globFilesParameterVariant: args.globFilesParameterVariant,
-    }))
+    .map((toolName) => buildWorkspaceToolDefinition(toolName))
     .filter((tool): tool is OpenAiCompatibleTool => Boolean(tool));
 }
 

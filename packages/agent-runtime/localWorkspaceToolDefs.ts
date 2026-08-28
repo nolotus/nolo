@@ -3,8 +3,9 @@
 // Workspace tool schema 定义 + shell 命令构建 + tool 分发器。
 // 从 localWorkspaceTools.ts 提取——纯声明，零 I/O，零副作用。
 //
-// 这组函数接受 variant 字符串，输出 OpenAI tool schema 对象。
-// 执行器（readFileTool / execShellTool 等）留在 localWorkspaceTools.ts。
+// 这组函数输出唯一的 canonical OpenAI tool schema 对象（schema variant 实验
+// 已结束，experiment layer 移除；执行器（readFileTool / execShellTool 等）
+// 留在 localWorkspaceTools.ts）。
 
 import { resolveExecutableOnPath } from "./runtimeCompat";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
@@ -23,11 +24,6 @@ import {
 import type { OpenAiCompatibleTool } from "./capabilities";
 
 export type { OpenAiCompatibleTool };
-
-export type GlobFilesDescriptionVariant = "brief" | "strategy" | "workflow" | "antiShell";
-export type GlobFilesParameterVariant = "minimal" | "scoped" | "rich";
-export type ReadFileDescriptionVariant = "brief" | "strategy" | "workflow" | "antiShell";
-export type ReadFileParameterVariant = "minimal" | "scoped" | "rich";
 
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
@@ -65,20 +61,11 @@ function buildWorkspacePathProperty() {
   };
 }
 
-function buildReadWorkspaceDescription(variant?: ReadFileDescriptionVariant) {
-  if (variant === "brief") {
-    return "Read a UTF-8 text file inside the workspace.";
-  }
-  if (variant === "workflow") {
-    return 'Read a UTF-8 text file inside the workspace. Use lines with a range from search matches, or lines: "-50" for logs. Read the whole file only when the task needs all content.';
-  }
-  if (variant === "antiShell") {
-    return "Read a UTF-8 text file inside the workspace. Prefer readFile over shell commands (cat/head/tail).";
-  }
+function buildReadWorkspaceDescription() {
   return "Read a UTF-8 text file inside the workspace. Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
 }
 
-function buildReadWorkspaceParameters(variant?: ReadFileParameterVariant) {
+function buildReadWorkspaceParameters() {
   const path = buildWorkspacePathProperty();
   const lines = {
     type: "string",
@@ -90,24 +77,6 @@ function buildReadWorkspaceParameters(variant?: ReadFileParameterVariant) {
     description:
       "Refetch even when the requested range was already delivered earlier and the file is unchanged (e.g. after context compaction).",
   };
-  if (variant === "minimal") {
-    return {
-      type: "object",
-      properties: { path },
-      required: ["path"],
-    };
-  }
-  if (variant === "rich") {
-    return {
-      type: "object",
-      properties: {
-        path,
-        lines,
-        force,
-      },
-      required: ["path"],
-    };
-  }
   return {
     type: "object",
     properties: {
@@ -119,16 +88,13 @@ function buildReadWorkspaceParameters(variant?: ReadFileParameterVariant) {
   };
 }
 
-function buildReadWorkspaceFileTool(args?: {
-  descriptionVariant?: ReadFileDescriptionVariant;
-  parameterVariant?: ReadFileParameterVariant;
-}): OpenAiCompatibleTool {
+function buildReadWorkspaceFileTool(): OpenAiCompatibleTool {
   return {
     type: "function",
     function: {
       name: "readFile",
-      description: buildReadWorkspaceDescription(args?.descriptionVariant),
-      parameters: buildReadWorkspaceParameters(args?.parameterVariant),
+      description: buildReadWorkspaceDescription(),
+      parameters: buildReadWorkspaceParameters(),
     },
   };
 }
@@ -185,20 +151,11 @@ function buildReplaceWorkspaceTextTool(): OpenAiCompatibleTool {
   };
 }
 
-function buildGlobWorkspaceDescription(variant?: GlobFilesDescriptionVariant) {
-  if (variant === "brief") {
-    return "Find workspace files by path glob without reading file contents.";
-  }
-  if (variant === "workflow") {
-    return "Find files by glob pattern. Use codeSearch for text inside candidates, and readFile for specific paths.";
-  }
-  if (variant === "antiShell") {
-    return "Find workspace files by path glob. Prefer globFiles over shell find/ls commands.";
-  }
+function buildGlobWorkspaceDescription() {
   return "Find file paths by glob pattern without reading file contents. Use brace groups (e.g. '**/*.{ts,tsx}') to match multiple patterns in one call.";
 }
 
-function buildGlobWorkspaceParameters(variant?: GlobFilesParameterVariant) {
+function buildGlobWorkspaceParameters() {
   const pattern = {
     type: "string",
     description: "Glob pattern for files (supports brace groups like '**/*.{ts,tsx}', '**/{package.json,tsconfig*.json}').",
@@ -218,52 +175,26 @@ function buildGlobWorkspaceParameters(variant?: GlobFilesParameterVariant) {
     items: { type: "string" },
     description: "Glob patterns to exclude from results.",
   };
-  if (variant === "minimal") {
-    return {
-      type: "object",
-      properties: { pattern },
-      required: ["pattern"],
-    };
-  }
-  if (variant === "rich") {
-    return {
-      type: "object",
-      properties: {
-        pattern,
-        path,
-        exclude,
-        includeIgnored,
-        maxResults,
-      },
-      required: ["pattern"],
-    };
-  }
   return {
     type: "object",
     properties: {
       pattern,
-      glob: {
-        type: "string",
-        description: "Alias for pattern, kept for compatibility.",
-      },
       path,
       exclude,
       includeIgnored,
       maxResults,
     },
+    required: ["pattern"],
   };
 }
 
-function buildGlobWorkspaceFilesTool(args?: {
-  descriptionVariant?: GlobFilesDescriptionVariant;
-  parameterVariant?: GlobFilesParameterVariant;
-}): OpenAiCompatibleTool {
+function buildGlobWorkspaceFilesTool(): OpenAiCompatibleTool {
   return {
     type: "function",
     function: {
       name: "globFiles",
-      description: buildGlobWorkspaceDescription(args?.descriptionVariant),
-      parameters: buildGlobWorkspaceParameters(args?.parameterVariant),
+      description: buildGlobWorkspaceDescription(),
+      parameters: buildGlobWorkspaceParameters(),
     },
   };
 }
@@ -365,17 +296,9 @@ function buildListProcessesTool(): OpenAiCompatibleTool {
   };
 }
 
-export function buildWorkspaceToolDefinition(toolName: string, args?: {
-  readFileDescriptionVariant?: ReadFileDescriptionVariant;
-  readFileParameterVariant?: ReadFileParameterVariant;
-  globFilesDescriptionVariant?: GlobFilesDescriptionVariant;
-  globFilesParameterVariant?: GlobFilesParameterVariant;
-}) {
+export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "readFile") {
-    return buildReadWorkspaceFileTool({
-      descriptionVariant: args?.readFileDescriptionVariant,
-      parameterVariant: args?.readFileParameterVariant,
-    });
+    return buildReadWorkspaceFileTool();
   }
   if (toolName === "writeFile") {
     return buildWriteWorkspaceFileTool();
@@ -384,10 +307,7 @@ export function buildWorkspaceToolDefinition(toolName: string, args?: {
     return buildReplaceWorkspaceTextTool();
   }
   if (toolName === "globFiles") {
-    return buildGlobWorkspaceFilesTool({
-      descriptionVariant: args?.globFilesDescriptionVariant,
-      parameterVariant: args?.globFilesParameterVariant,
-    });
+    return buildGlobWorkspaceFilesTool();
   }
   if (toolName === "captureVisualState") return buildCaptureVisualStateTool();
   if (toolName === "execShell") return buildExecShellTool(toolName);

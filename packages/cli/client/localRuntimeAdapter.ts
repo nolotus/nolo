@@ -141,10 +141,6 @@ import {
 } from "./cliLocalAgentRecordReader";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
-  resolveGlobFilesDescriptionVariant,
-  resolveReadFileDescriptionVariant,
-  resolveReadFileParameterVariant,
-  resolveGlobFilesParameterVariant,
 } from "./cliWorkspaceToolVariants";
 import {
   parseJsonObject,

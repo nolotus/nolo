@@ -1,9 +1,11 @@
 /**
- * Local workspace tool schema variants.
+ * Local workspace tool runtime toggle.
  *
- * Extracted from localRuntimeAdapter.ts. Pure env-driven functions that
- * select which description/parameter variant each workspace tool (readFile,
- * globFiles) uses in its OpenAI function schema.
+ * Extracted from localRuntimeAdapter.ts. This module no longer hosts the
+ * schema variant experiment layer (readFile/globFiles description/parameter
+ * variants were removed after the A/B concluded — the winning schemas are the
+ * only implementations in localWorkspaceToolDefs.ts). It now only owns the
+ * declared-only toggle for the CLI local runtime.
  *
  * No module state — only reads env vars.
  */
@@ -17,43 +19,4 @@ export function shouldUseDeclaredOnlyLocalWorkspaceTools(env: EnvLike) {
   const value =
     env.NOLO_LOCAL_WORKSPACE_TOOLSET || env.NOLO_LOCAL_TOOLSET_MODE || "";
   return value === "declared-only" || value === "declared";
-}
-
-export function resolveGlobFilesDescriptionVariant(env: EnvLike) {
-  return resolveLocalWorkspaceDescriptionVariant(
-    env.NOLO_GLOBFILES_DESCRIPTION_VARIANT,
-  );
-}
-
-export function resolveReadFileDescriptionVariant(env: EnvLike) {
-  return resolveLocalWorkspaceDescriptionVariant(
-    env.NOLO_READFILE_DESCRIPTION_VARIANT,
-  );
-}
-
-export function resolveReadFileParameterVariant(env: EnvLike) {
-  return resolveLocalWorkspaceParameterVariant(
-    env.NOLO_READFILE_PARAMETER_VARIANT,
-  );
-}
-
-export function resolveGlobFilesParameterVariant(env: EnvLike) {
-  return resolveLocalWorkspaceParameterVariant(
-    env.NOLO_GLOBFILES_PARAMETER_VARIANT,
-  );
-}
-
-function resolveLocalWorkspaceDescriptionVariant(value: string | undefined) {
-  return value === "brief" ||
-    value === "strategy" ||
-    value === "workflow" ||
-    value === "antiShell"
-    ? value
-    : "strategy";
-}
-
-function resolveLocalWorkspaceParameterVariant(value: string | undefined) {
-  return value === "minimal" || value === "scoped" || value === "rich"
-    ? value
-    : "rich";
 }

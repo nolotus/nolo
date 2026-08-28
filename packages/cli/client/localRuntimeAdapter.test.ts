@@ -2764,14 +2764,12 @@ describe("CLI local runtime adapter", () => {
     expect(systemText).toContain("多 Agent 编排（后台 Run）");
   });
 
-  test("can vary globFiles schema through local runtime env", async () => {
+  test("exposes the single canonical readFile/globFiles schema through the local runtime", async () => {
     const requests: Array<{ body: any }> = [];
     const adapter = createAdapter({
       env: {
         OPENAI_API_KEY: "sk-local",
         NOLO_LOCAL_OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
-        NOLO_GLOBFILES_DESCRIPTION_VARIANT: "antiShell",
-        NOLO_GLOBFILES_PARAMETER_VARIANT: "rich",
       },
       db: {
         get: async () => ({
@@ -2779,7 +2777,7 @@ describe("CLI local runtime adapter", () => {
           prompt: "Use local coding tools.",
           model: "mimo-v2.5-pro",
           provider: "custom",
-          tools: ["globFiles"],
+          tools: ["readFile", "globFiles"],
         }),
         put: async () => {},
         batch: async () => {},
@@ -2796,11 +2794,20 @@ describe("CLI local runtime adapter", () => {
     await runLocalAgentTurn({
       adapter,
       agentRef: FULLSTACK_TEST_AGENT_KEY,
-      input: "find tests",
+      input: "inspect cwd",
     });
 
+    const readFile = requests[0]?.body.tools.find((tool: any) => tool.function.name === "readFile")?.function;
     const globFiles = requests[0]?.body.tools.find((tool: any) => tool.function.name === "globFiles")?.function;
-    expect(globFiles.description).toContain("Prefer globFiles over shell");
+    expect(readFile.description).toBe(
+      "Read a UTF-8 text file inside the workspace. Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).",
+    );
+    expect(readFile.parameters.required).toEqual(["path"]);
+    expect(publicSchemaKeys(readFile)).toEqual(["path", "lines", "force"]);
+    expect(globFiles.description).toBe(
+      "Find file paths by glob pattern without reading file contents. Use brace groups (e.g. '**/*.{ts,tsx}') to match multiple patterns in one call.",
+    );
+    expect(globFiles.parameters.required).toEqual(["pattern"]);
     expect(publicSchemaKeys(globFiles)).toEqual([
       "pattern",
       "path",
@@ -2808,132 +2815,6 @@ describe("CLI local runtime adapter", () => {
       "includeIgnored",
       "maxResults",
     ]);
-  });
-
-  test("can vary readFile schema through local runtime env", async () => {
-    const requests: Array<{ body: any }> = [];
-    const adapter = createAdapter({
-      env: {
-        OPENAI_API_KEY: "sk-local",
-        NOLO_LOCAL_OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
-        NOLO_READFILE_DESCRIPTION_VARIANT: "strategy",
-        NOLO_READFILE_PARAMETER_VARIANT: "rich",
-      },
-      db: {
-        get: async () => ({
-          dbKey: FULLSTACK_TEST_AGENT_KEY,
-          prompt: "Use local coding tools.",
-          model: "mimo-v2.5-pro",
-          provider: "custom",
-          tools: ["readFile"],
-        }),
-        put: async () => {},
-        batch: async () => {},
-        iterator: () => (async function* () {})(),
-      },
-      fetchImpl: async (_url, init) => {
-        requests.push({ body: JSON.parse(String(init?.body)) });
-        return Response.json({
-          choices: [{ message: { content: "done" } }],
-        });
-      },
-    });
-
-    await runLocalAgentTurn({
-      adapter,
-      agentRef: FULLSTACK_TEST_AGENT_KEY,
-      input: "read a file range",
-    });
-
-    const readFile = requests[0]?.body.tools.find((tool: any) => tool.function.name === "readFile")?.function;
-    expect(readFile.description).toContain("Use lines");
-    expect(publicSchemaKeys(readFile)).toEqual(["path", "lines", "force"]);
-  });
-
-  test("can vary globFiles schema through local runtime env", async () => {
-    const requests: Array<{ body: any }> = [];
-    const adapter = createAdapter({
-      env: {
-        OPENAI_API_KEY: "sk-local",
-        NOLO_LOCAL_OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
-        NOLO_GLOBFILES_DESCRIPTION_VARIANT: "antiShell",
-        NOLO_GLOBFILES_PARAMETER_VARIANT: "rich",
-      },
-      db: {
-        get: async () => ({
-          dbKey: FULLSTACK_TEST_AGENT_KEY,
-          prompt: "Use local coding tools.",
-          model: "mimo-v2.5-pro",
-          provider: "custom",
-          tools: ["globFiles"],
-        }),
-        put: async () => {},
-        batch: async () => {},
-        iterator: () => (async function* () {})(),
-      },
-      fetchImpl: async (_url, init) => {
-        requests.push({ body: JSON.parse(String(init?.body)) });
-        return Response.json({
-          choices: [{ message: { content: "done" } }],
-        });
-      },
-    });
-
-    await runLocalAgentTurn({
-      adapter,
-      agentRef: FULLSTACK_TEST_AGENT_KEY,
-      input: "find tests",
-    });
-
-    const globFiles = requests[0]?.body.tools.find((tool: any) => tool.function.name === "globFiles")?.function;
-    expect(globFiles.description).toContain("Prefer globFiles over shell");
-    expect(publicSchemaKeys(globFiles)).toEqual([
-      "pattern",
-      "path",
-      "exclude",
-      "includeIgnored",
-      "maxResults",
-    ]);
-  });
-
-  test("can vary readFile schema through local runtime env", async () => {
-    const requests: Array<{ body: any }> = [];
-    const adapter = createAdapter({
-      env: {
-        OPENAI_API_KEY: "sk-local",
-        NOLO_LOCAL_OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
-        NOLO_READFILE_DESCRIPTION_VARIANT: "strategy",
-        NOLO_READFILE_PARAMETER_VARIANT: "rich",
-      },
-      db: {
-        get: async () => ({
-          dbKey: FULLSTACK_TEST_AGENT_KEY,
-          prompt: "Use local coding tools.",
-          model: "mimo-v2.5-pro",
-          provider: "custom",
-          tools: ["readFile"],
-        }),
-        put: async () => {},
-        batch: async () => {},
-        iterator: () => (async function* () {})(),
-      },
-      fetchImpl: async (_url, init) => {
-        requests.push({ body: JSON.parse(String(init?.body)) });
-        return Response.json({
-          choices: [{ message: { content: "done" } }],
-        });
-      },
-    });
-
-    await runLocalAgentTurn({
-      adapter,
-      agentRef: FULLSTACK_TEST_AGENT_KEY,
-      input: "read a file range",
-    });
-
-    const readFile = requests[0]?.body.tools.find((tool: any) => tool.function.name === "readFile")?.function;
-    expect(readFile.description).toContain("Use lines");
-    expect(publicSchemaKeys(readFile)).toEqual(["path", "lines", "force"]);
   });
 
   test("allows default semantic workspace tools without legacy agent tool declarations", async () => {

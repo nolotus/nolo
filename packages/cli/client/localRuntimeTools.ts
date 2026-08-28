@@ -7,10 +7,6 @@ import {
 } from "./localRuntimeDiagnostics";
 import {
   shouldUseDeclaredOnlyLocalWorkspaceTools,
-  resolveGlobFilesDescriptionVariant,
-  resolveReadFileDescriptionVariant,
-  resolveReadFileParameterVariant,
-  resolveGlobFilesParameterVariant,
 } from "./cliWorkspaceToolVariants";
 import {
   buildLocalWorkspaceOpenAiTools,
@@ -108,10 +104,6 @@ export function buildOpenAiTools(args: {
     ...buildLocalWorkspaceOpenAiTools({
       toolNames: toolset.toolNames,
       exposeShellTools: toolset.exposeShellTools,
-      readFileDescriptionVariant: resolveReadFileDescriptionVariant(args.env),
-      readFileParameterVariant: resolveReadFileParameterVariant(args.env),
-      globFilesDescriptionVariant: resolveGlobFilesDescriptionVariant(args.env),
-      globFilesParameterVariant: resolveGlobFilesParameterVariant(args.env),
     }),
     ...buildServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({ toolNames: args.toolNames }),
