@@ -9,10 +9,10 @@ import {
 } from "./componentReleasePolicy.mjs";
 
 const COMPONENT_CONFIG = {
-  cli: { packagePath: "packages/cli/package.json", releaseConfigPath: ".releaserc.cli.json" },
+  cli: { packagePath: "packages/cli/package.json", tagFormat: "cli-v${version}" },
   desktop: {
     packagePath: "packages/desktop/package.json",
-    releaseConfigPath: ".releaserc.desktop.json",
+    tagFormat: "desktop-v${version}",
   },
 };
 
@@ -29,7 +29,7 @@ function git(args, repositoryRoot) {
   }).trim();
 }
 
-class ReleaseStateForkError extends Error {
+export class ReleaseStateForkError extends Error {
   constructor(component, orphanTags) {
     super(
       `RELEASE STATE FORK: ${component} has orphan tags ${orphanTags.join(", ")} newer than its package.json version. ` +
@@ -40,7 +40,7 @@ class ReleaseStateForkError extends Error {
   }
 }
 
-class OrphanTagSkipError extends Error {
+export class OrphanTagSkipError extends Error {
   constructor(tag, orphanTags) {
     super(
       `orphan tag ${tag} not reachable from HEAD; version already released or pending manual reconciliation; skipping to avoid tag collision`,
@@ -161,59 +161,8 @@ function compareSemver(left, right) {
 }
 
 function readReleaseConfig(config, branch, repositoryRoot) {
-  const releaseConfig = JSON.parse(
-    readFileSync(resolve(repositoryRoot, config.releaseConfigPath), "utf8"),
-  );
-  const branchConfig = releaseConfig.branches?.find((entry) =>
-    typeof entry === "string" ? entry === branch : entry?.name === branch,
-  );
-  if (!branchConfig) throw new Error(`${config.releaseConfigPath} does not configure ${branch}`);
-  if (
-    branch === "alpha" &&
-    (typeof branchConfig !== "object" || branchConfig.prerelease !== "alpha")
-  ) {
-    throw new Error(`${config.releaseConfigPath} has an unexpected alpha channel`);
-  }
-  if (
-    typeof releaseConfig.tagFormat !== "string" ||
-    !releaseConfig.tagFormat.endsWith("${version}") ||
-    releaseConfig.tagFormat.indexOf("${version}") !== releaseConfig.tagFormat.lastIndexOf("${version}")
-  ) {
-    throw new Error(`${config.releaseConfigPath} has an unsupported tagFormat`);
-  }
-  return { tagFormat: releaseConfig.tagFormat, tagPrefix: releaseConfig.tagFormat.slice(0, -10) };
-}
-
-function semanticReleaseChannelsByCommit(commits, repositoryRoot) {
-  if (commits.length === 0) return new Map();
-  const output = git(
-    [
-      "log",
-      "--no-walk",
-      "--format=%H%x1f%N%x1e",
-      "--notes=refs/notes/semantic-release*",
-      ...new Set(commits),
-    ],
-    repositoryRoot,
-  );
-  const channels = new Map();
-  for (const record of output.split("\x1e")) {
-    const [commit, notes = ""] = record.trim().split("\x1f", 2);
-    if (!commit) continue;
-    const commitChannels = notes
-      .split("\n")
-      .filter(Boolean)
-      .flatMap((note) => {
-        try {
-          const parsed = JSON.parse(note).channels;
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      });
-    channels.set(commit, commitChannels);
-  }
-  return channels;
+  if (branch !== "alpha" && branch !== "main") throw new Error(`unsupported branch ${branch}`);
+  return { tagFormat: config.tagFormat, tagPrefix: config.tagFormat.slice(0, -10) };
 }
 
 function applicableTags(config, branch, repositoryRoot) {
@@ -233,18 +182,12 @@ function applicableTags(config, branch, repositoryRoot) {
       const [tag, peeledCommit, directObject] = line.split("\t");
       return { tag, commit: peeledCommit || directObject };
     });
-  const channelsByCommit = semanticReleaseChannelsByCommit(
-    [...new Set(tags.map(({ commit }) => commit))],
-    repositoryRoot,
-  );
   return tags.flatMap(({ tag, commit }) => {
     try {
       const parsed = parseSemver(tag.slice(tagPrefix.length));
-      const noteChannels = channelsByCommit.get(commit) ?? [];
       const applicable =
         branch === "main" ? parsed.prerelease.length === 0 :
-          parsed.prerelease.length === 0 ||
-          (parsed.prerelease.includes("alpha") && noteChannels.includes("alpha"));
+          parsed.prerelease.length === 0 || parsed.prerelease[0] === "alpha";
       return applicable ? [{ tag, parsed, commit }] : [];
     } catch {
       return [];

@@ -112,20 +112,22 @@ export function resolveCliVersionAction(
   return "downgrade";
 }
 
-function applyVersion(version: string): void {
+export function applyVersion(version: string, repositoryRoot = process.cwd()): void {
+  const packageJson = path.join(repositoryRoot, "packages/cli/package.json");
+  const cliDownloads = path.join(repositoryRoot, "packages/app/constants/cliDownloads.ts");
   // 1. cliDownloads.ts — regex replace
-  const tsOld = fs.readFileSync(CLI_DOWNLOADS_TS, "utf8");
+  const tsOld = fs.readFileSync(cliDownloads, "utf8");
   if (!NOLO_CLI_VERSION_RE.test(tsOld)) {
-    throw new Error(`NOLO_CLI_VERSION not found in ${CLI_DOWNLOADS_TS}`);
+    throw new Error(`NOLO_CLI_VERSION not found in ${cliDownloads}`);
   }
   const tsNew = tsOld.replace(NOLO_CLI_VERSION_RE, `NOLO_CLI_VERSION = "${version}"`);
-  fs.writeFileSync(CLI_DOWNLOADS_TS, tsNew);
+  fs.writeFileSync(cliDownloads, tsNew);
 
   // 2. package.json — JSON read/write, 2-space indent + trailing newline
-  const pkgRaw = fs.readFileSync(CLI_PACKAGE_JSON, "utf8");
+  const pkgRaw = fs.readFileSync(packageJson, "utf8");
   const pkg = JSON.parse(pkgRaw);
   pkg.version = version;
-  fs.writeFileSync(CLI_PACKAGE_JSON, JSON.stringify(pkg, null, 2) + "\n");
+  fs.writeFileSync(packageJson, JSON.stringify(pkg, null, 2) + "\n");
 }
 
 async function main(): Promise<void> {

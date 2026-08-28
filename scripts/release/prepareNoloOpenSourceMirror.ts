@@ -1630,9 +1630,9 @@ jobs:
   await writeFile(join(githubDir, "cli-publish.yml"), cliPublish);
 
   // Version bump: push 到 alpha/main 时验证兼容性并 dispatch 发布。
-  // 版本号由 bun-nolo 的 semantic-release 决定（single-source），随 mirror
+  // 版本号由 bun-nolo 的统一 release engine 决定（single-source），随 mirror
   // 同步到公开仓库（packages/*/package.json 的 version 字段已含正确版本）。
-  // 公开仓库不跑 semantic-release——快照式无历史会导致版本号推断错误。
+  // 公开仓库不跑 release engine——快照式无历史会导致版本号推断错误。
   const versionBump = `name: Version Bump
 
 on:
@@ -1843,7 +1843,7 @@ export async function prepareNoloOpenSourceMirror(input: {
 
   await writeFile(join(outDir, "package.json"), JSON.stringify(openSourceRoot, null, 2) + "\n");
 
-  for (const f of ["bunfig.toml", "tsconfig.json", ".bun-version", "css-modules.d.ts", ".releaserc.cli.json", ".releaserc.desktop.json", "release.config.js"]) {
+  for (const f of ["bunfig.toml", "tsconfig.json", ".bun-version", "css-modules.d.ts"]) {
     const src = join(repoRoot, f);
     if (existsSync(src)) await cp(src, join(outDir, f));
   }

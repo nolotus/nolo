@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync } from "node:fs";
-import { componentsForCommit } from "../release/componentSemanticRelease.mjs";
+import { componentsForCommit } from "../release/componentReleasePolicy.mjs";
 
 const read = (path: string) => Bun.file(path).text();
 
@@ -50,22 +50,14 @@ describe("workflowCostPolicy", () => {
         typeof step.run === "string" &&
         /(^|\s)(?:npx\s+)?semantic-release(?:\s|$)/.test(step.run),
     );
-    const releaseSteps = steps.filter((step) => step.run === "bunx semantic-release");
+    const releaseSteps = steps.filter((step) => step.run === "bun scripts/release/publishComponents.mts --branch \"${{ github.ref_name }}\"");
 
     const planIndex = steps.findIndex((step) => step.name === "Plan component releases");
-    const notesIndex = steps.findIndex(
-      (step) => step.name === "Fetch semantic-release channel notes",
-    );
     const setupIndex = steps.findIndex((step) => step.uses === "oven-sh/setup-bun@v2");
     const installIndex = steps.findIndex(
       (step) => step.run === "bun install --frozen-lockfile",
     );
     expect(planIndex).toBeGreaterThanOrEqual(0);
-    expect(notesIndex).toBeGreaterThanOrEqual(0);
-    expect(notesIndex).toBeLessThan(planIndex);
-    expect(steps[notesIndex]?.run).toBe(
-      "git fetch --no-tags origin '+refs/notes/semantic-release*:refs/notes/semantic-release*'",
-    );
     expect(planIndex).toBeLessThan(setupIndex);
     expect(planIndex).toBeLessThan(installIndex);
     expect(steps[planIndex]).toMatchObject({
@@ -79,29 +71,14 @@ describe("workflowCostPolicy", () => {
       run: 'echo "ready=true" >> "$GITHUB_OUTPUT"',
     });
 
-    expect(allReleaseSteps).toHaveLength(2);
-    expect(releaseSteps).toEqual([
-      {
-        name: "Run CLI semantic-release",
-        id: "cli-release",
-        if: "steps.release-preflight.outputs.ready == 'true' && steps.release-plan.outputs.cli == 'true'",
-        env: {
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
-          NOLO_RELEASE_CONFIG: "cli",
-        },
-        run: "bunx semantic-release",
-      },
-      {
-        name: "Run Desktop semantic-release",
-        id: "desktop-release",
-        if: "${{ !cancelled() && steps.release-preflight.outputs.ready == 'true' && steps.release-plan.outputs.desktop == 'true' }}",
-        env: {
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
-          NOLO_RELEASE_CONFIG: "desktop",
-        },
-        run: "bunx semantic-release",
-      },
-    ]);
+    expect(allReleaseSteps).toHaveLength(0);
+    expect(releaseSteps).toHaveLength(1);
+    expect(releaseSteps[0]).toMatchObject({
+      name: "Run component releases",
+      id: "component-release",
+      run: "bun scripts/release/publishComponents.mts --branch \"${{ github.ref_name }}\"",
+    });
+    expect(String(releaseSteps[0].if)).toContain("steps.release-preflight.outputs.ready == 'true'");
     expect(source).not.toContain("desktop-dry-run");
     // CLI 发布已迁移到公开镜像仓库 nolo：version-bump 不再 dispatch 已删除的
     // 私有 cli-npm-publish workflow，CLI 的 npm 发布由 nolo 的 version-bump dispatch

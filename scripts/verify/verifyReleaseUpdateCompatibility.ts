@@ -46,7 +46,7 @@ export function validateReleaseUpdateCompatibility(input: ReleaseCompatibilityIn
   //     不再 dispatch 已删除的发布 workflow（cli-npm-publish / desktop-alpha / desktop-release）。
   //   - 公开(nolo)：版本号从 bun-nolo 快照同步而来，version-bump 不跑 semantic-release，
   //     只 dispatch cli-publish / desktop-build 完成免费发布。
-  const isPublicMirror = !input.versionBump.includes("NOLO_RELEASE_CONFIG");
+  const isPublicMirror = !input.versionBump.includes("publishComponents.mts");
 
   if (isPublicMirror) {
     // 公开镜像：版本号单源自 bun-nolo，不得跑 semantic-release。
@@ -57,9 +57,8 @@ export function validateReleaseUpdateCompatibility(input: ReleaseCompatibilityIn
       fail("public repo version-bump must not run component semantic-release passes");
     }
   } else {
-    // 私有仓库：版本号单源在此，须同时跑 CLI 与 desktop 的 semantic-release。
-    if (!input.versionBump.includes("NOLO_RELEASE_CONFIG: cli")) fail("unified workflow no longer runs CLI semantic-release");
-    if (!input.versionBump.includes("NOLO_RELEASE_CONFIG: desktop")) fail("unified workflow no longer runs Desktop semantic-release");
+    // 私有仓库：版本号由统一的自研组件引擎单源决定。
+    if (!input.versionBump.includes("publishComponents.mts")) fail("unified workflow no longer runs the component release engine");
     // 版本号在 bun-nolo 单源，nolo 快照不跑 semantic-release；私有仓不得再 dispatch
     // 已删除的发布 workflow（已迁移到 nolo）。
     if (input.versionBump.includes("gh workflow run cli-npm-publish.yml")) {

@@ -21,13 +21,13 @@ describe("release/update compatibility gate", () => {
     expect(() => validateReleaseUpdateCompatibility({ ...valid, declaredCliVersion: "0.0.0" })).toThrow(/does not match/);
   });
 
-  test("fails when desktop version source leaves the unified version writer", () => {
+  test("accepts the public mirror workflow without the private component engine", () => {
     expect(() =>
       validateReleaseUpdateCompatibility({
         ...valid,
-        versionBump: valid.versionBump.replace("NOLO_RELEASE_CONFIG: desktop", ""),
+        versionBump: valid.versionBump.replace("bun scripts/release/publishComponents.mts --branch \"${{ github.ref_name }}\"", "bun scripts/release/applyVersions.ts"),
       }),
-    ).toThrow(/no longer runs Desktop semantic-release/);
+    ).not.toThrow();
   });
 
   test("fails when private version-bump dispatches a removed desktop workflow", () => {

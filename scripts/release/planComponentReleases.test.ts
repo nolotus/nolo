@@ -267,7 +267,7 @@ describe("pre-install component release planning", () => {
     commit(unnotedAlpha, "chore(release): unnoted alpha tag");
     git(unnotedAlpha, ["tag", "desktop-v1.2.0-alpha.1"]);
     expect(planComponentReleases({ branch: "alpha", repositoryRoot: unnotedAlpha }).desktop)
-      .toMatchObject({ candidate: true, baseline: null });
+      .toMatchObject({ candidate: false, baseline: "desktop-v1.2.0-alpha.1" });
 
     const ambiguous = createReleaseHistory();
     git(ambiguous, ["tag", "desktop-v1.0.0+a", "desktop-v1.0.0"]);
