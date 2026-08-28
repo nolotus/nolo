@@ -485,4 +485,94 @@ describe("planCompression", () => {
       expect(plan.shouldCompress).toBe(false);
     });
   });
+
+  describe("tool stub tier (老工具输出 stub 档)", () => {
+    // 早期 tool 结果很大（~8k token），最近 3 条 tool 结果很小。
+    // 这样 stub 早期大 tool 能显著节省、保留最近 3 条原文，从而回到预算内。
+    function bigOldToolMsgs(pairCount: number): Message[] {
+      const hugeTool = "y".repeat(32_000); // ~8k token
+      const smallTool = "z".repeat(40); // 极小
+      const out: Message[] = [];
+      for (let i = 0; i < pairCount; i++) {
+        out.push(makeMsg(`a${i}`, "assistant", `ask ${i}`));
+        // 早期 tool 用大 content，最近 3 条用极小 content
+        out.push(makeMsg(`t${i}`, "tool", i < pairCount - 3 ? hugeTool : smallTool));
+      }
+      out.push(makeMsg("final", "assistant", "done"));
+      return out;
+    }
+
+    it("≥4 条 tool 结果且 stub 后可回预算 → 触发 stub 档（不生成摘要）", () => {
+      // 4 对：前 1 条 tool 大（~8k），后 3 条小。stub 前 1 条大 tool 即回到预算。
+      const msgs = bigOldToolMsgs(4);
+      const plan = planCompression({
+        allMsgs: msgs,
+        summarizedBeforeId: undefined,
+        summary: "",
+        contextWindow: 8000,
+      });
+      expect(plan.shouldCompress).toBe(true);
+      expect(plan.stub).toBeDefined();
+      // 保留最近 3 条 tool 原文，stub 第 4 倒数第 3 条之前那 1 条（t0）
+      expect(plan.stub!.stubbedCount).toBe(1);
+      // beforeId = 第一条被 stub 的 tool 结果 id
+      expect(plan.stub!.beforeId).toBe("t0");
+      // 摘要路径未占用
+      expect(plan.newSummarizedBeforeId).toBeUndefined();
+    });
+
+    it("tool 结果 ≤3 条 → 不触发 stub 档", () => {
+      const msgs = bigOldToolMsgs(3);
+      const plan = planCompression({
+        allMsgs: msgs,
+        summarizedBeforeId: undefined,
+        summary: "",
+        contextWindow: 8000,
+      });
+      // 3 条 tool 结果 ≤ STUB_KEEP_COUNT → 不 stub
+      expect(plan.stub).toBeUndefined();
+    });
+
+    it("节省不足回落到 summary 档（stub 不命中）", () => {
+      // 大量超预算来自不可 stub 的 user 长消息；tool 结果小 → stub 省不够，
+      // 即便触发压缩也不走 stub 档（stub 档要求 savedTokens 足以回到预算）。
+      const smallTool = "z".repeat(40);
+      const hugeUser = "u".repeat(64_000); // ~16k token，stub 动不了它
+      const msgs: Message[] = [
+        makeMsg("u0", "user", hugeUser),
+        ...Array.from({ length: 5 }, (_, i) => [
+          makeMsg(`a${i}`, "assistant", `ask ${i}`),
+          makeMsg(`t${i}`, "tool", smallTool),
+        ]).flat(),
+        makeMsg("a5", "assistant", "done"),
+      ];
+      const plan = planCompression({
+        allMsgs: msgs,
+        summarizedBeforeId: undefined,
+        summary: "",
+        contextWindow: 8000,
+      });
+      // stub 掉小 tool 结果省不了多少，仍超预算 → 不返回 stub 档
+      expect(plan.stub).toBeUndefined();
+    });
+
+    it("stub 不触碰 summarizedBeforeId 之前已入摘要的区间", () => {
+      // 摘要边界在 old2；pending 内才有 ≥4 条 tool 结果，stub 只发生在 pending 内。
+      const pendingTool = bigOldToolMsgs(5); // 5 对 + final
+      const allMsgs = [
+        makeMsg("old1", "user", "old"),
+        makeMsg("old2", "assistant", "old2"),
+        ...pendingTool,
+      ];
+      const plan = planCompression({
+        allMsgs,
+        summarizedBeforeId: "old2",
+        summary: "已有摘要",
+        contextWindow: 8000,
+      });
+      expect(plan.stub).toBeDefined();
+      // pending 内第一条 tool 是 t0，保留最后 3 条（t2,t3,t4），stub t0,t1 → beforeId=t1
+      expect(plan.stub!.beforeId).toBe("t1");
+    });
+  });
 });

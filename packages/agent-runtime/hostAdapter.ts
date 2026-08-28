@@ -177,6 +177,23 @@ export type AgentRuntimeSaveTurnInput = {
 export type AgentRuntimeDialogSummary = {
   summary: string;
   summarizedBeforeId?: string;
+  /** 老工具输出 stub 档边界：此 id 之前（summarizedBeforeId 之后）的 tool 结果被替换为 stub。 */
+  stubbedBeforeId?: string;
+  /**
+   * 摘要锚点内容寻址校验：summarizedBeforeId 及其之前消息切片的 SHA-256
+   * （JSON.stringify 后哈希，hex）。历史被 fork/编辑/裁剪后重算哈希不匹配，
+   * 载入时据此判摘要无效，避免退化为「摘要 + 全量历史」投影。旧记录缺失时保持
+   * 原有 findIndex 行为（不迁移）。
+   */
+  sourceHash?: string;
+  /** 摘要锚点切片长度（消息条数）。载入时若当前 history 更短 → 历史被裁剪 → 判无效。 */
+  sourceCount?: number;
+  /**
+   * 摘要生成逻辑版本位（COMPACTION_SUMMARY_SCHEMA_VERSION）。改版后旧记录因哈希
+   * 仍匹配而不会自动失效，故载入时据此主动判无效。字段缺失（旧记录）按 v1 处理；
+   * 字段存在但值畸形（null / 非数字）同样判无效（键存在即透传，读取层不静默丢弃）。
+   */
+  schemaVersion?: unknown;
 };
 
 export type AgentRuntimeHostAdapter = {
@@ -217,6 +234,10 @@ export type AgentRuntimeHostAdapter = {
     dialogId: string;
     summary: string;
     summarizedBeforeId?: string;
+    stubbedBeforeId?: string;
+    sourceHash?: string;
+    sourceCount?: number;
+    schemaVersion?: number;
   }): Promise<void>;
 };
 

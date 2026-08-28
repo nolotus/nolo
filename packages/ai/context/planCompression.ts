@@ -21,6 +21,12 @@ export const MIN_COMPRESS_COUNT = 5;
 /** 主动归档时保留最后两条原文，避免刚给用户的结论立刻被折叠进 summary。 */
 export const ACTIVE_SUMMARY_TAIL_KEEP_COUNT = 2;
 
+/** stub 档保留最近 N 条 tool 结果原文，更早的 tool 输出被替换为一行 stub。 */
+export const STUB_KEEP_COUNT = 3;
+
+/** 被 stub 的 tool 输出替换成的占位文本。 */
+export const TOOL_STUB_TEXT = "[tool output cleared to save context]";
+
 // --- 类型 ---
 
 export type CompressionReason = "task_completed" | "context_budget" | "manual";
@@ -58,6 +64,16 @@ export interface CompressionPlan {
   newSummarizedBeforeId?: string;
   /** 本次决策相对于 allMsgs 的起点（summarizedBeforeId 之后第一条的下标）。 */
   startIndex: number;
+  /**
+   * stub 档（老工具输出自动压缩）。
+   *
+   * 上下文超预算时，先零成本把较老的 tool 结果 content 替换为一行 stub
+   * （保留最近 STUB_KEEP_COUNT 条原文），回不到预算才走摘要路径。
+   * beforeId：第 (STUB_KEEP_COUNT+1) 倒数第 STUB_KEEP_COUNT+1 条 tool 结果之前那条
+   * 的 id —— 更早的全部 stub；stubbedCount：被 stub 的 tool 消息数；
+   * savedTokens：原 content token 之和减去 stub 文本开销。
+   */
+  stub?: { beforeId: string; stubbedCount: number; savedTokens: number };
 }
 
 // --- 辅助函数（纯函数） ---
@@ -256,6 +272,72 @@ function calculateCompressCount(
 }
 
 /**
+ * 老工具输出 stub 档决策（零成本，不调 LLM）。
+ *
+ * 在 pending 范围内保留最后 STUB_KEEP_COUNT 条 tool 结果原文，更早的 tool 结果
+ * content 替换成一行 stub。若替换后 totalUsed 能回到 historyBudget 内则返回
+ * stub 档，否则返回 null 让调用方走摘要路径。
+ *
+ * stub 不受 guardToolChainBoundary 约束：消息一条不删，assistant(tool_calls) →
+ * tool(result) 配对天然保留。唯一要求是不得 stub 到 summarizedBeforeId 之前
+ * 已入摘要的区间——本函数只处理 pending 范围内的消息，天然满足。
+ */
+function tryComputeStubPlan(
+  pendingMsgs: Message[],
+  totalUsed: number,
+  historyBudget: number,
+  startIndex: number,
+): CompressionPlan | null {
+  // 收集 pending 内「仍含原文」的 tool 结果下标（planCompression 基于投影后的
+  // 消息判定，已 stub 的 tool 结果 content 已是 stub 文本，不再重复计）。
+  const toolIndices: number[] = [];
+  for (let i = 0; i < pendingMsgs.length; i++) {
+    if (pendingMsgs[i].role === "tool") {
+      const content = serializeMessageContent(pendingMsgs[i].content) || "";
+      if (content !== TOOL_STUB_TEXT) toolIndices.push(i);
+    }
+  }
+  // 真正待 stub 的 tool 结果 ≤ STUB_KEEP_COUNT 条 → 不值得 stub
+  if (toolIndices.length <= STUB_KEEP_COUNT) return null;
+
+  // 保留最近 STUB_KEEP_COUNT 条 tool 结果原文；更早的 tool 结果全部 stub。
+  // 第一个被 stub 的是倒数第 (STUB_KEEP_COUNT+1) 条 tool 结果。
+  const firstStubbedIdx = toolIndices[toolIndices.length - STUB_KEEP_COUNT - 1];
+  const beforeMsg = pendingMsgs[firstStubbedIdx];
+  if (!beforeMsg) return null;
+
+  const stubOverhead = estimateTokenCount(TOOL_STUB_TEXT);
+  const stubbedMsgs = pendingMsgs.slice(0, firstStubbedIdx + 1).filter(
+    (m) => m.role === "tool",
+  );
+  // 被 stub 的 tool 结果的原 content token 之和（已 stub 的贡献近乎为 0）
+  const originalTokens = stubbedMsgs.reduce(
+    (s, m) => s + getMessageTokenCount(m),
+    0,
+  );
+  const savedTokens = Math.max(0, originalTokens - stubOverhead * stubbedMsgs.length);
+
+  if (totalUsed - savedTokens > historyBudget) return null;
+
+  const keptMsgs = pendingMsgs.slice(firstStubbedIdx + 1);
+  return {
+    shouldCompress: true,
+    compressCount: stubbedMsgs.length,
+    msgsToCompress: stubbedMsgs,
+    msgsToKeep: keptMsgs,
+    newSummarizedBeforeId: undefined,
+    startIndex,
+    stub: {
+      // beforeId = 第一条被 stub 的 tool 结果的消息 id；投影端按
+      // 「abs index <= beforeId 的 index 的 tool 消息」判定是否 stub。
+      beforeId: beforeMsg.id,
+      stubbedCount: stubbedMsgs.length,
+      savedTokens,
+    },
+  };
+}
+
+/**
  * 保护 tool chain 边界：不切断 assistant(tool_calls) → tool(result) 配对。
  */
 function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): number {
@@ -302,6 +384,18 @@ export function planCompression(input: CompressionInput): CompressionPlan {
     lastMsg: pendingMsgs[pendingMsgs.length - 1],
   });
   if (!trigger) return emptyPlan(startIndex);
+
+  // 3.5 老工具输出 stub 档（零成本优先）：在 summary 档之前，先看能否靠
+  //     把较老 tool 结果 content 替换成一行 stub 回到预算内。回得进去就
+  //     不生成摘要、不调 LLM。stub 不受 guardToolChainBoundary 影响
+  //     （消息一条不删，tool_calls→tool 配对天然保留）。
+  const stubPlan = tryComputeStubPlan(
+    pendingMsgs,
+    totalUsed,
+    historyBudget,
+    startIndex,
+  );
+  if (stubPlan) return stubPlan;
 
   // 4. 算压缩条数 + 保护 tool chain
   let compressCount = calculateCompressCount(pendingMsgs, rawMessageBudget, {

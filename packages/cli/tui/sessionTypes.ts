@@ -83,6 +83,14 @@ export type TuiState = {
    * null = 已加载但无记忆；undefined = 尚未加载。
    */
   cachedMemoryOverlay?: string | null;
+  /**
+   * 会话级权限自动化——true 时 TUI 的 confirmDestructiveAction 跳过确认弹窗，
+   * 直接放行破坏性 shell 命令与工作区外部文件访问。仅影响 TUI 的确认回调，
+   * actionGate（handoff/input 类）不受影响。通过 /auto <on|off> 切换，
+   * 默认 off（undefined 视同 off），不持久化，/new / 切换对话也不清除，
+   * 仅随当前 TUI 进程存活。
+   */
+  autoConfirm?: boolean;
 };
 
 export type TuiAction =

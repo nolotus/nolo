@@ -9,12 +9,16 @@
  * 否则会打掉 provider 前缀缓存（实测比不压缩更贵）。
  */
 
+import { createHash } from "node:crypto";
+
 import { planCompression } from "../ai/context/planCompression";
+import { TOOL_STUB_TEXT } from "../ai/context/planCompression";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { canonicalizeToolName } from "./toolNameAliases";
 import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
+  COMPACTION_SUMMARY_SCHEMA_VERSION,
   formatMessagesForSummaryWithTruncation,
   formatFileOperationsFromMessages,
   buildCompactionUserContent,
@@ -62,6 +66,83 @@ export function toPlanCompressionMessages(
   }));
 }
 
+/**
+ * 计算摘要锚点切片（summarizedBeforeId 及其之前的所有消息）的 SHA-256。
+ * 用 JSON.stringify 后的内容寻址哈希做失效检测：历史被 fork/编辑/裁剪后，
+ * 切片内容变化 → 重算哈希不匹配 → 摘要判无效。
+ */
+export function hashSummarySourceSlice(
+  history: AgentRuntimeChatMessage[],
+  summarizedBeforeId?: string,
+): string | undefined {
+  if (!summarizedBeforeId) return undefined;
+  const bridged = toPlanCompressionMessages(history);
+  const found = bridged.findIndex((m) => m.id === summarizedBeforeId);
+  if (found === -1) return undefined;
+  const slice = bridged.slice(0, found + 1);
+  return createHash("sha256")
+    .update(JSON.stringify(slice))
+    .digest("hex");
+}
+
+/**
+ * 校验已持久化摘要的锚点是否仍与当前 canonical history 对齐。
+ * 规则（仅当 stored.sourceHash 存在时生效）：
+ *  - (v) stored.schemaVersion 已定义且 ≠ COMPACTION_SUMMARY_SCHEMA_VERSION → 无效
+ *       （生成逻辑/投影格式改版，旧摘要需重建；字段缺失按 v1 处理）
+ *  - (a) summarizedBeforeId 在当前历史找不到 → 无效
+ *  - (b) 找得到但重算切片哈希 ≠ stored.sourceHash → 无效（历史被编辑）
+ *  - (c) 当前 history.length < stored.sourceCount → 历史被裁剪 → 无效
+ * 任一无效 → 返回 null（丢弃摘要与 stub，由决策层重新压缩）。
+ * stored.sourceHash 缺失（旧记录）→ 返回 undefined（保持现有 findIndex 行为）。
+ */
+export function validateStoredSummary(args: {
+  history: AgentRuntimeChatMessage[];
+  stored: {
+    summarizedBeforeId?: string;
+    sourceHash?: string;
+    sourceCount?: number;
+    schemaVersion?: unknown;
+  };
+}): boolean | null | undefined {
+  const { history, stored } = args;
+
+  // (v) 生成逻辑版本位：字段存在（任意值）且 !== 当前版本 → 旧摘要失效。
+  //     字段缺失（undefined）按 v1 处理不失效；畸形值（null / "2" / 非数字）
+  //     等价于版本不匹配，同样判无效，避免静默当作 v1 信任。
+  if (
+    stored.schemaVersion !== undefined &&
+    stored.schemaVersion !== COMPACTION_SUMMARY_SCHEMA_VERSION
+  ) {
+    return false;
+  }
+
+  const sourceHash = stored.sourceHash;
+  if (typeof sourceHash !== "string" || !sourceHash) return undefined;
+
+  // (c) 历史被裁剪：当前长度小于摘要锚点切片长度 → 锚点之前的消息必然不完整
+  if (
+    typeof stored.sourceCount === "number" &&
+    history.length < stored.sourceCount
+  ) {
+    return false;
+  }
+
+  // (a) 锚点找不到 → 历史被重排/fork
+  const bridged = toPlanCompressionMessages(history);
+  const found = bridged.findIndex(
+    (m) => m.id === stored.summarizedBeforeId,
+  );
+  if (found === -1) return false;
+
+  // (b) 哈希重算比对
+  const recomputed = hashSummarySourceSlice(history, stored.summarizedBeforeId);
+  if (recomputed === undefined) return false;
+  if (recomputed !== sourceHash) return false;
+
+  return true;
+}
+
 export function buildLocalSummaryHistoryMessage(
   summary: string,
 ): AgentRuntimeChatMessage {
@@ -78,6 +159,8 @@ export function projectHistoryWithSummary(args: {
   history: AgentRuntimeChatMessage[];
   summary: string;
   summarizedBeforeId?: string;
+  /** 老工具输出 stub 边界：此 id 及其之前（summarizedBeforeId 之后）的 tool 结果 content 被替换为 stub 文本。 */
+  stubbedBeforeId?: string;
 }): AgentRuntimeChatMessage[] {
   const bridged = toPlanCompressionMessages(args.history);
   let startIndex = 0;
@@ -85,10 +168,70 @@ export function projectHistoryWithSummary(args: {
     const found = bridged.findIndex((m) => m.id === args.summarizedBeforeId);
     if (found !== -1) startIndex = found + 1;
   }
-  return [
-    buildLocalSummaryHistoryMessage(args.summary),
-    ...args.history.slice(startIndex),
-  ];
+
+  let stubEndIndex = -1;
+  if (args.stubbedBeforeId) {
+    const found = bridged.findIndex((m) => m.id === args.stubbedBeforeId);
+    if (found !== -1) stubEndIndex = found;
+  }
+
+  const projected = args.history.slice(startIndex).map((message, i) => {
+    const absIndex = startIndex + i;
+    // stub 区间：summarizedBeforeId 之后、stubbedBeforeId 及其之前
+    if (
+      stubEndIndex !== -1 &&
+      message.role === "tool" &&
+      absIndex <= stubEndIndex
+    ) {
+      const content =
+        typeof message.content === "string"
+          ? TOOL_STUB_TEXT
+          : Array.isArray(message.content)
+            ? [{ type: "text" as const, text: TOOL_STUB_TEXT }]
+            : TOOL_STUB_TEXT;
+      return { ...message, content };
+    }
+    return message;
+  });
+
+  // stub-only 投影：summary 为空时不 prepend 空摘要消息，只做 stub 替换。
+  // 这避免「无已有摘要、首次进 stub 档」时把一条空摘要塞进 provider 历史。
+  const summaryMsg =
+    args.summary.trim().length > 0
+      ? [buildLocalSummaryHistoryMessage(args.summary)]
+      : [];
+  return [...summaryMsg, ...projected];
+}
+
+/**
+ * 把已持久化的 stubbedBeforeId 应用到 history 的一个副本上（等长等序，只替换
+ * tool 消息的 content，不增删任何消息）。用于两个场景：
+ * - HIGH-2：喂给 planCompression 的规划输入必须「已应用 stub」，否则已 stub 的
+ *   工具输出会被再次计入 savedTokens（重复计入），可能反复选中 stub 档而投影
+ *   仍超预算。
+ * - 位置 id 契约：返回数组与 canonical history 逐位对齐，summarizedBeforeId /
+ *   stubbedBeforeId 的 findIndex 对齐不受影响。
+ */
+function applyStoredStubToHistory(
+  history: AgentRuntimeChatMessage[],
+  stubbedBeforeId?: string,
+): AgentRuntimeChatMessage[] {
+  if (!stubbedBeforeId) return history;
+  const bridged = toPlanCompressionMessages(history);
+  const stubEndIndex = bridged.findIndex((m) => m.id === stubbedBeforeId);
+  if (stubEndIndex === -1) return history;
+  return history.map((message, i) => {
+    if (i <= stubEndIndex && message.role === "tool") {
+      const content =
+        typeof message.content === "string"
+          ? TOOL_STUB_TEXT
+          : Array.isArray(message.content)
+            ? [{ type: "text" as const, text: TOOL_STUB_TEXT }]
+            : TOOL_STUB_TEXT;
+      return { ...message, content };
+    }
+    return message;
+  });
 }
 
 /**
@@ -128,6 +271,20 @@ export type LocalAutoCompactionResult = {
   usage?: Record<string, unknown>;
   /** P1-8: 压缩 metrics（仅在 summaryGenerated=true 时有值） */
   metrics?: CompactionMetrics;
+  /**
+   * 压缩观测事件字段（可选，能映射就映射、拿不到就不给，禁止为凑数重计算）。
+   * 全部复用已有 CompactionMetrics / plan.stub 口径，与 executionObservation
+   * 的 compaction 事件直接对齐。
+   */
+  reason?: "tool_stub" | "context_budget" | "cold_resume" | "invalid_summary";
+  /** 压缩前估算 token（before = previousSummary + compressed）。 */
+  beforeTokens?: number;
+  /** 压缩后估算 token（after = newSummary + retained）。 */
+  afterTokens?: number;
+  /** 压缩省下的估算 token（before - after）。 */
+  savedTokens?: number;
+  /** stub 路径：被替换为 stub 档的工具输出条数。 */
+  stubbedCount?: number;
 };
 
 export async function maybeAutoCompactLocalHistory(args: {
@@ -158,7 +315,14 @@ export async function maybeAutoCompactLocalHistory(args: {
     return unchanged();
   }
 
-  let stored: { summary: string; summarizedBeforeId?: string } | null = null;
+  let stored: {
+    summary: string;
+    summarizedBeforeId?: string;
+    stubbedBeforeId?: string;
+    sourceHash?: string;
+    sourceCount?: number;
+    schemaVersion?: unknown;
+  } | null = null;
   try {
     stored = await adapter.loadDialogSummary(dialogId);
   } catch (error) {
@@ -166,11 +330,54 @@ export async function maybeAutoCompactLocalHistory(args: {
     return unchanged();
   }
 
+  // 摘要锚点内容寻址校验：sourceHash 存在时，若历史被 fork/编辑/裁剪导致
+  // 重算哈希不匹配或锚点失效，判摘要无效并连同 stub 一起丢弃，走「无摘要」
+  // 路径由决策层重新压缩——否则 findIndex 落空会把投影退化成
+  // 「摘要 + 全量历史」（比不压缩更贵）。旧记录缺 sourceHash → 保持原行为。
+  // 此外 schemaVersion 已定义且不等于当前版本 → 生成逻辑改版，旧摘要同样判无效。
+  const bridged = toPlanCompressionMessages(history);
+  const validation = validateStoredSummary({ history, stored: stored ?? {} });
+  // 摘要校验失效（sourceHash 失配 / schemaVersion 改版 / 锚点缺失 / 历史裁剪）触发的
+  // 重新压缩与普通预算压缩在观测语义上不可混淆，须透传 invalid_summary 原因。
+  const invalidSummary = validation === false;
+  // validation===false 时 stored 必非 null（schemaVersion 不匹配或 sourceHash 校验失败均需有 stored）
+  const invalidStored = stored as NonNullable<typeof stored>;
+  if (validation === false) {
+    let reason: string;
+    if (
+      invalidStored?.schemaVersion !== undefined &&
+      invalidStored.schemaVersion !== COMPACTION_SUMMARY_SCHEMA_VERSION
+    ) {
+      reason = "schema-version-mismatch";
+    } else if (
+      typeof invalidStored?.summarizedBeforeId !== "string" ||
+      !bridged.some((m) => m.id === invalidStored.summarizedBeforeId)
+    ) {
+      reason = "anchor-not-found";
+    } else if (
+      typeof invalidStored?.sourceCount === "number" &&
+      history.length < invalidStored.sourceCount
+    ) {
+      reason = "history-trimmed";
+    } else {
+      reason = "hash-mismatch";
+    }
+    console.warn(
+      `[localLoop] invalidated dialog summary for ${dialogId} (${reason}); discarding and re-compressing`,
+    );
+    stored = null;
+  }
+
   const existingSummary =
     typeof stored?.summary === "string" ? stored.summary : "";
   const summarizedBeforeId =
     typeof stored?.summarizedBeforeId === "string"
       ? stored.summarizedBeforeId
+      : undefined;
+  const storedStubbedBeforeId =
+    typeof stored?.stubbedBeforeId === "string" &&
+    stored.stubbedBeforeId
+      ? stored.stubbedBeforeId
       : undefined;
 
   const contextWindow =
@@ -180,7 +387,13 @@ export async function maybeAutoCompactLocalHistory(args: {
       ? args.contextWindow
       : getModelContextWindow(args.model ?? "");
 
-  const allMsgs = toPlanCompressionMessages(history);
+  // HIGH-2：规划输入必须是「应用了 storedStubbedBeforeId 的历史副本」——已 stub
+  // 的工具输出不能再以 canonical 原文计入 savedTokens（否则会重复计入、反复选中
+  // stub 档而实际投影仍超预算，延误摘要档）。副本等长等序（只替换 tool content），
+  // 位置 id 契约不受影响。摘要 token 由 summary 输入承担，不经消息列表。
+  const allMsgs = toPlanCompressionMessages(
+    applyStoredStubToHistory(history, storedStubbedBeforeId),
+  );
   // Cold-resume 判定：距上次活动很久再继续的对话，provider 前缀缓存必然已过期，
   // 这一轮无论如何都要全量重发整个上下文。那正是压缩最划算的时刻——反正要付
   // 全量未命中的钱，不如让重发的那份小一点，且后续每一轮都跟着受益。
@@ -203,12 +416,17 @@ export async function maybeAutoCompactLocalHistory(args: {
   });
 
   const projectExisting = (): LocalAutoCompactionResult => {
-    if (!existingSummary.trim()) return unchanged();
+    // HIGH-1：所有返回路径统一走投影，投影始终应用 storedStubbedBeforeId。
+    // summary 为空时省略摘要层（projectHistoryWithSummary 内部处理），但 stub
+    // 照常生效——「已 stub 但本轮不触发压缩」的轮次不能把老工具输出以原文重发。
+    // 仅在确实有内容可投影（摘要或 stub 任一）时才返回压缩投影；否则保持原样。
+    if (!existingSummary.trim() && !storedStubbedBeforeId) return unchanged();
     return {
       history: projectHistoryWithSummary({
         history,
         summary: existingSummary,
         summarizedBeforeId,
+        stubbedBeforeId: storedStubbedBeforeId,
       }),
       compressed: true,
       summaryGenerated: false,
@@ -217,6 +435,54 @@ export async function maybeAutoCompactLocalHistory(args: {
 
   if (!plan.shouldCompress) {
     return projectExisting();
+  }
+
+  // stub 档：零成本回到预算，不生成摘要、不调 LLM。
+  if (plan.stub) {
+    const nextStubbedBeforeId = plan.stub.beforeId;
+    const changed = nextStubbedBeforeId !== storedStubbedBeforeId;
+    if (changed) {
+      try {
+        await adapter.saveDialogSummary({
+          dialogId,
+          summary: existingSummary,
+          summarizedBeforeId,
+          stubbedBeforeId: nextStubbedBeforeId,
+          // stub 档不改锚点切片 → 透传源校验字段保持读写对称
+          sourceHash: stored?.sourceHash,
+          sourceCount: stored?.sourceCount,
+          schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
+        });
+      } catch (error) {
+        console.warn("[localLoop] saveDialogSummary (stub) failed:", error);
+      }
+    }
+    // stub 档 metrics（reason=tool_stub）
+    const metrics = buildCompactionMetricsFromPlan({
+      reason: "tool_stub",
+      previousSummary: existingSummary,
+      plan,
+      newSummary: existingSummary,
+    });
+    console.log(formatCompactionMetricsLog(metrics));
+
+    return {
+      history: projectHistoryWithSummary({
+        history,
+        summary: existingSummary,
+        summarizedBeforeId,
+        stubbedBeforeId: nextStubbedBeforeId,
+      }),
+      compressed: true,
+      summaryGenerated: false,
+      metrics,
+      reason: "tool_stub",
+      savedTokens: plan.stub.savedTokens,
+      stubbedCount: plan.stub.stubbedCount,
+      beforeTokens:
+        metrics.previousSummaryTokens + metrics.compressedTokens,
+      afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
+    };
   }
 
   try {
@@ -251,11 +517,29 @@ export async function maybeAutoCompactLocalHistory(args: {
       dialogId,
       summary: newSummary,
       summarizedBeforeId: plan.newSummarizedBeforeId,
+      // 新摘要已覆盖 stub 区间 → 清空 stubbedBeforeId
+      stubbedBeforeId: undefined,
+      // 内容寻址失效检测：存锚点切片哈希与长度，供下轮载入校验。
+      sourceHash: hashSummarySourceSlice(history, plan.newSummarizedBeforeId),
+      sourceCount: (() => {
+        const b = toPlanCompressionMessages(history);
+        const i = b.findIndex((m) => m.id === plan.newSummarizedBeforeId);
+        return i === -1 ? 0 : i + 1;
+      })(),
+      schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
     });
 
     // P1-8 压缩埋点：记录 metrics 并日志
+    // 原因优先级：校验失效触发的重压缩 > cold_resume > context_budget，与
+    // localLoop 构造 compaction 事件 / buildCompactionMetricsFromPlan 同口径。
+    const metricsReason: "invalid_summary" | "cold_resume" | "context_budget" =
+      invalidSummary
+        ? "invalid_summary"
+        : coldResume
+          ? "cold_resume"
+          : "context_budget";
     const metrics = buildCompactionMetricsFromPlan({
-      reason: coldResume ? "cold_resume" : "context_budget",
+      reason: metricsReason,
       previousSummary: existingSummary,
       plan,
       newSummary,
@@ -271,6 +555,10 @@ export async function maybeAutoCompactLocalHistory(args: {
       }),
       compressed: true,
       summaryGenerated: true,
+      reason: metricsReason,
+      beforeTokens:
+        metrics.previousSummaryTokens + metrics.compressedTokens,
+      afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
       ...(result.usage ? { usage: result.usage as Record<string, unknown> } : {}),
       metrics,
     };

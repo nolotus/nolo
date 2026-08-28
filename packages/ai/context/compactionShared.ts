@@ -23,6 +23,16 @@ import { serializeMessageContent } from "../../chat/messages/messageContent";
 import { estimateTokenCount } from "./tokenUtils";
 import { getMessageTokenCount, type TokenCountableMessage } from "./planCompression";
 
+/**
+ * 摘要记录（dialog summary）的生成逻辑版本号。
+ *
+ * sourceHash 只检测「历史变了」，不检测「摘要 prompt / 投影格式变了」——旧历史 +
+ * 新逻辑时哈希照样匹配，旧摘要会被继续信任。此版本位用于在摘要生成逻辑或投影
+ * 格式改版时主动让旧摘要失效：载入时若 stored.schemaVersion 已定义且不等于当前
+ * 值，判摘要无效并丢弃（走重新压缩）；字段缺失（旧记录）按 v1 处理，零迁移。
+ */
+export const COMPACTION_SUMMARY_SCHEMA_VERSION = 1;
+
 // --- 摘要 prompt ---
 
 /**

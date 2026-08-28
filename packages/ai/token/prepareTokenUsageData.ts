@@ -4,6 +4,7 @@ import { normalizeUsage } from "./normalizeUsage";
 import { resolveBillingTarget } from "./resolveBillingTarget";
 import type { EntryPath, RawUsage, TokenUsageData } from "./types";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
+import { LOCAL_USER_ID } from "./usageConstants";
 
 type SharingLevel = "default" | "split" | "full";
 
@@ -136,7 +137,7 @@ export function resolveBillable(input: {
   hasExternalPrice: boolean;
 }): boolean {
   const uid = input.userId?.trim();
-  if (!uid || uid === "local") return false;
+  if (!uid || uid === LOCAL_USER_ID) return false;
   const apiSource = input.apiSource;
   if (apiSource === "cli") return false;
   // OAuth 订阅 agent（chatgpt/claude/cursor/xai/antigravity）——用户自带订阅

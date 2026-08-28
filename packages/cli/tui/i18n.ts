@@ -283,6 +283,22 @@ const STRINGS = {
     en: "Usage: /altscreen <on|off>",
     zh: "用法：/altscreen <on|off>",
   },
+  autoCurrent: {
+    en: "Permission auto-approve: {0}",
+    zh: "权限自动化：{0}",
+  },
+  autoUsage: {
+    en: "Usage: /auto <on|off>",
+    zh: "用法：/auto <on|off>",
+  },
+  autoOn: {
+    en: "Permission auto-approve ON — destructive shell and external-file confirmations will be skipped for this session.",
+    zh: "权限自动化已开启：本会话内破坏性 shell 与外部文件访问确认将自动放行。",
+  },
+  autoOff: {
+    en: "Permission auto-approve OFF — confirmations will ask again.",
+    zh: "权限自动化已关闭：恢复逐次确认。",
+  },
   langSwitched: {
     en: "Language switched to English.",
     zh: "已切换为中文。",
@@ -532,6 +548,7 @@ const STRINGS = {
       "  /lang <zh|en>         Switch interface language",
       "  /copy [all]           Copy the last reply (or the full conversation with \"all\") to the clipboard",
       "  /mouse <on|off>       Toggle mouse mode (off = drag to select text)",
+      "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell & external-file confirms)",
       "  /math <on|off>        Toggle math formula rendering (Unicode transcription)",
       "  /altscreen <on|off>   Toggle the terminal alternate screen (default on; off shares shell scrollback)",
       "  Shift+drag            Select text natively even while mouse mode is on (terminal bypass)",
@@ -569,6 +586,7 @@ const STRINGS = {
       "  /lang <zh|en>         切换界面语言",
       "  /copy [all]           复制最后一条回复到剪贴板（加 all 复制完整对话）",
       "  /mouse <on|off>       切换鼠标模式（off 后可直接拖选文本）",
+      "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell 与外部文件确认）",
       "  /math <on|off>        切换数学公式渲染（Unicode 转写）",
       "  /altscreen <on|off>   切换终端备用屏（默认 on；off 改为与 shell 共用回滚）",
       "  Shift+拖拽            鼠标模式开启时也可原生选中文本（终端绕过修饰键）",

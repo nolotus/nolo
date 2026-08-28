@@ -343,6 +343,7 @@ export const SLASH_COMMANDS = [
   "/ctx",
   "/runtime",
   "/tools",
+  "/auto",
   "/switch",
   "/agent",
   "/agents",

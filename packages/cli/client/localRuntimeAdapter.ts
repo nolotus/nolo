@@ -582,6 +582,10 @@ export function createCliLocalRuntimeAdapter(
         dialogId: input.dialogId,
         summary: input.summary,
         summarizedBeforeId: input.summarizedBeforeId,
+        stubbedBeforeId: input.stubbedBeforeId,
+        sourceHash: input.sourceHash,
+        sourceCount: input.sourceCount,
+        schemaVersion: input.schemaVersion,
       }),
     saveTurn: async (input) =>
       writeDialog({

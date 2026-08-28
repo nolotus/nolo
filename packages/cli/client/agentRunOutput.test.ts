@@ -10,6 +10,7 @@ import {
 } from "../tui/tuiHistory";
 import { toolLabel } from "../tui/i18n";
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
+import type { AgentExecutionObservationEvent } from "../../agent-runtime/executionObservation";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 
 /** Escape a localized label so it is safe to embed in a RegExp. */
@@ -342,5 +343,107 @@ describe("HTTP/SSE path parity", () => {
     expect(result.content).toBe(content);
     // summary stays clipped — it is the one-line label, not the payload.
     expect(result.summary.length).toBeLessThan(content.length);
+  });
+});
+
+describe("createCliTurnOutput compaction observation line", () => {
+  function renderWithCompaction(
+    event: Extract<AgentExecutionObservationEvent, { kind: "compaction" }> | null,
+    pushText = true,
+  ): string {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    const stream = createHistoryOutputStream(history, () => {});
+    const options = {
+      output: stream as unknown as NodeJS.WritableStream,
+      agentName: "TestAgent",
+      env: { COLORTERM: "truecolor" },
+    } as unknown as RunAgentTurnOptions;
+    const turn = createCliTurnOutput({ options });
+    if (pushText) turn.pushText("hello");
+    if (event) turn.recordCompaction(event);
+    turn.finish();
+    finalizeCurrentTurn(history);
+    return history.turns
+      .map((t) => t.content)
+      .join("\n")
+      .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  }
+
+  test("compaction event renders one dim summary line", () => {
+    const visible = renderWithCompaction({
+      kind: "compaction",
+      atMs: 1,
+      reason: "tool_stub",
+      summaryGenerated: false,
+      compressed: true,
+      savedTokens: 8400,
+      stubbedCount: 12,
+    });
+    expect(visible).toContain("已压缩上下文：stub 12 条工具输出，省约 8.4k tokens");
+  });
+
+  test("summary-generated compaction renders with saved tokens", () => {
+    const visible = renderWithCompaction({
+      kind: "compaction",
+      atMs: 1,
+      reason: "context_budget",
+      summaryGenerated: true,
+      compressed: true,
+      savedTokens: 21000,
+    });
+    expect(visible).toContain("已压缩上下文：生成历史摘要，省约 21k tokens");
+  });
+
+  test("no compaction event produces no compaction line (output unchanged)", () => {
+    const visible = renderWithCompaction(null);
+    expect(visible).not.toContain("已压缩上下文");
+  });
+
+  test("compaction event with numbers omitted still renders folded line", () => {
+    const visible = renderWithCompaction({
+      kind: "compaction",
+      atMs: 1,
+      reason: "tool_stub",
+      summaryGenerated: false,
+      compressed: true,
+      stubbedCount: 5,
+    });
+    expect(visible).toContain("已压缩上下文：stub 5 条工具输出");
+    // savedTokens 缺省 → 省略「省约」片段
+    expect(visible).not.toContain("省约");
+  });
+
+  test("savedTokens missing but before/after present → no before-after derivation", () => {
+    const visible = renderWithCompaction({
+      kind: "compaction",
+      atMs: 1,
+      reason: "context_budget",
+      summaryGenerated: true,
+      compressed: true,
+      beforeTokens: 30000,
+      afterTokens: 9000,
+    });
+    // savedTokens 缺失 → 仅省略「省约」片段，绝不二次推导 before-after
+    expect(visible).toContain("已压缩上下文：生成历史摘要");
+    expect(visible).not.toContain("省约");
+    expect(visible).not.toContain("21000");
+    expect(visible).not.toContain("21k");
+  });
+
+  test("savedTokens present → number comes from the event field only", () => {
+    const visible = renderWithCompaction({
+      kind: "compaction",
+      atMs: 1,
+      reason: "context_budget",
+      summaryGenerated: true,
+      compressed: true,
+      savedTokens: 21000,
+      beforeTokens: 99999,
+      afterTokens: 99998,
+    });
+    // 数字严格取事件字段 savedTokens，before-after 差异再大也不参与
+    expect(visible).toContain("已压缩上下文：生成历史摘要，省约 21k tokens");
+    expect(visible).not.toContain("99999");
   });
 });

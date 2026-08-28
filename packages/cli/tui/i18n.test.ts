@@ -159,6 +159,10 @@ describe("i18n", () => {
     "timeDaysAgo",
     "dialogMoreAbove",
     "dialogMoreBelow",
+    "autoCurrent",
+    "autoUsage",
+    "autoOn",
+    "autoOff",
   ] as const;
 
   test("every new key resolves to non-empty, distinct copy in both locales", () => {
@@ -199,6 +203,24 @@ describe("i18n", () => {
     expect(t("helpText")).toContain("/altscreen");
     setCliLocale("zh");
     expect(t("helpText")).toContain("/altscreen");
+  });
+
+  test("auto-approve i18n keys exist, non-empty, and differ between locales", () => {
+    // /auto 会话级权限自动化的 4 个键：zh/en 都要非空且互不相同，
+    // helpText 在两种语言下都要列出 /auto。
+    for (const key of ["autoCurrent", "autoUsage", "autoOn", "autoOff"] as const) {
+      setCliLocale("en");
+      const en = t(key, "on");
+      setCliLocale("zh");
+      const zh = t(key, "on");
+      expect(en.length, `en copy for ${key}`).toBeGreaterThan(0);
+      expect(zh.length, `zh copy for ${key}`).toBeGreaterThan(0);
+      expect(zh, `zh === en means ${key} was not translated`).not.toBe(en);
+    }
+    setCliLocale("en");
+    expect(t("helpText")).toContain("/auto <on|off>");
+    setCliLocale("zh");
+    expect(t("helpText")).toContain("/auto <on|off>");
   });
 
   test("dialog confirm and action gate completion keys exist and differ between locales", () => {

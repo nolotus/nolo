@@ -1,5 +1,7 @@
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
+import type { AgentExecutionObservationEvent } from "../../agent-runtime/executionObservation";
 import { createRenderAwareStreamWriter, formatAssistantDisplay, formatAssistantTextForCli } from "./assistantOutput";
+import { STYLE } from "./inlineMarkdown";
 import { createThinkParserState, processThinkChunk, flushThinkParser } from "../../agent-runtime/thinkTagParser";
 import {
   createToolEventFormatter,
@@ -10,6 +12,48 @@ import {
 import { parseAgentRunEvent } from "./agentRunSnapshot";
 import { Spinner } from "./agentRunSpinner";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
+
+/**
+ * 把一条 compaction 观测事件折叠成一行 dim 摘要（无压缩事件返回空串）。
+ * 数字缺失时省略对应片段；savedTokens 缺失时只省略「省约」片段，不做
+ * before-after 二次推导（契约：token 数字只来自事件字段，禁止重算）。
+ * 输出示例：
+ *   `已压缩上下文：stub 12 条工具输出，省约 8.4k tokens`
+ *   `已压缩上下文：生成历史摘要，省约 21k tokens`
+ */
+export function formatCompactionSummaryLine(
+  event: Extract<
+    AgentExecutionObservationEvent,
+    { kind: "compaction" }
+  > | null,
+): string {
+  if (!event) return "";
+  const action =
+    event.reason === "tool_stub"
+      ? "stub 工具输出"
+      : "生成历史摘要";
+  let detail = action;
+  if (typeof event.stubbedCount === "number") {
+    detail = `stub ${event.stubbedCount} 条工具输出`;
+  }
+  const saved =
+    typeof event.savedTokens === "number"
+      ? event.savedTokens
+      : undefined;
+  let line = `已压缩上下文：${detail}`;
+  if (saved !== undefined) {
+    let k: string;
+    if (saved >= 1000) {
+      const v = (saved / 1000).toFixed(1);
+      k = v.replace(/\.0$/, "") + "k";
+    } else {
+      k = String(saved);
+    }
+    line += `，省约 ${k} tokens`;
+  }
+  line += "\n";
+  return `${STYLE.dim}${line}${STYLE.reset}`;
+}
 
 export interface CliTurnOutputOptions {
   options: RunAgentTurnOptions;
@@ -72,6 +116,12 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   let everStreamedAnyText = false;
   let printedAssistantLabel = false;
   let thinkState = createThinkParserState();
+  // 压缩观测事件：一个 turn 至多渲染一行摘要。记录最后一条 compaction 事件，
+  // 在 finish() 统一输出（保持与既有逐字节输出行为一致，无压缩事件零输出）。
+  let compactionEvent: Extract<
+    AgentExecutionObservationEvent,
+    { kind: "compaction" }
+  > | null = null;
 
   const renderWriter = createRenderAwareStreamWriter({
     write: (chunk) => options.output.write(chunk),
@@ -209,6 +259,12 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       spinner.setThinkingHint(chunk);
     },
     handleToolEvent,
+    /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。 */
+    recordCompaction(
+      event: Extract<AgentExecutionObservationEvent, { kind: "compaction" }>,
+    ) {
+      compactionEvent = event;
+    },
     showWorking(label?: string) {
       const activeLabel = label ?? workingLabel;
       spinner.show(activeLabel);
@@ -244,6 +300,11 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
         } else {
           options.output.write(`\n${options.agentName} > (no text response)\n`);
         }
+      }
+      // 压缩摘要行（dim，一行折叠展示）。无压缩事件 → 零输出。
+      const compactionLine = formatCompactionSummaryLine(compactionEvent);
+      if (compactionLine) {
+        options.output.write(compactionLine);
       }
     },
   };

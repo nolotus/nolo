@@ -2360,6 +2360,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }
       };
       const confirmDestructiveAction = async (request: PermissionRequest) => {
+        // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
+        // runTuiWorkspace 的可变绑定（busy 期间 /auto 走 isBusyLocalSlash
+        // 本地处理并回写），这里在调用时读取，拿到的总是最新值。
+        // 只短路破坏性操作确认；actionGate（handoff/input 类）不走这里。
+        if (state.autoConfirm) return true;
         modalOwnsKeyboard = true;
         try {
           return await dialogHost.run((anchor) =>
@@ -2875,6 +2880,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/density" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/tools" ||
+            busySlashCommand === "/auto" ||
             busySlashCommand === "/tasks" ||
             busySlashCommand === "/jobs" ||
             busySlashCommand === "/procs" ||
@@ -3082,6 +3088,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         line,
         (gate) => waitForActionGate(rl, input, output, gate, spawnRunner),
         async (request) => {
+          // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
+          // runTuiWorkspace 的可变绑定（runSubmittedLine 会把 handleTuiInput
+          // 的 nextState 回写），这里在调用时读取，拿到的总是最新值。
+          if (state.autoConfirm) return true;
           rl.pause();
           try {
             return await dialogHost.run((anchor) =>

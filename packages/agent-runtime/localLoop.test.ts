@@ -3684,6 +3684,89 @@ describe("local turn usage accounting", () => {
   });
 });
 
+describe("compaction observation event (localLoop → onLoopEvent)", () => {
+  const oversizedHistory: AgentRuntimeChatMessage[] = Array.from(
+    { length: 20 },
+    (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "长对话历史记录内容测试。".repeat(3000),
+    }),
+  );
+
+  function makeAdapter(overrides?: {
+    loadDialogSummary?: AgentRuntimeHostAdapter["loadDialogSummary"];
+  }): AgentRuntimeHostAdapter {
+    return {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        model: "fake-compact-model",
+        prompt: "system prompt",
+      }),
+      loadDialogHistory: async () => oversizedHistory,
+      saveTurn: async () => ({ dialogId: "dialog-compact-ev" }),
+      loadDialogSummary: overrides?.loadDialogSummary,
+      saveDialogSummary: async () => {},
+      resolveProvider: async () => ({
+        model: "fake-compact-model",
+        complete: async (messages) => {
+          const isCompactionCall = messages.some(
+            (m) =>
+              typeof m.content === "string" &&
+              m.content.includes("对话上下文压缩器"),
+          );
+          if (isCompactionCall) {
+            return { content: "关键事实档案\n- 已压缩要点", model: "fake" };
+          }
+          return { content: "主循环回复", model: "fake" };
+        },
+      }),
+      executeTool: async () => ({ content: "ok" }),
+    };
+  }
+
+  test("summary path: emits one compaction event with summaryGenerated=true", async () => {
+    const loopEvents: any[] = [];
+    const result = await runLocalAgentTurn({
+      adapter: makeAdapter({ loadDialogSummary: async () => null }),
+      agentRef: "agent-compact-test",
+      input: "new user turn",
+      continueDialogId: "dialog-compact-ev",
+      onLoopEvent: (event) => loopEvents.push(event),
+    });
+    expect(result.content).toBe("主循环回复");
+    const compactions = loopEvents.filter((e) => e.kind === "compaction");
+    expect(compactions.length).toBe(1);
+    expect(compactions[0]?.reason).toBe("context_budget");
+    expect(compactions[0]?.summaryGenerated).toBe(true);
+    expect(compactions[0]?.compressed).toBe(true);
+    expect(compactions[0]?.beforeTokens).toBeGreaterThan(0);
+    expect(compactions[0]?.afterTokens).toBeGreaterThan(0);
+  });
+
+  test("under threshold: no compaction event emitted", async () => {
+    const loopEvents: any[] = [];
+    const smallHistory: AgentRuntimeChatMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    const adapter: AgentRuntimeHostAdapter = {
+      ...makeAdapter({ loadDialogSummary: async () => null }),
+      loadDialogHistory: async () => smallHistory,
+    };
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "agent-compact-test",
+      input: "new user turn",
+      continueDialogId: "dialog-compact-ev",
+      onLoopEvent: (event) => loopEvents.push(event),
+    });
+    expect(result.content).toBe("主循环回复");
+    expect(loopEvents.filter((e) => e.kind === "compaction").length).toBe(0);
+  });
+});
+
 describe("resolveEmptyAssistantOutcome", () => {
   test("visible output or tool calls short-circuit to ok", () => {
     expect(resolveEmptyAssistantOutcome({ ...emptyTurn, hasVisibleOutput: true })).toEqual({

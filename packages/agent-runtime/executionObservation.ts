@@ -71,4 +71,22 @@ export type AgentExecutionObservationEvent =
       errorMessage?: string;
       metadata?: Record<string, unknown>;
     }
-  | { kind: "image-downgraded"; reason: "no-vision"; atMs: number };
+  | { kind: "image-downgraded"; reason: "no-vision"; atMs: number }
+  | {
+      kind: "compaction";
+      atMs: number;
+      /** 与 CompactionMetrics.reason 口径一致。 */
+      reason: "tool_stub" | "context_budget" | "cold_resume" | "invalid_summary";
+      summaryGenerated: boolean;
+      compressed: boolean;
+      /** 压缩前估算 token（无对应估算口径则省略）。 */
+      beforeTokens?: number;
+      /** 压缩后估算 token。 */
+      afterTokens?: number;
+      /** 压缩省下的估算 token（before - after）。 */
+      savedTokens?: number;
+      /** stub 路径：被替换为 stub 档的工具输出条数。 */
+      stubbedCount?: number;
+      droppedCount?: number;
+      detail?: string;
+    };

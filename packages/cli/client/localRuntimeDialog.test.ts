@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { writeDialog, createLocalDialogTitleGenerator } from "./localRuntimeDialog";
+import { writeDialog, createLocalDialogTitleGenerator, loadCliDialogSummary } from "./localRuntimeDialog";
 
 /**
  * Helper: flush pending microtasks so fire-and-forget title patches settle.
@@ -434,5 +434,33 @@ describe("localRuntimeDialog writeDialog title behavior", () => {
       { apiKeyRefResolver: null, credentialBroker: null },
     );
     expect(generator).not.toBeNull();
+  });
+});
+
+describe("localRuntimeDialog loadCliDialogSummary schemaVersion pass-through", () => {
+  const makeStore = (record: Record<string, any>) => ({
+    read: async () => record,
+    write: async () => {},
+  });
+
+  test("schemaVersion 键存在即透传（畸形值不被静默丢弃），缺失则不设该键", async () => {
+    const base = { summary: "  seeded  ", summarizedBeforeId: "m1", sourceHash: "h", sourceCount: 3 };
+
+    // null → 透传 null
+    const sNull = await loadCliDialogSummary({ store: makeStore({ ...base, schemaVersion: null }), userId: "u", dialogId: "d" });
+    expect(sNull).not.toBeNull();
+    expect((sNull as any).schemaVersion).toBeNull();
+
+    // "2" → 透传 "2"
+    const sStr = await loadCliDialogSummary({ store: makeStore({ ...base, schemaVersion: "2" }), userId: "u", dialogId: "d" });
+    expect((sStr as any).schemaVersion).toBe("2");
+
+    // 真缺失 → 返回对象不带 schemaVersion 键
+    const sMissing = await loadCliDialogSummary({ store: makeStore({ ...base }), userId: "u", dialogId: "d" });
+    expect("schemaVersion" in (sMissing as any)).toBe(false);
+
+    // 合法数字 → 透传
+    const sOk = await loadCliDialogSummary({ store: makeStore({ ...base, schemaVersion: 1 }), userId: "u", dialogId: "d" });
+    expect((sOk as any).schemaVersion).toBe(1);
   });
 });

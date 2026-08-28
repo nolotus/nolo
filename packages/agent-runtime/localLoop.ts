@@ -1289,6 +1289,29 @@ export async function runLocalAgentTurn(
     });
     history = compacted.history;
     compactionUsage = compacted.usage;
+    // 压缩观测事件：compressed / summaryGenerated 任一为 true 才发射；
+    // 无压缩不发射。事件发射不能影响主流程（emitLoopEvent 本身已 fail-open）。
+    if (compacted.compressed || compacted.summaryGenerated) {
+      emitLoopEvent(input, {
+        kind: "compaction",
+        atMs: Date.now(),
+        reason: compacted.reason ?? "context_budget",
+        summaryGenerated: compacted.summaryGenerated,
+        compressed: compacted.compressed,
+        ...(compacted.beforeTokens !== undefined
+          ? { beforeTokens: compacted.beforeTokens }
+          : {}),
+        ...(compacted.afterTokens !== undefined
+          ? { afterTokens: compacted.afterTokens }
+          : {}),
+        ...(compacted.savedTokens !== undefined
+          ? { savedTokens: compacted.savedTokens }
+          : {}),
+        ...(compacted.stubbedCount !== undefined
+          ? { stubbedCount: compacted.stubbedCount }
+          : {}),
+      });
+    }
   } catch (error) {
     console.warn("[localLoop] auto-compaction unexpected error:", error);
   }

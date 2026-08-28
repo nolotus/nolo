@@ -1,3 +1,22 @@
+
+## 0.34.0-alpha.1
+
+## 0.34.0-alpha.1 (2026-08-28)
+
+### Features
+
+* **context:** add old tool-output stub tier for local auto-compaction ([f939b24](https://github.com/nolotus/bun-nolo/commit/f939b247cadf690ed038ad6b6271091856463895))
+* **context:** emit compaction observation event with TUI summary line ([466570e](https://github.com/nolotus/bun-nolo/commit/466570ebadc17ce60a1cfc9354ff7d9a56523e30))
+* **context:** validate dialog summary with source hash ([aaaab24](https://github.com/nolotus/bun-nolo/commit/aaaab24c03b60d2a9f5d04524e83a12ad2a8835e))
+* **context:** version dialog summary records for invalidation ([2241683](https://github.com/nolotus/bun-nolo/commit/2241683544acd04e057fe6fcf48256bc7194c84f))
+* **tui:** add /auto <on|off> session switch to skip permission confirms ([a332e85](https://github.com/nolotus/bun-nolo/commit/a332e8506f9e63a1f2e536e691247e5ac3646d77))
+
+### Bug Fixes
+
+* **context:** honor persisted stub across non-compaction turns and stop double-counting stubbed savings ([98ecf26](https://github.com/nolotus/bun-nolo/commit/98ecf262390ab688ab81f2392814d07ea93c8651))
+* **context:** treat malformed schema version as invalid summary ([7f2573d](https://github.com/nolotus/bun-nolo/commit/7f2573d43712330fbb920e8a3385ab2dc4972b29))
+* **context:** wire invalid_summary reason and event-only token numbers ([a92840f](https://github.com/nolotus/bun-nolo/commit/a92840f1ed95e4563a26c7c115ecd8d1d6df1c5c))
+
 ## [0.33.0-alpha.34](https://github.com/nolotus/bun-nolo/compare/cli-v0.33.0-alpha.33...cli-v0.33.0-alpha.34) (2026-08-28)
 
 ### Features

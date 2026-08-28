@@ -297,6 +297,31 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         output: t("toolsSet", nextMode),
       };
     }
+    case "/auto": {
+      const normalizedArg = asTrimmedLowercaseString(argText);
+      if (!normalizedArg) {
+        return {
+          nextState: state,
+          output: `${t("autoCurrent", state.autoConfirm ? "on" : "off")}\n${t("autoUsage")}`,
+        };
+      }
+      if (normalizedArg === "on") {
+        return {
+          nextState: { ...state, autoConfirm: true },
+          output: t("autoOn"),
+        };
+      }
+      if (normalizedArg === "off") {
+        return {
+          nextState: { ...state, autoConfirm: false },
+          output: t("autoOff"),
+        };
+      }
+      return {
+        nextState: state,
+        output: t("autoUsage"),
+      };
+    }
     case "/tasks":
     case "/jobs":
     case "/procs": {

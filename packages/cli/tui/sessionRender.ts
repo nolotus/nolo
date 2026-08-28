@@ -122,6 +122,13 @@ export function renderStatusLine(state: TuiState) {
     parts.push(themeText(`⚙ ${runningCount} running`, "info", colorEnabled));
   }
 
+  // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过
+  // （破坏性 shell / 外部文件访问不再逐次询问）。warning 色与 git 分支 chip
+  // 同语义——"需要留意的状态"。off / undefined 时不渲染任何内容。
+  if (state.autoConfirm === true) {
+    parts.push(themeText("⏵ auto", "warning", colorEnabled));
+  }
+
   const body = parts.join(sep);
   const surface = colorEnabled ? surfaceBackgroundSequence() : "";
   if (!surface) return body;

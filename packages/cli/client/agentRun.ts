@@ -950,6 +950,10 @@ async function runLocalAgentTurnForCli(
             "[nolo] 当前 agent 不支持图片输入，已用占位文本替代。要完整图片理解可 /switch 到 Kimi K2.6。\n",
           );
         }
+        if (event.kind === "compaction") {
+          // 记录压缩观测事件，turn 结束时由 turnOutput.finish() 渲染一行 dim 摘要。
+          turnOutput.recordCompaction(event);
+        }
         options.onLoopEvent?.(event);
       },
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),

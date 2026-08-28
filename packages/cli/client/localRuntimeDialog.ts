@@ -442,7 +442,14 @@ export async function loadCliDialogSummary(args: {
   store: HybridRecordStore;
   userId: string;
   dialogId: string;
-}): Promise<{ summary: string; summarizedBeforeId?: string } | null> {
+}): Promise<{
+  summary: string;
+  summarizedBeforeId?: string;
+  stubbedBeforeId?: string;
+  sourceHash?: string;
+  sourceCount?: number;
+  schemaVersion?: unknown;
+} | null> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
   const record = await args.store.read(dialogKey);
   if (!record || typeof record !== "object") return null;
@@ -452,11 +459,27 @@ export async function loadCliDialogSummary(args: {
       : "";
   if (!summary) return null;
   const summarizedBeforeId = (record as any).summarizedBeforeId;
+  const stubbedBeforeId = (record as any).stubbedBeforeId;
+  const sourceHash = (record as any).sourceHash;
+  const sourceCount = (record as any).sourceCount;
+  // 键存在即透传（值为任意），由 validateStoredSummary 判无效：
+  // 畸形值（null / "2" / 非数字）也必须触发失效，不能静默当成字段缺失按 v1 信任。
+  const schemaVersion = (record as any).schemaVersion;
   return {
     summary,
     ...(typeof summarizedBeforeId === "string" && summarizedBeforeId
       ? { summarizedBeforeId }
       : {}),
+    ...(typeof stubbedBeforeId === "string" && stubbedBeforeId
+      ? { stubbedBeforeId }
+      : {}),
+    ...(typeof sourceHash === "string" && sourceHash
+      ? { sourceHash }
+      : {}),
+    ...(typeof sourceCount === "number" && sourceCount > 0
+      ? { sourceCount }
+      : {}),
+    ...("schemaVersion" in record ? { schemaVersion } : {}),
   };
 }
 
@@ -466,6 +489,10 @@ export async function saveCliDialogSummary(args: {
   dialogId: string;
   summary: string;
   summarizedBeforeId?: string;
+  stubbedBeforeId?: string;
+  sourceHash?: string;
+  sourceCount?: number;
+  schemaVersion?: number;
 }): Promise<void> {
   const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
   const existing = (await args.store.read(dialogKey)) ?? {};
@@ -488,6 +515,18 @@ export async function saveCliDialogSummary(args: {
     summary: args.summary,
     ...(args.summarizedBeforeId !== undefined
       ? { summarizedBeforeId: args.summarizedBeforeId }
+      : {}),
+    // 始终写入 stubbedBeforeId（包括 undefined → 清空旧 stub），保证
+    // 摘要路径生成新 summary 后旧 stub 边界被正确清除。
+    stubbedBeforeId: args.stubbedBeforeId,
+    ...(args.sourceHash !== undefined
+      ? { sourceHash: args.sourceHash }
+      : {}),
+    ...(args.sourceCount !== undefined
+      ? { sourceCount: args.sourceCount }
+      : {}),
+    ...(args.schemaVersion !== undefined
+      ? { schemaVersion: args.schemaVersion }
       : {}),
     compressionCount,
     summaryPending: false,

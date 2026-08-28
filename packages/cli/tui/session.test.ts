@@ -6,14 +6,17 @@ import { join } from "node:path";
 import {
   applyTuiInputKey,
   completeSlashCommand,
+  completeSlashPrefix,
   createInitialTuiState,
   handleTuiInput,
   isLikelySlashCommand,
+  SLASH_COMMANDS,
   stripImageTokens,
 } from "./session";
 import {
   renderContextPanel,
   renderKnownAgents,
+  renderStatusLine,
   renderTuiHelp,
   renderWelcome,
 } from "./sessionRender";
@@ -723,6 +726,62 @@ describe("handleTuiInput - /altscreen dispatch", () => {
     setCliLocale("en");
     expect(handleTuiInput("/math", state).output).toBe(t("mathUsage"));
     expect(handleTuiInput("/math maybe", state).output).toBe(t("mathUsage"));
+  });
+});
+
+describe("handleTuiInput - /auto dispatch", () => {
+  // /auto 是会话级权限自动化开关：dispatch 层只改 TuiState.autoConfirm，
+  // 不产生 action；真正跳过确认弹窗的接线在 readlineWorkspace 的两处
+  // confirmDestructiveAction 回调里（此处不测 workspace 级行为）。
+  test("registers /auto in SLASH_COMMANDS and completes via tab", () => {
+    expect(SLASH_COMMANDS).toContain("/auto");
+    expect(completeSlashPrefix("/au")).toBe("/auto ");
+  });
+
+  test("/auto with no arg reports current state + usage and keeps state", () => {
+    const state = createInitialTuiState({});
+    setCliLocale("en");
+    const res = handleTuiInput("/auto", state);
+    expect(res.output).toBe(`${t("autoCurrent", "off")}\n${t("autoUsage")}`);
+    expect(res.nextState).toBe(state);
+    expect(res.nextState.autoConfirm).toBeUndefined();
+    expect(res.action).toBeUndefined();
+  });
+
+  test("/auto on enables autoConfirm for the session", () => {
+    const state = createInitialTuiState({});
+    setCliLocale("en");
+    const res = handleTuiInput("/auto on", state);
+    expect(res.nextState.autoConfirm).toBe(true);
+    expect(res.output).toBe(t("autoOn"));
+    expect(res.action).toBeUndefined();
+  });
+
+  test("/auto off disables autoConfirm", () => {
+    const state = { ...createInitialTuiState({}), autoConfirm: true };
+    setCliLocale("en");
+    const res = handleTuiInput("/auto off", state);
+    expect(res.nextState.autoConfirm).toBe(false);
+    expect(res.output).toBe(t("autoOff"));
+    expect(res.action).toBeUndefined();
+  });
+
+  test("/auto with an unknown arg shows usage and keeps state", () => {
+    const state = { ...createInitialTuiState({}), autoConfirm: true };
+    setCliLocale("en");
+    const res = handleTuiInput("/auto bogus", state);
+    expect(res.output).toBe(t("autoUsage"));
+    expect(res.nextState).toBe(state);
+    expect(res.nextState.autoConfirm).toBe(true);
+  });
+
+  test("renderStatusLine shows the auto chip only while autoConfirm is on", () => {
+    // cwd 固定到一个不含 "auto" 的路径：worktree 目录名本身带 auto，
+    // 会污染 not.toContain 断言。
+    const base = { ...createInitialTuiState({}), cwd: "/tmp/nolo-project" };
+    expect(stripAnsi(renderStatusLine({ ...base, autoConfirm: true }))).toContain("⏵ auto");
+    expect(stripAnsi(renderStatusLine({ ...base, autoConfirm: false }))).not.toContain("auto");
+    expect(stripAnsi(renderStatusLine(base))).not.toContain("auto");
   });
 });
 
