@@ -55,7 +55,7 @@ describe("workflowCostPolicy", () => {
     const planIndex = steps.findIndex((step) => step.name === "Plan component releases");
     const setupIndex = steps.findIndex((step) => step.uses === "oven-sh/setup-bun@v2");
     const installIndex = steps.findIndex(
-      (step) => step.run === "bun install --frozen-lockfile",
+      (step) => step.run?.startsWith("bun install --frozen-lockfile"),
     );
     expect(planIndex).toBeGreaterThanOrEqual(0);
     expect(planIndex).toBeLessThan(setupIndex);
