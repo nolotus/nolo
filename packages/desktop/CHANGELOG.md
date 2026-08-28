@@ -1,3 +1,13 @@
+
+## 0.32.0-alpha.63
+
+## 0.32.0-alpha.63 (2026-08-28)
+
+### Bug Fixes
+
+* **desktop:** use forward-slash xcopy switches on Windows (backslash tokens made xcopy exit 4) [no-review: mechanical slash-direction fix, 1 line x4] ([6f0e9ee](https://github.com/nolotus/bun-nolo/commit/6f0e9ee2a7b868eb4997a856a28b6aa44804200b))
+* **types:** settle script-dev loader typing and identity test toBe generics ([e99fcf8](https://github.com/nolotus/bun-nolo/commit/e99fcf8cca35262f5992703a7045925d55206e05))
+
 ## [0.32.0-alpha.62](https://github.com/nolotus/bun-nolo/compare/desktop-v0.32.0-alpha.61...desktop-v0.32.0-alpha.62) (2026-08-28)
 
 ### Bug Fixes

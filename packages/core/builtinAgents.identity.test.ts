@@ -103,8 +103,8 @@ describe("builtinAgentCatalog ↔ PUBLIC_AGENT_DEFS cross-assertions", () => {
       ).toBeDefined();
       if (!seed) continue;
 
-      expect(seed.model).toBe(entry.model);
-      expect(seed.provider ?? "openai").toBe(entry.provider);
+      expect(seed.model).toBe<string>(entry.model);
+      expect(seed.provider ?? "openai").toBe<string>(entry.provider);
       if (entry.imageModel) {
         expect(seed.imageModel).toBe(entry.imageModel);
       }
@@ -128,13 +128,13 @@ describe("builtinAgentCatalog ↔ PUBLIC_AGENT_DEFS cross-assertions", () => {
       if (!entry) continue;
 
       expect(entry.group).toBe("public");
-      expect(entry.model).toBe(seed.model);
-      expect(entry.provider).toBe(seed.provider ?? "openai");
+      expect(seed.model).toBe<string>(entry.model);
+      expect(seed.provider ?? "openai").toBe<string>(entry.provider);
       if (entry.imageModel) {
-        expect(entry.imageModel).toBe(seed.imageModel);
+        expect(seed.imageModel).toBe(entry.imageModel);
       }
       if (entry.imageWorkflow) {
-        expect(entry.imageWorkflow).toBe(seed.imageWorkflow);
+        expect(seed.imageWorkflow).toBe(entry.imageWorkflow);
       }
     }
   });

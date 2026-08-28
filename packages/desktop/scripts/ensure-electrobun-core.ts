@@ -156,7 +156,7 @@ export async function ensureElectrobunCore(options?: {
       // Copy recursively using Bun's cp via spawn fallback
       const proc = Bun.spawn(
         process.platform === "win32"
-          ? ["cmd", "/c", "xcopy", src, dest, "\\E", "\\I", "\\Y", "\\Q"]
+          ? ["cmd", "/c", "xcopy", src, dest, "/E", "/I", "/Y", "/Q"]
           : ["cp", "-R", src, dest],
         { stdout: "inherit", stderr: "inherit" },
       );

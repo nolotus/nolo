@@ -217,11 +217,14 @@ const baseConfig = {
   // 始终启用打包 / 代码分割 / tree-shaking
   bundle: true,
   splitting: true,
+  /** @type {import("esbuild").BuildOptions["format"]} */
   format: "esm",
+  /** @type {import("esbuild").BuildOptions["platform"]} */
   platform: "browser",
   target: ["es2020"],
   treeShaking: true,
   metafile: ENABLE_WEB_METAFILE,
+  /** @type {import("esbuild").BuildOptions["legalComments"]} */
   legalComments: "none",
 
   define: {
@@ -235,6 +238,7 @@ const baseConfig = {
     "process.env.MAPS_API_KEY": JSON.stringify(process.env.MAPS_API_KEY || ""),
   },
 
+  /** @type {Record<string, import("esbuild").Loader>} */
   loader: {
     ".js": "jsx",
     ".webp": "file",
