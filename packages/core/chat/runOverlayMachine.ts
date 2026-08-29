@@ -24,14 +24,16 @@
 // existing one is merged field-by-field. The caller does not need to know
 // whether the run already exists.
 
-export type RunStatus =
-  | "running"
-  | "reviewing"
-  | "testing"
-  | "done"
-  | "failed"
-  | "cancelled"
-  | "orphaned";
+import type { AgentThreadStatus } from "agent-runtime/agentThread";
+
+/** UI-only intermediate stage statuses that do not exist on the backend agent-runtime thread lifecycle. */
+export type RunUiStageStatus = "reviewing" | "testing";
+
+/**
+ * Overlay run status converged with authoritative AgentThreadStatus
+ * (pending, running, done, failed, cancelled, orphaned) plus UI-only stage statuses.
+ */
+export type RunStatus = AgentThreadStatus | RunUiStageStatus;
 
 export type RunInfo = {
   runId: string;

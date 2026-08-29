@@ -10,9 +10,21 @@ import {
   formatRuntimeLocationLabel,
   resolveAgentCreatorSummary,
   shouldShowAgentTokenCost,
+  type ClientAgentThreadStatus,
 } from "./agentDisplayUtils";
+import { AGENT_THREAD_STATUSES } from "agent-runtime/agentThread";
 
 describe("agentDisplayUtils", () => {
+  it("ClientAgentThreadStatus supports all AGENT_THREAD_STATUSES including orphaned", () => {
+    const statuses: ClientAgentThreadStatus[] = [...AGENT_THREAD_STATUSES];
+    expect(statuses).toContain("orphaned");
+    expect(statuses).toContain("pending");
+    expect(statuses).toContain("running");
+    expect(statuses).toContain("done");
+    expect(statuses).toContain("failed");
+    expect(statuses).toContain("cancelled");
+  });
+
   it("formats output pricing in the shared per-million-token style", () => {
     expect(formatAgentOutputPrice(20)).toBe("1M / 20 积分");
     expect(formatAgentOutputPrice(0)).toBe("免费");

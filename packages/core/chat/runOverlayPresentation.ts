@@ -12,6 +12,7 @@ import type { RunInfo, RunOverlayState, RunStatus } from "./runOverlayMachine";
 
 /** Display order for the status groups. Omitted statuses are skipped. */
 const STATUS_ORDER: RunStatus[] = [
+  "pending",
   "running",
   "reviewing",
   "testing",
@@ -23,6 +24,7 @@ const STATUS_ORDER: RunStatus[] = [
 
 /** Icon + Chinese label for each status, used both in the group header and the detail line. */
 const STATUS_DISPLAY: Record<RunStatus, { icon: string; label: string }> = {
+  pending: { icon: "⏳", label: "排队中" },
   running: { icon: "▶", label: "正在运行" },
   reviewing: { icon: "👁", label: "待 review" },
   testing: { icon: "🧪", label: "在测试" },
@@ -119,6 +121,7 @@ function detailLine(run: RunInfo): string {
 }
 
 const SHORT_STATUS_LABEL: Record<RunStatus, string> = {
+  pending: "排队中",
   running: "运行中",
   reviewing: "待 review",
   testing: "测试中",

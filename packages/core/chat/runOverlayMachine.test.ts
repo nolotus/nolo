@@ -307,11 +307,14 @@ describe("buildOverlayPresentation", () => {
 
 describe("statusLabel", () => {
   test("maps known statuses to Chinese labels", () => {
+    expect(statusLabel("pending")).toBe("排队中");
     expect(statusLabel("running")).toBe("正在运行");
     expect(statusLabel("reviewing")).toBe("待 review");
     expect(statusLabel("testing")).toBe("在测试");
     expect(statusLabel("done")).toBe("已完成");
     expect(statusLabel("failed")).toBe("失败");
+    expect(statusLabel("cancelled")).toBe("已取消");
+    expect(statusLabel("orphaned")).toBe("孤儿");
   });
 
   test("falls back to the raw status for unknown values", () => {

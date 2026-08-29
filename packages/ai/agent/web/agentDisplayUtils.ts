@@ -1,6 +1,12 @@
 import { format } from "date-fns";
 
 import type { Agent, DialogConfig } from "app/types";
+import type {
+  AgentThreadKind,
+  AgentThreadListSection,
+  AgentThreadPresentationIntent,
+  AgentThreadStatus,
+} from "agent-runtime/agentThread";
 import { resolveAvatarUrl } from "ai/agent/avatarUtils";
 import {
   type AgentPriceHint,
@@ -43,7 +49,7 @@ export interface AgentDialogHistoryEntry {
   updatedAt: unknown;
 }
 
-export type AgentThreadListSection = "running" | "future" | "recent";
+export type { AgentThreadListSection };
 
 export interface AgentThreadOverviewEntry extends AgentDialogHistoryEntry {
   agentKey: string | null;
@@ -59,24 +65,11 @@ export interface AgentThreadOverviewGroups {
   recent: AgentThreadOverviewEntry[];
 }
 
-export type ClientAgentThreadStatus =
-  | "pending"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled";
+export type ClientAgentThreadStatus = AgentThreadStatus;
 
-export type ClientAgentThreadKind =
-  | "chat"
-  | "background"
-  | "inline"
-  | "handoff"
-  | "scheduled";
+export type ClientAgentThreadKind = AgentThreadKind;
 
-export type ClientAgentThreadPresentationIntent =
-  | "background_handoff"
-  | "inline_result"
-  | "handoff_speaker";
+export type ClientAgentThreadPresentationIntent = AgentThreadPresentationIntent;
 
 export interface ClientAgentThread {
   threadId: string;

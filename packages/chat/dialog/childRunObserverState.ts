@@ -42,6 +42,7 @@ export const DEFAULT_CHILD_RUN_STATUS_LABELS = {
   done: "Done",
   failed: "Failed",
   cancelled: "Cancelled",
+  orphaned: "Orphaned",
   unknown: "Unknown",
 } as const;
 
@@ -176,7 +177,7 @@ export function isTerminalChildRunStatus(
   status: ClientAgentThreadStatus | string | null | undefined,
 ): boolean {
   const key = asOptionalTrimmedString(status) ?? "";
-  return key === "done" || key === "failed" || key === "cancelled";
+  return key === "done" || key === "failed" || key === "cancelled" || key === "orphaned";
 }
 
 export function isFailedChildRunStatus(

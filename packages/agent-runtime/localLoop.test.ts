@@ -2788,6 +2788,12 @@ describe("runLocalAgentTurn", () => {
   // "this model does not support image input" → local 判失败 → fallback 到没有
   // local code 工具的 server → agent 报 blocker。这里验证 image_url parts 在
   // 发给 provider 前按 vision 能力被剥离。
+  // fixture 约定：本用例要求 resolveAgentImageInputSupport 解析出 false。
+  // 这里刻意用 provider: "custom" + 非 catalog 模型名，使能力查表落空并回退到
+  // 显式的 hasVision: false（见 agentCapabilities.ts 的 catalogHasVision →
+  // agent.hasVision 回退链）。不要改回真实模型名：真实模型会随 catalog 更新
+  // 或 providers.ts 的别名映射（如曾经的 glm-5.2 → glm-5.3）而获得视觉能力，
+  // 导致剥离逻辑不触发、本用例静默失效。
   test("模型不支持图片时，剥离 image_url part 为占位文本", async () => {
     let providerMessages: AgentRuntimeChatMessage[] = [];
     const loopEvents: any[] = [];
@@ -2796,19 +2802,20 @@ describe("runLocalAgentTurn", () => {
       capabilities: ["local-provider", "local-persistence"],
       loadAgentConfig: async (agentRef) => ({
         key: agentRef,
-        model: "glm-5.2",
-        provider: "nolo",
+        model: "mock-text-only-model",
+        provider: "custom",
+        hasVision: false,
       }),
       loadDialogHistory: async () => [],
       saveTurn: async () => ({ dialogId: "dialog-no-vision" }),
       resolveProvider: async (agentConfig) => {
         return {
-          model: agentConfig.model ?? "glm-5.2",
+          model: agentConfig.model ?? "mock-text-only-model",
           complete: async (messages) => {
             providerMessages = messages as AgentRuntimeChatMessage[];
             return {
               content: "ok without image",
-              model: agentConfig.model ?? "glm-5.2",
+              model: agentConfig.model ?? "mock-text-only-model",
               trace: messages,
             };
           },
@@ -2907,6 +2914,8 @@ describe("runLocalAgentTurn", () => {
   // 纯图片消息（无 text part）过滤后不能变成空串——主流 Provider API 要求
   // user 消息 content 非空，空串会触发 400，又回到误 fallback 的老问题。
   // 占位文本保证 content 非空，让 local 轮能正常完成。
+  // fixture 约定同上：provider: "custom" + 非 catalog 模型名 + hasVision: false，
+  // 避免依赖真实模型的 catalog 能力（会随别名映射/能力升级而漂移）。
   test("纯图片消息过滤后变占位文本而非空串", async () => {
     let providerMessages: AgentRuntimeChatMessage[] = [];
     const adapter: AgentRuntimeHostAdapter = {
@@ -2914,18 +2923,19 @@ describe("runLocalAgentTurn", () => {
       capabilities: ["local-provider", "local-persistence"],
       loadAgentConfig: async (agentRef) => ({
         key: agentRef,
-        model: "glm-5.2",
-        provider: "nolo",
+        model: "mock-text-only-model",
+        provider: "custom",
+        hasVision: false,
       }),
       loadDialogHistory: async () => [],
       saveTurn: async () => ({ dialogId: "dialog-image-only" }),
       resolveProvider: async (agentConfig) => ({
-        model: agentConfig.model ?? "glm-5.2",
+        model: agentConfig.model ?? "mock-text-only-model",
         complete: async (messages) => {
           providerMessages = messages as AgentRuntimeChatMessage[];
           return {
             content: "ok placeholder",
-            model: agentConfig.model ?? "glm-5.2",
+            model: agentConfig.model ?? "mock-text-only-model",
             trace: messages,
           };
         },

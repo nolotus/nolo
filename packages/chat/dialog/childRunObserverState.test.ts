@@ -196,6 +196,7 @@ describe("childRunObserverState presentation", () => {
     expect(formatChildRunStatusLabel("done")).toBe("Done");
     expect(formatChildRunStatusLabel("failed")).toBe("Failed");
     expect(formatChildRunStatusLabel("cancelled")).toBe("Cancelled");
+    expect(formatChildRunStatusLabel("orphaned")).toBe("Orphaned");
     expect(formatChildRunStatusLabel(undefined)).toBe("Unknown");
   });
 
