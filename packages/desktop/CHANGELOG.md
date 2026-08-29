@@ -1,4 +1,13 @@
 
+## 0.33.0-alpha.3
+
+## 0.33.0-alpha.3 (2026-08-29)
+
+### Bug Fixes
+
+* **cli:** 后台 run 输出被截断时结算为 failed，不再假成功 ([95b33be](https://github.com/nolotus/bun-nolo/commit/95b33bea0fc8950eaf6197c9c5ca0544ea61ab78))
+
+
 ## 0.33.0-alpha.2
 
 ## 0.33.0-alpha.2 (2026-08-29)

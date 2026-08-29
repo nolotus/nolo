@@ -14,7 +14,7 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { asTrimmedString } from "core/trimmedString";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
 import type { AgentRuntimeRequestedMode, AgentRuntimeHostAdapter, AgentRuntimeToolResult } from "../agentRuntimeLocal";
-import type { LocalAgentActionGate, LocalAgentLoopEvent } from "../../agent-runtime/localLoop";
+import type { LocalAgentActionGate, LocalAgentLoopEvent, EmptyAssistantFallbackReason } from "../../agent-runtime/localLoop";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
 import type { UserChoiceRequest, UserChoiceResult } from "./localRuntimeAdapter";
 import type { CliFetchImpl } from "../cliFetch";
@@ -240,6 +240,13 @@ export type RunAgentTurnOptions = {
 export type RunAgentTurnResult = {
   exitCode: number;
   dialogId?: string;
+  /**
+   * 本轮以空 assistant 兜底（诊断文案收尾、不抛错）收尾时的成因
+   * （length_truncated / stream_truncated / empty_completion）。
+   * 由 localLoop 透传；交互侧继续按成功展示，后台 run 编排者据此
+   * 决定是否把本 run 结算为 failed。
+   */
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   /**
    * Dialog title persisted for this turn (LLM-generated when available, else
    * the fallback used by buildAgentRuntimeDialogWritePlan). The TUI displays

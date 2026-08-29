@@ -668,11 +668,23 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // If this process was spawned as a local background child, finalize the
   // registry record so the parent `nolo agent ps/status` sees the outcome.
   if (typeof childRunId === "string" && childRunId.length > 0) {
-    const finalStatus = result.exitCode === 0 ? "done" : "failed";
+    // 空 assistant 兜底（不抛错、exitCode 仍 0）：截断型（length/stream）
+    // 说明编排者拿不到完整结论，须结算为 failed 以便父级接力重派；
+    // 普通空回复（empty_completion）不算故障，仍按 exitCode 判定。
+    // saveTurn 已保留对话内容（见 localLoop），failed 结算不删改对话。
+    const isTruncated =
+      result.emptyAssistantFallbackReason === "length_truncated" ||
+      result.emptyAssistantFallbackReason === "stream_truncated";
+    const truncationNote = isTruncated
+      ? { note: `empty assistant output: ${result.emptyAssistantFallbackReason}` }
+      : {};
+    const finalStatus =
+      isTruncated || result.exitCode !== 0 ? "failed" : "done";
     await (deps.finalizeRunRecord ?? finalizeRunRecord)(childRunId, {
       status: finalStatus,
       exitCode: result.exitCode,
       dialogId: result.dialogId,
+      ...truncationNote,
     },
     {
       env,

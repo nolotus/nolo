@@ -981,6 +981,9 @@ async function runLocalAgentTurnForCli(
       dialogId: result.dialogId,
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
+      ...(result.emptyAssistantFallbackReason
+        ? { emptyAssistantFallbackReason: result.emptyAssistantFallbackReason }
+        : {}),
       turnTokens: buildTurnTokenUsage(result.usage, result.model),
     };
   } catch (error) {

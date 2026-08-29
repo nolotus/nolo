@@ -116,6 +116,12 @@ export type LocalAgentTurnInput = {
 
 export type LocalAgentTurnResult = AgentRuntimeResult & {
   dialogId: string;
+  /**
+   * 本轮在二次仍空后走了 fallback（诊断文案收尾、不抛错）时的成因。
+   * 只如实陈述，不决定成败：交互侧照常显示文案；上层（如后台 run 的
+   * 编排者）据它决定是否把本轮结算为 failed。无此字段 = 正常轮。
+   */
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   /** Dialog title persisted by saveTurn (LLM-generated or fallback). */
   title?: string;
   /** 后台 LLM 标题 patch（fire-and-forget）；resolve 携带最终标题（无/失败为 null）。 */
@@ -1367,7 +1373,9 @@ export async function runLocalAgentTurn(
 
   const userInputText = extractUserInputText(input.input);
   let toolCallCount = 0;
-  let result: AgentRuntimeResult;
+  // 允许承载空 assistant 兜底标记（emptyAssistantFallbackReason），
+  // 供上层（后台 run 编排者）据成因结算成败；仅本地类型放宽。
+  let result: AgentRuntimeResult & { emptyAssistantFallbackReason?: EmptyAssistantFallbackReason };
   let turnUsage: Record<string, unknown> | undefined;
   let contextUsage: Record<string, unknown> | undefined;
   const usageRecords: NonNullable<AgentRuntimeSaveTurnInput["usageRecords"]> = [];
@@ -1491,6 +1499,10 @@ export async function runLocalAgentTurn(
           result = {
             ...result,
             content: resolveEmptyAssistantFallbackMessage(outcome.reason),
+            // 只打标记不抛错：交互侧仍照常显示诊断文案（零行为变化）。
+            // 上层（后台 run 编排者）据 emptyAssistantFallbackReason 判断
+            // 是否把本轮结算为 failed。见 LocalAgentTurnResult 注释。
+            emptyAssistantFallbackReason: outcome.reason,
           };
           break;
         }

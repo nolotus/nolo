@@ -3913,3 +3913,85 @@ test("cross-turn projection of unchanged tool output is byte-identical across tu
   const text = typeof firstTurn === "string" ? firstTurn : JSON.stringify(firstTurn);
   expect(text).toContain("spillFile=");
 });
+
+describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
+  function makeTruncAdapter(opts: { callCount: number; finishReason?: string }) {
+    let calls = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        name: "Local Agent",
+        prompt: "base prompt",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-trunc" }),
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async (messages) => {
+          calls += 1;
+          if (calls <= opts.callCount) {
+            // 空正文且 finish_reason 指向截断 → resolveEmptyAssistantOutcome 直接 fallback
+            return {
+              content: "",
+              finish_reason: opts.finishReason ?? "length",
+              model: "fake-local",
+              trace: messages,
+            } as unknown as AgentRuntimeChatMessage & {
+              content: string;
+              finish_reason?: string;
+            } as any;
+          }
+          return { content: "done", model: "fake-local", trace: messages };
+        },
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run");
+      },
+    };
+    return adapter;
+  }
+
+  test("sets emptyAssistantFallbackReason when the provider is length-truncated", async () => {
+    const adapter = makeTruncAdapter({ callCount: 1, finishReason: "length" });
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "frontend",
+      input: "do something huge",
+    });
+    // 兜底文案收尾、不抛错（exitCode 语义由上层决定），但标记要如实带上成因。
+    expect(result.emptyAssistantFallbackReason).toBe("length_truncated");
+    expect(result.content).toContain("截断");
+  });
+
+  test("does NOT set the marker on a normal completed turn", async () => {
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        name: "Local Agent",
+        prompt: "base prompt",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-normal" }),
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async () => ({ content: "all good", model: "fake-local" }),
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run");
+      },
+    };
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "frontend",
+      input: "hello",
+    });
+    expect(result.emptyAssistantFallbackReason).toBeUndefined();
+    expect(result.content).toBe("all good");
+  });
+});

@@ -1179,6 +1179,132 @@ describe("cli agent run command", () => {
     ]);
   });
 
+  test("background run: length-truncated empty assistant output is finalized as failed with a reason note", async () => {
+    const finalized: Array<{ runId: string; status: string; note?: string; exitCode?: number }> = [];
+    const exitCode = await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-trunc" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-trunc-1",
+          emptyAssistantFallbackReason: "length_truncated",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+
+    // 后台 run：虽然 exitCode 仍 0（fallback 不抛错），截断型兜底必须结算为 failed。
+    expect(exitCode).toBe(0);
+    expect(finalized).toEqual([
+      {
+        runId: "run-child-trunc",
+        status: "failed",
+        exitCode: 0,
+        dialogId: "dialog-trunc-1",
+        note: "empty assistant output: length_truncated",
+      },
+    ]);
+  });
+
+  test("background run: stream-truncated empty assistant output is finalized as failed with a reason note", async () => {
+    const finalized: Array<{ runId: string; status: string; note?: string }> = [];
+    await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-stream" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-stream-1",
+          emptyAssistantFallbackReason: "stream_truncated",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+    expect(finalized[0]).toMatchObject({
+      status: "failed",
+      note: "empty assistant output: stream_truncated",
+    });
+  });
+
+  test("background run: ordinary empty reply stays done (not a truncation)", async () => {
+    const finalized: Array<{ runId: string; status: string; note?: string }> = [];
+    await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-empty" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-empty-1",
+          emptyAssistantFallbackReason: "empty_completion",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+    // 普通空回复不算故障：仍按 exitCode 判定为 done，且不带 note。
+    expect(finalized[0]).toEqual({
+      runId: "run-child-empty",
+      status: "done",
+      exitCode: 0,
+      dialogId: "dialog-empty-1",
+    });
+  });
+
+  test("interactive (non-background) truncation: behavior unchanged, exitCode 0, no registry finalize", async () => {
+    const finalized: string[] = [];
+    const exitCode = await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        // 无 NOLO_AGENT_RUN_ID → 不是后台 run，不进 finalize 分支。
+        env: {},
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-interactive-1",
+          emptyAssistantFallbackReason: "length_truncated",
+        }),
+        finalizeRunRecord: (_runId, _update) => {
+          finalized.push("should not be called");
+        },
+      }
+    );
+    expect(exitCode).toBe(0);
+    expect(finalized).toEqual([]);
+  });
+
   test("does not print the --bg local hint for server runs (where --bg is supported)", async () => {
     const chunks: string[] = [];
     const exitCode = await runCommand([
