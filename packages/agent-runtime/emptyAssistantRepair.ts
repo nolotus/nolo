@@ -119,3 +119,22 @@ export function hasAssistantVisibleOutput(
     return false;
   });
 }
+
+export const LENGTH_TRUNCATED_REASONING_MARKER = "[length_truncated_reasoning_tail]";
+export const MAX_TRUNCATED_REASONING_CHARS = 2000;
+
+/**
+ * 当模型因 length 截断导致正文一行未落（reasoning-only 被截断）时，
+ * 提取已有思考过程的尾部（clip 到约 2000 字符）并带上可识别标记，
+ * 供运行时写入 run 日志以便编排者/宿主复盘与提取审查结论。
+ */
+export function formatLengthTruncatedReasoningTail(
+  reasoning_content: string | undefined | null,
+  maxChars = MAX_TRUNCATED_REASONING_CHARS,
+): string | null {
+  if (typeof reasoning_content !== "string") return null;
+  const trimmed = reasoning_content.trim();
+  if (trimmed.length === 0) return null;
+  const tail = trimmed.length > maxChars ? trimmed.slice(-maxChars) : trimmed;
+  return `[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${tail}`;
+}

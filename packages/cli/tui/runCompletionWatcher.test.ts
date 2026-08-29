@@ -1,7 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import type { RunRecord } from "../agentRunControl";
-import { createRunCompletionWatcher } from "./runCompletionWatcher";
+import {
+  writeRunRecord,
+  ackRunRecord,
+  claimRunRecord,
+  type RunRecord,
+} from "../agentRunControl";
+import {
+  createRunCompletionWatcher,
+  filterUnclaimedChildRuns,
+  buildWakeMessage,
+  buildWakeDisplayText,
+} from "./runCompletionWatcher";
 import type { ChildRunCompletedTurnEvent, InternalTurnEvent } from "core/chat/internalTurnEvent";
 
 const T0 = 1_700_000_000_000;
@@ -245,5 +258,89 @@ describe("createRunCompletionWatcher", () => {
     expect(h.wakes).toHaveLength(1);
     const event = h.wakes[0] as ChildRunCompletedTurnEvent;
     expect(event.runs[0]?.runId).toBe("run-a");
+  });
+});
+
+describe("filterUnclaimedChildRuns (投递时刻 ack 复核)", () => {
+  test("全量已 ack 的 run 在投递时被全部过滤", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-filter-unclaimed-all-"));
+    const env = { NOLO_HOME: tempDir };
+    try {
+      writeRunRecord(record({ runId: "run-1", status: "done" }), { env });
+      writeRunRecord(record({ runId: "run-2", status: "done" }), { env });
+
+      // wait 消费了这两条 run 并落盘 ack
+      ackRunRecord("run-1", { env });
+      ackRunRecord("run-2", { env });
+
+      const runs = [
+        record({ runId: "run-1", status: "done" }),
+        record({ runId: "run-2", status: "done" }),
+      ];
+
+      const res = filterUnclaimedChildRuns(runs, { env, now: () => T0 + 10_000 });
+      expect(res.remainingRuns).toHaveLength(0);
+      expect(res.claimedRunIds).toEqual(["run-1", "run-2"]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("部分已 ack 时只保留剩余未 claim 的 run，并可正确重建文案", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-filter-unclaimed-partial-"));
+    const env = { NOLO_HOME: tempDir };
+    try {
+      writeRunRecord(record({ runId: "run-1", status: "done" }), { env });
+      writeRunRecord(record({ runId: "run-2", status: "done" }), { env });
+      writeRunRecord(record({ runId: "run-3", status: "failed", exitCode: 1 }), { env });
+
+      // wait 消费了 run-1 (ack:true) 和 run-2 (持有有效 lease)
+      ackRunRecord("run-1", { env });
+      claimRunRecord("run-2", { env });
+
+      const runs = [
+        record({ runId: "run-1", status: "done" }),
+        record({ runId: "run-2", status: "done" }),
+        record({ runId: "run-3", status: "failed", exitCode: 1 }),
+      ];
+
+      const res = filterUnclaimedChildRuns(runs, { env, now: () => T0 + 10_000 });
+      expect(res.remainingRuns).toHaveLength(1);
+      expect(res.remainingRuns[0]?.runId).toBe("run-3");
+      expect(res.claimedRunIds).toEqual(["run-1", "run-2"]);
+
+      // 验证重建后的文案仅包含 run-3
+      const text = buildWakeMessage(res.remainingRuns, T0 + 10_000);
+      expect(text).toContain("1 条后台 run 已到达终态");
+      expect(text).toContain("runId: run-3");
+      expect(text).not.toContain("runId: run-1");
+      expect(text).not.toContain("runId: run-2");
+
+      const displayText = buildWakeDisplayText(res.remainingRuns, T0 + 10_000);
+      expect(displayText).toContain("1 条后台 run 已完成");
+      expect(displayText).toContain("✗ Worker failed");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("全部未 ack 时全部保留", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-filter-unclaimed-none-"));
+    const env = { NOLO_HOME: tempDir };
+    try {
+      writeRunRecord(record({ runId: "run-1", status: "done" }), { env });
+      writeRunRecord(record({ runId: "run-2", status: "done" }), { env });
+
+      const runs = [
+        record({ runId: "run-1", status: "done" }),
+        record({ runId: "run-2", status: "done" }),
+      ];
+
+      const res = filterUnclaimedChildRuns(runs, { env, now: () => T0 + 10_000 });
+      expect(res.remainingRuns).toHaveLength(2);
+      expect(res.claimedRunIds).toHaveLength(0);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

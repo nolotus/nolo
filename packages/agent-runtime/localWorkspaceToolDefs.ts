@@ -33,15 +33,11 @@ const WORKSPACE_TOOL_NAMES = [
 const SHELL_TOOL_NAMES = ["execShell", "launchProcess", "listProcesses"] as const;
 
 const WORKSPACE_TOOL_NAME_SET = new Set<string>(WORKSPACE_TOOL_NAMES);
-const REMOVED_WORKSPACE_TOOL_NAMES = new Set([
-  "gitStatus", "gitDiff", "gitCreateBranch", "gitAdd", "gitCommit", "commitWorkspace",
-]);
 
 export {
   WORKSPACE_TOOL_NAMES,
   SHELL_TOOL_NAMES,
   WORKSPACE_TOOL_NAME_SET,
-  REMOVED_WORKSPACE_TOOL_NAMES,
   tokenizeShellPrefix,
   wrapPowerShellCommand,
   findPowerShellExecutable,
@@ -322,7 +318,6 @@ export function filterDeclaredWorkspaceToolNames(args: {
 }) {
   return (args.toolNames ?? []).filter((toolName) =>
     WORKSPACE_TOOL_NAME_SET.has(toolName) &&
-    !REMOVED_WORKSPACE_TOOL_NAMES.has(toolName) &&
     (args.exposeShellTools || !SHELL_TOOL_NAMES.includes(toolName as any))
   );
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 
 import {
   ORCHESTRATION_TOOL_NAMES,
-  SUBTASK_REMOVED_GIT_TOOL_NAMES,
   SUBTASK_REMOVED_TOOL_NAMES,
   INTERACTION_REQUIRED_TOOL_NAMES,
   filterToolNamesForRunKind,
@@ -43,22 +42,12 @@ describe("filterToolNamesForRunKind", () => {
     "editFile",
     "globFiles",
     "execShell",
-    // 只读 git（subtask 保留）
-    "gitStatus",
-    "gitDiff",
     // 编排工具（subtask 移除）
     "startAgentRun",
     "controlAgentRun",
     "listAgents",
     "readAgent",
     "runStreamingAgent",
-    "streamParallelAgents",
-    "startAgentDialog",
-    // git 写工具（subtask 移除）
-    "gitAdd",
-    "gitCommit",
-    "gitCreateBranch",
-    "commitWorkspace",
     // 交互工具（subtask 移除）
     "ask_user",
   ];
@@ -68,7 +57,7 @@ describe("filterToolNamesForRunKind", () => {
     expect(result).toEqual(fullToolSurface);
   });
 
-  it("removes orchestration + git-write tools for subtask runs", () => {
+  it("removes orchestration + interaction tools for subtask runs", () => {
     const result = filterToolNamesForRunKind(fullToolSurface, true);
     // 干活工具保留
     expect(result).toContain("readFile");
@@ -76,23 +65,12 @@ describe("filterToolNamesForRunKind", () => {
     expect(result).toContain("editFile");
     expect(result).toContain("globFiles");
     expect(result).toContain("execShell");
-    // 只读 git 保留
-    expect(result).toContain("gitStatus");
-    expect(result).toContain("gitDiff");
     // 编排工具移除
     expect(result).not.toContain("startAgentRun");
     expect(result).not.toContain("controlAgentRun");
     expect(result).not.toContain("listAgents");
     expect(result).not.toContain("readAgent");
-    expect(result).not.toContain("startAgentRun");
     expect(result).not.toContain("runStreamingAgent");
-    expect(result).not.toContain("streamParallelAgents");
-    expect(result).not.toContain("startAgentDialog");
-    // git 写工具移除
-    expect(result).not.toContain("gitAdd");
-    expect(result).not.toContain("gitCommit");
-    expect(result).not.toContain("gitCreateBranch");
-    expect(result).not.toContain("commitWorkspace");
     // 交互工具移除（子任务无用户交互通道）
     expect(result).not.toContain("ask_user");
   });
@@ -115,8 +93,6 @@ describe("filterToolNamesForRunKind", () => {
       "editFile",
       "globFiles",
       "execShell",
-      "gitStatus",
-      "gitDiff",
     ];
     expect(result).toEqual(expectedKept);
   });
@@ -126,11 +102,8 @@ describe("subtaskBlockedToolNames", () => {
   it("returns the full subtask removal set as a mutable array", () => {
     const blocked = subtaskBlockedToolNames();
     expect(blocked).toEqual([...SUBTASK_REMOVED_TOOL_NAMES]);
-    // Every orchestration + git-write + interaction name is present
+    // Every orchestration + interaction name is present
     for (const name of ORCHESTRATION_TOOL_NAMES) {
-      expect(blocked).toContain(name);
-    }
-    for (const name of SUBTASK_REMOVED_GIT_TOOL_NAMES) {
       expect(blocked).toContain(name);
     }
     for (const name of INTERACTION_REQUIRED_TOOL_NAMES) {
@@ -145,20 +118,6 @@ describe("tool name sets", () => {
     expect(ORCHESTRATION_TOOL_NAMES.has("controlAgentRun")).toBe(true);
     expect(ORCHESTRATION_TOOL_NAMES.has("listAgents")).toBe(true);
     expect(ORCHESTRATION_TOOL_NAMES.has("readAgent")).toBe(true);
-    expect(ORCHESTRATION_TOOL_NAMES.has("startAgentDialog")).toBe(true);
     expect(ORCHESTRATION_TOOL_NAMES.has("runStreamingAgent")).toBe(true);
-    expect(ORCHESTRATION_TOOL_NAMES.has("streamParallelAgents")).toBe(true);
-  });
-
-  it("git-write set covers all mutating git tools", () => {
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("gitAdd")).toBe(true);
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("gitCommit")).toBe(true);
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("gitCreateBranch")).toBe(true);
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("commitWorkspace")).toBe(true);
-  });
-
-  it("read-only git is NOT in the removed set", () => {
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("gitStatus")).toBe(false);
-    expect(SUBTASK_REMOVED_GIT_TOOL_NAMES.has("gitDiff")).toBe(false);
   });
 });

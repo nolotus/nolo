@@ -3,8 +3,11 @@ import {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   EMPTY_ASSISTANT_REPAIR_PROMPT,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
+  LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_REASONING_ONLY_REPAIRS,
+  MAX_TRUNCATED_REASONING_CHARS,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
   resolveEmptyAssistantFallbackMessage,
   resolveEmptyAssistantOutcome,
@@ -159,5 +162,29 @@ describe("emptyAssistantRepair standalone boundary", () => {
         streamComplete: false,
       }),
     ).toEqual({ kind: "fallback", reason: "stream_truncated" });
+  });
+
+  describe("formatLengthTruncatedReasoningTail", () => {
+    it("returns null for empty, blank, or non-string reasoning", () => {
+      expect(formatLengthTruncatedReasoningTail(undefined)).toBeNull();
+      expect(formatLengthTruncatedReasoningTail(null)).toBeNull();
+      expect(formatLengthTruncatedReasoningTail("")).toBeNull();
+      expect(formatLengthTruncatedReasoningTail("   \n\t  ")).toBeNull();
+    });
+
+    it("formats short reasoning with marker", () => {
+      const reasoning = "I think the review is approved.";
+      const formatted = formatLengthTruncatedReasoningTail(reasoning);
+      expect(formatted).toBe(`[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${reasoning}`);
+    });
+
+    it("clips reasoning exceeding maxChars to the tail", () => {
+      const prefix = "a".repeat(3000);
+      const tail = "b".repeat(2000);
+      const fullReasoning = prefix + tail;
+      const formatted = formatLengthTruncatedReasoningTail(fullReasoning, 2000);
+      expect(formatted).toBe(`[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${tail}`);
+      expect(formatted?.length).toBe(`[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n`.length + 2000);
+    });
   });
 });

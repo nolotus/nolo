@@ -49,8 +49,18 @@ import { runAskChoiceDialog } from "./askChoiceDialog";
 import { createDialogHost } from "./dialogHost";
 import { createActivityIndicator, type AgentRunStatusSnapshot } from "./activityIndicator";
 import { createRunRegistryPoller } from "./runRegistryPoller";
-import { createRunCompletionWatcher } from "./runCompletionWatcher";
-import { createTurnRequest, type InternalTurnEvent, type TurnRequest } from "core/chat/internalTurnEvent";
+import {
+  createRunCompletionWatcher,
+  filterUnclaimedChildRuns,
+  buildWakeMessage,
+  buildWakeDisplayText,
+} from "./runCompletionWatcher";
+import {
+  createTurnRequest,
+  type ChildRunCompletedTurnEvent,
+  type InternalTurnEvent,
+  type TurnRequest,
+} from "core/chat/internalTurnEvent";
 import { checkStaleRun, readRunRecord } from "../agentRunControl";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { prefetchAgentCatalog } from "./agentCatalog";
@@ -1084,14 +1094,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (text) => runWakeHandler?.(text),
   });
+  const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
     update: (snapshot) => activityIndicator.updateAgentRun(snapshot),
     // 显式传 env：resolveNoloHome 只认传入 env 的 NOLO_HOME，不传则永远读
     // ~/.nolo——设了 NOLO_HOME 的环境（dev、测试）会读错目录。run 记录读取
     // 与 reconcile 的调用点也是同样写法。
-    readRecord: (runId) => readRunRecord(runId, { env: process.env }),
-    reconcile: (runId) => checkStaleRun(runId, { env: process.env }),
+    readRecord: (runId) => readRunRecord(runId, { env: effectiveEnv }),
+    reconcile: (runId) => checkStaleRun(runId, { env: effectiveEnv }),
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
   });
   const history = createTurnHistory();
@@ -1404,10 +1415,38 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // 静默：patch 失败下一轮节流会重试，不值得打扰用户。
         });
     };
-    const req = createTurnRequest(inputMsg);
+    let req = createTurnRequest(inputMsg);
     if (req.event.kind === "child-run-completed") {
-      for (const r of req.event.runs) {
+      const nowMs = Date.now();
+      const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
+        req.event.runs,
+        { env: effectiveEnv, now: () => nowMs },
+      );
+      for (const runId of claimedRunIds) {
+        runCompletionWatcher.markAcknowledged(runId);
+      }
+      if (remainingRuns.length === 0) {
+        for (const r of req.event.runs) {
+          runCompletionWatcher.markAcknowledged(r.runId);
+        }
+        return { ok: true, aborted: false };
+      }
+      for (const r of remainingRuns) {
         runCompletionWatcher.markAcknowledged(r.runId);
+      }
+      if (remainingRuns.length !== req.event.runs.length) {
+        const text = buildWakeMessage(remainingRuns, nowMs);
+        const displayText = buildWakeDisplayText(remainingRuns, nowMs);
+        const updatedEvent: ChildRunCompletedTurnEvent = {
+          kind: "child-run-completed",
+          runs: remainingRuns,
+          text,
+          displayText,
+        };
+        req = {
+          text,
+          event: updatedEvent,
+        };
       }
     }
     const message = req.text;

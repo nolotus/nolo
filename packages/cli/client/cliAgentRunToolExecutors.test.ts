@@ -272,6 +272,18 @@ describe("cli controlAgentRun executor", () => {
     expect(result.metadata?.reportPath).toBe("/home/test/.nolo/runs/run-1.report.md");
   });
 
+  it("status omits reportPath when report file does not exist", async () => {
+    const deps = buildDeps({ kill: () => {} });
+    seedRun(deps, "run-1", { status: "done" });
+    const executor = createCliControlAgentRunExecutor(deps);
+    const result = await executor({
+      arguments: JSON.stringify({ action: "status", runId: "run-1" }),
+    });
+    const data = JSON.parse(result.content);
+    expect(data.reportPath).toBeUndefined();
+    expect(result.metadata?.reportPath).toBeUndefined();
+  });
+
   it("status omits dialogId when the run has no dialog yet", async () => {
     const deps = buildDeps({ kill: () => {} });
     seedRun(deps, "run-1", { status: "running" });

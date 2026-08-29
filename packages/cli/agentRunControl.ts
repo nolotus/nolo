@@ -6,7 +6,7 @@
 // with ordinary shell tools.
 
 import { homedir as nodeHomedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import * as nodeFs from "node:fs";
@@ -779,14 +779,41 @@ export function rewriteMsgFileArg(args: string[], messagePath: string): string[]
   return result;
 }
 
-function buildAgentRunChildCommand(options: {
-  rawArgs: string[];
-  commandPath?: string[];
-  cliEntrypointPath?: string;
-  messagePath?: string;
-}): { execPath: string; childArgs: string[] } {
+function resolveValidCliEntrypoint(cliEntrypointPath?: string, fs: FsLike = nodeFs): string {
+  if (cliEntrypointPath && fs.existsSync(cliEntrypointPath)) {
+    return cliEntrypointPath;
+  }
+  const fallback = resolveCliEntrypointPath();
+  if (fs.existsSync(fallback)) {
+    return fallback;
+  }
+  // Try locating sibling or package entrypoint if fallback does not exist on disk
+  const candidates = [
+    join(dirname(fallback), "cli", "index.ts"),
+    join(dirname(fallback), "cli", "index.js"),
+    join(dirname(fallback), "..", "packages", "cli", "index.ts"),
+    join(dirname(fallback), "..", "packages", "cli", "index.js"),
+    join(dirname(fallback), "..", "index.js"),
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(cand)) {
+      return cand;
+    }
+  }
+  return fallback;
+}
+
+export function buildAgentRunChildCommand(
+  options: {
+    rawArgs: string[];
+    commandPath?: string[];
+    cliEntrypointPath?: string;
+    messagePath?: string;
+  },
+  deps: AgentRunControlDeps = {}
+): { execPath: string; childArgs: string[] } {
+  const fs = deps.fs ?? nodeFs;
   const execPath = process.execPath;
-  const entrypoint = options.cliEntrypointPath || resolveCliEntrypointPath();
   const commandParts = options.commandPath ?? [];
   // 子进程以 run cwd 启动并重解析参数：--msg-file 改写为 nolo runs 目录里的
   // 内容快照（不依赖调用者本地文件）；--skill 相对路径按调用者 cwd 绝对化。
@@ -795,7 +822,11 @@ function buildAgentRunChildCommand(options: {
     strippedArgs = rewriteMsgFileArg(strippedArgs, options.messagePath);
   }
   strippedArgs = absolutizeSkillArgs(strippedArgs);
-  if (isCompiledBinary() || entrypoint === execPath) {
+  if (isCompiledBinary() || options.cliEntrypointPath === execPath) {
+    return { execPath, childArgs: [...commandParts, ...strippedArgs] };
+  }
+  const entrypoint = resolveValidCliEntrypoint(options.cliEntrypointPath, fs);
+  if (entrypoint === execPath) {
     return { execPath, childArgs: [...commandParts, ...strippedArgs] };
   }
   return { execPath, childArgs: [entrypoint, ...commandParts, ...strippedArgs] };
@@ -902,12 +933,15 @@ export async function spawnLocalBackgroundRun(
   };
   fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
 
-  const { execPath, childArgs } = buildAgentRunChildCommand({
-    rawArgs: input.rawArgs,
-    commandPath: input.commandPath,
-    cliEntrypointPath: input.cliEntrypointPath,
-    messagePath,
-  });
+  const { execPath, childArgs } = buildAgentRunChildCommand(
+    {
+      rawArgs: input.rawArgs,
+      commandPath: input.commandPath,
+      cliEntrypointPath: input.cliEntrypointPath,
+      messagePath,
+    },
+    deps
+  );
 
   const childEnv: EnvLike = {
     ...env,

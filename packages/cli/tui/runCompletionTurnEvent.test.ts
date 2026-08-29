@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRunCompletionWatcher } from "./runCompletionWatcher";
+import { createRunCompletionWatcher, filterUnclaimedChildRuns, buildWakeMessage, buildWakeDisplayText } from "./runCompletionWatcher";
 import { createChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import {
   createTurnRequest,
@@ -735,7 +735,206 @@ describe("subAgent terminal event & chat queue loop", () => {
       fs.unlinkSync(lockPath);
       const token2 = claimRunRecord(runId, { env });
       expect(token2).toBeTruthy();
-      expect(readRunRecord(runId, { env })?.ackLease?.token).toBe(token2);
+      expect(readRunRecord(runId, { env })?.ackLease?.token).toBe(token2!);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("17. 投递时刻 ack 复核（全量已 ack）：事件排队后在投递时刻所有 run 均已 ack，turn 完全跳过", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-run-wake-ack-delivery-"));
+    const env = { NOLO_HOME: tempDir };
+    const executedTurns: TurnRequest[] = [];
+
+    try {
+      writeRunRecord(
+        createRecord({ runId: "run-race-1", parentDialogId: "parent-dialog-1", status: "running" }),
+        { env },
+      );
+      writeRunRecord(
+        createRecord({ runId: "run-race-2", parentDialogId: "parent-dialog-1", status: "running" }),
+        { env },
+      );
+
+      let activeDialogId: string | null = "parent-dialog-1";
+      const binding = createChatQueueTuiBinding(async (rawReq) => {
+        let req = createTurnRequest(rawReq);
+        if (req.event.kind === "child-run-completed") {
+          const nowMs = Date.now();
+          const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
+            req.event.runs,
+            { env, now: () => nowMs },
+          );
+          for (const runId of claimedRunIds) {
+            watcher.markAcknowledged(runId);
+          }
+          if (remainingRuns.length === 0) {
+            for (const r of req.event.runs) {
+              watcher.markAcknowledged(r.runId);
+            }
+            return { ok: true, aborted: false };
+          }
+        }
+        executedTurns.push(req);
+        return { ok: true, aborted: false };
+      });
+
+      const watcher = createRunCompletionWatcher({
+        getCurrentDialogId: () => activeDialogId,
+        onWake: (event) => {
+          void binding.enqueue(event);
+        },
+        now: () => T0 + 10000,
+      });
+
+      // 1. 模拟当前 turn 正在 running (编排者正在等别的 run)
+      binding.notifyTurnStart();
+
+      // 先观察到 running 状态
+      watcher.observe([
+        readRunRecord("run-race-1", { env })!,
+        readRunRecord("run-race-2", { env })!,
+      ]);
+
+      // 2. run-race-1 和 run-race-2 到达终态，watcher 排队唤醒事件
+      writeRunRecord(
+        createRecord({ runId: "run-race-1", parentDialogId: "parent-dialog-1", status: "done" }),
+        { env },
+      );
+      writeRunRecord(
+        createRecord({ runId: "run-race-2", parentDialogId: "parent-dialog-1", status: "done" }),
+        { env },
+      );
+      watcher.observe([
+        readRunRecord("run-race-1", { env })!,
+        readRunRecord("run-race-2", { env })!,
+      ]);
+
+      // 唤醒事件已进入 queue
+      expect(binding.queueLength()).toBe(1);
+
+      // 关键不变量：唤醒事件排队后，用户又排入了一条普通消息
+      void binding.enqueue("user follow-up message");
+      expect(binding.queueLength()).toBe(2);
+
+      // 3. 编排者在当前 turn 内通过 wait 轮到它们，消费并落盘 ack: true
+      ackRunRecord("run-race-1", { env });
+      ackRunRecord("run-race-2", { env });
+
+      // 4. 当前 turn 结束，触发 queue drain
+      await binding.notifyTurnEnd({ ok: true, aborted: false });
+
+      // 5. 验证：在投递时刻发现所有 run 均已 ack，唤醒 turn 完全跳过（不进入 executedTurns）；
+      // 但随后排队的用户消息存活未被清空，且被级联 drain 正常执行！
+      expect(executedTurns).toHaveLength(1);
+      expect(executedTurns[0]?.text).toBe("user follow-up message");
+      expect(binding.queueLength()).toBe(0);
+      expect(watcher.isAcknowledged("run-race-1")).toBe(true);
+      expect(watcher.isAcknowledged("run-race-2")).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("18. 投递时刻 ack 复核（部分已 ack）：只投递剩余未 ack 的 run 并重建摘要", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-run-wake-partial-delivery-"));
+    const env = { NOLO_HOME: tempDir };
+    const executedTurns: TurnRequest[] = [];
+
+    try {
+      writeRunRecord(
+        createRecord({ runId: "run-p1", parentDialogId: "parent-dialog-1", status: "running" }),
+        { env },
+      );
+      writeRunRecord(
+        createRecord({ runId: "run-p2", parentDialogId: "parent-dialog-1", status: "running" }),
+        { env },
+      );
+
+      let activeDialogId: string | null = "parent-dialog-1";
+      const binding = createChatQueueTuiBinding(async (rawReq) => {
+        let req = createTurnRequest(rawReq);
+        if (req.event.kind === "child-run-completed") {
+          const nowMs = Date.now();
+          const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
+            req.event.runs,
+            { env, now: () => nowMs },
+          );
+          for (const runId of claimedRunIds) {
+            watcher.markAcknowledged(runId);
+          }
+          if (remainingRuns.length === 0) {
+            for (const r of req.event.runs) {
+              watcher.markAcknowledged(r.runId);
+            }
+            return { ok: true, aborted: false };
+          }
+          for (const r of remainingRuns) {
+            watcher.markAcknowledged(r.runId);
+          }
+          if (remainingRuns.length !== req.event.runs.length) {
+            const text = buildWakeMessage(remainingRuns, nowMs);
+            const displayText = buildWakeDisplayText(remainingRuns, nowMs);
+            const updatedEvent: ChildRunCompletedTurnEvent = {
+              kind: "child-run-completed",
+              runs: remainingRuns,
+              text,
+              displayText,
+            };
+            req = {
+              text,
+              event: updatedEvent,
+            };
+          }
+        }
+        executedTurns.push(req);
+        return { ok: true, aborted: false };
+      });
+
+      const watcher = createRunCompletionWatcher({
+        getCurrentDialogId: () => activeDialogId,
+        onWake: (event) => {
+          void binding.enqueue(event);
+        },
+        now: () => T0 + 10000,
+      });
+
+      binding.notifyTurnStart();
+
+      // 先观察 running
+      watcher.observe([
+        readRunRecord("run-p1", { env })!,
+        readRunRecord("run-p2", { env })!,
+      ]);
+
+      writeRunRecord(
+        createRecord({ runId: "run-p1", parentDialogId: "parent-dialog-1", status: "done" }),
+        { env },
+      );
+      writeRunRecord(
+        createRecord({ runId: "run-p2", parentDialogId: "parent-dialog-1", status: "failed", exitCode: 1 }),
+        { env },
+      );
+      watcher.observe([
+        readRunRecord("run-p1", { env })!,
+        readRunRecord("run-p2", { env })!,
+      ]);
+
+      // 仅 wait 了 run-p1
+      ackRunRecord("run-p1", { env });
+
+      // turn 结束触发 drain
+      await binding.notifyTurnEnd({ ok: true, aborted: false });
+
+      // 验证：turn 产生了一次，仅包含 run-p2
+      expect(executedTurns).toHaveLength(1);
+      const ev = executedTurns[0]?.event as ChildRunCompletedTurnEvent;
+      expect(ev.runs).toHaveLength(1);
+      expect(ev.runs[0]?.runId).toBe("run-p2");
+      expect(ev.text).toContain("runId: run-p2");
+      expect(ev.text).not.toContain("runId: run-p1");
+      expect(watcher.isAcknowledged("run-p1")).toBe(true);
+      expect(watcher.isAcknowledged("run-p2")).toBe(true);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

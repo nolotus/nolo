@@ -1,4 +1,17 @@
 
+## 0.33.0-alpha.2
+
+## 0.33.0-alpha.2 (2026-08-29)
+
+### Bug Fixes
+
+* **cli:** run 报告默认不写盘，supervise/环境变量按需生成 ([7e4b560](https://github.com/nolotus/bun-nolo/commit/7e4b5609fd0569d0f68f071f7a5365d688abd6c1))
+* **cli:** run 验收报告补子 agent 产出与结果指引，门控误导性 git 摘要 ([ccccb0d](https://github.com/nolotus/bun-nolo/commit/ccccb0d4e267dfb61c566c22cef4b189c046b9af))
+* **cli:** 后台子进程入口存在性校验，坏入口回退默认解析 ([53b0b11](https://github.com/nolotus/bun-nolo/commit/53b0b11b74b86edc68126798ef8ace0bd6539c5c))
+* **runtime:** length 截断时把 reasoning 尾部落盘，不再整轮丢失 ([23909e5](https://github.com/nolotus/bun-nolo/commit/23909e5228c4c7ce24220790b479c8351fa69faf))
+* **tui:** 终态唤醒投递时刻复核 ack，杜绝已消费 run 的重复通知 ([c3d8c17](https://github.com/nolotus/bun-nolo/commit/c3d8c17060f7f3e743545056b95a0840e6543e8d))
+
+
 ## 0.33.0-alpha.1
 
 ## 0.33.0-alpha.1 (2026-08-28)

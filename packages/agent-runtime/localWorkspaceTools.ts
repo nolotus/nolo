@@ -139,10 +139,6 @@ type WorkspaceFileArgs = {
   expectedReplacements?: unknown;
   maxDepth?: unknown;
   entryType?: unknown;
-  startLine?: unknown;
-  endLine?: unknown;
-  maxLines?: unknown;
-  tailLines?: unknown;
   lines?: unknown;
   query?: unknown;
   pattern?: unknown;
@@ -176,7 +172,6 @@ import {
   WORKSPACE_TOOL_NAMES,
   SHELL_TOOL_NAMES,
   WORKSPACE_TOOL_NAME_SET,
-  REMOVED_WORKSPACE_TOOL_NAMES,
   buildWorkspaceToolDefinition,
   filterDeclaredWorkspaceToolNames,
 } from "./localWorkspaceToolDefs";
@@ -250,7 +245,7 @@ export function buildLocalWorkspacePolicyToolNames(args: {
       toolNames: args.declaredToolNames,
       exposeShellTools: args.exposeShellTools === true,
     }),
-  ])].filter((toolName) => !REMOVED_WORKSPACE_TOOL_NAMES.has(toolName));
+  ])];
 }
 
 export function buildLocalWorkspaceOpenAiTools(args: {
@@ -363,19 +358,6 @@ function readExpectedReplacementCount(args: WorkspaceFileArgs) {
 const READ_FILE_SLICE_FALLBACK_LINES = 200;
 
 /**
- * Superseded by the single `lines` argument, undeclared in the readFile schema
- * but still honoured at runtime.
- *
- * This is deliberately the inverse of the tailLines mistake: that argument was
- * parsed and range-checked while undeclared, so a model guessing it got a
- * value error implying the argument existed. These four are accepted only so
- * in-flight callers keep working, and every use answers with a deprecation
- * warning pointing at `lines`. Delete this list — and the branch that reads
- * it — once callers have moved.
- */
-const LEGACY_SLICE_ARG_NAMES = ["startLine", "endLine", "maxLines", "tailLines"] as const;
-
-/**
  * `null` means "not provided", not "provided an invalid value".
  *
  * Models emitting JSON arguments routinely fill unused optional fields with
@@ -463,7 +445,7 @@ const LINES_RANGE_FORMAT = /^(\d+)?\s*-\s*(\d+)?$/;
  * Parse the `lines` argument into the internal slice shape.
  *
  * Returns undefined for unusable syntax — a range string has no partially
- * valid forms, so unlike the legacy integers there is nothing to salvage.
+ * valid forms, so there is nothing to salvage.
  */
 function parseLinesArg(value: unknown): { slice?: ReadFileSlice; warning?: string } {
   const text = asTrimmedString(value);
@@ -520,7 +502,6 @@ function parseLinesArg(value: unknown): { slice?: ReadFileSlice; warning?: strin
  */
 function readFileSliceArgs(args: WorkspaceFileArgs) {
   const warnings: string[] = [];
-  const legacyUsed = LEGACY_SLICE_ARG_NAMES.filter((name) => !isAbsentArg(args[name]));
   const withFallback = (slice: ReadFileSlice) => {
     warnings.push(
       `No usable line range remained; returned the first ${READ_FILE_SLICE_FALLBACK_LINES} lines instead of the whole file.`,
@@ -528,55 +509,11 @@ function readFileSliceArgs(args: WorkspaceFileArgs) {
     return { ...slice, maxLines: READ_FILE_SLICE_FALLBACK_LINES, warnings };
   };
 
-  if (!isAbsentArg(args.lines)) {
-    if (legacyUsed.length > 0) {
-      warnings.push(`Ignored ${legacyUsed.join(", ")}: superseded by lines.`);
-    }
-    const { slice, warning } = parseLinesArg(args.lines);
-    if (warning) warnings.push(warning);
-    return slice ? { ...slice, warnings } : withFallback({});
-  }
+  if (isAbsentArg(args.lines)) return { warnings };
 
-  if (legacyUsed.length === 0) return { warnings };
-
-  warnings.push(
-    `${legacyUsed.join(", ")} ${legacyUsed.length > 1 ? "are" : "is"} deprecated; use lines instead (${LINES_ARG_SYNTAX}).`,
-  );
-  // No `fallback`: a rejected legacy argument is simply absent. The whole-slice
-  // fallback is decided once, after every argument has been resolved.
-  const take = (name: (typeof LEGACY_SLICE_ARG_NAMES)[number], max?: number) =>
-    collectIntegerArg({ value: args[name], name, max, warnings });
-  const resolved: ReadFileSlice = {
-    startLine: take("startLine"),
-    endLine: take("endLine"),
-    maxLines: take("maxLines", 2000),
-    tailLines: take("tailLines", 2000),
-  };
-
-  if (
-    resolved.endLine !== undefined &&
-    resolved.startLine !== undefined &&
-    resolved.endLine < resolved.startLine
-  ) {
-    warnings.push(
-      `Ignored endLine (${resolved.endLine}): endLine must be greater than or equal to startLine (${resolved.startLine}).`,
-    );
-    resolved.endLine = undefined;
-  }
-  // Keep the explicit range and drop the tail: a range is the more specific
-  // request, and startLine usually comes from a real search hit.
-  if (
-    resolved.tailLines !== undefined &&
-    (resolved.startLine !== undefined || resolved.endLine !== undefined)
-  ) {
-    warnings.push(
-      `Ignored tailLines (${resolved.tailLines}): tailLines cannot be combined with startLine or endLine.`,
-    );
-    resolved.tailLines = undefined;
-  }
-
-  const nothingUsable = LEGACY_SLICE_ARG_NAMES.every((name) => resolved[name] === undefined);
-  return nothingUsable ? withFallback(resolved) : { ...resolved, warnings };
+  const { slice, warning } = parseLinesArg(args.lines);
+  if (warning) warnings.push(warning);
+  return slice ? { ...slice, warnings } : withFallback({});
 }
 
 /**

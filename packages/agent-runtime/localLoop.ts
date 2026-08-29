@@ -174,9 +174,12 @@ import {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  LENGTH_TRUNCATED_REASONING_MARKER,
+  MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
+  formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
 
@@ -185,9 +188,12 @@ export {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  LENGTH_TRUNCATED_REASONING_MARKER,
+  MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
+  formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
 };
 
@@ -1476,6 +1482,12 @@ export async function runLocalAgentTurn(
         if (outcome.kind === "fallback") {
           // 二次仍空：按成因选诊断文案作为最终 content 结束，不抛错
           // （行为与 server loop 对齐——两边共用同一个映射函数）。
+          if (outcome.reason === "length_truncated" && result.reasoning_content) {
+            const reasoningTailLog = formatLengthTruncatedReasoningTail(result.reasoning_content);
+            if (reasoningTailLog) {
+              console.warn(`\n${reasoningTailLog}\n`);
+            }
+          }
           result = {
             ...result,
             content: resolveEmptyAssistantFallbackMessage(outcome.reason),

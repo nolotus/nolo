@@ -7,9 +7,8 @@ export type {
 export {
   buildExecShellToolDefinition,
   normalizeExecShellInput,
-  buildLocalExecShellContext,
 } from "./execShellCapability";
-export type { ExecShellInput, LocalExecShellContextArgs } from "./execShellCapability";
+export type { ExecShellInput } from "./execShellCapability";
 
 export {
   invokeCapability,

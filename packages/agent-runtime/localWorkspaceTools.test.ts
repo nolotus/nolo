@@ -285,32 +285,6 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     });
   });
 
-  test("readFile still honours the legacy integer arguments, with a deprecation warning", async () => {
-    const root = createWorkspace();
-    writeFileSync(join(root, "notes.md"), "one\ntwo\nthree\nfour\n");
-    const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
-
-    // In-flight callers keep working; the warning points them at `lines`.
-    const legacy = await executors.readFile({
-      id: "call-read-legacy",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", startLine: 2, endLine: 3 }),
-    });
-    expect(legacy.content).toBe("two\nthree");
-    expect(warningsOf(legacy)[0]).toBe(
-      'startLine, endLine are deprecated; use lines instead ("40-120", "120-", "-50", or "50").',
-    );
-
-    // `lines` wins outright rather than being merged with the legacy arguments.
-    const both = await executors.readFile({
-      id: "call-read-both",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", lines: "1-2", tailLines: 1 }),
-    });
-    expect(both.content).toBe("one\ntwo");
-    expect(warningsOf(both)[0]).toBe("Ignored tailLines: superseded by lines.");
-  });
-
   test("readFile drops an unusable lines argument and reports it instead of failing", async () => {
     const root = createWorkspace();
     writeFileSync(join(root, "notes.md"), "one\ntwo\nthree\n");
@@ -346,84 +320,6 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     expect(warningsOf(wrongType)[0]).toBe(
       'Ignored lines: expected "40-120", "120-", "-50", or "50", received 40.',
     );
-  });
-
-  test("readFile drops invalid legacy arguments and reports them instead of failing", async () => {
-    const root = createWorkspace();
-    writeFileSync(join(root, "notes.md"), "one\ntwo\nthree\n");
-    const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
-
-    const badStart = await executors.readFile({
-      id: "call-read-bad-start",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", startLine: 0 }),
-    });
-    expect(badStart.content).toBe("one\ntwo\nthree");
-    expect(warningsOf(badStart)[1]).toBe(
-      "Ignored startLine: expected a positive integer, received 0.",
-    );
-    expect(warningsOf(badStart)[2]).toContain("returned the first 200 lines");
-
-    // endLine < startLine drops only endLine; the startLine hit is kept.
-    const badEnd = await executors.readFile({
-      id: "call-read-bad-end",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", startLine: 2, endLine: 1, force: true }),
-    });
-    expect(badEnd.content).toBe("two\nthree");
-    expect(warningsOf(badEnd)[1]).toBe(
-      "Ignored endLine (1): endLine must be greater than or equal to startLine (2).",
-    );
-
-    // The explicit range wins over the tail; tailLines is the one dropped.
-    const badCombo = await executors.readFile({
-      id: "call-read-bad-combo",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", startLine: 2, tailLines: 1, force: true }),
-    });
-    expect(badCombo.content).toBe("two\nthree");
-    expect(warningsOf(badCombo)[1]).toBe(
-      "Ignored tailLines (1): tailLines cannot be combined with startLine or endLine.",
-    );
-
-    // Non-numeric legacy input reaches readIntegerArg through the deprecation
-    // branch, not the `lines` parser. Drop this with LEGACY_SLICE_ARG_NAMES.
-    const badTail = await executors.readFile({
-      id: "call-read-bad-tail",
-      name: "readFile",
-      arguments: JSON.stringify({ path: "notes.md", tailLines: "not-a-number", force: true }),
-    });
-    expect(badTail.content).toBe("one\ntwo\nthree");
-    expect(warningsOf(badTail)[1]).toBe(
-      'Ignored tailLines: expected a positive integer, received "not-a-number".',
-    );
-    expect(warningsOf(badTail)[2]).toContain("returned the first 200 lines");
-  });
-
-  test("readFile treats null slice arguments as not provided", async () => {
-    const root = createWorkspace();
-    writeFileSync(join(root, "notes.md"), "one\ntwo\nthree\n");
-    const executors = createLocalWorkspaceToolExecutors({ workspaceRoot: root });
-
-    // Models emitting JSON arguments routinely null out optional fields they
-    // are not using; that must not shrink the read or raise warnings.
-    const result = await executors.readFile({
-      id: "call-read-nulls",
-      name: "readFile",
-      arguments: JSON.stringify({
-        path: "notes.md",
-        startLine: null,
-        endLine: null,
-        maxLines: null,
-        tailLines: null,
-      }),
-    });
-
-    // Verbatim content, trailing newline included: an all-absent call takes the
-    // untouched whole-file path, not the line-rejoining slice path.
-    expect(result.content).toBe("one\ntwo\nthree\n");
-    expect(result.metadata).not.toHaveProperty("warnings");
-    expect(result.metadata).toMatchObject({ truncated: false, totalLines: 3 });
   });
 
   test("readFile leaves valid reads free of warnings", async () => {
@@ -1073,12 +969,6 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     for (const toolName of [
       removedPatchTool,
       removedScriptTool,
-      "gitStatus",
-      "gitDiff",
-      "gitCreateBranch",
-      "gitAdd",
-      "gitCommit",
-      "commitWorkspace",
     ]) {
       expect(executors).not.toHaveProperty(toolName);
     }
@@ -1287,7 +1177,7 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     })).toEqual(["readFile"]);
   });
 
-  test("does not carry removed semantic git tools into local policy tool names", () => {
+  test("does not carry retired git tools into local policy tool names", () => {
     expect(buildLocalWorkspacePolicyToolNames({
       declaredToolNames: [
         "gitStatus",
@@ -1355,7 +1245,7 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     ]);
   });
 
-  test("does not expose removed semantic git tools in model schemas", () => {
+  test("does not expose retired git tools in model schemas", () => {
     expect(buildLocalWorkspaceOpenAiTools({
       toolNames: [
         "gitStatus",

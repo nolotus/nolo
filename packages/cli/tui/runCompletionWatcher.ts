@@ -19,7 +19,12 @@
  * - ephemeral 或结果缺失的 run 提供 fallback 说明，防止 readDialog 坍塌。
  */
 
-import { isRunRecordClaimed, type RunRecord } from "../agentRunControl";
+import {
+  isRunRecordClaimed,
+  readRunRecord,
+  type AgentRunControlDeps,
+  type RunRecord,
+} from "../agentRunControl";
 import { readTimestamp } from "../client/agentRunSnapshot";
 import {
   clipText,
@@ -36,6 +41,144 @@ import {
 
 /** 每条 run 的 note 摘要在唤醒消息里的截断长度。 */
 const WAKE_NOTE_MAX_CHARS = 300;
+
+export function runDuration(
+  record: RunRecord | AgentRunCompletionShape,
+  nowMs: number = Date.now()
+): string {
+  return (
+    formatRunAge(
+      {
+        startedAt: readTimestamp(record.startedAt as any),
+        finishedAt: readTimestamp((record as any).endedAt ?? (record as any).finishedAt),
+      },
+      nowMs
+    ) ?? ""
+  );
+}
+
+export function isFailureStatus(status: unknown): boolean {
+  return typeof status === "string" && status !== "done";
+}
+
+export function describeRun(
+  record: RunRecord | AgentRunCompletionShape,
+  nowMs: number = Date.now()
+): string[] {
+  const lines = [
+    `runId: ${record.runId}`,
+    `agent: ${resolveRunLabel(record as any)}`,
+    `status: ${record.status}`,
+  ];
+  // 正常完成的 run 不报 exitCode / 活动计数：那是诊断信息，成功时模型要
+  // 的只是「谁干完了、结果去哪取」。「结果去哪取」（childDialogId /
+  // ephemeral）任何状态都要给，否则模型会去 readDialog 一个不存在的对话。
+  const verbose = isFailureStatus(record.status);
+  if (verbose && typeof record.exitCode === "number") {
+    lines.push(`exitCode: ${record.exitCode}`);
+  }
+  if (record.dialogId) {
+    lines.push(`childDialogId: ${record.dialogId}`);
+  } else if ((record as any).ephemeral) {
+    lines.push(`ephemeral: true (no persisted child dialog)`);
+  } else {
+    lines.push(`childDialogId: missing (result unpersisted or ephemeral)`);
+  }
+  const duration = runDuration(record, nowMs);
+  if (duration) lines.push(`duration: ${duration}`);
+  const recordError =
+    "error" in record && typeof record.error === "string" ? record.error : undefined;
+  const note =
+    typeof record.note === "string"
+      ? clipText(record.note, WAKE_NOTE_MAX_CHARS)
+      : typeof recordError === "string"
+      ? clipText(recordError, WAKE_NOTE_MAX_CHARS)
+      : "";
+  if (note) lines.push(`note: ${note}`);
+  const counters = verbose ? record.activity?.counters : undefined;
+  if (
+    counters &&
+    typeof counters.toolCalls === "number" &&
+    typeof counters.llmCalls === "number" &&
+    typeof counters.fileEdits === "number"
+  ) {
+    lines.push(
+      `activity: ${counters.toolCalls} tool calls · ${counters.llmCalls} llm calls · ${counters.fileEdits} edits`
+    );
+  }
+  return lines;
+}
+
+export function buildWakeMessage(
+  finished: (RunRecord | AgentRunCompletionShape)[],
+  nowMs: number = Date.now()
+): string {
+  const lines = [
+    `【后台 run 终态通知】你派出的 ${finished.length} 条后台 run 已到达终态：`,
+  ];
+  for (const record of finished) {
+    lines.push("", ...describeRun(record, nowMs));
+  }
+  lines.push(
+    "",
+    "以上是你通过 startAgentRun 派出的后台 run 的终态通知（系统内部事件，不是用户消息）。请阅读上面的摘要并自己决定下一步：汇总结果、继续后续工作、或向用户汇报结论。需要完整输出时用 controlAgentRun(action:\"status\", runId, tailLines:30) 拉取对应 run 的日志。"
+  );
+  return lines.join("\n");
+}
+
+/**
+ * 屏幕上那一行。
+ *
+ * 终态唤醒不是用户说的话，却一直被当成 user message 整段印进 transcript
+ * （runId/exitCode/childDialogId/activity 全文），还得在文案里自辩「这是系
+ * 统内部事件」——那句自辩本身就是渲染漏了一层的证据。这里给 UI 一行紧凑
+ * 摘要，详情留在 dock 面板和子 dialog。
+ */
+export function buildWakeDisplayText(
+  finished: (RunRecord | AgentRunCompletionShape)[],
+  nowMs: number = Date.now()
+): string {
+  const parts = finished.map((record) => {
+    const mark = isFailureStatus(record.status) ? "✗" : "✓";
+    const duration = runDuration(record, nowMs);
+    const label = resolveRunLabel(record as any);
+    const status = isFailureStatus(record.status) ? ` ${record.status}` : "";
+    return `${mark} ${label}${status}${duration ? ` · ${duration}` : ""}`;
+  });
+  return `${finished.length} 条后台 run 已完成 · ${parts.join(" · ")}`;
+}
+
+/**
+ * 投递时刻唤醒事件 ack 复核。
+ *
+ * 唤醒事件在 watcher observe 时入队，到 readlineWorkspace 真正消费成 turn 之间，
+ * 编排者可能已经通过 wait 同步消费了其中的 run（并落盘 ack:true 或持有有效租约）。
+ * 此函数在 turn 真正开始前重读磁盘记录，剔除所有已被 claim/ack 的 run。
+ */
+export function filterUnclaimedChildRuns(
+  runs: (RunRecord | AgentRunCompletionShape)[],
+  deps: Omit<AgentRunControlDeps, "now"> & { now?: () => number | Date } = {}
+): {
+  remainingRuns: AgentRunCompletionShape[];
+  claimedRunIds: string[];
+} {
+  const rawNow = deps.now ? deps.now() : Date.now();
+  const nowMs = typeof rawNow === "number" ? rawNow : rawNow.getTime();
+  const remainingRuns: AgentRunCompletionShape[] = [];
+  const claimedRunIds: string[] = [];
+
+  for (const r of runs) {
+    const record = readRunRecord(r.runId, deps as AgentRunControlDeps);
+    const target = record ?? (r as any);
+    if (isRunRecordClaimed(target, nowMs)) {
+      claimedRunIds.push(r.runId);
+    } else {
+      remainingRuns.push(normalizeRunCompletionShape(r));
+    }
+  }
+
+  return { remainingRuns, claimedRunIds };
+}
 
 export type RunCompletionWatcherDeps = {
   /** 当前打开的 dialogId；只有属于当前对话的 run 才唤醒（用户切走了就跳过）。 */
@@ -63,98 +206,6 @@ export function createRunCompletionWatcher(
   const createdAt = now();
   const lastStatusByRunId = new Map<string, string>();
   const notifiedRunIds = new Set<string>();
-
-  const runDuration = (record: RunRecord | AgentRunCompletionShape): string =>
-    formatRunAge(
-      {
-        startedAt: readTimestamp(record.startedAt as any),
-        finishedAt: readTimestamp((record as any).endedAt ?? (record as any).finishedAt),
-      },
-      now()
-    ) ?? "";
-
-  const isFailureStatus = (status: unknown): boolean =>
-    typeof status === "string" && status !== "done";
-
-  const describeRun = (record: RunRecord | AgentRunCompletionShape): string[] => {
-    const lines = [
-      `runId: ${record.runId}`,
-      `agent: ${resolveRunLabel(record as any)}`,
-      `status: ${record.status}`,
-    ];
-    // 正常完成的 run 不报 exitCode / 活动计数：那是诊断信息，成功时模型要
-    // 的只是「谁干完了、结果去哪取」。「结果去哪取」（childDialogId /
-    // ephemeral）任何状态都要给，否则模型会去 readDialog 一个不存在的对话。
-    const verbose = isFailureStatus(record.status);
-    if (verbose && typeof record.exitCode === "number") {
-      lines.push(`exitCode: ${record.exitCode}`);
-    }
-    if (record.dialogId) {
-      lines.push(`childDialogId: ${record.dialogId}`);
-    } else if ((record as any).ephemeral) {
-      lines.push(`ephemeral: true (no persisted child dialog)`);
-    } else {
-      lines.push(`childDialogId: missing (result unpersisted or ephemeral)`);
-    }
-    const duration = runDuration(record);
-    if (duration) lines.push(`duration: ${duration}`);
-    const recordError =
-      "error" in record && typeof record.error === "string" ? record.error : undefined;
-    const note =
-      typeof record.note === "string"
-        ? clipText(record.note, WAKE_NOTE_MAX_CHARS)
-        : typeof recordError === "string"
-        ? clipText(recordError, WAKE_NOTE_MAX_CHARS)
-        : "";
-    if (note) lines.push(`note: ${note}`);
-    const counters = verbose ? record.activity?.counters : undefined;
-    if (
-      counters &&
-      typeof counters.toolCalls === "number" &&
-      typeof counters.llmCalls === "number" &&
-      typeof counters.fileEdits === "number"
-    ) {
-      lines.push(
-        `activity: ${counters.toolCalls} tool calls · ${counters.llmCalls} llm calls · ${counters.fileEdits} edits`
-      );
-    }
-    return lines;
-  };
-
-  const buildWakeMessage = (finished: (RunRecord | AgentRunCompletionShape)[]): string => {
-    const lines = [
-      `【后台 run 终态通知】你派出的 ${finished.length} 条后台 run 已到达终态：`,
-    ];
-    for (const record of finished) {
-      lines.push("", ...describeRun(record));
-    }
-    lines.push(
-      "",
-      "以上是你通过 startAgentRun 派出的后台 run 的终态通知（系统内部事件，不是用户消息）。请阅读上面的摘要并自己决定下一步：汇总结果、继续后续工作、或向用户汇报结论。需要完整输出时用 controlAgentRun(action:\"status\", runId, tailLines:30) 拉取对应 run 的日志。"
-    );
-    return lines.join("\n");
-  };
-
-  /**
-   * 屏幕上那一行。
-   *
-   * 终态唤醒不是用户说的话，却一直被当成 user message 整段印进 transcript
-   * （runId/exitCode/childDialogId/activity 全文），还得在文案里自辩「这是系
-   * 统内部事件」——那句自辩本身就是渲染漏了一层的证据。这里给 UI 一行紧凑
-   * 摘要，详情留在 dock 面板和子 dialog。
-   */
-  const buildWakeDisplayText = (
-    finished: (RunRecord | AgentRunCompletionShape)[]
-  ): string => {
-    const parts = finished.map((record) => {
-      const mark = isFailureStatus(record.status) ? "✗" : "✓";
-      const duration = runDuration(record);
-      const label = resolveRunLabel(record as any);
-      const status = isFailureStatus(record.status) ? ` ${record.status}` : "";
-      return `${mark} ${label}${status}${duration ? ` · ${duration}` : ""}`;
-    });
-    return `${finished.length} 条后台 run 已完成 · ${parts.join(" · ")}`;
-  };
 
   return {
     observe(records: (RunRecord | AgentRunCompletionShape | Record<string, any>)[]): void {
@@ -207,12 +258,12 @@ export function createRunCompletionWatcher(
       if (finished.length === 0) return;
 
       const shapes = finished.map((r) => normalizeRunCompletionShape(r));
-      const summaryText = buildWakeMessage(finished);
+      const summaryText = buildWakeMessage(finished, now());
       const event: ChildRunCompletedTurnEvent = {
         kind: "child-run-completed",
         runs: shapes,
         text: summaryText,
-        displayText: buildWakeDisplayText(finished),
+        displayText: buildWakeDisplayText(finished, now()),
       };
 
       deps.onWake(event);

@@ -14,8 +14,9 @@
  *  1. Orchestration tools are only for interactive agents, never for subtasks.
  *  2. Subtasks default to ZERO project context — all context comes from the
  *     caller's `task` / `input` payload.
- *  3. Subtasks keep read-only git tools but lose git write tools
- *     (gitAdd/gitCommit/gitCreateBranch/commitWorkspace).
+ *  3. Subtasks lose orchestration and interaction-required tools; the remaining
+ *     workspace tools (readFile/writeFile/editFile/execShell/globFiles/...) are
+ *     kept so the subtask can do its work.
  *  4. Defense in depth: run-layer filtering (code) + config-layer trimming
  *     (platform config, documented separately).
  *
@@ -43,34 +44,15 @@ export type RunIsolationEnvLike = Record<string, string | undefined>;
  * (unbounded fan-out) or introspect other agents' configs.
  *
  * `agent-orchestration` capability pack contributes the first three; the rest
- * are agent-related tools that either dispatch (startAgentRun, runStreamingAgent,
- * startAgentDialog, streamParallelAgents) or introspect (readAgent, listAgents).
+ * are agent-related tools that either dispatch (startAgentRun, runStreamingAgent)
+ * or introspect (readAgent, listAgents).
  */
 export const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set([
   "startAgentRun",
   "controlAgentRun",
   "listAgents",
   "readAgent",
-  "startAgentDialog",
   "runStreamingAgent",
-  "streamParallelAgents",
-]);
-
-/**
- * Git write tool names removed for subtasks. Read-only git inspection (gitStatus,
- * gitDiff) is retained so a subtask can verify repo state, but mutating git
- * (add/commit/create-branch/commitWorkspace) is the interactive agent's job —
- * the subtask should only produce diffs and let the orchestrator commit.
- *
- * Mirrors `REMOVED_WORKSPACE_TOOL_NAMES` in localWorkspaceToolDefs.ts; kept
- * here as an explicit list so the isolation module is the single source of
- * truth for what a subtask loses.
- */
-export const SUBTASK_REMOVED_GIT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "gitAdd",
-  "gitCommit",
-  "gitCreateBranch",
-  "commitWorkspace",
 ]);
 
 /**
@@ -85,10 +67,9 @@ export const INTERACTION_REQUIRED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "ask_user",
 ]);
 
-/** All tool names a subtask must NOT receive (orchestration + git write + interaction). */
+/** All tool names a subtask must NOT receive (orchestration + interaction). */
 export const SUBTASK_REMOVED_TOOL_NAMES: ReadonlySet<string> = new Set([
   ...ORCHESTRATION_TOOL_NAMES,
-  ...SUBTASK_REMOVED_GIT_TOOL_NAMES,
   ...INTERACTION_REQUIRED_TOOL_NAMES,
 ]);
 
@@ -114,9 +95,9 @@ export function isSubtaskRun(env: RunIsolationEnvLike | undefined): boolean {
  *
  * - Interactive runs (`isSubtask=false`): returned unchanged — zero behavior
  *   change for the existing interactive path.
- * - Subtask runs: orchestration tools + git write tools removed. The remaining
- *   "干活" tools (readFile/writeFile/editFile/execShell/globFiles/... plus
- *   read-only git) are kept so the subtask can actually do its work.
+ * - Subtask runs: orchestration + interaction-required tools removed. The
+ *   remaining "干活" tools (readFile/writeFile/editFile/execShell/globFiles/...)
+ *   are kept so the subtask can actually do its work.
  *
  * This filter is applied at the tool-NAME layer (before prepareTools), so the
  * existing prepareTools cache key (built from the final name list) stays

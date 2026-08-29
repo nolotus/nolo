@@ -35,6 +35,7 @@ import {
   spawnLocalBackgroundRun,
   stripBackgroundFlag,
   absolutizeSkillArgs,
+  buildAgentRunChildCommand,
   rewriteMsgFileArg,
   writeRunRecord,
   type LocalAgentLoopEvent,
@@ -153,7 +154,7 @@ function createDeps(overrides: Partial<AgentRunControlDeps> = {}): AgentRunContr
   return {
     env: { NOLO_HOME: "/home/test/.nolo" },
     homedir: () => "/home/test",
-    fs: createInMemoryFs(),
+    fs: createInMemoryFs({ "/repo/packages/cli/index.ts": "" }),
     now: () => new Date("2025-01-01T00:00:00.000Z"),
     generateRunId: () => "run-2025-01-01T00-00-00-000Z-abc123",
     ...overrides,
@@ -432,6 +433,35 @@ describe("agent run control plane", () => {
     );
 
     expect(calls[0].args).toEqual(["run", "local-codex", "--msg", "hello"]);
+  });
+
+  test("buildAgentRunChildCommand falls back to valid entrypoint when cliEntrypointPath does not exist", () => {
+    const memFs = createInMemoryFs({});
+    const cmd = buildAgentRunChildCommand(
+      {
+        rawArgs: ["local-codex", "--msg", "hello"],
+        commandPath: ["agent", "run"],
+        cliEntrypointPath: "/nonexistent/packages/index.ts",
+      },
+      { fs: memFs }
+    );
+    // Should NOT use the invalid /nonexistent/packages/index.ts
+    expect(cmd.childArgs[0]).not.toBe("/nonexistent/packages/index.ts");
+    expect(cmd.childArgs).toContain("agent");
+    expect(cmd.childArgs).toContain("run");
+  });
+
+  test("buildAgentRunChildCommand uses cliEntrypointPath when it exists", () => {
+    const memFs = createInMemoryFs({ "/valid/custom/entry.ts": "" });
+    const cmd = buildAgentRunChildCommand(
+      {
+        rawArgs: ["local-codex", "--msg", "hello"],
+        commandPath: ["agent", "run"],
+        cliEntrypointPath: "/valid/custom/entry.ts",
+      },
+      { fs: memFs }
+    );
+    expect(cmd.childArgs[0]).toBe("/valid/custom/entry.ts");
   });
 
   test("spawnLocalBackgroundRun records dodCommands and spawnHead", async () => {

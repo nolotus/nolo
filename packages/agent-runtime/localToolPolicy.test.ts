@@ -140,14 +140,17 @@ describe("local tool policy", () => {
     })).toMatchObject({ allowed: false });
   });
 
-  test("blocks removed semantic git workflow tools even when declared", () => {
+  test("retired git workflow tools fall through to the normal declared-tool path", () => {
+    // The special removed-tools rejection branch is gone; these tools
+    // now behave like any other declared tool (allowed when declared in
+    // non-restricted mode) and are simply absent from the executor surface.
     for (const toolName of ["gitCreateBranch", "gitAdd", "gitCommit", "commitWorkspace"]) {
       expect(resolveLocalToolPolicy({
         env: {},
         agentToolNames: [toolName],
         toolName,
       })).toMatchObject({
-        allowed: false,
+        allowed: true,
         toolName,
       });
     }

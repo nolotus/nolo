@@ -684,7 +684,7 @@ export async function runAgentSuperviseCommand(
           // If neither report exists on disk yet, generate report synchronously
           if (!reportJson && !reportMarkdown) {
             try {
-              const gen = await generateRunReport(terminalRecord, { env, homedir, fs, now });
+              const gen = await generateRunReport(terminalRecord, { env, homedir, fs, now, forceReport: true });
               reportMarkdown = gen.markdown;
               reportJson = gen.report;
             } catch {

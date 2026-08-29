@@ -2,12 +2,14 @@
 // Writes markdown to ~/.nolo/runs/<runId>.report.md and structured JSON to ~/.nolo/runs/<runId>.report.json.
 
 import { homedir as nodeHomedir } from "node:os";
+import { join } from "node:path";
 import * as nodeFs from "node:fs";
 import {
   execFileSync as nodeExecFileSync,
   spawnSync as nodeSpawnSync,
 } from "node:child_process";
 import {
+  resolveRunLogPath,
   resolveRunReportPath,
   resolveRunReportJsonPath,
   resolveRunsDir,
@@ -22,6 +24,7 @@ export type AgentRunReportDeps = {
   now?: () => Date;
   spawnSync?: typeof nodeSpawnSync;
   execFileSync?: typeof nodeExecFileSync;
+  forceReport?: boolean;
 };
 
 export type DoDCommandResult = {
@@ -42,6 +45,7 @@ export type RunReportJson = {
   duration: string;
   activity?: { fileEdits: number; toolCalls: number; llmCalls: number };
   dialogId?: string;
+  childOutputTail?: string;
   dodResults?: DoDCommandResult[];
   gitSummary?: GitSummaryResult;
   generatedAt: string;
@@ -258,6 +262,63 @@ export function parseDoDResultsFromMarkdown(markdown: string): {
   return { passed, dodResults };
 }
 
+export function extractChildAgentOutput(
+  logPath: string | undefined,
+  deps: AgentRunReportDeps = {}
+): string | undefined {
+  if (!logPath) return undefined;
+  const fs = deps.fs ?? nodeFs;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(logPath, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  // Remove ANSI escape sequences (OSC and CSI)
+  const stripped = raw
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, "")
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+
+  const lines = stripped.split(/\r?\n/);
+
+  // Find the last line matching an assistant turn header: "agent-xxx > ..." or "... > ..."
+  let lastMarkerLineIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (/^(?:agent-[^\s>]+|[a-zA-Z0-9_@/.-]+)\s*>\s*/.test(line)) {
+      lastMarkerLineIdx = i;
+      break;
+    }
+  }
+
+  if (lastMarkerLineIdx === -1) return undefined;
+
+  const collectedLines: string[] = [];
+  const firstLine = lines[lastMarkerLineIdx];
+  const firstMarkerIdx = firstLine.indexOf(" > ");
+  collectedLines.push(firstLine.slice(firstMarkerIdx + 3));
+
+  for (let j = lastMarkerLineIdx + 1; j < lines.length; j++) {
+    const line = lines[j];
+    if (line.startsWith("[nolo] dialog") || line.startsWith("[nolo] background dialog")) {
+      break;
+    }
+    collectedLines.push(line);
+  }
+
+  const joined = collectedLines.join("\n").trim();
+  if (!joined) return undefined;
+
+  const MAX_CHARS = 2000;
+  const chars = Array.from(joined);
+  if (chars.length > MAX_CHARS) {
+    return `${chars.slice(0, MAX_CHARS).join("")}\n\n...(截断，完整日志请查看 log)...`;
+  }
+  return joined;
+}
+
 export async function buildRunReportData(
   record: RunRecord,
   deps: AgentRunReportDeps = {}
@@ -272,6 +333,16 @@ export async function buildRunReportData(
   const agentDisplay = record.agentName ? `${record.agentName} (${record.agentKey})` : record.agentKey;
   const dialogIdStr = record.dialogId || "-";
 
+  const resolvedLogPath = record.logPath || resolveRunLogPath(record.runId, deps.env, deps.homedir);
+  const runsDir = resolveRunsDir(deps.env, deps.homedir);
+  const reportPath = resolveRunReportPath(record.runId, deps.env, deps.homedir);
+  const reportJsonPath = resolveRunReportJsonPath(record.runId, deps.env, deps.homedir);
+  const msgPath = record.msgFile ?? join(runsDir, `${record.runId}.msg.md`);
+  const fs = deps.fs ?? nodeFs;
+  const msgPathExists = fs.existsSync(msgPath);
+
+  const childOutput = extractChildAgentOutput(resolvedLogPath, deps);
+
   const lines: string[] = [];
   lines.push(`# Run 验收报告: ${record.runId}`);
   lines.push("");
@@ -283,11 +354,42 @@ export async function buildRunReportData(
   lines.push(`| agent | ${agentDisplay} |`);
   lines.push(`| status | ${record.status} |`);
   lines.push(`| exitCode | ${exitCodeStr} |`);
+  lines.push(`| 开始时间 | ${record.startedAt} |`);
+  lines.push(`| 结束时间 | ${record.endedAt ?? "-"} |`);
   lines.push(`| 耗时 | ${duration} |`);
   lines.push(`| activity | ${activityStr} |`);
   lines.push(`| dialogId | ${dialogIdStr} |`);
   lines.push("");
 
+  // ## 子 Agent 产出
+  lines.push("## 子 Agent 产出");
+  lines.push("");
+  if (childOutput) {
+    lines.push(childOutput);
+  } else {
+    lines.push(`（无法从 log 提取最终答复，完整日志：${resolvedLogPath}）`);
+  }
+  lines.push("");
+
+  // ## 结果去哪取
+  lines.push("## 结果去哪取");
+  lines.push("");
+  if (record.dialogId) {
+    lines.push(
+      `- 对话记录: ${record.dialogId}（可用 controlAgentRun(action:"status", runId:"${record.runId}") 查看，或终端运行 nolo dialog read ${record.dialogId}）`
+    );
+  } else {
+    lines.push("- 对话记录: 无（未持久化或 ephemeral run）");
+  }
+  lines.push(`- 完整日志: ${resolvedLogPath}`);
+  if (msgPathExists) {
+    lines.push(`- 任务输入: ${msgPath}`);
+  }
+  lines.push(`- 验收报告 (Markdown): ${reportPath}`);
+  lines.push(`- 验收报告 (JSON): ${reportJsonPath}`);
+  lines.push("");
+
+  // DoD Results
   let dodResults: DoDCommandResult[] | undefined;
   if (record.dodCommands && record.dodCommands.length > 0) {
     dodResults = [];
@@ -308,30 +410,28 @@ export async function buildRunReportData(
     lines.push("");
   }
 
-  // Git Summary
-  lines.push("## Git 摘要");
-  lines.push("");
-  const gitSummary = collectGitSummary(record.cwd, record.spawnHead, deps);
-  if (!gitSummary.isGitRepo) {
-    lines.push("非 Git 仓库或 Git 不可用");
-  } else if (gitSummary.error) {
-    lines.push(`Git 统计异常: ${gitSummary.error}`);
-  } else {
-    lines.push(`- 变更统计: ${gitSummary.modifiedCount ?? 0} modified / ${gitSummary.untrackedCount ?? 0} untracked`);
-    if (record.spawnHead) {
+  // Git Summary: Only show if spawnHead is present and there are new commits
+  // 限制说明：record.cwd 即子 agent 工作区，本地 run 恒成立；跨 worktree 场景待 ProcessTask 落地时统一解决。
+  let gitSummary: GitSummaryResult | undefined;
+  if (record.spawnHead) {
+    const summary = collectGitSummary(record.cwd, record.spawnHead, deps);
+    if (
+      summary.isGitRepo &&
+      summary.commits &&
+      summary.commits.length > 0 &&
+      !summary.error &&
+      !summary.commits[0]?.startsWith("(")
+    ) {
+      gitSummary = summary;
+      lines.push("## Git 摘要");
+      lines.push("");
       lines.push(`- 新增 Commit (${record.spawnHead}..HEAD):`);
-      if (gitSummary.commits && gitSummary.commits.length > 0) {
-        for (const c of gitSummary.commits) {
-          lines.push(`  - ${c}`);
-        }
-      } else {
-        lines.push("  - (无新 commit)");
+      for (const c of summary.commits) {
+        lines.push(`  - ${c}`);
       }
-    } else {
-      lines.push("- 新增 Commit: 未记录 spawnHead");
+      lines.push("");
     }
   }
-  lines.push("");
 
   // Ending timestamp
   lines.push("---");
@@ -350,8 +450,9 @@ export async function buildRunReportData(
     duration,
     activity: { fileEdits: edits, toolCalls: tools, llmCalls },
     ...(record.dialogId ? { dialogId: record.dialogId } : {}),
+    ...(childOutput ? { childOutputTail: childOutput } : {}),
     ...(dodResults ? { dodResults } : {}),
-    gitSummary,
+    ...(gitSummary ? { gitSummary } : {}),
     generatedAt: now.toISOString(),
   };
 
@@ -379,12 +480,15 @@ export async function generateRunReport(
 
   const { markdown, report } = await buildRunReportData(record, deps);
 
-  try {
-    fs.mkdirSync(runsDir, { recursive: true });
-    fs.writeFileSync(reportPath, markdown, "utf8");
-    fs.writeFileSync(reportJsonPath, JSON.stringify(report, null, 2), "utf8");
-  } catch (err) {
-    console.warn(`[nolo] failed to write run report file to ${reportPath}:`, err);
+  const shouldWrite = deps.forceReport === true || env.NOLO_RUN_REPORT === "1";
+  if (shouldWrite) {
+    try {
+      fs.mkdirSync(runsDir, { recursive: true });
+      fs.writeFileSync(reportPath, markdown, "utf8");
+      fs.writeFileSync(reportJsonPath, JSON.stringify(report, null, 2), "utf8");
+    } catch (err) {
+      console.warn(`[nolo] failed to write run report file to ${reportPath}:`, err);
+    }
   }
 
   return { reportPath, reportJsonPath, markdown, report };

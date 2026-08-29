@@ -19,15 +19,6 @@ const NEVER_LOCAL_TOOLS = new Set([
   "createAgent",
 ]);
 
-const REMOVED_LOCAL_TOOLS = new Set([
-  "gitStatus",
-  "gitDiff",
-  "gitCreateBranch",
-  "gitAdd",
-  "gitCommit",
-  "commitWorkspace",
-]);
-
 /**
  * Tools every local agent gets without an allowlist. Exported because tests
  * used to keep their own transcribed copies, which silently fell behind each
@@ -100,14 +91,6 @@ export function resolveLocalToolPolicy(args: {
       allowed: false,
       toolName,
       reason: `${toolName} is blocked by the local runtime safety policy.`,
-    };
-  }
-
-  if (REMOVED_LOCAL_TOOLS.has(toolName)) {
-    return {
-      allowed: false,
-      toolName,
-      reason: `${toolName} has been removed from the local runtime tool surface. Use execShell in shell-enabled workspace runs when shell is needed.`,
     };
   }
 

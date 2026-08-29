@@ -298,15 +298,15 @@ describe("prepareTools", () => {
   });
 
   it("agent-run isolation: subtask-filtered tool list produces a distinct cache key from the interactive list", () => {
-    // The runKind filter removes orchestration + git-write names BEFORE
+    // The runKind filter removes orchestration + interaction names BEFORE
     // prepareTools, so the two run kinds feed prepareTools different name
     // lists. prepareTools' cache key is built from the final name list, so
     // interactive and subtask results are cached separately — no cache
     // poisoning across run kinds.
-    // Note: gitAdd/gitCommit are REMOVED_WORKSPACE_TOOL_NAMES (not in
-    // toolRegistry), so prepareTools warns and drops them. The filter still
-    // removes them from the subtask list; here we verify the cacheKey split
-    // using real registry tools (readFile/writeFile/startAgentRun/controlAgentRun).
+    // Note: gitAdd/gitCommit are retired tools (not in toolRegistry), so
+    // prepareTools warns and drops them. The filter still removes them from
+    // the subtask list; here we verify the cacheKey split using real registry
+    // tools (readFile/writeFile/startAgentRun/controlAgentRun).
     const interactiveNames = [
       "readFile",
       "writeFile",

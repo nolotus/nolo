@@ -6,7 +6,11 @@ import {
   runLocalAgentTurn,
   summarizeHistoricalToolContent,
 } from "./localLoop";
-import { MAX_REASONING_ONLY_REPAIRS } from "./emptyAssistantRepair";
+import {
+  MAX_REASONING_ONLY_REPAIRS,
+  LENGTH_TRUNCATED_FALLBACK_MESSAGE,
+  LENGTH_TRUNCATED_REASONING_MARKER,
+} from "./emptyAssistantRepair";
 import type { AgentRuntimeHostAdapter, AgentRuntimeSaveTurnInput } from "./hostAdapter";
 import type { AgentRuntimeChatMessage } from "./types";
 import { FRESH_TOOL_OUTPUT_MAX_CHARS } from "../ai/agent/toolOutputPolicy";
@@ -2462,6 +2466,53 @@ describe("runLocalAgentTurn", () => {
     // 第一轮空 → repair；第二轮仍空 → fallback 结束
     expect(completeCalls).toBe(2);
     expect(savedTurns).toHaveLength(1);
+  });
+
+  test("length truncated turn with reasoning logs reasoning tail with marker and returns fallback message", async () => {
+    const origWarn = console.warn;
+    const warns: string[] = [];
+    console.warn = (...args: any[]) => {
+      warns.push(args.join(" "));
+    };
+
+    try {
+      const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+      const reasoningSample = "Detailed reasoning: The review found 2 issues. Overall status: APPROVE. " + "x".repeat(3000);
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence"],
+        loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+        loadDialogHistory: async () => [],
+        saveTurn: async (input) => {
+          savedTurns.push(input);
+          return { dialogId: "dialog-length-trunc" };
+        },
+        resolveProvider: async () => ({
+          model: "m",
+          complete: async () => ({
+            content: "",
+            reasoning_content: reasoningSample,
+            finish_reason: "length",
+            model: "m",
+          } as any),
+        }),
+        executeTool: async () => { throw new Error("no tools"); },
+      };
+
+      const result = await runLocalAgentTurn({ adapter, agentRef: "a", input: "review this code" });
+
+      // Fallback message is unchanged
+      expect(result.content).toBe(LENGTH_TRUNCATED_FALLBACK_MESSAGE);
+      expect(savedTurns).toHaveLength(1);
+
+      // Warning logs contain the marker and reasoning tail clipped to 2000 chars
+      const matchingWarn = warns.find((w) => w.includes(LENGTH_TRUNCATED_REASONING_MARKER));
+      expect(matchingWarn).toBeDefined();
+      expect(matchingWarn).toContain(reasoningSample.slice(-2000));
+      expect(matchingWarn).not.toContain("Detailed reasoning: The review found 2 issues.");
+    } finally {
+      console.warn = origWarn;
+    }
   });
 
   test("脏历史经过 prepareMessagesForProviderCall 配对护栏：孤儿 tool 与悬空 tool_calls 不进 provider", async () => {

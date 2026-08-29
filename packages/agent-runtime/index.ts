@@ -68,9 +68,12 @@ export {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  LENGTH_TRUNCATED_REASONING_MARKER,
+  MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
+  formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
 export {
@@ -371,12 +374,10 @@ export type {
   ExecutableCapability,
   OpenAiCompatibleTool,
   ExecShellInput,
-  LocalExecShellContextArgs,
 } from "./capabilities";
 export {
   buildExecShellToolDefinition,
   normalizeExecShellInput,
-  buildLocalExecShellContext,
   invokeCapability,
   BUILTIN_CAPABILITIES,
 } from "./capabilities";
