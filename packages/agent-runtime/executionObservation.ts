@@ -73,6 +73,14 @@ export type AgentExecutionObservationEvent =
     }
   | { kind: "image-downgraded"; reason: "no-vision"; atMs: number }
   | {
+      kind: "loop-stalled";
+      reason: string;
+      atMs: number;
+      round?: number;
+      detail?: string;
+      consecutiveRounds?: number;
+    }
+  | {
       kind: "compaction";
       atMs: number;
       /** 与 CompactionMetrics.reason 口径一致。 */

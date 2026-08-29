@@ -111,7 +111,10 @@ export type LocalAgentTurnInput = {
    * 真正撤销；中断的回合仍会 saveTurn 留档。
    */
   abortSignal?: AbortSignal;
-
+  /**
+   * 可选进度看门狗配置（用于防死循环/复读熔断）。
+   */
+  progressGuardConfig?: ProgressGuardConfig;
 };
 
 export type LocalAgentTurnResult = AgentRuntimeResult & {
@@ -180,6 +183,8 @@ import {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  REPETITION_LOOP_FALLBACK_MESSAGE,
+  STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
@@ -188,12 +193,20 @@ import {
   formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
+import {
+  createLocalLoopProgressGuard,
+  LocalLoopProgressGuard,
+  type ProgressGuardConfig,
+  type ProgressGuardVerdict,
+} from "./progressGuard";
 
 export {
   EMPTY_ASSISTANT_REPAIR_PROMPT,
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  REPETITION_LOOP_FALLBACK_MESSAGE,
+  STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
@@ -201,6 +214,10 @@ export {
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
+  createLocalLoopProgressGuard,
+  LocalLoopProgressGuard,
+  type ProgressGuardConfig,
+  type ProgressGuardVerdict,
 };
 
 function formatToolExecutionError(args: {
@@ -1394,6 +1411,7 @@ export async function runLocalAgentTurn(
   // 当前未完成轮的流式文本累加。每轮入口重置，只保留最新未完成轮的文本，
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
+  const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
   try {
     // resolveProvider used to sit outside the try: credential / provider-init
     // failures then skipped saveTurn, so TUI lost dialogId and the next
@@ -1465,6 +1483,24 @@ export async function runLocalAgentTurn(
             ? { provider: result.provider || agentConfig.provider }
             : {}),
         });
+      }
+      // 熔断保护：检查模型是否陷入重复复读输出/工具调用死循环
+      const assistantGuardVerdict = progressGuard.observeAssistantResponse(result);
+      if (assistantGuardVerdict.action === "stall") {
+        emitLoopEvent(input, {
+          kind: "loop-stalled",
+          round,
+          reason: assistantGuardVerdict.reason,
+          detail: assistantGuardVerdict.detail,
+          consecutiveRounds: assistantGuardVerdict.consecutiveRounds,
+          atMs: Date.now(),
+        });
+        result = {
+          ...result,
+          content: resolveEmptyAssistantFallbackMessage(assistantGuardVerdict.reason),
+          emptyAssistantFallbackReason: assistantGuardVerdict.reason,
+        };
+        break;
       }
       const toolCalls = result.tool_calls ?? [];
       const rawToolCallsCount = (result.tool_calls?.length ?? 0) || (Array.isArray((result as any).raw_tool_calls) ? (result as any).raw_tool_calls.length : 0);
@@ -1539,6 +1575,8 @@ export async function runLocalAgentTurn(
           }
         }
         if (hasInlineExecutedTools) {
+          // Provider 流内已执行所有工具并推完文本（如 Cursor 流），
+          // 消费完 outputBlocks 后直接 break 退出循环，单轮即终态，无多轮死循环风险。
           messages.push(...blocksToOpenAiMessages(outputBlocks));
           skipFinalAppend = true;
           break;
@@ -1553,6 +1591,11 @@ export async function runLocalAgentTurn(
         ...(result.reasoning_content ? { reasoning_content: result.reasoning_content } : {}),
         tool_calls: toolCalls,
       });
+      const executedToolResults: Array<{
+        toolName: string;
+        content?: string | null;
+        metadata?: Record<string, unknown>;
+      }> = [];
       for (const toolCall of toolCalls) {
         throwIfAborted(input);
         const toolName = toolCall.function.name;
@@ -1686,6 +1729,11 @@ export async function runLocalAgentTurn(
             },
           };
         }
+        executedToolResults.push({
+          toolName,
+          content: toolResult.content,
+          metadata: toolResult.metadata,
+        });
         messages.push({
           role: "tool",
           content: formatToolMessageContent({
@@ -1697,6 +1745,27 @@ export async function runLocalAgentTurn(
           toolName,
           ...(toolResult.metadata ? { tool_result_metadata: toolResult.metadata } : {}),
         });
+      }
+      // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
+      const toolExecutionGuardVerdict = progressGuard.observeToolExecution(
+        toolCalls,
+        executedToolResults,
+      );
+      if (toolExecutionGuardVerdict.action === "stall") {
+        emitLoopEvent(input, {
+          kind: "loop-stalled",
+          round,
+          reason: toolExecutionGuardVerdict.reason,
+          detail: toolExecutionGuardVerdict.detail,
+          consecutiveRounds: toolExecutionGuardVerdict.consecutiveRounds,
+          atMs: Date.now(),
+        });
+        result = {
+          ...result,
+          content: resolveEmptyAssistantFallbackMessage(toolExecutionGuardVerdict.reason),
+          emptyAssistantFallbackReason: toolExecutionGuardVerdict.reason,
+        };
+        break;
       }
       round += 1;
     }

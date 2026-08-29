@@ -7,6 +7,8 @@ import {
   MAX_REASONING_ONLY_REPAIRS,
   MAX_TRUNCATED_REASONING_CHARS,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  REPETITION_LOOP_FALLBACK_MESSAGE,
+  STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
   resolveEmptyAssistantFallbackMessage,
@@ -81,6 +83,12 @@ describe("emptyAssistantRepair standalone boundary", () => {
     );
     expect(resolveEmptyAssistantFallbackMessage("empty_completion")).toBe(
       EMPTY_ASSISTANT_FALLBACK_MESSAGE,
+    );
+    expect(resolveEmptyAssistantFallbackMessage("repetition_loop")).toBe(
+      REPETITION_LOOP_FALLBACK_MESSAGE,
+    );
+    expect(resolveEmptyAssistantFallbackMessage("stagnant_tool_calls")).toBe(
+      STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
     );
   });
 

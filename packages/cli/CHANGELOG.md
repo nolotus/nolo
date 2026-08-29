@@ -1,4 +1,13 @@
 
+## 0.35.0-alpha.1
+
+## 0.35.0-alpha.1 (2026-08-29)
+
+### Features
+
+* **agent-runtime:** localLoop 无进展熔断，止住模型复读空转 ([0c27832](https://github.com/nolotus/bun-nolo/commit/0c27832d027f9b44b660ec09e8ac7de55b51c753))
+
+
 ## 0.34.0-alpha.3
 
 ## 0.34.0-alpha.3 (2026-08-29)

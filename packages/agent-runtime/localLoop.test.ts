@@ -3994,4 +3994,400 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
     expect(result.emptyAssistantFallbackReason).toBeUndefined();
     expect(result.content).toBe("all good");
   });
+
+  describe("progress guard & repetition circuit breaker in localLoop", () => {
+    test("does NOT trip guard on legitimate polling when assistant narrative is identical but tool results change (12 rounds)", async () => {
+      let callCount = 0;
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Polling Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["execShell"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-polling-ok" }),
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            if (callCount <= 12) {
+              // 12 rounds of identical assistant narration and identical tool call
+              return {
+                content: "Waiting for long-running build process, let me check status again...",
+                model: "fake-local",
+                tool_calls: [
+                  {
+                    id: `call-poll-${callCount}`,
+                    type: "function",
+                    function: {
+                      name: "execShell",
+                      arguments: '{"command":"check-build-progress"}',
+                    },
+                  },
+                ],
+              };
+            }
+            // Round 13: build finishes
+            return {
+              content: "Build completed successfully after 12 checks.",
+              model: "fake-local",
+            };
+          },
+        }),
+        executeTool: async () => ({
+          // Tool results change on every single check (progress advances)
+          content: `build progress: ${callCount * 8}% done`,
+          metadata: { progress: callCount * 8 },
+        }),
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "monitor build",
+        progressGuardConfig: {
+          maxConsecutiveIdenticalRounds: 5,
+          maxConsecutiveStagnantToolRounds: 8,
+        },
+      });
+
+      // 12 poll rounds + 1 final round = 13 rounds completed cleanly
+      expect(callCount).toBe(13);
+      expect(result.emptyAssistantFallbackReason).toBeUndefined();
+      expect(result.content).toBe("Build completed successfully after 12 checks.");
+      expect(result.dialogId).toBe("dialog-polling-ok");
+    });
+
+    test("trips circuit breaker on repetition loop and persists dialog evidence", async () => {
+      let callCount = 0;
+      let savedTurnInput: AgentRuntimeSaveTurnInput | null = null;
+      const loopEvents: any[] = [];
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Loop Guard Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["execShell"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async (input) => {
+          savedTurnInput = input;
+          return { dialogId: "dialog-stalled-repetition" };
+        },
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            // Model keeps returning identical content and identical tool call
+            return {
+              content: "I am thinking about running git status...",
+              model: "fake-local",
+              tool_calls: [
+                {
+                  id: `call-repeat-${callCount}`,
+                  type: "function",
+                  function: {
+                    name: "execShell",
+                    arguments: '{"command":"git status"}',
+                  },
+                },
+              ],
+            };
+          },
+        }),
+        executeTool: async () => ({
+          content: "On branch alpha\nnothing to commit",
+        }),
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "start task",
+        progressGuardConfig: {
+          maxConsecutiveIdenticalRounds: 4,
+        },
+        onLoopEvent: (event) => loopEvents.push(event),
+      });
+
+      // Exactly 4 rounds executed before tripping on round 4
+      expect(callCount).toBe(4);
+      expect(result.emptyAssistantFallbackReason).toBe("repetition_loop");
+      expect(result.content).toContain("死循环");
+      expect(result.dialogId).toBe("dialog-stalled-repetition");
+
+      // Verify that loop-stalled event was emitted
+      const stallEvent = loopEvents.find((e) => e.kind === "loop-stalled");
+      expect(stallEvent).toBeDefined();
+      expect(stallEvent?.reason).toBe("repetition_loop");
+
+      // Verify dialog persistence kept the evidence
+      expect(savedTurnInput).not.toBeNull();
+      expect(savedTurnInput!.messages.length).toBeGreaterThan(1);
+    });
+
+    test("trips circuit breaker on stagnant tool calls with unchanged results", async () => {
+      let callCount = 0;
+      let savedTurnInput: AgentRuntimeSaveTurnInput | null = null;
+      const loopEvents: any[] = [];
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Loop Guard Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["readFile"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async (input) => {
+          savedTurnInput = input;
+          return { dialogId: "dialog-stalled-tools" };
+        },
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            // Content varies slightly, but tool calls are identical
+            return {
+              content: `Round ${callCount}: let me read again`,
+              model: "fake-local",
+              tool_calls: [
+                {
+                  id: `call-read-${callCount}`,
+                  type: "function",
+                  function: {
+                    name: "readFile",
+                    arguments: '{"path":"unchanged.txt"}',
+                  },
+                },
+              ],
+            };
+          },
+        }),
+        executeTool: async () => ({
+          content: "file content never changes",
+          metadata: { size: 26 },
+        }),
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "read repeatedly",
+        progressGuardConfig: {
+          maxConsecutiveStagnantToolRounds: 3,
+        },
+        onLoopEvent: (event) => loopEvents.push(event),
+      });
+
+      // 3 rounds of identical tool call + identical result -> trips
+      expect(callCount).toBe(3);
+      expect(result.emptyAssistantFallbackReason).toBe("stagnant_tool_calls");
+      expect(result.content).toContain("无实质进展");
+      expect(result.dialogId).toBe("dialog-stalled-tools");
+
+      const stallEvent = loopEvents.find((e) => e.kind === "loop-stalled");
+      expect(stallEvent).toBeDefined();
+      expect(stallEvent?.reason).toBe("stagnant_tool_calls");
+    });
+
+    test("does NOT trip guard on legitimate multi-round coding task with 15 rounds of varying work", async () => {
+      let callCount = 0;
+      let executedToolPaths: string[] = [];
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Legit Multi Round Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["readFile", "editFile", "execShell"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-legit-long-task" }),
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            if (callCount <= 12) {
+              // Alternating legitimate steps: reading files, editing, running tests
+              const stepType = callCount % 3;
+              if (stepType === 1) {
+                return {
+                  content: `Inspecting step ${callCount}`,
+                  model: "fake-local",
+                  tool_calls: [
+                    {
+                      id: `call-${callCount}`,
+                      type: "function",
+                      function: {
+                        name: "readFile",
+                        arguments: JSON.stringify({ path: `src/module_${callCount}.ts` }),
+                      },
+                    },
+                  ],
+                };
+              }
+              if (stepType === 2) {
+                return {
+                  content: `Refactoring step ${callCount}`,
+                  model: "fake-local",
+                  tool_calls: [
+                    {
+                      id: `call-${callCount}`,
+                      type: "function",
+                      function: {
+                        name: "editFile",
+                        arguments: JSON.stringify({
+                          path: `src/module_${callCount - 1}.ts`,
+                          oldText: "foo",
+                          newText: "bar",
+                        }),
+                      },
+                    },
+                  ],
+                };
+              }
+              return {
+                content: `Verifying step ${callCount}`,
+                model: "fake-local",
+                tool_calls: [
+                  {
+                    id: `call-${callCount}`,
+                    type: "function",
+                    function: {
+                      name: "execShell",
+                      arguments: JSON.stringify({
+                        command: `bun test src/module_${callCount - 2}.test.ts`,
+                      }),
+                    },
+                  },
+                ],
+              };
+            }
+            // Final conclusion round
+            return {
+              content: "All 12 refactoring steps completed successfully and verified.",
+              model: "fake-local",
+            };
+          },
+        }),
+        executeTool: async (toolCall) => {
+          const parsed = JSON.parse(toolCall.arguments);
+          if (parsed.path) executedToolPaths.push(parsed.path);
+          return {
+            content: `Execution output for ${toolCall.name} at round ${callCount}`,
+            metadata: { round: callCount },
+          };
+        },
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "run full refactoring suite",
+        // Using default thresholds (5 identical, 8 stagnant)
+      });
+
+      // Must complete normally without being killed
+      expect(callCount).toBe(13);
+      expect(result.emptyAssistantFallbackReason).toBeUndefined();
+      expect(result.content).toBe(
+        "All 12 refactoring steps completed successfully and verified.",
+      );
+      expect(result.dialogId).toBe("dialog-legit-long-task");
+      expect(executedToolPaths.length).toBe(8);
+    });
+
+    test("allows legitimate short polling/retries (e.g. 3 times) before changing strategy without false positive", async () => {
+      let callCount = 0;
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Retry Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["execShell"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-retry-ok" }),
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            // 3 identical poll requests
+            if (callCount <= 3) {
+              return {
+                content: "Polling build status...",
+                model: "fake-local",
+                tool_calls: [
+                  {
+                    id: `call-poll-${callCount}`,
+                    type: "function",
+                    function: {
+                      name: "execShell",
+                      arguments: '{"command":"check-build-status"}',
+                    },
+                  },
+                ],
+              };
+            }
+            // Round 4: strategy changes
+            if (callCount === 4) {
+              return {
+                content: "Build is taking too long, canceling build process.",
+                model: "fake-local",
+                tool_calls: [
+                  {
+                    id: "call-cancel",
+                    type: "function",
+                    function: {
+                      name: "execShell",
+                      arguments: '{"command":"cancel-build"}',
+                    },
+                  },
+                ],
+              };
+            }
+            // Round 5: finished
+            return {
+              content: "Build was canceled cleanly.",
+              model: "fake-local",
+            };
+          },
+        }),
+        executeTool: async () => ({
+          content: "status: running",
+        }),
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "watch build",
+        // Default threshold is 5 for identical and 8 for stagnant
+      });
+
+      expect(callCount).toBe(5);
+      expect(result.emptyAssistantFallbackReason).toBeUndefined();
+      expect(result.content).toBe("Build was canceled cleanly.");
+    });
+  });
 });

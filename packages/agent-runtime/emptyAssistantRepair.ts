@@ -32,10 +32,31 @@ export const LENGTH_TRUNCATED_FALLBACK_MESSAGE =
 export const STREAM_TRUNCATED_FALLBACK_MESSAGE =
   "上游响应流在收尾前被中断（未收到结束标记），本轮输出不完整。请重试当前步骤。";
 
+export const REPETITION_LOOP_FALLBACK_MESSAGE =
+  "检测到模型陷入重复输出死循环，已自动熔断终止当前任务。";
+
+export const STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE =
+  "检测到连续多次相同工具调用且无实质进展，已自动熔断终止当前任务。";
+
+/**
+ * 前三个值是 provider 返回形态的成因，server loop 与 CLI 共用。
+ *
+ * 后两个（repetition_loop / stagnant_tool_calls）是 CLI 侧 progressGuard 熔断
+ * 的产物，server 路径不可达——复用本枚举只为直接拿到 fallback 文案。这构成
+ * 一处跨层语义泄漏（server 的类型里出现了它永远不会产生的值），与
+ * docs/handoff/2026-08-27-async-task-agents-research-handoff.md 12.7 讨论的
+ * 问题同类。
+ *
+ * TODO(独立 PR)：把 ProgressGuardVerdict.reason 改为 CLI 本地的
+ * LoopStallReason，在 localLoop 内映射到本枚举（仅用于取文案），使本类型恢复
+ * 为纯 provider 语义。本次不做以免 PR 范围膨胀，且属纯重构无行为收益。
+ */
 export type EmptyAssistantFallbackReason =
   | "empty_completion"
   | "length_truncated"
-  | "stream_truncated";
+  | "stream_truncated"
+  | "repetition_loop"
+  | "stagnant_tool_calls";
 
 /**
  * reasoning-only 空轮允许的最大 repair 次数。reasoning 模型（如 deepseek-v4-flash）
@@ -99,6 +120,8 @@ export function resolveEmptyAssistantFallbackMessage(
 ): string {
   if (reason === "length_truncated") return LENGTH_TRUNCATED_FALLBACK_MESSAGE;
   if (reason === "stream_truncated") return STREAM_TRUNCATED_FALLBACK_MESSAGE;
+  if (reason === "repetition_loop") return REPETITION_LOOP_FALLBACK_MESSAGE;
+  if (reason === "stagnant_tool_calls") return STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE;
   return EMPTY_ASSISTANT_FALLBACK_MESSAGE;
 }
 

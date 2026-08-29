@@ -68,6 +68,8 @@ export {
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  REPETITION_LOOP_FALLBACK_MESSAGE,
+  STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
@@ -76,6 +78,13 @@ export {
   formatLengthTruncatedReasoningTail,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
+export {
+  LocalLoopProgressGuard,
+  createLocalLoopProgressGuard,
+  resolveProgressGuardConfig,
+  type ProgressGuardConfig,
+  type ProgressGuardVerdict,
+} from "./progressGuard";
 export {
   pickAgentRuntimeInferenceOptions,
 } from "./agentConfigOptions";

@@ -1250,6 +1250,64 @@ describe("cli agent run command", () => {
     });
   });
 
+  test("background run: repetition_loop circuit breaker is finalized as failed with a reason note", async () => {
+    const finalized: Array<{ runId: string; status: string; note?: string }> = [];
+    await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-repetition" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-repetition-1",
+          emptyAssistantFallbackReason: "repetition_loop",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+    expect(finalized[0]).toMatchObject({
+      status: "failed",
+      note: "empty assistant output: repetition_loop",
+    });
+  });
+
+  test("background run: stagnant_tool_calls circuit breaker is finalized as failed with a reason note", async () => {
+    const finalized: Array<{ runId: string; status: string; note?: string }> = [];
+    await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "fix ui",
+        "--local",
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-stagnant" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-stagnant-1",
+          emptyAssistantFallbackReason: "stagnant_tool_calls",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+    expect(finalized[0]).toMatchObject({
+      status: "failed",
+      note: "empty assistant output: stagnant_tool_calls",
+    });
+  });
+
   test("background run: ordinary empty reply stays done (not a truncation)", async () => {
     const finalized: Array<{ runId: string; status: string; note?: string }> = [];
     await runCommand(
