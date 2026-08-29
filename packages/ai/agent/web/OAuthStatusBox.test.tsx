@@ -57,6 +57,25 @@ const loadModule = async (): Promise<OAuthStatusBoxModule["OAuthStatusBox"]> => 
       t: (_key: string, fallback?: string) => fallback ?? _key,
     }),
   }));
+  // bun test 不跑 @stylexjs babel 编译；组件链上的 StyleX 样式模块
+  // （modelSourceStyles）在运行时调用 create/keyframes 会抛错，给一个
+  // 结构兼容的测试替身（class 合并语义对渲染断言无关紧要）。
+  let stylexTestId = 0;
+  const stylexProps = (...args: unknown[]) => {
+    const classNames: string[] = [];
+    for (const arg of args) {
+      if (!arg || typeof arg !== "object") continue;
+      for (const key of Object.keys(arg as Record<string, unknown>)) {
+        classNames.push(key);
+      }
+    }
+    return { className: classNames.join(" "), style: {} };
+  };
+  mock.module("@stylexjs/stylex", () => ({
+    create: (styles: Record<string, unknown>) => styles,
+    keyframes: (_frames: unknown) => `test-keyframes-${stylexTestId++}`,
+    props: stylexProps,
+  }));
   mock.module("render/web/ui/Button", () => ({
     __esModule: true,
     default: ({

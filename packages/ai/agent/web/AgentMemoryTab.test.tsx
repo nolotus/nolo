@@ -20,6 +20,7 @@ const realAuthSlice = { ...(await import("auth/authSlice")) };
 const realToast = { ...(await import("app/utils/toast")) };
 const realButton = { ...(await import("render/web/ui/Button")) };
 const realIdentity = { ...(await import("identity")) };
+const realStylex = { ...(await import("@stylexjs/stylex")) };
 
 // mock.restore() 清不掉 mock.module——漏还原会污染后续 suite 文件。
 const restoreLeakedModuleMocks = () => {
@@ -30,6 +31,7 @@ const restoreLeakedModuleMocks = () => {
   mock.module("app/utils/toast", () => realToast);
   mock.module("render/web/ui/Button", () => realButton);
   mock.module("identity", () => realIdentity);
+  mock.module("@stylexjs/stylex", () => realStylex);
 };
 
 type AgentMemoryTabModule = {
@@ -115,6 +117,22 @@ const loadModule = async (): Promise<AgentMemoryTabModule["default"]> => {
       success: () => {},
       error: () => {},
     },
+  }));
+  let stylexTestId = 0;
+  const stylexProps = (...args: unknown[]) => {
+    const classNames: string[] = [];
+    for (const arg of args) {
+      if (!arg || typeof arg !== "object") continue;
+      for (const key of Object.keys(arg as Record<string, unknown>)) {
+        classNames.push(key);
+      }
+    }
+    return { className: classNames.join(" "), style: {} };
+  };
+  mock.module("@stylexjs/stylex", () => ({
+    create: (styles: Record<string, unknown>) => styles,
+    keyframes: (_frames: unknown) => `test-keyframes-${stylexTestId++}`,
+    props: stylexProps,
   }));
   mock.module("render/web/ui/Button", () => ({
     ...realButton,
@@ -242,11 +260,11 @@ describe("AgentMemoryTab", () => {
 
     await renderTab(AgentMemoryTab);
     await waitFor(() =>
-      Boolean(container.querySelector(".agent-memory-tab__truncated-hint"))
+      Boolean(container.querySelector('[data-testid="agent-memory-truncated-hint"]'))
     );
 
     expect(
-      container.querySelector(".agent-memory-tab__truncated-hint")?.textContent
+      container.querySelector('[data-testid="agent-memory-truncated-hint"]')?.textContent
     ).toBe("记忆较多，当前显示最近 1 条；更早内容未展示。");
   });
 
@@ -266,7 +284,7 @@ describe("AgentMemoryTab", () => {
 
     await renderTab(AgentMemoryTab);
     await waitFor(() =>
-      Boolean(container.querySelector(".agent-memory-tab__truncated-hint"))
+      Boolean(container.querySelector('[data-testid="agent-memory-truncated-hint"]'))
     );
 
     const refreshButton = container.querySelector(
@@ -277,7 +295,7 @@ describe("AgentMemoryTab", () => {
     });
 
     expect(
-      container.querySelector(".agent-memory-tab__truncated-hint")
+      container.querySelector('[data-testid="agent-memory-truncated-hint"]')
     ).toBeNull();
     expect(container.textContent).toContain(memoryItem.content);
 
@@ -287,7 +305,7 @@ describe("AgentMemoryTab", () => {
     });
     await waitFor(() => !refreshButton.disabled);
     expect(
-      container.querySelector(".agent-memory-tab__truncated-hint")
+      container.querySelector('[data-testid="agent-memory-truncated-hint"]')
     ).toBeNull();
   });
 
@@ -309,12 +327,12 @@ describe("AgentMemoryTab", () => {
     const AgentMemoryTab = await loadModule();
     await renderTab(AgentMemoryTab);
     await waitFor(() =>
-      Boolean(container.querySelector(".agent-memory-tab__add"))
+      Boolean(container.querySelector('[data-testid="agent-memory-add-form"]'))
     );
 
     // 表单元素存在
     const textarea = container.querySelector(
-      ".agent-memory-tab__add-input"
+      '[data-testid="agent-memory-add-input"]'
     ) as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
     expect(textarea.placeholder).toContain("记住");

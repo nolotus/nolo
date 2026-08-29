@@ -14,6 +14,8 @@ import { Dialog } from "render/web/ui/modal/Dialog";
 import ReferencesSelector from "./ReferencesSelector";
 import { LuBot, LuBrain, LuInfo, LuLightbulb, LuSparkles, LuWrench, LuX } from "react-icons/lu";
 import type { FormData } from "../createAgentSchema";
+import * as stylex from "@stylexjs/stylex";
+import { toolsTabStyles as styles } from "./toolsTabStyles";
 import {
   buildAgentSkillConfigPatch,
   resolveAgentSkillConfig,
@@ -157,22 +159,30 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
       : null;
 
   return (
-    <div className="tools-tab-panel">
-      <section className="tools-tab-hero">
-        <div className="tools-tab-hero__copy">
-          <h3 className="tools-tab-hero__title">{t("toolsTab.title")}</h3>
-          <p className="tools-tab-hero__description">{t("toolsTab.description")}</p>
+    <div {...stylex.props(styles.panel)}>
+      <section
+        className="agent-create-esc-tools-section"
+        {...stylex.props(styles.section, styles.sectionHero)}
+      >
+        <div {...stylex.props(styles.headingCopy)}>
+          <h3 {...stylex.props(styles.heroTitle)}>{t("toolsTab.title")}</h3>
+          <p {...stylex.props(styles.heroDescription)}>{t("toolsTab.description")}</p>
         </div>
       </section>
 
-      <section className="tools-tab-skills">
-        <div className="tools-tab-section-heading tools-tab-section-heading--withActions">
-          <div>
-            <h4>{t("toolsTab.skillModeTitle")}</h4>
-            <p>{t("toolsTab.skillModeDescription")}</p>
+      <section
+        className="agent-create-esc-tools-section"
+        {...stylex.props(styles.section)}
+      >
+        <div
+          {...stylex.props(styles.sectionHeading, styles.sectionHeadingWithActions)}
+        >
+          <div {...stylex.props(styles.sectionHeadingWithActionsFirstChild)}>
+            <h4 {...stylex.props(styles.sectionHeadingTitle)}>{t("toolsTab.skillModeTitle")}</h4>
+            <p {...stylex.props(styles.sectionHeadingDescription)}>{t("toolsTab.skillModeDescription")}</p>
           </div>
 
-          <div className="tools-tab-skill-actions">
+          <div {...stylex.props(styles.skillActions)}>
             <Button type="button" variant="secondary" onClick={() => setSkillPickerOpen(true)}>
               {t("references.addSkill")}
             </Button>
@@ -188,26 +198,30 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         </div>
 
         {skillState.loading ? (
-          <div className="tools-tab-summary__empty">{t("loading")}</div>
+          <div {...stylex.props(styles.summaryEmpty)}>{t("loading")}</div>
         ) : skillState.skillSummaries.length > 0 ? (
           <>
-            <div className="tools-tab-skills__grid">
+            <div {...stylex.props(styles.skillsGrid)}>
               {skillState.skillSummaries.map((skill) => (
                 <article
                   key={skill.dbKey}
-                  className="tools-tab-skill-card tools-tab-skill-card--selected"
+                  className="agent-create-esc-tools-skill-card agent-create-esc-tools-skill-card--selected"
+                  {...stylex.props(styles.skillCard, styles.skillCardSelected)}
                 >
-                  <div className="tools-tab-skill-card__header">
-                    <span className="tools-tab-skill-card__icon" aria-hidden="true">
+                  <div {...stylex.props(styles.skillCardHeader)}>
+                    <span
+                      aria-hidden="true"
+                      {...stylex.props(styles.skillCardIcon)}
+                    >
                       {skill.referenceType === "instruction" ? (
                         <LuLightbulb size={18} />
                       ) : (
                         <LuBrain size={18} />
                       )}
                     </span>
-                    <div className="tools-tab-skill-card__meta">
-                      <span className="tools-tab-skill-card__title">{skill.skillName}</span>
-                      <span className="tools-tab-skill-card__state tools-tab-skill-card__state--selected">
+                    <div {...stylex.props(styles.skillCardMeta)}>
+                      <span {...stylex.props(styles.skillCardTitle)}>{skill.skillName}</span>
+                      <span {...stylex.props(styles.skillCardState, styles.skillCardStateSelected)}>
                         {skill.referenceType === "instruction"
                           ? t("references.instruction")
                           : t("references.knowledge")}
@@ -215,7 +229,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                     </div>
                     <button
                       type="button"
-                      className="tools-tab-skill-card__info"
+                      {...stylex.props(styles.skillCardInfoRemove, styles.skillCardInfo)}
                       onClick={() => setActiveDetailKey(skill.dbKey)}
                       aria-label={t("toolsTab.viewSkillDetail")}
                     >
@@ -223,7 +237,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                     </button>
                     <button
                       type="button"
-                      className="tools-tab-skill-card__remove"
+                      {...stylex.props(styles.skillCardInfoRemove, styles.skillCardRemove)}
                       onClick={() => removeSkillReference(skill.dbKey)}
                       aria-label={t("toolsTab.removeSkill")}
                     >
@@ -241,17 +255,18 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
               size="small"
             >
               {activeDetail ? (
-                <div className="tools-tab-skill-detail">
+                <div {...stylex.props(styles.skillDetail)}>
                   {activeDetail.description ? (
-                    <p className="tools-tab-skill-detail__description">{activeDetail.description}</p>
+                    <p {...stylex.props(styles.skillDetailDescription)}>{activeDetail.description}</p>
                   ) : null}
 
                   {activeDetail.toolNames.length > 0 ? (
-                    <div className="tools-tab-skill-card__block">
-                      <div className="tools-tab-skill-card__label">{t("toolsTab.boundTools")}</div>
-                      <div className="tools-tab-skill-card__tools">
+                    <div {...stylex.props(styles.skillCardBlock)}>
+                      <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.boundTools")}</div>
+                      <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.toolNames.map((toolId) => (
-                          <span key={toolId} className="tools-tab-skill-card__tool-chip">
+                          <span key={toolId} className="agent-create-esc-tools-chip"
+                            {...stylex.props(styles.chip)}>
                             {getToolDisplayLabel(toolId, t)}
                           </span>
                         ))}
@@ -260,11 +275,12 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                   ) : null}
 
                   {activeDetail.requiredSkills.length > 0 ? (
-                    <div className="tools-tab-skill-card__block">
-                      <div className="tools-tab-skill-card__label">{t("toolsTab.requiredSkills")}</div>
-                      <div className="tools-tab-skill-card__tools">
+                    <div {...stylex.props(styles.skillCardBlock)}>
+                      <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.requiredSkills")}</div>
+                      <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.requiredSkills.map((skillId) => (
-                          <span key={skillId} className="tools-tab-skill-card__tool-chip">
+                          <span key={skillId} className="agent-create-esc-tools-chip"
+                            {...stylex.props(styles.chip)}>
                             {skillId}
                           </span>
                         ))}
@@ -273,11 +289,12 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                   ) : null}
 
                   {activeDetail.recommendedSkills.length > 0 ? (
-                    <div className="tools-tab-skill-card__block">
-                      <div className="tools-tab-skill-card__label">{t("toolsTab.recommendedSkills")}</div>
-                      <div className="tools-tab-skill-card__tools">
+                    <div {...stylex.props(styles.skillCardBlock)}>
+                      <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.recommendedSkills")}</div>
+                      <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.recommendedSkills.map((skillId) => (
-                          <span key={skillId} className="tools-tab-skill-card__tool-chip">
+                          <span key={skillId} className="agent-create-esc-tools-chip"
+                            {...stylex.props(styles.chip)}>
                             {skillId}
                           </span>
                         ))}
@@ -286,7 +303,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                   ) : null}
 
                   {activeDetail.promptPatch ? (
-                    <div className="tools-tab-skill-card__patch">
+                    <div {...stylex.props(styles.skillCardPatch)}>
                       <LuBot size={15} aria-hidden="true" />
                       <span>{activeDetail.promptPatch}</span>
                     </div>
@@ -296,9 +313,12 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
             </Dialog>
           </>
         ) : (
-          <div className="tools-tab-empty-state">
-            <div className="tools-tab-summary__empty">{t("toolsTab.noSkillsSelected")}</div>
-            <div className="tools-tab-skill-actions">
+          <div
+            className="agent-create-esc-tools-empty-state"
+            {...stylex.props(styles.emptyState)}
+          >
+            <div {...stylex.props(styles.summaryEmpty)}>{t("toolsTab.noSkillsSelected")}</div>
+            <div {...stylex.props(styles.skillActions)}>
               <Button type="button" variant="secondary" onClick={() => setSkillPickerOpen(true)}>
                 {t("references.addSkill")}
               </Button>
@@ -307,10 +327,10 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         )}
       </section>
 
-      <section className="tools-tab-capability-packs">
-        <div className="tools-tab-section-heading">
-          <h4>能力</h4>
-          <p>开启 agent 需要的能力包，每个包包含一组协同的工具。</p>
+      <section>
+        <div {...stylex.props(styles.sectionHeading)}>
+          <h4 {...stylex.props(styles.sectionHeadingTitle)}>能力</h4>
+          <p {...stylex.props(styles.sectionHeadingDescription)}>开启 agent 需要的能力包，每个包包含一组协同的工具。</p>
         </div>
         <CapabilityPackSelector
           // 读时兼容：有 skills 用 skills，没有则从 enabledPacks 派生
@@ -322,11 +342,16 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         />
       </section>
 
-      <section className="tools-tab-raw-tools">
-        <div className="tools-tab-section-heading tools-tab-section-heading--withActions">
-          <div>
-            <h4>{t("toolsTab.toolModeTitle")}</h4>
-            <p>{t("toolsTab.toolModeDescription")}</p>
+      <section
+        className="agent-create-esc-tools-section"
+        {...stylex.props(styles.section)}
+      >
+        <div
+          {...stylex.props(styles.sectionHeading, styles.sectionHeadingWithActions)}
+        >
+          <div {...stylex.props(styles.sectionHeadingWithActionsFirstChild)}>
+            <h4 {...stylex.props(styles.sectionHeadingTitle)}>{t("toolsTab.toolModeTitle")}</h4>
+            <p {...stylex.props(styles.sectionHeadingDescription)}>{t("toolsTab.toolModeDescription")}</p>
           </div>
 
           <Button
@@ -342,12 +367,15 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
 
         {manualToolsExpanded ? (
           <>
-            <div className="tools-tab-skill-banner tools-tab-skill-banner--subtle">
-              <span className="tools-tab-skill-banner__icon" aria-hidden="true">
+            <div {...stylex.props(styles.skillBanner, styles.skillBannerSubtle)}>
+              <span
+                aria-hidden="true"
+                {...stylex.props(styles.skillBannerIcon)}
+              >
                 <LuWrench size={16} />
               </span>
-              <div className="tools-tab-skill-banner__copy">
-                <strong>{t("toolsTab.manualToolsTitle")}</strong>
+              <div {...stylex.props(styles.skillBannerCopy)}>
+                <strong {...stylex.props(styles.skillBannerCopyStrong)}>{t("toolsTab.manualToolsTitle")}</strong>
                 <span>{t("toolsTab.manualToolsDescription")}</span>
               </div>
             </div>
@@ -360,16 +388,22 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
             />
           </>
         ) : (
-          <div className="tools-tab-collapsed-note">
+          <div
+            className="agent-create-esc-tools-collapsed-note"
+            {...stylex.props(styles.collapsedNote)}
+          >
             {t("toolsTab.manualToolsCollapsed", { count: value.length })}
           </div>
         )}
       </section>
 
-      <section className="tools-tab-summary">
-        <div className="tools-tab-section-heading">
-          <h4>{t("toolsTab.summaryTitle")}</h4>
-          <p>
+      <section
+        className="agent-create-esc-tools-section"
+        {...stylex.props(styles.section)}
+      >
+        <div {...stylex.props(styles.sectionHeading)}>
+          <h4 {...stylex.props(styles.sectionHeadingTitle)}>{t("toolsTab.summaryTitle")}</h4>
+          <p {...stylex.props(styles.sectionHeadingDescription)}>
             {t("toolsTab.summaryDescription", {
               skillCount: skillState.skillSummaries.length,
               toolCount: runtimeToolIds.length,
@@ -378,11 +412,12 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         </div>
 
         {skillState.recommendedSkillHints.length > 0 ? (
-          <div className="tools-tab-summary__subsection">
-            <div className="tools-tab-skill-card__label">{t("toolsTab.recommendedHints")}</div>
-            <div className="tools-tab-summary__chips">
+          <div {...stylex.props(styles.summarySubsection)}>
+            <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.recommendedHints")}</div>
+            <div {...stylex.props(styles.chipsRow)}>
               {skillState.recommendedSkillHints.map((hint) => (
-                <span key={hint} className="tools-tab-summary__chip">
+                <span key={hint} className="agent-create-esc-tools-chip"
+                      {...stylex.props(styles.chip)}>
                   {hint}
                 </span>
               ))}
@@ -391,11 +426,14 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         ) : null}
 
         {skillState.skillPromptPatches.length > 0 ? (
-          <div className="tools-tab-summary__subsection">
-            <div className="tools-tab-skill-card__label">{t("toolsTab.runtimeGuidance")}</div>
-            <div className="tools-tab-summary__guidance">
+          <div {...stylex.props(styles.summarySubsection)}>
+            <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.runtimeGuidance")}</div>
+            <div {...stylex.props(styles.summaryGuidance)}>
               {skillState.skillPromptPatches.map((patch) => (
-                <div key={patch} className="tools-tab-skill-card__patch">
+                <div
+                  key={patch}
+                  {...stylex.props(styles.skillCardPatch)}
+                >
                   <LuSparkles size={15} aria-hidden="true" />
                   <span>{patch}</span>
                 </div>
@@ -405,15 +443,16 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         ) : null}
 
         {runtimeToolLabels.length > 0 ? (
-          <div className="tools-tab-summary__chips">
+          <div {...stylex.props(styles.chipsRow)}>
             {runtimeToolLabels.map((tool) => (
-              <span key={tool.id} className="tools-tab-summary__chip">
+              <span key={tool.id} className="agent-create-esc-tools-chip"
+                      {...stylex.props(styles.chip)}>
                 {tool.label}
               </span>
             ))}
           </div>
         ) : (
-          <div className="tools-tab-summary__empty">{t("toolsTab.noToolsSelected")}</div>
+          <div {...stylex.props(styles.summaryEmpty)}>{t("toolsTab.noToolsSelected")}</div>
         )}
       </section>
 
@@ -423,10 +462,10 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         title={t("references.addSkill")}
         size="large"
       >
-        <div className="tools-tab-dialogBody">
-          <div className="tools-tab-dialogHelp">{t("references.skillsHelp")}</div>
+        <div {...stylex.props(styles.dialogBody)}>
+          <div {...stylex.props(styles.dialogHelp)}>{t("references.skillsHelp")}</div>
           {referencesError ? (
-            <div className="tools-tab-dialogError">{referencesError}</div>
+            <div {...stylex.props(styles.dialogError)}>{referencesError}</div>
           ) : null}
           <ReferencesSelector
             value={references}
@@ -458,8 +497,8 @@ const ToolsTab = ({
   const enabledPacks = (values.enabledPacks || []) as string[];
 
   return (
-    <div className="tools-tab-container">
-      <section className="tools-selection-card">
+    <div {...stylex.props(styles.container)}>
+      <section {...stylex.props(styles.selectionCard)}>
         <FormField error={errors.tools} {...commonProps}>
           <ToolsTabField
             value={(values.tools || []) as string[]}

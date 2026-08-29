@@ -20,7 +20,8 @@ import {
 } from "react-icons/lu";
 import WhitelistInput from "./WhitelistInput";
 import AgentAvatar from "./AgentAvatar";
-import "./AgentPublishDialog.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentPublishDialogStyles as styles } from "./agentPublishDialogStyles";
 
 export interface AgentPublishSettings {
   isPublic: boolean;
@@ -121,10 +122,10 @@ export default function AgentPublishDialog({
 
   const actions = (
     <>
-      <span className="agent-publish-dialog__footer-note">
+      <span {...stylex.props(styles.footerNote)}>
         {t("publish.footer.note", "保存后立即更新访问方式与计费信息")}
       </span>
-      <div className="agent-publish-dialog__footer-actions">
+      <div {...stylex.props(styles.footerActions)}>
         <Button variant="ghost" onClick={onClose} disabled={isSaving}>
           {t("publish.footer.cancel", "取消")}
         </Button>
@@ -156,30 +157,30 @@ export default function AgentPublishDialog({
       title={t("publish.title", "发布设置")}
       icon={<LuRocket size={16} />}
       className="agent-publish-dialog"
-      bodyClassName="agent-publish-dialog__body"
       width="min(980px, calc(100vw - 48px))"
       actions={actions}
     >
-      <div className="agent-publish-dialog__layout">
-        <div className="agent-publish-dialog__form-column">
+      <div {...stylex.props(styles.layout)}>
+        <div {...stylex.props(styles.formColumn)}>
           {/* 1. 谁可以使用 */}
-          <section className="agent-publish-dialog__section">
-            <div className="agent-publish-dialog__status-card">
+          <section {...stylex.props(styles.section)}>
+            <div {...stylex.props(styles.statusCard)}>
               <span
-                className={`agent-publish-dialog__status-icon ${
-                  isPublic ? "is-public" : "is-private"
-                }`}
+                {...stylex.props(
+                  styles.statusIcon,
+                  isPublic ? styles.statusIconPublic : styles.statusIconPrivate
+                )}
                 aria-hidden="true"
               >
                 {isPublic ? <LuGlobe size={20} /> : <LuLockKeyhole size={20} />}
               </span>
-              <div className="agent-publish-dialog__status-copy">
-                <strong>
+              <div {...stylex.props(styles.statusCopy)}>
+                <strong {...stylex.props(styles.statusCopyStrong)}>
                   {isPublic
                     ? t("publish.status.public", "已公开到市场")
                     : t("publish.status.private", "仅自己可见")}
                 </strong>
-                <span>
+                <span {...stylex.props(styles.statusCopySpan)}>
                   {isPublic
                     ? t(
                         "publish.status.publicHint",
@@ -203,9 +204,9 @@ export default function AgentPublishDialog({
               </Switch>
             </div>
             {!canPublishPublic && (
-              <div className="agent-publish-dialog__runtime-note" role="note">
-                <LuCircleAlert size={16} aria-hidden="true" />
-                <span>
+              <div {...stylex.props(styles.runtimeNote)} role="note">
+                <LuCircleAlert size={16} {...stylex.props(styles.runtimeNoteSvg)} aria-hidden="true" />
+                <span {...stylex.props(styles.runtimeNoteSpan)}>
                   {t(
                     "publish.status.runtimeNote",
                     "当前运行方式（本机 CLI / 自定义 API）只能私有使用，切换到平台 API 后才可以公开。",
@@ -216,14 +217,14 @@ export default function AgentPublishDialog({
           </section>
 
           {/* 2. 公开介绍 */}
-          <section className="agent-publish-dialog__section">
-            <div className="agent-publish-dialog__section-heading">
-              <span className="agent-publish-dialog__section-icon">
+          <section {...stylex.props(styles.section, styles.sectionDivider)}>
+            <div {...stylex.props(styles.sectionHeading)}>
+              <span {...stylex.props(styles.sectionIcon)}>
                 <LuGlobe size={16} />
               </span>
               <div>
-                <h3>{t("publish.introduction.heading", "公开介绍")}</h3>
-                <p>
+                <h3 {...stylex.props(styles.headingTitle)}>{t("publish.introduction.heading", "公开介绍")}</h3>
+                <p {...stylex.props(styles.headingSubtitle)}>
                   {t(
                     "publish.introduction.hint",
                     "这段文字会直接出现在右侧的市场卡片上。",
@@ -247,14 +248,14 @@ export default function AgentPublishDialog({
 
           {/* 3. 使用计费 */}
           {showPricing && (
-            <section className="agent-publish-dialog__section">
-              <div className="agent-publish-dialog__section-heading">
-                <span className="agent-publish-dialog__section-icon">
+            <section {...stylex.props(styles.section, styles.sectionDivider)}>
+              <div {...stylex.props(styles.sectionHeading)}>
+                <span {...stylex.props(styles.sectionIcon)}>
                   <LuCoins size={16} />
                 </span>
                 <div>
-                  <h3>{t("publish.pricing.heading", "使用计费")}</h3>
-                  <p>
+                  <h3 {...stylex.props(styles.headingTitle)}>{t("publish.pricing.heading", "使用计费")}</h3>
+                  <p {...stylex.props(styles.headingSubtitle)}>
                     {t(
                       "publish.pricing.hint",
                       "按每百万 Token 设置积分价格，0 表示免费。",
@@ -262,7 +263,7 @@ export default function AgentPublishDialog({
                   </p>
                 </div>
               </div>
-              <div className="agent-publish-dialog__price-grid">
+              <div {...stylex.props(styles.priceGrid)}>
                 <NumberField
                   label={t("publish.pricing.inputLabel", "输入价格")}
                   value={inputPrice}
@@ -300,14 +301,14 @@ export default function AgentPublishDialog({
           )}
 
           {/* 4. 访问控制 */}
-          <section className="agent-publish-dialog__section">
-            <div className="agent-publish-dialog__section-heading">
-              <span className="agent-publish-dialog__section-icon">
+          <section {...stylex.props(styles.section, styles.sectionDivider)}>
+            <div {...stylex.props(styles.sectionHeading)}>
+              <span {...stylex.props(styles.sectionIcon)}>
                 <LuUsers size={16} />
               </span>
               <div>
-                <h3>{t("publish.access.heading", "访问控制")}</h3>
-                <p>
+                <h3 {...stylex.props(styles.headingTitle)}>{t("publish.access.heading", "访问控制")}</h3>
+                <p {...stylex.props(styles.headingSubtitle)}>
                   {t(
                     "publish.access.hint",
                     "留空代表所有可见用户都能使用；添加后仅名单内用户可用。",
@@ -320,33 +321,34 @@ export default function AgentPublishDialog({
         </div>
 
         <aside
-          className="agent-publish-dialog__side"
+          {...stylex.props(styles.side)}
           aria-label={t("publish.preview.aside", "发布预览与检查")}
         >
           {/* 市场卡片实时预览：所见即所得 */}
-          <div className="agent-publish-dialog__preview">
-            <div className="agent-publish-dialog__preview-label">
+          <div {...stylex.props(styles.preview)}>
+            <div {...stylex.props(styles.previewLabel)}>
               <LuEye size={14} aria-hidden="true" />
               <span>{t("publish.preview.label", "市场卡片预览")}</span>
             </div>
             <div
-              className={`agent-publish-dialog__preview-card ${
-                isPublic ? "" : "is-dimmed"
-              }`}
+              {...stylex.props(
+                styles.previewCard,
+                !isPublic && styles.previewCardDimmed
+              )}
             >
-              <div className="agent-publish-dialog__preview-head">
+              <div {...stylex.props(styles.previewHead)}>
                 <AgentAvatar agent={agent} size={40} avatarSize="large" />
-                <div className="agent-publish-dialog__preview-title">
-                  <strong>
+                <div {...stylex.props(styles.previewTitle)}>
+                  <strong {...stylex.props(styles.previewTitleStrong)}>
                     {agent.name?.trim() ||
                       t("publish.preview.unnamed", "未命名智能体")}
                   </strong>
-                  <span className="agent-publish-dialog__preview-price">
+                  <span {...stylex.props(styles.previewPrice)}>
                     {previewPriceLabel}
                   </span>
                 </div>
               </div>
-              <p className="agent-publish-dialog__preview-intro">
+              <p {...stylex.props(styles.previewIntro)}>
                 {introduction.trim() ||
                   t(
                     "publish.preview.emptyIntro",
@@ -354,7 +356,7 @@ export default function AgentPublishDialog({
                   )}
               </p>
               <span
-                className="agent-publish-dialog__preview-cta"
+                {...stylex.props(styles.previewCta)}
                 aria-hidden="true"
               >
                 <LuMessageSquare size={13} />
@@ -362,7 +364,7 @@ export default function AgentPublishDialog({
               </span>
             </div>
             {!isPublic && (
-              <p className="agent-publish-dialog__preview-hint">
+              <p {...stylex.props(styles.previewHint)}>
                 {t(
                   "publish.preview.privateHint",
                   "当前为私有，市场里不会出现这张卡片。",
@@ -372,53 +374,54 @@ export default function AgentPublishDialog({
           </div>
 
           <div
-            className="agent-publish-dialog__preflight"
+            {...stylex.props(styles.preflight)}
             aria-label={t("publish.preflight.aside", "发布前检查")}
           >
-            <div className="agent-publish-dialog__preflight-heading">
-              <span className="agent-publish-dialog__section-icon">
+            <div {...stylex.props(styles.preflightHeading)}>
+              <span {...stylex.props(styles.sectionIcon)}>
                 <LuShieldCheck size={16} />
               </span>
               <div>
-                <h3>{t("publish.preflight.heading", "发布前检查")}</h3>
-                <p>{t("publish.preflight.hint", "基于当前设置实时更新。")}</p>
+                <h3 {...stylex.props(styles.headingTitle)}>{t("publish.preflight.heading", "发布前检查")}</h3>
+                <p {...stylex.props(styles.headingSubtitle)}>{t("publish.preflight.hint", "基于当前设置实时更新。")}</p>
               </div>
             </div>
 
-            <div className="agent-publish-dialog__check-list">
+            <div {...stylex.props(styles.checkList)}>
               {preflightItems.map((item) => (
                 <div
                   key={item.id}
-                  className={`agent-publish-dialog__check ${
-                    item.passed ? "is-passed" : "is-pending"
-                  }`}
+                  {...stylex.props(styles.check)}
                 >
                   {item.passed ? (
-                    <LuCircleCheck size={16} aria-hidden="true" />
+                    <LuCircleCheck size={16} {...stylex.props(styles.checkIcon, styles.checkIconPassed)} aria-hidden="true" />
                   ) : (
-                    <LuCircleAlert size={16} aria-hidden="true" />
+                    <LuCircleAlert size={16} {...stylex.props(styles.checkIcon, styles.checkIconPending)} aria-hidden="true" />
                   )}
-                  <div>
-                    <strong>{item.label}</strong>
-                    <span>{item.detail}</span>
+                  <div {...stylex.props(styles.checkContent)}>
+                    <strong {...stylex.props(styles.checkStrong)}>{item.label}</strong>
+                    <span {...stylex.props(styles.checkSpan)}>{item.detail}</span>
                   </div>
                 </div>
               ))}
             </div>
 
             <div
-              className={`agent-publish-dialog__summary ${
-                publicReady ? "is-ready" : "is-pending"
-              }`}
+              {...stylex.props(styles.summary)}
             >
-              <strong>
+              <strong
+                {...stylex.props(
+                  styles.summaryStrong,
+                  publicReady && styles.summaryStrongReady
+                )}
+              >
                 {publicReady
                   ? t("publish.summary.ready", "可以公开发布")
                   : t("publish.summary.pending", "建议先处理 {{count}} 项", {
                       count: failedChecks,
                     })}
               </strong>
-              <span>
+              <span {...stylex.props(styles.summarySpan)}>
                 {publicReady
                   ? t("publish.summary.readyHint", "开启公开后，保存即可更新市场状态。")
                   : t(

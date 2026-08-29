@@ -1,0 +1,282 @@
+/*
+ * agentCreateStylexEscapeHatch.css
+ * ─────────────────────────────────────────────────────────────
+ * agent 创建/编辑流 CSS → StyleX 迁移的逃生舱：集中存放无法用
+ * StyleX（stylex.create 原子类）表达的规则，由 AgentForm.tsx 顶部
+ * import。每条规则前注明「选择器 + 保留原因」。
+ *
+ * 类名约定：hook 类名统一加 agent-create-esc- 前缀，与 TSX 中
+ * stylex.props(...) 并存于同一元素，保持与原 CSS 相同的选择器
+ * 特异性与级联行为。
+ *
+ * 属性竞争下沉约定：StyleX 规则全部位于 @layer 内，而本文件是
+ * unlayered 普通 CSS——级联上 unlayered 恒胜 layered，与出现顺序无关。
+ * 因此凡与 StyleX 原子类存在同名属性竞争的规则（基础色将被 dark 覆盖、
+ * hover 需胜过 dark 覆盖、selected 变体需胜过 hover）也一并下沉到本文件，
+ * 并保持原 CSS 源码顺序（基础 → dark → hover → selected），由 unlayered
+ * 内部的源码顺序恢复原级联语义。对应的 StyleX 侧竞争声明已删除，避免双源。
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ── [data-theme] 暗色字面量覆盖 ──
+ * 保留原因：data-theme 属性选择器由全局 DOM 状态驱动，StyleX 不支持
+ * 属性选择器；组件内没有与该属性严格同步的 TS 状态（useTheme 走 redux，
+ * 与 DOM 属性写入存在时序差），条件化会有首屏闪烁风险，故按 1:1 原则
+ * 保留原级联行为。 */
+
+/* [data-theme="dark"] .form-header —— AgentForm.tsx */
+[data-theme="dark"] .agent-create-esc-form-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+}
+
+/* [data-theme="dark"] .form-footer —— AgentForm.tsx */
+[data-theme="dark"] .agent-create-esc-form-footer {
+  border-top-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* [data-theme="dark"] .public-settings-group —— PublishSettingsTab.tsx */
+[data-theme="dark"] .agent-create-esc-public-settings-group {
+  background: var(--backgroundTertiary);
+}
+
+/* [data-theme="dark"] .custom-api-box —— ModelSourceSection.tsx */
+[data-theme="dark"] .agent-create-esc-custom-api-box {
+  background: var(--backgroundTertiary);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* .ref-manager__card —— ReferencesTab.tsx
+   保留原因：background/border 与 StyleX 原子类存在同名属性竞争，
+   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）在 unlayered
+   内部按源码顺序决胜。 */
+.agent-create-esc-ref-card {
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderLight, rgba(0, 0, 0, 0.05));
+}
+
+/* [data-theme="dark"] .ref-manager__card —— ReferencesTab.tsx */
+[data-theme="dark"] .agent-create-esc-ref-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* [data-theme="dark"] .ref-manager__card-count —— ReferencesTab.tsx */
+[data-theme="dark"] .agent-create-esc-ref-card-count {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* [data-theme="dark"] .ref-manager__item —— ReferencesTab.tsx */
+[data-theme="dark"] .agent-create-esc-ref-item {
+  background: color-mix(in srgb, var(--background) 95%, white 2%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* [data-theme="dark"] .ref-manager__empty —— ReferencesTab.tsx */
+[data-theme="dark"] .agent-create-esc-ref-empty {
+  background: color-mix(in srgb, var(--background) 95%, white 2%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* .tools-tab-hero/.tools-tab-skills/.tools-tab-raw-tools/.tools-tab-summary
+   —— ToolsTab.tsx（四个 section 共用一个 hook 类）
+   保留原因：background/border 与 StyleX 原子类存在同名属性竞争，
+   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）决胜。 */
+.agent-create-esc-tools-section {
+  background: var(--backgroundSecondary);
+  border: 1px solid var(--borderLight);
+}
+
+/* [data-theme="dark"] .tools-tab-hero/.tools-tab-skills/.tools-tab-raw-tools/
+   .tools-tab-summary —— ToolsTab.tsx（四个 section 共用一个 hook 类） */
+[data-theme="dark"] .agent-create-esc-tools-section {
+  background: color-mix(in srgb, var(--backgroundSecondary) 60%, transparent);
+  border-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* [data-theme="dark"] .tools-tab-collapsed-note —— ToolsTab.tsx */
+[data-theme="dark"] .agent-create-esc-tools-collapsed-note {
+  background: color-mix(in srgb, var(--backgroundSecondary) 50%, transparent);
+  border-color: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+/* [data-theme="dark"] .tools-tab-skill-card —— ToolsTab.tsx */
+[data-theme="dark"] .agent-create-esc-tools-skill-card {
+  background: color-mix(in srgb, var(--backgroundSecondary) 70%, transparent);
+  border-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* .tools-tab-skill-card:hover —— ToolsTab.tsx
+   保留原因：原文件中 hover 定义在 dark 覆盖之后，暗色下 hover 仍需生效；
+   下沉为 unlayered 并置于上方 dark 规则之后，按源码顺序恢复原级联。 */
+.agent-create-esc-tools-skill-card:hover {
+  box-shadow: var(--shadow1);
+  border-color: var(--borderHover);
+}
+
+/* .tools-tab-skill-card--selected —— ToolsTab.tsx
+   保留原因：与上方 hover 规则存在 borderColor/boxShadow 同名竞争；基线中
+   selected 定义在 hover 之后，同特异性按源码顺序决胜（悬停时保持主色边框
+   与外环）。故下沉到 unlayered 并置于 hover 之后；StyleX 侧 skillCardSelected
+   的同名声明已删除，避免双源。 */
+.agent-create-esc-tools-skill-card--selected {
+  border-color: color-mix(in srgb, var(--primary) 50%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+/* .tools-tab-skill-card__tool-chip/.tools-tab-summary__chip —— ToolsTab.tsx
+   （两种 chip 共用一个 hook 类）
+   保留原因：background/border/color 与 StyleX 原子类存在同名属性竞争，
+   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）决胜。 */
+.agent-create-esc-tools-chip {
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderLight);
+  color: var(--textSecondary);
+}
+
+/* [data-theme="dark"] .tools-tab-skill-card__tool-chip,
+   [data-theme="dark"] .tools-tab-summary__chip —— ToolsTab.tsx
+   （两种 chip 共用一个 hook 类） */
+[data-theme="dark"] .agent-create-esc-tools-chip {
+  background: color-mix(in srgb, var(--backgroundSecondary) 80%, transparent);
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--text);
+}
+
+/* [data-theme="dark"] .tools-tab-empty-state —— ToolsTab.tsx */
+[data-theme="dark"] .agent-create-esc-tools-empty-state {
+  background: color-mix(in srgb, var(--backgroundSecondary) 40%, transparent);
+}
+
+/* ── 父级 :hover 控制子元素 ──
+ * 保留原因：StyleX 只支持元素自身伪类，不支持后代/父子组合选择器。 */
+
+/* .agent-avatar-preview--clickable:hover .agent-avatar-overlay —— PersonaSection.tsx */
+.agent-create-esc-avatar-preview--clickable:hover .agent-create-esc-avatar-overlay {
+  opacity: 1;
+}
+
+/* .ref-manager__item-main.ref-manager__item-link:hover .ref-manager__item-title
+   —— ReferencesTab.tsx */
+.agent-create-esc-ref-link:hover .agent-create-esc-ref-title {
+  color: var(--primary, #3b82f6);
+}
+
+/* .rs-item:hover .rs-item__actions —— ReferencesSelector.tsx */
+.agent-create-esc-rs-item:hover .agent-create-esc-rs-item-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* ── StyleX 不支持的伪类 / 伪元素（:last-child、::after）──
+ * 保留原因：@stylexjs 编译器静默丢弃这两类声明，1:1 视觉必须以普通
+ * CSS 承载。选中态由受控 input 驱动，TSX 已知，故用 data-checked
+ * 属性选择器等价改写原 `input:checked + .rs-checkbox-ui` 级联。 */
+
+/* .rs-item:last-child { border-bottom: none } —— ReferencesSelector.tsx */
+.agent-create-esc-rs-item:last-child {
+  border-bottom: none;
+}
+
+/* input:checked + .rs-checkbox-ui（背景/边框）—— ReferencesSelector.tsx */
+.agent-create-esc-rs-check[data-checked="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+/* input:checked + .rs-checkbox-ui::after（对勾）—— ReferencesSelector.tsx */
+.agent-create-esc-rs-check[data-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ── :not() 伪类 ──
+ * 保留原因：StyleX 不支持 :not()。 */
+
+/* .agent-create-source-card:hover:not(:disabled) —— AgentCreateSourceStep.tsx */
+.agent-create-esc-source-card:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--backgroundHover, var(--backgroundSecondary));
+}
+
+/* ── 跨组件后代选择器（React Aria Select 内部结构）──
+ * 保留原因：目标元素由 render/web/ui/Select 内部渲染，样式需从
+ * field 容器穿透到组件内部的 nolo-select-* 类名。 */
+
+/* .agent-create-source-field .react-aria-Select.nolo-select,
+   .agent-create-source-field .agent-create-source-select
+   —— AgentCreateSourceStep.tsx */
+.agent-create-esc-source-field .react-aria-Select.nolo-select,
+.agent-create-esc-source-field .agent-create-esc-source-select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* .agent-create-source-field .agent-create-source-select .nolo-select-trigger
+   —— AgentCreateSourceStep.tsx */
+.agent-create-esc-source-field .agent-create-esc-source-select .nolo-select-trigger {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fontSize-sm);
+  background: var(--background, #0f1115);
+}
+
+/* .agent-create-source-field .nolo-select-label —— AgentCreateSourceStep.tsx */
+.agent-create-esc-source-field .nolo-select-label {
+  font-size: var(--fontSize-sm);
+  font-weight: 600;
+  color: var(--textSecondary);
+}
+
+/* ── 同元素双类竞争（原 route 捆绑包加载顺序覆盖）──
+ * 保留原因：原 .cli-select 靠 route-styles 捆绑包在 entry CSS 之后加载
+ * 而覆盖 .nolo-select-trigger 的同名属性；迁移为 @layer 原子类后会输给
+ * 非 layer 的 trigger 基础样式，故保留普通 CSS 并用双类选择器维持覆盖。 */
+
+/* .cli-select（挂在 render/web/ui SelectTrigger 上时）—— ModelSourceSection.tsx */
+.nolo-select-trigger.agent-create-esc-cli-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--fontSize-base);
+  color: var(--text);
+  background: var(--background);
+  outline: none;
+  cursor: pointer;
+}
+
+.nolo-select-trigger.agent-create-esc-cli-select:focus {
+  border-color: var(--primary);
+}
+
+/* ── 大量子元素（li / code）的后代样式 ──
+ * 保留原因：列表内大量 <li>/<code> 由翻译文案内联渲染，逐一挂
+ * StyleX props 不可行；保留 ul 级后代选择器，行为与原
+ * .cli-info-box__list li / code 一致。 */
+
+/* .cli-info-box__list li —— ModelSourceSection.tsx */
+.agent-create-esc-cli-info-list li {
+  font-size: var(--fontSize-sm);
+  color: var(--textSecondary);
+  line-height: var(--leading-normal);
+}
+
+/* .cli-info-box__list code —— ModelSourceSection.tsx */
+.agent-create-esc-cli-info-list code {
+  background: var(--backgroundSecondary);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-family: monospace;
+  font-size: var(--fontSize-xs);
+}

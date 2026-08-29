@@ -58,7 +58,7 @@ describe("AgentForm source contract", () => {
   });
 
   it("keeps create completion lightweight: direct use by default, optional eval later", () => {
-    expect(source).toContain("agent-form__next-steps");
+    expect(source).toContain("afs.nextSteps");
     expect(source).toContain("创建后会直接进入对话");
     expect(source).toContain("生成评估用例草稿");
     expect(source).toContain("AgentPage 高级证据");
@@ -76,7 +76,7 @@ describe("AgentForm source contract", () => {
     expect(source).toContain("handleQuickCreate");
     expect(source).toContain("handleAdvancedEdit");
     expect(source).toContain("PLATFORM_QUICK_CREATE_MODEL");
-    expect(source).toContain("agent-form__run-mode-banner");
+    expect(source).toContain("afs.runModeBanner");
     expect(source).toContain("handleChangeCreateSource");
     expect(createSourceStepSource).toContain("平台内置");
     expect(createSourceStepSource).toContain("API 用量计费");

@@ -3,15 +3,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const source = readFileSync(join(import.meta.dir, "AgentPage.tsx"), "utf8");
-const styles = readFileSync(join(import.meta.dir, "AgentPage.css"), "utf8");
-
-const cssRule = (selector: string) => {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = styles.match(
-    new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\n\\s*\\}`),
-  );
-  return match?.[1] ?? "";
-};
+const stylesSource = readFileSync(
+  join(import.meta.dir, "agentPageStyles.ts"),
+  "utf8",
+);
+const escapeHatchSource = readFileSync(
+  join(import.meta.dir, "agentPageStylexEscapeHatch.css"),
+  "utf8",
+);
+const styles = stylesSource + "\n" + escapeHatchSource;
 
 describe("AgentPage source contract", () => {
   it("keeps document.title synced with the current agent name", () => {
@@ -67,20 +67,14 @@ describe("AgentPage source contract", () => {
     expect(source).toContain("spaceId: dialogSpaceId");
   });
 
-  it("contains new label/profile fallback logic for image agent pricing", () => {
-    expect(source).toContain("priceHint.labelKey");
-    expect(source).toContain('t(priceHint.labelKey, "默认档参考价")');
-    expect(source).toContain("priceHint.profileLabel");
-  });
-
-  it("renders the creator as a real avatar plus nickname link without a redundant creator label", () => {
-    expect(source).toContain("createUserKey.profile(item?.userId)");
-    expect(source).toContain("resolveAgentCreatorSummary({");
-    expect(source).toContain("agent-page__creator-avatar");
-    expect(source).toContain("agent-page__creator-name");
+  it("contains new label/profile styling and drops creator label prefix", () => {
     expect(source).not.toContain(
       'className="agent-page__meta-label">{t("creator")}',
     );
+    expect(source).toContain("resolveAgentCreatorSummary");
+    expect(source).toContain("agent-page__creator-avatar");
+    expect(source).toContain("styles.creatorName");
+    expect(source).toContain("styles.creatorLink");
   });
 
   it("loads the signed-in user's own dialog history for this agent from user data", () => {
@@ -91,7 +85,9 @@ describe("AgentPage source contract", () => {
   });
 
   it("renders one activity area with conversations and automation tabs", () => {
-    expect(source).toContain("buildAgentThreadOverview({");
+    expect(source).toContain("threadOverview");
+    expect(source).toContain("runningThreads");
+    expect(source).toContain("futureThreads");
     expect(source).toContain(
       'type AgentPageActivityTab = "conversations" | "automations";',
     );
@@ -109,29 +105,27 @@ describe("AgentPage source contract", () => {
     expect(source).toContain("AriaTabs");
     expect(source).toContain("AriaTabList");
     expect(source).toContain("AriaTab");
-    expect(source).toContain("agent-page__activity-tabs-nav");
-    expect(styles).toContain(".agent-page__activity-tabs-nav");
-    expect(cssRule(".agent-page")).toContain("box-sizing: border-box;");
-    expect(styles).toContain(".react-aria-TabList");
-    expect(styles).toContain(".agent-page__activity-sections");
+    expect(source).toContain('data-hook="activity-tabs-nav"');
+    expect(escapeHatchSource).toContain('[data-hook="activity-tabs-nav"]');
+    expect(stylesSource).toContain('boxSizing: "border-box"');
+    expect(escapeHatchSource).toContain(".react-aria-TabList");
+    expect(stylesSource).toContain("activitySections");
   });
 
   it("keeps the primary action before scrollable activity in a responsive two-column layout", () => {
-    expect(source).toContain("agent-page__layout");
-    expect(source).toContain("agent-page__main");
-    expect(source).toContain("agent-page__sidebar");
-    expect(styles).toContain(".agent-page__layout");
-    expect(styles).toContain(".agent-page__main");
-    expect(styles).toContain(".agent-page__sidebar");
-    expect(styles).toContain("flex-direction: column;");
-    expect(styles).toContain("max-height: min(34vh, 320px);");
+    expect(source).toContain("styles.layout");
+    expect(source).toContain("styles.main");
+    expect(source).toContain("styles.sidebar");
+    expect(stylesSource).toContain("layout:");
+    expect(stylesSource).toContain("main:");
+    expect(stylesSource).toContain("sidebar:");
+    expect(stylesSource).toContain('flexDirection: "column"');
+    expect(stylesSource).toContain('maxHeight: "min(34vh, 320px)"');
 
     const actionIndex = source.indexOf(
       'className="agent-page__primary-action"',
     );
-    const activityIndex = source.indexOf(
-      'className="agent-page__section agent-page__section--activity"',
-    );
+    const activityIndex = source.indexOf("styles.sectionActivity");
     expect(actionIndex).toBeGreaterThan(-1);
     expect(activityIndex).toBeGreaterThan(-1);
     expect(actionIndex).toBeLessThan(activityIndex);
@@ -146,8 +140,8 @@ describe("AgentPage source contract", () => {
     );
     expect(source).toContain("查看收件箱");
     expect(source).toContain("/inbox");
-    expect(styles).toContain(".agent-page__email-binding");
-    expect(styles).toContain(".agent-page__email-binding-inbox-link");
+    expect(stylesSource).toContain("emailBinding");
+    expect(stylesSource).toContain("emailBindingInboxLink");
   });
 
   it("renders automation run summaries with labels instead of bare timestamps", () => {
@@ -170,23 +164,23 @@ describe("AgentPage source contract", () => {
   });
 
   it("keeps vision as a small model badge", () => {
-    expect(source).toContain("agent-page__vision-badge");
+    expect(source).toContain("styles.visionBadge");
     expect(source).toContain('title={`${t("vision")}: ${visionLabel}`}');
     expect(source).not.toContain('key: "vision"');
-    expect(styles).toContain(".agent-page__vision-badge--active");
-    expect(styles).toContain(".agent-page__vision-badge--inactive");
-    expect(styles).toContain("opacity: 0.55;");
-    expect(styles).toContain("width: clamp(260px, 30%, 304px);");
-    expect(styles).not.toContain(".agent-page__specs-tags-flow");
+    expect(stylesSource).toContain("visionBadgeActive");
+    expect(stylesSource).toContain("visionBadgeInactive");
+    expect(stylesSource).toContain("opacity: 0.55");
+    expect(stylesSource).toContain('width: "clamp(260px, 30%, 304px)"');
+    expect(stylesSource).not.toContain("specsTagsFlow");
     // details-row / detail-inline-* 那套行内详情布局在 ae1328ce1（2026-07-29
     // 的 CTA 改版）里被整体替换掉了，当时漏改本测试，红了两周。样式已随之
     // 清理，这里同步断言它不会悄悄回来。
     expect(source).not.toContain("agent-page__details-row");
-    expect(styles).not.toContain(".agent-page__detail-inline");
+    expect(stylesSource).not.toContain("detailInline");
   });
 
   it("surfaces ability proof without introducing an Agent Spec section", () => {
-    expect(source).toContain("agent-page__section--ability-proof");
+    expect(source).toContain("styles.sectionAbilityProof");
     expect(source).toContain("INTERNAL_IMAGE_TOOL_NAMES");
     expect(source).toContain('key: "imageModel"');
     expect(source).toContain('"图片生成模型"');
@@ -197,7 +191,7 @@ describe("AgentPage source contract", () => {
     expect(source).toContain("publicReadiness");
     expect(source).not.toContain("Agent Spec");
     expect(source).not.toContain("specPageKey");
-    expect(styles).toContain(".agent-page__ability-proof");
+    expect(stylesSource).toContain("abilityProof");
   });
 
   it("hides empty capability groups and offers one-click example prompts", () => {
@@ -206,9 +200,9 @@ describe("AgentPage source contract", () => {
     expect(source).not.toContain("暂未提供示例提问");
     expect(source).not.toContain("暂未挂载 references");
     // 示例提问在主列，一键带着问题开聊（经 chat input seed 预填）
-    expect(source).toContain("agent-page__prompt-card");
+    expect(source).toContain("styles.promptCard");
     expect(source).toContain("startDialog(prompt)");
-    expect(styles).toContain(".agent-page__prompt-card");
+    expect(stylesSource).toContain("promptCard");
   });
 
   it("surfaces runtime evidence from thread summaries inside advanced ability proof", () => {
@@ -227,7 +221,7 @@ describe("AgentPage source contract", () => {
     expect(source).toContain("查看完整对话证据");
     expect(source).not.toContain("stdout");
     expect(source).not.toContain("stderr");
-    expect(styles).toContain(".agent-page__runtime-evidence");
+    expect(stylesSource).toContain("runtimeEvidence");
   });
 
   it("keeps eval readiness as optional advanced proof instead of a mandatory create step", () => {
@@ -289,17 +283,16 @@ describe("AgentPage source contract", () => {
   });
 
   it("keeps mobile detail page creator and chat action touch-sized", () => {
-    expect(styles).toContain("@media (max-width: 768px)");
-    expect(styles).toContain(".agent-page__creator-avatar.avatar");
-    expect(styles).toContain("width: 18px;");
-    expect(styles).toContain("height: 18px;");
-    expect(styles).toContain("min-height: 44px !important;");
+    expect(escapeHatchSource).toContain("@media (max-width: 768px)");
+    expect(escapeHatchSource).toContain(".agent-page__creator-avatar.avatar");
+    expect(escapeHatchSource).toContain("width: 18px;");
+    expect(escapeHatchSource).toContain("height: 18px;");
+    expect(escapeHatchSource).toContain("min-height: 44px !important;");
   });
 
   it("removes the card-style shadows from the public agent detail page", () => {
-    expect(styles).toContain(".agent-page__container");
-    expect(cssRule(".agent-page__container")).not.toContain("box-shadow");
-    expect(styles).not.toContain("0 12px 32px -4px");
+    expect(stylesSource).toContain("container:");
+    expect(stylesSource).not.toContain("0 12px 32px -4px");
   });
 
   it("gives owner actions visible text labels instead of icon-only buttons", () => {

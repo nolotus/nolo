@@ -13,6 +13,9 @@ import ContextBudgetIndicator from "./ContextBudgetIndicator";
 import { LuBrain, LuLightbulb } from "react-icons/lu";
 import PagePreviewDialog from "render/web/ui/modal/PagePreviewDialog";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
+import * as stylex from "@stylexjs/stylex";
+import { referencesTabStyles as styles } from "./referencesTabStyles";
+import { publishSettingsTabStyles as publishStyles } from "./publishSettingsTabStyles";
 import type { FormData } from "../createAgentSchema";
 
 interface ReferencesTabProps {
@@ -127,25 +130,34 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
   const setReferences = (next: Reference[]) => set("references", next);
 
   return (
-    <div className="tab-content-wrapper">
-      <div className="ref-manager">
-        <div className="ref-manager__grid">
-          <section className="ref-manager__card ref-manager__card--knowledge">
-            <header className="ref-manager__card-header">
-              <div className="ref-manager__card-headerTop">
-                <div className="ref-manager__card-heading">
-                  <div className="ref-manager__card-titleWrap">
-                    <span className="ref-manager__card-icon" aria-hidden="true">
+    <div {...stylex.props(publishStyles.tabContentWrapper)}>
+      <div {...stylex.props(styles.manager)}>
+        <div {...stylex.props(styles.grid)}>
+          <section
+            className="agent-create-esc-ref-card"
+            {...stylex.props(styles.card)}
+          >
+            <header {...stylex.props(styles.cardHeader)}>
+              <div {...stylex.props(styles.cardHeaderTop)}>
+                <div {...stylex.props(styles.cardHeading)}>
+                  <div {...stylex.props(styles.cardTitleWrap)}>
+                    <span
+                      aria-hidden="true"
+                      {...stylex.props(styles.cardIcon, styles.cardIconKnowledge)}
+                    >
                       <LuBrain size={16} aria-hidden="true" />
                     </span>
-                    <div className="ref-manager__card-titleBlock">
-                      <div className="ref-manager__card-titleRow">
-                        <h3 className="ref-manager__card-title">
+                    <div {...stylex.props(styles.cardTitleBlock)}>
+                      <div {...stylex.props(styles.cardTitleRow)}>
+                        <h3 {...stylex.props(styles.cardTitle)}>
                           {t("references.knowledge")}
                         </h3>
-                        <span className="ref-manager__card-count">{knowledgeCount}</span>
+                        <span
+                          className="agent-create-esc-ref-card-count"
+                          {...stylex.props(styles.cardCount)}
+                        >{knowledgeCount}</span>
                       </div>
-                      <p className="ref-manager__card-subtitle">
+                      <p {...stylex.props(styles.cardSubtitle)}>
                         {t("references.knowledgeHelp")}
                       </p>
                     </div>
@@ -164,24 +176,32 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
               </div>
             </header>
 
-            <div className="ref-manager__card-body">
+            <div {...stylex.props(styles.cardBody)}>
               {knowledgeRefs.length > 0 ? (
-                <div className="ref-manager__list">
+                <div {...stylex.props(styles.list)}>
                   {knowledgeRefs.map((ref) => (
-                    <div key={ref.dbKey} className="ref-manager__item">
+                    <div
+                        key={ref.dbKey}
+                        className="agent-create-esc-ref-item"
+                        {...stylex.props(styles.item)}
+                      >
                       <a
                         href={buildPageLink(ref)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ref-manager__item-main ref-manager__item-link"
+                        className="agent-create-esc-ref-link"
+                          {...stylex.props(styles.itemMain, styles.itemLink)}
                         onClick={(e) => handleItemClick(e, ref)}
                       >
-                        <div className="ref-manager__item-title">{ref.title || ref.dbKey}</div>
-                        <div className="ref-manager__item-meta">{ref.dbKey}</div>
+                        <div
+                          className="agent-create-esc-ref-title"
+                          {...stylex.props(styles.itemTitle)}
+                        >{ref.title || ref.dbKey}</div>
+                        <div {...stylex.props(styles.itemMeta)}>{ref.dbKey}</div>
                       </a>
                       <button
                         type="button"
-                        className="ref-manager__remove"
+                        {...stylex.props(styles.remove)}
                         onClick={() =>
                           setReferences(
                             references.filter((item) => item.dbKey !== ref.dbKey)
@@ -194,11 +214,14 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                   ))}
                 </div>
               ) : (
-                <div className="ref-manager__empty">
-                  <div className="ref-manager__empty-title">
+                <div
+                  className="agent-create-esc-ref-empty"
+                  {...stylex.props(styles.empty)}
+                >
+                  <div {...stylex.props(styles.emptyTitle)}>
                     {t("references.noKnowledgeYet")}
                   </div>
-                  <div className="ref-manager__empty-tip">
+                  <div {...stylex.props(styles.emptyTip)}>
                     {t("references.knowledgeEmptyHint")}
                   </div>
                 </div>
@@ -206,24 +229,33 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
             </div>
           </section>
 
-          <section className="ref-manager__card ref-manager__card--instruction">
-            <header className="ref-manager__card-header">
-              <div className="ref-manager__card-headerTop">
-                <div className="ref-manager__card-heading">
-                  <div className="ref-manager__card-titleWrap">
-                    <span className="ref-manager__card-icon" aria-hidden="true">
+          <section
+            className="agent-create-esc-ref-card"
+            {...stylex.props(styles.card)}
+          >
+            <header {...stylex.props(styles.cardHeader)}>
+              <div {...stylex.props(styles.cardHeaderTop)}>
+                <div {...stylex.props(styles.cardHeading)}>
+                  <div {...stylex.props(styles.cardTitleWrap)}>
+                    <span
+                      aria-hidden="true"
+                      {...stylex.props(styles.cardIcon, styles.cardIconInstruction)}
+                    >
                       <LuLightbulb size={16} aria-hidden="true" />
                     </span>
-                    <div className="ref-manager__card-titleBlock">
-                      <div className="ref-manager__card-titleRow">
-                        <h3 className="ref-manager__card-title">
+                    <div {...stylex.props(styles.cardTitleBlock)}>
+                      <div {...stylex.props(styles.cardTitleRow)}>
+                        <h3 {...stylex.props(styles.cardTitle)}>
                           {t("references.instruction")}
                         </h3>
-                        <span className="ref-manager__card-count">
+                        <span
+                          className="agent-create-esc-ref-card-count"
+                          {...stylex.props(styles.cardCount)}
+                        >
                           {instructionCount}
                         </span>
                       </div>
-                      <p className="ref-manager__card-subtitle">
+                      <p {...stylex.props(styles.cardSubtitle)}>
                         {t("references.instructionHelp")}
                       </p>
                     </div>
@@ -244,24 +276,32 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
               </div>
             </header>
 
-            <div className="ref-manager__card-body">
+            <div {...stylex.props(styles.cardBody)}>
               {instructionRefs.length > 0 ? (
-                <div className="ref-manager__list">
+                <div {...stylex.props(styles.list)}>
                   {instructionRefs.map((ref) => (
-                    <div key={ref.dbKey} className="ref-manager__item">
+                    <div
+                        key={ref.dbKey}
+                        className="agent-create-esc-ref-item"
+                        {...stylex.props(styles.item)}
+                      >
                       <a
                         href={buildPageLink(ref)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ref-manager__item-main ref-manager__item-link"
+                        className="agent-create-esc-ref-link"
+                          {...stylex.props(styles.itemMain, styles.itemLink)}
                         onClick={(e) => handleItemClick(e, ref)}
                       >
-                        <div className="ref-manager__item-title">{ref.title || ref.dbKey}</div>
-                        <div className="ref-manager__item-meta">{ref.dbKey}</div>
+                        <div
+                          className="agent-create-esc-ref-title"
+                          {...stylex.props(styles.itemTitle)}
+                        >{ref.title || ref.dbKey}</div>
+                        <div {...stylex.props(styles.itemMeta)}>{ref.dbKey}</div>
                       </a>
                       <button
                         type="button"
-                        className="ref-manager__remove"
+                        {...stylex.props(styles.remove)}
                         onClick={() =>
                           setReferences(
                             references.filter((item) => item.dbKey !== ref.dbKey)
@@ -274,11 +314,14 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                   ))}
                 </div>
               ) : (
-                <div className="ref-manager__empty">
-                  <div className="ref-manager__empty-title">
+                <div
+                  className="agent-create-esc-ref-empty"
+                  {...stylex.props(styles.empty)}
+                >
+                  <div {...stylex.props(styles.emptyTitle)}>
                     {t("references.noInstructionsYet")}
                   </div>
-                  <div className="ref-manager__empty-tip">
+                  <div {...stylex.props(styles.emptyTip)}>
                     {t("references.instructionEmptyHint")}
                   </div>
                 </div>
@@ -292,12 +335,12 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
           onClose={() => setActivePicker(null)}
           title={pickerTitle}
           size="large"
-          className="ref-manager__dialog"
+          className={stylex.props(styles.dialog).className}
         >
-          <div className="ref-manager__dialogBody">
-            <div className="ref-manager__dialogHelp">{pickerHelp}</div>
+          <div {...stylex.props(styles.dialogBody)}>
+            <div {...stylex.props(styles.dialogHelp)}>{pickerHelp}</div>
             {referencesError ? (
-              <div className="ref-manager__dialogError">
+              <div {...stylex.props(styles.dialogError)}>
                 {referencesError as string}
               </div>
             ) : null}

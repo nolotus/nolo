@@ -7,7 +7,11 @@ const source = readFileSync(
   "utf8"
 );
 const cssSource = readFileSync(
-  join(import.meta.dir, "GuidedAgentCreatePage.css"),
+  join(import.meta.dir, "guidedAgentCreatePageStyles.ts"),
+  "utf8"
+);
+const escapeHatchSource = readFileSync(
+  join(import.meta.dir, "agentPageStylexEscapeHatch.css"),
   "utf8"
 );
 const hookSource = readFileSync(
@@ -73,10 +77,9 @@ describe("GuidedAgentCreatePage source contract", () => {
   });
 
   it("keeps the manual page visually quiet instead of wrapping the form in another card", () => {
-    expect(cssSource).toContain(".manual-agent-create__form {");
-    expect(cssSource).toContain("background: transparent;");
-    expect(cssSource).toContain("box-shadow: none;");
-    expect(cssSource).toContain(".manual-agent-create .form-title");
-    expect(cssSource).toContain("display: none;");
+    expect(cssSource).toContain('backgroundColor: "transparent"');
+    expect(cssSource).toContain('boxShadow: "none"');
+    expect(escapeHatchSource).toContain(".manual-agent-create .form-title");
+    expect(escapeHatchSource).toContain("display: none;");
   });
 });

@@ -110,6 +110,18 @@ describe("renderAskChoiceFrame", () => {
     // Column must match the visible width of the prefix+text (CJK = 2 cols).
     expect(frame.otherCursor!.col).toBe(displayWidth(otherLine));
   });
+
+  test("bottomAnchored frame includes scroll hint in zh and en", () => {
+    setCliLocale("zh");
+    const stateZh = createInitialAskChoiceState([makeQuestion()]);
+    const frameZh = renderAskChoiceFrame(stateZh, { bottomAnchored: true });
+    expect(stripAnsi(frameZh.text)).toContain("Shift+滚轮可回看上方消息");
+
+    setCliLocale("en");
+    const stateEn = createInitialAskChoiceState([makeQuestion()]);
+    const frameEn = renderAskChoiceFrame(stateEn, { bottomAnchored: true });
+    expect(stripAnsi(frameEn.text)).toContain("Shift+wheel scrolls back terminal history");
+  });
 });
 
 describe("runAskChoiceDialog", () => {
@@ -487,5 +499,132 @@ describe("runAskChoiceDialog", () => {
       userMessage: "chose B",
       label: "B",
     });
+  });
+
+  test("anchored mode scrolls up by delta when panel grows taller, and does not scroll when shrinking", async () => {
+    setCliLocale("en");
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      rows: 40,
+      write: (c: string) => {
+        writes.push(String(c));
+        return true;
+      },
+    };
+
+    // 2 questions: Q1 has 2 choices, Q2 has 6 choices.
+    // Tab from Q1 to Q2 will make the frame taller. Tab back from Q2 to Q1 makes it shorter.
+    const resultPromise = runAskChoiceDialog({
+      request: {
+        questions: [
+          {
+            id: "q1",
+            question: "Question 1",
+            choices: [
+              { id: "1a", label: "A" },
+              { id: "1b", label: "B" },
+            ],
+            allowOther: false,
+          },
+          {
+            id: "q2",
+            question: "Question 2",
+            choices: [
+              { id: "2a", label: "A" },
+              { id: "2b", label: "B" },
+              { id: "2c", label: "C" },
+              { id: "2d", label: "D" },
+              { id: "2e", label: "E" },
+              { id: "2f", label: "F" },
+            ],
+            allowOther: false,
+          },
+        ],
+        blocking: true,
+      },
+      output: output as any,
+      input: { isTTY: true, isRaw: true, setRawMode: () => {} } as any,
+      readKey: makeKeyReader(["\t", "\x1b[Z", "\r", "\r"]), // Tab -> Q2 (grows), Shift+Tab -> Q1 (shrinks), Enter -> select Q1 (advances to Q2), Enter -> select Q2 (submits)
+      bottomAnchored: true,
+      bottomRow: 35,
+    });
+
+    const result = await resultPromise;
+    expect(result.kind).toBe("multi-submitted");
+
+    const joined = writes.join("");
+    // Find all scroll sequences \x1b[<N>S
+    const scrollMatches = Array.from(joined.matchAll(/\x1b\[(\d+)S/g)).map(
+      (m) => Number(m[1]),
+    );
+
+    // First paint scrolled for initial headroom.
+    // Second paint (switch to Q2, 4 more choices -> frame 4 lines taller) scrolled delta 4 lines.
+    // Third paint (switch back to Q1, frame shrunk) did not emit any new scroll sequence.
+    expect(scrollMatches.length).toBe(3);
+    expect(scrollMatches[0]).toBeGreaterThan(0);
+    expect(scrollMatches[1]).toBe(4);
+    expect(scrollMatches[2]).toBe(4); // Fourth paint: auto-advancing from Q1 to Q2 on first Enter
+
+    // Verify order: the delta scroll sequence \x1b[4S must occur BEFORE clearAnchoredLines (\x1b[<row>;1H\x1b[2K)
+    const secondScrollIdx = joined.indexOf("\x1b[4S");
+    const clearAfterDeltaIdx = joined.indexOf("\x1b[2K", secondScrollIdx);
+    expect(secondScrollIdx).toBeGreaterThan(0);
+    expect(clearAfterDeltaIdx).toBeGreaterThan(secondScrollIdx);
+  });
+
+  test("unanchored mode handles frame growth without overwriting above", async () => {
+    setCliLocale("en");
+    const writes: string[] = [];
+    const output = {
+      isTTY: true,
+      rows: 40,
+      write: (c: string) => {
+        writes.push(String(c));
+        return true;
+      },
+    };
+
+    const resultPromise = runAskChoiceDialog({
+      request: {
+        questions: [
+          {
+            id: "q1",
+            question: "Question 1",
+            choices: [
+              { id: "1a", label: "A" },
+              { id: "1b", label: "B" },
+            ],
+            allowOther: false,
+          },
+          {
+            id: "q2",
+            question: "Question 2",
+            choices: [
+              { id: "2a", label: "A" },
+              { id: "2b", label: "B" },
+              { id: "2c", label: "C" },
+              { id: "2d", label: "D" },
+              { id: "2e", label: "E" },
+              { id: "2f", label: "F" },
+            ],
+            allowOther: false,
+          },
+        ],
+        blocking: true,
+      },
+      output: output as any,
+      input: { isTTY: true, isRaw: true, setRawMode: () => {} } as any,
+      readKey: makeKeyReader(["\r", "\t", "\r"]), // Enter -> select Q1 (advances to Q2, grows), Enter -> select Q2 (submits)
+      bottomAnchored: false,
+    });
+
+    const result = await resultPromise;
+    expect(result.kind).toBe("multi-submitted");
+
+    const joined = writes.join("");
+    // Delta is 4 lines. In unanchored mode, it should output \n\n\n\n\x1b[4A to make room
+    expect(joined).toContain("\n\n\n\n\x1b[4A");
   });
 });

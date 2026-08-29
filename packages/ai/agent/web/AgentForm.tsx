@@ -42,6 +42,9 @@ import { read } from "database/dbSlice";
 import type { Agent } from "app/types";
 
 import { LuPlus, LuRefreshCw, LuHistory, LuTrash2 } from "react-icons/lu";
+import * as stylex from "@stylexjs/stylex";
+import { agentFormStyles as afs } from "./agentFormStyles";
+import "./agentCreateStylexEscapeHatch.css";
 
 const TABS = [
   { id: 0, key: "tabs.basicInfo" },
@@ -411,7 +414,10 @@ const AgentForm: React.FC<AgentFormProps> = ({
     <>
       <link rel="stylesheet" href="/public/route-styles/agent-form.css" />
       <div
-        className={isCreate ? "create-agent-container" : "edit-agent-container"}
+        {...stylex.props(
+          afs.container,
+          isCreate ? afs.createContainer : afs.editContainer
+        )}
       >
         {isCreate && !showSourceStep && (
           <FormTitle>{t("createAgent.title")}</FormTitle>
@@ -429,14 +435,14 @@ const AgentForm: React.FC<AgentFormProps> = ({
         ) : (
           <form onSubmit={submit(handleFormSubmit, handleFormSubmitError)} noValidate>
             {isCreate && createSourceCommitted && !skipSourceStep && (
-              <div className="agent-form__run-mode-banner">
+              <div {...stylex.props(afs.runModeBanner)}>
                 <span>
                   {t("createAgent.runMode.heading", "运行方式")}：
-                  <strong>{runModeBannerLabel}</strong>
+                  <strong {...stylex.props(afs.runModeBannerLabel)}>{runModeBannerLabel}</strong>
                 </span>
                 <button
                   type="button"
-                  className="agent-form__run-mode-banner-change"
+                  {...stylex.props(afs.runModeBannerChange)}
                   onClick={handleChangeCreateSource}
                 >
                   {t("createAgent.runMode.change", "更换")}
@@ -444,7 +450,10 @@ const AgentForm: React.FC<AgentFormProps> = ({
               </div>
             )}
 
-            <div className="form-header">
+            <div
+              className="agent-create-esc-form-header"
+              {...stylex.props(afs.formHeader)}
+            >
               <TabsNav
                 tabs={tabs}
                 activeTab={activeTab}
@@ -454,19 +463,22 @@ const AgentForm: React.FC<AgentFormProps> = ({
               />
             </div>
 
-            <div className="form-body">
-              <div className="tab-content">
-                <div className="tab-panel">{renderTabById(activeTab)}</div>
+            <div {...stylex.props(afs.formBody)}>
+              <div {...stylex.props(afs.tabContent)}>
+                <div {...stylex.props(afs.tabPanel)}>{renderTabById(activeTab)}</div>
               </div>
             </div>
 
-            <div className="form-footer">
+            <div
+              className="agent-create-esc-form-footer"
+              {...stylex.props(afs.formFooter)}
+            >
               {isCreate && !readOnly && (
-                <p className="agent-form__next-steps">
+                <p {...stylex.props(afs.nextSteps)}>
                   创建后会直接进入对话。生成评估用例草稿、查看 AgentPage 高级证据都是可选专业步骤；不会自动跑 live eval，也不会自动花钱。
                 </p>
               )}
-              <div className="footer-actions">
+              <div {...stylex.props(afs.footerActions)}>
                 {!isCreate && !readOnly && agentKey && (
                   <Button
                     type="button"
@@ -476,6 +488,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
                     size="small"
                     icon={<LuTrash2 />}
                     aria-label={t("agentForm.deleteAgent", "删除此 Agent")}
+                    className={stylex.props(afs.footerActionButton).className}
                     style={{ marginRight: "auto" }}
                   >
                     {t("agentForm.deleteAgent", "删除此 Agent")}
@@ -489,6 +502,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
                     size="small"
                     icon={<LuHistory />}
                     title={t("version.history", { defaultValue: "Version History" })}
+                    className={stylex.props(afs.footerActionButton).className}
                   />
                 )}
                 {showCloseButton && (
@@ -498,6 +512,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
                     onClick={onClose}
                     disabled={isSubmitting || isHydratingInitialValues}
                     size="small"
+                    className={stylex.props(afs.footerActionButton).className}
                   >
                     {readOnly ? t("close", "关闭") : t("cancel")}
                   </Button>
@@ -510,6 +525,7 @@ const AgentForm: React.FC<AgentFormProps> = ({
                     loading={isSubmitting || isHydratingInitialValues}
                     disabled={isSubmitting || isHydratingInitialValues}
                     icon={isCreate ? <LuPlus /> : <LuRefreshCw />}
+                    className={stylex.props(afs.footerActionButton).className}
                   >
                     {isSubmitting || isHydratingInitialValues
                       ? t(isCreate ? "creating" : "updating")

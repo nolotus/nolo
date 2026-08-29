@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { nanoid } from "nanoid";
 import { LuPlus, LuTrash2 } from "react-icons/lu";
 import { Input } from "render/web/form/Input";
+import * as stylex from "@stylexjs/stylex";
+import { greetingMenuStyles as styles } from "./greetingMenuStyles";
 
 export type GreetingMenuItem = {
     id: string;
@@ -60,13 +62,13 @@ const GreetingMenuEditor: React.FC<GreetingMenuEditorProps> = ({
     );
 
     return (
-        <div className="greeting-menu">
+        <div {...stylex.props(styles.menu)}>
 
-            <div className="greeting-menu__header">
-                <div className="greeting-menu__title">
+            <div {...stylex.props(styles.header)}>
+                <div {...stylex.props(styles.title)}>
                     {t("form.greetingMenuTitle", "问候菜单（可选）")}
                 </div>
-                <div className="greeting-menu__desc">
+                <div {...stylex.props(styles.desc)}>
                     {t(
                         "form.greetingMenuDesc",
                         "你可以为这个 Agent 配置若干快捷入口，用户在进入对话时会看到这些按钮。"
@@ -75,16 +77,15 @@ const GreetingMenuEditor: React.FC<GreetingMenuEditorProps> = ({
             </div>
 
             {items.length > 0 && (
-                <div className="greeting-menu__list">
+                <div {...stylex.props(styles.list)}>
                     {items.map((item) => (
-                        <div key={item.id} className="greeting-menu__item">
-                            <div className="greeting-menu__row">
-                                <div className="greeting-menu__col greeting-menu__col--label">
-                                    <span className="greeting-menu__field-label">
+                        <div key={item.id} {...stylex.props(styles.item)}>
+                            <div {...stylex.props(styles.row)}>
+                                <div {...stylex.props(styles.col)}>
+                                    <span {...stylex.props(styles.fieldLabel)}>
                                         {t("form.greetingMenuItemLabel", "按钮文案")}
                                     </span>
                                     <Input
-                                        className="greeting-menu__input"
                                         size="sm"
                                         value={item.label}
                                         onChange={(e) =>
@@ -97,15 +98,14 @@ const GreetingMenuEditor: React.FC<GreetingMenuEditorProps> = ({
                                     />
                                 </div>
 
-                                <div className="greeting-menu__col greeting-menu__col--message">
-                                    <span className="greeting-menu__field-label">
+                                <div {...stylex.props(styles.col)}>
+                                    <span {...stylex.props(styles.fieldLabel)}>
                                         {t("form.greetingMenuItemUserMessage", "等价用户请求")}
-                                        <span className="greeting-menu__optional">
+                                        <span {...stylex.props(styles.optional)}>
                                             {t("form.optional", "（可选）")}
                                         </span>
                                     </span>
                                     <Input
-                                        className="greeting-menu__input"
                                         size="sm"
 
                                         value={item.userMessage ?? ""}
@@ -123,7 +123,7 @@ const GreetingMenuEditor: React.FC<GreetingMenuEditorProps> = ({
 
                                 <button
                                     type="button"
-                                    className="greeting-menu__remove"
+                                    {...stylex.props(styles.remove)}
                                     onClick={() => handleRemove(item.id)}
                                     aria-label={t("form.greetingMenuRemove", "删除菜单项")}
                                 >
@@ -137,7 +137,7 @@ const GreetingMenuEditor: React.FC<GreetingMenuEditorProps> = ({
 
             <button
                 type="button"
-                className="greeting-menu__add"
+                {...stylex.props(styles.add)}
                 onClick={handleAdd}
             >
                 <LuPlus size={16} aria-hidden="true" />

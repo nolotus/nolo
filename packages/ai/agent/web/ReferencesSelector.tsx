@@ -26,6 +26,8 @@ import {
 import { PUBLIC_CATALOG_SPACE_ID } from "create/space/publicCatalogSpace";
 import { useViewMode } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import * as stylex from "@stylexjs/stylex";
+import { referencesSelectorStyles as styles } from "./referencesSelectorStyles";
 
 // The shared cooperation space is our canonical source of public agents / public skills.
 // However, `space.visibility = "public"` does not yet imply anonymous DB reads for its
@@ -487,20 +489,37 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
     items.map((item) => {
       const selected = value.find((r) => r.dbKey === item.dbKey);
       return (
-        <label key={item.dbKey} className="rs-item" data-selected={!!selected}>
-          <div className="rs-item__check">
+        <label
+            key={item.dbKey}
+            className="agent-create-esc-rs-item"
+            data-selected={!!selected}
+            {...stylex.props(styles.item, selected && styles.itemSelected)}
+          >
+          <div>
             <input
               type="checkbox"
               checked={!!selected}
               onChange={() => toggleRef(item)}
+              {...stylex.props(styles.checkInput)}
             />
-            <div className="rs-checkbox-ui" />
+            <div
+              className="agent-create-esc-rs-check"
+              data-checked={!!selected}
+              {...stylex.props(styles.checkboxUi)}
+            />
           </div>
 
-          <div className="rs-item__body">
-            <div className="rs-item__title">{item.title}</div>
+          <div {...stylex.props(styles.itemBody)}>
+            <div
+              {...stylex.props(
+                styles.itemTitle,
+                selected && styles.itemTitleSelected
+              )}
+            >
+              {item.title}
+            </div>
             {(searchQuery || activeSpaceId === ALL_SPACES_ID) && (
-              <div className="rs-item__meta">
+              <div {...stylex.props(styles.itemMeta)}>
                 {t("references.fromSpace", {
                   spaceName: item.spaceName || "",
                 })}
@@ -508,11 +527,14 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
             )}
           </div>
 
-          <div className="rs-item__actions">
+          <div
+              className="agent-create-esc-rs-item-actions"
+              {...stylex.props(styles.itemActions)}
+            >
             <Tooltip content={t("references.previewDoc", "预览文档")} delay={200}>
               <button
                 type="button"
-                className="rs-icon-btn rs-icon-btn--ghost"
+                {...stylex.props(styles.iconBtn, styles.iconBtnGhost)}
                 onClick={(e) => handleOpenPreview(e, item)}
                 title={t("references.previewDoc", "预览文档")}
                 aria-label={t("references.previewDoc", "预览文档")}
@@ -527,7 +549,7 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
             >
               <button
                 type="button"
-                className="rs-icon-btn rs-icon-btn--ghost"
+                {...stylex.props(styles.iconBtn, styles.iconBtnGhost)}
                 onClick={(e) => handleOpenInNewTab(e, item)}
                 title={t("references.openInNewTab", "在新标签页打开")}
                 aria-label={t("references.openInNewTab", "在新标签页打开")}
@@ -546,8 +568,13 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
               >
                 <button
                   type="button"
-                  className="rs-icon-btn rs-icon-btn--type"
-                  data-type={selected.type}
+                  {...stylex.props(
+                    styles.iconBtn,
+                    styles.iconBtnType,
+                    selected.type === "knowledge"
+                      ? styles.iconBtnTypeKnowledge
+                      : styles.iconBtnTypeInstruction
+                  )}
                   onClick={(e) => toggleType(e, item.dbKey)}
                   title={
                     selected.type === "knowledge"
@@ -576,8 +603,8 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
     });
 
   return (
-    <div className="rs-container">
-      <div className="rs-search">
+    <div {...stylex.props(styles.container)}>
+      <div {...stylex.props(styles.search)}>
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
@@ -592,7 +619,7 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
       </div>
 
       {spaceItems.length > 0 && (
-        <div className="rs-space-combobox">
+        <div {...stylex.props(styles.spaceCombobox)}>
           <Combobox<ReferencePickerSpaceItem>
             items={spaceItems}
             selectedItem={selectedSpaceItem}
@@ -611,53 +638,55 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
         </div>
       )}
 
-      <div className="rs-list">
+      <div {...stylex.props(styles.list)}>
         {pickerMode === "skill" ? (
           skillListLoading ? (
-          <div className="rs-status">
-            <div className="rs-spinner" />
+          <div {...stylex.props(styles.status)}>
+            <div {...stylex.props(styles.spinner)} />
             {t("loading")}
           </div>
         ) : showSkillEmpty ? (
-          <div className="rs-status">
+          <div {...stylex.props(styles.status)}>
             {t("references.noSkillContent")}
           </div>
         ) : (
           <>
-            <section className="rs-section">
-              <header className="rs-section__header">
-                <div className="rs-section__title">
+            <section {...stylex.props(styles.section)}>
+              <header {...stylex.props(styles.sectionHeader)}>
+                <div {...stylex.props(styles.sectionTitle)}>
                   {t("references.globalRecommendedSkills")}
                 </div>
-                <div className="rs-section__count">
+                <div {...stylex.props(styles.sectionCount)}>
                   {filteredGlobalSkillContents.length}
                 </div>
               </header>
               {filteredGlobalSkillContents.length > 0 ? (
                 <div>{renderItems(filteredGlobalSkillContents)}</div>
               ) : (
-                <div className="rs-section__empty">
+                <div {...stylex.props(styles.sectionEmpty)}>
                   {t("references.noGlobalRecommendedSkills")}
                 </div>
               )}
               {globalSkillsUnavailable ? (
-                <div className="rs-section__hint">
+                <div {...stylex.props(styles.sectionHint)}>
                   {t("references.globalRecommendedSkillsFallback")}
                 </div>
               ) : null}
             </section>
 
-            <section className="rs-section">
-              <header className="rs-section__header">
-                <div className="rs-section__title">
+            <section
+              {...stylex.props(styles.section, styles.sectionAdjacent)}
+            >
+              <header {...stylex.props(styles.sectionHeader)}>
+                <div {...stylex.props(styles.sectionTitle)}>
                   {t("references.currentViewSkills")}
                 </div>
-                <div className="rs-section__count">{filteredViewSkillContents.length}</div>
+                <div {...stylex.props(styles.sectionCount)}>{filteredViewSkillContents.length}</div>
               </header>
               {filteredViewSkillContents.length > 0 ? (
                 <div>{renderItems(filteredViewSkillContents)}</div>
               ) : (
-                <div className="rs-section__empty">
+                <div {...stylex.props(styles.sectionEmpty)}>
                   {t("references.noCurrentViewSkills")}
                 </div>
               )}
@@ -665,12 +694,12 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
           </>
         )
         ) : loading || loadingSkillCandidates ? (
-          <div className="rs-status">
-            <div className="rs-spinner" />
+          <div {...stylex.props(styles.status)}>
+            <div {...stylex.props(styles.spinner)} />
             {t("loading")}
           </div>
         ) : filteredContents.length === 0 ? (
-          <div className="rs-status">
+          <div {...stylex.props(styles.status)}>
             {t(
               searchQuery
                 ? "references.noResults"
@@ -683,9 +712,9 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
       </div>
 
       {value.length > 0 && (
-        <div className="rs-summary">
+        <div {...stylex.props(styles.summary)}>
           {t("references.selected", { count: value.length })}
-          <span className="rs-summary__detail">
+          <span {...stylex.props(styles.summaryDetail)}>
             (K: {value.filter((r) => r.type === "knowledge").length}, I:{" "}
             {value.filter((r) => r.type === "instruction").length})
           </span>

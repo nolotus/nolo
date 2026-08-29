@@ -4,7 +4,8 @@ import { LuUserPlus, LuX } from "react-icons/lu";
 import Button from "render/web/ui/Button";
 import { AriaComboBox, ComboBoxItem } from "render/web/ui/AriaComboBox";
 import { useUserId } from "identity";
-import "./WhitelistInput.css";
+import * as stylex from "@stylexjs/stylex";
+import { whitelistInputStyles as styles } from "./whitelistInputStyles";
 
 interface WhitelistInputProps {
   value?: string[];
@@ -45,8 +46,8 @@ const WhitelistInput: React.FC<WhitelistInputProps> = ({
   );
 
   return (
-    <div className="whitelist-container">
-      <div className="whitelist-input-wrapper">
+    <div {...stylex.props(styles.container)}>
+      <div {...stylex.props(styles.inputWrapper)}>
         <AriaComboBox
           aria-label={t("publish.whitelist.label", "白名单用户")}
           allowsCustomValue
@@ -78,20 +79,20 @@ const WhitelistInput: React.FC<WhitelistInputProps> = ({
           onClick={() => handleAddUser()}
           icon={<LuUserPlus />}
           disabled={!inputValue.trim()}
-          className="whitelist-add-button"
+          className={stylex.props(styles.addButton).className}
         >
           {t("add", "添加")}
         </Button>
       </div>
 
       {value.length > 0 && (
-        <div className="whitelist-user-list" aria-label="已添加的白名单用户">
+        <div {...stylex.props(styles.userList)} aria-label="已添加的白名单用户">
           {value.map((user) => (
-            <div key={user} className="whitelist-user-tag">
-              <span className="whitelist-user-id">{user}</span>
+            <div key={user} {...stylex.props(styles.userTag)}>
+              <span {...stylex.props(styles.userId)}>{user}</span>
               <button
                 type="button"
-                className="whitelist-remove-button"
+                {...stylex.props(styles.removeButton)}
                 onClick={() => handleRemoveUser(user)}
                 aria-label={`移除 ${user}`}
               >

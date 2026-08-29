@@ -1,6 +1,8 @@
 // ai/agent/web/AgentPage.tsx
 
-import "./AgentPage.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentPageStyles as styles } from "./agentPageStyles";
+import "./agentPageStylexEscapeHatch.css";
 import {
   lazy,
   Suspense,
@@ -122,13 +124,13 @@ const PageStateIndicator = ({
   error: any;
   t: any;
 }) => (
-  <div className="agent-page__container agent-page__state-indicator">
+  <div {...stylex.props(styles.container, styles.stateIndicator)}>
     {isLoading ? (
       <PageLoading fullHeight={false} />
     ) : (
       <>
-        <h2>{t("loadError")}</h2>
-        <p>{error?.message}</p>
+        <h2 {...stylex.props(styles.stateIndicatorH2)}>{t("loadError")}</h2>
+        <p {...stylex.props(styles.stateIndicatorP)}>{error?.message}</p>
       </>
     )}
   </div>
@@ -266,20 +268,20 @@ const AbilityChipGroup = ({
 }) => {
   if (items.length === 0) return null;
   return (
-    <div className="agent-page__chip-group">
-      <span className="agent-page__chip-group-label">{title}</span>
-      <div className="agent-page__chip-row">
+    <div {...stylex.props(styles.chipGroup)} data-hook="chip-group">
+      <span {...stylex.props(styles.chipGroupLabel)}>{title}</span>
+      <div {...stylex.props(styles.chipRow)}>
         {items.slice(0, max).map((item, index) => (
           <span
             key={`${title}-${index}`}
-            className="agent-page__chip"
+            {...stylex.props(styles.chip)}
             title={item}
           >
             {item}
           </span>
         ))}
         {items.length > max ? (
-          <span className="agent-page__chip agent-page__chip--more">
+          <span {...stylex.props(styles.chip, styles.chipMore)}>
             +{items.length - max}
           </span>
         ) : null}
@@ -355,20 +357,20 @@ const RuntimeEvidenceSummary = ({
 }) => {
   const evidenceView = buildRuntimeEvidenceRows(entry);
   return (
-    <div className="agent-page__runtime-evidence">
-      <div className="agent-page__runtime-evidence-title">
+    <div {...stylex.props(styles.runtimeEvidence)}>
+      <div {...stylex.props(styles.runtimeEvidenceTitle)}>
         <LuActivity size={14} aria-hidden="true" />
         <span>运行证据</span>
       </div>
-      <p className="agent-page__runtime-evidence-summary">
+      <p {...stylex.props(styles.runtimeEvidenceSummary)}>
         {evidenceView.summary} Alpha 执行证据，不代表完整生产沙箱。
       </p>
       {evidenceView.rows.length > 0 ? (
-        <div className="agent-page__runtime-evidence-grid">
+        <div {...stylex.props(styles.runtimeEvidenceGrid)}>
           {evidenceView.rows.map((row) => (
-            <div key={row.label} className="agent-page__runtime-evidence-row">
-              <span>{row.label}</span>
-              <strong>{row.value}</strong>
+            <div key={row.label} {...stylex.props(styles.runtimeEvidenceRow)}>
+              <span {...stylex.props(styles.runtimeEvidenceRowSpan)}>{row.label}</span>
+              <strong {...stylex.props(styles.runtimeEvidenceRowStrong)}>{row.value}</strong>
             </div>
           ))}
         </div>
@@ -376,7 +378,7 @@ const RuntimeEvidenceSummary = ({
       {entry?.dbKey ? (
         <Link
           to={buildDialogUrl(entry.dbKey, entry.spaceId)}
-          className="agent-page__runtime-evidence-link"
+          {...stylex.props(styles.runtimeEvidenceLink)}
         >
           查看完整对话证据
         </Link>
@@ -405,23 +407,27 @@ const AgentActivityThreadSection = ({
 }) => {
   if (items.length === 0) return null;
   return (
-    <div className="agent-page__activity-section">
-      <h3 className="agent-page__activity-section-title">{title}</h3>
-      <div className="agent-page__thread-list">
+    <div {...stylex.props(styles.section)}>
+      <h3 {...stylex.props(styles.activitySectionTitle)}>{title}</h3>
+      <div {...stylex.props(styles.threadList)}>
         {items.map((dialog) => (
           <Link
             key={dialog.dbKey}
             to={buildDialogUrl(dialog.dbKey, dialog.spaceId)}
-            className="agent-page__thread-item"
+            {...stylex.props(styles.threadItem)}
+            data-hook="thread-item"
           >
-            <span className="agent-page__thread-title">{dialog.title}</span>
-            <span className="agent-page__thread-meta">
+            <span {...stylex.props(styles.threadTitle)} data-hook="thread-title">
+              {dialog.title}
+            </span>
+            <span {...stylex.props(styles.threadMeta)}>
               {formatAgentThreadListMeta(dialog)}
             </span>
             {onDelete && (
               <button
                 type="button"
-                className="agent-page__history-delete-btn"
+                {...stylex.props(styles.historyDeleteBtn)}
+                data-hook="history-delete-btn"
                 onClick={(e) => onDelete(e, dialog.dbKey)}
                 title="删除对话"
                 aria-label="删除对话"
@@ -450,27 +456,27 @@ const AgentEmailBindingSection = ({
   }
 
   return (
-    <section className="agent-page__section agent-page__section--email-binding">
-      <div className="agent-page__email-binding">
-        <div className="agent-page__email-binding-heading">
+    <section {...stylex.props(styles.section, styles.sectionEmailBinding)}>
+      <div {...stylex.props(styles.emailBinding)}>
+        <div {...stylex.props(styles.emailBindingHeading)}>
           <LuMail size={15} aria-hidden="true" />
           <span>邮箱绑定</span>
           <Link
             to={`/${agentKey}/inbox`}
-            className="agent-page__email-binding-inbox-link"
+            {...stylex.props(styles.emailBindingInboxLink)}
           >
             <LuInbox size={14} aria-hidden="true" />
             <span>查看收件箱</span>
           </Link>
         </div>
         <>
-          <p className="agent-page__email-binding-intro">
+          <p {...stylex.props(styles.emailBindingIntro)}>
             受控域名邮箱，用于以该 Agent 身份收发邮件与接收验证信。
             {getPublicProviderLabel(summary.provider)
               ? ` · ${getPublicProviderLabel(summary.provider)}`
               : ""}
           </p>
-          <ul className="agent-page__email-binding-list">
+          <ul {...stylex.props(styles.emailBindingList)}>
             {summary.identities.map((identity) => {
               const readiness = formatAgentEmailReadinessLabel(
                 identity.readinessStatus,
@@ -483,13 +489,13 @@ const AgentEmailBindingSection = ({
               return (
                 <li
                   key={identity.emailAddress}
-                  className="agent-page__email-binding-item"
+                  {...stylex.props(styles.emailBindingItem)}
                 >
-                  <span className="agent-page__email-binding-address">
+                  <span {...stylex.props(styles.emailBindingAddress)}>
                     {identity.emailAddress}
                   </span>
                   {metaParts.length > 0 ? (
-                    <span className="agent-page__email-binding-meta">
+                    <span {...stylex.props(styles.emailBindingMeta)}>
                       {metaParts.join(" · ")}
                     </span>
                   ) : null}
@@ -890,9 +896,12 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
       {
         id: "conversations" as const,
         label: (
-          <span className="agent-page__tab-label-wrap">
+          <span {...stylex.props(styles.tabLabelWrap)}>
             <span>{t("agentActivityConversations", "对话")}</span>
-            <span className="agent-page__activity-tab-count">
+            <span
+              {...stylex.props(styles.activityTabCount)}
+              data-hook="activity-tab-count"
+            >
               {conversationsTabCount}
             </span>
           </span>
@@ -901,9 +910,12 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
       {
         id: "automations" as const,
         label: (
-          <span className="agent-page__tab-label-wrap">
+          <span {...stylex.props(styles.tabLabelWrap)}>
             <span>{t("agentAutomations", "自动化")}</span>
-            <span className="agent-page__activity-tab-count">
+            <span
+              {...stylex.props(styles.activityTabCount)}
+              data-hook="activity-tab-count"
+            >
               {automations.length}
             </span>
           </span>
@@ -953,14 +965,13 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
     const visionLabel = hasVision ? t("supported") : t("notSupported");
 
     const valueNode = (
-      <span className="agent-page__model-value-container">
-        <span className="agent-page__model-name">{modelValue}</span>
+      <span {...stylex.props(styles.modelValueContainer)}>
+        <span {...stylex.props(styles.modelName)}>{modelValue}</span>
         <span
-          className={`agent-page__vision-badge ${
-            hasVision
-              ? "agent-page__vision-badge--active"
-              : "agent-page__vision-badge--inactive"
-          }`}
+          {...stylex.props(
+            styles.visionBadge,
+            hasVision ? styles.visionBadgeActive : styles.visionBadgeInactive
+          )}
           title={`${t("vision")}: ${visionLabel}`}
           aria-label={`${t("vision")}: ${visionLabel}`}
         >
@@ -1061,7 +1072,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
 
   if (error && !item) {
     return (
-      <div className="agent-page">
+      <div {...stylex.props(styles.page)}>
         <PageStateIndicator isLoading={false} error={error} t={t} />
       </div>
     );
@@ -1071,10 +1082,10 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
   // and users never see only a full-page spinner.
   if (!item) {
     return (
-      <div className="agent-page">
-        <div className="agent-page__container">
-          <header className="agent-page__header" style={headerSurfaceVt}>
-            <div className="agent-page__avatar" style={headerIconVt}>
+      <div {...stylex.props(styles.page)}>
+        <div {...stylex.props(styles.container)}>
+          <header {...stylex.props(styles.header)} style={headerSurfaceVt}>
+            <div {...stylex.props(styles.avatar)} style={headerIconVt}>
               <AgentAvatar
                 agent={{ name: t("unnamed"), model: undefined, provider: "" }}
                 size={48}
@@ -1082,13 +1093,13 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 className="agent-page__avatar-image"
               />
             </div>
-            <div className="agent-page__info">
-              <h1 className="agent-page__name" style={headerTitleVt}>
+            <div {...stylex.props(styles.info)}>
+              <h1 {...stylex.props(styles.name)} style={headerTitleVt}>
                 {t("loading", "加载中…")}
               </h1>
             </div>
           </header>
-          <div className="agent-page__body-placeholder" aria-busy="true">
+          <div {...stylex.props(styles.bodyPlaceholder)} aria-busy="true">
             <PageLoading fullHeight={false} />
           </div>
         </div>
@@ -1103,7 +1114,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
     unknownUserLabel: t("unknownUser"),
   });
   const creatorDisplay = (
-    <Link to={`/profile/${item.userId}`} className="agent-page__creator-link">
+    <Link to={`/profile/${item.userId}`} {...stylex.props(styles.creatorLink)}>
       <Avatar
         name={creator.name}
         type="user"
@@ -1112,18 +1123,26 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
         src={creator.avatarUrl ?? undefined}
         className="agent-page__creator-avatar"
       />
-      <span className="agent-page__creator-name">{creator.name}</span>
+      <span {...stylex.props(styles.creatorName)}>{creator.name}</span>
     </Link>
   );
 
   return (
     <>
-      <div className="agent-page">
-        <div className="agent-page__container">
+      <div {...stylex.props(styles.page)}>
+        <div {...stylex.props(styles.container)}>
           {/* Hero Header */}
-          <header className="agent-page__header" style={headerSurfaceVt}>
-            <div className="agent-page__header-top">
-              <div className="agent-page__avatar" style={headerIconVt}>
+          <header
+            {...stylex.props(styles.header)}
+            data-hook="header"
+            style={headerSurfaceVt}
+          >
+            <div {...stylex.props(styles.headerTop)}>
+              <div
+                {...stylex.props(styles.avatar)}
+                data-hook="header-avatar"
+                style={headerIconVt}
+              >
                 <AgentAvatar
                   agent={item}
                   size={64}
@@ -1132,20 +1151,20 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 />
               </div>
 
-              <div className="agent-page__info">
-                <h1 className="agent-page__name" style={headerTitleVt}>
+              <div {...stylex.props(styles.info)}>
+                <h1 {...stylex.props(styles.name)} style={headerTitleVt}>
                   {item.name || t("unnamed")}
-                  <span className="agent-page__header-badges">
+                  <span {...stylex.props(styles.headerBadges)}>
                     {item.isPublic ? (
                       <span
-                        className="agent-page__header-badge agent-page__header-badge--public"
+                        {...stylex.props(styles.headerBadge, styles.headerBadgePublic)}
                         title="公开到市场"
                       >
                         <LuGlobe size={11} /> 公开
                       </span>
                     ) : (
                       <span
-                        className="agent-page__header-badge agent-page__header-badge--private"
+                        {...stylex.props(styles.headerBadge, styles.headerBadgePrivate)}
                         title="仅自己可见 (私有)"
                       >
                         <LuLock size={11} /> 私有
@@ -1153,21 +1172,21 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                     )}
                     {item.apiSource === "cli" ? (
                       <span
-                        className="agent-page__header-badge agent-page__header-badge--cli"
+                        {...stylex.props(styles.headerBadge, styles.headerBadgeCli)}
                         title="本机 CLI"
                       >
                         <LuTerminal size={11} /> 本机 CLI
                       </span>
                     ) : item.apiSource === "custom" ? (
                       <span
-                        className="agent-page__header-badge agent-page__header-badge--custom"
+                        {...stylex.props(styles.headerBadge, styles.headerBadgeCustom)}
                         title="自定义 API Key"
                       >
                         <LuWrench size={11} /> 自整 Key
                       </span>
                     ) : (
                       <span
-                        className="agent-page__header-badge agent-page__header-badge--platform"
+                        {...stylex.props(styles.headerBadge, styles.headerBadgePlatform)}
                         title="平台内置 API"
                       >
                         <LuCpu size={11} /> 平台 API
@@ -1177,19 +1196,19 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 </h1>
 
                 {item.introduction && item.introduction !== t("noIntroduction") && item.introduction !== "暂无简介。" ? (
-                  <p className="agent-page__description">
+                  <p {...stylex.props(styles.description)}>
                     {item.introduction}
                   </p>
                 ) : abilityProof.scenarios.length > 0 ? (
-                  <div className="agent-page__hero-scenarios">
+                  <div {...stylex.props(styles.heroScenarios)}>
                     {abilityProof.scenarios.slice(0, 4).map((scenario, i) => (
-                      <span key={`hero-scenario-${i}`} className="agent-page__hero-chip">
+                      <span key={`hero-scenario-${i}`} {...stylex.props(styles.heroChip)}>
                         {scenario}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <p className="agent-page__description agent-page__description--fallback">
+                  <p {...stylex.props(styles.description, styles.descriptionFallback)}>
                     {t(
                       "agentDefaultFallback",
                       "智能 AI 助手，随时点击下方的「开始聊天」探索它的完整能力。",
@@ -1197,20 +1216,20 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                   </p>
                 )}
 
-                <div className="agent-page__meta">
-                  <div className="agent-page__meta-item">
+                <div {...stylex.props(styles.meta)}>
+                  <div {...stylex.props(styles.metaItem)}>
                     <LuUser size={14} aria-hidden="true" />
-                    <span className="agent-page__meta-value agent-page__meta-value--creator">
+                    <span {...stylex.props(styles.metaValue, styles.metaValueCreator)}>
                       {creatorDisplay}
                     </span>
                   </div>
 
-                  <div className="agent-page__meta-item">
+                  <div {...stylex.props(styles.metaItem)}>
                     <LuCalendarDays size={14} aria-hidden="true" />
-                    <span className="agent-page__meta-label">
+                    <span {...stylex.props(styles.metaLabel)}>
                       {t("createdAt")}
                     </span>
-                    <span className="agent-page__meta-value">
+                    <span {...stylex.props(styles.metaValue)}>
                       {formatDateValue(item.createdAt, "yyyy-MM-dd")}
                     </span>
                   </div>
@@ -1218,28 +1237,28 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                   {details.map((d) => (
                     <div
                       key={d.key}
-                      className="agent-page__meta-item"
+                      {...stylex.props(styles.metaItem)}
                       {...(d.ariaLabel ? { "aria-label": d.ariaLabel } : {})}
                     >
                       {d.icon}
-                      <span className="agent-page__meta-label">{d.label}:</span>
-                      <span className="agent-page__meta-value">{d.value}</span>
+                      <span {...stylex.props(styles.metaLabel)}>{d.label}:</span>
+                      <span {...stylex.props(styles.metaValue)}>{d.value}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="agent-page__header-actions-top">
+              <div {...stylex.props(styles.headerActionsTop)}>
                 <AgentFavoriteButton
                   agentKey={currentKey}
-                  className="agent-page__fav-btn"
+                  {...stylex.props(styles.favBtn)}
                   iconSize={20}
                 />
               </div>
             </div>
 
             {/* Hero CTA & Actions Bar */}
-            <div className="agent-page__hero-cta-row">
+            <div {...stylex.props(styles.heroCtaRow)}>
               <Button
                 icon={<LuMessageSquare size={18} />}
                 onClick={() => startDialog()}
@@ -1252,7 +1271,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
               </Button>
 
               {(canEdit || canFork) && (
-                <div className="agent-page__admin-actions">
+                <div {...stylex.props(styles.adminActions)}>
                   {canEdit && (
                     <>
                       <Button
@@ -1301,20 +1320,20 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
           </header>
 
           {/* Content */}
-          <main className="agent-page__content">
-            <div className="agent-page__layout">
+          <main {...stylex.props(styles.content)}>
+            <div {...stylex.props(styles.layout)}>
               {/* Left Column: Chat Activity & Prompts */}
-              <div className="agent-page__main">
+              <div {...stylex.props(styles.main)}>
                 {item.introduction &&
                   item.introduction !== t("noIntroduction") &&
                   item.introduction !== "暂无简介。" &&
                   abilityProof.scenarios.length > 0 && (
-                    <section className="agent-page__section agent-page__section--description">
-                      <div className="agent-page__chip-row agent-page__scenario-row">
+                    <section {...stylex.props(styles.section, styles.sectionDescription)}>
+                      <div {...stylex.props(styles.chipRow, styles.scenarioRow)}>
                         {abilityProof.scenarios.slice(0, 6).map((scenario, i) => (
                           <span
                             key={`scenario-${i}`}
-                            className="agent-page__chip"
+                            {...stylex.props(styles.chip)}
                             title={scenario}
                           >
                             {scenario}
@@ -1326,27 +1345,29 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
 
                 {/* Example prompts: 一键带着问题开聊，帮新用户迈出第一步 */}
                 {abilityProof.examples.length > 0 ? (
-                  <section className="agent-page__section agent-page__section--prompts">
-                    <h3 className="agent-page__prompts-title">
+                  <section {...stylex.props(styles.section, styles.sectionPrompts)}>
+                    <h3 {...stylex.props(styles.promptsTitle)}>
                       {t("tryAsking", "试试这样问")}
                     </h3>
-                    <div className="agent-page__prompt-grid">
+                    <div {...stylex.props(styles.promptGrid)}>
                       {abilityProof.examples.slice(0, 4).map((prompt, i) => (
                         <button
                           key={`prompt-${i}`}
                           type="button"
-                          className="agent-page__prompt-card"
+                          {...stylex.props(styles.promptCard, isDialogLoading && styles.promptCardDisabled)}
+                          data-hook="prompt-card"
                           onClick={() => startDialog(prompt)}
                           disabled={isDialogLoading}
                           title={prompt}
                         >
-                          <span className="agent-page__prompt-text">
+                          <span {...stylex.props(styles.promptText)}>
                             {prompt}
                           </span>
                           <LuMessageSquare
                             size={14}
                             aria-hidden="true"
-                            className="agent-page__prompt-icon"
+                            {...stylex.props(styles.promptIcon)}
+                            data-hook="prompt-icon"
                           />
                         </button>
                       ))}
@@ -1355,13 +1376,14 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 ) : null}
 
                 {/* Activity — standalone section */}
-                <section className="agent-page__section agent-page__section--activity">
+                <section {...stylex.props(styles.section, styles.sectionActivity)}>
                   <AriaTabs
                     selectedKey={activeActivityTab}
                     onSelectionChange={(key) =>
                       setActiveActivityTab(key as AgentPageActivityTab)
                     }
-                    className="agent-page__activity-tabs-nav"
+                    {...stylex.props(styles.activityTabsNav)}
+                    data-hook="activity-tabs-nav"
                   >
                     <AriaTabList aria-label="智能体活动记录">
                       {activityTabs.map((tab) => (
@@ -1372,29 +1394,29 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                     </AriaTabList>
                   </AriaTabs>
 
-                  <div className="agent-page__activity-panel">
+                  <div {...stylex.props(styles.activityPanel)}>
                     {activeActivityTab === "conversations" ? (
                       !currentUserId ? (
-                        <p className="agent-page__history-empty">
+                        <p {...stylex.props(styles.historyEmpty)}>
                           {t(
                             "chatHistoryLoginRequired",
                             "登录后查看你和这个 Agent 的聊天记录",
                           )}
                         </p>
                       ) : isHistoryLoading ? (
-                        <p className="agent-page__history-empty">
+                        <p {...stylex.props(styles.historyEmpty)}>
                           {t("loading", "加载中...")}
                         </p>
                       ) : conversationsTabCount === 0 ? (
-                        <div className="agent-page__empty-state">
+                        <div {...stylex.props(styles.emptyState)}>
                           <LuMessageSquare size={20} aria-hidden="true" />
-                          <p>
+                          <p {...stylex.props(styles.emptyStateP)}>
                             {t(
                               "chatHistoryEmpty",
                               "你还没有和这个 Agent 的聊天记录",
                             )}
                           </p>
-                          <span>
+                          <span {...stylex.props(styles.emptyStateSpan)}>
                             {t(
                               "chatHistoryEmptyHint",
                               "点上方「开始聊天」，记录会出现在这里",
@@ -1402,7 +1424,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                           </span>
                         </div>
                       ) : (
-                        <div className="agent-page__activity-sections">
+                        <div {...stylex.props(styles.activitySections)}>
                           <AgentActivityThreadSection
                             title={t("agentThreadsRunning", "正在运行")}
                             items={runningThreads}
@@ -1414,9 +1436,9 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                             onDelete={handleRequestDeleteDialog}
                           />
                           {activityHistory.length > 0 ? (
-                            <div className="agent-page__activity-section">
-                              <div className="agent-page__activity-section-header">
-                                <h3 className="agent-page__activity-section-title">
+                            <div {...stylex.props(styles.section)}>
+                              <div {...stylex.props(styles.activitySectionHeader)}>
+                                <h3 {...stylex.props(styles.activitySectionTitle)}>
                                   {t("agentActivityRecentChats", "最近聊天")}
                                 </h3>
                                 <Button
@@ -1435,7 +1457,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                                   {t("agentManageAll", "管理全部")}
                                 </Button>
                               </div>
-                              <div className="agent-page__history-list">
+                              <div {...stylex.props(styles.historyList)}>
                                 {activityHistory.map((dialog) => (
                                   <Link
                                     key={dialog.dbKey}
@@ -1443,13 +1465,17 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                                       dialog.dbKey,
                                       dialog.spaceId,
                                     )}
-                                    className="agent-page__history-item"
+                                    {...stylex.props(styles.historyItem)}
+                                    data-hook="history-item"
                                   >
-                                    <div className="agent-page__history-content">
-                                      <span className="agent-page__history-title">
+                                    <div {...stylex.props(styles.historyContent)}>
+                                      <span
+                                        {...stylex.props(styles.historyTitle)}
+                                        data-hook="history-title"
+                                      >
                                         {dialog.title}
                                       </span>
-                                      <span className="agent-page__history-meta">
+                                      <span {...stylex.props(styles.historyMeta)}>
                                         {dialog.spaceName
                                           ? `${dialog.spaceName} · `
                                           : ""}
@@ -1461,7 +1487,8 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                                     </div>
                                     <button
                                       type="button"
-                                      className="agent-page__history-delete-btn"
+                                      {...stylex.props(styles.historyDeleteBtn)}
+                                      data-hook="history-delete-btn"
                                       onClick={(e) =>
                                         handleRequestDeleteDialog(
                                           e,
@@ -1482,11 +1509,11 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                       )
                     ) : activeActivityTab === "automations" ? (
                       automations.length === 0 ? (
-                        <p className="agent-page__history-empty">
+                        <p {...stylex.props(styles.historyEmpty)}>
                           {t("agentAutomationsEmpty", "暂无自动化规则")}
                         </p>
                       ) : (
-                        <div className="agent-page__thread-list">
+                        <div {...stylex.props(styles.threadList)}>
                           {automations.map((automation) => {
                             const runStatus =
                               automation.summary?.runStatus ??
@@ -1535,16 +1562,20 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                             return (
                               <div
                                 key={automation.automationKey}
-                                className="agent-page__thread-item"
+                                {...stylex.props(styles.threadItem)}
+                                data-hook="thread-item"
                               >
-                                <span className="agent-page__thread-title">
+                                <span
+                                  {...stylex.props(styles.threadTitle)}
+                                  data-hook="thread-title"
+                                >
                                   {automation.title ||
                                     t(
                                       "agentAutomationUntitled",
                                       "未命名自动化",
                                     )}
                                 </span>
-                                <span className="agent-page__thread-meta">
+                                <span {...stylex.props(styles.threadMeta)}>
                                   {lifecycleLabel} · {runStatusLabel}
                                   {" · "}
                                   {t("agentAutomationNextRun", "下一次运行")}：
@@ -1578,7 +1609,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
               </div>
 
               {/* Right Column: Sidebar containing static config, proof of capability, etc. */}
-              <div className="agent-page__sidebar">
+              <div {...stylex.props(styles.sidebar)}>
                 {canEdit ? <AgentGrantPanel agentKey={currentKey} /> : null}
                 {canEdit &&
                 typeof item?.apiKeyRef === "string" &&
@@ -1587,8 +1618,8 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 ) &&
                 currentToken &&
                 server ? (
-                  <section className="agent-page__section agent-page__section--oauth-status">
-                    <div className="agent-page__ability-proof-heading">
+                  <section {...stylex.props(styles.section)}>
+                    <div {...stylex.props(styles.abilityProofHeading)}>
                       <LuShieldCheck size={15} aria-hidden="true" />
                       <span>OAuth 凭据（他人代用额度前需已 sync）</span>
                     </div>
@@ -1600,13 +1631,13 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                   </section>
                 ) : null}
                 {/* Ability proof and developer specs */}
-                <section className="agent-page__section agent-page__section--ability-proof">
-                  <div className="agent-page__ability-proof">
-                    <div className="agent-page__ability-proof-heading">
+                <section {...stylex.props(styles.section, styles.sectionAbilityProof)}>
+                  <div {...stylex.props(styles.abilityProof)}>
+                    <div {...stylex.props(styles.abilityProofHeading)}>
                       <LuShieldCheck size={15} aria-hidden="true" />
                       <span>能力与配置</span>
                     </div>
-                    <div className="agent-page__ability-proof-grid">
+                    <div {...stylex.props(styles.abilityProofGrid)}>
                       <AbilityChipGroup
                         title="工具"
                         items={abilityProof.toolLabels}
@@ -1622,42 +1653,42 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                       {abilityProof.toolLabels.length === 0 &&
                       abilityProof.referenceLabels.length === 0 &&
                       abilityProof.imageModelLabels.length === 0 ? (
-                        <p className="agent-page__ability-proof-empty">
+                        <p {...stylex.props(styles.abilityProofEmpty)}>
                           未挂载额外工具或知识，纯对话即可使用。
                         </p>
                       ) : null}
                     </div>
-                    <details className="agent-page__ability-proof-advanced">
-                      <summary>
+                    <details {...stylex.props(styles.abilityProofAdvanced)}>
+                      <summary {...stylex.props(styles.abilityProofAdvancedSummary)}>
                         <LuBookOpen size={14} aria-hidden="true" />
                         <span>高级证据</span>
                       </summary>
-                      <div className="agent-page__ability-proof-status">
-                        <span>
+                      <div {...stylex.props(styles.abilityProofStatus)}>
+                        <span {...stylex.props(styles.abilityProofStatusTitle)}>
                           <LuWrench size={14} aria-hidden="true" />
                           Public gate
                         </span>
-                        <p>
+                        <p {...stylex.props(styles.abilityProofStatusP)}>
                           {abilityProof.publicReadiness?.summary ||
                             "未连接公开检查结果；发布前可运行 public gate 验证 public alias、eval cases、reference readability 和 secret 风险。"}
                         </p>
                       </div>
-                      <div className="agent-page__ability-proof-status">
-                        <span>
+                      <div {...stylex.props(styles.abilityProofStatus)}>
+                        <span {...stylex.props(styles.abilityProofStatusTitle)}>
                           <LuActivity size={14} aria-hidden="true" />
                           评估状态
                         </span>
-                        <p>
+                        <p {...stylex.props(styles.abilityProofStatusP)}>
                           {abilityProof.evalReadiness?.summary ||
                             "未连接评估结果；专业发布前可先生成 eval cases 草稿，再决定是否 dry-run。不强制普通创建流程运行 live eval。"}
                         </p>
                       </div>
-                      <div className="agent-page__ability-proof-status">
-                        <span>
+                      <div {...stylex.props(styles.abilityProofStatus)}>
+                        <span {...stylex.props(styles.abilityProofStatusTitle)}>
                           <LuActivity size={14} aria-hidden="true" />
                           托管执行授权
                         </span>
-                        <p>
+                        <p {...stylex.props(styles.abilityProofStatusP)}>
                           {abilityProof.hostedExecAllowed
                             ? "已允许 Alpha 托管临时工作区执行脚本/命令。"
                             : "未允许托管临时执行；普通对话不会获得 Web hosted execShell。"}
@@ -1724,9 +1755,9 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
         title={`管理全部对话记录${fullActivityHistory.length > 0 ? ` (${fullActivityHistory.length})` : ""}`}
         size="large"
       >
-        <div className="agent-page__history-list agent-page__history-list--manage">
+        <div {...stylex.props(styles.historyList, styles.historyListManage)}>
           {fullActivityHistory.length === 0 ? (
-            <p className="agent-page__history-empty">暂无对话记录</p>
+            <p {...stylex.props(styles.historyEmpty)}>暂无对话记录</p>
           ) : (
             fullActivityHistory
               .slice(
@@ -1737,21 +1768,26 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                 <Link
                   key={dialog.dbKey}
                   to={buildDialogUrl(dialog.dbKey, dialog.spaceId)}
-                  className="agent-page__history-item"
+                  {...stylex.props(styles.historyItem)}
+                  data-hook="history-item"
                   onClick={() => setIsManageModalOpen(false)}
                 >
-                  <div className="agent-page__history-content">
-                    <span className="agent-page__history-title">
+                  <div {...stylex.props(styles.historyContent)}>
+                    <span
+                      {...stylex.props(styles.historyTitle)}
+                      data-hook="history-title"
+                    >
                       {dialog.title}
                     </span>
-                    <span className="agent-page__history-meta">
+                    <span {...stylex.props(styles.historyMeta)}>
                       {dialog.spaceName ? `${dialog.spaceName} · ` : ""}
                       {formatDateValue(dialog.updatedAt, "yyyy-MM-dd HH:mm")}
                     </span>
                   </div>
                   <button
                     type="button"
-                    className="agent-page__history-delete-btn"
+                    {...stylex.props(styles.historyDeleteBtn)}
+                    data-hook="history-delete-btn"
                     onClick={(e) => handleRequestDeleteDialog(e, dialog.dbKey)}
                     title={t("deleteDialog", "删除对话")}
                     aria-label={t("deleteDialog", "删除对话")}
@@ -1763,11 +1799,11 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
           )}
         </div>
         {manageTotalPages > 1 && (
-          <div className="agent-page__manage-pagination">
-            <span className="agent-page__manage-pagination-info">
+          <div {...stylex.props(styles.managePagination)}>
+            <span {...stylex.props(styles.managePaginationInfo)}>
               {manageModalPage + 1} / {manageTotalPages}
             </span>
-            <div className="agent-page__manage-pagination-buttons">
+            <div {...stylex.props(styles.managePaginationButtons)}>
               <Button
                 variant="secondary"
                 size="small"

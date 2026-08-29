@@ -12,7 +12,9 @@ import { selectCurrentServer } from "app/settings/settingSlice";
 import { useToken, useUserId } from "identity";
 import { createAgentKey } from "database/keys";
 import Button from "render/web/ui/Button";
-import "./AgentMemoryTab.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentMemoryTabStyles as styles } from "./agentMemoryTabStyles";
+import "./agentPageStylexEscapeHatch.css";
 
 interface AgentMemoryItem {
   id: string;
@@ -243,27 +245,27 @@ const AgentMemoryTab: React.FC<AgentMemoryTabProps> = ({ agentId, agentKey }) =>
   };
 
   return (
-    <div className="tab-content-wrapper agent-memory-tab">
-      <div className="agent-memory-tab__header">
+    <div {...stylex.props(styles.container)}>
+      <div {...stylex.props(styles.header)}>
         <div>
-          <h3 className="agent-memory-tab__title">
+          <h3 {...stylex.props(styles.title)}>
             {t("agentMemory.title", "这个 Agent 记得你什么")}
           </h3>
-          <p className="agent-memory-tab__description">
+          <p {...stylex.props(styles.description)}>
             {t(
               "agentMemory.description",
               "以下内容来自你和这个 Agent 的对话。删除后它将不再记得对应内容；被你纠正过的记忆置信度会降低并停止使用。"
             )}
           </p>
         </div>
-        <div className="agent-memory-tab__actions">
+        <div {...stylex.props(styles.actions)}>
           <Button
             variant="ghost"
             size="small"
             icon={
               <LuRefreshCw
                 size={14}
-                className={loading ? "agent-memory-tab__spin" : ""}
+                {...(loading ? stylex.props(styles.spin) : {})}
                 aria-hidden="true"
               />
             }
@@ -287,14 +289,16 @@ const AgentMemoryTab: React.FC<AgentMemoryTabProps> = ({ agentId, agentKey }) =>
 
       {canManage && (
         <form
-          className="agent-memory-tab__add"
+          {...stylex.props(styles.add)}
+          data-testid="agent-memory-add-form"
           onSubmit={(event) => {
             event.preventDefault();
             handleAdd();
           }}
         >
           <textarea
-            className="agent-memory-tab__add-input"
+            {...stylex.props(styles.addInput)}
+            data-testid="agent-memory-add-input"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={t(
@@ -318,7 +322,7 @@ const AgentMemoryTab: React.FC<AgentMemoryTabProps> = ({ agentId, agentKey }) =>
       )}
 
       {!canManage || items.length === 0 ? (
-        <div className="agent-memory-tab__empty">
+        <div {...stylex.props(styles.empty)}>
           <LuBrain size={36} aria-hidden="true" />
           <p>
             {canManage
@@ -329,7 +333,10 @@ const AgentMemoryTab: React.FC<AgentMemoryTabProps> = ({ agentId, agentKey }) =>
       ) : (
         <>
           {truncated && (
-            <p className="agent-memory-tab__truncated-hint">
+            <p
+              {...stylex.props(styles.truncatedHint)}
+              data-testid="agent-memory-truncated-hint"
+            >
               {t(
                 "agentMemory.truncated",
                 "记忆较多，当前显示最近 {{count}} 条；更早内容未展示。",
@@ -337,16 +344,19 @@ const AgentMemoryTab: React.FC<AgentMemoryTabProps> = ({ agentId, agentKey }) =>
               )}
             </p>
           )}
-          <ul className="agent-memory-tab__list">
+          <ul {...stylex.props(styles.list)}>
             {items.map((item) => (
-              <li key={item.id} className="agent-memory-tab__item">
-                <div className="agent-memory-tab__item-main">
-                  <div className="agent-memory-tab__item-content">
+              <li key={item.id} {...stylex.props(styles.item)}>
+                <div {...stylex.props(styles.itemMain)}>
+                  <div {...stylex.props(styles.itemContent)}>
                     {item.content}
                   </div>
-                  <div className="agent-memory-tab__item-meta">
+                  <div {...stylex.props(styles.itemMeta)}>
                     <span
-                      className={`agent-memory-tab__badge agent-memory-tab__badge--${item.kind}`}
+                      {...stylex.props(
+                        styles.badge,
+                        item.kind === "semantic" && styles.badgeSemantic
+                      )}
                     >
                       {kindLabel(item)}
                     </span>

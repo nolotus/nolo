@@ -7,6 +7,8 @@ import { NumberInput } from "render/web/form/Input";
 import { TextArea } from "render/web/form/TextArea";
 
 import ToggleSwitch from "render/web/ui/ToggleSwitch";
+import * as stylex from "@stylexjs/stylex";
+import { publishSettingsTabStyles as styles } from "./publishSettingsTabStyles";
 import WhitelistInput from "./WhitelistInput";
 
 import type { FormData } from "../createAgentSchema";
@@ -26,12 +28,20 @@ const PublishSettingsTab = ({
 
   const commonProps = { horizontal: true, labelWidth: "140px" };
 
+  // 原 publish body 内对该包装类的 padding 覆盖（16px 0 0）：
+  // 本组件只在该 publish body 内渲染，覆盖值并入为静态 key（见 styles 文件）。
+
   const isPublic = values.isPublic;
 
   const canBePublic = apiSource === "platform";
 
   return (
-    <div className="tab-content-wrapper">
+    <div
+      {...stylex.props(
+        styles.tabContentWrapper,
+        styles.tabContentWrapperInPublishBody
+      )}
+    >
       {/* 1. isPublic 开关 */}
       <FormField
         label={t("form.isPublic", "公开到市场")}
@@ -61,7 +71,7 @@ const PublishSettingsTab = ({
 
       {/* 2. 仅在 isPublic 为 true 时渲染公开设置容器 */}
       {isPublic && (
-        <div className="public-settings-group">
+        <div className="agent-create-esc-public-settings-group" {...stylex.props(styles.publicSettingsGroup)}>
           <FormField
             label={t("publish.whitelist.label", "白名单")}
             helperText={t(

@@ -16,7 +16,8 @@ import { getPublicAgentDbKey } from "ai/agent/publicAgentIdentity";
 import { createAgentKey } from "database/keys";
 import type { Agent } from "app/types";
 import { ContentType } from "app/types";
-import "./AgentForkDialog.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentForkDialogStyles as styles } from "./agentForkDialogStyles";
 
 interface AgentForkDialogProps {
   isOpen: boolean;
@@ -203,14 +204,15 @@ const AgentForkDialog: React.FC<AgentForkDialogProps> = ({
         </>
       }
     >
-      <div className="agent-fork-dialog__body">
-        <div className="agent-fork-dialog__target-label">
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.targetLabel)}>
           {t("fork.targetSpaceLabel", "放入空间")}
         </div>
-        <ul className="agent-fork-dialog__options" role="radiogroup">
-          <li className="agent-fork-dialog__option">
-            <label>
+        <ul {...stylex.props(styles.options)} role="radiogroup">
+          <li {...stylex.props(styles.option)}>
+            <label {...stylex.props(styles.optionLabel)}>
               <input
+                {...stylex.props(styles.optionInput)}
                 type="radio"
                 name="fork-target"
                 value=""
@@ -222,9 +224,10 @@ const AgentForkDialog: React.FC<AgentForkDialogProps> = ({
             </label>
           </li>
           {spaceOptions.map((space) => (
-            <li key={space.id} className="agent-fork-dialog__option">
-              <label>
+            <li key={space.id} {...stylex.props(styles.option)}>
+              <label {...stylex.props(styles.optionLabel)}>
                 <input
+                  {...stylex.props(styles.optionInput)}
                   type="radio"
                   name="fork-target"
                   value={space.id}

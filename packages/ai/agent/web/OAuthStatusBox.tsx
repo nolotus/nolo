@@ -13,6 +13,8 @@ import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import Button from "render/web/ui/Button";
 import { getIsDesktopApp } from "app/utils/env";
+import * as stylex from "@stylexjs/stylex";
+import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
 
 export type OAuthConnectionState =
   | { kind: "loading" }
@@ -187,8 +189,8 @@ export const OAuthStatusBox = ({
 
   if (state.kind === "loading") {
     return (
-      <div className="cli-info-box">
-        <p className="cli-info-box__hint">Checking connection…</p>
+      <div {...stylex.props(modelStyles.cliInfoBox)}>
+        <p {...stylex.props(modelStyles.cliInfoBoxHint)}>Checking connection…</p>
       </div>
     );
   }
@@ -201,10 +203,10 @@ export const OAuthStatusBox = ({
       expiresIn !== undefined && expiresIn <= EXPIRING_SOON_MINUTES;
     const label = state.email || state.accountId || providerId;
     return (
-      <div className="cli-info-box">
-        <p className="cli-info-box__title">Signed in as {label}</p>
+      <div {...stylex.props(modelStyles.cliInfoBox)}>
+        <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>Signed in as {label}</p>
         {expiresIn !== undefined && (
-          <p className="cli-info-box__hint">
+          <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
             {expiringSoon
               ? `⚠️ Token expires in ${expiresIn} min — re-authorize to refresh.`
               : `Token expires in ${expiresIn} min.`}
@@ -230,9 +232,9 @@ export const OAuthStatusBox = ({
 
   if (isDesktop) {
     return (
-      <div className="cli-info-box">
-        {errorMessage ? <p className="cli-info-box__hint">{errorMessage}</p> : null}
-        <p className="cli-info-box__hint">
+      <div {...stylex.props(modelStyles.cliInfoBox)}>
+        {errorMessage ? <p {...stylex.props(modelStyles.cliInfoBoxHint)}>{errorMessage}</p> : null}
+        <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
           OAuth 将在系统浏览器中完成，凭据由 Nolo Desktop 保存在本机。
         </p>
         <Button onClick={() => void startDesktopLogin()} size="small">
@@ -244,16 +246,16 @@ export const OAuthStatusBox = ({
 
   return (
     <>
-      <div className="cli-info-box">
+      <div {...stylex.props(modelStyles.cliInfoBox)}>
         {errorMessage && (
           <p
-            className="cli-info-box__hint"
+            {...stylex.props(modelStyles.cliInfoBoxHint)}
             style={{ color: "var(--color-error, #d20f39)" }}
           >
             {errorMessage}
           </p>
         )}
-        <p className="cli-info-box__hint">
+        <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
           Run{" "}
           <code className="cli-info-box__code">
             nolo auth {providerId} --sync-to-server

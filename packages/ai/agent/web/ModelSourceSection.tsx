@@ -52,6 +52,8 @@ import { selectCurrentServer } from "app/settings/settingSlice";
 import { useToken } from "identity";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import type { FormData } from "../createAgentSchema";
+import * as stylex from "@stylexjs/stylex";
+import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
 
 // CLI 模型列表（从 AdvancedSettingsTab 提取）
 const COPILOT_CLI_MODELS = [
@@ -332,7 +334,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
         {readOnly ? (
           <>
             <FormField label={t("form.apiSource")} {...common}>
-              <div className="readonly-value">{API_SOURCE_LABELS[apiSource]}</div>
+              <div {...stylex.props(modelStyles.readonlyValue)}>{API_SOURCE_LABELS[apiSource]}</div>
             </FormField>
 
             {isPlatformApi && (
@@ -365,29 +367,42 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
             )}
 
             {isCustomApi && (
-              <div className="custom-api-box">
+              <div
+                className="agent-create-esc-custom-api-box"
+                {...stylex.props(modelStyles.customApiBox)}
+              >
                 <FormField label={t("form.model")} required error={errors.model} {...common}>
-                  <div className="readonly-value">{modelValue || "-"}</div>
+                  <div {...stylex.props(modelStyles.readonlyValue)}>{modelValue || "-"}</div>
                 </FormField>
 
                 <FormField label={t("form.customProviderUrl")} error={errors.customProviderUrl} {...common}>
-                  <div className="readonly-value readonly-value--break">{customProviderUrl || "-"}</div>
+                  <div
+                    {...stylex.props(
+                      modelStyles.readonlyValue,
+                      modelStyles.readonlyValueBreak
+                    )}
+                  >
+                    {customProviderUrl || "-"}
+                  </div>
                 </FormField>
               </div>
             )}
 
             {isCliApi && (
-              <div className="custom-api-box">
+              <div
+                className="agent-create-esc-custom-api-box"
+                {...stylex.props(modelStyles.customApiBox)}
+              >
                 <FormField label="CLI 工具" {...common}>
-                  <div className="readonly-value">{cliProviderLabel}</div>
+                  <div {...stylex.props(modelStyles.readonlyValue)}>{cliProviderLabel}</div>
                 </FormField>
 
                 <FormField label={t("form.model")} {...common}>
-                  <div className="readonly-value">{selectedCliModelLabel}</div>
+                  <div {...stylex.props(modelStyles.readonlyValue)}>{selectedCliModelLabel}</div>
                 </FormField>
 
                 <FormField label="运行位置" {...common}>
-                  <div className="readonly-value">
+                  <div {...stylex.props(modelStyles.readonlyValue)}>
                     {selectedMachine
                       ? `${selectedMachine.name} (${selectedMachine.platform}/${selectedMachine.arch})`
                       : "本地/服务器默认 CLI 环境"}
@@ -399,7 +414,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
         ) : (
           <>
             <FormField label={t("form.apiSource")} {...common}>
-              <div className="api-source-selector">
+              <div {...stylex.props(modelStyles.apiSourceSelector)}>
                 {[
                   { value: "platform" as ApiSourceType, label: "平台 API", desc: "使用平台密钥" },
                   { value: "custom" as ApiSourceType, label: "自定义 API", desc: "自己的密钥" },
@@ -408,11 +423,14 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   <button
                     key={opt.value}
                     type="button"
-                    className={`api-source-btn ${apiSource === opt.value ? "is-active" : ""}`}
+                    {...stylex.props(
+                      modelStyles.apiSourceBtn,
+                      apiSource === opt.value && modelStyles.apiSourceBtnActive
+                    )}
                     onClick={() => handleApiSourceChange(opt.value)}
                   >
-                    <span className="api-source-btn__label">{opt.label}</span>
-                    <span className="api-source-btn__desc">{opt.desc}</span>
+                    <span {...stylex.props(modelStyles.apiSourceBtnLabel, apiSource === opt.value && modelStyles.apiSourceBtnLabelActive)}>{opt.label}</span>
+                    <span {...stylex.props(modelStyles.apiSourceBtnDesc)}>{opt.desc}</span>
                   </button>
                 ))}
               </div>
@@ -422,7 +440,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
               <FormField label={t("form.model")} required error={errors.model} {...common}>
                 {isCliApi ? (
                   <Select
-                    className="cli-select"
+                    className={stylex.props(modelStyles.cliSelect).className}
                     selectedKey={(values.model as string) || ""}
                     onSelectionChange={(key) =>
                       set("model", String(key ?? ""))
@@ -466,13 +484,16 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
             )}
 
             {isCustomApi && (
-              <div className="custom-api-box">
+              <div
+                className="agent-create-esc-custom-api-box"
+                {...stylex.props(modelStyles.customApiBox)}
+              >
                 <FormField label="Provider" required {...common}>
                   <SelectRoot
                     selectedKey={selectedPresetId}
                     onSelectionChange={(v) => handlePresetChange(v as string)}
                   >
-                    <SelectTrigger className="cli-select nolo-select-trigger">
+                    <SelectTrigger className="agent-create-esc-cli-select nolo-select-trigger">
                       <SelectValue>
                         {() => {
                           const v = selectedPresetId;
@@ -528,7 +549,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                 <FormField label={t("form.model")} required error={errors.model} {...common}>
                   {selectedModelOptions.length > 0 ? (
                     <Select
-                      className="cli-select"
+                      className={stylex.props(modelStyles.cliSelect).className}
                       selectedKey={(values.model as string) || selectedPresetFields.model}
                       onSelectionChange={(key) => {
                         const id = String(key ?? "");
@@ -586,7 +607,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   <>
                     <FormField label="运行位置" {...common}>
                       <Select
-                        className="cli-select"
+                        className={stylex.props(modelStyles.cliSelect).className}
                         selectedKey={(values.machineId as string) || ""}
                         onSelectionChange={(key) =>
                           set("machineId", String(key ?? ""))
@@ -624,9 +645,9 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                       )}
                     </FormField>
 
-                    <div className="cli-info-box">
-                      <p className="cli-info-box__title">ℹ️ 本地模型绑定说明</p>
-                      <ul className="cli-info-box__list">
+                    <div {...stylex.props(modelStyles.cliInfoBox)}>
+                      <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>ℹ️ 本地模型绑定说明</p>
+                      <ul className="agent-create-esc-cli-info-list" {...stylex.props(modelStyles.cliInfoBoxList)}>
                         <li>这里的 `127.0.0.1` 只对绑定的那台机器自己有效。</li>
                         <li>远程端应通过 Agent 使用模型，而不是直接访问 `127.0.0.1`。</li>
                         <li>这是 machine binding 路径，不需要公开模型域名。</li>
@@ -638,10 +659,13 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
             )}
 
             {isCliApi && (
-              <div className="custom-api-box">
+              <div
+                className="agent-create-esc-custom-api-box"
+                {...stylex.props(modelStyles.customApiBox)}
+              >
                 <FormField label="CLI 工具" {...common}>
                   <Select
-                    className="cli-select"
+                    className={stylex.props(modelStyles.cliSelect).className}
                     selectedKey={(values.cliProvider as string) || "copilot"}
                     onSelectionChange={(key) => {
                       const v = String(key ?? "");
@@ -688,7 +712,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
                 <FormField label="运行位置" {...common}>
                   <Select
-                    className="cli-select"
+                    className={stylex.props(modelStyles.cliSelect).className}
                     selectedKey={(values.machineId as string) || ""}
                     onSelectionChange={(key) =>
                       set("machineId", String(key ?? ""))
@@ -726,9 +750,9 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   )}
                 </FormField>
 
-                <div className="cli-info-box">
-                  <p className="cli-info-box__title">ℹ️ 使用前提</p>
-                  <ul className="cli-info-box__list">
+                <div {...stylex.props(modelStyles.cliInfoBox)}>
+                  <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>ℹ️ 使用前提</p>
+                  <ul className="agent-create-esc-cli-info-list" {...stylex.props(modelStyles.cliInfoBoxList)}>
                     {selectedCliProvider === "agy" ? (
                       <>
                         <li>已安装 <code>agy</code> CLI 并完成本机登录</li>

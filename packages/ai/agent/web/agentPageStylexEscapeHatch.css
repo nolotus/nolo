@@ -1,0 +1,402 @@
+/*
+ * agentPageStylexEscapeHatch.css
+ * ─────────────────────────────────────────────────────────────
+ * Agent 详情/创建/弹窗流 CSS → StyleX 迁移的逃生舱：集中存放
+ * 无法用 StyleX（stylex.create 原子类）表达的规则（包括被清单外文件
+ * 引用的通用类名规则、跨组件选择器规则、react-aria 动态挂载类名规则等）。
+ * 由 AgentPage.tsx 与 GuidedAgentCreatePage.tsx 顶部 import。
+ * 每条规则前注明「选择器 + 保留原因」。
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ── 动画 Keyframes：AgentMemoryTab.tsx ── */
+@keyframes agent-memory-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 跨组件选择器：GuidedAgentCreatePage.tsx ── */
+
+/* .manual-agent-create .form-title —— GuidedAgentCreatePage.tsx
+ * 保留原因：隐藏嵌套 AgentForm 子组件内部的标题，跨组件后代选择器 */
+.manual-agent-create .form-title {
+  display: none;
+}
+
+/* .manual-agent-create .create-agent-container —— GuidedAgentCreatePage.tsx
+ * 保留原因：重置嵌套 AgentForm 容器的最大宽度与边距，跨组件后代选择器 */
+.manual-agent-create .create-agent-container {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 0;
+  background: transparent;
+}
+
+/* ── 跨组件 / Dialog 内部覆盖：AgentPublishDialog.tsx ── */
+
+/* .agent-publish-dialog .c-dialog —— AgentPublishDialog.tsx
+ * 保留原因：Dialog 组件内部模态框高度与响应式尺寸覆盖 */
+.agent-publish-dialog .c-dialog {
+  height: min(720px, calc(100vh - 72px));
+}
+
+.agent-publish-dialog .c-dialog__header {
+  border-bottom: 1px solid var(--borderLight, var(--border));
+}
+
+.agent-publish-dialog .c-dialog__footer {
+  justify-content: space-between;
+  padding-top: 16px;
+  border-top: 1px solid var(--borderLight, var(--border));
+}
+
+@media (max-width: 760px) {
+  .agent-publish-dialog .c-dialog {
+    height: 100%;
+  }
+}
+
+/* .agent-publish-dialog__price-grid .react-aria-Group, .react-aria-Input —— AgentPublishDialog.tsx
+ * 保留原因：react-aria 组件库挂载类名内部布局调整 */
+.agent-publish-dialog__price-grid .react-aria-Group {
+  width: 100%;
+}
+
+.agent-publish-dialog__price-grid .react-aria-Input {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 520px) {
+  .agent-publish-dialog__status-card .react-aria-SwitchField {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── react-aria-Tab 导航与计数选择器：AgentPage.tsx ── */
+
+/* .agent-page__creator-avatar.avatar —— AgentPage.tsx
+ * 保留原因：Avatar 组件内部类名特异性覆盖，保持移动端 18px 尺寸 */
+.agent-page__creator-avatar.avatar {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+}
+
+@media (max-width: 768px) {
+  .agent-page__creator-avatar.avatar {
+    width: 18px;
+    height: 18px;
+  }
+
+  .agent-page__avatar,
+  .agent-page__avatar-image {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+/* .react-aria-Tab[data-selected] [data-hook="activity-tab-count"] —— AgentPage.tsx
+ * 保留原因：react-aria-Tab 选中状态联动子元素计数字段颜色 */
+.react-aria-Tab[data-selected] [data-hook="activity-tab-count"] {
+  background: var(--primaryGhost);
+  color: var(--primary);
+}
+
+[data-hook="activity-tabs-nav"] .react-aria-TabList {
+  border-bottom: 1px solid var(--borderLight, var(--border, #e5e7eb));
+  width: 100%;
+  display: flex;
+}
+
+[data-hook="activity-tabs-nav"] .react-aria-Tab {
+  padding: 8px 16px;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--textSecondary);
+  cursor: pointer;
+  transition: color 0.15s ease;
+  outline: none;
+  background: transparent;
+  border: none;
+}
+
+[data-hook="activity-tabs-nav"] .react-aria-Tab[data-selected] {
+  color: var(--textHeading, var(--text));
+  font-weight: 600;
+}
+
+[data-hook="activity-tabs-nav"] .react-aria-Tab[data-hovered] {
+  color: var(--textHeading, var(--text));
+}
+
+[data-hook="activity-tabs-nav"] .react-aria-Tab .react-aria-SelectionIndicator {
+  background: transparent;
+}
+
+[data-hook="activity-tabs-nav"]
+  .react-aria-Tab[data-selected]
+  .react-aria-SelectionIndicator {
+  background: var(--primary, #2563eb);
+  height: 3px;
+  border-radius: var(--radius-full, 999px);
+}
+
+/* ── 按钮覆盖（压制 @nolo/render .btn 基础样式）：AgentPage.tsx ── */
+
+/* .agent-page__primary-action —— AgentPage.tsx
+ * 保留原因：覆盖 @nolo/render 的 unlayered .btn 基础样式（!important 语义） */
+.agent-page__primary-action {
+  height: 42px !important;
+  padding: 0 var(--space-6) !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  border-radius: var(--radius-sm, 8px) !important;
+  background: var(--primaryGhost, rgba(59, 130, 246, 0.12)) !important;
+  color: var(--primary, #3b82f6) !important;
+  border: 1px solid var(--borderAccent, var(--borderLight)) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+  transition: all 0.2s ease !important;
+}
+
+.agent-page__primary-action:hover:not(:disabled) {
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  border-color: var(--primary) !important;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* .agent-page__admin-btn —— AgentPage.tsx
+ * 保留原因：覆盖 @nolo/render 的 unlayered .btn 基础样式（!important 语义） */
+.agent-page__admin-btn {
+  height: 36px !important;
+  padding: 0 var(--space-3) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border-radius: var(--radius-sm, 6px) !important;
+  background: var(--backgroundHover) !important;
+  border: 1px solid var(--borderLight, var(--border)) !important;
+  color: var(--textSecondary) !important;
+  transition: all 0.2s ease !important;
+}
+
+.agent-page__admin-btn:hover:not(:disabled) {
+  background: var(--backgroundSelected, var(--backgroundHover)) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+
+@media (max-width: 768px) {
+  .agent-page__primary-action {
+    min-height: 44px !important;
+    font-size: var(--fontSize-sm) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .agent-page__primary-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .agent-page__admin-actions button {
+    width: 100% !important;
+  }
+}
+
+/* ── 联动与伪类逃生舱：AgentPage.tsx ── */
+
+/* [data-hook="header"]:hover [data-hook="header-avatar"] —— AgentPage.tsx
+ * 保留原因：父级 header hover 时缩放 avatar 图标，StyleX 无法表达父子联动 hover */
+[data-hook="header"]:hover [data-hook="header-avatar"] {
+  transform: scale(1.02);
+}
+
+/* [data-hook="prompt-card"]:hover:not(:disabled) [data-hook="prompt-icon"] —— AgentPage.tsx
+ * 保留原因：父级 promptCard hover 时高亮 promptIcon 图标，基线 467-470 */
+[data-hook="prompt-card"]:hover:not(:disabled) [data-hook="prompt-icon"] {
+  color: var(--primary);
+  opacity: 1;
+}
+
+/* [data-hook="history-item"]:hover [data-hook="history-title"] —— AgentPage.tsx
+ * 保留原因：父级 history-item hover 时高亮 history-title 文字，基线 976-978 */
+[data-hook="history-item"]:hover [data-hook="history-title"] {
+  color: var(--primary);
+}
+
+/* [data-hook="thread-item"]:hover [data-hook="thread-title"] —— AgentPage.tsx
+ * 保留原因：父级 thread-item hover 时高亮 thread-title 文字，基线 1084-1086 */
+[data-hook="thread-item"]:hover [data-hook="thread-title"] {
+  color: var(--primary);
+}
+
+/* [data-hook="thread-item"] —— AgentPage.tsx
+ * 保留原因：:last-child 去除底边框，以及 hover 状态 border 透明与 padding-left 位移 */
+[data-hook="thread-item"]:last-child {
+  border-bottom: none;
+}
+
+[data-hook="thread-item"]:hover {
+  border-bottom-color: transparent;
+  padding-left: var(--space-3);
+}
+
+/* [data-hook="history-delete-btn"] —— AgentPage.tsx
+ * 保留原因：父级 hover 联动显示历史删除按钮，StyleX 无法表达父子联动 hover */
+[data-hook="history-delete-btn"] {
+  opacity: 0;
+}
+
+[data-hook="history-item"]:hover [data-hook="history-delete-btn"],
+[data-hook="thread-item"]:hover [data-hook="history-delete-btn"] {
+  opacity: 0.6;
+}
+
+[data-hook="history-delete-btn"]:hover {
+  opacity: 1 !important;
+  color: var(--danger, #ef4444);
+  background: var(--backgroundHover);
+}
+
+/* [data-hook="chip-group"]:first-child —— AgentPage.tsx
+ * 保留原因：AbilityChipGroup 首项去除上边框与内边距，StyleX 无法表达 :first-child */
+[data-hook="chip-group"]:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* ── 通用类名（外部文件依赖保持）：原 AgentPage ── */
+
+/* .status-badge 系列 —— 被 KanbanBoard.tsx 等引用
+ * 保留原因：通用状态徽章类名，外部组件依赖 */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--fontSize-xs);
+  font-weight: 600;
+}
+
+.status-badge--public {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--success, #10b981);
+}
+
+.status-badge--private {
+  background-color: rgba(107, 114, 128, 0.1);
+  color: var(--textTertiary);
+}
+
+/* .form-group / .form-label / .form-control / .text-area / .form-row-grid —— 被 RechargeModal.tsx / InviteModal.tsx / SpaceSettings.tsx 引用
+ * 保留原因：通用表单控制类名，外部组件依赖 */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form-label {
+  font-size: var(--fontSize-xs);
+  font-weight: 500;
+  color: var(--textSecondary);
+}
+
+.form-control {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--borderSubtle);
+  background-color: var(--backgroundPrimary);
+  color: var(--textPrimary);
+  font-size: var(--fontSize-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.form-control:focus {
+  border-color: var(--primary);
+}
+
+.text-area {
+  resize: vertical;
+  min-height: 70px;
+}
+
+.form-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+/* .settings-section-title / .gate-* / .check-* —— 原 AgentPage 旧弹窗/门禁类名
+ * 保留原因：防止历史或外部依赖断裂 */
+.settings-section-title {
+  margin: 0 0 var(--space-1) 0;
+  font-size: var(--fontSize-base);
+  font-weight: 600;
+  color: var(--textPrimary);
+}
+
+.gate-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: var(--fontSize-base);
+  color: var(--textPrimary);
+}
+
+.gate-summary--success {
+  background-color: rgba(16, 185, 129, 0.08);
+  color: var(--success, #10b981);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.gate-summary--warning {
+  background-color: rgba(245, 158, 11, 0.08);
+  color: var(--warning, #f59e0b);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.check-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.check-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.check-badge--ok {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--success, #10b981);
+}
+
+.check-badge--fail {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: var(--warning, #f59e0b);
+}
+
+.check-label {
+  font-size: var(--fontSize-sm);
+  color: var(--textPrimary);
+}
+
+.check-detail {
+  font-size: var(--fontSize-xs);
+  color: var(--textTertiary);
+  margin: 0;
+}

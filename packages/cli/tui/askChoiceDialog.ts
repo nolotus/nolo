@@ -113,7 +113,10 @@ function otherRowPrefix(index: number): string {
   return ` [${index + 1}] ${t("askChoiceOtherLabel")}: `;
 }
 
-export function renderAskChoiceFrame(state: AskChoiceUiState): AskChoiceFrame {
+export function renderAskChoiceFrame(
+  state: AskChoiceUiState,
+  options?: { bottomAnchored?: boolean },
+): AskChoiceFrame {
   const colorEnabled = resolveCliColorEnabled();
   const q = state.questions[state.activeIndex];
   const qs = state.questionStates[state.activeIndex];
@@ -122,6 +125,13 @@ export function renderAskChoiceFrame(state: AskChoiceUiState): AskChoiceFrame {
 
   // Title
   lines.push(renderDialogTitle(t("askChoiceTitle")));
+  if (options?.bottomAnchored) {
+    lines.push(
+      colorEnabled
+        ? themeText(`  ${t("askChoiceScrollHint")}`, "muted", colorEnabled)
+        : `  ${t("askChoiceScrollHint")}`,
+    );
+  }
   lines.push("");
 
   // Tab bar (only when multiple questions)
@@ -273,41 +283,47 @@ export async function runAskChoiceDialog(args: {
   };
 
   const paint = () => {
-    const frame = renderAskChoiceFrame(state);
+    const frame = renderAskChoiceFrame(state, { bottomAnchored });
     const lines = frame.text.split("\n");
     const lineCount = lines.length;
     const canPosition = outputIsTty(output) && typeof output.write === "function";
 
     if (bottomAnchored && canPosition) {
       const anchorRow = resolveBottomRow();
-      // First paint: scroll the whole screen up by `lineCount` lines so the
-      // panel occupies freshly blanked rows at the bottom instead of painting
-      // over existing messages. `CSI n S` (Scroll Up) scrolls the entire
-      // scroll region (full screen by default) up by n lines regardless of
-      // cursor position: the top n lines enter scrollback (still reachable by
-      // scrolling up) and n blank lines appear at the bottom. The panel then
-      // paints into those blank rows via the existing CUP loop, so messages
-      // are pushed up rather than overwritten.
-      //
-      // Limitation: we only scroll once (on the first paint). If the panel
-      // later grows taller (longer tab, Other text wraps), the extra top rows
-      // are still cleared via `\x1b[2K` in the CUP loop and would overwrite
-      // whatever sits there. That pre-dates this fix; resolving it would need
-      // per-delta scrolling on height changes.
+      const ttyRows =
+        typeof output === "object" &&
+        output !== null &&
+        "rows" in output &&
+        typeof (output as { rows?: unknown }).rows === "number"
+          ? (output as { rows: number }).rows
+          : 24;
+
       if (!scrolledHeadroom) {
-        const ttyRows =
-          typeof output === "object" &&
-          output !== null &&
-          "rows" in output &&
-          typeof (output as { rows?: unknown }).rows === "number"
-            ? (output as { rows: number }).rows
-            : 24;
+        // First paint: scroll the whole screen up by `lineCount` lines so the
+        // panel occupies freshly blanked rows at the bottom instead of painting
+        // over existing messages. `CSI n S` (Scroll Up) scrolls the entire
+        // scroll region (full screen by default) up by n lines regardless of
+        // cursor position: the top n lines enter scrollback (still reachable by
+        // scrolling up) and n blank lines appear at the bottom. The panel then
+        // paints into those blank rows via the existing CUP loop, so messages
+        // are pushed up rather than overwritten.
         const scrollN = Math.min(lineCount, Math.max(0, ttyRows - 1));
         if (scrollN > 0) {
           output.write(`\x1b[${scrollN}S`);
         }
         scrolledHeadroom = true;
+      } else if (lineCount > renderedLineCount) {
+        // Subsequent paint: if the panel grew taller (switching question tabs,
+        // Other text wrapping, detail expanding), scroll up by the delta so the
+        // newly grown top lines land in newly blanked bottom rows instead of
+        // clearing and overwriting whatever sits above the panel.
+        const delta = lineCount - renderedLineCount;
+        const scrollN = Math.min(delta, Math.max(0, ttyRows - 1));
+        if (scrollN > 0) {
+          output.write(`\x1b[${scrollN}S`);
+        }
       }
+
       clearAnchoredLines(
         output,
         lastBottomRow > 0 ? lastBottomRow : anchorRow,
@@ -336,6 +352,11 @@ export async function runAskChoiceDialog(args: {
       restoreUnanchoredCursor();
       for (let i = 0; i < renderedLineCount; i++) {
         output.write("\x1b[1A\x1b[2K");
+      }
+      if (renderedLineCount > 0 && lineCount > renderedLineCount) {
+        const delta = lineCount - renderedLineCount;
+        output.write("\n".repeat(delta));
+        output.write(`\x1b[${delta}A`);
       }
       output.write(`${frame.text}\n`);
       renderedLineCount = lineCount;
@@ -410,12 +431,12 @@ export async function runAskChoiceDialog(args: {
       const q = state.questions[state.activeIndex];
       const isOtherRow = qs.cursorIndex >= q.choices.length;
 
-      if (isCancel(sequence)) {
-        action = { type: "CANCEL" };
+      if (sequence === CSI_SHIFT_TAB) {
+        action = { type: "PREV_TAB" };
       } else if (sequence === CSI_TAB) {
         action = { type: "NEXT_TAB" };
-      } else if (sequence === CSI_SHIFT_TAB) {
-        action = { type: "PREV_TAB" };
+      } else if (isCancel(sequence)) {
+        action = { type: "CANCEL" };
       } else if (isArrowUp(sequence)) {
         action = { type: "MOVE_CURSOR", delta: -1 };
       } else if (isArrowDown(sequence)) {

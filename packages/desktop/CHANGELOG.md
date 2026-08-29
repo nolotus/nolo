@@ -1,4 +1,13 @@
 
+## 0.35.0-alpha.2
+
+## 0.35.0-alpha.2 (2026-08-29)
+
+### Bug Fixes
+
+* **tui:** ask_user 面板变高时逐增量滚动，避免覆盖上方消息 ([ebb8ec0](https://github.com/nolotus/bun-nolo/commit/ebb8ec0885412982c0bcbc850fcf98a1a8b220e6))
+
+
 ## 0.35.0-alpha.1
 
 ## 0.35.0-alpha.1 (2026-08-29)

@@ -426,6 +426,10 @@ const STRINGS = {
     en: "question",
     zh: "问题",
   },
+  askChoiceScrollHint: {
+    en: "↑ Shift+wheel scrolls back terminal history",
+    zh: "↑ Shift+滚轮可回看上方消息",
+  },
   askChoiceSubmit: {
     en: "Submit",
     zh: "提交",

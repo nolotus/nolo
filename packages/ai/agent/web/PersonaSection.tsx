@@ -26,6 +26,8 @@ import { LuCamera } from "react-icons/lu";
 import { isRecord } from "core/isRecord";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type { FormData } from "../createAgentSchema";
+import * as stylex from "@stylexjs/stylex";
+import { personaStyles as avatarStyles } from "./personaStyles";
 
 type GreetingValue =
   | string
@@ -104,9 +106,9 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
         {/* 头像 */}
         <div className="persona-section__avatar">
           {readOnly ? (
-            <div className="agent-avatar-preview">
+            <div {...stylex.props(avatarStyles.avatarPreview)}>
               {avatarPreview ? (
-                <img src={avatarPreview} alt="avatar" />
+                <img src={avatarPreview} alt="avatar" {...stylex.props(avatarStyles.avatarPreviewImg)} />
               ) : (
                 <LuCamera size={22} className="agent-avatar-placeholder" aria-hidden="true" />
               )}
@@ -114,16 +116,21 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
           ) : (
             <button
               type="button"
-              className="agent-avatar-preview agent-avatar-preview--clickable"
+              className="agent-create-esc-avatar-preview--clickable"
+              {...stylex.props(avatarStyles.avatarPreview, avatarStyles.avatarPreviewClickable)}
               onClick={() => fileInputRef.current?.click()}
               aria-label={t("form.avatarUpload", "上传头像")}
             >
               {avatarPreview ? (
-                <img src={avatarPreview} alt="" />
+                <img src={avatarPreview} alt="" {...stylex.props(avatarStyles.avatarPreviewImg)} />
               ) : (
                 <LuCamera size={22} className="agent-avatar-placeholder" aria-hidden="true" />
               )}
-              <div className="agent-avatar-overlay" aria-hidden="true">
+              <div
+                className="agent-create-esc-avatar-overlay"
+                aria-hidden="true"
+                {...stylex.props(avatarStyles.avatarOverlay)}
+              >
                 <LuCamera size={16} aria-hidden="true" />
               </div>
             </button>
@@ -133,7 +140,7 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              className="agent-avatar-input"
+              {...stylex.props(avatarStyles.avatarInput)}
               onChange={handleAvatarUpload}
             />
           )}
