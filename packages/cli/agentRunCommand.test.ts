@@ -1114,8 +1114,13 @@ describe("cli agent run command", () => {
           readdirSync() {
             return [];
           },
-          existsSync() {
-            return false;
+          existsSync(path: string) {
+            // 入口必须真实存在（commit 53b0b11b7 引入 existsSync 校验）：无效
+            // cliEntrypointPath 会被判为坏入口并回退 resolveCliEntrypointPath()
+            // 默认解析，导致 args[0] 变成默认结果而非宿主传入的入口。测试注入的
+            // /repo/packages/cli/index.ts 是虚构路径，因此这里按路径放行，守护
+            // "宿主传入的合法入口被原样使用" 这一行为。
+            return path === "/repo/packages/cli/index.ts";
           },
           openSync() {
             return 42;
