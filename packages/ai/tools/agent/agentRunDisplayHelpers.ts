@@ -401,6 +401,15 @@ const AGENT_RUN_TERMINAL_STATUSES = new Set([
   // as terminal by all display/filter/GC consumers.
   "orphaned",
 ]);
+// Layer boundary (handoff doc §12.7 — "分层，不是漂移"): this set is the
+// ~/.nolo/runs/<runId>.json file carrier's terminal axis. The in-memory
+// process registry axis lives in packages/agent-runtime/processTask.ts
+// (PROCESS_TASK_STATUSES / PROCESS_TASK_TERMINAL_STATUSES). The two never
+// merged because no value crosses between them: run control kills via an
+// injected `process.kill(pid, signal)` (never via processRegistry), and the
+// registry writes nothing to ~/.nolo/runs. No pathway → no drift surface.
+// timeout/killed describe process-level events that only exist on this
+// (file/supervised-run) axis; merge only if a real cross-layer pathway appears.
 
 export function isAgentRunTerminalStatus(status: string | undefined): boolean {
   return typeof status === "string" && AGENT_RUN_TERMINAL_STATUSES.has(status);

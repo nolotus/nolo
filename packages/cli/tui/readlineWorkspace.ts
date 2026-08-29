@@ -40,7 +40,11 @@ import {
   readLastAgentSelectionAudit,
   saveProfileAgentSelection,
 } from "../client/profileConfig";
-import { checkForCliUpdate, runSelfUpdate } from "../updateCommands";
+import {
+  checkForCliUpdate,
+  runSelfUpdateDetailed,
+  type SelfUpdateExecution,
+} from "../updateCommands";
 import { readPipeText, spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
 import { setMathRenderingEnabled } from "../client/mathText";
@@ -377,7 +381,7 @@ function readAgentsMdLayer(cwd: string): TurnContextLayer | null {
 
 export type SelfUpdater = (
   output: NodeJS.WritableStream
-) => Promise<number>;
+) => Promise<SelfUpdateExecution>;
 
 type WorkspaceOptions = {
   scriptDir: string;
@@ -939,7 +943,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           sendOsc52: isInteractiveInput(input),
         });
   const selfUpdater: SelfUpdater =
-    options.selfUpdater ?? ((target) => runSelfUpdate({ output: target }));
+    options.selfUpdater ?? ((target) => runSelfUpdateDetailed({
+      output: target,
+      env: options.env ?? process.env,
+    }));
 
   if ((output as { isTTY?: boolean }).isTTY) {
     // Enter the alternate screen first so the TUI owns a private buffer.
@@ -1891,8 +1898,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
     if (result.action?.type === "self-update") {
       try {
-        const exitCode = await selfUpdater(output);
-        if (exitCode === 0) {
+        const update = await selfUpdater(output);
+        if (update.exitCode === 0 && update.disposition === "scheduled") {
+          output.write("Update is ready. Nolo will now exit safely; installation starts after shutdown.\n");
+          return true;
+        }
+        if (update.exitCode === 0) {
           output.write("Update finished. Restart nolo to use the new version.\n");
         } else {
           output.write("Update failed. Check the error above, then run /update again or use nolo update.\n");
@@ -3153,6 +3164,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
   } finally {
     const registry = getProcessRegistry();
+    // Full-truth list() is correct here: only launchProcess registrations ever
+    // set persist, and transient foreground envelopes (workspaceShell
+    // pre-registration) always have persist=false, so they can't inflate this
+    // exit-path count. The stopAll() below is the process-exit fallback and
+    // must keep killing everything, transient envelopes included.
     const persistentCount = registry.list().filter((p) => p.persist && p.status === "running").length;
     registry.stopAll();
     if (persistentCount > 0) {

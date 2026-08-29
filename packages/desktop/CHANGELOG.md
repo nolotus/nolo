@@ -1,4 +1,18 @@
 
+## 0.35.0-alpha.1
+
+## 0.35.0-alpha.1 (2026-08-29)
+
+### Features
+
+* **agent-runtime:** ProcessTask 层 Envelope 预登记与追加式事件表 ([436cecf](https://github.com/nolotus/bun-nolo/commit/436cecf64e9e9af172a8d05e5e05574036ba8c18))
+
+### Bug Fixes
+
+* **agent-runtime:** 收紧 ask_user 触发判据，止住把执行决策推给用户 ([de76b79](https://github.com/nolotus/bun-nolo/commit/de76b79de1c9cc2a9c23effd7190d7c97161b1a0))
+* **cli:** make Windows self-update safe ([1694ac2](https://github.com/nolotus/bun-nolo/commit/1694ac29a84593e9b57437a239d6dd343687dcef))
+
+
 ## 0.34.0-alpha.1
 
 ## 0.34.0-alpha.1 (2026-08-29)

@@ -117,7 +117,10 @@ export function renderStatusLine(state: TuiState) {
   );
   parts.push(tokenSegment);
 
-  const runningCount = getProcessRegistry().list().filter(p => p.status === "running").length;
+  // User-visible running count: only real background tasks (launchProcess /
+  // promoted). Transient foreground grace-period envelopes must not inflate
+  // this (pre-Phase-0 semantics).
+  const runningCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
   if (runningCount > 0) {
     parts.push(themeText(`⚙ ${runningCount} running`, "info", colorEnabled));
   }

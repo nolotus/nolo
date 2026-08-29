@@ -13,6 +13,19 @@ import { isCompiledBinary } from "./cliEnvHelpers";
 import { spawnProcess } from "./processSpawn";
 import { resolveTuiLaunchMode } from "./runtimeModeArgs";
 import { readPackageInfo } from "./updateCommands";
+import { consumeWindowsUpdateStartupNotice } from "./windowsSelfUpdate";
+
+if (process.platform === "win32") {
+  const updateNotice = consumeWindowsUpdateStartupNotice(process.env, {
+    ownerUpdateId: process.env.NOLO_UPDATE_OWNER_ID,
+  });
+  if (updateNotice) {
+    process.stderr.write(`${updateNotice.text}\n`);
+    if (updateNotice.blocking) {
+      process.exit(75);
+    }
+  }
+}
 
 const SOURCE_CLI_DIR = dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = isCompiledBinary() ? dirname(process.execPath) : SOURCE_CLI_DIR;

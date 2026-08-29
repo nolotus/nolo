@@ -433,6 +433,7 @@ export type WorkspaceExecResult =
       detached?: undefined;
       pid?: undefined;
       label?: undefined;
+      taskId?: undefined;
     }
   | {
       stdout: string;
@@ -442,6 +443,7 @@ export type WorkspaceExecResult =
       detached: true;
       pid: number;
       label: string;
+      taskId: string;
       content: string;
       spawnFailed?: undefined;
       aborted?: undefined;
@@ -457,6 +459,7 @@ export type WorkspaceExecResult =
       detached?: undefined;
       pid?: undefined;
       label?: undefined;
+      taskId?: undefined;
     };
 
 export async function runWorkspaceCommand(args: {
@@ -487,6 +490,26 @@ export async function runWorkspaceCommand(args: {
   if (args.stdin !== undefined && proc.stdin) {
     proc.stdin.write(args.stdin);
     proc.stdin.end();
+  }
+  // Envelope pre-registration (Phase 0, §12.1 item 2): the moment the spawn
+  // succeeded we already hold a stable taskId for this command. If the command
+  // finishes before the detach threshold, completeTransient() drops the
+  // envelope again ("不留痕是结果"); if the threshold fires first, promote()
+  // reuses this very envelope — same taskId, no re-execution, no second record.
+  const label = deriveLabel(args.command.join(" "));
+  const registry = getProcessRegistry();
+  if (typeof proc.pid === "number") {
+    registry.add({
+      pid: proc.pid,
+      pgid: proc.pid,
+      command: args.command.join(" "),
+      label,
+      // Foreground grace-period envelope: not a user-visible background task
+      // until promote() flips the marker on timeout detach (see
+      // listBackground). Keeps the status line / /procs / /stop semantics
+      // identical to pre-Phase-0.
+      transient: true,
+    });
   }
   const exitPromise = waitForNodeProcessExit(proc);
   const cleanupChildOnHostSignal = (signal: NodeJS.Signals) => {
@@ -573,6 +596,12 @@ export async function runWorkspaceCommand(args: {
     if (abortListener && args.abortSignal) {
       args.abortSignal.removeEventListener("abort", abortListener);
     }
+    // Spawn/mid-run error: a pre-registered envelope must not outlive a
+    // command that never became a background task. No-op when registration
+    // was skipped (pid-less spawn failure).
+    if (typeof proc.pid === "number") {
+      registry.remove(proc.pid);
+    }
     if (isSpawnFailureError(error)) {
       return spawnFailedCommandResult(error, args.outputLimit);
     }
@@ -605,10 +634,17 @@ export async function runWorkspaceCommand(args: {
   if (detachedProcess) {
     exitPromise.catch(() => {});
     const pid = typeof proc.pid === "number" ? proc.pid : 0;
-    const label = deriveLabel(args.command.join(" "));
     const pgid = pid;
-    const registry = getProcessRegistry();
-    registry.add({ pid, pgid, command: args.command.join(" "), label });
+    // Same-process promotion (§12.1 item 2): reuse the envelope pre-registered
+    // at spawn time — same taskId, same record, never a re-execution. The
+    // add() fallback preserves the old "a record always exists after detach"
+    // guarantee only for the pid-less-spawn path where pre-registration was
+    // skipped; it cannot duplicate an existing record because promote()
+    // already returned in that case.
+    const promoted = registry.promote(pid);
+    const envelope = promoted
+      ?? registry.add({ pid, pgid, command: args.command.join(" "), label });
+    const taskId = envelope.taskId;
     proc.on("close", (code) => {
       detachSignalCleanup();
       registry.markExited(pid, code ?? 1);
@@ -625,10 +661,12 @@ export async function runWorkspaceCommand(args: {
       detached: true,
       pid,
       label,
+      taskId,
       content: JSON.stringify({
         detached: true,
         pid,
         label,
+        taskId,
         status: "running",
         ...(immediate ? { reason: "long-running-command" } : {}),
       }),
@@ -640,6 +678,12 @@ export async function runWorkspaceCommand(args: {
     stderrPromise,
   ]);
   const exitCode = aborted ? 130 : timedOut ? 124 : Number(raceWinner);
+  // Grace GC: the command ended before detach promotion, so drop the
+  // pre-registered envelope ("不留痕是结果"). No-op after promotion; the
+  // foreground return shape below is unchanged (hard requirement).
+  if (typeof proc.pid === "number") {
+    registry.completeTransient(proc.pid, exitCode);
+  }
   const stderr = aborted
     ? `${rawStderr.trim() ? `${rawStderr.trim()}\n` : ""}command aborted by signal\n`
     : timedOut

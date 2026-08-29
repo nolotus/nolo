@@ -1987,7 +1987,7 @@ async function launchProcessTool(args: {
 
   const pgid = detached ? pid : pid;
   const registry = getProcessRegistry();
-  registry.add({ pid, pgid, command, label, persist });
+  const envelope = registry.add({ pid, pgid, command, label, persist });
 
   const cleanupChildOnHostSignal = (signal: NodeJS.Signals) => {
     try {
@@ -2017,7 +2017,7 @@ async function launchProcessTool(args: {
   });
 
   const activity = extractActivity(parsed);
-  const resultData = { pid, label, status: "running" as const };
+  const resultData = { pid, label, taskId: envelope.taskId, status: "running" as const };
 
   return {
     content: JSON.stringify(resultData),
@@ -2026,6 +2026,7 @@ async function launchProcessTool(args: {
       pid,
       label,
       status: "running",
+      taskId: envelope.taskId,
       processLaunch: resultData,
       ...(activity ? { activity } : {}),
     },

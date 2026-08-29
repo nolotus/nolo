@@ -783,7 +783,11 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
         if (action === "stop-process" && typeof pid === "number") {
           registry.kill(pid);
         } else if (action === "stop-all") {
-          registry.stopAll(undefined, { includePersist: true });
+          // Mirrors /stop all: user-initiated bulk stop targets background
+          // tasks only. Transient foreground envelopes stay owned by their
+          // foreground runner; the process-exit fallback (plain stopAll())
+          // still kills everything.
+          registry.stopAll(undefined, { includePersist: true, backgroundOnly: true });
         }
       } catch (err) {
         console.error("[nolo-desktop-process-control] failed:", err);

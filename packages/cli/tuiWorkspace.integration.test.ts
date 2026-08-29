@@ -649,7 +649,7 @@ describe("cli tui workspace process", () => {
         env: {},
         selfUpdater: async (out) => {
           out.write("npm output: installing nolo-cli@latest...\n");
-          return 0;
+          return { exitCode: 0, disposition: "completed" };
         },
       }).then(() => "done"),
       new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 3000)),
@@ -661,6 +661,36 @@ describe("cli tui workspace process", () => {
     expect(stdout).toContain("npm output: installing nolo-cli@latest...");
     expect(stdout).toContain("Update finished. Restart nolo to use the new version.");
     expect(stdout).toMatch(/Bye\.|再见。/);
+  });
+
+  test("/update exits the TUI after a safe Windows update is scheduled", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: Uint8Array[] = [];
+    output.on("data", (chunk) => chunks.push(toPlainUint8Array(chunk)));
+
+    input.write("/update\n");
+    input.end();
+
+    const result = await Promise.race([
+      startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env: {},
+        selfUpdater: async (out) => {
+          out.write("Safe Windows update scheduled.\n");
+          return { exitCode: 0, disposition: "scheduled" };
+        },
+      }).then(() => "done"),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 3000)),
+    ]);
+    const stdout = Buffer.concat(chunks).toString("utf8");
+
+    expect(result).toBe("done");
+    expect(stdout).toContain("Safe Windows update scheduled.");
+    expect(stdout).toContain("Nolo will now exit safely");
+    expect(stdout).not.toMatch(/Bye\.|再见。/);
   });
 
   test("/update uses the explicit shared updater output contract on the real TUI path", async () => {
@@ -723,7 +753,7 @@ describe("cli tui workspace process", () => {
         env: {},
         selfUpdater: async (out) => {
           out.write("npm ERR! permission denied\n");
-          return 1;
+          return { exitCode: 1, disposition: "completed" };
         },
       }).then(() => "done"),
       new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 3000)),

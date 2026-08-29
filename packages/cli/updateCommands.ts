@@ -7,6 +7,10 @@ import { DEFAULT_NOLO_SERVER_URL } from "./defaultServer";
 import { loadProfileConfig } from "./client/profileConfig";
 import { resolveDefaultSpawn, type SpawnFn, type SpawnedProcess } from "./processSpawn";
 import { isCompiledBinary } from "./cliEnvHelpers";
+import {
+  scheduleWindowsSelfUpdate,
+  type WindowsUpdateLaunchOptions,
+} from "./windowsSelfUpdate";
 
 export type CliReleaseChannel = "alpha" | "latest";
 
@@ -33,6 +37,15 @@ type RunSelfUpdateOptions = {
   entrypointPath?: string;
   serverUrl?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  scheduleWindowsUpdate?: (
+    options: WindowsUpdateLaunchOptions,
+  ) => { helperPid: number; statePath: string; logPath: string };
+};
+
+export type SelfUpdateExecution = {
+  exitCode: number;
+  disposition: "completed" | "scheduled";
 };
 
 type SpawnOutputChunk = string | ArrayBuffer | ArrayBufferView;
@@ -223,7 +236,9 @@ function isRunSelfUpdateOptions(
       "spawn" in value ||
       "entrypointPath" in value ||
       "serverUrl" in value ||
-      "env" in value)
+      "env" in value ||
+      "platform" in value ||
+      "scheduleWindowsUpdate" in value)
   );
 }
 
@@ -512,9 +527,9 @@ export async function checkForCliUpdate(
   }
 }
 
-export async function runSelfUpdate(
+export async function runSelfUpdateDetailed(
   outputOrOptions?: NodeJS.WritableStream | RunSelfUpdateOptions,
-) {
+): Promise<SelfUpdateExecution> {
   const options =
     outputOrOptions === undefined
       ? {}
@@ -527,7 +542,10 @@ export async function runSelfUpdate(
   // symlink, no npm/bun package manager involved. Route before touching npm
   // so sh-installed users without npm get a working `nolo update`.
   if (isCompiledBinary()) {
-    return runStandaloneBundleUpdate(options);
+    return {
+      exitCode: await runStandaloneBundleUpdate(options),
+      disposition: "completed",
+    };
   }
 
   const output = options.output ?? process.stdout;
@@ -537,6 +555,37 @@ export async function runSelfUpdate(
 
   const channel = getCliInstallChannel(serverUrl);
   const command = buildNpmSelfUpdateCommand(channel);
+
+  if ((options.platform ?? process.platform) === "win32") {
+    const packageInfo = readPackageInfo();
+    const entrypointPath =
+      options.entrypointPath ?? fileURLToPath(import.meta.url);
+    const schedule = options.scheduleWindowsUpdate ?? scheduleWindowsSelfUpdate;
+    try {
+      const scheduled = schedule({
+        channel,
+        currentVersion: packageInfo.version,
+        entrypointPath,
+        env,
+      });
+      output.write(`\nNolo Agent CLI Installer & Updater\n`);
+      output.write(`-----------------------------------------\n`);
+      output.write(`✓ Target channel: ${channel} (nolo-cli@${channel})\n`);
+      output.write(`✓ Safe Windows update scheduled (helper pid ${scheduled.helperPid}).\n`);
+      output.write(`▸ Exit Nolo normally. Installation starts after this process releases its files.\n`);
+      output.write(`▸ Do not open another Nolo window until the update finishes.\n`);
+      output.write(`  Log: ${scheduled.logPath}\n\n`);
+      return { exitCode: 0, disposition: "scheduled" };
+    } catch (error) {
+      output.write(
+        `✗ Could not schedule the Windows update: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      output.write(
+        `  Manual update after closing every Nolo window: ${command.join(" ")}\n`,
+      );
+      return { exitCode: 1, disposition: "completed" };
+    }
+  }
 
   output.write(`\nNolo Agent CLI Installer & Updater\n`);
   output.write(`-----------------------------------------\n`);
@@ -558,7 +607,7 @@ export async function runSelfUpdate(
       output.write(`  ${renderProgressBar(100.0)}\n`);
       output.write(`✓ Update completed successfully!\n\n`);
     }
-    return exitCode;
+    return { exitCode, disposition: "completed" };
   }
 
   const [exitCode] = await Promise.all([
@@ -572,5 +621,12 @@ export async function runSelfUpdate(
     output.write(`✓ Update completed successfully!\n\n`);
   }
 
-  return exitCode;
+  return { exitCode, disposition: "completed" };
+}
+
+/** Backward-compatible numeric API used by the non-interactive command registry. */
+export async function runSelfUpdate(
+  outputOrOptions?: NodeJS.WritableStream | RunSelfUpdateOptions,
+): Promise<number> {
+  return (await runSelfUpdateDetailed(outputOrOptions)).exitCode;
 }

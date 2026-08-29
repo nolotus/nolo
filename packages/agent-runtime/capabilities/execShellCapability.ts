@@ -156,7 +156,15 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
         timedOut: result.timedOut,
         ...(result.aborted ? { aborted: true } : {}),
         ...(result.detached
-          ? { detached: true, pid: result.pid, label: result.label, status: "running" as const }
+          ? {
+              detached: true,
+              pid: result.pid,
+              label: result.label,
+              // Phase 0: stable taskId from the pre-registered Execution
+              // Envelope (additive; existing detached fields untouched).
+              taskId: result.taskId,
+              status: "running" as const,
+            }
           : {}),
         ...(normalized.activity ? { activity: normalized.activity } : {}),
       },

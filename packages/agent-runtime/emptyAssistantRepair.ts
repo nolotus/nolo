@@ -44,7 +44,7 @@ export const STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE =
  * 后两个（repetition_loop / stagnant_tool_calls）是 CLI 侧 progressGuard 熔断
  * 的产物，server 路径不可达——复用本枚举只为直接拿到 fallback 文案。这构成
  * 一处跨层语义泄漏（server 的类型里出现了它永远不会产生的值），与
- * docs/handoff/2026-08-27-async-task-agents-research-handoff.md 12.7 讨论的
+ * docs/handoff/2026-08-27-async-task-agents-archive.md 12.7 讨论的
  * 问题同类。
  *
  * TODO(独立 PR)：把 ProgressGuardVerdict.reason 改为 CLI 本地的

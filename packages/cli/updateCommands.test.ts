@@ -14,8 +14,10 @@ import {
   runStandaloneBundleUpdate,
   resolveSelfUpdateServerUrl,
   runSelfUpdate,
+  runSelfUpdateDetailed,
 } from "./updateCommands";
 import type { SpawnFn, SpawnProcessOptions, SpawnedProcess } from "./processSpawn";
+import type { WindowsUpdateLaunchOptions } from "./windowsSelfUpdate";
 
 type SpawnCall = SpawnProcessOptions;
 type StubSubprocess = Pick<SpawnedProcess, "exited"> & {
@@ -158,6 +160,36 @@ describe("cli update commands", () => {
     // Non-compiled run must take the npm path, not sh -c.
     expect(spawnCalls[0]?.cmd[0]).toBe("npm");
     expect(spawnCalls[0]?.cmd[3]).toBe("nolo-cli@latest");
+  });
+
+  test("schedules Windows npm updates outside the running CLI process", async () => {
+    const output = new PassThrough();
+    const chunks: Uint8Array[] = [];
+    output.on("data", (chunk) => chunks.push(toPlainUint8Array(chunk)));
+    const scheduled: WindowsUpdateLaunchOptions[] = [];
+
+    const result = await runSelfUpdateDetailed({
+      output,
+      platform: "win32",
+      serverUrl: "https://nolo.chat",
+      entrypointPath: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\nolo-cli\\index.js",
+      scheduleWindowsUpdate: (options) => {
+        scheduled.push(options);
+        return {
+          helperPid: 4321,
+          statePath: "C:\\Users\\test\\.nolo\\updates\\update-result.json",
+          logPath: "C:\\Users\\test\\.nolo\\updates\\update.log",
+        };
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, disposition: "scheduled" });
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]?.channel).toBe("latest");
+    expect(scheduled[0]?.entrypointPath).toContain("nolo-cli");
+    const text = Buffer.concat(chunks).toString("utf8");
+    expect(text).toContain("Safe Windows update scheduled");
+    expect(text).toContain("after this process releases its files");
   });
 
   test("prefers explicit server url override for update channel selection", () => {

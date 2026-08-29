@@ -326,7 +326,10 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
     case "/jobs":
     case "/procs": {
       const registry = getProcessRegistry();
-      const all = registry.list();
+      // User-visible background tasks only — transient foreground grace-period
+      // envelopes (pre-Phase-0 semantics) stay out of /procs; both groups below
+      // derive from the same background view.
+      const all = registry.listBackground();
       const running = all.filter(p => p.status === "running");
       const stopped = all.filter(p => p.status !== "running");
       const lines: string[] = [];
@@ -356,21 +359,27 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         return { nextState: state, output: t("stopUsage") };
       }
       if (argText === "all") {
-        const before = registry.list().filter(p => p.status === "running").length;
-        registry.stopAll(undefined, { includePersist: true });
+        // /stop is a user-facing background-task action: count and kill only
+        // what listBackground() shows. Foreground commands are interrupted via
+        // Esc/abort, not via /stop (pre-Phase-0 semantics).
+        const before = registry.listBackground().filter(p => p.status === "running").length;
+        registry.stopAll(undefined, { includePersist: true, backgroundOnly: true });
         return { nextState: state, output: t("stopAllDone", String(before)) };
       }
       if (/^\d+$/.test(argText)) {
         const pid = parseInt(argText, 10);
         const proc = registry.get(pid);
-        if (!proc || proc.status !== "running") {
+        // Transient foreground envelopes are not user-stoppable: their
+        // lifecycle belongs to the foreground runner (abort/timeout). Report
+        // them as unknown pids, matching the pre-Phase-0 visibility.
+        if (!proc || proc.status !== "running" || proc.transient) {
           return { nextState: state, output: t("stopNoPid", String(pid)) };
         }
         registry.kill(pid);
         return { nextState: state, output: t("stopPidDone", String(pid), proc.label) };
       }
-      // Match by label
-      const matches = registry.list().filter(p => p.status === "running" && p.label === argText);
+      // Match by label (background view only — see /stop all above)
+      const matches = registry.listBackground().filter(p => p.status === "running" && p.label === argText);
       if (matches.length === 0) {
         return { nextState: state, output: t("stopNoLabel", argText) };
       }
