@@ -198,7 +198,7 @@
         }
 
         .space-data-tabs .react-aria-Tab[data-selected],
-        .space-data-tabs .react-aria-Tab.is-active {
+.space-data-tabs .react-aria-Tab.is-active {
           color: var(--textHeading, var(--text));
         }
 

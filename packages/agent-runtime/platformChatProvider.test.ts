@@ -1101,3 +1101,52 @@ describe("platform chat provider usage whitelist seam (real upstream name)", () 
     expect(body.stream_options).toEqual({ include_usage: true });
   });
 });
+
+describe("client version gate header propagation in platformChatProvider", () => {
+  test("resolvePlatformChatProviderConfig attaches clientVersion from env", async () => {
+    const config = await resolvePlatformChatProviderConfig({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: {
+        NOLO_SERVER: "https://nolo.chat",
+        AUTH_TOKEN: "token",
+        NOLO_CLI_VERSION: "0.38.0",
+      },
+    });
+    expect(config.clientVersion).toBe("0.38.0");
+  });
+
+  test("buildPlatformChatCompletionRequest attaches x-nolo-client-version header when present", () => {
+    const reqWithVersion = buildPlatformChatCompletionRequest({
+      providerConfig: {
+        serverUrl: "https://nolo.chat",
+        authToken: "token",
+        agentKey: "agent-k3",
+        model: "kimi-k3",
+        provider: "nolo",
+        endpoint: "https://nolo.chat/api/chat",
+        requestOptions: {},
+        clientVersion: "0.38.0",
+      },
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const headers = reqWithVersion.init.headers as Record<string, string>;
+    expect(headers["x-nolo-client-version"]).toBe("0.38.0");
+
+    const reqWithoutVersion = buildPlatformChatCompletionRequest({
+      providerConfig: {
+        serverUrl: "https://nolo.chat",
+        authToken: "token",
+        agentKey: "agent-k3",
+        model: "kimi-k3",
+        provider: "nolo",
+        endpoint: "https://nolo.chat/api/chat",
+        requestOptions: {},
+      },
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const headersWithout = reqWithoutVersion.init.headers as Record<string, string>;
+    expect(headersWithout["x-nolo-client-version"]).toBeUndefined();
+  });
+});

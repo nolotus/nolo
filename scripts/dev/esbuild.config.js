@@ -103,11 +103,11 @@ export const outdir = `public/${assetDirName}`;
 export const publicPath = `/public/${assetDirName}/`;
 
 // StyleX esbuild 插件（ENABLE_STYLEX 关闭时为 null，plugins 数组里会被过滤掉）。
-// useCSSLayers: StyleX 规则输出到 CSS @layer，便于与普通 CSS 的层叠顺序共存；
+// useCSSLayers: false，因为 unlayered 普通 CSS 会无条件压过 layer 内 StyleX 规则；
 // unstable_moduleResolution: StyleX 运行时按 CommonJS 语义解析，与 esbuild bundle 行为对齐。
 const stylexEsbuildPlugin = ENABLE_STYLEX
   ? stylexUnplugin.esbuild({
-      useCSSLayers: true,
+      useCSSLayers: false,
       importSources: ["@stylexjs/stylex"],
       unstable_moduleResolution: { type: "commonJS" },
     })
@@ -143,7 +143,7 @@ if (ENABLE_STYLEX) {
     const { unpluginFactory } = require(corePath);
     stylexCollectInstance = unpluginFactory(
       {
-        useCSSLayers: true,
+        useCSSLayers: false,
         importSources: ["@stylexjs/stylex"],
         unstable_moduleResolution: { type: "commonJS" },
       },

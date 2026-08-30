@@ -19,12 +19,14 @@ import {
 } from "../integrations/openai/responsesHelpers";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import { normalizeServerOrigin } from "core/serverOrigin";
+import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
 import { asNonEmptyStringArray } from "core/stringArray";
 import {
   buildProviderExecutionPlan,
   canUsePlatformChatProvider as canUsePlatformChatProviderFromEnv,
   hasDirectOpenAiCompatibleProvider as hasDirectOpenAiCompatibleProviderFromEnv,
   resolveAgentRuntimeLocation,
+  resolveClientVersion,
   resolvePlatformAuthToken,
   resolvePlatformServerUrl,
   resolveProviderTransportDecision,
@@ -86,6 +88,13 @@ export type PlatformChatProviderConfig = {
    * primaryUsageProvider 是同一组概念。
    */
   usageProvider?: string;
+  /**
+   * 本客户端自身版本（CLI 从 NOLO_CLI_VERSION 解析）。
+   * 随请求以 x-nolo-client-version 头发给 server，让 server 端的客户端版本闸门
+   * 能判断「这个客户端认不认识该托管模型的 wire 要求」。缺省时不发头（server
+   * 侧 fail-open）。
+   */
+  clientVersion?: string;
 };
 
 type PlatformChatTool = Record<string, unknown>;
@@ -151,6 +160,9 @@ export async function resolvePlatformChatProviderConfig(args: {
       ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
       ...(args.agentConfig.apiSource ? { apiSource: args.agentConfig.apiSource } : {}),
       ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
+      ...(resolveClientVersion(args.env)
+        ? { clientVersion: resolveClientVersion(args.env)! }
+        : {}),
     };
   }
   return {
@@ -165,6 +177,7 @@ export async function resolvePlatformChatProviderConfig(args: {
     ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
     ...(plan.apiSource ? { apiSource: plan.apiSource } : {}),
     ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
+    ...(plan.clientVersion ? { clientVersion: plan.clientVersion } : {}),
   };
 }
 
@@ -245,6 +258,15 @@ export function buildPlatformChatCompletionRequest(args: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${args.providerConfig.authToken}`,
+        // 客户端版本闸门第 2 层：与鉴权头同处一处统一注入，避免某条命令路径
+        // 漏发。server 据此拒绝「该客户端认不了 wire 的托管模型」；不发这个头
+        // 的旧客户端在 server 侧 fail-open（已知局限）。
+        ...(args.providerConfig.clientVersion
+          ? {
+              [NOLO_CLIENT_VERSION_HEADER]:
+                args.providerConfig.clientVersion,
+            }
+          : {}),
       },
       body: JSON.stringify(body),
     },

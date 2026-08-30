@@ -79,6 +79,30 @@ describe("normalizeHistoricalReasoningMessage", () => {
       const normalized = normalizeHistoricalReasoningMessage(msg);
       expect(normalized.thinkContent).toBe("有效思考内容");
     });
+
+    it("matches fallback messages even when content contains leading/trailing whitespace (SSE chunks concatenation tolerance)", () => {
+      const fallbacks = [
+        EMPTY_ASSISTANT_FALLBACK_MESSAGE,
+        LENGTH_TRUNCATED_FALLBACK_MESSAGE,
+        STREAM_TRUNCATED_FALLBACK_MESSAGE,
+        REPETITION_LOOP_FALLBACK_MESSAGE,
+        STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
+      ];
+
+      for (const fallbackText of fallbacks) {
+        const paddedContent = `  \n\t  ${fallbackText} \r\n  `;
+        const msg: Message = {
+          id: `msg-pad-${fallbackText.slice(0, 4)}`,
+          dbKey: "dialog-user-1-dialog-1-msg-pad",
+          role: "assistant",
+          content: paddedContent,
+          reasoning_content: `Reasoning for padded ${fallbackText}`,
+        };
+        const normalized = normalizeHistoricalReasoningMessage(msg);
+        expect(normalized.thinkContent).toBe(`Reasoning for padded ${fallbackText}`);
+        expect(normalized.content).toBe(paddedContent);
+      }
+    });
   });
 
   describe("② 正常历史轮保持不变（避免全量上屏改变阅读密度）", () => {
@@ -115,12 +139,12 @@ describe("normalizeHistoricalReasoningMessage", () => {
       );
     });
 
-    it("does not modify assistant message if reasoning_content is empty or whitespace", () => {
+    it("does not modify assistant message if reasoning_content is empty or whitespace (even when content is fallback ± whitespace)", () => {
       const emptyReasoningMessage: Message = {
         id: "msg-empty-reasoning",
         dbKey: "dialog-user-1-dialog-1-msg-05",
         role: "assistant",
-        content: STREAM_TRUNCATED_FALLBACK_MESSAGE,
+        content: `  \n${STREAM_TRUNCATED_FALLBACK_MESSAGE}  \t`,
         reasoning_content: "   \n  ",
       };
 
@@ -128,14 +152,27 @@ describe("normalizeHistoricalReasoningMessage", () => {
 
       expect(normalized).toBe(emptyReasoningMessage);
       expect(normalized.thinkContent).toBeUndefined();
+
+      const emptyReasoningStringMessage: Message = {
+        id: "msg-empty-str-reasoning",
+        dbKey: "dialog-user-1-dialog-1-msg-05b",
+        role: "assistant",
+        content: `  ${EMPTY_ASSISTANT_FALLBACK_MESSAGE}  `,
+        reasoning_content: "",
+      };
+
+      const normalized2 = normalizeHistoricalReasoningMessage(emptyReasoningStringMessage);
+
+      expect(normalized2).toBe(emptyReasoningStringMessage);
+      expect(normalized2.thinkContent).toBeUndefined();
     });
 
-    it("does not modify assistant message if reasoning_content is undefined", () => {
+    it("does not modify assistant message if reasoning_content is undefined (even when content is fallback ± whitespace)", () => {
       const noReasoningMessage: Message = {
         id: "msg-no-reasoning",
         dbKey: "dialog-user-1-dialog-1-msg-06",
         role: "assistant",
-        content: STREAM_TRUNCATED_FALLBACK_MESSAGE,
+        content: ` \n\t ${STREAM_TRUNCATED_FALLBACK_MESSAGE} `,
       };
 
       const normalized = normalizeHistoricalReasoningMessage(noReasoningMessage);

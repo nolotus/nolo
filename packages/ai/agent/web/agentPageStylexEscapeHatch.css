@@ -91,7 +91,7 @@
   }
 
   .agent-page__avatar,
-  .agent-page__avatar-image {
+.agent-page__avatar-image {
     width: 56px;
     height: 56px;
   }
@@ -99,7 +99,7 @@
 
 /* .react-aria-Tab[data-selected] [data-hook="activity-tab-count"] —— AgentPage.tsx
  * 保留原因：react-aria-Tab 选中状态联动子元素计数字段颜色 */
-.react-aria-Tab[data-selected] [data-hook="activity-tab-count"] {
+.react-aria-Tab[data-selected] [data-hook="activity-tab-count"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--primaryGhost);
   color: var(--primary);
 }
@@ -210,52 +210,52 @@
 
 /* [data-hook="header"]:hover [data-hook="header-avatar"] —— AgentPage.tsx
  * 保留原因：父级 header hover 时缩放 avatar 图标，StyleX 无法表达父子联动 hover */
-[data-hook="header"]:hover [data-hook="header-avatar"] {
+[data-hook="header"]:hover [data-hook="header-avatar"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   transform: scale(1.02);
 }
 
 /* [data-hook="prompt-card"]:hover:not(:disabled) [data-hook="prompt-icon"] —— AgentPage.tsx
  * 保留原因：父级 promptCard hover 时高亮 promptIcon 图标，基线 467-470 */
-[data-hook="prompt-card"]:hover:not(:disabled) [data-hook="prompt-icon"] {
+[data-hook="prompt-card"]:hover:not(:disabled) [data-hook="prompt-icon"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   color: var(--primary);
   opacity: 1;
 }
 
 /* [data-hook="history-item"]:hover [data-hook="history-title"] —— AgentPage.tsx
  * 保留原因：父级 history-item hover 时高亮 history-title 文字，基线 976-978 */
-[data-hook="history-item"]:hover [data-hook="history-title"] {
+[data-hook="history-item"]:hover [data-hook="history-title"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   color: var(--primary);
 }
 
 /* [data-hook="thread-item"]:hover [data-hook="thread-title"] —— AgentPage.tsx
  * 保留原因：父级 thread-item hover 时高亮 thread-title 文字，基线 1084-1086 */
-[data-hook="thread-item"]:hover [data-hook="thread-title"] {
+[data-hook="thread-item"]:hover [data-hook="thread-title"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   color: var(--primary);
 }
 
 /* [data-hook="thread-item"] —— AgentPage.tsx
  * 保留原因：:last-child 去除底边框，以及 hover 状态 border 透明与 padding-left 位移 */
-[data-hook="thread-item"]:last-child {
+[data-hook="thread-item"]:last-child:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-bottom: none;
 }
 
-[data-hook="thread-item"]:hover {
+[data-hook="thread-item"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-bottom-color: transparent;
   padding-left: var(--space-3);
 }
 
 /* [data-hook="history-delete-btn"] —— AgentPage.tsx
  * 保留原因：父级 hover 联动显示历史删除按钮，StyleX 无法表达父子联动 hover */
-[data-hook="history-delete-btn"] {
+[data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 0;
 }
 
-[data-hook="history-item"]:hover [data-hook="history-delete-btn"],
-[data-hook="thread-item"]:hover [data-hook="history-delete-btn"] {
+[data-hook="history-item"]:hover [data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook="thread-item"]:hover [data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 0.6;
 }
 
-[data-hook="history-delete-btn"]:hover {
+[data-hook="history-delete-btn"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 1 !important;
   color: var(--danger, #ef4444);
   background: var(--backgroundHover);
@@ -263,7 +263,7 @@
 
 /* [data-hook="chip-group"]:first-child —— AgentPage.tsx
  * 保留原因：AbilityChipGroup 首项去除上边框与内边距，StyleX 无法表达 :first-child */
-[data-hook="chip-group"]:first-child {
+[data-hook="chip-group"]:first-child:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-top: none;
   padding-top: 0;
 }

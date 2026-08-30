@@ -1,4 +1,15 @@
 
+## 0.39.0-alpha.2
+
+## 0.39.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **agent:** 客户端版本闸门——旧客户端用不了的新模型明确拒绝并提示升级 ([35b29cb](https://github.com/nolotus/bun-nolo/commit/35b29cbfa10a8fa30035d102ec2fcd661c708a77))
+* **chat:** 历史截断轮归一化 trim 加固与半截正文轮边界沉淀 ([651d0f9](https://github.com/nolotus/bun-nolo/commit/651d0f9d156de11d8353bf820148984948247005))
+* **stylex:** 关闭 CSS layers 并按对手实际特异性消解 292 条级联冲突 ([d15a59b](https://github.com/nolotus/bun-nolo/commit/d15a59b8e3c5bbc444cc8f8825c6bd0559303c82))
+
+
 ## 0.39.0-alpha.1
 
 ## 0.39.0-alpha.1 (2026-08-30)

@@ -39,7 +39,7 @@ Bun.plugin({
             "@stylexjs/babel-plugin",
             {
               // 与 scripts/dev/esbuild.config.js / buildRenderBundle.ts 保持一致
-              useCSSLayers: true,
+              useCSSLayers: false,
               importSources: ["@stylexjs/stylex"],
               unstable_moduleResolution: { type: "commonJS" },
               dev: false,

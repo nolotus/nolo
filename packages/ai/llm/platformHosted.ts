@@ -3,6 +3,7 @@
 // Public provider id is `nolo` (see providers.ts MODEL_MAP).
 
 export * from "./platformHostedRoutingTable";
+export * from "./platformHostedClientVersionGate";
 
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { Model } from "./types";
@@ -32,6 +33,7 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
+  PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 
 export const PLATFORM_HOSTED_CLAUDE_MODELS = [
@@ -403,6 +405,10 @@ export const platformHostedModels = [
     contextWindow: 1_000_000,
     supportsTool: true,
     supportsReasoningEffort: true,
+    // 客户端版本闸门第 1 层（目录标注）：随模型列表下发，新客户端据此置灰 +
+    // 提示升级。真值在 platformHostedRoutingTable（见
+    // platformHosted.clientVersionGate.test.ts 的目录↔路由表对齐断言）。
+    minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   },
   {
     name: PLATFORM_HOSTED_KIMI_K26_MODEL,

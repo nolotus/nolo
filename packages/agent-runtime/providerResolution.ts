@@ -11,6 +11,7 @@ import {
   resolvePlatformChatCompletionsEndpoint,
   resolvePlatformHostedCredentialProvider,
 } from "./platformProviderEndpoints";
+import { evaluatePlatformHostedClientVersionGate } from "../ai/llm/platformHostedClientVersionGate";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -136,6 +137,11 @@ export type ProxyProviderExecutionPlan = ProviderExecutionPlanBase & {
   apiKeyHeader?: string;
   /** 同 DirectProviderExecutionPlan.usageProvider。 */
   usageProvider?: string;
+  /**
+   * 本客户端自身版本（NOLO_CLI_VERSION）。透传给 platformChatProvider，
+   * 作为 x-nolo-client-version 头发给 server 的版本闸门。
+   */
+  clientVersion?: string;
 };
 
 export type ProviderExecutionPlan =
@@ -173,6 +179,20 @@ export function resolveOpenAiCompatibleApiKey(env: EnvLike) {
 
 export function resolvePlatformServerUrl(env: EnvLike) {
   return trimTrailingSlash(env.NOLO_SERVER || env.BASE_URL || "https://nolo.chat");
+}
+
+/**
+ * 本客户端自身版本（客户端版本闸门用）。
+ *
+ * 单一来源：CLI 入口 packages/cli/index.ts 把 packages/cli/package.json 的
+ * version 写进 NOLO_CLI_VERSION。desktop 打包时同样注入这个变量即可复用整套
+ * 闸门，无需再加一个平行的 env 名。
+ *
+ * 返回 undefined = 本进程不知道自己的版本（如脚本/测试直接调 runtime）。
+ * 此时既不发版本头、本地 self-check 也放行 —— fail-open 一致。
+ */
+export function resolveClientVersion(env: EnvLike): string | undefined {
+  return asOptionalTrimmedString(env.NOLO_CLI_VERSION);
 }
 
 export function resolvePlatformAuthToken(env: EnvLike) {
@@ -426,6 +446,29 @@ export async function buildProviderExecutionPlan(args: {
   }
 
   const provider = agentConfig.provider || agentConfig.apiSource || "openai";
+  // ── 客户端版本闸门：本地 runtime self-check ─────────────────────────────
+  // 解析平台托管路由的同一处，比对「自身版本」与「表里的 minClientVersion」。
+  // 低于要求就在这里抛错——**不发起任何上游调用，也不发出 proxy 请求**，
+  // 一分钱都不烧。这是对旧客户端最实际的保护：server 侧闸门拦不住不发版本头
+  // 的客户端，而带了这段 self-check 的客户端在本地就把自己拦下了。
+  //
+  // 只管平台托管（provider=nolo 家族）；custom / 自带 key / OAuth 订阅在上面
+  // 的 mode==="custom" 分支就已经 return，走不到这里。
+  const localClientVersion = resolveClientVersion(env);
+  const clientVersionGate = evaluatePlatformHostedClientVersionGate({
+    provider,
+    model,
+    clientVersion: localClientVersion,
+    isCustomApi:
+      agentConfig.apiSource === "custom" ||
+      Boolean(agentConfig.customProviderUrl?.trim()),
+    hasExplicitCredential:
+      Boolean(agentConfig.apiKey?.trim()) ||
+      Boolean(agentConfig.apiKeyRef?.trim()),
+  });
+  if (clientVersionGate.blocked) {
+    throw new Error(clientVersionGate.message);
+  }
   // 查询使用；对外 provider 语义仍是 "nolo"。custom 模式不设置（用户自带
   // provider 的行为不变）。
   const platformUsageProvider = resolvePlatformHostedCredentialProvider(provider, model);
@@ -443,6 +486,7 @@ export async function buildProviderExecutionPlan(args: {
       serverUrl: resolvePlatformServerUrl(env),
       authToken: resolvePlatformAuthToken(env),
       agentKey: agentConfig.key,
+      ...(localClientVersion ? { clientVersion: localClientVersion } : {}),
       ...(agentConfig.apiSource ? { apiSource: agentConfig.apiSource } : {}),
       ...(platformUsageProvider ? { usageProvider: platformUsageProvider } : {}),
       // Platform agents use the server-managed provider credential. Never

@@ -4,6 +4,7 @@ import {
   resolvePlatformHostedRouting,
   PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID,
   PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID,
+  PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
@@ -78,6 +79,7 @@ describe("PLATFORM_HOSTED_ROUTING_TABLE & resolvePlatformHostedRouting", () => {
       keyName: "crof",
       wire: "chat.completions",
       agentRunHosted: true,
+      minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
     });
 
     // 5. Gemini 3.7 Flash

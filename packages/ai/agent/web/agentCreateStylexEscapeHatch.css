@@ -21,13 +21,13 @@
  * 下沉到 unlayered 普通 CSS 中确保级联顺序稳定。 */
 
 /* .tools-tab-skill-card:hover —— ToolsTab.tsx */
-.agent-create-esc-tools-skill-card:hover {
+.agent-create-esc-tools-skill-card:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   box-shadow: var(--shadow1);
   border-color: var(--borderHover);
 }
 
 /* .tools-tab-skill-card--selected —— ToolsTab.tsx */
-.agent-create-esc-tools-skill-card--selected {
+.agent-create-esc-tools-skill-card--selected:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-color: color-mix(in srgb, var(--primary) 50%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
 }
@@ -36,18 +36,18 @@
  * 保留原因：StyleX 只支持元素自身伪类，不支持后代/父子组合选择器。 */
 
 /* .agent-avatar-preview--clickable:hover .agent-avatar-overlay —— PersonaSection.tsx */
-.agent-create-esc-avatar-preview--clickable:hover .agent-create-esc-avatar-overlay {
+.agent-create-esc-avatar-preview--clickable:hover .agent-create-esc-avatar-overlay:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 1;
 }
 
 /* .ref-manager__item-main.ref-manager__item-link:hover .ref-manager__item-title
    —— ReferencesTab.tsx */
-.agent-create-esc-ref-link:hover .agent-create-esc-ref-title {
+.agent-create-esc-ref-link:hover .agent-create-esc-ref-title:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   color: var(--primary, #3b82f6);
 }
 
 /* .rs-item:hover .rs-item__actions —— ReferencesSelector.tsx */
-.agent-create-esc-rs-item:hover .agent-create-esc-rs-item-actions {
+.agent-create-esc-rs-item:hover .agent-create-esc-rs-item-actions:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
@@ -59,18 +59,18 @@
  * 属性选择器等价改写原 `input:checked + .rs-checkbox-ui` 级联。 */
 
 /* .rs-item:last-child { border-bottom: none } —— ReferencesSelector.tsx */
-.agent-create-esc-rs-item:last-child {
+.agent-create-esc-rs-item:last-child:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-bottom: none;
 }
 
 /* input:checked + .rs-checkbox-ui（背景/边框）—— ReferencesSelector.tsx */
-.agent-create-esc-rs-check[data-checked="true"] {
+.agent-create-esc-rs-check[data-checked="true"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--primary);
   border-color: var(--primary);
 }
 
 /* input:checked + .rs-checkbox-ui::after（对勾）—— ReferencesSelector.tsx */
-.agent-create-esc-rs-check[data-checked="true"]::after {
+.agent-create-esc-rs-check[data-checked="true"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::after {
   content: "";
   position: absolute;
   left: 4px;
@@ -86,7 +86,7 @@
  * 保留原因：StyleX 不支持 :not()。 */
 
 /* .agent-create-source-card:hover:not(:disabled) —— AgentCreateSourceStep.tsx */
-.agent-create-esc-source-card:hover:not(:disabled) {
+.agent-create-esc-source-card:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-color: var(--primary);
   background: var(--backgroundHover, var(--backgroundSecondary));
 }

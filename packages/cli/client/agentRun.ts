@@ -44,6 +44,8 @@ import {
   isKnownServerPlatformAgent,
 } from "./agentRunPlatformTools";
 import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
+import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
+import { resolveClientVersion } from "../../agent-runtime/providerResolution";
 import { expandCollapsedPastes } from "../../core/collapsedPaste";
 
 import { ulid } from "ulid";
@@ -678,6 +680,9 @@ async function runHttpAgentTurn(
   spinner.start();
 
   const fetchImpl = options.fetchImpl ?? fetch;
+  // 本 CLI 自身版本（packages/cli/index.ts 注入 NOLO_CLI_VERSION）。
+  // 缺失时不发头 —— server 侧 fail-open，见 platformHostedClientVersionGate。
+  const clientVersionHeader = resolveClientVersion(options.env ?? {});
   const subjectRefs = buildSubjectRefs(options);
   const allowedChildAgentKeys = options.allowedChildAgentKeys?.filter((key) =>
     key.trim(),
@@ -751,6 +756,11 @@ async function runHttpAgentTurn(
       headers: {
         Authorization: `Bearer ${authToken}`,
         "Content-Type": "application/json",
+        // 客户端版本闸门：与鉴权头同处注入。server 侧据此拒绝旧客户端选中的
+        // 新托管模型（明确提示升级），而不是放行去连续截断 + 照常扣积分。
+        ...(clientVersionHeader
+          ? { [NOLO_CLIENT_VERSION_HEADER]: clientVersionHeader }
+          : {}),
       },
       body: buildRequestBody(stream),
       ...(options.abortSignal ? { signal: options.abortSignal } : {}),

@@ -100,8 +100,11 @@ describe("stylex esbuild pipeline smoke", () => {
       const flatCss = css.replace(/\s+/g, "");
       const flatJs = js.replace(/\s+/g, "");
 
-      // 1) stylex.create 的规则确实被写进了 CSS 产物（冒烟模块里的声明值），且走 @layer 输出
-      expect(flatCss).toContain("@layer");
+      // 1) stylex.create 的规则确实被写进了 CSS 产物（冒烟模块里的声明值）。
+      //    关闭 useCSSLayers 后，StyleX 不再输出 @layer，
+      //    而是改用 `:not(#\#)` 特异性 hack 来保证属性优先级。
+      expect(flatCss).not.toContain("@layer");
+      expect(flatCss).toContain(":not(#\\#)");
       expect(flatCss).toContain("background-color:#1234ff");
       expect(flatCss).toContain("border-radius:4px");
       expect(flatCss).toContain("padding:2px8px");

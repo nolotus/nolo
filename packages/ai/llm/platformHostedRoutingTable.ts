@@ -50,6 +50,21 @@ export type PlatformHostedUpstreamId =
   | "openai"
   | "deepseek";
 
+/**
+ * Kimi K3 的最低客户端版本。
+ *
+ * 定值依据（可核）：K3 的 wire 要求一组专属 quirk —— 删掉通用采样参数
+ * （temperature / top_p / frequency_penalty / presence_penalty）并把
+ * max_tokens 改写成 max_completion_tokens，见
+ * packages/integrations/openai/providerBodyCompatibility.ts。
+ * 这份 quirk 补齐「本地直连出口」的修复是 853dbdd5e（fix(agent): 平台托管
+ * K3 本地直连 quirk 缺失与 usage provider 双出口统一），`git tag --contains
+ * 853dbdd5e` 的最早 CLI tag 是 cli-v0.38.0-alpha.4。
+ * 也就是说 0.38.0-alpha.4 之前的客户端本地直连 K3 必断（2026-08-29 事故的
+ * 根因形态：连续截断 + 照常扣积分）。
+ */
+export const PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION = "0.38.0-alpha.4";
+
 export type PlatformHostedRoutingEntry = {
   readonly endpoint: string;
   readonly usageProvider: PlatformHostedUpstreamId;
@@ -62,6 +77,22 @@ export type PlatformHostedRoutingEntry = {
    * 仅在 chatProxy / 本地 CLI 路径生效（如 Claude / Grok 在 server 侧未分流）。
    */
   readonly agentRunHosted?: boolean;
+  /**
+   * 使用该托管模型所需的最低客户端版本（semver，见 core/clientVersionGate）。
+   *
+   * 标注判据：模型有**专属 quirk 或 wire 特殊性**，旧客户端的内置路由/请求体
+   * 构造不认识它、选中即撞（连续截断/400），才需要标。没有特殊性的模型不标
+   * （YAGNI）—— 多标一个就是多一条会随客户端发版腐化的约束。
+   *
+   * 两处消费：
+   * 1. 目录层：随模型列表下发给客户端，新客户端可据此置灰 + 提示升级；
+   * 2. 使用层：server（chatHandler / agentRun）按请求头 x-nolo-client-version
+   *    拒绝，本地 runtime 按自身版本 self-check 后不发起上游调用。
+   *
+   * 只对平台托管模型（provider=nolo 家族）生效。用户自定义模型 / OAuth 订阅
+   * 模型走用户自己的凭据与选择，平台不设闸。
+   */
+  readonly minClientVersion?: string;
 };
 
 export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
@@ -106,12 +137,15 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
+  // 唯一带 minClientVersion 的托管模型：wire 要求专属 body quirk（删采样参数 +
+  // max_completion_tokens），旧客户端本地直连必断。
   [PLATFORM_HOSTED_KIMI_K3_MODEL]: {
     endpoint: "https://crof.ai/v1/chat/completions",
     usageProvider: "upstream-k3",
     keyName: "upstream-k3",
     wire: "chat.completions",
     agentRunHosted: true,
+    minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   },
   // Gemini 3.7 Flash -> Google official OpenAI-compatible endpoint
   [PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL]: {
@@ -219,4 +253,17 @@ export function resolvePlatformHostedRouting(
   const normalized = asTrimmedLowercaseString(model);
   if (!normalized) return undefined;
   return PLATFORM_HOSTED_ROUTING_TABLE[normalized];
+}
+
+/**
+ * 查询平台托管模型要求的最低客户端版本。
+ * 未注册 / 未门控的模型返回 undefined（= 不设闸）。
+ *
+ * 这是「目录标注」与「使用时拒绝」两层闸门共用的唯一读取口——server、
+ * agent-runtime、catalog 都从这里取，避免任何一侧抄一份常量后腐化。
+ */
+export function resolvePlatformHostedMinClientVersion(
+  model?: string | null,
+): string | undefined {
+  return resolvePlatformHostedRouting(model)?.minClientVersion;
 }

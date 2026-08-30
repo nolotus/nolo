@@ -21,7 +21,7 @@
  * 保留原因：:hover:not(:disabled) 为复合伪类选择器，StyleX 不支持 :not(...) 伪类。 */
 
 /* .tool-confirm-button:hover:not(:disabled) */
-[data-hook~="messages-esc-tool-confirm-button"]:hover:not(:disabled) {
+[data-hook~="messages-esc-tool-confirm-button"]:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--surfaceInteractiveHover, var(--backgroundHover));
   color: var(--text);
   border-color: var(--borderSubtle);
@@ -53,20 +53,20 @@
  * StyleX 不支持后代选择器。 */
 
 @container right-panel (max-width: 380px) {
-  [data-hook~="messages-esc-adc-header"] {
+  [data-hook~="messages-esc-adc-header"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     flex-wrap: wrap;
     gap: 6px;
     padding: 8px 12px;
   }
-  [data-hook~="messages-esc-adc-name"] {
+  [data-hook~="messages-esc-adc-name"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     font-size: var(--fontSize-base);
   }
-  [data-hook~="messages-esc-adc-actions"] {
+  [data-hook~="messages-esc-adc-actions"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     width: 100%;
     justify-content: flex-end;
     gap: 4px;
   }
-  [data-hook~="messages-esc-adc-btn"] {
+  [data-hook~="messages-esc-adc-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     padding: 5px 10px;
     font-size: var(--fontSize-sm);
     gap: 4px;
@@ -83,7 +83,7 @@
   [data-hook~="messages-esc-adc-btn-editor"] span {
     display: inline;
   }
-  [data-hook~="messages-esc-adc-btn"] {
+  [data-hook~="messages-esc-adc-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     padding: 6px 8px;
   }
 }
@@ -95,13 +95,13 @@
  * StyleX 不支持父子/后代组合选择器。 */
 
 /* .file-item:hover:not(.processing):not(.error) .file-icon-wrapper */
-[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon-wrapper"] {
+[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon-wrapper"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--file-color);
   transform: scale(1.1);
 }
 
 /* .file-item:hover:not(.processing):not(.error) .file-icon */
-[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon"] {
+[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   color: #fff;
 }
 
@@ -120,7 +120,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-hook~="messages-esc-file-item"]:hover [data-hook~="messages-esc-file-icon-wrapper"] {
+  [data-hook~="messages-esc-file-item"]:hover [data-hook~="messages-esc-file-icon-wrapper"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     transform: none;
   }
 }
@@ -131,19 +131,19 @@
  * 保留原因：@container right-panel 命名容器查询在小屏幕下的紧凑布局。 */
 
 @container right-panel (max-width: 380px) {
-  [data-hook~="messages-esc-pa-intro"] {
+  [data-hook~="messages-esc-pa-intro"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     display: none;
   }
-  [data-hook~="messages-esc-pa-content"] {
+  [data-hook~="messages-esc-pa-content"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     flex-direction: column;
     gap: 8px;
     padding: 12px 14px;
   }
-  [data-hook~="messages-esc-pa-right"] {
+  [data-hook~="messages-esc-pa-right"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     width: 100%;
     display: flex;
   }
-  [data-hook~="messages-esc-pa-action-btn"] {
+  [data-hook~="messages-esc-pa-action-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     flex: 1;
     justify-content: center;
     height: var(--control-md);
@@ -157,28 +157,28 @@
  * 保留原因：父级 hover / 状态类激活桌面端操作栏显现，
  * 以及 :focus-within 激活。StyleX 不支持父子/后代选择器。 */
 
-[data-hook~="messages-esc-msg-hover-target"]:hover [data-hook~="messages-esc-actions-desktop"],
-[data-hook~="messages-esc-msg-hover-target"][data-hook~="messages-esc-is-actions-hover"] [data-hook~="messages-esc-actions-desktop"],
-.msg-hover-target:hover .actions.desktop,
-.msg-hover-target.is-actions-hover .actions.desktop,
-.msg:hover .actions.desktop,
-.msg.actions-visible .actions.desktop,
-[data-hook~="messages-esc-actions-desktop"][data-hook~="messages-esc-show"],
-[data-hook~="messages-esc-actions-desktop"]:focus-within {
+[data-hook~="messages-esc-msg-hover-target"]:hover [data-hook~="messages-esc-actions-desktop"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="messages-esc-msg-hover-target"][data-hook~="messages-esc-is-actions-hover"] [data-hook~="messages-esc-actions-desktop"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+.msg-hover-target:hover .actions.desktop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+.msg-hover-target.is-actions-hover .actions.desktop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+.msg:hover .actions.desktop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+.msg.actions-visible .actions.desktop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="messages-esc-actions-desktop"][data-hook~="messages-esc-show"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="messages-esc-actions-desktop"]:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-[data-hook~="messages-esc-action-btn"]:focus-visible {
+[data-hook~="messages-esc-action-btn"]:focus-visible:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   outline: 2px solid var(--borderFocus);
   outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-hook~="messages-esc-actions-overlay-mobile"] [data-hook~="messages-esc-overlay-backdrop"],
-  [data-hook~="messages-esc-actions-panel"],
-  [data-hook~="messages-esc-action-spinner"] {
+  [data-hook~="messages-esc-actions-overlay-mobile"] [data-hook~="messages-esc-overlay-backdrop"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="messages-esc-actions-panel"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="messages-esc-action-spinner"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     animation: none;
   }
 }

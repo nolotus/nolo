@@ -114,4 +114,16 @@ export interface Model {
 
   /** Optional benchmark capability metadata. */
   ability?: ModelAbility;
+
+  /**
+   * 使用该模型所需的最低客户端版本（semver）——客户端版本闸门第 1 层。
+   *
+   * 只由平台托管模型（provider=nolo 家族）填充，真值住在
+   * ai/llm/platformHostedRoutingTable 的 minClientVersion，这里是"下发给客户端
+   * 的目录投影"。客户端拿到后可用于置灰/提示升级；server 与本地 runtime 另有
+   * 使用时的硬拒绝（见 ai/llm/platformHostedClientVersionGate）。
+   *
+   * 用户自定义模型 / OAuth 订阅模型永远不填：那是用户自己的凭据与选择。
+   */
+  minClientVersion?: string;
 }

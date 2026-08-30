@@ -683,3 +683,103 @@ describe("platform hosted usage provider in execution plans (local runtime)", ()
     expect(plan.usageProvider).toBeUndefined();
   });
 });
+
+describe("client version gate in provider resolution (local runtime self-check)", () => {
+  test("blocks a gated hosted model (kimi-k3) on an older CLI version before dispatch", async () => {
+    await expect(
+      buildProviderExecutionPlan({
+        agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+        env: {
+          NOLO_SERVER: "https://nolo.chat",
+          AUTH_TOKEN: "token",
+          NOLO_CLI_VERSION: "0.38.0-alpha.3",
+        },
+        runtimeKind: "local",
+      }),
+    ).rejects.toThrow(/模型「kimi-k3」需要 nolo-cli ≥ 0\.38\.0-alpha\.4/);
+  });
+
+  test("passes and attaches clientVersion when local version is at or above minimum", async () => {
+    const planAlpha = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: {
+        NOLO_SERVER: "https://nolo.chat",
+        AUTH_TOKEN: "token",
+        NOLO_CLI_VERSION: "0.38.0-alpha.4",
+      },
+      runtimeKind: "local",
+    });
+    expect(planAlpha).toMatchObject({
+      mode: "platform",
+      transport: "proxy",
+      clientVersion: "0.38.0-alpha.4",
+    });
+
+    const planRelease = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: {
+        NOLO_SERVER: "https://nolo.chat",
+        AUTH_TOKEN: "token",
+        NOLO_CLI_VERSION: "0.38.0",
+      },
+      runtimeKind: "local",
+    });
+    expect(planRelease).toMatchObject({
+      mode: "platform",
+      transport: "proxy",
+      clientVersion: "0.38.0",
+    });
+  });
+
+  test("fails open when NOLO_CLI_VERSION is missing / unknown", async () => {
+    const plan = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: {
+        NOLO_SERVER: "https://nolo.chat",
+        AUTH_TOKEN: "token",
+      },
+      runtimeKind: "local",
+    });
+    expect(plan).toMatchObject({
+      mode: "platform",
+      transport: "proxy",
+    });
+    expect((plan as any).clientVersion).toBeUndefined();
+  });
+
+  test("leaves ungated hosted models untouched even on very old client versions", async () => {
+    const plan = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-glm", provider: "nolo", model: "glm-5-3-flash", apiSource: "platform" },
+      env: {
+        NOLO_SERVER: "https://nolo.chat",
+        AUTH_TOKEN: "token",
+        NOLO_CLI_VERSION: "0.1.0",
+      },
+      runtimeKind: "local",
+    });
+    expect(plan).toMatchObject({
+      mode: "platform",
+      transport: "proxy",
+      clientVersion: "0.1.0",
+    });
+  });
+
+  test("leaves custom / user-credentialled models untouched on old client versions", async () => {
+    const customPlan = await buildProviderExecutionPlan({
+      agentConfig: {
+        key: "agent-custom",
+        apiSource: "custom",
+        provider: "moonshot",
+        model: "kimi-k3",
+        customProviderUrl: "https://api.moonshot.cn/v1",
+        apiKey: "sk-custom",
+      },
+      env: {
+        NOLO_CLI_VERSION: "0.1.0",
+      },
+      runtimeKind: "local",
+    });
+    expect(customPlan.mode).toBe("custom");
+    expect(customPlan.transport).toBe("direct");
+  });
+});

@@ -135,7 +135,8 @@ export function createSsrCompatPlugin(): Plugin {
  */
 export function createStylexPlugin(): Plugin {
   return stylexUnplugin.esbuild({
-    useCSSLayers: true,
+    // useCSSLayers: false，因为 unlayered 普通 CSS 会无条件压过 layer 内 StyleX 规则
+    useCSSLayers: false,
     importSources: ["@stylexjs/stylex"],
     unstable_moduleResolution: { type: "commonJS" },
   });
