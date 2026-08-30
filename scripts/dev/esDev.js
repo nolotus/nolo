@@ -90,6 +90,7 @@ const devBuildSignalPlugin = {
 
       const { manifest } = await publishDevWebBuildSignal({ buildMs });
       console.log("♻️ dev web build published (latest-assets):", manifest);
+      console.log("[dev] SSR render bundle is stale — run 'rr' to rebuild");
     });
   },
 };

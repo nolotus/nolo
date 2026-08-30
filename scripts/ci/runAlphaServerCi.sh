@@ -250,6 +250,10 @@ sync_alpha_checkout() {
 
 sync_alpha_runtime_checkout() {
   if [[ "$WORK_DIR" == "$REPO_DIR" ]]; then
+    [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
+      echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR after sync_alpha_runtime_checkout" >&2
+      exit 1
+    }
     return
   fi
 
@@ -257,8 +261,22 @@ sync_alpha_runtime_checkout() {
   cd "$REPO_DIR"
   git fetch --all
   git reset --hard "$BUILD_SHA"
-  "$BUN_BIN" "$REPO_DIR/scripts/dev/buildRenderBundle.ts"
+  # 解包/同步 SSR render-dist 产物到运行时目录
+  if [[ -f "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" ]]; then
+    tar -xf "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" -C "$REPO_DIR" packages/server/.render-dist 2>/dev/null || {
+      echo "WARN: failed to extract packages/server/.render-dist from artifact" >&2
+    }
+  elif [[ -d "$WORK_DIR/packages/server/.render-dist" ]]; then
+    mkdir -p "$REPO_DIR/packages/server/.render-dist"
+    cp -R "$WORK_DIR/packages/server/.render-dist"/. "$REPO_DIR/packages/server/.render-dist"/
+  fi
   cd "$WORK_DIR"
+
+  # 机械化守卫：同步后断言运行时目录中的 SSR render bundle 存在
+  [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
+    echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR after sync_alpha_runtime_checkout" >&2
+    exit 1
+  }
 }
 
 cleanup_alpha_tmp_rebuildable_state() {
@@ -541,11 +559,16 @@ package_web_artifact() {
     cp -f "$CF_OFFLOAD_ARTIFACT_TAR_GZ" "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz"
     # deployRemote.sh 消费的是未压缩 .tar（tar -xf）；由 CF 下载 tar.gz 解出。
     gzip -dc "$CF_OFFLOAD_ARTIFACT_TAR_GZ" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar"
+    # 将 SSR render-dist 产物追加到 artifact tar 中
+    if [[ -d packages/server/.render-dist ]]; then
+      tar -rf "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" packages/server/.render-dist
+    fi
+    gzip -c "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" 2>/dev/null || true
     local cf_tar_bytes
     cf_tar_bytes="$(wc -c < "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" | tr -d '[:space:]')"
     # 双端 sha/字节数证明部署的就是 CF 产物。
     echo "CF offload artifact consumed: src=$CF_OFFLOAD_ARTIFACT_TAR_GZ"
-    echo "  tar.gz sha=$(shasum -a 256 "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" | awk '{print $1}') bytes=$cf_tar_gz_bytes"
+    echo "  tar.gz sha=$(shasum -a 256 "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" | awk '{print $1}') bytes=$(wc -c < "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" | tr -d '[:space:]')"
     echo "  tar    sha=$(shasum -a 256 "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" | awk '{print $1}') bytes=$cf_tar_bytes"
     archive_web_artifact "alpha" "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" || printf 'artifact archive failed (non-blocking, deploy continues)\n' >&2
     return 0
@@ -570,12 +593,15 @@ print(base_path.strip("/").rstrip("/"))
 PY
 )"
 
+  mkdir -p packages/server/.render-dist
+
   tar -cf "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" \
     public/latest-assets.json \
     public/meta.json \
     "$asset_dir" \
     public/locales \
-    public/route-styles
+    public/route-styles \
+    packages/server/.render-dist
 
   # 产物持久归档（尽力而为，失败不阻塞部署）
   gzip -c "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" 2>/dev/null || true
@@ -635,6 +661,12 @@ schedule_nolo_ci_restart_after_job() {
 }
 
 deploy_alpha_artifact() {
+  # 机械化守卫：alpha 启动/部署前断言 SSR render bundle 存在
+  [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
+    echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR before deploy_alpha_artifact" >&2
+    return 1
+  }
+
   local prev_head="${1:-}"
   local skip_core_reload=0
   if ! alpha_core_restart_required "$prev_head"; then
@@ -735,12 +767,15 @@ print(base_path.strip("/").rstrip("/"))
 PY
 )"
 
+  mkdir -p packages/server/.render-dist
+
   tar -czf web-build.tar.gz \
     public/latest-assets.json \
     public/meta.json \
     "$asset_dir" \
     public/locales \
-    public/route-styles
+    public/route-styles \
+    packages/server/.render-dist
 
   # 产物持久归档（尽力而为，失败不阻塞部署）
   archive_web_artifact "main" "$WORK_DIR/web-build.tar.gz" || printf 'artifact archive failed (non-blocking, deploy continues)\n' >&2
@@ -1117,6 +1152,42 @@ seed_plaza_agents() {
     || { echo "WARN: plaza seed failed (non-fatal) @ $base_url" >&2; }
 }
 
+assert_runtime_render_bundle() {
+  local target_dir="${1:-$REPO_DIR}"
+  local bundle_path="$target_dir/packages/server/.render-dist/render.mjs"
+  log "Assert runtime render bundle: $bundle_path"
+  if [[ ! -f "$bundle_path" ]]; then
+    echo "FATAL: SSR render bundle missing in runtime directory: $bundle_path" >&2
+    return 1
+  fi
+  echo "✅ SSR render bundle verified: $bundle_path ($(wc -c < "$bundle_path" | tr -d '[:space:]') bytes)"
+}
+
+probe_alpha_agents_ssr() {
+  log "Probe alpha /agents SSR"
+  local probe_url="${ALPHA_LOCAL_BASE}/agents"
+  local http_code
+  local response_file
+  response_file="$(mktemp)"
+
+  http_code="$(curl -s -w '%{http_code}' -o "$response_file" "$probe_url" || echo "000")"
+  if [[ "$http_code" != "200" ]]; then
+    echo "FATAL: /agents SSR probe returned HTTP $http_code (expected 200) from $probe_url" >&2
+    head -n 30 "$response_file" >&2 || true
+    rm -f "$response_file"
+    return 1
+  fi
+
+  if grep -qi "Render bundle not found" "$response_file"; then
+    echo "FATAL: /agents SSR response contains 'Render bundle not found' error" >&2
+    rm -f "$response_file"
+    return 1
+  fi
+
+  echo "✅ SSR /agents probe passed: HTTP 200 ($(wc -c < "$response_file" | tr -d '[:space:]') bytes)"
+  rm -f "$response_file"
+}
+
 probe_alpha_share_ssr() {
   [[ -n "$ALPHA_SSR_PROBE_PATH" ]] || return 0
 
@@ -1177,11 +1248,13 @@ alpha_deploy() {
   disk_snapshot "after-sync-runtime"
   timed_phase "deploy-alpha-artifact" deploy_alpha_artifact "$prev_head"
   disk_snapshot "after-deploy"
+  timed_phase "assert-runtime-render-bundle" assert_runtime_render_bundle "$REPO_DIR"
   timed_phase "verify-alpha-health" verify_alpha_health
   timed_phase "warmup-after-deploy" warmup_after_deploy
   timed_phase "seed-plaza-agents" seed_plaza_agents "$ALPHA_PUBLIC_BASE"
   timed_phase "audit-alpha-app-lifecycle" alpha_app_lifecycle_audit
   timed_phase "probe-alpha-share-ssr" probe_alpha_share_ssr
+  timed_phase "probe-alpha-agents-ssr" probe_alpha_agents_ssr
   disk_snapshot "final"
   space_analysis
   print_phase_timing_summary

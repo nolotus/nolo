@@ -738,6 +738,12 @@ start_nolo() {
   if [[ -n "$PM2_KILL_TIMEOUT" ]]; then
     args+=(--kill-timeout "$PM2_KILL_TIMEOUT")
   fi
+
+  # 机械化守卫：启动前断言 SSR render bundle 存在
+  [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
+    echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR before start_nolo" >&2
+    return 1
+  }
   # 启动期故障（最典型：LevelDB 锁被上一个进程占住）现在是快速失败而非静默重试，
   # 靠 PM2 重启把异常暴露出来。理想情况下应同时限制重启次数，避免
   # 「起不来 → 重启 → 又起不来」打满 CPU 与日志、反而盖住根因。
@@ -993,6 +999,12 @@ start_nolo_canary() {
   if [[ -n "$PM2_KILL_TIMEOUT" ]]; then
     args+=(--kill-timeout "$PM2_KILL_TIMEOUT")
   fi
+
+  # 机械化守卫：启动 canary 前断言 SSR render bundle 存在
+  [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
+    echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR before start_nolo_canary ($canary_name)" >&2
+    return 1
+  }
 
   export_repo_dotenv
 
@@ -1369,6 +1381,7 @@ sync_staged_public_support_files() {
   copy_staged_dir_contents "$artifact_stage_dir/$asset_relative_dir" "$REPO_DIR/$asset_relative_dir"
   copy_staged_dir_contents "$artifact_stage_dir/public/locales" "$REPO_DIR/public/locales"
   copy_staged_dir_contents "$artifact_stage_dir/public/route-styles" "$REPO_DIR/public/route-styles"
+  copy_staged_dir_contents "$artifact_stage_dir/packages/server/.render-dist" "$REPO_DIR/packages/server/.render-dist"
 }
 
 promote_staged_public_files() {

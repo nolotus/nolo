@@ -1,4 +1,13 @@
 
+## 0.36.0-alpha.4
+
+## 0.36.0-alpha.4 (2026-08-30)
+
+### Bug Fixes
+
+* **ci:** SSR render bundle 随 artifact 送达运行时槽位，补齐部署守卫与 live 探针 ([c91f7db](https://github.com/nolotus/bun-nolo/commit/c91f7dbcbcfebd2a368e2562ac6907984bdd0201))
+
+
 ## 0.36.0-alpha.3
 
 ## 0.36.0-alpha.3 (2026-08-30)
