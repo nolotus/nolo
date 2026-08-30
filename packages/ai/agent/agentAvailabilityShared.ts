@@ -127,10 +127,25 @@ function parseResetAtText(value: string, now: number): number | undefined {
 }
 
 /**
+ * 周期性硬配额耗尽的文案启发式。部分 provider（如 Ollama cloud 的
+ * `you ... have reached your weekly usage limit, upgrade for higher limits ...`）
+ * 的 429 body 既无 Retry-After 也无任何可解析的复位时刻，若落到默认 5 分钟窗口，
+ * agent 很快又被放回派发并再次撞 429。这类配额按周/月重置，直接给到硬上限
+ * `MAX_COOLDOWN_MS`，由 clamp 统一封顶、由 probe 机制负责到期重试。
+ *
+ * 调用方必须把它排在 `parseResetsInMs` 之前：后者对整个 body 文本做全局
+ * 「数字+单位」扫描，provider 可控内容（用户名/ref 里的 "2sun"、"12m"）会被
+ * 误读成相对时长并短路本判定。
+ */
+function matchesPeriodicUsageLimitText(text: string): boolean {
+  return /weekly usage limit|monthly usage limit/i.test(text);
+}
+
+/**
  * 把一次上游 429 响应解析成绝对的 epoch-ms 可用时刻。
  *
  * 优先级：Retry-After 头 → body 里的 retryAfter → resets_at/resetsAt →
- * 文案里的绝对 "reset at" → 文案里的相对时长 → 默认窗口。
+ * 文案里的绝对 "reset at" → 周期性硬配额文案 → 文案里的相对时长 → 默认窗口。
  */
 export function resolveNextAvailableAt(
   body: unknown,
@@ -156,9 +171,16 @@ export function resolveNextAvailableAt(
   }
 
   const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  const absoluteFromText = parseResetAtText(text, now);
+  // 周期性硬配额文案必须先于 parseResetsInMs 判定：后者对整个 body 文本做全局
+  // 「数字+单位」扫描，provider 可控内容（用户名 "star_2sun"、ref "12m-9"）会被
+  // 误读成相对时长，把本该 24h 的冷却短路成秒级，原 bug 复活。绝对 "reset at"
+  // 是精确信号，仍优先于该启发式。
   const parsed =
-    parseResetAtText(text, now) ??
-    now + (parseResetsInMs(text) ?? DEFAULT_PROVIDER_RETRY_MS);
+    absoluteFromText ??
+    (matchesPeriodicUsageLimitText(text)
+      ? now + MAX_COOLDOWN_MS
+      : now + (parseResetsInMs(text) ?? DEFAULT_PROVIDER_RETRY_MS));
   return clampCooldownDeadline(parsed, now);
 }
 

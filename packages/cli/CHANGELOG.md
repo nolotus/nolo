@@ -1,4 +1,13 @@
 
+## 0.38.0-alpha.3
+
+## 0.38.0-alpha.3 (2026-08-30)
+
+### Bug Fixes
+
+* **cli:** custom agent 无 credentialRef 时 429 冷却落盘，恢复 cooldown gate ([8b80c64](https://github.com/nolotus/bun-nolo/commit/8b80c64b0cbc48853fe852ec25997dcc69f568a5))
+
+
 ## 0.38.0-alpha.2
 
 ## 0.38.0-alpha.2 (2026-08-30)

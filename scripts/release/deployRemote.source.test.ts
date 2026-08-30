@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const source = readFileSync(join(import.meta.dir, "deployRemote.sh"), "utf-8");
 const verifyRenderedWebAssetsSource = readFileSync(
@@ -52,6 +54,87 @@ describe("deployRemote source contract", () => {
     expect(source).toContain("wait_status=124");
     expect(source).toContain('emit_deploy_step "pm2-stop-wait-${slot_name}" "$wait_status"');
     expect(source).toContain('timed_deploy_step "verify-rendered-assets" verify_rendered_assets');
+  });
+
+  it("strips the ssr selfcheck diag token from dump files after pm2 save (resurrect 不复活旧 token)", () => {
+    // 机器重启 resurrect 会把 dump.pm2 里的 env 原样还给进程；NOLO_CI_DIAG_TOKEN
+    // 一旦落盘，自检端点就带着旧 token 长期存活。save 后必须立即剥离。
+    expect(source).toContain("sanitize_pm2_dump_diag_token()");
+    expect(source).toContain('timed_deploy_step "pm2-save" run_maybe_sudo "$PM2_BIN" save');
+    expect(source).toContain("sanitize_pm2_dump_diag_token || true");
+    // 剥离必须发生在 pm2 save 之后（save 前剥离对已序列化的 dump 无效）
+    expect(source.indexOf('timed_deploy_step "pm2-save"')).toBeLessThan(
+      source.indexOf("sanitize_pm2_dump_diag_token || true")
+    );
+    // 剥离逻辑收敛在独立脚本（fixture 行为测试见下），shell 侧只负责调用
+    expect(source).toContain('sanitize_pm2_dump_diag_token.py" "$PM2_HOME"');
+    expect(readFileSync(join(import.meta.dir, "sanitize_pm2_dump_diag_token.py"), "utf-8"))
+      .toContain('"dump.pm2.bak"'); // .bak 一并剥离（pm2 save 会写 .bak）
+  });
+
+  it("sanitize script strips the diag token from real-shaped dump fixtures (pm2_env 顶层 + env 子对象 + .bak)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm2-dump-sanitize-"));
+    const pm2Home = join(dir, ".pm2");
+    try {
+      mkdirSync(pm2Home, { recursive: true });
+      // 真实 pm2 dump 结构：[{ name, pm2_env: { ..., env: {...} } }]
+      const dump = JSON.stringify([
+        {
+          name: "nolo",
+          pm_exec_path: "/root/bun-nolo/packages/server/entry.ts",
+          pm2_env: {
+            name: "nolo",
+            env: {
+              NOLO_CI_DIAG: "1",
+              NOLO_CI_DIAG_TOKEN: "token-in-env-child",
+              NOLO_RELEASE_SHA: "abc123",
+              HOME: "/root",
+            },
+            NOLO_CI_DIAG_TOKEN: "token-at-pm2-env-top",
+          },
+        },
+        { name: "other-app", pm2_env: { env: { FOO: "bar" } } },
+      ]);
+      writeFileSync(join(pm2Home, "dump.pm2"), dump, "utf-8");
+      writeFileSync(join(pm2Home, "dump.pm2.bak"), dump, "utf-8");
+
+      const run = spawnSync("python3", [join(import.meta.dir, "sanitize_pm2_dump_diag_token.py"), pm2Home], {
+        encoding: "utf8",
+      });
+      expect(run.status).toBe(0);
+
+      // 行为断言：剥离后两个 dump 文件中不再含该键（任何层级）
+      const containsToken = (text: string) => text.includes("NOLO_CI_DIAG_TOKEN");
+      expect(containsToken(readFileSync(join(pm2Home, "dump.pm2"), "utf-8"))).toBe(false);
+      expect(containsToken(readFileSync(join(pm2Home, "dump.pm2.bak"), "utf-8"))).toBe(false);
+
+      // 非 token env 原样保留（剥离不能误伤其它键 / 其它 app）
+      const sanitized = JSON.parse(readFileSync(join(pm2Home, "dump.pm2"), "utf-8"));
+      expect(sanitized[0].pm2_env.env.NOLO_CI_DIAG).toBe("1");
+      expect(sanitized[0].pm2_env.env.NOLO_RELEASE_SHA).toBe("abc123");
+      expect(sanitized[1].pm2_env.env.FOO).toBe("bar");
+
+      // 幂等：再跑一遍应当 clean（无文件 mtime/内容抖动）
+      const rerun = spawnSync("python3", [join(import.meta.dir, "sanitize_pm2_dump_diag_token.py"), pm2Home], {
+        encoding: "utf8",
+      });
+      expect(rerun.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitize script is a no-op when dump files are missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pm2-dump-sanitize-empty-"));
+    try {
+      const run = spawnSync("python3", [join(import.meta.dir, "sanitize_pm2_dump_diag_token.py"), dir], {
+        encoding: "utf8",
+      });
+      expect(run.status).toBe(0);
+      expect(existsSync(join(dir, "dump.pm2"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("does not reference the removed standalone tool-worker runtime", () => {

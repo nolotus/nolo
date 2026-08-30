@@ -247,7 +247,7 @@ import {
   readCredentialAvailability,
   readCredentialEntry,
   recordCredentialProbe,
-  resolveCredentialKey,
+  resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
   createCursorProvider,
@@ -611,7 +611,7 @@ export function createCliLocalRuntimeAdapter(
       // 冷却检查放在派发点：loadAgentConfig 只负责加载配置，不应因冷却失败
       // （冷却 ≠ 配置错误，listAgents/预览等读配置路径不能被误伤）。
       const nowMs = now();
-      const credentialKeyForGate = resolveCredentialKey(
+      const credentialKeyForGate = resolveCredentialKeyWithFallback(
         agentConfig as unknown as Record<string, unknown>,
       );
       const credentialCooldowns: Record<string, number> = credentialKeyForGate
@@ -650,7 +650,7 @@ export function createCliLocalRuntimeAdapter(
         // global-cache 时本地并无记录，`if (!current) return` 会把 429 结论
         // 静默丢弃，nextAvailableAt 永远是 now。credential 存储不依赖 agent
         // 记录是否存在，因此即使本地没缓存过该 agent，冷却也能落盘。
-        const credentialKey = resolveCredentialKey(
+        const credentialKey = resolveCredentialKeyWithFallback(
           agentConfig as unknown as Record<string, unknown>,
         );
         if (credentialKey) {
@@ -716,14 +716,15 @@ export function createCliLocalRuntimeAdapter(
       // probe 态：放行本次真实请求，并在发出前记录探测时间，避免 10 分钟间隔内
       // 反复重试。
       //
-      // 已知降级（有意接受）：探测时间只能记在 credential entry 上，因此解析不出
-      // credentialKey 的 agent 拿不到 lastProbeAt，会每次派发都判 probe —— 对这类
-      // agent 等同于不设冷却。注意 recordLocalAvailability 在 mark 时也会写 agent
-      // 记录的 nextAvailableAt，所以这类冷却并非只有历史遗留数据会产生。
-      // 之所以仍可接受：撞 429 的代价是一次被拒的请求（provider 已在限流，不会真正
-      // 消耗配额），而反向的失败模式——冷却把可用凭证锁死数天——才是本次要修的故障。
-      // 且 MAX_COOLDOWN_MS 已保证任何冷却最长 24h 自然过期。
-      // 若日后要收紧，正解是给 agent 级记录也存 lastProbeAt，而不是退回硬 block。
+      // 冷却与探测时间都记在 credential entry 上。无 apiKeyRef/credentialRef 的
+      // custom-provider agent（如 Ollama cloud 直连）经 resolveCredentialKeyWithFallback
+      // 派生 fallback key（custom-endpoint:<origin> / custom-agent:<key>）后与
+      // 其它 agent 共用同一套 mark / gate / probe 机制。其中 endpoint 级分组比
+      // credential 粒度粗——同一 endpoint 下账号 A 耗尽会连带挡住正常的账号 B：
+      // 冷却期内 B 只能等这里每 PROBE_INTERVAL_MS 放行一次 probe，直到某次 probe
+      // 拿到 2xx 才清除冷却，并非「延迟一个窗口即恢复」。刻意取舍：这仍远优于
+      // 反向故障——冷却落不了盘导致每次派发都撞 429；且 MAX_COOLDOWN_MS 保证
+      // 任何冷却最长 24h 自然过期。
       if (gateDecision === "probe" && credentialKeyForGate) {
         await recordCredentialProbe(credentialKeyForGate, deps.env, nowMs).catch(
           () => undefined,

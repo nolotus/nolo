@@ -87,7 +87,9 @@ export async function runAuthCooldownCommand(
   for (const key of keys.sort()) {
     const at = entries[key];
     console.log(
-      `  ${key.padEnd(24)} recovers ${new Date(at).toISOString()}  (${formatRemaining(at - now)} remaining)`,
+      // 列宽按最长的 fallback key（custom-endpoint:<origin>，如
+      // custom-endpoint:https://ollama.com = 34 字符）取值，避免撑破对齐。
+      `  ${key.padEnd(34)} recovers ${new Date(at).toISOString()}  (${formatRemaining(at - now)} remaining)`,
     );
   }
   return 0;

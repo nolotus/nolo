@@ -10,11 +10,14 @@ import {
   readCredentialAvailability,
   readCredentialEntry,
   recordCredentialProbe,
-  resolveCredentialKey,
   resolveCredentialAvailabilityPath,
+  resolveCredentialKey,
+  resolveCredentialKeyWithFallback,
 } from "./credentialAvailability";
 import {
+  MAX_COOLDOWN_MS,
   PROBE_INTERVAL_MS,
+  resolveAvailabilityAction,
   resolveCooldownGate,
 } from "ai/agent/agentAvailabilityShared";
 
@@ -47,6 +50,127 @@ describe("resolveCredentialKey", () => {
     expect(resolveCredentialKey({ key: "public-agent" })).toBeUndefined();
     expect(resolveCredentialKey(null)).toBeUndefined();
     expect(resolveCredentialKey({ apiKeyRef: "   " })).toBeUndefined();
+  });
+});
+
+describe("resolveCredentialKeyWithFallback", () => {
+  it("keeps the ref-based key (and resolveCredentialKey behavior) when a ref exists", () => {
+    expect(
+      resolveCredentialKeyWithFallback({
+        apiKeyRef: "chatgpt",
+        customProviderUrl: "https://ollama.com/v1",
+      }),
+    ).toBe("chatgpt");
+    expect(
+      resolveCredentialKeyWithFallback({ credentialRef: "api-key:agent-x" }),
+    ).toBe("api-key:agent-x");
+  });
+
+  it("derives a deterministic endpoint key from customProviderUrl", () => {
+    expect(
+      resolveCredentialKeyWithFallback({
+        key: "ollama",
+        customProviderUrl: "https://ollama.com/v1",
+      }),
+    ).toBe("custom-endpoint:https://ollama.com");
+    // 同一 origin（不同路径/尾斜杠/大小写 host）派生同一把 key，跨进程稳定。
+    expect(
+      resolveCredentialKeyWithFallback({
+        key: "ollama",
+        customProviderUrl: "https://ollama.com/v1/",
+      }),
+    ).toBe("custom-endpoint:https://ollama.com");
+    expect(
+      resolveCredentialKeyWithFallback({
+        key: "other",
+        customProviderUrl: "https://OLLAMA.com/chat/completions",
+      }),
+    ).toBe("custom-endpoint:https://ollama.com");
+  });
+
+  it("falls back to an agent-key key when the endpoint is not a parseable URL", () => {
+    expect(
+      resolveCredentialKeyWithFallback({
+        key: "ollama",
+        customProviderUrl: "not a url",
+      }),
+    ).toBe("custom-agent:ollama");
+  });
+
+  it("falls back to an agent-key key without any endpoint field", () => {
+    expect(resolveCredentialKeyWithFallback({ key: "public-agent" })).toBe(
+      "custom-agent:public-agent",
+    );
+  });
+
+  it("returns undefined when there is nothing to derive from", () => {
+    expect(resolveCredentialKeyWithFallback(null)).toBeUndefined();
+    expect(resolveCredentialKeyWithFallback({})).toBeUndefined();
+    expect(resolveCredentialKeyWithFallback({ key: "   " })).toBeUndefined();
+  });
+});
+
+describe("fallback-key cooldown for credential-less custom providers", () => {
+  // 无 apiKeyRef/credentialRef、本地也无 agent 记录的 agentConfig
+  // （服务端 global-cache 下发的 Ollama cloud 直连 agent 即此形态）。
+  const agentConfig = {
+    key: "ollama-cloud",
+    name: "Ollama cloud",
+    customProviderUrl: "https://ollama.com/v1",
+  };
+  // 真实 Ollama 429 body：无 Retry-After、无 resets_at、无 "reset at" 文案。
+  const weeklyBody = {
+    error: {
+      message:
+        "you (blissful_dewdney_254) have reached your weekly usage limit, upgrade for higher limits: https://ollama.com/upgrade or add extra usage: https://ollama.com/settings (ref: abc-def)",
+      type: "api_error",
+      param: null,
+      code: null,
+    },
+  };
+
+  it("persists a 429 cooldown under the fallback key in credential-availability.json", async () => {
+    const now = 1_000;
+    const credentialKey = resolveCredentialKeyWithFallback(agentConfig);
+    expect(credentialKey).toBe("custom-endpoint:https://ollama.com");
+
+    // 与 localRuntimeAdapter.recordLocalAvailability 相同的落盘链路：
+    // resolveAvailabilityAction 决策 → markCredentialUnavailable 写盘。
+    const action = resolveAvailabilityAction(429, weeklyBody, now);
+    expect(action.kind).toBe("mark");
+    if (action.kind !== "mark") return;
+    await markCredentialUnavailable(credentialKey!, action.nextAvailableAt, env, now);
+
+    const raw = JSON.parse(
+      await readFile(resolveCredentialAvailabilityPath(env), "utf8"),
+    );
+    expect(Object.keys(raw.entries)).toContain(
+      "custom-endpoint:https://ollama.com",
+    );
+
+    const entry = await readCredentialEntry(credentialKey!, env, now);
+    // 周期性硬配额文案 → 24h 冷却，而非 5 分钟默认窗口。
+    expect(entry?.nextAvailableAt).toBe(now + MAX_COOLDOWN_MS);
+  });
+
+  it("no longer leaves the gate unconditionally open: probe first, then blocked", async () => {
+    const now = 1_000;
+    const credentialKey = resolveCredentialKeyWithFallback(agentConfig)!;
+    await markCredentialUnavailable(credentialKey, now + MAX_COOLDOWN_MS, env, now);
+
+    // 冷却期内且从未探测 → gate 判 probe（放行一次真实请求），而非旧缺陷下的
+    // 永远 open（key 为 undefined → 冷却读不到 → 每次派发都撞 429）。
+    const entry = await readCredentialEntry(credentialKey, env, now);
+    expect(resolveCooldownGate({ ...entry }, now)).toBe("probe");
+
+    // probe 被记录后 → blocked，10 分钟内不再重复打上游。
+    await recordCredentialProbe(credentialKey, env, now);
+    const after = await readCredentialEntry(credentialKey, env, now);
+    expect(resolveCooldownGate({ ...after }, now)).toBe("blocked");
+
+    // 2xx clear 恢复：条目消失，gate 回到 open。
+    await clearCredentialAvailability(credentialKey, env, now);
+    expect(await readCredentialEntry(credentialKey, env, now)).toBeUndefined();
   });
 });
 
@@ -219,6 +343,23 @@ describe("applyCredentialAvailability", () => {
       { chatgpt: 9_000 },
     );
     expect((merged[0] as any).nextAvailableAt).toBe(20_000);
+  });
+
+  // 读侧必须与写侧同一把 fallback key：无 ref 的 custom-provider agent 的冷却
+  // 记在 custom-endpoint:/custom-agent: 条目下，若这里匹配不到，冷却期内 agent
+  // 仍会被 list 列出并被选中，429 循环复活。
+  it("matches runtime-written fallback-key entries for credential-less custom providers", () => {
+    const merged = applyCredentialAvailability(
+      [
+        {
+          id: "ollama-cloud",
+          key: "ollama-cloud",
+          customProviderUrl: "https://ollama.com/v1",
+        },
+      ],
+      { "custom-endpoint:https://ollama.com": 9_000 },
+    );
+    expect((merged[0] as any).nextAvailableAt).toBe(9_000);
   });
 
   it("is a no-op when there are no cooldowns", () => {

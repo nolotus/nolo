@@ -73,6 +73,50 @@ export function resolveCredentialKey(
   return undefined;
 }
 
+/**
+ * 与 `resolveCredentialKey` 相同的 credential 归属，但解析不出 ref 时派生**确定性
+ * fallback key**，让无 `apiKeyRef`/`credentialRef` 的 custom-provider agent（例如
+ * `customProviderUrl=https://ollama.com/v1` 直连 Ollama cloud）的 429 冷却也能落盘。
+ * 此前这类 agent 的 mark 与 gate 都因拿不到 key 而空转，冷却结论被静默丢弃，
+ * 每次派发都重新撞同一堵 429。
+ *
+ * 派生规则（只依赖 agent 配置本身，跨进程稳定）：
+ * 1. 配置了可解析为 URL 的 `customProviderUrl`（直连 OpenAI-compatible 通道实际
+ *    读取的 endpoint 字段，见 `providerResolution.ts` custom 分支的
+ *    `agentConfig.customProviderUrl`）→ `custom-endpoint:<URL origin>`；
+ * 2. 否则 → `custom-agent:<agentConfig.key>`。
+ *
+ * 已知误差（有意接受）：endpoint 级分组比 credential 粒度粗——同一 endpoint 下
+ * 的不同账号共享同一份冷却。账号 A 耗尽会连带挡住同 endpoint 下正常的账号 B：
+ * 冷却期内 B 只能等共享层 gate 每 `PROBE_INTERVAL_MS` 放行一次 probe，且要等
+ * 某次 probe 拿到 2xx 才清除冷却——B 并非「延迟一个窗口就恢复」，而是退化成
+ * 低频探测直到命中成功响应。刻意取舍：换取的是无 ref 的 agent 冷却必落盘、
+ * 不再每次派发都撞 429，且 `MAX_COOLDOWN_MS` 保证最长 24h 自然过期。
+ */
+export function resolveCredentialKeyWithFallback(
+  agent: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const byRef = resolveCredentialKey(agent);
+  if (byRef) return byRef;
+  if (!agent || typeof agent !== "object") return undefined;
+  const endpoint = agent.customProviderUrl;
+  if (typeof endpoint === "string") {
+    const trimmed = endpoint.trim();
+    if (trimmed) {
+      try {
+        const origin = new URL(trimmed).origin;
+        // opaque origin（非 http(s) 形态）不做 endpoint 分组，落回 agent key。
+        if (origin && origin !== "null") return `custom-endpoint:${origin}`;
+      } catch {
+        // 非 URL 形态的 endpoint 不臆造，落回 agent key。
+      }
+    }
+  }
+  const key = agent.key;
+  if (typeof key === "string" && key.trim()) return `custom-agent:${key.trim()}`;
+  return undefined;
+}
+
 function parseFile(raw: string): CredentialAvailabilityFile {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object") return { entries: {} };
@@ -246,7 +290,11 @@ export function applyCredentialAvailability<
 >(agents: T[], credentialAvailability: Record<string, number>): T[] {
   if (Object.keys(credentialAvailability).length === 0) return agents;
   return agents.map((agent) => {
-    const key = resolveCredentialKey(agent);
+    // 与写侧（localRuntimeAdapter 的 mark/gate）同一把 key：无 ref 的
+    // custom-provider agent 的冷却记在 fallback key（custom-endpoint:/custom-agent:）
+    // 下，这里若仍用 ref-only 的 resolveCredentialKey 就永远匹配不到，
+    // 冷却期内 agent 仍会被 list 列出并被选中。
+    const key = resolveCredentialKeyWithFallback(agent);
     if (!key) return agent;
     const at = credentialAvailability[key];
     if (typeof at !== "number") return agent;

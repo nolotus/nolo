@@ -2720,6 +2720,220 @@ describe("Esc 即时反馈与强制停止", () => {
     await Promise.race([workspacePromise, tick(3000)]);
   });
 
+  test("双 Esc 强制收尾：运行中第一次 Esc 协作中止，第二次 Esc 强制收尾并清空活跃 turn 控制器", async () => {
+    const { input, output, stdout } = makeStreams();
+    const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    let turnStarted = 0;
+    let turnAborted = false;
+    let resolveTurn1: (() => void) | null = null;
+    const turn1Hold = new Promise<void>((r) => { resolveTurn1 = r; });
+
+    const workspacePromise = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async (opt) => {
+        turnStarted++;
+        opt.output.write("turn-1 running");
+        opt.abortSignal?.addEventListener("abort", () => {
+          turnAborted = true;
+        });
+        await turn1Hold;
+        return { exitCode: 0, dialogId: "test-dialog-double-esc" };
+      },
+    });
+
+    // 启动 Turn 1
+    input.write("turn 1 start\r");
+    while (turnStarted < 1) await tick(10);
+    await tick(40);
+
+    // 第一次 Esc: markStopping + 协作 abort
+    input.write("\x1b");
+    await tick(50);
+    expect(turnAborted).toBe(true);
+    let out = stripAnsi(stdout());
+    expect(out).toContain(t("turnStopping"));
+    expect(out).not.toContain(t("forceStopped"));
+
+    // 第二次 Esc: 强制收尾（forcedStop 置位 + activeTurnAbort 置空 + 输出 forceStopped + 解除 busyLock）
+    input.write("\x1b");
+    await tick(60);
+    out = stripAnsi(stdout());
+    expect(out).toContain(t("forceStopped"));
+
+    // 验证 busyLock 已解除，可以立刻响应新输入
+    input.write("second input\r");
+    let waited = 0;
+    while (turnStarted < 2 && waited < 2000) {
+      await tick(20);
+      waited += 20;
+    }
+    expect(turnStarted).toBe(2);
+
+    // 清理
+    resolveTurn1!();
+    await tick(40);
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([workspacePromise, tick(3000)]);
+  });
+
+  test("迟到返回丢弃：强制收尾后旧 turn 的迟到返回被丢弃（不写历史、不重复输出收尾提示、不破坏状态）", async () => {
+    const { input, output, stdout } = makeStreams();
+    const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    let resolveLateTurn: (() => void) | null = null;
+    const lateTurnHold = new Promise<void>((r) => { resolveLateTurn = r; });
+    let turnCount = 0;
+
+    const workspacePromise = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async (opt) => {
+        turnCount++;
+        if (turnCount === 1) {
+          opt.output.write("running slow turn");
+          await lateTurnHold;
+          // 模拟旧 turn 迟到返回，携带结果与数据
+          return {
+            exitCode: 0,
+            dialogId: "late-dialog-id",
+            turnTokens: 1234,
+            streamInterrupted: false,
+          };
+        }
+        // 迟到返回落地之后的新 turn：立即正常完成，验证状态未被破坏。
+        opt.output.write("post-late turn ok");
+        return { exitCode: 0, dialogId: "post-late-dialog-id" };
+      },
+    });
+
+    input.write("start slow turn\r");
+    while (turnCount < 1) await tick(10);
+    await tick(40);
+
+    // 双 Esc 触发强制停止
+    input.write("\x1b");
+    await tick(40);
+    input.write("\x1b");
+    await tick(60);
+
+    const outBeforeLateReturn = stripAnsi(stdout());
+    const forceStoppedCountBefore = countOccurrences(outBeforeLateReturn, t("forceStopped"));
+    const turnStoppedCountBefore = countOccurrences(outBeforeLateReturn, t("turnStopped"));
+    expect(forceStoppedCountBefore).toBeGreaterThanOrEqual(1);
+    expect(turnStoppedCountBefore).toBe(0);
+
+    // 释放迟到 turn 的 hold
+    resolveLateTurn!();
+    await tick(80);
+
+    const outAfterLateReturn = stripAnsi(stdout());
+    const forceStoppedCountAfter = countOccurrences(outAfterLateReturn, t("forceStopped"));
+    const turnStoppedCountAfter = countOccurrences(outAfterLateReturn, t("turnStopped"));
+
+    // 迟到返回因 wasForceStopped 被丢弃：不打印 turnStopped，不新增 forceStopped
+    expect(turnStoppedCountAfter).toBe(0);
+    expect(forceStoppedCountAfter).toBe(forceStoppedCountBefore);
+
+    // 正向断言（防 guard 失效静默通过）：若 epoch guard 被弄坏，迟到返回不会
+    // 被丢弃，会走到 ctx.activeTurnAbort.signal（已被双 Esc 置 null）抛
+    // TypeError（bun/JSC 文案含 "is not an object"/"undefined"），再被外层
+    // catch 打成 turnFailed 横幅。旧断言只查 turnStopped 缺席，这种用户可见
+    // 崩坏下依然全绿——这里必须断言 turnFailed 与崩溃文案都不存在。
+    expect(outAfterLateReturn).not.toContain(t("turnFailed"));
+    expect(outAfterLateReturn).not.toMatch(/is not an object|undefined/);
+
+    // 迟到返回落地后，下一轮 turn 仍能正常启动、完成并渲染（状态未被破坏）。
+    input.write("after late\r");
+    let waited = 0;
+    while (turnCount < 2 && waited < 2000) {
+      await tick(20);
+      waited += 20;
+    }
+    expect(turnCount).toBe(2);
+    await tick(80);
+    const outAfterNextTurn = stripAnsi(stdout());
+    expect(outAfterNextTurn).toContain("post-late turn ok");
+    expect(outAfterNextTurn).not.toContain(t("turnFailed"));
+    expect(outAfterNextTurn).not.toMatch(/is not an object|undefined/);
+
+    // 清理
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([workspacePromise, tick(3000)]);
+  });
+
+  test("正常轮转：强制停止后下一次 turn 启动重置 forcedStop 且 turnEpoch 单调递增正常完成", async () => {
+    const { input, output, stdout } = makeStreams();
+    const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    let resolveTurn1: (() => void) | null = null;
+    const turn1Hold = new Promise<void>((r) => { resolveTurn1 = r; });
+    let turnCount = 0;
+
+    const workspacePromise = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async (opt) => {
+        turnCount++;
+        const currentTurn = turnCount;
+        if (currentTurn === 1) {
+          opt.output.write("turn 1 in-flight");
+          await turn1Hold;
+          return { exitCode: 0, dialogId: "dialog-turn-1" };
+        } else {
+          opt.output.write("turn 2 finished successfully");
+          return { exitCode: 0, dialogId: "dialog-turn-2" };
+        }
+      },
+    });
+
+    // 启动 Turn 1
+    input.write("turn 1\r");
+    while (turnCount < 1) await tick(10);
+    await tick(40);
+
+    // 双 Esc 强制收尾 Turn 1
+    input.write("\x1b");
+    await tick(40);
+    input.write("\x1b");
+    await tick(60);
+
+    let out = stripAnsi(stdout());
+    expect(out).toContain(t("forceStopped"));
+
+    // 启动 Turn 2：进入 runOneAgentTurn 时 forcedStop 重置为 false，turnEpoch 递增为 2
+    input.write("turn 2\r");
+    let waited = 0;
+    while (turnCount < 2 && waited < 2000) {
+      await tick(20);
+      waited += 20;
+    }
+    expect(turnCount).toBe(2);
+    await tick(60);
+
+    // 此时释放 Turn 1 的迟到返回（模拟并发/延迟返回）
+    resolveTurn1!();
+    await tick(80);
+
+    out = stripAnsi(stdout());
+    // Turn 2 正常完成，其输出内容在 stdout 中完整可见
+    expect(out).toContain("turn 2 finished successfully");
+
+    // 清理
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([workspacePromise, tick(3000)]);
+  });
+
   test("强制停止后迟到的 runAgentChat 返回值被丢弃：不重复打印 turnStopped", async () => {
     // 这是本任务最容易出错的地方：强制停止后 activeTurnAbort 已被清空、
     // busyLock 已解除，但 runAgentChat 的 await 仍会在稍后返回。返回值走
@@ -3254,14 +3468,16 @@ describe("restoreAltScreen error guard", () => {
 
 describe("readlineWorkspace paste store clearance contract", () => {
   test("clearCollapsedPasteStore is invoked on pick-dialog selection success", async () => {
-    const code = readFileSync(
-      join(import.meta.dir, "readlineWorkspace.ts"),
-      "utf8",
-    );
+    // pick-dialog 分支已迁入 tuiSlashRouter（S5 重构），契约改为读两文件取
+    // 并集——实现位置再次迁移时无需再改本测试（先例 8e117b681「更新过期断言」）。
+    const code = ["readlineWorkspace.ts", "tuiSlashRouter.ts"]
+      .map((file) => readFileSync(join(import.meta.dir, file), "utf8"))
+      .join("\n");
     const pickDialogBlock = code.slice(
       code.indexOf('result.action?.type === "pick-dialog"'),
       code.indexOf('result.action?.type === "list-agents"'),
     );
+    expect(pickDialogBlock).not.toBe("");
     expect(pickDialogBlock).toContain("clearCollapsedPasteStore(pasteStore)");
   });
 });

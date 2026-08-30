@@ -77,6 +77,19 @@ run_maybe_sudo() {
   fi
 }
 
+# pm2 save 会把 start 时注入的 env 原样序列化进 dump.pm2（并写 dump.pm2.bak）；
+# 机器重启 resurrect 会把这些 env 还给进程 —— NOLO_CI_DIAG_TOKEN（SSR 自检
+# 端点门禁）随之带旧 token 长期存活。token 只需存在于运行进程 env（本圈部署
+# 探针用完即弃），无需跨重启复活：save 后立即剥离 dump 中的该键。
+# 剥离逻辑在 sanitize_pm2_dump_diag_token.py（本脚本同目录，随 runtime checkout
+# 一起部署；fixture 行为测试见 deployRemote.source.test.ts）。失败仅 WARN 不
+# 阻断部署（剥离失败只是退回旧行为，不影响本次部署）。
+sanitize_pm2_dump_diag_token() {
+  local self_dir
+  self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  run_maybe_sudo python3 "$self_dir/sanitize_pm2_dump_diag_token.py" "$PM2_HOME"
+}
+
 run_env() {
   if [[ "$USE_SUDO" == "1" ]]; then
     sudo env HOME="$DEPLOY_HOME" PM2_HOME="$PM2_HOME" RUNNER_TRACKING_ID="$RUNNER_TRACKING_ID" "$@"
@@ -1586,6 +1599,8 @@ fi
 
 echo "💾 保存 PM2 进程列表..."
 timed_deploy_step "pm2-save" run_maybe_sudo "$PM2_BIN" save
+# 自检 token 不进持久化快照（resurrect 后 env 无旧 token，自检端点自然 404）
+sanitize_pm2_dump_diag_token || true
 
 echo "🔍 检查部署结果..."
 # 蓝绿成功时用 active slot name，否则用 nolo

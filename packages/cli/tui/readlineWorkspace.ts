@@ -1,39 +1,11 @@
 import { createInterface } from "node:readline";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { runAgentTurn, type RunAgentTurnResult } from "../client/agentRun";
-import {
-  createCliLocalRuntimeAdapter,
-  type UserChoiceRequest,
-  type UserChoiceResult,
-} from "../client/localRuntimeAdapter";
-import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
-import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
-import {
-  buildAgentsMdLayer,
-  buildMemoryOverlayLayer,
-  buildMemoryUseGuidanceLayer,
-  partitionScopedBlocks,
-  renderTurnContextBlocksWithScope,
-  type TurnContextLayer,
-} from "../../agent-runtime/turnContext";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
-import { resolveCliMemory } from "../memoryRecall";
-import { deleteDbRecord, readDbRecord } from "../agentRecordHelpers";
-import {
-  resolveAgentContextWindow,
-  resolveAgentModelIdentity,
-} from "../client/tokenUsage";
-import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
+import { readDbRecord } from "../agentRecordHelpers";
 import type { LocalAgentActionGate } from "../../agent-runtime/localLoop";
-import type { ContextBlockScope } from "../../agent-runtime/contextBlockScope";
-import { readCommandActionGatePayload } from "../../agent-runtime/actionGate";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
 import type { AgentRuntimeToolResult } from "../agentRuntimeLocal";
-import { compactDialog, type CompactDialogResult } from "../client/compactDialog";
-import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import {
   getAgentSelectionAuditPath,
   getDefaultProfileConfigPath,
@@ -43,43 +15,25 @@ import {
 import {
   checkForCliUpdate,
   runSelfUpdateDetailed,
-  type SelfUpdateExecution,
 } from "../updateCommands";
-import { readPipeText, spawnProcess } from "../processSpawn";
+import { spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
-import { setMathRenderingEnabled } from "../client/mathText";
-import { runSelectDialog, type SelectDialogItem } from "./selectDialog";
-import { runAskChoiceDialog } from "./askChoiceDialog";
-import { createDialogHost, type DialogHost } from "./dialogHost";
+import { type SelectDialogItem } from "./selectDialog";
+import { createDialogHost } from "./dialogHost";
 import {
   createActivityIndicator,
-  type ActivityIndicator,
-  type AgentRunStatusSnapshot,
 } from "./activityIndicator";
-import {
-  createRunRegistryPoller,
-  type RunRegistryPoller,
-} from "./runRegistryPoller";
-import {
-  createRunCompletionWatcher,
-  filterUnclaimedChildRuns,
-  buildWakeMessage,
-  buildWakeDisplayText,
-  type RunCompletionWatcher,
-} from "./runCompletionWatcher";
+import { createRunRegistryPoller } from "./runRegistryPoller";
+import { createRunCompletionWatcher } from "./runCompletionWatcher";
 import {
   createTurnRequest,
-  type ChildRunCompletedTurnEvent,
   type InternalTurnEvent,
   type TurnRequest,
 } from "core/chat/internalTurnEvent";
 import { checkStaleRun, readRunRecord } from "../agentRunControl";
-import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { prefetchAgentCatalog } from "./agentCatalog";
-import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import {
   mergeAttachedImages,
-  resolveAttachmentImageUrls,
   summarizeAttachment,
 } from "./pasteImage";
 import { readClipboardImage } from "./clipboardImage";
@@ -115,13 +69,25 @@ import {
   createCollapsedPasteStore,
   releaseCollapsedPasteReferences,
   replaceCollapsedPastesWithReferences,
-  type CollapsedPasteStore,
 } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { getCliLocale, initCliLocale, t } from "./i18n";
-import { saveProfileLocale } from "../client/profileConfig";
-import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
-import { emitTerminalBell, shouldEmitTerminalBell } from "./terminalNotification";
+import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+// S3 迁移：turn 执行与队列 drain（runOneAgentTurn / ensureChatQueueBinding /
+// preemptAndAbortForDrain / AgentTurnContext）及前奏区函数（runAgentChat /
+// waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
+// ./tuiTurnRunner。依赖方向单向：本文件 → tuiTurnRunner；后者禁止回指本文件。
+import {
+  ensureChatQueueBinding,
+  isInteractiveInput,
+  preemptAndAbortForDrain,
+  runOneAgentTurn,
+  waitForActionGate,
+  waitForRawActionGate,
+  type AgentTurnContext,
+  type SelfUpdater,
+  type WorkspaceOptions,
+} from "./tuiTurnRunner";
 
 // Ctrl+S (0x13): flush all queued follow-ups as one merged message. Named so
 // the raw byte is greppable by intent ("Ctrl+S" / "flush") rather than only by
@@ -187,7 +153,6 @@ import {
   resetHistoryFrameDiffCache,
   startTurn,
   type TurnHistory,
-  MAX_TUI_HISTORY_TURNS,
 } from "./tuiHistory";
 import {
   parseScrollAction,
@@ -206,6 +171,17 @@ import {
   hitTestHistory,
   type TuiSelectionState,
 } from "./tuiSelection";
+// S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
+// scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
+// 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
+import { createTuiRender } from "./tuiRender";
+// S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
+// SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
+// 本文件 → tuiSlashRouter；后者禁止回指本文件。
+import {
+  runSubmittedSlashLine,
+  type SlashDispatchHost,
+} from "./tuiSlashRouter";
 export {
   type FixedInputController,
   createNoopFixedInput,
@@ -225,9 +201,6 @@ import {
   leaveAltScreen,
   type FixedInputController,
 } from "./tuiRawInput";
-
-/** Max bytes of AGENTS.md/CLAUDE.md to inject — prevents context window overflow. */
-const AGENTS_MD_MAX_BYTES = 8192;
 
 /**
  * Alternate-screen restore for non-normal exit paths.
@@ -366,372 +339,10 @@ export function installAltScreenRestoreHandlers(
   });
 }
 
-/**
- * Read AGENTS.md (or CLAUDE.md fallback) from the workspace root.
- * Returns the runtime's canonical agents-md layer, or null when absent.
- *
- * The block text and its cacheScope both come from `buildAgentsMdLayer` — this
- * host must not format the marker itself, or downstream consumers are forced
- * to string-match it back to recover the scope.
- */
-function readAgentsMdLayer(cwd: string): TurnContextLayer | null {
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const filePath = join(cwd, name);
-    if (existsSync(filePath)) {
-      try {
-        let content = readFileSync(filePath, "utf8").trim();
-        if (!content) continue;
-        if (Buffer.byteLength(content, "utf8") > AGENTS_MD_MAX_BYTES) {
-          content = Buffer.from(content, "utf8").subarray(0, AGENTS_MD_MAX_BYTES).toString("utf8") + "\n\n<!-- AGENTS.md truncated -->";
-        }
-        return buildAgentsMdLayer(content, name);
-      } catch { /* skip unreadable */ }
-    }
-  }
-  return null;
-}
 
-export type SelfUpdater = (
-  output: NodeJS.WritableStream
-) => Promise<SelfUpdateExecution>;
-
-type WorkspaceOptions = {
-  scriptDir: string;
-  env?: NodeJS.ProcessEnv;
-  input?: NodeJS.ReadableStream;
-  output?: NodeJS.WritableStream;
-  agentRunner?: typeof runAgentTurn;
-  compactRunner?: (options: {
-    serverUrl: string;
-    authToken: string;
-    dialogId: string;
-    summaryLlmCaller?: (content: string) => Promise<string | null>;
-  }) => Promise<CompactDialogResult>;
-  dialogPickerRunner?: typeof runDialogPicker;
-  dialogHistoryLoader?: typeof loadDialogHistoryForDisplay;
-  selfUpdater?: SelfUpdater;
-  spawnRunner?: typeof spawnProcess;
-  /** Injected summary LLM caller for /compact compression. Wired by localRuntimeAdapter. */
-  summaryLlmCaller?: (content: string) => Promise<string | null>;
-  fetchImpl?: typeof fetch;
-  saveAgentSelection?: typeof saveProfileAgentSelection;
-  clipboardWriter?: (text: string) => Promise<void>;
-};
-
-
-type RawModeInput = NodeJS.ReadableStream & {
-  isRaw?: boolean;
-  setRawMode: (mode: boolean) => unknown;
-};
-
-
-
-async function runAgentChat(
-  scriptDir: string,
-  state: TuiState,
-  message: string,
-  env: NodeJS.ProcessEnv,
-  output: NodeJS.WritableStream,
-  agentRunner: typeof runAgentTurn = runAgentTurn,
-  options: {
-    imageUrls?: string[];
-    actionGateHandler?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
-    requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
-    abortSignal?: AbortSignal;
-    pastedTextStore?: CollapsedPasteStore;
-    activityReporter?: (label: string | null) => void;
-    /**
-     * 后台 run 状态快照的接收者（dock 面板）。曾经在本签名里声明缺失、调用
-     * 处传了却被静默丢弃，导致模型轮询那条面板上料链路整根断掉；补上声明
-     * 后会在下面转发给 agentRunner。
-     */
-    onAgentRunStatus?: (snapshot: AgentRunStatusSnapshot | null) => void;
-  } = {}
-) {
-  // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
-  // 缓存路由结果。旧实现只在「新对话第一轮」把默认 agent 拨到 flash 档，续聊
-  // （-c / 重启 TUI）时缓存已失效、分支也不进，于是原样落回默认 agent；默认
-  // agent 的模型一旦变贵，用户在毫无提示的情况下按新价计费。
-  const effectiveAgentKey = state.agentKey;
-  const effectiveAgentName = state.agentName;
-  const continueId = state.dialogId;
-  // 图片输入：图片档已移除，不再自动切换到 Kimi K2.6。
-  // 纯文本模型收到图片时，会剥离 image_url part 为占位文本（见
-  // imagePreprocessing.ts），避免上游 400。用户如需完整视觉可手动 /switch 到支持视觉的模型。
-  // Resolve attached skill references (dbKey, .agents/skills/<name>/SKILL.md)
-  // and inject as system context blocks — same
-  // mechanism as `nolo agent run --skill <ref>`.
-  let effectiveMessage = message;
-  let skillAllowedTools: string[] | undefined;
-  let skillContextBlocks: string[] | undefined;
-  if (state.attachedSkills.length > 0) {
-    const authToken = resolvePlatformAuthToken(env);
-    const resolvedSkills = [];
-    for (const ref of state.attachedSkills) {
-      try {
-        const resolved = await resolveSkillReference(ref, {
-          cwd: state.cwd,
-          readDbRecord: async (dbKey: string) => {
-            return readDbRecord({
-              dbKey,
-              authToken,
-              serverUrl: state.serverUrl,
-              fetchImpl: fetch,
-            });
-          },
-        });
-        resolvedSkills.push(resolved);
-      } catch (error) {
-        output.write(`[nolo] skill "${ref}" skipped: ${toErrorMessage(error)}\n`);
-      }
-    }
-    if (resolvedSkills.length > 0) {
-      // Build skill content as context blocks (system prompt) instead of
-      // prepending to user message — preserves LLM prefix-cache on the
-      // system+history prefix across turns.
-      skillContextBlocks = buildSkillContextBlocks(resolvedSkills);
-      // P3: collect allowed-tools from all skills and intersect
-      const toolLists = resolvedSkills
-        .map((s) => s.allowedTools)
-        .filter((t): t is string[] => !!t && t.length > 0);
-      if (toolLists.length > 0) {
-        skillAllowedTools = toolLists.reduce((acc, tools) =>
-          acc.filter((t) => tools.includes(t))
-        );
-        if (skillAllowedTools.length === 0) {
-          output.write(`[nolo] warning: attached skills declare incompatible allowed-tools; no tool restriction enforced\n`);
-        }
-      }
-    }
-  }
-  // Assemble the turn's context layers. Each builder stamps its own cacheScope
-  // (session = stable prefix, cached; turn = dynamic suffix, recomputed), so
-  // this host never has to infer scope by string-matching block markers.
-  const layers: Array<TurnContextLayer | null> = [
-    readAgentsMdLayer(state.cwd),
-    // Skill discovery: scan conventional skill dirs for SKILL.md and inject an
-    // index layer so the model knows what skills exist and can readFile them
-    // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
-    buildSkillDiscoveryContextLayer(state.cwd),
-  ];
-
-  // Memory overlay: session-scoped — load once per dialog, reuse across turns.
-  // New memories written via rememberMemory tool are for FUTURE dialogs, not
-  // the current one (the model already has the context from the conversation).
-  // /new or dialog switch clears cachedMemoryOverlay so the next dialog reloads.
-  let memoryPromptBlock = state.cachedMemoryOverlay;
-  if (memoryPromptBlock === undefined) {
-    memoryPromptBlock = await resolveCliMemory({
-      serverUrl: state.serverUrl,
-      authToken: resolvePlatformAuthToken(env),
-      agentKey: effectiveAgentKey,
-      userInput: effectiveMessage,
-      env,
-    }).catch(() => null);
-    // Cache will be propagated to TUI state by the caller via runResult.cachedMemoryOverlay.
-  }
-  const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
-  const memoryUseGuidanceLayer = buildMemoryUseGuidanceLayer({ promptBlock: memoryPromptBlock });
-
-  const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
-    ...renderTurnContextBlocksWithScope(layers),
-    ...renderTurnContextBlocksWithScope([memoryUseGuidanceLayer]),
-    // Attached skill bodies are already self-contained sections built by
-    // buildSkillContextBlocks; they stay turn-scope because the user can
-    // attach/detach skills between turns.
-    ...(skillContextBlocks ?? [])
-      .map((content) => content.trim())
-      .filter((content) => content.length > 0)
-      .map((content) => ({ content, cacheScope: "turn" as const })),
-    ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
-  ]);
-  const result: RunAgentTurnResult = await agentRunner({
-    agentName: effectiveAgentName,
-    agentKey: effectiveAgentKey,
-    serverUrl: state.serverUrl,
-    message: effectiveMessage,
-    continueDialogId: state.dialogId,
-    ...(state.agentKey === DEFAULT_TUI_AGENT_KEY && env.NOLO_AUTO_ROUTE !== "0"
-      ? { dialogAgentMode: "auto" as const }
-      : { dialogAgentMode: "fixed" as const }),
-    runtimeMode: state.runtimeMode,
-    // `/lang` updates the in-memory TUI state immediately. Pass that state
-    // explicitly so the next real turn cannot keep using the workspace's
-    // launch-time NOLO_LANG value while the estimator already uses the new one.
-    userLanguage: state.userLanguage,
-    localRuntimeCwd: process.cwd(),
-    scriptDir,
-    env: {
-      ...env,
-      NOLO_LANG: state.userLanguage,
-      NOLO_CLI_TOOLS: state.toolDisplay,
-    },
-    output,
-    showThinking: state.thinkingDisplay === "show",
-    ...(options.imageUrls && options.imageUrls.length > 0
-      ? { imageUrls: options.imageUrls }
-      : {}),
-    ...(options.actionGateHandler ? { actionGateHandler: options.actionGateHandler } : {}),
-    ...(options.confirmDestructiveAction
-      ? { confirmDestructiveAction: options.confirmDestructiveAction }
-      : {}),
-    ...(options.requestUserChoice
-      ? { requestUserChoice: options.requestUserChoice }
-      : {}),
-    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    // Always inject a local adapter factory so background run delegations from
-    // inside a TUI turn are stamped with the current conversation. Previously
-    // this factory only existed when pasted text was present, which meant a
-    // plain (no-paste) turn had no injection point for parentDialogId and the
-    // run-completion watcher could never attribute runs spawned this turn.
-    ...(options.pastedTextStore?.items.size
-      ? { pastedTextStore: options.pastedTextStore }
-      : {}),
-    localRuntimeAdapterFactory: (
-      factoryEnv: Record<string, string | undefined>,
-      factoryOptions?: { cwd?: string },
-    ) =>
-      createCliLocalRuntimeAdapter({
-        env: factoryEnv,
-        cwd: factoryOptions?.cwd ?? state.cwd,
-        output,
-        ...(options.confirmDestructiveAction
-          ? { confirmDestructiveAction: options.confirmDestructiveAction }
-          : {}),
-        ...(options.requestUserChoice
-          ? { requestUserChoice: options.requestUserChoice }
-          : {}),
-        ...(options.pastedTextStore
-          ? { pastedTextStore: options.pastedTextStore }
-          : {}),
-        // Stamp spawned background runs with the current TUI dialog so the
-        // run-completion watcher can attribute terminal-state wakes to this
-        // conversation.
-        ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
-        ...(options.activityReporter
-          ? { activityReporter: options.activityReporter }
-          : {}),
-      }),
-    ...(options.activityReporter ? { activityReporter: options.activityReporter } : {}),
-    // 转发 dock 订阅：runAgentTurn 的输出层靠它判断「有面板」从而抑制
-    // transcript 的进展卡片；dock 本身也靠它接收模型轮询带回来的快照。
-    ...(options.onAgentRunStatus ? { onAgentRunStatus: options.onAgentRunStatus } : {}),
-    ...(skillAllowedTools !== undefined
-      ? { allowedToolNames: skillAllowedTools }
-      : {}),
-    ...(contextBlockScopes.length > 0
-      ? { contextBlockScopes }
-      : {}),
-  });
-  return {
-    ...result,
-    contextWindow: resolveAgentContextWindow({
-      agentKey: effectiveAgentKey,
-      agentName: effectiveAgentName,
-    }),
-    cachedMemoryOverlay: memoryPromptBlock,
-  };
-}
-
-function waitForActionGate(
-  rl: ReturnType<typeof createInterface>,
-  input: NodeJS.ReadableStream,
-  output: NodeJS.WritableStream,
-  gate: LocalAgentActionGate,
-  spawnRunner: typeof spawnProcess,
-): Promise<AgentRuntimeToolResult> {
-  const commandPayload = gate.kind === "handoff"
-    ? readCommandActionGatePayload(gate.payload)
-    : null;
-  const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
-  const isInteractiveHandoff =
-    gate.kind === "handoff" &&
-    gate.title === "This command requires an interactive terminal.";
-  const title = isInteractiveHandoff
-    ? t("actionGateInteractiveTitle")
-    : gate.title;
-  const body = isInteractiveHandoff
-    ? t("actionGateInteractiveBody")
-    : gate.body;
-  output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
-  output.write(`[nolo] ${title}\n`);
-  if (body) output.write(`[nolo] ${body}\n`);
-  output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${t("actionGateEnterHint")}\n`);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result: AgentRuntimeToolResult) => {
-      if (settled) return;
-      settled = true;
-      rl.off("close", onClose);
-      rl.off("SIGINT", onSigint);
-      resolve(result);
-    };
-    const cancelResult = (reason: string): AgentRuntimeToolResult => ({
-      content: `action gate cancelled: ${gate.title}`,
-      metadata: {
-        exitCode: 130,
-        actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-      },
-    });
-    const failResult = (message: string): AgentRuntimeToolResult => ({
-      content: `action gate failed: ${gate.title}`,
-      metadata: {
-        exitCode: 1,
-        actionGateResult: { gateId: gate.id, status: "failed", output: message },
-      },
-    });
-    const onClose = () => finish(cancelResult("readline closed"));
-    const onSigint = () => finish(cancelResult("interrupted"));
-    rl.once("close", onClose);
-    rl.once("SIGINT", onSigint);
-    rl.question("", async () => {
-      if (settled) return;
-      if (!commandPayload) {
-        finish(failResult("unsupported gate payload"));
-        return;
-      }
-      const rawInput = input as RawModeInput;
-      const restoreRawMode = Boolean(rawInput.isRaw);
-      rl.pause();
-      rawInput.setRawMode?.(false);
-      let exitCode = 1;
-      let errorMessage = "";
-      try {
-        const proc = spawnRunner({
-          cmd: commandPayload.command,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        exitCode = await proc.exited;
-      } catch (error) {
-        errorMessage = toErrorMessage(error);
-      } finally {
-        if (restoreRawMode) rawInput.setRawMode?.(true);
-        rl.resume();
-      }
-      finish({
-        content: exitCode === 0 && !errorMessage
-          ? `action gate completed: ${displayCommand}`
-          : errorMessage
-            ? `action gate failed: ${errorMessage}`
-            : `action gate failed with exit code ${exitCode}: ${displayCommand}`,
-        metadata: {
-          exitCode,
-          actionGateResult: {
-            gateId: gate.id,
-            status: exitCode === 0 && !errorMessage ? "completed" : "failed",
-            output: errorMessage || displayCommand,
-          },
-          argv: commandPayload.command,
-          displayCommand,
-        },
-      });
-    });
-  });
-}
+// ── S3 迁移转发：readAgentsMdLayer / runAgentChat / waitForActionGate 及
+// SelfUpdater / WorkspaceOptions / RawModeInput 类型已原样迁至 ./tuiTurnRunner
+// （类型随 AgentTurnContext 走，本文件经顶部 type-only import 继续消费）。
 
 /**
  * One dim line naming the origin of a non-default startup agent, or "" when
@@ -795,506 +406,10 @@ function persistAgentSelection(
   }
 }
 
-function isInteractiveInput(input: NodeJS.ReadableStream): input is RawModeInput & { isTTY: true } {
-  const candidate = input as RawModeInput & { isTTY?: boolean };
-  return Boolean(candidate.isTTY) && typeof candidate.setRawMode === "function";
-}
-
-function waitForRawActionGate(
-  input: NodeJS.ReadableStream,
-  output: NodeJS.WritableStream,
-  gate: LocalAgentActionGate,
-  spawnRunner: typeof spawnProcess,
-  hooks?: {
-    beforeSubprocess?: () => void;
-    afterSubprocess?: () => void;
-    /** Route decoded TTY tokens through the workspace decoder. */
-    registerToken?: (handler: ((token: string) => void) | null) => void;
-  },
-): Promise<AgentRuntimeToolResult> {
-  const commandPayload = gate.kind === "handoff"
-    ? readCommandActionGatePayload(gate.payload)
-    : null;
-  const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
-  const isInteractiveHandoff =
-    gate.kind === "handoff" &&
-    gate.title === "This command requires an interactive terminal.";
-  const title = isInteractiveHandoff
-    ? t("actionGateInteractiveTitle")
-    : gate.title;
-  const body = isInteractiveHandoff
-    ? t("actionGateInteractiveBody")
-    : gate.body;
-  output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
-  output.write(`[nolo] ${title}\n`);
-  if (body) output.write(`[nolo] ${body}\n`);
-  output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${t("actionGateEnterHint")}\n`);
-
-  return new Promise((resolve) => {
-    const rawInput = input as RawModeInput;
-    let settled = false;
-    let commandRunning = false;
-    const finish = (result: AgentRuntimeToolResult) => {
-      if (settled) return;
-      settled = true;
-      hooks?.registerToken?.(null);
-      input.off("data", onData);
-      resolve(result);
-    };
-    const cancel = (reason: string) =>
-      finish({
-        content: `action gate cancelled: ${gate.title}`,
-        metadata: {
-          exitCode: 130,
-          actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-        },
-      });
-    const fail = (message: string) =>
-      finish({
-        content: `action gate failed: ${gate.title}`,
-        metadata: {
-          exitCode: 1,
-          actionGateResult: { gateId: gate.id, status: "failed", output: message },
-        },
-      });
-    const runCommand = async () => {
-      if (settled || commandRunning) return;
-      commandRunning = true;
-      if (!commandPayload) {
-        fail("unsupported gate payload");
-        return;
-      }
-      const wasRaw = Boolean(rawInput.isRaw);
-      rawInput.setRawMode?.(false);
-      hooks?.beforeSubprocess?.();
-      let exitCode = 1;
-      let errorMessage = "";
-      try {
-        const proc = spawnRunner({
-          cmd: commandPayload.command,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        exitCode = await proc.exited;
-      } catch (error) {
-        errorMessage = toErrorMessage(error);
-      } finally {
-        hooks?.afterSubprocess?.();
-        if (wasRaw) rawInput.setRawMode?.(true);
-      }
-      finish({
-        content: exitCode === 0 && !errorMessage
-          ? `action gate completed: ${displayCommand}`
-          : errorMessage
-            ? `action gate failed: ${errorMessage}`
-            : `action gate failed with exit code ${exitCode}: ${displayCommand}`,
-        metadata: {
-          exitCode,
-          actionGateResult: {
-            gateId: gate.id,
-            status: exitCode === 0 && !errorMessage ? "completed" : "failed",
-            output: errorMessage || displayCommand,
-          },
-          argv: commandPayload.command,
-          displayCommand,
-        },
-      });
-    };
-    const handleToken = (text: string) => {
-      if (settled || commandRunning) return;
-      if (text.includes("\u0003")) {
-        cancel("interrupted");
-        return;
-      }
-      if (text.includes("\r") || text.includes("\n")) {
-        void runCommand();
-      }
-    };
-    const onData = (chunk: Buffer | string) => {
-      const text = String(chunk);
-      handleToken(text);
-    };
-    if (hooks?.registerToken) {
-      hooks.registerToken(handleToken);
-    } else {
-      input.on("data", onData);
-    }
-  });
-}
-
-// ── S2：Turn 执行与队列 drain 的显式上下文容器与文件级函数 ──────────────────
-
-/**
- * AgentTurnContext
- *
- * 显式传递给文件级 turn 执行与队列 drain 函数的上下文容器。
- * 遵循硬约束：turn 侧经 ctx 代理、输入循环侧同闭包直读；可变状态一律通过 getter/setter 提供双向读写引用语义，
- * 绝不进行单向展开拷贝或传值快照。
- */
-export interface AgentTurnContext {
-  // ── 可变引用语义字段（通过 getter/setter 代理到 runTuiWorkspace 闭包中的原始 let 绑定） ──
-  state: TuiState;
-  forcedStop: boolean;
-  forcedStopEpoch: number;
-  turnEpoch: number;
-  activeTurnAbort: AbortController | null;
-  activeTurnEpoch: number;
-  modalOwnsKeyboard: boolean;
-  composerDecoderDrain: (() => void) | null;
-  chatQueueBinding: ChatQueueTuiBinding | null;
-
-  // ── 外部只读 / 动态读取字段 ──
-  readonly sessionEnded: boolean;
-  readonly buffer: string;
-  readonly cursorPos: number;
-
-  // ── 稳定实例与配置（fixedInput 具有运行期替换特性，经 getter 动态直通） ──
-  readonly options: WorkspaceOptions;
-  readonly effectiveEnv: Record<string, string | undefined>;
-  readonly history: TurnHistory;
-  readonly fixedInput: FixedInputController;
-  readonly activityIndicator: ActivityIndicator;
-  readonly activityReporter: (label: string | null) => void;
-  readonly runRegistryPoller: RunRegistryPoller;
-  readonly runCompletionWatcher: RunCompletionWatcher;
-  readonly pasteStore: CollapsedPasteStore;
-  readonly dialogHost: DialogHost | null;
-  readonly input: NodeJS.ReadableStream;
-  readonly output: NodeJS.WritableStream;
-
-  // ── 渲染与状态回调 ──
-  syncWindowTitle: () => void;
-  renderHistoryToOutput: () => void;
-  scheduleRender: () => void;
-  flushPendingRender: () => void;
-  refreshDialogTotalCredits: (dialogId: string, dialogKey: string) => void;
-  emitCommandOutput: (text: string, command?: string) => void;
-}
-
-/**
- * S2: 文件级 runOneAgentTurn 函数
- *
- * 执行单轮 agent turn：记录用户发言到 transcript、调用 runAgentChat、
- * 处理终态/abort/强制停止、折叠 dialog 与 token 状态回 ctx。
- */
-async function runOneAgentTurn(
-  ctx: AgentTurnContext,
-  inputMsg: TurnRequest | InternalTurnEvent | string,
-  imageUrls: string[],
-  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
-): Promise<{ ok: boolean; aborted: boolean }> {
-  // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
-  // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
-  // dialogLabel + OSC 窗口标题，避免窗口标题停留在 fallback 直到下一轮
-  // turn 才刷新（title 节流 30 分钟，可能很久看不到总结标题）。
-  // 校验 dialogId 仍是当前 dialog：patch 是异步的，用户可能已 /new 或
-  // /pick 切走，不能把旧 dialog 的标题盖到新 dialog 上。
-  const scheduleTitlePatchSync = (runResult: RunAgentTurnResult) => {
-    if (!runResult.titlePatchPromise || !runResult.dialogId) return;
-    const patchDialogId = runResult.dialogId;
-    runResult.titlePatchPromise
-      .then((patchedTitle) => {
-        if (!patchedTitle || ctx.sessionEnded) return;
-        if (ctx.state.dialogId !== patchDialogId) return;
-        if (ctx.state.dialogLabel === patchedTitle) return;
-        ctx.state = {
-          ...ctx.state,
-          dialogLabel: patchedTitle,
-          dialogTitle: patchedTitle,
-        };
-        ctx.syncWindowTitle();
-      })
-      .catch(() => {
-        // 静默：patch 失败下一轮节流会重试，不值得打扰用户。
-      });
-  };
-  let req = createTurnRequest(inputMsg);
-  if (req.event.kind === "child-run-completed") {
-    const nowMs = Date.now();
-    const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
-      req.event.runs,
-      { env: ctx.effectiveEnv, now: () => nowMs },
-    );
-    for (const runId of claimedRunIds) {
-      ctx.runCompletionWatcher.markAcknowledged(runId);
-    }
-    if (remainingRuns.length === 0) {
-      for (const r of req.event.runs) {
-        ctx.runCompletionWatcher.markAcknowledged(r.runId);
-      }
-      return { ok: true, aborted: false };
-    }
-    for (const r of remainingRuns) {
-      ctx.runCompletionWatcher.markAcknowledged(r.runId);
-    }
-    if (remainingRuns.length !== req.event.runs.length) {
-      const text = buildWakeMessage(remainingRuns, nowMs);
-      const displayText = buildWakeDisplayText(remainingRuns, nowMs);
-      const updatedEvent: ChildRunCompletedTurnEvent = {
-        kind: "child-run-completed",
-        runs: remainingRuns,
-        text,
-        displayText,
-      };
-      req = {
-        text,
-        event: updatedEvent,
-      };
-    }
-  }
-  const message = req.text;
-  // 每轮 turn 开始时重置强制收尾标志，确保上一轮的强制停止不会泄漏到本轮。
-  ctx.forcedStop = false;
-  ctx.turnEpoch += 1;
-  const myEpoch = ctx.turnEpoch;
-  ctx.history.followBottom = true;
-  // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
-  // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
-  // 气泡——否则每条 run 完成都在对话里伪造一条几百字的「用户消息」。
-  const isInternalEvent = req.event.kind !== "user";
-  const transcriptText =
-    req.event.kind === "child-run-completed"
-      ? (req.event.displayText ?? req.event.text)
-      : message;
-  startTurn(ctx.history, isInternalEvent ? "assistant" : "user");
-  appendToCurrentTurn(
-    ctx.history,
-    isInternalEvent
-      ? dimCliText(transcriptText, resolveCliColorEnabled())
-      : transcriptText,
-  );
-  finalizeCurrentTurn(ctx.history);
-  ctx.renderHistoryToOutput();
-  if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
-
-  startTurn(ctx.history, "assistant");
-  const agentOutput = isInteractiveInput(ctx.input)
-    ? createHistoryOutputStream(ctx.history, () => {
-        ctx.scheduleRender();
-      })
-    : ctx.output;
-  // Interactive ask_user: dock an arrow-key select dialog above the
-  // composer (same dialogHost + runSelectDialog as the /agent picker) and
-  // resolve the user's pick into the userMessage that continues the turn.
-  // Only wired in interactive TUI mode; headless/CI falls back to text menu.
-  const requestUserChoice =
-    isInteractiveInput(ctx.input) && ctx.dialogHost
-      ? async (choiceReq: UserChoiceRequest): Promise<UserChoiceResult> => {
-          // The ask_choice popup installs its own raw-key reader on stdin,
-          // but dialogHost.run only composer.pause()s and does NOT detach
-          // the global `input.on("data", onData)` listener. Node fans the
-          // same `data` event to both listeners, so every key (Esc/Enter/
-          // printable) would be handled twice: once by the popup and once
-          // by handleInputToken — which aborts the turn on Esc and pollutes
-          // the composer draft / queue on Enter. Claim the keyboard here so
-          // handleInputToken drops all keys while the popup is open.
-          ctx.modalOwnsKeyboard = true;
-          try {
-            return await ctx.dialogHost!.run((anchor) =>
-              runAskChoiceDialog({
-                request: choiceReq,
-                input: ctx.input as NodeJS.ReadStream,
-                output: ctx.output as NodeJS.WritableStream,
-                ...anchor,
-              }),
-            );
-          } catch {
-            return { kind: "cancelled" };
-          } finally {
-            // Same deferred-Enter race as confirm/action-gate: the popup's
-            // confirm Enter is debounced ~40ms in the composer decoder and
-            // only lands here after the popup has closed and
-            // modalOwnsKeyboard flipped back — so it would fall through to
-            // submit and enqueue the draft. Drain the decoder buffer on
-            // close so that Enter (and any partial ESC/CSI tail) is dropped
-            // instead of polluting the next submit.
-            ctx.composerDecoderDrain?.();
-            ctx.modalOwnsKeyboard = false;
-          }
-        }
-      : undefined;
-  try {
-    ctx.activeTurnAbort = new AbortController();
-    ctx.activeTurnEpoch = myEpoch;
-    const runResult = await runAgentChat(
-      ctx.options.scriptDir,
-      ctx.state,
-      message,
-      ctx.options.env ?? process.env,
-      agentOutput,
-      ctx.options.agentRunner,
-      {
-        ...(imageUrls.length > 0 ? { imageUrls } : {}),
-        actionGateHandler,
-        ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
-        ...(requestUserChoice ? { requestUserChoice } : {}),
-        abortSignal: ctx.activeTurnAbort.signal,
-        pastedTextStore: ctx.pasteStore,
-        activityReporter: ctx.activityReporter,
-        onAgentRunStatus: (snapshot) => {
-          if (snapshot) {
-            ctx.activityIndicator.updateAgentRun(snapshot);
-            // run 进面板的唯一入口就在这里，所以轮询器也只在这里起表；
-            // 它自己在没有活跃 run 时会停。
-            ctx.runRegistryPoller.ensureRunning();
-          } else {
-            ctx.activityIndicator.clearAgentRun();
-          }
-        },
-      },
-    );
-    // 强制收尾保护：第二次 Esc 已把 activeTurnAbort 置 null、busyLock 解除、
-    // 打印过 forceStopped 提示。runAgentChat 现在才返回 —— 这段迟到返回值
-    // 必须整体丢弃：不读已 null 的 activeTurnAbort（会 NPE）、不重复打印
-    // turnStopped、不重绘（用户可能已在输入新一轮）。用 epoch 比对而非全局
-    // forcedStop：强制停止后用户可能已发起新 turn 并重置 forcedStop=false，
-    // 旧 turn 靠 myEpoch === forcedStopEpoch 识别自己被强制过。
-    // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
-    const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
-    if (wasForceStopped) {
-      if (runResult.dialogId || runResult.turnTokens) {
-        const nextDialogKey = runResult.dialogId
-          ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
-            ? ctx.state.dialogKey
-            : ctx.state.dialogOwnerId
-              ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
-              : undefined
-          : ctx.state.dialogKey;
-        ctx.state = {
-          ...ctx.state,
-          ...(runResult.dialogId
-            ? {
-                dialogId: runResult.dialogId,
-                dialogKey: nextDialogKey,
-                dialogLabel: runResult.title || runResult.dialogId,
-                ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-              }
-            : {}),
-          ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-          ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-        };
-        if (runResult.dialogId && nextDialogKey) {
-          ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-        }
-      }
-      scheduleTitlePatchSync(runResult);
-      return { ok: false, aborted: true };
-    }
-    const wasAborted = ctx.activeTurnAbort.signal.aborted;
-    ctx.activeTurnAbort = null;
-    if (
-      shouldEmitTerminalBell({
-        wasAborted,
-        streamInterrupted: runResult.streamInterrupted,
-        exitCode: runResult.exitCode,
-        interactive: isInteractiveInput(ctx.input),
-      })
-    ) {
-      emitTerminalBell(ctx.output);
-    }
-    if (isInteractiveInput(ctx.input)) {
-      finalizeCurrentTurn(ctx.history);
-      ctx.flushPendingRender();
-      ctx.renderHistoryToOutput();
-      if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
-    }
-    if (wasAborted) {
-      if (runResult.pendingToolName) {
-        // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
-        // 完成，其结果不会进入本次对话历史。告知工具名，语气正常。
-        ctx.emitCommandOutput(t("turnStoppedToolPending", runResult.pendingToolName));
-      } else {
-        ctx.emitCommandOutput(t("turnStopped"));
-      }
-    }
-    if (runResult.dialogId || runResult.turnTokens || runResult.contextWindow) {
-      const nextDialogKey = runResult.dialogId
-        ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
-          ? ctx.state.dialogKey
-          : ctx.state.dialogOwnerId
-            ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
-            : undefined
-        : ctx.state.dialogKey;
-      ctx.state = {
-        ...ctx.state,
-        ...(runResult.dialogId
-          ? {
-              dialogId: runResult.dialogId,
-              dialogKey: nextDialogKey,
-              dialogLabel: runResult.title || runResult.dialogId,
-              ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-            }
-          : {}),
-        ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-        ...(runResult.contextWindow
-          ? { contextWindow: runResult.contextWindow }
-          : {}),
-        // input_tokens 是累计上下文输入（含历史消息），把它持久化到
-        // estimatedContextTokens：下一轮若 provider 不返回 usage，context
-        // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
-        ...(runResult.turnTokens && runResult.turnTokens.input > 0
-          ? { estimatedContextTokens: runResult.turnTokens.input }
-          : {}),
-        ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-      };
-      if (runResult.dialogId && nextDialogKey) {
-        ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-      }
-    }
-    scheduleTitlePatchSync(runResult);
-    // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
-    // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
-    if (!wasAborted && runResult.exitCode !== 0) {
-      if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
-        ctx.emitCommandOutput(t("balanceExhaustedHint"));
-      } else if (isQuotaExhaustedError(runResult.localError)) {
-        ctx.emitCommandOutput(t("quotaExhaustedHint"));
-      } else if (runResult.dialogId) {
-        ctx.emitCommandOutput(t("dialogPreservedHint"));
-      } else {
-        ctx.emitCommandOutput(t("dialogNotSavedHint"));
-      }
-    }
-    return { ok: !wasAborted, aborted: wasAborted };
-  } finally {
-    ctx.activityIndicator.stop();
-    ctx.activeTurnAbort = null;
-  }
-}
-
-/**
- * S2: 文件级 ensureChatQueueBinding 函数
- *
- * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
- */
-function ensureChatQueueBinding(
-  ctx: AgentTurnContext,
-  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
-): ChatQueueTuiBinding {
-  if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
-  ctx.chatQueueBinding = createChatQueueTuiBinding(async (text) => {
-    return runOneAgentTurn(ctx, text, [], actionGateHandler, confirmDestructiveAction);
-  });
-  return ctx.chatQueueBinding;
-}
-
-/**
- * S2: 文件级 preemptAndAbortForDrain 函数
- *
- * 中止正在执行的 in-flight turn，以便队列头部立即 drain。
- */
-function preemptAndAbortForDrain(
-  binding: ChatQueueTuiBinding,
-  activeTurnAbort: AbortController | null,
-): void {
-  if (binding.preemptForDrain() && activeTurnAbort) {
-    activeTurnAbort.abort();
-  }
-}
+// ── S3 迁移转发：isInteractiveInput / waitForRawActionGate / S2 turn 执行区
+// （AgentTurnContext、runOneAgentTurn、ensureChatQueueBinding、
+// preemptAndAbortForDrain）已原样迁至 ./tuiTurnRunner，此处经顶部 import
+// 转发使用；依赖方向单向（readlineWorkspace → tuiTurnRunner）。
 
 // The product runs one interactive TUI per process. Tests/embedders can still
 // overlap exported calls, so cleanup is latest-owner-wins: an older workspace
@@ -1522,54 +637,34 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // flicker. Coalesce multiple onUpdate calls in the same macrotask into a
   // single render frame, and wrap each frame in BSU/ESU (2026h/l) + cursor
   // hide/show so the terminal never shows a half-painted intermediate state.
-  // Coalesce streaming chunks into ~30fps frames; keystroke composer repaints
-  // go through fixedInput.repaint directly and are unaffected; flushPendingRender
-  // remains immediate for turn boundaries.
-  const RENDER_THROTTLE_MS = 33;
-  let renderScheduled = false;
-  let renderTimer: ReturnType<typeof setTimeout> | null = null;
   // Set true by finish() once the interactive session has exited. Lives in the
   // outer scope (alongside refreshGitStatus) so the async git callback can drop
   // a stale repaint that would land after /exit. `done` is block-scoped inside
   // the interactive branch below and is not visible here.
   let sessionEnded = false;
 
-  const flushPendingRender = () => {
-    if (renderTimer !== null) {
-      clearTimeout(renderTimer);
-      renderTimer = null;
-    }
-    if (!renderScheduled) return;
-    renderScheduled = false;
-    paintSyncedFrame();
-  };
-
-  const paintSyncedFrame = () => {
-    if (fixedInput.isPaused()) return;
-    // Begin terminal sync update + hide cursor. Terminals without 2026
-    // support silently ignore the sequence; cursor hide is a universal
-    // fallback that still reduces visible flicker.
-    output.write("\x1b[?2026h\x1b[?25l");
-    try {
-      // Reuse renderHistoryToOutput so synced frames carry the active
-      // selection highlight (a wheel scroll now repaints through here and must
-      // not drop a drag-selection the user made) and share its re-entry guard.
-      renderHistoryToOutput();
-      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-    } finally {
-      output.write("\x1b[?25h\x1b[?2026l");
-    }
-  };
-
-  const scheduleRender = () => {
-    if (renderScheduled) return;
-    renderScheduled = true;
-    renderTimer = setTimeout(() => {
-      renderScheduled = false;
-      renderTimer = null;
-      paintSyncedFrame();
-    }, RENDER_THROTTLE_MS);
-  };
+  // ── S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
+  // scheduleRender）与共享节流状态 flushPendingRender 已迁至 ./tuiRender。
+  // 此处以 getter 直通注入可变绑定（fixedInput 会被 composer 安装整体替换、
+  // buffer/cursorPos 随草稿改写），保持可变引用语义（禁止快照）；稳定引用
+  // （output / history / selectionState）直接传值。解构保持原函数名，全部
+  // 渲染调用点零改动。渲染是输出字节序列敏感区，函数体逐行搬移未动。
+  const selectionState = createSelectionState();
+  const { renderHistoryToOutput, scheduleRender, flushPendingRender } =
+    createTuiRender({
+      output,
+      history,
+      selectionState,
+      get fixedInput() {
+        return fixedInput;
+      },
+      get buffer() {
+        return buffer;
+      },
+      get cursorPos() {
+        return cursorPos;
+      },
+    });
 
   const refreshGitStatus = (): void => {
     // Per-key fallback: an explicit options.env that omits the key still
@@ -1638,10 +733,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
   });
 
-  // 防重入卫兵：onInputLinesChange → renderHistoryToOutput → 若 composer 重绘
-  // 又触发 onInputLinesChange → 无限递归把 CPU 打满。重入时直接 return。
-  let syncingLayout = false;
-  const selectionState = createSelectionState();
   let autoScrollTimer: ReturnType<typeof setInterval> | null = null;
   let lastDragMouseX = 1;
   // 边缘拖拽动态加速的 tick 计数：持续按住边缘的 tick 数决定单步行数，
@@ -1664,51 +755,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     selectionState.head = null;
   };
 
-  const renderHistoryToOutput = () => {
-    // A dialog (picker / confirm) owns the screen while paused. Repainting the
-    // transcript underneath it erases the frame — mid-turn confirms streamed
-    // tokens over the prompt, so it flashed and vanished while still holding
-    // the keyboard, and the turn looked hung.
-    if (fixedInput.isPaused()) return;
-    if (syncingLayout) return;
-    syncingLayout = true;
-    try {
-      renderHistory(
-        output,
-        history,
-        fixedInput.getInputLines(),
-        selectionState,
-      );
-    } finally {
-      syncingLayout = false;
-    }
-  };
-  const readLatestAssistantReply = () => {
-    const lastReply = [...history.turns]
-      .reverse()
-      .find((turn) => turn.role === "assistant")?.content;
-    const text = lastReply ? stripAnsi(lastReply).trim() : "";
-    return text || null;
-  };
-  // Build a full Markdown transcript of the conversation (User + Assistant),
-  // including the currently streaming turn if any. Used by /copy all.
-  const buildConversationMarkdown = (h: TurnHistory): string => {
-    const parts: string[] = [];
-    for (const turn of h.turns) {
-      const role = turn.role === "user" ? "User" : "Assistant";
-      const content = stripAnsi(turn.content).trim();
-      if (!content) continue;
-      parts.push(`## ${role}\n\n${content}`);
-    }
-    if (h.currentRole && h.currentContent) {
-      const role = h.currentRole === "user" ? "User" : "Assistant";
-      const content = stripAnsi(h.currentContent).trim();
-      if (content) {
-        parts.push(`## ${role}\n\n${content}`);
-      }
-    }
-    return parts.join("\n\n");
-  };
+  // readLatestAssistantReply / buildConversationMarkdown（/copy last|all 取材）
+  // 已随 S5 迁至 ./tuiSlashRouter。
   // True while a modal (raw action gate OR ask_choice popup) owns the
   // keyboard. The modal's own `data` listener handles its keys (Enter/Esc/
   // Ctrl+C/arrow keys), so the main loop must not let stray keys leak into
@@ -1850,527 +898,51 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     return true;
   };
 
+  // ── S5 迁移：runSubmittedLine 的 slash 命令 bus 分发已迁至 ./tuiSlashRouter
+  // （runSubmittedSlashLine）。此处仅装配 host：可变绑定（state / buffer /
+  // cursorPos / fixedInput）以 getter/setter 直通保持可变引用语义（禁止快照），
+  // 稳定实例与编排回调按原引用注入。本文件调用点与函数签名保持不变。
+  const slashHost: SlashDispatchHost = {
+    get state() {
+      return state;
+    },
+    set state(v) {
+      state = v;
+    },
+    get buffer() {
+      return buffer;
+    },
+    get cursorPos() {
+      return cursorPos;
+    },
+    get fixedInput() {
+      return fixedInput;
+    },
+    history,
+    pasteStore,
+    dialogHost,
+    input,
+    output,
+    options,
+    fetchImpl,
+    turnCtx,
+    emitCommandOutput,
+    renderHistoryToOutput,
+    refreshDialogTotalCredits,
+    persistExplicitAgentSwitch,
+    persistAgentSelection,
+    writeClipboard,
+    selfUpdater,
+    spawnRunner,
+    installAltScreenRestoreHandlers,
+  };
+
   const runSubmittedLine = async (
     line: string,
     actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
     confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
-  ) => {
-    if (!line.trim()) return false;
-    const result = handleTuiInput(line, state);
-    const previousAgentKey = state.agentKey;
-    state = result.nextState;
-
-    // In interactive mode the transcript pane is owned by renderHistory; a raw
-    // output.write lands inside the scroll region and is wiped by the next
-    // composer repaint (\x1b[J), which made /context et al invisible. Route
-    // command echo + output through history instead.
-    //
-    // 非 chat 的 slash 命令统一走 local turn：命令行 + 输出合并成一条
-    // role="local" 的回显，与 user/assistant 对话视觉区分，翻历史不再
-    // 把 /switch 这类命令伪装成一轮对话。action 类命令（pick-agent 等）
-    // 无 output 时不写 history。/exit 的 "bye" 也不进 history——退出后
-    // 历史立即销毁，写 local turn 纯浪费且可能被清屏前闪烁。
-    //
-    // 非交互模式（管道/脚本）下仍需输出 result.output，但走 emitCommandOutput
-    // 内部的 output.write 分支（不写 history），command 传空因为非交互模式
-    // 没有"命令回显"的视觉概念。
-    const interactive = isInteractiveInput(input);
-
-    if (result.action?.type !== "exit" && result.output) {
-      // 交互模式下 chat 的图片预览（"found image: ..."）不在此 raw write：
-      // renderHistory 拥有 transcript pane，raw write 会落进滚动区、被下一条
-      // composer 重绘（\x1b[J）抹掉——交互模式的 preview 本就走 local turn /
-      // history 渲染通道。但非交互（管道/脚本）模式下没有 composer 重绘问题，
-      // 预览对脚本用户有价值（确认图片被检测到），因此仅当（非 chat）或
-      // （非交互时 chat）才 emit。exit 走下方独立分支，不在此 emit。
-      const shouldEmit = result.action?.type !== "chat" || !interactive;
-      if (shouldEmit) emitCommandOutput(result.output, interactive ? line.trim() : "");
-    }
-
-    if (state.agentKey !== previousAgentKey) {
-      // 用户显式切换 agent（/agent <name>、/switch <name> 或 picker）：
-      // 清掉这条对话首轮 auto-route 的缓存，否则下一轮会被缓存切回原
-      // agent（典型场景：原 agent 429 后想换一个）。判定只看 agentKey 是否
-      // 变化，不耦合 "Switched to " 这类输出文案——文案一旦 i18n 化或调整，
-      // 字符串前缀判定就会漏掉切换、导致缓存不清、切换「不生效」回归。
-      persistExplicitAgentSwitch(previousAgentKey);
-    }
-
-    if (result.action?.type === "exit") {
-      // "bye" 作为退出前最后一帧的视觉确认，直接 output.write 而不进
-      // history——退出后 history 立即销毁，写 local turn 没有意义。
-      if (result.output) output.write(`${result.output}\n`);
-      return true;
-    }
-
-    if (result.action?.type === "clear") {
-      if (result.action.dialogId) {
-        const authToken = resolvePlatformAuthToken(options.env ?? {});
-        try {
-          await deleteDbRecord({
-            // The messages delete endpoint expects the bare dialogId; dialogKey
-            // is the persisted dialog record key and has a different prefix.
-            dbKey: result.action.dialogId,
-            deleteOptions: { type: "messages" },
-            authToken,
-            fetchImpl,
-            serverUrl: state.serverUrl,
-          });
-          emitCommandOutput(t("clearedDialog"));
-        } catch (error) {
-          emitCommandOutput(`[nolo] Clear failed: ${toErrorMessage(error)}\n`);
-          return false;
-        }
-      }
-      clearCollapsedPasteStore(pasteStore);
-      // Clear removes the persisted messages and clears the dialog identity
-      // (like /new), so the next turn starts a fresh dialog instead of
-      // continuing the cleared one.
-      // Drop usage-derived context immediately so the composer reflects the
-      // empty dialog before the next turn starts.
-      state = {
-        ...state,
-        turnTokens: undefined,
-        // 新对话累计积分从 0 开始，清掉旧对话残留的累计值，等首轮读取后再回填。
-        dialogTotalCredits: undefined,
-        cachedMemoryOverlay: undefined, // 新对话重新加载记忆
-        estimatedContextTokens: estimateDefaultCliContextTokens({
-          cwd: state.cwd,
-          agentKey: state.agentKey,
-          userLanguage: state.userLanguage,
-          ...resolveAgentModelIdentity({
-            agentKey: state.agentKey,
-            agentName: state.agentName,
-          }),
-        }),
-      };
-      history.turns.length = 0;
-      history.currentRole = null;
-      history.currentContent = "";
-      history.scrollTop = 0;
-      history.followBottom = true;
-      renderHistoryToOutput();
-      // Re-emit after the wipe: the pre-clear echo of /new was just discarded
-      // along with the rest of the transcript.
-      const sparkle = [
-        "",
-        `     🏔  ${t("startedFreshDialog")}`,
-        "     ────────────────────────────",
-        "",
-      ].join("\n");
-      emitCommandOutput(themeText(sparkle, "chrome", resolveCliColorEnabled()));
-    }
-    if (result.action?.type === "compact") {
-      const runner = options.compactRunner ?? compactDialog;
-      const authToken = resolvePlatformAuthToken(options.env ?? {});
-      const compactStart = Date.now();
-      try {
-        const compactResult = await runner({
-          serverUrl: state.serverUrl,
-          authToken,
-          dialogId: result.action.dialogId,
-          summaryLlmCaller: options.summaryLlmCaller,
-        });
-        const elapsedSec = ((Date.now() - compactStart) / 1000).toFixed(1);
-        state = {
-          ...state,
-          dialogId: compactResult.dialogId,
-          dialogKey: compactResult.dialogKey,
-          dialogLabel: compactResult.dialogId,
-          dialogTitle: state.dialogTitle,
-          // Compact forks into a fresh dialog that only inherits the summary,
-          // not the full message history. Drop usage-derived context so the
-          // composer chip falls back to the default CLI surface estimate and
-          // the context percentage visibly drops. Mirrors the /clear reset.
-          turnTokens: undefined,
-          // compact fork 出新的官方 dialog，其全量计费投影从新记录累计。
-          // 清掉旧累计值，等首轮读取后再回填新 dialog 的 totalCost。
-          dialogTotalCredits: undefined,
-          cachedMemoryOverlay: undefined, // compact 创建新 dialog，重新加载记忆
-          estimatedContextTokens: estimateDefaultCliContextTokens({
-            cwd: state.cwd,
-            agentKey: state.agentKey,
-            userLanguage: state.userLanguage,
-            ...resolveAgentModelIdentity({
-              agentKey: state.agentKey,
-              agentName: state.agentName,
-            }),
-          }),
-        };
-        const elapsed = `${elapsedSec}s`;
-        const message = compactResult.summaryGenerated
-          ? compactResult.compactedMessageCount > 0
-            ? t(
-                "compactSuccessWithCount",
-                result.action.dialogId,
-                compactResult.dialogId,
-                elapsed,
-                String(compactResult.compactedMessageCount),
-              )
-            : t(
-                "compactSuccess",
-                result.action.dialogId,
-                compactResult.dialogId,
-                elapsed,
-              )
-          : t(
-              "compactForked",
-              result.action.dialogId,
-              compactResult.dialogId,
-              elapsed,
-            );
-        output.write(`${message}\n`);
-      } catch (error: any) {
-        output.write(
-          `[nolo] Compact failed: ${toErrorMessage(error)}\n`
-        );
-      }
-    }
-
-    if (result.action?.type === "self-update") {
-      try {
-        const update = await selfUpdater(output);
-        if (update.exitCode === 0 && update.disposition === "scheduled") {
-          output.write("Update is ready. Nolo will now exit safely; installation starts after shutdown.\n");
-          return true;
-        }
-        if (update.exitCode === 0) {
-          output.write("Update finished. Restart nolo to use the new version.\n");
-        } else {
-          output.write("Update failed. Check the error above, then run /update again or use nolo update.\n");
-        }
-      } catch (error) {
-        output.write(`${toErrorMessage(error)}\n`);
-        output.write("Update failed. Check the error above, then run /update again or use nolo update.\n");
-      }
-    }
-
-    if (result.action?.type === "theme-refresh") {
-      // Re-probe the terminal background on demand (OSC 11) so a runtime
-      // theme switch in Ghostty et al. is picked up by the internal palette.
-      // emitCommandOutput renders the history and repaints the composer with
-      // the updated brightness, so no extra repaint is needed here.
-      const detected = await detectTerminalBackground({
-        stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
-        stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
-        allowSystemFallback: true,
-      });
-      if (detected && applyDetectedBackground(detected)) {
-        emitCommandOutput(t("themeRefreshed", detected.brightness));
-      } else if (detected) {
-        // Already matched — still echo the current brightness for the user.
-        emitCommandOutput(t("themeRefreshed", detected.brightness));
-      } else {
-        emitCommandOutput(t("themeRefreshFailed"));
-      }
-    }
-
-    if (result.action?.type === "pick-agent") {
-      try {
-        const pickResult = await dialogHost.run((anchor) =>
-          runAgentPicker({
-            currentKey: state.agentKey,
-            env: options.env ?? process.env,
-            input: input as NodeJS.ReadStream,
-            output: output as NodeJS.WritableStream,
-            ...anchor,
-          }),
-        );
-        if (pickResult.kind === "list") {
-          output.write(`${pickResult.output}\n`);
-        } else if (pickResult.kind === "selected") {
-          state = {
-            ...state,
-            agentName: pickResult.name,
-            agentKey: pickResult.key,
-            contextWindow: resolveAgentContextWindow({
-              agentKey: pickResult.key,
-              agentName: pickResult.name,
-              model: pickResult.model,
-            }),
-            estimatedContextTokens: estimateDefaultCliContextTokens({
-              cwd: state.cwd,
-              agentKey: pickResult.key,
-              agentName: pickResult.name,
-              model: pickResult.model,
-              userLanguage: state.userLanguage,
-            }),
-            ...(pickResult.apiSource ? { apiSource: pickResult.apiSource } : {}),
-            cachedMemoryOverlay: undefined, // 切换 agent 后重新加载记忆
-          };
-          persistAgentSelection(state, options.env ?? process.env);
-          output.write(
-            `${formatAgentSwitchMessage({
-              name: pickResult.name,
-              dialogId: state.dialogId,
-            })}\n`
-          );
-        } else {
-          output.write(`${t("agentSwitchCancelled")}\n`);
-        }
-      } catch (error) {
-        output.write(
-          `[nolo] Agent picker failed: ${toErrorMessage(error)}\n`
-        );
-      }
-    }
-
-    if (result.action?.type === "set-locale") {
-      try {
-        saveProfileLocale(result.action.locale);
-      } catch {
-        // Locale still applies for this session; persistence is best-effort.
-      }
-    }
-
-    if (result.action?.type === "set-mouse") {
-      fixedInput.setMouseEnabled(result.action.enabled);
-    }
-
-    if (result.action?.type === "set-math") {
-      setMathRenderingEnabled(result.action.enabled);
-    }
-
-    if (result.action?.type === "set-altscreen") {
-      // Both helpers are idempotent and no-op on non-TTY, so a repeated
-      // /altscreen on|off costs nothing. Re-installing the restore handlers on
-      // re-entry keeps the exit/signal path pointed at the current output.
-      if (result.action.enabled) {
-        enterAltScreen(output);
-        installAltScreenRestoreHandlers(output);
-      } else {
-        leaveAltScreen(output);
-      }
-      // The freshly switched buffer is blank — repaint or the user stares at
-      // an empty screen until the next event.
-      resetHistoryFrameDiffCache(output);
-      renderHistoryToOutput();
-      fixedInput.repaint(buffer, cursorPos);
-    }
-
-    if (result.action?.type === "copy-last") {
-      const text = readLatestAssistantReply() ?? "";
-      if (!text) {
-        emitCommandOutput(t("copyNothing"));
-      } else {
-        try {
-          await writeClipboard(text);
-          emitCommandOutput(t("copiedLastReply"));
-        } catch (error) {
-          // Headless / container shells often lack xclip/pbcopy; surface the
-          // reply text so the user can still copy it manually instead of only
-          // seeing a raw "spawn xclip ENOENT".
-          const message = toErrorMessage(error);
-          const missingClipboard =
-            /ENOENT|not found|no such file|clipboard|spawn|EPIPE|EACCES/i.test(message) ||
-            /clipboard/i.test(String(error?.constructor?.name ?? ""));
-          if (missingClipboard) {
-            emitCommandOutput(t("copyUnavailable"));
-            emitCommandOutput(text);
-          } else {
-            emitCommandOutput(`[nolo] ${t("copyFailed")}: ${message}`);
-          }
-        }
-      }
-    }
-
-    if (result.action?.type === "copy-all") {
-      const text = buildConversationMarkdown(history);
-      if (!text) {
-        emitCommandOutput(t("copyAllNothing"));
-      } else {
-        try {
-          await writeClipboard(text);
-          emitCommandOutput(t("copiedAllHistory"));
-        } catch (error) {
-          const message = toErrorMessage(error);
-          const missingClipboard =
-            /ENOENT|not found|no such file|clipboard|spawn|EPIPE|EACCES/i.test(message) ||
-            /clipboard/i.test(String(error?.constructor?.name ?? ""));
-          if (missingClipboard) {
-            emitCommandOutput(t("copyUnavailable"));
-          } else {
-            emitCommandOutput(`[nolo] ${t("copyFailed")}: ${message}`);
-          }
-        }
-      }
-    }
-
-    if (result.action?.type === "pick-dialog") {
-      const interactivePicker = isInteractiveInput(input);
-      try {
-        const pickResult = await dialogHost.run((anchor) =>
-          (options.dialogPickerRunner ?? runDialogPicker)({
-            env: options.env ?? process.env,
-            input: input as NodeJS.ReadStream,
-            output: output as NodeJS.WritableStream,
-            interactive: interactivePicker,
-            ...anchor,
-            bottomAnchored: interactivePicker,
-          }),
-        );
-        if (pickResult.kind === "selected") {
-          const loadedTurns = await (
-            options.dialogHistoryLoader ?? loadDialogHistoryForDisplay
-          )({
-            dialog: pickResult.dialog,
-            env: options.env ?? process.env,
-          });
-          const restored = loadedTurns.slice(-MAX_TUI_HISTORY_TURNS);
-          history.turns.length = 0;
-          history.turns.push(...restored);
-          history.currentRole = null;
-          history.currentContent = "";
-          history.scrollTop = 0;
-          history.followBottom = true;
-          state = {
-            ...state,
-            dialogId: pickResult.dialog.id,
-            dialogKey: pickResult.dialog.dbKey,
-            dialogLabel: pickResult.dialog.title || pickResult.dialog.id,
-            dialogTitle: pickResult.dialog.title,
-            turnTokens: undefined,
-            // 切换对话先清空上一个对话的累计积分，等下面异步读取成功后回填；
-            // 若读取失败也不至于把旧对话的累计值残留显示在状态行。
-            dialogTotalCredits: undefined,
-            cachedMemoryOverlay: undefined, // 切换对话后重新加载记忆
-          };
-          // 切到已有对话时立即初始化「整个对话累计」积分（读 dialog 记录的 totalCost）。
-          refreshDialogTotalCredits(pickResult.dialog.id, pickResult.dialog.dbKey);
-          clearCollapsedPasteStore(pasteStore);
-          emitCommandOutput(
-            `${t("resumedDialogPrefix")}: ${pickResult.dialog.title} (${pickResult.dialog.id})`,
-          );
-        } else if (pickResult.kind === "list") {
-          emitCommandOutput(pickResult.output);
-        } else if (pickResult.kind === "error") {
-          emitCommandOutput(`[nolo] ${pickResult.message}`);
-        } else {
-          emitCommandOutput(t("dialogResumeCancelled"));
-        }
-      } catch (error) {
-        emitCommandOutput(
-          `[nolo] History failed: ${toErrorMessage(error)}`,
-        );
-      }
-    }
-
-    if (result.action?.type === "list-agents") {
-      try {
-        const pickResult = await runAgentPicker({
-          currentKey: state.agentKey,
-          env: options.env ?? process.env,
-          input: input as NodeJS.ReadStream,
-          output: output as NodeJS.WritableStream,
-          interactive: false,
-        });
-        if (pickResult.kind === "list") {
-          output.write(`${pickResult.output}\n`);
-        }
-      } catch (error) {
-        output.write(
-          `[nolo] Agent list failed: ${toErrorMessage(error)}\n`
-        );
-      }
-    }
-
-    if (result.action?.type === "shell-command") {
-      const shellCmd = result.action.command;
-      if (!shellCmd) {
-        emitCommandOutput("[nolo] Error: No command specified after !");
-      } else {
-        emitCommandOutput(`Executing: ${shellCmd}`);
-        try {
-          const shellInvocation =
-            process.platform === "win32"
-              ? [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", shellCmd]
-              : ["/bin/sh", "-c", shellCmd];
-          const proc = spawnRunner({
-            cmd: shellInvocation,
-            cwd: state.cwd,
-            env: options.env ?? process.env,
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-
-          const [stdoutText, stderrText] = await Promise.all([
-            readPipeText(proc.stdout),
-            readPipeText(proc.stderr),
-          ]);
-
-          const exitCode = await proc.exited;
-
-          if (stdoutText) {
-            emitCommandOutput(`\`\`\`\n${stdoutText.trim()}\n\`\`\``);
-          }
-          if (stderrText) {
-            emitCommandOutput(themeText(`\`\`\`\nError:\n${stderrText.trim()}\n\`\`\``, "danger", resolveCliColorEnabled()));
-          }
-          if (exitCode !== 0) {
-            emitCommandOutput(themeText(`[nolo] Command exited with code ${exitCode}.`, "warning", resolveCliColorEnabled()));
-          }
-        } catch (error) {
-          emitCommandOutput(
-            themeText(`[nolo] Command execution failed: ${toErrorMessage(error)}`, "danger", resolveCliColorEnabled())
-          );
-        }
-      }
-    }
-
-    if (result.action?.type === "chat") {
-      // 读取本轮待发送附件为 dataUrl（chat action 内联路径 + state 暂存附件）。
-      // 失败回调直接写 output。清空动作留在调用点，与下方"发送即消费"注释一起。
-      const { imageUrls } = await resolveAttachmentImageUrls({
-        actionImagePaths: result.action.imagePaths,
-        attachedImages: state.attachedImages,
-        onFailure: (_path, err) =>
-          output.write(`[nolo] image skipped: ${err.message}\n`),
-      });
-      // 本轮待发送暂存区：发送即消费。imageUrls 已在上面确定，这里立即清空，
-      // 避免纯文字轮把上一轮附件残留重读重发给上游（累积至 ~9 轮撞 8 张
-      // 上限报 UPSTREAM_400）。必须在异步 turn 开始前同步清空：若等 turn 成功
-      // 后才清，会误删用户在 busy 期间为下一条消息粘贴的新图。历史消息里的
-      // 图片不动（模型仍可经历史回放引用旧图）。
-      state = {
-        ...state,
-        attachedImages: [],
-      };
-
-      history.followBottom = true;
-      // Notify the queue core that a direct (non-drained) turn is starting,
-      // then execute it via the shared runOneAgentTurn helper. After it ends,
-      // notifyTurnEnd drives the drain cascade for any messages the user
-      // queued while this turn was running.
-      const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
-      binding.notifyTurnStart();
-      try {
-        const outcome = await runOneAgentTurn(
-          turnCtx,
-          result.action.message,
-          imageUrls,
-          actionGateHandler,
-          confirmDestructiveAction,
-        );
-        await binding.notifyTurnEnd(outcome);
-      } catch (err) {
-        // A throw here (e.g. a post-stream persistence / server-replication
-        // failure inside the agent runner) must NOT leave the queue machine
-        // stuck in `running`. That was the root cause of "the reply finished
-        // but every later message silently goes to the queue and never
-        // drains": notifyTurnEnd was never reached, so `running` stayed true
-        // and no future turn-end drove a drain. Report a failed (non-aborted)
-        // turn-end — chatQueueMachine keeps the queue on failure — and surface
-        // the error instead of swallowing it.
-        await binding.notifyTurnEnd({ ok: false, aborted: false });
-        emitCommandOutput(
-          `${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`,
-        );
-      }
-      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-    }
-
-    return false;
-  };
+  ): Promise<boolean> =>
+    runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction);
 
   if (isInteractiveInput(input)) {
     input.setRawMode(true);

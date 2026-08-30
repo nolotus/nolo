@@ -75,6 +75,22 @@ describe("CLI local runtime adapter source contract (credential broker)", () => 
     expect(directBlock).toContain("apiKeyRefResolver");
     expect(directBlock).toContain("credentialBroker");
   });
+
+  // 历史缺陷回归：无 apiKeyRef/credentialRef 的 custom-provider agent（如 Ollama
+  // cloud 直连）此前在 gate 与 recordLocalAvailability 两处都解析不出 credentialKey，
+  // 429 冷却被静默丢弃、每次派发都重新撞 429。两处必须都改用 fallback 版本。
+  // key 一致性的行为验证（mark → gate → probe → clear）由
+  // credentialAvailability.test.ts 的 fallback-key 行为回归覆盖。
+  test("marks and gates the 429 cooldown with the same fallback credential key", () => {
+    // gate 点（credentialKeyForGate）与 record 点（recordLocalAvailability 内）
+    // 各一处调用。断言按代码结构切片而非写死缩进/换行，抗 prettier 重排。
+    const callCount = source.match(/resolveCredentialKeyWithFallback\(/g)?.length ?? 0;
+    expect(callCount).toBeGreaterThanOrEqual(2);
+    const recordStart = source.indexOf("const recordLocalAvailability");
+    expect(recordStart).toBeGreaterThan(-1);
+    expect(source.slice(0, recordStart)).toContain("resolveCredentialKeyWithFallback(");
+    expect(source.slice(recordStart)).toContain("resolveCredentialKeyWithFallback(");
+  });
 });
 
 describe("CLI local runtime adapter", () => {

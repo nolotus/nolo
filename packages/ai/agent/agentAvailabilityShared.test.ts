@@ -56,6 +56,58 @@ describe("resolveNextAvailableAt", () => {
     expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + MAX_COOLDOWN_MS);
   });
 
+  test("gives an Ollama-style weekly usage limit body the full 24h cooldown, not the 5min default", () => {
+    // 真实 Ollama cloud 429 body：无 Retry-After、无 resets_at、文案里也没有
+    // 可解析的 "reset at <date>"。旧行为落 5 分钟默认窗口，agent 很快又被放回
+    // 派发并再次撞 429；现按周期性硬配额启发式给到 MAX_COOLDOWN_MS。
+    const body = {
+      error: {
+        message:
+          "you (blissful_dewdney_254) have reached your weekly usage limit, upgrade for higher limits: https://ollama.com/upgrade or add extra usage: https://ollama.com/settings (ref: abc-def)",
+        type: "api_error",
+        param: null,
+        code: null,
+      },
+    };
+    expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + MAX_COOLDOWN_MS);
+  });
+
+  // 回归：parseResetsInMs 对整个 body 做全局「数字+单位」扫描，provider 可控
+  // 文本会被误读成相对时长并把 24h 冷却短路成秒级。启发式必须先于它判定。
+  test("provider-controlled text in the message cannot short-circuit the 24h cooldown (username)", () => {
+    // "star_2sun" 里的 "2s" 曾被误读成 2 秒。
+    const body = {
+      error: {
+        message: "you (star_2sun) have reached your weekly usage limit",
+      },
+    };
+    expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + MAX_COOLDOWN_MS);
+  });
+
+  test("provider-controlled text in the message cannot short-circuit the 24h cooldown (ref)", () => {
+    // "ref: 12m-9" 里的 "12m" 曾被误读成 12 分钟。
+    const body = {
+      error: {
+        message:
+          "you have reached your monthly usage limit, upgrade at https://ollama.com/upgrade (ref: 12m-9)",
+      },
+    };
+    expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + MAX_COOLDOWN_MS);
+  });
+
+  test("matches monthly usage limit bodies the same way", () => {
+    const body = { error: { message: "you have reached your monthly usage limit" } };
+    expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + MAX_COOLDOWN_MS);
+  });
+
+  test("an explicit retry-after still wins over the usage-limit heuristic (precise signals first)", () => {
+    const body = {
+      retryAfter: 90,
+      error: { message: "weekly usage limit exceeded, try again shortly" },
+    };
+    expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + 90_000);
+  });
+
   test("ignores an already-past reset timestamp and falls back to the default", () => {
     const body = { error: { message: "limit will reset at 2026-08-20 10:00:00" } };
     expect(resolveNextAvailableAt(body, NOW)).toBe(NOW + DEFAULT_PROVIDER_RETRY_MS);
