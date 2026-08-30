@@ -1,4 +1,13 @@
 
+## 0.36.0-alpha.3
+
+## 0.36.0-alpha.3 (2026-08-30)
+
+### Bug Fixes
+
+* **tui:** emit chat image preview in non-interactive (pipe) mode ([e6ef272](https://github.com/nolotus/bun-nolo/commit/e6ef272152a5715460b60d46d311101ce6a17047))
+
+
 ## 0.36.0-alpha.2
 
 ## 0.36.0-alpha.2 (2026-08-30)

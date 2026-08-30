@@ -557,3 +557,42 @@ export async function readImagePaths(
   }
   return { images, failures };
 }
+
+export type ResolveAttachmentImageUrlsInput = {
+  /** chat action 内联检测到的图片路径（可能为空） */
+  actionImagePaths?: string[];
+  /** state 里本轮待发送的暂存附件 */
+  attachedImages: AttachedImage[];
+  /** 图片读取失败时的回调（调用方借此向 output 输出 [nolo] image skipped） */
+  onFailure?: (resolvedPath: string, error: Error) => void;
+};
+
+export type ResolveAttachmentImageUrlsResult = {
+  /** 已读成 dataUrl 的图片列表，供 agent turn 消费 */
+  imageUrls: string[];
+};
+
+/**
+ * 收集本轮待发送图片路径（chat action 内联路径 + state 暂存附件）→ 统一读取为
+ * dataUrl。与附件读取逻辑共居本文件（readImagePaths 的所有者），贴近既有内聚；
+ * 失败回调通过 onFailure 交由调用方决定如何写入，因此本函数不依赖具体的
+ * output writer 类型，也便于在 readlineWorkspace.ts 之外复用/单独测试。
+ */
+export async function resolveAttachmentImageUrls({
+  actionImagePaths,
+  attachedImages,
+  onFailure,
+}: ResolveAttachmentImageUrlsInput): Promise<ResolveAttachmentImageUrlsResult> {
+  const pathsToRead = [
+    ...(actionImagePaths ?? []),
+    ...attachedImages.map((img) => img.sourcePath),
+  ];
+  let imageUrls: string[] = [];
+  if (pathsToRead.length > 0) {
+    const readResult = await readImagePaths(pathsToRead, {
+      onFailure,
+    });
+    imageUrls = readResult.images.map((img) => img.dataUrl);
+  }
+  return { imageUrls };
+}

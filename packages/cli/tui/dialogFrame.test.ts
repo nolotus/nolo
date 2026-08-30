@@ -12,6 +12,7 @@ import {
 import { t } from "./i18n";
 import { renderSelectDialog } from "./selectDialog";
 import { renderMultiSelectFrame } from "./multiSelectDialog";
+import { setActiveThemeMode } from "./theme";
 
 describe("dialog frame primitives", () => {
   test("plain text is unchanged when color is disabled", () => {
@@ -34,19 +35,24 @@ describe("dialog frame primitives", () => {
   });
 
   test("focused row and detail carry distinct colors when enabled", () => {
-    const row = renderDialogRow(
-      { label: "alpha", detail: "the one", focused: true },
-      true,
-    );
-    // Focused label and muted detail must not collapse to the same sequence,
-    // otherwise the cursor is only findable via the `>` glyph.
-    const labelColor = row.slice(row.indexOf("alpha") - 20, row.indexOf("alpha"));
-    const detailColor = row.slice(
-      row.indexOf("the one") - 20,
-      row.indexOf("the one"),
-    );
-    expect(labelColor).not.toBe(detailColor);
-    expect(row).toContain("\x1b[");
+    setActiveThemeMode("dark");
+    try {
+      const row = renderDialogRow(
+        { label: "alpha", detail: "the one", focused: true },
+        true,
+      );
+      // Focused label and muted detail must not collapse to the same sequence,
+      // otherwise the cursor is only findable via the `>` glyph.
+      const labelColor = row.slice(row.indexOf("alpha") - 20, row.indexOf("alpha"));
+      const detailColor = row.slice(
+        row.indexOf("the one") - 20,
+        row.indexOf("the one"),
+      );
+      expect(labelColor).not.toBe(detailColor);
+      expect(row).toContain("\x1b[");
+    } finally {
+      setActiveThemeMode("terminal");
+    }
   });
 
   test("multi-select uses the shared checkbox glyphs", () => {
@@ -84,6 +90,7 @@ describe("dialog frame primitives", () => {
   test("focused row renders as a selection bar on truecolor terminals", () => {
     const previous = process.env.COLORTERM;
     process.env.COLORTERM = "truecolor";
+    setActiveThemeMode("dark");
     try {
       const row = renderDialogRow({ label: "alpha", focused: true }, true);
       expect(row).toContain("\x1b[48;2;"); // surface fill behind the row
@@ -91,6 +98,7 @@ describe("dialog frame primitives", () => {
       expect(row).toContain("❯ alpha");
       expect(row.endsWith("\x1b[0m")).toBe(true);
     } finally {
+      setActiveThemeMode("terminal");
       if (previous === undefined) {
         delete process.env.COLORTERM;
       } else {

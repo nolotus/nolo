@@ -69,7 +69,11 @@ import { checkStaleRun, readRunRecord } from "../agentRunControl";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { prefetchAgentCatalog } from "./agentCatalog";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
-import { mergeAttachedImages, readImagePaths, summarizeAttachment } from "./pasteImage";
+import {
+  mergeAttachedImages,
+  resolveAttachmentImageUrls,
+  summarizeAttachment,
+} from "./pasteImage";
 import { readClipboardImage } from "./clipboardImage";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
@@ -1749,12 +1753,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 没有"命令回显"的视觉概念。
     const interactive = isInteractiveInput(input);
 
-    if (
-      result.action?.type !== "chat" &&
-      result.action?.type !== "exit" &&
-      result.output
-    ) {
-      emitCommandOutput(result.output, interactive ? line.trim() : "");
+    if (result.action?.type !== "exit" && result.output) {
+      // 交互模式下 chat 的图片预览（"found image: ..."）不在此 raw write：
+      // renderHistory 拥有 transcript pane，raw write 会落进滚动区、被下一条
+      // composer 重绘（\x1b[J）抹掉——交互模式的 preview 本就走 local turn /
+      // history 渲染通道。但非交互（管道/脚本）模式下没有 composer 重绘问题，
+      // 预览对脚本用户有价值（确认图片被检测到），因此仅当（非 chat）或
+      // （非交互时 chat）才 emit。exit 走下方独立分支，不在此 emit。
+      const shouldEmit = result.action?.type !== "chat" || !interactive;
+      if (shouldEmit) emitCommandOutput(result.output, interactive ? line.trim() : "");
     }
 
     if (state.agentKey !== previousAgentKey) {
@@ -2188,18 +2195,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
 
     if (result.action?.type === "chat") {
-      const pathsToRead = [
-        ...(result.action.imagePaths ?? []),
-        ...state.attachedImages.map((img) => img.sourcePath),
-      ];
-      let imageUrls: string[] = [];
-      if (pathsToRead.length > 0) {
-        const readResult = await readImagePaths(pathsToRead, {
-          onFailure: (_path, err) =>
-            output.write(`[nolo] image skipped: ${err.message}\n`),
-        });
-        imageUrls = readResult.images.map((img) => img.dataUrl);
-      }
+      // 读取本轮待发送附件为 dataUrl（chat action 内联路径 + state 暂存附件）。
+      // 失败回调直接写 output。清空动作留在调用点，与下方"发送即消费"注释一起。
+      const { imageUrls } = await resolveAttachmentImageUrls({
+        actionImagePaths: result.action.imagePaths,
+        attachedImages: state.attachedImages,
+        onFailure: (_path, err) =>
+          output.write(`[nolo] image skipped: ${err.message}\n`),
+      });
       // 本轮待发送暂存区：发送即消费。imageUrls 已在上面确定，这里立即清空，
       // 避免纯文字轮把上一轮附件残留重读重发给上游（累积至 ~9 轮撞 8 张
       // 上限报 UPSTREAM_400）。必须在异步 turn 开始前同步清空：若等 turn 成功
