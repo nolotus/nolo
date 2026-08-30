@@ -160,7 +160,7 @@ export function resolveTableWidth(
   env: Record<string, string | undefined> = process.env,
 ): number {
   if (typeof explicit === "number" && explicit > 0) return explicit;
-  const override = parseInt(env.NOLO_TEST_TABLE_WIDTH ?? "", 10);
+  const override = parseInt(env.NOLO_TEST_TABLE_WIDTH, 10);
   if (!Number.isNaN(override) && override > 0) return override;
   const cols =
     typeof process !== "undefined" &&
@@ -475,11 +475,7 @@ export function renderBoxTable(
     );
   }
   lines.push(boxLine("├", "┼", "┤", widths));
-  const hasMultiLineRecord = bodyDisplayRows.some((rows) => rows > 1);
   bodyGrids.forEach((_, rec) => {
-    if (hasMultiLineRecord && rec > 0) {
-      lines.push(boxLine("├", "┼", "┤", widths));
-    }
     for (let r = 0; r < bodyDisplayRows[rec]; r += 1) {
       lines.push(
         dataRow(

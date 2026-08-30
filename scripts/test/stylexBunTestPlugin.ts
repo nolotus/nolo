@@ -9,14 +9,6 @@
  * 因此在测试进程内注册 Bun.plugin，对纯 TS 的样式载体文件做同样的
  * 静态编译（与 esbuild 配置同参数，class hash 确定性一致）。
  *
- * 缺陷修复（2026-08-30）：
- * 之前正则 /(^|\/)[^/]*[Ss]tyles\.ts$|(^|\/)[^/]*\.stylex\.ts$/ 过宽，
- * 误匹配到了 packages/cli/client/terminalStyles.ts 等非 StyleX 的纯 TS 模块。
- * 在 Bun 1.3.14 runner 中，Bun.plugin onLoad 对匹配到的模块若返回 undefined，
- * 会导致测试运行器在 import 该模块时抛出 "Expected module mock to return an object"。
- * 修复：将 filter 精确限定在包含 StyleX 样式的目录与 .stylex.ts 文件中，
- * 避免无关模块被拦截。
- *
  * 只编译 *Styles.ts / *.stylex.ts 这类纯 TS 文件（无 JSX）：
  * - 组件 TSX 里的 stylex.props() 是运行时安全函数（styleq 合并类名），
  *   接收已编译的样式对象即可，无需 Babel；
@@ -25,7 +17,7 @@
 import { transformAsync } from "@babel/core";
 
 const STYLEX_FILE_FILTER =
-  /(^|\/)packages\/(?:ai\/agent|app|chat)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
+  /(^|\/)[^/]*[Ss]tyles\.ts$|(^|\/)[^/]*\.stylex\.ts$/;
 
 Bun.plugin({
   name: "stylex-static-compile",
