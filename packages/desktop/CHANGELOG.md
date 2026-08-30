@@ -1,4 +1,18 @@
 
+## 0.36.0-alpha.1
+
+## 0.36.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **cli:** add thinking display toggle ([83fac87](https://github.com/nolotus/bun-nolo/commit/83fac873ddc5898cc2b4c3e33b91469c502a95cb))
+
+### Bug Fixes
+
+* **billing:** dedupe dialog usage projection ([e1cd922](https://github.com/nolotus/bun-nolo/commit/e1cd922e3931aebfcd3dec0b140df74722a4d999))
+* **chat:** surface real upstream cause in PLATFORM_LLM_BUSY errors ([4a61d73](https://github.com/nolotus/bun-nolo/commit/4a61d7355dca1e53de976e8802eb84813ad022ef))
+
+
 ## 0.35.0-alpha.2
 
 ## 0.35.0-alpha.2 (2026-08-29)

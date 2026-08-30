@@ -785,6 +785,42 @@ describe("handleTuiInput - /auto dispatch", () => {
   });
 });
 
+describe("handleTuiInput - /thinking display", () => {
+  test("defaults to show and participates in slash completion", () => {
+    const state = createInitialTuiState({});
+    expect(state.thinkingDisplay).toBe("show");
+    expect(SLASH_COMMANDS).toContain("/thinking");
+    expect(completeSlashPrefix("/thi")).toBe("/thinking ");
+  });
+
+  test("/thinking show|hide updates only the session display preference", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+
+    const hidden = handleTuiInput("/thinking hide", state);
+    expect(hidden.nextState.thinkingDisplay).toBe("hide");
+    expect(hidden.output).toBe(t("thinkingSet", "hide"));
+    expect(hidden.action).toBeUndefined();
+
+    const shown = handleTuiInput("/thinking show", hidden.nextState);
+    expect(shown.nextState.thinkingDisplay).toBe("show");
+    expect(shown.output).toBe(t("thinkingSet", "show"));
+    expect(shown.action).toBeUndefined();
+  });
+
+  test("/thinking reports current mode and rejects unsupported values", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), thinkingDisplay: "hide" as const };
+
+    expect(handleTuiInput("/thinking", state).output).toBe(
+      t("thinkingCurrent", "hide"),
+    );
+    const invalid = handleTuiInput("/thinking off", state);
+    expect(invalid.nextState).toBe(state);
+    expect(invalid.output).toBe(t("thinkingUsage"));
+  });
+});
+
 describe("Task B - localized slash-command output", () => {
   beforeEach(() => {
     getProcessRegistry().clear();

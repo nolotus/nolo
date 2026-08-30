@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { agentThemeTokens } from "app/theme/agentTheme.stylex";
 
 /**
  * 模型来源区（API 来源三选一 / CLI 选择 / 只读值 / CLI 信息盒 / 自定义 API 盒）
@@ -115,13 +116,13 @@ export const modelSourceStyles = stylex.create({
   customApiBox: {
     margin: "4px 0 12px 0",
     padding: "24px",
-    background: "var(--backgroundSecondary)",
+    background: agentThemeTokens.surfaceGroup,
     borderRadius: "var(--radius-md)",
     border: "none",
     display: "flex",
     flexDirection: "column",
     gap: "20px",
-    boxShadow: "0 4px 20px var(--shadowLight)",
+    boxShadow: agentThemeTokens.shadowCardRaised,
     animationName: stylex.keyframes({
       from: { opacity: 0, transform: "translateY(-4px)" },
       to: { opacity: 1, transform: "translateY(0)" },

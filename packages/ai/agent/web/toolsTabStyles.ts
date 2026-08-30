@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { agentThemeTokens } from "app/theme/agentTheme.stylex";
 
 /**
  * 工具/技能标签页（ToolsTab.tsx）的 StyleX 样式 ——
@@ -54,8 +55,10 @@ export const toolsTabStyles = stylex.create({
     gap: "14px",
     padding: "20px",
     borderRadius: "var(--radius-sm)",
-    // background/border 下沉在 agentCreateStylexEscapeHatch.css（与 dark
-    // 覆盖存在属性竞争，需 unlayered 内按源码顺序决胜）。
+    background: agentThemeTokens.surfaceOverlaySoft,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: agentThemeTokens.borderOverlaySoft,
     "@media (max-width: 768px)": {
       padding: "16px",
       borderRadius: "var(--radius-sm)",
@@ -116,10 +119,12 @@ export const toolsTabStyles = stylex.create({
   },
   collapsedNote: {
     padding: "12px 14px",
-    border: "1.5px dashed var(--borderHover)",
+    borderWidth: "1.5px",
+    borderStyle: "dashed",
+    borderColor: agentThemeTokens.borderOverlayNote,
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary)",
-    background: "var(--backgroundGhost)",
+    background: agentThemeTokens.surfaceOverlayNote,
     fontSize: "13px",
     lineHeight: 1.6,
   },
@@ -139,9 +144,11 @@ export const toolsTabStyles = stylex.create({
     minWidth: 0,
     boxSizing: "border-box",
     padding: "12px",
-    border: "1px solid var(--borderLight)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: agentThemeTokens.borderOverlaySoft,
     borderRadius: "var(--radius-sm)",
-    background: "var(--backgroundGhost)",
+    background: agentThemeTokens.surfaceOverlaySkill,
     color: "inherit",
     textAlign: "left",
     transition:
@@ -262,8 +269,11 @@ export const toolsTabStyles = stylex.create({
     alignItems: "center",
     padding: "3px 10px",
     borderRadius: "999px",
-    // background/border/color 下沉在 agentCreateStylexEscapeHatch.css
-    // （与 dark 覆盖存在属性竞争，需 unlayered 内按源码顺序决胜）。
+    background: agentThemeTokens.surfaceOverlayStrong,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: agentThemeTokens.borderOverlayStrong,
+    color: agentThemeTokens.chipText,
     fontSize: "12px",
     fontWeight: 500,
     lineHeight: 1.4,
@@ -336,7 +346,7 @@ export const toolsTabStyles = stylex.create({
     gap: "12px",
     padding: "16px",
     borderRadius: "var(--radius-sm)",
-    background: "var(--backgroundTertiary)",
+    background: agentThemeTokens.surfaceOverlayFaint,
     border: "1.5px dashed color-mix(in srgb, var(--border) 70%, transparent)",
   },
   summaryEmpty: {

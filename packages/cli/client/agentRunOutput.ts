@@ -111,6 +111,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     suppressRunProgressCards: typeof options.onAgentRunStatus === "function",
   });
   const eventMode = resolveAgentEventMode(options);
+  const showThinking = options.showThinking !== false;
 
   let streamedAssistantText = false;
   let everStreamedAnyText = false;
@@ -135,7 +136,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     thinkState = parsed.state;
     if (!parsed.content && !parsed.reasoning) return;
     // Reasoning from inline think tags goes to the spinner hint, not visible content.
-    if (parsed.reasoning) {
+    if (showThinking && parsed.reasoning) {
       spinner.setThinkingHint(parsed.reasoning);
     }
     if (!parsed.content) return;
@@ -256,7 +257,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       // Thinking content scrolls live on the spinner line instead of
       // being written as separate output. The spinner shows a truncated
       // hint of what the model is currently reasoning about.
-      spinner.setThinkingHint(chunk);
+      if (showThinking) spinner.setThinkingHint(chunk);
     },
     handleToolEvent,
     /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。 */
@@ -309,4 +310,3 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     },
   };
 }
-

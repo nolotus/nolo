@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { agentThemeTokens } from "app/theme/agentTheme.stylex";
 
 /**
  * 引用管理区（ReferencesTab.tsx）的 StyleX 样式 ——
@@ -34,8 +35,10 @@ export const referencesTabStyles = stylex.create({
     gap: "var(--space-4)",
     minHeight: 0,
     padding: "var(--space-4)",
-    // background/border 下沉在 agentCreateStylexEscapeHatch.css（与 dark
-    // 覆盖存在属性竞争，需 unlayered 内按源码顺序决胜）。
+    background: agentThemeTokens.surfaceOverlayHairline,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: agentThemeTokens.borderOverlayHairline,
     borderRadius: "var(--radius-md)",
     animationName: stylex.keyframes({
       from: { opacity: 0, transform: "translateY(4px)" },
@@ -111,7 +114,7 @@ export const referencesTabStyles = stylex.create({
     height: "24px",
     padding: "0 8px",
     borderRadius: "999px",
-    background: "color-mix(in srgb, var(--background) 85%, white 4%)",
+    background: agentThemeTokens.surfaceBadgeSubtle,
     color: "var(--textSecondary)",
     fontSize: "var(--fontSize-xs)",
     fontWeight: 700,
@@ -160,8 +163,8 @@ export const referencesTabStyles = stylex.create({
     gap: "var(--space-3)",
     padding: "var(--space-3)",
     borderRadius: "var(--radius-sm)",
-    background: "var(--background)",
-    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)",
+    background: agentThemeTokens.surfaceCardItem,
+    boxShadow: agentThemeTokens.shadowCardItem,
     border: "1px solid transparent",
   },
   itemMain: {
@@ -207,7 +210,8 @@ export const referencesTabStyles = stylex.create({
     gap: "8px",
     minHeight: "72px",
     borderRadius: "var(--radius-sm)",
-    background: "color-mix(in srgb, var(--background) 92%, white 2%)",
+    background: agentThemeTokens.surfaceCardEmpty,
+    boxShadow: agentThemeTokens.shadowCardEmpty,
     color: "var(--textTertiary)",
     fontSize: "var(--fontSize-sm)",
     textAlign: "left",

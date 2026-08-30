@@ -13,6 +13,57 @@ import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import type { AgentExecutionObservationEvent } from "../../agent-runtime/executionObservation";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 
+describe("createCliTurnOutput thinking display", () => {
+  function createTurn(showThinking?: boolean) {
+    const output: string[] = [];
+    const hints: string[] = [];
+    const spinner = {
+      setThinkingHint: (chunk: string) => hints.push(chunk),
+      show: () => {},
+      stop: () => {},
+    };
+    const options = {
+      output: { write: (chunk: string) => output.push(chunk) },
+      agentName: "TestAgent",
+      env: {},
+      ...(showThinking === undefined ? {} : { showThinking }),
+    } as unknown as RunAgentTurnOptions;
+    const turn = createCliTurnOutput({ options, spinner: spinner as any });
+    return { turn, output, hints };
+  }
+
+  test("shows separate reasoning events by default", () => {
+    const { turn, hints } = createTurn();
+    turn.pushThinking("reasoning delta");
+    expect(hints).toEqual(["reasoning delta"]);
+  });
+
+  test("hide suppresses separate reasoning display without affecting text", () => {
+    const { turn, output, hints } = createTurn(false);
+    turn.pushThinking("secret reasoning");
+    turn.pushText("visible answer");
+    turn.finish();
+    expect(hints).toEqual([]);
+    expect(output.join("")).toContain("visible answer");
+  });
+
+  test("the same hide switch suppresses inline think tags", () => {
+    const { turn, output, hints } = createTurn(false);
+    turn.pushText("<think>inline secret</think>visible answer");
+    turn.finish();
+    expect(hints).toEqual([]);
+    expect(output.join("")).toContain("visible answer");
+    expect(output.join("")).not.toContain("inline secret");
+  });
+
+  test("inline think tags remain visible on the spinner by default", () => {
+    const { turn, hints } = createTurn();
+    turn.pushText("<think>inline reasoning</think>answer");
+    turn.finish();
+    expect(hints).toContain("inline reasoning");
+  });
+});
+
 /** Escape a localized label so it is safe to embed in a RegExp. */
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

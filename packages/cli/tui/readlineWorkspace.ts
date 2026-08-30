@@ -556,6 +556,7 @@ async function runAgentChat(
       NOLO_CLI_TOOLS: state.toolDisplay,
     },
     output,
+    showThinking: state.thinkingDisplay === "show",
     ...(options.imageUrls && options.imageUrls.length > 0
       ? { imageUrls: options.imageUrls }
       : {}),
@@ -2930,6 +2931,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/density" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/tools" ||
+            busySlashCommand === "/thinking" ||
             busySlashCommand === "/auto" ||
             busySlashCommand === "/tasks" ||
             busySlashCommand === "/jobs" ||

@@ -121,4 +121,93 @@ describe("stylex esbuild pipeline smoke", () => {
       await rm(dir, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("compiles defineVars and all 18 createTheme classes into static CSS", async () => {
+    const outdir = await mkdtemp(join(tmpdir(), "nolo-stylex-theme-smoke-"));
+    const dir = await mkdtemp(join(tmpdir(), "nolo-theme-src-"));
+    const hostCssPath = join(dir, "themeHost.css");
+    const entryTsPath = join(dir, "themeEntry.ts");
+    const agentThemePath = join(process.cwd(), "packages/app/theme/agentTheme.stylex");
+
+    await writeFile(hostCssPath, ".theme-host { display: block; }\n");
+    await writeFile(
+      entryTsPath,
+      `import "./themeHost.css";
+import * as stylex from "@stylexjs/stylex";
+import {
+  agentThemeTokens,
+  neutralLight, neutralDark,
+  oceanLight, oceanDark,
+  forestLight, forestDark,
+  trailLight, trailDark,
+  waveLight, waveDark,
+  irisLight, irisDark,
+  roseLight, roseDark,
+  monoLight, monoDark,
+  catppuccinLight, catppuccinDark,
+  AGENT_THEMES,
+} from ${JSON.stringify(agentThemePath)};
+
+const styles = stylex.create({
+  header: {
+    background: agentThemeTokens.surfaceGlassHeader,
+    borderColor: agentThemeTokens.borderGlassHeader,
+    boxShadow: agentThemeTokens.shadowFooterUpward,
+  },
+  card: {
+    background: agentThemeTokens.surfaceOverlayHairline,
+    borderColor: agentThemeTokens.borderOverlayHairline,
+  },
+});
+
+console.log(styles, AGENT_THEMES);
+`
+    );
+
+    try {
+      const result = await build({
+        ...config,
+        entryPoints: [entryTsPath],
+        outdir,
+        metafile: true,
+        minify: false,
+        entryNames: "[name]",
+        logLevel: "silent",
+      });
+
+      const outputNames = Object.keys(result.metafile?.outputs ?? {});
+      const cssRel = outputNames.find((f) => f.endsWith("themeEntry.css"));
+      expect(cssRel).toBeDefined();
+      const jsRel = outputNames.find((f) => f.endsWith("themeEntry.js"));
+      expect(jsRel).toBeDefined();
+
+      const toAbs = (p: string) => (p.startsWith("/") ? p : join(process.cwd(), p));
+      const css = await readFile(toAbs(cssRel as string), "utf8");
+      const js = await readFile(toAbs(jsRel as string), "utf8");
+
+      // 1) 存在 :root 初始变量定义
+      expect(css).toContain(":root");
+
+      // 2) 存在 18 个 createTheme 产出的主题类选择器（去重后精确 18 个）
+      const themeClassSelectors = css.match(/\.x[0-9a-z]+\.x[0-9a-z]+/g) ?? [];
+      const uniqueThemeClassSelectors = new Set(themeClassSelectors);
+      // 9 themes * 2 (light/dark) = 18 themes
+      expect(uniqueThemeClassSelectors.size).toBe(18);
+
+      // 3) 样式规则引用了生成的 StyleX 变量 (var(--x...))
+      expect(css).toMatch(/var\(--x[0-9a-z]+\)/);
+
+      // 4) JS 产物包含 9 个核心主题的主题对象
+      for (const name of [
+        "neutral", "ocean", "forest", "trail", "wave",
+        "iris", "rose", "mono", "catppuccin"
+      ]) {
+        expect(js).toContain(`${name}Light`);
+        expect(js).toContain(`${name}Dark`);
+      }
+    } finally {
+      await rm(outdir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

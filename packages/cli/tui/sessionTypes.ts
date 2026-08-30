@@ -5,6 +5,8 @@ import type { CliUpdateInfo } from "../updateCommands";
 import type { AttachedImage } from "./pasteImage";
 import type { GitStatus } from "./gitStatus";
 
+export type ThinkingDisplayMode = "show" | "hide";
+
 export type TuiState = {
   agentKey: string;
   agentName: string;
@@ -58,6 +60,12 @@ export type TuiState = {
   userLanguage?: string;
   gitStatus?: GitStatus;
   toolDisplay: ToolDisplayMode;
+  /**
+   * Session-only reasoning display preference. This controls terminal chrome
+   * only: reasoning generation, transport, persistence, and billing remain
+   * unchanged when hidden.
+   */
+  thinkingDisplay: ThinkingDisplayMode;
   turnTokens?: TurnTokenUsage;
   /**
    * 整个对话累计消耗的平台积分（与 web 端 `selectCurrentDialogTokens` 的

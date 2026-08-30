@@ -192,6 +192,11 @@ export type RunAgentTurnOptions = {
   timeoutMs?: number;
   traceTools?: boolean;
   eventsMode?: "jsonl";
+  /**
+   * Whether live reasoning is rendered in terminal chrome. Defaults to true.
+   * This is display-only and must not alter the provider request or callbacks.
+   */
+  showThinking?: boolean;
   taskEvidence?: TaskEvidenceInput;
   fetchImpl?: CliFetchImpl;
   currentMachineIdResolver?: (env: EnvLike) => Promise<string | undefined>;

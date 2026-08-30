@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { agentThemeTokens } from "app/theme/agentTheme.stylex";
 
 /**
  * 发布设置（PublishSettingsTab.tsx）的 StyleX 样式 ——
@@ -27,7 +28,7 @@ export const publishSettingsTabStyles = stylex.create({
   publicSettingsGroup: {
     marginTop: "var(--space-2)",
     padding: "var(--space-6)",
-    backgroundColor: "var(--backgroundSecondary)",
+    backgroundColor: agentThemeTokens.surfaceGroup,
     borderRadius: "var(--radius-lg, 14px)",
     border: "none",
     display: "flex",

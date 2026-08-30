@@ -487,7 +487,37 @@ const FAILURE_BUILDERS: Record<
   upstream: buildUpstreamFailure,
 };
 
-function describeLocalRunFailure(message: string): string {
+function describeLocalRunFailure(
+  message: string,
+  rawError?: unknown,
+): string {
+  // Extract an in-band busy detail (e.g. "runinfra HTTP 503 (pc_123, 2
+  // attempts)") carried on the thrown error's `.detail`. It survives
+  // `toErrorMessage` only through the raw object, so it's threaded in here.
+  let busyDetail: string | undefined;
+  if (
+    rawError &&
+    typeof rawError === "object" &&
+    "detail" in rawError &&
+    typeof (rawError as { detail: unknown }).detail === "string" &&
+    (rawError as { detail: string }).detail.trim()
+  ) {
+    busyDetail = (rawError as { detail: string }).detail.trim();
+  }
+
+  // 服务器紧张 (PLATFORM_LLM_BUSY): the platform LLM upstream is
+  // capacity-limited / timed out. Root cause is on the platform, not the
+  // user's machine — never suggest fixing local credentials.
+  if (
+    /PLATFORM_LLM_BUSY|服务器紧张/.test(message)
+  ) {
+    const shown = message.replace(/\s*\(PLATFORM_LLM_BUSY\)\s*$/, "");
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} 服务器紧张${shown !== "服务器紧张" ? ` (${shown})` : ""} (PLATFORM_LLM_BUSY)${busyDetail ? `: ${busyDetail}` : ""}. ${NO_FALLBACK} ` +
+      `平台模型上游繁忙，稍后重试或换个模型。\n`
+    );
+  }
+
   // Balance/402 is the common "I just topped up / please continue" case —
   // never tell the user to fix local credentials.
   if (
@@ -1091,7 +1121,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
       const localErrorMessage = localResult.localError
         ? toErrorMessage(localResult.localError)
         : "local runtime failed";
-      options.output.write(describeLocalRunFailure(localErrorMessage));
+      options.output.write(describeLocalRunFailure(localErrorMessage, localResult.localError));
       return {
         exitCode: 1,
         ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),

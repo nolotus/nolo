@@ -291,6 +291,56 @@ describe("writeServerTokenRecord", () => {
     }
     expect(recCount).toBe(1);
   });
+
+  it("uses the stable token record key to dedupe dialog projection while different calls accumulate", async () => {
+    const dialogId = "dialog-stable-projection";
+    const dialogKey = createKey(DataType.DIALOG, "user-stable", dialogId);
+    await testDb.put(dialogKey, {
+      id: dialogId,
+      dbKey: dialogKey,
+      type: DataType.DIALOG,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0,
+    });
+
+    const { writeServerTokenRecord } = await loadWriterModule();
+    const baseOpts = {
+      userId: "user-stable",
+      username: "stable",
+      agentKey: "agent-stable",
+      agentConfig: {
+        model: "gpt-5.5",
+        provider: "openai",
+        inputPrice: 1_000,
+        outputPrice: 2_000,
+      },
+      runId: dialogId,
+    };
+
+    const first = await writeServerTokenRecord({
+      ...baseOpts,
+      usageCallId: "provider-call-a",
+      rawUsage: { input_tokens: 100, output_tokens: 20 } as any,
+    });
+    await writeServerTokenRecord({
+      ...baseOpts,
+      usageCallId: "provider-call-a",
+      rawUsage: { input_tokens: 100, output_tokens: 20 } as any,
+    });
+    const second = await writeServerTokenRecord({
+      ...baseOpts,
+      usageCallId: "provider-call-b",
+      rawUsage: { input_tokens: 40, output_tokens: 8 } as any,
+    });
+
+    expect(first.recordKey).not.toBe(second.recordKey);
+    expect(await testDb.get(dialogKey)).toMatchObject({
+      inputTokens: 140,
+      outputTokens: 28,
+      totalCost: Number((first.cost + second.cost).toFixed(6)),
+    });
+  });
   it("writes a failed-call record as not-charged with error message (US-3.3)", async () => {
     const { writeFailedTokenRecord } = await loadWriterModule();
     const result = await writeFailedTokenRecord({

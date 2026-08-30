@@ -16,6 +16,7 @@ import {
   resolveThemeModePreload,
   SYSTEM_DARK_MEDIA_QUERY,
 } from "app/theme/themeModeBootstrap";
+import { applyAgentThemeToElement } from "app/theme/agentTheme.stylex";
 import { getDb } from "database/client/db";
 import { detectSite, loadRoutes, type SiteId } from "app/web/siteRoutes";
 import i18n from "app/i18n/client";
@@ -176,6 +177,13 @@ try {
 } catch {
   // ignore localStorage access failures
 }
+
+// 提前同步 HTML 根节点的 StyleX 主题 class，保证 pre-React 零闪烁
+applyAgentThemeToElement(
+  document.documentElement,
+  storedThemeName,
+  themeModePreload.isDark
+);
 
 const preloadedState = bootstrappedAuthState
   ? {

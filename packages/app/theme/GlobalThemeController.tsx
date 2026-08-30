@@ -12,6 +12,7 @@ import {
 } from "app/settings/settingSlice";
 import { isRecord } from "core/isRecord";
 import { FONT_PRESET_STORAGE_KEY } from "./fontPreference";
+import { applyAgentThemeToElement } from "./agentTheme.stylex";
 
 const STYLE_TAG_ID = "global-theme-variables";
 const useIsomorphicLayoutEffect =
@@ -63,6 +64,7 @@ const GlobalThemeController = () => {
 
     document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
     document.documentElement.setAttribute("data-density", density);
+    applyAgentThemeToElement(document.documentElement, String(themeName), isDark);
     try {
       localStorage.setItem("nolo-theme-mode", themeMode);
       localStorage.setItem("nolo-theme-name", String(themeName));

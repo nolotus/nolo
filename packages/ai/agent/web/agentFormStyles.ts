@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { agentThemeTokens } from "app/theme/agentTheme.stylex";
 
 /**
  * AgentForm 创建/编辑表单骨架 + 运行方式选择步骤的 StyleX 样式
@@ -42,12 +43,13 @@ export const agentFormStyles = stylex.create({
     position: "sticky",
     top: 0,
     zIndex: 20,
-    // 原 CSS 有两条 background 声明，后者（color-mix）覆盖前者，此处取生效值
-    background: "color-mix(in srgb, var(--background) 95%, transparent)",
+    background: agentThemeTokens.surfaceGlassHeader,
     padding: "8px 0 12px",
     display: "flex",
     justifyContent: "center",
-    borderBottom: "1px solid var(--borderLight, rgba(0,0,0,0.06))",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: agentThemeTokens.borderGlassHeader,
     backdropFilter: "blur(8px)",
     WebkitBackdropFilter: "blur(8px)",
     "@media (max-width: 640px)": {
@@ -85,11 +87,13 @@ export const agentFormStyles = stylex.create({
     flexShrink: 0,
     padding: "10px 12px",
     margin: "0 -24px",
-    background: "color-mix(in srgb, var(--background) 85%, transparent)",
+    background: agentThemeTokens.surfaceGlassFooter,
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
-    borderTop: "1px solid var(--borderLight, rgba(0,0,0,0.08))",
-    boxShadow: "0 -4px 20px rgba(0, 0, 0, 0.03)",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: agentThemeTokens.borderGlassFooter,
+    boxShadow: agentThemeTokens.shadowFooterUpward,
     "@media (max-width: 640px)": {
       padding: "4px 8px",
       margin: "0 -16px",

@@ -5,149 +5,31 @@
  * StyleX（stylex.create 原子类）表达的规则，由 AgentForm.tsx 顶部
  * import。每条规则前注明「选择器 + 保留原因」。
  *
+ * 注：主题暗色覆盖已全部收编入 StyleX 原生主题变量体系
+ *（agentTheme.stylex.ts defineVars + createTheme 静态通道），
+ * 本文件内无暗色主题覆盖选择器。
+ *
  * 类名约定：hook 类名统一加 agent-create-esc- 前缀，与 TSX 中
  * stylex.props(...) 并存于同一元素，保持与原 CSS 相同的选择器
  * 特异性与级联行为。
- *
- * 属性竞争下沉约定：StyleX 规则全部位于 @layer 内，而本文件是
- * unlayered 普通 CSS——级联上 unlayered 恒胜 layered，与出现顺序无关。
- * 因此凡与 StyleX 原子类存在同名属性竞争的规则（基础色将被 dark 覆盖、
- * hover 需胜过 dark 覆盖、selected 变体需胜过 hover）也一并下沉到本文件，
- * 并保持原 CSS 源码顺序（基础 → dark → hover → selected），由 unlayered
- * 内部的源码顺序恢复原级联语义。对应的 StyleX 侧竞争声明已删除，避免双源。
  * ─────────────────────────────────────────────────────────────
  */
 
-/* ── [data-theme] 暗色字面量覆盖 ──
- * 保留原因：data-theme 属性选择器由全局 DOM 状态驱动，StyleX 不支持
- * 属性选择器；组件内没有与该属性严格同步的 TS 状态（useTheme 走 redux，
- * 与 DOM 属性写入存在时序差），条件化会有首屏闪烁风险，故按 1:1 原则
- * 保留原级联行为。 */
+/* ── 状态与变体竞争规则（hover / selected）──
+ * 保留原因：skill-card 的 --selected 与 :hover 存在 borderColor/boxShadow 同名竞争；
+ * selected 定义在 hover 之后，同特异性按源码顺序决胜（悬停时保持主色边框与外环）。
+ * 下沉到 unlayered 普通 CSS 中确保级联顺序稳定。 */
 
-/* [data-theme="dark"] .form-header —— AgentForm.tsx */
-[data-theme="dark"] .agent-create-esc-form-header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  background: color-mix(in srgb, var(--background) 92%, transparent);
-}
-
-/* [data-theme="dark"] .form-footer —— AgentForm.tsx */
-[data-theme="dark"] .agent-create-esc-form-footer {
-  border-top-color: rgba(255, 255, 255, 0.1);
-  background: color-mix(in srgb, var(--background) 80%, transparent);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
-}
-
-/* [data-theme="dark"] .public-settings-group —— PublishSettingsTab.tsx */
-[data-theme="dark"] .agent-create-esc-public-settings-group {
-  background: var(--backgroundTertiary);
-}
-
-/* [data-theme="dark"] .custom-api-box —— ModelSourceSection.tsx */
-[data-theme="dark"] .agent-create-esc-custom-api-box {
-  background: var(--backgroundTertiary);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-}
-
-/* .ref-manager__card —— ReferencesTab.tsx
-   保留原因：background/border 与 StyleX 原子类存在同名属性竞争，
-   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）在 unlayered
-   内部按源码顺序决胜。 */
-.agent-create-esc-ref-card {
-  background: var(--backgroundTertiary);
-  border: 1px solid var(--borderLight, rgba(0, 0, 0, 0.05));
-}
-
-/* [data-theme="dark"] .ref-manager__card —— ReferencesTab.tsx */
-[data-theme="dark"] .agent-create-esc-ref-card {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-/* [data-theme="dark"] .ref-manager__card-count —— ReferencesTab.tsx */
-[data-theme="dark"] .agent-create-esc-ref-card-count {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-/* [data-theme="dark"] .ref-manager__item —— ReferencesTab.tsx */
-[data-theme="dark"] .agent-create-esc-ref-item {
-  background: color-mix(in srgb, var(--background) 95%, white 2%);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-/* [data-theme="dark"] .ref-manager__empty —— ReferencesTab.tsx */
-[data-theme="dark"] .agent-create-esc-ref-empty {
-  background: color-mix(in srgb, var(--background) 95%, white 2%);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-/* .tools-tab-hero/.tools-tab-skills/.tools-tab-raw-tools/.tools-tab-summary
-   —— ToolsTab.tsx（四个 section 共用一个 hook 类）
-   保留原因：background/border 与 StyleX 原子类存在同名属性竞争，
-   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）决胜。 */
-.agent-create-esc-tools-section {
-  background: var(--backgroundSecondary);
-  border: 1px solid var(--borderLight);
-}
-
-/* [data-theme="dark"] .tools-tab-hero/.tools-tab-skills/.tools-tab-raw-tools/
-   .tools-tab-summary —— ToolsTab.tsx（四个 section 共用一个 hook 类） */
-[data-theme="dark"] .agent-create-esc-tools-section {
-  background: color-mix(in srgb, var(--backgroundSecondary) 60%, transparent);
-  border-color: color-mix(in srgb, var(--border) 50%, transparent);
-}
-
-/* [data-theme="dark"] .tools-tab-collapsed-note —— ToolsTab.tsx */
-[data-theme="dark"] .agent-create-esc-tools-collapsed-note {
-  background: color-mix(in srgb, var(--backgroundSecondary) 50%, transparent);
-  border-color: color-mix(in srgb, var(--border) 55%, transparent);
-}
-
-/* [data-theme="dark"] .tools-tab-skill-card —— ToolsTab.tsx */
-[data-theme="dark"] .agent-create-esc-tools-skill-card {
-  background: color-mix(in srgb, var(--backgroundSecondary) 70%, transparent);
-  border-color: color-mix(in srgb, var(--border) 50%, transparent);
-}
-
-/* .tools-tab-skill-card:hover —— ToolsTab.tsx
-   保留原因：原文件中 hover 定义在 dark 覆盖之后，暗色下 hover 仍需生效；
-   下沉为 unlayered 并置于上方 dark 规则之后，按源码顺序恢复原级联。 */
+/* .tools-tab-skill-card:hover —— ToolsTab.tsx */
 .agent-create-esc-tools-skill-card:hover {
   box-shadow: var(--shadow1);
   border-color: var(--borderHover);
 }
 
-/* .tools-tab-skill-card--selected —— ToolsTab.tsx
-   保留原因：与上方 hover 规则存在 borderColor/boxShadow 同名竞争；基线中
-   selected 定义在 hover 之后，同特异性按源码顺序决胜（悬停时保持主色边框
-   与外环）。故下沉到 unlayered 并置于 hover 之后；StyleX 侧 skillCardSelected
-   的同名声明已删除，避免双源。 */
+/* .tools-tab-skill-card--selected —— ToolsTab.tsx */
 .agent-create-esc-tools-skill-card--selected {
   border-color: color-mix(in srgb, var(--primary) 50%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
-}
-
-/* .tools-tab-skill-card__tool-chip/.tools-tab-summary__chip —— ToolsTab.tsx
-   （两种 chip 共用一个 hook 类）
-   保留原因：background/border/color 与 StyleX 原子类存在同名属性竞争，
-   下沉后与下方 dark 覆盖按原文件源码顺序（基础 → dark）决胜。 */
-.agent-create-esc-tools-chip {
-  background: var(--backgroundTertiary);
-  border: 1px solid var(--borderLight);
-  color: var(--textSecondary);
-}
-
-/* [data-theme="dark"] .tools-tab-skill-card__tool-chip,
-   [data-theme="dark"] .tools-tab-summary__chip —— ToolsTab.tsx
-   （两种 chip 共用一个 hook 类） */
-[data-theme="dark"] .agent-create-esc-tools-chip {
-  background: color-mix(in srgb, var(--backgroundSecondary) 80%, transparent);
-  border-color: color-mix(in srgb, var(--border) 60%, transparent);
-  color: var(--text);
-}
-
-/* [data-theme="dark"] .tools-tab-empty-state —— ToolsTab.tsx */
-[data-theme="dark"] .agent-create-esc-tools-empty-state {
-  background: color-mix(in srgb, var(--backgroundSecondary) 40%, transparent);
 }
 
 /* ── 父级 :hover 控制子元素 ──

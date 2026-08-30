@@ -25,7 +25,12 @@ import {
 } from "./toolCallTextParser";
 
 /** In-band stream failure carried by an SSE frame instead of an HTTP status. */
-export type ChatCompletionStreamError = { message: string; code?: string };
+export type ChatCompletionStreamError = {
+  message: string;
+  code?: string;
+  /** Upstream root cause detail, e.g. "runinfra HTTP 503 (pc_123, 2 attempts)". */
+  detail?: string;
+};
 
 /** Mutable accumulator shared across delta chunks for one stream. */
 export type ChatCompletionStreamState = {
@@ -76,10 +81,15 @@ export function extractChatCompletionStreamError(
       : typeof raw.type === "string" && raw.type.trim()
         ? raw.type.trim()
         : undefined;
+  const detail =
+    typeof raw.detail === "string" && raw.detail.trim()
+      ? raw.detail.trim()
+      : undefined;
   if (!message && !code) return null;
   return {
     message: message || "upstream stream error",
     ...(code ? { code } : {}),
+    ...(detail ? { detail } : {}),
   };
 }
 
@@ -101,8 +111,9 @@ export function throwIfChatCompletionStreamFailed(
     failure.code
       ? `${failure.message} (${failure.code})`
       : failure.message,
-  ) as Error & { code?: string };
+  ) as Error & { code?: string; detail?: string };
   if (failure.code) error.code = failure.code;
+  if (failure.detail) error.detail = failure.detail;
   throw error;
 }
 

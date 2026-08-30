@@ -1135,6 +1135,62 @@ describe("cli agent run client", () => {
     expect(output.text()).not.toContain("Fix the local credential/config");
   });
 
+  test("platform busy error shows upstream detail and never suggests fixing local credentials", async () => {
+    // 服务器紧张 (PLATFORM_LLM_BUSY): the platform LLM upstream is
+    // capacity-limited. The detail (which provider / status) must be shown,
+    // and the fix hint must be "retry / switch model", NOT local credentials.
+    const busyError = new Error("服务器紧张") as Error & { detail?: string };
+    busyError.detail = "runinfra HTTP 503 (pc_123, 2 attempts)";
+
+    const output = new CaptureOutput();
+    const result = await runAgentTurn({
+      agentName: "GLM 5.2",
+      agentKey: "agent-glm-local",
+      serverUrl: "https://nolo.chat",
+      message: "continue",
+      scriptDir: "C:/missing/scripts",
+      env: { AUTH_TOKEN: "token-123" },
+      runtimeMode: "auto",
+      output,
+      localRuntimeAdapter: {
+        host: "cli",
+        capabilities: ["leveldb-agent-config", "local-provider"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "GLM 5.2",
+          apiSource: "custom",
+          customProviderUrl: "https://ollama.com/v1",
+          model: "glm-5.2:cloud",
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-kept-busy" }),
+        resolveProvider: async () => ({
+          model: "glm-5.2:cloud",
+          complete: async () => {
+            throw busyError;
+          },
+        }),
+        executeTool: async () => {
+          throw new Error("no tools expected");
+        },
+      },
+      fetchImpl: async () => {
+        throw new Error("server fallback should not run");
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    const text = output.text();
+    expect(text).toContain("local run unavailable");
+    expect(text).toContain("服务器紧张");
+    expect(text).toContain("PLATFORM_LLM_BUSY");
+    // The detail surfaces the real upstream root cause.
+    expect(text).toContain("runinfra HTTP 503 (pc_123, 2 attempts)");
+    // Busy is a platform capacity problem, not a local credential problem.
+    expect(text).toContain("平台模型上游繁忙，稍后重试或换个模型");
+    expect(text).not.toContain("Fix the local credential/config");
+  });
+
   test("ephemeral mode skips persistence: adapter.saveTurn is never called", async () => {
     const output = new CaptureOutput();
     const saveTurnCalls: any[] = [];
@@ -3046,6 +3102,89 @@ describe("cli agent run client", () => {
     // Thinking appears on the spinner line, not as standalone content
     expect(output.text()).toContain("Deep thinking details...");
     expect(output.text()).toContain("Final answer");
+  });
+
+  test("SSE stream hides thinking display without changing the request or text", async () => {
+    const sseBody = [
+      `data: ${JSON.stringify({ type: "thinking", content: "Hidden server reasoning" })}`,
+      "",
+      `data: ${JSON.stringify({ type: "text", content: "Visible server answer" })}`,
+      "",
+      `data: ${JSON.stringify({ type: "done", dialogId: "dialog-sse-hidden-thinking" })}`,
+      "",
+    ].join("\n");
+    const output = new CaptureOutput();
+    (output as CaptureOutput & { isTTY: boolean }).isTTY = true;
+    let requestBody: any;
+
+    await runAgentTurn({
+      agentName: "nolo",
+      agentKey: "agent-pub-test",
+      serverUrl: "https://nolo.chat",
+      message: "hello",
+      scriptDir: "C:/missing/scripts",
+      env: { AUTH_TOKEN: "token-123" },
+      runtimeMode: "server",
+      showThinking: false,
+      output,
+      fetchImpl: async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(sseBody, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+
+    expect(output.text()).not.toContain("Hidden server reasoning");
+    expect(output.text()).toContain("Visible server answer");
+    expect(requestBody.showThinking).toBeUndefined();
+    expect(requestBody.enableThinking).toBeUndefined();
+  });
+
+  test("local reasoning callback stays active while its display is hidden", async () => {
+    const output = new CaptureOutput();
+    (output as CaptureOutput & { isTTY: boolean }).isTTY = true;
+    let reasoningCallbackObserved = false;
+
+    await runAgentTurn({
+      agentName: "local",
+      agentKey: "local-test",
+      serverUrl: "https://nolo.chat",
+      message: "hello",
+      scriptDir: "C:/missing/scripts",
+      env: {},
+      runtimeMode: "local",
+      showThinking: false,
+      output,
+      localRuntimeAdapter: {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Local",
+          prompt: "Answer",
+          model: "fake-local",
+          toolNames: [],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-local-hidden-thinking" }),
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async (_messages, providerOptions) => {
+            reasoningCallbackObserved = typeof providerOptions?.onReasoningDelta === "function";
+            providerOptions?.onReasoningDelta?.("Hidden local reasoning");
+            providerOptions?.onTextDelta?.("Visible local answer");
+            return { content: "Visible local answer", model: "fake-local" };
+          },
+        }),
+        executeTool: async () => ({ content: "" }),
+      },
+    });
+
+    expect(reasoningCallbackObserved).toBe(true);
+    expect(output.text()).not.toContain("Hidden local reasoning");
+    expect(output.text()).toContain("Visible local answer");
   });
 
   test("SSE stream renders compact tool events without verbose tool_result content flooding", async () => {

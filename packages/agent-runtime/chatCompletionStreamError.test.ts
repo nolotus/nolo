@@ -31,6 +31,13 @@ const WARMUP = ": nolo-chat-proxy-ready\n\n";
 const busyFrame = `data: ${JSON.stringify({
   error: { msg: "服务器紧张", code: "PLATFORM_LLM_BUSY" },
 })} \n\n`;
+const busyWithDetailFrame = `data: ${JSON.stringify({
+  error: {
+    msg: "服务器紧张",
+    code: "PLATFORM_LLM_BUSY",
+    detail: "runinfra HTTP 503 (pc_123, 2 attempts)",
+  },
+})} \n\n`;
 const idleFrame = `data: ${JSON.stringify({
   error: { msg: "idle 60 s", code: "IDLE" },
 })} \n\n`;
@@ -44,6 +51,22 @@ describe("extractChatCompletionStreamError", () => {
         error: { msg: "服务器紧张", code: "PLATFORM_LLM_BUSY" },
       }),
     ).toEqual({ message: "服务器紧张", code: "PLATFORM_LLM_BUSY" });
+  });
+
+  test("透传 detail 字段（busy 根因）", () => {
+    expect(
+      extractChatCompletionStreamError({
+        error: {
+          msg: "服务器紧张",
+          code: "PLATFORM_LLM_BUSY",
+          detail: "runinfra HTTP 503 (pc_123, 2 attempts)",
+        },
+      }),
+    ).toEqual({
+      message: "服务器紧张",
+      code: "PLATFORM_LLM_BUSY",
+      detail: "runinfra HTTP 503 (pc_123, 2 attempts)",
+    });
   });
 
   test("认 OpenAI/Ollama 的 message/type 形状", () => {
@@ -103,6 +126,19 @@ describe("readPlatformChatSseCompletion", () => {
     });
     await expect(promise).rejects.toThrow("服务器紧张");
     await expect(promise).rejects.toThrow("PLATFORM_LLM_BUSY");
+  });
+
+  test("busy 帧的 detail 携带到抛出的错误上", async () => {
+    const promise = readPlatformChatSseCompletion({
+      response: sseResponse(WARMUP, busyWithDetailFrame),
+      usesResponsesApi: false,
+    });
+    await expect(promise).rejects.toThrow(
+      /服务器紧张 \(PLATFORM_LLM_BUSY\)/,
+    );
+    await expect(promise).rejects.toMatchObject({
+      detail: "runinfra HTTP 503 (pc_123, 2 attempts)",
+    });
   });
 
   test("Responses 分支也看得见错误帧", async () => {
