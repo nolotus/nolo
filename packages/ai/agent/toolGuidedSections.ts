@@ -52,11 +52,12 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
    - 中文写稿/长文创作/低 AI 味内容：优先选 \`gemini-3.7-flash\`（行文自然、高性价比）或 \`kimi-k3\`。
    - 顶档模型（Opus 5、GPT-5.6 Sol 及同级）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级。深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败。普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
+   - 通道排除判据：只排除「本次改动的作者」与「当时实测死因的坏通道」（配额耗尽/余额不足/限流，须有当次错误证据）。编排者自身的 agent 身份派出的新实例不带编排者上下文：与作者跨模型家族时是合法 reviewer，且 flash 档常是最便宜的 review 通道；「不烧平台积分」优先级对大跑量执行者成立，对 flash 档 review（成本可忽略）不适用。
    - 不凭名字编造能力，不索取 prompt/密钥/数据库 key 来选人；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
 
 **拆分与派发质量**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖的工作先固化契约再派发，勿让多个 Agent 各自猜同一接口。子任务自包含、边界清晰，只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证和用户沟通。
 
-**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是自己；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 **危险 / 不可逆操作**：
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易等）时，优先预览或向用户确认。
