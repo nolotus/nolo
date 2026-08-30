@@ -113,6 +113,29 @@ describe("native router runtime", () => {
     expect(html).toBe("");
   });
 
+  it("warns at most once when RouterContext is missing during SSR", () => {
+    // 模块级 once 计数器：本用例必须保持在文件内首个「无 Provider 降级」的位置，
+    // 否则 warn 配额会被更早的降级用例消费掉。
+    const warns: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warns.push(args.map(String).join(" "));
+    };
+    try {
+      const first = renderToString(<NavigateProbe />);
+      expect(first).toContain("<button");
+      const second = renderToString(<NavigateProbe />);
+      expect(second).toContain("<button");
+    } finally {
+      console.warn = originalWarn;
+    }
+    const routingWarns = warns.filter((w) => w.includes("[routing]"));
+    expect(routingWarns.length).toBe(1);
+    expect(routingWarns[0]).toBe(
+      "[routing] RouterContext missing during SSR — navigation no-op",
+    );
+  });
+
   it("renders Navigate and useNavigate safely even outside of RouterProvider during SSR", () => {
     const html = renderToString(<Navigate to="/login" replace />);
     expect(html).toBe("");
