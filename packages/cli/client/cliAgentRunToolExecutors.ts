@@ -190,15 +190,18 @@ function buildRunStatusPayload(
       startedAt: reconciled.startedAt,
       endedAt: reconciled.endedAt ?? null,
       exitCode: reconciled.exitCode ?? null,
-      // Expose dialogId so the caller can read the agent's actual output
-      // via `nolo dialog read <dialogId>`. The dialog is the authoritative
-      // result store; the run log is the child process stdout/stderr,
-      // whose contents vary by provider (some stream tokens to stdout,
-      // some only emit startup + stderr). Because status does not carry
-      // logTail by default, a "done" run with an empty logTail is
-      // indistinguishable from a hung run without this field. Surfacing
-      // dialogId gives the caller a reliable way to fetch the result.
-      ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
+      // Non-ephemeral runs expose dialogId so the caller can read the
+      // agent's actual output via `nolo dialog read <dialogId>`. Ephemeral
+      // runs do not persist a dialog (their ephemeral dialogId is synthetic)
+      // and instead return `{ ephemeral: true, dialogNote: ... }`.
+      ...(reconciled.ephemeral
+        ? {
+            ephemeral: true,
+            dialogNote: "此 run 未持久化 dialog，结果见 run 输出",
+          }
+        : reconciled.dialogId
+        ? { dialogId: reconciled.dialogId }
+        : {}),
       ...(reportExists ? { reportPath } : {}),
       // Progress is what makes tailLines:0 an actual answer to "is it
       // stuck?". Without it a poll returns `running` and a pid, so the only
@@ -291,6 +294,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: deps.cwd ?? process.cwd(),
         message,
+        ...(args.ephemeral === true ? { ephemeral: true } : {}),
         output: noopOutput,
       },
       deps,
@@ -365,7 +369,9 @@ async function spawnContinuationRun(
   userInput: string,
   deps: CliAgentRunToolExecutorDeps
 ) {
-  if (!reconciled.dialogId) {
+  // ephemeral run 只有合成的 eph-* dialogId（不落盘、永远读不到）：不再用
+  // dialogId 做 guard，否则 ephemeral 续跑会直接抛错；非 ephemeral 的保护不变。
+  if (!reconciled.ephemeral && !reconciled.dialogId) {
     throw new Error("该 run 无关联 dialog，无法续跑。");
   }
 
@@ -374,12 +380,16 @@ async function spawnContinuationRun(
   const rawArgs = [
     "--agent",
     agentKey,
-    "--continue",
-    reconciled.dialogId,
+    // 仅非 ephemeral 且确有 dialogId 时才续接原 dialog。ephemeral 不落盘，
+    // 其 dialogId 是合成的，绝不能透传给子进程 --continue（子进程读不到必然
+    // 全链路 404）；续跑转为开一个新的 ephemeral run。
+    ...(!reconciled.ephemeral && reconciled.dialogId
+      ? ["--continue", reconciled.dialogId]
+      : []),
     "--msg-file",
     "PLACEHOLDER",
     "--bg",
-    ...(reconciled.ephemeral === true ? ["--ephemeral"] : []),
+    ...(reconciled.ephemeral ? ["--ephemeral"] : []),
   ];
 
   const { runId: newRunId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
@@ -393,6 +403,7 @@ async function spawnContinuationRun(
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
       message: userInput,
+      ...(reconciled.ephemeral ? { ephemeral: true } : {}),
       output: noopOutput,
     },
     deps,
@@ -406,7 +417,10 @@ async function spawnContinuationRun(
     content: JSON.stringify({
       runId: reconciled.runId,
       newRunId,
-      dialogId: reconciled.dialogId,
+      // ephemeral 的 dialogId 是合成的（不落盘），不外泄；调用方按 ephemeral 语义处理。
+      ...(reconciled.ephemeral
+        ? { ephemeral: true }
+        : { dialogId: reconciled.dialogId }),
       mode: "continue",
       status: "running",
       ...(agentName ? { agentName } : {}),
@@ -618,7 +632,12 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             return {
               content: JSON.stringify({
                 runId: reconciled.runId,
-                ...(afterCheck.dialogId || reconciled.dialogId ? { dialogId: afterCheck.dialogId ?? reconciled.dialogId } : {}),
+                // ephemeral 不外泄合成 dialogId；非 ephemeral 保持原 dialogId 透出。
+                ...(reconciled.ephemeral
+                  ? { ephemeral: true }
+                  : afterCheck.dialogId || reconciled.dialogId
+                    ? { dialogId: afterCheck.dialogId ?? reconciled.dialogId }
+                    : {}),
                 mode: "enqueue",
                 consumed: true,
                 status: afterCheck.status,
@@ -643,7 +662,12 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         return {
           content: JSON.stringify({
             runId: reconciled.runId,
-            ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
+            // ephemeral 不外泄合成 dialogId（enqueue 场景同样收敛）。
+            ...(reconciled.ephemeral
+              ? { ephemeral: true }
+              : reconciled.dialogId
+                ? { dialogId: reconciled.dialogId }
+                : {}),
             mode: "enqueue",
             queued: queuedCount,
             status: "running",

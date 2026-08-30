@@ -57,6 +57,19 @@ export type AgentCommandDeps = {
     fetchImpl: CliFetchImpl
   ) => Promise<void>;
   localRuntimeProbe?: (env: EnvLike) => Promise<LocalRuntimeProbeResult>;
+  /** dialog 本地读取注入（测试用；缺省走本地 LevelDB 真实读取）。 */
+  readLocalDialog?: (args: {
+    dialogKey: string;
+    dialogId: string;
+    limit: number;
+  }) => Promise<{ meta: any; msgs: any[] }>;
+  /** dialog 回退候选库读取注入（测试用；缺省按 dbPath 临时开库读取）。 */
+  readLocalDialogAtDbPath?: (args: {
+    dbPath: string;
+    dialogKey: string;
+    dialogId: string;
+    limit: number;
+  }) => Promise<{ meta: any; msgs: any[] }>;
 };
 
 async function getDefaultCliDb() {

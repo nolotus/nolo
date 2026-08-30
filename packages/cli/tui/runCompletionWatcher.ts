@@ -77,12 +77,12 @@ export function describeRun(
   if (verbose && typeof record.exitCode === "number") {
     lines.push(`exitCode: ${record.exitCode}`);
   }
-  if (record.dialogId) {
-    lines.push(`childDialogId: ${record.dialogId}`);
-  } else if ((record as any).ephemeral) {
+  if (record.ephemeral) {
     lines.push(`ephemeral: true (no persisted child dialog)`);
+  } else if (record.dialogId) {
+    lines.push(`childDialogId: ${record.dialogId}`);
   } else {
-    lines.push(`childDialogId: missing (result unpersisted or ephemeral)`);
+    lines.push(`childDialogId: missing (result unpersisted)`);
   }
   const duration = runDuration(record, nowMs);
   if (duration) lines.push(`duration: ${duration}`);

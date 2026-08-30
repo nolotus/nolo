@@ -2186,6 +2186,46 @@ describe("run-truth-batch: list filter + paginate", () => {
     expect(record?.parentDialogId).toBe("dlg-parent-123");
   });
 
+  test("spawnLocalBackgroundRun records ephemeral:true when specified, omits field when not specified", async () => {
+    const { spawn } = createMockSpawn();
+    const deps = createDeps({
+      spawn,
+      getProcessStartTime: () => new Date("2025-01-01T00:00:00.250Z"),
+    });
+    const { output } = createMockOutput();
+
+    // 传 ephemeral: true → 落盘记录含 ephemeral:true
+    const resultWithEph = await spawnLocalBackgroundRun(
+      {
+        rawArgs: ["agent-1", "--bg", "--ephemeral"],
+        commandPath: ["agent", "run"],
+        cliEntrypointPath: "/repo/packages/cli/index.ts",
+        agentKey: "agent-1",
+        cwd: "/repo",
+        ephemeral: true,
+        output,
+      },
+      deps
+    );
+    const recordWithEph = readRunRecord(resultWithEph.runId, deps);
+    expect(recordWithEph?.ephemeral).toBe(true);
+
+    // 不传 ephemeral → 记录中不出现该字段
+    const resultWithoutEph = await spawnLocalBackgroundRun(
+      {
+        rawArgs: ["agent-1", "--bg"],
+        commandPath: ["agent", "run"],
+        cliEntrypointPath: "/repo/packages/cli/index.ts",
+        agentKey: "agent-1",
+        cwd: "/repo",
+        output,
+      },
+      deps
+    );
+    const recordWithoutEph = readRunRecord(resultWithoutEph.runId, deps);
+    expect(recordWithoutEph).not.toHaveProperty("ephemeral");
+  });
+
   test("list paginate with offset", () => {
     const deps = createDeps();
     for (let i = 0; i < 10; i++) {

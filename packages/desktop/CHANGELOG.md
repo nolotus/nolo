@@ -1,4 +1,14 @@
 
+## 0.46.0-alpha.3
+
+## 0.46.0-alpha.3 (2026-08-30)
+
+### Bug Fixes
+
+* **cli:** ephemeral run 不再对外暴露读不到的合成 dialogId ([10db7c0](https://github.com/nolotus/bun-nolo/commit/10db7c06a0bd89481f7d5c3166d134438975978c))
+* **stylex:** 清除 shorthand 静默丢弃引发的聊天面白底回归（150 条转换 + 条件态守护） ([350ceff](https://github.com/nolotus/bun-nolo/commit/350ceff6836d4d35a512f3663d03cfcd17a2af61))
+
+
 ## 0.46.0-alpha.2
 
 ## 0.46.0-alpha.2 (2026-08-30)

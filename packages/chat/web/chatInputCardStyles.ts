@@ -20,14 +20,15 @@ export const chatInputCardStyles = stylex.create({
   card: {
     display: "flex",
     flexDirection: "column",
-    background:
-      "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
     borderRadius: "var(--radius-md) var(--radius-md) 0 0",
     padding: "var(--space-3) var(--space-4)",
     position: "relative",
     transition:
       "border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease",
-    border: "1px solid var(--borderMuted, var(--borderLight))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight))",
     boxShadow: agentThemeTokens.chatInputCardShadow,
     overflow: "hidden",
     width: "100%",

@@ -547,8 +547,8 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   margin-top: 10px;
 }
 
-.SidebarUserSection__menu-toggle.is-open,
-[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"] {
+.SidebarUserSection__menu-toggle.is-open:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--surfaceInteractiveHover, var(--backgroundHover));
   color: var(--text);
 }
@@ -753,6 +753,17 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
 [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     border-width: 1.5px !important;
   }
+}
+
+/* .message-input__box .message-input__textarea —— 旧 message-input.css 1:1 迁入（原带 !important 的透明覆盖） */
+.message-input__box .message-input__textarea,
+[data-hook~="chat-esc-chat-input-card"] .message-input__textarea {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  padding: var(--space-2) 0 !important;
 }
 
 /* .message-input__box nested controls */

@@ -279,6 +279,30 @@ describe("cli controlAgentRun executor", () => {
     expect(data.logTail).toBeUndefined();
   });
 
+  it("status payload for an ephemeral run omits dialogId and flags ephemeral", async () => {
+    // Ephemeral runs never persist a dialog; their `eph-<ts>-<rand>` id is
+    // synthetic. The status payload must not leak it — otherwise the caller
+    // will readDialog a dialog that can never exist.
+    const deps = buildDeps({ kill: () => {} });
+    seedRun(deps, "run-eph", {
+      status: "done",
+      dialogId: "eph-1755000000-abcd",
+      ephemeral: true,
+      exitCode: 0,
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({ action: "status", runId: "run-eph" }),
+    });
+    const data = JSON.parse(result.content);
+    expect(data.status).toBe("done");
+    expect(data).not.toHaveProperty("dialogId");
+    expect(data.ephemeral).toBe(true);
+    // 结果获取路径的指引写进 payload（而非假 dialogId）。
+    expect(data.dialogNote).toContain("未持久化 dialog");
+  });
+
   it("status exposes dialogId for a completed run so the caller can read the agent output", async () => {
     // Regression: a "done" run with an empty logTail was indistinguishable
     // from a hung run because the LLM output lives in the dialog, not the
@@ -690,6 +714,56 @@ describe("cli controlAgentRun executor", () => {
     expect(newRecord.parentDialogId).toBe("parent-dialog-456");
   });
 
+  it("append to an ephemeral terminal run spawns a new ephemeral run without --continue or the synthetic dialogId", async () => {
+    // ephemeral run 的 dialogId 是合成的（不落盘）：续跑绝不能把它塞进子进程
+    // --continue（子进程读不到必然全链路 404），改为开一个新的 ephemeral run。
+    let nextRunId = "run-2";
+    const deps = buildDeps({
+      generateRunId: () => nextRunId,
+      kill: () => {},
+    });
+    seedRun(deps, "run-1", {
+      status: "done",
+      dialogId: "eph-1755000000-abcd",
+      ephemeral: true,
+      agentKey: "agent-pub-x",
+      agentName: "测试助手",
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-1",
+        userInput: "继续执行第二阶段任务",
+      }),
+    });
+
+    const parsed = JSON.parse(result.content);
+    expect(parsed).toMatchObject({
+      runId: "run-1",
+      newRunId: "run-2",
+      mode: "continue",
+      status: "running",
+      agentName: "测试助手",
+    });
+    // 返回值不外泄合成 dialogId，改以 ephemeral 标记。
+    expect(parsed).not.toHaveProperty("dialogId");
+    expect(parsed.ephemeral).toBe(true);
+
+    // spawn 参数：不含假 eph-* id、不含 --continue，但含 --ephemeral。
+    expect(deps.spawnCalls.length).toBe(1);
+    const spawnCall = deps.spawnCalls[0];
+    const flatArgs = spawnCall.args.join("\u0000");
+    expect(flatArgs).not.toContain("eph-1755000000-abcd");
+    expect(spawnCall.args).not.toContain("--continue");
+    expect(spawnCall.args).toContain("--ephemeral");
+
+    // 新 run 记录沿用 ephemeral 语义。
+    const newRecord = JSON.parse(deps.mem.files.get("/home/test/.nolo/runs/run-2.json")!);
+    expect(newRecord.ephemeral).toBe(true);
+  });
+
   it("append to a running run without queuePath rejects with unsupported error", async () => {
     const deps = buildDeps({ kill: () => {} });
     seedRun(deps, "run-1", {
@@ -767,6 +841,46 @@ describe("cli controlAgentRun executor", () => {
     expect(parsed2.queued).toBe(2);
     expect(parsed2.mode).toBe("enqueue");
     expect(deps.spawnCalls.length).toBe(0);
+  });
+
+  it("append to an ephemeral running run via queue channel returns ephemeral:true instead of the synthetic dialogId", async () => {
+    // ephemeral run 走 enqueue 分支时同样不得外泄合成的 eph-* dialogId。
+    const deps = buildDeps({ kill: () => {} });
+    const queuePath = "/home/test/.nolo/runs/run-eph.queue.jsonl";
+    seedRun(deps, "run-eph", {
+      status: "running",
+      dialogId: "eph-1755000000-abcd",
+      ephemeral: true,
+      agentKey: "agent-pub-x",
+      agentName: "测试助手",
+      queuePath,
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-eph",
+        userInput: "运行中入队的指令",
+      }),
+    });
+
+    const parsed = JSON.parse(result.content);
+    expect(parsed).toMatchObject({
+      runId: "run-eph",
+      mode: "enqueue",
+      queued: 1,
+      status: "running",
+      agentName: "测试助手",
+      taskPreview: "运行中入队的指令",
+    });
+    expect(parsed).not.toHaveProperty("dialogId");
+    expect(parsed.ephemeral).toBe(true);
+
+    // 消息确实写入队列、未 spawn 新进程
+    expect(deps.spawnCalls.length).toBe(0);
+    const entry = JSON.parse(deps.mem.files.get(queuePath)!.trim());
+    expect(entry.text).toBe("运行中入队的指令");
   });
 
   it("append race degradation: entryId unconsumed when child becomes terminal falls back to continue spawn with merged message", async () => {

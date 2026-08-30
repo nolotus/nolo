@@ -145,6 +145,8 @@ export const SidebarUserSection: React.FC = () => {
   // --- 状态控制 ---
   const [bellOpen, setBellOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // MessageInputCore.tsx:981 惯例：spread 在前，className 显式合并字面类（防 clobber）。
+  const menuToggleStyleProps = stylex.props(sidebarStyles.sidebarUserSectionMenuToggle);
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -306,7 +308,10 @@ export const SidebarUserSection: React.FC = () => {
           </Tooltip>
           <button
             type="button"
-            className={`SidebarUserSection__menu-toggle ${menuOpen ? "is-open" : ""}`}
+            {...menuToggleStyleProps}
+            className={[menuToggleStyleProps.className, "SidebarUserSection__menu-toggle", menuOpen ? "is-open" : ""]
+              .filter(Boolean)
+              .join(" ")}
             data-hook={`chat-esc-user-menu-toggle ${menuOpen ? "chat-esc-user-menu-open" : ""}`}
             onClick={() => {
               setMenuOpen((prev) => !prev);

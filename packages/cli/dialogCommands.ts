@@ -961,7 +961,18 @@ export async function readDialogSnapshot(args: {
     localFailure = describeLocalDialogFailure(error);
     // Only a confirmed missing key means "try the server". Lock/IO errors are
     // expected local-runtime fallbacks and are retained as diagnostics.
-    if (!isLevelNotFoundError(error) && !isLevelDbOpenUnavailableError(error)) throw error;
+    if (!isLevelNotFoundError(error) && !isLevelDbOpenUnavailableError(error)) {
+      // 真实本地 IO 错误原样抛出（不走 HTTP 回退），但把本地尝试明细与
+      // dialogId 附到错误上：formatDialogReadFailure / isCleanDialogNotFoundFailure
+      // 需要它们区分「真故障」（完整诊断）与「干净的 not found」（单行降噪）。
+      const enriched = error as Error & {
+        local?: LocalDialogFailure;
+        dialogId?: string;
+      };
+      enriched.dialogId = args.dialogId;
+      if (localFailure) enriched.local = localFailure;
+      throw enriched;
+    }
   }
 
   try {
@@ -976,10 +987,12 @@ export async function readDialogSnapshot(args: {
     });
     return { ...result, candidateBases };
   } catch (error) {
+    const enriched = error as Error & {
+      local?: LocalDialogFailure;
+      dialogId?: string;
+    };
+    enriched.dialogId = args.dialogId;
     if (localFailure) {
-      const enriched = error as Error & {
-        local?: LocalDialogFailure;
-      };
       enriched.local = localFailure;
       const attemptedPaths = localFailure.paths ?? [localFailure.path];
       enriched.message = `${enriched.message}; local read attempted (${attemptedPaths.join(" → ")}): ${localFailure.reason}`;
@@ -1321,7 +1334,64 @@ async function readSpaceDialogRecords(args: {
 
 const MAX_ATTEMPT_LINES = 5;
 
-function formatDialogReadFailure(error: unknown): string {
+/**
+ * 判定 dialog 读取失败是否属于「干净的 not found」。
+ *
+ * 满足条件：
+ * - 若有 HTTP 尝试，必须全部返回 HTTP 404（无 500/网络错误/超时）；
+ * - 若有 localFailure，必须明确包含结构化的 localAttempts 且全部为 miss / missing / locked；
+ * - 无 localAttempts 明细时保守返回 false 走完整诊断，避免松散子串匹配误将真 IO 错误吞为 not found。
+ *
+ * 【已知设计假设 (L3)】
+ * 当另一进程持本地 LevelDB 排他锁、且该 dialog 仅存在于本地库时，本地读取因
+ * locked 无法探测 key 是否存在，随后 server 读取若也 404，会被判定为
+ * clean not found。这是多进程排他锁下的已知设计权衡。
+ */
+export function isCleanDialogNotFoundFailure(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const attempts: HttpAttempt[] = Array.isArray((error as any).attempts)
+    ? (error as any).attempts
+    : [];
+
+  const hasHttp = attempts.length > 0;
+  if (hasHttp) {
+    const allHttp404 = attempts.every((attempt) => attempt.status === 404);
+    if (!allHttp404) return false;
+  }
+
+  const localFailure = (error as { local?: LocalDialogFailure }).local;
+  if (localFailure) {
+    if (localFailure.attempts && localFailure.attempts.length > 0) {
+      const allLocalClean = localFailure.attempts.every(
+        (a) => a.status === "miss" || a.status === "missing" || a.status === "locked",
+      );
+      if (!allLocalClean) return false;
+    } else {
+      // 保守防御（M1）：无 attempts 明细时一律不判为 clean not found，走完整诊断
+      return false;
+    }
+  }
+
+  return hasHttp || Boolean(localFailure);
+}
+
+function formatDialogReadFailure(error: unknown, fallbackDialogId?: string): string {
+  const targetId =
+    (typeof error === "object" &&
+      error !== null &&
+      typeof (error as any).dialogId === "string" &&
+      (error as any).dialogId) ||
+    fallbackDialogId;
+
+  if (isCleanDialogNotFoundFailure(error)) {
+    // 干净的 not found：单行输出即可，完整候选链诊断降级进 debug 日志。
+    logger.debug(
+      { error, dialogId: targetId },
+      "dialog not found across all local and HTTP candidates",
+    );
+    return targetId ? `[nolo] dialog ${targetId} not found` : `[nolo] dialog not found`;
+  }
+
   const message = toErrorMessage(error);
   const attempts: HttpAttempt[] =
     typeof error === "object" && error !== null && Array.isArray((error as any).attempts)
@@ -1350,7 +1420,7 @@ function formatDialogReadFailure(error: unknown): string {
     }
     if (localFailure.locked) {
       lines.push(
-        "    - 宿主进程持有 LevelDB 排他锁时，本地只读不可用：建议关闭宿主（如 dev server / 运行中的 agent run）后重试，或改用 server 端点读取。",
+        "    - 本地库正被某个进程持有 LevelDB 排他锁（常常就是当前 TUI 宿主进程自己，本地只读在持锁期间不可用）；请通过 server 端点读取该 dialog。",
       );
     }
   }
@@ -1451,6 +1521,8 @@ export async function runDialogReadCommand(
       dialogKey: target.dialogKey,
       fetchImpl: deps.fetchImpl ?? fetch,
       limit,
+      readLocalDialog: deps.readLocalDialog,
+      readLocalDialogAtDbPath: deps.readLocalDialogAtDbPath,
     });
     const orderedMsgs = Array.isArray(read.msgs) ? [...read.msgs].reverse() : read.msgs;
     const lastAssistantMessage = Array.isArray(orderedMsgs)
@@ -1524,7 +1596,7 @@ export async function runDialogReadCommand(
     output.write("\n");
     return 0;
   } catch (error) {
-    output.write(`${formatDialogReadFailure(error)}\n`);
+    output.write(`${formatDialogReadFailure(error, target.dialogId)}\n`);
     return 1;
   }
 }
@@ -1566,6 +1638,8 @@ export async function runDialogStatusCommand(
       dialogKey: target.dialogKey,
       fetchImpl: deps.fetchImpl ?? fetch,
       limit: 1,
+      readLocalDialog: deps.readLocalDialog,
+      readLocalDialogAtDbPath: deps.readLocalDialogAtDbPath,
     });
     output.write(renderCompactDialogStatus({
       ...(read.meta ?? {}),

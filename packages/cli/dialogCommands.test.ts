@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Level } from "level";
 
 import {
+  isCleanDialogNotFoundFailure,
   isLevelDbOpenUnavailableError,
   readDialogSnapshot,
   runDialogDeleteCommand,
@@ -366,7 +367,7 @@ describe("cli dialog commands", () => {
     expect(result.candidateBases[result.candidateBases.length - 1]).toBe("http://127.0.0.1:38123");
   });
 
-  test("dialog read failure reports attempts detail and next-step hint", async () => {
+  test("dialog read clean not-found reports concise not found and does not spill fallback chain or host shutdown advice", async () => {
     const chunks: string[] = [];
 
     const exitCode = await runDialogReadCommand(
@@ -374,6 +375,33 @@ describe("cli dialog commands", () => {
       {
         env: authEnv("env-user"),
         output: { write(chunk) { chunks.push(String(chunk)); } },
+        // 注入本地读取：meta undefined → 结构化 miss 明细（不依赖机器上的真实库状态）。
+        readLocalDialog: async () => ({ meta: undefined, msgs: [] }),
+        fetchImpl: testFetch(async () => new Response("not found", { status: 404 })),
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    const text = chunks.join("");
+    expect(text.trim()).toBe(`[nolo] dialog ${dialogId} not found`);
+    expect(text).not.toContain("attempts:");
+    expect(text).not.toContain("next-step:");
+    expect(text).not.toContain("建议关闭宿主");
+  });
+
+  test("dialog read preserves full diagnostics on real local DB IO error (injected into the local read path)", async () => {
+    const chunks: string[] = [];
+
+    const exitCode = await runDialogReadCommand(
+      [dialogId, "--token", authEnv("user-1").AUTH_TOKEN!, "--server", "https://arg.nolo.chat"],
+      {
+        env: authEnv("env-user"),
+        output: { write(chunk) { chunks.push(String(chunk)); } },
+        // 注入点必须是本地读路径（readDialogFromLocalDb 经由 readLocalDialog），
+        // 而非 HTTP 层：真实 IO 错误在本地读取阶段直接抛出，不落入 HTTP 回退。
+        readLocalDialog: async () => {
+          throw new Error("EIO: disk read failure on leveldb block");
+        },
         fetchImpl: testFetch(async () => new Response("not found", { status: 404 })),
       }
     );
@@ -381,11 +409,47 @@ describe("cli dialog commands", () => {
     expect(exitCode).toBe(1);
     const text = chunks.join("");
     expect(text).toContain("dialog read failed");
-    expect(text).toContain("attempts:");
-    expect(text).toContain("https://arg.nolo.chat");
-    expect(text).toContain("HTTP 404");
-    expect(text).toContain("next-step:");
-    expect(text).toContain("data/leveldb");
+    expect(text).toContain("EIO: disk read failure on leveldb block");
+    expect(text).toContain("local:");
+    expect(isCleanDialogNotFoundFailure(new Error("EIO: disk read failure"))).toBe(false);
+  });
+
+  test("dialog read outputs rewritten lock advice when local DB is locked and diagnostics are shown", async () => {
+    const chunks: string[] = [];
+
+    const exitCode = await runDialogReadCommand(
+      [dialogId, "--token", authEnv("user-1").AUTH_TOKEN!, "--server", "https://arg.nolo.chat"],
+      {
+        env: authEnv("env-user"),
+        output: { write(chunk) { chunks.push(String(chunk)); } },
+        readLocalDialog: async () => {
+          const err = new Error("Resource temporarily unavailable");
+          (err as any).code = "LEVEL_LOCKED";
+          throw err;
+        },
+        fetchImpl: testFetch(async () => {
+          throw new Error("HTTP 500 Internal Server Error");
+        }),
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    const text = chunks.join("");
+    expect(text).toContain("dialog read failed");
+    expect(text).toContain("常常就是当前 TUI 宿主进程自己");
+    expect(text).toContain("请通过 server 端点读取该 dialog");
+    expect(text).not.toContain("建议关闭宿主");
+  });
+
+  test("isCleanDialogNotFoundFailure conservatively returns false when localFailure lacks attempts (M1 defense)", () => {
+    const errorWithNoAttempts = {
+      attempts: [{ status: 404 }],
+      local: {
+        attempted: true,
+        reason: "Resource temporarily unavailable: /data/leveldb/LOCK",
+      },
+    };
+    expect(isCleanDialogNotFoundFailure(errorWithNoAttempts)).toBe(false);
   });
 
   test("dialog read failure maps 'Unable to connect' to the connectivity next-step hint", async () => {

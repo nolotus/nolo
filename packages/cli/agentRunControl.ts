@@ -1271,6 +1271,7 @@ export async function spawnLocalBackgroundRun(
      */
     parentDialogId?: string;
     dodCommands?: string[];
+    ephemeral?: boolean;
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
@@ -1347,6 +1348,7 @@ export async function spawnLocalBackgroundRun(
       : {}),
     ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
     ...(spawnHead ? { spawnHead } : {}),
+    ...(input.ephemeral ? { ephemeral: true } : {}),
   };
   fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
 
@@ -1945,7 +1947,11 @@ function printStatusOnce(record: RunRecord, deps: AgentRunControlDeps & { output
   deps.output.write(`elapsed:  ${formatDuration(record.startedAt, record.endedAt)}\n`);
   if (record.endedAt) deps.output.write(`ended:    ${record.endedAt}\n`);
   if (typeof record.exitCode === "number") deps.output.write(`exitCode: ${record.exitCode}\n`);
-  if (record.dialogId) deps.output.write(`dialog:   ${record.dialogId}\n`);
+  if (record.ephemeral) {
+    deps.output.write(`dialog:   ephemeral (no persisted child dialog)\n`);
+  } else if (record.dialogId) {
+    deps.output.write(`dialog:   ${record.dialogId}\n`);
+  }
   if (record.note) deps.output.write(`note:     ${record.note}\n`);
   const activitySummary = formatActivitySummary(record.activity);
   if (activitySummary) deps.output.write(`${activitySummary}\n`);
