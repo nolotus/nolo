@@ -1,4 +1,17 @@
 
+## 0.43.0-alpha.1
+
+## 0.43.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **ai:** 通用派发纪律上移注入层（基线钉数字 + 同家族降级 reviewer） ([4da0f39](https://github.com/nolotus/bun-nolo/commit/4da0f39c66c20b6c9f059b910b577a60ac53f38b))
+
+### Bug Fixes
+
+* **stylex:** 显式合并 stylex.props className 与手写 hook 类，修复 composer 裸样式回归 ([cd48dfe](https://github.com/nolotus/bun-nolo/commit/cd48dfe3999ffbfbc250461133550be457671d94))
+
+
 ## 0.42.0-alpha.1
 
 ## 0.42.0-alpha.1 (2026-08-30)

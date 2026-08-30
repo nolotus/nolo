@@ -419,12 +419,15 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
   const vtStyle = viewTransitionStyle(QUICK_CHAT_COMPOSER_VT_NAME, {
     enabled: surface === "home-primary",
   });
+  // stylex.props() returns { className } which would clobber the handwritten
+  // "quick-chat-box" hook class if spread after it; merge explicitly instead.
+  const cardStyleProps = stylex.props(chatInputCardStyles.card);
   return (
     <div className="quick-chat-container" data-surface={surface} data-testid="quick-chat-shell" style={vtStyle}>
       <div
-        className="quick-chat-box"
         data-hook="chat-esc-chat-input-card"
-        {...stylex.props(chatInputCardStyles.card)}
+        {...cardStyleProps}
+        className={[cardStyleProps.className, "quick-chat-box"].filter(Boolean).join(" ")}
       >
         <TextField className="message-input__textarea-wrap" aria-label={placeholder || "Quick chat"}>
           <TextArea

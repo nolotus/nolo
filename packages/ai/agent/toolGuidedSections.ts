@@ -20,7 +20,7 @@ const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run�
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 观察/停止（wait/signal/proc 语义）。何时派发见「多 Agent 协作」段；本段只讲派发之后怎么盯、怎么排错。
 
 1. 盯梢：**异步派发后立即收尾，等终态通知。** 要立即拿结果就别用异步：<100s 子任务直接 startAgentRun({ wait: true })；已异步派出的用 controlAgentRun(action:"wait", runId) 阻塞到终态。支持终态唤醒的环境（桌面 TUI）run 到终态自动摘要唤醒你，无并行工作则一句话收尾；没有终态唤醒的环境（裸 CLI、服务端 runtime）用 wait 阻塞，同样不要自己循环查。
-2. 等待/禁止轮询/禁空转/别复述 status 的语义以 startAgentRun 与 controlAgentRun 工具描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：多个独立子任务一次派完，之后等各自终态逐个汇总。
+2. 等待/禁止轮询/禁空转/别复述 status 的语义以 startAgentRun 与 controlAgentRun 工具描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：多个独立子任务一次派完，之后等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因它们恰好共用同一执行 agent/通道而自行加「通道串行」的保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有任务间存在真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错：先分诊再下结论。① 复核 agentKey 是否照抄自 listAgents（不是就先修 key，不算通道故障）；② 报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；③ 同一已验证 key 上仍失败且错误明确指向通道（429、鉴权失败、machine offline）→ 才记为通道故障。
 4. 判定「派发通道整体不可用」前，至少对 2 个不同候选各完成「已验证 key + 一次真实派发」；候选不足 2 个就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。只有 status=failed/超时或 progress 长时间毫无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态——别假设「派发了就在跑」。`;
 
@@ -55,9 +55,9 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
    - 通道排除判据：只排除「本次改动的作者」与「当时实测死因的坏通道」（配额耗尽/余额不足/限流，须有当次错误证据）。编排者自身的 agent 身份派出的新实例不带编排者上下文：与作者跨模型家族时是合法 reviewer，且 flash 档常是最便宜的 review 通道；「不烧平台积分」优先级对大跑量执行者成立，对 flash 档 review（成本可忽略）不适用。
    - 不凭名字编造能力，不索取 prompt/密钥/数据库 key 来选人；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
 
-**拆分与派发质量**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖的工作先固化契约再派发，勿让多个 Agent 各自猜同一接口。子任务自包含、边界清晰，只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证和用户沟通。
+**拆分与派发质量**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖的工作先固化契约再派发，勿让多个 Agent 各自猜同一接口。子任务自包含、边界清晰，只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证和用户沟通。brief 对测试类 DoD 必须钉死基线精确数字（派发前亲自跑 bun test \<scope\> 记下 pass/fail，写明既有失败归属），验收时亲自复跑对照——fail 超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」自述按未验证处理。
 
-**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；全部跨家族通道不可用时，同模型家族的派发新实例（上下文仍隔离）经 owner 授权可作降级 reviewer，trailer 注明实际审查者与原因；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 **危险 / 不可逆操作**：
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易等）时，优先预览或向用户确认。

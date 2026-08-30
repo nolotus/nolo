@@ -126,6 +126,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   const dispatch = useAppDispatch();
   const { t } = useTranslation("chat");
 
+  // stylex.props() returns { className } which would clobber the handwritten
+  // "message-input__box" hook class if spread after it; merge explicitly instead.
+  const cardStyleProps = stylex.props(chatInputCardStyles.card);
+
   const currentDialogKey = useCurrentDialogKey();
   const pendingFiles = usePendingFiles(currentDialogKey) as any[];
   const currentDialogConfig = useCurrentDialogConfig();
@@ -974,9 +978,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               点选后靠 iframe 高亮反馈，发送消息后自动清除（见 sendMessage）。 */}
 
           <div
-            className="message-input__box"
             data-hook="chat-esc-chat-input-card"
-            {...stylex.props(chatInputCardStyles.card)}
+            {...cardStyleProps}
+            className={[cardStyleProps.className, "message-input__box"].filter(Boolean).join(" ")}
           >
             <MessageInputComposer
               areaRef={areaRef}

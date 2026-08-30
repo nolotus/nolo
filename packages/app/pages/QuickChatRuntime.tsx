@@ -657,6 +657,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       : undefined;
   // Prefer the current space's bound folder; fall back to the desktop process cwd.
   const workspacePath = currentSpace?.boundFolder?.trim() || desktopCwd;
+  // stylex.props() returns { className } which would clobber the handwritten
+  // "quick-chat-box" hook class if spread after it; merge explicitly instead.
+  const cardStyleProps = stylex.props(chatInputCardStyles.card);
   return (
     <>
       <div
@@ -679,9 +682,16 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
           </div>
         )}
         <div
-          className={`quick-chat-box ${isDragOver ? "drag-over" : ""} ${isSending ? "is-sending" : ""}`}
           data-hook="chat-esc-chat-input-card"
-          {...stylex.props(chatInputCardStyles.card)}
+          {...cardStyleProps}
+          className={[
+            cardStyleProps.className,
+            "quick-chat-box",
+            isDragOver ? "drag-over" : "",
+            isSending ? "is-sending" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
