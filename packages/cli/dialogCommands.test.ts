@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Level } from "level";
 
 import {
+  isLevelDbOpenUnavailableError,
   readDialogSnapshot,
   runDialogDeleteCommand,
   runDialogListCommand,
@@ -39,6 +40,26 @@ function testFetch(fn: TestFetch): typeof fetch {
 
 const dialogId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const secondDialogId = "01BRZ3NDEKTSV4RRFFQ69G5FAA";
+
+/**
+ * NOLO_HOME 回退链测试环境：临时目录 + NOLO_HOME env 注入/还原。
+ * 库本身由用例自行 open/close（锁场景需要保持持有）。
+ */
+async function withNoloHome<T>(
+  fn: (noloHome: string, dbPath: string) => Promise<T>,
+): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), "nolo-dialog-nolo-home-"));
+  const dbPath = join(root, "data", "leveldb");
+  const previousNoloHome = process.env.NOLO_HOME;
+  process.env.NOLO_HOME = root;
+  try {
+    return await fn(root, dbPath);
+  } finally {
+    if (previousNoloHome === undefined) delete process.env.NOLO_HOME;
+    else process.env.NOLO_HOME = previousNoloHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 async function withTempDialogDb<T>(
   fn: (db: Level<string, any>) => Promise<T>,
@@ -184,6 +205,106 @@ describe("cli dialog commands", () => {
       });
       expect(result.source).toBe("http");
       expect(fetchCalls).toBeGreaterThan(0);
+    });
+  });
+
+  test("dialog read falls back to NOLO_HOME db when cwd db misses the key", async () => {
+    await withNoloHome(async (_noloHome, dbPath) => {
+      const id = "01JNOLOHOMEREAD00000000000001";
+      const key = `dialog-user-1-${id}`;
+      const homeDb = new Level<string, any>(dbPath, { valueEncoding: "json" });
+      await homeDb.open();
+      await homeDb.put(key, { id, dbKey: key, status: "done" });
+      await homeDb.close();
+
+      let fetchCalls = 0;
+      const result = await readDialogSnapshot({
+        authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+        dialogId: id, dialogKey: key, limit: 0,
+        fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("unexpected", { status: 500 }); }),
+        // 主候选（<cwd>/data 或 NOLO_SERVER_DB_PATH）无该 key
+        readLocalDialog: async () => ({ meta: undefined, msgs: [] }),
+      });
+
+      expect(result.source).toBe("local-db-fallback");
+      expect(result.meta.status).toBe("done");
+      expect(result.dbPath).toBe(dbPath);
+      expect(fetchCalls).toBe(0);
+      // 主候选 miss 已记录，最终从 NOLO_HOME 候选命中
+      expect(result.localAttempts).toEqual([expect.objectContaining({ status: "miss" })]);
+    });
+  });
+
+  test("dialog read reports not found with tried dirs when cwd and NOLO_HOME dbs both miss", async () => {
+    await withNoloHome(async (_noloHome, dbPath) => {
+      const id = "01JNOLOHOMEMISS00000000000001";
+      const key = `dialog-user-1-${id}`;
+      let fetchCalls = 0;
+      const failure: any = await readDialogSnapshot({
+        authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+        dialogId: id, dialogKey: key, limit: 0,
+        fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("not found", { status: 404 }); }),
+        readLocalDialog: async () => ({ meta: undefined, msgs: [] }),
+      }).catch((error) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.local.attempted).toBe(true);
+      expect(failure.local.reason).toBe("local dialog not found");
+      expect(failure.local.paths).toContain(dbPath);
+      // NOLO_HOME 库目录不存在 → 按库不存在分类，而不是误报锁/其他错误
+      expect(failure.local.attempts.at(-1)).toMatchObject({ path: dbPath, status: "missing" });
+      expect(failure.local.locked).toBeFalsy();
+      expect(fetchCalls).toBeGreaterThan(0);
+    });
+  });
+
+  test("isLevelDbOpenUnavailableError walks cause chain and rejects non-lock open failures (W1)", () => {
+    // 真锁特征直接命中
+    expect(
+      isLevelDbOpenUnavailableError(Object.assign(new Error("Resource temporarily unavailable"), { code: "LEVEL_LOCKED" })),
+    ).toBe(true);
+    // NOT_OPEN 宽泛 code + cause 链带锁特征 → locked
+    expect(
+      isLevelDbOpenUnavailableError(
+        Object.assign(new Error("Database failed to open"), {
+          code: "LEVEL_DATABASE_NOT_OPEN",
+          cause: new Error("io error: /path/LOCK: Resource temporarily unavailable"),
+        }),
+      ),
+    ).toBe(true);
+    // NOT_OPEN 无锁 cause（空库/损坏/权限）→ 不得标 locked
+    expect(
+      isLevelDbOpenUnavailableError(Object.assign(new Error("Database failed to open"), { code: "LEVEL_DATABASE_NOT_OPEN" })),
+    ).toBe(false);
+  });
+
+  test("dialog read reports lock error instead of not found when NOLO_HOME db is locked", async () => {
+    await withNoloHome(async (_noloHome, dbPath) => {
+      const id = "01JNOLOHOMELOCK00000000000001";
+      const key = `dialog-user-1-${id}`;
+      // 模拟宿主进程持锁：建库写入目标 key 并保持打开（排他 LOCK）
+      const holder = new Level<string, any>(dbPath, { valueEncoding: "json" });
+      await holder.open();
+      await holder.put(key, { id, dbKey: key, status: "done" });
+      try {
+        let fetchCalls = 0;
+        const failure: any = await readDialogSnapshot({
+          authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+          dialogId: id, dialogKey: key, limit: 0,
+          fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("not found", { status: 404 }); }),
+          readLocalDialog: async () => ({ meta: undefined, msgs: [] }),
+        }).catch((error) => error);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure.local.attempted).toBe(true);
+        // key 明明存在但库被锁：必须报锁错误，不得伪装成 not found
+        expect(failure.local.locked).toBe(true);
+        expect(failure.local.reason).not.toBe("local dialog not found");
+        expect(failure.local.attempts.at(-1)).toMatchObject({ path: dbPath, status: "locked" });
+        expect(fetchCalls).toBeGreaterThan(0);
+      } finally {
+        await holder.close().catch(() => undefined);
+      }
     });
   });
 

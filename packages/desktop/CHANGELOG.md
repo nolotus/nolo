@@ -1,4 +1,13 @@
 
+## 0.43.0-alpha.2
+
+## 0.43.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **cli:** dialog read falls back to NOLO_HOME data dir, lock errors stay distinct ([793e38d](https://github.com/nolotus/bun-nolo/commit/793e38d5f57a671a0a5f8a2c6f25d51ec7780c71))
+
+
 ## 0.43.0-alpha.1
 
 ## 0.43.0-alpha.1 (2026-08-30)

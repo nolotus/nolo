@@ -24,7 +24,8 @@ import { logger } from "core/logger";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
-import { resolveServerDbPath } from "../database-engine/dbPath";
+import { existsSync } from "node:fs";
+import { resolveLocalDialogDbCandidates, resolveServerDbPath } from "../database-engine/dbPath";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { parsePositiveIntegerOrFallback } from "core/positiveIntegerOrFallback";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
@@ -658,22 +659,76 @@ type LocalDialogRead = (args: {
   limit: number;
 }) => Promise<{ meta: any; msgs: any[] }>;
 
+type LocalDialogReadAtDbPath = (args: {
+  dbPath: string;
+  dialogKey: string;
+  dialogId: string;
+  limit: number;
+}) => Promise<{ meta: any; msgs: any[] }>;
+
+type LocalDialogAttemptStatus = "miss" | "locked" | "missing" | "error";
+
+type LocalDialogAttempt = {
+  path: string;
+  status: LocalDialogAttemptStatus;
+  reason: string;
+};
+
 type LocalDialogFailure = {
   attempted: true;
   reason: string;
   path: string;
+  /** 实际尝试过的候选数据目录（含 NOLO_HOME 回退）。 */
+  paths?: string[];
+  /** 每个候选目录的尝试结果明细。 */
+  attempts?: LocalDialogAttempt[];
+  /** 任一候选库被宿主进程锁住打不开。 */
+  locked?: boolean;
 };
 
 function localDialogDbPath() {
   return resolveServerDbPath();
 }
 
+function localDialogDbCandidates() {
+  return resolveLocalDialogDbCandidates();
+}
+
+/**
+ * LevelDB 进程锁是排他的：宿主进程持锁时本地只读打不开。这类「打不开/被锁」
+ * 必须与「库不存在」「key 不存在」区分，不得伪装成 not found。
+ */
+export function isLevelDbOpenUnavailableError(error: unknown) {
+  if (isLevelLockError(error)) return true;
+  // LEVEL_DATABASE_NOT_OPEN 是「open 失败」的宽泛 code：空库/损坏/权限等非锁
+  // 失败也会带它。只有 cause 链上带真锁特征（LEVEL_LOCKED / EAGAIN / /LOCK）
+  // 才判 locked，避免把非锁 open 失败误导成「关闭宿主进程」提示。
+  let current: unknown = error;
+  for (let depth = 0; current != null && depth < 5; depth += 1) {
+    if (isLevelLockError(current)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function describeLocalDialogFailure(error: unknown): LocalDialogFailure {
-  return {
+  const attempts =
+    typeof error === "object" &&
+    error !== null &&
+    Array.isArray((error as { localAttempts?: unknown }).localAttempts)
+      ? ((error as { localAttempts: LocalDialogAttempt[] }).localAttempts)
+      : undefined;
+  const failure: LocalDialogFailure = {
     attempted: true,
     reason: toErrorMessage(error),
     path: localDialogDbPath(),
   };
+  if (attempts && attempts.length > 0) {
+    failure.attempts = attempts;
+    failure.paths = [...new Set(attempts.map((attempt) => attempt.path))];
+    failure.locked = attempts.some((attempt) => attempt.status === "locked");
+  }
+  return failure;
 }
 
 function isExplicitDialogIdMismatch(meta: unknown, dialogId: string) {
@@ -699,6 +754,162 @@ async function readDialogFromLocalDb(
   };
 }
 
+/**
+ * 回退候选库（NOLO_HOME/data/leveldb）的默认只读读取器。
+ *
+ * 与主读取（serverDb 单例）不同，这里按路径临时开库、读完即关：
+ * - 绝不在回退路径上创建库：目录不存在按「missing」分类；createIfMissing: false 防误建；
+ * - 编码与宿主写入端一致（serverStoreFactory 的 safeJsonEncoding）；
+ * - 被锁打不开快速失败（classic-level 持锁即 EWOULDBLOCK），由调用方按 locked 分类。
+ */
+async function readLocalDialogAtDbPathDefault(args: {
+  dbPath: string;
+  dialogKey: string;
+  dialogId: string;
+  limit: number;
+}): Promise<{ meta: any; msgs: any[] }> {
+  if (!existsSync(args.dbPath)) {
+    throw Object.assign(
+      new Error(`local database directory does not exist: ${args.dbPath}`),
+      { code: "LEVEL_DATABASE_DIR_MISSING" },
+    );
+  }
+  const [{ Level }, { safeJsonEncoding }, { fetchMessages }] = await Promise.all([
+    import("level"),
+    import("../database-engine/serverStoreFactory"),
+    import("../chat/messages/fetchMessages"),
+  ]);
+  const db = new Level<string, any>(args.dbPath, {
+    valueEncoding: safeJsonEncoding,
+    createIfMissing: false,
+  });
+  try {
+    await db.open();
+    let meta: any;
+    try {
+      meta = await db.get(args.dialogKey);
+    } catch (error) {
+      if (isLevelNotFoundError(error)) return { meta: undefined, msgs: [] };
+      throw error;
+    }
+    const msgs = await fetchMessages(db, args.dialogId, {
+      limit: args.limit,
+      throwOnError: true,
+    });
+    return { meta, msgs };
+  } finally {
+    await db.close().catch(() => undefined);
+  }
+}
+
+/**
+ * 本地读取回退链：按候选目录顺序尝试（<cwd>/data/leveldb → NOLO_HOME/data/leveldb），
+ * 前一候选读不到目标 key 且下一候选库存在时继续；任一候选命中即返回。
+ *
+ * 错误分类（不得让锁错误伪装成 not found）：
+ * - 主候选：非 not-found / 非锁的真实本地库错误直接抛出（沿用既有语义，不落入 HTTP）；
+ * - 回退候选：best-effort，逐项记录 miss/locked/error，绝不中途抛出；
+ * - 全部未命中时按「锁 > 真实错误 > not found」收口，并携带 attempts 明细。
+ */
+async function readDialogFromLocalDbWithFallback(args: {
+  dialogKey: string;
+  dialogId: string;
+  limit: number;
+  readLocalDialog?: LocalDialogRead;
+  readLocalDialogAtDbPath?: LocalDialogReadAtDbPath;
+}): Promise<{
+  meta: any;
+  msgs: any[];
+  source: ReadSource;
+  dbPath: string;
+  /** 回退链逐候选明细（与快照自身的 HTTP attempts 字段区分）。 */
+  localAttempts: LocalDialogAttempt[];
+}> {
+  const candidates = localDialogDbCandidates();
+  const attempts: LocalDialogAttempt[] = [];
+  let missMessage = "local dialog not found";
+  let lockedError: unknown;
+  let genericError: unknown;
+
+  // 候选 1：既有主读取（cwd / NOLO_SERVER_DB_PATH 语义保留）。
+  const primaryPath = candidates[0];
+  try {
+    const local = await readDialogFromLocalDb(
+      args.dialogKey,
+      args.dialogId,
+      args.limit,
+      args.readLocalDialog,
+    );
+    const localMeta = local.meta;
+    if (!localMeta) {
+      attempts.push({ path: primaryPath, status: "miss", reason: missMessage });
+    } else if (isExplicitDialogIdMismatch(localMeta, args.dialogId)) {
+      missMessage = "local dialog id does not match requested dialog";
+      attempts.push({ path: primaryPath, status: "miss", reason: missMessage });
+    } else {
+      return { ...local, source: "local-db-fallback" as ReadSource, dbPath: primaryPath, localAttempts: attempts };
+    }
+  } catch (error) {
+    if (!isLevelNotFoundError(error) && !isLevelDbOpenUnavailableError(error)) throw error;
+    const locked = isLevelDbOpenUnavailableError(error);
+    attempts.push({
+      path: primaryPath,
+      status: locked ? "locked" : "miss",
+      reason: toErrorMessage(error),
+    });
+    if (locked && !lockedError) lockedError = error;
+  }
+
+  // 候选 2+：NOLO_HOME 回退（只读、不建库）。
+  for (const dbPath of candidates.slice(1)) {
+    if (!existsSync(dbPath)) {
+      attempts.push({
+        path: dbPath,
+        status: "missing",
+        reason: `database directory does not exist: ${dbPath}`,
+      });
+      continue;
+    }
+    try {
+      const readAt = args.readLocalDialogAtDbPath ?? readLocalDialogAtDbPathDefault;
+      const result = await readAt({
+        dbPath,
+        dialogKey: args.dialogKey,
+        dialogId: args.dialogId,
+        limit: args.limit,
+      });
+      if (!result?.meta) {
+        attempts.push({ path: dbPath, status: "miss", reason: missMessage });
+      } else if (isExplicitDialogIdMismatch(result.meta, args.dialogId)) {
+        missMessage = "local dialog id does not match requested dialog";
+        attempts.push({ path: dbPath, status: "miss", reason: missMessage });
+      } else {
+        return { ...result, source: "local-db-fallback" as ReadSource, dbPath, localAttempts: attempts };
+      }
+    } catch (error) {
+      const locked = isLevelDbOpenUnavailableError(error);
+      attempts.push({
+        path: dbPath,
+        status: locked ? "locked" : "error",
+        reason: toErrorMessage(error),
+      });
+      if (locked && !lockedError) lockedError = error;
+      else if (!locked && !genericError) genericError = error;
+    }
+  }
+
+  const aggregate = (error: unknown, code?: string) => {
+    const err = error instanceof Error ? error : new Error(toErrorMessage(error));
+    Object.assign(err, { localAttempts: attempts });
+    if (code) (err as Error & { code?: string }).code = code;
+    return err;
+  };
+
+  if (lockedError) throw aggregate(lockedError);
+  if (genericError) throw aggregate(genericError);
+  throw aggregate(new Error(missMessage), "LEVEL_NOT_FOUND");
+}
+
 export async function readDialogSnapshot(args: {
   authToken: string;
   base: string;
@@ -707,6 +918,8 @@ export async function readDialogSnapshot(args: {
   fetchImpl: CliFetchImpl;
   limit: number;
   readLocalDialog?: LocalDialogRead;
+  /** 注入指定路径库的读取器（回退候选 NOLO_HOME 用），默认按路径临时开库。 */
+  readLocalDialogAtDbPath?: LocalDialogReadAtDbPath;
   /** Skip the meta fetch and only return messages. */
   messagesOnly?: boolean;
 }) {
@@ -720,22 +933,17 @@ export async function readDialogSnapshot(args: {
   // Only fall through on a local miss; a real local DB error must not be hidden.
   let localFailure: LocalDialogFailure | undefined;
   try {
-    const local = await readDialogFromLocalDb(
-      args.dialogKey,
-      args.dialogId,
-      args.limit,
-      args.readLocalDialog,
-    );
+    const local = await readDialogFromLocalDbWithFallback({
+      dialogKey: args.dialogKey,
+      dialogId: args.dialogId,
+      limit: args.limit,
+      readLocalDialog: args.readLocalDialog,
+      readLocalDialogAtDbPath: args.readLocalDialogAtDbPath,
+    });
     // The storage key is authoritative: the record was fetched by args.dialogKey.
     // dbKey/contentKey are redundant copies and may be stale after migration.
+    // （meta 校验已在回退链内逐候选完成，走到这里即命中有效记录。）
     const localMeta = local.meta;
-    if (!localMeta || isExplicitDialogIdMismatch(localMeta, args.dialogId)) {
-      const miss = new Error(
-        !localMeta ? "local dialog not found" : "local dialog id does not match requested dialog",
-      );
-      (miss as Error & { code?: string }).code = "LEVEL_NOT_FOUND";
-      throw miss;
-    }
     const localKey =
       localMeta && typeof localMeta === "object"
         ? String(localMeta.dbKey ?? localMeta.contentKey ?? "")
@@ -753,11 +961,7 @@ export async function readDialogSnapshot(args: {
     localFailure = describeLocalDialogFailure(error);
     // Only a confirmed missing key means "try the server". Lock/IO errors are
     // expected local-runtime fallbacks and are retained as diagnostics.
-    const localDbUnavailable =
-      isLevelLockError(error) ||
-      (typeof error === "object" &&
-        (error as { code?: unknown }).code === "LEVEL_DATABASE_NOT_OPEN");
-    if (!isLevelNotFoundError(error) && !localDbUnavailable) throw error;
+    if (!isLevelNotFoundError(error) && !isLevelDbOpenUnavailableError(error)) throw error;
   }
 
   try {
@@ -777,7 +981,8 @@ export async function readDialogSnapshot(args: {
         local?: LocalDialogFailure;
       };
       enriched.local = localFailure;
-      enriched.message = `${enriched.message}; local read attempted (${localFailure.path}): ${localFailure.reason}`;
+      const attemptedPaths = localFailure.paths ?? [localFailure.path];
+      enriched.message = `${enriched.message}; local read attempted (${attemptedPaths.join(" → ")}): ${localFailure.reason}`;
     }
     throw error;
   }
@@ -1133,7 +1338,21 @@ function formatDialogReadFailure(error: unknown): string {
     lines.push("  local:");
     lines.push(`    - attempted: yes`);
     lines.push(`    - reason: ${localFailure.reason}`);
-    lines.push(`    - database: ${localFailure.path}`);
+    if (localFailure.attempts?.length) {
+      lines.push(
+        "    - databases tried（回退链: <cwd>/data/leveldb → NOLO_HOME/data/leveldb）:",
+      );
+      for (const attempt of localFailure.attempts) {
+        lines.push(`      - ${attempt.path} — ${attempt.status}: ${attempt.reason}`);
+      }
+    } else {
+      lines.push(`    - database: ${localFailure.path}`);
+    }
+    if (localFailure.locked) {
+      lines.push(
+        "    - 宿主进程持有 LevelDB 排他锁时，本地只读不可用：建议关闭宿主（如 dev server / 运行中的 agent run）后重试，或改用 server 端点读取。",
+      );
+    }
   }
 
   if (attempts.length > 0) {
@@ -1176,8 +1395,13 @@ function formatDialogReadFailure(error: unknown): string {
   });
 
   if (allNotFound) {
+    const triedPaths = localFailure?.paths?.length
+      ? `（已尝试：${localFailure.paths.join(" → ")}）`
+      : "";
     lines.push(
-      "  next-step: 目标 dialog 可能不在这些 server 上；本地 run 的对话在本地库（<cwd>/data/leveldb），请用存储方对应环境/服务读取，运行中 run 可用 `nolo agent status <runId|pid>` 或 dialog 的 status 模式查摘要。",
+      "  next-step: 目标 dialog 可能不在这些 server 上；本地 run 的对话按 <cwd>/data/leveldb → NOLO_HOME/data/leveldb（默认 ~/.nolo）回退查找" +
+        triedPaths +
+        "，请用存储方对应环境/服务读取，运行中 run 可用 `nolo agent status <runId|pid>` 或 dialog 的 status 模式查摘要。",
     );
   } else if (hasConnRefusedOrTimeout) {
     lines.push(
