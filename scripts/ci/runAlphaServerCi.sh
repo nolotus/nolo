@@ -662,6 +662,12 @@ schedule_nolo_ci_restart_after_job() {
   echo "🔁 nolo-ci core logic changed; restart scheduled after job ${job_id} succeeds"
 }
 
+gen_diag_token() {
+  # SSR 自检端点的部署级随机 token（生命周期 = 单次部署/维护窗口）。
+  # 不落盘、不进日志：只经环境变量注入 pm2 env，并由探针经请求头回传。
+  openssl rand -hex 16 2>/dev/null || od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+}
+
 deploy_alpha_artifact() {
   # 机械化守卫：alpha 启动/部署前断言 SSR render bundle 存在
   [ -f "$REPO_DIR/packages/server/.render-dist/render.mjs" ] || {
@@ -726,6 +732,7 @@ deploy_alpha_artifact() {
   NOLO_SERVICE_HEALTH_URL="$ALPHA_LOCAL_BASE/ready" \
   NOLO_DEPLOY_WINDOW_PUBLIC_PROBE_URL="$ALPHA_PUBLIC_BASE/health" \
   NOLO_CI_DIAG=1 \
+  NOLO_CI_DIAG_TOKEN="${SSR_SELFCHECK_TOKEN:-}" \
   bash ./scripts/release/deployRemote.sh
 
   NOLO_REPO_DIR="$REPO_DIR" \
@@ -1170,15 +1177,28 @@ assert_runtime_render_bundle() {
 probe_alpha_agents_ssr() {
   log "Probe alpha /agents SSR"
 
-  # 1. SSR 自检端点探针
+  # 1. SSR 自检端点探针：带本次部署生成的 token 请求头；端点 404 视为
+  #    token/env 未对齐（自检静默失效），直接判失败。
+  local diag_token="${SSR_SELFCHECK_TOKEN:-}"
   local selfcheck_url="${ALPHA_LOCAL_BASE}/api/admin/ssr-selfcheck"
   local selfcheck_file
   selfcheck_file="$(mktemp)"
   local selfcheck_code
-  selfcheck_code="$(curl -s -w '%{http_code}' -o "$selfcheck_file" "$selfcheck_url" || echo "000")"
+  if [[ -n "$diag_token" ]]; then
+    # 注意：token 只进请求头，不回显（响应体不含 token）。
+    selfcheck_code="$(curl -s -w '%{http_code}' -H "x-nolo-ci-diag-token: $diag_token" -o "$selfcheck_file" "$selfcheck_url" || echo "000")"
+  else
+    selfcheck_code="$(curl -s -w '%{http_code}' -o "$selfcheck_file" "$selfcheck_url" || echo "000")"
+  fi
   echo "--- [diag] SSR Selfcheck Response (HTTP $selfcheck_code) ---" >&2
   cat "$selfcheck_file" >&2
   echo "" >&2
+
+  if [[ "$selfcheck_code" != "200" ]]; then
+    echo "FATAL: /api/admin/ssr-selfcheck returned HTTP $selfcheck_code (expected 200; 404 usually means diag token/env mismatch)" >&2
+    rm -f "$selfcheck_file"
+    return 1
+  fi
 
   local error_msg
   error_msg="$(python3 -c "
@@ -1251,6 +1271,10 @@ alpha_deploy() {
   # alpha_core_restart_required 永远判定「纯前端变更」→ 服务端代码变更从不触发
   # 进程重启（2026-08-13 实测：两次部署 succeeded 但 nolo 进程 87 分钟未重启）。
   prev_head="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+  # 每次部署生成一枚新的 SSR 自检 token：随 pm2 env 注入（经 deployRemote.sh
+  # 环境透传，见 deploy_alpha_artifact），同一次运行中的探针再以请求头回传同一枚。
+  # 生命周期 = 单次部署；不落盘、不回显、不进日志。
+  SSR_SELFCHECK_TOKEN="$(gen_diag_token)"
   disk_snapshot "start"
   timed_phase "preflight-disk-check" preflight_disk_check
   disk_snapshot "after-preflight"
@@ -1449,6 +1473,10 @@ alpha_maintenance() {
   systemctl restart caddy
 
   log "Ensure alpha service"
+  # 重建/重注册 pm2 env 时同样配一枚新 diag token（与 ssrSelfcheckHandler 的
+  # token 门控配套）；生命周期 = 本次维护窗口，不落盘、不回显。
+  local maintenance_diag_token
+  maintenance_diag_token="$(gen_diag_token)"
   NOLO_BRANCH=alpha \
   NOLO_RELEASE_SHA="$BUILD_SHA" \
   NOLO_REPO_DIR="$REPO_DIR" \
@@ -1465,6 +1493,7 @@ alpha_maintenance() {
   NOLO_SERVICE_HEALTH_URL="$ALPHA_LOCAL_BASE/ready" \
   NOLO_DEPLOY_WINDOW_PUBLIC_PROBE_URL="$ALPHA_PUBLIC_BASE/health" \
   NOLO_CI_DIAG=1 \
+  NOLO_CI_DIAG_TOKEN="$maintenance_diag_token" \
   bash ./scripts/release/deployRemote.sh
 
   log "Local health"

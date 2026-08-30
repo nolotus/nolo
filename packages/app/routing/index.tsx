@@ -252,6 +252,15 @@ function useRouterContext(): RouterContextValue {
   return ctx;
 }
 
+// SSR-safe 降级可见性：hooks 在无 RouterContext 时按事故修复行为静默 no-op，
+// 但降级必须可观测——每进程最多 warn 一次（防刷屏），供探针/日志发现静默降级。
+let missingRouterContextWarned = false;
+function warnMissingRouterContextOnce(): void {
+  if (missingRouterContextWarned) return;
+  missingRouterContextWarned = true;
+  console.warn("[routing] RouterContext missing during SSR — navigation no-op");
+}
+
 // RouterProvider
 
 export function RouterProvider({
@@ -390,13 +399,21 @@ const DEFAULT_FALLBACK_LOCATION: Location = {
 
 export function useLocation(): Location {
   const ctx = useContext(RouterContext);
-  return ctx?.location ?? DEFAULT_FALLBACK_LOCATION;
+  if (!ctx) {
+    warnMissingRouterContextOnce();
+    return DEFAULT_FALLBACK_LOCATION;
+  }
+  return ctx.location;
 }
 
 export function useNavigate(): (to: To | number, options?: NavigateOptions) => void {
   const ctx = useContext(RouterContext);
   const matches = useContext(RouteMatchContext);
   const routeBase = matches?.at(-1)?.pathnameBase ?? "/";
+
+  if (!ctx) {
+    warnMissingRouterContextOnce();
+  }
 
   return useCallback(
     (to: To | number, options?: NavigateOptions) => {
@@ -417,7 +434,11 @@ export function useNavigate(): (to: To | number, options?: NavigateOptions) => v
 
 export function useNavigationType(): "POP" | "PUSH" | "REPLACE" {
   const ctx = useContext(RouterContext);
-  return ctx?.navigationType ?? "POP";
+  if (!ctx) {
+    warnMissingRouterContextOnce();
+    return "POP";
+  }
+  return ctx.navigationType;
 }
 
 export function useParams<K extends string = string>(): Readonly<

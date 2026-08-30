@@ -1,4 +1,13 @@
 
+## 0.38.0-alpha.2
+
+## 0.38.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **security:** ssr-selfcheck 端点部署级 token 门控 + routing 降级可见性 ([f11200a](https://github.com/nolotus/bun-nolo/commit/f11200ac9e66046784a7a4e8307a0b8dfbc5420e))
+
+
 ## 0.38.0-alpha.1
 
 ## 0.38.0-alpha.1 (2026-08-30)
