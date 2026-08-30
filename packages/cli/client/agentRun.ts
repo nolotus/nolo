@@ -23,6 +23,10 @@ import {
   formatAssistantResponseForCli,
 } from "./agentRunOutput";
 import { readStreamingAgentRun } from "./agentRunStream";
+import {
+  describeClientVersionTooOldFailure,
+  isClientVersionTooOldFailure,
+} from "./clientVersionTooOldFailure";
 
 import {
   type DispatchPlan,
@@ -493,6 +497,13 @@ function describeLocalRunFailure(
   message: string,
   rawError?: unknown,
 ): string {
+  // 客户端版本闸门拒绝（本地 self-check 在 providerResolution 抛错，Error 上带
+  // code + 结构化 detail）：渲染含模型/所需版本/升级命令的可操作提示。与
+  // agentRunStream 的 server-run 分支共用同一份渲染，避免文案漂移。
+  if (isClientVersionTooOldFailure(message, rawError)) {
+    return describeClientVersionTooOldFailure(message, rawError);
+  }
+
   // Extract an in-band busy detail (e.g. "runinfra HTTP 503 (pc_123, 2
   // attempts)") carried on the thrown error's `.detail`. It survives
   // `toErrorMessage` only through the raw object, so it's threaded in here.

@@ -92,4 +92,8 @@ export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约（与
    - 选人与任务匹配参考：
      * **能力匹配**：若任务明确需要特定额外能力（浏览器/图片/表格/邮件/数据库），优先筛选 tools 字段覆盖对应能力的候选；
      * **成本与配额**：在满足能力的同档候选中，优先选择成本低（低 inputPrice）或走用户自建/私有凭据的通道；
-     * **tools 字段只反映额外能力，不反映 coding 能力**：writeFile/editFile/execBash/applyEdit/gitCommit 等代码工具由 host 自动注入，tools=[] 不代表不能写代码，不要据此排除候选。`;
+     * **tools 字段只反映额外能力，不反映 coding 能力**：writeFile/editFile/execBash/applyEdit/gitCommit 等代码工具由 host 自动注入，tools=[] 不代表不能写代码，不要据此排除候选。
+   - 429 限流与知情权契约：
+     * 任何用户私有凭据与自建 Agent（即满足 isOwned=true、isOAuth=true 或 apiSource="custom" 之一，含收藏与未收藏）若出现在 listAgents 返回的 unavailableAgents 中（429 限流冷却期），禁止静默跳过；
+     * 改派平台 Agent（消耗平台积分）前必须在回复中告知用户：哪个订阅/自建 agent 限流、预计何时恢复（nextAvailableAt）、本次将扣平台积分；
+     * 若任务不紧急，建议等恢复或询问用户。`;

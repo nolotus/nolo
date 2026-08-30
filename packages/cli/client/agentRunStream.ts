@@ -1,4 +1,9 @@
 import { toErrorMessage } from "core/errorMessage";
+import {
+  attachStreamFrameErrorFields,
+  describeClientVersionTooOldFailure,
+  isClientVersionTooOldFailure,
+} from "./clientVersionTooOldFailure";
 import { createSseToolEventAdapter } from "./toolOutput";
 import { buildTurnTokenUsage, formatUsage, shouldShowUsage } from "./tokenUsage";
 import { Spinner } from "./agentRunSpinner";
@@ -56,8 +61,13 @@ export async function readStreamingAgentRun(
       dialogId = payload.dialogId;
     }
     if (payload?.error || payload?.type === "error") {
-      throw new Error(
-        String(payload.error || payload.message || "Agent stream failed"),
+      // 结构化字段透传（三层贯通第 2→3 层）：server 的版本闸门拒绝帧带
+      // code + detail，挂到 Error 上供 describeClientVersionTooOldFailure /
+      // describeLocalRunFailure 渲染可操作提示。其余错误帧不带这些字段，
+      // 行为不变。
+      throw attachStreamFrameErrorFields(
+        new Error(String(payload.error || payload.message || "Agent stream failed")),
+        payload,
       );
     }
     if (payload?.type === "done") {
@@ -153,6 +163,13 @@ export async function readStreamingAgentRun(
         "[nolo] The agent run may still finish on the server; read the dialog before retrying.\n",
       );
       return { exitCode: 0, dialogId, streamInterrupted: true };
+    }
+    if (isClientVersionTooOldFailure(message, error)) {
+      // 版本闸门拒绝：渲染含升级指引的可操作文案，而不是裸的
+      // "Agent stream failed"。dialog 已建时仍走下方保留现场分支（闸门拒绝
+      // 理论上发生在 dialog 创建前，这里只是防御）。
+      options.output.write(`\n${describeClientVersionTooOldFailure(message, error)}`);
+      return { exitCode: 1 };
     }
     options.output.write(`\n[nolo] Agent stream failed: ${message}\n`);
     return { exitCode: 1 };

@@ -48,6 +48,9 @@ const mockQueryFetch = (records: unknown[]) => {
         { status: 200 },
       );
     }
+    if (url.includes("/rpc/listFavorites") || url.includes("/api/v1/db/read/")) {
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }
     throw new Error(`unexpected fetch: ${url}`);
   }) as typeof fetch;
 };
@@ -116,6 +119,90 @@ describe("listAgentsFunc", () => {
     const result = await listAgentsFunc({}, thunkApi);
     expect((result.rawData as any).total).toBe(0);
     expect((result.rawData as any).agents).toEqual([]);
+    expect((result.rawData as any).unavailableCount).toBe(0);
+    expect((result.rawData as any).unavailableAgents).toEqual([]);
+  });
+
+  it("无 429 agent 时 unavailableAgents 为空数组且 unavailableCount 为 0", async () => {
+    mockQueryFetch(agentRecords);
+    const result = await listAgentsFunc({}, buildThunkApi());
+    const rawData = result.rawData as any;
+    expect(rawData.unavailableCount).toBe(0);
+    expect(rawData.unavailableAgents).toEqual([]);
+  });
+
+  it("存在 429 agent 时 agents 数组不含它、unavailableCount 正确、unavailableAgents 含其摘要且字段齐全", async () => {
+    const cooldownDeadline = Date.now() + 120000;
+    const mixedRecords = [
+      ...agentRecords,
+      {
+        id: "agent-rate-limited",
+        dbKey: "agent-user-1-agent-rate-limited",
+        userId: "user-1",
+        name: "Rate Limited Agent",
+        model: "claude-3-5-sonnet",
+        provider: "anthropic",
+        apiSource: "custom",
+        isFavorite: true,
+        favoritedAt: 1700000000000,
+        nextAvailableAt: cooldownDeadline,
+        updatedAt: "2026-07-03T00:00:00.000Z",
+        tools: ["editFile"],
+      },
+    ];
+    mockQueryFetch(mixedRecords);
+    const result = await listAgentsFunc({}, buildThunkApi());
+    const rawData = result.rawData as any;
+
+    expect(rawData.total).toBe(2);
+    expect(rawData.agents).toHaveLength(2);
+    expect(rawData.agents.some((a: any) => a.name === "Rate Limited Agent")).toBe(false);
+
+    expect(rawData.unavailableCount).toBe(1);
+    expect(rawData.unavailableAgents).toHaveLength(1);
+
+    const unavailable = rawData.unavailableAgents[0];
+    expect(unavailable.name).toBe("Rate Limited Agent");
+    expect(unavailable.model).toBe("claude-3-5-sonnet");
+    expect(unavailable.provider).toBe("anthropic");
+    expect(unavailable.apiSource).toBe("custom");
+    expect(unavailable.isFavorite).toBe(true);
+    expect(unavailable.isOAuth).toBe(false);
+    expect(typeof unavailable.isOwned).toBe("boolean");
+    expect(unavailable.nextAvailableAt).toBe(cooldownDeadline);
+    expect(unavailable.favoritedAt).toBe(1700000000000);
+    expect(unavailable.updatedAt).toBe("2026-07-03T00:00:00.000Z");
+  });
+
+  it("showUnavailable: true 时 agents 包含 429 agent，unavailableAgents 仍返回其摘要", async () => {
+    const cooldownDeadline = Date.now() + 120000;
+    const mixedRecords = [
+      ...agentRecords,
+      {
+        id: "agent-rate-limited",
+        dbKey: "agent-user-1-agent-rate-limited",
+        userId: "user-1",
+        name: "Rate Limited Agent",
+        model: "claude-3-5-sonnet",
+        provider: "anthropic",
+        apiSource: "custom",
+        isFavorite: true,
+        nextAvailableAt: cooldownDeadline,
+        updatedAt: "2026-07-03T00:00:00.000Z",
+      },
+    ];
+    mockQueryFetch(mixedRecords);
+    const result = await listAgentsFunc({ showUnavailable: true }, buildThunkApi());
+    const rawData = result.rawData as any;
+
+    expect(rawData.total).toBe(3);
+    expect(rawData.agents).toHaveLength(3);
+    expect(rawData.agents.some((a: any) => a.name === "Rate Limited Agent")).toBe(true);
+
+    expect(rawData.unavailableCount).toBe(1);
+    expect(rawData.unavailableAgents).toHaveLength(1);
+    expect(rawData.unavailableAgents[0].name).toBe("Rate Limited Agent");
+    expect(rawData.unavailableAgents[0].nextAvailableAt).toBe(cooldownDeadline);
   });
 });
 
@@ -140,6 +227,8 @@ describe("agent tool contracts", () => {
   it("requires the runnable agentKey and rejects display names", () => {
     expect(listAgentsFunctionSchema.description).toContain("agentKey");
     expect(listAgentsFunctionSchema.description).toContain("Copy `agentKey` verbatim into startAgentRun");
+    expect(listAgentsFunctionSchema.description).toContain("unavailableAgents");
+    expect(listAgentsFunctionSchema.description).toContain("unavailableCount");
     expect(readAgentFunctionSchema.description).toContain("exact agentKey from listAgents");
     expect(readAgentFunctionSchema.description).toContain("do not pass the display name");
     expect(readAgentFunctionSchema.parameters.properties.agent.description).toContain("Do not use the display name");

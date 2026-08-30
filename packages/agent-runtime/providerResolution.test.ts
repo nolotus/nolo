@@ -699,6 +699,39 @@ describe("client version gate in provider resolution (local runtime self-check)"
     ).rejects.toThrow(/模型「kimi-k3」需要 nolo-cli ≥ 0\.38\.0-alpha\.4/);
   });
 
+  test("local self-check rejection carries structured code + detail for CLI rendering (three-layer detail, layer 1)", async () => {
+    let thrown: unknown;
+    try {
+      await buildProviderExecutionPlan({
+        agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+        env: {
+          NOLO_SERVER: "https://nolo.chat",
+          AUTH_TOKEN: "token",
+          NOLO_CLI_VERSION: "0.38.0-alpha.3",
+        },
+        runtimeKind: "local",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const gateError = thrown as Error & {
+      code?: string;
+      detail?: Record<string, unknown>;
+    };
+    expect(gateError.code).toBe("CLIENT_VERSION_TOO_OLD");
+    // 与 server 侧 ClientVersionTooOldError 同一份 detail 形状，CLI
+    // describeLocalRunFailure 据此渲染可操作升级提示（此前只抛裸 message）。
+    expect(gateError.detail).toMatchObject({
+      reason: "CLIENT_VERSION_TOO_OLD",
+      model: "kimi-k3",
+      minClientVersion: "0.38.0-alpha.4",
+      clientVersion: "0.38.0-alpha.3",
+      upgradeCommand: "npx nolo-cli@latest",
+      retryable: false,
+    });
+  });
+
   test("passes and attaches clientVersion when local version is at or above minimum", async () => {
     const planAlpha = await buildProviderExecutionPlan({
       agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },

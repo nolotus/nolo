@@ -101,9 +101,10 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       description: "Confirmed dialog ids or dbKeys to delete.",
     },
   }, ["query"]);
-  add("listAgents", "List the current user's agents with runnable agentKey for delegation. Copy the agentKey verbatim; do not infer it from the display name.", {
+  add("listAgents", "List the current user's agents with runnable agentKey for delegation. Copy the agentKey verbatim; do not infer it from the display name. Agents currently rate-limited (429) are hidden by default and summarized in `unavailableAgents` with `unavailableCount`; pass showUnavailable: true to include them in `agents`.", {
     space: stringToolParam("Optional space id or URL."),
     publicOnly: { type: "boolean", description: "Only show public agents." },
+    showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
     agent: stringToolParam("Exact agentKey from listAgents (preferred; copy verbatim; plain id or URL are compatibility fallbacks)."),

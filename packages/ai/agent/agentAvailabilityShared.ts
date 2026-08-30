@@ -45,7 +45,7 @@ function clampCooldownDeadline(at: number, now: number): number {
  */
 export function isAgentUnavailableNow(
   agent:
-    | ({ nextAvailableAt?: number } & Record<string, unknown>)
+    | { nextAvailableAt?: number }
     | null
     | undefined,
   now = Date.now(),

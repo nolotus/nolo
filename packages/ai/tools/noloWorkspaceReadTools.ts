@@ -1,6 +1,13 @@
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { DataType } from "create/types";
-import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields } from "../agent/safeAgentSummary";
+import {
+  toSafeAgentSummary,
+  sortSafeAgentSummaries,
+  toCompactAgentSummary,
+  toUnavailableAgentSummary,
+  omitNullishAgentSummaryFields,
+  type SafeAgentSummary,
+} from "../agent/safeAgentSummary";
 import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
@@ -524,7 +531,7 @@ export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDispla
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List the current user's Nolo agents as safe summaries. By default the `agents` array carries a compact agent-selection projection per agent: the runnable `agentKey` (agent-<userId>-<id> for owned, agent-pub-<id> for public) plus name, model, provider, apiSource, tools, isFavorite, isOAuth, isOwned, isPublic; null-valued keys are omitted. Copy `agentKey` verbatim into startAgentRun. Set `verbose: true` for troubleshooting to also get prices, introduction, modelAbility and timestamps. Results prioritize favorites; within that, user OAuth/custom agents first, then other owned agents, then public agents. Agents currently rate-limited (429, nextAvailableAt in the future) are hidden by default so a caller won't pick one that can't run right now; set `showUnavailable: true` to include them. The response carries an `unavailableCount` for the number of hidden rate-limited agents.",
+    "List the current user's Nolo agents as safe summaries. By default the `agents` array carries a compact agent-selection projection per agent: the runnable `agentKey` (agent-<userId>-<id> for owned, agent-pub-<id> for public) plus name, model, provider, apiSource, tools, isFavorite, isOAuth, isOwned, isPublic; null-valued keys are omitted. Copy `agentKey` verbatim into startAgentRun. Set `verbose: true` for troubleshooting to also get prices, introduction, modelAbility and timestamps. Results prioritize favorites; within that, user OAuth/custom agents first, then other owned agents, then public agents. Agents currently rate-limited (429, nextAvailableAt in the future) are hidden by default; set `showUnavailable: true` to include them in `agents`. The response also returns `unavailableCount` and `unavailableAgents` (summaries with agentKey, name, model, provider, apiSource, isFavorite, isOAuth, isOwned, nextAvailableAt, favoritedAt, updatedAt) showing rate-limited agents and their expected recovery timestamps.",
   parameters: {
     type: "object",
     properties: {
@@ -581,15 +588,17 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
 
   // 429 限流中（nextAvailableAt 在未来）的 agent 默认不列出，避免 AI/用户
   // 选到当下打不了的 agent。deadline <= now 的视为已恢复，正常保留。
-  // 先应用 publicOnly（及任何其它维度过滤），再统计 unavailableCount，保证
-  // 计数与最终列表同口径。
+  // 先应用 publicOnly（及任何其它维度过滤），再统计 unavailableCount 与 unavailableAgents，保证
+  // 计数与列表同口径。
   const now = Date.now();
   if (args?.publicOnly === true) {
     agents = agents.filter((agent) => agent.isPublic);
   }
-  const unavailableCount = agents.filter((a) => isAgentUnavailableNow(a as any, now)).length;
+  const unavailableList = agents.filter((a) => isAgentUnavailableNow(a, now));
+  const unavailableCount = unavailableList.length;
+  const unavailableAgents = sortSafeAgentSummaries(unavailableList).map(toUnavailableAgentSummary);
   if (args?.showUnavailable !== true) {
-    agents = agents.filter((a) => !isAgentUnavailableNow(a as any, now));
+    agents = agents.filter((a) => !isAgentUnavailableNow(a, now));
   }
   agents = sortSafeAgentSummaries(agents);
   // 默认精简投影（与 server listAgents 保持一致）：只保留选人决策所需字段，
@@ -602,7 +611,13 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
       ? agents.map(omitNullishAgentSummaryFields)
       : agents.map(toCompactAgentSummary);
   return {
-    rawData: { success: true, total: projectedAgents.length, unavailableCount, agents: projectedAgents },
+    rawData: {
+      success: true,
+      total: projectedAgents.length,
+      unavailableCount,
+      unavailableAgents,
+      agents: projectedAgents,
+    },
     displayData: formatAgentListCard(agents),
   };
 }

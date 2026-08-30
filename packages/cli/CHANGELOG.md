@@ -1,4 +1,14 @@
 
+## 0.40.0-alpha.3
+
+## 0.40.0-alpha.3 (2026-08-30)
+
+### Bug Fixes
+
+* **agent:** expose 429-unavailable agents via unavailableAgents in listAgents ([cd74892](https://github.com/nolotus/bun-nolo/commit/cd748920850221603307cc5c3df81d97a1bd1a56))
+* **agent:** follow-ups 两卡——loop.test 考古修绿 + 版本闸门三层 detail 贯通 ([57da67d](https://github.com/nolotus/bun-nolo/commit/57da67d7922d9a9b111039fc01cd002e853228e2))
+
+
 ## 0.40.0-alpha.2
 
 ## 0.40.0-alpha.2 (2026-08-30)

@@ -140,5 +140,10 @@ describe("agentSelectionPriority", () => {
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("未收藏的 OAuth / 自定义 Agent");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("其他自建 Agent");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("公开 / 平台 Agent");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("429 限流与知情权契约");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("unavailableAgents");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("任何用户私有凭据与自建 Agent");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("isOwned=true、isOAuth=true 或 apiSource=\"custom\"");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("改派平台 Agent（消耗平台积分）前必须在回复中告知用户");
   });
 });

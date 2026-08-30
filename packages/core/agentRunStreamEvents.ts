@@ -53,6 +53,17 @@ export interface AgentRunStreamErrorEvent {
   message: string;
   reason?: "provider_credential_revoked";
   providerCredential?: unknown;
+  /**
+   * 结构化错误码（CLIENT_VERSION_TOO_OLD 三层贯通：server loop 的版本闸门
+   * 拒绝帧携带；CLI handlePayload 把它挂到抛出的 Error 上供渲染分支识别）。
+   */
+  code?: string;
+  /**
+   * 结构化 detail（buildClientVersionGateErrorDetail 的形状：reason/model/
+   * minClientVersion/clientVersion?/upgradeCommand/retryable）。与此前的
+   * credential-revoked 附加字段同属「error 帧带结构化字段」的既有模式。
+   */
+  detail?: Record<string, unknown>;
 }
 
 /** assistant 工具调用声明 */

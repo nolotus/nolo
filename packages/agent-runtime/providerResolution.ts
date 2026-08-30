@@ -11,7 +11,8 @@ import {
   resolvePlatformChatCompletionsEndpoint,
   resolvePlatformHostedCredentialProvider,
 } from "./platformProviderEndpoints";
-import { evaluatePlatformHostedClientVersionGate } from "../ai/llm/platformHostedClientVersionGate";
+import { evaluatePlatformHostedClientVersionGate, buildClientVersionGateErrorDetail } from "../ai/llm/platformHostedClientVersionGate";
+import { CLIENT_VERSION_TOO_OLD_CODE } from "core/clientVersionGate";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -467,7 +468,16 @@ export async function buildProviderExecutionPlan(args: {
       Boolean(agentConfig.apiKeyRef?.trim()),
   });
   if (clientVersionGate.blocked) {
-    throw new Error(clientVersionGate.message);
+    // 结构化 detail 与 server 侧 ClientVersionTooOldError 对齐（同一份
+    // buildClientVersionGateErrorDetail）：CLI describeLocalRunFailure 据此渲染
+    // 可操作的升级提示，而不是只有一句裸 message。message 文案不变（已验收）。
+    const gateError = new Error(clientVersionGate.message) as Error & {
+      code: typeof CLIENT_VERSION_TOO_OLD_CODE;
+      detail: Record<string, unknown>;
+    };
+    gateError.code = CLIENT_VERSION_TOO_OLD_CODE;
+    gateError.detail = buildClientVersionGateErrorDetail(clientVersionGate);
+    throw gateError;
   }
   // 查询使用；对外 provider 语义仍是 "nolo"。custom 模式不设置（用户自带
   // provider 的行为不变）。

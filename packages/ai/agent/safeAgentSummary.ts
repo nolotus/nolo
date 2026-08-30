@@ -340,3 +340,53 @@ export function toCompactAgentSummary(
   }
   return compact as CompactSafeAgentSummary;
 }
+
+export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
+  "agentKey",
+  "name",
+  "model",
+  "provider",
+  "apiSource",
+  "isFavorite",
+  "isOAuth",
+  "isOwned",
+  "nextAvailableAt",
+  "favoritedAt",
+  "updatedAt",
+] as const;
+
+export type UnavailableAgentSummary = {
+  agentKey?: string;
+  name: string;
+  model?: string;
+  provider?: string;
+  apiSource?: string;
+  isFavorite: boolean;
+  isOAuth: boolean;
+  isOwned: boolean;
+  nextAvailableAt?: number;
+  favoritedAt?: number | string;
+  updatedAt?: number | string;
+};
+
+/**
+ * 429 限流不可用 Agent 的精简摘要投影（供 listAgents 的 unavailableAgents 字段消费）。
+ * 包含选人和知情权决策所需的关键标识（agentKey、isOAuth、isOwned、isFavorite 等）及复位时间戳（nextAvailableAt）。
+ */
+export function toUnavailableAgentSummary(
+  summary: SafeAgentSummary
+): UnavailableAgentSummary {
+  const item: Record<string, unknown> = {
+    name: summary.name,
+    isFavorite: summary.isFavorite,
+    isOAuth: summary.isOAuth,
+    isOwned: summary.isOwned,
+  };
+  for (const field of UNAVAILABLE_AGENT_SUMMARY_FIELDS) {
+    const value = summary[field];
+    if (value !== null && value !== undefined) {
+      item[field] = value;
+    }
+  }
+  return item as UnavailableAgentSummary;
+}
