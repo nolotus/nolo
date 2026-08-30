@@ -78,7 +78,10 @@ export type CliExecuteResult = {
 };
 export type CliImageInput = { source: string };
 import type { ReadToolFn } from "./cliLocalToolExecutors";
-import { withProviderStreamRetry } from "./providerStreamRetry";
+import {
+  isBusyProviderStreamError,
+  withProviderStreamRetry,
+} from "./providerStreamRetry";
 
 import {
   resolveRuntimeServerUrl as _resolveRuntimeServerUrl,
@@ -844,11 +847,20 @@ export function createCliLocalRuntimeAdapter(
     resolveProviderBase: AgentRuntimeHostAdapter["resolveProvider"];
   };
 
-  // Direct providers keep the bounded whole-stream retry. Platform chat POSTs
-  // do not: a lost response does not prove nolo/its upstream skipped execution,
-  // so replaying here could duplicate provider cost and billing evidence.
-  // Deployment drains remain retryable inside platformProxyTransport because
-  // structured `503 core_draining` is emitted before provider admission.
+  // Direct providers keep the bounded whole-stream retry across all
+  // retryable stream failures. Platform chat POSTs restrict stream-level
+  // retry to `isBusyProviderStreamError` (the server's pre-admission
+  // `PLATFORM_LLM_BUSY` SSE error frame or non-streaming busy 503): busy
+  // consumes 0 tokens and has no side effects, so retrying it after cooldown
+  // does not violate the duplicate-cost / billing boundary. Generic
+  // mid-stream drops / network errors on platform chat remain non-retryable
+  // here (commit ac58f2c79).
+  // Non-streaming busy 503 is retried first at the fetch layer (fetchWithTransientRetry);
+  // if that layer exhausts its attempts and throws, the complete-level retry
+  // provides one final backed-off retry (worst-case 6 upstream POSTs across
+  // two full 3-attempt fetch budgets, 5×1200ms cooldowns — 4 fetch-level +
+  // 1 complete-level), all of which are
+  // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
     resolveProvider: async (agentConfig: AgentRuntimeAgentConfig) => {
@@ -856,7 +868,10 @@ export function createCliLocalRuntimeAdapter(
         agentConfig,
       )) as AgentRuntimeProvider;
       return shouldUsePlatformChatProvider(deps.env, agentConfig)
-        ? provider
+        ? withProviderStreamRetry(provider, {
+            ...deps,
+            retryOnly: isBusyProviderStreamError,
+          })
         : withProviderStreamRetry(provider, deps);
     },
   };

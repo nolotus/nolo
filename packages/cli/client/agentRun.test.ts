@@ -1191,6 +1191,68 @@ describe("cli agent run client", () => {
     expect(text).not.toContain("Fix the local credential/config");
   });
 
+  test("busy failure strips raw=/headers= debug noise but keeps a --server action hint", async () => {
+    // A failed busy attempt carries real production-format
+    // verbose raw/headers echo in its message: `raw="..."` + `headers=[...]`.
+    // The user-facing line must drop that noise (including cf-ray/content-length
+    // and escaped JSON contents) and keep one actionable retry hint.
+    const busyError = new Error(
+      '服务器紧张 raw="{\\"error\\":{\\"message\\":\\"服务器紧张\\",\\"code\\":\\"PLATFORM_LLM_BUSY\\"}}" headers=[server=Caddy cf-ray=91f01234abcd-SJC content-length=98] (PLATFORM_LLM_BUSY)',
+    ) as Error & { detail?: string };
+
+    const output = new CaptureOutput();
+    const result = await runAgentTurn({
+      agentName: "GLM 5.2",
+      agentKey: "agent-glm-local",
+      serverUrl: "https://nolo.chat",
+      message: "continue",
+      scriptDir: "C:/missing/scripts",
+      env: { AUTH_TOKEN: "token-123" },
+      runtimeMode: "auto",
+      output,
+      localRuntimeAdapter: {
+        host: "cli",
+        capabilities: ["leveldb-agent-config", "local-provider"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "GLM 5.2",
+          apiSource: "custom",
+          customProviderUrl: "https://ollama.com/v1",
+          model: "glm-5.2:cloud",
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-kept-busy" }),
+        resolveProvider: async () => ({
+          model: "glm-5.2:cloud",
+          complete: async () => {
+            throw busyError;
+          },
+        }),
+        executeTool: async () => {
+          throw new Error("no tools expected");
+        },
+      },
+      fetchImpl: async () => {
+        throw new Error("server fallback should not run");
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    const text = output.text();
+    expect(text).toContain("服务器紧张");
+    expect(text).toContain("PLATFORM_LLM_BUSY");
+    // Debug noise stripped from the user-facing line.
+    expect(text).not.toContain("raw=");
+    expect(text).not.toContain("headers=");
+    expect(text).not.toContain("cf-ray");
+    expect(text).not.toContain("content-length");
+    expect(text).not.toContain('"code"');
+    expect(text).not.toContain('"message"');
+    // Actionable hint preserved.
+    expect(text).toContain("Retry shortly");
+    expect(text).toContain("--server");
+  });
+
   test("ephemeral mode skips persistence: adapter.saveTurn is never called", async () => {
     const output = new CaptureOutput();
     const saveTurnCalls: any[] = [];

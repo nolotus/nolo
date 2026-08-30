@@ -48,6 +48,27 @@ describe("fetchWithTransientRetry", () => {
     expect(slept).toEqual([1500]);
   });
 
+  it("sleeps exactly res.retryAfterMs for a busy 503 the server marked retryable (1200ms)", async () => {
+    const slept: number[] = [];
+    const { impl, calls } = scriptedFetch([
+      json(503, {
+        retryable: true,
+        retryAfterMs: 1200,
+        error: { message: "服务器紧张", code: "PLATFORM_LLM_BUSY" },
+      }),
+      json(200, { ok: true }),
+    ]);
+
+    const res = await fetchWithTransientRetry(impl, "https://example.test/x", undefined, {
+      sleep: async (ms) => { slept.push(ms); },
+    });
+
+    expect(res.status).toBe(200);
+    expect(calls.length).toBe(2);
+    // No Retry-After header, so the body's top-level retryAfterMs wins verbatim.
+    expect(slept).toEqual([1200]);
+  });
+
   it("honours a standard Retry-After header over the body hint", async () => {
     const slept: number[] = [];
     const { impl } = scriptedFetch([

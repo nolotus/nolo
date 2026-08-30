@@ -19,8 +19,11 @@ export async function shouldRetryPlatformProxyResponse(
   try {
     const body = (await response.clone().json()) as {
       reason?: unknown;
+      retryable?: unknown;
     };
-    return body?.reason === "core_draining";
+    return (
+      body?.reason === "core_draining" || body?.retryable === true
+    );
   } catch {
     return false;
   }

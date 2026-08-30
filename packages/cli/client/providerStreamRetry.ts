@@ -62,10 +62,28 @@ export const STREAM_RETRY_MARKER =
  */
 const UPSTREAM_STREAM_INTERRUPTED_RE = /UPSTREAM_STREAM_INTERRUPTED/i;
 
+// Busy SSE error frame: `{"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}}`
+// (packages/agent-runtime/processChatCompletionDelta.ts). Same regex family as
+// agentRun.ts:512 (`/PLATFORM_LLM_BUSY|服务器紧张/`). The upstream is capacity-
+// limited, not dead: give it a short cooldown before the retry, mirroring the
+// server proxy's GENTLE_RETRY_DELAY_MS (1200ms) so the TUI doesn't hammer a
+// congested upstream the instant the 200 + error frame lands.
+const BUSY_STREAM_ERROR_RE = /PLATFORM_LLM_BUSY|服务器紧张/i;
+const BUSY_STREAM_RETRY_DELAY_MS = 1200;
+
+export function isBusyProviderStreamError(error: unknown): boolean {
+  return BUSY_STREAM_ERROR_RE.test(toErrorMessage(error));
+}
+
+async function defaultSleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function isRetryableProviderStreamError(error: unknown): boolean {
   const message = toErrorMessage(error);
   return (
     UPSTREAM_STREAM_INTERRUPTED_RE.test(message) ||
+    BUSY_STREAM_ERROR_RE.test(message) ||
     isTransientFetchError(message)
   );
 }
@@ -74,6 +92,16 @@ export function withProviderStreamRetry(
   provider: AgentRuntimeProvider,
   deps: {
     activityReporter?: (label: string | null) => void;
+    /** Injectable sleep for tests; defaults to setTimeout. */
+    sleep?: (ms: number) => Promise<void>;
+    /**
+     * Optional filter on which errors qualify for stream-level retry.
+     * When supplied, an error must pass BOTH isRetryableProviderStreamError
+     * and retryOnly(error). Direct provider paths leave this undefined
+     * (all retryable errors), whereas the platform proxy path restricts to
+     * isBusyProviderStreamError so lost responses don't replay billed cost.
+     */
+    retryOnly?: (error: unknown) => boolean;
   },
 ): AgentRuntimeProvider {
   return {
@@ -112,6 +140,7 @@ export function withProviderStreamRetry(
           if (options?.signal?.aborted) throw error;
           if (attempt >= PROVIDER_STREAM_RETRY_MAX_ATTEMPTS) throw error;
           if (!isRetryableProviderStreamError(error)) throw error;
+          if (deps.retryOnly && !deps.retryOnly(error)) throw error;
           // Providers that emit mid-stream tool events (e.g. Cursor's inline
           // exec channel) have already executed/displayed a side effect; a
           // retry would replay that tool event (duplicate execution or
@@ -121,7 +150,14 @@ export function withProviderStreamRetry(
           if (streamedChars > 0 && options?.onTextDelta) {
             options.onTextDelta(STREAM_RETRY_MARKER);
           }
-          deps.activityReporter?.("上游流中断 · 自动重试");
+          // Busy 是容量受限而非故障：退避 ~1200ms 再重试，避免重锤一个
+          // 尚未恢复的上游。流中断/瞬时网络错误保持立即重试，不进这里。
+          if (isBusyProviderStreamError(error)) {
+            deps.activityReporter?.("服务器紧张 · 稍候自动重试");
+            await (deps.sleep ?? defaultSleep)(BUSY_STREAM_RETRY_DELAY_MS);
+          } else {
+            deps.activityReporter?.("上游流中断 · 自动重试");
+          }
         }
       }
     },

@@ -511,10 +511,22 @@ function describeLocalRunFailure(
   if (
     /PLATFORM_LLM_BUSY|服务器紧张/.test(message)
   ) {
-    const shown = message.replace(/\s*\(PLATFORM_LLM_BUSY\)\s*$/, "");
+    // 剥离诊断噪音：`raw="..."` / `headers=[...]` 是调试用回显，对用户
+    // 无意义且会把 busy 文案撑得冗长。保留可行动的一行提示。
+    const stripDebugNoise = (s: string) =>
+      s
+        .replace(/\s*raw=".*"/g, "")
+        .replace(/\s*raw=\S+/g, "")
+        .replace(/\s*headers=\[[^\]]*\]/g, "")
+        .replace(/\s*headers=\S+/g, "")
+        .trim();
+    const shown = stripDebugNoise(
+      message.replace(/\s*\(PLATFORM_LLM_BUSY\)\s*$/, ""),
+    );
+    const cleanedBusyDetail = busyDetail ? stripDebugNoise(busyDetail) : undefined;
     return (
-      `${RUN_UNAVAILABLE_PREFIX} 服务器紧张${shown !== "服务器紧张" ? ` (${shown})` : ""} (PLATFORM_LLM_BUSY)${busyDetail ? `: ${busyDetail}` : ""}. ${NO_FALLBACK} ` +
-      `平台模型上游繁忙，稍后重试或换个模型。\n`
+      `${RUN_UNAVAILABLE_PREFIX} 服务器紧张${shown !== "服务器紧张" ? ` (${shown})` : ""} (PLATFORM_LLM_BUSY)${cleanedBusyDetail ? `: ${cleanedBusyDetail}` : ""}. ${NO_FALLBACK} ` +
+      `平台模型上游繁忙，稍后重试或换个模型。Retry shortly, ${SERVER_FALLBACK_HINT}\n`
     );
   }
 

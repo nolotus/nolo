@@ -20,6 +20,8 @@ import {
 import { fetchWithTransientRetry } from "./localRuntimeFetchRetry";
 import {
   STREAM_RETRY_MARKER,
+  isBusyProviderStreamError,
+  isRetryableProviderStreamError,
   withProviderStreamRetry,
 } from "./providerStreamRetry";
 
@@ -85,6 +87,7 @@ describe("withProviderStreamRetry (unit)", () => {
   it("retries a mid-stream socket death after partial output: marker + full regenerated text", async () => {
     const deltas: DeltaSink = [];
     const labels: (string | null)[] = [];
+    const slept: number[] = [];
     const provider = makeFakeProvider({
       attempts: [
         async (emit) => {
@@ -99,6 +102,9 @@ describe("withProviderStreamRetry (unit)", () => {
     });
     const wrapped = withProviderStreamRetry(provider, {
       activityReporter: (label) => labels.push(label),
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
     });
     const result = await wrapped.complete([{ role: "user", content: "hi" }], {
       onTextDelta: (chunk) => deltas.push(chunk),
@@ -109,6 +115,8 @@ describe("withProviderStreamRetry (unit)", () => {
       `Hel${STREAM_RETRY_MARKER}Hello, world!`,
     );
     expect(labels).toContain("上游流中断 · 自动重试");
+    // Stream interruptions / socket kills are retried immediately without sleep.
+    expect(slept).toEqual([]);
   });
 
   it("retries silently when the failed attempt streamed nothing yet", async () => {
@@ -232,6 +240,158 @@ describe("withProviderStreamRetry (unit)", () => {
     ).rejects.toThrow(BUN_SOCKET_CLOSED);
     expect(calls).toBe(1);
     expect(toolEvents).toEqual(["execShell"]);
+  });
+
+  it("retries a busy (PLATFORM_LLM_BUSY) error after the ~1200ms cooldown", async () => {
+    let calls = 0;
+    const slept: number[] = [];
+    const labels: (string | null)[] = [];
+    const provider = makeFakeProvider({
+      attempts: [
+        async () => {
+          calls += 1;
+          throw new Error(
+            'chat completion stream failed: {"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}}',
+          );
+        },
+        async (emit) => {
+          emit("recovered after busy");
+          return okResult("recovered after busy");
+        },
+      ],
+    });
+    const wrapped = withProviderStreamRetry(provider, {
+      sleep: async (ms) => { slept.push(ms); },
+      activityReporter: (label) => labels.push(label),
+    });
+    const result = await wrapped.complete([{ role: "user", content: "hi" }]);
+    expect(result.content).toBe("recovered after busy");
+    // The busy path slept the cooldown before the successfully retried attempt.
+    expect(slept).toEqual([1200]);
+    expect(labels).toContain("服务器紧张 · 稍候自动重试");
+  });
+
+  it("does NOT retry busy when the failed attempt already emitted a tool event", async () => {
+    let calls = 0;
+    const provider = makeFakeProvider({
+      attempts: [
+        async (_emit, opts) => {
+          calls += 1;
+          opts?.onToolEvent?.({
+            type: "tool-call",
+            round: 1,
+            toolCallId: "call-1",
+            toolName: "execShell",
+            argumentsPreview: "true",
+          });
+          throw new Error(
+            '{"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}}',
+          );
+        },
+      ],
+    });
+    const wrapped = withProviderStreamRetry(provider, {
+      sleep: async () => {},
+    });
+    await expect(
+      wrapped.complete([{ role: "user", content: "hi" }], {
+        onToolEvent: () => {},
+      }),
+    ).rejects.toThrow("PLATFORM_LLM_BUSY");
+    expect(calls).toBe(1);
+  });
+
+  it("gives up after consecutive busy attempts and rethrows", async () => {
+    let calls = 0;
+    const provider = makeFakeProvider({
+      attempts: [
+        async () => {
+          calls += 1;
+          throw new Error(
+            '{"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}} server busy',
+          );
+        },
+      ],
+    });
+    const wrapped = withProviderStreamRetry(provider, {
+      sleep: async () => {},
+    });
+    await expect(
+      wrapped.complete([{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("PLATFORM_LLM_BUSY");
+    expect(calls).toBe(2);
+  });
+
+  it("respects retryOnly filter: retries when error passes retryOnly filter", async () => {
+    let calls = 0;
+    const slept: number[] = [];
+    const provider = makeFakeProvider({
+      attempts: [
+        async () => {
+          calls += 1;
+          throw new Error('{"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}}');
+        },
+        async (emit) => {
+          calls += 1;
+          emit("busy retry passed");
+          return okResult("busy retry passed");
+        },
+      ],
+    });
+    const wrapped = withProviderStreamRetry(provider, {
+      retryOnly: isBusyProviderStreamError,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    const result = await wrapped.complete([{ role: "user", content: "hi" }]);
+    expect(result.content).toBe("busy retry passed");
+    expect(calls).toBe(2);
+    expect(slept).toEqual([1200]);
+  });
+
+  it("respects retryOnly filter: rejects non-matching transient errors without retry", async () => {
+    let calls = 0;
+    const provider = makeFakeProvider({
+      attempts: [
+        async () => {
+          calls += 1;
+          throw new Error(BUN_SOCKET_CLOSED);
+        },
+      ],
+    });
+    const wrapped = withProviderStreamRetry(provider, {
+      retryOnly: isBusyProviderStreamError,
+    });
+    await expect(
+      wrapped.complete([{ role: "user", content: "hi" }]),
+    ).rejects.toThrow(BUN_SOCKET_CLOSED);
+    expect(calls).toBe(1);
+  });
+});
+
+describe("isRetryableProviderStreamError / isBusyProviderStreamError", () => {
+  it("classifies busy PLATFORM_LLM_BUSY as retryable", () => {
+    expect(
+      isRetryableProviderStreamError(
+        new Error('{"error":{"msg":"服务器紧张","code":"PLATFORM_LLM_BUSY"}}'),
+      ),
+    ).toBe(true);
+    expect(isBusyProviderStreamError(new Error("服务器紧张"))).toBe(true);
+  });
+
+  it("still classifies UPSTREAM_STREAM_INTERRUPTED as retryable (regression)", () => {
+    expect(
+      isRetryableProviderStreamError(
+        new Error('{"code":"UPSTREAM_STREAM_INTERRUPTED","message":"upstream stream interrupted: boom"}'),
+      ),
+    ).toBe(true);
+    expect(isBusyProviderStreamError(new Error("upstream stream interrupted"))).toBe(false);
+  });
+
+  it("does not treat an ordinary error as retryable", () => {
+    expect(isRetryableProviderStreamError(new Error("HTTP 401 unauthorized"))).toBe(false);
+    expect(isBusyProviderStreamError(new Error("HTTP 401 unauthorized"))).toBe(false);
   });
 });
 

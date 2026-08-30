@@ -1,4 +1,13 @@
 
+## 0.37.0-alpha.1
+
+## 0.37.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **cli:** PLATFORM_LLM_BUSY(服务器紧张) 自动重试与 busy 文案瘦身 ([17055c4](https://github.com/nolotus/bun-nolo/commit/17055c482034c1427f6e050aefef6cc04cb98e9e))
+
+
 ## 0.36.0-alpha.5
 
 ## 0.36.0-alpha.5 (2026-08-30)
