@@ -1,4 +1,14 @@
 
+## 0.37.0-alpha.2
+
+## 0.37.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **server:** SSR 渲染 bundle 预编译，修复 StyleX 上线引发的全站 500 ([b2c1dd9](https://github.com/nolotus/bun-nolo/commit/b2c1dd9c23d6b6b1745281725618ed5497f78a54))
+* **tui:** consume attachedImages after send to stop cross-turn image accumulation ([40aa0e9](https://github.com/nolotus/bun-nolo/commit/40aa0e9ec5e486502fa99e94dba240b3916ed1ee))
+
+
 ## 0.37.0-alpha.1
 
 ## 0.37.0-alpha.1 (2026-08-30)

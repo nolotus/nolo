@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { collectRunningManagedProcesses } from "./devProcessGuard";
 import { DEFAULT_LOCAL_API_PORT } from "../../packages/core/localOrigins";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
+import { buildRenderBundle } from "./buildRenderBundle";
 
 type ProcessKey = "web" | "api";
 type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -150,6 +151,14 @@ async function restartProcesses(keys: ProcessKey[]): Promise<void> {
     await stopProcess(key);
   }
 
+  if (uniqueKeys.includes("api")) {
+    try {
+      await buildRenderBundle({ repoRoot: REPO_ROOT });
+    } catch (error) {
+      console.error("[dev] Failed to rebuild render bundle before api restart:", error);
+    }
+  }
+
   for (const key of startOrder) {
     startProcess(key);
   }
@@ -202,6 +211,15 @@ async function main(): Promise<void> {
   }
 
   printHelp();
+
+  try {
+    await buildRenderBundle({ repoRoot: REPO_ROOT });
+  } catch (error) {
+    console.error(
+      "[dev] Initial render bundle build failed (start anyway; run 'rr' in dev to rebuild and recover):",
+      error
+    );
+  }
 
   startProcess("web");
   startProcess("api");

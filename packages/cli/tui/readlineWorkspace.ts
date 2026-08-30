@@ -69,7 +69,7 @@ import { checkStaleRun, readRunRecord } from "../agentRunControl";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { prefetchAgentCatalog } from "./agentCatalog";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
-import { mergeAttachedImages, readImagePaths, resolveImageSource, summarizeAttachment } from "./pasteImage";
+import { mergeAttachedImages, readImagePaths, summarizeAttachment } from "./pasteImage";
 import { readClipboardImage } from "./clipboardImage";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
@@ -2199,13 +2199,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             output.write(`[nolo] image skipped: ${err.message}\n`),
         });
         imageUrls = readResult.images.map((img) => img.dataUrl);
-        if (readResult.images.length > 0) {
-          state = {
-            ...state,
-            attachedImages: mergeAttachedImages(state.attachedImages, readResult.images),
-          };
-        }
       }
+      // 本轮待发送暂存区：发送即消费。imageUrls 已在上面确定，这里立即清空，
+      // 避免纯文字轮把上一轮附件残留重读重发给上游（累积至 ~9 轮撞 8 张
+      // 上限报 UPSTREAM_400）。必须在异步 turn 开始前同步清空：若等 turn 成功
+      // 后才清，会误删用户在 busy 期间为下一条消息粘贴的新图。历史消息里的
+      // 图片不动（模型仍可经历史回放引用旧图）。
+      state = {
+        ...state,
+        attachedImages: [],
+      };
 
       history.followBottom = true;
       // Notify the queue core that a direct (non-drained) turn is starting,

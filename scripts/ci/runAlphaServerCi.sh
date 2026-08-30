@@ -257,6 +257,7 @@ sync_alpha_runtime_checkout() {
   cd "$REPO_DIR"
   git fetch --all
   git reset --hard "$BUILD_SHA"
+  "$BUN_BIN" "$REPO_DIR/scripts/dev/buildRenderBundle.ts"
   cd "$WORK_DIR"
 }
 
@@ -423,6 +424,7 @@ run_deploy_tests() {
       packages/server/handlers/agentRun/agentRunControlHandler.test.ts \
       packages/server/handlers/chatHandler.test.ts \
       packages/server/databaseRoutes.test.ts \
+      packages/server/renderBundleSsrProbe.source.test.ts \
       packages/ai/llm/modelRegistry.test.ts \
       packages/database-engine/dbPath.test.ts
   rm -rf "$test_db_dir"
@@ -837,6 +839,9 @@ STABLE_BUN_BIN="${BUN_INSTALL}/bin/bun-nolo-${BUN_VERSION}"
 install -m 755 "$(command -v bun)" "$STABLE_BUN_BIN"
 BUN_BIN="$STABLE_BUN_BIN"
 
+cd "$PRODUCTION_REPO_DIR" && "$BUN_BIN" install
+cd "$PRODUCTION_REPO_DIR" && "$BUN_BIN" scripts/dev/buildRenderBundle.ts
+
 NOLO_BRANCH=main \
 NOLO_RELEASE_SHA="$BUILD_SHA" \
 NOLO_DEPLOY_JOB_ID="$DEPLOY_JOB_ID" \
@@ -905,6 +910,7 @@ REMOTE
 
 build_web() {
   NODE_ENV=production NOLO_WEB_PRECOMPRESS=1 NOLO_BUILD_SHA="$BUILD_SHA" "$BUN_BIN" run build
+  "$BUN_BIN" "$WORK_DIR/scripts/dev/buildRenderBundle.ts"
 }
 
 # CF builder offload（scripts/ci/cf-builder/，Step 3b 产品化）：
@@ -1157,6 +1163,7 @@ alpha_deploy() {
   disk_snapshot "after-install"
   if timed_phase "cf-build-alpha-offload" cf_build_alpha_offload; then
     disk_snapshot "after-cf-offload"
+    timed_phase "build-render-bundle" "$BUN_BIN" "$WORK_DIR/scripts/dev/buildRenderBundle.ts"
   else
     # offload 未配置或任一环节失败 → 原地回退宿主本地构建（行为与现状完全一致）
     timed_phase "build-web" build_web

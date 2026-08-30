@@ -78,6 +78,56 @@ describe("tui image attachment integration", () => {
     expect(stdout).toContain("found image");
   });
 
+  test("attached images are consumed after send; next text-only turn emits no imageUrls", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: Uint8Array[] = [];
+    output.on("data", (chunk) => chunks.push(toPlainUint8Array(chunk)));
+
+    const calls: Array<{ message: string; imageUrls?: string[] }> = [];
+
+    // 第一轮带图，第二轮纯文字。根因修复前，第二轮的 state.attachedImages 仍
+    // 残留第一轮的图，纯文字轮也会把旧图重读进 imageUrls，反复累积到上游 8 张
+    // 上限（UPSTREAM_400）。修复后发送即消费，第二轮不应再带任何 imageUrls。
+    input.write(`看图 ${pngPath}\n`);
+    input.write("再解释下这个\n");
+    input.write("/exit\n");
+    input.end();
+
+    await Promise.race([
+      startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env: {},
+        agentRunner: async (options) => {
+          calls.push({
+            message: options.message,
+            imageUrls: options.imageUrls,
+          });
+          output.write("\nok\n");
+          return { exitCode: 0, dialogId: "01TESTDIALOG1234567890ABCD" };
+        },
+      }),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 3000)
+      ),
+    ]);
+
+    expect(calls).toHaveLength(2);
+
+    const first = calls[0]!;
+    expect(first.message).toBe("看图");
+    expect(first.imageUrls).toBeDefined();
+    expect(first.imageUrls).toHaveLength(1);
+    expect(first.imageUrls?.[0]).toMatch(/^data:image\/png;base64,/);
+
+    // 第二轮：图片暂存区应在发送后被清空，纯文字消息不带任何图。
+    const second = calls[1]!;
+    expect(second.message).toBe("再解释下这个");
+    expect(second.imageUrls).toBeUndefined();
+  });
+
   test("iTerm2-style backslash-escaped path with space is detected", async () => {
     const input = new PassThrough();
     const output = new PassThrough();

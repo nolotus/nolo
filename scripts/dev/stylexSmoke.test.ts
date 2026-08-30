@@ -1,9 +1,65 @@
 import { describe, expect, it } from "bun:test";
-import { build } from "esbuild";
+import type { BuildOptions, BuildResult } from "esbuild";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { config } from "./esbuild.config.js";
+
+/**
+ * 隔离执行 esbuild 构建辅助函数：
+ * 在单独的 Bun 子进程中运行 esbuild build，避免 bun test 运行时的 stdio 拦截导致 esbuild 管道关闭。
+ */
+async function runIsolatedEsbuild(buildOptions: BuildOptions): Promise<BuildResult> {
+  const tempDir = await mkdtemp(join(tmpdir(), "nolo-esbuild-ipc-"));
+  const metaFile = join(tempDir, "meta.json");
+
+  try {
+    const runnerScript = `
+      import { build } from "esbuild";
+      import { config } from "./scripts/dev/esbuild.config.js";
+      import { writeFile } from "node:fs/promises";
+
+      const customOptions = ${JSON.stringify(buildOptions)};
+      const mergedOptions = {
+        ...config,
+        ...customOptions,
+      };
+
+      try {
+        const result = await build(mergedOptions);
+        await writeFile(${JSON.stringify(metaFile)}, JSON.stringify({
+          success: true,
+          metafile: result.metafile,
+          errors: result.errors,
+          warnings: result.warnings,
+        }));
+      } catch (error) {
+        console.error(error);
+        process.exit(1);
+      }
+    `;
+
+    const proc = Bun.spawn([process.execPath, "-e", runnerScript], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    if (exitCode !== 0) {
+      throw new Error(`Isolated esbuild build failed (exit ${exitCode}):\n${stderr || stdout}`);
+    }
+
+    const fileContent = await readFile(metaFile, "utf8");
+    return JSON.parse(fileContent);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
 
 /**
  * StyleX esbuild 管线冒烟测试：
@@ -20,8 +76,7 @@ describe("stylex esbuild pipeline smoke", () => {
   it("aggregates StyleX rules into the built CSS and keeps class names in sync", async () => {
     const outdir = await mkdtemp(join(tmpdir(), "nolo-stylex-smoke-"));
     try {
-      const result = await build({
-        ...config,
+      const result = await runIsolatedEsbuild({
         // 最小入口：只构建冒烟模块（它自己导入 CSS 宿主文件）
         entryPoints: ["packages/web/stylexSmoke.ts"],
         // 隔离输出，避免污染 public/
@@ -92,8 +147,7 @@ describe("stylex esbuild pipeline smoke", () => {
     await writeFile(join(dir, "host2.css"), "/* host2 */\n.host2-marker { color: red; }\n");
     await writeFile(join(dir, "other.ts"), `import "./host2.css";\n`);
     try {
-      const result = await build({
-        ...config,
+      const result = await runIsolatedEsbuild({
         entryPoints: [join(dir, "other.ts"), join(dir, "entry.ts")],
         outdir,
         metafile: true,
@@ -165,8 +219,7 @@ console.log(styles, AGENT_THEMES);
     );
 
     try {
-      const result = await build({
-        ...config,
+      const result = await runIsolatedEsbuild({
         entryPoints: [entryTsPath],
         outdir,
         metafile: true,
