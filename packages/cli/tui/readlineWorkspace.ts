@@ -50,14 +50,22 @@ import { runConfirmDialog } from "./confirmDialog";
 import { setMathRenderingEnabled } from "../client/mathText";
 import { runSelectDialog, type SelectDialogItem } from "./selectDialog";
 import { runAskChoiceDialog } from "./askChoiceDialog";
-import { createDialogHost } from "./dialogHost";
-import { createActivityIndicator, type AgentRunStatusSnapshot } from "./activityIndicator";
-import { createRunRegistryPoller } from "./runRegistryPoller";
+import { createDialogHost, type DialogHost } from "./dialogHost";
+import {
+  createActivityIndicator,
+  type ActivityIndicator,
+  type AgentRunStatusSnapshot,
+} from "./activityIndicator";
+import {
+  createRunRegistryPoller,
+  type RunRegistryPoller,
+} from "./runRegistryPoller";
 import {
   createRunCompletionWatcher,
   filterUnclaimedChildRuns,
   buildWakeMessage,
   buildWakeDisplayText,
+  type RunCompletionWatcher,
 } from "./runCompletionWatcher";
 import {
   createTurnRequest,
@@ -916,6 +924,378 @@ function waitForRawActionGate(
   });
 }
 
+// ── S2：Turn 执行与队列 drain 的显式上下文容器与文件级函数 ──────────────────
+
+/**
+ * AgentTurnContext
+ *
+ * 显式传递给文件级 turn 执行与队列 drain 函数的上下文容器。
+ * 遵循硬约束：turn 侧经 ctx 代理、输入循环侧同闭包直读；可变状态一律通过 getter/setter 提供双向读写引用语义，
+ * 绝不进行单向展开拷贝或传值快照。
+ */
+export interface AgentTurnContext {
+  // ── 可变引用语义字段（通过 getter/setter 代理到 runTuiWorkspace 闭包中的原始 let 绑定） ──
+  state: TuiState;
+  forcedStop: boolean;
+  forcedStopEpoch: number;
+  turnEpoch: number;
+  activeTurnAbort: AbortController | null;
+  activeTurnEpoch: number;
+  modalOwnsKeyboard: boolean;
+  composerDecoderDrain: (() => void) | null;
+  chatQueueBinding: ChatQueueTuiBinding | null;
+
+  // ── 外部只读 / 动态读取字段 ──
+  readonly sessionEnded: boolean;
+  readonly buffer: string;
+  readonly cursorPos: number;
+
+  // ── 稳定实例与配置（fixedInput 具有运行期替换特性，经 getter 动态直通） ──
+  readonly options: WorkspaceOptions;
+  readonly effectiveEnv: Record<string, string | undefined>;
+  readonly history: TurnHistory;
+  readonly fixedInput: FixedInputController;
+  readonly activityIndicator: ActivityIndicator;
+  readonly activityReporter: (label: string | null) => void;
+  readonly runRegistryPoller: RunRegistryPoller;
+  readonly runCompletionWatcher: RunCompletionWatcher;
+  readonly pasteStore: CollapsedPasteStore;
+  readonly dialogHost: DialogHost | null;
+  readonly input: NodeJS.ReadableStream;
+  readonly output: NodeJS.WritableStream;
+
+  // ── 渲染与状态回调 ──
+  syncWindowTitle: () => void;
+  renderHistoryToOutput: () => void;
+  scheduleRender: () => void;
+  flushPendingRender: () => void;
+  refreshDialogTotalCredits: (dialogId: string, dialogKey: string) => void;
+  emitCommandOutput: (text: string, command?: string) => void;
+}
+
+/**
+ * S2: 文件级 runOneAgentTurn 函数
+ *
+ * 执行单轮 agent turn：记录用户发言到 transcript、调用 runAgentChat、
+ * 处理终态/abort/强制停止、折叠 dialog 与 token 状态回 ctx。
+ */
+async function runOneAgentTurn(
+  ctx: AgentTurnContext,
+  inputMsg: TurnRequest | InternalTurnEvent | string,
+  imageUrls: string[],
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+): Promise<{ ok: boolean; aborted: boolean }> {
+  // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
+  // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
+  // dialogLabel + OSC 窗口标题，避免窗口标题停留在 fallback 直到下一轮
+  // turn 才刷新（title 节流 30 分钟，可能很久看不到总结标题）。
+  // 校验 dialogId 仍是当前 dialog：patch 是异步的，用户可能已 /new 或
+  // /pick 切走，不能把旧 dialog 的标题盖到新 dialog 上。
+  const scheduleTitlePatchSync = (runResult: RunAgentTurnResult) => {
+    if (!runResult.titlePatchPromise || !runResult.dialogId) return;
+    const patchDialogId = runResult.dialogId;
+    runResult.titlePatchPromise
+      .then((patchedTitle) => {
+        if (!patchedTitle || ctx.sessionEnded) return;
+        if (ctx.state.dialogId !== patchDialogId) return;
+        if (ctx.state.dialogLabel === patchedTitle) return;
+        ctx.state = {
+          ...ctx.state,
+          dialogLabel: patchedTitle,
+          dialogTitle: patchedTitle,
+        };
+        ctx.syncWindowTitle();
+      })
+      .catch(() => {
+        // 静默：patch 失败下一轮节流会重试，不值得打扰用户。
+      });
+  };
+  let req = createTurnRequest(inputMsg);
+  if (req.event.kind === "child-run-completed") {
+    const nowMs = Date.now();
+    const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
+      req.event.runs,
+      { env: ctx.effectiveEnv, now: () => nowMs },
+    );
+    for (const runId of claimedRunIds) {
+      ctx.runCompletionWatcher.markAcknowledged(runId);
+    }
+    if (remainingRuns.length === 0) {
+      for (const r of req.event.runs) {
+        ctx.runCompletionWatcher.markAcknowledged(r.runId);
+      }
+      return { ok: true, aborted: false };
+    }
+    for (const r of remainingRuns) {
+      ctx.runCompletionWatcher.markAcknowledged(r.runId);
+    }
+    if (remainingRuns.length !== req.event.runs.length) {
+      const text = buildWakeMessage(remainingRuns, nowMs);
+      const displayText = buildWakeDisplayText(remainingRuns, nowMs);
+      const updatedEvent: ChildRunCompletedTurnEvent = {
+        kind: "child-run-completed",
+        runs: remainingRuns,
+        text,
+        displayText,
+      };
+      req = {
+        text,
+        event: updatedEvent,
+      };
+    }
+  }
+  const message = req.text;
+  // 每轮 turn 开始时重置强制收尾标志，确保上一轮的强制停止不会泄漏到本轮。
+  ctx.forcedStop = false;
+  ctx.turnEpoch += 1;
+  const myEpoch = ctx.turnEpoch;
+  ctx.history.followBottom = true;
+  // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
+  // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
+  // 气泡——否则每条 run 完成都在对话里伪造一条几百字的「用户消息」。
+  const isInternalEvent = req.event.kind !== "user";
+  const transcriptText =
+    req.event.kind === "child-run-completed"
+      ? (req.event.displayText ?? req.event.text)
+      : message;
+  startTurn(ctx.history, isInternalEvent ? "assistant" : "user");
+  appendToCurrentTurn(
+    ctx.history,
+    isInternalEvent
+      ? dimCliText(transcriptText, resolveCliColorEnabled())
+      : transcriptText,
+  );
+  finalizeCurrentTurn(ctx.history);
+  ctx.renderHistoryToOutput();
+  if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
+
+  startTurn(ctx.history, "assistant");
+  const agentOutput = isInteractiveInput(ctx.input)
+    ? createHistoryOutputStream(ctx.history, () => {
+        ctx.scheduleRender();
+      })
+    : ctx.output;
+  // Interactive ask_user: dock an arrow-key select dialog above the
+  // composer (same dialogHost + runSelectDialog as the /agent picker) and
+  // resolve the user's pick into the userMessage that continues the turn.
+  // Only wired in interactive TUI mode; headless/CI falls back to text menu.
+  const requestUserChoice =
+    isInteractiveInput(ctx.input) && ctx.dialogHost
+      ? async (choiceReq: UserChoiceRequest): Promise<UserChoiceResult> => {
+          // The ask_choice popup installs its own raw-key reader on stdin,
+          // but dialogHost.run only composer.pause()s and does NOT detach
+          // the global `input.on("data", onData)` listener. Node fans the
+          // same `data` event to both listeners, so every key (Esc/Enter/
+          // printable) would be handled twice: once by the popup and once
+          // by handleInputToken — which aborts the turn on Esc and pollutes
+          // the composer draft / queue on Enter. Claim the keyboard here so
+          // handleInputToken drops all keys while the popup is open.
+          ctx.modalOwnsKeyboard = true;
+          try {
+            return await ctx.dialogHost!.run((anchor) =>
+              runAskChoiceDialog({
+                request: choiceReq,
+                input: ctx.input as NodeJS.ReadStream,
+                output: ctx.output as NodeJS.WritableStream,
+                ...anchor,
+              }),
+            );
+          } catch {
+            return { kind: "cancelled" };
+          } finally {
+            // Same deferred-Enter race as confirm/action-gate: the popup's
+            // confirm Enter is debounced ~40ms in the composer decoder and
+            // only lands here after the popup has closed and
+            // modalOwnsKeyboard flipped back — so it would fall through to
+            // submit and enqueue the draft. Drain the decoder buffer on
+            // close so that Enter (and any partial ESC/CSI tail) is dropped
+            // instead of polluting the next submit.
+            ctx.composerDecoderDrain?.();
+            ctx.modalOwnsKeyboard = false;
+          }
+        }
+      : undefined;
+  try {
+    ctx.activeTurnAbort = new AbortController();
+    ctx.activeTurnEpoch = myEpoch;
+    const runResult = await runAgentChat(
+      ctx.options.scriptDir,
+      ctx.state,
+      message,
+      ctx.options.env ?? process.env,
+      agentOutput,
+      ctx.options.agentRunner,
+      {
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        actionGateHandler,
+        ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
+        ...(requestUserChoice ? { requestUserChoice } : {}),
+        abortSignal: ctx.activeTurnAbort.signal,
+        pastedTextStore: ctx.pasteStore,
+        activityReporter: ctx.activityReporter,
+        onAgentRunStatus: (snapshot) => {
+          if (snapshot) {
+            ctx.activityIndicator.updateAgentRun(snapshot);
+            // run 进面板的唯一入口就在这里，所以轮询器也只在这里起表；
+            // 它自己在没有活跃 run 时会停。
+            ctx.runRegistryPoller.ensureRunning();
+          } else {
+            ctx.activityIndicator.clearAgentRun();
+          }
+        },
+      },
+    );
+    // 强制收尾保护：第二次 Esc 已把 activeTurnAbort 置 null、busyLock 解除、
+    // 打印过 forceStopped 提示。runAgentChat 现在才返回 —— 这段迟到返回值
+    // 必须整体丢弃：不读已 null 的 activeTurnAbort（会 NPE）、不重复打印
+    // turnStopped、不重绘（用户可能已在输入新一轮）。用 epoch 比对而非全局
+    // forcedStop：强制停止后用户可能已发起新 turn 并重置 forcedStop=false，
+    // 旧 turn 靠 myEpoch === forcedStopEpoch 识别自己被强制过。
+    // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
+    const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
+    if (wasForceStopped) {
+      if (runResult.dialogId || runResult.turnTokens) {
+        const nextDialogKey = runResult.dialogId
+          ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
+            ? ctx.state.dialogKey
+            : ctx.state.dialogOwnerId
+              ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
+              : undefined
+          : ctx.state.dialogKey;
+        ctx.state = {
+          ...ctx.state,
+          ...(runResult.dialogId
+            ? {
+                dialogId: runResult.dialogId,
+                dialogKey: nextDialogKey,
+                dialogLabel: runResult.title || runResult.dialogId,
+                ...(runResult.title ? { dialogTitle: runResult.title } : {}),
+              }
+            : {}),
+          ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+          ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+        };
+        if (runResult.dialogId && nextDialogKey) {
+          ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
+        }
+      }
+      scheduleTitlePatchSync(runResult);
+      return { ok: false, aborted: true };
+    }
+    const wasAborted = ctx.activeTurnAbort.signal.aborted;
+    ctx.activeTurnAbort = null;
+    if (
+      shouldEmitTerminalBell({
+        wasAborted,
+        streamInterrupted: runResult.streamInterrupted,
+        exitCode: runResult.exitCode,
+        interactive: isInteractiveInput(ctx.input),
+      })
+    ) {
+      emitTerminalBell(ctx.output);
+    }
+    if (isInteractiveInput(ctx.input)) {
+      finalizeCurrentTurn(ctx.history);
+      ctx.flushPendingRender();
+      ctx.renderHistoryToOutput();
+      if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
+    }
+    if (wasAborted) {
+      if (runResult.pendingToolName) {
+        // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
+        // 完成，其结果不会进入本次对话历史。告知工具名，语气正常。
+        ctx.emitCommandOutput(t("turnStoppedToolPending", runResult.pendingToolName));
+      } else {
+        ctx.emitCommandOutput(t("turnStopped"));
+      }
+    }
+    if (runResult.dialogId || runResult.turnTokens || runResult.contextWindow) {
+      const nextDialogKey = runResult.dialogId
+        ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
+          ? ctx.state.dialogKey
+          : ctx.state.dialogOwnerId
+            ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
+            : undefined
+        : ctx.state.dialogKey;
+      ctx.state = {
+        ...ctx.state,
+        ...(runResult.dialogId
+          ? {
+              dialogId: runResult.dialogId,
+              dialogKey: nextDialogKey,
+              dialogLabel: runResult.title || runResult.dialogId,
+              ...(runResult.title ? { dialogTitle: runResult.title } : {}),
+            }
+          : {}),
+        ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+        ...(runResult.contextWindow
+          ? { contextWindow: runResult.contextWindow }
+          : {}),
+        // input_tokens 是累计上下文输入（含历史消息），把它持久化到
+        // estimatedContextTokens：下一轮若 provider 不返回 usage，context
+        // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
+        ...(runResult.turnTokens && runResult.turnTokens.input > 0
+          ? { estimatedContextTokens: runResult.turnTokens.input }
+          : {}),
+        ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+      };
+      if (runResult.dialogId && nextDialogKey) {
+        ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
+      }
+    }
+    scheduleTitlePatchSync(runResult);
+    // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
+    // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
+    if (!wasAborted && runResult.exitCode !== 0) {
+      if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
+        ctx.emitCommandOutput(t("balanceExhaustedHint"));
+      } else if (isQuotaExhaustedError(runResult.localError)) {
+        ctx.emitCommandOutput(t("quotaExhaustedHint"));
+      } else if (runResult.dialogId) {
+        ctx.emitCommandOutput(t("dialogPreservedHint"));
+      } else {
+        ctx.emitCommandOutput(t("dialogNotSavedHint"));
+      }
+    }
+    return { ok: !wasAborted, aborted: wasAborted };
+  } finally {
+    ctx.activityIndicator.stop();
+    ctx.activeTurnAbort = null;
+  }
+}
+
+/**
+ * S2: 文件级 ensureChatQueueBinding 函数
+ *
+ * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
+ */
+function ensureChatQueueBinding(
+  ctx: AgentTurnContext,
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+): ChatQueueTuiBinding {
+  if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
+  ctx.chatQueueBinding = createChatQueueTuiBinding(async (text) => {
+    return runOneAgentTurn(ctx, text, [], actionGateHandler, confirmDestructiveAction);
+  });
+  return ctx.chatQueueBinding;
+}
+
+/**
+ * S2: 文件级 preemptAndAbortForDrain 函数
+ *
+ * 中止正在执行的 in-flight turn，以便队列头部立即 drain。
+ */
+function preemptAndAbortForDrain(
+  binding: ChatQueueTuiBinding,
+  activeTurnAbort: AbortController | null,
+): void {
+  if (binding.preemptForDrain() && activeTurnAbort) {
+    activeTurnAbort.abort();
+  }
+}
+
 // The product runs one interactive TUI per process. Tests/embedders can still
 // overlap exported calls, so cleanup is latest-owner-wins: an older workspace
 // may not reset theme state selected by a newer active workspace. Full nested
@@ -1396,314 +1776,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // throw `ReferenceError: onData is not defined` and leave modalOwnsKeyboard
   // stuck true, which froze all input after an ask_user question.
   let composerDecoderDrain: (() => void) | null = null;
-  const runOneAgentTurn = async (
-    inputMsg: TurnRequest | InternalTurnEvent | string,
-    imageUrls: string[],
-    actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
-  ): Promise<{ ok: boolean; aborted: boolean }> => {
-    // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
-    // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
-    // dialogLabel + OSC 窗口标题，避免窗口标题停留在 fallback 直到下一轮
-    // turn 才刷新（title 节流 30 分钟，可能很久看不到总结标题）。
-    // 校验 dialogId 仍是当前 dialog：patch 是异步的，用户可能已 /new 或
-    // /pick 切走，不能把旧 dialog 的标题盖到新 dialog 上。
-    const scheduleTitlePatchSync = (runResult: RunAgentTurnResult) => {
-      if (!runResult.titlePatchPromise || !runResult.dialogId) return;
-      const patchDialogId = runResult.dialogId;
-      runResult.titlePatchPromise
-        .then((patchedTitle) => {
-          if (!patchedTitle || sessionEnded) return;
-          if (state.dialogId !== patchDialogId) return;
-          if (state.dialogLabel === patchedTitle) return;
-          state = {
-            ...state,
-            dialogLabel: patchedTitle,
-            dialogTitle: patchedTitle,
-          };
-          syncWindowTitle();
-        })
-        .catch(() => {
-          // 静默：patch 失败下一轮节流会重试，不值得打扰用户。
-        });
-    };
-    let req = createTurnRequest(inputMsg);
-    if (req.event.kind === "child-run-completed") {
-      const nowMs = Date.now();
-      const { remainingRuns, claimedRunIds } = filterUnclaimedChildRuns(
-        req.event.runs,
-        { env: effectiveEnv, now: () => nowMs },
-      );
-      for (const runId of claimedRunIds) {
-        runCompletionWatcher.markAcknowledged(runId);
-      }
-      if (remainingRuns.length === 0) {
-        for (const r of req.event.runs) {
-          runCompletionWatcher.markAcknowledged(r.runId);
-        }
-        return { ok: true, aborted: false };
-      }
-      for (const r of remainingRuns) {
-        runCompletionWatcher.markAcknowledged(r.runId);
-      }
-      if (remainingRuns.length !== req.event.runs.length) {
-        const text = buildWakeMessage(remainingRuns, nowMs);
-        const displayText = buildWakeDisplayText(remainingRuns, nowMs);
-        const updatedEvent: ChildRunCompletedTurnEvent = {
-          kind: "child-run-completed",
-          runs: remainingRuns,
-          text,
-          displayText,
-        };
-        req = {
-          text,
-          event: updatedEvent,
-        };
-      }
-    }
-    const message = req.text;
-    // 每轮 turn 开始时重置强制收尾标志，确保上一轮的强制停止不会泄漏到本轮。
-    forcedStop = false;
-    turnEpoch += 1;
-    const myEpoch = turnEpoch;
-    history.followBottom = true;
-    // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
-    // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
-    // 气泡——否则每条 run 完成都在对话里伪造一条几百字的「用户消息」。
-    const isInternalEvent = req.event.kind !== "user";
-    const transcriptText =
-      req.event.kind === "child-run-completed"
-        ? (req.event.displayText ?? req.event.text)
-        : message;
-    startTurn(history, isInternalEvent ? "assistant" : "user");
-    appendToCurrentTurn(
-      history,
-      isInternalEvent
-        ? dimCliText(transcriptText, resolveCliColorEnabled())
-        : transcriptText,
-    );
-    finalizeCurrentTurn(history);
-    renderHistoryToOutput();
-    if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-
-    startTurn(history, "assistant");
-    const agentOutput = isInteractiveInput(input)
-      ? createHistoryOutputStream(history, () => {
-          scheduleRender();
-        })
-      : output;
-    // Interactive ask_user: dock an arrow-key select dialog above the
-    // composer (same dialogHost + runSelectDialog as the /agent picker) and
-    // resolve the user's pick into the userMessage that continues the turn.
-    // Only wired in interactive TUI mode; headless/CI falls back to text menu.
-    const requestUserChoice =
-      isInteractiveInput(input) && dialogHost
-        ? async (req: UserChoiceRequest): Promise<UserChoiceResult> => {
-            // The ask_choice popup installs its own raw-key reader on stdin,
-            // but dialogHost.run only composer.pause()s and does NOT detach
-            // the global `input.on("data", onData)` listener. Node fans the
-            // same `data` event to both listeners, so every key (Esc/Enter/
-            // printable) would be handled twice: once by the popup and once
-            // by handleInputToken — which aborts the turn on Esc and pollutes
-            // the composer draft / queue on Enter. Claim the keyboard here so
-            // handleInputToken drops all keys while the popup is open.
-            modalOwnsKeyboard = true;
-            try {
-              return await dialogHost.run((anchor) =>
-                runAskChoiceDialog({
-                  request: req,
-                  input: input as NodeJS.ReadStream,
-                  output: output as NodeJS.WritableStream,
-                  ...anchor,
-                }),
-              );
-            } catch {
-              return { kind: "cancelled" };
-            } finally {
-              // Same deferred-Enter race as confirm/action-gate: the popup's
-              // confirm Enter is debounced ~40ms in the composer decoder and
-              // only lands here after the popup has closed and
-              // modalOwnsKeyboard flipped back — so it would fall through to
-              // submit and enqueue the draft. Drain the decoder buffer on
-              // close so that Enter (and any partial ESC/CSI tail) is dropped
-              // instead of polluting the next submit.
-              composerDecoderDrain?.();
-              modalOwnsKeyboard = false;
-            }
-          }
-        : undefined;
-    try {
-      activeTurnAbort = new AbortController();
-      activeTurnEpoch = myEpoch;
-      const runResult = await runAgentChat(
-        options.scriptDir,
-        state,
-        message,
-        options.env ?? process.env,
-        agentOutput,
-        options.agentRunner,
-        {
-          ...(imageUrls.length > 0 ? { imageUrls } : {}),
-          actionGateHandler,
-          ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
-          ...(requestUserChoice ? { requestUserChoice } : {}),
-          abortSignal: activeTurnAbort.signal,
-          pastedTextStore: pasteStore,
-          activityReporter,
-          onAgentRunStatus: (snapshot) => {
-            if (snapshot) {
-              activityIndicator.updateAgentRun(snapshot);
-              // run 进面板的唯一入口就在这里，所以轮询器也只在这里起表；
-              // 它自己在没有活跃 run 时会停。
-              runRegistryPoller.ensureRunning();
-            } else {
-              activityIndicator.clearAgentRun();
-            }
-          },
-        }
-      );
-      // 强制收尾保护：第二次 Esc 已把 activeTurnAbort 置 null、busyLock 解除、
-      // 打印过 forceStopped 提示。runAgentChat 现在才返回 —— 这段迟到返回值
-      // 必须整体丢弃：不读已 null 的 activeTurnAbort（会 NPE）、不重复打印
-      // turnStopped、不重绘（用户可能已在输入新一轮）。用 epoch 比对而非全局
-      // forcedStop：强制停止后用户可能已发起新 turn 并重置 forcedStop=false，
-      // 旧 turn 靠 myEpoch === forcedStopEpoch 识别自己被强制过。
-      // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
-      const wasForceStopped = forcedStopEpoch === myEpoch;
-      if (wasForceStopped) {
-        if (runResult.dialogId || runResult.turnTokens) {
-          const nextDialogKey = runResult.dialogId
-            ? runResult.dialogId === state.dialogId && state.dialogKey
-              ? state.dialogKey
-              : state.dialogOwnerId
-                ? `dialog-${state.dialogOwnerId}-${runResult.dialogId}`
-                : undefined
-            : state.dialogKey;
-          state = {
-            ...state,
-            ...(runResult.dialogId
-              ? {
-                  dialogId: runResult.dialogId,
-                  dialogKey: nextDialogKey,
-                  dialogLabel: runResult.title || runResult.dialogId,
-                  ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-                }
-              : {}),
-            ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-            ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-          };
-          if (runResult.dialogId && nextDialogKey) {
-            refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-          }
-        }
-        scheduleTitlePatchSync(runResult);
-        return { ok: false, aborted: true };
-      }
-      const wasAborted = activeTurnAbort.signal.aborted;
-      activeTurnAbort = null;
-      if (
-        shouldEmitTerminalBell({
-          wasAborted,
-          streamInterrupted: runResult.streamInterrupted,
-          exitCode: runResult.exitCode,
-          interactive: isInteractiveInput(input),
-        })
-      ) {
-        emitTerminalBell(output);
-      }
-      if (isInteractiveInput(input)) {
-        finalizeCurrentTurn(history);
-        flushPendingRender();
-        renderHistoryToOutput();
-        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-      }
-      if (wasAborted) {
-        if (runResult.pendingToolName) {
-          // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
-          // 完成，其结果不会进入本次对话历史。告知工具名，语气正常。
-          emitCommandOutput(t("turnStoppedToolPending", runResult.pendingToolName));
-        } else {
-          emitCommandOutput(t("turnStopped"));
-        }
-      }
-      if (runResult.dialogId || runResult.turnTokens || runResult.contextWindow) {
-        const nextDialogKey = runResult.dialogId
-          ? runResult.dialogId === state.dialogId && state.dialogKey
-            ? state.dialogKey
-            : state.dialogOwnerId
-              ? `dialog-${state.dialogOwnerId}-${runResult.dialogId}`
-              : undefined
-          : state.dialogKey;
-        state = {
-          ...state,
-          ...(runResult.dialogId
-            ? {
-                dialogId: runResult.dialogId,
-                dialogKey: nextDialogKey,
-                dialogLabel: runResult.title || runResult.dialogId,
-                ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-              }
-            : {}),
-          ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-          ...(runResult.contextWindow
-            ? { contextWindow: runResult.contextWindow }
-            : {}),
-          // input_tokens 是累计上下文输入（含历史消息），把它持久化到
-          // estimatedContextTokens：下一轮若 provider 不返回 usage，context
-          // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
-          ...(runResult.turnTokens && runResult.turnTokens.input > 0
-            ? { estimatedContextTokens: runResult.turnTokens.input }
-            : {}),
-          ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-        };
-        if (runResult.dialogId && nextDialogKey) {
-          refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-        }
-      }
-      scheduleTitlePatchSync(runResult);
-      // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
-      // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
-      if (!wasAborted && runResult.exitCode !== 0) {
-        if (isBalanceExhaustedError(runResult.localError) && runResult.dialogId) {
-          emitCommandOutput(t("balanceExhaustedHint"));
-        } else if (isQuotaExhaustedError(runResult.localError)) {
-          emitCommandOutput(t("quotaExhaustedHint"));
-        } else if (runResult.dialogId) {
-          emitCommandOutput(t("dialogPreservedHint"));
-        } else {
-          emitCommandOutput(t("dialogNotSavedHint"));
-        }
-      }
-      return { ok: !wasAborted, aborted: wasAborted };
-    } finally {
-      activityIndicator.stop();
-      activeTurnAbort = null;
-    }
-  };
-
-  // The TUI chat queue binding drives drain via runOneAgentTurn. It is created
-  // here (inside the workspace closure) so the drain callback can capture
-  // history/state/fixedInput/runAgentChat just like a direct send does.
-  let chatQueueBinding: ChatQueueTuiBinding | null = null;
-  const ensureChatQueueBinding = (
-    actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
-    confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>
-  ): ChatQueueTuiBinding => {
-    if (chatQueueBinding) return chatQueueBinding;
-    chatQueueBinding = createChatQueueTuiBinding(async (text) => {
-      return runOneAgentTurn(text, [], actionGateHandler, confirmDestructiveAction);
-    });
-    return chatQueueBinding;
-  };
-
-  // Abort the in-flight turn so the queue head drains immediately. Shared by
-  // the empty-Enter-while-busy preempt and the Ctrl+S flush shortcut so the
-  // "arm preempt, then abort" two-step lives in exactly one place.
-  const preemptAndAbortForDrain = (binding: ChatQueueTuiBinding): void => {
-    if (binding.preemptForDrain() && activeTurnAbort) {
-      activeTurnAbort.abort();
-    }
-  };
 
   const emitCommandOutput = (text: string, command = "") => {
     if (!text) return;
@@ -1715,6 +1787,57 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     appendLocalTurn(history, command, text);
     renderHistoryToOutput();
     if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+  };
+
+  // The TUI chat queue binding drives drain via runOneAgentTurn. It is created
+  // on demand so the drain callback can capture history/state/fixedInput/runAgentChat.
+  let chatQueueBinding: ChatQueueTuiBinding | null = null;
+
+  // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
+  const turnCtx: AgentTurnContext = {
+    get state() { return state; },
+    set state(v) { state = v; },
+    get forcedStop() { return forcedStop; },
+    set forcedStop(v) { forcedStop = v; },
+    get forcedStopEpoch() { return forcedStopEpoch; },
+    set forcedStopEpoch(v) { forcedStopEpoch = v; },
+    get turnEpoch() { return turnEpoch; },
+    set turnEpoch(v) { turnEpoch = v; },
+    get activeTurnAbort() { return activeTurnAbort; },
+    set activeTurnAbort(v) { activeTurnAbort = v; },
+    get activeTurnEpoch() { return activeTurnEpoch; },
+    set activeTurnEpoch(v) { activeTurnEpoch = v; },
+    get modalOwnsKeyboard() { return modalOwnsKeyboard; },
+    set modalOwnsKeyboard(v) { modalOwnsKeyboard = v; },
+    get composerDecoderDrain() { return composerDecoderDrain; },
+    set composerDecoderDrain(v) { composerDecoderDrain = v; },
+    get chatQueueBinding() { return chatQueueBinding; },
+    set chatQueueBinding(v) { chatQueueBinding = v; },
+
+    get sessionEnded() { return sessionEnded; },
+    get buffer() { return buffer; },
+    get cursorPos() { return cursorPos; },
+
+    get fixedInput() { return fixedInput; },
+
+    options,
+    effectiveEnv,
+    history,
+    activityIndicator,
+    activityReporter,
+    runRegistryPoller,
+    runCompletionWatcher,
+    pasteStore,
+    dialogHost,
+    input,
+    output,
+
+    syncWindowTitle,
+    renderHistoryToOutput,
+    scheduleRender,
+    flushPendingRender,
+    refreshDialogTotalCredits,
+    emitCommandOutput,
   };
 
   const persistExplicitAgentSwitch = (previousAgentKey: string) => {
@@ -2218,10 +2341,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // then execute it via the shared runOneAgentTurn helper. After it ends,
       // notifyTurnEnd drives the drain cascade for any messages the user
       // queued while this turn was running.
-      const binding = ensureChatQueueBinding(actionGateHandler, confirmDestructiveAction);
+      const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
       binding.notifyTurnStart();
       try {
         const outcome = await runOneAgentTurn(
+          turnCtx,
           result.action.message,
           imageUrls,
           actionGateHandler,
@@ -2445,12 +2569,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const runIdleTextTurn = async (inputMsg: TurnRequest | InternalTurnEvent | string): Promise<void> => {
       const req = createTurnRequest(inputMsg);
       const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-      const binding = ensureChatQueueBinding(actionGateHandler, confirmDestructiveAction);
+      const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
       binding.notifyTurnStart();
       busy = true;
       fixedInput.enterOutputMode(req.text);
       try {
         const outcome = await runOneAgentTurn(
+          turnCtx,
           req,
           [],
           actionGateHandler,
@@ -2473,7 +2598,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (done) return;
       if (busy || fixedInput.isPaused()) {
         const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-        ensureChatQueueBinding(actionGateHandler, confirmDestructiveAction).enqueue(event);
+        ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).enqueue(event);
         if (fixedInput.active && !fixedInput.isPaused()) {
           fixedInput.repaint(buffer, cursorPos);
         }
@@ -2537,6 +2662,157 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }, 60);
     };
 
+    // ── S1：Ctrl+C 分支抽为 runTuiWorkspace 内部具名闭包（逐行搬移，行为等价） ──
+    // 原内联于 handleInputToken 的 `if (sequence === "\u0003")` 整块，职责清晰
+    // （防误退键盘语义），搬到这里保持纯搬移：不改逻辑、不改输出字节序列。
+    // 依赖（busyLock 之外的闭包变量）在交互块作用域内全部可及。
+    const handleCtrlCKey = async (busyLock: boolean): Promise<void> => {
+      // Ctrl+C（\u0003）：防误退。必须放在 generic clearSelection() 之前，
+      // 否则会先清掉鼠标选区，导致"Ctrl+C 提取选区"失效。
+      // - Busy：中止当前 Turn（保持原有 abort 语义），绝不退出。
+      // - Idle + 有鼠标选区：提取选区文本写入剪贴板，清除高亮，绝不退出。
+      // - Idle + 输入草稿非空：仅清空草稿（同 Bash/Zsh），绝不退出。
+      // - Idle + 草稿空且无选区：第一次记录时间戳 + 提示；1000ms 内第二次才退出。
+      if (busyLock && activeTurnAbort) {
+        // 中止当前 Turn（保持原有行为）：与 Esc 的协作停止一致。
+        const stopBinding = chatQueueBinding;
+        if (stopBinding && stopBinding.queueLength() > 0) {
+          stopBinding.preemptForStop();
+        }
+        activityIndicator.markStopping();
+        activeTurnAbort.abort();
+        return;
+      }
+      // Idle 分支。
+      const now = Date.now();
+      const hasSelection =
+        selectionState.anchor !== null &&
+        selectionState.head !== null &&
+        !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
+      if (hasSelection) {
+        // 提取选区文本写入剪贴板，清除选区高亮。
+        const tty = output as { rows?: number; columns?: number };
+        const columns = tty.columns ?? 80;
+        const contentWidth = Math.max(1, columns - 1);
+        const textToCopy = extractSelectedText(
+          history,
+          selectionState.anchor!,
+          selectionState.head!,
+          contentWidth,
+        );
+        clearSelection();
+        if (textToCopy.length > 0) {
+          try {
+            await writeClipboard(textToCopy);
+            emitCommandOutput(t("copiedSelection"));
+          } catch (error) {
+            emitCommandOutput(
+              `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
+            );
+          }
+        }
+        paintFrame(buffer);
+        return;
+      }
+      if (selectionState.anchor) {
+        clearSelection();
+      }
+      if (buffer.length > 0) {
+        // 仅清空输入草稿。
+        buffer = "";
+        cursorPos = 0;
+        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+        emitCommandOutput(t("ctrlCClearedDraft"));
+        return;
+      }
+      // 草稿空且无选区：双击退出。
+      if (lastCtrlCDoublePress !== null && now - lastCtrlCDoublePress <= 1000) {
+        lastCtrlCDoublePress = null;
+        fixedInput.disable();
+        finish();
+        return;
+      }
+      lastCtrlCDoublePress = now;
+      emitCommandOutput(t("ctrlCExitHint"));
+    };
+
+    // ── S1：busy 本地 slash 处理抽为 runTuiWorkspace 内部具名闭包（逐行搬移） ──
+    // 原内联于 handleInputToken 的 `if (isBusyLocalSlash) { ... }` 整块。该分支
+    // 在 turn 进行中把 /context /switch 等本地命令经 handleTuiInput 走瞬时渲染
+    // 通道（见下），搬移不改逻辑与输出字节序列。
+    const handleBusyLocalSlash = async (
+      submittedText: string,
+      busySlashCommand: string,
+    ): Promise<void> => {
+      releaseCollapsedPasteReferences(submittedText, pasteStore);
+      buffer = "";
+      cursorPos = 0;
+      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+
+      const beforeAgentKey = state.agentKey;
+      const res = handleTuiInput(submittedText, state);
+      if (res.action?.type === "theme-refresh") {
+        state = res.nextState;
+        const detected = await detectTerminalBackground({
+          stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
+          stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
+          allowSystemFallback: true,
+        });
+        let refreshMsg = "";
+        if (detected && applyDetectedBackground(detected)) {
+          refreshMsg = t("themeRefreshed", detected.brightness);
+        } else if (detected) {
+          refreshMsg = t("themeRefreshed", detected.brightness);
+        } else {
+          refreshMsg = t("themeRefreshFailed");
+        }
+        if (refreshMsg) {
+          output.write(`${refreshMsg}\n`);
+        }
+      } else if (res.action) {
+        // `/switch` with no target (interactive picker) and `/switch
+        // list` need to take over the screen, which races the in-flight
+        // streaming repaint. Don't open them while busy and don't queue
+        // them either: surface a one-line notice telling the user how
+        // to switch without the picker (the change takes effect on the
+        // next turn, not the in-flight one).
+        output.write(
+          "Model picker isn't available while a reply is running. " +
+            "Use `/switch <name>` to switch now (takes effect on the " +
+            "next turn), or wait for the reply to finish.\n",
+        );
+      } else {
+        state = res.nextState;
+        let msg = res.output;
+        if (
+          busySlashCommand === "/switch" &&
+          persistExplicitAgentSwitch(beforeAgentKey)
+        ) {
+          // The switch succeeded. It can't affect the in-flight turn
+          // (its model/provider were captured at turn start), so it
+          // takes effect on the next turn / loop iteration. Warn that
+          // switching mid-conversation re-sends the context to the new
+          // model and therefore may burn extra tokens.
+          const hint =
+            "Note: the new model takes effect on the next turn. " +
+            "Switching models may consume more tokens because the " +
+            "conversation context is re-sent to the new model.";
+          msg = msg ? `${msg}\n${hint}` : hint;
+        }
+        if (msg) {
+          output.write(`${msg}\n`);
+        }
+      }
+      if (busySlashCommand === "/theme") {
+        // Theme commands mutate process-wide render state. Repaint both
+        // the transcript and composer immediately even while a reply is
+        // streaming; otherwise old truecolor cells linger until the
+        // next stream chunk happens to arrive.
+        renderHistoryToOutput();
+        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      }
+    };
+
     const handleInputToken = async (sequence: string) => {
       if (done) return;
       // While a modal (raw action gate OR ask_choice popup) owns the
@@ -2591,7 +2867,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           t(busy ? "flushQueuedBusyHint" : "flushQueuedIdleHint", String(totalCount)),
         );
         if (busy) {
-          preemptAndAbortForDrain(chatQueueBinding);
+          preemptAndAbortForDrain(chatQueueBinding, activeTurnAbort);
           return;
         }
         // Idle: clear the now-merged draft, then reuse the empty-Enter
@@ -2725,74 +3001,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return;
       }
 
-      // Ctrl+C（\u0003）：防误退。必须放在 generic clearSelection() 之前，
-      // 否则会先清掉鼠标选区，导致"Ctrl+C 提取选区"失效。
-      // - Busy：中止当前 Turn（保持原有 abort 语义），绝不退出。
-      // - Idle + 有鼠标选区：提取选区文本写入剪贴板，清除高亮，绝不退出。
-      // - Idle + 输入草稿非空：仅清空草稿（同 Bash/Zsh），绝不退出。
-      // - Idle + 草稿空且无选区：第一次记录时间戳 + 提示；1000ms 内第二次才退出。
+      // ── S1：Ctrl+C 分支已抽为上方 handleCtrlCKey 具名闭包，此处仅转发。
       if (sequence === "\u0003") {
-        if (busyLock && activeTurnAbort) {
-          // 中止当前 Turn（保持原有行为）：与 Esc 的协作停止一致。
-          const stopBinding = chatQueueBinding;
-          if (stopBinding && stopBinding.queueLength() > 0) {
-            stopBinding.preemptForStop();
-          }
-          activityIndicator.markStopping();
-          activeTurnAbort.abort();
-          return;
-        }
-        // Idle 分支。
-        const now = Date.now();
-        const hasSelection =
-          selectionState.anchor !== null &&
-          selectionState.head !== null &&
-          !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
-        if (hasSelection) {
-          // 提取选区文本写入剪贴板，清除选区高亮。
-          const tty = output as { rows?: number; columns?: number };
-          const columns = tty.columns ?? 80;
-          const contentWidth = Math.max(1, columns - 1);
-          const textToCopy = extractSelectedText(
-            history,
-            selectionState.anchor!,
-            selectionState.head!,
-            contentWidth,
-          );
-          clearSelection();
-          if (textToCopy.length > 0) {
-            try {
-              await writeClipboard(textToCopy);
-              emitCommandOutput(t("copiedSelection"));
-            } catch (error) {
-              emitCommandOutput(
-                `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
-              );
-            }
-          }
-          paintFrame(buffer);
-          return;
-        }
-        if (selectionState.anchor) {
-          clearSelection();
-        }
-        if (buffer.length > 0) {
-          // 仅清空输入草稿。
-          buffer = "";
-          cursorPos = 0;
-          if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-          emitCommandOutput(t("ctrlCClearedDraft"));
-          return;
-        }
-        // 草稿空且无选区：双击退出。
-        if (lastCtrlCDoublePress !== null && now - lastCtrlCDoublePress <= 1000) {
-          lastCtrlCDoublePress = null;
-          fixedInput.disable();
-          finish();
-          return;
-        }
-        lastCtrlCDoublePress = now;
-        emitCommandOutput(t("ctrlCExitHint"));
+        await handleCtrlCKey(busyLock);
         return;
       }
 
@@ -2950,78 +3161,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/profile" ||
             busySlashCommand === "/version";
           if (isBusyLocalSlash) {
-            releaseCollapsedPasteReferences(submittedText, pasteStore);
-            buffer = "";
-            cursorPos = 0;
-            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-
-            const beforeAgentKey = state.agentKey;
-            const res = handleTuiInput(submittedText, state);
-            if (res.action?.type === "theme-refresh") {
-              state = res.nextState;
-              const detected = await detectTerminalBackground({
-                stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
-                stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
-                allowSystemFallback: true,
-              });
-              let refreshMsg = "";
-              if (detected && applyDetectedBackground(detected)) {
-                refreshMsg = t("themeRefreshed", detected.brightness);
-              } else if (detected) {
-                refreshMsg = t("themeRefreshed", detected.brightness);
-              } else {
-                refreshMsg = t("themeRefreshFailed");
-              }
-              if (refreshMsg) {
-                output.write(`${refreshMsg}\n`);
-              }
-            } else if (res.action) {
-              // `/switch` with no target (interactive picker) and `/switch
-              // list` need to take over the screen, which races the in-flight
-              // streaming repaint. Don't open them while busy and don't queue
-              // them either: surface a one-line notice telling the user how
-              // to switch without the picker (the change takes effect on the
-              // next turn, not the in-flight one).
-              output.write(
-                "Model picker isn't available while a reply is running. " +
-                  "Use `/switch <name>` to switch now (takes effect on the " +
-                  "next turn), or wait for the reply to finish.\n",
-              );
-            } else {
-              state = res.nextState;
-              let msg = res.output;
-              if (
-                busySlashCommand === "/switch" &&
-                persistExplicitAgentSwitch(beforeAgentKey)
-              ) {
-                // The switch succeeded. It can't affect the in-flight turn
-                // (its model/provider were captured at turn start), so it
-                // takes effect on the next turn / loop iteration. Warn that
-                // switching mid-conversation re-sends the context to the new
-                // model and therefore may burn extra tokens.
-                const hint =
-                  "Note: the new model takes effect on the next turn. " +
-                  "Switching models may consume more tokens because the " +
-                  "conversation context is re-sent to the new model.";
-                msg = msg ? `${msg}\n${hint}` : hint;
-              }
-              if (msg) {
-                output.write(`${msg}\n`);
-              }
-            }
-            if (busySlashCommand === "/theme") {
-              // Theme commands mutate process-wide render state. Repaint both
-              // the transcript and composer immediately even while a reply is
-              // streaming; otherwise old truecolor cells linger until the
-              // next stream chunk happens to arrive.
-              renderHistoryToOutput();
-              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-            }
+            // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
+            // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。
+            await handleBusyLocalSlash(submittedText, busySlashCommand);
             return;
           }
           const { actionGateHandler, confirmDestructiveAction } =
             buildInteractiveTurnHandlers();
-          const binding = ensureChatQueueBinding(actionGateHandler, confirmDestructiveAction);
+          const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
           const decision = binding.resolveSubmit({
             text: submittedText,
             isRunning: true,
@@ -3046,7 +3193,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             // clean end and drains rather than clearing the queue), then
             // abort the current turn. The turn's own finally will call
             // notifyTurnEnd, which drives the drain cascade.
-            preemptAndAbortForDrain(binding);
+            preemptAndAbortForDrain(binding, activeTurnAbort);
           }
           // arm-fresh-dialog / compact-blocked / noop / multi-image-blocked
           // are all intentionally no-ops while busy: the draft is preserved
@@ -3060,7 +3207,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // fall through to runSubmittedLine as before.
         if (!submittedText.trim() && chatQueueBinding && chatQueueBinding.queueLength() > 0) {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-          const manualBinding = ensureChatQueueBinding(actionGateHandler, confirmDestructiveAction);
+          const manualBinding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
           const drainedText = manualBinding.drainHeadForManualTurn();
           if (drainedText !== null) {
             // 空 Enter 进来的，草稿本来就是空的/纯空白，清掉再进 output 模式。

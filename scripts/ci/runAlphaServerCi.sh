@@ -107,7 +107,7 @@ USAGE
 }
 
 log() {
-  printf '\n=== %s ===\n' "$*"
+  printf '\n=== %s ===\n' "$*" || true
 }
 
 # The alpha host's `date +%s%3N` does not reliably truncate or zero-pad `%N`.
@@ -538,6 +538,7 @@ EOF
       echo "WARNING: artifact prune loop failed (non-blocking)" || true
     fi
   fi
+  return 0
 }
 
 package_web_artifact() {
@@ -562,8 +563,8 @@ package_web_artifact() {
     # 将 SSR render-dist 产物追加到 artifact tar 中
     if [[ -d packages/server/.render-dist ]]; then
       tar -rf "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" packages/server/.render-dist
+      gzip -c "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" 2>/dev/null || true
     fi
-    gzip -c "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" 2>/dev/null || true
     local cf_tar_bytes
     cf_tar_bytes="$(wc -c < "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" | tr -d '[:space:]')"
     # 双端 sha/字节数证明部署的就是 CF 产物。
@@ -606,6 +607,7 @@ PY
   # 产物持久归档（尽力而为，失败不阻塞部署）
   gzip -c "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar" > "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" 2>/dev/null || true
   archive_web_artifact "alpha" "$ARTIFACT_DIR/nolo-web-build-${BUILD_SHA}.tar.gz" || printf 'artifact archive failed (non-blocking, deploy continues)\n' >&2
+  return 0
 }
 
 alpha_core_restart_required() {
@@ -723,6 +725,7 @@ deploy_alpha_artifact() {
   NOLO_PM2_KILL_TIMEOUT=40000 \
   NOLO_SERVICE_HEALTH_URL="$ALPHA_LOCAL_BASE/ready" \
   NOLO_DEPLOY_WINDOW_PUBLIC_PROBE_URL="$ALPHA_PUBLIC_BASE/health" \
+  NOLO_CI_DIAG=1 \
   bash ./scripts/release/deployRemote.sh
 
   NOLO_REPO_DIR="$REPO_DIR" \
@@ -1067,6 +1070,7 @@ promote_alpha_artifact() {
   cd "$WORK_DIR"
   cp -f "$artifact_path" "$WORK_DIR/web-build.tar.gz"
   archive_web_artifact "main" "$WORK_DIR/web-build.tar.gz" || printf 'artifact archive failed (non-blocking, deploy continues)\n' >&2
+  return 0
 }
 
 main_web_release() {
@@ -1165,18 +1169,51 @@ assert_runtime_render_bundle() {
 
 probe_alpha_agents_ssr() {
   log "Probe alpha /agents SSR"
+
+  # 1. SSR 自检端点探针
+  local selfcheck_url="${ALPHA_LOCAL_BASE}/api/admin/ssr-selfcheck"
+  local selfcheck_file
+  selfcheck_file="$(mktemp)"
+  local selfcheck_code
+  selfcheck_code="$(curl -s -w '%{http_code}' -o "$selfcheck_file" "$selfcheck_url" || echo "000")"
+  echo "--- [diag] SSR Selfcheck Response (HTTP $selfcheck_code) ---" >&2
+  cat "$selfcheck_file" >&2
+  echo "" >&2
+
+  local error_msg
+  error_msg="$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    print(data.get('errorMessage') or '')
+except Exception:
+    print('')
+" "$selfcheck_file" 2>/dev/null || echo "")"
+  rm -f "$selfcheck_file"
+
+  if [[ -n "$error_msg" ]]; then
+    echo "FATAL: /api/admin/ssr-selfcheck reported SSR error: $error_msg" >&2
+    return 1
+  fi
+
   local probe_url="${ALPHA_LOCAL_BASE}/agents"
   local http_code
   local response_file
   response_file="$(mktemp)"
 
   http_code="$(curl -s -w '%{http_code}' -o "$response_file" "$probe_url" || echo "000")"
+
+  # [diag] 无条件输出服务端 pm2 错误日志尾（SSR 堆栈经 status API 可读；正常时为空）
+  echo "--- [diag] pm2 error log tail (always) ---" >&2
+  tail -n 150 /root/.pm2/logs/*error.log 2>/dev/null | grep -av "react-dom-server\|node_modules" | grep -aE "DBG-SSR|Render failed|stylex|Unexpected|Error:" | tail -30 >&2 || true
+
   if [[ "$http_code" != "200" ]]; then
     echo "FATAL: /agents SSR probe returned HTTP $http_code (expected 200) from $probe_url" >&2
     head -n 30 "$response_file" >&2 || true
     echo "--- [diag] server render errors (pm2 logs tail) ---" >&2
-    tail -n 120 /root/.pm2/logs/*error.log 2>/dev/null | grep -aE "SSR|Render failed|stylex|Unexpected|Error:|error:" | tail -40 >&2 || true
-    tail -n 60 /root/.pm2/logs/*out.log 2>/dev/null | grep -aE "SSR|Render failed|stylex|Unexpected" | tail -20 >&2 || true
+    tail -n 120 /root/.pm2/logs/*error.log 2>/dev/null | grep -av "react-dom-server\|node_modules" | grep -aE "SSR|Render failed|stylex|Unexpected|Error:|error:" | tail -40 >&2 || true
+    tail -n 60 /root/.pm2/logs/*out.log 2>/dev/null | grep -av "react-dom-server\|node_modules" | grep -aE "SSR|Render failed|stylex|Unexpected" | tail -20 >&2 || true
     rm -f "$response_file"
     return 1
   fi
@@ -1269,6 +1306,14 @@ alpha_deploy() {
   else
     echo "(no snapshots)"
   fi
+  # [diag] SSR 堆栈诊断——置于部署输出最末尾，确保进入 status API 的 40 行窗口
+  echo ""
+  echo "=== [diag] SSR Render Stack (pm2 logs) ==="
+  # 主动触发一次公网 /agents（生成新的错误堆栈行）
+  curl -s -m 8 -o /dev/null "https://us.nolo.chat/agents?diag=$BUILD_SHA" || true
+  sleep 1
+  grep -ah "DBG-SSR" /root/.pm2/logs/* 2>/dev/null | tail -2 || true
+  grep -ahE "TypeError|ReferenceError|RangeError|SyntaxError|Cannot read|is not a function|is not defined|Cannot destructure" /root/.pm2/logs/*error.log 2>/dev/null | grep -av "react-dom-server\|node_modules" | tail -6 || true
 }
 
 alpha_billing_audit() {
@@ -1419,6 +1464,7 @@ alpha_maintenance() {
   NOLO_PM2_KILL_TIMEOUT=40000 \
   NOLO_SERVICE_HEALTH_URL="$ALPHA_LOCAL_BASE/ready" \
   NOLO_DEPLOY_WINDOW_PUBLIC_PROBE_URL="$ALPHA_PUBLIC_BASE/health" \
+  NOLO_CI_DIAG=1 \
   bash ./scripts/release/deployRemote.sh
 
   log "Local health"
@@ -1458,6 +1504,7 @@ alpha_maintenance() {
   df -h /tmp || true
 }
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 case "$COMMAND" in
   alpha-deploy)
     alpha_deploy
@@ -1494,3 +1541,6 @@ case "$COMMAND" in
     fail "Unknown command: $COMMAND"
     ;;
 esac
+else
+  return 0 2>/dev/null || true
+fi

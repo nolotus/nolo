@@ -380,33 +380,44 @@ export function MemoryRouter({
 
 // useLocation / useNavigate / useNavigationType / useParams
 
+const DEFAULT_FALLBACK_LOCATION: Location = {
+  pathname: "/",
+  search: "",
+  hash: "",
+  state: null,
+  key: "default",
+};
+
 export function useLocation(): Location {
-  return useRouterContext().location;
+  const ctx = useContext(RouterContext);
+  return ctx?.location ?? DEFAULT_FALLBACK_LOCATION;
 }
 
 export function useNavigate(): (to: To | number, options?: NavigateOptions) => void {
-  const { navigate } = useRouterContext();
+  const ctx = useContext(RouterContext);
   const matches = useContext(RouteMatchContext);
   const routeBase = matches?.at(-1)?.pathnameBase ?? "/";
 
   return useCallback(
     (to: To | number, options?: NavigateOptions) => {
+      if (!ctx) return;
       if (typeof to === "number") {
-        navigate(to, options);
+        ctx.navigate(to, options);
         return;
       }
       const resolvedOptions =
         typeof to === "object" && options?.state === undefined
           ? { ...options, state: to.state }
           : options;
-      navigate(resolveTo(to, routeBase), resolvedOptions);
+      ctx.navigate(resolveTo(to, routeBase), resolvedOptions);
     },
-    [navigate, routeBase],
+    [ctx, routeBase],
   );
 }
 
 export function useNavigationType(): "POP" | "PUSH" | "REPLACE" {
-  return useRouterContext().navigationType;
+  const ctx = useContext(RouterContext);
+  return ctx?.navigationType ?? "POP";
 }
 
 export function useParams<K extends string = string>(): Readonly<

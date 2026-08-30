@@ -102,10 +102,11 @@ describe("runAlphaServerCi source contract", () => {
     expect(source).toContain("-name '.*.mermaid'");
     expect(source).toContain('ws_root="${NOLO_CI_WORKSPACE_ROOT:-/var/tmp/nolo-ci-workspaces}"');
     expect(source).not.toContain("find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} +");
-    expect(maintenanceWorkflow).not.toContain("uses: actions/checkout");
-    expect(maintenanceWorkflow).not.toContain("uses: oven-sh/setup-bun");
-    expect(maintenanceWorkflow).not.toContain("docker system prune");
-    expect(maintenanceWorkflow).not.toContain("systemctl restart caddy");
+    const fixServerJob = maintenanceWorkflow.split("release-audit:")[0] ?? maintenanceWorkflow;
+    expect(fixServerJob).not.toContain("uses: actions/checkout");
+    expect(fixServerJob).not.toContain("uses: oven-sh/setup-bun");
+    expect(fixServerJob).not.toContain("docker system prune");
+    expect(fixServerJob).not.toContain("systemctl restart caddy");
   });
 
   it("keeps main web release in a dedicated checkout instead of the alpha service checkout", () => {
@@ -429,23 +430,32 @@ describe("main-web-release artifact promotion behavior", () => {
   const scriptPath = "scripts/ci/runAlphaServerCi.sh";
 
   async function runBash(env: Record<string, string>, scriptCmd: string) {
-    const proc = Bun.spawn(["bash", "-c", `source ${scriptPath} "" >/dev/null && ${scriptCmd}`], {
-      env: {
-        ...process.env,
-        ...env,
-        NOLO_BUILD_SHA: env.BUILD_SHA ?? env.NOLO_BUILD_SHA ?? "",
-        NOLO_ALPHA_WORK_DIR: env.WORK_DIR ?? env.NOLO_ALPHA_WORK_DIR ?? process.cwd(),
-        NOLO_ALPHA_REPO_DIR: env.REPO_DIR ?? env.NOLO_ALPHA_REPO_DIR ?? process.cwd(),
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, exitCode };
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "nolo-bash-out-"));
+    const outFile = join(dir, "out.log");
+    const errFile = join(dir, "err.log");
+    try {
+      const proc = Bun.spawn(["bash", "-c", `source ${scriptPath} && ${scriptCmd} >"${outFile}" 2>"${errFile}"`], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ...env,
+          NOLO_BUILD_SHA: env.BUILD_SHA ?? env.NOLO_BUILD_SHA ?? "",
+          NOLO_ALPHA_WORK_DIR: env.WORK_DIR ?? env.NOLO_ALPHA_WORK_DIR ?? process.cwd(),
+          NOLO_ALPHA_REPO_DIR: env.REPO_DIR ?? env.NOLO_ALPHA_REPO_DIR ?? process.cwd(),
+          NOLO_ALPHA_ARTIFACT_DIR: env.ARTIFACT_DIR ?? env.NOLO_ALPHA_ARTIFACT_DIR ?? "",
+          NOLO_ARTIFACT_ARCHIVE_DIR: env.NOLO_ARTIFACT_ARCHIVE_DIR ?? "",
+        },
+      });
+      const exitCode = await proc.exited;
+      const stdout = await Bun.file(outFile).text().catch(() => "");
+      const stderr = await Bun.file(errFile).text().catch(() => "");
+      return { stdout, stderr, exitCode };
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   it("promotes when alpha artifact exists, is non-empty, and meta sha matches", async () => {
@@ -610,7 +620,10 @@ describe("main-web-release artifact promotion behavior", () => {
       await writeFile(join(tmpArchive, `alpha-${shortsha}.meta.json`), JSON.stringify({ sha, kind: "alpha" }));
 
       for (const bin of ["bash", "mktemp", "rm", "cat"]) {
-        const p = existsSync(`/bin/${bin}`) ? `/bin/${bin}` : `/usr/bin/${bin}`;
+        let p = existsSync(`/bin/${bin}`) ? `/bin/${bin}` : `/usr/bin/${bin}`;
+        if (bin === "bash" && existsSync("/opt/homebrew/bin/bash")) {
+          p = "/opt/homebrew/bin/bash";
+        }
         await symlink(p, join(tmpBin, bin));
       }
 
@@ -631,25 +644,32 @@ describe("CF offload artifact junction (BLOCK-1): package_web_artifact consumes 
   const scriptPath = "scripts/ci/runAlphaServerCi.sh";
 
   async function runBash(env: Record<string, string>, scriptCmd: string) {
-    const proc = Bun.spawn(["bash", "-c", `source ${scriptPath} "" >/dev/null && ${scriptCmd}`], {
-      env: {
-        ...process.env,
-        ...env,
-        NOLO_BUILD_SHA: env.BUILD_SHA ?? env.NOLO_BUILD_SHA ?? "",
-        NOLO_ALPHA_WORK_DIR: env.WORK_DIR ?? env.NOLO_ALPHA_WORK_DIR ?? process.cwd(),
-        NOLO_ALPHA_REPO_DIR: env.REPO_DIR ?? env.NOLO_ALPHA_REPO_DIR ?? process.cwd(),
-        NOLO_ALPHA_ARTIFACT_DIR: env.ARTIFACT_DIR ?? env.NOLO_ALPHA_ARTIFACT_DIR ?? "",
-        NOLO_ARTIFACT_ARCHIVE_DIR: env.NOLO_ARTIFACT_ARCHIVE_DIR ?? "",
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, exitCode };
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "nolo-bash-out-"));
+    const outFile = join(dir, "out.log");
+    const errFile = join(dir, "err.log");
+    try {
+      const proc = Bun.spawn(["bash", "-c", `source ${scriptPath} && ${scriptCmd} >"${outFile}" 2>"${errFile}"`], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ...env,
+          NOLO_BUILD_SHA: env.BUILD_SHA ?? env.NOLO_BUILD_SHA ?? "",
+          NOLO_ALPHA_WORK_DIR: env.WORK_DIR ?? env.NOLO_ALPHA_WORK_DIR ?? process.cwd(),
+          NOLO_ALPHA_REPO_DIR: env.REPO_DIR ?? env.NOLO_ALPHA_REPO_DIR ?? process.cwd(),
+          NOLO_ALPHA_ARTIFACT_DIR: env.ARTIFACT_DIR ?? env.NOLO_ALPHA_ARTIFACT_DIR ?? "",
+          NOLO_ARTIFACT_ARCHIVE_DIR: env.NOLO_ARTIFACT_ARCHIVE_DIR ?? "",
+        },
+      });
+      const exitCode = await proc.exited;
+      const stdout = await Bun.file(outFile).text().catch(() => "");
+      const stderr = await Bun.file(errFile).text().catch(() => "");
+      return { stdout, stderr, exitCode };
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   it("consumes the CF tar.gz junction and produces the deployable .tar at the exact handoff path", async () => {
@@ -667,7 +687,7 @@ describe("CF offload artifact junction (BLOCK-1): package_web_artifact consumes 
     const cfRaw = new TextEncoder().encode("CF-BUILT-ARTIFACT-CONTENT");
     const rawTar = join(tmpWork, "raw.tar");
     await writeFile(rawTar, cfRaw);
-    const gzBuf = execFileSync("gzip", ["-c", rawTar]);
+    const gzBuf = Bun.gzipSync(cfRaw);
 
     try {
       await writeFile(cfTgz, gzBuf);

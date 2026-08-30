@@ -113,6 +113,14 @@ describe("native router runtime", () => {
     expect(html).toBe("");
   });
 
+  it("renders Navigate and useNavigate safely even outside of RouterProvider during SSR", () => {
+    const html = renderToString(<Navigate to="/login" replace />);
+    expect(html).toBe("");
+
+    const probeHtml = renderToString(<NavigateProbe />);
+    expect(probeHtml).toContain("<button");
+  });
+
   it("exposes search params on server", () => {
     const html = renderToString(
       <RouterProvider initialUrl="https://nolo.test/?q=test">

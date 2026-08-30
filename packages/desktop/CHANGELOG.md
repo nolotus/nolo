@@ -1,4 +1,13 @@
 
+## 0.36.0-alpha.5
+
+## 0.36.0-alpha.5 (2026-08-30)
+
+### Bug Fixes
+
+* **routing:** 路由钩子 SSR-safe 化，修复 /agents SSR 500（StyleX 迁移事故收尾） ([efd5aa7](https://github.com/nolotus/bun-nolo/commit/efd5aa740f17b213522e1bcb4d7656c15048b0ee))
+
+
 ## 0.36.0-alpha.4
 
 ## 0.36.0-alpha.4 (2026-08-30)
