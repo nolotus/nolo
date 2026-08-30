@@ -75,7 +75,7 @@ export default {
         notesTitle: "Notes",
         notes: [
           `Points are billed by actual token usage and never expire. A balance of ${ADVANCED_FEATURE_MIN_BALANCE} points unlocks Pro (real-time web search, batch file analysis, and more).`,
-          `A single recharge of ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} points or more unlocks Advanced (GPT Pro, Claude Opus, and similar models). Every payment channel counts.`,
+          `A single recharge of ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} points or more unlocks Advanced (GPT Pro, Claude Opus, Kimi K3, and similar models). Every payment channel counts.`,
           "Online payments are credited automatically after the provider confirms the callback. WeChat / Alipay transfers are credited manually, usually within 1-30 minutes, and may be delayed on holidays.",
           "Self-purchased points that are 100% unused can be fully refunded within 7 days. For refunds and other questions, contact {{email}}.",
         ],
@@ -148,7 +148,7 @@ export default {
         notesTitle: "提示",
         notes: [
           `积分按实际消耗的 Token 扣费，永久有效。余额达到 ${ADVANCED_FEATURE_MIN_BALANCE} 积分自动解锁专业版（实时联网搜索、批量文件分析等）。`,
-          `单笔充值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分解锁高阶版（GPT Pro、Claude Opus 等模型），任意充值渠道均计入。`,
+          `单笔充值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分解锁高阶版（GPT Pro、Claude Opus、Kimi K3 等模型），任意充值渠道均计入。`,
           "在线支付由支付平台回调确认后自动到账；微信 / 支付宝为人工核对充值，通常 1-30 分钟，节假日可能延迟。",
           "自费充值的积分在 7 天内完全未使用可申请全额退款，退款及其他问题请联系 {{email}}。",
         ],
@@ -221,7 +221,7 @@ export default {
         notesTitle: "提示",
         notes: [
           `積分依實際消耗的 Token 扣費，永久有效。餘額達到 ${ADVANCED_FEATURE_MIN_BALANCE} 積分自動解鎖專業版（即時聯網搜尋、批次檔案分析等）。`,
-          `單筆儲值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 積分解鎖高階版（GPT Pro、Claude Opus 等模型），任何儲值管道均計入。`,
+          `單筆儲值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 積分解鎖高階版（GPT Pro、Claude Opus、Kimi K3 等模型），任何儲值管道均計入。`,
           "線上支付由支付平台回呼確認後自動入帳；微信 / 支付寶為人工核對儲值，通常 1-30 分鐘，假日可能延遲。",
           "自費儲值的積分在 7 天內完全未使用可申請全額退款，退款及其他問題請聯絡 {{email}}。",
         ],
@@ -297,7 +297,7 @@ export default {
         notesTitle: "ご案内",
         notes: [
           `ポイントは実際に消費したトークンに応じて課金され、有効期限はありません。残高が ${ADVANCED_FEATURE_MIN_BALANCE} ポイントに達するとプロ版（リアルタイム検索、一括ファイル分析など）が解放されます。`,
-          `1回のチャージが ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} ポイント以上で上級版（GPT Pro、Claude Opus など）が解放されます。すべての決済方法が対象です。`,
+          `1回のチャージが ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} ポイント以上で上級版（GPT Pro、Claude Opus、Kimi K3 など）が解放されます。すべての決済方法が対象です。`,
           "オンライン決済は決済事業者の確認後に自動反映されます。WeChat / Alipay は手動対応で、通常 1〜30 分、休日は遅れる場合があります。",
           "自費で購入したポイントは、7日以内かつ未使用であれば全額返金を申請できます。返金やその他のお問い合わせは {{email}} まで。",
         ],

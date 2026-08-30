@@ -10,15 +10,28 @@ export function isGptProModel(provider: unknown, model: unknown): boolean {
   const normalizedProvider = asTrimmedLowercaseString(provider);
   const normalizedModel = asTrimmedLowercaseString(model);
   if (normalizedProvider === "openai") {
-    return /^gpt-[a-z0-9.]+-pro(?:-|$)/.test(normalizedModel);
+    // 字符类含 "-"：允许 pro 前有内部连字符段（如 gpt-5.6-sol-pro），
+    // (?:-|$) 仍保证 -pro 后必须是段边界，prologue/proximity 类不会误伤。
+    return /^gpt-[a-z0-9.-]+-pro(?:-|$)/.test(normalizedModel);
   }
   if (normalizedProvider === "deepinfra") {
-    return normalizedModel.includes("claude") && normalizedModel.includes("opus");
+    // fable 系列与 opus 同属 199 积分档位（补漏：claude-fable-5 此前被遗漏）。
+    return (
+      normalizedModel.includes("claude") &&
+      (normalizedModel.includes("opus") || normalizedModel.includes("fable"))
+    );
+  }
+  if (normalizedProvider === "nolo") {
+    // 平台托管 Kimi K3 与 GPT Pro / Claude Opus 同门槛（199 积分档位）。
+    // core 包不得反向依赖 ai 包，这里用字面量精确匹配，
+    // 对应 ai 侧 PLATFORM_HOSTED_KIMI_K3_MODEL（"kimi-k3"）。
+    // nolo 下 glm-5.3 / glm-5-3-flash / kimi-k2.6 等廉价模型不在档位内，必须精确等于，禁止前缀匹配。
+    return normalizedModel === "kimi-k3";
   }
   return false;
 }
 
-export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro 系列需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;
+export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro / Kimi K3 等高级模型需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;
 
 /**
  * 客户端侧：判断当前 agent 是否因 GPT Pro 资格不足被拦截。

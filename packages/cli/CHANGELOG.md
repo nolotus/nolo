@@ -1,4 +1,14 @@
 
+## 0.43.0-alpha.1
+
+## 0.43.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **auth:** gate Kimi K3 behind GPT Pro 199 recharge tier, add fable to tier ([814d5fa](https://github.com/nolotus/bun-nolo/commit/814d5fadf84f4afebab974382a9d7e6af4076bb8))
+* **chat:** switch web TUI default nolo agent to glm-5-3-flash ([b706e41](https://github.com/nolotus/bun-nolo/commit/b706e4170ee2c77249d7b7dcfa6622782e8cc9e9))
+
+
 ## 0.42.0-alpha.1
 
 ## 0.42.0-alpha.1 (2026-08-30)

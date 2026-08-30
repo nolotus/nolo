@@ -61,7 +61,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     group: "builtin",
     name: "nolo",
     provider: "nolo",
-    model: "deepseek-v4-flash-vision-exp",
+    model: "glm-5-3-flash",
     runtimeFallback: true,
   },
   {

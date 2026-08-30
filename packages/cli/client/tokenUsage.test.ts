@@ -51,14 +51,15 @@ describe("tokenUsage", () => {
   });
 
   test("resolveAgentContextWindow follows the nolo catalog model (1M)", () => {
-    // nolo 指向 builtinAgentCatalog 里的 DeepSeek V4 Flash Vision Exp（1M），
+    // nolo 指向 builtinAgentCatalog 里的 GLM 5.3 Flash（1M），
     // 窗口跟随目录模型，不再受 NOLO_AUTO_ROUTE 影响。
+    // glm-5-3-flash（当前 nolo 默认档）的 catalog 窗口是 1M（2^20）。
     expect(
       resolveAgentContextWindow({
         agentKey: BUILTIN_NOLO_AGENT_KEY,
         agentName: "nolo",
       }),
-    ).toBe(1_000_000);
+    ).toBe(1_048_576);
 
     expect(
       resolveAgentContextWindow({
@@ -77,7 +78,7 @@ describe("tokenUsage", () => {
         agentKey: BUILTIN_NOLO_AGENT_KEY,
         agentName: "nolo",
       }),
-    ).toEqual({ agentName: "nolo", model: "deepseek-v4-flash-vision-exp" });
+    ).toEqual({ agentName: "nolo", model: "glm-5-3-flash" });
 
     // 显式 model 优先，不被默认档覆盖。
     expect(

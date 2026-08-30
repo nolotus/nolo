@@ -3,7 +3,11 @@ import { describe, expect, it } from "bun:test";
 import { BUILTIN_AGENT_CATALOG } from "core/builtinAgentCatalog";
 import {
   hasPlatformHostedUpstreamRoute,
+  isOpenAiResponsesModel,
+  resolvePlatformChatCompletionsEndpoint,
   resolvePlatformHostedCredentialProvider,
+  DEEPSEEK_RESPONSES_ENDPOINT,
+  OPENAI_RESPONSES_ENDPOINT,
 } from "./platformProviderEndpoints";
 import { platformHostedModels } from "ai/llm/platformHosted";
 import { resolveBuiltinPlatformAgentRoute } from "./builtinPlatformAgentRoute";
@@ -48,6 +52,31 @@ describe("builtinAgentCatalog × 平台分流表", () => {
       // 端点解析不出来 = 该 agent 上线即 PLATFORM_MODEL_UNROUTED
       expect(route!.endpoint).toBeTruthy();
     }
+  });
+
+  it("默认档 nolo（glm-5-3-flash）走 chat.completions wire，而非 Responses wire", () => {
+    // 默认档从 deepseek-v4-flash-vision-exp（Responses wire）切到 glm-5-3-flash 后，
+    // 服务端权威路由必须跟着换接口：glm-5-3-flash 不是 DeepSeek 托管模型，不该再打
+    // Responses 端点（换接口只改 catalog、忘改分流就会出现 401 事故同形态）。
+    const noloEntry = BUILTIN_AGENT_CATALOG.find(
+      (e) => e.group === "builtin" && e.name === "nolo",
+    );
+    expect(noloEntry?.model).toBe("glm-5-3-flash");
+
+    const route = resolveBuiltinPlatformAgentRoute(publicAgentKey(noloEntry!.id));
+    expect(route).not.toBeNull();
+    expect(route!.provider).toBe("nolo");
+    expect(route!.model).toBe("glm-5-3-flash");
+
+    // wire 分流：glm-5-3-flash 不满足 Responses 判定，必须走 chat.completions 端点。
+    expect(
+      isOpenAiResponsesModel({ provider: "nolo", model: "glm-5-3-flash" }),
+    ).toBe(false);
+    expect(route!.endpoint).toBe(
+      resolvePlatformChatCompletionsEndpoint("nolo", "glm-5-3-flash"),
+    );
+    expect(route!.endpoint).not.toBe(OPENAI_RESPONSES_ENDPOINT);
+    expect(route!.endpoint).not.toBe(DEEPSEEK_RESPONSES_ENDPOINT);
   });
 
   it("每个平台托管模型都同时算得出端点和 key 的来源（两张表必须逐条对齐）", () => {

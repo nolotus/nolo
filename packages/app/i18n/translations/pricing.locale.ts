@@ -42,6 +42,7 @@ export default {
             features: [
               "Advanced reasoning models",
               "Claude Opus access",
+              "Kimi K3 access",
               "Dedicated VM runtime",
               "Isolated compute resources",
               "Long-running workload execution"
@@ -132,6 +133,7 @@ export default {
             features: [
               "GPT Pro 系列模型",
               "Claude Opus 模型",
+              "Kimi K3 模型",
               "独立虚拟机执行环境",
               "隔离的计算资源",
               "支持长时间超重任务"
@@ -223,6 +225,7 @@ export default {
             features: [
               "GPT Pro 系列模型",
               "Claude Opus 模型",
+              "Kimi K3 模型",
               "獨立虛擬機執行環境",
               "隔離的計算資源",
               "支援長時間超重任務"
@@ -313,6 +316,7 @@ export default {
             features: [
               "GPT Pro 系列モデル",
               "Claude Opus へのアクセス",
+              "Kimi K3 へのアクセス",
               "独立した仮想マシン実行環境",
               "隔離された計算リソース",
               "長時間・高負荷タスクの実行"
