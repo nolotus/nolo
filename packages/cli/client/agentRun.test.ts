@@ -767,6 +767,7 @@ describe("cli agent run client", () => {
           complete: async (messages) => ({
             content: `local:${messages.at(-1)?.content}`,
             model: "fake-local",
+            stream_complete: true,
             trace: messages,
           }),
         }),
@@ -1346,7 +1347,7 @@ describe("cli agent run client", () => {
         },
         resolveProvider: async () => ({
           model: "fake-local",
-          complete: async () => ({ content: "done", model: "fake-local" }),
+          complete: async () => ({ content: "done", model: "fake-local", stream_complete: true }),
         }),
         executeTool: async () => {
           throw new Error("no tools expected");
@@ -1405,7 +1406,7 @@ describe("cli agent run client", () => {
                 }],
               };
             }
-            return { content: "done after retry", model: "fake-local" };
+            return { content: "done after retry", model: "fake-local", stream_complete: true };
           },
         }),
         executeTool: async () => {
@@ -1471,7 +1472,7 @@ describe("cli agent run client", () => {
                 }],
               };
             }
-            return { content: "All done!", model: "fake-local" };
+            return { content: "All done!", model: "fake-local", stream_complete: true };
           },
         }),
         executeTool: async () => ({ content: "ok" }),
@@ -1950,7 +1951,7 @@ describe("cli agent run client", () => {
         saveTurn: async () => ({ dialogId: "dialog-local-bg" }),
         resolveProvider: async () => ({
           model: "fake-local",
-          complete: async () => ({ content: "accepted locally", model: "fake-local" }),
+          complete: async () => ({ content: "accepted locally", model: "fake-local", stream_complete: true }),
         }),
         executeTool: async () => {
           throw new Error("no tools expected");
@@ -2837,7 +2838,7 @@ describe("cli agent run client", () => {
           saveTurn: async () => ({ dialogId: "dialog-local-env" }),
           resolveProvider: async () => ({
             model: "fake-local",
-            complete: async () => ({ content: "local env ok", model: "fake-local" }),
+            complete: async () => ({ content: "local env ok", model: "fake-local", stream_complete: true }),
           }),
           executeTool: async () => {
             throw new Error("no tools expected");
