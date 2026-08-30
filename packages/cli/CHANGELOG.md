@@ -1,4 +1,13 @@
 
+## 0.47.0-alpha.2
+
+## 0.47.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **chat:** 修复聊天输入框工具栏纵向堆叠为横向布局 ([2a48514](https://github.com/nolotus/bun-nolo/commit/2a4851488bec7680701c437d3409b2200fb440b7))
+
+
 ## 0.47.0-alpha.1
 
 ## 0.47.0-alpha.1 (2026-08-30)

@@ -651,8 +651,19 @@ export const messageInputStyles = stylex.create({
   },
   controls: {
     display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+  },
+  controlsLeft: {
+    display: "flex",
+    alignItems: "center",
     gap: "var(--space-3)",
-    alignItems: "flex-end",
+  },
+  controlsRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-3)",
   },
   canvasEditChip: {
     display: "inline-flex",
