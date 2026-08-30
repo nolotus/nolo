@@ -418,6 +418,12 @@ type FailureCtx = {
   /** Human-readable transport label: "server chat proxy" or "local provider". */
   where: "server chat proxy" | "local provider";
   status: number;
+  /**
+   * 启动期 429 兜底落盘后的冷却截止（ISO）。由 rawError.cooldownUntil 传入
+   * （markStartupRateLimitCooldown 把它挂在错误对象上，沿用 localLoop 把
+   * dialogId 挂错误上的既有模式）；undefined = 未命中 rate-limit 或落盘跳过。
+   */
+  cooldownUntil?: string;
 };
 
 function buildAuthFailure(ctx: FailureCtx): string {
@@ -451,9 +457,15 @@ function buildRejectedPayloadFailure(ctx: FailureCtx): string {
 }
 
 function buildRateLimitFailure(ctx: FailureCtx): string {
+  // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
+  // 文案必须带上「已标记冷却至 <ISO>」：用户不再只看到一次限流报错，还能知道
+  // 该 agent 在冷却解除前会被派发门控拦住，不会继续白撞 429。
+  const cooldownNote = ctx.cooldownUntil
+    ? ` 已标记冷却至 ${ctx.cooldownUntil}，到期前派发会被冷却门控拦截（到期自动 probe 恢复）。`
+    : "";
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, rate limited). Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.\n`
+    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.${cooldownNote}\n`
   );
 }
 
@@ -575,12 +587,73 @@ function describeLocalRunFailure(
     );
   }
 
+  // 启动期 429 兜底落盘后的冷却截止挂在 rawError 上（markStartupRateLimitCooldown）。
+  const cooldownUntil =
+    rawError && typeof rawError === "object"
+      ? (rawError as { cooldownUntil?: string }).cooldownUntil
+      : undefined;
   const ctx: FailureCtx = {
     message,
     where: cls.transport === "platform" ? "server chat proxy" : "local provider",
     status: cls.status,
+    ...(cooldownUntil ? { cooldownUntil } : {}),
   };
   return FAILURE_BUILDERS[cls.kind](ctx);
+}
+
+/**
+ * 启动期 rate-limit 冷却兜底落盘。
+ *
+ * 缺陷背景：agent run 启动期的 provider 429（如 Codex/Claude OAuth 握手期
+ * "usage limit reached"、antigravity "Individual quota reached"）往往在
+ * transport 抛错路径上没走到响应分支的 recordLocalAvailability，只被
+ * classifyLocalRunError 分类后打日志 exit 1，冷却不落盘 → agent 照常被
+ * listAgents 列出、下次派发继续撞 429。这里补上与 run 中途完全同语义的落盘：
+ * resolveAvailabilityAction 解析 status=429 + 从 message 文本提取复位文案
+ * （"Resets in 1h35m38s" / "reset at …" / weekly usage limit 启发式）→
+ * credential 级优先写盘 → agent 级 nextAvailableAt（merge 取更晚者）。
+ *
+ * 幂等：transport 响应分支已落盘时重复 mark 由 mergeAvailabilityDeadline
+ * 收敛到更晚者，不会缩短既有冷却。解析不出复位时刻时由共享层落到保守默认
+ * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
+ *
+ * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
+ * 「已标记冷却至 <ISO>」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
+ */
+async function markStartupRateLimitCooldown(
+  options: RunAgentTurnOptions,
+  adapter: AgentRuntimeHostAdapter | undefined,
+  message: string,
+): Promise<string | undefined> {
+  const cls = classifyLocalRunError(message);
+  if (cls.kind !== "rate-limit") return undefined;
+  const recorder = adapter as
+    | (AgentRuntimeHostAdapter & {
+        recordStartupAvailabilityForAgent?(
+          agentRef: string,
+          status: number,
+          body?: unknown,
+        ): Promise<number | undefined>;
+      })
+    | undefined;
+  if (typeof recorder?.recordStartupAvailabilityForAgent !== "function") {
+    return undefined;
+  }
+  try {
+    const effectiveNextAvailableAt =
+      await recorder.recordStartupAvailabilityForAgent(
+        options.agentKey,
+        cls.status,
+        message,
+      );
+    return typeof effectiveNextAvailableAt === "number"
+      ? new Date(effectiveNextAvailableAt).toISOString()
+      : undefined;
+  } catch {
+    // 冷却落盘是尽力而为：失败不改变 run 失败的呈现与退出码。
+    return undefined;
+  }
 }
 
 function shouldAttemptAutoLocal(options: RunAgentTurnOptions) {
@@ -1072,10 +1145,26 @@ async function runLocalAgentTurnForCli(
         ...(pendingToolName ? { pendingToolName } : {}),
       };
     }
+    // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
+    // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
+    // 供 auto 路径 describeLocalRunFailure 渲染「已标记冷却至 <ISO>」。
+    const cooldownUntil = await markStartupRateLimitCooldown(
+      options,
+      baseAdapter,
+      toErrorMessage(error),
+    );
+    if (cooldownUntil) {
+      (error as { cooldownUntil?: string }).cooldownUntil = cooldownUntil;
+    }
     if (settings.reportFailure) {
       options.output.write(
         `[nolo] Local agent run failed: ${toErrorMessage(error)}\n`,
       );
+      if (cooldownUntil) {
+        options.output.write(
+          `[nolo] 已标记冷却至 ${cooldownUntil}，到期前派发该 agent 会被冷却门控拦截。\n`,
+        );
+      }
     }
     return {
       exitCode: 1,

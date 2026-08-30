@@ -1,4 +1,13 @@
 
+## 0.45.0-alpha.1
+
+## 0.45.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **cli:** mark startup rate-limit cooldown for agent runs ([8461e17](https://github.com/nolotus/bun-nolo/commit/8461e17a743794a48b7d8e90df2dbcb83e0a385e))
+
+
 ## 0.44.0-alpha.2
 
 ## 0.44.0-alpha.2 (2026-08-30)

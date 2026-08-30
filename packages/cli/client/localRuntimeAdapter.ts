@@ -402,9 +402,128 @@ import {
   saveCliDialogSummary,
 } from "./localRuntimeDialog";
 
+/**
+ * 「一次上游响应 → 可用性落盘」的可复用核心（模块级导出）。
+ *
+ * 与 run 中途路径（resolveProviderBase 里的 `recordLocalAvailability` 闭包）完全
+ * 同语义：resolveAvailabilityAction 解析 status/body → credential 级优先写盘 →
+ * agent 级 nextAvailableAt（merge 取更晚者）。中途路径直接复用它；agent run
+ * 启动期路径（agentRun.ts 在 classifyLocalRunError 命中 rate-limit 时）经
+ * adapter 扩展方法 `recordStartupAvailabilityForAgent` 复用，保证两条路径的
+ * 判据、clamp、merge 语义不漂移。
+ *
+ * 返回 mark 时**最终生效**的冷却截止（agent 级与 credential 级取更晚者），
+ * 供调用方渲染「已标记冷却至 <ISO>」文案；clear/noop/跳过返回 undefined。
+ */
+export async function recordLocalAvailabilityForAgent(args: {
+  deps: CliLocalRuntimeAdapterDeps;
+  agentConfig: unknown;
+  status: number;
+  body?: unknown;
+  now?: () => number;
+}): Promise<number | undefined> {
+  const now = args.now ?? Date.now;
+  const { deps, status } = args;
+  const agentConfig = args.agentConfig as Record<string, unknown> | undefined;
+  const key = typeof agentConfig?.key === "string" ? agentConfig.key : "";
+  if (!key) return undefined;
+  const action = resolveAvailabilityAction(status, args.body, now());
+  if (action.kind === "noop") return undefined;
+
+  // Credential 层优先：限流是 provider 凭证的属性，不是 agent 的属性。
+  // 共用同一 OAuth（chatgpt / claude / antigravity）的多个 agent 必须
+  // 共享冷却，否则会逐个重复撞同一堵墙。
+  //
+  // 这一步还修掉了下面 agent 级写回的一个真实缺陷：agent 定义来自远端
+  // global-cache 时本地并无记录，`if (!current) return` 会把 429 结论
+  // 静默丢弃，nextAvailableAt 永远是 now。credential 存储不依赖 agent
+  // 记录是否存在，因此即使本地没缓存过该 agent，冷却也能落盘。
+  const credentialKey = resolveCredentialKeyWithFallback(agentConfig);
+  if (credentialKey) {
+    if (action.kind === "mark") {
+      await markCredentialUnavailable(
+        credentialKey,
+        action.nextAvailableAt,
+        deps.env,
+        now(),
+      ).catch(() => undefined);
+    } else {
+      await clearCredentialAvailability(
+        credentialKey,
+        deps.env,
+        now(),
+      ).catch(() => undefined);
+    }
+  }
+
+  const store = await getOrCreateSharedStore(deps);
+  const current = await store.read(key, { remote: false }).catch(() => null);
+  // 本地没有该 agent 的记录时不再往 agent store 里补写半条记录——
+  // 冷却已经落在 credential 层，这里只负责维护既有的 agent 级字段。
+  if (!current || typeof current !== "object") {
+    // 本地无 agent 记录时，冷却只落在 credential 层；回报 credential 的截止。
+    if (action.kind !== "mark" || !credentialKey) return undefined;
+    const entry = await readCredentialEntry(credentialKey, deps.env, now()).catch(
+      () => undefined,
+    );
+    return typeof entry?.nextAvailableAt === "number"
+      ? entry.nextAvailableAt
+      : action.nextAvailableAt;
+  }
+  const record = current as Record<string, unknown>;
+  // 无 deadline 时的 clear 是空操作，跳过可避免每次成功响应都写一次库。
+  if (action.kind === "clear" && !("nextAvailableAt" in record)) return undefined;
+  const next = { ...record };
+  let effectiveNextAvailableAt: number | undefined;
+  if (action.kind === "mark") {
+    // 取更晚者：短冷却（如 5xx 的 5 分钟）不得抹掉已落盘的长冷却（如周额度）。
+    const merged = mergeAvailabilityDeadline(
+      record.nextAvailableAt,
+      action.nextAvailableAt,
+    );
+    next.nextAvailableAt = merged;
+    effectiveNextAvailableAt = merged;
+  } else {
+    delete next.nextAvailableAt;
+  }
+  await store.write(key, next).catch(() => undefined);
+
+  if (action.kind !== "mark") return undefined;
+  // 与派发 gate 的 effective 口径一致：agent 级与 credential 级取更晚者，
+  // 避免文案报的截止早于实际拦截时刻。
+  if (credentialKey) {
+    const entry = await readCredentialEntry(credentialKey, deps.env, now()).catch(
+      () => undefined,
+    );
+    if (typeof entry?.nextAvailableAt === "number") {
+      effectiveNextAvailableAt = mergeAvailabilityDeadline(
+        entry.nextAvailableAt,
+        effectiveNextAvailableAt ?? entry.nextAvailableAt,
+      );
+    }
+  }
+  return effectiveNextAvailableAt;
+}
+
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
-): AgentRuntimeHostAdapter {
+): AgentRuntimeHostAdapter & {
+  /**
+   * 启动期 429 冷却兜底落盘入口（CLI 本地 adapter 专有，非
+   * AgentRuntimeHostAdapter 接口成员）。agentRun.ts 在 classifyLocalRunError
+   * 命中 rate-limit 时调用：provider 握手/首请求期的 429（如 Codex/Claude
+   * OAuth "usage limit reached"、antigravity "Individual quota reached"）
+   * 往往在 transport 抛错路径上没走到响应分支的 recordLocalAvailability，
+   * 只打日志 exit 1 不落冷却 → agent 照常被 listAgents 列出、下次派发继续
+   * 撞 429。这里复用本 adapter 的 deps/store，把与中途路径同语义的冷却落盘。
+   * 幂等：transport 已落盘时重复 mark 由 mergeAvailabilityDeadline 取更晚者收敛。
+   */
+  recordStartupAvailabilityForAgent(
+    agentRef: string,
+    status: number,
+    body?: unknown,
+  ): Promise<number | undefined>;
+} {
   const now = deps.now ?? Date.now;
   const createId = deps.createId ?? createFallbackId;
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -636,60 +755,14 @@ export function createCliLocalRuntimeAdapter(
        * 决策用共享纯函数，本地只负责 IO；每条 transport 分支都必须调用它，
        * 否则限流 agent 会继续被 listAgents 列出、继续被选中、继续撞 429。
        */
-      const recordLocalAvailability = async (status: number, body?: unknown) => {
-        const key = typeof agentConfig.key === "string" ? agentConfig.key : "";
-        if (!key) return;
-        const action = resolveAvailabilityAction(status, body, now());
-        if (action.kind === "noop") return;
-
-        // Credential 层优先：限流是 provider 凭证的属性，不是 agent 的属性。
-        // 共用同一 OAuth（chatgpt / claude / antigravity）的多个 agent 必须
-        // 共享冷却，否则会逐个重复撞同一堵墙。
-        //
-        // 这一步还修掉了下面 agent 级写回的一个真实缺陷：agent 定义来自远端
-        // global-cache 时本地并无记录，`if (!current) return` 会把 429 结论
-        // 静默丢弃，nextAvailableAt 永远是 now。credential 存储不依赖 agent
-        // 记录是否存在，因此即使本地没缓存过该 agent，冷却也能落盘。
-        const credentialKey = resolveCredentialKeyWithFallback(
-          agentConfig as unknown as Record<string, unknown>,
-        );
-        if (credentialKey) {
-          if (action.kind === "mark") {
-            await markCredentialUnavailable(
-              credentialKey,
-              action.nextAvailableAt,
-              deps.env,
-              now(),
-            ).catch(() => undefined);
-          } else {
-            await clearCredentialAvailability(
-              credentialKey,
-              deps.env,
-              now(),
-            ).catch(() => undefined);
-          }
-        }
-
-        const store = await getOrCreateSharedStore(deps);
-        const current = await store.read(key, { remote: false }).catch(() => null);
-        // 本地没有该 agent 的记录时不再往 agent store 里补写半条记录——
-        // 冷却已经落在 credential 层，这里只负责维护既有的 agent 级字段。
-        if (!current || typeof current !== "object") return;
-        const record = current as Record<string, unknown>;
-        // 无 deadline 时的 clear 是空操作，跳过可避免每次成功响应都写一次库。
-        if (action.kind === "clear" && !("nextAvailableAt" in record)) return;
-        const next = { ...record };
-        if (action.kind === "mark") {
-          // 取更晚者：短冷却（如 5xx 的 5 分钟）不得抹掉已落盘的长冷却（如周额度）。
-          next.nextAvailableAt = mergeAvailabilityDeadline(
-            record.nextAvailableAt,
-            action.nextAvailableAt,
-          );
-        } else {
-          delete next.nextAvailableAt;
-        }
-        await store.write(key, next).catch(() => undefined);
-      };
+      const recordLocalAvailability = (status: number, body?: unknown): Promise<void> =>
+        recordLocalAvailabilityForAgent({
+          deps,
+          agentConfig,
+          status,
+          body,
+          now,
+        }).then(() => undefined);
 
       // 冷却门控：deadline 已过 → 放行；未过但距上次探测超间隔 → probe（放行一次真实
       // 请求去试探上游是否已恢复）；刚探测过 → blocked（照旧 throw）。probe 由本次
@@ -874,6 +947,21 @@ export function createCliLocalRuntimeAdapter(
             retryOnly: isBusyProviderStreamError,
           })
         : withProviderStreamRetry(provider, deps);
+    },
+    recordStartupAvailabilityForAgent: async (
+      agentRef: string,
+      status: number,
+      body?: unknown,
+    ) => {
+      const agentConfig = await adapterBase.loadAgentConfig(agentRef);
+      if (!agentConfig) return undefined;
+      return recordLocalAvailabilityForAgent({
+        deps,
+        agentConfig,
+        status,
+        body,
+        now,
+      });
     },
   };
 }

@@ -82,14 +82,28 @@ describe("CLI local runtime adapter source contract (credential broker)", () => 
   // key 一致性的行为验证（mark → gate → probe → clear）由
   // credentialAvailability.test.ts 的 fallback-key 行为回归覆盖。
   test("marks and gates the 429 cooldown with the same fallback credential key", () => {
-    // gate 点（credentialKeyForGate）与 record 点（recordLocalAvailability 内）
-    // 各一处调用。断言按代码结构切片而非写死缩进/换行，抗 prettier 重排。
+    // gate 点（credentialKeyForGate）与 record 点（模块级
+    // recordLocalAvailabilityForAgent 核心内；resolveProviderBase 里的
+    // recordLocalAvailability 闭包只是它的委托）各一处调用。断言按代码结构
+    // 切片而非写死缩进/换行，抗 prettier 重排。
     const callCount = source.match(/resolveCredentialKeyWithFallback\(/g)?.length ?? 0;
     expect(callCount).toBeGreaterThanOrEqual(2);
     const recordStart = source.indexOf("const recordLocalAvailability");
     expect(recordStart).toBeGreaterThan(-1);
+    // record 逻辑抽到模块级核心后，gate 与核心函数都必须出现在 record 闭包之前。
     expect(source.slice(0, recordStart)).toContain("resolveCredentialKeyWithFallback(");
-    expect(source.slice(recordStart)).toContain("resolveCredentialKeyWithFallback(");
+    // 核心函数体内必须用 fallback 版本解析 credentialKey（record 点的 key 一致性）。
+    const coreStart = source.indexOf("export async function recordLocalAvailabilityForAgent");
+    expect(coreStart).toBeGreaterThan(-1);
+    const coreBody = source.slice(
+      coreStart,
+      source.indexOf("export function createCliLocalRuntimeAdapter"),
+    );
+    expect(coreBody).toContain("resolveCredentialKeyWithFallback(");
+    // 启动期兜底入口必须存在且复用同一核心（agentRun.ts 在 classifyLocalRunError
+    // 命中 rate-limit 时调用它，保证启动期与中途冷却语义不漂移）。
+    expect(source).toContain("recordStartupAvailabilityForAgent");
+    expect(source).toContain("recordLocalAvailabilityForAgent({");
   });
 });
 
