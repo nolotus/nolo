@@ -1,4 +1,13 @@
 
+## 0.41.0-alpha.1
+
+## 0.41.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **llm:** switch GLM 5.3/5.2 hosted upstream from OpenRouter to crof ([467bde9](https://github.com/nolotus/bun-nolo/commit/467bde9307aed37c36551566248ec0e270605523))
+
+
 ## 0.40.0-alpha.1
 
 ## 0.40.0-alpha.1 (2026-08-30)

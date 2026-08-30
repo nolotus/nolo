@@ -225,7 +225,7 @@ describe("platform hosted GLM 5.3 Flash catalog (RunInfra flash tier)", () => {
   });
 });
 
-describe("platform hosted GLM 5.3 catalog (OpenRouter Z.ai tier)", () => {
+describe("platform hosted GLM 5.3 catalog (crof Z.ai tier)", () => {
   it("publishes GLM 5.3 capabilities and pricing", () => {
     expect(platformHostedModels.map((model) => model.name)).toContain(
       PLATFORM_HOSTED_GLM_53_MODEL,

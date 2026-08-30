@@ -261,7 +261,7 @@ describe("calculatePrice", () => {
     // 1M uncached input, 500k cache-read input, 200k output
     // PLATFORM_HOSTED_GLM_PRICE (USD×8):
     //   input: 1.4 * 8 = 11.2 credits / 1M
-    //   inputCacheHit: 0.26 * 8 = 2.08 credits / 1M
+    //   inputCacheHit: 0.06 * 8 = 0.48 credits / 1M (crof cache_prompt $0.06)
     //   output: 4.4 * 8 = 35.2 credits / 1M
     const result = calculatePrice({
       provider: "nolo",
@@ -275,8 +275,8 @@ describe("calculatePrice", () => {
       },
     });
 
-    // 1M fresh input (11.2) + 0.5M cached input (1.04) + 0.2M output (7.04) = 19.28
-    expect(result.cost).toBeCloseTo(19.28, 4);
+    // 1M fresh input (11.2) + 0.5M cached input (0.24) + 0.2M output (7.04) = 18.48
+    expect(result.cost).toBeCloseTo(18.48, 4);
   });
 
   it("prices platform-hosted GLM 5.3 Flash cache-hit input at the RunInfra cached rate", () => {

@@ -321,12 +321,12 @@ export const GLM_5_3_DEF = defineAgentSeed({
   hasVision: true,
   inputPrice: PLATFORM_HOSTED_GLM_PRICE.input,
   outputPrice: PLATFORM_HOSTED_GLM_PRICE.output,
-  introduction: "GLM 5.3 公开助手（平台托管 OpenRouter），适合复杂推理、长上下文、中文理解与代码分析。",
+  introduction: "GLM 5.3 公开助手（平台托管），适合复杂推理、长上下文、中文理解与代码分析。",
   greeting: "你好，我是 GLM 5.3。适合处理复杂分析、高质量中文问答与代码推理任务。",
   prompt:
     "你是共享空间里的高质量通用 AI 助手。优先快速、直接、准确地完成任务；需要推理、分析或编写代码时保持结构清晰、逻辑严谨。",
   tools: [],
-  tags: ["nolo", "glm", "openrouter"],
+  tags: ["nolo", "glm", "upstream-k3"],
 });
 
 export const GLM_5_3_FLASH_DEF = defineAgentSeed({

@@ -3,7 +3,6 @@ import {
   PLATFORM_HOSTED_ROUTING_TABLE,
   resolvePlatformHostedRouting,
   PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID,
-  PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 import {
@@ -49,15 +48,22 @@ describe("PLATFORM_HOSTED_ROUTING_TABLE & resolvePlatformHostedRouting", () => {
     // 2. GLM 5.3 & 5.2
     const glm53 = resolvePlatformHostedRouting("glm-5.3");
     expect(glm53).toEqual({
-      endpoint: "https://openrouter.ai/api/v1/chat/completions",
-      usageProvider: "openrouter",
-      keyName: "openrouter",
-      upstreamModelId: PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID,
+      endpoint: "https://crof.ai/v1/chat/completions",
+      usageProvider: "crof",
+      keyName: "crof",
       wire: "chat.completions",
       agentRunHosted: true,
     });
     const glm52 = resolvePlatformHostedRouting("glm-5.2");
-    expect(glm52?.upstreamModelId).toBe(PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID);
+    expect(glm52).toEqual({
+      endpoint: "https://crof.ai/v1/chat/completions",
+      usageProvider: "crof",
+      keyName: "crof",
+      // legacy 5.2 显式 remap 到 crof 的 glm-5.3
+      upstreamModelId: "glm-5.3",
+      wire: "chat.completions",
+      agentRunHosted: true,
+    });
 
     // 3. GLM 5.3 Flash
     const glmFlash = resolvePlatformHostedRouting("glm-5-3-flash");

@@ -32,13 +32,13 @@ describe("platformProviderEndpoints", () => {
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "grok-4.6"),
     ).toBe("https://api.x.ai/v1/chat/completions");
-    // nolo + kimi-k2.6 & glm-5.2 路由到 OpenRouter
+    // nolo + kimi-k2.6 路由到 OpenRouter；glm-5.3/5.2 已切 crof（legacy 5.2 remap 5.3）
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "kimi-k2.6"),
     ).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "glm-5.2"),
-    ).toBe("https://openrouter.ai/api/v1/chat/completions");
+    ).toBe("https://crof.ai/v1/chat/completions");
     // 平台托管 Kimi K3：实际上游 crof
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "kimi-k3"),
@@ -113,7 +113,8 @@ describe("resolvePlatformHostedCredentialProvider", () => {
     // 查询和 server 侧 getApiKey 复用，改这里两处同步生效。
     expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k3")).toBe("crof");
     expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k2.6")).toBe("openrouter");
-    expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.3")).toBe("openrouter");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.3")).toBe("crof");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.2")).toBe("crof");
     expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5-3-flash")).toBe("runinfra");
     expect(resolvePlatformHostedCredentialProvider("nolo", "gemini-3.7-flash")).toBe("google");
     // Gemini 出图模型同上游 Google

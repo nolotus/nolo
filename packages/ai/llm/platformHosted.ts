@@ -107,6 +107,7 @@ export const PLATFORM_HOSTED_KIMI_K3_PRICE = {
 
 /**
  * GLM 5.3（平台托管语义）：记录侧展示与主键为 `glm-5.3`（兼容历史 `glm-5.2`），
+ * 保持 11.2 / 35.2 credits 不随上游变动（上游成本低于平台定价），
  */
 export const isPlatformHostedGlmModel = (
   model?: string | null,
@@ -119,7 +120,7 @@ export const isPlatformHostedGlm53Model = isPlatformHostedGlmModel;
 
 export const PLATFORM_HOSTED_GLM_PRICE = {
   input: 7.84, // 11.2 credits
-  inputCacheHit: 1.456, // 2.08 credits
+  inputCacheHit: toPlatformCredits(0.06), // 0.48 credits
   output: 24.64, // 35.2 credits (35.2 = 35.2)
 } as const;
 

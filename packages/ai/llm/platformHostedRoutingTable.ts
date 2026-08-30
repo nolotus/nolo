@@ -24,8 +24,6 @@ export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
 export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
-export const PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID = "z-ai/glm-5.3";
-export const PLATFORM_HOSTED_GLM_52_OPENROUTER_MODEL_ID = "z-ai/glm-5.3";
 export const PLATFORM_HOSTED_GLM_53_FLASH_MODEL = "glm-5-3-flash";
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
 export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
@@ -107,18 +105,17 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_GLM_53_MODEL]: {
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    usageProvider: "openrouter",
-    keyName: "openrouter",
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID,
+    endpoint: "https://crof.ai/v1/chat/completions",
+    usageProvider: "upstream-k3",
+    keyName: "upstream-k3",
     wire: "chat.completions",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_GLM_52_MODEL]: {
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    usageProvider: "openrouter",
-    keyName: "openrouter",
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID,
+    endpoint: "https://crof.ai/v1/chat/completions",
+    usageProvider: "upstream-k3",
+    keyName: "upstream-k3",
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
   },
