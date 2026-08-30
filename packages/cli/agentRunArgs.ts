@@ -68,6 +68,7 @@ export type ParsedAgentRunArgs = {
   fallbackAgentKeys?: string[];
   skillRefs?: string[];
   dodCommands?: string[];
+  queueFile?: string;
 };
 
 export function readFlagValue(args: string[], flag: string) {
@@ -311,6 +312,7 @@ export function parseAgentRunArgs(
     ?.split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+  const queueFile = readFlagValue(args, "--queue-file");
   return {
     agentKey,
     message,
@@ -354,5 +356,6 @@ export function parseAgentRunArgs(
     ...(blockedToolNames.length ? { blockedToolNames } : {}),
     ...(dodCommands.length ? { dodCommands } : {}),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+    ...(queueFile ? { queueFile } : {}),
   };
 }

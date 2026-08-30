@@ -1147,6 +1147,8 @@ describe("cli agent run command", () => {
       "--local",
       "--timeout-ms",
       "120000",
+      "--queue-file",
+      "/home/test/.nolo/runs/run-test-123.queue.jsonl",
     ]);
     expect(spawnCalls[0].options.detached).toBe(true);
     expect(spawnCalls[0].options.cwd).toBe(process.cwd());
@@ -1640,5 +1642,272 @@ describe("cli agent run command", () => {
     expect(exitCode).toBe(0);
     expect(calls[0].agentKey).toBe(CLI_AUTO_ROUTE_AGENT_KEY);
     expect(calls[0].imageUrls).toEqual([]);
+  });
+
+  // --- Queue drain loop (运行中入队消费) ---
+  test("drain loop: consumes queued messages sequentially with continueDialogId and exits when empty", async () => {
+    const queuePath = "/home/test/.nolo/runs/run-child-drain.queue.jsonl";
+    const queueContent = [
+      JSON.stringify({ id: "d1", ts: 1000, text: "第1条入队指令" }),
+      JSON.stringify({ id: "d2", ts: 2000, text: "第2条入队指令" }),
+    ].join("\n") + "\n";
+
+    const memFiles: Record<string, string> = {
+      [queuePath]: queueContent,
+    };
+    const dirs = new Set<string>();
+
+    const mockFs = {
+      existsSync: (path: string) => path in memFiles || dirs.has(path),
+      readFileSync: (path: string) => {
+        if (!(path in memFiles)) throw new Error("ENOENT");
+        return memFiles[path];
+      },
+      writeFileSync: (path: string, content: string) => {
+        memFiles[path] = content;
+      },
+      unlinkSync: (path: string) => {
+        delete memFiles[path];
+      },
+      mkdirSync: (path: string) => {
+        dirs.add(path);
+      },
+      rmdirSync: (path: string) => {
+        dirs.delete(path);
+      },
+      openSync: () => 42,
+      readdirSync: () => [],
+    } as any;
+
+    const runnerCalls: Array<{ message: string; continueDialogId?: string }> = [];
+    const finalized: Array<{ runId: string; status: string; exitCode?: number; dialogId?: string }> = [];
+
+    const exitCode = await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "初始任务",
+        "--local",
+        "--queue-file",
+        queuePath,
+      ],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-drain" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        fs: mockFs,
+        runner: async (options) => {
+          runnerCalls.push({
+            message: options.message,
+            continueDialogId: options.continueDialogId,
+          });
+          return { exitCode: 0, dialogId: "dialog-drain-123" };
+        },
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(runnerCalls).toHaveLength(3);
+    // 初始调用：无 continueDialogId，message 为初始任务
+    expect(runnerCalls[0].message).toContain("初始任务");
+    expect(runnerCalls[0].continueDialogId).toBeUndefined();
+
+    // 第一次 drain：带初始 result.dialogId，message 为第1条入队指令
+    expect(runnerCalls[1].message).toContain("第1条入队指令");
+    expect(runnerCalls[1].continueDialogId).toBe("dialog-drain-123");
+
+    // 第二次 drain：继续带 dialogId，message 为第2条入队指令
+    expect(runnerCalls[2].message).toContain("第2条入队指令");
+    expect(runnerCalls[2].continueDialogId).toBe("dialog-drain-123");
+
+    // 队列文件已被清空 / 删除
+    expect(memFiles[queuePath]).toBeUndefined();
+
+    // 结算状态为 done，dialogId 保持
+    expect(finalized).toEqual([
+      {
+        runId: "run-child-drain",
+        status: "done",
+        exitCode: 0,
+        dialogId: "dialog-drain-123",
+      },
+    ]);
+  });
+
+  test("drain loop: defensive limit caps drain at 200 iterations and logs warning", async () => {
+    let callCount = 0;
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args: any[]) => {
+      errors.push(args.join(" "));
+    };
+
+    try {
+      const exitCode = await runCommand(
+        [
+          "frontend-implementer",
+          "--msg",
+          "初始任务",
+          "--local",
+          "--queue-file",
+          "/tmp/infinite.queue.jsonl",
+        ],
+        {
+          scriptDir: "/repo/scripts",
+          output: { write() {} },
+          fs: { existsSync: () => true } as any,
+          popSingleQueueMessage: async () => ({ id: "q1", ts: Date.now(), text: "无限循环指令" }),
+          runner: async () => {
+            callCount++;
+            return { exitCode: 0, dialogId: "dialog-infinite" };
+          },
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      // 1 次初始 + 200 次 drain 防御上限 = 201
+      expect(callCount).toBe(201);
+      expect(errors.some((e) => e.includes("defensive limit of 200 turns"))).toBe(true);
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  test("drain loop: non-zero exitCode on turn 1 breaks loop and preserves remaining messages in queue", async () => {
+    const queuePath = "/home/test/.nolo/runs/run-err-drain.queue.jsonl";
+    const queueContent = [
+      JSON.stringify({ id: "m1", ts: 1000, text: "会失败的第1条指令" }),
+      JSON.stringify({ id: "m2", ts: 2000, text: "未执行的第2条指令" }),
+    ].join("\n") + "\n";
+
+    const memFiles: Record<string, string> = {
+      [queuePath]: queueContent,
+    };
+    const dirs = new Set<string>();
+
+    const mockFs = {
+      existsSync: (path: string) => path in memFiles || dirs.has(path),
+      readFileSync: (path: string) => {
+        if (!(path in memFiles)) throw new Error("ENOENT");
+        return memFiles[path];
+      },
+      writeFileSync: (path: string, content: string) => {
+        memFiles[path] = content;
+      },
+      unlinkSync: (path: string) => {
+        delete memFiles[path];
+      },
+      mkdirSync: (path: string) => {
+        dirs.add(path);
+      },
+      rmdirSync: (path: string) => {
+        dirs.delete(path);
+      },
+      openSync: () => 42,
+      readdirSync: () => [],
+    } as any;
+
+    const runnerCalls: string[] = [];
+
+    const exitCode = await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "初始任务",
+        "--local",
+        "--queue-file",
+        queuePath,
+      ],
+      {
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        fs: mockFs,
+        runner: async (options) => {
+          runnerCalls.push(options.message);
+          if (options.message.includes("会失败的第1条指令")) {
+            return { exitCode: 1, dialogId: "dialog-err-1" };
+          }
+          return { exitCode: 0, dialogId: "dialog-err-1" };
+        },
+      }
+    );
+
+    // 第1条 drain 失败后立即中断，不执行第2条
+    expect(exitCode).toBe(1);
+    expect(runnerCalls).toHaveLength(2); // 初始 + 第1条
+
+    // 第2条指令仍保留在队列文件中，未被丢弃
+    expect(memFiles[queuePath]).toBeDefined();
+    expect(memFiles[queuePath]).toContain("未执行的第2条指令");
+  });
+
+  test("drain loop: runner exception breaks loop and preserves remaining messages in queue", async () => {
+    const queuePath = "/home/test/.nolo/runs/run-throw-drain.queue.jsonl";
+    const queueContent = [
+      JSON.stringify({ id: "m1", ts: 1000, text: "抛异常的第1条指令" }),
+      JSON.stringify({ id: "m2", ts: 2000, text: "未执行的第2条指令" }),
+    ].join("\n") + "\n";
+
+    const memFiles: Record<string, string> = {
+      [queuePath]: queueContent,
+    };
+    const dirs = new Set<string>();
+
+    const mockFs = {
+      existsSync: (path: string) => path in memFiles || dirs.has(path),
+      readFileSync: (path: string) => {
+        if (!(path in memFiles)) throw new Error("ENOENT");
+        return memFiles[path];
+      },
+      writeFileSync: (path: string, content: string) => {
+        memFiles[path] = content;
+      },
+      unlinkSync: (path: string) => {
+        delete memFiles[path];
+      },
+      mkdirSync: (path: string) => {
+        dirs.add(path);
+      },
+      rmdirSync: (path: string) => {
+        dirs.delete(path);
+      },
+      openSync: () => 42,
+      readdirSync: () => [],
+    } as any;
+
+    const runnerCalls: string[] = [];
+
+    const exitCode = await runCommand(
+      [
+        "frontend-implementer",
+        "--msg",
+        "初始任务",
+        "--local",
+        "--queue-file",
+        queuePath,
+      ],
+      {
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        fs: mockFs,
+        runner: async (options) => {
+          runnerCalls.push(options.message);
+          if (options.message.includes("抛异常的第1条指令")) {
+            throw new Error("mock crash");
+          }
+          return { exitCode: 0, dialogId: "dialog-throw-1" };
+        },
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    expect(runnerCalls).toHaveLength(2);
+
+    // 第2条指令仍保留在队列文件中
+    expect(memFiles[queuePath]).toBeDefined();
+    expect(memFiles[queuePath]).toContain("未执行的第2条指令");
   });
 });

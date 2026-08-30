@@ -42,6 +42,7 @@ export type RunRecord = {
   exitCode?: number;
   endedAt?: string;
   logPath: string;
+  queuePath?: string;
   dialogId?: string;
   /**
    * Parent dialog id that spawned this run (the orchestrator's own dialog,
@@ -120,6 +121,12 @@ export type FsLike = {
   existsSync: typeof nodeFs.existsSync;
   openSync: typeof nodeFs.openSync;
   unlinkSync: typeof nodeFs.unlinkSync;
+  /** Optional: enables directory removal for lock release when present. */
+  rmdirSync?: typeof nodeFs.rmdirSync;
+  /** Optional: enables append writes to queue files when present. */
+  appendFileSync?: typeof nodeFs.appendFileSync;
+  /** Optional: enables truncate operations when present. */
+  truncateSync?: typeof nodeFs.truncateSync;
   /** Optional: enables atomic tmp+rename record publishing when present. */
   renameSync?: typeof nodeFs.renameSync;
   /** Optional: enables stale lock/temporary detection when present. */
@@ -180,6 +187,415 @@ export function resolveRunLogPath(
   homedir = nodeHomedir
 ): string {
   return join(resolveRunsDir(env, homedir), `${runId}.log`);
+}
+
+export function resolveRunQueuePath(
+  runId: string,
+  env?: EnvLike,
+  homedir = nodeHomedir
+): string {
+  return join(resolveRunsDir(env, homedir), `${runId}.queue.jsonl`);
+}
+
+export type RunQueueEntry = {
+  id: string;
+  ts: number;
+  text: string;
+};
+
+export function defaultGenerateQueueEntryId(): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `qmsg-${ts}-${rand}`;
+}
+
+export function _parseQueueLines(content: string): RunQueueEntry[] {
+  if (!content.trim()) return [];
+  const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+  const entries: RunQueueEntry[] = [];
+  for (const line of lines) {
+    try {
+      const item = JSON.parse(line);
+      if (typeof item?.text === "string" && item.text.trim()) {
+        entries.push({
+          id: typeof item.id === "string" && item.id.trim() ? item.id.trim() : defaultGenerateQueueEntryId(),
+          ts: typeof item.ts === "number" ? item.ts : Date.now(),
+          text: item.text.trim(),
+        });
+      }
+    } catch {
+      if (line.length > 0) {
+        entries.push({
+          id: defaultGenerateQueueEntryId(),
+          ts: Date.now(),
+          text: line,
+        });
+      }
+    }
+  }
+  return entries;
+}
+
+export const parseQueueLines = _parseQueueLines;
+
+export function _serializeQueueEntries(entries: RunQueueEntry[]): string {
+  if (entries.length === 0) return "";
+  return entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+}
+
+export const serializeQueueEntries = _serializeQueueEntries;
+
+/** 内部锁内快照读：调用方必须已持队列锁 */
+export function _countQueueMessagesLocked(queuePath: string, fs: FsLike = nodeFs): number {
+  if (!fs.existsSync(queuePath)) return 0;
+  try {
+    const content = fs.readFileSync(queuePath, "utf8");
+    return _parseQueueLines(content).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** 内部锁内快照读：调用方必须已持队列锁 */
+export function _readQueueMessagesLocked(queuePath: string, fs: FsLike = nodeFs): string[] {
+  if (!fs.existsSync(queuePath)) return [];
+  try {
+    const content = fs.readFileSync(queuePath, "utf8");
+    return _parseQueueLines(content).map((e) => e.text);
+  } catch {
+    return [];
+  }
+}
+
+/** 内部锁内快照读：调用方必须已持队列锁 */
+export function _readQueueEntriesLocked(queuePath: string, fs: FsLike = nodeFs): RunQueueEntry[] {
+  if (!fs.existsSync(queuePath)) return [];
+  try {
+    const content = fs.readFileSync(queuePath, "utf8");
+    return _parseQueueLines(content);
+  } catch {
+    return [];
+  }
+}
+
+function tryUnlinkFile(fs: FsLike, path: string | undefined): boolean {
+  if (typeof path !== "string" || path.length === 0) return true;
+  try {
+    if (fs.existsSync(path)) {
+      fs.unlinkSync(path);
+    }
+    return true;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    return code === "ENOENT";
+  }
+}
+
+function tryRmdir(fs: FsLike, path: string | undefined): boolean {
+  if (typeof path !== "string" || path.length === 0) return true;
+  try {
+    if (typeof fs.rmdirSync === "function") {
+      fs.rmdirSync(path);
+    } else {
+      fs.unlinkSync(path);
+    }
+    return true;
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return true;
+    return false;
+  }
+}
+
+export type QueueLockOwnerToken = {
+  ownerId: string;
+  pid: number;
+  createdAt: string;
+  createdAtMs: number;
+};
+
+/**
+ * 队列互斥锁超时阈值：60 秒。
+ *
+ * 【不变量论证】
+ * withQueueLock 临界区内部仅执行内存 JSON 与单文件读写等亚毫秒级（< 1ms）短文件操作，
+ * 绝不允许在锁内发起大文件 IO、网络请求或长时间等待。
+ * 将 staleLockMs 设为 60s（60,000ms），比正常持锁操作时间高出 4~5 个数量级，
+ * 确保活跃持锁进程永远不会被正常重试误判定为陈旧锁接管。
+ */
+export const QUEUE_LOCK_STALE_MS = 60_000;
+export const QUEUE_LOCK_RETRIES = 20;
+export const QUEUE_LOCK_RETRY_INTERVAL_MS = 10;
+
+export function defaultGenerateOwnerTokenId(): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `own-${ts}-${rand}`;
+}
+
+function normalizeQueueDeps(depsOrFs?: AgentRunControlDeps | FsLike): AgentRunControlDeps {
+  if (!depsOrFs) return {};
+  if ("mkdirSync" in depsOrFs) {
+    return { fs: depsOrFs as FsLike };
+  }
+  return depsOrFs as AgentRunControlDeps;
+}
+
+export async function withQueueLock<T>(
+  queuePath: string,
+  fnOrDeps: (() => T | Promise<T>) | AgentRunControlDeps | FsLike,
+  depsOrFnOrOpts?: AgentRunControlDeps | FsLike | (() => T | Promise<T>) | { staleLockMs?: number; retries?: number; retryIntervalMs?: number },
+  maybeOpts?: {
+    staleLockMs?: number;
+    retries?: number;
+    retryIntervalMs?: number;
+  }
+): Promise<T> {
+  let fn: () => T | Promise<T>;
+  let rawDeps: AgentRunControlDeps | FsLike | undefined;
+  let opts: { staleLockMs?: number; retries?: number; retryIntervalMs?: number } = maybeOpts ?? {};
+
+  if (typeof fnOrDeps === "function") {
+    fn = fnOrDeps;
+    if (
+      depsOrFnOrOpts &&
+      typeof depsOrFnOrOpts === "object" &&
+      !("mkdirSync" in depsOrFnOrOpts) &&
+      !("fs" in depsOrFnOrOpts) &&
+      !("env" in depsOrFnOrOpts)
+    ) {
+      opts = { ...depsOrFnOrOpts, ...maybeOpts };
+      rawDeps = undefined;
+    } else {
+      rawDeps = depsOrFnOrOpts as (AgentRunControlDeps | FsLike | undefined);
+    }
+  } else {
+    rawDeps = fnOrDeps;
+    fn = depsOrFnOrOpts as () => T | Promise<T>;
+  }
+  const deps = normalizeQueueDeps(rawDeps);
+  const fs = deps.fs ?? nodeFs;
+  const now = deps.now ?? (() => new Date());
+  const staleLockMs = opts.staleLockMs ?? QUEUE_LOCK_STALE_MS;
+  const retries = opts.retries ?? QUEUE_LOCK_RETRIES;
+  const retryIntervalMs = opts.retryIntervalMs ?? QUEUE_LOCK_RETRY_INTERVAL_MS;
+  const lockPath = `${queuePath}.lock`;
+  const tokenPath = join(lockPath, "owner.json");
+
+  // Ensure parent directory exists for lock path
+  try {
+    fs.mkdirSync(dirname(lockPath), { recursive: true });
+  } catch {
+    // ignore
+  }
+
+  const myOwnerId = defaultGenerateOwnerTokenId();
+  let held = false;
+
+  const tryAcquire = (): boolean => {
+    let created = false;
+    try {
+      fs.mkdirSync(lockPath);
+      created = true;
+    } catch {
+      // EEXIST or lock directory already exists. Check if stale.
+      try {
+        if (typeof fs.statSync === "function") {
+          const stat = fs.statSync(lockPath);
+          const ageMs = stat ? now().getTime() - stat.mtimeMs : 0;
+          if (ageMs > staleLockMs) {
+            // 陈旧锁接管：清理旧 token 并 rmdir，再 mkdir 并写入自己的 token
+            try {
+              tryUnlinkFile(fs, tokenPath);
+              tryRmdir(fs, lockPath);
+            } catch {
+              // ignore
+            }
+            try {
+              fs.mkdirSync(lockPath);
+              created = true;
+            } catch {
+              // raced with another taker
+            }
+          }
+        }
+      } catch {
+        // stat failed or unsupported
+      }
+    }
+
+    if (created) {
+      try {
+        const token: QueueLockOwnerToken = {
+          ownerId: myOwnerId,
+          pid: process.pid,
+          createdAt: now().toISOString(),
+          createdAtMs: now().getTime(),
+        };
+        fs.writeFileSync(tokenPath, JSON.stringify(token), "utf8");
+        return true;
+      } catch (writeTokenErr) {
+        tryRmdir(fs, lockPath);
+        throw writeTokenErr;
+      }
+    }
+
+    return false;
+  };
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (tryAcquire()) {
+      held = true;
+      break;
+    }
+    if (attempt < retries && retryIntervalMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryIntervalMs));
+    }
+  }
+
+  if (!held) {
+    throw new Error(`queue busy: ${queuePath}`);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (held) {
+      try {
+        // 释放只在「锁仍属于自己」时执行：读 token，匹配自己的 ownerId 才删除
+        let currentOwnerId: string | undefined;
+        if (fs.existsSync(tokenPath)) {
+          try {
+            const raw = fs.readFileSync(tokenPath, "utf8");
+            const parsed = JSON.parse(raw);
+            currentOwnerId = parsed?.ownerId;
+          } catch {
+            currentOwnerId = undefined;
+          }
+        }
+        if (currentOwnerId === myOwnerId) {
+          tryUnlinkFile(fs, tokenPath);
+          tryRmdir(fs, lockPath);
+        } else {
+          console.error(
+            `[nolo] Warning: queue lock for ${queuePath} was taken over by another process (owner mismatch: expected ${myOwnerId}, found ${currentOwnerId ?? "none"}). Will not release.`
+          );
+        }
+      } catch (releaseErr) {
+        console.error(`[nolo] Warning: failed to release queue lock for ${queuePath}:`, releaseErr);
+      }
+    }
+  }
+}
+
+export async function appendRunQueue(
+  queuePath: string,
+  input: string | { id?: string; text: string },
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<{ queuedCount: number; entryId: string }> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  const now = deps.now ?? (() => new Date());
+  const text = typeof input === "string" ? input : input.text;
+  const entryId =
+    typeof input === "object" && typeof input.id === "string" && input.id.trim()
+      ? input.id.trim()
+      : defaultGenerateQueueEntryId();
+  const entry: RunQueueEntry = { id: entryId, ts: now().getTime(), text };
+  const line = JSON.stringify(entry) + "\n";
+
+  return await withQueueLock(queuePath, deps, async () => {
+    if (typeof fs.appendFileSync === "function") {
+      fs.appendFileSync(queuePath, line, "utf8");
+    } else {
+      const existing = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf8") : "";
+      fs.writeFileSync(queuePath, existing + line, "utf8");
+    }
+    const currentContent = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf8") : line;
+    return { queuedCount: _parseQueueLines(currentContent).length, entryId };
+  });
+}
+
+export async function countQueueMessages(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<number> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  if (!fs.existsSync(queuePath)) return 0;
+  return await withQueueLock(queuePath, deps, async () => {
+    return _countQueueMessagesLocked(queuePath, fs);
+  });
+}
+
+export async function readQueueMessages(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<string[]> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  if (!fs.existsSync(queuePath)) return [];
+  return await withQueueLock(queuePath, deps, async () => {
+    return _readQueueMessagesLocked(queuePath, fs);
+  });
+}
+
+export async function readQueueEntries(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<RunQueueEntry[]> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  if (!fs.existsSync(queuePath)) return [];
+  return await withQueueLock(queuePath, deps, async () => {
+    return _readQueueEntriesLocked(queuePath, fs);
+  });
+}
+
+export async function popAllQueueEntries(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<RunQueueEntry[]> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  return await withQueueLock(queuePath, deps, async () => {
+    if (!fs.existsSync(queuePath)) return [];
+    const content = fs.readFileSync(queuePath, "utf8");
+    const entries = _parseQueueLines(content);
+    tryUnlinkFile(fs, queuePath);
+    return entries;
+  });
+}
+
+export async function popSingleQueueMessage(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<RunQueueEntry | null> {
+  const deps = normalizeQueueDeps(depsOrFs);
+  const fs = deps.fs ?? nodeFs;
+  return await withQueueLock(queuePath, deps, async () => {
+    if (!fs.existsSync(queuePath)) return null;
+    const content = fs.readFileSync(queuePath, "utf8");
+    const entries = _parseQueueLines(content);
+    if (entries.length === 0) {
+      tryUnlinkFile(fs, queuePath);
+      return null;
+    }
+    const [first, ...rest] = entries;
+    if (rest.length === 0) {
+      tryUnlinkFile(fs, queuePath);
+    } else {
+      fs.writeFileSync(queuePath, _serializeQueueEntries(rest), "utf8");
+    }
+    return first;
+  });
+}
+
+export async function popQueueMessages(
+  queuePath: string,
+  depsOrFs: AgentRunControlDeps | FsLike = {}
+): Promise<string[]> {
+  const entries = await popAllQueueEntries(queuePath, depsOrFs);
+  return entries.map((e) => e.text);
 }
 
 export function resolveRunReportPath(
@@ -606,19 +1022,6 @@ export type GcRunRecordsResult = {
   failedIds: string[];
 };
 
-function tryUnlinkFile(fs: FsLike, path: string | undefined): boolean {
-  if (typeof path !== "string" || path.length === 0) return true;
-  try {
-    if (fs.existsSync(path)) {
-      fs.unlinkSync(path);
-    }
-    return true;
-  } catch (error) {
-    const code = (error as { code?: string }).code;
-    return code === "ENOENT";
-  }
-}
-
 /**
  * Sweep terminal run records whose `endedAt` (or `reconciledAt` for orphaned)
  * is older than `retentionMs`. Removes the `.json`, `.log`, and `.msg.md`
@@ -633,10 +1036,10 @@ function tryUnlinkFile(fs: FsLike, path: string | undefined): boolean {
  * `now` and `retentionMs` are injectable so the sweep is deterministic in
  * tests — the sweep never reads `Date.now()` directly.
  */
-export function gcRunRecords(
+export async function gcRunRecords(
   deps: AgentRunControlDeps = {},
   options: { retentionMs?: number } = {}
-): GcRunRecordsResult {
+): Promise<GcRunRecordsResult> {
   const fs = deps.fs ?? nodeFs;
   const now = (deps.now ?? (() => new Date()))();
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now));
@@ -662,20 +1065,32 @@ export function gcRunRecords(
 
     const jsonPath = resolveRunRecordPath(record.runId, deps.env, deps.homedir);
     const logPath = resolveRunLogPath(record.runId, deps.env, deps.homedir);
+    const queuePath = record.queuePath ?? resolveRunQueuePath(record.runId, deps.env, deps.homedir);
     const reportPath = resolveRunReportPath(record.runId, deps.env, deps.homedir);
     const reportJsonPath = resolveRunReportJsonPath(record.runId, deps.env, deps.homedir);
     const msgPath =
       record.msgFile ?? join(resolveRunsDir(deps.env, deps.homedir), `${record.runId}.msg.md`);
 
-    // 1. Delete auxiliary files FIRST (.log, .msg.md, and optional .report.md / .report.json)
+    // 1. Delete auxiliary files FIRST (.log, .msg.md, .queue.jsonl, and optional .report.md / .report.json)
+    // 队列文件删除走 withQueueLock 互斥，防止与并发读写交错
     const logOk = tryUnlinkFile(fs, logPath);
     const msgOk = tryUnlinkFile(fs, msgPath);
+    let queueOk = true;
+    if (fs.existsSync(queuePath)) {
+      try {
+        await withQueueLock(queuePath, deps, () => {
+          tryUnlinkFile(fs, queuePath);
+        });
+      } catch {
+        queueOk = false;
+      }
+    }
     tryUnlinkFile(fs, reportPath);
     tryUnlinkFile(fs, reportJsonPath);
 
     // 2. If any auxiliary file failed to delete, KEEP the .json index file
     // so future GC passes can discover and retry sweeping this run.
-    if (!logOk || !msgOk) {
+    if (!logOk || !msgOk || !queueOk) {
       failedIds.push(record.runId);
       continue;
     }
@@ -859,7 +1274,7 @@ export async function spawnLocalBackgroundRun(
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
-): Promise<{ runId: string; pid?: number; logPath: string; batchId: string }> {
+): Promise<{ runId: string; pid?: number; logPath: string; queuePath: string; batchId: string }> {
   const env = deps.env ?? process.env;
   const homedir = deps.homedir ?? nodeHomedir;
   const fs = deps.fs ?? nodeFs;
@@ -870,6 +1285,7 @@ export async function spawnLocalBackgroundRun(
   const runId = generateRunId();
   const batchId = input.batchId ?? (deps.generateBatchId ?? defaultGenerateBatchId)();
   const logPath = resolveRunLogPath(runId, env, homedir);
+  const queuePath = resolveRunQueuePath(runId, env, homedir);
   const recordPath = resolveRunRecordPath(runId, env, homedir);
   const runsDir = resolveRunsDir(env, homedir);
   fs.mkdirSync(runsDir, { recursive: true });
@@ -924,6 +1340,7 @@ export async function spawnLocalBackgroundRun(
     ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
     status: "running",
     logPath,
+    queuePath,
     batchId,
     ...(typeof input.parentDialogId === "string" && input.parentDialogId.trim()
       ? { parentDialogId: input.parentDialogId.trim() }
@@ -933,9 +1350,15 @@ export async function spawnLocalBackgroundRun(
   };
   fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
 
+  const rawArgsWithQueue = (input.rawArgs ?? []).some(
+    (arg) => arg === "--queue-file" || arg.startsWith("--queue-file=")
+  )
+    ? input.rawArgs
+    : [...(input.rawArgs ?? []), "--queue-file", queuePath];
+
   const { execPath, childArgs } = buildAgentRunChildCommand(
     {
-      rawArgs: input.rawArgs,
+      rawArgs: rawArgsWithQueue,
       commandPath: input.commandPath,
       cliEntrypointPath: input.cliEntrypointPath,
       messagePath,
@@ -967,7 +1390,7 @@ export async function spawnLocalBackgroundRun(
     writeRunRecord(record, deps);
   }
 
-  return { runId, pid: proc.pid, logPath, batchId };
+  return { runId, pid: proc.pid, logPath, queuePath, batchId };
 }
 
 export function ackRunRecord(

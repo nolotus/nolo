@@ -9,10 +9,37 @@ import {
 
 const buildMemFs = () => {
   const files = new Map<string, string>();
+  const dirs = new Set<string>();
+  const mtimes = new Map<string, number>();
   const fs = {
-    mkdirSync: () => {},
+    mkdirSync: (path: string, options?: { recursive?: boolean }) => {
+      if (options?.recursive) {
+        dirs.add(path);
+        return;
+      }
+      if (dirs.has(path) || files.has(path)) {
+        const err = new Error(`EEXIST: file already exists, mkdir '${path}'`) as Error & { code: string };
+        err.code = "EEXIST";
+        throw err;
+      }
+      dirs.add(path);
+    },
+    rmdirSync: (path: string) => {
+      if (!dirs.has(path)) {
+        const err = new Error(`ENOENT: no such file or directory, rmdir '${path}'`) as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      }
+      dirs.delete(path);
+    },
     writeFileSync: (path: string, content: string) => {
       files.set(path, content);
+      mtimes.set(path, Date.now());
+    },
+    appendFileSync: (path: string, content: string) => {
+      const existing = files.get(path) ?? "";
+      files.set(path, existing + content);
+      mtimes.set(path, Date.now());
     },
     readFileSync: (path: string) => {
       const value = files.get(path);
@@ -23,13 +50,22 @@ const buildMemFs = () => {
       [...files.keys()]
         .filter((key) => key.startsWith(`${path}/`))
         .map((key) => key.slice(path.length + 1)),
-    existsSync: (path: string) => files.has(path),
+    existsSync: (path: string) => files.has(path) || dirs.has(path),
+    statSync: (path: string) => {
+      if (!files.has(path) && !dirs.has(path)) {
+        const err = new Error("ENOENT") as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      }
+      return { mtimeMs: mtimes.get(path) ?? Date.now() };
+    },
     openSync: () => 1,
     unlinkSync: (path: string) => {
       files.delete(path);
+      mtimes.delete(path);
     },
   } as unknown as FsLike;
-  return { files, fs };
+  return { files, dirs, mtimes, fs };
 };
 
 const buildDeps = (overrides: Partial<CliAgentRunToolExecutorDeps> = {}) => {
@@ -654,7 +690,7 @@ describe("cli controlAgentRun executor", () => {
     expect(newRecord.parentDialogId).toBe("parent-dialog-456");
   });
 
-  it("append to a running run rejects with enqueue not implemented error", async () => {
+  it("append to a running run without queuePath rejects with unsupported error", async () => {
     const deps = buildDeps({ kill: () => {} });
     seedRun(deps, "run-1", {
       status: "running",
@@ -670,7 +706,168 @@ describe("cli controlAgentRun executor", () => {
           userInput: "新指令",
         }),
       }),
-    ).rejects.toThrow("运行中入队(enqueue)暂未实现，请等终态后再 append");
+    ).rejects.toThrow("该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append");
+  });
+
+  it("append to a running run with queuePath enqueues message and returns mode:enqueue without spawning", async () => {
+    const deps = buildDeps({ kill: () => {} });
+    const queuePath = "/home/test/.nolo/runs/run-1.queue.jsonl";
+    seedRun(deps, "run-1", {
+      status: "running",
+      dialogId: "dialog-user-123",
+      agentKey: "agent-pub-x",
+      agentName: "测试助手",
+      queuePath,
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-1",
+        userInput: "运行中入队的第一条指令",
+      }),
+    });
+
+    const parsed = JSON.parse(result.content);
+    expect(parsed).toMatchObject({
+      runId: "run-1",
+      dialogId: "dialog-user-123",
+      mode: "enqueue",
+      queued: 1,
+      status: "running",
+      agentName: "测试助手",
+      taskPreview: "运行中入队的第一条指令",
+    });
+
+    // 格式化卡片
+    expect(result.metadata?.displayData).toContain("测试助手");
+    expect(result.metadata?.displayData).toContain("running");
+    expect(result.metadata?.displayData).toContain("[enqueued 1] 运行中入队的第一条指令");
+
+    // 不应 spawn 新进程
+    expect(deps.spawnCalls.length).toBe(0);
+
+    // 检查队列文件内容
+    const queueContent = deps.mem.files.get(queuePath);
+    expect(queueContent).toBeDefined();
+    const entry = JSON.parse(queueContent!.trim());
+    expect(entry.text).toBe("运行中入队的第一条指令");
+    expect(typeof entry.ts).toBe("number");
+
+    // 第二次追加，queued 计数递增为 2
+    const result2 = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-1",
+        userInput: "运行中入队的第二条指令",
+      }),
+    });
+    const parsed2 = JSON.parse(result2.content);
+    expect(parsed2.queued).toBe(2);
+    expect(parsed2.mode).toBe("enqueue");
+    expect(deps.spawnCalls.length).toBe(0);
+  });
+
+  it("append race degradation: entryId unconsumed when child becomes terminal falls back to continue spawn with merged message", async () => {
+    let nextRunId = "run-2";
+    const queuePath = "/home/test/.nolo/runs/run-1.queue.jsonl";
+    let probeCount = 0;
+    const deps = buildDeps({
+      generateRunId: () => nextRunId,
+      kill: (pid, signal) => {
+        // 第一阶段（find/初始 checkStaleRun）返回存活 (signal===0 不抛错)；
+        // 第二阶段（写入队列后的 afterCheck）模拟进程退出 (抛 ESRCH)，checkStaleRun 判定为 orphaned/terminal
+        probeCount++;
+        if (probeCount > 1 && signal === 0) {
+          const err = new Error("ESRCH") as Error & { code: string };
+          err.code = "ESRCH";
+          throw err;
+        }
+      },
+    });
+
+    seedRun(deps, "run-1", {
+      status: "running",
+      dialogId: "dialog-user-123",
+      agentKey: "agent-pub-x",
+      agentName: "测试助手",
+      batchId: "batch-1",
+      queuePath,
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-1",
+        userInput: "竞态追加指令",
+      }),
+    });
+
+    const parsed = JSON.parse(result.content);
+    expect(parsed).toMatchObject({
+      runId: "run-1",
+      newRunId: "run-2",
+      dialogId: "dialog-user-123",
+      mode: "continue",
+      status: "running",
+      agentName: "测试助手",
+      taskPreview: "竞态追加指令",
+    });
+
+    // 应已降级走 continue spawn
+    expect(deps.spawnCalls.length).toBe(1);
+    expect(deps.mem.files.get("/home/test/.nolo/runs/run-2.msg.md")).toBe("竞态追加指令");
+  });
+
+  it("append race degradation: entryId already consumed by child before terminal does NOT spawn duplicate continuation", async () => {
+    const queuePath = "/home/test/.nolo/runs/run-1.queue.jsonl";
+    let probeCount = 0;
+    const deps = buildDeps({
+      kill: (pid, signal) => {
+        probeCount++;
+        if (probeCount > 1 && signal === 0) {
+          // 模拟子进程在退出前消费并清空了队列
+          deps.mem.files.delete(queuePath);
+          const err = new Error("ESRCH") as Error & { code: string };
+          err.code = "ESRCH";
+          throw err;
+        }
+      },
+    });
+
+    seedRun(deps, "run-1", {
+      status: "running",
+      dialogId: "dialog-user-123",
+      agentKey: "agent-pub-x",
+      agentName: "测试助手",
+      batchId: "batch-1",
+      queuePath,
+    });
+    const executor = createCliControlAgentRunExecutor(deps);
+
+    const result = await executor({
+      arguments: JSON.stringify({
+        action: "append",
+        runId: "run-1",
+        userInput: "已被子进程抢先消费的指令",
+      }),
+    });
+
+    const parsed = JSON.parse(result.content);
+    expect(parsed).toMatchObject({
+      runId: "run-1",
+      dialogId: "dialog-user-123",
+      mode: "enqueue",
+      consumed: true,
+      status: "orphaned",
+      agentName: "测试助手",
+      taskPreview: "已被子进程抢先消费的指令",
+    });
+
+    // 绝对不应重复 spawn 新进程
+    expect(deps.spawnCalls.length).toBe(0);
   });
 
   it("append to a run without dialogId rejects with error", async () => {

@@ -6,6 +6,7 @@
 // for back-compat with existing callers.
 
 import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
+import * as nodeFs from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLI_AUTO_ROUTE_AGENT_KEY } from "./client/autoModelRouter";
@@ -38,7 +39,10 @@ import {
 import {
   createRunActivityTracker,
   finalizeRunRecord,
+  popQueueMessages,
+  popSingleQueueMessage,
   readRunRecord,
+  resolveRunQueuePath,
   spawnLocalBackgroundRun,
   type AgentRunControlDeps,
 } from "./agentRunControl";
@@ -113,6 +117,8 @@ export type AgentRunCommandDeps = {
   finalizeRunRecord?: typeof finalizeRunRecord;
   readRunRecord?: typeof readRunRecord;
   generateRunReport?: typeof generateRunReport;
+  popQueueMessages?: typeof popQueueMessages;
+  popSingleQueueMessage?: typeof popSingleQueueMessage;
   /** Override for tests; defaults to `process.exit`. */
   processExit?: (code: number) => never;
   /** Override for tests; defaults to `NOLO_LOCAL_RUN_STALL_TIMEOUT_MS` env or 5 min. */
@@ -529,21 +535,27 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
 
   // Build the runner options once; the same options (message, cwd,
   // subjectRefs, runtime mode, etc.) are reused for any quota fallback retry
-  // so the fallback agent executes against an identical request surface.
-  const buildRunOptions = (targetAgentKey: string): RunAgentTurnOptions => ({
-    agentName: targetAgentKey,
-    agentKey: targetAgentKey,
-    serverUrl: resolveServerUrl(env),
-    message: prependWorkflowReferencePrompt(
+  // and subsequent queued turn drains so turns execute against an identical request surface.
+  const formatTurnMessage = (msg: string) =>
+    prependWorkflowReferencePrompt(
       prependSubjectDialogMarker(
         prependFeatureWorktreeInstruction(
-          prependOutputFormatGuidance(effectiveMessage),
+          prependOutputFormatGuidance(msg),
           parsed.injectFeatureWorktreeInstruction
         ),
         parsed.subjectDialogKey
       ),
       workflowReference
-    ),
+    );
+
+  const buildRunOptions = (
+    targetAgentKey: string,
+    turnMessage: string = effectiveMessage
+  ): RunAgentTurnOptions => ({
+    agentName: targetAgentKey,
+    agentKey: targetAgentKey,
+    serverUrl: resolveServerUrl(env),
+    message: formatTurnMessage(turnMessage),
     imageUrls: parsed.imageUrls.map(normalizeCliImageInput),
     scriptDir: deps.scriptDir,
     env: runEnv,
@@ -640,6 +652,51 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       output.write(`Suggested alternatives for your decision: ${parsed.fallbackAgentKeys.join(', ')}\n`);
     }
     output.write(`As the orchestrating agent, decide next based on task and re-dispatch (update task state with this attempt).\n`);
+  }
+
+  // ── Queue drain loop (运行中入队消费：通过 --queue-file 接收队列文件) ─────
+  const queueFilePath = parsed.queueFile ?? (childRunId ? resolveRunQueuePath(childRunId, env, deps.homedir) : undefined);
+  const queueFs = deps.fs ?? nodeFs;
+  if (queueFilePath && queueFs.existsSync(queueFilePath) && result.dialogId && result.exitCode === 0) {
+    const MAX_DRAIN_TURNS = 200;
+    let drainTurns = 0;
+    const popSingle = deps.popSingleQueueMessage ?? popSingleQueueMessage;
+
+    while (drainTurns < MAX_DRAIN_TURNS && queueFs.existsSync(queueFilePath)) {
+      const nextEntry = await popSingle(queueFilePath, deps);
+      if (!nextEntry) {
+        break;
+      }
+      drainTurns += 1;
+      try {
+        const turnResult: RunAgentTurnResult = await raceWithWatchdog(
+          runner({
+            ...buildRunOptions(effectiveAgentKey, nextEntry.text),
+            continueDialogId: result.dialogId,
+            ...(modelOverride ? { modelOverride } : {}),
+          })
+        );
+        clearWatchdogs();
+        result = turnResult;
+        if (result.exitCode !== 0) {
+          break;
+        }
+      } catch (drainError) {
+        clearWatchdogs();
+        console.error(`[nolo] queue turn failed with exception: ${toErrorMessage(drainError)}`);
+        result = {
+          ...result,
+          exitCode: 1,
+          localError: drainError,
+        };
+        break;
+      }
+    }
+    if (drainTurns >= MAX_DRAIN_TURNS) {
+      console.error(
+        `[nolo] Warning: queue drain loop reached defensive limit of ${MAX_DRAIN_TURNS} turns, stopping.`
+      );
+    }
   }
 
   if (result.dialogId) {

@@ -26,6 +26,7 @@ import {
   type AgentRunControlDeps,
   type FsLike,
   type RunRecord,
+  appendRunQueue,
   checkStaleRun,
   ackRunRecord,
   claimRunRecord,
@@ -34,6 +35,10 @@ import {
   finalizeRunRecord,
   findRunRecord,
   gcRunRecords,
+  popAllQueueEntries,
+  popQueueMessages,
+  serializeQueueEntries,
+  withQueueLock,
   queryRunRecords,
   resolveRunReportPath,
   spawnLocalBackgroundRun,
@@ -355,6 +360,69 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
   };
 }
 
+async function spawnContinuationRun(
+  reconciled: RunRecord,
+  userInput: string,
+  deps: CliAgentRunToolExecutorDeps
+) {
+  if (!reconciled.dialogId) {
+    throw new Error("该 run 无关联 dialog，无法续跑。");
+  }
+
+  const agentKey = reconciled.agentKey;
+  const agentName = reconciled.agentName;
+  const rawArgs = [
+    "--agent",
+    agentKey,
+    "--continue",
+    reconciled.dialogId,
+    "--msg-file",
+    "PLACEHOLDER",
+    "--bg",
+    ...(reconciled.ephemeral === true ? ["--ephemeral"] : []),
+  ];
+
+  const { runId: newRunId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
+    {
+      rawArgs,
+      commandPath: ["agent", "run"],
+      cliEntrypointPath: deps.cliEntrypoint,
+      agentKey,
+      ...(agentName ? { agentName } : {}),
+      ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
+      ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
+      cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
+      message: userInput,
+      output: noopOutput,
+    },
+    deps,
+  );
+
+  const displayName = resolveRunLabel({ agentName, agentKey, runId: newRunId });
+  const labels = agentRunCardLabels();
+  const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
+
+  return {
+    content: JSON.stringify({
+      runId: reconciled.runId,
+      newRunId,
+      dialogId: reconciled.dialogId,
+      mode: "continue",
+      status: "running",
+      ...(agentName ? { agentName } : {}),
+      ...(resolvedBatchId ? { batchId: resolvedBatchId } : {}),
+      ...(taskPreview ? { taskPreview } : {}),
+    }),
+    metadata: {
+      displayData: formatStartRunCard(displayName, "running", {
+        task: taskPreview,
+        runId: newRunId,
+        labels,
+      }),
+    },
+  };
+}
+
 /** controlAgentRun：list / status / wait / stop / todo / append，映射到本地 ~/.nolo/runs/ 注册表。wait 轮询记录直到终态。 */
 export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (
@@ -375,7 +443,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       // ignoring statusFilter/limit entirely — that was the bug. GC runs
       // opportunistically on the same call; it never touches non-terminal
       // records, so it's safe to run alongside active runs.
-      gcRunRecords(deps);
+      await gcRunRecords(deps);
       const { runs: records, total, hasMore } = queryRunRecords(
         {
           ...(typeof args.batchId === "string" && args.batchId.trim()
@@ -513,67 +581,86 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       // 说明：RunRecord 目前没有任何字段区分 server 来源的 run（serverBase/
       // serverUrl/source 均无人写入），此处不做甄别；server run 的 append
       // 待 server 侧执行器实现时补（Phase 2）。
-      const reconciled = checkStaleRun(record.runId, deps) ?? record;
+      let reconciled = checkStaleRun(record.runId, deps) ?? record;
       if (!isAgentRunTerminalStatus(reconciled.status)) {
-        throw new Error("运行中入队(enqueue)暂未实现，请等终态后再 append");
-      }
+        if (!reconciled.queuePath) {
+          throw new Error("该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append");
+        }
 
-      if (!reconciled.dialogId) {
-        throw new Error("该 run 无关联 dialog，无法续跑。");
-      }
+        const queuePath = reconciled.queuePath;
+        const { queuedCount, entryId } = await appendRunQueue(queuePath, userInput, deps);
 
-      const agentKey = reconciled.agentKey;
-      const agentName = reconciled.agentName;
-      const rawArgs = [
-        "--agent",
-        agentKey,
-        "--continue",
-        reconciled.dialogId,
-        "--msg-file",
-        "PLACEHOLDER",
-        "--bg",
-        ...(reconciled.ephemeral === true ? ["--ephemeral"] : []),
-      ];
-
-      const { runId: newRunId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
-        {
-          rawArgs,
-          commandPath: ["agent", "run"],
-          cliEntrypointPath: deps.cliEntrypoint,
-          agentKey,
-          ...(agentName ? { agentName } : {}),
-          ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
-          ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
-          cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
-          message: userInput,
-          output: noopOutput,
-        },
-        deps,
-      );
-
-      const displayName = resolveRunLabel({ agentName, agentKey, runId: newRunId });
-      const labels = agentRunCardLabels();
-      const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
-
-      return {
-        content: JSON.stringify({
+        const displayName = resolveRunLabel({
+          agentName: reconciled.agentName,
+          agentKey: reconciled.agentKey,
           runId: reconciled.runId,
-          newRunId,
-          dialogId: reconciled.dialogId,
-          mode: "continue",
-          status: "running",
-          ...(agentName ? { agentName } : {}),
-          ...(resolvedBatchId ? { batchId: resolvedBatchId } : {}),
-          ...(taskPreview ? { taskPreview } : {}),
-        }),
-        metadata: {
-          displayData: formatStartRunCard(displayName, "running", {
-            task: taskPreview,
-            runId: newRunId,
-            labels,
+        });
+        const labels = agentRunCardLabels();
+        const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
+
+        // 写完 re-check 一次状态（防竞态）
+        const afterCheck = checkStaleRun(reconciled.runId, deps) ?? reconciled;
+        if (isAgentRunTerminalStatus(afterCheck.status)) {
+          // 竞态降级：子进程已在入队前后进入终态。
+          // 原子取走当前剩余队列快照，检查本次写入的 entryId 是否还在
+          const remainingEntries = await popAllQueueEntries(queuePath, deps);
+          const ourEntryFound = remainingEntries.some((e) => e.id === entryId);
+
+          if (!ourEntryFound) {
+            // entryId 已被子进程在退出前消费完：不再重复 spawn，安全写回其他可能存在的并发 entry
+            if (remainingEntries.length > 0) {
+              await withQueueLock(queuePath, deps, () => {
+                const fs = deps.fs ?? nodeFs;
+                const existing = fs.existsSync(queuePath) ? fs.readFileSync(queuePath, "utf8") : "";
+                fs.writeFileSync(queuePath, serializeQueueEntries(remainingEntries) + existing, "utf8");
+              });
+            }
+            return {
+              content: JSON.stringify({
+                runId: reconciled.runId,
+                ...(afterCheck.dialogId || reconciled.dialogId ? { dialogId: afterCheck.dialogId ?? reconciled.dialogId } : {}),
+                mode: "enqueue",
+                consumed: true,
+                status: afterCheck.status,
+                ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+                ...(taskPreview ? { taskPreview } : {}),
+              }),
+              metadata: {
+                displayData: formatStartRunCard(displayName, afterCheck.status, {
+                  task: `[consumed] ${taskPreview}`,
+                  runId: reconciled.runId,
+                  labels,
+                }),
+              },
+            };
+          }
+
+          // entryId 仍在队列中（未被子进程消费）：合并本次及所有未消费消息走 continue spawn
+          const mergedMessage = remainingEntries.map((e) => e.text).join("\n\n");
+          return await spawnContinuationRun(afterCheck, mergedMessage, deps);
+        }
+
+        return {
+          content: JSON.stringify({
+            runId: reconciled.runId,
+            ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
+            mode: "enqueue",
+            queued: queuedCount,
+            status: "running",
+            ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+            ...(taskPreview ? { taskPreview } : {}),
           }),
-        },
-      };
+          metadata: {
+            displayData: formatStartRunCard(displayName, "running", {
+              task: `[enqueued ${queuedCount}] ${taskPreview}`,
+              runId: reconciled.runId,
+              labels,
+            }),
+          },
+        };
+      }
+
+      return await spawnContinuationRun(reconciled, userInput, deps);
     }
 
     if (action !== "status" && action !== "stop" && action !== "wait") {

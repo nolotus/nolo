@@ -1,4 +1,13 @@
 
+## 0.46.0-alpha.1
+
+## 0.46.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **cli:** controlAgentRun 支持运行中入队（文件队列 + 跨进程锁） ([be4f8f6](https://github.com/nolotus/bun-nolo/commit/be4f8f6c0f5bc3babac68a0b335425322e5e870b))
+
+
 ## 0.45.0-alpha.1
 
 ## 0.45.0-alpha.1 (2026-08-30)

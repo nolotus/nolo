@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { join } from "node:path";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { ChildProcess } from "node:child_process";
 import type {
   AgentRunControlDeps,
@@ -23,9 +25,17 @@ import {
   readRunRecord,
   resolveNoloHome,
   resolveRunLogPath,
+  resolveRunQueuePath,
   resolveRunRecordPath,
   resolveRunReportPath,
   resolveRunsDir,
+  appendRunQueue,
+  countQueueMessages,
+  readQueueMessages,
+  popQueueMessages,
+  popSingleQueueMessage,
+  popAllQueueEntries,
+  withQueueLock,
   runAgentKillCommand,
   runAgentLogsCommand,
   runAgentPsCommand,
@@ -62,8 +72,23 @@ function createInMemoryFs(initial: Record<string, string> = {}): FsLike & {
           current = parent;
         }
         if (current === "/") dirs.add("/");
+        dirs.add(path);
+        return;
+      }
+      if (dirs.has(path) || path in files) {
+        const error = new Error(`EEXIST: file already exists, mkdir '${path}'`) as Error & { code: string };
+        error.code = "EEXIST";
+        throw error;
       }
       dirs.add(path);
+    },
+    rmdirSync(path: string) {
+      if (!dirs.has(path)) {
+        const error = new Error(`ENOENT: no such file or directory, rmdir '${path}'`) as Error & { code: string };
+        error.code = "ENOENT";
+        throw error;
+      }
+      dirs.delete(path);
     },
     writeFileSync(path: string, data: string) {
       writeCalls.push({ path, data });
@@ -81,7 +106,7 @@ function createInMemoryFs(initial: Record<string, string> = {}): FsLike & {
     // Files written by this stub are "just now" unless a test overrides mtime,
     // which is what lets the tmp sweep distinguish abandoned from in-flight.
     statSync(path: string) {
-      if (!(path in files)) {
+      if (!(path in files) && !dirs.has(path)) {
         const error = new Error(`ENOENT: ${path}`) as Error & { code: string };
         error.code = "ENOENT";
         throw error;
@@ -111,6 +136,19 @@ function createInMemoryFs(initial: Record<string, string> = {}): FsLike & {
     },
     unlinkSync(path: string) {
       delete files[path];
+    },
+    appendFileSync(path: string, data: string) {
+      files[path] = (files[path] ?? "") + data;
+      dirs.add(join(path, ".."));
+    },
+    renameSync(oldPath: string, newPath: string) {
+      if (!(oldPath in files)) {
+        const error = new Error(`ENOENT: ${oldPath}`) as Error & { code: string };
+        error.code = "ENOENT";
+        throw error;
+      }
+      files[newPath] = files[oldPath];
+      delete files[oldPath];
     },
     writeCalls,
   } as unknown as FsLike & { writeCalls: Array<{ path: string; data: string }> };
@@ -211,6 +249,404 @@ describe("agent run control plane", () => {
     expect(resolveRunReportPath("run-1", { NOLO_HOME: "/custom/nolo" })).toBe(
       "/custom/nolo/runs/run-1.report.md"
     );
+    expect(resolveRunQueuePath("run-1", { NOLO_HOME: "/custom/nolo" })).toBe(
+      "/custom/nolo/runs/run-1.queue.jsonl"
+    );
+  });
+
+  test("appendRunQueue, countQueueMessages, popSingleQueueMessage, and popAllQueueEntries manage FIFO queue", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-q1.queue.jsonl";
+
+    expect(await countQueueMessages(queuePath, fs)).toBe(0);
+    expect(await popSingleQueueMessage(queuePath, fs)).toBeNull();
+
+    const res1 = await appendRunQueue(queuePath, "msg 1", { fs, now: () => new Date("2026-07-31T00:00:00.000Z") });
+    expect(res1.queuedCount).toBe(1);
+    expect(typeof res1.entryId).toBe("string");
+    expect(await countQueueMessages(queuePath, fs)).toBe(1);
+
+    const res2 = await appendRunQueue(queuePath, "msg 2", { fs, now: () => new Date("2026-07-31T00:01:00.000Z") });
+    expect(res2.queuedCount).toBe(2);
+    expect(typeof res2.entryId).toBe("string");
+    expect(await countQueueMessages(queuePath, fs)).toBe(2);
+
+    expect(await readQueueMessages(queuePath, fs)).toEqual(["msg 1", "msg 2"]);
+
+    // popSingleQueueMessage claims 1 item and keeps remaining intact in queue
+    const single = await popSingleQueueMessage(queuePath, fs);
+    expect(single?.text).toBe("msg 1");
+    expect(single?.id).toBe(res1.entryId);
+    expect(await countQueueMessages(queuePath, fs)).toBe(1);
+    expect(await readQueueMessages(queuePath, fs)).toEqual(["msg 2"]);
+
+    // Append msg 3
+    const res3 = await appendRunQueue(queuePath, "msg 3", { fs });
+    expect(res3.queuedCount).toBe(2);
+
+    // popAllQueueEntries takes all remaining items
+    const all = await popAllQueueEntries(queuePath, fs);
+    expect(all.map((e) => e.text)).toEqual(["msg 2", "msg 3"]);
+    expect(await countQueueMessages(queuePath, fs)).toBe(0);
+  });
+
+  test("withQueueLock mutual exclusion: busy lock throws error when timeout expires", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-lock1.queue.jsonl";
+    fs.mkdirSync(`${queuePath}.lock`);
+
+    await expect(
+      withQueueLock(
+        queuePath,
+        { fs },
+        () => "ok",
+        { retries: 2, retryIntervalMs: 1 }
+      )
+    ).rejects.toThrow("queue busy");
+  });
+
+  test("withQueueLock stale lock takeover: broken after staleLockMs and acquired with owner token", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-lock2.queue.jsonl";
+    const lockPath = `${queuePath}.lock`;
+    fs.mkdirSync(lockPath);
+    fs.setMtime(lockPath, 1000); // very old mtime
+
+    const result = await withQueueLock(
+      queuePath,
+      { fs, now: () => new Date(1000 + 70_000) },
+      () => "acquired after stale",
+      { staleLockMs: 60_000 }
+    );
+
+    expect(result).toBe("acquired after stale");
+    // Lock released in finally
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  test("withQueueLock owner token: mismatch on release does not delete another process lock", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-lock-mismatch.queue.jsonl";
+    const lockPath = `${queuePath}.lock`;
+    const tokenPath = `${lockPath}/owner.json`;
+
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args: any[]) => { errors.push(args.join(" ")); };
+
+    try {
+      await withQueueLock(
+        queuePath,
+        { fs },
+        () => {
+          // 模拟在临界区内锁被第三方篡改/接管（ownerId 变成别人）
+          fs.writeFileSync(tokenPath, JSON.stringify({ ownerId: "someone-else-token", pid: 99999 }));
+        }
+      );
+
+      // 释放时发现 token 不匹配，拒绝删除别人的锁目录并打印警告
+      expect(fs.existsSync(lockPath)).toBe(true);
+      expect(errors.some((e) => e.includes("owner mismatch"))).toBe(true);
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  test("withQueueLock concurrency: concurrent callers serialize cleanly", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-lock-concurrent.queue.jsonl";
+    const order: string[] = [];
+
+    const task1 = withQueueLock(queuePath, { fs }, async () => {
+      order.push("t1-start");
+      await new Promise((r) => setTimeout(r, 20));
+      order.push("t1-end");
+    }, { retries: 10, retryIntervalMs: 5 });
+
+    const task2 = withQueueLock(queuePath, { fs }, async () => {
+      order.push("t2-start");
+      order.push("t2-end");
+    }, { retries: 10, retryIntervalMs: 5 });
+
+    await Promise.all([task1, task2]);
+
+    expect(order).toEqual(["t1-start", "t1-end", "t2-start", "t2-end"]);
+  });
+
+  test("popAllQueueEntries and popSingleQueueMessage throw when readFileSync fails, leaving queue intact", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-failread.queue.jsonl";
+    await appendRunQueue(queuePath, "important message", { fs });
+
+    const brokenFs: FsLike = {
+      ...fs,
+      readFileSync: (path) => {
+        if (String(path).endsWith(".queue.jsonl")) {
+          throw new Error("EIO: disk read failed");
+        }
+        return fs.readFileSync(path);
+      },
+    };
+
+    await expect(popAllQueueEntries(queuePath, { fs: brokenFs })).rejects.toThrow("EIO: disk read failed");
+    await expect(popSingleQueueMessage(queuePath, { fs: brokenFs })).rejects.toThrow("EIO: disk read failed");
+
+    // Original file must still exist and be readable with normal fs
+    expect(await countQueueMessages(queuePath, fs)).toBe(1);
+    expect(await readQueueMessages(queuePath, fs)).toEqual(["important message"]);
+  });
+
+  test("withQueueLock token write failure: unlinks newly created lock directory and throws error, leaving no ghost lock", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-token-fail.queue.jsonl";
+    const lockPath = `${queuePath}.lock`;
+
+    const brokenFs: FsLike = {
+      ...fs,
+      writeFileSync: (path, data) => {
+        if (String(path).endsWith("owner.json")) {
+          throw new Error("ENOSPC: disk full during token write");
+        }
+        return fs.writeFileSync(path, data);
+      },
+    };
+
+    await expect(
+      withQueueLock(queuePath, { fs: brokenFs }, () => "ok", { retries: 0 })
+    ).rejects.toThrow("ENOSPC");
+
+    // Lock directory must be cleaned up and not left as a ghost directory
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  test("withQueueLock real OS process mutual exclusion: two child processes contending on same queue lock execute serially without overlap", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-queue-lock-test-"));
+    const queuePath = join(tempDir, "real.queue.jsonl");
+    const logPath = join(tempDir, "timeline.jsonl");
+
+    const helperScript = `
+      import { withQueueLock } from "${join(__dirname, "agentRunControl.ts")}";
+      import { appendFileSync } from "node:fs";
+
+      const [queuePath, logPath] = process.argv.slice(1);
+
+      await withQueueLock(queuePath, async () => {
+        const start = Date.now();
+        await new Promise((r) => setTimeout(r, 60));
+        const end = Date.now();
+        appendFileSync(logPath, JSON.stringify({ pid: process.pid, start, end }) + "\\n");
+      }, { retries: 30, retryIntervalMs: 20 });
+    `;
+
+    try {
+      const p1 = spawn(process.execPath, ["-e", helperScript, queuePath, logPath], { stdio: "ignore" });
+      const p2 = spawn(process.execPath, ["-e", helperScript, queuePath, logPath], { stdio: "ignore" });
+
+      const waitProc = (proc: ChildProcess) =>
+        new Promise<number>((resolve) => {
+          const timer = setTimeout(() => {
+            proc.kill("SIGKILL");
+            resolve(-1);
+          }, 6000);
+          proc.on("exit", (code) => {
+            clearTimeout(timer);
+            resolve(code ?? 0);
+          });
+        });
+
+      const [code1, code2] = await Promise.all([waitProc(p1), waitProc(p2)]);
+
+      expect(code1).toBe(0);
+      expect(code2).toBe(0);
+
+      expect(existsSync(logPath)).toBe(true);
+      const lines = readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      expect(lines).toHaveLength(2);
+
+      const [t1, t2] = lines;
+      // 互斥断言：第一个进程结束时刻 <= 第二个进程开始时刻（允许因毫秒时钟粒度的 0-1ms 容差）
+      const noOverlap = t1.end <= t2.start + 1 || t2.end <= t1.start + 1;
+      expect(noOverlap).toBe(true);
+    } finally {
+      try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("withQueueLock real OS process: releasing lock allows waiting competitor to acquire", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-queue-lock-comp-"));
+    const queuePath = join(tempDir, "comp.queue.jsonl");
+    const markerPath = join(tempDir, "acquired.txt");
+
+    const helperScript = `
+      import { withQueueLock } from "${join(__dirname, "agentRunControl.ts")}";
+      import { writeFileSync } from "node:fs";
+
+      const [queuePath, markerPath] = process.argv.slice(1);
+
+      await withQueueLock(queuePath, async () => {
+        await new Promise((r) => setTimeout(r, 40));
+        writeFileSync(markerPath, "acquired-by-" + process.pid);
+      }, { retries: 25, retryIntervalMs: 15 });
+    `;
+
+    try {
+      // 先让父进程持锁
+      let releaseParentLock!: () => void;
+      const parentLockPromise = withQueueLock(queuePath, async () => {
+        await new Promise<void>((r) => { releaseParentLock = r; });
+      });
+
+      // 等待父进程确已建立锁目录
+      const lockDir = `${queuePath}.lock`;
+      let checks = 0;
+      while (!existsSync(lockDir) && checks < 50) {
+        await new Promise((r) => setTimeout(r, 10));
+        checks++;
+      }
+      expect(existsSync(lockDir)).toBe(true);
+
+      // 启动子进程（此时子进程会等待）
+      const child = spawn(process.execPath, ["-e", helperScript, queuePath, markerPath], { stdio: "ignore" });
+
+      // 50ms 后父进程释放锁
+      setTimeout(() => {
+        releaseParentLock();
+      }, 50);
+
+      await parentLockPromise;
+
+      const childExit = await new Promise<number>((resolve) => {
+        const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(-1); }, 5000);
+        child.on("exit", (code) => { clearTimeout(timer); resolve(code ?? 0); });
+      });
+
+      expect(childExit).toBe(0);
+      expect(existsSync(markerPath)).toBe(true);
+    } finally {
+      try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("GC and appendRunQueue under lock: GC deletion and append serialize cleanly on real fs", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "nolo-gc-race-"));
+    const noloHome = join(tempDir, ".nolo");
+    const runsDir = join(noloHome, "runs");
+    const queuePath = join(runsDir, "run-race.queue.jsonl");
+    const logPath = join(runsDir, "run-race.log");
+    const recordPath = join(runsDir, "run-race.json");
+
+    const env = { NOLO_HOME: noloHome };
+    const deps = { env, homedir: () => tempDir };
+
+    try {
+      await appendRunQueue(queuePath, "msg before gc", deps);
+      expect(existsSync(queuePath)).toBe(true);
+
+      writeRunRecord(
+        {
+          runId: "run-race",
+          agentKey: "a",
+          startedAt: "2025-01-01T00:00:00.000Z",
+          status: "done",
+          endedAt: "2025-01-01T00:00:00.000Z",
+          logPath,
+          queuePath,
+        },
+        deps
+      );
+      writeFileSync(logPath, "log content");
+
+      // 并发执行 GC 清理与向新队列追加消息
+      const gcPromise = gcRunRecords(deps, { retentionMs: 0 });
+      const appendPromise = (async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return appendRunQueue(queuePath, "msg during/after gc", deps);
+      })();
+
+      const [gcResult, appendResult] = await Promise.all([gcPromise, appendPromise]);
+
+      expect(gcResult.swept).toBe(1);
+      expect(appendResult.queuedCount).toBeGreaterThanOrEqual(1);
+      expect(existsSync(queuePath)).toBe(true);
+      const remainingMsgs = await readQueueMessages(queuePath, deps);
+      expect(remainingMsgs).toContain("msg during/after gc");
+    } finally {
+      try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("gcRunRecords deletes queue file strictly inside withQueueLock and respects lock when held", async () => {
+    const fs = createInMemoryFs();
+    const queuePath = "/home/test/.nolo/runs/run-gc-lock.queue.jsonl";
+    const logPath = "/home/test/.nolo/runs/run-gc-lock.log";
+    const lockPath = `${queuePath}.lock`;
+
+    let unlinkedInsideLock = false;
+    const baseUnlink = fs.unlinkSync.bind(fs);
+    fs.unlinkSync = (path: string) => {
+      if (path === queuePath) {
+        // 断言：删除 queuePath 的那一刻，锁目录必须存在（处于持锁状态）
+        unlinkedInsideLock = fs.existsSync(lockPath);
+      }
+      baseUnlink(path);
+    };
+
+    fs.writeFileSync(queuePath, "msg in queue");
+    fs.writeFileSync(logPath, "log text");
+
+    const deps = createDeps({ fs, now: () => new Date("2025-01-11T00:00:00.000Z") });
+    writeRunRecord(
+      {
+        runId: "run-gc-lock",
+        agentKey: "a",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "done",
+        endedAt: "2025-01-01T00:00:00.000Z",
+        logPath,
+        queuePath,
+      },
+      deps
+    );
+
+    // 1. 结构断言：删除发生在 withQueueLock 临界区内
+    const sweepResult = await gcRunRecords(deps, { retentionMs: 0 });
+    expect(sweepResult.swept).toBe(1);
+    expect(unlinkedInsideLock).toBe(true);
+    expect(fs.existsSync(queuePath)).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(false);
+
+    // 2. 互斥断言：当他人持有队列锁时，GC 绝不越锁删除，而是保留文件并标记 failed
+    fs.writeFileSync(queuePath, "msg in queue 2");
+    fs.writeFileSync(logPath, "log text 2");
+    writeRunRecord(
+      {
+        runId: "run-gc-held",
+        agentKey: "a",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "done",
+        endedAt: "2025-01-01T00:00:00.000Z",
+        logPath,
+        queuePath,
+      },
+      deps
+    );
+
+    // 手动持锁（新鲜锁，未超时）
+    fs.mkdirSync(lockPath);
+
+    const heldSweepResult = await gcRunRecords(deps, { retentionMs: 0 });
+    expect(heldSweepResult.swept).toBe(0);
+    expect(heldSweepResult.failedIds).toContain("run-gc-held");
+    // 队列文件和 json 索引完整保留，未被越权删除
+    expect(fs.existsSync(queuePath)).toBe(true);
+    expect(fs.existsSync("/home/test/.nolo/runs/run-gc-held.json")).toBe(true);
+
+    // 释放锁后，下一轮 GC 正常扫除
+    fs.rmdirSync(lockPath);
+    const retrySweepResult = await gcRunRecords(deps, { retentionMs: 0 });
+    expect(retrySweepResult.swept).toBe(1);
+    expect(retrySweepResult.sweptIds).toContain("run-gc-held");
+    expect(fs.existsSync(queuePath)).toBe(false);
   });
 
   test("defaultGenerateRunId returns run prefix", () => {
@@ -407,6 +843,8 @@ describe("agent run control plane", () => {
       "--msg",
       "hello",
       "--local",
+      "--queue-file",
+      "/home/test/.nolo/runs/run-2025-01-01T00-00-00-000Z-abc123.queue.jsonl",
     ]);
     expect(calls[0].options.cwd).toBe("/repo");
     expect(calls[0].options.detached).toBe(true);
@@ -432,7 +870,14 @@ describe("agent run control plane", () => {
       deps
     );
 
-    expect(calls[0].args).toEqual(["run", "local-codex", "--msg", "hello"]);
+    expect(calls[0].args).toEqual([
+      "run",
+      "local-codex",
+      "--msg",
+      "hello",
+      "--queue-file",
+      "/home/test/.nolo/runs/run-2025-01-01T00-00-00-000Z-abc123.queue.jsonl",
+    ]);
   });
 
   test("buildAgentRunChildCommand falls back to valid entrypoint when cliEntrypointPath does not exist", () => {
@@ -1795,7 +2240,7 @@ describe("run-truth-batch: GC", () => {
     );
   }
 
-  test("GC sweeps only terminal records past retention", () => {
+  test("GC sweeps only terminal records past retention", async () => {
     // now = 2025-01-11, retention 7 days → anything ended/reconciled before 2025-01-04 goes.
     const deps = createDeps({ now: () => new Date("2025-01-11T00:00:00.000Z") });
     // Pre-create the .log/.msg.md files the in-memory fs only has .json from writeRunRecord.
@@ -1807,7 +2252,7 @@ describe("run-truth-batch: GC", () => {
     fs.writeFileSync("/home/test/.nolo/runs/old-running.log", "log");
     seedForGc(deps);
 
-    const result = gcRunRecords(deps);
+    const result = await gcRunRecords(deps);
     expect(result.swept).toBe(2);
     expect(result.sweptIds.sort()).toEqual(["old-done", "old-orphan"]);
 
@@ -1824,7 +2269,7 @@ describe("run-truth-batch: GC", () => {
 
   // A crash between writeFileSync(tmp) and renameSync strands a `.tmp` that
   // nothing else removes, so the runs dir would grow without bound.
-  test("GC sweeps abandoned publish temporaries but spares in-flight ones", () => {
+  test("GC sweeps abandoned publish temporaries but spares in-flight ones", async () => {
     const nowMs = new Date("2025-01-11T00:00:00.000Z").getTime();
     const deps = createDeps({ now: () => new Date(nowMs) });
     const fs = deps.fs as ReturnType<typeof createInMemoryFs>;
@@ -1834,14 +2279,14 @@ describe("run-truth-batch: GC", () => {
     fs.writeFileSync("/home/test/.nolo/runs/run-y.json.456.def.tmp", "{}");
     fs.setMtime("/home/test/.nolo/runs/run-y.json.456.def.tmp", nowMs - 1_000);
 
-    gcRunRecords(deps);
+    await gcRunRecords(deps);
 
     expect(fs.existsSync("/home/test/.nolo/runs/run-x.json.123.abc.tmp")).toBe(false);
     // Young enough to be someone's in-flight publish — must survive.
     expect(fs.existsSync("/home/test/.nolo/runs/run-y.json.456.def.tmp")).toBe(true);
   });
 
-  test("GC never sweeps non-terminal records regardless of age", () => {
+  test("GC never sweeps non-terminal records regardless of age", async () => {
     const deps = createDeps({ now: () => new Date("2025-12-31T00:00:00.000Z") });
     const fs = deps.fs!;
     fs.writeFileSync("/home/test/.nolo/runs/old-running.log", "log");
@@ -1849,12 +2294,12 @@ describe("run-truth-batch: GC", () => {
       { runId: "old-running", pid: 1, agentKey: "a", startedAt: "2024-01-01T00:00:00.000Z", status: "running", logPath: "/home/test/.nolo/runs/old-running.log" },
       deps
     );
-    const result = gcRunRecords(deps);
+    const result = await gcRunRecords(deps);
     expect(result.swept).toBe(0);
     expect(fs.existsSync("/home/test/.nolo/runs/old-running.json")).toBe(true);
   });
 
-  test("GC retention is injectable (deterministic for tests)", () => {
+  test("GC retention is injectable (deterministic for tests)", async () => {
     // With retention=0, all terminal records sweep immediately.
     const deps = createDeps({ now: () => new Date("2025-01-11T00:00:00.000Z") });
     const fs = deps.fs!;
@@ -1863,7 +2308,7 @@ describe("run-truth-batch: GC", () => {
       { runId: "t", agentKey: "a", startedAt: "2025-01-11T00:00:00.000Z", status: "done", endedAt: "2025-01-11T00:00:00.000Z", logPath: "/home/test/.nolo/runs/t.log" },
       deps
     );
-    const result = gcRunRecords(deps, { retentionMs: 0 });
+    const result = await gcRunRecords(deps, { retentionMs: 0 });
     expect(result.swept).toBe(1);
     expect(fs.existsSync("/home/test/.nolo/runs/t.json")).toBe(false);
   });
@@ -1934,7 +2379,7 @@ describe("run-truth-batch: GC", () => {
     expect(record?.pid).toBe(777);
   });
 
-  test("GC retains JSON and skips swept count when auxiliary file deletion fails", () => {
+  test("GC retains JSON and skips swept count when auxiliary file deletion fails", async () => {
     const deps = createDeps({ now: () => new Date("2025-01-11T00:00:00.000Z") });
     const baseFs = deps.fs!;
     baseFs.writeFileSync("/home/test/.nolo/runs/bad-log.log", "log");
@@ -1962,18 +2407,18 @@ describe("run-truth-batch: GC", () => {
       },
     };
 
-    const failedResult = gcRunRecords({ ...deps, fs: customFs });
+    const failedResult = await gcRunRecords({ ...deps, fs: customFs });
     expect(failedResult.swept).toBe(0);
     expect(failedResult.sweptIds).toEqual([]);
     expect(failedResult.failedIds).toEqual(["bad-log"]);
     expect(baseFs.existsSync("/home/test/.nolo/runs/bad-log.json")).toBe(true);
 
-    const retryResult = gcRunRecords(deps);
+    const retryResult = await gcRunRecords(deps);
     expect(retryResult).toEqual({ swept: 1, sweptIds: ["bad-log"], failedIds: [] });
     expect(baseFs.existsSync("/home/test/.nolo/runs/bad-log.json")).toBe(false);
   });
 
-  test("GC treats ENOENT on auxiliary file as success and successfully sweeps JSON", () => {
+  test("GC treats ENOENT on auxiliary file as success and successfully sweeps JSON", async () => {
     const deps = createDeps({ now: () => new Date("2025-01-11T00:00:00.000Z") });
     const fs = deps.fs!;
     writeRunRecord(
@@ -1988,10 +2433,39 @@ describe("run-truth-batch: GC", () => {
       deps
     );
 
-    const result = gcRunRecords(deps);
+    const result = await gcRunRecords(deps);
     expect(result.swept).toBe(1);
     expect(result.sweptIds).toEqual(["missing-log"]);
     expect(result.failedIds).toEqual([]);
     expect(fs.existsSync("/home/test/.nolo/runs/missing-log.json")).toBe(false);
+  });
+
+  test("GC sweeps queue file along with log and msg files under lock", async () => {
+    const deps = createDeps({ now: () => new Date("2025-01-11T00:00:00.000Z") });
+    const fs = deps.fs!;
+    const queuePath = "/home/test/.nolo/runs/run-with-q.queue.jsonl";
+    const logPath = "/home/test/.nolo/runs/run-with-q.log";
+    fs.writeFileSync(queuePath, "queue content");
+    fs.writeFileSync(logPath, "log content");
+
+    writeRunRecord(
+      {
+        runId: "run-with-q",
+        agentKey: "a",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "done",
+        endedAt: "2025-01-01T00:00:00.000Z",
+        logPath,
+        queuePath,
+      },
+      deps
+    );
+
+    const result = await gcRunRecords(deps);
+    expect(result.swept).toBe(1);
+    expect(result.sweptIds).toEqual(["run-with-q"]);
+    expect(fs.existsSync(queuePath)).toBe(false);
+    expect(fs.existsSync(logPath)).toBe(false);
+    expect(fs.existsSync("/home/test/.nolo/runs/run-with-q.json")).toBe(false);
   });
 });
