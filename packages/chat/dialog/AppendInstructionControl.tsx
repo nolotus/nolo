@@ -12,7 +12,9 @@ import {
   parseAppendInstructionResponse,
   resolveAppendInstructionMode,
 } from "./childRunObserverState";
-import "./ChildRunObserverPanel.css";
+import * as stylex from "@stylexjs/stylex";
+import { croStyles } from "./childRunObserverStyles";
+import "./dialogStylexEscapeHatch.css";
 
 export type AppendInstructionControlProps = {
   /** Target dialog key / id for the run. */
@@ -172,17 +174,26 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
 
   const showQueuedBadge = isEnqueue && typeof localQueued === "number" && localQueued > 0;
 
+  // stylex.props() 展开会覆盖其后位置的 className —— 外部 className prop
+  //（组件合并通道）与 StyleX 类名手动拼接，避免互相覆盖。
+  const rootStyleProps = stylex.props(croStyles.aic);
+  const rootClassName = className
+    ? `${rootStyleProps.className ?? ""} ${className}`.trim()
+    : rootStyleProps.className;
+
   return (
     <form
-      className={`AppendInstructionControl AppendInstructionControl--${mode} ${className}`.trim()}
+      data-hook={`dialog-esc-aic-root${mode === "continue" ? " dialog-esc-aic-continue" : ""}`}
+      {...rootStyleProps}
+      className={rootClassName}
       onSubmit={handleSubmit}
       data-testid="append-instruction-control"
       data-mode={mode}
     >
-      <div className="AppendInstructionControl__header">
+      <div {...stylex.props(croStyles.aicHeader)}>
         <label
           htmlFor={inputId}
-          className="AppendInstructionControl__label"
+          {...stylex.props(croStyles.aicLabel)}
         >
           {isEnqueue ? (
             <>
@@ -208,7 +219,7 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
         </label>
         {showQueuedBadge ? (
           <span
-            className="AppendInstructionControl__queuedBadge"
+            {...stylex.props(croStyles.aicQueuedBadge)}
             title={t(
               "childRunObserver.queuedCountTitle",
               "当前排队中的指令数",
@@ -225,11 +236,12 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
         ) : null}
       </div>
 
-      <div className="AppendInstructionControl__inputRow">
+      <div {...stylex.props(croStyles.aicInputRow)}>
         <input
           id={inputId}
           type="text"
-          className="AppendInstructionControl__input"
+          data-hook="dialog-esc-aic-input"
+          {...stylex.props(croStyles.aicInput)}
           value={input}
           onInput={(e) => setInput((e.target as HTMLInputElement).value)}
           onChange={(e) => setInput(e.target.value)}
@@ -240,14 +252,15 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
         />
         <button
           type="submit"
-          className="AppendInstructionControl__submit"
+          data-hook="dialog-esc-aic-submit"
+          {...stylex.props(croStyles.aicSubmit)}
           disabled={isSending || !input.trim()}
           aria-label={buttonLabel}
         >
           {isSending ? (
             <LuLoader
               size={13}
-              className="AppendInstructionControl__spinner"
+              {...stylex.props(croStyles.aicSpinner)}
               aria-hidden="true"
             />
           ) : isEnqueue ? (
@@ -265,7 +278,7 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
 
       {errorMessage ? (
         <div
-          className="AppendInstructionControl__error"
+          {...stylex.props(croStyles.aicError)}
           role="alert"
           aria-live="assertive"
         >
@@ -275,7 +288,7 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
 
       {successNotice ? (
         <div
-          className="AppendInstructionControl__success"
+          {...stylex.props(croStyles.aicSuccess)}
           role="status"
           aria-live="polite"
         >

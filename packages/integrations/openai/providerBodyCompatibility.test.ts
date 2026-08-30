@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import { FIREWORKS_KIMI_CURRENT_MODEL } from "ai/llm/kimi";
+import {
+  FIREWORKS_KIMI_CURRENT_MODEL,
+  PLATFORM_HOSTED_KIMI_K3_MODEL,
+  PLATFORM_HOSTED_KIMI_K26_MODEL,
+} from "ai/llm/kimi";
 import { normalizeChatCompletionsBodyForProvider } from "./providerBodyCompatibility";
 
 describe("normalizeChatCompletionsBodyForProvider", () => {
@@ -152,6 +156,78 @@ describe("normalizeChatCompletionsBodyForProvider", () => {
       }),
     ).toEqual({
       model: "kimi-k2.6",
+      messages: [{ role: "user", content: "hi" }],
+      temperature: 0.6,
+      max_tokens: 1024,
+    });
+  });
+
+  it("applies the K3 quirk to platform-hosted nolo requests (upstream crof)", () => {
+    // 线上事故复现：平台托管路径 provider 是 "nolo" 而非 "moonshot"，
+    // 判据只认 "moonshot" 时 quirk 完全不触发 → 不合规 body → 上游中途断流。
+    const body = {
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+      messages: [{ role: "user", content: "hi" }],
+      temperature: 0.7,
+      top_p: 0.9,
+      frequency_penalty: 0.5,
+      presence_penalty: 0.3,
+      max_tokens: 4096,
+      tool_choice: "auto",
+    };
+
+    const normalized = normalizeChatCompletionsBodyForProvider({
+      body,
+      provider: "nolo",
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+    });
+
+    expect(normalized).toEqual({
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+      messages: [{ role: "user", content: "hi" }],
+      max_completion_tokens: 4096,
+      tool_choice: "auto",
+    });
+    expect(normalized).not.toHaveProperty("temperature");
+    expect(normalized).not.toHaveProperty("top_p");
+    expect(normalized).not.toHaveProperty("frequency_penalty");
+    expect(normalized).not.toHaveProperty("presence_penalty");
+    expect(normalized).not.toHaveProperty("max_tokens");
+  });
+
+  it("applies the K3 quirk to legacy ollama-cloud hosted records", () => {
+    const normalized = normalizeChatCompletionsBodyForProvider({
+      body: {
+        model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+        messages: [{ role: "user", content: "hi" }],
+        temperature: 0.7,
+        max_tokens: 2048,
+      },
+      provider: "ollama-cloud",
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+    });
+
+    expect(normalized.max_completion_tokens).toBe(2048);
+    expect(normalized).not.toHaveProperty("max_tokens");
+    expect(normalized).not.toHaveProperty("temperature");
+  });
+
+  it("keeps sampling params for platform-hosted non-K3 models", () => {
+    const body = {
+      model: PLATFORM_HOSTED_KIMI_K26_MODEL,
+      messages: [{ role: "user", content: "hi" }],
+      temperature: 0.6,
+      max_tokens: 1024,
+    };
+
+    expect(
+      normalizeChatCompletionsBodyForProvider({
+        body,
+        provider: "nolo",
+        model: PLATFORM_HOSTED_KIMI_K26_MODEL,
+      }),
+    ).toEqual({
+      model: PLATFORM_HOSTED_KIMI_K26_MODEL,
       messages: [{ role: "user", content: "hi" }],
       temperature: 0.6,
       max_tokens: 1024,

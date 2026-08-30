@@ -1,4 +1,6 @@
-import "../sidebar.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "../sidebarStyles";
+import "../chatStylexEscapeHatch.css";
 import React, { useRef, useCallback, useState } from "react";
 import { useLocation, useParams, useNavigate } from "app/routing";
 
@@ -217,8 +219,10 @@ const CategorySection: React.FC<CategorySectionProps> = ({
     <>
       <div
         className={sectionClasses}
+        data-hook="chat-esc-category-section"
         onDragOver={handleSectionDragOver}
         onDragLeave={handleSectionDragLeave}
+        {...stylex.props(sidebarStyles.categorySection)}
       >
         {!hideHeader && (
           <CategoryHeader
@@ -233,12 +237,21 @@ const CategorySection: React.FC<CategorySectionProps> = ({
           className={`CategorySection__content-wrapper ${
             isCollapsed ? "CategorySection__content-wrapper--collapsed" : ""
           }`}
+          data-hook={`chat-esc-category-wrapper ${
+            isCollapsed ? "chat-esc-category-collapsed" : ""
+          }`}
           style={{ overflow: items.length === 0 ? "visible" : undefined }}
+          {...stylex.props(
+            sidebarStyles.categoryContentWrapper,
+            isCollapsed && sidebarStyles.categoryContentWrapperCollapsed
+          )}
         >
           {items.length > 0 ? (
             <div
               className="CategorySection__content-inner"
+              data-hook="chat-esc-category-inner"
               style={{ overflow: "hidden" }}
+              {...stylex.props(sidebarStyles.categoryContentInner)}
             >
               <SidebarVirtualizedList
                 items={flatRows}

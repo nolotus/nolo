@@ -10,7 +10,8 @@ describe("CommandPalette source contract", () => {
   const paletteSource = read("CommandPalette.tsx");
   const sidebarPaletteSource = read("SidebarCommandPalette.tsx");
   const entriesSource = read("sidebarCommandPaletteEntries.ts");
-  const css = read("CommandPalette.css");
+  const styles = read("commandPaletteStyles.ts");
+  const hatch = read("../chatStylexEscapeHatch.css");
 
   it("uses RAC Autocomplete + ModalOverlay shell with mod+k", () => {
     expect(paletteSource).toContain("ModalOverlay");
@@ -20,10 +21,10 @@ describe("CommandPalette source contract", () => {
     expect(paletteSource).toContain('COMMAND_PALETTE_SHORTCUT = "mod+k"');
     expect(paletteSource).toContain("onInputChange");
     expect(paletteSource).toContain("footer");
-    expect(css).toContain(".command-palette-dialog");
-    expect(css).toContain(".command-palette-section-header");
-    expect(css).toContain(".command-palette-footer");
-    expect(css).toContain(".command-palette-spinner");
+    expect(styles).toContain("dialog:");
+    expect(hatch).toContain("chat-esc-cp-section-header");
+    expect(styles).toContain("footer:");
+    expect(hatch).toContain("chat-esc-cp-spinner");
   });
 
   it("sidebar palette aggregates favorites/spaces/content/public agents", () => {
@@ -41,7 +42,7 @@ describe("CommandPalette source contract", () => {
     expect(sidebarPaletteSource).toContain(
       "collectExcludedContentKeys(favoriteItems)",
     );
-    expect(sidebarPaletteSource).toContain("command-palette-footer");
+    expect(sidebarPaletteSource).toContain("chat-esc-cp-footer-hint");
     expect(sidebarPaletteSource).toContain("command_palette_hint_navigate");
     expect(entriesSource).toContain("SIDEBAR_PALETTE_IDLE_LIMITS");
     expect(entriesSource).toContain("publicAgents: 0");

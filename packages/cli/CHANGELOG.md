@@ -1,4 +1,14 @@
 
+## 0.38.0-alpha.4
+
+## 0.38.0-alpha.4 (2026-08-30)
+
+### Bug Fixes
+
+* **agent-runtime:** 平台 Responses 线误发 stream_options.include_usage 致上游 400 ([86c2d6a](https://github.com/nolotus/bun-nolo/commit/86c2d6abdec191c19521d4a2392f3f6dd90fd459))
+* **agent:** 平台托管 K3 本地直连 quirk 缺失与 usage provider 双出口统一 ([853dbdd](https://github.com/nolotus/bun-nolo/commit/853dbdd5ec477c39a39816319c3f2a833181f7e7))
+
+
 ## 0.38.0-alpha.3
 
 ## 0.38.0-alpha.3 (2026-08-30)

@@ -30,6 +30,7 @@ import {
 } from "./toolCallAccumulator";
 import { sanitizeForOutbound } from "./outboundHistorySanitize";
 import { buildResponsesRequestBody } from "../integrations/openai/responsesRequestBody";
+import { normalizeChatCompletionsBodyForProvider } from "../integrations/openai/providerBodyCompatibility";
 import {
   extractReasoningFromResponseOutput,
   extractTextFromResponseOutput,
@@ -47,6 +48,12 @@ export type OpenAiCompatibleProviderConfig = {
   provider: string;
   requestOptions: Record<string, number | string>;
   wire?: "responses" | "chat.completions";
+  /**
+   * runinfra / google…）；对外 provider 语义仍是 "nolo"——计费归属与错误分类
+   * 锚定平台，与 server 侧 loopUpstream 的 primaryProvider vs
+   * primaryUsageProvider 是同一组概念。
+   */
+  usageProvider?: string;
 };
 
 type OpenAiCompatibleTool = Record<string, unknown>;
@@ -96,13 +103,24 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
     ...args.providerConfig.requestOptions,
     ...(args.tools && args.tools.length > 0 ? { tools: args.tools } : {}),
     ...(!isResponses && args.stream
-      ? getUsageRequestOptions(args.providerConfig.provider, { api: "chat-completions" })
+      // usage 白名单必须按真实上游名查询（platformChatProvider 同理）：平台
+      // 托管 remap 后 provider 仍是 "nolo"，不在白名单里，查 "nolo" 会丢
+      // include_usage → 上游不回终结 usage 帧 → 本地路径同样计费漏账。
+      ? getUsageRequestOptions(args.providerConfig.usageProvider ?? args.providerConfig.provider, { api: "chat-completions" })
       : {}),
   };
 
+  // chat.completions wire 必须过共享 per-provider body quirk 判定，与 server
+  // 要求删除采样参数并把 max_tokens 改名 max_completion_tokens；本地直连不过
+  // 这道判定会发出不合规 body，上游中途断流且照常扣费。responses wire 与
+  // server 一致不走该判定（buildResponsesRequestBody 自成一体）。
   const body = isResponses
     ? buildResponsesRequestBody(rawBody, args.providerConfig.model)
-    : rawBody;
+    : normalizeChatCompletionsBodyForProvider({
+        body: rawBody,
+        provider: args.providerConfig.provider,
+        model: args.providerConfig.model,
+      });
 
   const endpoint = args.providerConfig.endpoint;
   const headers: Record<string, string> = {

@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { useTranslation } from "react-i18next";
 import { LuMic, LuMicOff, LuPhone, LuPhoneOff } from "react-icons/lu";
-import "./LiveVoicePanel.css";
+import { liveVoicePanelStyles } from "./liveVoicePanelStyles";
+import "./chatStylexEscapeHatch.css";
 
 /**
  * Status values aligned with the server's LiveVoiceStatus type:
@@ -182,14 +184,14 @@ export const LiveVoicePanel: React.FC<LiveVoicePanelProps> = ({ agentId, dialogI
   const isActive = status === "listening" || status === "thinking" || status === "speaking";
 
   return (
-    <div className="live-voice-panel">
-      <div className="live-voice-header">
-        <LuPhone className="live-voice-pulse-icon" aria-hidden="true" />
+    <div {...stylex.props(liveVoicePanelStyles.panel)}>
+      <div {...stylex.props(liveVoicePanelStyles.header)}>
+        <LuPhone {...stylex.props(liveVoicePanelStyles.pulseIcon)} aria-hidden="true" />
         <span className="status-text">{statusLabel}</span>
       </div>
       {errorMessage && status === "disconnected" ? (
         <div
-          className="live-voice-error"
+          {...stylex.props(liveVoicePanelStyles.error)}
           role="status"
           aria-live="polite"
           title={errorMessage}
@@ -197,22 +199,27 @@ export const LiveVoicePanel: React.FC<LiveVoicePanelProps> = ({ agentId, dialogI
           {errorMessage}
         </div>
       ) : null}
-      <div className="waveform-container">
+      <div {...stylex.props(liveVoicePanelStyles.waveformContainer)}>
         {isActive && !isMuted ? (
-          <div className="waveform-animation" aria-hidden="true">
-            <span className="bar"></span>
-            <span className="bar"></span>
-            <span className="bar"></span>
-            <span className="bar"></span>
-            <span className="bar"></span>
+          <div
+            data-hook="chat-esc-lv-bars"
+            {...stylex.props(liveVoicePanelStyles.waveformAnimation)}
+            aria-hidden="true"
+          >
+            <span data-hook="chat-esc-lv-bar" {...stylex.props(liveVoicePanelStyles.bar)}></span>
+            <span data-hook="chat-esc-lv-bar" {...stylex.props(liveVoicePanelStyles.bar)}></span>
+            <span data-hook="chat-esc-lv-bar" {...stylex.props(liveVoicePanelStyles.bar)}></span>
+            <span data-hook="chat-esc-lv-bar" {...stylex.props(liveVoicePanelStyles.bar)}></span>
+            <span data-hook="chat-esc-lv-bar" {...stylex.props(liveVoicePanelStyles.bar)}></span>
           </div>
         ) : (
-          <div className="waveform-idle" aria-hidden="true" />
+          <div {...stylex.props(liveVoicePanelStyles.waveformIdle)} aria-hidden="true" />
         )}
       </div>
-      <div className="live-voice-controls">
+      <div {...stylex.props(liveVoicePanelStyles.controls)}>
         <button
-          className={`control-btn ${isMuted ? "muted" : ""}`}
+          data-hook={`chat-esc-lv-control-btn${isMuted ? " chat-esc-lv-control-muted" : ""}`}
+          {...stylex.props(liveVoicePanelStyles.controlBtn)}
           onClick={() => setIsMuted((muted) => !muted)}
           title={isMuted ? t("liveVoice.unmute", "Unmute") : t("liveVoice.mute", "Mute")}
           aria-label={isMuted ? t("liveVoice.unmute", "Unmute") : t("liveVoice.mute", "Mute")}
@@ -221,7 +228,8 @@ export const LiveVoicePanel: React.FC<LiveVoicePanelProps> = ({ agentId, dialogI
           {isMuted ? <LuMicOff aria-hidden="true" /> : <LuMic aria-hidden="true" />}
         </button>
         <button
-          className="control-btn hangup"
+          data-hook="chat-esc-lv-control-btn chat-esc-lv-control-hangup"
+          {...stylex.props(liveVoicePanelStyles.controlBtn)}
           onClick={onClose}
           title={t("liveVoice.hangUp", "Hang up")}
           aria-label={t("liveVoice.hangUp", "Hang up")}

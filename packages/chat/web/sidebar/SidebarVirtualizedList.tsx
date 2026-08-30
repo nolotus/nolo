@@ -8,6 +8,9 @@
 // every row and the optimization is lost.
 
 import React from "react";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "../sidebarStyles";
+import "../chatStylexEscapeHatch.css";
 import {
   ListBox,
   ListBoxItem,
@@ -135,6 +138,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
         ref={listRef}
         aria-label="Sidebar items"
         className="SidebarVirtualizedList__scroller"
+        data-hook="chat-esc-sidebar-scroller"
         items={items}
         dependencies={dependencies}
         onAction={onAction}
@@ -143,6 +147,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
         selectedKeys={selectedKeys as any}
         onSelectionChange={onSelectionChange}
         style={{ height }}
+        {...stylex.props(sidebarStyles.scroller)}
       >
         {(item: T) => (
           <ListBoxItem

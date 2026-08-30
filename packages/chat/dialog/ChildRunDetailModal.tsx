@@ -19,7 +19,9 @@ import {
   type ChildRunStatusLabels,
 } from "./childRunObserverState";
 import { AppendInstructionControl } from "./AppendInstructionControl";
-import "./ChildRunObserverPanel.css";
+import * as stylex from "@stylexjs/stylex";
+import { croStyles } from "./childRunObserverStyles";
+import "./dialogStylexEscapeHatch.css";
 
 type ChildRunDetailModalProps = {
   isOpen: boolean;
@@ -161,33 +163,34 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
       showClose
       bodyClassName="ChildRunDetailModal__body"
     >
-      <div className="ChildRunDetailModal__meta">
+      <div {...stylex.props(croStyles.modalMeta)}>
         <span>
-          {t("childRunObserver.detailStatus")} <strong>{statusLabel}</strong>
+          {t("childRunObserver.detailStatus")} <strong {...stylex.props(croStyles.modalMetaStrong)}>{statusLabel}</strong>
         </span>
         <span>
-          {t("childRunObserver.detailAgent")} <strong>{thread.primaryAgentKey}</strong>
+          {t("childRunObserver.detailAgent")} <strong {...stylex.props(croStyles.modalMetaStrong)}>{thread.primaryAgentKey}</strong>
         </span>
         {thread.threadId ? (
           <span>
-            {t("childRunObserver.detailThread")} <strong>{thread.threadId}</strong>
+            {t("childRunObserver.detailThread")} <strong {...stylex.props(croStyles.modalMetaStrong)}>{thread.threadId}</strong>
           </span>
         ) : null}
       </div>
 
-      <div className="ChildRunDetailModal__evidence" role="status">
+      <div {...stylex.props(croStyles.modalEvidence)} role="status">
         {evidenceLine}
       </div>
 
       {loadState === "loading" ? (
-        <div className="ChildRunDetailModal__state" role="status" aria-live="polite">
+        <div {...stylex.props(croStyles.modalState)} role="status" aria-live="polite">
           {t("childRunObserver.detailLoading")}
         </div>
       ) : null}
 
       {loadState === "error" ? (
         <div
-          className="ChildRunDetailModal__state ChildRunDetailModal__state--error"
+          data-hook="dialog-esc-cdm-state-error"
+          {...stylex.props(croStyles.modalState)}
           role="alert"
         >
           {errorMessage || t("childRunObserver.detailLoadFailed")}
@@ -195,27 +198,28 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
       ) : null}
 
       {loadState === "ready" && messages.length === 0 ? (
-        <div className="ChildRunDetailModal__state" role="status">
+        <div {...stylex.props(croStyles.modalState)} role="status">
           {t("childRunObserver.detailEmpty")}
         </div>
       ) : null}
 
       {messages.length > 0 ? (
         <div
-          className="ChildRunDetailModal__messages"
+          {...stylex.props(croStyles.modalMessages)}
           aria-label={t("childRunObserver.messagesAriaLabel")}
         >
           {messages.map((message) => (
-            <article key={message.id} className="ChildRunDetailModal__message">
-              <div className="ChildRunDetailModal__messageRole">
+            <article key={message.id} {...stylex.props(croStyles.modalMessage)}>
+              <div {...stylex.props(croStyles.modalMessageRole)}>
                 {message.role || "message"}
               </div>
               <div
-                className={
+                data-hook={
                   message.content
-                    ? "ChildRunDetailModal__messageBody"
-                    : "ChildRunDetailModal__messageBody ChildRunDetailModal__messageBody--empty"
+                    ? undefined
+                    : "dialog-esc-cdm-message-body-empty"
                 }
+                {...stylex.props(croStyles.modalMessageBody)}
               >
                 {message.content || t("childRunObserver.emptyContent")}
               </div>
@@ -224,7 +228,7 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
         </div>
       ) : null}
 
-      <div className="ChildRunDetailModal__footer">
+      <div {...stylex.props(croStyles.modalFooter)}>
         <AppendInstructionControl
           dialogKey={resolveAppendDialogKey(thread)}
           status={dialogStatus ?? thread.status}

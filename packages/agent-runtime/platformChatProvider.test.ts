@@ -1006,3 +1006,98 @@ describe("platform chat SSE streaming reader (子目标 A)", () => {
     expect(result.stream_complete).toBe(true);
   });
 });
+
+describe("platform chat provider usage whitelist seam (real upstream name)", () => {
+  test("proxy payload requests include_usage via the real upstream name for hosted K3", async () => {
+    const providerConfig = await resolvePlatformChatProviderConfig({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: { NOLO_SERVER: "https://nolo.chat", AUTH_TOKEN: "token" },
+    });
+
+    // 对外语义仍是 nolo（计费归属不变）；白名单查询用真实上游名 crof。
+    expect(providerConfig.provider).toBe("nolo");
+    expect(providerConfig.usageProvider).toBe("crof");
+
+    const body = JSON.parse(
+      String(
+        buildPlatformChatCompletionRequest({
+          providerConfig,
+          messages: [{ role: "user", content: "hi" }],
+          stream: true,
+        }).init.body,
+      ),
+    );
+    expect(body.stream_options).toEqual({ include_usage: true });
+  });
+
+  test("non-hosted provider config has no usageProvider and gains no usage fields", async () => {
+    const providerConfig = await resolvePlatformChatProviderConfig({
+      // moonshot：有平台 chat.completions 端点、但不在 usage 白名单
+      agentConfig: { key: "agent-moonshot", provider: "moonshot", model: "kimi-k2.6" },
+      env: { NOLO_SERVER: "https://nolo.chat", AUTH_TOKEN: "token" },
+    });
+
+    expect(providerConfig.usageProvider).toBeUndefined();
+
+    const body = JSON.parse(
+      String(
+        buildPlatformChatCompletionRequest({
+          providerConfig,
+          messages: [{ role: "user", content: "hi" }],
+          stream: true,
+        }).init.body,
+      ),
+    );
+    expect(body).not.toHaveProperty("stream_options");
+  });
+
+  test("Responses wire (hosted GPT-5.6 Luna) gains no chat-completions stream_options", async () => {
+    const providerConfig = await resolvePlatformChatProviderConfig({
+      agentConfig: { key: "agent-luna", provider: "openai", model: "gpt-5.6-luna" },
+      env: { NOLO_SERVER: "https://nolo.chat", AUTH_TOKEN: "token" },
+    });
+
+    expect(providerConfig.endpoint).toBe("https://api.openai.com/v1/responses");
+
+    const body = JSON.parse(
+      String(
+        buildPlatformChatCompletionRequest({
+          providerConfig,
+          messages: [{ role: "user", content: "hi" }],
+          stream: true,
+        }).init.body,
+      ),
+    );
+    // openai 命中 STREAM_USAGE_PROVIDERS 白名单，但 Responses 线绝不携带
+    // chat.completions 专属的 stream_options——OpenAI 会直接 400
+    // Unknown parameter: 'stream_options.include_usage'（Luna 通道故障回归点）。
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.messages).toBeUndefined();
+    expect(body.stream_options).toBeUndefined();
+    expect(body).not.toHaveProperty("usage");
+  });
+
+  test("chat.completions wire with a whitelisted openai upstream still requests include_usage", () => {
+    const body = JSON.parse(
+      String(
+        buildPlatformChatCompletionRequest({
+          providerConfig: {
+            serverUrl: "https://nolo.chat",
+            authToken: "token",
+            agentKey: "agent-openai-completions",
+            model: "gpt-5.6-luna",
+            provider: "openai",
+            endpoint: "https://api.openai.com/v1/chat/completions",
+            requestOptions: {},
+          },
+          messages: [{ role: "user", content: "hi" }],
+          stream: true,
+        }).init.body,
+      ),
+    );
+    // 既有行为回归保护：白名单语义只按线格式分流，chat.completions 线照常
+    // 请求终结 usage 帧，不得被 Responses 修复误伤。
+    expect(Array.isArray(body.messages)).toBe(true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+  });
+});

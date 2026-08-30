@@ -1,7 +1,6 @@
 // 纯展示组件，无 Redux/action 依赖，供游客/分享页使用
 // 复用 ToolMessageItem 中已导出的 StatusIcon、safeParse、cssCore
-import "./messages.css";
-import "./ReadOnlyToolMessageItem.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { memo, useMemo, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { StatusIcon, safeParse } from "./toolMessageShared";
@@ -17,6 +16,9 @@ import {
   resolveToolDisplayName,
 } from "./toolDisplayName";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
+import { readOnlyToolMessageItemStyles as roStyles } from "./readOnlyToolMessageItemStyles";
+import { messagesStyles } from "./messagesStyles";
+import "./messagesStylexEscapeHatch.css";
 
 /** Button reset so `.tr-header` keeps layout when used as `<button>`. */
 const TR_HEADER_BUTTON_STYLE: React.CSSProperties = {
@@ -72,33 +74,41 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
     });
 
     return (
-      <div className={`tool-msg-row tool-msg-row--handoff ${statusStr} ${collapsed ? "is-collapsed" : ""}`}>
+      <div
+        className={["tool-msg-row", statusStr, collapsed ? "is-collapsed" : ""].filter(Boolean).join(" ")}
+        {...stylex.props(messagesStyles.toolMsgRow, roStyles.rowHandoff)}
+      >
         <button
           type="button"
           className="tr-header"
+          {...stylex.props(messagesStyles.trHeader)}
           style={TR_HEADER_BUTTON_STYLE}
           onClick={() => setCollapsed((p) => !p)}
           aria-expanded={!collapsed}
         >
-          <div className="tr-main">
-            <div className={`tr-icon ${statusStr}`}>
+          <div className="tr-main" {...stylex.props(messagesStyles.trMain)}>
+            <div
+              className={`tr-icon ${statusStr}`}
+              {...stylex.props(messagesStyles.trIcon)}
+            >
               <StatusIcon status={statusStr} toolName={toolName} />
             </div>
-            <span className="tr-summary u-truncate">{handoff.summary}</span>
+            <span className="tr-summary u-truncate" {...stylex.props(messagesStyles.trSummary)}>{handoff.summary}</span>
           </div>
-          <div className="tr-chevron" aria-hidden="true">
+          <div className="tr-chevron" {...stylex.props(messagesStyles.trChevron)} aria-hidden="true">
             {collapsed ? <LuChevronRight size={14} aria-hidden="true" /> : <LuChevronDown size={14} aria-hidden="true" />}
           </div>
         </button>
 
         {!collapsed && (
-          <div className="tr-body handoff-tool__body">
+          <div className="tr-body handoff-tool__body" {...stylex.props(messagesStyles.trBody, roStyles.handoffBody)}>
             {!handoff.inline && (
-              <div className="handoff-tool__detail-row">
-                <span className="handoff-tool__label">子 dialog</span>
+              <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
+                <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>子 dialog</span>
                 {handoff.targetDialogKey ? (
                   <a
                     className="handoff-tool__link"
+                    {...stylex.props(roStyles.handoffLink)}
                     href={buildDialogUrl(
                       handoff.targetDialogKey,
                       handoff.targetSpaceId
@@ -107,26 +117,27 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
                     打开对话
                   </a>
                 ) : (
-                  <span className="handoff-tool__value">未单独创建</span>
+                  <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>未单独创建</span>
                 )}
               </div>
             )}
-            <div className="handoff-tool__detail-row">
-              <span className="handoff-tool__label">目标 Agent</span>
+            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
+              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>目标 Agent</span>
               <span
                 className="handoff-tool__value"
+                {...stylex.props(roStyles.handoffValue)}
                 title={handoff.agentKey || undefined}
               >
                 {handoff.targetLabel}
               </span>
             </div>
-            <div className="handoff-tool__detail-row">
-              <span className="handoff-tool__label">输入摘要</span>
-              <span className="handoff-tool__value">{handoff.inputSummary}</span>
+            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
+              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>输入摘要</span>
+              <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>{handoff.inputSummary}</span>
             </div>
-            <div className="handoff-tool__detail-row">
-              <span className="handoff-tool__label">状态</span>
-              <span className="handoff-tool__value">{handoff.statusLabel}</span>
+            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
+              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>状态</span>
+              <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>{handoff.statusLabel}</span>
             </div>
           </div>
         )}
@@ -136,27 +147,34 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
   if (toolName === "ask_user" || rawData?.type === "ask_user") return null;
 
   return (
-    <div className={`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`}>
+    <div
+      className={`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`}
+      {...stylex.props(messagesStyles.toolMsgRow)}
+    >
       <button
         type="button"
         className="tr-header"
+        {...stylex.props(messagesStyles.trHeader)}
         style={TR_HEADER_BUTTON_STYLE}
         onClick={() => setCollapsed((p) => !p)}
         aria-expanded={!collapsed}
       >
-        <div className="tr-main">
-          <div className={`tr-icon ${statusStr}`}>
+        <div className="tr-main" {...stylex.props(messagesStyles.trMain)}>
+          <div
+            className={`tr-icon ${statusStr}`}
+            {...stylex.props(messagesStyles.trIcon)}
+          >
             <StatusIcon status={statusStr} toolName={toolName} />
           </div>
-          <span className="tr-summary u-truncate">{displaySummary}</span>
+          <span className="tr-summary u-truncate" {...stylex.props(messagesStyles.trSummary)}>{displaySummary}</span>
         </div>
-        <div className="tr-chevron" aria-hidden="true">
+        <div className="tr-chevron" {...stylex.props(messagesStyles.trChevron)} aria-hidden="true">
           {collapsed ? <LuChevronRight size={14} aria-hidden="true" /> : <LuChevronDown size={14} aria-hidden="true" />}
         </div>
       </button>
 
       {!collapsed && (
-        <div className="tr-body">
+        <div className="tr-body" {...stylex.props(messagesStyles.trBody)}>
           <ToolMessageContent
             toolName={toolName}
             rawData={rawData}

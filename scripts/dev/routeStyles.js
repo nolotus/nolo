@@ -32,7 +32,6 @@ export const ROUTE_STYLE_FILES = [
   [
     [
       "packages/app/pages/ShareImportPage.css",
-      "packages/chat/messages/web/MessageLayout.css",
       "packages/app/pages/share/DocImportView.css",
       "packages/app/pages/share/ImportBar.css",
     ],

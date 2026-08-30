@@ -25,6 +25,8 @@ import {
 } from "create/space/sidebarItemShared";
 import { Header, MenuItem, MenuSection } from "render/web/ui/Menu";
 import Kbd from "render/web/ui/Kbd";
+import * as stylex from "@stylexjs/stylex";
+import { commandPaletteStyles as cpStyles } from "./commandPaletteStyles";
 import { CommandPalette } from "./CommandPalette";
 import {
   buildContentPaletteEntries,
@@ -54,36 +56,36 @@ const resolveContentIcon = (entry: Extract<SidebarPaletteEntry, { kind: "content
 const PaletteEntryItem = ({ entry }: { entry: SidebarPaletteEntry }) => {
   if (entry.kind === "space") {
     return (
-      <MenuItem id={entry.id} textValue={entry.textValue} className="command-palette-item">
+      <MenuItem id={entry.id} textValue={entry.textValue} data-hook="chat-esc-cp-item">
         <LuBoxes size={16} aria-hidden="true" />
-        <span slot="label" className="command-palette-item-label">
+        <span slot="label" {...stylex.props(cpStyles.itemLabel)}>
           {entry.title}
         </span>
-        <span className="command-palette-item-meta">{entry.meta}</span>
+        <span {...stylex.props(cpStyles.itemMeta)}>{entry.meta}</span>
       </MenuItem>
     );
   }
 
   if (entry.kind === "public-agent") {
     return (
-      <MenuItem id={entry.id} textValue={entry.textValue} className="command-palette-item">
+      <MenuItem id={entry.id} textValue={entry.textValue} data-hook="chat-esc-cp-item">
         <LuBot size={16} aria-hidden="true" />
-        <span slot="label" className="command-palette-item-label">
+        <span slot="label" {...stylex.props(cpStyles.itemLabel)}>
           {entry.title}
         </span>
-        <span className="command-palette-item-meta">{entry.meta}</span>
+        <span {...stylex.props(cpStyles.itemMeta)}>{entry.meta}</span>
       </MenuItem>
     );
   }
 
   const Icon = entry.section === "favorites" ? LuStar : resolveContentIcon(entry);
   return (
-    <MenuItem id={entry.id} textValue={entry.textValue} className="command-palette-item">
+    <MenuItem id={entry.id} textValue={entry.textValue} data-hook="chat-esc-cp-item">
       <Icon size={16} aria-hidden="true" />
-      <span slot="label" className="command-palette-item-label">
+      <span slot="label" {...stylex.props(cpStyles.itemLabel)}>
         {entry.title}
       </span>
-      <span className="command-palette-item-meta">{entry.meta}</span>
+      <span {...stylex.props(cpStyles.itemMeta)}>{entry.meta}</span>
     </MenuItem>
   );
 };
@@ -314,16 +316,16 @@ export function SidebarCommandPalette({
         aria-label={t("common:search", "搜索")}
         footer={
           <>
-            <span className="command-palette-footer-hint">
+            <span {...stylex.props(cpStyles.footerHint)} data-hook="chat-esc-cp-footer-hint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd>
               {t("command_palette_hint_navigate", "导航")}
             </span>
-            <span className="command-palette-footer-hint">
+            <span {...stylex.props(cpStyles.footerHint)} data-hook="chat-esc-cp-footer-hint">
               <Kbd>Enter</Kbd>
               {t("command_palette_hint_open", "打开")}
             </span>
-            <span className="command-palette-footer-hint">
+            <span {...stylex.props(cpStyles.footerHint)} data-hook="chat-esc-cp-footer-hint">
               <Kbd>Esc</Kbd>
               {t("command_palette_hint_close", "关闭")}
             </span>
@@ -340,9 +342,9 @@ export function SidebarCommandPalette({
             <MenuSection
               key={section.id}
               id={section.id}
-              className="command-palette-section"
+              {...stylex.props(cpStyles.section)}
             >
-              <Header className="command-palette-section-header">
+              <Header data-hook="chat-esc-cp-section-header">
                 {section.title}
               </Header>
               {section.entries.map((entry) => (
@@ -353,14 +355,15 @@ export function SidebarCommandPalette({
                   id="public-agents-loading"
                   textValue={t("command_palette_loading_plaza", "正在加载 AI 广场")}
                   isDisabled
-                  className="command-palette-item command-palette-item--status"
+                  data-hook="chat-esc-cp-item chat-esc-cp-item-status"
                 >
                   <LuLoaderCircle
                     size={16}
                     aria-hidden="true"
-                    className="command-palette-spinner"
+                    data-hook="chat-esc-cp-spinner"
+                    {...stylex.props(cpStyles.spinner)}
                   />
-                  <span slot="label" className="command-palette-item-label">
+                  <span slot="label" {...stylex.props(cpStyles.itemLabel)}>
                     {t("command_palette_loading_plaza", "正在加载 AI 广场…")}
                   </span>
                 </MenuItem>

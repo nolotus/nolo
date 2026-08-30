@@ -16,9 +16,9 @@ describe("TodoCard (HTML DOM Render Verification)", () => {
     const html = renderToString(<TodoCard rawData={rawData} />);
 
     // 视觉 DOM 根容器与基础 CSS Class 断言
-    expect(html).toContain("chat-todo-card");
-    expect(html).toContain("chat-todo-progress-bar-bg");
-    expect(html).toContain("chat-todo-progress-text");
+    expect(html).toContain('data-testid="chat-todo-card"');
+    expect(html).toContain('data-testid="chat-todo-progress-bar-bg"');
+    expect(html).toContain('data-testid="chat-todo-progress-text"');
 
     // Todo 标题与渲染文本断言
     expect(html).toContain("Task 1 completed");
@@ -26,9 +26,9 @@ describe("TodoCard (HTML DOM Render Verification)", () => {
     expect(html).toContain("Task 3 pending");
 
     // 状态标记 CSS 类与元素结构断言
-    expect(html).toContain("status-done");
-    expect(html).toContain("status-in_progress");
-    expect(html).toContain("status-pending");
+    expect(html).toContain('data-status="done"');
+    expect(html).toContain('data-status="in_progress"');
+    expect(html).toContain('data-status="pending"');
 
     // 进度与百分比渲染断言 (1 / 3, 33%)
     expect(html).toContain("33%");
@@ -40,14 +40,14 @@ describe("TodoCard (HTML DOM Render Verification)", () => {
     });
 
     const html = renderToString(<TodoCard rawData={rawData} />);
-    expect(html).toContain("chat-todo-card");
+    expect(html).toContain('data-testid="chat-todo-card"');
     expect(html).toContain("Stringified Task");
-    expect(html).toContain("status-done");
+    expect(html).toContain('data-status="done"');
   });
 
   it("renders empty state card when todos is empty", () => {
     const html = renderToString(<TodoCard rawData={{ todos: [] }} />);
-    expect(html).toContain("chat-todo-card");
+    expect(html).toContain('data-testid="chat-todo-card"');
     expect(html).toContain("已清空");
   });
 });

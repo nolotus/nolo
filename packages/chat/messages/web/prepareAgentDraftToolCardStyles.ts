@@ -1,0 +1,197 @@
+import * as stylex from "@stylexjs/stylex";
+
+/**
+ * PrepareAgentDraftToolCard 样式 —— StyleX 迁移
+ * （自原 PrepareAgentDraftToolCard.css 1:1 迁出）
+ */
+export const prepareAgentDraftToolCardStyles = stylex.create({
+  card: {
+    alignItems: "flex-start",
+    background: "var(--backgroundSecondary, #f8fafc)",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #e2e8f0)))",
+    borderRadius: "var(--radius-xs)",
+    display: "flex",
+    flexDirection: {
+      default: "row",
+      "@media (max-width: 640px)": "column",
+    },
+    gap: 12,
+    maxWidth: 720,
+    padding: 14,
+  },
+  icon: {
+    alignItems: "center",
+    background: "var(--primary, #2563eb)",
+    borderRadius: "var(--radius-xs)",
+    color: "var(--primaryText, #ffffff)",
+    display: "flex",
+    flex: "0 0 36px",
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  body: {
+    flex: 1,
+    minWidth: 0,
+  },
+  header: {
+    alignItems: "flex-start",
+    display: "flex",
+    gap: 10,
+    justifyContent: "space-between",
+  },
+  eyebrow: {
+    color: "var(--textSecondary, #64748b)",
+    fontSize: 12,
+    lineHeight: 1.2,
+  },
+  title: {
+    color: "var(--text, #0f172a)",
+    fontSize: 15,
+    lineHeight: 1.3,
+    marginTop: 2,
+    marginBottom: 0,
+  },
+  status: {
+    background: "var(--accentSubtle, rgba(14, 165, 233, 0.14))",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, rgba(14, 165, 233, 0.2)))",
+    borderRadius: 999,
+    color: "var(--accentText, var(--text, #075985))",
+    flex: "0 0 auto",
+    fontSize: 12,
+    lineHeight: 1,
+    paddingTop: 5,
+    paddingBottom: 5,
+    paddingLeft: 8,
+    paddingRight: 8,
+  },
+  summary: {
+    color: "var(--text, #1e293b)",
+    fontSize: 13,
+    lineHeight: 1.5,
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  meta: {
+    color: "var(--textSecondary, #64748b)",
+    display: "flex",
+    flexWrap: "wrap",
+    fontSize: 12,
+    gap: 12,
+    marginTop: 10,
+  },
+  metaItem: {
+    alignItems: "center",
+    display: "inline-flex",
+    gap: 4,
+  },
+  missing: {
+    background: "var(--surfaceInset, rgba(15, 23, 42, 0.04))",
+    borderRadius: "var(--radius-xs)",
+    color: "var(--textSecondary, #475569)",
+    fontSize: 12,
+    lineHeight: 1.4,
+    marginTop: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingLeft: 10,
+    paddingRight: 10,
+  },
+  hint: {
+    alignItems: "center",
+    color: "var(--textSecondary, #64748b)",
+    display: "flex",
+    fontSize: 12,
+    gap: 6,
+    lineHeight: 1.4,
+    marginTop: 10,
+  },
+  hintIcon: {
+    flex: "0 0 auto",
+  },
+  actions: {
+    alignItems: "stretch",
+    display: "flex",
+    flex: "0 0 auto",
+    flexDirection: {
+      default: "column",
+      "@media (max-width: 640px)": "row",
+    },
+    gap: 8,
+    justifyContent: "flex-start",
+    width: {
+      default: "auto",
+      "@media (max-width: 640px)": "100%",
+    },
+  },
+  action: {
+    alignItems: "center",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "transparent",
+    borderRadius: "var(--radius-xs)",
+    cursor: "pointer",
+    display: "inline-flex",
+    fontSize: 12,
+    fontWeight: 500,
+    gap: 6,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingTop: 6,
+    paddingBottom: 6,
+    paddingLeft: 12,
+    paddingRight: 12,
+    textDecoration: "none",
+    transition: "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease",
+    whiteSpace: "nowrap",
+    flex: {
+      default: "none",
+      "@media (max-width: 640px)": "1 1 0",
+    },
+  },
+  actionPrimary: {
+    background: {
+      default: "var(--primary, #2563eb)",
+      ":hover": "var(--primaryHover, #1d4ed8)",
+    },
+    borderColor: {
+      default: "var(--primary, #2563eb)",
+      ":hover": "var(--primaryHover, #1d4ed8)",
+    },
+    color: "var(--primaryText, #ffffff)",
+  },
+  actionPrimaryDisabled: {
+    cursor: "not-allowed",
+    opacity: 0.6,
+  },
+  actionSecondary: {
+    background: {
+      default: "var(--surfaceInteractive, var(--background, #ffffff))",
+      ":hover": "var(--surfaceInteractiveHover, var(--backgroundSecondary, #f1f5f9))",
+    },
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight, var(--border, #cbd5e1)))",
+      ":hover": "var(--borderSubtle, #94a3b8)",
+    },
+    color: "var(--text, #0f172a)",
+  },
+  actionPanel: {
+    background: {
+      default: "color-mix(in srgb, var(--primary, #2563eb) 10%, transparent)",
+      ":hover": "color-mix(in srgb, var(--primary, #2563eb) 16%, transparent)",
+    },
+    borderColor: {
+      default: "color-mix(in srgb, var(--primary, #2563eb) 24%, transparent)",
+      ":hover": "color-mix(in srgb, var(--primary, #2563eb) 36%, transparent)",
+    },
+    color: "var(--primary, #2563eb)",
+  },
+  actionPanelActive: {
+    background: "color-mix(in srgb, var(--primary, #2563eb) 18%, transparent)",
+    borderColor: "var(--primary, #2563eb)",
+  },
+});

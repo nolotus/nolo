@@ -615,3 +615,71 @@ describe("provider resolution", () => {
   });
 
 });
+
+describe("platform hosted usage provider in execution plans (local runtime)", () => {
+  const DIRECT_ENV = {
+    NOLO_LOCAL_LLM: "direct",
+    NOLO_LOCAL_OPENAI_API_KEY: "local-openai-key",
+  };
+
+  test("direct plan carries the real upstream id while provider stays nolo (K3 → crof)", async () => {
+    const plan = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3" },
+      env: DIRECT_ENV,
+      runtimeKind: "local",
+    });
+
+    expect(plan.mode).toBe("platform");
+    expect(plan).toMatchObject({ transport: "direct" });
+    const direct = plan as DirectProviderExecutionPlan;
+    // 对外 provider 语义不变：计费归属与错误分类锚定平台。
+    expect(direct.provider).toBe("nolo");
+    // usage 白名单按真实上游名查询，否则 include_usage 被丢 → 本地路径漏账。
+    expect(direct.usageProvider).toBe("crof");
+  });
+
+  test("maps GLM Flash to runinfra and Gemini to google", async () => {
+    const glmFlash = (await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-glmf", provider: "nolo", model: "glm-5-3-flash" },
+      env: DIRECT_ENV,
+      runtimeKind: "local",
+    })) as DirectProviderExecutionPlan;
+    expect(glmFlash.usageProvider).toBe("runinfra");
+
+    const gemini = (await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-gem", provider: "nolo", model: "gemini-3.7-flash" },
+      env: DIRECT_ENV,
+      runtimeKind: "local",
+    })) as DirectProviderExecutionPlan;
+    expect(gemini.usageProvider).toBe("google");
+  });
+
+  test("proxy plan carries the same usage provider for hosted models", async () => {
+    const plan = await buildProviderExecutionPlan({
+      agentConfig: { key: "agent-k3", provider: "nolo", model: "kimi-k3", apiSource: "platform" },
+      env: { NOLO_SERVER: "https://nolo.chat", AUTH_TOKEN: "token" },
+      runtimeKind: "local",
+    });
+
+    expect(plan).toMatchObject({ transport: "proxy", provider: "nolo" });
+    expect((plan as typeof plan & { usageProvider?: string }).usageProvider).toBe("crof");
+  });
+
+  test("custom agents get no usageProvider (user-brought provider behavior unchanged)", async () => {
+    const plan = (await buildProviderExecutionPlan({
+      agentConfig: {
+        key: "agent-custom",
+        apiSource: "custom",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        customProviderUrl: "https://api.deepseek.com/v1",
+      },
+      env: {},
+      runtimeKind: "local",
+    })) as DirectProviderExecutionPlan;
+
+    expect(plan.mode).toBe("custom");
+    expect(plan.transport).toBe("direct");
+    expect(plan.usageProvider).toBeUndefined();
+  });
+});

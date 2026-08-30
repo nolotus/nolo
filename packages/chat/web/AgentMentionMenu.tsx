@@ -1,6 +1,8 @@
 // 文件路径: packages/chat/web/AgentMentionMenu.tsx
 
-import "./message-input.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import React, { memo, useEffect, useRef } from "react";
 
 export type FavoriteAgentSummary = {
@@ -16,7 +18,6 @@ interface AgentMentionMenuProps {
   onSelect: (agent: FavoriteAgentSummary) => void;
   onHover?: (index: number) => void;
 }
-
 
 /**
  * 只负责展示：收藏 Agent 的 @ 下拉菜单
@@ -74,21 +75,33 @@ const AgentMentionMenuComponent: React.FC<AgentMentionMenuProps> = ({
 
   return (
     <>
-
-      <div className="message-input__mentions" ref={containerRef}>
+      <div
+        className="message-input__mentions"
+        ref={containerRef}
+        {...stylex.props(messageInputStyles.mentions)}
+      >
         {headerText && (
-          <div className="message-input__mentions-header">{headerText}</div>
+          <div
+            className="message-input__mentions-header"
+            {...stylex.props(messageInputStyles.mentionsHeader)}
+          >
+            {headerText}
+          </div>
         )}
 
-        <ul className="message-input__mentions-list">
+        <ul
+          className="message-input__mentions-list"
+          {...stylex.props(messageInputStyles.mentionsList)}
+        >
           {agents.map((agent, index) => {
             const isActive = index === highlightIndex;
 
             return (
               <li
                 key={agent.agentKey}
-                className={`message-input__mentions-item${isActive ? " is-active" : ""
-                  }`}
+                className={`message-input__mentions-item${
+                  isActive ? " is-active" : ""
+                }`}
                 onMouseDown={(event) => {
                   // 阻止 textarea 失焦
                   event.preventDefault();
@@ -97,8 +110,15 @@ const AgentMentionMenuComponent: React.FC<AgentMentionMenuProps> = ({
                 onMouseEnter={() => {
                   if (onHover) onHover(index);
                 }}
+                {...stylex.props(
+                  messageInputStyles.mentionsItem,
+                  isActive && messageInputStyles.mentionsItemActive
+                )}
               >
-                <span className="message-input__mentions-item-name">
+                <span
+                  className="message-input__mentions-item-name"
+                  {...stylex.props(messageInputStyles.mentionsItemName)}
+                >
                   {agent.name}
                 </span>
               </li>

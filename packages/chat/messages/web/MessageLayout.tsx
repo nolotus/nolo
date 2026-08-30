@@ -1,11 +1,13 @@
 // 纯布局组件：仅负责 message 的桌面/移动端骨架
 // 通过 slots（content / actions / confirmBar）支持不同场景组合
-import "./MessageLayout.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { memo } from "react";
 import { LuTerminal } from "react-icons/lu";
 import Avatar from "render/web/ui/Avatar";
 import { StreamingPendingIndicator } from "./StreamingPendingIndicator";
 import { useActionsHoverPin } from "../../hooks/useActionsHoverPin";
+import { messageLayoutStyles as styles } from "./messageLayoutStyles";
+import "./messagesStylexEscapeHatch.css";
 
 export interface MessageLayoutProps {
   isRobot: boolean;
@@ -97,9 +99,11 @@ export const MessageLayout = memo(
       onMouseLeave: onActionsLeave,
     } = useActionsHoverPin(Boolean(actions) && !isTouch);
 
+    const isSelf = type === "self";
+
     const avatarDesktop = (
-      <div className="avatar-area">
-        <div className="avatar-wrapper">
+      <div className="avatar-area" {...stylex.props(styles.avatarArea)}>
+        <div className="avatar-wrapper" {...stylex.props(styles.avatarWrapper)}>
           <Avatar
             name={displayName}
             type={isRobot ? "agent" : "user"}
@@ -109,7 +113,10 @@ export const MessageLayout = memo(
             onClick={isRobot ? (onAvatarClick as any) : undefined}
           />
           {isRobot && isStreaming && !hasVisibleContent && (
-            <div className="avatar-indicator-pos">
+            <div
+              className="avatar-indicator-pos"
+              {...stylex.props(styles.avatarIndicatorPos)}
+            >
               <StreamingPendingIndicator size="sm" />
             </div>
           )}
@@ -118,10 +125,16 @@ export const MessageLayout = memo(
     );
 
     const robotName = isRobot && displayName && (
-      <div className={`robot-name${isTouch ? " mobile" : ""}`}>
+      <div
+        className={`robot-name${isTouch ? " mobile" : ""}`}
+        {...stylex.props(
+          styles.robotName,
+          isTouch && styles.robotNameMobile
+        )}
+      >
         {displayName}
         {isCliAgent && (
-          <span className="cli-badge">
+          <span className="cli-badge" {...stylex.props(styles.cliBadge)}>
             <LuTerminal size={isTouch ? 10 : 11} aria-hidden="true" />
             CLI
           </span>
@@ -140,6 +153,11 @@ export const MessageLayout = memo(
           ]
             .filter(Boolean)
             .join(" ")}
+          {...stylex.props(
+            styles.msg,
+            isSelf ? styles.msgSelf : null,
+            showActions ? styles.msgHover : null
+          )}
           data-message-id={messageId}
           onClick={onClick}
           onTouchStart={onTouchStart}
@@ -157,32 +175,72 @@ export const MessageLayout = memo(
               ]
                 .filter(Boolean)
                 .join(" ")}
+              data-hook={[
+                "messages-esc-msg-hover-target",
+                isActionsHover ? "messages-esc-is-actions-hover" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              {...stylex.props(styles.msgInnerDesktop)}
               onMouseEnter={onActionsEnter}
               onMouseLeave={onActionsLeave}
             >
               {/* Avatar + bubble only — actions are a sibling BELOW this row
                   so they never participate in avatar vertical alignment. */}
-              <div className="msg-bubble-row">
+              <div
+                className="msg-bubble-row"
+                {...stylex.props(
+                  styles.msgBubbleRow,
+                  isSelf && styles.msgBubbleRowSelf
+                )}
+              >
                 {avatarDesktop}
-                <div className="content-area">
+                <div
+                  className="content-area"
+                  {...stylex.props(
+                    styles.contentArea,
+                    isSelf ? styles.contentAreaSelf : styles.contentAreaRobot
+                  )}
+                >
                   {robotName}
-                  <div className={`msg-body ${type}`}>
+                  <div
+                    className={`msg-body ${type}`}
+                    data-hook="messages-esc-msg-body"
+                    {...stylex.props(
+                      styles.msgBody,
+                      isSelf ? styles.msgBodySelf : styles.msgBodyRobot
+                    )}
+                  >
                     {content}
                     {confirmBar}
                   </div>
                 </div>
               </div>
               {actions && (
-                <div className="msg-actions-below">{actions}</div>
+                <div
+                  className="msg-actions-below"
+                  {...stylex.props(
+                    styles.msgActionsBelow,
+                    isSelf && styles.msgActionsBelowSelf
+                  )}
+                >
+                  {actions}
+                </div>
               )}
             </div>
           )}
 
           {/* ── 移动端 ── */}
           {isTouch && (
-            <div className="msg-inner mobile">
-              <div className="msg-header">
-                <div className="avatar-wrapper">
+            <div
+              className="msg-inner mobile"
+              {...stylex.props(styles.msgInnerMobile)}
+            >
+              <div className="msg-header" {...stylex.props(styles.msgHeader)}>
+                <div
+                  className="avatar-wrapper"
+                  {...stylex.props(styles.avatarWrapper)}
+                >
                   <Avatar
                     name={displayName}
                     type={isRobot ? "agent" : "user"}
@@ -192,15 +250,32 @@ export const MessageLayout = memo(
                     onClick={isRobot ? (onAvatarClick as any) : undefined}
                   />
                   {isRobot && isStreaming && !hasVisibleContent && (
-                    <div className="avatar-indicator-pos mobile">
+                    <div
+                      className="avatar-indicator-pos mobile"
+                      {...stylex.props(
+                        styles.avatarIndicatorPos,
+                        styles.avatarIndicatorPosMobile
+                      )}
+                    >
                       <StreamingPendingIndicator size="sm" />
                     </div>
                   )}
                 </div>
                 {robotName}
               </div>
-              <div className="content-area mobile">
-                <div className={`msg-body ${type} mobile`}>
+              <div
+                className="content-area mobile"
+                {...stylex.props(styles.contentArea, styles.contentAreaMobile)}
+              >
+                <div
+                  className={`msg-body ${type} mobile`}
+                  data-hook="messages-esc-msg-body"
+                  {...stylex.props(
+                    styles.msgBody,
+                    isSelf ? styles.msgBodySelf : styles.msgBodyRobot,
+                    isSelf ? styles.msgBodySelfMobile : styles.msgBodyRobotMobile
+                  )}
+                >
                   {content}
                   {confirmBar}
                 </div>

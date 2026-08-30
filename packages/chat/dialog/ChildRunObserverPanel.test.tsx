@@ -347,11 +347,11 @@ describe("ChildRunObserverPanel", () => {
   ) => {
     await waitFor(() => {
       expect(
-        container.querySelector("button.ChildRunObserverPanel__collapsedRail"),
+        container.querySelector('button[data-hook~="dialog-esc-cro-collapsed-rail"]'),
       ).toBeTruthy();
     });
     const rail = container.querySelector(
-      "button.ChildRunObserverPanel__collapsedRail",
+      'button[data-hook~="dialog-esc-cro-collapsed-rail"]',
     ) as HTMLButtonElement;
     await click(rail);
   };
@@ -407,9 +407,9 @@ describe("ChildRunObserverPanel", () => {
           ),
         ).toBe(true);
       });
-      expect(container.querySelector(".ChildRunObserverPanel")).toBeNull();
+      expect(container.querySelector("aside[aria-label=\"Child runs\"]")).toBeNull();
       expect(
-        container.querySelector(".ChildRunObserverPanel__collapsedRail"),
+        container.querySelector('button[data-hook~="dialog-esc-cro-collapsed-rail"]'),
       ).toBeNull();
       expect(container.textContent).not.toContain("startAgentRun (async dispatch)");
     } finally {
@@ -427,10 +427,10 @@ describe("ChildRunObserverPanel", () => {
     try {
       await waitFor(() => {
         expect(
-          container.querySelector("button.ChildRunObserverPanel__collapsedRail"),
+          container.querySelector('button[data-hook~="dialog-esc-cro-collapsed-rail"]'),
         ).toBeTruthy();
       });
-      expect(container.querySelector(".ChildRunObserverPanel")).toBeNull();
+      expect(container.querySelector("aside[aria-label=\"Child runs\"]")).toBeNull();
       expect(container.textContent).not.toContain("Research subtask");
 
       await expandPanel(container, click);
@@ -439,7 +439,7 @@ describe("ChildRunObserverPanel", () => {
       });
 
       const collapse = Array.from(
-        container.querySelectorAll("button.ChildRunObserverPanel__iconButton"),
+        container.querySelectorAll('button[data-hook~="dialog-esc-cro-icon-button"]'),
       ).find((btn) =>
         (btn.getAttribute("aria-label") || "").includes("Collapse"),
       ) as HTMLButtonElement | undefined;
@@ -448,10 +448,10 @@ describe("ChildRunObserverPanel", () => {
 
       await waitFor(() => {
         expect(
-          container.querySelector("button.ChildRunObserverPanel__collapsedRail"),
+          container.querySelector('button[data-hook~="dialog-esc-cro-collapsed-rail"]'),
         ).toBeTruthy();
       });
-      expect(container.querySelector(".ChildRunObserverPanel")).toBeNull();
+      expect(container.querySelector("aside[aria-label=\"Child runs\"]")).toBeNull();
     } finally {
       await cleanup();
     }
@@ -491,7 +491,7 @@ describe("ChildRunObserverPanel", () => {
       });
 
       const buttons = Array.from(
-        container.querySelectorAll("button.ChildRunObserverPanel__item"),
+        container.querySelectorAll('button[data-hook~="dialog-esc-cro-item"]'),
       ) as HTMLButtonElement[];
       expect(buttons.length).toBeGreaterThan(0);
       await click(buttons[0]!);
@@ -500,7 +500,7 @@ describe("ChildRunObserverPanel", () => {
         expect(container.textContent).toContain("still working");
         expect(container.textContent).toContain("do research");
         expect(
-          container.querySelector(".AppendInstructionControl[data-mode='enqueue']"),
+          container.querySelector("[data-testid='append-instruction-control'][data-mode='enqueue']"),
         ).not.toBeNull();
       });
     } finally {

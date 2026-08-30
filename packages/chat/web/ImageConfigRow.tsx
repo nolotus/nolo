@@ -1,6 +1,8 @@
 // 文件路径: packages/chat/web/ImageConfigRow.tsx
 
-import "./message-input.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Select, SelectItem } from "render/web/ui/Select";
@@ -28,7 +30,6 @@ interface ImageConfigRowProps {
   onImageSizeChange: (value?: ImageSizeKey) => void;
   onImageProfileChange: (value?: "speed" | "quality") => void;
 }
-
 
 const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
   aspectRatio,
@@ -75,7 +76,11 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
 
   return (
     <>
-      <div className="image-config-row" data-testid="image-config-row">
+      <div
+        className="image-config-row"
+        data-testid="image-config-row"
+        {...stylex.props(messageInputStyles.imageConfigRow)}
+      >
         <span>{t("imageOptionsLabel", "生成图片设置")}</span>
 
         {imageProfiles.length > 0 && (
@@ -85,6 +90,7 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
               handleImageProfileChange(key == null ? "" : String(key))
             }
             className="image-config-row__select"
+            {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem
               id=""
@@ -121,6 +127,7 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
               handleAspectRatioChange(key == null ? "" : String(key))
             }
             className="image-config-row__select"
+            {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem id="" textValue={t("imageAspectDefault", "比例: 默认")}>
               {t("imageAspectDefault", "比例: 默认")}
@@ -140,6 +147,7 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
               handleImageSizeChange(key == null ? "" : String(key))
             }
             className="image-config-row__select"
+            {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem id="" textValue={t("imageSizeDefault", "清晰度: 默认")}>
               {t("imageSizeDefault", "清晰度: 默认")}

@@ -6,8 +6,8 @@ const streamingTextSource = readFileSync(
   join(import.meta.dir, "StreamingMessageText.tsx"),
   "utf-8"
 );
-const messageLayoutCssSource = readFileSync(
-  join(import.meta.dir, "MessageLayout.css"),
+const messageLayoutStylesSource = readFileSync(
+  join(import.meta.dir, "messageLayoutStyles.ts"),
   "utf-8"
 );
 const streamingRevealSource = readFileSync(
@@ -28,7 +28,7 @@ describe("StreamingMessageText source contract", () => {
     expect(streamingRevealSource).toContain("Intl.Segmenter");
     expect(streamingTextSource).toContain("streaming-message-text__char");
     expect(streamingTextSource).toContain("streaming-message-text__cursor");
-    expect(messageLayoutCssSource).toContain("white-space: pre-wrap");
+    expect(messageLayoutStylesSource).toContain('whiteSpace: "pre-wrap"');
   });
 
   it("renders structured markdown during streaming instead of leaving raw markers until completion", () => {

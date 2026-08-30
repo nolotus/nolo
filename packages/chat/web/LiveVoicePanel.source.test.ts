@@ -76,7 +76,7 @@ describe("LiveVoicePanel error handling (source)", () => {
   it("handles server error events and surfaces the message", () => {
     expect(panelSource).toContain('msg.type === "error"');
     expect(panelSource).toContain("setErrorMessage");
-    expect(panelSource).toContain('className="live-voice-error"');
+    expect(panelSource).toContain("liveVoicePanelStyles.error");
   });
 
   it("logs websocket errors with agent and dialog context", () => {

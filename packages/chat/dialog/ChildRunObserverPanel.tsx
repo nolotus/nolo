@@ -23,7 +23,9 @@ import {
   shouldPollChildRuns,
   type ChildRunStatusLabels,
 } from "./childRunObserverState";
-import "./ChildRunObserverPanel.css";
+import * as stylex from "@stylexjs/stylex";
+import { croStyles } from "./childRunObserverStyles";
+import "./dialogStylexEscapeHatch.css";
 
 export type ChildRunObserverPanelProps = {
   /** Parent/root dialog id used as parentThreadId filter. */
@@ -210,18 +212,19 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
       <>
         <button
           type="button"
-          className="ChildRunObserverPanel__collapsedRail"
+          data-hook="dialog-esc-cro-collapsed-rail"
+          {...stylex.props(croStyles.collapsedRail)}
           onClick={() => setIsExpanded(true)}
           aria-expanded={false}
           aria-label={t("childRunObserver.expandAriaLabel")}
           title={t("childRunObserver.expandTitle")}
         >
           <LuActivity size={14} aria-hidden="true" />
-          <span className="ChildRunObserverPanel__collapsedLabel">
+          <span {...stylex.props(croStyles.collapsedLabel)}>
             {t("childRunObserver.title")}
           </span>
           {threads.length > 0 ? (
-            <span className="ChildRunObserverPanel__collapsedCount">
+            <span {...stylex.props(croStyles.collapsedCount)}>
               {threads.length}
             </span>
           ) : null}
@@ -235,25 +238,26 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
   return (
     <>
       <aside
-        className="ChildRunObserverPanel"
+        {...stylex.props(croStyles.panel)}
         aria-label={t("childRunObserver.panelAriaLabel")}
       >
-        <div className="ChildRunObserverPanel__header">
-          <div className="ChildRunObserverPanel__titleWrap">
-            <div className="ChildRunObserverPanel__title">
+        <div {...stylex.props(croStyles.header)}>
+          <div {...stylex.props(croStyles.titleWrap)}>
+            <div {...stylex.props(croStyles.title)}>
               <LuActivity size={14} aria-hidden="true" />
               <span>{t("childRunObserver.title")}</span>
             </div>
-            <div className="ChildRunObserverPanel__subtitle">
+            <div {...stylex.props(croStyles.subtitle)}>
               {hasLoadedOnce
                 ? t("childRunObserver.subtitleCount", { count: threads.length })
                 : t("childRunObserver.subtitleLoading")}
             </div>
           </div>
-          <div className="ChildRunObserverPanel__headerActions">
+          <div {...stylex.props(croStyles.headerActions)}>
             <button
               type="button"
-              className="ChildRunObserverPanel__iconButton"
+              data-hook="dialog-esc-cro-icon-button"
+              {...stylex.props(croStyles.iconButton)}
               onClick={() => void fetchChildRuns()}
               disabled={isLoading}
               aria-label={t("childRunObserver.refreshAriaLabel")}
@@ -263,7 +267,8 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
             </button>
             <button
               type="button"
-              className="ChildRunObserverPanel__iconButton"
+              data-hook="dialog-esc-cro-icon-button"
+              {...stylex.props(croStyles.iconButton)}
               onClick={() => setIsExpanded(false)}
               aria-expanded={true}
               aria-label={t("childRunObserver.collapseAriaLabel")}
@@ -274,10 +279,10 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
           </div>
         </div>
 
-        <div className="ChildRunObserverPanel__body">
+        <div {...stylex.props(croStyles.body)}>
           {loadState === "loading" ? (
             <div
-              className="ChildRunObserverPanel__state"
+              {...stylex.props(croStyles.state)}
               role="status"
               aria-live="polite"
             >
@@ -287,13 +292,15 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
 
           {loadState === "error" ? (
             <div
-              className="ChildRunObserverPanel__state ChildRunObserverPanel__state--error"
+              data-hook="dialog-esc-cro-state-error"
+              {...stylex.props(croStyles.state)}
               role="alert"
             >
               <div>{errorMessage || t("childRunObserver.loadFailed")}</div>
               <button
                 type="button"
-                className="ChildRunObserverPanel__retry"
+                data-hook="dialog-esc-cro-retry"
+                {...stylex.props(croStyles.retry)}
                 onClick={() => void fetchChildRuns()}
               >
                 {t("childRunObserver.retry")}
@@ -302,44 +309,58 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
           ) : null}
 
           {loadState === "empty" ? (
-            <div className="ChildRunObserverPanel__state" role="status">
+            <div {...stylex.props(croStyles.state)} role="status">
               {t("childRunObserver.empty")}
             </div>
           ) : null}
 
           {loadState === "ready" || (threads.length > 0 && loadState !== "loading") ? (
-            <ul className="ChildRunObserverPanel__list">
+            <ul {...stylex.props(croStyles.list)}>
               {threads.map((thread) => {
                 const status = thread.status;
-                const statusClass = `ChildRunObserverPanel__status ChildRunObserverPanel__status--${status}`;
+                // 原变体类 `__status--${status}` 仅以下 5 个有 CSS 规则，
+                // 其余状态（unknown 等）无规则，退回基础样式。
+                const statusVariant =
+                  status === "running"
+                    ? croStyles.statusRunning
+                    : status === "pending"
+                    ? croStyles.statusPending
+                    : status === "done"
+                    ? croStyles.statusDone
+                    : status === "failed"
+                    ? croStyles.statusFailed
+                    : status === "cancelled"
+                    ? croStyles.statusCancelled
+                    : undefined;
                 return (
                   <li key={thread.threadId}>
                     <button
                       type="button"
-                      className="ChildRunObserverPanel__item"
+                      data-hook="dialog-esc-cro-item"
+                      {...stylex.props(croStyles.item)}
                       onClick={() => openChild(thread)}
                     >
-                      <div className="ChildRunObserverPanel__itemMain">
-                        <span className="ChildRunObserverPanel__itemTitle">
+                      <div {...stylex.props(croStyles.itemMain)}>
+                        <span {...stylex.props(croStyles.itemTitle)}>
                           {resolveChildRunTitle(thread, untitledLabel)}
                         </span>
-                        <div className="ChildRunObserverPanel__badges">
+                        <div {...stylex.props(croStyles.badges)}>
                           {typeof thread.queued === "number" && thread.queued > 0 ? (
-                            <span className="ChildRunObserverPanel__queuedPill">
+                            <span {...stylex.props(croStyles.queuedPill)}>
                               {t("childRunObserver.queuedCount", "{{count}} 条排队中", {
                                 count: thread.queued,
                               })}
                             </span>
                           ) : null}
-                          <span className={statusClass}>
+                          <span {...stylex.props(croStyles.status, statusVariant)}>
                             {formatChildRunStatusLabel(status, statusLabels)}
                           </span>
                         </div>
                       </div>
-                      <div className="ChildRunObserverPanel__agent">
+                      <div {...stylex.props(croStyles.agent)}>
                         {thread.primaryAgentKey}
                       </div>
-                      <div className="ChildRunObserverPanel__evidence">
+                      <div {...stylex.props(croStyles.evidence)}>
                         {formatChildRunEvidenceLine(
                           thread.runtimeEvidence,
                           status,

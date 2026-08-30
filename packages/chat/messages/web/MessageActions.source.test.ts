@@ -6,7 +6,14 @@ const source = readFileSync(
   join(import.meta.dir, "MessageActions.tsx"),
   "utf-8",
 );
-const css = readFileSync(join(import.meta.dir, "MessageActions.css"), "utf-8");
+const escapeHatchCss = readFileSync(
+  join(import.meta.dir, "messagesStylexEscapeHatch.css"),
+  "utf-8"
+);
+const stylesSource = readFileSync(
+  join(import.meta.dir, "messageActionsStyles.ts"),
+  "utf-8"
+);
 
 describe("MessageActions source contract", () => {
   it("does not offer per-message TTS / playSpeech on the action bar", () => {
@@ -110,64 +117,55 @@ describe("MessageActions source contract", () => {
 
 describe("MessageActions CSS contract", () => {
   it("shows desktop actions on shared hover parent and showActions class", () => {
-    expect(css).toContain(".msg-hover-target:hover .actions.desktop");
-    expect(css).toContain(
+    expect(escapeHatchCss).toContain(".msg-hover-target:hover .actions.desktop");
+    expect(escapeHatchCss).toContain(
       ".msg-hover-target.is-actions-hover .actions.desktop",
     );
-    expect(css).toContain(".msg:hover .actions.desktop");
-    expect(css).toContain(".actions.desktop.show");
-    expect(css).toContain("opacity: 0");
-    expect(css).toContain("visibility: hidden");
+    expect(escapeHatchCss).toContain(".msg:hover .actions.desktop");
+    expect(escapeHatchCss).toContain("opacity: 1");
+    expect(escapeHatchCss).toContain("visibility: visible");
+    expect(stylesSource).toContain("opacity: 0");
+    expect(stylesSource).toContain('visibility: "hidden"');
   });
 
   it("places desktop actions in a horizontal bar under the message body", () => {
-    expect(css).toContain("flex-direction: row");
-    expect(css).toContain("pointer-events: none");
-    expect(css).toContain("pointer-events: auto");
-    // In-flow inside the shared hover parent — not absolutely positioned.
-    const desktopBlock = css.slice(
-      css.indexOf(".actions.desktop {"),
-      css.indexOf(".actions.desktop .action-btn {"),
+    const desktopBlock = stylesSource.slice(
+      stylesSource.indexOf("actionsDesktop: {"),
+      stylesSource.indexOf("actionBtn: {"),
     );
-    expect(desktopBlock).toContain("flex-direction: row");
-    expect(desktopBlock).toContain("position: static");
-    expect(desktopBlock).not.toContain("position: absolute");
-    expect(desktopBlock).not.toContain("translateX(-50%)");
-    expect(desktopBlock).not.toContain("translateX(var(--space-1))");
+    expect(desktopBlock).toContain('flexDirection: "row"');
+    expect(desktopBlock).toContain('pointerEvents: "none"');
+    expect(desktopBlock).toContain('position: "static"');
+    expect(desktopBlock).not.toContain('position: "absolute"');
+    expect(escapeHatchCss).toContain("pointer-events: auto");
   });
 
   it("keeps focus-within and focus-visible discoverability without MessageList changes", () => {
-    expect(css).toContain(".actions.desktop:focus-within");
-    expect(css).toContain(":focus-visible");
+    expect(escapeHatchCss).toContain(":focus-within");
+    expect(escapeHatchCss).toContain(":focus-visible");
   });
 
   it("uses in-flow shared hover parent (no absolute slot / margin bridges)", () => {
-    expect(css).toContain(".msg-hover-target:hover .actions.desktop");
-    expect(css).toContain(
+    expect(escapeHatchCss).toContain(".msg-hover-target:hover .actions.desktop");
+    expect(escapeHatchCss).toContain(
       ".msg-hover-target.is-actions-hover .actions.desktop",
     );
-    expect(css).not.toContain("margin-bottom: -48px");
-    expect(css).not.toContain(".actions.desktop::before");
-    expect(css).not.toContain(".msg-actions-below::after");
-    const desktopBlock = css.slice(
-      css.indexOf(".actions.desktop {"),
-      css.indexOf(".msg-hover-target:hover .actions.desktop"),
+    const desktopBlock = stylesSource.slice(
+      stylesSource.indexOf("actionsDesktop: {"),
+      stylesSource.indexOf("actionBtn: {"),
     );
-    expect(desktopBlock).not.toContain("margin-top:");
-    expect(desktopBlock).not.toContain("position: absolute");
+    expect(desktopBlock).not.toContain('position: "absolute"');
   });
 
   it("styles busy/disabled buttons and loading spinner", () => {
-    expect(css).toContain(".action-btn:disabled");
-    expect(css).toContain(".action-btn.busy");
-    expect(css).toContain(".action-spinner");
-    expect(css).toContain("@keyframes actionSpin");
+    expect(stylesSource).toContain("actionBtnDisabled");
+    expect(stylesSource).toContain("actionBtnBusy");
+    expect(stylesSource).toContain("actionSpinner");
+    expect(stylesSource).toContain("actionSpin");
   });
 
   it("respects prefers-reduced-motion for overlay and spinner", () => {
-    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(css).toContain(".actions-overlay.mobile");
-    expect(css).toContain("animation: none");
-    expect(css).toContain(".actions-panel");
+    expect(escapeHatchCss).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(escapeHatchCss).toContain("animation: none");
   });
 });

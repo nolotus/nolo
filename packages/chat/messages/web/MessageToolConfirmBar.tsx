@@ -1,4 +1,4 @@
-import "./MessageToolConfirmBar.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppSelector, useAppDispatch } from "app/store";
@@ -11,6 +11,8 @@ import {
   shouldShowToolMessageConfirmBanner,
   translateGateTitle,
 } from "chat/toolConfirmPolicy";
+import { messageToolConfirmBarStyles as styles } from "./messageToolConfirmBarStyles";
+import "./messagesStylexEscapeHatch.css";
 
 interface MessageToolConfirmBarProps {
   messageId?: string;
@@ -104,10 +106,19 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
 
   return (
     <>
-      <div className="tool-confirm-row">
+      <div
+      className="tool-confirm-row"
+      {...stylex.props(styles.row)}
+      data-testid="tool-confirm-row"
+    >
         <button
           type="button"
           className="tool-confirm-button"
+          data-hook="messages-esc-tool-confirm-button"
+          {...stylex.props(
+            styles.button,
+            buttonDisabled && styles.buttonDisabled
+          )}
           onClick={handleConfirmExecute}
           disabled={buttonDisabled}
         >
@@ -118,6 +129,12 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
             className={`tool-confirm-status ${
               statusClass === "success" ? "success" : "failed"
             }`}
+            {...stylex.props(
+              styles.status,
+              statusClass === "success"
+                ? styles.statusSuccess
+                : styles.statusFailed
+            )}
           >
             {statusText}
           </div>

@@ -28,5 +28,10 @@ export function buildResponsesRequestBody(
     max_tokens: undefined,
     reasoning_effort: undefined,
     tool_choice: undefined,
+    // stream_options 是 chat.completions 专属参数；客户端按 chat 线构建的 body
+    // 携带它（旧版本 runtime 或 wire 分流窗口期）经此处转 Responses 上游时必须
+    // 剥离，否则 OpenAI 直接 400 Unknown parameter: 'stream_options.include_usage'。
+    // Responses 线天然在流末返回 usage，无需 include_usage。
+    stream_options: undefined,
   };
 }

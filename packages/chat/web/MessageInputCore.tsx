@@ -1,8 +1,10 @@
 // packages/chat/web/MessageInputCore.tsx
 // Composer assembly: text/IME/mention, panels, controls, send/delete hooks.
 
-import "./message-input.css";
-import "./chatInputCard.css";
+import * as stylex from "@stylexjs/stylex";
+import { chatInputCardStyles } from "./chatInputCardStyles";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import React, {
   useCallback,
   useRef,
@@ -864,8 +866,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           processingCount > 0 ? "message-input--processing" : ""
         }`}
         style={composerVtStyle}
+        {...stylex.props(messageInputStyles.container)}
       >
-        <div className="message-input__wrapper">
+        <div
+          className="message-input__wrapper"
+          {...stylex.props(messageInputStyles.wrapper)}
+        >
           <BrowseContextIndicator />
           <MessageInputAttachmentsPanel
             imagePreviews={imgPreviews as PendingImagePreview[]}
@@ -905,7 +911,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           )}
 
           {pastedBlocks.length > 0 && (
-            <div className="message-input__paste-chips">
+            <div
+              className="message-input__paste-chips"
+              {...stylex.props(messageInputStyles.pasteChips)}
+            >
               {pastedBlocks.map((block, index) => (
                 <MessageInputChip
                   key={block.id}
@@ -964,7 +973,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           {/* 选中元素不在输入框显示芯片：选中能力保留（注入 agent），
               点选后靠 iframe 高亮反馈，发送消息后自动清除（见 sendMessage）。 */}
 
-          <div className="message-input__box chat-input-card">
+          <div
+            className="message-input__box"
+            data-hook="chat-esc-chat-input-card"
+            {...stylex.props(chatInputCardStyles.card)}
+          >
             <MessageInputComposer
               areaRef={areaRef}
               text={text}
@@ -1001,7 +1014,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           </div>
 
           {showIndicator && (
-            <div className="message-input__indicator">
+            <div
+              className="message-input__indicator"
+              {...stylex.props(messageInputStyles.indicator)}
+            >
               <div className="message-input__spinner" />
               <span>{indicatorText}</span>
             </div>

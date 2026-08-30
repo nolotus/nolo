@@ -1,4 +1,7 @@
 import React from "react";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "../sidebarStyles";
+import "../chatStylexEscapeHatch.css";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "render/web/ui/Tooltip";
 import {
@@ -104,9 +107,13 @@ export const SidebarTypeFilter: React.FC<{
   return (
     <div
       className={`SidebarTypeFilter${disabled ? " is-disabled" : ""}`}
+      data-hook="chat-esc-sidebar-type-filter"
       role="group"
       aria-label={ariaLabel || t("allView.recent", "最近")}
-      style={disabled ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+      {...stylex.props(
+        sidebarStyles.sidebarTypeFilter,
+        disabled && sidebarStyles.sidebarTypeFilterDisabled
+      )}
     >
       {items.map(({ id, label, Icon }) => {
         const isActive = activeFilter === id;
@@ -115,6 +122,7 @@ export const SidebarTypeFilter: React.FC<{
             <button
               type="button"
               className={`SidebarTypeFilter-button${isActive ? " is-active" : ""}`}
+              data-hook="chat-esc-sidebar-type-filter-button"
               data-recent-filter={id}
               aria-pressed={isActive}
               aria-label={label}
@@ -122,6 +130,10 @@ export const SidebarTypeFilter: React.FC<{
                 event.stopPropagation();
                 if (!disabled) onChange(id);
               }}
+              {...stylex.props(
+                sidebarStyles.sidebarTypeFilterButton,
+                isActive && sidebarStyles.sidebarTypeFilterButtonActive
+              )}
             >
               <Icon size={14} aria-hidden="true" />
             </button>

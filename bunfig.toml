@@ -12,6 +12,9 @@ conditions = ["nolo-cloud", "default"]
 [test]
 preload = [
   "./scripts/test/setupDomGlobals.ts",
+  # StyleX 静态 API（create/keyframes/defineVars）编译通道：迁移后的
+  # *Styles.ts 会被组件测试真实 import，bun 裸运行时无法执行编译期 API。
+  "./scripts/test/stylexBunTestPlugin.ts",
   # 每个测试进程独占一个临时 NOLO_HOME，避免测试写开发者真实的 ~/.nolo
   # （agent 选择、本地 LevelDB、broker 端点都曾被测试改写）。
   "./scripts/test/isolateNoloHome.ts",

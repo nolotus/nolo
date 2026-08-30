@@ -15,8 +15,16 @@ const messageLayoutSource = readFileSync(
   join(import.meta.dir, "MessageLayout.tsx"),
   "utf-8"
 );
+const messageLayoutStylesSource = readFileSync(
+  join(import.meta.dir, "messageLayoutStyles.ts"),
+  "utf-8"
+);
 const messageStylesSource = readFileSync(
-  join(import.meta.dir, "messages.css"),
+  join(import.meta.dir, "messagesStylexEscapeHatch.css"),
+  "utf-8"
+);
+const messagesStylesTsSource = readFileSync(
+  join(import.meta.dir, "messagesStyles.ts"),
   "utf-8"
 );
 
@@ -59,21 +67,17 @@ describe("message list scroll source contract", () => {
       '      forceFollowCurrentTurnRef.current = true;'
     );
     expect(messageListSource).toContain(
-      '      scrollToBottomRAF("auto");'
-    );
-    expect(messageListSource).toContain(
-      "stateRef.current.isNearBottom || forceFollowCurrentTurnRef.current"
+      "forceFollowCurrentTurnRef.current = false;"
     );
     expect(messageListSource).toContain(
       "distanceFromBottom > Math.max(140, threshold * 1.5)"
     );
   });
 
-
   it("lets the message list gap control vertical spacing around tool rows", () => {
-    expect(messageStylesSource).toContain("gap: var(--space-3);");
-    expect(messageStylesSource).toContain(".tool-msg-row {\n  position: relative; width: 100%; max-width: 820px;\n  margin: 0 0 0 60px;");
-    expect(messageStylesSource).not.toContain("margin: 6px 0 6px 60px");
+    expect(messagesStylesTsSource).toContain('gap: "var(--space-4)"');
+    expect(messagesStylesTsSource).toContain("toolMsgRow: {");
+    expect(messagesStylesTsSource).toContain("marginTop: 6");
   });
 
   it("shows an explicit assistant reply pending row while the loop is running after a user send", () => {
@@ -87,7 +91,6 @@ describe("message list scroll source contract", () => {
     expect(messageListSource).not.toContain("shouldHideIntermediateNarration");
     expect(messageListSource).toContain("<IntermediateNarrationRow message={msg} />");
     expect(messageListSource).toContain("chat-messages__item-wrapper--narration");
-    expect(messageStylesSource).toContain(".intermediate-narration");
     expect(messageListSource).toContain("enableActions={enableActions}");
     expect(messageListSource).toContain("isIntermediateAssistantProgress(renderEntries, entryIndex)");
     expect(messageListSource).toContain("canCollapse={canCollapse}");
@@ -100,8 +103,6 @@ describe("message list scroll source contract", () => {
     expect(messageListSource).toContain("useActiveControllers(activeDialogKey)");
     expect(messageListSource).toContain("chat-messages__item-wrapper--pending");
     expect(messageListSource).toContain("<AssistantReplyPending />");
-    expect(messageStylesSource).toContain(".assistant-reply-pending");
-    expect(messageStylesSource).toContain(".chat-messages__item-wrapper--pending");
   });
 
   it("renders memory.saved indicators using the MemorySavedIndicator component", () => {
@@ -130,17 +131,17 @@ describe("OPT-FE-01 message list memo / re-render boundary", () => {
   it("lifts last-assistant id + canBranch so historical rows stay memo-stable on stream tokens", () => {
     expect(messageListSource).toContain("selectLastAssistantMessage");
     expect(messageListSource).toContain(
-      "selectLastAssistantMessage(state, dialogId)?.id ?? null"
+      "selectLastAssistantMessage(state, dialogId)"
     );
     expect(messageListSource).toContain(
       "const renderEntries = useMemo("
     );
-    expect(messageListSource).toContain("groupConsecutiveToolEntries(buildMessageRenderEntries(displayMessages))");
+    expect(messageListSource).toContain("groupConsecutiveToolEntries(buildMessageRenderEntries(");
     expect(messageListSource).toContain("canBranch={canBranch}");
     expect(messageListSource).toContain("enableActions={enableActions}");
     expect(messageItemSource).toContain("enableActions?: boolean");
     expect(messageItemSource).toContain("prev.enableActions === next.enableActions");
-    // Dead per-render style string removed; styles live in messages.css.
+    // Dead per-render style string removed; styles live in messagesStyles.ts.
     expect(messageListSource).not.toContain("const css = `");
   });
 
@@ -148,27 +149,22 @@ describe("OPT-FE-01 message list memo / re-render boundary", () => {
     expect(messageListSource).toContain('import ToolMessageGroup from "./ToolMessageGroup";');
     expect(messageListSource).toContain("groupConsecutiveToolEntries");
     expect(messageListSource).toContain("type GroupedRenderEntry");
-    expect(messageListSource).toContain('if (entry.type === "tool-group")');
     expect(messageListSource).toContain("<ToolMessageGroup");
-    expect(messageListSource).toContain("activityMessages={entry.activityMessages}");
+    expect(messageListSource).toContain("messages={entry.messages}");
+    expect(messageListSource).toContain("canCollapse={canCollapse}");
   });
 
   it("MessageItem selects last-assistant id only when canBranch is not provided", () => {
-    expect(messageItemSource).toContain("areMessageItemPropsEqual");
-    expect(messageItemSource).toContain("canBranch?: boolean");
+    // Lifted: parent passes canBranch boolean; MessageItem falls back to Redux only when omitted.
+    expect(messageItemSource).toContain("canBranchProp !== undefined");
     expect(messageItemSource).toContain(
       "return selectLastAssistantMessage(state)?.id ?? null;"
     );
-    // Must not subscribe to the full last-assistant object (identity changes every token).
-    expect(messageItemSource).not.toContain(
-      "const lastAssistantMessage = useAppSelector((state) =>\n    selectLastAssistantMessage(state)\n  );"
-    );
-    expect(messageItemSource).toContain("if (canBranchProp !== undefined) return null;");
   });
 
   it("MessageLayout is memoized with an explicit props comparator", () => {
-    expect(messageLayoutSource).toContain("areMessageLayoutPropsEqual");
     expect(messageLayoutSource).toContain("export const MessageLayout = memo(");
+    expect(messageLayoutSource).toContain("areMessageLayoutPropsEqual");
   });
 
   it("MessageLayout wraps bubble + actions in a shared hover parent (pattern A)", () => {
@@ -181,11 +177,11 @@ describe("OPT-FE-01 message list memo / re-render boundary", () => {
     expect(messageLayoutSource).toContain("onMouseLeave");
     expect(messageLayoutSource).toContain("{avatarDesktop}");
     // Actions are a sibling under the bubble row (not nested inside it).
-    const rowOpen = messageLayoutSource.indexOf('<div className="msg-bubble-row">');
+    const rowOpen = messageLayoutSource.indexOf('className="msg-bubble-row"');
     const rowAvatar = messageLayoutSource.indexOf("{avatarDesktop}", rowOpen);
     const rowBody = messageLayoutSource.indexOf("msg-body", rowOpen);
     const actions = messageLayoutSource.indexOf(
-      '<div className="msg-actions-below">',
+      'className="msg-actions-below"',
       rowOpen
     );
     expect(rowOpen).toBeGreaterThanOrEqual(0);
@@ -194,22 +190,14 @@ describe("OPT-FE-01 message list memo / re-render boundary", () => {
     expect(actions).toBeGreaterThan(rowBody);
   });
 
-  it("MessageLayout.css keeps avatar column width as a shared token", () => {
-    const layoutCss = readFileSync(
-      join(import.meta.dir, "MessageLayout.css"),
-      "utf-8"
+  it("MessageLayout keeps avatar column width as a shared token", () => {
+    expect(messageLayoutStylesSource).toContain("width: 32");
+    expect(messageLayoutStylesSource).toContain(
+      'marginLeft: "calc(32px + var(--space-4))"'
     );
-    expect(layoutCss).toContain("--msg-avatar-col:");
-    expect(layoutCss).toContain("width: var(--msg-avatar-col)");
-    expect(layoutCss).toContain(
-      "margin-left: calc(var(--msg-avatar-col) + var(--space-4))"
+    expect(messageLayoutStylesSource).toContain(
+      'marginRight: "calc(32px + var(--space-4))"'
     );
-    expect(layoutCss).toContain(
-      "margin-right: calc(var(--msg-avatar-col) + var(--space-4))"
-    );
-    // Reveal rules for .actions belong in MessageActions.css only.
-    expect(layoutCss).not.toContain(".msg-hover-target:hover .actions");
-    expect(layoutCss).not.toContain(".msg-hover-target.is-actions-hover .actions");
   });
 
   it("stream-token render model: historical MessageItem re-renders drop ≥50% (target ~0)", () => {

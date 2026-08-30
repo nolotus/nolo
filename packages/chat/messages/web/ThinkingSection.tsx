@@ -1,4 +1,4 @@
-import "./ThinkingSection.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useMemo, memo } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { useAppSelector } from "app/store";
@@ -7,6 +7,8 @@ import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import Editor from "create/editor/Editor";
 import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
 import { useTranslation } from "react-i18next";
+import { thinkingSectionStyles as styles } from "./thinkingSectionStyles";
+import "./messagesStylexEscapeHatch.css";
 
 interface ThinkingSectionProps {
   thinkContent?: string;
@@ -47,30 +49,46 @@ export const ThinkingSection = memo(
 
     return (
       <>
-        <div className="thinking-container">
+        <div className="thinking-container" {...stylex.props(styles.container)}>
           <button
             className="thinking-toggle"
+            {...stylex.props(styles.toggle)}
             onClick={toggleThinking}
             aria-expanded={isExpanded}
             type="button"
           >
-            <div className="thinking-icon" aria-hidden="true">
+            <div
+              className="thinking-icon"
+              {...stylex.props(styles.icon)}
+              aria-hidden="true"
+            >
               {isExpanded ? (
                 <LuChevronDown size={14} />
               ) : (
                 <LuChevronRight size={14} />
               )}
             </div>
-            <span className="thinking-label">
+            <span className="thinking-label" {...stylex.props(styles.label)}>
               {t("thinkingProcess")}
             </span>
           </button>
           <div
             className={`thinking-content ${isExpanded ? "expanded" : "collapsed"}`}
+            {...stylex.props(
+              styles.content,
+              isExpanded ? styles.contentExpanded : styles.contentCollapsed
+            )}
           >
             {isExpanded && slate && (
-              <div className="thinking-inner">
-                <div className="thinking-editor-wrapper">
+              <div
+                className="thinking-inner"
+                {...stylex.props(styles.inner)}
+              >
+                <div
+                  className="thinking-editor-wrapper"
+                  data-hook="messages-esc-thinking-editor-wrapper"
+                  {...stylex.props(styles.editorWrapper)}
+                >
                   <Editor
                     initialValue={slate}
                     readOnly

@@ -1,10 +1,12 @@
 // 文件路径: chat/messages/web/ApplyLineEditsPreviewViewer.tsx
 
-import "./messages.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useMemo } from "react";
 import { LuTriangle } from "react-icons/lu";
 import NoloEditor from "create/editor/Editor";
 import { ToolProps, guessLanguageFromPath } from "./ToolMessageTypes";
+import { messagesStyles as styles } from "./messagesStyles";
+import "./messagesStylexEscapeHatch.css";
 
 /* --- 行级编辑：预览态（previewOnly） --- */
 
@@ -113,6 +115,5 @@ const ApplyLineEditsPreviewViewer: React.FC<ToolProps> = ({
     </div>
   );
 };
-
 
 export default ApplyLineEditsPreviewViewer;

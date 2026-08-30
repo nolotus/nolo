@@ -5,6 +5,7 @@ import {
   OPENAI_RESPONSES_ENDPOINT,
   PLATFORM_CHAT_COMPLETIONS_ENDPOINTS,
   resolvePlatformChatCompletionsEndpoint,
+  resolvePlatformHostedCredentialProvider,
   resolvePlatformResponsesEndpoint,
 } from "./platformProviderEndpoints";
 
@@ -102,5 +103,34 @@ describe("platformProviderEndpoints", () => {
     expect(resolvePlatformResponsesEndpoint("nolo", "deepseek-v4-pro")).toBe(DEEPSEEK_RESPONSES_ENDPOINT);
     expect(resolvePlatformResponsesEndpoint("deepseek", "deepseek-v4-flash")).toBe(DEEPSEEK_RESPONSES_ENDPOINT);
     expect(resolvePlatformResponsesEndpoint("moonshot")).toBeUndefined();
+  });
+});
+
+describe("resolvePlatformHostedCredentialProvider", () => {
+  test("maps every platform-hosted model family to its real upstream id", () => {
+    // 与 resolvePlatformChatCompletionsEndpoint 逐条对应：端点解析到谁家，
+    // key / usage 白名单就用谁家。本映射同时被本地 runtime 的 usage 白名单
+    // 查询和 server 侧 getApiKey 复用，改这里两处同步生效。
+    expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k3")).toBe("crof");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k2.6")).toBe("openrouter");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.3")).toBe("openrouter");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5-3-flash")).toBe("runinfra");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "gemini-3.7-flash")).toBe("google");
+    // Gemini 出图模型同上游 Google
+    expect(
+      resolvePlatformHostedCredentialProvider("nolo", "gemini-3.1-flash-image-preview"),
+    ).toBe("google");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "gpt-image-2")).toBe("openai");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "anthropic/claude-opus-5")).toBe("deepinfra");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "grok-4.6")).toBe("xai");
+    // legacy 记录别名同样命中
+    expect(resolvePlatformHostedCredentialProvider("ollama-cloud", "kimi-k3")).toBe("crof");
+  });
+
+  test("returns undefined for non-hosted providers and unrouted models", () => {
+    expect(resolvePlatformHostedCredentialProvider("openai", "gpt-5.5")).toBeUndefined();
+    expect(resolvePlatformHostedCredentialProvider("moonshot", "kimi-k3")).toBeUndefined();
+    expect(resolvePlatformHostedCredentialProvider("nolo", "unsupported-model")).toBeUndefined();
+    expect(resolvePlatformHostedCredentialProvider("nolo")).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 // 文件路径: chat/messages/web/ToolMessageContent.tsx
 
-import "./messages.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   LuFileText,
@@ -28,6 +28,8 @@ import { useStore } from "react-redux";
 import { readFileContent } from "database/dbSlice";
 import ImagePreviewModal from "render/web/ui/modal/ImagePreviewModal";
 import NoloEditor from "create/editor/Editor";
+import { messagesStyles as styles } from "./messagesStyles";
+import "./messagesStylexEscapeHatch.css";
 import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
 import UpdateAgentToolCard from "./UpdateAgentToolCard";

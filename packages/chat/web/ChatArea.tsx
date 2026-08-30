@@ -11,7 +11,8 @@ import MessageInputContainer, {
 import ChatErrorBoundary from "chat/web/ChatErrorBoundary";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import type { AgentPickerControlProps } from "chat/web/AgentPickerControl";
-import "./ChatArea.css";
+import * as stylex from "@stylexjs/stylex";
+import { chatAreaStyles } from "./ChatAreaStyles";
 
 interface ChatAreaProps {
   dialogId: string;
@@ -37,7 +38,7 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
 
   return (
     <div
-      className="chat-area"
+      {...stylex.props(chatAreaStyles.area)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -63,7 +64,7 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
       </ChatErrorBoundary>
 
       {isDragOver && (
-        <div className="chat-area__drop-overlay">
+        <div {...stylex.props(chatAreaStyles.dropOverlay)}>
           <span>拖入图片或文件以添加附件</span>
         </div>
       )}

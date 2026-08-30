@@ -11,7 +11,7 @@ const source = readFileSync(
   join(import.meta.dir, "SidebarVirtualizedList.tsx"),
   "utf-8"
 );
-const sidebarCss = readFileSync(join(import.meta.dir, "..", "sidebar.css"), "utf-8");
+const sidebarStyles = readFileSync(join(import.meta.dir, "..", "sidebarStyles.ts"), "utf-8");
 
 describe("estimateVirtualizedMountedRows", () => {
   it("returns 0 for empty / invalid inputs", () => {
@@ -53,43 +53,37 @@ describe("SidebarVirtualizedList source contract", () => {
 
   it("keeps the ListBox as the sole scroller (overflow auto + bounded height)", () => {
     expect(source).toContain('className="SidebarVirtualizedList__scroller"');
-    // Static scroller styles live in CSS; only the dynamic `height` prop
+    // Static scroller styles live in StyleX; only the dynamic `height` prop
     // stays inline (height = "100%" default or caller-provided px/number).
     expect(source).toContain("style={{ height }}");
-    // The scroller's static rules are defined on the CSS class — match the
-    // standalone rule (not the chained `.CategorySection__content-inner ...`
-    // override) by anchoring on a newline before the selector.
-    const scrollerRules = [
-      ...sidebarCss.matchAll(/(^|\n)\.SidebarVirtualizedList__scroller\s*\{[^}]*\}/gs),
-    ];
-    const standaloneRule = scrollerRules
-      .map((m) => m[0])
-      .find((rule) => rule.includes("display: block"));
+    const standaloneRule = sidebarStyles.match(
+      /scroller:\s*\{[^}]*\}/s
+    );
     expect(standaloneRule).toBeTruthy();
-    expect(standaloneRule!).toContain("display: block");
-    expect(standaloneRule!).toContain("padding: 0");
-    expect(standaloneRule!).toContain("margin: 0");
-    expect(standaloneRule!).toContain("overflow: auto");
-    expect(standaloneRule!).toContain("min-height: 0");
-    expect(standaloneRule!).toContain("flex: 1 1 auto");
-    expect(standaloneRule!).toContain("overscroll-behavior: contain");
+    expect(standaloneRule![0]).toContain('display: "block"');
+    expect(standaloneRule![0]).toContain("padding: 0");
+    expect(standaloneRule![0]).toContain("margin: 0");
+    expect(standaloneRule![0]).toContain('overflow: "auto"');
+    expect(standaloneRule![0]).toContain("minHeight: 0");
+    expect(standaloneRule![0]).toContain('flex: "1 1 auto"');
+    expect(standaloneRule![0]).toContain('overscrollBehavior: "contain"');
     // 保留 style containment（防虚拟化列表污染外层计数器/引用），但禁止
     // contain:paint —— paint containment 在三层嵌套 overflow:auto 链里会让
     // 浏览器把本 scroller 当成独立隔离区，wheel 不向可滚动祖先冒泡，
     // 表现为"必须先点一下才能滚"。
-    expect(standaloneRule!).toContain("contain: style");
-    expect(standaloneRule!).not.toContain("contain: layout paint style");
+    expect(standaloneRule![0]).toContain('contain: "style"');
+    expect(standaloneRule![0]).not.toContain("paint");
   });
 
   it("CSS height chain prevents outer ancestors from stealing scroll", () => {
-    expect(sidebarCss).toContain(".SidebarVirtualizedList__scroller");
-    expect(sidebarCss).toContain("overscroll-behavior: contain");
+    expect(sidebarStyles).toContain("scroller");
+    expect(sidebarStyles).toContain('overscrollBehavior: "contain"');
     // All View: outer recent-content must NOT be overflow-y:auto
-    const recentContent = sidebarCss.match(
-      /\.AllViewSidebar__recent-content\s*\{[^}]*\}/s
+    const recentContent = sidebarStyles.match(
+      /allViewRecentContent:\s*\{[^}]*\}/s
     );
     expect(recentContent).toBeTruthy();
-    expect(recentContent![0]).toContain("overflow: hidden");
+    expect(recentContent![0]).toContain('overflow: "hidden"');
     expect(recentContent![0]).not.toContain("overflow-y: auto");
   });
 });

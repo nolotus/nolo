@@ -15,7 +15,8 @@ import {
   parseCanvasSnapshotMessage,
 } from "render/canvas/canvasSnapshotParser";
 import type { CompletionFinishReason } from "../types";
-import "./MessageContentFinishReason.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageContentFinishReasonStyles } from "./messageContentFinishReasonStyles";
 import CanvasSnapshotMessage from "render/canvas/CanvasSnapshotMessage";
 
 type MessageContentProps = {
@@ -279,7 +280,10 @@ export const MessageContent = memo(
         </div>
 
         {role !== "self" && finishReason === "length" && (
-          <div className="msg-finish-reason-length" role="status">
+          <div
+            {...stylex.props(messageContentFinishReasonStyles.lengthNotice)}
+            role="status"
+          >
             {t("finishReasonLengthNotice")}
           </div>
         )}

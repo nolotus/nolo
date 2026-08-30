@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  PLATFORM_HOSTED_KIMI_K3_MODEL,
+  PLATFORM_HOSTED_KIMI_K26_MODEL,
+} from "ai/llm/kimi";
+import {
   buildOpenAiCompatibleChatCompletionRequest,
   executeOpenAiCompatibleChatCompletion,
   parseOpenAiCompatibleChatCompletionResponse,
   readOpenAiCompatibleSseCompletion,
 } from "./openAiCompatibleProvider";
+import type { OpenAiCompatibleProviderConfig } from "./openAiCompatibleProvider";
 
 function sseResponse(body: string, contentType = "text/event-stream") {
   return new Response(new ReadableStream({
@@ -434,6 +439,10 @@ describe("OpenAI-compatible provider Responses wire support", () => {
         endpoint: "https://opencode.ai/zen/v1/responses",
         apiKey: "sk-opencode",
         provider: "custom",
+        // usageProvider 命中 STREAM_USAGE_PROVIDERS 白名单（openai），只有
+        // !isResponses 守卫能挡住 stream_options——这正是 Luna 通道在
+        // platformChatProvider 上翻车的那道闸，这里压测它。
+        usageProvider: "openai",
         requestOptions: {},
       },
       messages: [{ role: "user", content: "hello" }],
@@ -721,5 +730,138 @@ describe("OpenAI-compatible provider availability reporting", () => {
     });
     expect(result.content).toBe("ok");
     expect(seen).toEqual([{ status: 200 }]);
+  });
+});
+
+describe("OpenAI-compatible provider per-provider body quirk (shared with server loop)", () => {
+  function buildSentBody(args: { provider: string; model: string; endpoint?: string }) {
+    const request = buildOpenAiCompatibleChatCompletionRequest({
+      providerConfig: {
+        model: args.model,
+        endpoint: args.endpoint ?? "https://provider.example/v1/chat/completions",
+        apiKey: "sk-test",
+        provider: args.provider,
+        requestOptions: {
+          temperature: 0.7,
+          top_p: 0.9,
+          frequency_penalty: 0.5,
+          presence_penalty: 0.3,
+          max_tokens: 4096,
+          reasoning_effort: "medium",
+        },
+      },
+      messages: [{ role: "user", content: "hello" }],
+    });
+    return JSON.parse(String(request.init.body)) as Record<string, any>;
+  }
+
+  test("strips sampling params and renames max_tokens for platform-hosted Kimi K3 (provider=nolo, upstream crof)", () => {
+    // 线上事故回归用例：本地直连 crof 调 kimi-k3 时曾原样透传采样参数，
+    // 上游中途断流（「上游响应流在收尾前被中断」）且照常扣费。
+    const sentBody = buildSentBody({
+      provider: "nolo",
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+    });
+
+    expect(sentBody.model).toBe(PLATFORM_HOSTED_KIMI_K3_MODEL);
+    expect(sentBody).not.toHaveProperty("temperature");
+    expect(sentBody).not.toHaveProperty("top_p");
+    expect(sentBody).not.toHaveProperty("frequency_penalty");
+    expect(sentBody).not.toHaveProperty("presence_penalty");
+    // max_tokens 改名 max_completion_tokens，且不同时存在两个字段。
+    expect(sentBody.max_completion_tokens).toBe(4096);
+    expect(sentBody).not.toHaveProperty("max_tokens");
+    // quirk 只动采样参数与 max_tokens；其余字段（如 reasoning_effort）保留，
+    // 与 server 主路径 normalize 后的行为一致。
+    expect(sentBody.reasoning_effort).toBe("medium");
+  });
+
+  test("applies the same K3 quirk for moonshot direct connections", () => {
+    const sentBody = buildSentBody({
+      provider: "moonshot",
+      endpoint: "https://api.moonshot.cn/v1/chat/completions",
+      model: "kimi-k3",
+    });
+
+    expect(sentBody).not.toHaveProperty("temperature");
+    expect(sentBody).not.toHaveProperty("top_p");
+    expect(sentBody).not.toHaveProperty("frequency_penalty");
+    expect(sentBody).not.toHaveProperty("presence_penalty");
+    expect(sentBody.max_completion_tokens).toBe(4096);
+    expect(sentBody).not.toHaveProperty("max_tokens");
+  });
+
+  test("keeps sampling params for non-K3 models on the local direct path", () => {
+    // 防过度收敛：平台托管非 K3 模型不得被误删采样参数。
+    const sentBody = buildSentBody({
+      provider: "nolo",
+      model: PLATFORM_HOSTED_KIMI_K26_MODEL,
+    });
+
+    expect(sentBody.temperature).toBe(0.7);
+    expect(sentBody.top_p).toBe(0.9);
+    expect(sentBody.frequency_penalty).toBe(0.5);
+    expect(sentBody.presence_penalty).toBe(0.3);
+    expect(sentBody.max_tokens).toBe(4096);
+    expect(sentBody).not.toHaveProperty("max_completion_tokens");
+  });
+});
+
+describe("OpenAI-compatible provider usage whitelist seam (real upstream name)", () => {
+  function buildStreamSentBody(providerConfig: OpenAiCompatibleProviderConfig) {
+    const request = buildOpenAiCompatibleChatCompletionRequest({
+      providerConfig,
+      messages: [{ role: "user", content: "hello" }],
+      stream: true,
+    });
+    return JSON.parse(String(request.init.body)) as Record<string, any>;
+  }
+
+  test("platform-hosted K3 stream requests include_usage via the real upstream name (crof)", () => {
+    // usageProvider 是本批新增的 seam：查白名单用真实上游名，对外 provider
+    // 仍是 "nolo"。缺失时查 "nolo" 不在白名单 → 不发 include_usage → 漏账。
+    const sentBody = buildStreamSentBody({
+      model: PLATFORM_HOSTED_KIMI_K3_MODEL,
+      endpoint: "https://crof.ai/v1/chat/completions",
+      apiKey: "sk-test",
+      provider: "nolo",
+      usageProvider: "crof",
+      requestOptions: { temperature: 0.7, max_tokens: 4096 },
+    });
+
+    expect(sentBody.stream_options).toEqual({ include_usage: true });
+    // K3 body quirk 依旧生效（第一批），与 usage seam 互不干扰。
+    expect(sentBody).not.toHaveProperty("temperature");
+    expect(sentBody.max_completion_tokens).toBe(4096);
+    expect(sentBody).not.toHaveProperty("max_tokens");
+  });
+
+  test("no usageProvider keeps the whitelist lookup on the configured provider (custom unchanged)", () => {
+    const sentBody = buildStreamSentBody({
+      model: "custom-coder",
+      endpoint: "https://provider.example/v1/chat/completions",
+      apiKey: "sk-custom",
+      provider: "custom",
+      requestOptions: { temperature: 0.2, max_tokens: 4096 },
+    });
+
+    // custom 不在白名单：不发 stream_options（与改动前行为一致），采样参数保留。
+    expect(sentBody).not.toHaveProperty("stream_options");
+    expect(sentBody.temperature).toBe(0.2);
+    expect(sentBody.max_tokens).toBe(4096);
+  });
+
+  test("oauth-shaped google-antigravity agent gains no usage fields and keeps sampling", () => {
+    const sentBody = buildStreamSentBody({
+      model: "gemini-3.6-flash",
+      endpoint: "https://cloudcode-pa.googleapis.com/v1internal",
+      apiKey: "oauth-token",
+      provider: "google-antigravity",
+      requestOptions: { temperature: 0.5 },
+    });
+
+    // OAuth 订阅路径不受平台托管 usage seam 影响：不多发不少发任何字段。
+    expect(sentBody).not.toHaveProperty("stream_options");
+    expect(sentBody.temperature).toBe(0.5);
   });
 });

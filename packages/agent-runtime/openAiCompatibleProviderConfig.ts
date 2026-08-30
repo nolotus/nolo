@@ -31,5 +31,6 @@ export async function resolveOpenAiCompatibleProviderConfig(args: {
     ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
     provider: plan.provider,
     requestOptions: plan.requestOptions,
+    ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
   };
 }

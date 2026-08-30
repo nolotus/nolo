@@ -35,7 +35,9 @@ import {
   type QuickChatMode,
 } from "./quickChatFlow";
 import { shouldDeferEnterForIme } from "app/utils/ime";
-import "chat/web/chatInputCard.css";
+import * as stylex from "@stylexjs/stylex";
+import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
+import "chat/web/chatStylexEscapeHatch.css";
 import "./QuickChat.css";
 
 const quickChatRuntimeImport = () => import("./QuickChatRuntime");
@@ -419,7 +421,11 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
   });
   return (
     <div className="quick-chat-container" data-surface={surface} data-testid="quick-chat-shell" style={vtStyle}>
-      <div className="quick-chat-box chat-input-card">
+      <div
+        className="quick-chat-box"
+        data-hook="chat-esc-chat-input-card"
+        {...stylex.props(chatInputCardStyles.card)}
+      >
         <TextField className="message-input__textarea-wrap" aria-label={placeholder || "Quick chat"}>
           <TextArea
             className="message-input__textarea"

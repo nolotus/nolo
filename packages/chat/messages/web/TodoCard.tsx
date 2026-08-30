@@ -1,7 +1,8 @@
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
 import type { ToolProps } from "./ToolMessageTypes";
 import type { TodoItem } from "ai/tools/agent/setTodoListTool";
-import "./TodoCard.css";
+import { todoCardStyles as styles } from "./todoCardStyles";
 
 export interface TodoCardProps extends Partial<ToolProps> {
   rawData?: any;
@@ -19,6 +20,7 @@ const IconListTodo = () => (
     strokeLinecap="round"
     strokeLinejoin="round"
     className="chat-todo-header-icon"
+    {...stylex.props(styles.headerIcon)}
   >
     <rect x="3" y="5" width="6" height="6" rx="1" />
     <path d="m3 17 2 2 4-4" />
@@ -39,6 +41,7 @@ const IconCheckCircle = () => (
     strokeLinecap="round"
     strokeLinejoin="round"
     className="chat-todo-icon status-done"
+    {...stylex.props(styles.icon, styles.iconDone)}
     aria-label="completed"
   >
     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
@@ -57,6 +60,7 @@ const IconLoader = () => (
     strokeLinecap="round"
     strokeLinejoin="round"
     className="chat-todo-icon status-in_progress"
+    {...stylex.props(styles.icon, styles.iconInProgress)}
     aria-label="in progress"
   >
     <line x1="12" y1="2" x2="12" y2="6" />
@@ -81,6 +85,7 @@ const IconCircle = () => (
     strokeLinecap="round"
     strokeLinejoin="round"
     className="chat-todo-icon status-pending"
+    {...stylex.props(styles.icon, styles.iconPending)}
     aria-label="pending"
   >
     <circle cx="12" cy="12" r="10" />
@@ -109,13 +114,17 @@ export const TodoCard: React.FC<TodoCardProps> = ({ rawData, isError }) => {
 
   if (!todos || todos.length === 0) {
     return (
-      <div className="chat-todo-card" data-testid="chat-todo-card">
-        <div className="chat-todo-header">
-          <div className="chat-todo-title-wrap">
+      <div
+        className="chat-todo-card"
+        {...stylex.props(styles.card)}
+        data-testid="chat-todo-card"
+      >
+        <div className="chat-todo-header" {...stylex.props(styles.header)}>
+          <div className="chat-todo-title-wrap" {...stylex.props(styles.titleWrap)}>
             <IconListTodo />
             <span>任务清单</span>
           </div>
-          <span className="chat-todo-progress-text">已清空</span>
+          <span className="chat-todo-progress-text" {...stylex.props(styles.progressText)}>已清空</span>
         </div>
       </div>
     );
@@ -125,37 +134,63 @@ export const TodoCard: React.FC<TodoCardProps> = ({ rawData, isError }) => {
   const progressPercent = Math.round((doneCount / todos.length) * 100);
 
   return (
-    <div className="chat-todo-card" data-testid="chat-todo-card">
-      <div className="chat-todo-header">
-        <div className="chat-todo-title-wrap">
+    <div
+      className="chat-todo-card"
+      {...stylex.props(styles.card)}
+      data-testid="chat-todo-card"
+    >
+      <div className="chat-todo-header" {...stylex.props(styles.header)}>
+        <div className="chat-todo-title-wrap" {...stylex.props(styles.titleWrap)}>
           <IconListTodo />
           <span>任务清单</span>
         </div>
-        <span className="chat-todo-progress-text">
+        <span
+          className="chat-todo-progress-text"
+          {...stylex.props(styles.progressText)}
+          data-testid="chat-todo-progress-text"
+        >
           {doneCount} / {todos.length} ({progressPercent}%)
         </span>
       </div>
 
-      <div className="chat-todo-progress-bar-bg">
+      <div
+        className="chat-todo-progress-bar-bg"
+        {...stylex.props(styles.progressBarBg)}
+        data-testid="chat-todo-progress-bar-bg"
+      >
         <div
           className="chat-todo-progress-bar-fill"
+          {...stylex.props(styles.progressBarFill)}
           style={{ width: `${progressPercent}%` }}
         />
       </div>
 
-      <div className="chat-todo-list">
+      <div className="chat-todo-list" {...stylex.props(styles.list)}>
         {todos.map((item, index) => {
           const status = item.status || "pending";
+          const isDone = status === "done";
+          const isInProgress = status === "in_progress";
           return (
             <div
               key={index}
               className={`chat-todo-item status-${status}`}
+              {...stylex.props(styles.item)}
               data-testid={`todo-item-${index}`}
+              data-status={status}
             >
-              {status === "done" && <IconCheckCircle />}
-              {status === "in_progress" && <IconLoader />}
+              {isDone && <IconCheckCircle />}
+              {isInProgress && <IconLoader />}
               {status === "pending" && <IconCircle />}
-              <span className="chat-todo-text">{item.title}</span>
+              <span
+                className="chat-todo-text"
+                {...stylex.props(
+                  styles.text,
+                  isDone && styles.textDone,
+                  isInProgress && styles.textInProgress
+                )}
+              >
+                {item.title}
+              </span>
             </div>
           );
         })}

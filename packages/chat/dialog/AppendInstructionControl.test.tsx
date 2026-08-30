@@ -105,7 +105,7 @@ describe("AppendInstructionControl", () => {
     );
 
     try {
-      const form = container.querySelector(".AppendInstructionControl");
+      const form = container.querySelector("[data-testid='append-instruction-control']");
       expect(form).not.toBeNull();
       expect(form?.getAttribute("data-mode")).toBe("enqueue");
 
@@ -133,7 +133,7 @@ describe("AppendInstructionControl", () => {
     );
 
     try {
-      const badge = container.querySelector(".AppendInstructionControl__queuedBadge");
+      const badge = container.querySelector('[role="status"][title]');
       expect(badge).not.toBeNull();
       expect(badge?.textContent).toContain("3 条排队中");
     } finally {
@@ -153,7 +153,7 @@ describe("AppendInstructionControl", () => {
     );
 
     try {
-      const form = container.querySelector(".AppendInstructionControl");
+      const form = container.querySelector("[data-testid='append-instruction-control']");
       expect(form).not.toBeNull();
       expect(form?.getAttribute("data-mode")).toBe("continue");
 
@@ -180,7 +180,7 @@ describe("AppendInstructionControl", () => {
     );
 
     try {
-      const form = container.querySelector(".AppendInstructionControl");
+      const form = container.querySelector("[data-testid='append-instruction-control']");
       expect(form).not.toBeNull();
       expect(form?.getAttribute("data-mode")).toBe("continue");
     } finally {
@@ -200,7 +200,7 @@ describe("AppendInstructionControl", () => {
     );
 
     try {
-      const form = container.querySelector(".AppendInstructionControl");
+      const form = container.querySelector("[data-testid='append-instruction-control']");
       expect(form).toBeNull();
     } finally {
       await cleanup();
@@ -261,10 +261,10 @@ describe("AppendInstructionControl", () => {
         status: undefined,
       });
 
-      const successEl = view.container.querySelector(".AppendInstructionControl__success");
+      const successEl = view.container.querySelector('[role="status"]:not([title])');
       expect(successEl?.textContent).toContain("已加入队列，将在下一轮消费");
 
-      const badge = view.container.querySelector(".AppendInstructionControl__queuedBadge");
+      const badge = view.container.querySelector('[role="status"][title]');
       expect(badge?.textContent).toContain("1 条排队中");
     } finally {
       await view.cleanup();
@@ -324,7 +324,7 @@ describe("AppendInstructionControl", () => {
         status: "running",
       });
 
-      const successEl = view.container.querySelector(".AppendInstructionControl__success");
+      const successEl = view.container.querySelector('[role="status"]:not([title])');
       expect(successEl?.textContent).toContain("已提交继续指令");
     } finally {
       await view.cleanup();
@@ -363,7 +363,7 @@ describe("AppendInstructionControl", () => {
       await submitForm(form);
       await flushDomUpdates(5);
 
-      const errorEl = view.container.querySelector(".AppendInstructionControl__error");
+      const errorEl = view.container.querySelector('[role="alert"]');
       expect(errorEl).not.toBeNull();
       expect(errorEl?.textContent).toBe("Cannot continue task while queue is not empty");
       expect(input.value).toBe("retry please");

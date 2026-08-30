@@ -25,7 +25,9 @@ import type { Agent } from "app/types";
 import { useAgentDialog } from "ai/agent/hooks/useAgentDialog";
 import { resolveAgentCardDialogKey } from "chat/messages/web/resolveAgentCardDialogKey";
 import { asNonEmptyStringArray } from "core/stringArray";
-import "./AgentDraftPanel.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentDraftPanelStyles } from "./agentDraftPanelStyles";
+import "./dialogStylexEscapeHatch.css";
 
 interface AgentDraftPanelProps {
   initialDraft: GuidedAgentDraft;
@@ -61,19 +63,24 @@ const AssemblySection = ({
   items: string[];
   empty: string;
 }) => (
-  <div className="AgentDraftPanel__assemblySection">
-    <div className="AgentDraftPanel__assemblySectionTitle">
+  <div {...stylex.props(agentDraftPanelStyles.assemblySection)}>
+    <div {...stylex.props(agentDraftPanelStyles.assemblySectionTitle)}>
       {icon}
       <span>{title}</span>
     </div>
     {items.length > 0 ? (
-      <ul>
+      <ul {...stylex.props(agentDraftPanelStyles.assemblyList)}>
         {items.map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
+          <li
+            key={`${item}-${index}`}
+            {...stylex.props(agentDraftPanelStyles.assemblyItem)}
+          >
+            {item}
+          </li>
         ))}
       </ul>
     ) : (
-      <p>{empty}</p>
+      <p {...stylex.props(agentDraftPanelStyles.assemblyItem)}>{empty}</p>
     )}
   </div>
 );
@@ -196,10 +203,10 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
   };
 
   return (
-    <aside className="AgentDraftPanel" aria-label="Agent 配置草稿">
-      <div className="AgentDraftPanel__header">
-        <div className="AgentDraftPanel__titleWrap">
-          <div className="AgentDraftPanel__title">
+    <aside {...stylex.props(agentDraftPanelStyles.root)} aria-label="Agent 配置草稿">
+      <div {...stylex.props(agentDraftPanelStyles.header)}>
+        <div {...stylex.props(agentDraftPanelStyles.titleWrap)}>
+          <div {...stylex.props(agentDraftPanelStyles.title)}>
             <LuBot size={18} aria-hidden="true" />
             <span>
               {isCreated
@@ -210,14 +217,15 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
             </span>
           </div>
           {isCreated ? (
-            <span className="AgentDraftPanel__createdState">可以开始使用</span>
+            <span {...stylex.props(agentDraftPanelStyles.createdState)}>可以开始使用</span>
           ) : isDirty ? (
-            <span className="AgentDraftPanel__dirtyState">已本地修改</span>
+            <span {...stylex.props(agentDraftPanelStyles.dirtyState)}>已本地修改</span>
           ) : null}
         </div>
         <button
           type="button"
-          className="AgentDraftPanel__iconButton"
+          data-hook="dialog-esc-adp-icon-button"
+          {...stylex.props(agentDraftPanelStyles.iconButton)}
           onClick={onClose}
           aria-label="关闭草稿面板"
         >
@@ -225,50 +233,75 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
         </button>
       </div>
 
-      <div className="AgentDraftPanel__body">
-        <label className="AgentDraftPanel__field">
+      <div {...stylex.props(agentDraftPanelStyles.body)}>
+        <label {...stylex.props(agentDraftPanelStyles.field)}>
           <span>名称</span>
           <input
             value={name}
             disabled={isCreated}
+            data-hook="dialog-esc-adp-field-control"
+            {...stylex.props(agentDraftPanelStyles.fieldControl)}
             onChange={(event) => setName(event.target.value)}
           />
         </label>
 
-        <label className="AgentDraftPanel__field">
+        <label {...stylex.props(agentDraftPanelStyles.field)}>
           <span>简介</span>
           <textarea
             value={introduction}
             disabled={isCreated}
+            data-hook="dialog-esc-adp-field-control"
+            {...stylex.props(
+              agentDraftPanelStyles.fieldControl,
+              agentDraftPanelStyles.fieldTextareaMin
+            )}
             onChange={(event) => setIntroduction(event.target.value)}
             rows={3}
           />
         </label>
 
-        <label className="AgentDraftPanel__field">
+        <label {...stylex.props(agentDraftPanelStyles.field)}>
           <span>Prompt</span>
           <textarea
             value={prompt}
             disabled={isCreated}
+            data-hook="dialog-esc-adp-field-control"
+            {...stylex.props(
+              agentDraftPanelStyles.fieldControl,
+              agentDraftPanelStyles.fieldTextareaMin
+            )}
             onChange={(event) => setPrompt(event.target.value)}
             rows={9}
           />
         </label>
 
-        <div className="AgentDraftPanel__field">
+        <div {...stylex.props(agentDraftPanelStyles.field)}>
           <span>能力</span>
           {capabilityLabels.length > 0 && (
-            <div className="AgentDraftPanel__capabilityPills" aria-label="已选择能力">
+            <div
+              {...stylex.props(agentDraftPanelStyles.capabilityPills)}
+              aria-label="已选择能力"
+            >
               {capabilityLabels.map((label) => (
-                <span key={label}>{label}</span>
+                <span
+                  key={label}
+                  {...stylex.props(agentDraftPanelStyles.capabilityPill)}
+                >
+                  {label}
+                </span>
               ))}
             </div>
           )}
-          <details className="AgentDraftPanel__technicalDetails">
-            <summary>高级技术标识</summary>
+          <details {...stylex.props(agentDraftPanelStyles.technicalDetails)}>
+            <summary {...stylex.props(agentDraftPanelStyles.technicalSummary)}>高级技术标识</summary>
             <input
               value={capabilityText}
               disabled={isCreated}
+              data-hook="dialog-esc-adp-field-control"
+              {...stylex.props(
+                agentDraftPanelStyles.fieldControl,
+                agentDraftPanelStyles.technicalInput
+              )}
               onChange={(event) => setCapabilityText(event.target.value)}
               aria-label="能力技术标识"
               placeholder="用英文逗号分隔技术标识"
@@ -276,9 +309,9 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           </details>
         </div>
 
-        <details className="AgentDraftPanel__assembly" open={!isCreated}>
-          <summary>能力装配</summary>
-          <div className="AgentDraftPanel__assemblyGrid">
+        <details {...stylex.props(agentDraftPanelStyles.assembly)} open={!isCreated}>
+          <summary {...stylex.props(agentDraftPanelStyles.assemblySummary)}>能力装配</summary>
+          <div {...stylex.props(agentDraftPanelStyles.assemblyGrid)}>
             <AssemblySection
               icon={<LuFileText size={14} aria-hidden="true" />}
               title="指令"
@@ -312,12 +345,15 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           </div>
         </details>
 
-        <div className="AgentDraftPanel__field">
+        <div {...stylex.props(agentDraftPanelStyles.field)}>
           <span>可见性</span>
-          <div className="AgentDraftPanel__toggleGroup">
+          <div {...stylex.props(agentDraftPanelStyles.toggleGroup)}>
             <button
               type="button"
-              className={!isPublic ? "is-active" : ""}
+              data-hook={`dialog-esc-adp-toggle-button${
+                !isPublic ? " dialog-esc-adp-toggle-active" : ""
+              }`}
+              {...stylex.props(agentDraftPanelStyles.toggleButton)}
               disabled={isCreated}
               onClick={() => setIsPublic(false)}
             >
@@ -326,7 +362,10 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
             </button>
             <button
               type="button"
-              className={isPublic ? "is-active" : ""}
+              data-hook={`dialog-esc-adp-toggle-button${
+                isPublic ? " dialog-esc-adp-toggle-active" : ""
+              }`}
+              {...stylex.props(agentDraftPanelStyles.toggleButton)}
               disabled={isCreated}
               onClick={() => setIsPublic(true)}
             >
@@ -337,16 +376,23 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
         </div>
       </div>
 
-      <div className="AgentDraftPanel__footer">
+      <div {...stylex.props(agentDraftPanelStyles.footer)}>
         {isCreated && (
-          <div className="AgentDraftPanel__nextSteps" aria-label="创建后自动能力提示">
-            <span>已准备好</span>
-            <p>{createdHint}</p>
+          <div
+            {...stylex.props(agentDraftPanelStyles.nextSteps)}
+            aria-label="创建后自动能力提示"
+          >
+            <span {...stylex.props(agentDraftPanelStyles.nextStepsLabel)}>已准备好</span>
+            <p {...stylex.props(agentDraftPanelStyles.nextStepsText)}>{createdHint}</p>
           </div>
         )}
         <button
           type="button"
-          className="AgentDraftPanel__primary"
+          data-hook="dialog-esc-adp-primary"
+          {...stylex.props(
+            agentDraftPanelStyles.actionShared,
+            agentDraftPanelStyles.primary
+          )}
           onClick={isCreated ? () => startDialog() : handleConfirm}
           disabled={confirmDisabled}
           title={confirmTitle}
@@ -357,7 +403,10 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
         </button>
         <button
           type="button"
-          className="AgentDraftPanel__secondary"
+          {...stylex.props(
+            agentDraftPanelStyles.actionShared,
+            agentDraftPanelStyles.secondary
+          )}
           onClick={() =>
             navigate("/create/agent", {
               state: { initialDraft: isCreated ? createdAgent : updatedDraft },
@@ -370,4 +419,4 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
       </div>
     </aside>
   );
-};
+}

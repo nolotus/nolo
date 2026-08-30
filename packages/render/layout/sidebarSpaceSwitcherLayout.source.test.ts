@@ -9,8 +9,12 @@ const chatSidebarSource = readFileSync(
   join(repoRoot, "packages/chat/web/ChatSidebar.tsx"),
   "utf-8"
 );
-const sidebarCss = readFileSync(
-  join(repoRoot, "packages/chat/web/sidebar.css"),
+const sidebarStyles = readFileSync(
+  join(repoRoot, "packages/chat/web/sidebarStyles.ts"),
+  "utf-8"
+);
+const escapeHatchCss = readFileSync(
+  join(repoRoot, "packages/chat/web/chatStylexEscapeHatch.css"),
   "utf-8"
 );
 const topBarSource = readFileSync(join(layoutDir, "TopBar.tsx"), "utf-8");
@@ -89,13 +93,13 @@ describe("sidebar space switcher layout source contract", () => {
 
   it("keeps the sidebar header as scope | search", () => {
     // Alignment system: one shared left rail via --sidebar-* tokens.
-    expect(sidebarCss).toContain("--sidebar-row-height: 32px;");
-    expect(sidebarCss).toContain(".ChatSidebar__top-bar");
-    expect(sidebarCss).toContain(".ChatSidebar__scope-wrapper {\n  min-width: 0;");
-    expect(sidebarCss).toContain(".ChatSidebar__scope-wrapper .TpSw--sidebar");
+    expect(sidebarStyles).toContain('"--sidebar-row-height": "32px"');
+    expect(sidebarStyles).toContain("topBar");
+    expect(sidebarStyles).toContain('minWidth: 0');
+    expect(escapeHatchCss).toContain(".ChatSidebar__scope-wrapper .TpSw--sidebar");
     expect(chatSidebarSource).toContain('className="ChatSidebar__search-btn"');
-    expect(sidebarCss).not.toContain("ChatSidebar__create-row--searching");
-    expect(sidebarCss).not.toContain("SidebarSearchRow");
+    expect(sidebarStyles).not.toContain("createRowSearching");
+    expect(sidebarStyles).not.toContain("SidebarSearchRow");
   });
 
   it("opens sidebar search as a command palette (mod+k)", () => {
@@ -119,13 +123,13 @@ describe("sidebar space switcher layout source contract", () => {
     expect(chatSidebarSource).toContain('to="/explore"');
     expect(chatSidebarSource).toContain("LuSparkles");
     expect(chatSidebarSource).toContain('t("common:explorePlaza", "探索")');
-    expect(sidebarCss).toContain(".AllViewSidebar__nav-row");
+    expect(sidebarStyles).toContain("navRow");
     // Nav chrome sizes follow the sidebar alignment tokens.
-    expect(sidebarCss).toContain(
-      "min-height: var(--sidebar-row-height);"
+    expect(sidebarStyles).toContain(
+      'minHeight: "var(--sidebar-row-height)"'
     );
-    expect(sidebarCss).toContain(
-      "width: var(--sidebar-icon-size);"
+    expect(sidebarStyles).toContain(
+      'width: "var(--sidebar-icon-size)"'
     );
     // No plaza-slot/plaza-link header chrome expectation remains.
     expect(chatSidebarSource).not.toContain('ChatSidebar__plaza-slot');

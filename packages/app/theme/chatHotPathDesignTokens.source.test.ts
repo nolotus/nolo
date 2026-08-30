@@ -13,23 +13,20 @@ const read = (relativePath: string) =>
  */
 describe("chat+render hot-path design tokens source contract", () => {
   test("input card shells use radius-md and space/inputPadding tokens", () => {
-    const card = read("packages/chat/web/chatInputCard.css");
-    const input = read("packages/chat/web/message-input.css");
+    const card = read("packages/chat/web/chatInputCardStyles.ts");
+    const input = read("packages/chat/web/messageInputStyles.ts");
 
     expect(card).toContain(
-      "border-radius: var(--radius-md) var(--radius-md) 0 0;"
+      'borderRadius: "var(--radius-md) var(--radius-md) 0 0"'
     );
-    expect(card).toContain("padding: var(--space-3) var(--space-4);");
-    expect(card).toContain("padding: var(--inputPadding, 10px 14px);");
+    expect(card).toContain('padding: "var(--space-3) var(--space-4)"');
+    expect(card).toContain('padding: "var(--inputPadding, 10px 14px)"');
 
-    expect(input).toContain("padding: var(--space-3) var(--space-5);");
-    expect(input).toContain("border-radius: var(--radius-md);");
-    expect(input).toContain("padding: var(--space-2) 0 !important;");
+    expect(input).toContain('"var(--radius-md)"');
+    expect(input).toContain('"var(--space-3)"');
     expect(input).not.toContain("border-radius: 20px 20px 20px 20px;");
     expect(input).not.toContain("padding: 12px 20px;");
   });
-
-
 
   test("topbar history colors use text tokens instead of bare hex greys", () => {
     const layoutCss = read("packages/render/layout/layout.css");

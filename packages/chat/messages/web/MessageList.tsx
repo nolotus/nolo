@@ -1,6 +1,6 @@
 // 文件路径: packages/chat/messages/web/MessageList.tsx
 
-import "./messages.css";
+import * as stylex from "@stylexjs/stylex";
 import React, {
   useRef,
   useLayoutEffect,
@@ -28,6 +28,8 @@ import {
   type GroupedRenderEntry,
 } from "./groupToolEntries";
 import TopLoadingIndicator from "./TopLoadingIndicator";
+import { messagesStyles as styles } from "./messagesStyles";
+import "./messagesStylexEscapeHatch.css";
 import { ScrollToBottomButton } from "chat/web/ScrollToBottomButton";
 import { ScrollToTopButton } from "chat/web/ScrollToTopButton";
 import {
@@ -527,7 +529,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
     [isRunning, messages]
   );
 
-  // Styles live in messages.css (avoid rebuilding a large unused style string each stream tick).
+  // Styles live in messagesStyles.ts (avoid rebuilding a large unused style string each stream tick).
 
   return (
     <div className={`chat-messages__list-wrapper${isInitialRender ? " chat-messages__list-wrapper--initial" : ""}`} ref={listRef}>
@@ -769,19 +771,41 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
   if (memories.length === 0) return null;
 
   return (
-    <div className="memory-saved-container">
+    <div
+      className="memory-saved-container"
+      {...stylex.props(styles.memorySavedContainer)}
+      data-testid="memory-saved-container"
+    >
       {memories.map((mem) => {
         const isExplicit = mem.sourceKind === "explicit-user-directive";
         const prefix = isExplicit ? "已保存记忆" : "助手已保存记忆";
         // Content is unique after getSavedMemories dedupe; prefer explicit id if present.
         const memoryKey = mem.id ?? mem.dbKey ?? `${mem.sourceKind}:${mem.content}`;
         return (
-          <div key={memoryKey} className="memory-saved-item">
-            <span className="memory-saved-icon" aria-hidden="true">
+          <div
+            key={memoryKey}
+            className="memory-saved-item"
+            {...stylex.props(styles.memorySavedItem)}
+            data-testid="memory-saved-item"
+          >
+            <span
+              className="memory-saved-icon"
+              {...stylex.props(styles.memorySavedIcon)}
+              aria-hidden="true"
+            >
               <LuBrain size={14} aria-hidden="true" />
             </span>
-            <span className="memory-saved-prefix">{prefix}：</span>
-            <span className="memory-saved-content" title={mem.content}>
+            <span
+              className="memory-saved-prefix"
+              {...stylex.props(styles.memorySavedPrefix)}
+            >
+              {prefix}：
+            </span>
+            <span
+              className="memory-saved-content"
+              {...stylex.props(styles.memorySavedContent)}
+              title={mem.content}
+            >
               {mem.content}
             </span>
           </div>

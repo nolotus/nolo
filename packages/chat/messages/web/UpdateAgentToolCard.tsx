@@ -1,6 +1,6 @@
 // 文件路径: chat/messages/web/UpdateAgentToolCard.tsx
 
-import "./messages.css";
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
 import { useAppSelector } from "app/store";
 import { useTranslation } from "react-i18next";
@@ -11,6 +11,9 @@ import type { Agent } from "app/types";
 import { selectCurrentDialogConfig } from "chat/dialog/dialogSlice";
 import { toTrimmedString } from "core/toTrimmedString";
 import { resolveAgentCardDialogKey } from "./resolveAgentCardDialogKey";
+import { messagesStyles as mStyles } from "./messagesStyles";
+import { createAgentToolCardStyles as cStyles } from "./createAgentToolCardStyles";
+import "./messagesStylexEscapeHatch.css";
 
 interface UpdateAgentToolCardProps {
     rawData: any;
@@ -72,31 +75,35 @@ const UpdateAgentToolCard: React.FC<UpdateAgentToolCardProps> = ({ rawData, isEr
     };
 
     return (
-        <div className="premium-agent-card update-style">
-            <div className="pa-glow" />
-            <div className="pa-content">
-                <div className="pa-left">
-                    <div className="pa-avatar-wrap">
-                        <div className="pa-avatar">
+        <div className="premium-agent-card update-style" {...stylex.props(cStyles.card, mStyles.uatcCard)}>
+            <div className="pa-glow" {...stylex.props(mStyles.uatcGlow)} />
+            <div
+                className="pa-content"
+                {...stylex.props(cStyles.content, mStyles.uatcContent)}
+                data-hook="messages-esc-pa-content"
+            >
+                <div className="pa-left" {...stylex.props(cStyles.left)}>
+                    <div className="pa-avatar-wrap" {...stylex.props(cStyles.avatarWrap)}>
+                        <div className="pa-avatar" {...stylex.props(cStyles.avatar)}>
                             <LuWrench size={22} aria-hidden="true" />
                         </div>
-                        <div className="pa-status-dot" />
+                        <div className="pa-status-dot" {...stylex.props(cStyles.statusDot)} />
                     </div>
-                    <div className="pa-info">
-                        <div className="pa-name-row">
-                            <span className="pa-name">{displayName}</span>
-                            <div className="pa-update-badge">
+                    <div className="pa-info" {...stylex.props(cStyles.info)}>
+                        <div className="pa-name-row" {...stylex.props(cStyles.titleRow)}>
+                            <span className="pa-name" {...stylex.props(cStyles.name)}>{displayName}</span>
+                            <div className="pa-update-badge" {...stylex.props(mStyles.uatcUpdatedBadge)}>
                                 {t("updateAgent.badge") || "已更新"}
                             </div>
                         </div>
-                        <div className="pa-meta">
-                            <span className="pa-meta-item">
+                        <div className="pa-meta" {...stylex.props(cStyles.meta)}>
+                            <span className="pa-meta-item" {...stylex.props(cStyles.metaItem)}>
                                 <LuCpu size={10} aria-hidden="true" />
                                 {model}
                             </span>
-                            <span className="pa-meta-sep">•</span>
+                            <span className="pa-meta-sep" {...stylex.props(cStyles.metaSep)}>•</span>
                             {isPublic && (
-                                <span className="pa-meta-item">
+                                <span className="pa-meta-item" {...stylex.props(cStyles.metaItem)}>
                                     <LuShieldCheck size={10} aria-hidden="true" />
                                     {t("createAgent.public") || "Public"}
                                 </span>
@@ -104,10 +111,16 @@ const UpdateAgentToolCard: React.FC<UpdateAgentToolCardProps> = ({ rawData, isEr
                         </div>
                     </div>
                 </div>
-                <div className="pa-right">
+                <div
+                    className="pa-right"
+                    {...stylex.props(cStyles.right)}
+                    data-hook="messages-esc-pa-right"
+                >
                     <button
                         type="button"
                         className="pa-action-btn"
+                        {...stylex.props(cStyles.actionBtn, isStarting && cStyles.actionBtnDisabled)}
+                        data-hook="messages-esc-pa-action-btn"
                         onClick={() => startDialog()}
                         disabled={isStarting}
                     >

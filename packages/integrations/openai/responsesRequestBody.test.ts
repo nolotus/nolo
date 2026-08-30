@@ -66,4 +66,22 @@ describe("buildResponsesRequestBody", () => {
     expect(body.input).toBe(input);
     expect(body.tools).toBeUndefined();
   });
+
+  test("strips chat-completions-only stream_options before a Responses upstream", () => {
+    // Luna 回归（第二道防线）：客户端按 chat 线构建的 body 携带
+    // stream_options.include_usage 经此处转 Responses 上游时必须剥离，
+    // 否则 OpenAI 400 Unknown parameter: 'stream_options.include_usage'。
+    const body = buildResponsesRequestBody(
+      {
+        messages: [{ role: "user", content: "hello" }],
+        stream: true,
+        stream_options: { include_usage: true },
+      },
+      "gpt-5.6-luna",
+    );
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.stream_options).toBeUndefined();
+    // JSON 序列化后键完全消失（undefined 值被 stringify 丢弃）。
+    expect("stream_options" in JSON.parse(JSON.stringify(body))).toBe(false);
+  });
 });

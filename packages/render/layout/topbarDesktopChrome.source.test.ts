@@ -8,8 +8,12 @@ const themeCss = readFileSync(
   join(import.meta.dir, "../../app/theme/theme-ui.css"),
   "utf-8"
 );
-const chatSidebarCss = readFileSync(
-  join(import.meta.dir, "../../chat/web/sidebar.css"),
+const chatSidebarStyles = readFileSync(
+  join(import.meta.dir, "../../chat/web/sidebarStyles.ts"),
+  "utf-8"
+);
+const chatSidebarEscapeHatch = readFileSync(
+  join(import.meta.dir, "../../chat/web/chatStylexEscapeHatch.css"),
   "utf-8"
 );
 const mainLayoutSource = readFileSync(
@@ -18,8 +22,6 @@ const mainLayoutSource = readFileSync(
 );
 
 describe("desktop topbar and scrollbar source contract", () => {
-
-
   it("moves bell + avatar into the sidebar footer on desktop shell", () => {
     // TopBar keeps only the create button on the right for the desktop shell.
     expect(topBarSource).toContain("topbar__user-area--compact");
@@ -30,7 +32,7 @@ describe("desktop topbar and scrollbar source contract", () => {
       'import("chat/web/sidebar/SidebarUserSection")'
     );
     expect(mainLayoutSource).toContain("{isLoggedIn && (");
-    expect(chatSidebarCss).toContain(".SidebarUserSection");
+    expect(chatSidebarStyles).toContain("sidebarUserSection");
   });
 
   it("keeps fixed drawers below the injected titlebar + TopBar", () => {
@@ -47,11 +49,11 @@ describe("desktop topbar and scrollbar source contract", () => {
       expect(layoutCss).toContain(`${selector}::-webkit-scrollbar-thumb:hover`);
     }
 
-    expect(chatSidebarCss).toContain(".ChatSidebar__scroll-area::-webkit-scrollbar");
-    expect(chatSidebarCss).toContain(
+    expect(chatSidebarEscapeHatch).toContain(".ChatSidebar__scroll-area::-webkit-scrollbar");
+    expect(chatSidebarEscapeHatch).toContain(
       ".ChatSidebar__scroll-area:hover::-webkit-scrollbar-thumb"
     );
-    expect(chatSidebarCss).toContain("scrollbar-width: thin");
+    expect(chatSidebarStyles).toContain('scrollbarWidth: "thin"');
     expect(themeCss).toContain('html[data-nolo-desktop="1"] body');
     expect(themeCss).toContain('html[data-nolo-desktop="1"] ::-webkit-scrollbar');
     expect(themeCss).toContain("overflow: hidden");

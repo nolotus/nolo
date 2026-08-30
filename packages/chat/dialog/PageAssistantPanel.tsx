@@ -1,4 +1,13 @@
-import "./DialogPage.css";
+import * as stylex from "@stylexjs/stylex";
+import { dialogPageStyles } from "./dialogPageStyles";
+import "./dialogStylexEscapeHatch.css";
+
+// `.page-assistant-panel__chat-messages` 类名保留在 DOM：运行时
+// scrollContainerSelector 与 dialogStylexEscapeHatch.css 的后代覆盖规则
+// 依赖该类名；StyleX 原子类经组件 className prop 通道手动拼接。
+const PAP_CHAT_MESSAGES_CLASS = `page-assistant-panel__chat-messages ${
+  stylex.props(dialogPageStyles.papChatMessages).className ?? ''
+}`.trim();
 import React, {
     memo,
     useEffect,
@@ -57,14 +66,19 @@ type EmptyStateProps = {
 
 const EmptyState = memo(
     ({ message, actionText, onAction }: EmptyStateProps) => (
-        <div className="empty-state">
-            <div className="empty-state__icon" aria-hidden="true">
+        <div {...stylex.props(dialogPageStyles.emptyState)}>
+            <div {...stylex.props(dialogPageStyles.emptyStateIcon)} aria-hidden="true">
                 <LuBot size={40} aria-hidden="true" />
             </div>
-            <p className="empty-state__text">{message}</p>
+            <p {...stylex.props(dialogPageStyles.emptyStateText)}>{message}</p>
 
             {actionText && onAction && (
-                <button type="button" className="empty-state__btn" onClick={onAction}>
+                <button
+                    type="button"
+                    data-hook="dialog-esc-est-btn"
+                    {...stylex.props(dialogPageStyles.emptyStateBtn)}
+                    onClick={onAction}
+                >
                     <LuBot size={16} aria-hidden="true" />
                     <span>{actionText}</span>
                 </button>
@@ -318,7 +332,7 @@ export const ArtifactAssistantPanel = memo(
             );
         } else {
             body = (
-                <div className="page-assistant-panel__loading">
+                <div {...stylex.props(dialogPageStyles.papLoading)}>
                     <StreamingIndicator />
                 </div>
             );
@@ -327,7 +341,7 @@ export const ArtifactAssistantPanel = memo(
         // 对话界面：header 标题 + ChatArea（agent 切换在 composer 里）
         if (isCreatingDialog || isLoadingInitial || !isChatActive) {
             body = (
-                <div className="page-assistant-panel__loading">
+                <div {...stylex.props(dialogPageStyles.papLoading)}>
                     <StreamingIndicator />
                 </div>
             );
@@ -344,13 +358,13 @@ export const ArtifactAssistantPanel = memo(
             body = null;
         } else {
             body = (
-                <div className="page-assistant-panel__chat">
+                <div data-hook="dialog-esc-pap-chat" {...stylex.props(dialogPageStyles.papChat)}>
                     <ChatDisplayContext.Provider value={{ compactDeployCards: true }}>
                     <ChatArea
                         dialogId={dialogId}
                         scrollContainerSelector=".page-assistant-panel__chat-messages"
                         runtimeOptions={runtimeOptions}
-                        messagesClassName="page-assistant-panel__chat-messages"
+                        messagesClassName={PAP_CHAT_MESSAGES_CLASS}
                         agentPicker={{
                             candidates: agentKeys.map((key) => ({
                                 key,
@@ -371,10 +385,10 @@ export const ArtifactAssistantPanel = memo(
     }
 
     return (
-        <aside className="page-assistant-panel">
-            <header className="page-assistant-panel__header">
-                <div className="page-assistant-panel__title">
-                    <span className="page-assistant-panel__title-icon" aria-hidden="true">
+        <aside {...stylex.props(dialogPageStyles.pap)}>
+            <header {...stylex.props(dialogPageStyles.papHeader)}>
+                <div {...stylex.props(dialogPageStyles.papTitle)}>
+                    <span {...stylex.props(dialogPageStyles.papTitleIcon)} aria-hidden="true">
                         <LuBot size={14} aria-hidden="true" />
                     </span>
                     <span>
@@ -385,7 +399,7 @@ export const ArtifactAssistantPanel = memo(
                 </div>
             </header>
 
-            <div className="page-assistant-panel__body">{body}</div>
+            <div {...stylex.props(dialogPageStyles.papBody)}>{body}</div>
 
 
         </aside>

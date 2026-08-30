@@ -1,4 +1,8 @@
-import { isFireworksKimiModel } from "ai/llm/kimi";
+import {
+  isFireworksKimiModel,
+  isNoloHostedProvider,
+  PLATFORM_HOSTED_KIMI_K3_MODEL,
+} from "ai/llm/kimi";
 import {
   requiresBareImageUrl,
   toBareImageUrlMessages,
@@ -14,9 +18,22 @@ type NormalizeChatCompletionsBodyArgs = {
 /** Moonshot 开放平台旗舰模型 id（api.moonshot.cn OpenAI 兼容模式）。 */
 const MOONSHOT_KIMI_K3_MODEL = "kimi-k3";
 
-const isMoonshotKimiK3 = (provider: string, model: string): boolean =>
-  asTrimmedLowercaseString(provider) === "moonshot" &&
-  asTrimmedLowercaseString(model) === MOONSHOT_KIMI_K3_MODEL;
+/**
+ * K3 body quirk 的触发判据（server 与本地 runtime 两条出口共用）：
+ * - 用户自带 key 的 moonshot 直连；
+ * 平台托管路径传进来的 provider 是 "nolo" 而非上游 id，只认 "moonshot" 会让
+ * quirk 完全不触发（server 主路径与本地直连路径同样受影响）。
+ */
+const isKimiK3ProviderModel = (provider: string, model: string): boolean => {
+  const normalizedModel = asTrimmedLowercaseString(model);
+  if (asTrimmedLowercaseString(provider) === "moonshot") {
+    return normalizedModel === MOONSHOT_KIMI_K3_MODEL;
+  }
+  return (
+    isNoloHostedProvider(provider) &&
+    normalizedModel === PLATFORM_HOSTED_KIMI_K3_MODEL
+  );
+};
 
 export const normalizeChatCompletionsBodyForProvider = ({
   body,
@@ -31,7 +48,7 @@ export const normalizeChatCompletionsBodyForProvider = ({
     delete nextBody.reasoning_effort;
   }
 
-  if (isMoonshotKimiK3(provider, model)) {
+  if (isKimiK3ProviderModel(provider, model)) {
     // Kimi K3 官方要求固定采样参数，不应被通用 Agent 默认值覆盖。
     delete nextBody.temperature;
     delete nextBody.top_p;
@@ -45,8 +62,9 @@ export const normalizeChatCompletionsBodyForProvider = ({
     }
   }
 
-  // 载荷形状类的 quirk 住在 core/chat（agent-runtime 走不到本模块，两条出口
-  // 必须共用同一份判定）；本文件只留 provider→字段增删这类 body 级 quirk。
+  // 载荷形状类的 quirk 住在 core/chat（依赖无关，两条出口共用同一份判定）；
+  // 本文件只留 provider→字段增删这类 body 级 quirk。agent-runtime 本地直连
+  // 路径直接复用本模块（纯 TS，无 Node 专属依赖），保证与 server 出口一致。
   if (Array.isArray(nextBody.messages) && requiresBareImageUrl({ provider, model })) {
     nextBody.messages = toBareImageUrlMessages(nextBody.messages);
   }

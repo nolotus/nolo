@@ -42,8 +42,8 @@ describe("MemorySavedIndicator UI component", () => {
     const view = await renderInDom(<MemorySavedIndicator dialogConfig={dialogConfig} />);
     try {
       const html = view.container.innerHTML;
-      expect(html).toContain("memory-saved-container");
-      expect(html).toContain("memory-saved-item");
+      expect(html).toContain('data-testid="memory-saved-container"');
+      expect(html).toContain('data-testid="memory-saved-item"');
       expect(html).toContain("已保存记忆");
       expect(html).toContain("记住我是创建者");
       expect(html).toContain("助手已保存记忆");
@@ -51,7 +51,7 @@ describe("MemorySavedIndicator UI component", () => {
       expect(html).not.toContain("推断的偏好");
       expect(html).not.toContain("用户似乎在工作");
       
-      const items = view.container.querySelectorAll(".memory-saved-item");
+      const items = view.container.querySelectorAll('[data-testid="memory-saved-item"]');
       expect(items.length).toBe(2);
     } finally {
       await view.cleanup();

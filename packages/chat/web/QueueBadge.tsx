@@ -11,9 +11,11 @@
 // directly, this component will read from the adapter's runtime instead. The
 // `ChatQueueStatus` shape stays the same either way.
 
-import "./queue-badge.css";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { useTranslation } from "react-i18next";
+import { queueBadgeStyles } from "./queueBadgeStyles";
+import "./chatStylexEscapeHatch.css";
 import {
   clearPendingUserInputQueue,
   usePendingUserInputQueue,
@@ -58,10 +60,11 @@ function QueueBadgeImpl({ dialogKey, isRunning }: QueueBadgeProps) {
   if (!visible) return null;
 
   return (
-    <div className="queue-badge" ref={popoverRef}>
+    <div {...stylex.props(queueBadgeStyles.badge)} ref={popoverRef}>
       <button
         type="button"
-        className={`queue-badge__pill${count === 0 ? " queue-badge__pill--running" : ""}`}
+        data-hook={`chat-esc-queue-pill${count === 0 ? " chat-esc-queue-pill-running" : ""}`}
+        {...stylex.props(queueBadgeStyles.pill)}
         aria-live="polite"
         onClick={() => setOpen((v) => !v)}
         aria-label={
@@ -71,34 +74,37 @@ function QueueBadgeImpl({ dialogKey, isRunning }: QueueBadgeProps) {
         }
         aria-expanded={open}
       >
-        <span className="queue-badge__icon">{count > 0 ? "↥" : "⏳"}</span>
-        {count > 0 && <span className="queue-badge__count">{count}</span>}
-        <span className="queue-badge__label">
+        <span {...stylex.props(queueBadgeStyles.icon)}>{count > 0 ? "↥" : "⏳"}</span>
+        {count > 0 && <span {...stylex.props(queueBadgeStyles.count)}>{count}</span>}
+        <span {...stylex.props(queueBadgeStyles.label)}>
           {count > 0
             ? t("queueBadgeQueued", "排队中")
             : t("loopRunning", "Loop 运行中")}
         </span>
       </button>
       {open && count > 0 && (
-        <div className="queue-badge__popover" role="dialog">
-          <div className="queue-badge__popover-header">
+        <div {...stylex.props(queueBadgeStyles.popover)} role="dialog">
+          <div {...stylex.props(queueBadgeStyles.popoverHeader)}>
             <span>{t("queueBadgeTitle", "排队消息")}</span>
             <button
               type="button"
-              className="queue-badge__clear"
+              {...stylex.props(queueBadgeStyles.clear)}
               onClick={handleClear}
             >
               {t("queueBadgeClear", "清空")}
             </button>
           </div>
-          <ul className="queue-badge__list">
+          <ul {...stylex.props(queueBadgeStyles.list)}>
             {queue.slice(0, previewMax).map((text, i) => (
-              <li key={i} className="queue-badge__item" title={text}>
+              <li key={i} {...stylex.props(queueBadgeStyles.item)} title={text}>
                 {text.length > 60 ? text.slice(0, 60) + "…" : text}
               </li>
             ))}
             {count > previewMax && (
-              <li className="queue-badge__item queue-badge__item--more">
+              <li
+                data-hook="chat-esc-queue-item-more"
+                {...stylex.props(queueBadgeStyles.item)}
+              >
                 {t("queueBadgeMore", "还有 {{n}} 条", { n: count - previewMax })}
               </li>
             )}

@@ -2,7 +2,7 @@
  * Web (HTML/CSS) renderer for the isomorphic `ask_user` state machine.
  *
  * Mirrors the RN AskChoicePanel but uses plain DOM elements + CSS classes
- * from messages.css. Shares the same reducer from `ai/tools/askChoiceState`.
+ * from messagesStyles.ts. Shares the same reducer from `ai/tools/askChoiceState`.
  */
 
 import React, { useReducer, useCallback, useEffect, useRef } from "react";

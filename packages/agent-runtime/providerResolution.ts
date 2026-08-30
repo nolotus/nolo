@@ -9,6 +9,7 @@ import {
   isOpenAiResponsesModel,
   resolvePlatformResponsesEndpoint,
   resolvePlatformChatCompletionsEndpoint,
+  resolvePlatformHostedCredentialProvider,
 } from "./platformProviderEndpoints";
 
 type EnvLike = Record<string, string | undefined>;
@@ -115,6 +116,12 @@ export type DirectProviderExecutionPlan = ProviderExecutionPlanBase & {
   endpoint: string;
   apiKey: string;
   apiKeyHeader?: string;
+  /**
+   * 实际上游 provider id（usage 白名单查询用），仅平台托管分流时设置。
+   * 对外 provider 语义保持 "nolo"（计费归属 / 错误分类锚定平台），与 server
+   * 侧 loopUpstream 的 primaryProvider vs primaryUsageProvider 是同一组概念。
+   */
+  usageProvider?: string;
 };
 
 export type ProxyProviderExecutionPlan = ProviderExecutionPlanBase & {
@@ -127,6 +134,8 @@ export type ProxyProviderExecutionPlan = ProviderExecutionPlanBase & {
   apiSource?: string;
   apiKey?: string;
   apiKeyHeader?: string;
+  /** 同 DirectProviderExecutionPlan.usageProvider。 */
+  usageProvider?: string;
 };
 
 export type ProviderExecutionPlan =
@@ -417,6 +426,9 @@ export async function buildProviderExecutionPlan(args: {
   }
 
   const provider = agentConfig.provider || agentConfig.apiSource || "openai";
+  // 查询使用；对外 provider 语义仍是 "nolo"。custom 模式不设置（用户自带
+  // provider 的行为不变）。
+  const platformUsageProvider = resolvePlatformHostedCredentialProvider(provider, model);
   const endpoint = transportDecision.transport === "proxy"
     ? resolvePlatformProviderEndpoint(agentConfig)
     : resolveChatCompletionsEndpoint(resolveOpenAiCompatibleBaseUrl(env));
@@ -432,6 +444,7 @@ export async function buildProviderExecutionPlan(args: {
       authToken: resolvePlatformAuthToken(env),
       agentKey: agentConfig.key,
       ...(agentConfig.apiSource ? { apiSource: agentConfig.apiSource } : {}),
+      ...(platformUsageProvider ? { usageProvider: platformUsageProvider } : {}),
       // Platform agents use the server-managed provider credential. Never
       // forward a raw credential from a stale/local agent record through the
       // platform proxy; credentials are resolved by the platform server.
@@ -473,5 +486,6 @@ export async function buildProviderExecutionPlan(args: {
     endpoint,
     requestOptions,
     apiKey,
+    ...(platformUsageProvider ? { usageProvider: platformUsageProvider } : {}),
   };
 }

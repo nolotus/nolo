@@ -1,5 +1,7 @@
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
-import "chat/messages/web/MessageLayout.css";
+import { messageLayoutStyles as layoutStyles } from "chat/messages/web/messageLayoutStyles";
+import "chat/messages/web/messagesStylexEscapeHatch.css";
 
 const isAssistantToolStub = (message: any): boolean =>
   message?.role === "assistant" &&
@@ -44,14 +46,42 @@ const ShareDialogPreview: React.FC<{ messages: any[] }> = ({ messages }) => {
             key={message.id ?? index}
             className="ShareImportPage-msgWrapper"
           >
-            <div className={`msg ${isAssistant ? "robot" : "self"}`}>
-              <div className="msg-inner desktop">
-                <div className="content-area">
-                  {isAssistant && <div className="robot-name">AI Assistant</div>}
-                  <div className={`msg-body ${isAssistant ? "robot" : "self"}`}>
-                    <div className="msg-content">
-                      <div className="message-text">
-                        <div className="simple-text">{text}</div>
+            <div
+              className={`msg ${isAssistant ? "robot" : "self"}`}
+              {...stylex.props(
+                layoutStyles.msg,
+                !isAssistant && layoutStyles.msgSelf
+              )}
+            >
+              <div
+                className="msg-inner desktop"
+                {...stylex.props(layoutStyles.msgInnerDesktop)}
+              >
+                <div
+                  className="content-area"
+                  {...stylex.props(
+                    layoutStyles.contentArea,
+                    isAssistant ? layoutStyles.contentAreaRobot : layoutStyles.contentAreaSelf
+                  )}
+                >
+                  {isAssistant && (
+                    <div className="robot-name" {...stylex.props(layoutStyles.robotName)}>
+                      AI Assistant
+                    </div>
+                  )}
+                  <div
+                    className={`msg-body ${isAssistant ? "robot" : "self"}`}
+                    data-hook="messages-esc-msg-body"
+                    {...stylex.props(
+                      layoutStyles.msgBody,
+                      isAssistant ? layoutStyles.msgBodyRobot : layoutStyles.msgBodySelf
+                    )}
+                  >
+                    <div className="msg-content" {...stylex.props(layoutStyles.msgContent)}>
+                      <div className="message-text" {...stylex.props(layoutStyles.messageText)}>
+                        <div className="simple-text" {...stylex.props(layoutStyles.simpleText)}>
+                          {text}
+                        </div>
                       </div>
                     </div>
                   </div>

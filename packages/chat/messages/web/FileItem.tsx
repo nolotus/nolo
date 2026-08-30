@@ -1,8 +1,10 @@
 // chat/web/shared/FileItem.tsx
-import "./FileItem.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { memo } from "react";
 import { LuFileSpreadsheet, LuFileText } from "react-icons/lu";
 import { LuMessageSquare } from "react-icons/lu";
+import { fileItemStyles as styles } from "./fileItemStyles";
+import "./messagesStylexEscapeHatch.css";
 
 const FILE_TYPE_CONFIG = {
   excel: { icon: LuFileSpreadsheet, color: "#1D6F42", ext: "Excel" },
@@ -69,6 +71,20 @@ export const FileItem = memo(
             isProcessing ? "processing" : "",
             error ? "error" : "",
           ].join(" ")}
+          data-hook={[
+            "messages-esc-file-item",
+            variant === "message" ? "messages-esc-file-item-message" : "messages-esc-file-item-attachment",
+            isProcessing ? "messages-esc-file-item-processing" : "",
+            error ? "messages-esc-file-item-error" : "",
+          ].filter(Boolean).join(" ")}
+          {...stylex.props(
+            styles.item,
+            variant === "message" && styles.message,
+            variant === "attachment" && styles.attachment,
+            variant === "attachment" && isMobile && styles.attachmentMobile,
+            isProcessing && styles.processing,
+            Boolean(error) && styles.error
+          )}
           style={{
             "--file-color": config.color,
             cursor: (!disabled && onPreview) ? "pointer" : "default"
@@ -86,34 +102,59 @@ export const FileItem = memo(
             }
           }}
         >
-          <div className="file-icon-wrapper" aria-hidden="true">
+          <div
+            className="file-icon-wrapper"
+            data-hook="messages-esc-file-icon-wrapper"
+            {...stylex.props(
+              styles.iconWrapper,
+              variant === "message" && styles.iconWrapperMessage,
+              variant === "attachment" && styles.iconWrapperAttachment
+            )}
+            aria-hidden="true"
+          >
             <IconComponent
               size={isAttachment ? 14 : 16}
               className="file-icon"
+              data-hook="messages-esc-file-icon"
+              {...stylex.props(styles.icon)}
             />
           </div>
 
           {isAttachment ? (
             <div className="file-info">
-              <span className="file-name">{displayName}</span>
+              <span
+                className="file-name"
+                {...stylex.props(styles.name, styles.nameAttachment)}
+              >
+                {displayName}
+              </span>
               <div className="file-meta">
-                <span className="file-ext">{config.ext}</span>
+                <span className="file-ext" {...stylex.props(styles.ext)}>{config.ext}</span>
                 {file?.size ? (
                   <span className="file-size">{formatSize(file.size)}</span>
                 ) : null}
               </div>
             </div>
           ) : (
-            <span className="file-name">{file?.name || "未知文件"}</span>
+            <span
+              className="file-name"
+              {...stylex.props(styles.name, styles.nameMessage)}
+            >
+              {file?.name || "未知文件"}
+            </span>
           )}
 
           {isAttachment && isProcessing && (
             <div className="processing-indicator">
-              <div className="spinner" />
+              <div className="spinner" {...stylex.props(styles.spinner)} />
             </div>
           )}
 
-          {isAttachment && error && <div className="error-indicator">⚠️</div>}
+          {isAttachment && error && (
+            <div className="error-indicator" {...stylex.props(styles.errorIndicator)}>
+              ⚠️
+            </div>
+          )}
         </div>
       </>
     );

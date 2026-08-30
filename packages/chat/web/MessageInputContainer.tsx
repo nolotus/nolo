@@ -1,8 +1,9 @@
 // 文件路径: packages/chat/web/MessageInputContainer.tsx
 // Assembly / permission gate. Composer lives in MessageInputCore.
 
-import "./message-input.css";
-import "./chatInputCard.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import React, {
   useCallback,
   useState,

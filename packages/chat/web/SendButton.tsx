@@ -1,4 +1,6 @@
-import "./message-input.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import { LuArrowUp, LuLoader } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
 import {
@@ -7,7 +9,7 @@ import {
 } from "chat/dialog/dialogSlice";
 import { useHasStreamingMessage } from "chat/messages/messageSlice";
 import { useTranslation } from "react-i18next";
-import { toast } from "app/utils/toast"
+import { toast } from "app/utils/toast";
 import { useCallback, useEffect, useState } from "react";
 import type React from "react";
 
@@ -109,6 +111,7 @@ const SendButton: React.FC<SendButtonProps> = ({
     <button
       type="button"
       className={`send-button ${variantClass}`}
+      data-hook="chat-esc-send-button"
       data-testid={testId}
       data-loading={isLoading ? "true" : undefined}
       aria-busy={isLoading || undefined}
@@ -117,22 +120,42 @@ const SendButton: React.FC<SendButtonProps> = ({
       disabled={isEffectivelyDisabled}
       aria-label={ariaLabel}
       title={ariaTitle}
+      {...stylex.props(
+        messageInputStyles.sendButton,
+        canAbort
+          ? messageInputStyles.stopMode
+          : isLoading
+            ? messageInputStyles.sendButtonLoading
+            : messageInputStyles.sendMode,
+        isEffectivelyDisabled && messageInputStyles.sendButtonDisabled
+      )}
     >
       {canAbort ? (
-        <div className="stop-indicator" aria-hidden="true" />
+        <div
+          className="stop-indicator"
+          aria-hidden="true"
+          {...stylex.props(messageInputStyles.stopIndicator)}
+        />
       ) : isLoading ? (
         <LuLoader
           size={20}
           strokeWidth={1.8}
           className="send-loading-icon"
+          data-hook="chat-esc-send-loading"
           aria-hidden="true"
+          {...stylex.props(messageInputStyles.sendLoadingIcon)}
         />
       ) : (
         <LuArrowUp
           size={20}
           strokeWidth={1.75}
           className={`send-icon ${isAnimating ? "animating" : ""}`}
+          data-hook="chat-esc-send-icon"
           aria-hidden="true"
+          {...stylex.props(
+            messageInputStyles.sendIcon,
+            isAnimating && messageInputStyles.sendIconAnimating
+          )}
         />
       )}
     </button>

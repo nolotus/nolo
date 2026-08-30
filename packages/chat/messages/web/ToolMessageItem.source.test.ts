@@ -39,12 +39,17 @@ describe("ToolMessageItem source contract", () => {
   });
 
   test("tool row header has no running pulse-dot animation", () => {
-    const css = readFileSync(
-      new URL("./messages.css", import.meta.url),
+    const escapeHatchCss = readFileSync(
+      new URL("./messagesStylexEscapeHatch.css", import.meta.url),
       "utf8",
     );
-    expect(css).not.toContain("tool-running-pulse");
-    expect(css).not.toContain(".tr-icon::after");
+    const stylesSource = readFileSync(
+      new URL("./messagesStyles.ts", import.meta.url),
+      "utf8",
+    );
+    expect(escapeHatchCss).not.toContain("tool-running-pulse");
+    expect(escapeHatchCss).not.toContain(".tr-icon::after");
+    expect(stylesSource).not.toContain("tool-running-pulse");
   });
 
   test("completed tool rows auto-collapse so only the active row stays open", () => {

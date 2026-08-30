@@ -146,7 +146,7 @@ describe("MessageToolConfirmBar", () => {
         await flush();
       });
 
-      expect(container.querySelector(".tool-confirm-row")).toBeNull();
+      expect(container.querySelector('[data-testid="tool-confirm-row"]')).toBeNull();
       expect(container.textContent).not.toContain("确认删除这些 Space");
       expect(container.textContent).not.toContain("确认删除");
     }
@@ -169,7 +169,7 @@ describe("MessageToolConfirmBar", () => {
       await flush();
     });
 
-    expect(container.querySelector(".tool-confirm-row")).toBeNull();
+    expect(container.querySelector('[data-testid="tool-confirm-row"]')).toBeNull();
     expect(container.textContent).not.toContain("确认执行");
     expect(dispatchCalls).toEqual([]);
   });
@@ -192,7 +192,7 @@ describe("MessageToolConfirmBar", () => {
       await flush();
     });
 
-    expect(container.querySelector(".tool-confirm-row")).not.toBeNull();
+    expect(container.querySelector('[data-testid="tool-confirm-row"]')).not.toBeNull();
     expect(container.textContent).toContain("应用这个补丁（危险操作）");
   });
 

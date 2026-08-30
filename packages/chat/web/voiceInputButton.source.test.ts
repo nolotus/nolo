@@ -49,7 +49,7 @@ describe("VoiceInputButton source contract", () => {
 
   it("decorative mic/animation chrome is aria-hidden", () => {
     expect(source).toContain('<LuMic size={iconSize} aria-hidden="true" />');
-    expect(source).toContain('<div className="voice-dots" aria-hidden="true">');
-    expect(source).toContain('<div className="voice-bars" aria-hidden="true">');
+    expect(source).toContain('className="voice-dots" aria-hidden="true"');
+    expect(source).toContain('className="voice-bars" aria-hidden="true"');
   });
 });

@@ -15,7 +15,9 @@ import { selectById } from "database/dbSlice";
 import type { Agent } from "app/types";
 import type { AgentPickerCandidate } from "../hooks/useAgentPickerCandidates";
 import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
-import "./AgentPickerControl.css";
+import * as stylex from "@stylexjs/stylex";
+import { agentPickerControlStyles as apStyles } from "./agentPickerControlStyles";
+import "./chatStylexEscapeHatch.css";
 
 export type AgentPickerDefaultOption = {
   /** 列表行与空选态 trigger 标签，例如「默认」「自动」。 */
@@ -79,7 +81,8 @@ const AgentPickerItem: React.FC<{
   // 来源层 badge：收藏优先，其次自己创建，否则广场
   const badge = candidate.isFavorite ? (
     <span
-      className="agent-picker__item-badge is-favorite"
+      data-hook="chat-esc-ap-badge-favorite"
+      {...stylex.props(apStyles.badge)}
       aria-label={t("chat:favoriteAgent", "收藏")}
       title={t("chat:favoriteAgent", "收藏")}
     >
@@ -87,7 +90,8 @@ const AgentPickerItem: React.FC<{
     </span>
   ) : candidate.isOwned ? (
     <span
-      className="agent-picker__item-badge is-owned"
+      data-hook="chat-esc-ap-badge-owned"
+      {...stylex.props(apStyles.badge)}
       aria-label={t("chat:myAgent", "我的")}
       title={t("chat:myAgent", "我的")}
     >
@@ -95,7 +99,8 @@ const AgentPickerItem: React.FC<{
     </span>
   ) : (
     <span
-      className="agent-picker__item-badge is-public"
+      data-hook="chat-esc-ap-badge-public"
+      {...stylex.props(apStyles.badge)}
       aria-label={t("ai:agentSquare", "广场")}
       title={t("ai:agentSquare", "广场")}
     >
@@ -104,23 +109,28 @@ const AgentPickerItem: React.FC<{
   );
   return (
     <li
-      className={`agent-picker__item${isActive ? " is-active" : ""}`}
+      data-hook={isActive ? "chat-esc-ap-item-active" : undefined}
       aria-current={isActive || undefined}
     >
-      <button type="button" onClick={() => onSelect(candidate.key)}>
+      <button
+        type="button"
+        data-hook="chat-esc-ap-item-btn"
+        {...stylex.props(apStyles.itemBtn)}
+        onClick={() => onSelect(candidate.key)}
+      >
         {badge}
-        <span className="agent-picker__item-text">
-          <span className="agent-picker__item-name">
+        <span {...stylex.props(apStyles.itemText)}>
+          <span {...stylex.props(apStyles.itemName)}>
             {agent?.name ?? candidate.key}
           </span>
           {(agent?.introduction || agent?.model) && (
-            <span className="agent-picker__item-intro">
+            <span {...stylex.props(apStyles.itemIntro)}>
               {agent?.introduction || agent?.model}
             </span>
           )}
         </span>
         {isActive && (
-          <span className="agent-picker__item-check" aria-hidden="true">
+          <span {...stylex.props(apStyles.itemCheck)} aria-hidden="true">
             <LuCheck size={14} />
           </span>
         )}
@@ -171,24 +181,31 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
     if (agentKey !== (normalizedActiveKey ?? "")) onSelect(agentKey);
   };
 
-  const rootClass = ["agent-picker", open ? "is-open" : "", className]
-    .filter(Boolean)
-    .join(" ");
-
   return (
-    <div className={rootClass}>
+    <div
+      data-hook={open ? "chat-esc-ap-open" : undefined}
+      className={className}
+      {...stylex.props(apStyles.root)}
+    >
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
         <RACButton
+          data-hook="chat-esc-ap-trigger"
           className="agent-picker__trigger"
+          {...stylex.props(apStyles.trigger)}
           aria-label={triggerAria}
         >
-          <span className="agent-picker__trigger-icon" aria-hidden="true">
+          <span {...stylex.props(apStyles.triggerIcon)} aria-hidden="true">
             {triggerIcon}
           </span>
-          <span className="agent-picker__trigger-label">{triggerLabel}</span>
+          <span
+            className="agent-picker__trigger-label"
+            {...stylex.props(apStyles.triggerLabel)}
+          >
+            {triggerLabel}
+          </span>
           <LuChevronDown
             size={12}
-            className="agent-picker__trigger-caret"
+            {...stylex.props(apStyles.caret, open && apStyles.caretOpen)}
             aria-hidden="true"
           />
         </RACButton>
@@ -196,35 +213,42 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
           placement="top start"
           offset={6}
           hideArrow
-          className="agent-picker__popover nolo-select-popup select-popover"
+          className="nolo-select-popup select-popover"
+          {...stylex.props(apStyles.popover)}
           style={{ width: 280, padding: 0 }}
         >
-          {hint && <div className="agent-picker__hint">{hint}</div>}
-          <ul className="agent-picker__list">
+          {hint && <div {...stylex.props(apStyles.hint)}>{hint}</div>}
+          <ul {...stylex.props(apStyles.list)}>
             {defaultOption && (
               <li
-                className={`agent-picker__item${isDefaultActive ? " is-active" : ""}`}
+                data-hook={isDefaultActive ? "chat-esc-ap-item-active" : undefined}
                 aria-current={isDefaultActive || undefined}
               >
-                <button type="button" onClick={() => handleSelect("")}>
+                <button
+                  type="button"
+                  data-hook="chat-esc-ap-item-btn"
+                  {...stylex.props(apStyles.itemBtn)}
+                  onClick={() => handleSelect("")}
+                >
                   <span
-                    className="agent-picker__item-badge is-default"
+                    data-hook="chat-esc-ap-badge-default"
+                    {...stylex.props(apStyles.badge)}
                     aria-hidden="true"
                   >
                     <LuZap size={11} />
                   </span>
-                  <span className="agent-picker__item-text">
-                    <span className="agent-picker__item-name">
+                  <span {...stylex.props(apStyles.itemText)}>
+                    <span {...stylex.props(apStyles.itemName)}>
                       {defaultOption.label}
                     </span>
                     {defaultOption.description && (
-                      <span className="agent-picker__item-intro">
+                      <span {...stylex.props(apStyles.itemIntro)}>
                         {defaultOption.description}
                       </span>
                     )}
                   </span>
                   {isDefaultActive && (
-                    <span className="agent-picker__item-check" aria-hidden="true">
+                    <span {...stylex.props(apStyles.itemCheck)} aria-hidden="true">
                       <LuCheck size={14} />
                     </span>
                   )}
@@ -241,7 +265,7 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
             ))}
           </ul>
           {candidates.length === 0 && defaultOption && (
-            <div className="agent-picker__empty">
+            <div {...stylex.props(apStyles.empty)}>
               {t("chat:noAvailableAgents", "暂无可用 Agent")}
             </div>
           )}

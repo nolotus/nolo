@@ -1,0 +1,338 @@
+/*
+ * messagesStylexEscapeHatch.css
+ * ─────────────────────────────────────────────────────────────
+ * packages/chat/messages/web CSS → StyleX 迁移的逃生舱：集中存放
+ * 无法用 StyleX（stylex.create 原子类）表达或存在同名属性竞争、必须以
+ * unlayered 普通 CSS 保持原级联顺序的规则。由使用方 tsx 顶部
+ * import。每条规则前注明「选择器 + 保留原因」，按基线源码顺序排列。
+ *
+ * 注：暗色主题覆盖一律走 StyleX 主题 token 通道
+ *（app/theme/agentTheme.stylex.ts），本文件无 [data-theme] 规则。
+ *
+ * hook 约定：元素以 data-hook 属性携带 hook 标记（stylex.props()
+ * 展开会覆盖其后位置之外的 className，data-hook 字面属性不受影响），
+ * 选择器用 [data-hook~="messages-esc-*"] 等价原类名匹配（特异性同 class）。
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ═══ 自 MessageToolConfirmBar.css 迁出（MessageToolConfirmBar.tsx）═══ */
+
+/* ── 状态与变体竞争规则（hover / disabled）──
+ * 保留原因：:hover:not(:disabled) 为复合伪类选择器，StyleX 不支持 :not(...) 伪类。 */
+
+/* .tool-confirm-button:hover:not(:disabled) */
+[data-hook~="messages-esc-tool-confirm-button"]:hover:not(:disabled) {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+  color: var(--text);
+  border-color: var(--borderSubtle);
+}
+
+/* ═══ 自 ThinkingSection.css 迁出（ThinkingSection.tsx）═══ */
+
+/* ── 跨组件 Slate Editor 样式穿透覆盖 ──
+ * 保留原因：ThinkingSection 内嵌只读 Editor，需要穿透子组件 DOM 覆盖
+ * .nolo-editor-container 的 padding 与 [data-slate-editor] 的字号/颜色。
+ * StyleX 不支持后代与子组件穿透选择器。 */
+
+/* .thinking-editor-wrapper :global(.nolo-editor-container) */
+[data-hook~="messages-esc-thinking-editor-wrapper"] .nolo-editor-container {
+  padding: 0 !important;
+}
+
+/* .thinking-editor-wrapper :global([data-slate-editor]) */
+[data-hook~="messages-esc-thinking-editor-wrapper"] [data-slate-editor] {
+  font-size: var(--fontSize-sm) !important;
+  color: var(--textMuted, var(--textTertiary)) !important;
+  opacity: 0.92 !important;
+}
+
+/* ═══ 自 AppDeployCard.css 迁出（AppDeployCard.tsx）═══ */
+
+/* ── 容器查询与后代子元素规则 ──
+ * 保留原因：@container right-panel 命名的容器查询，且包含 .adc-btn span 后代选择器，
+ * StyleX 不支持后代选择器。 */
+
+@container right-panel (max-width: 380px) {
+  [data-hook~="messages-esc-adc-header"] {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+  }
+  [data-hook~="messages-esc-adc-name"] {
+    font-size: var(--fontSize-base);
+  }
+  [data-hook~="messages-esc-adc-actions"] {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  [data-hook~="messages-esc-adc-btn"] {
+    padding: 5px 10px;
+    font-size: var(--fontSize-sm);
+    gap: 4px;
+  }
+  [data-hook~="messages-esc-adc-btn-editor"] span {
+    font-size: var(--fontSize-sm);
+  }
+}
+
+@container right-panel (max-width: 300px) {
+  [data-hook~="messages-esc-adc-btn"] span {
+    display: none;
+  }
+  [data-hook~="messages-esc-adc-btn-editor"] span {
+    display: inline;
+  }
+  [data-hook~="messages-esc-adc-btn"] {
+    padding: 6px 8px;
+  }
+}
+
+/* ═══ 自 FileItem.css 迁出（FileItem.tsx）═══ */
+
+/* ── 父级 :hover 控制子元素 ──
+ * 保留原因：鼠标悬停在卡片上时改变内部图标容器背景与图标颜色。
+ * StyleX 不支持父子/后代组合选择器。 */
+
+/* .file-item:hover:not(.processing):not(.error) .file-icon-wrapper */
+[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon-wrapper"] {
+  background: var(--file-color);
+  transform: scale(1.1);
+}
+
+/* .file-item:hover:not(.processing):not(.error) .file-icon */
+[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) [data-hook~="messages-esc-file-icon"] {
+  color: #fff;
+}
+
+/* .file-item:hover:not(.processing):not(.error) 状态竞争 */
+[data-hook~="messages-esc-file-item"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) {
+  background: var(--backgroundHover);
+  border-color: var(--file-color);
+}
+
+[data-hook~="messages-esc-file-item-message"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) {
+  transform: translateY(-1px);
+}
+
+[data-hook~="messages-esc-file-item-attachment"]:hover:not([data-hook~="messages-esc-file-item-processing"]):not([data-hook~="messages-esc-file-item-error"]) {
+  transform: scale(1.02);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-hook~="messages-esc-file-item"]:hover [data-hook~="messages-esc-file-icon-wrapper"] {
+    transform: none;
+  }
+}
+
+/* ═══ 自 CreateAgentToolCard.css 迁出（CreateAgentToolCard.tsx）═══ */
+
+/* ── 容器查询覆盖 ──
+ * 保留原因：@container right-panel 命名容器查询在小屏幕下的紧凑布局。 */
+
+@container right-panel (max-width: 380px) {
+  [data-hook~="messages-esc-pa-intro"] {
+    display: none;
+  }
+  [data-hook~="messages-esc-pa-content"] {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  [data-hook~="messages-esc-pa-right"] {
+    width: 100%;
+    display: flex;
+  }
+  [data-hook~="messages-esc-pa-action-btn"] {
+    flex: 1;
+    justify-content: center;
+    height: var(--control-md);
+    font-size: var(--fontSize-sm);
+  }
+}
+
+/* ═══ 自 MessageActions.css 迁出（MessageActions.tsx）═══ */
+
+/* ── 悬停显现规则（Pattern A）──
+ * 保留原因：父级 hover / 状态类激活桌面端操作栏显现，
+ * 以及 :focus-within 激活。StyleX 不支持父子/后代选择器。 */
+
+[data-hook~="messages-esc-msg-hover-target"]:hover [data-hook~="messages-esc-actions-desktop"],
+[data-hook~="messages-esc-msg-hover-target"][data-hook~="messages-esc-is-actions-hover"] [data-hook~="messages-esc-actions-desktop"],
+.msg-hover-target:hover .actions.desktop,
+.msg-hover-target.is-actions-hover .actions.desktop,
+.msg:hover .actions.desktop,
+.msg.actions-visible .actions.desktop,
+[data-hook~="messages-esc-actions-desktop"][data-hook~="messages-esc-show"],
+[data-hook~="messages-esc-actions-desktop"]:focus-within {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+[data-hook~="messages-esc-action-btn"]:focus-visible {
+  outline: 2px solid var(--borderFocus);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-hook~="messages-esc-actions-overlay-mobile"] [data-hook~="messages-esc-overlay-backdrop"],
+  [data-hook~="messages-esc-actions-panel"],
+  [data-hook~="messages-esc-action-spinner"] {
+    animation: none;
+  }
+}
+
+/* ═══ 自 MessageLayout.css 迁出（MessageLayout / Markdown 渲染）═══ */
+
+/* ── 消息正文内 Markdown / 富文本深层后代排版 ──
+ * 保留原因：Markdown 渲染器（Slate / StreamingStructuredMarkdown）输出
+ * 原生 HTML 节点，StyleX 无法直接为第三方或动态生成的深层子节点添加原子类。 */
+
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-body,
+[data-hook~="messages-esc-msg-body"] .ReadOnlyMarkdownContent__body {
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: 0.01em;
+}
+
+[data-hook~="messages-esc-msg-body"] .text-paragraph {
+  margin: 0.65em 0;
+  line-height: inherit;
+}
+
+[data-hook~="messages-esc-msg-body"] .text-heading-one,
+[data-hook~="messages-esc-msg-body"] .text-heading-two,
+[data-hook~="messages-esc-msg-body"] .text-heading-three,
+[data-hook~="messages-esc-msg-body"] .text-heading-four,
+[data-hook~="messages-esc-msg-body"] .text-heading-five,
+[data-hook~="messages-esc-msg-body"] .text-heading-six,
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-body h1,
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-body h2,
+[data-hook~="messages-esc-msg-body"] .streaming-markdown-body h3,
+[data-hook~="messages-esc-msg-body"] .ReadOnlyMarkdownContent__body h1,
+[data-hook~="messages-esc-msg-body"] .ReadOnlyMarkdownContent__body h2,
+[data-hook~="messages-esc-msg-body"] .ReadOnlyMarkdownContent__body h3 {
+  margin-top: 1.15em;
+  margin-bottom: 0.45em;
+  line-height: 1.35;
+}
+
+[data-hook~="messages-esc-msg-body"] .custom-list {
+  margin: 0.55em 0;
+  line-height: 1.65;
+  padding-left: 1.25em;
+}
+
+[data-hook~="messages-esc-msg-body"] .custom-list-item {
+  margin: 0 0 0.3em;
+  line-height: 1.65;
+  padding-left: 0.3em;
+}
+
+[data-hook~="messages-esc-msg-body"] .custom-list-item:last-child {
+  margin-bottom: 0;
+}
+
+[data-hook~="messages-esc-msg-body"] .custom-list-item p,
+[data-hook~="messages-esc-msg-body"] .custom-list-item .text-paragraph {
+  margin: 0.15em 0;
+}
+
+/* Inline code */
+[data-hook~="messages-esc-msg-body"] .inline-code {
+  font-size: 0.9em;
+  font-weight: 500;
+  line-height: 1.45;
+  padding: 0.12em 0.4em;
+  margin: 0 0.08em;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--borderLight, var(--border)) 70%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--backgroundSecondary, var(--surfaceInset)) 72%,
+    transparent
+  );
+  color: color-mix(in srgb, var(--primary) 82%, var(--text));
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+[data-hook~="messages-esc-msg-body"] .text-quote {
+  margin: 0.75em 0;
+  padding: 0.65em 0.9em;
+  line-height: inherit;
+}
+
+@media (max-width: 768px) {
+  [data-hook~="messages-esc-msg-body"] .inline-code {
+    font-size: 0.92em;
+    padding: 0.1em 0.35em;
+  }
+}
+
+/* ═══ 自 messages.css 迁出 ═══ */
+
+/* ── 页面滚动阴影伪元素（HeroUI 风格）──
+ * 保留原因：::before 与 ::after 伪元素附着在 [data-nolo-chat-scroll-shadow] 容器上，
+ * 需要由全局滚动状态属性 [data-top-scroll] 与 [data-bottom-scroll] 控制渐变显隐。
+ * StyleX 对伪元素与属性复合选择器支持受限。 */
+
+.MainLayout__main[data-nolo-chat-scroll-shadow] {
+  position: relative;
+}
+
+.MainLayout__main[data-nolo-chat-scroll-shadow]::before,
+.MainLayout__main[data-nolo-chat-scroll-shadow]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28px;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.MainLayout__main[data-nolo-chat-scroll-shadow]::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--background) 0%,
+    color-mix(in srgb, var(--background) 80%, transparent) 40%,
+    color-mix(in srgb, var(--background) 0%, transparent) 100%
+  );
+}
+
+.MainLayout__main[data-nolo-chat-scroll-shadow]::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--background) 0%,
+    color-mix(in srgb, var(--background) 80%, transparent) 40%,
+    color-mix(in srgb, var(--background) 0%, transparent) 100%
+  );
+}
+
+.MainLayout__main[data-nolo-chat-scroll-shadow][data-top-scroll]::before {
+  opacity: 1;
+}
+
+.MainLayout__main[data-nolo-chat-scroll-shadow][data-bottom-scroll]::after {
+  opacity: 1;
+}
+
+/* ── 移动端滚动条隐藏 ──
+ * 保留原因：WebKit 专用伪元素 ::-webkit-scrollbar，StyleX 不支持。 */
+
+@media (max-width: 768px) {
+  [data-hook~="messages-esc-viewport"]::-webkit-scrollbar {
+    display: none;
+  }
+  [data-hook~="messages-esc-viewport"] {
+    scrollbar-width: none;
+  }
+}

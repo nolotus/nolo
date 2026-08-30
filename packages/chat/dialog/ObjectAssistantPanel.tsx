@@ -17,6 +17,9 @@ import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { readAppServerOrigin } from "app/constants/appEditor";
 import { useAppSelectedNode } from "app/appInspector/appInspectorStore";
 import { ArtifactAssistantPanel } from "./PageAssistantPanel";
+import * as stylex from "@stylexjs/stylex";
+import { dialogPageStyles } from "./dialogPageStyles";
+import "./dialogStylexEscapeHatch.css";
 import {
   buildBuiltinObjectAssistantAgent,
   buildObjectAssistantRuntimeOptions,
@@ -36,18 +39,18 @@ const ObjectAssistantShell: React.FC<{ message: string; loading?: boolean }> = (
   message,
   loading = false,
 }) => (
-  <aside className="page-assistant-panel">
-    <header className="page-assistant-panel__header">
-      <div className="page-assistant-panel__title">
-        <span className="page-assistant-panel__title-icon" aria-hidden="true">
+  <aside {...stylex.props(dialogPageStyles.pap)}>
+    <header {...stylex.props(dialogPageStyles.papHeader)}>
+      <div {...stylex.props(dialogPageStyles.papTitle)}>
+        <span {...stylex.props(dialogPageStyles.papTitleIcon)} aria-hidden="true">
           <LuBot size={14} aria-hidden="true" />
         </span>
         <span>{message}</span>
       </div>
     </header>
 
-    <div className="page-assistant-panel__body">
-      <div className="page-assistant-panel__loading">
+    <div {...stylex.props(dialogPageStyles.papBody)}>
+      <div {...stylex.props(dialogPageStyles.papLoading)}>
         {loading ? <StreamingIndicator /> : <span>{message}</span>}
       </div>
     </div>

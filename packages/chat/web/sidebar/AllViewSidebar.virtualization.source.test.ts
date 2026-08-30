@@ -10,7 +10,7 @@ const pinnedSource = readFileSync(
   join(import.meta.dir, "SidebarPinnedBlock.tsx"),
   "utf-8"
 );
-const sidebarCss = readFileSync(join(import.meta.dir, "..", "sidebar.css"), "utf-8");
+const sidebarStyles = readFileSync(join(import.meta.dir, "..", "sidebarStyles.ts"), "utf-8");
 
 describe("AllViewSidebar virtualization completeness", () => {
   it("routes default recent + search through SidebarVirtualizedList (RecentVirtualList)", () => {
@@ -40,27 +40,21 @@ describe("AllViewSidebar virtualization completeness", () => {
   });
 
   it("search path uses section--fill so Virtualizer has a bounded height chain", () => {
-    expect(allViewSource).toContain(
-      'className="AllViewSidebar__section AllViewSidebar__section--fill"'
-    );
-    expect(sidebarCss).toContain(".AllViewSidebar__section--fill");
-    expect(sidebarCss).toContain(
-      ".AllViewSidebar__section--fill .AllViewSidebar__section-preview"
-    );
-    expect(sidebarCss).toContain(
-      ".AllViewSidebar__section--fill .AllViewSidebar__search-group"
-    );
+    expect(allViewSource).toContain("AllViewSidebar__section--fill");
+    expect(sidebarStyles).toContain("allViewSectionFill");
+    expect(sidebarStyles).toContain("allViewSectionPreview");
+    expect(sidebarStyles).toContain("allViewSearchGroup");
   });
 
   it("recent-list is a flex column shell for the ListBox scroller", () => {
-    const recentList = sidebarCss.match(
-      /\.AllViewSidebar__recent-list\s*\{[^}]*\}/s
+    const recentList = sidebarStyles.match(
+      /allViewRecentList:\s*\{[^}]*\}/s
     );
     expect(recentList).toBeTruthy();
-    expect(recentList![0]).toContain("display: flex");
-    expect(recentList![0]).toContain("flex-direction: column");
-    expect(recentList![0]).toContain("min-height: 0");
-    expect(recentList![0]).toContain("overflow: hidden");
+    expect(recentList![0]).toContain('display: "flex"');
+    expect(recentList![0]).toContain('flexDirection: "column"');
+    expect(recentList![0]).toContain("minHeight: 0");
+    expect(recentList![0]).toContain('overflow: "hidden"');
   });
 
   it("keeps pinned block non-virtual (small-N policy) and documents map render", () => {

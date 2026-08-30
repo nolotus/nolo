@@ -1,7 +1,9 @@
-import "./message-input.css";
+import * as stylex from "@stylexjs/stylex";
+import { messageInputStyles } from "./messageInputStyles";
+import "./chatStylexEscapeHatch.css";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { LuMic } from "react-icons/lu";
-import { toast } from "app/utils/toast"
+import { toast } from "app/utils/toast";
 import { useAppSelector } from "app/store";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { useCurrentDialogKey } from "chat/dialog/dialogSlice";
@@ -270,29 +272,45 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   const label = isRecording ? "停止录音（或等待静音自动停止）" : isProcessing ? "转录中…" : "语音输入";
 
   return (
-    <>
-
-      <button
-        type="button"
-        className={`voice-btn ${stateClass} ${className}`}
-        onClick={handleClick}
-        disabled={isProcessing}
-        aria-label={label}
-        title={label}
-      >
-        {isProcessing ? (
-          <div className="voice-dots" aria-hidden="true">
-            <span /><span /><span />
-          </div>
-        ) : isRecording ? (
-          <div className="voice-bars" aria-hidden="true">
-            <span /><span /><span /><span /><span />
-          </div>
-        ) : (
-          <LuMic size={iconSize} aria-hidden="true" />
-        )}
-      </button>
-    </>
+    <button
+      type="button"
+      className={`voice-btn ${stateClass} ${className}`}
+      data-hook={className.includes("voice-btn-in-send") ? "chat-esc-voice-btn-send" : undefined}
+      onClick={handleClick}
+      disabled={isProcessing}
+      aria-label={label}
+      title={label}
+      {...stylex.props(
+        messageInputStyles.voiceBtn,
+        isRecording
+          ? messageInputStyles.voiceBtnRecording
+          : isProcessing
+            ? messageInputStyles.voiceBtnProcessing
+            : messageInputStyles.voiceBtnIdle,
+        className.includes("voice-btn--compact") &&
+          messageInputStyles.voiceBtnCompact,
+        className.includes("voice-btn-in-send") &&
+          messageInputStyles.voiceBtnInSend
+      )}
+    >
+      {isProcessing ? (
+        <div className="voice-dots" aria-hidden="true" {...stylex.props(messageInputStyles.voiceDots)}>
+          <span {...stylex.props(messageInputStyles.voiceDot)} />
+          <span {...stylex.props(messageInputStyles.voiceDot)} />
+          <span {...stylex.props(messageInputStyles.voiceDot)} />
+        </div>
+      ) : isRecording ? (
+        <div className="voice-bars" aria-hidden="true" {...stylex.props(messageInputStyles.voiceBars)}>
+          <span {...stylex.props(messageInputStyles.voiceBar)} />
+          <span {...stylex.props(messageInputStyles.voiceBar)} />
+          <span {...stylex.props(messageInputStyles.voiceBar)} />
+          <span {...stylex.props(messageInputStyles.voiceBar)} />
+          <span {...stylex.props(messageInputStyles.voiceBar)} />
+        </div>
+      ) : (
+        <LuMic size={iconSize} aria-hidden="true" />
+      )}
+    </button>
   );
 };
 

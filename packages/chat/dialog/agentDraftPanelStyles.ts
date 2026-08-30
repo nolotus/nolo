@@ -1,0 +1,284 @@
+import * as stylex from "@stylexjs/stylex";
+
+/**
+ * AgentDraftPanel.tsx 的 StyleX 样式 —— 自原 AgentDraftPanel.css 1:1 迁出
+ * （2026-08-30）。与原 CSS 保持 1:1：同一元素、同一声明、同值；
+ * 原 `.AgentDraftPanel__xxx 后代` 选择器在本组件内等价于直接类。
+ *
+ * 逃生舱（dialogStylexEscapeHatch.css，hook: dialog-esc-adp-*）：
+ * - icon-button/:hover、field 控件的 :not(:disabled)/:disabled/
+ *   ::placeholder/:focus 阶梯、toggle 的 :disabled 与 .is-active 变体、
+ *   primary:disabled —— 均与基础同名属性竞争（或 StyleX 不支持该
+ *   选择器），按基线源码顺序下沉 unlayered 保持级联。
+ */
+export const agentDraftPanelStyles = stylex.create({
+  root: {
+    background: "var(--background, #ffffff)",
+    borderLeft:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    display: "flex",
+    flex: "0 0 360px",
+    flexDirection: "column",
+    minHeight: 0,
+    width: "360px",
+    "@media (max-width: 960px)": {
+      bottom: 0,
+      boxShadow: "0 -12px 30px rgba(15, 23, 42, 0.16)",
+      flexBasis: "auto",
+      left: 0,
+      maxHeight: "82vh",
+      position: "fixed",
+      right: 0,
+      width: "auto",
+      zIndex: 20,
+    },
+  },
+  header: {
+    alignItems: "center",
+    borderBottom:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    display: "flex",
+    justifyContent: "space-between",
+    minHeight: "52px",
+    padding: "0 14px",
+  },
+  titleWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+    minWidth: 0,
+  },
+  title: {
+    alignItems: "center",
+    color: "var(--text, #111827)",
+    display: "flex",
+    fontSize: "14px",
+    fontWeight: 650,
+    gap: "8px",
+  },
+  dirtyState: {
+    color: "var(--textSecondary, #6b7280)",
+    fontSize: "11px",
+    fontWeight: 600,
+    lineHeight: 1.2,
+    paddingLeft: "26px",
+  },
+  createdState: {
+    color: "var(--success, #16a34a)",
+    fontSize: "11px",
+    fontWeight: 650,
+    lineHeight: 1.2,
+    paddingLeft: "26px",
+  },
+  iconButton: {
+    alignItems: "center",
+    background: "transparent",
+    border: 0,
+    borderRadius: "var(--radius-xs)",
+    color: "var(--textSecondary, #6b7280)",
+    cursor: "pointer",
+    display: "inline-flex",
+    height: "30px",
+    justifyContent: "center",
+    width: "30px",
+  },
+  body: {
+    display: "flex",
+    flex: "1 1 auto",
+    flexDirection: "column",
+    gap: "12px",
+    minHeight: 0,
+    overflow: "auto",
+    padding: "14px",
+  },
+  field: {
+    color: "var(--textSecondary, #4b5563)",
+    display: "flex",
+    flexDirection: "column",
+    fontSize: "12px",
+    fontWeight: 600,
+    gap: "6px",
+  },
+  /* __field input / __field textarea 共享基础（变体见逃生舱） */
+  fieldControl: {
+    background: "var(--backgroundSecondary, var(--background, #ffffff))",
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    borderRadius: "var(--radius-xs)",
+    caretColor: "var(--text, #111827)",
+    color: "var(--text, #111827)",
+    font: "inherit",
+    fontSize: "13px",
+    fontWeight: 400,
+    lineHeight: 1.45,
+    minWidth: 0,
+    padding: "8px 10px",
+    resize: "vertical",
+  },
+  /* __field textarea 追加 min-height（与 fieldControl 组合） */
+  fieldTextareaMin: {
+    minHeight: "74px",
+  },
+  capabilityPills: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+  },
+  capabilityPill: {
+    background: "var(--accentSubtle, rgba(37, 99, 235, 0.12))",
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, rgba(37, 99, 235, 0.22)))",
+    borderRadius: "999px",
+    color: "var(--accentText, var(--text, #1d4ed8))",
+    fontSize: "12px",
+    fontWeight: 650,
+    lineHeight: 1,
+    padding: "5px 8px",
+  },
+  technicalDetails: {
+    color: "var(--textSecondary, #6b7280)",
+    fontSize: "12px",
+    fontWeight: 600,
+  },
+  technicalSummary: {
+    cursor: "pointer",
+    listStylePosition: "inside",
+    minHeight: "24px",
+  },
+  /* __technicalDetails input 追加声明（叠在 fieldControl 上） */
+  technicalInput: {
+    marginTop: "6px",
+    width: "100%",
+  },
+  assembly: {
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    borderRadius: "var(--radius-xs)",
+    color: "var(--textSecondary, #4b5563)",
+    fontSize: "12px",
+    fontWeight: 600,
+    padding: "9px 10px",
+  },
+  assemblySummary: {
+    color: "var(--text, #111827)",
+    cursor: "pointer",
+    fontSize: "13px",
+    fontWeight: 700,
+    listStylePosition: "inside",
+    minHeight: "24px",
+  },
+  assemblyGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+    paddingTop: "8px",
+  },
+  assemblySection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "5px",
+  },
+  assemblySectionTitle: {
+    alignItems: "center",
+    color: "var(--text, #111827)",
+    display: "inline-flex",
+    fontSize: "12px",
+    fontWeight: 700,
+    gap: "6px",
+  },
+  assemblyList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    margin: 0,
+    paddingLeft: "18px",
+  },
+  assemblyItem: {
+    color: "var(--textSecondary, #4b5563)",
+    fontSize: "12px",
+    fontWeight: 500,
+    lineHeight: 1.45,
+    margin: 0,
+  },
+  toggleGroup: {
+    display: "grid",
+    gap: "8px",
+    gridTemplateColumns: "1fr 1fr",
+  },
+  toggleButton: {
+    alignItems: "center",
+    background: "var(--backgroundSecondary, var(--background, #ffffff))",
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    borderRadius: "var(--radius-xs)",
+    color: "var(--textSecondary, #4b5563)",
+    cursor: "pointer",
+    display: "inline-flex",
+    fontSize: "13px",
+    fontWeight: 600,
+    gap: "6px",
+    justifyContent: "center",
+    minHeight: "34px",
+  },
+  footer: {
+    borderTop:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    padding: "12px 14px",
+  },
+  nextSteps: {
+    display: "grid",
+    gap: "6px",
+    gridTemplateColumns: "1fr",
+  },
+  nextStepsLabel: {
+    color: "var(--textSecondary, #6b7280)",
+    fontSize: "11px",
+    fontWeight: 700,
+  },
+  nextStepsText: {
+    color: "var(--text, #111827)",
+    fontSize: "12px",
+    fontWeight: 560,
+    lineHeight: 1.45,
+    margin: 0,
+  },
+  nextStepsButton: {
+    background: "var(--backgroundSecondary, var(--background, #ffffff))",
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    borderRadius: "var(--radius-xs)",
+    color: "var(--text, #111827)",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: 650,
+    minHeight: "30px",
+    textAlign: "left",
+    padding: "0 9px",
+  },
+  /* __primary / __secondary 共享基础 */
+  actionShared: {
+    alignItems: "center",
+    borderRadius: "var(--radius-xs)",
+    cursor: "pointer",
+    display: "inline-flex",
+    fontSize: "13px",
+    fontWeight: 650,
+    gap: "7px",
+    justifyContent: "center",
+    minHeight: "36px",
+  },
+  primary: {
+    background: "var(--primary, #2563eb)",
+    border: "1px solid var(--primary, #2563eb)",
+    color: "var(--primaryText, #ffffff)",
+  },
+  secondary: {
+    background: "var(--backgroundSecondary, var(--background, #ffffff))",
+    border:
+      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    color: "var(--text, #111827)",
+  },
+});

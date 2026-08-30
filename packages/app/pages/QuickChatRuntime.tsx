@@ -18,6 +18,9 @@ import { sendFirstMessage } from "chat/messages/sendFirstMessage";
 import { selectDefaultAgentId } from "app/settings/settingSlice";
 import { useFetchData } from "app/hooks";
 import { isAbortError } from "core/abortError";
+import * as stylex from "@stylexjs/stylex";
+import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
+import "chat/web/chatStylexEscapeHatch.css";
 import { getIsDesktopApp } from "app/utils/env";
 import { noloAgentId } from "core/init";
 import { asTrimmedString } from "core/trimmedString";
@@ -676,7 +679,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
           </div>
         )}
         <div
-          className={`quick-chat-box chat-input-card ${isDragOver ? "drag-over" : ""} ${isSending ? "is-sending" : ""}`}
+          className={`quick-chat-box ${isDragOver ? "drag-over" : ""} ${isSending ? "is-sending" : ""}`}
+          data-hook="chat-esc-chat-input-card"
+          {...stylex.props(chatInputCardStyles.card)}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}

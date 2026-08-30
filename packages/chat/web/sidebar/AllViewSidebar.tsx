@@ -34,7 +34,9 @@ const __sidPerf = __debugPerfEnabled
   : null;
 // ── end perf timing ──
 
-import "../sidebar.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "../sidebarStyles";
+import "../chatStylexEscapeHatch.css";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate, useParams } from "app/routing";
 import { useTranslation } from "react-i18next";
@@ -84,11 +86,26 @@ const readStoredRecentFilter = (): SidebarTypeFilterId => {
 
 const SidebarSkeleton: React.FC<{ itemsCount?: number }> = ({ itemsCount = 4 }) => {
   return (
-    <div className="SidebarSkeleton" aria-busy="true" aria-label="Loading...">
+    <div
+      className="SidebarSkeleton"
+      aria-busy="true"
+      aria-label="Loading..."
+      {...stylex.props(sidebarStyles.sidebarSkeleton)}
+    >
       {Array.from({ length: itemsCount }).map((_, idx) => (
-        <div key={idx} className="SidebarSkeleton__item">
-          <div className="SidebarSkeleton__icon" />
-          <div className="SidebarSkeleton__text" />
+        <div
+          key={idx}
+          className="SidebarSkeleton__item"
+          {...stylex.props(sidebarStyles.sidebarSkeletonItem)}
+        >
+          <div
+            className="SidebarSkeleton__icon"
+            {...stylex.props(sidebarStyles.sidebarSkeletonIcon)}
+          />
+          <div
+            className="SidebarSkeleton__text"
+            {...stylex.props(sidebarStyles.sidebarSkeletonText)}
+          />
         </div>
       ))}
     </div>
@@ -190,7 +207,10 @@ const RecentVirtualList: React.FC<{
     [items, currentUserId, activePageKey, currentPath]
   );
   return (
-    <div className="AllViewSidebar__recent-list">
+    <div
+      className="AllViewSidebar__recent-list"
+      {...stylex.props(sidebarStyles.allViewRecentList)}
+    >
       <SidebarVirtualizedList
         items={items}
         onAction={onAction}
@@ -445,30 +465,71 @@ const AllViewSidebar: React.FC<{
     // column flex fill so the ListBox gets a finite clientHeight — otherwise
     // height:100% collapses to content size and every match mounts.
     return (
-      <div className="AllViewSidebar">
-        <div className="AllViewSidebar__scroll-area" ref={scrollAreaRef}>
-          <section className="AllViewSidebar__section AllViewSidebar__section--fill">
+      <div
+        className={`AllViewSidebar ${stylex.props(sidebarStyles.allViewSidebar).className ?? ""}`}
+      >
+        <div
+          className={`AllViewSidebar__scroll-area ${stylex.props(sidebarStyles.scrollArea).className ?? ""}`}
+          ref={scrollAreaRef}
+        >
+          <section
+            className={`AllViewSidebar__section AllViewSidebar__section--fill ${
+              stylex.props(
+                sidebarStyles.allViewSection,
+                sidebarStyles.allViewSectionFill
+              ).className ?? ""
+            }`}
+          >
             <div className="AllViewSidebar__section-header-row">
-              <div className="AllViewSidebar__section-header AllViewSidebar__section-header--static">
-                <span className="AllViewSidebar__menu-label">
+              <div
+                className={`AllViewSidebar__section-header AllViewSidebar__section-header--static ${
+                  stylex.props(sidebarStyles.allViewSectionHeader).className ?? ""
+                }`}
+              >
+                <span
+                  className={`AllViewSidebar__menu-label ${
+                    stylex.props(sidebarStyles.allViewMenuLabel).className ?? ""
+                  }`}
+                >
                   {t("search")}
                 </span>
-                <span className="AllViewSidebar__section-state">
+                <span
+                  className={`AllViewSidebar__section-state ${
+                    stylex.props(sidebarStyles.allViewSectionState).className ?? ""
+                  }`}
+                >
                   {totalSearchResults}
                 </span>
               </div>
             </div>
 
-            <div className="AllViewSidebar__section-preview">
+            <div
+              className={`AllViewSidebar__section-preview ${
+                stylex.props(sidebarStyles.allViewSectionPreview).className ?? ""
+              }`}
+            >
               {totalSearchResults === 0 ? (
-                <div className="AllViewSidebar__preview-empty">
+                <div
+                  className={`AllViewSidebar__preview-empty ${
+                    stylex.props(sidebarStyles.allViewPreviewEmpty).className ?? ""
+                  }`}
+                >
                   {t("search_no_results")}
                 </div>
               ) : (
                 <>
                   {searchedRecentItems.length > 0 ? (
-                    <div className="AllViewSidebar__search-group">
-                      <div className="AllViewSidebar__search-group-title">
+                    <div
+                      className={`AllViewSidebar__search-group ${
+                        stylex.props(sidebarStyles.allViewSearchGroup).className ?? ""
+                      }`}
+                      data-hook="chat-esc-allview-search-group"
+                    >
+                      <div
+                        className={`AllViewSidebar__search-group-title ${
+                          stylex.props(sidebarStyles.allViewSearchGroupTitle).className ?? ""
+                        }`}
+                      >
                         {t("allView.recent")}
                       </div>
                       <RecentVirtualList
@@ -495,7 +556,9 @@ const AllViewSidebar: React.FC<{
   }
 
   return (
-    <div className="AllViewSidebar">
+    <div
+      className={`AllViewSidebar ${stylex.props(sidebarStyles.allViewSidebar).className ?? ""}`}
+    >
       {navHeader}
       {header}
 
@@ -509,16 +572,36 @@ const AllViewSidebar: React.FC<{
         />
       )}
 
-      <div className="AllViewSidebar__scroll-area" ref={scrollAreaRef}>
-        <div className="AllViewSidebar__recent-content">
+      <div
+        className={`AllViewSidebar__scroll-area ${stylex.props(sidebarStyles.scrollArea).className ?? ""}`}
+        ref={scrollAreaRef}
+      >
+        <div
+          className={`AllViewSidebar__recent-content ${
+            stylex.props(sidebarStyles.allViewRecentContent).className ?? ""
+          }`}
+        >
           {recentLoading && sidebarRecentItems.length === 0 ? (
             <SidebarSkeleton itemsCount={4} />
           ) : stableRecentItems.length === 0 ? (
-            <div className="AllViewSidebar__empty-state">
-              <div className="AllViewSidebar__empty-icon" aria-hidden="true">
+            <div
+              className={`AllViewSidebar__empty-state ${
+                stylex.props(sidebarStyles.allViewEmptyState).className ?? ""
+              }`}
+            >
+              <div
+                className={`AllViewSidebar__empty-icon ${
+                  stylex.props(sidebarStyles.allViewEmptyIcon).className ?? ""
+                }`}
+                aria-hidden="true"
+              >
                 <LuInbox size={24} aria-hidden="true" />
               </div>
-              <div className="AllViewSidebar__empty-text">
+              <div
+                className={`AllViewSidebar__empty-text ${
+                  stylex.props(sidebarStyles.allViewEmptyText).className ?? ""
+                }`}
+              >
                 {recentFilter === "all"
                   ? t("emptyTitle")
                   : t("space:no_items_found", "没有找到该类型的内容")}

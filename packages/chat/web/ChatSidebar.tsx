@@ -15,7 +15,9 @@ import { useSpaceEvents } from "create/space/hooks/useSpaceEvents";
 import { useGroupedContent } from "create/space/hooks/useGroupedContent";
 import { UNCATEGORIZED_ID } from "create/space/constants";
 import { useTranslation } from "react-i18next";
-import "./sidebar.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "./sidebarStyles";
+import "./chatStylexEscapeHatch.css";
 
 import { DraggableContainer } from "./DraggableContainer";
 import TopbarSpaceSwitcher from "render/layout/TopbarSpaceSwitcher";
@@ -173,25 +175,39 @@ const ChatSidebar: React.FC = () => {
   }, []);
 
   const searchTooltip = (
-    <span className="ChatSidebar__search-tooltip">
+    <span
+      className="ChatSidebar__search-tooltip"
+      {...stylex.props(sidebarStyles.searchTooltip)}
+    >
       {t("common:search", "搜索...")}
       <Kbd shortcut={COMMAND_PALETTE_SHORTCUT} />
     </span>
   );
 
   const topHeaderSection = (
-    <div className="ChatSidebar__top-bar">
+    <div
+      className="ChatSidebar__top-bar"
+      {...stylex.props(sidebarStyles.topBar)}
+    >
       <NavLink
         to="/explore"
         end
         className={({ isActive }) =>
           `AllViewSidebar__nav-row ChatSidebar__top-explore${isActive ? " active" : ""}`
         }
+        {...stylex.props(sidebarStyles.navRow, sidebarStyles.topExplore)}
       >
-        <span className="AllViewSidebar__menu-icon" aria-hidden="true">
+        <span
+          className="AllViewSidebar__menu-icon"
+          aria-hidden="true"
+          {...stylex.props(sidebarStyles.topExploreMenuIcon)}
+        >
           <LuSparkles size={15} aria-hidden="true" />
         </span>
-        <span className="AllViewSidebar__menu-label">
+        <span
+          className="AllViewSidebar__menu-label"
+          {...stylex.props(sidebarStyles.allViewMenuLabel)}
+        >
           {t("common:explorePlaza", "探索")}
         </span>
       </NavLink>
@@ -204,6 +220,7 @@ const ChatSidebar: React.FC = () => {
             aria-label={t("common:search", "搜索...")}
             aria-haspopup="dialog"
             aria-expanded={isCommandPaletteOpen}
+            {...stylex.props(sidebarStyles.searchBtn)}
           >
             <LuSearch size={16} aria-hidden="true" />
           </button>
@@ -214,7 +231,10 @@ const ChatSidebar: React.FC = () => {
 
   // 全局类型筛选 Shell (放在 favoritesSection 上方，自上而下控制我的收藏和内容列表)
   const typeFilterShell = (
-    <div className="SidebarTypeFilterShell">
+    <div
+      className="SidebarTypeFilterShell"
+      {...stylex.props(sidebarStyles.sidebarTypeFilterShell)}
+    >
       <SidebarTypeFilter
         activeFilter={typeFilter}
         onChange={handleTypeFilterChange}
@@ -232,36 +252,63 @@ const ChatSidebar: React.FC = () => {
 
   // 全局收藏专区（受 typeFilter 控制；可折叠）
   const favoritesSection = (
-    <div className="AllViewSidebar__nav-group AllViewSidebar__nav-group--favorites">
+    <div
+      className="AllViewSidebar__nav-group AllViewSidebar__nav-group--favorites"
+      {...stylex.props(sidebarStyles.navGroupFavorites)}
+    >
       <div
         className={`AllViewSidebar__nav-row--favorites-header${
           isFavoritesRouteActive ? " is-active" : ""
         }`}
+        data-hook="chat-esc-fav-header"
+        {...stylex.props(sidebarStyles.navRowFavoritesHeader)}
       >
         {/* 星标与折叠箭头共用一个前导槽位：标题因此和分类标题、列表条目同轨。 */}
         <button
           type="button"
           className={`AllViewSidebar__favorites-toggle${favoritesCollapsed ? " is-collapsed" : ""}`}
+          data-hook="chat-esc-fav-toggle"
           onClick={() => toggleFavoritesCollapseUi()}
           title={favoritesCollapsed ? t("expand", "展开") : t("collapse", "折叠")}
           aria-label={favoritesCollapsed ? t("expand", "展开") : t("collapse", "折叠")}
           aria-expanded={!favoritesCollapsed}
           disabled={filteredFavoriteItems.length === 0}
+          {...stylex.props(sidebarStyles.favoritesToggle)}
         >
-          <LuStar size={15} className="AllViewSidebar__favorites-toggle-star" aria-hidden="true" />
+          <LuStar
+            size={15}
+            className="AllViewSidebar__favorites-toggle-star"
+            aria-hidden="true"
+            {...stylex.props(sidebarStyles.favoritesToggleStar)}
+          />
           <LuChevronDown
             size={15}
             className="AllViewSidebar__favorites-toggle-chevron"
             aria-hidden="true"
+            {...stylex.props(
+              sidebarStyles.favoritesToggleChevron,
+              favoritesCollapsed && sidebarStyles.favoritesToggleChevronCollapsed
+            )}
           />
         </button>
-        <NavLink to="/favorites" end className="AllViewSidebar__favorites-link">
-          <span className="AllViewSidebar__menu-label">
+        <NavLink
+          to="/favorites"
+          end
+          className="AllViewSidebar__favorites-link"
+          {...stylex.props(sidebarStyles.favoritesLink)}
+        >
+          <span
+            className="AllViewSidebar__menu-label"
+            {...stylex.props(sidebarStyles.allViewMenuLabel)}
+          >
             {t("allView.favorites", "我的收藏")}
           </span>
         </NavLink>
         {favoritesCollapsed && filteredFavoriteItems.length > 0 && (
-          <span className="AllViewSidebar__favorites-count">
+          <span
+            className="AllViewSidebar__favorites-count"
+            {...stylex.props(sidebarStyles.favoritesCount)}
+          >
             {filteredFavoriteItems.length}
           </span>
         )}
@@ -280,9 +327,20 @@ const ChatSidebar: React.FC = () => {
 
   // 空间选择器 Header (下接该空间资源)
   const spaceSwitcherHeader = (
-    <div className="ChatSidebar__header-wrapper ChatSidebar__header-wrapper--space">
-      <div className="ChatSidebar__create-row">
-        <div className="ChatSidebar__scope-wrapper" style={{ flex: 1, minWidth: 0 }}>
+    <div
+      className="ChatSidebar__header-wrapper ChatSidebar__header-wrapper--space"
+      data-hook="chat-esc-sidebar-header-space"
+    >
+      <div
+        className="ChatSidebar__create-row"
+        {...stylex.props(sidebarStyles.createRow)}
+      >
+        <div
+          className="ChatSidebar__scope-wrapper"
+          data-hook="chat-esc-sidebar-scope-wrapper"
+          style={{ flex: 1, minWidth: 0 }}
+          {...stylex.props(sidebarStyles.scopeWrapper)}
+        >
           <TopbarSpaceSwitcher placement="sidebar" />
         </div>
       </div>
@@ -292,7 +350,11 @@ const ChatSidebar: React.FC = () => {
   // "全部" 或未选择具体空间：全量侧边栏
   if (viewMode === "all" || !space) {
     return (
-      <div className="ChatSidebar">
+      <div
+        className="ChatSidebar"
+        data-hook="chat-esc-sidebar"
+        {...stylex.props(sidebarStyles.chatSidebar)}
+      >
         {topHeaderSection}
         {typeFilterShell}
         {favoritesSection}
@@ -305,8 +367,17 @@ const ChatSidebar: React.FC = () => {
   }
 
   // 分类/空间视图
+  const isSingleSection =
+    sortedCategories.length +
+      (filteredGroupedData.uncategorized.length > 0 ? 1 : 0) ===
+    1;
+
   return (
-    <div className="ChatSidebar">
+    <div
+      className="ChatSidebar"
+      data-hook="chat-esc-sidebar"
+      {...stylex.props(sidebarStyles.chatSidebar)}
+    >
       {topHeaderSection}
       {typeFilterShell}
       {favoritesSection}
@@ -321,13 +392,29 @@ const ChatSidebar: React.FC = () => {
         className="ChatSidebar__pinned-block"
       />
 
-      <div className="ChatSidebar__scroll-area" ref={scrollAreaRef} onDragOver={handleDragOverScrollArea}>
+      <div
+        className="ChatSidebar__scroll-area"
+        data-hook="chat-esc-sidebar-scroll-area"
+        ref={scrollAreaRef}
+        onDragOver={handleDragOverScrollArea}
+        {...stylex.props(sidebarStyles.scrollArea)}
+      >
         {isEmpty && typeFilter !== "all" ? (
-          <div className="ChatSidebar__empty-state">
-            <div className="ChatSidebar__empty-icon" aria-hidden="true">
+          <div
+            className="ChatSidebar__empty-state"
+            {...stylex.props(sidebarStyles.allViewEmptyState)}
+          >
+            <div
+              className="ChatSidebar__empty-icon"
+              aria-hidden="true"
+              {...stylex.props(sidebarStyles.allViewEmptyIcon)}
+            >
               <LuSearch size={24} aria-hidden="true" />
             </div>
-            <div className="ChatSidebar__empty-text">
+            <div
+              className="ChatSidebar__empty-text"
+              {...stylex.props(sidebarStyles.allViewEmptyText)}
+            >
               {t("space:no_items_found", "没有找到该类型的内容")}
             </div>
           </div>
@@ -335,8 +422,13 @@ const ChatSidebar: React.FC = () => {
           <div
             className={[
               "ChatSidebar__content",
-              (sortedCategories.length + (filteredGroupedData.uncategorized.length > 0 ? 1 : 0)) === 1 ? "ChatSidebar__content--single-section" : "",
+              isSingleSection ? "ChatSidebar__content--single-section" : "",
             ].filter(Boolean).join(" ")}
+            data-hook={isSingleSection ? "chat-esc-sidebar-single-section" : undefined}
+            {...stylex.props(
+              sidebarStyles.content,
+              isSingleSection && sidebarStyles.contentSingleSection
+            )}
           >
             {/* 未分类区域 */}
             {filteredGroupedData.uncategorized.length > 0 && (
@@ -346,6 +438,10 @@ const ChatSidebar: React.FC = () => {
                   : ""
                   }`}
                 style={{ "--section-index": 0 } as React.CSSProperties}
+                {...stylex.props(
+                  sidebarStyles.section,
+                  filteredGroupedData.uncategorized.length === 0 && sidebarStyles.sectionEmpty
+                )}
               >
                 <DraggableContainer
                   id={UNCATEGORIZED_ID}
@@ -384,6 +480,10 @@ const ChatSidebar: React.FC = () => {
                           : index,
                     } as React.CSSProperties
                   }
+                  {...stylex.props(
+                    sidebarStyles.section,
+                    filteredGroupedData.categorized[category.id]?.length === 0 && sidebarStyles.sectionEmpty
+                  )}
                 >
                   <DraggableContainer
                     id={category.id}
@@ -412,8 +512,10 @@ const ChatSidebar: React.FC = () => {
               <button
                 type="button"
                 className="ChatSidebar__add-category-row"
+                data-hook="chat-esc-add-category-row"
                 onClick={() => setIsAddCategoryOpen(true)}
                 aria-label={t("space:create_new_category", "新建分类")}
+                {...stylex.props(sidebarStyles.addCategoryRow)}
               >
                 <LuFolderPlus size={15} aria-hidden="true" />
                 <span>{t("space:create_new_category", "新建分类")}</span>
@@ -421,12 +523,17 @@ const ChatSidebar: React.FC = () => {
             )}
           </div>
         ) : space ? (
-          <div className="ChatSidebar__content">
+          <div
+            className="ChatSidebar__content"
+            {...stylex.props(sidebarStyles.content)}
+          >
             <button
               type="button"
               className="ChatSidebar__add-category-row"
+              data-hook="chat-esc-add-category-row"
               onClick={() => setIsAddCategoryOpen(true)}
               aria-label={t("space:create_new_category", "新建分类")}
+              {...stylex.props(sidebarStyles.addCategoryRow)}
             >
               <LuFolderPlus size={15} aria-hidden="true" />
               <span>{t("space:create_new_category", "新建分类")}</span>

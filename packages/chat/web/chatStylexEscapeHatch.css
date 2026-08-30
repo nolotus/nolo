@@ -1,0 +1,882 @@
+/*
+ * chatStylexEscapeHatch.css
+ * ─────────────────────────────────────────────────────────────
+ * packages/chat/web CSS → StyleX 迁移的逃生舱：集中存放无法用
+ * StyleX（stylex.create 原子类）表达或存在同名属性竞争、必须以
+ * unlayered 普通 CSS 保持原级联顺序的规则。由使用方 tsx 顶部
+ * import（与原 CSS 相同的打包路径）。每条规则前注明
+ * 「选择器 + 保留原因」，按基线源码顺序排列。
+ *
+ * 注：暗色主题覆盖一律走 StyleX 主题 token 通道
+ *（app/theme/agentTheme.stylex.ts），本文件无 [data-theme] 规则。
+ *
+ * hook 约定：元素以 data-hook 属性携带 hook 标记（stylex.props()
+ * 展开会覆盖其后位置之外的 className，data-hook 字面属性不受影响），
+ * 选择器用 [data-hook~="chat-esc-*"] 等价原类名匹配（特异性同 class）。
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ═══ 自 queue-badge.css 迁出（QueueBadge.tsx）═══ */
+
+/* ── 状态与变体竞争规则（hover / variant）──
+ * 保留原因：变体与基础类存在同名属性竞争，原级联靠源码顺序让
+ * 后者胜出；StyleX 原子类在 @layer 内无法保证该顺序，下沉到
+ * unlayered 保持级联稳定（unlayered 恒胜 @layer，与原结果一致），
+ * 多条规则之间按原源码顺序排列。 */
+
+/* .queue-badge__pill:hover（与基础 background 竞争）—— QueueBadge.tsx */
+[data-hook~="chat-esc-queue-pill"]:hover {
+  background: var(--nolo-surface-3, rgba(120, 120, 120, 0.2));
+}
+
+/* .queue-badge__pill--running（与基础 border-color/color 竞争）—— QueueBadge.tsx */
+[data-hook~="chat-esc-queue-pill-running"] {
+  border-color: var(--nolo-accent, #6b8afd);
+  color: var(--nolo-accent, #6b8afd);
+}
+
+/* .queue-badge__item--more（与 __item 基础 color 竞争）—— QueueBadge.tsx */
+[data-hook~="chat-esc-queue-item-more"] {
+  color: var(--nolo-text-secondary, rgba(120, 120, 120, 0.8));
+  font-style: italic;
+}
+
+/* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
+
+/* .chat-input-card:focus-within —— 与基础 background/border-color/box-shadow
+ * 及暗色 token 阴影同名竞争，原级联按源码顺序让本规则胜出；
+ * 下沉 unlayered 保持聚焦态覆盖（含暗色下聚焦仍走本规则）。
+ * 暗色 `[data-theme="dark"]` box-shadow 覆盖不走本文件，
+ * 已收编入 token agentThemeTokens.chatInputCardShadow。 */
+[data-hook~="chat-esc-chat-input-card"]:focus-within {
+  background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+  border-color: var(--primaryBorder, var(--primary));
+  box-shadow:
+    0 0 0 3px var(--focusRing),
+    0 16px 34px -28px var(--shadowMedium);
+}
+
+/* ═══ 自 LiveVoicePanel.css 迁出（LiveVoicePanel.tsx）═══ */
+
+/* ── StyleX 不支持的选择器（:nth-child）──
+ * 保留原因：波形条逐条高度/动画延迟只能按序数区分，
+ * StyleX 静态 API 不支持 :nth-child，必须普通 CSS 承载。 */
+
+/* .live-voice-panel .waveform-animation .bar:nth-child(1) */
+[data-hook~="chat-esc-lv-bars"] [data-hook~="chat-esc-lv-bar"]:nth-child(1) {
+  height: 10px;
+  animation-delay: 0s;
+}
+
+/* .live-voice-panel .waveform-animation .bar:nth-child(2) */
+[data-hook~="chat-esc-lv-bars"] [data-hook~="chat-esc-lv-bar"]:nth-child(2) {
+  height: 30px;
+  animation-delay: 0.2s;
+}
+
+/* .live-voice-panel .waveform-animation .bar:nth-child(3) */
+[data-hook~="chat-esc-lv-bars"] [data-hook~="chat-esc-lv-bar"]:nth-child(3) {
+  height: 40px;
+  animation-delay: 0.4s;
+}
+
+/* .live-voice-panel .waveform-animation .bar:nth-child(4) */
+[data-hook~="chat-esc-lv-bars"] [data-hook~="chat-esc-lv-bar"]:nth-child(4) {
+  height: 25px;
+  animation-delay: 0.6s;
+}
+
+/* .live-voice-panel .waveform-animation .bar:nth-child(5) */
+[data-hook~="chat-esc-lv-bars"] [data-hook~="chat-esc-lv-bar"]:nth-child(5) {
+  height: 15px;
+  animation-delay: 0.8s;
+}
+
+/* ── 状态与变体竞争规则（hover / active / muted / hangup）──
+ * 保留原因：变体与基础类在 background/color/transform 上同名竞争，
+ * 原级联靠「特异性 + 源码顺序」决胜（hangup 后于 hover、
+ * hangup:hover 特异性最高）；@layer 原子类无法复现该顺序，
+ * 整条阶梯按原源码顺序下沉 unlayered。变体 hook 以双属性选择器
+ * 保持与原 `.control-btn.muted` 同级的相对特异性。 */
+
+/* .live-voice-panel .control-btn:hover */
+[data-hook~="chat-esc-lv-control-btn"]:hover {
+  background: var(--hoverBg, rgba(255, 255, 255, 0.18));
+}
+
+/* .live-voice-panel .control-btn:active */
+[data-hook~="chat-esc-lv-control-btn"]:active {
+  transform: scale(0.95);
+}
+
+/* .live-voice-panel .control-btn.muted */
+[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-muted"] {
+  color: var(--textMuted, var(--textTertiary, #aaa));
+}
+
+/* .live-voice-panel .control-btn.hangup */
+[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-hangup"] {
+  background: var(--error, #ef4444);
+  color: white;
+}
+
+/* .live-voice-panel .control-btn.hangup:hover */
+[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-hangup"]:hover {
+  background: color-mix(in srgb, var(--error) 90%, black);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--error) 30%, transparent);
+}
+
+/* ═══ 自 AgentPickerControl.css 迁出（AgentPickerControl.tsx）═══ */
+
+/* ── 状态与变体竞争规则（hover / open / active / badge 变体）──
+ * 保留原因：与基础 background/color/border-color 同名竞争，
+ * 原级联靠源码顺序决胜；下沉 unlayered 后按原源码顺序排列，
+ * is-active 后于 hover（原规则特异性更高 + 靠后，悬停选中项
+ * 保持选中底色），badge 变体均为整组替换基础 color/background。 */
+
+/* .agent-picker__trigger:hover, .agent-picker.is-open .agent-picker__trigger */
+[data-hook~="chat-esc-ap-trigger"]:hover,
+[data-hook~="chat-esc-ap-open"] [data-hook~="chat-esc-ap-trigger"] {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+  color: var(--primary);
+  border-color: var(--borderSubtle);
+}
+
+/* .agent-picker__item > button:hover */
+[data-hook~="chat-esc-ap-item-btn"]:hover {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+}
+
+/* .agent-picker__item.is-active > button */
+[data-hook~="chat-esc-ap-item-active"] [data-hook~="chat-esc-ap-item-btn"] {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  color: var(--primary);
+}
+
+/* .agent-picker__item-badge.is-favorite */
+[data-hook~="chat-esc-ap-badge-favorite"] {
+  color: var(--warning, #f5a623);
+  background: rgba(245, 166, 35, 0.12);
+}
+
+/* .agent-picker__item-badge.is-owned */
+[data-hook~="chat-esc-ap-badge-owned"] {
+  color: var(--primary);
+  background: rgba(0, 120, 212, 0.12);
+}
+
+/* .agent-picker__item-badge.is-public */
+[data-hook~="chat-esc-ap-badge-public"] {
+  color: var(--textSecondary);
+}
+
+/* .agent-picker__item-badge.is-default */
+[data-hook~="chat-esc-ap-badge-default"] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+/* ═══ 自 sidebar/CommandPalette.css 迁出（CommandPalette.tsx +
+ *     SidebarCommandPalette.tsx）═══ */
+
+/* ── RAC 过渡属性选择器动画（StyleX 不支持 [data-*] 选择器）──
+ * 保留原因：data-entering/data-exiting 由 react-aria 内部设置，
+ * 无法转 StyleX；prefers-reduced-motion 覆盖需位于动画规则之后。 */
+
+/* .command-palette-overlay[data-entering] */
+[data-hook~="chat-esc-cp-overlay"][data-entering] {
+  animation: command-palette-overlay-in 160ms ease-out;
+}
+
+/* .command-palette-overlay[data-exiting] */
+[data-hook~="chat-esc-cp-overlay"][data-exiting] {
+  animation: command-palette-overlay-out 120ms ease-in;
+}
+
+/* .command-palette-modal[data-entering] */
+[data-hook~="chat-esc-cp-modal"][data-entering] {
+  animation: command-palette-modal-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* .command-palette-modal[data-exiting] */
+[data-hook~="chat-esc-cp-modal"][data-exiting] {
+  animation: command-palette-modal-out 120ms ease-in;
+}
+
+/* ── search-input 与 TextField.css .react-aria-Input 的同特异性竞争 ──
+ * 保留原因：`.command-palette-search-input` 与 `.react-aria-Input`
+ * 同为 (0,1,0)，原级联靠两份 CSS 的捆绑顺序决胜；下沉 unlayered
+ * 并保持原 import 位置以复现同一顺序依赖。::placeholder 与 :focus
+ * 阶梯随基础规则一并下沉。 */
+
+/* .command-palette-search-input */
+[data-hook~="chat-esc-cp-search-input"] {
+  width: 100%;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--backgroundSecondary, var(--background));
+  color: var(--text);
+  font-size: var(--fontSize-base, 14px);
+  outline: none;
+}
+
+/* .command-palette-search-input::placeholder */
+[data-hook~="chat-esc-cp-search-input"]::placeholder {
+  color: var(--textTertiary);
+}
+
+/* .command-palette-search-input:focus */
+[data-hook~="chat-esc-cp-search-input"]:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+/* ── menu 覆盖 Menu.css .react-aria-Menu 的同名属性 ──
+ * 保留原因：max-height:none/padding:0 必须胜过 unlayered 的
+ * Menu.css；保留原组合选择器（含 .react-aria-Menu）的相对特异性。
+ * [data-empty] 为 react-aria 属性选择器，StyleX 不支持。 */
+
+/* .command-palette-menu.react-aria-Menu, .command-palette-menu */
+[data-hook~="chat-esc-cp-menu"].react-aria-Menu,
+[data-hook~="chat-esc-cp-menu"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  outline: none;
+}
+
+/* .command-palette-menu[data-empty] */
+[data-hook~="chat-esc-cp-menu"][data-empty] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  color: var(--textTertiary);
+  font-style: italic;
+  font-size: var(--fontSize-sm, 13px);
+}
+
+/* ── 跨组件后代 / 组合选择器 ──
+ * 保留原因：footer-hint 的 kbd 后代须压过 Kbd 自身 unlayered 样式；
+ * item 图标 `> svg` 与 Menu.css `.react-aria-MenuItem > svg:not(...)`
+ * 同特异性按捆绑顺序决胜；section-header 含 `.react-aria-Header`
+ * 组合选择器，StyleX 不支持。 */
+
+/* .command-palette-footer-hint .kbd, .command-palette-footer-hint kbd */
+[data-hook~="chat-esc-cp-footer-hint"] .kbd,
+[data-hook~="chat-esc-cp-footer-hint"] kbd {
+  min-width: 1.25rem;
+  justify-content: center;
+}
+
+/* .command-palette-item--status（胜过 Menu.css .react-aria-MenuItem
+ * 基础 color/cursor 的同特异性捆绑顺序竞争） */
+[data-hook~="chat-esc-cp-item"][data-hook~="chat-esc-cp-item-status"] {
+  color: var(--textTertiary);
+  font-style: italic;
+  cursor: default;
+}
+
+/* .command-palette-item.react-aria-MenuItem > svg */
+[data-hook~="chat-esc-cp-item"].react-aria-MenuItem > svg {
+  color: var(--textSecondary);
+}
+
+/* .command-palette-section-header, .command-palette-menu .react-aria-Header */
+[data-hook~="chat-esc-cp-section-header"],
+[data-hook~="chat-esc-cp-menu"] .react-aria-Header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--textTertiary);
+  font-size: var(--fontSize-xs, 12px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--background, #fff) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+@keyframes command-palette-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes command-palette-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes command-palette-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes command-palette-modal-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+
+@keyframes command-palette-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── prefers-reduced-motion 覆盖（位于动画规则之后，保持原文件顺序）── */
+
+/* .command-palette-overlay[data-entering]/[data-exiting],
+   .command-palette-modal[data-entering]/[data-exiting]（reduce） */
+@media (prefers-reduced-motion: reduce) {
+  [data-hook~="chat-esc-cp-overlay"][data-entering],
+  [data-hook~="chat-esc-cp-overlay"][data-exiting],
+  [data-hook~="chat-esc-cp-modal"][data-entering],
+  [data-hook~="chat-esc-cp-modal"][data-exiting] {
+    animation: none;
+  }
+
+  /* .command-palette-spinner（reduce；胜过 @layer 内的 StyleX 动画） */
+  [data-hook~="chat-esc-cp-spinner"] {
+    animation: none;
+  }
+}
+
+/* ═══ 自 sidebar.css 迁出（ChatSidebar.tsx / AllViewSidebar.tsx / CategorySection.tsx / SidebarUserSection.tsx / DraggableContainer.tsx）═══ */
+
+/* ── 跨组件后代与伪元素规则 ──
+ * 保留原因：侧边栏内的空间切换器、搜索框内部表单控件、滚动条 webkit 伪元素、
+ * 单一分区自适应高度链及动画 keyframes 无法用 StyleX 静态规则表达。 */
+
+/* .ChatSidebar__scope-wrapper .TpSw--sidebar */
+[data-hook~="chat-esc-sidebar-scope-wrapper"] .TpSw--sidebar,
+.ChatSidebar__scope-wrapper .TpSw--sidebar {
+  width: 100%;
+}
+
+/* .ChatSidebar .TpSw--sidebar .TpSw__btnGroup */
+[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__btnGroup,
+.ChatSidebar .TpSw--sidebar .TpSw__btnGroup {
+  padding: 0 3px;
+}
+
+/* .ChatSidebar .TpSw--sidebar .TpSw__spaceLink */
+[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__spaceLink,
+.ChatSidebar .TpSw--sidebar .TpSw__spaceLink {
+  padding: 4px;
+  gap: var(--sidebar-gap-x);
+}
+
+/* .ChatSidebar .TpSw--sidebar .TpSw__icon */
+[data-hook~="chat-esc-sidebar"] .TpSw--sidebar .TpSw__icon,
+.ChatSidebar .TpSw--sidebar .TpSw__icon {
+  width: var(--sidebar-icon-size);
+  height: var(--sidebar-icon-size);
+}
+
+/* .ChatSidebar__header-wrapper--space */
+.ChatSidebar__header-wrapper--space,
+[data-hook~="chat-esc-sidebar-header-space"] {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+/* .ChatSidebar__search-wrapper descendant rules */
+.ChatSidebar__search-wrapper .ChatSidebar__search-form,
+.ChatSidebar__search-wrapper .search-form,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .ChatSidebar__search-form,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .search-form {
+  min-width: 0;
+  width: 100%;
+  gap: 0;
+}
+
+.ChatSidebar__search-wrapper .search-container,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .search-container {
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ChatSidebar__search-wrapper .input-field-wrapper,
+.ChatSidebar__search-wrapper .search-btn,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .input-field-wrapper,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .search-btn {
+  height: var(--sidebar-header-control-size);
+  min-height: var(--sidebar-header-control-size);
+}
+
+.ChatSidebar__search-wrapper .search-action,
+[data-hook~="chat-esc-sidebar-search-wrapper"] .search-action {
+  display: none;
+}
+
+/* .ChatSidebar__scroll-area scrollbars */
+.ChatSidebar__scroll-area::-webkit-scrollbar,
+[data-hook~="chat-esc-sidebar-scroll-area"]::-webkit-scrollbar {
+  width: var(--space-1);
+}
+
+.ChatSidebar__scroll-area::-webkit-scrollbar-track,
+[data-hook~="chat-esc-sidebar-scroll-area"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ChatSidebar__scroll-area::-webkit-scrollbar-thumb,
+[data-hook~="chat-esc-sidebar-scroll-area"]::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.ChatSidebar__scroll-area:hover::-webkit-scrollbar-thumb,
+[data-hook~="chat-esc-sidebar-scroll-area"]:hover::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+}
+
+/* .SidebarVirtualizedList__scroller scrollbars */
+.SidebarVirtualizedList__scroller::-webkit-scrollbar,
+[data-hook~="chat-esc-sidebar-scroller"]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+html[data-nolo-desktop="1"] .SidebarVirtualizedList__scroller,
+html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"] {
+  scrollbar-width: none;
+}
+
+html[data-nolo-desktop="1"] .SidebarVirtualizedList__scroller::-webkit-scrollbar,
+html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.CategorySection__content-inner .SidebarVirtualizedList__scroller,
+[data-hook~="chat-esc-category-inner"] [data-hook~="chat-esc-sidebar-scroller"] {
+  height: auto !important;
+  max-height: min(420px, 55vh);
+  flex: 0 1 auto;
+}
+
+.ChatSidebar__content--single-section .CategorySection,
+[data-hook~="chat-esc-sidebar-single-section"] [data-hook~="chat-esc-category-section"] {
+  flex: 1;
+  min-height: 0;
+}
+
+.ChatSidebar__content--single-section .CategorySection__content-wrapper:not(.CategorySection__content-wrapper--collapsed),
+[data-hook~="chat-esc-sidebar-single-section"] [data-hook~="chat-esc-category-wrapper"]:not([data-hook~="chat-esc-category-collapsed"]) {
+  flex: 1;
+  min-height: 0;
+}
+
+.ChatSidebar__content--single-section .CategorySection__content-inner,
+[data-hook~="chat-esc-sidebar-single-section"] [data-hook~="chat-esc-category-inner"] {
+  max-height: none;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.ChatSidebar__content--single-section .CategorySection__content-inner .SidebarVirtualizedList__scroller,
+[data-hook~="chat-esc-sidebar-single-section"] [data-hook~="chat-esc-category-inner"] [data-hook~="chat-esc-sidebar-scroller"] {
+  height: 100% !important;
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.CategorySection__empty-hint:hover,
+[data-hook~="chat-esc-category-empty-hint"]:hover {
+  opacity: 0.8;
+  background: var(--backgroundHover);
+  border-color: var(--primaryGhost);
+}
+
+@container (max-width: 250px) {
+  .SidebarTypeFilter,
+  [data-hook~="chat-esc-sidebar-type-filter"] {
+    gap: 1px;
+  }
+
+  .SidebarTypeFilter-button,
+  [data-hook~="chat-esc-sidebar-type-filter-button"] {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+  }
+
+  .AllViewSidebar__more-icon,
+  [data-hook~="chat-esc-allview-more-icon"] {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.AllViewSidebar__search-group + .AllViewSidebar__search-group,
+[data-hook~="chat-esc-allview-search-group"] + [data-hook~="chat-esc-allview-search-group"] {
+  margin-top: 10px;
+}
+
+.SidebarUserSection__menu-toggle.is-open,
+[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"] {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover));
+  color: var(--text);
+}
+
+.SidebarUserSection__menu-toggle-icon,
+[data-hook~="chat-esc-user-menu-icon"] {
+  transition: transform 0.15s ease;
+}
+
+.SidebarUserSection__menu-toggle.is-open .SidebarUserSection__menu-toggle-icon,
+[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"] [data-hook~="chat-esc-user-menu-icon"] {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 768px) {
+  .SidebarUserSection__dropdown .topbar-user-menu__item,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__item {
+    height: 40px;
+  }
+
+  .SidebarUserSection__dropdown .topbar-user-menu__divider,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__divider {
+    margin: 2px 10px;
+  }
+
+  .SidebarUserSection__dropdown .topbar-user-menu__header,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__header {
+    padding: 10px 12px 12px;
+  }
+
+  .SidebarUserSection__dropdown .topbar-user-menu__balance-value,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__balance-value {
+    font-size: 18px;
+  }
+
+  .SidebarUserSection__dropdown .topbar-user-menu__theme-row,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__theme-row {
+    min-height: 36px;
+  }
+
+  .SidebarUserSection__dropdown .topbar-user-menu__item:hover,
+  [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__item:hover {
+    transform: none;
+  }
+}
+
+.ChatSidebar__add-category-row svg,
+[data-hook~="chat-esc-add-category-row"] svg {
+  flex-shrink: 0;
+  color: inherit;
+  padding: 3px;
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-sizing: content-box;
+}
+
+.AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar,
+[data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 6px 12px;
+  margin: 0;
+  border-bottom: 1px solid var(--borderMuted, var(--borderLight, #e4e4e7));
+  gap: 8px;
+  box-shadow: none;
+  flex-direction: column;
+  align-items: stretch;
+  padding-bottom: 8px;
+}
+
+.AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar button,
+[data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar button {
+  padding: 4px 8px;
+  font-size: 12px;
+  height: 26px;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar-meta,
+[data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar-meta {
+  font-size: 12px;
+  color: var(--textMuted, var(--textSecondary, #71717a));
+}
+
+.AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar-start,
+[data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar-start {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar-actions,
+[data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar-actions {
+  justify-content: flex-end;
+  width: 100%;
+  gap: 6px;
+}
+
+@keyframes chatSidebarEmptyFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sidebarSkeletonPulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 0.25; }
+  100% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ChatSidebar__add-category-row,
+  .AllViewSidebar__nav-row--favorites-header,
+  .AllViewSidebar__favorites-toggle > *,
+  [data-hook~="chat-esc-add-category-row"],
+  [data-hook~="chat-esc-fav-header"],
+  [data-hook~="chat-esc-fav-toggle"] > * {
+    transition: none;
+  }
+}
+
+/* ═══ 自 message-input.css 迁出（MessageInputCore.tsx / VoiceInputButton.tsx / SendButton.tsx / CreateTaskModal.tsx）═══ */
+
+/* ── 关键帧动画与伪元素/媒体查询规则 ── */
+
+@keyframes sendArrowUp {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  45% { transform: translateY(-12px) scale(1.08); opacity: 1; }
+  100% { transform: translateY(-36px) scale(0.85); opacity: 0; }
+}
+
+@keyframes message-input-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes scroll-btn-appear {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes voice-recording-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--error, #ef4444) 18%, transparent), 0 8px 20px -12px var(--shadowMedium);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--error, #ef4444) 28%, transparent), 0 12px 28px -10px var(--shadowMedium);
+  }
+}
+
+@keyframes voice-dots-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes indicator-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes indicator-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .send-button:hover,
+  [data-hook~="chat-esc-send-button"]:hover {
+    transform: none;
+  }
+  .send-button:active:not(:disabled),
+  [data-hook~="chat-esc-send-button"]:active:not(:disabled) {
+    transform: scale(0.96);
+    transition-duration: 0.1s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-button, .send-icon, .stop-indicator, .send-loading-icon,
+  [data-hook~="chat-esc-send-button"], [data-hook~="chat-esc-send-icon"] {
+    transition: none !important;
+  }
+  .send-button:hover,
+  [data-hook~="chat-esc-send-button"]:hover {
+    transform: none !important;
+  }
+  .send-icon.animating,
+  [data-hook~="chat-esc-send-icon"].animating {
+    animation: none !important;
+    opacity: 0.6;
+  }
+  .send-loading-icon,
+  [data-hook~="chat-esc-send-loading"] {
+    animation: none !important;
+  }
+}
+
+@media (prefers-contrast: high) {
+  .send-button, .send-button.stop-mode,
+  [data-hook~="chat-esc-send-button"] {
+    border-width: 1.5px !important;
+  }
+}
+
+/* .message-input__box nested controls */
+.message-input__box .upload-button,
+[data-hook~="chat-esc-chat-input-card"] .upload-button {
+  --button-size: 40px !important;
+}
+
+.message-input__box .send-button,
+[data-hook~="chat-esc-chat-input-card"] .send-button,
+[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"] {
+  --button-size: 40px !important;
+}
+
+.message-input__box .voice-btn-in-send,
+[data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send,
+[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"] {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+@media (max-width: 480px) {
+  .message-input__box .upload-button,
+  [data-hook~="chat-esc-chat-input-card"] .upload-button {
+    --button-size: 36px !important;
+  }
+  .message-input__box .send-button,
+  [data-hook~="chat-esc-chat-input-card"] .send-button,
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"] {
+    --button-size: 36px !important;
+  }
+  .message-input__box .voice-btn-in-send,
+  [data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send,
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"] {
+    width: 36px !important;
+    height: 36px !important;
+  }
+}
+
+/* .message-input__canvas-edit-chip button & span */
+.message-input__canvas-edit-chip button,
+[data-hook~="chat-esc-canvas-chip"] button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--backgroundTertiary);
+  color: var(--textSecondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.message-input__canvas-edit-chip span,
+.message-input__canvas-edit-chip-label,
+[data-hook~="chat-esc-canvas-chip"] span,
+[data-hook~="chat-esc-canvas-chip-label"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* dialog-usage-trigger & popover meter */
+.dialog-usage-trigger,
+[data-hook~="chat-esc-dialog-usage-trigger"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--borderMuted, var(--borderLight, #e4e4e7));
+  background: var(--surfaceRaised, var(--backgroundSecondary, transparent));
+  color: var(--textSecondary);
+  font-size: var(--fontSize-xs, 12px);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.dialog-usage-trigger:hover,
+.dialog-usage-trigger[data-hovered],
+.dialog-usage-trigger.is-open,
+.dialog-usage-trigger[data-pressed],
+[data-hook~="chat-esc-dialog-usage-trigger"]:hover,
+[data-hook~="chat-esc-dialog-usage-trigger"][data-hovered],
+[data-hook~="chat-esc-dialog-usage-trigger"].is-open,
+[data-hook~="chat-esc-dialog-usage-trigger"][data-pressed] {
+  background: var(--surfaceInteractiveHover, var(--backgroundHover, #f4f4f5));
+  border-color: var(--border, #d4d4d8);
+  color: var(--text);
+}
+
+.dialog-usage-trigger:focus-visible,
+.dialog-usage-trigger[data-focus-visible],
+[data-hook~="chat-esc-dialog-usage-trigger"]:focus-visible,
+[data-hook~="chat-esc-dialog-usage-trigger"][data-focus-visible] {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.dialog-usage-gauge-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.dialog-usage-gauge-icon__fill {
+  transition:
+    stroke-dashoffset 0.3s ease,
+    stroke 0.2s ease;
+}
+
+.dialog-usage-panel__meter .nolo-meter-track {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--borderLight, var(--border)) 70%, transparent);
+  box-shadow: none;
+  border: none;
+}
+
+.dialog-usage-panel__meter .nolo-meter-fill {
+  border-radius: 999px;
+  min-width: 0;
+}

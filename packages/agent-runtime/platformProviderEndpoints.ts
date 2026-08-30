@@ -168,6 +168,20 @@ export function resolvePlatformChatCompletionsEndpoint(
 }
 
 /**
+ * 平台托管上游 id（credential / usage 白名单共用）。
+ * 每个成员都必须是 getNoloKey 接受的 provider，新增时两处同步。
+ */
+export type PlatformHostedUpstreamId =
+  | "deepinfra"
+  | "xai"
+  | "openrouter"
+  | "runinfra"
+  | "upstream-k3"
+  | "google"
+  | "openai"
+  | "deepseek";
+
+/**
  * 平台托管模型该用哪个 provider 的 key。
  *
  * 与上面的 `resolvePlatformChatCompletionsEndpoint` **逐条对应**——同一个模型，
@@ -180,7 +194,7 @@ export function resolvePlatformChatCompletionsEndpoint(
 export function resolvePlatformHostedCredentialProvider(
   provider: string,
   model?: string | null,
-): string | undefined {
+): PlatformHostedUpstreamId | undefined {
   const key = asTrimmedLowercaseString(provider);
   if (!key) return undefined;
   const aliased = PLATFORM_PROVIDER_ENDPOINT_ALIASES[key] ?? key;

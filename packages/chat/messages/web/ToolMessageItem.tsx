@@ -1,4 +1,4 @@
-import "./messages.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { memo, useMemo, useState, useEffect, useRef } from "react";
 import {
   LuChevronDown,
@@ -28,6 +28,8 @@ import { executeToolRun, useToolRunById } from "ai/tools/toolRunStore";
 import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
+import { messagesStyles as styles } from "./messagesStyles";
+import "./messagesStylexEscapeHatch.css";
 import { safeParse, StatusIcon } from "./toolMessageShared";
 import {
   buildRunStreamingAgentHandoffPresentation,

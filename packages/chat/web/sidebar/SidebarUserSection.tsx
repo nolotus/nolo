@@ -61,7 +61,9 @@ import { Dialog } from "render/web/ui/modal/Dialog";
 import Button from "render/web/ui/Button";
 // InviteRewards 在公开集不存在（life 包 cloud-only）；cloudLazy 用变量路径绕过 esbuild。
 const InviteRewards = cloudLazy("life/web/InviteRewards", () => null);
-import "../sidebar.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarStyles } from "../sidebarStyles";
+import "../chatStylexEscapeHatch.css";
 
 const getNotificationIcon = (item: AppNotification) => {
   if (item.kind === "agent_notice") return <LuBell size={15} aria-hidden="true" />;
@@ -96,6 +98,7 @@ const PortalDropdown: React.FC<{
   return createPortal(
     <div
       className={`SidebarUserSection__dropdown is-open ${className || ""}`}
+      data-hook="chat-esc-user-dropdown"
       role={role}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -106,6 +109,12 @@ const PortalDropdown: React.FC<{
         left: rect.left + 8,
         width: rect.width - 16,
       }}
+      {...stylex.props(
+        sidebarStyles.sidebarUserSectionDropdown,
+        sidebarStyles.sidebarUserSectionDropdownOpen,
+        className?.includes("SidebarUserSection__dropdown--menu") &&
+          sidebarStyles.sidebarUserSectionDropdownMenu
+      )}
     >
       {children}
     </div>,
@@ -251,10 +260,22 @@ export const SidebarUserSection: React.FC = () => {
   if (!authUser) return null;
 
   return (
-    <div className="SidebarUserSection" ref={sectionRef}>
-      <div className="SidebarUserSection__row">
+    <div
+      className="SidebarUserSection"
+      ref={sectionRef}
+      {...stylex.props(sidebarStyles.sidebarUserSection)}
+    >
+      <div
+        className="SidebarUserSection__row"
+        {...stylex.props(sidebarStyles.sidebarUserSectionRow)}
+      >
         {/* 左侧：头像进 Life，chevron 打开账号菜单 */}
-        <div className="SidebarUserSection__card-wrap" ref={menuContainerRef} style={{ flex: 1, minWidth: 0 }}>
+        <div
+          className="SidebarUserSection__card-wrap"
+          ref={menuContainerRef}
+          style={{ flex: 1, minWidth: 0 }}
+          {...stylex.props(sidebarStyles.sidebarUserSectionCardWrap)}
+        >
           <Tooltip
             content={t("goToProfile", "个人主页")}
             placement="top"
@@ -265,6 +286,7 @@ export const SidebarUserSection: React.FC = () => {
               className="SidebarUserSection__profile"
               onClick={handleOpenLifeProfile}
               aria-label={t("goToProfile", "个人主页")}
+              {...stylex.props(sidebarStyles.sidebarUserSectionProfile)}
             >
               <Avatar
                 name={authUser.username}
@@ -276,6 +298,7 @@ export const SidebarUserSection: React.FC = () => {
               <span
                 className="SidebarUserSection__username"
                 title={authUser.email || authUser.username}
+                {...stylex.props(sidebarStyles.sidebarUserSectionUsername)}
               >
                 {authUser.email || authUser.username}
               </span>
@@ -284,6 +307,7 @@ export const SidebarUserSection: React.FC = () => {
           <button
             type="button"
             className={`SidebarUserSection__menu-toggle ${menuOpen ? "is-open" : ""}`}
+            data-hook={`chat-esc-user-menu-toggle ${menuOpen ? "chat-esc-user-menu-open" : ""}`}
             onClick={() => {
               setMenuOpen((prev) => !prev);
               setBellOpen(false);
@@ -295,6 +319,7 @@ export const SidebarUserSection: React.FC = () => {
             <LuChevronDown
               size={14}
               className="SidebarUserSection__menu-toggle-icon"
+              data-hook="chat-esc-user-menu-icon"
               aria-hidden="true"
             />
           </button>
@@ -476,7 +501,10 @@ export const SidebarUserSection: React.FC = () => {
       </div>
 
       {/* 右侧：操作按钮 */}
-      <div className="SidebarUserSection__actions">
+      <div
+        className="SidebarUserSection__actions"
+        {...stylex.props(sidebarStyles.sidebarUserSectionActions)}
+      >
         {/* 设置 */}
         <Tooltip content={t("settings.title", "设置")} placement="top" disabled={isMobile}>
           <button
@@ -484,12 +512,17 @@ export const SidebarUserSection: React.FC = () => {
             className="SidebarUserSection__tool-btn"
             onClick={handleOpenSettings}
             aria-label={t("settings.title", "设置")}
+            {...stylex.props(sidebarStyles.sidebarUserSectionToolBtn)}
           >
             <LuSettings size={17} aria-hidden="true" />
           </button>
         </Tooltip>
         {/* 通知 */}
-        <div className="SidebarUserSection__tool-wrap" ref={bellContainerRef}>
+        <div
+          className="SidebarUserSection__tool-wrap"
+          ref={bellContainerRef}
+          {...stylex.props(sidebarStyles.sidebarUserSectionToolWrap)}
+        >
           <Tooltip content={t("notifications.title", "通知")} placement="top" disabled={isMobile}>
             <button
               type="button"
@@ -505,10 +538,18 @@ export const SidebarUserSection: React.FC = () => {
               }
               aria-expanded={bellOpen}
               aria-haspopup="menu"
+              {...stylex.props(
+                sidebarStyles.sidebarUserSectionToolBtn,
+                bellOpen && sidebarStyles.sidebarUserSectionToolBtnActive
+              )}
             >
               <LuBell size={17} aria-hidden="true" />
               {unreadCount > 0 && (
-                <span className="SidebarUserSection__badge" aria-hidden="true">
+                <span
+                  className="SidebarUserSection__badge"
+                  aria-hidden="true"
+                  {...stylex.props(sidebarStyles.sidebarUserSectionBadge)}
+                >
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}

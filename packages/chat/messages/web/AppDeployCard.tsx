@@ -1,6 +1,7 @@
 // 文件路径: chat/messages/web/AppDeployCard.tsx
 // 部署成功后在聊天中展示应用预览卡片（链接 + 内嵌 iframe）
 
+import * as stylex from "@stylexjs/stylex";
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,7 +19,8 @@ import {
 import { resolveAppRouteKey } from "app/utils/appKeys";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { asOptionalTrimmedString } from "core/optionalString";
-import "./AppDeployCard.css";
+import { appDeployCardStyles as styles } from "./appDeployCardStyles";
+import "./messagesStylexEscapeHatch.css";
 import { useChatDisplayContext } from "./ChatDisplayContext";
 
 interface AppDeployCardProps {
@@ -102,15 +104,36 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
   if (!hasRenderableData || !appUrl) return null;
 
   return (
-    <div className="app-deploy-card">
-      <div className="adc-header">
-        <div className="adc-info">
-          <LuMonitor size={15} className="adc-icon" aria-hidden="true" />
-          <span className="adc-name">{appName}</span>
+    <div className="app-deploy-card" {...stylex.props(styles.card)}>
+      <div
+        className="adc-header"
+        {...stylex.props(styles.header)}
+        data-hook="messages-esc-adc-header"
+      >
+        <div className="adc-info" {...stylex.props(styles.info)}>
+          <LuMonitor
+            size={15}
+            className="adc-icon"
+            {...stylex.props(styles.icon)}
+            aria-hidden="true"
+          />
+          <span
+            className="adc-name"
+            {...stylex.props(styles.name)}
+            data-hook="messages-esc-adc-name"
+          >
+            {appName}
+          </span>
         </div>
-        <div className="adc-actions">
+        <div
+          className="adc-actions"
+          {...stylex.props(styles.actions)}
+          data-hook="messages-esc-adc-actions"
+        >
           <a
             className="adc-btn adc-btn--link"
+            {...stylex.props(styles.btn)}
+            data-hook="messages-esc-adc-btn"
             href={appUrl}
             target="_blank"
             rel="noopener noreferrer"
@@ -121,6 +144,8 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
           </a>
           <button
             className={`adc-btn adc-btn--preview ${iframeOpen ? "is-active" : ""}`}
+            {...stylex.props(styles.btn)}
+            data-hook="messages-esc-adc-btn"
             onClick={() => setIframeOpen((v) => !v)}
             title={t("app.togglePreview", "切换预览")}
             type="button"
@@ -135,6 +160,8 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
           {appRouteKey && (
             <button
               className="adc-btn adc-btn--editor"
+              {...stylex.props(styles.btn)}
+              data-hook="messages-esc-adc-btn messages-esc-adc-btn-editor"
               onClick={() =>
                 navigate(buildAppEditorPath(appRouteKey, undefined, appServerOrigin))
               }
@@ -149,10 +176,18 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
       </div>
 
       {iframeOpen && (
-        <div className="adc-frame-wrap">
+        <div className="adc-frame-wrap" {...stylex.props(styles.frameWrapper)}>
           {loadingMessage && (
-            <div className={`adc-loading ${isSlow ? "is-slow" : ""}`}>
-              <LuLoaderCircle size={14} className="adc-loading-icon" aria-hidden="true" />
+            <div
+              className={`adc-loading ${isSlow ? "is-slow" : ""}`}
+              {...stylex.props(styles.frameLoading)}
+            >
+              <LuLoaderCircle
+                size={14}
+                className="adc-loading-icon"
+                {...stylex.props(styles.spinner)}
+                aria-hidden="true"
+              />
               <div className="adc-loading-text">
                 <div>{loadingMessage}</div>
                 {isSlow && (
@@ -166,13 +201,13 @@ const AppDeployCard: React.FC<AppDeployCardProps> = ({ rawData, isError }) => {
           <iframe
             src={appUrl}
             className="adc-frame"
+            {...stylex.props(styles.frame)}
             title={appName}
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
             onLoad={() => setFrameState("loaded")}
           />
         </div>
       )}
-
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import "./MessageActions.css";
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
 import {
   LuCopy,
@@ -25,6 +25,8 @@ import { useCurrentDialogKey } from "chat/dialog/dialogSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { TFunction } from "i18next";
 import { useMessageDelete } from "../hooks/useMessageDelete";
+import { messageActionsStyles as styles } from "./messageActionsStyles";
+import "./messagesStylexEscapeHatch.css";
 
 const SAVE_TITLE_TIMEOUT_MS = 1500;
 
@@ -331,6 +333,8 @@ export const MessageActions = ({
       <>
         <div
           className={`actions desktop ${showActions ? "show" : ""}`}
+          data-hook={["messages-esc-actions-desktop", showActions ? "messages-esc-show" : ""].filter(Boolean).join(" ")}
+          {...stylex.props(styles.actionsDesktop)}
           data-message-actions="desktop"
         >
           {actions.map(
@@ -339,13 +343,25 @@ export const MessageActions = ({
                 <button
                   type="button"
                   className={`action-btn ${active ? "active" : ""} ${busy ? "busy" : ""}`}
+                  data-hook="messages-esc-action-btn"
+                  {...stylex.props(
+                    styles.actionBtn,
+                    active && styles.actionBtnActive,
+                    disabled && styles.actionBtnDisabled,
+                    busy && styles.actionBtnBusy
+                  )}
                   onClick={handler}
                   aria-label={label}
                   aria-busy={busy || undefined}
                   disabled={disabled || undefined}
                 >
                   {busy ? (
-                    <span className="action-spinner" aria-hidden="true" />
+                    <span
+                      className="action-spinner"
+                      data-hook="messages-esc-action-spinner"
+                      {...stylex.props(styles.actionSpinner)}
+                      aria-hidden="true"
+                    />
                   ) : (
                     <Icon size={14} />
                   )}
@@ -362,10 +378,17 @@ export const MessageActions = ({
   if (!showActions) return null;
   return (
     <>
-      <div className="actions-overlay mobile" data-message-actions="mobile">
+      <div
+        className="actions-overlay mobile"
+        data-hook="messages-esc-actions-overlay-mobile"
+        {...stylex.props(styles.actionsOverlayMobile)}
+        data-message-actions="mobile"
+      >
         <button
           type="button"
           className="overlay-backdrop"
+          data-hook="messages-esc-overlay-backdrop"
+          {...stylex.props(styles.overlayBackdrop)}
           aria-label={t("closeActions", "关闭操作")}
           onClick={(e) => {
             e.stopPropagation();
@@ -381,19 +404,27 @@ export const MessageActions = ({
         />
         <dialog
           className="actions-panel"
+          data-hook="messages-esc-actions-panel"
+          {...stylex.props(styles.actionsPanel)}
           open
           aria-label={t("messageActions", "消息操作")}
         >
-          <div className="panel-header">
-            <div className="panel-indicator" />
+          <div className="panel-header" {...stylex.props(styles.panelHeader)}>
+            <div className="panel-indicator" {...stylex.props(styles.panelIndicator)} />
           </div>
-          <div className="actions-grid">
+          <div className="actions-grid" {...stylex.props(styles.actionsGrid)}>
             {actions.map(
               ({ key, icon: Icon, handler, label, active, disabled, busy }) => (
                 <button
                   type="button"
                   key={key}
                   className={`action-item ${active ? "active" : ""} ${busy ? "busy" : ""}`}
+                  {...stylex.props(
+                    styles.actionItem,
+                    active && styles.actionItemActive,
+                    disabled && styles.actionBtnDisabled,
+                    busy && styles.actionBtnBusy
+                  )}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (disabled) return;
@@ -403,14 +434,25 @@ export const MessageActions = ({
                   aria-busy={busy || undefined}
                   disabled={disabled || undefined}
                 >
-                  <div className="action-icon">
+                  <div
+                    className="action-icon"
+                    {...stylex.props(
+                      styles.actionIcon,
+                      active && styles.actionIconActive
+                    )}
+                  >
                     {busy ? (
-                      <span className="action-spinner" aria-hidden="true" />
+                      <span
+                        className="action-spinner"
+                        data-hook="messages-esc-action-spinner"
+                        {...stylex.props(styles.actionSpinner, styles.actionSpinnerLarge)}
+                        aria-hidden="true"
+                      />
                     ) : (
                       <Icon size={20} />
                     )}
                   </div>
-                  <span className="action-label">{label}</span>
+                  <span className="action-label" {...stylex.props(styles.actionLabel)}>{label}</span>
                 </button>
               ),
             )}

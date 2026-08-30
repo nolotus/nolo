@@ -27,14 +27,17 @@ describe("DialogPage child-run observer wiring", () => {
     expect(dialogPageSource).toContain(
       "<ChildRunObserverPanel parentThreadId={dialogId} />",
     );
-    expect(dialogPageSource).toContain("DialogPage-shell--withChildRunObserver");
+    // 原 shell 变体类 `DialogPage-shell--withChildRunObserver` 迁移为
+    // StyleX 条件样式（rootWithSidePanel），由 observer 条件触发。
+    expect(dialogPageSource).toContain("shouldShowChildRunObserver");
+    expect(dialogPageSource).toContain("dialogPageStyles.rootWithSidePanel");
   });
 
   it("keeps the observer collapsed by default and collapsible when open", () => {
     expect(panelSource).toContain("shouldShowChrome");
     expect(panelSource).toContain('threads.length > 0 || loadState === "error"');
     expect(panelSource).toContain("useState(false)");
-    expect(panelSource).toContain("ChildRunObserverPanel__collapsedRail");
+    expect(panelSource).toContain('data-hook="dialog-esc-cro-collapsed-rail"');
     expect(panelSource).toContain("setIsExpanded(false)");
     expect(panelSource).toContain("setIsExpanded(true)");
   });

@@ -3,10 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const layoutCss = readFileSync(join(import.meta.dir, "layout.css"), "utf8");
-const sidebarCss = readFileSync(
-  join(import.meta.dir, "../../chat/web/sidebar.css"),
-  "utf8"
-);
 const switcherSource = readFileSync(
   join(import.meta.dir, "TopbarSpaceSwitcher.tsx"),
   "utf8"
@@ -40,7 +36,6 @@ describe("sidebar popover width source contract", () => {
     expect(mobileSidebarBlock).toContain("top: var(--topbar-height);");
     expect(mobileSidebarBlock).toContain("height: auto;");
   });
-
 
   it("uses sidebar-specific fixed panel sizing for the portaled space switcher menu", () => {
     expect(switcherSource).toContain("TpSw__panel--sidebar");

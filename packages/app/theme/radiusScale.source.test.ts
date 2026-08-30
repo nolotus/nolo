@@ -22,7 +22,7 @@ describe("radius scale source contract", () => {
     const modal = read("packages/render/web/modal.css");
     const settings = read("packages/app/settings/web/settings.css");
     const layout = read("packages/render/layout/layout.css");
-    const sidebar = read("packages/chat/web/sidebar.css");
+    const sidebar = read("packages/chat/web/sidebarStyles.ts");
 
     expect(ui).toContain("--btn-radius: var(--radius-xs)");
     expect(form).toContain("border-radius: var(--radius-sm)");
@@ -31,7 +31,6 @@ describe("radius scale source contract", () => {
     expect(settings).toContain(".SettingsModal");
     expect(settings).toContain("border-radius: var(--radius-md)");
     expect(layout).toContain(".topbar-dropdown");
-    expect(sidebar).toContain(".SidebarUserSection__dropdown");
+    expect(sidebar).toContain("sidebarUserSectionDropdown");
   });
-
 });

@@ -80,6 +80,12 @@ export type PlatformChatProviderConfig = {
   apiKey?: string;
   apiKeyHeader?: string;
   apiSource?: string;
+  /**
+   * runinfra / google…）；对外 provider 语义仍是 "nolo"——计费归属与错误分类
+   * 锚定平台，与 server 侧 loopUpstream 的 primaryProvider vs
+   * primaryUsageProvider 是同一组概念。
+   */
+  usageProvider?: string;
 };
 
 type PlatformChatTool = Record<string, unknown>;
@@ -144,6 +150,7 @@ export async function resolvePlatformChatProviderConfig(args: {
       ...(plan.apiKey ? { apiKey: plan.apiKey } : {}),
       ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
       ...(args.agentConfig.apiSource ? { apiSource: args.agentConfig.apiSource } : {}),
+      ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
     };
   }
   return {
@@ -157,6 +164,7 @@ export async function resolvePlatformChatProviderConfig(args: {
     ...(plan.apiKey ? { apiKey: plan.apiKey } : {}),
     ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
     ...(plan.apiSource ? { apiSource: plan.apiSource } : {}),
+    ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
   };
 }
 
@@ -204,7 +212,14 @@ export function buildPlatformChatCompletionRequest(args: {
         }),
     stream: args.stream ?? false,
     ...(args.stream
-      ? getUsageRequestOptions(args.providerConfig.provider, { api: "chat-completions" })
+      // usage 白名单必须按真实上游名查询（openAiCompatibleProvider 同理）：
+      // 平台托管 remap 后 provider 仍是 "nolo"，不在白名单里，查 "nolo" 会丢
+      // include_usage → 上游不回终结 usage 帧 → 计费漏账。
+      // 混入 chat.completions 专属的 stream_options.include_usage 会被 OpenAI
+      // 拒绝（400 Unknown parameter: 'stream_options.include_usage'），Responses
+      ? getUsageRequestOptions(args.providerConfig.usageProvider ?? args.providerConfig.provider, {
+          api: usesResponsesApi ? "responses" : "chat-completions",
+        })
       : {}),
     ...requestOptions,
     ...(args.tools && args.tools.length > 0

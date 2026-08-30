@@ -11,7 +11,9 @@ import {
 } from "react-aria-components";
 import { Menu } from "render/web/ui/Menu";
 import { matchShortcut } from "app/settings/shortcutUtils";
-import "./CommandPalette.css";
+import * as stylex from "@stylexjs/stylex";
+import { commandPaletteStyles } from "./commandPaletteStyles";
+import "../chatStylexEscapeHatch.css";
 
 export const COMMAND_PALETTE_SHORTCUT = "mod+k";
 
@@ -73,37 +75,40 @@ export function CommandPalette<T extends object>(props: CommandPaletteProps<T>) 
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       isDismissable
-      className="command-palette-overlay"
+      data-hook="chat-esc-cp-overlay"
+      {...stylex.props(commandPaletteStyles.overlay)}
     >
-      <Modal className="command-palette-modal">
+      <Modal
+        data-hook="chat-esc-cp-modal"
+        {...stylex.props(commandPaletteStyles.modal)}
+      >
         <Dialog
-          className="command-palette-dialog"
+          {...stylex.props(commandPaletteStyles.dialog)}
           aria-label={ariaLabel ?? searchAriaLabel}
         >
           <AriaAutocomplete filter={contains} inputValue={inputValue} onInputChange={onInputChange}>
             <SearchField
               autoFocus
               aria-label={searchAriaLabel}
-              className="command-palette-search"
+              {...stylex.props(commandPaletteStyles.search)}
             >
               <Input
-                className="command-palette-search-input"
+                data-hook="chat-esc-cp-search-input"
                 placeholder={placeholder}
               />
             </SearchField>
             <Menu
               items={items}
               onAction={onAction}
-              className={["command-palette-menu", className]
-                .filter(Boolean)
-                .join(" ")}
+              data-hook="chat-esc-cp-menu"
+              className={className}
               renderEmptyState={() => emptyState}
               aria-label={ariaLabel ?? searchAriaLabel}
             >
               {children as any}
             </Menu>
             {footer ? (
-              <div className="command-palette-footer" aria-hidden="true">
+              <div {...stylex.props(commandPaletteStyles.footer)} aria-hidden="true">
                 {footer}
               </div>
             ) : null}

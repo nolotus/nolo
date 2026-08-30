@@ -60,7 +60,16 @@ const ErrorView = React.lazy(() => import("render/web/ui/ErrorView"));
 // Full history on open — tool-heavy coding turns exceed any small window and
 // blind multi-turn desktop agents if we only keep the last 30–50 rows.
 
-import "./DialogPage.css";
+import * as stylex from "@stylexjs/stylex";
+import { dialogPageStyles } from "./dialogPageStyles";
+import "./dialogStylexEscapeHatch.css";
+
+// `.DialogPage__messages` 类名保留在 DOM：运行时 scrollContainerSelector 与
+// dialogStylexEscapeHatch.css 的滚动条/后代覆盖规则依赖该类名；
+// StyleX 原子类经组件 className prop 通道手动拼接（ChatArea 内部合并）。
+const DIALOG_PAGE_MESSAGES_CLASS = `DialogPage__messages has-scroll-mask ${
+  stylex.props(dialogPageStyles.messages).className ?? ""
+}`.trim();
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
 import { resolveLatestAgentDraftSidePanelState } from "./agentDraftPanelState";
@@ -738,15 +747,16 @@ const DialogPage = ({
 
     return (
       <div
-        className="DialogPage__context-banner"
+        {...stylex.props(dialogPageStyles.contextBanner)}
         role="status"
         aria-live="polite"
       >
-        <div className="DialogPage__context-banner-inner">
-          <span className="DialogPage__context-banner-text">{description}</span>
+        <div {...stylex.props(dialogPageStyles.contextBannerInner)}>
+          <span {...stylex.props(dialogPageStyles.contextBannerText)}>{description}</span>
           <button
             type="button"
-            className="DialogPage__context-banner-link"
+            data-hook="dialog-esc-dp-banner-link"
+            {...stylex.props(dialogPageStyles.contextBannerLink)}
             onClick={() => {
               logDialogPage("Navigating to inherited source dialog", {
                 pageKey,
@@ -818,7 +828,7 @@ const DialogPage = ({
           <ChatArea
             dialogId={dialogId}
             scrollContainerSelector=".DialogPage__messages"
-            messagesClassName="DialogPage__messages has-scroll-mask"
+            messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />
         </>
       );
@@ -843,7 +853,7 @@ const DialogPage = ({
           <ChatArea
             dialogId={dialogId}
             scrollContainerSelector=".DialogPage__messages"
-            messagesClassName="DialogPage__messages has-scroll-mask"
+            messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />
         </>
       );
@@ -870,7 +880,7 @@ const DialogPage = ({
           <ChatArea
             dialogId={dialogId}
             scrollContainerSelector=".DialogPage__messages"
-            messagesClassName="DialogPage__messages has-scroll-mask"
+            messagesClassName={DIALOG_PAGE_MESSAGES_CLASS}
           />
         </>
       );
@@ -925,16 +935,17 @@ const DialogPage = ({
   return (
     <>
       {/* 聊天页根容器：负责整页宽度 / 左右安全区 / 垂直布局 */}
-      <div
-        className={`DialogPage-shell ${
-          shouldShowDraftPanel ? "DialogPage-shell--withDraftPanel" : ""
-        } ${
-          shouldShowChildRunObserver
-            ? "DialogPage-shell--withChildRunObserver"
-            : ""
-        }`}
-      >
-        <div className="DialogPage-root">{renderContent()}</div>
+      <div {...stylex.props(dialogPageStyles.shell)}>
+        <div
+          data-hook="dialog-esc-dp-root"
+          {...stylex.props(
+            dialogPageStyles.root,
+            (shouldShowDraftPanel || shouldShowChildRunObserver) &&
+              dialogPageStyles.rootWithSidePanel,
+          )}
+        >
+          {renderContent()}
+        </div>
         {shouldShowDraftPanel && latestAgentDraft && (
           <AgentDraftPanel
             initialDraft={latestAgentDraft}
