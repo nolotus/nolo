@@ -1174,6 +1174,9 @@ probe_alpha_agents_ssr() {
   if [[ "$http_code" != "200" ]]; then
     echo "FATAL: /agents SSR probe returned HTTP $http_code (expected 200) from $probe_url" >&2
     head -n 30 "$response_file" >&2 || true
+    echo "--- [diag] server render errors (pm2 logs tail) ---" >&2
+    tail -n 120 /root/.pm2/logs/*error.log 2>/dev/null | grep -aE "SSR|Render failed|stylex|Unexpected|Error:|error:" | tail -40 >&2 || true
+    tail -n 60 /root/.pm2/logs/*out.log 2>/dev/null | grep -aE "SSR|Render failed|stylex|Unexpected" | tail -20 >&2 || true
     rm -f "$response_file"
     return 1
   fi
