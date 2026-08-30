@@ -45,11 +45,12 @@ describe("resolveChatWire", () => {
       resolveChatWire({ provider: "nolo", model: "deepseek-v4-flash" }),
     ).toBe("responses");
     expect(
-      resolveChatWire({ provider: "deepseek", model: "deepseek-v4-pro" }),
+      resolveChatWire({ provider: "deepseek", model: "deepseek-v4-flash-vision-exp" }),
     ).toBe("responses");
   });
 
   test("Priority 5: default falls back to completions", () => {
+    expect(resolveChatWire({ provider: "nolo", model: "deepseek-v4-pro" })).toBe("completions");
     expect(resolveChatWire({ provider: "openai", model: "gpt-4o" })).toBe("completions");
     expect(resolveChatWire({ provider: "openrouter", model: "meta-llama/llama-3-70b" })).toBe(
       "completions",

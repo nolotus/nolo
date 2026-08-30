@@ -7,14 +7,14 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
-  PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE,
-  PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE,
+  PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE,
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_GLM_53_FLASH_PRICE,
   PLATFORM_HOSTED_GLM_53_MODEL,
   PLATFORM_HOSTED_GLM_PRICE,
   platformHostedModels,
   resolvePlatformDeepseekFlashRoute,
+  resolvePlatformHostedRouting,
 } from "./platformHosted";
 
 const planRoute = (
@@ -83,14 +83,19 @@ describe("resolvePlatformDeepseekFlashRoute", () => {
     expect(planRoute({ hasExplicitCredential: true })).toEqual({ kind: "configured" });
   });
 
-  it("routes hosted Pro to official Responses API", () => {
+  it("keeps hosted Pro on configured route for resolvePlatformDeepseekFlashRoute (routes via RunInfra instead)", () => {
     expect(
       planRoute({ model: PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL }),
-    ).toEqual({
-      kind: "hosted",
-      primaryProvider: "nolo",
-      credentialProvider: "deepseek",
-      wire: "responses",
+    ).toEqual({ kind: "configured" });
+  });
+
+  it("routes hosted Pro to RunInfra chat.completions in platform hosted routing table", () => {
+    expect(resolvePlatformHostedRouting(PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL)).toEqual({
+      endpoint: "https://api.runinfra.ai/v1/chat/completions",
+      usageProvider: "runinfra",
+      keyName: "runinfra",
+      wire: "chat.completions",
+      agentRunHosted: true,
     });
   });
 
@@ -149,14 +154,8 @@ describe("DeepSeek V4 official pricing", () => {
     expect(getPlatformHostedDeepSeekV4Price("deepseek-v4-flash", peak)).toEqual(
       PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE,
     );
-    expect(getPlatformHostedDeepSeekV4Price("deepseek-v4-pro", peak)).toEqual(
-      PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE,
-    );
     expect(getPlatformHostedDeepSeekV4Price("deepseek-v4-flash", offPeak)).toEqual(
       PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE,
-    );
-    expect(getPlatformHostedDeepSeekV4Price("deepseek-v4-pro", offPeak)).toEqual(
-      PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE,
     );
     // 周末即使落在"工作日高峰时段"内也按低谷计费
     expect(getPlatformHostedDeepSeekV4Price("deepseek-v4-flash", weekendPeakHour)).toEqual(
@@ -177,11 +176,10 @@ describe("platform hosted DeepSeek V4 catalog", () => {
   });
 
   it("publishes V4 Pro capabilities and pricing", () => {
-    expect(
-      platformHostedModels.find(
-        (model) => model.name === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-      ),
-    ).toMatchObject({
+    const pro = platformHostedModels.find(
+      (model) => model.name === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
+    );
+    expect(pro).toMatchObject({
       name: PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
       displayName: "DeepSeek V4 Pro",
       hasVision: false,
@@ -189,10 +187,10 @@ describe("platform hosted DeepSeek V4 catalog", () => {
       maxOutputTokens: 384_000,
       supportsTool: true,
       supportsReasoningEffort: true,
-      price: PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE,
-      peakPrice: PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE,
-      offPeakPrice: PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE,
+      price: PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE,
     });
+    expect((pro as any)?.peakPrice).toBeUndefined();
+    expect((pro as any)?.offPeakPrice).toBeUndefined();
   });
 
   it("publishes V4 Flash in the catalog at peak price by default", () => {

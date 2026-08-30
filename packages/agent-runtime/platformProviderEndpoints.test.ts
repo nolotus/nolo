@@ -47,13 +47,14 @@ describe("platformProviderEndpoints", () => {
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "gemini-3.7-flash"),
     ).toBe("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
-    // 平台托管 DeepSeek V4 走 Responses 端点，chat.completions 返回 undefined
+    // 平台托管 DeepSeek V4 Flash 走 Responses 端点，chat.completions 返回 undefined
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "deepseek-v4-flash"),
     ).toBeUndefined();
+    // 平台托管 DeepSeek V4 Pro 独立走 RunInfra chat.completions
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "deepseek-v4-pro"),
-    ).toBeUndefined();
+    ).toBe("https://api.runinfra.ai/v1/chat/completions");
     expect(resolvePlatformResponsesEndpoint("nolo", "deepseek-v4-flash")).toBe(
       DEEPSEEK_RESPONSES_ENDPOINT,
     );
@@ -84,11 +85,14 @@ describe("platformProviderEndpoints", () => {
       isOpenAiResponsesModel({ provider: "deepseek", model: "deepseek-v4-flash" }),
     ).toBe(true);
     expect(
-      isOpenAiResponsesModel({ provider: "deepseek", model: "deepseek-v4-pro" }),
+      isOpenAiResponsesModel({ provider: "deepseek", model: "deepseek-v4-flash-vision-exp" }),
     ).toBe(true);
     expect(
       isOpenAiResponsesModel({ provider: "nolo", model: "deepseek-v4-flash" }),
     ).toBe(true);
+    expect(
+      isOpenAiResponsesModel({ provider: "nolo", model: "deepseek-v4-pro" }),
+    ).toBe(false);
   });
 
   test("OPENAI_RESPONSES_ENDPOINT is the canonical responses URL", () => {
@@ -100,7 +104,7 @@ describe("platformProviderEndpoints", () => {
   test("resolves the provider-specific Responses endpoint", () => {
     expect(resolvePlatformResponsesEndpoint("openai")).toBe(OPENAI_RESPONSES_ENDPOINT);
     expect(resolvePlatformResponsesEndpoint("nolo", "deepseek-v4-flash")).toBe(DEEPSEEK_RESPONSES_ENDPOINT);
-    expect(resolvePlatformResponsesEndpoint("nolo", "deepseek-v4-pro")).toBe(DEEPSEEK_RESPONSES_ENDPOINT);
+    expect(resolvePlatformResponsesEndpoint("nolo", "deepseek-v4-pro")).toBeUndefined();
     expect(resolvePlatformResponsesEndpoint("deepseek", "deepseek-v4-flash")).toBe(DEEPSEEK_RESPONSES_ENDPOINT);
     expect(resolvePlatformResponsesEndpoint("moonshot")).toBeUndefined();
   });
@@ -113,6 +117,7 @@ describe("resolvePlatformHostedCredentialProvider", () => {
     // 查询和 server 侧 getApiKey 复用，改这里两处同步生效。
     expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k3")).toBe("crof");
     expect(resolvePlatformHostedCredentialProvider("nolo", "kimi-k2.6")).toBe("openrouter");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "deepseek-v4-pro")).toBe("runinfra");
     expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.3")).toBe("crof");
     expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5.2")).toBe("crof");
     expect(resolvePlatformHostedCredentialProvider("nolo", "glm-5-3-flash")).toBe("runinfra");

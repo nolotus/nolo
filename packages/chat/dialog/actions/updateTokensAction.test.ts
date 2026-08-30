@@ -53,6 +53,9 @@ async function loadUpdateTokensAction() {
     ...realAuthSlice,
     deductBalance: deductBalanceMock,
   }));
+  mock.module("identity/actions", () => ({
+    deductBalance: deductBalanceMock,
+  }));
 
   mock.module("ai/token/saveTokenRecord", () => ({
     createTokenRecord: createTokenRecordMock,
@@ -695,5 +698,93 @@ describe("updateTokensAction", () => {
     expect(patchMock).toHaveBeenCalled();
     expect(dialogRecords[dialogKey].inputTokens).toBe(100);
     expect(dialogRecords[dialogKey].outputTokens).toBe(50);
+  });
+
+  it("recovers stable callId from usageRaw.provider_call_id and passes it to saveTokenRecord and stable projection check", async () => {
+    const updateTokensAction = await loadUpdateTokensAction();
+    patchMock.mockClear();
+    readMock.mockClear();
+    writeMock.mockClear();
+    deductBalanceMock.mockClear();
+    createTokenRecordMock.mockClear();
+    saveTokenRecordMock.mockClear();
+
+    const providerCallId = "call-rebound-fallback-999";
+    const stableKey = createTokenKey.recordForStableCall("user-1", providerCallId);
+
+    const dialogKey = "dialog-fallback-callid";
+    const dialogRecords: Record<string, any> = {
+      [dialogKey]: {
+        dbKey: dialogKey,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalCost: 0,
+      },
+    };
+
+    const dispatch = mock((action: any) => {
+      if (action.kind === "read") {
+        const record = dialogRecords[action.input.dbKey];
+        return {
+          unwrap: async () => (record ? { ...record } : null),
+        };
+      }
+      if (action.kind === "write") {
+        return {
+          unwrap: async () => ({
+            dbKey: action.input.customKey ?? action.input.data?.dbKey,
+            ...action.input.data,
+          }),
+        };
+      }
+      if (action.kind === "patch") {
+        dialogRecords[action.input.dbKey] = {
+          ...dialogRecords[action.input.dbKey],
+          ...action.input.changes,
+        };
+        return {
+          unwrap: async () => ({ ...dialogRecords[action.input.dbKey] }),
+        };
+      }
+      if (action.kind === "deductBalance") {
+        return { unwrap: async () => undefined };
+      }
+      throw new Error(`unexpected action: ${JSON.stringify(action)}`);
+    });
+
+    const getState = () =>
+      ({
+        auth: {
+          currentUser: { userId: "user-1", username: "tester" },
+        },
+        dbRecords: { ...dialogRecords },
+      }) as any;
+
+    // Test with usageRecord where callId is undefined, but usage.provider_call_id is present
+    await updateTokensAction(
+      {
+        dialogId: "dialog-fallback-callid",
+        dialogKey,
+        usageRecord: {
+          callId: undefined as any,
+          usage: {
+            input_tokens: 40,
+            output_tokens: 20,
+            provider_call_id: providerCallId,
+          },
+        },
+        agentConfig: {
+          id: "agent-1",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+        },
+      },
+      { dispatch, getState } as any
+    );
+
+    // Verify saveTokenRecord received the recovered callId as 4th parameter
+    expect(saveTokenRecordMock).toHaveBeenCalled();
+    const lastCall = (saveTokenRecordMock.mock.calls as any[])[saveTokenRecordMock.mock.calls.length - 1];
+    expect(lastCall[3]).toBe(providerCallId);
   });
 });

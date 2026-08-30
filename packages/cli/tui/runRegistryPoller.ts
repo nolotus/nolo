@@ -18,7 +18,7 @@
  */
 
 import { type AgentRunSnapshot, readTimestamp } from "../client/agentRunSnapshot";
-import type { RunRecord } from "../agentRunControl";
+import { listRunRecords, type RunRecord } from "../agentRunControl";
 import {
   isAgentNameFallback,
   isAgentRunTerminalStatus,
@@ -41,6 +41,50 @@ const DISCOVERY_TERMINAL_LINGER_MS = 60_000;
  * 掉、崩了、没写终态就没了）第一时间就会被问到。
  */
 export const RUN_RECONCILE_SILENCE_MS = 15_000;
+
+export const RUNNING_AGENT_COUNT_CACHE_TTL_MS = 1000;
+let cachedRunningAgentCount = 0;
+let lastRunningAgentCountScannedAt = 0;
+
+export type RunningAgentCountOptions = {
+  now?: number;
+  force?: boolean;
+  reader?: () => Array<{ status?: string }>;
+};
+
+/**
+ * 节流并缓存活跃 agent 运行计数。
+ *
+ * `renderStatusLine` 在 TUI 活跃渲染路径（~150ms / 每次按键）频繁被调用。
+ * 如果直接全量扫描磁盘（`listRunRecords`），在 1000+ 记录下会导致严重卡顿。
+ * 此处强制两次物理扫描间隔 ≥ 1s，在 TTL 窗口内直接返回内存缓存计数。
+ */
+export function getCachedRunningAgentCount(options?: RunningAgentCountOptions): number {
+  const now = options?.now ?? Date.now();
+  if (
+    !options?.force &&
+    lastRunningAgentCountScannedAt > 0 &&
+    now - lastRunningAgentCountScannedAt < RUNNING_AGENT_COUNT_CACHE_TTL_MS
+  ) {
+    return cachedRunningAgentCount;
+  }
+  const readFn = options?.reader ?? listRunRecords;
+  try {
+    const records = readFn();
+    cachedRunningAgentCount = records.filter(
+      (r) => !isAgentRunTerminalStatus(r.status)
+    ).length;
+    lastRunningAgentCountScannedAt = now;
+  } catch {
+    // local run registry is best effort
+  }
+  return cachedRunningAgentCount;
+}
+
+export function resetRunningAgentCountCacheForTest(): void {
+  cachedRunningAgentCount = 0;
+  lastRunningAgentCountScannedAt = 0;
+}
 
 export type RunRegistryPollerDeps = {
   /** 面板当前挂着哪些 run（dock.getRuns()）。 */
@@ -119,6 +163,7 @@ export function snapshotFromRunRecord(
   return {
     runId: record.runId,
     status: record.status,
+    ...(!record.parentDialogId ? { unassigned: true } : {}),
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
@@ -142,6 +187,7 @@ function fingerprint(snapshot: AgentRunSnapshot): string {
   return JSON.stringify([
     snapshot.status,
     snapshot.agentName ?? "",
+    (snapshot as any).unassigned ?? false,
     snapshot.toolCallCount ?? -1,
     snapshot.errorMessage ?? "",
     snapshot.finishedAt ?? 0,
@@ -207,13 +253,13 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       !dockedIds.has(record.runId) &&
       !retiredRunIds.has(record.runId) &&
       !isAgentRunTerminalStatus(record.status) &&
-      (!deps.getCurrentDialogId || (currentDialogId !== undefined && record.parentDialogId === currentDialogId))
+      (!deps.getCurrentDialogId || (currentDialogId !== undefined && (record.parentDialogId === currentDialogId || !record.parentDialogId)))
     );
     // 从未上过板的终态记录也给 dock 一次展示机会；超出窗口才墓碑化。
     const discoveredTerminal = discovered.filter((record) => {
       if (!record.runId || dockedIds.has(record.runId) || retiredRunIds.has(record.runId)) return false;
       if (!isAgentRunTerminalStatus(record.status)) return false;
-      if (deps.getCurrentDialogId && (currentDialogId === undefined || record.parentDialogId !== currentDialogId)) return false;
+      if (deps.getCurrentDialogId && (currentDialogId === undefined || !(record.parentDialogId === currentDialogId || !record.parentDialogId))) return false;
       const endedAt = readTimestamp(record.endedAt);
       return endedAt !== undefined && at - endedAt <= DISCOVERY_TERMINAL_LINGER_MS;
     });

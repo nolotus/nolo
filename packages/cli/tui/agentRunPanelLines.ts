@@ -14,7 +14,7 @@ import {
   runShowsLogTail,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
-import { activeInFlight, formatInFlightFact, runStatusTone } from "./runSnapshotDisplay";
+import { activeInFlight, formatInFlightFact, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
 /**
@@ -75,15 +75,17 @@ export function formatAgentRunPanelLines(
   const statusColor = runStatusTone(status);
 
   const errPart = snapshot.errorMessage ? ` · ${snapshot.errorMessage}` : "";
+  const unassignedFact = formatUnassignedFact(snapshot);
+  const unassignedPart = unassignedFact ? ` · ${unassignedFact}` : "";
   const progressPart = formatPanelProgress(snapshot, now);
-  // The panel repaints on a timer, so this ticks live — unlike the transcript
+  // The panel repaints on a timer, so this ticks live —不像 transcript
   // cards, which freeze the age at the moment they were emitted.
   const age = formatRunAge(snapshot, now);
   const agePart = age ? ` · ${age}` : "";
 
   if (!colorEnabled) {
     lines.push(
-      `🤖 Sub-Agent: ${name}${runId} · ${statusSymbol} ${status}${agePart}${progressPart}${errPart}`
+      `🤖 Sub-Agent: ${name}${runId} · ${statusSymbol} ${status}${unassignedPart}${agePart}${progressPart}${errPart}`
     );
   } else {
     const botIcon = themeText("🤖", "accent", true);
@@ -93,10 +95,11 @@ export function formatAgentRunPanelLines(
     // colour on, so omitting it here made the live duration invisible in
     // exactly the mode users see.
     const statusText = themeText(` · ${statusSymbol} ${status}`, statusColor, true);
+    const unassignedText = unassignedPart ? themeText(unassignedPart, "muted") : "";
     const ageText = agePart ? themeText(agePart, "chrome") : "";
     const progressText = progressPart ? themeText(progressPart, "chrome") : "";
     const errorText = errPart ? themeText(errPart, "danger") : "";
-    lines.push(`${botIcon}${labelText}${nameText}${statusText}${ageText}${progressText}${errorText}`);
+    lines.push(`${botIcon}${labelText}${nameText}${statusText}${unassignedText}${ageText}${progressText}${errorText}`);
   }
 
   const detail = formatPanelDetail(snapshot);

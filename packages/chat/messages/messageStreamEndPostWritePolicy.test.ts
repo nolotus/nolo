@@ -46,6 +46,18 @@ describe("resolveStreamEndPostWritePolicy", () => {
     expect(r.billingMode).toBe("skip");
   });
 
+  test("billingMode: skip for an immediate user cancellation, preventing an estimated token report", () => {
+    const r = resolveStreamEndPostWritePolicy({
+      hasReportedUsage: false,
+      skipBilling: true,
+      agentProvider: "openrouter",
+      titleEligible: false,
+      textContent: "[用户中断]",
+      toolCalls: [],
+    });
+    expect(r.billingMode).toBe("skip");
+  });
+
   test("updateTitle mirrors titleEligible", () => {
     expect(
       resolveStreamEndPostWritePolicy({

@@ -643,6 +643,73 @@ describe("sendOpenAICompletionsRequest", () => {
     expect(finalPayload?.messageMetadata?.metadata?.error).toBeUndefined();
   });
 
+  it("marks an immediate user AbortError with provider_call_id-only usage to skip billing", async () => {
+    const { sendOpenAICompletionsRequest, getStreamEndPayloads, setFetchResponse } =
+      await loadSendOpenAICompletionsRequest();
+    const encoder = new TextEncoder();
+    let pulled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!pulled) {
+          pulled = true;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-only" } })}\n\n`)
+          );
+          return;
+        }
+        const error = new Error("User abort");
+        error.name = "AbortError";
+        controller.error(error);
+      },
+    });
+    setFetchResponse(new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+
+    await sendOpenAICompletionsRequest({
+      bodyData: { model: "openai/gpt-4o", messages: [], stream: true },
+      agentConfig: { dbKey: "agent-gpt-4o", provider: "openrouter", model: "openai/gpt-4o" },
+      thunkApi: createThunkApi(),
+      dialogKey: "dialog-user-1-dialog-1",
+    });
+
+    const finalPayload = getStreamEndPayloads().at(-1);
+    expect(finalPayload?.totalUsage).toEqual({ provider_call_id: "pcall-abort-only" });
+    expect(finalPayload?.billingFailed).toBe(false);
+    expect(finalPayload?.skipBilling).toBe(true);
+  });
+
+  it("keeps billing enabled after a user AbortError with observed provider usage", async () => {
+    const { sendOpenAICompletionsRequest, getStreamEndPayloads, setFetchResponse } =
+      await loadSendOpenAICompletionsRequest();
+    const encoder = new TextEncoder();
+    let pulled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!pulled) {
+          pulled = true;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-used", prompt_tokens: 3, completion_tokens: 1 } })}\n\n`)
+          );
+          return;
+        }
+        const error = new Error("User abort");
+        error.name = "AbortError";
+        controller.error(error);
+      },
+    });
+    setFetchResponse(new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+
+    await sendOpenAICompletionsRequest({
+      bodyData: { model: "openai/gpt-4o", messages: [], stream: true },
+      agentConfig: { dbKey: "agent-gpt-4o", provider: "openrouter", model: "openai/gpt-4o" },
+      thunkApi: createThunkApi(),
+      dialogKey: "dialog-user-1-dialog-1",
+    });
+
+    const finalPayload = getStreamEndPayloads().at(-1);
+    expect(finalPayload?.billingFailed).toBe(false);
+    expect(finalPayload?.skipBilling).toBe(false);
+  });
+
   describe("stream throttling behavior", () => {
     it("batches multiple text deltas within one throttling period", async () => {
       const { sendOpenAICompletionsRequest, setFetchResponse } =

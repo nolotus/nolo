@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 import { MemoryDB } from "database-engine/MemoryDB";
-import { createKey } from "database/keys";
+import { createKey, createTokenKey } from "database/keys";
 import { createTestAuthorityStore } from "database-engine/testAuthorityStore";
 import { DataType } from "create/types";
 
@@ -360,16 +360,22 @@ describe("writeServerTokenRecord", () => {
     expect(result.tokenRecord).toMatchObject({
       status: "failed",
       billable: false,
+      pay: {},
       cost: 0,
+      would_have_charged_credits: 0,
+      absorbed_credits: 0,
       input_tokens: 0,
       output_tokens: 0,
       model: "deepseek-v4-flash",
       dialogId: "dialog-fail-1",
       errorMessage: "upstream 503: upstream request timed out",
     });
+    expect(result.recordKey).toBe(
+      createTokenKey.recordForFailedStableCall("user-fail", "provider-call-fail-1")
+    );
 
     // Idempotent per usageCallId: writing again with the same key overwrites
-    // the same record rather than adding a second one.
+    // the same record and does NOT double-increment failedCount.
     const again = await writeFailedTokenRecord({
       userId: "user-fail",
       agentKey: "agent-fail-1",
@@ -379,6 +385,193 @@ describe("writeServerTokenRecord", () => {
       errorMessage: "retry",
     });
     expect(again.recordKey).toBe(result.recordKey);
+
+    const statsPrefix = createKey("token", "stats", "day", "user", "user-fail", "");
+    let statsKey: string | null = null;
+    for await (const [k] of testDb.iterator({ gte: statsPrefix, lte: `${statsPrefix}\uffff` })) {
+      if (typeof k === "string" && k.startsWith(statsPrefix)) statsKey = k;
+    }
+    expect(statsKey).not.toBeNull();
+    const stats = (await testDb.get(statsKey as string)) as any;
+    expect(stats.total.failedCount).toBe(1);
+    expect(stats.total.count).toBe(0);
   });
 
+  it("writeServerTokenRecord with status=failed retains actual usage and catalog-rated credits while cost=0 and billable=false", async () => {
+    const dialogId = "dialog-fail-usage-1";
+    const dialogKey = createKey(DataType.DIALOG, "user-fail-usage", dialogId);
+    await testDb.put(dialogKey, {
+      id: dialogId,
+      dbKey: dialogKey,
+      type: DataType.DIALOG,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0,
+    });
+
+    const { writeServerTokenRecord } = await loadWriterModule();
+    const result = await writeServerTokenRecord({
+      userId: "user-fail-usage",
+      username: "fail-user",
+      agentKey: "agent-fail-usage",
+      agentConfig: {
+        model: "deepseek-v4-flash",
+        provider: "deepseek",
+        inputPrice: 3.6,
+        outputPrice: 10.8,
+      },
+      runId: dialogId,
+      usageCallId: "call-fail-with-usage",
+      status: "failed",
+      errorMessage: "upstream connection reset mid-stream",
+      rawUsage: {
+        prompt_tokens: 200,
+        completion_tokens: 80,
+        total_tokens: 280,
+        prompt_cache_hit_tokens: 50,
+        prompt_cache_miss_tokens: 150,
+      } as any,
+    });
+
+    expect(result.cost).toBe(0);
+    expect(result.recordKey).toBe(
+      createTokenKey.recordForFailedStableCall("user-fail-usage", "call-fail-with-usage")
+    );
+    expect(result.tokenRecord).toMatchObject({
+      status: "failed",
+      billable: false,
+      pay: {},
+      cost: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      observed_usage: {
+        input_tokens: 200,
+        output_tokens: 80,
+        cache_read_input_tokens: 50,
+        cache_creation_input_tokens: 150,
+      },
+      errorMessage: "upstream connection reset mid-stream",
+    });
+    expect(result.tokenRecord.would_have_charged_credits).toBeGreaterThan(0);
+    expect(result.tokenRecord.absorbed_credits).toBe(result.tokenRecord.would_have_charged_credits);
+
+    // Dialog totals must NOT be incremented for failed attempts
+    const dialog = await testDb.get(dialogKey);
+    expect(dialog.inputTokens).toBe(0);
+    expect(dialog.outputTokens).toBe(0);
+    expect(dialog.totalCost).toBe(0);
+
+    // Daily stats must only increment failedCount
+    const statsPrefix = createKey("token", "stats", "day", "user", "user-fail-usage", "");
+    let statsKey: string | null = null;
+    for await (const [k] of testDb.iterator({ gte: statsPrefix, lte: `${statsPrefix}\uffff` })) {
+      if (typeof k === "string" && k.startsWith(statsPrefix)) statsKey = k;
+    }
+    expect(statsKey).not.toBeNull();
+    const stats = (await testDb.get(statsKey as string)) as any;
+    expect(stats.total.failedCount).toBe(1);
+    expect(stats.total.count).toBe(0);
+    expect(stats.total.tokens.input).toBe(0);
+    expect(stats.total.tokens.output).toBe(0);
+    expect(stats.total.cost).toBe(0);
+  });
+
+  it("same usageCallId failed then success preserves both audit records and projects stats/dialog correctly", async () => {
+    const dialogId = "dialog-retry-same-id";
+    const dialogKey = createKey(DataType.DIALOG, "user-retry", dialogId);
+    await testDb.put(dialogKey, {
+      id: dialogId,
+      dbKey: dialogKey,
+      type: DataType.DIALOG,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0,
+    });
+
+    const { writeServerTokenRecord } = await loadWriterModule();
+    const baseOpts = {
+      userId: "user-retry",
+      username: "retry-user",
+      agentKey: "agent-retry",
+      agentConfig: {
+        model: "deepseek-v4-flash",
+        provider: "deepseek",
+        inputPrice: 3.6,
+        outputPrice: 10.8,
+      },
+      runId: dialogId,
+      usageCallId: "stable-call-retry-1",
+    };
+
+    // Attempt 1: Failed
+    const failResult = await writeServerTokenRecord({
+      ...baseOpts,
+      status: "failed",
+      errorMessage: "upstream 502 bad gateway",
+      rawUsage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } as any,
+    });
+    expect(failResult.cost).toBe(0);
+    expect(failResult.recordKey).toBe(
+      createTokenKey.recordForFailedStableCall("user-retry", "stable-call-retry-1")
+    );
+    expect(failResult.tokenRecord.status).toBe("failed");
+    expect(failResult.tokenRecord.billable).toBe(false);
+    expect(failResult.tokenRecord.pay).toEqual({});
+
+    // Duplicate failed write does not double-increment failedCount
+    const duplicateFail = await writeServerTokenRecord({
+      ...baseOpts,
+      status: "failed",
+      errorMessage: "upstream 502 bad gateway",
+      rawUsage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } as any,
+    });
+    expect(duplicateFail.recordKey).toBe(failResult.recordKey);
+
+    // Attempt 2: Success with same usageCallId
+    const successResult = await writeServerTokenRecord({
+      ...baseOpts,
+      rawUsage: { prompt_tokens: 150, completion_tokens: 60, total_tokens: 210 } as any,
+    });
+    expect(successResult.recordKey).toBe(
+      createTokenKey.recordForStableCall("user-retry", "stable-call-retry-1")
+    );
+    expect(successResult.recordKey).not.toBe(failResult.recordKey);
+    expect(successResult.cost).toBeGreaterThan(0);
+    expect(successResult.tokenRecord.status).toBeUndefined();
+    expect(successResult.tokenRecord.billable).toBe(true);
+    expect(successResult.tokenRecord.cost).toBe(successResult.cost);
+
+    // Both failure audit record and success record are preserved in store
+    const failedRecord = await testDb.get(failResult.recordKey);
+    expect(failedRecord).toBeDefined();
+    expect(failedRecord.status).toBe("failed");
+    expect(failedRecord.billable).toBe(false);
+
+    const successRecord = await testDb.get(successResult.recordKey);
+    expect(successRecord).toBeDefined();
+    expect(successRecord.billable).toBe(true);
+    expect(successRecord.cost).toBe(successResult.cost);
+
+    // Dialog totals are updated with the success attempt
+    const dialog = await testDb.get(dialogKey);
+    expect(dialog.inputTokens).toBe(150);
+    expect(dialog.outputTokens).toBe(60);
+    expect(dialog.totalCost).toBe(successResult.cost);
+
+    // Daily stats has the success tokens/cost and preserved failedCount from attempt 1
+    const statsPrefix = createKey("token", "stats", "day", "user", "user-retry", "");
+    let statsKey: string | null = null;
+    for await (const [k] of testDb.iterator({ gte: statsPrefix, lte: `${statsPrefix}\uffff` })) {
+      if (typeof k === "string" && k.startsWith(statsPrefix)) statsKey = k;
+    }
+    expect(statsKey).not.toBeNull();
+    const stats = (await testDb.get(statsKey as string)) as any;
+    expect(stats.total.failedCount).toBe(1);
+    expect(stats.total.count).toBe(1);
+    expect(stats.total.tokens.input).toBe(150);
+    expect(stats.total.tokens.output).toBe(60);
+    expect(stats.total.cost).toBe(Number(successResult.cost.toFixed(6)));
+  });
 });

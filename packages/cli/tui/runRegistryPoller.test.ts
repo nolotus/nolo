@@ -4,9 +4,13 @@ import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import type { RunRecord } from "../agentRunControl";
 import {
   RUN_RECONCILE_SILENCE_MS,
+  RUNNING_AGENT_COUNT_CACHE_TTL_MS,
   createRunRegistryPoller,
+  getCachedRunningAgentCount,
+  resetRunningAgentCountCacheForTest,
   snapshotFromRunRecord,
 } from "./runRegistryPoller";
+import { formatUnassignedFact } from "./runSnapshotDisplay";
 
 const T0 = 1_700_000_000_000;
 
@@ -209,6 +213,34 @@ describe("snapshotFromRunRecord", () => {
   test("a running run's note is not mistaken for an error", () => {
     const snapshot = snapshotFromRunRecord(record({ runId: "run-a", note: "just a note" }), T0);
     expect(snapshot.errorMessage).toBeUndefined();
+  });
+
+  test("marks unassigned when record has no parentDialogId", () => {
+    const unassignedSnapshot = snapshotFromRunRecord(
+      record({ runId: "run-no-parent", parentDialogId: undefined }),
+      T0
+    );
+    expect((unassignedSnapshot as any).unassigned).toBe(true);
+
+    const assignedSnapshot = snapshotFromRunRecord(
+      record({ runId: "run-with-parent", parentDialogId: "dialog-a" }),
+      T0
+    );
+    expect((assignedSnapshot as any).unassigned).toBeUndefined();
+  });
+
+  test("formatUnassignedFact returns parent: ? when parentDialogId is missing", () => {
+    const snapshot = snapshotFromRunRecord(
+      record({ runId: "run-unassigned", parentDialogId: undefined }),
+      T0
+    );
+    expect(formatUnassignedFact(snapshot as any)).toBe("parent: ?");
+
+    const assigned = snapshotFromRunRecord(
+      record({ runId: "run-assigned", parentDialogId: "dialog-a" }),
+      T0
+    );
+    expect(formatUnassignedFact(assigned as any)).toBeNull();
   });
 });
 
@@ -451,6 +483,17 @@ describe("run registry poller", () => {
     expect(h.updates).toEqual([]);
   });
 
+  test("discovers an active run missing parentDialogId (degradation fallback)", () => {
+    const h = setup({
+      dialogId: "dialog-a",
+      discovered: [record({ runId: "run-unassigned", parentDialogId: undefined })],
+    });
+    h.poller.ensureRunning();
+    h.tick();
+    expect(h.updates.map((u) => u.runId)).toEqual(["run-unassigned"]);
+    expect((h.updates[0] as any)?.unassigned).toBe(true);
+  });
+
   test("repeated discovery is idempotent", () => {
     const h = setup({
       dialogId: "dialog-a",
@@ -565,5 +608,65 @@ describe("onRecordsPolled", () => {
     expect(() => h.poller.poll()).not.toThrow();
     // 面板照常更新。
     expect(h.updates).toHaveLength(1);
+  });
+});
+
+describe("sessionRender getCachedRunningAgentCount throttling & memoization", () => {
+  test("memoizes active agent count within 1s TTL and does not re-scan IO on same tick", () => {
+    resetRunningAgentCountCacheForTest();
+    let scanCount = 0;
+    // 模拟 registry 中有 1200+ 条记录（1000 条 done/failed，200 条 running）
+    const mockRecords: Array<{ status: string }> = [];
+    for (let i = 0; i < 1000; i++) {
+      mockRecords.push({ status: i % 2 === 0 ? "done" : "failed" });
+    }
+    for (let i = 0; i < 200; i++) {
+      mockRecords.push({ status: "running" });
+    }
+
+    const mockReader = () => {
+      scanCount += 1;
+      return mockRecords;
+    };
+
+    const t0 = 10_000;
+    // 模拟 TUI 渲染热路径（1000 次击键或 150ms 活跃重绘在同一个 1s 窗口内）
+    for (let i = 0; i < 1000; i++) {
+      const count = getCachedRunningAgentCount({
+        now: t0 + (i % 500),
+        reader: mockReader,
+      });
+      expect(count).toBe(200);
+    }
+    // 同一 1s 窗口内 1000 次连续读取只触发了 1 次 reader 全量扫描
+    expect(scanCount).toBe(1);
+
+    // 超过 TTL (1000ms) 后，下一次调用才会重新扫描
+    const countAfterTtl = getCachedRunningAgentCount({
+      now: t0 + RUNNING_AGENT_COUNT_CACHE_TTL_MS + 10,
+      reader: mockReader,
+    });
+    expect(countAfterTtl).toBe(200);
+    expect(scanCount).toBe(2);
+  });
+
+  test("returns cached count gracefully when reader throws", () => {
+    resetRunningAgentCountCacheForTest();
+    const t0 = 10_000;
+    // 第一次读取成功
+    const count1 = getCachedRunningAgentCount({
+      now: t0,
+      reader: () => [{ status: "running" }, { status: "done" }],
+    });
+    expect(count1).toBe(1);
+
+    // 过了 TTL 但 reader 抛错，优雅回退到之前的缓存值
+    const count2 = getCachedRunningAgentCount({
+      now: t0 + 2000,
+      reader: () => {
+        throw new Error("disk IO error");
+      },
+    });
+    expect(count2).toBe(1);
   });
 });

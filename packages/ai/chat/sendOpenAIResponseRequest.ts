@@ -112,6 +112,10 @@ type StreamState = {
   usage: any | null;
   assistantToolCalls: AssistantToolCall[];
   completedResponse: any | null;
+  /** Upstream/protocol failures must never fall back to estimated billing. */
+  billingFailed: boolean;
+  /** A user abort before any real token/cost usage is observed is not billable. */
+  skipBilling: boolean;
   responsesStateFallback?: boolean;
 };
 
@@ -183,6 +187,26 @@ const getStreamErrorMessage = (event: any): string => {
   return "Unknown error";
 };
 
+/** A provider call id alone is metadata, not reported token/cost usage. */
+const hasReportedTokenOrCostUsage = (usage: unknown): boolean => {
+  if (!usage || typeof usage !== "object") return false;
+  const hasTokenField = [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+  ].some((field) => Object.prototype.hasOwnProperty.call(usage, field));
+  const hasCost =
+    Object.prototype.hasOwnProperty.call(usage, "cost") &&
+    typeof (usage as { cost?: unknown }).cost === "number";
+  return hasTokenField || hasCost;
+};
+
+const shouldSkipBillingForUserAbort = (error: unknown, usage: unknown): boolean => {
+  return isAbortError(error) && !hasReportedTokenOrCostUsage(usage);
+};
+
 export const sendOpenAIResponseRequest = async ({
   bodyData,
   agentConfig,
@@ -230,6 +254,8 @@ export const sendOpenAIResponseRequest = async ({
     usage: null,
     assistantToolCalls: [],
     completedResponse: null,
+    billingFailed: false,
+    skipBilling: false,
   };
   let activeMessageMetadata = messageMetadata;
 
@@ -244,6 +270,7 @@ export const sendOpenAIResponseRequest = async ({
     finishReason,
     messageId,
     usage: state.usage ?? undefined,
+    billingFailed: state.billingFailed,
     responseId:
       typeof state.completedResponse?.id === "string"
         ? state.completedResponse.id
@@ -313,6 +340,21 @@ export const sendOpenAIResponseRequest = async ({
       state.contentBuffer = seg(state.content);
     }
 
+    const hasVisibleOutput = state.contentBuffer.some(
+      (part) =>
+        part.type === "image_url" ||
+        (part.type === "text" && typeof part.text === "string" && part.text.trim())
+    );
+    if (
+      !hasVisibleOutput &&
+      state.assistantToolCalls.length === 0 &&
+      !hasReportedTokenOrCostUsage(state.usage)
+    ) {
+      // A clean HTTP 200 EOF with no visible output, tool call, or usage is an
+      // upstream empty result, not a completed response that may be estimated.
+      state.billingFailed = true;
+    }
+
     activeMessageMetadata = withImageGenerationStage(
       activeMessageMetadata,
       "saving"
@@ -353,6 +395,8 @@ export const sendOpenAIResponseRequest = async ({
         messageMetadata: activeMessageMetadata,
         toolCalls: state.assistantToolCalls,
         spaceId: streamSpaceId,
+        billingFailed: state.billingFailed,
+        skipBilling: state.skipBilling,
       })
     );
   };
@@ -651,6 +695,7 @@ export const sendOpenAIResponseRequest = async ({
         }
         const errorMessage = await parseApiError(response);
         state.content = `[错误: ${errorMessage}]`;
+        state.billingFailed = true;
         await finalize();
         return buildMeta();
       }
@@ -662,6 +707,7 @@ export const sendOpenAIResponseRequest = async ({
           await waitForInitialStreamRetry(1_500, signal);
           continue;
         }
+        state.billingFailed = true;
         await finalize();
         return buildMeta();
       }
@@ -730,6 +776,7 @@ export const sendOpenAIResponseRequest = async ({
                 continue attemptLoop;
               }
               state.content += `\n[Error: ${getStreamErrorMessage(event)}]`;
+              state.billingFailed = true;
               await finalize();
               return buildMeta();
             }
@@ -836,14 +883,28 @@ export const sendOpenAIResponseRequest = async ({
                 if (event.response?.usage) {
                   state.usage = updateTotalUsage(state.usage, event.response.usage);
                 }
+                if (
+                  event.response?.status === "failed" ||
+                  event.response?.status === "incomplete"
+                ) {
+                  state.billingFailed = true;
+                }
                 break;
               case "response.failed":
                 state.content += `\n[API Failed: ${event.response?.error?.message || "unknown"}]`;
+                if (event.response?.usage) {
+                  state.usage = updateTotalUsage(state.usage, event.response.usage);
+                }
+                state.billingFailed = true;
                 finishReason = "error";
                 await finalize();
                 return buildMeta(false, false, finishReason);
               case "response.incomplete":
                 state.content += `\n[Incomplete: ${event.response?.incomplete_details?.reason || "unknown"}]`;
+                if (event.response?.usage) {
+                  state.usage = updateTotalUsage(state.usage, event.response.usage);
+                }
+                state.billingFailed = true;
                 finishReason = "incomplete";
                 await finalize();
                 return buildMeta(false, false, finishReason);
@@ -870,10 +931,13 @@ export const sendOpenAIResponseRequest = async ({
     }
     return buildMeta(false, false, null);
   } catch (error: any) {
+    const isAbort = isAbortError(error);
     state.content +=
-      isAbortError(error)
+      isAbort
         ? "[用户中断]"
         : `[异常: ${error?.message || "unknown"}]`;
+    state.billingFailed = isAbort ? state.billingFailed : true;
+    state.skipBilling = state.skipBilling || shouldSkipBillingForUserAbort(error, state.usage);
     await finalize();
     return buildMeta(false, false, "error");
   } finally {

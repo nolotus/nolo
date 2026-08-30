@@ -38,20 +38,44 @@ export function resolveStreamEndBillingUsages(input: {
   const billedUsage = isOpenAIBuiltInImageGenerationAgent(agentConfig)
     ? withImageGenerationCount(totalUsage, imageGenerationCount)
     : totalUsage;
-  const estimatedUsage = estimateMissingUsage({
+  const rawEstimatedUsage = estimateMissingUsage({
     content: finalVisibleContent,
   });
+  const providerCallId =
+    typeof totalUsage === "object" && totalUsage !== null
+      ? (totalUsage as { provider_call_id?: string }).provider_call_id
+      : undefined;
+  const estimatedUsage = providerCallId
+    ? { ...rawEstimatedUsage, provider_call_id: providerCallId }
+    : rawEstimatedUsage;
   const billedEstimatedUsage = isOpenAIBuiltInImageGenerationAgent(agentConfig)
     ? withImageGenerationCount(estimatedUsage, imageGenerationCount)
     : estimatedUsage;
   const titleEligibleContent =
     serializeMessageContent(finalVisibleContent, "[图片]") ?? "";
 
+  // Presence of an explicit provider usage field is authoritative, including
+  // an explicit zero. Only a metadata-only snapshot (for example
+  // `{provider_call_id}`) may use the estimated fallback.
+  const hasReportedTokens = Boolean(
+    totalUsage &&
+      typeof totalUsage === "object" &&
+      ([
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+      ].some((field) => Object.prototype.hasOwnProperty.call(totalUsage, field)) ||
+        (Object.prototype.hasOwnProperty.call(totalUsage, "cost") &&
+          typeof totalUsage.cost === "number")),
+  );
+
   return {
     imageGenerationCount,
     billedUsage,
     billedEstimatedUsage,
-    hasReportedUsage: Boolean(totalUsage),
+    hasReportedUsage: hasReportedTokens,
     titleEligible: titleEligibleContent.trim() !== "",
   };
 }

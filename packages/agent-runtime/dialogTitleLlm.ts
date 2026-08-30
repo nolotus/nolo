@@ -109,6 +109,10 @@ export async function generateLocalDialogTitle(
           providerConfig,
           messages: [
             {
+              role: "system",
+              content: BUILTIN_TITLE_LLM_CONFIG.prompt,
+            },
+            {
               role: "user",
               content: JSON.stringify(visibleMessages),
             },
@@ -116,8 +120,21 @@ export async function generateLocalDialogTitle(
           stream: false,
         });
 
+        let parsedBody: any = {};
+        if (typeof request.init?.body === "string") {
+          parsedBody = safeParseJson(request.init.body) ?? {};
+        } else if (typeof request.init?.body === "object" && request.init?.body !== null) {
+          parsedBody = request.init.body;
+        }
+        const patchedBody = {
+          ...parsedBody,
+          reasoning_effort: "low",
+          max_tokens: 512,
+        };
+
         const res = await input.fetchImpl(request.url, {
           ...request.init,
+          body: JSON.stringify(patchedBody),
           signal: AbortSignal.timeout(timeoutMs),
         });
 
@@ -204,6 +221,9 @@ export async function generateLocalDialogTitle(
               { role: "system", content: BUILTIN_TITLE_LLM_CONFIG.prompt },
               { role: "user", content: JSON.stringify(visibleMessages) },
             ],
+            // reasoning_effort/max_tokens 优化标题延迟与消耗；注意部分严格 OpenAI 兼容服务端（如某些 vLLM 部署）若拒绝未知参数会降级到 fallback。
+            reasoning_effort: "low",
+            max_tokens: 512,
             stream: false,
           }),
           signal: AbortSignal.timeout(timeoutMs),

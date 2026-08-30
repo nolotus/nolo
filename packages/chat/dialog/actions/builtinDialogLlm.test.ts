@@ -7,9 +7,9 @@ import {
 } from "./builtinDialogLlm";
 
 describe("builtin dialog llm config", () => {
-  it("pins title generation to the builtin DeepSeek V4 Flash model", () => {
+  it("pins title generation to the builtin GLM 5.3 Flash model", () => {
     expect(BUILTIN_TITLE_LLM_CONFIG.provider).toBe("nolo");
-    expect(BUILTIN_TITLE_LLM_CONFIG.model).toBe("deepseek-v4-flash");
+    expect(BUILTIN_TITLE_LLM_CONFIG.model).toBe("glm-5-3-flash");
     expect(BUILTIN_TITLE_LLM_CONFIG.apiSource).toBe("platform");
     expect(BUILTIN_TITLE_LLM_CONFIG.useServerProxy).toBe(true);
     expect(BUILTIN_TITLE_LLM_CONFIG.prompt).toContain("title generator");
@@ -18,9 +18,9 @@ describe("builtin dialog llm config", () => {
     expect(BUILTIN_TITLE_LLM_CONFIG.prompt).toContain("Output only the title text");
   });
 
-  it("pins summary generation to the builtin DeepSeek V4 Flash model", () => {
+  it("pins summary generation to the builtin GLM 5.3 Flash model", () => {
     expect(BUILTIN_SUMMARY_LLM_CONFIG.provider).toBe("nolo");
-    expect(BUILTIN_SUMMARY_LLM_CONFIG.model).toBe("deepseek-v4-flash");
+    expect(BUILTIN_SUMMARY_LLM_CONFIG.model).toBe("glm-5-3-flash");
     expect(BUILTIN_SUMMARY_LLM_CONFIG.apiSource).toBe("platform");
     expect(BUILTIN_SUMMARY_LLM_CONFIG.useServerProxy).toBe(true);
     expect(BUILTIN_SUMMARY_LLM_CONFIG.prompt).toContain("对话记忆助理");

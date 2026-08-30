@@ -55,3 +55,13 @@ export function activeInFlight(
   if (isAgentRunTerminalStatus(snapshot.status)) return null;
   return snapshot.inFlight ?? null;
 }
+
+/**
+ * 缺失 parentDialogId 的 run 在面板上标注 `parent: ?`。
+ */
+export function formatUnassignedFact(
+  snapshot: AgentRunSnapshot & { unassigned?: boolean }
+): string | null {
+  return (snapshot as any).unassigned ? "parent: ?" : null;
+}
+

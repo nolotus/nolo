@@ -16,6 +16,7 @@ import {
   resolveTuiBrightness,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { getCachedRunningAgentCount } from "./runRegistryPoller";
 import type { TuiState } from "./sessionTypes";
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
@@ -117,12 +118,20 @@ export function renderStatusLine(state: TuiState) {
   );
   parts.push(tokenSegment);
 
-  // User-visible running count: only real background tasks (launchProcess /
-  // promoted). Transient foreground grace-period envelopes must not inflate
-  // this (pre-Phase-0 semantics).
-  const runningCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
-  if (runningCount > 0) {
-    parts.push(themeText(`⚙ ${runningCount} running`, "info", colorEnabled));
+  // User-visible running count: launchProcess / promoted local background tasks,
+  // plus active (non-terminal) agent runs from local run registry (throttled).
+  const runningTaskCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
+  const runningAgentCount = getCachedRunningAgentCount();
+
+  const runningParts: string[] = [];
+  if (runningTaskCount > 0) {
+    runningParts.push(`${runningTaskCount} running`);
+  }
+  if (runningAgentCount > 0) {
+    runningParts.push(`${runningAgentCount} ${runningAgentCount === 1 ? "agent" : "agents"}`);
+  }
+  if (runningParts.length > 0) {
+    parts.push(themeText(`⚙ ${runningParts.join(" · ")}`, "info", colorEnabled));
   }
 
   // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过

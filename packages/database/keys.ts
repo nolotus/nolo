@@ -454,6 +454,9 @@ export const createTokenKey = {
   /** Server provider-call record: retry-stable even when the retry clock changes. */
   recordForStableCall: (userId: string, callId: string) =>
     createKey("token", userId, "call", encodeURIComponent(callId)),
+  /** Server provider-call failure audit record: preserved separately from retry success in a collision-free namespace. */
+  recordForFailedStableCall: (userId: string, callId: string) =>
+    createKey("token", userId, "failed-call", encodeURIComponent(callId)),
   range: (userId: string, timestamp: number) => ({
     start: createKey("token", userId, timestamp.toString()),
     end: createKey("token", userId, (timestamp + 86_400_000).toString()),

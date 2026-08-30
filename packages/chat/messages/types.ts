@@ -45,6 +45,8 @@ export interface CompletionUsage {
   /** Platform billing identity when usage is rated into credits. */
   billing_provider?: string;
   billing_model?: string;
+  /** First provider-call id for this chat proxy request (server truth anchor). */
+  provider_call_id?: string;
   // Responses API (OpenAI / DeepSeek 官方) usage 命名；updateTotalUsage
   // 会归一化到 prompt_tokens / completion_tokens，原始字段保留用于消费点回退。
   input_tokens?: number;

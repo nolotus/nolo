@@ -27,7 +27,7 @@ import {
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { formatAgentRunPanelLines } from "./agentRunPanelLines";
-import { activeInFlight, formatInFlightFact, runStatusTone } from "./runSnapshotDisplay";
+import { activeInFlight, formatInFlightFact, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
 /** 年龄每秒走一格；比 150ms 的活动帧慢，因为这里没有动画只有秒数。 */
@@ -338,6 +338,8 @@ function formatRunDockRow(
   // killed 和 timeout，而那两个的处理方式完全不同。
   if (terminal) facts.push(age ? `${snapshot.status} ${age}` : snapshot.status);
   else if (age) facts.push(age);
+  const unassigned = formatUnassignedFact(snapshot);
+  if (unassigned) facts.push(unassigned);
   if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
     facts.push(`${snapshot.toolCallCount} tools`);
   }

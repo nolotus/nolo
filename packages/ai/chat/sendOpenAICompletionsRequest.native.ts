@@ -154,6 +154,8 @@ type StreamState = {
     hasProcessedToolCalls: boolean;
     alreadyFinalized: boolean;
     finishReason: CompletionFinishReason | null;
+    billingFailed: boolean;
+    skipBilling: boolean;
 };
 
 type FinalizeContext = {
@@ -189,6 +191,7 @@ export type CompletionMeta = {
     hasHandedOff: boolean;
     finishReason: CompletionFinishReason | null;
     usage?: any;
+    billingFailed?: boolean;
 };
 
 /**
@@ -207,7 +210,30 @@ function createInitialStreamState(): StreamState {
         hasProcessedToolCalls: false,
         alreadyFinalized: false,
         finishReason: null,
+        billingFailed: false,
+        skipBilling: false,
     };
+}
+
+/** A provider call id alone is metadata, not reported token/cost usage. */
+function hasReportedTokenOrCostUsage(totalUsage: unknown): boolean {
+    if (!totalUsage || typeof totalUsage !== "object") return false;
+    const hasTokenField = [
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+    ].some((field) => Object.prototype.hasOwnProperty.call(totalUsage, field));
+    const hasCost =
+        Object.prototype.hasOwnProperty.call(totalUsage, "cost") &&
+        typeof (totalUsage as { cost?: unknown }).cost === "number";
+    return hasTokenField || hasCost;
+}
+
+/** A user abort is billable only after provider token/cost usage was observed. */
+function shouldSkipBillingForUserAbort(error: unknown, totalUsage: unknown): boolean {
+    return isAbortError(error) && !hasReportedTokenOrCostUsage(totalUsage);
 }
 
 /**
@@ -275,7 +301,9 @@ async function finalizeStream(
             dialogKey: ctx.dialogKey,
             messageId: ctx.messageId,
             reasoningBuffer: state.reasoningBuffer,
-            toolCalls: state.assistantToolCalls,
+        toolCalls: state.assistantToolCalls,
+        billingFailed: state.billingFailed,
+        skipBilling: state.skipBilling,
         })
     );
 
@@ -668,7 +696,8 @@ async function handleStreamCompletion(
     const producedNothing =
         state.contentBuffer.length === 0 &&
         !(state.reasoningBuffer || "").trim() &&
-        (state.assistantToolCalls?.length ?? 0) === 0;
+        (state.assistantToolCalls?.length ?? 0) === 0 &&
+        !hasReportedTokenOrCostUsage(state.totalUsage);
     if (producedNothing && !state.hasHandedOff && !state.alreadyFinalized) {
         state = {
             ...state,
@@ -676,6 +705,7 @@ async function handleStreamCompletion(
                 state.contentBuffer,
                 "[错误: 模型返回了空响应，请重试或切换其他模型]"
             ),
+            billingFailed: true,
         };
     }
 
@@ -784,6 +814,7 @@ export const sendOpenAICompletionsRequest = async ({
         hasHandedOff: hasHandedOffOverall,
         finishReason: lastFinishReason,
         usage: streamState.totalUsage ?? undefined,
+        billingFailed: streamState.billingFailed,
     });
     const resetStateForRetry = () => {
         streamState = createInitialStreamState();
@@ -824,6 +855,7 @@ export const sendOpenAICompletionsRequest = async ({
         const token = selectIdentityToken(getState() as RootState) ?? "";
         const handleAttemptFailure = async (error: any) => {
             let errorText: string;
+            const skipBilling = shouldSkipBillingForUserAbort(error, streamState.totalUsage);
             if (isAbortError(error)) {
                 errorText = "\n[用户中断]";
             } else {
@@ -835,6 +867,8 @@ export const sendOpenAICompletionsRequest = async ({
             streamState = {
                 ...streamState,
                 contentBuffer: appendTextChunk(streamState.contentBuffer, errorText),
+                billingFailed: isAbortError(error) ? streamState.billingFailed : true,
+                skipBilling: streamState.skipBilling || skipBilling,
             };
             streamState = await finalizeStream(streamState, finalizeCtx);
             await finishWithMeta();
@@ -941,6 +975,7 @@ export const sendOpenAICompletionsRequest = async ({
                                             streamState.contentBuffer,
                                             `\n[API Error] ${errorMsg}`
                                         ),
+                                        billingFailed: true,
                                     };
                                     finalizeStream(streamState, finalizeCtx).then(() => {
                                         finishWithMeta();
@@ -976,21 +1011,10 @@ export const sendOpenAICompletionsRequest = async ({
                                     streamState.finishReason = finishReason === "error" ? null : finishReason as CompletionFinishReason;
 
                                     if (finishReason === "tool_calls") {
-                                        processAccumulatedToolCalls(streamState, {
-                                            dispatch,
-                                            agentConfig,
-                                            dialogId,
-                                            dialogKey,
-                                            messageId,
-                                        }).then((toolResult) => {
-                                            streamState = toolResult.state;
-                                            hasHandedOffOverall ||= toolResult.hasHandedOff;
-                                            hasPendingInteractionOverall ||= toolResult.hasPendingInteraction;
-
-                                            finalizeStream(streamState, finalizeCtx).then((finalized) => {
-                                                streamState = finalized;
-                                            });
-                                        });
+                                        // Wait for [DONE]/EOF before processing
+                                        // tools or finalizing. A later error
+                                        // frame must still be able to mark the
+                                        // round failed and suppress billing.
                                     } else if (finishReason !== "stop") {
                                         const finishErrorMessage =
                                             finishReason === "error"
@@ -1006,6 +1030,7 @@ export const sendOpenAICompletionsRequest = async ({
                                                         ? "\n[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。"
                                                         : `\n[流结束原因: ${finishReason}]`
                                             ),
+                                            ...(finishReason === "error" ? { billingFailed: true } : {}),
                                         };
                                     }
                                 }

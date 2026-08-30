@@ -162,6 +162,8 @@ type StreamState = {
   hasProcessedToolCalls: boolean;
   alreadyFinalized: boolean;
   finishReason: string | null;
+  billingFailed: boolean;
+  skipBilling: boolean;
 };
 
 type FinalizeContext = {
@@ -227,6 +229,7 @@ export type CompletionMeta = {
   finishReason: string | null;
   messageId: string;
   usage?: any;
+  billingFailed?: boolean;
   responseId?: string;
   responsesStateFallback?: boolean;
 };
@@ -264,7 +267,27 @@ function createInitialStreamState(): StreamState {
     hasProcessedToolCalls: false,
     alreadyFinalized: false,
     finishReason: null,
+    billingFailed: false,
+    skipBilling: false,
   };
+}
+
+/** A user abort is billable only after provider token/cost usage was observed. */
+function shouldSkipBillingForUserAbort(error: unknown, totalUsage: unknown): boolean {
+  if (!isAbortError(error)) return false;
+  if (!totalUsage || typeof totalUsage !== "object") return true;
+
+  const hasTokenField = [
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+  ].some((field) => Object.prototype.hasOwnProperty.call(totalUsage, field));
+  const hasCost =
+    Object.prototype.hasOwnProperty.call(totalUsage, "cost") &&
+    typeof (totalUsage as { cost?: unknown }).cost === "number";
+  return !(hasTokenField || hasCost);
 }
 
 /**
@@ -363,6 +386,8 @@ async function finalizeStream(
       messageMetadata: ctx.messageMetadata,
       toolCalls: state.assistantToolCalls,
       spaceId: ctx.spaceId,
+      billingFailed: state.billingFailed,
+      skipBilling: state.skipBilling,
     })
   );
 
@@ -400,6 +425,7 @@ function markEmptyCompletionAsError(
       state.contentBuffer,
       `[错误: ${EMPTY_UPSTREAM_STREAM_MESSAGE}]`
     ),
+    billingFailed: true,
   };
 }
 
@@ -929,7 +955,7 @@ async function handleStreamCompletion(
 
   if (!state.hasProcessedToolCalls && state.accumulatedToolCalls.length > 0) {
     // Tool 开始前先更新 TopBar token 显示
-    if (state.totalUsage) {
+    if (state.totalUsage && !state.billingFailed) {
       ctx.dispatch(tokenUsageLiveUpdate({
         input_tokens: state.totalUsage.prompt_tokens ?? state.totalUsage.input_tokens,
         output_tokens: state.totalUsage.completion_tokens ?? state.totalUsage.output_tokens,
@@ -1057,6 +1083,7 @@ export const sendOpenAICompletionsRequest = async ({
     finishReason: lastFinishReason,
     messageId,
     usage: streamState.totalUsage ?? undefined,
+    billingFailed: streamState.billingFailed,
   });
 
   try {
@@ -1148,6 +1175,7 @@ export const sendOpenAICompletionsRequest = async ({
           streamState.contentBuffer,
           `[错误: ${errorMessage}]`
         ),
+        billingFailed: true,
       };
       streamState = await finalizeStream(streamState, finalizeCtx);
       return buildMeta();
@@ -1275,6 +1303,7 @@ export const sendOpenAICompletionsRequest = async ({
                 streamState.contentBuffer,
                 `\n[API Error] ${errorMsg}`
               ),
+              billingFailed: true,
             };
             await reader.cancel();
             break;
@@ -1313,34 +1342,10 @@ export const sendOpenAICompletionsRequest = async ({
             streamState.finishReason = finishReason;
 
             if (finishReason === "tool_calls") {
+              // A finish_reason is not the protocol terminator. Defer tool
+              // processing and finalization to handleStreamCompletion at EOF
+              // so a later error frame can still mark this round failed.
               throttler.flush();
-              // Tool 开始前先更新 TopBar token 显示
-              if (streamState.totalUsage) {
-                dispatch(tokenUsageLiveUpdate({
-                  input_tokens: streamState.totalUsage.prompt_tokens ?? streamState.totalUsage.input_tokens,
-                  output_tokens: streamState.totalUsage.completion_tokens ?? streamState.totalUsage.output_tokens,
-                  cost: streamState.totalUsage.cost,
-                  dialogKey,
-                }));
-              }
-              const toolResult = await processAccumulatedToolCalls(
-                streamState,
-                {
-                  dispatch,
-                  agentConfig,
-                  dialogId,
-                  dialogKey,
-                  messageId,
-                  messageMetadata,
-                }
-              );
-
-              streamState = toolResult.state;
-              hasHandedOffOverall ||= toolResult.hasHandedOff;
-              hasPendingInteractionOverall ||= toolResult.hasPendingInteraction;
-
-              // 无论是否 handoff，都 finalize 当前 assistant 消息（stub）
-              streamState = await finalizeStream(streamState, finalizeCtx);
             } else if (finishReason !== "stop") {
               const finishErrorMessage =
                 finishReason === "error"
@@ -1354,8 +1359,9 @@ export const sendOpenAICompletionsRequest = async ({
                     ? `\n[API Error] Error: ${finishErrorMessage}`
                     : finishReason === "error"
                       ? "\n[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。"
-                      : `\n[流结束原因: ${finishReason}]`
+                    : `\n[流结束原因: ${finishReason}]`
                 ),
+                ...(finishReason === "error" ? { billingFailed: true } : {}),
               };
             }
           }
@@ -1366,6 +1372,7 @@ export const sendOpenAICompletionsRequest = async ({
     throttler.flush();
     let errorText: string;
     const isAbort = isAbortError(error);
+    const skipBilling = shouldSkipBillingForUserAbort(error, streamState.totalUsage);
     if (isAbort) {
       errorText = "\n[用户中断]";
     } else {
@@ -1377,6 +1384,8 @@ export const sendOpenAICompletionsRequest = async ({
     streamState = {
       ...streamState,
       contentBuffer: appendTextChunk(streamState.contentBuffer, errorText),
+      billingFailed: isAbort ? streamState.billingFailed : true,
+      skipBilling: streamState.skipBilling || skipBilling,
     };
     // 用户主动中断(AbortError)不算截断,按原行为落库即可;
     // 其它错误(流读取超时 / 连接被静默中断等)属于"异常终止",

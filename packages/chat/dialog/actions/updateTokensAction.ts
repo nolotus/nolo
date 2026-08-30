@@ -164,10 +164,14 @@ export const updateTokensAction = async (
     currentAccountUserId: currentUser?.userId ?? null,
   });
   const timestamp = Date.now();
-  const callId = typeof usageRecord?.callId === "string" && usageRecord.callId
-    ? usageRecord.callId
-    : undefined;
   const usageRaw = usageRecord?.usage ?? legacyUsage;
+  const callId =
+    (typeof usageRecord?.callId === "string" && usageRecord.callId.trim()
+      ? usageRecord.callId.trim()
+      : undefined) ??
+    (typeof usageRaw?.provider_call_id === "string" && usageRaw.provider_call_id.trim()
+      ? usageRaw.provider_call_id.trim()
+      : undefined);
   const usageWithStableCallId = callId && !usageRaw?.provider_call_id
     ? { ...usageRaw, provider_call_id: callId }
     : usageRaw;

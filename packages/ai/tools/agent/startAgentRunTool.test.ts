@@ -181,4 +181,37 @@ describe("startAgentRunFunc", () => {
     expect(lastBgArgs.userInput).toContain("--- INPUT (text) ---");
     expect(lastBgArgs.userInput).toContain("raw text here");
   });
+
+  it("omits parentDialogId when activeDialogKey is empty and no parentDialogId is provided", async () => {
+    await startAgentRunFunc(
+      { agentKey: "agent-1", task: "fallback task" },
+      makeThunkApi()
+    );
+    const lastBgArgs = lastRunAgentBackgroundCalls.at(-1);
+    expect(lastBgArgs.parentDialogId).toBeUndefined();
+  });
+
+  it("passes parentDialogId from args (bare id or prefixed key) when provided", async () => {
+    await startAgentRunFunc(
+      {
+        agentKey: "agent-1",
+        task: "task with explicit parent",
+        parentDialogId: "01M19JS92QYBQYX9MMG1R3Q7WW",
+      },
+      makeThunkApi()
+    );
+    const lastBgArgs1 = lastRunAgentBackgroundCalls.at(-1);
+    expect(lastBgArgs1.parentDialogId).toBe("01M19JS92QYBQYX9MMG1R3Q7WW");
+
+    await startAgentRunFunc(
+      {
+        agentKey: "agent-1",
+        task: "task with prefixed parent key",
+        parentDialogId: "dialog-user-01M19JS92QYBQYX9MMG1R3Q7WW",
+      },
+      makeThunkApi()
+    );
+    const lastBgArgs2 = lastRunAgentBackgroundCalls.at(-1);
+    expect(lastBgArgs2.parentDialogId).toBe("01M19JS92QYBQYX9MMG1R3Q7WW");
+  });
 });

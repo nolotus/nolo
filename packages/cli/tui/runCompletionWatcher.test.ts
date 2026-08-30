@@ -195,6 +195,18 @@ describe("createRunCompletionWatcher", () => {
     expect(h.wakes).toHaveLength(0);
   });
 
+  test("parentDialogId 缺失的 run 降级投递给当前 dialog，不静默 continue", () => {
+    const h = setup();
+    // record without parentDialogId
+    h.watcher.observe([record({ runId: "run-unowned", parentDialogId: undefined })]);
+    h.watcher.observe([
+      record({ runId: "run-unowned", parentDialogId: undefined, status: "done" }),
+    ]);
+    expect(h.wakes).toHaveLength(1);
+    const event = h.wakes[0] as ChildRunCompletedTurnEvent;
+    expect(event.runs[0]?.runId).toBe("run-unowned");
+  });
+
   test("同一个 runId 绝不重复唤醒", () => {
     const h = setup();
     const done = record({ runId: "run-a", status: "done" });

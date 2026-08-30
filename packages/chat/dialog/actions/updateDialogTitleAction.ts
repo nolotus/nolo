@@ -177,6 +177,7 @@ export const updateDialogTitleActionWithDeps = async (
         llmConfig: BUILTIN_TITLE_LLM_CONFIG,
         content,
         billingDialogKey: dialogKey,
+        systemPromptOverride: BUILTIN_TITLE_LLM_CONFIG.prompt,
       })
     ).unwrap();
   }

@@ -26,15 +26,21 @@ export interface StreamEndPostWritePolicy {
  */
 export function resolveStreamEndPostWritePolicy(input: {
   hasReportedUsage: boolean;
+  /** An upstream/transport error means this round is not client-billable. */
+  billingFailed?: boolean;
+  /** User abort before reported provider usage; suppresses estimated billing. */
+  skipBilling?: boolean;
   agentProvider?: string | null;
   titleEligible: boolean;
   textContent: string;
   toolCalls?: unknown[] | null;
 }): StreamEndPostWritePolicy {
-  const { hasReportedUsage, agentProvider, titleEligible, textContent, toolCalls } =
+  const { hasReportedUsage, billingFailed, skipBilling, agentProvider, titleEligible, textContent, toolCalls } =
     input;
 
-  const billingMode: StreamEndBillingMode = hasReportedUsage
+  const billingMode: StreamEndBillingMode = billingFailed || skipBilling
+    ? "skip"
+    : hasReportedUsage
     ? "reported"
     : agentProvider && agentProvider !== "custom"
     ? "estimated"

@@ -20,10 +20,20 @@ export function updateTotalUsage(
 
   // 如果是第一次接收，直接克隆新数据块
   if (!currentUsage) {
+    const hasExplicitTokenField = [
+      "prompt_tokens",
+      "completion_tokens",
+      "total_tokens",
+      "input_tokens",
+      "output_tokens",
+    ].some((field) => Object.prototype.hasOwnProperty.call(newUsageChunk, field));
     const first: CompletionUsage = {
-      completion_tokens: 0,
-      prompt_tokens: 0,
-      total_tokens: 0,
+      // Do not synthesize zero token fields for metadata-only events such as
+      // `{provider_call_id}`. Explicit provider zeros remain real reported
+      // usage; only pure metadata is eligible for estimated fallback.
+      ...(hasExplicitTokenField
+        ? { completion_tokens: 0, prompt_tokens: 0, total_tokens: 0 }
+        : {}),
       ...newUsageChunk,
     } as CompletionUsage;
     applyResponsesUsageFields(first, newUsageChunk);
@@ -85,6 +95,11 @@ export function updateTotalUsage(
   const billingModel = asOptionalTrimmedString(newUsageChunk.billing_model);
   if (billingModel) {
     updatedUsage.billing_model = billingModel;
+  }
+
+  const providerCallId = asOptionalTrimmedString(newUsageChunk.provider_call_id);
+  if (providerCallId) {
+    updatedUsage.provider_call_id = providerCallId;
   }
 
   return updatedUsage;

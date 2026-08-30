@@ -258,21 +258,19 @@ export const PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE = {
   inputCacheHit: toCnyCredits(0.1), // ¥0.1
   output: toCnyCredits(9), // ¥9
 } as const;
-export const PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE = {
-  input: toCnyCredits(9), // ¥9
-  inputCacheHit: toCnyCredits(0.3), // ¥0.3
-  output: toCnyCredits(27), // ¥27
-} as const;
 
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE = {
   input: toCnyCredits(1.5), // ¥1.5
   inputCacheHit: toCnyCredits(0.05), // ¥0.05
   output: toCnyCredits(4.5), // ¥4.5
 } as const;
-export const PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE = {
-  input: toCnyCredits(4.5), // ¥4.5
-  inputCacheHit: toCnyCredits(0.15), // ¥0.15
-  output: toCnyCredits(13.5), // ¥13.5
+
+/**
+ */
+export const PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE = {
+  input: 3.36, // 4.8 credits
+  inputCacheHit: 0.168, // 0.24 credits
+  output: toPlatformCredits(1.9), // 15.2 credits
 } as const;
 
 export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
@@ -296,15 +294,10 @@ export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
 };
 
 export const getPlatformHostedDeepSeekV4Price = (
-  model: string,
+  _model: string,
   nowMs = Date.now(),
 ) => {
   const isOffPeak = isDeepSeekOffPeakBeijingTime(nowMs);
-  if (model === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL) {
-    return isOffPeak
-      ? PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE
-      : PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE;
-  }
   return isOffPeak
     ? PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE
     : PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE;
@@ -312,8 +305,7 @@ export const getPlatformHostedDeepSeekV4Price = (
 
 export const isPlatformHostedDeepSeekV4Model = (model: string): boolean =>
   model === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL;
+  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL;
 
 export const PLATFORM_HOSTED_DEEPSEEK_CHAT_COMPLETIONS_URL =
   "https://api.deepseek.com/chat/completions";
@@ -334,8 +326,7 @@ export const isPlatformHostedDeepseekModel = (
   model?: string | null,
 ): boolean =>
   model === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL;
+  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL;
 
 export const isPlatformHostedDeepseekFlashModel = isPlatformHostedDeepseekModel;
 
@@ -469,9 +460,7 @@ export const platformHostedModels = [
     name: PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
     displayName: "DeepSeek V4 Pro",
     hasVision: false,
-    price: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE },
-    peakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE },
-    offPeakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE },
+    price: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE },
     maxOutputTokens: 384_000,
     contextWindow: 1_000_000,
     supportsTool: true,

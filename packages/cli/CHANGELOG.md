@@ -1,4 +1,22 @@
 
+## 0.46.0-alpha.1
+
+## 0.46.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **ai:** deepseek-v4-pro 上游切换到 RunInfra 并统一美元计价口径 ([f53be0c](https://github.com/nolotus/bun-nolo/commit/f53be0c998b603c1351c728682e1e707f5a2aedf))
+
+### Bug Fixes
+
+* **agent-runtime:** recognize SSE done as terminal evidence ([e9a8952](https://github.com/nolotus/bun-nolo/commit/e9a895238e955b3f76db4db7035570328eaf6d31))
+* **billing:** prevent charges for failed chat streams ([76ce585](https://github.com/nolotus/bun-nolo/commit/76ce585eba3f559db73449738df78d72a2dbc8b4))
+* **dialog:** 修复标题 LLM 链路超时静默降级并切换到 RunInfra glm-5-3-flash ([b755765](https://github.com/nolotus/bun-nolo/commit/b7557652b1e447b66fb3c6bdd74bf89eff4078bb))
+* **tui:** ensure parentDialogId injection, unowned run dock fallback, and agent runs in status bar ([aeb30d6](https://github.com/nolotus/bun-nolo/commit/aeb30d604350fa8d21ac66c034ab12e5b2be3917))
+* **tui:** markdown 表格 EA=A 宽度约定可配置（默认 narrow）+ 多行记录分隔线 ([7174a32](https://github.com/nolotus/bun-nolo/commit/7174a32ae2fe2eaebd4401b3f5d062e2e2972534))
+* **tui:** throttle agent run status line count and annotate unassigned multi-run rows ([90b6703](https://github.com/nolotus/bun-nolo/commit/90b67037076fbb21a25d04fe8ff92d1c753def3c))
+
+
 ## 0.45.0-alpha.2
 
 ## 0.45.0-alpha.2 (2026-08-30)

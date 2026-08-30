@@ -218,9 +218,16 @@ export function parseOpenAiCompatibleChatCompletionResponse(args: {
 
 function processOpenAiCompatibleSseEvent(
   event: string,
-  state: ChatCompletionStreamState,
+  state: ChatCompletionStreamState & { sawDone: boolean },
 ) {
   for (const line of event.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("data:") && trimmed.slice(5).trim() === "[DONE]") {
+      // Some compatible endpoints terminate successfully with [DONE] but omit
+      // both usage and finish_reason. Preserve the explicit protocol marker.
+      state.sawDone = true;
+      continue;
+    }
     const parsed = parseSseDataLineJson(line) as any;
     if (parsed == null) continue;
     applyChatCompletionDelta(parsed, state);
@@ -232,7 +239,7 @@ export async function readOpenAiCompatibleSseCompletion(args: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
 }) {
-  const state: ChatCompletionStreamState = {
+  const state: ChatCompletionStreamState & { sawDone: boolean } = {
     content: "",
     reasoning: "",
     usage: undefined,
@@ -241,6 +248,7 @@ export async function readOpenAiCompatibleSseCompletion(args: {
     toolCallTextState: createToolCallTextParserState(),
     onTextDelta: args.onTextDelta,
     onReasoningDelta: args.onReasoningDelta,
+    sawDone: false,
   };
 
   for await (const frame of readSseFrames(args.response)) {
@@ -252,11 +260,13 @@ export async function readOpenAiCompatibleSseCompletion(args: {
   throwIfChatCompletionStreamFailed(state);
 
   const tool_calls = finalizeAccumulatedToolCalls(state.accumulatedToolCalls);
+  const streamComplete = state.sawDone || !!state.usage || !!state.finishReason;
   return {
     content: state.content,
     ...(state.reasoning ? { reasoning_content: state.reasoning } : {}),
     ...(tool_calls.length > 0 ? { tool_calls } : {}),
-    ...(state.usage ? { usage: state.usage, stream_complete: true } : {}),
+    ...(state.usage ? { usage: state.usage } : {}),
+    ...(streamComplete ? { stream_complete: true } : {}),
     ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
   };
 }

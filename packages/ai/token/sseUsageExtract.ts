@@ -51,7 +51,8 @@ export function hasUsageTokens(value: unknown): boolean {
  *   - top-level `usage` (chat.completions; also the Responses terminal chunk
  *     when a proxy re-emits it top-level) — only when it holds token fields,
  *     so billing-only `usage` lookalikes are ignored;
- *   - `response.completed.response.usage` (Responses SSE).
+ *   - `response.*.response.usage` (Responses SSE), including failed and
+ *     incomplete terminal events whose usage is audit-only.
  */
 export function extractUsageFromSsePayload(parsed: unknown): Record<string, unknown> | undefined {
   if (!parsed || typeof parsed !== "object") return undefined;
@@ -62,7 +63,7 @@ export function extractUsageFromSsePayload(parsed: unknown): Record<string, unkn
     return topLevel as Record<string, unknown>;
   }
 
-  if (payload.type === "response.completed") {
+  if (typeof payload.type === "string" && payload.type.startsWith("response.")) {
     const response = payload.response;
     if (response && typeof response === "object") {
       const nested = (response as Record<string, unknown>).usage;

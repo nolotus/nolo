@@ -216,6 +216,29 @@ describe("OpenAI-compatible provider wire helpers", () => {
     expect(deltas).toEqual(["hel", "lo"]);
   });
 
+  test("treats a bare [DONE] marker as successful stream completion", async () => {
+    const result = await readOpenAiCompatibleSseCompletion({
+      response: sseResponse(
+        'data: {"choices":[{"delta":{"content":"done"}}]}\n\n' +
+        "data: [DONE]",
+      ),
+    });
+
+    expect(result.content).toBe("done");
+    expect(result.usage).toBeUndefined();
+    expect(result.finish_reason).toBeUndefined();
+    expect(result.stream_complete).toBe(true);
+  });
+
+  test("does not mark an EOF without terminal evidence as complete", async () => {
+    const result = await readOpenAiCompatibleSseCompletion({
+      response: sseResponse('data: {"choices":[{"delta":{"content":"partial"}}]}'),
+    });
+
+    expect(result.content).toBe("partial");
+    expect(result.stream_complete).toBeUndefined();
+  });
+
   test("falls back to JSON parsing when stream=true but content-type is not SSE", async () => {
     const providerConfig = {
       model: "custom-coder",

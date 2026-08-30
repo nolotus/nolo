@@ -23,7 +23,7 @@
  * dataHandlers path share one definition and cannot drift on key shape.
  */
 
-/** Marker key written only after ledger processing succeeds. */
+/** Durable server-owned state marker for a provider call. */
 export const providerCallTokenRecordMarkerKey = (
   providerCallId?: string
 ): string | undefined =>
@@ -40,6 +40,12 @@ export const providerCallChargeIdempotencyKey = (
     ? `provider-call:${encodeURIComponent(userId)}:${providerCallId}:charge:v1`
     : undefined;
 
+export type ProviderCallMarkerOutcome =
+  | "pending"
+  | "client_owned"
+  | "charged"
+  | "failed";
+
 /**
  * Marker value shape (written by recordChatProxyTokenUsage). Exported as a
  * type-only contract so handleToken can read the stored token record without
@@ -48,6 +54,8 @@ export const providerCallChargeIdempotencyKey = (
 export interface ProviderCallTokenRecordMarker {
   providerCallId?: string;
   recordKey?: string;
+  failureRecordKey?: string;
   tokenRecord?: Record<string, unknown>;
   recordedAt?: number;
+  outcome?: ProviderCallMarkerOutcome;
 }

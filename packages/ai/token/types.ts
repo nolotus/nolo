@@ -56,6 +56,8 @@ interface BillingUsageMetadata {
 export interface RawUsageType1 extends BillingUsageMetadata {
   output_tokens?: number;
   input_tokens?: number;
+  /** Optional on Chat Completions-compatible providers, but retained when sent. */
+  total_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
   input_tokens_details?: {
@@ -67,8 +69,9 @@ export interface RawUsageType2 extends BillingUsageMetadata {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
-  prompt_cache_hit_tokens: number;
-  prompt_cache_miss_tokens: number;
+  /** Some Responses-compatible providers omit cache split fields. */
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
   prompt_tokens_details?: {
     cached_tokens?: number;
   };
@@ -80,6 +83,8 @@ export type RawUsage = RawUsageType1 | RawUsageType2;
 export interface NormalizedUsage extends BillingUsageMetadata {
   input_tokens: number;
   output_tokens: number;
+  /** Preserved when the upstream supplies a total alongside token splits. */
+  total_tokens?: number;
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
   cost: number;
@@ -121,6 +126,14 @@ export interface TokenUsageData extends NormalizedUsage {
   entry_path?: EntryPath;
 }
 
+export interface ObservedUsageAudit {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  total_tokens?: number;
+}
+
 // Token记录
 export interface TokenRecord {
   id: string;
@@ -148,7 +161,22 @@ export interface TokenRecord {
   inputCacheHitPrice?: number;
   /** 缓存写入单价（credits/百万），billing catalog 写时快照（US-3.2）；旧记录缺省 */
   cacheWritePrice?: number;
-  /** 调用终态（US-3.3）：缺省视为 success；failed = 调用失败（可能仍有部分 usage 被计费） */
+  /**
+   * 按目录价计算若成功本应收取的积分（catalog-rated platform credits，非上游发票真实成本/COGS）。
+   * 仅 status=failed 时写入，供平台审计与免单统计；真实 COGS 需结合 raw usage 与 provider 账单核算。
+   */
+  would_have_charged_credits?: number;
+  /**
+   * 平台吸收/免单的积分（catalog-rated platform credits，非上游发票真实成本/COGS）。
+   * status=failed 时与 would_have_charged_credits 一致。
+   */
+  absorbed_credits?: number;
+  /**
+   * 失败调用时保留的实际观察到的原始/归一化用量（US-3.3 审计与 COGS 核算），
+   * 顶层 input/output/cache 设为 0 避免通用统计报表误计未成功用量。
+   */
+  observed_usage?: ObservedUsageAudit;
+  /** 调用终态（US-3.3）：缺省视为 success；failed = 调用失败（未向用户计费） */
   status?: "success" | "failed";
   /** 失败原因摘要（provider 错误等，截断存储）；仅 status=failed 时有意义 */
   errorMessage?: string;

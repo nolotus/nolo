@@ -60,6 +60,9 @@ export async function getOrCreateSharedStore(deps: CliLocalRuntimeAdapterDeps) {
   return storePromise;
 }
 
+const TITLE_WARN_THROTTLE_MS = 30 * 60 * 1000;
+let lastTitleWarnAtMs = 0;
+
 export function createLocalDialogTitleGenerator(
   deps: CliLocalRuntimeAdapterDeps,
   ctx: {
@@ -121,9 +124,17 @@ export function createLocalDialogTitleGenerator(
           trace: [],
         }),
       fallbackTitle: input.fallbackTitle,
-      timeoutMs: 4_000,
+      timeoutMs: 30_000,
     });
-    return result.source === "llm" ? result.title : null;
+    if (result.source !== "llm") {
+      const now = Date.now();
+      if (now - lastTitleWarnAtMs >= TITLE_WARN_THROTTLE_MS) {
+        lastTitleWarnAtMs = now;
+        process.stderr.write("[nolo] Dialog title LLM unavailable; using fallback title.\n");
+      }
+      return null;
+    }
+    return result.title;
   };
 }
 
@@ -292,8 +303,8 @@ export async function writeDialog(args: {
   }
 
   // PERF: title 生成改为 fire-and-forget。不再 await Promise.race 阻塞 turn
-  // 返回——实测 title LLM 调用稳定撞穿 2500ms 超时（见 baseline），用户白白
-  // 等 2.5 秒却什么都没拿到。现在先用 fallback title 写入并立即返回，title
+  // 返回——避免同步阻塞 turn。
+  // 现在先用 fallback title 写入并立即返回，title
   // 回来后后台 patch dialog 记录。one-shot CLI 进程退出时 title 可能丢失，
   // 但 TUI 是长驻进程，patch 几乎总能完成；即使丢失，下一轮 title 节流逻辑
   // 会重新生成（needsTitleUpdate 仍为 true，因为 titleUpdatedAt 未刷新）。

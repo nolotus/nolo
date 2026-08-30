@@ -83,6 +83,10 @@ export const startAgentRunFunctionSchema = {
                 default: "full",
                 description: "可选。full=返回完整输出；summary=只返回子任务总结（截断中间部分）。默认 full。",
             },
+            parentDialogId: {
+                type: "string",
+                description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
+            },
         },
         required: ["agentKey", "task"],
     },
@@ -98,6 +102,7 @@ interface StartAgentRunArgs {
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
+    parentDialogId?: string;
 }
 
 /**
@@ -138,10 +143,17 @@ export async function startAgentRunFunc(
 
     const content = buildDelegatedTaskContent(task, input);
 
-    // 从模块级单例取当前对话 key，提取 id 作为 parentDialogId 透传给服务端，
-    // 让后台子对话记录父子关系，供侧边栏折叠。无当前对话时不传。
+    // 从入参或模块级单例取当前对话 key/id，提取 id 作为 parentDialogId 透传给服务端，
+    // 让后台子对话记录父子关系，供侧边栏折叠。无当前对话且无入参时降级不传。
     const activeDialogKey = getActiveDialogKey();
-    const parentDialogId = activeDialogKey ? extractCustomId(activeDialogKey) : undefined;
+    const explicitParentDialogId =
+        typeof args.parentDialogId === "string" && args.parentDialogId.trim()
+            ? (args.parentDialogId.includes("-")
+                ? extractCustomId(args.parentDialogId)
+                : args.parentDialogId.trim())
+            : undefined;
+    const parentDialogId =
+        explicitParentDialogId ?? (activeDialogKey ? extractCustomId(activeDialogKey) : undefined);
 
     try {
         const bgResult = await dispatch(

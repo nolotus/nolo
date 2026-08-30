@@ -432,10 +432,8 @@ describe("markdownTable / 缺陷 A：inline markdown 软换行不残留字面标
   });
 });
 
-describe("markdownTable / 缺陷 B：EA=A 符号不欠 pad、框线不错位", () => {
-  // 缺陷 B：→ × 等 EA=A 符号被 displayWidth 按 1 列计，但终端按 2 列渲染
-  // → pad 不足、竖线错位。修复后 displayWidth 按 2 列计，pad 恒等式成立。
-  test("含 → / × 的单元格渲染后所有框线行 displayWidth 一致（不再欠 pad）", () => {
+describe("markdownTable / 缺陷 B：EA=A 符号 pad 与框线对齐", () => {
+  test("含 → / × 的单元格渲染后所有框线行 displayWidth 一致", () => {
     const out = renderMarkdownTable(
       {
         headers: ["issue", "fix"],
@@ -445,13 +443,11 @@ describe("markdownTable / 缺陷 B：EA=A 符号不欠 pad、框线不错位", (
       { width: 50, brightness: "dark" },
     );
     const lines = out.split("\n");
-    // 所有框线行可见宽度一致（displayWidth 已按 2 列计 → 不再欠 pad）。
-    // 这是 pad 恒等式的正确形式：displayWidth 一致 = 每列 pad 到位、无溢出。
+    // 所有框线行可见宽度一致
     const widths = new Set(lines.map((l) => displayWidth(l)));
     expect(widths.size).toBe(1);
-    // 对照：若 EA=A 符号仍按 1 列计（修复前），含 → 的行会欠 1 列 pad，
-    // displayWidth 与其它行不一致。此处显式断言 → 计 2 列。
-    expect(displayWidth("131072 → 1_000_000 + assert")).toBe(28);
+    // narrow 默认约定下，→ 计 1 列
+    expect(displayWidth("131072 → 1_000_000 + assert")).toBe(27);
   });
 
   test("窄列（框线表档位）下含 → 的单元格软换行后框线仍对齐", () => {
@@ -710,5 +706,81 @@ describe("markdownTable / 缺陷 C 回归：多 span 单元格软换行不丢样
     for (const l of out.split("\n")) {
       expect(displayWidth(l)).toBeLessThanOrEqual(30);
     }
+  });
+});
+
+describe("markdownTable / 自洽性回归测试与多行记录分隔线", () => {
+  const realHeaders = ["任务", "执行", "Review", "合并", "Push"];
+  const realRows = [
+    ["GLM 5.3 → crof", "☑", "☑ APPROVE", "☑", "☑"],
+    ["① K3 → 199 档", "☑", "☑ WARNING→裁定放行（W1 已记录）", "☑ b19c01415", "☑"],
+    ["② 默认档 → glm-5-3-flash", "☑", "☑ APPROVE", "☑ 8e1b251fa", "☑"],
+    ["④ 429 mark 缺陷", "🔄 执行中", "—", "—", "—"],
+    ["⑤ readDialog 路径 bug", "⏳ 排队", "—", "—", "—"],
+  ];
+
+  const widths = [100, 96, 88, 80];
+  const conventions: Array<"narrow" | "wide"> = ["narrow", "wide"];
+
+  for (const w of widths) {
+    for (const conv of conventions) {
+      test(`真实用户表格在 width=${w}, 约定=${conv} 下各行竖线前缀显示宽度全等`, () => {
+        const prevEnv = process.env.NOLO_TUI_AMBIGUOUS_WIDTH;
+        process.env.NOLO_TUI_AMBIGUOUS_WIDTH = conv;
+        try {
+          const rendered = renderMarkdownTable(
+            { headers: realHeaders, aligns: ["left", "left", "left", "left", "left"], rows: realRows },
+            { width: w, brightness: "dark" },
+          );
+          const rawLines = rendered.split("\n");
+          // 过滤出所有含 │ 的框线/数据行
+          const borderLines = rawLines.filter((l) => l.includes("│"));
+          expect(borderLines.length).toBeGreaterThan(0);
+
+          // 逐行取每个 │（stripAnsi 后），各行竖线的前缀显示宽度（用 cellDisplayWidth 累计）与首行全等
+          const getBarPositions = (line: string): number[] => {
+            const strippedLine = stripAnsi(line);
+            const positions: number[] = [];
+            for (let i = 0; i < strippedLine.length; i++) {
+              if (strippedLine[i] === "│") {
+                positions.push(cellDisplayWidth(strippedLine.slice(0, i)));
+              }
+            }
+            return positions;
+          };
+
+          const baseline = getBarPositions(borderLines[0]!);
+          expect(baseline.length).toBe(realHeaders.length + 1); // 5列 -> 6根竖线
+
+          for (let idx = 1; idx < borderLines.length; idx++) {
+            const current = getBarPositions(borderLines[idx]!);
+            expect(current).toEqual(baseline);
+          }
+        } finally {
+          process.env.NOLO_TUI_AMBIGUOUS_WIDTH = prevEnv;
+        }
+      });
+    }
+  }
+
+  test("多行记录表格存在 ├ 分隔线，全单行表格无分隔线", () => {
+    // 1. 真实表格含长文本（软换行），必然有记录 displayRows > 1，断言包含 ├ 且在行间出现
+    const multiRowOut = renderMarkdownTable(
+      { headers: realHeaders, aligns: ["left", "left", "left", "left", "left"], rows: realRows },
+      { width: 80, brightness: "dark" },
+    );
+    const multiLines = multiRowOut.split("\n");
+    const dividerCount = multiLines.filter((l) => l.startsWith("├") && l.includes("┼") && l.endsWith("┤")).length;
+    // 表头下方有 1 根，多行记录之间还有若干根 -> 总数 > 1
+    expect(dividerCount).toBeGreaterThan(1);
+
+    // 2. 全单行小表：断言除表头下方的 1 根 ├ 之外，数据行之间无任何 ├
+    const singleRowOut = renderMarkdownTable(
+      { headers: ["A", "B"], aligns: ["left", "left"], rows: [["1", "2"], ["3", "4"]] },
+      { width: 80, brightness: "dark" },
+    );
+    const singleLines = singleRowOut.split("\n");
+    const singleDividerCount = singleLines.filter((l) => l.startsWith("├") && l.includes("┼") && l.endsWith("┤")).length;
+    expect(singleDividerCount).toBe(1);
   });
 });

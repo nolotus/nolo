@@ -77,6 +77,51 @@ describe("updateTotalUsage", () => {
     expect(usage?.completion_tokens_details).toEqual({ reasoning_tokens: 2 });
   });
 
+  it("preserves provider_call_id from initial metadata chunk across later token usage chunks", () => {
+    // 1. Initial metadata chunk (no tokens, only provider_call_id)
+    const initial = updateTotalUsage(null, {
+      provider_call_id: "pcall-abc-123",
+    });
+    expect(initial?.provider_call_id).toBe("pcall-abc-123");
+
+    // 2. Later upstream chunk with real token counts
+    const withTokens = updateTotalUsage(initial, {
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+    });
+    expect(withTokens).toMatchObject({
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      provider_call_id: "pcall-abc-123",
+    });
+
+    // 3. Billing event at end of stream
+    const withBilling = updateTotalUsage(withTokens, {
+      cost: 0.05,
+      billing_provider: "deepseek",
+      billing_model: "deepseek-v4-flash",
+    });
+    expect(withBilling).toMatchObject({
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      cost: 0.05,
+      billing_provider: "deepseek",
+      billing_model: "deepseek-v4-flash",
+      provider_call_id: "pcall-abc-123",
+    });
+  });
+
+  it("does not synthesize token zeros for provider metadata-only chunks", () => {
+    const usage = updateTotalUsage(null, {
+      provider_call_id: "pcall-metadata-only",
+    });
+
+    expect(usage as any).toEqual({ provider_call_id: "pcall-metadata-only" });
+  });
+
   it("returns null when chunk is empty", () => {
     expect(updateTotalUsage(null, null as any)).toBeNull();
   });

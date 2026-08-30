@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
+import { BUILTIN_TITLE_LLM_CONFIG } from "./builtinDialogLlm";
+import { updateDialogTitleActionWithDeps } from "./updateDialogTitleAction";
 import {
   TITLE_UPDATE_INTERVAL_MINUTES,
   shouldUpdateTitle,
@@ -37,5 +39,46 @@ describe("updateDialogTitleAction timing", () => {
       )
     ).toBe(true);
     expect(TITLE_UPDATE_INTERVAL_MINUTES).toBe(30);
+  });
+});
+
+describe("updateDialogTitleAction LLM execution", () => {
+  it("passes BUILTIN_TITLE_LLM_CONFIG.prompt as systemPromptOverride to runLlmAction", async () => {
+    let capturedArgs: any = null;
+    const runLlmMock = (args: any) => {
+      capturedArgs = args;
+      return {
+        unwrap: async () => "新标题",
+      };
+    };
+    const dialogKey = "dialog-user-01TEST0000000000000001";
+    const state = {
+      user: { currentUserId: "user-1" },
+    };
+    const dispatch = (action: any) => action;
+    const getState = () => state;
+
+    await updateDialogTitleActionWithDeps(
+      { dialogKey },
+      { dispatch, getState, extra: {} },
+      {
+        runLlmAction: runLlmMock as any,
+        patchAction: ((changes: any) => ({ unwrap: async () => changes })) as any,
+        selectDialogById: (() => ({
+          createdAt: "2026-03-20T05:40:00.000Z",
+          updatedAt: "2026-03-20T05:40:00.000Z",
+        })) as any,
+        selectAllMessages: (() => [
+          { id: "m1", role: "user", content: "用户提问" },
+          { id: "m2", role: "assistant", content: "助手回复" },
+        ]) as any,
+        selectCurrentUserId: (() => "user-1") as any,
+      }
+    );
+
+    expect(capturedArgs).not.toBeNull();
+    expect(capturedArgs.systemPromptOverride).toBe(
+      BUILTIN_TITLE_LLM_CONFIG.prompt
+    );
   });
 });

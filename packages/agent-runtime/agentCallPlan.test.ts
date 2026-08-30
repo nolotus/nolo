@@ -232,12 +232,12 @@ describe("resolveAgentCallPlan — legacy deepseek-provider records", () => {
     expect(resolveClientWire(plan)).toBe("responses");
   });
 
-  test("V4 Pro routes to the same Responses upstream", () => {
+  test("V4 Pro routes to RunInfra chat.completions upstream", () => {
     const plan = resolveAgentCallPlan(
       baseConfig({ provider: "deepseek", model: "deepseek-v4-pro" }),
     );
-    expect(plan.upstreamWire).toBe("responses");
-    expect(plan.endpoint).toBe("https://api.deepseek.com/responses");
+    expect(plan.upstreamWire).toBe("chat.completions");
+    expect(plan.endpoint).toBe("https://api.runinfra.ai/v1/chat/completions");
   });
 });
 

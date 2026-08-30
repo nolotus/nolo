@@ -271,6 +271,7 @@ async function runAgentChat(
     serverUrl: state.serverUrl,
     message: effectiveMessage,
     continueDialogId: state.dialogId,
+    ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
     ...(state.agentKey === DEFAULT_TUI_AGENT_KEY && env.NOLO_AUTO_ROUTE !== "0"
       ? { dialogAgentMode: "auto" as const }
       : { dialogAgentMode: "fixed" as const }),

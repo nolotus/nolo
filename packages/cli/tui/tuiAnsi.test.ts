@@ -5,6 +5,7 @@ import {
   __getDisplayWidthCacheSizeForTest,
   buildWindowTitle,
   displayWidth,
+  resolveAmbiguousWidth,
   stripAnsi,
   tokenizeAnsiLine,
 } from "./tuiAnsi";
@@ -70,7 +71,7 @@ describe("buildWindowTitle", () => {
  * 语义与生产实现的历史版本一致：全量字素分段 + 每 cluster 一次 stringWidth 判定加宽。
  */
 const refGraphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-function referenceDisplayWidth(str: string, locale: "zh" | "en"): number {
+function referenceDisplayWidth(str: string, locale: "zh" | "en", ambiguousWidth: "narrow" | "wide" = "narrow"): number {
   const plain = stripAnsi(str);
   let width = stringWidthRaw(plain);
   for (const { segment } of refGraphemeSegmenter.segment(plain)) {
@@ -80,15 +81,20 @@ function referenceDisplayWidth(str: string, locale: "zh" | "en"): number {
       (code >= 0x2600 && code <= 0x27bf && !(code >= 0x2768 && code <= 0x2775)) ||
       (code >= 0x2b00 && code <= 0x2bff) ||
       (code >= 0x1f300 && code <= 0x1faff);
-    // 与生产实现同步：EA=A 常见符号（箭头/数学/项目符号）强制按 2 列计。
+    // EA=A 常见符号（箭头/数学/项目符号/圈数字等）：仅在 wide 约定下加宽。
     const ambiguousWide =
       (code >= 0x2190 && code <= 0x2195) ||
       code === 0x21d0 || code === 0x21d2 || code === 0x21d4 ||
       code === 0x00d7 || code === 0x00f7 || code === 0x00b1 ||
-      code === 0x2022 || code === 0x00b7;
+      code === 0x2022 || code === 0x00b7 ||
+      code === 0x00b0 || code === 0x2103 ||
+      (code >= 0x2010 && code <= 0x2015) ||
+      (code >= 0x2460 && code <= 0x24ff) ||
+      code === 0x231a || code === 0x231b ||
+      (code >= 0x23e9 && code <= 0x23fa);
     const cjkQuote =
       locale === "zh" && (code === 0x201c || code === 0x201d || code === 0x2018 || code === 0x2019);
-    if (forceWideSymbol || ambiguousWide || cjkQuote) width += 1;
+    if ((ambiguousWidth === "wide" && (forceWideSymbol || ambiguousWide)) || cjkQuote) width += 1;
   }
   return width;
 }
@@ -198,32 +204,73 @@ describe("displayWidth equivalence with reference implementation", () => {
   });
 });
 
-describe("displayWidth / East Asian Ambiguous 符号强制加宽", () => {
-  // 缺陷 B：EA=A 符号（箭头/数学/项目符号）stringWidth 按 1 列计，但 CJK
-  // 终端实际按 2 列渲染 → 表格 pad 不足、框线错位。修复后 displayWidth 必须
-  // 按 2 列计，且 zh/en 两个 locale 下行为一致（这些符号与 CJK 引号不同，
-  // 不依赖 locale）。
+describe("displayWidth / East Asian Ambiguous 符号宽度约定", () => {
+  // 默认 narrow 约定下，EA=A 符号按 1 列渲染（同 stringWidth），避免现代终端过 pad
   const ambiguous = ["→", "←", "↑", "↓", "↔", "↕", "⇒", "⇐", "⇔", "×", "÷", "±", "•", "·"];
   for (const locale of ["zh", "en"] as const) {
-    describe(`locale=${locale}`, () => {
+    describe(`locale=${locale} (narrow default)`, () => {
       for (const c of ambiguous) {
-        test(`displayWidth(${JSON.stringify(c)}) = 2 (EA=A 按 2 列)`, () => {
+        test(`displayWidth(${JSON.stringify(c)}) = 1 (EA=A narrow 默认按 1 列)`, () => {
           setCliLocale(locale);
-          expect(displayWidth(c)).toBe(2);
+          expect(displayWidth(c)).toBe(1);
         });
       }
-      test("EA=A 符号混排行按 2 列计宽", () => {
+      test("EA=A 符号混排行按 1 列计宽", () => {
         setCliLocale(locale);
-        // 131072 → 1_000_000 +：→ 计 2 列，其余 ASCII 各 1 列。
-        expect(displayWidth("131072 → 1_000_000 +")).toBe(21);
-        expect(displayWidth("×8 换算")).toBe(8); // ×2 + 8 + 空格 + 换算4
+        // 131072 → 1_000_000 +：→ 计 1 列，其余 ASCII 各 1 列。
+        expect(displayWidth("131072 → 1_000_000 +")).toBe(20);
+        expect(displayWidth("×8 换算")).toBe(7); // ×1 + 8 + 空格 + 换算4
       });
     });
   }
-  test("框线字符不受 EA=A 加宽影响（仍按 1 列）", () => {
+
+  test("框线字符不受加宽影响（仍按 1 列）", () => {
     setCliLocale("zh");
     for (const c of ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"]) {
       expect(displayWidth(c)).toBe(1);
     }
+  });
+
+  describe("NOLO_TUI_AMBIGUOUS_WIDTH 约定切换与解析", () => {
+    test("resolveAmbiguousWidth 解析优先级与合法性回退", () => {
+      expect(resolveAmbiguousWidth()).toBe("narrow");
+      expect(resolveAmbiguousWidth("wide")).toBe("wide");
+      expect(resolveAmbiguousWidth("narrow")).toBe("narrow");
+      expect(resolveAmbiguousWidth(undefined, { NOLO_TUI_AMBIGUOUS_WIDTH: "wide" })).toBe("wide");
+      expect(resolveAmbiguousWidth(undefined, { NOLO_TUI_AMBIGUOUS_WIDTH: "WIDE" })).toBe("wide");
+      expect(resolveAmbiguousWidth(undefined, { NOLO_TUI_AMBIGUOUS_WIDTH: "narrow" })).toBe("narrow");
+      expect(resolveAmbiguousWidth(undefined, { NOLO_TUI_AMBIGUOUS_WIDTH: "invalid_value" })).toBe("narrow");
+    });
+
+    test("同一输入在 narrow / wide 约定下返回不同值，env 变化立即生效", () => {
+      const testChars = [
+        { char: "→", narrow: 1, wide: 2 },
+        { char: "☑", narrow: 1, wide: 2 },
+        { char: "①", narrow: 1, wide: 2 },
+        { char: "—", narrow: 1, wide: 2 },
+        { char: "°", narrow: 1, wide: 2 },
+        { char: "⏳", narrow: 2, wide: 2 }, // ⏳ stringWidth 本身 = 2
+      ];
+
+      for (const { char, narrow, wide } of testChars) {
+        expect(displayWidth(char, "narrow")).toBe(narrow);
+        expect(displayWidth(char, "wide")).toBe(wide);
+      }
+    });
+
+    test("补全 wide 名单测试 (wide 模式下全部 = 2)", () => {
+      const wideList = ["→", "☑", "①", "②", "④", "⑤", "—", "–", "°", "℃", "⏳", "⏰", "⏱", "⏸", "⏹", "•", "·", "×", "÷", "±"];
+      for (const char of wideList) {
+        expect(displayWidth(char, "wide")).toBe(2);
+      }
+    });
+
+    test("zh locale 引号在 narrow / wide 下均保持加宽 (= 2)", () => {
+      setCliLocale("zh");
+      expect(displayWidth("“", "narrow")).toBe(2);
+      expect(displayWidth("”", "narrow")).toBe(2);
+      expect(displayWidth("“", "wide")).toBe(2);
+      expect(displayWidth("”", "wide")).toBe(2);
+    });
   });
 });

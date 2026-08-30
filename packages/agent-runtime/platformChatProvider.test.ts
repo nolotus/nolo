@@ -636,6 +636,31 @@ describe("platform chat SSE streaming reader (子目标 A)", () => {
     expect(result.usage).toEqual({ total_tokens: 7 });
   });
 
+  test("treats a bare [DONE] marker as successful platform stream completion", async () => {
+    const result = await readPlatformChatSseCompletion({
+      response: sseResponse(
+        'data: {"choices":[{"delta":{"content":"done"}}]}\n\n' +
+        "data: [DONE]",
+      ),
+      usesResponsesApi: false,
+    });
+
+    expect(result.content).toBe("done");
+    expect(result.usage).toBeUndefined();
+    expect(result.finish_reason).toBeUndefined();
+    expect(result.stream_complete).toBe(true);
+  });
+
+  test("does not mark a platform EOF without terminal evidence as complete", async () => {
+    const result = await readPlatformChatSseCompletion({
+      response: sseResponse('data: {"choices":[{"delta":{"content":"partial"}}]}'),
+      usesResponsesApi: false,
+    });
+
+    expect(result.content).toBe("partial");
+    expect(result.stream_complete).toBeUndefined();
+  });
+
   test("billing frame with independent `billing` key does not overwrite real usage", async () => {
     // 回归护栏：server 端 billing 帧（formatBillingUsageEvent）以前复用顶层
     // `usage` key 注入 billing_*/cost，把客户端刚从 response.completed 解析

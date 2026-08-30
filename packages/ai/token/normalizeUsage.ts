@@ -51,6 +51,7 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
       total_tokens: 0,
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
+      cost: 0,
     };
   }
 
@@ -72,7 +73,7 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
     "cache_creation_input_tokens" in usage
       ? (usage.cache_creation_input_tokens ?? 0)
       : "prompt_cache_miss_tokens" in usage
-        ? usage.prompt_cache_miss_tokens
+        ? (usage.prompt_cache_miss_tokens ?? 0)
         : 0;
 
   const cacheReadInputTokens =
@@ -126,6 +127,9 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    total_tokens:
+      finiteTokenCount((usage as Record<string, unknown>).total_tokens) ??
+      inputTokens + outputTokens,
     cache_creation_input_tokens: cacheCreationInputTokens,
     cache_read_input_tokens: cacheReadInputTokens,
     cost,

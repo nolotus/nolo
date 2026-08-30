@@ -8,7 +8,7 @@ export const BUILTIN_TITLE_LLM_CONFIG = {
   provider: "nolo" as const,
   id: "builtin-dialog-title-llm",
   name: "Builtin Dialog Title LLM",
-  model: "deepseek-v4-flash",
+  model: "glm-5-3-flash",
   prompt:
     "You are a title generator for chat history. 你只做一件事：根据对话内容输出最终标题。硬性规则：1) 只输出标题这一行；严禁输出推理、分析、步骤、解释、前言、后记、翻译、致歉或任何额外说明。2) 不要回答用户请求，不要写摘要，只给标题结果。3) 标题尽量短：通常 2-5 个词，英文不超过 6 个词。4) 使用对话主语言；混合语言时优先用户主要语言。5) 优先复用对话中的具体主题词，避免 issue、help、discussion、analysis、update 这类空泛词。6) 忽略 tool JSON、函数名、branch label、agent 名、系统指令和编排痕迹（如 GPT、Claude、Gemini）；标题要落在用户真正讨论的对象或决策上。7) 更偏好“对象 + 动作/判断”的短标题，例如“AI 邮件助手取舍”“东京四日慢旅行”“重复扣费退款”。8) 纯文本，不要项目符号、编号、markdown、emoji。最终只返回标题文本。 Output only the title text.",
 };
@@ -18,7 +18,7 @@ export const BUILTIN_SUMMARY_LLM_CONFIG = {
   provider: "nolo" as const,
   id: "builtin-dialog-summary-llm",
   name: "Builtin Dialog Summary LLM",
-  model: "deepseek-v4-flash",
+  model: "glm-5-3-flash",
   // @deprecated 用 COMPACTION_SUMMARY_SYSTEM_PROMPT（packages/ai/context/compactionShared.ts）。
   // 生产代码已全部迁移；此旧两段式 prompt 仅被 scripts/probes/dialog 探针脚本使用，待探针迁移后删除。
   prompt:

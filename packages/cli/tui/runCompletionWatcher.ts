@@ -218,7 +218,7 @@ export function createRunCompletionWatcher(
           if (notifiedRunIds.has(record.runId)) continue;
           const status = record.status;
           if (typeof status !== "string") continue;
-          if (record.parentDialogId !== currentDialogId) continue;
+          if (!(record.parentDialogId === currentDialogId || !record.parentDialogId)) continue;
           if (isRunRecordClaimed(record, now())) {
             // claim 生效中：有同步消费者（wait）盯着这条 run，唤醒通道让路。
             // 「有效」很关键——过期的租约（持有者进程已被杀）不算数，否则这

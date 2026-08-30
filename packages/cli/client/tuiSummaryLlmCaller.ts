@@ -4,7 +4,7 @@
  *
  * Mirrors the pattern from `generateLocalDialogTitle` (dialogTitleLlm.ts):
  * resolve platform chat provider config → build request → fetch → parse.
- * Uses BUILTIN_SUMMARY_LLM_CONFIG (deepseek-v4-flash) as the summary model.
+ * Uses BUILTIN_SUMMARY_LLM_CONFIG (glm-5-3-flash) as the summary model.
  *
  * Returns null on any failure (no auth, network error, parse error) so
  * `compactDialog` can degrade to fork-only behavior.
@@ -68,8 +68,20 @@ export function createTuiSummaryLlmCaller(
         stream: false,
       });
 
+      let parsedBody: any = {};
+      if (typeof request.init?.body === "string") {
+        parsedBody = safeParseJson(request.init.body) ?? {};
+      } else if (typeof request.init?.body === "object" && request.init?.body !== null) {
+        parsedBody = request.init.body;
+      }
+      const patchedBody = {
+        ...parsedBody,
+        reasoning_effort: "low",
+      };
+
       const response = await fetchImpl(request.url, {
         ...request.init,
+        body: JSON.stringify(patchedBody),
         signal: AbortSignal.timeout(timeoutMs),
       });
 

@@ -60,9 +60,14 @@ export async function dispatchStreamEndBilling(
   // "[Failed to save message]" — the message IS saved.
   try {
     if (billingMode === "reported") {
+      const fallbackCallId =
+        typeof (billedUsage as any)?.provider_call_id === "string" &&
+        (billedUsage as any).provider_call_id.trim()
+          ? (billedUsage as any).provider_call_id.trim()
+          : undefined;
       const usageRecords = billingUsageRecords?.length
         ? billingUsageRecords
-        : [{ callId: undefined, usage: billedUsage }];
+        : [{ callId: fallbackCallId, usage: billedUsage }];
       for (const usageRecord of usageRecords) {
         await dispatch(
           updateTokensAction({

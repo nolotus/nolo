@@ -160,6 +160,10 @@ interface MessageStreamEndPayload {
    * 据此决定是否把 finishReason 写进最终 Message。
    */
   finishReason?: CompletionFinishReason;
+  /** Upstream/transport failure; suppresses all client-side billing effects. */
+  billingFailed?: boolean;
+  /** User abort before reported provider usage; suppresses estimated billing. */
+  skipBilling?: boolean;
 }
 
 type DialogScopedMessage = Message & { dialogId?: string };
@@ -897,6 +901,8 @@ export const messageSlice = createSliceWithThunks({
           reasoningBuffer,
           toolCalls,
           finishReason,
+          billingFailed,
+          skipBilling,
         } = payload;
 
         // 1. 先把 contentBuffer 中的 dataURL 图像上传为文件 URL
@@ -1012,6 +1018,8 @@ export const messageSlice = createSliceWithThunks({
           addRefs,
         } = resolveStreamEndPostWritePolicy({
           hasReportedUsage,
+          billingFailed,
+          skipBilling,
           agentProvider: agentConfig?.provider,
           titleEligible,
           textContent,

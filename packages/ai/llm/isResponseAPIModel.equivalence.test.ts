@@ -11,7 +11,7 @@ import { isResponseAPIModel } from "./isResponseAPIModel";
 describe("isResponseAPIModel (delegates to resolveChatWire)", () => {
   it("nolo / deepseek V4 models use Responses wire", () => {
     expect(isResponseAPIModel({ provider: "nolo", model: "deepseek-v4-flash" })).toBe(true);
-    expect(isResponseAPIModel({ provider: "nolo", model: "deepseek-v4-pro" })).toBe(true);
+    expect(isResponseAPIModel({ provider: "nolo", model: "deepseek-v4-flash-vision-exp" })).toBe(true);
     expect(isResponseAPIModel({ provider: "deepseek", model: "deepseek-v4-flash" })).toBe(true);
   });
 

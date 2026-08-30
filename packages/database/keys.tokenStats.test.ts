@@ -18,6 +18,18 @@ describe("token stats keys", () => {
 
     const stableCallKey = createTokenKey.recordForStableCall("user-1", "call-123");
     expect(isTokenStatsKey(stableCallKey)).toBe(false);
+    expect(stableCallKey).toBe("token-user-1-call-call-123");
+
+    const failedStableCallKey = createTokenKey.recordForFailedStableCall("user-1", "call-123");
+    expect(isTokenStatsKey(failedStableCallKey)).toBe(false);
+    expect(failedStableCallKey).toBe("token-user-1-failed-call-call-123");
+
+    // Collision-free namespace: callId "abc" failure must not equal callId "abc-failed" success
+    const failedAbc = createTokenKey.recordForFailedStableCall("user-1", "abc");
+    const successAbcFailed = createTokenKey.recordForStableCall("user-1", "abc-failed");
+    expect(failedAbc).toBe("token-user-1-failed-call-abc");
+    expect(successAbcFailed).toBe("token-user-1-call-abc-failed");
+    expect(failedAbc).not.toBe(successAbcFailed);
 
     expect(isTokenStatsKey("token-user-1-123456789")).toBe(false);
     expect(isTokenStatsKey("dialog-user-1-01DIALOGID000000000000001")).toBe(false);

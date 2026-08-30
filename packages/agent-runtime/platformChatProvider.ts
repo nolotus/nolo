@@ -408,13 +408,21 @@ function processPlatformChatSseEvent(
     responsesToolCalls: ReturnType<typeof createResponsesToolAccumulator>;
     dsmlToolCallState: DsmlParserState;
     billing?: Record<string, unknown>;
+    sawDone: boolean;
   },
 ) {
   for (const line of event.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
     const payload = trimmed.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
+    if (!payload) continue;
+    // healthy stream with only [DONE], without a trailing usage chunk or
+    // finish_reason. Keep that transport-level completion evidence instead of
+    // later treating the response as a cut-off stream.
+    if (payload === "[DONE]") {
+      state.sawDone = true;
+      continue;
+    }
     let parsed: any;
     try {
       parsed = JSON.parse(payload);
@@ -534,6 +542,7 @@ export async function readPlatformChatSseCompletion(args: {
     thinkState: createThinkParserState(),
     toolCallTextState: createToolCallTextParserState(),
     finishReason: undefined as string | undefined,
+    sawDone: false,
   };
 
   for await (const frame of readSseFrames(args.response)) {
@@ -588,11 +597,13 @@ export async function readPlatformChatSseCompletion(args: {
             ? completionsToolCalls
             : finalizeResponsesToolCalls(state.responsesToolCalls);
     const finalUsage = mergeBillingIntoUsage(state.usage, state.billing);
+    const streamComplete = state.sawDone || !!state.usage || !!state.finishReason;
     return {
       content: normalizedFinal.content || state.content,
       ...(state.reasoning ? { reasoning_content: state.reasoning } : {}),
       ...(tool_calls.length > 0 ? { tool_calls } : {}),
-      ...(finalUsage ? { usage: finalUsage, stream_complete: true } : {}),
+      ...(finalUsage ? { usage: finalUsage } : {}),
+      ...(streamComplete ? { stream_complete: true } : {}),
       // finish_reason 供 executePlatformChatCompletion 穿透给 localLoop 的
       // 空轮/截断判定；此前 reader 从不回传，流式路径恒缺。
       ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
@@ -601,11 +612,13 @@ export async function readPlatformChatSseCompletion(args: {
 
   const tool_calls = finalizeAccumulatedToolCalls(state.accumulatedToolCalls);
   const finalUsage = mergeBillingIntoUsage(state.usage, state.billing);
+  const streamComplete = state.sawDone || !!state.usage || !!state.finishReason;
   return {
     content: state.content,
     ...(state.reasoning ? { reasoning_content: state.reasoning } : {}),
     ...(tool_calls.length > 0 ? { tool_calls } : {}),
-    ...(finalUsage ? { usage: finalUsage, stream_complete: true } : {}),
+    ...(finalUsage ? { usage: finalUsage } : {}),
+    ...(streamComplete ? { stream_complete: true } : {}),
     ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
   };
 }

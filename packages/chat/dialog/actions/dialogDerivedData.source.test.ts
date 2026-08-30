@@ -19,10 +19,10 @@ describe("dialog derived data source contract", () => {
     expect(source).toContain('import { patch, selectById } from "database/dbSlice";');
     expect(source).toContain("summaryPending");
     expect(source).toContain("summarizedBeforeId");
-    expect(source).toContain("llmConfig: BUILTIN_SUMMARY_LLM_CONFIG");
+    expect(source).toContain("BUILTIN_SUMMARY_LLM_CONFIG");
     expect(source).not.toContain("summaryAgentDbKey");
     expect(source).toContain("patch({");
-    expect(builtinSource).toContain('model: "deepseek-v4-flash"');
+    expect(builtinSource).toContain('model: "glm-5-3-flash"');
   });
 
   it("persists token records through dbSlice.write and patches dialog aggregates", () => {

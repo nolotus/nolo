@@ -23,6 +23,9 @@ export const DEEPSEEK_RESPONSES_ENDPOINT =
 /** xAI 官方 OpenAI 兼容 chat.completions（平台托管 Grok 的实际上游）。 */
 export const XAI_CHAT_COMPLETIONS_ENDPOINT =
   "https://api.x.ai/v1/chat/completions";
+/** RunInfra 官方 OpenAI 兼容 chat.completions（平台托管 GLM 5.3 Flash 的实际上游）。 */
+export const RUNINFRA_CHAT_COMPLETIONS_ENDPOINT =
+  "https://api.runinfra.ai/v1/chat/completions";
 
 /** Known platform chat.completions endpoints keyed by provider id. */
 export const PLATFORM_CHAT_COMPLETIONS_ENDPOINTS: Readonly<

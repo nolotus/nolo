@@ -387,4 +387,19 @@ describe("run dock rendering", () => {
     const h = setup();
     expect(h.lines()).toEqual([]);
   });
+
+  test("unassigned run shows 'parent: ?' annotation in multi-run dock row", () => {
+    const runs = [
+      snapshot({ runId: "run-a", agentName: "Flash", toolCallCount: 3 }),
+      snapshot({
+        runId: "run-b",
+        agentName: "Sonnet",
+        unassigned: true,
+        toolCallCount: 5,
+      } as any),
+    ];
+    const lines = formatRunDockLines(runs, false, 9000);
+    expect(lines[1]).not.toContain("parent: ?");
+    expect(lines[2]).toContain("parent: ?");
+  });
 });

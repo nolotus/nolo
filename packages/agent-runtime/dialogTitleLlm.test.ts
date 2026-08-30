@@ -1,3 +1,4 @@
+import { BUILTIN_TITLE_LLM_CONFIG } from "../chat/dialog/actions/builtinDialogLlm";
 import { describe, expect, test } from "bun:test";
 
 import { generateLocalDialogTitle } from "./dialogTitleLlm";
@@ -43,6 +44,57 @@ describe("generateLocalDialogTitle", () => {
     expect(result.source).toBe("llm");
     expect(result.title).toBe("东京四日慢旅行");
   });
+
+  test("passes system prompt and reasoning optimization to buildRequest/fetch on platform proxy path", async () => {
+    let capturedMessages: any = null;
+    let capturedFetchInit: any = null;
+    const fakeResponse = {
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          choices: [{ message: { content: "东京四日慢旅行" } }],
+        }),
+    };
+
+    await generateLocalDialogTitle({
+      messages,
+      env: { AUTH_TOKEN: "fake.jwt.token" },
+      resolveProviderConfig: async () => ({
+        authToken: "fake.jwt.token",
+        serverUrl: "https://nolo.chat",
+        model: "deepseek-v4-flash",
+        provider: "deepseek",
+        endpoint: "https://api.deepseek.com/chat/completions",
+      }),
+      buildRequest: (args: any) => {
+        capturedMessages = args.messages;
+        return {
+          url: "https://nolo.chat/api/v1/chat",
+          init: { method: "POST", headers: {}, body: JSON.stringify({ model: BUILTIN_TITLE_LLM_CONFIG.model }) },
+        };
+      },
+      parseResponse: ({ data }: { providerConfig: any; data: any }) => ({
+        content: data?.choices?.[0]?.message?.content ?? "",
+      }),
+      fetchImpl: async (_url: any, init: any) => {
+        capturedFetchInit = init;
+        return fakeResponse as any;
+      },
+      fallbackTitle: "fallback title",
+    });
+
+    expect(capturedMessages).toBeArray();
+    expect(capturedMessages[0]).toEqual({
+      role: "system",
+      content: BUILTIN_TITLE_LLM_CONFIG.prompt,
+    });
+    expect(capturedMessages[1]?.role).toBe("user");
+    const parsedBody = JSON.parse(capturedFetchInit?.body as string);
+    expect(parsedBody.model).toBe(BUILTIN_TITLE_LLM_CONFIG.model);
+    expect(parsedBody.reasoning_effort).toBe("low");
+    expect(parsedBody.max_tokens).toBe(512);
+  });
+
 
   test("falls back when platform provider config has no authToken (logged out)", async () => {
     const result = await generateLocalDialogTitle({
@@ -375,9 +427,9 @@ describe("generateLocalDialogTitle", () => {
     expect(capturedUrl).toContain("/v1/chat/completions");
     expect(capturedMethod).toBe("POST");
     // F5: the request body model comes from the resolved provider config
-    // (BUILTIN deepseek-v4-flash via the patched custom config), not a
+    // (BUILTIN glm-5-3-flash via the patched custom config), not a
     // hardcoded constant unrelated to resolution.
-    expect(capturedBody.model).toBe("deepseek-v4-flash");
+    expect(capturedBody.model).toBe("glm-5-3-flash");
     // HIGH-1(c): the env OPENAI_API_KEY must propagate through the custom
     // branch as a Bearer Authorization header — without it a real OpenAI
     // endpoint would 401. Previously the synthesized directAgentConfig carried
@@ -429,7 +481,7 @@ describe("generateLocalDialogTitle", () => {
     expect(result.title).toBe("自定义模型标题");
     // The body model is the resolved custom model, NOT the BUILTIN default.
     expect(capturedBody.model).toBe("qwen2.5-72b");
-    expect(capturedBody.model).not.toBe("deepseek-v4-flash");
+    expect(capturedBody.model).not.toBe("glm-5-3-flash");
   });
 
   test("OPENAI_API_KEY + local base URL → carries Authorization header (local ollama not skipped)", async () => {

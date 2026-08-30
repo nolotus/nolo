@@ -55,6 +55,32 @@ describe("calculatePrice", () => {
     expect(result.cost).toBe(7.2);
   });
 
+  it("prices DeepSeek V4 Pro using single RunInfra rate without peak/off-peak variation", () => {
+    const usage = {
+      input_tokens: 2_000_000,
+      output_tokens: 1_000_000,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 1_000_000,
+      cost: 0,
+    };
+    // uncached input (1M) 4.8 + output (1M) 15.2 + cache_read (1M) 0.24 = 20.24 credits
+    const offPeakResult = calculatePrice({
+      provider: "nolo",
+      modelName: "deepseek-v4-pro",
+      usage,
+      nowMs: Date.UTC(2026, 7, 16, 20), // off-peak
+    });
+    const peakResult = calculatePrice({
+      provider: "nolo",
+      modelName: "deepseek-v4-pro",
+      usage,
+      nowMs: Date.UTC(2026, 7, 17, 2), // peak (10:00 Beijing)
+    });
+
+    expect(offPeakResult.cost).toBe(20.24);
+    expect(peakResult.cost).toBe(20.24);
+  });
+
   it("applies Math.max floor-price protection when agent snapshot carries stale lower prices", () => {
     // Agent snapshot may carry stale Ollama list prices (0.03/0.16) while the
     // catalog has risen to DeepSeek V4 peak (3/9). getEffectivePrices is Math.max

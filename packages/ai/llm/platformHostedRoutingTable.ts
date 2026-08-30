@@ -229,7 +229,7 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: true,
   },
-  // DeepSeek Flash / Vision / Pro -> DeepSeek Responses API（agentRun 走专用 responses 编排）
+  // DeepSeek Flash / Vision -> DeepSeek Responses API（agentRun 走专用 responses 编排）
   [PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL]: {
     endpoint: "https://api.deepseek.com/responses",
     usageProvider: "deepseek",
@@ -244,12 +244,13 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: false,
   },
+  // deepseek-v4-pro 独立于 flash 走 RunInfra（官方 chat.completions wire，非 DeepSeek responses）
   [PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL]: {
-    endpoint: "https://api.deepseek.com/responses",
-    usageProvider: "deepseek",
-    keyName: "deepseek",
-    wire: "responses",
-    agentRunHosted: false,
+    endpoint: "https://api.runinfra.ai/v1/chat/completions",
+    usageProvider: "runinfra",
+    keyName: "runinfra",
+    wire: "chat.completions",
+    agentRunHosted: true,
   },
 };
 
