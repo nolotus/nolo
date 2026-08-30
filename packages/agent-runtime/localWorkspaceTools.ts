@@ -25,6 +25,13 @@ import type {
 import type { PermissionRequest } from "./actionGate";
 import { createGlob, resolveExecutableOnPath } from "./runtimeCompat";
 import { getProcessRegistry } from "./processRegistry";
+import {
+  formatTaskLogsContent,
+  runTaskLogs,
+  runTaskStop,
+  runTaskWait,
+  runTasks,
+} from "./processTaskTools";
 
 type LocalWorkspaceToolArgs = {
   workspaceRoot: string;
@@ -2046,6 +2053,117 @@ async function listProcessesTool(args: {
   };
 }
 
+// --- ProcessTask follow-up executors (Phase 1) --------------------------------
+// Thin adapters: argument parsing + result envelope only. All behaviour lives
+// in ./processTaskTools so it is testable without spawning anything.
+
+function requireTaskId(parsed: Record<string, unknown>): string | undefined {
+  return readTrimmedString(parsed.taskId);
+}
+
+function missingTaskIdResult(toolName: string): AgentRuntimeToolResult {
+  return {
+    content: JSON.stringify({
+      outcome: "invalid-arguments",
+      detail: `${toolName} requires a taskId (see tasks for current handles).`,
+    }),
+    metadata: { status: "invalid-arguments", tool: toolName },
+  };
+}
+
+async function taskWaitTool(args: {
+  call: AgentRuntimeToolCallInput;
+  pollIntervalMs?: number;
+}): Promise<AgentRuntimeToolResult> {
+  const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
+  const taskId = requireTaskId(parsed);
+  if (!taskId) return missingTaskIdResult(args.call.name);
+  const result = await runTaskWait({
+    taskId,
+    timeoutMs: parsed.timeoutMs,
+    registry: getProcessRegistry(),
+    ...(args.pollIntervalMs !== undefined ? { pollIntervalMs: args.pollIntervalMs } : {}),
+  });
+  return {
+    content: JSON.stringify(result),
+    metadata: {
+      taskId,
+      outcome: result.outcome,
+      ...("status" in result && result.status ? { status: result.status } : {}),
+      ...("cursor" in result ? { cursor: result.cursor } : {}),
+      ...("exitCode" in result && result.exitCode !== undefined
+        ? { exitCode: result.exitCode }
+        : {}),
+    },
+  };
+}
+
+async function taskLogsTool(args: {
+  call: AgentRuntimeToolCallInput;
+  workspaceRoot: string;
+  commandOutputLimit?: number;
+}): Promise<AgentRuntimeToolResult> {
+  const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
+  const taskId = requireTaskId(parsed);
+  if (!taskId) return missingTaskIdResult(args.call.name);
+  const result = runTaskLogs({
+    taskId,
+    cursor: parsed.cursor,
+    registry: getProcessRegistry(),
+  });
+  const rendered = formatTaskLogsContent(result, {
+    ...(args.commandOutputLimit !== undefined
+      ? { outputLimit: args.commandOutputLimit }
+      : {}),
+    workspaceRoot: args.workspaceRoot,
+  });
+  return {
+    content: rendered.content,
+    metadata: {
+      taskId,
+      outcome: result.outcome,
+      ...("status" in result && result.status ? { status: result.status } : {}),
+      ...("cursor" in result ? { cursor: result.cursor } : {}),
+      ...("events" in result ? { eventCount: result.events.length } : {}),
+      ...(rendered.logRef ? { logRef: rendered.logRef } : {}),
+    },
+  };
+}
+
+async function taskStopTool(args: {
+  call: AgentRuntimeToolCallInput;
+  graceMs?: number;
+}): Promise<AgentRuntimeToolResult> {
+  const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
+  const taskId = requireTaskId(parsed);
+  if (!taskId) return missingTaskIdResult(args.call.name);
+  const result = await runTaskStop({
+    taskId,
+    registry: getProcessRegistry(),
+    ...(args.graceMs !== undefined ? { graceMs: args.graceMs } : {}),
+  });
+  return {
+    content: JSON.stringify(result),
+    metadata: {
+      taskId,
+      outcome: result.outcome,
+      ...("status" in result ? { status: result.status } : {}),
+      ...("pid" in result ? { pid: result.pid } : {}),
+      ...("signal" in result ? { signal: result.signal } : {}),
+    },
+  };
+}
+
+async function tasksTool(_args: {
+  call: AgentRuntimeToolCallInput;
+}): Promise<AgentRuntimeToolResult> {
+  const result = runTasks({ registry: getProcessRegistry() });
+  return {
+    content: JSON.stringify(result),
+    metadata: { count: result.count, tasks: result.tasks },
+  };
+}
+
 export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) {
   const fileAccess = args.confirmExternalFileAccess
     ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
@@ -2118,5 +2236,15 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
     listProcesses: (call: AgentRuntimeToolCallInput) => listProcessesTool({
       call,
     }),
+    taskWait: (call: AgentRuntimeToolCallInput) => taskWaitTool({ call }),
+    taskLogs: (call: AgentRuntimeToolCallInput) => taskLogsTool({
+      call,
+      workspaceRoot: args.workspaceRoot,
+      ...(args.commandOutputLimit !== undefined
+        ? { commandOutputLimit: args.commandOutputLimit }
+        : {}),
+    }),
+    taskStop: (call: AgentRuntimeToolCallInput) => taskStopTool({ call }),
+    tasks: (call: AgentRuntimeToolCallInput) => tasksTool({ call }),
   };
 }

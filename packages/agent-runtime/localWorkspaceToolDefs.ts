@@ -28,9 +28,16 @@ export type { OpenAiCompatibleTool };
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
+  "taskWait", "taskLogs", "taskStop", "tasks",
 ] as const;
 
-const SHELL_TOOL_NAMES = ["execShell", "launchProcess", "listProcesses"] as const;
+// Process-control tools ride the same gate as listProcesses: they only exist
+// to follow up on tasks the shell tools spawned, so exposing them without
+// shell access would hand out dangling handles.
+const SHELL_TOOL_NAMES = [
+  "execShell", "launchProcess", "listProcesses",
+  "taskWait", "taskLogs", "taskStop", "tasks",
+] as const;
 
 const WORKSPACE_TOOL_NAME_SET = new Set<string>(WORKSPACE_TOOL_NAMES);
 
@@ -292,6 +299,112 @@ function buildListProcessesTool(): OpenAiCompatibleTool {
   };
 }
 
+// --- ProcessTask follow-up tools (Phase 1) -----------------------------------
+// These four only observe/stop tasks that already exist: a launchProcess task,
+// or an execShell command that exceeded its detach window and returned
+// {detached: true, taskId}. execShell/launchProcess intentionally have NO
+// async/mode/background parameter — the model never picks an execution mode.
+
+function buildTaskWaitTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "taskWait",
+      description:
+        "Block until a background task (from launchProcess, or an execShell command that detached) reaches a terminal state, or until timeoutMs elapses. "
+        + "Returns {outcome, status, exitCode?, cursor, events}: outcome \"terminal\" with status exited|failed|stopped when it finished, "
+        + "outcome \"timeout\" with status \"running\" when it is still going (call again to keep waiting), "
+        + "outcome \"not-found\" for an unknown taskId, or outcome \"evicted\" when the event trail aged out (never wait again in that case). "
+        + "`cursor` is the highest event seq covered by this response — pass it to taskLogs to read only newer events.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            minLength: 1,
+            description: "Task id returned by launchProcess or by a detached execShell result.",
+          },
+          timeoutMs: {
+            type: "number",
+            description:
+              "Wait budget in milliseconds. Defaults to 60000; values above 300000 are clamped to 300000.",
+          },
+        },
+        required: ["taskId"],
+      },
+    },
+  };
+}
+
+function buildTaskLogsTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "taskLogs",
+      description:
+        "Read a background task's lifecycle events incrementally. Returns {outcome, status, cursor, events} where events are the started|promoted|exited|killed records with seq greater than the cursor you passed, "
+        + "and the returned `cursor` is the new high-water mark to pass next time (omit cursor to read from the beginning; repeating the same cursor is idempotent). "
+        + "Oversized output is spilled to a file and reported as `logRef`, which you can open with readFile.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            minLength: 1,
+            description: "Task id returned by launchProcess or by a detached execShell result.",
+          },
+          cursor: {
+            type: "number",
+            description:
+              "Last event seq you already consumed; only events with a higher seq are returned. Defaults to 0 (all retained events).",
+          },
+        },
+        required: ["taskId"],
+      },
+    },
+  };
+}
+
+function buildTaskStopTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "taskStop",
+      description:
+        "Stop a background task: SIGTERM to its process group, then SIGKILL if it is still alive after a short grace window. "
+        + "Returns {outcome, status, signal, escalated}: outcome \"stopped\" with status \"stopped\" on success, "
+        + "or outcome \"not-stoppable\" (already finished, or a foreground command that is not a background task) or \"not-found\". Never reports success without signalling.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            minLength: 1,
+            description: "Task id returned by launchProcess or by a detached execShell result.",
+          },
+        },
+        required: ["taskId"],
+      },
+    },
+  };
+}
+
+function buildTasksTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "tasks",
+      description:
+        "List background tasks you can still wait on, read logs from, or stop. Returns {count, tasks: {taskId, pid, label, status, startedAt, persist}[]}. "
+        + "Use it to recover a taskId you lost track of; foreground commands still running inside execShell are not listed.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  };
+}
+
 export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "readFile") {
     return buildReadWorkspaceFileTool();
@@ -309,6 +422,10 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "execShell") return buildExecShellTool(toolName);
   if (toolName === "launchProcess") return buildLaunchProcessTool();
   if (toolName === "listProcesses") return buildListProcessesTool();
+  if (toolName === "taskWait") return buildTaskWaitTool();
+  if (toolName === "taskLogs") return buildTaskLogsTool();
+  if (toolName === "taskStop") return buildTaskStopTool();
+  if (toolName === "tasks") return buildTasksTool();
   return null;
 }
 

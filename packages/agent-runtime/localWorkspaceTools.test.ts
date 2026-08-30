@@ -1127,6 +1127,12 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
         "execShell",
         "launchProcess",
         "listProcesses",
+        // ProcessTask follow-ups ride the same gate: handles are only useful
+        // to an agent that can spawn tasks in the first place.
+        "taskWait",
+        "taskLogs",
+        "taskStop",
+        "tasks",
         "readFile",
         "writeFile",
       ],
@@ -1147,6 +1153,10 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
         "execShell",
         "launchProcess",
         "listProcesses",
+        "taskWait",
+        "taskLogs",
+        "taskStop",
+        "tasks",
         "captureVisualState",
       ],
       exposeShellTools: true,
@@ -1221,7 +1231,15 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
     expect(buildLocalWorkspacePolicyToolNames({
       declaredToolNames: ["execShell"],
       exposeShellTools: true,
-    })).toEqual(["execShell", "launchProcess", "listProcesses"]);
+    })).toEqual([
+      "execShell",
+      "launchProcess",
+      "listProcesses",
+      "taskWait",
+      "taskLogs",
+      "taskStop",
+      "tasks",
+    ]);
   });
 
   test("ignores unknown legacy file aliases when canonical workspace tools are declared", () => {

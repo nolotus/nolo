@@ -1,4 +1,13 @@
 
+## 0.39.0-alpha.1
+
+## 0.39.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **agent-runtime:** ProcessTask 工具层四件套（异步任务 Phase 1） ([edf5e3d](https://github.com/nolotus/bun-nolo/commit/edf5e3d3cc9ccb6ca01696123117746f8e529a0c))
+
+
 ## 0.38.0-alpha.1
 
 ## 0.38.0-alpha.1 (2026-08-30)

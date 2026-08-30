@@ -147,6 +147,16 @@ export class ProcessRegistry {
   }
 
   /**
+   * Whether the task's event trail is still retained. Cursor consumers MUST
+   * pair this with getTaskEvents(): an empty read means either "no new events"
+   * or "the whole trail was evicted" (§1.1), and only this call tells them
+   * apart — without it a wait loop hangs forever on an evicted task.
+   */
+  hasTaskEvents(taskId: string): boolean {
+    return this.eventLog.hasTask(taskId);
+  }
+
+  /**
    * Timeout-detach promotion: mark the pre-registered envelope as a background
    * task. Same record, same taskId, no re-execution, no second registration.
    */
