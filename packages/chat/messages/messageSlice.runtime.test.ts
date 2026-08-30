@@ -553,4 +553,121 @@ describe("messageSlice runtime isolation", () => {
       },
     ]);
   });
+
+  test("normalizes historical truncated assistant reasoning_content into thinkContent upon loading into state", async () => {
+    const {
+      default: messageReducer,
+      setMessages,
+      initMsgs,
+      loadOlderMessages,
+    } = await loadMessageSliceModule();
+    const { STREAM_TRUNCATED_FALLBACK_MESSAGE } = await import(
+      "agent-runtime/emptyAssistantRepair"
+    );
+
+    // 1. setMessages with replace: true (setAllMessages)
+    let state = messageReducer(
+      undefined,
+      setMessages({
+        dialogId: "dialog-hist",
+        messages: [
+          {
+            id: "msg-user-1",
+            dbKey: "dialog-dialog-hist-msg-1",
+            role: "user",
+            content: "帮我设计一下方案",
+          },
+          {
+            id: "msg-asst-truncated",
+            dbKey: "dialog-dialog-hist-msg-2",
+            role: "assistant",
+            content: STREAM_TRUNCATED_FALLBACK_MESSAGE,
+            reasoning_content: "这是被截断的完整设计思考过程",
+          } as any,
+          {
+            id: "msg-asst-normal",
+            dbKey: "dialog-dialog-hist-msg-3",
+            role: "assistant",
+            content: "正常回答正文",
+            reasoning_content: "正常回答背后的思考",
+          } as any,
+        ],
+        replace: true,
+      })
+    );
+
+    let msgs = selectAllFromState(state, "dialog-hist");
+    expect(msgs).toHaveLength(3);
+    // 历史截断轮：thinkContent 被展示层归一化填充
+    const truncatedMsg = msgs.find((m: any) => m.id === "msg-asst-truncated");
+    expect(truncatedMsg?.thinkContent).toBe("这是被截断的完整设计思考过程");
+    expect(truncatedMsg?.reasoning_content).toBe("这是被截断的完整设计思考过程");
+    // 正常轮：thinkContent 保持 undefined
+    const normalMsg = msgs.find((m: any) => m.id === "msg-asst-normal");
+    expect(normalMsg?.thinkContent).toBeUndefined();
+    // user 消息：thinkContent 保持 undefined
+    const userMsg = msgs.find((m: any) => m.id === "msg-user-1");
+    expect(userMsg?.thinkContent).toBeUndefined();
+
+    // 2. initMsgs.fulfilled (upsertMany / setAll)
+    const initPayload = [
+      {
+        id: "msg-init-truncated",
+        dbKey: "dialog-dialog-hist-msg-4",
+        role: "assistant",
+        content: STREAM_TRUNCATED_FALLBACK_MESSAGE,
+        reasoning_content: "initMsgs 加载到的历史截断思考",
+      } as any,
+    ];
+    state = messageReducer(
+      state,
+      initMsgs.pending("req-init-2", { dialogId: "dialog-hist-2" })
+    );
+    state = messageReducer(
+      state,
+      initMsgs.fulfilled(initPayload, "req-init-2", {
+        dialogId: "dialog-hist-2",
+      })
+    );
+
+    const initMsgsList = selectAllFromState(state, "dialog-hist-2");
+    expect(initMsgsList[0]?.thinkContent).toBe("initMsgs 加载到的历史截断思考");
+
+    // 3. loadOlderMessages.fulfilled
+    const olderPayload = {
+      dialogId: "dialog-hist-2",
+      messages: [
+        {
+          id: "msg-older-truncated",
+          dbKey: "dialog-dialog-hist-msg-0",
+          role: "assistant",
+          content: STREAM_TRUNCATED_FALLBACK_MESSAGE,
+          reasoning_content: "loadOlderMessages 加载到的更早历史截断思考",
+        } as any,
+      ],
+      limit: 20,
+    };
+    state = messageReducer(
+      state,
+      loadOlderMessages.pending("req-older-1", {
+        dialogId: "dialog-hist-2",
+        limit: 20,
+      } as any)
+    );
+    state = messageReducer(
+      state,
+      loadOlderMessages.fulfilled(olderPayload, "req-older-1", {
+        dialogId: "dialog-hist-2",
+        limit: 20,
+      } as any)
+    );
+
+    const olderMsgsList = selectAllFromState(state, "dialog-hist-2");
+    const loadedOlder = olderMsgsList.find(
+      (m: any) => m.id === "msg-older-truncated"
+    );
+    expect(loadedOlder?.thinkContent).toBe(
+      "loadOlderMessages 加载到的更早历史截断思考"
+    );
+  });
 });

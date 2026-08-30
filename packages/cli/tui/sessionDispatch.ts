@@ -389,9 +389,9 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
       if (/^\d+$/.test(argText)) {
         const pid = parseInt(argText, 10);
         const proc = registry.get(pid);
-        // Transient foreground envelopes are not user-stoppable: their
-        // lifecycle belongs to the foreground runner (abort/timeout). Report
-        // them as unknown pids, matching the pre-Phase-0 visibility.
+        // Transient foreground envelopes are not user-stoppable (registry.kill
+        // already guards this invariant; this check provides the explicit user error).
+        // Report them as unknown pids, matching the pre-Phase-0 visibility.
         if (!proc || proc.status !== "running" || proc.transient) {
           return { nextState: state, output: t("stopNoPid", String(pid)) };
         }

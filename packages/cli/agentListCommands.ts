@@ -1,5 +1,5 @@
 import { toErrorMessage } from "core/errorMessage";
-import { toSafeAgentSummary, sortSafeAgentSummaries } from "ai/agent/safeAgentSummary";
+import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields } from "ai/agent/safeAgentSummary";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -37,7 +37,7 @@ export async function runAgentListCommand(
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const { wantJson, wantSafe, publicOnly, idsOnly, showUnavailable } = parseAgentListArgs(args);
+  const { wantJson, wantSafe, publicOnly, idsOnly, showUnavailable, verbose } = parseAgentListArgs(args);
   const spaceInput = readOption(args, "--space") ?? readOption(args, "--space-id");
 
   const authToken = resolveAuthToken(args, env);
@@ -230,6 +230,12 @@ export async function runAgentListCommand(
         ? safeCandidates
         : safeCandidates.filter((agent) => !isAgentUnavailableNow(agent as any));
       const sortedSafeAgents = sortSafeAgentSummaries(safeAgents);
+      // 默认精简投影（与 server listAgents 一致）：只保留选人决策所需字段，
+      // 防止大列表被 host 按字节截断后模型照抄别的条目格式猜 agentKey；
+      // --verbose 拿回完整字段集（同样省略 null 值键）排障。
+      const safeOutputAgents = verbose
+        ? sortedSafeAgents.map(omitNullishAgentSummaryFields)
+        : sortedSafeAgents.map(toCompactAgentSummary);
 
       output.write(JSON.stringify({
         success: true,
@@ -237,7 +243,7 @@ export async function runAgentListCommand(
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         total: sortedSafeAgents.length,
         unavailableCount: safeUnavailableCount,
-        agents: sortedSafeAgents,
+        agents: safeOutputAgents,
       }, null, 2));
       output.write("\n");
       return 0;

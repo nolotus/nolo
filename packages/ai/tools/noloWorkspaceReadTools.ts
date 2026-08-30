@@ -1,6 +1,6 @@
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { DataType } from "create/types";
-import { toSafeAgentSummary, sortSafeAgentSummaries } from "../agent/safeAgentSummary";
+import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields } from "../agent/safeAgentSummary";
 import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
@@ -524,13 +524,14 @@ export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDispla
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List the current user's Nolo agents as safe summaries. The `agents` array in the JSON result carries each agent's runnable `agentKey` (agent-<userId>-<id> for owned, agent-pub-<id> for public) plus model, apiSource, tools, prices, isOwned, isOAuth, nextAvailableAt (epoch ms when temporarily unavailable), isFavorite. Copy `agentKey` verbatim into startAgentRun. Results prioritize favorites; within that, user OAuth/custom agents first, then other owned agents, then public agents. Agents currently rate-limited (429, nextAvailableAt in the future) are hidden by default so a caller won't pick one that can't run right now; set `showUnavailable: true` to include them. The response carries an `unavailableCount` for the number of hidden rate-limited agents.",
+    "List the current user's Nolo agents as safe summaries. By default the `agents` array carries a compact agent-selection projection per agent: the runnable `agentKey` (agent-<userId>-<id> for owned, agent-pub-<id> for public) plus name, model, provider, apiSource, tools, isFavorite, isOAuth, isOwned, isPublic; null-valued keys are omitted. Copy `agentKey` verbatim into startAgentRun. Set `verbose: true` for troubleshooting to also get prices, introduction, modelAbility and timestamps. Results prioritize favorites; within that, user OAuth/custom agents first, then other owned agents, then public agents. Agents currently rate-limited (429, nextAvailableAt in the future) are hidden by default so a caller won't pick one that can't run right now; set `showUnavailable: true` to include them. The response carries an `unavailableCount` for the number of hidden rate-limited agents.",
   parameters: {
     type: "object",
     properties: {
       limit: { type: "integer", description: "Maximum agents to return. Default 100, max 500." },
       publicOnly: { type: "boolean", description: "Only show public agents." },
       showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+      verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
     },
   },
 } as const;
@@ -591,8 +592,17 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     agents = agents.filter((a) => !isAgentUnavailableNow(a as any, now));
   }
   agents = sortSafeAgentSummaries(agents);
+  // 默认精简投影（与 server listAgents 保持一致）：只保留选人决策所需字段，
+  // 防止大列表被 host 按字节截断后模型照抄别的条目格式猜 agentKey。
+  // 必须在 429 过滤与排序之后执行：isAgentUnavailableNow 依赖 nextAvailableAt，
+  // compareAgentSelection 依赖 favoritedAt/updatedAt，先投影会把它们裁掉。
+  // verbose: true 返回完整字段集（省略 null 值键）用于排障。
+  const projectedAgents =
+    args?.verbose === true
+      ? agents.map(omitNullishAgentSummaryFields)
+      : agents.map(toCompactAgentSummary);
   return {
-    rawData: { success: true, total: agents.length, unavailableCount, agents },
+    rawData: { success: true, total: projectedAgents.length, unavailableCount, agents: projectedAgents },
     displayData: formatAgentListCard(agents),
   };
 }

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   toSafeAgentSummary,
   sortSafeAgentSummaries,
+  toCompactAgentSummary,
+  omitNullishAgentSummaryFields,
   resolveFavoriteStatus,
 } from "./safeAgentSummary";
 
@@ -330,5 +332,125 @@ describe("safeAgentSummary", () => {
     const keys = Object.keys(summary);
     expect(keys).not.toContain("privateKey");
     expect(keys).not.toContain("dbKey");
+  });
+});
+
+describe("compact listAgents projection", () => {
+  const full = toSafeAgentSummary(
+    {
+      id: "own-1",
+      dbKey: "agent-user1-own-1",
+      name: "Owned Bot",
+      handle: "owned-bot",
+      introduction: "long introduction text",
+      model: "gpt-5.6-sol",
+      provider: "zai",
+      apiSource: "custom",
+      cliProvider: null,
+      tools: ["search"],
+      inputPrice: 0.01,
+      outputPrice: 0.03,
+      modelAbility: { passAt1: 73, benchmarkScore: 59, writingScore: 80 },
+      isPublic: false,
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+    { userId: "user1", favoritesMap: { "agent-user1-own-1": 1700000001000 } },
+  );
+
+  test("toCompactAgentSummary keeps exactly the agent-selection field set", () => {
+    const compact = toCompactAgentSummary(full);
+    expect(Object.keys(compact).sort()).toEqual([
+      "agentKey",
+      "apiSource",
+      "isFavorite",
+      "isOAuth",
+      "isOwned",
+      "isPublic",
+      "model",
+      "name",
+      "provider",
+      "tools",
+    ]);
+    expect(compact.agentKey).toBe("agent-user1-own-1");
+    expect(compact.isFavorite).toBe(true);
+    expect(compact.favoritedAt).toBeUndefined();
+  });
+
+  test("toCompactAgentSummary drops noisy fields (introduction, cliProvider, modelAbility, prices, timestamps)", () => {
+    const compact: Record<string, unknown> = toCompactAgentSummary(full);
+    for (const field of [
+      "id",
+      "handle",
+      "introduction",
+      "cliProvider",
+      "modelAbility",
+      "favoritedAt",
+      "updatedAt",
+      "inputPrice",
+      "outputPrice",
+    ]) {
+      expect(compact).not.toHaveProperty(field);
+    }
+  });
+
+  test("omitNullishAgentSummaryFields removes null/undefined keys but keeps falsy values like empty tools", () => {
+    const sparse = toSafeAgentSummary({ id: "x", dbKey: "agent-user1-x", name: "X" });
+    const verboseSparse = omitNullishAgentSummaryFields(sparse);
+    expect(verboseSparse).not.toHaveProperty("handle");
+    expect(verboseSparse).not.toHaveProperty("introduction");
+    expect(verboseSparse).not.toHaveProperty("model");
+    expect(JSON.stringify(verboseSparse)).not.toContain("null");
+    // [] / false 是有效信息，不得被误删。
+    const kept = omitNullishAgentSummaryFields({ tools: [], isFavorite: false, name: "Y" });
+    expect(kept).toEqual({ tools: [], isFavorite: false, name: "Y" });
+  });
+
+  test("nextAvailableAt survives the compact projection (cooling-agent decision info)", () => {
+    const cooling = { ...full, nextAvailableAt: Date.now() + 3_600_000 };
+    const compact = toCompactAgentSummary(cooling);
+    expect(compact.nextAvailableAt).toBe(cooling.nextAvailableAt);
+  });
+
+  test("projecting after sortSafeAgentSummaries preserves favorite + OAuth ordering", () => {
+    const mk = (
+      name: string,
+      fields: { userId?: string; apiKeyRef?: string; isFavorite?: boolean; updatedAt: string; favoritedAt?: number },
+    ) =>
+      toSafeAgentSummary(
+        {
+          id: name,
+          dbKey: `agent-user1-${name}`,
+          publicKey: `agent-pub-${name}`,
+          userId: "user1",
+          name,
+          model: "gpt-5.6-sol",
+          isPublic: false,
+          ...fields,
+        },
+        {
+          userId: "user1",
+          favoritesMap: fields.isFavorite
+            ? { [`agent-user1-${name}`]: fields.favoritedAt ?? 1 }
+            : undefined,
+        },
+      );
+    const input = [
+      mk("plain-public", { userId: "other-user", updatedAt: "2026-07-01T00:00:00.000Z" }),
+      mk("fav-oauth", { isFavorite: true, apiKeyRef: "chatgpt", updatedAt: "2026-06-01T00:00:00.000Z", favoritedAt: 1700000001000 }),
+      mk("plain-owned", { updatedAt: "2026-07-03T00:00:00.000Z" }),
+      mk("fav-plain", { isFavorite: true, updatedAt: "2026-06-02T00:00:00.000Z", favoritedAt: 1700000009000 }),
+      mk("oauth-owned", { apiKeyRef: "chatgpt", updatedAt: "2026-07-02T00:00:00.000Z" }),
+    ];
+    const shortKey = (key: string | undefined) => key!.replace(/^agent-(user1|pub)-/, "");
+    const sortedKeys = sortSafeAgentSummaries(input)
+      .map((a) => a.agentKey)
+      .map(shortKey);
+    // 档位：0 收藏 OAuth → 1 其他收藏 → 2 未收藏 OAuth/自定义 → 3 其他自建 → 4 公开。
+    expect(sortedKeys).toEqual(["fav-oauth", "fav-plain", "oauth-owned", "plain-owned", "plain-public"]);
+    // 排序在投影之前完成，投影只裁输出字段，不得改变顺序。
+    const projectedKeys = sortSafeAgentSummaries(input)
+      .map(toCompactAgentSummary)
+      .map((a) => shortKey(a.agentKey));
+    expect(projectedKeys).toEqual(sortedKeys);
   });
 });

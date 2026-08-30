@@ -1,4 +1,21 @@
 
+## 0.38.0-alpha.1
+
+## 0.38.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **agent-runtime:** 事件表保留策略与 killed 归属裁决固化 ([e5553e8](https://github.com/nolotus/bun-nolo/commit/e5553e83ef63a4b8290c0e6e16508c8c839083d6))
+
+### Bug Fixes
+
+* **agent-runtime:** transient 守卫下沉进 processRegistry.kill() ([53556fb](https://github.com/nolotus/bun-nolo/commit/53556fbf44d596c1073fe231c653b4b9a709ae1a))
+* **agent:** listAgents 默认精简投影，防止 agentKey 被截断丢失 ([7b40454](https://github.com/nolotus/bun-nolo/commit/7b4045444bc7bdbc4738a2b6a66b93b648e9732f))
+* **chat:** 历史截断轮的 reasoning_content 装载期归一化，打通思考折叠展示 ([c4c71a5](https://github.com/nolotus/bun-nolo/commit/c4c71a57dcad9ff23cdea890f22164b947d139ae))
+* **cli:** readDialog 本地命中不再因冗余 dbKey 偏差被丢弃 ([339a3b0](https://github.com/nolotus/bun-nolo/commit/339a3b079314b142fd46ea9189446a7eb7bdeff3))
+* **tui:** dock 面板发现宿主工具派发的本地 run ([4d03b58](https://github.com/nolotus/bun-nolo/commit/4d03b58184fe5244d87daaaffaa63ab3816df6d9))
+
+
 ## 0.37.0-alpha.5
 
 ## 0.37.0-alpha.5 (2026-08-30)

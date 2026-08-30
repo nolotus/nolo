@@ -276,3 +276,67 @@ export function toSafeAgentSummary(
 export function sortSafeAgentSummaries<T extends AgentSelectionCandidate>(agents: T[]): T[] {
   return [...agents].sort(compareAgentSelection);
 }
+
+/**
+ * listAgents 默认输出投影：编排者选人决策真正需要的最小字段集。
+ *
+ * 背景（真实事故）：32 个 agent 的完整摘要约 23.9KB，被 host 按字节截成
+ * 头+尾，中段条目的 agentKey 不可见，模型照抄其它条目的 ULID 格式猜了一个
+ * 不存在的 key，派发 2 秒即失败。agentKey 是唯一不可推导、必须逐字复制的
+ * 字段，必须保留；introduction/cliProvider/modelAbility/价格等长文本或大量
+ * 为 null 的字段在截断预算里是纯噪音，默认剔除。verbose 模式拿回完整字段集。
+ */
+export const COMPACT_AGENT_SUMMARY_FIELDS = [
+  "agentKey",
+  "name",
+  "model",
+  "provider",
+  "apiSource",
+  "isFavorite",
+  "isOAuth",
+  "isOwned",
+  "isPublic",
+  "tools",
+  // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
+  // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
+  // 所以通常根本不占字节。
+  "nextAvailableAt",
+] as const;
+
+export type CompactSafeAgentSummary = Pick<
+  SafeAgentSummary,
+  (typeof COMPACT_AGENT_SUMMARY_FIELDS)[number]
+>;
+
+/**
+ * 去掉值为 null/undefined 的键。"introduction": null 这类键只花字节不给信息；
+ * 省略整个键与 toSafeAgentSummary 对 publicKey/agentKey 的既有约定一致
+ * （不给模型一个用不了的值）。
+ */
+export function omitNullishAgentSummaryFields<T extends object>(summary: T): T {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(summary)) {
+    if (value !== null && value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
+
+/**
+ * 完整摘要 → 默认精简投影（选人最小字段集，且不含值为 null/undefined 的键）。
+ * 注意：只做输出投影，不参与排序/过滤——排序必须在投影之前完成
+ * （compareAgentSelection 依赖 favoritedAt/updatedAt，429 过滤依赖 nextAvailableAt）。
+ */
+export function toCompactAgentSummary(
+  summary: SafeAgentSummary
+): CompactSafeAgentSummary {
+  const compact: Record<string, unknown> = {};
+  for (const field of COMPACT_AGENT_SUMMARY_FIELDS) {
+    const value = summary[field];
+    if (value !== null && value !== undefined) {
+      compact[field] = value;
+    }
+  }
+  return compact as CompactSafeAgentSummary;
+}

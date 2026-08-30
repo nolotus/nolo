@@ -39,6 +39,7 @@ import type { DialogConfig } from "app/types";
 import { selectCurrentDialogKey, updateDialogTitle, updateTokens } from "chat/dialog/dialogSlice";
 import { updateDialogSummaryAction } from "chat/dialog/actions/updateDialogSummaryAction";
 import { normalizeAssistantContentBuffer } from "./messageContent";
+import { normalizeHistoricalReasoningMessage } from "./normalizeHistoricalReasoning";
 import {
   appendSaveFailureToContent,
   finalizeAssistantMessageContent,
@@ -273,18 +274,27 @@ const findDialogIdByMessageDbKey = (
 };
 
 const upsertOneMessage = (dialogState: MessageDialogState, message: Message) => {
-  dialogState.msgs = messagesAdapter.upsertOne(dialogState.msgs, message);
+  dialogState.msgs = messagesAdapter.upsertOne(
+    dialogState.msgs,
+    normalizeHistoricalReasoningMessage(message)
+  );
 };
 
 const upsertManyMessages = (
   dialogState: MessageDialogState,
   messages: Message[]
 ) => {
-  dialogState.msgs = messagesAdapter.upsertMany(dialogState.msgs, messages);
+  dialogState.msgs = messagesAdapter.upsertMany(
+    dialogState.msgs,
+    messages.map(normalizeHistoricalReasoningMessage)
+  );
 };
 
 const addOneMessage = (dialogState: MessageDialogState, message: Message) => {
-  dialogState.msgs = messagesAdapter.addOne(dialogState.msgs, message);
+  dialogState.msgs = messagesAdapter.addOne(
+    dialogState.msgs,
+    normalizeHistoricalReasoningMessage(message)
+  );
 };
 
 const updateOneMessage = (
@@ -310,7 +320,10 @@ const removeAllMessages = (dialogState: MessageDialogState) => {
 };
 
 const setAllMessages = (dialogState: MessageDialogState, messages: Message[]) => {
-  dialogState.msgs = messagesAdapter.setAll(dialogState.msgs, messages);
+  dialogState.msgs = messagesAdapter.setAll(
+    dialogState.msgs,
+    messages.map(normalizeHistoricalReasoningMessage)
+  );
 };
 
 // Lazy accessor for this slice's own actions, used inside thunk bodies below.

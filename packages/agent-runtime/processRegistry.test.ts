@@ -312,3 +312,32 @@ test("stopAll(backgroundOnly) spares transient envelopes; plain stopAll (exit fa
   expect(reg.getTaskEvents(fg.taskId).map((e) => e.type)).toEqual(["started", "promoted", "killed"]);
   expect(reg.getTaskEvents(bg.taskId).map((e) => e.type)).toEqual(["started", "killed"]);
 });
+
+test("kill refuses to terminate transient running envelope and leaves events untouched until promoted", () => {
+  const reg = getProcessRegistry();
+  const detached = process.platform !== "win32";
+  const child = spawn("sleep", ["60"], { detached, stdio: "ignore" });
+  expect(child.pid).toBeDefined();
+  const pid = child.pid!;
+  const pgid = detached ? pid : pid;
+
+  const env = reg.add({ pid, pgid, command: "sleep 60", label: "sleep", transient: true });
+
+  // (a) kill on a transient running entry returns false, does not kill process, emits no killed event
+  const killedTransient = reg.kill(pid);
+  expect(killedTransient).toBe(false);
+  expect(reg.get(pid)?.status).toBe("running");
+  expect(reg.getTaskEvents(env.taskId).map((e) => e.type)).toEqual(["started"]);
+
+  // (b) Once promoted (transient flipped to false), kill operates normally
+  reg.promote(pid);
+  expect(reg.get(pid)?.transient).toBe(false);
+
+  const killedPromoted = reg.kill(pid);
+  expect(killedPromoted).toBe(true);
+  expect(reg.get(pid)?.status).toBe("stopped");
+  expect(reg.getTaskEvents(env.taskId).map((e) => e.type)).toEqual(["started", "promoted", "killed"]);
+
+  child.kill();
+});
+

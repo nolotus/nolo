@@ -728,19 +728,87 @@ describe("cli agent list commands", () => {
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(chunks.join(""));
     expect(parsed.success).toBe(true);
-    expect(parsed.agents.map((agent: any) => agent.id)).toEqual(["public-bot", "fav-bot", "normal-bot"]);
-    expect(parsed.agents[0].modelAbility).toEqual({ passAt1: 73, benchmarkScore: 59, writingScore: 80 });
-    expect(parsed.agents.find((agent: any) => agent.id === "fav-bot")).toMatchObject({
-      introduction: "Coding helper",
-      inputPrice: 3,
-      outputPrice: 4,
-    });
+    // 默认精简投影：用 agentKey 断言收藏优先排序（public-bot 收藏时间更新在前）。
+    // public-bot 的公开记录存在性在本 mock 中未被确认（publicRecordExists=false），
+    // 按既有 --safe 契约省略 publicKey/agentKey，绝不给模型一个 404 key。
+    expect(parsed.agents.map((agent: any) => agent.agentKey)).toEqual([
+      undefined,
+      "agent-user-1-fav-bot",
+      "agent-user-1-normal-bot",
+    ]);
+    expect(parsed.agents[0].name).toBe("Public Favorite Bot");
     for (const agent of parsed.agents) {
       expect(agent).not.toHaveProperty("privateKey");
       expect(agent).not.toHaveProperty("dbKey");
       expect(agent).not.toHaveProperty("prompt");
       expect(agent).not.toHaveProperty("credentialRef");
+      // 精简投影剔除的噪音字段不得出现。
+      expect(agent).not.toHaveProperty("id");
+      expect(agent).not.toHaveProperty("introduction");
+      expect(agent).not.toHaveProperty("inputPrice");
+      expect(agent).not.toHaveProperty("outputPrice");
+      expect(agent).not.toHaveProperty("modelAbility");
     }
+  });
+
+  test("agent list --json --safe --verbose restores the full field set (still no null-valued keys)", async () => {
+    const chunks: string[] = [];
+    const exitCode = await runAgentListCommand(
+      [
+        "--json",
+        "--safe",
+        "--verbose",
+        "--token",
+        `${Buffer.from(JSON.stringify({ userId: "user-1" })).toString("base64")}.sig`,
+        "--server",
+        "https://arg.nolo.chat",
+      ],
+      {
+        env: authEnv("env-user"),
+        db: {
+          get: async () => { throw new Error("unused"); },
+          put: async () => undefined,
+          batch: async () => undefined,
+          iterator: () => { throw new Error("locked"); },
+        } as any,
+        output: { write(chunk) { chunks.push(String(chunk)); } },
+        fetchImpl: testFetch(async (url) => {
+          const target = String(url);
+          if (target.endsWith("/rpc/listFavorites")) {
+            return new Response(JSON.stringify({ targetType: "agent", items: [], ids: [] }), { status: 200 });
+          }
+          if (target.includes("/api/v1/db/query/user-1")) {
+            return new Response(JSON.stringify({ data: { data: [
+              {
+                dbKey: "agent-user-1-bot",
+                id: "bot",
+                userId: "user-1",
+                name: "Verbose Bot",
+                model: "gpt-5.6-sol",
+                introduction: "Verbose helper",
+                inputPrice: 1,
+                outputPrice: 2,
+                updatedAt: "2026-06-01T00:00:00.000Z",
+              },
+            ] } }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+        }),
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(chunks.join(""));
+    const agent = parsed.agents.find((a: any) => a.agentKey === "agent-user-1-bot");
+    expect(agent.id).toBe("bot");
+    expect(agent.introduction).toBe("Verbose helper");
+    expect(agent.inputPrice).toBe(1);
+    expect(agent.outputPrice).toBe(2);
+    expect(agent.updatedAt).toBe("2026-06-01T00:00:00.000Z");
+    // fixture 无 handle/cliProvider 等字段 → null 值键被省略而非输出 null。
+    expect(agent).not.toHaveProperty("handle");
+    expect(agent).not.toHaveProperty("cliProvider");
+    expect(chunks.join("")).not.toContain("null");
   });
 
   test("agent list hides rate-limited (429) agents by default and --show-unavailable shows them", async () => {
@@ -842,7 +910,7 @@ describe("cli agent list commands", () => {
     const parsed = JSON.parse(chunks.join(""));
     expect(parsed.success).toBe(true);
     // --safe 输出同样不得包含限流中的 favorite agent。
-    expect(parsed.agents.map((a: any) => a.id)).toEqual(["ok"]);
+    expect(parsed.agents.map((a: any) => a.agentKey)).toEqual(["agent-user-1-ok"]);
     expect(parsed.unavailableCount).toBe(1);
   });
 
@@ -902,7 +970,7 @@ describe("cli agent list commands", () => {
     const parsed = JSON.parse(chunks.join(""));
     expect(parsed.success).toBe(true);
     // favorite-only unavailable agent 被隐藏，且计入 unavailableCount（口径一致）。
-    expect(parsed.agents.map((a: any) => a.id)).toEqual(["ok"]);
+    expect(parsed.agents.map((a: any) => a.agentKey)).toEqual(["agent-user-1-ok"]);
     expect(parsed.unavailableCount).toBe(1);
   });
 });

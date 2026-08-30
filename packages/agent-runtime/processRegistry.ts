@@ -18,6 +18,7 @@
 import {
   ProcessTaskEventLog,
   type ProcessTaskEvent,
+  type ProcessTaskEventLogOptions,
   type ProcessTaskStatus,
 } from "./processTask";
 
@@ -75,7 +76,11 @@ function mintTaskId(pid: number): string {
 export class ProcessRegistry {
   private processes = new Map<number, RegisteredProcess>();
   private byTaskId = new Map<string, number>();
-  private eventLog = new ProcessTaskEventLog();
+  private eventLog: ProcessTaskEventLog;
+
+  constructor(eventLogOptions?: ProcessTaskEventLogOptions) {
+    this.eventLog = new ProcessTaskEventLog(eventLogOptions);
+  }
 
   /**
    * Pre-register an envelope right after a successful spawn and emit the
@@ -158,9 +163,19 @@ export class ProcessRegistry {
     return { ...item };
   }
 
+  /**
+   * Terminate a background process group and update its status to "stopped".
+   *
+   * Invariant (§1.3): Transient foreground envelopes (workspaceShell grace
+   * period before timeout detach) are NOT stoppable through this entry point;
+   * their lifecycle belongs to the foreground runner (abort/timeout). Calling
+   * kill() on a transient entry does not signal the process, does not emit a
+   * "killed" event, and returns false.
+   */
   kill(pid: number, signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): boolean {
     const item = this.processes.get(pid);
     if (!item) return false;
+    if (item.transient) return false;
 
     if (item.status === "running") {
       try {

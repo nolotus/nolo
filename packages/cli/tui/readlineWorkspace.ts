@@ -30,7 +30,7 @@ import {
   type InternalTurnEvent,
   type TurnRequest,
 } from "core/chat/internalTurnEvent";
-import { checkStaleRun, readRunRecord } from "../agentRunControl";
+import { checkStaleRun, listRunRecords, readRunRecord } from "../agentRunControl";
 import { prefetchAgentCatalog } from "./agentCatalog";
 import {
   mergeAttachedImages,
@@ -609,6 +609,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // ~/.nolo——设了 NOLO_HOME 的环境（dev、测试）会读错目录。run 记录读取
     // 与 reconcile 的调用点也是同样写法。
     readRecord: (runId) => readRunRecord(runId, { env: effectiveEnv }),
+    discoverRuns: () => listRunRecords({ env: effectiveEnv }),
+    getCurrentDialogId: () => state.dialogId,
     reconcile: (runId) => checkStaleRun(runId, { env: effectiveEnv }),
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
   });

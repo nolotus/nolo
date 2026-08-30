@@ -773,6 +773,7 @@ export async function runOneAgentTurn(
           }
         }
       : undefined;
+  ctx.runRegistryPoller.beginHold();
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
@@ -917,6 +918,7 @@ export async function runOneAgentTurn(
     }
     return { ok: !wasAborted, aborted: wasAborted };
   } finally {
+    ctx.runRegistryPoller.endHold();
     ctx.activityIndicator.stop();
     ctx.activeTurnAbort = null;
   }

@@ -166,6 +166,8 @@ export interface Message {
   content: Content;
 
   thinkContent?: string;
+  /** 思维链原文（OpenAI / DeepSeek / Kimi 等 provider 返回的原始 reasoning_content 字段）。 */
+  reasoning_content?: string;
   image?: string;
   images?: string[];
 

@@ -27,6 +27,10 @@ import {
 
 /** 读一次 json 很便宜，可以贴着面板的重绘节奏走。 */
 export const RUN_POLL_INTERVAL_MS = 1000;
+/** Discovery is filesystem-heavy; docked runs still get their one-second poll. */
+const DISCOVERY_EVERY_TICKS = 5;
+/** A terminal record first seen by discovery gets one chance to render. */
+const DISCOVERY_TERMINAL_LINGER_MS = 60_000;
 /**
  * 记录静默多久之后才值得去问「这进程还在吗」。
  *
@@ -45,6 +49,10 @@ export type RunRegistryPollerDeps = {
   update: (snapshot: AgentRunSnapshot) => void;
   /** 读一条 run 记录（纯文件读）。 */
   readRecord: (runId: string) => RunRecord | null | undefined;
+  /** 可选：扫描本地 registry，供首轮发现尚未上板的 run。 */
+  discoverRuns?: () => RunRecord[];
+  /** 当前 dialog；发现路径沿用 runCompletionWatcher 的归属判据。 */
+  getCurrentDialogId?: () => string | undefined;
   /** 孤儿回收：pid 没了就把记录落成终态。返回 null 表示记录不存在。 */
   reconcile?: (runId: string) => RunRecord | null | undefined;
   /**
@@ -63,6 +71,10 @@ export type RunRegistryPollerDeps = {
 export type RunRegistryPoller = {
   /** 有 run 上板时调用；已经在转、或已经 dispose 过，都什么都不做。 */
   ensureRunning(): void;
+  /** Keep discovery alive for the duration of a turn, including before a run exists. */
+  beginHold(): void;
+  /** Release a turn hold; an empty poller stops on its next tick. */
+  endHold(): void;
   /** 立刻走一轮（测试与首帧用）。 */
   poll(): void;
   /** 停表并忘掉去重状态；之后仍可被 ensureRunning 重新起表。 */
@@ -148,8 +160,13 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
 
   let timer: unknown = null;
   let disposed = false;
+  let holdCount = 0;
+  let tickCount = 0;
+  let discoveredRecords: RunRecord[] = [];
   const lastEmitted = new Map<string, string>();
   const lastReconciledAt = new Map<string, number>();
+  // Dock 退场后仍保留终态 tombstone，避免下一次 discovery 把它复活。
+  const retiredRunIds = new Set<string>();
 
   const stop = () => {
     if (timer !== null) {
@@ -158,6 +175,8 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     }
     lastEmitted.clear();
     lastReconciledAt.clear();
+    discoveredRecords = [];
+    tickCount = 0;
   };
 
   /** 记录最后一次有动静的时刻：activity 在跑就用它，否则退回 run 的起点。 */
@@ -168,12 +187,43 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
   const poll = () => {
     const at = now();
     // 终态 run 不必再读：它的记录不会再变，dock 的 linger 会自己送它下板。
-    const active = deps.getDockedRuns().filter(
+    const dockedRuns = deps.getDockedRuns();
+    const dockedActive = dockedRuns.filter(
       (run) => run.runId && !isAgentRunTerminalStatus(run.status)
     );
-    if (active.length === 0) {
-      // 没有活跃 run 就没有可轮询的东西。下次有 run 上板时 ensureRunning 会
-      // 把表重新开起来。
+    const dockedIds = new Set(dockedRuns.map((run) => run.runId));
+    tickCount += 1;
+    if (deps.discoverRuns && (tickCount - 1) % DISCOVERY_EVERY_TICKS === 0) {
+      try {
+        discoveredRecords = deps.discoverRuns();
+      } catch {
+        // Discovery is optional IO; a transient registry read must not break the TUI.
+      }
+    }
+    const discovered = discoveredRecords;
+    const currentDialogId = deps.getCurrentDialogId?.();
+    const discoveredActive = discovered.filter((record) =>
+      record.runId &&
+      !dockedIds.has(record.runId) &&
+      !retiredRunIds.has(record.runId) &&
+      !isAgentRunTerminalStatus(record.status) &&
+      (!deps.getCurrentDialogId || (currentDialogId !== undefined && record.parentDialogId === currentDialogId))
+    );
+    // 从未上过板的终态记录也给 dock 一次展示机会；超出窗口才墓碑化。
+    const discoveredTerminal = discovered.filter((record) => {
+      if (!record.runId || dockedIds.has(record.runId) || retiredRunIds.has(record.runId)) return false;
+      if (!isAgentRunTerminalStatus(record.status)) return false;
+      if (deps.getCurrentDialogId && (currentDialogId === undefined || record.parentDialogId !== currentDialogId)) return false;
+      const endedAt = readTimestamp(record.endedAt);
+      return endedAt !== undefined && at - endedAt <= DISCOVERY_TERMINAL_LINGER_MS;
+    });
+    for (const record of discovered) {
+      if (record.runId && isAgentRunTerminalStatus(record.status) && !discoveredTerminal.includes(record)) {
+        retiredRunIds.add(record.runId);
+      }
+    }
+    const active = [...dockedActive, ...discoveredActive, ...discoveredTerminal.map((record) => ({ runId: record.runId, status: record.status } as AgentRunSnapshot))];
+    if (active.length === 0 && holdCount === 0) {
       stop();
       return;
     }
@@ -237,12 +287,22 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     }
   };
 
+  const ensureRunning = () => {
+    // stop() 是可逆的（没有活跃 run 时自己停表，有新 run 再起），dispose()
+    // 不是：会话都退出了，迟到的 tool-result 不该再把表开起来。
+    if (disposed || timer !== null) return;
+    timer = setIntervalFn(poll, intervalMs);
+  };
+
   return {
-    ensureRunning() {
-      // stop() 是可逆的（没有活跃 run 时自己停表，有新 run 再起），dispose()
-      // 不是：会话都退出了，迟到的 tool-result 不该再把表开起来。
-      if (disposed || timer !== null) return;
-      timer = setIntervalFn(poll, intervalMs);
+    ensureRunning,
+    beginHold() {
+      if (disposed) return;
+      holdCount += 1;
+      ensureRunning();
+    },
+    endHold() {
+      if (holdCount > 0) holdCount -= 1;
     },
     poll,
     stop,

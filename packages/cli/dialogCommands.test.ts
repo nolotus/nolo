@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Level } from "level";
 
 import {
   readDialogSnapshot,
@@ -35,6 +39,24 @@ function testFetch(fn: TestFetch): typeof fetch {
 
 const dialogId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const secondDialogId = "01BRZ3NDEKTSV4RRFFQ69G5FAA";
+
+async function withTempDialogDb<T>(
+  fn: (db: Level<string, any>) => Promise<T>,
+): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), "nolo-dialog-read-"));
+  const previousDbPath = process.env.NOLO_SERVER_DB_PATH;
+  process.env.NOLO_SERVER_DB_PATH = root;
+  const db = new Level<string, any>(root, { valueEncoding: "json" });
+  try {
+    await db.open();
+    return await fn(db);
+  } finally {
+    await db.close().catch(() => undefined);
+    if (previousDbPath === undefined) delete process.env.NOLO_SERVER_DB_PATH;
+    else process.env.NOLO_SERVER_DB_PATH = previousDbPath;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 describe("cli dialog commands", () => {
   test("dialog attachment cleanup plans only explicit dialog-owned files for deletion", () => {
@@ -107,6 +129,76 @@ describe("cli dialog commands", () => {
     expect(plan.deleteCandidates[0]?.reason).toContain("explicit referenced-attachment deletion");
   });
 
+
+  test("dialog read uses a real local LevelDB hit without HTTP", async () => {
+    await withTempDialogDb(async (db) => {
+      const id = "01JLOCALREAD000000000000000";
+      const key = `dialog-user-1-${id}`;
+      await db.put(key, { id, dbKey: key, status: "done" });
+      let fetchCalls = 0;
+      const result = await readDialogSnapshot({
+        authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+        dialogId: id, dialogKey: key, limit: 0,
+        fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("unexpected", { status: 500 }); }),
+        readLocalDialog: async () => ({ meta: await db.get(key), msgs: [] }),
+      });
+      expect(result.source).toBe("local-db-fallback");
+      expect(fetchCalls).toBe(0);
+    });
+  });
+
+  test("dialog read trusts the storage key when redundant dbKey is stale", async () => {
+    await withTempDialogDb(async (db) => {
+      const id = "01JLOCALREAD000000000000001";
+      const key = `dialog-user-1-${id}`;
+      await db.put(key, { id, dbKey: "dialog-user-1-ALTERNATE", status: "done" });
+      let fetchCalls = 0;
+      const result = await readDialogSnapshot({
+        authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+        dialogId: id, dialogKey: key, limit: 0,
+        fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("unexpected", { status: 500 }); }),
+        readLocalDialog: async () => ({ meta: await db.get(key), msgs: [] }),
+      });
+      expect(result.meta.status).toBe("done");
+      expect(fetchCalls).toBe(0);
+    });
+  });
+
+  test("dialog read falls back to HTTP when real local LevelDB has no key", async () => {
+    await withTempDialogDb(async (db) => {
+      const id = "01JLOCALREAD000000000000002";
+      const key = `dialog-user-1-${id}`;
+      let fetchCalls = 0;
+      const result = await readDialogSnapshot({
+        authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+        dialogId: id, dialogKey: key, limit: 0,
+        fetchImpl: testFetch(async (url) => {
+          fetchCalls += 1;
+          if (String(url).includes("/api/v1/db/read/")) return Response.json({ id, status: "remote" });
+          return Response.json([]);
+        }),
+        readLocalDialog: async () => {
+          try { return { meta: await db.get(key), msgs: [] }; }
+          catch (error) { throw Object.assign(error as Error, { code: "LEVEL_NOT_FOUND" }); }
+        },
+      });
+      expect(result.source).toBe("http");
+      expect(fetchCalls).toBeGreaterThan(0);
+    });
+  });
+
+  test("dialog read reports local failure alongside HTTP attempts", async () => {
+    const id = "01JLOCALREAD000000000000003";
+    const key = `dialog-user-1-${id}`;
+    let fetchCalls = 0;
+    await expect(readDialogSnapshot({
+      authToken: authEnv("user-1").AUTH_TOKEN!, base: "https://nolo.chat",
+      dialogId: id, dialogKey: key, limit: 0,
+      fetchImpl: testFetch(async () => { fetchCalls += 1; return new Response("not found", { status: 404 }); }),
+      readLocalDialog: async () => { throw Object.assign(new Error("LEVEL_LOCKED: database LOCK"), { code: "LEVEL_LOCKED" }); },
+    })).rejects.toMatchObject({ local: { attempted: true, reason: "LEVEL_LOCKED: database LOCK" } });
+    expect(fetchCalls).toBeGreaterThan(0);
+  });
 
   test("dialog read falls back to the local store after remote 404s", async () => {
     const dialogId = "01JZZZZZZZZZZZZZZZZZZZZZZZ";

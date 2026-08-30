@@ -20,6 +20,7 @@ const agentRecords = [
   {
     id: "agent-1",
     dbKey: "agent-user-1-agent-1",
+    userId: "user-1",
     name: "Private Agent",
     model: "gpt-test",
     isPublic: false,
@@ -29,6 +30,7 @@ const agentRecords = [
   {
     id: "agent-2",
     dbKey: "agent-user-1-agent-2",
+    userId: "user-1",
     name: "Public Agent",
     model: "gpt-test",
     isPublic: true,
@@ -64,18 +66,38 @@ describe("listAgentsFunc", () => {
       expect(agent).not.toHaveProperty("privateKey");
       expect(agent).not.toHaveProperty("dbKey");
     }
-    // listAgentsFunc 按 updatedAt 降序排列（最新在前），不依赖顺序断言字段
-    const byId = new Map<string, any>(agents.map((agent: any) => [agent.id, agent]));
-    expect(byId.get("agent-1")?.name).toBe("Private Agent");
-    expect(byId.get("agent-1")?.isPublic).toBe(false);
-    expect(byId.get("agent-1")?.tools).toEqual(["read", "exa_search"]);
-    // Private agent: publicKey must be omitted entirely, not synthesized.
-    expect(byId.get("agent-1")).not.toHaveProperty("publicKey");
+    // listAgentsFunc 按 updatedAt 降序排列（最新在前），不依赖顺序断言字段。
+    // 本单测 mock 无可解析的登录身份（selectIdentityUserId 链路），按既有安全
+    // 契约省略 agentKey；server 侧 listAgentsServer.test.ts 覆盖 agentKey 正向断言。
+    for (const agent of agents) {
+      expect(agent).not.toHaveProperty("agentKey");
+    }
+    const byName = new Map<string, any>(agents.map((agent: any) => [agent.name, agent]));
+    expect(byName.get("Private Agent")?.isPublic).toBe(false);
+    expect(byName.get("Private Agent")?.tools).toEqual(["read", "exa_search"]);
+    // 默认精简投影：噪音字段一律不出现。
+    for (const field of ["id", "introduction", "cliProvider", "modelAbility", "updatedAt", "inputPrice", "outputPrice"]) {
+      expect(byName.get("Private Agent")).not.toHaveProperty(field);
+    }
     // Public agent (isPublic=true) without explicit publicKey: also omitted.
     // isPublic is a flag, NOT proof the agent-pub-<id> record exists.
     // listAgentsFunc cannot cheaply verify existence → omit rather than guess.
-    expect(byId.get("agent-2")).not.toHaveProperty("publicKey");
+    expect(byName.get("Public Agent")).not.toHaveProperty("publicKey");
     expect((result.rawData as any).total).toBe(2);
+  });
+
+  it("verbose: true 返回完整字段集，但 null 值键仍被省略", async () => {
+    mockQueryFetch(agentRecords);
+    const result = await listAgentsFunc({ verbose: true }, buildThunkApi());
+    const raw = JSON.stringify(result.rawData);
+    const byName = new Map<string, any>(
+      ((result.rawData as any).agents as any[]).map((agent) => [agent.name, agent]),
+    );
+    expect(byName.get("Private Agent")?.updatedAt).toBe("2026-07-01T00:00:00.000Z");
+    // 完整摘要同样不给私有 agent 一个无法解析的 publicKey。
+    expect(byName.get("Private Agent")).not.toHaveProperty("publicKey");
+    // fixture 里 handle/introduction/价格等均为 null → 整个响应不出现 null 值键。
+    expect(raw).not.toContain("null");
   });
 
   it("publicOnly=true 只返回公开 agent", async () => {
@@ -86,7 +108,7 @@ describe("listAgentsFunc", () => {
     );
     const agents = (result.rawData as any).agents;
     expect(agents).toHaveLength(1);
-    expect(agents[0].id).toBe("agent-2");
+    expect(agents[0].name).toBe("Public Agent");
   });
 
   it("游客（无 token/userId）返回空结果而非抛错", async () => {

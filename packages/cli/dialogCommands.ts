@@ -20,9 +20,11 @@ import {
   planDialogAttachmentCleanup,
 } from "./dialogAttachmentCleanup";
 import { toErrorMessage } from "core/errorMessage";
+import { logger } from "core/logger";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
+import { resolveServerDbPath } from "../database-engine/dbPath";
 import { parsePositiveFiniteNumberOrFallback } from "core/positiveFiniteNumberOrFallback";
 import { parsePositiveIntegerOrFallback } from "core/positiveIntegerOrFallback";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
@@ -656,6 +658,33 @@ type LocalDialogRead = (args: {
   limit: number;
 }) => Promise<{ meta: any; msgs: any[] }>;
 
+type LocalDialogFailure = {
+  attempted: true;
+  reason: string;
+  path: string;
+};
+
+function localDialogDbPath() {
+  return resolveServerDbPath();
+}
+
+function describeLocalDialogFailure(error: unknown): LocalDialogFailure {
+  return {
+    attempted: true,
+    reason: toErrorMessage(error),
+    path: localDialogDbPath(),
+  };
+}
+
+function isExplicitDialogIdMismatch(meta: unknown, dialogId: string) {
+  return (
+    meta && typeof meta === "object" &&
+    "id" in meta &&
+    (meta as { id?: unknown }).id != null &&
+    String((meta as { id: unknown }).id) !== dialogId
+  );
+}
+
 async function readDialogFromLocalDb(
   dialogKey: string,
   dialogId: string,
@@ -689,6 +718,7 @@ export async function readDialogSnapshot(args: {
   // Local-first is intentional: local TUI/CLI runs persist beside the process,
   // while server runs persist remotely. A dialogId does not identify the store.
   // Only fall through on a local miss; a real local DB error must not be hidden.
+  let localFailure: LocalDialogFailure | undefined;
   try {
     const local = await readDialogFromLocalDb(
       args.dialogKey,
@@ -696,18 +726,22 @@ export async function readDialogSnapshot(args: {
       args.limit,
       args.readLocalDialog,
     );
-    // A local reader can legally return an empty/missing record (for example
-    // when another local authority is open). Treat that as a miss; otherwise
-    // a stale local lookup would mask the server-owned dialog forever.
+    // The storage key is authoritative: the record was fetched by args.dialogKey.
+    // dbKey/contentKey are redundant copies and may be stale after migration.
     const localMeta = local.meta;
+    if (!localMeta || isExplicitDialogIdMismatch(localMeta, args.dialogId)) {
+      const miss = new Error(
+        !localMeta ? "local dialog not found" : "local dialog id does not match requested dialog",
+      );
+      (miss as Error & { code?: string }).code = "LEVEL_NOT_FOUND";
+      throw miss;
+    }
     const localKey =
       localMeta && typeof localMeta === "object"
         ? String(localMeta.dbKey ?? localMeta.contentKey ?? "")
         : "";
-    if (!localMeta || (localKey && localKey !== args.dialogKey)) {
-      const miss = new Error("local dialog not found");
-      (miss as Error & { code?: string }).code = "LEVEL_NOT_FOUND";
-      throw miss;
+    if (localKey && localKey !== args.dialogKey) {
+      logger.debug({ dialogKey: args.dialogKey, recordDbKey: localKey }, "local dialog record dbKey differs from storage key");
     }
     return {
       ...local,
@@ -716,11 +750,9 @@ export async function readDialogSnapshot(args: {
       candidateBases,
     };
   } catch (error) {
+    localFailure = describeLocalDialogFailure(error);
     // Only a confirmed missing key means "try the server". Lock/IO errors are
-    // real local-runtime failures and must remain visible to the caller.
-    // A resident server holding the shared LOCK is an expected miss for CLI
-    // reads: the local authority is unavailable, so try the configured server.
-    // Other local I/O failures remain visible instead of being silently masked.
+    // expected local-runtime fallbacks and are retained as diagnostics.
     const localDbUnavailable =
       isLevelLockError(error) ||
       (typeof error === "object" &&
@@ -728,16 +760,27 @@ export async function readDialogSnapshot(args: {
     if (!isLevelNotFoundError(error) && !localDbUnavailable) throw error;
   }
 
-  const result = await tryHttpDialogCandidates({
-    bases: candidateBases,
-    dialogKey: args.dialogKey,
-    dialogId: args.dialogId,
-    limit: args.limit,
-    authToken: args.authToken,
-    fetchImpl: args.fetchImpl,
-    messagesOnly: args.messagesOnly,
-  });
-  return { ...result, candidateBases };
+  try {
+    const result = await tryHttpDialogCandidates({
+      bases: candidateBases,
+      dialogKey: args.dialogKey,
+      dialogId: args.dialogId,
+      limit: args.limit,
+      authToken: args.authToken,
+      fetchImpl: args.fetchImpl,
+      messagesOnly: args.messagesOnly,
+    });
+    return { ...result, candidateBases };
+  } catch (error) {
+    if (localFailure) {
+      const enriched = error as Error & {
+        local?: LocalDialogFailure;
+      };
+      enriched.local = localFailure;
+      enriched.message = `${enriched.message}; local read attempted (${localFailure.path}): ${localFailure.reason}`;
+    }
+    throw error;
+  }
 }
 
 function compact(value: unknown, max = 180) {
@@ -1081,6 +1124,17 @@ function formatDialogReadFailure(error: unknown): string {
       : [];
 
   const lines: string[] = [`[nolo] dialog read failed: ${message}`];
+
+  const localFailure =
+    typeof error === "object" && error !== null && "local" in error
+      ? (error as { local?: LocalDialogFailure }).local
+      : undefined;
+  if (localFailure) {
+    lines.push("  local:");
+    lines.push(`    - attempted: yes`);
+    lines.push(`    - reason: ${localFailure.reason}`);
+    lines.push(`    - database: ${localFailure.path}`);
+  }
 
   if (attempts.length > 0) {
     const seen = new Set<string>();
