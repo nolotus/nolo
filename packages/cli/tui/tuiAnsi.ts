@@ -102,25 +102,58 @@ export function applyTerminalOutputToText(existing: string, chunk: string): stri
 }
 
 /**
- * East Asian Ambiguous（EA=A）常见符号：stringWidth 按 1 列计，但 CJK 终端
- * （尤其 zh locale）实际按 2 列渲染 → 表格 pad 不足、框线错位。强制按 2 列计。
- * 逐个考证：箭头 ←↑→↓↔↕ / ⇐⇒⇔、数学 ×÷±、项目符号 •·。
- * 注意：×÷±· 位于 U+2000 之下，scanWidthNeeds 必须单独识别（见下）。
+ * East Asian Ambiguous（EA=A）宽度约定。
+ * - narrow（默认）：符号一律按 1 列（纯 stringWidth 结果），适合 VSCode(unicode11)/iTerm2 等现代默认终端；
+ * - wide：符号强制按 2 列计宽，适合 CJK 字体终端或 ambiguous=double 设置。
+ */
+export type TuiAmbiguousWidth = "narrow" | "wide";
+
+/**
+ * 解析 EA=A 宽度约定：
+ * 显式参数 > env NOLO_TUI_AMBIGUOUS_WIDTH > 默认 "narrow"。
+ * 大小写不敏感，非法值静默回退默认 "narrow"。
+ */
+export function resolveAmbiguousWidth(
+  explicit?: TuiAmbiguousWidth,
+  env: Record<string, string | undefined> = process.env,
+): TuiAmbiguousWidth {
+  if (explicit === "wide" || explicit === "narrow") return explicit;
+  const raw = env.NOLO_TUI_AMBIGUOUS_WIDTH;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed === "wide") return "wide";
+    if (trimmed === "narrow") return "narrow";
+  }
+  return "narrow";
+}
+
+/**
+ * East Asian Ambiguous（EA=A）常见符号：stringWidth 按 1 列计，但在 wide 约定下按 2 列计宽。
+ * 覆盖：
+ * - 箭头：0x2190-0x2195 (←↑→↓↔↕), 0x21D0, 0x21D2, 0x21D4 (⇐⇒⇔)
+ * - 数学与标点：0x00D7 (×), 0x00F7 (÷), 0x00B1 (±), 0x2022 (•), 0x00B7 (·)
+ * - 补全 wide 名单：
+ *   - 0x00B0 (°), 0x2103 (℃)
+ *   - 0x2010-0x2015 (— – ‐ ‑ ‒ ―)
+ *   - 0x2460-0x24FF (①②④⑤ 圈数字/括号序号等)
+ *   - 0x231A-0x231B, 0x23E9-0x23FA (⏳⏰⏱⏸⏹ 等杂项技术符号)
  */
 function isAmbiguousWideSymbolCode(code: number): boolean {
   return (
     (code >= 0x2190 && code <= 0x2195) || // ←↑→↓↔↕
     code === 0x21d0 || code === 0x21d2 || code === 0x21d4 || // ⇐⇒⇔
     code === 0x00d7 || code === 0x00f7 || code === 0x00b1 || // ×÷±
-    code === 0x2022 || code === 0x00b7 // • ·
+    code === 0x2022 || code === 0x00b7 || // • ·
+    code === 0x00b0 || code === 0x2103 || // ° ℃
+    (code >= 0x2010 && code <= 0x2015) || // ‐‑‒–—―
+    (code >= 0x2460 && code <= 0x24ff) || // ①②④⑤ 圈数字/括号序号
+    code === 0x231a || code === 0x231b || // ⌚ ⌛
+    (code >= 0x23e9 && code <= 0x23fa) // ⏳⏰⏱⏸⏹ 等
   );
 }
 
 /**
- * 命中区间首码点判断：需要强制加宽的杂项符号 / emoji 区间（同原实现内联语义）。
- * 注意：这些区间并非全部位于 >= U+2000 —— ×÷±· 等 EA=A 符号位于 U+2000 之下，
- * 由 isAmbiguousWideSymbolCode 单独识别（见上）。isForceWideSymbolCode 是
- * isAmbiguousWideSymbolCode 的超集，二者共同构成 displayWidth 的加宽来源。
+ * 命中区间首码点判断：需要强制加宽的杂项符号 / emoji 区间。
  */
 function isForceWideSymbolCode(code: number): boolean {
   return (
@@ -139,31 +172,36 @@ function isCjkQuoteCode(code: number): boolean {
 /**
  * 单次遍历判定一行是否需要慢路径与是否命中加宽区间。
  *
- *  - hasNonAscii：是否存在非 ASCII 码点。注意：不仅 >= U+2000 的码点（任一
- *    代码单元 >= 0x2000，或任何代理对）算非 ASCII，位于 U+2000 之下的 EA=A
- *    符号（×÷±·）也会命中 isAmbiguousWideSymbolCode 而返回 hasNonAscii: true
- *    —— 因此「仅含 × 的行」也会走慢路径，这是有意为之（× 需按 2 列计宽）。
- *    纯 ASCII 行绝不可能命中任何加宽区间，直接用 stringWidth 快路径返回、不缓存。
- *  - hasCandidate：是否存在可能触发强制加宽的码点（命中区间 / zh 下 CJK 引号）。
- * 两者共享一次循环，只做整数比较，远快于每字素簇一次 stringWidth。
+ *  - hasNonAscii：是否存在非 ASCII 码点。
+ *  - hasCandidate：是否存在可能触发强制加宽的码点。
+ *    narrow 下符号区间不算 candidate（避免白跑慢路径），zh 引号 candidate 保留；
+ *    wide 下 isForceWideSymbolCode 命中的符号算 candidate。
  *
- * 【决策记录 · EA=A 符号加宽】×÷±· 与箭头等 EA=A 符号按 2 列计宽是 locale
- * 无关的全局策略（不依赖 zh/en）。取舍：窄渲染终端（按 1 列渲染这些符号）会
- * 反向过 pad —— 欠 pad 导致框线错位，过 pad 导致早截断；我们接受「过 pad 导致
- * 早截断」这一侧（框线不错位优先于内容完整）。
+ * 【决策记录 · EA=A 宽度约定】
+ * 默认 narrow 的依据：string-width、VSCode(unicode11)、iTerm2 等主流终端默认均按窄（1 列）渲染；
+ * 若强制按 2 列计宽会导致 padCell 过 pad（终端实际渲染窄于计宽），进而导致表格竖线向左移位、逐列累加错位。
+ * 故宽度约定必须与终端一致，默认采用 narrow，并支持通过 NOLO_TUI_AMBIGUOUS_WIDTH=wide
+ * 在 CJK 字体终端或 ambiguous=double 设置下开启宽渲染。
+ * zh locale 下的 CJK 全角引号（“”‘’）加宽行为独立于 EA=A 约定保持不变。
  */
-function scanWidthNeeds(plain: string, locale: "zh" | "en"): { hasNonAscii: boolean; hasCandidate: boolean } {
+function scanWidthNeeds(
+  plain: string,
+  locale: "zh" | "en",
+  ambiguousWidth: TuiAmbiguousWidth,
+): { hasNonAscii: boolean; hasCandidate: boolean } {
   let hasNonAscii = false;
+  const isWideMode = ambiguousWidth === "wide";
+
   for (let i = 0; i < plain.length; i++) {
     const cc = plain.charCodeAt(i);
-    // 部分 EA=A 符号（×÷±·）位于 U+2000 之下，需在 ASCII 快路径之外单独识别。
-    if (isAmbiguousWideSymbolCode(cc)) {
+    // EA=A 符号部分在 U+2000 之下（如 ×÷±·°）。
+    if (isWideMode && isAmbiguousWideSymbolCode(cc)) {
       return { hasNonAscii: true, hasCandidate: true };
     }
-    if (cc < 0x2000) continue;
-    // 到这里 cc >= 0x2000，必属非 ASCII。必须记录下来再继续扫描：提前 return
-    // 会让「未命中加宽区间」的分支无从得知本行含非 ASCII，纯 ASCII 快路径便成
-    // 死代码，所有 ASCII 行都改走缓存写入 + FIFO 淘汰（实测慢 13x）。
+    if (cc < 0x2000) {
+      if (cc >= 0x80) hasNonAscii = true;
+      continue;
+    }
     hasNonAscii = true;
     let code = cc;
     if (cc >= 0xd800 && cc <= 0xdbff && i + 1 < plain.length) {
@@ -173,14 +211,16 @@ function scanWidthNeeds(plain: string, locale: "zh" | "en"): { hasNonAscii: bool
         i += 1;
       }
     }
-    if (isForceWideSymbolCode(code) || (locale === "zh" && isCjkQuoteCode(code))) {
+    const isSymbolCandidate = isWideMode && isForceWideSymbolCode(code);
+    const isQuoteCandidate = locale === "zh" && isCjkQuoteCode(code);
+    if (isSymbolCandidate || isQuoteCandidate) {
       return { hasNonAscii: true, hasCandidate: true };
     }
   }
   return { hasNonAscii, hasCandidate: false };
 }
 
-// 按行 memo：key = plain + locale。key 含 locale 以避免运行期 locale 变化导致缓存失配。
+// 按行 memo：key = locale + \0 + ambiguousWidth + \0 + plain。
 // 上限限制避免长会话内存无界增长（FIFO 淘汰）。
 const displayWidthCache = new Map<string, number>();
 const DISPLAY_WIDTH_CACHE_MAX = 4096;
@@ -201,30 +241,31 @@ export function __clearDisplayWidthCacheForTest(): void {
   displayWidthCache.clear();
 }
 
-export function displayWidth(str: string): number {
+export function displayWidth(
+  str: string,
+  ambiguousWidth: TuiAmbiguousWidth = resolveAmbiguousWidth(),
+): number {
   const plain = stripAnsi(str);
   const locale = getCliLocale();
 
   // 单次廉价扫描：判定是否需要缓存（含非 ASCII）以及是否命中加宽区间。
-  const needs = scanWidthNeeds(plain, locale);
+  const needs = scanWidthNeeds(plain, locale, ambiguousWidth);
 
-  // 快路径：纯 ASCII 行绝无命中区间码点（区间全部 >= U+2000），直接返回，
-  // 不缓存（纯 ASCII 计算快，缓存无收益，且避免占用有限缓存槽）。
+  // 快路径：纯 ASCII 行绝无命中区间码点，直接返回，不缓存。
   if (!needs.hasNonAscii) {
     return stringWidth(plain);
   }
 
   // 非 ASCII 行：绝大多数调用方是重复渲染同一行内容（反复重绘同一可视窗口），
   // 命中缓存可跳过 stringWidth(plain) 与 Segmenter，是最大的收益来源。
-  // key 含 locale，避免运行期 locale 变化导致缓存失配。
-  const key = locale + "\u0000" + plain;
+  // key 含 locale 与 ambiguousWidth，避免运行期 locale/约定变化导致缓存失配。
+  const key = locale + "\u0000" + ambiguousWidth + "\u0000" + plain;
   const cached = displayWidthCache.get(key);
   if (cached !== undefined) return cached;
 
   const base = stringWidth(plain);
 
-  // 含非 ASCII 但不含命中区间码点的行（中文/日文等）：与原实现逐 cluster
-  // 扫描结果必然一致（扫描不存在时循环体永不执行），直接返回并缓存。
+  // 含非 ASCII 但不含命中区间码点的行（中文/日文等）：与逐 cluster 扫描结果一致，直接返回并缓存。
   if (!needs.hasCandidate) {
     if (displayWidthCache.size >= DISPLAY_WIDTH_CACHE_MAX) {
       const eldest = displayWidthCache.keys().next().value as string | undefined;
@@ -234,12 +275,15 @@ export function displayWidth(str: string): number {
     return base;
   }
 
-  // 慢路径：仅在码点落入命中区间时才调 stringWidth 校验
-  // （替代原实现对每个 cluster 都做一次 stringWidth），其余 cluster 只做整数比较。
+  // 慢路径：仅在码点落入命中区间时才调 stringWidth 校验。
+  // narrow 下仅 zh 引号加宽；wide 下符号与 zh 引号加宽。
   let width = base;
+  const isWideMode = ambiguousWidth === "wide";
   for (const { segment } of graphemeSegmenter.segment(plain)) {
     const code = segment.codePointAt(0) ?? 0;
-    if (isForceWideSymbolCode(code) || (locale === "zh" && isCjkQuoteCode(code))) {
+    const isSymbol = isWideMode && isForceWideSymbolCode(code);
+    const isQuote = locale === "zh" && isCjkQuoteCode(code);
+    if (isSymbol || isQuote) {
       if (stringWidth(segment) === 1) width += 1;
     }
   }
