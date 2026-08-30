@@ -1050,3 +1050,55 @@ describe("loadDesktopAgentRuntimeAgentConfigFromRecordStore builtin fallback", (
     expect(config).toBeNull();
   });
 });
+
+
+describe("desktopAgentRuntimeAdapter token projection billingCategory", () => {
+  test("projects billable=false turns to subscription category in daily stats", async () => {
+    const memoryStore = new Map<string, any>();
+    const store: any = {
+      read: async (key: string) => memoryStore.get(key) ?? null,
+      write: async (key: string, val: any) => { memoryStore.set(key, val); },
+      batch: async (ops: any[]) => {
+        for (const op of ops) {
+          if (op.type === "put") memoryStore.set(op.key, op.value);
+        }
+      },
+    };
+
+    await saveDesktopAgentRuntimeTurnToRecordStore({
+      store,
+      userId: "user-1",
+      now: () => 1786500000000,
+      createId: () => "id-1",
+      input: {
+        agentKey: "agent-1",
+        dialogId: "dialog-1",
+        billingConfig: {
+          model: "custom-model",
+          provider: "custom-provider",
+          apiSource: "custom",
+        },
+        usageRecords: [
+          {
+            callId: "call-1",
+            model: "custom-model",
+            provider: "custom-provider",
+            usage: { input_tokens: 1000, output_tokens: 500 },
+          },
+        ],
+        messages: [{ role: "user", content: "hi" }],
+        result: { content: "ok" },
+      },
+    });
+
+    let stats: any = null;
+    for (const [k, v] of memoryStore.entries()) {
+      if (k.startsWith("token-stats-")) stats = v;
+    }
+    expect(stats).not.toBeNull();
+    expect(stats.categories?.subscription).toBeDefined();
+    expect(stats.categories.subscription.count).toBe(1);
+    expect(stats.categories.subscription.cost).toBe(0);
+    expect(stats.modelCategories?.["custom-model:::subscription"]).toBeDefined();
+  });
+});

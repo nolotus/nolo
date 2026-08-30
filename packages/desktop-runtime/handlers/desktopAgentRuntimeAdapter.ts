@@ -465,6 +465,7 @@ export async function saveDesktopAgentRuntimeTurnToRecordStore(args: {
       cache_creation_input_tokens: prepared.usage.cache_creation_input_tokens,
       agentId: prepared.tokenData.agentId ?? prepared.tokenData.cybotId,
       entry_path: prepared.tokenData.entry_path,
+      billingCategory: (prepared.tokenData.billable ?? false) ? "platform" : "subscription",
     });
     const existingStatsIndex = tokenOps.findIndex((op) => op.key === statsKey);
     const statsOp = {

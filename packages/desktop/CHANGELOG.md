@@ -1,4 +1,13 @@
 
+## 0.40.0-alpha.1
+
+## 0.40.0-alpha.1 (2026-08-30)
+
+### Features
+
+* **usage:** split usage stats by billing category (platform vs subscription) ([6a6ed41](https://github.com/nolotus/bun-nolo/commit/6a6ed41ff04d43d17dac9f03d784d46d465d3dcc))
+
+
 ## 0.39.0-alpha.3
 
 ## 0.39.0-alpha.3 (2026-08-30)

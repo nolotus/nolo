@@ -62,6 +62,7 @@ const updateStats = async (
       cache_creation_input_tokens: data.cache_creation_input_tokens,
       agentId: data.agentId ?? data.cybotId,
       entry_path: data.entry_path,
+      billingCategory: data.billable ? "platform" : "subscription",
     });
 
     await (thunkApi.dispatch(

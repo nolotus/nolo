@@ -218,6 +218,7 @@ export async function writeLocalTokenRecord(args: {
         input_tokens: prepared.usage.input_tokens,
         output_tokens: prepared.usage.output_tokens,
         cost: prepared.tokenData.cost,
+        billingCategory: (prepared.tokenData.billable ?? false) ? "platform" : "subscription",
       });
       const statsRecord = { ...newStats, id: statsKey, type: "token" as const };
       await args.store.write(statsKey, statsRecord);

@@ -3,6 +3,15 @@ import { Language } from "../types";
 export default {
   [Language.EN]: {
     translation: {
+      all_sources: "All Sources",
+      source_platform: "Platform billing",
+      source_subscription: "Subscription (0 credits)",
+      source_subscription_badge: "Subscription",
+      source_unbilled_badge: "Unbilled",
+      source_unbilled: "Unbilled (0 credits)",
+      source_platform_badge: "Platform",
+      source_type: "Source",
+      billing_detail_source: "Billing source",
       languageName: "English",
       login: "Login",
       logout: "Logout",
@@ -1367,6 +1376,15 @@ export default {
   },
   [Language.ZH_CN]: {
     translation: {
+      all_sources: "全部来源",
+      source_platform: "平台计费",
+      source_subscription: "订阅 · 0积分",
+      source_subscription_badge: "订阅",
+      source_unbilled_badge: "未计费",
+      source_unbilled: "未计费 · 0积分",
+      source_platform_badge: "平台计费",
+      source_type: "来源",
+      billing_detail_source: "计费来源",
       languageName: "简体中文",
       login: "登录",
       logout: "登出",
@@ -2652,6 +2670,15 @@ export default {
   },
   [Language.ZH_HANT]: {
     translation: {
+      all_sources: "全部來源",
+      source_platform: "平台計費",
+      source_subscription: "訂閱 · 0積分",
+      source_subscription_badge: "訂閱",
+      source_unbilled_badge: "未計費",
+      source_unbilled: "未計費 · 0積分",
+      source_platform_badge: "平台計費",
+      source_type: "來源",
+      billing_detail_source: "計費來源",
       languageName: "繁體中文",
       login: "登入",
       logout: "登出",
@@ -3858,6 +3885,15 @@ quickChat: {
   },
   [Language.JA]: {
     translation: {
+      all_sources: "すべてのソース",
+      source_platform: "プラットフォーム課金",
+      source_subscription: "サブスクリプション · 0クレジット",
+      source_subscription_badge: "サブスク",
+      source_unbilled_badge: "未請求",
+      source_unbilled: "未請求 · 0クレジット",
+      source_platform_badge: "プラットフォーム",
+      source_type: "ソース",
+      billing_detail_source: "請求元",
       languageName: "日本語",
       login: "ログイン",
       logout: "ログアウト",

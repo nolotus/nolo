@@ -20,12 +20,22 @@ describe("localRuntimeDialog writeDialog title behavior", () => {
           if (op.type === "put") data[op.key] = op.value;
         }
       },
+      batch: async (ops: Array<{ type: string; key: string; value: any }>) => {
+        for (const op of ops) {
+          if (op.type === "put") data[op.key] = op.value;
+        }
+      },
       getData: () => data,
     };
   };
 
   test("uses fallback title normalized down to <= 24 chars when titleGenerator returns null without logging in", async () => {
     const store = createMockStore();
+    (store as any).batch = async (ops: any[]) => {
+      for (const op of ops) {
+        if (op.type === "put") store.getData()[op.key] = op.value;
+      }
+    };
     let nowCounter = 1710000000000;
     const longUserMessage = "请帮我重构 UI 组件代码：清理冗余样式，重构 DOM 层级，确保响应式布局正确运作，不要修改全局变值";
 
@@ -462,5 +472,60 @@ describe("localRuntimeDialog loadCliDialogSummary schemaVersion pass-through", (
     // 合法数字 → 透传
     const sOk = await loadCliDialogSummary({ store: makeStore({ ...base, schemaVersion: 1 }), userId: "u", dialogId: "d" });
     expect((sOk as any).schemaVersion).toBe(1);
+  });
+});
+
+describe("localRuntimeDialog writeDialog billingCategory", () => {
+  test("writes token usage with subscription billing category when billable is false", async () => {
+    const memoryStore = new Map<string, any>();
+    const store: any = {
+      read: async (key: string) => memoryStore.get(key) ?? null,
+      write: async (key: string, val: any) => { memoryStore.set(key, val); },
+      batch: async (ops: any[]) => {
+        for (const op of ops) {
+          if (op.type === "put") memoryStore.set(op.key, op.value);
+        }
+      },
+    };
+
+    const ops = await writeDialog({
+      store,
+      userId: "user-1",
+      input: {
+        agentKey: "agent-1",
+        billingConfig: {
+          agentId: "agent-1",
+          model: "m-local",
+          provider: "p-local",
+          apiSource: "custom",
+        },
+        usageRecords: [
+          {
+            callId: "call-local-1",
+            model: "m-local",
+            provider: "p-local",
+            usage: { input_tokens: 800, output_tokens: 200 },
+          },
+        ],
+        messages: [{ role: "user", content: "hi" }],
+        result: { content: "Done", model: "m-local" },
+      },
+      now: () => 1786500000000,
+      createId: () => "id-1",
+      env: {},
+      fetchImpl: (async () => ({})) as any,
+      titleGenerator: async () => null,
+    });
+
+    expect(ops).toBeDefined();
+    let stats: any = null;
+    for (const [k, v] of memoryStore.entries()) {
+      if (k.startsWith("token-stats-")) stats = v;
+    }
+    expect(stats).not.toBeNull();
+    expect(stats.categories?.subscription).toBeDefined();
+    expect(stats.categories.subscription.count).toBe(1);
+    expect(stats.categories.subscription.cost).toBe(0);
+    expect(stats.modelCategories?.["m-local:::subscription"]).toBeDefined();
   });
 });

@@ -168,4 +168,156 @@ describe("applyTokenUsageToDayStats", () => {
     expect(afterFailure.providers["opencode-go"].failedCount).toBe(1);
   });
 
+
+  it("accumulates mixed billing categories into categories and modelCategories partitions", () => {
+    // First usage: platform billing with cost
+    const day1 = applyTokenUsageToDayStats(null, {
+      userId: "user-1",
+      timeKey: "2026-08-30",
+      model: "glm-5.3",
+      provider: "zai",
+      input_tokens: 1000,
+      output_tokens: 500,
+      cost: 0.05,
+      billingCategory: "platform",
+    });
+
+    expect(day1.total.count).toBe(1);
+    expect(day1.total.cost).toBe(0.05);
+    expect(day1.models["glm-5.3"].count).toBe(1);
+    expect(day1.categories?.["platform"].count).toBe(1);
+    expect(day1.categories?.["platform"].cost).toBe(0.05);
+    expect(day1.modelCategories?.["glm-5.3:::platform"].count).toBe(1);
+    expect(day1.modelCategories?.["glm-5.3:::platform"].cost).toBe(0.05);
+
+    // Second usage: subscription with 0 credits
+    const day2 = applyTokenUsageToDayStats(day1, {
+      userId: "user-1",
+      timeKey: "2026-08-30",
+      model: "glm-5.3",
+      provider: "zai",
+      input_tokens: 2000,
+      output_tokens: 800,
+      cost: 0,
+      billingCategory: "subscription",
+    });
+
+    // Total and model aggregations combine both
+    expect(day2.total.count).toBe(2);
+    expect(day2.total.tokens.input).toBe(3000);
+    expect(day2.total.tokens.output).toBe(1300);
+    expect(day2.total.cost).toBe(0.05);
+    expect(day2.models["glm-5.3"].count).toBe(2);
+    expect(day2.models["glm-5.3"].cost).toBe(0.05);
+
+    // Categories split cleanly
+    expect(day2.categories?.["platform"].count).toBe(1);
+    expect(day2.categories?.["platform"].cost).toBe(0.05);
+    expect(day2.categories?.["platform"].tokens.input).toBe(1000);
+
+    expect(day2.categories?.["subscription"].count).toBe(1);
+    expect(day2.categories?.["subscription"].cost).toBe(0);
+    expect(day2.categories?.["subscription"].tokens.input).toBe(2000);
+
+    // modelCategories partition correctly
+    expect(day2.modelCategories?.["glm-5.3:::platform"].count).toBe(1);
+    expect(day2.modelCategories?.["glm-5.3:::platform"].cost).toBe(0.05);
+    expect(day2.modelCategories?.["glm-5.3:::subscription"].count).toBe(1);
+    expect(day2.modelCategories?.["glm-5.3:::subscription"].cost).toBe(0);
+  });
+
+  it("normalizes legacy DayStats without billingCategory by defaulting to platform", () => {
+    const legacyStats: any = {
+      userId: "user-1",
+      period: "day",
+      timeKey: "2026-08-01",
+      total: {
+        count: 5,
+        tokens: { input: 500, output: 250, cacheRead: 0, cacheCreation: 0 },
+        cost: 0.05,
+        failedCount: 0,
+      },
+      models: {
+        "legacy-glm": {
+          count: 5,
+          tokens: { input: 500, output: 250, cacheRead: 0, cacheCreation: 0 },
+          cost: 0.05,
+          failedCount: 0,
+        },
+      },
+      providers: {
+        zai: {
+          count: 5,
+          tokens: { input: 500, output: 250, cacheRead: 0, cacheCreation: 0 },
+          cost: 0.05,
+          failedCount: 0,
+        },
+      },
+      agents: {},
+      entryPaths: {},
+    };
+
+    // When new subscription usage is appended on top of legacy data:
+    const updated = applyTokenUsageToDayStats(legacyStats, {
+      userId: "user-1",
+      timeKey: "2026-08-01",
+      model: "legacy-glm",
+      provider: "zai",
+      input_tokens: 300,
+      output_tokens: 100,
+      cost: 0,
+      billingCategory: "subscription",
+    });
+
+    expect(updated.total.count).toBe(6);
+    expect(updated.models["legacy-glm"].count).toBe(6);
+    // Legacy total migrated to platform category without polluting subscription
+    expect(updated.categories?.["platform"].count).toBe(5);
+    expect(updated.categories?.["platform"].cost).toBe(0.05);
+    expect(updated.modelCategories?.["legacy-glm:::platform"].count).toBe(5);
+    // New subscription usage goes to subscription category
+    expect(updated.categories?.["subscription"].count).toBe(1);
+    expect(updated.categories?.["subscription"].cost).toBe(0);
+    expect(updated.modelCategories?.["legacy-glm:::subscription"].count).toBe(1);
+  });
+
+  it("records failed calls in categories and modelCategories", () => {
+    const day = applyTokenUsageToDayStats(null, {
+      userId: "user-1",
+      timeKey: "2026-08-30",
+      model: "glm-5.3",
+      provider: "zai",
+      input_tokens: 0,
+      output_tokens: 0,
+      cost: 0,
+      status: "failed",
+      billingCategory: "subscription",
+    });
+
+    expect(day.total.failedCount).toBe(1);
+    expect(day.total.count).toBe(0);
+    expect(day.categories?.["subscription"].failedCount).toBe(1);
+    expect(day.categories?.["subscription"].count).toBe(0);
+    expect(day.modelCategories?.["glm-5.3:::subscription"].failedCount).toBe(1);
+    expect(day.modelCategories?.["glm-5.3:::subscription"].count).toBe(0);
+  });
+
+  it("forces cost to 0 for subscription category even if delta.cost was non-zero", () => {
+    const day = applyTokenUsageToDayStats(null, {
+      userId: "user-1",
+      timeKey: "2026-08-30",
+      model: "deepseek-r1",
+      provider: "deepinfra",
+      input_tokens: 10000,
+      output_tokens: 5000,
+      cost: 0.99, // theoretical unbilled cost
+      billingCategory: "subscription",
+    });
+
+    expect(day.total.cost).toBe(0);
+    expect(day.categories?.["subscription"].cost).toBe(0);
+    expect(day.modelCategories?.["deepseek-r1:::subscription"].cost).toBe(0);
+    expect(day.models["deepseek-r1"].cost).toBe(0);
+    expect(day.total.tokens.input).toBe(10000);
+  });
 });

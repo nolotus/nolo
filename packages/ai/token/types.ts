@@ -11,7 +11,7 @@ export const TOKEN_PERIODS = {
 // DayStats / ModelStats / TokenCount 统一定义，供 stats.ts、query.ts、
 // serverTokenWriter、updateTokensAction、externalToolCost 共用。
 // 唯一实现在 applyTokenUsageToDayStats.ts。
-export type { DayStats, ModelStats, TokenCount } from "./applyTokenUsageToDayStats";
+export type { DayStats, ModelStats, TokenCount, BillingCategory } from "./applyTokenUsageToDayStats";
 
 export const TOKEN_SCOPES = {
   USER: "user",
