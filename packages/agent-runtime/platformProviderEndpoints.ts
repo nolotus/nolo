@@ -8,17 +8,13 @@
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { getModelConfig } from "../ai/llm/providers";
 import {
-  isPlatformHostedClaudeModel,
   isPlatformHostedDeepseekModel,
-  isPlatformHostedGrokModel,
-  isPlatformHostedKimiK26Model,
-  isPlatformHostedGlmModel,
-  isPlatformHostedGlm53FlashModel,
-  isPlatformHostedGeminiModel,
-  isPlatformHostedGeminiImageModel,
   isPlatformHostedOpenAIImageModel,
+  resolvePlatformHostedRouting,
+  type PlatformHostedUpstreamId,
 } from "../ai/llm/platformHosted";
-import { PLATFORM_HOSTED_KIMI_K3_MODEL } from "../ai/llm/kimi";
+
+export { type PlatformHostedUpstreamId } from "../ai/llm/platformHosted";
 
 export const OPENAI_RESPONSES_ENDPOINT =
   "https://api.openai.com/v1/responses";
@@ -91,9 +87,9 @@ export function resolvePlatformResponsesEndpoint(
     normalized === "nolo" ||
     normalized === "ollama-cloud"
   ) {
-    // 平台托管 gpt-image-2：上游是 OpenAI Responses，不是 DeepSeek
-    if (isPlatformHostedOpenAIImageModel(model)) {
-      return OPENAI_RESPONSES_ENDPOINT;
+    const route = resolvePlatformHostedRouting(model);
+    if (route && route.wire === "responses") {
+      return route.endpoint;
     }
     if (!model || isPlatformHostedDeepseekModel(model)) {
       return DEEPSEEK_RESPONSES_ENDPOINT;
@@ -120,74 +116,22 @@ export function resolvePlatformChatCompletionsEndpoint(
   const key = asTrimmedLowercaseString(provider);
   if (!key) return undefined;
   const aliased = PLATFORM_PROVIDER_ENDPOINT_ALIASES[key] ?? key;
-  // 平台托管 Claude（provider=nolo + anthropic/claude-*）：实际上游 deepinfra
-  if (aliased === "nolo" && isPlatformHostedClaudeModel(model)) {
-    return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.deepinfra;
-  }
-  // 平台托管 Grok（provider=nolo + grok-4.6）：实际上游 xAI
-  if (aliased === "nolo" && isPlatformHostedGrokModel(model)) {
-    return XAI_CHAT_COMPLETIONS_ENDPOINT;
-  }
-  if (
-    aliased === "nolo" &&
-    (isPlatformHostedKimiK26Model(model) || isPlatformHostedGlmModel(model))
-  ) {
-    return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.openrouter;
-  }
-  // 平台托管 GLM 5.3 Flash：实际上游 RunInfra（独家廉价快档）
-  if (aliased === "nolo" && isPlatformHostedGlm53FlashModel(model)) {
-    return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.runinfra;
-  }
-  if (
-    aliased === "nolo" &&
-    asTrimmedLowercaseString(model) === PLATFORM_HOSTED_KIMI_K3_MODEL
-  ) {
-    return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.crof;
-  }
-  // 平台托管 Gemini 3.7 Flash / Gemini 出图模型：实际上游 Google
-  if (
-    aliased === "nolo" &&
-    (isPlatformHostedGeminiModel(model) || isPlatformHostedGeminiImageModel(model))
-  ) {
-    return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.google;
-  }
-  // 平台托管 gpt-image-2：实际上游 OpenAI（走 Responses 端点，不走 chat.completions）
-  if (aliased === "nolo" && isPlatformHostedOpenAIImageModel(model)) {
-    return undefined;
-  }
-  // 平台托管 DeepSeek V4（走 Responses 端点，不走 chat.completions）
-  if (aliased === "nolo" && isPlatformHostedDeepseekModel(model)) {
-    return undefined;
-  }
-  // 平台托管（nolo 及 legacy ollama-cloud/deepseek 记录）未显式分流的模型：
-  // 不再回退到默认上游（原 ollama.com 兜底已移除），显式返回 undefined 让上层报错。
   if (aliased === "nolo") {
+    const route = resolvePlatformHostedRouting(model);
+    if (route && route.wire !== "responses") {
+      return route.endpoint;
+    }
+    // 平台托管 Responses 模型或未识别模型返回 undefined（显式分流）
     return undefined;
   }
   return PLATFORM_CHAT_COMPLETIONS_ENDPOINTS[aliased];
 }
 
 /**
- * 平台托管上游 id（credential / usage 白名单共用）。
- * 每个成员都必须是 getNoloKey 接受的 provider，新增时两处同步。
- */
-export type PlatformHostedUpstreamId =
-  | "deepinfra"
-  | "xai"
-  | "openrouter"
-  | "runinfra"
-  | "upstream-k3"
-  | "google"
-  | "openai"
-  | "deepseek";
-
-/**
  * 平台托管模型该用哪个 provider 的 key。
  *
- * 与上面的 `resolvePlatformChatCompletionsEndpoint` **逐条对应**——同一个模型，
- * 端点解析到谁家，key 就取谁家。两个函数必须放在一起改：历史上它们分处两个包
- * 各自手写，端点先去掉了 ollama 兜底、key 侧还在发 OLLAMA_API_KEY，于是「拿 A
- * 家的钥匙去开 B 家的门」连出两次线上 401（2026-08-13 / 2026-08-22）。
+ * 统一消费声明式路由真值表（resolvePlatformHostedRouting）：
+ * 端点与凭据同源，彻底杜绝分支漂移与误路由。
  *
  * 返回 undefined = 不是平台托管路由，调用方按记录里的 provider 自己取 key。
  */
@@ -199,21 +143,7 @@ export function resolvePlatformHostedCredentialProvider(
   if (!key) return undefined;
   const aliased = PLATFORM_PROVIDER_ENDPOINT_ALIASES[key] ?? key;
   if (aliased !== "nolo") return undefined;
-  if (isPlatformHostedClaudeModel(model)) return "deepinfra";
-  if (isPlatformHostedGrokModel(model)) return "xai";
-  if (isPlatformHostedKimiK26Model(model) || isPlatformHostedGlmModel(model)) {
-    return "openrouter";
-  }
-  if (isPlatformHostedGlm53FlashModel(model)) return "runinfra";
-  if (asTrimmedLowercaseString(model) === PLATFORM_HOSTED_KIMI_K3_MODEL) {
-    return "upstream-k3";
-  }
-  if (isPlatformHostedGeminiModel(model) || isPlatformHostedGeminiImageModel(model)) {
-    return "google";
-  }
-  if (isPlatformHostedOpenAIImageModel(model)) return "openai";
-  if (isPlatformHostedDeepseekModel(model)) return "deepseek";
-  return undefined;
+  return resolvePlatformHostedRouting(model)?.keyName;
 }
 
 /**

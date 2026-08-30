@@ -2,6 +2,8 @@
 // Platform catalog for hosted models (upstream provider is abstracted).
 // Public provider id is `nolo` (see providers.ts MODEL_MAP).
 
+export * from "./platformHostedRoutingTable";
+
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { Model } from "./types";
 import type { ImageSizeKey } from "./imagePricing";
@@ -14,15 +16,23 @@ import {
   DEEPINFRA_CLAUDE_SONNET_PRICE,
   DEEPINFRA_CLAUDE_FABLE_PRICE,
 } from "./deepinfra";
-
-/**
- * Claude 模型（平台托管语义）：记录侧 provider=nolo（统一管理），实际上游
- * 仍是 deepinfra（URL 指向 deepinfra、key 用 DEEPINFRA_API_KEY）。
- */
-export const PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL =
-  "anthropic/claude-sonnet-5";
-export const PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL = "anthropic/claude-opus-5";
-export const PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL = "anthropic/claude-fable-5";
+import {
+  PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
+  PLATFORM_HOSTED_GROK_4_6_MODEL,
+  PLATFORM_HOSTED_GLM_53_MODEL,
+  PLATFORM_HOSTED_GLM_52_MODEL,
+  PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+  PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
+  PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
+  PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
+  PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
+  PLATFORM_HOSTED_OPENAI_IMAGE_MODEL,
+  PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
+  PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
+  PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
+} from "./platformHostedRoutingTable";
 
 export const PLATFORM_HOSTED_CLAUDE_MODELS = [
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
@@ -59,8 +69,6 @@ export const toCnyCredits = (cnyPerMillion: number): number =>
 /**
  * Grok 4.6（平台托管语义）：记录侧 provider=nolo（统一管理），实际上游为
  */
-export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
-
 export const isPlatformHostedGrokModel = (model?: string | null): boolean =>
   asTrimmedLowercaseString(model) === PLATFORM_HOSTED_GROK_4_6_MODEL;
 
@@ -74,7 +82,6 @@ export const PLATFORM_HOSTED_GROK_PRICE = {
  *
  * 缓存读取单价来自上游回报的实际账单反推（cost_details.upstream_inference_*）：
  */
-export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const isPlatformHostedKimiK26Model = (
   model?: string | null,
 ): boolean => asTrimmedLowercaseString(model) === PLATFORM_HOSTED_KIMI_K26_MODEL;
@@ -99,14 +106,6 @@ export const PLATFORM_HOSTED_KIMI_K3_PRICE = {
 /**
  * GLM 5.3（平台托管语义）：记录侧展示与主键为 `glm-5.3`（兼容历史 `glm-5.2`），
  */
-export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
-/** @deprecated Kept for backward compatibility with existing agent records. */
-export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
-
-export const PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID = "z-ai/glm-5.3";
-export const PLATFORM_HOSTED_GLM_52_OPENROUTER_MODEL_ID =
-  PLATFORM_HOSTED_GLM_53_OPENROUTER_MODEL_ID;
-
 export const isPlatformHostedGlmModel = (
   model?: string | null,
 ): boolean => {
@@ -127,8 +126,6 @@ export const PLATFORM_HOSTED_GLM_PRICE = {
  * key 用 RUNINFRA_API_KEY）。模型 id 与 RunInfra 一致（glm-5-3-flash，无需映射）。
  * 注意：上游强制 reasoning，`supportsReasoningEffort=false`（实测不可关闭）。
  */
-export const PLATFORM_HOSTED_GLM_53_FLASH_MODEL = "glm-5-3-flash";
-
 /**
  */
 export const PLATFORM_HOSTED_GLM_53_FLASH_PRICE = {
@@ -148,8 +145,6 @@ export const isPlatformHostedGlm53FlashModel = (
  * Gemini 3.7 Flash（平台托管语义）：直连 Google 官方原生 API（gemini-3.7-flash，
  * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
  */
-export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
-
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_PRICE = {
   input: 4.2, // 6.0 credits
   output: 21, // 30.0 credits
@@ -168,19 +163,10 @@ export const isPlatformHostedGeminiModel = (
  * 模型 id 与上游一致，出图 tool / handler 按模型名分发，不能改名。
  * 价格沿用原 openai / google 目录中的定义。
  */
-export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
-
 export const isPlatformHostedOpenAIImageModel = (
   model?: string | null,
 ): boolean =>
   asTrimmedLowercaseString(model) === PLATFORM_HOSTED_OPENAI_IMAGE_MODEL;
-
-export const PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL =
-  "gemini-3.1-flash-lite-image";
-export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL =
-  "gemini-3.1-flash-image-preview";
-export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL =
-  "gemini-3-pro-image-preview";
 
 export const PLATFORM_HOSTED_GEMINI_IMAGE_MODELS = [
   PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
@@ -257,14 +243,6 @@ const createPlatformHostedGeminiImageModel = ({
   imageGenerationProfiles,
   supportsTool: false,
 });
-
-/**
- * Platform hosted DeepSeek V4 Flash / Pro. Same model id as official DeepSeek.
- */
-export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash";
-export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL =
-  "deepseek-v4-flash-vision-exp";
-export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
 
 /**
  * DeepSeek V4 peak/off-peak pricing.
