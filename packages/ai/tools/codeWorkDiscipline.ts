@@ -34,7 +34,7 @@ export const CODE_WORK_DISCIPLINE_BODY = `## 效率优先（省 token）
 - **建议汇报**：交付时把过程中发现的**任何值得用户知道的事**都列出来（预存无关改动、既有测试隔离问题、潜在风险、后续可优化点、需用户决策的事项），不要只报「做完了」。
 
 ## Review 纪律（commit 前硬门）
-- 除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是自己。无 review 不 commit——这是硬门，不是建议。
+- 除 ≤2 步零逻辑风险的机械改动（错别字/格式/CSS 微调）外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff（\`git diff\`，未提交的改动）。reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」，跨家族优先非强制）。无 review 不 commit——这是硬门，不是建议。
 - 派发走 \`startAgentRun(agentKey, task, { ephemeral: true })\`（web/桌面端没有 nolo CLI，所有 host 都有这个工具）。ephemeral 让 review 完成后不留 dialog 记录。
 - task 里必须写明审查对象（\`git diff\` 看工作区改动，或 \`git diff alpha...HEAD\` 看已提交改动），否则 reviewer 不知道审什么。
 - 按角色加载对应 skill：reviewer 先 \`loadSkill("coding-review")\` 拿通用流程，再按角色 \`loadSkill("coding-review-<role>")\` 拿检查项。角色清单：code-quality（**必跑**）/ architecture（**单独派发**，中级以上问题）/ security（按需 + 安全敏感触发必跑）/ frontend-ux（涉及 UI 时）/ backend-data（涉及 server 时）。角色切割的目的是注意力隔离——每个角色只盯自己的检查面，按需启用，避免一个 reviewer 背所有角色导致注意力稀释。
