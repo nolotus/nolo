@@ -1,4 +1,13 @@
 
+## 0.44.0-alpha.2
+
+## 0.44.0-alpha.2 (2026-08-30)
+
+### Bug Fixes
+
+* **agent:** glm-5.3-flash 托管线补 minClientVersion 客户端版本闸门 ([938a017](https://github.com/nolotus/bun-nolo/commit/938a0178182b202d8730577511672d86b50abf1f))
+
+
 ## 0.44.0-alpha.1
 
 ## 0.44.0-alpha.1 (2026-08-30)

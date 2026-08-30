@@ -63,6 +63,18 @@ export type PlatformHostedUpstreamId =
  */
 export const PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION = "0.38.0-alpha.4";
 
+/**
+ * GLM 5.3 Flash 的最低客户端版本。
+ *
+ * 定值依据（可核）：闸门比对的是 CLI 版本线（NOLO_CLI_VERSION / 请求头
+ * x-nolo-client-version）。0.33.0-alpha.1 是首个包含 d8e52b3b8
+ * （parse platform chat completion body by payload shape）修复的 CLI tag
+ * （`git tag --contains d8e52b3b8`）。
+ * 低于它的客户端（包括 0.32.0 stable 等历史版本）解析 chat.completion body 会
+ * 丢正文导致静默空轮。
+ */
+export const PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION = "0.33.0-alpha.1";
+
 export type PlatformHostedRoutingEntry = {
   readonly endpoint: string;
   readonly usageProvider: PlatformHostedUpstreamId;
@@ -126,6 +138,7 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     keyName: "runinfra",
     wire: "chat.completions",
     agentRunHosted: true,
+    minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
   "glm-5.3-flash": {
     endpoint: "https://api.runinfra.ai/v1/chat/completions",
@@ -133,9 +146,9 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     keyName: "runinfra",
     wire: "chat.completions",
     agentRunHosted: true,
+    minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
-  // 唯一带 minClientVersion 的托管模型：wire 要求专属 body quirk（删采样参数 +
-  // max_completion_tokens），旧客户端本地直连必断。
+  // wire 要求专属 body quirk（删采样参数 + max_completion_tokens），旧客户端本地直连必断。
   [PLATFORM_HOSTED_KIMI_K3_MODEL]: {
     endpoint: "https://crof.ai/v1/chat/completions",
     usageProvider: "upstream-k3",

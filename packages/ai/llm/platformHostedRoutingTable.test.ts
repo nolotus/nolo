@@ -4,6 +4,7 @@ import {
   resolvePlatformHostedRouting,
   PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
+  PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
@@ -73,9 +74,13 @@ describe("PLATFORM_HOSTED_ROUTING_TABLE & resolvePlatformHostedRouting", () => {
       keyName: "runinfra",
       wire: "chat.completions",
       agentRunHosted: true,
+      minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
     });
     const glmFlashAlias = resolvePlatformHostedRouting("glm-5.3-flash");
     expect(glmFlashAlias?.usageProvider).toBe("runinfra");
+    expect(glmFlashAlias?.minClientVersion).toBe(
+      PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+    );
 
     // 4. Kimi K3
     const k3 = resolvePlatformHostedRouting(PLATFORM_HOSTED_KIMI_K3_MODEL);

@@ -34,6 +34,7 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
+  PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 
 export const PLATFORM_HOSTED_CLAUDE_MODELS = [
@@ -485,6 +486,7 @@ export const platformHostedModels = [
     contextWindow: 1_048_576,
     supportsTool: true,
     supportsReasoningEffort: false,
+    minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
   {
     name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,

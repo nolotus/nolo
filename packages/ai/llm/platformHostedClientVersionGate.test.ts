@@ -11,6 +11,8 @@ import {
 } from "./kimi";
 import {
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
+  PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+  PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_ROUTING_TABLE,
   resolvePlatformHostedMinClientVersion,
 } from "./platformHostedRoutingTable";
@@ -29,13 +31,32 @@ describe("catalog annotation (layer 1)", () => {
     expect(PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION).toBe("0.38.0-alpha.4");
   });
 
+  test("glm-5.3-flash carries the expected minClientVersion in the routing table", () => {
+    expect(
+      PLATFORM_HOSTED_ROUTING_TABLE[PLATFORM_HOSTED_GLM_53_FLASH_MODEL]?.minClientVersion,
+    ).toBe(PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION);
+    expect(
+      PLATFORM_HOSTED_ROUTING_TABLE["glm-5.3-flash"]?.minClientVersion,
+    ).toBe(PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION);
+    // 定值依据：0.33.0-alpha.1 是首个包含 d8e52b3b8 修复的 CLI tag
+    expect(PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION).toBe("0.33.0-alpha.1");
+  });
+
   test("the model catalog served to clients ships the same value (no drift)", () => {
-    const catalogEntry = platformHostedModels.find(
+    const kimiEntry = platformHostedModels.find(
       (model) => model.name === PLATFORM_HOSTED_KIMI_K3_MODEL,
     );
-    expect(catalogEntry).toBeDefined();
-    expect((catalogEntry as { minClientVersion?: string }).minClientVersion).toBe(
+    expect(kimiEntry).toBeDefined();
+    expect((kimiEntry as { minClientVersion?: string }).minClientVersion).toBe(
       PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
+    );
+
+    const glmFlashEntry = platformHostedModels.find(
+      (model) => model.name === PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+    );
+    expect(glmFlashEntry).toBeDefined();
+    expect((glmFlashEntry as { minClientVersion?: string }).minClientVersion).toBe(
+      PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
     );
   });
 
@@ -51,14 +72,20 @@ describe("catalog annotation (layer 1)", () => {
     expect(mismatched).toEqual([]);
   });
 
-  test("kimi-k3 is currently the only gated hosted model (YAGNI)", () => {
+  test("only expected models are gated (YAGNI)", () => {
     // 标注判据是「有专属 quirk / wire 特殊性」。多标一个就是多一条会随客户端
     // 发版腐化的约束，所以这里把当前集合钉死；新增门控时必须自觉更新本断言。
     const gated = Object.entries(PLATFORM_HOSTED_ROUTING_TABLE)
       .filter(([, entry]) => Boolean(entry.minClientVersion))
       .map(([model]) => model)
       .sort();
-    expect(gated).toEqual([PLATFORM_HOSTED_KIMI_K3_MODEL]);
+    expect(gated).toEqual(
+      [
+        PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+        "glm-5.3-flash",
+        PLATFORM_HOSTED_KIMI_K3_MODEL,
+      ].sort(),
+    );
   });
 
   test("resolvePlatformHostedMinClientVersion returns undefined for ungated / unknown models", () => {
@@ -179,6 +206,45 @@ describe("evaluatePlatformHostedClientVersionGate (layer 2 decision)", () => {
         hasExplicitCredential: true,
       }).blocked,
     ).toBe(false);
+  });
+
+  test("blocks platform-hosted glm-5.3-flash on client versions below 0.33.0-alpha.1", () => {
+    // 1. 历史 stable 版本 0.32.0（不含 d8e52b3b8 修复）必须被拦截
+    const stableBlockedDecision = evaluatePlatformHostedClientVersionGate({
+      provider: "nolo",
+      model: "glm-5.3-flash",
+      clientVersion: "0.32.0",
+    });
+    expect(stableBlockedDecision.blocked).toBe(true);
+    if (!stableBlockedDecision.blocked) throw new Error("unreachable");
+    expect(stableBlockedDecision.code).toBe(CLIENT_VERSION_TOO_OLD_CODE);
+    expect(stableBlockedDecision.minClientVersion).toBe(
+      PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+    );
+
+    // 2. 紧邻的前置 alpha 版本 0.33.0-alpha.0 必须被拦截
+    const alphaBlockedDecision = evaluatePlatformHostedClientVersionGate({
+      provider: "nolo",
+      model: "glm-5.3-flash",
+      clientVersion: "0.33.0-alpha.0",
+    });
+    expect(alphaBlockedDecision.blocked).toBe(true);
+
+    // 3. 别名 [PLATFORM_HOSTED_GLM_53_FLASH_MODEL] 同样拦截
+    const blockedAliasDecision = evaluatePlatformHostedClientVersionGate({
+      provider: "nolo",
+      model: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+      clientVersion: "0.33.0-alpha.0",
+    });
+    expect(blockedAliasDecision.blocked).toBe(true);
+
+    // 4. 达到门槛版本 0.33.0-alpha.1 放行
+    const allowedDecision = evaluatePlatformHostedClientVersionGate({
+      provider: "nolo",
+      model: "glm-5.3-flash",
+      clientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+    });
+    expect(allowedDecision.blocked).toBe(false);
   });
 
   test("the error detail carries machine-readable upgrade facts", () => {
