@@ -1,4 +1,13 @@
 
+## 0.38.0-alpha.5
+
+## 0.38.0-alpha.5 (2026-08-30)
+
+### Bug Fixes
+
+* **agent:** 流截断语义三分——reasoning 落盘、失败轮可观测、半截输出告警 ([f870afb](https://github.com/nolotus/bun-nolo/commit/f870afb3cb82d4f76864e9d7f32992f5ac0e1d7c))
+
+
 ## 0.38.0-alpha.4
 
 ## 0.38.0-alpha.4 (2026-08-30)

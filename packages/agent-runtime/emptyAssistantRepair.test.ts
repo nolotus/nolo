@@ -7,26 +7,60 @@ import {
   MAX_REASONING_ONLY_REPAIRS,
   MAX_TRUNCATED_REASONING_CHARS,
   STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  STREAM_TRUNCATED_REASONING_MARKER,
   REPETITION_LOOP_FALLBACK_MESSAGE,
   STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   formatLengthTruncatedReasoningTail,
+  formatStreamTruncatedReasoningTail,
   hasAssistantVisibleOutput,
   resolveEmptyAssistantFallbackMessage,
   resolveEmptyAssistantOutcome,
+  resolveTruncatedReasoningTailLog,
 } from "./emptyAssistantRepair";
 
 describe("emptyAssistantRepair standalone boundary", () => {
   it("resolves empty assistant outcome states accurately without pulling node modules", () => {
-    // Visible output short-circuits
+    // Visible output short-circuits（正常收尾：finish_reason=stop 不受收紧影响）
+    expect(
+      resolveEmptyAssistantOutcome({
+        hasToolCalls: false,
+        hasVisibleOutput: true,
+        repairUsed: false,
+        finishReason: "stop",
+      }),
+    ).toEqual({ kind: "ok" });
+
+    // 半截输出截断：有可见正文、但既无 finish_reason 也无收尾帧 →
+    // ok_with_warning（不再静默判 ok，正文保留、发警告）。
     expect(
       resolveEmptyAssistantOutcome({
         hasToolCalls: false,
         hasVisibleOutput: true,
         repairUsed: false,
       }),
+    ).toEqual({ kind: "ok_with_warning", reason: "stream_truncated" });
+    expect(
+      resolveEmptyAssistantOutcome({
+        hasToolCalls: false,
+        hasVisibleOutput: true,
+        repairUsed: true,
+        finishReason: undefined,
+        streamComplete: false,
+      }),
+    ).toEqual({ kind: "ok_with_warning", reason: "stream_truncated" });
+
+    // streamComplete（收尾元数据帧）压过「缺 finish_reason」的推断：
+    // 从不发 finish_reason 的健康上游不得落入警告分支。
+    expect(
+      resolveEmptyAssistantOutcome({
+        hasToolCalls: false,
+        hasVisibleOutput: true,
+        repairUsed: false,
+        streamComplete: true,
+      }),
     ).toEqual({ kind: "ok" });
 
-    // Tool calls short-circuit
+    // Tool calls short-circuit（纯工具意图轮不受影响）
     expect(
       resolveEmptyAssistantOutcome({
         hasToolCalls: true,
@@ -193,6 +227,57 @@ describe("emptyAssistantRepair standalone boundary", () => {
       const formatted = formatLengthTruncatedReasoningTail(fullReasoning, 2000);
       expect(formatted).toBe(`[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${tail}`);
       expect(formatted?.length).toBe(`[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n`.length + 2000);
+    });
+  });
+
+  describe("formatStreamTruncatedReasoningTail", () => {
+    it("returns null for empty, blank, or non-string reasoning", () => {
+      expect(formatStreamTruncatedReasoningTail(undefined)).toBeNull();
+      expect(formatStreamTruncatedReasoningTail(null)).toBeNull();
+      expect(formatStreamTruncatedReasoningTail("")).toBeNull();
+      expect(formatStreamTruncatedReasoningTail("   \n\t  ")).toBeNull();
+    });
+
+    it("formats reasoning tail with the stream-specific marker (not the length marker)", () => {
+      const reasoning = "窗台场景 / 书签页签 / 信纸邮票 / 字体选型，方案已经想清楚了。";
+      const formatted = formatStreamTruncatedReasoningTail(reasoning);
+      expect(formatted).toBe(`[nolo] ${STREAM_TRUNCATED_REASONING_MARKER}\n${reasoning}`);
+      expect(formatted).not.toContain(LENGTH_TRUNCATED_REASONING_MARKER);
+    });
+
+    it("clips to the tail just like the length variant", () => {
+      const prefix = "a".repeat(3000);
+      const tail = "b".repeat(2000);
+      const formatted = formatStreamTruncatedReasoningTail(prefix + tail, 2000);
+      expect(formatted).toBe(`[nolo] ${STREAM_TRUNCATED_REASONING_MARKER}\n${tail}`);
+    });
+  });
+
+  describe("resolveTruncatedReasoningTailLog", () => {
+    const reasoning = "部分思考过程";
+
+    it("maps length_truncated to the length marker", () => {
+      expect(resolveTruncatedReasoningTailLog("length_truncated", reasoning)).toBe(
+        `[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${reasoning}`,
+      );
+    });
+
+    it("maps stream_truncated to the stream marker", () => {
+      expect(resolveTruncatedReasoningTailLog("stream_truncated", reasoning)).toBe(
+        `[nolo] ${STREAM_TRUNCATED_REASONING_MARKER}\n${reasoning}`,
+      );
+    });
+
+    it("returns null for non-truncation reasons (loop guards, empty completion)", () => {
+      expect(resolveTruncatedReasoningTailLog("empty_completion", reasoning)).toBeNull();
+      expect(resolveTruncatedReasoningTailLog("repetition_loop", reasoning)).toBeNull();
+      expect(resolveTruncatedReasoningTailLog("stagnant_tool_calls", reasoning)).toBeNull();
+    });
+
+    it("returns null for normal turns (no fallback reason)", () => {
+      expect(resolveTruncatedReasoningTailLog(undefined, reasoning)).toBeNull();
+      expect(resolveTruncatedReasoningTailLog("stream_truncated", undefined)).toBeNull();
+      expect(resolveTruncatedReasoningTailLog("stream_truncated", "  ")).toBeNull();
     });
   });
 });

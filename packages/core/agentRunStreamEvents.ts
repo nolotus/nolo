@@ -37,6 +37,14 @@ export interface AgentRunStreamDoneEvent {
     model: string;
     responseId: string;
   } | null;
+  /**
+   * 本轮以空轮/截断兜底文案收尾时的成因（失败轮可观测：done 但带伤）。
+   * 消费方（计费/持久化包装层）据此在落盘记录上写 fallbackReason 等字段。
+   * 取值复用 turn_warning 的 reason 枚举，不新增。
+   */
+  fallbackReason?: "empty_completion" | "length_truncated" | "stream_truncated" | "responses_state_fallback";
+  /** 兜底发生时本轮是否已用过一次 repair。 */
+  repairUsed?: boolean;
 }
 
 /** 错误信号 */
@@ -124,6 +132,15 @@ export interface AgentRunStreamTurnWarningEvent {
     | "stream_truncated"
     | "responses_state_fallback";
   message: string;
+  /**
+   * 失败轮可观测：警告发生时本轮是否已用过一次 repair（结构化字段，
+   * 供持久化包装层写入 run/dialog 记录；CLI 客户端静默本事件，不受影响）。
+   */
+  repairUsed?: boolean;
+  /** 兜底轮的 provider 信息（流式路径手里已有 lastResolvedProvider）。 */
+  provider?: string;
+  /** 平台侧 provider 调用 id（streamProviderCallId），用于对账/排障。 */
+  providerCallId?: string;
 }
 
 /** SSE 事件 discriminated union */

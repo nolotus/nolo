@@ -119,12 +119,8 @@ export type LocalAgentTurnInput = {
 
 export type LocalAgentTurnResult = AgentRuntimeResult & {
   dialogId: string;
-  /**
-   * 本轮在二次仍空后走了 fallback（诊断文案收尾、不抛错）时的成因。
-   * 只如实陈述，不决定成败：交互侧照常显示文案；上层（如后台 run 的
-   * 编排者）据它决定是否把本轮结算为 failed。无此字段 = 正常轮。
-   */
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  // emptyAssistantFallbackReason / emptyAssistantRepairUsed 已上移到
+  // AgentRuntimeResult（server loop 与 localLoop 共用同一字段与注释）。
   /** Dialog title persisted by saveTurn (LLM-generated or fallback). */
   title?: string;
   /** 后台 LLM 标题 patch（fire-and-forget）；resolve 携带最终标题（无/失败为 null）。 */
@@ -191,6 +187,8 @@ import {
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
+  formatStreamTruncatedReasoningTail,
+  resolveTruncatedReasoningTailLog,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
 import {
@@ -213,6 +211,8 @@ export {
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
+  formatStreamTruncatedReasoningTail,
+  resolveTruncatedReasoningTailLog,
   hasAssistantVisibleOutput,
   createLocalLoopProgressGuard,
   LocalLoopProgressGuard,
@@ -1523,22 +1523,37 @@ export async function runLocalAgentTurn(
           if (!!result.reasoning_content) reasoningEmptyRepairCount += 1;
           continue;
         }
+        if (outcome.kind === "ok_with_warning") {
+          // 半截输出截断：正文已部分流出，保留原文，不重试也不替换；
+          // 打截断标记让上层（子 run 结算/编排者）可观测并按截断语义接力。
+          // errorMessage 记录告警文案（内容与正文分离，落盘记录可自解释）。
+          result = {
+            ...result,
+            errorMessage: resolveEmptyAssistantFallbackMessage(outcome.reason),
+            emptyAssistantFallbackReason: outcome.reason,
+            emptyAssistantRepairUsed,
+          };
+          break;
+        }
         if (outcome.kind === "fallback") {
           // 二次仍空：按成因选诊断文案作为最终 content 结束，不抛错
           // （行为与 server loop 对齐——两边共用同一个映射函数）。
-          if (outcome.reason === "length_truncated" && result.reasoning_content) {
-            const reasoningTailLog = formatLengthTruncatedReasoningTail(result.reasoning_content);
-            if (reasoningTailLog) {
-              console.warn(`\n${reasoningTailLog}\n`);
-            }
+          // 截断类成因（length/stream）同时提取 reasoning 尾部打日志，
+          // 与 server loop 的 fallback 分支共用同一提取机制。
+          const reasoningTailLog = resolveTruncatedReasoningTailLog(outcome.reason, result.reasoning_content);
+          if (reasoningTailLog) {
+            console.warn(`\n${reasoningTailLog}\n`);
           }
+          const fallbackMessage = resolveEmptyAssistantFallbackMessage(outcome.reason);
           result = {
             ...result,
-            content: resolveEmptyAssistantFallbackMessage(outcome.reason),
+            content: fallbackMessage,
             // 只打标记不抛错：交互侧仍照常显示诊断文案（零行为变化）。
             // 上层（后台 run 编排者）据 emptyAssistantFallbackReason 判断
             // 是否把本轮结算为 failed。见 LocalAgentTurnResult 注释。
+            errorMessage: fallbackMessage,
             emptyAssistantFallbackReason: outcome.reason,
+            emptyAssistantRepairUsed,
           };
           break;
         }
@@ -1814,6 +1829,13 @@ export async function runLocalAgentTurn(
 
   result = result!;
   if (!skipFinalAppend) {
+    // 截断类兜底/告警（length/stream）时提取 reasoning 尾部（带 marker），
+    // 以 thinkContent 附加到最终 assistant 消息：web 思考折叠可读的落盘通道，
+    // 与 server loop 的 fallback 分支机制对齐。正常轮无标记 → 无附加，零变化。
+    const truncatedReasoningTailLog = resolveTruncatedReasoningTailLog(
+      result.emptyAssistantFallbackReason,
+      result.reasoning_content,
+    );
     messages.push({
       role: "assistant",
       content: result.content,
@@ -1822,6 +1844,7 @@ export async function runLocalAgentTurn(
       ...(result.reasoning_content
         ? { reasoning_content: result.reasoning_content }
         : {}),
+      ...(truncatedReasoningTailLog ? { thinkContent: truncatedReasoningTailLog } : {}),
     });
   }
   const turnMessages = applyPersistedTurnInput(

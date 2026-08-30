@@ -10,6 +10,8 @@ import {
   MAX_REASONING_ONLY_REPAIRS,
   LENGTH_TRUNCATED_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
+  STREAM_TRUNCATED_FALLBACK_MESSAGE,
+  STREAM_TRUNCATED_REASONING_MARKER,
 } from "./emptyAssistantRepair";
 import type { AgentRuntimeHostAdapter, AgentRuntimeSaveTurnInput } from "./hostAdapter";
 import type { AgentRuntimeChatMessage } from "./types";
@@ -3830,11 +3832,17 @@ describe("compaction observation event (localLoop → onLoopEvent)", () => {
 
 describe("resolveEmptyAssistantOutcome", () => {
   test("visible output or tool calls short-circuit to ok", () => {
-    expect(resolveEmptyAssistantOutcome({ ...emptyTurn, hasVisibleOutput: true })).toEqual({
+    // 正常收尾（finish_reason=stop）：零行为变化
+    expect(resolveEmptyAssistantOutcome({ ...emptyTurn, hasVisibleOutput: true, finishReason: "stop" })).toEqual({
       kind: "ok",
     });
     expect(resolveEmptyAssistantOutcome({ ...emptyTurn, hasToolCalls: true })).toEqual({
       kind: "ok",
+    });
+    // 有可见正文但流未收尾（无 finish_reason、无收尾帧）→ 半截输出截断告警
+    expect(resolveEmptyAssistantOutcome({ ...emptyTurn, hasVisibleOutput: true })).toEqual({
+      kind: "ok_with_warning",
+      reason: "stream_truncated",
     });
   });
 
@@ -3980,7 +3988,9 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
       saveTurn: async () => ({ dialogId: "dialog-normal" }),
       resolveProvider: async () => ({
         model: "fake-local",
-        complete: async () => ({ content: "all good", model: "fake-local" }),
+        // 正常流必须带 finish_reason（任务语义：finishReason="stop" 的流
+        // 零行为变化）；缺 finish_reason 的输出会被判为半截输出截断。
+        complete: async () => ({ content: "all good", model: "fake-local", finish_reason: "stop" }),
       }),
       executeTool: async () => {
         throw new Error("tools should not run");
@@ -3993,6 +4003,141 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
     });
     expect(result.emptyAssistantFallbackReason).toBeUndefined();
     expect(result.content).toBe("all good");
+  });
+
+  test("stream_truncated after reasoning-only repair persists reasoning tail with stream marker (K3 incident shape)", async () => {
+    const origWarn = console.warn;
+    const warns: string[] = [];
+    console.warn = (...args: any[]) => {
+      warns.push(args.join(" "));
+    };
+    try {
+      const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+      let completeCalls = 0;
+      // 事故原型（dialog-1c2b14b968，平台托管 kimi-k3）：长思考（reasoning-only，
+      // 无正文无 tool_calls）+ 无 finish_reason 的断流。repair 一次仍断流 → fallback。
+      const reasoningSample = "窗台场景 / 书签页签 / 信纸邮票 / 字体选型，完整方案已想清楚。";
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence"],
+        loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+        loadDialogHistory: async () => [],
+        saveTurn: async (input) => {
+          savedTurns.push(input);
+          return { dialogId: "dialog-stream-trunc" };
+        },
+        resolveProvider: async () => ({
+          model: "m",
+          complete: async () => {
+            completeCalls += 1;
+            return {
+              content: "",
+              reasoning_content: reasoningSample,
+              // 无 finish_reason、无收尾帧 → stream_truncated
+              finish_reason: undefined,
+              stream_complete: false,
+              model: "m",
+            } as any;
+          },
+        }),
+        executeTool: async () => { throw new Error("no tools"); },
+      };
+
+      const result = await runLocalAgentTurn({ adapter, agentRef: "a", input: "design it" });
+
+      // repair 一次后仍断流 → fallback，两轮调用
+      expect(completeCalls).toBe(2);
+      expect(result.content).toBe(STREAM_TRUNCATED_FALLBACK_MESSAGE);
+      expect(result.emptyAssistantFallbackReason).toBe("stream_truncated");
+      expect(result.emptyAssistantRepairUsed).toBe(true);
+
+      // reasoning 尾部落盘：run 日志带 stream 专属 marker
+      const matchingWarn = warns.find((w) => w.includes(STREAM_TRUNCATED_REASONING_MARKER));
+      expect(matchingWarn).toBeDefined();
+      expect(matchingWarn).toContain(reasoningSample);
+      expect(matchingWarn).not.toContain(LENGTH_TRUNCATED_REASONING_MARKER);
+
+      // reasoning 尾部落盘：saveTurn 的最终 assistant 消息带 thinkContent
+      // （web 思考折叠只读 thinkContent），完整思维链仍在 reasoning_content。
+      const finalAssistant = savedTurns[0]?.messages.filter((m) => m.role === "assistant").at(-1);
+      expect(finalAssistant?.reasoning_content).toBe(reasoningSample);
+      expect(finalAssistant?.thinkContent).toBe(
+        `[nolo] ${STREAM_TRUNCATED_REASONING_MARKER}\n${reasoningSample}`,
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  test("partial visible output with no finish_reason is warned, kept, and marked (no silent success)", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const partialText = "function fixWidget() {\n  // 半截实现……";
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-partial-trunc" };
+      },
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async () => ({
+          // 半截正文 + 流未收尾（无 finish_reason、无收尾帧）
+          content: partialText,
+          finish_reason: undefined,
+          stream_complete: false,
+          model: "m",
+        } as any),
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run on a cut stream");
+      },
+    };
+
+    const result = await runLocalAgentTurn({ adapter, agentRef: "a", input: "write code" });
+
+    // 部分输出保留原文，不替换为兜底文案、不重试
+    expect(result.content).toBe(partialText);
+    expect(result.content).not.toBe(STREAM_TRUNCATED_FALLBACK_MESSAGE);
+    // 截断标记可观测（编排者/子 run 结算按截断语义接力）
+    expect(result.emptyAssistantFallbackReason).toBe("stream_truncated");
+    expect(result.errorMessage).toBe(STREAM_TRUNCATED_FALLBACK_MESSAGE);
+
+    const finalAssistant = savedTurns[0]?.messages.filter((m) => m.role === "assistant").at(-1);
+    expect(finalAssistant?.content).toBe(partialText);
+  });
+
+  test("healthy stop stream with visible output keeps ok semantics and persists no thinkContent", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-healthy" };
+      },
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async () => ({
+          content: "完整正文",
+          finish_reason: "stop",
+          model: "m",
+        } as any),
+      }),
+      executeTool: async () => { throw new Error("no tools"); },
+    };
+
+    const result = await runLocalAgentTurn({ adapter, agentRef: "a", input: "hello" });
+
+    expect(result.emptyAssistantFallbackReason).toBeUndefined();
+    expect(result.emptyAssistantRepairUsed).toBeUndefined();
+    expect(result.content).toBe("完整正文");
+    const finalAssistant = savedTurns[0]?.messages.filter((m) => m.role === "assistant").at(-1);
+    expect(finalAssistant?.thinkContent).toBeUndefined();
   });
 
   describe("progress guard & repetition circuit breaker in localLoop", () => {
@@ -4036,6 +4181,7 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
             return {
               content: "Build completed successfully after 12 checks.",
               model: "fake-local",
+              finish_reason: "stop", // 健康收尾：否则缺 finish_reason 会被判为半截输出截断
             };
           },
         }),
@@ -4283,6 +4429,7 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
             return {
               content: "All 12 refactoring steps completed successfully and verified.",
               model: "fake-local",
+              finish_reason: "stop", // 健康收尾
             };
           },
         }),
@@ -4370,6 +4517,7 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
             return {
               content: "Build was canceled cleanly.",
               model: "fake-local",
+              finish_reason: "stop", // 健康收尾：否则缺 finish_reason 会被判为半截输出截断
             };
           },
         }),

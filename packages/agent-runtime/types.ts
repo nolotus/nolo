@@ -1,3 +1,5 @@
+import type { EmptyAssistantFallbackReason } from "./emptyAssistantRepair";
+
 export type AgentRuntimeMode = "local" | "server";
 export type AgentRuntimeHost = "cli" | "desktop" | "web" | "server";
 export type AgentRuntimeRequestedMode = "auto" | AgentRuntimeMode;
@@ -57,6 +59,14 @@ export interface AgentRuntimeChatMessage {
   createdAt?: number;
   tool_result_metadata?: Record<string, unknown>;
   reasoning_content?: string;
+  /**
+   * web 思考折叠可读的思考内容（web Message 模型只渲染 thinkContent，
+   * 不读 reasoning_content）。仅在截断兜底时由运行时附加 reasoning 尾部
+   * （带 marker、clip 到 2000 字符）；完整思维链始终走 reasoning_content。
+   * 回读映射（dialogMessageRecordToAgentRuntimeMessage）刻意不还原此字段，
+   * 避免混入下一轮 provider 请求。
+   */
+  thinkContent?: string;
   cybotKey?: string;
   agentKey?: string;
   agentName?: string;
@@ -129,6 +139,19 @@ export interface AgentRuntimeResult {
   /** Set when a turn is persisted after a provider/runtime failure. */
   error?: boolean;
   errorMessage?: string;
+  /**
+   * 空轮/截断兜底标记（server loop 与 CLI localLoop 共用，同一字段名保证
+   * 两侧消费方语义一致）。本轮在空轮判定后走了诊断文案兜底（或半截输出
+   * 截断告警）时的成因。只如实陈述，不决定成败：交互侧照常显示文案；
+   * 上层（后台 run 编排者 / CLI 子 run 结算）据它决定是否结算为 failed。
+   * 无此字段 = 正常轮。
+   *
+   * 注意：ok_with_warning（半截输出截断，正文保留）也会带此标记——
+   * 编排者同样拿不到完整结论，结算语义与截断兜底一致。
+   */
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  /** 兜底/告警发生时，本轮是否已用过一次 repair（观测字段，不影响行为）。 */
+  emptyAssistantRepairUsed?: boolean;
   policyState?: unknown;
   latencyProfile?: {
     totalMs: number;

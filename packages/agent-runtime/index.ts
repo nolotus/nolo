@@ -71,11 +71,14 @@ export {
   REPETITION_LOOP_FALLBACK_MESSAGE,
   STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
+  STREAM_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
   type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
+  formatStreamTruncatedReasoningTail,
+  resolveTruncatedReasoningTailLog,
   hasAssistantVisibleOutput,
 } from "./emptyAssistantRepair";
 export {

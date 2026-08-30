@@ -596,4 +596,106 @@ describe("agent runtime dialog write plan", () => {
 
     expect(plan.ops[0]?.value?.runtimeCheckpoint).toBeUndefined();
   });
+
+  test("fallback turn persists structured wound fields (fallbackReason/repairUsed/errorMessage) while status stays done", () => {
+    const plan = buildAgentRuntimeDialogWritePlan({
+      input: {
+        agentKey: "agent-user-1-frontend",
+        messages: [{ role: "user", content: "hi" }],
+        result: {
+          content: "上游响应流在收尾前被中断（未收到结束标记），本轮输出不完整。请重试当前步骤。",
+          model: "kimi-k3",
+          provider: "platform",
+          errorMessage: "上游响应流在收尾前被中断（未收到结束标记），本轮输出不完整。请重试当前步骤。",
+          emptyAssistantFallbackReason: "stream_truncated",
+          emptyAssistantRepairUsed: true,
+        },
+      },
+      userId: "user-1",
+      now: 1710000000000,
+      createId: () => "01WOUND",
+      runtimeHost: "cli",
+    });
+
+    const dialogRecord = plan.ops[0]?.value;
+    // 可观测：兜底字段随记录落盘……
+    expect(dialogRecord?.fallbackReason).toBe("stream_truncated");
+    expect(dialogRecord?.repairUsed).toBe(true);
+    expect(dialogRecord?.errorMessage).toContain("上游响应流在收尾前被中断");
+    // ……但 status 语义不变（是否改 failed 由 review 裁决）
+    expect(dialogRecord?.status).toBe("done");
+  });
+
+  test("healthy turn on a clean dialog record persists no wound fields", () => {
+    const plan = buildAgentRuntimeDialogWritePlan({
+      input: {
+        agentKey: "agent-user-1-frontend",
+        messages: [{ role: "user", content: "hi" }],
+        result: { content: "done", model: "m" },
+      },
+      userId: "user-1",
+      now: 1710000000000,
+      createId: () => "01CLEAN",
+      runtimeHost: "cli",
+    });
+
+    const dialogRecord = plan.ops[0]?.value;
+    expect(dialogRecord?.fallbackReason).toBeUndefined();
+    expect(dialogRecord?.repairUsed).toBeUndefined();
+    expect(dialogRecord?.errorMessage).toBeUndefined();
+    expect(dialogRecord?.status).toBe("done");
+  });
+
+  test("healthy turn after a fallback turn clears stale wound fields instead of carrying them forward", () => {
+    const plan = buildAgentRuntimeDialogWritePlan({
+      input: {
+        agentKey: "agent-user-1-frontend",
+        continueDialogId: "wounded-dialog",
+        messages: [{ role: "user", content: "retry please" }],
+        result: { content: "all good now", model: "m" },
+      },
+      userId: "user-1",
+      now: 1710000000000,
+      createId: () => "unused",
+      runtimeHost: "cli",
+      existingDialog: {
+        id: "wounded-dialog",
+        status: "done",
+        fallbackReason: "stream_truncated",
+        repairUsed: true,
+        errorMessage: "上游响应流在收尾前被中断（未收到结束标记）",
+      },
+    });
+
+    const dialogRecord = plan.ops[0]?.value;
+    expect(dialogRecord?.fallbackReason).toBeNull();
+    expect(dialogRecord?.repairUsed).toBeNull();
+    expect(dialogRecord?.errorMessage).toBeNull();
+    expect(dialogRecord?.status).toBe("done");
+  });
+
+  test("persists thinkContent (stream-truncated reasoning tail) on the assistant message record", () => {
+    const plan = buildAgentRuntimeDialogWritePlan({
+      input: {
+        agentKey: "agent-user-1-frontend",
+        messages: [
+          { role: "user", content: "design it" },
+          {
+            role: "assistant",
+            content: "上游响应流在收尾前被中断（未收到结束标记），本轮输出不完整。请重试当前步骤。",
+            reasoning_content: "窗台场景 / 书签页签 / 信纸邮票……",
+            thinkContent: "[nolo] [stream_truncated_reasoning_tail]\n窗台场景 / 书签页签 / 信纸邮票……",
+          },
+        ],
+        result: { content: "上游响应流在收尾前被中断", model: "m" },
+      },
+      userId: "user-1",
+      now: 1710000000000,
+      createId: () => "01THINK",
+      runtimeHost: "cli",
+    });
+
+    const assistantOp = plan.ops.find((op) => op.value?.role === "assistant");
+    expect(assistantOp?.value?.thinkContent).toContain("[stream_truncated_reasoning_tail]");
+  });
 });

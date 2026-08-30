@@ -3,6 +3,7 @@ import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeHost,
+  AgentRuntimeResult,
 } from "./types";
 import type { AgentRuntimeSaveTurnInput } from "./hostAdapter";
 import { dialogMessageKey } from "../database/keys";
@@ -194,6 +195,11 @@ function buildDialogMessageWriteOps(args: {
           ...(typeof message.reasoning_content === "string"
             ? { reasoning_content: message.reasoning_content }
             : {}),
+          // web 思考折叠可读的截断 reasoning 尾部（带 marker）。仅在截断
+          // 兜底/告警轮由 localLoop 附加，正常轮无此字段。
+          ...(typeof message.thinkContent === "string"
+            ? { thinkContent: message.thinkContent }
+            : {}),
           ...(message.role === "user" ? { userId: args.userId } : {}),
           ...(message.role === "assistant" ? {
             agentKey: args.input.agentKey,
@@ -207,6 +213,34 @@ function buildDialogMessageWriteOps(args: {
         },
       };
     });
+}
+
+/**
+ * 空轮/截断兜底的结构化伤情字段（CLI local 落盘）。
+ *
+ * done 但带伤：status 语义保持不变（是否改 failed 由 review 裁决），但
+ * dialog 记录带上 fallbackReason / repairUsed / errorMessage，监控与报表
+ * 无需比对积分即可发现兜底轮。健康轮不带字段；仅当旧记录留有伤情字段
+ * （上一轮兜底过）且本轮健康时显式清空，避免旧值污染新结论。
+ */
+function buildEmptyAssistantWoundFields(
+  result: AgentRuntimeResult,
+  existingDialog?: DialogRecord | null,
+): Record<string, unknown> {
+  const reason = result.emptyAssistantFallbackReason;
+  if (reason) {
+    return {
+      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+      fallbackReason: reason,
+      ...(typeof result.emptyAssistantRepairUsed === "boolean"
+        ? { repairUsed: result.emptyAssistantRepairUsed }
+        : {}),
+    };
+  }
+  if (existingDialog?.fallbackReason || existingDialog?.errorMessage) {
+    return { errorMessage: null, fallbackReason: null, repairUsed: null };
+  }
+  return {};
 }
 
 /**
@@ -301,6 +335,12 @@ export function buildAgentRuntimeDialogWritePlan(args: {
       : (args.existingDialog?.createdAt ?? nowIso);
   const { availableToolNames: _deprecatedAvailableToolNames, ...cleanExistingCheckpoint } =
     asRecordOrEmpty(args.existingDialog?.runtimeCheckpoint);
+  // 空轮/截断兜底的结构化伤情字段（可观测，不改 status 语义）：
+  // done 但带伤——监控/报表按 fallbackReason 即可筛出这类轮次。
+  const woundFields = buildEmptyAssistantWoundFields(
+    args.input.result,
+    args.existingDialog,
+  );
   const dialogRecord = {
     ...asRecordOrEmpty(args.existingDialog),
     id: dialogId,
@@ -312,6 +352,7 @@ export function buildAgentRuntimeDialogWritePlan(args: {
     titleSource: pickedTitle.titleSource,
     titleUpdatedAt: titleUpdatedAtIso,
     status: args.input.result.error === true ? "failed" : "done",
+    ...woundFields,
     triggerType: `${args.runtimeHost}-local`,
     executionMode: args.existingDialog?.executionMode ?? "foreground",
     createdAt: args.existingDialog?.createdAt ?? nowIso,

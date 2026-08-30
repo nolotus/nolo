@@ -88,8 +88,26 @@ export function resolveEmptyAssistantOutcome(args: {
   reasoningRepairCount?: number;
 }):
   | { kind: "ok" }
+  | { kind: "ok_with_warning"; reason: "stream_truncated" }
   | { kind: "repair" }
   | { kind: "fallback"; reason: EmptyAssistantFallbackReason } {
+  // 半截输出截断：有可见正文、但既无 finish_reason 也无收尾帧——流在吐出部分
+  // 正文后被切断。不再静默判 ok（用户拿到半截代码而平台零告警的事故形态）。
+  // 条件缺一不可：
+  //   - 正常流（finishReason="stop" 或有 streamComplete）绝不落入；
+  //   - 带 tool_calls 的轮次不落入——工具轮之后循环还会继续，成功判定发生在
+  //     终轮（无工具调用的那一轮）；这也使 server 与 CLI 的可达域完全一致
+  //     （CLI 仅在无 tool_calls 时调用本判定）。
+  // reason 复用既有 "stream_truncated" 枚举值，不新增 SSE/CLI 不可达值
+  // （跨层语义泄漏教训见本文件 EmptyAssistantFallbackReason 的 TODO）。
+  if (
+    args.hasVisibleOutput &&
+    !args.hasToolCalls &&
+    !args.finishReason &&
+    !args.streamComplete
+  ) {
+    return { kind: "ok_with_warning", reason: "stream_truncated" };
+  }
   if (args.hasToolCalls || args.hasVisibleOutput) return { kind: "ok" };
   // 长度截断：模型输出被截断（可能在思考阶段就被截断），无法靠 repair 补救 → fallback。
   if (args.finishReason === "length") return { kind: "fallback", reason: "length_truncated" };
@@ -144,7 +162,27 @@ export function hasAssistantVisibleOutput(
 }
 
 export const LENGTH_TRUNCATED_REASONING_MARKER = "[length_truncated_reasoning_tail]";
+/**
+ * stream_truncated 专属 marker（而非复用 length 的 marker）：
+ * 两者成因不同——length 是模型撞输出上限，stream 是上游传输层断流。
+ * run 日志 / 复盘检索按 marker 归因，混用会把排查方向带偏（K3 事故即断流，
+ * 若打上 length marker 会被误读为输出上限问题）。裁剪与格式化逻辑与 length
+ * 版本共用同一段实现，不存在逻辑分叉。
+ */
+export const STREAM_TRUNCATED_REASONING_MARKER = "[stream_truncated_reasoning_tail]";
 export const MAX_TRUNCATED_REASONING_CHARS = 2000;
+
+function formatReasoningTailWithMarker(
+  reasoning_content: string | undefined | null,
+  marker: string,
+  maxChars: number,
+): string | null {
+  if (typeof reasoning_content !== "string") return null;
+  const trimmed = reasoning_content.trim();
+  if (trimmed.length === 0) return null;
+  const tail = trimmed.length > maxChars ? trimmed.slice(-maxChars) : trimmed;
+  return `[nolo] ${marker}\n${tail}`;
+}
 
 /**
  * 当模型因 length 截断导致正文一行未落（reasoning-only 被截断）时，
@@ -155,9 +193,33 @@ export function formatLengthTruncatedReasoningTail(
   reasoning_content: string | undefined | null,
   maxChars = MAX_TRUNCATED_REASONING_CHARS,
 ): string | null {
-  if (typeof reasoning_content !== "string") return null;
-  const trimmed = reasoning_content.trim();
-  if (trimmed.length === 0) return null;
-  const tail = trimmed.length > maxChars ? trimmed.slice(-maxChars) : trimmed;
-  return `[nolo] ${LENGTH_TRUNCATED_REASONING_MARKER}\n${tail}`;
+  return formatReasoningTailWithMarker(reasoning_content, LENGTH_TRUNCATED_REASONING_MARKER, maxChars);
+}
+
+/**
+ * stream_truncated（上游断流）版本的 reasoning 尾部提取。断流轮的思考往往正是
+ * 最该留存的（长思考后断流），机制与 length 版本对齐，仅 marker 不同。
+ */
+export function formatStreamTruncatedReasoningTail(
+  reasoning_content: string | undefined | null,
+  maxChars = MAX_TRUNCATED_REASONING_CHARS,
+): string | null {
+  return formatReasoningTailWithMarker(reasoning_content, STREAM_TRUNCATED_REASONING_MARKER, maxChars);
+}
+
+/**
+ * 截断类 fallback 成因 → reasoning 尾部日志。server loop 与 CLI localLoop 的
+ * fallback 分支统一经此取尾部，保证两侧落盘机制一致；非截断成因返回 null。
+ */
+export function resolveTruncatedReasoningTailLog(
+  reason: EmptyAssistantFallbackReason | undefined,
+  reasoning_content: string | undefined | null,
+): string | null {
+  if (reason === "length_truncated") {
+    return formatLengthTruncatedReasoningTail(reasoning_content);
+  }
+  if (reason === "stream_truncated") {
+    return formatStreamTruncatedReasoningTail(reasoning_content);
+  }
+  return null;
 }
