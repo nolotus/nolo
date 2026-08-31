@@ -243,6 +243,11 @@ const STRINGS = {
     en: "Draft cleared.",
     zh: "输入草稿已清空。",
   },
+  // 空草稿按 Backspace 逐个撤销附件（composer 附件条）。
+  attachmentRemovedHint: {
+    en: "Removed attachment {0}, {1} remaining",
+    zh: "已移除附件 {0}，剩余 {1} 张",
+  },
   historyNoToken: {
     en: "History requires an auth token. Run `nolo login` or set AUTH_TOKEN.",
     zh: "查看历史对话需要登录凭证。请运行 `nolo login` 或设置 AUTH_TOKEN。",

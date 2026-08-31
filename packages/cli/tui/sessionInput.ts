@@ -1,5 +1,6 @@
 import {
   allocateCollapsedPaste,
+  COLLAPSED_PASTE_PLACEHOLDER_RE,
   expandRangeToCollapsedPasteChips,
   findCollapsedPasteSpanAt,
   releaseCollapsedPaste,
@@ -16,8 +17,8 @@ export const PASTE_TOKEN_PREFIX = "\x00PASTE\x00";
 export type ApplyTuiInputKeyOptions = {
   /**
    * When set, oversized bracketed-paste payloads collapse into a one-line
-   * `[paste #N · L lines]` placeholder; the full body lives in this store and
-   * becomes a recoverable model reference when the draft is submitted.
+   * `[paste #N · L lines · preview]` placeholder; the full body lives in this
+   * store and becomes a recoverable model reference when the draft is submitted.
    */
   pasteStore?: CollapsedPasteStore;
 };
@@ -253,9 +254,11 @@ function releasePastesInRange(
 ): void {
   if (!pasteStore || start >= end) return;
   const slice = buffer.slice(start, end);
-  const re = /\[paste #(\d+) · (\d+) lines\]/g;
+  // 复用 core 的共享正则（兼容新旧两种 chip 格式）。此前这里是私拷贝的旧
+  // 格式正则，chip 引入 preview 段后曾漂移；单一真值避免再次漂移。
+  COLLAPSED_PASTE_PLACEHOLDER_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(slice)) !== null) {
+  while ((match = COLLAPSED_PASTE_PLACEHOLDER_RE.exec(slice)) !== null) {
     releaseCollapsedPaste(pasteStore, Number(match[1]));
   }
 }
@@ -317,7 +320,7 @@ function isKillToLineEndSequence(seq: string, key: TuiKeyInfo): boolean {
   return false;
 }
 
-function isBackspaceSequence(seq: string, key: TuiKeyInfo): boolean {
+export function isBackspaceSequence(seq: string, key: TuiKeyInfo): boolean {
   if (key.name === "backspace") return true;
   if (seq === "\b" || seq === "\x7f") return true;
   // eslint-disable-next-line no-control-regex

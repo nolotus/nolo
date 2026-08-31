@@ -187,7 +187,7 @@ describe("applyTuiInputKey", () => {
     const body = Array.from({ length: 12 }, (_, i) => `line-${i}`).join("\n");
     const pasteToken = `\x00PASTE\x00${body}`;
     const pasteRes = applyTuiInputKey("", pasteToken, {}, 0, { pasteStore });
-    expect(pasteRes.buffer).toBe("[paste #1 · 12 lines]");
+    expect(pasteRes.buffer).toBe("[paste #1 · 12 lines · line-0]");
     expect(pasteRes.buffer.includes("\n")).toBe(false);
     expect(pasteStore.items.get(1)).toBe(body);
 
@@ -208,7 +208,7 @@ describe("applyTuiInputKey", () => {
     await Bun.sleep(40);
     expect(tokens).toEqual([`\x00PASTE\x00${body}`]);
     const pasteRes = applyTuiInputKey("", tokens[0]!, {}, 0, { pasteStore });
-    expect(pasteRes.buffer).toBe("[paste #1 · 10 lines]");
+    expect(pasteRes.buffer).toBe("[paste #1 · 10 lines · raw-0]");
     expect(pasteStore.items.get(1)).toBe(body);
   });
 
@@ -270,7 +270,7 @@ describe("applyTuiInputKey", () => {
       5,
       { pasteStore },
     );
-    expect(nested.buffer).toBe(`${first.buffer}[paste #2 · 10 lines]`);
+    expect(nested.buffer).toBe(`${first.buffer}[paste #2 · 10 lines · B0]`);
     expect(expandCollapsedPastes(nested.buffer, pasteStore)).toBe(
       `${body1}${body2}`,
     );
