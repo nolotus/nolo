@@ -354,6 +354,11 @@ async function runAgentChat(
   };
 }
 
+function isApprovedConfirmationInput(answer: string): boolean {
+  const normalized = answer.trim().toLowerCase();
+  return normalized === "" || normalized === "y" || normalized === "yes" || normalized === "确认";
+}
+
 export function waitForActionGate(
   rl: ReturnType<typeof createInterface>,
   input: NodeJS.ReadableStream,
@@ -379,7 +384,7 @@ export function waitForActionGate(
   output.write(`[nolo] ${title}\n`);
   if (body) output.write(`[nolo] ${body}\n`);
   output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${t("actionGateEnterHint")}\n`);
+  output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
   return new Promise((resolve) => {
     let settled = false;
     const finish = (result: AgentRuntimeToolResult) => {
@@ -407,15 +412,12 @@ export function waitForActionGate(
     const onSigint = () => finish(cancelResult("interrupted"));
     rl.once("close", onClose);
     rl.once("SIGINT", onSigint);
-    rl.question("", async () => {
+    rl.question("", async (answer) => {
       if (settled) return;
       if (isConfirmation) {
-        finish({
-          content: `action gate completed: ${gate.title}`,
-          metadata: {
-            actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" },
-          },
-        });
+        finish(isApprovedConfirmationInput(answer)
+          ? { content: `action gate completed: ${gate.title}`, metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } } }
+          : cancelResult("confirmation declined"));
         return;
       }
       if (!commandPayload) {
@@ -498,12 +500,13 @@ export function waitForRawActionGate(
   output.write(`[nolo] ${title}\n`);
   if (body) output.write(`[nolo] ${body}\n`);
   output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${t("actionGateEnterHint")}\n`);
+  output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
 
   return new Promise((resolve) => {
     const rawInput = input as RawModeInput;
     let settled = false;
     let commandRunning = false;
+    let confirmationLine = "";
     const finish = (result: AgentRuntimeToolResult) => {
       if (settled) return;
       settled = true;
@@ -575,6 +578,23 @@ export function waitForRawActionGate(
       if (settled || commandRunning) return;
       if (text.includes("\u0003") || (isConfirmation && text.includes("\u001b"))) {
         cancel("interrupted");
+        return;
+      }
+      if (isConfirmation) {
+        const newline = text.search(/[\r\n]/);
+        confirmationLine += newline >= 0 ? text.slice(0, newline) : text;
+        if (newline >= 0) {
+          const normalized = confirmationLine.trim().toLowerCase();
+          confirmationLine = "";
+          if (!isApprovedConfirmationInput(confirmationLine)) {
+            cancel("confirmation declined");
+            return;
+          }
+          finish({
+            content: `action gate completed: ${gate.title}`,
+            metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } },
+          });
+        }
         return;
       }
       if (text.includes("\r") || text.includes("\n")) {

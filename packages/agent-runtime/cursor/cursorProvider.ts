@@ -14,6 +14,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { evaluateFileWritePolicy } from "../fileWritePolicy";
 import http2 from "node:http2";
 
 import { create, fromBinary, toBinary, toJson, fromJson } from "@bufbuild/protobuf";
@@ -761,6 +762,7 @@ export type CursorProviderOptions = {
   tools?: NoloToolDefinition[];
   /** Callback that executes a nolo tool call inline (sync exec channel). */
   executeTool?: (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>;
+  onActionGate?: (gate: import("../localLoop").LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
   /** Dedicated internal workspace search callback (for Cursor grepArgs bridge). */
   searchWorkspace?: (args: CursorSearchWorkspaceArgs) => Promise<AgentRuntimeToolResult>;
   /** Dedicated internal workspace list callback (for Cursor lsArgs bridge). */
@@ -804,6 +806,7 @@ export async function streamCursorChat(
   const execCtx: CursorExecContext = {
     tools: buildMcpToolDefinitions(options.tools),
     executeTool: options.executeTool,
+    ...(options.onActionGate ? { onActionGate: options.onActionGate } : {}),
     ...(options.searchWorkspace ? { searchWorkspace: options.searchWorkspace } : {}),
     ...(options.listWorkspaceEntries ? { listWorkspaceEntries: options.listWorkspaceEntries } : {}),
     toolCalls,
@@ -1107,6 +1110,7 @@ export function buildMcpToolDefinitions(
 export type CursorExecContext = {
   tools: McpToolDefinition[];
   executeTool?: (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>;
+  onActionGate?: CursorProviderOptions["onActionGate"];
   /** Dedicated internal workspace search callback (for Cursor grepArgs bridge). */
   searchWorkspace?: (args: CursorSearchWorkspaceArgs) => Promise<AgentRuntimeToolResult>;
   /** Dedicated internal workspace list callback (for Cursor lsArgs bridge). */
@@ -1587,6 +1591,23 @@ function decodeMcpArgValue(value: Uint8Array): unknown {
   }
 }
 
+async function executeCursorTool(ctx: CursorExecContext, call: AgentRuntimeToolCallInput): Promise<AgentRuntimeToolResult> {
+  if ((call.name === "writeFile" || call.name === "editFile") && ctx.onActionGate) {
+    let path = "the requested file";
+    try {
+      const parsed = JSON.parse(call.arguments) as { path?: unknown };
+      if (typeof parsed.path === "string" && parsed.path.trim()) path = parsed.path.trim();
+    } catch {}
+    const policy = evaluateFileWritePolicy({ tool: call.name, path, sessionApproved: false });
+    if (policy.permissionDecision !== "ask") return ctx.executeTool ? ctx.executeTool(call) : { content: "tool execution unavailable" };
+    const gate = { ...policy.permissionRequest, kind: "confirm" as const, toolName: call.name, toolCallId: call.id };
+    const result = await ctx.onActionGate(gate);
+    if ((result?.metadata?.actionGateResult as { status?: unknown } | undefined)?.status !== "completed") return result ?? { content: `${call.name} cancelled: file write confirmation was not approved.`, metadata: { cancelled: true, actionGateResult: { gateId: gate.id, status: "cancelled" } } };
+    ctx.onActionGate = undefined;
+  }
+  return ctx.executeTool ? ctx.executeTool(call) : { content: "tool execution unavailable" };
+}
+
 /**
  * Dispatch a single `ExecServerMessage`. When `ctx.executeTool` is present the
  * native Cursor exec cases (`readArgs`/`shellArgs`/`grepArgs`/`writeArgs`/
@@ -1644,7 +1665,7 @@ export async function handleExecServerMessage(
         });
         const startedAt = Date.now();
         try {
-          const toolResult = await ctx.executeTool({
+          const toolResult = await executeCursorTool(ctx, {
             id: args.toolCallId,
             name: "readFile",
             arguments: toolCallArgs,
@@ -1715,7 +1736,7 @@ export async function handleExecServerMessage(
         });
         const startedAt = Date.now();
         try {
-          const toolResult = await ctx.executeTool({
+          const toolResult = await executeCursorTool(ctx, {
             id: args.toolCallId,
             name: "execShell",
             arguments: toolCallArgs,
@@ -1879,7 +1900,7 @@ export async function handleExecServerMessage(
         });
         const startedAt = Date.now();
         try {
-          const toolResult = await ctx.executeTool({
+          const toolResult = await executeCursorTool(ctx, {
             id: args.toolCallId,
             name: "writeFile",
             arguments: toolCallArgs,
@@ -1942,7 +1963,7 @@ export async function handleExecServerMessage(
         });
         const startedAt = Date.now();
         try {
-          const toolResult = await ctx.executeTool({
+          const toolResult = await executeCursorTool(ctx, {
             id: args.toolCallId,
             name: "deleteFile",
             arguments: toolCallArgs,
@@ -2063,7 +2084,7 @@ export async function handleExecServerMessage(
         });
         const startedAt = Date.now();
         try {
-          const toolResult = await ctx.executeTool({
+          const toolResult = await executeCursorTool(ctx, {
             id: args.toolCallId,
             name: toolName,
             arguments: toolCallArgs,
@@ -2231,6 +2252,7 @@ export function createCursorProvider(
           ? { onReasoningDelta: options.onReasoningDelta }
           : {}),
         ...(options?.onToolEvent ? { onToolEvent: options.onToolEvent } : {}),
+        ...(options?.onActionGate ? { onActionGate: options.onActionGate } : {}),
         ...(typeof options?.toolEventRound === "number"
           ? { toolEventRound: options.toolEventRound }
           : {}),

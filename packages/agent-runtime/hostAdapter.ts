@@ -112,6 +112,7 @@ export type AgentRuntimeCompleteOptions = {
   }) => void;
   /** Round number for `onToolEvent` events; localLoop sets it to current round. */
   toolEventRound?: number;
+  onActionGate?: (gate: import("./localLoop").LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
 };
 
 export type AgentRuntimeProvider = {

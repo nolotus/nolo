@@ -1707,17 +1707,19 @@ export async function runLocalAgentTurn(
                 `${toolName} confirmation`,
               );
               const gateResult = replacement?.metadata?.actionGateResult;
-              if (replacement === undefined || isCompletedActionGateResult(gateResult)) {
-                writeSession.approved = true;
-              } else if (
-                gateResult &&
-                typeof gateResult === "object" &&
-                ((gateResult as { status?: unknown }).status === "cancelled" ||
-                  (gateResult as { status?: unknown }).status === "failed")
+              if (
+                replacement !== undefined &&
+                isCompletedActionGateResult(gateResult)
               ) {
-                toolResult = replacement;
-              } else {
                 writeSession.approved = true;
+              } else {
+                toolResult = replacement ?? {
+                  content: `${toolName} cancelled: user declined file write confirmation.`,
+                  metadata: {
+                    cancelled: true,
+                    actionGateResult: { gateId: gate.id, status: "cancelled" },
+                  },
+                };
               }
             }
           }
@@ -1761,7 +1763,9 @@ export async function runLocalAgentTurn(
               toolCallId: toolCall.id,
               toolName,
               atMs: finishedAt,
-              ok: true,
+              ok: toolResult.metadata?.cancelled !== true &&
+                (toolResult.metadata?.actionGateResult as { status?: unknown } | undefined)?.status !== "cancelled" &&
+                (toolResult.metadata?.actionGateResult as { status?: unknown } | undefined)?.status !== "failed",
               elapsedMs: Math.max(0, finishedAt - startedAt),
               ...(summary ? { summary } : {}),
               ...(safeMetadata ? { metadata: safeMetadata } : {}),

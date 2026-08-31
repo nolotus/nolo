@@ -4539,3 +4539,93 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
     });
   });
 });
+
+describe("session file-write gate (onActionGate)", () => {
+  // 门控集成测试：fake adapter + onActionGate stub。
+  // 保密/确认契约：normal（交互宿主）的会话首次 writeFile 必须先过门；
+  // gate completed = 会话级放行（二次写静默）；cancelled/undefined =
+  // fail-closed（executeTool 不执行，且 undefined 不得意外放行）。
+  function buildGateHarness(
+    onActionGate: (gate: unknown) => Promise<unknown> | unknown,
+  ) {
+    let executeToolCalls = 0;
+    let gateCalls = 0;
+    let calls = 0;
+    const adapter: any = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef: string) => ({ key: agentRef, name: "A", model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-gate" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async () => {
+          // 前两轮各返回一次 writeFile tool-call，第三轮收尾
+          calls += 1;
+          if (calls > 2) return { content: "final answer", model: "m" };
+          return { content: "calling write", model: "m", tool_calls: [
+            { id: `call-${calls}`, type: "function", function: { name: "writeFile", arguments: '{"path":"a.ts","content":"x"}' } },
+          ] };
+        },
+      }),
+      executeTool: async () => {
+        executeToolCalls += 1;
+        return { ok: true };
+      },
+    };
+    const runTurn = (input: string) =>
+      runLocalAgentTurn({
+        adapter,
+        agentRef: "a",
+        input,
+        onActionGate: (gate: unknown) => {
+          gateCalls += 1;
+          return onActionGate(gate);
+        },
+      } as any);
+    return { adapter, run: runTurn, callsOf: () => executeToolCalls, gatesOf: () => gateCalls };
+  }
+
+  test("gate completed → write executes and the session stays approved", async () => {
+    const h = buildGateHarness(() => ({
+      content: "approved",
+      metadata: { actionGateResult: { status: "completed" } },
+    }));
+    await h.run("write it");
+    // 两轮写都执行，但门只问一次（会话级放行的直接证明）
+    expect(h.callsOf()).toBe(2);
+    expect(h.gatesOf()).toBe(1);
+  });
+
+  test("gate cancelled → write rejected and the next write asks again", async () => {
+    const h = buildGateHarness(() => ({
+      content: "denied",
+      metadata: { actionGateResult: { status: "cancelled" } },
+    }));
+    await h.run("write it");
+    expect(h.callsOf()).toBe(0);
+    expect(h.gatesOf()).toBe(2);
+  });
+
+  test("gate returning undefined → fail-closed (write rejected, tool not executed)", async () => {
+    const h = buildGateHarness(() => undefined);
+    await h.run("write it");
+    expect(h.callsOf()).toBe(0);
+    expect(h.gatesOf()).toBe(2);
+  });
+
+  test("a fresh adapter session asks again (session approval is per-adapter)", async () => {
+    const h1 = buildGateHarness(() => ({
+      metadata: { actionGateResult: { status: "completed" } },
+    }));
+    await h1.run("write it");
+    expect(h1.callsOf()).toBe(2);
+    const h2 = buildGateHarness(() => ({
+      metadata: { actionGateResult: { status: "completed" } },
+    }));
+    await h2.run("write it");
+    // 新 adapter = 新会话：重新询问
+    expect(h2.gatesOf()).toBe(1);
+    expect(h2.callsOf()).toBe(2);
+  });
+});

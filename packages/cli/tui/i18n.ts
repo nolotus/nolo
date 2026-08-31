@@ -786,6 +786,7 @@ const STRINGS = {
     en: "Press Enter to run it now. Follow any prompts below, or Ctrl+C to cancel.",
     zh: "按 Enter 立即执行，按下方提示操作，或按 Ctrl+C 取消。",
   },
+  actionGateConfirmHint: { en: "Enter=approve, n=cancel (or type y/yes).", zh: "Enter=批准，n=取消（也可输入 y/yes）。" },
   actionGateInteractiveTitle: {
     en: "This command requires an interactive terminal.",
     zh: "该命令需要交互式终端",

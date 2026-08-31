@@ -630,6 +630,66 @@ describe("cursorProvider", () => {
     expect(execClient.message.value.result.case).toBe("success");
   });
 
+  // P2b-Cursor：穿透验收（onActionGate → options → execCtx → 写入门）。
+  // 契约：未批准（cancelled）→ executeTool 不执行；批准 → 同 ctx 后续写静默。
+  test("handleExecServerMessage writeArgs fires onActionGate; unapproved write is blocked", async () => {
+    const mock = makeMockH2Request();
+    let executeToolCalls = 0;
+    let gateCalled = 0;
+    const executeTool = async () => {
+      executeToolCalls += 1;
+      return { content: "ok" };
+    };
+    const ctx = {
+      ...makeExecCtx(executeTool, []),
+      onActionGate: async (gate: any) => {
+        gateCalled += 1;
+        expect(gate.toolName).toBe("writeFile");
+        expect(gate.kind).toBe("confirm");
+        return { content: "denied", metadata: { actionGateResult: { status: "cancelled" } } };
+      },
+    };
+    await handleExecServerMessage(
+      makeExecMsg("writeArgs", { path: "/tmp/gate.txt", content: "x", toolCallId: "tc-w1" }),
+      mock.stream as any,
+      ctx,
+    );
+    expect(gateCalled).toBe(1);
+    expect(executeToolCalls).toBe(0);
+  });
+
+  test("handleExecServerMessage writeArgs: session-approved ctx skips the gate on subsequent writes", async () => {
+    const mock = makeMockH2Request();
+    let executeToolCalls = 0;
+    let gateCalled = 0;
+    const executeTool = async () => {
+      executeToolCalls += 1;
+      return { content: "ok" };
+    };
+    const ctx = {
+      ...makeExecCtx(executeTool, []),
+      onActionGate: async (gate: any) => {
+        gateCalled += 1;
+        return { content: "approved", metadata: { actionGateResult: { status: "completed" } } };
+      },
+    };
+    await handleExecServerMessage(
+      makeExecMsg("writeArgs", { path: "/tmp/gate1.txt", content: "1", toolCallId: "tc-1" }),
+      mock.stream as any,
+      ctx,
+    );
+    expect(executeToolCalls).toBe(1);
+    expect(gateCalled).toBe(1);
+    await handleExecServerMessage(
+      makeExecMsg("writeArgs", { path: "/tmp/gate2.txt", content: "2", toolCallId: "tc-2" }),
+      mock.stream as any,
+      ctx,
+    );
+    // ctx 级会话放行：第二次写不再询问
+    expect(executeToolCalls).toBe(2);
+    expect(gateCalled).toBe(1);
+  });
+
   test("handleExecServerMessage bridges mcpArgs to nolo tool call", async () => {
     const mock = makeMockH2Request();
     const toolCalls: any[] = [];
