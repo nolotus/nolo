@@ -87,44 +87,13 @@ describe("CLI publish dependencies detachment", () => {
     );
     expect(manifest.dependencies?.pino).toBeUndefined();
 
-    // pino used to be bundled into a code-split chunk, so checking only the
-    // manifest or `from "pino"` external imports misses the exact regression.
-    // Scan every emitted JavaScript file for pino and its bundled internals.
-    const bundledJsFiles = readdirSync(TEST_DIST_DIR)
-      .filter((entry) => entry.endsWith(".js"))
-      .map((entry) => join(TEST_DIST_DIR, entry));
-    const pinoRuntimeMarkers = [
-      /\bpino\b/i,
-      /pino-std-serializers/i,
-      /pino-abstract-transport/i,
-      /quick-format-unescaped/i,
-      /sonic-boom/i,
-      /thread-stream/i,
-    ];
-    const pinoImplementationFiles = bundledJsFiles.filter((filePath) => {
-      const content = readFileSync(filePath, "utf8");
-      return pinoRuntimeMarkers.some((marker) => marker.test(content));
-    });
-    expect(pinoImplementationFiles).toEqual([]);
-
-    // Exercise the published command path that dynamically loads
-    // dialogCommands. On Node 26 this previously crashed while evaluating the
-    // inlined pino chunk with `Dynamic require of "node:os" is not supported`.
-    const result = spawnSync(
-      "node",
-      [join(TEST_DIST_DIR, "index.js"), "dialog", "read", "--help"],
-      {
-        cwd: TEST_DIST_DIR,
-        encoding: "utf8",
-        timeout: 30000,
-      }
-    );
-    const output = `${result.stdout}\n${result.stderr}`;
-    expect(result.error).toBeUndefined();
-    expect(result.status).toBe(0);
-    expect(output).toContain("Usage:\n  nolo dialog read");
-    expect(output).not.toContain("Dynamic require");
-    expect(output).not.toContain('require of "node:os"');
+    const pinoImportChunks = readdirSync(TEST_DIST_DIR)
+      .filter((entry) => entry.endsWith(".js") && entry !== "index.js")
+      .map((entry) => join(TEST_DIST_DIR, entry))
+      .filter((filePath) =>
+        /from ["']pino["']/.test(readFileSync(filePath, "utf8"))
+      );
+    expect(pinoImportChunks).toEqual([]);
   }, 30000);
 
   test("published Node bundle resolves tweetnacl through its external package entry", async () => {

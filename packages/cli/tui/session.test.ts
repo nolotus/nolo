@@ -34,9 +34,12 @@ import {
 import {
   getActiveThemeName,
   getActiveBrightness,
+  getActiveDensity,
   setActiveThemeName,
   setActiveBrightness,
+  setActiveDensity,
   themeColorSequence,
+  type TuiDensity,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 
@@ -729,26 +732,26 @@ describe("handleTuiInput - /altscreen dispatch", () => {
   });
 });
 
-describe("handleTuiInput - /tools display migration hint", () => {
-  test("normal remains the default and the command only emits the migration hint", () => {
+describe("handleTuiInput - /tools display", () => {
+  test("normal is the default and compact remains a pro alias", () => {
     setCliLocale("en");
     const state = createInitialTuiState({});
     expect(state.toolDisplay).toBe("normal");
 
-    const result = handleTuiInput("/tools pro", state);
-    expect(result.nextState).toBe(state);
-    expect(result.output).toBe(t("displayFixedHint"));
-    expect(result.action).toBeUndefined();
+    const pro = handleTuiInput("/tools pro", state);
+    expect(pro.nextState.toolDisplay).toBe("pro");
+    const compact = handleTuiInput("/tools compact", state);
+    expect(compact.nextState.toolDisplay).toBe("pro");
+    const normal = handleTuiInput("/tools normal", pro.nextState);
+    expect(normal.nextState.toolDisplay).toBe("normal");
   });
 
-  test("any argument (including unknown) emits the same hint and keeps state", () => {
+  test("unknown values show the normal/pro usage without changing state", () => {
     setCliLocale("en");
     const state = createInitialTuiState({});
-    for (const input of ["/tools", "/tools normal", "/tools expert"]) {
-      const result = handleTuiInput(input, state);
-      expect(result.nextState).toBe(state);
-      expect(result.output).toBe(t("displayFixedHint"));
-    }
+    const result = handleTuiInput("/tools expert", state);
+    expect(result.nextState).toBe(state);
+    expect(result.output).toContain("normal|pro|hide|verbose");
   });
 });
 
@@ -882,38 +885,39 @@ describe("handleTuiInput - /auto dispatch", () => {
   });
 });
 
-describe("handleTuiInput - /thinking display migration hint", () => {
-  test("defaults to show and the command only emits the migration hint", () => {
+describe("handleTuiInput - /thinking display", () => {
+  test("defaults to show and participates in slash completion", () => {
     const state = createInitialTuiState({});
     expect(state.thinkingDisplay).toBe("show");
-    setCliLocale("en");
-    const result = handleTuiInput("/thinking", state);
-    expect(result.nextState).toBe(state);
-    expect(result.output).toBe(t("displayFixedHint"));
-    expect(result.action).toBeUndefined();
+    expect(SLASH_COMMANDS).toContain("/thinking");
+    expect(completeSlashPrefix("/thi")).toBe("/thinking ");
   });
 
-  test("any argument (including unsupported values) keeps state and emits the same hint", () => {
+  test("/thinking show|hide updates only the session display preference", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+
+    const hidden = handleTuiInput("/thinking hide", state);
+    expect(hidden.nextState.thinkingDisplay).toBe("hide");
+    expect(hidden.output).toBe(t("thinkingSet", "hide"));
+    expect(hidden.action).toBeUndefined();
+
+    const shown = handleTuiInput("/thinking show", hidden.nextState);
+    expect(shown.nextState.thinkingDisplay).toBe("show");
+    expect(shown.output).toBe(t("thinkingSet", "show"));
+    expect(shown.action).toBeUndefined();
+  });
+
+  test("/thinking reports current mode and rejects unsupported values", () => {
     setCliLocale("en");
     const state = { ...createInitialTuiState({}), thinkingDisplay: "hide" as const };
-    for (const input of ["/thinking show", "/thinking hide", "/thinking off"]) {
-      const result = handleTuiInput(input, state);
-      expect(result.nextState).toBe(state);
-      expect(result.output).toBe(t("displayFixedHint"));
-    }
-  });
 
-  test("NOLO_CLI_THINKING=hide resolves to hide; unset resolves to show", () => {
-    const hidden = createInitialTuiState({ NOLO_CLI_THINKING: "hide" });
-    expect(hidden.thinkingDisplay).toBe("hide");
-    const falseVal = createInitialTuiState({ NOLO_CLI_THINKING: "false" });
-    expect(falseVal.thinkingDisplay).toBe("hide");
-    const zeroVal = createInitialTuiState({ NOLO_CLI_THINKING: "0" });
-    expect(zeroVal.thinkingDisplay).toBe("hide");
-    const unset = createInitialTuiState({});
-    expect(unset.thinkingDisplay).toBe("show");
-    const showVal = createInitialTuiState({ NOLO_CLI_THINKING: "show" });
-    expect(showVal.thinkingDisplay).toBe("show");
+    expect(handleTuiInput("/thinking", state).output).toBe(
+      t("thinkingCurrent", "hide"),
+    );
+    const invalid = handleTuiInput("/thinking off", state);
+    expect(invalid.nextState).toBe(state);
+    expect(invalid.output).toBe(t("thinkingUsage"));
   });
 });
 
@@ -1007,20 +1011,23 @@ describe("handleTuiInput - path-vs-slash disambiguation", () => {
     });
   });
 
-  // /theme 会改写 theme.ts 的模块级全局状态，该状态跨测试文件存活，
+  // /theme 与 /density 会改写 theme.ts 的模块级全局状态，该状态跨测试文件存活，
   // 会污染后跑的 tui/theme.test.ts。这里捕获原值并在 afterEach 还原——用 afterEach
   // 而非在用例末尾还原，是为了让用例中途失败时也能还原。
   const themeStateBeforeEach = {
     theme: "",
     brightness: null as "light" | "dark" | null,
+    density: "spacious" as TuiDensity,
   };
   beforeEach(() => {
     themeStateBeforeEach.theme = getActiveThemeName();
     themeStateBeforeEach.brightness = getActiveBrightness();
+    themeStateBeforeEach.density = getActiveDensity();
   });
   afterEach(() => {
     setActiveThemeName(themeStateBeforeEach.theme);
     setActiveBrightness(themeStateBeforeEach.brightness);
+    setActiveDensity(themeStateBeforeEach.density);
   });
 
   test("handles /theme command to list or switch themes", () => {
@@ -1058,14 +1065,17 @@ describe("handleTuiInput - path-vs-slash disambiguation", () => {
     expect(getActiveBrightness()).toBeNull();
   });
 
-  test("/density emits the migration hint without touching state", () => {
+  test("handles /density command to view or switch density", () => {
     const state = createInitialTuiState({});
-    setCliLocale("en");
-    for (const input of ["/density", "/density cozy", "/density unknown-density"]) {
-      const result = handleTuiInput(input, state);
-      expect(result.nextState).toBe(state);
-      expect(result.output).toBe(t("displayFixedHint"));
-    }
+    const viewResult = handleTuiInput("/density", state);
+    expect(viewResult.output).toContain("Current density: spacious");
+
+    const switchResult = handleTuiInput("/density cozy", state);
+    expect(switchResult.output).toContain("Switched to layout density: cozy");
+    expect(getActiveDensity()).toBe("cozy");
+
+    const invalidResult = handleTuiInput("/density unknown-density", state);
+    expect(invalidResult.output).toContain("Unknown density: unknown-density");
   });
 });
 
