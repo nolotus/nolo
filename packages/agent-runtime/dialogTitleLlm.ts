@@ -10,6 +10,7 @@
 
 import { BUILTIN_TITLE_LLM_CONFIG } from "../chat/dialog/actions/builtinDialogLlm";
 import { normalizeDialogTitle } from "../chat/dialog/dialogTitle";
+import { PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL } from "ai/llm/platformHostedRoutingTable";
 import type { AgentRuntimeChatMessage } from "./types";
 
 type EnvLike = Record<string, string | undefined>;
@@ -39,6 +40,8 @@ export type GenerateLocalDialogTitleInput = {
   /** Parses the non-streaming JSON response into { content, ... }. */
   parseResponse?: (args: { providerConfig: any; data: any }) => { content: string };
   fetchImpl: FetchLike;
+  /** Existing title, used to keep the title stable across regeneration. */
+  existingTitle?: string;
   /** Fallback title when LLM is unavailable or fails. */
   fallbackTitle: string;
   /** Abort timeout for the title LLM call (ms). */
@@ -88,10 +91,11 @@ export async function generateLocalDialogTitle(
       return { role: m.role, content };
     });
 
-  while (visibleMessages.length > 1 && JSON.stringify(visibleMessages).length > 4000) {
+  while (visibleMessages.length > 1 && transcriptLength(visibleMessages) > 4000) {
     visibleMessages.shift();
   }
 
+  const compactTranscript = buildTitleTranscript(visibleMessages);
   if (visibleMessages.length === 0) {
     return { title: fallbackTitle, source: "fallback" };
   }
@@ -110,11 +114,11 @@ export async function generateLocalDialogTitle(
           messages: [
             {
               role: "system",
-              content: BUILTIN_TITLE_LLM_CONFIG.prompt,
+              content: buildTitleSystemPrompt(input.existingTitle),
             },
             {
               role: "user",
-              content: JSON.stringify(visibleMessages),
+              content: compactTranscript,
             },
           ],
           stream: false,
@@ -126,11 +130,21 @@ export async function generateLocalDialogTitle(
         } else if (typeof request.init?.body === "object" && request.init?.body !== null) {
           parsedBody = request.init.body;
         }
-        const patchedBody = {
-          ...parsedBody,
-          reasoning_effort: "low",
-          max_tokens: 512,
-        };
+        const patchedBody = isNemotronTitleModel()
+          ? {
+              ...parsedBody,
+              // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝；
+              // json mode 下模型跳过 thinking（实测 completion 16-18 tokens）。
+              // 防御：显式置空，防未来 BUILTIN 配置或 requestOptions 残留该字段。
+              response_format: { type: "json_object" },
+              max_tokens: 512,
+              reasoning_effort: undefined,
+            }
+          : {
+              ...parsedBody,
+              reasoning_effort: "low",
+              max_tokens: 3072,
+            };
 
         const res = await input.fetchImpl(request.url, {
           ...request.init,
@@ -143,7 +157,9 @@ export async function generateLocalDialogTitle(
           const data = safeParseJson(raw);
           if (data) {
             const parsed = input.parseResponse({ providerConfig, data });
-            const generated = normalizeDialogTitle(parsed.content);
+            const generated = normalizeDialogTitle(
+              extractTitleFromLlmContent(parsed.content),
+            );
             if (generated) {
               return { title: generated, source: "llm" };
             }
@@ -218,12 +234,14 @@ export async function generateLocalDialogTitle(
           body: JSON.stringify({
             model: directConfig.model || input.agentConfig?.model || BUILTIN_TITLE_LLM_CONFIG.model,
             messages: [
-              { role: "system", content: BUILTIN_TITLE_LLM_CONFIG.prompt },
-              { role: "user", content: JSON.stringify(visibleMessages) },
+              { role: "system", content: buildTitleSystemPrompt(input.existingTitle) },
+              { role: "user", content: compactTranscript },
             ],
-            // reasoning_effort/max_tokens 优化标题延迟与消耗；注意部分严格 OpenAI 兼容服务端（如某些 vLLM 部署）若拒绝未知参数会降级到 fallback。
-            reasoning_effort: "low",
-            max_tokens: 512,
+            // Nemotron json mode（跳过 thinking）与其余路径的 reasoning_effort 优化互斥；
+            // 严格 OpenAI 兼容服务端若拒绝未知参数会降级到 fallback。
+            ...(isNemotronTitleModel()
+              ? { response_format: { type: "json_object" }, max_tokens: 512 }
+              : { reasoning_effort: "low", max_tokens: 3072 }),
             stream: false,
           }),
           signal: AbortSignal.timeout(timeoutMs),
@@ -233,7 +251,9 @@ export async function generateLocalDialogTitle(
           const raw = await res.text().catch(() => "");
           const data = safeParseJson(raw);
           const rawContent = data?.choices?.[0]?.message?.content ?? "";
-          const generated = normalizeDialogTitle(rawContent);
+          const generated = normalizeDialogTitle(
+            extractTitleFromLlmContent(rawContent),
+          );
           if (generated) {
             return { title: generated, source: "llm" };
           }
@@ -245,6 +265,52 @@ export async function generateLocalDialogTitle(
   }
 
   return { title: fallbackTitle, source: "fallback" };
+}
+
+function buildTitleTranscript(messages: Array<{ role: string; content: string }>): string {
+  return messages
+    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+    .join("\n");
+}
+
+function transcriptLength(messages: Array<{ role: string; content: string }>): number {
+  return buildTitleTranscript(messages).length;
+}
+
+function buildTitleSystemPrompt(existingTitle?: string): string {
+  const title = existingTitle?.trim();
+  // Nemotron（RunInfra 上游）：json mode 下模型会跳过 thinking 直接出答案
+  // （实测 completion 16-18 tokens vs 纯文本路径 1000-3000 tokens），且
+  // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，二者互斥。
+  const jsonFormatInstruction = isNemotronTitleModel()
+    ? '\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。'
+    : "";
+  const base = `${BUILTIN_TITLE_LLM_CONFIG.prompt}${jsonFormatInstruction}`;
+  return title
+    ? `${base}\n当前标题：${title}。如果对话仍在讨论同一主题，必须原样输出当前标题，不要改写；只有当对话明确转向了不同主题时才生成新标题。`
+    : base;
+}
+
+const isNemotronTitleModel = (): boolean =>
+  BUILTIN_TITLE_LLM_CONFIG.model === PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL;
+
+/** Nemotron json mode 把答案约束进 {"title": "..."}；其余路径维持纯文本。 */
+function extractTitleFromLlmContent(raw: string): string {
+  if (isNemotronTitleModel() && raw.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.title === "string" && parsed.title.trim()) {
+        return parsed.title;
+      }
+      // JSON 合法但 title 缺失/为空：返回空串走 fallback，
+      // 不能把 {"title": ""} 整个 JSON 外壳当成标题文本。
+      return "";
+    } catch {
+      // 上游忽略 response_format 输出纯文本：回落纯文本处理。
+      return raw;
+    }
+  }
+  return raw;
 }
 
 function extractText(content: unknown): string {

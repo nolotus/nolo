@@ -11,6 +11,7 @@
  */
 
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
+import { stripAnsi } from "./tuiAnsi";
 import {
   clipText,
   formatDuration,
@@ -72,27 +73,18 @@ export function formatUnassignedFact(
   return (snapshot as any).unassigned ? "parent: ?" : null;
 }
 
-/**
- * [临时补齐] normal 模式的「安全产品投影」。
- *
- * 此函数由 runDock.ts 的在途改动引用（displayMode === "normal" 时净化快照），
- * 但实现一直缺失导致 TUI 模块加载即 SyntaxError。本实现按其 source 测试
- * 「normal hides adversarial error/log payloads while pro retains them」的
- * 规格：剥离错误原文、原始日志行、模型原话、最近工具名列表等对抗面/调试面。
- * inFlight 保留（产品面「当前动作」展示，含动作名与计时）——该字段是否需要
- * 清洗由该工作线在正式版定夺（review WARNING 记录项）。
- */
+
+/** Safe normal-mode projection for dock/panel text. */
 export function sanitizeRunSnapshotForNormal(snapshot: AgentRunSnapshot): AgentRunSnapshot {
+  const clean = (value: string) => stripAnsi(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
   return {
-    runId: snapshot.runId,
-    status: snapshot.status,
-    agentName: snapshot.agentName,
-    taskPreview: snapshot.taskPreview,
-    toolCallCount: snapshot.toolCallCount,
-    startedAt: snapshot.startedAt,
-    finishedAt: snapshot.finishedAt,
-    inFlight: snapshot.inFlight,
-    logKey: snapshot.logKey,
+    ...snapshot,
+    agentName: snapshot.agentName ? clean(snapshot.agentName) : snapshot.agentName,
+    taskPreview: snapshot.taskPreview ? clean(snapshot.taskPreview) : snapshot.taskPreview,
+    lastAssistantText: snapshot.lastAssistantText ? clean(snapshot.lastAssistantText) : snapshot.lastAssistantText,
+    lastToolNames: snapshot.lastToolNames?.map(clean).filter(Boolean),
+    errorMessage: undefined,
+    logLines: undefined,
   };
 }
 

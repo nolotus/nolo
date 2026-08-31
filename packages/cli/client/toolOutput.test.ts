@@ -173,6 +173,122 @@ describe("toolOutput", () => {
     expect(gated).not.toContain("execShell echo");
   });
 
+  test("normal mode failed run card keeps outcome/counts, drops raw error and log tail; pro keeps both", () => {
+    const rawError = "Error: Anthropic API key expired: sk-ant-api03-SECRET-VALUE";
+    const secretCommand = "$ curl -H 'Authorization: Bearer sk-live-SECRET' https://api.example.com";
+    const event = toolEvent({
+      type: "tool-result",
+      toolName: "controlAgentRun",
+      content: JSON.stringify({
+        status: "failed",
+        runId: "run-2026-abcd1234",
+        agentName: "child-helper",
+        toolCallCount: 3,
+        errorMessage: rawError,
+        logLines: [secretCommand, "DATA_CLONE_ERR: 25 DOMException"],
+      }),
+    });
+
+    const normal = formatToolEventForCli(event, "normal", false);
+    // Status/outcome and counts stay visible...
+    expect(normal).toContain("failed");
+    expect(normal).toContain("child-helper");
+    expect(normal).toContain("3");
+    // ...as a localized pointer instead of the raw diagnostic...
+    expect(normal).toContain("run failed — full diagnostics in pro mode");
+    // ...and the raw error / log lines never surface.
+    expect(normal).not.toContain("sk-ant-api03-SECRET-VALUE");
+    expect(normal).not.toContain("sk-live-SECRET");
+    expect(normal).not.toContain("curl");
+    expect(normal).not.toContain("DATA_CLONE_ERR");
+
+    const pro = formatToolEventForCli(event, "pro", false);
+    expect(pro).toContain("sk-ant-api03-SECRET-VALUE");
+    expect(pro).toContain("sk-live-SECRET");
+    expect(pro).toContain("DATA_CLONE_ERR");
+  });
+
+  // P2b：版本偏斜 baked 卡（server 烘焙的旧格式 displayData/content，非 JSON）
+  // —— :694 lines 路径 + sanitizeRunCardForNormal 直接覆盖。状态轮询的失败
+  // run 是「成功 tool-result」携带失败快照（无 failed 标记），不得因缺少
+  // 失败短路而漏出多行续行与 Log tail 段。
+  const bakedLegacyCard =
+    "Agent run card (legacy build)\n  Run status\n    ⏳ failed\n  agent   child-helper\n  error   Error: DATA_CLONE_ERR: 25\n    at callAnthropic (api.ts:42:9)\n    Authorization: Bearer sk-ant-api03-CONTINUATION-LEAK\n\n  Log tail:\n    $ curl -H 'Authorization: Bearer sk-live-PROBE-SECRET' https://api.example.com/x";
+  const bakedCardVariants: Array<[string, Record<string, unknown>]> = [
+    ["without failed marker", { displayData: bakedLegacyCard }],
+    ["with failed marker", { failed: true, displayData: bakedLegacyCard }],
+  ];
+  for (const [variant, metadata] of bakedCardVariants) {
+    test(`normal mode redacts legacy baked status-poll card (${variant})`, () => {
+      const event = toolEvent({
+        type: "tool-result",
+        toolName: "controlAgentRun",
+        metadata,
+        content: bakedLegacyCard,
+      });
+
+      // 保密契约：normal 模式下密钥/续行/Log tail 无论哪条渲染路径都不得出现。
+      const normal = formatToolEventForCli(event, "normal", false);
+      expect(normal).not.toContain("DATA_CLONE_ERR");
+      expect(normal).not.toContain("callAnthropic");
+      expect(normal).not.toContain("sk-ant-api03-CONTINUATION-LEAK");
+      expect(normal).not.toContain("sk-ant-api03-SKEWSECRET");
+      expect(normal).not.toContain("sk-live-PROBE-SECRET");
+      expect(normal).not.toContain("Log tail");
+
+      // pro 行为按变体区分（均为 HEAD 既有语义，本 diff 未改动 pro 通道）：
+      // - 未标 failed：非 failed 卡 pro 走完整渲染，原文（含密钥形态）保留；
+      // - 标 failed：failed 短路只出首行，诊断不展开。
+      const pro = formatToolEventForCli(event, "pro", false);
+      if (variant === "without failed marker") {
+        expect(pro).toContain("sk-ant-api03-CONTINUATION-LEAK");
+        expect(pro).toContain("sk-live-PROBE-SECRET");
+      } else {
+        expect(pro).toContain("Agent run card (legacy build)");
+        expect(pro).not.toContain("sk-ant-api03");
+        expect(pro).not.toContain("sk-live-PROBE-SECRET");
+      }
+    });
+  }
+
+  test("normal mode failed orchestration result shows localized failure only; pro keeps the raw line", () => {
+    const rawError = "Error: spawn ENOENT: /opt/secret-tools/agent-runner --token sk-secret-token";
+    const event = toolEvent({
+      type: "tool-result",
+      toolName: "startAgentRun",
+      content: `${rawError}\n    at spawnAgent (child.js:12:5)`,
+    });
+
+    const normal = formatToolEventForCli(event, "normal", false);
+    expect(normal).toContain("✗");
+    expect(normal).toContain("failed");
+    expect(normal).not.toContain("sk-secret-token");
+    expect(normal).not.toContain("secret-tools");
+    expect(normal).not.toContain("spawn ENOENT");
+
+    const pro = formatToolEventForCli(event, "pro", false);
+    expect(pro).toContain(rawError);
+  });
+
+  test("normal mode loadSkill failure is localized; pro keeps the raw first line", () => {
+    const event = toolEvent({
+      type: "tool-result",
+      toolName: "loadSkill",
+      metadata: { name: "deploy-helper", exitCode: 1 },
+      content:
+        'Skill "deploy-helper" not found: ENOENT: no such file or directory, scandir \'/Users/dev/.nolo/skills/deploy-helper\'',
+    });
+
+    const normal = formatToolEventForCli(event, "normal", false);
+    expect(normal).toContain("✗");
+    expect(normal).toContain("deploy-helper");
+    expect(normal).not.toContain("ENOENT");
+    expect(normal).not.toContain("scandir");
+
+    const pro = formatToolEventForCli(event, "pro", false);
+    expect(pro).toContain("ENOENT");
+  });
+
   test("normal mode keeps one summary line per command, in order", () => {
     const format = createToolEventFormatter("normal", false);
     const emit = (id: string) => {
