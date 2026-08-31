@@ -354,18 +354,42 @@ async function runAgentChat(
   };
 }
 
+const ESC = "\u001b";
+const CTRL_C = "\u0003";
+
 function isApprovedConfirmationInput(answer: string): boolean {
   const normalized = answer.trim().toLowerCase();
   return normalized === "" || normalized === "y" || normalized === "yes" || normalized === "确认";
 }
 
-export function waitForActionGate(
-  rl: ReturnType<typeof createInterface>,
-  input: NodeJS.ReadableStream,
-  output: NodeJS.WritableStream,
-  gate: LocalAgentActionGate,
-  spawnRunner: typeof spawnProcess,
-): Promise<AgentRuntimeToolResult> {
+function buildGateConfirmedResult(gate: LocalAgentActionGate): AgentRuntimeToolResult {
+  return {
+    content: `action gate completed: ${gate.title}`,
+    metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } },
+  };
+}
+
+function buildGateCancelledResult(gate: LocalAgentActionGate, reason: string): AgentRuntimeToolResult {
+  return {
+    content: `action gate cancelled: ${gate.title}`,
+    metadata: {
+      exitCode: 130,
+      actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
+    },
+  };
+}
+
+function buildGateFailedResult(gate: LocalAgentActionGate, message: string): AgentRuntimeToolResult {
+  return {
+    content: `action gate failed: ${gate.title}`,
+    metadata: {
+      exitCode: 1,
+      actionGateResult: { gateId: gate.id, status: "failed", output: message },
+    },
+  };
+}
+
+function deriveGateMeta(gate: LocalAgentActionGate) {
   const commandPayload = gate.kind === "handoff"
     ? readCommandActionGatePayload(gate.payload)
     : null;
@@ -380,11 +404,28 @@ export function waitForActionGate(
   const body = isInteractiveHandoff
     ? t("actionGateInteractiveBody")
     : gate.body;
+  return { commandPayload, isConfirmation, displayCommand, isInteractiveHandoff, title, body };
+}
+
+function writeGatePrompt(output: NodeJS.WritableStream, meta: ReturnType<typeof deriveGateMeta>): void {
+  const { title, body, displayCommand, isConfirmation } = meta;
   output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
   output.write(`[nolo] ${title}\n`);
   if (body) output.write(`[nolo] ${body}\n`);
   output.write(`  ${displayCommand}\n`);
   output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
+}
+
+export function waitForActionGate(
+  rl: ReturnType<typeof createInterface>,
+  input: NodeJS.ReadableStream,
+  output: NodeJS.WritableStream,
+  gate: LocalAgentActionGate,
+  spawnRunner: typeof spawnProcess,
+): Promise<AgentRuntimeToolResult> {
+  const meta = deriveGateMeta(gate);
+  const { commandPayload, isConfirmation, displayCommand } = meta;
+  writeGatePrompt(output, meta);
   return new Promise((resolve) => {
     let settled = false;
     const finish = (result: AgentRuntimeToolResult) => {
@@ -394,20 +435,10 @@ export function waitForActionGate(
       rl.off("SIGINT", onSigint);
       resolve(result);
     };
-    const cancelResult = (reason: string): AgentRuntimeToolResult => ({
-      content: `action gate cancelled: ${gate.title}`,
-      metadata: {
-        exitCode: 130,
-        actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-      },
-    });
-    const failResult = (message: string): AgentRuntimeToolResult => ({
-      content: `action gate failed: ${gate.title}`,
-      metadata: {
-        exitCode: 1,
-        actionGateResult: { gateId: gate.id, status: "failed", output: message },
-      },
-    });
+    const cancelResult = (reason: string): AgentRuntimeToolResult =>
+      buildGateCancelledResult(gate, reason);
+    const failResult = (message: string): AgentRuntimeToolResult =>
+      buildGateFailedResult(gate, message);
     const onClose = () => finish(cancelResult("readline closed"));
     const onSigint = () => finish(cancelResult("interrupted"));
     rl.once("close", onClose);
@@ -416,7 +447,7 @@ export function waitForActionGate(
       if (settled) return;
       if (isConfirmation) {
         finish(isApprovedConfirmationInput(answer)
-          ? { content: `action gate completed: ${gate.title}`, metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } } }
+          ? buildGateConfirmedResult(gate)
           : cancelResult("confirmation declined"));
         return;
       }
@@ -482,25 +513,9 @@ export function waitForRawActionGate(
     registerToken?: (handler: ((token: string) => void) | null) => void;
   },
 ): Promise<AgentRuntimeToolResult> {
-  const commandPayload = gate.kind === "handoff"
-    ? readCommandActionGatePayload(gate.payload)
-    : null;
-  const isConfirmation = gate.kind === "confirm";
-  const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
-  const isInteractiveHandoff =
-    gate.kind === "handoff" &&
-    gate.title === "This command requires an interactive terminal.";
-  const title = isInteractiveHandoff
-    ? t("actionGateInteractiveTitle")
-    : gate.title;
-  const body = isInteractiveHandoff
-    ? t("actionGateInteractiveBody")
-    : gate.body;
-  output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
-  output.write(`[nolo] ${title}\n`);
-  if (body) output.write(`[nolo] ${body}\n`);
-  output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
+  const meta = deriveGateMeta(gate);
+  const { commandPayload, isConfirmation, displayCommand } = meta;
+  writeGatePrompt(output, meta);
 
   return new Promise((resolve) => {
     const rawInput = input as RawModeInput;
@@ -514,22 +529,8 @@ export function waitForRawActionGate(
       input.off("data", onData);
       resolve(result);
     };
-    const cancel = (reason: string) =>
-      finish({
-        content: `action gate cancelled: ${gate.title}`,
-        metadata: {
-          exitCode: 130,
-          actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-        },
-      });
-    const fail = (message: string) =>
-      finish({
-        content: `action gate failed: ${gate.title}`,
-        metadata: {
-          exitCode: 1,
-          actionGateResult: { gateId: gate.id, status: "failed", output: message },
-        },
-      });
+    const cancel = (reason: string) => finish(buildGateCancelledResult(gate, reason));
+    const fail = (message: string) => finish(buildGateFailedResult(gate, message));
     const runCommand = async () => {
       if (settled || commandRunning) return;
       commandRunning = true;
@@ -576,7 +577,7 @@ export function waitForRawActionGate(
     };
     const handleToken = (text: string) => {
       if (settled || commandRunning) return;
-      if (text.includes("\u0003") || (isConfirmation && text.includes("\u001b"))) {
+      if (text.includes(CTRL_C) || (isConfirmation && text === ESC)) {
         cancel("interrupted");
         return;
       }
@@ -586,28 +587,16 @@ export function waitForRawActionGate(
         if (newline >= 0) {
           const normalized = confirmationLine.trim().toLowerCase();
           confirmationLine = "";
-          if (!isApprovedConfirmationInput(confirmationLine)) {
+          if (!isApprovedConfirmationInput(normalized)) {
             cancel("confirmation declined");
             return;
           }
-          finish({
-            content: `action gate completed: ${gate.title}`,
-            metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } },
-          });
+          finish(buildGateConfirmedResult(gate));
         }
         return;
       }
       if (text.includes("\r") || text.includes("\n")) {
-        if (isConfirmation) {
-          finish({
-            content: `action gate completed: ${gate.title}`,
-            metadata: {
-              actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" },
-            },
-          });
-        } else {
-          void runCommand();
-        }
+        void runCommand();
       }
     };
     const onData = (chunk: Buffer | string) => {

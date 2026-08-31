@@ -58,7 +58,6 @@ import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   themeColorSequence,
   themeText,
-  getActiveDensity,
   resolveTuiThemeMode,
   setActiveThemeMode,
   resetWorkspaceThemeState,
@@ -1724,7 +1723,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/ctx" ||
             busySlashCommand === "/switch" ||
             busySlashCommand === "/theme" ||
-            busySlashCommand === "/density" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/tools" ||
             busySlashCommand === "/thinking" ||
