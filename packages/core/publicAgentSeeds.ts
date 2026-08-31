@@ -181,6 +181,28 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
     }
   }
 
+  // 进入公开 agent seed 的 name/introduction/greeting/prompt/tags。
+  // 原因：换供应商/换托管渠道不应牵动用户可见文案；模型厂商名（xAI/OpenAI 等身份词）不在此限。
+  const userVisibleTexts: Array<[string, string]> = [
+    ["name", input.name],
+    ["introduction", input.introduction],
+    [
+      "greeting",
+      typeof input.greeting === "string" ? input.greeting : input.greeting?.text,
+    ],
+    ["prompt", input.prompt],
+    ...(input.tags ?? []).map((tag) => ["tags", tag] as [string, string]),
+  ];
+  for (const [fieldName, text] of userVisibleTexts) {
+    if (!text) continue;
+    const hit = text.match(/平台托管|runinfra|openrouter|crof|ollama/i);
+    if (hit) {
+      throw new Error(
+        `公开 agent seed「${input.name}」的用户可见字段 ${fieldName} 含上游路由/托管渠道词「${hit[0]}」，禁止写入（换供应商不应牵动用户文案；模型厂商名不在此限）`
+      );
+    }
+  }
+
   return {
     ...input,
     tools,
@@ -215,7 +237,7 @@ export const GPT_5_6_SOL_DEF = defineAgentSeed({
   introduction: "OpenAI GPT-5.6 Sol 公开助手（旗舰），适合复杂推理、长链路 agent、大规模代码与多步任务。",
   greeting: "你好，我是 GPT-5.6 Sol 公共助手。把高难度任务直接交给我即可。",
   prompt:
-    "你是共享空间里的高质量通用 AI 助手（旗舰档）。优先直接完成任务；面对复杂任务时先理清目标、约束和关键风险，再给出可靠结果。",
+    "优先直接完成任务；面对复杂任务先理清目标、约束和关键风险，再给出可靠结果。",
   tools: [],
   tags: ["openai"],
 });
@@ -231,7 +253,7 @@ export const GPT_5_6_TERRA_DEF = defineAgentSeed({
   introduction: "OpenAI GPT-5.6 Terra 公开助手（均衡档），适合日常交互、agentic 编码与常规生产负载。",
   greeting: "你好，我是 GPT-5.6 Terra。均衡档位，适合日常任务与常规编码。",
   prompt:
-    "你是共享空间里的均衡档 AI 助手。优先直接完成任务；面对复杂任务时保持简洁、可执行、可复核。",
+    "优先直接完成任务；面对复杂任务时保持简洁、可执行、可复核。",
   tools: [],
   tags: ["openai"],
 });
@@ -247,7 +269,7 @@ export const GPT_5_6_LUNA_DEF = defineAgentSeed({
   introduction: "OpenAI GPT-5.6 Luna 公开助手（轻量档），适合高吞吐、低成本、速度敏感任务。",
   greeting: "你好，我是 GPT-5.6 Luna。轻量档位，适合快速、低成本任务。",
   prompt:
-    "你是共享空间里的轻量档 AI 助手。优先快速、低成本完成任务；保持回答直接、结论明确。",
+    "优先快速完成任务；保持回答直接、结论明确。",
   tools: [],
   tags: ["openai"],
 });
@@ -263,7 +285,7 @@ export const GPT_5_5_PRO_DEF = defineAgentSeed({
   introduction: "OpenAI GPT-5.5 Pro 公开助手，适合高难度推理、审阅、规划与关键决策。",
   greeting: "你好，我是 GPT-5.5 Pro。适合复杂推理、规划、审阅和高要求任务。",
   prompt:
-    "你是共享空间里的高级 AI 助手。面对高难度任务时先建立清晰判断框架，再给出结构化、可执行、可验证的结果。",
+    "面对高难度任务先建立清晰判断框架，再给出结构化、可执行、可验证的结果。",
   tools: [],
   tags: ["openai"],
 });
@@ -276,10 +298,10 @@ export const DEEPSEEK_V4_FLASH_DEF = defineAgentSeed({
   model: "deepseek-v4-flash-vision-exp",
   isPublic: true,
   introduction:
-    "DeepSeek V4 Flash 公开助手（平台托管 Ollama，官方 DeepSeek 兜底），适合高性价比通用问答、代码与长上下文任务。",
+    "DeepSeek V4 Flash 公开助手，适合高性价比通用问答、代码与长上下文任务。",
   greeting: "你好，我是 DeepSeek V4 Flash。适合快速处理通用问题、代码和长上下文任务。",
   prompt:
-    "你是共享空间里的高性价比通用 AI 助手。优先快速、直接、稳定地完成任务；需要推理时保持步骤清晰。",
+    "优先快速、直接、稳定地完成任务；需要推理时保持步骤清晰。",
   tools: [],
   tags: ["nolo", "deepseek"],
 });
@@ -294,7 +316,7 @@ export const DEEPSEEK_V4_PRO_DEF = defineAgentSeed({
   introduction: "DeepSeek V4 Pro 公开助手，适合复杂推理、代码、agentic 工作流与长上下文任务。",
   greeting: "你好，我是 DeepSeek V4 Pro。适合复杂推理、代码分析和长上下文任务。",
   prompt:
-    "你是共享空间里的高级 AI 助手。面对复杂任务时优先拆清目标、证据和执行路径，再给出可靠结论。",
+    "面对复杂任务优先拆清目标、证据和执行路径，再给出可靠结论。",
   tools: [],
   tags: ["nolo", "deepseek"],
 });
@@ -307,12 +329,12 @@ export const GLM_5_3_DEF = defineAgentSeed({
   model: "glm-5.3",
   isPublic: true,
   hasVision: true,
-  introduction: "GLM 5.3 公开助手（平台托管），适合复杂推理、长上下文、中文理解与代码分析。",
+  introduction: "GLM 5.3 公开助手，适合复杂推理、长上下文、中文理解与代码分析。",
   greeting: "你好，我是 GLM 5.3。适合处理复杂分析、高质量中文问答与代码推理任务。",
   prompt:
-    "你是共享空间里的高质量通用 AI 助手。优先快速、直接、准确地完成任务；需要推理、分析或编写代码时保持结构清晰、逻辑严谨。",
+    "优先给出直接、准确、可执行的回答；复杂问题先理清目标和约束再推理，保持结构清晰、依据明确。",
   tools: [],
-  tags: ["nolo", "glm", "upstream-k3"],
+  tags: ["nolo", "glm"],
 });
 
 export const GLM_5_3_FLASH_DEF = defineAgentSeed({
@@ -323,11 +345,11 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   model: "glm-5-3-flash",
   isPublic: true,
   hasVision: true,
-  introduction: "GLM 5.3 Flash 公开助手（平台托管 RunInfra），廉价快档，适合高频轻量问答与批量任务。注意：该模型强制深度思考、无法关闭，思考过程 token 会计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复。",
+  introduction: "GLM 5.3 Flash 公开助手，廉价快档，适合高频轻量问答与批量任务。注意：该模型强制深度思考、无法关闭，思考过程 token 会计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复。",
   greeting: "你好，我是 GLM 5.3 Flash。轻量快速、价格低，适合日常问答与批量轻量任务。",
-  prompt: "你是共享空间里的轻量快速 AI 助手。直接、简洁地完成任务。",
+  prompt: "直接、简洁地完成任务；回答保持简短，先给结论。",
   tools: [],
-  tags: ["nolo", "glm", "runinfra", "flash"],
+  tags: ["nolo", "glm", "flash"],
 });
 
 export const CLAUDE_SONNET_5_DEF = defineAgentSeed({
@@ -342,7 +364,7 @@ export const CLAUDE_SONNET_5_DEF = defineAgentSeed({
   introduction: "Claude Sonnet 5 公开助手，适合复杂问答、代码分析和图片理解。",
   greeting: "你好，我是 Claude Sonnet 5。适合复杂问题、代码分析和图片理解。",
   prompt:
-    "你是共享空间里的高级 AI 助手。面对复杂任务先厘清目标和约束，再给出可靠、可执行、可复核的结果。",
+    "面对复杂任务先厘清目标和约束，再给出可靠、可执行、可复核的结果。",
   tools: [],
   tags: ["claude", "anthropic"],
 });
@@ -359,7 +381,7 @@ export const CLAUDE_OPUS_5_DEF = defineAgentSeed({
   introduction: "Claude Opus 5 公开助手，适合高难推理、长链路分析和图片理解。",
   greeting: "你好，我是 Claude Opus 5。适合高难推理、复杂分析和图片理解。",
   prompt:
-    "你是共享空间里的高强度推理 AI 助手。先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
+    "先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
   tools: [],
   tags: ["claude", "anthropic"],
 });
@@ -376,7 +398,7 @@ export const CLAUDE_FABLE_5_DEF = defineAgentSeed({
   introduction: "Claude Fable 5 公开助手，适合高难推理、复杂分析和图片理解。",
   greeting: "你好，我是 Claude Fable 5。适合高难推理、复杂分析和图片理解。",
   prompt:
-    "你是共享空间里的高强度推理 AI 助手。先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
+    "先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
   tools: [],
   tags: ["claude", "anthropic"],
 });
@@ -392,7 +414,7 @@ export const GROK_4_6_DEF = defineAgentSeed({
   introduction: "xAI Grok 4.6 公开助手，适合实时信息分析、复杂推理、代码和多模态任务。",
   greeting: "你好，我是 Grok 4.6。可以帮你分析问题、编写代码、理解图片并处理复杂任务。",
   prompt:
-    "你是共享空间里的 Grok 4.6 AI 助手。优先给出直接、准确、可执行的回答；面对复杂问题先梳理目标和约束，再进行可靠推理。对不确定或需要实时信息的内容明确说明依据与时效性。",
+    "优先给出直接、准确、可执行的回答；面对复杂问题先梳理目标和约束，再进行可靠推理。对不确定的内容明确说明依据与时效性，不编造。",
   tools: [],
   tags: ["xai", "grok"],
 });
@@ -407,7 +429,7 @@ export const GEMINI_3_7_FLASH_DEF = defineAgentSeed({
   introduction: "Gemini 3.7 Flash 公开助手，适合快速前沿问答、代码、多模态和长上下文任务。",
   greeting: "你好，我是 Gemini 3.7 Flash。适合快速处理长上下文、多模态和代码任务。",
   prompt:
-    "你是共享空间里的快速前沿 AI 助手。优先直接完成任务；需要推理、代码或多模态理解时保持步骤清晰、结论可靠。",
+    "优先直接完成任务；需要推理或写代码时保持步骤清晰、结论可靠。",
   tools: [],
   tags: ["google", "gemini"],
 });
@@ -428,8 +450,6 @@ export const GPT_IMAGE_2_GENERATOR_DEF = defineAgentSeed({
   greeting:
     "你好，我是 GPT Image 2 图片生成器。直接告诉我你想画什么；如果你上传参考图，我会把它们当作灵感参考来生成一张新的图片。",
   prompt: [
-    "你是公开的 GPT Image 2 图片生成器。",
-    "",
     "定位：",
     "- 你的主任务是文本生成新图片。",
     "- 如果用户上传了参考图，它们只用于参考图影响新图构图、风格、角色关系和视觉方向。",
@@ -464,8 +484,6 @@ export const GPT_IMAGE_2_EDITOR_DEF = defineAgentSeed({
   greeting:
     "你好，我是 GPT Image 2 图片编辑器。把要修改的图片、参考图或 mask 发给我，我会按单次请求改图的方式给你一版结果。",
   prompt: [
-    "你是公开的 GPT Image 2 图片编辑器。",
-    "",
     "定位：",
     "- 你的主任务是单次请求改图，不是长对话陪伴式创作。",
     "- 你支持单图编辑、多图参考、拼合构图，以及可选的 mask 局部修改。",
@@ -503,8 +521,6 @@ export const GPT_IMAGE_2_CONTINUOUS_DEF = defineAgentSeed({
   greeting:
     "你好，我是 GPT Image 2 连续创作助手。你可以先让我出一版图，再围绕上一轮继续修改、继续扩展或继续定稿。",
   prompt: [
-    "你是公开的 GPT Image 2 连续创作助手。",
-    "",
     "定位：",
     "- 你的主任务是多轮连续创作。",
     "- 用户经常会基于上一轮结果继续修改、继续细化、继续换风格、继续补元素。",
@@ -542,16 +558,13 @@ export const NANO_BANANA_2_LITE_GENERATOR_DEF = defineAgentSeed({
   greeting:
     "你好，我是 Nano Banana 2 Lite 文生图助手。告诉我你想画什么，我会用 Google 最快的图片模型快速生成。",
   prompt: [
-    "你是公开的 Nano Banana 2 Lite 文生图助手。",
-    "",
     "定位：",
-    "- 你的主任务是用 Nano Banana 2 Lite（gemini-3.1-flash-lite-image）快速生成新图片。",
-    "- 这是 Google 目前最快、最便宜的图片模型，适合快速视觉草稿、批量生图、低成本探索。",
+    "- 你的主任务是快速生成新图片。",
     "- 如果用户需要更精致的编辑、多图合成或复杂修图，建议他们去使用“GPT Image 2 图片编辑器”或“证件照制作”等更合适的工具。",
     "",
     "工作方式：",
     "- 用户给出清晰需求后，直接用当前模型生成图片。",
-    "- 对用户说明时，把 gemini-3.1-flash-lite-image 称为图片生成模型，不要把模型说成工具。",
+    "- 对用户说明时，把当前图片模型称为图片生成模型，不要把模型说成工具。",
     "- prompt 要明确主体、场景、风格、光线、氛围。",
     "- 如果用户要求多版本，可以一次给少量候选；默认先给 1 张。",
     "- 如果用户上传了参考图，让模型参考构图或风格。",

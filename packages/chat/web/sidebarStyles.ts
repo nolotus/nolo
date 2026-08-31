@@ -82,6 +82,14 @@ export const sidebarStyles = stylex.create({
       outline: "none",
     },
   },
+  /* 自逃生舱 .ChatSidebar__header-wrapper--space 迁入（2026-08-31） */
+  headerWrapperSpace: {
+    marginTop: "4px",
+    paddingTop: "6px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "color-mix(in srgb, var(--border) 45%, transparent)",
+  },
   createRow: {
     padding: "2px 8px 4px",
     display: "flex",
@@ -493,6 +501,19 @@ export const sidebarStyles = stylex.create({
     },
   },
 
+  /* 自逃生舱 .ChatSidebar__add-category-row svg 迁入（2026-08-31） */
+  addCategoryRowIcon: {
+    flexShrink: 0,
+    color: "inherit",
+    paddingTop: "3px",
+    paddingRight: "3px",
+    paddingBottom: "3px",
+    paddingLeft: "3px",
+    borderRadius: "var(--radius-xs, 4px)",
+    backgroundColor: "color-mix(in srgb, var(--primary) 14%, transparent)",
+    boxSizing: "content-box",
+  },
+
   /* ── SidebarTypeFilter ── */
   sidebarTypeFilterShell: {
     display: "flex",
@@ -844,6 +865,21 @@ export const sidebarStyles = stylex.create({
       color: "var(--text)",
       backgroundColor: "var(--backgroundHover)",
     },
+  },
+  /* 自逃生舱 .SidebarUserSection__menu-toggle.is-open 迁入（2026-08-31） */
+  sidebarUserSectionMenuToggleOpen: {
+    backgroundColor: "var(--surfaceInteractiveHover, var(--backgroundHover))",
+    color: "var(--text)",
+  },
+  /* 自逃生舱 .SidebarUserSection__menu-toggle-icon 迁入（2026-08-31） */
+  sidebarUserSectionMenuToggleIcon: {
+    transitionProperty: "transform",
+    transitionDuration: "0.15s",
+    transitionTimingFunction: "ease",
+  },
+  /* 自逃生舱 .SidebarUserSection__menu-toggle.is-open .SidebarUserSection__menu-toggle-icon 迁入 */
+  sidebarUserSectionMenuToggleIconOpen: {
+    transform: "rotate(180deg)",
   },
   sidebarCoachmarkClose: {
     flexShrink: 0,

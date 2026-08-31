@@ -184,8 +184,8 @@ const STRINGS = {
     zh: "[nolo] 当前 agent 似乎额度/速率受限（429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
   },
   balanceExhaustedHint: {
-    en: "[nolo] Insufficient balance. Your message is saved in this dialog — top up, then send again or say \"continue\".",
-    zh: "[nolo] 余额不足。你刚发的话已保存在当前对话里——充值后直接再说一句或说「继续」即可，不会丢上下文。",
+    en: "[nolo] Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
+    zh: "[nolo] 你刚发的话已保存在当前对话里——充值后直接再说一句或说「继续」即可接着聊，不会丢上下文。",
   },
   dialogPreservedHint: {
     en: "[nolo] This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",

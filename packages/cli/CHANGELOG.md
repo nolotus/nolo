@@ -1,4 +1,18 @@
 
+## 0.51.0-alpha.1
+
+## 0.51.0-alpha.1 (2026-08-31)
+
+### Features
+
+* **plaza:** 公开 seed 用户文案守门 + 清理上游渠道词 ([15632a3](https://github.com/nolotus/bun-nolo/commit/15632a31eb3620c7c69a98d7d0db7fbebdc5af03))
+
+### Bug Fixes
+
+* **cli:** 402 余额失败行只留一句人话，充值指引交给本地化提示 ([402d1d6](https://github.com/nolotus/bun-nolo/commit/402d1d69cc10b2b6069794714725e5cfbcc42e0c))
+* **cli:** agent run 失败文案降噪与 402 余额提示可读化 ([d8e6cde](https://github.com/nolotus/bun-nolo/commit/d8e6cde2a06fa9ed65d6c723ca98fdcb4c5e9d41))
+
+
 ## 0.50.0-alpha.1
 
 ## 0.50.0-alpha.1 (2026-08-31)

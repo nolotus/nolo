@@ -65,6 +65,32 @@ async function loadRunLocalAgentTurn() {
 
 type ReviewDecisionStatus = "passed" | "needs_changes" | "blocked";
 
+// 剥离 provider 回显的调试噪音：`raw="..."` / `headers=[...]` 仅供诊断，
+// 不应出现在面向用户的错误文案中。
+const stripDebugNoise = (s: string) =>
+  s
+    .replace(/\s*raw="[\s\S]*"/g, "")
+    .replace(/\s*raw=\S+/g, "")
+    .replace(/\s*headers=\[[^\]]*\]/g, "")
+    .replace(/\s*headers=\S+/g, "")
+    .trim();
+
+function extractEmbeddedErrorMessage(message: string): string | undefined {
+  const match = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(message);
+  if (!match) return undefined;
+
+  try {
+    const decoded = JSON.parse(`"${match[1]}"`);
+    if (typeof decoded !== "string" || !decoded.trim()) return undefined;
+    // 控制字符（\u0000-\u001f、\u007f）在 \uXXXX 解码后会变成真实终端序列
+    // （ESC 清屏 / 光标移动），provider 可控文本必须先剥离再进用户文案。
+    const cleaned = decoded.replace(/[\u0000-\u001f\u007f]/g, "");
+    return cleaned.trim() ? cleaned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveCurrentMachineId(options: RunAgentTurnOptions) {
   return options.currentMachineIdResolver
     ? options.currentMachineIdResolver(options.env)
@@ -399,9 +425,16 @@ const HISTORY_REPLAY_REJECTION_RE =
   /invalid_request_error|invalid\s+tool\s+call\s+arguments?/i;
 
 /**
- * Shared framing for every local-run failure message. Keeps the wording of
- * the "auto runtime: local run unavailable" line consistent so the TUI and
- * tests can match on a stable prefix/suffix.
+ * Shared framing for the five non-402 local-run failure builders below.
+ * The 402 branch deliberately does not use this prefix: the TUI immediately
+ * follows it with a localized balance hint, so the old bilingual scaffolding
+ * made the failure line noisy and repetitive.
+ *
+ * Tradeoff accepted in review (MEDIUM-info, option ①): on the plain CLI /
+ * headless path (options.output.write here) no hint line follows, so the 402
+ * output carries no explicit top-up guidance. The extracted provider message
+ * ("余额不足，无法继续访问（需要余额 > 1，当前0.923167）") is self-explanatory,
+ * so the guidance duplication was dropped on purpose.
  */
 const RUN_UNAVAILABLE_PREFIX = "[nolo] auto runtime: local run unavailable";
 const NO_FALLBACK = "Not falling back to server.";
@@ -505,7 +538,7 @@ const FAILURE_BUILDERS: Record<
   upstream: buildUpstreamFailure,
 };
 
-function describeLocalRunFailure(
+export function describeLocalRunFailure(
   message: string,
   rawError?: unknown,
 ): string {
@@ -536,15 +569,6 @@ function describeLocalRunFailure(
   if (
     /PLATFORM_LLM_BUSY|服务器紧张/.test(message)
   ) {
-    // 剥离诊断噪音：`raw="..."` / `headers=[...]` 是调试用回显，对用户
-    // 无意义且会把 busy 文案撑得冗长。保留可行动的一行提示。
-    const stripDebugNoise = (s: string) =>
-      s
-        .replace(/\s*raw=".*"/g, "")
-        .replace(/\s*raw=\S+/g, "")
-        .replace(/\s*headers=\[[^\]]*\]/g, "")
-        .replace(/\s*headers=\S+/g, "")
-        .trim();
     const shown = stripDebugNoise(
       message.replace(/\s*\(PLATFORM_LLM_BUSY\)\s*$/, ""),
     );
@@ -562,10 +586,13 @@ function describeLocalRunFailure(
       message,
     )
   ) {
-    return (
-      `${RUN_UNAVAILABLE_PREFIX} (${message}). ${NO_FALLBACK} ` +
-      `Top up your balance, then send again (or say "继续") — if a dialog was kept, context is preserved.\n`
+    const cleanedMessage = stripDebugNoise(message);
+    const fallback = cleanedMessage.replace(
+      /^[^:]*provider failed: HTTP \d{3}\s*/,
+      "",
     );
+    const shownMessage = extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
+    return `[nolo] ${shownMessage}\n`;
   }
 
   const cls = classifyLocalRunError(message);

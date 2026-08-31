@@ -329,7 +329,7 @@ const ChatSidebar: React.FC = () => {
   const spaceSwitcherHeader = (
     <div
       className="ChatSidebar__header-wrapper ChatSidebar__header-wrapper--space"
-      data-hook="chat-esc-sidebar-header-space"
+      {...stylex.props(sidebarStyles.headerWrapperSpace)}
     >
       <div
         className="ChatSidebar__create-row"
@@ -517,7 +517,11 @@ const ChatSidebar: React.FC = () => {
                 aria-label={t("space:create_new_category", "新建分类")}
                 {...stylex.props(sidebarStyles.addCategoryRow)}
               >
-                <LuFolderPlus size={15} aria-hidden="true" />
+                <LuFolderPlus
+                  size={15}
+                  aria-hidden="true"
+                  {...stylex.props(sidebarStyles.addCategoryRowIcon)}
+                />
                 <span>{t("space:create_new_category", "新建分类")}</span>
               </button>
             )}
@@ -535,7 +539,11 @@ const ChatSidebar: React.FC = () => {
               aria-label={t("space:create_new_category", "新建分类")}
               {...stylex.props(sidebarStyles.addCategoryRow)}
             >
-              <LuFolderPlus size={15} aria-hidden="true" />
+              <LuFolderPlus
+                size={15}
+                aria-hidden="true"
+                {...stylex.props(sidebarStyles.addCategoryRowIcon)}
+              />
               <span>{t("space:create_new_category", "新建分类")}</span>
             </button>
           </div>

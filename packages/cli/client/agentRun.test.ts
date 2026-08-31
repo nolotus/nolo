@@ -4,6 +4,7 @@ import { Writable } from "node:stream";
 import { expectNoRetiredTaskOrchestrationTerms } from "../../../scripts/helpers/retiredTaskOrchestrationTerms";
 import {
   classifyReviewDecisionStatus,
+  describeLocalRunFailure,
   runAgentTurn,
 } from "./agentRun";
 import { findServerPlatformTools } from "./agentRunPlatformTools";
@@ -831,6 +832,36 @@ describe("cli agent run client", () => {
     expect(String((result.localError as Error).message)).toContain("UPSTREAM_402");
   });
 
+  test("cleans embedded JSON and provider debug noise from local 402 output", () => {
+    const message =
+      'local run unavailable (platform provider failed: HTTP 402 {"error":{"message":"余额不足，无法继续访问（需要余额 > 1，当前0.923167）。","code":"INSUFFICIENT_BALANCE","details":{}}} raw="{"error":{"message":"余额不足","code":"INSUFFICIENT_BALANCE","details":{"requiredBalance":1,"currentBalance":0.923167}}}" headers=[server=Caddy content-length=188])';
+    const output = describeLocalRunFailure(message);
+
+    expect(output).toBe(
+      "[nolo] 余额不足，无法继续访问（需要余额 > 1，当前0.923167）。\n",
+    );
+    expect(output).toContain("余额不足，无法继续访问（需要余额 > 1，当前0.923167）");
+    expect(output).not.toContain("local run unavailable");
+    expect(output).not.toContain("Not falling back");
+    expect(output).not.toContain("Top up your balance");
+    expect(output).not.toContain('raw="');
+    expect(output).not.toContain("headers=[");
+    expect(output).not.toContain('{"error"');
+    expect(output).not.toContain("provider failed");
+  });
+
+  test("falls back to cleaned plain text when local 402 JSON extraction fails", () => {
+    const output = describeLocalRunFailure(
+      'local provider failed: HTTP 402 Insufficient Balance (UPSTREAM_402) raw="debug" headers=[server=Caddy]',
+    );
+
+    expect(output).toContain("[nolo] Insufficient Balance (UPSTREAM_402)");
+    expect(output).not.toContain('raw="');
+    expect(output).not.toContain("headers=[");
+    expect(output).not.toContain("provider failed");
+    expect(output).not.toContain("Top up your balance");
+  });
+
   test("auto mode surfaces dialogId after local 402 without falling back to server", async () => {
     const output = new CaptureOutput();
     let fetchCalls = 0;
@@ -877,9 +908,10 @@ describe("cli agent run client", () => {
     expect(result.localError).toBeInstanceOf(Error);
     expect(String((result.localError as Error).message)).toContain("UPSTREAM_402");
     expect(fetchCalls).toBe(0);
-    expect(output.text()).toContain("local run unavailable");
-    expect(output.text()).toContain("Not falling back to server");
-    expect(output.text()).toContain("Top up your balance");
+    expect(output.text()).toContain("[nolo] Insufficient Balance (UPSTREAM_402)");
+    expect(output.text()).not.toContain("local run unavailable");
+    expect(output.text()).not.toContain("Not falling back to server");
+    expect(output.text()).not.toContain("Top up your balance");
     expect(output.text()).not.toContain("Fix the local credential/config");
   });
 

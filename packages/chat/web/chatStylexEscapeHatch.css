@@ -374,6 +374,9 @@
  * 保留原因：侧边栏内的空间切换器、搜索框内部表单控件、滚动条 webkit 伪元素、
  * 单一分区自适应高度链及动画 keyframes 无法用 StyleX 静态规则表达。 */
 
+/* 白名单保留：跨组件后代中和器（TopbarSpaceSwitcher 共享组件内部节点，
+ * 侧边栏无法为其挂 stylex.props）——待共享组件原生 bare 变体后清理。
+ * 另：render 包 sidebarSpaceSwitcherLayout.source.test.ts 断言此选择器存在。 */
 /* .ChatSidebar__scope-wrapper .TpSw--sidebar */
 [data-hook~="chat-esc-sidebar-scope-wrapper"] .TpSw--sidebar,
 .ChatSidebar__scope-wrapper .TpSw--sidebar {
@@ -400,15 +403,9 @@
   height: var(--sidebar-icon-size);
 }
 
-/* .ChatSidebar__header-wrapper--space */
-.ChatSidebar__header-wrapper--space,
-[data-hook~="chat-esc-sidebar-header-space"] {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-}
-
-/* .ChatSidebar__search-wrapper descendant rules */
+/* 白名单保留：跨组件后代中和器（search 共享组件内部结构），StyleX 无法表达
+ * —— 待共享组件原生 bare 变体后清理。
+ * .ChatSidebar__search-wrapper descendant rules */
 .ChatSidebar__search-wrapper .ChatSidebar__search-form,
 .ChatSidebar__search-wrapper .search-form,
 [data-hook~="chat-esc-sidebar-search-wrapper"] .ChatSidebar__search-form,
@@ -437,6 +434,7 @@
   display: none;
 }
 
+/* 白名单保留：::-webkit-scrollbar 系列伪元素，StyleX 静态 API 不支持。 */
 /* .ChatSidebar__scroll-area scrollbars */
 .ChatSidebar__scroll-area:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::-webkit-scrollbar,
 [data-hook~="chat-esc-sidebar-scroll-area"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::-webkit-scrollbar {
@@ -460,6 +458,8 @@
   background-color: var(--border);
 }
 
+/* 白名单保留：::-webkit-scrollbar 伪元素 + html[data-nolo-desktop] 祖先条件，
+ * 二者 StyleX 均无法表达。 */
 /* .SidebarVirtualizedList__scroller scrollbars */
 .SidebarVirtualizedList__scroller:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::-webkit-scrollbar,
 [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::-webkit-scrollbar {
@@ -480,6 +480,8 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   display: none !important;
 }
 
+/* 白名单保留：跨组件后代中和器（CategorySection 内 SidebarVirtualizedList
+ * 滚动容器高度链，含 !important），StyleX 无法表达该后代关系。 */
 .CategorySection__content-inner .SidebarVirtualizedList__scroller:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-category-inner"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   height: auto !important;
@@ -487,6 +489,8 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   flex: 0 1 auto;
 }
 
+/* 白名单保留：单分区自适应高度链，依赖 .ChatSidebar__content--single-section
+ * 祖先状态贯穿多层子组件，StyleX 静态原子类无法表达跨组件后代选择。 */
 .ChatSidebar__content--single-section .CategorySection:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-sidebar-single-section"] [data-hook~="chat-esc-category-section"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   flex: 1;
@@ -515,13 +519,7 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   min-height: 0;
 }
 
-.CategorySection__empty-hint:hover,
-[data-hook~="chat-esc-category-empty-hint"]:hover {
-  opacity: 0.8;
-  background: var(--backgroundHover);
-  border-color: var(--primaryGhost);
-}
-
+/* 白名单保留：@container 容器查询，StyleX 不支持。 */
 @container (max-width: 250px) {
   .SidebarTypeFilter:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-sidebar-type-filter"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
@@ -542,27 +540,15 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   }
 }
 
+/* 白名单保留：相邻兄弟选择器 `+`，StyleX 静态 API 不支持。 */
 .AllViewSidebar__search-group + .AllViewSidebar__search-group,
 [data-hook~="chat-esc-allview-search-group"] + [data-hook~="chat-esc-allview-search-group"] {
   margin-top: 10px;
 }
 
-.SidebarUserSection__menu-toggle.is-open:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--text);
-}
 
-.SidebarUserSection__menu-toggle-icon,
-[data-hook~="chat-esc-user-menu-icon"] {
-  transition: transform 0.15s ease;
-}
-
-.SidebarUserSection__menu-toggle.is-open .SidebarUserSection__menu-toggle-icon,
-[data-hook~="chat-esc-user-menu-toggle"][data-hook~="chat-esc-user-menu-open"] [data-hook~="chat-esc-user-menu-icon"] {
-  transform: rotate(180deg);
-}
-
+/* 白名单保留：@media + 跨组件后代中和器（PortalDropdown 内 topbar-user-menu__*
+ * 由 topbar 侧组件渲染，侧边栏无法挂载 stylex.props）。 */
 @media (max-width: 768px) {
   .SidebarUserSection__dropdown .topbar-user-menu__item,
 [data-hook~="chat-esc-user-dropdown"] .topbar-user-menu__item {
@@ -595,16 +581,9 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   }
 }
 
-.ChatSidebar__add-category-row svg,
-[data-hook~="chat-esc-add-category-row"] svg {
-  flex-shrink: 0;
-  color: inherit;
-  padding: 3px;
-  border-radius: var(--radius-xs, 4px);
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  box-sizing: content-box;
-}
 
+/* 白名单保留：跨组件后代中和器（MyContentCollection__batch-* 由 app 包组件渲染，
+ * 侧边栏内需中和其卡片白底/边框），StyleX 无法表达该后代关系。 */
 .AllViewSidebar__batch-bar-wrapper.is-selection .MyContentCollection__batch-bar,
 [data-hook~="chat-esc-allview-batch-wrapper"].is-selection .MyContentCollection__batch-bar {
   background: transparent;
@@ -647,6 +626,8 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   gap: 6px;
 }
 
+/* 白名单保留：@keyframes 定义（sidebarStyles.ts 的 animationName 引用它们，
+ * 删除会造成悬空引用）。 */
 @keyframes chatSidebarEmptyFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -658,6 +639,7 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   100% { opacity: 0.6; }
 }
 
+/* 白名单保留：prefers-reduced-motion 媒体查询 + 子选择器 `> *`。 */
 @media (prefers-reduced-motion: reduce) {
   .ChatSidebar__add-category-row:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .AllViewSidebar__nav-row--favorites-header:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
