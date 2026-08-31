@@ -19,7 +19,7 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 观察/停止（wait/signal/proc 语义）。何时派发见「多 Agent 协作」段；本段只讲派发之后怎么盯、怎么排错。
 
-1. 盯梢：**异步派发后立即收尾，等终态通知。** 要立即拿结果就别用异步：<100s 子任务直接 startAgentRun({ wait: true })；已异步派出的用 controlAgentRun(action:"wait", runId) 阻塞到终态。支持终态唤醒的环境（桌面 TUI）run 到终态自动摘要唤醒你，无并行工作则一句话收尾；没有终态唤醒的环境（裸 CLI、服务端 runtime）用 wait 阻塞，同样不要自己循环查。
+1. 盯梢：**异步派发后立即收尾，等终态通知。** 阻塞等待（startAgentRun wait:true / controlAgentRun wait）的真实代价是冻结对话——用户在等待期间无法插话，编排者也无法并行推进其他工作，因此阻塞等待仅限三种情况：① 预计 <100s 且马上要用结果的子任务；② 用户明确要求同步等待或正在与该子任务对话；③ 环境不支持终态唤醒，且当前没有可并行推进的其他工作（此时 startAgentRun 直接 wait:true，已异步派出的用 controlAgentRun(action:"wait", runId) 阻塞到终态）。支持终态唤醒的环境（桌面 TUI / web）：多分钟级 run 一律异步派发并立即收尾结束回合（一句话说明后续动作即可），终态自动摘要唤醒后继续；串行依赖（执行→审查→集成）不是阻塞对话的理由——靠 wake 接力即可。没有终态唤醒的环境（裸 CLI、服务端 runtime）才用 wait 阻塞，同样不要自己循环查。
 2. 等待/禁止轮询/禁空转/别复述 status 的语义以 startAgentRun 与 controlAgentRun 工具描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：多个独立子任务一次派完，之后等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因它们恰好共用同一执行 agent/通道而自行加「通道串行」的保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有任务间存在真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错：先分诊再下结论。① 复核 agentKey 是否照抄自 listAgents（不是就先修 key，不算通道故障）；② 报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；③ 同一已验证 key 上仍失败且错误明确指向通道（429、鉴权失败、machine offline）→ 才记为通道故障。
 4. 判定「派发通道整体不可用」前，至少对 2 个不同候选各完成「已验证 key + 一次真实派发」；候选不足 2 个就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。只有 status=failed/超时或 progress 长时间毫无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态——别假设「派发了就在跑」。`;
@@ -41,7 +41,7 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 
 **派发通道**：
 - 目标记录已声明 delegation.serverBase / runtimeServerBase → 工具自动路由到对应 nolo server，无需重复填 serverBase；用户给出可访问的 server origin 时可传 serverBase 覆盖自动路由，勿臆造地址、勿把 localhost 当远端机器。
-- 通道语义：startAgentRun 异步（wait:false）只表示已启动/排队，**不表示任务完成**；done/failed 后系统用 terminal wake 继续父对话，你再读 child evidence 决定下一步。要短结果直接同步等（wait:true）；要让用户前台实时看到发言，用 runStreamingAgent。
+- 通道语义：startAgentRun 异步（wait:false）只表示已启动/排队，**不表示任务完成**；done/failed 后系统用 terminal wake 继续父对话，你再读 child evidence 决定下一步。仅当预计 <100s 且马上要用结果、用户明确要求同步等待（或正在与该子任务对话）、或环境不支持终态唤醒且无并行工作时，才用 wait:true 同步等（阻塞会冻结对话）；否则一律异步派发，靠终态唤醒接力。要让用户前台实时看到发言，用 runStreamingAgent。
 - 多 Agent 协作不限于代码任务：游戏设计、电影策划、写作、运营、研究等异步分工场景同样适用。
 
 **发散 / 会商（系统级决策机制）**：

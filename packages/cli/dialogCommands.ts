@@ -1,5 +1,7 @@
 import type { AgentCommandDeps } from "./agentCommandSupport";
 import type { CliFetchImpl } from "./cliFetch";
+import { fetchWithTransientRetry } from "./client/localRuntimeFetchRetry";
+import { DRAIN_EXHAUSTED_USER_MESSAGE, isDrainExhaustedResponse } from "core/drainReason";
 import { buildSpaceLookup, getSpaceContentKeys } from "./cliSpaceHelpers";
 import {
   parseUserIdFromAuthToken,
@@ -526,6 +528,21 @@ function isLocalBaseUrl(base: string) {
   }
 }
 
+/**
+ * 共享重试层在 `503 core_draining` 长预算耗尽后，会把 raw JSON body 替换成
+ * `DRAIN_EXHAUSTED_USER_MESSAGE`（仍为 503）。用共享 predicate（与
+ * createDrainExhaustedResponse 同源）识别该响应并把友好文案透传进错误消息，
+ * 用户看到的是「服务正在重启中」而不是干巴巴的 HTTP 503；其余 503 一律不读取
+ * body，防止把 raw JSON 或网关错误页糊进用户可见消息。
+ */
+async function describeReadFailureStatus(res: Response): Promise<string> {
+  if (res.status !== 503) return `HTTP ${res.status}`;
+  if (await isDrainExhaustedResponse(res)) {
+    return `HTTP 503（${DRAIN_EXHAUSTED_USER_MESSAGE}）`;
+  }
+  return "HTTP 503";
+}
+
 async function readDialogOverHttp(args: {
   base: string;
   dialogKey: string;
@@ -545,17 +562,23 @@ async function readDialogOverHttp(args: {
   const buildGetConvMsgsBody = () =>
     JSON.stringify({ dialogId: args.dialogId, dialogKey: args.dialogKey, limit: args.limit });
   const readViaBridge = async () => {
-    const bridgeRes = await args.fetchImpl(`${args.base}/api/dialog-read`, {
-      method: "POST",
-      headers: authHeaders,
-      body: JSON.stringify({
-        dialogKey: args.dialogKey,
-        dialogId: args.dialogId,
-        limit: args.limit,
-      }),
-    });
+    // 读操作（POST 仅携带查询体；服务端聚合读取 meta+msgs，无副作用）：
+    // 重放安全，保持共享层默认 retryNetworkErrors: true，drain 窗口内自动重试。
+    const bridgeRes = await fetchWithTransientRetry(
+      args.fetchImpl,
+      `${args.base}/api/dialog-read`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          dialogKey: args.dialogKey,
+          dialogId: args.dialogId,
+          limit: args.limit,
+        }),
+      },
+    );
     if (!bridgeRes.ok) {
-      throw Object.assign(new Error(`dialog read bridge failed: HTTP ${bridgeRes.status}`), {
+      throw Object.assign(new Error(`dialog read bridge failed: ${await describeReadFailureStatus(bridgeRes)}`), {
         status: bridgeRes.status,
         base: args.base,
       });
@@ -576,14 +599,20 @@ async function readDialogOverHttp(args: {
 
   // messagesOnly fast path: skip the redundant meta GET and fetch messages directly.
   if (args.messagesOnly) {
-    const msgsOnlyRes = await args.fetchImpl(`${args.base}/rpc/getConvMsgs`, {
-      method: "POST",
-      headers: authHeaders,
-      body: buildGetConvMsgsBody(),
-    });
+    // 读操作：/rpc/getConvMsgs 虽是 POST，但语义为查询历史消息，无副作用，
+    // 重放安全 → 保持共享层默认 retryNetworkErrors: true。
+    const msgsOnlyRes = await fetchWithTransientRetry(
+      args.fetchImpl,
+      `${args.base}/rpc/getConvMsgs`,
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: buildGetConvMsgsBody(),
+      },
+    );
     if (!msgsOnlyRes.ok) {
       if (msgsOnlyRes.status === 401 || msgsOnlyRes.status === 403) return readViaBridge();
-      throw Object.assign(new Error(`read dialog messages failed: HTTP ${msgsOnlyRes.status}`), {
+      throw Object.assign(new Error(`read dialog messages failed: ${await describeReadFailureStatus(msgsOnlyRes)}`), {
         status: msgsOnlyRes.status,
         base: args.base,
       });
@@ -591,27 +620,31 @@ async function readDialogOverHttp(args: {
     return { meta: null, msgs: await msgsOnlyRes.json(), source: "http" as ReadSource };
   }
 
-  const metaRes = await args.fetchImpl(
+  // GET 读操作，天然幂等：保持共享层默认 retryNetworkErrors: true。
+  const metaRes = await fetchWithTransientRetry(
+    args.fetchImpl,
     `${args.base}/api/v1/db/read/${encodeURIComponent(args.dialogKey)}`,
-    { headers: { Authorization: `Bearer ${args.authToken}` } }
+    { headers: { Authorization: `Bearer ${args.authToken}` } },
   );
   if (!metaRes.ok) {
     if (metaRes.status === 401 || metaRes.status === 403) return readViaBridge();
-    throw Object.assign(new Error(`read dialog meta failed: HTTP ${metaRes.status}`), {
+    throw Object.assign(new Error(`read dialog meta failed: ${await describeReadFailureStatus(metaRes)}`), {
       status: metaRes.status,
       base: args.base,
     });
   }
   const meta = await metaRes.json();
 
-  const msgsRes = await args.fetchImpl(`${args.base}/rpc/getConvMsgs`, {
+  // 读操作：与 messagesOnly 快路径同一端点，POST 仅为携带查询体，无副作用，
+  // 重放安全 → 保持共享层默认 retryNetworkErrors: true。
+  const msgsRes = await fetchWithTransientRetry(args.fetchImpl, `${args.base}/rpc/getConvMsgs`, {
     method: "POST",
     headers: authHeaders,
     body: buildGetConvMsgsBody(),
   });
   if (!msgsRes.ok) {
     if (msgsRes.status === 401 || msgsRes.status === 403) return readViaBridge();
-    throw Object.assign(new Error(`read dialog messages failed: HTTP ${msgsRes.status}`), {
+    throw Object.assign(new Error(`read dialog messages failed: ${await describeReadFailureStatus(msgsRes)}`), {
       status: msgsRes.status,
       base: args.base,
     });

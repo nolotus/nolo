@@ -10,6 +10,12 @@
  */
 import { describe, expect, it } from "bun:test";
 import { fetchWithTransientRetry } from "./localRuntimeAdapter";
+import * as coreRetry from "core/fetchWithTransientRetry";
+import {
+  defaultLoopbackRequest,
+  fetchWithTransientRetry as retryFromCliShim,
+  isTransientFetchError as transientFromCliShim,
+} from "./localRuntimeFetchRetry";
 
 const json = (status: number, body: unknown, headers?: Record<string, string>) =>
   new Response(JSON.stringify(body), {
@@ -333,5 +339,20 @@ describe("fetchWithTransientRetry", () => {
       }),
     ).rejects.toThrow("ECONNRESET socket hang up");
     expect(calls).toBe(1);
+  });
+});
+
+/**
+ * 共享层下沉后的 re-export 兼容断言：cli 侧既有 import 路径
+ * （./localRuntimeFetchRetry 与 ./localRuntimeAdapter barrel）必须仍然解析到
+ * core 的同一实现对象——防止下沉时漏掉 re-export 造成行为分叉。
+ */
+describe("fetchWithTransientRetry re-export compatibility", () => {
+  it("cli-side import paths resolve to the shared core implementation", () => {
+    expect(retryFromCliShim).toBe(coreRetry.fetchWithTransientRetry);
+    expect(fetchWithTransientRetry).toBe(coreRetry.fetchWithTransientRetry);
+    expect(transientFromCliShim).toBe(coreRetry.isTransientFetchError);
+    // Node-only loopback bypass 仍由 cli 侧导出（core 不携带 node:http(s)）。
+    expect(typeof defaultLoopbackRequest).toBe("function");
   });
 });

@@ -1,4 +1,14 @@
 
+## 0.46.0-alpha.4
+
+## 0.46.0-alpha.4 (2026-08-31)
+
+### Bug Fixes
+
+* **agents:** 阻塞等待仅限三条例外，多分钟 run 一律异步派发靠 wake 接力 ([4022aa4](https://github.com/nolotus/bun-nolo/commit/4022aa4f890affa5e73b10a5747dc8edd513bf55))
+* **cli:** drain 窗口重试保护下沉共享层，读对话/查状态路径不再裸奔 ([5026bec](https://github.com/nolotus/bun-nolo/commit/5026bec175d21c927b2d728a199b436b1b2020b0))
+
+
 ## 0.46.0-alpha.3
 
 ## 0.46.0-alpha.3 (2026-08-30)

@@ -11,6 +11,11 @@ import {
 import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
+import {
+  DRAIN_EXHAUSTED_USER_MESSAGE,
+  isDrainExhaustedResponse,
+} from "core/drainReason";
+import { fetchWithTransientRetry } from "core/fetchWithTransientRetry";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
@@ -54,6 +59,34 @@ const getRuntime = (thunkApi: any) => {
 const authHeaders = (token?: string) =>
   token ? { Authorization: `Bearer ${token}` } : {};
 
+/**
+ * drain 长预算耗尽的显式错误。读 helpers 的兜底 catch（`() => null` /
+ * `() => []` / `catch { return {} }`）必须放行它：耗尽意味着「服务正在重启」，
+ * 吞成 not found / 空结果会把基础设施故障伪装成业务事实，误导 agent 与用户。
+ */
+class DrainExhaustedError extends Error {
+  constructor() {
+    super(DRAIN_EXHAUSTED_USER_MESSAGE);
+    this.name = "DrainExhaustedError";
+  }
+}
+
+function isDrainExhaustedError(error: unknown): error is DrainExhaustedError {
+  return error instanceof DrainExhaustedError;
+}
+
+/**
+ * 共享重试层在 `503 core_draining` 长预算耗尽后返回 503，raw JSON body 已被
+ * 替换为 `DRAIN_EXHAUSTED_USER_MESSAGE`（text/plain，经 core/drainReason 的
+ * isDrainExhaustedResponse 识别，检测与产出同源不漂移）。读到耗尽响应即抛
+ * 显式错误，交由调用方透传友好文案；其余 503 保持原行为（静默 null/空）。
+ */
+async function throwIfDrainExhausted(response: Response): Promise<void> {
+  if (await isDrainExhaustedResponse(response)) {
+    throw new DrainExhaustedError();
+  }
+}
+
 async function readRemoteRecord(args: {
   serverBase?: string;
   token?: string;
@@ -63,11 +96,20 @@ async function readRemoteRecord(args: {
   const serverBase = normalizeServerOrigin(args.serverBase);
   if (!serverBase || !args.token) return null;
   const query = args.includeDeleted ? "?includeDeleted=true" : "";
-  const response = await fetch(
+  // GET 读操作，天然幂等：保持共享层默认 retryNetworkErrors: true（重放安全），
+  // 部署 drain 窗口内的 503 core_draining 由此自动重试。
+  const response = await fetchWithTransientRetry(
+    fetch,
     `${serverBase}/api/v1/db/read/${encodeURIComponent(args.dbKey)}${query}`,
     { headers: authHeaders(args.token) } as RequestInit
   );
-  if (!response.ok) return null;
+  if (!response.ok) {
+    // drain 长预算耗尽：抛显式错误向上透传友好文案，绝不能落到下面的
+    // `return null`——否则 readAgent/readSpace/readSkillDoc 会把「服务正在
+    // 重启」报成误导性的「not found」。其余 503 维持旧行为。
+    await throwIfDrainExhausted(response);
+    return null;
+  }
   const payload = await response.json().catch(() => null);
   return payload?.data ?? payload;
 }
@@ -82,7 +124,10 @@ async function queryRemoteUserRecords(args: {
 }) {
   const serverBase = normalizeServerOrigin(args.serverBase);
   if (!serverBase || !args.token || !args.userId) return [];
-  const response = await fetch(
+  // 读操作：/api/v1/db/query 虽是 POST，但语义为按条件查询记录，无副作用，
+  // 重放安全 → 保持共享层默认 retryNetworkErrors: true。
+  const response = await fetchWithTransientRetry(
+    fetch,
     `${serverBase}/api/v1/db/query/${encodeURIComponent(args.userId)}?limit=${args.limit}`,
     {
       method: "POST",
@@ -96,7 +141,11 @@ async function queryRemoteUserRecords(args: {
       }),
     } as RequestInit
   );
-  if (!response.ok) return [];
+  if (!response.ok) {
+    // drain 长预算耗尽：抛显式错误而不是吞成空列表（同 readRemoteRecord）。
+    await throwIfDrainExhausted(response);
+    return [];
+  }
   const payload = await response.json().catch(() => null);
   return Array.isArray(payload?.data?.data)
     ? payload.data.data
@@ -117,7 +166,12 @@ async function queryBestRecords(
     userId: runtime?.currentUserId,
     type,
     limit,
-  }).catch(() => []);
+  }).catch((error) => {
+    // 兜底 .catch 只吞普通失败；drain 耗尽必须继续向上抛（listDialogs/listAgents
+    // 不能把「服务正在重启」展示成空列表）。
+    if (isDrainExhaustedError(error)) throw error;
+    return [];
+  });
   return remoteRecords;
 }
 
@@ -128,7 +182,11 @@ async function readBestRecord(thunkApi: any, dbKey: string, includeDeleted = fal
     token: runtime?.currentToken,
     dbKey,
     includeDeleted,
-  }).catch(() => null);
+  }).catch((error) => {
+    // 兜底 .catch 只吞普通失败；drain 耗尽必须继续向上抛（见 DrainExhaustedError）。
+    if (isDrainExhaustedError(error)) throw error;
+    return null;
+  });
 }
 
 export const listDialogsFunctionSchema = {
@@ -312,7 +370,9 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
   let messages: any[] = [];
   const serverBase = normalizeServerOrigin(runtime?.currentServer);
   if (serverBase && runtime?.currentToken) {
-    const response = await fetch(`${serverBase}/rpc/getConvMsgs`, {
+    // 读操作：/rpc/getConvMsgs 虽是 POST，但语义为查询历史消息，无副作用，
+    // 重放安全 → 保持共享层默认 retryNetworkErrors: true。
+    const response = await fetchWithTransientRetry(fetch, `${serverBase}/rpc/getConvMsgs`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -323,6 +383,10 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
     if (response?.ok) {
       const payload = await response.json().catch(() => []);
       messages = Array.isArray(payload) ? payload : [];
+    } else if (response) {
+      // drain 长预算耗尽：把共享层注入的友好文案透传为显式错误，不让读失败
+      // 伪装成「0 条消息」；其余 503 维持旧行为（静默空消息）。
+      await throwIfDrainExhausted(response);
     }
   }
 
@@ -463,7 +527,9 @@ async function fetchUserFavoriteAgentMap(thunkApi: any): Promise<Record<string, 
   try {
     const serverBase = normalizeServerOrigin(runtime.currentServer);
     if (!serverBase) return {};
-    const response = await fetch(`${serverBase}/rpc/listFavorites`, {
+    // 读操作：查询当前用户收藏映射，无副作用 → 保持共享层默认重试网络错误；
+    // 耗尽后的 503 经 !ok 分支的 throwIfDrainExhausted 显式上抛（见 catch 放行）。
+    const response = await fetchWithTransientRetry(fetch, `${serverBase}/rpc/listFavorites`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -471,7 +537,12 @@ async function fetchUserFavoriteAgentMap(thunkApi: any): Promise<Record<string, 
       },
       body: JSON.stringify({ targetType: "agent" }),
     } as RequestInit).catch(() => null);
-    if (!response || !response.ok) return {};
+    if (!response || !response.ok) {
+      // drain 长预算耗尽：抛显式错误而不是吞成空 map——空 map 会让 listAgents
+      // 把「服务正在重启」展示成「没有任何收藏」。
+      if (response) await throwIfDrainExhausted(response);
+      return {};
+    }
 
     const data: any = await response.json().catch(() => ({}));
     const favoritedAtByKey: Record<string, number> = {};
@@ -489,7 +560,9 @@ async function fetchUserFavoriteAgentMap(thunkApi: any): Promise<Record<string, 
       }
     }
     return favoritedAtByKey;
-  } catch {
+  } catch (error) {
+    // 兜底 catch 只吞普通失败；drain 耗尽必须继续向上抛。
+    if (isDrainExhaustedError(error)) throw error;
     return {};
   }
 }
@@ -562,7 +635,11 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
       `agent-pub-${record?.id}` === favKey
     );
     if (!isAlreadyPresent) {
-      const favRecord = await readBestRecord(thunkApi, favKey).catch(() => null);
+      const favRecord = await readBestRecord(thunkApi, favKey).catch((error) => {
+        // 收藏富化读失败可容忍，但 drain 耗尽必须向上抛（同 readBestRecord）。
+        if (isDrainExhaustedError(error)) throw error;
+        return null;
+      });
       if (favRecord) {
         const key = favRecord?.dbKey || favRecord?.id || favKey;
         recordsMap.set(key, favRecord);
@@ -683,7 +760,8 @@ export async function listSpacesFunc(_args: any, thunkApi: any): Promise<ToolRes
   const runtime = getRuntime(thunkApi);
   const serverBase = normalizeServerOrigin(runtime?.currentServer);
   if (serverBase && runtime?.currentToken && runtime?.currentUserId) {
-    const response = await fetch(`${serverBase}/rpc/getUserSpaceMemberships`, {
+    // 读操作：查询当前用户加入的空间列表，无副作用 → 保持共享层默认重试网络错误。
+    const response = await fetchWithTransientRetry(fetch, `${serverBase}/rpc/getUserSpaceMemberships`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -707,6 +785,11 @@ export async function listSpacesFunc(_args: any, thunkApi: any): Promise<ToolRes
           displayData: jsonPreview({ total: spaces.length, spaces }),
         };
       }
+    }
+    if (response) {
+      // drain 长预算耗尽：透传共享层注入的友好文案为显式错误，避免落进下方
+      // 误导性的「未登录/不可达」提示；其余 503 维持旧行为。
+      await throwIfDrainExhausted(response);
     }
   }
   throw new Error("listSpaces requires a signed-in user and reachable Nolo server.");

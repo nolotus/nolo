@@ -3,8 +3,11 @@ import {
   formatAgentListCard,
   listAgentsFunc,
   listAgentsFunctionSchema,
+  listSpacesFunc,
   readDialogFunctionSchema,
   readAgentFunctionSchema,
+  readDialogFunc,
+  readSpaceFunc,
 } from "./noloWorkspaceReadTools";
 
 const originalFetch = globalThis.fetch;
@@ -295,5 +298,155 @@ describe("formatAgentListCard", () => {
     expect(card).toContain("Agent 8");
     expect(card).not.toContain("Agent 9");
     expect(card).toContain("… +4 more");
+  });
+});
+
+/**
+ * drain 窗口保护下沉到共享层后，workspace 读工具（/rpc/* 等裸 fetch 路径）必须
+ * 默认继承：503 core_draining 自动重试；预算耗尽后给 agent 的是共享层的友好
+ * 文案（显式错误），而不是 raw JSON，也不是伪装成功的空结果。
+ * retryAfterMs: 1 让 30 次长预算在测试里瞬间走完。
+ */
+describe("workspace read tools drain-window retry (shared layer wiring)", () => {
+  const dialogId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const drain503 = () =>
+    new Response(
+      JSON.stringify({
+        error: "Server draining",
+        reason: "core_draining",
+        retryable: true,
+        retryAfterMs: 1,
+      }),
+      { status: 503, headers: { "content-type": "application/json" } },
+    );
+
+  it("readDialogFunc retries 503 core_draining on /rpc/getConvMsgs and succeeds", async () => {
+    let msgsCalls = 0;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes("/rpc/getConvMsgs")) {
+        msgsCalls += 1;
+        if (msgsCalls <= 2) return drain503();
+        return new Response(JSON.stringify([{ role: "assistant", content: "ok" }]), { status: 200 });
+      }
+      if (url.includes("/api/v1/db/read/")) {
+        return new Response(JSON.stringify({ data: { title: "Drain me" } }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const result = await readDialogFunc({ dialog: dialogId, limit: 25 }, buildThunkApi());
+
+    // 2 次 drain 503 + 1 次成功：读取路径确实走了共享重试。
+    expect(msgsCalls).toBe(3);
+    const raw = result.rawData as any;
+    expect(raw.success).toBe(true);
+    expect(raw.messages).toHaveLength(1);
+    const text = JSON.stringify(result);
+    expect(text).not.toContain("Server draining");
+    expect(text).not.toContain("core_draining");
+  });
+
+  it("listSpacesFunc surfaces the friendly copy after the drain budget is exhausted", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (input: any) => {
+      calls += 1;
+      return drain503();
+    }) as typeof fetch;
+
+    let caught: unknown = null;
+    try {
+      await listSpacesFunc({}, buildThunkApi());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    // 预算耗尽后是友好文案；既不是 raw JSON，也不是误导性的「未登录/不可达」。
+    expect(message).toContain("服务正在重启中，请稍后重试");
+    expect(message).not.toContain("Server draining");
+    expect(message).not.toContain("core_draining");
+    expect(message).not.toContain("listSpaces requires a signed-in user");
+    // /rpc/getUserSpaceMemberships 打满 core_draining 专属长预算（30 次）。
+    expect(calls).toBe(30);
+  });
+
+  it("keeps network-error replay enabled for idempotent read paths (default retryNetworkErrors)", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes("/rpc/getUserSpaceMemberships")) {
+        calls += 1;
+        if (calls <= 2) throw new Error("socket hang up");
+        return new Response(JSON.stringify([{ spaceId: "space-1", spaceName: "Alpha" }]), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const result = await listSpacesFunc({}, buildThunkApi());
+
+    // 读操作（POST 查询，无副作用）重放安全：瞬时网络错误按共享层默认
+    // （retryNetworkErrors: true，本批接线未显式关闭）重试后成功。
+    expect(calls).toBe(3);
+    expect((result.rawData as any).spaces).toHaveLength(1);
+  });
+
+  it("readSpaceFunc surfaces the friendly copy instead of a misleading not-found after drain exhaustion", async () => {
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes("/api/v1/db/read/")) return drain503();
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    let caught: unknown = null;
+    try {
+      await readSpaceFunc({ space: "space-abc" }, buildThunkApi());
+    } catch (error) {
+      caught = error;
+    }
+
+    // 重试耗尽 → 友好文案；绝不能落进 readBestRecord 的 null → 「not found」。
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("服务正在重启中，请稍后重试");
+    expect(message).not.toContain("readSpace not found");
+    expect(message).not.toContain("Server draining");
+    expect(message).not.toContain("core_draining");
+  });
+
+  it("listAgentsFunc surfaces the friendly copy instead of an empty list when /rpc/listFavorites drains out", async () => {
+    let favCalls = 0;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes("/rpc/listFavorites")) {
+        favCalls += 1;
+        return drain503();
+      }
+      if (url.includes("/api/v1/db/query/")) {
+        return new Response(JSON.stringify({ data: { data: agentRecords } }), { status: 200 });
+      }
+      if (url.includes("/api/v1/db/read/")) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    let caught: unknown = null;
+    try {
+      await listAgentsFunc({}, buildThunkApi());
+    } catch (error) {
+      caught = error;
+    }
+
+    // 记录查询成功、收藏映射 drain 耗尽：必须显式报「服务正在重启」，
+    // 不能吞成空 favorites map 让 listAgents 以成功语义展示残缺列表。
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("服务正在重启中，请稍后重试");
+    expect(message).not.toContain("Server draining");
+    expect(message).not.toContain("core_draining");
+    // /rpc/listFavorites 打满 core_draining 专属长预算（30 次）后才上抛。
+    expect(favCalls).toBe(30);
   });
 });

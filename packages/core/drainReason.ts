@@ -55,3 +55,33 @@ export function createDrainExhaustedResponse(original: Response): Response {
     headers,
   });
 }
+
+/**
+ * 判断响应是否为共享重试层 drain 预算耗尽后的友好替换响应
+ * （createDrainExhaustedResponse 的产物：503 + text/plain + DRAIN_EXHAUSTED_USER_MESSAGE 文案）。
+ * 读路径调用方据此区分「耗尽」与普通 503：耗尽必须透传友好提示，不得吞成
+ * not found / 空结果（那会把基础设施故障伪装成业务事实）。
+ *
+ * 这是协议判定，不是模糊文案匹配：除 status 外必须先校验 Content-Type
+ * media-type（忽略 charset/参数、忽略大小写）为 text/plain——
+ * createDrainExhaustedResponse 恒定产出 `text/plain; charset=utf-8`，而普通
+ * 应用 503 几乎总是 JSON；即使某个应用 503 的 JSON body 恰好含同样文案，
+ * 也不能被误判成共享层产物。全文匹配在 clone 上进行，避免消费调用方要用的
+ * 响应体。
+ */
+export async function isDrainExhaustedResponse(
+  response: Response,
+): Promise<boolean> {
+  if (response.status !== 503) return false;
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim()
+    .toLowerCase();
+  if (contentType !== "text/plain") return false;
+  try {
+    return (await response.clone().text()) === DRAIN_EXHAUSTED_USER_MESSAGE;
+  } catch {
+    return false;
+  }
+}

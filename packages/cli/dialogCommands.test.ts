@@ -1809,3 +1809,92 @@ test("dialog read help is served by the internal command", async () => {
     expect(parsed.map((item: any) => item.dialogId)).toEqual([dialogId, secondDialogId]);
   });
 });
+
+/**
+ * drain 窗口保护下沉到共享层（fetchWithTransientRetry）后，dialogCommands 的
+ * 读取路径（/api/dialog-read、/rpc/getConvMsgs、/api/v1/db/read/...）必须默认
+ * 继承：服务端 503 core_draining 自动重试，且任何情况下都不把 raw drain JSON
+ * 糊给用户。retryAfterMs: 1 让重试预算在测试里瞬间走完，不拖慢套件。
+ */
+describe("dialog read drain-window retry (shared layer wiring)", () => {
+  const drain503 = () =>
+    new Response(
+      JSON.stringify({
+        error: "Server draining",
+        reason: "core_draining",
+        retryable: true,
+        retryAfterMs: 1,
+      }),
+      { status: 503, headers: { "content-type": "application/json" } },
+    );
+
+  test("retries 503 core_draining until success and never exposes raw drain JSON", async () => {
+    const chunks: string[] = [];
+    let metaCalls = 0;
+    let msgsCalls = 0;
+
+    const exitCode = await runDialogReadCommand(
+      [dialogId, "25", "--token", authEnv("user-1").AUTH_TOKEN!, "--server", "https://arg.nolo.chat"],
+      {
+        env: authEnv("env-user"),
+        output: { write(chunk) { chunks.push(String(chunk)); } },
+        fetchImpl: testFetch(async (url) => {
+          const target = String(url);
+          if (target.endsWith(`/api/v1/db/read/dialog-user-1-${dialogId}`)) {
+            metaCalls += 1;
+            if (metaCalls <= 2) return drain503();
+            return Response.json({ title: "Drain me", status: "done" });
+          }
+          if (target.endsWith("/rpc/getConvMsgs")) {
+            msgsCalls += 1;
+            return Response.json([{ role: "assistant", content: "done" }]);
+          }
+          // 回退候选（DEFAULT_LOCAL_API_ORIGIN）：非瞬态连接拒绝，应立即失败、
+          // 不消耗共享层重试预算。
+          throw new Error("connect ECONNREFUSED 127.0.0.1:38123");
+        }),
+      }
+    );
+
+    expect(exitCode).toBe(0);
+    // 2 次 drain 503 + 1 次成功：证明读取路径确实走了共享重试，而不是首战即败。
+    expect(metaCalls).toBe(3);
+    expect(msgsCalls).toBe(1);
+    const out = chunks.join("");
+    expect(out).not.toContain("Server draining");
+    expect(out).not.toContain("core_draining");
+    const parsed = JSON.parse(out);
+    expect(parsed.source).toBe("http");
+    expect(parsed.title).toBe("Drain me");
+  });
+
+  test("after the drain retry budget is exhausted, output shows the friendly copy", async () => {
+    const chunks: string[] = [];
+    let calls = 0;
+
+    const exitCode = await runDialogReadCommand(
+      [dialogId, "25", "--token", authEnv("user-1").AUTH_TOKEN!, "--server", "https://arg.nolo.chat"],
+      {
+        env: authEnv("env-user"),
+        output: { write(chunk) { chunks.push(String(chunk)); } },
+        fetchImpl: testFetch(async (url) => {
+          if (String(url).startsWith("https://arg.nolo.chat")) {
+            calls += 1;
+            return drain503();
+          }
+          throw new Error("connect ECONNREFUSED 127.0.0.1:38123");
+        }),
+      }
+    );
+
+    expect(exitCode).toBe(1);
+    // meta GET 打满 core_draining 专属长预算（30 次）后才放弃；本地回退候选
+    // 因 ECONNREFUSED 立即失败，不追加预算。
+    expect(calls).toBe(30);
+    const out = chunks.join("");
+    // raw JSON 不外泄，用户看到的是共享层注入的友好文案。
+    expect(out).not.toContain("Server draining");
+    expect(out).not.toContain("core_draining");
+    expect(out).toContain("服务正在重启中，请稍后重试");
+  });
+});

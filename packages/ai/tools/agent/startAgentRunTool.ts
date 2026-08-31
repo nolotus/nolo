@@ -5,7 +5,8 @@
 //   - default (wait:false): Unix analogy fork + exec. Returns a runId
 //     (= dialogId = threadId) immediately; observe / stop via controlAgentRun.
 //     异步派发后禁止轮询查询——不要反复调 status 等结果，用户界面已实时显示
-//     每条 run 状态；要同步结果直接用 wait:true。
+//     每条 run 状态；wait:true 仅限三条例外（<100s 且马上要用 / 用户明确要求
+//     同步 / 环境不支持终态唤醒且无并行工作），阻塞会冻结对话，见 wait 参数描述。
 //   - wait:true: synchronous — subscribes the dialog SSE stream until
 //     done/failed and returns the child's content directly (no runId back,
 //     so there is nothing to poll), for subtasks < 100s that need the result
@@ -29,7 +30,8 @@ export const startAgentRunFunctionSchema = {
         "启动一个 Agent 执行子任务。默认异步（Unix fork+exec）：立即返回 runId，不阻塞当前对话，" +
         "之后用 controlAgentRun 观察/停止；异步派发后禁止轮询查询——不要反复调 status 等结果，" +
         "用户界面已在实时显示每条 run 的状态。" +
-        "要同步结果直接传 wait:true：订阅 SSE 等 done/failed 并直接返回子任务结果（适合 <100s 的子任务）。" +
+        "要同步结果直接传 wait:true：订阅 SSE 等 done/failed 并直接返回子任务结果。阻塞等待会冻结对话，" +
+        "仅限三种情况：<100s 且马上要用结果；用户明确要求同步等待或正在与该子任务对话；环境不支持终态唤醒且无并行工作（详见 wait 参数描述）。" +
         "wait:true 时可用 resultMode 控制返回内容：full=返回完整输出；summary=只返回头尾总结（截断中间，防长输出撑爆上下文）。" +
         "适合长任务、并行子任务、需要中途观察或叫停的场景。",
     parameters: {
@@ -73,7 +75,9 @@ export const startAgentRunFunctionSchema = {
                 type: "boolean",
                 description:
                     "可选。为 true 时同步等待子任务完成并直接返回结果（订阅 SSE 等 done/failed），" +
-                    "不返回 runId 让调用方轮询；适合 <100s 且需要立即拿结果的子任务。" +
+                    "不返回 runId 让调用方轮询。阻塞等待会冻结当前对话（用户无法插话、编排者也无法并行推进其他工作），" +
+                    "仅限三种情况：① 预计 <100s 且马上要用结果；② 用户明确要求同步等待或正在与该子任务对话；" +
+                    "③ 环境不支持终态唤醒且当前没有可并行推进的其他工作。" +
                     "默认 false（异步 fork+exec，返回 runId 后用 controlAgentRun 观察）。",
                 default: false,
             },
