@@ -1859,6 +1859,89 @@ describe("scroll-aware history", () => {
     expect(turnsProcessed).toEqual(["start turn 1"]);
   });
 
+  test("executes /cd locally during busy turn without enqueuing, and the next turn still runs", async () => {
+    const input = new PassThrough() as PassThrough & {
+      isTTY?: boolean;
+      setRawMode?: (mode: boolean) => void;
+    };
+    const output = new PassThrough() as PassThrough & {
+      isTTY?: boolean;
+      rows?: number;
+      columns?: number;
+    };
+    input.isTTY = true;
+    output.isTTY = true;
+    output.rows = TERM_ROWS;
+    output.columns = TERM_COLS;
+    input.setRawMode = () => {};
+
+    const chunks: Uint8Array[] = [];
+    output.on("data", (chunk) => {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+
+    let resolveFirstTurn: (() => void) | null = null;
+    const firstTurnPromise = new Promise<void>((resolve) => {
+      resolveFirstTurn = resolve;
+    });
+
+    let turnCount = 0;
+    const turnsProcessed: string[] = [];
+
+    const workspacePromise = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async (opt) => {
+        turnCount++;
+        turnsProcessed.push(opt.message);
+        if (turnCount === 1) {
+          opt.output.write("HEAD");
+          await new Promise((r) => setTimeout(r, 30));
+          await firstTurnPromise;
+          opt.output.write("TAIL");
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("start turn 1\r");
+
+    while (turnCount < 1) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 30));
+
+    // /cd is on the busy whitelist: it must be handled locally (no model
+    // picker warning, no enqueue as a chat turn) and echo the new cwd.
+    input.write("/cd /tmp\r");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const outputTextAfterCd = Buffer.concat(chunks).toString("utf8");
+    expect(outputTextAfterCd).not.toContain("Model picker isn't available");
+    expect(outputTextAfterCd).toContain(t("cdSwitched", "/tmp"));
+
+    resolveFirstTurn!();
+    await new Promise((r) => setTimeout(r, 50));
+
+    input.write("/exit\r");
+    input.end();
+
+    await Promise.race([
+      workspacePromise,
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
+
+    // /cd was NOT enqueued as a chat turn: only the real user message reached
+    // the agent runner, and the in-flight reply survived intact.
+    expect(turnsProcessed).toEqual(["start turn 1"]);
+    const fullOutput = Buffer.concat(chunks).toString("utf8");
+    expect(fullOutput).toContain("HEAD");
+    expect(fullOutput).toContain("TAIL");
+  });
+
   test("busy /switch auto persists and routes the next turn through auto", async () => {
     const input = new PassThrough() as PassThrough & {
       isTTY?: boolean;
@@ -3485,6 +3568,39 @@ describe("readlineWorkspace paste store clearance contract", () => {
     expect(pickDialogBlock).not.toBe("");
     expect(pickDialogBlock).toContain("clearCollapsedPasteStore(pasteStore)");
   });
+
+  test("附件消费制：直接 chat 提交在发出消息前清空 attachedImages", () => {
+    // HIGH review 修复的源码契约 pin：chat 提交路径里 imageUrls 组装完成后、
+    // runOneAgentTurn 发消息之前必须 `attachedImages: []`，否则 Ctrl+V 的图
+    // 会随后续每条消息静默重发。行为级验证见 imageAttachment.integration
+    // .test.ts「附件消费制」用例。
+    // S4/S5 重构后 chat 分发与「发送即消费」清零位于 tuiSlashRouter.ts，
+    // 本契约随实现迁移：切 tuiSlashRouter 的 chat 块（action 识别 → runOneAgentTurn）。
+    const routerCode = readFileSync(
+      join(import.meta.dir, "tuiSlashRouter.ts"),
+      "utf8",
+    );
+    const chatBlockStart = routerCode.indexOf('result.action?.type === "chat"');
+    const chatBlock = routerCode.slice(
+      chatBlockStart,
+      routerCode.indexOf("runOneAgentTurn(", chatBlockStart),
+    );
+    expect(chatBlock).toContain("attachedImages: []");
+    // 清空必须发生在消息发出之前（同一全局坐标系内比较位置）。
+    expect(
+      routerCode.indexOf("attachedImages: []", chatBlockStart),
+    ).toBeLessThan(routerCode.indexOf("runOneAgentTurn(", chatBlockStart));
+    // busy 时带附件的提交走 queue-blocked（保留草稿、不排队）：该分支不得清空。
+    const code = readFileSync(
+      join(import.meta.dir, "readlineWorkspace.ts"),
+      "utf8",
+    );
+    const queueBlockedBlock = code.slice(
+      code.indexOf('decision.kind === "queue-blocked"'),
+      code.indexOf('decision.kind === "noop"'),
+    );
+    expect(queueBlockedBlock).not.toContain("attachedImages: []");
+  });
 });
 
 describe("terminal-native theme polling contract", () => {
@@ -4207,5 +4323,78 @@ describe("pinned agent notice", () => {
     input.write("/exit\r");
     input.end();
     await Promise.race([workspacePromise, tick(2000)]);
+  });
+});
+
+describe("Backspace 附件撤销守卫（无附件时行为不变）", () => {
+  type FakeInput = PassThrough & {
+    isTTY?: boolean;
+    setRawMode?: (mode: boolean) => void;
+  };
+  type FakeOutput = PassThrough & {
+    isTTY?: boolean;
+    rows?: number;
+    columns?: number;
+  };
+
+  const makeStreams = () => {
+    const input = new PassThrough() as FakeInput;
+    const output = new PassThrough() as FakeOutput;
+    input.isTTY = true;
+    output.isTTY = true;
+    output.rows = TERM_ROWS;
+    output.columns = TERM_COLS;
+    input.setRawMode = () => {};
+    const chunks: Buffer[] = [];
+    output.on("data", (chunk) => chunks.push(chunk as Buffer));
+    return {
+      input,
+      output,
+      stdout: () => Buffer.concat(chunks).toString("utf8"),
+    };
+  };
+
+  test("空草稿 + 无附件：Backspace 不产生移除提示也不退出", async () => {
+    const { input, output, stdout } = makeStreams();
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async () => ({ exitCode: 0, dialogId: "d" }),
+    });
+    await Bun.sleep(40);
+
+    // 空草稿连按 Backspace：无附件可撤销，走普通退格（no-op）。
+    input.write("\x7f\x7f\x7f");
+    await Bun.sleep(80);
+    expect(stripAnsi(stdout())).not.toContain("已移除附件");
+    // 进程仍在运行。
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+
+  test("草稿非空：Backspace 删除字符，不触发附件撤销路径", async () => {
+    const { input, output, stdout } = makeStreams();
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async () => ({ exitCode: 0, dialogId: "d" }),
+    });
+    await Bun.sleep(40);
+
+    input.write("hello");
+    await Bun.sleep(40);
+    input.write("\x7f");
+    await Bun.sleep(80);
+    // 无附件时即使是普通退格也绝不打印附件移除提示。
+    expect(stripAnsi(stdout())).not.toContain("已移除附件");
+    // 进程仍在运行（守卫没有误吞按键导致异常退出）。
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
   });
 });

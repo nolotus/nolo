@@ -33,10 +33,16 @@ import {
 import { checkStaleRun, listRunRecords, readRunRecord } from "../agentRunControl";
 import { prefetchAgentCatalog } from "./agentCatalog";
 import {
+  formatComposerAttachmentLine,
   mergeAttachedImages,
+  popLastAttachedImage,
   summarizeAttachment,
 } from "./pasteImage";
-import { readClipboardImage } from "./clipboardImage";
+import {
+  getDefaultClipboardTempDir,
+  readClipboardImage,
+  sweepStaleClipboardFiles,
+} from "./clipboardImage";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
@@ -46,6 +52,7 @@ import {
   createInitialTuiState,
   handleTuiInput,
   formatElapsedSeconds,
+  isBackspaceSequence,
   renderPrompt,
   composeStatusLineWithQueue,
   renderStatusLine,
@@ -58,7 +65,6 @@ import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   themeColorSequence,
   themeText,
-  getActiveDensity,
   resolveTuiThemeMode,
   setActiveThemeMode,
   resetWorkspaceThemeState,
@@ -79,12 +85,14 @@ import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 // waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
 // ./tuiTurnRunner。依赖方向单向：本文件 → tuiTurnRunner；后者禁止回指本文件。
 import {
+  buildGateConfirmedResult,
   ensureChatQueueBinding,
+  isAutoConfirmableFileWriteGate,
   isInteractiveInput,
   preemptAndAbortForDrain,
+  resolveActionGate,
   runOneAgentTurn,
   waitForActionGate,
-  waitForRawActionGate,
   type AgentTurnContext,
   type SelfUpdater,
   type WorkspaceOptions,
@@ -932,6 +940,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     turnCtx,
     emitCommandOutput,
     renderHistoryToOutput,
+    scheduleRender,
     refreshDialogTotalCredits,
     persistExplicitAgentSwitch,
     persistAgentSelection,
@@ -998,6 +1007,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             const oneLine = text.replace(/\r?\n/g, " ⏎ ");
             return dimCliText(`  ⤷ ${i + 1}. ${oneLine}`, colorEnabled);
           });
+      },
+      getAttachmentLine: () => {
+        // 附件条：Ctrl+V 贴图成功后实时显示当前草稿的附件列表（≤2 张全列，
+        // 更多 +N）。附件是「下一条消息」的草稿态：提交时由 sessionDispatch
+        // 派发层清零，/clear、/new 同样清零 → 返回 null → 行消失（高度回落
+        // 走 onInputLinesChange 既有路径）。dim 以匹配 composer chrome。
+        const line = formatComposerAttachmentLine(state.attachedImages);
+        return line ? dimCliText(line, resolveCliColorEnabled()) : null;
       },
       onInputLinesChange: () => {
         // composer 高度变化（活动行首次出现：3→4 行）时补一次历史重绘。
@@ -1108,12 +1125,31 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         modalOwnsKeyboard = false;
       };
       const actionGateHandler = async (gate: LocalAgentActionGate) => {
+        // /auto on（会话级权限自动化）：只放行写文件确认门（file_write 的
+        // confirm gate）。handoff / input 类 gate 需要真人接管终端，不是
+        // 权限确认，绝不能被 /auto 短路——这是安全边界，见
+        // isAutoConfirmableFileWriteGate 的文档。与 confirmDestructiveAction
+        // 的 state.autoConfirm 先例同款：state 是 runTuiWorkspace 的可变绑定，
+        // 这里在调用时读取，拿到的总是最新值。
+        if (state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
+          return buildGateConfirmedResult(gate);
+        }
         modalOwnsKeyboard = true;
         try {
-          return await waitForRawActionGate(input, output, gate, spawnRunner, {
-            beforeSubprocess: () => fixedInput.pause(),
-            afterSubprocess: () => fixedInput.resumeFromSubprocess(),
+          // `confirm` gates route through dialogHost + a framed dialog;
+          // `handoff` gates keep the raw text-prompt wait, now pausing the
+          // composer for its full wait window instead of only around the
+          // subprocess. See resolveActionGate's docstring in tuiTurnRunner.ts
+          // for why (activity-indicator repaint erasure).
+          return await resolveActionGate(gate, {
+            dialogHost,
+            input,
+            output,
+            spawnRunner,
             registerToken: (handler) => { rawActionGateTokenHandler = handler; },
+            pauseComposer: () => fixedInput.pause(),
+            resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
+            resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
           });
         } finally {
           releaseKeyboardToComposer();
@@ -1348,6 +1384,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (refreshMsg) {
           output.write(`${refreshMsg}\n`);
         }
+      } else if (res.action?.type === "cwd-refresh") {
+        // /cd 在 turn 运行中允许切换：立即应用新 cwd（下个 turn 生效），
+        // 回显确认文案，并用新 cwd 重测 gitStatus 后重绘状态行/composer。
+        state = res.nextState;
+        if (res.output) {
+          output.write(`${res.output}\n`);
+        }
+        // 与 refreshGitStatus 相同的 kill switch：测试/禁用场景不 spawn git。
+        if ((options.env?.NOLO_CLI_GIT_STATUS ?? process.env.NOLO_CLI_GIT_STATUS) !== "0") {
+          const gitStatus = await detectGitStatusAsync(state.cwd);
+          if (gitStatus !== undefined) {
+            state = { ...state, gitStatus };
+          }
+        }
+        scheduleRender();
       } else if (res.action) {
         // `/switch` with no target (interactive picker) and `/switch
         // list` need to take over the screen, which races the in-flight
@@ -1665,6 +1716,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
         return;
       }
+      // Backspace 撤销附件：空草稿 + 有附件时，逐个撤销（最新贴的先撤）。
+      // 拦截点在普通字符处理之前；buffer 非空时完全不触发，普通退格语义
+      // 不变（回执卡片仍留在 scrollback 作历史记录）。
+      if (
+        isBackspaceSequence(sequence, {}) &&
+        buffer === "" &&
+        state.attachedImages.length > 0
+      ) {
+        const undo = popLastAttachedImage(state.attachedImages);
+        if (undo.handled && undo.removed) {
+          state = { ...state, attachedImages: undo.images };
+          emitCommandOutput(
+            `[nolo] ${t("attachmentRemovedHint", undo.removed.filename, String(undo.images.length))}`,
+          );
+          if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+          return;
+        }
+      }
       const result = applyTuiInputKey(buffer, sequence, {}, cursorPos, {
         pasteStore,
       });
@@ -1722,9 +1791,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const isBusyLocalSlash =
             busySlashCommand === "/context" ||
             busySlashCommand === "/ctx" ||
+            busySlashCommand === "/cd" ||
             busySlashCommand === "/switch" ||
             busySlashCommand === "/theme" ||
-            busySlashCommand === "/density" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/tools" ||
             busySlashCommand === "/thinking" ||
@@ -1870,7 +1939,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     for await (const line of rl) {
       const shouldExit = await runSubmittedLine(
         line,
-        (gate) => waitForActionGate(rl, input, output, gate, spawnRunner),
+        (gate) =>
+          // /auto on 同款短路，见上方交互路径的 actionGateHandler 注释：
+          // 只放行 file_write 的 confirm gate，handoff/input 类仍要求真人操作。
+          state.autoConfirm && isAutoConfirmableFileWriteGate(gate)
+            ? Promise.resolve(buildGateConfirmedResult(gate))
+            : waitForActionGate(rl, input, output, gate, spawnRunner),
         async (request) => {
           // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
           // runTuiWorkspace 的可变绑定（runSubmittedLine 会把 handleTuiInput
@@ -1918,6 +1992,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
 export async function startTuiWorkspace(options: WorkspaceOptions) {
   const themeOwner = ++latestWorkspaceThemeOwner;
+  // TUI 启动时清扫过期的 clip-* 临时文件。fire-and-forget + 吞错——
+  // 清理永不阻塞/影响 TUI 运行。
+  void sweepStaleClipboardFiles(getDefaultClipboardTempDir()).catch(() => {});
   try {
     return await runTuiWorkspace(options);
   } finally {
@@ -1927,5 +2004,8 @@ export async function startTuiWorkspace(options: WorkspaceOptions) {
     if (themeOwner === latestWorkspaceThemeOwner) {
       resetWorkspaceThemeState();
     }
+    // 正常退出路径的第二次清扫（本 finally 是全部退出路径的唯一汇聚点）。
+    // 同样 fire-and-forget：进程可能在 unlink 完成前退出，残留留给下次启动清扫。
+    void sweepStaleClipboardFiles(getDefaultClipboardTempDir()).catch(() => {});
   }
 }

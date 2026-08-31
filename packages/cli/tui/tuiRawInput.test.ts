@@ -272,6 +272,78 @@ describe("createFixedInput composer diffing & decoupled repaint", () => {
   });
 });
 
+describe("createFixedInput 附件条（getAttachmentLine）", () => {
+  test("附件行渲染在输入提示上方，composer 3→4 行", () => {
+    let attachmentLine: string | null = "📎 clip-abc123def4.png (12.3 KB)";
+    const calls: number[] = [];
+    const tty = mockTty();
+    const input = createFixedInput(tty.output, {
+      getStatusLine: () => "status",
+      getAttachmentLine: () => attachmentLine,
+      onInputLinesChange: (lines) => calls.push(lines),
+    });
+
+    input.repaint("");
+    expect(input.getInputLines()).toBe(4);
+    const out = tty.stdout();
+    expect(out).toContain("📎 clip-abc123def4.png (12.3 KB)");
+    // 附件行位于输入提示（❯）上方。
+    expect(out.indexOf("📎 clip-abc123def4.png")).toBeLessThan(
+      out.lastIndexOf("❯"),
+    );
+    // 高度变化走 scroll-region 路径：onInputLinesChange 收到新高度 4。
+    expect(calls[calls.length - 1]).toBe(4);
+  });
+
+  test("附件出现触发整帧重绘（内容 diff 缓存更新）", () => {
+    let attachmentLine: string | null = null;
+    const tty = mockTty();
+    const input = createFixedInput(tty.output, {
+      getStatusLine: () => "status",
+      getAttachmentLine: () => attachmentLine,
+    });
+    input.repaint("");
+    tty.chunks.length = 0;
+    attachmentLine = "📎 clip-abc123def4.png (12.3 KB)";
+    input.repaint("");
+    expect(tty.stdout()).toContain("\x1b[J");
+    expect(tty.stdout()).toContain("📎 clip-abc123def4.png");
+  });
+
+  test("附件消失时行数回落 4→3，onInputLinesChange 收到 3", () => {
+    let attachmentLine: string | null = "📎 clip-abc123def4.png (12.3 KB)";
+    const calls: number[] = [];
+    const tty = mockTty();
+    const input = createFixedInput(tty.output, {
+      getStatusLine: () => "status",
+      getAttachmentLine: () => attachmentLine,
+      onInputLinesChange: (lines) => calls.push(lines),
+    });
+    input.repaint("");
+    expect(input.getInputLines()).toBe(4);
+    attachmentLine = null;
+    tty.chunks.length = 0; // mockTty 累积历史 chunk，先清掉再断言新帧。
+    input.repaint("");
+    expect(input.getInputLines()).toBe(3);
+    expect(calls[calls.length - 1]).toBe(3);
+    expect(tty.stdout()).not.toContain("clip-abc123def4");
+  });
+
+  test("超终端宽的附件行被截断，光标定位序列仍发出", () => {
+    const tty = mockTty(24, 20);
+    const input = createFixedInput(tty.output, {
+      getStatusLine: () => "status",
+      getAttachmentLine: () => `📎 ${"x".repeat(80)} (1.0 KB)`,
+    });
+    input.repaint("");
+    const out = tty.stdout();
+    // 完整行不可能放进 20 列：截断生效。
+    expect(out).not.toContain("x".repeat(80));
+    // 硬件光标仍被定位（CUP），没有因为截断丢失。
+    expect(out).toMatch(/\x1b\[\d+;\d+H/);
+  });
+});
+
 // --- alternate screen (DECSET 1049) -------------------------------------
 // The TUI must run on the alternate screen to isolate its scroll state from
 // the shell's scrollback. These tests pin the contract: enter on TTY, leave

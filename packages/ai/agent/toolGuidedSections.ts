@@ -57,7 +57,11 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 
 **拆分与派发质量**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖的工作先固化契约再派发，勿让多个 Agent 各自猜同一接口。子任务自包含、边界清晰，只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证和用户沟通。brief 对测试类 DoD 必须钉死基线精确数字（派发前亲自跑 bun test \<scope\> 记下 pass/fail，写明既有失败归属），验收时亲自复跑对照——fail 超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」自述按未验证处理。
 
-**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；全部跨家族通道不可用时，同模型家族的派发新实例（上下文仍隔离）经 owner 授权可作降级 reviewer，trailer 注明实际审查者与原因；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+**阶段划分与独立审查（commit 前硬门）**：
+- **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端及其他需要用户验收的功能，在实现阶段**不得触发或等待最终独立 review**；应先完成验证并交付可测试产物，等待用户测试与反馈。
+- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review 工作区 diff，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；全部跨家族通道不可用时，同模型家族的派发新实例（上下文仍隔离）经 owner 授权可作降级 reviewer，trailer 注明实际审查者与原因；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
+- **安全与审计**：安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 --- 确认边界 ---
 **危险 / 不可逆操作**：
