@@ -1,4 +1,13 @@
 
+## 0.52.0-alpha.1
+
+## 0.52.0-alpha.1 (2026-08-31)
+
+### Features
+
+* **cli:** 402 余额原因行按 locale 渲染（解析 details 数字走 i18n 模板） ([41b19d3](https://github.com/nolotus/bun-nolo/commit/41b19d318d0bcede800e50ee5586ccb31b1de403))
+
+
 ## 0.51.0-alpha.1
 
 ## 0.51.0-alpha.1 (2026-08-31)

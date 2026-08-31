@@ -45,18 +45,24 @@ describe("configureCaddyProxy source contract", () => {
   });
 
   it("retries transient loopback connection refusals during Bun reloads", () => {
-    expect(source.match(/lb_try_duration 60s/g)?.length).toBe(2);
-    expect(source.match(/lb_try_interval 250ms/g)?.length).toBe(2);
+    // 每个 reverse_proxy 块都必须带重试参数，所以按「块数」断言而不是写死数字。
+    // 当前 3 块：@chat（T4 chat-proxy 分流，端口为空时不渲染）、@stream、catch-all。
+    const proxyBlockCount = (source.match(/^\t*reverse_proxy [^\n]*\{$/gm) ?? []).length;
+    expect(proxyBlockCount).toBeGreaterThanOrEqual(2);
+    expect(source.match(/lb_try_duration 60s/g)?.length).toBe(proxyBlockCount);
+    expect(source.match(/lb_try_interval 250ms/g)?.length).toBe(proxyBlockCount);
     expect(source.indexOf("lb_try_duration 60s")).toBeLessThan(source.indexOf("flush_interval -1"));
   });
 
   it("retries only safe GET/HEAD reads when the upstream is draining", () => {
+    const proxyBlockCount = (source.match(/^\t*reverse_proxy [^\n]*\{$/gm) ?? []).length;
     const retryMatchers = source.match(
       /lb_retry_match \{\n\s*method GET HEAD\n\s*\}/g
     );
-    expect(retryMatchers).toHaveLength(2);
+    // 3 块 = @chat（T4 分流）+ @stream + catch-all；每块都只重试安全方法。
+    expect(retryMatchers).toHaveLength(proxyBlockCount);
     expect(source).not.toMatch(/lb_retry_match[\s\S]*method GET POST/);
-    expect(source.match(/method GET HEAD/g)).toHaveLength(2);
+    expect(source.match(/method GET HEAD/g)).toHaveLength(proxyBlockCount);
   });
 
   it("falls back to restart with diagnostics when systemd reload fails", () => {

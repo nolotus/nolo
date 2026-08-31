@@ -57,6 +57,32 @@ else
 fi
 
 SERVICE_HEALTH_URL="${NOLO_SERVICE_HEALTH_URL:-http://127.0.0.1:${APP_HTTP_PORT}/health}"
+
+# --- chat proxy 进程拆分（docs/plans/2026-08-31-chat-proxy-process-split.md，T4）---
+# 独立 PM2 app，以 NOLO_SERVER_RUNTIME_ROLE=chat-proxy 运行（不开 LevelDB/SQLite、
+# 不跑 scheduler，只挂 /health + /api/v1/chat）。收益来源是：**core 部署既不停它、
+# 不重启它、也不等它**，所以进行中的 LLM 流不被 core 发布打断。
+#
+# 默认关闭。未显式设 NOLO_CHAT_PROXY_ENABLED=1 时，本文件的行为与拆分前完全一致
+# （不起 app、不探活、不给 Caddy 传 chat upstream）。
+# ⚠️ 开启前置条件：T2（core 侧 call plan 内部端点）必须已上线 —— chat-proxy 角色下
+# 没有 DB，chatHandler 现在还直接 import serverDb，提前切流会让 /api/v1/chat 报错。
+CHAT_PROXY_ENABLED="${NOLO_CHAT_PROXY_ENABLED:-0}"
+# 🔴 名字必须 ≠ "nolo" 且 ≠ 蓝绿 canary slot，否则 core 部署的停机函数会杀掉它。
+# 该约束由 assert_chat_proxy_app_name_isolation 机械断言，命中即拒绝启动。
+CHAT_PROXY_APP_NAME="${NOLO_CHAT_PROXY_APP_NAME:-nolo-chat-proxy}"
+CHAT_PROXY_HTTP_HOST="${NOLO_CHAT_PROXY_HTTP_HOST:-127.0.0.1}"
+CHAT_PROXY_HTTP_PORT="${NOLO_CHAT_PROXY_HTTP_PORT:-38124}"
+# /ready 的 readiness 依赖 startCoreRuntime（packages/server/coreReadiness.ts），
+# chat-proxy 不跑 core runtime，因此探活只能用 /health，不能照搬 /ready 的 buildSha 门。
+CHAT_PROXY_HEALTH_URL="${NOLO_CHAT_PROXY_HEALTH_URL:-http://127.0.0.1:${CHAT_PROXY_HTTP_PORT}/health}"
+# 只有显式设 1 才重启已在跑的 chat-proxy（chat-proxy 自己的发布通道）。
+# core 部署走默认 0：已在跑就完全不碰。
+CHAT_PROXY_RESTART="${NOLO_CHAT_PROXY_RESTART:-0}"
+CHAT_PROXY_ROUTE_PATHS="${NOLO_CHAT_PROXY_ROUTE_PATHS:-/api/v1/chat}"
+chat_proxy_upstream_ready=0
+chat_proxy_failed=0
+chat_proxy_started=0
 EXPECTED_ENTRY_PATH="$REPO_DIR/packages/server/entry.ts"
 # bun runtime --conditions 只接受 CLI flag，bunfig.toml [install] conditions 不影响 runtime。
 # 遗漏会导致 identity/cloudRoutes 走 local 分支 → cloud 路由不注册 → 白屏。
@@ -1302,6 +1328,160 @@ cleanup_on_exit() {
 trap 'cleanup_on_exit $?' EXIT
 trap 'cleanup_on_exit 143' INT TERM
 
+# ============================================================================
+# chat-proxy app（T4）。全部为**新增**函数：core 的 start_nolo / graceful_stop_nolo /
+# blue_green_* / rebuild_nolo 一行未改，core 部署路径不受影响。
+# ============================================================================
+
+chat_proxy_enabled() {
+  [[ "$CHAT_PROXY_ENABLED" == "1" ]]
+}
+
+# 🔴 本方案的最高优先级正确性门：core 部署的停机/清理函数按 PM2 app 名匹配 "nolo"。
+# 如果 chat-proxy 的 app 名被这些匹配式命中，core 发布就会停掉本方案要保护的进程，
+# 方案自我否定。这里把每条**真实**匹配式原样重放一遍，命中即拒绝接线。
+#
+# 被重放的匹配式（保持与上文函数同步）：
+#   (1) 精确名 == "nolo"：nolo_exists / nolo_app_count / wait_for_nolo_app_count /
+#       nolo_pm2_field / nolo_has_legacy_tool_worker_env
+#   (2) pm2 CLI 字面名参数 "nolo"：delete_nolo_and_wait / delete_stale_nolo_instances /
+#       stop-nolo-before-artifact-promote
+#   (3) jlist 子串 '"name":"nolo"'：graceful_stop_nolo / blue_green_reload_nolo
+#   (4) 蓝绿 canary slot 名：graceful_stop_slot "$NOLO_BLUE_GREEN_CANARY_NAME"
+assert_chat_proxy_app_name_isolation() {
+  local name="$CHAT_PROXY_APP_NAME"
+  local canary_name="${NOLO_BLUE_GREEN_CANARY_NAME:-nolo-next}"
+
+  if [[ -z "$name" ]]; then
+    echo "❌ NOLO_CHAT_PROXY_APP_NAME 不能为空"
+    return 1
+  fi
+
+  # (1)(2) 精确名匹配 / pm2 CLI 字面名参数
+  if [[ "$name" == "nolo" ]]; then
+    echo "❌ chat-proxy app 名不能是 \"nolo\"：core 部署的 graceful_stop_nolo /"
+    echo "   delete_stale_nolo_instances / wait_for_nolo_app_count 会停掉并误判它"
+    return 1
+  fi
+
+  # (4) 蓝绿 canary slot
+  if [[ "$name" == "$canary_name" ]]; then
+    echo "❌ chat-proxy app 名不能等于蓝绿 canary slot \"${canary_name}\"：graceful_stop_slot 会停掉它"
+    return 1
+  fi
+
+  # (3) 原样重放 jlist 子串匹配式，输入是 chat-proxy 自己的 jlist 片段。
+  local jlist_fragment
+  jlist_fragment="$(printf '{"name":"%s","pm2_env":{"status":"online"}}' "$name")"
+  if printf '%s' "$jlist_fragment" | grep -q '"name":"nolo"'; then
+    echo "❌ chat-proxy app 名 \"${name}\" 会被 graceful_stop_nolo 的 jlist 匹配式 '\"name\":\"nolo\"' 命中"
+    return 1
+  fi
+  if printf '%s' "$jlist_fragment" | grep -q "\"name\":\"${canary_name}\""; then
+    echo "❌ chat-proxy app 名 \"${name}\" 会被 blue_green_reload_nolo 的 canary 匹配式命中"
+    return 1
+  fi
+
+  # 端口隔离：与 core 抢同一监听端口会直接互相踩。
+  if [[ "$CHAT_PROXY_HTTP_PORT" == "$APP_HTTP_PORT" ]]; then
+    echo "❌ chat-proxy 端口 ${CHAT_PROXY_HTTP_PORT} 与 core 端口 ${APP_HTTP_PORT} 冲突"
+    return 1
+  fi
+
+  echo "✅ chat-proxy 隔离断言通过: app=\"${name}\"（≠ nolo，≠ ${canary_name}，不被 jlist 匹配式命中）port=${CHAT_PROXY_HTTP_PORT}（≠ core ${APP_HTTP_PORT}）"
+}
+
+# 精确名匹配（与 nolo_exists 同款实现，避免 grep -w 把 "nolo-chat-proxy" 里的 "nolo" 当词）。
+chat_proxy_app_exists() {
+  run_maybe_sudo "$PM2_BIN" jlist 2>/dev/null | python3 -c "
+import json, sys
+try:
+    apps = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if any(a.get('name') == sys.argv[1] for a in apps) else 1)
+" "$CHAT_PROXY_APP_NAME" 2>/dev/null
+}
+
+start_chat_proxy() {
+  local args=(start "$EXPECTED_ENTRY_PATH" --interpreter "$BUN_BIN" --interpreter-args "$BUN_RUNTIME_ARGS" --name "$CHAT_PROXY_APP_NAME")
+  if [[ -n "$PM2_KILL_TIMEOUT" ]]; then
+    args+=(--kill-timeout "$PM2_KILL_TIMEOUT")
+  fi
+
+  export_repo_dotenv
+
+  # DISABLE_HTTPS=1：chat-proxy 只在 loopback 上被 Caddy 反代，TLS 由 Caddy 终止。
+  # NOLO_REUSE_PORT=0：它不做蓝绿，独占自己的端口。保持 reusePort 关闭，
+  #   残留的重复实例会以 EADDRINUSE 大声失败，而不是静默双实例分摊流量。
+  run_env \
+    NODE_ENV=production \
+    NOLO_FORCE_PRODUCTION=1 \
+    NOLO_SERVER_RUNTIME_ROLE=chat-proxy \
+    DISABLE_HTTPS=1 \
+    NOLO_DISABLE_HTTPS=1 \
+    PLATFORM_SERVER_HOST="$CHAT_PROXY_HTTP_HOST" \
+    HTTP_PORT="$CHAT_PROXY_HTTP_PORT" \
+    NOLO_REUSE_PORT=0 \
+    NOLO_SLOT="$CHAT_PROXY_APP_NAME" \
+    NOLO_RELEASE_SHA="${NOLO_RELEASE_SHA:-}" \
+    NOLO_DEPLOY_JOB_ID="${NOLO_DEPLOY_JOB_ID:-}" \
+    NOLO_SHUTDOWN_CONTEXT_DIR="$SHUTDOWN_CONTEXT_DIR" \
+    "$PM2_BIN" "${args[@]}"
+}
+
+# 幂等：已存在就**不重启**（这是 core 发布不打断 LLM 流的全部收益来源），
+# 不存在才启动。绝不 pm2 start 同名第二份。
+ensure_chat_proxy_app() {
+  if chat_proxy_app_exists; then
+    if [[ "$CHAT_PROXY_RESTART" == "1" ]]; then
+      echo "♻️ NOLO_CHAT_PROXY_RESTART=1：显式重启 ${CHAT_PROXY_APP_NAME}（core 部署默认不走这条路径）"
+      run_maybe_sudo "$PM2_BIN" restart "$CHAT_PROXY_APP_NAME" --kill-timeout "${NOLO_CHAT_PROXY_KILL_TIMEOUT_MS:-65000}"
+      return 0
+    fi
+    echo "✅ ${CHAT_PROXY_APP_NAME} 已在运行：core 部署不停它、不重启它、不等它（保护进行中的 LLM 流）"
+    return 0
+  fi
+
+  echo "🚀 ${CHAT_PROXY_APP_NAME} 不存在，启动独立 chat-proxy app（role=chat-proxy port=${CHAT_PROXY_HTTP_PORT}）..."
+  start_chat_proxy
+  chat_proxy_started=1
+}
+
+# 独立探活：/health（不是 /ready）。失败必须大声失败，不静默跳过。
+verify_chat_proxy_health() {
+  retry_http_contains "$CHAT_PROXY_APP_NAME" "$CHAT_PROXY_HEALTH_URL" "ok" \
+    "${NOLO_CHAT_PROXY_HEALTH_ATTEMPTS:-15}" \
+    "${NOLO_CHAT_PROXY_HEALTH_DELAY_SECONDS:-2}" \
+    --max-time 5
+}
+
+# core 部署尾部的 chat-proxy 接线。故意放在 core 全部验证通过之后，
+# 且**不**触发 auto_rollback —— chat-proxy 的问题不该回滚一次健康的 core 发布。
+wire_chat_proxy() {
+  if ! chat_proxy_enabled; then
+    echo "ℹ️ chat-proxy 未启用（NOLO_CHAT_PROXY_ENABLED=${CHAT_PROXY_ENABLED}）；chat 流量继续走 core"
+    return 0
+  fi
+
+  if timed_deploy_step "assert-chat-proxy-app-name-isolation" assert_chat_proxy_app_name_isolation \
+    && timed_deploy_step "ensure-chat-proxy-app" ensure_chat_proxy_app \
+    && timed_deploy_step "verify-chat-proxy-health" verify_chat_proxy_health; then
+    chat_proxy_upstream_ready=1
+    if [[ "$chat_proxy_started" == "1" ]]; then
+      echo "💾 chat-proxy 新入 PM2，重新保存进程列表（否则机器重启 resurrect 不会带上它）"
+      timed_deploy_step "pm2-save-chat-proxy" run_maybe_sudo "$PM2_BIN" save || true
+      sanitize_pm2_dump_diag_token || true
+    fi
+    return 0
+  fi
+
+  chat_proxy_failed=1
+  echo "❌ chat-proxy（${CHAT_PROXY_APP_NAME}）未就绪：Caddy 的 chat 路由保持指向 core（不切流），本次部署将以非 0 退出"
+  run_maybe_sudo "$PM2_BIN" logs "$CHAT_PROXY_APP_NAME" --lines 60 --nostream 2>/dev/null || true
+  return 0
+}
+
 configure_caddy_proxy() {
   if [[ "$PROXY_MODE" != "caddy" ]]; then
     return
@@ -1309,10 +1489,20 @@ configure_caddy_proxy() {
 
   echo "🌐 配置 Caddy 统一入口，upstream=${APP_HTTP_HOST}:${APP_HTTP_PORT}..."
   local script_path="$REPO_DIR/scripts/release/configureCaddyProxy.sh"
+  # chat 分流只在 chat-proxy 实际探活通过后才下发（chat_proxy_upstream_ready=1）。
+  # 空值 => configureCaddyProxy.sh 不渲染 @chat 块 => chat 留在 core upstream，
+  # 渲染结果与拆分前逐字节相同。绝不把 Caddy 指向一个没起来的端口。
+  local chat_proxy_upstream_port=""
+  if [[ "$chat_proxy_upstream_ready" == "1" ]]; then
+    chat_proxy_upstream_port="$CHAT_PROXY_HTTP_PORT"
+  fi
   run_env \
     NOLO_CADDY_HOSTS="${NOLO_CADDY_HOSTS:?NOLO_CADDY_HOSTS is required when NOLO_PROXY_MODE=caddy}" \
     NOLO_CADDY_UPSTREAM_HOST="$APP_HTTP_HOST" \
     NOLO_CADDY_UPSTREAM_PORT="$APP_HTTP_PORT" \
+    NOLO_CADDY_CHAT_PROXY_UPSTREAM_HOST="$CHAT_PROXY_HTTP_HOST" \
+    NOLO_CADDY_CHAT_PROXY_UPSTREAM_PORT="$chat_proxy_upstream_port" \
+    NOLO_CADDY_CHAT_PROXY_PATHS="$CHAT_PROXY_ROUTE_PATHS" \
     NOLO_CADDY_BIN="${NOLO_CADDY_BIN:-caddy}" \
     NOLO_CADDYFILE_PATH="${NOLO_CADDYFILE_PATH:-/etc/caddy/Caddyfile}" \
     NOLO_CADDY_INSTALL="${NOLO_CADDY_INSTALL:-1}" \
@@ -1635,7 +1825,14 @@ if ! timed_deploy_step "verify-rendered-assets" verify_rendered_assets; then
 fi
 
 stop_deploy_window_probe
+timed_deploy_step "wire-chat-proxy" wire_chat_proxy
 timed_deploy_step "configure-caddy-proxy" configure_caddy_proxy
 deploy_completed=1
 
 echo "🚀 热重载部署成功！PM2 与 HTTP healthcheck 均通过"
+
+if [[ "$chat_proxy_failed" == "1" ]]; then
+  echo "❌ core 部署成功，但 chat-proxy（${CHAT_PROXY_APP_NAME}）接线失败"
+  echo "   chat 流量仍在 core 上（Caddy 未切流），core 无需回滚；请修复 chat-proxy 后重跑部署"
+  exit 1
+fi

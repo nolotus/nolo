@@ -8,7 +8,7 @@ import {
   runAgentTurn,
 } from "./agentRun";
 import { findServerPlatformTools } from "./agentRunPlatformTools";
-import { setCliLocale } from "../tui/i18n";
+import { getCliLocale, setCliLocale } from "../tui/i18n";
 import { BUILTIN_NOLO_AGENT_KEY } from "./localRuntimeAdapter";
 import { NOLO_PROJECT_MANAGER_AGENT_KEY } from "../agentAliases";
 
@@ -830,6 +830,27 @@ describe("cli agent run client", () => {
     expect(result.dialogId).toBe("dialog-after-402");
     expect(result.localError).toBeInstanceOf(Error);
     expect(String((result.localError as Error).message)).toContain("UPSTREAM_402");
+  });
+
+  test("localizes embedded balance details in 402 output", () => {
+    const message =
+      'local run unavailable (platform provider failed: HTTP 402 {"error":{"message":"余额不足，无法继续访问（需要余额 > 1，当前0.923167）。","code":"INSUFFICIENT_BALANCE","details":{"requiredBalance":1,"currentBalance":0.923167}}} raw="debug" headers=[server=Caddy])';
+    const previousLocale = getCliLocale();
+    try {
+      setCliLocale("zh");
+      const zhOutput = describeLocalRunFailure(message);
+      expect(zhOutput).toContain("余额不足：需要余额 > 1，当前 0.923167");
+      expect(zhOutput).not.toContain('raw="');
+      expect(zhOutput).not.toContain("headers=[");
+
+      setCliLocale("en");
+      const enOutput = describeLocalRunFailure(message);
+      expect(enOutput).toContain("Insufficient balance: requires > 1, current balance 0.923167");
+      expect(enOutput).not.toContain('raw="');
+      expect(enOutput).not.toContain("headers=[");
+    } finally {
+      setCliLocale(previousLocale);
+    }
   });
 
   test("cleans embedded JSON and provider debug noise from local 402 output", () => {

@@ -62,10 +62,22 @@ describe("deployRemote source contract", () => {
     expect(source).toContain("sanitize_pm2_dump_diag_token()");
     expect(source).toContain('timed_deploy_step "pm2-save" run_maybe_sudo "$PM2_BIN" save');
     expect(source).toContain("sanitize_pm2_dump_diag_token || true");
-    // 剥离必须发生在 pm2 save 之后（save 前剥离对已序列化的 dump 无效）
-    expect(source.indexOf('timed_deploy_step "pm2-save"')).toBeLessThan(
-      source.indexOf("sanitize_pm2_dump_diag_token || true")
-    );
+    // 剥离必须发生在 pm2 save 之后（save 前剥离对已序列化的 dump 无效）。
+    // 逐处校验每一次 pm2 save：T4 起 chat-proxy 首次入列也会 save（pm2-save-chat-proxy），
+    // 比较「全局首次出现位置」会被函数定义段的先后顺序误伤。
+    const saveSteps = [
+      ...source.matchAll(
+        /timed_deploy_step "(pm2-save[^"]*)" run_maybe_sudo "\$PM2_BIN" save[^\n]*\n/g
+      ),
+    ];
+    expect(saveSteps.length).toBeGreaterThanOrEqual(1);
+    for (const step of saveSteps) {
+      const after = source.slice(step.index! + step[0].length);
+      expect(
+        after.slice(0, 400),
+        `${step[1]} 之后必须紧跟 diag token 剥离`
+      ).toContain("sanitize_pm2_dump_diag_token || true");
+    }
     // 剥离逻辑收敛在独立脚本（fixture 行为测试见下），shell 侧只负责调用
     expect(source).toContain('sanitize_pm2_dump_diag_token.py" "$PM2_HOME"');
     expect(readFileSync(join(import.meta.dir, "sanitize_pm2_dump_diag_token.py"), "utf-8"))

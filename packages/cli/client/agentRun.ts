@@ -56,6 +56,7 @@ import { ulid } from "ulid";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import { toErrorMessage } from "core/errorMessage";
+import { t } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
 async function loadRunLocalAgentTurn() {
@@ -86,6 +87,59 @@ function extractEmbeddedErrorMessage(message: string): string | undefined {
     // （ESC 清屏 / 光标移动），provider 可控文本必须先剥离再进用户文案。
     const cleaned = decoded.replace(/[\u0000-\u001f\u007f]/g, "");
     return cleaned.trim() ? cleaned : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseEmbeddedBalanceDetails(
+  message: string,
+): { required: string; current: string } | undefined {
+  const jsonStart = message.indexOf('{"error"');
+  if (jsonStart < 0) return undefined;
+
+  try {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let jsonEnd = -1;
+    for (let i = jsonStart; i < message.length; i += 1) {
+      const char = message[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+      } else if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        depth += 1;
+      } else if (char === "}" && --depth === 0) {
+        jsonEnd = i + 1;
+        break;
+      }
+    }
+    if (jsonEnd < 0) return undefined;
+    const parsed: unknown = JSON.parse(message.slice(jsonStart, jsonEnd));
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const error = (parsed as { error?: unknown }).error;
+    if (!error || typeof error !== "object") return undefined;
+    const details = (error as { details?: unknown }).details;
+    if (!details || typeof details !== "object") return undefined;
+    const requiredBalance = (details as { requiredBalance?: unknown }).requiredBalance;
+    const currentBalance = (details as { currentBalance?: unknown }).currentBalance;
+    if (typeof requiredBalance !== "number" || typeof currentBalance !== "number") {
+      return undefined;
+    }
+    // 病态数值（1e999 → Infinity、负数）只影响显示：降级回 provider 原文，
+    // 而不是渲染出「需要余额 > Infinity」这类原因行（review LOW 建议采纳）。
+    if (
+      !Number.isFinite(requiredBalance) ||
+      !Number.isFinite(currentBalance) ||
+      requiredBalance <= 0
+    ) {
+      return undefined;
+    }
+    return { required: String(requiredBalance), current: String(currentBalance) };
   } catch {
     return undefined;
   }
@@ -591,7 +645,14 @@ export function describeLocalRunFailure(
       /^[^:]*provider failed: HTTP \d{3}\s*/,
       "",
     );
-    const shownMessage = extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
+    const balanceDetails = parseEmbeddedBalanceDetails(cleanedMessage);
+    const shownMessage = balanceDetails
+      ? t(
+          "balanceInsufficientReason",
+          balanceDetails.required,
+          balanceDetails.current,
+        )
+      : extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
     return `[nolo] ${shownMessage}\n`;
   }
 

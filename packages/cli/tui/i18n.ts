@@ -187,6 +187,10 @@ const STRINGS = {
     en: "[nolo] Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
     zh: "[nolo] 你刚发的话已保存在当前对话里——充值后直接再说一句或说「继续」即可接着聊，不会丢上下文。",
   },
+  balanceInsufficientReason: {
+    en: "Insufficient balance: requires > {required}, current balance {current}.",
+    zh: "余额不足：需要余额 > {required}，当前 {current}。",
+  },
   dialogPreservedHint: {
     en: "[nolo] This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",
     zh: "[nolo] 本轮失败了，但对话已保留。直接再说一句（或说「继续」）即可在同一对话里接着聊。",
@@ -804,9 +808,10 @@ export type CliStringKey = keyof typeof STRINGS;
 export function t(key: CliStringKey, ...params: string[]): string {
   const text = STRINGS[key][currentLocale];
   if (params.length === 0) return text;
-  // Optional {0}/{1}/... interpolation; missing params keep the placeholder.
-  return text.replace(/\{(\d+)\}/g, (match, index) => {
-    const replacement = params[Number(index)];
+  // Optional {0}/{1}/... and named interpolation; missing params keep the placeholder.
+  return text.replace(/\{(\d+|required|current)\}/g, (match, name) => {
+    const index = name === "required" ? 0 : name === "current" ? 1 : Number(name);
+    const replacement = params[index];
     return replacement === undefined ? match : replacement;
   });
 }
