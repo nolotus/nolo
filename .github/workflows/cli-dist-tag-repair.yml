@@ -1,0 +1,21 @@
+name: CLI dist-tag repair (temp)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+      - name: Repair dist-tags
+        run: |
+          npm dist-tag add nolo-cli@0.53.0-alpha.1 alpha
+          npm dist-tag add nolo-cli@1.0.0 latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify
+        run: npm view nolo-cli dist-tags --json
