@@ -12,34 +12,33 @@ export const getNoloKey = (
     | "anthropic"
     | "ollama-cloud"
     | "upstream-k3"
-    | "runinfra",
-  env: Record<string, string | undefined> = process.env
+    | "runinfra"
 ) => {
   switch (provider) {
     case "anthropic":
-      return env.ANTHROPIC_API_KEY;
+      return process.env.ANTHROPIC_API_KEY;
     case "google":
       return firstConfiguredKey(
-        env.GOOGLE_API_KEY,
-        env.GEMINI_API_KEY
+        process.env.GOOGLE_API_KEY,
+        process.env.GEMINI_API_KEY
       );
     case "deepseek":
-      return env.DEEPSEEK_API_KEY;
+      return process.env.DEEPSEEK_API_KEY;
     case "openrouter":
-      return env.OPENROUTER_API_KEY;
+      return process.env.OPENROUTER_API_KEY;
     case "fireworks":
-      return env.FIREWORKS_API_KEY;
+      return process.env.FIREWORKS_API_KEY;
     case "openai":
       return firstConfiguredKey(
-        env.OPENAI_KEY,
-        env.OPENAI_API_KEY
+        process.env.OPENAI_KEY,
+        process.env.OPENAI_API_KEY
       );
     case "deepinfra":
-      return env.DEEPINFRA_API_KEY;
+      return process.env.DEEPINFRA_API_KEY;
     case "upstream-k3":
-      return env.UPSTREAM_K3_API_KEY;
+      return process.env.UPSTREAM_K3_API_KEY;
     case "runinfra":
-      return env.RUNINFRA_API_KEY;
+      return process.env.RUNINFRA_API_KEY;
     // provider "nolo" / "ollama-cloud" 没有自己的 key。
     //
     // 兜底返回 OLLAMA_API_KEY，制造过两次 401：拿 ollama 的 key 去打

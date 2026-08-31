@@ -17,11 +17,14 @@ import {
   type Turn,
 } from "./tuiHistory";
 import {
+  getActiveDensity,
   getActiveBrightness,
   getActiveThemeName,
+  setActiveDensity,
   setActiveBrightness,
   setActiveThemeName,
   themeColorSequence,
+  type TuiDensity,
 } from "./theme";
 import { padOrTruncateToWidth, stripAnsi, visibleWidth } from "./tuiAnsi";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
@@ -549,20 +552,33 @@ describe("buildHistoryLines — user turn background bubble", () => {
     expect(stripAnsi(lines[lines.length - 1]!)).toMatch(/^┃  /);
   });
 
-  test("bubble rows stay full-width under the default spacious layout", () => {
-    for (const line of userBubble("density check", 40)) {
-      expect(visibleWidth(line)).toBe(40);
-      expect(line.endsWith("\x1b[0m")).toBe(true);
+  test("bubble rows stay full-width under both densities", () => {
+    const prev = getActiveDensity();
+    try {
+      for (const density of ["spacious", "cozy"] as const) {
+        setActiveDensity(density);
+        for (const line of userBubble("density check", 40)) {
+          expect(visibleWidth(line)).toBe(40);
+          expect(line.endsWith("\x1b[0m")).toBe(true);
+        }
+      }
+    } finally {
+      setActiveDensity(prev);
     }
   });
 });
 
 describe("buildHistoryLines — per-turn memoization", () => {
+  let densityBefore: TuiDensity;
+
   beforeEach(() => {
     setActiveThemeName("catppuccin");
+    densityBefore = getActiveDensity();
+    setActiveDensity("spacious");
   });
   afterEach(() => {
     setActiveThemeName("catppuccin");
+    setActiveDensity(densityBefore);
   });
 
   const multiTurnHistory = () => {
@@ -630,7 +646,8 @@ describe("buildHistoryLines — per-turn memoization", () => {
     });
   });
 
-  test("separator gap appears only above non-initial user turns (Q&A hugs)", () => {
+  test("spacious vs cozy separator position rules", () => {
+    const densityBefore = getActiveDensity();
     noColor(() => {
       const userFirst: Turn[] = [{ role: "user", content: "hi" }];
       const assistantFirst: Turn[] = [{ role: "assistant", content: "hello" }];
@@ -639,12 +656,13 @@ describe("buildHistoryLines — per-turn memoization", () => {
         { role: "user", content: "b" },
       ];
 
+      setActiveDensity("spacious");
       const spaciousUser = buildHistoryLines(
         { ...createTurnHistory(), turns: userFirst },
         80,
       );
-      // First turn never gets a leading blank — even a user turn.
-      expect(spaciousUser[0]).toContain("┃");
+      expect(spaciousUser[0]).toBe("");
+      expect(spaciousUser[1]).toContain("┃");
 
       const spaciousAssistant = buildHistoryLines(
         { ...createTurnHistory(), turns: assistantFirst },
@@ -661,7 +679,22 @@ describe("buildHistoryLines — per-turn memoization", () => {
       expect(spaciousMulti[0]).not.toBe("");
       const blankIdx = spaciousMulti.findIndex((l, i) => i > 0 && l === "");
       expect(blankIdx).toBeGreaterThan(0);
+
+      setActiveDensity("cozy");
+      const cozyUser = buildHistoryLines(
+        { ...createTurnHistory(), turns: userFirst },
+        80,
+      );
+      expect(cozyUser[0]).not.toBe("");
+      // Cozy never inserts the position-based blank separators.
+      expect(cozyUser.filter((l) => l === "").length).toBe(0);
+      const cozyMulti = buildHistoryLines(
+        { ...createTurnHistory(), turns: multi },
+        80,
+      );
+      expect(cozyMulti.filter((l) => l === "").length).toBe(0);
     });
+    setActiveDensity(densityBefore);
   });
 });
 
@@ -875,10 +908,14 @@ describe("virtualized renderHistory — windowed painting matches the full rende
     expect(repainted).toBeLessThanOrEqual(ROWS - INPUT_LINES);
   });
 
-  test("default spacious layout stays byte-identical across re-renders", () => {
+  test("density change stays byte-identical", () => {
     noColor(() => {
       const history = buildRichHistory(120);
-      // Default layout: blank separators between turns, rendered unconditionally.
+      setActiveDensity("spacious"); // default: blank separators between turns
+      expect(renderFrame(history)).toBe(referenceFrame(history));
+      setActiveDensity("cozy"); // separators vanish — render cache stale
+      expect(renderFrame(history)).toBe(referenceFrame(history));
+      setActiveDensity("spacious");
       expect(renderFrame(history)).toBe(referenceFrame(history));
     });
   });
@@ -946,11 +983,13 @@ describe("virtualized renderHistory — windowed painting matches the full rende
 describe("buildTurnOffsets & incremental streaming verification", () => {
   beforeEach(() => {
     setActiveThemeName("catppuccin");
+    setActiveDensity("cozy");
     resetStreamingTurnCache();
   });
 
   afterEach(() => {
     setActiveThemeName("catppuccin");
+    setActiveDensity("spacious"); // restore default; cozy here leaks into later files
     resetStreamingTurnCache();
   });
 
@@ -966,43 +1005,39 @@ describe("buildTurnOffsets & incremental streaming verification", () => {
       // Turn 3: Assistant single line
       history.turns.push({ role: "assistant", content: "Done" });
 
-      const offsets = buildTurnOffsets(history, 80);
-      expect(offsets.entries.length).toBe(4);
+      const offsetsCozy = buildTurnOffsets(history, 80);
+      expect(offsetsCozy.entries.length).toBe(4);
 
-      // Gap only above the non-initial user turn (index 2); Q&A pairs hug.
-      const expectedSeparators = [0, 0, 1, 0];
+      // Cozy mode: separatorAbove should be 0 for all
       let expectedRow = 0;
-      for (let i = 0; i < offsets.entries.length; i++) {
-        const entry = offsets.entries[i]!;
-        expectedRow += entry.separatorAbove;
+      for (let i = 0; i < offsetsCozy.entries.length; i++) {
+        const entry = offsetsCozy.entries[i]!;
         expect(entry.startRow).toBe(expectedRow);
-        expect(entry.separatorAbove).toBe(expectedSeparators[i]!);
+        expect(entry.separatorAbove).toBe(0);
         expect(entry.lineCount).toBeGreaterThan(0);
         expectedRow += entry.lineCount;
       }
-      expect(offsets.totalLines).toBe(expectedRow);
+      expect(offsetsCozy.totalLines).toBe(expectedRow);
     });
   });
 
-  test("buildTurnOffsets inserts separator gaps only above non-initial user turns", () => {
+  test("buildTurnOffsets respects spacious density separator gaps", () => {
     noColor(() => {
+      setActiveDensity("spacious");
       const history = createTurnHistory();
       history.turns.push({ role: "user", content: "Q1" });
       history.turns.push({ role: "assistant", content: "A1" });
       history.turns.push({ role: "user", content: "Q2" });
 
-      const offsets = buildTurnOffsets(history, 80);
-      expect(offsets.entries.length).toBe(3);
-      // Q&A hug: no gap above the first turn or the answer; next user turn opens a new group.
-      expect(offsets.entries[0]!.separatorAbove).toBe(0);
-      expect(offsets.entries[1]!.separatorAbove).toBe(0);
-      expect(offsets.entries[2]!.separatorAbove).toBe(1);
+      const offsetsSpacious = buildTurnOffsets(history, 80);
+      expect(offsetsSpacious.entries.length).toBe(3);
+      // Spacious mode: user turn at index 0 gets separator 1; subsequent turns get separator 1
+      expect(offsetsSpacious.entries[0]!.separatorAbove).toBe(1);
+      expect(offsetsSpacious.entries[1]!.separatorAbove).toBe(1);
+      expect(offsetsSpacious.entries[2]!.separatorAbove).toBe(1);
 
-      expect(offsets.entries[0]!.startRow).toBe(0);
-      expect(offsets.entries[1]!.startRow).toBe(offsets.entries[0]!.lineCount);
-      expect(offsets.entries[2]!.startRow).toBe(
-        offsets.entries[1]!.startRow + offsets.entries[1]!.lineCount + 1,
-      );
+      expect(offsetsSpacious.entries[0]!.startRow).toBe(1);
+      expect(offsetsSpacious.entries[1]!.startRow).toBe(1 + offsetsSpacious.entries[0]!.lineCount + 1);
     });
   });
 

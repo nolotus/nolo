@@ -212,6 +212,18 @@ export function setActiveBrightness(brightness: TuiBrightness | null) {
   setActiveThemeMode(brightness ?? "terminal");
 }
 
+export type TuiDensity = "cozy" | "spacious";
+
+let activeDensity: TuiDensity = "spacious";
+
+export function getActiveDensity(): TuiDensity {
+  return activeDensity;
+}
+
+export function setActiveDensity(density: TuiDensity) {
+  activeDensity = density;
+}
+
 const TRUECOLOR_TERM_PROGRAMS = new Set([
   "iterm.app",
   "wezterm",

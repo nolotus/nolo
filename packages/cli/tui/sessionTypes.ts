@@ -126,9 +126,6 @@ export type TuiAction =
       type: "theme-refresh";
     }
   | {
-      type: "cwd-refresh";
-    }
-  | {
       type: "shell-command";
       command: string;
     }

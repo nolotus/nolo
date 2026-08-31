@@ -193,13 +193,6 @@ type FixedInputConfig = {
    */
   getQueueLines?: () => string[];
   /**
-   * 附件条：Ctrl+V 贴图成功后显示在输入提示行上方的一行（如
-   * `📎 clip-xxx.png (12 KB)`）。内容由调用方拼装，composer 只负责布局与
-   * 超宽截断（fitAnsiLine），保证不破坏光标定位。返回 null 时隐藏该行，
-   * 高度变化走既有 scroll-region 路径（同活动行先例）。
-   */
-  getAttachmentLine?: () => string | null;
-  /**
    * Composer 高度变化时通知外部，让 readlineWorkspace 触发一次历史重绘。
    * 活动行首次出现时 composer 从 3 行变 4 行，repaintAt 据此 setScrollRegion
    * 收缩历史可视区，但历史是按旧 inputLines 画的、最底行被盖住；这个回调
@@ -329,13 +322,6 @@ export function createFixedInput(
       sections.push(fitAnsiLine(line.replace(/\r?\n/g, " "), cols));
     }
 
-    // 附件条：紧贴输入提示行上方（草稿的组成部分，优先级高于队列预览）。
-    // 同样折叠换行占恰好一行；超宽交给 fitAnsiLine 截断。
-    const attachmentLine = config.getAttachmentLine?.() ?? null;
-    if (attachmentLine) {
-      sections.push(fitAnsiLine(attachmentLine.replace(/\r?\n/g, " "), cols));
-    }
-
     const promptRaw = t("promptLabel");
     const promptWidth = displayWidth(promptRaw);
     // Accent-colored chevron so the input area feels active, not inert.
@@ -402,8 +388,7 @@ export function createFixedInput(
       2 +
       (titleLine ? 1 : 0) +
       activityLines.length +
-      queueLines.length +
-      (attachmentLine ? 1 : 0); // completion? + top rule + status + activity lines + queued preview + attachment line
+      queueLines.length; // completion? + top rule + status + activity lines + queued preview
     return { text, lines, cursorCol, cursorRow: headerRows + cursorRow };
   };
 

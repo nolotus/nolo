@@ -39,7 +39,6 @@ export {
   SLASH_COMMANDS,
   completeSlashPrefix,
   completeSlashCommand,
-  isBackspaceSequence,
   isLikelySlashCommand,
   stripImageTokens,
 } from "./sessionInput";
