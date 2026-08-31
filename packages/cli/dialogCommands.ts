@@ -21,8 +21,8 @@ import {
   deleteDialogAttachmentCandidates,
   planDialogAttachmentCleanup,
 } from "./dialogAttachmentCleanup";
-import { createClientLogger } from "core/clientLogger";
 import { toErrorMessage } from "core/errorMessage";
+import { logger } from "core/logger";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { DEFAULT_LOCAL_API_ORIGIN } from "../core/localOrigins";
@@ -38,8 +38,6 @@ import {
 import { asTrimmedString } from "core/trimmedString";
 import { isLevelNotFoundError } from "database/levelNotFoundError";
 import { isLevelLockError } from "database/levelLockError";
-
-const logger = createClientLogger("cli:dialog");
 
 type ReadSource = "http" | "local-db-fallback";
 

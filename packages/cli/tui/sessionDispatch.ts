@@ -1,8 +1,5 @@
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
-import { statSync } from "node:fs";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { DEFAULT_NOLO_SERVER_URL } from "../defaultServer";
 import {
   parseUserIdFromAuthToken,
@@ -24,6 +21,8 @@ import {
   setActiveThemeName,
   getActiveThemeMode,
   setActiveBrightness,
+  getActiveDensity,
+  setActiveDensity,
   THEME_PALETTES,
   themeText,
 } from "./theme";
@@ -36,24 +35,12 @@ import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { formatElapsedSeconds, renderContextPanel, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
-import type { TuiState, TuiInputResult, ThinkingDisplayMode } from "./sessionTypes";
+import type { TuiState, TuiInputResult } from "./sessionTypes";
 
 export { DEFAULT_TUI_AGENT_KEY };
 export const DEFAULT_TUI_SERVER_URL = DEFAULT_NOLO_SERVER_URL;
 
 type EnvLike = Record<string, string | undefined>;
-
-/**
- * Resolve the thinking display from the hidden env fallback.
- * Only an explicit hide/false/0 silences reasoning; anything else
- * (including an unset variable) keeps the built-in default `show`.
- */
-export function resolveThinkingDisplayMode(
-  env: EnvLike = process.env,
-): ThinkingDisplayMode {
-  const raw = (env.NOLO_CLI_THINKING ?? "").trim().toLowerCase();
-  return raw === "hide" || raw === "false" || raw === "0" ? "hide" : "show";
-}
 
 export function createInitialTuiState(env: EnvLike = process.env): TuiState {
   const agentKey =
@@ -103,7 +90,7 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
     userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
     gitStatus: undefined,
     toolDisplay: normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "normal"),
-    thinkingDisplay: resolveThinkingDisplayMode(env),
+    thinkingDisplay: "show",
     contextWindow: resolveAgentContextWindow({ agentKey, agentName }),
     estimatedContextTokens: estimateDefaultCliContextTokens({
       cwd,
@@ -254,48 +241,28 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         };
       }
     }
-    case "/cd": {
-      if (!argText) {
-        // 无参数：只显示当前 cwd + 用法，不改状态、不产 action。
+    case "/density": {
+      const parts = argText.split(/\s+/);
+      const sub = parts[0]?.trim();
+      if (!sub) {
         return {
           nextState: state,
-          output: `${t("cdCurrent", state.cwd)}\n${t("cdUsage")}`,
+          output: t("densityCurrent", getActiveDensity()),
         };
       }
-      // `~` 展开为当前用户 home；其余交给 node:path 按当前 cwd 解析
-      // （支持相对/绝对路径）。解析结果必须存在且为目录，否则报错不改状态。
-      const expanded =
-        argText === "~"
-          ? homedir()
-          : argText.startsWith("~/") || argText.startsWith("~\\")
-            ? resolve(homedir(), argText.slice(2))
-            : argText;
-      const target = resolve(state.cwd, expanded);
-      try {
-        if (!statSync(target).isDirectory()) {
-          return { nextState: state, output: t("cdNotDir", target) };
-        }
-      } catch {
-        return { nextState: state, output: t("cdNotFound", target) };
+      if (sub === "cozy" || sub === "spacious") {
+        setActiveDensity(sub);
+        return {
+          nextState: state,
+          output: t("densitySwitched", sub),
+        };
+      } else {
+        return {
+          nextState: state,
+          output: t("densityUnknown", sub),
+        };
       }
-      // 去尾部斜杠，与 createInitialTuiState 的 cwd 初始化行为一致；
-      // 根目录 "/" 除外（去掉斜杠会得到空串，破坏后续 resolve/stat）。
-      const normalized = target === "/" ? "/" : target.replace(/\/+$/, "");
-      return {
-        nextState: { ...state, cwd: normalized },
-        output: t("cdSwitched", normalized),
-        action: { type: "cwd-refresh" },
-      };
     }
-    case "/density":
-    case "/tools":
-    case "/thinking":
-      // 三套显示选择已收敛为唯一内置默认体验，命令保留识别但不切换任何状态；
-      // 专业细节走环境变量兜底（重启生效）。
-      return {
-        nextState: state,
-        output: t("displayFixedHint"),
-      };
     case "/context":
     case "/ctx":
       return { nextState: state, output: renderContextPanel(state) };
@@ -309,6 +276,45 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
       return {
         nextState: { ...state, runtimeMode: argText },
         output: t("runtimeSet", argText),
+      };
+    }
+    case "/tools": {
+      if (!argText) {
+        return {
+          nextState: state,
+          output: t("toolsCurrent", state.toolDisplay),
+        };
+      }
+      const normalizedArg = asTrimmedLowercaseString(argText);
+      if (!["normal", "pro", "hide", "compact", "verbose", "on", "off"].includes(normalizedArg)) {
+        return {
+          nextState: state,
+          output: t("toolsUsage"),
+        };
+      }
+      const nextMode = normalizeToolDisplayMode(normalizedArg, state.toolDisplay);
+      return {
+        nextState: { ...state, toolDisplay: nextMode },
+        output: t("toolsSet", nextMode),
+      };
+    }
+    case "/thinking": {
+      const normalizedArg = asTrimmedLowercaseString(argText);
+      if (!normalizedArg) {
+        return {
+          nextState: state,
+          output: t("thinkingCurrent", state.thinkingDisplay),
+        };
+      }
+      if (normalizedArg !== "show" && normalizedArg !== "hide") {
+        return {
+          nextState: state,
+          output: t("thinkingUsage"),
+        };
+      }
+      return {
+        nextState: { ...state, thinkingDisplay: normalizedArg },
+        output: t("thinkingSet", normalizedArg),
       };
     }
     case "/auto": {
