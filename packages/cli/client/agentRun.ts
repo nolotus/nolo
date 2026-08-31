@@ -31,6 +31,7 @@ import {
 import {
   type DispatchPlan,
   resolveAuthToken,
+  resolveFileWriteGateEnabled,
   isMachineBoundLocalhostCustomProvider,
   resolveBoundMachineId,
   detectCurrentMachineId,
@@ -1146,6 +1147,7 @@ async function runLocalAgentTurnForCli(
         : {}),
       continueDialogId: currentDialogId,
       fileWriteSessionId: currentDialogId,
+      fileWriteGateEnabled: resolveFileWriteGateEnabled(options.env),
       spaceId: options.spaceId,
       category: options.category,
       inheritedFromDialogKey: options.inheritedFromDialogKey,

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -34,12 +34,9 @@ import {
 import {
   getActiveThemeName,
   getActiveBrightness,
-  getActiveDensity,
   setActiveThemeName,
   setActiveBrightness,
-  setActiveDensity,
   themeColorSequence,
-  type TuiDensity,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 
@@ -732,26 +729,26 @@ describe("handleTuiInput - /altscreen dispatch", () => {
   });
 });
 
-describe("handleTuiInput - /tools display", () => {
-  test("normal is the default and compact remains a pro alias", () => {
+describe("handleTuiInput - /tools display migration hint", () => {
+  test("normal remains the default and the command only emits the migration hint", () => {
     setCliLocale("en");
     const state = createInitialTuiState({});
     expect(state.toolDisplay).toBe("normal");
 
-    const pro = handleTuiInput("/tools pro", state);
-    expect(pro.nextState.toolDisplay).toBe("pro");
-    const compact = handleTuiInput("/tools compact", state);
-    expect(compact.nextState.toolDisplay).toBe("pro");
-    const normal = handleTuiInput("/tools normal", pro.nextState);
-    expect(normal.nextState.toolDisplay).toBe("normal");
+    const result = handleTuiInput("/tools pro", state);
+    expect(result.nextState).toBe(state);
+    expect(result.output).toBe(t("displayFixedHint"));
+    expect(result.action).toBeUndefined();
   });
 
-  test("unknown values show the normal/pro usage without changing state", () => {
+  test("any argument (including unknown) emits the same hint and keeps state", () => {
     setCliLocale("en");
     const state = createInitialTuiState({});
-    const result = handleTuiInput("/tools expert", state);
-    expect(result.nextState).toBe(state);
-    expect(result.output).toContain("normal|pro|hide|verbose");
+    for (const input of ["/tools", "/tools normal", "/tools expert"]) {
+      const result = handleTuiInput(input, state);
+      expect(result.nextState).toBe(state);
+      expect(result.output).toBe(t("displayFixedHint"));
+    }
   });
 });
 
@@ -885,39 +882,38 @@ describe("handleTuiInput - /auto dispatch", () => {
   });
 });
 
-describe("handleTuiInput - /thinking display", () => {
-  test("defaults to show and participates in slash completion", () => {
+describe("handleTuiInput - /thinking display migration hint", () => {
+  test("defaults to show and the command only emits the migration hint", () => {
     const state = createInitialTuiState({});
     expect(state.thinkingDisplay).toBe("show");
-    expect(SLASH_COMMANDS).toContain("/thinking");
-    expect(completeSlashPrefix("/thi")).toBe("/thinking ");
-  });
-
-  test("/thinking show|hide updates only the session display preference", () => {
     setCliLocale("en");
-    const state = createInitialTuiState({});
-
-    const hidden = handleTuiInput("/thinking hide", state);
-    expect(hidden.nextState.thinkingDisplay).toBe("hide");
-    expect(hidden.output).toBe(t("thinkingSet", "hide"));
-    expect(hidden.action).toBeUndefined();
-
-    const shown = handleTuiInput("/thinking show", hidden.nextState);
-    expect(shown.nextState.thinkingDisplay).toBe("show");
-    expect(shown.output).toBe(t("thinkingSet", "show"));
-    expect(shown.action).toBeUndefined();
+    const result = handleTuiInput("/thinking", state);
+    expect(result.nextState).toBe(state);
+    expect(result.output).toBe(t("displayFixedHint"));
+    expect(result.action).toBeUndefined();
   });
 
-  test("/thinking reports current mode and rejects unsupported values", () => {
+  test("any argument (including unsupported values) keeps state and emits the same hint", () => {
     setCliLocale("en");
     const state = { ...createInitialTuiState({}), thinkingDisplay: "hide" as const };
+    for (const input of ["/thinking show", "/thinking hide", "/thinking off"]) {
+      const result = handleTuiInput(input, state);
+      expect(result.nextState).toBe(state);
+      expect(result.output).toBe(t("displayFixedHint"));
+    }
+  });
 
-    expect(handleTuiInput("/thinking", state).output).toBe(
-      t("thinkingCurrent", "hide"),
-    );
-    const invalid = handleTuiInput("/thinking off", state);
-    expect(invalid.nextState).toBe(state);
-    expect(invalid.output).toBe(t("thinkingUsage"));
+  test("NOLO_CLI_THINKING=hide resolves to hide; unset resolves to show", () => {
+    const hidden = createInitialTuiState({ NOLO_CLI_THINKING: "hide" });
+    expect(hidden.thinkingDisplay).toBe("hide");
+    const falseVal = createInitialTuiState({ NOLO_CLI_THINKING: "false" });
+    expect(falseVal.thinkingDisplay).toBe("hide");
+    const zeroVal = createInitialTuiState({ NOLO_CLI_THINKING: "0" });
+    expect(zeroVal.thinkingDisplay).toBe("hide");
+    const unset = createInitialTuiState({});
+    expect(unset.thinkingDisplay).toBe("show");
+    const showVal = createInitialTuiState({ NOLO_CLI_THINKING: "show" });
+    expect(showVal.thinkingDisplay).toBe("show");
   });
 });
 
@@ -956,6 +952,89 @@ describe("Task B - localized slash-command output", () => {
     expect(handleTuiInput("/tasks", state()).output).toBe("没有运行中的进程。");
     setCliLocale("en");
     expect(handleTuiInput("/tasks", state()).output).toBe("No processes.");
+  });
+});
+
+describe("handleTuiInput - /cd working directory switch", () => {
+  let cwd: string;
+  let subDir: string;
+
+  beforeEach(() => {
+    cwd = makeTempDir();
+    subDir = join(cwd, "sub");
+    mkdirSync(subDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  test("/cd with an absolute path switches cwd and emits cwd-refresh", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+    const res = handleTuiInput(`/cd ${subDir}`, state);
+    expect(res.nextState.cwd).toBe(subDir);
+    expect(res.nextState).not.toBe(state);
+    expect(res.action).toEqual({ type: "cwd-refresh" });
+    expect(res.output).toBe(t("cdSwitched", subDir));
+  });
+
+  test("/cd with a relative path resolves against the current cwd", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const res = handleTuiInput("/cd sub", state);
+    expect(res.nextState.cwd).toBe(subDir);
+    expect(res.action).toEqual({ type: "cwd-refresh" });
+  });
+
+  test("/cd strips trailing slashes like createInitialTuiState", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const res = handleTuiInput(`/cd ${subDir}/`, state);
+    expect(res.nextState.cwd).toBe(subDir);
+  });
+
+  test("/cd with no argument shows current cwd + usage and does not switch", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const res = handleTuiInput("/cd", state);
+    expect(res.nextState).toBe(state);
+    expect(res.action).toBeUndefined();
+    expect(res.output).toBe(`${t("cdCurrent", cwd)}\n${t("cdUsage")}`);
+  });
+
+  test("/cd to a missing directory reports an error and does not switch", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const missing = join(cwd, "nope");
+    const res = handleTuiInput(`/cd ${missing}`, state);
+    expect(res.nextState).toBe(state);
+    expect(res.action).toBeUndefined();
+    expect(res.output).toBe(t("cdNotFound", missing));
+  });
+
+  test("/cd to a file reports not-a-directory and does not switch", () => {
+    setCliLocale("en");
+    const filePath = join(cwd, "file.txt");
+    writeFileSync(filePath, "x");
+    const state = { ...createInitialTuiState({}), cwd };
+    const res = handleTuiInput(`/cd ${filePath}`, state);
+    expect(res.nextState).toBe(state);
+    expect(res.action).toBeUndefined();
+    expect(res.output).toBe(t("cdNotDir", filePath));
+  });
+
+  test("/cd ~ expands to the home directory", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+    const res = handleTuiInput("/cd ~", state);
+    expect(res.nextState.cwd).toBe(homedir());
+    expect(res.action).toEqual({ type: "cwd-refresh" });
+  });
+
+  test("/cd is registered in SLASH_COMMANDS and completes via tab", () => {
+    expect(SLASH_COMMANDS).toContain("/cd");
+    expect(completeSlashPrefix("/cd")).toBe("/cd ");
   });
 });
 
@@ -1011,23 +1090,20 @@ describe("handleTuiInput - path-vs-slash disambiguation", () => {
     });
   });
 
-  // /theme 与 /density 会改写 theme.ts 的模块级全局状态，该状态跨测试文件存活，
+  // /theme 会改写 theme.ts 的模块级全局状态，该状态跨测试文件存活，
   // 会污染后跑的 tui/theme.test.ts。这里捕获原值并在 afterEach 还原——用 afterEach
   // 而非在用例末尾还原，是为了让用例中途失败时也能还原。
   const themeStateBeforeEach = {
     theme: "",
     brightness: null as "light" | "dark" | null,
-    density: "spacious" as TuiDensity,
   };
   beforeEach(() => {
     themeStateBeforeEach.theme = getActiveThemeName();
     themeStateBeforeEach.brightness = getActiveBrightness();
-    themeStateBeforeEach.density = getActiveDensity();
   });
   afterEach(() => {
     setActiveThemeName(themeStateBeforeEach.theme);
     setActiveBrightness(themeStateBeforeEach.brightness);
-    setActiveDensity(themeStateBeforeEach.density);
   });
 
   test("handles /theme command to list or switch themes", () => {
@@ -1065,17 +1141,14 @@ describe("handleTuiInput - path-vs-slash disambiguation", () => {
     expect(getActiveBrightness()).toBeNull();
   });
 
-  test("handles /density command to view or switch density", () => {
+  test("/density emits the migration hint without touching state", () => {
     const state = createInitialTuiState({});
-    const viewResult = handleTuiInput("/density", state);
-    expect(viewResult.output).toContain("Current density: spacious");
-
-    const switchResult = handleTuiInput("/density cozy", state);
-    expect(switchResult.output).toContain("Switched to layout density: cozy");
-    expect(getActiveDensity()).toBe("cozy");
-
-    const invalidResult = handleTuiInput("/density unknown-density", state);
-    expect(invalidResult.output).toContain("Unknown density: unknown-density");
+    setCliLocale("en");
+    for (const input of ["/density", "/density cozy", "/density unknown-density"]) {
+      const result = handleTuiInput(input, state);
+      expect(result.nextState).toBe(state);
+      expect(result.output).toBe(t("displayFixedHint"));
+    }
   });
 });
 

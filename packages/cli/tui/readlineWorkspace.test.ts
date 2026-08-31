@@ -1859,6 +1859,89 @@ describe("scroll-aware history", () => {
     expect(turnsProcessed).toEqual(["start turn 1"]);
   });
 
+  test("executes /cd locally during busy turn without enqueuing, and the next turn still runs", async () => {
+    const input = new PassThrough() as PassThrough & {
+      isTTY?: boolean;
+      setRawMode?: (mode: boolean) => void;
+    };
+    const output = new PassThrough() as PassThrough & {
+      isTTY?: boolean;
+      rows?: number;
+      columns?: number;
+    };
+    input.isTTY = true;
+    output.isTTY = true;
+    output.rows = TERM_ROWS;
+    output.columns = TERM_COLS;
+    input.setRawMode = () => {};
+
+    const chunks: Uint8Array[] = [];
+    output.on("data", (chunk) => {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+
+    let resolveFirstTurn: (() => void) | null = null;
+    const firstTurnPromise = new Promise<void>((resolve) => {
+      resolveFirstTurn = resolve;
+    });
+
+    let turnCount = 0;
+    const turnsProcessed: string[] = [];
+
+    const workspacePromise = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: {},
+      agentRunner: async (opt) => {
+        turnCount++;
+        turnsProcessed.push(opt.message);
+        if (turnCount === 1) {
+          opt.output.write("HEAD");
+          await new Promise((r) => setTimeout(r, 30));
+          await firstTurnPromise;
+          opt.output.write("TAIL");
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("start turn 1\r");
+
+    while (turnCount < 1) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 30));
+
+    // /cd is on the busy whitelist: it must be handled locally (no model
+    // picker warning, no enqueue as a chat turn) and echo the new cwd.
+    input.write("/cd /tmp\r");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const outputTextAfterCd = Buffer.concat(chunks).toString("utf8");
+    expect(outputTextAfterCd).not.toContain("Model picker isn't available");
+    expect(outputTextAfterCd).toContain(t("cdSwitched", "/tmp"));
+
+    resolveFirstTurn!();
+    await new Promise((r) => setTimeout(r, 50));
+
+    input.write("/exit\r");
+    input.end();
+
+    await Promise.race([
+      workspacePromise,
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
+
+    // /cd was NOT enqueued as a chat turn: only the real user message reached
+    // the agent runner, and the in-flight reply survived intact.
+    expect(turnsProcessed).toEqual(["start turn 1"]);
+    const fullOutput = Buffer.concat(chunks).toString("utf8");
+    expect(fullOutput).toContain("HEAD");
+    expect(fullOutput).toContain("TAIL");
+  });
+
   test("busy /switch auto persists and routes the next turn through auto", async () => {
     const input = new PassThrough() as PassThrough & {
       isTTY?: boolean;
