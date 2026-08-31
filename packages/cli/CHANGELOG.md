@@ -1,4 +1,13 @@
 
+## 0.47.0-alpha.7
+
+## 0.47.0-alpha.7 (2026-08-31)
+
+### Bug Fixes
+
+* **chat:** 内置 object assistants 私有存量记录价格自愈（ensure-and-repair） ([f11155b](https://github.com/nolotus/bun-nolo/commit/f11155b88f8e6c9e03f212c9519a937f0f53047a))
+
+
 ## 0.47.0-alpha.6
 
 ## 0.47.0-alpha.6 (2026-08-31)
