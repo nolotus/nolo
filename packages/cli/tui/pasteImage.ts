@@ -475,41 +475,6 @@ export function summarizeAttachments(images: AttachedImage[]): string {
 }
 
 /**
- * Composer 附件条文本：`📎 <filename> (<size>)`，逗号分隔。
- *
- * ≤2 张全列；更多张列前 2 张 + `+N`。超终端宽的截断由 composer 的
- * fitAnsiLine 负责（这里不做宽度计算，避免引入与终端状态耦合的逻辑）。
- * 无附件返回 null（composer 据此隐藏附件行）。纯函数，便于单元测试。
- */
-export function formatComposerAttachmentLine(
-  images: AttachedImage[],
-): string | null {
-  if (images.length === 0) return null;
-  const head = images
-    .slice(0, 2)
-    .map((img) => `📎 ${img.filename} (${formatBytes(img.sizeBytes)})`);
-  const extra = images.length - head.length;
-  return extra > 0 ? `${head.join(", ")} +${extra}` : head.join(", ");
-}
-
-/**
- * Backspace 撤销附件：弹出最后一张（最新贴的在后）。
- *
- * 空数组返回 handled=false（没有可撤销的附件，调用方保持普通退格语义）。
- * 纯函数，便于单元测试。
- */
-export function popLastAttachedImage(
-  images: AttachedImage[],
-): { handled: boolean; images: AttachedImage[]; removed?: AttachedImage } {
-  if (images.length === 0) return { handled: false, images };
-  return {
-    handled: true,
-    images: images.slice(0, -1),
-    removed: images[images.length - 1],
-  };
-}
-
-/**
  * 合并已存的附件和刚读到的新附件,按 sourcePath 去重。
  *
  * 语义:

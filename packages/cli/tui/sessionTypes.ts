@@ -34,17 +34,6 @@ export type TuiState = {
    * 保留在 state 里是为了让 handleTuiInput 这种纯函数也能做路径解析。
    */
   cwd: string;
-  /**
-   * `/cd` 切换前的旧目录（仅当发生过切换时存在）。`/cd -` 回退到该目录；
-   * 回退成功后清空，避免再次 `/cd -` 反复横跳（语义：`-` 只回溯一步）。
-   */
-  prevCwd?: string;
-  /**
-   * 最近一次 `/cd` 切换产生的切换消息，作为 turn-scope 上下文注入 agent
-   * 下一轮输入（agent 与用户同时知情）。被下一个真实 turn 消费后清除；
-   * 若在 turn 运行中切换（busy 路径），该消息会一直保留到下一个 turn 被读取。
-   */
-  pendingCwdNotice?: string;
   attachedDocs: string[];
   /**
    * Skill refs attached to the workspace via /skill attach.
@@ -135,15 +124,6 @@ export type TuiAction =
     }
   | {
       type: "theme-refresh";
-    }
-  | {
-      type: "cwd-refresh";
-      /**
-       * 切换成功后要写入对话历史的切换消息（agent 下一 turn 可读到），
-       * 格式与 /switch 的切换消息同语义。缺省时（如仅重测 gitStatus）
-       * 不写对话历史。
-       */
-      switchMessage?: string;
     }
   | {
       type: "shell-command";

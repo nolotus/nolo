@@ -1403,27 +1403,6 @@ sys.exit(0 if any(a.get('name') == sys.argv[1] for a in apps) else 1)
 " "$CHAT_PROXY_APP_NAME" 2>/dev/null
 }
 
-# 共享内部 token 文件：core 与 chat-proxy 用同一 token 互认
-# （getInternalToken 运行时读取该文件，core 无需重启即生效）。
-ensure_chat_proxy_internal_token_file() {
-  CHAT_PROXY_INTERNAL_TOKEN_FILE="${NOLO_INTERNAL_TOKEN_FILE:-${REPO_DIR}/data/chat-proxy-internal-token}"
-  if [[ -s "$CHAT_PROXY_INTERNAL_TOKEN_FILE" ]]; then
-    return 0
-  fi
-  local dir
-  dir="$(dirname "$CHAT_PROXY_INTERNAL_TOKEN_FILE")"
-  mkdir -p "$dir" 2>/dev/null || true
-  if [[ ! -w "$dir" ]]; then
-    echo "⚠️ 无法写入 $dir，chat-proxy 内部 token 共享文件未生成（call-plan 将 fail-closed）"
-    return 1
-  fi
-  local token
-  token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
-  (umask 077 && printf '%s' "$token" > "$CHAT_PROXY_INTERNAL_TOKEN_FILE")
-  chmod 600 "$CHAT_PROXY_INTERNAL_TOKEN_FILE"
-  echo "🔐 已生成 chat-proxy 内部 token 共享文件：$CHAT_PROXY_INTERNAL_TOKEN_FILE"
-}
-
 start_chat_proxy() {
   local args=(start "$EXPECTED_ENTRY_PATH" --interpreter "$BUN_BIN" --interpreter-args "$BUN_RUNTIME_ARGS" --name "$CHAT_PROXY_APP_NAME")
   if [[ -n "$PM2_KILL_TIMEOUT" ]]; then
@@ -1443,10 +1422,6 @@ start_chat_proxy() {
     NOLO_DISABLE_HTTPS=1 \
     PLATFORM_SERVER_HOST="$CHAT_PROXY_HTTP_HOST" \
     HTTP_PORT="$CHAT_PROXY_HTTP_PORT" \
-    # CallPlanClient 必须指向 core（38123）；不带这条时 fallback 取本进程
-    # 的 PORT=38124，变成自己 call 自己（chat-proxy 角色没有 call-plan 端点）。
-    NOLO_CORE_INTERNAL_URL="http://127.0.0.1:${APP_HTTP_PORT}" \
-    NOLO_INTERNAL_TOKEN_FILE="$CHAT_PROXY_INTERNAL_TOKEN_FILE" \
     NOLO_REUSE_PORT=0 \
     NOLO_SLOT="$CHAT_PROXY_APP_NAME" \
     NOLO_RELEASE_SHA="${NOLO_RELEASE_SHA:-}" \
@@ -1490,7 +1465,6 @@ wire_chat_proxy() {
   fi
 
   if timed_deploy_step "assert-chat-proxy-app-name-isolation" assert_chat_proxy_app_name_isolation \
-    && timed_deploy_step "ensure-chat-proxy-internal-token" ensure_chat_proxy_internal_token_file \
     && timed_deploy_step "ensure-chat-proxy-app" ensure_chat_proxy_app \
     && timed_deploy_step "verify-chat-proxy-health" verify_chat_proxy_health; then
     chat_proxy_upstream_ready=1

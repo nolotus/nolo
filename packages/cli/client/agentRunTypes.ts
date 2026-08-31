@@ -63,21 +63,6 @@ export function resolveAuthToken(env: EnvLike) {
 }
 
 /**
- * Hidden escape hatch for the session-first-write confirm gate, mirroring
- * `resolveThinkingDisplayMode`'s NOLO_CLI_THINKING contract (sessionDispatch.ts):
- * takes effect on restart, not documented in `--help`. Only an explicit
- * off/0/false disables the gate; anything else — including an unset or
- * unparsable value — resolves to `true` (gate enabled), matching today's
- * behavior byte-for-byte. Resolved here (CLI layer) and threaded down as
- * `fileWriteGateEnabled` on the local-turn input; agent-runtime never reads
- * `process.env` directly so it stays embeddable outside the CLI.
- */
-export function resolveFileWriteGateEnabled(env: EnvLike): boolean {
-  const raw = (env.NOLO_CLI_WRITE_GATE ?? "").trim().toLowerCase();
-  return raw !== "off" && raw !== "0" && raw !== "false";
-}
-
-/**
  * Check whether an agent config represents a machine-bound localhost
  * custom provider — the agent is bound to a specific machine AND its
  * custom provider URL points to 127.0.0.1 or localhost.

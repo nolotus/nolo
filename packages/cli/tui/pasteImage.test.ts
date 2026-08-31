@@ -8,11 +8,9 @@ import {
   detectImagePaths,
   fileUriToPath,
   formatBytes,
-  formatComposerAttachmentLine,
   ImageReadError,
   mapWindowsPathToWsl,
   mergeAttachedImages,
-  popLastAttachedImage,
   readImageAsDataUrl,
   readImagePaths,
   resolveImageSource,
@@ -519,61 +517,5 @@ describe("readImagePaths", () => {
     expect(multi).toContain("2. screen2.jpg");
     expect(multi).toContain("1.0 MB");
     expect(multi).toContain("500.0 KB");
-  });
-});
-describe("composer attachment line (附件条)", () => {
-  const img = (filename: string, sizeBytes: number): AttachedImage => ({
-    filename,
-    sizeBytes,
-    sourcePath: `/tmp/${filename}`,
-    dataUrl: "data:image/png;base64,abc",
-    mime: "image/png",
-  });
-
-  test("无附件返回 null（composer 隐藏附件行）", () => {
-    expect(formatComposerAttachmentLine([])).toBeNull();
-  });
-
-  test("≤2 张全列：📎 <filename> (<size>) 逗号分隔", () => {
-    expect(formatComposerAttachmentLine([img("clip-a.png", 512)])).toBe(
-      "📎 clip-a.png (512 B)",
-    );
-    expect(
-      formatComposerAttachmentLine([
-        img("clip-a.png", 1024),
-        img("clip-b.jpg", 500 * 1024),
-      ]),
-    ).toBe("📎 clip-a.png (1.0 KB), 📎 clip-b.jpg (500.0 KB)");
-  });
-
-  test("更多张列前 2 张 + +N", () => {
-    const line = formatComposerAttachmentLine([
-      img("a.png", 1),
-      img("b.png", 2),
-      img("c.png", 3),
-      img("d.png", 4),
-      img("e.png", 5),
-    ]);
-    expect(line).toBe("📎 a.png (1 B), 📎 b.png (2 B) +3");
-  });
-
-  test("popLastAttachedImage 弹出最后一张（Backspace 撤销逻辑）", () => {
-    const empty = popLastAttachedImage([]);
-    expect(empty.handled).toBe(false);
-    expect(empty.images).toEqual([]);
-
-    const a = img("a.png", 1);
-    const b = img("b.png", 2);
-    const c = img("c.png", 3);
-    const undo = popLastAttachedImage([a, b, c]);
-    expect(undo.handled).toBe(true);
-    expect(undo.removed).toBe(c);
-    expect(undo.images).toEqual([a, b]);
-    // 逐个撤销到空。
-    const undo2 = popLastAttachedImage(undo.images);
-    expect(undo2.removed).toBe(b);
-    const undo3 = popLastAttachedImage(undo2.images);
-    expect(undo3.removed).toBe(a);
-    expect(popLastAttachedImage(undo3.images).handled).toBe(false);
   });
 });

@@ -31,22 +31,6 @@ describe("i18n", () => {
     expect(t("placeholder")).toBe("输入消息，或用 / 查看命令…");
   });
 
-  test("/cd switch message and no-previous keys exist in both locales", () => {
-    setCliLocale("en");
-    expect(t("cdNoPrevious")).toContain("No previous");
-    expect(t("cdSwitchedMessage", "/a", "/b")).toContain("/a → /b");
-    expect(t("cdSwitchedMessage", "/a", "/b")).toContain("new directory");
-    setCliLocale("zh");
-    expect(t("cdNoPrevious")).toContain("没有上一个目录");
-    expect(t("cdSwitchedMessage", "旧", "新")).toContain("旧 → 新");
-    expect(t("cdSwitchedMessage", "旧", "新")).toContain("以新目录为准");
-    // 切换消息必须明确「后续工具执行与文件操作以新目录为准」。
-    setCliLocale("en");
-    expect(t("cdSwitchedMessage", "/a", "/b")).toContain(
-      "Subsequent tool execution and file operations use the new directory"
-    );
-  });
-
   test("welcomeHint is localized", () => {
     setCliLocale("en");
     expect(t("welcomeHint")).toContain(newlineHint());
@@ -122,7 +106,9 @@ describe("i18n", () => {
     "unknownCommand",
     "runtimeUsage",
     "runtimeSet",
-    "displayFixedHint",
+    "toolsCurrent",
+    "toolsUsage",
+    "toolsSet",
     "tasksRunning",
     "tasksStopped",
     "tasksNone",
@@ -146,6 +132,9 @@ describe("i18n", () => {
     "themeRefreshed",
     "themeRefreshFailed",
     "themeUnknown",
+    "densityCurrent",
+    "densitySwitched",
+    "densityUnknown",
     "docAttachUsage",
     "docList",
     "docNone",

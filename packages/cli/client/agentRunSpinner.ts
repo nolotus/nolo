@@ -1,5 +1,4 @@
 import { themeColorSequence } from "../tui/theme";
-import { dimCliText } from "./terminalStyles";
 import type { OutputLike } from "./agentRunTypes";
 
 export function formatElapsed(totalSeconds: number): string {
@@ -134,7 +133,7 @@ export class Spinner {
       Math.floor((Date.now() - this.startTime) / 1000),
     );
     const thinkingPart = this.thinkingHint
-      ? dimCliText(`: ${truncateThinkingHint(this.thinkingHint, 60)}`)
+      ? `: ${truncateThinkingHint(this.thinkingHint, 60)}`
       : "";
     return `${themeColorSequence("accent")}${frame}\x1b[39m ${this.text}${thinkingPart} (${formatElapsed(elapsedSeconds)})`;
   }
