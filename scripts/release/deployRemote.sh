@@ -815,6 +815,9 @@ start_nolo() {
     NOLO_SERVER_RUNTIME_ROLE=core \
     NOLO_WEB_HOSTED_EXEC_RUNTIME="${NOLO_WEB_HOSTED_EXEC_RUNTIME:-}" \
     NOLO_HOSTED_WORKSPACE_ROOT="${NOLO_HOSTED_WORKSPACE_ROOT:-}" \
+    # core 与 chat-proxy 共享同一内部 token 文件（internalToken 运行时读取，
+    # 文件生成于 ensure_chat_proxy_internal_token_file；core 无需为此重启）。
+    NOLO_INTERNAL_TOKEN_FILE="$CHAT_PROXY_INTERNAL_TOKEN_FILE" \
     DISABLE_HTTPS="$DISABLE_HTTPS" \
     NOLO_DISABLE_HTTPS="$DISABLE_HTTPS" \
     PLATFORM_SERVER_HOST="$APP_HTTP_HOST" \
@@ -1053,6 +1056,9 @@ start_nolo_canary() {
     NOLO_SERVER_RUNTIME_ROLE=core \
     NOLO_WEB_HOSTED_EXEC_RUNTIME="${NOLO_WEB_HOSTED_EXEC_RUNTIME:-}" \
     NOLO_HOSTED_WORKSPACE_ROOT="${NOLO_HOSTED_WORKSPACE_ROOT:-}" \
+    # core 与 chat-proxy 共享同一内部 token 文件（internalToken 运行时读取，
+    # 文件生成于 ensure_chat_proxy_internal_token_file；core 无需为此重启）。
+    NOLO_INTERNAL_TOKEN_FILE="$CHAT_PROXY_INTERNAL_TOKEN_FILE" \
     DISABLE_HTTPS="$DISABLE_HTTPS" \
     NOLO_DISABLE_HTTPS="$DISABLE_HTTPS" \
     PLATFORM_SERVER_HOST="$APP_HTTP_HOST" \
