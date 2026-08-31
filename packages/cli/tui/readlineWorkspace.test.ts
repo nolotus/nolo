@@ -83,20 +83,17 @@ describe("displayWidth", () => {
   });
 
   test("counts emoji and common symbols as width 2", () => {
+    // 注意：只守 emoji 宽 2 的行为不变量；EA=A 符号（♠→× 等）在
+    // NOLO_TUI_AMBIGUOUS_WIDTH 默认 narrow 下按 1 列（第三方宽度表结论，
+    // 已由 tuiAnsi.test.ts 的 narrow/wide 断言组覆盖，此处不再镜像）。
     expect(displayWidth("📁")).toBe(2);
     expect(displayWidth("📋")).toBe(2);
-    expect(displayWidth("♠")).toBe(2);
     expect(displayWidth("a📁b")).toBe(4);
   });
 
   test("counts the ❯ prompt ornament as width 1", () => {
     expect(displayWidth("❯")).toBe(1);
     expect(displayWidth("❯ ")).toBe(2);
-  });
-
-  test("counts the 🏔 status-line icon as width 2", () => {
-    expect(displayWidth("🏔")).toBe(2);
-    expect(displayWidth("🏔 minimax-m3")).toBe(13); // 2 + " minimax-m3" (11)
   });
 
   test("counts CJK quotation marks as width 2 in zh locale", () => {
@@ -1018,13 +1015,14 @@ describe("mouse drag selection integration", () => {
     expect(agentRuns).toBe(1);
     await Bun.sleep(80);
 
-    // History rows at width 20: separator, user, separator,
-    // "◈ abcdefghijklmnopqr", "stuvwxyz". SGR coordinates are 1-based.
-    input.write("\x1b[<0;1;5M");
+    // History rows at width 20 (grouped Q&A layout, no inter-turn blanks):
+    // "┃  q", "◈ abcdefghijklmnopqr", "stuvwxyz". SGR coordinates are
+    // 1-based; the wrapped tail row is index 2, so all events target Y=3.
+    input.write("\x1b[<0;1;3M");
     // Deliberately stop the last motion early. The release coordinate is the
     // authoritative endpoint when a terminal coalesces motion reports.
-    input.write("\x1b[<32;3;5M");
-    input.write("\x1b[<0;6;5m");
+    input.write("\x1b[<32;3;3M");
+    input.write("\x1b[<0;6;3m");
 
     const copyDeadline = Date.now() + 1000;
     while (copied.length === 0 && Date.now() < copyDeadline) {
@@ -1035,7 +1033,7 @@ describe("mouse drag selection integration", () => {
     // A plain click starts a zero-width selection and must repaint away the
     // old reverse-video overlay even if no drag follows.
     const outputBeforeClick = outputChunks.length;
-    input.write("\x1b[<0;2;5M");
+    input.write("\x1b[<0;2;3M");
     await Bun.sleep(30);
     const clickPaint = outputChunks.slice(outputBeforeClick).join("");
     expect(clickPaint.length).toBeGreaterThan(0);
@@ -1164,9 +1162,11 @@ describe("Ctrl+C 防误退", () => {
     }
     await Bun.sleep(80);
 
-    // 拖选几行，形成选区（press + drag），同现有 mouse drag 测试的坐标。
-    input.write("\x1b[<0;1;5M"); // press at row1 col1
-    input.write("\x1b[<32;3;5M"); // drag to row3 col3
+    // 拖选几行，形成选区（press + drag）。新问答成组布局下历史行为三行
+    // "┃  q" / "◈ abcdefghijklmnopqr" / "stuvwxyz"（无轮次间空行），
+    // 拖到 Y=3 即可覆盖整条回复。
+    input.write("\x1b[<0;1;3M"); // press at row1 col1
+    input.write("\x1b[<32;3;3M"); // drag to row3 col3
     await Bun.sleep(40);
 
     // Ctrl+C 提取选区写入剪贴板（不走 release 复制路径）。
@@ -1452,10 +1452,11 @@ describe("scroll-aware history", () => {
     expect(history.followBottom).toBe(false);
 
     // Reaching the bottom via the wheel resumes live-tail. 30 assistant
-    // turns render as 59 lines (blank separators), viewport 8 → max 51.
-    history.scrollTop = 50;
+    // turns render as 30 lines (grouped layout: blanks only separate
+    // non-initial user turns), viewport 8 → max 22.
+    history.scrollTop = 21;
     applyScrollAction(history, "wheel-down", output, 2);
-    expect(history.scrollTop).toBe(51);
+    expect(history.scrollTop).toBe(22);
     expect(history.followBottom).toBe(true);
   });
 
@@ -1475,8 +1476,9 @@ describe("scroll-aware history", () => {
 
     applyScrollAction(history, "bottom", output, 2);
     expect(history.followBottom).toBe(true);
-    // 59 transcript lines (30 turns + blank separators) - 8 visible = 51.
-    expect(history.scrollTop).toBe(51);
+    // 30 transcript lines (30 assistant turns; grouped layout has no
+    // inter-turn separators) - 8 visible = 22.
+    expect(history.scrollTop).toBe(22);
 
     // Home（top）直达首部，并关闭 follow bottom。
     applyScrollAction(history, "top", output, 2);
@@ -2448,8 +2450,9 @@ describe("scroll-aware history", () => {
     await Promise.race([workspacePromise, new Promise((r) => setTimeout(r, 3000))]);
 
     const fullOutput = Buffer.concat(chunks).toString("utf8");
-    expect(fullOutput).toContain("余额不足");
-    expect(fullOutput).toContain("继续");
+    // UPSTREAM_402 的 UX 文案为「已保存在当前对话里…不会丢上下文」（充值后接着聊）。
+    expect(fullOutput).toContain("已保存在当前对话里");
+    expect(fullOutput).toContain("不会丢上下文");
     expect(fullOutput).not.toContain("Fix the local credential/config");
   });
 

@@ -13,6 +13,9 @@ import {
   renderWelcome,
 } from "./tui/session";
 import { getCliLocale, setCliLocale } from "./tui/i18n";
+// 窗口断言一律从 catalog 真值源推导（resolveAgentContextWindow），不钉硬编码魔数：
+// catalog / 模型档位同步后此处自动跟随，测试只守「接线正确」这条不变量。
+import { resolveAgentContextWindow } from "./client/tokenUsage";
 
 describe("cli tui session", () => {
   // Assertions below are written against the English strings; pin the locale
@@ -65,9 +68,12 @@ describe("cli tui session", () => {
     // status line shows the default agent name "nolo" instead of an "auto" label.
     expect(renderStatusLine(state)).toContain("nolo");
     expect(renderStatusLine(state)).toContain("🏔 nolo");
-    // auto default routes to flash (DeepSeek 1M); chip shows a measured
+    // auto default routes to the built-in catalog agent; window follows the
+    // catalog model (derived, not hardcoded). Chip shows a measured
     // system+tools estimate until the first provider usage report arrives.
-    expect(state.contextWindow).toBe(1_000_000);
+    expect(state.contextWindow).toBe(
+      resolveAgentContextWindow({ agentKey: DEFAULT_TUI_AGENT_KEY, agentName: "nolo" }),
+    );
     expect(state.estimatedContextTokens).toBeGreaterThan(2_000);
     expect(renderStatusLine(state)).toMatch(/context: \d+(\.\d+)?% \([\d.]+k\/1M\)/);
     expect(renderStatusLine(state)).not.toContain("(0/");
@@ -86,7 +92,9 @@ describe("cli tui session", () => {
       NOLO_CLI_GIT_STATUS: "0",
       NOLO_AUTO_ROUTE: "0",
     });
-    expect(state.contextWindow).toBe(1_000_000);
+    expect(state.contextWindow).toBe(
+      resolveAgentContextWindow({ agentKey: DEFAULT_TUI_AGENT_KEY, agentName: "nolo" }),
+    );
     expect(state.estimatedContextTokens).toBeGreaterThan(2_000);
     expect(renderStatusLine(state)).toMatch(/context: \d+(\.\d+)?% \([\d.]+k\/1M\)/);
     expect(renderStatusLine(state)).not.toContain("(0/");
@@ -105,7 +113,9 @@ describe("cli tui session", () => {
       const withWindow = { ...state, contextWindow: 512_000 };
       const switched = handleTuiInput("/switch nolo", withWindow);
       expect(switched.nextState.agentKey).toBe(DEFAULT_TUI_AGENT_KEY);
-      expect(switched.nextState.contextWindow).toBe(1_000_000);
+      expect(switched.nextState.contextWindow).toBe(
+        resolveAgentContextWindow({ agentKey: DEFAULT_TUI_AGENT_KEY, agentName: "nolo" }),
+      );
     } finally {
       if (prev === undefined) delete process.env.NOLO_AUTO_ROUTE;
       else process.env.NOLO_AUTO_ROUTE = prev;
@@ -197,11 +207,13 @@ describe("cli tui session", () => {
 
   test("defaults display modes and supports /tools", () => {
     const state = createInitialTuiState({});
-    expect(state.toolDisplay).toBe("compact");
+    // 450234264 display convergence removed the compact default; normal wins.
+    expect(state.toolDisplay).toBe("normal");
 
+    // /tools 已随显示收敛停用：命令保留识别、不切状态，输出固定提示。
     const tools = handleTuiInput("/tools verbose", state);
-    expect(tools.nextState.toolDisplay).toBe("verbose");
-    expect(renderContextPanel(tools.nextState)).toContain("tools    verbose");
+    expect(tools.nextState.toolDisplay).toBe("normal");
+    expect(tools.output).toContain("no switching needed");
   });
 
   test("tracks runtime mode from env and sends it with chat actions", () => {

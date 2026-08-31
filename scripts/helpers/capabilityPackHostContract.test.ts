@@ -5,7 +5,7 @@ import {
   expandEnabledPacks,
 } from "../../packages/ai/tools/toolPacks";
 import { resolveCliEffectiveEnabledPacks } from "../../packages/cli/client/localRuntimeAdapter";
-import { resolveDesktopEffectiveEnabledPacks } from "../../packages/server/handlers/desktopAgentRuntimeTurnService";
+import { resolveDesktopEffectiveEnabledPacks } from "../../packages/desktop-runtime/handlers/desktopAgentRuntimeTurnService";
 import { resolveEffectiveEnabledPacks } from "../../packages/ai/tools/toolPacks";
 
 /**

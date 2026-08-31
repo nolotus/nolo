@@ -109,15 +109,14 @@ describe("tuiSelection", () => {
     finalizeCurrentTurn(history);
 
     const visibleLines = buildHistoryLines(history, 80);
-    // Row 0: "" (separator)
-    // Row 1: "┃  First turn"
-    // Row 2: "" (separator)
-    // Row 3: "◈ Second turn"
+    // Grouped Q&A layout (blanks only separate non-initial user turns):
+    // Row 0: "┃  First turn"
+    // Row 1: "◈ Second turn"
 
     const text = extractSelectedText(
       history,
-      { globalRow: 1, col: 9 },  // "turn" in "┃  First turn"
-      { globalRow: 3, col: 8 },  // "Second" in "◈ Second turn"
+      { globalRow: 0, col: 9 },  // "turn" in "┃  First turn"
+      { globalRow: 1, col: 8 },  // "Second" in "◈ Second turn"
       80,
     );
     expect(text).toContain("turn");
@@ -376,8 +375,10 @@ describe("tuiSelection", () => {
     appendToCurrentTurn(history, "♠abc");
     finalizeCurrentTurn(history);
 
-    const anchor = { globalRow: 0, col: 4 };
-    const head = { globalRow: 0, col: 5 };
+    // 7174a32ae 起 EA=A 符号默认 narrow（♠=1 列），行 "◈ ♠abc" 中 'a' 落在
+    // col 3-4；extract 与 overlay 必须使用同一宽度模型。
+    const anchor = { globalRow: 0, col: 3 };
+    const head = { globalRow: 0, col: 4 };
     expect(extractSelectedText(history, anchor, head, 80)).toBe("a");
 
     const [overlaid] = applySelectionOverlay(
