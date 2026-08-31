@@ -396,10 +396,11 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("tailLines:0");
     expect(prompt).toContain("tailLines:30");
     expect(prompt).toContain("stop 之前先看日志");
-    // 分档与拆分纪律（协作段）
+    // 分档与拆分纪律（协作段）——2026-08-31 起为两账判据（上下文账 / 并行账），步数门槛已废弃
     expect(prompt).toContain("分档标准");
-    expect(prompt).toContain("逻辑步骤 <5 且只读/搜/改 ≤2 个文件");
-    expect(prompt).toContain("跨 3 个以上独立领域");
+    expect(prompt).toContain("两账判据");
+    expect(prompt).toContain("上下文账命中 → 派发");
+    expect(prompt).toContain("并行账命中 → 派发");
     expect(prompt).toContain("不为「凑数量」派发");
     expect(prompt).toContain("按独立领域拆，不按文件数量拆");
     expect(prompt).toContain("用户明确要求你亲自完成时按用户要求执行");
@@ -949,5 +950,46 @@ describe("buildSystemPrompt", () => {
     });
     expect(mainPromptWithAsk).toContain("通过提问来澄清需求，而不是仓促给出答案");
     expect(mainPromptWithAsk).toContain("你是测试助手。");
+  });
+
+  it("enforces phase separation: user testing first and final review only when preparing to commit", async () => {
+    const { buildSystemPrompt } = await loadPromptBuilders();
+    const prompt = buildSystemPrompt({
+      agentConfig: {
+        userId: "user-1",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        useServerProxy: true,
+        isPublic: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        tools: ["startAgentRun", "controlAgentRun", "listAgents"],
+      } as any,
+    });
+
+    // 1. 明确区分实现/测试阶段与准备提交阶段
+    expect(prompt).toContain("阶段划分与独立审查");
+    expect(prompt).toContain("严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段");
+
+    // 2. UI/前端及需验收功能在实现阶段先交付可测试产物，不得触发或等待最终 review
+    expect(prompt).toContain("不得触发或等待最终独立 review");
+    expect(prompt).toContain("等待用户测试与反馈");
+
+    // 3. 最终 review 只在用户明确确认准备提交时派发，通过后才提交
+    expect(prompt).toContain("只有当用户明确确认准备提交/合并时，才派发最终 review");
+    expect(prompt).toContain("用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer");
+    expect(prompt).toContain("无 review 不 commit");
+
+    // 4. 保留安全关键审查与只读审计能力，但不阻塞用户测试
+    expect(prompt).toContain("安全关键变更的必要审查不受影响");
+    expect(prompt).toContain("独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试");
+
+    // 5. 保留 review 证据硬门
+    expect(prompt).toContain("review 证据硬门");
+    expect(prompt).toContain("仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过");
+
+    // 6. 验证旧的“改完即 review / 自动循环阻塞测试”表述不再存在
+    expect(prompt).not.toContain("自动循环：改完 →");
+    expect(prompt).not.toContain("改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff");
   });
 });

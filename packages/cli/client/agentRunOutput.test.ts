@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { createCliTurnOutput } from "./agentRunOutput";
 import { createSseToolEventAdapter } from "./toolOutput";
@@ -8,12 +8,29 @@ import {
   finalizeCurrentTurn,
   startTurn,
 } from "../tui/tuiHistory";
-import { toolLabel } from "../tui/i18n";
+import { setCliLocale, toolLabel } from "../tui/i18n";
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import type { AgentExecutionObservationEvent } from "../../agent-runtime/executionObservation";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 
 describe("createCliTurnOutput thinking display", () => {
+  // Trace copy is localized; pin to en so assertions don't depend on LANG.
+  beforeEach(() => {
+    setCliLocale("en");
+  });
+
+  // dimCliText resolves color from process.env; non-TTY runners default it
+  // off, so force it on for the dim assertions and restore afterwards.
+  let prevColor: string | undefined;
+  beforeEach(() => {
+    prevColor = process.env.NOLO_CLI_COLOR;
+    process.env.NOLO_CLI_COLOR = "1";
+  });
+  afterEach(() => {
+    if (prevColor === undefined) delete process.env.NOLO_CLI_COLOR;
+    else process.env.NOLO_CLI_COLOR = prevColor;
+  });
+
   function createTurn(showThinking?: boolean) {
     const output: string[] = [];
     const hints: string[] = [];
@@ -61,6 +78,31 @@ describe("createCliTurnOutput thinking display", () => {
     turn.pushText("<think>inline reasoning</think>answer");
     turn.finish();
     expect(hints).toContain("inline reasoning");
+  });
+
+  test("finished thinking leaves a dim duration trace in the display stream", () => {
+    const { turn, output } = createTurn();
+    turn.pushThinking("some reasoning");
+    turn.pushText("answer");
+    turn.finish();
+    const all = output.join("");
+    const traceIdx = all.indexOf("✻");
+    expect(traceIdx).toBeGreaterThanOrEqual(0);
+    expect(all).toContain("✻ Thought for");
+    expect(all).toContain("\x1b[2m");
+    // Trace lands before the answer text (thinking precedes the reply).
+    expect(traceIdx).toBeLessThan(all.indexOf("answer"));
+  });
+
+  test("thinking trace is fully suppressed when showThinking is off", () => {
+    const { turn, output } = createTurn(false);
+    turn.pushThinking("hidden reasoning");
+    turn.pushText("answer");
+    turn.finish();
+    const all = output.join("");
+    expect(all).not.toContain("✻");
+    expect(all).not.toContain("Thought for");
+    expect(all).toContain("answer");
   });
 });
 

@@ -63,6 +63,24 @@ describe("toolOutput", () => {
     expect(shouldEmitToolEvents("hide")).toBe(false);
   });
 
+  test("normal mode dims successful trace lines but keeps failures vivid", () => {
+    const format = createToolEventFormatter("normal", true);
+    format(toolEvent({ type: "tool-call", toolName: "execShell", argumentsPreview: "bun test" }));
+    const ok = format(
+      toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: { exitCode: 0, command: "bun test" },
+      }),
+    );
+    expect(ok).toContain("\x1b[2m");
+
+    const failed = format(
+      toolEvent({ type: "tool-error", toolName: "execShell" }),
+    );
+    expect(failed).not.toContain("\x1b[2m");
+  });
+
   test("normal mode reports the action and status without shell plumbing", () => {
     const format = createToolEventFormatter("normal", false);
     format(toolEvent({

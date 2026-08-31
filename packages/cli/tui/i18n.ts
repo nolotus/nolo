@@ -243,6 +243,11 @@ const STRINGS = {
     en: "Draft cleared.",
     zh: "输入草稿已清空。",
   },
+  // 空草稿按 Backspace 逐个撤销附件（composer 附件条）。
+  attachmentRemovedHint: {
+    en: "Removed attachment {0}, {1} remaining",
+    zh: "已移除附件 {0}，剩余 {1} 张",
+  },
   historyNoToken: {
     en: "History requires an auth token. Run `nolo login` or set AUTH_TOKEN.",
     zh: "查看历史对话需要登录凭证。请运行 `nolo login` 或设置 AUTH_TOKEN。",
@@ -310,6 +315,10 @@ const STRINGS = {
   // --- Tool trace copy ------------------------------------------------------
   // The compact trace shows only status, never timing or output size: a line
   // count told the user nothing actionable and the ms figure read as noise.
+  thinkingTraceLine: {
+    en: "✻ Thought for {0}",
+    zh: "✻ 思考 {0}",
+  },
   toolNeedsAction: {
     en: "needs action",
     zh: "待确认",
@@ -551,9 +560,8 @@ const STRINGS = {
       "  /new                  Clear screen and start a fresh dialog",
       "  /compact              Compact current dialog and fork a new one",
       "  /context              Show workspace context and next actions",
+      "  /cd <path>            Change the working directory (takes effect on the next turn)",
       "  /runtime <mode>       Use auto, local, or server runtime",
-      "  /tools <mode>         Control tool trace: hide, compact, verbose",
-      "  /thinking <mode>      Show or hide live model reasoning",
       "  /switch               Pick an agent interactively (↑↓, Enter)",
       "  /switch list          List agents as text",
       "  /switch <name>        Switch directly by name, alias, or key (alias: /agent)",
@@ -563,7 +571,7 @@ const STRINGS = {
       "  /lang <zh|en>         Switch interface language",
       "  /copy [all]           Copy the last reply (or the full conversation with \"all\") to the clipboard",
       "  /mouse <on|off>       Toggle mouse mode (off = drag to select text)",
-      "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell & external-file confirms)",
+      "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell, external-file & file-write confirms)",
       "  /math <on|off>        Toggle math formula rendering (Unicode transcription)",
       "  /altscreen <on|off>   Toggle the terminal alternate screen (default on; off shares shell scrollback)",
       "  Shift+drag            Select text natively even while mouse mode is on (terminal bypass)",
@@ -590,9 +598,8 @@ const STRINGS = {
       "  /new                  清屏并开始新对话",
       "  /compact              压缩当前对话并分叉出新对话",
       "  /context              查看工作区上下文与后续操作",
+      "  /cd <path>           切换工作目录（下个 turn 生效）",
       "  /runtime <mode>       切换 runtime：auto、local、server",
-      "  /tools <mode>         工具轨迹显示：hide、compact、verbose",
-      "  /thinking <mode>      显示或隐藏模型的实时思考过程",
       "  /switch               交互式选择 agent（↑↓ 移动，Enter 确认）",
       "  /switch list          以文本列出全部 agent",
       "  /switch <name>        按名称、别名或 key 直接切换（别名：/agent）",
@@ -602,7 +609,7 @@ const STRINGS = {
       "  /lang <zh|en>         切换界面语言",
       "  /copy [all]           复制最后一条回复到剪贴板（加 all 复制完整对话）",
       "  /mouse <on|off>       切换鼠标模式（off 后可直接拖选文本）",
-      "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell 与外部文件确认）",
+      "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell、外部文件与写文件确认）",
       "  /math <on|off>        切换数学公式渲染（Unicode 转写）",
       "  /altscreen <on|off>   切换终端备用屏（默认 on；off 改为与 shell 共用回滚）",
       "  Shift+拖拽            鼠标模式开启时也可原生选中文本（终端绕过修饰键）",
@@ -633,21 +640,10 @@ const STRINGS = {
   },
   runtimeUsage: { en: "Usage: /runtime <auto|local|server>", zh: "用法：/runtime <auto|local|server>" },
   runtimeSet: { en: "Runtime: {0}", zh: "运行模式：{0}" },
-  toolsCurrent: {
-    en: "Tool display: {0} (normal | pro | hide | verbose)",
-    zh: "工具显示：{0}（普通 normal | 专业 pro | hide | verbose）",
+  displayFixedHint: {
+    en: "The TUI now ships a single built-in display default, no switching needed. Power users can fall back to environment variables (applied on restart): NOLO_CLI_TOOLS=normal|pro|verbose|hide controls the tool trace, NOLO_CLI_THINKING=show|hide controls reasoning visibility.",
+    zh: "TUI 现在只有一套内置默认显示，无需切换。专业细节可用环境变量兜底（重启生效）：NOLO_CLI_TOOLS=normal|pro|verbose|hide 控制工具轨迹，NOLO_CLI_THINKING=show|hide 控制思考过程。",
   },
-  toolsUsage: { en: "Usage: /tools <normal|pro|hide|verbose>", zh: "用法：/tools <normal|pro|hide|verbose>" },
-  toolsSet: { en: "Tool display: {0}", zh: "工具显示：{0}" },
-  thinkingCurrent: {
-    en: "Thinking display: {0} (show | hide)",
-    zh: "思考显示：{0}（show | hide）",
-  },
-  thinkingUsage: {
-    en: "Usage: /thinking <show|hide>",
-    zh: "用法：/thinking <show|hide>",
-  },
-  thinkingSet: { en: "Thinking display: {0}", zh: "思考显示：{0}" },
   tasksRunning: { en: "Running processes ({0}):", zh: "运行中的进程（{0}）：" },
   tasksStopped: { en: "Stopped/exited ({0}):", zh: "已停止/已退出（{0}）：" },
   tasksNone: { en: "No processes.", zh: "没有运行中的进程。" },
@@ -719,14 +715,18 @@ const STRINGS = {
   },
   themeSwitched: { en: "Switched to theme: {0}", zh: "已切换到主题：{0}" },
   themeUnknown: { en: "Unknown theme: {0}. Available themes: {1}", zh: "未知主题：{0}。可用主题：{1}" },
-  densityCurrent: {
-    en: "Current density: {0}\nUsage: /density <cozy|spacious>",
-    zh: "当前密度：{0}\n用法：/density <cozy|spacious>",
+  cdUsage: {
+    en: "Usage: /cd <path>  (relative, absolute, ~, or -; takes effect on the next turn)",
+    zh: "用法：/cd <path>（相对、绝对、~ 或 - 路径；下个 turn 生效）",
   },
-  densitySwitched: { en: "Switched to layout density: {0}", zh: "已切换到布局密度：{0}" },
-  densityUnknown: {
-    en: "Unknown density: {0}. Use 'cozy' or 'spacious'.",
-    zh: "未知密度：{0}。请使用 cozy 或 spacious。",
+  cdCurrent: { en: "Current directory: {0}", zh: "当前目录：{0}" },
+  cdSwitched: { en: "Working directory: {0}", zh: "工作目录：{0}" },
+  cdNotFound: { en: "Directory not found: {0}", zh: "目录不存在：{0}" },
+  cdNotDir: { en: "Not a directory: {0}", zh: "不是目录：{0}" },
+  cdNoPrevious: { en: "No previous directory.", zh: "没有上一个目录。" },
+  cdSwitchedMessage: {
+    en: "Working directory changed: {0} → {1}. Subsequent tool execution and file operations use the new directory.",
+    zh: "工作目录已切换：{0} → {1}。后续工具执行与文件操作以新目录为准。",
   },
   docAttachUsage: { en: "Usage: /doc attach <doc>", zh: "用法：/doc attach <doc>" },
   docList: { en: "Attached docs: {0}", zh: "已挂载文档：{0}" },

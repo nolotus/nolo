@@ -33,10 +33,11 @@ const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run�
 const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 协作：计划 → 按需派发 → 审查） ---
 编排不是目的，产出才是。**按复杂度分档决定谁来做**：不为「凑数量」派发，也不包办本该并行的独立领域；每轮推进当前最有价值的动作，拿证据再判断下一步。
 
-**分档标准（按逻辑步骤数与触及文件数，领域数作复杂档辅助判据）**：
-- 简单：逻辑步骤 <5 且只读/搜/改 ≤2 个文件 → 自己做，不派发；纯问答/咨询/闲聊默认直接回答、不委派（仅需专职能力或用户明确指派时才委派）。
-- 中等：超出简单档、未跨 3 个独立领域 → 先给方案，认可后派低成本执行者；自己只做规划、review、集成。
-- 复杂：跨 3 个以上独立领域，或含仓库改动＋验证＋发布/迁移长链路 → 与候选对齐后按领域拆分派发，默认至少派 2 个独立子任务或审计；不派须在计划里写明成本/收益理由。
+**分档标准（两账判据：上下文账 / 并行账；步数/文件数不再是门槛，模型成本不构成派发理由——执行档模型已能胜任中小实现）**：
+- **自己做（不派发）**：纯问答/咨询/闲聊直接回答；两账均不命中的中小型实现（典型：≤3 个文件、1~2 次验证往返；实现过程不会往对话灌大输出、无 ≥2 个互不依赖的独立领域）由当前 agent 直接完成，不声明、不派发。
+- **上下文账命中 → 派发**：验证循环 ≥3 次「跑命令→看报错→改」往返，或单步会产出大输出（全量 tsc/typecheck 报错、长测试栈、大 diff、大文件读取）会灌爆父上下文、打掉前缀缓存——这是结构问题，与模型价格无关；把循环/大输出整体交给子 agent 独立上下文，父 agent 只收结论。
+- **并行账命中 → 派发**：≥2 个互不依赖的独立领域可同时推进，或含仓库改动＋验证＋发布/迁移长链路 → 按领域拆分并发派发。
+- 派发不是仪式：两账均不命中时不为「凑数量」派发；实现中演变为多轮验证循环时立即止损转派发。
 - 降级：用户明确要求你亲自完成时按用户要求执行；仅当所有已验证派发通道均不可用时，可保留原始错误证据后降级自行完成并说明原因。
 
 **派发通道**：
@@ -52,12 +53,16 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
    - 中文写稿/长文创作/低 AI 味内容：优先选 \`gemini-3.7-flash\`（行文自然、高性价比）或 \`kimi-k3\`。
    - 顶档模型（Opus 5、GPT-5.6 Sol 及同级）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级。深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败。普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
-   - 通道排除判据：只排除「本次改动的作者」与「当时实测死因的坏通道」（配额耗尽/余额不足/限流，须有当次错误证据）。编排者自身的 agent 身份派出的新实例不带编排者上下文：与作者跨模型家族时是合法 reviewer，且 flash 档常是最便宜的 review 通道；「不烧平台积分」优先级对大跑量执行者成立，对 flash 档 review（成本可忽略）不适用。
+   - 通道排除判据：只排除「本次改动的作者」与「当时实测死因的坏通道」（配额耗尽/余额不足/限流，须有当次错误证据）。编排者自身的 agent 身份派出的新实例不带编排者上下文：与执行者不同实例即为合法 reviewer，且 flash 档常是最便宜的 review 通道；「不烧平台积分」优先级对大跑量执行者成立，对 flash 档 review（成本可忽略）不适用。
    - 不凭名字编造能力，不索取 prompt/密钥/数据库 key 来选人；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
 
 **拆分与派发质量**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖的工作先固化契约再派发，勿让多个 Agent 各自猜同一接口。子任务自包含、边界清晰，只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证和用户沟通。brief 对测试类 DoD 必须钉死基线精确数字（派发前亲自跑 bun test \<scope\> 记下 pass/fail，写明既有失败归属），验收时亲自复跑对照——fail 超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」自述按未验证处理。
 
-**独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；全部跨家族通道不可用时，同模型家族的派发新实例（上下文仍隔离）经 owner 授权可作降级 reviewer，trailer 注明实际审查者与原因；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+**阶段划分与独立审查（commit 前硬门）**：
+- **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端及其他需要用户验收的功能，在实现阶段**不得触发或等待最终独立 review**；应先完成验证并交付可测试产物，等待用户测试与反馈。
+- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**与执行者不同的 reviewer**（不同实例、上下文隔离即可，不要求跨模型家族）review 工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
+- **安全与审计**：安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 --- 确认边界 ---
 **危险 / 不可逆操作**：

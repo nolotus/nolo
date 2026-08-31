@@ -4547,6 +4547,7 @@ describe("session file-write gate (onActionGate)", () => {
   // fail-closed（executeTool 不执行，且 undefined 不得意外放行）。
   function buildGateHarness(
     onActionGate: (gate: unknown) => Promise<unknown> | unknown,
+    options?: { fileWriteGateEnabled?: boolean },
   ) {
     let executeToolCalls = 0;
     let gateCalls = 0;
@@ -4578,6 +4579,9 @@ describe("session file-write gate (onActionGate)", () => {
         adapter,
         agentRef: "a",
         input,
+        ...(options?.fileWriteGateEnabled !== undefined
+          ? { fileWriteGateEnabled: options.fileWriteGateEnabled }
+          : {}),
         onActionGate: (gate: unknown) => {
           gateCalls += 1;
           return onActionGate(gate);
@@ -4627,5 +4631,36 @@ describe("session file-write gate (onActionGate)", () => {
     // 新 adapter = 新会话：重新询问
     expect(h2.gatesOf()).toBe(1);
     expect(h2.callsOf()).toBe(2);
+  });
+
+  // NOLO_CLI_WRITE_GATE=off 逃生口：CLI 层解析后经 fileWriteGateEnabled 向下
+  // 传递（agent-runtime 本身不读 process.env，见 fileWriteGateEnabled 的字段
+  // 文档）。fail-safe 契约：未显式传 false，门必须保持开启——不管是完全不传
+  // 这个字段（默认路径），还是显式传 true。
+  test("fileWriteGateEnabled: false skips the gate entirely (writes execute directly)", async () => {
+    const h = buildGateHarness(() => {
+      throw new Error("gate must not be invoked when fileWriteGateEnabled is false");
+    }, { fileWriteGateEnabled: false });
+    await h.run("write it");
+    expect(h.gatesOf()).toBe(0);
+    expect(h.callsOf()).toBe(2);
+  });
+
+  test("fileWriteGateEnabled: true keeps the gate active (same as the default)", async () => {
+    const h = buildGateHarness(() => ({
+      metadata: { actionGateResult: { status: "completed" } },
+    }), { fileWriteGateEnabled: true });
+    await h.run("write it");
+    expect(h.gatesOf()).toBe(1);
+    expect(h.callsOf()).toBe(2);
+  });
+
+  test("omitting fileWriteGateEnabled (unset) keeps the gate active — fail-safe default", async () => {
+    const h = buildGateHarness(() => ({
+      metadata: { actionGateResult: { status: "completed" } },
+    }));
+    await h.run("write it");
+    expect(h.gatesOf()).toBe(1);
+    expect(h.callsOf()).toBe(2);
   });
 });

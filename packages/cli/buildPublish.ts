@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -208,13 +208,28 @@ export async function buildPublishArtifactBundled(
 
   await bundleCliEntry({ sourceDir, distDir, external: PUBLISH_EXTERNAL });
 
-  // 发布依赖只留 external 包（native prebuild + ulid + tweetnacl）；其余纯 JS 已 inline。
-  // 版本优先取 buildPublishArtifact 已解析进 manifest 的值；tweetnacl 经由被 inline 的
-  // workspace 依赖进入 bundle，不被 CLI 源码直接 import，因此不在 distPkg.dependencies
-  // 中，需从 CLI/root manifest 解析版本（不硬编码）。
+  // 发布依赖只留 bundle 产物实际引用的 external 包；其余纯 JS 已 inline。
+  // 不能只依据源码可达图保留依赖，因为 tree shaking 可能移除整个 external import。
+  const emittedExternalDeps = new Set<string>();
+  for (const entry of readdirSync(distDir)) {
+    if (!entry.endsWith(".js")) continue;
+    const content = readFileSync(join(distDir, entry), "utf8");
+    for (const dependency of extractExternalImports(content)) {
+      emittedExternalDeps.add(dependency);
+    }
+    // levelLazyShim uses createRequire so database code stays lazy on --help.
+    // esbuild emits that call as `_require("level")` in a split chunk.
+    const requirePattern = /\b(?:require|_require|require\d+)\(\s*["']([^"']+)["']\s*\)/g;
+    let requireMatch: RegExpExecArray | null;
+    while ((requireMatch = requirePattern.exec(content)) !== null) {
+      const [dependency] = extractExternalImports(`import ${JSON.stringify(requireMatch[1])}`);
+      if (dependency) emittedExternalDeps.add(dependency);
+    }
+  }
   const publishVersionMap = buildPublishVersionMap(sourceDir);
   const keptDeps: Record<string, string> = {};
   for (const name of ["level", "ulid", "tweetnacl"]) {
+    if (!emittedExternalDeps.has(name)) continue;
     const version = distPkg.dependencies?.[name] ?? publishVersionMap[name];
     if (version) keptDeps[name] = version;
   }
@@ -361,8 +376,7 @@ async function bundleCliEntry(args: {
 /**
  * Resolve a name → version map from the repo-root and CLI package manifests,
  * skipping workspace: ranges. Used to attach publish versions to external
- * packages (e.g. tweetnacl) that reach the bundle through inlined workspace deps
- * and therefore are not discovered from CLI source imports directly.
+ * packages that reach the bundle through inlined workspace dependencies.
  */
 function buildPublishVersionMap(sourceDir: string): Record<string, string> {
   const versionMap: Record<string, string> = {};

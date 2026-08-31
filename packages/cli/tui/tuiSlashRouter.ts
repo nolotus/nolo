@@ -40,6 +40,7 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { stripAnsi } from "./tuiAnsi";
+import { detectGitStatusAsync } from "./gitStatus";
 import {
   MAX_TUI_HISTORY_TURNS,
   resetHistoryFrameDiffCache,
@@ -83,6 +84,7 @@ export interface SlashDispatchHost {
 
   readonly emitCommandOutput: (text: string, command?: string) => void;
   readonly renderHistoryToOutput: () => void;
+  readonly scheduleRender: () => void;
   readonly refreshDialogTotalCredits: (dialogId: string, dialogKey: string) => void;
   readonly persistExplicitAgentSwitch: (previousAgentKey: string) => boolean;
   // readlineWorkspace 模块级函数（默认档不落盘的 agent 选择持久化），
@@ -149,6 +151,7 @@ export async function runSubmittedSlashLine(
     turnCtx,
     emitCommandOutput,
     renderHistoryToOutput,
+    scheduleRender,
     refreshDialogTotalCredits,
     persistExplicitAgentSwitch,
     persistAgentSelection,
@@ -364,6 +367,26 @@ export async function runSubmittedSlashLine(
     } else {
       emitCommandOutput(t("themeRefreshFailed"));
     }
+  }
+
+  if (result.action?.type === "cwd-refresh") {
+    // /cd 已把 state.cwd 切到新目录：用新 cwd 重测 gitStatus（与 turn 结束
+    // 后 refreshGitStatus 的检测时机一致），写回 state 后重绘状态行/composer。
+    // 异步检测不阻塞；结果到达时若会话已退出则丢弃（与 readlineWorkspace 的
+    // sessionEnded 卫兵语义一致）。与 refreshGitStatus 相同的 kill switch：
+    // 测试/禁用场景不 spawn git。
+    if ((options.env?.NOLO_CLI_GIT_STATUS ?? process.env.NOLO_CLI_GIT_STATUS) !== "0") {
+      const gitStatus = await detectGitStatusAsync(host.state.cwd);
+      if (gitStatus !== undefined) {
+        host.state = { ...host.state, gitStatus };
+      }
+    }
+    // 切换消息写入对话历史（role="local"，与 /switch 的消息同通道），
+    // 用户可见且 agent 后续 turn 能读到（见 runAgentChat 的上下文组装）。
+    if (result.action.switchMessage) {
+      emitCommandOutput(result.action.switchMessage);
+    }
+    scheduleRender();
   }
 
   if (result.action?.type === "pick-agent") {
