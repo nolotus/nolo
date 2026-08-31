@@ -1432,6 +1432,8 @@ start_chat_proxy() {
 
   export_repo_dotenv
 
+  # CallPlanClient 必须指向 core（38123）；不带这条时 fallback 取本进程
+  # 的 PORT=38124，变成自己 call 自己（chat-proxy 角色没有 call-plan 端点）。
   # DISABLE_HTTPS=1：chat-proxy 只在 loopback 上被 Caddy 反代，TLS 由 Caddy 终止。
   # NOLO_REUSE_PORT=0：它不做蓝绿，独占自己的端口。保持 reusePort 关闭，
   #   残留的重复实例会以 EADDRINUSE 大声失败，而不是静默双实例分摊流量。
@@ -1443,8 +1445,6 @@ start_chat_proxy() {
     NOLO_DISABLE_HTTPS=1 \
     PLATFORM_SERVER_HOST="$CHAT_PROXY_HTTP_HOST" \
     HTTP_PORT="$CHAT_PROXY_HTTP_PORT" \
-    # CallPlanClient 必须指向 core（38123）；不带这条时 fallback 取本进程
-    # 的 PORT=38124，变成自己 call 自己（chat-proxy 角色没有 call-plan 端点）。
     NOLO_CORE_INTERNAL_URL="http://127.0.0.1:${APP_HTTP_PORT}" \
     NOLO_INTERNAL_TOKEN_FILE="$CHAT_PROXY_INTERNAL_TOKEN_FILE" \
     NOLO_REUSE_PORT=0 \
@@ -1457,15 +1457,43 @@ start_chat_proxy() {
 
 # 幂等：已存在就**不重启**（这是 core 发布不打断 LLM 流的全部收益来源），
 # 不存在才启动。绝不 pm2 start 同名第二份。
+# 例外：关键 env 与期望值不一致时必须 delete+重建（否则 proxy 带着旧 env
+# 运行，如缺 NOLO_CORE_INTERNAL_URL 时会自己 call 自己直到人工干预）。
+# pm2 restart --update-env 不可靠（实测不刷新已存实例的 env），所以走重建。
+chat_proxy_env_matches() {
+  local pid
+  pid="$(run_maybe_sudo "$PM2_BIN" pid "$CHAT_PROXY_APP_NAME" 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$pid" && "$pid" != "0" ]] || return 0
+  local env_file="/proc/$pid/environ"
+  [[ -r "$env_file" ]] || return 0
+  local expected_url="http://127.0.0.1:${APP_HTTP_PORT}"
+  local ok=1
+  if ! tr '\0' '\n' < "$env_file" | grep -q "^NOLO_CORE_INTERNAL_URL=$expected_url\$"; then
+    ok=0
+  fi
+  if ! tr '\0' '\n' < "$env_file" | grep -q "^NOLO_INTERNAL_TOKEN_FILE=$CHAT_PROXY_INTERNAL_TOKEN_FILE\$"; then
+    ok=0
+  fi
+  return $((1 - ok))
+}
+
 ensure_chat_proxy_app() {
   if chat_proxy_app_exists; then
-    if [[ "$CHAT_PROXY_RESTART" == "1" ]]; then
-      echo "♻️ NOLO_CHAT_PROXY_RESTART=1：显式重启 ${CHAT_PROXY_APP_NAME}（core 部署默认不走这条路径）"
-      run_maybe_sudo "$PM2_BIN" restart "$CHAT_PROXY_APP_NAME" --kill-timeout "${NOLO_CHAT_PROXY_KILL_TIMEOUT_MS:-65000}"
+    if ! chat_proxy_env_matches; then
+      echo "♻️ chat-proxy env 与期望不一致（NOLO_CORE_INTERNAL_URL/NOLO_INTERNAL_TOKEN_FILE），重建以生效"
+      run_maybe_sudo "$PM2_BIN" delete "$CHAT_PROXY_APP_NAME" >/dev/null 2>&1 || true
+      # 继续走到下方「不存在才启动」分支，用当前代码的完整 env 重建
+      chat_proxy_started=1
+    fi
+    if chat_proxy_app_exists; then
+      if [[ "$CHAT_PROXY_RESTART" == "1" ]]; then
+        echo "♻️ NOLO_CHAT_PROXY_RESTART=1：显式重启 ${CHAT_PROXY_APP_NAME}（core 部署默认不走这条路径）"
+        run_maybe_sudo "$PM2_BIN" restart "$CHAT_PROXY_APP_NAME" --kill-timeout "${NOLO_CHAT_PROXY_KILL_TIMEOUT_MS:-65000}"
+        return 0
+      fi
+      echo "✅ ${CHAT_PROXY_APP_NAME} 已在运行：core 部署不停它、不重启它、不等它（保护进行中的 LLM 流）"
       return 0
     fi
-    echo "✅ ${CHAT_PROXY_APP_NAME} 已在运行：core 部署不停它、不重启它、不等它（保护进行中的 LLM 流）"
-    return 0
   fi
 
   echo "🚀 ${CHAT_PROXY_APP_NAME} 不存在，启动独立 chat-proxy app（role=chat-proxy port=${CHAT_PROXY_HTTP_PORT}）..."

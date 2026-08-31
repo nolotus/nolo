@@ -379,6 +379,11 @@ describe("行为：chat-proxy 自己的生命周期", () => {
   it("app 不存在时启动一份，env 带 role=chat-proxy 与独立端口", () => {
     const run = runScenario("scenario_ensure_starts_when_absent", {
       NOLO_CHAT_PROXY_ENABLED: "1",
+      // 场景直接调 ensure_chat_proxy_app（真实接线链 wire_chat_proxy 里
+      // ensure_chat_proxy_internal_token_file 先行设置它）；start_chat_proxy 在
+      // set -u 下会读该变量，不提供会 unbound variable。路径指向测试 workdir，
+      // 不触碰真机 token 文件。
+      NOLO_INTERNAL_TOKEN_FILE: join(workRoot, "chat-proxy-internal-token"),
       FAKE_PM2_JLIST: writeJlist("core-only", ["nolo"]),
     });
     expect(run.code, run.stdout + run.stderr).toBe(0);
@@ -394,7 +399,12 @@ describe("行为：chat-proxy 自己的生命周期", () => {
       FAKE_PM2_JLIST: jlistBoth,
     });
     expect(run.code, run.stdout + run.stderr).toBe(0);
-    expect(run.pm2Calls).toEqual(["jlist"]);
+    // 完整读序列：jlist（查存在）→ pid（宿主的 chat_proxy_env_matches 用 pid 读
+    // /proc/$pid/environ 比对 NOLO_CORE_INTERNAL_URL/NOLO_INTERNAL_TOKEN_FILE；
+    // mac 无 /proc 视为匹配）→ jlist（「不存在才启动」分支的二次确认）。
+    // 全是读操作，一条变更命令都没有 —— pid 调用出现在日志里反而锁住了
+    // env-drift 检查确实发生这一新行为。
+    expect(run.pm2Calls).toEqual(["jlist", "pid nolo-chat-proxy", "jlist"]);
     for (const verb of ["start", "stop", "restart", "reload", "delete"]) {
       expect(run.pm2Calls.some((call) => call.startsWith(`${verb} `)), `不该出现 pm2 ${verb}`).toBe(false);
     }

@@ -75,7 +75,10 @@ scenario_wire_disabled_is_noop() {
 }
 
 # app 不存在 → 启动一份，env 带 role/port。
+# 与真实接线链 wire_chat_proxy 保持一致：ensure_chat_proxy_internal_token_file 先行
+# （start_chat_proxy 在 set -u 下读 CHAT_PROXY_INTERNAL_TOKEN_FILE）。
 scenario_ensure_starts_when_absent() {
+  ensure_chat_proxy_internal_token_file
   ensure_chat_proxy_app
   emit_result
 }
