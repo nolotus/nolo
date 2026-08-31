@@ -364,7 +364,6 @@ export function waitForActionGate(
   const commandPayload = gate.kind === "handoff"
     ? readCommandActionGatePayload(gate.payload)
     : null;
-  const isConfirmation = gate.kind === "confirm";
   const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
   const isInteractiveHandoff =
     gate.kind === "handoff" &&
@@ -409,15 +408,6 @@ export function waitForActionGate(
     rl.once("SIGINT", onSigint);
     rl.question("", async () => {
       if (settled) return;
-      if (isConfirmation) {
-        finish({
-          content: `action gate completed: ${gate.title}`,
-          metadata: {
-            actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" },
-          },
-        });
-        return;
-      }
       if (!commandPayload) {
         finish(failResult("unsupported gate payload"));
         return;
@@ -483,7 +473,6 @@ export function waitForRawActionGate(
   const commandPayload = gate.kind === "handoff"
     ? readCommandActionGatePayload(gate.payload)
     : null;
-  const isConfirmation = gate.kind === "confirm";
   const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
   const isInteractiveHandoff =
     gate.kind === "handoff" &&
@@ -573,21 +562,12 @@ export function waitForRawActionGate(
     };
     const handleToken = (text: string) => {
       if (settled || commandRunning) return;
-      if (text.includes("\u0003") || (isConfirmation && text.includes("\u001b"))) {
+      if (text.includes("\u0003")) {
         cancel("interrupted");
         return;
       }
       if (text.includes("\r") || text.includes("\n")) {
-        if (isConfirmation) {
-          finish({
-            content: `action gate completed: ${gate.title}`,
-            metadata: {
-              actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" },
-            },
-          });
-        } else {
-          void runCommand();
-        }
+        void runCommand();
       }
     };
     const onData = (chunk: Buffer | string) => {

@@ -378,10 +378,8 @@ describe("localRuntimeDialog writeDialog title behavior", () => {
     });
 
     let generatorCalled = false;
-    let receivedExistingTitle: string | undefined;
-    const titleGenerator = async (input: { existingTitle?: string }) => {
+    const titleGenerator = async () => {
       generatorCalled = true;
-      receivedExistingTitle = input.existingTitle;
       return "更新后的新标题";
     };
 
@@ -429,7 +427,6 @@ describe("localRuntimeDialog writeDialog title behavior", () => {
 
     dialogRecord = store.getData()["dialog-local-user-d3"];
     expect(generatorCalled).toBe(true);
-    expect(receivedExistingTitle).toBe("旧标题");
     expect(dialogRecord.title).toBe("更新后的新标题");
   });
 

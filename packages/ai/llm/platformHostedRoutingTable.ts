@@ -33,7 +33,6 @@ export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash";
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL = "deepseek-v4-flash-vision-exp";
 export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
-export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL = "nemotron-3-5-lightning-30b";
 
 /**
  * 平台托管上游 id（credential / usage 白名单 / keyName 共用）。
@@ -229,15 +228,6 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     keyName: "openai",
     wire: "responses",
     agentRunHosted: true,
-  },
-  // Nemotron 标题 LLM 内部专用，走 chatProxy；agentRun 不分流。
-  [PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
-    upstreamModelId: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
-    wire: "chat.completions",
-    agentRunHosted: false,
   },
   // DeepSeek Flash / Vision -> DeepSeek Responses API（agentRun 走专用 responses 编排）
   [PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL]: {

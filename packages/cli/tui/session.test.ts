@@ -825,19 +825,16 @@ describe("handleTuiInput - /auto dispatch", () => {
     const plain = stripAnsi(renderStatusLine(state, 52));
     expect(displayWidth(plain)).toBeLessThanOrEqual(52);
     expect(plain).toContain("*2");
-    // ⚙ chip 只统计进程注册表后台任务（92e580f29 决策）：agent-run 计数归
-    // dock，/auto 派发的会话级 run 不在此出现。
-    expect(plain).not.toContain("⚙");
+    expect(plain).toContain("1 agent");
     expect(plain).toContain("⏵ auto");
     expect(plain).not.toContain("context:");
     expect(plain).not.toContain("workspace");
 
-        const emergency = stripAnsi(renderStatusLine(state, 22));
+    const emergency = stripAnsi(renderStatusLine(state, 22));
     expect(displayWidth(emergency)).toBeLessThanOrEqual(22);
-    // 去聚合后 22 列内降级形态即可放下（⚙ 机器级计数已移除，不触发 emergency 投影）
     expect(emergency).toContain("⏵");
-    expect(emergency).toContain("⑂");
-    expect(emergency).toContain("*2");
+    expect(emergency).toContain("⚙1");
+    expect(emergency).toContain("⑂*2?3");
     expect(emergency).not.toContain("context:");
   });
 
@@ -863,13 +860,8 @@ describe("handleTuiInput - /auto dispatch", () => {
 
       expect(visibleWidth(line)).toBeLessThanOrEqual(12);
       expect(stripAnsi(line)).toContain("⏵");
+      expect(stripAnsi(line)).toContain("⚙1");
       expect(stripAnsi(line)).toContain("⑂*2?3");
-      expect(stripAnsi(line)).not.toContain("queued");
-    });
-
-    test("maxWidth=1 still prioritizes required state over the queue badge", () => {
-      const line = composeStatusLineWithQueue({ ...createInitialTuiState({}), autoConfirm: true }, dimCliText(" · queued", true), 1);
-      expect(stripAnsi(line)).toContain("⏵");
       expect(stripAnsi(line)).not.toContain("queued");
     });
 
@@ -879,6 +871,7 @@ describe("handleTuiInput - /auto dispatch", () => {
 
       expect(visibleWidth(line)).toBeLessThanOrEqual(30);
       expect(stripAnsi(line)).toContain("⏵");
+      expect(stripAnsi(line)).toContain("⚙1");
       expect(stripAnsi(line)).toContain("⑂");
       expect(stripAnsi(line)).toContain("2 queued");
     });

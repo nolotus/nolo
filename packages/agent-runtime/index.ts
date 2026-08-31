@@ -63,8 +63,6 @@ export type { AccumulatedToolCall, ToolCallAccumulator } from "./toolCallAccumul
 export { applyChatCompletionDelta, flushChatCompletionStream } from "./processChatCompletionDelta";
 export type { ChatCompletionStreamState } from "./processChatCompletionDelta";
 export { runLocalAgentTurn } from "./localLoop";
-export { evaluateFileWritePolicy } from "./fileWritePolicy";
-export type { FileWritePolicyResult } from "./fileWritePolicy";
 export {
   EMPTY_ASSISTANT_REPAIR_PROMPT,
   EMPTY_ASSISTANT_FALLBACK_MESSAGE,

@@ -34,7 +34,6 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-  PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
@@ -267,12 +266,6 @@ export const PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE = {
   output: toCnyCredits(4.5), // ¥4.5
 } as const;
 
-export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE = {
-  input: toPlatformCredits(0.05),
-  inputCacheHit: toPlatformCredits(0.01),
-  output: toPlatformCredits(0.15),
-} as const;
-
 /**
  */
 export const PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE = {
@@ -397,16 +390,6 @@ export const resolvePlatformDeepseekRoute = (args: {
 export const resolvePlatformDeepseekFlashRoute = resolvePlatformDeepseekRoute;
 
 export const platformHostedModels = [
-  {
-    name: PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL,
-    displayName: "Nemotron 3.5 Lightning 30B",
-    hasVision: false,
-    price: { ...PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE },
-    maxOutputTokens: 32768,
-    contextWindow: 262144,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
   {
     name: PLATFORM_HOSTED_KIMI_K3_MODEL,
     displayName: "Kimi K3",

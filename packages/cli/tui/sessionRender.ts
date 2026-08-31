@@ -117,10 +117,10 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
   );
   parts.push(tokenSegment);
 
-  // In-flight work chip: local background tasks plus active (non-terminal)
-  // agent runs from the local run registry (throttled). This is a REQUIRED
-  // status-line field — the queue badge (optional chrome) must never squeeze
-  // it out at any width; the dock renders the per-run breakdown separately.
+  // This chip counts launchProcess / promoted local background tasks. The
+  // conversation-scoped agent-run counts belong to the dock, which already
+  // renders `N running · M done · K failed`; do not add a machine-wide agents
+  // count here as it would describe a different population.
   const runningTaskCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
   if (runningTaskCount > 0) {
     parts.push(themeText(`⚙ ${runningTaskCount} running`, "info", colorEnabled));
@@ -167,7 +167,7 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
       if (state.autoConfirm === true) {
         emergency.push(themeText("⏵", "warning", colorEnabled));
       }
-      const runningTotal = runningTaskCount;
+      const runningTotal = runningTaskCount + runningAgentCount;
       if (runningTotal > 0) {
         emergency.push(themeText(`⚙${runningTotal}`, "info", colorEnabled));
       }

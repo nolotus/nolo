@@ -351,12 +351,6 @@ const STRINGS = {
     en: "Log tail:",
     zh: "日志尾部：",
   },
-  // Normal-mode safe projection: the raw errorMessage/logLines of a failed run
-  // stay in pro/verbose; normal mode names the failure and points at pro.
-  runDiagnosticsHidden: {
-    en: "run failed — full diagnostics in pro mode",
-    zh: "运行失败——完整诊断见 pro 模式",
-  },
   runsListLabel: {
     en: "Runs ({0})",
     zh: "运行 ({0})",

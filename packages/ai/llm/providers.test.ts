@@ -34,7 +34,6 @@ describe("Ollama Cloud Kimi catalog", () => {
         "deepseek-v4-pro",
         "glm-5.3",
         "glm-5-3-flash",
-        "nemotron-3-5-lightning-30b",
         "gemini-3.7-flash",
         "anthropic/claude-sonnet-5",
         "anthropic/claude-opus-5",

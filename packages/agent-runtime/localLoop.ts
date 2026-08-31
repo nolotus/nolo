@@ -9,7 +9,6 @@ import type {
 } from "./hostAdapter";
 import type { ActionGate } from "./actionGate";
 import { readActionGate, readCommandActionGatePayload } from "./actionGate";
-import { evaluateFileWritePolicy } from "./fileWritePolicy";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeMessageContent,
@@ -93,8 +92,6 @@ export type LocalAgentTurnInput = {
   noStream?: boolean;
   onToolEvent?: (event: LocalAgentToolEvent) => void;
   onActionGate?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
-  /** Stable dialog/session key used for interactive approval state. */
-  fileWriteSessionId?: string;
   onTextDelta?: (chunk: string) => void;
   /**
    * 端侧 reasoning 增量透传（第一层）。provider.complete 收到 reasoning
@@ -1191,49 +1188,6 @@ function applyPersistedTurnInput(
   });
 }
 
-const fileWriteSessionApproval = new WeakMap<object, { approved: boolean }>();
-const fileWriteSessionKeys = new Map<string, object>();
-
-function getFileWriteSessionApproval(input: LocalAgentTurnInput): { approved: boolean } {
-  if (input.fileWriteSessionId) {
-    let key = fileWriteSessionKeys.get(input.fileWriteSessionId);
-    if (!key) {
-      key = {};
-      fileWriteSessionKeys.set(input.fileWriteSessionId, key);
-    }
-    const existing = fileWriteSessionApproval.get(key);
-    if (existing) return existing;
-    const created = { approved: false };
-    fileWriteSessionApproval.set(key, created);
-    return created;
-  }
-  const key = input.adapter as unknown as object;
-  const existing = fileWriteSessionApproval.get(key);
-  if (existing) return existing;
-  const created = { approved: false };
-  fileWriteSessionApproval.set(key, created);
-  return created;
-}
-
-function readToolPathForWriteGate(argumentsValue: string): string {
-  try {
-    const parsed = JSON.parse(argumentsValue) as Record<string, unknown>;
-    return typeof parsed.path === "string" && parsed.path.trim()
-      ? parsed.path.trim()
-      : "the requested file";
-  } catch {
-    return "the requested file";
-  }
-}
-
-function isCompletedActionGateResult(value: unknown): boolean {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value as { status?: unknown }).status === "completed",
-  );
-}
-
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
@@ -1683,69 +1637,29 @@ export async function runLocalAgentTurn(
           },
         );
         try {
-          const writeTool = toolName === "writeFile" || toolName === "editFile";
-          // Only interactive hosts can approve the session gate. Headless/background
-          // runs retain the pre-gate behavior and execute writes directly.
-          if (writeTool && input.onActionGate) {
-            const writeSession = getFileWriteSessionApproval(input);
-            const policy = evaluateFileWritePolicy({
-              tool: toolName,
-              path: readToolPathForWriteGate(toolCall.function.arguments),
-              sessionApproved: writeSession.approved,
-            });
-            if (policy.permissionDecision === "ask") {
-              const gate: LocalAgentActionGate = {
-                ...policy.permissionRequest,
-                id: `${policy.permissionRequest.id}-${toolCall.id}`,
-                kind: "confirm",
-                toolName,
-                toolCallId: toolCall.id,
-              };
-              const replacement = await raceWithAbort(
-                input,
-                input.onActionGate(gate),
-                `${toolName} confirmation`,
-              );
-              const gateResult = replacement?.metadata?.actionGateResult;
-              if (replacement === undefined || isCompletedActionGateResult(gateResult)) {
-                writeSession.approved = true;
-              } else if (
-                gateResult &&
-                typeof gateResult === "object" &&
-                ((gateResult as { status?: unknown }).status === "cancelled" ||
-                  (gateResult as { status?: unknown }).status === "failed")
-              ) {
-                toolResult = replacement;
-              } else {
-                writeSession.approved = true;
-              }
-            }
-          }
-          if (!toolResult) {
-            const executePromise = input.adapter.executeTool({
-              id: toolCall.id,
-              name: toolName,
-              arguments: toolCall.function.arguments,
-              ...(userInputText ? { userInput: userInputText } : {}),
-              ...(input.runtimeContext
-                ? { runtimeContext: input.runtimeContext }
-                : {}),
-              ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-            }, {
-              ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-              ...(input.runtimeContext
-                ? { runtimeContext: input.runtimeContext }
-                : {}),
-            });
-            toolResult = await raceWithAbort(input, executePromise, toolName);
-          }
+          const executePromise = input.adapter.executeTool({
+            id: toolCall.id,
+            name: toolName,
+            arguments: toolCall.function.arguments,
+            ...(userInputText ? { userInput: userInputText } : {}),
+            ...(input.runtimeContext
+              ? { runtimeContext: input.runtimeContext }
+              : {}),
+            ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+          }, {
+            ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+            ...(input.runtimeContext
+              ? { runtimeContext: input.runtimeContext }
+              : {}),
+          });
+          toolResult = await raceWithAbort(input, executePromise, toolName);
           const actionGate = buildActionGate({
             toolName,
             toolCallId: toolCall.id,
             metadata: toolResult.metadata,
           });
           if (actionGate && input.onActionGate) {
-            const replacement = await raceWithAbort(input, input.onActionGate(actionGate), `${toolName} action gate`);
+            const replacement = await input.onActionGate(actionGate);
             if (replacement) {
               toolResult = replacement;
             }

@@ -56,7 +56,6 @@ export type ActivityIndicatorDeps = {
   setIntervalFn?: (cb: () => void, ms: number) => unknown;
   clearIntervalFn?: (handle: unknown) => void;
   /** 注入停靠区（测试用）；默认自建一个，共用同一套 now/timer 依赖。 */
-  displayMode: "normal" | "pro" | "verbose" | "compact" | "hide" | (() => "normal" | "pro" | "verbose" | "compact" | "hide");
   runDock?: RunDock;
 };
 
@@ -211,7 +210,6 @@ export function createActivityIndicator(
       now,
       setIntervalFn,
       clearIntervalFn,
-      displayMode: deps.displayMode,
     });
 
   const updateAgentRun = (snapshot: AgentRunStatusSnapshot) => {

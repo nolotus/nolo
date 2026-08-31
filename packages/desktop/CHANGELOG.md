@@ -1,23 +1,26 @@
 
-## 0.53.0-alpha.1
+## 0.35.0
 
-## 0.53.0-alpha.1 (2026-08-31)
+## 0.35.0 (2026-08-31)
 
 ### Features
 
-* **chat:** 标题模型切换平台托管 Nemotron 3.5 Lightning 30B 并优化成本与稳定性 ([9495868](https://github.com/nolotus/bun-nolo/commit/94958683ae541e6928379fd43706cd67c99ccc4c))
-* **runtime:** 会话首写文件确认门 ([21322a0](https://github.com/nolotus/bun-nolo/commit/21322a0606cd47f57001fa0fd71e539eccfa7ce2))
-* **runtime:** 会话首写文件确认门——TUI 可达 + 会话级批准态 ([1de669a](https://github.com/nolotus/bun-nolo/commit/1de669a8d1050e626496dccdfd9e17b23700c52f))
+* **cli:** 402 余额原因行按 locale 渲染（解析 details 数字走 i18n 模板） ([41b19d3](https://github.com/nolotus/bun-nolo/commit/41b19d318d0bcede800e50ee5586ccb31b1de403))
+* **plaza:** 上架 Grok 4.6 公开 agent 并校准 xai 官方定价 ([2add273](https://github.com/nolotus/bun-nolo/commit/2add2735016d18723df852e8f81c5fbb42c40fc9))
+* **plaza:** 公开 seed 用户文案守门 + 清理上游渠道词 ([15632a3](https://github.com/nolotus/bun-nolo/commit/15632a31eb3620c7c69a98d7d0db7fbebdc5af03))
+* **plaza:** 平台聊天端点表补 xai，桌面/CLI 本地 runtime 直跑 Grok 4.6 ([e93abe0](https://github.com/nolotus/bun-nolo/commit/e93abe0b8acf55cd508061e111dfe2ba1800996c))
+* **prompt:** 询问/执行平衡再平衡——日常小事不打扰，规模化开工先确认 ([e5ebac2](https://github.com/nolotus/bun-nolo/commit/e5ebac2f32adf9d2fd712362d468230988578a70))
+* **tui:** add normal and pro transcript display ([6df9aea](https://github.com/nolotus/bun-nolo/commit/6df9aea074fec7f40daee9caecb8389c455ef8db))
 
 ### Bug Fixes
 
-* **chat:** 标题 max_tokens 提至 3072，适配 Nemotron 强制 thinking ([1241aea](https://github.com/nolotus/bun-nolo/commit/1241aeaf00b7b2acdce4d5be647ab02a95a16f41))
-* **release:** 恢复被并行 release 整合误降级的版本文件至 0.53.0-alpha.1 ([1d3f985](https://github.com/nolotus/bun-nolo/commit/1d3f985266125c89f4b8018de6c751544f7afb74))
-* **tui:** normal 模式泄露修复全链收口——transcript/dock/start 卡三路脱敏 ([02cb670](https://github.com/nolotus/bun-nolo/commit/02cb6705e533107008a8f7f96b64031014de4604))
-
-### Performance Improvements
-
-* **chat:** 标题 Nemotron 启用 json mode，跳过 thinking 提速约 5 倍并降耗约 100 倍 ([0f0cef7](https://github.com/nolotus/bun-nolo/commit/0f0cef783ffbf417038c21ad3f4ebe22bc1b64c8))
+* **chat:** messages 组 73 处 StyleX shorthand 转 longhand，修复消息 hover 按钮无背景 ([0c9d7e7](https://github.com/nolotus/bun-nolo/commit/0c9d7e7ff9d70950af338e38b8bd2f638c1824ac))
+* **chat:** 内置 object assistants 私有存量记录价格自愈（ensure-and-repair） ([f11155b](https://github.com/nolotus/bun-nolo/commit/f11155b88f8e6c9e03f212c9519a937f0f53047a))
+* **cli:** 402 余额失败行只留一句人话，充值指引交给本地化提示 ([402d1d6](https://github.com/nolotus/bun-nolo/commit/402d1d69cc10b2b6069794714725e5cfbcc42e0c))
+* **cli:** agent run 失败文案降噪与 402 余额提示可读化 ([d8e6cde](https://github.com/nolotus/bun-nolo/commit/d8e6cde2a06fa9ed65d6c723ca98fdcb4c5e9d41))
+* **cli:** 补齐 runDock normal 模式安全投影缺失的 sanitizeRunSnapshotForNormal ([19448fa](https://github.com/nolotus/bun-nolo/commit/19448fa7c93205ec6db4e61d7156fca0257a5e49))
+* **deploy:** revert the stray origin-sync reapply (restores v0.51.0-alpha.1 release files) ([d72604e](https://github.com/nolotus/bun-nolo/commit/d72604e4a8e28b3a38e54389920046aab2e246a4))
+* **tui:** run 面板只显示当前对话相关 run，并去噪双时长与机器级计数 ([92e580f](https://github.com/nolotus/bun-nolo/commit/92e580f297f486464b60d90967bfe4113587b9b5))
 
 
 ## 0.34.0

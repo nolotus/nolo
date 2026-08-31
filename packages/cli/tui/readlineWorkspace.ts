@@ -576,7 +576,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     isTurnActive: () => activeTurnAbort !== null,
     fallbackLabel: () => `${state.agentName} -> working`,
     stoppingLabel: () => t("turnStopping"),
-    displayMode: () => state.toolDisplay,
     onRepaint: () => {
       if (fixedInput.active && !fixedInput.isPaused()) {
         output.write("\x1b[?2026h\x1b[?25l");

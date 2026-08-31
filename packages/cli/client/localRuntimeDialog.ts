@@ -73,7 +73,6 @@ export function createLocalDialogTitleGenerator(
 ): ((input: {
   messages: AgentRuntimeChatMessage[];
   fallbackTitle: string;
-  existingTitle?: string;
 }) => Promise<string | null>) | null {
   // Only build a generator when at least one provider path is available:
   // the platform chat proxy (auth token) OR a direct OpenAI-compatible local
@@ -86,7 +85,6 @@ export function createLocalDialogTitleGenerator(
   return async (input) => {
     const result = await generateLocalDialogTitle({
       messages: input.messages,
-      existingTitle: input.existingTitle,
       env: deps.env,
       fetchImpl: async (url: RequestInfo | URL, init?: RequestInit) =>
         fetchWithTransientRetry(
@@ -253,7 +251,6 @@ export async function writeDialog(args: {
   titleGenerator?: ((input: {
     messages: AgentRuntimeChatMessage[];
     fallbackTitle: string;
-    existingTitle?: string;
   }) => Promise<string | null>) | null;
   /**
    * @deprecated title 生成现在是 fire-and-forget，此参数不再阻塞 turn
@@ -317,11 +314,7 @@ export async function writeDialog(args: {
     const fallbackTitle =
       buildDialogFallbackTitleFromUserInput(rawLastUserText) || "Local agent run";
     titlePromise = args
-      .titleGenerator({
-        messages: args.input.messages,
-        fallbackTitle,
-        existingTitle: existingTitle || undefined,
-      })
+      .titleGenerator({ messages: args.input.messages, fallbackTitle })
       .catch(() => null as string | null);
   }
 

@@ -171,9 +171,7 @@ describe("platform hosted DeepSeek V4 catalog", () => {
     );
     expect(platformHostedModels.map((model) => model.name)).toContain(
       PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-    );
-    expect(platformHostedModels.map((model) => model.name)).toContain(
-      PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
+  PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
     );
   });
 
