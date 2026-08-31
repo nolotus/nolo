@@ -396,10 +396,11 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("tailLines:0");
     expect(prompt).toContain("tailLines:30");
     expect(prompt).toContain("stop 之前先看日志");
-    // 分档与拆分纪律（协作段）
+    // 分档与拆分纪律（协作段）——2026-08-31 起为两账判据（上下文账 / 并行账），步数门槛已废弃
     expect(prompt).toContain("分档标准");
-    expect(prompt).toContain("逻辑步骤 <5 且只读/搜/改 ≤2 个文件");
-    expect(prompt).toContain("跨 3 个以上独立领域");
+    expect(prompt).toContain("两账判据");
+    expect(prompt).toContain("上下文账命中 → 派发");
+    expect(prompt).toContain("并行账命中 → 派发");
     expect(prompt).toContain("不为「凑数量」派发");
     expect(prompt).toContain("按独立领域拆，不按文件数量拆");
     expect(prompt).toContain("用户明确要求你亲自完成时按用户要求执行");
