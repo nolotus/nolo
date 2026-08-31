@@ -1,4 +1,13 @@
 
+## 0.46.0-alpha.6
+
+## 0.46.0-alpha.6 (2026-08-31)
+
+### Bug Fixes
+
+* **stylex:** dialog 面白底收尾——68 条 shorthand 转 longhand + 未知属性闸门 ([84133da](https://github.com/nolotus/bun-nolo/commit/84133dabd668833dead6d2608e2766a6ae031df6))
+
+
 ## 0.46.0-alpha.5
 
 ## 0.46.0-alpha.5 (2026-08-31)

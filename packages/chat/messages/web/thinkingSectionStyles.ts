@@ -16,11 +16,12 @@ export const thinkingSectionStyles = stylex.create({
     paddingBottom: 3,
     paddingLeft: 8,
     paddingRight: 8,
-    background: {
+    backgroundColor: {
       default: "transparent",
       ":hover": "var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)))",
     },
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: 999,
     color: {
       default: "var(--textMuted, var(--textTertiary))",
@@ -50,7 +51,7 @@ export const thinkingSectionStyles = stylex.create({
     width: 5,
     height: 5,
     borderRadius: 999,
-    background: "color-mix(in srgb, var(--primary) 32%, var(--textTertiary))",
+    backgroundColor: "color-mix(in srgb, var(--primary) 32%, var(--textTertiary))",
     boxShadow: "0 0 0 2px color-mix(in srgb, var(--primary) 8%, transparent)",
     flexShrink: 0,
     opacity: 0.9,

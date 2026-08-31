@@ -6,6 +6,7 @@ import {
   deriveStylexSpecificities,
   calculateSpecificity,
   compareSpecificity,
+  findUnknownCssProperties,
   type Specificity,
 } from "./stylexCascadeAuditor.js";
 
@@ -37,6 +38,14 @@ describe("StyleX Escape Hatch Cascade Specificity Audit", () => {
     expect(audit.losing.length).toBe(0);
     expect(audit.winning.length).toBeGreaterThan(0);
     expect(audit.derivedSpecificities.globalMax.A).toBeGreaterThanOrEqual(4);
+
+    // 闸门补盲区：伪属性（如折叠 bug 产生的 border-left-left）会被 StyleX
+    // 静默直通进 entry.css 且被浏览器整条忽略 —— 显式 fail 防假绿。
+    const unknownProps = findUnknownCssProperties(join(workspaceRoot, "public/assets/entry.css"));
+    if (unknownProps.length > 0) {
+      console.error("Unknown/pseudo CSS properties in entry.css:", unknownProps);
+    }
+    expect(unknownProps).toEqual([]);
   });
 
   it("accurately detects regressions when a boosted rule drops below opponent specificity", () => {

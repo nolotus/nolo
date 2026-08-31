@@ -330,6 +330,43 @@ export interface AuditOptions {
   silent?: boolean;
 }
 
+/**
+ * 扫描 entry.css 中的「非标准 CSS 属性」（side 段重复，如折叠 bug 产生的
+ * border-left-left / border-top-top / border-bottom-bottom）。
+ * 伪属性会被 StyleX 静默直通进产物 CSS、被浏览器整条忽略 —— 审计/运行时
+ * 均表现为「该样式丢了」，容易假绿，故在闸门显式 fail。
+ */
+export function findUnknownCssProperties(entryCssPath: string): string[] {
+  if (!existsSync(entryCssPath)) return [];
+  const content = readFileSync(entryCssPath, "utf8");
+  const found = new Map<string, number>();
+  const flag = (prop: string, lineNo: number) => {
+    if (!found.has(prop)) found.set(prop, lineNo);
+  };
+  // 1) 声明行扫描：缩进行 `  prop: value`，相邻段重复即伪属性
+  for (const [i, line] of content.split("\n").entries()) {
+    const m = line.match(/^\s+([a-zA-Z][a-zA-Z0-9-]*)\s*:/);
+    if (!m) continue;
+    const segments = m[1].split("-");
+    for (let s = 0; s < segments.length - 1; s++) {
+      if (segments[s] && segments[s] === segments[s + 1]) {
+        flag(m[1], i + 1);
+        break;
+      }
+    }
+  }
+  // 2) 兜底正则：压缩单行形态下的 side×side 重复（不依赖缩进）
+  const doubled =
+    /\b(border(?:-block|-inline)?|background|margin|padding|inset)-((?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))-\2\s*:/g;
+  let mm: RegExpExecArray | null;
+  while ((mm = doubled.exec(content)) !== null) {
+    flag(mm[0].trim().replace(/[:\s]+$/, ""), content.slice(0, mm.index).split("\n").length);
+  }
+  return [...found.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([prop, line]) => `${prop} (entry.css line ${line})`);
+}
+
 export function auditEscapeHatchFiles(
   filePaths: string[],
   elementIndex: ElementIndexItem[],

@@ -20,18 +20,21 @@ import * as stylex from "@stylexjs/stylex";
 export const croStyles = stylex.create({
   // ── ChildRunObserverPanel ──
   panel: {
-    background: "var(--background, #ffffff)",
-    borderLeft:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    backgroundColor: "var(--background, #ffffff)",
+    borderLeftWidth: "1px",
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     display: "flex",
     flex: "0 0 300px",
     flexDirection: "column",
     minHeight: 0,
     width: "300px",
     "@media (max-width: 960px)": {
-      borderLeft: "none",
-      borderTop:
-        "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+      borderLeftWidth: 0,
+      borderLeftStyle: "none",
+      borderTopWidth: "1px",
+      borderTopStyle: "solid",
+      borderTopColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
       flex: "0 0 auto",
       maxHeight: "42vh",
       width: "100%",
@@ -41,10 +44,12 @@ export const croStyles = stylex.create({
   collapsedRail: {
     alignItems: "center",
     alignSelf: "stretch",
-    background: "var(--background, #ffffff)",
-    border: 0,
-    borderLeft:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    backgroundColor: "var(--background, #ffffff)",
+    borderWidth: 0,
+    borderStyle: "none",
+    borderLeftWidth: "1px",
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     color: "var(--textSecondary, #6b7280)",
     cursor: "pointer",
     display: "flex",
@@ -56,9 +61,11 @@ export const croStyles = stylex.create({
     padding: "14px 6px",
     width: "44px",
     "@media (max-width: 960px)": {
-      borderLeft: "none",
-      borderTop:
-        "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+      borderLeftWidth: 0,
+      borderLeftStyle: "none",
+      borderTopWidth: "1px",
+      borderTopStyle: "solid",
+      borderTopColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
       flex: "0 0 auto",
       flexDirection: "row",
       gap: "8px",
@@ -79,7 +86,7 @@ export const croStyles = stylex.create({
     },
   },
   collapsedCount: {
-    background: "color-mix(in srgb, var(--primary, #2563eb) 14%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--primary, #2563eb) 14%, transparent)",
     borderRadius: "999px",
     color: "var(--primary, #1d4ed8)",
     fontSize: "11px",
@@ -91,8 +98,9 @@ export const croStyles = stylex.create({
   },
   header: {
     alignItems: "center",
-    borderBottom:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     display: "flex",
     justifyContent: "space-between",
     minHeight: "48px",
@@ -126,8 +134,9 @@ export const croStyles = stylex.create({
   },
   iconButton: {
     alignItems: "center",
-    background: "transparent",
-    border: 0,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-xs, 6px)",
     color: "var(--textSecondary, #6b7280)",
     cursor: "pointer",
@@ -154,8 +163,10 @@ export const croStyles = stylex.create({
   },
   retry: {
     alignSelf: "flex-start",
-    background: "transparent",
-    border: "1px solid var(--borderMuted, var(--borderLight, #d1d5db))",
+    backgroundColor: "transparent",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, #d1d5db))",
     borderRadius: "var(--radius-xs, 6px)",
     color: "var(--text, #111827)",
     cursor: "pointer",
@@ -173,8 +184,10 @@ export const croStyles = stylex.create({
     padding: 0,
   },
   item: {
-    background: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
-    border: "1px solid var(--borderMuted, var(--borderLight, #e5e7eb))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
     borderRadius: "var(--radius-sm, 8px)",
     color: "inherit",
     cursor: "pointer",
@@ -211,23 +224,23 @@ export const croStyles = stylex.create({
   /* __status 变体：仅设置基础规则没有的 background/color，
    * 与基础无同名属性竞争，可安全作为条件 StyleX 样式组合 */
   statusRunning: {
-    background: "rgba(37, 99, 235, 0.12)",
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
     color: "var(--primary, #1d4ed8)",
   },
   statusPending: {
-    background: "rgba(37, 99, 235, 0.12)",
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
     color: "var(--primary, #1d4ed8)",
   },
   statusDone: {
-    background: "rgba(22, 163, 74, 0.12)",
+    backgroundColor: "rgba(22, 163, 74, 0.12)",
     color: "var(--success, #15803d)",
   },
   statusFailed: {
-    background: "rgba(220, 38, 38, 0.12)",
+    backgroundColor: "rgba(220, 38, 38, 0.12)",
     color: "var(--errorText, #b91c1c)",
   },
   statusCancelled: {
-    background: "var(--backgroundSecondary, #f3f4f6)",
+    backgroundColor: "var(--backgroundSecondary, #f3f4f6)",
     color: "var(--textSecondary, #6b7280)",
   },
   agent: {
@@ -251,7 +264,7 @@ export const croStyles = stylex.create({
     gap: "4px",
   },
   queuedPill: {
-    background: "rgba(234, 88, 12, 0.12)",
+    backgroundColor: "rgba(234, 88, 12, 0.12)",
     borderRadius: "999px",
     color: "#ea580c",
     fontSize: "10px",
@@ -277,8 +290,10 @@ export const croStyles = stylex.create({
     fontWeight: 650,
   },
   modalEvidence: {
-    background: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
-    border: "1px solid var(--borderMuted, var(--borderLight, #e5e7eb))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
     borderRadius: "var(--radius-xs, 6px)",
     color: "var(--textSecondary, #4b5563)",
     fontSize: "12px",
@@ -299,7 +314,9 @@ export const croStyles = stylex.create({
     overflow: "auto",
   },
   modalMessage: {
-    border: "1px solid var(--borderMuted, var(--borderLight, #e5e7eb))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
     borderRadius: "var(--radius-sm, 8px)",
     padding: "10px 12px",
   },
@@ -318,7 +335,9 @@ export const croStyles = stylex.create({
     whiteSpace: "pre-wrap",
   },
   modalFooter: {
-    borderTop: "1px solid var(--borderMuted, var(--borderLight, #e5e7eb))",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
     marginTop: "14px",
     paddingTop: "12px",
   },
@@ -345,7 +364,7 @@ export const croStyles = stylex.create({
   },
   aicQueuedBadge: {
     alignItems: "center",
-    background: "rgba(234, 88, 12, 0.12)",
+    backgroundColor: "rgba(234, 88, 12, 0.12)",
     borderRadius: "999px",
     color: "#c2410c",
     display: "inline-flex",
@@ -360,8 +379,10 @@ export const croStyles = stylex.create({
     gap: "8px",
   },
   aicInput: {
-    background: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
-    border: "1px solid var(--borderMuted, var(--borderLight, #d1d5db))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, #d1d5db))",
     borderRadius: "var(--radius-sm, 8px)",
     color: "var(--text, #111827)",
     flex: "1 1 auto",
@@ -373,8 +394,9 @@ export const croStyles = stylex.create({
   },
   aicSubmit: {
     alignItems: "center",
-    background: "var(--primary, #2563eb)",
-    border: "none",
+    backgroundColor: "var(--primary, #2563eb)",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-sm, 8px)",
     color: "#ffffff",
     cursor: "pointer",
@@ -394,8 +416,10 @@ export const croStyles = stylex.create({
     animation: "AppendInstructionControl-spin 0.8s linear infinite",
   },
   aicError: {
-    background: "rgba(220, 38, 38, 0.08)",
-    border: "1px solid rgba(220, 38, 38, 0.25)",
+    backgroundColor: "rgba(220, 38, 38, 0.08)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(220, 38, 38, 0.25)",
     borderRadius: "var(--radius-xs, 6px)",
     color: "var(--errorText, #b91c1c)",
     fontSize: "12px",
@@ -404,8 +428,10 @@ export const croStyles = stylex.create({
   },
   aicSuccess: {
     alignItems: "center",
-    background: "rgba(22, 163, 74, 0.08)",
-    border: "1px solid rgba(22, 163, 74, 0.25)",
+    backgroundColor: "rgba(22, 163, 74, 0.08)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(22, 163, 74, 0.25)",
     borderRadius: "var(--radius-xs, 6px)",
     color: "var(--success, #15803d)",
     display: "flex",

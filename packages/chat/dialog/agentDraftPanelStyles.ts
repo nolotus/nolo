@@ -13,9 +13,10 @@ import * as stylex from "@stylexjs/stylex";
  */
 export const agentDraftPanelStyles = stylex.create({
   root: {
-    background: "var(--background, #ffffff)",
-    borderLeft:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    backgroundColor: "var(--background, #ffffff)",
+    borderLeftWidth: "1px",
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     display: "flex",
     flex: "0 0 360px",
     flexDirection: "column",
@@ -35,8 +36,9 @@ export const agentDraftPanelStyles = stylex.create({
   },
   header: {
     alignItems: "center",
-    borderBottom:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     display: "flex",
     justifyContent: "space-between",
     minHeight: "52px",
@@ -72,8 +74,9 @@ export const agentDraftPanelStyles = stylex.create({
   },
   iconButton: {
     alignItems: "center",
-    background: "transparent",
-    border: 0,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary, #6b7280)",
     cursor: "pointer",
@@ -101,9 +104,10 @@ export const agentDraftPanelStyles = stylex.create({
   },
   /* __field input / __field textarea 共享基础（变体见逃生舱） */
   fieldControl: {
-    background: "var(--backgroundSecondary, var(--background, #ffffff))",
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
     borderRadius: "var(--radius-xs)",
     caretColor: "var(--text, #111827)",
     color: "var(--text, #111827)",
@@ -125,9 +129,10 @@ export const agentDraftPanelStyles = stylex.create({
     gap: "6px",
   },
   capabilityPill: {
-    background: "var(--accentSubtle, rgba(37, 99, 235, 0.12))",
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, rgba(37, 99, 235, 0.22)))",
+    backgroundColor: "var(--accentSubtle, rgba(37, 99, 235, 0.12))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, rgba(37, 99, 235, 0.22)))",
     borderRadius: "999px",
     color: "var(--accentText, var(--text, #1d4ed8))",
     fontSize: "12px",
@@ -151,8 +156,9 @@ export const agentDraftPanelStyles = stylex.create({
     width: "100%",
   },
   assembly: {
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary, #4b5563)",
     fontSize: "12px",
@@ -207,9 +213,10 @@ export const agentDraftPanelStyles = stylex.create({
   },
   toggleButton: {
     alignItems: "center",
-    background: "var(--backgroundSecondary, var(--background, #ffffff))",
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary, #4b5563)",
     cursor: "pointer",
@@ -221,8 +228,9 @@ export const agentDraftPanelStyles = stylex.create({
     minHeight: "34px",
   },
   footer: {
-    borderTop:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
     display: "flex",
     flexDirection: "column",
     gap: "8px",
@@ -246,9 +254,10 @@ export const agentDraftPanelStyles = stylex.create({
     margin: 0,
   },
   nextStepsButton: {
-    background: "var(--backgroundSecondary, var(--background, #ffffff))",
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
     borderRadius: "var(--radius-xs)",
     color: "var(--text, #111827)",
     cursor: "pointer",
@@ -271,14 +280,17 @@ export const agentDraftPanelStyles = stylex.create({
     minHeight: "36px",
   },
   primary: {
-    background: "var(--primary, #2563eb)",
-    border: "1px solid var(--primary, #2563eb)",
+    backgroundColor: "var(--primary, #2563eb)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--primary, #2563eb)",
     color: "var(--primaryText, #ffffff)",
   },
   secondary: {
-    background: "var(--backgroundSecondary, var(--background, #ffffff))",
-    border:
-      "1px solid var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
     color: "var(--text, #111827)",
   },
 });
