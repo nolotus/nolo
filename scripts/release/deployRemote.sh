@@ -1422,9 +1422,6 @@ start_chat_proxy() {
     NOLO_DISABLE_HTTPS=1 \
     PLATFORM_SERVER_HOST="$CHAT_PROXY_HTTP_HOST" \
     HTTP_PORT="$CHAT_PROXY_HTTP_PORT" \
-    # CallPlanClient 必须指向 core（38123）；不带这条时 fallback 取本进程
-    # 的 PORT=38124，变成自己 call 自己（chat-proxy 角色没有 call-plan 端点）。
-    NOLO_CORE_INTERNAL_URL="http://127.0.0.1:${APP_HTTP_PORT}" \
     NOLO_REUSE_PORT=0 \
     NOLO_SLOT="$CHAT_PROXY_APP_NAME" \
     NOLO_RELEASE_SHA="${NOLO_RELEASE_SHA:-}" \

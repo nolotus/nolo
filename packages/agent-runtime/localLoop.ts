@@ -95,15 +95,6 @@ export type LocalAgentTurnInput = {
   onActionGate?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
   /** Stable dialog/session key used for interactive approval state. */
   fileWriteSessionId?: string;
-  /**
-   * Escape hatch for the session-first-write confirm gate. `undefined`/`true`
-   * keeps today's behavior (gate active); `false` skips it entirely and
-   * writes/edits execute directly, as if already session-approved. Resolved
-   * by the CLI layer from `NOLO_CLI_WRITE_GATE` (fail-safe: unparsable or
-   * unset values must resolve to `true` upstream) — agent-runtime itself
-   * never reads `process.env` so it stays embeddable outside the CLI.
-   */
-  fileWriteGateEnabled?: boolean;
   onTextDelta?: (chunk: string) => void;
   /**
    * 端侧 reasoning 增量透传（第一层）。provider.complete 收到 reasoning
@@ -1695,10 +1686,7 @@ export async function runLocalAgentTurn(
           const writeTool = toolName === "writeFile" || toolName === "editFile";
           // Only interactive hosts can approve the session gate. Headless/background
           // runs retain the pre-gate behavior and execute writes directly.
-          // `fileWriteGateEnabled === false` is the explicit escape hatch
-          // (NOLO_CLI_WRITE_GATE=off, resolved by the CLI); any other value,
-          // including undefined, keeps the gate active — fail-safe default.
-          if (writeTool && input.onActionGate && input.fileWriteGateEnabled !== false) {
+          if (writeTool && input.onActionGate) {
             const writeSession = getFileWriteSessionApproval(input);
             const policy = evaluateFileWritePolicy({
               tool: toolName,

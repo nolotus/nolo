@@ -87,39 +87,23 @@ describe("CLI publish dependencies detachment", () => {
     );
     expect(manifest.dependencies?.pino).toBeUndefined();
 
-    // pino used to be bundled into a code-split chunk, so checking only the
-    // manifest or `from "pino"` external imports misses the exact regression.
-    // Scan every emitted JavaScript file for pino and its bundled internals.
-    const bundledJsFiles = readdirSync(TEST_DIST_DIR)
-      .filter((entry) => entry.endsWith(".js"))
-      .map((entry) => join(TEST_DIST_DIR, entry));
-    const pinoRuntimeMarkers = [
-      { name: "pino bundle module", pattern: /node_modules\/pino\/pino\.js/ },
-      { name: "pino commonjs wrapper", pattern: /require_pino\s*=\s*__commonJS/ },
-      { name: "pino std serializers", pattern: /pino-std-serializers/i },
-      { name: "pino transport", pattern: /pino-abstract-transport/i },
-      { name: "pino formatter", pattern: /quick-format-unescaped/i },
-      { name: "pino output stream", pattern: /sonic-boom/i },
-      { name: "pino worker stream", pattern: /thread-stream/i },
-    ];
-    const pinoImplementationFindings = bundledJsFiles.flatMap((filePath) => {
-      const content = readFileSync(filePath, "utf8");
-      return pinoRuntimeMarkers
-        .filter(({ pattern }) => pattern.test(content))
-        .map(({ name }) => ({ file: filePath, marker: name }));
-    });
-    expect(pinoImplementationFindings).toEqual([]);
+    const pinoImportChunks = readdirSync(TEST_DIST_DIR)
+      .filter((entry) => entry.endsWith(".js") && entry !== "index.js")
+      .map((entry) => join(TEST_DIST_DIR, entry))
+      .filter((filePath) =>
+        /from ["']pino["']/.test(readFileSync(filePath, "utf8"))
+      );
+    expect(pinoImportChunks).toEqual([]);
   }, 30000);
 
-  test("published Node bundle omits tree-shaken tweetnacl", async () => {
+  test("published Node bundle resolves tweetnacl through its external package entry", async () => {
     await buildPublishArtifactBundled(CLI_SOURCE_DIR, TEST_DIST_DIR);
 
     const manifest = JSON.parse(
       readFileSync(join(TEST_DIST_DIR, "package.json"), "utf8")
     );
 
-    // tweetnacl remains available to workspace code, but the current CLI
-    // reachable graph does not use it after tree shaking.
+    // tweetnacl 版本必须由构建从 manifest 解析进发布依赖（不硬编码），与 root manifest 一致。
     const rootManifest = JSON.parse(
       readFileSync(join(REPO_ROOT, "package.json"), "utf8")
     );
@@ -128,10 +112,10 @@ describe("CLI publish dependencies detachment", () => {
       rootManifest.devDependencies?.tweetnacl ??
       rootManifest.peerDependencies?.tweetnacl;
     expect(typeof expectedTweetnaclVersion).toBe("string");
-    expect(manifest.dependencies?.tweetnacl).toBeUndefined();
+    expect(manifest.dependencies?.tweetnacl).toBe(expectedTweetnaclVersion);
 
-    // A future reachable tweetnacl import must appear in both the bundle and
-    // publish manifest; until then neither should carry the unused package.
+    // tweetnacl 保持 external 时，bundle 会留下 from "tweetnacl" 的 chunk；旧实现把
+    // tweetnacl 的 CJS 内联进 ESM chunk，不会产生这样的外部导入 chunk。
     const tweetnaclImportChunks = readdirSync(TEST_DIST_DIR)
       .filter((entry) => entry.endsWith(".js") && entry !== "index.js")
       .map((entry) => join(TEST_DIST_DIR, entry))
@@ -141,7 +125,28 @@ describe("CLI publish dependencies detachment", () => {
           readFileSync(left, "utf8").length - readFileSync(right, "utf8").length
       );
 
-    expect(tweetnaclImportChunks).toEqual([]);
+    expect(tweetnaclImportChunks.length).toBeGreaterThan(0);
+
+    const smallestTweetnaclImportChunk = tweetnaclImportChunks[0];
+    const result = spawnSync(
+      "node",
+      [
+        "--input-type=module",
+        "-e",
+        `import(${JSON.stringify(pathToFileURL(smallestTweetnaclImportChunk).href)}).then(() => process.exit(0), (error) => { console.error(error); process.exit(1); });`,
+      ],
+      {
+        cwd: TEST_DIST_DIR,
+        encoding: "utf8",
+        timeout: 30000,
+      }
+    );
+
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(output).not.toContain("Dynamic require");
+    expect(output).not.toContain("crypto");
   }, 30000);
 
   test("bundled index.js does not contain React Native module import specifiers", async () => {

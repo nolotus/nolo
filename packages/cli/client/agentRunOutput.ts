@@ -11,10 +11,8 @@ import {
   shouldEmitToolEvents,
 } from "./toolOutput";
 import { parseAgentRunEvent } from "./agentRunSnapshot";
-import { Spinner, formatElapsed } from "./agentRunSpinner";
+import { Spinner } from "./agentRunSpinner";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
-import { dimCliText } from "./terminalStyles";
-import { t } from "../tui/i18n";
 
 /**
  * 把一条 compaction 观测事件折叠成一行 dim 摘要（无压缩事件返回空串）。
@@ -127,22 +125,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   let everStreamedAnyText = false;
   let printedAssistantLabel = false;
   let thinkState = createThinkParserState();
-  // thinking 痕迹计时：首末打点跨度（spinner 上的思考流结束后，在 transcript
-  // 留一行 dim「✻ 思考 Xs」。showThinking=false 时不打点，痕迹自然零输出，
-  // 与 NOLO_CLI_THINKING=hide 全隐契约一致；痕迹只进 TUI 显示层，不进持久化消息。
-  let thinkingFirstAt: number | null = null;
-  let thinkingLastAt = 0;
-  const markThinkingActivity = () => {
-    const now = Date.now();
-    if (thinkingFirstAt === null) thinkingFirstAt = now;
-    thinkingLastAt = now;
-  };
-  const writeThinkingTrace = () => {
-    if (thinkingFirstAt === null) return;
-    const seconds = Math.max(0, Math.round((thinkingLastAt - thinkingFirstAt) / 1000));
-    thinkingFirstAt = null;
-    options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
-  };
   // 压缩观测事件：一个 turn 至多渲染一行摘要。记录最后一条 compaction 事件，
   // 在 finish() 统一输出（保持与既有逐字节输出行为一致，无压缩事件零输出）。
   let compactionEvent: Extract<
@@ -172,11 +154,9 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     if (!parsed.content && !parsed.reasoning) return;
     // Reasoning from inline think tags goes to the spinner hint, not visible content.
     if (showThinking && parsed.reasoning) {
-      markThinkingActivity();
       spinner.setThinkingHint(parsed.reasoning);
     }
     if (!parsed.content) return;
-    writeThinkingTrace();
     spinner.stop();
     options.activityReporter?.(null);
     if (!printedAssistantLabel) {
@@ -303,10 +283,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       // Thinking content scrolls live on the spinner line instead of
       // being written as separate output. The spinner shows a truncated
       // hint of what the model is currently reasoning about.
-      if (showThinking) {
-        markThinkingActivity();
-        spinner.setThinkingHint(chunk);
-      }
+      if (showThinking) spinner.setThinkingHint(chunk);
     },
     handleToolEvent,
     /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。 */
@@ -323,7 +300,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     finish(fallbackContent?: string) {
       spinner.stop();
       options.activityReporter?.(null);
-      writeThinkingTrace();
       // Flush any residual think-tag buffer.
       const flushedThink = flushThinkParser(thinkState);
       thinkState = flushedThink.state;

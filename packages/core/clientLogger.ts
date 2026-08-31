@@ -38,18 +38,12 @@ const serializeValue = (value: unknown, seen = new WeakSet<object>()): unknown =
     return "[Circular]";
   }
   seen.add(value);
-  try {
-    if (Array.isArray(value)) {
-      return value.map((item) => serializeValue(item, seen));
-    }
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, serializeValue(item, seen)])
-    );
-  } finally {
-    // Track only the active recursion path. A shared object referenced by two
-    // sibling fields is valid JSON data and must not be reported as circular.
-    seen.delete(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeValue(item, seen));
   }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, serializeValue(item, seen)])
+  );
 };
 
 const getLogLevel = (): number => {

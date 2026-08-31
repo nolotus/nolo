@@ -4,7 +4,7 @@
  * 从 readlineWorkspace.ts 抽出。依赖：
  * - ./tuiAnsi：wrapTranscriptLine / wrapTranscriptLineWithLayout / padOrTruncateToWidth / applyTerminalOutputToText
  * - ./tuiScrollbar：renderScrollbarRow / parseScrollAction / ScrollAction / WHEEL_SCROLL_LINES
- * - ./theme：themeColorSequence / themeText / resolveCliColorEnabled
+ * - ./theme：themeColorSequence / themeText / getActiveDensity / resolveCliColorEnabled
  * - ../client/assistantOutput：formatAssistantDisplay（assistant turn 的唯一渲染器，
  *   与流式输出共享同一份实现，避免历史重绘与流式样式漂移）
  */
@@ -25,6 +25,7 @@ import {
   WHEEL_SCROLL_LINES,
 } from "./tuiScrollbar";
 import {
+  getActiveDensity,
   renderSurfaceLine,
   themeColorSequence,
   themeText,
@@ -110,6 +111,7 @@ function trimHistoryToBudget(history: TurnHistory): void {
 type TurnLineCacheEntry = {
   width: number;
   color: boolean;
+  density: string;
   /**
    * Theme fingerprint. `/theme` changes both the accent foreground and the
    * user-bubble wash; without this the cache would replay rows painted in the
@@ -184,9 +186,9 @@ function setCachedTurnLine(turn: Turn, entry: TurnLineCacheEntry): void {
 /**
  * Line-count cache: how many terminal rows a finalized turn occupies at a
  * given width. Deliberately keyed by width ONLY — ANSI styling, bubble surface
- * and separators never change wrap counts (styles are zero-width and turn
+ * and density never change wrap counts (styles are zero-width and spacious
  * separators live outside the cache). This is what lets renderHistory rebuild
- * its row-offset index without re-running markdown when /theme or the
+ * its row-offset index without re-running markdown when /theme, density or the
  * background auto-follow poller invalidate the render cache: counts survive,
  * so only the visible window needs repainting instead of all 400 turns.
  */
@@ -528,6 +530,7 @@ export function getTurnLayoutRows(
   turn: Turn,
   contentWidth: number,
   colorEnabled: boolean,
+  density: string,
   themeFingerprint: string,
 ): TurnLayoutRow[] {
   const cached = getCachedTurnLine(turn);
@@ -535,6 +538,7 @@ export function getTurnLayoutRows(
     cached &&
     cached.width === contentWidth &&
     cached.color === colorEnabled &&
+    cached.density === density &&
     cached.themeFingerprint === themeFingerprint
   ) {
     return cached.layoutRows;
@@ -544,6 +548,7 @@ export function getTurnLayoutRows(
   setCachedTurnLine(turn, {
     width: contentWidth,
     color: colorEnabled,
+    density,
     themeFingerprint,
     lines,
     layoutRows,
@@ -566,6 +571,7 @@ type StreamingTurnCache = {
   role: TurnRole;
   contentWidth: number;
   colorEnabled: boolean;
+  density: string;
   themeFingerprint: string;
   fullContent: string;
   prefixLength: number;
@@ -644,6 +650,7 @@ function getStreamingTurnLines(
   content: string,
   contentWidth: number,
   colorEnabled: boolean,
+  density: string,
   themeFingerprint: string,
 ): string[] {
   if (
@@ -651,6 +658,7 @@ function getStreamingTurnLines(
     (streamingTurnCache.role !== role ||
       streamingTurnCache.contentWidth !== contentWidth ||
       streamingTurnCache.colorEnabled !== colorEnabled ||
+      streamingTurnCache.density !== density ||
       streamingTurnCache.themeFingerprint !== themeFingerprint ||
       !content.startsWith(streamingTurnCache.fullContent.slice(0, streamingTurnCache.prefixLength)))
   ) {
@@ -662,6 +670,7 @@ function getStreamingTurnLines(
       role,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
       fullContent: content,
       prefixLength: 0,
@@ -734,7 +743,7 @@ export type TurnOffsetEntry = {
   startRow: number;
   /** Rows this turn's content occupies (separator excluded). */
   lineCount: number;
-  /** 1 when a blank row is inserted above this turn (user-first or after another turn). */
+  /** 1 when density=spacious inserts a blank row above this turn. */
   separatorAbove: number;
 };
 
@@ -746,18 +755,20 @@ export type TurnOffsets = {
 /**
  * Scan TurnHistory → index of turn → start row. O(n) but reads only the line-count
  * cache — no markdown re-rendering; on a miss the count comes from the cheap
- * countTurnLines pass and is recorded for later frames. Turn separators
+ * countTurnLines pass and is recorded for later frames. Spacious separators
  * depend on position, so they are indexed here rather than cached.
  */
 export function buildTurnOffsets(
   history: TurnHistory,
   contentWidth: number
 ): TurnOffsets {
+  const density = getActiveDensity();
   const entries: TurnOffsetEntry[] = [];
   let offset = 0;
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    const separatorAbove = i > 0 && turn.role === "user" ? 1 : 0;
+    const separatorAbove =
+      density === "spacious" && (i > 0 || turn.role === "user") ? 1 : 0;
     offset += separatorAbove;
     const cacheMap = turnLineCountCache.get(turn);
     let lineCount: number;
@@ -791,6 +802,7 @@ export function getAllTurnEntries(
   const turns = [...history.turns];
 
   if (history.currentRole !== null && history.currentContent) {
+    const density = getActiveDensity();
     const colorEnabled = resolveCliColorEnabled();
     const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
     const streamingLines = getStreamingTurnLines(
@@ -798,9 +810,10 @@ export function getAllTurnEntries(
       history.currentContent,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
     );
-    const sep = currentTurnSeparator(history);
+    const sep = currentTurnSeparator(history, density);
     const startRow = finalizedLines + sep;
     entries.push({
       startRow,
@@ -818,24 +831,29 @@ export function getAllTurnEntries(
 }
 
 /** Row index of the blank separator above the current streaming turn, if any. */
-function currentTurnSeparator(history: TurnHistory): number {
-  return history.turns.length > 0 && history.currentRole === "user" ? 1 : 0;
+function currentTurnSeparator(history: TurnHistory, density: string): number {
+  return density === "spacious" &&
+    (history.turns.length > 0 || history.currentRole === "user")
+    ? 1
+    : 0;
 }
 
 export function buildHistoryLines(history: TurnHistory, contentWidth: number): string[] {
   const colorEnabled = resolveCliColorEnabled();
+  const density = getActiveDensity();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
   const wrapped: string[] = [];
 
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    if (i > 0 && turn.role === "user") {
+    if (density === "spacious" && (i > 0 || turn.role === "user")) {
       wrapped.push("");
     }
     const layoutRows = getTurnLayoutRows(
       turn,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
     );
     wrapped.push(...layoutRows.map((r) => r.rendered));
@@ -844,7 +862,7 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
   // Streaming turn mutates per chunk — incremental prefix cache.
   if (history.currentRole !== null && history.currentContent) {
     const i = history.turns.length;
-    if (i > 0 && history.currentRole === "user") {
+    if (density === "spacious" && (i > 0 || history.currentRole === "user")) {
       wrapped.push("");
     }
     const streamingLines = getStreamingTurnLines(
@@ -852,6 +870,7 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
       history.currentContent,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
     );
     wrapped.push(...streamingLines);
@@ -871,6 +890,7 @@ export function buildHistoryLayoutRows(
   contentWidth: number,
 ): TurnLayoutRow[] {
   const colorEnabled = resolveCliColorEnabled();
+  const density = getActiveDensity();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
   const rows: TurnLayoutRow[] = [];
   const separatorRow = (): TurnLayoutRow => ({
@@ -882,20 +902,21 @@ export function buildHistoryLayoutRows(
 
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    if (i > 0 && turn.role === "user") {
+    if (density === "spacious" && (i > 0 || turn.role === "user")) {
       rows.push(separatorRow());
     }
     rows.push(...getTurnLayoutRows(
       turn,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
     ));
   }
 
   if (history.currentRole !== null && history.currentContent) {
     const i = history.turns.length;
-    if (i > 0 && history.currentRole === "user") {
+    if (density === "spacious" && (i > 0 || history.currentRole === "user")) {
       rows.push(separatorRow());
     }
     rows.push(
@@ -932,6 +953,7 @@ export function renderHistory(
   const visibleHeight = Math.max(1, rows - inputLines);
   const contentWidth = Math.max(1, columns - 1);
   const colorEnabled = resolveCliColorEnabled();
+  const density = getActiveDensity();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
 
   const { entries, totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
@@ -944,9 +966,10 @@ export function renderHistory(
       history.currentContent,
       contentWidth,
       colorEnabled,
+      density,
       themeFingerprint,
     );
-    const sep = currentTurnSeparator(history);
+    const sep = currentTurnSeparator(history, density);
     currentStart = finalizedLines + sep;
   }
   const totalLines =
@@ -988,6 +1011,7 @@ export function renderHistory(
       cached &&
       cached.width === contentWidth &&
       cached.color === colorEnabled &&
+      cached.density === density &&
       cached.themeFingerprint === themeFingerprint
     ) {
       layoutRows = cached.layoutRows;
@@ -997,6 +1021,7 @@ export function renderHistory(
         turn,
         contentWidth,
         colorEnabled,
+        density,
         themeFingerprint,
       );
     }
@@ -1009,7 +1034,7 @@ export function renderHistory(
     }
   }
   if (currentStart >= 0) {
-    const separatorAbove = currentTurnSeparator(history);
+    const separatorAbove = currentTurnSeparator(history, density);
     if (separatorAbove > 0) {
       const sepRow = currentStart - 1;
       if (sepRow >= winStart && sepRow < winEnd) {
@@ -1124,7 +1149,7 @@ export function applyScrollAction(
   let totalLines = finalizedLines;
   if (history.currentRole !== null && history.currentContent) {
     totalLines +=
-      currentTurnSeparator(history) +
+      currentTurnSeparator(history, getActiveDensity()) +
       countTurnLines(history.currentRole, history.currentContent, contentWidth);
   }
   const maxScrollTop = Math.max(0, totalLines - visibleHeight);

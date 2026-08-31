@@ -260,17 +260,10 @@ export function resolveAgentCallPlan(
     endpointKey: (agentConfig as any).endpointKey,
   });
 
-  // deepseek-v4-pro is a platform-hosted chat.completions route despite the
-  // broad deepseek Responses-model predicate.
-  const upstreamWire: WireFormat =
-    provider === "nolo" && agentConfig.model === "deepseek-v4-pro"
-      ? "chat.completions"
-      : useResponses
-        ? "responses"
-        : "chat.completions";
+  const upstreamWire: WireFormat = useResponses ? "responses" : "chat.completions";
 
   // Compute endpoint for platform providers
-  const endpoint = upstreamWire === "responses"
+  const endpoint = useResponses
     ? resolvePlatformResponsesEndpoint(provider) ?? ""
     : resolvePlatformChatCompletionsEndpoint(provider, agentConfig.model) ?? "";
 
