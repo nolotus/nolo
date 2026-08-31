@@ -207,6 +207,11 @@ type FixedInputConfig = {
    * 之后调用，避免回调里又读旧 region。
    */
   onInputLinesChange?: (lines: number) => void;
+  /**
+   * 当前 working directory（来自 TuiState.cwd）。用于 `/cd <部分路径>` 的
+   * 目录候选渲染；缺省时仅显示命令名补全候选。
+   */
+  getCwd?: () => string | undefined;
 };
 
 export function createFixedInput(
@@ -280,7 +285,7 @@ export function createFixedInput(
     const colorEnabled = resolveCliColorEnabled();
     const cols = Math.max(1, getColumns());
 
-    const completions = completeSlashCommand(buffer);
+    const completions = completeSlashCommand(buffer, config.getCwd?.());
     const sections: string[] = [];
     if (completions.length > 0) {
       sections.push(fitAnsiLine(dimCliText(completions.join("  "), colorEnabled), cols));

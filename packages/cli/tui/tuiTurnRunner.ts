@@ -254,6 +254,13 @@ async function runAgentChat(
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
   const memoryUseGuidanceLayer = buildMemoryUseGuidanceLayer({ promptBlock: memoryPromptBlock });
 
+  // 最近一次 /cd 切换通知：作为 turn-scope 上下文注入本轮，agent 与用户
+  // 同时知情（与 /switch 消息「用户可见 + agent 可知」的语义对齐）。消费
+  // 时机在 runOneAgentTurn 的状态折叠处（发起过真实 turn 后清空）。
+  const cwdNoticeBlocks = state.pendingCwdNotice
+    ? [{ content: state.pendingCwdNotice, cacheScope: "turn" as const }]
+    : [];
+
   const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
     ...renderTurnContextBlocksWithScope(layers),
     ...renderTurnContextBlocksWithScope([memoryUseGuidanceLayer]),
@@ -265,6 +272,7 @@ async function runAgentChat(
       .filter((content) => content.length > 0)
       .map((content) => ({ content, cacheScope: "turn" as const })),
     ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
+    ...cwdNoticeBlocks,
   ]);
   const result: RunAgentTurnResult = await agentRunner({
     agentName: effectiveAgentName,
@@ -978,6 +986,8 @@ export async function runOneAgentTurn(
             : {}),
           ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
           ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+          // 本轮已发起 agent 调用（消息已注入），消费切换通知。
+          pendingCwdNotice: undefined,
         };
         if (runResult.dialogId && nextDialogKey) {
           ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
@@ -1042,6 +1052,10 @@ export async function runOneAgentTurn(
           ? { estimatedContextTokens: runResult.turnTokens.input }
           : {}),
         ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+        // 切换消息本轮已注入 agent 上下文（runAgentChat 已读），消费掉，
+        // 避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实 turn、
+        // 而非纯 child-run-completed 事件短路）时才清除。
+        pendingCwdNotice: undefined,
       };
       if (runResult.dialogId && nextDialogKey) {
         ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);

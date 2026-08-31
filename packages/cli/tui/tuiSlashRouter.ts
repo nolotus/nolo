@@ -381,6 +381,11 @@ export async function runSubmittedSlashLine(
         host.state = { ...host.state, gitStatus };
       }
     }
+    // 切换消息写入对话历史（role="local"，与 /switch 的消息同通道），
+    // 用户可见且 agent 后续 turn 能读到（见 runAgentChat 的上下文组装）。
+    if (result.action.switchMessage) {
+      emitCommandOutput(result.action.switchMessage);
+    }
     scheduleRender();
   }
 

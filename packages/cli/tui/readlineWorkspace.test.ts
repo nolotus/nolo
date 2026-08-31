@@ -1942,6 +1942,143 @@ describe("scroll-aware history", () => {
     expect(fullOutput).toContain("TAIL");
   });
 
+  test("idle /cd writes a switch message into the transcript and injects it into the next turn context", async () => {
+    const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const cdRoot = mkdtempSync(join(tmpdir(), "nolo-cd-msg-"));
+    const alphaPath = join(cdRoot, "alpha");
+    mkdirSync(alphaPath, { recursive: true });
+    try {
+      const input = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        setRawMode?: (mode: boolean) => void;
+      };
+      const output = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        rows?: number;
+        columns?: number;
+      };
+      input.isTTY = true;
+      output.isTTY = true;
+      output.rows = TERM_ROWS;
+      output.columns = TERM_COLS;
+      input.setRawMode = () => {};
+      const chunks: string[] = [];
+      output.on("data", (chunk) => chunks.push(String(chunk)));
+      // 屏幕帧含 ANSI + 120 列 wrap 换行，归一化空白后再做子串匹配。
+      const norm = (s: string) => s.replace(/\s+/g, "");
+      const stdout = () => norm(stripAnsi(chunks.join("")));
+      const workspaceCwd = process.cwd();
+
+      const seenContextBlocks: string[][] = [];
+      const workspacePromise = startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env: {},
+        agentRunner: async (opt) => {
+          seenContextBlocks.push(
+            (opt.contextBlockScopes ?? [])
+              .map((b) => b.content)
+              .filter(
+                (c) =>
+                  c.includes("Working directory changed") ||
+                  c.includes("工作目录已切换")
+              )
+          );
+          return { exitCode: 0, dialogId: "switch-msg-dialog" };
+        },
+      });
+
+      // /cd 切换：确认文案 + 切换消息都进对话历史（stdout 可见）。
+      input.write(`/cd ${alphaPath}\r`);
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(stdout()).toContain(norm(t("cdSwitched", alphaPath)));
+      expect(stdout()).toContain(norm(t("cdSwitchedMessage", workspaceCwd, alphaPath)));
+
+      // 下一轮真实 turn：切换消息作为上下文注入 agent。
+      input.write("hello after cd\r");
+      const deadline = Date.now() + 3000;
+      while (seenContextBlocks.length < 1 && Date.now() < deadline) {
+        await Bun.sleep(10);
+      }
+      expect(seenContextBlocks[0]).toEqual([t("cdSwitchedMessage", workspaceCwd, alphaPath)]);
+
+      // 再一轮：一次性通知已被消费，不再重复注入。
+      input.write("another turn\r");
+      const deadline2 = Date.now() + 3000;
+      while (seenContextBlocks.length < 2 && Date.now() < deadline2) {
+        await Bun.sleep(10);
+      }
+      expect(seenContextBlocks[1]).toEqual([]);
+
+      input.write("/exit\r");
+      input.end();
+      await Promise.race([workspacePromise, Bun.sleep(3000)]);
+    } finally {
+      rmSync(cdRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("/cd - goes back to the previous directory and reports no-previous without history", async () => {
+    const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const cdRoot = mkdtempSync(join(tmpdir(), "nolo-cd-dash-"));
+    const alphaPath = join(cdRoot, "alpha");
+    mkdirSync(alphaPath, { recursive: true });
+    try {
+      const input = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        setRawMode?: (mode: boolean) => void;
+      };
+      const output = new PassThrough() as PassThrough & {
+        isTTY?: boolean;
+        rows?: number;
+        columns?: number;
+      };
+      input.isTTY = true;
+      output.isTTY = true;
+      output.rows = TERM_ROWS;
+      output.columns = TERM_COLS;
+      input.setRawMode = () => {};
+      const chunks: string[] = [];
+      output.on("data", (chunk) => chunks.push(String(chunk)));
+      const norm = (s: string) => s.replace(/\s+/g, "");
+      const stdout = () => norm(stripAnsi(chunks.join("")));
+      const workspaceCwd = process.cwd();
+
+      const workspacePromise = startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env: {},
+        agentRunner: async () => ({ exitCode: 0, dialogId: "cd-dash-dialog" }),
+      });
+
+      input.write(`/cd ${alphaPath}\r`);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(stdout()).toContain(norm(t("cdSwitched", alphaPath)));
+
+      input.write("/cd -\r");
+      await new Promise((r) => setTimeout(r, 80));
+      // 回到 workspace 根目录 + 切换消息（旧→新 = alpha → workspace 根）。
+      expect(stdout()).toContain(norm(t("cdSwitched", workspaceCwd)));
+      expect(stdout()).toContain(norm(t("cdSwitchedMessage", alphaPath, workspaceCwd)));
+
+      // 无 history 时的第二次 `-`。
+      input.write("/cd -\r");
+      await new Promise((r) => setTimeout(r, 80));
+      expect(stdout()).toContain(norm(t("cdNoPrevious")));
+
+      input.write("/exit\r");
+      input.end();
+      await Promise.race([workspacePromise, Bun.sleep(3000)]);
+    } finally {
+      rmSync(cdRoot, { recursive: true, force: true });
+    }
+  });
+
   test("busy /switch auto persists and routes the next turn through auto", async () => {
     const input = new PassThrough() as PassThrough & {
       isTTY?: boolean;

@@ -1021,6 +1021,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // renderHistoryToOutput 内部有 syncingLayout 卫兵防重入。
         renderHistoryToOutput();
       },
+      // /cd 路径补全候选行渲染需要当前 cwd（读 state 而非入参，保证
+      // /cd 切换后立即以新 cwd 渲染，composer 不必重建）。
+      getCwd: () => state.cwd,
     });
     fixedInput = {
       ...baseFixedInput,
@@ -1736,6 +1739,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
       const result = applyTuiInputKey(buffer, sequence, {}, cursorPos, {
         pasteStore,
+        cwd: state.cwd,
       });
       if (result.redraw) {
         resetHistoryFrameDiffCache(output);

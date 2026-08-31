@@ -262,6 +262,20 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
           output: `${t("cdCurrent", state.cwd)}\n${t("cdUsage")}`,
         };
       }
+      // `-`：回上一个目录。目标就是 prevCwd（必然存在），直接交换；
+      // 交换后清空 prevCwd（语义：`-` 只回溯一步，再按 `-` 提示无上一目录）。
+      if (argText === "-") {
+        if (!state.prevCwd) {
+          return { nextState: state, output: t("cdNoPrevious") };
+        }
+        const previous = state.prevCwd;
+        const switchMessage = t("cdSwitchedMessage", state.cwd, previous);
+        return {
+          nextState: { ...state, cwd: previous, prevCwd: undefined, pendingCwdNotice: switchMessage },
+          output: t("cdSwitched", previous),
+          action: { type: "cwd-refresh", switchMessage },
+        };
+      }
       // `~` 展开为当前用户 home；其余交给 node:path 按当前 cwd 解析
       // （支持相对/绝对路径）。解析结果必须存在且为目录，否则报错不改状态。
       const expanded =
@@ -281,10 +295,15 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
       // 去尾部斜杠，与 createInitialTuiState 的 cwd 初始化行为一致；
       // 根目录 "/" 除外（去掉斜杠会得到空串，破坏后续 resolve/stat）。
       const normalized = target === "/" ? "/" : target.replace(/\/+$/, "");
+      if (normalized === state.cwd) {
+        // /cd . 或切到当前目录：no-op，不污染 prevCwd、不发切换消息。
+        return { nextState: state, output: t("cdCurrent", state.cwd) };
+      }
+      const switchMessage = t("cdSwitchedMessage", state.cwd, normalized);
       return {
-        nextState: { ...state, cwd: normalized },
+        nextState: { ...state, cwd: normalized, prevCwd: state.cwd, pendingCwdNotice: switchMessage },
         output: t("cdSwitched", normalized),
-        action: { type: "cwd-refresh" },
+        action: { type: "cwd-refresh", switchMessage },
       };
     }
     case "/density":

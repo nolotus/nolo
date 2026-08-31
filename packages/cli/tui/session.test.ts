@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   SLASH_COMMANDS,
   stripImageTokens,
 } from "./session";
+import type { TuiState } from "./session";
 import {
   composeStatusLineWithQueue,
   renderContextPanel,
@@ -648,6 +649,92 @@ describe("completeSlashCommand", () => {
   });
 });
 
+describe("completeSlashCommand - /cd path completion", () => {
+  let root: string;
+  let alphaDir: string;
+  let betaDir: string;
+  let hiddenDir: string;
+  let filePath: string;
+  let deepDir: string;
+
+  beforeEach(() => {
+    root = makeTempDir();
+    alphaDir = join(root, "alpha");
+    betaDir = join(root, "beta");
+    hiddenDir = join(root, ".hidden");
+    filePath = join(root, "notes.txt");
+    deepDir = join(alphaDir, "deep");
+    mkdirSync(alphaDir, { recursive: true });
+    mkdirSync(betaDir, { recursive: true });
+    mkdirSync(hiddenDir, { recursive: true });
+    mkdirSync(deepDir, { recursive: true });
+    writeFileSync(filePath, "hello");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("lists matching subdirectory candidates for a relative prefix", () => {
+    const matches = completeSlashCommand("/cd a", root);
+    expect(matches).toEqual([`/cd alpha/`]);
+  });
+
+  test("returns multiple dir candidates and never files", () => {
+    const matches = completeSlashCommand("/cd ", root);
+    expect(matches).toContain(`/cd alpha/`);
+    expect(matches).toContain(`/cd beta/`);
+    // 只列目录，不列文件。
+    expect(matches).not.toContain(`/cd notes.txt/`);
+  });
+
+  test("deepens into a subdirectory relative candidate", () => {
+    const matches = completeSlashCommand(`/cd alpha/`, root);
+    expect(matches).toEqual([`/cd alpha/deep/`]);
+  });
+
+  test("hides dot-directories unless the prefix starts with a dot", () => {
+    expect(completeSlashCommand("/cd ", root)).not.toContain(`/cd .hidden/`);
+    expect(completeSlashCommand("/cd .", root)).toEqual([`/cd .hidden/`]);
+  });
+
+  test("no candidates when nothing matches", () => {
+    expect(completeSlashCommand("/cd zzz", root)).toEqual([]);
+  });
+
+  test("symlinked directories are listed, broken symlinks are not", () => {
+    symlinkSync(alphaDir, join(root, "linkdir"));
+    symlinkSync(join(root, "zzz-missing"), join(root, "brokendir"));
+    expect(completeSlashCommand("/cd li", root)).toEqual(["/cd linkdir/"]);
+    expect(completeSlashCommand("/cd bro", root)).toEqual([]);
+  });
+
+  test("absolute prefix resolves from the filesystem root, not cwd", () => {
+    const matches = completeSlashCommand(`/cd ${alphaDir}/d`, root);
+    expect(matches).toEqual([`/cd ${alphaDir}/deep/`]);
+  });
+
+  test("command completion is untouched when cwd is omitted", () => {
+    expect(completeSlashCommand("/he")).toContain("/help");
+  });
+
+  test("TAB with a single dir candidate completes to a trailing slash", () => {
+    const res = applyTuiInputKey("/cd a", "\t", {}, undefined, { cwd: root });
+    expect(res.buffer).toBe("/cd alpha/");
+    expect(res.cursorPos).toBe("/cd alpha/".length);
+  });
+
+  test("TAB with multiple candidates keeps the buffer for disambiguation", () => {
+    const res = applyTuiInputKey("/cd ", "\t", {}, undefined, { cwd: root });
+    expect(res.buffer).toBe("/cd ");
+  });
+
+  test("TAB without cwd keeps plain command-name completion", () => {
+    const res = applyTuiInputKey("/cd", "\t", {}, undefined, {});
+    expect(res.buffer).toBe("/cd ");
+  });
+});
+
 describe("handleTuiInput - /switch, /agent, /tasks, /jobs aliases", () => {
   beforeEach(() => {
     getProcessRegistry().clear();
@@ -975,7 +1062,7 @@ describe("handleTuiInput - /cd working directory switch", () => {
     const res = handleTuiInput(`/cd ${subDir}`, state);
     expect(res.nextState.cwd).toBe(subDir);
     expect(res.nextState).not.toBe(state);
-    expect(res.action).toEqual({ type: "cwd-refresh" });
+    expect(res.action).toMatchObject({ type: "cwd-refresh" });
     expect(res.output).toBe(t("cdSwitched", subDir));
   });
 
@@ -984,7 +1071,7 @@ describe("handleTuiInput - /cd working directory switch", () => {
     const state = { ...createInitialTuiState({}), cwd };
     const res = handleTuiInput("/cd sub", state);
     expect(res.nextState.cwd).toBe(subDir);
-    expect(res.action).toEqual({ type: "cwd-refresh" });
+    expect(res.action).toMatchObject({ type: "cwd-refresh" });
   });
 
   test("/cd strips trailing slashes like createInitialTuiState", () => {
@@ -1029,12 +1116,65 @@ describe("handleTuiInput - /cd working directory switch", () => {
     const state = createInitialTuiState({});
     const res = handleTuiInput("/cd ~", state);
     expect(res.nextState.cwd).toBe(homedir());
-    expect(res.action).toEqual({ type: "cwd-refresh" });
+    expect(res.action).toMatchObject({ type: "cwd-refresh" });
   });
 
   test("/cd is registered in SLASH_COMMANDS and completes via tab", () => {
     expect(SLASH_COMMANDS).toContain("/cd");
     expect(completeSlashPrefix("/cd")).toBe("/cd ");
+  });
+
+  test("/cd sets prevCwd on switch and emits a switchMessage", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const res = handleTuiInput("/cd sub", state);
+    expect(res.nextState.prevCwd).toBe(cwd);
+    expect(res.nextState.pendingCwdNotice).toBe(
+      t("cdSwitchedMessage", cwd, subDir)
+    );
+    expect(res.action).toMatchObject({
+      type: "cwd-refresh",
+      switchMessage: t("cdSwitchedMessage", cwd, subDir),
+    });
+  });
+
+  test("/cd - goes back to the previous directory and clears prevCwd", () => {
+    setCliLocale("en");
+    const switched: TuiState = {
+      ...createInitialTuiState({}),
+      cwd: subDir,
+      prevCwd: cwd,
+    };
+    const res = handleTuiInput("/cd -", switched);
+    expect(res.nextState.cwd).toBe(cwd);
+    expect(res.nextState.prevCwd).toBeUndefined();
+    expect(res.nextState.pendingCwdNotice).toBe(
+      t("cdSwitchedMessage", subDir, cwd)
+    );
+    expect(res.action).toMatchObject({ type: "cwd-refresh" });
+    expect(res.output).toBe(t("cdSwitched", cwd));
+  });
+
+  test("/cd - with no previous directory reports cdNoPrevious and switches nothing", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+    const res = handleTuiInput("/cd -", state);
+    expect(res.nextState).toBe(state);
+    expect(res.output).toBe(t("cdNoPrevious"));
+    expect(res.action).toBeUndefined();
+  });
+
+  test("/cd - roundtrip: switch then back lands on the original cwd", () => {
+    setCliLocale("en");
+    const state = { ...createInitialTuiState({}), cwd };
+    const there = handleTuiInput("/cd sub", state);
+    const back = handleTuiInput("/cd -", there.nextState);
+    expect(back.nextState.cwd).toBe(cwd);
+    expect(back.nextState.prevCwd).toBeUndefined();
+    // A second - has no history left to go back to.
+    const again = handleTuiInput("/cd -", back.nextState);
+    expect(again.nextState).toBe(back.nextState);
+    expect(again.output).toBe(t("cdNoPrevious"));
   });
 });
 
