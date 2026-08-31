@@ -42,10 +42,6 @@ import {
   type TuiDensity,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
-import {
-  getCachedRunningAgentCount,
-  resetRunningAgentCountCacheForTest,
-} from "./runRegistryPoller";
 
 // Command-output assertions target English strings; pin the locale for
 // machines whose LANG resolves to zh. Locale-dependent describes further down
@@ -815,12 +811,6 @@ describe("handleTuiInput - /auto dispatch", () => {
   });
 
   test("narrow status drops context/cwd before dirty, running and auto", () => {
-    resetRunningAgentCountCacheForTest();
-    getCachedRunningAgentCount({
-      force: true,
-      now: Date.now(),
-      reader: () => [{ status: "running" }],
-    });
     const state = {
       ...createInitialTuiState({}),
       cwd: "/a/very/long/workspace/path",
@@ -846,7 +836,6 @@ describe("handleTuiInput - /auto dispatch", () => {
     expect(emergency).toContain("⚙1");
     expect(emergency).toContain("⑂*2?3");
     expect(emergency).not.toContain("context:");
-    resetRunningAgentCountCacheForTest();
   });
 
   describe("composeStatusLineWithQueue — queue badge never squeezes required state", () => {
@@ -863,12 +852,6 @@ describe("handleTuiInput - /auto dispatch", () => {
     });
 
     test("badge wider than maxWidth is dropped; auto/running/dirty stay visible", () => {
-      resetRunningAgentCountCacheForTest();
-      getCachedRunningAgentCount({
-        force: true,
-        now: Date.now(),
-        reader: () => [{ status: "running" }],
-      });
       // Badge (" · 12 queued") is deliberately wider than the whole budget:
       // reserving its width must not starve the required fields, and the
       // badge itself must go before any of them does.
@@ -880,16 +863,9 @@ describe("handleTuiInput - /auto dispatch", () => {
       expect(stripAnsi(line)).toContain("⚙1");
       expect(stripAnsi(line)).toContain("⑂*2?3");
       expect(stripAnsi(line)).not.toContain("queued");
-      resetRunningAgentCountCacheForTest();
     });
 
     test("badge is kept only when the degraded status still fits beside it", () => {
-      resetRunningAgentCountCacheForTest();
-      getCachedRunningAgentCount({
-        force: true,
-        now: Date.now(),
-        reader: () => [{ status: "running" }],
-      });
       const badge = dimCliText(" · 2 queued", true);
       const line = composeStatusLineWithQueue(queueState(), badge, 30);
 
@@ -898,7 +874,6 @@ describe("handleTuiInput - /auto dispatch", () => {
       expect(stripAnsi(line)).toContain("⚙1");
       expect(stripAnsi(line)).toContain("⑂");
       expect(stripAnsi(line)).toContain("2 queued");
-      resetRunningAgentCountCacheForTest();
     });
   });
 });

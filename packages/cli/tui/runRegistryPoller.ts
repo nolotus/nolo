@@ -42,50 +42,6 @@ const DISCOVERY_TERMINAL_LINGER_MS = 60_000;
  */
 export const RUN_RECONCILE_SILENCE_MS = 15_000;
 
-export const RUNNING_AGENT_COUNT_CACHE_TTL_MS = 1000;
-let cachedRunningAgentCount = 0;
-let lastRunningAgentCountScannedAt = 0;
-
-export type RunningAgentCountOptions = {
-  now?: number;
-  force?: boolean;
-  reader?: () => Array<{ status?: string }>;
-};
-
-/**
- * 节流并缓存活跃 agent 运行计数。
- *
- * `renderStatusLine` 在 TUI 活跃渲染路径（~150ms / 每次按键）频繁被调用。
- * 如果直接全量扫描磁盘（`listRunRecords`），在 1000+ 记录下会导致严重卡顿。
- * 此处强制两次物理扫描间隔 ≥ 1s，在 TTL 窗口内直接返回内存缓存计数。
- */
-export function getCachedRunningAgentCount(options?: RunningAgentCountOptions): number {
-  const now = options?.now ?? Date.now();
-  if (
-    !options?.force &&
-    lastRunningAgentCountScannedAt > 0 &&
-    now - lastRunningAgentCountScannedAt < RUNNING_AGENT_COUNT_CACHE_TTL_MS
-  ) {
-    return cachedRunningAgentCount;
-  }
-  const readFn = options?.reader ?? listRunRecords;
-  try {
-    const records = readFn();
-    cachedRunningAgentCount = records.filter(
-      (r) => !isAgentRunTerminalStatus(r.status)
-    ).length;
-    lastRunningAgentCountScannedAt = now;
-  } catch {
-    // local run registry is best effort
-  }
-  return cachedRunningAgentCount;
-}
-
-export function resetRunningAgentCountCacheForTest(): void {
-  cachedRunningAgentCount = 0;
-  lastRunningAgentCountScannedAt = 0;
-}
-
 export type RunRegistryPollerDeps = {
   /** 面板当前挂着哪些 run（dock.getRuns()）。 */
   getDockedRuns: () => AgentRunSnapshot[];

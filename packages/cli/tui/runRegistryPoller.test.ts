@@ -4,10 +4,7 @@ import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import type { RunRecord } from "../agentRunControl";
 import {
   RUN_RECONCILE_SILENCE_MS,
-  RUNNING_AGENT_COUNT_CACHE_TTL_MS,
   createRunRegistryPoller,
-  getCachedRunningAgentCount,
-  resetRunningAgentCountCacheForTest,
   snapshotFromRunRecord,
 } from "./runRegistryPoller";
 import { formatUnassignedFact } from "./runSnapshotDisplay";
@@ -636,65 +633,5 @@ describe("onRecordsPolled", () => {
     expect(() => h.poller.poll()).not.toThrow();
     // 面板照常更新。
     expect(h.updates).toHaveLength(1);
-  });
-});
-
-describe("sessionRender getCachedRunningAgentCount throttling & memoization", () => {
-  test("memoizes active agent count within 1s TTL and does not re-scan IO on same tick", () => {
-    resetRunningAgentCountCacheForTest();
-    let scanCount = 0;
-    // 模拟 registry 中有 1200+ 条记录（1000 条 done/failed，200 条 running）
-    const mockRecords: Array<{ status: string }> = [];
-    for (let i = 0; i < 1000; i++) {
-      mockRecords.push({ status: i % 2 === 0 ? "done" : "failed" });
-    }
-    for (let i = 0; i < 200; i++) {
-      mockRecords.push({ status: "running" });
-    }
-
-    const mockReader = () => {
-      scanCount += 1;
-      return mockRecords;
-    };
-
-    const t0 = 10_000;
-    // 模拟 TUI 渲染热路径（1000 次击键或 150ms 活跃重绘在同一个 1s 窗口内）
-    for (let i = 0; i < 1000; i++) {
-      const count = getCachedRunningAgentCount({
-        now: t0 + (i % 500),
-        reader: mockReader,
-      });
-      expect(count).toBe(200);
-    }
-    // 同一 1s 窗口内 1000 次连续读取只触发了 1 次 reader 全量扫描
-    expect(scanCount).toBe(1);
-
-    // 超过 TTL (1000ms) 后，下一次调用才会重新扫描
-    const countAfterTtl = getCachedRunningAgentCount({
-      now: t0 + RUNNING_AGENT_COUNT_CACHE_TTL_MS + 10,
-      reader: mockReader,
-    });
-    expect(countAfterTtl).toBe(200);
-    expect(scanCount).toBe(2);
-  });
-
-  test("returns cached count gracefully when reader throws", () => {
-    resetRunningAgentCountCacheForTest();
-    const t0 = 10_000;
-    // 第一次读取成功
-    const count1 = getCachedRunningAgentCount({
-      now: t0,
-      reader: () => [{ status: "running" }, { status: "done" }],
-    });
-    expect(count1).toBe(1);
-
-    // 过了 TTL 但 reader 抛错，优雅回退到之前的缓存值
-    const count2 = getCachedRunningAgentCount({
-      now: t0 + 2000,
-      reader: () => {
-        throw new Error("disk IO error");
-      },
-    });
-    expect(count2).toBe(1);
   });
 });
