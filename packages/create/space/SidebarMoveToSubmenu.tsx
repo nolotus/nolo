@@ -1,4 +1,5 @@
-import "./SidebarMoveToPanel.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarItemStyles as styles } from "./sidebarItemStyles";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -163,20 +164,20 @@ const SidebarMoveToSubmenu: React.FC<SidebarMoveToSubmenuProps> = ({
           </MenuItem>
         </Menu>
       ) : (
-        <div className="SidebarItem__move-panel-body">
+        <div {...stylex.props(styles.moveBody)}>
           <Autocomplete filter={contains}>
             <SearchField
-              className="SidebarItem__move-panel-search"
+              {...stylex.props(styles.moveSearch)}
               aria-label={t("search")}
               autoFocus
             >
               <Input
-                className="SidebarItem__move-panel-search-input"
+                {...stylex.props(styles.moveInput)}
                 placeholder={t("search")}
               />
             </SearchField>
             <Menu
-              className="SidebarItem__move-panel-list"
+              {...stylex.props(styles.moveList)}
               aria-label={t("moveToSpace")}
               items={availableSpaces}
               onAction={(key) => handleSpaceSelect(String(key))}
@@ -191,11 +192,11 @@ const SidebarMoveToSubmenu: React.FC<SidebarMoveToSubmenuProps> = ({
                   {movingSpaceId === space.id ? (
                     <LuLoaderCircle
                       size={14}
-                      className="SidebarItem__loading-spinner"
+                      {...stylex.props(styles.spinner)}
                       aria-hidden="true"
                     />
                   ) : null}
-                  <span slot="label" className="SidebarItem__move-panel-item-label">
+                  <span slot="label" {...stylex.props(styles.moveLabel)}>
                     {space.label}
                   </span>
                 </MenuItem>

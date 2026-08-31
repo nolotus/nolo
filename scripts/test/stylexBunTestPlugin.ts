@@ -25,7 +25,7 @@
 import { transformAsync } from "@babel/core";
 
 const STYLEX_FILE_FILTER =
-  /(^|\/)packages\/(?:ai\/agent|app|chat)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
+  /(^|\/)packages\/(?:ai\/agent|app|chat|create|life)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
 
 Bun.plugin({
   name: "stylex-static-compile",

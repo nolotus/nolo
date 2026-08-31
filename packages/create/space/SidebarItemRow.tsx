@@ -1,9 +1,12 @@
 // SidebarItemRow.tsx
 // Lightweight visual row for use inside RAC ListBoxItem (virtualized sidebar).
+// SidebarItem__content-icon--spinning is represented by styles.spinning.
 // No NavLink, no self-managed keyboard/focus — RAC handles navigation via onAction.
 // Context menu and action buttons retained.
 
-import "./SidebarItem.css";
+import * as stylex from "@stylexjs/stylex";
+import { sidebarItemStyles as styles } from "./sidebarItemStyles";
+import "./SidebarItemStylexEscapeHatch.css";
 
 import React, {
   useRef,
@@ -160,6 +163,13 @@ function SidebarItemRow({
   const [editTitle, setEditTitle] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  // Floating controls (drag handle / inline actions / 92px link padding) reveal
+  // on .SidebarItem:hover / [data-open] / :focus-within in the original CSS.
+  // StyleX has no descendant + pseudo-class selectors, so we track the
+  // equivalent states on the row container (onMouseEnter/Leave + onFocus/Blur
+  // capture = focus-within) and drive visibility from props.
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocusWithin, setIsFocusWithin] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   // Row root element ref — used as the RAC Menu anchor for right-click /
   // Shift+F10 context-menu entry, reusing the same anchor+activeMenuKey
@@ -395,21 +405,35 @@ function SidebarItemRow({
     "data-unread": showUnreadDot || undefined,
   } as const;
 
+  // Floating controls reveal (union of original CSS conditions):
+  //   .SidebarItem:hover / [data-open] / :focus-within  →  hover || isMenuOpen || isFocusWithin
+  //   [data-dragging] overrides to hidden                →  !isDragging
+  const controlsRevealed = (isHovered || isMenuOpen || isFocusWithin) && !isDragging;
+
   return (
     <>
       <div
         ref={rowRef}
-        className={
-          isFlash ? "SidebarItem SidebarItem--flash" : "SidebarItem"
-        }
+        {...stylex.props(styles.item, isFlash && styles.flash, isActive && styles.active, isSelected && styles.selected, isDragging && styles.dragging, isMenuOpen && styles.open)}
         {...dataAttrs}
         style={style}
+        data-hook="create-space-sidebar-row"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onFocusCapture={() => setIsFocusWithin(true)}
+        onBlurCapture={(e) => {
+          // focus-within：焦点在行内兄弟元素间转移时保持 true，完全离开行才 false
+          // （否则 blur→focus 顺序会让控件闪现隐藏）。
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setIsFocusWithin(false);
+          }
+        }}
         onContextMenu={handleRowContextMenu}
       >
         {isSelectionMode ? (
           <button
             type="button"
-            className="SidebarItem__selection-checkbox-wrapper"
+            {...stylex.props(styles.selection)}
             onClick={() => onSelectItem?.(contentKey)}
             aria-label={isSelected ? "deselect" : "select"}
             aria-pressed={isSelected}
@@ -417,20 +441,20 @@ function SidebarItemRow({
             {isSelected ? (
               <LuSquareCheck
                 size={ICON_SIZE}
-                className="SidebarItem__selection-checkbox"
+                {...stylex.props(styles.selectionIcon)}
                 aria-hidden="true"
               />
             ) : (
               <LuSquare
                 size={ICON_SIZE}
-                className="SidebarItem__selection-checkbox"
+                {...stylex.props(styles.selectionIcon)}
                 aria-hidden="true"
               />
             )}
           </button>
         ) : (
           <div
-            className="SidebarItem__icon-wrapper"
+            {...stylex.props(styles.iconWrapper, disableDrag && styles.dragDisabled)}
             data-running={isRunningDialog || undefined}
             data-status={dialogStatusTone}
             data-unread={showUnreadDot || undefined}
@@ -442,36 +466,36 @@ function SidebarItemRow({
             {isRunningDialog ? (
               <LuLoaderCircle
                 size={ICON_SIZE}
-                className="SidebarItem__content-icon SidebarItem__content-icon--spinning"
+                {...stylex.props(styles.icon, styles.spinning)}
                 aria-hidden="true"
               />
             ) : showStatusMark ? (
               <span
-                className="SidebarItem__status-mark"
+                {...stylex.props(styles.statusMark, dialogStatusTone === "failed" && styles.statusFailed)}
                 data-status={dialogStatusTone}
                 aria-hidden="true"
               />
             ) : pinned ? (
-              <LuPin size={ICON_SIZE} className="SidebarItem__content-icon" aria-hidden="true" />
+              <LuPin size={ICON_SIZE} {...stylex.props(styles.icon, isActive && styles.iconActive)} aria-hidden="true" />
             ) : type === "agent" && entity ? (
               <AgentAvatar
                 agent={entity}
                 size={ICON_SIZE}
                 avatarSize="small"
-                className="SidebarItem__agent-avatar"
+                {...stylex.props(styles.avatar)}
               />
             ) : entity?.icon ? (
               <ContentIcon
                 icon={entity.icon}
                 fallback={Icon}
                 size={ICON_SIZE}
-                className="SidebarItem__content-icon"
+                {...stylex.props(styles.icon, isActive && styles.iconActive)}
               />
             ) : (
-              <Icon size={ICON_SIZE} className="SidebarItem__content-icon" aria-hidden="true" />
+              <Icon size={ICON_SIZE} {...stylex.props(styles.icon, isActive && styles.iconActive)} aria-hidden="true" />
             )}
-            {showUnreadDot && !showStatusMark && <span className="SidebarItem__unread-dot" aria-hidden="true" />}
-            <div className="SidebarItem__drag-handle" aria-hidden="true">
+            {showUnreadDot && !showStatusMark && <span {...stylex.props(styles.unreadDot)} aria-hidden="true" />}
+            <div {...stylex.props(styles.dragHandle, controlsRevealed && !disableDrag ? styles.dragVisible : styles.dragHidden)} aria-hidden="true">
               <LuGripVertical size={14} aria-hidden="true" />
             </div>
           </div>
@@ -481,6 +505,7 @@ function SidebarItemRow({
           <div style={{ flex: 1, minWidth: 0 }}>
             <InlineEditInput
               inputRef={inputRef}
+              className="create-space-sidebar-inline-edit-input"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
               onBlur={handleEditSubmit}
@@ -501,14 +526,14 @@ function SidebarItemRow({
         ) : (
           <NavLink
             to={navLinkTarget}
-            className="SidebarItem__content-link"
+            {...stylex.props(styles.link, controlsRevealed && styles.linkActions)}
             draggable={false}
             onClick={handleNavLinkClick}
           >
             {childCount ? (
               <button
                 type="button"
-                className="SidebarItem__child-toggle"
+                {...stylex.props(styles.childToggle)}
                 aria-label={isChildCollapsed ? "展开子对话" : "折叠子对话"}
                 onClick={(e) => {
                   e.preventDefault();
@@ -522,11 +547,11 @@ function SidebarItemRow({
                 ) : (
                   <LuChevronDown size={12} aria-hidden="true" />
                 )}
-                <span className="SidebarItem__child-count">{childCount}</span>
+                <span {...stylex.props(styles.childCount)}>{childCount}</span>
               </button>
             ) : null}
             <span
-              className="SidebarItem__content-title"
+              {...stylex.props(styles.title, isActive && styles.titleActive)}
               data-status={dialogStatusTone}
               title={displayTitle}
               style={isChildRow ? { paddingLeft: 8 } : undefined}
@@ -538,7 +563,7 @@ function SidebarItemRow({
 
         {!isEditing && !isSelectionMode && showInlineActions && (
           <div
-            className="SidebarItem__actions"
+            {...stylex.props(styles.actions, controlsRevealed && styles.actionsVisible, isDragging && styles.actionsDragging)}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -556,7 +581,7 @@ function SidebarItemRow({
                 title={displayTitle}
                 spaceIdOverride={effectiveSpaceId}
                 sourceServerOrigin={sourceServerOrigin}
-                className="SidebarItem__action-button"
+                className={stylex.props(styles.actionButton).className}
                 aria-label={t("common:delete")}
                 htmlTitle={t("common:delete")}
               />

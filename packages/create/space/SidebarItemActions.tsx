@@ -1,3 +1,5 @@
+import * as stylex from "@stylexjs/stylex";
+import { sidebarItemStyles as styles } from "./sidebarItemStyles";
 /* SidebarItemActions.tsx */
 import React from "react";
 import { LuChevronRight } from "react-icons/lu";
@@ -19,7 +21,7 @@ export function IconButton({
   return (
     <button
       ref={buttonRef}
-      className="SidebarItem__action-button"
+      className={stylex.props(styles.actionButton).className}
       onClick={onClick}
       aria-label={label}
       type="button"
@@ -45,18 +47,20 @@ export function MenuItem({
     const { className, ...rest } = props;
     return (
         <button
-            className={`SidebarItem__menu-item ${className || ""}`}
+            className={`${stylex.props(styles.menuItem).className} ${className || ""}`}
             onClick={onClick}
             role="menuitem"
             type="button"
+            data-hook="create-space-sidebar-menu-item"
             {...rest}
         >
-            {Icon && <Icon size={ICON_SIZE} className="SidebarItem__menu-item-icon" aria-hidden="true" />}
+            {Icon && <Icon size={ICON_SIZE} className={stylex.props(styles.menuIcon).className} data-hook="create-space-sidebar-menu-icon" aria-hidden="true" />}
             <span>{label}</span>
             {isSubMenu && (
                 <LuChevronRight
                     size={ICON_SIZE}
-                    className="SidebarItem__submenu-indicator"
+                    className={stylex.props(styles.submenuIndicator).className}
+                    data-hook="create-space-sidebar-submenu-indicator"
                     aria-hidden="true"
                 />
             )}

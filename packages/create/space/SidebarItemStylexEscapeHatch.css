@@ -1,0 +1,56 @@
+/*
+ * SidebarItemStylexEscapeHatch.css
+ * ─────────────────────────────────────────────────────────────
+ * packages/create/space CSS → StyleX 迁移逃生舱：集中存放无法用
+ * StyleX（stylex.create 原子类）表达的后代/跨组件选择器规则。
+ * 由使用方 tsx 顶部 import。
+ *
+ * data-hook 约定（同 messagesStylexEscapeHatch.css）：
+ * 元素以 data-hook 字面属性携带 hook 标记，选择器用
+ * [data-hook~="..."] 等价原类名匹配（特异性同 class，加 :not(#\#)
+ * 抬升以压过无层叠顺序保障的全局类）。
+ * ─────────────────────────────────────────────────────────────
+ */
+
+/* ═══ 自 SidebarItem.css 迁出 ═══ */
+
+/* ── 行内联编辑（inline-edit-input）sidebar 覆写 ──
+ * 保留原因：.SidebarItem .inline-edit-input 为后代选择器，且需压过
+ * render/web/ui.css 中同名的 .inline-edit-input 基础规则（24px 高、
+ * primary 25% 边框）。原 CSS 语义：sidebar 场景输入框收窄到 22px、
+ * text 色调边框，focus 时收 primary 色调（45% 边框 + 6% 背景 + 2px 焦点环），
+ * 与详情页的 primary 主色调区分、视觉更轻。
+ * 挂载：SidebarItemRow.tsx 行容器 data-hook="create-space-sidebar-row"，
+ * InlineEditInput className="create-space-sidebar-inline-edit-input"。 */
+
+[data-hook~="create-space-sidebar-row"] .create-space-sidebar-inline-edit-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  height: 22px;
+  padding: 0 6px;
+  font-weight: 500;
+  border-radius: var(--radius-sm, 6px);
+  border-color: color-mix(in srgb, var(--text) 14%, transparent);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: none;
+}
+
+[data-hook~="create-space-sidebar-row"] .create-space-sidebar-inline-edit-input:focus:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+/* ── menu-item hover 变色（icon / submenu-indicator）──
+ * 保留原因：.SidebarItem__menu-item:hover .SidebarItem__menu-item-icon 与
+ * .SidebarItem__menu-item:hover .SidebarItem__submenu-indicator 为
+ * 「父伪类 + 后代」复合选择器，StyleX 不支持。
+ * 挂载：SidebarItemActions.tsx MenuItem（data-hook menu-item /
+ * menu-icon / submenu-indicator）。该 MenuItem 目前在仓内无消费方
+ * （原 CSS 中规则即死规则），1:1 迁移保证未来接线时行为与原 CSS 一致。 */
+
+[data-hook~="create-space-sidebar-menu-item"]:hover [data-hook~="create-space-sidebar-menu-icon"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: var(--text);
+}
+
+[data-hook~="create-space-sidebar-menu-item"]:hover [data-hook~="create-space-sidebar-submenu-indicator"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: var(--textSecondary);
+}
