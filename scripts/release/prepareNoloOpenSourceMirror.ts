@@ -1503,6 +1503,8 @@ jobs:
         if: runner.os != 'Windows' || needs.select-targets.outputs.channel != 'stable'
         env:
           TMPDIR: \${{ runner.temp }}
+          NOLO_DESKTOP_BUILD_RPM: "1"
+          NOLO_DESKTOP_BUILD_DEB: "1"
           ELECTROBUN_RELEASE_BASE_URL: https://github.com/nolotus/nolo/releases/latest/download
           APPLE_DEVELOPER_ID: \${{ secrets.APPLE_DEVELOPER_ID }}
           APPLE_API_KEY: \${{ secrets.APPLE_API_KEY }}
