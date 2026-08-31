@@ -157,6 +157,12 @@ export const bootstrapServer = async (): Promise<void> => {
 
     console.log(`[desktop-runtime] listening on ${HTTP_HOST}:${HTTP_PORT}`);
 
+    // 暴露 server 实例给 requestRemoteAddress（globalThis.__httpServer）：
+    // loopback 信任判定依赖 server.requestIP 的真实对端地址，拿不到实例时
+    // 一律 fail-closed，导致所有 trusted-desktop API 403。与私有仓库
+    // server/entry.ts 的全局注入约定保持一致。
+    (globalThis as { __httpServer?: unknown }).__httpServer = httpServer;
+
     // 预热桌面运行时路由懒加载模块
     prewarmDesktopRuntimeRoutes();
   })();
@@ -169,6 +175,7 @@ export const shutdownServer = async (): Promise<void> => {
     httpServer.stop(false);
     httpServer = null;
   }
+  (globalThis as { __httpServer?: unknown }).__httpServer = null;
   bootPromise = null;
 };
 

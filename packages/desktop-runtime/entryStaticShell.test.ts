@@ -41,6 +41,7 @@ beforeAll(async () => {
   process.env.HTTP_PORT = String(PORT);
   process.env.PLATFORM_SERVER_HOST = "127.0.0.1";
   process.env.NOLO_SERVER_AUTOSTART = "0";
+  process.env.NOLO_DESKTOP = "1";
 
   const entry = await import("./entry");
   await entry.bootstrapServer();
@@ -49,6 +50,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await shutdown?.();
+  delete process.env.NOLO_DESKTOP;
   rmSync(tempPublicDir, { recursive: true, force: true });
 });
 
@@ -99,5 +101,22 @@ describe("desktop-runtime entry static shell", () => {
     const body = await res.text();
     expect(body).not.toContain("root:");
     expect(res.headers.get("content-type")).toContain("text/html");
+  });
+
+  it("still 403s trusted-desktop APIs for bare non-browser requests", async () => {
+    // fail-closed：真实对端 127.0.0.1 但缺少 same-origin 证明 → 拒绝。
+    const res = await fetch(`${BASE}/api/desktop/auth/session`);
+    expect(res.status).toBe(403);
+  });
+
+  it("serves trusted-desktop APIs when same-origin provenance is proven", async () => {
+    // 回归：desktop-runtime/entry.ts 曾漏掉 globalThis.__httpServer 注入，
+    // loopback 判定永远拿不到对端地址（fail-closed），导致创建 agent、
+    // 发消息等所有信任 API 403。
+    const res = await fetch(`${BASE}/api/desktop/auth/session`, {
+      headers: { "x-nolo-desktop-tool": "1" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, tokens: [] });
   });
 });
