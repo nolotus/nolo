@@ -374,8 +374,30 @@ export function validateDesktopUpdateMetadata(args: {
     return;
   }
   if (delta <= 0) {
-    throw new Error(
-      `${args.channel} ${args.platform} desktop version ${actualVersion} must be newer than the currently published version ${previousVersion}`
+    // A prerelease version recorded in a stable-channel manifest means the
+    // channel was polluted (e.g. an alpha build published to stable by
+    // mistake). A genuine stable release is always the correct repair for
+    // that state, so allow the overwrite instead of blocking the release
+    // behind manual R2 surgery. Every other non-advancing publish still
+    // fails loudly.
+    //
+    // Invariant assumption: a prerelease version in the stable channel is
+    // ALWAYS pollution — stable never ships legitimate RC/prerelease builds.
+    // If stable ever introduces sanctioned RC rollout, replace this implicit
+    // repair with an explicit --repair-polluted-stable opt-in flag.
+    const previousIsPrerelease = previousVersion.includes("-");
+    const actualIsStableRelease = !actualVersion.includes("-");
+    if (
+      args.channel !== "stable" ||
+      !previousIsPrerelease ||
+      !actualIsStableRelease
+    ) {
+      throw new Error(
+        `${args.channel} ${args.platform} desktop version ${actualVersion} must be newer than the currently published version ${previousVersion}`
+      );
+    }
+    console.warn(
+      `[publish-desktop] repairing polluted ${args.channel} ${args.platform} channel: published prerelease ${previousVersion} will be replaced by stable ${actualVersion}`
     );
   }
 }

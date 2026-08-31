@@ -27,7 +27,7 @@ type HistoryApi = {
   startTurn: (history: any, role: "user" | "assistant" | "local") => void;
   appendToCurrentTurn: (history: any, content: string) => void;
   finalizeCurrentTurn: (history: any) => void;
-  getTurnLayoutRows: (turn: any, width: number, color: boolean, density: string, surface: string) => unknown[];
+  getTurnLayoutRows: (turn: any, width: number, color: boolean, themeFingerprint: string) => unknown[];
   getTurnLineCacheStats?: () => { size: number; capacity: number; hits: number; misses: number; evictions: number };
   resetTurnLineCacheStats?: () => void;
 };
@@ -65,7 +65,7 @@ function runA(api: HistoryApi, totalBytes: number) {
     addTurn(api, history, "assistant", payload(perTurn, i));
   }
   gc();
-  for (const turn of history.turns) api.getTurnLayoutRows(turn, 119, false, "compact", "default");
+  for (const turn of history.turns) api.getTurnLayoutRows(turn, 119, false, "default");
   gc();
   return { heapUsed: process.memoryUsage().heapUsed, storedBytes: history.turns.reduce((n: number, t: any) => n + Buffer.byteLength(t.content), 0), turns: history.turns.length };
 }
@@ -76,7 +76,7 @@ function runB(api: HistoryApi) {
   addTurn(api, history, "assistant", lines);
   gc();
   const turn = history.turns[0];
-  api.getTurnLayoutRows(turn, 119, false, "compact", "default");
+  api.getTurnLayoutRows(turn, 119, false, "default");
   gc();
   return {
     heapUsed: process.memoryUsage().heapUsed,
@@ -108,7 +108,7 @@ function runD(api: HistoryApi) {
   const residentLines = new Map<any, number>();
   for (const first of starts) {
     for (const turn of history.turns.slice(first, first + 20)) {
-      const rows = api.getTurnLayoutRows(turn, 119, false, "compact", "default");
+      const rows = api.getTurnLayoutRows(turn, 119, false, "default");
       residentLines.delete(turn);
       residentLines.set(turn, rows.length);
       while (residentLines.size > api.getTurnLineCacheStats().capacity) residentLines.delete(residentLines.keys().next().value);
@@ -138,7 +138,7 @@ function runC(api: HistoryApi, totalTurns: number) {
     for (let i = first; i < Math.min(first + 20, totalTurns); i++) {
       addTurn(api, history, "assistant", `turn ${i} ${"z".repeat(180)}`);
     }
-    for (const turn of history.turns.slice(-20)) api.getTurnLayoutRows(turn, 119, false, "compact", "default");
+    for (const turn of history.turns.slice(-20)) api.getTurnLayoutRows(turn, 119, false, "default");
     const stats = api.getTurnLineCacheStats();
     peakSize = Math.max(peakSize, stats.size);
     windows += 1;

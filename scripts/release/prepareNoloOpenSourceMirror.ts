@@ -1468,6 +1468,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y
+          libgtk-3-dev libwebkit2gtk-4.1-dev
+          libayatana-appindicator3-dev librsvg2-dev
       - name: Verify Linux desktop build dependencies
         if: runner.os == 'Linux'
         run: bash ./scripts/ci/verifyLinuxDesktopDeps.sh

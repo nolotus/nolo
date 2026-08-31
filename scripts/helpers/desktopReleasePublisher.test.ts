@@ -436,6 +436,127 @@ describe("desktopReleasePublisher", () => {
     ).toThrow("must be newer than the currently published");
   });
 
+  it("repairs a stable channel polluted by a prerelease version instead of blocking", () => {
+    // Regression guard: stable-win/macos update.json once recorded
+    // 0.53.0-alpha.1 (an alpha build published to stable), which deadlocked
+    // every stable release behind the monotonicity check.
+    expect(() =>
+      validateDesktopUpdateMetadata({
+        channel: "stable",
+        platform: "windows",
+        expectedVersion: "0.36.1",
+        buildSha: "new",
+        updateJson: {
+          version: "0.36.1",
+          hash: "abc",
+        },
+        existingManifest: {
+          schemaVersion: 1,
+          channel: "stable",
+          updatedAt: "2026-08-31T00:00:00.000Z",
+          artifacts: {
+            windows: {
+              url: "/public/downloads/stable-win-x64-NoloDesktop-Setup.exe",
+              size: 123,
+              version: "0.53.0-alpha.1",
+              buildSha: "polluted",
+              publishedAt: "2026-08-31T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("still rejects a stable downgrade between two stable versions", () => {
+    expect(() =>
+      validateDesktopUpdateMetadata({
+        channel: "stable",
+        platform: "windows",
+        expectedVersion: "0.36.1",
+        buildSha: "new",
+        updateJson: {
+          version: "0.36.1",
+          hash: "abc",
+        },
+        existingManifest: {
+          schemaVersion: 1,
+          channel: "stable",
+          updatedAt: "2026-08-31T00:00:00.000Z",
+          artifacts: {
+            windows: {
+              url: "/public/downloads/stable-win-x64-NoloDesktop-Setup.exe",
+              size: 123,
+              version: "0.37.0",
+              buildSha: "old",
+              publishedAt: "2026-08-31T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    ).toThrow("must be newer than the currently published");
+  });
+
+  it("does not let the pollution repair bypass canary monotonicity", () => {
+    expect(() =>
+      validateDesktopUpdateMetadata({
+        channel: "alpha",
+        platform: "windows",
+        expectedVersion: "0.32.0-alpha.50",
+        buildSha: "new",
+        updateJson: {
+          version: "0.32.0-alpha.50",
+          hash: "abc",
+        },
+        existingManifest: {
+          schemaVersion: 1,
+          channel: "alpha",
+          updatedAt: "2026-08-31T00:00:00.000Z",
+          artifacts: {
+            windows: {
+              url: "/public/downloads/canary-win-x64-NoloDesktop-Setup.exe",
+              size: 123,
+              version: "0.32.0-alpha.60",
+              buildSha: "newer-canary",
+              publishedAt: "2026-08-31T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    ).toThrow("must be newer than the currently published");
+  });
+
+  it("does not allow a prerelease to replace a prerelease in the stable channel", () => {
+    // Locks the actualIsStableRelease condition: stable channels must never
+    // carry prerelease versions, in either direction.
+    expect(() =>
+      validateDesktopUpdateMetadata({
+        channel: "stable",
+        platform: "windows",
+        expectedVersion: "0.36.1-alpha.1",
+        buildSha: "new",
+        updateJson: {
+          version: "0.36.1-alpha.1",
+          hash: "abc",
+        },
+        existingManifest: {
+          schemaVersion: 1,
+          channel: "stable",
+          updatedAt: "2026-08-31T00:00:00.000Z",
+          artifacts: {
+            windows: {
+              url: "/public/downloads/stable-win-x64-NoloDesktop-Setup.exe",
+              size: 123,
+              version: "0.53.0-alpha.1",
+              buildSha: "polluted",
+              publishedAt: "2026-08-31T00:00:00.000Z",
+            },
+          },
+        },
+      }),
+    ).toThrow("must be newer than the currently published");
+  });
+
   it("allows rerunning a stable publish for the same version and build sha", () => {
     expect(() =>
       validateDesktopUpdateMetadata({

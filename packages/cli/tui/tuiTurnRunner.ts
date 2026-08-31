@@ -52,6 +52,7 @@ import type { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicke
 import type { saveProfileAgentSelection } from "../client/profileConfig";
 import { runAskChoiceDialog } from "./askChoiceDialog";
 import type { DialogHost } from "./dialogHost";
+import { runConfirmDialog } from "./confirmDialog";
 import type { ActivityIndicator, AgentRunStatusSnapshot } from "./activityIndicator";
 import type { RunRegistryPoller } from "./runRegistryPoller";
 import {
@@ -354,18 +355,42 @@ async function runAgentChat(
   };
 }
 
+const ESC = "\u001b";
+const CTRL_C = "\u0003";
+
 function isApprovedConfirmationInput(answer: string): boolean {
   const normalized = answer.trim().toLowerCase();
   return normalized === "" || normalized === "y" || normalized === "yes" || normalized === "确认";
 }
 
-export function waitForActionGate(
-  rl: ReturnType<typeof createInterface>,
-  input: NodeJS.ReadableStream,
-  output: NodeJS.WritableStream,
-  gate: LocalAgentActionGate,
-  spawnRunner: typeof spawnProcess,
-): Promise<AgentRuntimeToolResult> {
+function buildGateConfirmedResult(gate: LocalAgentActionGate): AgentRuntimeToolResult {
+  return {
+    content: `action gate completed: ${gate.title}`,
+    metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } },
+  };
+}
+
+function buildGateCancelledResult(gate: LocalAgentActionGate, reason: string): AgentRuntimeToolResult {
+  return {
+    content: `action gate cancelled: ${gate.title}`,
+    metadata: {
+      exitCode: 130,
+      actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
+    },
+  };
+}
+
+function buildGateFailedResult(gate: LocalAgentActionGate, message: string): AgentRuntimeToolResult {
+  return {
+    content: `action gate failed: ${gate.title}`,
+    metadata: {
+      exitCode: 1,
+      actionGateResult: { gateId: gate.id, status: "failed", output: message },
+    },
+  };
+}
+
+function deriveGateMeta(gate: LocalAgentActionGate) {
   const commandPayload = gate.kind === "handoff"
     ? readCommandActionGatePayload(gate.payload)
     : null;
@@ -380,11 +405,50 @@ export function waitForActionGate(
   const body = isInteractiveHandoff
     ? t("actionGateInteractiveBody")
     : gate.body;
+  return { commandPayload, isConfirmation, displayCommand, isInteractiveHandoff, title, body };
+}
+
+/**
+ * Bare-text gate prompt. Still used by:
+ *   - `waitForActionGate` (non-raw fallback, confirm + handoff) — not affected
+ *     by the invisibility bug, see that function's docstring.
+ *   - `waitForRawActionGate` (raw TTY) — now only reached for `handoff` gates
+ *     (`resolveActionGate` routes `confirm` gates to `dialogHost` + a real
+ *     framed dialog instead). The raw handoff caller now pauses the composer
+ *     for this prompt's entire wait window, so it survives the
+ *     activity-indicator repaint tick that used to erase it.
+ */
+function writeGatePrompt(output: NodeJS.WritableStream, meta: ReturnType<typeof deriveGateMeta>): void {
+  const { title, body, displayCommand, isConfirmation } = meta;
   output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
   output.write(`[nolo] ${title}\n`);
   if (body) output.write(`[nolo] ${body}\n`);
   output.write(`  ${displayCommand}\n`);
   output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
+}
+
+/**
+ * Non-raw (plain `readline`) action gate wait. Used only on the
+ * `!isInteractiveInput(input)` fallback path in `readlineWorkspace.ts` (no
+ * TTY / no raw mode — e.g. piped stdin). That path never installs the raw
+ * `fixedInput` composer (it stays the `createNoopFixedInput()` stub, whose
+ * `active` flag is `false`), and `activityIndicator`'s `onRepaint` short-circuits
+ * whenever `fixedInput.active` is false — so the 150ms activity-indicator tick
+ * that erases `waitForRawActionGate`'s prompt in the raw path never fires a
+ * repaint here at all. This prompt is not subject to the invisibility bug
+ * this file fixes; it is left as `output.write()` + `rl.question()` and does
+ * not need to route through `dialogHost`.
+ */
+export function waitForActionGate(
+  rl: ReturnType<typeof createInterface>,
+  input: NodeJS.ReadableStream,
+  output: NodeJS.WritableStream,
+  gate: LocalAgentActionGate,
+  spawnRunner: typeof spawnProcess,
+): Promise<AgentRuntimeToolResult> {
+  const meta = deriveGateMeta(gate);
+  const { commandPayload, isConfirmation, displayCommand } = meta;
+  writeGatePrompt(output, meta);
   return new Promise((resolve) => {
     let settled = false;
     const finish = (result: AgentRuntimeToolResult) => {
@@ -394,20 +458,10 @@ export function waitForActionGate(
       rl.off("SIGINT", onSigint);
       resolve(result);
     };
-    const cancelResult = (reason: string): AgentRuntimeToolResult => ({
-      content: `action gate cancelled: ${gate.title}`,
-      metadata: {
-        exitCode: 130,
-        actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-      },
-    });
-    const failResult = (message: string): AgentRuntimeToolResult => ({
-      content: `action gate failed: ${gate.title}`,
-      metadata: {
-        exitCode: 1,
-        actionGateResult: { gateId: gate.id, status: "failed", output: message },
-      },
-    });
+    const cancelResult = (reason: string): AgentRuntimeToolResult =>
+      buildGateCancelledResult(gate, reason);
+    const failResult = (message: string): AgentRuntimeToolResult =>
+      buildGateFailedResult(gate, message);
     const onClose = () => finish(cancelResult("readline closed"));
     const onSigint = () => finish(cancelResult("interrupted"));
     rl.once("close", onClose);
@@ -416,7 +470,7 @@ export function waitForActionGate(
       if (settled) return;
       if (isConfirmation) {
         finish(isApprovedConfirmationInput(answer)
-          ? { content: `action gate completed: ${gate.title}`, metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } } }
+          ? buildGateConfirmedResult(gate)
           : cancelResult("confirmation declined"));
         return;
       }
@@ -482,25 +536,9 @@ export function waitForRawActionGate(
     registerToken?: (handler: ((token: string) => void) | null) => void;
   },
 ): Promise<AgentRuntimeToolResult> {
-  const commandPayload = gate.kind === "handoff"
-    ? readCommandActionGatePayload(gate.payload)
-    : null;
-  const isConfirmation = gate.kind === "confirm";
-  const displayCommand = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? gate.title;
-  const isInteractiveHandoff =
-    gate.kind === "handoff" &&
-    gate.title === "This command requires an interactive terminal.";
-  const title = isInteractiveHandoff
-    ? t("actionGateInteractiveTitle")
-    : gate.title;
-  const body = isInteractiveHandoff
-    ? t("actionGateInteractiveBody")
-    : gate.body;
-  output.write(`\n[nolo] ${t("actionGateNeeded")}\n`);
-  output.write(`[nolo] ${title}\n`);
-  if (body) output.write(`[nolo] ${body}\n`);
-  output.write(`  ${displayCommand}\n`);
-  output.write(`[nolo] ${isConfirmation ? t("actionGateConfirmHint") : t("actionGateEnterHint")}\n`);
+  const meta = deriveGateMeta(gate);
+  const { commandPayload, isConfirmation, displayCommand } = meta;
+  writeGatePrompt(output, meta);
 
   return new Promise((resolve) => {
     const rawInput = input as RawModeInput;
@@ -514,22 +552,8 @@ export function waitForRawActionGate(
       input.off("data", onData);
       resolve(result);
     };
-    const cancel = (reason: string) =>
-      finish({
-        content: `action gate cancelled: ${gate.title}`,
-        metadata: {
-          exitCode: 130,
-          actionGateResult: { gateId: gate.id, status: "cancelled", output: reason },
-        },
-      });
-    const fail = (message: string) =>
-      finish({
-        content: `action gate failed: ${gate.title}`,
-        metadata: {
-          exitCode: 1,
-          actionGateResult: { gateId: gate.id, status: "failed", output: message },
-        },
-      });
+    const cancel = (reason: string) => finish(buildGateCancelledResult(gate, reason));
+    const fail = (message: string) => finish(buildGateFailedResult(gate, message));
     const runCommand = async () => {
       if (settled || commandRunning) return;
       commandRunning = true;
@@ -576,7 +600,7 @@ export function waitForRawActionGate(
     };
     const handleToken = (text: string) => {
       if (settled || commandRunning) return;
-      if (text.includes("\u0003") || (isConfirmation && text.includes("\u001b"))) {
+      if (text.includes(CTRL_C) || (isConfirmation && text === ESC)) {
         cancel("interrupted");
         return;
       }
@@ -586,28 +610,16 @@ export function waitForRawActionGate(
         if (newline >= 0) {
           const normalized = confirmationLine.trim().toLowerCase();
           confirmationLine = "";
-          if (!isApprovedConfirmationInput(confirmationLine)) {
+          if (!isApprovedConfirmationInput(normalized)) {
             cancel("confirmation declined");
             return;
           }
-          finish({
-            content: `action gate completed: ${gate.title}`,
-            metadata: { actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" } },
-          });
+          finish(buildGateConfirmedResult(gate));
         }
         return;
       }
       if (text.includes("\r") || text.includes("\n")) {
-        if (isConfirmation) {
-          finish({
-            content: `action gate completed: ${gate.title}`,
-            metadata: {
-              actionGateResult: { gateId: gate.id, status: "completed", output: "confirmed" },
-            },
-          });
-        } else {
-          void runCommand();
-        }
+        void runCommand();
       }
     };
     const onData = (chunk: Buffer | string) => {
@@ -620,6 +632,85 @@ export function waitForRawActionGate(
       input.on("data", onData);
     }
   });
+}
+
+/**
+ * `confirm` 类 gate 在 `localLoop.ts:1697` 由
+ * `{ ...policy.permissionRequest, id, kind: "confirm", toolName, toolCallId }`
+ * 构造，运行期字段是 `PermissionRequest` 的超集；`ActionGate`/`LocalAgentActionGate`
+ * 类型本身不声明 `tool`/`action`/`command`/`suggestedRule`，这里按上述构造契约
+ * 断言回 `PermissionRequest`，只在 `gate.kind === "confirm"` 分支使用。
+ */
+function asConfirmPermissionRequest(gate: LocalAgentActionGate): PermissionRequest {
+  return gate as unknown as PermissionRequest;
+}
+
+/**
+ * 交互式 (raw TTY) action gate 的统一入口。
+ *
+ * 根因（见 docs/plans/2026-08-31-action-gate-invisible.md）：`confirm` 类 gate
+ * 曾经和 `handoff` 类 gate 一起走 `waitForRawActionGate` 的裸 `output.write()`
+ * 提示，从不 pause composer；活动行指示器每 150ms 触发一次 `fixedInput.repaint`，
+ * 从 `history` 重建屏幕，gate 提示从未进 `history`，于是 ~150ms 内被擦掉——
+ * turn 看起来卡死，实则 gate 在静默占着键盘。
+ *
+ * 修复：
+ *   - `confirm` gate 改走 `dialogHost.run()` + `runConfirmDialog`，与破坏性操作
+ *     确认同款带框弹窗（同一 `run()` 负责 composer pause + 重绘抑制 + anchor），
+ *     不再可能被活动行 tick 擦掉。返回值经 `buildGateConfirmedResult` /
+ *     `buildGateCancelledResult` 折回既有形状，取消原因固定为
+ *     "confirmation declined"（与 `confirmDestructiveAction` 现有的
+ *     approve/cancel 二元语义一致——`runConfirmDialog` 不区分 Esc 与显式选
+ *     Cancel，两者都是用户主动取消）。
+ *   - `handoff` gate 仍走 `waitForRawActionGate`（裸文本提示更贴近"复制命令
+ *     到终端跑"的场景，不需要 select-dialog 框架），但现在从等待 Enter 的
+ *     那一刻起就 `pauseComposer()`，而不是像原来那样只在 `beforeSubprocess`
+ *     才 pause——等待提示同样要扛住活动行 tick。子进程真正跑起来后
+ *     `afterSubprocess` 钩子照旧负责 `resumeFromSubprocess`；若用户在按
+ *     Enter 之前就取消（Ctrl+C/Esc），子进程从未启动，改由
+ *     `resumeComposerFromDialog()` 收尾，避免误发只有子进程退出后才需要的
+ *     全屏滚动区重置序列。
+ */
+export async function resolveActionGate(
+  gate: LocalAgentActionGate,
+  deps: {
+    dialogHost: DialogHost;
+    input: NodeJS.ReadableStream;
+    output: NodeJS.WritableStream;
+    spawnRunner: typeof spawnProcess;
+    /** Route decoded TTY tokens through the workspace decoder (handoff only). */
+    registerToken: (handler: ((token: string) => void) | null) => void;
+    pauseComposer: () => void;
+    resumeComposerFromSubprocess: () => void;
+    resumeComposerFromDialog: () => void;
+  },
+): Promise<AgentRuntimeToolResult> {
+  if (gate.kind === "confirm") {
+    const approved = await deps.dialogHost.run((anchor) =>
+      runConfirmDialog({
+        request: asConfirmPermissionRequest(gate),
+        input: deps.input as NodeJS.ReadStream,
+        output: deps.output,
+        ...anchor,
+      }),
+    );
+    return approved
+      ? buildGateConfirmedResult(gate)
+      : buildGateCancelledResult(gate, "confirmation declined");
+  }
+  let subprocessRan = false;
+  deps.pauseComposer();
+  try {
+    return await waitForRawActionGate(deps.input, deps.output, gate, deps.spawnRunner, {
+      beforeSubprocess: () => {
+        subprocessRan = true;
+      },
+      afterSubprocess: deps.resumeComposerFromSubprocess,
+      registerToken: deps.registerToken,
+    });
+  } finally {
+    if (!subprocessRan) deps.resumeComposerFromDialog();
+  }
 }
 
 // ── S2：Turn 执行与队列 drain 的显式上下文容器与文件级函数 ──────────────────
