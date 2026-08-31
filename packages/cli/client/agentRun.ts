@@ -1145,6 +1145,7 @@ async function runLocalAgentTurnForCli(
           }
         : {}),
       continueDialogId: currentDialogId,
+      fileWriteSessionId: currentDialogId,
       spaceId: options.spaceId,
       category: options.category,
       inheritedFromDialogKey: options.inheritedFromDialogKey,

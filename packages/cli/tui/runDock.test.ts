@@ -19,6 +19,7 @@ function setup() {
   let repaints = 0;
 
   const dock = createRunDock({
+    displayMode: () => "pro",
     onRepaint: () => {
       repaints += 1;
     },

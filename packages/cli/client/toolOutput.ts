@@ -24,7 +24,7 @@ import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
 import { type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor, themeText } from "../tui/theme";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
-import { displayWidth } from "../tui/tuiAnsi";
+import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
 import { diffLines } from "diff";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
 
@@ -496,42 +496,63 @@ function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none"
   return `${dimCliText(text, true)}\n`;
 }
 
+// safe（normal）投影通用清洗：剥 ANSI/OSC（含剪贴板写、超链接）、折叠换行。
+// 供 renderRunCard（客户端重建）与 recoverOrchestrationCard 的 start 卡共用，
+// 与 dock 侧 sanitizeRunSnapshotForNormal 的 clean 同语义。
+const cleanUserText = (value: string) =>
+  stripAnsi(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+
 /**
- * Render a run snapshot as a card body: the closing `Run finished` card once
- * the run reached a terminal status, the in-progress `Run status` card until
- * then. One entry point so both never disagree about which a run deserves.
+ * Render a run snapshot as a card body. Safe mode rebuilds the card without
+ * error/log fields and cleans user-controlled text; pro mode stays complete.
  */
 function renderRunCard(
   snapshot: AgentRunSnapshot,
-  opts?: { includeLogTail?: boolean }
+  opts?: { includeLogTail?: boolean; safe?: boolean }
 ): string {
   const labels = agentRunCardLabels();
   const timing = { startedAt: snapshot.startedAt, finishedAt: snapshot.finishedAt };
-  const name = snapshot.agentName ?? "agent";
-  if (isAgentRunTerminalStatus(snapshot.status)) {
-    return formatFinishedRunCard(name, snapshot.status, {
-      runId: snapshot.runId,
-      toolCallCount: snapshot.toolCallCount,
-      lastToolNames: snapshot.lastToolNames,
-      lastAssistantText: snapshot.lastAssistantText,
-      errorMessage: snapshot.errorMessage,
-      logLines: snapshot.logLines,
-      timing,
-      ...(opts?.includeLogTail !== undefined ? { includeLogTail: opts.includeLogTail } : {}),
-      labels,
-    });
-  }
-  return formatStatusRunCard(name, snapshot.status, {
-    runId: snapshot.runId,
-    toolCallCount: snapshot.toolCallCount,
-    lastToolNames: snapshot.lastToolNames,
-    lastAssistantText: snapshot.lastAssistantText,
-    errorMessage: snapshot.errorMessage,
-    logLines: snapshot.logLines,
-    timing,
-    ...(opts?.includeLogTail !== undefined ? { includeLogTail: opts.includeLogTail } : {}),
-    labels,
-  });
+  const safe = opts?.safe === true;
+  const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
+  // safe（normal）投影：与 dock 侧 sanitizeRunSnapshotForNormal 同规则清洗
+  // （剥 ANSI/OSC、折叠换行），防止 provider 可控文本清屏/写剪贴板/伪造链接。
+  const source = safe
+    ? {
+        ...snapshot,
+        agentName: snapshot.agentName ? cleanUserText(snapshot.agentName) : snapshot.agentName,
+        taskPreview: snapshot.taskPreview ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview,
+        lastAssistantText: snapshot.lastAssistantText
+          ? cleanUserText(snapshot.lastAssistantText)
+          : snapshot.lastAssistantText,
+        lastToolNames: snapshot.lastToolNames?.map(cleanUserText),
+      }
+    : snapshot;
+  const hadError = safe && Boolean(source.errorMessage?.trim());
+  const errorFields = safe
+    ? { errorMessage: undefined, logLines: undefined }
+    : { errorMessage: source.errorMessage, logLines: source.logLines };
+  const body = isAgentRunTerminalStatus(snapshot.status)
+    ? formatFinishedRunCard(name, snapshot.status, {
+        runId: snapshot.runId,
+        toolCallCount: source.toolCallCount,
+        lastToolNames: source.lastToolNames,
+        lastAssistantText: source.lastAssistantText,
+        ...errorFields,
+        timing,
+        ...(opts?.includeLogTail !== undefined ? { includeLogTail: opts.includeLogTail } : {}),
+        labels,
+      })
+    : formatStatusRunCard(name, snapshot.status, {
+        runId: snapshot.runId,
+        toolCallCount: source.toolCallCount,
+        lastToolNames: source.lastToolNames,
+        lastAssistantText: source.lastAssistantText,
+        ...errorFields,
+        timing,
+        ...(opts?.includeLogTail !== undefined ? { includeLogTail: opts.includeLogTail } : {}),
+        labels,
+      });
+  return hadError ? `${body}\n  error   ${t("runDiagnosticsHidden")}` : body;
 }
 
 /**
@@ -548,8 +569,10 @@ function renderRunCard(
  */
 function recoverOrchestrationCard(
   event: LocalAgentToolEvent,
-  toolName: string
+  toolName: string,
+  opts?: { safe?: boolean }
 ): string | null {
+  const safe = opts?.safe === true;
   const content = typeof event.content === "string" ? event.content : "";
   const trimmed = content.trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
@@ -586,15 +609,19 @@ function recoverOrchestrationCard(
   const { kind, snapshot } = parsedEvent;
 
   if (kind === "start") {
-    return formatStartRunCard(snapshot.agentName ?? "agent", snapshot.status, {
-      task: snapshot.taskPreview,
+    // safe（normal）投影：与 renderRunCard 同规则清洗 provider 可控文本
+    // （agentName/taskPreview 剥 ANSI/OSC、折叠换行）。
+    const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
+    const task = snapshot.taskPreview ? (safe ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview) : snapshot.taskPreview;
+    return formatStartRunCard(name, snapshot.status, {
+      task,
       runId: snapshot.runId,
       labels,
     });
   }
   if (kind === "gone") return formatNotFoundRunCard(labels);
   if (kind === "stop") return formatStopRunCard(snapshot.status, labels);
-  return renderRunCard(snapshot);
+  return renderRunCard(snapshot, opts);
 }
 
 /**
@@ -611,8 +638,10 @@ function parseControlAgentRunStatusEvent(
 function formatOrchestrationCardBlock(
   event: LocalAgentToolEvent,
   toolName: string,
-  colorEnabled: boolean
+  colorEnabled: boolean,
+  opts?: { safe?: boolean }
 ): string {
+  const safe = opts?.safe === true;
   const rawLabel = toolLabel(toolName);
   const bakedCard =
     typeof event.metadata?.displayData === "string" && event.metadata.displayData.trim()
@@ -621,7 +650,7 @@ function formatOrchestrationCardBlock(
   // Client render first (see recoverOrchestrationCard); the server-baked card
   // and then the raw content are fallbacks for payloads we cannot rebuild.
   const rawDataStr =
-    recoverOrchestrationCard(event, toolName) ||
+    recoverOrchestrationCard(event, toolName, { safe }) ||
     bakedCard ||
     (typeof event.content === "string" ? event.content : "");
   const failed =
@@ -631,7 +660,11 @@ function formatOrchestrationCardBlock(
     /^Error:/i.test(rawDataStr.trim());
 
   if (failed) {
-    const firstLine = rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed");
+    // Safe projection (normal mode): state/outcome stay, the raw diagnostic
+    // (API keys, commands, stack first lines) never leaves pro/verbose.
+    const firstLine = safe
+      ? t("toolFailed")
+      : rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed");
     const message = clip(firstLine, 96);
     if (!colorEnabled) {
       return `✗ ${rawLabel}  ${message}\n`;
@@ -643,16 +676,15 @@ function formatOrchestrationCardBlock(
   }
 
   const displayData = rawDataStr.trim();
-  // `displayData` may be a card baked by the server (possibly an older build),
-  // which this process cannot fix structurally the way formatStatusRunCard does.
-  // Drop the information-free `agent   agent` row if such a card still carries it.
-  const lines = displayData
-    ? displayData.split("\n").filter((line) => !/^\s*agent\s+agent\s*$/.test(line))
-    : [];
+  // A server from an older build may bake a multiline error into displayData.
+  // In safe mode remove the error row and its indented continuation lines until
+  // the next card label (or blank line), rather than filtering only its first line.
+  const lines = displayData ? displayData.split("\n") : [];
+  const projected = safe ? sanitizeRunCardForNormal(lines) : lines;
 
   if (!colorEnabled) {
     let out = `● ${rawLabel}\n`;
-    for (const line of lines) {
+    for (const line of projected) {
       out += `  ${line}\n`;
     }
     return out;
@@ -661,8 +693,55 @@ function formatOrchestrationCardBlock(
   const bullet = themeText("●", "success", true);
   const labelPart = themeText(rawLabel, "muted", true);
   let out = `${bullet} ${labelPart}\n`;
-  for (const line of lines) {
+  for (const line of projected) {
     out += `  ${themeText(line, "muted", true)}\n`;
+  }
+  return out;
+}
+
+/**
+ * Normal-mode safe projection of a run card body (client-rebuilt or
+ * server-baked — both arrive here as lines).
+ *
+ * Keeps the required facts: status/outcome row (✗ failed), identity, tool
+ * counts, note. Drops what leaks: the raw `error   …` row and the trailing
+ * `Log tail:` section (unfiltered process output — API keys, curl commands).
+ * A failed run keeps a localized pointer to pro mode instead of the raw
+ * diagnostic; pro/verbose render the card untouched.
+ */
+function sanitizeRunCardForNormal(lines: string[]): string[] {
+  const out: string[] = [];
+  // error 行命中后的缩进深度：其后更深缩进的行是同一错误的续行
+  // （堆栈帧 / Authorization 头），与 error 本体一起吞掉，直到下一个
+  // 卡标签行（双空格 label 形态）或空行。
+  let errorIndent: number | null = null;
+  for (const line of lines) {
+    // The log tail is always the card's last section: drop it and the blank
+    // separator above its header. Header text matches both the CLI-injected
+    // localized label and the packages/ai English default (server-baked
+    // cards always carry the default).
+    if (/^(log tail:?|日志尾部：?)$/i.test(line.trim())) {
+      if (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+      break;
+    }
+    if (/^\s*error\b/i.test(line)) {
+      out.push(`  error   ${t("runDiagnosticsHidden")}`);
+      errorIndent = line.length - line.trimStart().length;
+      continue;
+    }
+    if (errorIndent !== null) {
+      if (line.trim() === "") {
+        // 空行结束续行块
+        errorIndent = null;
+        out.push(line);
+        continue;
+      }
+      const indent = line.length - line.trimStart().length;
+      const isLabelRow = /^\s{2}[a-z][a-zA-Z0-9]*\s{2,}/.test(line);
+      if (indent > errorIndent && !isLabelRow) continue; // 吞缩进续行
+      errorIndent = null; // 到达下一标签行/同级行，恢复正常投影
+    }
+    out.push(line);
   }
   return out;
 }
@@ -764,10 +843,12 @@ function formatNormalToolLine(
     event.type === "tool-result" &&
     (toolName === "listAgents" || toolName === "startAgentRun" || toolName === "controlAgentRun")
   ) {
-    return formatOrchestrationCardBlock(event, toolName, colorEnabled);
+    // Safe projection: normal mode keeps status/outcome/counts but never the
+    // raw errorMessage/logLines of a failed run — those belong to pro/verbose.
+    return formatOrchestrationCardBlock(event, toolName, colorEnabled, { safe: true });
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
-    return formatLoadSkillBlock(event, colorEnabled) ?? "";
+    return formatLoadSkillBlock(event, colorEnabled, { safe: true }) ?? "";
   }
 
   const label = toolLabel(toolName);
@@ -1064,10 +1145,14 @@ function formatTodoListForCli(
  * minimal-prefix contract the web/RN renderers use — and render a failure
  * line instead of the success bullet. Shared by compact/pro and normal: the
  * loaded skill name is product feedback, not shell plumbing.
+ *
+ * Safe projection (normal mode): the raw failure first line (paths, exception
+ * detail) stays in pro/compact; normal mode shows the localized failure only.
  */
 function formatLoadSkillBlock(
   event: LocalAgentToolEvent,
-  colorEnabled: boolean
+  colorEnabled: boolean,
+  opts?: { safe?: boolean }
 ): string | null {
   if (event.type !== "tool-result" || event.toolName !== "loadSkill") return null;
   const skillName = resolveLoadSkillName(event);
@@ -1076,7 +1161,9 @@ function formatLoadSkillBlock(
     /^Skill\s+"[^"]*"\s+not found/.test(content) || isFailedToolResult(event);
   const labelText = t("usedSkillLabel");
   if (failed) {
-    const message = clip(content.split("\n")[0] || t("toolFailed"), 96);
+    const message = opts?.safe === true
+      ? t("toolFailed")
+      : clip(content.split("\n")[0] || t("toolFailed"), 96);
     return formatToolTraceLine(`▸ ${labelText} (${skillName})  ✗ ${message}`, colorEnabled, "error");
   }
   if (!colorEnabled) {

@@ -86,15 +86,100 @@ describe("generateLocalDialogTitle", () => {
     expect(capturedMessages).toBeArray();
     expect(capturedMessages[0]).toEqual({
       role: "system",
-      content: BUILTIN_TITLE_LLM_CONFIG.prompt,
+      content: `${BUILTIN_TITLE_LLM_CONFIG.prompt}\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。`,
     });
     expect(capturedMessages[1]?.role).toBe("user");
     const parsedBody = JSON.parse(capturedFetchInit?.body as string);
     expect(parsedBody.model).toBe(BUILTIN_TITLE_LLM_CONFIG.model);
-    expect(parsedBody.reasoning_effort).toBe("low");
+    expect(parsedBody.reasoning_effort).toBeUndefined();
+    expect(parsedBody.response_format).toEqual({ type: "json_object" });
     expect(parsedBody.max_tokens).toBe(512);
   });
 
+  test("nemotron json mode unwraps {\"title\": ...} payloads before normalization", async () => {
+    const result = await generateLocalDialogTitle({
+      messages: [{ role: "user", content: "帮我规划上海三日美食旅行" }],
+      env: { AUTH_TOKEN: "fake" },
+      resolveProviderConfig: async () => ({ authToken: "fake" }),
+      buildRequest: ({ messages }: any) => {
+        return { url: "https://nolo.chat/api/v1/chat", init: { body: "{}" } };
+      },
+      parseResponse: () => ({ content: '{"title": "上海三日美食旅行"}' }),
+      fetchImpl: async () => ({ ok: true, text: async () => "{}" }) as any,
+      fallbackTitle: "fallback title",
+    });
+    expect(result).toEqual({ title: "上海三日美食旅行", source: "llm" });
+  });
+
+  test("nemotron json payload with empty title degrades to fallback instead of leaking the JSON shell", async () => {
+    const result = await generateLocalDialogTitle({
+      messages: [{ role: "user", content: "hi" }],
+      env: { AUTH_TOKEN: "fake" },
+      resolveProviderConfig: async () => ({ authToken: "fake" }),
+      buildRequest: () => ({ url: "https://nolo.chat/api/v1/chat", init: { body: "{}" } }),
+      parseResponse: () => ({ content: '{"title": ""}' }),
+      fetchImpl: async () => ({ ok: true, text: async () => "{}" }) as any,
+      fallbackTitle: "fallback title",
+    });
+    expect(result).toEqual({ title: "fallback title", source: "fallback" });
+  });
+
+
+  test("platform existingTitle adds the stability instruction", async () => {
+    let capturedMessages: any[] = [];
+    await generateLocalDialogTitle({
+      messages,
+      existingTitle: "东京四日慢旅行",
+      env: { AUTH_TOKEN: "fake" },
+      resolveProviderConfig: async () => ({ authToken: "fake" }),
+      buildRequest: ({ messages }: any) => {
+        capturedMessages = messages;
+        return { url: "https://nolo.chat/api/v1/chat", init: { body: "{}" } };
+      },
+      parseResponse: () => ({ content: "东京四日慢旅行" }),
+      fetchImpl: async () => ({ ok: true, text: async () => "{}" }) as any,
+      fallbackTitle: "fallback",
+    });
+    expect(capturedMessages[0].content).toContain("当前标题：东京四日慢旅行。如果对话仍在讨论同一主题");
+  });
+
+  test("direct existingTitle adds the stability instruction", async () => {
+    let capturedBody: any;
+    await generateLocalDialogTitle({
+      messages,
+      existingTitle: "东京四日慢旅行",
+      env: { OPENAI_API_KEY: "local" },
+      resolveProviderConfig: async () => ({ authToken: "" }),
+      resolveDirectProviderConfig: async () => ({ endpoint: "http://localhost:11434/v1/chat/completions", apiKey: "local", model: "llama3" }),
+      fetchImpl: async (_url, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: "标题" } }] }) } as any;
+      },
+      fallbackTitle: "fallback",
+    });
+    expect(capturedBody.messages[0].content).toContain("当前标题：东京四日慢旅行。如果对话仍在讨论同一主题");
+  });
+
+  test("omits stability instruction without existingTitle and sends plain transcript", async () => {
+    let capturedMessages: any[] = [];
+    await generateLocalDialogTitle({
+      messages,
+      env: { AUTH_TOKEN: "fake" },
+      resolveProviderConfig: async () => ({ authToken: "fake" }),
+      buildRequest: ({ messages }: any) => {
+        capturedMessages = messages;
+        return { url: "https://nolo.chat/api/v1/chat", init: { body: "{}" } };
+      },
+      parseResponse: () => ({ content: "标题" }),
+      fetchImpl: async () => ({ ok: true, text: async () => "{}" }) as any,
+      fallbackTitle: "fallback",
+    });
+    expect(capturedMessages[0].content).toBe(
+      `${BUILTIN_TITLE_LLM_CONFIG.prompt}\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。`,
+    );
+    expect(capturedMessages[1].content).toContain("User: ");
+    expect(capturedMessages[1].content).not.toStartWith("[");
+  });
 
   test("falls back when platform provider config has no authToken (logged out)", async () => {
     const result = await generateLocalDialogTitle({
@@ -429,7 +514,7 @@ describe("generateLocalDialogTitle", () => {
     // F5: the request body model comes from the resolved provider config
     // (BUILTIN glm-5-3-flash via the patched custom config), not a
     // hardcoded constant unrelated to resolution.
-    expect(capturedBody.model).toBe("glm-5-3-flash");
+    expect(capturedBody.model).toBe("nemotron-3-5-lightning-30b");
     // HIGH-1(c): the env OPENAI_API_KEY must propagate through the custom
     // branch as a Bearer Authorization header — without it a real OpenAI
     // endpoint would 401. Previously the synthesized directAgentConfig carried

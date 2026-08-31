@@ -65,6 +65,9 @@ export const normalizeChatCompletionsBodyForProvider = ({
   // 载荷形状类的 quirk 住在 core/chat（依赖无关，两条出口共用同一份判定）；
   // 本文件只留 provider→字段增删这类 body 级 quirk。agent-runtime 本地直连
   // 路径直接复用本模块（纯 TS，无 Node 专属依赖），保证与 server 出口一致。
+  // 注：Nemotron 3.5 Lightning（RunInfra 上游）的强制 thinking 无法用 body 参数
+  // 关闭（/no_think、reasoning:{enabled:false}、chat_template_kwargs、
+  // reasoning_effort 全部实测无效），调用方必须给足 max_tokens 预算（标题路径 3072）。
   if (Array.isArray(nextBody.messages) && requiresBareImageUrl({ provider, model })) {
     nextBody.messages = toBareImageUrlMessages(nextBody.messages);
   }
