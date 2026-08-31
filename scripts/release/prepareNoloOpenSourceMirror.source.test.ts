@@ -24,6 +24,15 @@ import {
 const REPO_ROOT = join(import.meta.dir, "../..");
 
 describe("prepareNoloOpenSourceMirror public projection manifest & constants", () => {
+  test("derives the public npm dist-tag from projected SemVer instead of the public branch", () => {
+    const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
+    const versionBumpSource = source.slice(source.indexOf("const versionBump ="));
+    expect(versionBumpSource).toContain("branches: [main]");
+    expect(versionBumpSource).toContain("version.includes('-') ? 'alpha' : 'latest'");
+    expect(versionBumpSource).toContain('gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"');
+    expect(versionBumpSource).not.toContain('if [ "\\${GITHUB_REF}" = "refs/heads/main" ]');
+  });
+
   test("keeps the manifest-less desktop Chrome connector in the package closure", async () => {
     expect(await computePackageClosure(REPO_ROOT)).toContain("desktop-chrome-connector");
   });
@@ -543,6 +552,10 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     // Wave 5 完成后，所有 auth/billing import 已迁移到 identity/core 契约，
     // projection gate 应通过。
     await expect(prepareNoloOpenSourceMirror({ repoRoot: REPO_ROOT, outDir })).resolves.toBeUndefined();
+    const publicVersionBump = readFileSync(join(outDir, ".github/workflows/version-bump.yml"), "utf8");
+    expect(publicVersionBump).toContain("branches: [main]");
+    expect(publicVersionBump).toContain("version.includes('-') ? 'alpha' : 'latest'");
+    expect(publicVersionBump).toContain('gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"');
     await rm(outDir, { recursive: true, force: true });
   });
 

@@ -2,7 +2,7 @@ name: Version Bump
 
 on:
   push:
-    branches: [alpha, main]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -34,11 +34,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            gh workflow run cli-publish.yml -f dist_tag=latest
-          elif [ "${GITHUB_REF}" = "refs/heads/alpha" ]; then
-            gh workflow run cli-publish.yml -f dist_tag=alpha
-          fi
+          # The public projection has only main. Preserve the private release
+          # channel by deriving npm's dist-tag from the projected SemVer.
+          CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
+          gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
 
       - name: Dispatch desktop build
         env:

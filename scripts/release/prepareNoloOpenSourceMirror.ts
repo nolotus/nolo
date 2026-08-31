@@ -1638,7 +1638,7 @@ jobs:
 `;
   await writeFile(join(githubDir, "cli-publish.yml"), cliPublish);
 
-  // Version bump: push 到 alpha/main 时验证兼容性并 dispatch 发布。
+  // Version bump: public main 更新时验证兼容性并 dispatch 发布。
   // 版本号由 bun-nolo 的统一 release engine 决定（single-source），随 mirror
   // 同步到公开仓库（packages/*/package.json 的 version 字段已含正确版本）。
   // 公开仓库不跑 release engine——快照式无历史会导致版本号推断错误。
@@ -1646,7 +1646,7 @@ jobs:
 
 on:
   push:
-    branches: [alpha, main]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -1678,11 +1678,10 @@ jobs:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ "\${GITHUB_REF}" = "refs/heads/main" ]; then
-            gh workflow run cli-publish.yml -f dist_tag=latest
-          elif [ "\${GITHUB_REF}" = "refs/heads/alpha" ]; then
-            gh workflow run cli-publish.yml -f dist_tag=alpha
-          fi
+          # The public projection has only main. Preserve the private release
+          # channel by deriving npm's dist-tag from the projected SemVer.
+          CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
+          gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
 
       - name: Dispatch desktop build
         env:

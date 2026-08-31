@@ -68,6 +68,23 @@ describe("client logger", () => {
     });
   });
 
+  test("serializes shared non-circular fields at each reference", () => {
+    let output = "";
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      output += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    const shared = { requestId: "req-shared" };
+    createClientLogger("test").info({ first: shared, second: shared }, "shared");
+
+    expect(JSON.parse(output)).toMatchObject({
+      first: { requestId: "req-shared" },
+      second: { requestId: "req-shared" },
+      msg: "shared",
+    });
+  });
+
   test("honors NOLO_LOG_LEVEL when debug logging is explicitly enabled", () => {
     let output = "";
     process.stderr.write = ((chunk: string | Uint8Array) => {

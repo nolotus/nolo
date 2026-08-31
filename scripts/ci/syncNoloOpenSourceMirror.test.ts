@@ -73,6 +73,7 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     const privateRepo = await makePrivateRepo();
     const publicRepo = await makePublicRepo("0.33.0-alpha.33");
     const { stdout, exitCode } = await run(privateRepo, ["bash", syncScript, "--check"], {
+      SYNC_REPO_ROOT: privateRepo,
       SYNC_PUBLIC_REPO: publicRepo,
     });
     expect(exitCode).toBe(0);
@@ -83,6 +84,7 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     const privateRepo = await makePrivateRepo();
     const publicRepo = await makePublicRepo("0.33.0-alpha.31");
     const { stdout, exitCode } = await run(privateRepo, ["bash", syncScript, "--check"], {
+      SYNC_REPO_ROOT: privateRepo,
       SYNC_PUBLIC_REPO: publicRepo,
     });
     expect(exitCode).toBe(2);
@@ -99,6 +101,7 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     const prepareCmd = `mkdir -p "${stageDir}/packages/cli" && printf '{"version":"0.33.0-alpha.33"}\\n' > "${stageDir}/packages/cli/package.json"`;
 
     const { stdout, stderr, exitCode } = await run(privateRepo, ["bash", syncScript], {
+      SYNC_REPO_ROOT: privateRepo,
       SYNC_PUBLIC_REPO: publicRepo,
       SYNC_STAGE_DIR: stageDir,
       SYNC_MIRROR_DIR: join(tmpdir(), "nolo-sync-mirror-test"),
@@ -121,5 +124,29 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     // 投影内容已更新
     const cliVersion = await git(publicRepo, ["show", `${publicHeadAfter}:packages/cli/package.json`]);
     expect(cliVersion).toContain("0.33.0-alpha.33");
+  });
+
+  it("succeeds without a commit or push when the public projection is unchanged", async () => {
+    const privateRepo = await makePrivateRepo();
+    const publicRepo = await makePublicRepo("0.33.0-alpha.33");
+    const publicHeadBefore = await git(publicRepo, ["rev-parse", "HEAD"]);
+    const stageDir = await mkdtemp(join(tmpdir(), "nolo-sync-stage-noop-"));
+    const mirrorDir = await mkdtemp(join(tmpdir(), "nolo-sync-mirror-noop-"));
+    temporaryDirectories.push(stageDir, mirrorDir);
+    const prepareCmd = `mkdir -p "${stageDir}/packages/cli" && printf '{"version":"0.33.0-alpha.33"}\\n' > "${stageDir}/packages/cli/package.json"`;
+
+    const { stdout, stderr, exitCode } = await run(privateRepo, ["bash", syncScript], {
+      SYNC_REPO_ROOT: privateRepo,
+      SYNC_PUBLIC_REPO: publicRepo,
+      SYNC_STAGE_DIR: stageDir,
+      SYNC_MIRROR_DIR: mirrorDir,
+      SYNC_PREPARE_CMD: prepareCmd,
+    });
+
+    expect(exitCode).toBe(0, stderr);
+    expect(stdout).toContain("投影无变化（no-op）");
+    expect(stdout).toContain("Source-Commit:");
+    expect(stdout).toContain("Source-Release-Tag:");
+    expect(await git(publicRepo, ["rev-parse", "HEAD"])).toBe(publicHeadBefore);
   });
 });

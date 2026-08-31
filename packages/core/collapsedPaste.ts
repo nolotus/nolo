@@ -6,6 +6,8 @@
  * side store and is expanded back on send.
  */
 
+import { compactWhitespace } from "./compactWhitespace";
+
 export const COLLAPSE_PASTE_MIN_LINES = 8;
 export const COLLAPSE_PASTE_MIN_CHARS = 400;
 
@@ -16,9 +18,18 @@ export const WEB_PASTE_THRESHOLD: CollapsePasteThreshold = {
   minChars: WEB_COLLAPSE_PASTE_MIN_CHARS,
 };
 
-/** Stable placeholder: `[paste #12 · 345 lines]` */
+/** Stable placeholder: `[paste #12 · 345 lines · first line preview]` */
 export const COLLAPSED_PASTE_PLACEHOLDER_RE =
-  /\[paste #(\d+) · (\d+) lines\]/g;
+  // 兼容两种格式：旧 `[paste #N · L lines]` 与新 `[paste #N · L lines · preview]`。
+  // preview 段用负向先行断言排除模型引用（`…; full content available via
+  // readPastedText(pasteId=N)`）：legacy 无 scope 的模型引用与新 chip 形状重叠，
+  // 若被当作 chip 匹配，跨会话残留的引用会被错误展开/替换（破坏 durable
+  // fallback 语义）。preview 与模型引用尾段在生成时都不会包含该标记原文之外
+  // 的歧义，此处按"完整模型引用尾段"精确排除。
+  /\[paste #(\d+) · (\d+) lines(?: · (?![^\]]*; full content available via readPastedText\(pasteId=\d+\))([^\]]*))?\]/g;
+
+/** chip 首行预览的最大长度（字符数，不含截断省略号 `…`）。 */
+export const COLLAPSED_PASTE_PREVIEW_MAX_CHARS = 24;
 
 /**
  * Model-side reference. The body stays in the local paste store and the
@@ -83,12 +94,36 @@ export function estimatePasteBytes(text: string): number {
   return bytes;
 }
 
+/**
+ * chip 首行预览：取文本首个非空行 → 折叠连续空白为单空格 → 去掉全部 `]`
+ * 与控制字符 → 截断到 24 字符（截断时以 `…` 结尾）。
+ *
+ * 返回空串表示没有可用预览（文本无任何非空字符，或清洗后为空），调用方
+ * 应省略 chip 的 preview 段。保证返回值单行、不含 `]` 与控制字符，使整段
+ * placeholder 始终能被 COLLAPSED_PASTE_PLACEHOLDER_RE 原样匹配回来。
+ */
+export function buildCollapsedPastePreview(text: string): string {
+  const firstNonEmptyLine =
+    text.split(/\r\n|\r|\n/).find((line) => line.trim().length > 0) ?? "";
+  let preview = compactWhitespace(firstNonEmptyLine);
+  // eslint-disable-next-line no-control-regex
+  preview = preview.replace(/\]|\p{C}/gu, "").trim();
+  if (preview.length === 0) return "";
+  const chars = Array.from(preview);
+  if (chars.length > COLLAPSED_PASTE_PREVIEW_MAX_CHARS) {
+    return chars.slice(0, COLLAPSED_PASTE_PREVIEW_MAX_CHARS).join("") + "…";
+  }
+  return preview;
+}
+
 export function formatCollapsedPastePlaceholder(
   id: number,
   text: string,
 ): string {
   const lines = countTextLines(text);
-  return `[paste #${id} · ${lines} lines]`;
+  const preview = buildCollapsedPastePreview(text);
+  if (!preview) return `[paste #${id} · ${lines} lines]`;
+  return `[paste #${id} · ${lines} lines · ${preview}]`;
 }
 
 export type CollapsedPasteLabelLocale = "en" | "zh";

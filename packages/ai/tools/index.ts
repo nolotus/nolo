@@ -643,7 +643,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     description: {
       name: "ask_user",
       description:
-        "向用户提出一个带多个选项的问题，让界面展示按钮供用户选择。",
+        "向用户提出带选项的问题，让界面展示按钮供选择。仅在选项真正互斥且无法从上下文推断用户偏好时使用；已有明确方向或用户已授权你决定时，直接执行并在文本中说明，不要为此调用本工具。",
       category: "交互 / UI",
     },
     behavior: "answer",

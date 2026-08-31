@@ -466,6 +466,7 @@ describe("cli agent run command", () => {
       memoryRecallDisabled: true,
       scriptDir: "/repo/scripts",
       output: { write() {} },
+      resolveAgentRunAgentKey: async () => undefined,
       resolveWorkflowReference: async (ref) => ({
         ref,
         content: "Use this reference when an agent needs reviewable UI changes.",

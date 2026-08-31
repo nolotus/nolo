@@ -13,6 +13,31 @@ describe("single release dispatch contract", () => {
     expect(source).toContain("publishComponents.mts");
   });
 
+  test("binary tarball dispatch does not depend on gh being installed on the runner", () => {
+    const source = readFileSync(".github/workflows/version-bump.yml", "utf8");
+    expect(source).toContain("https://api.github.com/repos/${{ github.repository }}/actions/workflows/cli-binary-publish.yml/dispatches");
+    expect(source).toContain('Authorization: Bearer ${GITHUB_TOKEN}');
+    expect(source).toContain("NEW_CLI_TAG=$(git tag --points-at HEAD");
+    expect(source).not.toContain('gh api -X POST "repos/${{ github.repository }}/actions/workflows/cli-binary-publish.yml/dispatches"');
+  });
+
+  test("dispatch JSON body is built with node from an env var, never spliced from github.ref_name", () => {
+    const source = readFileSync(".github/workflows/version-bump.yml", "utf8");
+    // ref_name 表达式不得直接拼进 --data 字符串：先经 env 透传，再以
+    // node -e 从 process.env 安全注入 JSON body（self-hosted alpha-ci
+    // runner 必有 node/bun，jq 不保证存在）。
+    expect(source).toContain("DISPATCH_REF: ${{ github.ref_name }}");
+    expect(source).toContain("DISPATCH_REF=\"$DISPATCH_REF\" node -e 'process.stdout.write(JSON.stringify({ref:process.env.DISPATCH_REF}))'");
+    expect(source).not.toContain('--data \'{"ref":"${{ github.ref_name }}"}\'');
+    expect(source).not.toContain("jq -n --arg ref");
+    // 用便携的 --fail（不依赖 GitHub-hosted runner 的 curl 版本），
+    // dispatch 失败时以 --write-out 的 http_code 兜住诊断信息。
+    expect(source).toContain("--fail --silent --show-error");
+    expect(source).toContain("--write-out '%{http_code}'");
+    expect(source).not.toContain("--fail-with-body");
+    expect(source).not.toContain("curl ≥ 7.76");
+  });
+
   test("removed private desktop workflow files no longer exist", () => {
     const { existsSync } = require("node:fs");
     expect(existsSync(".github/workflows/desktop-alpha.yml")).toBe(false);
