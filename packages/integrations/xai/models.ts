@@ -7,7 +7,16 @@ export const xaiModels: Model[] = [
     displayName: "Grok 4.6",
     hasVision: true,
     contextWindow: 500000,
-    price: { input: 16, output: 48 },
+    price: { input: 16, output: 48, inputCacheHit: 4 },
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: 200_001,
+          price: { input: 32, output: 96, inputCacheHit: 8 },
+        },
+      ],
+    },
     fnCall: true,
     jsonOutput: true,
   },

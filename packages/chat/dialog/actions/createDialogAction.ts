@@ -16,7 +16,10 @@ import {
 import { createDialogKey } from "database/keys";
 import { format, formatISO } from "date-fns";
 import { prepareAndPersistMessage } from "chat/messages/messageSlice";
-import { buildBuiltinObjectAssistantAgentFromKey } from "../objectAssistantRegistry";
+import {
+  alignBuiltinObjectAssistantRecord,
+  buildBuiltinObjectAssistantAgentFromKey,
+} from "../objectAssistantRegistry";
 
 import type { Agent, DialogConfig } from "app/types";
 import { isDevelopment } from "app/utils/env";
@@ -166,7 +169,19 @@ export const createDialogAction = async (
     ).unwrap().catch(() => null)) as
       | (Agent & { greeting?: string | AgentGreetingConfig })
       | null;
-    if (existing) return existing;
+    if (existing) {
+      const repaired = alignBuiltinObjectAssistantRecord(existing);
+      if (!repaired) return existing;
+
+      await dispatch(
+        write({
+          data: repaired,
+          customKey: existing.dbKey,
+          userId,
+        })
+      ).unwrap();
+      return repaired;
+    }
 
     const recoveredBuiltinAgent = buildBuiltinObjectAssistantAgentFromKey(
       agentKey,

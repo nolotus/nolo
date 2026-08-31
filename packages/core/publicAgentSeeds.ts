@@ -381,6 +381,22 @@ export const CLAUDE_FABLE_5_DEF = defineAgentSeed({
   tags: ["claude", "anthropic"],
 });
 
+export const GROK_4_6_DEF = defineAgentSeed({
+  id: deterministicId("01GROK46PLAZ", "shared-space-xai-grok-4-6"),
+  presetKey: "grok-4.6",
+  name: "Grok 4.6",
+  provider: "xai",
+  model: "grok-4.6",
+  isPublic: true,
+  hasVision: true,
+  introduction: "xAI Grok 4.6 公开助手，适合实时信息分析、复杂推理、代码和多模态任务。",
+  greeting: "你好，我是 Grok 4.6。可以帮你分析问题、编写代码、理解图片并处理复杂任务。",
+  prompt:
+    "你是共享空间里的 Grok 4.6 AI 助手。优先给出直接、准确、可执行的回答；面对复杂问题先梳理目标和约束，再进行可靠推理。对不确定或需要实时信息的内容明确说明依据与时效性。",
+  tools: [],
+  tags: ["xai", "grok"],
+});
+
 export const GEMINI_3_7_FLASH_DEF = defineAgentSeed({
   id: deterministicId("01GEM37FLPB", "shared-space-google-gemini-3-7-flash"),
   presetKey: "gemini-3.7-flash",
@@ -560,6 +576,7 @@ export const PUBLIC_AGENT_DEFS = [
   CLAUDE_SONNET_5_DEF,
   CLAUDE_OPUS_5_DEF,
   CLAUDE_FABLE_5_DEF,
+  GROK_4_6_DEF,
   GEMINI_3_7_FLASH_DEF,
   GPT_IMAGE_2_GENERATOR_DEF,
   GPT_IMAGE_2_EDITOR_DEF,

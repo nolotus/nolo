@@ -212,6 +212,14 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     runtimeFallback: true,
   },
   {
+    id: "01GROK46PLAZ00000001PTJZ3K",
+    group: "public",
+    name: "Grok 4.6",
+    provider: "xai",
+    model: "grok-4.6",
+    runtimeFallback: true,
+  },
+  {
     id: "01GPTIMG2GEN00000000SSEBOS",
     group: "public",
     name: "GPT Image 2 图片生成器",

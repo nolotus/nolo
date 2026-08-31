@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.34.0",
+  "version": "0.47.0-alpha.1",
   "type": "module",
   "scripts": {
     "prepare:web": "cd ../.. && NODE_ENV=production bun ./scripts/dev/esBuild.js",
