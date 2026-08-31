@@ -1,4 +1,13 @@
 
+## 0.49.0-alpha.1
+
+## 0.49.0-alpha.1 (2026-08-31)
+
+### Features
+
+* **plaza:** 平台聊天端点表补 xai，桌面/CLI 本地 runtime 直跑 Grok 4.6 ([e93abe0](https://github.com/nolotus/bun-nolo/commit/e93abe0b8acf55cd508061e111dfe2ba1800996c))
+
+
 ## 0.48.0-alpha.1
 
 ## 0.48.0-alpha.1 (2026-08-31)

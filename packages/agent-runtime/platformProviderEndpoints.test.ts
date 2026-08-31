@@ -14,6 +14,10 @@ describe("platformProviderEndpoints", () => {
     expect(resolvePlatformChatCompletionsEndpoint("openai")).toBe(
       PLATFORM_CHAT_COMPLETIONS_ENDPOINTS.openai,
     );
+    // provider=xai 的 agentConfig 直接解析到 Grok 4.6 的 xAI 官方端点
+    expect(resolvePlatformChatCompletionsEndpoint("xai", "grok-4.6")).toBe(
+      "https://api.x.ai/v1/chat/completions",
+    );
     // 平台 nolo 无默认上游（原 ollama.com 兜底已移除）：无模型 → undefined
     expect(resolvePlatformChatCompletionsEndpoint("nolo")).toBeUndefined();
     // legacy ollama-cloud 记录同样无默认上游

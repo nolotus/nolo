@@ -36,6 +36,8 @@ export const PLATFORM_CHAT_COMPLETIONS_ENDPOINTS: Readonly<
   google:
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   openai: "https://api.openai.com/v1/chat/completions",
+  // xAI 官方 OpenAI 兼容模式（平台托管 Grok）
+  xai: "https://api.x.ai/v1/chat/completions",
   openrouter: "https://openrouter.ai/api/v1/chat/completions",
   // 千问 AI 平台 OpenAI 兼容模式
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
