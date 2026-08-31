@@ -33,6 +33,17 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     expect(versionBumpSource).not.toContain('if [ "\\${GITHUB_REF}" = "refs/heads/main" ]');
   });
 
+  test("gates public desktop build dispatch on desktop version changes", () => {
+    const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
+    const versionBumpSource = source.slice(source.indexOf("const versionBump ="));
+    expect(versionBumpSource).toContain("Decide whether desktop build is needed");
+    expect(versionBumpSource).toContain("packages/desktop/package.json");
+    expect(versionBumpSource).toContain("if: steps.desktop.outputs.build == 'true'");
+    expect(versionBumpSource).toContain('EVENT_NAME: \\${{ github.event_name }}');
+    expect(versionBumpSource).toContain('0000000000000000000000000000000000000000');
+    expect(versionBumpSource).toContain('git rev-parse --verify --quiet "\\$BEFORE_SHA^{commit}"');
+  });
+
   test("adds a post-publish npm install health check to the public CLI workflow", () => {
     const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
     const cliPublishSource = source.slice(source.indexOf("const cliPublish ="));

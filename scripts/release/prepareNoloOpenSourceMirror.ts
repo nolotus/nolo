@@ -1709,7 +1709,36 @@ jobs:
           CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
           gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
 
+      - name: Decide whether desktop build is needed
+        id: desktop
+        env:
+          BEFORE_SHA: \${{ github.event.before }}
+          AFTER_SHA: \${{ github.sha }}
+          EVENT_NAME: \${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # workflow_dispatch 没有 before；手动触发时保持可发布 desktop。
+          if [ "\$EVENT_NAME" != "push" ] || [ -z "\$BEFORE_SHA" ]; then
+            echo "build=true" >> "\$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # branch 创建时 GitHub 会把 before 置为 40 个 0；它不是可 diff 的 commit。
+          # 无法确认 before 时保守放行 desktop build，避免守卫本身把发布打红。
+          if [ "\$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || ! git rev-parse --verify --quiet "\$BEFORE_SHA^{commit}" >/dev/null; then
+            echo "build=true" >> "\$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 公开仓的版本号由 bun-nolo release engine 单源决定；desktop 版本没变
+          # 说明这次投影不需要产出 desktop 安装包，避免 CLI-only sync 触发整套
+          # macOS/Windows desktop build（以及无关的 stable 版本守卫红噪音）。
+          if git diff --name-only "\$BEFORE_SHA" "\$AFTER_SHA" -- packages/desktop/package.json | grep -q .; then
+            echo "build=true" >> "\$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "\$GITHUB_OUTPUT"
+          fi
+
       - name: Dispatch desktop build
+        if: steps.desktop.outputs.build == 'true'
         env:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
         run: |
