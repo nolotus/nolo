@@ -48,6 +48,7 @@ test_cli_package() {
     packages/cli/publishPackage.source.test.ts \
     packages/cli/buildPublish.source.test.ts \
     packages/cli/buildPublish.runtime.test.ts \
+    packages/cli/buildPublishDependencies.test.ts \
     packages/cli/client/agentRun.test.ts \
     packages/cli/agentRunCommand.test.ts \
     packages/cli/client/localRuntimeAdapter.test.ts \

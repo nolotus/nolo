@@ -47,4 +47,10 @@ describe("runCliPublishCi source contract", () => {
     const declared = /NOLO_CLI_VERSION = "([^"]+)"/.exec(downloads)?.[1];
     expect(declared).toBe(cliPkg.version);
   });
+
+  it("blocks bundled pino from re-entering the published runtime", () => {
+    // 2026-08-31 Windows/Node 26 事故：npm alpha 包把 pino 打进 ESM chunk，
+    // `nolo` 启动即 Dynamic require of "node:os"。发布前必须跑这份回归。
+    expect(publishScript).toContain("packages/cli/buildPublishDependencies.test.ts");
+  });
 });

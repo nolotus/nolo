@@ -33,6 +33,17 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     expect(versionBumpSource).not.toContain('if [ "\\${GITHUB_REF}" = "refs/heads/main" ]');
   });
 
+  test("adds a post-publish npm install health check to the public CLI workflow", () => {
+    const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
+    const cliPublishSource = source.slice(source.indexOf("const cliPublish ="));
+    expect(cliPublishSource).toContain("npm-install-health:");
+    expect(cliPublishSource).toContain("windows-latest");
+    expect(cliPublishSource).toContain("node: 26");
+    expect(cliPublishSource).toContain('npm install -g "nolo-cli@');
+    expect(cliPublishSource).toContain("nolo --version");
+    expect(cliPublishSource).toContain("nolo doctor");
+  });
+
   test("keeps the manifest-less desktop Chrome connector in the package closure", async () => {
     expect(await computePackageClosure(REPO_ROOT)).toContain("desktop-chrome-connector");
   });

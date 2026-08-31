@@ -37,3 +37,29 @@ jobs:
           NOLO_CLI_PUBLISH_DIST_TAG: ${{ inputs.dist_tag }}
           NOLO_CLI_PUBLISH_NPM_PREFIX: ${{ runner.temp }}/nolo-cli-prefix
         run: bash ./scripts/ci/runCliPublishCi.sh
+
+  npm-install-health:
+    name: npm install health (${{ matrix.os }} / Node ${{ matrix.node }})
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 24
+          - os: windows-latest
+            node: 26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install published nolo-cli from npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          npm install -g "nolo-cli@${VERSION}"
+          nolo --version
+          nolo doctor
