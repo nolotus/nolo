@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-  alignBuiltinObjectAssistantRecord,
   buildBuiltinObjectAssistantAgentFromKey,
   buildObjectAssistantSidebarId,
   buildBuiltinObjectAssistantAgent,
@@ -18,34 +17,6 @@ describe("objectAssistantRegistry", () => {
     expect(getPreferredObjectAssistantKey("table", "user-1")[0]).toContain(
       "agent-user-1-builtin-table-assistant-v1",
     );
-  });
-
-  it("repairs legacy builtin object assistant prices while preserving the record", () => {
-    const agent = buildBuiltinObjectAssistantAgent("page", "user-1");
-    const legacy = { ...agent, inputPrice: 3.6, outputPrice: 10.8 };
-    const repaired = alignBuiltinObjectAssistantRecord(legacy);
-
-    expect(repaired).toEqual({ ...legacy, inputPrice: 0, outputPrice: 0 });
-  });
-
-  it("does not repair builtin records whose model was changed by the user", () => {
-    const agent = buildBuiltinObjectAssistantAgent("page", "user-1");
-    expect(
-      alignBuiltinObjectAssistantRecord({ ...agent, model: "user-selected-model", inputPrice: 3.6 })
-    ).toBeNull();
-  });
-
-  it("does not repair already aligned builtin records", () => {
-    expect(
-      alignBuiltinObjectAssistantRecord(buildBuiltinObjectAssistantAgent("page", "user-1"))
-    ).toBeNull();
-  });
-
-  it("does not repair non-builtin agents", () => {
-    const agent = buildBuiltinObjectAssistantAgent("page", "user-1");
-    expect(
-      alignBuiltinObjectAssistantRecord({ ...agent, id: "custom-agent", inputPrice: 3.6 })
-    ).toBeNull();
   });
 
   it("builds builtin page assistant agent with guided greeting and skill reference", () => {

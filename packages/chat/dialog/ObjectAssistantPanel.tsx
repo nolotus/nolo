@@ -21,7 +21,6 @@ import * as stylex from "@stylexjs/stylex";
 import { dialogPageStyles } from "./dialogPageStyles";
 import "./dialogStylexEscapeHatch.css";
 import {
-  alignBuiltinObjectAssistantRecord,
   buildBuiltinObjectAssistantAgent,
   buildObjectAssistantRuntimeOptions,
   getObjectAssistantUiConfig,
@@ -123,11 +122,6 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
         const existing = await dispatch(readAndWait(agent.dbKey)).unwrap().catch(() => null);
         if (!existing) {
           await dispatch(write({ data: agent, customKey: agent.dbKey })).unwrap();
-        } else {
-          const repaired = alignBuiltinObjectAssistantRecord(existing);
-          if (repaired) {
-            await dispatch(write({ data: repaired, customKey: agent.dbKey })).unwrap();
-          }
         }
         if (!cancelled) {
           setPreferredAgentKeys([agent.dbKey]);

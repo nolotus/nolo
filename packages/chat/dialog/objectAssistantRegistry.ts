@@ -194,24 +194,6 @@ export const buildBuiltinObjectAssistantAgent = (
   }
 };
 
-/**
- * 自愈 D1/D4 价格政策：修复旧的内置对象助手价格快照。
- * provider/model 双守卫保证用户改过模型的记录不会被误清。
- */
-export const alignBuiltinObjectAssistantRecord = (record: Agent): Agent | null => {
-  const isBuiltinObjectAssistant = Object.values(BUILTIN_OBJECT_ASSISTANT_IDS).includes(record.id);
-  if (
-    !isBuiltinObjectAssistant ||
-    record.provider !== PLATFORM_HOSTED_KIMI_PROVIDER ||
-    record.model !== PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
-    (record.inputPrice === 0 && record.outputPrice === 0)
-  ) {
-    return null;
-  }
-
-  return { ...record, inputPrice: 0, outputPrice: 0 };
-};
-
 export const buildBuiltinObjectAssistantAgentFromKey = (
   agentKey?: string | null,
   userId?: string | null,
