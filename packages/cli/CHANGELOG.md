@@ -1168,3 +1168,5 @@
 ## [0.3.0](https://github.com/nolotus/bun-nolo/compare/cli-v0.2.0...cli-v0.3.0) (2026-07-29)
 
 ## [0.2.0](https://github.com/nolotus/bun-nolo/compare/cli-v0.1.58...cli-v0.2.0) (2026-07-29)
+
+> 补发说明：本版本 npm publish 由 bump 链路完成，但二进制 tarball 因 bump bot commit（GITHUB_TOKEN push）不触发 cli-binary-publish workflow 而缺失，随本提交重新构建上传。
