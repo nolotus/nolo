@@ -1,4 +1,13 @@
 
+## 0.47.0-alpha.5
+
+## 0.47.0-alpha.5 (2026-08-31)
+
+### Bug Fixes
+
+* **agents:** 平台公共 agent 记录价格清零，让位目录价（D1/D4 对齐） ([0789e07](https://github.com/nolotus/bun-nolo/commit/0789e070c93b7679e5d3fb9ad8e5f5942ab6ae87))
+
+
 ## 0.47.0-alpha.4
 
 ## 0.47.0-alpha.4 (2026-08-31)

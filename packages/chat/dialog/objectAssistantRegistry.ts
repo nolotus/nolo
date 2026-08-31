@@ -5,10 +5,7 @@ import { createAgentKey } from "database/keys";
 import { APP_BUILDER_PUBLIC_AGENT_KEY } from "app/constants/appEditor";
 import { buildBuiltinObjectSkillReference, type BuiltinObjectSkillKind } from "ai/skills/builtinObjectSkills";
 
-import {
-  PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
-  PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE,
-} from "ai/llm/platformHosted";
+import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "ai/llm/platformHosted";
 import { PLATFORM_HOSTED_KIMI_PROVIDER } from "ai/llm/kimi";
 
 export type ObjectAssistantKind = "page" | "table" | "app" | "image" | "file";
@@ -128,8 +125,8 @@ export const buildBuiltinObjectAssistantAgent = (
     model: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
     apiSource: "platform" as const,
     useServerProxy: true,
-    inputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.input,
-    outputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.output,
+    inputPrice: 0,
+    outputPrice: 0,
     createdAt: now,
     updatedAt: String(now),
     dialogCount: 0,

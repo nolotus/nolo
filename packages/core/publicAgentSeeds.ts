@@ -9,12 +9,8 @@
 
 import { getModelPricing } from "../ai/llm/getPricing";
 import { getModelConfig } from "../ai/llm/providers";
-import {
-  PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE,
-  PLATFORM_HOSTED_GLM_PRICE,
-  PLATFORM_HOSTED_GLM_53_FLASH_PRICE,
-  isPlatformHostedImageModel,
-} from "../ai/llm/platformHosted";
+import { isPlatformHostedImageModel } from "../ai/llm/platformHosted";
+import { isNoloHostedProvider } from "../ai/llm/kimi";
 import {
   PUBLIC_DEEPSEEK_V4_FLASH_AGENT_ID,
   PUBLIC_DEEPSEEK_V4_PRO_AGENT_ID,
@@ -160,13 +156,14 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
   const allowFork = input.allowFork ?? AGENT_SEED_DEFAULTS.allowFork;
   const tags: string[] = input.tags ? [...input.tags] : [];
 
-  let inputPrice = input.inputPrice;
-  let outputPrice = input.outputPrice;
+  const isPlatformHosted = isNoloHostedProvider(input.provider);
+  let inputPrice = isPlatformHosted ? 0 : input.inputPrice;
+  let outputPrice = isPlatformHosted ? 0 : input.outputPrice;
   let hasVision = input.hasVision;
   const pricesProvided =
     input.inputPrice !== undefined || input.outputPrice !== undefined;
 
-  if (inputPrice === undefined || outputPrice === undefined) {
+  if (!isPlatformHosted && (inputPrice === undefined || outputPrice === undefined)) {
     const pricing = getModelPricing(providerForLookup, input.model);
     if (!pricing) {
       throw new Error(`未找到模型价格元数据: ${providerForLookup}/${input.model}`);
@@ -195,13 +192,6 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
     hasVision,
   } as T & AgentSeedConfig;
 }
-
-// ── 导出价格常量供外部使用 ──
-export {
-  PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE,
-  PLATFORM_HOSTED_GLM_PRICE,
-  PLATFORM_HOSTED_GLM_53_FLASH_PRICE,
-};
 
 // ── 导出公共 Agent ID 常量 ──
 export {
@@ -285,8 +275,6 @@ export const DEEPSEEK_V4_FLASH_DEF = defineAgentSeed({
   provider: "nolo",
   model: "deepseek-v4-flash-vision-exp",
   isPublic: true,
-  inputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.input,
-  outputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.output,
   introduction:
     "DeepSeek V4 Flash 公开助手（平台托管 Ollama，官方 DeepSeek 兜底），适合高性价比通用问答、代码与长上下文任务。",
   greeting: "你好，我是 DeepSeek V4 Flash。适合快速处理通用问题、代码和长上下文任务。",
@@ -319,8 +307,6 @@ export const GLM_5_3_DEF = defineAgentSeed({
   model: "glm-5.3",
   isPublic: true,
   hasVision: true,
-  inputPrice: PLATFORM_HOSTED_GLM_PRICE.input,
-  outputPrice: PLATFORM_HOSTED_GLM_PRICE.output,
   introduction: "GLM 5.3 公开助手（平台托管），适合复杂推理、长上下文、中文理解与代码分析。",
   greeting: "你好，我是 GLM 5.3。适合处理复杂分析、高质量中文问答与代码推理任务。",
   prompt:
@@ -337,8 +323,6 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   model: "glm-5-3-flash",
   isPublic: true,
   hasVision: true,
-  inputPrice: PLATFORM_HOSTED_GLM_53_FLASH_PRICE.input,
-  outputPrice: PLATFORM_HOSTED_GLM_53_FLASH_PRICE.output,
   introduction: "GLM 5.3 Flash 公开助手（平台托管 RunInfra），廉价快档，适合高频轻量问答与批量任务。注意：该模型强制深度思考、无法关闭，思考过程 token 会计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复。",
   greeting: "你好，我是 GLM 5.3 Flash。轻量快速、价格低，适合日常问答与批量轻量任务。",
   prompt: "你是共享空间里的轻量快速 AI 助手。直接、简洁地完成任务。",

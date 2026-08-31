@@ -98,6 +98,28 @@ export const isPlatformKimiProviderModel = (
   return false;
 };
 
+/**
+ * Platform-managed provider family predicate.
+ *
+ * True for catalog provider `nolo`, legacy `ollama-cloud`, platform `deepseek`,
+ * or any legacy provider/model matching `isPlatformKimiProviderModel`.
+ *
+ * Single shared source of truth across:
+ * - packages/server/handlers/agentRun/loopUpstream.ts
+ * - packages/server/handlers/chatProxyRouting.ts
+ */
+export const isPlatformManagedProvider = (
+  provider?: string | null,
+  model?: string | null
+): boolean => {
+  const normalized = asTrimmedLowercaseString(provider);
+  return (
+    isNoloHostedProvider(normalized) ||
+    normalized === "deepseek" ||
+    isPlatformKimiProviderModel(normalized, model)
+  );
+};
+
 export const resolveFireworksKimiModel = (model?: string | null): string => {
   if (model === FIREWORKS_KIMI_LATEST_MODEL) {
     return FIREWORKS_KIMI_CURRENT_MODEL;

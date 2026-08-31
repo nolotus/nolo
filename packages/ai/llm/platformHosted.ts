@@ -4,6 +4,7 @@
 
 export * from "./platformHostedRoutingTable";
 export * from "./platformHostedClientVersionGate";
+export { isPlatformManagedProvider } from "./kimi";
 
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import type { Model } from "./types";

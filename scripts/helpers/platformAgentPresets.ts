@@ -5,8 +5,6 @@ import {
   BUILTIN_NOLO_AGENT_ID,
   SYSTEM_USER_ID,
 } from "../../packages/core/builtinAgents";
-import { PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE } from "../../packages/ai/llm/platformHosted";
-import { PLATFORM_HOSTED_KIMI_PRICE } from "../../packages/ai/llm/platformHosted";
 import { PLATFORM_HOSTED_KIMI_PROVIDER } from "../../packages/ai/llm/kimi";
 import type { AgentSeedConfig } from "../createSpaceAgents";
 import { defineAgentSeed } from "./agentSeedBuilder";
@@ -91,8 +89,6 @@ export const PLATFORM_DEMO_AGENTS: AgentSeedConfig[] = [
     ],
     provider: PLATFORM_HOSTED_KIMI_PROVIDER,
     model: "kimi-k2.6",
-    inputPrice: PLATFORM_HOSTED_KIMI_PRICE.input,
-    outputPrice: PLATFORM_HOSTED_KIMI_PRICE.output,
     isPublic: true,
     tags: ["nolo", "引导", "分发"],
   }),
@@ -173,8 +169,6 @@ export const APP_BUILDER_AGENT_CONFIG: AgentSeedConfig = defineAgentSeed({
   prompt: APP_BUILDER_CORE_PROMPT,
   provider: "nolo",
   model: "deepseek-v4-flash",
-  inputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.input,
-  outputPrice: PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE.output,
   isPublic: true,
   tags: ["应用构建", "网站", "无代码", "nolo-react"],
   tools: [],

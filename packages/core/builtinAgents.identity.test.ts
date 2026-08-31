@@ -189,6 +189,17 @@ describe("builtinAgentCatalog ↔ PUBLIC_AGENT_DEFS cross-assertions", () => {
   });
 });
 
+describe("platform hosted seed pricing policy", () => {
+  it("defers all nolo and legacy ollama-cloud public seed prices to catalog pricing", () => {
+    for (const seed of PUBLIC_AGENT_DEFS) {
+      if (seed.provider === "nolo" || seed.provider === "ollama-cloud") {
+        expect(seed.inputPrice).toBe(0);
+        expect(seed.outputPrice).toBe(0);
+      }
+    }
+  });
+});
+
 describe("platform hosted image agent seed pricing resolution", () => {
   it("resolves google image model price from nolo catalog without throwing", () => {
     expect(NANO_BANANA_2_LITE_GENERATOR_DEF.id).toBe(
