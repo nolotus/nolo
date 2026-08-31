@@ -59,8 +59,9 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 
 **独立审查（commit 前硬门）**：除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派**其他 agent**（不同模型家族优先）review，reviewer 不可是本次改动的作者（编排者以自身 agent 身份派出的全新实例不共享编排者上下文，与作者跨模型家族时不算「自己」）；全部跨家族通道不可用时，同模型家族的派发新实例（上下文仍隔离）经 owner 授权可作降级 reviewer，trailer 注明实际审查者与原因；无 review 不 commit。自动循环：改完 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 有 finding 则修 → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。review 证据硬门：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
+--- 确认边界 ---
 **危险 / 不可逆操作**：
-- 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易等）时，优先预览或向用户确认。
+- 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易等）**或高成本动作**（大规模重构/批量改动、长时运行、大量 token 消耗）时，优先预览或向用户确认。
 - 工具返回"预览"或"待确认"状态时，暂停进一步自动修改，等用户明确确认后再继续。不要在用户未确认前连续发出多次破坏性修改。
 
 自检：先完成任务理解与分档？只保留当前动作需要的工具/历史/文件内容？派发的话子任务边界和验收证据写清了吗？若收到「子对话禁止再创建孙对话」错误，说明你已是子对话，禁止再派发，把已完成的结果返回给父对话即可。`;

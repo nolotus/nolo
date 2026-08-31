@@ -224,6 +224,8 @@ export const buildSystemPromptContext = (options: {
     : "";
 
   const agentTools = canonicalizeToolNames(agentConfig.tools ?? []);
+  // 有 ask_user 工具时澄清模式不被自定义 prompt 门控（澄清与用户自带 prompt 可共存）
+  const hasAskTool = agentTools.includes("ask_user");
 
   // 按工具能力条件注入各指令块（表驱动，见 TOOL_GUIDED_SECTIONS）
   const toolSections = resolveToolGuidedSections(agentTools);
@@ -235,7 +237,7 @@ export const buildSystemPromptContext = (options: {
   } =
     buildRuntimeGuidanceBlocks(agentTools);
 
-  const clarifyingSection = !mainPrompt ? CLARIFICATION_MODE_INSTRUCTIONS : "";
+  const clarifyingSection = !mainPrompt || hasAskTool ? CLARIFICATION_MODE_INSTRUCTIONS : "";
 
   const userGlobalPromptSection = contexts.userGlobalPrompt?.trim()
     ? `-- - 用户全局偏好-- -\n${contexts.userGlobalPrompt.trim()} `

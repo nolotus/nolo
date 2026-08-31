@@ -898,4 +898,56 @@ describe("buildSystemPrompt", () => {
     expect(optionsOverride).toContain("--- 响应展示指南（宽屏 / 桌面端） ---");
     expect(optionsOverride).not.toContain("--- 响应展示指南（窄屏 / TUI / 移动端） ---");
   });
+
+  it("unlocks clarification mode when ask_user is available even with a custom prompt", async () => {
+    const { buildSystemPrompt } = await loadPromptBuilders();
+
+    // 无自定义 prompt → 澄清模式注入（既有基线）
+    const noMainPrompt = buildSystemPrompt({
+      agentConfig: {
+        userId: "user-1",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        useServerProxy: true,
+        isPublic: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        tools: [],
+      } as any,
+    });
+    expect(noMainPrompt).toContain("通过提问来澄清需求，而不是仓促给出答案");
+
+    // 有自定义 prompt 但无 ask_user → 澄清模式被自定义 prompt 门控（维持旧行为）
+    const mainPromptNoAsk = buildSystemPrompt({
+      agentConfig: {
+        userId: "user-1",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        useServerProxy: true,
+        isPublic: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        prompt: "你是测试助手。",
+        tools: [],
+      } as any,
+    });
+    expect(mainPromptNoAsk).not.toContain("通过提问来澄清需求，而不是仓促给出答案");
+
+    // 有自定义 prompt 且有 ask_user → 澄清模式不再被门控（hasAskTool=true 路径）
+    const mainPromptWithAsk = buildSystemPrompt({
+      agentConfig: {
+        userId: "user-1",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        useServerProxy: true,
+        isPublic: false,
+        updatedAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        prompt: "你是测试助手。",
+        tools: ["ask_user"],
+      } as any,
+    });
+    expect(mainPromptWithAsk).toContain("通过提问来澄清需求，而不是仓促给出答案");
+    expect(mainPromptWithAsk).toContain("你是测试助手。");
+  });
 });

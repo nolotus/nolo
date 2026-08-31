@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
+import { spawnCapturedSync } from "../test/spawnCapturedSync";
 
 /**
  * T4：chat-proxy 的部署接线（独立 PM2 app + Caddy 分流）。
@@ -17,6 +18,20 @@ import { describe, expect, it } from "bun:test";
  *    回滚一次健康的 core 发布。
  * 4. 默认必须关闭：chat-proxy 角色下 chatHandler 仍直接 import serverDb，
  *    T2（call plan 内部端点）没上线前提前切流会让 /api/v1/chat 直接报错。
+ *
+ * ## 环境前提（必须满足，否则会误报失败）
+ *
+ * **不要用裸 `Bun.spawnSync` / `spawnSync` 读本文件下方行为测试的子进程输出。** `bun test`
+ * 以仓库根为 cwd 做测试文件发现走查后，进程常驻上万 fd；一旦父进程持有的 fd 编号越过
+ * 约 10240，裸 piped spawn 的子进程会「照样执行、但对 stdout/stderr 的每次写都失败」，
+ * 于是 harness 里任何以写成败决定退出码的命令都变成无声 exit 1：stdout 空、stderr 空、
+ * 连 `bash -x` 的 xtrace 也是零输出。它在瘦 worktree（如本分支）里天然是绿的，在完整
+ * 主 checkout 里必挂 —— 与脚本逻辑无关，纯环境级故障，且症状会随 `ios/`、`node_modules/`
+ * 体积漂移。所有读输出的 spawn 必须走 `../test/spawnCapturedSync`（见该模块头部说明）。
+ * 只断言退出码的裸 spawn 是安全的（退出码不受影响）。
+ *
+ * 回归保护在 `scripts/test/spawnCapturedSync.source.test.ts`：它人为把 fd 压过阈值，
+ * 因此即便在瘦 worktree 里也能复现并拦住这种退化。
  */
 
 const releaseDir = import.meta.dir;
@@ -252,8 +267,10 @@ function runScenario(
   env: Record<string, string> = {}
 ): { code: number; stdout: string; stderr: string; pm2Calls: string[]; pm2Log: string } {
   writeFileSync(pm2Log, "");
-  const result = Bun.spawnSync({
-    cmd: ["bash", join(fixturesDir, "deployRemoteChatProxyHarness.sh")],
+  // 用 spawnCapturedSync 而不是裸 Bun.spawnSync：主 checkout 里 `bun test` 常驻
+  // ~14000 个 fd，会把 piped spawn 的子进程 stdio 顶到高位而变成「bash 无声 exit 1」
+  // （详见 scripts/test/spawnCapturedSync.ts 的说明）。这里只拿退出码 + 输出做断言。
+  const result = spawnCapturedSync(["bash", join(fixturesDir, "deployRemoteChatProxyHarness.sh")], {
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
       HOME: workRoot,
@@ -273,14 +290,12 @@ function runScenario(
       FAKE_PM2_JLIST: jlistEmpty,
       ...env,
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   const log = readFileSync(pm2Log, "utf8");
   return {
-    code: result.exitCode ?? -1,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
+    code: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
     pm2Log: log,
     pm2Calls: log
       .split("\n")

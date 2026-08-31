@@ -1,4 +1,18 @@
 
+## 0.53.0-alpha.1
+
+## 0.53.0-alpha.1 (2026-08-31)
+
+### Features
+
+* **prompt:** 询问/执行平衡再平衡——日常小事不打扰，规模化开工先确认 ([e5ebac2](https://github.com/nolotus/bun-nolo/commit/e5ebac2f32adf9d2fd712362d468230988578a70))
+
+### Bug Fixes
+
+* **cli:** 补齐 runDock normal 模式安全投影缺失的 sanitizeRunSnapshotForNormal ([19448fa](https://github.com/nolotus/bun-nolo/commit/19448fa7c93205ec6db4e61d7156fca0257a5e49))
+* **deploy:** revert the stray origin-sync reapply (restores v0.51.0-alpha.1 release files) ([d72604e](https://github.com/nolotus/bun-nolo/commit/d72604e4a8e28b3a38e54389920046aab2e246a4))
+
+
 ## 0.52.0-alpha.1
 
 ## 0.52.0-alpha.1 (2026-08-31)

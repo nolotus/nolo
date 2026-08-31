@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-
+import { spawnCapturedSync } from "../test/spawnCapturedSync";
 const source = readFileSync(join(import.meta.dir, "deployRemote.sh"), "utf-8");
 const verifyRenderedWebAssetsSource = readFileSync(
   join(import.meta.dir, "..", "verify", "verifyRenderedWebAssets.sh"),
@@ -521,13 +521,13 @@ describe("deployRemote source contract", () => {
     const epochMillisFunction = source.match(/epoch_millis\(\) \{[\s\S]*?\n\}/)?.[0];
     expect(epochMillisFunction).toBeDefined();
 
-    const sample = Bun.spawnSync([
+    const sample = spawnCapturedSync([
       "bash",
       "-c",
       `${epochMillisFunction}\nfirst="$(epoch_millis)"\nsleep 0.02\nsecond="$(epoch_millis)"\nprintf '%s %s\\n' "$first" "$second"`,
     ]);
     expect(sample.exitCode).toBe(0);
-    const [first, second] = sample.stdout.toString().trim().split(" ").map(Number);
+    const [first, second] = sample.stdout.trim().split(" ").map(Number);
     expect(first).toBeGreaterThan(1_000_000_000_000);
     expect(second - first).toBeGreaterThanOrEqual(10);
     expect(second - first).toBeLessThan(1_000);
