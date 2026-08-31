@@ -10,7 +10,6 @@
 
 import { BUILTIN_TITLE_LLM_CONFIG } from "../chat/dialog/actions/builtinDialogLlm";
 import { normalizeDialogTitle } from "../chat/dialog/dialogTitle";
-import { PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL } from "ai/llm/platformHostedRoutingTable";
 import type { AgentRuntimeChatMessage } from "./types";
 
 type EnvLike = Record<string, string | undefined>;
@@ -130,21 +129,13 @@ export async function generateLocalDialogTitle(
         } else if (typeof request.init?.body === "object" && request.init?.body !== null) {
           parsedBody = request.init.body;
         }
-        const patchedBody = isNemotronTitleModel()
-          ? {
-              ...parsedBody,
-              // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝；
-              // json mode 下模型跳过 thinking（实测 completion 16-18 tokens）。
-              // 防御：显式置空，防未来 BUILTIN 配置或 requestOptions 残留该字段。
-              response_format: { type: "json_object" },
-              max_tokens: 512,
-              reasoning_effort: undefined,
-            }
-          : {
-              ...parsedBody,
-              reasoning_effort: "low",
-              max_tokens: 3072,
-            };
+        const patchedBody = {
+          ...parsedBody,
+          // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，
+          // 标题路径统一走 json mode（跳过 thinking，实测 completion 个位数 tokens）。
+          response_format: { type: "json_object" },
+          max_tokens: 512,
+        };
 
         const res = await input.fetchImpl(request.url, {
           ...request.init,
@@ -237,11 +228,10 @@ export async function generateLocalDialogTitle(
               { role: "system", content: buildTitleSystemPrompt(input.existingTitle) },
               { role: "user", content: compactTranscript },
             ],
-            // Nemotron json mode（跳过 thinking）与其余路径的 reasoning_effort 优化互斥；
-            // 严格 OpenAI 兼容服务端若拒绝未知参数会降级到 fallback。
-            ...(isNemotronTitleModel()
-              ? { response_format: { type: "json_object" }, max_tokens: 512 }
-              : { reasoning_effort: "low", max_tokens: 3072 }),
+            // 标题路径统一 json mode（跳过 thinking）；response_format 与
+            // reasoning_effort 同发会被 RunInfra 400 拒绝，故不发 reasoning_effort。
+            response_format: { type: "json_object" },
+            max_tokens: 512,
             stream: false,
           }),
           signal: AbortSignal.timeout(timeoutMs),
@@ -279,24 +269,19 @@ function transcriptLength(messages: Array<{ role: string; content: string }>): n
 
 function buildTitleSystemPrompt(existingTitle?: string): string {
   const title = existingTitle?.trim();
-  // Nemotron（RunInfra 上游）：json mode 下模型会跳过 thinking 直接出答案
-  // （实测 completion 16-18 tokens vs 纯文本路径 1000-3000 tokens），且
-  // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，二者互斥。
-  const jsonFormatInstruction = isNemotronTitleModel()
-    ? '\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。'
-    : "";
-  const base = `${BUILTIN_TITLE_LLM_CONFIG.prompt}${jsonFormatInstruction}`;
+  // 标题路径统一 json mode：模型把答案约束进 {"title": "..."} 并跳过 thinking
+  // （Nemotron 实测 completion 16-18 tokens vs 纯文本 1000-3000；glm 同样有效且
+  // 输出更贴题）。response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，
+  // 故标题请求不发 reasoning_effort。
+  const base = `${BUILTIN_TITLE_LLM_CONFIG.prompt}\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。`;
   return title
     ? `${base}\n当前标题：${title}。如果对话仍在讨论同一主题，必须原样输出当前标题，不要改写；只有当对话明确转向了不同主题时才生成新标题。`
     : base;
 }
 
-const isNemotronTitleModel = (): boolean =>
-  BUILTIN_TITLE_LLM_CONFIG.model === PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL;
-
-/** Nemotron json mode 把答案约束进 {"title": "..."}；其余路径维持纯文本。 */
+/** 标题 json mode 把答案约束进 {"title": "..."}；上游忽略 response_format 时回落纯文本。 */
 function extractTitleFromLlmContent(raw: string): string {
-  if (isNemotronTitleModel() && raw.trim().startsWith("{")) {
+  if (raw.trim().startsWith("{")) {
     try {
       const parsed = JSON.parse(raw);
       if (typeof parsed?.title === "string" && parsed.title.trim()) {
@@ -306,7 +291,6 @@ function extractTitleFromLlmContent(raw: string): string {
       // 不能把 {"title": ""} 整个 JSON 外壳当成标题文本。
       return "";
     } catch {
-      // 上游忽略 response_format 输出纯文本：回落纯文本处理。
       return raw;
     }
   }

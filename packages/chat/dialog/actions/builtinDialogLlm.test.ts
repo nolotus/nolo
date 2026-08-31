@@ -9,7 +9,7 @@ import {
 describe("builtin dialog llm config", () => {
   it("pins title generation to the builtin GLM 5.3 Flash model", () => {
     expect(BUILTIN_TITLE_LLM_CONFIG.provider).toBe("nolo");
-    expect(BUILTIN_TITLE_LLM_CONFIG.model).toBe("nemotron-3-5-lightning-30b");
+    expect(BUILTIN_TITLE_LLM_CONFIG.model).toBe("glm-5-3-flash");
     expect(BUILTIN_TITLE_LLM_CONFIG.apiSource).toBe("platform");
     expect(BUILTIN_TITLE_LLM_CONFIG.useServerProxy).toBe(true);
     expect(BUILTIN_TITLE_LLM_CONFIG.prompt).toContain("title generator");

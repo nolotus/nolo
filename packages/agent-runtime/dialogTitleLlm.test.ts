@@ -96,7 +96,7 @@ describe("generateLocalDialogTitle", () => {
     expect(parsedBody.max_tokens).toBe(512);
   });
 
-  test("nemotron json mode unwraps {\"title\": ...} payloads before normalization", async () => {
+  test("title json mode unwraps {\"title\": ...} payloads before normalization", async () => {
     const result = await generateLocalDialogTitle({
       messages: [{ role: "user", content: "帮我规划上海三日美食旅行" }],
       env: { AUTH_TOKEN: "fake" },
@@ -111,7 +111,7 @@ describe("generateLocalDialogTitle", () => {
     expect(result).toEqual({ title: "上海三日美食旅行", source: "llm" });
   });
 
-  test("nemotron json payload with empty title degrades to fallback instead of leaking the JSON shell", async () => {
+  test("title json payload with empty title degrades to fallback instead of leaking the JSON shell", async () => {
     const result = await generateLocalDialogTitle({
       messages: [{ role: "user", content: "hi" }],
       env: { AUTH_TOKEN: "fake" },
@@ -514,7 +514,7 @@ describe("generateLocalDialogTitle", () => {
     // F5: the request body model comes from the resolved provider config
     // (BUILTIN glm-5-3-flash via the patched custom config), not a
     // hardcoded constant unrelated to resolution.
-    expect(capturedBody.model).toBe("nemotron-3-5-lightning-30b");
+    expect(capturedBody.model).toBe("glm-5-3-flash");
     // HIGH-1(c): the env OPENAI_API_KEY must propagate through the custom
     // branch as a Bearer Authorization header — without it a real OpenAI
     // endpoint would 401. Previously the synthesized directAgentConfig carried

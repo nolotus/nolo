@@ -22,7 +22,7 @@ describe("dialog derived data source contract", () => {
     expect(source).toContain("BUILTIN_SUMMARY_LLM_CONFIG");
     expect(source).not.toContain("summaryAgentDbKey");
     expect(source).toContain("patch({");
-    expect(builtinSource).toContain('model: "nemotron-3-5-lightning-30b"');
+    expect(builtinSource).toContain('model: "glm-5-3-flash"');
   });
 
   it("persists token records through dbSlice.write and patches dialog aggregates", () => {
