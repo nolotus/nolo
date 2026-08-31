@@ -58,6 +58,7 @@ import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   themeColorSequence,
   themeText,
+  getActiveDensity,
   resolveTuiThemeMode,
   setActiveThemeMode,
   resetWorkspaceThemeState,
@@ -81,9 +82,9 @@ import {
   ensureChatQueueBinding,
   isInteractiveInput,
   preemptAndAbortForDrain,
-  resolveActionGate,
   runOneAgentTurn,
   waitForActionGate,
+  waitForRawActionGate,
   type AgentTurnContext,
   type SelfUpdater,
   type WorkspaceOptions,
@@ -1109,20 +1110,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const actionGateHandler = async (gate: LocalAgentActionGate) => {
         modalOwnsKeyboard = true;
         try {
-          // `confirm` gates route through dialogHost + a framed dialog;
-          // `handoff` gates keep the raw text-prompt wait, now pausing the
-          // composer for its full wait window instead of only around the
-          // subprocess. See resolveActionGate's docstring in tuiTurnRunner.ts
-          // for why (activity-indicator repaint erasure).
-          return await resolveActionGate(gate, {
-            dialogHost,
-            input,
-            output,
-            spawnRunner,
+          return await waitForRawActionGate(input, output, gate, spawnRunner, {
+            beforeSubprocess: () => fixedInput.pause(),
+            afterSubprocess: () => fixedInput.resumeFromSubprocess(),
             registerToken: (handler) => { rawActionGateTokenHandler = handler; },
-            pauseComposer: () => fixedInput.pause(),
-            resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
-            resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
           });
         } finally {
           releaseKeyboardToComposer();
@@ -1733,6 +1724,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/ctx" ||
             busySlashCommand === "/switch" ||
             busySlashCommand === "/theme" ||
+            busySlashCommand === "/density" ||
             busySlashCommand === "/runtime" ||
             busySlashCommand === "/tools" ||
             busySlashCommand === "/thinking" ||
