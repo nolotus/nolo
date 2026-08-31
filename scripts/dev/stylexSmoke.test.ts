@@ -179,6 +179,32 @@ describe("stylex esbuild pipeline smoke", () => {
     }
   }, 60_000);
 
+  it("emits message action button hover background as a StyleX atomic rule", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nolo-message-actions-stylex-"));
+    const outdir = join(dir, "out");
+    const entry = join(dir, "entry.ts");
+    await writeFile(join(dir, "host.css"), "/* message actions host */\n");
+    await writeFile(
+      entry,
+      `import ${JSON.stringify(join(process.cwd(), "packages/chat/messages/web/messageActionsStyles.ts"))};\nimport "./host.css";\n`,
+    );
+    try {
+      const result = await runIsolatedEsbuild({
+        entryPoints: [entry], outdir, metafile: true, minify: false,
+        entryNames: "[name]", logLevel: "silent",
+      });
+      const cssRel = Object.keys(result.metafile?.outputs ?? {}).find((f) => f.endsWith("entry.css"));
+      expect(cssRel).toBeDefined();
+      const css = await readFile(cssRel!.startsWith("/") ? cssRel! : join(process.cwd(), cssRel!), "utf8");
+      const actionHover = css.match(/[^{}]*:hover[^{}]*\{[^{}]*\}/g)?.find((rule) => rule.includes("background-color"));
+      expect(actionHover).toBeDefined();
+      expect(actionHover).toContain("background-color");
+      expect(css).not.toMatch(/borderLeftLeft|background-color:\s*none/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("compiles defineVars and all 18 createTheme classes into static CSS", async () => {
     const outdir = await mkdtemp(join(tmpdir(), "nolo-stylex-theme-smoke-"));
     const dir = await mkdtemp(join(tmpdir(), "nolo-theme-src-"));

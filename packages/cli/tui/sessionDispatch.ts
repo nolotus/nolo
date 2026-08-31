@@ -89,7 +89,7 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       asOptionalTrimmedString(env.NOLO_CLI_STATUS_MODE) ?? runtimeMode,
     userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
     gitStatus: undefined,
-    toolDisplay: normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "compact"),
+    toolDisplay: normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "normal"),
     thinkingDisplay: "show",
     contextWindow: resolveAgentContextWindow({ agentKey, agentName }),
     estimatedContextTokens: estimateDefaultCliContextTokens({
@@ -286,7 +286,7 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         };
       }
       const normalizedArg = asTrimmedLowercaseString(argText);
-      if (!["hide", "compact", "verbose", "on", "off"].includes(normalizedArg)) {
+      if (!["normal", "pro", "hide", "compact", "verbose", "on", "off"].includes(normalizedArg)) {
         return {
           nextState: state,
           output: t("toolsUsage"),

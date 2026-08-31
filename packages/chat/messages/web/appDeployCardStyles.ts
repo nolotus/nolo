@@ -17,7 +17,7 @@ export const appDeployCardStyles = stylex.create({
     borderRadius: "var(--radius-md)",
     overflow: "hidden",
     marginTop: 8,
-    background: "var(--surfaceInset, var(--background))",
+    backgroundColor: "var(--surfaceInset, var(--background))",
     boxShadow: "0 10px 24px -22px var(--shadowMedium)",
   },
   header: {
@@ -29,7 +29,7 @@ export const appDeployCardStyles = stylex.create({
     paddingLeft: 14,
     paddingRight: 14,
     gap: 10,
-    background: "var(--surfaceInset, var(--backgroundGhost))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundGhost))",
     flexWrap: {
       default: "nowrap",
       "@media (max-width: 768px)": "wrap",
@@ -82,7 +82,7 @@ export const appDeployCardStyles = stylex.create({
       default: "var(--borderMuted, var(--border))",
       ":hover": "var(--borderSubtle)",
     },
-    background: {
+    backgroundColor: {
       default: "var(--surfaceInteractive, var(--backgroundSecondary))",
       ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
     },
@@ -98,7 +98,7 @@ export const appDeployCardStyles = stylex.create({
     transition: "background 0.18s ease, color 0.18s ease, border-color 0.18s ease",
   },
   btnPrimary: {
-    background: {
+    backgroundColor: {
       default: "var(--primary)",
       ":hover": "var(--primaryHover, var(--primary))",
     },
@@ -110,7 +110,7 @@ export const appDeployCardStyles = stylex.create({
   },
   frameWrapper: {
     position: "relative",
-    background: "var(--surfaceInset, var(--backgroundGhost))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundGhost))",
     borderTopWidth: 1,
     borderTopStyle: "solid",
     borderTopColor: "var(--borderMuted, var(--borderLight))",
@@ -121,9 +121,10 @@ export const appDeployCardStyles = stylex.create({
       default: "min(68vh, 560px)",
       "@media (max-width: 768px)": "min(72vh, 620px)",
     },
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     display: "block",
-    background: "var(--surfaceRaised, #fff)",
+    backgroundColor: "var(--surfaceRaised, #fff)",
   },
   frameLoading: {
     position: "absolute",
@@ -133,7 +134,7 @@ export const appDeployCardStyles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    background: "color-mix(in srgb, var(--surfaceRaised, var(--background)) 82%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--surfaceRaised, var(--background)) 82%, transparent)",
     backdropFilter: "blur(4px)",
     color: "var(--textSecondary)",
     fontSize: "var(--fontSize-sm)",
@@ -156,6 +157,6 @@ export const appDeployCardStyles = stylex.create({
     paddingRight: 14,
     color: "var(--textTertiary)",
     fontSize: "var(--fontSize-sm)",
-    background: "var(--surfaceInset, var(--backgroundGhost))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundGhost))",
   },
 });

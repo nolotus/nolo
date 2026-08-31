@@ -24,7 +24,7 @@ export const fileItemStyles = stylex.create({
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--border)",
-    background: "var(--background)",
+    backgroundColor: "var(--background)",
   },
   message: {
     gap: "var(--space-2)",
@@ -32,7 +32,7 @@ export const fileItemStyles = stylex.create({
     paddingBottom: "var(--space-2)",
     paddingLeft: "var(--space-3)",
     paddingRight: "var(--space-3)",
-    background: "var(--backgroundSecondary)",
+    backgroundColor: "var(--backgroundSecondary)",
     fontSize: {
       default: "var(--fontSize-base)",
       "@media (max-width: 768px)": "var(--fontSize-sm)",
@@ -70,12 +70,12 @@ export const fileItemStyles = stylex.create({
   iconWrapperMessage: {
     width: 28,
     height: 28,
-    background: "var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)))",
   },
   iconWrapperAttachment: {
     width: 24,
     height: 24,
-    background: "var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceInteractiveHover, var(--backgroundHover)))",
   },
   icon: {
     transition: "all .2s ease",
@@ -119,7 +119,7 @@ export const fileItemStyles = stylex.create({
   },
   error: {
     borderColor: "var(--error)",
-    background: "var(--errorGhost)",
+    backgroundColor: "var(--errorGhost)",
     pointerEvents: "none",
   },
   errorIndicator: {

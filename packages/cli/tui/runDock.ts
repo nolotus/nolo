@@ -21,13 +21,12 @@
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
   clipText,
-  formatRunAge,
   getAgentRunStatusIcon,
   isAgentRunTerminalStatus,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { formatAgentRunPanelLines } from "./agentRunPanelLines";
-import { activeInFlight, formatInFlightFact, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
+import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
 /** 年龄每秒走一格；比 150ms 的活动帧慢，因为这里没有动画只有秒数。 */
@@ -333,7 +332,7 @@ function formatRunDockRow(
   const statusColor = runStatusTone(snapshot.status);
 
   const facts: string[] = [];
-  const age = formatRunAge(snapshot, now);
+  const age = formatTerminalRunAge(snapshot, now);
   // 终态行把状态词写出来（`done 42s`）：图标区分得了成功失败，区分不了
   // killed 和 timeout，而那两个的处理方式完全不同。
   if (terminal) facts.push(age ? `${snapshot.status} ${age}` : snapshot.status);

@@ -8,7 +8,7 @@ import { resolveCatalogPlatformAgents } from "./agentCatalog";
 import { renderDialogTitle } from "./dialogFrame";
 import { t } from "./i18n";
 import { displayWidth } from "./readlineWorkspace";
-import { stripAnsi } from "./tuiAnsi";
+import { stripAnsi, visibleWidth } from "./tuiAnsi";
 import {
   themeText,
   themeColorSequence,
@@ -16,7 +16,6 @@ import {
   resolveTuiBrightness,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
-import { getCachedRunningAgentCount } from "./runRegistryPoller";
 import type { TuiState } from "./sessionTypes";
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
@@ -57,7 +56,7 @@ export function renderComposerTokenChip(
 
 // ─── Status line ────────────────────────────────────────────────────────────
 
-export function renderStatusLine(state: TuiState) {
+export function renderStatusLine(state: TuiState, maxWidth?: number) {
   const colorEnabled = resolveCliColorEnabled();
   // OMP-style chips: soft fg colors + " · " separators. No solid powerline
   // backgrounds — those break box layout when the line is long.
@@ -118,20 +117,13 @@ export function renderStatusLine(state: TuiState) {
   );
   parts.push(tokenSegment);
 
-  // User-visible running count: launchProcess / promoted local background tasks,
-  // plus active (non-terminal) agent runs from local run registry (throttled).
+  // This chip counts launchProcess / promoted local background tasks. The
+  // conversation-scoped agent-run counts belong to the dock, which already
+  // renders `N running · M done · K failed`; do not add a machine-wide agents
+  // count here as it would describe a different population.
   const runningTaskCount = getProcessRegistry().listBackground().filter(p => p.status === "running").length;
-  const runningAgentCount = getCachedRunningAgentCount();
-
-  const runningParts: string[] = [];
   if (runningTaskCount > 0) {
-    runningParts.push(`${runningTaskCount} running`);
-  }
-  if (runningAgentCount > 0) {
-    runningParts.push(`${runningAgentCount} ${runningAgentCount === 1 ? "agent" : "agents"}`);
-  }
-  if (runningParts.length > 0) {
-    parts.push(themeText(`⚙ ${runningParts.join(" · ")}`, "info", colorEnabled));
+    parts.push(themeText(`⚙ ${runningTaskCount} running`, "info", colorEnabled));
   }
 
   // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过
@@ -141,7 +133,56 @@ export function renderStatusLine(state: TuiState) {
     parts.push(themeText("⏵ auto", "warning", colorEnabled));
   }
 
-  const body = parts.join(sep);
+  let visibleParts = parts;
+  if (maxWidth && maxWidth > 0) {
+    const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
+    // Context, cwd and identity are useful orientation, but none is an
+    // actionable state. Drop them in that order before allowing terminal
+    // clipping to hide dirty/running/auto-confirm.
+    for (const optional of [tokenSegment, cwdSegment, agentSegment]) {
+      if (widthOf(visibleParts) <= maxWidth) break;
+      visibleParts = visibleParts.filter((part) => part !== optional);
+    }
+    if (widthOf(visibleParts) > maxWidth && state.gitStatus) {
+      const gitIndex = visibleParts.findIndex((part) => stripAnsi(part).startsWith("⑂ "));
+      if (gitIndex >= 0) {
+        const { modified, untracked } = state.gitStatus;
+        const compactDirty = themeText(
+          `⑂${modified > 0 ? ` *${modified}` : ""}${untracked > 0 ? ` ?${untracked}` : ""}`,
+          "warning",
+          colorEnabled,
+        );
+        visibleParts = visibleParts.with(gitIndex, compactDirty);
+      }
+    }
+    if (widthOf(visibleParts) > maxWidth) {
+      // Emergency projection for genuinely narrow terminals. These glyphs
+      // preserve the three actionable facts without their explanatory words;
+      // lower-priority identity/cwd/context and queued previews are already
+      // gone by this point. Joined with single spaces, not the " · " chips:
+      // each " · " costs 3 columns and would push the line past ultra-narrow
+      // budgets, letting terminal end-clipping eat the trailing (required)
+      // dirty/running fields first.
+      const emergency: string[] = [];
+      if (state.autoConfirm === true) {
+        emergency.push(themeText("⏵", "warning", colorEnabled));
+      }
+      const runningTotal = runningTaskCount + runningAgentCount;
+      if (runningTotal > 0) {
+        emergency.push(themeText(`⚙${runningTotal}`, "info", colorEnabled));
+      }
+      if (state.gitStatus) {
+        const { modified, untracked } = state.gitStatus;
+        emergency.push(themeText(
+          `⑂${modified > 0 ? `*${modified}` : ""}${untracked > 0 ? `?${untracked}` : ""}`,
+          "warning",
+          colorEnabled,
+        ));
+      }
+      visibleParts = [emergency.join(" ")];
+    }
+  }
+  const body = visibleParts.join(sep);
   const surface = colorEnabled ? surfaceBackgroundSequence() : "";
   if (!surface) return body;
 
@@ -160,6 +201,31 @@ export function renderStatusLine(state: TuiState) {
   // \x1b[49m resets background only, so callers can keep appending
   // foreground-colored text (the "· Esc to stop" hint) after the chip closes.
   return `${surface} ${body} \x1b[49m`;
+}
+
+/**
+ * Compose the composer status line plus the optional queued-input badge under
+ * one width budget.
+ *
+ * Required state (auto-confirm / running / dirty) owns the budget. The queue
+ * badge is optional chrome: its width is reserved from the degradation budget
+ * only while the degraded status can still fit beside it, and when the badge
+ * alone would overflow `maxWidth` it is dropped entirely — terminal
+ * end-clipping must never be the thing that hides auto-confirm, running or
+ * dirty.
+ */
+export function composeStatusLineWithQueue(
+  state: TuiState,
+  queueSuffix: string,
+  maxWidth?: number
+): string {
+  const hasBudget = typeof maxWidth === "number" && maxWidth > 0;
+  const queueWidth = queueSuffix ? visibleWidth(queueSuffix) : 0;
+  const budget = hasBudget ? Math.max(1, maxWidth! - queueWidth) : undefined;
+  const base = renderStatusLine(state, budget);
+  if (!queueSuffix) return base;
+  if (!hasBudget) return base + queueSuffix;
+  return visibleWidth(base) + queueWidth <= maxWidth! ? base + queueSuffix : base;
 }
 
 // ─── Welcome & prompt ───────────────────────────────────────────────────────

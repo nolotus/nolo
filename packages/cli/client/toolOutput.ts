@@ -28,11 +28,11 @@ import { displayWidth } from "../tui/tuiAnsi";
 import { diffLines } from "diff";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
 
-export type ToolDisplayMode = "hide" | "compact" | "verbose";
+export type ToolDisplayMode = "normal" | "pro" | "hide" | "verbose" | "compact";
 
 export function normalizeToolDisplayMode(
   raw: string | undefined,
-  fallback: ToolDisplayMode = "compact"
+  fallback: ToolDisplayMode = "normal"
 ): ToolDisplayMode {
   const normalized = asTrimmedLowercaseString(raw);
   if (normalized === "hide" || normalized === "off" || normalized === "false" || normalized === "0") {
@@ -46,8 +46,11 @@ export function normalizeToolDisplayMode(
   ) {
     return "verbose";
   }
-  if (normalized === "compact" || normalized === "minimal" || normalized === "short") {
-    return "compact";
+  if (normalized === "normal" || normalized === "summary" || normalized === "on") {
+    return "normal";
+  }
+  if (normalized === "pro" || normalized === "compact" || normalized === "minimal" || normalized === "short") {
+    return "pro";
   }
   return fallback;
 }
@@ -60,7 +63,7 @@ export function resolveToolDisplayMode(env: Record<string, string | undefined> =
   if (legacyTrace === "verbose" || legacyTrace === "full") {
     return "verbose";
   }
-  return normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "compact");
+  return normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "normal");
 }
 
 export function shouldEmitToolEvents(mode: ToolDisplayMode) {
@@ -89,6 +92,18 @@ export function formatActiveToolLabel(
   const args = clipPathAware(event.argumentsPreview ?? "");
   const label = toolLabel(toolName);
   return args ? `${label} ${args}` : label;
+}
+
+/**
+ * Normal-display spinner/activity label: the action verb only, never the
+ * argument preview — for shell-running tools that preview IS the command
+ * line (cwd/echo/pipeline), which normal mode must not surface anywhere,
+ * including the composer activity line.
+ */
+export function formatConservativeActiveToolLabel(
+  event: Pick<LocalAgentToolEvent, "toolName" | "argumentsPreview">
+) {
+  return toolLabel(event.toolName || "tool");
 }
 
 /**
@@ -721,6 +736,56 @@ function formatVerboseToolEvent(event: LocalAgentToolEvent, colorEnabled: boolea
   );
 }
 
+/**
+ * Ordinary-user projection of a tool event.
+ *
+ * Deliberately excludes arguments, paths, commands and result bodies. Those
+ * belong to pro/verbose mode and are often implementation plumbing
+ * (cwd/echo/pipelines) rather than useful product feedback.
+ */
+function formatNormalToolLine(
+  event: LocalAgentToolEvent,
+  pending: { toolName: string; argumentsPreview?: string } | undefined,
+  colorEnabled: boolean,
+) {
+  if (event.type === "tool-call") return "";
+  const toolName = event.toolName || pending?.toolName || "tool";
+
+  // Interactive / product blocks keep their full rendering in normal mode:
+  // an ask_user menu is the headless reply surface, todo lists and run cards
+  // are product status — none of them are shell plumbing (cwd/echo/pipeline).
+  const todoBlock = formatTodoListForCli(event, colorEnabled);
+  if (todoBlock) return todoBlock;
+  if (event.type === "tool-result" && (event.toolName === "ask_user" || event.metadata?.uiAskChoice)) {
+    const block = formatUiAskChoiceBlock(event, colorEnabled);
+    if (block) return block;
+  }
+  if (
+    event.type === "tool-result" &&
+    (toolName === "listAgents" || toolName === "startAgentRun" || toolName === "controlAgentRun")
+  ) {
+    return formatOrchestrationCardBlock(event, toolName, colorEnabled);
+  }
+  if (event.type === "tool-result" && toolName === "loadSkill") {
+    return formatLoadSkillBlock(event, colorEnabled) ?? "";
+  }
+
+  const label = toolLabel(toolName);
+  if (readActionGate(event.metadata?.actionGate)) {
+    return formatToolTraceLine(`▸ ${label}  ! ${t("toolNeedsAction")}`, colorEnabled, "error");
+  }
+  if (event.type === "tool-error") {
+    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolFailed")}`, colorEnabled, "error");
+  }
+  if (event.metadata?.timedOut) {
+    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolTimedOut")}`, colorEnabled, "error");
+  }
+  if (isFailedToolResult(event)) {
+    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolFailed")}`, colorEnabled, "error");
+  }
+  return formatToolTraceLine(`▸ ${label}  ✓`, colorEnabled);
+}
+
 function isReadToolName(name?: string): boolean {
   if (!name) return false;
   return name === "read" || name === "readFile" || name === "read_file" || name === "readWorkspaceFile";
@@ -992,6 +1057,37 @@ function formatTodoListForCli(
   return colorEnabled ? themeText(text, "chrome") : text;
 }
 
+/**
+ * loadSkill: render Kimi-style "● Used Skill (<name>)" with the inline
+ * follow-instructions line indented below it. not-found is a plain
+ * tool-result (executors return text, never throw), so detect it here — same
+ * minimal-prefix contract the web/RN renderers use — and render a failure
+ * line instead of the success bullet. Shared by compact/pro and normal: the
+ * loaded skill name is product feedback, not shell plumbing.
+ */
+function formatLoadSkillBlock(
+  event: LocalAgentToolEvent,
+  colorEnabled: boolean
+): string | null {
+  if (event.type !== "tool-result" || event.toolName !== "loadSkill") return null;
+  const skillName = resolveLoadSkillName(event);
+  const content = typeof event.content === "string" ? event.content : "";
+  const failed =
+    /^Skill\s+"[^"]*"\s+not found/.test(content) || isFailedToolResult(event);
+  const labelText = t("usedSkillLabel");
+  if (failed) {
+    const message = clip(content.split("\n")[0] || t("toolFailed"), 96);
+    return formatToolTraceLine(`▸ ${labelText} (${skillName})  ✗ ${message}`, colorEnabled, "error");
+  }
+  if (!colorEnabled) {
+    return `✦ ${labelText}: ${skillName}\n`;
+  }
+  const star = themeText("✦", "success", true);
+  const labelPart = themeText(labelText, "muted", true);
+  const namePart = themeText(skillName, "chrome", true);
+  return `${star} ${labelPart}: ${namePart}\n`;
+}
+
 function formatCompactToolLine(
   event: LocalAgentToolEvent,
   pending: { toolName: string; argumentsPreview?: string } | undefined,
@@ -1045,29 +1141,10 @@ function formatCompactToolLine(
     return formatToolTraceLine(`▸ ${label}  ✗ ${message}`, colorEnabled, "error");
   }
 
-  // loadSkill: render Kimi-style "● Used Skill (<name>)" with the inline
-  // follow-instructions line indented below it. tool-error already returned
-  // above. not-found is a plain tool-result (executors return text, never
-  // throw), so detect it here — same minimal-prefix contract the web/RN
-  // renderers use — and render a failure line instead of the success bullet.
-  if (event.type === "tool-result" && toolName === "loadSkill") {
-    const skillName = resolveLoadSkillName(event);
-    const content = typeof event.content === "string" ? event.content : "";
-    const failed =
-      /^Skill\s+"[^"]*"\s+not found/.test(content) || isFailedToolResult(event);
-    const labelText = t("usedSkillLabel");
-    if (failed) {
-      const message = clip(content.split("\n")[0] || t("toolFailed"), 96);
-      return formatToolTraceLine(`▸ ${labelText} (${skillName})  ✗ ${message}`, colorEnabled, "error");
-    }
-    if (!colorEnabled) {
-      return `✦ ${labelText}: ${skillName}\n`;
-    }
-    const star = themeText("✦", "success", true);
-    const labelPart = themeText(labelText, "muted", true);
-    const namePart = themeText(skillName, "chrome", true);
-    return `${star} ${labelPart}: ${namePart}\n`;
-  }
+  // loadSkill card is shared with normal mode (the skill name is product
+  // feedback, not plumbing); tool-error already returned above.
+  const loadSkillBlock = formatLoadSkillBlock(event, colorEnabled);
+  if (loadSkillBlock) return loadSkillBlock;
 
   // listAgents / startAgentRun / controlAgentRun orchestration card block
   if (
@@ -1173,6 +1250,7 @@ export function formatToolEventForCli(
 ) {
   if (mode === "hide") return "";
   if (mode === "verbose") return formatVerboseToolEvent(event, colorEnabled);
+  if (mode === "normal") return formatNormalToolLine(event, undefined, colorEnabled);
   if (event.type === "tool-call") return "";
   return formatCompactToolLine(event, undefined, colorEnabled);
 }
@@ -1364,6 +1442,18 @@ export function createToolEventFormatter(
   const formatter = (event: LocalAgentToolEvent): string => {
     if (mode === "hide") return "";
     if (mode === "verbose") return formatVerboseToolEvent(event, colorEnabled);
+    if (mode === "normal") {
+      if (event.type === "tool-call") {
+        pending.set(event.toolCallId, {
+          toolName: event.toolName,
+          argumentsPreview: event.argumentsPreview,
+        });
+        return "";
+      }
+      const call = pending.get(event.toolCallId);
+      pending.delete(event.toolCallId);
+      return formatNormalToolLine(event, call, colorEnabled);
+    }
 
     // controlAgentRun(status) for the same runId folds like Read/Run trees:
     // consecutive polls collapse into one card carrying the latest state.

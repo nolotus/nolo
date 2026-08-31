@@ -6,6 +6,7 @@ import { createThinkParserState, processThinkChunk, flushThinkParser } from "../
 import {
   createToolEventFormatter,
   formatActiveToolLabel,
+  formatConservativeActiveToolLabel,
   resolveToolDisplayMode,
   shouldEmitToolEvents,
 } from "./toolOutput";
@@ -21,6 +22,13 @@ import type { RunAgentTurnOptions } from "./agentRunTypes";
  *   `已压缩上下文：stub 12 条工具输出，省约 8.4k tokens`
  *   `已压缩上下文：生成历史摘要，省约 21k tokens`
  */
+/**
+ * Bare-CLI assistant identity label suffix: `<agentName> > `. The TUI is the
+ * only consumer that suppresses this label (its history paints the single ◈
+ * anchor instead); every other surface keeps the classic label.
+ */
+const IDENTITY_LABEL_SEPARATOR = " > ";
+
 export function formatCompactionSummaryLine(
   event: Extract<
     AgentExecutionObservationEvent,
@@ -123,6 +131,15 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     AgentExecutionObservationEvent,
     { kind: "compaction" }
   > | null = null;
+  const assistantLabelManaged = options.output.assistantLabelManaged === true;
+  const writeToolOutput = (chunk: string) => {
+    if (!chunk) return;
+    if (typeof options.output.writeToolBlock === "function") {
+      options.output.writeToolBlock(chunk);
+    } else {
+      options.output.write(chunk);
+    }
+  };
 
   const renderWriter = createRenderAwareStreamWriter({
     write: (chunk) => options.output.write(chunk),
@@ -143,7 +160,9 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     spinner.stop();
     options.activityReporter?.(null);
     if (!printedAssistantLabel) {
-      options.output.write(`\n${options.agentName} > `);
+      if (!assistantLabelManaged) {
+        options.output.write(`\n${options.agentName}${IDENTITY_LABEL_SEPARATOR}`);
+      }
       printedAssistantLabel = true;
     }
     streamedAssistantText = true;
@@ -203,15 +222,22 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     // fetch) the formatter accumulates internally and returns ""; the tree
     // is flushed later when a non-buffered tool arrives or at finish().
     if (chunk) {
-      options.output.write(chunk);
+      writeToolOutput(chunk);
     }
 
     // ── Post-write: start spinner for in-flight tool-calls ──────────
+    // normal mode keeps live activity feedback but strips the argument
+    // preview from the label: for shell-running tools the preview is the
+    // command line itself (cwd/echo/pipeline), which normal mode must not
+    // surface — including the composer activity line.
     if (
-      toolDisplayMode === "compact" &&
+      (toolDisplayMode === "compact" || toolDisplayMode === "pro" || toolDisplayMode === "normal") &&
       event.type === "tool-call"
     ) {
-      const activeLabel = formatActiveToolLabel(event);
+      const activeLabel =
+        toolDisplayMode === "normal"
+          ? formatConservativeActiveToolLabel(event)
+          : formatActiveToolLabel(event);
       spinner.show(activeLabel);
       options.activityReporter?.(activeLabel);
     }
@@ -248,7 +274,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       if (eventMode !== "jsonl" && formatToolEvent.flush) {
         const pendingToolOutput = formatToolEvent.flush();
         if (pendingToolOutput) {
-          options.output.write(pendingToolOutput);
+          writeToolOutput(pendingToolOutput);
         }
       }
       writeVisibleAssistantChunk(chunk);
@@ -282,7 +308,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       }
       const pendingToolOutput = formatToolEvent.flush ? formatToolEvent.flush() : "";
       if (pendingToolOutput) {
-        options.output.write(pendingToolOutput);
+        writeToolOutput(pendingToolOutput);
       }
       if (streamedAssistantText) {
         renderWriter.flush();
@@ -297,9 +323,17 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
           ? formatAssistantResponseForCli(fallbackContent.trim())
           : "";
         if (content) {
-          options.output.write(`\n${options.agentName} > ${content}\n`);
+          options.output.write(
+            assistantLabelManaged
+              ? `${content}\n`
+              : `\n${options.agentName}${IDENTITY_LABEL_SEPARATOR}${content}\n`,
+          );
         } else {
-          options.output.write(`\n${options.agentName} > (no text response)\n`);
+          options.output.write(
+            assistantLabelManaged
+              ? "(no text response)\n"
+              : `\n${options.agentName}${IDENTITY_LABEL_SEPARATOR}(no text response)\n`,
+          );
         }
       }
       // 压缩摘要行（dim，一行折叠展示）。无压缩事件 → 零输出。

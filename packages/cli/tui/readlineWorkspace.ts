@@ -47,6 +47,7 @@ import {
   handleTuiInput,
   formatElapsedSeconds,
   renderPrompt,
+  composeStatusLineWithQueue,
   renderStatusLine,
   renderWelcome,
   DEFAULT_TUI_AGENT_KEY,
@@ -610,7 +611,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 与 reconcile 的调用点也是同样写法。
     readRecord: (runId) => readRunRecord(runId, { env: effectiveEnv }),
     discoverRuns: () => listRunRecords({ env: effectiveEnv }),
-    getCurrentDialogId: () => state.dialogId,
+    getCurrentDialogId: () => state.dialogId ?? null,
     reconcile: (runId) => checkStaleRun(runId, { env: effectiveEnv }),
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
   });
@@ -962,19 +963,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // back to the placeholder and hid what the user was typing (the submit
     // path still read the inner buffer, so input "worked" but was invisible).
     const baseFixedInput = createFixedInput(output, {
-      getStatusLine: () => {
-        let base = renderStatusLine(state);
+      getStatusLine: (maxWidth) => {
         // Show the queued-input count while a turn is running so the user can
         // see their follow-ups are staged, not lost. Mirrors the Web/RN
         // queue badge via the shared projectChatQueueStatus contract.
-        if (chatQueueBinding && chatQueueBinding.queueLength() > 0) {
-          base += dimCliText(
-            ` · ${chatQueueBinding.queueLength()} ${t("queuedHint")}`,
-            resolveCliColorEnabled(),
-          );
-        }
-
-        return base;
+        // composeStatusLineWithQueue treats the badge as optional chrome: it
+        // reserves the badge width only while the degraded status (auto
+        // confirm / running / dirty) still fits beside it, and drops the
+        // badge entirely when it alone would overflow the budget.
+        const queueSuffix =
+          chatQueueBinding && chatQueueBinding.queueLength() > 0
+            ? dimCliText(
+                ` · ${chatQueueBinding.queueLength()} ${t("queuedHint")}`,
+                resolveCliColorEnabled(),
+              )
+            : "";
+        return composeStatusLineWithQueue(state, queueSuffix, maxWidth);
       },
       getActivityLines: () =>
         activityIndicator.getActivityLines(resolveCliColorEnabled()),

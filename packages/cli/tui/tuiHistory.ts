@@ -41,9 +41,16 @@ import {
 
 export type TurnRole = "user" | "assistant" | "local";
 
+export type TurnBlock = {
+  kind: "assistant" | "tool";
+  content: string;
+};
+
 export type Turn = {
   role: TurnRole;
   content: string;
+  /** TUI-only transcript structure; content remains the compatible projection. */
+  blocks?: TurnBlock[];
   /**
    * 本地命令/事件回显专用（role === "local"）：触发它的命令原文，例如
    * "/switch 2"。为空字符串表示无对应命令的系统反馈（如 "Turn stopped"），
@@ -66,6 +73,7 @@ export type TurnHistory = {
   turns: Turn[];
   currentRole: TurnRole | null;
   currentContent: string;
+  currentBlocks: TurnBlock[];
   scrollTop: number;
   followBottom: boolean;
   hasMoreAbove?: boolean;
@@ -216,6 +224,7 @@ export function createTurnHistory(): TurnHistory {
     turns: [],
     currentRole: null,
     currentContent: "",
+    currentBlocks: [],
     scrollTop: 0,
     followBottom: true,
   };
@@ -227,11 +236,30 @@ export function startTurn(history: TurnHistory, role: TurnRole) {
   }
   history.currentRole = role;
   history.currentContent = "";
+  history.currentBlocks = [];
   resetStreamingTurnCache();
 }
 
 export function appendToCurrentTurn(history: TurnHistory, chunk: string) {
   history.currentContent += chunk;
+  appendCurrentBlock(history, "assistant", chunk);
+}
+
+function appendCurrentBlock(
+  history: TurnHistory,
+  kind: TurnBlock["kind"],
+  chunk: string,
+) {
+  if (!chunk) return;
+  const last = history.currentBlocks.at(-1);
+  if (last?.kind === kind) {
+    last.content = applyTerminalOutputToText(last.content, chunk);
+  } else {
+    history.currentBlocks.push({
+      kind,
+      content: applyTerminalOutputToText("", chunk),
+    });
+  }
 }
 
 export function finalizeCurrentTurn(history: TurnHistory) {
@@ -239,9 +267,20 @@ export function finalizeCurrentTurn(history: TurnHistory) {
     history.turns.push({
       role: history.currentRole,
       content: compactTurnContent(history.currentContent),
+      ...(history.currentRole === "assistant" && history.currentBlocks.length > 0
+        ? {
+            blocks: history.currentBlocks
+              .map((block) => ({
+                ...block,
+                content: compactTurnContent(block.content),
+              }))
+              .filter((block) => block.content.length > 0),
+          }
+        : {}),
     });
     history.currentRole = null;
     history.currentContent = "";
+    history.currentBlocks = [];
     resetStreamingTurnCache();
     trimHistoryToBudget(history);
   }
@@ -272,11 +311,13 @@ export function appendLocalTurn(
 
 export function applyOutputChunkToCurrentTurn(
   history: TurnHistory,
-  chunk: string
+  chunk: string,
+  kind: TurnBlock["kind"] = "assistant",
 ): boolean {
   const next = applyTerminalOutputToText(history.currentContent, chunk);
   if (next === history.currentContent) return false;
   history.currentContent = next;
+  appendCurrentBlock(history, kind, chunk);
   return true;
 }
 
@@ -285,8 +326,10 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
     ? formatAssistantDisplay(content, { trimEdges: false })
     : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
   const rawLines = highlighted.split("\n");
-  const styledLines = rawLines.map((line, idx) => {
-    if (idx === 0 && !line.startsWith("[nolo]")) {
+  let anchored = false;
+  const styledLines = rawLines.map((line) => {
+    if (!anchored && line.trim().length > 0 && !line.startsWith("[nolo]")) {
+      anchored = true;
       const anchorPrefix = colorEnabled
         ? `${themeColorSequence("chrome")}◈\x1b[39m `
         : "◈ ";
@@ -435,9 +478,15 @@ export function layoutTurnRows(
   let rawOffset = 0;
   const rows: TurnLayoutRow[] = [];
 
+  // styleAssistantTurn anchored the first non-empty non-[nolo] line; mirror
+  // that choice here so the ◈ wrap bookkeeping (prefixWidth) lands on the
+  // same row, and a leading blank/[nolo] line never owns the anchor column.
+  let anchored = false;
   for (let i = 0; i < styledLines.length; i++) {
     const styledLine = styledLines[i]!;
-    const isFirstLine = i === 0 && !styledLine.startsWith("[nolo]");
+    const isFirstLine =
+      !anchored && styledLine.trim().length > 0 && !styledLine.startsWith("[nolo]");
+    if (isFirstLine) anchored = true;
     const anchorPrefix = isFirstLine
       ? (colorEnabled ? `${themeColorSequence("chrome")}◈\x1b[39m ` : "◈ ")
       : "";
@@ -546,21 +595,10 @@ function renderPrefixTurnBlock(
   if (role === "user") {
     return renderTurnBlock(role, content, contentWidth, colorEnabled);
   }
-  const highlighted = colorEnabled
-    ? formatAssistantDisplay(content, { trimEdges: false })
-    : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
-  const rawLines = highlighted.split("\n");
-  const styledLines = rawLines.map((line, idx) => {
-    if (idx === 0 && !line.startsWith("[nolo]")) {
-      const anchorPrefix = colorEnabled
-        ? `${themeColorSequence("chrome")}◈\x1b[39m `
-        : "◈ ";
-      return `${anchorPrefix}${line}`;
-    }
-    return line.startsWith("[nolo]") && colorEnabled
-      ? themeText(line, "chrome", true)
-      : line;
-  });
+  // Delegate styling (including the ◈ anchor on the first non-empty
+  // non-[nolo] line) to styleAssistantTurn so streaming and finalized turns
+  // cannot drift into double identity markers or orphan anchors.
+  const styledLines = styleAssistantTurn(content, colorEnabled).split("\n");
   const lines: string[] = [];
   for (const logicalLine of styledLines) {
     lines.push(...wrapTranscriptLine(logicalLine, contentWidth));
@@ -1077,8 +1115,9 @@ export function createHistoryOutputStream(
   history: TurnHistory,
   onUpdate: () => void
 ): NodeJS.WritableStream {
-  return {
+  const stream = {
     isTTY: true,
+    assistantLabelManaged: true,
     write(chunk: string | Buffer): boolean {
       const text = typeof chunk === "string" ? chunk : chunk.toString();
       if (applyOutputChunkToCurrentTurn(history, text)) {
@@ -1086,7 +1125,13 @@ export function createHistoryOutputStream(
       }
       return true;
     },
-  } as unknown as NodeJS.WritableStream;
+    writeToolBlock(chunk: string): void {
+      if (applyOutputChunkToCurrentTurn(history, chunk, "tool")) {
+        onUpdate();
+      }
+    },
+  };
+  return stream as unknown as NodeJS.WritableStream;
 }
 
 export function applyScrollAction(

@@ -23,6 +23,7 @@ export type {
 // Rendering
 export {
   renderStatusLine,
+  composeStatusLineWithQueue,
   renderWelcome,
   renderPrompt,
   renderTuiHelp,

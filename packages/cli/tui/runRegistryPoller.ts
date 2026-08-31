@@ -95,8 +95,8 @@ export type RunRegistryPollerDeps = {
   readRecord: (runId: string) => RunRecord | null | undefined;
   /** 可选：扫描本地 registry，供首轮发现尚未上板的 run。 */
   discoverRuns?: () => RunRecord[];
-  /** 当前 dialog；发现路径沿用 runCompletionWatcher 的归属判据。 */
-  getCurrentDialogId?: () => string | undefined;
+  /** 当前对话 ID；getter 必须每次读取，以支持会话中途切换对话。 */
+  getCurrentDialogId?: () => string | null;
   /** 孤儿回收：pid 没了就把记录落成终态。返回 null 表示记录不存在。 */
   reconcile?: (runId: string) => RunRecord | null | undefined;
   /**
@@ -248,23 +248,35 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
     }
     const discovered = discoveredRecords;
     const currentDialogId = deps.getCurrentDialogId?.();
+    // The dock is conversation-scoped: only records explicitly parented to the
+    // current dialog may enter or refresh it. In particular, an unassigned
+    // record is not a safe fallback here; P1 tool-results already provide the
+    // runs that the current conversation explicitly asked to show. Reading the
+    // getter on every poll also makes switching conversations take effect.
+    const belongsToCurrentDialog = (record: RunRecord) =>
+      !deps.getCurrentDialogId ||
+      (currentDialogId !== null && record.parentDialogId === currentDialogId);
     const discoveredActive = discovered.filter((record) =>
       record.runId &&
       !dockedIds.has(record.runId) &&
       !retiredRunIds.has(record.runId) &&
       !isAgentRunTerminalStatus(record.status) &&
-      (!deps.getCurrentDialogId || (currentDialogId !== undefined && (record.parentDialogId === currentDialogId || !record.parentDialogId)))
+      belongsToCurrentDialog(record)
     );
     // 从未上过板的终态记录也给 dock 一次展示机会；超出窗口才墓碑化。
     const discoveredTerminal = discovered.filter((record) => {
       if (!record.runId || dockedIds.has(record.runId) || retiredRunIds.has(record.runId)) return false;
-      if (!isAgentRunTerminalStatus(record.status)) return false;
-      if (deps.getCurrentDialogId && (currentDialogId === undefined || !(record.parentDialogId === currentDialogId || !record.parentDialogId))) return false;
+      if (!isAgentRunTerminalStatus(record.status) || !belongsToCurrentDialog(record)) return false;
       const endedAt = readTimestamp(record.endedAt);
       return endedAt !== undefined && at - endedAt <= DISCOVERY_TERMINAL_LINGER_MS;
     });
     for (const record of discovered) {
-      if (record.runId && isAgentRunTerminalStatus(record.status) && !discoveredTerminal.includes(record)) {
+      if (
+        record.runId &&
+        isAgentRunTerminalStatus(record.status) &&
+        belongsToCurrentDialog(record) &&
+        !discoveredTerminal.includes(record)
+      ) {
         retiredRunIds.add(record.runId);
       }
     }
@@ -306,6 +318,10 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       // 读不到记录不代表 run 没了：这条 run 可能跑在服务端、根本不在本地
       // registry 里。本地读不到就交给原来那条路（模型轮询），不动面板。
       if (!record) continue;
+      // Discovery and polling use the same conversation scope. P1 tool-results
+      // enter through update() directly and are intentionally not filtered here;
+      // this guard only prevents the filesystem stream from crossing dialogs.
+      if (deps.getCurrentDialogId && !belongsToCurrentDialog(record)) continue;
       polled.push(record);
 
       const snapshot = snapshotFromRunRecord(record, at);

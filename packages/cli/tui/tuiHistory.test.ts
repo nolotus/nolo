@@ -87,6 +87,14 @@ const render = (turns: Turn[], width = 120): string =>
     width,
   ).join("\n");
 
+test("assistant anchor attaches to the first non-empty line", () => {
+  noColor(() => {
+    const output = render([{ role: "assistant", content: "\nanswer" }]);
+    expect(output.split("\n").some((line) => line.trim() === "◈")).toBe(false);
+    expect(output).toContain("◈ answer");
+  });
+});
+
 describe("buildHistoryLines — assistant markdown rendered through the full renderer", () => {
   beforeEach(() => setActiveThemeName("catppuccin"));
   afterEach(() => setActiveThemeName("catppuccin"));

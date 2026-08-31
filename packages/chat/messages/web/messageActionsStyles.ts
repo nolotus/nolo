@@ -30,8 +30,9 @@ export const messageActionsStyles = stylex.create({
     gap: 0,
     margin: 0,
     padding: 2,
-    background: "transparent",
-    border: "none",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-xs)",
     boxShadow: "none",
     opacity: 0,
@@ -45,9 +46,10 @@ export const messageActionsStyles = stylex.create({
     justifyContent: "center",
     width: 26,
     height: 26,
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-xs)",
-    background: {
+    backgroundColor: {
       default: "transparent",
       ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
     },
@@ -60,7 +62,7 @@ export const messageActionsStyles = stylex.create({
   },
   actionBtnActive: {
     color: "var(--primary)",
-    background: "var(--surfaceInteractiveActive, var(--primaryGhost))",
+    backgroundColor: "var(--surfaceInteractiveActive, var(--primaryGhost))",
   },
   actionBtnDisabled: {
     opacity: 0.5,
@@ -101,7 +103,7 @@ export const messageActionsStyles = stylex.create({
   overlayBackdrop: {
     position: "absolute",
     inset: 0,
-    background: "rgba(0, 0, 0, 0.4)",
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
     backdropFilter: "blur(2px)",
     animationName: backdropFadeIn,
     animationDuration: "0.2s",
@@ -112,7 +114,7 @@ export const messageActionsStyles = stylex.create({
     zIndex: 1,
     width: "100%",
     maxWidth: 480,
-    background: "var(--surfaceRaised, var(--background))",
+    backgroundColor: "var(--surfaceRaised, var(--background))",
     borderTopLeftRadius: "var(--radius-lg)",
     borderTopRightRadius: "var(--radius-lg)",
     boxShadow: "0 -4px 16px rgba(0, 0, 0, 0.15)",
@@ -120,7 +122,8 @@ export const messageActionsStyles = stylex.create({
     animationDuration: "0.25s",
     animationTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
     padding: 0,
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     margin: 0,
   },
   panelHeader: {
@@ -134,7 +137,7 @@ export const messageActionsStyles = stylex.create({
   panelIndicator: {
     width: 36,
     height: 4,
-    background: "var(--borderHover, var(--border))",
+    backgroundColor: "var(--borderHover, var(--border))",
     borderRadius: 2,
   },
   actionsGrid: {
@@ -156,7 +159,7 @@ export const messageActionsStyles = stylex.create({
     paddingBottom: "var(--space-3)",
     paddingLeft: "var(--space-2)",
     paddingRight: "var(--space-2)",
-    background: {
+    backgroundColor: {
       default: "transparent",
       ":active": "var(--surfaceInteractiveHover, var(--backgroundHover))",
     },
@@ -164,7 +167,8 @@ export const messageActionsStyles = stylex.create({
       default: "none",
       ":active": "scale(0.96)",
     },
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: "var(--radius-md)",
     color: "var(--textSecondary)",
     cursor: "pointer",
@@ -181,12 +185,12 @@ export const messageActionsStyles = stylex.create({
     width: 44,
     height: 44,
     borderRadius: "var(--radius-md)",
-    background: "var(--surfaceInset, var(--backgroundSecondary))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary))",
     color: "var(--textSecondary)",
     transition: "all 0.15s ease",
   },
   actionIconActive: {
-    background: "var(--primaryGhost)",
+    backgroundColor: "var(--primaryGhost)",
     color: "var(--primary)",
   },
   actionLabel: {

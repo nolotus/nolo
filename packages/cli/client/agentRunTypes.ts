@@ -31,6 +31,10 @@ export type EnvLike = Record<string, string | undefined>;
 export type OutputLike = {
   write: (chunk: string) => void;
   isTTY?: boolean;
+  /** TUI history owns the assistant identity marker; bare CLI output does not. */
+  assistantLabelManaged?: boolean;
+  /** Optional TUI-only semantic write. Never participates in persisted messages. */
+  writeToolBlock?: (chunk: string) => void;
 };
 
 /**

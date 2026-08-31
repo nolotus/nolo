@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
-import { getCliLocale, setCliLocale } from "../tui/i18n";
+import { getCliLocale, setCliLocale, toolLabel } from "../tui/i18n";
 import { displayWidth } from "../tui/tuiAnsi";
 import { themeColorSequence } from "../tui/theme";
 import { detectCodeLangFromPath } from "./assistantOutput";
@@ -8,6 +8,7 @@ import {
   createSseToolEventAdapter,
   createToolEventFormatter,
   formatActiveToolLabel,
+  formatConservativeActiveToolLabel,
   formatFetchTreeBlockForCli,
   formatReadTreeBlockForCli,
   formatRunTreeBlockForCli,
@@ -50,12 +51,237 @@ describe("toolOutput", () => {
     setCliLocale("en");
   });
 
-  test("defaults to compact and respects legacy NOLO_TRACE_TOOLS hide", () => {
-    expect(normalizeToolDisplayMode(undefined)).toBe("compact");
+  test("defaults to normal, maps compact to pro, and respects legacy trace flags", () => {
+    expect(normalizeToolDisplayMode(undefined)).toBe("normal");
+    expect(normalizeToolDisplayMode("normal")).toBe("normal");
+    expect(normalizeToolDisplayMode("pro")).toBe("pro");
+    expect(normalizeToolDisplayMode("compact")).toBe("pro");
+    expect(resolveToolDisplayMode({})).toBe("normal");
     expect(resolveToolDisplayMode({ NOLO_TRACE_TOOLS: "0" })).toBe("hide");
     expect(resolveToolDisplayMode({ NOLO_TRACE_TOOLS: "verbose" })).toBe("verbose");
-    expect(shouldEmitToolEvents("compact")).toBe(true);
+    expect(shouldEmitToolEvents("normal")).toBe(true);
     expect(shouldEmitToolEvents("hide")).toBe(false);
+  });
+
+  test("normal mode reports the action and status without shell plumbing", () => {
+    const format = createToolEventFormatter("normal", false);
+    format(toolEvent({
+      type: "tool-call",
+      toolName: "execShell",
+      argumentsPreview: "cd /secret/work && echo token && bun test",
+    }));
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      argumentsPreview: "cd /secret/work && echo token && bun test",
+      metadata: { exitCode: 0, command: "cd /secret/work && echo token && bun test" },
+    }));
+    expect(output).toContain(toolLabel("execShell"));
+    expect(output).toContain("✓");
+    expect(output).not.toContain("/secret/work");
+    expect(output).not.toContain("echo token");
+    expect(output).not.toContain("bun test");
+  });
+
+  test("normal mode keeps the headless ask_user menu interactive", () => {
+    const line = formatToolEventForCli(
+      toolEvent({
+        type: "tool-result",
+        toolName: "ask_user",
+        content: JSON.stringify({
+          type: "ask_user",
+          question: "接下来做哪件事？",
+          choices: [
+            { id: "a", label: "生成本周周报", userMessage: "帮我生成本周周报" },
+            { id: "b", label: "整理待办事项", userMessage: "帮我整理待办事项" },
+          ],
+          blocking: true,
+        }),
+        metadata: { uiAskChoice: true },
+      }),
+      "normal",
+      false
+    );
+    expect(line).toContain("接下来做哪件事？");
+    expect(line).toContain("1. 生成本周周报");
+    expect(line).toContain("2. 整理待办事项");
+  });
+
+  test("normal mode keeps run cards and skill cards as product content", () => {
+    const runCard = formatToolEventForCli(
+      toolEvent({
+        type: "tool-result",
+        toolName: "controlAgentRun",
+        metadata: { displayData: "Run status / ✅ done\n child-helper" },
+      }),
+      "normal",
+      false
+    );
+    expect(runCard).toContain("Run status");
+    expect(runCard).not.toContain(`▸ controlAgentRun`);
+
+    const skillCard = formatToolEventForCli(
+      toolEvent({
+        type: "tool-result",
+        toolName: "loadSkill",
+        content: "skill body",
+      }),
+      "normal",
+      false
+    );
+    expect(skillCard).toContain("Used Skill");
+  });
+
+  test("normal mode reports failure and needs-action without the command", () => {
+    const format = createToolEventFormatter("normal", false);
+    format(
+      toolEvent({
+        type: "tool-call",
+        toolName: "execShell",
+        argumentsPreview: "bun run scripts/leaky.sh",
+      })
+    );
+    const failed = format(
+      toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        argumentsPreview: "bun run scripts/leaky.sh",
+        metadata: { exitCode: 1, command: "bun run scripts/leaky.sh" },
+      })
+    );
+    expect(failed).toContain(toolLabel("execShell"));
+    expect(failed).toContain("✗");
+    expect(failed).not.toContain("leaky");
+
+    const gated = formatToolEventForCli(
+      toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: {
+          actionGate: {
+            id: "gate-1",
+            kind: "handoff",
+            title: "run external command",
+            status: "pending",
+          },
+        },
+      }),
+      "normal",
+      false
+    );
+    expect(gated).toContain("! needs action");
+    expect(gated).not.toContain("execShell echo");
+  });
+
+  test("normal mode keeps one summary line per command, in order", () => {
+    const format = createToolEventFormatter("normal", false);
+    const emit = (id: string) => {
+      format(
+        toolEvent({
+          type: "tool-call",
+          toolCallId: id,
+          toolName: "execShell",
+          argumentsPreview: `cmd-${id}`,
+        })
+      );
+      return format(
+        toolEvent({
+          type: "tool-result",
+          toolCallId: id,
+          toolName: "execShell",
+          argumentsPreview: `cmd-${id}`,
+          metadata: { exitCode: 0, command: `cmd-${id}` },
+        })
+      );
+    };
+    const first = emit("a");
+    const second = emit("b");
+    // One conservative summary line per event, neither leaking the command.
+    expect(first).toContain(toolLabel("execShell"));
+    expect(second).toContain(toolLabel("execShell"));
+    expect(first).not.toContain("cmd-a");
+    expect(second).not.toContain("cmd-b");
+    expect(first.trim().length).toBeGreaterThan(0);
+    expect(second.trim().length).toBeGreaterThan(0);
+  });
+
+  test("pro mode preserves concrete commands and matches the compact alias byte-for-byte", () => {
+    const runSequence = (mode: "pro" | "compact") => {
+      const format = createToolEventFormatter(mode, false);
+      format(
+        toolEvent({
+          type: "tool-call",
+          toolCallId: "run-1",
+          toolName: "execShell",
+          argumentsPreview: "bun test packages/cli/tui",
+        })
+      );
+      format(
+        toolEvent({
+          type: "tool-result",
+          toolCallId: "run-1",
+          toolName: "execShell",
+          argumentsPreview: "bun test packages/cli/tui",
+          metadata: { exitCode: 0, command: "bun test packages/cli/tui" },
+        })
+      );
+      format(
+        toolEvent({
+          type: "tool-call",
+          toolCallId: "run-2",
+          toolName: "execShell",
+          argumentsPreview: "git status -sb",
+        })
+      );
+      format(
+        toolEvent({
+          type: "tool-result",
+          toolCallId: "run-2",
+          toolName: "execShell",
+          argumentsPreview: "git status -sb",
+          metadata: { exitCode: 0, command: "git status -sb" },
+        })
+      );
+      // Run results buffer into a folded tree; flush emits it in event order.
+      return format.flush ? format.flush() : "";
+    };
+
+    const pro = runSequence("pro");
+    const legacyCompact = runSequence("compact");
+    expect(pro).toBe(legacyCompact);
+    expect(pro).toContain("bun test packages/cli/tui");
+    expect(pro).toContain("git status -sb");
+    expect(pro.indexOf("bun test")).toBeLessThan(pro.indexOf("git status"));
+  });
+
+  test("normal spinner/activity label carries the verb only, never the command", () => {
+    const label = formatConservativeActiveToolLabel({
+      toolName: "execShell",
+      argumentsPreview: "cd /srv/app && echo deploy-token | tee log",
+    });
+    expect(label).toBe(toolLabel("execShell"));
+    expect(label).not.toContain("deploy-token");
+    expect(label).not.toContain("echo");
+  });
+
+  test("hide suppresses everything and verbose keeps the full trace", () => {
+    const call = toolEvent({
+      type: "tool-call",
+      toolName: "execShell",
+      argumentsPreview: "bun test packages/cli",
+    });
+    const result = toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      argumentsPreview: "bun test packages/cli",
+      metadata: { exitCode: 0, command: "bun test packages/cli" },
+      summary: "exit=0",
+    });
+    expect(formatToolEventForCli(call, "hide", false)).toBe("");
+    expect(formatToolEventForCli(result, "hide", false)).toBe("");
+    const verbose = formatToolEventForCli(call, "verbose", false);
+    expect(verbose).toContain("[nolo:tool]");
+    expect(verbose).toContain("bun test packages/cli");
   });
 
   test("compact mode renders setTodoList as a readable task list", () => {

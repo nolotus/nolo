@@ -256,7 +256,8 @@ describe("run dock rendering", () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("2 running");
     expect(lines[1]).toContain("Flash");
-    expect(lines[1]).toContain("1m03s");
+    // 运行中不显示 run 总时长，只显示动作/进度事实。
+    expect(lines[1]).not.toContain("1m03s");
     expect(lines[1]).toContain("24 tools");
     // 只留最后一个工具名，行宽有限。
     expect(lines[1]).toContain("edit");

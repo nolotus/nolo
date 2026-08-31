@@ -64,6 +64,52 @@ describe("createCliTurnOutput thinking display", () => {
   });
 });
 
+test("TUI history owns the assistant marker and keeps tool blocks structured", () => {
+  const history = createTurnHistory();
+  startTurn(history, "assistant");
+  const stream = createHistoryOutputStream(history, () => {});
+  const spinner = {
+    setThinkingHint: () => {},
+    show: () => {},
+    stop: () => {},
+  };
+  const options = {
+    output: stream,
+    agentName: "TestAgent",
+    env: { NOLO_CLI_TOOLS: "normal" },
+  } as unknown as RunAgentTurnOptions;
+  const turn = createCliTurnOutput({ options, spinner: spinner as any });
+
+  turn.pushText("先检查。\n");
+  turn.handleToolEvent({
+    type: "tool-call",
+    toolName: "execShell",
+    toolCallId: "run-1",
+    round: 0,
+    argumentsPreview: "cd /private && echo secret",
+  } as LocalAgentToolEvent);
+  turn.handleToolEvent({
+    type: "tool-result",
+    toolName: "execShell",
+    toolCallId: "run-1",
+    round: 0,
+    metadata: { exitCode: 0 },
+  } as LocalAgentToolEvent);
+  turn.pushText("完成。");
+  turn.finish();
+  finalizeCurrentTurn(history);
+
+  const [completed] = history.turns;
+  expect(completed.content).not.toContain("TestAgent >");
+  expect(completed.content).not.toContain("/private");
+  expect(completed.blocks?.map((block) => block.kind)).toEqual([
+    "assistant",
+    "tool",
+    "assistant",
+  ]);
+  expect(completed.blocks?.map((block) => block.content).join("")).toBe(completed.content);
+});
+
 /** Escape a localized label so it is safe to embed in a RegExp. */
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -94,7 +140,7 @@ describe("createCliTurnOutput compact tool tree regression", () => {
     const options = {
       output: stream as unknown as NodeJS.WritableStream,
       agentName: "TestAgent",
-      env: { COLORTERM: "truecolor" },
+      env: { COLORTERM: "truecolor", NOLO_CLI_TOOLS: "pro" },
     } as unknown as RunAgentTurnOptions;
 
     const turn = createCliTurnOutput({ options });
@@ -170,7 +216,7 @@ describe("createCliTurnOutput compact tool tree regression", () => {
     const options = {
       output: stream as unknown as NodeJS.WritableStream,
       agentName: "TestAgent",
-      env: { COLORTERM: "truecolor" },
+      env: { COLORTERM: "truecolor", NOLO_CLI_TOOLS: "pro" },
     } as unknown as RunAgentTurnOptions;
     const turn = createCliTurnOutput({ options });
 

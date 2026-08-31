@@ -7,7 +7,7 @@ import * as stylex from "@stylexjs/stylex";
 export const prepareAgentDraftToolCardStyles = stylex.create({
   card: {
     alignItems: "flex-start",
-    background: "var(--backgroundSecondary, #f8fafc)",
+    backgroundColor: "var(--backgroundSecondary, #f8fafc)",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight, var(--border, #e2e8f0)))",
@@ -23,7 +23,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
   },
   icon: {
     alignItems: "center",
-    background: "var(--primary, #2563eb)",
+    backgroundColor: "var(--primary, #2563eb)",
     borderRadius: "var(--radius-xs)",
     color: "var(--primaryText, #ffffff)",
     display: "flex",
@@ -55,7 +55,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     marginBottom: 0,
   },
   status: {
-    background: "var(--accentSubtle, rgba(14, 165, 233, 0.14))",
+    backgroundColor: "var(--accentSubtle, rgba(14, 165, 233, 0.14))",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight, rgba(14, 165, 233, 0.2)))",
@@ -90,7 +90,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     gap: 4,
   },
   missing: {
-    background: "var(--surfaceInset, rgba(15, 23, 42, 0.04))",
+    backgroundColor: "var(--surfaceInset, rgba(15, 23, 42, 0.04))",
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary, #475569)",
     fontSize: 12,
@@ -154,7 +154,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     },
   },
   actionPrimary: {
-    background: {
+    backgroundColor: {
       default: "var(--primary, #2563eb)",
       ":hover": "var(--primaryHover, #1d4ed8)",
     },
@@ -169,7 +169,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     opacity: 0.6,
   },
   actionSecondary: {
-    background: {
+    backgroundColor: {
       default: "var(--surfaceInteractive, var(--background, #ffffff))",
       ":hover": "var(--surfaceInteractiveHover, var(--backgroundSecondary, #f1f5f9))",
     },
@@ -180,7 +180,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     color: "var(--text, #0f172a)",
   },
   actionPanel: {
-    background: {
+    backgroundColor: {
       default: "color-mix(in srgb, var(--primary, #2563eb) 10%, transparent)",
       ":hover": "color-mix(in srgb, var(--primary, #2563eb) 16%, transparent)",
     },
@@ -191,7 +191,7 @@ export const prepareAgentDraftToolCardStyles = stylex.create({
     color: "var(--primary, #2563eb)",
   },
   actionPanelActive: {
-    background: "color-mix(in srgb, var(--primary, #2563eb) 18%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--primary, #2563eb) 18%, transparent)",
     borderColor: "var(--primary, #2563eb)",
   },
 });

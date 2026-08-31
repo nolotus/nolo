@@ -15,7 +15,7 @@ export const messageToolConfirmBarStyles = stylex.create({
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight))",
-    background: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-start",
@@ -34,7 +34,7 @@ export const messageToolConfirmBarStyles = stylex.create({
       default: "var(--borderMuted, var(--borderLight))",
       ":hover": "var(--borderSubtle)",
     },
-    background: {
+    backgroundColor: {
       default: "var(--surfaceInteractive, var(--backgroundSecondary))",
       ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
     },
@@ -51,7 +51,7 @@ export const messageToolConfirmBarStyles = stylex.create({
     opacity: 0.72,
     cursor: "default",
     borderColor: "var(--borderMuted, var(--borderLight))",
-    background: "var(--surfaceInteractive, var(--backgroundSecondary))",
+    backgroundColor: "var(--surfaceInteractive, var(--backgroundSecondary))",
     color: "var(--textSecondary)",
   },
   status: {

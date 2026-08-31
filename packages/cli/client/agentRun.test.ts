@@ -1485,7 +1485,7 @@ describe("cli agent run client", () => {
     expect(matches?.length).toBe(1);
   });
 
-  test("prints compact local tool trace by default", async () => {
+  test("prints a plumbing-free local tool summary by default", async () => {
     const output = new CaptureOutput();
     let completeCalls = 0;
 
@@ -1534,7 +1534,7 @@ describe("cli agent run client", () => {
 
     expect(result).toMatchObject({ exitCode: 0, dialogId: "dialog-local" });
     expect(output.text()).toContain("Read");
-    expect(output.text()).toContain("README.md");
+    expect(output.text()).not.toContain("README.md");
     expect(output.text()).not.toContain("[nolo:tool]");
   });
 
@@ -1557,7 +1557,7 @@ describe("cli agent run client", () => {
       serverUrl: "https://nolo.chat",
       message: "run tests",
       scriptDir: "C:/missing/scripts",
-      env: { AUTH_TOKEN: "token-123" },
+      env: { AUTH_TOKEN: "token-123", NOLO_CLI_TOOLS: "pro" },
       output,
       runtimeMode: "local",
       localRuntimeAdapter: {

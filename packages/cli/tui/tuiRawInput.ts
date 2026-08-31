@@ -180,7 +180,7 @@ export function createNoopFixedInput(): FixedInputController {
 }
 
 type FixedInputConfig = {
-  getStatusLine: () => string;
+  getStatusLine: (maxWidth?: number) => string;
   /** Optional title line rendered above the status line. */
   getTitleLine?: () => string | null;
   /** turn 进行中的活动行；无活动时返回 null。 */
@@ -310,7 +310,7 @@ export function createFixedInput(
     if (titleLine) {
       sections.push(fitAnsiLine(titleLine.replace(/\r?\n/g, " "), cols));
     }
-    sections.push(fitAnsiLine(config.getStatusLine(), cols));
+    sections.push(fitAnsiLine(config.getStatusLine(cols), cols));
 
     // Queued follow-up preview lines sit between the status line and the input
     // prompt so the user sees the actual staged text, not just a count.

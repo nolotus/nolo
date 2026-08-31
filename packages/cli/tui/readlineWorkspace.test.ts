@@ -626,6 +626,7 @@ describe("turn history", () => {
     expect(history.turns).toEqual([]);
     expect(history.currentRole).toBeNull();
     expect(history.currentContent).toBe("");
+    expect(history.currentBlocks).toEqual([]);
   });
 
   test("startTurn finalizes the previous turn", () => {
@@ -643,7 +644,11 @@ describe("turn history", () => {
     startTurn(history, "assistant");
     appendToCurrentTurn(history, "world");
     finalizeCurrentTurn(history);
-    expect(history.turns).toEqual([{ role: "assistant", content: "world" }]);
+    expect(history.turns).toEqual([{
+      role: "assistant",
+      content: "world",
+      blocks: [{ kind: "assistant", content: "world" }],
+    }]);
     expect(history.currentRole).toBeNull();
   });
 

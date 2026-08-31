@@ -14,6 +14,7 @@ import {
   stripImageTokens,
 } from "./session";
 import {
+  composeStatusLineWithQueue,
   renderContextPanel,
   renderKnownAgents,
   renderStatusLine,
@@ -23,6 +24,8 @@ import {
 import type { CliUpdateInfo } from "../updateCommands";
 import { getCliLocale, setCliLocale, t, type CliLocale } from "./i18n";
 import { displayWidth, stripAnsi, createRawInputDecoder } from "./readlineWorkspace";
+import { visibleWidth } from "./tuiAnsi";
+import { dimCliText } from "../client/terminalStyles";
 import { detectImagePaths } from "./pasteImage";
 import {
   createCollapsedPasteStore,
@@ -39,6 +42,10 @@ import {
   type TuiDensity,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import {
+  getCachedRunningAgentCount,
+  resetRunningAgentCountCacheForTest,
+} from "./runRegistryPoller";
 
 // Command-output assertions target English strings; pin the locale for
 // machines whose LANG resolves to zh. Locale-dependent describes further down
@@ -729,6 +736,29 @@ describe("handleTuiInput - /altscreen dispatch", () => {
   });
 });
 
+describe("handleTuiInput - /tools display", () => {
+  test("normal is the default and compact remains a pro alias", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+    expect(state.toolDisplay).toBe("normal");
+
+    const pro = handleTuiInput("/tools pro", state);
+    expect(pro.nextState.toolDisplay).toBe("pro");
+    const compact = handleTuiInput("/tools compact", state);
+    expect(compact.nextState.toolDisplay).toBe("pro");
+    const normal = handleTuiInput("/tools normal", pro.nextState);
+    expect(normal.nextState.toolDisplay).toBe("normal");
+  });
+
+  test("unknown values show the normal/pro usage without changing state", () => {
+    setCliLocale("en");
+    const state = createInitialTuiState({});
+    const result = handleTuiInput("/tools expert", state);
+    expect(result.nextState).toBe(state);
+    expect(result.output).toContain("normal|pro|hide|verbose");
+  });
+});
+
 describe("handleTuiInput - /auto dispatch", () => {
   // /auto 是会话级权限自动化开关：dispatch 层只改 TuiState.autoConfirm，
   // 不产生 action；真正跳过确认弹窗的接线在 readlineWorkspace 的两处
@@ -782,6 +812,94 @@ describe("handleTuiInput - /auto dispatch", () => {
     expect(stripAnsi(renderStatusLine({ ...base, autoConfirm: true }))).toContain("⏵ auto");
     expect(stripAnsi(renderStatusLine({ ...base, autoConfirm: false }))).not.toContain("auto");
     expect(stripAnsi(renderStatusLine(base))).not.toContain("auto");
+  });
+
+  test("narrow status drops context/cwd before dirty, running and auto", () => {
+    resetRunningAgentCountCacheForTest();
+    getCachedRunningAgentCount({
+      force: true,
+      now: Date.now(),
+      reader: () => [{ status: "running" }],
+    });
+    const state = {
+      ...createInitialTuiState({}),
+      cwd: "/a/very/long/workspace/path",
+      agentName: "A very long agent display name",
+      autoConfirm: true,
+      gitStatus: {
+        branch: "a-very-long-feature-branch-name",
+        modified: 2,
+        untracked: 3,
+      },
+    };
+    const plain = stripAnsi(renderStatusLine(state, 52));
+    expect(displayWidth(plain)).toBeLessThanOrEqual(52);
+    expect(plain).toContain("*2");
+    expect(plain).toContain("1 agent");
+    expect(plain).toContain("⏵ auto");
+    expect(plain).not.toContain("context:");
+    expect(plain).not.toContain("workspace");
+
+    const emergency = stripAnsi(renderStatusLine(state, 22));
+    expect(displayWidth(emergency)).toBeLessThanOrEqual(22);
+    expect(emergency).toContain("⏵");
+    expect(emergency).toContain("⚙1");
+    expect(emergency).toContain("⑂*2?3");
+    expect(emergency).not.toContain("context:");
+    resetRunningAgentCountCacheForTest();
+  });
+
+  describe("composeStatusLineWithQueue — queue badge never squeezes required state", () => {
+    const queueState = () => ({
+      ...createInitialTuiState({}),
+      cwd: "/a/very/long/workspace/path",
+      agentName: "A very long agent display name",
+      autoConfirm: true,
+      gitStatus: {
+        branch: "a-very-long-feature-branch-name",
+        modified: 2,
+        untracked: 3,
+      },
+    });
+
+    test("badge wider than maxWidth is dropped; auto/running/dirty stay visible", () => {
+      resetRunningAgentCountCacheForTest();
+      getCachedRunningAgentCount({
+        force: true,
+        now: Date.now(),
+        reader: () => [{ status: "running" }],
+      });
+      // Badge (" · 12 queued") is deliberately wider than the whole budget:
+      // reserving its width must not starve the required fields, and the
+      // badge itself must go before any of them does.
+      const badge = dimCliText(" · 12 queued", true);
+      const line = composeStatusLineWithQueue(queueState(), badge, 12);
+
+      expect(visibleWidth(line)).toBeLessThanOrEqual(12);
+      expect(stripAnsi(line)).toContain("⏵");
+      expect(stripAnsi(line)).toContain("⚙1");
+      expect(stripAnsi(line)).toContain("⑂*2?3");
+      expect(stripAnsi(line)).not.toContain("queued");
+      resetRunningAgentCountCacheForTest();
+    });
+
+    test("badge is kept only when the degraded status still fits beside it", () => {
+      resetRunningAgentCountCacheForTest();
+      getCachedRunningAgentCount({
+        force: true,
+        now: Date.now(),
+        reader: () => [{ status: "running" }],
+      });
+      const badge = dimCliText(" · 2 queued", true);
+      const line = composeStatusLineWithQueue(queueState(), badge, 30);
+
+      expect(visibleWidth(line)).toBeLessThanOrEqual(30);
+      expect(stripAnsi(line)).toContain("⏵");
+      expect(stripAnsi(line)).toContain("⚙1");
+      expect(stripAnsi(line)).toContain("⑂");
+      expect(stripAnsi(line)).toContain("2 queued");
+      resetRunningAgentCountCacheForTest();
+    });
   });
 });
 

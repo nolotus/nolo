@@ -14,6 +14,7 @@ import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
   clipText,
   formatDuration,
+  formatRunAge,
   isAgentRunTerminalStatus,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 
@@ -54,6 +55,12 @@ export function activeInFlight(
 ): NonNullable<AgentRunSnapshot["inFlight"]> | null {
   if (isAgentRunTerminalStatus(snapshot.status)) return null;
   return snapshot.inFlight ?? null;
+}
+
+/** 总时长只用于终态；运行中应使用 activeInFlight 的动作计时。 */
+export function formatTerminalRunAge(snapshot: AgentRunSnapshot, now: number): string | null {
+  if (!isAgentRunTerminalStatus(snapshot.status)) return null;
+  return formatRunAge(snapshot, now);
 }
 
 /**

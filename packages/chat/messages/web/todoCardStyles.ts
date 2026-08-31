@@ -25,7 +25,7 @@ export const todoCardStyles = stylex.create({
     paddingLeft: 16,
     paddingRight: 16,
     borderRadius: "var(--radius-md, 10px)",
-    background: "var(--surfaceInset, var(--backgroundSecondary, #f8f9fa))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f8f9fa))",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
@@ -62,14 +62,14 @@ export const todoCardStyles = stylex.create({
   progressBarBg: {
     width: "100%",
     height: 4,
-    background: "var(--borderMuted, #e5e7eb)",
+    backgroundColor: "var(--borderMuted, #e5e7eb)",
     borderRadius: 2,
     overflow: "hidden",
     marginBottom: 12,
   },
   progressBarFill: {
     height: "100%",
-    background: "var(--primary, #3b82f6)",
+    backgroundColor: "var(--primary, #3b82f6)",
     borderRadius: 2,
     transition: "width 0.3s ease",
   },
@@ -89,7 +89,7 @@ export const todoCardStyles = stylex.create({
     borderRadius: 6,
     transition: "background 0.15s ease",
     ":hover": {
-      background: "var(--backgroundHover, rgba(0, 0, 0, 0.02))",
+      backgroundColor: "var(--backgroundHover, rgba(0, 0, 0, 0.02))",
     },
   },
   icon: {

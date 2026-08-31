@@ -127,7 +127,7 @@ export const messageLayoutStyles = stylex.create({
     fontWeight: 600,
     letterSpacing: "0.02em",
     color: "var(--textSecondary)",
-    background: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight))",
@@ -148,7 +148,7 @@ export const messageLayoutStyles = stylex.create({
     overflowWrap: "anywhere",
   },
   msgBodyRobot: {
-    background: "transparent",
+    backgroundColor: "transparent",
     color: "var(--textPrimary, var(--text, #1a1a1a))",
     paddingTop: 2,
     paddingBottom: 0,
@@ -157,7 +157,7 @@ export const messageLayoutStyles = stylex.create({
     width: "100%",
   },
   msgBodySelf: {
-    background: "var(--surfaceRaised, var(--backgroundSecondary, #f3f4f6))",
+    backgroundColor: "var(--surfaceRaised, var(--backgroundSecondary, #f3f4f6))",
     color: "var(--textPrimary, var(--text, #111827))",
     paddingTop: "var(--space-3)",
     paddingBottom: "var(--space-3)",
@@ -187,7 +187,7 @@ export const messageLayoutStyles = stylex.create({
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight))",
-    background: "var(--surfaceInset, var(--backgroundSecondary))",
+    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary))",
   },
   msgImage: {
     display: "block",
@@ -253,7 +253,7 @@ export const messageLayoutStyles = stylex.create({
   emptyContentLine: {
     height: 12,
     borderRadius: 4,
-    background: "color-mix(in srgb, var(--textMuted, var(--textSecondary)) 18%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--textMuted, var(--textSecondary)) 18%, transparent)",
     animationName: emptyContentPulse,
     animationDuration: "1.4s",
     animationTimingFunction: "ease-in-out",
@@ -268,7 +268,7 @@ export const messageLayoutStyles = stylex.create({
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight))",
     borderRadius: "var(--radius-sm)",
-    background: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
+    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
     marginBottom: 8,
   },
   imageGenerationWaitCardTitle: {
@@ -326,7 +326,7 @@ export const messageLayoutStyles = stylex.create({
     width: 2,
     height: "1em",
     verticalAlign: "text-bottom",
-    background: "var(--primary)",
+    backgroundColor: "var(--primary)",
     marginLeft: 2,
     animationName: cursorBlink,
     animationDuration: "1s",
@@ -347,7 +347,7 @@ export const messageLayoutStyles = stylex.create({
   streamingInlineArtifactPlaceholder: {
     padding: "var(--space-4)",
     color: "var(--textMuted, var(--textSecondary))",
-    background: "var(--backgroundGhost)",
+    backgroundColor: "var(--backgroundGhost)",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--borderSubtle, var(--border))",

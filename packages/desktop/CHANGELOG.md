@@ -1,4 +1,18 @@
 
+## 0.49.0-alpha.1
+
+## 0.49.0-alpha.1 (2026-08-31)
+
+### Features
+
+* **tui:** add normal and pro transcript display ([6df9aea](https://github.com/nolotus/bun-nolo/commit/6df9aea074fec7f40daee9caecb8389c455ef8db))
+
+### Bug Fixes
+
+* **chat:** messages 组 73 处 StyleX shorthand 转 longhand，修复消息 hover 按钮无背景 ([0c9d7e7](https://github.com/nolotus/bun-nolo/commit/0c9d7e7ff9d70950af338e38b8bd2f638c1824ac))
+* **tui:** run 面板只显示当前对话相关 run，并去噪双时长与机器级计数 ([92e580f](https://github.com/nolotus/bun-nolo/commit/92e580f297f486464b60d90967bfe4113587b9b5))
+
+
 ## 0.48.0-alpha.1
 
 ## 0.48.0-alpha.1 (2026-08-31)

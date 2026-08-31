@@ -624,10 +624,10 @@ const STRINGS = {
   runtimeUsage: { en: "Usage: /runtime <auto|local|server>", zh: "用法：/runtime <auto|local|server>" },
   runtimeSet: { en: "Runtime: {0}", zh: "运行模式：{0}" },
   toolsCurrent: {
-    en: "Tool display: {0} (hide | compact | verbose)",
-    zh: "工具显示：{0}（hide | compact | verbose）",
+    en: "Tool display: {0} (normal | pro | hide | verbose)",
+    zh: "工具显示：{0}（普通 normal | 专业 pro | hide | verbose）",
   },
-  toolsUsage: { en: "Usage: /tools <hide|compact|verbose>", zh: "用法：/tools <hide|compact|verbose>" },
+  toolsUsage: { en: "Usage: /tools <normal|pro|hide|verbose>", zh: "用法：/tools <normal|pro|hide|verbose>" },
   toolsSet: { en: "Tool display: {0}", zh: "工具显示：{0}" },
   thinkingCurrent: {
     en: "Thinking display: {0} (show | hide)",

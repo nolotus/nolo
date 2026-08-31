@@ -28,8 +28,9 @@ function record(over: Partial<RunRecord> & { runId: string }): RunRecord {
  * 轮询器只认两件事：面板上现在挂着谁，以及磁盘上读到什么。两者都注入，
  * 所以测试不碰真实文件系统也不碰真实 timer。
  */
-function setup(opts: { docked?: AgentRunSnapshot[]; discovered?: RunRecord[]; dialogId?: string } = {}) {
+function setup(opts: { docked?: AgentRunSnapshot[]; discovered?: RunRecord[]; dialogId?: string | null } = {}) {
   let nowMs = T0;
+  let currentDialogId = opts.dialogId;
   let tickCb: (() => void) | null = null;
   const docked = new Map<string, AgentRunSnapshot>();
   for (const run of opts.docked ?? []) docked.set(run.runId, run);
@@ -51,7 +52,7 @@ function setup(opts: { docked?: AgentRunSnapshot[]; discovered?: RunRecord[]; di
       docked.set(snapshot.runId, { ...docked.get(snapshot.runId), ...snapshot });
     },
     discoverRuns: () => discovered,
-    getCurrentDialogId: () => opts.dialogId,
+    ...(opts.dialogId !== undefined ? { getCurrentDialogId: () => currentDialogId } : {}),
     readRecord: (runId) => {
       reads.push(runId);
       if (throwOn.has(runId)) throw new Error("boom");
@@ -90,6 +91,9 @@ function setup(opts: { docked?: AgentRunSnapshot[]; discovered?: RunRecord[]; di
     setDiscovered(runs: RunRecord[]) {
       discovered = runs;
       for (const run of runs) records.set(run.runId, run);
+    },
+    setCurrentDialogId(dialogId: string | null) {
+      currentDialogId = dialogId;
     },
     dock(run: AgentRunSnapshot) {
       docked.set(run.runId, run);
@@ -463,6 +467,16 @@ describe("run registry poller", () => {
     expect(h.updates).toEqual([]);
   });
 
+  test("returns no discovered runs before the session has a dialog", () => {
+    const h = setup({
+      dialogId: null,
+      discovered: [record({ runId: "run-unassigned", parentDialogId: "dialog-a" })],
+    });
+    h.poller.ensureRunning();
+    h.tick();
+    expect(h.updates).toEqual([]);
+  });
+
   test("discovers an active run belonging to the current dialog", () => {
     const h = setup({
       dialogId: "dialog-a",
@@ -483,15 +497,29 @@ describe("run registry poller", () => {
     expect(h.updates).toEqual([]);
   });
 
-  test("discovers an active run missing parentDialogId (degradation fallback)", () => {
+  test("skips an active run missing parentDialogId", () => {
     const h = setup({
       dialogId: "dialog-a",
       discovered: [record({ runId: "run-unassigned", parentDialogId: undefined })],
     });
     h.poller.ensureRunning();
     h.tick();
-    expect(h.updates.map((u) => u.runId)).toEqual(["run-unassigned"]);
-    expect((h.updates[0] as any)?.unassigned).toBe(true);
+    expect(h.updates).toEqual([]);
+  });
+
+  test("switches discovery filtering when the current dialog changes", () => {
+    const h = setup({
+      dialogId: "dialog-a",
+      discovered: [record({ runId: "run-a", parentDialogId: "dialog-a" })],
+    });
+    h.poller.ensureRunning();
+    h.tick();
+    expect(h.updates.map((u) => u.runId)).toEqual(["run-a"]);
+
+    h.setCurrentDialogId("dialog-b");
+    h.setDiscovered([record({ runId: "run-b", parentDialogId: "dialog-b" })]);
+    for (let i = 0; i < 5; i++) h.tick();
+    expect(h.updates.map((u) => u.runId)).toEqual(["run-a", "run-b"]);
   });
 
   test("repeated discovery is idempotent", () => {

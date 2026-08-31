@@ -8,13 +8,11 @@
 
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
-  formatRunAge,
   getAgentRunStatusIcon,
-  isAgentRunTerminalStatus,
   runShowsLogTail,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
-import { activeInFlight, formatInFlightFact, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
+import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
 /**
@@ -78,9 +76,9 @@ export function formatAgentRunPanelLines(
   const unassignedFact = formatUnassignedFact(snapshot);
   const unassignedPart = unassignedFact ? ` · ${unassignedFact}` : "";
   const progressPart = formatPanelProgress(snapshot, now);
-  // The panel repaints on a timer, so this ticks live —不像 transcript
-  // cards, which freeze the age at the moment they were emitted.
-  const age = formatRunAge(snapshot, now);
+  // 总时长只描述已经结束的 run；运行中只展示 activeInFlight 提供的动作事实
+  // （例如 `thinking 12s`），避免把 run 总时长和当前动作时长混为一谈。
+  const age = formatTerminalRunAge(snapshot, now);
   const agePart = age ? ` · ${age}` : "";
 
   if (!colorEnabled) {
