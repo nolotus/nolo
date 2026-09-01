@@ -1,9 +1,8 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareCliPublishPackage } from "../../scripts/release/prepareCliPublishPackage";
 
 setDefaultTimeout(30_000);
 
@@ -41,10 +40,21 @@ describe("CLI installable pack smoke test", () => {
           rmSync(TEST_PREFIX, { recursive: true, force: true });
         }
         mkdirSync(TEST_PREFIX, { recursive: true });
-        await prepareCliPublishPackage({
-          repoRoot: process.cwd(),
-          outDir: DIST_DIR,
+        const result = spawnSync("bun", [
+          join(process.cwd(), "scripts/release/prepareCliPublishPackage.ts"),
+          "--out-dir",
+          DIST_DIR,
+        ], {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          timeout: 120_000,
+          env: { PATH: process.env.PATH },
         });
+        if (result.error || result.status !== 0) {
+          throw new Error(
+            `CLI publish preparation failed: ${result.error?.message ?? result.stderr ?? `status ${result.status}`}`
+          );
+        }
       })();
     }
     return buildDistPromise;
@@ -157,12 +167,28 @@ describe("CLI installable pack smoke test", () => {
   test("invoke extracted CLI with --help flag", async () => {
     await ensureExtractedPackage();
     const cliIndexPath = join(TEST_PREFIX, "index.js");
-    const output = execFileSync("node", [cliIndexPath, "--help"], {
-      encoding: "utf8",
+    const stdoutPath = join(TEST_ROOT, "extracted-help.stdout");
+    const stderrPath = join(TEST_ROOT, "extracted-help.stderr");
+    const result = spawnSync("/bin/sh", [
+      "-c",
+      'exec node "$1" "$2" > "$3" 2> "$4"',
+      "nolo-installable-pack",
+      cliIndexPath,
+      "--help",
+      stdoutPath,
+      stderrPath,
+    ], {
       timeout: 15_000, // 兜底：native binding 异常时不卡死 CI
+      env: { PATH: process.env.PATH, NODE_OPTIONS: process.env.NODE_OPTIONS },
     });
+    const output = readFileSync(stdoutPath, "utf8");
+    const errorOutput = readFileSync(stderrPath, "utf8");
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(errorOutput).toBe("");
 
-    // Basic smoke check: output should contain something CLI-related
+    // Basic smoke check: output should contain something CLI-related.
+    // Use stdout explicitly so the test cannot pass on a silent successful exit.
     expect(output.length).toBeGreaterThan(0);
   });
 
@@ -190,12 +216,26 @@ describe("CLI installable pack smoke test", () => {
       "nolo-cli",
       "index.js"
     );
-    const output = execFileSync(
-      "node",
-      [installedCliPath, "dialog", "read", "--help"],
-      { cwd: NPM_INSTALL_ROOT, encoding: "utf8", timeout: 30_000 }
-    );
-
+    const result = spawnSync("/bin/sh", [
+      "-c",
+      'exec node "$1" "$2" "$3" "$4" > "$5" 2> "$6"',
+      "nolo-installable-pack",
+      installedCliPath,
+      "dialog",
+      "read",
+      "--help",
+      join(TEST_ROOT, "installed-help.stdout"),
+      join(TEST_ROOT, "installed-help.stderr"),
+    ], {
+      cwd: NPM_INSTALL_ROOT,
+      timeout: 30_000,
+      env: { PATH: process.env.PATH, NODE_OPTIONS: process.env.NODE_OPTIONS },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    const output = readFileSync(join(TEST_ROOT, "installed-help.stdout"), "utf8");
+    const errorOutput = readFileSync(join(TEST_ROOT, "installed-help.stderr"), "utf8");
+    expect(errorOutput).toBe("");
     expect(output).toContain("Usage:\n  nolo dialog read");
     expect(output).not.toContain("Dynamic require");
   }, 120_000);
