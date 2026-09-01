@@ -20,6 +20,12 @@ import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyl
 import { themeText } from "../tui/theme";
 import { stripAnsi } from "../tui/tuiAnsi";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
+import {
+  formatFetchItemUrl,
+  formatReadItemPath,
+  formatRunItemCommand,
+  formatSearchItemQuery,
+} from "./formatReadPathTree";
 
 function clip(value: string, max = 72) {
   return clipCompactText(value, max, "…");
@@ -35,6 +41,14 @@ export function formatConservativeActiveToolLabel(
   event: Pick<LocalAgentToolEvent, "toolName" | "argumentsPreview">
 ) {
   return toolLabel(event.toolName || "tool");
+}
+
+function isRunToolName(name?: string): boolean {
+  return name === "execShell" || name === "runCommand" || name === "launchProcess";
+}
+
+function isReadToolName(name?: string): boolean {
+  return name === "readFile";
 }
 
 function isFailedToolResult(event: LocalAgentToolEvent) {
@@ -636,15 +650,56 @@ function formatLoadSkillBlock(
   return `${star} ${labelPart}: ${namePart}\n`;
 }
 
+export const TUI_TREE_MARKER = "\u0001TUI_TREE\n";
+export const TUI_TREE_END = "\u0002";
+
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
+  reset?: () => void;
 };
 
 export function createToolEventFormatter(
-  colorEnabled = resolveCliColorEnabled()
+  colorEnabled = resolveCliColorEnabled(),
+  opts: { tuiTrees?: boolean } = {},
 ): ToolEventFormatter {
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  return (event: LocalAgentToolEvent): string => {
+  let tree: { kind: "Run" | "Read" | "Search" | "Fetch"; items: string[] } | null = null;
+  const treeKind = (name: string): "Run" | "Read" | "Search" | "Fetch" | null =>
+    isRunToolName(name) ? "Run" : isReadToolName(name) ? "Read" : name === "exa_search" ? "Search" : name === "fetchWebpage" ? "Fetch" : null;
+  const treeLine = (kind: "Run" | "Read" | "Search" | "Fetch", items: string[]) => {
+    const label = kind === "Run" ? toolLabel("execShell") : kind === "Read" ? toolLabel("readFile") : kind === "Fetch" ? toolLabel("fetchWebpage") : toolLabel("exa_search");
+    return `${TUI_TREE_MARKER}${label} (${items.length})\n${items.map((item, i) => `${i === items.length - 1 ? "└── " : "├── "}${item}  ✓`).join("\n")}${TUI_TREE_END}\n`;
+  };
+
+  const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
+    if (!opts.tuiTrees || event.type !== "tool-result") return null;
+    if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate)) {
+      tree = null;
+      return null;
+    }
+    const name = event.toolName || call?.toolName || "tool";
+    const kind = treeKind(name);
+    if (!kind) { tree = null; return null; }
+    let item = "";
+    const m = event.metadata ?? {};
+    if (kind === "Run") {
+      const command = typeof m.command === "string" ? m.command : "";
+      // argumentsPreview is intentionally never promoted to a tree leaf: it is
+      // model-controlled. Only the runtime's safe command projection is used.
+      item = command ? formatRunItemCommand(command, typeof m.exitCode === "number" ? m.exitCode : undefined, Boolean(m.timedOut)) : "command";
+    }
+    if (kind === "Read") item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
+    if (kind === "Search") item = formatSearchItemQuery(typeof m.query === "string" ? m.query : typeof m.pattern === "string" ? m.pattern : "search", typeof m.path === "string" ? m.path : undefined);
+    if (kind === "Fetch") item = formatFetchItemUrl(typeof m.url === "string" ? m.url : "webpage");
+    if (!item) item = toolLabel(name);
+    if (tree?.kind !== kind) tree = { kind, items: [] };
+    tree.items.push(item);
+    // Keep the first call visible immediately; the second result replaces this
+    // tail row with the complete tree in the TUI history.
+    if (tree.items.length < 2) return formatNormalToolLine(event, call, colorEnabled);
+    return treeLine(kind, tree.items);
+  };
+  const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {
         toolName: event.toolName,
@@ -654,8 +709,12 @@ export function createToolEventFormatter(
     }
     const call = pending.get(event.toolCallId);
     pending.delete(event.toolCallId);
+    const treeOutput = formatTreeEvent(event, call);
+    if (treeOutput !== null) return treeOutput;
     return formatNormalToolLine(event, call, colorEnabled);
-  };
+  }) as ToolEventFormatter;
+  format.reset = () => { tree = null; };
+  return format;
 }
 
 export function createSseToolEventAdapter(

@@ -34,7 +34,9 @@ export type OutputLike = {
   /** TUI history owns the assistant identity marker; bare CLI output does not. */
   assistantLabelManaged?: boolean;
   /** Optional TUI-only semantic write. Never participates in persisted messages. */
-  writeToolBlock?: (chunk: string) => void;
+  writeToolBlock?: (chunk: string) => boolean;
+  /** TUI history capability: enable grouped tool trees. */
+  tuiTrees?: boolean;
 };
 
 /**

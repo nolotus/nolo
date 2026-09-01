@@ -32,6 +32,7 @@ import {
   userSurfaceBackgroundSequence,
 } from "./theme";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
+import { TUI_TREE_MARKER } from "../client/toolOutput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
@@ -318,6 +319,29 @@ export function appendLocalTurn(
  */
 const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓)$/;
 
+function applyTreeRewrite(text: string, chunk: string): string | null {
+  if (!chunk.startsWith(TUI_TREE_MARKER)) return null;
+  const payload = chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, "");
+  const tree = `• ${payload}`;
+  const hadTrailingNewline = text.endsWith("\n");
+  const body = hadTrailingNewline ? text.slice(0, -1) : text;
+  const bodyLines = body.split("\n");
+  const plainLines = bodyLines.map((line) => stripAnsi(line));
+  const tail = plainLines.at(-1) ?? "";
+  // The second result replaces exactly the immediately preceding flat row.
+  // Never scan past it: a failure/action row must remain visible and break the
+  // group rather than being swallowed by a later tree.
+  let prefix: string;
+  if (tail.trimStart().startsWith("▸ ")) {
+    prefix = bodyLines.length < 2 ? "" : `${bodyLines.slice(0, -1).join("\n")}\n`;
+  } else if (tail.trimStart().startsWith("└── ")) {
+    const headerIndex = plainLines.findLastIndex((line) => line.trimStart().startsWith("• "));
+    if (headerIndex < 0) return null;
+    prefix = `${bodyLines.slice(0, headerIndex).join("\n")}${headerIndex > 0 ? "\n" : ""}`;
+  } else return null;
+  return `${prefix}${tree}\n`;
+}
+
 function foldToolSuccessLine(text: string, chunk: string): string | null {
   const plain = stripAnsi(chunk).replace(/\n+$/, "");
   if (!plain || plain.includes("\n") || !TOOL_SUCCESS_LINE_RE.test(plain)) return null;
@@ -343,6 +367,31 @@ export function applyOutputChunkToCurrentTurn(
   kind: TurnBlock["kind"] = "assistant",
 ): boolean {
   if (kind === "tool") {
+    if (chunk.startsWith(TUI_TREE_MARKER)) {
+      const rewrittenTree = applyTreeRewrite(history.currentContent, chunk);
+      if (rewrittenTree === null) {
+        // A protocol chunk must never fall through to the terminal parser:
+        // strip the private framing and expose only its newest leaf. This is
+        // also the reset boundary when assistant prose interrupted a group.
+        const safe = chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002/g, "");
+        const leaves = safe.split("\n").filter((line) => /^(?:├── |└── )/.test(line));
+        const newest = leaves.at(-1)?.replace(/^(?:├── |└── )/, "▸ ") ?? "";
+        if (!newest) return false;
+        const flat = `${newest}\n`;
+        history.currentContent = applyTerminalOutputToText(history.currentContent, flat);
+        appendCurrentBlock(history, kind, flat);
+        return false;
+      }
+      const treeContent = rewrittenTree;
+      history.currentContent = treeContent;
+      const lastBlock = history.currentBlocks.at(-1);
+      const treeLines = treeContent.split("\n");
+      const treeHeaderIndex = treeLines.findIndex((line) => line.trimStart().startsWith("• "));
+      const treeBlock = treeHeaderIndex >= 0 ? treeLines.slice(treeHeaderIndex).join("\n") : treeContent;
+      if (lastBlock?.kind === "tool") lastBlock.content = lastBlock.content.replace(/[^\n]*$/, "") + treeBlock;
+      else history.currentBlocks.push({ kind: "tool", content: treeBlock });
+      return true;
+    }
     const foldedContent = foldToolSuccessLine(history.currentContent, chunk);
     if (foldedContent !== null) {
       history.currentContent = foldedContent;
@@ -1319,6 +1368,7 @@ export function createHistoryOutputStream(
   const stream = {
     isTTY: true,
     assistantLabelManaged: true,
+    tuiTrees: true,
     write(chunk: string | Buffer): boolean {
       const text = typeof chunk === "string" ? chunk : chunk.toString();
       if (applyOutputChunkToCurrentTurn(history, text)) {
@@ -1326,10 +1376,10 @@ export function createHistoryOutputStream(
       }
       return true;
     },
-    writeToolBlock(chunk: string): void {
-      if (applyOutputChunkToCurrentTurn(history, chunk, "tool")) {
-        onUpdate();
-      }
+    writeToolBlock(chunk: string): boolean {
+      const applied = applyOutputChunkToCurrentTurn(history, chunk, "tool");
+      if (applied) onUpdate();
+      return applied;
     },
   };
   return stream as unknown as NodeJS.WritableStream;

@@ -59,7 +59,8 @@ describe("runLocalAgentTurn", () => {
     });
 
     expect(result).toMatchObject({
-      content: "fake local ok: polish the notification panel",
+      // mock echo 末尾 user content = 时间块(turn-scope) + "\n\n" + input
+      content: expect.stringContaining("polish the notification panel"),
       model: "fake-local",
       dialogId: "dialog-local-1",
     });
@@ -152,11 +153,65 @@ describe("runLocalAgentTurn", () => {
     const systemMessage = providerMessages.find((message) => message.role === "system");
     const systemContent = String(systemMessage?.content);
     expect(systemContent.split(sessionBlock).length - 1).toBe(1);
-    expect(systemContent.split(turnBlock).length - 1).toBe(1);
+    // 前缀缓存契约：turn-scope 动态块不再进 system（system 每轮逐秒变化会切断
+    // 其身后全部历史的前缀缓存），改并入末尾 user 消息头部。
+    expect(systemContent.includes(turnBlock)).toBe(false);
+    const lastUserMessage = [...providerMessages].reverse().find((message) => message.role === "user");
+    const lastUserContent = String(lastUserMessage?.content);
+    expect(lastUserContent.split(turnBlock).length - 1).toBe(1);
+    expect(lastUserContent.indexOf(turnBlock)).toBeLessThan(lastUserContent.indexOf("hello"));
     const stablePrefixChars = systemMessage?.stable_prefix_chars ?? 0;
     expect(stablePrefixChars).toBeGreaterThan(0);
+    // 整个 system 都是稳定前缀（动态块已移出），缓存断点可覆盖全部 system。
+    expect(stablePrefixChars).toBe(systemContent.length);
     expect(systemContent.slice(0, stablePrefixChars)).toContain(sessionBlock);
-    expect(systemContent.slice(stablePrefixChars)).toContain(turnBlock);
+  });
+
+  test("turn-scope block with structured input: dynamic prefix keeps image parts intact", async () => {
+    const turnBlock = "turn-scope-structured-input-block";
+    let providerMessages: AgentRuntimeChatMessage[] = [];
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        prompt: "base prompt",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-turn-scope-structured" }),
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async (messages) => {
+          providerMessages = messages as AgentRuntimeChatMessage[];
+          return { content: "ok", model: "fake-local", trace: messages };
+        },
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run");
+      },
+    };
+
+    const imageInput: AgentRuntimeMessageContent = [
+      { type: "text", text: "看这张图" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
+    ];
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "turn-scope-structured",
+      input: imageInput,
+      contextBlocks: [turnBlock],
+      contextBlockScopes: [{ content: turnBlock, cacheScope: "turn" }],
+    });
+
+    const lastUser = [...providerMessages].reverse().find((message) => message.role === "user");
+    const parts = Array.isArray(lastUser?.content) ? lastUser!.content : [];
+    expect(parts.length).toBe(3);
+    // dynamic 区 = 运行时注入的时间块 + caller 的 turn-scope 块（\n\n 连接后并入 user 头部）
+    expect(String(parts[0]?.text)).toContain("--- 当前时间 ---");
+    expect(String(parts[0]?.text)).toContain(turnBlock);
+    expect(parts[1]).toEqual({ type: "text", text: "看这张图" });
+    expect(parts[2]).toEqual({ type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } });
   });
 
   test("legacy contextBlocks fallback: caller supplies only plain blocks, content still reaches the prompt", async () => {
@@ -195,7 +250,9 @@ describe("runLocalAgentTurn", () => {
       providerMessages.find((message) => message.role === "system")?.content,
     );
     // The legacy block must appear exactly once — not dropped, not duplicated.
-    expect(systemContent.split(legacyBlock).length - 1).toBe(1);
+    // 前缀缓存契约：plain blocks 归一为 turn-scope，进末尾 user 头部（不在 system）。
+    const legacyLastUser = [...providerMessages].reverse().find((message) => message.role === "user");
+    expect(String(legacyLastUser?.content).split(legacyBlock).length - 1).toBe(1);
   });
 
   test("legacy fallback: plain contextBlocks with no scopes appear once each as turn-scope", async () => {
@@ -232,9 +289,10 @@ describe("runLocalAgentTurn", () => {
     const systemContent = String(
       providerMessages.find((message) => message.role === "system")?.content,
     );
-    // A and B must appear exactly once each.
-    expect(systemContent.split("A").length - 1).toBe(1);
-    expect(systemContent.split("B").length - 1).toBe(1);
+    // A and B must appear exactly once each (turn-scope → 末尾 user 头部).
+    const plainLastUser = [...providerMessages].reverse().find((message) => message.role === "user");
+    expect(String(plainLastUser?.content).split("A").length - 1).toBe(1);
+    expect(String(plainLastUser?.content).split("B").length - 1).toBe(1);
   });
 
   test("injects the agent identity block (incl. subscribed model) into the system prompt", async () => {
@@ -829,7 +887,8 @@ describe("runLocalAgentTurn", () => {
       persistedInputReference: compactReference,
     });
 
-    expect(providerUserContent).toBe(compactReference);
+    expect(providerUserContent).toContain("--- 当前时间 ---");
+    expect(String(providerUserContent).endsWith(compactReference)).toBe(true);
     expect(savedTurns[0]?.messages.find((message) => message.role === "user")?.content).toBe(
       expandedInput,
     );
@@ -2578,8 +2637,9 @@ describe("runLocalAgentTurn", () => {
     );
     expect(plainAsstIdx).toBeGreaterThan(0);
     expect(sent[plainAsstIdx + 1]).not.toMatchObject({ role: "tool" });
-    // 末尾是本轮 user input
-    expect(sent[sent.length - 1]).toMatchObject({ role: "user", content: "now" });
+    // 末尾是本轮 user input（turn-scope 时间块并入其头部，input 在最后）
+    expect(sent[sent.length - 1]).toMatchObject({ role: "user" });
+    expect(String(sent[sent.length - 1]?.content).endsWith("now")).toBe(true);
   });
 
   test("exposes the last round's finish_reason across a multi-round tool loop", async () => {
@@ -3278,9 +3338,13 @@ describe("runLocalAgentTurn", () => {
     const systemContent = String(systemMessage?.content ?? "");
     // startup-protocol guidance 块标记。
     expect(systemContent).toContain("--- 启动协议 ---");
-    // current-time 块标记与当天日期。
-    expect(systemContent).toContain("--- 当前时间 ---");
-    expect(systemContent).toContain(`当前日期: ${new Date().toISOString().slice(0, 10)}`);
+    // 前缀缓存契约：current-time 是 turn-scope，不再进 system（会切断其身后
+    // 全部历史的前缀缓存），改并入末尾 user 头部。
+    expect(systemContent).not.toContain("--- 当前时间 ---");
+    const guidanceLastUser = [...providerMessages].reverse().find((m) => m.role === "user");
+    const guidanceLastUserContent = String(guidanceLastUser?.content ?? "");
+    expect(guidanceLastUserContent).toContain("--- 当前时间 ---");
+    expect(guidanceLastUserContent).toContain(`当前日期: ${new Date().toISOString().slice(0, 10)}`);
     // execShell + fetchWebpage 时，网页研究工具策略由 webAccess 段承载
     // （生产环境勿用 execShell 抓网页）。
     expect(systemContent).toContain("不要用 execShell 调 curl/grep/sed");
@@ -3327,8 +3391,9 @@ describe("runLocalAgentTurn", () => {
     const systemMessage = providerMessages.find((m) => m.role === "system");
     expect(systemMessage).toBeDefined();
     const systemContent = String(systemMessage?.content ?? "");
-    // current-time 仍然注入（与工具无关）。
-    expect(systemContent).toContain("--- 当前时间 ---");
+    // current-time 仍然注入（与工具无关）——前缀缓存契约下在末尾 user 头部。
+    const noToolsLastUser = [...providerMessages].reverse().find((m) => m.role === "user");
+    expect(String(noToolsLastUser?.content)).toContain("--- 当前时间 ---");
     // tool-gated guidance 块未被触发，不注入空内容。
     expect(systemContent).not.toContain("--- 邮箱验证码注册流程 ---");
     expect(systemContent).not.toContain("不要用 execShell 调 curl/grep/sed");

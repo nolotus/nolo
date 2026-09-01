@@ -1056,20 +1056,32 @@ function buildMessages(args: {
       .filter(Boolean);
     const stableContent = stableParts.join("\n\n");
     const dynamicContent = dynamicParts.join("\n\n");
-    const systemContent = dynamicContent
-      ? `${stableContent}\n\n${dynamicContent}`
-      : stableContent;
+    // 前缀缓存契约：turn-scope 动态块（当前时间等）绝不拼进 system 尾部。
+    // system 每轮在动态块处逐秒变化，会把其身后全部历史消息的前缀缓存命中
+    // 一起切断（RunInfra cached_tokens / Anthropic cache_control 都按 prompt
+    // 前缀匹配；实测 113k 上下文 A/B：拼尾部 cached=0 vs 移到末尾命中 49%、
+    // TTFT 5.4s→2.9s，见 packages/cli/__perf__/cachePrefixAbProbe.ts）。
+    // 动态块并入末尾 user 消息头部：system(stable) + history(append-only)
+    // 全程前缀稳定，每轮只有新增尾巴是天然 miss。
+    const userContent: AgentRuntimeMessageContent = dynamicContent
+      ? typeof args.input === "string"
+        ? `${dynamicContent}\n\n${args.input}`
+        : [
+            { type: "text", text: dynamicContent },
+            ...(Array.isArray(args.input) ? args.input : args.input ? [args.input] : []),
+          ]
+      : args.input;
     return {
       messages: [
-        ...(systemContent
+        ...(stableContent
           ? [{
               role: "system" as const,
-              content: systemContent,
+              content: stableContent,
               ...(stableContent ? { stable_prefix_chars: stableContent.length } : {}),
             }]
           : []),
         ...prepareHistoryForNextTurn(args.history, args.contextReferenceResolver),
-        { role: "user" as const, content: args.input },
+        { role: "user" as const, content: userContent },
       ],
       stableContextChars: stableContent.length,
       dynamicContextChars: dynamicContent.length,

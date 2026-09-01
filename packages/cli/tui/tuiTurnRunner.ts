@@ -288,7 +288,12 @@ async function runAgentChat(
       ...env,
       NOLO_LANG: state.userLanguage,
     },
-    output,
+    output: {
+      ...(output as unknown as { write: (chunk: string) => void }),
+      tuiTrees:
+        (output as unknown as { tuiTrees?: boolean }).tuiTrees === true &&
+        typeof (output as unknown as { writeToolBlock?: unknown }).writeToolBlock === "function",
+    },
     showThinking: state.thinkingDisplay === "show",
     ...(options.imageUrls && options.imageUrls.length > 0
       ? { imageUrls: options.imageUrls }

@@ -28,6 +28,8 @@ import { padOrTruncateToWidth, stripAnsi, visibleWidth } from "./tuiAnsi";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { renderScrollbarRow } from "./tuiScrollbar";
 import { formatAssistantDisplay } from "../client/assistantOutput";
+import { createToolEventFormatter } from "../client/toolOutput";
+import { setCliLocale } from "../tui/i18n";
 
 // buildHistoryLines is the single paint path for both streaming and history
 // redraw. These tests lock the contract that history redraw uses the full
@@ -1529,4 +1531,37 @@ describe("tool line folding (same action on the same object collapses into ×N)"
     expect(folded).toHaveLength(1);
     expect(lines.some((line) => stripAnsi(line).includes("▸ Edit  ✓"))).toBe(false);
   });
+});
+
+
+describe("TUI tool tree protocol", () => {
+  beforeEach(() => setCliLocale("en"));
+  const event = (toolName: string, metadata: Record<string, unknown> = {}, type: "tool-result" | "tool-error" = "tool-result") => ({ type, toolName, toolCallId: `${toolName}-${Math.random()}`, round: 0, metadata } as any);
+  const feed = (history: ReturnType<typeof createTurnHistory>, formatter: ReturnType<typeof createToolEventFormatter>, e: any) => { const chunk = formatter(e); if (chunk) applyOutputChunkToCurrentTurn(history, chunk, "tool"); };
+  test("Run calls grow a tree and replace the flat row", () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(false, { tuiTrees: true }); feed(h, f, event("execShell", { command: "bun test", exitCode: 0 })); feed(h, f, event("execShell", { command: "git status", exitCode: 0 })); expect(stripAnsi(h.currentContent)).toBe("• Run (2)\n├── bun test  ✓\n└── git status  ✓\n"); });
+  test("single call stays flat", () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(false, { tuiTrees: true }); feed(h, f, event("execShell", { command: "pwd", exitCode: 0 })); expect(stripAnsi(h.currentContent)).toBe("▸ Run · pwd  ✓\n"); });
+  test("failure is standalone and breaks the group", () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(false, { tuiTrees: true }); feed(h, f, event("execShell", { command: "a", exitCode: 0 })); feed(h, f, event("execShell", { command: "bad", exitCode: 1 }, "tool-result")); feed(h, f, event("execShell", { command: "c", exitCode: 0 })); expect(h.currentContent).toContain("✗"); expect(h.currentContent).not.toContain("Run (2)"); });
+  test("Run and Read are separate", () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(false, { tuiTrees: true }); feed(h, f, event("execShell", { command: "a", exitCode: 0 })); feed(h, f, event("execShell", { command: "b", exitCode: 0 })); feed(h, f, event("readFile", { path: "a.ts", startLine: 2, endLine: 4, totalLines: 8 })); feed(h, f, event("readFile", { path: "b.ts", startLine: 1, endLine: 2, totalLines: 8 })); expect(h.currentContent).toContain("Run (2)"); expect(h.currentContent).toContain("Read (2)"); expect(h.currentContent).toContain("a.ts:2-4"); });
+  for (const color of [false, true]) test(`ANSI ${color ? "on" : "off"}`, () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(color, { tuiTrees: true }); feed(h, f, event("execShell", { command: "a", exitCode: 0 })); feed(h, f, event("execShell", { command: "b", exitCode: 0 })); expect(stripAnsi(h.currentContent)).toContain("Run (2)"); expect(h.currentContent).not.toMatch(/[\u0001\u0002]|TUI_TREE/); });
+  test("non-tree repeats still fold", () => { const h = createTurnHistory(); startTurn(h, "assistant"); for (let i = 0; i < 3; i++) applyOutputChunkToCurrentTurn(h, "▸ Edit  ✓\n", "tool"); expect(h.currentContent).toBe("▸ Edit ×3  ✓\n"); });
+  test("failed tree rewrite falls back to flat and resets formatter state", () => {
+    const h = createTurnHistory(); startTurn(h, "assistant");
+    const f = createToolEventFormatter(false, { tuiTrees: true });
+    feed(h, f, event("execShell", { command: "old-a", exitCode: 0 }));
+    feed(h, f, event("execShell", { command: "old-b", exitCode: 0 }));
+    // Simulate an injection writing directly to history, bypassing formatter.
+    applyOutputChunkToCurrentTurn(h, "injected output\n", "assistant");
+    const rewrite = f(event("execShell", { command: "new-a", exitCode: 0 }));
+    expect(rewrite).toContain("\u0001");
+    const applied = applyOutputChunkToCurrentTurn(h, rewrite, "tool");
+    expect(applied).toBe(false);
+    f.reset?.();
+    feed(h, f, event("execShell", { command: "new-b", exitCode: 0 }));
+    feed(h, f, event("execShell", { command: "new-c", exitCode: 0 }));
+    expect(stripAnsi(h.currentContent)).toContain("injected output");
+    expect(stripAnsi(h.currentContent)).toContain("Run (2)");
+    expect(stripAnsi(h.currentContent)).toContain("new-b");
+    expect(stripAnsi(h.currentContent)).not.toContain("new-a  ✓\n└── new-b");
+  });
+  test("assistant prose starts a new group", () => { const h = createTurnHistory(); startTurn(h, "assistant"); const f = createToolEventFormatter(false, { tuiTrees: true }); feed(h, f, event("execShell", { command: "a", exitCode: 0 })); feed(h, f, event("execShell", { command: "b", exitCode: 0 })); f.reset?.(); applyOutputChunkToCurrentTurn(h, "prose\n", "assistant"); feed(h, f, event("execShell", { command: "c", exitCode: 0 })); feed(h, f, event("execShell", { command: "d", exitCode: 0 })); expect(stripAnsi(h.currentContent).match(/Run \(2\)/g)).toHaveLength(2); });
 });

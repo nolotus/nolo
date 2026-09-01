@@ -291,7 +291,7 @@ export function isPolishListLikeLine(line: string): boolean {
   return LIST_LIKE_RE_FOR_GUARD.test(normalizeListLine(line));
 }
 
-const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]/;
+const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s/;
 
 /**
  * polish 呼吸规则：cur/next 相邻两行之间是否会插入空行。
@@ -416,7 +416,7 @@ export function polishAssistantStructure(
   // between siblings. Fence interiors are already masked to `\x00F<n>\x00`
   // sentinels (not list-like), so code that happens to look like a list is
   // never touched.
-  const LIST_LIKE = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]/;
+  const LIST_LIKE = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s/;
   const headingLines = afterHeading.split("\n");
   const breathed: string[] = [];
   for (let i = 0; i < headingLines.length; i++) {

@@ -109,7 +109,9 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     params.spinner ??
     new Spinner(options.output, workingLabel, Boolean(options.activityReporter));
 
-  const formatToolEvent = createToolEventFormatter();
+  const formatToolEvent = createToolEventFormatter(undefined, {
+    tuiTrees: options.output.tuiTrees === true,
+  });
   const eventMode = resolveAgentEventMode(options);
   const showThinking = options.showThinking !== false;
 
@@ -145,7 +147,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   const writeToolOutput = (chunk: string) => {
     if (!chunk) return;
     if (typeof options.output.writeToolBlock === "function") {
-      options.output.writeToolBlock(chunk);
+      if (!options.output.writeToolBlock(chunk)) formatToolEvent.reset?.();
     } else {
       options.output.write(chunk);
     }
@@ -157,6 +159,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
   const writeVisibleAssistantChunk = (chunk: string) => {
     if (!chunk) return;
+    formatToolEvent.reset?.();
     // Strip inline think tags from streaming content (some models emit
     // thinking inline in content instead of as separate thinking events).
     const parsed = processThinkChunk(chunk, thinkState);
