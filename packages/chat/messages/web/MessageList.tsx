@@ -27,6 +27,10 @@ import {
   groupConsecutiveToolEntries,
   type GroupedRenderEntry,
 } from "./groupToolEntries";
+import ChildRunEventRow, {
+  mergeWakeEventsIntoEntries,
+  type RenderEntry,
+} from "./ChildRunEventRow";
 import TopLoadingIndicator from "./TopLoadingIndicator";
 import { messagesStyles as styles } from "./messagesStyles";
 import { withLiteralClass } from "./toolMessageShared";
@@ -520,9 +524,15 @@ const MessagesList: React.FC<MessagesListProps> = ({
   }, [conversationTodoEnabled, currentTodo?.sourceMessageId, displayMessages]);
 
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
+  // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
+  // 为空/undefined 时 mergeWakeEventsIntoEntries 原样返回 entries（零布局变化）。
   const renderEntries = useMemo(
-    () => groupConsecutiveToolEntries(buildMessageRenderEntries(renderMessages)),
-    [renderMessages]
+    () =>
+      mergeWakeEventsIntoEntries(
+        groupConsecutiveToolEntries(buildMessageRenderEntries(renderMessages)),
+        (currentDialogConfig as any)?.wakeEvents
+      ),
+    [renderMessages, currentDialogConfig]
   );
 
   const awaitingAssistantReply = useMemo(
@@ -555,6 +565,18 @@ const MessagesList: React.FC<MessagesListProps> = ({
         )}
 
         {renderEntries.map((entry, entryIndex) => {
+          if (entry.type === "wake-event") {
+            // 后台 run 终态系统行：紧凑单行，非用户气泡、非 assistant 消息。
+            return (
+              <React.Fragment key={entry.key}>
+                <div className="chat-messages__item-wrapper">
+                  <MessageRowErrorBoundary>
+                    <ChildRunEventRow event={entry.event} />
+                  </MessageRowErrorBoundary>
+                </div>
+              </React.Fragment>
+            );
+          }
           if (entry.type === "tool-group") {
             // Expand/collapse only — header status icons follow each group's tools.
             // Historical groups (user after) fold even while a later turn runs;

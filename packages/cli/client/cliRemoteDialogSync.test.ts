@@ -15,6 +15,12 @@ const AUTH_TOKEN = `${Buffer.from(JSON.stringify({ userId: USER_ID })).toString(
   "base64url",
 )}.sig.x`;
 
+test("CLI wake display text uses the compact payload format", async () => {
+  const { buildLocalWakeDisplayText } = await import("./cliRemoteDialogSync");
+  expect(buildLocalWakeDisplayText({ label: "Child", terminalStatus: "done" })).toContain("✓ Child");
+  expect(buildLocalWakeDisplayText({ label: "Child", terminalStatus: "failed" })).toContain("✗ Child failed");
+});
+
 test("postRemoteRecord 遇 429 经退避后成功，不再一次即弃", async () => {
   const { postRemoteRecord } = await import("./cliRemoteDialogSync");
   let writeCalls = 0;

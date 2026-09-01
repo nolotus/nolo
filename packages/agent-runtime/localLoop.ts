@@ -29,6 +29,10 @@ import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import { buildCurrentTimeBlock } from "./currentTimeContext";
+import {
+  estimateContextTokens,
+  hashStablePrefixContent,
+} from "../ai/agent/contextCompiler";
 import type {
   AgentExecutionContextMetrics,
   AgentExecutionObservationEvent,
@@ -1034,6 +1038,9 @@ type BuiltMessages = {
   messages: AgentRuntimeChatMessage[];
   stableContextChars: number;
   dynamicContextChars: number;
+  /** 稳定前缀内容指纹（与 contextCompiler 同一 FNV 算法），用于 token 记录的 prefix churn 观测。 */
+  stablePrefixHash?: string;
+  stablePrefixEstimatedTokens?: number;
 };
 
 function buildMessages(args: {
@@ -1086,6 +1093,12 @@ function buildMessages(args: {
       ],
       stableContextChars: stableContent.length,
       dynamicContextChars: dynamicContent.length,
+      ...(stableContent
+        ? {
+            stablePrefixHash: hashStablePrefixContent(stableContent),
+            stablePrefixEstimatedTokens: estimateContextTokens(stableContent),
+          }
+        : {}),
     };
   }
 
@@ -1106,6 +1119,12 @@ function buildMessages(args: {
     ],
     stableContextChars: (args.prompt?.trim() ?? "").length,
     dynamicContextChars: blocks.join("\n\n").length,
+    ...(systemContent
+      ? {
+          stablePrefixHash: hashStablePrefixContent(systemContent),
+          stablePrefixEstimatedTokens: estimateContextTokens(systemContent),
+        }
+      : {}),
   };
 }
 
@@ -1651,6 +1670,12 @@ export async function runLocalAgentTurn(
           model: result.model || agentConfig.model || "unknown",
           ...(result.provider || agentConfig.provider
             ? { provider: result.provider || agentConfig.provider }
+            : {}),
+          ...(builtMessages.stablePrefixHash
+            ? {
+                stablePrefixHash: builtMessages.stablePrefixHash,
+                stablePrefixEstimatedTokens: builtMessages.stablePrefixEstimatedTokens,
+              }
             : {}),
         });
       }

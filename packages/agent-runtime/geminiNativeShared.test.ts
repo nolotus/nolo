@@ -467,6 +467,70 @@ describe("geminiNativeShared", () => {
       });
     });
 
+    test("maps cachedContentTokenCount to cache_read_input_tokens", () => {
+      const withCache = accumulateGeminiChunks([
+        {
+          response: {
+            candidates: [{ content: { parts: [{ text: "ok" }] } }],
+            usageMetadata: {
+              promptTokenCount: 100000,
+              candidatesTokenCount: 500,
+              totalTokenCount: 100500,
+              cachedContentTokenCount: 96000,
+            },
+          },
+        },
+      ]);
+      expect(withCache.usage).toEqual({
+        prompt_tokens: 100000,
+        completion_tokens: 500,
+        total_tokens: 100500,
+        cache_read_input_tokens: 96000,
+      });
+
+      // 无缓存命中时不得注入 0 值字段（保持 metadata-only 形状）
+      const noCache = accumulateGeminiChunks([
+        {
+          response: {
+            candidates: [{ content: { parts: [{ text: "ok" }] } }],
+            usageMetadata: {
+              promptTokenCount: 100,
+              candidatesTokenCount: 5,
+              totalTokenCount: 105,
+              cachedContentTokenCount: 0,
+            },
+          },
+        },
+      ]);
+      expect(noCache.usage).toEqual({
+        prompt_tokens: 100,
+        completion_tokens: 5,
+        total_tokens: 105,
+      });
+    });
+
+    test("clamps malformed cachedContentTokenCount above promptTokenCount", () => {
+      const { usage } = accumulateGeminiChunks([
+        {
+          response: {
+            candidates: [{ content: { parts: [{ text: "ok" }] } }],
+            usageMetadata: {
+              promptTokenCount: 1000,
+              candidatesTokenCount: 50,
+              totalTokenCount: 1050,
+              cachedContentTokenCount: 999999,
+            },
+          },
+        },
+      ]);
+      expect(usage).toEqual({
+        prompt_tokens: 1000,
+        completion_tokens: 50,
+        total_tokens: 1050,
+        cache_read_input_tokens: 1000,
+      });
+    });
+
     test("invokes onTextDelta and onReasoningDelta callbacks per chunk", () => {
       const textDeltas: string[] = [];
       const reasoningDeltas: string[] = [];
