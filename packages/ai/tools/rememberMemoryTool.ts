@@ -32,6 +32,7 @@ export async function rememberMemoryFunc(
     content: string;
     requestedScope: RememberMemoryScope;
     resolvedScopes: Array<{ ownerType: string; ownerId: string }>;
+    similarMemories?: Array<{ id: string; content: string; kind: string; createdAt: string }>;
   }>(
     thunkApi,
     "/api/memory/remember",
@@ -47,8 +48,13 @@ export async function rememberMemoryFunc(
   const scopeLabel =
     result.resolvedScopes?.[0]?.ownerType === "space" ? "当前空间" : "当前用户";
 
+  const similar = result.similarMemories ?? [];
+  const similarHint = similar.length
+    ? `\n提示：已有 ${similar.length} 条语义相近的既有记忆（如 ${similar[0].id}："${similar[0].content.slice(0, 48)}…"）。若本条已取代它，请调用 deleteMemory 归档旧条，避免同主题版本堆积。`
+    : "";
+
   return {
     rawData: result,
-    displayData: `已记住这条${scopeLabel}记忆。`,
+    displayData: `已记住这条${scopeLabel}记忆。${similarHint}`,
   };
 }

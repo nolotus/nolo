@@ -1,6 +1,7 @@
 import { buildAgentSubjectTarget, resolveScopedMemoryTargets, type MemoryScope } from "./scope";
 import { createMemoryItem, writeMemoryItemWithIndexesToDb } from "./store";
-import { loadOwnerItemsFromDb } from "./queryShared";
+import { loadMemoryCandidatesFromDb } from "./query";
+import { tokenize } from "./rank";
 import type {
   MemoryItem,
   MemoryKind,
@@ -43,6 +44,17 @@ export interface RememberMemoryResult {
   content: string;
   requestedScope: RememberMemoryScope;
   savedItems: MemoryItem[];
+  /**
+   * 语义近邻旧条（软查重提示）：本条非精确命中时，同 owner/kind/subject 下
+   * token 重叠 ≥ SIMILAR_OVERLAP_THRESHOLD 的既有记忆（最多 3 条，按重叠度降序）。
+   * 只提示不自动合并——调用方据此决定是否用 deleteMemory 归档被取代的旧条。
+   */
+  similarMemories: Array<{
+    id: string;
+    content: string;
+    kind: MemoryKind;
+    createdAt: string;
+  }>;
   resolvedScopes: Array<{
     ownerType: MemoryOwnerType;
     ownerId: string;
@@ -105,17 +117,25 @@ export const rememberMemory = async (
       ? kind === "procedural" ? 0.88 : 0.85
       : kind === "procedural" ? 0.68 : 0.6;
 
-  const savedItems = await Promise.all(
+  const savedWithSimilar = await Promise.all(
     targets.map(async (target) => {
-      const subject =
-        (input.scope ?? "auto") === "auto" && memorySubjectId
-          ? buildAgentSubjectTarget(target, memorySubjectId)
-          : target;
+      const useAgentSubject = (input.scope ?? "auto") === "auto" && !!memorySubjectId;
+      const subject = useAgentSubject
+        ? buildAgentSubjectTarget(target, memorySubjectId)
+        : target;
+      // 查重与写入必须用同一个 effective subject：scope=auto 且 memorySubjectId 存在时
+      // 写入 agent subject，查重若仍按 owner subject 匹配会静默失效（review BLOCK 项）。
+      const agentSubjectId = useAgentSubject ? memorySubjectId : null;
 
-      // 去重：查同 owner + 同 content + 同 subject 的已有记忆（Bug 2 修复）
-      // 找到 → 更新激活时间 + 提升计数 + 取较高 confidence（不新建）
-      // 没找到 → 新建
-      const existing = await findExistingMemoryByContent(db, target, content, kind, agentKey);
+      // 精确查重 + 语义近邻软查重：单次 DB 加载（subject/kind 在 DB 层过滤，
+      // 避免按 owner 截断 200 条后旧条漏报）+ 单次遍历，避免重复读取与 tokenize。
+      const { existing, similarItems } = await findExistingAndSimilarMemories({
+        db,
+        target,
+        content,
+        kind,
+        agentSubjectId,
+      });
       if (existing) {
         const updated: MemoryItem = {
           ...existing,
@@ -125,7 +145,7 @@ export const rememberMemory = async (
           sourceDialogId: input.dialogId ?? existing.sourceDialogId,
         };
         await writeMemoryItemWithIndexesToDb(db, updated);
-        return updated;
+        return { item: updated, similarItems: [] as MemoryItem[] };
       }
 
       const item = createMemoryItem({
@@ -146,15 +166,30 @@ export const rememberMemory = async (
         sourceDialogId: input.dialogId ?? undefined,
       });
       await writeMemoryItemWithIndexesToDb(db, item);
-      return item;
+      return { item, similarItems };
     }),
   );
+
+  const savedItems = savedWithSimilar.map((entry) => entry.item);
+  const similarById = new Map<string, MemoryItem>();
+  for (const entry of savedWithSimilar) {
+    for (const similar of entry.similarItems) similarById.set(similar.id, similar);
+  }
+  const similarMemories = [...similarById.values()]
+    .slice(0, 3)
+    .map((item) => ({
+      id: item.id,
+      content: item.content,
+      kind: item.kind,
+      createdAt: item.createdAt,
+    }));
 
   return {
     success: true,
     content,
     requestedScope: scope,
     savedItems,
+    similarMemories,
     resolvedScopes: targets.map((target) => ({
       ownerType: target.ownerType,
       ownerId: target.ownerId,
@@ -165,27 +200,84 @@ export const rememberMemory = async (
   };
 };
 
+/** 精确查重/软查重的加载上限：DB 层已按 effective subject + kind 过滤后再截断。 */
+const DEDUPE_LOAD_LIMIT = 200;
+/** 软查重阈值：overlap coefficient（交集 / 较小集合的 token 数）。 */
+const SIMILAR_OVERLAP_THRESHOLD = 0.6;
+/** 最小 query token 数：短中文内容的 CJK 2-gram 复用率高（如"部署状态"），
+ * overlap 极易过阈值造成误报——低于门槛只做精确查重，不做近邻提示。 */
+const SIMILAR_MIN_QUERY_TOKENS = 10;
+const SIMILAR_CANDIDATES_LIMIT = 3;
+
 /**
- * 查同 owner + 同 content + 同 kind 的已有记忆（去重用）。
- * 当 agentKey 存在时，额外要求 subject 匹配——避免同一用户下
- * 不同 agent 写相同 content 被误合并（它们应是独立的 subject=agent 记忆）。
- * 只匹配 content 精确相等——不做模糊匹配，避免误合并语义相近但不同的记忆。
+ * 精确查重 + 语义近邻（软查重）一次完成：单次 DB 加载 + 单次遍历。
+ *
+ * subject 判定与写入端 effective subject 严格一致（agentSubjectId 存在 → 匹配
+ * agent subject，否则匹配 owner subject）——避免"写入 agent subject、查重按
+ * owner 找"的静默失效（review BLOCK 项）。加载走 loadMemoryCandidatesFromDb，
+ * DB 层先按 subject/kind 过滤再取 200 条：owner 下条目超过上限时按最新截断，
+ * 更旧条目不参与查重（best-effort：近期演进条目按激活/创建排序天然靠前）。
+ *
+ * 软查重只提示、不自动合并（与精确去重的"防误合并"哲学一致）。匹配判据为
+ * token overlap coefficient ≥ SIMILAR_OVERLAP_THRESHOLD——演进快照（同一事实
+ * 的状态更新版）通常新版覆盖/包含旧版，overlap 比 Jaccard 更贴合（Jaccard 的
+ * union 会放大长文本的偶发差异导致漏报）。
  */
-async function findExistingMemoryByContent(
-  db: any,
-  target: { ownerType: MemoryOwnerType; ownerId: string },
-  content: string,
-  kind: MemoryKind,
-  agentKey: string | null,
-): Promise<MemoryItem | null> {
-  const items = await loadOwnerItemsFromDb(db, target, 200);
-  return items.find(
-    (item) =>
-      item.content === content &&
-      item.kind === kind &&
-      // agentKey 存在时要求 subject 匹配，避免跨 agent 误合并
-      (agentKey
-        ? item.subjectType === "agent" && item.subjectId === agentKey
-        : item.subjectType === target.ownerType && item.subjectId === target.ownerId),
-  ) ?? null;
+async function findExistingAndSimilarMemories(input: {
+  db: any;
+  target: { ownerType: MemoryOwnerType; ownerId: string };
+  content: string;
+  kind: MemoryKind;
+  /** effective agent subject id：scope=auto 且 memorySubjectId 存在时非空。 */
+  agentSubjectId: string | null;
+}): Promise<{ existing: MemoryItem | null; similarItems: MemoryItem[] }> {
+  const subjectRefs = input.agentSubjectId
+    ? [{ subjectType: "agent" as const, subjectId: input.agentSubjectId }]
+    : [
+        {
+          subjectType: input.target.ownerType,
+          subjectId: input.target.ownerId,
+        },
+      ];
+  const items = await loadMemoryCandidatesFromDb(input.db, {
+    owners: [input.target],
+    subjects: subjectRefs,
+    kinds: [input.kind],
+    ownerLimit: DEDUPE_LOAD_LIMIT,
+  });
+
+  const subjectMatches = (item: MemoryItem): boolean =>
+    input.agentSubjectId
+      ? item.subjectType === "agent" && item.subjectId === input.agentSubjectId
+      : item.subjectType === input.target.ownerType &&
+        item.subjectId === input.target.ownerId;
+
+  const queryTokens = new Set(tokenize(input.content));
+  const canScoreSimilar = queryTokens.size >= SIMILAR_MIN_QUERY_TOKENS;
+  const scored: Array<{ item: MemoryItem; overlap: number }> = [];
+
+  for (const item of items) {
+    if (!subjectMatches(item)) continue;
+    // 精确命中：同一条已存在，走 bump 分支，无需近邻提示
+    if (item.content === input.content) {
+      return { existing: item, similarItems: [] };
+    }
+    if (!canScoreSimilar) continue;
+    const itemTokens = new Set(tokenize(item.content));
+    if (itemTokens.size === 0) continue;
+    let intersection = 0;
+    for (const token of queryTokens) {
+      if (itemTokens.has(token)) intersection += 1;
+    }
+    const overlap = intersection / Math.min(queryTokens.size, itemTokens.size);
+    if (overlap >= SIMILAR_OVERLAP_THRESHOLD) {
+      scored.push({ item, overlap });
+    }
+  }
+
+  scored.sort((a, b) => b.overlap - a.overlap);
+  return {
+    existing: null,
+    similarItems: scored.slice(0, SIMILAR_CANDIDATES_LIMIT).map((entry) => entry.item),
+  };
 }

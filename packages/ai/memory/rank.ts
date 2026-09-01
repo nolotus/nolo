@@ -19,7 +19,7 @@ const buildCjkTokens = (text: string): string[] => {
   return tokens;
 };
 
-const tokenize = (text: string): string[] => {
+export const tokenize = (text: string): string[] => {
   const normalized = text.toLowerCase();
   const wordTokens = normalized
     .split(/[\s,.;:!?()[\]{}"'`，。！？：；、]+/)

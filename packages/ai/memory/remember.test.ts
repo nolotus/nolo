@@ -33,6 +33,96 @@ describe("rememberMemory", () => {
     expect(items[0]?.patternKey).toBe("agent-remember");
   });
 
+  it("reports similarMemories when new content is an evolution snapshot of an existing item", async () => {
+    await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content:
+        "bun-nolo realtime Effect 第二刀已落地本地 alpha（37f779327）：server 侧抽出唯一 seam = EventStore{append,listAfter}，LevelDB 与 InMemoryEventStore 共用同一 replay 语义，realtimeWorld.test 12 pass。",
+    });
+
+    const result = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content:
+        "bun-nolo realtime Effect 第二刀已封板并 push origin/alpha（37f779327）：server 侧抽出唯一 seam = EventStore{append,listAfter}，共享 replay 语义，realtimeWorld.test 12 pass。",
+    });
+
+    expect(result.savedItems).toHaveLength(1); // 非精确命中 → 新建，不覆盖旧条
+    expect(result.similarMemories.length).toBeGreaterThanOrEqual(1);
+    expect(result.similarMemories[0]?.content).toContain("第二刀已落地");
+  });
+
+  it("returns empty similarMemories for exact duplicates and unrelated content", async () => {
+    await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content: "这个用户在复杂问题里更喜欢先看结论。",
+    });
+
+    const exact = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content: "这个用户在复杂问题里更喜欢先看结论。",
+    });
+    expect(exact.similarMemories).toEqual([]); // 精确命中走 bump 分支，不提示
+
+    const unrelated = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content: "团队协作约定：提交信息一律使用英文书写。",
+    });
+    expect(unrelated.similarMemories).toEqual([]);
+  });
+
+  it("matches dedupe and similar candidates by effective subject when memorySubjectId is set", async () => {
+    const first = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      memorySubjectId: "agent-kimi",
+      content:
+        "bun-nolo realtime Effect 第二刀已落地本地 alpha（37f779327）：server 侧抽出唯一 seam = EventStore{append,listAfter}，LevelDB 与 InMemoryEventStore 共用同一 replay 语义，realtimeWorld.test 12 pass。",
+    });
+    expect(first.savedItems[0]?.subjectId).toBe("agent-kimi");
+
+    const second = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      memorySubjectId: "agent-kimi",
+      content:
+        "bun-nolo realtime Effect 第二刀已封板并 push origin/alpha（37f779327）：server 侧抽出唯一 seam = EventStore{append,listAfter}，共享 replay 语义，realtimeWorld.test 12 pass。",
+    });
+    expect(second.savedItems[0]?.subjectId).toBe("agent-kimi");
+    // 同 effective subject 的演进快照必须被软查重捕获（写入与查重同一 subject 判定）
+    expect(second.similarMemories.length).toBeGreaterThanOrEqual(1);
+    expect(second.similarMemories[0]?.content).toContain("第二刀已落地");
+  });
+
+  it("skips similar matching for short contents to avoid CJK bigram false positives", async () => {
+    await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content: "部署状态已更新。",
+    });
+    // 两句共享大部分 CJK 2-gram（overlap 会过阈值），但 token 数低于门槛 → 不提示
+    const result = await rememberMemory({
+      db,
+      userId: "user1",
+      spaceId: "space1",
+      content: "部署状态已过期。",
+    });
+    expect(result.savedItems).toHaveLength(1);
+    expect(result.similarMemories).toEqual([]);
+  });
+
   it("supports explicit space scope", async () => {
     const result = await rememberMemory({
       db,
