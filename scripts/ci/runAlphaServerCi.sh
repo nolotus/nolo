@@ -868,7 +868,7 @@ deploy_main_remote() {
   local remote_artifact
   remote_artifact="$(main_remote_artifact_path)"
   ssh -i "$key_path" -o IdentitiesOnly=yes "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
-    "BUILD_SHA='${BUILD_SHA}' DEPLOY_JOB_ID='${NOLO_DEPLOY_JOB_ID:-}' REMOTE_ARTIFACT='${remote_artifact}' PRODUCTION_REPO_DIR='${PRODUCTION_REPO_DIR}' PRODUCTION_PM2_BIN='${PRODUCTION_PM2_BIN}' PRODUCTION_PM2_HOME='${PRODUCTION_PM2_HOME}' bash -s" <<'REMOTE'
+    "BUILD_SHA='${main_artifact_sha}' DEPLOY_JOB_ID='${NOLO_DEPLOY_JOB_ID:-}' REMOTE_ARTIFACT='${remote_artifact}' PRODUCTION_REPO_DIR='${PRODUCTION_REPO_DIR}' PRODUCTION_PM2_BIN='${PRODUCTION_PM2_BIN}' PRODUCTION_PM2_HOME='${PRODUCTION_PM2_HOME}' bash -s" <<'REMOTE'
 set -Eeuo pipefail
 cd "$PRODUCTION_REPO_DIR"
 git fetch --all
@@ -901,6 +901,7 @@ NOLO_PROXY_MODE=caddy \
 NOLO_CADDY_HOSTS=nolo.chat \
 NOLO_BLUE_GREEN_DEFER_LISTEN=1 \
 NOLO_BLUE_GREEN=1 \
+NOLO_CHAT_PROXY_ENABLED=1 \
 NOLO_ARTIFACT_PATH="$REMOTE_ARTIFACT" \
 NOLO_PM2_KILL_TIMEOUT=40000 \
 NOLO_SERVICE_HEALTH_URL=http://127.0.0.1:38123/ready \
@@ -1097,8 +1098,16 @@ main_web_release() {
     log "main-web-release: HEAD^2 not resolvable (non-merge or single parent); falling back to BUILD_SHA=${lookup_sha}"
   fi
 
+  # 部署目标产物 sha：promote 路径 = 被晋升 artifact 的 sha（lookup_sha，即 alpha
+  # HEAD）；全量重建路径 = BUILD_SHA（build 时以 resolve_deploy_target_sha==BUILD_SHA
+  # stamp，见 deployRemote.sh build-frontend 的 NOLO_BUILD_SHA）。传给 remote 作为
+  # BUILD_SHA，使 /ready 的 buildSha 门验证「运行的产物 == 部署的产物」——
+  # 2026-09-01 main 实测：promote 晋升 alpha HEAD 产物但验证期望 push event sha，
+  # 永远 mismatch，内容部署成功而 job 判失败。
+  local main_artifact_sha="$BUILD_SHA"
   if check_alpha_artifact_promotable "$lookup_sha"; then
     timed_phase "promote-alpha-artifact" promote_alpha_artifact "$lookup_sha"
+    main_artifact_sha="$lookup_sha"
   else
     log "artifact not found; full rebuild"
     timed_phase "install-dependencies" install_dependencies

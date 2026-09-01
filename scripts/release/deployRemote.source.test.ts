@@ -743,6 +743,17 @@ describe("deployRemote source contract", () => {
     // 蓝绿成功后跳过 nolo name 检查（服务跑在 canary slot）
     expect(source).toContain('NOLO_BLUE_GREEN_ACTIVE');
     expect(source).toContain("蓝绿部署：跳过 nolo name 检查");
+
+    // 蓝绿前置清理其他 PM2 daemon 的残留实例（2026-09-01 main 实测：root daemon
+    // 残留与 canary 互等 LevelDB 锁 → canary-ready-gate 180s 超时）。必须在
+    // slot 检测之前——残留清完后「无活跃 slot」的判断才准确。
+    const bgFnStart = source.indexOf("blue_green_reload_nolo() {");
+    const bgFnEnd = source.indexOf("\n}\n", bgFnStart);
+    const bgFunction = source.slice(bgFnStart, bgFnEnd);
+    expect(bgFunction).toContain("delete_stale_nolo_instances");
+    expect(bgFunction.indexOf("delete_stale_nolo_instances")).toBeLessThan(
+      bgFunction.indexOf("检测当前活跃 slot")
+    );
   });
 
   it("adds x-nolo-slot header to health and ready endpoints for blue-green slot identification", () => {

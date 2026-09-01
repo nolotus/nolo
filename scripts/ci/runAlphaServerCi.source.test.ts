@@ -37,6 +37,17 @@ describe("runAlphaServerCi source contract", () => {
     expect(source).toContain('[nolo-ci-result] status=skipped reason=docs-only');
   });
 
+  it("deploys main with the promoted artifact sha as the ready-gate target and chat-proxy enabled", () => {
+    // remote 侧 BUILD_SHA = 部署产物 sha：promote 路径 = alpha HEAD artifact，
+    // rebuild 路径 = BUILD_SHA。/ready 的 buildSha 门验证「运行的产物 == 部署的产物」，
+    // 与 push event 的 git sha 无关（2026-09-01 main 实测：promote alpha HEAD 产物
+    // 却用 event sha 验证，永远 mismatch → 内容部署成功而 job 判失败）。
+    expect(source).toContain("BUILD_SHA='${main_artifact_sha}'");
+    expect(source).toContain('main_artifact_sha="$lookup_sha"');
+    // 第二段：main 启用 chat-proxy（SSE 流跨蓝绿切换存活），与 alpha 同参数
+    expect(source).toContain("NOLO_CHAT_PROXY_ENABLED=1");
+  });
+
   it("skips alpha build and deploy only for the strict docs classifier result", () => {
     const classification = source.indexOf('deploy_decision="$(bash ./scripts/ci/classifyDeployChanges.sh');
     const dependencyInstall = source.indexOf('timed_phase "install-dependencies" install_dependencies', classification);

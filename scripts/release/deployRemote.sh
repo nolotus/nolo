@@ -1160,6 +1160,12 @@ else:
 # - nolo-next 在跑（上次蓝绿残留）→ canary 起 nolo
 # 交替使用两个 slot，避免 PM2 重命名（PM2 不支持）。
 blue_green_reload_nolo() {
+  # 前置清理其他 PM2 daemon 下的残留 nolo 实例（如 /root/.pm2）。残留实例会在
+  # canary 等锁期间抢 LevelDB 锁，把 canary-ready-gate 拖到超时（2026-09-01 main
+  # 实测：root daemon 残留实例与 canary 互等锁，gate 180s 超时）。rebuild_nolo
+  # 路径此前已在 start 前清理，蓝绿路径缺失——补齐并放在 slot 检测之前：
+  # 若活跃 slot 只存在于残留 daemon，清完后正确走「无活跃 slot」首次启动路径。
+  delete_stale_nolo_instances
   # 检测当前活跃 slot
   local old_slot=""
   local canary_name=""
