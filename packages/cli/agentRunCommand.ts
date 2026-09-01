@@ -7,8 +7,6 @@
 
 import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
 import * as nodeFs from "node:fs";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { CLI_AUTO_ROUTE_AGENT_KEY } from "./client/autoModelRouter";
 import {
   buildModelLayerOverride,
@@ -16,6 +14,7 @@ import {
 } from "../agent-runtime/modelLayerOverride";
 import type { ContextBlockScope } from "../agent-runtime/contextBlockScope";
 import { buildSkillDiscoveryContextLayer } from "../agent-runtime/skillDiscovery";
+import { readAgentsMdLayerFromDisk } from "../agent-runtime/agentsMd";
 import { CliProviderQuotaError } from "ai/agent/cliExecutor";
 import type { AgentRuntimeHostAdapter } from "./agentRuntimeLocal";
 import { resolveAgentRecordFromHybridStore, readDbRecord } from "./agentRecordHelpers";
@@ -66,7 +65,6 @@ import {
   type LocalRunWorkspaceInspection,
 } from "./agentRunLocalWorkspace";
 import {
-  buildAgentsMdLayer,
   buildMemoryOverlayLayer,
   buildMemoryUseGuidanceLayer,
   partitionScopedBlocks,
@@ -526,22 +524,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   let memoryOverlayLayer: ReturnType<typeof buildMemoryOverlayLayer> = null;
   let memoryUseGuidanceLayer: ReturnType<typeof buildMemoryUseGuidanceLayer> = null;
   if (!isSubtask) {
-  // AGENTS.md project instructions
-  const AGENTS_MD_MAX = 8192;
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const agentsMdPath = join(cliCwd, name);
-    if (existsSync(agentsMdPath)) {
-      try {
-        let mdContent = readFileSync(agentsMdPath, "utf8").trim();
-        if (!mdContent) continue;
-        if (Buffer.byteLength(mdContent, "utf8") > AGENTS_MD_MAX) {
-          mdContent = Buffer.from(mdContent, "utf8").subarray(0, AGENTS_MD_MAX).toString("utf8") + "\n\n<!-- AGENTS.md truncated -->";
-        }
-        scopedLayers.push(buildAgentsMdLayer(mdContent, name));
-        break;
-      } catch { /* skip */ }
-    }
-  }
+  // AGENTS.md project instructions（共享实现：agent-runtime/agentsMd，
+  // 含 8KB 截断与 CLAUDE.md 回退，三 host 同源）
+  const agentsMdLayer = readAgentsMdLayerFromDisk(cliCwd);
+  if (agentsMdLayer) scopedLayers.push(agentsMdLayer);
   // Skill content blocks
   skillContentBlocks.push(...buildSkillContextBlocks(skillReferences));
 

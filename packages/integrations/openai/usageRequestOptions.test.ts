@@ -94,6 +94,15 @@ describe("getUsageRequestOptions", () => {
       expected: { stream_options: { include_usage: true } },
     },
     {
+      provider: "runinfra",
+      expected: { stream_options: { include_usage: true } },
+    },
+    {
+      provider: "kimi-code",
+      expected: { stream_options: { include_usage: true } },
+    },
+    {
+      // custom 无 endpoint 时保持保守：任意手配网关可能不认 stream_options。
       provider: "custom",
       expected: {},
     },
@@ -104,6 +113,17 @@ describe("getUsageRequestOptions", () => {
       expect(getUsageRequestOptions(provider)).toEqual(expected);
     });
   }
+
+  test("custom provider gets stream usage only for measured Kimi Code endpoints", () => {
+    expect(
+      getUsageRequestOptions("custom", { endpoint: "https://api.kimi.com/coding/v1/chat/completions" })
+    ).toEqual({ stream_options: { include_usage: true } });
+    // 其他 custom 网关不受影响（严格网关对未知参数 400）。
+    expect(
+      getUsageRequestOptions("custom", { endpoint: "https://my-gateway.example.com/v1/chat/completions" })
+    ).toEqual({});
+    expect(getUsageRequestOptions("custom", { endpoint: null })).toEqual({});
+  });
 
   test("does not request stream_options for Responses API", () => {
     expect(getUsageRequestOptions("openai", { api: "responses" })).toEqual({});

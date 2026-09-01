@@ -21,8 +21,8 @@ const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run�
 
 1. 盯梢：**异步派发后立即收尾，等终态通知。** 阻塞等待（wait:true / controlAgentRun wait）会冻结对话，仅限：① 预计 <100s 且马上要用结果；② 用户明确要求同步等待或正在与该子任务对话；③ 环境不支持终态唤醒且无并行工作（已异步派出的用 controlAgentRun(action:"wait", runId) 阻塞到终态）。支持终态唤醒的环境（桌面 TUI / web）：多分钟级 run 一律异步派发并立即收尾，终态自动摘要唤醒后继续；串行依赖不是阻塞对话的理由——靠 wake 接力。无终态唤醒的环境（裸 CLI、服务端 runtime）才用 wait 阻塞，同样不要自己循环查。
 2. 禁止轮询/禁空转/别复述 status，语义以两个工具的描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：独立子任务一次派完，等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有真实文件/数据依赖或 brief 明示冲突面时才串行。
-3. 排错先分诊：① 复核 agentKey 是否照抄自 listAgents（不是就先修 key，不算通道故障）；② 报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；③ 同一已验证 key 上仍失败且错误明确指向通道（429、鉴权失败、machine offline）→ 才记为通道故障。
-4. 判定「派发通道整体不可用」前，至少对 2 个不同候选各完成「已验证 key + 一次真实派发」，候选不足 2 个就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态，别假设「派发了就在跑」。`;
+3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
+4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态，别假设「派发了就在跑」。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
@@ -58,7 +58,7 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 **commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
 - **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
-- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围读取 AGENTS.md、docs/workflow.md、当前 plan/progress、命中的 SKILL.md、references、涉及产品取舍时的 docs/product-positioning.md，以及 touched files 的完整 diff，brief 里列出实际加载的 context。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 nolo-plan「合并门」节）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 --- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。
@@ -78,10 +78,8 @@ const WEBPAGE_ACCESS_INSTRUCTIONS = `--- 网页访问能力 (Web Access) ---
 0. 用户已给明确 URL → 先直接 fetch 这些 URL，不要先搜索或猜备用网址（最高优先级的网页真值）；仅当抓取失败、缺字段或内容不匹配才额外搜索，并说明降级原因。
 1. 无明确 URL → 先用 exa_search 发现权威入口（尤其陌生 docs 站，不要直接猜子路径）。
 2. 已有明确 URL 且需完整渲染内容 → fetchWebpage（支持 JS/SPA；docs.* 自动检查 /llms.txt 并规范化 URL）。
-3. 需登录/填表/多步交互 → browser_openSession（openSession 拿 ID → typeText/click/readContent）。
-4. YouTube/亚马逊/Google 等结构化数据 → 对应专用 Scraper（youtubeScraper、amazonProductScraper 等）。
-5. 不要用 execShell 调 curl/grep/sed 等抓网页（dev shell 常被禁，浪费回合）；用 fetchWebpage、站点 Markdown / llms.txt 或专用工具。
-6. 内容过长或锚点段落未被单独提取 → 先找该站 Markdown 版本、独立页面、llms.txt 索引或更具体 URL 再继续回答。`;
+3. 需登录/填表/多步交互 → browser_openSession（openSession 拿 ID → typeText/click/readContent）；YouTube/亚马逊/Google 等结构化数据 → 对应专用 Scraper（youtubeScraper、amazonProductScraper 等）。
+4. 不要用 execShell 调 curl/grep/sed 等抓网页（dev shell 常被禁，浪费回合）；内容过长或锚点段落未被单独提取 → 先找该站 Markdown / llms.txt、独立页面或更具体 URL 再继续回答。`;
 
 // ============================================================================
 // 本地文件整理（有 local desktop file tools 时注入）
@@ -110,34 +108,24 @@ const MEMORY_CAPTURE_INSTRUCTIONS = `--- 长期记忆 ---
 - 日常错误记忆优先通过 rememberMemory 修正降权/归档覆盖而非物理删除；物理删除仅在用户明确要求且在其权限范围内（deleteMemory）。`;
 
 // ============================================================================
-// 自我更新能力（仅在 Agent 拥有 updateSelf 工具时注入）
+// Agent 配置维护（有 updateSelf / updateAgent 工具时注入；两段合并为一块）
 // ============================================================================
 
-const SELF_UPDATE_INSTRUCTIONS = `--- Agent 自我更新能力 ---
-
-## 何时更新自己
-- 重要决策/进度变化 → updateDoc 写回状态页
-- 值得复用的知识 → createDoc 建细分页，再按需要更新自己的 references / greeting / introduction
-- 小幅体验优化 → updateSelf 调整 greeting / introduction / tags
-
-## 更新原则
-- 优先形成最小、可解释的变更，不要为了“显得在进化”而频繁改自己
-- 低风险沉淀优先写入 memory / doc；只有当这些知识需要长期改变你的行为方式时，再考虑 updateSelf
-- prompt / references / tools / model 这类高影响字段，默认按需要确认来处理，不要静默大改
-- 如果工具返回 policy limit / ask / reject，不要重复尝试，应先向用户解释或等待更高权限确认
-- 没有发生实际更新时，不要在回复末尾额外汇报“未更新”状态`;
-
-const GENERIC_AGENT_UPDATE_INSTRUCTIONS = `--- Agent 维护能力 ---
-你拥有 updateAgent 权限，可以更新指定的 Agent。
-
-## 何时更新别的 Agent
-- 用户明确要求你维护、修复或批量调整另一个 Agent
-- 你需要修改的目标不是当前正在运行的自己
-
-## 更新原则
-- 默认把 updateAgent 当成高风险维护操作，优先最小改动
-- 修改前先确认目标 Agent 是否正确，避免误改
-- 如果工具返回需要确认，不要绕过确认流程`;
+const buildAgentConfigMaintenanceInstructions = (agentTools: string[]): string => {
+    const hasUpdateAgent = agentTools.includes("updateAgent");
+    const lines = [
+        "--- Agent 配置维护（updateSelf / updateAgent） ---",
+        hasUpdateAgent
+            ? "- 何时用：用户明确要求调整自己或另一个 Agent 的配置；updateSelf 改自己，updateAgent 更新指定的 Agent。"
+            : "- 何时用：用户明确要求调整当前 Agent 自己的配置（updateSelf）。",
+        "- 最小、可解释的变更；低风险沉淀优先写 memory / doc，需要长期改变行为方式才改配置；prompt / references / tools / model 等高影响字段不静默大改。",
+    ];
+    if (hasUpdateAgent) {
+        lines.push("- updateAgent 默认按高风险维护操作处理：先确认目标 Agent 是否正确，避免误改，不绕过确认流程。");
+    }
+    lines.push("- 工具返回 policy limit / ask / reject → 不重复尝试，向用户解释或等待更高权限确认；没有实际更新时不汇报“未更新”状态");
+    return lines.join("\n");
+};
 
 
 // ============================================================================
@@ -191,9 +179,23 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
         build: () => KNOWLEDGE_MANAGEMENT_INSTRUCTIONS,
     },
     { id: "memoryCapture", triggerTools: ["rememberMemory"], build: () => MEMORY_CAPTURE_INSTRUCTIONS },
-    { id: "selfUpdate", triggerTools: ["updateSelf"], build: () => SELF_UPDATE_INSTRUCTIONS },
-    { id: "genericAgentUpdate", triggerTools: ["updateAgent"], build: () => GENERIC_AGENT_UPDATE_INSTRUCTIONS },
+    { id: "agentConfigMaintenance", triggerTools: ["updateSelf", "updateAgent"], build: buildAgentConfigMaintenanceInstructions },
 ];
+
+/**
+ * 注入顺序的唯一真值：buildSystemPrompt 的显式 layer 列表与 localLoop 的
+ * 拼装都必须遵循这个顺序，禁止两边各自手写（历史上顺序 drift 过：
+ * menuUsage / webAccess 在两条装配线里互换）。改顺序只改这里。
+ */
+export const TOOL_GUIDED_SECTION_ORDER = [
+    "agentOrchestration",
+    "agentCollaboration",
+    "webAccess",
+    "menuUsage",
+    "knowledgeManagement",
+    "memoryCapture",
+    "agentConfigMaintenance",
+] as const;
 
 /**
  * Resolve all tool-guided sections at once; returns content keyed by section id.

@@ -27,10 +27,11 @@ export function buildChatCompletionsRequestBody(
   body: Record<string, any>,
   model: string,
   providerName?: string,
+  endpoint?: string | null,
 ): Record<string, any> {
   const usageRequestOptions =
     body.stream === true && providerName
-      ? getUsageRequestOptions(providerName, { api: "chat-completions" })
+      ? getUsageRequestOptions(providerName, { api: "chat-completions", endpoint })
       : {};
   // Tools are normalized independently of messages: a client can send the
   // Responses tool shape together with plain `messages` (that is exactly what

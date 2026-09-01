@@ -587,6 +587,13 @@ export const buildMemoryOverlayLayer = (
  *
  * Null when there is no memory promptBlock — the guidance only matters when
  * memory is active.
+ *
+ * 门控分歧说明（有意为之，勿"统一"掉）：server 路径（buildSystemPrompt）
+ * 按 hasMemoryTools 常驻注入——因为 memory overlay 是 turn-scope、按轮变化，
+ * 指引若随 overlay 翻转会反复打破前缀缓存；而本 builder 的消费方
+ * （TUI/desktop/CLI）的 overlay 按 dialog 缓存、dialog 内不翻转，按
+ * promptBlock 门控同样前缀稳定。若未来 TurnContextSource 能拿到 agent
+ * 工具列表，再统一为 hasMemoryTools。
  */
 export const buildMemoryUseGuidanceLayer = (
   args: BuildMemoryOverlayLayerArgs,

@@ -232,6 +232,7 @@ export function buildPlatformChatCompletionRequest(args: {
       // 拒绝（400 Unknown parameter: 'stream_options.include_usage'），Responses
       ? getUsageRequestOptions(args.providerConfig.usageProvider ?? args.providerConfig.provider, {
           api: usesResponsesApi ? "responses" : "chat-completions",
+          endpoint: usesResponsesApi ? null : args.providerConfig.endpoint,
         })
       : {}),
     ...requestOptions,

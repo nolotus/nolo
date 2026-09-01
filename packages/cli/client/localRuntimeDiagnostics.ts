@@ -49,6 +49,13 @@ export type CliLocalRuntimeAdapterDeps = {
    * dialog" the same way the web adapter filters by parentThreadId.
    */
   parentDialogId?: string;
+  /**
+   * startAgentRun 成功 spawn、但本轮无法盖章 parentDialogId（新会话首轮
+   * dialogId 尚未生成、模型也未显式传参）时的回调。TUI 用它收集本轮
+   * 「失归属」的 runId，turn 结束拿到 dialogId 后回填记录
+   * （backfillRunRecordParentDialog），让 dock 发现与终态唤醒归因生效。
+   */
+  onBackgroundRunSpawned?: (runId: string) => void;
 };
 
 export type PreparedAgentRuntime = {

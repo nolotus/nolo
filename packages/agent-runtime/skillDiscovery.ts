@@ -27,7 +27,9 @@ const MAX_DISCOVERED_SKILLS = 50;
 // descriptions exceeds this budget, each description is shortened proportionally
 // (keeping the front — where authors should front-load activation triggers and
 // key use cases, per the Agent Skills authoring guide) rather than hard-cut at
-// a fixed per-skill limit. Current 12 skills total ~2k chars, well under budget.
+// a fixed per-skill limit. 2026-09 基线：15 个 skill，description 原文合计
+// ≈3.0K 字符、sanitize（每条 ≤200）后 ≈2.5K，距 4000 预算仍有余量；
+// 新增 skill 时注意 description 从简（触发词前置）。
 const MAX_DISCOVERY_DESC_BUDGET = 4000;
 // Floor per-skill description length when budget pressure requires shortening.
 // Ensures every skill still gets a meaningful one-line summary.
@@ -102,8 +104,8 @@ export function discoverSkills(cwd: string): DiscoveredSkill[] {
   // Budget control (Codex-style): if total description length exceeds the
   // budget, shorten each description proportionally — keeping the front (where
   // authors should front-load activation triggers) and never below the floor.
-  // Only kicks in when skill count grows large; current 12 skills (~2k) are
-  // well under the 4000-char budget, so no shortening happens today.
+  // Only kicks in when total description length exceeds the budget; keep
+  // descriptions lean so the proportionate shortening stays dormant.
   const totalDescLen = skills.reduce((sum, s) => sum + s.description.length, 0);
   if (totalDescLen > MAX_DISCOVERY_DESC_BUDGET && skills.length > 0) {
     const scale = MAX_DISCOVERY_DESC_BUDGET / totalDescLen;

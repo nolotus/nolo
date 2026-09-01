@@ -2483,6 +2483,133 @@ describe("CLI local runtime adapter", () => {
     expect(result.content).toContain("README.md");
   });
 
+  test("reports startAgentRun spawns that could not be stamped with a parent dialog", async () => {
+    // 新会话首轮：deps 无 parentDialogId、模型也未传参——spawn 成功但记录
+    // 失归属，adapter 必须把 runId 报给 onBackgroundRunSpawned 供 turn 结束回填。
+    const spawned: string[] = [];
+    const adapter = createAdapter({
+      env: {
+        NOLO_LOCAL_USER_ID: "user-1",
+        NOLO_LOCAL_ALLOWED_TOOLS: "startAgentRun",
+      },
+      db: {
+        get: async () => ({
+          dbKey: "agent-user-1-orchestrator",
+          prompt: "Orchestrate.",
+          toolNames: ["startAgentRun"],
+        }),
+        put: async () => {},
+        batch: async () => {},
+        iterator: () => (async function* () {})(),
+      },
+      localToolExecutors: {
+        startAgentRun: async () => ({
+          content: JSON.stringify({ runId: "run-unstamped-1", status: "running" }),
+        }),
+      },
+      onBackgroundRunSpawned: (runId: string) => {
+        spawned.push(runId);
+      },
+      fetchImpl: async () => Response.json({}),
+    });
+    await adapter.loadAgentConfig("orchestrator");
+
+    await adapter.executeTool({
+      id: "call-1",
+      name: "startAgentRun",
+      arguments: JSON.stringify({ agentKey: "agent-user-1-worker", task: "do it" }),
+    });
+
+    expect(spawned).toEqual(["run-unstamped-1"]);
+  });
+
+  test("stamps startAgentRun args with parentDialogId instead of reporting an unstamped spawn", async () => {
+    const spawned: string[] = [];
+    let seenArgs: any = null;
+    const adapter = createAdapter({
+      env: {
+        NOLO_LOCAL_USER_ID: "user-1",
+        NOLO_LOCAL_ALLOWED_TOOLS: "startAgentRun",
+      },
+      db: {
+        get: async () => ({
+          dbKey: "agent-user-1-orchestrator",
+          prompt: "Orchestrate.",
+          toolNames: ["startAgentRun"],
+        }),
+        put: async () => {},
+        batch: async () => {},
+        iterator: () => (async function* () {})(),
+      },
+      localToolExecutors: {
+        startAgentRun: async (call) => {
+          seenArgs = JSON.parse(call.arguments);
+          return { content: JSON.stringify({ runId: "run-stamped-1", status: "running" }) };
+        },
+      },
+      parentDialogId: "parent-1",
+      onBackgroundRunSpawned: (runId: string) => {
+        spawned.push(runId);
+      },
+      fetchImpl: async () => Response.json({}),
+    });
+    await adapter.loadAgentConfig("orchestrator");
+
+    await adapter.executeTool({
+      id: "call-1",
+      name: "startAgentRun",
+      arguments: JSON.stringify({ agentKey: "agent-user-1-worker", task: "do it" }),
+    });
+
+    expect(seenArgs?.parentDialogId).toBe("parent-1");
+    expect(spawned).toEqual([]);
+  });
+
+  test("does not report a spawn when the model supplied parentDialogId itself", async () => {
+    const spawned: string[] = [];
+    let seenArgs: any = null;
+    const adapter = createAdapter({
+      env: {
+        NOLO_LOCAL_USER_ID: "user-1",
+        NOLO_LOCAL_ALLOWED_TOOLS: "startAgentRun",
+      },
+      db: {
+        get: async () => ({
+          dbKey: "agent-user-1-orchestrator",
+          prompt: "Orchestrate.",
+          toolNames: ["startAgentRun"],
+        }),
+        put: async () => {},
+        batch: async () => {},
+        iterator: () => (async function* () {})(),
+      },
+      localToolExecutors: {
+        startAgentRun: async (call) => {
+          seenArgs = JSON.parse(call.arguments);
+          return { content: JSON.stringify({ runId: "run-explicit-1", status: "running" }) };
+        },
+      },
+      onBackgroundRunSpawned: (runId: string) => {
+        spawned.push(runId);
+      },
+      fetchImpl: async () => Response.json({}),
+    });
+    await adapter.loadAgentConfig("orchestrator");
+
+    await adapter.executeTool({
+      id: "call-1",
+      name: "startAgentRun",
+      arguments: JSON.stringify({
+        agentKey: "agent-user-1-worker",
+        task: "do it",
+        parentDialogId: "dialog-from-model",
+      }),
+    });
+
+    expect(seenArgs?.parentDialogId).toBe("dialog-from-model");
+    expect(spawned).toEqual([]);
+  });
+
   test("advertises execShell to OpenAI-compatible providers by default", async () => {
     const requests: Array<{ body: any }> = [];
     const adapter = createAdapter({

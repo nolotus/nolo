@@ -25,7 +25,7 @@ import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages, stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
 import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
-import { resolveToolGuidedSections } from "../ai/agent/toolGuidedSections";
+import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import { buildCurrentTimeBlock } from "./currentTimeContext";
 import type {
@@ -1382,7 +1382,9 @@ export async function runLocalAgentTurn(
       guidanceBlocks.startupProtocol,
       guidanceBlocks.contextLayerContract,
       guidanceBlocks.emailRegistrationWorkflow,
-      ...Object.values(toolGuidedSections),
+      // 注入顺序遵循 TOOL_GUIDED_SECTION_ORDER（与 buildSystemPrompt 的显式
+      // layer 列表同源），禁止用 Object.values 自行定序。
+      ...TOOL_GUIDED_SECTION_ORDER.map((id) => toolGuidedSections[id] ?? ""),
     ]
       .map((content) => content.trim())
       .filter((content): content is string => content.length > 0)

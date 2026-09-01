@@ -10,6 +10,7 @@ import type {
   RunRecord,
 } from "./agentRunControl";
 import {
+  backfillRunRecordParentDialog,
   checkStaleRun,
   createRunActivityTracker,
   defaultGenerateBatchId,
@@ -668,6 +669,88 @@ describe("agent run control plane", () => {
     };
     writeRunRecord(record, deps);
     expect(readRunRecord("run-1", deps)).toEqual(record);
+  });
+
+  test("backfillRunRecordParentDialog stamps a record missing parentDialogId", () => {
+    const deps = createDeps();
+    writeRunRecord(
+      {
+        runId: "run-bf-1",
+        pid: 100,
+        agentKey: "agent-x",
+        cwd: "/repo",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "running",
+        logPath: "/home/test/.nolo/runs/run-bf-1.log",
+      },
+      deps,
+    );
+    expect(backfillRunRecordParentDialog("run-bf-1", "dialog-1", deps)).toBe(true);
+    const record = readRunRecord("run-bf-1", deps);
+    expect(record?.parentDialogId).toBe("dialog-1");
+    // 其余字段原样保留（心跳是读-改-写，回填不得丢 activity 等字段）。
+    expect(record?.status).toBe("running");
+    expect(record?.agentKey).toBe("agent-x");
+  });
+
+  test("backfillRunRecordParentDialog never overwrites an existing parentDialogId", () => {
+    const deps = createDeps();
+    writeRunRecord(
+      {
+        runId: "run-bf-2",
+        agentKey: "agent-x",
+        cwd: "/repo",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "running",
+        logPath: "/home/test/.nolo/runs/run-bf-2.log",
+        parentDialogId: "dialog-original",
+      },
+      deps,
+    );
+    expect(backfillRunRecordParentDialog("run-bf-2", "dialog-other", deps)).toBe(false);
+    expect(readRunRecord("run-bf-2", deps)?.parentDialogId).toBe("dialog-original");
+  });
+
+  test("backfillRunRecordParentDialog returns false for unknown runId or empty dialogId", () => {
+    const deps = createDeps();
+    expect(backfillRunRecordParentDialog("run-missing", "dialog-1", deps)).toBe(false);
+    writeRunRecord(
+      {
+        runId: "run-bf-3",
+        agentKey: "agent-x",
+        cwd: "/repo",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "running",
+        logPath: "/home/test/.nolo/runs/run-bf-3.log",
+      },
+      deps,
+    );
+    expect(backfillRunRecordParentDialog("run-bf-3", "", deps)).toBe(false);
+    expect(readRunRecord("run-bf-3", deps)?.parentDialogId).toBeUndefined();
+  });
+
+  test("backfillRunRecordParentDialog resolves the record via the caller-provided env (NOLO_HOME)", () => {
+    // 调用约定：resolveNoloHome 只认传入 env 的 NOLO_HOME。记录写在自定义
+    // NOLO_HOME 下时，不传 env 的回填会去默认 ~/.nolo 找（找不到 → false），
+    // 传入同源 env 才能命中——tuiTurnRunner 的回填点必须显式传 env。
+    const customDeps = createDeps({
+      env: { NOLO_HOME: "/custom/nolo-home" },
+    });
+    writeRunRecord(
+      {
+        runId: "run-bf-env",
+        agentKey: "agent-x",
+        cwd: "/repo",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "running",
+        logPath: "/custom/nolo-home/runs/run-bf-env.log",
+      },
+      customDeps,
+    );
+    // 默认 deps（createDeps 的 NOLO_HOME=/home/test/.nolo）找不到该记录。
+    expect(backfillRunRecordParentDialog("run-bf-env", "dialog-1", createDeps())).toBe(false);
+    expect(backfillRunRecordParentDialog("run-bf-env", "dialog-1", customDeps)).toBe(true);
+    expect(readRunRecord("run-bf-env", customDeps)?.parentDialogId).toBe("dialog-1");
   });
 
   test("listRunRecords sorts by startedAt descending", () => {
@@ -1860,13 +1943,19 @@ describe("run activity tracker", () => {
     );
     const tracker = createRunActivityTracker("run-1", { ...deps, fs }, { minWriteIntervalMs: 50 });
 
+    // 心跳的读-改-写现在持有记录锁（withRunRecordLock），每次落盘伴随一次
+    // .lock 文件写——计数只算记录数据写（tmp 文件），排除锁文件，避免把
+    // 测试耦合到内部写文件的次数上。
+    const recordWrites = () =>
+      fs.writeCalls.filter((c) => c.path.includes("/run-1.json") && !c.path.endsWith(".lock"));
+
     tracker.onLoopEvent({ kind: "llm-start", round: 0, atMs: Date.now() });
     // Event schedules a write but does not execute immediately.
-    expect(fs.writeCalls.length).toBe(1); // only the setup write
+    expect(recordWrites().length).toBe(1); // only the setup write
 
     await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(fs.writeCalls.length).toBe(2);
-    const firstActivity = JSON.parse(fs.writeCalls[1].data).activity;
+    expect(recordWrites().length).toBe(2);
+    const firstActivity = JSON.parse(recordWrites()[1].data).activity;
     expect(firstActivity.inFlight?.kind).toBe("llm");
 
     tracker.onLoopEvent({ kind: "llm-end", round: 0, atMs: Date.now(), ok: true });
@@ -1878,7 +1967,7 @@ describe("run activity tracker", () => {
       atMs: Date.now(),
     });
     await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(fs.writeCalls.length).toBe(3);
+    expect(recordWrites().length).toBe(3);
 
     tracker.dispose();
   });

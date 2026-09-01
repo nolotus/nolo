@@ -784,11 +784,22 @@ export function createRunActivityTracker(
 
   function doWrite() {
     writeTimer = undefined;
-    const record = readRunRecord(runId, deps);
-    if (!record) return;
-    const activity = serializeActivity();
-    writeRunRecord({ ...record, activity }, deps);
-    lastWriteAt = now().getTime();
+    // 读-改-写包记录锁（strict：锁被占用就丢弃这次心跳，2s 后下一跳重写，
+    // 无害）。此前心跳不参与锁仲裁，会与 backfillRunRecordParentDialog /
+    // finalizeRunRecord 的带锁写交错，把旧快照整体写回吞掉对方字段（丢失
+    // 更新）。tmp+rename 只防撕裂读，不防 RMW 丢更新。
+    withRunRecordLock(
+      runId,
+      deps,
+      () => {
+        const record = readRunRecord(runId, deps);
+        if (!record) return;
+        const activity = serializeActivity();
+        writeRunRecord({ ...record, activity }, deps);
+        lastWriteAt = now().getTime();
+      },
+      { strict: true },
+    );
   }
 
   function scheduleWrite() {
@@ -859,6 +870,31 @@ export function readRunRecord(runId: string, deps: AgentRunControlDeps = {}): Ru
     }
   }
   return null;
+}
+
+/**
+ * 首轮归因回填：新会话的第一轮里 TUI 的 state.dialogId 尚未生成（turn 结束
+ * 后才从 runResult 回填），该轮派发的后台 run 记录上没有 parentDialogId，
+ * TUI dock 的会话作用域发现（runRegistryPoller）会把它们永久过滤掉，
+ * runCompletionWatcher 也无法归因终态唤醒。turn 结束拿到 dialogId 后由
+ * tuiTurnRunner 对本轮收集到的 runId 逐条调用本函数补盖章。
+ *
+ * 只补缺失值：注入路径已盖章的记录原样保留；记录不存在返回 false。终态
+ * 记录同样回填——discovery 对终态记录有一次 linger 渲染机会。
+ */
+export function backfillRunRecordParentDialog(
+  runId: string,
+  parentDialogId: string,
+  deps: AgentRunControlDeps = {},
+): boolean {
+  if (!parentDialogId) return false;
+  const updated = withRunRecordLock(runId, deps, () => {
+    const record = readRunRecord(runId, deps);
+    if (!record || record.parentDialogId) return false;
+    writeRunRecord({ ...record, parentDialogId }, deps);
+    return true;
+  });
+  return updated === true;
 }
 
 export function listRunRecords(deps: AgentRunControlDeps = {}): RunRecord[] {

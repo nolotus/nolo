@@ -418,7 +418,6 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("可读性/可搜索性");
     expect(prompt).toContain("review context contract");
     expect(prompt).toContain("AGENTS.md");
-    expect(prompt).toContain("docs/product-positioning.md");
     expect(prompt).toContain("深 review 达标线");
     expect(prompt).toContain("用户点名不受此限");
     expect(prompt).toContain("已有失败证据后的升级");
@@ -582,7 +581,7 @@ describe("buildSystemPrompt", () => {
       } as any,
     });
 
-    expect(prompt).toContain("Agent 自我更新能力");
+    expect(prompt).toContain("Agent 配置维护");
     expect(prompt).not.toContain("你拥有 updateSelf 权限，可以修改自己的配置");
     expect(prompt).not.toContain('用户说"记住"');
     expect(prompt).not.toContain("[未更新，原因：xxx]");
@@ -604,7 +603,7 @@ describe("buildSystemPrompt", () => {
       } as any,
     });
 
-    expect(prompt).toContain("Agent 维护能力");
+    expect(prompt).toContain("Agent 配置维护");
     expect(prompt).toContain("更新指定的 Agent");
     expect(prompt).toContain("高风险维护操作");
   });

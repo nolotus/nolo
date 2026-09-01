@@ -871,21 +871,28 @@ export function createCliLocalRuntimeAdapter(
       // only when (a) this is a startAgentRun call and (b) we actually know
       // the current dialog id — otherwise leave the call untouched.
       let injectedCall = contextualCall;
+      // startAgentRun 且本轮无法盖章（无 deps.parentDialogId、模型也未显式
+      // 传参——新会话首轮 dialogId 尚未生成就是这种情形）时置 true；执行
+      // 成功后从结果 JSON 取 runId 上报，供 TUI 在 turn 结束回填归属。
+      let spawnedWithoutParent = false;
       if (
         contextualCall.name === "startAgentRun" &&
-        deps.parentDialogId &&
         typeof contextualCall.arguments === "string"
       ) {
         try {
           const args = JSON.parse(contextualCall.arguments);
           if (!args.parentDialogId) {
-            injectedCall = {
-              ...contextualCall,
-              arguments: JSON.stringify({
-                ...args,
-                parentDialogId: deps.parentDialogId,
-              }),
-            };
+            if (deps.parentDialogId) {
+              injectedCall = {
+                ...contextualCall,
+                arguments: JSON.stringify({
+                  ...args,
+                  parentDialogId: deps.parentDialogId,
+                }),
+              };
+            } else {
+              spawnedWithoutParent = true;
+            }
           }
         } catch {
           // Malformed arguments: leave the call as-is; the executor will fail
@@ -908,6 +915,16 @@ export function createCliLocalRuntimeAdapter(
           ? { confirmDestructiveAction: deps.confirmDestructiveAction }
           : {}),
       });
+      if (spawnedWithoutParent && deps.onBackgroundRunSpawned) {
+        try {
+          const payload = JSON.parse(result?.content ?? "");
+          if (payload && typeof payload.runId === "string" && payload.runId) {
+            deps.onBackgroundRunSpawned(payload.runId);
+          }
+        } catch {
+          // 结果非 JSON 或 spawn 失败（错误 payload 无 runId）——没有可回填的 run。
+        }
+      }
       return {
         ...result,
         metadata: {

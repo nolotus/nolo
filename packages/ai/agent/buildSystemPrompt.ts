@@ -12,6 +12,7 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 // 必须带同一份指引，两处各存一份迟早漂移。
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
+import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
 import { resolveToolGuidedSections } from "./toolGuidedSections";
@@ -47,21 +48,7 @@ const createContextSection = (
 ): string =>
   content ? `### ${title} \n${description} \n\n${content} ` : "";
 
-/** 根据屏幕宽度生成响应式排版展示建议（跨端通用：TUI / Web / RN 视觉优化） */
-const buildResponseGuidelines = (isMobile: boolean): string => {
-  if (isMobile) {
-    return `--- 响应展示指南（窄屏 / TUI / 移动端） ---
-当前处于窄屏或终端视图，采用紧凑、高扫描率排版：结论/关键状态置顶，短段落（2-4 句）并保持空行，拒绝文字墙。
-- 列表项用「- **核心词**：说明」；嵌套最多 2 层，子列表缩进 2 空格；并列用无序列表，步骤用有序列表。
-- **表格降级**：严禁使用 ≥4 列的大宽表（窄屏/终端折行严重错位），改用键值清单或纵向卡片。
-- 克制分割线（仅大主题切换或结论前，前后留空行）；路径、命令与参数用反引号 \` \` 包裹；代码块标明语言且避免横向超长行；克制 Emoji。`;
-  }
-  return `--- 响应展示指南（宽屏 / 桌面端） ---
-当前处于大屏视图：层次清晰的全景结构，重要模块用二级/三级标题划分；段落 2-4 句并留空行，直奔主题。
-- 列表项用「- **核心词**：说明」；嵌套最多 2 层，子列表缩进 2 空格；并列用无序列表，步骤用有序列表。
-- **表格与对比**：宽屏下可适度使用 Markdown 多列表格做方案对比、参数汇总或矩阵分析。
-- 可展示更完整的代码上下文与多步执行示例；路径、命令与参数用反引号 \` \` 包裹，代码块标明语言；克制分割线与 Emoji。`;
-};
+/** 根据屏幕宽度的排版指南已收敛到 agent-runtime/responseGuidelines（TUI 共用）。 */
 
 /** 构建参考资料区块 */
 const buildReferenceMaterialsBlock = (contexts: Contexts): string => {
@@ -263,6 +250,8 @@ export const buildSystemPromptContext = (options: {
   // memory-overlay has content this turn. This keeps the guidance in the stable
   // prefix — if it were conditional on memory-overlay being non-empty, the
   // prefix would break when memory first appears or disappears.
+  // 注意：TUI/desktop/CLI 路径按 promptBlock 门控（见 turnContext.ts
+  // buildMemoryUseGuidanceLayer 的门控分歧说明），两边都是前缀稳定的。
   const hasMemoryTools = Array.isArray(agentConfig.tools) && agentConfig.tools.some(
     (t: string) => /memory/i.test(t),
   );
@@ -287,8 +276,7 @@ export const buildSystemPromptContext = (options: {
     { id: "clarification-mode", owner: "platform", cacheScope: "session", content: clarifyingSection },
     { id: "knowledge-management", owner: "platform", cacheScope: "session", content: toolSections.knowledgeManagement },
     { id: "memory-capture", owner: "platform", cacheScope: "session", content: toolSections.memoryCapture },
-    { id: "self-update", owner: "platform", cacheScope: "session", content: toolSections.selfUpdate },
-    { id: "generic-agent-update", owner: "platform", cacheScope: "session", content: toolSections.genericAgentUpdate },
+    { id: "agent-config-maintenance", owner: "platform", cacheScope: "session", content: toolSections.agentConfigMaintenance },
     { id: "context-layer-contract", owner: "platform", cacheScope: "static", content: contextLayerContract },
     {
       id: "email-registration-workflow",

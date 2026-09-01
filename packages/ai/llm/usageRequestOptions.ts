@@ -43,7 +43,22 @@ const STREAM_USAGE_PROVIDERS = new Set([
   // endpoint, supports stream_options.include_usage (measured to return
   // prompt_tokens_details.cached_tokens).
   "runinfra",
+  // Kimi For Coding subscription (api.kimi.com/coding/v1): OpenAI-compatible
+  // chat.completions streaming that only emits the terminal usage frame when
+  // stream_options.include_usage is requested (measured; the official
+  // kimi-code CLI also sends include_usage). Custom agents pointing at the
+  // same endpoint are covered by the endpoint check below, not here.
+  "kimi-code",
 ]);
+
+// Kimi Code endpoint marker for user-configured custom providers. Duplicated
+// from agent-runtime/kimiUserAgent.ts isKimiEndpoint on purpose: ai/llm must
+// not depend on agent-runtime, and both copies guard the same wire behavior —
+// update them together.
+const KIMI_CODE_ENDPOINT_MARKER = "api.kimi.com";
+
+const isKimiCodeEndpoint = (endpoint?: string | null): boolean =>
+  typeof endpoint === "string" && endpoint.includes(KIMI_CODE_ENDPOINT_MARKER);
 
 const EXTRA_USAGE_FIELD_PROVIDERS = new Set(["openrouter"]);
 
@@ -52,10 +67,18 @@ const normalizeProviderName = (providerName?: string | null) =>
 
 export const getUsageRequestOptions = (
   providerName?: string | null,
-  options?: { api?: UsageRequestApi }
+  options?: { api?: UsageRequestApi; endpoint?: string | null }
 ): UsageRequestOptions => {
   const normalizedProvider = normalizeProviderName(providerName);
   const api = options?.api ?? "chat-completions";
+
+  // custom 是用户手配的任意 OpenAI 兼容网关，不能整体进白名单（严格网关不认
+  // stream_options 会 400）；但指向 Kimi For Coding 端点的 custom agent 已实测
+  // 支持 include_usage，按 endpoint 精准放行，否则订阅流式永远没有 usage 帧
+  //（TUI context 面板不动 + 计费只剩字符估算）。
+  const shouldRequestStreamUsage =
+    STREAM_USAGE_PROVIDERS.has(normalizedProvider) ||
+    (normalizedProvider === "custom" && isKimiCodeEndpoint(options?.endpoint));
 
   if (api === "responses") {
     return EXTRA_USAGE_FIELD_PROVIDERS.has(normalizedProvider)
@@ -68,7 +91,7 @@ export const getUsageRequestOptions = (
   }
 
   return {
-    ...(STREAM_USAGE_PROVIDERS.has(normalizedProvider)
+    ...(shouldRequestStreamUsage
       ? {
           stream_options: {
             include_usage: true as const,

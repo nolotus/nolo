@@ -106,7 +106,11 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
       // usage 白名单必须按真实上游名查询（platformChatProvider 同理）：平台
       // 托管 remap 后 provider 仍是 "nolo"，不在白名单里，查 "nolo" 会丢
       // include_usage → 上游不回终结 usage 帧 → 本地路径同样计费漏账。
-      ? getUsageRequestOptions(args.providerConfig.usageProvider ?? args.providerConfig.provider, { api: "chat-completions" })
+      // endpoint 供 custom provider 的端点级判定（如手配 Kimi For Coding）。
+      ? getUsageRequestOptions(args.providerConfig.usageProvider ?? args.providerConfig.provider, {
+          api: "chat-completions",
+          endpoint: args.providerConfig.endpoint,
+        })
       : {}),
   };
 

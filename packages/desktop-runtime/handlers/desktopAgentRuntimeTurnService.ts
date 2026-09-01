@@ -1,5 +1,4 @@
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import { toErrorMessage } from "core/errorMessage";
 import type {
   AgentRuntimeAgentConfig,
@@ -90,13 +89,13 @@ import {
   buildDialogSummaryLayer,
   buildWorkspaceContextLayer,
   buildSkillDiscoveryLayer,
-  buildAgentsMdLayer,
   partitionScopedBlocks,
   renderTurnContextBlocksWithScope,
   buildMemoryUseGuidanceLayer,
   spaceRecordKey,
 } from "agent-runtime/turnContext";
 import { discoverSkills } from "agent-runtime/skillDiscovery";
+import { readAgentsMdLayerFromDisk } from "agent-runtime/agentsMd";
 import {
   createChromeConnectorClient,
   createVerifiedChromeConnectorClient,
@@ -804,29 +803,8 @@ export async function rejectDesktopTextOnlyAgentRuntimeToolCall(
   throw new Error(`Desktop text-only agent runtime cannot execute tool calls: ${call.name}`);
 }
 
-/**
- * Read AGENTS.md from the workspace root. Falls back to CLAUDE.md if
- * AGENTS.md is absent (common in repos that predate the standard).
- * Returns null when neither file exists.
- */
-function readAgentsMd(workspaceRoot: string): string | null {
-  const candidates = [
-    join(workspaceRoot, "AGENTS.md"),
-    join(workspaceRoot, "CLAUDE.md"),
-  ];
-  for (const filePath of candidates) {
-    if (!existsSync(filePath)) continue;
-    try {
-      let content = readFileSync(filePath, "utf8").trim();
-      if (!content) continue;
-      if (Buffer.byteLength(content, "utf8") > 8192) {
-        content = Buffer.from(content, "utf8").subarray(0, 8192).toString("utf8") + "\n\n<!-- AGENTS.md truncated -->";
-      }
-      return content;
-    } catch { /* skip unreadable */ }
-  }
-  return null;
-}
+// AGENTS.md 读取已收敛到 agent-runtime/agentsMd 的 readAgentsMdLayerFromDisk
+//（TUI / CLI / desktop 三 host 共享同一实现，含 8KB 截断与 CLAUDE.md 回退）。
 
 
 export async function resolveDesktopTextOnlyAgentRuntimeProvider(args: {
@@ -1267,9 +1245,9 @@ export async function runDesktopAgentRuntimeTurn(
     } catch (scanError) {
       console.warn("[desktop-runtime] skill discovery scan failed:", scanError);
     }
-    // AGENTS.md project context (session-scope for cache stability)
-    const agentsMdContent = readAgentsMd(boundFolder);
-    agentsMdLayer = agentsMdContent ? buildAgentsMdLayer(agentsMdContent) : null;
+    // AGENTS.md project context (session-scope for cache stability；
+    // 共享实现：agent-runtime/agentsMd，含 8KB 截断与 CLAUDE.md 回退)
+    agentsMdLayer = readAgentsMdLayerFromDisk(boundFolder);
   }
 
   // T13 — user global prompt. userId comes from the dialog record only; when

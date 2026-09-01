@@ -15,8 +15,6 @@
  * 由调用方 runTuiWorkspace 装配，本模块不做任何模块级可变单例。
  */
 import type { createInterface } from "node:readline";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { runAgentTurn, type RunAgentTurnResult } from "../client/agentRun";
 import {
   createCliLocalRuntimeAdapter,
@@ -25,8 +23,9 @@ import {
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
+import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
+import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
-  buildAgentsMdLayer,
   buildMemoryOverlayLayer,
   buildMemoryUseGuidanceLayer,
   partitionScopedBlocks,
@@ -46,6 +45,7 @@ import {
 import type { AgentRuntimeToolResult } from "../agentRuntimeLocal";
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
+import { backfillRunRecordParentDialog } from "../agentRunControl";
 import type { SelfUpdateExecution } from "../updateCommands";
 import type { spawnProcess } from "../processSpawn";
 import type { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
@@ -85,33 +85,8 @@ import {
 import type { FixedInputController } from "./tuiRawInput";
 
 /** Max bytes of AGENTS.md/CLAUDE.md to inject — prevents context window overflow. */
-const AGENTS_MD_MAX_BYTES = 8192;
-
-
-/**
- * Read AGENTS.md (or CLAUDE.md fallback) from the workspace root.
- * Returns the runtime's canonical agents-md layer, or null when absent.
- *
- * The block text and its cacheScope both come from `buildAgentsMdLayer` — this
- * host must not format the marker itself, or downstream consumers are forced
- * to string-match it back to recover the scope.
- */
-function readAgentsMdLayer(cwd: string): TurnContextLayer | null {
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const filePath = join(cwd, name);
-    if (existsSync(filePath)) {
-      try {
-        let content = readFileSync(filePath, "utf8").trim();
-        if (!content) continue;
-        if (Buffer.byteLength(content, "utf8") > AGENTS_MD_MAX_BYTES) {
-          content = Buffer.from(content, "utf8").subarray(0, AGENTS_MD_MAX_BYTES).toString("utf8") + "\n\n<!-- AGENTS.md truncated -->";
-        }
-        return buildAgentsMdLayer(content, name);
-      } catch { /* skip unreadable */ }
-    }
-  }
-  return null;
-}
+// AGENTS.md 读取已收敛到 agent-runtime/agentsMd 的 readAgentsMdLayerFromDisk
+//（TUI / CLI / desktop 三 host 共享同一实现，含 8KB 截断与 CLAUDE.md 回退）。
 
 export type SelfUpdater = (
   output: NodeJS.WritableStream
@@ -235,12 +210,19 @@ async function runAgentChat(
   // (session = stable prefix, cached; turn = dynamic suffix, recomputed), so
   // this host never has to infer scope by string-matching block markers.
   const layers: Array<TurnContextLayer | null> = [
-    readAgentsMdLayer(state.cwd),
+    readAgentsMdLayerFromDisk(state.cwd),
     // Skill discovery: scan conventional skill dirs for SKILL.md and inject an
     // index layer so the model knows what skills exist and can readFile them
     // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
     buildSkillDiscoveryContextLayer(state.cwd),
   ];
+
+  // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
+  // （agent-runtime/responseGuidelines），此前只注入 server/web 路径。
+  const responseGuidelinesBlock: ContextBlockScope = {
+    content: buildResponseGuidelines(true),
+    cacheScope: "session",
+  };
 
   // Memory overlay: session-scoped — load once per dialog, reuse across turns.
   // New memories written via rememberMemory tool are for FUTURE dialogs, not
@@ -269,6 +251,7 @@ async function runAgentChat(
 
   const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
     ...renderTurnContextBlocksWithScope(layers),
+    responseGuidelinesBlock,
     ...renderTurnContextBlocksWithScope([memoryUseGuidanceLayer]),
     // Attached skill bodies are already self-contained sections built by
     // buildSkillContextBlocks; they stay turn-scope because the user can
@@ -280,6 +263,10 @@ async function runAgentChat(
     ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
     ...cwdNoticeBlocks,
   ]);
+  // 新会话首轮 state.dialogId 尚未生成（turn 结束后才从 result 回填），
+  // 该轮派发的后台 run 无法注入 parentDialogId——adapter 通过
+  // onBackgroundRunSpawned 把这些 runId 报到这里，turn 结束统一回填归属。
+  const spawnedRunsMissingParent: string[] = [];
   const result: RunAgentTurnResult = await agentRunner({
     agentName: effectiveAgentName,
     agentKey: effectiveAgentKey,
@@ -343,6 +330,10 @@ async function runAgentChat(
         // run-completion watcher can attribute terminal-state wakes to this
         // conversation.
         ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
+        // 首轮无 dialogId 时的兜底：收集失归属的 spawn，turn 结束回填。
+        onBackgroundRunSpawned: (runId) => {
+          spawnedRunsMissingParent.push(runId);
+        },
         ...(options.activityReporter
           ? { activityReporter: options.activityReporter }
           : {}),
@@ -359,6 +350,20 @@ async function runAgentChat(
       ? { contextBlockScopes }
       : {}),
   });
+  // 回填本轮失归属的后台 run：纯数据修复（读-改-写 registry JSON，带记录锁），
+  // 不碰 UI 锁，abort/force-stop 路径同样安全。单条失败不带走 turn。
+  if (result.dialogId && spawnedRunsMissingParent.length > 0) {
+    for (const runId of spawnedRunsMissingParent) {
+      try {
+        // 必须传 env：resolveNoloHome 只认传入 env 的 NOLO_HOME，不传则永远
+        // 读 ~/.nolo——设了 NOLO_HOME 的环境（dev、测试）会静默回填错目录
+        // （与 readlineWorkspace.ts 轮询器注入 env 的约定同源）。
+        backfillRunRecordParentDialog(runId, result.dialogId, { env });
+      } catch {
+        // 显示层兜底：归回失败只影响 dock 可见性，不影响 turn 本身。
+      }
+    }
+  }
   return {
     ...result,
     contextWindow: resolveAgentContextWindow({

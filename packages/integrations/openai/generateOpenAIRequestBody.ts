@@ -80,6 +80,7 @@ interface BuildRequestBodyOptions {
   model: string;
   messages: Message[];
   providerName: string;
+  customProviderUrl?: string | null;
   temperature?: number;
   top_p?: number;
   frequency_penalty?: number;
@@ -138,6 +139,7 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
     model,
     messages,
     providerName,
+    customProviderUrl,
     temperature,
     top_p,
     frequency_penalty,
@@ -158,6 +160,7 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
   };
   const usageRequestOptions = getUsageRequestOptions(providerName, {
     api: "chat-completions",
+    endpoint: customProviderUrl,
   });
   Object.assign(bodyData, usageRequestOptions);
 
@@ -247,6 +250,7 @@ export const generateOpenAIRequestBody = (
     model: resolvedModel,
     messages: messagesWithPrompt,
     providerName,
+    customProviderUrl: agentConfig.customProviderUrl,
     temperature: agentConfig.temperature,
     top_p: agentConfig.top_p,
     frequency_penalty: agentConfig.frequency_penalty,
