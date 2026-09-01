@@ -59,7 +59,7 @@ describe("dialog agent policy", () => {
         cybots: [],
         autoRoute: { stickyTier: "image" },
       } as any),
-    ).toBe("agent-pub-01DSV4FLASHPB00000000JFPFD");
+    ).toBe("agent-pub-01NOLOAPPBLD000000019KCKT0");
   });
 
   test("prefers an explicit per-turn target", () => {

@@ -184,7 +184,14 @@ export async function postRemoteRecord(args: {
     },
     // evidence 写是 customKey 幂等覆盖写（同 key 重写结果相同），
     // 因此 502 重试安全：即便前一次已被服务端处理，重写结果不变。
-    { retryableStatuses: new Set([429, 502, 503]) },
+    // 402（ledger append conflict）同样幂等可重试：token 记录同 key
+    // 覆盖写 + 扣费幂等键（token:<key>）在 prepare 阶段短路 duplicate，
+    // 重试不会双扣。服务端 chargeTokenUsageWithLedger 内部已带 conflict
+    // 重试，走到 402 说明多重冲突，客户端再退避重试一轮兜底。
+    // Effect v4 迁移锚点：白名单重试 ≈ Effect.retry({ while: res =>
+    // retryableStatuses.has(res.status), schedule: Schedule.exponential })，
+    // 退避/抖动由 Schedule 组合表达，测试用 TestClock 免真实 sleep。
+    { retryableStatuses: new Set([402, 429, 502, 503]) },
   );
   if (!response.ok) {
     const text = await response.text().catch(() => "");

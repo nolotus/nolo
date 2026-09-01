@@ -1,6 +1,4 @@
-import {
-  PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
-} from "core/builtinAgents";
+import { BUILTIN_NOLO_AGENT_KEY } from "core/builtinAgents";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 
 /**
@@ -45,17 +43,23 @@ const createProfile = (input: {
 });
 
 const FLASH_PROFILE = createProfile({
-  id: "builtin:auto:deepseek-v4-flash",
+  id: "builtin:auto:nolo",
   tier: "flash",
-  legacyAgentKey: PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
-  name: "DeepSeek V4 Flash",
-  model: "deepseek-v4-flash",
+  legacyAgentKey: BUILTIN_NOLO_AGENT_KEY,
+  name: "nolo",
+  model: "glm-5-3-flash",
 });
 
 /**
  * Code-owned execution truth for dialogs in auto mode. These profiles do not
  * require a persisted Agent entity. Balanced/quality intentionally share the
  * current Flash runtime profile until product routing changes.
+ *
+ * 2026-09-02: flash 档从旧广场档 DeepSeek V4 Flash 对齐到内置 nolo 本体（与
+ * settings/quickChatTierDefaults.ts 的默认档一致）。修复：QuickChat 首条消息
+ * 按默认档由 nolo 应答，而 auto 对话续聊仍走旧广场档——同一对话首问 nolo、
+ * 续聊 DeepSeek，消息头名字漂移（两半各一个脑子）。运行时 provider/model
+ * 最终由 builtinPlatformAgentConfigs 按 catalog 托管，此处只作兜底声明。
  *
  * "image" tier maps to flash — image input is now handled by the vision
  * preprocessing pipeline, not by switching to a vision model. The key

@@ -4749,6 +4749,12 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
      * 确定性投递点——再晚一格就属于 turn 结束后的新 turn 了。
      */
     injectBeforeReturn?: (roundIndex: number, dynamicInbox: string[]) => void;
+    /**
+     * seal 刀：透传给 runLocalAgentTurn 的 onBeforeFinalInjectionDrain。
+     * 在「provider #1 已 resolve、no-tool result 已确定、final drain 之前」
+     * 的缝隙里执行——测试在此断言 inbox 仍空并投递迟到 injection。
+     */
+    onCompletionBoundary?: () => Promise<void> | void;
   }) {
     const requests: AgentRuntimeChatMessage[][] = [];
     const savedTurns: AgentRuntimeSaveTurnInput[] = [];
@@ -4806,9 +4812,12 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
           const queued = pendingInjections.shift() ?? [];
           return [...queued, ...dynamicInbox.splice(0)];
         },
+        ...(options.onCompletionBoundary
+          ? { onBeforeFinalInjectionDrain: options.onCompletionBoundary }
+          : {}),
       } as any);
 
-    return { run, requests, savedTurns };
+    return { run, requests, savedTurns, dynamicInbox };
   }
 
   // a) loop 进行中注入 → 下一轮 provider 请求消息里必须出现注入的 user 消息。
@@ -4932,6 +4941,70 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
     expect(
       saved.messages.some(
         (m) => m.role === "user" && String(m.content).includes("run-race"),
+      ),
+    ).toBe(true);
+  });
+
+  // e) completion-boundary race（seal）：injection 在 provider #1 已 resolve、
+  //    localLoop 已拿到 no-tool result、final drain 之前才到达——比 c) 更晚的
+  //    窗口。c) 的 injectBeforeReturn 只能表达「resolve 前同帧投递」；本用例借
+  //    production completion-boundary 缝隙（onBeforeFinalInjectionDrain）在该
+  //    同步段内精确投递，证明 parent 仍不提前结束、final drain 消费它。
+  test("completion-boundary race (seal): provider resolve 之后才到达的 injection 仍被 final drain 消费", async () => {
+    let provider1Returned = false;
+    let boundaryReached = false;
+    const h = buildInjectionHarness({
+      providerScript: [
+        { content: "round 1 final answer" },
+        { content: "round 2 answer after late injection" },
+      ],
+      injections: [],
+      injectBeforeReturn: (roundIndex) => {
+        // 只记录 provider #1 已走到 return（不投递——本用例的 injection 在
+        // resolve 之后才到，与 c) 区分）。
+        if (roundIndex === 0) provider1Returned = true;
+      },
+      onCompletionBoundary: async () => {
+        // seam 在每轮 no-tool 完成路径都触发；只处理 Round 1 的 boundary
+        //（Round 2 收尾时 inbox 已空、不该再投递）。
+        if (boundaryReached) return;
+        // 此刻的确定性：能进到这个缝隙 = parent 的 await continuation 已恢复
+        // = provider #1 promise 已 resolve、no-tool result 已在手、final drain
+        // 尚未执行。此处断言时序三要素，然后才投递 injection。
+        boundaryReached = true;
+        expect(provider1Returned).toBe(true);
+        expect(h.requests).toHaveLength(1);
+        expect(h.dynamicInbox).toHaveLength(0);
+        // 时序钉死后才注入 child completion。
+        h.dynamicInbox.push("child run run-seal 已完成: 迟到的完成通知");
+      },
+    });
+
+    const result = await h.run();
+
+    expect(boundaryReached).toBe(true);
+    // Round 1 没有提前结束：final drain 消费了迟到 injection，进入 Round 2。
+    expect(h.requests).toHaveLength(2);
+    const secondRequest = h.requests[1]!;
+    const assistantIdx = secondRequest.map((m) => m.role).lastIndexOf("assistant");
+    expect(assistantIdx).toBeGreaterThanOrEqual(0);
+    // Round 2 history 明确包含 injection：assistant 之后紧跟注入的 user 消息。
+    expect(secondRequest[assistantIdx + 1]).toMatchObject({ role: "user" });
+    expect(String(secondRequest[assistantIdx + 1]!.content)).toContain("run-seal");
+    expect(String(secondRequest[assistantIdx + 1]!.content)).toContain("迟到");
+    // 最终正常结束，结果来自 Round 2。
+    expect(result.content).toBe("round 2 answer after late injection");
+    // 注入随 saveTurn 落盘，真实 history 完整：user → assistant(R1) → user(injection) → assistant(R2)。
+    const saved = h.savedTurns[0]!;
+    expect(saved.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(
+      saved.messages.some(
+        (m) => m.role === "user" && String(m.content).includes("run-seal"),
       ),
     ).toBe(true);
   });

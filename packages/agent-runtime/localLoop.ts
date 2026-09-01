@@ -189,6 +189,14 @@ export type LocalAgentTurnInput = {
    * 注入消息进入 `messages`，因此天然随 turnMessages 一起 saveTurn 持久化。
    */
   drainInjections?: () => string[];
+  /**
+   * [test seam] completion-boundary 缝隙：在「no-tool result 已确定、final
+   * injection drain 尚未执行」处 await 调用。生产调用方不传——行为零变化；
+   * deterministic race 测试用它在该窗口（provider 已 resolve 之后的同步段，
+   * Promise 语义上外部无插入点）内精确投递 child completion，验证收尾
+   * drain 不丢迟到事件。seal 刀专用，见 localLoop.test.ts。
+   */
+  onBeforeFinalInjectionDrain?: () => Promise<void> | void;
 };
 
 export type LocalAgentTurnResult = AgentRuntimeResult & {
@@ -1759,6 +1767,12 @@ export async function runLocalAgentTurn(
         // 先把本轮 assistant 回复落进上下文，再追加注入的 user 消息并多跑一轮，
         // 让模型在本回合内当场消化。abort/熔断/错误的 break 路径不做拦截。
         if (input.drainInjections) {
+          // completion-boundary 缝隙：此刻 no-tool result 已确定（provider 已
+          // resolve）、final drain 尚未执行。生产不传，行为零变化；race 测试
+          // 借此在「resolve 之后的同步段」内精确投递迟到 injection（seal 刀）。
+          if (input.onBeforeFinalInjectionDrain) {
+            await input.onBeforeFinalInjectionDrain();
+          }
           const assistantMessage: AgentRuntimeChatMessage = {
             role: "assistant",
             content: result.content,

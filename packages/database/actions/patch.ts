@@ -3,6 +3,7 @@
 import type { DbThunkApi } from "database/thunkApiTypes";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { actionToast as toast } from "./actionToast";
+import { fetchFromServer } from "./common";
 import { isRecord } from "core/isRecord";
 import { toTimestampMs } from "core/timestamp";
 import {
@@ -62,7 +63,7 @@ const inferNextUpdatedAt = (currentData: any): number | string | undefined => {
 
 /**
  * Patch Action: 对现有数据项应用增量更新。
- * 1. 从本地数据库读取现有数据。
+ * 1. 从本地数据库读取现有数据；本地未命中时先从服务器水合（水合记录与 patch 结果合并后一次性落盘）。
  * 2. 将传入的 'changes' 对象与现有数据进行深度合并。
  * 3. 将合并后的新数据写回本地数据库。
  * 4. 异步地将 'changes' 对象同步到所有相关服务器。
@@ -97,16 +98,28 @@ export const patchAction = async (
   }
 
   const state = thunkApi.getState() as import("app/store").RootState;
-  const { currentServer, syncServers: configuredSyncServers } =
+  const { currentServer, syncServers: configuredSyncServers, currentToken } =
     getRuntimeServerContext(state);
 
   try {
-    // 3. 使用注入的 db 实例读取当前数据
-    const currentData = await db.get(dbKey);
+    // 3. 使用注入的 db 实例读取当前数据；本地未命中时先从服务器水合。
+    // 注意：水合记录不单独落盘——与 patch 结果合并后一次性写入，避免
+    // 「已回种未打补丁的记录」被后续 patch/读缓存当作权威数据。
+    let currentData = await db.get(dbKey);
     if (!currentData) {
-      throw new Error(
-        `Cannot apply patch: Data not found locally for key: ${dbKey}.`
-      );
+      // 本地未命中：记录可能只存在服务器端（典型：web 端服务端 run 持久化的
+      // assistant 消息，客户端拉取后只进 redux 不进本地 IndexedDB，导致
+      // editUserMessageAndReplay 对目标消息 patch 必失败）。
+      const hydrateServer = preferredServerOrigin ?? currentServer;
+      const remoteData = hydrateServer
+        ? await fetchFromServer(hydrateServer, dbKey, currentToken)
+        : null;
+      if (!remoteData) {
+        throw new Error(
+          `Cannot apply patch: Data not found locally or on server for key: ${dbKey}.`
+        );
+      }
+      currentData = remoteData;
     }
 
     const patchChanges = Object.prototype.hasOwnProperty.call(changes, "updatedAt")
