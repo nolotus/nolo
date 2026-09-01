@@ -8,7 +8,6 @@ import { selectIdentityUserId } from "identity/selectors";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { patch, read } from "database/dbSlice";
 import { UNCATEGORIZED_ID } from "../constants";
-import type { SpaceState } from "../types";
 import { checkSpaceMembership } from "../utils/permissions";
 // Wave D: currentSpaceId/currentSpace 已剥至 module store。
 import {

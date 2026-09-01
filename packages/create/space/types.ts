@@ -18,11 +18,3 @@ export interface CreateSpaceRequest {
   /** 空间绑定的本地文件夹路径（桌面端专用） */
   boundFolder?: string;
 }
-
-/**
- * Empty state type for the spaceSlice compatibility shell.
- * All actual state lives in module stores. This type exists only because
- * RTK thunk reducer callbacks require a state parameter type.
- * Do NOT add fields here — new state goes in a module store.
- */
-export type SpaceState = Record<string, never>;

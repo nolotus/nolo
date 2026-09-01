@@ -48,7 +48,6 @@ describe("resolvePreferredSpaceId", () => {
     setCurrentSpaceId("space-live");
     const result = await resolvePreferredSpaceId({
       dispatch: (x: any) => x,
-      getState: () => ({}) as any,
     });
     expect(result).toBe("space-live");
     expect(readMock).not.toHaveBeenCalled();
@@ -69,7 +68,6 @@ describe("resolvePreferredSpaceId", () => {
     readMock.mockResolvedValueOnce({ id: "space-a" });
     const result = await resolvePreferredSpaceId({
       dispatch: (x: any) => x,
-      getState: () => ({}) as any,
     });
     expect(result).toBe("space-a");
   });
@@ -88,7 +86,6 @@ describe("resolvePreferredSpaceId", () => {
     readAndWaitMock.mockRejectedValue(new Error("miss"));
     const result = await resolvePreferredSpaceId({
       dispatch: (x: any) => x,
-      getState: () => ({}) as any,
     });
     expect(result).toBeNull();
   });

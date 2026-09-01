@@ -3,8 +3,8 @@ import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 // Value-copy snapshots — Bun mock.restore() does not clear mock.module.
 const realAuthSlice = { ...(await import("auth/authSlice")) };
 const realSettingSlice = { ...(await import("app/settings/settingSlice")) };
-const realSpaceModule = {
-  ...(await import("create/space/spaceCurrentSelectors")),
+const realSpaceCurrentStore = {
+  ...(await import("create/space/spaceCurrentStore")),
 };
 const realDialogSlice = { ...(await import("chat/dialog/dialogSlice")) };
 
@@ -22,7 +22,7 @@ let moduleVersion = 0;
 const restoreLeakedModuleMocks = () => {
   mock.module("auth/authSlice", () => realAuthSlice);
   mock.module("app/settings/settingSlice", () => realSettingSlice);
-  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
+  mock.module("create/space/spaceCurrentStore", () => realSpaceCurrentStore);
   mock.module(
     "create/space/content/addContentAction",
     () => realAddContentAction,
@@ -36,9 +36,10 @@ const loadModule = async () => {
   mock.module("./toolApiClient", () => ({
     callToolApi: callToolApiMock,
   }));
-  mock.module("create/space/spaceCurrentSelectors", () => ({
-    ...realSpaceModule,
-    selectCurrentSpaceId: () => "space-1",
+  // Wave E: production 读 spaceCurrentStore.getCurrentSpaceId()，mock 必须对准真实导入的模块。
+  mock.module("create/space/spaceCurrentStore", () => ({
+    ...realSpaceCurrentStore,
+    getCurrentSpaceId: () => "space-1",
   }));
   mock.module("auth/authSlice", () => ({
     ...realAuthSlice,

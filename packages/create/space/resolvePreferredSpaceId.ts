@@ -1,4 +1,3 @@
-import type { RootState } from "app/store";
 import { isAbortError } from "core/abortError";
 import { read, readAndWait } from "database/dbSlice";
 
@@ -72,8 +71,6 @@ export const resolvePreferredSpaceId = async ({
   dispatch,
 }: {
   dispatch: any;
-  getState: () => RootState;
-  userId?: string | null;
 }): Promise<string | null> => {
   // Wave E: state.space 已随 spaceSlice 删除，当前空间改读 module store。
   // 注意用 Raw 版本：getCurrentSpaceId() 在 viewMode=all 时会返回 null，

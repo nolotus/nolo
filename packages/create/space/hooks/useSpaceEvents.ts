@@ -10,14 +10,13 @@
 //   useSpaceEvents();
 
 import { useEffect } from "react";
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAppSelector } from "app/store";
 // Wave E: applySpaceEvent 现在是普通函数，直接调用（不再 dispatch）。
 import { applySpaceEvent } from "../spaceDialogStore";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { subscribeSharedSse } from "app/realtime/sharedSse";
 
 export function useSpaceEvents() {
-    const dispatch = useAppDispatch();
     const spaceId = useCurrentSpaceId();
     const { currentServer, currentToken: token } =
         useAppSelector(selectRuntimeSnapshot);
@@ -40,7 +39,7 @@ export function useSpaceEvents() {
         return () => {
             dispose();
         };
-    }, [spaceId, currentServer, token, dispatch]);
+    }, [spaceId, currentServer, token]);
 }
 
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";

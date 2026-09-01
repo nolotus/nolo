@@ -2,7 +2,7 @@
 // 原测试通过 spaceReducer + 手工构造的 fetchUserSpaceMemberships.pending/fulfilled/rejected
 // action 驱动 case reducer；slice 删除后副作用已内联进 thunk 的 payload creator，
 // 因此这里改为直接驱动 module store mutator（thunk 现在调用的正是这些函数），
-// thunk 与 mutator 的接线由 memberThunks.wiring.test.ts 覆盖。
+// Wave E: thunk 与 mutator 的接线由 spaceThunks.runtime.test.ts 覆盖。
 import { describe, expect, test, beforeEach } from "bun:test";
 
 import {

@@ -101,9 +101,8 @@ describe("deleteSpace", () => {
 });
 
 describe("space thunk typePrefix 稳定性（跨模块调用点按字符串断言）", () => {
-  // Wave E: 用源码断言而非运行时 import。24 个 thunk 分布在 4 个模块，
-  // 运行时全量 import 会拉进 app/reducer 等仍引用已删除 spaceSlice 的包外文件
-  // （T1 边界不允许改），源码断言可稳定守住 typePrefix 契约。
+  // 用源码断言而非运行时 import：24 个 thunk 分布在 4 个模块，
+  // 源码断言避免拉入重型依赖图，稳定守住 typePrefix 契约。
   const read = (rel: string) =>
     readFileSync(new URL(rel, import.meta.url), "utf8");
 
