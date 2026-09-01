@@ -35,6 +35,12 @@ export type MessageItemProps = {
    * narration). Defaults to true for share / standalone mounts.
    */
   enableActions?: boolean;
+  /**
+   * List-provided streaming flag (preferred). When omitted, falls back to
+   * `message.isStreaming` (rarely set on the entity itself). The list has the
+   * authoritative signal from the session store (useHasStreamingMessage).
+   */
+  isStreaming?: boolean;
 };
 
 /**
@@ -80,6 +86,7 @@ function areMessageItemPropsEqual(
     prev.readOnly === next.readOnly &&
     prev.canBranch === next.canBranch &&
     prev.enableActions === next.enableActions &&
+    prev.isStreaming === next.isStreaming &&
     prev.message === next.message
   );
 }
@@ -92,6 +99,7 @@ export const MessageItem = memo(
     readOnly = false,
     canBranch: canBranchProp,
     enableActions = true,
+    isStreaming: isStreamingProp,
   }: MessageItemProps) => {
     const currentUserId = useUserId();
     const currentServer = useAppSelector(selectRuntimeCurrentServer);
@@ -102,8 +110,10 @@ export const MessageItem = memo(
       imageGenerationState,
       userId,
       role,
-      isStreaming = false,
     } = message || {};
+    // 列表层传入的 streaming 信号优先（session store 权威）；实体上的
+    // isStreaming 极少被写入（messageSlice 不置 true），仅作兜底。
+    const isStreaming = isStreamingProp ?? message?.isStreaming ?? false;
     const messageAgentKey = resolveMessageAgentKey(message);
 
     const isSelf = role === "user" && (currentUserId === userId || !messageAgentKey);

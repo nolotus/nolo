@@ -643,6 +643,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       message={msg}
                       canBranch={canBranch}
                       enableActions={enableActions}
+                      isStreaming={hasStreamingMessage && msg.id === lastAssistantMessageId}
                     />
                   )}
                 </MessageRowErrorBoundary>

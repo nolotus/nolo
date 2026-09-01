@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { StreamingPendingIndicator } from "./StreamingPendingIndicator";
+import { OrbActivityIndicator } from "./OrbActivityIndicator";
 
 /**
  * Placeholder row shown while the agent loop is running but no visible
@@ -9,7 +9,7 @@ export const AssistantReplyPending = memo(function AssistantReplyPending() {
   return (
     <div className="assistant-reply-pending" aria-live="polite" aria-busy="true">
       <div className="assistant-reply-pending__avatar" aria-hidden="true">
-        <StreamingPendingIndicator size="md" />
+        <OrbActivityIndicator variant="s1-thinking" size={18} />
       </div>
       <div className="assistant-reply-pending__body">
         <div className="assistant-reply-pending__label">正在回复…</div>

@@ -753,6 +753,11 @@ export const toolMessageContentStyles = stylex.create({
     backgroundColor: "var(--surfaceInset, var(--backgroundGhost))",
     fontSize: "var(--fontSize-xs)",
   },
+  diffFileIcon: {
+    flexShrink: 0,
+    color: "var(--textSecondary)",
+    opacity: 0.75,
+  },
   diffFile: {
     flex: 1,
     minWidth: 0,
@@ -784,8 +789,14 @@ export const toolMessageContentStyles = stylex.create({
     borderLeftColor: "var(--success)",
     backgroundColor: "color-mix(in srgb, var(--success) 9%, transparent)",
   },
+  /**
+   * aicss File Diff 的删除行 accent：45° 斜纹红条。
+   * 原版用 ::before 伪元素；StyleX 不支持伪元素且无独立 border-left-image，
+   * 改用 borderImage 复刻。slice=3 与左边框 3px 1:1 采样（渐变周期 3px，
+   * 斜纹不被横向拉伸），其余三边宽 0 不绘制，accent 只呈现在左边。
+   */
   diffRemoved: {
-    borderLeftColor: "var(--error)",
+    borderImage: "repeating-linear-gradient(45deg, var(--error) 0, var(--error) 1.5px, transparent 1.5px, transparent 3px) 3",
     backgroundColor: "color-mix(in srgb, var(--error) 9%, transparent)",
   },
   diffLine: {

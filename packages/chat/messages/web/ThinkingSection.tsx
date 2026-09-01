@@ -6,6 +6,7 @@ import { selectShowThinking } from "app/settings/settingSlice";
 import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import Editor from "create/editor/Editor";
 import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
+import { OrbActivityIndicator } from "./OrbActivityIndicator";
 import { useTranslation } from "react-i18next";
 import { thinkingSectionStyles as styles } from "./thinkingSectionStyles";
 import "./messagesStylexEscapeHatch.css";
@@ -62,13 +63,21 @@ export const ThinkingSection = memo(
               {...stylex.props(styles.icon)}
               aria-hidden="true"
             >
-              {isExpanded ? (
+              {isStreaming ? (
+                <OrbActivityIndicator variant="s1-thinking" size={14} />
+              ) : isExpanded ? (
                 <LuChevronDown size={14} />
               ) : (
                 <LuChevronRight size={14} />
               )}
             </div>
-            <span className="thinking-label" {...stylex.props(styles.label)}>
+            <span
+              className="thinking-label"
+              {...stylex.props(
+                styles.label,
+                isStreaming && styles.labelShimmer
+              )}
+            >
               {t("thinkingProcess")}
             </span>
           </button>

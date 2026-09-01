@@ -1,6 +1,7 @@
 
 import React, { useMemo } from "react";
 import { LuFileDiff } from "react-icons/lu";
+import { LuFileCode2 } from "react-icons/lu";
 import { withLiteralClass } from "./toolMessageShared";
 import { toolMessageContentStyles as cs } from "./toolMessageContentStyles";
 import {
@@ -30,6 +31,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ parts, filePath }) => {
   return (
     <div {...withLiteralClass("diff-viewer", cs.diffViewer)} role="region" aria-label={`Diff for ${filePath}`}>
       <div {...withLiteralClass("diff-viewer__summary", cs.diffSummary)}>
+        <LuFileCode2
+          size={13}
+          aria-hidden="true"
+          {...withLiteralClass("diff-viewer__icon", cs.diffFileIcon)}
+        />
         <span {...withLiteralClass("diff-viewer__summary-file", cs.diffFile)}>{filePath}</span>
         <span {...withLiteralClass("diff-viewer__stat diff-viewer__stat--add", cs.diffStat, cs.diffAdd)}>
           +{summary.added}

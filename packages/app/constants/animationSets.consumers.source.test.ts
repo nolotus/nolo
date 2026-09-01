@@ -11,7 +11,8 @@ const readPkg = (rel: string) => readFileSync(join(packagesRoot, rel), "utf8");
 /**
  * Locks the contract after removing the AI response animation picker:
  * settings no longer exposes multi-set selection, and chat consumers use
- * the fixed STREAMING_SYMBOLS cycle via useStreamingSymbol.
+ * fixed pending indicators (OrbActivityIndicator / StreamingPendingIndicator)
+ * with no wave-glyph cycling.
  */
 describe("animationSets consumers (source)", () => {
   test("ChatConfigSections does not contain multi-set animation UI", () => {
@@ -31,21 +32,21 @@ describe("animationSets consumers (source)", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  test("web ThinkingSection uses StreamingPendingIndicator (no wave glyphs)", () => {
+  test("web ThinkingSection uses OrbActivityIndicator (no wave glyphs)", () => {
     const src = readPkg("chat/messages/web/ThinkingSection.tsx");
     expect(src).not.toContain("selectPreferredAnimationSet");
     expect(src).not.toContain("useStreamingSymbol");
     expect(src).not.toContain("getStaticAnimationSymbol");
-    expect(src).toContain("StreamingPendingIndicator");
+    expect(src).toContain("OrbActivityIndicator");
     expect(src).not.toMatch(/\[["']·["']\s*,\s*["']~/);
   });
 
-  test("AssistantReplyPending uses StreamingPendingIndicator (no wave glyphs)", () => {
+  test("AssistantReplyPending uses OrbActivityIndicator (no wave glyphs)", () => {
     const src = readPkg("chat/messages/web/AssistantReplyPending.tsx");
     expect(src).not.toContain("selectPreferredAnimationSet");
     expect(src).not.toContain("useStreamingSymbol");
     expect(src).not.toContain("getStaticAnimationSymbol");
-    expect(src).toContain("StreamingPendingIndicator");
+    expect(src).toContain("OrbActivityIndicator");
     expect(src).not.toMatch(/\[["']·["']\s*,\s*["']~/);
   });
 });

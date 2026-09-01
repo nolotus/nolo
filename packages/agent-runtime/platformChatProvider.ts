@@ -12,6 +12,10 @@ import {
 } from "./openAiCompatibleMessages";
 import { sanitizeForOutbound } from "./outboundHistorySanitize";
 import {
+  collectStablePromptPrefix,
+  stablePromptCacheKey,
+} from "./promptCacheKey";
+import {
   convertMessagesToResponsesInput,
   extractTextFromResponseOutput,
   extractToolCallsFromResponseOutput,
@@ -243,6 +247,23 @@ export function buildPlatformChatCompletionRequest(args: {
         }
       : {}),
     ...(shouldDisableThinking(args.providerConfig) ? { thinking: { type: "disabled" } } : {}),
+    // 缓存路由亲和提示：托管上游是多副本共享池，前缀缓存是节点本地的，
+    // 请求落到另一副本就整条 miss（实测占该线全部 miss token 的 52%，
+    // 依据见 promptCacheKey.ts）。键只取跨轮稳定的部分（model + system 稳定
+    // 前缀 + 工具定义），历史增长不参与，否则键每轮都变等于没有键。
+    // 已实测 RunInfra 接受该字段且不破坏既有命中；效果待上线后按
+    // promptCacheKey.ts 末尾的口径复测。
+    prompt_cache_key: stablePromptCacheKey(
+      [
+        args.providerConfig.model,
+        // 只从消息里取：本 builder 只拿得到 providerConfig，没有 agentConfig，
+        // agent prompt 早已由 localLoop 的 buildMessages 拼进 system 稳定前缀，
+        // 所以 sanitizedMessages 里的 system 就是完整取材，无需 fallback。
+        collectStablePromptPrefix(sanitizedMessages as unknown[]),
+        args.tools ?? [],
+      ],
+      "nolo-chat",
+    ),
     url: args.providerConfig.endpoint,
     provider: args.providerConfig.provider,
     agentKey: args.providerConfig.agentKey,

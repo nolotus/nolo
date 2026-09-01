@@ -9,6 +9,10 @@ import {
   toResponsesTools,
   type ResponseInputItem,
 } from "../integrations/openai/responsesHelpers";
+import {
+  collectStablePromptPrefix,
+  stablePromptCacheKey,
+} from "./promptCacheKey";
 import { parseSseDataLineObject } from "./sseDataLine";
 import { readSseDataValues } from "./sseFrames";
 import {
@@ -178,37 +182,6 @@ function collectInstructions(
   return systemTexts.join("\n\n");
 }
 
-function collectStableInstructions(
-  messages: unknown[],
-  fallbackPrompt?: string,
-): string {
-  const systemTexts: string[] = [];
-  if (fallbackPrompt?.trim()) systemTexts.push(fallbackPrompt.trim());
-  for (const raw of messages) {
-    if (!raw || typeof raw !== "object") continue;
-    const message = raw as Record<string, unknown>;
-    const role = String(message.role ?? "");
-    if (role !== "system" && role !== "developer") continue;
-    if (typeof message.content === "string") {
-      const boundary = Number(message.stable_prefix_chars);
-      const text = Number.isFinite(boundary) && boundary > 0
-        ? message.content.slice(0, boundary)
-        : message.content;
-      if (text.trim()) systemTexts.push(text.trim());
-    }
-  }
-  return systemTexts.join("\n\n");
-}
-
-function stablePromptCacheKey(parts: unknown[]): string {
-  const value = JSON.stringify(parts);
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `nolo-codex-${hash.toString(16).padStart(8, "0")}`;
-}
 
 /**
  * Codex OAuth has a private Responses wire format. Unlike the public OpenAI /
@@ -245,7 +218,7 @@ export function buildCodexRequestBody(
   });
   const input = convertMessagesToCodexInput(nonSystem as any);
   const instructions = collectInstructions(rawMessages, args.agentConfig.prompt);
-  const stableInstructions = collectStableInstructions(rawMessages, args.agentConfig.prompt);
+  const stableInstructions = collectStablePromptPrefix(rawMessages, args.agentConfig.prompt);
   const model =
     asOptionalTrimmedString(args.openAiBody.model) ??
     asOptionalTrimmedString(args.agentConfig.model) ??
@@ -261,7 +234,7 @@ export function buildCodexRequestBody(
     store: false,
     // Keep routing stable across turns and request UUIDs. Growing input/history
     // is intentionally excluded; only stable request-prefix material belongs.
-    prompt_cache_key: stablePromptCacheKey([model, stableInstructions, tools ?? []]),
+    prompt_cache_key: stablePromptCacheKey([model, stableInstructions, tools ?? []], "nolo-codex"),
     client_metadata: identity.clientMetadata,
   };
   if (instructions) body.instructions = instructions;
