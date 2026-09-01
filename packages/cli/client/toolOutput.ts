@@ -17,8 +17,11 @@ import {
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
-import { themeText } from "../tui/theme";
-import { stripAnsi } from "../tui/tuiAnsi";
+import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
+import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
+import { redactSecrets } from "../tui/redactSecrets";
+import { diffLines } from "diff";
+import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
 import {
   formatFetchItemUrl,
@@ -242,8 +245,15 @@ function renderRunCard(
       }
     : snapshot;
   const hadError = safe && Boolean(source.errorMessage?.trim());
+  // 失败时 normal 模式同样显示具体错误（2026-09-01 owner 定调：run 失败不
+  // 折叠、想知道具体的）。errorMessage 仍按 safe 规则清洗（剥 ANSI/OSC、
+  // 折叠换行）并 clip，防止 provider 可控文本清屏/写剪贴板/伪造链接；
+  // logLines（无界进程输出）保持 pro/verbose 专属。
   const errorFields = safe
-    ? { errorMessage: undefined, logLines: undefined }
+    ? {
+        errorMessage: hadError ? clip(redactSecrets(cleanUserText(source.errorMessage!)), 160) : undefined,
+        logLines: undefined,
+      }
     : { errorMessage: source.errorMessage, logLines: source.logLines };
   const body = isAgentRunTerminalStatus(snapshot.status)
     ? formatFinishedRunCard(name, snapshot.status, {
@@ -266,7 +276,7 @@ function renderRunCard(
         ...(opts?.includeLogTail !== undefined ? { includeLogTail: opts.includeLogTail } : {}),
         labels,
       });
-  return hadError ? `${body}\n  error   ${t("runDiagnosticsHidden")}` : body;
+  return body;
 }
 
 /**
@@ -363,12 +373,10 @@ function formatOrchestrationCardBlock(
     /^Error:/i.test(rawDataStr.trim());
 
   if (failed) {
-    // Safe projection (normal mode): state/outcome stay, the raw diagnostic
-    // (API keys, commands, stack first lines) never leaves pro/verbose.
-    const firstLine = safe
-      ? t("toolFailed")
-      : rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed");
-    const message = clip(firstLine, 96);
+    // 失败要说为什么（2026-09-01 owner 定调）：normal 模式同样显示清洗后的
+    // 首行原因；无界续行（堆栈/头/进程输出）仍不上屏。
+    const firstLine = stripAnsi(rawDataStr.trim().split("\n")[0] || event.summary || event.message || t("toolFailed"));
+    const message = clip(redactSecrets(firstLine), 96);
     if (!colorEnabled) {
       return `✗ ${rawLabel}  ${message}\n`;
     }
@@ -407,10 +415,11 @@ function formatOrchestrationCardBlock(
  * server-baked — both arrive here as lines).
  *
  * Keeps the required facts: status/outcome row (✗ failed), identity, tool
- * counts, note. Drops what leaks: the raw `error   …` row and the trailing
- * `Log tail:` section (unfiltered process output — API keys, curl commands).
- * A failed run keeps a localized pointer to pro mode instead of the raw
- * diagnostic; pro/verbose render the card untouched.
+ * counts, note, and the `error   …` row itself — a failed run must say why
+ * (2026-09-01 owner: 失败要知道具体的). What still leaks nothing: the error
+ * row's indented continuation lines (stack frames / Authorization headers)
+ * and the trailing `Log tail:` section (unfiltered process output). Lines
+ * are pre-sanitized by cleanUserText upstream; here we only keep/drop.
  */
 function sanitizeRunCardForNormal(lines: string[]): string[] {
   const out: string[] = [];
@@ -428,7 +437,8 @@ function sanitizeRunCardForNormal(lines: string[]): string[] {
       break;
     }
     if (/^\s*error\b/i.test(line)) {
-      out.push(`  error   ${t("runDiagnosticsHidden")}`);
+      // 保留 error 首行本体（失败要说为什么），凭据形态打码，仍吞更深缩进续行。
+      out.push(clip(redactSecrets(stripAnsi(line)), 160));
       errorIndent = line.length - line.trimStart().length;
       continue;
     }
@@ -480,6 +490,218 @@ function pathBasenameGist(path: string): string {
   return base ? gistClip(base) : "";
 }
 
+// ---------------------------------------------------------------------------
+// editFile diff snippet（恢复自 bc71a400f / 5ee8fae69^）：editFile 的 added/
+// removed 片段是用户真正盯着看的内容面——单行 gist 只回答「动了哪个文件」，
+// diff 块回答「改了什么」。数据来自 executor 的 safe 投影 metadata
+// （oldSnippet/newSnippet，已被 agent-runtime 裁剪 ≤24 行/160 列）。
+// ---------------------------------------------------------------------------
+
+export type EditSnippetLine = { kind: DiffLineKind; text: string };
+
+const EDIT_SNIPPET_MAX_LINES = 24;
+const DEFAULT_EDIT_SNIPPET_MAX_WIDTH = 96;
+
+export function resolveEditSnippetMaxWidth(
+  env: Record<string, string | undefined> = process.env,
+  columns?: number
+): number {
+  if (env.NOLO_TEST_DIFF_WIDTH) {
+    const parsed = parseInt(env.NOLO_TEST_DIFF_WIDTH, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  const cols =
+    typeof columns === "number"
+      ? columns
+      : typeof process !== "undefined" && typeof process.stdout?.columns === "number"
+        ? process.stdout.columns
+        : 0;
+  if (cols > 0) {
+    return Math.max(80, Math.min(160, cols - 8));
+  }
+  return DEFAULT_EDIT_SNIPPET_MAX_WIDTH;
+}
+
+interface FormattedEditSnippet {
+  lines: EditSnippetLine[];
+  addedCount: number;
+  removedCount: number;
+}
+
+function prefixFor(kind: DiffLineKind): string {
+  return kind === "added" ? "+ " : kind === "removed" ? "- " : "  ";
+}
+
+/**
+ * Build one diff line: kind prefix + width-clipped body. Clipping uses
+ * display width (CJK-aware), not code-unit count, so a 60-char CJK line
+ * (120 display columns) is clipped where a `.length` check would overflow.
+ */
+function buildEditLine(kind: DiffLineKind, body: string, maxWidth = resolveEditSnippetMaxWidth()): EditSnippetLine {
+  return { kind, text: prefixFor(kind) + truncateByDisplayWidth(body, maxWidth) };
+}
+
+/** One-sided fallback: tag every line of a snippet with a single kind. */
+function snippetLinesWithKind(
+  snippet: string,
+  kind: DiffLineKind,
+  maxWidth = resolveEditSnippetMaxWidth()
+): EditSnippetLine[] {
+  const lines = snippet.split(/\r?\n/);
+  // Preserve blank lines: an empty added/removed line is still a real edit.
+  if (lines.at(-1) === "") lines.pop();
+  return lines.slice(0, EDIT_SNIPPET_MAX_LINES).map((line) => buildEditLine(kind, line, maxWidth));
+}
+
+/**
+ * Clip a line to a display-width budget, appending "…" when it overflows.
+ */
+function truncateByDisplayWidth(line: string, maxWidth: number): string {
+  if (displayWidth(line) <= maxWidth) return line;
+  let width = 0;
+  let kept = "";
+  for (const char of line) {
+    const w = displayWidth(char);
+    if (width + w + 1 > maxWidth) break; // +1 reserves room for "…"
+    kept += char;
+    width += w;
+  }
+  return `${kept}…`;
+}
+
+/**
+ * Keep the window centered on the first changed line so a change at the tail
+ * of a long snippet isn't clipped away by a naive head truncation.
+ */
+function windowAndTruncate(lines: EditSnippetLine[], maxLines: number): EditSnippetLine[] {
+  if (lines.length <= maxLines) return lines;
+  const firstChange = lines.findIndex((l) => l.kind !== "context");
+  if (firstChange === -1) return lines.slice(0, maxLines);
+  const half = Math.floor(maxLines / 2);
+  let start = Math.max(0, firstChange - half);
+  if (start + maxLines > lines.length) start = Math.max(0, lines.length - maxLines);
+  const kept = lines.slice(start, start + maxLines);
+  const omitted = lines.length - kept.length;
+  if (omitted > 0) {
+    kept.push({ kind: "context", text: `  … +${omitted} more lines` });
+  }
+  return kept;
+}
+
+function formatEditFileSnippet(
+  metadata: Record<string, unknown>
+): FormattedEditSnippet | undefined {
+  const oldSnippet = typeof metadata.oldSnippet === "string" ? metadata.oldSnippet : undefined;
+  const newSnippet = typeof metadata.newSnippet === "string" ? metadata.newSnippet : undefined;
+  if (!oldSnippet && !newSnippet) return undefined;
+
+  const maxWidth = resolveEditSnippetMaxWidth();
+
+  // Degraded path: one side missing — show whichever side we have, tagged
+  // wholesale as removed/added so the user at least sees something.
+  if (oldSnippet && !newSnippet) {
+    const lines = snippetLinesWithKind(oldSnippet, "removed", maxWidth);
+    return { lines, addedCount: 0, removedCount: lines.length };
+  }
+  if (newSnippet && !oldSnippet) {
+    const lines = snippetLinesWithKind(newSnippet, "added", maxWidth);
+    return { lines, addedCount: lines.length, removedCount: 0 };
+  }
+
+  // Both present: produce a real line-level diff via `diffLines`.
+  const parts = diffLines(oldSnippet!, newSnippet!);
+  const all: EditSnippetLine[] = [];
+  let addedCount = 0;
+  let removedCount = 0;
+
+  for (const part of parts) {
+    const kind: DiffLineKind = part.added ? "added" : part.removed ? "removed" : "context";
+    // `diffLines` values end with "\n", so split drops a trailing empty element.
+    const bodyLines = part.value.replace(/\n$/, "").split("\n");
+    for (const line of bodyLines) {
+      if (kind === "added") addedCount++;
+      if (kind === "removed") removedCount++;
+      all.push(buildEditLine(kind, line, maxWidth));
+    }
+  }
+
+  return {
+    lines: windowAndTruncate(all, EDIT_SNIPPET_MAX_LINES),
+    addedCount,
+    removedCount,
+  };
+}
+
+/**
+ * editFile 成功结果的展示 hint：inline 统计 `(+3, -1)` + 多行 diff detail。
+ * 无 snippet metadata（旧 server / 非 editFile）时返回 null，调用方退回纯 gist 行。
+ */
+function editFileResultHint(event: LocalAgentToolEvent): { inline: string; detail?: EditSnippetLine[] } | null {
+  if (event.toolName !== "editFile" || !event.metadata) return null;
+  const res = formatEditFileSnippet(event.metadata);
+  if (!res) return null;
+  const stats: string[] = [];
+  if (res.addedCount > 0) stats.push(`+${res.addedCount}`);
+  if (res.removedCount > 0) stats.push(`-${res.removedCount}`);
+  const inline = stats.length > 0 ? `(${stats.join(", ")})` : "";
+  return { inline, detail: res.lines };
+}
+
+function formatEditDetailBlock(
+  lines: EditSnippetLine[],
+  colorEnabled: boolean,
+  filePath?: string,
+  env: Record<string, string | undefined> = process.env
+): string {
+  if (!colorEnabled) {
+    return lines.map((line) => `  ${line.text}\n`).join("");
+  }
+  const isTruecolor = supportsTruecolor(env);
+  const lang: CodeLang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
+  const brightness: TuiBrightness = resolveTuiBrightness(env);
+  // Block-level padTo so every diff line forms a rectangle of equal visible
+  // width (Zed-style band). Measured with CJK-aware displayWidth.
+  const padTo = Math.max(...lines.map((line) => displayWidth(line.text))) + 1;
+  return lines
+    .map((line) => `  ${renderDiffLine({
+      kind: line.kind,
+      text: line.text,
+      highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
+        ? buildHighlightedEditLine(line, lang, brightness, env)
+        : undefined,
+      padTo,
+      colorEnabled: true,
+      env,
+    })}\n`)
+    .join("");
+}
+
+/** 一行是否值得语法高亮：truecolor + 已知语言 + 非 ellipsis + 有 +/- 前缀。 */
+function shouldHighlightEditLine(
+  line: EditSnippetLine,
+  lang: CodeLang,
+  isTruecolor: boolean,
+): boolean {
+  if (!isTruecolor || lang === "unknown") return false;
+  if (line.text.startsWith("  …") || line.text.startsWith("…")) return false;
+  return line.text.length >= 2;
+}
+
+/** 给 edit diff 行的前缀上色 + 对剩余部分做语法高亮。 */
+function buildHighlightedEditLine(
+  line: EditSnippetLine,
+  lang: CodeLang,
+  brightness: TuiBrightness,
+  env: Record<string, string | undefined>,
+): string {
+  const prefix = line.text.slice(0, 2);
+  const body = line.text.slice(2);
+  const prefixToken = line.kind === "added" ? "success" : line.kind === "removed" ? "danger" : "chrome";
+  const coloredPrefix = themeText(prefix, prefixToken, true, env);
+  const highlightedBody = highlightCodeLine(body, lang, brightness);
+  return `${coloredPrefix}${highlightedBody}`;
+}
+
 /**
  * normal 模式的派生摘要（gist）：动作对象的最小可感知名词，不是原始参数。
  * 只从 localLoop 安全观测投影取值（metadata.path / metadata.command，已裁剪
@@ -525,6 +747,12 @@ function normalToolGist(event: LocalAgentToolEvent): string {
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
   if (command) return commandHeadGist(command);
+  const query = typeof metadata.query === "string" ? metadata.query : "";
+  if (query) return clipCompactText(query, 64, "…");
+  const remembered = event.toolName === "rememberMemory" && typeof metadata.content === "string"
+    ? metadata.content
+    : "";
+  if (remembered) return clipCompactText(redactSecrets(remembered), 64, "…");
   return "";
 }
 
@@ -570,16 +798,57 @@ function formatNormalToolLine(
     return formatToolTraceLine(`▸ ${label}  ! ${t("toolNeedsAction")}`, colorEnabled, "error");
   }
   if (event.type === "tool-error") {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolFailed")}`, colorEnabled, "error");
+    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
   }
   if (event.metadata?.timedOut) {
     return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolTimedOut")}`, colorEnabled, "error");
   }
   if (isFailedToolResult(event)) {
-    return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolFailed")}`, colorEnabled, "error");
+    return formatToolTraceLine(`▸ ${label}  ✗ ${toolFailureReason(event) || t("toolFailed")}`, colorEnabled, "error");
   }
   const gist = normalToolGist(event);
-  return formatToolTraceLine(gist ? `▸ ${label} · ${gist}  ✓` : `▸ ${label}  ✓`, colorEnabled);
+  // editFile：gist 行追加 (+a, -r) 统计 + 多行 diff 色带块（Zed-style），
+  // 让用户不打开文件也能看到改了什么。多行 chunk 天然不参与 ×N 折叠。
+  const hint = editFileResultHint(event);
+  const statsInline = hint?.inline ? ` ${hint.inline}` : "";
+  const mainLine = formatToolTraceLine(
+    gist ? `▸ ${label} · ${gist}${statsInline}  ✓` : `▸ ${label}${statsInline}  ✓`,
+    colorEnabled,
+  );
+  if (hint?.detail?.length) {
+    const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
+    return `${mainLine}${formatEditDetailBlock(hint.detail, colorEnabled, filePath)}`;
+  }
+  return mainLine;
+}
+
+/**
+ * 失败原因首行（normal 模式同 pro 一样显示，2026-09-01 owner 定调：失败时
+ * 用户要知道具体的，而不是「工具失败」一吞了之）。清洗 ANSI/OSC、取首行、
+ * clip 96，异常细节只保留可读首行，堆栈与多行诊断不上屏。
+ */
+function toolFailureReason(event: LocalAgentToolEvent): string {
+  const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  const rawError = metadata.error ?? metadata.errorMessage;
+  const raw =
+    (typeof rawError === "string" && rawError.trim()) ||
+    event.message?.trim() ||
+    (typeof event.content === "string" && event.content.trim()) ||
+    event.summary?.trim() ||
+    "";
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // execShell content is structured as `stdout:` / `stderr:` sections. Prefer
+  // the first actual stderr line, then stdout, then the first non-label line;
+  // progress output must not hide the actionable stderr reason.
+  const sectionLines = (section: "stderr" | "stdout") => {
+    const start = lines.findIndex((line) => new RegExp(`^${section}\\s*:$`, "i").test(line));
+    if (start < 0) return [];
+    const end = lines.findIndex((line, index) => index > start && /^(stdout|stderr|exitCode)\s*:/i.test(line));
+    return lines.slice(start + 1, end < 0 ? lines.length : end);
+  };
+  const reasonLine = sectionLines("stderr")[0] ?? sectionLines("stdout")[0] ??
+    lines.find((line) => !/^(stdout|stderr|exitCode)\s*:/i.test(line)) ?? lines[0] ?? "";
+  return reasonLine ? clip(redactSecrets(stripAnsi(reasonLine)), 96) : "";
 }
 
 /**

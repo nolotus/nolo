@@ -103,6 +103,10 @@ const messageStreamEndMock = mock((payload: any) => ({
   kind: "messageStreamEnd",
   payload,
 }));
+const updateToolMessageMock = mock((payload: any) => ({
+  type: "message/updateToolMessage",
+  payload,
+}));
 
 const originalNoloDesktopEnv = process.env.NOLO_DESKTOP;
 let moduleVersion = 0;
@@ -140,6 +144,7 @@ function setupModuleMocks() {
     ...realMessageSlice,
     selectAllMsgs: selectAllMsgsMock,
     messageStreaming: (payload: any) => ({ type: "message/streaming", payload }),
+    updateToolMessage: updateToolMessageMock,
     messageStreamEnd: messageStreamEndMock,
     prepareAndPersistUserMessage: prepareAndPersistUserMessageMock,
     addUserMessage: addUserMessageMock,
@@ -3060,6 +3065,26 @@ describe("streamAgentChatTurn queued input handling", () => {
       }
     }
 
+    const streamingMessages = dispatched
+      .filter((action) => (action as Record<string, unknown>)?.type === "message/streaming")
+      .map((action) => (action as Record<string, unknown>)?.payload as Record<string, unknown>);
+    const assistantStreamingMessages = streamingMessages.filter(
+      (message) => message?.role === "assistant"
+    );
+    expect(assistantStreamingMessages[0]).toMatchObject({
+      content: "",
+      isStreaming: true,
+      thinkContent: "思考片段A",
+    });
+    const activeAssistantStreamingMessages = assistantStreamingMessages.filter(
+      (message) => message?.isStreaming === true
+    );
+    expect(activeAssistantStreamingMessages.at(-1)).toMatchObject({
+      content: "Answer text",
+      isStreaming: true,
+      thinkContent: "思考片段A思考片段B",
+    });
+
     expect(messageStreamEndMock).toHaveBeenCalledTimes(1);
     // reasoningBuffer 必须包含两段 thinking 的累计内容(顺序保留)。
     expect(messageStreamEndMock.mock.calls[0]?.[0].reasoningBuffer).toBe(
@@ -3152,6 +3177,7 @@ describe("streamAgentChatTurn queued input handling", () => {
     const originalDesktopEnv = process.env.NOLO_DESKTOP;
     process.env.NOLO_DESKTOP = "1";
     desktopStreamEventsOverride = [
+      { type: "thinking", content: "先读取文件" },
       {
         type: "tool",
         event: {
@@ -3246,6 +3272,23 @@ describe("streamAgentChatTurn queued input handling", () => {
 
     const toolMessages = streamingMessages.filter((m) => m?.role === "tool");
     expect(toolMessages.length).toBeGreaterThanOrEqual(1);
+
+    const assistantStreamingMessages = streamingMessages.filter(
+      (message) => message?.role === "assistant"
+    );
+    expect(assistantStreamingMessages[0]).toMatchObject({
+      content: "",
+      thinkContent: "先读取文件",
+      isStreaming: true,
+    });
+    expect(updateToolMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changes: expect.objectContaining({
+          thinkContent: "先读取文件",
+          isStreaming: false,
+        }),
+      })
+    );
 
     // First tool message: tool-call creates streaming entry
     const toolCallMsg = toolMessages.find(
@@ -3554,15 +3597,17 @@ describe("streamAgentChatTurn queued input handling", () => {
     expect(firstSegmentId! < toolMessageId!).toBe(true);
     expect(toolMessageId! < lastSegmentId!).toBe(true);
 
-    // The finalized first segment must be marked isStreaming: false at least
-    // once (the finalize dispatch before the tool card).
-    const firstSegmentFinalized = assistantMessages.some(
-      (m) =>
-        m?.id === firstSegmentId &&
-        m?.content === "Let me check that file." &&
-        m?.isStreaming === false
+    // The finalized first segment is updated locally before the tool card;
+    // messageStreaming is reserved for active streaming upserts.
+    expect(updateToolMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: firstSegmentId,
+        changes: expect.objectContaining({
+          content: "Let me check that file.",
+          isStreaming: false,
+        }),
+      })
     );
-    expect(firstSegmentFinalized).toBe(true);
 
     // messageStreamEnd persists the final (second) segment only.
     expect(messageStreamEndMock).toHaveBeenCalledTimes(1);

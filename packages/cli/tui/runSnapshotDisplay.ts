@@ -12,6 +12,7 @@
 
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import { stripAnsi } from "./tuiAnsi";
+import { redactSecrets } from "./redactSecrets";
 import {
   clipText,
   formatDuration,
@@ -77,13 +78,16 @@ export function formatUnassignedFact(
 /** Safe normal-mode projection for dock/panel text. */
 export function sanitizeRunSnapshotForNormal(snapshot: AgentRunSnapshot): AgentRunSnapshot {
   const clean = (value: string) => stripAnsi(value).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  // 失败原因保留（清洗后）：run 失败时面板要能说出为什么，而不是只给 ✗。
+  // 无界 logLines 仍只属于 pro/verbose。
+  const errorMessage = snapshot.errorMessage?.trim() ? redactSecrets(clean(snapshot.errorMessage)) : undefined;
   return {
     ...snapshot,
     agentName: snapshot.agentName ? clean(snapshot.agentName) : snapshot.agentName,
     taskPreview: snapshot.taskPreview ? clean(snapshot.taskPreview) : snapshot.taskPreview,
     lastAssistantText: snapshot.lastAssistantText ? clean(snapshot.lastAssistantText) : snapshot.lastAssistantText,
     lastToolNames: snapshot.lastToolNames?.map(clean).filter(Boolean),
-    errorMessage: undefined,
+    errorMessage,
     logLines: undefined,
   };
 }

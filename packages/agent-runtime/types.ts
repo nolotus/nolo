@@ -101,6 +101,15 @@ export interface AgentRuntimeResult {
   content: string;
   model: string;
   provider?: string;
+  /** Actual upstream identity used for per-call billing; provider remains product identity. */
+  billingProvider?: string;
+  billingModel?: string;
+  /** Per-provider-call usage, retained when a run switches upstream providers. */
+  billingSegments?: Array<{
+    provider: string;
+    model: string;
+    usage: Record<string, any>;
+  }>;
   inputPrice?: number;
   outputPrice?: number;
   usage?: Record<string, any>;

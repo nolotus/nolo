@@ -153,6 +153,22 @@
 
 /* ═══ 自 MessageActions.css 迁出（MessageActions.tsx）═══ */
 
+/* Streaming Text caret: keep the AICSS steady state explicit instead of
+ * relying on StyleX atomic class ordering when two animation declarations
+ * target the same element. */
+[data-hook~="messages-esc-msg-body"] .streaming-message-text__cursor--steady {
+  animation: none;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-hook~="messages-esc-msg-body"] .streaming-message-text__cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+
 /* ── 悬停显现规则（Pattern A）──
  * 保留原因：父级 hover / 状态类激活桌面端操作栏显现，
  * 以及 :focus-within 激活。StyleX 不支持父子/后代选择器。 */

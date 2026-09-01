@@ -37,6 +37,7 @@ import {
     finalizeTransientMessageOnError,
     removeTransientMessage,
     selectAllMsgs,
+    updateToolMessage,
 } from "chat/messages/messageSlice";
 import { persistToolMessages } from "chat/messages/persistToolMessage";
 import {
@@ -1083,8 +1084,7 @@ export const streamAgentChatTurnHandler = async (
                 }
                 return assistantMessageKeys;
             };
-            const streamDesktopAssistantText = (text: string) => {
-                currentContent += text;
+            const streamDesktopAssistantUpsert = () => {
                 const { key: msgKey, messageId } = ensureAssistantMessageKeys();
                 const segment = assistantSegments[assistantSegments.length - 1];
                 segment.content = currentContent;
@@ -1095,8 +1095,13 @@ export const streamAgentChatTurnHandler = async (
                     content: currentContent,
                     role: "assistant",
                     isStreaming: true,
+                    thinkContent: reasoningBuffer,
                     ...desktopMessageMetadata,
                 }));
+            };
+            const streamDesktopAssistantText = (text: string) => {
+                currentContent += text;
+                streamDesktopAssistantUpsert();
             };
             // When a tool call arrives, finalize the current assistant segment so the
             // tool card renders in its true position: the running segment stops accepting deltas,
@@ -1116,15 +1121,18 @@ export const streamAgentChatTurnHandler = async (
                 // needs to exist (to carry tool_calls at persist time) but must not
                 // be pushed to the store as a contentless bubble (isAssistantToolStub
                 // can't filter it without tool_calls).
-                if (assistantMessageKeys && currentContent.length > 0) {
-                    dispatch(messageStreaming({
+                if (
+                    assistantMessageKeys &&
+                    (currentContent.length > 0 || reasoningBuffer.length > 0)
+                ) {
+                    dispatch(updateToolMessage({
                         id: assistantMessageKeys.messageId,
                         dialogId,
-                        dbKey: assistantMessageKeys.key,
-                        content: currentContent,
-                        role: "assistant",
-                        isStreaming: false,
-                        ...desktopMessageMetadata,
+                        changes: {
+                            content: currentContent,
+                            thinkContent: reasoningBuffer,
+                            isStreaming: false,
+                        },
                     }));
                 }
                 assistantMessageKeys = null;
@@ -1162,6 +1170,9 @@ export const streamAgentChatTurnHandler = async (
                         // 在 messageStreamEnd 时传给 messageSlice 落成 thinkContent。
                         if (typeof event.content === "string") {
                             reasoningBuffer += event.content;
+                            // Mint the assistant row on the first reasoning delta so
+                            // ThinkingSection is visible before answer text arrives.
+                            streamDesktopAssistantUpsert();
                         }
                     } else if (event.type === "tool") {
                         const toolEvent = event.event;

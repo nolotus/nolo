@@ -4742,10 +4742,19 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
   function buildInjectionHarness(options: {
     providerScript: Array<{ content: string; tool_calls?: any[] }>;
     injections: string[][];
+    /**
+     * completion-boundary seam：在第 roundIndex 轮 provider return 前的
+     * 同一同步帧把 child completion 投进动态收件箱（race 构造用，无 sleep）。
+     * 事件循环上这是「已拿到 no-tool 结果、准备结束」时刻能构造的最晚
+     * 确定性投递点——再晚一格就属于 turn 结束后的新 turn 了。
+     */
+    injectBeforeReturn?: (roundIndex: number, dynamicInbox: string[]) => void;
   }) {
     const requests: AgentRuntimeChatMessage[][] = [];
     const savedTurns: AgentRuntimeSaveTurnInput[] = [];
     const pendingInjections = [...options.injections];
+    // 动态收件箱：injectBeforeReturn 在 provider return 前同帧投递的条目。
+    const dynamicInbox: string[] = [];
     let round = 0;
     const adapter: AgentRuntimeHostAdapter = {
       host: "cli",
@@ -4767,6 +4776,10 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
           const scripted = options.providerScript[round] ??
             options.providerScript.at(-1)!;
           round += 1;
+          // completion boundary：return（resolve）前的同一同步帧投递，
+          // parent 恢复执行时条目必已在收件箱——无真实 sleep 的 race 构造
+          //（Deferred/Ref/Queue 的 Promise 版最小等价物，投递先于 resolve）。
+          options.injectBeforeReturn?.(round - 1, dynamicInbox);
           // finish_reason/stream_complete 必须给全：缺省会被空轮判定当成
           // stream_truncated 提前收尾，测不到注入点。
           return {
@@ -4787,8 +4800,12 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
         adapter,
         agentRef: "injector",
         input: "original user input",
-        // 每次 drain 取走一批注入（模拟收件箱）。
-        drainInjections: () => pendingInjections.shift() ?? [],
+        // 每次 drain 取走一批注入（模拟收件箱）：预编排队列批 + race seam
+        // 同帧投递的动态批。现有测试不用动态批，行为不变。
+        drainInjections: () => {
+          const queued = pendingInjections.shift() ?? [];
+          return [...queued, ...dynamicInbox.splice(0)];
+        },
       } as any);
 
     return { run, requests, savedTurns };
@@ -4869,6 +4886,71 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
         (m) => m.role === "assistant" && String(m.content) === "first final answer",
       ),
     ).toHaveLength(1);
+  });
+
+  // c) completion boundary race：no-tool 结果返回的同一同步帧，child completion
+  //    恰好到达。parent 必须消费它并续跑一轮，不能提前 complete。
+  //    构造：provider 在 return（resolve）前的同一帧把 child completion 投进
+  //    收件箱——事件循环允许的最晚确定性投递点，无真实 sleep。
+  test("completion boundary race: no-tool resolve 同帧到达的 child completion 被消费", async () => {
+    let round1InjectionDelivered = false;
+    const h = buildInjectionHarness({
+      providerScript: [
+        { content: "round 1 final answer" },
+        { content: "round 2 answer after child completion" },
+      ],
+      injections: [],
+      injectBeforeReturn: (roundIndex, dynamicInbox) => {
+        if (roundIndex === 0) {
+          // Round 1 已拿到 no-tool 文本、正准备 return——此刻 child run 到达
+          // 终态，TUI 把 completion 直投收件箱。投递先于 resolve，顺序钉死。
+          round1InjectionDelivered = true;
+          dynamicInbox.push("child run run-race 已完成: 报告内容");
+        }
+      },
+    });
+
+    const result = await h.run();
+
+    // race 真的发生了：Round 1 resolve 前注入已投递。
+    expect(round1InjectionDelivered).toBe(true);
+    // Round 1 没有提前结束：provider 被调用了两次。
+    expect(h.requests).toHaveLength(2);
+    const secondRequest = h.requests[1]!;
+    // 注入进入真实 history/input：第 2 轮 provider 请求里，Round 1 的
+    // assistant 回复之后必须紧跟注入的 user 消息（确定性位置断言，
+    // 而非 findIndex 的弱存在性检查——review WARNING 修复）。
+    const assistantIdx = secondRequest.map((m) => m.role).lastIndexOf("assistant");
+    expect(assistantIdx).toBeGreaterThanOrEqual(0);
+    expect(secondRequest[assistantIdx + 1]).toMatchObject({ role: "user" });
+    expect(String(secondRequest[assistantIdx + 1]!.content)).toContain("run-race");
+    expect(String(secondRequest[assistantIdx + 1]!.content)).toContain("报告内容");
+    // 最终结果来自 Round 2。
+    expect(result.content).toBe("round 2 answer after child completion");
+    // 注入随 saveTurn 落盘（真实 history 不丢事件，下一 turn 上下文不缺块）。
+    const saved = h.savedTurns[0]!;
+    expect(
+      saved.messages.some(
+        (m) => m.role === "user" && String(m.content).includes("run-race"),
+      ),
+    ).toBe(true);
+  });
+
+  // d) baseline：收件箱机制在线（drainInjections 已提供）但整个 turn 无注入
+  //    → Round 1 正常结束，provider 恰好只调用一次，不会因收件箱存在多跑一轮。
+  test("baseline: 收件箱在线但无注入时 Round 1 正常结束且 provider 只调用一次", async () => {
+    const h = buildInjectionHarness({
+      providerScript: [{ content: "only round answer" }],
+      injections: [[]],
+    });
+
+    const result = await h.run();
+
+    expect(h.requests).toHaveLength(1);
+    expect(result.content).toBe("only round answer");
+    const saved = h.savedTurns[0]!;
+    expect(saved.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(String(saved.messages[1]!.content)).toBe("only round answer");
   });
 
   // 回归：没有 drainInjections 时行为完全不变（单轮结束、消息不重复）。

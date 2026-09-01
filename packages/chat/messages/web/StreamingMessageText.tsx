@@ -1,7 +1,18 @@
 import React, { memo, useMemo } from "react";
+import * as stylex from "@stylexjs/stylex";
 import { StreamingStructuredMarkdown } from "./StreamingStructuredMarkdown";
 import { buildStreamingMarkdownModel } from "./streamingMarkdownModel";
 import { splitVisibleCharacters, useStreamingReveal } from "./useStreamingReveal";
+import { messageLayoutStyles } from "./messageLayoutStyles";
+
+function styledClass(
+  literal: string,
+  ...styles: Array<Parameters<typeof stylex.props>[0] | false | null | undefined>
+): string {
+  const active = styles.filter(Boolean) as Parameters<typeof stylex.props>[0][];
+  const generated = stylex.props(...active).className;
+  return generated ? `${literal} ${generated}` : literal;
+}
 
 const FADE_CHAR_COUNT = 20;
 
@@ -17,12 +28,15 @@ const StreamingTextSpan = memo(({ content }: { content: string }) => {
   const fadingCharacters = characters.slice(fadeStartIndex);
 
   return (
-    <span className="streaming-message-text">
+    <span className={styledClass("streaming-message-text", messageLayoutStyles.streamingMessageText)}>
       {stablePrefix}
       {fadingCharacters.map((char, index) => (
         <span
           key={fadeStartIndex + index}
-          className="streaming-message-text__char"
+          className={styledClass(
+            "streaming-message-text__char",
+            messageLayoutStyles.streamingMessageTextChar
+          )}
         >
           {char}
         </span>
@@ -38,10 +52,20 @@ export const StreamingMessageText = memo(
       () => buildStreamingMarkdownModel(visibleContent),
       [visibleContent]
     );
-    // Hide blinking cursor as soon as all text content has finished revealing
+    // Match AICSS: keep a steady caret while revealing, then leave a blinking
+    // caret until the streaming message itself settles.
     const isActivelyRevealing = visibleContent.length < content.length;
-    const cursorElement = isStreaming && isActivelyRevealing ? (
-      <span className="streaming-message-text__cursor" aria-hidden="true" />
+    const cursorElement = isStreaming ? (
+      <span
+        className={styledClass(
+          `streaming-message-text__cursor${
+            isActivelyRevealing ? " streaming-message-text__cursor--steady" : ""
+          }`,
+          messageLayoutStyles.streamingMessageTextCursor,
+          isActivelyRevealing && messageLayoutStyles.streamingMessageTextCursorSteady
+        )}
+        aria-hidden="true"
+      />
     ) : null;
 
   if (model.kind === "plain-text") {

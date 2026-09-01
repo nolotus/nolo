@@ -647,7 +647,11 @@ const EDIT_SNIPPET_MAX_LINES = 24;
 const EDIT_SNIPPET_WIDTH = 160;
 
 function clipEditSnippet(text: string): string {
-  const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
+  const lines = text.split(/\r?\n/);
+  // Preserve empty lines: blank additions/deletions are real edits and must
+  // reach the CLI diff renderer. Remove only the synthetic final element
+  // created by a trailing newline, not meaningful interior blank lines.
+  if (lines.at(-1) === "") lines.pop();
   return lines
     .slice(0, EDIT_SNIPPET_MAX_LINES)
     .map((line) => (line.length > EDIT_SNIPPET_WIDTH ? `${line.slice(0, EDIT_SNIPPET_WIDTH)}…` : line))

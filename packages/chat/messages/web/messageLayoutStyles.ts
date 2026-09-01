@@ -308,10 +308,10 @@ export const messageLayoutStyles = stylex.create({
   streamingMessageText: {
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
-    lineHeight: {
-      default: "inherit",
-      "@media (max-width: 768px)": 1.7,
-    },
+    overflowWrap: "anywhere",
+    fontSize: "var(--fontSize-base, 14px)",
+    lineHeight: "var(--leading-relaxed, 1.6)",
+    color: "currentColor",
   },
   streamingMessageTextWrapper: {
     display: "inline",
@@ -323,14 +323,19 @@ export const messageLayoutStyles = stylex.create({
   },
   streamingMessageTextCursor: {
     display: "inline-block",
-    width: 2,
-    height: "1em",
+    width: 8,
+    height: "1.05em",
     verticalAlign: "text-bottom",
-    backgroundColor: "var(--primary)",
+    backgroundColor: "currentColor",
     marginLeft: 2,
     animationName: cursorBlink,
     animationDuration: "1s",
+    animationTimingFunction: "step-end",
     animationIterationCount: "infinite",
+  },
+  streamingMessageTextCursorSteady: {
+    animationName: "none",
+    opacity: 1,
   },
   streamingInlineArtifact: {
     display: "block",

@@ -182,6 +182,7 @@ export function buildServerPlatformToolExecutors(args: {
           metadata: {
             serverPlatformTool: true,
             webTool: toolName,
+            query: parsed.query,
           },
         };
       },
@@ -204,7 +205,7 @@ export function buildServerPlatformToolExecutors(args: {
     });
     return {
       content: raw,
-      metadata: { serverPlatformTool: true, memoryRead: true },
+      metadata: { serverPlatformTool: true, memoryRead: true, query },
     };
   };
 
@@ -236,7 +237,7 @@ export function buildServerPlatformToolExecutors(args: {
     });
     return {
       content: raw,
-      metadata: { serverPlatformTool: true, memoryWrite: true },
+      metadata: { serverPlatformTool: true, memoryWrite: true, content },
     };
   };
 

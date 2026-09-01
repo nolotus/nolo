@@ -204,6 +204,9 @@ const resolveEffectiveModelPrice = ({
   if (provider === "google") {
     return resolveGoogleServiceTierPrice(model, resolvedPrice, billingServiceTier);
   }
+  if (provider === "runinfra" || provider === "baseten") {
+    return resolvedPrice;
+  }
   return resolvedPrice;
 };
 
@@ -449,6 +452,8 @@ const calculateBasicCost = (
     case "deepseek":
     case "openai":
     case "deepinfra":
+    case "runinfra":
+    case "baseten":
       return calculateCacheBasedCost(resolvedPrice, usage, externalPrice);
 
     // without it keep simple full-price billing so cached tokens are not

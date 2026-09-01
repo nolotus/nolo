@@ -116,6 +116,39 @@ describe("toolOutput", () => {
     expect(output).toContain("▸ Web search · 最新的 TypeScript 发布信息  ✓");
   });
 
+  test("normal mode shows editFile as a readable line diff with the file path", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "editFile",
+      metadata: {
+        path: "src/server.ts",
+        oldSnippet: "const port = 3000;\nconst host = \\\"localhost\\\";",
+        newSnippet: "const port = 38123;\nconst host = \\\"localhost\\\";",
+      },
+    }));
+    expect(output).toContain("server.ts");
+    expect(output).toContain("- const port = 3000;");
+    expect(output).toContain("+ const port = 38123;");
+    expect(output).toContain("(+1, -1)");
+  });
+
+  test("normal mode shows search and memory subjects instead of bare tool labels", () => {
+    const format = createToolEventFormatter(false);
+    const search = format(toolEvent({
+      type: "tool-result",
+      toolName: "exa_search",
+      metadata: { query: "StyleX migration pitfalls" },
+    }));
+    const memory = format(toolEvent({
+      type: "tool-result",
+      toolName: "rememberMemory",
+      metadata: { content: "用户偏好显示工具详情" },
+    }));
+    expect(search).toContain("StyleX migration pitfalls");
+    expect(memory).toContain("用户偏好显示工具详情");
+  });
+
   test("normal mode shows the touched file basename as gist, never the full path", () => {
     const format = createToolEventFormatter(false);
     const output = format(toolEvent({
@@ -234,7 +267,7 @@ describe("toolOutput", () => {
     expect(gated).not.toContain("execShell echo");
   });
 
-  test("normal mode failed run card keeps outcome/counts, drops raw error and log tail", () => {
+  test("normal mode failed run card keeps outcome/counts and the redacted error row, drops log tail", () => {
     const rawError = "Error: Anthropic API key expired: sk-ant-api03-SECRET-VALUE";
     const secretCommand = "$ curl -H 'Authorization: Bearer sk-live-SECRET' https://api.example.com";
     const event = toolEvent({
@@ -255,10 +288,12 @@ describe("toolOutput", () => {
     expect(normal).toContain("failed");
     expect(normal).toContain("child-helper");
     expect(normal).toContain("3");
-    // ...as a localized pointer instead of the raw diagnostic...
-    expect(normal).toContain("run failed — full diagnostics in pro mode");
-    // ...and the raw error / log lines never surface.
+    // ...with the error row itself: the reason must be readable (2026-09-01
+    // owner: 失败要知道具体的), secret-bearing shapes redacted in place.
+    expect(normal).toContain("Anthropic API key expired");
+    // The key never surfaces even though the reason does.
     expect(normal).not.toContain("sk-ant-api03-SECRET-VALUE");
+    // Unbounded log lines never surface.
     expect(normal).not.toContain("sk-live-SECRET");
     expect(normal).not.toContain("curl");
     expect(normal).not.toContain("DATA_CLONE_ERR");
@@ -276,7 +311,7 @@ describe("toolOutput", () => {
     ["with failed marker", { failed: true, displayData: bakedLegacyCard }],
   ];
   for (const [variant, metadata] of bakedCardVariants) {
-    test(`normal mode redacts legacy baked status-poll card (${variant})`, () => {
+    test(`normal mode baked status-poll card keeps the error row, drops continuations and log tail (${variant})`, () => {
       const event = toolEvent({
         type: "tool-result",
         toolName: "controlAgentRun",
@@ -284,19 +319,24 @@ describe("toolOutput", () => {
         content: bakedLegacyCard,
       });
 
-      // 保密契约：normal 模式下密钥/续行/Log tail 无论哪条渲染路径都不得出现。
+      // 保密契约（2026-09-01 起 error 首行本体允许上屏，但密钥/续行/Log tail
+      // 无论哪条渲染路径都不得出现）：error 行要说为什么（DATA_CLONE_ERR 可见），
+      // 缩进续行（堆栈帧 / Authorization 头）与无界进程输出仍然吞掉。
       const normal = render(event);
-      expect(normal).not.toContain("DATA_CLONE_ERR");
       expect(normal).not.toContain("callAnthropic");
       expect(normal).not.toContain("sk-ant-api03-CONTINUATION-LEAK");
       expect(normal).not.toContain("sk-ant-api03-SKEWSECRET");
       expect(normal).not.toContain("sk-live-PROBE-SECRET");
       expect(normal).not.toContain("Log tail");
+      if (variant === "without failed marker") {
+        // 卡片投影路径：error 行本体保留（首行），失败要说为什么。
+        expect(normal).toContain("DATA_CLONE_ERR");
+      }
 
     });
   }
 
-  test("normal mode failed orchestration result shows localized failure only", () => {
+  test("normal mode failed orchestration result shows the redacted failure first line", () => {
     const rawError = "Error: spawn ENOENT: /opt/secret-tools/agent-runner --token sk-secret-token";
     const event = toolEvent({
       type: "tool-result",
@@ -306,10 +346,11 @@ describe("toolOutput", () => {
 
     const normal = render(event);
     expect(normal).toContain("✗");
-    expect(normal).toContain("failed");
+    // The reason itself is readable: errno + path explain what went wrong.
+    expect(normal).toContain("spawn ENOENT");
+    // Token-bearing shape redacted; the stack continuation never surfaces.
     expect(normal).not.toContain("sk-secret-token");
-    expect(normal).not.toContain("secret-tools");
-    expect(normal).not.toContain("spawn ENOENT");
+    expect(normal).not.toContain("child.js");
 
   });
 
@@ -728,8 +769,8 @@ describe("toolOutput", () => {
     // tool-error keeps the existing ✗ convention; no Used Skill block.
     expect(line).toContain(toolLabel("loadSkill"));
     expect(line).toContain("✗");
-    // The raw message never surfaces on the single-mode failure line.
-    expect(line).not.toContain("skill not found");
+    // The reason is on the line now (2026-09-01: 失败要说为什么).
+    expect(line).toContain("skill not found");
     // The inline-loaded detail line must not appear on a failure.
     expect(line).not.toContain("loaded inline");
     // Single trace line, not the two-line success block.
@@ -849,7 +890,7 @@ describe("toolOutput", () => {
     expect(startLine).not.toContain('{"runId"');
   });
 
-  test("orchestration card renders failure line with ✗ and keeps the raw diagnostic hidden", () => {
+  test("orchestration card renders failure line with ✗ and shows the readable reason", () => {
     const failLine = render(
       toolEvent({
         type: "tool-result",
@@ -859,8 +900,8 @@ describe("toolOutput", () => {
       })
     );
     expect(failLine).toContain("✗ startAgentRun");
-    // Safe projection: the raw diagnostic never surfaces.
-    expect(failLine).not.toContain("missing agentKey");
+    // 失败原因现在直接显示，便于定位问题。
+    expect(failLine).toContain("missing agentKey");
   });
 
   test("controlAgentRun status without agentName does not render agent   agent", () => {

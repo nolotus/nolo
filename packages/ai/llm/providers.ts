@@ -5,6 +5,8 @@ import { googleModels } from "integrations/google/models";
 import { openAIModels } from "integrations/openai/models";
 import { openrouterModels } from "ai/llm/openrouterModels";
 import { deepinfraModels } from "ai/llm/deepinfra";
+import { basetenModels } from "ai/llm/baseten";
+import { runinfraModels } from "ai/llm/runinfra";
 import { xaiModels } from "integrations/xai/models";
 import './fireworks'
 import type { Model } from "./types";
@@ -60,6 +62,8 @@ const MODEL_MAP = {
   google: googleModels,
   openai: openAIModels,
   deepinfra: deepinfraModels,
+  baseten: basetenModels,
+  runinfra: runinfraModels,
   openrouter: openrouterModels,
   fireworks: fireworksModels,
   nolo: platformHostedModels,
