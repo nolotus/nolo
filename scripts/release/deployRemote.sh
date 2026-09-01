@@ -783,6 +783,13 @@ start_nolo() {
     echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR before start_nolo" >&2
     return 1
   }
+
+  # core 与 chat-proxy 共享同一内部 token 文件（internalToken 运行时读取）。
+  # 必须在引用 CHAT_PROXY_INTERNAL_TOKEN_FILE 之前先 ensure——set -u 下未赋值
+  # 会直接炸掉启动命令（2026-08-31 14:09 起连续 10 次 alpha-deploy 全挂的
+  # 根因，c080a29a4 引入）。幂等：文件已存在时零开销。
+  ensure_chat_proxy_internal_token_file || true
+
   # 启动期故障（最典型：LevelDB 锁被上一个进程占住）现在是快速失败而非静默重试，
   # 靠 PM2 重启把异常暴露出来。理想情况下应同时限制重启次数，避免
   # 「起不来 → 重启 → 又起不来」打满 CPU 与日志、反而盖住根因。
@@ -1047,6 +1054,12 @@ start_nolo_canary() {
     echo "FATAL: packages/server/.render-dist/render.mjs missing in $REPO_DIR before start_nolo_canary ($canary_name)" >&2
     return 1
   }
+
+  # core 与 chat-proxy 共享同一内部 token 文件（internalToken 运行时读取）。
+  # 必须在引用 CHAT_PROXY_INTERNAL_TOKEN_FILE 之前先 ensure——set -u 下未赋值
+  # 会直接炸掉启动命令，蓝绿切换整体夭折（2026-08-31 14:09 起连续 10 次
+  # alpha-deploy 全挂的根因，c080a29a4 引入）。幂等：文件已存在时零开销。
+  ensure_chat_proxy_internal_token_file || true
 
   export_repo_dotenv
 

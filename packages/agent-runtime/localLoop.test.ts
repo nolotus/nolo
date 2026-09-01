@@ -4910,3 +4910,118 @@ describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
     expect(savedTurns[0]!.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
   });
 });
+
+describe("poisoned tool_call arguments (upstream stream truncation)", () => {
+  const baseAdapter = (
+    overrides: Partial<AgentRuntimeHostAdapter>,
+  ): AgentRuntimeHostAdapter => ({
+    host: "cli",
+    capabilities: ["local-provider", "local-persistence", "local-tools"],
+    loadAgentConfig: async (agentRef) => ({
+      key: agentRef,
+      model: "fake-local",
+    }),
+    saveTurn: async () => ({ dialogId: "dialog-poison" }),
+    ...overrides,
+  });
+
+  test("self-heal: stored truncated tool_call is downgraded to text before the provider call", async () => {
+    // 复刻真实事故形状：GLM 并行双 tool_call，前一个 arguments 丢结尾 `"}]}`。
+    const truncatedArgs = JSON.stringify({ agentKey: "agent-x", task: "review the diff" }).slice(0, -3);
+    let providerMessages: any[] = [];
+    const adapter = baseAdapter({
+      loadDialogHistory: async () => [
+        { role: "user", content: "dispatch two reviews" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            { id: "call-bad", type: "function", function: { name: "startAgentRun", arguments: truncatedArgs } },
+            { id: "call-ok", type: "function", function: { name: "startAgentRun", arguments: '{"agentKey":"agent-y"}' } },
+          ],
+        },
+        { role: "tool", tool_call_id: "call-bad", content: "startAgentRun failed: 缺少 agentKey 参数。", toolName: "startAgentRun" },
+        { role: "tool", tool_call_id: "call-ok", content: "run started #ip7vii", toolName: "startAgentRun" },
+      ],
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async (messages) => {
+          providerMessages = messages as any[];
+          return { content: "ack", model: "fake-local", trace: messages };
+        },
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run");
+      },
+    });
+
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "poison-heal",
+      input: "继续",
+      continueDialogId: "dialog-poison-self-heal",
+    });
+
+    // 毒丸 call 降级为文本，健康 sibling 结构保留
+    const asst = providerMessages.find((m) => m.role === "assistant" && Array.isArray(m.tool_calls));
+    expect((asst?.tool_calls ?? []).map((c: any) => c.id)).toEqual(["call-ok"]);
+    expect(String(asst?.content)).toContain("[tool_call: startAgentRun(");
+    expect(String(asst?.content)).toContain("review the dif");
+    // 毒丸 result 不再以结构化 tool 消息出现（否则网关仍会 400）
+    expect(providerMessages.find((m) => m.role === "tool" && m.tool_call_id === "call-bad")).toBeUndefined();
+    expect(providerMessages.some((m) =>
+      m.role === "assistant" && String(m.content).includes("[tool_result: startAgentRun: startAgentRun failed"),
+    )).toBe(true);
+    // 健康 result 结构保留
+    expect(providerMessages.find((m) => m.role === "tool" && m.tool_call_id === "call-ok")).toBeDefined();
+  });
+
+  test("in-turn interception: truncated arguments never reach the executor, result tells the model to retry", async () => {
+    const truncatedArgs = JSON.stringify({ command: "ls" }).slice(0, -2);
+    let executed = 0;
+    let round2Messages: any[] = [];
+    let callCount = 0;
+    const adapter = baseAdapter({
+      loadDialogHistory: async () => [{ role: "user", content: "run ls" }],
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async (messages) => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              content: null,
+              tool_calls: [{
+                id: "call-trunc",
+                type: "function",
+                function: { name: "exec_command", arguments: truncatedArgs },
+              }],
+              model: "fake-local",
+              trace: messages,
+            };
+          }
+          round2Messages = messages as any[];
+          return { content: "done", model: "fake-local", trace: messages };
+        },
+      }),
+      executeTool: async () => {
+        executed++;
+        return { content: "should not execute" };
+      },
+    });
+
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "poison-turn",
+      input: "run ls",
+      continueDialogId: "dialog-poison-turn",
+    });
+
+    expect(executed).toBe(0);
+    expect(result.content).toBe("done");
+    const toolMsg = round2Messages.find((m) => m.role === "tool" && m.tool_call_id === "call-trunc");
+    expect(String(toolMsg?.content)).toContain("exec_command failed");
+    expect(String(toolMsg?.content)).toContain("不是合法 JSON");
+    expect(String(toolMsg?.content)).toContain("疑似上游流式截断");
+    expect(String(toolMsg?.content)).toContain("重新完整调用");
+  });
+});

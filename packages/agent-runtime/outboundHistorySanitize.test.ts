@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRuntimeChatMessage, AgentRuntimeToolCall } from "./types";
-import { sanitizeOutboundHistory, sanitizeForOutbound } from "./outboundHistorySanitize";
+import { sanitizeOutboundHistory, sanitizeForOutbound, downgradeUnparsableToolCalls } from "./outboundHistorySanitize";
 
 const toolCall = (
   id: string,
@@ -244,5 +244,182 @@ describe("sanitizeOutboundHistory", () => {
     // undefined tools = caller has no tools concept → no name filter.
     const out = sanitizeForOutbound(msgs, undefined);
     expect(out.find((m) => Array.isArray(m.tool_calls))).toBeDefined();
+  });
+});
+
+describe("unparsable-JSON-arguments poison defense", () => {
+  // 真实案例（2026-09-01，RunInfra GLM 5.3 Flash）：并行双 tool_call 流式输出时，
+  // 前一个 call 的 arguments 被截断（缺结尾 `"}]}`），JSON.parse 报 Unterminated
+  // string。坏消息入存储历史后每轮请求被网关 400（messages[N].tool_calls[0].
+  // function.arguments invalid JSON string）拒绝，dialog 永久死锁。
+  const TRUNCATED_ARGS = JSON.stringify({ agentKey: "agent-x", task: "review the diff" }).slice(0, -3);
+
+  test("downgradeUnparsableToolCalls: truncated call downgraded to text, healthy sibling kept", () => {
+    const msgs = [
+      user("dispatch review + optimization"),
+      assistant("", {
+        tool_calls: [
+          { id: "call_bad", type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } },
+          { id: "call_ok", type: "function", function: { name: "startAgentRun", arguments: '{"agentKey":"agent-y","task":"optimize ttft"}' } },
+        ],
+      }),
+      tool("call_bad", "startAgentRun failed: 缺少 agentKey 参数。", "startAgentRun"),
+      tool("call_ok", "run started #ip7vii", "startAgentRun"),
+      user("继续"),
+    ];
+    const { messages: out, downgraded } = downgradeUnparsableToolCalls(msgs);
+    expect(downgraded).toBe(1);
+    // Bad call rendered as text, good call kept structural.
+    const asst = out[1];
+    expect(asst.tool_calls).toHaveLength(1);
+    expect(asst.tool_calls?.[0]?.id).toBe("call_ok");
+    expect(String(asst.content)).toContain("[tool_call: startAgentRun(");
+    expect(String(asst.content)).toContain("review the dif");
+    // Result of the downgraded call becomes an orphan → assistant text.
+    expect(out[2].role).toBe("assistant");
+    expect(String(out[2].content)).toContain("[tool_result: startAgentRun: startAgentRun failed");
+    // Healthy result keeps its structural shape.
+    expect(out[3].role).toBe("tool");
+    expect(out[3].tool_call_id).toBe("call_ok");
+  });
+
+  test("no poison returns the input array by reference (zero-cost pass-through)", () => {
+    const msgs = [
+      user("hi"),
+      assistant("", { tool_calls: toolCall("call_1", "exec_command", '{"command":"ls"}') }),
+      tool("call_1", "ok", "exec_command"),
+    ];
+    const out = downgradeUnparsableToolCalls(msgs);
+    expect(out.messages).toBe(msgs);
+    expect(out.downgraded).toBe(0);
+  });
+
+  test("empty-string arguments pass through (parameterless calls are legitimate)", () => {
+    const msgs = [
+      assistant("", {
+        tool_calls: [{ id: "c1", type: "function", function: { name: "no_args", arguments: "" } }],
+      }),
+      tool("c1", "done", "no_args"),
+    ];
+    const out = downgradeUnparsableToolCalls(msgs);
+    expect(out.downgraded).toBe(0);
+    expect(out.messages).toBe(msgs);
+  });
+
+  test("double-encoded JSON (parses to a string, not an object) is poison too", () => {
+    const doubleEncoded = JSON.stringify(JSON.stringify({ path: "src/app.ts" }));
+    const msgs = [
+      assistant("", { tool_calls: toolCall("c1", "readFile", doubleEncoded) }),
+      tool("c1", "contents", "readFile"),
+    ];
+    const { messages: out, downgraded } = downgradeUnparsableToolCalls(msgs);
+    expect(downgraded).toBe(1);
+    expect(out[0].tool_calls).toBeUndefined();
+    expect(String(out[0].content)).toContain("[tool_call: readFile(");
+    expect(out[1].role).toBe("assistant");
+  });
+
+  test("idempotent: second pass is a no-op", () => {
+    const msgs = [
+      assistant("", {
+        tool_calls: [
+          { id: "call_bad", type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } },
+          { id: "call_ok", type: "function", function: { name: "startAgentRun", arguments: '{"task":"x"}' } },
+        ],
+      }),
+      tool("call_bad", "err", "startAgentRun"),
+      tool("call_ok", "ok", "startAgentRun"),
+    ];
+    const first = downgradeUnparsableToolCalls(msgs);
+    const second = downgradeUnparsableToolCalls(first.messages);
+    expect(second.downgraded).toBe(0);
+    expect(second.messages).toEqual(first.messages);
+  });
+
+  test("sanitizeOutboundHistory also downgrades truncated arguments (cross-provider replay seam)", () => {
+    const msgs = [
+      assistant("", { tool_calls: toolCall("call_bad", "startAgentRun", TRUNCATED_ARGS) }),
+      tool("call_bad", "err", "startAgentRun"),
+    ];
+    const out = sanitizeOutboundHistory(msgs);
+    expect(out.find((m) => Array.isArray(m.tool_calls) && m.tool_calls.length > 0)).toBeUndefined();
+    const allText = out.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
+    expect(allText).toContain("[tool_call: startAgentRun(");
+    expect(allText).toContain("[tool_result: startAgentRun: err]");
+  });
+
+  test("sanitize keeps the healthy sibling of a poisoned call (no collateral downgrade)", () => {
+    const msgs = [
+      assistant("", {
+        tool_calls: [
+          { id: "call_bad", type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } },
+          { id: "call_ok", type: "function", function: { name: "startAgentRun", arguments: '{"task":"optimize"}' } },
+        ],
+      }),
+      tool("call_bad", "err", "startAgentRun"),
+      tool("call_ok", "ok", "startAgentRun"),
+    ];
+    const out = sanitizeOutboundHistory(msgs);
+    const asst = out[0];
+    expect(asst.tool_calls).toHaveLength(1);
+    expect(asst.tool_calls?.[0]?.id).toBe("call_ok");
+    expect(String(asst.content)).toContain("[tool_call: startAgentRun(");
+  });
+
+  test("id-less poisoned call still pairs its result via the stable sanitize id", () => {
+    const msgs = [
+      user("dispatch"),
+      assistant("", {
+        tool_calls: [
+          { type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } },
+        ],
+      }),
+      tool("call_sanitize_1_0", "err", "startAgentRun"),
+      user("继续"),
+    ];
+    const { messages: out, downgraded } = downgradeUnparsableToolCalls(msgs);
+    expect(downgraded).toBe(1);
+    expect(out[1].tool_calls).toBeUndefined();
+    expect(String(out[1].content)).toContain("[tool_call: startAgentRun(");
+    // Result paired through the derived stable id → downgraded, not dangling.
+    expect(out[2].role).toBe("assistant");
+    expect(String(out[2].content)).toContain("[tool_result: startAgentRun: err]");
+  });
+
+  test("non-string scalar arguments (number/boolean/null) are poison at the send seam", () => {
+    const msgs = [
+      assistant("", {
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "t", arguments: 42 as unknown as string } },
+          { id: "c2", type: "function", function: { name: "t", arguments: null as unknown as string } },
+          { id: "c3", type: "function", function: { name: "t", arguments: true as unknown as string } },
+        ],
+      }),
+      tool("c1", "r1", "t"),
+      tool("c2", "r2", "t"),
+      tool("c3", "r3", "t"),
+    ];
+    const { messages: out, downgraded } = downgradeUnparsableToolCalls(msgs);
+    expect(downgraded).toBe(3);
+    expect(out[0].tool_calls).toBeUndefined();
+    expect(out[1].role).toBe("assistant");
+    expect(out[2].role).toBe("assistant");
+    expect(out[3].role).toBe("assistant");
+  });
+
+  test("object-form and absent arguments pass through (normalized downstream)", () => {
+    const msgs = [
+      assistant("", {
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "t", arguments: { a: 1 } as unknown as string } },
+          { id: "c2", type: "function", function: { name: "t", arguments: undefined as unknown as string } },
+        ],
+      }),
+      tool("c1", "r1", "t"),
+      tool("c2", "r2", "t"),
+    ];
+    const out = downgradeUnparsableToolCalls(msgs);
+    expect(out.downgraded).toBe(0);
+    expect(out.messages).toBe(msgs);
   });
 });

@@ -168,6 +168,9 @@ export function sanitizeOutboundHistory(
       const name = call?.function?.name;
       const declaredAllows = !declared || (isString(name) && declared.has(name));
       if (!declaredAllows) return; // will be downgraded, don't pair its result
+      if (!hasParsableObjectArguments(call?.function?.arguments)) {
+        return; // truncated/unparsable JSON arguments → downgrade, don't pair result
+      }
       const id = isNonEmptyString(call?.id)
         ? call.id
         : stableToolCallId(i, callIndex);
@@ -283,4 +286,119 @@ function combineContentWithText(
     return [...base, { type: "text", text: extra }];
   }
   return extra;
+}
+
+/**
+ * Whether a tool_call's `arguments` is structurally usable on the wire:
+ * absent (→ normalizeToolCall stringifies to {}), object/array form (→
+ * stringified downstream), or a string that parses to a JSON object/array.
+ * The empty string is allowed: parameterless calls legitimately arrive as
+ * `arguments: ""` and gateways accept it. Poison: a non-empty string that
+ * fails JSON.parse (or parses to a non-object, e.g. a double-encoded string),
+ * and runtime-malformed scalars (number/boolean/null) which violate the
+ * OpenAI-compatible wire shape — chat-completions gateways validate inbound
+ * history `tool_calls[].function.arguments` and reject the WHOLE request with
+ * 400 (observed: RunInfra/GLM "UPSTREAM_400 ... received invalid JSON string").
+ */
+export function hasParsableObjectArguments(raw: unknown): boolean {
+  if (raw === undefined) return true;
+  if (raw === null || typeof raw === "number" || typeof raw === "boolean") {
+    return false;
+  }
+  if (typeof raw !== "string") return true;
+  if (raw.trim() === "") return true;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed !== null && typeof parsed === "object";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Local-loop send-seam poison defense: downgrade assistant tool_calls whose
+ * string `arguments` cannot be parsed as a JSON object (typical cause: the
+ * upstream truncated the arguments mid-stream — observed with GLM parallel
+ * tool calls losing the closing `"}]}`).
+ *
+ * Why a send-seam pass in addition to {@link sanitizeOutboundHistory}: the
+ * same-provider continuation path does NOT run full sanitize (that is the
+ * cross-provider replay seam), and the poisoned assistant message is already
+ * persisted — every turn rebuilds the request from stored history, so the
+ * gateway rejects every retry with 400 and the dialog deadlocks ("继续"
+ * replays the same poison forever). Downgrading here, at the last seam before
+ * the provider, makes every subsequent request clean regardless of what is
+ * stored, so the dialog self-heals; the persisted history is untouched
+ * (audit trail preserved) and the downgrade is idempotent across turns.
+ *
+ * Scope is deliberately narrower than full sanitize: only unparsable
+ * arguments are touched. When history contains no poison the input array is
+ * returned by reference and nothing else changes (no declared-name filtering,
+ * no dangling-call handling — those remain cross-provider replay concerns).
+ */
+export function downgradeUnparsableToolCalls(
+  messages: AgentRuntimeChatMessage[],
+): { messages: AgentRuntimeChatMessage[]; downgraded: number } {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { messages, downgraded: 0 };
+  }
+
+  const poisonIds = new Set<string>();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
+    m.tool_calls.forEach((call, callIndex) => {
+      if (!hasParsableObjectArguments(call?.function?.arguments)) {
+        // Derive the same stable id sanitizeOutboundHistory mints for ID-less
+        // calls, so an id-less poison still pairs (and downgrades) its result.
+        const id = isNonEmptyString(call?.id)
+          ? call.id
+          : stableToolCallId(i, callIndex);
+        poisonIds.add(id);
+      }
+    });
+  }
+  if (poisonIds.size === 0) return { messages, downgraded: 0 };
+
+  let downgraded = 0;
+  const out: AgentRuntimeChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      const kept: AgentRuntimeToolCall[] = [];
+      const lines: string[] = [];
+      for (const call of m.tool_calls) {
+        if (!hasParsableObjectArguments(call?.function?.arguments)) {
+          lines.push(renderToolCallAsText(call as AgentRuntimeToolCall));
+          downgraded++;
+        } else {
+          kept.push(call);
+        }
+      }
+      if (lines.length === 0) {
+        out.push(m);
+        continue;
+      }
+      const sanitized: AgentRuntimeChatMessage = {
+        ...m,
+        content: combineContentWithText(m.content, joinLines(...lines)),
+        tool_calls: kept.length > 0 ? kept : undefined,
+      };
+      // Explicitly drop the field when nothing survived — same rationale as
+      // sanitizeOutboundHistory: undefined would still serialize as a
+      // present-but-undefined field on some transports.
+      if (kept.length === 0) delete sanitized.tool_calls;
+      out.push(sanitized);
+      continue;
+    }
+    if (m.role === "tool") {
+      const id = isNonEmptyString(m.tool_call_id) ? m.tool_call_id : "";
+      if (id && poisonIds.has(id)) {
+        // The call this result pairs with was downgraded → orphan result.
+        out.push({ role: "assistant", content: renderToolResultAsText(m) });
+        continue;
+      }
+    }
+    out.push(m);
+  }
+  return { messages: out, downgraded };
 }

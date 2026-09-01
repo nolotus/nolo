@@ -783,7 +783,7 @@ describe("cli agent run client", () => {
 
     expect(result).toEqual({ exitCode: 0, dialogId: "dialog-local" });
     expect(output.text()).toContain("frontend -> working locally");
-    expect(output.text()).toContain("frontend > local:polish notifications");
+    expect(output.text()).toContain("frontend > local:--- 当前时间 ---");
   });
 
   test("returns dialogId when a local provider failure is persisted (e.g. 402)", async () => {

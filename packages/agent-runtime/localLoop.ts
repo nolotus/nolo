@@ -19,6 +19,7 @@ import type {
 } from "./types";
 
 import { sanitizeToolCallPairing } from "./toolCallPairing";
+import { downgradeUnparsableToolCalls, hasParsableObjectArguments } from "./outboundHistorySanitize";
 import { summarizeToolArguments } from "./summarizeToolArguments";
 import { buildIdentityBlock } from "./identityBlock";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
@@ -1497,6 +1498,18 @@ export async function runLocalAgentTurn(
   });
   let messages = builtMessages.messages;
   loopTimingMark("buildMessages", 0);
+  // 毒丸防御：历史中 arguments 非法 JSON 的 tool_call（典型成因：上游流式截断，
+  // 如 GLM 并行 tool_call 丢结尾 `"}]}`）会让网关对整个请求 400（实测 UPSTREAM_400
+  // messages[N].tool_calls[0].function.arguments invalid JSON string），而坏消息已
+  // 在存储历史里，每轮重放每轮失败 → dialog 永久死锁（"继续"无效）。发送前就地
+  // 降级为文本（存储不动、幂等），模型看到意图与 tool 结果文本后可重发调用 → 自愈。
+  const poisonDowngrade = downgradeUnparsableToolCalls(messages);
+  if (poisonDowngrade.downgraded > 0) {
+    messages = poisonDowngrade.messages;
+    console.warn(
+      `[nolo] downgraded ${poisonDowngrade.downgraded} tool_call(s) with unparsable JSON arguments from outbound history (suspected upstream stream truncation); persisted history untouched`,
+    );
+  }
   // vision 能力检测：catalog 已知模型按 hasVision 判定，未知模型默认 true。
   // 不支持图片时，buildMessages 产出的 image_url parts 必须在发给 provider 前剥离，
   // 否则上游 400 "this model does not support image input" → local 判失败 → fallback
@@ -1822,6 +1835,21 @@ export async function runLocalAgentTurn(
           },
         );
         try {
+          // 毒丸参数拦截（配合发送 seam 的 downgradeUnparsableToolCalls）：
+          // arguments 非空 string 但 JSON.parse 失败（典型成因：上游流式截断，
+          // 如 GLM 并行 tool_call 丢结尾 `"}]}`）时，执行器只能拿到空对象并
+          // 误报"缺少 xxx 参数"（参数明明生成了），模型无法自纠。这里提前抛出
+          // 明确诊断，走统一 tool-error 路径，tool result 直接指示重新调用。
+          const rawPoisonArguments = toolCall.function?.arguments;
+          if (
+            typeof rawPoisonArguments === "string" &&
+            rawPoisonArguments.trim() !== "" &&
+            !hasParsableObjectArguments(rawPoisonArguments)
+          ) {
+            throw new Error(
+              `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象。`,
+            );
+          }
           const writeTool = toolName === "writeFile" || toolName === "editFile";
           // Only interactive hosts can approve the session gate. Headless/background
           // runs retain the pre-gate behavior and execute writes directly.

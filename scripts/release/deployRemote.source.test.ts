@@ -15,6 +15,27 @@ describe("deployRemote source contract", () => {
     expect(source).not.toContain("\r");
   });
 
+  it("ensures the shared internal token file before core/canary reference it (set -u regression: 2026-08-31 十连挂)", () => {
+    // c080a29a4 在 start_nolo / start_nolo_canary 里引用 $CHAT_PROXY_INTERNAL_TOKEN_FILE，
+    // 但该变量只在 ensure_chat_proxy_internal_token_file()（chat-proxy 段，core 之后）
+    // 里赋值——set -u 下首次执行蓝绿 canary 启动就 unbound variable 崩溃，
+    // 蓝绿切换从未发生（旧进程一直服务），ssr-selfcheck 探到旧实例 404。
+    // 契约：两个 start 函数体内必须在**调用**（非注释）ensure 之后才引用变量。
+    for (const fnName of ["start_nolo", "start_nolo_canary"]) {
+      const fnBody = source.match(
+        new RegExp(`${fnName}\\(\\) \\{[\\s\\S]*?\\n\\}`, "m"),
+      )?.[0];
+      expect(fnBody).toBeDefined();
+      const ensureCallIdx = fnBody!.indexOf(
+        "ensure_chat_proxy_internal_token_file || true",
+      );
+      // 注释里也含函数名，只认真实调用行
+      const refIdx = fnBody!.indexOf('$CHAT_PROXY_INTERNAL_TOKEN_FILE"');
+      expect(ensureCallIdx).toBeGreaterThanOrEqual(0);
+      expect(refIdx).toBeGreaterThan(ensureCallIdx);
+    }
+  });
+
   it("ensures Playwright Chromium is available on the remote host", () => {
     expect(source).toContain("ensure_playwright_browser()");
     expect(source).toContain("playwright_chromium_cache_exists()");

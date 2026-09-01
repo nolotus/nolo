@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 // refreshGitStatus falls back to process.env per key because tests pass env: {}.
 process.env.NOLO_CLI_GIT_STATUS ??= "0";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { spawn } from "bun";
 import { join } from "node:path";
@@ -3586,6 +3587,11 @@ function spawnProbe(mode: string): {
 } {
   const child = spawn({
     cmd: ["bun", "run", PROBE_PATH, mode],
+    // 探针的 import 链会按 cwd 解析仓库状态目录（data/leveldb）。从活跃的
+    // 主检出跑测试时，运行中的 server 持有 LevelDB 锁，子进程在 import 阶段
+    // 就挂死/早退，五个信号用例全部红——那不是信号语义回归。给子进程一个
+    // 干净 cwd，让它与被测的 altScreen 退出语义解耦任何检出环境。
+    cwd: tmpdir(),
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",

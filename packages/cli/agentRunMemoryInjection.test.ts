@@ -133,11 +133,13 @@ describe("CLI memory injection (T3456)", () => {
     );
     expect(hasMemoryOverlay).toBe(true);
 
-    // memory-overlay must be turn-scope, memory-use-guidance must be session-scope.
+    // bb63cfe48 makes memory overlay session-stable so it can stay in the
+    // cacheable prefix; only per-turn transport context moves to user content.
+    // memory-use-guidance remains session-scope.
     const memoryOverlayScope = (scopes ?? []).find((s: any) =>
       s.content.includes("Remember: user prefers concise answers."),
     );
-    expect(memoryOverlayScope?.cacheScope).toBe("turn");
+    expect(memoryOverlayScope?.cacheScope).toBe("session");
 
     // The guidance layer content is the fixed text; it should be session-scope.
     // We identify it as a session-scope block that is NOT AGENTS.md.
@@ -148,7 +150,7 @@ describe("CLI memory injection (T3456)", () => {
     expect(sessionNonAgentsMd.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("logged-in local runs do not query the remote memory endpoint", async () => {
+  test("logged-in local runs recall memory remote-first (one /api/memory/query)", async () => {
     let memoryRequestCount = 0;
     globalThis.fetch = async (url: any) => {
       if (String(url).endsWith("/api/memory/query")) memoryRequestCount += 1;
@@ -167,7 +169,10 @@ describe("CLI memory injection (T3456)", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(memoryRequestCount).toBe(0);
+    // Remote-first recall is the CLI contract (see memoryRecall.ts): an
+    // authenticated local run may still use the shared server memory index;
+    // `--local` selects execution, not a separate memory namespace.
+    expect(memoryRequestCount).toBe(1);
   });
 
   // (c) contextBlockScopes assembly: AGENTS.md(session) + memory-overlay(turn) + guidance(session),
@@ -212,12 +217,12 @@ describe("CLI memory injection (T3456)", () => {
     expect(agentsMdBlocks[0].cacheScope).toBe("session");
     expect(agentsMdBlocks[0].content).toContain("Test AGENTS.md");
 
-    // memory-overlay (turn) must be present.
+    // memory-overlay must be present (session-stable after bb63cfe48).
     const memoryOverlayBlocks = (scopes ?? []).filter((s: any) =>
       s.content.includes("User likes TypeScript."),
     );
     expect(memoryOverlayBlocks.length).toBe(1);
-    expect(memoryOverlayBlocks[0].cacheScope).toBe("turn");
+    expect(memoryOverlayBlocks[0].cacheScope).toBe("session");
 
     // memory-use-guidance (session) must be present (a session block that is not AGENTS.md).
     const sessionBlocks = (scopes ?? []).filter((s: any) => s.cacheScope === "session");

@@ -176,7 +176,11 @@ describe("CLI local runtime adapter", () => {
       if (expected[i].contains !== undefined) {
         expect(messages[i].content).toContain(expected[i].contains);
       } else {
-        expect(messages[i].content).toBe(expected[i].content);
+        // bb63cfe48 moves turn-scope context (notably the current-time block)
+        // into the user message head to preserve upstream prompt-cache prefixes.
+        // The user payload remains the stable suffix of that enriched message.
+        expect(messages[i].content === expected[i].content ||
+          messages[i].content.endsWith(`\n\n${expected[i].content}`)).toBe(true);
       }
     }
   }
@@ -472,7 +476,7 @@ describe("CLI local runtime adapter", () => {
         type: "msg",
         dialogId: "01LOCAL",
         role: "user",
-        content: "fix tabs",
+        content: expect.stringContaining("fix tabs"),
       },
     });
     expect(dbWrites[1].body).toMatchObject({
@@ -1156,7 +1160,7 @@ describe("CLI local runtime adapter", () => {
     expect(store.get("dialog-dialog-existing-msg-1710000000000-001")).toMatchObject({
       dialogId: "dialog-existing",
       role: "user",
-      content: "make it cleaner",
+      content: expect.stringContaining("make it cleaner"),
     });
     expect(store.get("dialog-dialog-existing-msg-1710000000000-002")).toMatchObject({
       dialogId: "dialog-existing",
@@ -2406,13 +2410,12 @@ describe("CLI local runtime adapter", () => {
       ],
     });
 
-    expect(requests[0]?.body.messages.at(-1)).toEqual({
-      role: "user",
-      content: [
-        { type: "text", text: "describe this" },
-        { type: "image_url", image_url: { url: "https://example.com/a.png" } },
-      ],
-    });
+    const lastMessage = requests[0]?.body.messages.at(-1);
+    expect(lastMessage.role).toBe("user");
+    expect(lastMessage.content.slice(-2)).toEqual([
+      { type: "text", text: "describe this" },
+      { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+    ]);
   });
 
   test("allows registered execShell by default", async () => {
