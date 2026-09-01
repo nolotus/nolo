@@ -80,6 +80,7 @@ import {
 import { toErrorMessage } from "core/errorMessage";
 import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+import { appendStreamSafeNotice } from "./turnInjectionInbox";
 // S3 迁移：turn 执行与队列 drain（runOneAgentTurn / ensureChatQueueBinding /
 // preemptAndAbortForDrain / AgentTurnContext）及前奏区函数（runAgentChat /
 // waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
@@ -584,7 +585,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     isTurnActive: () => activeTurnAbort !== null,
     fallbackLabel: () => `${state.agentName} -> working`,
     stoppingLabel: () => t("turnStopping"),
-    displayMode: () => state.toolDisplay,
     onRepaint: () => {
       if (fixedInput.active && !fixedInput.isPaused()) {
         output.write("\x1b[?2026h\x1b[?25l");
@@ -643,6 +643,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       isPaused: () => fixedInput.isPaused(),
     },
     output: output as NodeJS.WritableStream,
+    // The decoder-drain hook is only bound once the interactive raw-mode
+    // composer installs its decoder (inside the `isInteractiveInput` block
+    // below); the non-raw readline path never binds it, so this stays a
+    // no-op there — which is correct, that path has no raw decoder to drain.
+    drainDecoder: () => {
+      if (composerDecoderDrain) composerDecoderDrain();
+    },
   });
   // ── Render coalescing + terminal sync ──────────────────────────────────
   // Streaming chunks arrive faster than the terminal can paint without
@@ -698,7 +705,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (!(output as { isTTY?: boolean }).isTTY) return;
     // modal / dialog 拥有屏幕（如 /help、confirm）时不重绘，否则会擦掉弹层。
     if (fixedInput.isPaused()) return;
-    if (modalOwnsKeyboard) return; // picker / confirm 弹层持有键盘时不重绘
+    if (dialogHost.isKeyboardClaimed()) return; // picker / confirm 弹层持有键盘时不重绘
     // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
@@ -769,18 +776,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
   // readLatestAssistantReply / buildConversationMarkdown（/copy last|all 取材）
   // 已随 S5 迁至 ./tuiSlashRouter。
-  // True while a modal (raw action gate OR ask_choice popup) owns the
-  // keyboard. The modal's own `data` listener handles its keys (Enter/Esc/
-  // Ctrl+C/arrow keys), so the main loop must not let stray keys leak into
-  // the composer draft buffer — otherwise a key typed while the modal is
-  // open gets prepended to the next submitted line (e.g. `x` before `/exit`
-  // yields `x/exit`, which is not recognized as /exit and the process never
-  // exits), or — for ask_choice — Esc meant to cancel the popup also aborts
-  // the whole turn (activeTurnAbort). Mirrors how the non-raw gate path uses
-  // rl.pause() to give the gate exclusive keyboard access.
-  // Hoisted above runOneAgentTurn so the requestUserChoice closure (which
-  // wraps an ask_choice dialog) can set/clear it without a forward-reference.
-  let modalOwnsKeyboard = false;
+  // Whether a modal (any `dialogHost.run()`/`withKeyboard()` caller — confirm
+  // dialogs, action gates, ask_choice, the agent/dialog pickers) currently
+  // owns the keyboard now lives entirely in `dialogHost` (`isKeyboardClaimed()`)
+  // — see dialogHost.ts's file docstring. The modal's own `data` listener
+  // handles its keys (Enter/Esc/Ctrl+C/arrow keys), so the main loop must not
+  // let stray keys leak into the composer draft buffer — otherwise a key
+  // typed while the modal is open gets prepended to the next submitted line
+  // (e.g. `x` before `/exit` yields `x/exit`, which is not recognized as
+  // /exit and the process never exits), or — for ask_choice — Esc meant to
+  // cancel the popup also aborts the whole turn (activeTurnAbort). Mirrors
+  // how the non-raw gate path uses rl.pause() to give the gate exclusive
+  // keyboard access.
+  // rawActionGateTokenHandler is still workspace-local: it's how the
+  // handoff-gate raw prompt (which has no dialog frame, so it never goes
+  // through `dialogHost.run()`) routes decoded tokens to itself while
+  // `dialogHost.withKeyboard()` holds the claim. Hoisted above
+  // runOneAgentTurn so handleInputToken (below) can read it without a
+  // forward-reference.
   let rawActionGateTokenHandler: ((token: string) => void) | null = null;
 
   // --- 对话累计积分刷新 helper（workspace 闭包顶层，turn 完成与 /pick 共用） ---
@@ -824,17 +837,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // turn, and folds dialog/token state back. Extracted from runSubmittedLine's
   // chat branch so the queue drain path can reuse the exact same rendering +
   // execution + state-update logic as a direct send.
-  // Composer decoder drain hook. The ask_user dialog and the composer's raw
-  // input decoder are two parallel `data` listeners on the same stdin. When
-  // ask_user closes, its confirm Enter is debounced ~40ms in the composer
-  // decoder and would otherwise leak into the next submit. Draining the
-  // decoder buffer on modal close discards those deferred bytes (and any
-  // partial ESC/CSI tail). The decoder binding only exists once the
-  // interactive composer is installed (inside the `isInteractiveInput` block),
-  // so we route the drain through a workspace-scope hook that requestUserChoice
-  // can reach — referencing the block-scoped decoder directly here used to
-  // throw `ReferenceError: onData is not defined` and leave modalOwnsKeyboard
-  // stuck true, which froze all input after an ask_user question.
+  // Composer decoder drain hook, read by `dialogHost`'s injected
+  // `drainDecoder` (see the createDialogHost call above). Every dialog and
+  // the composer's raw input decoder are parallel `data` listeners on the
+  // same stdin; a dialog's confirm Enter can sit debounced ~40ms in the
+  // composer decoder and would otherwise leak into the next submit once the
+  // dialog closes. `dialogHost.run()`/`withKeyboard()` calls this on every
+  // close (before releasing the keyboard claim) to discard those deferred
+  // bytes (and any partial ESC/CSI tail). The decoder binding only exists
+  // once the interactive composer is installed (inside the
+  // `isInteractiveInput` block below), so this stays a workspace-scope hook
+  // rather than a direct reference — referencing the block-scoped decoder
+  // directly used to throw `ReferenceError: onData is not defined` and leave
+  // the keyboard claim stuck, which froze all input after an ask_user
+  // question (fixed by routing through this hook instead).
   let composerDecoderDrain: (() => void) | null = null;
 
   const emitCommandOutput = (text: string, command = "") => {
@@ -853,6 +869,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // on demand so the drain callback can capture history/state/fixedInput/runAgentChat.
   let chatQueueBinding: ChatQueueTuiBinding | null = null;
 
+  // 当前进行中 turn 的注入收件箱（runOneAgentTurn 创建/清理）。busy 时后台 run
+  // 终态唤醒直投这里注入正在跑的 loop，不再走 chat 队列。见 turnInjectionInbox.ts。
+  let turnInjectionInbox: AgentTurnContext["turnInjectionInbox"] = null;
+
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
@@ -867,12 +887,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     set activeTurnAbort(v) { activeTurnAbort = v; },
     get activeTurnEpoch() { return activeTurnEpoch; },
     set activeTurnEpoch(v) { activeTurnEpoch = v; },
-    get modalOwnsKeyboard() { return modalOwnsKeyboard; },
-    set modalOwnsKeyboard(v) { modalOwnsKeyboard = v; },
-    get composerDecoderDrain() { return composerDecoderDrain; },
-    set composerDecoderDrain(v) { composerDecoderDrain = v; },
     get chatQueueBinding() { return chatQueueBinding; },
     set chatQueueBinding(v) { chatQueueBinding = v; },
+    get turnInjectionInbox() { return turnInjectionInbox; },
+    set turnInjectionInbox(v) { turnInjectionInbox = v; },
 
     get sessionEnded() { return sessionEnded; },
     get buffer() { return buffer; },
@@ -1108,25 +1126,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       input.setRawMode?.(false);
     };
     // actionGate / 破坏性操作确认的交互处理器曾内联在三处（busy 提交、空闲
-    // 手动 drain、直接发送），逐字重复。抽成一份三条路径共用：行为完全一致
-    // （modalOwnsKeyboard 的占锁/释放、composer 的 pause/resume、raw token
-    // 注册），改一处即三处生效。
+    // 手动 drain、直接发送），逐字重复。抽成一份三条路径共用：行为完全一致，
+    // 改一处即三处生效。键盘认领/释放 + decoder 排空现在完全由 dialogHost
+    // 自己负责（见 dialogHost.ts 文件注释），这两个处理器不用再手工管理。
     const buildInteractiveTurnHandlers = () => {
-      // The modal's own key reader and the composer's decoder are two parallel
-      // `data` listeners on the same stdin. `modalOwnsKeyboard` only shields
-      // the composer while the modal is *open*: plain text is emitted by the
-      // decoder synchronously and gets dropped inside that window, but Enter
-      // (`\r`) is deferred by a 40ms unmarked-paste debounce (tuiRawInput).
-      // By the time that debounce fires, the modal has closed and
-      // `modalOwnsKeyboard` is already false again — so the confirm/approve
-      // Enter leaks into the composer's submit path and enqueues the current
-      // draft as a chat message. Draining the decoder buffer on modal close
-      // discards those deferred bytes (and any partial ESC/CSI tail) so they
-      // can never fall through to submit.
-      const releaseKeyboardToComposer = () => {
-        onData.destroy();
-        modalOwnsKeyboard = false;
-      };
       const actionGateHandler = async (gate: LocalAgentActionGate) => {
         // /auto on（会话级权限自动化）：只放行写文件确认门（file_write 的
         // confirm gate）。handoff / input 类 gate 需要真人接管终端，不是
@@ -1137,26 +1140,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         if (state.autoConfirm && isAutoConfirmableFileWriteGate(gate)) {
           return buildGateConfirmedResult(gate);
         }
-        modalOwnsKeyboard = true;
-        try {
-          // `confirm` gates route through dialogHost + a framed dialog;
-          // `handoff` gates keep the raw text-prompt wait, now pausing the
-          // composer for its full wait window instead of only around the
-          // subprocess. See resolveActionGate's docstring in tuiTurnRunner.ts
-          // for why (activity-indicator repaint erasure).
-          return await resolveActionGate(gate, {
-            dialogHost,
-            input,
-            output,
-            spawnRunner,
-            registerToken: (handler) => { rawActionGateTokenHandler = handler; },
-            pauseComposer: () => fixedInput.pause(),
-            resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
-            resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
-          });
-        } finally {
-          releaseKeyboardToComposer();
-        }
+        // `confirm` gates route through dialogHost.run() + a framed dialog;
+        // `handoff` gates keep the raw text-prompt wait (dialogHost.withKeyboard()),
+        // now pausing the composer for its full wait window instead of only
+        // around the subprocess. See resolveActionGate's docstring in
+        // tuiTurnRunner.ts for why (activity-indicator repaint erasure) and
+        // for which of the two dialogHost entry points each kind uses.
+        return await resolveActionGate(gate, {
+          dialogHost,
+          input,
+          output,
+          spawnRunner,
+          registerToken: (handler) => { rawActionGateTokenHandler = handler; },
+          pauseComposer: () => fixedInput.pause(),
+          resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
+          resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
+        });
       };
       const confirmDestructiveAction = async (request: PermissionRequest) => {
         // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
@@ -1164,19 +1163,14 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 本地处理并回写），这里在调用时读取，拿到的总是最新值。
         // 只短路破坏性操作确认；actionGate（handoff/input 类）不走这里。
         if (state.autoConfirm) return true;
-        modalOwnsKeyboard = true;
-        try {
-          return await dialogHost.run((anchor) =>
-            runConfirmDialog({
-              request,
-              input: input as any,
-              output: output as any,
-              ...anchor,
-            }),
-          );
-        } finally {
-          releaseKeyboardToComposer();
-        }
+        return await dialogHost.run((anchor) =>
+          runConfirmDialog({
+            request,
+            input: input as any,
+            output: output as any,
+            ...anchor,
+          }),
+        );
       };
       return { actionGateHandler, confirmDestructiveAction };
     };
@@ -1215,8 +1209,43 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     runWakeHandler = (event: InternalTurnEvent | string) => {
       if (done) return;
       if (busy || fixedInput.isPaused()) {
-        const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
-        ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction).enqueue(event);
+        // 直投当前进行中的 agent loop：唤醒不再挂进 chat 消息队列等整个 turn
+        // 跑完，而是作为 user 消息在下一轮 provider 调用注入本 turn，模型当场
+        // 消化。收件箱不可用（无进行中 turn / 已关闭）时才落回 chat 队列。
+        const text = typeof event === "string" ? event : event.text;
+        const injected =
+          !!turnInjectionInbox && turnInjectionInbox.push({ text, fallback: event });
+        if (injected) {
+          // 立即在 transcript 印一行紧凑 dim 状态行，让用户马上看到唤醒已被
+          // 本轮吸收（不再出现在队列 UI）。
+          //
+          // 注意：这里不能用 emitCommandOutput。它走 appendLocalTurn，而
+          // appendLocalTurn 会 finalizeCurrentTurn 把 currentRole 置 null；
+          // createHistoryOutputStream.write 只调 applyOutputChunkToCurrentTurn，
+          // 不会把 currentRole 设回 assistant —— 注入发生在流式输出中途时，
+          // 之后模型继续流出的文本会被静默吞掉（不保存也不渲染）。
+          // appendStreamSafeNotice 会在插入状态行后重开 assistant 流式段。
+          const displayText =
+            typeof event !== "string" && event.kind === "child-run-completed"
+              ? (event.displayText ?? event.text)
+              : text;
+          const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
+          if (!isInteractiveInput(input)) {
+            // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
+            output.write(`${noticeLine}\n`);
+          } else {
+            history.followBottom = true;
+            appendStreamSafeNotice(history, noticeLine, {
+              appendLocalTurn,
+              startTurn,
+            });
+            renderHistoryToOutput();
+          }
+        } else {
+          const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
+          ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction)
+            .enqueue(event);
+        }
         if (fixedInput.active && !fixedInput.isPaused()) {
           fixedInput.repaint(buffer, cursorPos);
         }
@@ -1448,12 +1477,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
     const handleInputToken = async (sequence: string) => {
       if (done) return;
-      // While a modal (raw action gate OR ask_choice popup) owns the
-      // keyboard, that modal's own `data` listener owns the keyboard. Drop
-      // everything else so random keys do not accumulate in the composer
-      // draft buffer and corrupt the next submitted line, and so Esc meant
-      // to cancel an ask_choice popup does not also abort the running turn.
-      if (modalOwnsKeyboard) {
+      // While a modal (any dialogHost.run()/withKeyboard() caller — confirm,
+      // action gate, ask_choice, agent/dialog picker) owns the keyboard, that
+      // modal's own `data` listener owns the keyboard. Drop everything else
+      // so random keys do not accumulate in the composer draft buffer and
+      // corrupt the next submitted line, and so Esc meant to cancel a popup
+      // does not also abort the running turn.
+      if (dialogHost.isKeyboardClaimed()) {
         rawActionGateTokenHandler?.(sequence);
         return;
       }

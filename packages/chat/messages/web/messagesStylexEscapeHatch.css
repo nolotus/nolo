@@ -336,3 +336,87 @@
     scrollbar-width: none;
   }
 }
+
+/* Tool message migration: selectors that require legacy hooks, pseudo-classes, or media queries. */
+[data-hook~="messages-esc-tr-header"]:hover { background-color: var(--surfaceInteractiveHover, var(--backgroundHover)); }
+[data-hook~="messages-esc-tr-header"]:hover [data-hook~="messages-esc-tr-summary"] { color: var(--textSecondary); opacity: 1; }
+[data-hook~="messages-esc-tr-action-row"]:hover { color: var(--textSecondary); background-color: transparent; }
+[data-hook~="messages-esc-tr-action-row"]:hover [data-hook~="messages-esc-tr-action-chevron"] { color: var(--textSecondary); opacity: 1; }
+[data-hook~="messages-esc-tr-header"]:hover [data-hook~="messages-esc-tr-chevron"] { opacity: 1; }
+[data-hook~="messages-esc-t-content-block"]:hover { border-color: var(--borderMuted, transparent); }
+[data-hook~="messages-esc-t-inline-link"]:hover { background: var(--surfaceInteractiveHover, var(--backgroundHover)); border-color: var(--primaryBorder, var(--primary)); transform: translateY(-1px); }
+[data-hook~="messages-esc-t-card-link"]:hover { background: var(--surfaceInteractiveHover, var(--backgroundHover)); border-color: var(--primaryBorder, var(--primary)); transform: translateY(-1px); }
+[data-hook~="messages-esc-btn-primary-sm"]:hover { transform: translateY(-1px); background: var(--accentSoft, var(--primaryGhost)); border-color: color-mix(in srgb, var(--primary) 24%, transparent); }
+[data-hook~="messages-esc-g-img-card"]:hover { transform: scale(1.01); border-color: var(--borderSubtle, var(--borderMuted)); }
+[data-hook~="messages-esc-handoff-link"]:hover { color: var(--text); text-decoration: underline; }
+[data-hook~="messages-esc-tr-act-bar"]:hover, [data-hook~="messages-esc-tr-header"]:hover [data-hook~="messages-esc-tr-act-bar"] { opacity: 1; transform: translateX(0); }
+[data-hook~="messages-esc-tr-act-btn"]:hover { background-color: var(--backgroundHover); color: var(--text); border-color: var(--borderSubtle); }
+[data-hook~="messages-esc-tr-act-btn-danger"]:hover { color: var(--error); border-color: var(--error); }
+[data-hook~="messages-esc-tr-body"]::-webkit-scrollbar, [data-hook~="messages-esc-bash-output"]::-webkit-scrollbar { width: 4px; height: 4px; }
+[data-hook~="messages-esc-tr-body"]::-webkit-scrollbar-track, [data-hook~="messages-esc-bash-output"]::-webkit-scrollbar-track { background: transparent; }
+[data-hook~="messages-esc-tr-body"]::-webkit-scrollbar-thumb, [data-hook~="messages-esc-bash-output"]::-webkit-scrollbar-thumb { background: transparent; border-radius: 99px; }
+[data-hook~="messages-esc-tr-body"]:hover::-webkit-scrollbar-thumb, [data-hook~="messages-esc-bash-output"]:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--textQuaternary) 40%, transparent); }
+[data-hook~="messages-esc-tr-body"]::-webkit-scrollbar-thumb:hover, [data-hook~="messages-esc-bash-output"]::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--textTertiary, var(--textQuaternary)) 56%, transparent); }
+[data-hook~="messages-esc-tr-body"], [data-hook~="messages-esc-bash-output"] { scrollbar-color: transparent transparent; }
+[data-hook~="messages-esc-tr-body"]:hover, [data-hook~="messages-esc-bash-output"]:hover { scrollbar-color: color-mix(in srgb, var(--textQuaternary) 40%, transparent) transparent; }
+html[data-nolo-desktop="1"] [data-hook~="messages-esc-tr-body"], html[data-nolo-desktop="1"] [data-hook~="messages-esc-bash-output"] { scrollbar-width: none; }
+html[data-nolo-desktop="1"] [data-hook~="messages-esc-tr-body"]::-webkit-scrollbar { display: none; width: 0 !important; height: 0 !important; }
+@media (max-width: 960px) { [data-hook~="messages-esc-tool-row"] { margin-left: 0; } }
+@media (max-width: 640px) { [data-hook~="messages-esc-tool-row"] { max-width: 100%; } }
+@media (max-width: 560px) { [data-hook~="messages-esc-tr-phase-row"] { padding-left: 2px; padding-right: 2px; } }
+
+/* tool 卡时间线连接线（旧 1511-1518）：tr-phase 竖向 absolute connector */
+[data-hook~="messages-esc-tr-phase"]:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 21px;
+  bottom: -8px;
+  width: 1px;
+  background: var(--borderMuted, var(--borderSubtle));
+}
+[data-hook~="messages-esc-tr-phase-row"]:disabled { cursor: default; }
+/* btn-primary-sm hover（旧 1839-1843） */
+/* g-grid 单图卡片变体（旧 925）：后代规则走 hook 对 */
+[data-hook~="messages-esc-g-grid-cols-1"] [data-hook~="messages-esc-g-img-card"] {
+  aspect-ratio: 16 / 10;
+  max-height: min(420px, 52vh);
+}
+/* ziwei 标题装饰（旧 1962 / 2183-2196）：伪元素 + 内容注入走 hook */
+[data-hook~="messages-esc-ziwei-title"]::before {
+  content: "✦";
+  opacity: 0.55;
+  font-size: 12px;
+  letter-spacing: 0.3em;
+}
+[data-hook~="messages-esc-ziwei-center-title"]::before,
+[data-hook~="messages-esc-ziwei-center-title"]::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary) 35%, transparent));
+}
+[data-hook~="messages-esc-ziwei-center-title"]::after {
+  background: linear-gradient(270deg, transparent, color-mix(in srgb, var(--primary) 35%, transparent));
+}
+
+@media (max-width: 640px) {
+  [data-hook~="messages-esc-g-grid-cols-1"] [data-hook~="messages-esc-g-img-card"] {
+    max-height: min(300px, 46vh);
+  }
+}
+
+/* btn-tiny 后代规则（旧 978-983/1062-1067）：视频卡/推文卡小按钮 28×28 */
+[data-hook~="messages-esc-rvc-actions"] [data-hook~="messages-esc-btn-tiny"],
+[data-hook~="messages-esc-x-post-actions"] [data-hook~="messages-esc-btn-tiny"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+[data-hook~="messages-esc-x-post-actions"] [data-hook~="messages-esc-btn-tiny"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+

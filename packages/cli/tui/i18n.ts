@@ -521,10 +521,6 @@ const STRINGS = {
     en: "runtime",
     zh: "运行时",
   },
-  contextFieldTools: {
-    en: "tools",
-    zh: "工具",
-  },
   contextFieldServer: {
     en: "server",
     zh: "服务端",
@@ -641,8 +637,8 @@ const STRINGS = {
   runtimeUsage: { en: "Usage: /runtime <auto|local|server>", zh: "用法：/runtime <auto|local|server>" },
   runtimeSet: { en: "Runtime: {0}", zh: "运行模式：{0}" },
   displayFixedHint: {
-    en: "The TUI now ships a single built-in display default, no switching needed. Power users can fall back to environment variables (applied on restart): NOLO_CLI_TOOLS=normal|pro|verbose|hide controls the tool trace, NOLO_CLI_THINKING=show|hide controls reasoning visibility.",
-    zh: "TUI 现在只有一套内置默认显示，无需切换。专业细节可用环境变量兜底（重启生效）：NOLO_CLI_TOOLS=normal|pro|verbose|hide 控制工具轨迹，NOLO_CLI_THINKING=show|hide 控制思考过程。",
+    en: "The TUI ships a single built-in tool display — no configuration needed. Thinking process visibility is still controlled independently via NOLO_CLI_THINKING=show|hide (applied on restart).",
+    zh: "TUI 只有一套内置工具显示，无需配置。思考过程仍可用 NOLO_CLI_THINKING=show|hide 独立控制（重启生效）。",
   },
   tasksRunning: { en: "Running processes ({0}):", zh: "运行中的进程（{0}）：" },
   tasksStopped: { en: "Stopped/exited ({0}):", zh: "已停止/已退出（{0}）：" },

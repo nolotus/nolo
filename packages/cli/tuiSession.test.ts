@@ -12,7 +12,7 @@ import {
   renderStatusLine,
   renderWelcome,
 } from "./tui/session";
-import { getCliLocale, setCliLocale } from "./tui/i18n";
+import { getCliLocale, setCliLocale, t } from "./tui/i18n";
 // 窗口断言一律从 catalog 真值源推导（resolveAgentContextWindow），不钉硬编码魔数：
 // catalog / 模型档位同步后此处自动跟随，测试只守「接线正确」这条不变量。
 import { resolveAgentContextWindow } from "./client/tokenUsage";
@@ -208,12 +208,12 @@ describe("cli tui session", () => {
   test("defaults display modes and supports /tools", () => {
     const state = createInitialTuiState({});
     // 450234264 display convergence removed the compact default; normal wins.
-    expect(state.toolDisplay).toBe("normal");
+    // 单一显示模式后没有 toolDisplay 字段，/tools 只输出固定提示。
 
     // /tools 已随显示收敛停用：命令保留识别、不切状态，输出固定提示。
     const tools = handleTuiInput("/tools verbose", state);
-    expect(tools.nextState.toolDisplay).toBe("normal");
-    expect(tools.output).toContain("no switching needed");
+    expect(tools.nextState).toBe(state);
+    expect(tools.output).toBe(t("displayFixedHint"));
   });
 
   test("tracks runtime mode from env and sends it with chat actions", () => {

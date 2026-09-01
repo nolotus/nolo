@@ -4664,3 +4664,184 @@ describe("session file-write gate (onActionGate)", () => {
     expect(h.callsOf()).toBe(2);
   });
 });
+
+// ── 回合内注入（drainInjections）───────────────────────────────────────────
+//
+// TUI 的后台 run 终态唤醒在当前 turn 正跑时不再进 chat 队列，而是直投正在
+// 执行的 loop。这里锁住 localLoop 侧的两个注入点契约。
+describe("runLocalAgentTurn drainInjections (回合内注入)", () => {
+  /**
+   * 构造一个可编排的 loop：providerScript 逐轮给出返回值，requests 记录每轮
+   * 实际发给 provider 的请求消息。
+   */
+  function buildInjectionHarness(options: {
+    providerScript: Array<{ content: string; tool_calls?: any[] }>;
+    injections: string[][];
+  }) {
+    const requests: AgentRuntimeChatMessage[][] = [];
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const pendingInjections = [...options.injections];
+    let round = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef: string) => ({
+        key: agentRef,
+        name: "Injection Agent",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input: AgentRuntimeSaveTurnInput) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-injection" };
+      },
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async (messages: AgentRuntimeChatMessage[]) => {
+          requests.push(messages.map((m) => ({ ...m })));
+          const scripted = options.providerScript[round] ??
+            options.providerScript.at(-1)!;
+          round += 1;
+          // finish_reason/stream_complete 必须给全：缺省会被空轮判定当成
+          // stream_truncated 提前收尾，测不到注入点。
+          return {
+            finish_reason: "stop",
+            stream_complete: true,
+            ...scripted,
+            model: "fake-local",
+          } as any;
+        },
+      }),
+      executeTool: async (call: any) => ({
+        content: `tool ${call.name} ok`,
+      }),
+    } as any;
+
+    const run = () =>
+      runLocalAgentTurn({
+        adapter,
+        agentRef: "injector",
+        input: "original user input",
+        // 每次 drain 取走一批注入（模拟收件箱）。
+        drainInjections: () => pendingInjections.shift() ?? [],
+      } as any);
+
+    return { run, requests, savedTurns };
+  }
+
+  // a) loop 进行中注入 → 下一轮 provider 请求消息里必须出现注入的 user 消息。
+  test("注入在 loop 进行中到达时，下一轮 provider 调用即可见", async () => {
+    const h = buildInjectionHarness({
+      // 第 1 轮调工具（保证还有第 2 轮），第 2 轮正常收尾。
+      providerScript: [
+        {
+          content: "",
+          tool_calls: [
+            { id: "c1", type: "function", function: { name: "noop", arguments: "{}" } },
+          ],
+        },
+        { content: "done after seeing the injection" },
+      ],
+      // 第 1 轮开头无注入；第 2 轮开头注入一条。
+      injections: [[], ["后台 run run-x 已到终态 done"]],
+    });
+
+    await h.run();
+
+    expect(h.requests.length).toBeGreaterThanOrEqual(2);
+    const secondRequest = h.requests[1]!;
+    const injected = secondRequest.filter(
+      (m) => m.role === "user" && String(m.content).includes("run-x"),
+    );
+    expect(injected).toHaveLength(1);
+    expect(String(injected[0]!.content)).toContain("终态");
+  });
+
+  // b) 模型给出无 tool_calls 的最终响应时恰好有注入 → 不结束 turn，多跑一轮，
+  //    且注入消息进入下一轮上下文。
+  test("最终响应前到达的注入会让 loop 继续一轮而不是结束", async () => {
+    const h = buildInjectionHarness({
+      // 两轮都是「无 tool_calls 的最终响应」。若不拦截，第 1 轮就 break。
+      providerScript: [
+        { content: "first final answer" },
+        { content: "second answer after injection" },
+      ],
+      // 第 1 轮开头无注入；第 1 轮收尾前 drain 到一条 → 必须继续；
+      // 第 2 轮开头无注入；第 2 轮收尾前也无 → 正常结束。
+      injections: [[], ["run-y 已完成，请接着处理"], [], []],
+    });
+
+    const result = await h.run();
+
+    // 没有在第一轮结束：provider 被调用了两次。
+    expect(h.requests).toHaveLength(2);
+    const secondRequest = h.requests[1]!;
+    // 第 1 轮的 assistant 回复 + 注入的 user 消息都进了第 2 轮上下文。
+    expect(
+      secondRequest.some(
+        (m) => m.role === "assistant" && String(m.content) === "first final answer",
+      ),
+    ).toBe(true);
+    expect(
+      secondRequest.some(
+        (m) => m.role === "user" && String(m.content).includes("run-y"),
+      ),
+    ).toBe(true);
+    // 最终结果来自续跑的那一轮。
+    expect(result.content).toBe("second answer after injection");
+
+    // 持久化：注入的 user 消息必须随本轮 saveTurn 落盘，否则下一 turn 重建
+    // 上下文时丢失。
+    const saved = h.savedTurns[0]!;
+    expect(
+      saved.messages.some(
+        (m) => m.role === "user" && String(m.content).includes("run-y"),
+      ),
+    ).toBe(true);
+    // 不能重复追加 assistant 消息（收尾路径只应保留各轮各一条）。
+    expect(
+      saved.messages.filter(
+        (m) => m.role === "assistant" && String(m.content) === "first final answer",
+      ),
+    ).toHaveLength(1);
+  });
+
+  // 回归：没有 drainInjections 时行为完全不变（单轮结束、消息不重复）。
+  test("未提供 drainInjections 时行为不变", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    let calls = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef: string) => ({ key: agentRef, model: "fake-local" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input: AgentRuntimeSaveTurnInput) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-no-injection" };
+      },
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async () => {
+          calls += 1;
+          return {
+            content: "plain answer",
+            model: "fake-local",
+            finish_reason: "stop",
+            stream_complete: true,
+          };
+        },
+      }),
+      executeTool: async () => ({ content: "" }),
+    } as any;
+
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "plain",
+      input: "hi",
+    } as any);
+
+    expect(calls).toBe(1);
+    expect(result.content).toBe("plain answer");
+    expect(savedTurns[0]!.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+});

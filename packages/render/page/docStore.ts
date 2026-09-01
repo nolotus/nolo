@@ -26,7 +26,6 @@ import { formatISO } from "date-fns";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { toErrorMessage } from "core/errorMessage";
 import { readAndWait, patch } from "database/dbSlice";
-import { updateContentTitle } from "create/space/spaceSlice";
 import { DataType } from "create/types";
 import type { EditorContent } from "create/editor/utils/slateUtils";
 import type { PageSkillMetadata } from "ai/skills/skillDocProtocol";
@@ -530,6 +529,12 @@ export async function saveDocState(
 
     if (dbSpaceId) {
       try {
+        // 动态 import 断开 docStore → spaceSlice 的静态循环依赖：
+        // spaceSlice → contentThunks → updateContentTitleAction → tableSlice → … → docStore → spaceSlice
+        // 的环在模块初始化序变化时会让 bun 的 ESM 绑定解析提前命中未初始化的导出
+        //（bun test 下报 "Export 'updateContentTitle' not found"）。此处调用点在
+        // async 分支内且有 try/catch 兜底，懒加载不改变行为。
+        const { updateContentTitle } = await import("create/space/spaceSlice");
         await dispatch(
           (updateContentTitle as any)({
             spaceId: dbSpaceId,

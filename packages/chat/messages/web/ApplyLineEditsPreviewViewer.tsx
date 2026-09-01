@@ -1,11 +1,12 @@
 // 文件路径: chat/messages/web/ApplyLineEditsPreviewViewer.tsx
 
-import * as stylex from "@stylexjs/stylex";
 import React, { useMemo } from "react";
 import { LuTriangle } from "react-icons/lu";
 import NoloEditor from "create/editor/Editor";
 import { ToolProps, guessLanguageFromPath } from "./ToolMessageTypes";
 import { messagesStyles as styles } from "./messagesStyles";
+import { withLiteralClass } from "./toolMessageShared";
+import { toolMessageContentStyles as cs } from "./toolMessageContentStyles";
 import "./messagesStylexEscapeHatch.css";
 
 /* --- 行级编辑：预览态（previewOnly） --- */
@@ -22,9 +23,9 @@ const ApplyLineEditsPreviewViewer: React.FC<ToolProps> = ({
   if (!rawData.previewOnly || !Array.isArray(rawData.edits)) return null;
 
   return (
-    <div className="t-content-block ale-preview-block">
-      <div className="t-block-header">
-        <div className="t-badge warning">
+    <div {...withLiteralClass("t-content-block ale-preview-block", cs.contentBlock, cs.alePreview)}>
+      <div  {...withLiteralClass("t-block-header", contentStyles.blockHeader)}>
+        <div  {...withLiteralClass("t-badge warning", cs.badge, cs.badgeWarning)}>
           <LuTriangle size={14} aria-hidden="true" />
         </div>
         <div className="u-flex-col u-flex-1 u-min-w-0">
@@ -32,7 +33,7 @@ const ApplyLineEditsPreviewViewer: React.FC<ToolProps> = ({
         </div>
       </div>
 
-      <div className="ale-items-container">
+      <div {...withLiteralClass("ale-items-container", cs.aleItems)}>
         {rawData.edits.map((edit: any, idx: number) => {
           let label = "";
           if (edit.type === "replaceRange") {
@@ -84,24 +85,24 @@ const ApplyLineEditsPreviewViewer: React.FC<ToolProps> = ({
           ].join("-");
 
           return (
-            <div key={editKey} className="ale-edit-block">
-              <div className="ale-edit-header">
-                <span className={`ale-badge ale-badge--${edit.type}`}>
+            <div key={editKey} {...withLiteralClass("ale-edit-block", cs.aleBlock)}>
+              <div {...withLiteralClass("ale-edit-header", cs.aleHeader)}>
+                <span {...withLiteralClass(`ale-badge ale-badge--${edit.type}`, cs.aleBadge, edit.type === "replaceRange" && cs.aleBadgeReplace, (edit.type === "insertBefore" || edit.type === "insertAfter") && cs.aleBadgeInsert, edit.type === "deleteRange" && cs.aleBadgeDelete)}>
                   {edit.type}
                 </span>
-                <span className="ale-lines u-text-xs u-font-mono">
+                <span {...withLiteralClass("ale-lines u-text-xs u-font-mono", cs.aleLines)}>
                   {label}
                 </span>
               </div>
 
               {isInsertOrReplace && text && (
-                <div className="ale-code-full">
+                <div {...withLiteralClass("ale-code-full", cs.aleCode)}>
                   <NoloEditor initialValue={slateValue} readOnly />
                 </div>
               )}
 
               {edit.type === "deleteRange" && (
-                <div className="ale-delete-hint u-text-xs">
+                <div {...withLiteralClass("ale-delete-hint u-text-xs", cs.aleHint)}>
                   {t(
                     "ale.preview.deleteHint",
                     "此操作将删除上述行区间的原有内容（预览阶段无法展示原内容，执行后会提供完整 diff）。"

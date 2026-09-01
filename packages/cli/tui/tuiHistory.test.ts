@@ -7,6 +7,7 @@ import {
   resetStreamingTurnCache,
   renderHistory,
   applyScrollAction,
+  applyOutputChunkToCurrentTurn,
   createTurnHistory,
   finalizeCurrentTurn,
   startTurn,
@@ -24,7 +25,7 @@ import {
   themeColorSequence,
 } from "./theme";
 import { padOrTruncateToWidth, stripAnsi, visibleWidth } from "./tuiAnsi";
-import { resolveCliColorEnabled } from "../client/terminalStyles";
+import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import { renderScrollbarRow } from "./tuiScrollbar";
 import { formatAssistantDisplay } from "../client/assistantOutput";
 
@@ -1432,5 +1433,100 @@ describe("buildTurnOffsets & incremental streaming verification", () => {
       expect(offset80.totalLines).toBe(offset80Again.totalLines);
       expect(offset40.totalLines).toBeGreaterThan(offset80.totalLines);
     });
+  });
+});
+
+describe("tool line folding (same action on the same object collapses into ×N)", () => {
+  const applyTool = (history: ReturnType<typeof createTurnHistory>, chunk: string) =>
+    applyOutputChunkToCurrentTurn(history, chunk, "tool");
+
+  test("consecutive identical success lines collapse into one ×N line", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 8; i++) applyTool(history, "▸ Edit  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit ×8  ✓\n");
+  });
+
+  test("single tool line stays bare (no ×1)", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    applyTool(history, "▸ Edit  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit  ✓\n");
+  });
+
+  test("different labels do not fold; a repeat after a switch starts a fresh group", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 3; i++) applyTool(history, "▸ Edit  ✓\n");
+    for (let i = 0; i < 4; i++) applyTool(history, "▸ Run  ✓\n");
+    applyTool(history, "▸ Edit  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit ×3  ✓\n▸ Run ×4  ✓\n▸ Edit  ✓\n");
+  });
+
+  test("assistant text between tool lines resets the group", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    applyTool(history, "▸ Edit  ✓\n");
+    applyOutputChunkToCurrentTurn(history, "对照断言清单，看全部失败项：\n");
+    for (let i = 0; i < 2; i++) applyTool(history, "▸ Read  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit  ✓\n对照断言清单，看全部失败项：\n▸ Read ×2  ✓\n");
+  });
+
+  test("failure lines never fold and break the running group", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 2; i++) applyTool(history, "▸ Edit  ✓\n");
+    applyTool(history, "▸ Edit  ✗ 失败\n");
+    applyTool(history, "▸ Edit  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit ×2  ✓\n▸ Edit  ✗ 失败\n▸ Edit  ✓\n");
+  });
+
+  test("same label but different gist (different object) does not fold", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 2; i++) applyTool(history, "▸ Run · bun test  ✓\n");
+    for (let i = 0; i < 2; i++) applyTool(history, "▸ Run · git stash  ✓\n");
+    expect(history.currentContent).toBe("▸ Run · bun test ×2  ✓\n▸ Run · git stash ×2  ✓\n");
+  });
+
+  test("styled (dim) chunks fold identically to plain ones", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    const styled = `${dimCliText("▸ Read · app.ts  ✓", true)}\n`;
+    for (let i = 0; i < 3; i++) applyTool(history, styled);
+    expect(stripAnsi(history.currentContent)).toBe("▸ Read · app.ts ×3  ✓\n");
+    expect(history.currentContent).toContain("app.ts ×3");
+  });
+
+  test("multi-line tool blocks (ask_user card etc.) never fold", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    applyTool(history, "▸ Edit  ✓\n");
+    const card = "▸ Run  ✓\n  extra context line\n";
+    applyTool(history, card);
+    applyTool(history, "▸ Run  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit  ✓\n▸ Run  ✓\n  extra context line\n▸ Run  ✓\n");
+  });
+
+  test("turn boundary resets grouping", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 3; i++) applyTool(history, "▸ Edit  ✓\n");
+    startTurn(history, "user");
+    startTurn(history, "assistant");
+    applyTool(history, "▸ Edit  ✓\n");
+    expect(history.currentContent).toBe("▸ Edit  ✓\n");
+    expect(history.turns[0]!.content).toBe("▸ Edit ×3  ✓\n");
+  });
+
+  test("finalized history renders the folded line", () => {
+    const history = createTurnHistory();
+    startTurn(history, "assistant");
+    for (let i = 0; i < 8; i++) applyTool(history, "▸ Edit  ✓\n");
+    finalizeCurrentTurn(history);
+    const lines = buildHistoryLines(history, 80);
+    const folded = lines.filter((line) => stripAnsi(line).includes("▸ Edit ×8  ✓"));
+    expect(folded).toHaveLength(1);
+    expect(lines.some((line) => stripAnsi(line).includes("▸ Edit  ✓"))).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   isQuotaExhaustedError,
   parseAgentRunArgs,
   prependSubjectDialogMarker,
+  resolveRunOutcome,
   resolveWorkflowReference,
   runAgentRunCommand,
 } from "./agentRunCommand";
@@ -1211,17 +1212,47 @@ describe("cli agent run command", () => {
       }
     );
 
-    // 后台 run：虽然 exitCode 仍 0（fallback 不抛错），截断型兜底必须结算为 failed。
+    // 后台 run：进程 exitCode 仍 0（fallback 不抛错），但截断型兜底必须结算为
+    // failed 且写入的 exitCode 必须非零——否则任何按退出码判断的自动化都会把
+    // 这次失败误读成成功（实测证据：run-2026-08-31T10-54-42-840Z-mr6jls）。
     expect(exitCode).toBe(0);
     expect(finalized).toEqual([
       {
         runId: "run-child-trunc",
         status: "failed",
-        exitCode: 0,
+        exitCode: 1,
         dialogId: "dialog-trunc-1",
         note: "empty assistant output: length_truncated",
       },
     ]);
+  });
+
+  // 红测试（修复前必然失败）：直接复现 run-2026-08-31T10-54-42-840Z-mr6jls——
+  // isStalledOrTruncated === true 且 result.exitCode === 0 时，写入注册表的
+  // exitCode 必须非零。契约：status !== "done" ⟺ exitCode !== 0。
+  test("contract regression: stalled/truncated result with result.exitCode 0 must finalize with a non-zero exitCode", async () => {
+    const finalized: Array<{ runId: string; status: string; exitCode?: number; note?: string }> = [];
+    await runCommand(
+      ["frontend-implementer", "--msg", "fix ui", "--local"],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-contract-regression" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-contract-regression",
+          emptyAssistantFallbackReason: "stream_truncated",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+
+    expect(finalized).toHaveLength(1);
+    expect(finalized[0].status).toBe("failed");
+    expect(finalized[0].exitCode).toBeDefined();
+    expect(finalized[0].exitCode).not.toBe(0);
   });
 
   test("background run: stream-truncated empty assistant output is finalized as failed with a reason note", async () => {
@@ -1426,6 +1457,7 @@ describe("cli agent run command", () => {
       {
         runId: "run-timeout-1",
         status: "timeout",
+        exitCode: 124,
         note: expect.stringContaining("timed out after 50ms"),
       },
     ]);
@@ -1464,6 +1496,7 @@ describe("cli agent run command", () => {
       {
         runId: "run-stall-1",
         status: "failed",
+        exitCode: 1,
         note: expect.stringContaining("stalled: no progress for 50ms"),
       },
     ]);
@@ -1548,6 +1581,7 @@ describe("cli agent run command", () => {
       {
         runId: "run-llm-inflight-1",
         status: "failed",
+        exitCode: 1,
         note: expect.stringContaining("stalled: no progress for 50ms"),
       },
     ]);
@@ -1910,5 +1944,153 @@ describe("cli agent run command", () => {
     // 第2条指令仍保留在队列文件中
     expect(memFiles[queuePath]).toBeDefined();
     expect(memFiles[queuePath]).toContain("未执行的第2条指令");
+  });
+
+  describe("resolveRunOutcome (single settlement outcome resolver)", () => {
+    // Contract invariant, pinned for all four settlement scenarios:
+    //   status === "done"  <=>  exitCode === 0
+    //   status !== "done"  =>   exitCode !== 0, and the field is always present.
+    test("result, success: exitCode 0 -> done/0", () => {
+      const outcome = resolveRunOutcome({ kind: "result", exitCode: 0, isStalledOrTruncated: false });
+      expect(outcome).toEqual({ status: "done", exitCode: 0 });
+    });
+
+    test("result, non-zero exitCode -> failed, preserves the non-zero exitCode", () => {
+      const outcome = resolveRunOutcome({ kind: "result", exitCode: 7, isStalledOrTruncated: false });
+      expect(outcome).toEqual({ status: "failed", exitCode: 7 });
+    });
+
+    test("result, stalled/truncated with result.exitCode 0 -> failed with a non-zero exitCode (the bug fix)", () => {
+      const outcome = resolveRunOutcome({ kind: "result", exitCode: 0, isStalledOrTruncated: true });
+      expect(outcome.status).toBe("failed");
+      expect(outcome.exitCode).toBeDefined();
+      expect(outcome.exitCode).not.toBe(0);
+    });
+
+    test("stall watchdog -> failed with a non-zero exitCode", () => {
+      const outcome = resolveRunOutcome({ kind: "stall" });
+      expect(outcome.status).toBe("failed");
+      expect(outcome.exitCode).toBeDefined();
+      expect(outcome.exitCode).not.toBe(0);
+    });
+
+    test("timeout watchdog -> timeout with a non-zero exitCode", () => {
+      const outcome = resolveRunOutcome({ kind: "timeout" });
+      expect(outcome.status).toBe("timeout");
+      expect(outcome.exitCode).toBeDefined();
+      expect(outcome.exitCode).not.toBe(0);
+    });
+
+    // Every branch, exhaustively re-checked against the invariant so future
+    // edits to resolveRunOutcome can't quietly reintroduce done/non-zero or
+    // non-done/zero.
+    test("contract invariant holds across all scenarios", () => {
+      const scenarios: Array<Parameters<typeof resolveRunOutcome>[0]> = [
+        { kind: "result", exitCode: 0, isStalledOrTruncated: false },
+        { kind: "result", exitCode: 7, isStalledOrTruncated: false },
+        { kind: "result", exitCode: 0, isStalledOrTruncated: true },
+        { kind: "stall" },
+        { kind: "timeout" },
+      ];
+      for (const scenario of scenarios) {
+        const outcome = resolveRunOutcome(scenario);
+        expect(typeof outcome.exitCode).toBe("number");
+        if (outcome.status === "done") {
+          expect(outcome.exitCode).toBe(0);
+        } else {
+          expect(outcome.exitCode).not.toBe(0);
+        }
+      }
+    });
+  });
+
+  describe("foreground watchdogs (no --bg, no NOLO_AGENT_RUN_ID)", () => {
+    test("--timeout-ms is honored in the foreground (was previously silently ignored)", async () => {
+      const finalized: any[] = [];
+      let exitedWith: number | undefined;
+      const promise = runCommand(
+        ["frontend-implementer", "--msg", "hang forever", "--local", "--timeout-ms", "50"],
+        {
+          env: {},
+          scriptDir: "/repo/scripts",
+          output: { write() {} },
+          memoryRecallDisabled: true,
+          runner: async () => new Promise(() => {}) as any,
+          finalizeRunRecord: (runId, update) => {
+            finalized.push({ runId, ...update });
+          },
+          processExit: (code) => {
+            exitedWith = code;
+            throw new Error(`exit:${code}`);
+          },
+        },
+      );
+
+      await expect(promise).rejects.toThrow("timed out after 50ms");
+      expect(exitedWith).toBe(124);
+      // No registry record exists in the foreground (no childRunId) — nothing
+      // to finalize; the process exit code alone must carry the outcome.
+      expect(finalized).toEqual([]);
+    });
+
+    test("stall watchdog does NOT arm by default (no NOLO_LOCAL_RUN_STALL_TIMEOUT_MS)", async () => {
+      const finalized: any[] = [];
+      let exitedWith: number | undefined;
+      const promise = runCommand(
+        ["frontend-implementer", "--msg", "hang quietly", "--local"],
+        {
+          env: {},
+          scriptDir: "/repo/scripts",
+          output: { write() {} },
+          memoryRecallDisabled: true,
+          runner: async () => new Promise(() => {}) as any,
+          // A deps-level override alone must NOT arm the foreground stall
+          // watchdog — only the explicit env var does (per the plan's
+          // decision). This pins that the default stays "off".
+          stallTimeoutMs: 30,
+          finalizeRunRecord: (runId, update) => {
+            finalized.push({ runId, ...update });
+          },
+          processExit: (code) => {
+            exitedWith = code;
+            throw new Error(`exit:${code}`);
+          },
+        },
+      );
+      // Swallow so an eventual unrelated rejection doesn't surface as an
+      // unhandled rejection after this test has already finished asserting.
+      promise.catch(() => {});
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(exitedWith).toBeUndefined();
+      expect(finalized).toEqual([]);
+    });
+
+    test("stall watchdog arms when NOLO_LOCAL_RUN_STALL_TIMEOUT_MS is explicitly set", async () => {
+      const finalized: any[] = [];
+      let exitedWith: number | undefined;
+      const promise = runCommand(
+        ["frontend-implementer", "--msg", "hang quietly", "--local"],
+        {
+          env: { NOLO_LOCAL_RUN_STALL_TIMEOUT_MS: "50" },
+          scriptDir: "/repo/scripts",
+          output: { write() {} },
+          memoryRecallDisabled: true,
+          runner: async () => new Promise(() => {}) as any,
+          finalizeRunRecord: (runId, update) => {
+            finalized.push({ runId, ...update });
+          },
+          processExit: (code) => {
+            exitedWith = code;
+            throw new Error(`exit:${code}`);
+          },
+        },
+      );
+
+      await expect(promise).rejects.toThrow("stalled: no progress for 50ms");
+      expect(exitedWith).toBe(1);
+      // No registry record exists in the foreground — nothing to finalize.
+      expect(finalized).toEqual([]);
+    });
   });
 });

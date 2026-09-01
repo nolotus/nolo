@@ -45,8 +45,6 @@ export const RUN_DOCK_MAX_ROWS = 3;
 const RETIRED_MEMORY = 64;
 
 export type RunDockDeps = {
-  /** Normal/hide modes use a safe projection; pro/verbose retain diagnostics. */
-  displayMode: "normal" | "pro" | "verbose" | "compact" | "hide" | (() => "normal" | "pro" | "verbose" | "compact" | "hide");
   /** 重绘 composer（含光标隐藏/显示与 isPaused 守卫），由调用方提供。 */
   onRepaint: () => void;
   now?: () => number;
@@ -245,8 +243,8 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     const at = now();
     // 单条 run 保持原来的两行形态（含 `└ detail`）：绝大多数会话只有一个
     // 执行者，没必要为了多 run 的表头牺牲它的信息量。
-    const mode = typeof deps.displayMode === "function" ? deps.displayMode() : deps.displayMode;
-    const displaySnapshots = (mode === "normal" || mode === "hide") ? ordered.map((entry) => sanitizeRunSnapshotForNormal(entry.snapshot)) : ordered.map((entry) => entry.snapshot);
+    // 唯一显示模式：面板恒用 safe 投影（剥 ANSI/OSC、隐 raw error/log）。
+    const displaySnapshots = ordered.map((entry) => sanitizeRunSnapshotForNormal(entry.snapshot));
     if (displaySnapshots.length === 1) {
       return formatAgentRunPanelLines(displaySnapshots[0]!, colorEnabled, at);
     }

@@ -8,7 +8,7 @@ import {
   runAgentTurn,
 } from "./agentRun";
 import { findServerPlatformTools } from "./agentRunPlatformTools";
-import { getCliLocale, setCliLocale } from "../tui/i18n";
+import { getCliLocale, setCliLocale, toolLabel } from "../tui/i18n";
 import { BUILTIN_NOLO_AGENT_KEY } from "./localRuntimeAdapter";
 import { NOLO_PROJECT_MANAGER_AGENT_KEY } from "../agentAliases";
 
@@ -1591,7 +1591,7 @@ describe("cli agent run client", () => {
     expect(output.text()).not.toContain("[nolo:tool]");
   });
 
-  test("shows the active execShell command before the tool resolves", async () => {
+  test("shows the active execShell label (never the command) before the tool resolves", async () => {
     const output = new CaptureOutput();
     (output as CaptureOutput & { isTTY: boolean }).isTTY = true;
     let completeCalls = 0;
@@ -1610,7 +1610,7 @@ describe("cli agent run client", () => {
       serverUrl: "https://nolo.chat",
       message: "run tests",
       scriptDir: "C:/missing/scripts",
-      env: { AUTH_TOKEN: "token-123", NOLO_CLI_TOOLS: "pro" },
+      env: { AUTH_TOKEN: "token-123" },
       output,
       runtimeMode: "local",
       localRuntimeAdapter: {
@@ -1655,7 +1655,9 @@ describe("cli agent run client", () => {
     });
 
     await toolStarted;
-    expect(output.text()).toContain("Run bun test tui/session.test.ts");
+    // Single mode: the activity line carries the verb only — never the command.
+    expect(output.text()).toContain(toolLabel("execShell"));
+    expect(output.text()).not.toContain("bun test tui/session.test.ts");
 
     releaseTool();
     expect(await run).toMatchObject({ exitCode: 0, dialogId: "dialog-live-shell" });
@@ -1747,108 +1749,6 @@ describe("cli agent run client", () => {
     expect(inFlightOutput).toContain("frontend > I'll run the focused test.\n");
   });
 
-  test("prints verbose local tool trace when requested", async () => {
-    const output = new CaptureOutput();
-    let completeCalls = 0;
-
-    const result = await runAgentTurn({
-      agentName: "frontend",
-      agentKey: "frontend-local",
-      serverUrl: "https://nolo.chat",
-      message: "inspect repo",
-      scriptDir: "C:/missing/scripts",
-      env: { AUTH_TOKEN: "token-123", NOLO_CLI_TOOLS: "verbose" },
-      output,
-      runtimeMode: "local",
-      localRuntimeAdapter: {
-        host: "cli",
-        capabilities: ["local-provider", "local-persistence", "local-tools"],
-        loadAgentConfig: async (agentRef) => ({
-          key: agentRef,
-          name: "Frontend",
-          prompt: "Fix UI",
-          model: "fake-local",
-          toolNames: ["readFile"],
-        }),
-        loadDialogHistory: async () => [],
-        saveTurn: async () => ({ dialogId: "dialog-local-verbose" }),
-        resolveProvider: async () => ({
-          model: "fake-local",
-          complete: async () => {
-            completeCalls += 1;
-            if (completeCalls === 1) {
-              return {
-                content: "",
-                model: "fake-local",
-                tool_calls: [{
-                  id: "call-read",
-                  type: "function",
-                  function: { name: "readFile", arguments: JSON.stringify({ path: "README.md" }) },
-                }],
-              };
-            }
-            return { content: "done", model: "fake-local" };
-          },
-        }),
-        executeTool: async () => ({ content: "clean" }),
-      },
-    });
-
-    expect(result).toMatchObject({ exitCode: 0, dialogId: "dialog-local-verbose" });
-    expect(output.text()).toContain("[nolo:tool] #1 -> readFile README.md");
-    expect(output.text()).toContain("[nolo:tool] #1 <- readFile");
-  });
-
-  test("does not print local tool trace when disabled by env", async () => {
-    const output = new CaptureOutput();
-    let completeCalls = 0;
-
-    const result = await runAgentTurn({
-      agentName: "frontend",
-      agentKey: "frontend-local",
-      serverUrl: "https://nolo.chat",
-      message: "inspect repo",
-      scriptDir: "C:/missing/scripts",
-      env: { AUTH_TOKEN: "token-123", NOLO_TRACE_TOOLS: "0" },
-      output,
-      runtimeMode: "local",
-      localRuntimeAdapter: {
-        host: "cli",
-        capabilities: ["local-provider", "local-persistence", "local-tools"],
-        loadAgentConfig: async (agentRef) => ({
-          key: agentRef,
-          name: "Frontend",
-          prompt: "Fix UI",
-          model: "fake-local",
-          toolNames: ["readFile"],
-        }),
-        loadDialogHistory: async () => [],
-        saveTurn: async () => ({ dialogId: "dialog-local-no-trace" }),
-        resolveProvider: async () => ({
-          model: "fake-local",
-          complete: async () => {
-            completeCalls += 1;
-            if (completeCalls === 1) {
-              return {
-                content: "",
-                model: "fake-local",
-                tool_calls: [{
-                  id: "call-read",
-                  type: "function",
-                  function: { name: "readFile", arguments: JSON.stringify({ path: "README.md" }) },
-                }],
-              };
-            }
-            return { content: "done", model: "fake-local" };
-          },
-        }),
-        executeTool: async () => ({ content: "clean" }),
-      },
-    });
-
-    expect(result).toMatchObject({ exitCode: 0, dialogId: "dialog-local-no-trace" });
-    expect(output.text()).not.toContain("[nolo:tool]");
-  });
 
   test("prints local tool events as jsonl when requested", async () => {
     const output = new CaptureOutput();
@@ -3325,7 +3225,7 @@ describe("cli agent run client", () => {
       serverUrl: "https://nolo.chat",
       message: "hello",
       scriptDir: "C:/missing/scripts",
-      env: { AUTH_TOKEN: "token-123", NOLO_CLI_TOOLS: "compact" },
+      env: { AUTH_TOKEN: "token-123" },
       runtimeMode: "server",
       output,
       fetchImpl: async () =>

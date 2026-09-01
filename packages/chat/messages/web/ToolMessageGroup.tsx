@@ -8,8 +8,11 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
-import { StatusIcon, safeParse } from "./toolMessageShared";
+import { StatusIcon, safeParse, withLiteralClass } from "./toolMessageShared";
 import ToolMessageContent from "./ToolMessageContent";
+import { messagesStyles } from "./messagesStyles";
+import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
+import "./messagesStylexEscapeHatch.css";
 import {
   buildActivityTimeline,
   createToolNameTranslator,
@@ -300,19 +303,21 @@ export const ToolMessageGroup = memo(
       return (
         <div
           key={action.id}
-          className={`tr-action tr-action--${action.status}`}
+
+          {...withLiteralClass(`tr-action tr-action--${action.status}`, toolStyles.action)}
         >
           <button
             type="button"
-            className="tr-action-row"
+            className="tr-action-row" data-hook="messages-esc-tr-action-row"
+            {...withLiteralClass("tr-action-row", toolStyles.actionRow)}
             onClick={(event) => {
               event.stopPropagation();
               toggleAction(action.id);
             }}
           >
-            <span className={`tr-action-dot tr-action-dot--${action.status}`} />
-            <span className="tr-action-label u-truncate">{action.label}</span>
-            <span className="tr-action-chevron" aria-hidden="true">
+            <span {...withLiteralClass(`tr-action-dot tr-action-dot--${action.status}`, toolStyles.actionDot, action.status === "success" && toolStyles.actionDotSuccess, action.status === "running" && toolStyles.actionDotRunning, action.status === "failed" && toolStyles.actionDotFailed)} />
+            <span  {...withLiteralClass("tr-action-label u-truncate", toolStyles.truncate, toolStyles.actionLabel)}>{action.label}</span>
+            <span  aria-hidden="true" data-hook="messages-esc-tr-action-chevron" {...withLiteralClass("tr-action-chevron", toolStyles.actionChevron)}>
               {isActionExpanded ? (
                 <LuChevronDown size={13} />
               ) : (
@@ -321,7 +326,7 @@ export const ToolMessageGroup = memo(
             </span>
           </button>
           {isActionExpanded && (
-            <div className="tr-action-detail">
+            <div  {...withLiteralClass("tr-action-detail", toolStyles.actionDetail)}>
               <ToolMessageContent
                 toolName={(action.message as any)?.toolName}
                 rawData={rawData}
@@ -346,11 +351,13 @@ export const ToolMessageGroup = memo(
       return (
         <div
           key={phase.id}
-          className={`tr-phase tr-phase--${phase.status}${isPhaseExpanded ? " tr-phase--expanded" : ""}`}
+
+          data-hook="messages-esc-tr-phase" {...withLiteralClass(`tr-phase tr-phase--${phase.status}${isPhaseExpanded ? " tr-phase--expanded" : ""}`, toolStyles.action)}
         >
           <button
             type="button"
-            className="tr-phase-row"
+            className="tr-phase-row" data-hook="messages-esc-tr-phase-row"
+            {...withLiteralClass("tr-phase-row", toolStyles.phaseRow)}
             onClick={(event) => {
               event.stopPropagation();
               if (canExpand) togglePhase(phase.id);
@@ -358,19 +365,19 @@ export const ToolMessageGroup = memo(
             aria-expanded={canExpand ? isPhaseExpanded : undefined}
             disabled={!canExpand}
           >
-            <span className={`tr-phase-status tr-phase-status--${phase.status}`}>
+            <span {...withLiteralClass(`tr-phase-status tr-phase-status--${phase.status}`, toolStyles.phaseStatus, phase.status === "running" && toolStyles.phaseStatusRunning, phase.status === "failed" && toolStyles.phaseStatusFailed)}>
               <StatusIcon status={phase.status} toolName="" />
             </span>
-            <span className="tr-phase-main">
-              <span className="tr-phase-title u-truncate">{phase.title}</span>
+            <span  {...withLiteralClass("tr-phase-main", toolStyles.phaseMain)}>
+              <span  {...withLiteralClass("tr-phase-title u-truncate", toolStyles.truncate, toolStyles.phaseTitle)}>{phase.title}</span>
               {phase.actions.length > 1 && (
-                <span className="tr-phase-meta">
+                <span  {...withLiteralClass("tr-phase-meta", toolStyles.phaseMeta)}>
                   {phase.actions.length} 个动作
                 </span>
               )}
             </span>
             {canExpand && (
-              <span className="tr-phase-chevron" aria-hidden="true">
+              <span  aria-hidden="true" {...withLiteralClass("tr-phase-chevron", toolStyles.phaseChevron)}>
                 {isPhaseExpanded ? (
                   <LuChevronDown size={13} />
                 ) : (
@@ -380,7 +387,7 @@ export const ToolMessageGroup = memo(
             )}
           </button>
           {isPhaseExpanded && canExpand && (
-            <div className="tr-action-list">{phase.actions.map(renderAction)}</div>
+            <div  {...withLiteralClass("tr-action-list", toolStyles.actionList)}>{phase.actions.map(renderAction)}</div>
           )}
         </div>
       );
@@ -388,30 +395,29 @@ export const ToolMessageGroup = memo(
 
     const showBody = expanded;
     const headerMain = (
-      <div className="tr-main">
-        <div className={`tr-icon ${overallStatus}`}>
+      <div  {...withLiteralClass("tr-main", toolStyles.main)}>
+        <div {...withLiteralClass(`tr-icon ${overallStatus}`, toolStyles.icon)}>
           <StatusIcon status={overallStatus} toolName="" />
         </div>
-        <span className="tr-summary u-truncate">{summary}</span>
+        <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary)}>{summary}</span>
       </div>
     );
 
     return (
       <div
-        className={`tool-msg-row ${overallStatus} ${
-          expanded ? "" : "is-collapsed"
-        }`}
+        data-hook="messages-esc-tool-row"
+        {...withLiteralClass(`tool-msg-row ${overallStatus} ${expanded ? "" : "is-collapsed"}`, toolStyles.row)}
       >
         <button
           type="button"
-          className="tr-header"
+          data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolStyles.header)}
           style={TR_HEADER_BUTTON_STYLE}
           onClick={handleHeaderToggle}
           aria-expanded={expanded}
           aria-label={expanded ? "收起活动详情" : "展开活动详情"}
         >
           {headerMain}
-          <div className="tr-chevron" aria-hidden="true">
+          <div  aria-hidden="true" data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolStyles.chevron)}>
             {expanded ? (
               <LuChevronDown size={14} />
             ) : (
@@ -423,19 +429,21 @@ export const ToolMessageGroup = memo(
         {showBody && (
           <div
             ref={bodyRef}
-            className="tr-body tool-group__body"
+            className="tr-body tool-group__body" data-hook="messages-esc-tr-body"
+            {...withLiteralClass("tr-body tool-group__body", toolStyles.groupBody)}
             onScroll={handleBodyScroll}
           >
             <div ref={bodyContentRef} className="tr-body-content">
               {useFlatActions && flatActions.length > 0 ? (
-                <div className="tr-action-list">{flatActions.map(renderAction)}</div>
+                <div  {...withLiteralClass("tr-action-list", toolStyles.actionList)}>{flatActions.map(renderAction)}</div>
               ) : namedPhases.length > 0 ? (
-                <div className="tr-phase-list">{namedPhases.map(renderPhase)}</div>
+                <div  {...withLiteralClass("tr-phase-list", toolStyles.phaseList)}>{namedPhases.map(renderPhase)}</div>
               ) : (
                 messages.filter((msg) => isVisibleTodoMessage(msg, conversationTodoEnabled)).map((msg) => (
                   <div
                     key={msg.id ?? msg.dbKey ?? msg.tool_call_id}
-                    className="tool-group__item"
+                    
+                    {...withLiteralClass("tool-group__item", toolStyles.groupItem)}
                   >
                     <ToolMessageContent
                       toolName={msg.toolName}

@@ -91,6 +91,16 @@ describe("displayWidth", () => {
     expect(displayWidth("a📁b")).toBe(4);
   });
 
+  test("pins the 🏔 status-line icon as width 1 (EAW=neutral, not a bug)", () => {
+    // U+1F3D4（无 VS16 变体选择符）的 Unicode East_Asian_Width 属性是
+    // neutral，按标准取宽度 1——这是有意行为，不是待修 bug。它看起来像
+    // "该占 2 列的 emoji"，但 sessionRender.ts 状态栏用的正是这个裸码点。
+    // 若未来要改成 2，必须先确认目标终端的实际渲染并同步调整
+    // ambiguousWidth 约定，不要仅凭观感直接改 displayWidth。
+    expect(displayWidth("🏔")).toBe(1);
+    expect(displayWidth("🏔 minimax-m3")).toBe(12); // 1 + " minimax-m3" (11)
+  });
+
   test("counts the ❯ prompt ornament as width 1", () => {
     expect(displayWidth("❯")).toBe(1);
     expect(displayWidth("❯ ")).toBe(2);

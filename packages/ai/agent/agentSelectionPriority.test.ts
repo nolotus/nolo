@@ -145,5 +145,10 @@ describe("agentSelectionPriority", () => {
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("任何用户私有凭据与自建 Agent");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("isOwned=true、isOAuth=true 或 apiSource=\"custom\"");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("改派平台 Agent（消耗平台积分）前必须在回复中告知用户");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("收藏优先硬门");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("覆盖顶档成本门");
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain(
+      "收藏 Agent 全部占用或确认不可用后才允许派平台 Agent",
+    );
   });
 });

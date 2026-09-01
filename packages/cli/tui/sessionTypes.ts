@@ -1,6 +1,5 @@
 import type { AgentRuntimeRequestedMode } from "../agentRuntimeLocal";
 import type { TurnTokenUsage } from "../client/tokenUsage";
-import type { ToolDisplayMode } from "../client/toolOutput";
 import type { CliUpdateInfo } from "../updateCommands";
 import type { AttachedImage } from "./pasteImage";
 import type { GitStatus } from "./gitStatus";
@@ -70,7 +69,6 @@ export type TuiState = {
   /** Platform response language used by both the real turn and context estimate. */
   userLanguage?: string;
   gitStatus?: GitStatus;
-  toolDisplay: ToolDisplayMode;
   /**
    * Session-only reasoning display preference. This controls terminal chrome
    * only: reasoning generation, transport, persistence, and billing remain

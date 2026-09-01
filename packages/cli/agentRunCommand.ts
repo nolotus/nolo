@@ -136,6 +136,45 @@ function resolvePositiveMs(value: unknown, fallback: number): number {
   return parsePositiveFiniteNumberOrFallback(value, fallback);
 }
 
+// ── Single settlement outcome resolver ──────────────────────────────────
+// All three places that finalize a run record (normal completion, stall
+// watchdog, timeout watchdog) MUST derive {status, exitCode} from this one
+// pure function instead of hand-rolling their own pair. This is the fix for
+// three same-root bugs: status:"failed" written next to exitCode:0 (normal
+// completion didn't fold isStalledOrTruncated into exitCode), and watchdog
+// settlements that omitted exitCode entirely. Contract (unit-tested):
+//   status === "done"  <=>  exitCode === 0
+//   status !== "done"  =>   exitCode !== 0 (and the field is always present)
+export type RunOutcome = { readonly status: "done" | "failed" | "timeout"; readonly exitCode: number };
+
+export type ResolveRunOutcomeInput =
+  | { kind: "result"; exitCode: number; isStalledOrTruncated: boolean }
+  | { kind: "stall" }
+  | { kind: "timeout" };
+
+export function resolveRunOutcome(input: ResolveRunOutcomeInput): RunOutcome {
+  switch (input.kind) {
+    case "stall":
+      // Process exits 1 from the stall watchdog (see exitFromWatchdog below);
+      // the registry exitCode must match so `nolo agent status` is truthful.
+      return { status: "failed", exitCode: 1 };
+    case "timeout":
+      // Process exits 124 (conventional timeout exit code) from the timeout
+      // watchdog; keep the registry exitCode in lockstep.
+      return { status: "timeout", exitCode: 124 };
+    case "result": {
+      const failed = input.isStalledOrTruncated || input.exitCode !== 0;
+      if (!failed) {
+        return { status: "done", exitCode: 0 };
+      }
+      // A stalled/truncated turn can still report result.exitCode === 0 (the
+      // runner didn't throw); the contract requires a non-zero exitCode
+      // whenever status isn't "done", so fall back to 1 in that case.
+      return { status: "failed", exitCode: input.exitCode !== 0 ? input.exitCode : 1 };
+    }
+  }
+}
+
 async function resolveAgentRunAgentKey(args: {
   agentInput: string;
   cliArgs: string[];
@@ -171,10 +210,16 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
 
   const runner = deps.runner ?? runAgentTurn;
 
-  // Watchdogs for local background child runs: an overall --timeout-ms and a
-  // "no progress" stall timeout. They are only armed when this process is
-  // responsible for a registry record (NOLO_AGENT_RUN_ID), so interactive
-  // foreground runs are unaffected.
+  // Watchdogs: an overall --timeout-ms and a "no progress" stall timeout.
+  //
+  // --timeout-ms must work whenever the user passes it, foreground or
+  // background — a CLI flag that's silently ignored is the worst kind of
+  // failure. The stall watchdog stays opt-in in the foreground (interactive
+  // users can see a hang themselves; an unconditional 5-minute auto-kill
+  // would cut off legitimate long thinking), so it only arms in the
+  // foreground when NOLO_LOCAL_RUN_STALL_TIMEOUT_MS is explicitly set.
+  // Background child runs (NOLO_AGENT_RUN_ID present) keep the existing
+  // always-on stall watchdog — that default is unchanged.
   const nowMs = () => (deps.now ? deps.now().getTime() : Date.now());
   const childRunId = env.NOLO_AGENT_RUN_ID;
   const hasRegistry = typeof childRunId === "string" && childRunId.length > 0;
@@ -183,12 +228,21 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     deps.stallTimeoutMs ?? env.NOLO_LOCAL_RUN_STALL_TIMEOUT_MS,
     5 * 60_000,
   );
+  const stallEnvExplicitlySet =
+    typeof env.NOLO_LOCAL_RUN_STALL_TIMEOUT_MS === "string" &&
+    env.NOLO_LOCAL_RUN_STALL_TIMEOUT_MS.trim().length > 0;
+  const armStallWatchdog = hasRegistry || stallEnvExplicitlySet;
+  const armTimeoutWatchdog = typeof parsed.timeoutMs === "number" && parsed.timeoutMs > 0;
   let timedOut = false;
   let stalled = false;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   let stallTimer: ReturnType<typeof setInterval> | undefined;
-  const activityTracker = hasRegistry
-    ? createRunActivityTracker(childRunId, {
+  // Safe without a registry record too: createRunActivityTracker's writes are
+  // a no-op when readRunRecord(runId) finds nothing (foreground runs have no
+  // registry record), so a synthetic id is fine — it only ever governs the
+  // in-memory getActivity() the stall check below reads.
+  const activityTracker = armStallWatchdog
+    ? createRunActivityTracker(childRunId ?? "__foreground__", {
         env,
         homedir: deps.homedir,
         fs: deps.fs,
@@ -205,11 +259,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // even when process.exit is stubbed (tests). In production process.exit
   // terminates first and the rejection is moot.
   let rejectOnWatchdogFailure: ((error: Error) => void) | undefined;
-  const watchdogFailure: Promise<never> | undefined = hasRegistry
-    ? new Promise<never>((_, reject) => {
-        rejectOnWatchdogFailure = reject;
-      })
-    : undefined;
+  const watchdogFailure: Promise<never> | undefined =
+    armStallWatchdog || armTimeoutWatchdog
+      ? new Promise<never>((_, reject) => {
+          rejectOnWatchdogFailure = reject;
+        })
+      : undefined;
   const raceWithWatchdog = <T>(work: Promise<T>): Promise<T> =>
     watchdogFailure ? Promise.race([work, watchdogFailure]) : work;
   const exitFromWatchdog = (code: number) => {
@@ -221,7 +276,21 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       // never returns).
     }
   };
-  if (hasRegistry) {
+  // Foreground runs have no registry record to finalize (no childRunId); the
+  // watchdog can still write a truthful process exit code, it just skips the
+  // finalizeRunRecord call in that case.
+  const finalizeWatchdogOutcome = (
+    outcome: RunOutcome,
+    note: string,
+  ) => {
+    if (!hasRegistry) return;
+    (deps.finalizeRunRecord ?? finalizeRunRecord)(
+      childRunId as string,
+      { status: outcome.status, exitCode: outcome.exitCode, note },
+      { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
+    );
+  };
+  if (armStallWatchdog) {
     stallTimer = setInterval(() => {
       if (timedOut || stalled) return;
       const activity = activityTracker?.getActivity();
@@ -244,30 +313,24 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         clearWatchdogs();
         const note = `stalled: no progress for ${stallTimeoutMs}ms`;
         output.write(`[nolo] local run ${note}\n`);
-        (deps.finalizeRunRecord ?? finalizeRunRecord)(
-          childRunId,
-          { status: "failed", note },
-          { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
-        );
+        const outcome = resolveRunOutcome({ kind: "stall" });
+        finalizeWatchdogOutcome(outcome, note);
         rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
-        exitFromWatchdog(1);
+        exitFromWatchdog(outcome.exitCode);
       }
     }, Math.min(stallTimeoutMs, 10_000));
-    if (typeof parsed.timeoutMs === "number" && parsed.timeoutMs > 0) {
-      timeoutTimer = setTimeout(() => {
-        timedOut = true;
-        clearWatchdogs();
-        const note = `timed out after ${parsed.timeoutMs}ms`;
-        output.write(`[nolo] local run ${note}\n`);
-        (deps.finalizeRunRecord ?? finalizeRunRecord)(
-          childRunId,
-          { status: "timeout", note },
-          { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
-        );
-        rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
-        exitFromWatchdog(124);
-      }, parsed.timeoutMs);
-    }
+  }
+  if (armTimeoutWatchdog) {
+    timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      clearWatchdogs();
+      const note = `timed out after ${parsed.timeoutMs}ms`;
+      output.write(`[nolo] local run ${note}\n`);
+      const outcome = resolveRunOutcome({ kind: "timeout" });
+      finalizeWatchdogOutcome(outcome, note);
+      rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
+      exitFromWatchdog(outcome.exitCode);
+    }, parsed.timeoutMs);
   }
 
   // Support providing fallback suggestions for the orchestrating agent to decide.
@@ -738,11 +801,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     const truncationNote = isStalledOrTruncated
       ? { note: `empty assistant output: ${result.emptyAssistantFallbackReason}` }
       : {};
-    const finalStatus =
-      isStalledOrTruncated || result.exitCode !== 0 ? "failed" : "done";
-    await (deps.finalizeRunRecord ?? finalizeRunRecord)(childRunId, {
-      status: finalStatus,
+    const outcome = resolveRunOutcome({
+      kind: "result",
       exitCode: result.exitCode,
+      isStalledOrTruncated,
+    });
+    await (deps.finalizeRunRecord ?? finalizeRunRecord)(childRunId, {
+      status: outcome.status,
+      exitCode: outcome.exitCode,
       dialogId: result.dialogId,
       ...truncationNote,
     },

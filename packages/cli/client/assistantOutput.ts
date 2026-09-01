@@ -282,6 +282,26 @@ function normalizeListLine(line: string): string {
   return line;
 }
 
+/**
+ * polishAssistantStructure 的列表↔prose 呼吸空行判定（H1 splice 守卫用）。
+ * 判定必须作用在 convertMarkdownTablesForTerminal 的行归一化之后
+ * （"- item" 会先被改写成 "• item" 才参与 LIST_LIKE 匹配）。
+ */
+export function isPolishListLikeLine(line: string): boolean {
+  return LIST_LIKE_RE_FOR_GUARD.test(normalizeListLine(line));
+}
+
+const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]/;
+
+/**
+ * polish 呼吸规则：cur/next 相邻两行之间是否会插入空行。
+ * 与 polishAssistantStructure 的逐对判定严格对齐（blank 两侧不插）。
+ */
+export function polishBreathInsertsBlankBetween(cur: string, next: string): boolean {
+  if (cur === "" || next === "") return false;
+  return isPolishListLikeLine(cur) !== isPolishListLikeLine(next);
+}
+
 export function convertMarkdownTablesForTerminal(text: string) {
   const lines = text.split("\n");
   const out: string[] = [];

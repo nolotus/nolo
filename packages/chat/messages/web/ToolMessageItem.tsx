@@ -29,8 +29,9 @@ import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { messagesStyles as styles } from "./messagesStyles";
+import { toolMessageStyles as toolStyles, toolMessageStatusStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
-import { safeParse, StatusIcon } from "./toolMessageShared";
+import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
 import {
   buildRunStreamingAgentHandoffPresentation,
   normalizeToolDisplaySummary,
@@ -143,17 +144,17 @@ export const ToolMessageItem = memo(
       if (!summary && steps.length === 0) return null;
 
       return (
-        <div className="tool-run-progress">
-          {summary && <div className="tr-progress-summary">{summary}</div>}
+        <div {...withLiteralClass("tool-run-progress", toolStyles.stepProgress)}>
+          {summary && <div  {...withLiteralClass("tr-progress-summary", styles.trProgressSummary)}>{summary}</div>}
           {steps.length > 0 && (
-            <div className="tr-step-list">
+            <div  {...withLiteralClass("tr-step-list", styles.trStepList)}>
               {steps.map((step) => (
-                <div key={step.id} className={`tr-step is-${step.status}`}>
-                  <span className="tr-step-dot" />
-                  <div className="tr-step-texts">
-                    <div className="tr-step-label">{step.label}</div>
+                <div key={step.id} {...withLiteralClass(`tr-step is-${step.status}`, styles.trStep)}>
+                  <span  {...withLiteralClass("tr-step-dot", styles.trStepDot, step.status === "running" && styles.trStepRunning, step.status === "succeeded" && styles.trStepCompleted, step.status === "failed" && styles.trStepFailed)} />
+                  <div  {...withLiteralClass("tr-step-texts", styles.trStepTexts)}>
+                    <div  {...withLiteralClass("tr-step-label", styles.trStepLabel)}>{step.label}</div>
                     {step.detail && (
-                      <div className="tr-step-detail">{step.detail}</div>
+                      <div  {...withLiteralClass("tr-step-detail", styles.trStepDetail)}>{step.detail}</div>
                     )}
                   </div>
                 </div>
@@ -306,11 +307,13 @@ export const ToolMessageItem = memo(
       return (
         <>
           <div
-            className={`tool-msg-row tool-msg-row--handoff ${statusStr} ${collapsed ? "is-collapsed" : ""}`}
+
+            {...withLiteralClass(`tool-msg-row tool-msg-row--handoff ${statusStr} ${collapsed ? "is-collapsed" : ""}`, toolStyles.row, toolStyles.rowHandoff, collapsed && toolStyles.rowCollapsed, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.row)}
           >
             <button
               type="button"
               className="tr-header"
+              data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolStyles.header, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.header)}
               style={TR_HEADER_BUTTON_STYLE}
               onClick={() => {
                 userCollapsedOverrideRef.current = true;
@@ -318,13 +321,14 @@ export const ToolMessageItem = memo(
               }}
               aria-expanded={!collapsed}
             >
-              <div className="tr-main">
-                <div className={`tr-icon ${statusStr}`}>
+              <div  {...withLiteralClass("tr-main", toolStyles.main)}>
+                <div
+                  {...withLiteralClass(`tr-icon ${statusStr}`, toolStyles.icon, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.icon)}>
                   <StatusIcon status={statusStr} toolName={toolName} />
                 </div>
-                <span className="tr-summary u-truncate">{handoff.summary}</span>
+                <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.summary)}>{handoff.summary}</span>
               </div>
-              <div className="tr-chevron" aria-hidden="true">
+              <div  aria-hidden="true" data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolStyles.chevron)}>
                 {collapsed ? (
                   <LuChevronRight size={14} />
                 ) : (
@@ -334,14 +338,14 @@ export const ToolMessageItem = memo(
             </button>
 
             {!collapsed && (
-              <div className="tr-body handoff-tool__body">
+              <div  {...withLiteralClass("tr-body handoff-tool__body", toolStyles.body, toolStyles.handoffBody, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.body)} data-hook="messages-esc-tr-body">
                 {!handoff.inline && (
-                  <div className="handoff-tool__detail-row">
-                    <span className="handoff-tool__label">子 dialog</span>
+                  <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
+                    <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>子 dialog</span>
                     {handoff.targetDialogKey ? (
                       <button
                         type="button"
-                        className="handoff-tool__link"
+                        data-hook="messages-esc-handoff-link" {...withLiteralClass("handoff-tool__link", toolStyles.handoffLink)}
                         onClick={(event) => {
                           event.stopPropagation();
                           navigate(
@@ -356,28 +360,28 @@ export const ToolMessageItem = memo(
                         <LuArrowRight size={14} aria-hidden="true" />
                       </button>
                     ) : (
-                      <span className="handoff-tool__value">未单独创建</span>
+                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>未单独创建</span>
                     )}
                   </div>
                 )}
-                <div className="handoff-tool__detail-row">
-                  <span className="handoff-tool__label">目标 Agent</span>
+                <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>目标 Agent</span>
                   <span
-                    className="handoff-tool__value"
+                    {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}
                     title={handoff.agentKey || undefined}
                   >
                     {handoff.targetLabel}
                   </span>
                 </div>
-                <div className="handoff-tool__detail-row">
-                  <span className="handoff-tool__label">输入摘要</span>
-                  <span className="handoff-tool__value">
+                <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>输入摘要</span>
+                  <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>
                     {handoff.inputSummary}
                   </span>
                 </div>
-                <div className="handoff-tool__detail-row">
-                  <span className="handoff-tool__label">状态</span>
-                  <span className="handoff-tool__value">
+                <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>状态</span>
+                  <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>
                     {handoff.statusLabel}
                   </span>
                 </div>
@@ -393,14 +397,16 @@ export const ToolMessageItem = memo(
     return (
       <>
         <div
-          className={`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""} ${toolName === "appDeploy" ? "tool-msg-row--app-deploy" : ""}`}
+          data-hook="messages-esc-tool-row"
+          {...withLiteralClass(`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""} ${toolName === "appDeploy" ? "tool-msg-row--app-deploy" : ""}`, toolStyles.row, toolName === "appDeploy" && toolStyles.rowAppDeploy, collapsed && toolStyles.rowCollapsed, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.row)}
         >
           {/* Header shell stays a div so nested action buttons are valid HTML;
             expand/collapse is a real <button>, not div-onClick. */}
-          <div className="tr-header">
+          <div data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolStyles.header, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.header)}>
             <button
               type="button"
-              className="tr-header-toggle"
+              
+              {...withLiteralClass("tr-header-toggle", toolStyles.headerToggle)}
               style={TR_HEADER_TOGGLE_STYLE}
               onClick={() => {
                 userCollapsedOverrideRef.current = true;
@@ -408,13 +414,14 @@ export const ToolMessageItem = memo(
               }}
               aria-expanded={!collapsed}
             >
-              <div className="tr-main">
-                <div className={`tr-icon ${statusStr}`}>
+              <div  {...withLiteralClass("tr-main", toolStyles.main)}>
+                <div
+                  {...withLiteralClass(`tr-icon ${statusStr}`, toolStyles.icon, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.icon)}>
                   <StatusIcon status={statusStr} toolName={toolName} />
                 </div>
-                <span className="tr-summary u-truncate">{displaySummary}</span>
+                <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.summary)}>{displaySummary}</span>
               </div>
-              <div className="tr-chevron" aria-hidden="true">
+              <div  aria-hidden="true" data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolStyles.chevron)}>
                 {collapsed ? (
                   <LuChevronRight size={14} />
                 ) : (
@@ -424,12 +431,13 @@ export const ToolMessageItem = memo(
             </button>
 
             {!readOnly && (
-              <div className="tr-actions">
-                <div className="tr-act-bar">
+              <div  {...withLiteralClass("tr-actions", toolStyles.actions)}>
+                <div data-hook="messages-esc-tr-act-bar" {...withLiteralClass("tr-act-bar", toolStyles.actionBar)}>
                   <button
                     type="button"
                     onClick={handleCopy}
-                    className="tr-act-btn"
+                    className="tr-act-btn" data-hook="messages-esc-tr-act-btn"
+                    {...withLiteralClass("tr-act-btn", toolStyles.actionButton)}
                     title={t("common:copy", "复制")}
                     aria-label={t("common:copy", "复制")}
                   >
@@ -438,7 +446,8 @@ export const ToolMessageItem = memo(
                   <button
                     type="button"
                     onClick={() => setShowDebug(!showDebug)}
-                    className={`tr-act-btn ${showDebug ? "on" : ""}`}
+
+                    data-hook="messages-esc-tr-act-btn" {...withLiteralClass(`tr-act-btn ${showDebug ? "on" : ""}`, toolStyles.actionButton, showDebug && toolStyles.actionButtonOn)}
                     title={
                       showDebug
                         ? t("hideDebug", "隐藏调试")
@@ -456,7 +465,8 @@ export const ToolMessageItem = memo(
                   <button
                     type="button"
                     onClick={handleDeleteClick}
-                    className="tr-act-btn danger"
+                    className="tr-act-btn danger" data-hook="messages-esc-tr-act-btn-danger"
+                    {...withLiteralClass("tr-act-btn danger", toolStyles.actionButton)}
                     title={t("delete", "删除")}
                     aria-label={t("delete", "删除")}
                   >
@@ -468,12 +478,12 @@ export const ToolMessageItem = memo(
           </div>
 
           {!collapsed && (
-            <div className="tr-body">
+            <div data-hook="messages-esc-tr-body" {...withLiteralClass("tr-body", toolStyles.body, toolName === "appDeploy" && toolStyles.bodyAppDeploy, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.body)}>
               {showConfirmBanner && activeRun && (
-                <div className="confirm-banner">
-                  <div className="cb-text">
+                <div  {...withLiteralClass("confirm-banner", toolStyles.confirmBanner)}>
+                  <div  {...withLiteralClass("cb-text", toolStyles.confirmText)}>
                     {activeRun.status === "failed" ? (
-                      <span className="u-error-text">
+                      <span {...withLiteralClass("u-error-text", toolStyles.errorText)}>
                         {activeRun.error ||
                           t("tool.failed", "Execution failed")}
                       </span>
@@ -488,6 +498,7 @@ export const ToolMessageItem = memo(
                   <button
                     type="button"
                     className="btn-primary-sm"
+                    data-hook="messages-esc-btn-primary-sm" {...withLiteralClass("btn-primary-sm", toolStyles.primaryButton)}
                     disabled={activeRun.status === "running"}
                     aria-label={
                       activeRun.status === "running"
@@ -519,7 +530,7 @@ export const ToolMessageItem = memo(
                     }}
                   >
                     {activeRun.status === "running" ? (
-                      <LuCircle className="icon-primary" aria-hidden="true" />
+                      <LuCircle {...withLiteralClass("icon-primary", styles.iconPrimary)} aria-hidden="true" />
                     ) : activeRun.status === "failed" ? (
                       t("common.retry", "Retry")
                     ) : toolName === "deleteSpaces" ? (
@@ -547,7 +558,7 @@ export const ToolMessageItem = memo(
           )}
 
           {showDebug && (
-            <div className="debug-box">
+            <div  {...withLiteralClass("debug-box", toolStyles.debugBox)}>
               <pre>{JSON.stringify(toolPayload || rawData, null, 2)}</pre>
             </div>
           )}

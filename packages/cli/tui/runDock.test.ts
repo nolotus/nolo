@@ -19,7 +19,6 @@ function setup() {
   let repaints = 0;
 
   const dock = createRunDock({
-    displayMode: () => "pro",
     onRepaint: () => {
       repaints += 1;
     },
@@ -86,7 +85,10 @@ describe("run dock membership", () => {
   test("a transient error clears when the run reports healthy again", () => {
     const h = setup();
     h.dock.update(snapshot({ runId: "run-a", agentName: "Flash", errorMessage: "ETIMEDOUT" }));
-    expect(h.lines().join("\n")).toContain("ETIMEDOUT");
+    // 单一显示模式：面板恒为 safe 投影，raw errorMessage 不上板（数据本身
+    // 仍在，供合并逻辑判断「撤回」）。
+    expect(h.dock.getRuns()[0]?.errorMessage).toBe("ETIMEDOUT");
+    expect(h.lines().join("\n")).not.toContain("ETIMEDOUT");
 
     // 恢复正常后的轮询根本不带 errorMessage 这个 key。
     h.dock.update(snapshot({ runId: "run-a", toolCallCount: 4 }));

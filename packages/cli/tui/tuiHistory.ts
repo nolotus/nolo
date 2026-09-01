@@ -31,7 +31,7 @@ import {
   tuiRenderThemeFingerprint,
   userSurfaceBackgroundSequence,
 } from "./theme";
-import { formatAssistantDisplay } from "../client/assistantOutput";
+import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
@@ -307,11 +307,56 @@ export function appendLocalTurn(
   resetStreamingTurnCache();
 }
 
+/**
+ * 工具行 run-length 折叠：对同一对象重复同一动作的连续成功行合并为一行 ×N。
+ *
+ * 判据：新 chunk 剥 ANSI 后是「单行、`  ✓` 结尾」，且当前文本尾行剥 ANSI
+ * 并去掉已有 ×N 后与之全等（同 label + 同 gist）。中间夹了任何其他内容
+ * （正文 / thought / 失败行 / 多行卡）尾行即不匹配，组自然断开，无需额外
+ * 状态。失败（✗）与待确认（!）行结尾不是 ✓，永不折叠也永不入组。
+ * 纯显示层：只改写 transcript 文本，不影响持久化消息与 formatter 输出。
+ */
+const TOOL_SUCCESS_LINE_RE = /^(▸ .*?)(?: ×(\d+))?(  ✓)$/;
+
+function foldToolSuccessLine(text: string, chunk: string): string | null {
+  const plain = stripAnsi(chunk).replace(/\n+$/, "");
+  if (!plain || plain.includes("\n") || !TOOL_SUCCESS_LINE_RE.test(plain)) return null;
+  const hadTrailingNewline = text.endsWith("\n");
+  const body = hadTrailingNewline ? text.slice(0, -1) : text;
+  const newlineAt = body.lastIndexOf("\n");
+  const tail = newlineAt === -1 ? body : body.slice(newlineAt + 1);
+  const match = TOOL_SUCCESS_LINE_RE.exec(stripAnsi(tail));
+  if (!match || `${match[1]}${match[3]}` !== plain) return null;
+  const count = (match[2] ? Number(match[2]) : 1) + 1;
+  // ×N 插在状态符前的普通双空格之前（样式段之外），count 替换而非累加。
+  const anchor = tail.lastIndexOf("  ");
+  if (anchor < 0) return null;
+  const head = tail.slice(0, anchor).replace(/\s×\d+$/, "");
+  const merged = `${head} ×${count}${tail.slice(anchor)}`;
+  const prefix = newlineAt === -1 ? "" : body.slice(0, newlineAt + 1);
+  return `${prefix}${merged}${hadTrailingNewline ? "\n" : ""}`;
+}
+
 export function applyOutputChunkToCurrentTurn(
   history: TurnHistory,
   chunk: string,
   kind: TurnBlock["kind"] = "assistant",
 ): boolean {
+  if (kind === "tool") {
+    const foldedContent = foldToolSuccessLine(history.currentContent, chunk);
+    if (foldedContent !== null) {
+      history.currentContent = foldedContent;
+      const lastBlock = history.currentBlocks.at(-1);
+      // 不变量：fold 触发意味着 currentContent 尾行是工具行，而工具 chunk 只会
+      // 并入（或新建）尾部的 tool block——因此走到这里 lastBlock 必为 tool
+      // block，无需为非 tool 尾块做同步分支（blocks 当前无渲染消费方）。
+      if (lastBlock?.kind === "tool") {
+        const foldedBlock = foldToolSuccessLine(lastBlock.content, chunk);
+        if (foldedBlock !== null) lastBlock.content = foldedBlock;
+      }
+      return true;
+    }
+  }
   const next = applyTerminalOutputToText(history.currentContent, chunk);
   if (next === history.currentContent) return false;
   history.currentContent = next;
@@ -562,15 +607,46 @@ export function renderTurnBlock(
   return layoutTurnRows(role, content, contentWidth, colorEnabled, command).map((r) => r.rendered);
 }
 
+/**
+ * 流式 turn 的增量渲染缓存（H1 优化：paint 成本与当前 turn 总行数解耦）。
+ *
+ * 结构：把当前 turn 源文本切成「已提交完整逻辑行」+「未完行 tail」两段。
+ * 已提交段渲染一次后不再重排；每帧只重渲染 pendingTail（≈ 最近一个 tool block
+ * 或当前未完行）。全量渲染仅在缓存失效（非纯追加/换宽换主题）或命中可疑
+ * 内容守卫时发生，成本回退到旧实现（逐帧全量，正确性优先）。
+ *
+ * 安全模型（splice 等价性）：formatAssistantDisplay 的跨行状态只有
+ * fence/mermaid（``` 奇偶）、多行数学块（$$ / \[ \]）、表格
+ * （convertMarkdownTablesForTerminal + 逐行管道行）、polishAssistantStructure
+ * 的标题呼吸 / 列表↔prose 空行 / \n{4,} 压缩。以上形态出现即放弃 splice
+ * （该帧全量渲染并重新提交行缓存）；其余内容逐行渲染与整段渲染逐行一致
+ * （assistantOutput 高亮器刻意 LINE-LOCAL）。首次 splice 另做一次与全量渲染的
+ * 等价校验（失配 → 本 turn 永久关闭快路径）。NOLO_TUI_RENDER_VALIDATE=1 可强制
+ * 每帧校验（等价性测试用）。
+ */
 type StreamingTurnCache = {
   role: TurnRole;
   contentWidth: number;
   colorEnabled: boolean;
   themeFingerprint: string;
+  /** 本 turn 的完整源文本（含 pendingTail），startsWith 增量判定与守卫扫描的基准。 */
   fullContent: string;
-  prefixLength: number;
-  prefixLines: string[];
-  lastValidatedCut: number;
+  /** content[0..completeContentLength) 的已提交渲染行：全部是完整逻辑行。 */
+  committedLines: string[];
+  /** 已提交源文本长度（截到最后一个 \n；0 = 尚无完整逻辑行）。 */
+  completeContentLength: number;
+  /** 最后一个 \n 之后的未完行源文本（"" = 干净行边界）。 */
+  pendingTail: string;
+  /** 已提交源文本的 ``` 翻转次数（奇偶 = 围栏内外状态）。 */
+  fenceFlips: number;
+  /** 已提交区域最后一个逻辑行（边界 kind/表格守卫用）。 */
+  committedLastLine: string;
+  /** 本 turn 是否允许 append-splice（校验失配后关闭）。 */
+  fastPathEnabled: boolean;
+  /** 快路径与全量渲染的一次性等价校验是否已通过。 */
+  spliceValidated: boolean;
+  /** 上次返回的行数组（内容未变时直接复用，滚动/键击重绘零渲染成本）。 */
+  lastResult: string[] | null;
 };
 
 let streamingTurnCache: StreamingTurnCache | null = null;
@@ -578,6 +654,62 @@ let streamingTurnCache: StreamingTurnCache | null = null;
 export function resetStreamingTurnCache(): void {
   streamingTurnCache = null;
 }
+
+/** 与 layoutTurnRows/fence 语义对齐：``` 开头的行（含缩进）翻转围栏状态。 */
+function countFenceFlips(text: string): number {
+  const matches = text.match(/^[ \t]*```/gm);
+  return matches ? matches.length : 0;
+}
+
+const HEADING_LIKE_RE = /^#{1,3} /;
+
+/** 管道表格行形态（trimmed 以 | 开头）→ 表格块跨行状态，走全量渲染。 */
+function isPipeRowLike(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length > 0 && trimmed.startsWith("|");
+}
+
+/**
+ * 快路径可疑内容守卫：命中任一项 → 该帧全量渲染（成本回退旧行为，正确性不变）。
+ * 扫描对象是合并后的 newTail（pendingTail + suffix），捕捉跨段拼接的形态
+ * （如未完行以 "``" 结尾、suffix 续成 ```）。tool block（› / ├ / └ / 缩进行）
+ * 不含以下形态，正常走 splice。
+ */
+function isSuspiciousAppend(newTail: string, fenceParityEven: boolean): boolean {
+  if (!fenceParityEven) return true; // 已提交内容处于未闭合围栏内
+  if (newTail.includes("\r")) return true; // 回车重写历史
+  if (newTail.includes("```")) return true; // fence 开/闭（含 mermaid）
+  if (newTail.includes("$$") || newTail.includes("\\[") || newTail.includes("\\]")) {
+    return true; // 多行数学块开/闭
+  }
+  if (/\n{4,}/.test(newTail)) return true; // polish 的 \n{4,} 压缩
+  if (newTail.includes("\x00")) return true; // polish 哨兵字符（convertMarkdownTables 遮罩冲突）
+  return hasPipeRowLine(newTail);
+}
+
+/** 管道表格行形态：trimmed 以 | 开头（含分隔行 ---|---）。 */
+function hasPipeRowLine(text: string): boolean {
+  const lines = text.split("\n");
+  return lines.some((line) => isPipeRowLike(line));
+}
+
+/**
+ * 边界守卫：committed 最后一行与 tail 首行之间的 polish 行为
+ * （标题呼吸空行 / 列表↔prose 呼吸空行 / 表格续行）。
+ * 判定与 polishAssistantStructure 的逐对规则严格对齐。
+ */
+function isSuspiciousBoundary(committedLastLine: string, newTail: string): boolean {
+  const newlineIdx = newTail.indexOf("\n");
+  const firstLine = newlineIdx === -1 ? newTail : newTail.slice(0, newlineIdx);
+  // 标题呼吸：非空行 ↔ 标题行相邻（两个方向都会被 polish 插入空行）。
+  if (HEADING_LIKE_RE.test(firstLine) && committedLastLine !== "") return true;
+  if (HEADING_LIKE_RE.test(committedLastLine) && firstLine !== "") return true;
+  if (isPipeRowLike(firstLine) || isPipeRowLike(committedLastLine)) {
+    return true; // 表格块跨行（列宽对齐依赖上下文）
+  }
+  return polishBreathInsertsBlankBetween(committedLastLine, firstLine);
+}
+
 
 function renderPrefixTurnBlock(
   role: TurnRole,
@@ -646,78 +778,172 @@ function getStreamingTurnLines(
   colorEnabled: boolean,
   themeFingerprint: string,
 ): string[] {
+  const forceValidate = process.env.NOLO_TUI_RENDER_VALIDATE === "1";
+  let cache = streamingTurnCache;
+
+  const geometryChanged =
+    !cache ||
+    cache.role !== role ||
+    cache.contentWidth !== contentWidth ||
+    cache.colorEnabled !== colorEnabled ||
+    cache.themeFingerprint !== themeFingerprint;
+  // 非纯追加（\r 重写、内容收缩）或几何/主题变化 → 缓存失效，全量重建。
+  if (geometryChanged || !content.startsWith(cache.fullContent)) {
+    return rebuildStreamingCache(content, role, contentWidth, colorEnabled, themeFingerprint);
+  }
+
+  // 内容未变（滚动 / 键击触发的重绘）→ 复用上次结果，零渲染成本。
+  if (content === cache.fullContent && cache.lastResult) {
+    return cache.lastResult;
+  }
+
+  const suffix = content.slice(cache.fullContent.length);
+  if (suffix === "") {
+    return cache.lastResult ?? cache.committedLines;
+  }
+
+  // 全量渲染回退（守卫命中 / 校验失配）：重建 committed/pendingTail 切分。
+  // 注意：committed 渲染源一律剥掉段尾 \n（否则 split 产生幽灵空行，与
+  // 「该行后面还有内容」的全量渲染错位——旧前缀缓存正是栽在这里）。
+  const renderFull = (): string[] => {
+    const lines = renderTurnBlock(role, content, contentWidth, colorEnabled);
+    cache.fullContent = content;
+    cache.fenceFlips = countFenceFlips(content);
+    const lastNewline = content.lastIndexOf("\n");
+    cache.completeContentLength = lastNewline + 1;
+    cache.committedLines =
+      lastNewline === -1
+        ? []
+        : renderTurnBlock(role, content.slice(0, lastNewline), contentWidth, colorEnabled);
+    cache.pendingTail = content.slice(lastNewline + 1);
+    cache.committedLastLine =
+      lastNewline === -1 ? "" : lastLogicalLineOf(content.slice(0, lastNewline + 1));
+    cache.lastResult = lines;
+    return lines;
+  };
+
+  // ── 快路径守卫：命中可疑内容 → 该帧全量渲染（旧行为，正确性不变） ──────
+  const newTail = cache.pendingTail + suffix;
   if (
-    streamingTurnCache &&
-    (streamingTurnCache.role !== role ||
-      streamingTurnCache.contentWidth !== contentWidth ||
-      streamingTurnCache.colorEnabled !== colorEnabled ||
-      streamingTurnCache.themeFingerprint !== themeFingerprint ||
-      !content.startsWith(streamingTurnCache.fullContent.slice(0, streamingTurnCache.prefixLength)))
+    !cache.fastPathEnabled ||
+    isSuspiciousAppend(newTail, cache.fenceFlips % 2 === 0) ||
+    isSuspiciousBoundary(cache.committedLastLine, newTail)
   ) {
-    streamingTurnCache = null;
+    return renderFull();
   }
 
-  if (!streamingTurnCache) {
-    streamingTurnCache = {
-      role,
-      contentWidth,
-      colorEnabled,
-      themeFingerprint,
-      fullContent: content,
-      prefixLength: 0,
-      prefixLines: [],
-      lastValidatedCut: 0,
-    };
-  }
+  // ── 增量 splice：committed 不重排，只渲染未完 tail（O(tail)） ───────────
+  // turn 首段（尚无完整行）用 anchor 渲染器；后续 tail 不带 ◈。
+  const tailRenderer =
+    cache.completeContentLength === 0 ? renderPrefixTurnBlock : renderTailTurnBlock;
+  const tailLines = tailRenderer(role, newTail, contentWidth, colorEnabled);
+  const composed =
+    cache.completeContentLength === 0
+      ? tailLines
+      : [...cache.committedLines, ...tailLines];
 
-  if (content.length > streamingTurnCache.fullContent.length) {
-    let searchPos = streamingTurnCache.prefixLength;
-    let candidateCut = -1;
-
-    while (true) {
-      const idx = content.indexOf("\n\n", searchPos);
-      if (idx === -1) break;
-      const cut = idx + 1;
-      searchPos = idx + 2;
-
-      const prefixSub = content.slice(0, cut);
-      const fenceCount = (prefixSub.match(/^```/gm) || []).length;
-      if (fenceCount % 2 === 0) {
-        candidateCut = cut;
-        break;
-      }
+  if (!cache.spliceValidated || forceValidate) {
+    // 一次性（或强制）等价校验：splice 结果必须与全量渲染逐行一致。
+    const full = renderTurnBlock(role, content, contentWidth, colorEnabled);
+    cache.spliceValidated = true;
+    if (
+      composed.length === full.length &&
+      composed.every((line, index) => line === full[index])
+    ) {
+      commitCompletedTail(cache, content, newTail, role, contentWidth, colorEnabled);
+      cache.lastResult = composed;
+      return composed;
     }
-
-    if (candidateCut > streamingTurnCache.prefixLength) {
-      const candidatePrefix = content.slice(0, candidateCut);
-      const candidateTail = content.slice(candidateCut);
-
-      const candPrefixLines = renderPrefixTurnBlock(role, candidatePrefix, contentWidth, colorEnabled);
-      const candTailLines = renderTailTurnBlock(role, candidateTail, contentWidth, colorEnabled);
-      const candCombined = [...candPrefixLines, ...candTailLines];
-      if (candidateCut !== streamingTurnCache.lastValidatedCut) {
-        const fullCheckLines = renderTurnBlock(role, content, contentWidth, colorEnabled);
-        const sameLines = candCombined.length === fullCheckLines.length &&
-          candCombined.every((line, index) => line === fullCheckLines[index]);
-        streamingTurnCache.lastValidatedCut = candidateCut;
-        if (sameLines) {
-          streamingTurnCache.prefixLength = candidateCut;
-          streamingTurnCache.prefixLines = candPrefixLines;
-        }
-      }
-      streamingTurnCache.fullContent = content;
-    } else {
-      streamingTurnCache.fullContent = content;
-    }
+    // 失配 → 本 turn 关闭快路径，回退每帧全量（旧行为）。
+    cache.fastPathEnabled = false;
+    return renderFull();
   }
 
-  if (streamingTurnCache.prefixLength === 0) {
-    return renderTurnBlock(role, content, contentWidth, colorEnabled);
-  }
+  commitCompletedTail(cache, content, newTail, role, contentWidth, colorEnabled);
+  cache.lastResult = composed;
+  return composed;
+}
 
-  const tailContent = content.slice(streamingTurnCache.prefixLength);
-  const tailLines = renderTailTurnBlock(role, tailContent, contentWidth, colorEnabled);
-  return [...streamingTurnCache.prefixLines, ...tailLines];
+/** content 最后一个逻辑行（不含行尾换行）。 */
+function lastLogicalLineOf(content: string): string {
+  const trimmed = content.replace(/\n$/, "");
+  const idx = trimmed.lastIndexOf("\n");
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
+}
+
+/** 缓存失效（几何/主题变化、非纯追加）时的全量重建。 */
+function rebuildStreamingCache(
+  content: string,
+  role: TurnRole,
+  contentWidth: number,
+  colorEnabled: boolean,
+  themeFingerprint: string,
+): string[] {
+  const lines = renderTurnBlock(role, content, contentWidth, colorEnabled);
+  const lastNewline = content.lastIndexOf("\n");
+  streamingTurnCache = {
+    role,
+    contentWidth,
+    colorEnabled,
+    themeFingerprint,
+    fullContent: content,
+    // committed 渲染源剥掉段尾 \n（幽灵空行修正，见 renderFull 注释）。
+    committedLines:
+      lastNewline === -1
+        ? []
+        : renderTurnBlock(role, content.slice(0, lastNewline), contentWidth, colorEnabled),
+    completeContentLength: lastNewline + 1,
+    pendingTail: content.slice(lastNewline + 1),
+    fenceFlips: countFenceFlips(content),
+    committedLastLine:
+      lastNewline === -1 ? "" : lastLogicalLineOf(content.slice(0, lastNewline + 1)),
+    fastPathEnabled: true,
+    spliceValidated: false,
+    lastResult: lines,
+  };
+  return lines;
+}
+
+/**
+ * 把 tail 中已完成的行（到最后一个 \n）并入 committedLines：
+ * turn 首段用 anchor 渲染器（renderPrefixTurnBlock），后续段不带 ◈。
+ * 未完行留在 pendingTail；fence 翻转计数增量维护。
+ */
+function commitCompletedTail(
+  cache: StreamingTurnCache,
+  content: string,
+  newTail: string,
+  role: TurnRole,
+  contentWidth: number,
+  colorEnabled: boolean,
+): void {
+  const lastNewline = newTail.lastIndexOf("\n");
+  if (lastNewline !== -1) {
+    // 渲染源剥掉段尾 \n（幽灵空行修正）；\n 本身只作为行分隔符计数进
+    // completeContentLength，使 committedLines 与全量渲染逐行对齐。
+    const completePart = newTail.slice(0, lastNewline + 1);
+    const renderSource = completePart.slice(0, -1);
+    const renderer =
+      cache.completeContentLength === 0 ? renderPrefixTurnBlock : renderTailTurnBlock;
+    cache.committedLines.push(
+      ...renderer(role, renderSource, contentWidth, colorEnabled),
+    );
+    cache.completeContentLength += completePart.length;
+    cache.fenceFlips += countFenceFlips(completePart);
+    cache.committedLastLine = lastLogicalLineOf(completePart);
+    cache.pendingTail = newTail.slice(lastNewline + 1);
+  }
+  cache.fullContent = content;
+}
+
+export function getStreamingTurnLinesForTest(
+  role: TurnRole,
+  content: string,
+  contentWidth: number,
+  colorEnabled: boolean,
+  themeFingerprint: string,
+): string[] {
+  return getStreamingTurnLines(role, content, contentWidth, colorEnabled, themeFingerprint);
 }
 
 export function countTurnLines(

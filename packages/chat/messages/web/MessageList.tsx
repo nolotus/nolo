@@ -29,6 +29,7 @@ import {
 } from "./groupToolEntries";
 import TopLoadingIndicator from "./TopLoadingIndicator";
 import { messagesStyles as styles } from "./messagesStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 import { ScrollToBottomButton } from "chat/web/ScrollToBottomButton";
 import { ScrollToTopButton } from "chat/web/ScrollToTopButton";
@@ -773,7 +774,7 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
   return (
     <div
       className="memory-saved-container"
-      {...stylex.props(styles.memorySavedContainer)}
+      {...withLiteralClass("memory-saved-container", styles.memorySavedContainer)}
       data-testid="memory-saved-container"
     >
       {memories.map((mem) => {
@@ -785,25 +786,25 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
           <div
             key={memoryKey}
             className="memory-saved-item"
-            {...stylex.props(styles.memorySavedItem)}
+            {...withLiteralClass("memory-saved-item", styles.memorySavedItem)}
             data-testid="memory-saved-item"
           >
             <span
               className="memory-saved-icon"
-              {...stylex.props(styles.memorySavedIcon)}
+              {...withLiteralClass("memory-saved-icon", styles.memorySavedIcon)}
               aria-hidden="true"
             >
               <LuBrain size={14} aria-hidden="true" />
             </span>
             <span
               className="memory-saved-prefix"
-              {...stylex.props(styles.memorySavedPrefix)}
+              {...withLiteralClass("memory-saved-prefix", styles.memorySavedPrefix)}
             >
               {prefix}：
             </span>
             <span
               className="memory-saved-content"
-              {...stylex.props(styles.memorySavedContent)}
+              {...withLiteralClass("memory-saved-content", styles.memorySavedContent)}
               title={mem.content}
             >
               {mem.content}

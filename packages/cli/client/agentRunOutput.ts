@@ -5,10 +5,7 @@ import { STYLE } from "./inlineMarkdown";
 import { createThinkParserState, processThinkChunk, flushThinkParser } from "../../agent-runtime/thinkTagParser";
 import {
   createToolEventFormatter,
-  formatActiveToolLabel,
   formatConservativeActiveToolLabel,
-  resolveToolDisplayMode,
-  shouldEmitToolEvents,
 } from "./toolOutput";
 import { parseAgentRunEvent } from "./agentRunSnapshot";
 import { Spinner, formatElapsed } from "./agentRunSpinner";
@@ -112,14 +109,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     params.spinner ??
     new Spinner(options.output, workingLabel, Boolean(options.activityReporter));
 
-  const toolDisplayMode = resolveToolDisplayMode(options.env);
-  const traceLocalTools = shouldEmitToolEvents(toolDisplayMode);
-  // 有 dock 订阅者（TUI）时，run 的实时进展由 composer 上方的面板呈现，
-  // 进行中的 controlAgentRun status 轮询不再往 transcript 印进展卡
-  // （终态/报错/日志变化仍印）。裸 CLI 没有订阅者，行为完全不变。
-  const formatToolEvent = createToolEventFormatter(toolDisplayMode, undefined, {
-    suppressRunProgressCards: typeof options.onAgentRunStatus === "function",
-  });
+  const formatToolEvent = createToolEventFormatter();
   const eventMode = resolveAgentEventMode(options);
   const showThinking = options.showThinking !== false;
 
@@ -141,6 +131,8 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     if (thinkingFirstAt === null) return;
     const seconds = Math.max(0, Math.round((thinkingLastAt - thinkingFirstAt) / 1000));
     thinkingFirstAt = null;
+    // 0 秒的思考没有信息量，不打点：零内容行只会打断「工具组 → 正文」的节奏。
+    if (seconds < 1) return;
     options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
   };
   // 压缩观测事件：一个 turn 至多渲染一行摘要。记录最后一条 compaction 事件，
@@ -191,8 +183,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   };
 
   const handleToolEvent = (event: LocalAgentToolEvent) => {
-    if (!traceLocalTools) return;
-
     const chunk =
       eventMode === "jsonl"
         ? formatToolJsonEvent(event)
@@ -238,26 +228,19 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       streamedAssistantText = false;
     }
 
-    // Write tree / compact content. For buffered tools (read/search/run/
-    // fetch) the formatter accumulates internally and returns ""; the tree
-    // is flushed later when a non-buffered tool arrives or at finish().
+    // Write tool content. The single-mode formatter renders a full line per
+    // tool-result immediately; there is no internal buffering left.
     if (chunk) {
       writeToolOutput(chunk);
     }
 
     // ── Post-write: start spinner for in-flight tool-calls ──────────
-    // normal mode keeps live activity feedback but strips the argument
-    // preview from the label: for shell-running tools the preview is the
-    // command line itself (cwd/echo/pipeline), which normal mode must not
-    // surface — including the composer activity line.
-    if (
-      (toolDisplayMode === "compact" || toolDisplayMode === "pro" || toolDisplayMode === "normal") &&
-      event.type === "tool-call"
-    ) {
-      const activeLabel =
-        toolDisplayMode === "normal"
-          ? formatConservativeActiveToolLabel(event)
-          : formatActiveToolLabel(event);
+    // The activity label carries the verb only, never the argument preview:
+    // for shell-running tools the preview is the command line itself
+    // (cwd/echo/pipeline), which must not surface anywhere — including the
+    // composer activity line.
+    if (event.type === "tool-call") {
+      const activeLabel = formatConservativeActiveToolLabel(event);
       spinner.show(activeLabel);
       options.activityReporter?.(activeLabel);
     }
@@ -281,22 +264,10 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
   return {
     spinner,
-    toolDisplayMode,
-    traceLocalTools,
     eventMode,
     pushText(chunk: string) {
-      // Buffered-class tools (read/search/run/fetch/webSearch) accumulate
-      // their tree inside formatToolEvent and only flush when a non-buffered
-      // tool arrives or at finish(). Without this, a turn that is all
-      // read/search calls streams all text first and the tool tree pops in
-      // at the very end. Flush the pending tree before each text delta so
-      // tools and text stay interleaved in natural order.
-      if (eventMode !== "jsonl" && formatToolEvent.flush) {
-        const pendingToolOutput = formatToolEvent.flush();
-        if (pendingToolOutput) {
-          writeToolOutput(pendingToolOutput);
-        }
-      }
+      // The single-mode tool formatter emits each tool line immediately;
+      // there is no pending tool output to flush before a text delta.
       writeVisibleAssistantChunk(chunk);
     },
     pushThinking(chunk: string) {
@@ -329,10 +300,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       thinkState = flushedThink.state;
       if (flushedThink.content) {
         writeVisibleAssistantChunk(flushedThink.content);
-      }
-      const pendingToolOutput = formatToolEvent.flush ? formatToolEvent.flush() : "";
-      if (pendingToolOutput) {
-        writeToolOutput(pendingToolOutput);
       }
       if (streamedAssistantText) {
         renderWriter.flush();

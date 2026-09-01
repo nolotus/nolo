@@ -4576,6 +4576,10 @@ describe("CLI local runtime adapter OAuth per-request wiring (real credential st
     return createAdapter({
       env: {
         NOLO_LOCAL_USER_ID: "user-1",
+        // 冷却记录（credential-availability.json）按 adapter env 解析 NOLO_HOME；
+        // 缺省会退回真实 homedir，把测试写出的冷却落进开发者真实的 ~/.nolo，
+        // 反过来挡住后续测试运行。显式透传预载隔离的 NOLO_HOME。
+        NOLO_HOME: process.env.NOLO_HOME,
         ...(opts.authToken ? { AUTH_TOKEN: opts.authToken } : {}),
       },
       db: {
@@ -4983,7 +4987,12 @@ describe("CLI local runtime adapter OAuth branches surface usage (TUI context ch
     const dbKey = String(opts.agentRecord.dbKey);
     const store = new Map<string, unknown>([[dbKey, opts.agentRecord]]);
     return createAdapter({
-      env: { NOLO_LOCAL_USER_ID: "user-1" },
+      env: {
+        NOLO_LOCAL_USER_ID: "user-1",
+        // 同上：冷却记录落盘按 adapter env 解析 NOLO_HOME，缺省退回真实
+        // homedir；显式透传预载隔离的 NOLO_HOME，避免污染真实 ~/.nolo。
+        NOLO_HOME: process.env.NOLO_HOME,
+      },
       db: {
         get: async (key: string) => {
           if (!store.has(key)) throw new Error(`not found: ${key}`);

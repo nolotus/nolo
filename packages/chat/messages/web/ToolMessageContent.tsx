@@ -29,6 +29,7 @@ import { readFileContent } from "database/dbSlice";
 import ImagePreviewModal from "render/web/ui/modal/ImagePreviewModal";
 import NoloEditor from "create/editor/Editor";
 import { messagesStyles as styles } from "./messagesStyles";
+import { toolMessageContentStyles as contentStyles } from "./toolMessageContentStyles";
 import "./messagesStylexEscapeHatch.css";
 import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
@@ -48,7 +49,7 @@ import {
   buildZiweiChartDocMarkdown,
   buildZiweiChartDocTitle,
 } from "../ziweiChartDoc";
-import { CollapsibleToolText } from "./toolMessageShared";
+import { CollapsibleToolText, withLiteralClass } from "./toolMessageShared";
 import { shouldPreviewToolText } from "../toolPresentation";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 
@@ -65,13 +66,13 @@ export const ReadToolTreeViewer: React.FC<{
   if (!items || items.length === 0) return null;
   const count = items.length;
   return (
-    <div className="read-tool-tree-widget">
-      <div className="rtt-header">
-        <span className="rtt-bullet">•</span>
-        <span className="rtt-title">Read</span>
-        <span className="rtt-count">({count})</span>
+    <div  {...withLiteralClass("read-tool-tree-widget", contentStyles.treeWidget)}>
+      <div  {...withLiteralClass("rtt-header", contentStyles.rttHeader)}>
+        <span  {...withLiteralClass("rtt-bullet", contentStyles.rttBullet)}>•</span>
+        <span  {...withLiteralClass("rtt-title", contentStyles.rttTitle)}>Read</span>
+        <span  {...withLiteralClass("rtt-count", contentStyles.rttCount)}>({count})</span>
       </div>
-      <div className="rtt-list">
+      <div  {...withLiteralClass("rtt-list", contentStyles.rttList)}>
         {items.map((item, index) => {
           const isLast = index === count - 1;
           const connector = isLast ? "└── " : "├── ";
@@ -84,9 +85,9 @@ export const ReadToolTreeViewer: React.FC<{
               : `${pathWithRange}:${item.rangeLabel}`;
           }
           return (
-            <div key={index} className="rtt-item">
-              <span className="rtt-connector">{connector}</span>
-              <span className="rtt-path">{pathWithRange}</span>
+            <div key={index}  {...withLiteralClass("rtt-item", contentStyles.rttItem)}>
+              <span  {...withLiteralClass("rtt-connector", contentStyles.rttConnector)}>{connector}</span>
+              <span  {...withLiteralClass("rtt-path", contentStyles.rttPath)}>{pathWithRange}</span>
             </div>
           );
         })}
@@ -100,13 +101,13 @@ export const SearchToolTreeViewer: React.FC<{
   if (!items || items.length === 0) return null;
   const count = items.length;
   return (
-    <div className="read-tool-tree-widget">
-      <div className="rtt-header">
-        <span className="rtt-bullet">•</span>
-        <span className="rtt-title">Search</span>
-        <span className="rtt-count">({count})</span>
+    <div  {...withLiteralClass("read-tool-tree-widget", contentStyles.treeWidget)}>
+      <div  {...withLiteralClass("rtt-header", contentStyles.rttHeader)}>
+        <span  {...withLiteralClass("rtt-bullet", contentStyles.rttBullet)}>•</span>
+        <span  {...withLiteralClass("rtt-title", contentStyles.rttTitle)}>Search</span>
+        <span  {...withLiteralClass("rtt-count", contentStyles.rttCount)}>({count})</span>
       </div>
-      <div className="rtt-list">
+      <div  {...withLiteralClass("rtt-list", contentStyles.rttList)}>
         {items.map((item, index) => {
           const isLast = index === count - 1;
           const connector = isLast ? "└── " : "├── ";
@@ -116,9 +117,9 @@ export const SearchToolTreeViewer: React.FC<{
             if (formattedPath) queryText = queryText ? `${queryText} in ${formattedPath}` : formattedPath;
           }
           return (
-            <div key={index} className="rtt-item">
-              <span className="rtt-connector">{connector}</span>
-              <span className="rtt-path">{queryText}</span>
+            <div key={index}  {...withLiteralClass("rtt-item", contentStyles.rttItem)}>
+              <span  {...withLiteralClass("rtt-connector", contentStyles.rttConnector)}>{connector}</span>
+              <span  {...withLiteralClass("rtt-path", contentStyles.rttPath)}>{queryText}</span>
             </div>
           );
         })}
@@ -133,21 +134,21 @@ export const FetchToolTreeViewer: React.FC<{ items: Array<{ url: string }> }> = 
   if (!items || items.length === 0) return null;
   const count = items.length;
   return (
-    <div className="read-tool-tree-widget">
-      <div className="rtt-header">
-        <span className="rtt-bullet">•</span>
-        <span className="rtt-title">Fetch</span>
-        <span className="rtt-count">({count})</span>
+    <div  {...withLiteralClass("read-tool-tree-widget", contentStyles.treeWidget)}>
+      <div  {...withLiteralClass("rtt-header", contentStyles.rttHeader)}>
+        <span  {...withLiteralClass("rtt-bullet", contentStyles.rttBullet)}>•</span>
+        <span  {...withLiteralClass("rtt-title", contentStyles.rttTitle)}>Fetch</span>
+        <span  {...withLiteralClass("rtt-count", contentStyles.rttCount)}>({count})</span>
       </div>
-      <div className="rtt-list">
+      <div  {...withLiteralClass("rtt-list", contentStyles.rttList)}>
         {items.map((item, index) => {
           const isLast = index === count - 1;
           const connector = isLast ? "└── " : "├── ";
           const urlText = (item.url || "").trim() || "webpage";
           return (
-            <div key={index} className="rtt-item">
-              <span className="rtt-connector">{connector}</span>
-              <span className="rtt-path">{urlText}</span>
+            <div key={index}  {...withLiteralClass("rtt-item", contentStyles.rttItem)}>
+              <span  {...withLiteralClass("rtt-connector", contentStyles.rttConnector)}>{connector}</span>
+              <span  {...withLiteralClass("rtt-path", contentStyles.rttPath)}>{urlText}</span>
             </div>
           );
         })}
@@ -279,13 +280,13 @@ const CodePreviewViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
 
   return (
     <div
-      className="code-preview-widget code-preview-widget--meta"
+      {...withLiteralClass("code-preview-widget code-preview-widget--meta", contentStyles.codePreview)}
       title={path || undefined}
     >
-      <LuFileText size={13} className="u-dim" aria-hidden="true" />
-      <span className="cp-path">{formattedPath}</span>
+      <LuFileText size={13} {...withLiteralClass("u-dim", contentStyles.dimText)} aria-hidden="true" />
+      <span  {...withLiteralClass("cp-path", contentStyles.cpPath)}>{formattedPath}</span>
       {rangeLabel ? (
-        <span className="cp-meta u-dim u-text-xs">{rangeLabel}</span>
+        <span {...withLiteralClass("cp-meta u-dim u-text-xs", contentStyles.cpMeta)}>{rangeLabel}</span>
       ) : null}
     </div>
   );
@@ -340,13 +341,13 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   const hasDiff = diffPieces.length > 0;
 
   return (
-    <div className="t-content-block code-change-widget">
-      <div className="cp-header">
-        <div className="u-flex u-items-center u-gap-2 u-flex-1 u-min-w-0">
-          <LuFileText size={14} className="u-dim" aria-hidden="true" />
-          <span className="cp-path">{path}</span>
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block code-change-widget", contentStyles.contentBlock)}>
+      <div  {...withLiteralClass("cp-header", contentStyles.cpHeader)}>
+        <div {...withLiteralClass("u-flex u-items-center u-gap-2 u-flex-1 u-min-w-0", contentStyles.minWidth0)}>
+          <LuFileText size={14} {...withLiteralClass("u-dim", contentStyles.dimText)} aria-hidden="true" />
+          <span  {...withLiteralClass("cp-path", contentStyles.cpPath)}>{path}</span>
         </div>
-        <div className="cc-toggle">
+        <div  {...withLiteralClass("cc-toggle", contentStyles.toggle)}>
           <button
             type="button"
             className={view === "final" ? "on" : ""}
@@ -368,11 +369,11 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
       {view === "diff" ? (
         <DiffViewer parts={diffPieces} filePath={path} />
       ) : isLong ? (
-        <div className="editor-scroller compact">
-          <CollapsibleToolText text={newContent} className="code-dump" />
+        <div  {...withLiteralClass("editor-scroller compact", contentStyles.editorScroller, contentStyles.editorCompact)}>
+          <CollapsibleToolText text={newContent}  {...withLiteralClass("code-dump", contentStyles.codeDump)} />
         </div>
       ) : (
-        <div className="editor-scroller compact">
+        <div  {...withLiteralClass("editor-scroller compact", contentStyles.editorScroller, contentStyles.editorCompact)}>
           <NoloEditor initialValue={finalSlateValue} readOnly />
         </div>
       )}
@@ -424,17 +425,17 @@ const ExecShellViewer: React.FC<ToolProps> = ({
 
   if (blocked) {
     return (
-      <div className="t-content-block code-change-block">
-        <div className="t-block-header">
-          <div className="t-badge warning">
+      <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block code-change-block", contentStyles.contentBlock)}>
+        <div  {...withLiteralClass("t-block-header", contentStyles.blockHeader)}>
+          <div {...withLiteralClass("t-badge warning", contentStyles.badge, contentStyles.badgeWarning)}>
             <LuShieldAlert size={14} aria-hidden="true" />
           </div>
-          <div className="u-flex-col u-flex-1 u-min-w-0">
-            <span className="u-font-bold u-text-sm u-error-text">
+          <div {...withLiteralClass("u-flex-col u-flex-1 u-min-w-0", contentStyles.minWidth0)}>
+            <span {...withLiteralClass("u-font-bold u-text-sm u-error-text", contentStyles.errorText, contentStyles.boldText)}>
               {t("bash.blockedTitle", "危险命令已被拦截")}
             </span>
             {command && (
-              <span className="u-font-mono u-text-xs u-dim">
+              <span {...withLiteralClass("u-font-mono u-text-xs u-dim", contentStyles.monoDim)}>
                 {cwd ? `${cwd} $ ${command}` : command}
               </span>
             )}
@@ -443,11 +444,11 @@ const ExecShellViewer: React.FC<ToolProps> = ({
 
         {requireUnsafe && (
           <>
-            <p className="t-block-desc">
+            <p  {...withLiteralClass("t-block-desc", contentStyles.blockDesc)}>
               {t("bash.blockedDesc", "该命令被检测为高危操作，默认未执行。如确有必要，请确认风险后继续。")}
             </p>
             <div className="t-btn-row">
-              <button type="button" className="btn-primary-sm" onClick={handleUnsafeRun}>
+              <button type="button" data-hook="messages-esc-btn-primary-sm" {...withLiteralClass("btn-primary-sm", contentStyles.primaryButton)} onClick={handleUnsafeRun}>
                 <LuTerminal size={14} style={{ marginRight: 4 }} aria-hidden="true" />
                 {t("bash.runUnsafe", "仍要执行（unsafe）")}
               </button>
@@ -461,10 +462,10 @@ const ExecShellViewer: React.FC<ToolProps> = ({
   const statusColor = exitCode === 0 ? "var(--success)" : exitCode === undefined ? "var(--textQuaternary)" : "var(--error)";
   const outputBody = (
     <>
-      {stdout ? <CollapsibleToolText text={String(stdout)} className="term-out" /> : null}
-      {stderr ? <CollapsibleToolText text={String(stderr)} className="term-err" /> : null}
+      {stdout ? <CollapsibleToolText text={String(stdout)}  {...withLiteralClass("term-out", contentStyles.termOut)} /> : null}
+      {stderr ? <CollapsibleToolText text={String(stderr)}  {...withLiteralClass("term-err", contentStyles.termErr)} /> : null}
       {!stdout && !stderr && (
-        <div className="u-dim u-text-xs u-flex u-items-center u-justify-center" style={{ padding: "20px 0", fontStyle: "italic" }}>
+        <div {...withLiteralClass("u-dim u-text-xs u-flex u-items-center u-justify-center", contentStyles.dimText)} style={{ padding: "20px 0", fontStyle: "italic" }}>
           {t("bash.noOutput") || "(No output)"}
         </div>
       )}
@@ -474,16 +475,16 @@ const ExecShellViewer: React.FC<ToolProps> = ({
   // Tool-group row already shows "查看历史 · git …" — only mount result text.
   if (contentOnly) {
     return (
-      <div className="t-content-block bash-viewer bash-viewer--group-detail">
+      <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block bash-viewer bash-viewer--group-detail", contentStyles.contentBlock, contentStyles.bashViewer, contentStyles.bashViewerGroupDetail)}>
         {exitCode !== undefined && exitCode !== 0 && (
-          <div className="bash-result-meta">
-            <span className="shell-exit-code">
+          <div  {...withLiteralClass("bash-result-meta", contentStyles.bashResultMeta)}>
+            <span  {...withLiteralClass("shell-exit-code", contentStyles.shellExit)}>
               {t("bash.exitCode", { code: exitCode })}
             </span>
             <LuCircle size={8} fill={statusColor} color={statusColor} aria-hidden="true" />
           </div>
         )}
-        <div className="bash-output-area bash-output-area--group-detail">
+        <div data-hook="messages-esc-bash-output" {...withLiteralClass("bash-output-area bash-output-area--group-detail", contentStyles.bashOutput, contentStyles.bashOutputGroupDetail)}>
           {outputBody}
         </div>
       </div>
@@ -491,14 +492,14 @@ const ExecShellViewer: React.FC<ToolProps> = ({
   }
 
   return (
-    <div className="t-content-block bash-viewer professional">
-      <div className="bash-terminal-window">
-        <div className="bash-prompt-line">
-          <span className="bash-prompt-char">&gt;_</span>
-          <code className="shell-cmd">{cwd ? `${cwd} $ ${command}` : command}</code>
-          <div className="shell-meta-inline">
+    <div  data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block bash-viewer professional", contentStyles.contentBlock, contentStyles.bashViewer)}>
+      <div  {...withLiteralClass("bash-terminal-window", contentStyles.bashTerminal)}>
+        <div  {...withLiteralClass("bash-prompt-line", contentStyles.bashPromptLine)}>
+          <span  {...withLiteralClass("bash-prompt-char", contentStyles.bashPromptChar)}>&gt;_</span>
+          <code  {...withLiteralClass("shell-cmd", contentStyles.shellCmd)}>{cwd ? `${cwd} $ ${command}` : command}</code>
+          <div  {...withLiteralClass("shell-meta-inline", contentStyles.shellMeta)}>
             {exitCode !== undefined && (
-              <span className="shell-exit-code">
+              <span  {...withLiteralClass("shell-exit-code", contentStyles.shellExit)}>
                 {t("bash.exitCode", { code: exitCode })}
               </span>
             )}
@@ -506,7 +507,7 @@ const ExecShellViewer: React.FC<ToolProps> = ({
           </div>
         </div>
 
-        <div className="bash-output-area" style={{ maxHeight: 360 }}>
+        <div data-hook="messages-esc-bash-output" {...withLiteralClass("bash-output-area", contentStyles.bashOutput)} style={{ maxHeight: 360 }}>
           {outputBody}
         </div>
       </div>
@@ -544,25 +545,25 @@ const WriteFileConflictViewer: React.FC<ToolProps> = ({ rawData, isError, t }) =
   };
 
   return (
-    <div className="t-content-block code-change-block">
-      <div className="t-block-header">
-        <div className="t-badge warning">
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block code-change-block", contentStyles.contentBlock)}>
+      <div  {...withLiteralClass("t-block-header", contentStyles.blockHeader)}>
+        <div {...withLiteralClass("t-badge warning", contentStyles.badge, contentStyles.badgeWarning)}>
           <LuFileWarning size={14} aria-hidden="true" />
         </div>
         <div className="u-flex-col u-flex-1 u-min-w-0">
-          <span className="u-font-bold u-text-sm u-error-text">
+          <span {...withLiteralClass("u-font-bold u-text-sm u-error-text", contentStyles.errorText, contentStyles.boldText)}>
             {t("codeEdit.conflictTitle") || "File Conflict"}
           </span>
-          <span className="u-font-mono u-text-xs u-dim">{filePath}</span>
+          <span {...withLiteralClass("u-font-mono u-text-xs u-dim", contentStyles.monoDim)}>{filePath}</span>
         </div>
       </div>
 
-      <p className="t-block-desc">
+      <p  {...withLiteralClass("t-block-desc", contentStyles.blockDesc)}>
         {t("codeEdit.conflictMsg") || msg}
       </p>
 
       <div className="t-btn-row">
-        <button type="button" className="btn-primary-sm" onClick={handleConfirmOverwrite}>
+        <button type="button" data-hook="messages-esc-btn-primary-sm" {...withLiteralClass("btn-primary-sm", contentStyles.primaryButton)} onClick={handleConfirmOverwrite}>
           {t("codeEdit.overwrite") || "Overwrite"}
         </button>
       </div>
@@ -635,14 +636,14 @@ const GeminiImageItem: React.FC<{
     return (
       <button
         type="button"
-        className="g-img-card loaded"
+         data-hook="messages-esc-g-img-card" {...withLiteralClass("g-img-card loaded", contentStyles.imageCard)}
         style={cardStyle}
         onClick={() => onPreview(url, name)}
         aria-label={name}
       >
-        <img src={url} alt="" loading="lazy" />
-        <div className="g-img-overlay" aria-hidden="true">
-          <span className="u-truncate">{name}</span>
+        <img src={url} alt="" loading="lazy" {...withLiteralClass("g-img", contentStyles.image)} />
+        <div  {...withLiteralClass("g-img-overlay", contentStyles.imageOverlay)} aria-hidden="true">
+          <span {...withLiteralClass("u-truncate", contentStyles.truncate)}>{name}</span>
           <LuExternalLink size={14} aria-hidden="true" />
         </div>
       </button>
@@ -650,8 +651,8 @@ const GeminiImageItem: React.FC<{
   }
 
   return (
-    <div className={`g-img-card ${status}`}>
-      <div className="g-img-skeleton" />
+    <div data-hook="messages-esc-g-img-card" {...withLiteralClass(`g-img-card ${status}`, contentStyles.imageCard)}>
+      <div  {...withLiteralClass("g-img-skeleton", contentStyles.imageSkeleton)} />
     </div>
   );
 };
@@ -670,22 +671,22 @@ const GeminiGallery: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   );
 
   return (
-    <div className="t-content-block">
-      <div className="t-block-header">
-        <div className="t-badge info">
+    <div  data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block", contentStyles.contentBlock)}>
+      <div  {...withLiteralClass("t-block-header", contentStyles.blockHeader)}>
+        <div  {...withLiteralClass("t-badge info", contentStyles.badge, contentStyles.badgeInfo)}>
           <LuImage size={14} aria-hidden="true" />
         </div>
         <div className="u-min-w-0">
-          <span className="u-font-bold u-text-sm">
+          <span {...withLiteralClass("u-font-bold u-text-sm", contentStyles.blockTitle)}>
             {t("gemini.title", "Image Generation")}
           </span>
-          <span className="u-text-xs u-dim" style={{ marginLeft: 8 }}>
+          <span {...withLiteralClass("u-text-xs u-dim", contentStyles.dimText)} style={{ marginLeft: 8 }}>
             {countLabel}
           </span>
         </div>
       </div>
-      {rawData.text && <p className="t-block-desc">{rawData.text}</p>}
-      <div className={`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`}>
+      {rawData.text && <p  {...withLiteralClass("t-block-desc", contentStyles.blockDesc)}>{rawData.text}</p>}
+      <div data-hook={files.length === 1 ? "messages-esc-g-grid-cols-1" : undefined} className={`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`} {...withLiteralClass(`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`, contentStyles.imageGrid, files.length === 1 && contentStyles.imageGridCols1)}>
         {files.map((f: any, i: number) => (
           <GeminiImageItem
             key={f.fileId || i}
@@ -738,45 +739,45 @@ const RemotionVideoCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   };
 
   return (
-    <div className="t-content-block remotion-video-card">
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block remotion-video-card", contentStyles.contentBlock, contentStyles.videoCard)}>
       {url ? (
         <video
-          className="rvc-player"
+           {...withLiteralClass("rvc-player", contentStyles.videoPlayer)}
           src={url}
           controls
           preload="metadata"
           playsInline
         />
       ) : (
-        <div className="rvc-empty">
+        <div  {...withLiteralClass("rvc-empty", contentStyles.videoEmpty)}>
           <LuVideo size={24} aria-hidden="true" />
         </div>
       )}
-      <div className="rvc-body">
-        <div className="rvc-main">
-          <div className="icon-badge info">
+      <div  {...withLiteralClass("rvc-body", contentStyles.videoBody)}>
+        <div  {...withLiteralClass("rvc-main", contentStyles.videoMain)}>
+          <div  {...withLiteralClass("icon-badge info", contentStyles.iconBadge, contentStyles.iconBadgeInfo)}>
             <LuVideo size={18} aria-hidden="true" />
           </div>
-          <div className="u-flex-1 u-min-w-0">
-            <div className="u-font-bold u-truncate u-text-sm">{title}</div>
-            <div className="rvc-meta">
+          <div {...withLiteralClass("u-flex-1 u-min-w-0", contentStyles.flex1Min0)}>
+            <div {...withLiteralClass("u-font-bold u-truncate u-text-sm", contentStyles.truncate, contentStyles.boldText)}>{title}</div>
+            <div  {...withLiteralClass("rvc-meta", contentStyles.videoMeta)}>
               {template ? <span>{template}</span> : null}
               {sizeLabel ? <span>{sizeLabel}</span> : null}
-              {rawData.fileId ? <span className="u-font-mono">{rawData.fileId}</span> : null}
+              {rawData.fileId ? <span {...withLiteralClass("u-font-mono", contentStyles.monoDim)}>{rawData.fileId}</span> : null}
             </div>
           </div>
         </div>
-        <div className="rvc-actions">
-          <button type="button" className="btn-tiny" onClick={handleOpen} disabled={!url}>
+        <div data-hook="messages-esc-rvc-actions" {...withLiteralClass("rvc-actions", contentStyles.videoActions)}>
+          <button type="button" data-hook="messages-esc-btn-tiny" className="btn-tiny" onClick={handleOpen} disabled={!url}>
             <LuExternalLink size={13} aria-hidden="true" />
             {t("common.open", "Open")}
           </button>
-          <button type="button" className="btn-tiny" onClick={handleCopy} disabled={!url}>
+          <button type="button" data-hook="messages-esc-btn-tiny" className="btn-tiny" onClick={handleCopy} disabled={!url}>
             <LuCopy size={13} aria-hidden="true" />
             {t("common.copy", "Copy")}
           </button>
           {url ? (
-            <a className="btn-tiny rvc-download" href={url} download={title}>
+            <a data-hook="messages-esc-btn-tiny" {...withLiteralClass("btn-tiny rvc-download", contentStyles.minWidth0)} href={url} download={title}>
               <LuDownload size={13} aria-hidden="true" />
               {t("common.download", "Download")}
             </a>
@@ -864,22 +865,33 @@ const ZiweiChartCard: React.FC<ToolProps> = ({
     const adjective = Array.isArray(palace.adjectiveStars) ? palace.adjectiveStars : [];
 
     return (
-      <div key={name} className={classes}>
-        <div className="ziwei-card__palace-head">
+      <div
+        key={name}
+        {...withLiteralClass(
+          classes,
+          contentStyles.ziweiPalace,
+          palace.name === "命宫" && contentStyles.ziweiPalaceMing,
+          palace.isBodyPalace && contentStyles.ziweiPalaceBody,
+          palace.isOriginalPalace && contentStyles.ziweiPalaceOrigin
+        )}
+      >
+        <div {...withLiteralClass("ziwei-card__palace-head", contentStyles.ziweiPalaceHead)}>
           <strong>{palace.heavenlyStem}{palace.earthlyBranch}</strong>
           <span>[{palaceAliasMap[palace.name] || palace.name}宫]</span>
         </div>
-        <div className="ziwei-card__palace-limit"><span>大限</span>{palace.decadal.range[0]}-{palace.decadal.range[1]}</div>
-        <div className="ziwei-card__palace-limit"><span>小限</span>{palace.ages.join(" ")}</div>
-        <div className="ziwei-card__palace-stars">
-          <div className="ziwei-card__star-row is-major">
+        <div {...withLiteralClass("ziwei-card__palace-limit", contentStyles.ziweiPalaceLimit)}><span>大限</span>{palace.decadal.range[0]}-{palace.decadal.range[1]}</div>
+        <div {...withLiteralClass("ziwei-card__palace-limit", contentStyles.ziweiPalaceLimit)}><span>小限</span>{palace.ages.join(" ")}</div>
+        <div {...withLiteralClass("ziwei-card__palace-stars", contentStyles.ziweiPalaceStars)}>
+          <div {...withLiteralClass("ziwei-card__star-row is-major", contentStyles.ziweiStarRow, contentStyles.ziweiMajor)}>
             {major.length > 0 ? (
               major.map((star: any) => {
                 const formatted = formatMajorStar(star);
                 return (
                   <span
                     key={`${palace.name}-${star.name}`}
-                    className={formatted.hasMutagen ? "is-mutagen" : ""}
+                    {...(formatted.hasMutagen
+                      ? withLiteralClass("is-mutagen", contentStyles.ziweiMutagen)
+                      : { className: "" })}
                   >
                     {formatted.text}
                   </span>
@@ -890,14 +902,14 @@ const ZiweiChartCard: React.FC<ToolProps> = ({
             )}
           </div>
           {minor.length > 0 && (
-            <div className="ziwei-card__star-row is-minor">
+            <div {...withLiteralClass("ziwei-card__star-row is-minor", contentStyles.ziweiStarRow, contentStyles.ziweiMinor)}>
               {minor.map((star: string) => (
                 <span key={`${palace.name}-${star}`}>{star}</span>
               ))}
             </div>
           )}
           {adjective.length > 0 && (
-            <div className="ziwei-card__star-row is-adj">
+            <div {...withLiteralClass("ziwei-card__star-row is-adj", contentStyles.ziweiStarRow, contentStyles.ziweiAdj)}>
               {adjective.map((star: string) => (
                 <span key={`${palace.name}-${star}`}>{star}</span>
               ))}
@@ -937,17 +949,17 @@ const ZiweiChartCard: React.FC<ToolProps> = ({
   };
 
   return (
-    <div className="t-content-block ziwei-card">
-      <div className="ziwei-card__header">
-        <div className="u-flex-1 u-min-w-0">
-          <div className="ziwei-card__title">紫微斗数本命盘</div>
-          <div className="ziwei-card__meta">
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block ziwei-card", contentStyles.contentBlock, contentStyles.ziweiCard)}>
+      <div {...withLiteralClass("ziwei-card__header", contentStyles.ziweiHeader)}>
+        <div {...withLiteralClass("u-flex-1 u-min-w-0", contentStyles.flex1Min0)}>
+          <div {...withLiteralClass("ziwei-card__title", contentStyles.ziweiTitle)}>紫微斗数本命盘</div>
+          <div {...withLiteralClass("ziwei-card__meta", contentStyles.ziweiMeta)}>
             {chart.zodiac} · {chart.sign} · {mutagenSummary || "无"}
           </div>
         </div>
         <button
           type="button"
-          className="ziwei-card__save-button-minimal"
+           {...withLiteralClass("ziwei-card__save-button-minimal", contentStyles.ziweiButtonGold)}
           disabled={isSaving}
           onClick={handleSave}
           title={t("ziwei.savePrompt", "保存这张命盘")}
@@ -957,18 +969,18 @@ const ZiweiChartCard: React.FC<ToolProps> = ({
         </button>
       </div>
 
-      <div className="ziwei-card__toolbar">
-        <div className="ziwei-card__toolbar-left">
-          <div className="ziwei-card__pill">{summary.fiveElementsClass}</div>
-          <div className="ziwei-card__meta">
+      <div {...withLiteralClass("ziwei-card__toolbar", contentStyles.ziweiToolbar)}>
+        <div {...withLiteralClass("ziwei-card__toolbar-left", contentStyles.ziweiToolbarLeft)}>
+          <div {...withLiteralClass("ziwei-card__pill", contentStyles.ziweiPill)}>{summary.fiveElementsClass}</div>
+          <div {...withLiteralClass("ziwei-card__meta", contentStyles.ziweiMeta)}>
             {input?.calendarType === "lunar" ? "农历" : "阳历"} {input?.dateStr} {chart.timeRange}
           </div>
         </div>
-        <div className="ziwei-card__toolbar-right">
+        <div  {...withLiteralClass("ziwei-card__toolbar-right", contentStyles.ziweiToolbarRight, contentStyles.ziweiActionButtons)}>
           {savedKey && (
             <button
               type="button"
-              className="ziwei-card__open-button"
+               {...withLiteralClass("ziwei-card__open-button", contentStyles.ziweiButtonGold)}
               onClick={() => navigateToPage(savedKey)}
             >
               <LuExternalLink size={11} aria-hidden="true" />
@@ -978,25 +990,25 @@ const ZiweiChartCard: React.FC<ToolProps> = ({
         </div>
       </div>
 
-      <div className="ziwei-card__board-scroll">
-        <div className="ziwei-card__board">
+      <div {...withLiteralClass("ziwei-card__board-scroll", contentStyles.ziweiBoardScroll)}>
+        <div {...withLiteralClass("ziwei-card__board", contentStyles.ziweiBoard)}>
           {palaceSlotOrder.slice(0, 4).map((name) => renderPalaceCard(name))}
 
           {palaceSlotOrder.slice(4, 6).map((name) => renderPalaceCard(name, "is-side"))}
 
-          <div className="ziwei-card__center">
-            <div className="ziwei-card__center-title">命盘总览</div>
+          <div {...withLiteralClass("ziwei-card__center", contentStyles.ziweiCenter)}>
+            <div {...withLiteralClass("ziwei-card__center-title", contentStyles.ziweiCenterTitle)}>命盘总览</div>
 
             {centerFacts.map((line) => {
               const [label, value = ""] = line.split("：");
               return (
-                <div key={line} className="ziwei-card__center-line">
+                <div key={line} {...withLiteralClass("ziwei-card__center-line", contentStyles.ziweiCenterLine)}>
                   <span>{label}：</span>
                   <strong>{value}</strong>
                 </div>
               );
             })}
-            <div className="ziwei-card__center-facts">
+            <div {...withLiteralClass("ziwei-card__center-facts", contentStyles.ziweiCenterFacts)}>
               <span>命宫 {summary.mingGong}</span>
               <span>身宫 {summary.shenGong}</span>
               <span>{input?.gender}</span>
@@ -1193,7 +1205,8 @@ const ReadXhsProfileCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
           </div>
           <button
             type="button"
-            className="btn-primary-sm"
+            data-hook="messages-esc-btn-primary-sm"
+            {...withLiteralClass("btn-primary-sm", contentStyles.primaryButton)}
             style={{
               background: "var(--accent, #1890ff)",
               color: "#fff",
@@ -1226,21 +1239,21 @@ const ReadXhsProfileCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
     const needsLogin = code === "login_required" || code === "not_logged_in";
 
     return (
-      <div className="t-content-block x-post-card is-error">
-        <div className="x-post-card__header">
-          <div className="x-post-card__badge is-error">
+      <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block x-post-card is-error", contentStyles.contentBlock, contentStyles.xPost)}>
+        <div  {...withLiteralClass("x-post-card__header", contentStyles.xPostHeader)}>
+          <div  {...withLiteralClass("x-post-card__badge is-error", contentStyles.xPostBadge, contentStyles.xPostBadgeError)}>
             <LuTriangle size={15} aria-hidden="true" />
           </div>
-          <div className="x-post-card__identity">
-            <div className="x-post-card__title">
+          <div  {...withLiteralClass("x-post-card__identity", contentStyles.xPostIdentity)}>
+            <div  {...withLiteralClass("x-post-card__title", contentStyles.xPostTitle)}>
               {t("xhs.failedTitle", "小红书账号读取失败")}
             </div>
-            {code ? <div className="x-post-card__meta">{code}</div> : null}
+            {code ? <div  {...withLiteralClass("x-post-card__meta", contentStyles.xPostMeta)}>{code}</div> : null}
           </div>
         </div>
-        <div className="x-post-card__text">{String(message)}</div>
+        <div  {...withLiteralClass("x-post-card__text", contentStyles.xPostText)}>{String(message)}</div>
         {needsLogin && (
-          <div className="x-post-card__hint">
+          <div  {...withLiteralClass("x-post-card__hint", contentStyles.xPostHint)}>
             {t(
               "xhs.loginRequired",
               "匿名公开访问不可见或暂不可用。当前读取器不会登录、复用账号或使用 cookie。"
@@ -1257,21 +1270,21 @@ const ReadXhsProfileCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   if (!result?.ok || !result.data) return null;
 
   return (
-    <div className="t-content-block x-post-card">
-      <div className="x-post-card__header">
-        <div className="x-post-card__avatar">
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block x-post-card", contentStyles.contentBlock, contentStyles.xPost)}>
+      <div  {...withLiteralClass("x-post-card__header", contentStyles.xPostHeader)}>
+        <div  {...withLiteralClass("x-post-card__avatar", contentStyles.xPostAvatar)}>
           {(profile.nickname || "书").slice(0, 1)}
         </div>
-        <div className="x-post-card__identity">
-          <div className="x-post-card__title">{profile.nickname || "—"}</div>
-          <div className="x-post-card__meta">
+        <div  {...withLiteralClass("x-post-card__identity", contentStyles.xPostIdentity)}>
+          <div  {...withLiteralClass("x-post-card__title", contentStyles.xPostTitle)}>{profile.nickname || "—"}</div>
+          <div  {...withLiteralClass("x-post-card__meta", contentStyles.xPostMeta)}>
             {profile.redId ? <span>小红书号 {profile.redId}</span> : null}
           </div>
         </div>
       </div>
 
       {profile.desc ? (
-        <div className="x-post-card__text">{profile.desc}</div>
+        <div  {...withLiteralClass("x-post-card__text", contentStyles.xPostText)}>{profile.desc}</div>
       ) : null}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "4px 0 8px", fontSize: 12 }}>
@@ -1397,20 +1410,20 @@ const ReadXPostCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
     const nextStep = result?.nextStep;
 
     return (
-      <div className="t-content-block x-post-card is-error">
-        <div className="x-post-card__header">
-          <div className="x-post-card__badge is-error">
+      <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block x-post-card is-error", contentStyles.contentBlock, contentStyles.xPost)}>
+        <div  {...withLiteralClass("x-post-card__header", contentStyles.xPostHeader)}>
+          <div  {...withLiteralClass("x-post-card__badge is-error", contentStyles.xPostBadge, contentStyles.xPostBadgeError)}>
             <LuTriangle size={15} aria-hidden="true" />
           </div>
-          <div className="x-post-card__identity">
-            <div className="x-post-card__title">
+          <div  {...withLiteralClass("x-post-card__identity", contentStyles.xPostIdentity)}>
+            <div  {...withLiteralClass("x-post-card__title", contentStyles.xPostTitle)}>
               {t("xPost.failedTitle", "X 帖子读取失败")}
             </div>
-            {code ? <div className="x-post-card__meta">{code}</div> : null}
+            {code ? <div  {...withLiteralClass("x-post-card__meta", contentStyles.xPostMeta)}>{code}</div> : null}
           </div>
         </div>
-        <div className="x-post-card__text">{String(message)}</div>
-        {nextStep ? <div className="x-post-card__hint">{nextStep}</div> : null}
+        <div  {...withLiteralClass("x-post-card__text", contentStyles.xPostText)}>{String(message)}</div>
+        {nextStep ? <div  {...withLiteralClass("x-post-card__hint", contentStyles.xPostHint)}>{nextStep}</div> : null}
       </div>
     );
   }
@@ -1429,22 +1442,22 @@ const ReadXPostCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
   };
 
   return (
-    <div className="t-content-block x-post-card">
-      <div className="x-post-card__header">
-        <div className="x-post-card__avatar">
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass("t-content-block x-post-card", contentStyles.contentBlock, contentStyles.xPost)}>
+      <div  {...withLiteralClass("x-post-card__header", contentStyles.xPostHeader)}>
+        <div  {...withLiteralClass("x-post-card__avatar", contentStyles.xPostAvatar)}>
           {(displayName || handle || "X").slice(0, 1).toUpperCase()}
         </div>
-        <div className="x-post-card__identity">
-          <div className="x-post-card__title">{displayName}</div>
-          <div className="x-post-card__meta">
+        <div  {...withLiteralClass("x-post-card__identity", contentStyles.xPostIdentity)}>
+          <div  {...withLiteralClass("x-post-card__title", contentStyles.xPostTitle)}>{displayName}</div>
+          <div  {...withLiteralClass("x-post-card__meta", contentStyles.xPostMeta)}>
             {handle}
             {backend ? <span>{backend}</span> : null}
           </div>
         </div>
-        <div className="x-post-card__actions">
+        <div data-hook="messages-esc-x-post-actions" {...withLiteralClass("x-post-card__actions", contentStyles.xPostActions)}>
           <button
             type="button"
-            className="btn-tiny"
+            data-hook="messages-esc-btn-tiny" className="btn-tiny"
             onClick={handleCopy}
             title={t("common.copy", "Copy")}
             aria-label={t("common.copy", "Copy")}
@@ -1453,7 +1466,7 @@ const ReadXPostCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
           </button>
           <button
             type="button"
-            className="btn-tiny"
+            data-hook="messages-esc-btn-tiny" className="btn-tiny"
             onClick={handleOpen}
             disabled={!url}
             title={t("common.open", "Open")}
@@ -1463,9 +1476,9 @@ const ReadXPostCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
           </button>
         </div>
       </div>
-      <div className="x-post-card__text">{post.text}</div>
+      <div  {...withLiteralClass("x-post-card__text", contentStyles.xPostText)}>{post.text}</div>
       {url ? (
-        <div className="x-post-card__footer">
+        <div  {...withLiteralClass("x-post-card__footer", contentStyles.xPostFooter)}>
           <LuFileText size={12} aria-hidden="true" />
           <span>{url}</span>
         </div>
@@ -1489,28 +1502,28 @@ const DeleteSpacesCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
     : `待确认删除 ${deletable.length} 个 Space`;
 
   return (
-    <div className={`t-content-block delete-spaces-card ${isExecuted ? "is-done" : "is-preview"}`}>
-      <div className="delete-spaces-card__header">
-        <div className={`delete-spaces-card__badge ${isExecuted ? "is-done" : "is-warning"}`}>
+    <div data-hook="messages-esc-t-content-block" {...withLiteralClass(`t-content-block delete-spaces-card ${isExecuted ? "is-done" : "is-preview"}`, contentStyles.contentBlock, contentStyles.deleteCard)}>
+      <div  {...withLiteralClass("delete-spaces-card__header", contentStyles.deleteHeader)}>
+        <div {...withLiteralClass(`delete-spaces-card__badge ${isExecuted ? "is-done" : "is-warning"}`, contentStyles.deleteBadge)}>
           <LuTrash2 size={16} aria-hidden="true" />
         </div>
-        <div className="delete-spaces-card__title-wrap">
-          <div className="delete-spaces-card__title">{title}</div>
-          <div className="delete-spaces-card__subtitle">
+        <div  {...withLiteralClass("delete-spaces-card__title-wrap", contentStyles.deleteTitleWrap)}>
+          <div  {...withLiteralClass("delete-spaces-card__title", contentStyles.deleteTitle)}>{title}</div>
+          <div  {...withLiteralClass("delete-spaces-card__subtitle", contentStyles.deleteSubtitle)}>
             只删除 Space 壳和成员关系，不删除其中 doc/dialog/file
           </div>
         </div>
       </div>
 
       {!isExecuted && deletable.length > 0 ? (
-        <div className="delete-spaces-list">
+        <div  {...withLiteralClass("delete-spaces-list", contentStyles.deleteList)}>
           {deletable.map((item: any) => (
-            <div key={item.spaceId} className="delete-spaces-row">
-              <div className="delete-spaces-row__main">
-                <div className="delete-spaces-row__name">{item.name || item.spaceId}</div>
-                <div className="delete-spaces-row__id">{item.spaceId}</div>
+            <div key={item.spaceId}  {...withLiteralClass("delete-spaces-row", contentStyles.deleteRow)}>
+              <div  {...withLiteralClass("delete-spaces-row__main", contentStyles.deleteRowMain)}>
+                <div  {...withLiteralClass("delete-spaces-row__name", contentStyles.deleteRowName)}>{item.name || item.spaceId}</div>
+                <div  {...withLiteralClass("delete-spaces-row__id", contentStyles.deleteRowId)}>{item.spaceId}</div>
               </div>
-              <div className="delete-spaces-row__meta">
+              <div  {...withLiteralClass("delete-spaces-row__meta", contentStyles.deleteRowMeta)}>
                 <span><LuUsers size={13} aria-hidden="true" />{item.memberCount ?? 0}</span>
                 <span><LuDatabase size={13} aria-hidden="true" />{item.contentCount ?? 0}</span>
               </div>
@@ -1520,9 +1533,9 @@ const DeleteSpacesCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
       ) : null}
 
       {isExecuted && deletedSpaceIds.length > 0 ? (
-        <div className="delete-spaces-result-list">
+        <div {...withLiteralClass("delete-spaces-result-list", contentStyles.deleteResultList)}>
           {deletedSpaceIds.map((spaceId: string) => (
-            <div key={spaceId} className="delete-spaces-result">
+            <div key={spaceId} {...withLiteralClass("delete-spaces-result", contentStyles.deleteResult)}>
               <LuCheck size={14} aria-hidden="true" />
               <span>{spaceId}</span>
             </div>
@@ -1531,10 +1544,10 @@ const DeleteSpacesCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
       ) : null}
 
       {skipped.length > 0 ? (
-        <div className="delete-spaces-skipped">
-          <div className="delete-spaces-skipped__title">已跳过 {skipped.length} 个</div>
+        <div  {...withLiteralClass("delete-spaces-skipped", contentStyles.deleteSkipped)}>
+          <div  {...withLiteralClass("delete-spaces-skipped__title", contentStyles.deleteSkippedTitle)}>已跳过 {skipped.length} 个</div>
           {skipped.map((item: any) => (
-            <div key={`${item.spaceId}-${item.reason}`} className="delete-spaces-skipped__item">
+            <div key={`${item.spaceId}-${item.reason}`}  {...withLiteralClass("delete-spaces-skipped__item", contentStyles.deleteSkippedItem)}>
               <span>{item.name || item.spaceId || "未知 Space"}</span>
               <code>{item.reason}</code>
             </div>
@@ -1543,7 +1556,7 @@ const DeleteSpacesCard: React.FC<ToolProps> = ({ rawData, isError, t }) => {
       ) : null}
 
       {failures.length > 0 ? (
-        <div className="delete-spaces-failures">
+        <div  {...withLiteralClass("delete-spaces-failures", contentStyles.deleteFailures)}>
           {failures.map((item: any) => (
             <div key={item.dbKey}>{item.dbKey}: HTTP {item.status}</div>
           ))}
@@ -1572,7 +1585,7 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
       asOptionalTrimmedString(rawData.title) ??
       t("page.untitled", "Untitled Page");
     return (
-      <div className="t-inline-link">
+      <div data-hook="messages-esc-t-inline-link" {...withLiteralClass("t-inline-link", contentStyles.tInlineLink)}>
         <button
           type="button"
           onClick={() => openPreview(rawData.id, title)}
@@ -1594,12 +1607,12 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
             appearance: "none",
           }}
         >
-          <LuFileText size={14} className="icon-success" aria-hidden="true" />
-          <span className="u-font-bold u-truncate u-text-sm u-flex-1">{title}</span>
+          <LuFileText size={14} {...withLiteralClass("icon-success", contentStyles.iconSuccess)} aria-hidden="true" />
+          <span {...withLiteralClass("u-font-bold u-truncate u-text-sm u-flex-1", contentStyles.truncate, contentStyles.boldText)}>{title}</span>
         </button>
         <button
           type="button"
-          className="btn-tiny"
+          data-hook="messages-esc-btn-tiny" className="btn-tiny"
           onClick={() => navigateToPage(rawData.id)}
         >
           {t("common.open", "Open")}
@@ -1613,7 +1626,7 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
       asOptionalTrimmedString(rawData.title) ??
       t("page.untitled", "Untitled Page");
     return (
-      <div className="t-inline-link">
+      <div data-hook="messages-esc-t-inline-link" {...withLiteralClass("t-inline-link", contentStyles.tInlineLink)}>
         <button
           type="button"
           onClick={() => pageId && openPreview(pageId, title)}
@@ -1636,12 +1649,12 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
             appearance: "none",
           }}
         >
-          <LuFileText size={14} className="icon-success" aria-hidden="true" />
-          <span className="u-font-bold u-truncate u-text-sm u-flex-1">{title}</span>
+          <LuFileText size={14} {...withLiteralClass("icon-success", contentStyles.iconSuccess)} aria-hidden="true" />
+          <span {...withLiteralClass("u-font-bold u-truncate u-text-sm u-flex-1", contentStyles.truncate, contentStyles.boldText)}>{title}</span>
         </button>
         <button
           type="button"
-          className="btn-tiny"
+          data-hook="messages-esc-btn-tiny" className="btn-tiny"
           onClick={() => pageId && navigateToPage(pageId)}
           disabled={!pageId}
         >
@@ -1656,7 +1669,8 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
     return (
       <button
         type="button"
-        className="t-card-link"
+        data-hook="messages-esc-t-card-link"
+         {...withLiteralClass("t-card-link", contentStyles.tCardLink)}
         onClick={() => rawData.dbKey && navigateToPage(rawData.dbKey)}
         disabled={!rawData.dbKey}
         style={{
@@ -1668,16 +1682,16 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
           appearance: "none",
         }}
       >
-        <div className="icon-badge info">
+        <div  {...withLiteralClass("icon-badge info", contentStyles.iconBadge, contentStyles.iconBadgeInfo)}>
           <LuTable size={18} aria-hidden="true" />
         </div>
-        <div className="u-flex-1 u-min-w-0">
-          <div className="u-font-bold u-truncate u-text-sm">{title}</div>
-          <div className="u-text-xs u-dim u-font-mono">
+        <div {...withLiteralClass("u-flex-1 u-min-w-0", contentStyles.flex1Min0)}>
+          <div {...withLiteralClass("u-font-bold u-truncate u-text-sm", contentStyles.truncate, contentStyles.boldText)}>{title}</div>
+          <div {...withLiteralClass("u-text-xs u-dim u-font-mono", contentStyles.monoDim)}>
             ID: {rawData.tableId}
           </div>
         </div>
-        <LuExternalLink size={16} className="u-dim" aria-hidden="true" />
+        <LuExternalLink size={16} {...withLiteralClass("u-dim", contentStyles.dimText)} aria-hidden="true" />
       </button>
     );
   },
@@ -1687,14 +1701,14 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
     const values = rawData.values || {};
     const hasValues = Object.keys(values).length > 0;
     return (
-      <div className="t-row-added">
-        <LuTable size={13} className="u-dim" aria-hidden="true" />
-        <span className="u-text-xs u-dim">
+      <div  {...withLiteralClass("t-row-added", contentStyles.tRowAdded)}>
+        <LuTable size={13} {...withLiteralClass("u-dim", contentStyles.dimText)} aria-hidden="true" />
+        <span {...withLiteralClass("u-text-xs u-dim", contentStyles.dimText)}>
           {t("table.rowAdded", "已添加一行")}
-          {rowId && <span className="u-font-mono" style={{ marginLeft: 6, opacity: 0.5 }}>#{rowId.slice(-6)}</span>}
+          {rowId && <span {...withLiteralClass("u-font-mono", contentStyles.monoDim)} style={{ marginLeft: 6, opacity: 0.5 }}>#{rowId.slice(-6)}</span>}
         </span>
         {hasValues && (
-          <span className="u-text-xs u-dim" style={{ marginLeft: 4 }}>
+          <span {...withLiteralClass("u-text-xs u-dim", contentStyles.dimText)} style={{ marginLeft: 4 }}>
             — {Object.entries(values).map(([k, v]) => `${k}: ${v}`).join(", ")}
           </span>
         )}
@@ -1742,9 +1756,9 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
         line.startsWith("No skills were discovered"),
       );
       return (
-        <div className="load-skill-card">
-          <div className="load-skill-line">
-            <LuShieldAlert size={13} className="icon-error" aria-hidden="true" />
+        <div  {...withLiteralClass("load-skill-card", contentStyles.loadSkillCard)}>
+          <div  {...withLiteralClass("load-skill-line", contentStyles.loadSkillLine)}>
+            <LuShieldAlert size={13} {...withLiteralClass("icon-error", contentStyles.iconError)} aria-hidden="true" />
             <span>
               {failedName
                 ? `Skill "${failedName}" not found`
@@ -1752,11 +1766,11 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
             </span>
           </div>
           {availableLine ? (
-            <div className="u-text-xs u-dim">
+            <div {...withLiteralClass("u-text-xs u-dim", contentStyles.dimText)}>
               {availableLine}
             </div>
           ) : noneLine ? (
-            <div className="u-text-xs u-dim">{noneLine}</div>
+            <div {...withLiteralClass("u-text-xs u-dim", contentStyles.dimText)}>{noneLine}</div>
           ) : null}
         </div>
       );
@@ -1767,15 +1781,15 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
       "";
     const body = extractLoadSkillBody(content);
     return (
-      <div className="load-skill-card">
-        <div className="load-skill-line">
-          <LuCheck size={13} className="icon-success" aria-hidden="true" />
+      <div  {...withLiteralClass("load-skill-card", contentStyles.loadSkillCard)}>
+        <div  {...withLiteralClass("load-skill-line", contentStyles.loadSkillLine)}>
+          <LuCheck size={13} {...withLiteralClass("icon-success", contentStyles.iconSuccess)} aria-hidden="true" />
           <span>
             {name ? `Skill "${name}" loaded inline` : "Skill loaded inline"}
           </span>
         </div>
         {body ? (
-          <CollapsibleToolText text={body} className="code-dump" />
+          <CollapsibleToolText text={body}  {...withLiteralClass("code-dump", contentStyles.codeDump)} />
         ) : null}
       </div>
     );
@@ -1832,7 +1846,7 @@ const LazyJsonDump: React.FC<{ data: unknown }> = ({ data }) => {
     }
   }, [data]);
 
-  return <CollapsibleToolText text={json} className="code-dump" />;
+  return <CollapsibleToolText text={json}  {...withLiteralClass("code-dump", contentStyles.codeDump)} />;
 };
 
 const ToolMessageContent: React.FC<ToolMessageContentProps> = (props) => {
@@ -1847,7 +1861,7 @@ const ToolMessageContent: React.FC<ToolMessageContentProps> = (props) => {
   if (props.toolName === "setTodoList" && !conversationTodoEnabled) return null;
 
   return (
-    <div className="t-content-root">
+    <div  {...withLiteralClass("t-content-root", contentStyles.contentRoot)}>
       {Component ? (
         <Component {...props} rawData={normalizedRawData} />
       ) : (

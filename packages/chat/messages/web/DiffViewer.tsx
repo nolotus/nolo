@@ -1,5 +1,8 @@
+
 import React, { useMemo } from "react";
 import { LuFileDiff } from "react-icons/lu";
+import { withLiteralClass } from "./toolMessageShared";
+import { toolMessageContentStyles as cs } from "./toolMessageContentStyles";
 import {
   buildDiffRows,
   summarizeDiffRows,
@@ -17,7 +20,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ parts, filePath }) => {
 
   if (rows.length === 0) {
     return (
-      <div className="diff-viewer diff-viewer--empty">
+      <div {...withLiteralClass("diff-viewer diff-viewer--empty", cs.diffViewer, cs.diffEmpty)}>
         <LuFileDiff size={15} aria-hidden="true" />
         <span>No diff available</span>
       </div>
@@ -25,33 +28,33 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ parts, filePath }) => {
   }
 
   return (
-    <div className="diff-viewer" role="region" aria-label={`Diff for ${filePath}`}>
-      <div className="diff-viewer__summary">
-        <span className="diff-viewer__summary-file">{filePath}</span>
-        <span className="diff-viewer__stat diff-viewer__stat--add">
+    <div {...withLiteralClass("diff-viewer", cs.diffViewer)} role="region" aria-label={`Diff for ${filePath}`}>
+      <div {...withLiteralClass("diff-viewer__summary", cs.diffSummary)}>
+        <span {...withLiteralClass("diff-viewer__summary-file", cs.diffFile)}>{filePath}</span>
+        <span {...withLiteralClass("diff-viewer__stat diff-viewer__stat--add", cs.diffStat, cs.diffAdd)}>
           +{summary.added}
         </span>
-        <span className="diff-viewer__stat diff-viewer__stat--remove">
+        <span {...withLiteralClass("diff-viewer__stat diff-viewer__stat--remove", cs.diffStat, cs.diffRemove)}>
           -{summary.removed}
         </span>
       </div>
 
-      <div className="diff-viewer__body">
+      <div {...withLiteralClass("diff-viewer__body", cs.diffBody)}>
         {rows.map((row) => (
           <div
             key={row.id}
-            className={`diff-viewer__row diff-viewer__row--${row.kind}`}
+            {...withLiteralClass(`diff-viewer__row diff-viewer__row--${row.kind}`, cs.diffRow, row.kind === "added" && cs.diffAdded, row.kind === "removed" && cs.diffRemoved)}
           >
-            <span className="diff-viewer__line diff-viewer__line--old">
+            <span {...withLiteralClass("diff-viewer__line diff-viewer__line--old", cs.diffLine)}>
               {row.oldLine ?? ""}
             </span>
-            <span className="diff-viewer__line diff-viewer__line--new">
+            <span {...withLiteralClass("diff-viewer__line diff-viewer__line--new", cs.diffLine)}>
               {row.newLine ?? ""}
             </span>
-            <span className="diff-viewer__marker">
+            <span {...withLiteralClass("diff-viewer__marker", cs.diffLine, cs.diffMarker, row.kind === "added" && cs.diffMarkerAdded, row.kind === "removed" && cs.diffMarkerRemoved)}>
               {row.kind === "added" ? "+" : row.kind === "removed" ? "-" : " "}
             </span>
-            <code className="diff-viewer__code">{row.content || " "}</code>
+            <code {...withLiteralClass("diff-viewer__code", cs.diffCode)}>{row.content || " "}</code>
           </div>
         ))}
       </div>

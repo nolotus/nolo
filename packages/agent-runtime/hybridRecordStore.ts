@@ -142,10 +142,19 @@ export function parseSyncServersEnv(env: SyncServersEnvLike | undefined) {
     .filter((value) => value.length > 0);
 }
 
+/** Read 路径远端 fallback 的整体预算（ms），requestTimeoutMs 未传时生效；0/负数=关闭超时。 */
+export const DEFAULT_HYBRID_READ_TIMEOUT_MS = 250;
+
 export function createHybridRecordStore(
   deps: HybridRecordStoreDeps
 ): HybridRecordStore {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  // PERF(H2): 本地 miss → 远端 fallback 需要超时保护。未显式配置时默认 250ms
+  // （整体预算，跨 server 共享）。注意语义：显式传 requestTimeoutMs（含 desktop
+  // 的 300s）也按「整体预算、超时=miss 不 advance」执行——per-server 单次超时
+  // 语义已并入共享预算；desktop 单 server 场景等价，多 server 下总预算从
+  // N×300s 收敛为 300s（如需放宽可调大 requestTimeoutMs）。
+  const requestTimeoutMs = deps.requestTimeoutMs ?? DEFAULT_HYBRID_READ_TIMEOUT_MS;
 
   return {
     read: async (dbKey, options) => {
@@ -154,11 +163,24 @@ export function createHybridRecordStore(
       if (normalizedLocalRecord && options?.remote !== true) return normalizedLocalRecord;
       if (options?.remote === false) return null;
 
+      // 远端 fallback 整体预算：每个 server 尝试只用剩余预算（AbortSignal.timeout）。
+      // 超时/失败沿用既有 miss 语义（进 catch → 下一个 server / 返回本地），
+      // 不新增重试；预算耗尽后不再发起新的远端请求，按 miss 返回本地结果。
+      // requestTimeoutMs <= 0 → 关闭超时（保持历史行为）。
+      const fallbackDeadlineMs =
+        requestTimeoutMs > 0 ? Date.now() + requestTimeoutMs : null;
+
       for (const server of resolveHybridServers(
         deps.defaultServer,
         options?.preferredServerOrigin,
         deps.fallbackServers
       )) {
+        const remainingMs =
+          fallbackDeadlineMs === null
+            ? null
+            : fallbackDeadlineMs - Date.now();
+        if (remainingMs !== null && remainingMs <= 0) break;
+
         let remoteRecord = null;
         try {
           remoteRecord = await fetchHybridRemoteRecord({
@@ -166,8 +188,8 @@ export function createHybridRecordStore(
             server,
             authToken: deps.authToken,
             fetchImpl,
-            ...(deps.requestTimeoutMs
-              ? { signal: AbortSignal.timeout(deps.requestTimeoutMs) }
+            ...(remainingMs !== null
+              ? { signal: AbortSignal.timeout(remainingMs) }
               : {}),
           });
         } catch {

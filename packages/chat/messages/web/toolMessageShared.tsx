@@ -1,5 +1,8 @@
 // ToolMessageItem 中可被多处复用的纯函数与纯组件
+import * as stylex from "@stylexjs/stylex";
 import React, { useMemo, useState } from "react";
+import { toolMessageStyles } from "./toolMessageStyles";
+import { messagesStyles } from "./messagesStyles";
 import {
   LuCheck,
   LuCircle,
@@ -11,6 +14,25 @@ import {
   TOOL_OUTPUT_PREVIEW_CHARS,
   TOOL_OUTPUT_PREVIEW_LINES,
 } from "../toolPresentation";
+
+/**
+ * 保留字面 className 作 DOM/测试锚点，同时叠加 StyleX 原子类。
+ *
+ * 为什么必须用这个助手而不是直接写 ` {...withLiteralClass("x", s)}`：
+ * JSX 展开属性位于 className 之后时，返回对象里的 className 键会**整体覆盖**
+ * 字面 className（对象展开同名键后者胜），原类名从 DOM 消失——样式生效但
+ * 所有断言 DOM 类名的测试与遗留选择器全部失效（2026-08-31 实测）。
+ */
+export const withLiteralClass = (
+  literal: string,
+  ...styles: Array<Parameters<typeof stylex.props>[0] | false | null | undefined>
+): { className: string } => {
+  const active = styles.filter(Boolean) as Parameters<typeof stylex.props>[0][];
+  if (active.length === 0) return { className: literal };
+  const { className } = stylex.props(...active) as { className?: string };
+  return { className: className ? `${literal} ${className}` : literal };
+};
+
 
 export const safeParse = (content: any) => {
   if (typeof content === "object" && content !== null) return content;
@@ -28,11 +50,11 @@ export const StatusIcon = ({
   status: string;
   toolName?: string;
 }) => {
-  if (status === "running") return <LuCircle className="icon-primary" aria-hidden="true" />;
-  if (status === "repairing") return <LuCircle className="icon-warning" aria-hidden="true" />;
-  if (status === "failed") return <LuCircleAlert className="icon-error" aria-hidden="true" />;
-  if (status === "pending") return <LuCircle className="icon-muted" aria-hidden="true" />;
-  return <LuCheck className="icon-success" aria-hidden="true" />;
+  if (status === "running") return <LuCircle {...withLiteralClass("icon-primary", messagesStyles.iconPrimary)} aria-hidden="true" />;
+  if (status === "repairing") return <LuCircle {...withLiteralClass("icon-warning", messagesStyles.iconWarning)} aria-hidden="true" />;
+  if (status === "failed") return <LuCircleAlert {...withLiteralClass("icon-error", messagesStyles.iconError)} aria-hidden="true" />;
+  if (status === "pending") return <LuCircle {...withLiteralClass("icon-muted", messagesStyles.iconMuted)} aria-hidden="true" />;
+  return <LuCheck {...withLiteralClass("icon-success", messagesStyles.iconSuccess)} aria-hidden="true" />;
 };
 
 /**
@@ -66,7 +88,7 @@ export const CollapsibleToolText: React.FC<{
   const defaultExpandLabel = `展开全部 (${meta.totalChars.toLocaleString()} 字符)`;
 
   return (
-    <div className="tool-text-collapse">
+    <div  {...withLiteralClass("tool-text-collapse", toolMessageStyles.actionDetail)}>
       <pre
         className={className}
         style={

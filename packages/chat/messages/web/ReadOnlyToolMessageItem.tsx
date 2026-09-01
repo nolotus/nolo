@@ -3,7 +3,7 @@
 import * as stylex from "@stylexjs/stylex";
 import React, { memo, useMemo, useState } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
-import { StatusIcon, safeParse } from "./toolMessageShared";
+import { StatusIcon, safeParse, withLiteralClass } from "./toolMessageShared";
 import ToolMessageContent from "./ToolMessageContent";
 import {
   buildRunStreamingAgentHandoffPresentation,
@@ -18,6 +18,7 @@ import {
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { readOnlyToolMessageItemStyles as roStyles } from "./readOnlyToolMessageItemStyles";
 import { messagesStyles } from "./messagesStyles";
+import { toolMessageStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 
 /** Button reset so `.tr-header` keeps layout when used as `<button>`. */
@@ -75,40 +76,40 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
 
     return (
       <div
-        className={["tool-msg-row", statusStr, collapsed ? "is-collapsed" : ""].filter(Boolean).join(" ")}
-        {...stylex.props(messagesStyles.toolMsgRow, roStyles.rowHandoff)}
+        data-hook="messages-esc-tool-row"
+        {...withLiteralClass(["tool-msg-row", statusStr, collapsed ? "is-collapsed" : ""].filter(Boolean).join(" "), toolMessageStyles.row, roStyles.rowHandoff)}
       >
         <button
           type="button"
           className="tr-header"
-          {...stylex.props(messagesStyles.trHeader)}
+          data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolMessageStyles.header)}
           style={TR_HEADER_BUTTON_STYLE}
           onClick={() => setCollapsed((p) => !p)}
           aria-expanded={!collapsed}
         >
-          <div className="tr-main" {...stylex.props(messagesStyles.trMain)}>
+          <div  {...withLiteralClass("tr-main", toolMessageStyles.main)}>
             <div
-              className={`tr-icon ${statusStr}`}
-              {...stylex.props(messagesStyles.trIcon)}
+
+              {...withLiteralClass(`tr-icon ${statusStr}`, toolMessageStyles.icon)}
             >
               <StatusIcon status={statusStr} toolName={toolName} />
             </div>
-            <span className="tr-summary u-truncate" {...stylex.props(messagesStyles.trSummary)}>{handoff.summary}</span>
+            <span data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolMessageStyles.truncate, toolMessageStyles.summary)}>{handoff.summary}</span>
           </div>
-          <div className="tr-chevron" {...stylex.props(messagesStyles.trChevron)} aria-hidden="true">
+          <div  data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolMessageStyles.chevron)} aria-hidden="true">
             {collapsed ? <LuChevronRight size={14} aria-hidden="true" /> : <LuChevronDown size={14} aria-hidden="true" />}
           </div>
         </button>
 
         {!collapsed && (
-          <div className="tr-body handoff-tool__body" {...stylex.props(messagesStyles.trBody, roStyles.handoffBody)}>
+          <div  {...withLiteralClass("tr-body handoff-tool__body", toolMessageStyles.body, roStyles.handoffBody)}>
             {!handoff.inline && (
-              <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
-                <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>子 dialog</span>
+              <div  {...withLiteralClass("handoff-tool__detail-row", roStyles.handoffDetailRow)}>
+                <span  {...withLiteralClass("handoff-tool__label", roStyles.handoffLabel)}>子 dialog</span>
                 {handoff.targetDialogKey ? (
                   <a
-                    className="handoff-tool__link"
-                    {...stylex.props(roStyles.handoffLink)}
+                    
+                    {...withLiteralClass("handoff-tool__link", roStyles.handoffLink)}
                     href={buildDialogUrl(
                       handoff.targetDialogKey,
                       handoff.targetSpaceId
@@ -117,27 +118,27 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
                     打开对话
                   </a>
                 ) : (
-                  <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>未单独创建</span>
+                  <span  {...withLiteralClass("handoff-tool__value", roStyles.handoffValue)}>未单独创建</span>
                 )}
               </div>
             )}
-            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
-              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>目标 Agent</span>
+            <div  {...withLiteralClass("handoff-tool__detail-row", roStyles.handoffDetailRow)}>
+              <span  {...withLiteralClass("handoff-tool__label", roStyles.handoffLabel)}>目标 Agent</span>
               <span
-                className="handoff-tool__value"
-                {...stylex.props(roStyles.handoffValue)}
+                
+                {...withLiteralClass("handoff-tool__value", roStyles.handoffValue)}
                 title={handoff.agentKey || undefined}
               >
                 {handoff.targetLabel}
               </span>
             </div>
-            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
-              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>输入摘要</span>
-              <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>{handoff.inputSummary}</span>
+            <div  {...withLiteralClass("handoff-tool__detail-row", roStyles.handoffDetailRow)}>
+              <span  {...withLiteralClass("handoff-tool__label", roStyles.handoffLabel)}>输入摘要</span>
+              <span  {...withLiteralClass("handoff-tool__value", roStyles.handoffValue)}>{handoff.inputSummary}</span>
             </div>
-            <div className="handoff-tool__detail-row" {...stylex.props(roStyles.handoffDetailRow)}>
-              <span className="handoff-tool__label" {...stylex.props(roStyles.handoffLabel)}>状态</span>
-              <span className="handoff-tool__value" {...stylex.props(roStyles.handoffValue)}>{handoff.statusLabel}</span>
+            <div  {...withLiteralClass("handoff-tool__detail-row", roStyles.handoffDetailRow)}>
+              <span  {...withLiteralClass("handoff-tool__label", roStyles.handoffLabel)}>状态</span>
+              <span  {...withLiteralClass("handoff-tool__value", roStyles.handoffValue)}>{handoff.statusLabel}</span>
             </div>
           </div>
         )}
@@ -148,33 +149,34 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
 
   return (
     <div
-      className={`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`}
-      {...stylex.props(messagesStyles.toolMsgRow)}
+      data-hook="messages-esc-tool-row"
+      {...withLiteralClass(`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`, toolStyles.row)}
     >
       <button
         type="button"
         className="tr-header"
-        {...stylex.props(messagesStyles.trHeader)}
+        data-hook="messages-esc-tr-header"
+        {...withLiteralClass("tr-header", toolMessageStyles.header)}
         style={TR_HEADER_BUTTON_STYLE}
         onClick={() => setCollapsed((p) => !p)}
         aria-expanded={!collapsed}
       >
-        <div className="tr-main" {...stylex.props(messagesStyles.trMain)}>
+        <div  {...withLiteralClass("tr-main", toolMessageStyles.main)}>
           <div
-            className={`tr-icon ${statusStr}`}
-            {...stylex.props(messagesStyles.trIcon)}
+
+            {...withLiteralClass(`tr-icon ${statusStr}`, toolMessageStyles.icon)}
           >
             <StatusIcon status={statusStr} toolName={toolName} />
           </div>
-          <span className="tr-summary u-truncate" {...stylex.props(messagesStyles.trSummary)}>{displaySummary}</span>
+          <span data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolMessageStyles.truncate, toolMessageStyles.summary)}>{displaySummary}</span>
         </div>
-        <div className="tr-chevron" {...stylex.props(messagesStyles.trChevron)} aria-hidden="true">
+        <div  data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolMessageStyles.chevron)} aria-hidden="true">
           {collapsed ? <LuChevronRight size={14} aria-hidden="true" /> : <LuChevronDown size={14} aria-hidden="true" />}
         </div>
       </button>
 
       {!collapsed && (
-        <div className="tr-body" {...stylex.props(messagesStyles.trBody)}>
+        <div  {...withLiteralClass("tr-body", toolMessageStyles.body)} data-hook="messages-esc-tr-body">
           <ToolMessageContent
             toolName={toolName}
             rawData={rawData}

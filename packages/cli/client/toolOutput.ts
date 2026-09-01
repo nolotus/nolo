@@ -1,12 +1,8 @@
-import { clipPathAware, formatFetchTreeLines, formatHomePath, formatReadItemPath, formatReadTreeLines, formatRunTreeLines, formatSearchItemQuery, formatSearchTreeLines } from "./formatReadPathTree";
-export { clipPathAware };
 import { clipCompactText } from "core/clipCompactText";
-import { compactWhitespace } from "core/compactWhitespace";
-import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { clipHeadAndTail } from "core/clipHeadAndTail";
 export { clipHeadAndTail };
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
-import { readActionGate, readCommandActionGatePayload } from "../../agent-runtime/actionGate";
+import { readActionGate } from "../../agent-runtime/actionGate";
 import { parseUiAskChoiceContent } from "../../ai/tools/uiAskChoiceTool";
 import { formatAgentListCard } from "../../ai/tools/noloWorkspaceReadTools";
 import {
@@ -17,81 +13,16 @@ import {
   formatStatusRunCard,
   formatStopRunCard,
   isAgentRunTerminalStatus,
-  runShowsLogTail,
   type RunLabelFields,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
-import { type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor, themeText } from "../tui/theme";
-import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
-import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
-import { diffLines } from "diff";
+import { themeText } from "../tui/theme";
+import { stripAnsi } from "../tui/tuiAnsi";
 import { agentRunCardLabels, t, toolLabel } from "../tui/i18n";
-
-export type ToolDisplayMode = "normal" | "pro" | "hide" | "verbose" | "compact";
-
-export function normalizeToolDisplayMode(
-  raw: string | undefined,
-  fallback: ToolDisplayMode = "normal"
-): ToolDisplayMode {
-  const normalized = asTrimmedLowercaseString(raw);
-  if (normalized === "hide" || normalized === "off" || normalized === "false" || normalized === "0") {
-    return "hide";
-  }
-  if (
-    normalized === "verbose" ||
-    normalized === "debug" ||
-    normalized === "trace" ||
-    normalized === "full"
-  ) {
-    return "verbose";
-  }
-  if (normalized === "normal" || normalized === "summary" || normalized === "on") {
-    return "normal";
-  }
-  if (normalized === "pro" || normalized === "compact" || normalized === "minimal" || normalized === "short") {
-    return "pro";
-  }
-  return fallback;
-}
-
-export function resolveToolDisplayMode(env: Record<string, string | undefined> = process.env) {
-  const legacyTrace = asTrimmedLowercaseString(env.NOLO_TRACE_TOOLS);
-  if (legacyTrace === "0" || legacyTrace === "false" || legacyTrace === "off") {
-    return "hide";
-  }
-  if (legacyTrace === "verbose" || legacyTrace === "full") {
-    return "verbose";
-  }
-  return normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "normal");
-}
-
-export function shouldEmitToolEvents(mode: ToolDisplayMode) {
-  return mode !== "hide";
-}
 
 function clip(value: string, max = 72) {
   return clipCompactText(value, max, "…");
-}
-
-/**
- * Path-aware clip: keeps the leading segment and the filename, eliding the
- * middle, so a long path stays identifiable. Non-path values fall back to the
- * shared tail clip.
- *
- * The path branch is for posix-style tool args (this repo's tool args are
- * always posix); Windows backslash paths are intentionally not special-cased.
- * Shares compact-then-clip preconditions with `clipCompactText` so short
- * values behave byte-identically.
- */
-
-export function formatActiveToolLabel(
-  event: Pick<LocalAgentToolEvent, "toolName" | "argumentsPreview">
-) {
-  const toolName = event.toolName || "tool";
-  const args = clipPathAware(event.argumentsPreview ?? "");
-  const label = toolLabel(toolName);
-  return args ? `${label} ${args}` : label;
 }
 
 /**
@@ -106,242 +37,11 @@ export function formatConservativeActiveToolLabel(
   return toolLabel(event.toolName || "tool");
 }
 
-/**
- * Trailing status for a finished tool.
- *
- * Two kinds of signal survive here:
- *  1. states the user can act on — a pending confirmation, a timeout, a
- *     non-zero exit;
- *  2. content visibility for file tools — readFile's read range (so the user
- *     can spot an agent paging a large file in disjoint chunks and ask it to
- *     split the work) and editFile's actual added/removed snippets.
- *
- * Generic output size (line counts on every successful tool) is still dropped:
- * it padded every line without telling the user anything actionable.
- */
-export type EditSnippetLine = { kind: DiffLineKind; text: string };
-
-function compactResultHint(event: LocalAgentToolEvent): {
-  inline: string;
-  detail?: EditSnippetLine[];
-} {
-  const gate = readActionGate(event.metadata?.actionGate);
-  if (gate) {
-    const commandPayload = gate.kind === "handoff" ? readCommandActionGatePayload(gate.payload) : null;
-    const command = commandPayload?.displayCommand ?? commandPayload?.command.join(" ") ?? "";
-    const detail = command.trim() ? command : gate.title;
-    return { inline: `${t("toolNeedsAction")}: ${clip(detail, 120)}` };
-  }
-  if (event.metadata?.timedOut) return { inline: t("toolTimedOut") };
-
-  // readFile: show the read range only when the file was sliced, not when read
-  // in full (1..N/N would be noise on every ordinary read).
-  if (event.toolName === "readFile" && event.metadata) {
-    const range = readReadFileRange(event.metadata);
-    if (range) return { inline: range };
-  }
-
-  // editFile: show the actual added/removed snippet so the user can see what
-  // changed without opening the file.
-  if (event.toolName === "editFile" && event.metadata) {
-    const res = formatEditFileSnippet(event.metadata);
-    if (res) {
-      const stats: string[] = [];
-      if (res.addedCount > 0) stats.push(`+${res.addedCount}`);
-      if (res.removedCount > 0) stats.push(`-${res.removedCount}`);
-      const inline = stats.length > 0 ? `(${stats.join(", ")})` : "";
-      return { inline, detail: res.lines };
-    }
-  }
-
-  // writeFile: show line count or size if available in metadata
-  if (event.toolName === "writeFile" && event.metadata) {
-    const totalLines = event.metadata.totalLines ?? event.metadata.lines;
-    if (typeof totalLines === "number" && totalLines > 0) {
-      return { inline: `(+${totalLines})` };
-    }
-  }
-
-  const summary = event.summary;
-  if (!summary) return { inline: "" };
-  const exitMatch = summary.match(/exit=(\d+)/);
-  if (exitMatch && exitMatch[1] !== "0") return { inline: `${t("toolExitCode")} ${exitMatch[1]}` };
-  return { inline: "" };
-}
-
-function readReadFileRange(metadata: Record<string, unknown>): string | undefined {
-  const startLine = metadata.startLine;
-  const endLine = metadata.endLine;
-  const totalLines = metadata.totalLines;
-  const truncated = metadata.truncated;
-  if (
-    typeof startLine !== "number" ||
-    typeof endLine !== "number" ||
-    typeof totalLines !== "number"
-  ) {
-    return undefined;
-  }
-  // Only surface when the read was a slice of a larger file. A full read
-  // (startLine 1, endLine === totalLines, not truncated) is the common case and
-  // showing "1-2560/2560" on every read would be noise.
-  if (!truncated && startLine === 1 && endLine === totalLines) return undefined;
-  return `${startLine}-${endLine}/${totalLines}`;
-}
-
-const EDIT_SNIPPET_MAX_LINES = 24;
-const DEFAULT_EDIT_SNIPPET_MAX_WIDTH = 96;
-
-export function resolveEditSnippetMaxWidth(
-  env: Record<string, string | undefined> = process.env,
-  columns?: number
-): number {
-  if (env.NOLO_TEST_DIFF_WIDTH) {
-    const parsed = parseInt(env.NOLO_TEST_DIFF_WIDTH, 10);
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
-  }
-  const cols =
-    typeof columns === "number"
-      ? columns
-      : typeof process !== "undefined" && typeof process.stdout?.columns === "number"
-        ? process.stdout.columns
-        : 0;
-  if (cols > 0) {
-    return Math.max(80, Math.min(160, cols - 8));
-  }
-  return DEFAULT_EDIT_SNIPPET_MAX_WIDTH;
-}
-
-interface FormattedEditSnippet {
-  lines: EditSnippetLine[];
-  addedCount: number;
-  removedCount: number;
-}
-
-function formatEditFileSnippet(
-  metadata: Record<string, unknown>
-): FormattedEditSnippet | undefined {
-  const oldSnippet = typeof metadata.oldSnippet === "string" ? metadata.oldSnippet : undefined;
-  const newSnippet = typeof metadata.newSnippet === "string" ? metadata.newSnippet : undefined;
-  if (!oldSnippet && !newSnippet) return undefined;
-
-  const maxWidth = resolveEditSnippetMaxWidth();
-
-  // Degraded path: one side missing — show whichever side we have, tagged
-  // wholesale as removed/added so the user at least sees something.
-  if (oldSnippet && !newSnippet) {
-    const lines = snippetLinesWithKind(oldSnippet, "removed", maxWidth);
-    return { lines, addedCount: 0, removedCount: lines.length };
-  }
-  if (newSnippet && !oldSnippet) {
-    const lines = snippetLinesWithKind(newSnippet, "added", maxWidth);
-    return { lines, addedCount: lines.length, removedCount: 0 };
-  }
-
-  // Both present: produce a real line-level diff via `diffLines`.
-  const parts = diffLines(oldSnippet!, newSnippet!);
-  const all: EditSnippetLine[] = [];
-  let addedCount = 0;
-  let removedCount = 0;
-
-  for (const part of parts) {
-    const kind: DiffLineKind = part.added ? "added" : part.removed ? "removed" : "context";
-    // `diffLines` values end with "\n", so split drops a trailing empty element.
-    const raw = part.value.split("\n");
-    if (raw.length > 0 && raw[raw.length - 1] === "") raw.pop();
-    for (const line of raw) {
-      if (kind === "added") addedCount++;
-      if (kind === "removed") removedCount++;
-      all.push(buildEditLine(kind, line, maxWidth));
-    }
-  }
-
-  // No change at all (old === new) — nothing actionable to show.
-  const changeCount = all.filter((l) => l.kind !== "context").length;
-  if (changeCount === 0) return undefined;
-
-  return {
-    lines: windowAndTruncate(all, EDIT_SNIPPET_MAX_LINES),
-    addedCount,
-    removedCount,
-  };
-}
-
-function prefixFor(kind: DiffLineKind): string {
-  return kind === "added" ? "+ " : kind === "removed" ? "- " : "  ";
-}
-
-/**
- * Build one diff line: kind prefix + width-clipped body. Clipping uses
- * display width (CJK-aware) so a 60-char CJK line (120 columns) is truncated
- * where a `.length` check would have let it overflow.
- */
-function buildEditLine(kind: DiffLineKind, body: string, maxWidth = resolveEditSnippetMaxWidth()): EditSnippetLine {
-  return { kind, text: prefixFor(kind) + truncateByDisplayWidth(body, maxWidth) };
-}
-
-/** One-sided fallback: tag every line of a snippet with a single kind. */
-function snippetLinesWithKind(
-  snippet: string,
-  kind: DiffLineKind,
-  maxWidth = resolveEditSnippetMaxWidth()
-): EditSnippetLine[] {
-  const lines = snippet.split(/\r?\n/).filter((line) => line.length > 0);
-  return lines.slice(0, EDIT_SNIPPET_MAX_LINES).map((line) => buildEditLine(kind, line, maxWidth));
-}
-
-/**
- * Clip a line to a display-width budget, appending "…" when it overflows.
- * Width is measured by `displayWidth` (CJK-aware), not by code-unit count,
- * so a line of 60 CJK chars (120 display columns) is clipped where a
- * `.length`-based check would have let it through.
- */
-function truncateByDisplayWidth(line: string, maxWidth: number): string {
-  if (displayWidth(line) <= maxWidth) return line;
-  // Walk code points, accumulating display width; stop just before overflowing
-  // so the "…" fits within the budget.
-  let width = 0;
-  let kept = "";
-  for (const char of line) {
-    const w = displayWidth(char);
-    if (width + w + 1 > maxWidth) break; // +1 reserves room for "…"
-    kept += char;
-    width += w;
-  }
-  return `${kept}…`;
-}
-
-/**
- * Keep the window centered on the first changed line so a change at the tail
- * of a long snippet isn't clipped away by a naive head truncation. When the
- * changed region plus its surrounding context fits within maxLines, the
- * contiguous run from the first change is kept; otherwise the window is
- * shifted so the first change is visible.
- */
-function windowAndTruncate(lines: EditSnippetLine[], maxLines: number): EditSnippetLine[] {
-  if (lines.length <= maxLines) return lines;
-  const firstChange = lines.findIndex((l) => l.kind !== "context");
-  if (firstChange === -1) return lines.slice(0, maxLines);
-  // Center the window on the first change, clamped to [0, len-maxLines].
-  const half = Math.floor(maxLines / 2);
-  let start = Math.max(0, firstChange - half);
-  if (start + maxLines > lines.length) start = Math.max(0, lines.length - maxLines);
-  const kept = lines.slice(start, start + maxLines);
-  const omitted = lines.length - kept.length;
-  if (omitted > 0) {
-    kept.push({ kind: "context", text: `  … +${omitted} more lines` });
-  }
-  return kept;
-}
-
 function isFailedToolResult(event: LocalAgentToolEvent) {
   const exitCode = event.metadata?.exitCode;
   if (event.metadata?.actionGate) return false;
   if (typeof exitCode === "number" && exitCode !== 0) return true;
   return Boolean(event.metadata?.timedOut);
-}
-
-function isNeedsActionToolResult(event: LocalAgentToolEvent) {
-  return Boolean(event.metadata?.actionGate);
 }
 
 /**
@@ -624,17 +324,6 @@ function recoverOrchestrationCard(
   return renderRunCard(snapshot, opts);
 }
 
-/**
- * Parse a controlAgentRun tool-result into a foldable status snapshot.
- * List/stop/not_found cards are not foldable status polls.
- */
-function parseControlAgentRunStatusEvent(
-  event: LocalAgentToolEvent
-): AgentRunSnapshot | null {
-  const parsed = parseAgentRunEvent(event);
-  return parsed?.kind === "status" ? parsed.snapshot : null;
-}
-
 function formatOrchestrationCardBlock(
   event: LocalAgentToolEvent,
   toolName: string,
@@ -747,80 +436,60 @@ function sanitizeRunCardForNormal(lines: string[]): string[] {
 }
 
 /**
- * Fold two polls of the same run. The later poll wins field by field, but a
- * poll that omits a field must not erase what an earlier one reported — a
- * status endpoint that stops echoing `lastToolNames` should not blank the
- * progress row, and a terminal poll that reports only `status` should still be
- * able to state the run's totals.
+ * normal 模式 gist 宽度预算：够认出对象，短到不破坏单行扫描。
  */
-function mergeRunSnapshot(previous: AgentRunSnapshot, next: AgentRunSnapshot): AgentRunSnapshot {
-  return {
-    ...previous,
-    ...next,
-    errorMessage: next.errorMessage ?? previous.errorMessage,
-    logLines: next.logLines ?? previous.logLines,
-    logKey: next.logKey || previous.logKey,
-    toolCallCount: next.toolCallCount ?? previous.toolCallCount,
-    lastToolNames: next.lastToolNames ?? previous.lastToolNames,
-    lastAssistantText: next.lastAssistantText ?? previous.lastAssistantText,
-    startedAt: next.startedAt ?? previous.startedAt,
-    finishedAt: next.finishedAt ?? previous.finishedAt,
-  };
+const NORMAL_TOOL_GIST_MAX = 28;
+
+function gistClip(value: string, max = NORMAL_TOOL_GIST_MAX): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "";
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }
 
-function formatFoldedControlStatusCard(
-  snapshot: AgentRunSnapshot & { includeLogTail: boolean },
-  colorEnabled: boolean
-): string {
-  const body = renderRunCard(snapshot, { includeLogTail: snapshot.includeLogTail });
-  // Reuse the same ● card chrome as a normal orchestration result.
-  return formatOrchestrationCardBlock(
-    {
-      type: "tool-result",
-      round: 0,
-      toolCallId: `fold-${snapshot.runId}`,
-      toolName: "controlAgentRun",
-      content: "",
-      metadata: { displayData: body },
-    },
-    "controlAgentRun",
-    colorEnabled
-  );
+/**
+ * 简单命令的动作名词：前两个 token（程序 + 子命令，如 "bun test"）。
+ * 复合 shell——管道 / && / ; / 重定向 / 命令替换 / env 前缀 / cd 开头——
+ * 按管道噪音处理，不给摘要：gist 只回答「在跑什么」，绝不携带参数细节。
+ */
+function commandHeadGist(command: string): string {
+  const trimmed = command.replace(/\s+/g, " ").trim();
+  if (!trimmed || /[|;&<>`$]/.test(trimmed)) return "";
+  const tokens = trimmed.split(" ");
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]!)) return "";
+  if (["cd", "pushd", "popd", "source", "."].includes(tokens[0]!)) return "";
+  return gistClip(tokens.slice(0, 2).join(" "), 24);
 }
 
-function formatVerboseToolEvent(event: LocalAgentToolEvent, colorEnabled: boolean) {
-  const round = event.round + 1;
-  const detail = event.argumentsPreview ? ` ${event.argumentsPreview}` : "";
-  if (event.type === "tool-call") {
-    return formatToolTraceLine(`[nolo:tool] #${round} -> ${event.toolName}${detail}`, colorEnabled);
-  }
-  if (event.type === "tool-error") {
-    const elapsed = typeof event.elapsedMs === "number" ? ` ${event.elapsedMs}ms` : "";
-    return formatToolTraceLine(
-      `[nolo:tool] #${round} !! ${event.toolName}${elapsed}: ${event.message ?? "failed"}`,
-      colorEnabled,
-      "error"
-    );
-  }
-  const elapsed = typeof event.elapsedMs === "number" ? ` ${event.elapsedMs}ms` : "";
-  // ask_user: render the question + numbered choices even in verbose mode.
-  if (event.type === "tool-result" && (event.toolName === "ask_user" || event.metadata?.uiAskChoice)) {
-    const block = formatUiAskChoiceBlock(event, colorEnabled);
-    if (block) return `${formatToolTraceLine(`[nolo:tool] #${round} <- ${event.toolName}${elapsed}`, colorEnabled)}${block}`;
-  }
-  const summary = event.summary ? ` ${event.summary}` : "";
-  return formatToolTraceLine(
-    `[nolo:tool] #${round} <- ${event.toolName}${elapsed}${summary}`,
-    colorEnabled
-  );
+function pathBasenameGist(path: string): string {
+  const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
+  const base = segments.pop();
+  return base ? gistClip(base) : "";
+}
+
+/**
+ * normal 模式的派生摘要（gist）：动作对象的最小可感知名词，不是原始参数。
+ * 只从 localLoop 安全观测投影取值（metadata.path / metadata.command，已裁剪
+ * <=240）；argumentsPreview 是模型可控的原始参数文本，绝不进 normal 行。
+ * 缺失时回退纯「label ✓」形式。原则（2026-08-31 owner 定调）：用户不需要
+ * 全量，但需要感知 agent 大概在干嘛——raw args 是管道噪音，gist 是产品反馈。
+ */
+function normalToolGist(event: LocalAgentToolEvent): string {
+  const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  const path = typeof metadata.path === "string" ? metadata.path : "";
+  if (path) return pathBasenameGist(path);
+  const command = typeof metadata.command === "string" ? metadata.command : "";
+  if (command) return commandHeadGist(command);
+  return "";
 }
 
 /**
  * Ordinary-user projection of a tool event.
  *
- * Deliberately excludes arguments, paths, commands and result bodies. Those
- * belong to pro/verbose mode and are often implementation plumbing
- * (cwd/echo/pipelines) rather than useful product feedback.
+ * Raw arguments, full commands and result bodies stay out of normal mode —
+ * those are implementation plumbing (cwd/echo/pipelines), pro/verbose
+ * territory. What normal mode DOES show (2026-08-31) is a derived gist:
+ * basename of the touched file / head tokens of a simple command, so users
+ * can feel what the agent is roughly doing without reading plumbing.
  */
 function formatNormalToolLine(
   event: LocalAgentToolEvent,
@@ -864,216 +533,8 @@ function formatNormalToolLine(
   if (isFailedToolResult(event)) {
     return formatToolTraceLine(`▸ ${label}  ✗ ${t("toolFailed")}`, colorEnabled, "error");
   }
-  return formatToolTraceLine(`▸ ${label}  ✓`, colorEnabled);
-}
-
-function isReadToolName(name?: string): boolean {
-  if (!name) return false;
-  return name === "read" || name === "readFile" || name === "read_file" || name === "readWorkspaceFile";
-}
-
-function isSearchToolName(name?: string): boolean {
-  if (!name) return false;
-  return (
-    name === "grep" ||
-    name === "codeSearch" ||
-    name === "code_search" ||
-    name === "globFiles" ||
-    name === "glob_files" ||
-    name === "glob" ||
-    name === "searchWorkspace" ||
-    name === "search_workspace" ||
-    name === "search_all_spaces" ||
-    name === "search"
-  );
-}
-
-/**
- * Run-class tools: execShell (synchronous shell), launchProcess (detached
- * background), runCommand (legacy alias). All expose `metadata.command` as
- * the canonical leaf text, so they fold into a single • Run (N) tree when
- * they appear back-to-back, just like Read/Search.
- *
- * Action-gated (interactive handoff) results stay on the generic line so the
- * "needs action" recovery hint keeps its visible prompt — folding those into
- * a tree would bury the one signal the user must act on.
- */
-function isRunToolName(name?: string): boolean {
-  if (!name) return false;
-  return name === "execShell" || name === "runCommand" || name === "run_command" || name === "launchProcess";
-}
-
-/**
- * Fetch-class tools: fetchWebpage. Renders as a • Fetch (N) tree, mirroring
- * Read/Search/Run. The URL is the canonical leaf text.
- */
-function isFetchToolName(name?: string): boolean {
-  if (!name) return false;
-  return name === "fetchWebpage" || name === "fetch_webpage";
-}
-
-/**
- * Web-search-class tools: exa_search. Renders as a • Web search (N) tree,
- * independent from the local Search tree. Accepts both camelCase and snake_case
- * aliases to stay consistent with fetchWebpage / fetch_webpage handling.
- */
-function isWebSearchToolName(name?: string): boolean {
-  if (!name) return false;
-  return name === "exa_search" || name === "exaSearch";
-}
-
-function isRunResultFoldable(event: LocalAgentToolEvent): boolean {
-  return Boolean(event.metadata?.actionGate) === false;
-}
-
-export function formatSearchTreeBlockForCli(
-  items: Array<{ query: string; path?: string }>,
-  colorEnabled: boolean
-): string {
-  if (items.length === 0) return "";
-  const { count, lines } = formatSearchTreeLines(items);
-  const titleText = toolLabel("codeSearch");
-
-  if (!colorEnabled) {
-    const headerLine = `• ${titleText} (${count})\n`;
-    const treeLines = lines.map((l) => `  ${l.connector}${l.queryText}`).join("\n");
-    return `${headerLine}${treeLines}\n`;
-  }
-
-  const bullet = themeText("•", "chrome", true);
-  const title = styleCliText(titleText, "bold", true);
-  const countText = themeText(`(${count})`, "muted", true);
-  const headerLine = `${bullet} ${title} ${countText}\n`;
-
-  const treeLines = lines
-    .map((l) => {
-      const connector = themeText(`  ${l.connector}`, "chrome", true);
-      const queryText = themeText(l.queryText, "muted", true);
-      return `${connector}${queryText}`;
-    })
-    .join("\n");
-
-  return `${headerLine}${treeLines}\n`;
-}
-
-export function formatReadTreeBlockForCli(
-  items: Array<{ path: string; metadata?: Record<string, unknown> }>,
-  colorEnabled: boolean
-): string {
-  if (items.length === 0) return "";
-  const { count, lines } = formatReadTreeLines(items);
-  const titleText = toolLabel("readFile");
-
-  if (!colorEnabled) {
-    const headerLine = `• ${titleText} (${count})\n`;
-    const treeLines = lines.map((l) => `  ${l.connector}${l.pathWithRange}`).join("\n");
-    return `${headerLine}${treeLines}\n`;
-  }
-
-  const bullet = themeText("•", "chrome", true);
-  const title = styleCliText(titleText, "bold", true);
-  const countText = themeText(`(${count})`, "muted", true);
-  const headerLine = `${bullet} ${title} ${countText}\n`;
-
-  const treeLines = lines
-    .map((l) => {
-      const connector = themeText(`  ${l.connector}`, "chrome", true);
-      const pathText = themeText(l.pathWithRange, "muted", true);
-      return `${connector}${pathText}`;
-    })
-    .join("\n");
-
-  return `${headerLine}${treeLines}\n`;
-}
-
-export function formatRunTreeBlockForCli(
-  items: Array<{ command: string; exitCode?: number; timedOut?: boolean }>,
-  colorEnabled: boolean
-): string {
-  if (items.length === 0) return "";
-  const { count, lines } = formatRunTreeLines(items);
-  const titleText = toolLabel("execShell");
-
-  if (!colorEnabled) {
-    const headerLine = `• ${titleText} (${count})\n`;
-    const treeLines = lines.map((l) => `  ${l.connector}${l.commandText}`).join("\n");
-    return `${headerLine}${treeLines}\n`;
-  }
-
-  const bullet = themeText("•", "chrome", true);
-  const title = styleCliText(titleText, "bold", true);
-  const countText = themeText(`(${count})`, "muted", true);
-  const headerLine = `${bullet} ${title} ${countText}\n`;
-
-  const treeLines = lines
-    .map((l) => {
-      const connector = themeText(`  ${l.connector}`, "chrome", true);
-      const commandText = themeText(l.commandText, "muted", true);
-      return `${connector}${commandText}`;
-    })
-    .join("\n");
-
-  return `${headerLine}${treeLines}\n`;
-}
-
-export function formatWebSearchTreeBlockForCli(
-  items: Array<{ query: string }>,
-  colorEnabled: boolean
-): string {
-  if (items.length === 0) return "";
-  const { count, lines } = formatSearchTreeLines(items);
-  const titleText = toolLabel("exa_search");
-
-  if (!colorEnabled) {
-    const headerLine = `• ${titleText} (${count})\n`;
-    const treeLines = lines.map((l) => `  ${l.connector}${l.queryText}`).join("\n");
-    return `${headerLine}${treeLines}\n`;
-  }
-
-  const bullet = themeText("•", "chrome", true);
-  const title = styleCliText(titleText, "bold", true);
-  const countText = themeText(`(${count})`, "muted", true);
-  const headerLine = `${bullet} ${title} ${countText}\n`;
-
-  const treeLines = lines
-    .map((l) => {
-      const connector = themeText(`  ${l.connector}`, "chrome", true);
-      const queryText = themeText(l.queryText, "muted", true);
-      return `${connector}${queryText}`;
-    })
-    .join("\n");
-
-  return `${headerLine}${treeLines}\n`;
-}
-
-export function formatFetchTreeBlockForCli(
-  items: Array<{ url: string }>,
-  colorEnabled: boolean
-): string {
-  if (items.length === 0) return "";
-  const { count, lines } = formatFetchTreeLines(items);
-  const titleText = toolLabel("fetchWebpage");
-
-  if (!colorEnabled) {
-    const headerLine = `• ${titleText} (${count})\n`;
-    const treeLines = lines.map((l) => `  ${l.connector}${l.urlText}`).join("\n");
-    return `${headerLine}${treeLines}\n`;
-  }
-
-  const bullet = themeText("•", "chrome", true);
-  const title = styleCliText(titleText, "bold", true);
-  const countText = themeText(`(${count})`, "muted", true);
-  const headerLine = `${bullet} ${title} ${countText}\n`;
-
-  const treeLines = lines
-    .map((l) => {
-      const connector = themeText(`  ${l.connector}`, "chrome", true);
-      const urlText = themeText(l.urlText, "muted", true);
-      return `${connector}${urlText}`;
-    })
-    .join("\n");
-
-  return `${headerLine}${treeLines}\n`;
+  const gist = normalToolGist(event);
+  return formatToolTraceLine(gist ? `▸ ${label} · ${gist}  ✓` : `▸ ${label}  ✓`, colorEnabled);
 }
 
 /**
@@ -1175,506 +636,26 @@ function formatLoadSkillBlock(
   return `${star} ${labelPart}: ${namePart}\n`;
 }
 
-function formatCompactToolLine(
-  event: LocalAgentToolEvent,
-  pending: { toolName: string; argumentsPreview?: string } | undefined,
-  colorEnabled: boolean
-) {
-  const toolName = event.toolName || pending?.toolName || "tool";
-  const todoBlock = formatTodoListForCli(event, colorEnabled);
-  if (todoBlock) return todoBlock;
-  if (isReadToolName(toolName) && event.type === "tool-result") {
-    const rawPath =
-      (typeof event.metadata?.path === "string" ? event.metadata.path : undefined) ||
-      (typeof event.metadata?.filePath === "string" ? event.metadata.filePath : undefined) ||
-      event.argumentsPreview ||
-      pending?.argumentsPreview ||
-      "";
-    return formatReadTreeBlockForCli([{ path: rawPath, metadata: event.metadata }], colorEnabled);
-  }
-  if (isSearchToolName(toolName) && event.type === "tool-result") {
-    const rawQuery =
-      (typeof event.metadata?.query === "string" ? event.metadata.query : undefined) ||
-      (typeof event.metadata?.pattern === "string" ? event.metadata.pattern : undefined) ||
-      event.argumentsPreview ||
-      pending?.argumentsPreview ||
-      "";
-    const rawPath = typeof event.metadata?.path === "string" ? event.metadata.path : undefined;
-    return formatSearchTreeBlockForCli([{ query: rawQuery, path: rawPath }], colorEnabled);
-  }
-  if (isFetchToolName(toolName) && event.type === "tool-result") {
-    const rawUrl =
-      (typeof event.metadata?.url === "string" ? event.metadata.url : undefined) ||
-      event.argumentsPreview ||
-      pending?.argumentsPreview ||
-      "";
-    return formatFetchTreeBlockForCli([{ url: rawUrl }], colorEnabled);
-  }
-  if (isRunToolName(toolName) && event.type === "tool-result" && isRunResultFoldable(event)) {
-    const rawCommand =
-      (typeof event.metadata?.command === "string" ? event.metadata.command : undefined) ||
-      event.argumentsPreview ||
-      pending?.argumentsPreview ||
-      "";
-    const exitCode = typeof event.metadata?.exitCode === "number" ? event.metadata.exitCode : undefined;
-    const timedOut = Boolean(event.metadata?.timedOut);
-    return formatRunTreeBlockForCli([{ command: rawCommand, exitCode, timedOut }], colorEnabled);
-  }
-  const rawArgs = clipPathAware(event.argumentsPreview || pending?.argumentsPreview || "", 72);
-  const rawLabel = toolLabel(toolName);
-  const label = rawArgs ? `${rawLabel} ${rawArgs}` : rawLabel;
-  if (event.type === "tool-error") {
-    const message = clip(event.message ?? t("toolFailed"), 96);
-    return formatToolTraceLine(`▸ ${label}  ✗ ${message}`, colorEnabled, "error");
-  }
-
-  // loadSkill card is shared with normal mode (the skill name is product
-  // feedback, not plumbing); tool-error already returned above.
-  const loadSkillBlock = formatLoadSkillBlock(event, colorEnabled);
-  if (loadSkillBlock) return loadSkillBlock;
-
-  // listAgents / startAgentRun / controlAgentRun orchestration card block
-  if (
-    event.type === "tool-result" &&
-    (toolName === "listAgents" || toolName === "startAgentRun" || toolName === "controlAgentRun")
-  ) {
-    return formatOrchestrationCardBlock(event, toolName, colorEnabled);
-  }
-
-  // ask_user: render question + numbered choices instead of a generic
-  // tool trace line, so CLI users get an interactive-looking menu they can
-  // reply to by typing the number or their own answer.
-  if (event.type === "tool-result" && (event.toolName === "ask_user" || event.metadata?.uiAskChoice)) {
-    const block = formatUiAskChoiceBlock(event, colorEnabled);
-    if (block) return block;
-  }
-
-  const hint = compactResultHint(event);
-  const suffix = hint.inline ? ` ${hint.inline}` : "";
-  const failed = isFailedToolResult(event);
-  const marker = failed ? "✗" : isNeedsActionToolResult(event) ? "!" : "✓";
-
-  let mainLine: string;
-  if (!colorEnabled) {
-    mainLine = `▸ ${label}  ${marker}${suffix}\n`;
-  } else {
-    const chromePointer = themeText("▸", "chrome", true);
-    const mutedLabel = themeText(rawLabel, "muted", true);
-    const argsPart = rawArgs ? ` ${dimCliText(rawArgs, true)}` : "";
-    const statusToken = failed
-      ? themeText("✗", "danger", true)
-      : isNeedsActionToolResult(event)
-        ? themeText("!", "warning", true)
-        : themeText("✓", "success", true);
-    const suffixPart = hint.inline ? ` ${dimCliText(hint.inline, true)}` : "";
-    mainLine = `${chromePointer} ${mutedLabel}${argsPart}  ${statusToken}${suffixPart}\n`;
-  }
-
-  if (!hint.detail?.length) return mainLine;
-  const filePath = typeof event.metadata?.path === "string" ? event.metadata.path : event.argumentsPreview;
-  return `${mainLine}${formatEditDetailBlock(hint.detail, colorEnabled, filePath)}`;
-}
-
-function formatEditDetailBlock(
-  lines: EditSnippetLine[],
-  colorEnabled: boolean,
-  filePath?: string,
-  env: Record<string, string | undefined> = process.env
-): string {
-  if (!colorEnabled) {
-    return lines.map((line) => `  ${line.text}\n`).join("");
-  }
-  const isTruecolor = supportsTruecolor(env);
-  const lang = isTruecolor ? detectCodeLangFromPath(filePath) : "unknown";
-  const brightness = resolveTuiBrightness(env);
-  // Block-level padTo so every diff line forms a rectangle of equal visible
-  // width (Zed-style band). Measured with CJK-aware displayWidth.
-  const padTo = Math.max(...lines.map((line) => displayWidth(line.text))) + 1;
-  return lines
-    .map((line) => `  ${renderDiffLine({
-      kind: line.kind,
-      text: line.text,
-      highlightedText: shouldHighlightEditLine(line, lang, isTruecolor)
-        ? buildHighlightedEditLine(line, lang, brightness, env)
-        : undefined,
-      padTo,
-      colorEnabled: true,
-      env,
-    })}\n`)
-    .join("");
-}
-
-/** 一行是否值得语法高亮：truecolor + 已知语言 + 非 ellipsis + 有 +/- 前缀。 */
-function shouldHighlightEditLine(
-  line: EditSnippetLine,
-  lang: CodeLang,
-  isTruecolor: boolean,
-): boolean {
-  if (!isTruecolor || lang === "unknown") return false;
-  if (line.text.startsWith("  …") || line.text.startsWith("…")) return false;
-  return line.text.length >= 2;
-}
-
-/** 给 edit diff 行的前缀上色 + 对剩余部分做语法高亮。 */
-function buildHighlightedEditLine(
-  line: EditSnippetLine,
-  lang: CodeLang,
-  brightness: TuiBrightness,
-  env: Record<string, string | undefined>,
-): string {
-  const prefix = line.text.slice(0, 2);
-  const body = line.text.slice(2);
-  const prefixToken = line.kind === "added" ? "success" : line.kind === "removed" ? "danger" : "chrome";
-  const coloredPrefix = themeText(prefix, prefixToken, true, env);
-  const highlightedBody = highlightCodeLine(body, lang, brightness);
-  return `${coloredPrefix}${highlightedBody}`;
-}
-
-export function formatToolEventForCli(
-  event: LocalAgentToolEvent,
-  mode: ToolDisplayMode,
-  colorEnabled = resolveCliColorEnabled()
-) {
-  if (mode === "hide") return "";
-  if (mode === "verbose") return formatVerboseToolEvent(event, colorEnabled);
-  if (mode === "normal") return formatNormalToolLine(event, undefined, colorEnabled);
-  if (event.type === "tool-call") return "";
-  return formatCompactToolLine(event, undefined, colorEnabled);
-}
-
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
 };
 
 export function createToolEventFormatter(
-  mode: ToolDisplayMode,
-  colorEnabled = resolveCliColorEnabled(),
-  opts: { suppressRunProgressCards?: boolean } = {}
+  colorEnabled = resolveCliColorEnabled()
 ): ToolEventFormatter {
-  // 有 dock 面板覆盖 run 的实时进展时（TUI），进行中的纯进展轮询不再印卡；
-  // 终态收尾卡、报错卡、日志尾巴变化仍然印（transcript 需要结论与诊断）。
-  // 裸 CLI 没有面板，保持原有行为。
-  const suppressRunProgressCards = opts.suppressRunProgressCards === true;
   const pending = new Map<string, { toolName: string; argumentsPreview?: string }>();
-  let readBuffer: LocalAgentToolEvent[] = [];
-  let searchBuffer: LocalAgentToolEvent[] = [];
-  let runBuffer: LocalAgentToolEvent[] = [];
-  let fetchBuffer: LocalAgentToolEvent[] = [];
-  let webSearchBuffer: LocalAgentToolEvent[] = [];
-  /** Consecutive controlAgentRun(status) polls for one runId — updated in place. */
-  let statusFold: AgentRunSnapshot | null = null;
-  /** Last log tail emitted per runId — identical tails are not redrawn. */
-  const lastEmittedLogByRunId = new Map<string, string>();
-  /**
-   * Substance of the last card printed per runId — identical cards are dropped.
-   *
-   * The fold above only collapses *consecutive* polls: any other tool between
-   * two polls forces the open card out, and an orchestrator that alternates
-   * `sleep` with `controlAgentRun` therefore printed one full card per poll —
-   * six near-identical `Run status / ⏳ running` blocks saying nothing new. The
-   * composer dock now carries live run state, so a card that repeats what the
-   * last one said has no reader: the only thing worth the rows is a change.
-   */
-  const lastPrintedCardByRunId = new Map<string, string>();
-
-  /** Fields that make a card worth reprinting. Age is excluded: it always moves. */
-  const cardSubstance = (snapshot: AgentRunSnapshot): string =>
-    JSON.stringify([
-      snapshot.status,
-      snapshot.toolCallCount ?? -1,
-      snapshot.lastToolNames ?? [],
-      snapshot.lastAssistantText ?? "",
-      snapshot.errorMessage ?? "",
-      snapshot.logKey,
-    ]);
-
-  const flushStatusFold = (): string => {
-    if (!statusFold) return "";
-    const fold = statusFold;
-    statusFold = null;
-    const substance = cardSubstance(fold);
-    if (lastPrintedCardByRunId.get(fold.runId) === substance) return "";
-    const prevLog = lastEmittedLogByRunId.get(fold.runId);
-    const changed = Boolean(fold.logKey) && fold.logKey !== prevLog;
-    if (suppressRunProgressCards) {
-      // 进展已经在 dock 面板上实时呈现，纯进展轮询（toolCallCount /
-      // lastToolNames 变化）不再值一张卡片。仍然印的：终态（收尾结论）、
-      // 报错、日志尾巴变化。list/stop 等非 status 动作不走这条路，不受影响。
-      const terminal = isAgentRunTerminalStatus(fold.status);
-      if (!terminal && !fold.errorMessage && !changed) {
-        // 记账为已处理：不印卡但也不再算「新变化」，否则下一张该印的卡
-        // （比如终态卡）在合并折叠后可能被误判成与上次不同而多印。
-        lastPrintedCardByRunId.set(fold.runId, substance);
-        return "";
-      }
-    }
-    lastPrintedCardByRunId.set(fold.runId, substance);
-    // Only remember a tail that was actually printed. Cards withhold the tail
-    // while a run is healthy, so banking the key on every poll would mark a
-    // never-shown tail as "already seen" and suppress it on the failure card —
-    // the one card that exists to show it.
-    if (changed && runShowsLogTail(fold.status)) {
-      lastEmittedLogByRunId.set(fold.runId, fold.logKey);
-    }
-    return formatFoldedControlStatusCard({ ...fold, includeLogTail: changed }, colorEnabled);
-  };
-
-  /**
-   * Drain every buffer except the run-status fold.
-   *
-   * Split out so the two deferred classes can flush *each other*: a status card
-   * and a read tree are both held back, and whichever class the next event does
-   * not belong to has to be emitted first or the transcript reports them out of
-   * the order they happened.
-   */
-  const flushToolBuffers = (): string => {
-    let out = "";
-    if (readBuffer.length > 0) {
-      const items = readBuffer.map((evt) => {
-        const call = pending.get(evt.toolCallId);
-        const rawPath =
-          (typeof evt.metadata?.path === "string" ? evt.metadata.path : undefined) ||
-          (typeof evt.metadata?.filePath === "string" ? evt.metadata.filePath : undefined) ||
-          evt.argumentsPreview ||
-          call?.argumentsPreview ||
-          "";
-        return { path: rawPath, metadata: evt.metadata };
-      });
-      for (const evt of readBuffer) pending.delete(evt.toolCallId);
-      readBuffer = [];
-      out += formatReadTreeBlockForCli(items, colorEnabled);
-    }
-
-    if (searchBuffer.length > 0) {
-      const items = searchBuffer.map((evt) => {
-        const call = pending.get(evt.toolCallId);
-        const rawQuery =
-          (typeof evt.metadata?.query === "string" ? evt.metadata.query : undefined) ||
-          (typeof evt.metadata?.pattern === "string" ? evt.metadata.pattern : undefined) ||
-          evt.argumentsPreview ||
-          call?.argumentsPreview ||
-          "";
-        const rawPath = typeof evt.metadata?.path === "string" ? evt.metadata.path : undefined;
-        return { query: rawQuery, path: rawPath };
-      });
-      for (const evt of searchBuffer) pending.delete(evt.toolCallId);
-      searchBuffer = [];
-      out += formatSearchTreeBlockForCli(items, colorEnabled);
-    }
-
-    if (runBuffer.length > 0) {
-      const items = runBuffer.map((evt) => {
-        const call = pending.get(evt.toolCallId);
-        const rawCommand =
-          (typeof evt.metadata?.command === "string" ? evt.metadata.command : undefined) ||
-          evt.argumentsPreview ||
-          call?.argumentsPreview ||
-          "";
-        const exitCode = typeof evt.metadata?.exitCode === "number" ? evt.metadata.exitCode : undefined;
-        const timedOut = Boolean(evt.metadata?.timedOut);
-        return { command: rawCommand, exitCode, timedOut };
-      });
-      for (const evt of runBuffer) pending.delete(evt.toolCallId);
-      runBuffer = [];
-      out += formatRunTreeBlockForCli(items, colorEnabled);
-    }
-
-    if (fetchBuffer.length > 0) {
-      const items = fetchBuffer.map((evt) => {
-        const call = pending.get(evt.toolCallId);
-        const rawUrl =
-          (typeof evt.metadata?.url === "string" ? evt.metadata.url : undefined) ||
-          evt.argumentsPreview ||
-          call?.argumentsPreview ||
-          "";
-        return { url: rawUrl };
-      });
-      for (const evt of fetchBuffer) pending.delete(evt.toolCallId);
-      fetchBuffer = [];
-      out += formatFetchTreeBlockForCli(items, colorEnabled);
-    }
-
-    if (webSearchBuffer.length > 0) {
-      const items = webSearchBuffer.map((evt) => {
-        const call = pending.get(evt.toolCallId);
-        const rawQuery =
-          (typeof evt.metadata?.query === "string" ? evt.metadata.query : undefined) ||
-          (typeof evt.metadata?.pattern === "string" ? evt.metadata.pattern : undefined) ||
-          evt.argumentsPreview ||
-          call?.argumentsPreview ||
-          "";
-        return { query: rawQuery };
-      });
-      for (const evt of webSearchBuffer) pending.delete(evt.toolCallId);
-      webSearchBuffer = [];
-      out += formatWebSearchTreeBlockForCli(items, colorEnabled);
-    }
-
-    return out;
-  };
-
-  const flushBuffers = (): string => `${flushStatusFold()}${flushToolBuffers()}`;
-
-  /**
-   * A tool-result that is itself buffered still has to close an open run-status
-   * card first: the poll happened before this tool, so its card must be printed
-   * before this tool's tree.
-   */
-  const bufferToolResult = (buffer: LocalAgentToolEvent[], event: LocalAgentToolEvent): string => {
-    const flushed = flushStatusFold();
-    buffer.push(event);
-    return flushed;
-  };
-
-  const formatter = (event: LocalAgentToolEvent): string => {
-    if (mode === "hide") return "";
-    if (mode === "verbose") return formatVerboseToolEvent(event, colorEnabled);
-    if (mode === "normal") {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      const call = pending.get(event.toolCallId);
-      pending.delete(event.toolCallId);
-      return formatNormalToolLine(event, call, colorEnabled);
-    }
-
-    // controlAgentRun(status) for the same runId folds like Read/Run trees:
-    // consecutive polls collapse into one card carrying the latest state.
-    if (event.toolName === "controlAgentRun") {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        const snapshot = parseControlAgentRunStatusEvent(event);
-        if (snapshot) {
-          // Mirror of bufferToolResult: tools that ran before this poll must be
-          // printed before the card this poll produces.
-          let out = flushToolBuffers();
-          const open = statusFold;
-          const sameRun = open?.runId === snapshot.runId;
-          // Folding collapses repetition, not change. A different run, or the
-          // same run reaching a different status, is the event the reader is
-          // waiting for — merging it into the open card would let a run go from
-          // `running` to `done` inside a single card that only ever shows the
-          // ending, hiding both the progress and the moment it stopped.
-          if (open && (!sameRun || open.status !== snapshot.status)) {
-            out += flushStatusFold();
-          }
-          statusFold = open && sameRun ? mergeRunSnapshot(open, snapshot) : snapshot;
-          pending.delete(event.toolCallId);
-          // Terminal statuses must not sit hidden in the buffer.
-          if (isAgentRunTerminalStatus(snapshot.status)) {
-            out += flushBuffers();
-          }
-          return out;
-        }
-        // list / stop / not_found: flush any status fold, then render normally.
-        const flushed = flushBuffers();
-        const call = pending.get(event.toolCallId);
-        pending.delete(event.toolCallId);
-        return `${flushed}${formatCompactToolLine(event, call, colorEnabled)}`;
-      }
-    }
-
-    if (isReadToolName(event.toolName)) {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        return bufferToolResult(readBuffer, event);
-      }
-    }
-
-    if (isSearchToolName(event.toolName)) {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        return bufferToolResult(searchBuffer, event);
-      }
-    }
-
-    if (isRunToolName(event.toolName)) {
-      // Action-gated (interactive handoff) runs must NOT be buffered: their
-      // recovery hint is the one signal the user must act on, and folding it
-      // into a tree would hide the prompt. Flush prior runs, then fall
-      // through to the generic compact line so the "! needs action" marker
-      // still renders on its own line.
-      if (event.type === "tool-result" && !isRunResultFoldable(event)) {
-        const flushed = flushBuffers();
-        const call = pending.get(event.toolCallId);
-        pending.delete(event.toolCallId);
-        return `${flushed}${formatCompactToolLine(event, call, colorEnabled)}`;
-      }
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        return bufferToolResult(runBuffer, event);
-      }
-    }
-
-    if (isFetchToolName(event.toolName)) {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        return bufferToolResult(fetchBuffer, event);
-      }
-    }
-
-    if (isWebSearchToolName(event.toolName)) {
-      if (event.type === "tool-call") {
-        pending.set(event.toolCallId, {
-          toolName: event.toolName,
-          argumentsPreview: event.argumentsPreview,
-        });
-        return "";
-      }
-      if (event.type === "tool-result") {
-        return bufferToolResult(webSearchBuffer, event);
-      }
-    }
-
-    const flushed = flushBuffers();
+  return (event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {
         toolName: event.toolName,
         argumentsPreview: event.argumentsPreview,
       });
-      return flushed;
+      return "";
     }
-
     const call = pending.get(event.toolCallId);
     pending.delete(event.toolCallId);
-    return `${flushed}${formatCompactToolLine(event, call, colorEnabled)}`;
+    return formatNormalToolLine(event, call, colorEnabled);
   };
-  formatter.flush = flushBuffers;
-  return formatter;
 }
 
 export function createSseToolEventAdapter(

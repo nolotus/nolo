@@ -1184,13 +1184,13 @@ async function runLocalAgentTurnForCli(
         options.onLoopEvent?.(event);
       },
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-      ...(turnOutput.traceLocalTools
-        ? {
-            onToolEvent: (event) => {
-              turnOutput.handleToolEvent(event);
-            },
-          }
-        : {}),
+      // 回合内注入（TUI 后台 run 唤醒直投）：透传给 local loop。
+      ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
+      // tool-gist-fold 后 onToolEvent 无条件挂载（不再受 traceLocalTools 开关
+      // 控制，显示模式合并为单一 gist/折叠通道）——保留 alpha 的新形态。
+      onToolEvent: (event) => {
+        turnOutput.handleToolEvent(event);
+      },
       ...(!options.noStream
         ? {
             onTextDelta: (chunk) => {

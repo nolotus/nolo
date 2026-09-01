@@ -263,7 +263,12 @@ describe("hybrid record store", () => {
     ]);
   });
 
-  test("aborts a slow remote server via requestTimeoutMs and advances to the next server", async () => {
+  // H2 语义变更：requestTimeoutMs 现在是整个远端 fallback 的**共享预算**（默认 250ms），
+  // 不是单次尝试的超时。超时耗尽预算 → 按 miss 处理，不再向下一个 server 发请求
+  // （超时重试会被同一网络环境放大，且失去 <budget 的延迟上界）。
+  // 快速失败（如 503）不消耗预算，仍按既有 miss 语义 advance 到下一 server
+  // （见 "tries the fallback server only after the primary server fails"）。
+  test("aborts a slow remote server via requestTimeoutMs and treats the timeout as a miss", async () => {
     const { db } = createMemoryDb();
     const requests: string[] = [];
     const store = createHybridRecordStore({
@@ -283,6 +288,36 @@ describe("hybrid record store", () => {
             }
           });
         }
+        return Response.json({ data: { name: "fallback record" } });
+      }),
+    });
+
+    const result = await store.read("agent-user-1-frontend");
+    // 预算被挂起的 primary 耗尽 → miss，不再打 fallback server。
+    expect(result).toBeNull();
+    expect(requests).toEqual([
+      "https://nolo.chat/api/v1/db/read/agent-user-1-frontend",
+    ]);
+  });
+
+  test("aborts a slow remote server via requestTimeoutMs and advances to the next server when budget remains", async () => {
+    const { db } = createMemoryDb();
+    const requests: string[] = [];
+    const store = createHybridRecordStore({
+      db,
+      defaultServer: "https://nolo.chat",
+      fallbackServers: ["https://us.nolo.chat"],
+      authToken: "token-1",
+      requestTimeoutMs: 400,
+      fetchImpl: asFetch(async (url, init) => {
+        requests.push(String(url));
+        const signal = (init as RequestInit | undefined)?.signal;
+        if (url.includes("nolo.chat/api/v1/db/read") && !url.includes("us.nolo.chat")) {
+          // Primary fails fast with a 503（不消耗预算）.
+          return new Response("missing", { status: 503 });
+        }
+        // Fallback responds after a short delay，仍在剩余预算内。
+        await new Promise((resolve) => setTimeout(resolve, 30));
         return Response.json({ data: { name: "fallback record" } });
       }),
     });

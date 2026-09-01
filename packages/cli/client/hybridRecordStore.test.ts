@@ -175,8 +175,36 @@ describe("CLI hybrid record store", () => {
     });
   });
 
-  test("keeps newer local records over stale remote records", () => {
-    expect(shouldCacheRemoteRecord(
+  test("NOLO_HYBRID_READ_TIMEOUT_MS caps the shared remote-fallback budget (H2)", async () => {
+    const { db } = createMemoryDb();
+    const requests: string[] = [];
+    const startedAt = Date.now();
+    const hybrid = createCliHybridRecordStore({
+      db,
+      env: { NOLO_HYBRID_READ_TIMEOUT_MS: "60" },
+      fetchImpl: async (url, init) => {
+        requests.push(String(url));
+        // 两台 server 都挂起直到被 AbortSignal 打断。
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal;
+          if (signal) {
+            signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")));
+          }
+        });
+      },
+    });
+
+    const result = await hybrid.read("agent-user-1-missing");
+    const elapsed = Date.now() - startedAt;
+    // 共享预算 60ms：挂起的 primary 耗尽预算后按 miss 返回，不再打第二台。
+    expect(result).toBeNull();
+    expect(requests).toEqual([
+      "https://nolo.chat/api/v1/db/read/agent-user-1-missing",
+    ]);
+    expect(elapsed).toBeLessThan(300);
+  });
+
+  test("keeps newer local records over stale remote records", () => {    expect(shouldCacheRemoteRecord(
       { updatedAt: "2026-05-12T00:00:00.000Z" },
       { updatedAt: "2026-05-13T00:00:00.000Z" }
     )).toBe(false);

@@ -6,6 +6,7 @@ import {
   createHybridRecordStore,
   parseSyncServersEnv,
   shouldCacheHybridRemoteRecord,
+  DEFAULT_HYBRID_READ_TIMEOUT_MS,
   type HybridRecordKvDb,
   type HybridRecordStore,
 } from "../agentRuntimeLocal";
@@ -42,6 +43,23 @@ export function shouldCacheRemoteRecord(remoteRecord: any, localRecord: any) {
   return shouldCacheHybridRemoteRecord(remoteRecord, localRecord);
 }
 
+/**
+ * PERF(H2): read 路径远端 fallback 超时的 env 覆盖（毫秒）。
+ * 默认 DEFAULT_HYBRID_READ_TIMEOUT_MS（250ms，整体预算跨 server 共享）；
+ * 0=关闭超时；负数/非法值回退默认（不会关闭超时）。
+ */
+export function resolveHybridReadTimeoutMs(
+  env: EnvLike = process.env
+): number {
+  const raw = env.NOLO_HYBRID_READ_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_HYBRID_READ_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_HYBRID_READ_TIMEOUT_MS;
+  }
+  return parsed;
+}
+
 export function createCliHybridRecordStore(
   deps: CliHybridRecordStoreDeps
 ): HybridRecordStore {
@@ -53,5 +71,6 @@ export function createCliHybridRecordStore(
     fallbackServers: resolveFallbackServers(deps.env),
     authToken: resolveAuthToken(deps.env),
     fetchImpl: deps.fetchImpl,
+    requestTimeoutMs: resolveHybridReadTimeoutMs(deps.env),
   });
 }

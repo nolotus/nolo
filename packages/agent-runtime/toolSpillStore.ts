@@ -26,6 +26,24 @@ export interface SpillToolOutputOptions {
 export const DEFAULT_MAX_SPILL_DIR_BYTES = 50 * 1024 * 1024; // 50MB
 export const DEFAULT_SPILL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// 清理节流：spillToolOutput 每次调用都会触发 cleanupExpiredSpills（全量
+// readdirSync + 逐文件 statSync），真实 spill 目录数千文件时单次 ~100ms，
+// 且 buildMessages 中每条历史 tool 消息都触发一次，主导了本地 agent loop 的
+// 非 LLM 开销。节流后最多每 SPILL_CLEANUP_THROTTLE_MS 清理一次，到期文件
+// 最多晚一个节流窗口被清，清理语义不变。
+export const SPILL_CLEANUP_THROTTLE_MS = 60 * 1000;
+// 按目录分别节流：单一全局时间戳会让多 spill 目录（~/.nolo/spills 与
+// <workspace>/.nolo/spills 等）互相饿死——先到者独占节流窗口，其余目录的
+// LRU/配额清理永不执行。Map 有界（超过上限整体清空，等价于全员立即清一次，
+// 可接受：目录数正常为个位数）。
+const SPILL_THROTTLE_MAX_DIRS = 64;
+const lastSpillCleanupAtMsByDir = new Map<string, number>();
+
+/** 测试隔离钩子：重置进程内节流状态（bun test 同进程跑多个用例时防泄漏）。 */
+export function resetSpillCleanupThrottle(): void {
+  lastSpillCleanupAtMsByDir.clear();
+}
+
 export function resolveSpillDirectory(options?: {
   workspaceRoot?: string;
   baseDir?: string;
@@ -53,9 +71,21 @@ export function countLines(text: string): number {
 
 export function cleanupExpiredSpills(
   spillDir: string,
-  options?: { maxAgeMs?: number; maxTotalBytes?: number },
+  options?: { maxAgeMs?: number; maxTotalBytes?: number; throttleMs?: number },
 ): void {
   if (!existsSync(spillDir)) return;
+  // 节流：距上次清理不足 throttleMs 直接跳过（默认 0 = 不节流，保持原语义，
+  // 直接调用方/测试不受影响；仅 spillToolOutput 内部传 60s 节流）。
+  const throttleMs = options?.throttleMs ?? 0;
+  if (throttleMs > 0) {
+    const now = Date.now();
+    const last = lastSpillCleanupAtMsByDir.get(spillDir);
+    if (last !== undefined && now - last < throttleMs) return;
+    if (lastSpillCleanupAtMsByDir.size >= SPILL_THROTTLE_MAX_DIRS) {
+      lastSpillCleanupAtMsByDir.clear();
+    }
+    lastSpillCleanupAtMsByDir.set(spillDir, now);
+  }
   const maxAge = options?.maxAgeMs ?? DEFAULT_SPILL_TTL_MS;
   const maxBytes = options?.maxTotalBytes ?? DEFAULT_MAX_SPILL_DIR_BYTES;
   const now = Date.now();
@@ -120,10 +150,11 @@ export function spillToolOutput(options: SpillToolOutputOptions): ToolSpillResul
     mkdirSync(spillDir, { recursive: true });
   }
 
-  // Pre-cleanup periodically/on write
+  // Pre-cleanup periodically/on write（节流：最多每 60s 一次全量扫描）
   cleanupExpiredSpills(spillDir, {
     maxAgeMs: options.ttlMs,
     maxTotalBytes: options.maxRetentionBytes,
+    throttleMs: SPILL_CLEANUP_THROTTLE_MS,
   });
 
   const hash = createHash("sha256").update(content).digest("hex").slice(0, 12);

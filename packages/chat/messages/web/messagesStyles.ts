@@ -15,6 +15,12 @@ const pulse = stylex.keyframes({
  * （自原 messages.css 1:1 迁出）
  */
 export const messagesStyles = stylex.create({
+  iconPrimary: { color: "var(--primary)" },
+  iconSuccess: { color: "var(--success)" },
+  iconWarning: { color: "var(--warning)" },
+  iconMuted: { color: "var(--textTertiary)" },
+  iconError: { color: "var(--error)" },
+
   // ─── ToolRunProgress ─────────────────────────────────────
   toolRunProgress: {
     display: "flex",
@@ -383,40 +389,6 @@ export const messagesStyles = stylex.create({
     overflow: "hidden",
     transition: "border-color 0.15s ease",
   },
-  trHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    paddingTop: 8,
-    paddingBottom: 8,
-    paddingLeft: 10,
-    paddingRight: 10,
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    borderStyle: "none",
-    cursor: "pointer",
-    textAlign: "left",
-    gap: 8,
-    color: "inherit",
-    font: "inherit",
-  },
-  trMain: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    minWidth: 0,
-    flex: 1,
-  },
-  trIcon: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 18,
-    height: 18,
-    flexShrink: 0,
-    color: "var(--textSecondary)",
-  },
   trSummary: {
     fontSize: "var(--fontSize-sm)",
     fontWeight: 500,
@@ -425,21 +397,5 @@ export const messagesStyles = stylex.create({
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-  },
-  trChevron: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "var(--textTertiary)",
-    flexShrink: 0,
-  },
-  trBody: {
-    paddingTop: 0,
-    paddingBottom: 10,
-    paddingLeft: 10,
-    paddingRight: 10,
-    borderTopWidth: 1,
-    borderTopStyle: "solid",
-    borderTopColor: "var(--borderMuted, var(--borderLight))",
   },
 });

@@ -240,6 +240,7 @@ export {
   createHybridRecordStore,
   parseSyncServersEnv,
   shouldCacheHybridRemoteRecord,
+  DEFAULT_HYBRID_READ_TIMEOUT_MS,
 } from "./hybridRecordStore";
 export {
   executeLocalToolWithPolicy,

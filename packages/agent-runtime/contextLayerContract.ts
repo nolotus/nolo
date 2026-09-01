@@ -8,12 +8,12 @@ export const buildContextLayerContractBlock = (
 ): string => {
   const lines = [
     "--- 知识存储约定 ---",
-    "不要把所有信息塞进同一层，合理利用分层边界：",
-    "1. memory layer：短到中期、可复用但不必永久挂载的偏好、近期共识与经验（短、可检索、可替换）。",
-    "2. knowledge layer：稳定规则、长期有效事实与每轮依赖的说明（通过 prompt / references 自动加载）。",
-    "3. doc layer：需跨轮次维护的外部工作台（runbook、mission、incident、checkpoint、idea backlog、experiment log 等，显式按需读写）。",
+    "分层边界（不要把所有信息塞进同一层）：",
+    "1. memory layer：短到中期、可复用但不必永久挂载的偏好/共识/经验（短、可检索、可替换）。",
+    "2. knowledge layer：稳定规则与长期事实（通过 prompt / references 自动加载）。",
+    "3. doc layer：跨轮次维护的外部工作台（runbook / mission / incident / checkpoint / idea backlog / experiment log，显式按需读写）。",
     "",
-    "写入原则：临时步骤、原始长日志、一次性思路不要直接写进 memory/knowledge；稳定规则沉淀到 knowledge、可复用偏好/共识沉淀到 memory、跨轮接力状态/文档写入 doc。",
+    "写入原则：临时步骤、原始长日志、一次性思路不进 memory/knowledge；稳定规则→knowledge、可复用偏好/共识→memory、跨轮接力状态/文档→doc。",
   ];
 
   if (options.hasRememberMemoryTool) {

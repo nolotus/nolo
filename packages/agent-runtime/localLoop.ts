@@ -47,6 +47,46 @@ import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { maybeAutoCompactLocalHistory } from "./localAutoCompaction";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOLO_LOOP_TIMING instrumentation — measurement-only, zero behavior change.
+// Gated by env var; when off, each call site costs a single boolean check.
+// Emits one JSONL row per phase: { phase, round, durationMs } to stderr or to
+// the file given by NOLO_LOOP_TIMING_FILE. Never touches persisted data.
+// ─────────────────────────────────────────────────────────────────────────────
+const LOOP_TIMING_ENABLED =
+  typeof process !== "undefined" && process.env?.NOLO_LOOP_TIMING === "1";
+const LOOP_TIMING_FILE =
+  typeof process !== "undefined" ? process.env?.NOLO_LOOP_TIMING_FILE : undefined;
+let loopTimingRows: Array<{ phase: string; round: number; durationMs: number }> = [];
+let loopTimingLastMark: number | undefined;
+
+function loopTimingMark(phase: string, round: number): void {
+  if (!LOOP_TIMING_ENABLED) return;
+  const now = performance.now();
+  if (loopTimingLastMark !== undefined) {
+    loopTimingRows.push({ phase, round, durationMs: now - loopTimingLastMark });
+  }
+  loopTimingLastMark = now;
+}
+
+async function loopTimingFlush(): Promise<void> {
+  if (!LOOP_TIMING_ENABLED) return;
+  const lines = loopTimingRows.map((row) => JSON.stringify(row)).join("\n");
+  loopTimingRows = [];
+  loopTimingLastMark = undefined;
+  if (!lines) return;
+  if (LOOP_TIMING_FILE) {
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync(LOOP_TIMING_FILE, lines + "\n");
+    } catch {
+      // measurement must never break the loop
+    }
+  } else {
+    process.stderr.write(lines + "\n");
+  }
+}
+
 export type LocalAgentTurnInput = {
   adapter: AgentRuntimeHostAdapter;
   agentRef: string;
@@ -127,6 +167,19 @@ export type LocalAgentTurnInput = {
    * 可选进度看门狗配置（用于防死循环/复读熔断）。
    */
   progressGuardConfig?: ProgressGuardConfig;
+  /**
+   * 回合内注入收件箱的 drain 回调（TUI「后台 run 终态唤醒」直投当前 loop）。
+   *
+   * 语义：每次调用取走并清空当前待注入的文本条目（调用方负责去重/一次性），
+   * 返回空数组表示无注入。localLoop 在两处 drain：
+   *  1) 每轮开头（throwIfAborted 之后、构造请求消息之前）——注入内容在下一次
+   *     provider 调用即可见；
+   *  2) 无 tool_calls 的正常完成路径上、break 之前——此时若有新注入则不结束
+   *     本回合，push 成 user 消息后再跑一轮，让模型当场消化。
+   *
+   * 注入消息进入 `messages`，因此天然随 turnMessages 一起 saveTurn 持久化。
+   */
+  drainInjections?: () => string[];
 };
 
 export type LocalAgentTurnResult = AgentRuntimeResult & {
@@ -1246,6 +1299,10 @@ function isCompletedActionGateResult(value: unknown): boolean {
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
+  // 计时探针（NOLO_LOOP_TIMING=1）：入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
+  // 注意：模块级计时状态为单 turn 设计，并发跑多个 turn 且开启门控时数据会交错
+  // （仅调试工具，不影响生产路径）。
+  loopTimingMark("turnStart", 0);
   const agentConfig = await input.adapter.loadAgentConfig(input.agentRef);
   if (!agentConfig) {
     const error = new Error(
@@ -1290,6 +1347,7 @@ export async function runLocalAgentTurn(
     attachDialogIdToError(error, dialogId);
     throw error;
   }
+  loopTimingMark("loadDialogHistory", 0);
   // Identity block (名称/ID/模型) — session-scope so it sits in the
   // stable prefix. Built from the resolved agentConfig so subscribed/custom
   // agents get their model name injected, matching the web and server paths
@@ -1347,6 +1405,7 @@ export async function runLocalAgentTurn(
     ...currentTimeScope,
     ...callerScopes,
   ];
+  loopTimingMark("buildContextBlocks", 0);
 
   // Provider 惰性解析：自动压缩需要生成摘要时才 resolve；主循环复用同一实例。
   // resolve 失败由压缩路径吞掉（退回兜底裁剪），主循环再 resolve 时仍走原有 saveTurn 路径。
@@ -1399,12 +1458,14 @@ export async function runLocalAgentTurn(
   } catch (error) {
     console.warn("[localLoop] auto-compaction unexpected error:", error);
   }
+  loopTimingMark("maybeAutoCompactLocalHistory", 0);
 
   // 上下文预算兜底：必须在 turnStartIndex 之前裁，否则该索引会指向错误位置。
   const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model);
   if (trimmedHistory.droppedCount > 0) {
     history = trimmedHistory.history;
   }
+  loopTimingMark("trimHistoryToContextBudget", 0);
 
   const hasContextBlocks =
     callerScopes.some((block) => block.content.trim()) ||
@@ -1421,6 +1482,7 @@ export async function runLocalAgentTurn(
       input.adapter.host === "cli" ? input.contextReferenceResolver : undefined,
   });
   let messages = builtMessages.messages;
+  loopTimingMark("buildMessages", 0);
   // vision 能力检测：catalog 已知模型按 hasVision 判定，未知模型默认 true。
   // 不支持图片时，buildMessages 产出的 image_url parts 必须在发给 provider 前剥离，
   // 否则上游 400 "this model does not support image input" → local 判失败 → fallback
@@ -1473,9 +1535,33 @@ export async function runLocalAgentTurn(
     // message opened a fresh conversation ("amnesia").
     // Auto-compaction may have already resolved the provider; reuse it.
     const provider = await resolveProviderOnce();
+    // 回合内注入：取走收件箱条目并作为 user 消息追加到当前上下文。
+    // 返回是否真的注入了内容（供正常完成路径决定是否继续跑一轮）。
+    const applyPendingInjections = (): boolean => {
+      if (!input.drainInjections) return false;
+      let pending: string[] = [];
+      try {
+        pending = input.drainInjections() ?? [];
+      } catch (error) {
+        console.warn("[localLoop] drainInjections failed:", error);
+        return false;
+      }
+      let injected = false;
+      for (const text of pending) {
+        if (typeof text !== "string" || !text.trim()) continue;
+        messages.push({ role: "user", content: text });
+        injected = true;
+      }
+      return injected;
+    };
     while (true) {
       partialContent = "";
       throwIfAborted(input);
+      loopTimingMark("roundStart", round);
+      // 注入放在 roundStart 标记之后：roundStart 记的是「上一相位结束到本轮开始」
+      // 的边界耗时，注入的开销应计入随后的 prepareMessagesForProviderCall 相位，
+      // 不污染边界读数。注入仍在构造请求消息之前，本轮 provider 调用即可见。
+      applyPendingInjections();
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
       const preparedMessages = prepareMessagesForProviderCall(messages);
       const baseRequestMessages = filterImagePartsFromMessages(
@@ -1496,6 +1582,7 @@ export async function runLocalAgentTurn(
         dynamicContextChars: builtMessages.dynamicContextChars,
       };
       emptyAssistantRepairPending = false;
+      loopTimingMark("prepareMessagesForProviderCall", round);
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1523,6 +1610,7 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
+      loopTimingMark("llmCall", round);
       turnUsage = mergeTurnUsage(turnUsage, result.usage);
       contextUsage = result.usage;
       if (result.usage && Object.keys(result.usage).length > 0) {
@@ -1559,6 +1647,7 @@ export async function runLocalAgentTurn(
       }
       const toolCalls = result.tool_calls ?? [];
       const rawToolCallsCount = (result.tool_calls?.length ?? 0) || (Array.isArray((result as any).raw_tool_calls) ? (result as any).raw_tool_calls.length : 0);
+      loopTimingMark("postLlmProcessing", round);
       if (toolCalls.length === 0 && rawToolCallsCount === 0) {
         // 空轮判定：无可见输出（文本/图片）且绝对无 tool_calls 意图即空轮。
         // reasoning_content 不算可见输出（见 hasAssistantVisibleOutput 注释），
@@ -1611,6 +1700,31 @@ export async function runLocalAgentTurn(
             emptyAssistantRepairUsed,
           };
           break;
+        }
+        // 正常完成路径（无 tool_calls、有可见输出）：结束本回合前再 drain 一次。
+        // 若此刻恰好有注入（例如后台 run 刚到终态被 TUI 直投），就不结束——
+        // 先把本轮 assistant 回复落进上下文，再追加注入的 user 消息并多跑一轮，
+        // 让模型在本回合内当场消化。abort/熔断/错误的 break 路径不做拦截。
+        if (input.drainInjections) {
+          const assistantMessage: AgentRuntimeChatMessage = {
+            role: "assistant",
+            content: result.content,
+            ...(result.reasoning_content
+              ? { reasoning_content: result.reasoning_content }
+              : {}),
+          };
+          messages.push(assistantMessage);
+          if (applyPendingInjections()) {
+            // 注入续跑也是一个完整回合的结束：补 roundEnd 标记，让 timing 探针
+            // 的相位序列保持「每轮都有 roundEnd」的不变式（与工具调用路径一致），
+            // 否则续跑轮在 JSONL 里会缺一行、相位配对错位。
+            loopTimingMark("roundEnd", round);
+            round += 1;
+            continue;
+          }
+          // 无注入：撤回刚才的预置 assistant 消息，交回统一的最终追加路径
+          // （skipFinalAppend 语义与 thinkContent 附加都在那里处理）。
+          messages.pop();
         }
         break;
       }
@@ -1666,11 +1780,13 @@ export async function runLocalAgentTurn(
         content?: string | null;
         metadata?: Record<string, unknown>;
       }> = [];
+      loopTimingMark("toolLoopStart", round);
       for (const toolCall of toolCalls) {
         throwIfAborted(input);
         const toolName = toolCall.function.name;
         let toolResult;
         const startedAt = Date.now();
+        loopTimingMark("toolCallStart", round);
         const argumentsPreview = summarizeToolArguments(toolName, toolCall.function.arguments);
         // 唯一 canonical 出口：emitLoopEvent 发 tool-start，并桥接投影给 legacy onToolEvent。
         emitLoopEvent(
@@ -1767,6 +1883,7 @@ export async function runLocalAgentTurn(
           const finishedAt = Date.now();
           const summary = summarizeToolResult(toolResult.content, toolResult.metadata);
           const safeMetadata = projectSafeToolObservationMetadata(toolResult.metadata);
+          loopTimingMark("toolExecute", round);
           emitLoopEvent(
             input,
             {
@@ -1851,6 +1968,7 @@ export async function runLocalAgentTurn(
           content: toolResult.content,
           metadata: toolResult.metadata,
         });
+        loopTimingMark("toolResultFormat", round);
         messages.push({
           role: "tool",
           content: formatToolMessageContent({
@@ -1884,6 +2002,7 @@ export async function runLocalAgentTurn(
         };
         break;
       }
+      loopTimingMark("roundEnd", round);
       round += 1;
     }
   } catch (error) {
@@ -1926,6 +2045,8 @@ export async function runLocalAgentTurn(
       input,
     });
     attachDialogIdToError(loopError, dialogId);
+    // 失败路径同样落盘计时数据，避免中断时丢失已收集的相位。
+    await loopTimingFlush();
     throw loopError;
   }
 
@@ -1967,6 +2088,7 @@ export async function runLocalAgentTurn(
     });
   }
   const accountingUsage = addOutOfBandUsage(turnUsage, compactionUsage);
+  loopTimingMark("saveTurnStart", round);
   const saved = await input.adapter.saveTurn({
     agentKey: agentConfig.key,
     messages: turnMessages,
@@ -1985,6 +2107,8 @@ export async function runLocalAgentTurn(
     ...(input.inheritedFromDialogKey ? { inheritedFromDialogKey: input.inheritedFromDialogKey } : {}),
     ...(input.parentDialogId ? { parentDialogId: input.parentDialogId } : {}),
   });
+  loopTimingMark("saveTurn", round);
+  await loopTimingFlush();
 
   return {
     ...result,

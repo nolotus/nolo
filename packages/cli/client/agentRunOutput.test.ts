@@ -80,11 +80,35 @@ describe("createCliTurnOutput thinking display", () => {
     expect(hints).toContain("inline reasoning");
   });
 
-  test("finished thinking leaves a dim duration trace in the display stream", () => {
+  test("sub-second thinking leaves no duration trace", () => {
     const { turn, output } = createTurn();
-    turn.pushThinking("some reasoning");
+    turn.pushThinking("brief reasoning");
     turn.pushText("answer");
     turn.finish();
+    const all = output.join("");
+    // A zero-information zero-second beat would only break up the
+    // "tool group -> prose" rhythm; suppression is the product contract.
+    expect(all).not.toContain("✻");
+    expect(all).not.toContain("Thought for");
+    expect(all).toContain("answer");
+  });
+
+  test("finished thinking leaves a dim duration trace in the display stream", () => {
+    const { turn, output } = createTurn();
+    // Trace duration is the span of thinking activity; stub the clock so two
+    // thinking events land 2s apart (sub-second spans print no trace at all).
+    const realNow = Date.now;
+    let fakeNow = realNow();
+    Date.now = () => fakeNow;
+    try {
+      turn.pushThinking("some reasoning");
+      fakeNow += 2000;
+      turn.pushThinking("more reasoning");
+      turn.pushText("answer");
+      turn.finish();
+    } finally {
+      Date.now = realNow;
+    }
     const all = output.join("");
     const traceIdx = all.indexOf("✻");
     expect(traceIdx).toBeGreaterThanOrEqual(0);
@@ -118,7 +142,7 @@ test("TUI history owns the assistant marker and keeps tool blocks structured", (
   const options = {
     output: stream,
     agentName: "TestAgent",
-    env: { NOLO_CLI_TOOLS: "normal" },
+    env: {},
   } as unknown as RunAgentTurnOptions;
   const turn = createCliTurnOutput({ options, spinner: spinner as any });
 
@@ -173,7 +197,7 @@ function escapeForRegExp(value: string): string {
  * folded trees appear, no spinner frames linger, and no ≥2 consecutive
  * blank-line blocks exist.
  */
-describe("createCliTurnOutput compact tool tree regression", () => {
+describe("createCliTurnOutput single-mode tool transcript regression", () => {
   function runEventSequence(): string {
     const history = createTurnHistory();
     startTurn(history, "assistant");
@@ -182,7 +206,7 @@ describe("createCliTurnOutput compact tool tree regression", () => {
     const options = {
       output: stream as unknown as NodeJS.WritableStream,
       agentName: "TestAgent",
-      env: { COLORTERM: "truecolor", NOLO_CLI_TOOLS: "pro" },
+      env: { COLORTERM: "truecolor" },
     } as unknown as RunAgentTurnOptions;
 
     const turn = createCliTurnOutput({ options });
@@ -241,24 +265,27 @@ describe("createCliTurnOutput compact tool tree regression", () => {
       .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
   }
 
-  test("folded tool trees appear in transcript", () => {
+  test("single-mode tool lines appear in transcript", () => {
     const visible = runEventSequence();
-    // Tree headers are localized (toolLabel), so assert against the same label
-    // source rather than an English literal — otherwise this test just pins the
-    // current locale and breaks whenever the translation changes.
-    expect(visible).toContain(`• ${toolLabel("readFile")} (`);
-    expect(visible).toContain(`• ${toolLabel("codeSearch")} (`);
-    expect(visible).toContain(`• ${toolLabel("execShell")} (`);
+    // Tool lines are `▸ {label} · {gist}  ✓`; labels are localized (toolLabel),
+    // so assert against the same label source rather than an English literal —
+    // otherwise this test just pins the current locale and breaks whenever the
+    // translation changes.
+    expect(visible).toContain(`▸ ${toolLabel("readFile")}`);
+    expect(visible).toContain(`▸ ${toolLabel("codeSearch")}`);
+    expect(visible).toContain(`▸ ${toolLabel("execShell")}`);
+    // No tree headers: single mode has no `• Label (N)` blocks.
+    expect(visible).not.toContain(`• ${toolLabel("readFile")} (`);
   });
 
-  test("buffered tool tree flushes before subsequent text (not at finish)", () => {
+  test("tool lines render inline before subsequent text (not deferred to finish)", () => {
     const history = createTurnHistory();
     startTurn(history, "assistant");
     const stream = createHistoryOutputStream(history, () => {});
     const options = {
       output: stream as unknown as NodeJS.WritableStream,
       agentName: "TestAgent",
-      env: { COLORTERM: "truecolor", NOLO_CLI_TOOLS: "pro" },
+      env: { COLORTERM: "truecolor" },
     } as unknown as RunAgentTurnOptions;
     const turn = createCliTurnOutput({ options });
 
@@ -281,11 +308,11 @@ describe("createCliTurnOutput compact tool tree regression", () => {
       } as LocalAgentToolEvent);
     };
 
-    // readFile is a buffered tool: its tree is held inside the formatter.
+    // Single mode renders each readFile result immediately as its own line.
     turn.pushText("Start.\n");
     readTool("a.ts");
-    // Next text delta must flush the pending tree BEFORE the text, so the
-    // tool appears mid-transcript instead of piling up at finish().
+    // The first tool line must appear BEFORE "Middle." — rendered inline with
+    // the event stream, not deferred to finish().
     turn.pushText("Middle.\n");
     readTool("b.ts");
     turn.pushText("End.\n");
@@ -296,12 +323,11 @@ describe("createCliTurnOutput compact tool tree regression", () => {
       .map((t) => t.content)
       .join("\n")
       .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
-    const firstTree = `• ${toolLabel("readFile")} (`;
-    expect(visible.indexOf(firstTree)).toBeGreaterThan(visible.indexOf("Start."));
-    // First readFile tree flushed before "Middle." — not deferred to finish().
-    expect(visible.indexOf(firstTree)).toBeLessThan(visible.indexOf("Middle."));
+    const firstTool = `▸ ${toolLabel("readFile")} · a.ts`;
+    expect(visible.indexOf(firstTool)).toBeGreaterThan(visible.indexOf("Start."));
+    expect(visible.indexOf(firstTool)).toBeLessThan(visible.indexOf("Middle."));
     // Both readFile entries appear.
-    expect(visible.match(new RegExp(`• ${escapeForRegExp(toolLabel("readFile"))} \\(`, "g"))?.length).toBe(2);
+    expect(visible.match(new RegExp(`▸ ${escapeForRegExp(toolLabel("readFile"))} · \\S+\\.ts`, "g"))?.length).toBe(2);
   });
 
   test("no spinner frame residue (no (Ns) elapsed markers)", () => {
@@ -400,12 +426,7 @@ describe("createCliTurnOutput compact tool tree regression", () => {
     const inlineNames = ["globFiles", "readFile", "codeSearch", "execShell", "writeFile"]
       .map((name) => escapeForRegExp(toolLabel(name)))
       .join("|");
-    const treeNames = ["readFile", "codeSearch", "execShell", "fetchWebpage"]
-      .map((name) => escapeForRegExp(toolLabel(name)))
-      .join("|");
-    const isToolLine = (l: string) =>
-      new RegExp(`▸ (${inlineNames})`).test(l) ||
-      new RegExp(`• (${treeNames})\\s*\\(`).test(l);
+    const isToolLine = (l: string) => new RegExp(`▸ (${inlineNames})`).test(l);
 
     const firstToolIdx = lines.findIndex(isToolLine);
     const lastToolIdx = lines

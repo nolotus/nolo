@@ -23,19 +23,11 @@ import { formatListRunsCard, formatStatusRunCard, formatStopRunCard, resolveRunL
 export const controlAgentRunFunctionSchema = {
     name: "controlAgentRun",
     description:
-        "观察和控制后台 agent run。一个工具五个核心 action：" +
-        "list（列出 run，支持按批次/状态过滤与分页）、status（查单条 + 可选日志）、stop（取消 run）、" +
-        "append（向运行中或终态任务追加新指令/纠偏）、" +
-        "wait（受限的终态阻塞等待：阻塞到 run 终态并返回结果，不是轮询；另有 todo 查询 runtime todo）。" +
-        "相当于 Unix 的 wait + signal + /proc + write。" +
-        "用 startAgentRun 拿到 runId 后，用本工具跟进度、等结果、追加指令或叫停。" +
-        "异步派发后禁止轮询查询——不要反复调 status 等结果，用户界面已在实时显示每条 run 的状态；" +
-        "阻塞等待（startAgentRun wait:true 或本工具 wait action）会冻结当前对话，仅限三种情况：" +
-        "① 预计 <100s 且马上要用结果；② 用户明确要求同步等待或正在与该子任务对话；③ 环境不支持终态唤醒且当前没有可并行推进的其他工作——" +
-        "串行依赖不是阻塞对话的理由，支持终态唤醒的环境（桌面 TUI / web）多分钟级 run 一律异步派发并立即收尾。" +
-        "list 默认只返回最近 20 条，避免全量冲爆上下文；用 status/batchId/limit/offset 取所需分页。" +
-        "注意：用户界面已经在独立实时显示每条 run 的状态，本工具是给你自己做决策用的，" +
-        "不是用来给用户汇报进度的——不必为了「让用户看到状态」而轮询，也不要把返回值复述给用户。",
+        "观察和控制后台 agent run（五 action：list/status/stop/append/wait，另有 todo 查询）。" +
+        "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。" +
+        "盯梢/轮询/阻塞纪律见 system prompt「多 Agent 编排」段：异步派发后等终态通知、不要轮询；" +
+        "阻塞等待（wait action 或 startAgentRun wait:true）会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作。" +
+        "本工具供你自己做决策用：用户界面已实时显示每条 run 的状态，不必为「让用户看到状态」而调用，返回值也不要复述给用户。",
     parameters: {
         type: "object",
         properties: {
@@ -43,12 +35,10 @@ export const controlAgentRunFunctionSchema = {
                 type: "string",
                 enum: ["list", "status", "stop", "todo", "wait", "append"],
                 description:
-                    "要执行的操作：list=列出 run（省略 runId）；" +
-                    "status=查单条 run 状态 + 可选日志；stop=取消 run；" +
+                    "list=列出 run（省略 runId）；status=查单条 run 状态 + 可选日志；stop=取消 run；" +
                     "append=向任务追加指令（运行中入队，终态 continuation）；" +
-                    "wait=受限的终态阻塞等待（不是轮询）：客户端订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回。" +
-                    "阻塞等待会冻结当前对话，仅限三种情况：① 预计 <100s 且马上要用结果；② 用户明确要求同步等待或正在与该子任务对话；③ 环境不支持终态唤醒且无并行工作；" +
-                    "todo=列出 runtime todo（由 startAgentRun 的 batchId/trackTodo 产生，状态由关联 run 推导）。",
+                    "wait=终态阻塞等待：订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回，不是轮询；" +
+                    "todo=列出 runtime todo（由 startAgentRun 的 batchId/trackTodo 产生）。",
             },
             runId: {
                 type: "string",
@@ -74,16 +64,14 @@ export const controlAgentRunFunctionSchema = {
             timeoutMs: {
                 type: "number",
                 description:
-                    "可选。action=wait 的等待上限（毫秒），默认 100000（100s）。" +
-                    "超过上限仍未到达终态时返回 status=\"timeout\"（不是失败），可稍后再 wait 或改用 status/stop。",
+                    "可选。action=wait 的等待上限（毫秒），默认 100000。超时返回 status=\"timeout\"（不是失败），可稍后再 wait 或改用 status/stop。",
                 default: 100000,
             },
             tailLines: {
                 type: "number",
                 description:
                     "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
-                    "本地 run 的状态摘要里带 progress（toolCalls/llmCalls/fileEdits、inFlight=此刻在执行什么、" +
-                    "idleMs=距上次事件多久），足以判断「在干活」还是「卡住了」——先看它，只有确实可疑或已失败时才 tailLines>0 拉日志。",
+                    "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。",
                 default: 0,
             },
             batchId: {
@@ -94,9 +82,8 @@ export const controlAgentRunFunctionSchema = {
             status: {
                 type: "string",
                 description:
-                    "可选。action=list 时按状态过滤，支持单值或逗号分隔多值（如 'running,orphaned'）。" +
-                    "与 statusFilter 同义，status 优先；取值包含 orphaned（pid 已死但记录仍 running 的孤儿 run）。" +
-                    "默认 all（不过滤）。",
+                    "可选。action=list 时按状态过滤，单值或逗号分隔多值（如 'running,orphaned'）。" +
+                    "与 statusFilter 同义，status 优先；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
             },
             statusFilter: {
                 type: "string",

@@ -73,6 +73,7 @@ import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import { emitTerminalBell, shouldEmitTerminalBell } from "./terminalNotification";
 import {
   createHistoryOutputStream,
@@ -167,6 +168,11 @@ async function runAgentChat(
      * 后会在下面转发给 agentRunner。
      */
     onAgentRunStatus?: (snapshot: AgentRunStatusSnapshot | null) => void;
+    /**
+     * 回合内注入收件箱 drain（后台 run 终态唤醒直投当前 loop）。
+     * 原样透传给 agentRunner → runAgentTurn → local loop。
+     */
+    drainInjections?: () => string[];
   } = {}
 ) {
   // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
@@ -294,7 +300,6 @@ async function runAgentChat(
     env: {
       ...env,
       NOLO_LANG: state.userLanguage,
-      NOLO_CLI_TOOLS: state.toolDisplay,
     },
     output,
     showThinking: state.thinkingDisplay === "show",
@@ -346,6 +351,7 @@ async function runAgentChat(
     // 转发 dock 订阅：runAgentTurn 的输出层靠它判断「有面板」从而抑制
     // transcript 的进展卡片；dock 本身也靠它接收模型轮询带回来的快照。
     ...(options.onAgentRunStatus ? { onAgentRunStatus: options.onAgentRunStatus } : {}),
+    ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
     ...(skillAllowedTools !== undefined
       ? { allowedToolNames: skillAllowedTools }
       : {}),
@@ -677,20 +683,24 @@ export function isAutoConfirmableFileWriteGate(gate: LocalAgentActionGate): bool
  *
  * 修复：
  *   - `confirm` gate 改走 `dialogHost.run()` + `runConfirmDialog`，与破坏性操作
- *     确认同款带框弹窗（同一 `run()` 负责 composer pause + 重绘抑制 + anchor），
- *     不再可能被活动行 tick 擦掉。返回值经 `buildGateConfirmedResult` /
- *     `buildGateCancelledResult` 折回既有形状，取消原因固定为
- *     "confirmation declined"（与 `confirmDestructiveAction` 现有的
- *     approve/cancel 二元语义一致——`runConfirmDialog` 不区分 Esc 与显式选
- *     Cancel，两者都是用户主动取消）。
+ *     确认同款带框弹窗（同一 `run()` 负责 anchor + composer pause/resume +
+ *     重绘抑制 + 键盘认领/释放 + decoder 排空——五件事一次到位，见
+ *     dialogHost.ts 文件注释），不再可能被活动行 tick 擦掉。返回值经
+ *     `buildGateConfirmedResult` / `buildGateCancelledResult` 折回既有形状，
+ *     取消原因固定为 "confirmation declined"（与 `confirmDestructiveAction`
+ *     现有的 approve/cancel 二元语义一致——`runConfirmDialog` 不区分 Esc 与
+ *     显式选 Cancel，两者都是用户主动取消）。
  *   - `handoff` gate 仍走 `waitForRawActionGate`（裸文本提示更贴近"复制命令
- *     到终端跑"的场景，不需要 select-dialog 框架），但现在从等待 Enter 的
- *     那一刻起就 `pauseComposer()`，而不是像原来那样只在 `beforeSubprocess`
- *     才 pause——等待提示同样要扛住活动行 tick。子进程真正跑起来后
- *     `afterSubprocess` 钩子照旧负责 `resumeFromSubprocess`；若用户在按
- *     Enter 之前就取消（Ctrl+C/Esc），子进程从未启动，改由
- *     `resumeComposerFromDialog()` 收尾，避免误发只有子进程退出后才需要的
- *     全屏滚动区重置序列。
+ *     到终端跑"的场景，不需要 select-dialog 框架，所以不走 `dialogHost.run()`
+ *     的带框路径），但现在从等待 Enter 的那一刻起就 `pauseComposer()`，而不是
+ *     像原来那样只在 `beforeSubprocess` 才 pause——等待提示同样要扛住活动行
+ *     tick。子进程真正跑起来后 `afterSubprocess` 钩子照旧负责
+ *     `resumeFromSubprocess`；若用户在按 Enter 之前就取消（Ctrl+C/Esc），子
+ *     进程从未启动，改由 `resumeComposerFromDialog()` 收尾，避免误发只有子
+ *     进程退出后才需要的全屏滚动区重置序列。整段等待包在
+ *     `dialogHost.withKeyboard()` 里，拿到与 `run()` 同一份键盘认领 +
+ *     关闭时排空 decoder 的保证，只是没有 anchor/composer pause（那两件事
+ *     `pauseComposer`/`resumeComposer*` 参数已经手动做了）。
  */
 export async function resolveActionGate(
   gate: LocalAgentActionGate,
@@ -719,19 +729,27 @@ export async function resolveActionGate(
       ? buildGateConfirmedResult(gate)
       : buildGateCancelledResult(gate, "confirmation declined");
   }
-  let subprocessRan = false;
-  deps.pauseComposer();
-  try {
-    return await waitForRawActionGate(deps.input, deps.output, gate, deps.spawnRunner, {
-      beforeSubprocess: () => {
-        subprocessRan = true;
-      },
-      afterSubprocess: deps.resumeComposerFromSubprocess,
-      registerToken: deps.registerToken,
-    });
-  } finally {
-    if (!subprocessRan) deps.resumeComposerFromDialog();
-  }
+  // handoff gate: no dialog frame, so `dialogHost.run()` doesn't apply — but
+  // it still needs the same keyboard claim + drain-on-close guarantee `run()`
+  // gives framed dialogs, so it goes through `withKeyboard()` instead.
+  // Composer pause/resume stays this function's own job (there is no anchor
+  // to compute and the subprocess-vs-dialog resume split below is specific
+  // to this gate kind).
+  return deps.dialogHost.withKeyboard(async () => {
+    let subprocessRan = false;
+    deps.pauseComposer();
+    try {
+      return await waitForRawActionGate(deps.input, deps.output, gate, deps.spawnRunner, {
+        beforeSubprocess: () => {
+          subprocessRan = true;
+        },
+        afterSubprocess: deps.resumeComposerFromSubprocess,
+        registerToken: deps.registerToken,
+      });
+    } finally {
+      if (!subprocessRan) deps.resumeComposerFromDialog();
+    }
+  });
 }
 
 // ── S2：Turn 执行与队列 drain 的显式上下文容器与文件级函数 ──────────────────
@@ -751,9 +769,13 @@ export interface AgentTurnContext {
   turnEpoch: number;
   activeTurnAbort: AbortController | null;
   activeTurnEpoch: number;
-  modalOwnsKeyboard: boolean;
-  composerDecoderDrain: (() => void) | null;
   chatQueueBinding: ChatQueueTuiBinding | null;
+  /**
+   * 当前进行中 turn 的注入收件箱。runOneAgentTurn 开始时创建、结束时关闭清空；
+   * 非 null 即表示「有 turn 正在跑，可直投当前 loop」。
+   * 见 turnInjectionInbox.ts。
+   */
+  turnInjectionInbox: TurnInjectionInbox<TurnRequest | InternalTurnEvent | string> | null;
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
@@ -890,18 +912,19 @@ export async function runOneAgentTurn(
   // composer (same dialogHost + runSelectDialog as the /agent picker) and
   // resolve the user's pick into the userMessage that continues the turn.
   // Only wired in interactive TUI mode; headless/CI falls back to text menu.
+  //
+  // The ask_choice popup installs its own raw-key reader on stdin; without a
+  // keyboard claim the same `data` event fans out to both it and the
+  // composer's decoder, so every key (Esc/Enter/printable) is handled twice
+  // — once by the popup and once by handleInputToken, which aborts the turn
+  // on Esc and pollutes the composer draft/queue on Enter.
+  // `dialogHost.run()` now claims the keyboard for the popup's full lifetime
+  // and drains the composer's decoder (a debounced Enter, a partial ESC/CSI
+  // tail) before releasing it on close, so this call site no longer needs to
+  // manage any of that by hand — see dialogHost.ts's file docstring.
   const requestUserChoice =
     isInteractiveInput(ctx.input) && ctx.dialogHost
       ? async (choiceReq: UserChoiceRequest): Promise<UserChoiceResult> => {
-          // The ask_choice popup installs its own raw-key reader on stdin,
-          // but dialogHost.run only composer.pause()s and does NOT detach
-          // the global `input.on("data", onData)` listener. Node fans the
-          // same `data` event to both listeners, so every key (Esc/Enter/
-          // printable) would be handled twice: once by the popup and once
-          // by handleInputToken — which aborts the turn on Esc and pollutes
-          // the composer draft / queue on Enter. Claim the keyboard here so
-          // handleInputToken drops all keys while the popup is open.
-          ctx.modalOwnsKeyboard = true;
           try {
             return await ctx.dialogHost!.run((anchor) =>
               runAskChoiceDialog({
@@ -913,20 +936,16 @@ export async function runOneAgentTurn(
             );
           } catch {
             return { kind: "cancelled" };
-          } finally {
-            // Same deferred-Enter race as confirm/action-gate: the popup's
-            // confirm Enter is debounced ~40ms in the composer decoder and
-            // only lands here after the popup has closed and
-            // modalOwnsKeyboard flipped back — so it would fall through to
-            // submit and enqueue the draft. Drain the decoder buffer on
-            // close so that Enter (and any partial ESC/CSI tail) is dropped
-            // instead of polluting the next submit.
-            ctx.composerDecoderDrain?.();
-            ctx.modalOwnsKeyboard = false;
           }
         }
       : undefined;
   ctx.runRegistryPoller.beginHold();
+  // 本轮的注入收件箱：runWakeHandler 在 busy 时把后台 run 终态唤醒直投这里，
+  // 由 local loop 的 drainInjections 在轮边界取走注入当前 loop。
+  const injectionInbox = createTurnInjectionInbox<
+    TurnRequest | InternalTurnEvent | string
+  >();
+  ctx.turnInjectionInbox = injectionInbox;
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
@@ -943,6 +962,7 @@ export async function runOneAgentTurn(
         ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
         ...(requestUserChoice ? { requestUserChoice } : {}),
         abortSignal: ctx.activeTurnAbort.signal,
+        drainInjections: () => injectionInbox.drain(),
         pastedTextStore: ctx.pasteStore,
         activityReporter: ctx.activityReporter,
         onAgentRunStatus: (snapshot) => {
@@ -1080,6 +1100,26 @@ export async function runOneAgentTurn(
     ctx.runRegistryPoller.endHold();
     ctx.activityIndicator.stop();
     ctx.activeTurnAbort = null;
+    // 兜底不丢唤醒：turn 结束（正常/abort/异常/preemptAndAbortForDrain）时，
+    // 收件箱里还有 loop 没来得及消化的条目，就逐条落回 chat 队列，走既有的
+    // 排队 + markAcknowledged 过滤路径，在下一个 turn 被消费。
+    // （这条 enqueue 是允许的兜底路径，不是被移除的 busy 分支排队路径。）
+    if (ctx.turnInjectionInbox === injectionInbox) ctx.turnInjectionInbox = null;
+    const leftover = injectionInbox.close();
+    if (leftover.length > 0) {
+      const binding = ensureChatQueueBinding(
+        ctx,
+        actionGateHandler,
+        confirmDestructiveAction,
+      );
+      for (const entry of leftover) {
+        try {
+          binding.enqueue(entry.fallback);
+        } catch {
+          // 队列已关闭等极端情况：吞掉，避免 finally 抛出盖掉真实 turn 结果。
+        }
+      }
+    }
   }
 }
 

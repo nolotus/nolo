@@ -5,6 +5,7 @@ import {
   cleanupExpiredSpills,
   countLines,
   formatToolOverflowMarker,
+  resetSpillCleanupThrottle,
   resolveSpillDirectory,
   spillToolOutput,
 } from "./toolSpillStore";
@@ -13,6 +14,8 @@ const TEST_DIR = join(import.meta.dir, ".tmp-spill-test");
 
 describe("toolSpillStore", () => {
   beforeEach(() => {
+    // 重置节流状态，防止同进程跨用例泄漏（spillToolOutput 走 60s 节流路径）。
+    resetSpillCleanupThrottle();
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }

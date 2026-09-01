@@ -9,9 +9,6 @@ import {
   resolveAuthToken,
 } from "../cliEnvHelpers";
 import {
-  normalizeToolDisplayMode,
-} from "../client/toolOutput";
-import {
   DEFAULT_TUI_AGENT_KEY,
   PLATFORM_AGENTS,
   resolveCatalogPlatformAgents,
@@ -102,7 +99,6 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       asOptionalTrimmedString(env.NOLO_CLI_STATUS_MODE) ?? runtimeMode,
     userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
     gitStatus: undefined,
-    toolDisplay: normalizeToolDisplayMode(env.NOLO_CLI_TOOLS ?? env.NOLO_TOOLS, "normal"),
     thinkingDisplay: resolveThinkingDisplayMode(env),
     contextWindow: resolveAgentContextWindow({ agentKey, agentName }),
     estimatedContextTokens: estimateDefaultCliContextTokens({

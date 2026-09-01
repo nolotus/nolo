@@ -230,6 +230,11 @@ export type RunAgentTurnOptions = {
   /** Local loop lifecycle events; used by the CLI runner to write heartbeat activity to the registry. */
   onLoopEvent?: (event: LocalAgentLoopEvent) => void;
   /**
+   * 回合内注入收件箱 drain（TUI 后台 run 终态唤醒直投当前 loop）。
+   * 直接透传给 local loop input.drainInjections；server 模式不支持，忽略。
+   */
+  drainInjections?: () => string[];
+  /**
    * quick-chat 自动路由的「模型层覆盖」：分类路由落到通用档（tier agent）时，
    * 用用户选择的 agent 的 model 层替换档位 agent 的 model 层。
    * server 模式随 body 的 runtimeOptions.quickChatModelOverride 由服务端应用；

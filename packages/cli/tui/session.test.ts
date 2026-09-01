@@ -820,7 +820,6 @@ describe("handleTuiInput - /tools display migration hint", () => {
   test("normal remains the default and the command only emits the migration hint", () => {
     setCliLocale("en");
     const state = createInitialTuiState({});
-    expect(state.toolDisplay).toBe("normal");
 
     const result = handleTuiInput("/tools pro", state);
     expect(result.nextState).toBe(state);
@@ -1654,14 +1653,15 @@ describe("themed render surfaces", () => {
     const output = renderContextPanel(createInitialTuiState({}), true);
     // The field rows are the ones between the title and the blank line before
     // "Next:". Each label pads to display width 9, so every value must start
-    // at the same column once the color codes are stripped.
+    // at the same column once the color codes are stripped. (8 fields since
+    // the tools-display row was folded away into the single display mode.)
     const rows = output
       .split("\n")
       .slice(1)
       .filter((row) => row !== "")
-      .slice(0, 9)
+      .slice(0, 8)
       .map(stripAnsi);
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(8);
     const labelWidths = rows.map((row) => {
       const label = row.match(/^\S+\s+/)?.[0] ?? "";
       return displayWidth(label);
@@ -1709,9 +1709,9 @@ describe("Task D - i18n & help theme tests", () => {
         .split("\n")
         .slice(1)
         .filter((row) => row !== "")
-        .slice(0, 9)
+        .slice(0, 8)
         .map(stripAnsi);
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(8);
       const labelWidths = rows.map((row) => {
         const label = row.match(/^\S+\s+/)?.[0] ?? "";
         return displayWidth(label);
