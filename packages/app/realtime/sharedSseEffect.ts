@@ -12,7 +12,10 @@
 //   - 整个 subscription 是一个 fiber；dispose = interrupt fiber（AbortSignal 自动触发 fetch abort）
 //   - reader.releaseLock / broadcast.close 用 Effect.ensuring 绑定到 fiber 生命周期
 //     （generator finally 在 async 中断时不会执行，ensuring 才会）
-//   - cursor 是 scoped Ref：每个 physical subscription 一份，同 key 共享、跨 key 隔离
+//   - cursor 是 scoped Ref：每个 physical subscription 一份实例（A → Ref A、B → Ref B，
+//     各自独立），同 key 的 leader/follower 在**各自实例内**维护自己的 Ref；
+//     cursor 值经 BroadcastChannel 广播同步（follower 收到带 _eventId 的事件写自己的 Ref），
+//     跨 key 天然隔离（不同 key 的实例不互通）
 
 import { Context, Data, Effect, Fiber, Layer, Option, Ref, Deferred } from "effect";
 import { resolveRetryAfterMs } from "app/utils/retryAfter";
@@ -88,6 +91,9 @@ export class SseBroadcast extends Context.Tag("SseBroadcast")<
 
 export class SseStreamError extends Data.TaggedError("SseStreamError")<{
   readonly cause: unknown;
+  /** true 表示该次失败发生在「成功建立 SSE response（response.ok && body）之后」，
+   *  即读流阶段失败；retry loop 据此把 backoff 复位（建连成功即视为连接成功）。 */
+  readonly connected?: boolean;
 }> {}
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
@@ -135,11 +141,19 @@ export function parseSseChunk(chunk: string): {
  * 单次 physical SSE 连接：fetch → 读流 → 解析 → 回调。
  * 返回 "terminal"（401/403，停止）或 "stream-ended"（正常结束，重连）。
  * 失败返回 SseStreamError（网络错误 / 非 2xx / 读流错误）。
+ * connected 语义：「成功建立 SSE response（response.ok && response.body 成立）」
+ * 即视为连接成功，retry loop 据此把 backoff 复位为 RETRY_INITIAL_MS——即使随后的
+ * reader 读流失败、下次重连也按初始退避（旧行为），而不是沿用已增长的 backoff。
+ * 503 等非 2xx（无 body 可读）不会进入 connected，仍走 Retry-After 增长路径。
  */
 const readSseOnce = (
   args: SubscribeSharedSseArgs,
   publish: (message: SharedSseMessage) => void
-): Effect.Effect<"terminal" | "stream-ended", SseStreamError, SseCursor | SseTransport> =>
+): Effect.Effect<
+  { readonly outcome: "terminal" | "stream-ended"; readonly connected: boolean },
+  SseStreamError,
+  SseCursor | SseTransport
+> =>
   Effect.gen(function* () {
     const transport = yield* SseTransport;
     const cursor = yield* SseCursor;
@@ -155,7 +169,7 @@ const readSseOnce = (
       if (response.status === 401 || response.status === 403) {
         args.onTerminalStatus?.(response.status);
         publish({ type: "terminal-status", status: response.status });
-        return "terminal" as const;
+        return { outcome: "terminal" as const, connected: false };
       }
       return yield* Effect.fail(
         new SseStreamError({ cause: { status: response.status, headers: response.headers } })
@@ -194,8 +208,12 @@ const readSseOnce = (
     });
 
     return yield* readLoop.pipe(
+      // connected = true：读到此处说明 response.ok && response.body 已成立
+      //（连接成功建立），随后的读流失败属于「建连成功后的 reader 错误」，
+      // retry loop 据此复位 backoff。非 2xx 在 fetch 之后直接 return/fail，
+      // 不会走到这里（connected 保持 false）。
       Effect.catchAll((error) =>
-        Effect.fail(new SseStreamError({ cause: error }))
+        Effect.fail(new SseStreamError({ cause: error, connected: true }))
       ),
       Effect.ensuring(
         Effect.sync(() => {
@@ -206,7 +224,7 @@ const readSseOnce = (
           }
         })
       ),
-      Effect.map(() => "stream-ended" as const)
+      Effect.map(() => ({ outcome: "stream-ended" as const, connected: true }))
     );
   });
 
@@ -239,9 +257,12 @@ export const readSseLoop = (
       while (true) {
         const outcome = yield* Effect.either(readSseOnce(args, publish));
         if (outcome._tag === "Right") {
-          if (outcome.right === "terminal") return "terminal" as const;
-          // 流正常结束 → 重置退避后重连
-          retryDelay = RETRY_INITIAL_MS;
+          if (outcome.right.outcome === "terminal") return "terminal" as const;
+          // connected = 成功建立 SSE response（response.ok && response.body 成立），
+          // 此时把 backoff 复位为 RETRY_INITIAL_MS：流正常结束或随后的 reader
+          // 读流错误触发重连时，下次重连都按初始退避，不沿用已增长的 backoff。
+          // 非 2xx（503 等）不会进入 connected，仍走 Retry-After 增长路径。
+          if (outcome.right.connected) retryDelay = RETRY_INITIAL_MS;
           yield* clock.sleep(retryDelay);
           continue;
         }
@@ -251,6 +272,10 @@ export const readSseLoop = (
           // terminal status 已在 readSseOnce 内处理
           return "terminal" as const;
         }
+        // 建连成功（200 + body）后的读流失败也复位 backoff：connect 成功即
+        // 视为连接成功，next reconnect 按初始退避（旧行为），不沿用已增长的
+        // backoff。非 2xx 失败（error.connected 未设/false）仍走 Retry-After 增长。
+        if (error.connected) retryDelay = RETRY_INITIAL_MS;
         const retryAfterMs = resolveRetryAfterMs(cause.headers ?? null, retryDelay);
         yield* clock.sleep(retryAfterMs);
         retryDelay = Math.min(retryAfterMs * 2, RETRY_MAX_MS);
@@ -301,10 +326,12 @@ export const runElection = (
  *
  * cursor 粒度决策：cursorRef 在这里（per-key 实例层）创建，而不是在
  * readSseLoop 内——cursor 属于 physical subscription/key，而非「leader 任期」。
- * 同一 key 的多个实例共享同一份 cursor（同 key 共享语义），跨 key 天然隔离
- * （每个 key 一个实例 = 一份 Ref）。follower 经 BroadcastChannel 收到带 id 的
- * 事件时也写同一份 Ref：leader 掉线后 follower 晋升时带上正确的 Last-Event-ID，
- * 避免服务端全量重放。
+ * 语义澄清：每个 subscription 实例有自己的 cursorRef（A → Ref A、B → Ref B，
+ * 各自独立，互不读写）；同 key 的 leader/follower 在各自实例内维护自己的 Ref。
+ * cursor 值的跨实例同步靠 BroadcastChannel：follower 收到广播的带 _eventId
+ * 事件时写自己的 Ref。因此同一 key 的不同实例在 lock handover 后都能带上
+ * 正确的 Last-Event-ID（leader 掉线前收到的 id 已广播给 follower），
+ * 避免服务端全量重放。跨 key 天然隔离（不同 key 的实例不互通）。
  */
 export const subscribeSharedSseEffect = (
   args: SubscribeSharedSseArgs
@@ -438,4 +465,16 @@ export const SseBroadcastLive = Layer.succeed(SseBroadcast, {
         },
       };
     }),
+});
+
+/** 直接模式 Broadcast：no-op。direct fallback（supportsSharedTransport() 为 false）
+ * 的常见触发条件恰是 typeof BroadcastChannel === "undefined"，因此这里绝不依赖
+ * BroadcastChannel。direct 模式无跨实例共享语义（无锁选举、无扇出），单实例
+ * 在 readSseOnce 内 self-deliver 事件，post/close 为空操作即可。 */
+export const SseBroadcastDirect = Layer.succeed(SseBroadcast, {
+  create: (_name, _onMessage) =>
+    Effect.sync(() => ({
+      post: () => {},
+      close: () => {},
+    })),
 });

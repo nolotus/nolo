@@ -87,6 +87,23 @@ function makeSseResponse(event: unknown) {
   );
 }
 
+/** 保持打开的 SSE 响应：事件后不 close，避免触发重连（用于 fetch 恰一次断言）。 */
+function makeKeepOpenSseResponse(event: unknown) {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        // 故意不 close：保持连接打开
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }
+  );
+}
+
 describe("subscribeSharedSse", () => {
   const originalBroadcastChannel = globalThis.BroadcastChannel;
   const originalNavigator = globalThis.navigator;
@@ -305,5 +322,47 @@ describe("subscribeSharedSse", () => {
 
     disposeA();
     disposeB();
+  });
+
+  test("direct fallback works without BroadcastChannel and without navigator.locks", async () => {
+    // 回归：supportsSharedTransport() 为 false（BroadcastChannel undefined 且
+    // navigator.locks 不可用）时走 direct 模式。错误实现无条件注入
+    // SseBroadcastLive，其内部 new BroadcastChannel(name) 会抛 ReferenceError。
+    // 修复后 direct fallback 必须完全不经 BroadcastChannel：
+    //   onEvent 正常收到、无异常、dispose 正常、fetch 恰一次。
+    Object.defineProperty(globalThis, "BroadcastChannel", {
+      value: undefined,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      value: {}, // 无 locks
+      configurable: true,
+    });
+
+    const received: unknown[] = [];
+    const fetchMock = mock(async () => makeKeepOpenSseResponse({ type: "direct", value: 1 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    let dispose: (() => void) | undefined;
+    expect(() => {
+      dispose = subscribeSharedSse({
+        key: "space-direct",
+        url: "https://nolo.test/api/events/space-direct",
+        onEvent: (event) => received.push(event),
+      });
+    }).not.toThrow();
+
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(received).toEqual([{ type: "direct", value: 1 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    expect(() => dispose?.()).not.toThrow();
+    await flush();
+    // dispose 后仍无多余 fetch（保持打开的流被中断，不触发重连）
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

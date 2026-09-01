@@ -4,6 +4,7 @@
 
 import { Effect, Fiber, FiberId, Layer } from "effect";
 import {
+  SseBroadcastDirect,
   SseBroadcastLive,
   SseClockLive,
   SseLockDirect,
@@ -22,12 +23,19 @@ function supportsSharedTransport() {
 }
 
 export function subscribeSharedSse(args: SubscribeSharedSseArgs): () => void {
-  const lockLayer = supportsSharedTransport() ? SseLockLive : SseLockDirect;
+  // 按 mode 配对：shared = SseLockLive + SseBroadcastLive（真实选举 + 扇出）；
+  // direct = SseLockDirect + SseBroadcastDirect（无选举 + no-op broadcast）。
+  // 不能混搭：supportsSharedTransport() 为 false 的常见原因是 BroadcastChannel
+  // 不存在，direct fallback 若仍用 SseBroadcastLive 会因 new BroadcastChannel(name)
+  // 抛异常（旧实现走 subscribeDirect 直接 fetch 的回归）。
+  const shared = supportsSharedTransport();
+  const lockLayer = shared ? SseLockLive : SseLockDirect;
+  const broadcastLayer = shared ? SseBroadcastLive : SseBroadcastDirect;
   const liveLayer = Layer.mergeAll(
     SseClockLive,
     SseTransportLive,
     lockLayer,
-    SseBroadcastLive
+    broadcastLayer
   );
   const fiber = Effect.runFork(
     subscribeSharedSseEffect(args).pipe(Effect.provide(liveLayer))

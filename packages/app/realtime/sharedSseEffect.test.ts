@@ -237,6 +237,73 @@ describe("sharedSseEffect (deterministic)", () => {
     await runWith(program, [transport, broadcastLayer, SseLockDirect]);
   });
 
+  test("reset backoff after successful connect: reader error after 200 reconnects at RETRY_INITIAL_MS, not grown backoff", async () => {
+    // 回归：成功建立 SSE response（200 + body）后即使 reader 读流失败，
+    // 下次重连也必须按 RETRY_INITIAL_MS，而不是沿用已增长的 backoff。
+    // attempt1 fetch 失败 → 等 1000ms；attempt2 失败 → 等 2000ms；
+    // attempt3 HTTP 200 建连成功 → reader 立即 error → 下一次 reconnect 等 1000ms。
+    let attempts = 0;
+    const transport = makeTransport(async () => {
+      attempts++;
+      if (attempts === 1) throw new TypeError("network down");
+      if (attempts === 2) throw new TypeError("network down again");
+      // attempt3：合法 SSE 响应，但 read 立即 error（模拟读流失败）
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error("stream reset"));
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } }
+      );
+    });
+    const { layer: broadcastLayer } = makeBroadcast();
+
+    const program = Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        subscribeSharedSseEffect({
+          key: "space-reset-backoff",
+          url: "https://nolo.test/api/events/space-reset-backoff",
+          onEvent: () => {},
+        })
+      );
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(1);
+
+      // attempt1 失败 → 等 RETRY_INITIAL_MS=1000
+      yield* TestClock.adjust(Duration.millis(999));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(1); // 999ms 不应 fetch
+      yield* TestClock.adjust(Duration.millis(1));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(2); // 1000ms 应 fetch
+
+      // attempt2 失败 → backoff 增长到 2000
+      yield* TestClock.adjust(Duration.millis(1999));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(2); // 1999ms 不应 fetch
+      yield* TestClock.adjust(Duration.millis(1));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(3); // 2000ms 应 fetch
+
+      // attempt3：200 建连成功 + reader error → connected 复位 backoff
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(3);
+
+      // 下一次 reconnect 必须等 RETRY_INITIAL_MS（1000ms），而非已增长的 4000ms
+      yield* TestClock.adjust(Duration.millis(999));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(3); // 999ms 不应 fetch（若沿用增长 backoff 同样不 fetch，关键在下一条）
+      yield* TestClock.adjust(Duration.millis(1));
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      expect(attempts).toBe(4); // 1000ms 应 fetch（错误实现沿用 4000ms → 此处仍为 3 → RED）
+
+      yield* Fiber.interrupt(fiber);
+    });
+
+    await runWith(program, [transport, broadcastLayer, SseLockDirect]);
+  });
+
   test("dispose during retry sleep: no new fetch, no new event, no dangling retry", async () => {
     let attempts = 0;
     const transport = makeTransport(async () => {
