@@ -10,38 +10,14 @@
  *   "throw"              — throw after install so uncaughtException fires;
  *                          must print the error and exit non-zero.
  *
- * Readiness and diagnostics travel through files: under "bun test" with a
- * repo-local test file the runner intercepts spawned children's stdout AND
- * stderr pipes, so pipe-based channels lose bytes on the parent side. Real
- * stderr keeps flowing (CI/human diagnostics); the file channels are what
- * the test asserts on. Non-TTY output keeps `leaveAltScreen` a no-op — we
- * are testing exit semantics, not ANSI bytes.
+ * The probe prints a ready line on stdout so the parent knows handlers are
+ * installed before sending a signal. It deliberately uses a non-TTY output so
+ * `leaveAltScreen` is a no-op (we are testing exit semantics, not ANSI bytes).
  */
-import { appendFileSync } from "node:fs";
 import { installAltScreenRestoreHandlers } from "./readlineWorkspace";
 
 const mode = process.argv[2] ?? "install";
-const readyFile = process.argv[3];
-const diagFile = process.argv[4];
-const output = process.stderr; // non-TTY in the child; leaveAltScreen no-op
-
-if (!readyFile) throw new Error("missing ready-file argument");
-
-// Tee every stderr write into the diag file BEFORE any listener or handler is
-// installed, so pre-install markers, listener runs and the uncaughtException
-// report are all observable by the parent even when its stderr pipe is
-// intercepted.
-if (diagFile) {
-  const originalWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: any, ...rest: any[]) => {
-    try {
-      appendFileSync(diagFile, typeof chunk === "string" ? chunk : String(chunk));
-    } catch {
-      // A failing diagnostic tee must never mask the real stderr output.
-    }
-    return originalWrite(chunk, ...rest);
-  }) as typeof process.stderr.write;
-}
+const output = process.stdout; // non-TTY in the child; leaveAltScreen no-ops
 
 if (mode === "install+listener") {
   // MUST register the pre-existing listener BEFORE install so the handler
@@ -53,16 +29,17 @@ if (mode === "install+listener") {
     process.stderr.write(`listener-runs=${count}\n`);
     process.exit(count);
   });
+  // Debug: confirm the listener is visible to process.listeners BEFORE install.
+  process.stderr.write(`pre-install-listeners=${process.listeners("SIGINT").length}\n`);
 }
 
 installAltScreenRestoreHandlers(output);
 
-// File-based readiness handshake: the parent polls this file instead of
-// reading stdout (which the runner may intercept).
-appendFileSync(readyFile, "ready\n");
+// Tell the parent we are ready (handlers installed, idling).
+process.stdout.write("ready\n");
 
 if (mode === "throw") {
-  // Defer so the parent has time to observe the ready file.
+  // Defer so the parent has time to wire up reading stdout.
   setTimeout(() => {
     throw new Error("probe-boom");
   }, 20);

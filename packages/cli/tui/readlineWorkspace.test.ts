@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 // Hermetic: never spawn real git for the status chip in workspace tests.
 // refreshGitStatus falls back to process.env per key because tests pass env: {}.
 process.env.NOLO_CLI_GIT_STATUS ??= "0";
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { spawn } from "bun";
@@ -3584,25 +3584,14 @@ function spawnProbe(mode: string): {
   child: ReturnType<typeof spawn>;
   ready: Promise<void>;
   exited: Promise<{ code: number | null; stderr: string }>;
-  diagPath: string;
 } {
-  const readyPath = join(tmpdir(), `nolo-altscreen-ready-${process.pid}-${crypto.randomUUID()}`);
-  // stderr 断言也走文件：bun test 的 stdio 接管不止吞 stdout 的 ready 行，
-  // 同样会让子进程 stderr 内容（listener-runs / probe-boom）在父进程侧丢失。
-  // 探针把诊断行 tee 进该文件，断言读文件；真实 stderr 照旧输出。
-  const diagPath = join(tmpdir(), `nolo-altscreen-diag-${process.pid}-${crypto.randomUUID()}.log`);
   const child = spawn({
-    cmd: ["bun", "run", PROBE_PATH, mode, readyPath, diagPath],
-    // 探针子进程用最小白名单 env：readlineWorkspace.test.ts 里更早的用例会
-    // 改写 process.env（且子进程全量继承），父进程累积的 NOLO_*/鉴权/服务端
-    // 变量会让探针在 import 阶段去连活跃的运行时状态（LevelDB 锁/服务端口），
-    // 表现为挂死或早退——五个信号用例假红，而非信号语义回归。探针只测
-    // altScreen 退出语义，PATH+HOME 足够。
+    cmd: ["bun", "run", PROBE_PATH, mode],
+    // 探针的 import 链会按 cwd 解析仓库状态目录（data/leveldb）。从活跃的
+    // 主检出跑测试时，运行中的 server 持有 LevelDB 锁，子进程在 import 阶段
+    // 就挂死/早退，五个信号用例全部红——那不是信号语义回归。给子进程一个
+    // 干净 cwd，让它与被测的 altScreen 退出语义解耦任何检出环境。
     cwd: tmpdir(),
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-    },
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
@@ -3611,35 +3600,20 @@ function spawnProbe(mode: string): {
   const ready = new Promise<void>((r) => { resolveReady = r; });
   const exited = (async () => {
     const stderr = Bun.readableStreamToText(child.stderr);
-    // Readiness uses a file rather than stdout: Bun test's repository-local
-    // runner can intercept a spawned child's stdio pipe before the parent sees
-    // bytes, although the child has already written them.
+    // Drain stdout until "ready" appears (handlers installed) or proc exits.
+    const stdoutReader = child.stdout.getReader();
+    let buf = "";
     while (true) {
-      try {
-        if (readFileSync(readyPath, "utf8").includes("ready\n")) {
-          resolveReady();
-          break;
-        }
-      } catch {
-        // The child has not created the handshake file yet.
-      }
-      if ((await Promise.race([
-        child.exited.then(() => true),
-        new Promise((resolve) => setTimeout(() => resolve(false), 10)),
-      ])) === true) break;
+      const { value, done } = await stdoutReader.read();
+      if (done) break;
+      buf += new TextDecoder().decode(value);
+      if (buf.includes("ready\n")) { resolveReady(); break; }
     }
     const res = await child.exited;
     const stderrText = await stderr;
-    let diag = "";
-    try { diag = readFileSync(diagPath, "utf8"); } catch {}
-    try { unlinkSync(readyPath); } catch {}
-    try { unlinkSync(diagPath); } catch {}
-    // diag 是断言通道（stderr 管道在 bun test 下可能丢内容）；stderr 保留
-    // 管道原文仅供诊断，两者不合并——同一诊断行会在两个通道各出现一次，
-    // 合并会让 exactly-once 断言数出两份。
-    return { code: res, stderr: stderrText, diag };
+    return { code: res, stderr: stderrText };
   })();
-  return { child, ready, exited, diagPath };
+  return { child, ready, exited };
 }
 
 describe("altScreen signal/crash exit semantics (subprocess)", () => {
@@ -3650,11 +3624,11 @@ describe("altScreen signal/crash exit semantics (subprocess)", () => {
     const { code } = await Promise.race([
       exited,
       new Promise<{ code: number | null }>((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 15000)
+        setTimeout(() => rej(new Error("timeout")), 4000)
       ),
     ]);
     expect(code).toBe(143);
-  }, 20000);
+  });
 
   test("SIGINT 无既有 listener → 恢复后以 130 退出", async () => {
     const { child, ready, exited } = spawnProbe("install");
@@ -3663,11 +3637,11 @@ describe("altScreen signal/crash exit semantics (subprocess)", () => {
     const { code } = await Promise.race([
       exited,
       new Promise<{ code: number | null }>((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 15000)
+        setTimeout(() => rej(new Error("timeout")), 4000)
       ),
     ]);
     expect(code).toBe(130);
-  }, 20000);
+  });
 
   test("SIGHUP 无既有 listener → 恢复后以 129 退出", async () => {
     const { child, ready, exited } = spawnProbe("install");
@@ -3676,20 +3650,20 @@ describe("altScreen signal/crash exit semantics (subprocess)", () => {
     const { code } = await Promise.race([
       exited,
       new Promise<{ code: number | null }>((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 15000)
+        setTimeout(() => rej(new Error("timeout")), 4000)
       ),
     ]);
     expect(code).toBe(129);
-  }, 20000);
+  });
 
   test("有既有 SIGINT listener → 该 listener 恰好执行一次（不是两次）", async () => {
     const { child, ready, exited } = spawnProbe("install+listener");
     await ready;
     process.kill(child.pid!, "SIGINT");
-    const { code, stderr, diag } = await Promise.race([
+    const { code, stderr } = await Promise.race([
       exited,
-      new Promise<{ code: number | null; stderr: string; diag: string }>((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 15000)
+      new Promise<{ code: number | null; stderr: string }>((_, rej) =>
+        setTimeout(() => rej(new Error("timeout")), 4000)
       ),
     ]);
     // The pre-existing listener exits with its run-count as the code.
@@ -3699,26 +3673,24 @@ describe("altScreen signal/crash exit semantics (subprocess)", () => {
     // call is impossible — but the stderr marker "listener-runs=1" appears
     // exactly once, confirming no double-fire.
     expect(code).toBe(1);
-    // 断言走 diag 文件通道（stderr 管道在 bun test 下可能被接管丢内容）。
-    const runs = diag.match(/listener-runs=(\d+)/g) ?? [];
-    expect(runs.length, `stderr: ${JSON.stringify(stderr)} diag: ${JSON.stringify(diag)}`).toBe(1);
+    const runs = stderr.match(/listener-runs=(\d+)/g) ?? [];
+    expect(runs.length, `stderr: ${JSON.stringify(stderr)}`).toBe(1);
     expect(runs[0]).toBe("listener-runs=1");
-  }, 20000);
+  });
 
   test("uncaughtException → 打印错误信息并以非 0 退出", async () => {
     const { child, ready, exited } = spawnProbe("throw");
-    const { code, diag } = await Promise.race([
+    const { code, stderr } = await Promise.race([
       exited,
-      new Promise<{ code: number | null; diag: string }>((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 15000)
+      new Promise<{ code: number | null; stderr: string }>((_, rej) =>
+        setTimeout(() => rej(new Error("timeout")), 4000)
       ),
     ]);
     expect(code).not.toBe(0);
     expect(code).not.toBe(null);
-    // 断言走 diag 文件通道（tee 自 handler 的真实 stderr.write，语义不变）。
-    expect(diag).toContain("uncaughtException:");
-    expect(diag).toContain("probe-boom");
-  }, 20000);
+    expect(stderr).toContain("uncaughtException:");
+    expect(stderr).toContain("probe-boom");
+  });
 });
 
 describe("restoreAltScreen error guard", () => {

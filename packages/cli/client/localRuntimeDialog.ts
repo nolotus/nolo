@@ -28,9 +28,6 @@ import { applyTokenUsageToDayStats } from "../../ai/token/applyTokenUsageToDaySt
 import { createTokenKey, createTokenStatsKey } from "../../database/keys";
 import { runKeyed } from "core/keyedTaskQueue";
 import { format } from "date-fns";
-import { appendFileSync, mkdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import { type EnvLike } from "./localRuntimeHelpers";
 import {
   extractLastUserText,
@@ -42,86 +39,6 @@ import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliFetchImpl } from "../cliFetch";
-
-const RAW_USAGE_SCALARS = [
-  "prompt_tokens",
-  "completion_tokens",
-  "total_tokens",
-  "input_tokens",
-  "output_tokens",
-  "cache_read_input_tokens",
-  "cache_creation_input_tokens",
-  "prompt_cache_hit_tokens",
-  "prompt_cache_miss_tokens",
-  "cost",
-  "cost_in_usd_ticks",
-  "provider_call_id",
-] as const;
-const RAW_USAGE_DETAIL_OBJECTS = [
-  "prompt_tokens_details",
-  "completion_tokens_details",
-  "input_tokens_details",
-  "output_tokens_details",
-  "cost_details",
-] as const;
-
-/**
- * 白名单投影：只保留数值型 token/cost 字段与 provider_call_id，
- * details 对象也只保留数值叶子——从结构上保证不写入任何消息内容或
- * provider 私有字段（review HIGH-1）。
- */
-function projectRawUsage(usage: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const key of RAW_USAGE_SCALARS) {
-    const value = usage[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      out[key] = value;
-    } else if (key === "provider_call_id" && typeof value === "string" && value.trim()) {
-      out[key] = value;
-    }
-  }
-  for (const key of RAW_USAGE_DETAIL_OBJECTS) {
-    const value = usage[key];
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const numericLeaves = Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).filter(
-        ([, leaf]) => typeof leaf === "number" && Number.isFinite(leaf),
-      ),
-    );
-    if (Object.keys(numericLeaves).length > 0) out[key] = numericLeaves;
-  }
-  return out;
-}
-
-/**
- * ④ 原始 usage 审计捕获（默认关闭）：NOLO_DEBUG_RAW_USAGE=1 时把每条
- * provider 调用 usage 的白名单投影（仅数值 token/cost 字段）追加到
- * `$NOLO_HOME/logs/raw-usage.jsonl`（默认 ~/.nolo/logs/），用于判定
- * ollama-cloud / Codex OAuth 等通道是「上游没报 cache 字段」还是「真 0」。
- */
-function debugCaptureRawUsage(item: {
-  usage: Record<string, unknown>;
-  model?: string;
-  provider?: string;
-}): void {
-  if (!process.env.NOLO_DEBUG_RAW_USAGE) return;
-  try {
-    const noloHome = process.env.NOLO_HOME?.trim() || join(homedir(), ".nolo");
-    const dir = join(noloHome, "logs");
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(
-      join(dir, "raw-usage.jsonl"),
-      JSON.stringify({
-        ts: Date.now(),
-        model: item.model,
-        provider: item.provider,
-        usage: projectRawUsage(item.usage),
-      }) + "\n",
-    );
-  } catch {
-    // 审计捕获绝不能影响计费主链路
-  }
-}
 
 export async function resolveStore(deps: CliLocalRuntimeAdapterDeps) {
   if (deps.store) return deps.store;
@@ -232,7 +149,7 @@ export async function writeLocalTokenRecord(args: {
   createId: () => string;
   output?: { write(chunk: string): unknown };
 }): Promise<Array<{ type: "put"; key: string; value: any }>> {
-  const usageRecords: NonNullable<AgentRuntimeSaveTurnInput["usageRecords"]> = args.input.usageRecords?.length
+  const usageRecords = args.input.usageRecords?.length
     ? args.input.usageRecords
     : args.input.result.usage
       ? [{
@@ -254,7 +171,6 @@ export async function writeLocalTokenRecord(args: {
   const ops: Array<{ type: "put"; key: string; value: any }> = [];
   for (const item of usageRecords) {
     if (!item.usage || Object.keys(item.usage).length === 0) continue;
-    debugCaptureRawUsage(item);
     const timestamp = args.now();
     const callId =
       item.callId ||
@@ -278,12 +194,6 @@ export async function writeLocalTokenRecord(args: {
       dialogId: args.dialogId,
       timestamp,
       entry_path: "cli-local",
-      ...(item.stablePrefixHash
-        ? {
-            stable_prefix_hash: item.stablePrefixHash,
-            stable_prefix_estimated_tokens: item.stablePrefixEstimatedTokens,
-          }
-        : {}),
     });
 
     const recordKey = createTokenKey.recordForStableCall(args.userId, callId);

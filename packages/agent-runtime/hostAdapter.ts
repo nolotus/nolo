@@ -152,9 +152,6 @@ export type AgentRuntimeSaveTurnInput = {
     usage: Record<string, unknown>;
     model: string;
     provider?: string;
-    /** 本次请求稳定前缀指纹（contextCompiler 同一算法），用于 prefix churn 观测。 */
-    stablePrefixHash?: string;
-    stablePrefixEstimatedTokens?: number;
   }>;
   /** Full token consumption across tool-loop and compaction provider calls. */
   accountingUsage?: Record<string, unknown>;

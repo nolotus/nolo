@@ -435,12 +435,6 @@ export async function saveDesktopAgentRuntimeTurnToRecordStore(args: {
       dialogId: plan.dialogId,
       timestamp,
       entry_path: "desktop-local",
-      ...(item.stablePrefixHash
-        ? {
-            stable_prefix_hash: item.stablePrefixHash,
-            stable_prefix_estimated_tokens: item.stablePrefixEstimatedTokens,
-          }
-        : {}),
     });
     const tokenKey = createTokenKey.recordForStableCall(args.userId, item.callId);
     const existingToken = await args.store.read(tokenKey, { remote: false }).catch(() => null);

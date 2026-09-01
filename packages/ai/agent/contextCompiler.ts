@@ -16,15 +16,6 @@ function createHash(_algo: string) {
   };
 }
 
-/**
- * 稳定前缀内容指纹（FNV-1a 32-bit hex，browser/server 兼容）。
- * 供 cacheProfile.stablePrefixHash 与 cli-local token 记录共用同一算法，
- * 保证 server run 与本地 run 的前缀 churn 观测可横向比较。
- */
-export function hashStablePrefixContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
 export type ContextLayerOwner =
   | "platform"
   | "agent"
@@ -144,7 +135,9 @@ export const compileContextLayers = (
     dynamicContent,
     layers: compiledLayers,
     cacheProfile: {
-      stablePrefixHash: hashStablePrefixContent(stablePrefixContent),
+      stablePrefixHash: createHash("sha256")
+        .update(stablePrefixContent)
+        .digest("hex"),
       stablePrefixLayerIds: stablePrefixLayers.map((layer) => layer.id),
       stablePrefixCharCount: stablePrefixContent.length,
       stablePrefixEstimatedTokens: estimateContextTokens(stablePrefixContent),

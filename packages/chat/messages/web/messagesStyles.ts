@@ -346,40 +346,6 @@ export const messagesStyles = stylex.create({
     whiteSpace: "nowrap",
   },
 
-  // ─── ChildRunEventRow（后台 run 终态事件系统行）──────────
-  wakeEventRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    fontSize: "var(--fontSize-xs)",
-    color: "var(--textTertiary)",
-    lineHeight: "1.4em",
-    paddingTop: 2,
-    paddingBottom: 2,
-  },
-  wakeEventIcon: {
-    display: "inline-flex",
-    alignItems: "center",
-    height: "1.4em",
-    flexShrink: 0,
-    opacity: 0.85,
-  },
-  wakeEventStatusDone: {
-    color: "var(--success)",
-  },
-  wakeEventStatusFailed: {
-    color: "var(--error)",
-  },
-  wakeEventStatusCancelled: {
-    color: "var(--warning)",
-  },
-  wakeEventText: {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-
   // ─── ApplyLineEditsPreviewViewer ─────────────────────────
   applyLineEditsContainer: {
     borderWidth: 1,

@@ -375,20 +375,10 @@ export function applyGeminiChunk(
       typeof meta.totalTokenCount === "number"
         ? meta.totalTokenCount
         : prompt + candidates;
-    // Gemini implicit context caching: cachedContentTokenCount is a subset of
-    // promptTokenCount, matching our canonical `input_tokens` = total-input
-    // semantics (normalizeUsage reads cache_read_input_tokens directly).
-    const cached =
-      typeof meta.cachedContentTokenCount === "number" &&
-      Number.isFinite(meta.cachedContentTokenCount)
-        ? // cached ⊆ prompt；对畸形上游防御性钳位，避免 cache_read > input 破坏归一化与计费
-          Math.min(Math.max(0, Math.floor(meta.cachedContentTokenCount)), prompt)
-        : 0;
     state.usage = {
       prompt_tokens: prompt,
       completion_tokens: candidates,
       total_tokens: total,
-      ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
     };
   }
 
