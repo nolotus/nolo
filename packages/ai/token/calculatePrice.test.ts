@@ -323,4 +323,23 @@ describe("calculatePrice", () => {
 
     expect(result.cost).toBeCloseTo(0.0032, 6);
   });
+
+  it("prices delisted Claude compat requests at the actually-serving GLM 5.3 Flash rate (no zero-cost leak)", () => {
+    // Claude 系已下架（2026-09-01）：模型目录已无 claude 条目，兼容请求由
+    // glm-5-3-flash 上游服务。计价必须跟随实际上游（1M in + 1M out = 0.8 + 3.2
+    // = 4.0 credits），不能落到零成本虚拟模型漏账。
+    const result = calculatePrice({
+      provider: "nolo",
+      modelName: "anthropic/claude-sonnet-5",
+      usage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        cost: 0,
+      },
+    });
+
+    expect(result.cost).toBeCloseTo(4.0, 6);
+  });
 });

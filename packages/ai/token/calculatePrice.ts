@@ -7,6 +7,8 @@ import { Model, ModelPrice } from "ai/llm/types";
 import { findModelConfig, getModelConfig } from "ai/llm/providers";
 import { getApproxPricePerImage } from "ai/llm/imagePricing";
 import {
+  PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+  isPlatformHostedClaudeModel,
   getPlatformHostedDeepSeekV4Price,
   isPlatformHostedDeepSeekV4Model,
   isPlatformHostedImageModel,
@@ -580,6 +582,23 @@ export const calculatePrice = ({
       const hostedModel = getModelConfig("nolo", modelName);
       const costs = calculateBasicCost(
         hostedModel,
+        usage,
+        provider,
+        externalPrice,
+        billingServiceTier,
+        nowMs
+      );
+      const pay = calculatePayDistribution(costs, externalPrice, sharingLevel);
+      return { cost: sanitizeCost(costs.charge), pay };
+    }
+
+    // Claude 系已下架（2026-09-01）：存量兼容请求由 glm-5-3-flash 上游实际服务，
+    // 计价跟随实际上游模型（模型目录已无 claude 条目，否则会落到下方零成本
+    // 虚拟模型漏账）。兼容窗口结束后该分支自然失效。
+    if (provider === "nolo" && isPlatformHostedClaudeModel(modelName)) {
+      const compatModel = getModelConfig("nolo", PLATFORM_HOSTED_GLM_53_FLASH_MODEL);
+      const costs = calculateBasicCost(
+        compatModel,
         usage,
         provider,
         externalPrice,
