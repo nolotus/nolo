@@ -34,7 +34,7 @@
     "diff": "^8.0.2",
     "echarts": "^5.5.0",
     "echarts-for-react": "^3.0.2",
-    "effect": "^3.22.1",
+    "effect": "4.0.0-rc.112",
     "events": "^3.3.0",
     "fast-xml-parser": "^5.9.0",
     "google-map-react": "^2.2.3",

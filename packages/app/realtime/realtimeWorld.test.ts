@@ -21,7 +21,8 @@
 // 不拉入：HTTP/auth/routing/LevelDB/React/Redux/真实网络。
 
 import { describe, expect, test } from "bun:test";
-import { Duration, Effect, Fiber, Layer, TestContext, TestClock } from "effect";
+import { Duration, Effect, Fiber, Layer } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   SseBroadcast,
@@ -175,14 +176,14 @@ function runWith<A, R>(
   const merged = Layer.mergeAll(testClockLayer, ...layers);
   return Effect.runPromise(
     program.pipe(
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
       Effect.provide(merged)
     ) as Effect.Effect<A>
   );
 }
 
 const yieldLoop = () => Effect.gen(function* () {
-  for (let i = 0; i < 20; i++) yield* Effect.yieldNow();
+  for (let i = 0; i < 20; i++) yield* Effect.yieldNow;
 });
 
 // ── World tests ──────────────────────────────────────────────────────────────
@@ -195,7 +196,7 @@ describe("realtime world (real client × real server core)", () => {
     const received: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-1",
           url,
@@ -257,7 +258,7 @@ describe("realtime world (real client × real server core)", () => {
     const receivedA: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiberA = yield* Effect.fork(
+      const fiberA = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-A",
           url: urlA,

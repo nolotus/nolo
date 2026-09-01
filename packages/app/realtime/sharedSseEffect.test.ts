@@ -3,7 +3,8 @@
 // 用 TestClock 控制 sleep，用内存 transport/broadcast/lock 替换生产实现。
 
 import { describe, expect, test } from "bun:test";
-import { Duration, Effect, Fiber, FiberId, Layer, Option, TestContext, TestClock } from "effect";
+import { Duration, Effect, Fiber, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   SseBroadcast,
@@ -115,7 +116,7 @@ function sseResponse(body: string, keepOpen = false) {
   );
 }
 
-/** 跑一个测试 program：提供全部 test services + TestContext。 */
+/** 跑一个测试 program：提供全部 test services + TestClock（虚拟时钟）。 */
 function runWith<R>(
   program: Effect.Effect<void, never, R>,
   layers: Layer.Layer<never, never, R>[]
@@ -123,7 +124,7 @@ function runWith<R>(
   const merged = Layer.mergeAll(testClockLayer, ...layers);
   return Effect.runPromise(
     program.pipe(
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
       Effect.provide(merged)
     ) as Effect.Effect<void>
   );
@@ -161,25 +162,25 @@ describe("sharedSseEffect (deterministic)", () => {
     const receivedB: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiberA = yield* Effect.fork(
+      const fiberA = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-1",
           url: "https://nolo.test/api/events/space-1",
           onEvent: (e) => receivedA.push(e),
         })
       );
-      const fiberB = yield* Effect.fork(
+      const fiberB = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "user-1",
           url: "https://nolo.test/api/events/user-1",
           onEvent: (e) => receivedB.push(e),
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       // A 的第一次流结束 → 进入 retry sleep（1000ms）→ 重连
       yield* TestClock.adjust(Duration.millis(1000));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       expect(receivedB).toEqual([{ type: "b", _eventId: "B1" }]);
       // A 重连时携带的必须是 A 自己的 cursor，而不是 B 的
@@ -211,23 +212,23 @@ describe("sharedSseEffect (deterministic)", () => {
     const received: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-space-2",
           url: "https://nolo.test/api/events/space-space-2",
           onEvent: (e) => received.push(e),
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(1);
 
       // 首次 503 + Retry-After: 2 → 应等待 2000ms
       yield* TestClock.adjust(Duration.millis(1999));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(1); // 1999ms 不应重连
 
       yield* TestClock.adjust(Duration.millis(1));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(2); // 2000ms 应重连
       expect(received).toEqual([{ type: "hello", value: 2 }]);
 
@@ -260,42 +261,42 @@ describe("sharedSseEffect (deterministic)", () => {
     const { layer: broadcastLayer } = makeBroadcast();
 
     const program = Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-reset-backoff",
           url: "https://nolo.test/api/events/space-reset-backoff",
           onEvent: () => {},
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(1);
 
       // attempt1 失败 → 等 RETRY_INITIAL_MS=1000
       yield* TestClock.adjust(Duration.millis(999));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(1); // 999ms 不应 fetch
       yield* TestClock.adjust(Duration.millis(1));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(2); // 1000ms 应 fetch
 
       // attempt2 失败 → backoff 增长到 2000
       yield* TestClock.adjust(Duration.millis(1999));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(2); // 1999ms 不应 fetch
       yield* TestClock.adjust(Duration.millis(1));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(3); // 2000ms 应 fetch
 
       // attempt3：200 建连成功 + reader error → connected 复位 backoff
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(3);
 
       // 下一次 reconnect 必须等 RETRY_INITIAL_MS（1000ms），而非已增长的 4000ms
       yield* TestClock.adjust(Duration.millis(999));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(3); // 999ms 不应 fetch（若沿用增长 backoff 同样不 fetch，关键在下一条）
       yield* TestClock.adjust(Duration.millis(1));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(4); // 1000ms 应 fetch（错误实现沿用 4000ms → 此处仍为 3 → RED）
 
       yield* Fiber.interrupt(fiber);
@@ -317,23 +318,23 @@ describe("sharedSseEffect (deterministic)", () => {
     const received: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-space-2",
           url: "https://nolo.test/api/events/space-space-2",
           onEvent: (e) => received.push(e),
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       expect(attempts).toBe(1);
 
       // 进入 retry sleep（2000ms）后 dispose
       yield* Fiber.interrupt(fiber);
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       // 推进很久：不应有新的 fetch / event / dangling retry
       yield* TestClock.adjust(Duration.millis(100_000));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       expect(attempts).toBe(1);
       expect(received).toEqual([]);
@@ -355,7 +356,7 @@ describe("sharedSseEffect (deterministic)", () => {
     const { layer: broadcastLayer } = makeBroadcast();
 
     const program = Effect.gen(function* () {
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-space-3",
           url: "https://nolo.test/api/events/space-space-3",
@@ -363,7 +364,7 @@ describe("sharedSseEffect (deterministic)", () => {
           onTerminalStatus: (status) => terminalStatuses.push(status),
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       // 401 → terminal：fetch 计数必须停在 1，不再热循环
       expect(attempts).toBe(1);
@@ -371,7 +372,7 @@ describe("sharedSseEffect (deterministic)", () => {
 
       // 推进很久：仍无新 fetch（terminal 即停，不重试）
       yield* TestClock.adjust(Duration.millis(100_000));
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       expect(attempts).toBe(1);
       expect(terminalStatuses).toEqual([401]);
@@ -406,21 +407,21 @@ describe("sharedSseEffect (deterministic)", () => {
     const receivedB: unknown[] = [];
 
     const program = Effect.gen(function* () {
-      const fiberA = yield* Effect.fork(
+      const fiberA = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-space-4",
           url: "https://nolo.test/api/events/space-space-4",
           onEvent: (e) => receivedA.push(e),
         })
       );
-      const fiberB = yield* Effect.fork(
+      const fiberB = yield* Effect.forkChild(
         subscribeSharedSseEffect({
           key: "space-space-4",
           url: "https://nolo.test/api/events/space-space-4",
           onEvent: (e) => receivedB.push(e),
         })
       );
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       // A 当选 leader 收到 A1；B 是 follower（经 broadcast 也收到 A1）
       expect(receivedA).toEqual([{ type: "a", _eventId: "A1" }]);
@@ -428,9 +429,9 @@ describe("sharedSseEffect (deterministic)", () => {
 
       // A 掉线（dispose）→ 锁释放 → B 晋升 → B 重连必须带 Last-Event-ID: A1
       yield* Fiber.interrupt(fiberA);
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
       yield* TestClock.adjust(Duration.millis(1000)); // B 的 follower retry sleep
-      for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
 
       expect(lastEventIdByUrl.get("https://nolo.test/api/events/space-space-4")).toBe("A1");
 

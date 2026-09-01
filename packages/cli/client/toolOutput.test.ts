@@ -73,7 +73,7 @@ describe("toolOutput", () => {
     expect(output).not.toContain("bun test");
   });
 
-  test("normal mode shows a derived gist for simple commands", () => {
+  test("normal mode shows the safe command detail for Run", () => {
     const format = createToolEventFormatter(false);
     const output = format(toolEvent({
       type: "tool-result",
@@ -82,8 +82,38 @@ describe("toolOutput", () => {
       metadata: { exitCode: 0, command: "bun test packages/cli/tui packages/cli/client" },
     }));
     expect(output).toContain("▸ Run · bun test  ✓");
-    // 动词之后的具体参数仍不进 normal 行
     expect(output).not.toContain("packages/cli/tui");
+    expect(output).not.toContain("argumentsPreview");
+  });
+
+  test("normal mode shows Read path with the requested line range", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "readFile",
+      metadata: { path: "packages/cli/tui/sessionTypes.ts", startLine: 2, endLine: 49, totalLines: 120, truncated: true },
+    }));
+    expect(output).toContain("▸ Read · packages/cli/tui/sessionTypes.ts:2-49  ✓");
+  });
+
+  test("normal mode shows Fetch URL detail", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "fetchWebpage",
+      metadata: { url: "https://example.com/docs/start" },
+    }));
+    expect(output).toContain("▸ Fetch · https://example.com/docs/start  ✓");
+  });
+
+  test("normal mode shows web search query detail", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "exa_search",
+      metadata: { query: "最新的 TypeScript 发布信息" },
+    }));
+    expect(output).toContain("▸ Web search · 最新的 TypeScript 发布信息  ✓");
   });
 
   test("normal mode shows the touched file basename as gist, never the full path", () => {

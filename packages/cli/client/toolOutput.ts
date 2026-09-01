@@ -489,6 +489,38 @@ function pathBasenameGist(path: string): string {
  */
 function normalToolGist(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  const toolName = event.toolName || "";
+
+  // These fields are runtime-produced projections (not model-controlled
+  // arguments), so they are safe to show in the compact TUI activity line.
+  // Keep the same clipping rules as the expanded Read/Run/Fetch trees.
+  if (toolName === "readFile") {
+    const path = typeof metadata.path === "string"
+      ? metadata.path
+      : typeof metadata.filePath === "string" ? metadata.filePath : "";
+    if (path) return gistClip(formatReadItemPath(path, metadata), 52);
+  }
+  if (toolName === "fetchWebpage") {
+    const url = typeof metadata.url === "string" ? metadata.url : "";
+    if (url) return formatFetchItemUrl(url);
+  }
+  if (toolName === "exa_search") {
+    const query = typeof metadata.query === "string"
+      ? metadata.query
+      : typeof metadata.pattern === "string" ? metadata.pattern : "";
+    const path = typeof metadata.path === "string" ? metadata.path : undefined;
+    if (query || path) return formatSearchItemQuery(query, path);
+  }
+  if (isRunToolName(toolName)) {
+    const command = typeof metadata.command === "string" ? metadata.command : "";
+    if (command) {
+      // Keep shell plumbing out of the compact activity line. For simple
+      // commands show the executable/subcommand gist; the full safe command
+      // remains available in the expanded Run tree.
+      return commandHeadGist(command);
+    }
+  }
+
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
@@ -499,11 +531,10 @@ function normalToolGist(event: LocalAgentToolEvent): string {
 /**
  * Ordinary-user projection of a tool event.
  *
- * Raw arguments, full commands and result bodies stay out of normal mode —
- * those are implementation plumbing (cwd/echo/pipelines), pro/verbose
- * territory. What normal mode DOES show (2026-08-31) is a derived gist:
- * basename of the touched file / head tokens of a simple command, so users
- * can feel what the agent is roughly doing without reading plumbing.
+ * Raw arguments and result bodies stay out of normal mode. Runtime-produced
+ * details for the three activity-heavy tools are shown compactly: Read gets
+ * its path and line range, Run gets its clipped command, and Fetch gets its
+ * clipped URL. Other tools retain their derived basename/head gist.
  */
 function formatNormalToolLine(
   event: LocalAgentToolEvent,

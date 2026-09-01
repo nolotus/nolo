@@ -41,51 +41,38 @@ export const FOLLOWER_RETRY_MS = 1000;
 
 // ── Services ────────────────────────────────────────────────────────────────
 
-export class SseClock extends Context.Tag("SseClock")<
-  SseClock,
-  { readonly sleep: (ms: number) => Effect.Effect<void> }
->() {}
+export class SseClock extends Context.Service<SseClock, {
+  readonly sleep: (ms: number) => Effect.Effect<void>;
+}>()("SseClock") {}
 
-export class SseTransport extends Context.Tag("SseTransport")<
-  SseTransport,
-  {
-    readonly fetch: (
-      url: string,
-      headers: Record<string, string>
-    ) => Effect.Effect<Response, SseStreamError>;
-  }
->() {}
+export class SseTransport extends Context.Service<SseTransport, {
+  readonly fetch: (
+    url: string,
+    headers: Record<string, string>
+  ) => Effect.Effect<Response, SseStreamError>;
+}>()("SseTransport") {}
 
-export class SseCursor extends Context.Tag("SseCursor")<
-  SseCursor,
-  {
-    readonly get: () => Effect.Effect<string | null>;
-    readonly set: (id: string) => Effect.Effect<void>;
-  }
->() {}
+export class SseCursor extends Context.Service<SseCursor, {
+  readonly get: () => Effect.Effect<string | null>;
+  readonly set: (id: string) => Effect.Effect<void>;
+}>()("SseCursor") {}
 
-export class SseLock extends Context.Tag("SseLock")<
-  SseLock,
-  {
-    readonly withLock: <A, R>(
-      name: string,
-      use: Effect.Effect<A, never, R>
-    ) => Effect.Effect<Option.Option<A>, never, R>;
-  }
->() {}
+export class SseLock extends Context.Service<SseLock, {
+  readonly withLock: <A, R>(
+    name: string,
+    use: Effect.Effect<A, never, R>
+  ) => Effect.Effect<Option.Option<A>, never, R>;
+}>()("SseLock") {}
 
-export class SseBroadcast extends Context.Tag("SseBroadcast")<
-  SseBroadcast,
-  {
-    readonly create: (
-      name: string,
-      onMessage: (message: SharedSseMessage) => void
-    ) => Effect.Effect<{
-      readonly post: (message: SharedSseMessage) => void;
-      readonly close: () => void;
-    }>;
-  }
->() {}
+export class SseBroadcast extends Context.Service<SseBroadcast, {
+  readonly create: (
+    name: string,
+    onMessage: (message: SharedSseMessage) => void
+  ) => Effect.Effect<{
+    readonly post: (message: SharedSseMessage) => void;
+    readonly close: () => void;
+  }>;
+}>()("SseBroadcast") {}
 
 // ── Errors ──────────────────────────────────────────────────────────────────
 
@@ -179,9 +166,10 @@ const readSseOnce = (
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    // 可中断读：Effect.async + canceler(reader.cancel)。
+    // 可中断读：Effect.callback + canceler(reader.cancel)。
     // 中断时 canceler 取消 pending read，保证 fiber 可中断、无悬挂。
-    const abortableRead = Effect.async<ReadableStreamReadResult<Uint8Array>, Error>(
+    // v4: Effect.async 已移除，改用 Effect.callback（签名兼容：resume + 返回 canceler）。
+    const abortableRead = Effect.callback<ReadableStreamReadResult<Uint8Array>, Error>(
       (resume) => {
         reader.read().then(
           (r) => resume(Effect.succeed(r as ReadableStreamReadResult<Uint8Array>)),
@@ -212,7 +200,7 @@ const readSseOnce = (
       //（连接成功建立），随后的读流失败属于「建连成功后的 reader 错误」，
       // retry loop 据此复位 backoff。非 2xx 在 fetch 之后直接 return/fail，
       // 不会走到这里（connected 保持 false）。
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.fail(new SseStreamError({ cause: error, connected: true }))
       ),
       Effect.ensuring(
@@ -246,7 +234,7 @@ export const readSseLoop = (
 ): Effect.Effect<"terminal" | "stream-ended", never, SseClock | SseTransport> =>
   Effect.gen(function* () {
     const clock = yield* SseClock;
-    const cursorService: Context.Tag.Service<SseCursor> = {
+    const cursorService: Context.Service.Shape<typeof SseCursor> = {
       get: () => Ref.get(cursorRef),
       set: (id: string) => Ref.set(cursorRef, id),
     };
@@ -255,18 +243,19 @@ export const readSseLoop = (
 
     const loop = Effect.gen(function* () {
       while (true) {
-        const outcome = yield* Effect.either(readSseOnce(args, publish));
-        if (outcome._tag === "Right") {
-          if (outcome.right.outcome === "terminal") return "terminal" as const;
+        // v4: Effect.either 已移除，改用 Effect.result（Result.Success/Failure）
+        const outcome = yield* Effect.result(readSseOnce(args, publish));
+        if (outcome._tag === "Success") {
+          if (outcome.success.outcome === "terminal") return "terminal" as const;
           // connected = 成功建立 SSE response（response.ok && response.body 成立），
           // 此时把 backoff 复位为 RETRY_INITIAL_MS：流正常结束或随后的 reader
           // 读流错误触发重连时，下次重连都按初始退避，不沿用已增长的 backoff。
           // 非 2xx（503 等）不会进入 connected，仍走 Retry-After 增长路径。
-          if (outcome.right.connected) retryDelay = RETRY_INITIAL_MS;
+          if (outcome.success.connected) retryDelay = RETRY_INITIAL_MS;
           yield* clock.sleep(retryDelay);
           continue;
         }
-        const error = outcome.left;
+        const error = outcome.failure;
         const cause = error.cause as { status?: number; headers?: Headers };
         if (cause.status === 401 || cause.status === 403) {
           // terminal status 已在 readSseOnce 内处理
@@ -376,7 +365,7 @@ export const subscribeSharedSseEffect = (
 /** 生产 Clock：setTimeout 实现真实 sleep；测试用 SseClock + TestClock 替换。 */
 export const SseClockLive = Layer.succeed(SseClock, {
   sleep: (ms) =>
-    Effect.async<void>((resume) => {
+    Effect.callback<void>((resume) => {
       const t = setTimeout(() => resume(Effect.void), ms);
       return Effect.sync(() => clearTimeout(t));
     }),
@@ -403,7 +392,7 @@ export const SseLockLive = Layer.succeed(SseLock, {
       // 保证 navigator.locks 的 callback promise 总能 settle → 锁总能释放。
       // 读侧在 done 完成后才读 result，写读有 happens-before，无竞态。
       let result: A | undefined;
-      const runner = yield* Effect.fork(
+      const runner = yield* Effect.forkChild(
         Effect.gen(function* () {
           yield* Deferred.await(go);
           result = yield* use;
@@ -419,7 +408,7 @@ export const SseLockLive = Layer.succeed(SseLock, {
             })
           ).then(() => true);
         })
-      ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+      ).pipe(Effect.catch(() => Effect.succeed(false)));
       if (!acquired) {
         yield* Fiber.interrupt(runner);
         return Option.none();

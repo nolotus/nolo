@@ -10,6 +10,7 @@ import { MessageText } from "./MessageText";
 import { ImagePreview } from "./ImagePreview";
 import { FileItem } from "./FileItem";
 import { ThinkingSection } from "./ThinkingSection";
+import { ImageGenerationCard } from "./ImageGenerationCard";
 import {
   extractCanvasSnapshotText,
   parseCanvasSnapshotMessage,
@@ -247,23 +248,12 @@ export const MessageContent = memo(
             </div>
           )}
           {isImageWaitingState && (
-            <div className="image-generation-wait-card" aria-live="polite">
-              <div className="image-generation-wait-card__title">正在生成图片</div>
-              <div className="image-generation-wait-card__meta">
-                <span>{imageGenerationStageLabel}</span>
-                <span>已等待 {elapsedSeconds} 秒</span>
-              </div>
-              {imageGenerationState?.waitHint && (
-                <div className="image-generation-wait-card__hint">
-                  {imageGenerationState.waitHint}
-                </div>
-              )}
-              {imageGenerationState?.profileLabel && (
-                <div className="image-generation-wait-card__hint">
-                  当前模式：{imageGenerationState.profileLabel}
-                </div>
-              )}
-            </div>
+            <ImageGenerationCard
+              stageLabel={imageGenerationStageLabel}
+              elapsedSeconds={elapsedSeconds}
+              waitHint={imageGenerationState?.waitHint}
+              profileLabel={imageGenerationState?.profileLabel}
+            />
           )}
           {isEmptyStreaming && !isImageWaitingState && (
             <div className="empty-content" aria-hidden="true">

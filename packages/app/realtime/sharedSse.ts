@@ -2,7 +2,7 @@
 // façade：对外 API 不变（subscribeSharedSse），内部委托给 Effect kernel。
 // Effect 类型不泄漏到调用方（React hooks / Redux consumers 只看到 () => void）。
 
-import { Effect, Fiber, FiberId, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import {
   SseBroadcastDirect,
   SseBroadcastLive,
@@ -41,6 +41,8 @@ export function subscribeSharedSse(args: SubscribeSharedSseArgs): () => void {
     subscribeSharedSseEffect(args).pipe(Effect.provide(liveLayer))
   );
   return () => {
-    Effect.runSync(Fiber.interruptAsFork(fiber, FiberId.none));
+    // v4: Fiber.interruptAsFork 已移除；用 runFork 发起中断（fire-and-forget，
+    // 不等待 fiber 完成），保持 dispose 的同步语义。
+    Effect.runFork(Fiber.interrupt(fiber));
   };
 }
