@@ -29,6 +29,10 @@ import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import { buildCurrentTimeBlock } from "./currentTimeContext";
+import {
+  estimateContextTokens,
+  hashStablePrefixContent,
+} from "../ai/agent/contextCompiler";
 import type {
   AgentExecutionContextMetrics,
   AgentExecutionObservationEvent,
@@ -42,6 +46,10 @@ import {
   resolveHistoricalToolContentCap,
   resolveToolOutputProfile,
 } from "../ai/agent/toolOutputPolicy";
+import {
+  readCacheCreationInputTokens,
+  readCacheReadInputTokens,
+} from "../ai/token/cacheTokenFields";
 import { spillToolOutput } from "./toolSpillStore";
 import { planContextUsage } from "../ai/context/retention";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
@@ -1034,6 +1042,9 @@ type BuiltMessages = {
   messages: AgentRuntimeChatMessage[];
   stableContextChars: number;
   dynamicContextChars: number;
+  /** 稳定前缀内容指纹（与 contextCompiler 同一 FNV 算法），用于 token 记录的 prefix churn 观测。 */
+  stablePrefixHash?: string;
+  stablePrefixEstimatedTokens?: number;
 };
 
 function buildMessages(args: {
@@ -1086,6 +1097,12 @@ function buildMessages(args: {
       ],
       stableContextChars: stableContent.length,
       dynamicContextChars: dynamicContent.length,
+      ...(stableContent
+        ? {
+            stablePrefixHash: hashStablePrefixContent(stableContent),
+            stablePrefixEstimatedTokens: estimateContextTokens(stableContent),
+          }
+        : {}),
     };
   }
 
@@ -1106,6 +1123,12 @@ function buildMessages(args: {
     ],
     stableContextChars: (args.prompt?.trim() ?? "").length,
     dynamicContextChars: blocks.join("\n\n").length,
+    ...(systemContent
+      ? {
+          stablePrefixHash: hashStablePrefixContent(systemContent),
+          stablePrefixEstimatedTokens: estimateContextTokens(systemContent),
+        }
+      : {}),
   };
 }
 
@@ -1114,15 +1137,14 @@ function mergeTurnUsage(
   next: Record<string, unknown> | undefined
 ) {
   if (!next) return current;
+  // 缓存字段走共享别名表：OpenAI Responses / chat.completions 只在嵌套的
+  // *_tokens_details.cached_tokens 里给缓存命中，只认顶层字段会让本轮记账
+  // 显示 0 缓存，而同一次调用的 DB token 记录（走 normalizeUsage）却有值。
   const read = (usage: Record<string, unknown>) => ({
     input: Number(usage.input_tokens ?? usage.prompt_tokens ?? 0),
     output: Number(usage.output_tokens ?? usage.completion_tokens ?? 0),
-    cacheHit: Number(
-      usage.cache_read_input_tokens ?? usage.prompt_cache_hit_tokens ?? 0,
-    ),
-    cacheMiss: Number(
-      usage.cache_creation_input_tokens ?? usage.prompt_cache_miss_tokens ?? 0,
-    ),
+    cacheHit: readCacheReadInputTokens(usage),
+    cacheMiss: readCacheCreationInputTokens(usage),
   });
   const right = read(next);
   const left = current ? read(current) : { input: 0, output: 0, cacheHit: 0, cacheMiss: 0 };
@@ -1163,11 +1185,9 @@ export function addOutOfBandUsage(
       num(turn, "output_tokens", "completion_tokens") +
       num(extra, "output_tokens", "completion_tokens"),
     cache_read_input_tokens:
-      num(turn, "cache_read_input_tokens", "prompt_cache_hit_tokens") +
-      num(extra, "cache_read_input_tokens", "prompt_cache_hit_tokens"),
+      readCacheReadInputTokens(turn) + readCacheReadInputTokens(extra),
     cache_creation_input_tokens:
-      num(turn, "cache_creation_input_tokens", "prompt_cache_miss_tokens") +
-      num(extra, "cache_creation_input_tokens", "prompt_cache_miss_tokens"),
+      readCacheCreationInputTokens(turn) + readCacheCreationInputTokens(extra),
   };
 }
 
@@ -1651,6 +1671,12 @@ export async function runLocalAgentTurn(
           model: result.model || agentConfig.model || "unknown",
           ...(result.provider || agentConfig.provider
             ? { provider: result.provider || agentConfig.provider }
+            : {}),
+          ...(builtMessages.stablePrefixHash
+            ? {
+                stablePrefixHash: builtMessages.stablePrefixHash,
+                stablePrefixEstimatedTokens: builtMessages.stablePrefixEstimatedTokens,
+              }
             : {}),
         });
       }

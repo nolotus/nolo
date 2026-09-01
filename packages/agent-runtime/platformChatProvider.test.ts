@@ -184,6 +184,41 @@ describe("platform chat provider config", () => {
     expect(body.apiKeyHeader).toBeUndefined();
   });
 
+  // 压缩中间件一旦对 text/event-stream 生效，整条流会被攒到生成结束才下发，
+  // 首字节 = 总生成时长（2026-09-01 实测：1 chunk / TTFT 5.8-16.3s，对照
+  // identity 123-138 chunks / TTFT 1.2-3.6s）。非流式请求不受影响，仍走压缩。
+  test("opts streaming requests out of content-encoding negotiation", async () => {
+    const providerConfig = await resolvePlatformChatProviderConfig({
+      agentConfig: { key: "agent-pub-x", provider: "nolo", model: "glm-5-3-flash" },
+      env: { NOLO_SERVER: "https://nolo.chat", AUTH_TOKEN: "token" },
+    });
+
+    const streaming = buildPlatformChatCompletionRequest({
+      providerConfig,
+      messages: [{ role: "user", content: "hi" }],
+      stream: true,
+    });
+    expect(
+      (streaming.init.headers as Record<string, string>)["Accept-Encoding"],
+    ).toBe("identity");
+
+    for (const nonStreaming of [
+      buildPlatformChatCompletionRequest({
+        providerConfig,
+        messages: [{ role: "user", content: "hi" }],
+        stream: false,
+      }),
+      buildPlatformChatCompletionRequest({
+        providerConfig,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    ]) {
+      expect(
+        (nonStreaming.init.headers as Record<string, string>)["Accept-Encoding"],
+      ).toBeUndefined();
+    }
+  });
+
   // Billing attribution: without dialogId the server falls back to the
   // "chat-proxy" bucket (chatProxyBilling.ts), collapsing every runtime call
   // of every user into one row in the usage report.

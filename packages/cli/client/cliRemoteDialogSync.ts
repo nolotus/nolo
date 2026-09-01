@@ -88,6 +88,18 @@ function clipLocalWakeEvidence(value: unknown, max = 1200) {
   return compact || undefined;
 }
 
+export function buildLocalWakeDisplayText(args: {
+  label?: string;
+  terminalStatus: string;
+  durationMs?: number;
+}) {
+  const failed = args.terminalStatus !== "done";
+  const duration = typeof args.durationMs === "number" && args.durationMs >= 0
+    ? ` · ${Math.floor(args.durationMs / 60000)}m${Math.floor(args.durationMs / 1000) % 60}s`
+    : "";
+  return `1 条后台 run 已完成 · ${failed ? "✗" : "✓"} ${args.label || "后台 run"}${failed ? ` ${args.terminalStatus}` : ""}${duration}`;
+}
+
 function buildLocalParentWakeMessage(args: {
   childAgentKey: string;
   childDialogId: string;
@@ -271,6 +283,12 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
         host: "terminal",
         runtime: "bun",
         entrypoint: "agent-runtime:parent-child-terminal-wake",
+        wakeChildDialogKey: args.childDialogKey,
+        wakeTerminalStatus: "done",
+        wakeDisplayText: buildLocalWakeDisplayText({
+          label: args.childDialogRecord.taskLabel ?? args.childDialogRecord.title,
+          terminalStatus: "done",
+        }),
         subjectRefs,
         ...(allowedChildAgentKeys.length ? { allowedChildAgentKeys } : {}),
         ...(allowedToolNames.length ? { allowedToolNames } : {}),

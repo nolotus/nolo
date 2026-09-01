@@ -18,6 +18,14 @@ EXTRA_PROXY_FILE="${NOLO_CADDY_EXTRA_PROXY_FILE:-/etc/caddy/nolo-extra-proxy.cad
 CHAT_PROXY_UPSTREAM_HOST="${NOLO_CADDY_CHAT_PROXY_UPSTREAM_HOST:-$UPSTREAM_HOST}"
 CHAT_PROXY_UPSTREAM_PORT="${NOLO_CADDY_CHAT_PROXY_UPSTREAM_PORT:-}"
 CHAT_PROXY_PATHS="${NOLO_CADDY_CHAT_PROXY_PATHS:-/api/v1/chat}"
+# 流式（SSE / WebSocket）路径。两处消费：@stream 反代块（免缓冲直通）与
+# encode 的排除匹配器，必须共用同一份列表。
+# 为什么 SSE 必须排除出 encode：压缩中间件会把 text/event-stream 攒成一整块，
+# 等生成结束才下发。2026-09-01 在 nolo.chat 实测到该形态：SSE 带
+# content-encoding: gzip 返回、整条流 1 个 chunk、首字节 = 总生成时长
+# 5.8-16.3s；同期 Accept-Encoding: identity 对照 123-138 chunks、首字节
+# 1.2-3.6s。此处不赌边缘 Caddy 版本（2.8+ 才自动跳过 SSE），显式排除。
+STREAM_PATHS="/api/events/* /api/notifications /api/agent/run /api/v1/chat /api/cli/chat /api/connector/ws"
 
 run_root() {
   if [[ "$(id -u)" == "0" ]]; then
@@ -190,6 +198,21 @@ render_caddyfile() {
   # 那样 render_chat_proxy_route_block 里的校验失败就不会中止脚本。
   local chat_proxy_block
   chat_proxy_block="$(render_chat_proxy_route_block)"
+
+  # encode 排除列表 = 流式路径 ∪ chat 分流路径（去重，保持出现顺序）。
+  # set -f：路径列表含字面通配符（/api/events/*），未加引号展开会同时触发
+  # 分词与 pathname expansion——部署机上若真存在 /api/events/ 目录，`*` 会被
+  # 静默替换成实际文件名，排除列表被污染且校验照样通过。分词是这里要的，
+  # glob 不是，所以只关 glob。
+  local ENCODE_EXCLUDED_PATHS=""
+  local seen_path
+  set -f
+  for seen_path in $STREAM_PATHS $CHAT_PROXY_PATHS; do
+    if [[ " $ENCODE_EXCLUDED_PATHS " != *" $seen_path "* ]]; then
+      ENCODE_EXCLUDED_PATHS+="${ENCODE_EXCLUDED_PATHS:+ }$seen_path"
+    fi
+  done
+  set +f
   if [[ -n "$chat_proxy_block" ]]; then
     chat_proxy_block+=$'\n\n'
   fi
@@ -207,11 +230,15 @@ render_caddyfile() {
 }
 
 (nolo_proxy) {
-	encode gzip
+	# 压缩只对非流式响应生效：gzip encoder 会把 SSE 攒成一整块，抹掉流式
+	# 的全部 TTFT 收益（见 STREAM_PATHS 注释的实测数据）。@chat 自定义路径
+	# 一并排除，避免分流配置绕开这条约束。
+	@compressible not path ${ENCODE_EXCLUDED_PATHS}
+	encode @compressible gzip
 
 ${extra_proxy_snippet}
 
-${chat_proxy_block}	@stream path /api/events/* /api/notifications /api/agent/run /api/v1/chat /api/connector/ws
+${chat_proxy_block}	@stream path ${STREAM_PATHS}
 	reverse_proxy @stream {args.0}:{args.1} {
 		lb_try_duration 60s
 		lb_try_interval 250ms

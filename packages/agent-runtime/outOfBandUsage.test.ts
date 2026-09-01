@@ -38,3 +38,17 @@ test("兼容 prompt_tokens / completion_tokens 命名", () => {
   expect(out.input_tokens).toBe(1000);
   expect(out.output_tokens).toBe(100);
 });
+
+/**
+ * 嵌套 *_tokens_details.cached_tokens 是 OpenAI 两条线（Responses 与
+ * chat.completions）唯一的缓存命中出口。本轮记账此前只认顶层字段，导致
+ * DB token 记录有缓存、而同一次调用的本轮记账显示 0。
+ */
+test("本轮记账认得两条 OpenAI 线的嵌套 cached_tokens", () => {
+  const merged = addOutOfBandUsage(
+    { prompt_tokens: 1000, completion_tokens: 10, input_tokens_details: { cached_tokens: 900 } },
+    { prompt_tokens: 500, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 400 } },
+  );
+  expect(merged?.cache_read_input_tokens).toBe(1300);
+  expect(merged?.input_tokens).toBe(1500);
+});

@@ -122,10 +122,22 @@ export function createResponsesStreamCollector(callbacks?: {
           const completion = typeof u.output_tokens === "number" ? u.output_tokens : (typeof u.completion_tokens === "number" ? u.completion_tokens : 0);
           const total =
             typeof u.total_tokens === "number" ? u.total_tokens : prompt + completion;
+          // 细分字段必须原样带出：Responses wire 的缓存命中只在
+          // input_tokens_details.cached_tokens 里，重建成三个标量会把它丢掉，
+          // 于是 token 记录里 cache_read_input_tokens 恒为 0 —— 缓存率不可观测，
+          // 且 calculatePrice 把已缓存的 prompt 按全价计。
+          const inputDetails = u.input_tokens_details;
+          const outputDetails = u.output_tokens_details;
           usage = {
             prompt_tokens: prompt,
             completion_tokens: completion,
             total_tokens: total,
+            ...(inputDetails && typeof inputDetails === "object"
+              ? { input_tokens_details: inputDetails }
+              : {}),
+            ...(outputDetails && typeof outputDetails === "object"
+              ? { output_tokens_details: outputDetails }
+              : {}),
           };
         }
       }

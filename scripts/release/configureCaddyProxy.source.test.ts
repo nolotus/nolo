@@ -23,7 +23,7 @@ describe("configureCaddyProxy source contract", () => {
     expect(source).toContain("${extra_proxy_snippet}");
     expect(source).toContain("reverse_proxy @stream {args.0}:{args.1}");
     expect(source).toContain("reverse_proxy {args.0}:{args.1}");
-    expect(source).toContain("encode gzip");
+    expect(source).toContain("encode @compressible gzip");
     expect(source).not.toContain("encode zstd gzip");
     expect(source).toContain("${site_addresses} {");
     expect(source).toContain("import nolo_proxy ${UPSTREAM_HOST} ${UPSTREAM_PORT}");
@@ -37,7 +37,24 @@ describe("configureCaddyProxy source contract", () => {
   });
 
   it("keeps streaming endpoints unbuffered through Caddy", () => {
-    expect(source).toContain("@stream path /api/events/* /api/notifications /api/agent/run /api/v1/chat /api/connector/ws");
+    expect(source).toContain(
+      'STREAM_PATHS="/api/events/* /api/notifications /api/agent/run /api/v1/chat /api/cli/chat /api/connector/ws"',
+    );
+    expect(source).toContain("@stream path ${STREAM_PATHS}");
+    // SSE 不能走 encode：gzip encoder 会把整条流攒到生成结束才落地。
+    // 排除列表由 STREAM_PATHS ∪ CHAT_PROXY_PATHS 生成，两处共用同一份真值。
+    expect(source).toContain("@compressible not path ${ENCODE_EXCLUDED_PATHS}");
+    expect(source).toContain("for seen_path in $STREAM_PATHS $CHAT_PROXY_PATHS; do");
+    // 路径含字面通配符（/api/events/*）：去重循环必须关掉 pathname expansion，
+    // 否则部署机上存在同名目录时 `*` 会被静默替换成真实文件名。
+    const dedupeLoopStart = source.indexOf("local ENCODE_EXCLUDED_PATHS=");
+    expect(dedupeLoopStart).toBeGreaterThan(-1);
+    const dedupeLoop = source.slice(
+      dedupeLoopStart,
+      source.indexOf("chat_proxy_block+=", dedupeLoopStart),
+    );
+    expect(dedupeLoop).toContain("set -f");
+    expect(dedupeLoop).toContain("set +f");
     expect(source).toContain("header_up -X-Nolo-Client-IP");
     expect(source).toContain("header_up X-Nolo-Client-IP {remote_host}");
     expect(source).toContain("header_up X-Real-IP {remote_host}");

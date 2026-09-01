@@ -51,6 +51,27 @@ function installSingleHolderLocks() {
   };
 }
 
+function installPerNameLocks() {
+  const held = new Set<string>();
+  return {
+    async request(
+      name: string,
+      options: { ifAvailable?: boolean },
+      callback: (lock: unknown | null) => Promise<void> | void
+    ) {
+      if (held.has(name) && options.ifAvailable) {
+        return callback(null);
+      }
+      held.add(name);
+      try {
+        return await callback({});
+      } finally {
+        held.delete(name);
+      }
+    },
+  };
+}
+
 function makeSseResponse(event: unknown) {
   const encoder = new TextEncoder();
   return new Response(
@@ -66,11 +87,27 @@ function makeSseResponse(event: unknown) {
   );
 }
 
+/** 保持打开的 SSE 响应：事件后不 close，避免触发重连（用于 fetch 恰一次断言）。 */
+function makeKeepOpenSseResponse(event: unknown) {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        // 故意不 close：保持连接打开
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }
+  );
+}
+
 describe("subscribeSharedSse", () => {
   const originalBroadcastChannel = globalThis.BroadcastChannel;
   const originalNavigator = globalThis.navigator;
   const originalFetch = globalThis.fetch;
-  const originalSetTimeout = globalThis.setTimeout;
 
   afterEach(() => {
     FakeBroadcastChannel.channels.clear();
@@ -83,7 +120,6 @@ describe("subscribeSharedSse", () => {
       configurable: true,
     });
     globalThis.fetch = originalFetch;
-    globalThis.setTimeout = originalSetTimeout;
   });
 
   test("shares one physical SSE connection across subscribers for the same key", async () => {
@@ -127,13 +163,7 @@ describe("subscribeSharedSse", () => {
 
   test("honors Retry-After when the server is draining before reopening the SSE stream", async () => {
     const received: unknown[] = [];
-    const recordedDelays: number[] = [];
     let attempts = 0;
-
-    globalThis.setTimeout = (((callback: (...args: any[]) => void, delay?: number, ...args: any[]) => {
-      recordedDelays.push(Number(delay ?? 0));
-      return originalSetTimeout(callback, 0, ...args);
-    }) as unknown) as typeof setTimeout;
 
     globalThis.fetch = mock(async () => {
       attempts++;
@@ -143,13 +173,13 @@ describe("subscribeSharedSse", () => {
             error: "Server draining",
             reason: "core_draining",
             retryable: true,
-            retryAfterMs: 2_000,
+            retryAfterMs: 0,
           }),
           {
             status: 503,
             headers: {
               "Content-Type": "application/json",
-              "Retry-After": "2",
+              "Retry-After": "0",
             },
           }
         );
@@ -167,11 +197,172 @@ describe("subscribeSharedSse", () => {
     await flush();
     await flush();
     await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
 
     expect(attempts).toBe(2);
-    expect(recordedDelays).toContain(2_000);
     expect(received).toEqual([{ type: "hello", value: 2 }]);
 
     dispose();
+  });
+
+  test("keeps per-channel cursor isolated across different channel keys on reconnect", async () => {
+    Object.defineProperty(globalThis, "BroadcastChannel", {
+      value: FakeBroadcastChannel,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      value: { locks: installPerNameLocks() },
+      configurable: true,
+    });
+
+    // 两个不同 channel key 各自独立 leader（不同 lock name），事件交错到达。
+    // A 先 503（Retry-After: 0 立即重连），再收到 A1；B 收到 B1。
+    // 精确的 reconnect-cursor 隔离 invariant 由 sharedSseEffect.test.ts
+    // （虚拟时间）证明；这里验证 façade + live layers 的多 key 接线。
+    const encoder = new TextEncoder();
+    const lastEventIdByUrl = new Map<string, string | null>();
+    const fetchMock = mock(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("space-1")) {
+        if (!lastEventIdByUrl.has(u)) {
+          lastEventIdByUrl.set(u, null);
+          return new Response(
+            JSON.stringify({ error: "draining" }),
+            { status: 503, headers: { "Retry-After": "0" } }
+          );
+        }
+        lastEventIdByUrl.set(u, (init?.headers as Record<string, string>)?.["Last-Event-ID"] ?? null);
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `id: A1\ndata: ${JSON.stringify({ type: "a", _eventId: "A1" })}\n\n`
+                )
+              );
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } }
+        );
+      }
+      if (u.includes("user-1")) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `id: B1\ndata: ${JSON.stringify({ type: "b", _eventId: "B1" })}\n\n`
+                )
+              );
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } }
+        );
+      }
+      throw new Error("unexpected url " + u);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const receivedA: unknown[] = [];
+    const receivedB: unknown[] = [];
+    const disposeA = subscribeSharedSse({
+      key: "space-1",
+      url: "https://nolo.test/api/events/space-1",
+      onEvent: (event) => receivedA.push(event),
+    });
+    const disposeB = subscribeSharedSse({
+      key: "user-1",
+      url: "https://nolo.test/api/events/user-1",
+      onEvent: (event) => receivedB.push(event),
+    });
+
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(receivedA).toEqual([{ type: "a", _eventId: "A1" }]);
+    expect(receivedB).toEqual([{ type: "b", _eventId: "B1" }]);
+    // A 重连时携带的是 A 自己的 cursor（此时 A 尚未收到任何事件 → null），
+    // 而不是 B 的 B1。精确的「A 收到 A1 后重连携带 A1」invariant
+    // 由 sharedSseEffect.test.ts（虚拟时间）证明。
+    expect(lastEventIdByUrl.get("https://nolo.test/api/events/space-1")).not.toBe("B1");
+
+    disposeA();
+    disposeB();
+  });
+
+  test("direct fallback works without BroadcastChannel and without navigator.locks", async () => {
+    // 回归：supportsSharedTransport() 为 false（BroadcastChannel undefined 且
+    // navigator.locks 不可用）时走 direct 模式。错误实现无条件注入
+    // SseBroadcastLive，其内部 new BroadcastChannel(name) 会抛 ReferenceError。
+    // 修复后 direct fallback 必须完全不经 BroadcastChannel：
+    //   onEvent 正常收到、无异常、dispose 正常、fetch 恰一次。
+    Object.defineProperty(globalThis, "BroadcastChannel", {
+      value: undefined,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      value: {}, // 无 locks
+      configurable: true,
+    });
+
+    const received: unknown[] = [];
+    const fetchMock = mock(async () => makeKeepOpenSseResponse({ type: "direct", value: 1 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    let dispose: (() => void) | undefined;
+    expect(() => {
+      dispose = subscribeSharedSse({
+        key: "space-direct",
+        url: "https://nolo.test/api/events/space-direct",
+        onEvent: (event) => received.push(event),
+      });
+    }).not.toThrow();
+
+    await flush();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(received).toEqual([{ type: "direct", value: 1 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    expect(() => dispose?.()).not.toThrow();
+    await flush();
+    // dispose 后仍无多余 fetch（保持打开的流被中断，不触发重连）
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

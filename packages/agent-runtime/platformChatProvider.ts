@@ -259,6 +259,17 @@ export function buildPlatformChatCompletionRequest(args: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${args.providerConfig.authToken}`,
+        // 流式请求显式放弃压缩协商。实测记录（2026-09-01，glm-5-3-flash 经
+        // nolo.chat）：某个时间窗内 SSE 响应带 content-encoding: gzip 返回，
+        // 整条流被攒成 1 个 chunk，首字节 = 总生成时长（5.8/10.6/16.3s）；
+        // 同一分钟交替发起的 identity 请求为 123-138 chunks、首字节
+        // 1.2-3.6s。即压缩中间件一旦介入，流式的全部 TTFT 收益归零。
+        // 该窗口之后线上不再压缩 SSE（同一探针 6/6 未压缩），具体是哪一跳
+        // 压的没有定论；边缘侧已把流式路径排除出 encode
+        // （configureCaddyProxy.sh），这里是不依赖任何中间跳行为的客户端兜底
+        // ——用户侧本地代理同样可能压。SSE 正文只有几十 KB，放弃压缩的带宽
+        // 代价可忽略。
+        ...(args.stream ? { "Accept-Encoding": "identity" } : {}),
         // 客户端版本闸门第 2 层：与鉴权头同处一处统一注入，避免某条命令路径
         // 漏发。server 据此拒绝「该客户端认不了 wire 的托管模型」；不发这个头
         // 的旧客户端在 server 侧 fail-open（已知局限）。

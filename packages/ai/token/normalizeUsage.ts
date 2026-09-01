@@ -4,6 +4,10 @@ import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 
+import {
+  readCacheCreationInputTokens,
+  readCacheReadInputTokens,
+} from "./cacheTokenFields";
 import { RawUsage, NormalizedUsage } from "./types";
 
 const normalizeStringArray = (value: unknown): string[] | undefined => {
@@ -16,18 +20,6 @@ const finiteTokenCount = (value: unknown): number | undefined => {
   const finite = asOptionalFiniteNumber(value);
   if (finite === undefined) return undefined;
   return Math.max(0, Math.floor(finite));
-};
-
-const readNestedTokenCount = (
-  value: unknown,
-  path: readonly string[]
-): number | undefined => {
-  let cursor = value;
-  for (const key of path) {
-    if (!cursor || typeof cursor !== "object") return undefined;
-    cursor = (cursor as Record<string, unknown>)[key];
-  }
-  return finiteTokenCount(cursor);
 };
 
 const readFiniteNumberField = (
@@ -69,19 +61,9 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
         ? usage.completion_tokens
         : 0;
 
-  const cacheCreationInputTokens =
-    "cache_creation_input_tokens" in usage
-      ? (usage.cache_creation_input_tokens ?? 0)
-      : "prompt_cache_miss_tokens" in usage
-        ? (usage.prompt_cache_miss_tokens ?? 0)
-        : 0;
+  const cacheCreationInputTokens = readCacheCreationInputTokens(usage);
 
-  const cacheReadInputTokens =
-    finiteTokenCount((usage as any).cache_read_input_tokens) ??
-    finiteTokenCount((usage as any).prompt_cache_hit_tokens) ??
-    readNestedTokenCount(usage, ["input_tokens_details", "cached_tokens"]) ??
-    readNestedTokenCount(usage, ["prompt_tokens_details", "cached_tokens"]) ??
-    0;
+  const cacheReadInputTokens = readCacheReadInputTokens(usage);
 
   // ✅ 如果 provider 返回 usage.cost，则先原样透传；
   // 后续由 calculatePrice 按各 provider 的账单单位再做换算。
