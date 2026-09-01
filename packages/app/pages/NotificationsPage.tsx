@@ -9,7 +9,9 @@ import {
   useUnreadNotificationCount,
 } from "app/notifications/notificationStore";
 import { useAppDispatch } from "app/store";
-import { markDialogRead } from "create/space/spaceSlice";
+import {
+  markDialogRead,
+} from "create/space/markDialogReadThunk";
 import "./NotificationsPage.css";
 
 const getNotificationIcon = (item: AppNotification) => {

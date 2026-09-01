@@ -1,5 +1,7 @@
 import { selectIdentityUserId } from "identity/selectors";
-import { addContentToSpace } from "create/space/spaceSlice";
+import {
+  addContentToSpace,
+} from "create/space/content/contentThunks";
 import { DataType } from "create/types";
 import { write } from "database/dbSlice";
 import {

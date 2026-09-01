@@ -1,10 +1,18 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 import { readFileSync } from "node:fs";
 import React from "react";
 import { flushDomUpdates, renderInDom } from "../../../testing/domRender";
 
 let moduleVersion = 0;
 let globalDispatchSpy: ((action: any) => void) | null = null;
+
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
+
+afterAll(() => {
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
+});
 
 async function loadToolMessageContent() {
   const actualDialogSlice = await import("chat/dialog/dialogSlice");
@@ -76,7 +84,7 @@ async function loadToolMessageContent() {
       error: () => {},
     },
   }));
-  mock.module("create/space/spaceSlice", () => ({
+  mock.module("create/space/spaceCurrentSelectors", () => ({
     selectCurrentSpaceId: () => undefined,
   }));
   mock.module("render/page/docSlice", () => ({
@@ -101,8 +109,8 @@ describe("Conversation Todo visibility contract", () => {
       "utf8",
     );
     expect(source).toContain('props.toolName === "setTodoList"');
-    expect(source).toContain('conversationTodoEnabled');
-    expect(source).toContain('return null');
+    expect(source).toContain("conversationTodoEnabled");
+    expect(source).toContain("return null");
     // Todo presentation receives visibility explicitly; do not add a new
     // Redux read to this leaf component while Redux is being retired.
     expect(source).not.toContain("selectSystemBuiltinSkills");
@@ -149,7 +157,7 @@ describe("ToolMessageContent read_x_post", () => {
             fetchedAt: "2026-05-06T05:46:33.810Z",
           },
         }}
-      />
+      />,
     );
 
     try {
@@ -158,7 +166,7 @@ describe("ToolMessageContent read_x_post", () => {
       expect(view.getByText(/@karminski3/)).toBeTruthy();
       expect(view.getByText(/Google 刚刚发布了 Gemma 4系列模型/)).toBeTruthy();
       expect(
-        view.getByText("https://x.com/karminski3/status/2051832734533013575")
+        view.getByText("https://x.com/karminski3/status/2051832734533013575"),
       ).toBeTruthy();
       expect(view.getByRole("button", { name: "Copy" })).toBeTruthy();
       expect(view.getByRole("button", { name: "Open" })).toBeTruthy();
@@ -185,7 +193,7 @@ describe("ToolMessageContent read_x_post", () => {
             },
           },
         }}
-      />
+      />,
     );
 
     try {
@@ -201,7 +209,8 @@ describe("ToolMessageContent read_x_post", () => {
     const previousCreateObjectURL = globalThis.URL.createObjectURL;
     const previousRevokeObjectURL = globalThis.URL.revokeObjectURL;
     const createObjectURLMock = mock(() => "blob:mock-image");
-    globalThis.URL.createObjectURL = createObjectURLMock as typeof URL.createObjectURL;
+    globalThis.URL.createObjectURL =
+      createObjectURLMock as typeof URL.createObjectURL;
     globalThis.URL.revokeObjectURL = () => {};
     try {
       const sharedRawData = {
@@ -227,7 +236,7 @@ describe("ToolMessageContent read_x_post", () => {
             isError={false}
             t={t}
             rawData={sharedRawData}
-          />
+          />,
         );
 
         try {
@@ -238,7 +247,9 @@ describe("ToolMessageContent read_x_post", () => {
           expect(view.getByText("1 images generated")).toBeTruthy();
           expect(view.container.textContent).not.toContain("{{count}}");
           expect(createObjectURLMock).toHaveBeenCalledTimes(1);
-          const firstCallArg = (createObjectURLMock.mock.calls as unknown as unknown[][])[0]?.[0];
+          const firstCallArg = (
+            createObjectURLMock.mock.calls as unknown as unknown[][]
+          )[0]?.[0];
           expect(firstCallArg instanceof Blob).toBe(true);
 
           const img = view.container.querySelector("img");
@@ -259,7 +270,8 @@ describe("ToolMessageContent read_x_post", () => {
     const previousCreateObjectURL = globalThis.URL.createObjectURL;
     const previousRevokeObjectURL = globalThis.URL.revokeObjectURL;
     const createObjectURLMock = mock(() => "blob:mock-image");
-    globalThis.URL.createObjectURL = createObjectURLMock as typeof URL.createObjectURL;
+    globalThis.URL.createObjectURL =
+      createObjectURLMock as typeof URL.createObjectURL;
     globalThis.URL.revokeObjectURL = () => {};
 
     try {
@@ -280,7 +292,7 @@ describe("ToolMessageContent read_x_post", () => {
           isError={false}
           t={t}
           rawData={persistedRawData}
-        />
+        />,
       );
 
       try {
@@ -329,22 +341,61 @@ describe("ToolMessageContent read_xhs_profile", () => {
               { noteId: "n3", title: "旅行碎片" },
             ],
             noteDetails: [
-              { noteId: "n1", title: "穿搭日记", desc: "", type: "normal", userId: "5abc123", nickname: "测试博主", metrics: { likedCount: 100, collectedCount: 50, commentCount: 20, shareCount: 5 } },
+              {
+                noteId: "n1",
+                title: "穿搭日记",
+                desc: "",
+                type: "normal",
+                userId: "5abc123",
+                nickname: "测试博主",
+                metrics: {
+                  likedCount: 100,
+                  collectedCount: 50,
+                  commentCount: 20,
+                  shareCount: 5,
+                },
+              },
             ],
             commentsByNote: {},
             analysis: {
               totalNotes: 3,
-              highestLikedNote: { noteId: "n1", title: "穿搭日记", count: 12000 },
-              highestCommentedNote: { noteId: "n2", title: "美食探店", count: 300 },
-              highestCollectedNote: { noteId: "n1", title: "穿搭日记", count: 500 },
+              highestLikedNote: {
+                noteId: "n1",
+                title: "穿搭日记",
+                count: 12000,
+              },
+              highestCommentedNote: {
+                noteId: "n2",
+                title: "美食探店",
+                count: 300,
+              },
+              highestCollectedNote: {
+                noteId: "n1",
+                title: "穿搭日记",
+                count: 500,
+              },
               highestSharedNote: { noteId: "n3", title: "旅行碎片", count: 80 },
               commentBuckets: [
                 { label: "穿搭", count: 42, sampleCommentIds: ["c1"] },
                 { label: "美食", count: 18, sampleCommentIds: ["c2"] },
               ],
               topLikedComments: [
-                { commentId: "c1", userId: "u1", nickname: "路人甲", content: "太好看了！", likeCount: 999, subCommentCount: 5 },
-                { commentId: "c2", userId: "u2", nickname: "路人乙", content: "求链接", likeCount: 500, subCommentCount: 2 },
+                {
+                  commentId: "c1",
+                  userId: "u1",
+                  nickname: "路人甲",
+                  content: "太好看了！",
+                  likeCount: 999,
+                  subCommentCount: 5,
+                },
+                {
+                  commentId: "c2",
+                  userId: "u2",
+                  nickname: "路人乙",
+                  content: "求链接",
+                  likeCount: 500,
+                  subCommentCount: 2,
+                },
               ],
             },
             diagnostic: {
@@ -355,7 +406,7 @@ describe("ToolMessageContent read_xhs_profile", () => {
             },
           },
         }}
-      />
+      />,
     );
 
     try {
@@ -395,17 +446,17 @@ describe("ToolMessageContent read_xhs_profile", () => {
           },
           displayData: "小红书未登录，请先在桌面端登录",
         }}
-      />
+      />,
     );
 
     try {
-      expect(view.container.querySelector(".x-post-card.is-error")).toBeTruthy();
+      expect(
+        view.container.querySelector(".x-post-card.is-error"),
+      ).toBeTruthy();
       expect(view.getByText(/小红书账号读取失败/)).toBeTruthy();
       expect(view.getByText("login_required")).toBeTruthy();
       expect(view.getByText(/小红书未登录/)).toBeTruthy();
-      expect(
-        view.getByText(/匿名公开访问不可见或暂不可用/)
-      ).toBeTruthy();
+      expect(view.getByText(/匿名公开访问不可见或暂不可用/)).toBeTruthy();
     } finally {
       await view.cleanup();
     }
@@ -456,7 +507,7 @@ describe("ToolMessageContent read_xhs_profile", () => {
             },
           },
         }}
-      />
+      />,
     );
 
     try {
@@ -469,13 +520,15 @@ describe("ToolMessageContent read_xhs_profile", () => {
       expect(view.getByText(/滚动上限：2 页/)).toBeTruthy();
 
       // 2. Verify diagnostic display
-      expect(view.getByText(/诊断提示：captcha_detected - slide captcha shown/)).toBeTruthy();
+      expect(
+        view.getByText(/诊断提示：captcha_detected - slide captcha shown/),
+      ).toBeTruthy();
       expect(view.getByText(/检测到滑动验证码/)).toBeTruthy();
 
       // 3. Verify nextSuggestedAction display
       expect(view.getByText(/建议下一步：/)).toBeTruthy();
       expect(view.getByText(/还有未采集的笔记/)).toBeTruthy();
-      
+
       const btn = view.getByRole("button", { name: "读取更多 1 步" });
       expect(btn).toBeTruthy();
 
@@ -498,24 +551,29 @@ describe("ToolMessageContent shell detail", () => {
         toolName="execShell"
         isError={false}
         t={(key: string, fallback?: any) =>
-          key === "bash.exitCode" ? `退出码 ${fallback?.code}` : fallback ?? ""
+          key === "bash.exitCode"
+            ? `退出码 ${fallback?.code}`
+            : (fallback ?? "")
         }
         rawData={{
           ok: true,
-          command: "bun test packages/chat/messages/web/ToolMessageGroup.test.tsx",
+          command:
+            "bun test packages/chat/messages/web/ToolMessageGroup.test.tsx",
           cwd: "/Users/nolotus/bun-nolo-tool-activity-v2",
           exitCode: 0,
           stdout: "1 pass\n0 fail\n",
           stderr: "",
         }}
-      />
+      />,
     );
 
     try {
-      expect(view.container.querySelector(".bash-terminal-window")).toBeTruthy();
+      expect(
+        view.container.querySelector(".bash-terminal-window"),
+      ).toBeTruthy();
       expect(view.container.querySelector(".code-dump")).toBeNull();
       expect(view.container.textContent).toContain(
-        "bun test packages/chat/messages/web/ToolMessageGroup.test.tsx"
+        "bun test packages/chat/messages/web/ToolMessageGroup.test.tsx",
       );
       expect(view.getByText(/1 pass/)).toBeTruthy();
       expect(view.getByText("退出码 0")).toBeTruthy();
@@ -527,14 +585,16 @@ describe("ToolMessageContent shell detail", () => {
   it("hides shell command chrome in groupDetail and keeps only result content", async () => {
     const ToolMessageContent = await loadToolMessageContent();
     const command =
-      "git rev-parse HEAD origin/HEAD 2>/dev/null; echo \"---\"; git log --oneline -5";
+      'git rev-parse HEAD origin/HEAD 2>/dev/null; echo "---"; git log --oneline -5';
     const view = await renderInDom(
       <ToolMessageContent
         toolName="execShell"
         isError={false}
         presentation="groupDetail"
         t={(key: string, fallback?: any) =>
-          key === "bash.exitCode" ? `退出码 ${fallback?.code}` : fallback ?? ""
+          key === "bash.exitCode"
+            ? `退出码 ${fallback?.code}`
+            : (fallback ?? "")
         }
         rawData={{
           ok: false,
@@ -544,14 +604,16 @@ describe("ToolMessageContent shell detail", () => {
           stdout: "workspace_shell_escape_blocked\nblockedToken: /dev/null\n",
           stderr: "",
         }}
-      />
+      />,
     );
 
     try {
       expect(view.container.querySelector(".bash-prompt-line")).toBeNull();
       expect(view.container.querySelector(".shell-cmd")).toBeNull();
       expect(view.container.textContent).not.toContain("git rev-parse HEAD");
-      expect(view.container.textContent).toContain("workspace_shell_escape_blocked");
+      expect(view.container.textContent).toContain(
+        "workspace_shell_escape_blocked",
+      );
       expect(view.container.textContent).toContain("退出码 126");
     } finally {
       await view.cleanup();
@@ -575,7 +637,7 @@ describe("ToolMessageContent shell detail", () => {
           stderr: "",
           exitCode: undefined,
         }}
-      />
+      />,
     );
     try {
       expect(view.container.textContent).toContain("危险命令已被拦截");
@@ -590,16 +652,19 @@ describe("ToolMessageContent shell detail", () => {
     const ToolMessageContent = await loadToolMessageContent();
     const longStdout =
       "START_MARKER\n" +
-      Array.from({ length: 400 }, (_, i) => `log-line-${i}-${"x".repeat(40)}`).join(
-        "\n"
-      ) +
+      Array.from(
+        { length: 400 },
+        (_, i) => `log-line-${i}-${"x".repeat(40)}`,
+      ).join("\n") +
       "\nEND_MARKER";
     const view = await renderInDom(
       <ToolMessageContent
         toolName="execShell"
         isError={false}
         t={(key: string, fallback?: any) =>
-          key === "bash.exitCode" ? `退出码 ${fallback?.code}` : fallback ?? ""
+          key === "bash.exitCode"
+            ? `退出码 ${fallback?.code}`
+            : (fallback ?? "")
         }
         rawData={{
           ok: true,
@@ -609,7 +674,7 @@ describe("ToolMessageContent shell detail", () => {
           stdout: longStdout,
           stderr: "",
         }}
-      />
+      />,
     );
 
     try {
@@ -622,8 +687,8 @@ describe("ToolMessageContent shell detail", () => {
       expandBtn.click();
       await flushDomUpdates();
       expect(view.container.textContent).toContain("END_MARKER");
-      expect((view.container.textContent?.length ?? 0)).toBeGreaterThan(
-        longStdout.length * 0.9
+      expect(view.container.textContent?.length ?? 0).toBeGreaterThan(
+        longStdout.length * 0.9,
       );
     } finally {
       await view.cleanup();
@@ -646,7 +711,7 @@ describe("ToolMessageContent long fallback dump", () => {
         isError={false}
         t={t}
         rawData={payload}
-      />
+      />,
     );
 
     try {
@@ -659,7 +724,8 @@ describe("ToolMessageContent long fallback dump", () => {
       expandBtn.click();
       await flushDomUpdates();
       expect(view.container.textContent).toContain("TAIL_UNIQUE_TOKEN");
-      const after = view.container.querySelector(".code-dump")?.textContent?.length ?? 0;
+      const after =
+        view.container.querySelector(".code-dump")?.textContent?.length ?? 0;
       expect(after).toBeGreaterThanOrEqual(fullJson.length);
     } finally {
       await view.cleanup();
@@ -670,7 +736,8 @@ describe("ToolMessageContent long fallback dump", () => {
 describe("ToolMessageContent readFile meta-only", () => {
   it("renders path + line stats and never mounts file body", async () => {
     const ToolMessageContent = await loadToolMessageContent();
-    const body = "export const streamAgentChatTurn = () => {};\n// secret marker BODY_NOT_IN_UI\n";
+    const body =
+      "export const streamAgentChatTurn = () => {};\n// secret marker BODY_NOT_IN_UI\n";
     const view = await renderInDom(
       <ToolMessageContent
         toolName="readFile"
@@ -690,7 +757,9 @@ describe("ToolMessageContent readFile meta-only", () => {
       expect(view.container.textContent).toContain(
         "packages/ai/agent/streamAgentChatTurn.ts",
       );
-      expect(view.container.textContent).toContain("streamAgentChatTurn.ts:1-2");
+      expect(view.container.textContent).toContain(
+        "streamAgentChatTurn.ts:1-2",
+      );
       expect(view.container.textContent).not.toContain("BODY_NOT_IN_UI");
       expect(view.container.textContent).not.toContain("Unknown");
       expect(view.container.querySelector('[data-testid="editor"]')).toBeNull();
@@ -855,9 +924,7 @@ describe("ToolMessageContent loadSkill", () => {
     );
 
     try {
-      expect(
-        view.getByText(/Skill "search-first" loaded inline/),
-      ).toBeTruthy();
+      expect(view.getByText(/Skill "search-first" loaded inline/)).toBeTruthy();
       expect(view.container.querySelector(".load-skill-line")).toBeTruthy();
       expect(view.container.querySelector(".code-dump")).toBeTruthy();
       expect(view.getByText(/Reuse existing helpers/)).toBeTruthy();
@@ -916,12 +983,12 @@ describe("ToolMessageContent loadSkill", () => {
     try {
       // Failure surface, not success.
       expect(view.getByText(/Skill "ghost" not found/)).toBeTruthy();
-      expect(
-        view.container.querySelector(".icon-error"),
-      ).toBeTruthy();
+      expect(view.container.querySelector(".icon-error")).toBeTruthy();
       expect(view.container.querySelector(".icon-success")).toBeFalsy();
       // The available-skills list is surfaced to help recovery.
-      expect(view.getByText(/Available skills: deployment, legacy/)).toBeTruthy();
+      expect(
+        view.getByText(/Available skills: deployment, legacy/),
+      ).toBeTruthy();
       // The "loaded inline" success wording must never appear.
       expect(view.container.textContent).not.toContain("loaded inline");
     } finally {
@@ -981,4 +1048,3 @@ describe("ToolMessageContent loadSkill", () => {
     }
   });
 });
-

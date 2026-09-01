@@ -12,10 +12,14 @@ import i18n from "app/i18n/client";
 import { addHostToCurrentServer, getSettings } from "app/settings/settingSlice";
 import {
   fetchUserSpaceMemberships,
+} from "create/space/member/memberThunks";
+import {
   fetchSpace,
   fetchSpaceSidebarState,
+} from "create/space/spaceThunks";
+import {
   selectCurrentSpaceId,
-} from "create/space/spaceSlice";
+} from "create/space/spaceCurrentSelectors";
 import { isSpaceMembershipRemoteUnavailableError } from "create/space/member/isSpaceMembershipRemoteUnavailableError";
 import { useSystemTheme } from "app/theme/useSystemTheme";
 import GlobalThemeController from "app/theme/GlobalThemeController";

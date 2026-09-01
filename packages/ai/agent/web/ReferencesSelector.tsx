@@ -2,11 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useTranslation } from "react-i18next";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { readAndWait } from "database/dbSlice";
-import {
-  selectCurrentSpace,
-  selectViewMode,
-  fetchSpace,
-} from "create/space/spaceSlice";
+import { selectCurrentSpace, selectViewMode } from "create/space/spaceCurrentSelectors";
+import { fetchSpace } from "create/space/spaceThunks";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { resolvePageSkillMetadata } from "ai/skills/skillDocProtocol";
 import { LuEye, LuExternalLink, LuBrain, LuLightbulb } from "react-icons/lu";

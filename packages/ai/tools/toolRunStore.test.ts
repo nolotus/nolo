@@ -1,8 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 
-// Value-copy snapshot — incomplete spaceSlice mocks poison sibling suites
+// Value-copy snapshot — incomplete space-module mocks poison sibling suites
 // (fetchUserSpaceMemberships.pending) and later files that spread live modules.
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
+const realSpaceModule = {
+  ...(await import("create/space/member/memberThunks")),
+};
 
 const executorMock = mock();
 const fetchUserSpaceMembershipsMock = mock((userId: string) => ({
@@ -13,8 +23,10 @@ const fetchUserSpaceMembershipsMock = mock((userId: string) => ({
 let moduleVersion = 0;
 
 const restoreLeakedModuleMocks = () => {
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/member/memberThunks", () => realSpaceModule);
 };
+
+afterAll(() => restoreLeakedModuleMocks());
 
 async function loadToolRunStore() {
   mock.module(".", () => ({
@@ -22,8 +34,8 @@ async function loadToolRunStore() {
       executor: executorMock,
     }),
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/member/memberThunks", () => ({
+    ...realSpaceModule,
     fetchUserSpaceMemberships: fetchUserSpaceMembershipsMock,
   }));
   mock.module("./toolResultError", () => ({
@@ -82,7 +94,9 @@ describe("executeToolRun", () => {
     toolRunSetPending({ id: "run-1" });
 
     const dispatch = createFakeDispatch({ userId: "user-a" });
-    const result = (await dispatch(executeToolRun({ id: "run-1" }) as any)) as any;
+    const result = (await dispatch(
+      executeToolRun({ id: "run-1" }) as any,
+    )) as any;
 
     expect(executeToolRun.fulfilled.match(result)).toBe(true);
     expect(fetchUserSpaceMembershipsMock).toHaveBeenCalledWith("user-a");

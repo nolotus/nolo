@@ -1,6 +1,6 @@
 // store/space/actions/categoryActions.ts
 
-import { type PayloadAction } from "@reduxjs/toolkit";
+import { createAsyncThunk } from "@reduxjs/toolkit";
 import { ulid } from "ulid";
 import type { AppDispatch, RootState } from "app/store";
 import type { Category, Contents, SpaceContent, SpaceData, ULID } from "app/types";
@@ -30,138 +30,123 @@ import {
   expandCategoryInCollapsed,
 } from "../spaceUiStore";
 
-type Create = {
-  asyncThunk: (...args: any[]) => any;
-  reducer: (...args: any[]) => any;
+/** 共享 fulfilled 副作用：payload 属于当前空间时同步 currentSpace。 */
+const syncCurrentSpace = (spaceId: string, updatedSpaceData: any): void => {
+  if (getCurrentSpaceIdRaw() === spaceId) {
+    updateCurrentSpaceIfMatch(spaceId, updatedSpaceData);
+  }
 };
 
-/**
- * 创建与分类（Category）相关的所有 Reducer 和 Async Thunks
- * @param create - 由 buildCreateSlice 提供的创建器对象
- */
-export const createCategoryActions = (create: Create) => ({
-  // --- Regular Reducers ---
-
-  /**
-   * (新增) 从持久化存储中水合分类的折叠状态
-   */
-  hydrateCollapsedCategories: create.reducer(
-    (state: SpaceState, action: PayloadAction<Record<string, boolean>>) => {
-      setCollapsedCategoriesUi(
-        normalizeCollapsedCategories(action.payload),
-        getCurrentSpaceIdRaw(),
-      );
-    }
-  ),
-
-  // --- Async Thunks ---
 
   /**
    * 批量切换所有分类的折叠状态，并持久化到本地
    */
-  setAllCategoriesCollapsed: create.asyncThunk(
+export const setAllCategoriesCollapsed = createAsyncThunk(
+  "space/setAllCategoriesCollapsed",
     async (
       input: { spaceId?: string; collapsed: boolean },
       thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
     ): Promise<Record<string, boolean>> => {
-      const { getState } = thunkAPI;
-      const rootState = getState();
+    try {
+        const { getState } = thunkAPI;
+        const rootState = getState();
 
-      // 优先使用传入的 spaceId，否则获取当前活动空间
-      const spaceId = input.spaceId || getCurrentSpaceId();
-      if (!spaceId) throw new Error("无法切换折叠状态：没有活动的空间。");
+        // 优先使用传入的 spaceId，否则获取当前活动空间
+        const spaceId = input.spaceId || getCurrentSpaceId();
+        if (!spaceId) throw new Error("无法切换折叠状态：没有活动的空间。");
 
-      // 获取当前空间的所有分类 ID
-      // Wave D: currentSpace 已剥至 module store
-      const currentSpace = getCurrentSpaceRaw();
-      const categoryIds = currentSpace?.categories
-        ? Object.keys(currentSpace.categories)
-        : [];
-      // 始终包含“未分类”
-      categoryIds.push(UNCATEGORIZED_ID);
+        // 获取当前空间的所有分类 ID
+        // Wave D: currentSpace 已剥至 module store
+        const currentSpace = getCurrentSpaceRaw();
+        const categoryIds = currentSpace?.categories
+          ? Object.keys(currentSpace.categories)
+          : [];
+        // 始终包含“未分类”
+        categoryIds.push(UNCATEGORIZED_ID);
 
-      // 构造新的折叠状态映射
-      const collapsedCategories: Record<string, boolean> = {};
-      categoryIds.forEach((id) => {
-        collapsedCategories[id] = input.collapsed;
-      });
+        // 构造新的折叠状态映射
+        const collapsedCategories: Record<string, boolean> = {};
+        categoryIds.forEach((id) => {
+          collapsedCategories[id] = input.collapsed;
+        });
 
-      if (typeof window !== "undefined") {
-        writeStoredCollapsedCategories(
-          spaceId,
-          collapsedCategories,
-          window.localStorage,
-        );
-      }
+        if (typeof window !== "undefined") {
+          writeStoredCollapsedCategories(
+            spaceId,
+            collapsedCategories,
+            window.localStorage,
+          );
+        }
 
-      // Wave A: 直接写 module store，传入 thunk 构造的完整 map
-      // （setAllCategoriesCollapsedUi 只遍历已有 keys，会漏新分类，
-      // 所以用 setCollapsedCategoriesUi 传完整 map）
-      setCollapsedCategoriesUi(collapsedCategories, spaceId);
+        // Wave A: 直接写 module store，传入 thunk 构造的完整 map
+        // （setAllCategoriesCollapsedUi 只遍历已有 keys，会漏新分类，
+        // 所以用 setCollapsedCategoriesUi 传完整 map）
+        setCollapsedCategoriesUi(collapsedCategories, spaceId);
 
-      return collapsedCategories;
-    },
-    {
-      rejected: (state: SpaceState, action: any) => {
-        console.error("批量切换分类折叠状态失败:", action.error.message);
-      },
+    return collapsedCategories;
+    } catch (error) {
+      console.error("批量切换分类折叠状态失败:", (error as { message?: string } | undefined)?.message);
+      throw error;
     }
-  ),
+    }
+);
 
   /**
    * 切换单个分类的折叠状态，并持久化存储。
    * 直接使用当前激活的 spaceId，无需外部传入。
    */
-  toggleCategoryCollapse: create.asyncThunk(
+export const toggleCategoryCollapse = createAsyncThunk(
+  "space/toggleCategoryCollapse",
     async (
       input: { categoryId: string },
       thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
     ): Promise<Record<string, boolean>> => {
-      const { getState } = thunkAPI;
-      const { categoryId } = input;
-      const rootState = getState();
+    try {
+        const { getState } = thunkAPI;
+        const { categoryId } = input;
+        const rootState = getState();
 
-      // 获取当前空间 ID
-      const spaceId = getCurrentSpaceId();
-      if (!spaceId) throw new Error("无法切换折叠状态：没有活动的空间。");
-      if (!categoryId) throw new Error("无效的分类ID。");
+        // 获取当前空间 ID
+        const spaceId = getCurrentSpaceId();
+        if (!spaceId) throw new Error("无法切换折叠状态：没有活动的空间。");
+        if (!categoryId) throw new Error("无效的分类ID。");
 
-      // 计算新的折叠状态（Wave A: 从 module store 读）
-      const defaultCollapsed =
-        DEFAULT_COLLAPSED_CATEGORIES[categoryId] ?? true;
-      const currentCollapsedCategories = getCollapsedCategories();
-      const isCurrentlyCollapsed =
-        currentCollapsedCategories[categoryId] ?? defaultCollapsed;
-      const newCollapsedState = !isCurrentlyCollapsed;
-      const collapsedCategories = {
-        ...currentCollapsedCategories,
-        [categoryId]: newCollapsedState,
-      };
+        // 计算新的折叠状态（Wave A: 从 module store 读）
+        const defaultCollapsed =
+          DEFAULT_COLLAPSED_CATEGORIES[categoryId] ?? true;
+        const currentCollapsedCategories = getCollapsedCategories();
+        const isCurrentlyCollapsed =
+          currentCollapsedCategories[categoryId] ?? defaultCollapsed;
+        const newCollapsedState = !isCurrentlyCollapsed;
+        const collapsedCategories = {
+          ...currentCollapsedCategories,
+          [categoryId]: newCollapsedState,
+        };
 
-      if (typeof window !== "undefined") {
-        writeStoredCollapsedCategories(
-          spaceId,
-          collapsedCategories,
-          window.localStorage,
-        );
-      }
+        if (typeof window !== "undefined") {
+          writeStoredCollapsedCategories(
+            spaceId,
+            collapsedCategories,
+            window.localStorage,
+          );
+        }
 
-      // Wave A: 直接写 module store
-      toggleCategoryCollapseUi(categoryId);
+        // Wave A: 直接写 module store
+        toggleCategoryCollapseUi(categoryId);
 
-      return collapsedCategories;
-    },
-    {
-      rejected: (state: SpaceState, action: any) => {
-        console.error("切换分类折叠状态失败:", action.error.message);
-      },
+    return collapsedCategories;
+    } catch (error) {
+      console.error("切换分类折叠状态失败:", (error as { message?: string } | undefined)?.message);
+      throw error;
     }
-  ),
+    }
+);
 
   /**
    * 添加新分类
    */
-  addCategory: create.asyncThunk(
+export const addCategory = createAsyncThunk(
+  "space/addCategory",
     async (
       input: {
         spaceId?: string;
@@ -238,21 +223,16 @@ export const createCategoryActions = (create: Create) => ({
       // Wave A: 直接展开新分类
       expandCategoryInCollapsed(newCategoryId, spaceId);
 
+      syncCurrentSpace(spaceId, updatedSpaceData);
       return { spaceId, updatedSpaceData, newCategoryId, collapsedCategories };
-    },
-    {
-      fulfilled: (state: SpaceState, action: any) => {
-        if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-          updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-        }
-      },
     }
-  ),
+);
 
   /**
     * 删除单个分类
     */
-  deleteCategory: create.asyncThunk(
+export const deleteCategory = createAsyncThunk(
+  "space/deleteCategory",
     async (
       input: { categoryId: string; spaceId: ULID },
       thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
@@ -318,21 +298,16 @@ export const createCategoryActions = (create: Create) => ({
         );
       }
 
+      syncCurrentSpace(spaceId, updatedSpaceData);
       return { spaceId, updatedSpaceData, collapsedCategories };
-    },
-    {
-      fulfilled: (state: SpaceState, action: any) => {
-        if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-          updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-        }
-      },
     }
-  ),
+);
 
   /**
    * 修改分类名称
    */
-  updateCategoryName: create.asyncThunk(
+export const updateCategoryName = createAsyncThunk(
+  "space/updateCategoryName",
     async (
       input: { spaceId: ULID; categoryId: string; name: string },
       thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
@@ -373,21 +348,16 @@ export const createCategoryActions = (create: Create) => ({
         patch({ dbKey: spaceKey, changes })
       ).unwrap();
 
+      syncCurrentSpace(spaceId, updatedSpaceData);
       return { spaceId, updatedSpaceData };
-    },
-    {
-      fulfilled: (state: SpaceState, action: any) => {
-        if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-          updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-        }
-      },
     }
-  ),
+);
 
   /**
    * 重新排序分类
    */
-  reorderCategories: create.asyncThunk(
+export const reorderCategories = createAsyncThunk(
+  "space/reorderCategories",
     async (
       input: { spaceId: ULID; sortedCategoryIds: string[] },
       thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
@@ -451,14 +421,7 @@ export const createCategoryActions = (create: Create) => ({
         patch({ dbKey: spaceKey, changes })
       ).unwrap();
 
+      syncCurrentSpace(spaceId, updatedSpaceData);
       return { spaceId, updatedSpaceData };
-    },
-    {
-      fulfilled: (state: SpaceState, action: any) => {
-        if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-          updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-        }
-      },
     }
-  ),
-});
+);

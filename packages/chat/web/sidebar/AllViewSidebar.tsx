@@ -56,7 +56,9 @@ import {
 } from "create/space/SidebarAppDeleteDialog";
 import { MenuPopover } from "render/web/ui/MenuPopover";
 import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
-import { updateContentPinned } from "create/space/spaceSlice";
+import {
+  updateContentPinned,
+} from "create/space/content/contentThunks";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
 import { SidebarPinnedBlock } from "./SidebarPinnedBlock";
 import { SidebarVirtualizedList } from "./SidebarVirtualizedList";

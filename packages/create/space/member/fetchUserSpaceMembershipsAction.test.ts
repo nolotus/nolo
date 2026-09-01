@@ -1,19 +1,42 @@
-import { describe, expect, it, beforeEach } from "bun:test";
+import { afterAll, describe, expect, it, beforeEach, mock } from "bun:test";
 import { MemoryDB } from "database-engine/MemoryDB";
 import { clearMembershipFetchCache } from "../spaceAccess";
-import { fetchUserSpaceMembershipsAction } from "./fetchUserSpaceMembershipsAction";
+
+// Wave E: spaceSlice 已删除。本地水合/恢复不再走
+// dispatch({type:"space/hydrateMemberSpacesFromLocal"|"space/appendRecoveredMemberships"})，
+// 而是直接调用 spaceMembershipStore。为保留这些用例的原有断言语义（顺序 + payload），
+// 这里 mock module store，把调用记录成同样的 {type, payload} 形状。
+const storeCalls: any[] = [];
+const actualMembershipStore = await import("../spaceMembershipStore");
+const realMembershipStore = {
+  ...(await import("create/space/spaceMembershipStore")),
+};
+
+afterAll(() => {
+  mock.module("create/space/spaceMembershipStore", () => realMembershipStore);
+});
+
+mock.module("create/space/spaceMembershipStore", () => ({
+  ...actualMembershipStore,
+  hydrateMemberSpacesFromLocal: (payload: any) =>
+    storeCalls.push({ type: "space/hydrateMemberSpacesFromLocal", payload }),
+  appendRecoveredMemberships: (payload: any) =>
+    storeCalls.push({ type: "space/appendRecoveredMemberships", payload }),
+}));
+
+const { fetchUserSpaceMembershipsAction } =
+  await import("./fetchUserSpaceMembershipsAction");
 
 const createThunkApi = (
   db: MemoryDB,
   servers: string[] = [],
   token: string | null = servers.length > 0 ? "token" : null,
   dispatch?: (action: any) => void,
-  currentUserId: string = "user1"
+  currentUserId: string = "user1",
 ) =>
   ({
     getState: () => ({
       auth: { currentToken: token, currentUser: { userId: currentUserId } },
-      space: { memberSpaces: null },
       settings: {
         currentServer: servers[0] ?? "",
         syncServers: servers.slice(1),
@@ -27,7 +50,11 @@ describe("fetchUserSpaceMembershipsAction", () => {
   // membershipFetchCache 是模块级 30s TTL 缓存；不清理会跨测试命中
   // 前序测试的成功结果，导致"远程不可用"场景被错误放行。
   beforeEach(() => {
+    storeCalls.length = 0;
     clearMembershipFetchCache();
+    // Wave E: 水合判定改读真实 module store（getMemberSpaces() === null），
+    // 每个用例前重置，避免跨用例污染。
+    actualMembershipStore.resetSpaceMembershipState();
   });
 
   it("hydrates cached local memberships before slow remote verification finishes", async () => {
@@ -68,7 +95,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             ownerId: "user1",
             members: [],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(JSON.stringify({ data: { data: [] } }), {
@@ -82,12 +109,12 @@ describe("fetchUserSpaceMembershipsAction", () => {
         "user1",
         createThunkApi(db, ["http://127.0.0.1:38123"], "token", (action) => {
           dispatchCalls.push(action);
-        })
+        }),
       );
 
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(dispatchCalls).toEqual([
+      expect(storeCalls).toEqual([
         {
           type: "space/hydrateMemberSpacesFromLocal",
           payload: [
@@ -120,7 +147,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
 
     const result = await fetchUserSpaceMembershipsAction(
       "user1",
-      createThunkApi(db)
+      createThunkApi(db),
     );
 
     expect(result.map((membership) => membership.spaceId)).toEqual(["active"]);
@@ -147,7 +174,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result).toEqual([]);
@@ -184,7 +211,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result).toEqual([]);
@@ -227,7 +254,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             members: [],
             updatedAt: "2026-05-06T06:47:12.424Z",
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -236,7 +263,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result.map((membership) => membership.spaceId)).toEqual(["live"]);
@@ -248,7 +275,10 @@ describe("fetchUserSpaceMembershipsAction", () => {
   it("recovers visible spaces from user content summaries when membership indexes are empty", async () => {
     const db = new MemoryDB();
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       if (url.endsWith("/rpc/getUserSpaceMemberships")) {
         return new Response(JSON.stringify([]), {
@@ -277,7 +307,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               ],
             },
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.endsWith("/api/v1/db/read/space-recovered")) {
@@ -289,7 +319,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             members: ["user1"],
             updatedAt: "2026-05-20T10:00:00.000Z",
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -301,7 +331,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
         "user1",
         createThunkApi(db, ["https://nolo.chat"], "token", (action) => {
           dispatchCalls.push(action);
-        })
+        }),
       );
 
       // Recover is fire-and-forget: the thunk return no longer contains it.
@@ -311,7 +341,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
       // appendRecoveredMemberships dispatch to land.
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(dispatchCalls).toEqual([
+      expect(storeCalls).toEqual([
         {
           type: "space/appendRecoveredMemberships",
           payload: [
@@ -334,7 +364,10 @@ describe("fetchUserSpaceMembershipsAction", () => {
     const originalFetch = globalThis.fetch;
     const recoveryAuthHeaders: Array<string | null> = [];
 
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       if (url.endsWith("/rpc/getUserSpaceMemberships")) {
         return new Response(JSON.stringify([]), {
@@ -360,7 +393,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["https://nolo.chat"], "recovery-token")
+        createThunkApi(db, ["https://nolo.chat"], "recovery-token"),
       );
       expect(recoveryAuthHeaders).toEqual(["Bearer recovery-token"]);
 
@@ -368,7 +401,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
       // Empty token: no remote authority → no recovery query, no malformed header.
       const emptyTokenResult = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["https://nolo.chat"], "")
+        createThunkApi(db, ["https://nolo.chat"], ""),
       );
       expect(emptyTokenResult).toEqual([]);
       expect(recoveryAuthHeaders).toEqual([]);
@@ -381,7 +414,10 @@ describe("fetchUserSpaceMembershipsAction", () => {
     const db = new MemoryDB();
     const seenUrls: string[] = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       seenUrls.push(url);
       expect(url).not.toContain("nolotus.com");
@@ -416,7 +452,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               ],
             },
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.startsWith("https://us.nolo.chat/api/v1/db/query/user1")) {
@@ -434,7 +470,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             members: ["user1"],
             updatedAt: "2026-05-20T10:00:00.000Z",
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -444,21 +480,30 @@ describe("fetchUserSpaceMembershipsAction", () => {
       const dispatchCalls: any[] = [];
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["https://nolotus.com", "https://us.nolotus.com"], "token", (action) => {
-          dispatchCalls.push(action);
-        })
+        createThunkApi(
+          db,
+          ["https://nolotus.com", "https://us.nolotus.com"],
+          "token",
+          (action) => {
+            dispatchCalls.push(action);
+          },
+        ),
       );
 
       // Recover is fire-and-forget: the thunk return no longer contains it.
       expect(result).toEqual([]);
-      expect(seenUrls).toContain("https://nolo.chat/rpc/getUserSpaceMemberships");
-      expect(seenUrls).toContain("https://us.nolo.chat/rpc/getUserSpaceMemberships");
+      expect(seenUrls).toContain(
+        "https://nolo.chat/rpc/getUserSpaceMemberships",
+      );
+      expect(seenUrls).toContain(
+        "https://us.nolo.chat/rpc/getUserSpaceMemberships",
+      );
 
       // Recover runs in the background after the thunk resolves; wait for the
       // appendRecoveredMemberships dispatch to land.
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(dispatchCalls).toEqual([
+      expect(storeCalls).toEqual([
         {
           type: "space/appendRecoveredMemberships",
           payload: [
@@ -502,7 +547,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               ],
             },
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.endsWith("/api/v1/db/read/space-removed")) {
@@ -514,7 +559,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             members: ["owner"],
             updatedAt: "2026-05-20T10:00:00.000Z",
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -523,7 +568,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["https://nolo.chat"])
+        createThunkApi(db, ["https://nolo.chat"]),
       );
 
       expect(result).toEqual([]);
@@ -556,10 +601,12 @@ describe("fetchUserSpaceMembershipsAction", () => {
     }) as any;
 
     try {
-      await expect(fetchUserSpaceMembershipsAction(
-        "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
-      )).rejects.toThrow("space_membership_remote_unavailable");
+      await expect(
+        fetchUserSpaceMembershipsAction(
+          "user1",
+          createThunkApi(db, ["http://127.0.0.1:38123"]),
+        ),
+      ).rejects.toThrow("space_membership_remote_unavailable");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -603,11 +650,11 @@ describe("fetchUserSpaceMembershipsAction", () => {
           "user1",
           createThunkApi(db, ["http://127.0.0.1:38123"], "token", (action) => {
             dispatchCalls.push(action);
-          })
-        )
+          }),
+        ),
       ).rejects.toThrow("space_membership_remote_unavailable");
 
-      expect(dispatchCalls).toEqual([
+      expect(storeCalls).toEqual([
         {
           type: "space/hydrateMemberSpacesFromLocal",
           payload: [
@@ -619,7 +666,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
         },
       ]);
       expect(
-        dispatchCalls[0].payload.map((m: { spaceId: string }) => m.spaceId)
+        storeCalls[0].payload.map((m: { spaceId: string }) => m.spaceId),
       ).not.toContain("ghost");
     } finally {
       globalThis.fetch = originalFetch;
@@ -664,12 +711,12 @@ describe("fetchUserSpaceMembershipsAction", () => {
           "user1",
           createThunkApi(db, ["http://127.0.0.1:38123"], "token", (action) => {
             dispatchCalls.push(action);
-          })
-        )
+          }),
+        ),
       ).rejects.toThrow("space_membership_remote_unavailable");
 
       // No usable offline preview → hydrate must not run with empty payload.
-      expect(dispatchCalls).toEqual([]);
+      expect(storeCalls).toEqual([]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -703,14 +750,14 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result.map((membership) => membership.spaceId)).not.toContain(
-        "01KMX8DFZ6B8FEKQBH8JS0ZDNN"
+        "01KMX8DFZ6B8FEKQBH8JS0ZDNN",
       );
       expect(result.map((membership) => membership.spaceId)).not.toContain(
-        "01KKX14CP0TNR6GFQ39GNNTJDJ"
+        "01KKX14CP0TNR6GFQ39GNNTJDJ",
       );
       expect(result).toEqual([]);
     } finally {
@@ -740,16 +787,18 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "owner",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      return new Response("should not read tombstoned local space", { status: 500 });
+      return new Response("should not read tombstoned local space", {
+        status: 500,
+      });
     }) as any;
 
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result).toEqual([]);
@@ -781,7 +830,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "owner",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -790,7 +839,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       // Remote RPC memberships are trusted directly: even one whose space
@@ -800,9 +849,9 @@ describe("fetchUserSpaceMembershipsAction", () => {
         "live",
         "orphan",
       ]);
-      expect(
-        seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))
-      ).toBe(false);
+      expect(seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))).toBe(
+        false,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -825,7 +874,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "owner",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url === "https://us.nolo.chat/rpc/getUserSpaceMemberships") {
@@ -840,19 +889,23 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["https://nolo.chat", "https://us.nolo.chat"])
+        createThunkApi(db, ["https://nolo.chat", "https://us.nolo.chat"]),
       );
 
       expect(result.map((membership) => membership.spaceId)).toEqual([
         "cross-server",
       ]);
-      expect(seenUrls).toContain("https://nolo.chat/rpc/getUserSpaceMemberships");
-      expect(seenUrls).toContain("https://us.nolo.chat/rpc/getUserSpaceMemberships");
+      expect(seenUrls).toContain(
+        "https://nolo.chat/rpc/getUserSpaceMemberships",
+      );
+      expect(seenUrls).toContain(
+        "https://us.nolo.chat/rpc/getUserSpaceMemberships",
+      );
       // Direct trust: the membership is returned without re-verifying the
       // space record on any configured server.
-      expect(
-        seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))
-      ).toBe(false);
+      expect(seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))).toBe(
+        false,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -873,7 +926,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "member",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -882,7 +935,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       expect(result).toEqual([]);
@@ -908,7 +961,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "member",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -917,7 +970,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       // The RPC result is trusted directly even though the space record no
@@ -925,9 +978,9 @@ describe("fetchUserSpaceMembershipsAction", () => {
       expect(result.map((membership) => membership.spaceId)).toEqual([
         "removed",
       ]);
-      expect(
-        seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))
-      ).toBe(false);
+      expect(seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))).toBe(
+        false,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -957,7 +1010,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               role: "member",
             },
           ]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -966,7 +1019,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
     try {
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"])
+        createThunkApi(db, ["http://127.0.0.1:38123"]),
       );
 
       // The RPC result is trusted directly; the stale local space record is
@@ -974,9 +1027,9 @@ describe("fetchUserSpaceMembershipsAction", () => {
       expect(result.map((membership) => membership.spaceId)).toEqual([
         "removed",
       ]);
-      expect(
-        seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))
-      ).toBe(false);
+      expect(seenUrls.some((u) => u.includes("/api/v1/db/read/space-"))).toBe(
+        false,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1006,7 +1059,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
               ],
             },
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.includes("/api/v1/db/read/space-space_a")) {
@@ -1017,7 +1070,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             ownerId: "user1",
             members: ["user1"],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.includes("/api/v1/db/read/space-space_b")) {
@@ -1028,7 +1081,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             ownerId: "otherUser",
             members: ["otherUser"],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.includes("/api/v1/db/read/space-space_c")) {
@@ -1038,7 +1091,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
         // blocking the rest of the batch.
         return new Response(
           JSON.stringify({ error: "Network error fetching space_c" }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
+          { status: 500, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url.includes("/api/v1/db/read/space-space_d")) {
@@ -1049,7 +1102,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
             ownerId: "user1",
             members: ["user1"],
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -1061,7 +1114,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
         "user1",
         createThunkApi(db, ["http://127.0.0.1:38123"], "token", (action) => {
           dispatchCalls.push(action);
-        })
+        }),
       );
 
       // Recover is fire-and-forget: the thunk return no longer contains it.
@@ -1071,7 +1124,7 @@ describe("fetchUserSpaceMembershipsAction", () => {
       // appendRecoveredMemberships dispatch to land.
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(dispatchCalls).toEqual([
+      expect(storeCalls).toEqual([
         {
           type: "space/appendRecoveredMemberships",
           payload: [
@@ -1115,16 +1168,29 @@ describe("fetchUserSpaceMembershipsAction", () => {
       if (url.includes("/api/v1/db/query/")) {
         return new Response(
           JSON.stringify({
-            data: { data: [{ dbKey: "page-user1-doc-recovered", spaceId: "recovered", updatedAt: "2026-05-01T00:00:00.000Z" }] },
+            data: {
+              data: [
+                {
+                  dbKey: "page-user1-doc-recovered",
+                  spaceId: "recovered",
+                  updatedAt: "2026-05-01T00:00:00.000Z",
+                },
+              ],
+            },
           }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       // space record fetch for the recovered candidate
       if (url.endsWith("/api/v1/db/read/space-recovered")) {
         return new Response(
-          JSON.stringify({ id: "recovered", name: "Recovered", ownerId: "user1", members: ["user1"] }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
+          JSON.stringify({
+            id: "recovered",
+            name: "Recovered",
+            ownerId: "user1",
+            members: ["user1"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       return new Response(`unexpected url ${url}`, { status: 500 });
@@ -1136,14 +1202,22 @@ describe("fetchUserSpaceMembershipsAction", () => {
       // (simulating account switch after thunk started). Guard must drop dispatch.
       const result = await fetchUserSpaceMembershipsAction(
         "user1",
-        createThunkApi(db, ["http://127.0.0.1:38123"], "token", (a) => dispatched.push(a), "user2")
+        createThunkApi(
+          db,
+          ["http://127.0.0.1:38123"],
+          "token",
+          (a) => dispatched.push(a),
+          "user2",
+        ),
       );
       // thunk returns empty (no local, no remote memberships, recover is backgrounded)
       expect(result).toEqual([]);
       // Allow in-flight recover to settle
       await new Promise((r) => setTimeout(r, 100));
       // The actor guard must have blocked the append dispatch
-      const appendCalls = dispatched.filter((a) => a.type === "space/appendRecoveredMemberships");
+      const appendCalls = storeCalls.filter(
+        (a) => a.type === "space/appendRecoveredMemberships",
+      );
       expect(appendCalls).toEqual([]);
     } finally {
       globalThis.fetch = originalFetch;

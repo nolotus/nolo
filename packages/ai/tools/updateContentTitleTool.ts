@@ -1,4 +1,4 @@
-import { updateContentTitle } from "create/space/spaceSlice"; // 假设有一个对应的 action
+import { updateContentTitle } from "create/space/content/contentThunks"; // 假设有一个对应的 action
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 
 // Tool definition

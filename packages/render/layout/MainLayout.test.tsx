@@ -1,9 +1,27 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import { JSDOM } from "jsdom";
 import React, { act, useContext, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import RightSidebarContext from "./RightSidebarContext";
+
+// Value-copy snapshot — Bun mock.restore() does not clear mock.module,
+// 粘性 mock 会污染同进程后续 suite 文件（create/space 的 runtime 测试等）。
+const realSpaceCurrentStore = {
+  ...(await import("create/space/spaceCurrentStore")),
+};
+
+afterAll(() => {
+  mock.module("create/space/spaceCurrentStore", () => realSpaceCurrentStore);
+});
 
 type MockState = {
   settings: {
@@ -20,11 +38,12 @@ let mockState: MockState;
 let mockPathname = "/chat";
 let mockIsMobile = false;
 const dispatchCalls: unknown[] = [];
+const setViewModeCalls: string[] = [];
 
 const dispatchPointerEvent = (
   target: EventTarget,
   type: string,
-  init: MouseEventInit = {}
+  init: MouseEventInit = {},
 ) => {
   const event = new window.MouseEvent(type, {
     bubbles: true,
@@ -70,7 +89,8 @@ const loadMainLayout = async () => {
       dispatchCalls.push(action);
       return action;
     },
-    useAppSelector: (selector: (state: MockState) => unknown) => selector(mockState),
+    useAppSelector: (selector: (state: MockState) => unknown) =>
+      selector(mockState),
   }));
 
   mock.module("app/settings/settingSlice", () => ({
@@ -81,12 +101,14 @@ const loadMainLayout = async () => {
     selectSidebarWidth: (state: MockState) => state.settings.sidebarWidth,
   }));
 
-  mock.module("create/space/spaceSlice", () => ({
-    selectViewMode: (state: MockState) => state.space.viewMode,
+  // setViewMode is a module-store mutator now (called directly, not dispatched),
+  // so record its calls separately instead of via the dispatch log.
+  mock.module("create/space/spaceCurrentStore", () => ({
+    useViewMode: () => mockState.space.viewMode,
     setViewMode: (viewMode: "all" | "categories") => {
       (mockState as any).space = (mockState as any).space || {};
       (mockState as any).space.viewMode = viewMode;
-      return { type: "space/setViewMode", payload: viewMode };
+      setViewModeCalls.push(viewMode);
     },
   }));
 
@@ -133,7 +155,6 @@ const loadMainLayout = async () => {
     default: () => <div id="page-loading">Loading</div>,
   }));
 
-
   mock.module("app/routing", () => ({
     ...actualReactRouterDom,
     useLocation: () => ({
@@ -147,7 +168,6 @@ const loadMainLayout = async () => {
     useParams: () => ({}),
     Outlet: () => <RightSidebarOpener />,
   }));
-
 
   const module = await import(`./MainLayout.tsx?test=${moduleVersion++}`);
   mock.restore();
@@ -172,6 +192,7 @@ describe("MainLayout drag resize", () => {
 
   beforeEach(async () => {
     dispatchCalls.length = 0;
+    setViewModeCalls.length = 0;
     mockState = {
       settings: {
         sidebarWidth: 300,
@@ -183,9 +204,12 @@ describe("MainLayout drag resize", () => {
     mockPathname = "/chat";
     mockIsMobile = false;
 
-    dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
-      url: "http://localhost/chat",
-    });
+    dom = new JSDOM(
+      "<!doctype html><html><body><div id='root'></div></body></html>",
+      {
+        url: "http://localhost/chat",
+      },
+    );
 
     previousWindow = globalThis.window;
     previousDocument = globalThis.document;
@@ -193,9 +217,11 @@ describe("MainLayout drag resize", () => {
     previousHTMLElement = globalThis.HTMLElement;
     previousRequestAnimationFrame = globalThis.requestAnimationFrame;
     previousCancelAnimationFrame = globalThis.cancelAnimationFrame;
-    previousActEnvironment = (globalThis as typeof globalThis & {
-      IS_REACT_ACT_ENVIRONMENT?: boolean;
-    }).IS_REACT_ACT_ENVIRONMENT;
+    previousActEnvironment = (
+      globalThis as typeof globalThis & {
+        IS_REACT_ACT_ENVIRONMENT?: boolean;
+      }
+    ).IS_REACT_ACT_ENVIRONMENT;
 
     Object.assign(globalThis, {
       window: dom.window,
@@ -227,10 +253,14 @@ describe("MainLayout drag resize", () => {
       cancelAnimationFrame: () => undefined,
     });
 
-    Object.defineProperty(dom.window.HTMLElement.prototype, "setPointerCapture", {
-      configurable: true,
-      value: () => undefined,
-    });
+    Object.defineProperty(
+      dom.window.HTMLElement.prototype,
+      "setPointerCapture",
+      {
+        configurable: true,
+        value: () => undefined,
+      },
+    );
 
     MainLayout = await loadMainLayout();
     container = dom.window.document.getElementById("root") as HTMLDivElement;
@@ -266,8 +296,14 @@ describe("MainLayout drag resize", () => {
     expect(handle).toBeTruthy();
 
     act(() => {
-      dispatchPointerEvent(handle as Element, "pointerdown", { clientX: 300, clientY: 20 });
-      dispatchPointerEvent(window, "pointermove", { clientX: 340, clientY: 20 });
+      dispatchPointerEvent(handle as Element, "pointerdown", {
+        clientX: 300,
+        clientY: 20,
+      });
+      dispatchPointerEvent(window, "pointermove", {
+        clientX: 340,
+        clientY: 20,
+      });
       dispatchPointerEvent(window, "pointerup", { clientX: 340, clientY: 20 });
     });
 
@@ -283,7 +319,7 @@ describe("MainLayout drag resize", () => {
     });
 
     const rightSidebar = container.querySelector(
-      ".MainLayout__rightSidebar"
+      ".MainLayout__rightSidebar",
     ) as HTMLElement | null;
     const handle = container.querySelector(".MainLayout__rightResizeHandle");
 
@@ -292,13 +328,20 @@ describe("MainLayout drag resize", () => {
     expect(rightSidebar?.style.width).toBe("360px");
 
     act(() => {
-      dispatchPointerEvent(handle as Element, "pointerdown", { clientX: 840, clientY: 20 });
-      dispatchPointerEvent(window, "pointermove", { clientX: 850, clientY: 20 });
+      dispatchPointerEvent(handle as Element, "pointerdown", {
+        clientX: 840,
+        clientY: 20,
+      });
+      dispatchPointerEvent(window, "pointermove", {
+        clientX: 850,
+        clientY: 20,
+      });
       dispatchPointerEvent(window, "pointerup", { clientX: 850, clientY: 20 });
     });
 
     expect(
-      (container.querySelector(".MainLayout__rightSidebar") as HTMLElement).style.width
+      (container.querySelector(".MainLayout__rightSidebar") as HTMLElement)
+        .style.width,
     ).toBe("350px");
   });
 
@@ -342,16 +385,14 @@ describe("MainLayout drag resize", () => {
   });
 
   it("forces categories view on nested space content routes", async () => {
-    mockPathname = "/space/01KKY77TT0DA9NY7TNW3R7255N/dialog-0e95801d90-01KN6V7RS7WFJ6XX0EMJ2P5T38";
+    mockPathname =
+      "/space/01KKY77TT0DA9NY7TNW3R7255N/dialog-0e95801d90-01KN6V7RS7WFJ6XX0EMJ2P5T38";
     mockState.space.viewMode = "all";
 
     await act(async () => {
       root.render(<MainLayout />);
     });
 
-    expect(dispatchCalls).toContainEqual({
-      type: "space/setViewMode",
-      payload: "categories",
-    });
+    expect(setViewModeCalls).toContain("categories");
   });
 });

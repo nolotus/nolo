@@ -3,10 +3,7 @@ import "./SpaceSettings.css";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
-import {
-  updateSpace,
-  deleteSpace,
-} from "create/space/spaceSlice";
+import { updateSpace, deleteSpace } from "create/space/spaceThunks";
 import { useViewMode, setViewMode } from "create/space/spaceCurrentStore";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { createSpaceKey, normalizeSpaceId } from "../spaceKeys";

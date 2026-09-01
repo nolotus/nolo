@@ -11,10 +11,8 @@ import { useTranslation } from "react-i18next";
 import { NavLink, useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { getMyRoutePathForTab } from "app/constants/mySections";
-import {
-  changeSpace,
-  fetchUserSpaceMemberships,
-} from "create/space/spaceSlice";
+import { changeSpace } from "create/space/spaceThunks";
+import { fetchUserSpaceMemberships } from "create/space/member/memberThunks";
 import { setViewMode } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
 import {

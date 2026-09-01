@@ -2,21 +2,24 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 describe("space member dedupe guards", () => {
-  const sliceSource = readFileSync(
-    new URL("./spaceSlice.ts", import.meta.url),
-    "utf8"
+  const selectorsSource = readFileSync(
+    new URL("./spaceCurrentSelectors.ts", import.meta.url),
+    "utf8",
   );
   const membershipStoreSource = readFileSync(
     new URL("./spaceMembershipStore.ts", import.meta.url),
-    "utf8"
+    "utf8",
   );
 
   test("module store dedupes memberSpaces before sorting", () => {
-    // Wave C: dedupeMemberSpacesById 迁至 spaceMembershipStore，从 spaceSlice re-export。
-    expect(sliceSource).toContain("export { dedupeMemberSpacesById }");
-    expect(membershipStoreSource).toContain("export function dedupeMemberSpacesById");
+    // Wave E: spaceSlice 已删除，dedupeMemberSpacesById 的唯一归属是 spaceMembershipStore
+    // （原先的 slice re-export 一并移除）。过渡 selector 现居 spaceCurrentSelectors。
+    expect(selectorsSource).toContain("export const selectCurrentSpaceId");
     expect(membershipStoreSource).toContain(
-      "const memberSpaces = dedupeMemberSpacesById(state.memberSpaces || []);"
+      "export function dedupeMemberSpacesById",
+    );
+    expect(membershipStoreSource).toContain(
+      "const memberSpaces = dedupeMemberSpacesById(state.memberSpaces || []);",
     );
   });
 
@@ -24,6 +27,8 @@ describe("space member dedupe guards", () => {
     // Wave C: addSpace fulfilled 改调 addMemberSpace（module store mutator），
     // 内部用 dedupeMemberSpacesById 去重。顺序与原 Redux 一致：[...existing, space]。
     expect(membershipStoreSource).toContain("export function addMemberSpace");
-    expect(membershipStoreSource).toContain("dedupeMemberSpacesById([...existing, space])");
+    expect(membershipStoreSource).toContain(
+      "dedupeMemberSpacesById([...existing, space])",
+    );
   });
 });

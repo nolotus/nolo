@@ -11,7 +11,8 @@
 
 import { useEffect } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
-import { applySpaceEvent } from "../spaceSlice";
+// Wave E: applySpaceEvent 现在是普通函数，直接调用（不再 dispatch）。
+import { applySpaceEvent } from "../spaceDialogStore";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { subscribeSharedSse } from "app/realtime/sharedSse";
 
@@ -31,7 +32,7 @@ export function useSpaceEvents() {
             headers: token ? { Authorization: `Bearer ${token}` } : undefined,
             onEvent: (event) => {
                 if (typeof event.type === "string") {
-                    dispatch(applySpaceEvent(event as any));
+                    applySpaceEvent(event as any);
                 }
             },
         });

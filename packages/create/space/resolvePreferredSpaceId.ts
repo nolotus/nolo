@@ -3,6 +3,7 @@ import { isAbortError } from "core/abortError";
 import { read, readAndWait } from "database/dbSlice";
 
 import { createSpaceKey } from "./spaceKeys";
+import { getCurrentSpaceIdRaw } from "./spaceCurrentStore";
 import { getAllMemberSpaces } from "./spaceMembershipStore";
 
 const isSuppressedMissError = (error: unknown): boolean =>
@@ -69,16 +70,17 @@ export const readSpaceIfExists = async (
  */
 export const resolvePreferredSpaceId = async ({
   dispatch,
-  getState,
 }: {
   dispatch: any;
   getState: () => RootState;
   userId?: string | null;
 }): Promise<string | null> => {
-  const state = getState();
-
-  if (state.space.currentSpaceId) {
-    return state.space.currentSpaceId;
+  // Wave E: state.space 已随 spaceSlice 删除，当前空间改读 module store。
+  // 注意用 Raw 版本：getCurrentSpaceId() 在 viewMode=all 时会返回 null，
+  // 而这里需要用户真实选中的空间。
+  const currentSpaceId = getCurrentSpaceIdRaw();
+  if (currentSpaceId) {
+    return currentSpaceId;
   }
 
   for (const memberSpace of getAllMemberSpaces()) {

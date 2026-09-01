@@ -15,10 +15,10 @@ import { useNavigate } from "app/routing";
 import { toErrorMessage } from "core/errorMessage";
 import {
   addContentToSpace,
-  changeSpace,
   moveContentToSpace,
-  selectCurrentSpaceId,
-} from "create/space/spaceSlice";
+} from "create/space/content/contentThunks";
+import { changeSpace } from "create/space/spaceThunks";
+import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { Menu, MenuItem, SubmenuTrigger } from "render/web/ui/Menu";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";

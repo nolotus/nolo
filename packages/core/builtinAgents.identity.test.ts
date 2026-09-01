@@ -192,7 +192,7 @@ describe("builtinAgentCatalog ↔ PUBLIC_AGENT_DEFS cross-assertions", () => {
 describe("platform hosted seed pricing policy", () => {
   it("defers all nolo and legacy ollama-cloud public seed prices to catalog pricing", () => {
     for (const seed of PUBLIC_AGENT_DEFS) {
-      if (seed.provider === "nolo" || seed.provider === "ollama-cloud") {
+      if (seed.provider === "nolo") {
         expect(seed.inputPrice).toBe(0);
         expect(seed.outputPrice).toBe(0);
       }

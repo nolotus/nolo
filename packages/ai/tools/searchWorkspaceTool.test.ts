@@ -1,9 +1,24 @@
 import { describe, expect, it, mock } from "bun:test";
 
 import {
+  setCurrentSpaceBoth,
+  setViewMode,
+  resetSpaceCurrentState,
+} from "create/space/spaceCurrentStore";
+
+import {
   searchAllSpacesFunc,
   searchWorkspaceFunc,
 } from "./searchWorkspaceTool";
+
+// Space current-state lives in a module store now (no Redux `space` slice), so
+// mirror each fixture's space block into that store before invoking the tool.
+const applyStateToSpaceStore = (state: TestState) => {
+  resetSpaceCurrentState();
+  // viewMode matters: getCurrentSpaceId() hides the space in all-spaces mode.
+  setViewMode(state.space.viewMode as "all" | "categories");
+  setCurrentSpaceBoth(state.space.currentSpaceId, state.space.currentSpace);
+};
 
 type TestState = {
   auth?: {
@@ -104,12 +119,11 @@ describe("searchWorkspaceTool", () => {
   it("searches only the current space for search_workspace", async () => {
     const state = buildState();
 
-    const result = await searchWorkspaceFunc(
-      { query: "搜索" },
-      {
-        getState: () => state,
-      } as any,
-    );
+    applyStateToSpaceStore(state);
+
+    const result = await searchWorkspaceFunc({ query: "搜索" }, {
+      getState: () => state,
+    } as any);
 
     expect(result.rawData.contents).toHaveLength(1);
     expect(result.rawData.contents[0]?.spaceId).toBe("space-1");
@@ -177,6 +191,8 @@ describe("searchWorkspaceTool", () => {
         }
       },
     }));
+
+    applyStateToSpaceStore(state);
 
     const result = await searchAllSpacesFunc(
       { query: "搜索" },

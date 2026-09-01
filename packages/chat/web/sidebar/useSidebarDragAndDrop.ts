@@ -3,8 +3,10 @@ import { useCallback } from "react";
 import type { AppDispatch } from "app/store";
 import {
   reorderCategories,
+} from "create/space/category/categoryActions";
+import {
   updateContentCategory,
-} from "create/space/spaceSlice";
+} from "create/space/content/contentThunks";
 
 import type { ChatSidebarCategoryItem } from "./types";
 

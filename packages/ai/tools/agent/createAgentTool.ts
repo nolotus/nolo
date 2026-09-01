@@ -3,8 +3,9 @@
 import type { RootState } from "app/store";
 import type { Agent } from "app/types";
 import { createAgent } from "ai/agent/agentSlice";
-import { addContentToSpace } from "create/space/spaceSlice";
+import { addContentToSpace } from "create/space/content/contentThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
+import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { ContentType } from "app/types";
 import { createAgentKey, } from "database/keys";
 import type { FormData as AgentFormData } from "ai/agent/createAgentSchema";
@@ -441,7 +442,7 @@ export async function createAgentToolFunc(
     const currentUserId = selectIdentityUserId(state);
     const currentBalance = selectIdentityUserBalance(state);
 
-    // 获取当前用户的所有 Space (from create/space/spaceSlice)
+    // 获取当前用户的所有 Space (from create/space/member/memberThunks)
     const allSpaces = getAllMemberSpaces();
 
     if (!currentUserId) {
@@ -497,13 +498,13 @@ export async function createAgentToolFunc(
                 createAgent({
                     userId: currentUserId,
                     formData,
-                    spaceId: state.space.currentSpaceId || undefined,
+                    spaceId: getCurrentSpaceId() || undefined,
                 })
             )
             .unwrap();
 
         // 自动添加到当前空间侧边栏
-        const currentSpaceId = state.space.currentSpaceId;
+        const currentSpaceId = getCurrentSpaceId();
         if (currentSpaceId) {
             // 新创建的 Agent 统一使用 createAgentKey (agent- 前缀)
             const agentDbKey = agent.isPublic

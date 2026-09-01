@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 
 const selectByIdMock = mock(
-  (state: any, dbKey: string) => state?.db?.entities?.[dbKey] ?? null
+  (state: any, dbKey: string) => state?.db?.entities?.[dbKey] ?? null,
 );
 const createPatchThunk = (payload: any) =>
   Object.assign(
@@ -26,16 +26,29 @@ const createPatchThunk = (payload: any) =>
       (promise as any).unwrap = () => promise;
       return promise;
     },
-    { kind: "patch", ...payload }
+    { kind: "patch", ...payload },
   );
 const patchMock = mock(createPatchThunk);
-const readAndWaitMock = mock((dbKey: string) => ({ kind: "readAndWait", dbKey }));
-const changeSpaceMock = mock((spaceId: string) => ({ kind: "changeSpace", spaceId }));
+const readAndWaitMock = mock((dbKey: string) => ({
+  kind: "readAndWait",
+  dbKey,
+}));
+const changeSpaceMock = mock((spaceId: string) => ({
+  kind: "changeSpace",
+  spaceId,
+}));
 
 let moduleVersion = 0;
 
+const realSpaceThunks = { ...(await import("create/space/spaceThunks")) };
+
+afterAll(() => {
+  mock.module("create/space/spaceThunks", () => realSpaceThunks);
+});
+
 async function loadEnsureDialogSpaceAction() {
   const actualDbSlice = await import("database/dbSlice");
+
   mock.module("database/dbSlice", () => ({
     ...actualDbSlice,
     selectById: selectByIdMock,
@@ -43,10 +56,8 @@ async function loadEnsureDialogSpaceAction() {
     readAndWait: readAndWaitMock,
     selectEntities: (state: any) => state.db?.entities ?? {},
   }));
-  mock.module("create/space/spaceSlice", () => ({
+  mock.module("create/space/spaceThunks", () => ({
     changeSpace: changeSpaceMock,
-    selectCurrentSpaceId: (state: any) => state.space?.currentSpaceId ?? null,
-    selectAllMemberSpaces: (state: any) => state.space?.memberSpaces ?? [],
   }));
   const mod = await import(`./ensureDialogSpaceAction`);
   mock.restore();
@@ -56,7 +67,7 @@ async function loadEnsureDialogSpaceAction() {
 const clearMocks = () => {
   selectByIdMock.mockReset();
   selectByIdMock.mockImplementation(
-    (state: any, dbKey: string) => state?.db?.entities?.[dbKey] ?? null
+    (state: any, dbKey: string) => state?.db?.entities?.[dbKey] ?? null,
   );
   patchMock.mockReset();
   patchMock.mockImplementation(createPatchThunk);
@@ -93,12 +104,15 @@ describe("ensureDialogSpaceAction", () => {
   it("uses spaceId persisted in dialog config", async () => {
     clearMocks();
     const { ensureDialogSpaceAction } = await loadEnsureDialogSpaceAction();
-    selectByIdMock.mockReturnValue({ dbKey: "dialog-user-1", spaceId: "space-demo" });
+    selectByIdMock.mockReturnValue({
+      dbKey: "dialog-user-1",
+      spaceId: "space-demo",
+    });
     const dispatch = makeDispatch();
 
     const result = await ensureDialogSpaceAction("dialog-user-1")(
       dispatch,
-      () => baseState() as any
+      () => baseState() as any,
     );
 
     expect(result).toBe("demo");
@@ -108,13 +122,16 @@ describe("ensureDialogSpaceAction", () => {
   it("prefers the routed space id before persisted dialog state", async () => {
     clearMocks();
     const { ensureDialogSpaceAction } = await loadEnsureDialogSpaceAction();
-    selectByIdMock.mockReturnValue({ dbKey: "dialog-user-1", spaceId: "space-stale" });
+    selectByIdMock.mockReturnValue({
+      dbKey: "dialog-user-1",
+      spaceId: "space-stale",
+    });
     const dispatch = makeDispatch();
 
-    const result = await ensureDialogSpaceAction("dialog-user-1", "space-route")(
-      dispatch,
-      () => baseState() as any
-    );
+    const result = await ensureDialogSpaceAction(
+      "dialog-user-1",
+      "space-route",
+    )(dispatch, () => baseState() as any);
 
     expect(result).toBe("route");
     expect(changeSpaceMock).toHaveBeenCalledWith("route");
@@ -128,7 +145,7 @@ describe("ensureDialogSpaceAction", () => {
 
     const result = await ensureDialogSpaceAction("dialog-user-1")(
       dispatch,
-      () => baseState() as any
+      () => baseState() as any,
     );
 
     expect(result).toBeNull();
@@ -138,12 +155,15 @@ describe("ensureDialogSpaceAction", () => {
   it("skips changeSpace when already on the correct space", async () => {
     clearMocks();
     const { ensureDialogSpaceAction } = await loadEnsureDialogSpaceAction();
-    selectByIdMock.mockReturnValue({ dbKey: "dialog-user-1", spaceId: "space-demo" });
+    selectByIdMock.mockReturnValue({
+      dbKey: "dialog-user-1",
+      spaceId: "space-demo",
+    });
     const dispatch = makeDispatch();
 
     const result = await ensureDialogSpaceAction("dialog-user-1")(
       dispatch,
-      () => baseState("demo") as any
+      () => baseState("demo") as any,
     );
 
     expect(result).toBe("demo");

@@ -25,11 +25,7 @@ import {
 import { AppRoutePaths } from "app/constants/routePaths";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
-import {
-  selectCurrentSpace,
-  selectCurrentSpaceId,
-  selectViewMode,
-} from "create/space/spaceSlice";
+import { selectCurrentSpace, selectCurrentSpaceId, selectViewMode } from "create/space/spaceCurrentSelectors";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { DataType } from "create/types";
 import type { Key } from "react-aria-components";

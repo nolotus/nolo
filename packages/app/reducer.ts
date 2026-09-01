@@ -10,7 +10,6 @@ import databaseReducer from "database/dbSlice";
 import settingReducer from "app/settings/settingSlice";
 
 import tableReducer from "render/table/tableSlice";
-import spaceReducer from "create/space/spaceSlice";
 
 import messageReducer from "chat/messages/messageSlice";
 
@@ -22,6 +21,5 @@ export const reducer: Record<string, any> = {
   get auth() { return authReducer; },
   get db() { return databaseReducer; },
   get settings() { return settingReducer; },
-  get space() { return spaceReducer; },
   get table() { return tableReducer; },
 };

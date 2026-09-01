@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 
 import {
   AGENT_LOCAL_CREDENTIAL_DELETE_FAILED_MESSAGE,
@@ -14,11 +22,20 @@ const brokerDeleteMock = mock(async (_ref: string) => undefined);
 
 let moduleVersion = 0;
 
-const loadDeleteDbKey = async () => {
-  const actualSpaceSlice = await import("create/space/spaceSlice");
+const realContentThunks = {
+  ...(await import("create/space/content/contentThunks")),
+};
 
-  mock.module("create/space/spaceSlice", () => ({
-    ...actualSpaceSlice,
+afterAll(() => {
+  mock.module("create/space/content/contentThunks", () => realContentThunks);
+});
+
+const loadDeleteDbKey = async () => {
+  const actualContentThunks =
+    await import("create/space/content/contentThunks");
+
+  mock.module("create/space/content/contentThunks", () => ({
+    ...realContentThunks,
     deleteContentFromSpace: deleteContentFromSpaceMock,
   }));
 
@@ -27,11 +44,12 @@ const loadDeleteDbKey = async () => {
   return module;
 };
 
-const agentStateWithCredential = (
-  dbKey: string,
-  credentialRef?: string | null,
-  extra: Record<string, unknown> = {},
-) =>
+const agentStateWithCredential =
+  (
+    dbKey: string,
+    credentialRef?: string | null,
+    extra: Record<string, unknown> = {},
+  ) =>
   () =>
     ({
       db: {
@@ -162,7 +180,7 @@ describe("deleteDbKey", () => {
         throw Object.assign(new Error("not found"), { notFound: true });
       },
       iterator: () => ({
-        async *[Symbol.asyncIterator]() {}
+        async *[Symbol.asyncIterator]() {},
       }),
       batch: async () => undefined,
     };
@@ -214,7 +232,7 @@ describe("deleteDbKey", () => {
             includeAttachments: true,
           },
         }),
-      })
+      }),
     );
   });
 
@@ -227,7 +245,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey({ title: "Broken object" }, "space-3");
 
     await expect(thunk(dispatch as any, (() => ({})) as any)).rejects.toThrow(
-      "Invalid delete key"
+      "Invalid delete key",
     );
   });
 
@@ -243,7 +261,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey("page-user-3", "space-3");
 
     await expect(thunk(dispatch as any, (() => ({})) as any)).rejects.toThrow(
-      "无权修改此空间"
+      "无权修改此空间",
     );
   });
 
@@ -262,7 +280,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey("page-user-4", "space-4");
 
     await expect(thunk(dispatch as any, (() => ({})) as any)).rejects.toThrow(
-      "Delete failed"
+      "Delete failed",
     );
   });
 
@@ -318,7 +336,9 @@ describe("deleteDbKey", () => {
       if (action?.type === "deleteContentFromSpace") {
         return {
           unwrap: async () => {
-            throw new Error('Failed to fetch data for key "space-missing" from all sources.');
+            throw new Error(
+              'Failed to fetch data for key "space-missing" from all sources.',
+            );
           },
         };
       }
@@ -349,7 +369,7 @@ describe("deleteDbKey", () => {
         contentKey: "page-user-6",
         serverOrigin: "https://us.nolo.chat",
       },
-      "space-6"
+      "space-6",
     );
     const result = await thunk(dispatch as any, (() => ({})) as any);
 
@@ -371,13 +391,13 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey(agentKey);
     const result = await thunk(
       dispatch as any,
-      agentStateWithCredential(agentKey, "api-key:agent-user-1-agent-cred")
+      agentStateWithCredential(agentKey, "api-key:agent-user-1-agent-cred"),
     );
 
     expect(result).toBe(true);
     expect(brokerDeleteMock).toHaveBeenCalledTimes(1);
     expect(brokerDeleteMock).toHaveBeenCalledWith(
-      "api-key:agent-user-1-agent-cred"
+      "api-key:agent-user-1-agent-cred",
     );
   });
 
@@ -434,8 +454,8 @@ describe("deleteDbKey", () => {
     await expect(
       thunk(
         dispatch as any,
-        agentStateWithCredential(agentKey, "api-key:agent-dbfail")
-      )
+        agentStateWithCredential(agentKey, "api-key:agent-dbfail"),
+      ),
     ).rejects.toThrow("DB remove failed");
     expect(brokerDeleteMock).toHaveBeenCalledTimes(0);
   });
@@ -478,7 +498,9 @@ describe("deleteDbKey", () => {
     const leakedRef = "api-key:must-not-leak-ref";
     const leakedSecret = "sk-live-must-not-appear";
     brokerDeleteMock.mockImplementation(async () => {
-      throw new Error(`Keychain delete failed for ${leakedRef} ${leakedSecret}`);
+      throw new Error(
+        `Keychain delete failed for ${leakedRef} ${leakedSecret}`,
+      );
     });
 
     const warnMock = mock(() => undefined);
@@ -491,7 +513,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey(agentKey);
     const result = await thunk(
       dispatch as any,
-      agentStateWithCredential(agentKey, leakedRef, { apiKeyRef: "chatgpt" })
+      agentStateWithCredential(agentKey, leakedRef, { apiKeyRef: "chatgpt" }),
     );
 
     // Existing delete API: still successful after DB tombstone.
@@ -516,7 +538,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey(agentKey);
     const result = await thunk(
       dispatch as any,
-      agentStateWithCredential(agentKey, null, { apiKeyRef: "chatgpt" })
+      agentStateWithCredential(agentKey, null, { apiKeyRef: "chatgpt" }),
     );
 
     expect(result).toBe(true);
@@ -533,7 +555,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey(publicKey);
     const result = await thunk(
       dispatch as any,
-      agentStateWithCredential(publicKey, "api-key:agent-user-1-private")
+      agentStateWithCredential(publicKey, "api-key:agent-user-1-private"),
     );
 
     expect(result).toBe(true);
@@ -550,7 +572,7 @@ describe("deleteDbKey", () => {
     const thunk = deleteDbKey(agentKey, "space-agent-1");
     const result = await thunk(
       dispatch as any,
-      agentStateWithCredential(agentKey, "api-key:agent-with-space")
+      agentStateWithCredential(agentKey, "api-key:agent-with-space"),
     );
 
     expect(result).toBe(true);

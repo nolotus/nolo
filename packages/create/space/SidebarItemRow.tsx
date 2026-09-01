@@ -51,9 +51,9 @@ import {
   selectCurrentSpaceId,
   selectDialogStatusFromEntity,
   selectIsDialogUnreadFromEntity,
-  markDialogRead,
-  updateContentTitle,
-} from "create/space/spaceSlice";
+} from "create/space/spaceCurrentSelectors";
+import { markDialogRead } from "create/space/markDialogReadThunk";
+import { updateContentTitle } from "create/space/content/contentThunks";
 // Wave B: dialog 实时状态已剥至 module store。
 import {
   useDialogStatus,

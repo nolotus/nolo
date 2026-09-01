@@ -57,6 +57,15 @@ import { ulid } from "ulid";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import { toErrorMessage } from "core/errorMessage";
+import {
+  readCredentialEntry,
+  recordCredentialProbe,
+  resolveCredentialKeyWithFallback,
+} from "../credentialAvailability";
+import {
+  mergeAvailabilityDeadline,
+  resolveCooldownGate,
+} from "../../ai/agent/agentAvailabilityShared";
 import { t } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
@@ -1265,6 +1274,73 @@ async function runLocalAgentTurnForCli(
   }
 }
 
+/**
+ * HTTP/server 派发前的本地冷却预检。
+ *
+ * server 端 admission guard 只读 server KV 的 agent 记录，而 CLI 本地 runtime
+ * 的 429 冷却按设计只落本地（credential-availability.json + 本地 agent store，
+ * 见 localRuntimeAdapter 的 mark/gate）——本地限流的 agent 经 HTTP 派发时
+ * server guard 看不到标记，会放行 run 再在执行期失败。
+ *
+ * 这里在发起 POST 前用同一套共享判据（resolveCooldownGate）预检本地冷却：
+ * - "blocked" → 直接报错返回（附恢复时刻），不发请求。
+ * - "probe" → 放行并记录探测时间（与执行期 gate 同语义，冷却自愈依赖它）。
+ * - 本地无 agent 配置 / 无 credential key → 无法判定，放行（server 端 guard 负责）。
+ */
+async function checkLocalAvailabilityBeforeHttpDispatch(
+  options: RunAgentTurnOptions,
+): Promise<{ exitCode: 1 } | null> {
+  const adapter = resolveLocalRuntimeAdapter(options);
+  if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
+  let config: unknown;
+  try {
+    config = await adapter.loadAgentConfig(options.agentKey);
+  } catch {
+    // 本地无配置（如平台 agent）→ 无法判定本地冷却，交给 server 端 guard。
+    return null;
+  }
+  if (!config || typeof config !== "object") return null;
+  // 与 wrapLoadAgentConfigWithModelOverride 同一取法：runtime config 可能包着
+  // 原始记录，credential 归属字段（apiKeyRef/credentialRef/customProviderUrl/key）
+  // 在 rawRecord 上。
+  const baseRecord =
+    (config as { rawRecord?: Record<string, unknown> }).rawRecord ??
+    (config as unknown as Record<string, unknown>);
+  const credentialKey = resolveCredentialKeyWithFallback(baseRecord);
+  const agentLevelAt = (baseRecord as { nextAvailableAt?: unknown }).nextAvailableAt;
+  const agentLevelNextAvailableAt =
+    typeof agentLevelAt === "number" && Number.isFinite(agentLevelAt)
+      ? agentLevelAt
+      : undefined;
+  if (!credentialKey && agentLevelNextAvailableAt === undefined) return null;
+  const env = options.env as NodeJS.ProcessEnv;
+  const now = Date.now();
+  const entry = credentialKey
+    ? await readCredentialEntry(credentialKey, env, now).catch(() => undefined)
+    : undefined;
+  const entryAt = entry?.nextAvailableAt;
+  const effectiveNextAvailableAt =
+    typeof entryAt === "number"
+      ? mergeAvailabilityDeadline(agentLevelNextAvailableAt, entryAt)
+      : agentLevelNextAvailableAt;
+  if (typeof effectiveNextAvailableAt !== "number") return null;
+  const gateDecision = resolveCooldownGate(
+    { nextAvailableAt: effectiveNextAvailableAt, lastProbeAt: entry?.lastProbeAt },
+    now,
+  );
+  if (gateDecision === "probe" && credentialKey) {
+    // 与执行期 gate 同语义：放行本次真实请求前记录探测时间，避免间隔内反复重试。
+    await recordCredentialProbe(credentialKey, env, now).catch(() => undefined);
+    return null;
+  }
+  if (gateDecision !== "blocked") return null;
+  options.output.write(
+    `[nolo] Agent ${options.agentName || options.agentKey} is temporarily unavailable (429 cooldown) until ${new Date(Number(effectiveNextAvailableAt)).toISOString()}.\n` +
+      "Dispatch aborted before reaching the server. Pick another agent via listAgents, or retry after the cooldown.\n",
+  );
+  return { exitCode: 1 };
+}
+
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
   const authToken = resolveAuthToken(options.env);
   const runtimeMode = resolveRequestedRuntimeMode(options);
@@ -1356,6 +1432,12 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   // HTTP/server path 同样支持 ephemeral（请求体透传 ephemeral: true，
   // 服务端据此跳过 dialog 持久化），与本地 wrapAdapterEphemeral 一致。
   // 无需在此警告"仅 local 生效"——那是修复前的过时语义。
+
+  // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
+  const localBlock = await checkLocalAvailabilityBeforeHttpDispatch(options);
+  if (localBlock) {
+    return { exitCode: localBlock.exitCode };
+  }
 
   return runHttpAgentTurn(options, authToken);
 }

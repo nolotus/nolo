@@ -2,7 +2,7 @@ import type { RootState } from "app/store";
 import type { DialogConfig, SpaceData } from "app/types";
 import {
   changeSpace,
-} from "create/space/spaceSlice";
+} from "create/space/spaceThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { createSpaceKey, normalizeSpaceId } from "create/space/spaceKeys";
 import {
@@ -12,6 +12,7 @@ import {
   selectEntities,
 } from "database/dbSlice";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { selectCurrentSpace } from "create/space/spaceCurrentSelectors";
 
 const ENSURE_SPACE_DEBUG = false;
 const logEnsureDialogSpace = (
@@ -63,8 +64,8 @@ const findLoadedSpaceIdForDialog = (
   state: RootState,
   dialogKey: string
 ): string | null => {
-  if (spaceContainsContentKey(state.space.currentSpace, dialogKey)) {
-    return getSpaceIdFromSpaceData(state.space.currentSpace);
+  if (spaceContainsContentKey(selectCurrentSpace(state), dialogKey)) {
+    return getSpaceIdFromSpaceData(selectCurrentSpace(state));
   }
 
   const entities = selectEntities(state);

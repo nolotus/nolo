@@ -3,6 +3,12 @@ import { SpaceData } from "app/types";
 import { normalizeSpaceId } from "./spaceKeys";
 import { fetchSpaceSidebarStateAction } from "./fetchSpaceSidebarStateAction";
 import { fetchSpaceAction } from "./fetchSpaceAction";
+import { applyFetchSpaceFulfilled } from "./applyFetchSpaceFulfilled";
+// Wave E: state.space 已随 spaceSlice 删除，当前空间改读 module store。
+import {
+  getCurrentSpaceIdRaw,
+  getCurrentSpaceRaw,
+} from "./spaceCurrentStore";
 
 interface ChangeSpaceResponse {
   spaceId: string;
@@ -63,28 +69,22 @@ export const changeSpaceAction = async (
     void fetchSpaceAction({ spaceId: normalizedSpaceId, fresh: true }, thunkAPI)
       .then((result) => {
         if (!result?.spaceData) return;
-        const state = thunkAPI.getState()?.space;
-        if (!state) return;
-        if (normalizeSpaceId(state.currentSpaceId || "") !== normalizedSpaceId) {
+        if (
+          normalizeSpaceId(getCurrentSpaceIdRaw() || "") !== normalizedSpaceId
+        ) {
           return;
         }
         if (
           getSpaceUpdatedAt(result.spaceData) <
-          getSpaceUpdatedAt(state.currentSpace)
+          getSpaceUpdatedAt(getCurrentSpaceRaw())
         ) {
           return;
         }
-        thunkAPI.dispatch({
-          type: "space/fetchSpace/fulfilled",
-          payload: {
-            spaceId: normalizedSpaceId,
-            spaceData: result.spaceData,
-          },
-          meta: {
-            arg: { spaceId: normalizedSpaceId, fresh: true },
-            requestId: `changeSpace-revalidate-${normalizedSpaceId}`,
-            requestStatus: "fulfilled",
-          },
+        // Wave E: spaceSlice 已删除。原先靠手写 "space/fetchSpace/fulfilled"
+        // action 触发 case reducer，现在直接执行同一段 module store 写入。
+        applyFetchSpaceFulfilled({
+          spaceId: normalizedSpaceId,
+          spaceData: result.spaceData,
         });
       })
       .catch(() => {

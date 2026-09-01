@@ -1,9 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import type { ProcessLaunchInfo } from "chat/messages/types";
 
-// Value-copy snapshot — incomplete spaceSlice mocks poison sibling suites
+// Value-copy snapshot — incomplete space-module mocks poison sibling suites
 // (fetchUserSpaceMemberships.pending) and later files that spread live modules.
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
+const realSpaceModule = {
+  ...(await import("create/space/member/memberThunks")),
+};
 
 const executorMock = mock();
 const fetchUserSpaceMembershipsMock = mock((userId: string) => ({
@@ -14,8 +24,10 @@ const fetchUserSpaceMembershipsMock = mock((userId: string) => ({
 let moduleVersion = 0;
 
 const restoreLeakedModuleMocks = () => {
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/member/memberThunks", () => realSpaceModule);
 };
+
+afterAll(() => restoreLeakedModuleMocks());
 
 async function loadToolRunStore() {
   mock.module(".", () => ({
@@ -23,8 +35,8 @@ async function loadToolRunStore() {
       executor: executorMock,
     }),
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/member/memberThunks", () => ({
+    ...realSpaceModule,
     fetchUserSpaceMemberships: fetchUserSpaceMembershipsMock,
   }));
   mock.module("./toolResultError", () => ({
@@ -36,7 +48,7 @@ async function loadToolRunStore() {
 }
 
 function makeProcessLaunch(
-  overrides: Partial<ProcessLaunchInfo> = {}
+  overrides: Partial<ProcessLaunchInfo> = {},
 ): ProcessLaunchInfo {
   return {
     pid: 1234,
@@ -145,7 +157,7 @@ describe("updateProcessLaunchStatus", () => {
     toolRunSucceeded({ id: "run-1", finishedAt: 1001 });
 
     expect(() =>
-      updateProcessLaunchStatus({ toolRunId: "run-1", status: "stopped" })
+      updateProcessLaunchStatus({ toolRunId: "run-1", status: "stopped" }),
     ).not.toThrow();
 
     const run = getToolRunById("run-1")!;
@@ -181,7 +193,7 @@ describe("updateProcessLaunchStatus", () => {
         toolRunId: "does-not-exist",
         status: "exited",
         exitCode: 1,
-      })
+      }),
     ).not.toThrow();
 
     // existing run untouched

@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 import { EMPTY_ASSISTANT_REPAIR_PROMPT } from "agent-runtime/emptyAssistantRepair";
 
 // Value-copy snapshots — Bun mock.restore() does not clear mock.module.
 const realDialogSlice = { ...(await import("chat/dialog/dialogSlice")) };
 const realMessageSlice = { ...(await import("chat/messages/messageSlice")) };
 const realSettingSlice = { ...(await import("app/settings/settingSlice")) };
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
 const realAuthSlice = { ...(await import("auth/authSlice")) };
 
 let moduleVersion = 0;
@@ -14,9 +16,11 @@ const restoreLeakedModuleMocks = () => {
   mock.module("chat/dialog/dialogSlice", () => realDialogSlice);
   mock.module("chat/messages/messageSlice", () => realMessageSlice);
   mock.module("app/settings/settingSlice", () => realSettingSlice);
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
   mock.module("auth/authSlice", () => realAuthSlice);
 };
+
+afterAll(() => restoreLeakedModuleMocks());
 
 const loadSendOpenAICompletionsRequest = async () => {
   let capturedBodyData: any = null;
@@ -30,9 +34,18 @@ const loadSendOpenAICompletionsRequest = async () => {
 
   mock.module("chat/dialog/dialogSlice", () => ({
     ...realDialogSlice,
-    addActiveController: (payload: any) => ({ type: "addActiveController", payload }),
-    removeActiveController: (payload: any) => ({ type: "removeActiveController", payload }),
-    tokenUsageLiveUpdate: (payload: any) => ({ type: "tokenUsageLiveUpdate", payload }),
+    addActiveController: (payload: any) => ({
+      type: "addActiveController",
+      payload,
+    }),
+    removeActiveController: (payload: any) => ({
+      type: "removeActiveController",
+      payload,
+    }),
+    tokenUsageLiveUpdate: (payload: any) => ({
+      type: "tokenUsageLiveUpdate",
+      payload,
+    }),
   }));
 
   mock.module("chat/messages/messageSlice", () => ({
@@ -57,8 +70,8 @@ const loadSendOpenAICompletionsRequest = async () => {
     selectCurrentServer: () => "http://current-server.test",
   }));
 
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceModule,
     selectCurrentSpaceId: () => null,
   }));
 
@@ -178,12 +191,13 @@ describe("sendOpenAICompletionsRequest", () => {
                   delta: {},
                   finish_reason: "error",
                   error: {
-                    message: "Image input is not supported by this upstream provider",
+                    message:
+                      "Image input is not supported by this upstream provider",
                   },
                 },
               ],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.close();
       },
@@ -192,7 +206,7 @@ describe("sendOpenAICompletionsRequest", () => {
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -203,7 +217,10 @@ describe("sendOpenAICompletionsRequest", () => {
             role: "user",
             content: [
               { type: "text", text: "这是什么" },
-              { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+              {
+                type: "image_url",
+                image_url: { url: "https://example.com/a.png" },
+              },
             ],
           },
         ],
@@ -223,7 +240,9 @@ describe("sendOpenAICompletionsRequest", () => {
       .at(-1)
       ?.finalContentBuffer?.map((part: any) => part.text ?? "")
       .join("");
-    expect(finalText).toContain("Image input is not supported by this upstream provider");
+    expect(finalText).toContain(
+      "Image input is not supported by this upstream provider",
+    );
     expect(finalText).not.toBe("\n[流结束原因: error]");
   });
 
@@ -246,8 +265,8 @@ describe("sendOpenAICompletionsRequest", () => {
                   finish_reason: "error",
                 },
               ],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -257,7 +276,7 @@ describe("sendOpenAICompletionsRequest", () => {
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -268,7 +287,10 @@ describe("sendOpenAICompletionsRequest", () => {
             role: "user",
             content: [
               { type: "text", text: "这是什么" },
-              { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+              {
+                type: "image_url",
+                image_url: { url: "https://example.com/a.png" },
+              },
             ],
           },
         ],
@@ -362,8 +384,8 @@ describe("sendOpenAICompletionsRequest", () => {
       start(controller) {
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
-          )
+            `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`,
+          ),
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -480,8 +502,8 @@ describe("sendOpenAICompletionsRequest", () => {
           encoder.encode(
             `data: ${JSON.stringify({
               choices: [{ delta: { content: "hello" }, finish_reason: "stop" }],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -491,7 +513,7 @@ describe("sendOpenAICompletionsRequest", () => {
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -536,8 +558,8 @@ describe("sendOpenAICompletionsRequest", () => {
             encoder.encode(
               `data: ${JSON.stringify({
                 choices: [{ delta: { content: "partial" } }],
-              })}\n\n`
-            )
+              })}\n\n`,
+            ),
           );
           return;
         }
@@ -549,7 +571,7 @@ describe("sendOpenAICompletionsRequest", () => {
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -599,8 +621,8 @@ describe("sendOpenAICompletionsRequest", () => {
             encoder.encode(
               `data: ${JSON.stringify({
                 choices: [{ delta: { content: "partial" } }],
-              })}\n\n`
-            )
+              })}\n\n`,
+            ),
           );
           return;
         }
@@ -614,7 +636,7 @@ describe("sendOpenAICompletionsRequest", () => {
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -644,8 +666,11 @@ describe("sendOpenAICompletionsRequest", () => {
   });
 
   it("marks an immediate user AbortError with provider_call_id-only usage to skip billing", async () => {
-    const { sendOpenAICompletionsRequest, getStreamEndPayloads, setFetchResponse } =
-      await loadSendOpenAICompletionsRequest();
+    const {
+      sendOpenAICompletionsRequest,
+      getStreamEndPayloads,
+      setFetchResponse,
+    } = await loadSendOpenAICompletionsRequest();
     const encoder = new TextEncoder();
     let pulled = false;
     const stream = new ReadableStream<Uint8Array>({
@@ -653,7 +678,9 @@ describe("sendOpenAICompletionsRequest", () => {
         if (!pulled) {
           pulled = true;
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-only" } })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-only" } })}\n\n`,
+            ),
           );
           return;
         }
@@ -662,24 +689,38 @@ describe("sendOpenAICompletionsRequest", () => {
         controller.error(error);
       },
     });
-    setFetchResponse(new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    setFetchResponse(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
 
     await sendOpenAICompletionsRequest({
       bodyData: { model: "openai/gpt-4o", messages: [], stream: true },
-      agentConfig: { dbKey: "agent-gpt-4o", provider: "openrouter", model: "openai/gpt-4o" },
+      agentConfig: {
+        dbKey: "agent-gpt-4o",
+        provider: "openrouter",
+        model: "openai/gpt-4o",
+      },
       thunkApi: createThunkApi(),
       dialogKey: "dialog-user-1-dialog-1",
     });
 
     const finalPayload = getStreamEndPayloads().at(-1);
-    expect(finalPayload?.totalUsage).toEqual({ provider_call_id: "pcall-abort-only" });
+    expect(finalPayload?.totalUsage).toEqual({
+      provider_call_id: "pcall-abort-only",
+    });
     expect(finalPayload?.billingFailed).toBe(false);
     expect(finalPayload?.skipBilling).toBe(true);
   });
 
   it("keeps billing enabled after a user AbortError with observed provider usage", async () => {
-    const { sendOpenAICompletionsRequest, getStreamEndPayloads, setFetchResponse } =
-      await loadSendOpenAICompletionsRequest();
+    const {
+      sendOpenAICompletionsRequest,
+      getStreamEndPayloads,
+      setFetchResponse,
+    } = await loadSendOpenAICompletionsRequest();
     const encoder = new TextEncoder();
     let pulled = false;
     const stream = new ReadableStream<Uint8Array>({
@@ -687,7 +728,9 @@ describe("sendOpenAICompletionsRequest", () => {
         if (!pulled) {
           pulled = true;
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-used", prompt_tokens: 3, completion_tokens: 1 } })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ usage: { provider_call_id: "pcall-abort-used", prompt_tokens: 3, completion_tokens: 1 } })}\n\n`,
+            ),
           );
           return;
         }
@@ -696,11 +739,20 @@ describe("sendOpenAICompletionsRequest", () => {
         controller.error(error);
       },
     });
-    setFetchResponse(new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    setFetchResponse(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
 
     await sendOpenAICompletionsRequest({
       bodyData: { model: "openai/gpt-4o", messages: [], stream: true },
-      agentConfig: { dbKey: "agent-gpt-4o", provider: "openrouter", model: "openai/gpt-4o" },
+      agentConfig: {
+        dbKey: "agent-gpt-4o",
+        provider: "openrouter",
+        model: "openai/gpt-4o",
+      },
       thunkApi: createThunkApi(),
       dialogKey: "dialog-user-1-dialog-1",
     });
@@ -726,18 +778,18 @@ describe("sendOpenAICompletionsRequest", () => {
         start(controller) {
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: "Hello " } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "Hello " } }] })}\n\n`,
+            ),
           );
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: "world" } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "world" } }] })}\n\n`,
+            ),
           );
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: "!" } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "!" } }] })}\n\n`,
+            ),
           );
           controller.close();
         },
@@ -747,7 +799,7 @@ describe("sendOpenAICompletionsRequest", () => {
         new Response(stream, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        })
+        }),
       );
 
       const thunkApi = createThunkApi();
@@ -768,7 +820,7 @@ describe("sendOpenAICompletionsRequest", () => {
       });
 
       const streamingActions = thunkApi.dispatchedActions.filter(
-        (a) => a.type === "messageStreaming"
+        (a) => a.type === "messageStreaming",
       );
 
       // 初始有一条 content="" 的占位,其后在流正常结束 done flush 时进行最终提交
@@ -790,8 +842,8 @@ describe("sendOpenAICompletionsRequest", () => {
         start(controller) {
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: "Final chunk" } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "Final chunk" } }] })}\n\n`,
+            ),
           );
           controller.close();
         },
@@ -801,7 +853,7 @@ describe("sendOpenAICompletionsRequest", () => {
         new Response(stream, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        })
+        }),
       );
 
       const thunkApi = createThunkApi();
@@ -826,7 +878,7 @@ describe("sendOpenAICompletionsRequest", () => {
       });
 
       const streamingActions = thunkApi.dispatchedActions.filter(
-        (a) => a.type === "messageStreaming"
+        (a) => a.type === "messageStreaming",
       );
       const lastStreaming = streamingActions.at(-1);
       const text = lastStreaming?.payload?.content
@@ -845,8 +897,8 @@ describe("sendOpenAICompletionsRequest", () => {
         start(controller) {
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { content: "Calling tool... " } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "Calling tool... " } }] })}\n\n`,
+            ),
           );
           controller.enqueue(
             encoder.encode(
@@ -866,8 +918,8 @@ describe("sendOpenAICompletionsRequest", () => {
                     finish_reason: "tool_calls",
                   },
                 ],
-              })}\n\n`
-            )
+              })}\n\n`,
+            ),
           );
           controller.close();
         },
@@ -877,7 +929,7 @@ describe("sendOpenAICompletionsRequest", () => {
         new Response(stream, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        })
+        }),
       );
 
       const thunkApi = createThunkApi();
@@ -898,7 +950,7 @@ describe("sendOpenAICompletionsRequest", () => {
       });
 
       const streamingActions = thunkApi.dispatchedActions.filter(
-        (a) => a.type === "messageStreaming"
+        (a) => a.type === "messageStreaming",
       );
       const lastStreaming = streamingActions.at(-1);
       const text = lastStreaming?.payload?.content
@@ -909,8 +961,11 @@ describe("sendOpenAICompletionsRequest", () => {
     });
 
     it("flushes accumulated text on AbortError without error flag", async () => {
-      const { sendOpenAICompletionsRequest, setFetchResponse, getStreamEndPayloads } =
-        await loadSendOpenAICompletionsRequest();
+      const {
+        sendOpenAICompletionsRequest,
+        setFetchResponse,
+        getStreamEndPayloads,
+      } = await loadSendOpenAICompletionsRequest();
       const encoder = new TextEncoder();
 
       let pulled = false;
@@ -920,8 +975,8 @@ describe("sendOpenAICompletionsRequest", () => {
             pulled = true;
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ choices: [{ delta: { content: "Unflushed text" } }] })}\n\n`
-              )
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "Unflushed text" } }] })}\n\n`,
+              ),
             );
             return;
           }
@@ -935,7 +990,7 @@ describe("sendOpenAICompletionsRequest", () => {
         new Response(stream, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        })
+        }),
       );
 
       const thunkApi = createThunkApi();
@@ -974,13 +1029,13 @@ describe("sendOpenAICompletionsRequest", () => {
         start(controller) {
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Thinking step 1... " } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Thinking step 1... " } }] })}\n\n`,
+            ),
           );
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Thinking step 2" } }] })}\n\n`
-            )
+              `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Thinking step 2" } }] })}\n\n`,
+            ),
           );
           controller.close();
         },
@@ -990,7 +1045,7 @@ describe("sendOpenAICompletionsRequest", () => {
         new Response(stream, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        })
+        }),
       );
 
       const thunkApi = createThunkApi();
@@ -1007,11 +1062,11 @@ describe("sendOpenAICompletionsRequest", () => {
       });
 
       const streamingActions = thunkApi.dispatchedActions.filter(
-        (a) => a.type === "messageStreaming"
+        (a) => a.type === "messageStreaming",
       );
       const lastStreaming = streamingActions.at(-1);
       expect(lastStreaming?.payload?.thinkContent).toBe(
-        "Thinking step 1... Thinking step 2"
+        "Thinking step 1... Thinking step 2",
       );
     });
   });

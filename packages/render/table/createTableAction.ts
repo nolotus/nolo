@@ -6,9 +6,7 @@ import i18n from "app/i18n/client";
 
 import type { RootState, AppDispatch } from "app/store";
 import { selectIdentityUserId } from "identity/selectors";
-import {
-  addContentToSpace,
-} from "create/space/spaceSlice";
+import { addContentToSpace } from "create/space/content/contentThunks";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";

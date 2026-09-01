@@ -14,9 +14,7 @@ import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
 import { buildObjectAssistantSidebarId } from "chat/dialog/objectAssistantRegistry";
 import { isImageResourceLike } from "app/utils/fileUtils";
 import FileDropZone from "../components/FileDropZone";
-import {
-  uploadAndAddFileToSpace,
-} from "../spaceSlice";
+import { uploadAndAddFileToSpace } from "../content/contentThunks";
 import { useSpaceData } from "../hooks/useSpaceData";
 import { useAgentFetcher } from "../hooks/useAgentFetcher";
 import SpaceContentList from "../components/SpaceContentList";

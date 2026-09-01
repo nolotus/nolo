@@ -117,14 +117,16 @@ describe("PLATFORM_HOSTED_ROUTING_TABLE & resolvePlatformHostedRouting", () => {
       agentRunHosted: true,
     });
 
-    // 7. Claude models (agentRunHosted: false)
+    // 7. Claude models（已下架，兼容重映射到 RunInfra glm-5-3-flash）
     const claude = resolvePlatformHostedRouting("anthropic/claude-sonnet-5");
     expect(claude).toEqual({
-      endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-      usageProvider: "deepinfra",
-      keyName: "deepinfra",
+      endpoint: "https://api.runinfra.ai/v1/chat/completions",
+      usageProvider: "runinfra",
+      keyName: "runinfra",
+      // 下架兼容：旧 claude 模型名显式 remap 到 glm-5-3-flash
+      upstreamModelId: "glm-5-3-flash",
       wire: "chat.completions",
-      agentRunHosted: false,
+      agentRunHosted: true,
     });
 
     // 8. Grok (agentRunHosted: false)

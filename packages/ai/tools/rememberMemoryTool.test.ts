@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 
 const callToolApiMock = mock(async () => ({
   success: true,
@@ -8,6 +8,18 @@ const callToolApiMock = mock(async () => ({
 }));
 
 const selectCurrentSpaceIdMock = mock(() => "space-1");
+
+// Value-copy snapshot — Bun mock.restore() does not clear mock.module,
+// 粘性 mock 会污染同进程后续 suite 文件（spaceUiStore.runtime.test.ts 等）。
+const realSpaceCurrentStore = {
+  ...(await import("create/space/spaceCurrentStore")),
+};
+const realToolApiClient = { ...(await import("./toolApiClient")) };
+
+afterAll(() => {
+  mock.module("create/space/spaceCurrentStore", () => realSpaceCurrentStore);
+  mock.module("./toolApiClient", () => realToolApiClient);
+});
 
 let moduleVersion = 0;
 
@@ -32,11 +44,13 @@ describe("rememberMemoryTool", () => {
       {
         content: "在复杂问题里，这个用户更喜欢先看结论。",
       },
-      { getState: () => ({}) }
+      { getState: () => ({}) },
     );
 
     expect(callToolApiMock).toHaveBeenCalledTimes(1);
-    expect((callToolApiMock.mock.calls as any[])[0]?.[1]).toBe("/api/memory/remember");
+    expect((callToolApiMock.mock.calls as any[])[0]?.[1]).toBe(
+      "/api/memory/remember",
+    );
     expect((callToolApiMock.mock.calls as any[])[0]?.[2]).toEqual({
       content: "在复杂问题里，这个用户更喜欢先看结论。",
       scope: "auto",
@@ -53,8 +67,8 @@ describe("rememberMemoryTool", () => {
         {
           content: "   ",
         },
-        { getState: () => ({}) }
-      )
+        { getState: () => ({}) },
+      ),
     ).rejects.toThrow("rememberMemory 需要非空 content");
   });
 
@@ -68,7 +82,7 @@ describe("rememberMemoryTool", () => {
         scope: "space",
         kind: "procedural",
       },
-      { getState: () => ({}) }
+      { getState: () => ({}) },
     );
 
     expect((callToolApiMock.mock.calls as any[])[0]?.[2]).toEqual({

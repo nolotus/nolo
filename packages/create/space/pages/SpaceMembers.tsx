@@ -7,7 +7,7 @@ import { Select, SelectItem } from "render/web/ui/Select";
 import { toast } from "app/utils/toast";
 import { toErrorMessage } from "core/errorMessage";
 import { InviteModal } from "../components/InviteModal";
-import { addMember, removeMember } from "../spaceSlice";
+import { addMember, removeMember } from "../member/memberThunks";
 import { MemberRole } from "app/types";
 import { useSpaceData } from "../hooks/useSpaceData";
 import {

@@ -1,8 +1,10 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 const realDbSlice = await import("database/dbSlice");
-const realSpaceSlice = await import("create/space/spaceSlice");
+const realContentThunks = {
+  ...(await import("create/space/content/contentThunks")),
+};
 const realMessageSlice = await import("chat/messages/messageSlice");
 const realAuthSlice = await import("auth/authSlice");
 const realRegistry = await import("../objectAssistantRegistry");
@@ -30,7 +32,7 @@ const prepareAndPersistMessageMock = mock((payload: any) => ({
 
 let moduleVersion = 0;
 const dbSlicePath = fileURLToPath(
-  new URL("../../../database/dbSlice.ts", import.meta.url)
+  new URL("../../../database/dbSlice.ts", import.meta.url),
 );
 
 const loadCreateDialogAction = async () => {
@@ -46,8 +48,8 @@ const loadCreateDialogAction = async () => {
     write: writeMock,
     removeCachedEntity: removeCachedEntityMock,
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/content/contentThunks", () => ({
+    ...realContentThunks,
     addContentToSpace: addContentToSpaceMock,
   }));
   mock.module("auth/authSlice", () => ({
@@ -60,7 +62,9 @@ const loadCreateDialogAction = async () => {
   }));
   mock.module("../objectAssistantRegistry", () => realRegistry);
 
-  const module = await import(`./createDialogAction.ts?test=${moduleVersion++}`);
+  const module = await import(
+    `./createDialogAction.ts?test=${moduleVersion++}`
+  );
   mock.restore();
   return module.createDialogAction;
 };
@@ -85,7 +89,8 @@ describe("createDialogAction", () => {
       { agentMode: "auto", cybots: [], title: "新对话", skipGreeting: true },
       {
         dispatch,
-        getState: () => ({ auth: { currentUser: { userId: "user-1" } } }) as any,
+        getState: () =>
+          ({ auth: { currentUser: { userId: "user-1" } } }) as any,
       },
     );
 
@@ -101,7 +106,7 @@ describe("createDialogAction", () => {
     const createDialogAction = await loadCreateDialogAction();
     readAndWaitMock.mockClear();
     writeMock.mockClear();
-    
+
     readAndWaitMock.mockResolvedValueOnce({
       dbKey: "agent-fake",
       name: "Fake Agent",
@@ -111,7 +116,9 @@ describe("createDialogAction", () => {
       getState: () => ({ auth: { currentUser: { userId: "user-123" } } }),
       dispatch: (action: any) => {
         if (action.kind === "readAndWait") {
-          return { unwrap: async () => ({ dbKey: "agent-fake", name: "Fake Agent" }) };
+          return {
+            unwrap: async () => ({ dbKey: "agent-fake", name: "Fake Agent" }),
+          };
         }
         if (action.kind === "write") {
           writeMock(action);
@@ -128,18 +135,22 @@ describe("createDialogAction", () => {
         title: "Test Extra Refs",
         extraReferences: [{ dbKey: "ref-1", type: "instruction" } as any],
       },
-      mockThunk as any
+      mockThunk as any,
     );
 
     expect(result).toBeDefined();
-    
+
     // The second write call usually writes the dialog itself if the agent isn't being upserted.
     // We'll inspect all writeMock calls.
     const writes = writeMock.mock.calls;
-    const dialogWrite = writes.find(call => call[0]?.payload?.data?.title === "Test Extra Refs");
+    const dialogWrite = writes.find(
+      (call) => call[0]?.payload?.data?.title === "Test Extra Refs",
+    );
     expect(dialogWrite).toBeDefined();
     expect(dialogWrite?.[0]?.payload?.data?.extraReferences).toBeDefined();
-    expect(dialogWrite?.[0]?.payload?.data?.extraReferences[0]?.dbKey).toBe("ref-1");
+    expect(dialogWrite?.[0]?.payload?.data?.extraReferences[0]?.dbKey).toBe(
+      "ref-1",
+    );
   });
 
   it("skips agent config reads for titled skip-greeting fast paths", async () => {
@@ -164,7 +175,10 @@ describe("createDialogAction", () => {
         };
       }
 
-      if (action.kind === "addContentToSpace" || action.kind === "prepareAndPersistMessage") {
+      if (
+        action.kind === "addContentToSpace" ||
+        action.kind === "prepareAndPersistMessage"
+      ) {
         return { unwrap: async () => ({}) };
       }
 
@@ -188,7 +202,7 @@ describe("createDialogAction", () => {
               },
             },
           }) as any,
-      }
+      },
     );
 
     expect(readAndWaitMock).not.toHaveBeenCalled();
@@ -251,7 +265,7 @@ describe("createDialogAction", () => {
               },
             },
           }) as any,
-      }
+      },
     );
 
     expect(writeResolved).toBe(false);
@@ -262,8 +276,8 @@ describe("createDialogAction", () => {
     });
     expect(
       dispatch.mock.calls.some(
-        ([action]) => action?.type === "db/upsertSSREntity"
-      )
+        ([action]) => action?.type === "db/upsertSSREntity",
+      ),
     ).toBe(true);
     expect(writeMock).toHaveBeenCalledTimes(1);
     // Successful background write must not reverse the optimistic entity.
@@ -327,7 +341,7 @@ describe("createDialogAction", () => {
                 },
               },
             }) as any,
-        }
+        },
       );
 
       expect(result.dbKey).toContain("dialog-user-1-");
@@ -340,15 +354,15 @@ describe("createDialogAction", () => {
       expect(removeCachedEntityMock.mock.calls[0]?.[0]).toBe(result.dbKey);
       expect(
         dispatch.mock.calls.some(
-          ([action]) => action?.kind === "removeCachedEntity"
-        )
+          ([action]) => action?.kind === "removeCachedEntity",
+        ),
       ).toBe(true);
       expect(
         consoleError.mock.calls.some(
           (call: any[]) =>
             typeof call[0] === "string" &&
-            call[0].includes("optimistic dialog write failed")
-        )
+            call[0].includes("optimistic dialog write failed"),
+        ),
       ).toBe(true);
     } finally {
       console.error = originalConsoleError;
@@ -362,7 +376,10 @@ describe("createDialogAction", () => {
     addContentToSpaceMock.mockClear();
     prepareAndPersistMessageMock.mockClear();
 
-    const pageAgentKey = realRegistry.getPreferredObjectAssistantKey("page", "user-1")[0];
+    const pageAgentKey = realRegistry.getPreferredObjectAssistantKey(
+      "page",
+      "user-1",
+    )[0];
     const writes: any[] = [];
 
     const dispatch = mock((action: any) => {
@@ -382,7 +399,10 @@ describe("createDialogAction", () => {
         };
       }
 
-      if (action.kind === "addContentToSpace" || action.kind === "prepareAndPersistMessage") {
+      if (
+        action.kind === "addContentToSpace" ||
+        action.kind === "prepareAndPersistMessage"
+      ) {
         return { unwrap: async () => ({}) };
       }
 
@@ -404,7 +424,7 @@ describe("createDialogAction", () => {
               },
             },
           }) as any,
-      }
+      },
     );
 
     expect(readAndWaitMock).toHaveBeenCalledTimes(1);
@@ -443,7 +463,10 @@ describe("createDialogAction", () => {
         };
       }
 
-      if (action.kind === "addContentToSpace" || action.kind === "prepareAndPersistMessage") {
+      if (
+        action.kind === "addContentToSpace" ||
+        action.kind === "prepareAndPersistMessage"
+      ) {
         return { unwrap: async () => ({}) };
       }
 
@@ -467,7 +490,7 @@ describe("createDialogAction", () => {
               },
             },
           }) as any,
-      }
+      },
     );
 
     const dialogWrite = writeMock.mock.calls.at(-1)?.[0];
@@ -503,7 +526,10 @@ describe("createDialogAction", () => {
         };
       }
 
-      if (action.kind === "addContentToSpace" || action.kind === "prepareAndPersistMessage") {
+      if (
+        action.kind === "addContentToSpace" ||
+        action.kind === "prepareAndPersistMessage"
+      ) {
         return { unwrap: async () => ({}) };
       }
 
@@ -526,7 +552,7 @@ describe("createDialogAction", () => {
               },
             },
           }) as any,
-      }
+      },
     );
 
     expect(readAndWaitMock).toHaveBeenCalledWith({
@@ -621,15 +647,13 @@ describe("createDialogAction", () => {
       const getState = () =>
         ({
           auth: {
-            currentUser: tc.currentUserId
-              ? { userId: tc.currentUserId }
-              : null,
+            currentUser: tc.currentUserId ? { userId: tc.currentUserId } : null,
           },
         }) as any;
 
       const result = await createDialogAction(
         { cybots: tc.cybots },
-        { dispatch, getState, extra: {} }
+        { dispatch, getState, extra: {} },
       );
 
       expect(result.dbKey.startsWith(`dialog-${tc.expectOwner}-`)).toBe(true);
@@ -639,22 +663,21 @@ describe("createDialogAction", () => {
 
       const dialogWrite = writes.find(
         (p) =>
-          typeof p?.customKey === "string" && p.customKey.startsWith("dialog-")
+          typeof p?.customKey === "string" && p.customKey.startsWith("dialog-"),
       );
       expect(dialogWrite?.data?.userId).toBe(tc.expectOwner);
       expect(dialogWrite?.userId).toBe(tc.expectOwner);
 
       if (tc.expectGreetingUserId !== undefined) {
         expect(prepareAndPersistMessageMock).toHaveBeenCalledTimes(1);
-        const greetingPayload =
-          prepareAndPersistMessageMock.mock.calls[0]?.[0];
+        const greetingPayload = prepareAndPersistMessageMock.mock.calls[0]?.[0];
         expect(greetingPayload?.dialogConfig?.userId).toBe(
-          tc.expectGreetingUserId
+          tc.expectGreetingUserId,
         );
         expect(
           greetingPayload?.dialogConfig?.dbKey.startsWith(
-            `dialog-${tc.expectOwner}-`
-          )
+            `dialog-${tc.expectOwner}-`,
+          ),
         ).toBe(true);
       }
     });
@@ -675,7 +698,7 @@ describe("isLocalOwnerDialogAgents", () => {
   it("table-driven prefix detection", async () => {
     const loaded = await import("./createDialogAction.ts?resolver" as string);
     const resolve = (loaded as any).isLocalOwnerDialogAgents as (
-      cybots: readonly string[]
+      cybots: readonly string[],
     ) => boolean;
     for (const { cybots, expected } of cases) {
       expect(resolve(cybots)).toBe(expected);

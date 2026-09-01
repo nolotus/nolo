@@ -1,19 +1,29 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 
 const createDocMock = mock((args: any) => "page-demo");
-const selectCurrentSpaceIdMock = mock((state: any) => state?.space?.currentSpaceId ?? null);
+const selectCurrentSpaceIdMock = mock(
+  (state: any) => state?.space?.currentSpaceId ?? null,
+);
 
 let moduleVersion = 0;
 
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
+
+afterAll(() => {
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
+});
+
 async function loadCreateDocTool() {
   const actualDocStore = await import("render/page/docStore");
+
   mock.module("render/page/docStore", () => ({
     ...actualDocStore,
     createDocState: createDocMock,
   }));
-  const actualSpaceSlice = await import("create/space/spaceSlice");
-  mock.module("create/space/spaceSlice", () => ({
-    ...actualSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceModule,
     selectCurrentSpaceId: selectCurrentSpaceIdMock,
   }));
 

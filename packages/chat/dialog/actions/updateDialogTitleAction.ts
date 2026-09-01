@@ -5,7 +5,7 @@ import type { RootState } from "app/store";
 import { selectIdentityUserId } from "identity/selectors";
 import {
   updateContentTitle,
-} from "create/space/spaceSlice";
+} from "create/space/content/contentThunks";
 import { normalizeSpaceId } from "create/space/spaceKeys";
 import { patch, selectById } from "database/dbSlice";
 import { extractCustomId } from "core/prefix";

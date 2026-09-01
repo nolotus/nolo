@@ -14,11 +14,6 @@ import {
   PLATFORM_HOSTED_KIMI_K3_MODEL,
 } from "./kimi";
 import {
-  DEEPINFRA_CLAUDE_OPUS_PRICE,
-  DEEPINFRA_CLAUDE_SONNET_PRICE,
-  DEEPINFRA_CLAUDE_FABLE_PRICE,
-} from "./deepinfra";
-import {
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
@@ -39,6 +34,10 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
 
+/**
+ * Claude 系旧模型名清单（兼容锚点）：2026-09-01 起不再上架/维护，仅用于
+ * chatProxyRouting 识别存量 claude 请求并重映射到 glm-5-3-flash。
+ */
 export const PLATFORM_HOSTED_CLAUDE_MODELS = [
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
@@ -495,33 +494,9 @@ export const platformHostedModels = [
     supportsReasoningEffort: false,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
-  {
-    name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
-    displayName: "Claude Sonnet 5",
-    hasVision: true,
-    price: { ...DEEPINFRA_CLAUDE_SONNET_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 976000,
-    supportsTool: false,
-  },
-  {
-    name: PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
-    displayName: "Claude Opus 5",
-    hasVision: true,
-    price: { ...DEEPINFRA_CLAUDE_OPUS_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 976000,
-    supportsTool: false,
-  },
-  {
-    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
-    displayName: "Claude Fable 5",
-    hasVision: true,
-    price: { ...DEEPINFRA_CLAUDE_FABLE_PRICE },
-    maxOutputTokens: 4092,
-    contextWindow: 976000,
-    supportsTool: false,
-  },
+  // Claude 系已下架（2026-09-01），不再出现在 nolo 托管模型列表；旧模型名请求由
+  // platformHostedRoutingTable 重映射到 glm-5-3-flash 做兼容。deepinfra 直连通道
+  // （用户自有 key）不受影响，见 ./deepinfra.ts。
   {
     name: PLATFORM_HOSTED_GROK_4_6_MODEL,
     displayName: "Grok 4.6",

@@ -6,7 +6,7 @@ import { useUserId } from "identity";
 import { read } from "database/dbSlice";
 import { createAgent } from "ai/agent/agentSlice";
 import { toast } from "app/utils/toast";
-import { addContentToSpace } from "create/space/spaceSlice";
+import { addContentToSpace } from "create/space/content/contentThunks";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { Dialog } from "render/web/ui/modal/Dialog";

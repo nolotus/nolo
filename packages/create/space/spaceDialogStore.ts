@@ -5,6 +5,8 @@
 import { useSyncExternalStore } from "react";
 
 import { toTimestampMs } from "core/timestamp";
+// Wave E: applySpaceEvent 需要把 dialog.created 写进 currentSpace.contents。
+import { appendDialogContentEntry } from "./spaceCurrentStore";
 
 export interface SpaceDialogState {
   /** 实时任务状态：dialogId → "running" | "done" | "failed" */
@@ -174,4 +176,15 @@ export function useDialogStatus(dialogId: string | null): string | undefined {
 export function useIsDialogUnread(dialogId: string | null): boolean {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return dialogId ? state.unreadDialogIds[dialogId] === true : false;
+}
+// Wave E: 原 spaceSlice.applySpaceEvent reducer，逻辑照抄。
+// 调用形态从 dispatch(applySpaceEvent(ev)) 变为 applySpaceEvent(ev)。
+// 注意：dialog.created 事件同时要把条目写进 currentSpace.contents，
+// 该写入由 spaceCurrentStore.appendDialogContentEntry 承担。
+export function applySpaceEvent(ev: SpaceEvent): void {
+  const now = Date.now();
+  if (ev.type === "dialog.created" && ev.dialogKey && ev.dialogId && ev.title) {
+    appendDialogContentEntry(ev.dialogKey, ev.title, Math.max(now, 1));
+  }
+  applySpaceEventDialog(ev, now);
 }

@@ -1,8 +1,10 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 import { fileURLToPath } from "node:url";
 
 const realDbSlice = await import("database/dbSlice");
-const realSpaceSlice = await import("create/space/spaceSlice");
+const realContentThunks = {
+  ...(await import("create/space/content/contentThunks")),
+};
 const realMessageSlice = await import("chat/messages/messageSlice");
 const realAuthSlice = await import("auth/authSlice");
 const realUiAskChoice = await import("ai/tools/uiAskChoiceTool");
@@ -50,7 +52,7 @@ const resolveRecentRelationshipRecapMock = mock(async () => ({
 
 let moduleVersion = 0;
 const dbSlicePath = fileURLToPath(
-  new URL("../../../database/dbSlice.ts", import.meta.url)
+  new URL("../../../database/dbSlice.ts", import.meta.url),
 );
 
 const loadCreateDialogAction = async () => {
@@ -64,8 +66,8 @@ const loadCreateDialogAction = async () => {
     readAndWait: readAndWaitMock,
     write: writeMock,
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/content/contentThunks", () => ({
+    ...realContentThunks,
     addContentToSpace: addContentToSpaceMock,
   }));
   mock.module("auth/authSlice", () => ({
@@ -92,7 +94,9 @@ const loadCreateDialogAction = async () => {
       `${input.greetingText}\n\n上次我们主要聊到：${input.recentRecap}`,
   }));
 
-  const module = await import(`./createDialogAction.ts?understanding-test=${moduleVersion++}`);
+  const module = await import(
+    `./createDialogAction.ts?understanding-test=${moduleVersion++}`
+  );
   mock.restore();
   return module.createDialogAction;
 };
@@ -146,14 +150,20 @@ describe("createDialogAction understanding greeting", () => {
             },
           }) as any,
         extra: { db: {} },
-      }
+      },
     );
 
     const greetingPayload = prepareAndPersistMessageMock.mock.calls[0]?.[0];
     expect(resolveUnderstandingGreetingMemoryMock).toHaveBeenCalledTimes(1);
     expect(resolveRecentRelationshipRecapMock).toHaveBeenCalledTimes(0);
-    expect(greetingPayload?.message?.content).toContain("欢迎回来。我记得你上次更在意的是首封体验的信任感");
-    expect(greetingPayload?.message?.content).toContain("如果你愿意，我们可以接着看：先稳住首封体验，还是先把营销分层搭起来");
-    expect(greetingPayload?.message?.content).not.toContain("旧 recap 不应出现在 greeting 里");
+    expect(greetingPayload?.message?.content).toContain(
+      "欢迎回来。我记得你上次更在意的是首封体验的信任感",
+    );
+    expect(greetingPayload?.message?.content).toContain(
+      "如果你愿意，我们可以接着看：先稳住首封体验，还是先把营销分层搭起来",
+    );
+    expect(greetingPayload?.message?.content).not.toContain(
+      "旧 recap 不应出现在 greeting 里",
+    );
   });
 });

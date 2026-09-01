@@ -2,7 +2,7 @@
  * rememberMemory 的 OpenAI function schema——唯一定义。
  *
  * 从 `rememberMemoryTool.ts` 抽出来是因为那个模块 import 了
- * `create/space/spaceSlice`（Redux）和 `./toolApiClient`，只有渲染进程能加载。
+ * `create/space` 的 Redux thunk/selector 模块和 `./toolApiClient`，只有渲染进程能加载。
  * CLI/desktop 本地 runtime 需要同一份 schema 来向模型声明工具，但不能把
  * Redux 拖进 CLI bundle。
  *

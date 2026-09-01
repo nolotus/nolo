@@ -5,9 +5,7 @@ import React, { useState } from "react";
 import { LuTrash2 } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "app/routing";
-import {
-  selectCurrentSpaceId,
-} from "create/space/spaceSlice";
+import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
 import { normalizeSpaceId } from "create/space/spaceKeys";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { toast } from "app/utils/toast"

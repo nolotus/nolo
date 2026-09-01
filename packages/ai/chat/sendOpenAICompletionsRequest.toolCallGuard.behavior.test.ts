@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 
 // Value-copy snapshots — Bun mock.restore() does not clear mock.module.
 const realDialogSlice = { ...(await import("chat/dialog/dialogSlice")) };
 const realMessageSlice = { ...(await import("chat/messages/messageSlice")) };
 const realSettingSlice = { ...(await import("app/settings/settingSlice")) };
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
 const realAuthSlice = { ...(await import("auth/authSlice")) };
 const realDbSlice = { ...(await import("database/dbSlice")) };
 
@@ -14,7 +16,7 @@ const restoreLeakedModuleMocks = () => {
   mock.module("chat/dialog/dialogSlice", () => realDialogSlice);
   mock.module("chat/messages/messageSlice", () => realMessageSlice);
   mock.module("app/settings/settingSlice", () => realSettingSlice);
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
   mock.module("auth/authSlice", () => realAuthSlice);
   mock.module("database/dbSlice", () => realDbSlice);
 };
@@ -42,6 +44,8 @@ const makeThunkResult = (result: any) => {
   return wrapper;
 };
 
+afterAll(() => restoreLeakedModuleMocks());
+
 const loadModule = async () => {
   const handleToolCallsArgs: any[] = [];
   const streamEndPayloads: any[] = [];
@@ -68,14 +72,26 @@ const loadModule = async () => {
 
   mock.module("chat/dialog/dialogSlice", () => ({
     ...realDialogSlice,
-    addActiveController: (payload: any) => ({ type: "dialog/addActiveController", payload }),
-    removeActiveController: (payload: any) => ({ type: "dialog/removeActiveController", payload }),
-    tokenUsageLiveUpdate: (payload: any) => ({ type: "dialog/tokenUsageLiveUpdate", payload }),
+    addActiveController: (payload: any) => ({
+      type: "dialog/addActiveController",
+      payload,
+    }),
+    removeActiveController: (payload: any) => ({
+      type: "dialog/removeActiveController",
+      payload,
+    }),
+    tokenUsageLiveUpdate: (payload: any) => ({
+      type: "dialog/tokenUsageLiveUpdate",
+      payload,
+    }),
   }));
 
   mock.module("chat/messages/messageSlice", () => ({
     ...realMessageSlice,
-    messageStreaming: (payload: any) => ({ type: "message/messageStreaming", payload }),
+    messageStreaming: (payload: any) => ({
+      type: "message/messageStreaming",
+      payload,
+    }),
     messageStreamEnd: (payload: any) => {
       streamEndPayloads.push(payload);
       return Promise.resolve(payload);
@@ -84,7 +100,10 @@ const loadModule = async () => {
       dispatchedActions.push({ type: "message/addToolMessage", payload });
       return { type: "message/addToolMessage", payload };
     },
-    updateToolMessage: (payload: any) => ({ type: "message/updateToolMessage", payload }),
+    updateToolMessage: (payload: any) => ({
+      type: "message/updateToolMessage",
+      payload,
+    }),
   }));
 
   mock.module("chat/messages/toolThunks", () => ({
@@ -103,8 +122,8 @@ const loadModule = async () => {
     ...realSettingSlice,
     selectCurrentServer: () => "http://current-server.test",
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceModule,
     selectCurrentSpaceId: () => null,
   }));
   mock.module("auth/authSlice", () => ({
@@ -154,7 +173,11 @@ const loadModule = async () => {
       if (value?.type === "db/write") return Promise.resolve({ ok: true });
       return value;
     };
-    return { dispatch, getState: () => state, signal: new AbortController().signal };
+    return {
+      dispatch,
+      getState: () => state,
+      signal: new AbortController().signal,
+    };
   };
 
   return {
@@ -204,15 +227,15 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
                   },
                 },
               ],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({
               choices: [{ delta: {}, finish_reason: "tool_calls" }],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.close();
       },
@@ -221,7 +244,7 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
@@ -245,7 +268,7 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
     const allAccumulated = handleArgs.flatMap((a: any) => a.accumulatedCalls);
     expect(allAccumulated).toHaveLength(0);
     expect(
-      allAccumulated.some((c: any) => c?.function?.name === "appDeploy")
+      allAccumulated.some((c: any) => c?.function?.name === "appDeploy"),
     ).toBe(false);
 
     // A) 持久化的 assistant 消息中该 call 的 arguments 被替换为可 JSON.parse 的合法字符串
@@ -262,11 +285,13 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
     // A) 追加了一条对应 call_id 的自愈 tool 结果消息（addToolMessage + db/write）
     const dispatched = ctx.getDispatchedActions();
     const addToolActions = dispatched.filter(
-      (a: any) => a?.type === "message/addToolMessage"
+      (a: any) => a?.type === "message/addToolMessage",
     );
     expect(addToolActions.length).toBeGreaterThanOrEqual(1);
     const healMsg = addToolActions.find(
-      (a: any) => a.payload?.role === "tool" && a.payload?.toolCallId === "call_truncated"
+      (a: any) =>
+        a.payload?.role === "tool" &&
+        a.payload?.toolCallId === "call_truncated",
     );
     expect(healMsg).toBeDefined();
     const healContent = JSON.parse(healMsg.payload.content);
@@ -315,15 +340,15 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
                   },
                 },
               ],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({
               choices: [{ delta: {}, finish_reason: "tool_calls" }],
-            })}\n\n`
-          )
+            })}\n\n`,
+          ),
         );
         controller.close();
       },
@@ -332,11 +357,15 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
       new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      })
+      }),
     );
 
     await sendOpenAICompletionsRequest({
-      bodyData: { model: "openai/gpt-4o", messages: [{ role: "user", content: "go" }], stream: true },
+      bodyData: {
+        model: "openai/gpt-4o",
+        messages: [{ role: "user", content: "go" }],
+        stream: true,
+      },
       agentConfig: {
         dbKey: "agent-appbuilder",
         provider: "openrouter",
@@ -371,9 +400,14 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
 
     // 一个空的 200 流（本次请求只是触发出站 body 组装）
     setFetchResponse(
-      new Response(new ReadableStream<Uint8Array>({
-        start(controller) { controller.close(); },
-      }), { status: 200, headers: { "Content-Type": "text/event-stream" } })
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
     );
 
     await sendOpenAICompletionsRequest({
@@ -420,10 +454,12 @@ describe("sendOpenAICompletionsRequest - tool call arguments guard (Guard A + B)
       }
     }
     const assistant = body.messages.find((m: any) => m.role === "assistant");
-    expect(assistant.tool_calls[0].function.arguments).toBe('{"_invalid":true}');
+    expect(assistant.tool_calls[0].function.arguments).toBe(
+      '{"_invalid":true}',
+    );
     // B) 为缺配对结果的 tool_call 补了占位 tool 消息
     const placeholder = body.messages.find(
-      (m: any) => m.role === "tool" && m.tool_call_id === "call_hist_bad"
+      (m: any) => m.role === "tool" && m.tool_call_id === "call_hist_bad",
     );
     expect(placeholder).toBeDefined();
     expect(placeholder.content).toBe('{"error":"tool call was interrupted"}');

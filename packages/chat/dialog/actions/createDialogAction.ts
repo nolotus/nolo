@@ -4,7 +4,9 @@ import { selectIdentityUserId } from "identity/selectors";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { extractCustomId } from "core/prefix";
-import { addContentToSpace } from "create/space/spaceSlice";
+import {
+  addContentToSpace,
+} from "create/space/content/contentThunks";
 import { DataType } from "create/types";
 import {
   read,

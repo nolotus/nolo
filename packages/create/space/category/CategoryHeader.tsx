@@ -11,9 +11,9 @@ import {
 import {
   updateCategoryName,
   deleteCategory,
-  selectCurrentSpaceId,
   toggleCategoryCollapse,
-} from "create/space/spaceSlice";
+} from "create/space/category/categoryActions";
+import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
 // Wave A: collapsedCategories 已剥至 module store。
 import { useIsCategoryCollapsed } from "create/space/spaceUiStore";
 import CreateMenuButton from "render/layout/CreateMenuButtonContainer";

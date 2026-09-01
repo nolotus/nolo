@@ -1,7 +1,7 @@
 import { selectIdentityUserId } from "identity/selectors";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { createSpaceKey } from "create/space/spaceKeys";
-import { deleteSpace } from "create/space/spaceSlice";
+import { deleteSpace } from "create/space/spaceThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { read } from "database/dbSlice";
 import { getRuntimeServerContext } from "database/runtimeServerContext";

@@ -1,6 +1,7 @@
 // ai/tools/queryContentsByCategoryTool.ts
 
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { selectCurrentSpace } from "create/space/spaceCurrentSelectors";
 import type { RootState } from "app/store";
 
 /**
@@ -46,8 +47,8 @@ export async function queryContentsByCategoryFunc(
     throw new Error("无法查询内容，因为当前空间未设定。");
   }
 
-  // 假设当前空间数据存在于 state.space.currentSpace
-  const currentSpace: any = (state as any).space.currentSpace;
+  // 当前空间数据来自 module store + db entities（原 state.space.currentSpace）。
+  const currentSpace: any = selectCurrentSpace(state);
   if (!currentSpace) {
     throw new Error("当前空间数据未找到。");
   }

@@ -7,7 +7,9 @@ import { useFetchData } from "app/hooks";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { useIdentity } from "identity";
 import { useTranslation } from "react-i18next";
-import { markDialogRead } from "create/space/spaceSlice";
+import {
+  markDialogRead,
+} from "create/space/markDialogReadThunk";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { normalizeSpaceId } from "create/space/spaceKeys";
 

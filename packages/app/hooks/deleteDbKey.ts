@@ -11,7 +11,9 @@ import {
 } from "database/keys";
 import { deleteDialog } from "chat/dialog/dialogSlice";
 import { deleteTable } from "render/table/tableSlice";
-import { deleteContentFromSpace } from "create/space/spaceSlice";
+import {
+  deleteContentFromSpace,
+} from "create/space/content/contentThunks";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { read, remove, selectById } from "database/dbSlice";
 import { removeFavoriteLocally } from "app/favorite/favoriteStore";

@@ -7,9 +7,13 @@ import { useLocation, useParams, useNavigate } from "app/routing";
 import { useAppSelector, useAppDispatch } from "app/store";
 import {
   selectCurrentSpaceId,
+} from "create/space/spaceCurrentSelectors";
+import {
   toggleCategoryCollapse,
+} from "create/space/category/categoryActions";
+import {
   updateContentPinned,
-} from "create/space/spaceSlice";
+} from "create/space/content/contentThunks";
 // Wave A: collapsedCategories 已剥至 module store。
 import { useIsCategoryCollapsed } from "create/space/spaceUiStore";
 import { UNCATEGORIZED_ID } from "create/space/constants";

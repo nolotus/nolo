@@ -5,12 +5,14 @@ import {
   MY_CONTENT_USER_DATA_TYPES,
   type MyContentListItem,
 } from "app/utils/myContentItems";
-import type { SpaceContent, SpaceData, SpaceMemberWithSpaceInfo } from "app/types";
+import type { SpaceContent, SpaceData } from "app/types";
 import { toTrimmedString } from "core/toTrimmedString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { fetchUserData } from "database/client/fetchUserData";
 import { getUserDataItemTimestamp, mergeAndDedupUserData } from "database/userDataMerge";
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
+import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { selectCurrentSpace } from "create/space/spaceCurrentSelectors";
 
 type SearchWorkspaceArgs = { query: string };
 
@@ -39,11 +41,6 @@ type SearchWorkspaceState = {
   settings?: {
     currentServer?: string;
   };
-  space: {
-    currentSpaceId: string | null;
-    currentSpace: SpaceData | null;
-    memberSpaces: SpaceMemberWithSpaceInfo[] | null;
-  };
 };
 
 type SearchWorkspaceThunkApi = {
@@ -55,11 +52,12 @@ type SearchWorkspaceThunkApi = {
   };
 };
 
-const selectCurrentSpaceIdFromState = (state: SearchWorkspaceState) =>
-  state.space.currentSpaceId;
+// Space current-state now lives in module stores, not the Redux `space` slice.
+const selectCurrentSpaceIdFromState = (_state: SearchWorkspaceState) =>
+  getCurrentSpaceId();
 
 const selectCurrentSpaceFromState = (state: SearchWorkspaceState) =>
-  state.space.currentSpace;
+  selectCurrentSpace(state);
 
 const selectAllMemberSpacesFromState = (state: SearchWorkspaceState) => {
   const memberSpaces = getAllMemberSpaces();

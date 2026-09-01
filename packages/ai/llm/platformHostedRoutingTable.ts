@@ -192,27 +192,32 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
-  // Claude models -> DeepInfra（server agentRun 侧未分流，保持 no upstream route 报错）
+  // Claude 系已下架（2026-09-01）：旧模型名保留路由做兼容，一律重映射到
+  // RunInfra 的 glm-5-3-flash（同 kimi-k2.6 → qwen 先例）。存量 agent 记录由
+  // modelUpgradeTable 迁移，这里兜住迁移窗口期与漏网请求。
   [PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
+    endpoint: "https://api.runinfra.ai/v1/chat/completions",
+    usageProvider: "runinfra",
+    keyName: "runinfra",
     wire: "chat.completions",
-    agentRunHosted: false,
+    agentRunHosted: true,
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   },
   [PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
+    endpoint: "https://api.runinfra.ai/v1/chat/completions",
+    usageProvider: "runinfra",
+    keyName: "runinfra",
     wire: "chat.completions",
-    agentRunHosted: false,
+    agentRunHosted: true,
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   },
   [PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL]: {
-    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
-    usageProvider: "deepinfra",
-    keyName: "deepinfra",
+    endpoint: "https://api.runinfra.ai/v1/chat/completions",
+    usageProvider: "runinfra",
+    keyName: "runinfra",
     wire: "chat.completions",
-    agentRunHosted: false,
+    agentRunHosted: true,
+    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   },
   // Grok -> xAI（server agentRun 侧未分流，保持 no upstream route 报错）
   [PLATFORM_HOSTED_GROK_4_6_MODEL]: {

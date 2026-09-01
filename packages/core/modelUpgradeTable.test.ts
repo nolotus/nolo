@@ -43,19 +43,29 @@ test("deepseek provider 已下架：deepseek-v4-* 全部命中迁移到 nolo", (
   });
 });
 
-test("Claude 记录侧统一 nolo：deepinfra/anthropic/claude-* 命中迁移", () => {
+test("Claude 系停止维护：deepinfra/nolo 的 claude-* 一律迁移到 nolo glm-5-3-flash", () => {
   expect(
     lookupModelUpgrade("deepinfra", "anthropic/claude-opus-4-8")?.to,
-  ).toEqual({ provider: "nolo", model: "anthropic/claude-opus-5" });
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
   expect(
     lookupModelUpgrade("deepinfra", "anthropic/claude-opus-5")?.to,
-  ).toEqual({ provider: "nolo", model: "anthropic/claude-opus-5" });
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
   expect(
     lookupModelUpgrade("deepinfra", "anthropic/claude-fable-5")?.to,
-  ).toEqual({ provider: "nolo", model: "anthropic/claude-fable-5" });
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
   expect(
     lookupModelUpgrade("deepinfra", "anthropic/claude-sonnet-5")?.to,
-  ).toEqual({ provider: "nolo", model: "anthropic/claude-sonnet-5" });
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
+  // nolo 侧存量 claude 记录同样迁移（兼容 glm-5-3-flash）
+  expect(
+    lookupModelUpgrade("nolo", "anthropic/claude-opus-5")?.to,
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
+  expect(
+    lookupModelUpgrade("nolo", "anthropic/claude-sonnet-5")?.to,
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
+  expect(
+    lookupModelUpgrade("nolo", "anthropic/claude-fable-5")?.to,
+  ).toEqual({ provider: "nolo", model: "glm-5-3-flash" });
   // Claude Haiku 4.5 已下架，不再迁移到 nolo
   expect(
     lookupModelUpgrade("deepinfra", "anthropic/claude-haiku-4-5"),

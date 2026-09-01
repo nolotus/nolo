@@ -1,13 +1,55 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+
+// Value-copy snapshots — Bun mock.restore() does not clear mock.module,
+// 粘性 mock 会污染同进程后续 suite 文件（create/space 的 runtime 测试等）。
+const realSpaceThunks = { ...(await import("create/space/spaceThunks")) };
+const realMemberThunks = {
+  ...(await import("create/space/member/memberThunks")),
+};
+const realSpaceCurrentStore = {
+  ...(await import("create/space/spaceCurrentStore")),
+};
+const realSpaceCurrentSelectors = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
+const realSpaceMembershipStore = {
+  ...(await import("create/space/spaceMembershipStore")),
+};
+
+afterAll(() => {
+  mock.module("create/space/spaceThunks", () => realSpaceThunks);
+  mock.module("create/space/member/memberThunks", () => realMemberThunks);
+  mock.module("create/space/spaceCurrentStore", () => realSpaceCurrentStore);
+  mock.module(
+    "create/space/spaceCurrentSelectors",
+    () => realSpaceCurrentSelectors,
+  );
+  mock.module(
+    "create/space/spaceMembershipStore",
+    () => realSpaceMembershipStore,
+  );
+});
 
 type MembershipStatus = "idle" | "loading" | "fresh" | "offline";
 
 type MockState = {
   space: {
-    memberSpaces: Array<{ spaceId: string; spaceName?: string; dbKey?: string }>;
+    memberSpaces: Array<{
+      spaceId: string;
+      spaceName?: string;
+      dbKey?: string;
+    }>;
     currentSpace: { id: string; name?: string } | null;
     loading: boolean;
     membershipStatus: MembershipStatus;
@@ -18,6 +60,7 @@ type MockState = {
 let moduleVersion = 0;
 let TopbarSpaceSwitcher: React.ComponentType;
 let mockState: MockState;
+const setViewModeCalls: string[] = [];
 const dispatchCalls: unknown[] = [];
 const navigateCalls: string[] = [];
 
@@ -32,7 +75,8 @@ const loadTopbarSpaceSwitcher = async () => {
       dispatchCalls.push(action);
       return action;
     },
-    useAppSelector: (selector: (state: MockState) => unknown) => selector(mockState),
+    useAppSelector: (selector: (state: MockState) => unknown) =>
+      selector(mockState),
   }));
 
   mock.module("react-i18next", () => ({
@@ -60,22 +104,42 @@ const loadTopbarSpaceSwitcher = async () => {
     useClickOutside: () => undefined,
   }));
 
-  mock.module("create/space/spaceSlice", () => ({
-    changeSpace: (spaceId: string) => ({ type: "space/changeSpace", payload: spaceId }),
-    setViewMode: (viewMode: "all" | "categories") => ({
-      type: "space/setViewMode",
-      payload: viewMode,
+  mock.module("create/space/spaceThunks", () => ({
+    changeSpace: (spaceId: string) => ({
+      type: "space/changeSpace",
+      payload: spaceId,
     }),
-    selectAllMemberSpaces: (state: MockState) => state.space.memberSpaces,
-    selectCurrentSpace: (state: MockState) => state.space.currentSpace,
-    selectSpaceLoading: (state: MockState) => state.space.loading,
-    selectMemberSpacesLoaded: (state: MockState) => state.space.memberSpaces !== null,
-    selectMembershipStatus: (state: MockState) =>
-      state.space.membershipStatus ?? "idle",
-    selectViewMode: (state: MockState) => state.space.viewMode,
   }));
 
-  const module = await import(`./TopbarSpaceSwitcher.tsx?test=${moduleVersion++}`);
+  mock.module("create/space/member/memberThunks", () => ({
+    fetchUserSpaceMemberships: (userId: string) => ({
+      type: "space/fetchUserSpaceMemberships",
+      payload: userId,
+    }),
+  }));
+
+  // setViewMode is a module-store mutator now (called directly, not dispatched).
+  mock.module("create/space/spaceCurrentStore", () => ({
+    setViewMode: (viewMode: "all" | "categories") => {
+      setViewModeCalls.push(viewMode);
+    },
+    useViewMode: () => mockState.space.viewMode,
+  }));
+
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    useCurrentSpaceFromEntity: () => mockState.space.currentSpace,
+  }));
+
+  mock.module("create/space/spaceMembershipStore", () => ({
+    useAllMemberSpaces: () => mockState.space.memberSpaces,
+    useSpaceLoading: () => mockState.space.loading,
+    useMemberSpacesLoaded: () => mockState.space.memberSpaces !== null,
+    useMembershipStatus: () => mockState.space.membershipStatus ?? "idle",
+  }));
+
+  const module = await import(
+    `./TopbarSpaceSwitcher.tsx?test=${moduleVersion++}`
+  );
   mock.restore();
   return module.default;
 };
@@ -104,16 +168,21 @@ describe("TopbarSpaceSwitcher", () => {
 
     TopbarSpaceSwitcher = await loadTopbarSpaceSwitcher();
 
-    dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
-      url: "http://localhost/space/space-1",
-    });
+    dom = new JSDOM(
+      "<!doctype html><html><body><div id='root'></div></body></html>",
+      {
+        url: "http://localhost/space/space-1",
+      },
+    );
 
     previousWindow = globalThis.window;
     previousDocument = globalThis.document;
     previousNavigator = globalThis.navigator;
-    previousActEnvironment = (globalThis as typeof globalThis & {
-      IS_REACT_ACT_ENVIRONMENT?: boolean;
-    }).IS_REACT_ACT_ENVIRONMENT;
+    previousActEnvironment = (
+      globalThis as typeof globalThis & {
+        IS_REACT_ACT_ENVIRONMENT?: boolean;
+      }
+    ).IS_REACT_ACT_ENVIRONMENT;
 
     Object.assign(globalThis, {
       window: dom.window,
@@ -123,12 +192,14 @@ describe("TopbarSpaceSwitcher", () => {
 
     // JSDOM omits CSS.escape; react-aria ListBox selection utils need it.
     const cssEscape =
-      typeof (globalThis as { CSS?: { escape?: (value: string) => string } }).CSS
-        ?.escape === "function"
-        ? (globalThis as { CSS: { escape: (value: string) => string } }).CSS.escape
+      typeof (globalThis as { CSS?: { escape?: (value: string) => string } })
+        .CSS?.escape === "function"
+        ? (globalThis as { CSS: { escape: (value: string) => string } }).CSS
+            .escape
         : (value: string) =>
-            String(value).replace(/[^a-zA-Z0-9_-]/g, (ch) =>
-              `\\${ch.codePointAt(0)!.toString(16)} `
+            String(value).replace(
+              /[^a-zA-Z0-9_-]/g,
+              (ch) => `\\${ch.codePointAt(0)!.toString(16)} `,
             );
     const cssGlobal = { escape: cssEscape };
     Object.defineProperty(dom.window, "CSS", {
@@ -184,13 +255,13 @@ describe("TopbarSpaceSwitcher", () => {
     });
 
     const chevronButton = container.querySelector(
-      ".TpSw__chevronBtn"
+      ".TpSw__chevronBtn",
     ) as HTMLButtonElement | null;
     expect(chevronButton).toBeTruthy();
 
     await act(async () => {
       chevronButton?.dispatchEvent(
-        new dom.window.MouseEvent("click", { bubbles: true })
+        new dom.window.MouseEvent("click", { bubbles: true }),
       );
     });
 
@@ -198,7 +269,9 @@ describe("TopbarSpaceSwitcher", () => {
     expect(panel).toBeTruthy();
     expect(panel?.textContent).toContain("switch_space");
     expect(panel?.textContent).toContain("Planning");
-    const createBtn = panel?.querySelector(".TpSw__createBtn") as HTMLButtonElement | null;
+    const createBtn = panel?.querySelector(
+      ".TpSw__createBtn",
+    ) as HTMLButtonElement | null;
     expect(createBtn).toBeTruthy();
     expect(createBtn?.textContent).toContain("create_new_space");
     // Footer is a sibling after the scrollable list (not nested inside it).
@@ -224,12 +297,12 @@ describe("TopbarSpaceSwitcher", () => {
     });
 
     const chevronButton = container.querySelector(
-      ".TpSw__chevronBtn"
+      ".TpSw__chevronBtn",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
       chevronButton?.dispatchEvent(
-        new dom.window.MouseEvent("click", { bubbles: true })
+        new dom.window.MouseEvent("click", { bubbles: true }),
       );
     });
 
@@ -246,12 +319,12 @@ describe("TopbarSpaceSwitcher", () => {
     });
 
     const chevronButton = container.querySelector(
-      ".TpSw__chevronBtn"
+      ".TpSw__chevronBtn",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
       chevronButton?.dispatchEvent(
-        new dom.window.MouseEvent("click", { bubbles: true })
+        new dom.window.MouseEvent("click", { bubbles: true }),
       );
     });
 
@@ -268,12 +341,12 @@ describe("TopbarSpaceSwitcher", () => {
     });
 
     const chevronButton = container.querySelector(
-      ".TpSw__chevronBtn"
+      ".TpSw__chevronBtn",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
       chevronButton?.dispatchEvent(
-        new dom.window.MouseEvent("click", { bubbles: true })
+        new dom.window.MouseEvent("click", { bubbles: true }),
       );
     });
 
@@ -290,12 +363,12 @@ describe("TopbarSpaceSwitcher", () => {
     });
 
     const chevronButton = container.querySelector(
-      ".TpSw__chevronBtn"
+      ".TpSw__chevronBtn",
     ) as HTMLButtonElement | null;
 
     await act(async () => {
       chevronButton?.dispatchEvent(
-        new dom.window.MouseEvent("click", { bubbles: true })
+        new dom.window.MouseEvent("click", { bubbles: true }),
       );
     });
 
@@ -305,7 +378,8 @@ describe("TopbarSpaceSwitcher", () => {
   });
 
   it("sizes the sidebar dropdown panel to the sidebar switcher trigger", async () => {
-    const originalGetBoundingClientRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+    const originalGetBoundingClientRect =
+      dom.window.HTMLElement.prototype.getBoundingClientRect;
     dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
       const element = this as HTMLElement;
       if (element.classList.contains("TpSw")) {
@@ -343,23 +417,24 @@ describe("TopbarSpaceSwitcher", () => {
       });
 
       const chevronButton = container.querySelector(
-        ".TpSw__chevronBtn"
+        ".TpSw__chevronBtn",
       ) as HTMLButtonElement | null;
 
       await act(async () => {
         chevronButton?.dispatchEvent(
-          new dom.window.MouseEvent("click", { bubbles: true })
+          new dom.window.MouseEvent("click", { bubbles: true }),
         );
       });
 
       const panel = dom.window.document.body.querySelector(
-        ".TpSw__panel"
+        ".TpSw__panel",
       ) as HTMLElement | null;
       expect(panel).toBeTruthy();
       expect(panel?.style.left).toBe("18px");
       expect(panel?.style.width).toBe("296px");
     } finally {
-      dom.window.HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      dom.window.HTMLElement.prototype.getBoundingClientRect =
+        originalGetBoundingClientRect;
     }
   });
 });

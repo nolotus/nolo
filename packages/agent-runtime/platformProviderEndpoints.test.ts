@@ -22,16 +22,16 @@ describe("platformProviderEndpoints", () => {
     expect(resolvePlatformChatCompletionsEndpoint("nolo")).toBeUndefined();
     // legacy ollama-cloud 记录同样无默认上游
     expect(resolvePlatformChatCompletionsEndpoint("ollama-cloud")).toBeUndefined();
-    // 平台托管 Claude：provider=nolo + anthropic/claude-* 路由到 deepinfra
+    // 平台托管 Claude（已下架，2026-09-01）：旧模型名兼容路由到 RunInfra 的 glm-5-3-flash
     expect(
       resolvePlatformChatCompletionsEndpoint(
         "nolo",
         "anthropic/claude-opus-5",
       ),
-    ).toBe("https://api.deepinfra.com/v1/openai/chat/completions");
+    ).toBe("https://api.runinfra.ai/v1/chat/completions");
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "anthropic/claude-sonnet-5"),
-    ).toBe("https://api.deepinfra.com/v1/openai/chat/completions");
+    ).toBe("https://api.runinfra.ai/v1/chat/completions");
     // 平台托管 Grok：provider=nolo + grok-4.6 路由到 xAI 官方 API
     expect(
       resolvePlatformChatCompletionsEndpoint("nolo", "grok-4.6"),
@@ -131,7 +131,7 @@ describe("resolvePlatformHostedCredentialProvider", () => {
       resolvePlatformHostedCredentialProvider("nolo", "gemini-3.1-flash-image-preview"),
     ).toBe("google");
     expect(resolvePlatformHostedCredentialProvider("nolo", "gpt-image-2")).toBe("openai");
-    expect(resolvePlatformHostedCredentialProvider("nolo", "anthropic/claude-opus-5")).toBe("deepinfra");
+    expect(resolvePlatformHostedCredentialProvider("nolo", "anthropic/claude-opus-5")).toBe("runinfra");
     expect(resolvePlatformHostedCredentialProvider("nolo", "grok-4.6")).toBe("xai");
     // legacy 记录别名同样命中
     expect(resolvePlatformHostedCredentialProvider("ollama-cloud", "kimi-k3")).toBe("crof");

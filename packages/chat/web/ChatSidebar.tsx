@@ -3,8 +3,10 @@ import { NavLink, useLocation } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectCurrentSpace,
+} from "create/space/spaceCurrentSelectors";
+import {
   addCategory,
-} from "create/space/spaceSlice";
+} from "create/space/category/categoryActions";
 // Wave A: favoritesCollapsed 已剥至 module store。
 import {
   useFavoritesCollapsed,

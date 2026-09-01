@@ -3,7 +3,7 @@
 import { Editor, Transforms } from "slate";
 import type { AppDispatch } from "app/store";
 import { upload } from "database/dbSlice";
-import { uploadAndAddFileToSpace } from "create/space/spaceSlice";
+import { uploadAndAddFileToSpace } from "create/space/content/contentThunks";
 import { toast } from "app/utils/toast"
 
 const createCustomKey = (file: File) =>

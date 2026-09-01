@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -17,7 +25,9 @@ const dispatchCalls: unknown[] = [];
 
 const makeItem = (
   partial: Pick<AppNotification, "id" | "kind" | "title" | "read"> &
-    Partial<Pick<AppNotification, "message" | "href" | "dialogId" | "createdAt">>
+    Partial<
+      Pick<AppNotification, "message" | "href" | "dialogId" | "createdAt">
+    >,
 ): AppNotification => {
   const now = Date.now();
   const createdAt = partial.createdAt ?? now;
@@ -61,6 +71,17 @@ const seedDefaultNotifications = () => {
   ]);
 };
 
+const realMarkDialogReadThunk = {
+  ...(await import("create/space/markDialogReadThunk")),
+};
+
+afterAll(() => {
+  mock.module(
+    "create/space/markDialogReadThunk",
+    () => realMarkDialogReadThunk,
+  );
+});
+
 const loadTopbarNotificationBell = async () => {
   const actualReactRouterDom = await import("app/routing");
   const actualReactI18Next = await import("react-i18next");
@@ -103,20 +124,23 @@ const loadTopbarNotificationBell = async () => {
     }),
   }));
 
-  mock.module("create/space/spaceSlice", () => ({
+  mock.module("create/space/markDialogReadThunk", () => ({
     // markDialogRead 在生产中是 asyncThunk；mock 成返回 fulfilled action 的 thunk，
-    // 避免污染后续依赖真实 spaceSlice 的测试（bun mock.module 跨测试持久）。
-    markDialogRead: (payload: { dialogId: string }) =>
+    // 避免污染后续依赖真实 markDialogReadThunk 的测试（bun mock.module 跨测试持久）。
+    markDialogRead:
+      (payload: { dialogId: string }) =>
       (dispatch: (action: unknown) => void) =>
         Promise.resolve(
           dispatch({
             type: "space/markDialogRead/fulfilled",
             payload: { dialogId: payload.dialogId },
-          })
+          }),
         ),
   }));
 
-  const module = await import(`./TopbarNotificationBell.tsx?test=${moduleVersion++}`);
+  const module = await import(
+    `./TopbarNotificationBell.tsx?test=${moduleVersion++}`
+  );
   mock.restore();
   return module.default;
 };
@@ -138,16 +162,21 @@ describe("TopbarNotificationBell", () => {
 
     TopbarNotificationBell = await loadTopbarNotificationBell();
 
-    dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
-      url: "http://localhost/chat",
-    });
+    dom = new JSDOM(
+      "<!doctype html><html><body><div id='root'></div></body></html>",
+      {
+        url: "http://localhost/chat",
+      },
+    );
 
     previousWindow = globalThis.window;
     previousDocument = globalThis.document;
     previousNavigator = globalThis.navigator;
-    previousActEnvironment = (globalThis as typeof globalThis & {
-      IS_REACT_ACT_ENVIRONMENT?: boolean;
-    }).IS_REACT_ACT_ENVIRONMENT;
+    previousActEnvironment = (
+      globalThis as typeof globalThis & {
+        IS_REACT_ACT_ENVIRONMENT?: boolean;
+      }
+    ).IS_REACT_ACT_ENVIRONMENT;
 
     Object.assign(globalThis, {
       window: dom.window,
@@ -186,7 +215,9 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     expect(button).toBeTruthy();
 
     const badge = container.querySelector(".topbar-notification__badge");
@@ -199,11 +230,15 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     expect(button).toBeTruthy();
 
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const popup = container.querySelector(".topbar-notification__popup");
@@ -216,9 +251,13 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const popup = container.querySelector(".topbar-notification__popup");
@@ -236,21 +275,33 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const items = container.querySelectorAll(".topbar-notification__item");
     expect(items.length).toBe(2);
 
-    const unreadItem = container.querySelector(".topbar-notification__item.is-unread");
+    const unreadItem = container.querySelector(
+      ".topbar-notification__item.is-unread",
+    );
     expect(unreadItem).toBeTruthy();
-    expect(unreadItem?.querySelector(".topbar-notification__item-dot")).toBeTruthy();
+    expect(
+      unreadItem?.querySelector(".topbar-notification__item-dot"),
+    ).toBeTruthy();
 
-    const readItem = container.querySelector(".topbar-notification__item:not(.is-unread)");
+    const readItem = container.querySelector(
+      ".topbar-notification__item:not(.is-unread)",
+    );
     expect(readItem).toBeTruthy();
-    expect(readItem?.querySelector(".topbar-notification__item-dot")).toBeFalsy();
+    expect(
+      readItem?.querySelector(".topbar-notification__item-dot"),
+    ).toBeFalsy();
   });
 
   it("renders empty state when no notifications", async () => {
@@ -264,9 +315,13 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const empty = container.querySelector(".topbar-notification__empty");
@@ -279,16 +334,24 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
-    const firstItem = container.querySelector(".topbar-notification__item") as HTMLButtonElement | null;
+    const firstItem = container.querySelector(
+      ".topbar-notification__item",
+    ) as HTMLButtonElement | null;
     expect(firstItem).toBeTruthy();
 
     await act(async () => {
-      firstItem?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      firstItem?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     expect(navigateCalls.length).toBeGreaterThan(0);
@@ -302,9 +365,13 @@ describe("TopbarNotificationBell", () => {
       root.render(<TopbarNotificationBell />);
     });
 
-    const button = container.querySelector(".topbar-notification__button") as HTMLButtonElement | null;
+    const button = container.querySelector(
+      ".topbar-notification__button",
+    ) as HTMLButtonElement | null;
     await act(async () => {
-      button?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const popup = container.querySelector(".topbar-notification__popup");
@@ -315,16 +382,24 @@ describe("TopbarNotificationBell", () => {
     const header = container.querySelector(".topbar-notification__header");
     expect(header).toBeTruthy();
     expect(header?.querySelector(".topbar-notification__title")).toBeTruthy();
-    expect(header?.querySelector(".topbar-notification__mark-all")).toBeTruthy();
+    expect(
+      header?.querySelector(".topbar-notification__mark-all"),
+    ).toBeTruthy();
 
     // list and item body layout
     const list = container.querySelector(".topbar-notification__list");
     expect(list).toBeTruthy();
     const firstItem = list?.querySelector(".topbar-notification__item");
     expect(firstItem).toBeTruthy();
-    expect(firstItem?.querySelector(".topbar-notification__item-body")).toBeTruthy();
-    expect(firstItem?.querySelector(".topbar-notification__item-title-row")).toBeTruthy();
-    expect(firstItem?.querySelector(".topbar-notification__item-message")).toBeTruthy();
+    expect(
+      firstItem?.querySelector(".topbar-notification__item-body"),
+    ).toBeTruthy();
+    expect(
+      firstItem?.querySelector(".topbar-notification__item-title-row"),
+    ).toBeTruthy();
+    expect(
+      firstItem?.querySelector(".topbar-notification__item-message"),
+    ).toBeTruthy();
   });
 
   it("CSS allows header wrapping and keeps mark-all clickable on narrow screens", async () => {
@@ -332,7 +407,9 @@ describe("TopbarNotificationBell", () => {
     const css = await Bun.file(cssPath).text();
 
     // Header must allow wrapping so narrow screens don't squeeze title/subtitle
-    const headerMatch = css.match(/\.topbar-notification__header\s*\{([^}]*)\}/s);
+    const headerMatch = css.match(
+      /\.topbar-notification__header\s*\{([^}]*)\}/s,
+    );
     expect(headerMatch).toBeTruthy();
     const headerRule = headerMatch![1];
     expect(headerRule).toMatch(/flex-wrap:\s*wrap/);
@@ -340,12 +417,16 @@ describe("TopbarNotificationBell", () => {
     expect(headerRule).toMatch(/min-width:\s*0/);
 
     // Left title area must be allowed to shrink
-    const titleAreaMatch = css.match(/\.topbar-notification__header\s*>\s*div:first-child\s*\{([^}]*)\}/s);
+    const titleAreaMatch = css.match(
+      /\.topbar-notification__header\s*>\s*div:first-child\s*\{([^}]*)\}/s,
+    );
     expect(titleAreaMatch).toBeTruthy();
     expect(titleAreaMatch![1]).toMatch(/min-width:\s*0/);
 
     // Mark-all button must never shrink or wrap its text
-    const markAllMatch = css.match(/\.topbar-notification__mark-all\s*\{([^}]*)\}/s);
+    const markAllMatch = css.match(
+      /\.topbar-notification__mark-all\s*\{([^}]*)\}/s,
+    );
     expect(markAllMatch).toBeTruthy();
     const markAllRule = markAllMatch![1];
     expect(markAllRule).toMatch(/flex-shrink:\s*0/);

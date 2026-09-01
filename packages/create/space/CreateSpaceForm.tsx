@@ -12,7 +12,7 @@ import Button from "render/web/ui/Button";
 import { LuPlus, LuFolderOpen, LuFolder, LuX } from "react-icons/lu";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { SpaceVisibility } from "app/types";
-import { addSpace, changeSpace } from "./spaceSlice";
+import { addSpace, changeSpace } from "./spaceThunks";
 import { getIsDesktopApp } from "app/utils/env";
 
 type CreateSpaceRequest = {

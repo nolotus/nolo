@@ -1,8 +1,6 @@
 // ai/tools/updateContentCategoryTool.ts
 
-import {
-  updateContentCategory,
-} from "create/space/spaceSlice";
+import { updateContentCategory } from "create/space/content/contentThunks";
 import type { RootState } from "app/store";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 

@@ -31,7 +31,9 @@ import { shouldDeferEnterForIme } from "app/utils/ime";
 import { compactWorkspacePath } from "app/utils/compactWorkspacePath";
 import { read, selectEntities } from "database/dbSlice";
 import { fetchUserProfile } from "identity/actions";
-import { selectSpaceById } from "create/space/spaceSlice";
+import {
+  selectSpaceById,
+} from "create/space/spaceCurrentSelectors";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { useUserId } from "identity";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";

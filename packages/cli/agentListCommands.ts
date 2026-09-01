@@ -1,5 +1,5 @@
 import { toErrorMessage } from "core/errorMessage";
-import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields } from "ai/agent/safeAgentSummary";
+import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -223,9 +223,17 @@ export async function runAgentListCommand(
       if (publicOnly) {
         safeCandidates = safeCandidates.filter((agent) => agent.isPublic);
       }
-      const safeUnavailableCount = safeCandidates.filter((agent) =>
+      const safeUnavailableList = safeCandidates.filter((agent) =>
         isAgentUnavailableNow(agent as any)
-      ).length;
+      );
+      const safeUnavailableCount = safeUnavailableList.length;
+      // 与 server listAgents（ai 包 listAgentsFunction）同构：即使主列表默认
+      // 过滤掉 429 agent，也始终返回摘要，让编排契约「知情权」有数据可用
+      // （哪个 agent 限流、何时恢复）。showUnavailable 只影响 agents 主列表。
+      const safeUnavailableSummaries = safeUnavailableList as unknown as SafeAgentSummary[];
+      const safeUnavailableAgents = sortSafeAgentSummaries(
+        safeUnavailableSummaries
+      ).map(toUnavailableAgentSummary);
       const safeAgents = showUnavailable
         ? safeCandidates
         : safeCandidates.filter((agent) => !isAgentUnavailableNow(agent as any));
@@ -243,6 +251,7 @@ export async function runAgentListCommand(
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         total: sortedSafeAgents.length,
         unavailableCount: safeUnavailableCount,
+        unavailableAgents: safeUnavailableAgents,
         agents: safeOutputAgents,
       }, null, 2));
       output.write("\n");

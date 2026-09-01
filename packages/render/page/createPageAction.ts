@@ -1,8 +1,6 @@
 // 文件路径: render/page/createPageAction.ts
 import { selectIdentityUserId } from "identity/selectors";
-import {
-  addContentToSpace,
-} from "create/space/spaceSlice";
+import { addContentToSpace } from "create/space/content/contentThunks";
 import { createPageKey } from "database/keys";
 import i18n from "app/i18n/client";
 import { DataType } from "create/types";

@@ -17,7 +17,7 @@ import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { getSpaceContentTypeLabel } from "create/space/contentLabels";
 import {
   changeSpace,
-} from "create/space/spaceSlice";
+} from "create/space/spaceThunks";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import {
   ITEM_ICONS,

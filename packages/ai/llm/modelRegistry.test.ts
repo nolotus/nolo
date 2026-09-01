@@ -155,7 +155,7 @@ describe("model registry", () => {
     ).toBe(false);
   });
 
-  it("surfaces platform nolo Kimi + GLM and Claude in ALL_MODELS", () => {
+  it("surfaces platform nolo Kimi + GLM in ALL_MODELS (Claude delisted)", () => {
     expect(ALL_MODELS).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -166,20 +166,12 @@ describe("model registry", () => {
           provider: "nolo",
           name: "deepseek-v4-flash",
         }),
-        expect.objectContaining({
-          provider: "nolo",
-          name: "anthropic/claude-sonnet-5",
-        }),
-        expect.objectContaining({
-          provider: "nolo",
-          name: "anthropic/claude-opus-5",
-        }),
-        expect.objectContaining({
-          provider: "nolo",
-          name: "anthropic/claude-fable-5",
-        }),
       ])
     );
+    // Claude 系已下架（2026-09-01）：不再出现在 nolo 托管模型列表
+    expect(
+      ALL_MODELS.some((m) => String(m.name).includes("claude"))
+    ).toBe(false);
     expect(
       ALL_MODELS.some((m) => m.name === "anthropic/claude-haiku-4-5")
     ).toBe(false);

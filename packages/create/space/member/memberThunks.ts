@@ -1,5 +1,6 @@
 // create/space/member/memberThunks.ts
-import type { SpaceState } from "../types";
+// Wave E: 从 slice 工厂改为模块顶层 createAsyncThunk 直出，typePrefix 保持不变。
+import { createAsyncThunk } from "@reduxjs/toolkit";
 // Wave D: currentSpaceId/currentSpace 已剥至 module store。
 import {
   getCurrentSpaceIdRaw,
@@ -16,50 +17,46 @@ import {
   setMembershipRejected,
 } from "../spaceMembershipStore";
 
-type Create = {
-  asyncThunk: (...args: any[]) => any;
-  reducer: (...args: any[]) => any;
-};
-
-/**
- * 创建与成员相关的 Async Thunks
- * @param create - 由 buildCreateSlice 提供的创建器对象
- */
-export const createMemberThunks = (create: Create) => ({
-  fetchUserSpaceMemberships: create.asyncThunk(
-    fetchUserSpaceMembershipsAction,
-    {
-      pending: (state: SpaceState) => {
-        // Wave C: loading/membershipStatus 已剥至 module store。
-        setMembershipLoading();
-      },
-      fulfilled: (state: SpaceState, action: any) => {
-        // Wave C: memberSpaces/loading/membershipStatus/initialized 已剥至 module store。
-        setMemberSpaces(action.payload);
-      },
-      rejected: (state: SpaceState, action: any) => {
-        // Wave C: error/membershipStatus 已剥至 module store。
-        setMembershipRejected(
-          action.error.message,
-          isSpaceMembershipRemoteUnavailableError(action.error)
-        );
-      },
+export const fetchUserSpaceMemberships = createAsyncThunk(
+  "space/fetchUserSpaceMemberships",
+  async (arg: any, thunkAPI: any) => {
+    // pending 副作用：同步执行，保持原 pending reducer 的即时性。
+    // Wave C: loading/membershipStatus 已剥至 module store。
+    setMembershipLoading();
+    try {
+      const payload = await fetchUserSpaceMembershipsAction(arg, thunkAPI);
+      // Wave C: memberSpaces/loading/membershipStatus/initialized 已剥至 module store。
+      setMemberSpaces(payload);
+      return payload;
+    } catch (error) {
+      // Wave C: error/membershipStatus 已剥至 module store。
+      setMembershipRejected(
+        (error as { message?: string } | undefined)?.message,
+        isSpaceMembershipRemoteUnavailableError(error)
+      );
+      throw error;
     }
-  ),
+  }
+);
 
-  addMember: create.asyncThunk(addMemberAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-        updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-      }
-    },
-  }),
+export const addMember = createAsyncThunk(
+  "space/addMember",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await addMemberAction(arg, thunkAPI);
+    if (getCurrentSpaceIdRaw() === payload.spaceId) {
+      updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);
+    }
+    return payload;
+  }
+);
 
-  removeMember: create.asyncThunk(removeMemberAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      if (getCurrentSpaceIdRaw() === action.payload.spaceId) {
-        updateCurrentSpaceIfMatch(action.payload.spaceId, action.payload.updatedSpaceData);
-      }
-    },
-  }),
-});
+export const removeMember = createAsyncThunk(
+  "space/removeMember",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await removeMemberAction(arg, thunkAPI);
+    if (getCurrentSpaceIdRaw() === payload.spaceId) {
+      updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);
+    }
+    return payload;
+  }
+);

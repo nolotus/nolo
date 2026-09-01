@@ -1,14 +1,18 @@
 // create/space/spaceThunks.ts
-import type { SpaceContent, SpaceData } from "app/types";
-import { patch, read } from "database/dbSlice";
+// Wave E: spaceSlice 已删除。这些 thunk 从工厂模式改为模块顶层 createAsyncThunk 直出。
+// typePrefix 保持与原 slice ("space" + key) 完全一致。
+// 原 case reducer（pending/fulfilled/rejected）只操作 module store，从不碰 slice state，
+// 因此全部内联进 payload creator：pending 在 async 体开头同步执行，fulfilled 在成功后，
+// rejected 在 catch 中执行后 rethrow（保持 RTK 的 rejected action 语义）。
+import { createAsyncThunk } from "@reduxjs/toolkit";
 import { addSpaceAction } from "./addSpaceAction";
 import { deleteSpaceAction } from "./deleteSpaceAction";
 import { fetchSpaceAction } from "./fetchSpaceAction";
-import { createSpaceKey, normalizeSpaceId } from "./spaceKeys";
+import { normalizeSpaceId } from "./spaceKeys";
 import { updateSpaceAction } from "./updateSpaceAction";
 import { fetchSpaceSidebarStateAction } from "./fetchSpaceSidebarStateAction";
 import { changeSpaceAction } from "./changeSpaceAction";
-import { type SpaceState } from "./types";
+import { applyFetchSpaceFulfilled } from "./applyFetchSpaceFulfilled";
 // Wave A: collapsedCategories 已剥至 module store。
 import { setCollapsedCategories as setCollapsedCategoriesUi } from "./spaceUiStore";
 // Wave D: setViewMode 已从 spaceUiStore 迁至 spaceCurrentStore。
@@ -20,103 +24,119 @@ import {
   updateMemberSpaceName,
   setMembershipLoading,
   setMembershipLoaded,
-  setSpaceInitialized,
   setMembershipRejected,
 } from "./spaceMembershipStore";
 // Wave D: currentSpaceId/currentSpace 已剥至 module store。
 import {
   getCurrentSpaceIdRaw,
   setCurrentSpaceBoth,
-  setCurrentSpaceId,
   setCurrentSpace,
   updateCurrentSpaceIfMatch,
 } from "./spaceCurrentStore";
 
-type Create = {
-  asyncThunk: (...args: any[]) => any;
-  reducer: (...args: any[]) => any;
-};
+export { applyFetchSpaceFulfilled } from "./applyFetchSpaceFulfilled";
 
-export const createSpaceThunks = (create: Create) => ({
-  fetchSpaceSidebarState: create.asyncThunk(fetchSpaceSidebarStateAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      setCollapsedCategoriesUi(action.payload.collapsedCategories, getCurrentSpaceIdRaw());
-    },
-    rejected: (state: SpaceState, action: any) => {
-      console.error("获取空间侧边栏状态失败:", action.error.message);
+const errorMessage = (error: unknown): string | undefined =>
+  (error as { message?: string } | undefined)?.message;
+
+export const fetchSpaceSidebarState = createAsyncThunk(
+  "space/fetchSpaceSidebarState",
+  async (arg: any, thunkAPI: any) => {
+    try {
+      const payload = await fetchSpaceSidebarStateAction(arg, thunkAPI);
+      setCollapsedCategoriesUi(
+        payload.collapsedCategories,
+        getCurrentSpaceIdRaw()
+      );
+      return payload;
+    } catch (error) {
+      console.error("获取空间侧边栏状态失败:", errorMessage(error));
       setCollapsedCategoriesUi({}, getCurrentSpaceIdRaw());
-    },
-  }),
+      throw error;
+    }
+  }
+);
 
-  changeSpace: create.asyncThunk(changeSpaceAction, {
-    pending: (state: SpaceState, action: any) => {
-      const newSpaceId = normalizeSpaceId(action.meta.arg);
-      if (getCurrentSpaceIdRaw() !== newSpaceId) {
-        setMembershipLoading();
-        setCurrentSpace(null);
-      }
-    },
-    fulfilled: (state: SpaceState, action: any) => {
-      setCurrentSpaceBoth(action.payload.spaceId, action.payload.spaceData);
+export const changeSpace = createAsyncThunk(
+  "space/changeSpace",
+  async (arg: any, thunkAPI: any) => {
+    // pending 副作用：必须在 async 体开头同步执行，保持原 pending reducer 的即时性。
+    const newSpaceId = normalizeSpaceId(arg);
+    if (getCurrentSpaceIdRaw() !== newSpaceId) {
+      setMembershipLoading();
+      setCurrentSpace(null);
+    }
+
+    try {
+      const payload = await changeSpaceAction(arg, thunkAPI);
+      setCurrentSpaceBoth(payload.spaceId, payload.spaceData);
       setMembershipLoaded();
       setCollapsedCategoriesUi(
-        action.payload.sidebarState?.collapsedCategories || {},
-        action.payload.spaceId,
+        payload.sidebarState?.collapsedCategories || {},
+        payload.spaceId
       );
-    },
-    rejected: (state: SpaceState, action: any) => {
-      setMembershipRejected(action.error.message || "切换空间失败", false);
+      return payload;
+    } catch (error) {
+      setMembershipRejected(errorMessage(error) || "切换空间失败", false);
       setCurrentSpaceBoth(null, null);
       setCollapsedCategoriesUi({}, null);
-    },
-  }),
+      throw error;
+    }
+  }
+);
 
-  addSpace: create.asyncThunk(addSpaceAction, {
-    pending: (state: SpaceState) => {
-      setMembershipLoading();
-    },
-    fulfilled: (state: SpaceState, action: any) => {
-      addMemberSpace(action.payload);
-    },
-    rejected: (state: SpaceState, action: any) => {
-      setMembershipRejected(action.error.message, false);
-    },
-  }),
+export const addSpace = createAsyncThunk(
+  "space/addSpace",
+  async (arg: any, thunkAPI: any) => {
+    setMembershipLoading();
+    try {
+      const payload = await addSpaceAction(arg, thunkAPI);
+      addMemberSpace(payload);
+      return payload;
+    } catch (error) {
+      setMembershipRejected(errorMessage(error), false);
+      throw error;
+    }
+  }
+);
 
-  deleteSpace: create.asyncThunk(deleteSpaceAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      const normalizedSpaceId = normalizeSpaceId(action.payload.spaceId);
-      const currentSpaceId = getCurrentSpaceIdRaw();
-      const normalizedCurrentSpaceId = currentSpaceId
-        ? normalizeSpaceId(currentSpaceId)
-        : null;
-      removeMemberSpace(normalizedSpaceId);
-      if (normalizedCurrentSpaceId === normalizedSpaceId) {
-        setCurrentSpaceBoth(null, null);
-        setCollapsedCategoriesUi({}, null);
-        setViewModeUi("all");
-      }
-    },
-  }),
+export const deleteSpace = createAsyncThunk(
+  "space/deleteSpace",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await deleteSpaceAction(arg, thunkAPI);
+    const normalizedSpaceId = normalizeSpaceId(payload.spaceId);
+    const currentSpaceId = getCurrentSpaceIdRaw();
+    const normalizedCurrentSpaceId = currentSpaceId
+      ? normalizeSpaceId(currentSpaceId)
+      : null;
+    removeMemberSpace(normalizedSpaceId);
+    if (normalizedCurrentSpaceId === normalizedSpaceId) {
+      setCurrentSpaceBoth(null, null);
+      setCollapsedCategoriesUi({}, null);
+      setViewModeUi("all");
+    }
+    return payload;
+  }
+);
 
-  updateSpace: create.asyncThunk(updateSpaceAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      const { updatedSpace, spaceId } = action.payload;
-      updateCurrentSpaceIfMatch(spaceId, updatedSpace);
-      if (updatedSpace.name) {
-        updateMemberSpaceName(updatedSpace.id, updatedSpace.name);
-      }
-    },
-  }),
+export const updateSpace = createAsyncThunk(
+  "space/updateSpace",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await updateSpaceAction(arg, thunkAPI);
+    const { updatedSpace, spaceId } = payload;
+    updateCurrentSpaceIfMatch(spaceId, updatedSpace);
+    if (updatedSpace.name) {
+      updateMemberSpaceName(updatedSpace.id, updatedSpace.name);
+    }
+    return payload;
+  }
+);
 
-  fetchSpace: create.asyncThunk(fetchSpaceAction, {
-    fulfilled: (state: SpaceState, action: any) => {
-      const { spaceId, spaceData } = action.payload;
-      const currentSpaceId = getCurrentSpaceIdRaw();
-      if (!currentSpaceId || currentSpaceId === spaceId) {
-        setCurrentSpaceBoth(spaceId, spaceData);
-        setSpaceInitialized();
-      }
-    },
-  }),
-});
+export const fetchSpace = createAsyncThunk(
+  "space/fetchSpace",
+  async (arg: any, thunkAPI: any) => {
+    const payload = await fetchSpaceAction(arg, thunkAPI);
+    applyFetchSpaceFulfilled(payload);
+    return payload;
+  }
+);

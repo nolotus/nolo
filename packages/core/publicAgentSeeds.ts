@@ -352,56 +352,8 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   tags: ["nolo", "glm", "flash"],
 });
 
-export const CLAUDE_SONNET_5_DEF = defineAgentSeed({
-  id: deterministicId("01CLSO50DIPB", "shared-space-deepinfra-claude-sonnet-5"),
-  presetKey: "claude-sonnet-5-deepinfra",
-  name: "Claude Sonnet 5",
-  provider: "deepinfra",
-  model: "anthropic/claude-sonnet-5",
-  isPublic: true,
-  platformAudit: true,
-  hasVision: true,
-  introduction: "Claude Sonnet 5 公开助手，适合复杂问答、代码分析和图片理解。",
-  greeting: "你好，我是 Claude Sonnet 5。适合复杂问题、代码分析和图片理解。",
-  prompt:
-    "面对复杂任务先厘清目标和约束，再给出可靠、可执行、可复核的结果。",
-  tools: [],
-  tags: ["claude", "anthropic"],
-});
-
-export const CLAUDE_OPUS_5_DEF = defineAgentSeed({
-  id: deterministicId("01CLOP48DIPB", "shared-space-deepinfra-claude-opus-4-8"),
-  presetKey: "claude-opus-5-deepinfra",
-  name: "Claude Opus 5",
-  provider: "deepinfra",
-  model: "anthropic/claude-opus-5",
-  isPublic: true,
-  platformAudit: true,
-  hasVision: true,
-  introduction: "Claude Opus 5 公开助手，适合高难推理、长链路分析和图片理解。",
-  greeting: "你好，我是 Claude Opus 5。适合高难推理、复杂分析和图片理解。",
-  prompt:
-    "先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
-  tools: [],
-  tags: ["claude", "anthropic"],
-});
-
-export const CLAUDE_FABLE_5_DEF = defineAgentSeed({
-  id: deterministicId("01FABLE5DIPB", "shared-space-deepinfra-claude-fable-5"),
-  presetKey: "claude-fable-5-deepinfra",
-  name: "Claude Fable 5",
-  provider: "deepinfra",
-  model: "anthropic/claude-fable-5",
-  isPublic: true,
-  platformAudit: true,
-  hasVision: true,
-  introduction: "Claude Fable 5 公开助手，适合高难推理、复杂分析和图片理解。",
-  greeting: "你好，我是 Claude Fable 5。适合高难推理、复杂分析和图片理解。",
-  prompt:
-    "先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
-  tools: [],
-  tags: ["claude", "anthropic"],
-});
+// Claude Sonnet/Opus/Fable 5 seeds 已移除（2026-09-01 平台停止维护 Claude 系，
+// 广场下架；存量空间记录由 modelUpgradeTable 迁移到 glm-5-3-flash）。
 
 export const GROK_4_6_DEF = defineAgentSeed({
   id: deterministicId("01GROK46PLAZ", "shared-space-xai-grok-4-6"),
@@ -586,9 +538,6 @@ export const PUBLIC_AGENT_DEFS = [
   DEEPSEEK_V4_PRO_DEF,
   GLM_5_3_DEF,
   GLM_5_3_FLASH_DEF,
-  CLAUDE_SONNET_5_DEF,
-  CLAUDE_OPUS_5_DEF,
-  CLAUDE_FABLE_5_DEF,
   GROK_4_6_DEF,
   GEMINI_3_7_FLASH_DEF,
   GPT_IMAGE_2_GENERATOR_DEF,

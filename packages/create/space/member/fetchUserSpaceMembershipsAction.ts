@@ -11,6 +11,12 @@ import {
   selectSpaceRemoteAuth,
   spaceListsUser,
 } from "create/space/spaceAccess";
+// Wave E: spaceSlice 已删除，本地水合/恢复直接写 module store。
+import {
+  hydrateMemberSpacesFromLocal,
+  appendRecoveredMemberships,
+  getMemberSpaces,
+} from "create/space/spaceMembershipStore";
 import { DataType } from "create/types";
 import { API_ENDPOINTS } from "database/config";
 import { readAction } from "database/actions/read";
@@ -298,7 +304,8 @@ export const fetchUserSpaceMembershipsAction = async (
       );
 
   const localMemberships = await localMembershipsPromise;
-  if (state.space?.memberSpaces === null && localMemberships.length > 0) {
+  // Wave E: state.space 已随 spaceSlice 删除，"memberships 未加载"改读 module store。
+  if (getMemberSpaces() === null && localMemberships.length > 0) {
     const localPreview = await buildLocalMembershipPreview(
       userId,
       db,
@@ -306,10 +313,8 @@ export const fetchUserSpaceMembershipsAction = async (
     );
     // Only advertise Spaces that are locally openable offline.
     if (localPreview.length > 0) {
-      thunkAPI.dispatch?.({
-        type: "space/hydrateMemberSpacesFromLocal",
-        payload: localPreview,
-      });
+      // Wave E: spaceSlice 已删除，直接调用 module store。
+      hydrateMemberSpacesFromLocal(localPreview);
     }
   }
 
@@ -546,10 +551,8 @@ export const fetchUserSpaceMembershipsAction = async (
         } = membership;
         return { ...visible, spaceId: normalizeSpaceId(membership.spaceId) };
       });
-      thunkAPI.dispatch?.({
-        type: "space/appendRecoveredMemberships",
-        payload: cleaned,
-      });
+      // Wave E: spaceSlice 已删除，直接调用 module store。
+      appendRecoveredMemberships(cleaned);
     }).catch(() => {
       // Recover is best-effort; never surface as user-facing error.
     });

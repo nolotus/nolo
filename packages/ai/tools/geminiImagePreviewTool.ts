@@ -7,6 +7,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import { extractCustomId } from "core/prefix";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 
 const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview" as const;
 
@@ -38,8 +39,9 @@ type GeminiImageCommonArgs = {
 const selectCurrentDialogKeyFromState = (_state: any): string | null =>
     getActiveDialogKey();
 
-const selectCurrentSpaceIdFromState = (state: any): string | null =>
-    typeof state?.space?.currentSpaceId === "string" ? state.space.currentSpaceId : null;
+// Space current-state now lives in a module store, not the Redux `space` slice.
+const selectCurrentSpaceIdFromState = (_state: any): string | null =>
+    getCurrentSpaceId();
 
 const selectUserIdFromState = (state: any): string | null =>
     typeof state?.auth?.currentUser?.userId === "string" ? state.auth.currentUser.userId : null;

@@ -4,7 +4,7 @@ import SpaceNavigation from "./SpaceNavigation";
 import { useTheme } from "app/theme";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { selectSidebarWidth } from "app/settings/settingSlice";
-import { changeSpace } from "create/space/spaceSlice";
+import { changeSpace } from "create/space/spaceThunks";
 import { normalizeSpaceId } from "create/space/spaceKeys";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 

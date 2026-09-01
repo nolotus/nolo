@@ -7,13 +7,19 @@ const realAuthSlice = { ...(await import("auth/authSlice")) };
 const realSettingSlice = { ...(await import("app/settings/settingSlice")) };
 const realDbSlice = { ...(await import("database/dbSlice")) };
 const realFavoriteSlice = { ...(await import("app/favorite/favoriteStore")) };
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
-const realSpaceCurrentStore = { ...(await import("create/space/spaceCurrentStore")) };
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
+const realSpaceCurrentStore = {
+  ...(await import("create/space/spaceCurrentStore")),
+};
 // 同 PublicAgentsPreview：粘性 mock 漏还原会污染后续 suite 文件。
 const realIdentity = { ...(await import("identity")) };
 const realReactRedux = { ...(await import("react-redux")) };
 const realStore = { ...(await import("app/store")) };
-const realUseAgentDialog = { ...(await import("ai/agent/hooks/useAgentDialog")) };
+const realUseAgentDialog = {
+  ...(await import("ai/agent/hooks/useAgentDialog")),
+};
 const realUseHasMounted = { ...(await import("app/hooks/useHasMounted")) };
 const realRouting = { ...(await import("app/routing")) };
 const realToast = { ...(await import("app/utils/toast")) };
@@ -40,7 +46,7 @@ const restoreLeakedModuleMocks = () => {
   mock.module("app/settings/settingSlice", () => realSettingSlice);
   mock.module("database/dbSlice", () => realDbSlice);
   mock.module("app/favorite/favoriteStore", () => realFavoriteSlice);
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
   mock.module("create/space/spaceCurrentStore", () => realSpaceCurrentStore);
 };
 
@@ -69,7 +75,11 @@ async function loadAgentBlock() {
       children?: React.ReactNode;
       to?: string;
       [key: string]: unknown;
-    }) => <a href={to} {...props}>{children}</a>,
+    }) => (
+      <a href={to} {...props}>
+        {children}
+      </a>
+    ),
   }));
 
   const realIdentity = await import("identity");
@@ -77,7 +87,7 @@ async function loadAgentBlock() {
     ...realIdentity,
     useUserId: () => "user-1",
   }));
-  
+
   mock.module("react-redux", () => ({
     ...actualReactRedux,
     useSelector: (selector: (state: any) => unknown) =>
@@ -107,8 +117,7 @@ async function loadAgentBlock() {
 
   mock.module("auth/authSlice", () => ({
     ...realAuthSlice,
-    selectUserId: (state: any) =>
-      state?.auth?.currentUser?.userId ?? "user-1",
+    selectUserId: (state: any) => state?.auth?.currentUser?.userId ?? "user-1",
   }));
 
   mock.module("app/settings/settingSlice", () => ({
@@ -127,8 +136,8 @@ async function loadAgentBlock() {
   }));
 
   // Keep real deleteContentFromSpace thunk (.fulfilled) for sibling reducers.
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceModule,
     selectCurrentSpaceId: (state: any) => state.space.currentSpaceId,
     selectViewMode: (state: any) => state.space.viewMode,
   }));
@@ -160,19 +169,30 @@ async function loadAgentBlock() {
       options: {
         spaceId?: string | null;
         preferredServerOrigin?: string | null;
-      } = {}
+      } = {},
     ) => {
       dialogOptions.push(options);
       return {
-      isStarting: false,
-      startDialog: () => {},
+        isStarting: false,
+        startDialog: () => {},
       };
     },
   }));
 
   mock.module("app/favorite/AgentFavoriteButton", () => ({
-    default: ({ agentKey, className }: { agentKey: string; className?: string }) => (
-      <button type="button" data-testid="fav-btn" data-agent={agentKey} className={`agent-fav-btn-optimized ${className || ""}`} />
+    default: ({
+      agentKey,
+      className,
+    }: {
+      agentKey: string;
+      className?: string;
+    }) => (
+      <button
+        type="button"
+        data-testid="fav-btn"
+        data-agent={agentKey}
+        className={`agent-fav-btn-optimized ${className || ""}`}
+      />
     ),
   }));
 
@@ -181,7 +201,9 @@ async function loadAgentBlock() {
   }));
 
   mock.module("render/web/ui/modal/Dialog", () => ({
-    Dialog: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+    Dialog: ({ children }: { children?: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
   }));
 
   mock.module("ai/agent/avatarUtils", () => ({
@@ -224,15 +246,17 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     const html = renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-1",
-          dbKey: "agent-1",
-          name: "Favorite Agent",
-          introduction: "Helpful intro",
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-1",
+            dbKey: "agent-1",
+            name: "Favorite Agent",
+            introduction: "Helpful intro",
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(html).not.toContain("agent__fav-btn");
@@ -243,19 +267,21 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     const html = renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-turn",
-          dbKey: "agent-turn",
-          name: "Turn Agent",
-          introduction: "Helpful intro",
-          provider: "openrouter",
-          model: "openai/gpt-4.1-mini",
-          inputPrice: 20,
-          outputPrice: 20,
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-turn",
+            dbKey: "agent-turn",
+            name: "Turn Agent",
+            introduction: "Helpful intro",
+            provider: "openrouter",
+            model: "openai/gpt-4.1-mini",
+            inputPrice: 20,
+            outputPrice: 20,
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(html).not.toContain("输入");
@@ -273,19 +299,21 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     const html = renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-tiny-turn",
-          dbKey: "agent-tiny-turn",
-          name: "Tiny Turn Agent",
-          introduction: "Helpful intro",
-          provider: "openrouter",
-          model: "openai/gpt-4.1-mini",
-          inputPrice: 1,
-          outputPrice: 0,
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-tiny-turn",
+            dbKey: "agent-tiny-turn",
+            name: "Tiny Turn Agent",
+            introduction: "Helpful intro",
+            provider: "openrouter",
+            model: "openai/gpt-4.1-mini",
+            inputPrice: 1,
+            outputPrice: 0,
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(html).not.toContain("输入");
@@ -303,16 +331,18 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-origin",
-          dbKey: "agent-origin",
-          name: "Origin Agent",
-          introduction: "Helpful intro",
-          originServer: "https://us.nolo.chat",
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-origin",
+            dbKey: "agent-origin",
+            name: "Origin Agent",
+            introduction: "Helpful intro",
+            originServer: "https://us.nolo.chat",
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(dialogOptions.at(-1)).toEqual({
@@ -325,17 +355,19 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-authority",
-          dbKey: "agent-authority",
-          name: "Authority Agent",
-          introduction: "Helpful intro",
-          authorityServer: "https://self.example.com",
-          originServer: "https://us.nolo.chat",
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-authority",
+            dbKey: "agent-authority",
+            name: "Authority Agent",
+            introduction: "Helpful intro",
+            authorityServer: "https://self.example.com",
+            originServer: "https://us.nolo.chat",
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(dialogOptions.at(-1)).toEqual({
@@ -353,15 +385,17 @@ describe("AgentBlock", () => {
 
     renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-space-start",
-          dbKey: "agent-space-start",
-          name: "Space Start Agent",
-          introduction: "Helpful intro",
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-space-start",
+            dbKey: "agent-space-start",
+            name: "Space Start Agent",
+            introduction: "Helpful intro",
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(dialogOptions[0]).toEqual({
@@ -374,18 +408,20 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     const html = renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-image",
-          dbKey: "agent-image",
-          name: "Image Agent",
-          introduction: "Makes images",
-          provider: "google",
-          model: "gemini-3.1-flash-image-preview",
-          imageConfig: { enabled: true, imageSize: "2K" },
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-image",
+            dbKey: "agent-image",
+            name: "Image Agent",
+            introduction: "Makes images",
+            provider: "google",
+            model: "gemini-3.1-flash-image-preview",
+            imageConfig: { enabled: true, imageSize: "2K" },
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     // Should show the generic price label (t('price') → 'price' in test harness)
@@ -399,19 +435,21 @@ describe("AgentBlock", () => {
     const AgentBlock = await loadAgentBlock();
     const html = renderToStaticMarkup(
       <AgentBlock
-        item={{
-          id: "agent-generator",
-          dbKey: "agent-generator",
-          name: "Generator Agent",
-          introduction: "Generates images",
-          provider: "google",
-          model: "gemini-3.1-flash-image-preview",
-          imageWorkflow: "generate",
-          imageConfig: { enabled: true, imageSize: "2K" },
-          tags: [],
-        } as any}
+        item={
+          {
+            id: "agent-generator",
+            dbKey: "agent-generator",
+            name: "Generator Agent",
+            introduction: "Generates images",
+            provider: "google",
+            model: "gemini-3.1-flash-image-preview",
+            imageWorkflow: "generate",
+            imageConfig: { enabled: true, imageSize: "2K" },
+            tags: [],
+          } as any
+        }
         reload={() => {}}
-      />
+      />,
     );
 
     expect(html).toContain("默认档参考价");

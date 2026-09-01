@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -19,7 +27,7 @@ const toast = {
 const realStore = await import("app/store");
 const realDialogSlice = await import("chat/dialog/dialogSlice");
 const realSettingSlice = await import("app/settings/settingSlice");
-const realSpaceSlice = await import("create/space/spaceSlice");
+const realSpaceSelectors = { ...(await import("create/space/spaceCurrentSelectors")) };
 const realEnv = await import("app/utils/env");
 const realClipboard = await import("app/utils/clipboard");
 const realToast = await import("app/utils/toast");
@@ -35,7 +43,7 @@ const restoreLeakedModuleMocks = () => {
   mock.module("app/store", () => realStore);
   mock.module("chat/dialog/dialogSlice", () => realDialogSlice);
   mock.module("app/settings/settingSlice", () => realSettingSlice);
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceSelectors);
   mock.module("app/utils/env", () => realEnv);
   mock.module("app/utils/clipboard", () => realClipboard);
   mock.module("app/utils/toast", () => realToast);
@@ -81,8 +89,8 @@ const loadDialogMenu = async () => {
     selectCurrentServer: () => "http://localhost:3011",
     selectCopyDiagnosticsEnabled: () => true,
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceSelectors,
     selectCurrentSpaceId: () => "space-current",
   }));
   mock.module("app/utils/env", () => ({
@@ -110,9 +118,9 @@ const loadDialogMenu = async () => {
     ),
   }));
   mock.module("render/web/ui/Menu", () => {
-    const MenuActionContext = React.createContext<((key: string) => void) | null>(
-      null,
-    );
+    const MenuActionContext = React.createContext<
+      ((key: string) => void) | null
+    >(null);
     return {
       Menu: ({ onAction, children, ...rest }: any) => (
         <MenuActionContext.Provider value={onAction ?? null}>
@@ -168,10 +176,15 @@ describe("DialogMenu diagnostics", () => {
     toast.success.mockClear();
     toast.error.mockClear();
 
-    dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
-      url: "http://localhost:5173/dialog/dialog-local?token=secret&panel=chat",
-    });
-    (dom.window as any).requestAnimationFrame = (callback: FrameRequestCallback) => {
+    dom = new JSDOM(
+      "<!doctype html><html><body><div id='root'></div></body></html>",
+      {
+        url: "http://localhost:5173/dialog/dialog-local?token=secret&panel=chat",
+      },
+    );
+    (dom.window as any).requestAnimationFrame = (
+      callback: FrameRequestCallback,
+    ) => {
       return dom.window.setTimeout(() => callback(Date.now()), 16);
     };
     (dom.window as any).cancelAnimationFrame = (id: number) => {
@@ -254,7 +267,9 @@ describe("DialogMenu diagnostics", () => {
     expect(menuButton).toBeTruthy();
 
     await act(async () => {
-      menuButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      menuButton.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     const copyButton = Array.from(
@@ -263,7 +278,9 @@ describe("DialogMenu diagnostics", () => {
     expect(copyButton).toBeTruthy();
 
     await act(async () => {
-      copyButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      copyButton.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true }),
+      );
     });
 
     expect(copyToClipboard).toHaveBeenCalled();

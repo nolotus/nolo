@@ -972,5 +972,84 @@ describe("cli agent list commands", () => {
     // favorite-only unavailable agent 被隐藏，且计入 unavailableCount（口径一致）。
     expect(parsed.agents.map((a: any) => a.agentKey)).toEqual(["agent-user-1-ok"]);
     expect(parsed.unavailableCount).toBe(1);
+    // 与 server listAgents 同构：主列表默认过滤，但始终返回摘要供知情权契约使用。
+    expect(parsed.unavailableAgents).toHaveLength(1);
+    expect(parsed.unavailableAgents[0].name).toBe("Only Fav Limited");
+    expect(typeof parsed.unavailableAgents[0].nextAvailableAt).toBe("number");
+  });
+
+  test("agent list --safe surfaces credential-level cooldowns in unavailableAgents", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const home = mkdtempSync(join(tmpdir(), "nolo-cred-avail-"));
+    try {
+      // credential 层冷却：agent 记录本身没有 nextAvailableAt，冷却记在
+      // credential-availability.json 的 apiKeyRef 下（与 localRuntimeAdapter
+      // mark 同一把 key）。
+      writeFileSync(
+        join(home, "credential-availability.json"),
+        JSON.stringify({
+          entries: {
+            "api-key:agent-user-1-cred-limited": {
+              nextAvailableAt: Date.now() + 3_600_000,
+              lastProbeAt: Date.now() - 60_000,
+            },
+          },
+        }),
+        "utf8",
+      );
+      const chunks: string[] = [];
+      const exitCode = await runAgentListCommand(
+        [
+          "--json",
+          "--safe",
+          "--token",
+          `${Buffer.from(JSON.stringify({ userId: "user-1" })).toString("base64")}.sig`,
+          "--server",
+          "https://arg.nolo.chat",
+        ],
+        {
+          env: authEnv("env-user", { NOLO_HOME: home }),
+          db: {
+            get: async () => { throw new Error("unused"); },
+            put: async () => undefined,
+            batch: async () => undefined,
+            iterator: () => { throw new Error("locked"); },
+          } as any,
+          output: { write(chunk) { chunks.push(String(chunk)); } },
+          fetchImpl: testFetch(async (url) => {
+            const target = String(url);
+            if (target.endsWith("/rpc/listFavorites")) {
+              return new Response(JSON.stringify({ targetType: "agent", items: [], ids: [] }), { status: 200 });
+            }
+            if (target.includes("/api/v1/db/query/user-1")) {
+              return new Response(JSON.stringify({ data: { data: [
+                {
+                  dbKey: "agent-user-1-cred-limited",
+                  id: "cred-limited",
+                  userId: "user-1",
+                  name: "Cred Limited",
+                  model: "glm-5.3",
+                  apiKeyRef: "api-key:agent-user-1-cred-limited",
+                  updatedAt: 1700000009000,
+                },
+              ] } }), { status: 200 });
+            }
+            return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+          }),
+        }
+      );
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(chunks.join(""));
+      // credential 层冷却 → 默认隐藏。
+      expect(parsed.agents).toHaveLength(0);
+      expect(parsed.unavailableCount).toBe(1);
+      expect(parsed.unavailableAgents).toHaveLength(1);
+      expect(parsed.unavailableAgents[0].name).toBe("Cred Limited");
+      expect(typeof parsed.unavailableAgents[0].nextAvailableAt).toBe("number");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

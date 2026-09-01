@@ -34,10 +34,8 @@ import RowContextMenu from "./RowContextMenu";
 import SelectCellEditor, {
     type SelectCellEditorAnchor,
 } from "./SelectCellEditor";
-import {
-    selectCurrentSpaceId,
-    updateContentTitle,
-} from "create/space/spaceSlice";
+import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
+import { updateContentTitle } from "create/space/content/contentThunks";
 import { useAppSelector } from "app/store";
 import {
     findColumnByNameOrLabel,

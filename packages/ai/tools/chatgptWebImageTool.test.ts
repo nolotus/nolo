@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
 
 // Value-copy snapshots — Bun mock.restore() does not clear mock.module.
 const realAuthSlice = { ...(await import("auth/authSlice")) };
 const realSettingSlice = { ...(await import("app/settings/settingSlice")) };
-const realSpaceSlice = { ...(await import("create/space/spaceSlice")) };
+const realSpaceModule = {
+  ...(await import("create/space/spaceCurrentSelectors")),
+};
 const realDialogSlice = { ...(await import("chat/dialog/dialogSlice")) };
+
+const realAddContentAction = {
+  ...(await import("create/space/content/addContentAction")),
+};
 
 const callToolApiMock = mock(async () => ({
   text: "已生成图片",
@@ -16,22 +22,27 @@ let moduleVersion = 0;
 const restoreLeakedModuleMocks = () => {
   mock.module("auth/authSlice", () => realAuthSlice);
   mock.module("app/settings/settingSlice", () => realSettingSlice);
-  mock.module("create/space/spaceSlice", () => realSpaceSlice);
+  mock.module("create/space/spaceCurrentSelectors", () => realSpaceModule);
+  mock.module(
+    "create/space/content/addContentAction",
+    () => realAddContentAction,
+  );
   mock.module("chat/dialog/dialogSlice", () => realDialogSlice);
 };
+
+afterAll(() => restoreLeakedModuleMocks());
 
 const loadModule = async () => {
   mock.module("./toolApiClient", () => ({
     callToolApi: callToolApiMock,
   }));
-  mock.module("create/space/spaceSlice", () => ({
-    ...realSpaceSlice,
+  mock.module("create/space/spaceCurrentSelectors", () => ({
+    ...realSpaceModule,
     selectCurrentSpaceId: () => "space-1",
   }));
   mock.module("auth/authSlice", () => ({
     ...realAuthSlice,
-    selectUserId: (state: any) =>
-      state?.auth?.currentUser?.userId ?? "user-1",
+    selectUserId: (state: any) => state?.auth?.currentUser?.userId ?? "user-1",
   }));
   mock.module("app/settings/settingSlice", () => ({
     ...realSettingSlice,
@@ -70,11 +81,11 @@ describe("chatgptWebImageGenerateFunc", () => {
       {
         dispatch: mock(() => undefined),
         getState: () => ({}),
-      }
+      },
     );
 
     const [, path, body, options] =
-      ((callToolApiMock.mock.calls as any[])[0]) ?? [];
+      (callToolApiMock.mock.calls as any[])[0] ?? [];
     expect(path).toBe("/api/chatgpt-web-image");
     expect(body).toEqual({
       prompt: "画一张长安夜市海报",
@@ -98,8 +109,8 @@ describe("chatgptWebImageGenerateFunc", () => {
         {
           dispatch: mock(() => undefined),
           getState: () => ({}),
-        }
-      )
+        },
+      ),
     ).rejects.toThrow("prompt 不能为空");
     expect(callToolApiMock).not.toHaveBeenCalled();
   });

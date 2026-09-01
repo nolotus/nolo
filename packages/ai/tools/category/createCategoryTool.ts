@@ -1,6 +1,6 @@
 // ai/tools/createCategoryTool.ts
 
-import { addCategory } from "create/space/spaceSlice";
+import { addCategory } from "create/space/category/categoryActions";
 import type { RootState } from "app/store";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 

@@ -51,25 +51,42 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [  {
     to: { provider: "nolo", model: "deepseek-v4-pro" },
     reason: "deepseek provider 已下架（2026-08-13），统一走 nolo 平台托管",
   },
+  // Claude 系 2026-09-01 全线停止维护（广场下架 + nolo 托管列表移除），存量记录
+  // 一律兼容迁移到 nolo GLM 5.3 Flash；兼容期请求由 platformHosted 路由表重映射。
   {
     from: { provider: "deepinfra", model: "anthropic/claude-sonnet-5" },
-    to: { provider: "nolo", model: "anthropic/claude-sonnet-5" },
-    reason: "Claude 记录侧统一 nolo（实际上游仍 deepinfra），便于统一管理",
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
   },
   {
     from: { provider: "deepinfra", model: "anthropic/claude-opus-4-8" },
-    to: { provider: "nolo", model: "anthropic/claude-opus-5" },
-    reason: "Claude Opus 4.8 升级为 Opus 5，记录侧统一 nolo（实际上游仍 deepinfra）",
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
   },
   {
     from: { provider: "deepinfra", model: "anthropic/claude-opus-5" },
-    to: { provider: "nolo", model: "anthropic/claude-opus-5" },
-    reason: "Claude 记录侧统一 nolo（实际上游仍 deepinfra），便于统一管理",
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
   },
   {
     from: { provider: "deepinfra", model: "anthropic/claude-fable-5" },
-    to: { provider: "nolo", model: "anthropic/claude-fable-5" },
-    reason: "Claude 记录侧统一 nolo（实际上游仍 deepinfra），便于统一管理",
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
+  },
+  {
+    from: { provider: "nolo", model: "anthropic/claude-sonnet-5" },
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
+  },
+  {
+    from: { provider: "nolo", model: "anthropic/claude-opus-5" },
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
+  },
+  {
+    from: { provider: "nolo", model: "anthropic/claude-fable-5" },
+    to: { provider: "nolo", model: "glm-5-3-flash" },
+    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
   },
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },

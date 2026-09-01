@@ -344,9 +344,7 @@ export const executeToolRun: AsyncThunk<
         const latestState = thunkApi.getState() as any;
         const userId = latestState.auth?.currentUser?.userId;
         if (userId) {
-          const { fetchUserSpaceMemberships } = await import(
-            "create/space/spaceSlice"
-          );
+          const { fetchUserSpaceMemberships } = await import("create/space/member/memberThunks");
           await thunkApi.dispatch(fetchUserSpaceMemberships(userId) as any);
         }
       }

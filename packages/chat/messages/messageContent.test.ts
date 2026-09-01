@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+} from "bun:test";
 import { fileURLToPath } from "node:url";
 
 let moduleVersion = 0;
@@ -15,9 +23,21 @@ const getRuntimeServerContextMock = mock(() => ({
 }));
 const addContentActionMock = mock(async () => undefined);
 
+const realAddContentAction = {
+  ...(await import("create/space/content/addContentAction")),
+};
+
+afterAll(() => {
+  mock.module(
+    "create/space/content/addContentAction",
+    () => realAddContentAction,
+  );
+});
+
 const loadMessageContentModule = async () => {
   const actualDbSlice = await import("database/dbSlice");
-  const actualRuntimeServerContext = await import("database/runtimeServerContext");
+  const actualRuntimeServerContext =
+    await import("database/runtimeServerContext");
 
   mock.module("database/dbSlice", () => ({
     ...actualDbSlice,
@@ -56,7 +76,8 @@ describe("normalizeAssistantContentBuffer", () => {
   });
 
   it("strips Gemini native metadata when replacing generated image URLs", async () => {
-    const { normalizeAssistantContentBuffer } = await loadMessageContentModule();
+    const { normalizeAssistantContentBuffer } =
+      await loadMessageContentModule();
     const dispatch = mock((action: any) => {
       if (action.kind !== "upload") {
         throw new Error(`unexpected action: ${JSON.stringify(action)}`);
@@ -101,7 +122,8 @@ describe("normalizeAssistantContentBuffer", () => {
   });
 
   it("does not keep generated image data URLs when upload fails", async () => {
-    const { normalizeAssistantContentBuffer } = await loadMessageContentModule();
+    const { normalizeAssistantContentBuffer } =
+      await loadMessageContentModule();
     const dispatch = mock((action: any) => {
       if (action.kind !== "upload") {
         throw new Error(`unexpected action: ${JSON.stringify(action)}`);

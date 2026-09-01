@@ -3363,3 +3363,165 @@ describe("cli agent run client", () => {
     });
   });
 });
+
+describe("local availability precheck before HTTP dispatch", () => {
+  const TEST_TOKEN =
+    "header." +
+    Buffer.from(JSON.stringify({ userId: "user-cool-1" })).toString("base64") +
+    ".sig";
+
+  function buildCooldownHome(entries: Record<string, unknown>) {
+    const { mkdtempSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    const { tmpdir } = require("node:os") as typeof import("node:os");
+    const { join } = require("node:path") as typeof import("node:path");
+    const home = mkdtempSync(`${tmpdir()}/nolo-precheck-`);
+    writeFileSync(
+      `${home}/credential-availability.json`,
+      JSON.stringify({ entries }),
+    );
+    return home;
+  }
+
+  function readCooldownHome(home: string) {
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    return JSON.parse(readFileSync(`${home}/credential-availability.json`, "utf8"));
+  }
+
+  function limitedAgentAdapter(apiKeyRef: string) {
+    return {
+      host: "cli" as const,
+      capabilities: ["leveldb-agent-config", "local-provider"],
+      loadAgentConfig: async (agentRef: string) => ({
+        key: agentRef,
+        name: "Cred Limited",
+        apiSource: "custom" as const,
+        apiKeyRef,
+        model: "remote-model",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-cool-1" }),
+      resolveProvider: async () => ({
+        model: "remote-model",
+        complete: async () => {
+          throw new Error("unused in HTTP mode");
+        },
+      }),
+      executeTool: async () => {
+        throw new Error("no tools");
+      },
+    };
+  }
+
+  test("credential cooldown blocks HTTP dispatch before /api/agent/run", async () => {
+    const { rmSync } = require("node:fs") as typeof import("node:fs");
+    const home = buildCooldownHome({
+      "api-key:agent-user-cool-limited": {
+        nextAvailableAt: Date.now() + 3_600_000,
+        lastProbeAt: Date.now() - 60_000,
+      },
+    });
+    try {
+      const output = new CaptureOutput();
+      const fetchCalls: string[] = [];
+      const result = await runAgentTurn({
+        agentName: "Cred Limited",
+        agentKey: "agent-user-cool-limited",
+        serverUrl: "https://nolo.chat",
+        message: "hello",
+        scriptDir: "C:/missing/scripts",
+        env: { AUTH_TOKEN: TEST_TOKEN, NOLO_HOME: home },
+        runtimeMode: "server",
+        output,
+        localRuntimeAdapter: limitedAgentAdapter("api-key:agent-user-cool-limited"),
+        fetchImpl: (async (input: RequestInfo | URL) => {
+          fetchCalls.push(String(input));
+          return Response.json({ error: "unreachable" }, { status: 500 });
+        }) as unknown as typeof fetch,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(fetchCalls).toEqual([]);
+      expect(output.text()).toContain("temporarily unavailable (429 cooldown)");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("probe window lets HTTP dispatch through and records lastProbeAt", async () => {
+    const { rmSync } = require("node:fs") as typeof import("node:fs");
+    const staleProbeAt = Date.now() - 20 * 60 * 1000;
+    const home = buildCooldownHome({
+      "api-key:agent-user-cool-probe": {
+        nextAvailableAt: Date.now() + 3_600_000,
+        lastProbeAt: staleProbeAt,
+      },
+    });
+    try {
+      const output = new CaptureOutput();
+      const fetchCalls: string[] = [];
+      await runAgentTurn({
+        agentName: "Probe Agent",
+        agentKey: "agent-user-cool-probe",
+        serverUrl: "https://nolo.chat",
+        message: "hello",
+        scriptDir: "C:/missing/scripts",
+        env: { AUTH_TOKEN: TEST_TOKEN, NOLO_HOME: home },
+        runtimeMode: "server",
+        output,
+        localRuntimeAdapter: limitedAgentAdapter("api-key:agent-user-cool-probe"),
+        fetchImpl: (async (input: RequestInfo | URL) => {
+          fetchCalls.push(String(input));
+          return Response.json({ error: "server says no" }, { status: 429 });
+        }) as unknown as typeof fetch,
+      });
+
+      expect(fetchCalls.some((url) => url.includes("/api/agent/run"))).toBe(true);
+      const file = readCooldownHome(home);
+      const probeAt = file.entries["api-key:agent-user-cool-probe"]?.lastProbeAt;
+      expect(typeof probeAt).toBe("number");
+      expect(probeAt).toBeGreaterThan(staleProbeAt);
+      expect(probeAt).toBeLessThanOrEqual(Date.now());
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("missing local agent config skips the precheck and dispatches as before", async () => {
+    const output = new CaptureOutput();
+    const fetchCalls: string[] = [];
+    await runAgentTurn({
+      agentName: "Platform",
+      agentKey: "agent-pub-platform-test",
+      serverUrl: "https://nolo.chat",
+      message: "hello",
+      scriptDir: "C:/missing/scripts",
+      env: { AUTH_TOKEN: TEST_TOKEN, NOLO_HOME: "/nonexistent-nolo-home-precheck" },
+      runtimeMode: "server",
+      output,
+      localRuntimeAdapter: {
+        host: "cli" as const,
+        capabilities: ["leveldb-agent-config", "local-provider"],
+        loadAgentConfig: async () => {
+          throw new Error("Local agent config not found");
+        },
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-cool-2" }),
+        resolveProvider: async () => ({
+          model: "m",
+          complete: async () => {
+            throw new Error("unused");
+          },
+        }),
+        executeTool: async () => {
+          throw new Error("no tools");
+        },
+      },
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        fetchCalls.push(String(input));
+        return Response.json({ error: "server says no" }, { status: 429 });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(fetchCalls.some((url) => url.includes("/api/agent/run"))).toBe(true);
+  });
+});

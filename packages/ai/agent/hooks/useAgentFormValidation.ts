@@ -9,10 +9,7 @@ import { createAgentKey } from "database/keys";
 import { useTranslation } from "react-i18next";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
-import {
-  addContentToSpace,
-  updateContentTitle,
-} from "create/space/spaceSlice";
+import { addContentToSpace, updateContentTitle } from "create/space/content/contentThunks";
 import {
   getCreateAgentSchema,
   FormData,

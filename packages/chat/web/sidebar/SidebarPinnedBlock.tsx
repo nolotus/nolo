@@ -5,7 +5,9 @@ import "../chatStylexEscapeHatch.css";
 import { useLocation, useParams } from "app/routing";
 import { useTranslation } from "react-i18next";
 import { useAppSelector, useAppDispatch } from "app/store";
-import { updateContentPinned } from "create/space/spaceSlice";
+import {
+  updateContentPinned,
+} from "create/space/content/contentThunks";
 import { useUserId } from "identity";
 import { isRoutableContentActive } from "create/space/contentKeyUtils";
 import SidebarItemRow from "create/space/SidebarItemRow";

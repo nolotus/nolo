@@ -176,30 +176,9 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     model: "gpt-5.5-pro",
     runtimeFallback: true,
   },
-  {
-    id: "01CLSO50DIPB00000000A1DVVU",
-    group: "public",
-    name: "Claude Sonnet 5",
-    provider: "deepinfra",
-    model: "anthropic/claude-sonnet-5",
-    runtimeFallback: true,
-  },
-  {
-    id: "01CLOP48DIPB0000000001OI1W",
-    group: "public",
-    name: "Claude Opus 5",
-    provider: "deepinfra",
-    model: "anthropic/claude-opus-5",
-    runtimeFallback: true,
-  },
-  {
-    id: "01FABLE5DIPB00000001VJBKM4",
-    group: "public",
-    name: "Claude Fable 5",
-    provider: "deepinfra",
-    model: "anthropic/claude-fable-5",
-    runtimeFallback: true,
-  },
+  // Claude Sonnet/Opus/Fable 5 已从广场下架（2026-09-01，平台停止维护 Claude 系）：
+  // 存量记录由 modelUpgradeTable 迁移到 nolo/glm-5-3-flash，兼容期请求由
+  // platformHostedRoutingTable 重映射；客户端下架提示走 publicAgents.removedFromPlaza。
   // Gemini 文本档只上架最新一代：旧版留在广场只会分散选择、拉长列表，而
   // 用户想要的是「最新的那个 Gemini」。gemini-3.6-flash 这个**模型**仍然保留
   // （modelAbility / 定价表照旧），下架的只是广场入口。
