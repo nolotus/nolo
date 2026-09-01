@@ -148,7 +148,16 @@ describe("agentSelectionPriority", () => {
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("收藏优先硬门");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain("覆盖顶档成本门");
     expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain(
-      "收藏 Agent 全部占用或确认不可用后才允许派平台 Agent",
+      "收藏 Agent 确认不可用后才允许派平台 Agent",
+    );
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).toContain(
+      "每次 startAgentRun 都创建独立的 run/dialog",
+    );
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).not.toContain(
+      "agent 级 dialog 共享",
+    );
+    expect(AGENT_SELECTION_PRIORITY_INSTRUCTIONS).not.toContain(
+      "并行会混染上下文",
     );
   });
 });

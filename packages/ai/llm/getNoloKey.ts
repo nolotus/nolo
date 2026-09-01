@@ -12,7 +12,8 @@ export const getNoloKey = (
     | "anthropic"
     | "ollama-cloud"
     | "upstream-k3"
-    | "runinfra",
+    | "runinfra"
+    | "baseten",
   env: Record<string, string | undefined> = process.env
 ) => {
   switch (provider) {
@@ -40,6 +41,8 @@ export const getNoloKey = (
       return env.UPSTREAM_K3_API_KEY;
     case "runinfra":
       return env.RUNINFRA_API_KEY;
+    case "baseten":
+      return env.BASETEN_API_KEY;
     // provider "nolo" / "ollama-cloud" 没有自己的 key。
     //
     // 兜底返回 OLLAMA_API_KEY，制造过两次 401：拿 ollama 的 key 去打

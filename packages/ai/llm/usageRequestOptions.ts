@@ -43,6 +43,7 @@ const STREAM_USAGE_PROVIDERS = new Set([
   // endpoint, supports stream_options.include_usage (measured to return
   // prompt_tokens_details.cached_tokens).
   "runinfra",
+  "baseten",
   // Kimi For Coding subscription (api.kimi.com/coding/v1): OpenAI-compatible
   // chat.completions streaming that only emits the terminal usage frame when
   // stream_options.include_usage is requested (measured; the official

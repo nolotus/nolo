@@ -44,6 +44,7 @@ export type PlatformHostedUpstreamId =
   | "xai"
   | "openrouter"
   | "runinfra"
+  | "baseten"
   | "upstream-k3"
   | "google"
   | "openai"

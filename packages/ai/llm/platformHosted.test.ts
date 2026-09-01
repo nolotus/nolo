@@ -219,7 +219,9 @@ describe("platform hosted GLM 5.3 Flash catalog (RunInfra flash tier)", () => {
       contextWindow: 1_048_576,
       maxOutputTokens: 98304,
       supportsTool: true,
-      supportsReasoningEffort: false,
+      // 默认档强制 reasoning，但 reasoning_effort=low 实测可关闭
+      // （10/10 样本 reasoning 输出为 0，输出 token 降到约 1/5），故为 true。
+      supportsReasoningEffort: true,
       price: PLATFORM_HOSTED_GLM_53_FLASH_PRICE,
     });
   });

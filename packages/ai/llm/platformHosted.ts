@@ -129,7 +129,8 @@ export const PLATFORM_HOSTED_GLM_PRICE = {
 /**
  * GLM 5.3 Flash（平台托管语义）：RunInfra 独家上游，作为廉价快档（provider=nolo，
  * key 用 RUNINFRA_API_KEY）。模型 id 与 RunInfra 一致（glm-5-3-flash，无需映射）。
- * 注意：上游强制 reasoning，`supportsReasoningEffort=false`（实测不可关闭）。
+ * 注意：默认档强制 reasoning，但 reasoning_effort=low 可关闭（10/10 样本 reasoning
+ * 输出为 0，输出 token 降到约 1/5），故 supportsReasoningEffort=true。
  */
 /**
  */
@@ -491,7 +492,7 @@ export const platformHostedModels = [
     maxOutputTokens: 98304,
     contextWindow: 1_048_576,
     supportsTool: true,
-    supportsReasoningEffort: false,
+    supportsReasoningEffort: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
   // Claude 系已下架（2026-09-01），不再出现在 nolo 托管模型列表；旧模型名请求由

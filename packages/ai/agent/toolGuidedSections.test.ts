@@ -23,4 +23,16 @@ describe("toolGuidedSections", () => {
     expect(sections.agentOrchestration).toBe("");
     expect(sections.agentCollaboration).toBe("");
   });
+
+  test("requires explicit one-time consent before platform-agent calls", () => {
+    const sections = resolveToolGuidedSections(["startAgentRun", "controlAgentRun"]);
+    const prompt = sections.agentCollaboration;
+
+    expect(prompt).toContain("平台 Agent / 平台积分扣费确认硬闸门");
+    expect(prompt).toContain("仅告知用户“会消耗平台积分”不等于获得授权");
+    expect(prompt).toContain("“继续”“按计划”“你处理”“可以”等");
+    expect(prompt).toContain("禁止调用平台 Agent");
+    expect(prompt).toContain("授权是一次性的");
+    expect(prompt).toContain("派发前自检");
+  });
 });

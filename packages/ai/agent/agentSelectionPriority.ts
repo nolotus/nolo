@@ -89,6 +89,6 @@ export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约（与
      4. 其他自建 Agent（isOwned=true）
      5. 公开 / 平台 Agent（apiSource="platform" 或社区公开）
      同档位下收藏项按最近收藏（favoritedAt）优先，其余按最近更新（updatedAt）优先。
-   - 收藏优先硬门（用户钦定，覆盖顶档成本门）：禁止在收藏 Agent 可用时派平台通道。收藏的 OAuth/自定义 Agent 走用户私有订阅/凭据，即使是顶档模型（Opus、GPT-5.6 级）也不构成成本回避理由；「占用」视为不可用——目标 agent 存在其他 batchId 的 running run 时禁止对其并行派发（agent 级 dialog 共享，并行会混染上下文）。仅当收藏 Agent 全部占用或确认不可用后才允许派平台 Agent，且必须当次告知用户将消耗平台积分。
+   - 收藏优先硬门（用户钦定，覆盖顶档成本门）：禁止在收藏 Agent 可用时派平台通道。收藏的 OAuth/自定义 Agent 走用户私有订阅/凭据，即使是顶档模型（Opus、GPT-5.6 级）也不构成成本回避理由。每次 startAgentRun 都创建独立的 run/dialog；并行派发时必须用各自的 runId，并用 batchId 管理批次，避免编排层混淆结果。仅当收藏 Agent 确认不可用后才允许派平台 Agent，且必须当次告知用户将消耗平台积分。
    - 匹配参考：按任务所需能力筛 tools 字段；同档候选优先成本低（低 inputPrice）或走用户私有凭据的通道。tools 字段只反映额外能力，不反映 coding 能力——代码工具由 host 自动注入，tools=[] 不代表不能写代码，不要据此排除候选。
    - 429 限流与知情权契约：任何用户私有凭据与自建 Agent（isOwned=true、isOAuth=true 或 apiSource="custom" 之一）出现在 listAgents 的 unavailableAgents（429 冷却期）中时，禁止静默跳过；改派平台 Agent（消耗平台积分）前必须在回复中告知用户：哪个订阅/自建 agent 限流、预计何时恢复（nextAvailableAt）、本次将扣平台积分；任务不紧急建议等恢复或询问用户。`;

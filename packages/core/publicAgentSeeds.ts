@@ -345,7 +345,8 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   model: "glm-5-3-flash",
   isPublic: true,
   hasVision: true,
-  introduction: "GLM 5.3 Flash 公开助手，廉价快档，适合高频轻量问答与批量任务。注意：该模型强制深度思考、无法关闭，思考过程 token 会计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复。",
+  introduction:
+    "GLM 5.3 Flash 公开助手，廉价快档，适合高频轻量问答与批量任务。注意：该模型默认深度思考，思考过程 token 计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复；把 agent 的 reasoning_effort 设为 low 可关闭思考——单轮问答实测输出 token 降到约 1/5，多轮工具循环里约降 4 成（工具轮本身思考就少），可见回复长度与工具调用正确性均不变；medium 档 token 略降但延迟不改善。",
   greeting: "你好，我是 GLM 5.3 Flash。轻量快速、价格低，适合日常问答与批量轻量任务。",
   prompt: "直接、简洁地完成任务；回答保持简短，先给结论。",
   tools: [],
