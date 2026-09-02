@@ -1004,3 +1004,69 @@ describe("toolOutput", () => {
     expect(line.split("\n").some((l) => /^\s*agent\s+agent\s*$/.test(l))).toBe(false);
   });
 });
+
+describe("toolOutput normal-mode duration & secret guard", () => {
+  const normal = (event: LocalAgentToolEvent) => createToolEventFormatter(false)(event);
+
+  test("duration shows only above 500ms", () => {
+    const base = { type: "tool-result" as const, toolName: "customTool" };
+    expect(normal(toolEvent({ ...base, elapsedMs: 120 }))).not.toContain("120ms");
+    expect(normal(toolEvent({ ...base, elapsedMs: 500 }))).not.toContain("500ms");
+    expect(normal(toolEvent({ ...base, elapsedMs: 900 }))).toContain("900ms");
+    expect(normal(toolEvent({ ...base, elapsedMs: 1000 }))).toContain("1.0s");
+    expect(normal(toolEvent({ ...base, elapsedMs: 2000 }))).toContain("2.0s");
+  });
+
+  test("collapsed tree leaves go through the same secret guard", () => {
+    const treeFormatter = createToolEventFormatter(false, { tuiTrees: true });
+    const fetchOk = (url: string) =>
+      toolEvent({ type: "tool-result" as const, toolName: "fetchWebpage", metadata: { url } });
+    treeFormatter(fetchOk("https://example.com/a"));
+    const second = treeFormatter(fetchOk("https://api.example.com/v1?key=sk-ant-api03-abcdef0123456789"));
+    expect(second).not.toContain("sk-ant");
+    expect(second).not.toContain("api.example.com");
+    expect(second).toContain("example.com/a");
+  });
+
+  test("gist withheld when secret-like strings reach runtime projections", () => {
+    const leakyUrl = "https://api.example.com/v1/data?api_key=sk-ant-api03-abcdef0123456789";
+    const fetchLine = normal(
+      toolEvent({ type: "tool-result", toolName: "fetchWebpage", metadata: { url: leakyUrl } }),
+    );
+    expect(fetchLine).not.toContain("sk-ant");
+    expect(fetchLine).not.toContain("api.example.com");
+
+    const bearerQuery = normal(
+      toolEvent({
+        type: "tool-result",
+        toolName: "exa_search",
+        metadata: { query: "Authorization: Bearer sk-live-abcdef0123456789 docs" },
+      }),
+    );
+    expect(bearerQuery).not.toContain("Bearer");
+    expect(bearerQuery).not.toContain("sk-live");
+
+    const ghpQuery = normal(
+      toolEvent({
+        type: "tool-result",
+        toolName: "exa_search",
+        metadata: { query: "github token ghp_0123456789abcdef usage" },
+      }),
+    );
+    expect(ghpQuery).not.toContain("ghp_0123456789");
+  });
+
+  test("benign gists survive the guard", () => {
+    const runLine = normal(
+      toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: { command: "bun run typecheck" },
+        elapsedMs: 1200,
+      }),
+    );
+    expect(runLine).toContain("bun");
+    expect(runLine).toContain("✓");
+    expect(runLine).toContain("1.2s");
+  });
+});

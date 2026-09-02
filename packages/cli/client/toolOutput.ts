@@ -19,6 +19,7 @@ import { type AgentRunSnapshot, parseAgentRunEvent } from "./agentRunSnapshot";
 import { dimCliText, resolveCliColorEnabled, styleCliText } from "./terminalStyles";
 import { themeText, type DiffLineKind, type TuiBrightness, renderDiffLine, resolveTuiBrightness, supportsTruecolor } from "../tui/theme";
 import { displayWidth, stripAnsi } from "../tui/tuiAnsi";
+import { findPotentialSecrets } from "../secretScan";
 import { redactSecrets } from "../tui/redactSecrets";
 import { diffLines } from "diff";
 import { type CodeLang, detectCodeLangFromPath, highlightCodeLine } from "./assistantOutput";
@@ -761,7 +762,7 @@ function buildHighlightedEditLine(
  * 缺失时回退纯「label ✓」形式。原则（2026-08-31 owner 定调）：用户不需要
  * 全量，但需要感知 agent 大概在干嘛——raw args 是管道噪音，gist 是产品反馈。
  */
-function normalToolGist(event: LocalAgentToolEvent): string {
+function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
   const toolName = event.toolName || "";
 
@@ -806,6 +807,37 @@ function normalToolGist(event: LocalAgentToolEvent): string {
     : "";
   if (remembered) return clipCompactText(redactSecrets(remembered), 64, "…");
   return "";
+}
+
+/**
+ * normal 档摘要出口的统一补充护栏：runtime 投影虽非模型直控，但 URL query、
+ * 搜索词、命令行仍可能携带密钥形态串（?api_key=sk-…、Authorization: Bearer …、
+ * ghp_/xox 系前缀）。secretScan 覆盖赋值形态，这里补令牌串形态；命中即整体
+ * 放弃摘要退回纯 label——宁可少显示，不上屏可疑串（阶段 A 收敛，2026-09-02）。
+ */
+const NORMAL_GIST_SECRET_PATTERNS: RegExp[] = [
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
+  /\bsk-(?:ant-)?(?:api)?[0-9a-zA-Z-]{10,}/,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{10,}/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+];
+
+function withholdIfSecretLike(gist: string): string {
+  if (!gist) return "";
+  if (findPotentialSecrets(gist).length > 0) return "";
+  if (NORMAL_GIST_SECRET_PATTERNS.some((pattern) => pattern.test(gist))) return "";
+  return gist;
+}
+
+function normalToolGist(event: LocalAgentToolEvent): string {
+  return withholdIfSecretLike(normalToolGistRaw(event));
+}
+
+/** >500ms 才显示，避免每行都挂 `(0s)` 噪音；<1s 用 ms，其余一位小数 s。 */
+function formatNormalToolDuration(elapsedMs: unknown): string {
+  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs <= 500) return "";
+  if (elapsedMs < 1000) return `${Math.round(elapsedMs)}ms`;
+  return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
 /**
@@ -863,8 +895,11 @@ function formatNormalToolLine(
   // 让用户不打开文件也能看到改了什么。多行 chunk 天然不参与 ×N 折叠。
   const hint = editFileResultHint(event);
   const statsInline = hint?.inline ? ` ${hint.inline}` : "";
+  // >500ms 的工具耗时挂成功行尾部；短操作不显示（满屏 (0s) 是噪音）。
+  const durationInline = formatNormalToolDuration(event.elapsedMs);
+  const tail = durationInline ? `  ✓ ${durationInline}` : "  ✓";
   const mainLine = formatToolTraceLine(
-    gist ? `▸ ${label} · ${gist}${statsInline}  ✓` : `▸ ${label}${statsInline}  ✓`,
+    gist ? `▸ ${label} · ${gist}${statsInline}${tail}` : `▸ ${label}${statsInline}${tail}`,
     colorEnabled,
   );
   if (hint?.detail?.length) {
@@ -1043,7 +1078,10 @@ export function createToolEventFormatter(
     if (kind === "Read") item = formatReadItemPath(typeof m.path === "string" ? m.path : typeof m.filePath === "string" ? m.filePath : "file", m);
     if (kind === "Search") item = formatSearchItemQuery(typeof m.query === "string" ? m.query : typeof m.pattern === "string" ? m.pattern : "search", typeof m.path === "string" ? m.path : undefined);
     if (kind === "Fetch") item = formatFetchItemUrl(typeof m.url === "string" ? m.url : "webpage");
-    if (!item) item = toolLabel(name);
+    // 折叠树叶子与单行 normal 共用 secret 出口护栏：URL/query/command 叶子
+    // 携带密钥形态串时退回纯工具 label，不让 token 上屏（第二个及后续结果
+    // 只走 treeLine，不经过 normalToolGist，必须在这里再包一次）。
+    item = withholdIfSecretLike(item) || toolLabel(name);
     if (tree?.kind !== kind) tree = { kind, items: [] };
     tree.items.push(item);
     // Keep the first call visible immediately; the second result replaces this
