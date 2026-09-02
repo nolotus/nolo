@@ -53,7 +53,7 @@ export async function handleDesktopAuthSessionGet(
     // Lazy import: authenticateToken lives in packages/server (private) and is
     // only available in the full cloud build. Public build skips token validation.
     try {
-      const { authenticateToken } = await import("../authenticateToken");
+      const { authenticateToken } = await import("../../server/authenticateToken");
       await authenticateToken(token);
       return true;
     } catch (err: any) {
