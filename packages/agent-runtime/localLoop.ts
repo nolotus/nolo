@@ -2,6 +2,11 @@ import { clipCompactText } from "core/clipCompactText";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import type { ManagedRuntime } from "effect";
+import {
+  createLocalLoopObservationBoundary,
+  type LocalLoopObservationBoundary,
+  type LocalLoopObservationEvent,
+} from "./observationStream";
 
 import type {
   AgentRuntimeHostAdapter,
@@ -164,6 +169,14 @@ export type LocalAgentTurnInput = {
   onReasoningDelta?: (chunk: string) => void;
   onLoopEvent?: (event: LocalAgentLoopEvent) => void;
   /**
+   * [Observation Stream boundary] 统一观测事件流回调（可选）。
+   */
+  onObservationEvent?: (event: LocalLoopObservationEvent) => void;
+  /**
+   * [Observation Stream boundary] 自定义观测 boundary（可选，用于 Stream 收集/测试）。
+   */
+  observationBoundary?: LocalLoopObservationBoundary;
+  /**
    * 单次 provider.complete 的可选硬超时。
    * 未设置时：若本回合传了 timeoutMs 则继承之；否则不限时（coding loop 常跑很久，禁止默认 120s 杀请求）。
    */
@@ -244,6 +257,9 @@ export type LocalAgentContextMetrics = AgentExecutionContextMetrics;
  * `onLoopEvent` seam keep compiling while the two loops speak one vocabulary.
  */
 export type LocalAgentLoopEvent = AgentExecutionObservationEvent;
+
+export type { LocalLoopObservationBoundary, LocalLoopObservationEvent };
+export { createLocalLoopObservationBoundary };
 
 export type LocalAgentActionGate = ActionGate & {
   toolName: string;
@@ -351,39 +367,18 @@ function shouldReturnToolExecutionErrors(adapter: AgentRuntimeHostAdapter) {
 }
 
 /**
- * 桥接投影：把 canonical loop event 单向投影给 legacy `onToolEvent` 消费方
- * （desktop runtime / streamAgentChatTurn 等），并做好 fail-open 隔离。
- * 投影失败（回调抛错）不得影响 loop 正确性。
- */
-function emitToolEvent(
-  input: LocalAgentTurnInput,
-  event: LocalAgentToolEvent
-) {
-  try {
-    input.onToolEvent?.(event);
-  } catch {
-    // 桥接投影回调异常必须被吞掉，不允许影响 loop 正确性
-  }
-}
-
-/**
- * Canonical observation event 唯一出口。
+ * Canonical observation event 唯一出口（收敛经由 observationBoundary 发射）。
  *
- * - 发送给 onLoopEvent（fail-open）。
- * - 当 `bridge` 提供了 onToolEvent 投影时，单向桥接给 legacy 消费方（fail-open）。
- * - 即使未注册 onLoopEvent，bridge 也必须透传（legacy 消费方只注册 onToolEvent）。
+ * - 发送给 Queue/Stream（当 Stream 被监听时）形成单一真相源。
+ * - 自动单向投影给 legacy 回调（onLoopEvent / onToolEvent 等，fail-open）。
+ * - 纯净分离：bridge 不再混入 canonical event 对象，杜绝 onLoopEvent payload 污染。
  */
 function emitLoopEvent(
-  input: LocalAgentTurnInput,
+  boundary: LocalLoopObservationBoundary,
   event: LocalAgentLoopEvent,
   bridge?: LocalAgentToolEvent,
 ) {
-  try {
-    if (input.onLoopEvent) input.onLoopEvent(event);
-  } catch {
-    // 观测方回调异常必须被吞掉，不允许影响 loop 正确性
-  }
-  if (bridge) emitToolEvent(input, bridge);
+  boundary.emit(bridge ? { event, bridge } : { event });
 }
 
 const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
@@ -438,13 +433,14 @@ async function runCompleteWithTimeout(args: {
   timeoutMs?: number;
   round: number;
   input: LocalAgentTurnInput;
+  boundary: LocalLoopObservationBoundary;
   context?: LocalAgentContextMetrics;
   providerName?: string;
   model?: string;
 }): Promise<AgentRuntimeResult> {
-  const { provider, messages, options, timeoutMs, round, input, context, providerName, model } = args;
+  const { provider, messages, options, timeoutMs, round, input, boundary, context, providerName, model } = args;
 
-  emitLoopEvent(input, {
+  emitLoopEvent(boundary, {
     kind: "llm-start",
     round,
     atMs: Date.now(),
@@ -500,7 +496,7 @@ async function runCompleteWithTimeout(args: {
     const cacheMiss = Number(usage?.cache_creation_input_tokens ?? usage?.prompt_cache_miss_tokens ?? 0);
     const inputTokens = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0);
     const outputTokens = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0);
-    emitLoopEvent(input, {
+    emitLoopEvent(boundary, {
       kind: "llm-end",
       round,
       atMs: Date.now(),
@@ -1362,10 +1358,27 @@ function isCompletedActionGateResult(value: unknown): boolean {
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
-  // 计时探针（NOLO_LOOP_TIMING=1）：入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
-  // 注意：模块级计时状态为单 turn 设计，并发跑多个 turn 且开启门控时数据会交错
-  // （仅调试工具，不影响生产路径）。
-  loopTimingMark("turnStart", 0);
+  const legacyCallbacks = {
+    onLoopEvent: input.onLoopEvent,
+    onToolEvent: input.onToolEvent,
+    onTextDelta: input.onTextDelta,
+    onReasoningDelta: input.onReasoningDelta,
+    onObservationEvent: input.onObservationEvent,
+  };
+  const observationBoundary =
+    input.observationBoundary ??
+    createLocalLoopObservationBoundary(legacyCallbacks);
+
+  if (input.observationBoundary) {
+    // 自定义 boundary 传入时，合并 input 的 legacy callbacks 避免静默丢弃
+    observationBoundary.attachCallbacks(legacyCallbacks);
+  }
+
+  try {
+    // 计时探针（NOLO_LOOP_TIMING=1）：入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
+    // 注意：模块级计时状态为单 turn 设计，并发跑多个 turn 且开启门控时数据会交错
+    // （仅调试工具，不影响生产路径）。
+    loopTimingMark("turnStart", 0);
   const agentConfig = await input.adapter.loadAgentConfig(input.agentRef);
   if (!agentConfig) {
     const error = new Error(
@@ -1500,7 +1513,7 @@ export async function runLocalAgentTurn(
     // 压缩观测事件：compressed / summaryGenerated 任一为 true 才发射；
     // 无压缩不发射。事件发射不能影响主流程（emitLoopEvent 本身已 fail-open）。
     if (compacted.compressed || compacted.summaryGenerated) {
-      emitLoopEvent(input, {
+      emitLoopEvent(observationBoundary, {
         kind: "compaction",
         atMs: Date.now(),
         reason: compacted.reason ?? "context_budget",
@@ -1575,7 +1588,7 @@ export async function runLocalAgentTurn(
   // 纯文本模型 + 有图：无 vision 能力时剥离 image_url 为占位符，避免上游 400。
   if (!supportsImages && hasImageInRuntimeMessages(messages)) {
     messages = filterImagePartsFromMessages(messages, false);
-    emitLoopEvent(input, {
+    emitLoopEvent(observationBoundary, {
       kind: "image-downgraded",
       reason: "no-vision",
       atMs: Date.now(),
@@ -1660,6 +1673,16 @@ export async function runLocalAgentTurn(
       };
       emptyAssistantRepairPending = false;
       loopTimingMark("prepareMessagesForProviderCall", round);
+      const shouldStreamDeltas = Boolean(
+        input.onTextDelta || input.onObservationEvent || input.observationBoundary,
+      );
+      const shouldStreamReasoning = Boolean(
+        input.onReasoningDelta || input.onObservationEvent || input.observationBoundary,
+      );
+      const shouldPassToolEvents = Boolean(
+        input.onToolEvent || input.onObservationEvent || input.observationBoundary,
+      );
+
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1672,17 +1695,37 @@ export async function runLocalAgentTurn(
           // 计费归因：续聊轮次带上 dialogId，platform proxy 才能把 token 记录
           // 归到具体对话而不是 chat-proxy 兜底桶。新对话首轮 id 尚未分配。
           ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}),
-          ...(input.onTextDelta ? { onTextDelta: (chunk: string) => {
+          ...(shouldStreamDeltas ? { onTextDelta: (chunk: string) => {
             partialContent += chunk;
-            input.onTextDelta!(chunk);
+            observationBoundary.emit({
+              kind: "text-delta",
+              chunk,
+              round,
+              atMs: Date.now(),
+            });
           } } : {}),
-          ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
-          ...(input.onToolEvent ? { onToolEvent: input.onToolEvent } : {}),
-          ...(input.onToolEvent ? { toolEventRound: round } : {}),
+          ...(shouldStreamReasoning ? { onReasoningDelta: (chunk: string) => {
+            observationBoundary.emit({
+              kind: "reasoning-delta",
+              chunk,
+              round,
+              atMs: Date.now(),
+            });
+          } } : {}),
+          ...(shouldPassToolEvents ? { onToolEvent: (event: LocalAgentToolEvent) => {
+            observationBoundary.emit({
+              kind: "tool-event",
+              event,
+              round,
+              atMs: Date.now(),
+            });
+          } } : {}),
+          ...(shouldPassToolEvents ? { toolEventRound: round } : {}),
         },
         timeoutMs: resolveLlmRequestTimeoutMs(input),
         round,
         input,
+        boundary: observationBoundary,
         context: contextMetrics,
         providerName: agentConfig.provider,
         model: provider.model,
@@ -1713,7 +1756,7 @@ export async function runLocalAgentTurn(
       // 熔断保护：检查模型是否陷入重复复读输出/工具调用死循环
       const assistantGuardVerdict = progressGuard.observeAssistantResponse(result);
       if (assistantGuardVerdict.action === "stall") {
-        emitLoopEvent(input, {
+        emitLoopEvent(observationBoundary, {
           kind: "loop-stalled",
           round,
           reason: assistantGuardVerdict.reason,
@@ -1890,7 +1933,7 @@ export async function runLocalAgentTurn(
         const argumentsPreview = summarizeToolArguments(toolName, toolCall.function.arguments);
         // 唯一 canonical 出口：emitLoopEvent 发 tool-start，并桥接投影给 legacy onToolEvent。
         emitLoopEvent(
-          input,
+          observationBoundary,
           {
             kind: "tool-start",
             round,
@@ -2002,7 +2045,7 @@ export async function runLocalAgentTurn(
           const safeMetadata = projectSafeToolObservationMetadata(toolResult.metadata);
           loopTimingMark("toolExecute", round);
           emitLoopEvent(
-            input,
+            observationBoundary,
             {
               kind: "tool-end",
               round,
@@ -2032,7 +2075,7 @@ export async function runLocalAgentTurn(
         } catch (error) {
           const finishedAt = Date.now();
           emitLoopEvent(
-            input,
+            observationBoundary,
             {
               kind: "tool-end",
               round,
@@ -2116,7 +2159,7 @@ export async function runLocalAgentTurn(
         executedToolResults,
       );
       if (toolExecutionGuardVerdict.action === "stall") {
-        emitLoopEvent(input, {
+        emitLoopEvent(observationBoundary, {
           kind: "loop-stalled",
           round,
           reason: toolExecutionGuardVerdict.reason,
@@ -2258,4 +2301,7 @@ export async function runLocalAgentTurn(
     ...(saved.titlePatchPromise ? { titlePatchPromise: saved.titlePatchPromise } : {}),
     turnMessages,
   };
+  } finally {
+    observationBoundary.close();
+  }
 }

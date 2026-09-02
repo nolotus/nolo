@@ -1,14 +1,18 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { getEventListeners } from "node:events";
-import { Duration, Effect, ManagedRuntime } from "effect";
+import { Duration, Effect, ManagedRuntime, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import {
   LOCAL_TURN_ABORTED_CODE,
+  createLocalLoopObservationBoundary,
   resolveEmptyAssistantOutcome,
   runLocalAgentTurn,
   summarizeHistoricalToolContent,
+  type LocalAgentLoopEvent,
+  type LocalAgentToolEvent,
   type LocalAgentTurnResult,
+  type LocalLoopObservationEvent,
 } from "./localLoop";
 import {
   MAX_REASONING_ONLY_REPAIRS,
@@ -5783,5 +5787,520 @@ describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", 
     } finally {
       (process as any).removeListener("unhandledRejection", onUnhandled);
     }
+  });
+});
+
+// ── 第四刀：Observation Stream boundary（Effect v4 Stream/Queue）──────────
+//
+// 职责：证明 localLoop 全部 observation 出口收敛为单一 emit(event) → Effect Stream/Queue
+// → legacy callback 投影，满足：
+// 1. 顺序稳定：真实两轮 localLoop 经 Stream 收集，顺序与 legacy callback 严格一致。
+// 2. 单一真相源：canonical emit once → stream → legacy callback projection。
+// 3. 确定性收集与清理：回合完成/中断后 boundary 正常关闭，拒绝迟到事件，无悬挂。
+describe("runLocalAgentTurn observation stream boundary (Effect v4 Stream/Queue)", () => {
+  test("顺序稳定：真实两轮 localLoop 经 Effect Stream 收集，事件顺序与 legacy 回调严格一致", async () => {
+    const loopEvents: LocalAgentLoopEvent[] = [];
+    const toolEvents: LocalAgentToolEvent[] = [];
+    const textDeltas: string[] = [];
+    const reasoningDeltas: string[] = [];
+
+    const boundary = createLocalLoopObservationBoundary({
+      onLoopEvent: (e) => loopEvents.push(e),
+      onToolEvent: (e) => toolEvents.push(e),
+      onTextDelta: (c) => textDeltas.push(c),
+      onReasoningDelta: (c) => reasoningDeltas.push(c),
+    });
+
+    let completeCalls = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        name: "StreamAgent",
+        model: "stream-model",
+        toolNames: ["readFile"],
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-stream-order" }),
+      resolveProvider: async () => ({
+        model: "stream-model",
+        complete: async (_messages, options) => {
+          completeCalls += 1;
+          if (completeCalls === 1) {
+            // Round 0: stream reasoning + text deltas, then emit tool call
+            options?.onReasoningDelta?.("think step 1 ");
+            options?.onReasoningDelta?.("think step 2");
+            options?.onTextDelta?.("Let me read ");
+            options?.onTextDelta?.("the file.");
+            return {
+              content: "Let me read the file.",
+              reasoning_content: "think step 1 think step 2",
+              model: "stream-model",
+              tool_calls: [
+                {
+                  id: "call-order-1",
+                  type: "function" as const,
+                  function: {
+                    name: "readFile",
+                    arguments: JSON.stringify({ path: "README.md" }),
+                  },
+                },
+              ],
+            };
+          }
+          // Round 1: stream final answer
+          options?.onTextDelta?.("Here is ");
+          options?.onTextDelta?.("the result.");
+          return {
+            content: "Here is the result.",
+            model: "stream-model",
+          };
+        },
+      }),
+      executeTool: async () => {
+        return {
+          content: "# README\nProject documentation.",
+          metadata: { path: "README.md", exitCode: 0 },
+        };
+      },
+    };
+
+    // Concurrently collect events from the boundary Stream
+    const streamCollector = Effect.runPromise(Stream.runCollect(boundary.stream));
+
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "stream-agent",
+      input: "read README",
+      observationBoundary: boundary,
+    });
+
+    const streamEvents = Array.from(await streamCollector);
+
+    // 1. 断言 Stream 事件种类序列：严格按时间发生顺序
+    const kinds = streamEvents.map((e) => e.kind);
+    expect(kinds).toEqual([
+      "llm-start",
+      "reasoning-delta",
+      "reasoning-delta",
+      "text-delta",
+      "text-delta",
+      "llm-end",
+      "tool-start",
+      "tool-end",
+      "llm-start",
+      "text-delta",
+      "text-delta",
+      "llm-end",
+    ]);
+
+    // 2. 检查具体字段 payload
+    expect(streamEvents[0]).toMatchObject({ kind: "llm-start", round: 0 });
+    expect(streamEvents[1]).toMatchObject({ kind: "reasoning-delta", chunk: "think step 1 ", round: 0 });
+    expect(streamEvents[2]).toMatchObject({ kind: "reasoning-delta", chunk: "think step 2", round: 0 });
+    expect(streamEvents[3]).toMatchObject({ kind: "text-delta", chunk: "Let me read ", round: 0 });
+    expect(streamEvents[4]).toMatchObject({ kind: "text-delta", chunk: "the file.", round: 0 });
+    expect(streamEvents[5]).toMatchObject({ kind: "llm-end", round: 0, ok: true });
+    expect(streamEvents[6]).toMatchObject({ kind: "tool-start", round: 0, toolCallId: "call-order-1", toolName: "readFile" });
+    expect(streamEvents[7]).toMatchObject({ kind: "tool-end", round: 0, toolCallId: "call-order-1", toolName: "readFile", ok: true });
+    expect(streamEvents[8]).toMatchObject({ kind: "llm-start", round: 1 });
+    expect(streamEvents[9]).toMatchObject({ kind: "text-delta", chunk: "Here is ", round: 1 });
+    expect(streamEvents[10]).toMatchObject({ kind: "text-delta", chunk: "the result.", round: 1 });
+    expect(streamEvents[11]).toMatchObject({ kind: "llm-end", round: 1, ok: true });
+
+    // 3. 断言 legacy 回调接收到的事件与 Stream 投影严格一致
+    expect(loopEvents.map((e) => e.kind)).toEqual([
+      "llm-start",
+      "llm-end",
+      "tool-start",
+      "tool-end",
+      "llm-start",
+      "llm-end",
+    ]);
+    expect(textDeltas.join("")).toBe("Let me read the file.Here is the result.");
+    expect(reasoningDeltas.join("")).toBe("think step 1 think step 2");
+    expect(toolEvents.map((e) => e.type)).toEqual(["tool-call", "tool-result"]);
+    expect(toolEvents[0]).toMatchObject({ type: "tool-call", toolCallId: "call-order-1", toolName: "readFile" });
+    expect(toolEvents[1]).toMatchObject({ type: "tool-result", toolCallId: "call-order-1", content: "# README\nProject documentation." });
+  });
+
+  test("单一真相源：canonical emit once → stream → legacy callback projection 与 fail-open 隔离", async () => {
+    const onObsEvents: LocalLoopObservationEvent[] = [];
+    const loopEvents: LocalAgentLoopEvent[] = [];
+    const toolEvents: LocalAgentToolEvent[] = [];
+
+    const loopCallbackThrows = true;
+
+    const boundary = createLocalLoopObservationBoundary({
+      onObservationEvent: (e) => onObsEvents.push(e),
+      onLoopEvent: (e) => {
+        if (loopCallbackThrows && e.kind === "tool-start") {
+          throw new Error("observer boom on tool-start");
+        }
+        loopEvents.push(e);
+      },
+      onToolEvent: (e) => toolEvents.push(e),
+    });
+
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, model: "m", toolNames: ["t"] }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-single-source" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async (messages) => {
+          if (messages.length === 2) {
+            return {
+              content: "",
+              model: "m",
+              tool_calls: [{ id: "c1", type: "function" as const, function: { name: "t", arguments: "{}" } }],
+            };
+          }
+          return { content: "ok", model: "m" };
+        },
+      }),
+      executeTool: async () => ({ content: "tool output" }),
+    };
+
+    const streamCollector = Effect.runPromise(Stream.runCollect(boundary.stream));
+
+    // Turn must complete successfully despite the observer callback error (fail-open)
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "single-source",
+      input: "test",
+      observationBoundary: boundary,
+    });
+
+    expect(result.content).toBe("ok");
+
+    const collected = Array.from(await streamCollector);
+    // 证明：每一个事件在 Stream 中只有一份纯净 canonical 事件
+    expect(collected.length).toBe(6); // llm-start, llm-end, tool-start, tool-end, llm-start, llm-end
+    expect(onObsEvents.length).toBe(6);
+    expect(collected).toEqual(onObsEvents);
+
+    // 证明：canonical 事件对象本身纯净无 bridge 字段
+    const toolStartEvent = collected.find((e) => e.kind === "tool-start") as any;
+    expect(toolStartEvent).toBeDefined();
+    expect(toolStartEvent.bridge).toBeUndefined();
+    expect("bridge" in toolStartEvent).toBe(false);
+
+    // 证明：legacy onToolEvent 仍从发射信封的 bridge 获得 tool-call / tool-result 投影
+    expect(toolEvents[0]).toMatchObject({ type: "tool-call", toolCallId: "c1", toolName: "t" });
+    expect(toolEvents[1]).toMatchObject({ type: "tool-result", toolCallId: "c1", toolName: "t" });
+  });
+
+  test("确定性收集与清理：回合结束/中断后 boundary 正常关闭，拒绝迟到事件，无重复 terminal", async () => {
+    const boundary = createLocalLoopObservationBoundary();
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-cleanup" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async () => ({ content: "done", model: "m" }),
+      }),
+      executeTool: async () => { throw new Error("no tool"); },
+    };
+
+    const streamCollector = Effect.runPromise(Stream.runCollect(boundary.stream));
+
+    expect(boundary.isClosed()).toBe(false);
+
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "cleanup-agent",
+      input: "done",
+      observationBoundary: boundary,
+    });
+
+    // 1. 回合正常完成，boundary 自动 close
+    expect(boundary.isClosed()).toBe(true);
+
+    // 2. 注入迟到事件，应当被安全拒收（offer 返回 false / 不进入 queue）
+    boundary.emit({
+      kind: "llm-start",
+      round: 999,
+      atMs: Date.now(),
+    });
+    boundary.emit({
+      kind: "text-delta",
+      chunk: "late phantom delta",
+      atMs: Date.now(),
+    });
+
+    const collected = Array.from(await streamCollector);
+    expect(collected.map((e) => e.kind)).toEqual(["llm-start", "llm-end"]);
+    expect(collected.some((e) => (e as any).round === 999)).toBe(false);
+    expect(collected.some((e) => (e as any).chunk === "late phantom delta")).toBe(false);
+  });
+
+  test("确定性收集与清理：中断回合（abort）时 boundary 自动 close，无 dangling consumer", async () => {
+    const controller = new AbortController();
+    const boundary = createLocalLoopObservationBoundary();
+
+    let resolveProvider!: (value: any) => void;
+    const providerPromise = new Promise((resolve) => {
+      resolveProvider = resolve;
+    });
+
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-abort-cleanup" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: () => providerPromise as any,
+      }),
+      executeTool: async () => { throw new Error("no tool"); },
+    };
+
+    const streamCollector = Effect.runPromise(Stream.runCollect(boundary.stream));
+
+    const turnPromise = runLocalAgentTurn({
+      adapter,
+      agentRef: "abort-cleanup",
+      input: "will abort",
+      abortSignal: controller.signal,
+      observationBoundary: boundary,
+    }).then(
+      (r) => ({ kind: "fulfilled" as const, r }),
+      (e) => ({ kind: "rejected" as const, e }),
+    );
+
+    // 等待 turn 进入 provider 并发出 llm-start
+    let spins = 0;
+    while (spins < 1_000) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      spins += 1;
+      if (spins > 5) break;
+    }
+
+    controller.abort();
+    const settled = await turnPromise;
+    expect(settled.kind).toBe("rejected");
+
+    // 1. 中断后 boundary 自动 close
+    expect(boundary.isClosed()).toBe(true);
+
+    // 2. 迟到 resolve 触发（模拟未取消的 provider 稍后完成）
+    resolveProvider({ content: "late response", model: "m" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const collected = Array.from(await streamCollector);
+    // 仅收集到 abort 之前的 llm-start 与 llm-end（abort 时的 finally），迟到内容不入流
+    expect(collected.map((e) => e.kind)).toEqual(["llm-start", "llm-end"]);
+    expect(collected[1]).toMatchObject({ kind: "llm-end", ok: false });
+  });
+
+  test("[HIGH 修复] 内存零滞留：默认 legacy-only 路径不激活 Queue，队列零积压且不随事件数增长", async () => {
+    const textDeltas: string[] = [];
+    const loopEvents: LocalAgentLoopEvent[] = [];
+    const toolEvents: LocalAgentToolEvent[] = [];
+
+    let roundCount = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        model: "m",
+        toolNames: ["readFile"],
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-no-leak" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async (_messages, options) => {
+          roundCount += 1;
+          if (roundCount === 1) {
+            // 发射大量 delta 并触发工具调用
+            for (let i = 0; i < 50; i++) {
+              options?.onTextDelta?.(`chunk-${i} `);
+            }
+            return {
+              content: "calling tool",
+              model: "m",
+              tool_calls: [
+                {
+                  id: "call-leak-1",
+                  type: "function" as const,
+                  function: { name: "readFile", arguments: "{}" },
+                },
+              ],
+            };
+          }
+          return {
+            content: "done",
+            model: "m",
+          };
+        },
+      }),
+      executeTool: async () => ({ content: "tool output" }),
+    };
+
+    // 默认路径：仅传入 legacy callbacks，未传入 observationBoundary
+    const result = await runLocalAgentTurn({
+      adapter,
+      agentRef: "no-leak-agent",
+      input: "test memory",
+      onTextDelta: (c) => textDeltas.push(c),
+      onLoopEvent: (e) => loopEvents.push(e),
+      onToolEvent: (e) => toolEvents.push(e),
+    });
+
+    expect(result.content).toBe("done");
+    // 1. legacy 回调正常直投工作
+    expect(textDeltas).toHaveLength(50);
+    expect(loopEvents.length).toBeGreaterThan(0);
+    expect(toolEvents.length).toBeGreaterThan(0);
+
+    // 2. 验证 boundary 机制：创建默认 boundary，在未访问 .stream/.queue 时，isQueueActive() 为 false，queueSize() 为 0
+    const testBoundary = createLocalLoopObservationBoundary({
+      onTextDelta: () => {},
+    });
+    for (let i = 0; i < 100; i++) {
+      testBoundary.emit({ kind: "text-delta", chunk: "c", atMs: Date.now() });
+    }
+    expect(testBoundary.isQueueActive()).toBe(false);
+    expect(testBoundary.queueSize()).toBe(0);
+    testBoundary.close();
+  });
+
+  test("[MEDIUM 修复] 自定义 boundary 传入时合并 legacy callbacks，两边均完整收到事件", async () => {
+    const streamLoopEvents: LocalAgentLoopEvent[] = [];
+    const legacyLoopEvents: LocalAgentLoopEvent[] = [];
+    const legacyToolEvents: LocalAgentToolEvent[] = [];
+    const legacyTextDeltas: string[] = [];
+
+    const customBoundary = createLocalLoopObservationBoundary();
+    const streamCollector = Effect.runPromise(Stream.runCollect(customBoundary.stream));
+
+    let roundCount = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, model: "m", toolNames: ["exec"] }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-custom-boundary" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async (_messages, options) => {
+          roundCount += 1;
+          if (roundCount === 1) {
+            options?.onTextDelta?.("hello custom");
+            return {
+              content: "hello custom",
+              model: "m",
+              tool_calls: [{ id: "c-custom", type: "function" as const, function: { name: "exec", arguments: "{}" } }],
+            };
+          }
+          return {
+            content: "final done",
+            model: "m",
+          };
+        },
+      }),
+      executeTool: async () => ({ content: "exec result" }),
+    };
+
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "custom-agent",
+      input: "run",
+      observationBoundary: customBoundary,
+      onLoopEvent: (e) => legacyLoopEvents.push(e),
+      onToolEvent: (e) => legacyToolEvents.push(e),
+      onTextDelta: (c) => legacyTextDeltas.push(c),
+    });
+
+    const streamEvents = Array.from(await streamCollector);
+
+    // 1. 自定义 Stream 收到完整事件
+    expect(streamEvents.map((e) => e.kind)).toContain("llm-start");
+    expect(streamEvents.map((e) => e.kind)).toContain("text-delta");
+    expect(streamEvents.map((e) => e.kind)).toContain("tool-start");
+    expect(streamEvents.map((e) => e.kind)).toContain("tool-end");
+
+    // 2. input 上的 legacy callbacks 未被丢弃，同样完整收到
+    expect(legacyTextDeltas).toEqual(["hello custom"]);
+    expect(legacyLoopEvents.map((e) => e.kind)).toEqual([
+      "llm-start",
+      "llm-end",
+      "tool-start",
+      "tool-end",
+      "llm-start",
+      "llm-end",
+    ]);
+    expect(legacyToolEvents.map((e) => e.type)).toEqual(["tool-call", "tool-result"]);
+  });
+
+  test("[MEDIUM 修复] canonical onLoopEvent 载荷无 bridge 内部字段泄漏", async () => {
+    const loopEvents: LocalAgentLoopEvent[] = [];
+    const toolEvents: LocalAgentToolEvent[] = [];
+
+    let roundCount = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence", "local-tools"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, model: "m", toolNames: ["read"] }),
+      loadDialogHistory: async () => [],
+      saveTurn: async () => ({ dialogId: "dialog-clean-payload" }),
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async () => {
+          roundCount += 1;
+          if (roundCount === 1) {
+            return {
+              content: "",
+              model: "m",
+              tool_calls: [{ id: "c-clean", type: "function" as const, function: { name: "read", arguments: "{}" } }],
+            };
+          }
+          return {
+            content: "clean finished",
+            model: "m",
+          };
+        },
+      }),
+      executeTool: async () => ({ content: "clean tool result" }),
+    };
+
+    await runLocalAgentTurn({
+      adapter,
+      agentRef: "clean-agent",
+      input: "read",
+      onLoopEvent: (e) => loopEvents.push(e),
+      onToolEvent: (e) => toolEvents.push(e),
+    });
+
+    // 验证所有进入 onLoopEvent 的对象：绝对无 bridge 属性
+    for (const evt of loopEvents) {
+      expect("bridge" in evt).toBe(false);
+      expect((evt as any).bridge).toBeUndefined();
+    }
+
+    const toolStart = loopEvents.find((e) => e.kind === "tool-start");
+    expect(toolStart).toBeDefined();
+    expect(Object.keys(toolStart!)).toEqual(["kind", "round", "toolCallId", "toolName", "atMs"]);
+
+    const toolEnd = loopEvents.find((e) => e.kind === "tool-end");
+    expect(toolEnd).toBeDefined();
+    expect(Object.keys(toolEnd!)).toContain("kind");
+    expect(Object.keys(toolEnd!)).toContain("ok");
+    expect(Object.keys(toolEnd!)).not.toContain("bridge");
+
+    // legacy onToolEvent 仍正常接收独立 bridge 投影
+    expect(toolEvents).toHaveLength(2);
+    expect(toolEvents[0]).toMatchObject({ type: "tool-call", toolCallId: "c-clean" });
+    expect(toolEvents[1]).toMatchObject({ type: "tool-result", toolCallId: "c-clean" });
   });
 });
