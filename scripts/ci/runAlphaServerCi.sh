@@ -935,8 +935,14 @@ bun scripts/audits/repairRemoteBillingLedgerDeletedUserProjections.ts \
 REMOTE
 
   log "Audit main billing ledger"
-  ssh -i "$key_path" -o IdentitiesOnly=yes "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
-    "PRODUCTION_REPO_DIR='${PRODUCTION_REPO_DIR}' bash -s" <<'REMOTE'
+  # 已知坑（2026-09-02 main 实测）：PM2 重启后立刻 fetch 审计端点会偶发
+  # "socket connection was closed unexpectedly"（部署窗口抖动，非账目问题）。
+  # audit 为只读步骤，失败重试安全；deploy 与 health 验证已在前面阶段成功。
+  local audit_attempt
+  local audit_ok=0
+  for audit_attempt in 1 2 3; do
+    if ssh -i "$key_path" -o IdentitiesOnly=yes "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
+      "PRODUCTION_REPO_DIR='${PRODUCTION_REPO_DIR}' bash -s" <<'REMOTE'
 set -Eeuo pipefail
 cd "$PRODUCTION_REPO_DIR"
 BUN_VERSION="$(tr -d '\n' < .bun-version)"
@@ -953,6 +959,17 @@ bun scripts/audits/auditRemoteBillingLedger.ts \
   --cluster main \
   --legacy-since 2026-05-14T05:59:30.000Z
 REMOTE
+    then
+      audit_ok=1
+      break
+    fi
+    log "audit-main-remote attempt ${audit_attempt}/3 failed; retrying in 10s (deploy already done)"
+    sleep 10
+  done
+  if [[ "$audit_ok" != 1 ]]; then
+    echo "FATAL: audit-main-remote failed after 3 attempts (billing ledger audit could not complete)" >&2
+    return 1
+  fi
 }
 
 build_web() {

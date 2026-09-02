@@ -48,6 +48,20 @@ describe("runAlphaServerCi source contract", () => {
     expect(source).toContain("NOLO_CHAT_PROXY_ENABLED=1");
   });
 
+  it("retries audit-main-remote on transient restart-window failures before failing the release", () => {
+    // 2026-09-02 实测：PM2 重启后立刻 fetch 审计端点偶发 socket 断连，job 误判
+    // failed（deploy 与 health 验证其实均已成功）。audit 只读、重试安全。
+    const auditPhase = source.indexOf('log "Audit main billing ledger"');
+    const buildWeb = source.indexOf("build_web() {", auditPhase);
+    expect(auditPhase).toBeGreaterThan(0);
+    expect(buildWeb).toBeGreaterThan(auditPhase);
+    const auditBlock = source.slice(auditPhase, buildWeb);
+    expect(auditBlock).toContain("for audit_attempt in 1 2 3");
+    expect(auditBlock).toContain("sleep 10");
+    expect(auditBlock).toContain("audit_ok=1");
+    expect(auditBlock).toContain("failed after 3 attempts");
+  });
+
   it("skips alpha build and deploy only for the strict docs classifier result", () => {
     const classification = source.indexOf('deploy_decision="$(bash ./scripts/ci/classifyDeployChanges.sh');
     const dependencyInstall = source.indexOf('timed_phase "install-dependencies" install_dependencies', classification);

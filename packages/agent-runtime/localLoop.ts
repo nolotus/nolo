@@ -587,6 +587,24 @@ function summarizeToolResult(content: unknown, metadata?: Record<string, unknown
   return parts.join(" ");
 }
 
+/**
+ * 纯观测字段：只随 tool_result_metadata 持久化，不进入模型可见内容。
+ *
+ * 新增这类字段时有**三处**必须同时确认，漏一处就会出事：
+ *  1. 加进下面的 OBSERVATION_ONLY_METADATA_KEYS —— 否则 formatToolMessageContent
+ *     会把它拼进 globFiles/codeSearch/readFile 三个工具发给模型的 prompt 字节。
+ *  2. 确认它不在 compactToolMetadata 的 TOOL_METADATA_KEYS 允许清单里 ——
+ *     那条路（in-turn 投影与跨轮历史摘要共用）是白名单制，另一道独立闸门。
+ *  3. **不要**把它混进推给 progressGuard 的 executedToolResults ——
+ *     buildToolResultsSignature 对 metadata 整体做指纹，掺进任何逐次抖动的值
+ *     都会让 repetition_loop / stagnant_tool_calls 两条死循环熔断静默失效。
+ *     这一条被真实踩中过（见 executedToolResults.push 处的注释）。
+ */
+export const TOOL_DURATION_METADATA_KEY = "toolExecMs";
+const OBSERVATION_ONLY_METADATA_KEYS = new Set<string>([
+  TOOL_DURATION_METADATA_KEY,
+]);
+
 function formatToolMessageContent(args: {
   toolName: string;
   content: string;
@@ -603,7 +621,14 @@ function formatToolMessageContent(args: {
   ) {
     return args.content;
   }
-  return `${args.content}\n\n[tool metadata]\n${JSON.stringify(args.metadata)}`;
+  // 剔除纯观测字段后再判空：只带观测字段的 metadata 必须与「无 metadata」
+  // 走同一条路径，否则会凭空多出一个空的 [tool metadata] 块。
+  const visible: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args.metadata)) {
+    if (!OBSERVATION_ONLY_METADATA_KEYS.has(key)) visible[key] = value;
+  }
+  if (Object.keys(visible).length === 0) return args.content;
+  return `${args.content}\n\n[tool metadata]\n${JSON.stringify(visible)}`;
 }
 
 /**
@@ -1849,6 +1874,17 @@ export async function runLocalAgentTurn(
         throwIfAborted(input);
         const toolName = toolCall.function.name;
         let toolResult;
+        /**
+         * 工具本体执行耗时（ms）。只包住 adapter.executeTool 这一段，**不含**
+         * action gate 的人工确认等待——否则被门控的工具会记成用户的思考时间。
+         * 流内已执行（result 已填充）与被 gate 取消的分支不产生该值。
+         *
+         * 为什么要记：历史里 11.3% 的轮次带多个工具、总计约 20% 的工具调用本可
+         * 并行，但 tool metadata 从来没记过耗时，导致「轮内并行值不值得做」这个
+         * 决定一直是瞎的（快工具 15–45ms 的话只省 ~1.8s/300 次，慢命令则可能是
+         * 分钟级）。先把数据攒起来，再谈要不要并行。
+         */
+        let toolExecMs: number | undefined;
         const startedAt = Date.now();
         loopTimingMark("toolCallStart", round);
         const argumentsPreview = summarizeToolArguments(toolName, toolCall.function.arguments);
@@ -1946,7 +1982,9 @@ export async function runLocalAgentTurn(
                 ? { runtimeContext: input.runtimeContext }
                 : {}),
             });
+            const execStartedAtMs = Date.now();
             toolResult = await raceWithAbort(input, executePromise, toolName);
+            toolExecMs = Date.now() - execStartedAtMs;
           }
           const actionGate = buildActionGate({
             toolName,
@@ -2042,6 +2080,18 @@ export async function runLocalAgentTurn(
             },
           };
         }
+        // 观测字段合并到 metadata：随 tool_result_metadata 一并持久化，供后续
+        // 从历史反推工具耗时分布。formatToolMessageContent 会把它剔除，
+        // 模型可见内容逐字节不变（见该函数注释）。
+        const observedMetadata =
+          toolExecMs === undefined
+            ? toolResult.metadata
+            : { ...(toolResult.metadata ?? {}), [TOOL_DURATION_METADATA_KEY]: toolExecMs };
+        // 关键：喂给 progressGuard 的必须是**原始** metadata，不能带 toolExecMs。
+        // buildToolResultsSignature 把 metadata 整体 JSON 化做指纹，只有「内容与
+        // 元数据完全无变化」才计入无进展 streak（repetition_loop 5 轮 /
+        // stagnant_tool_calls 8 轮熔断）。掺进一个每次执行必然抖动的毫秒数，
+        // 签名将永不重复 → 两条死循环熔断对所有场景静默失效。
         executedToolResults.push({
           toolName,
           content: toolResult.content,
@@ -2053,11 +2103,11 @@ export async function runLocalAgentTurn(
           content: formatToolMessageContent({
             toolName,
             content: toolResult.content,
-            metadata: toolResult.metadata,
+            metadata: observedMetadata,
           }),
           tool_call_id: toolCall.id,
           toolName,
-          ...(toolResult.metadata ? { tool_result_metadata: toolResult.metadata } : {}),
+          ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
         });
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环

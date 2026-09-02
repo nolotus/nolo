@@ -1103,6 +1103,83 @@ describe("runLocalAgentTurn", () => {
     });
   });
 
+  test("stamps toolExecMs into persisted metadata without changing model-visible content", async () => {
+    // 不变量：toolExecMs 是纯观测字段——只进 tool_result_metadata，
+    // 绝不进发给模型的 content（否则会改变 globFiles/codeSearch/readFile
+    // 三个白名单工具的 prompt 字节）。
+    const savedTurns: any[] = [];
+    const makeAdapter = (visibleMetadata?: Record<string, unknown>) => ({
+      host: "cli" as const,
+      capabilities: ["local-provider", "local-persistence", "local-tools"] as any,
+      loadAgentConfig: async (agentRef: string) => ({
+        key: agentRef,
+        name: "Probe",
+        prompt: "p",
+        model: "fake-local",
+        toolNames: ["globFiles"],
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input: any) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-duration" };
+      },
+      resolveProvider: async () => {
+        let n = 0;
+        return {
+          model: "fake-local",
+          complete: async (messages: any[]) => {
+            n += 1;
+            if (n === 1) {
+              return {
+                content: "",
+                model: "fake-local",
+                tool_calls: [{
+                  id: "call-1",
+                  type: "function",
+                  function: { name: "globFiles", arguments: "{\"path\":\"docs\"}" },
+                }],
+              } as any;
+            }
+            return { content: "done", model: "fake-local" } as any;
+          },
+        };
+      },
+      executeTool: async () => ({
+        content: "docs/a.md",
+        ...(visibleMetadata ? { metadata: visibleMetadata } : {}),
+      }),
+    }) as any;
+
+    // 情形 1：工具本来就有可见 metadata → 内容里必须有 [tool metadata]，
+    // 但其 JSON 里不能出现 toolExecMs。
+    savedTurns.length = 0;
+    await runLocalAgentTurn({
+      adapter: makeAdapter({ path: "docs", count: 1 }),
+      agentRef: "probe",
+      input: "go",
+    });
+    const withMeta = savedTurns[0]?.messages?.find((m: any) => m.role === "tool");
+    expect(withMeta.content).toContain("[tool metadata]");
+    expect(withMeta.content).not.toContain("toolExecMs");
+    expect(withMeta.content).toContain("\"count\":1");
+    expect(typeof withMeta.tool_result_metadata?.toolExecMs).toBe("number");
+    expect(withMeta.tool_result_metadata.toolExecMs).toBeGreaterThanOrEqual(0);
+    expect(withMeta.tool_result_metadata.count).toBe(1);
+
+    // 情形 2：工具本来没有 metadata → 只剩观测字段时，内容必须与「无 metadata」
+    // 完全一致，不能凭空多出一个空的 [tool metadata] 块。
+    savedTurns.length = 0;
+    await runLocalAgentTurn({
+      adapter: makeAdapter(undefined),
+      agentRef: "probe",
+      input: "go",
+    });
+    const noMeta = savedTurns[0]?.messages?.find((m: any) => m.role === "tool");
+    expect(noMeta.content).toBe("docs/a.md");
+    expect(noMeta.content).not.toContain("[tool metadata]");
+    expect(typeof noMeta.tool_result_metadata?.toolExecMs).toBe("number");
+  });
+
   test("surfaces globFiles metadata in the tool message shown to the model", async () => {
     const savedTurns: AgentRuntimeSaveTurnInput[] = [];
     let completeCalls = 0;
@@ -4414,6 +4491,72 @@ describe("empty assistant fallback marker (runLocalAgentTurn)", () => {
 
       const stallEvent = loopEvents.find((e) => e.kind === "loop-stalled");
       expect(stallEvent).toBeDefined();
+      expect(stallEvent?.reason).toBe("stagnant_tool_calls");
+    });
+
+    test("stagnation guard still trips when tool execution time varies per round", async () => {
+      // 回归防线：toolExecMs 是每次执行必然抖动的毫秒数，一旦它混进喂给
+      // progressGuard 的 metadata，buildToolResultsSignature 的指纹将永不重复，
+      // repetition_loop / stagnant_tool_calls 两条熔断会对**所有**死循环场景
+      // 静默失效。上面那个用例抓不到：mock 工具瞬时返回，每轮耗时都是 0ms，
+      // 签名反而是稳定的。这里强制让每轮耗时不同，把真实生产条件复现出来。
+      let callCount = 0;
+      let execCount = 0;
+      const loopEvents: any[] = [];
+
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence", "local-tools"],
+        loadAgentConfig: async (agentRef) => ({
+          key: agentRef,
+          name: "Loop Guard Agent",
+          prompt: "test",
+          model: "fake-local",
+          toolNames: ["readFile"],
+        }),
+        loadDialogHistory: async () => [],
+        saveTurn: async () => ({ dialogId: "dialog-stalled-jitter" }),
+        resolveProvider: async () => ({
+          model: "fake-local",
+          complete: async () => {
+            callCount += 1;
+            return {
+              content: `Round ${callCount}: let me read again`,
+              model: "fake-local",
+              tool_calls: [
+                {
+                  id: `call-read-${callCount}`,
+                  type: "function",
+                  function: {
+                    name: "readFile",
+                    arguments: '{"path":"unchanged.txt"}',
+                  },
+                },
+              ],
+            };
+          },
+        }),
+        executeTool: async () => {
+          // 每轮真实耗时递增，保证 toolExecMs 逐轮不同。
+          execCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, execCount * 12));
+          return { content: "file content never changes", metadata: { size: 26 } };
+        },
+      };
+
+      const result = await runLocalAgentTurn({
+        adapter,
+        agentRef: "frontend",
+        input: "read repeatedly",
+        progressGuardConfig: {
+          maxConsecutiveStagnantToolRounds: 3,
+        },
+        onLoopEvent: (event) => loopEvents.push(event),
+      });
+
+      expect(callCount).toBe(3);
+      expect(result.emptyAssistantFallbackReason).toBe("stagnant_tool_calls");
+      const stallEvent = loopEvents.find((e) => e.kind === "loop-stalled");
       expect(stallEvent?.reason).toBe("stagnant_tool_calls");
     });
 
