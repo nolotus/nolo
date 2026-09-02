@@ -53,7 +53,7 @@ describe("toolOutput", () => {
     expect(failed).not.toContain("\x1b[2m");
   });
 
-  test("normal mode surfaces the safe command prefix but hides fluent sensitive words", () => {
+  test("normal mode shows the full command including cd / echo segments", () => {
     const format = createToolEventFormatter(false);
     format(toolEvent({
       type: "tool-call",
@@ -68,24 +68,22 @@ describe("toolOutput", () => {
     }));
     expect(output).toContain(toolLabel("execShell"));
     expect(output).toContain("✓");
-    // Safe prefix is surfaced so the user sees what ran.
-    expect(output).toContain("bun test");
-    // Sensitive / content-only segments stay hidden.
-    expect(output).not.toContain("/secret/work");
-    expect(output).not.toContain("echo token");
+    // 2026-09-02 owner 定调：Run 行 = 全量安全投影。整条命令上屏（脱敏后），
+    // 参数与路径不再回避——它们在展开的 Run 树里本来可见。
+    expect(output).toContain("cd /secret/work && echo token && bun test");
   });
 
-  test("normal mode advances past cd / env prefixes to the first real command", () => {
+  test("normal mode shows the full command with compound skeleton intact", () => {
     const format = createToolEventFormatter(false);
     const cases: Array<[string, string]> = [
-      ["cd /Users/nolotus/bun-nolo && git status", "git status"],
-      ["NOLO=1 bun test", "bun test"],
-      ["env NOLO=1 bun test", "bun test"],
-      ["git log --oneline -5 | head -3", "git log"],
-      ["git status || git log", "git status"],
-      ["git status; git log", "git status"],
-      ["git status\ngit log", "git status"],
-      ["echo hello && git status && git log", "git status"],
+      ["cd /Users/nolotus/bun-nolo && git status", "cd /Users/nolotus/bun-nolo && git status"],
+      ["NOLO=1 bun test", "NOLO=1 bun test"],
+      ["env NOLO=1 bun test", "env NOLO=1 bun test"],
+      ["git log --oneline -5 | head -3", "git log --oneline -5 | head -3"],
+      ["git status || git log", "git status || git log"],
+      ["git status; git log", "git status; git log"],
+      ["git status\ngit log", "git status git log"],
+      ["echo hello && git status && git log", "echo hello && git status && git log"],
     ];
     for (const [command, want] of cases) {
       const output = format(toolEvent({
@@ -97,65 +95,79 @@ describe("toolOutput", () => {
     }
   });
 
-  test("normal mode keeps safe command prefixes when arguments are quoted", () => {
+  test("normal mode shows quoted arguments verbatim", () => {
     const format = createToolEventFormatter(false);
     const output = format(toolEvent({
       type: "tool-result",
       toolName: "execShell",
       metadata: { exitCode: 0, command: 'git commit -m "fix: update"' },
     }));
-    expect(output).toContain("▸ Run · git commit  ✓");
-    expect(output).not.toContain("fix: update");
+    expect(output).toContain('▸ Run · git commit -m "fix: update"  ✓');
 
     const chained = format(toolEvent({
       type: "tool-result",
       toolName: "execShell",
       metadata: { exitCode: 0, command: 'echo "hello; git status" && git status' },
     }));
-    expect(chained).toContain("▸ Run · git status  ✓");
-    expect(chained).not.toContain("hello");
+    expect(chained).toContain('▸ Run · echo "hello; git status" && git status  ✓');
   });
 
-  test("normal mode hides shell syntax and limits unknown command details", () => {
+  test("normal mode redacts secret-shaped values and drops unredactable ones", () => {
     const format = createToolEventFormatter(false);
-    const hiddenCommands = [
-      'echo "$SECRET"',
-      'echo "token; cat /etc/passwd"',
-      "printf '%s' \"$TOKEN\"",
-      "$(cat /secret/credentials.json)",
-      "cat < /etc/passwd",
-    ];
-    for (const command of hiddenCommands) {
-      const output = format(toolEvent({
-        type: "tool-result",
-        toolName: "execShell",
-        metadata: { exitCode: 0, command },
-      }));
-      expect(output).toBe("▸ Run  ✓\n");
-    }
+    const keyed = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "bunx claude --api-key sk-ant-api03-abcdef1234567890" },
+    }));
+    expect(keyed).toContain("▸ Run · bunx claude --api-key ⟨redacted⟩  ✓");
+    expect(keyed).not.toContain("sk-ant-api03");
 
-    const safeUnknown = format(toolEvent({
+    const bearer = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "curl -H 'Authorization: Bearer abcdef1234567890' https://api.example.com" },
+    }));
+    expect(bearer).toContain("Bearer ⟨redacted⟩");
+    expect(bearer).not.toContain("abcdef1234567890");
+
+    // redactSecrets 不认识、但 gist 护栏（withholdIfSecretLike）认识的形态：
+    // 整行放弃，宁少勿泄。
+    const dropped = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "git push https://x:ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456@github.com/o/r.git" },
+    }));
+    expect(dropped).toBe("▸ Run  ✓\n");
+  });
+
+  test("normal mode keeps plain commands fully visible and empty commands bare", () => {
+    const format = createToolEventFormatter(false);
+    const cat = format(toolEvent({
       type: "tool-result",
       toolName: "execShell",
       metadata: { exitCode: 0, command: "cat /etc/passwd" },
     }));
-    expect(safeUnknown).toContain("▸ Run · cat  ✓");
-    expect(safeUnknown).not.toContain("/etc/passwd");
+    expect(cat).toContain("▸ Run · cat /etc/passwd  ✓");
+
+    const empty = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "   " },
+    }));
+    expect(empty).toBe("▸ Run  ✓\n");
   });
 
-  test("normal mode shows only allowlisted subcommands for known tools", () => {
+  test("normal mode shows flags and paths in commands (already visible in Run tree)", () => {
     const format = createToolEventFormatter(false);
     const output = format(toolEvent({
       type: "tool-result",
       toolName: "execShell",
       metadata: { exitCode: 0, command: "git --git-dir=/secret status" },
     }));
-    expect(output).toContain("▸ Run · git  ✓");
-    expect(output).not.toContain("--git-dir");
-    expect(output).not.toContain("/secret");
+    expect(output).toContain("▸ Run · git --git-dir=/secret status  ✓");
   });
 
-  test("normal mode shows the safe command detail for Run", () => {
+  test("normal mode shows the full command detail for Run", () => {
     const format = createToolEventFormatter(false);
     const output = format(toolEvent({
       type: "tool-result",
@@ -163,9 +175,44 @@ describe("toolOutput", () => {
       argumentsPreview: "bun test packages/cli/tui packages/cli/client",
       metadata: { exitCode: 0, command: "bun test packages/cli/tui packages/cli/client" },
     }));
-    expect(output).toContain("▸ Run · bun test  ✓");
-    expect(output).not.toContain("packages/cli/tui");
+    expect(output).toContain("▸ Run · bun test packages/cli/tui packages/cli/client  ✓");
+    // argumentsPreview（模型可控原始参数文本）仍绝不进 normal 行，gist 只取
+    // runtime 投影的 metadata.command。
     expect(output).not.toContain("argumentsPreview");
+  });
+
+  test("normal mode clips long commands to the pinned width budget", () => {
+    const format = createToolEventFormatter(false);
+    const prev = process.env.NOLO_TEST_RUN_GIST_WIDTH;
+    process.env.NOLO_TEST_RUN_GIST_WIDTH = "60";
+    try {
+      const output = format(toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: {
+          exitCode: 0,
+          command: "bun test packages/cli/client/toolOutput.test.ts packages/cli/tui/i18n.test.ts",
+        },
+      }));
+      expect(output).toContain("▸ Run · bun test packages");
+      expect(output).toContain("…  ✓");
+      expect(output).not.toContain("i18n.test.ts");
+    } finally {
+      if (prev === undefined) delete process.env.NOLO_TEST_RUN_GIST_WIDTH;
+      else process.env.NOLO_TEST_RUN_GIST_WIDTH = prev;
+    }
+  });
+
+  test("normal mode clips very long commands even on wide terminals", () => {
+    const format = createToolEventFormatter(false);
+    const long = "echo " + "x".repeat(300);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: long },
+    }));
+    expect(output).toContain("…  ✓");
+    expect(output).not.toContain("x".repeat(300));
   });
 
   test("normal mode shows Read path with the requested line range", () => {

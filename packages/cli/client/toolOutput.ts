@@ -472,70 +472,43 @@ function gistClip(value: string, max = NORMAL_TOOL_GIST_MAX): string {
 }
 
 /**
- * 命令的「安全动作前缀」：程序名 + 子命令（如 "git status"、"bun test"）。
- * 复合 shell（&& / ; / 管道 / env 前缀 / cd 开头）按顺序取第一个真正可执行的
- * 命令段：跳过 cd/pushd/popd/source/. 等导航段、跳过内容输出命令（echo/printf，
- * 其下一个 token 是展示内容不是动作），并对段内做 env 前缀剥离——这样单行 Run
- * 能看到「在跑什么」，但对管道里的路径 / token 等敏感参数仍不泄露。gist 只回答
- * 「在跑什么」，绝不携带参数细节。
+ * Run 行 gist 宽度预算：终端宽度减去 `▸ Run · ` 前缀与 ` ✓ 12.3s` 尾缀的余量，
+ * 下限 48（窄窗不塌到没信息），上限 160（超宽屏不无限拉长扫描线）；无 columns
+ * 信息时回退 96（与 edit snippet 的默认预算一致）。NOLO_TEST_RUN_GIST_WIDTH
+ * 供测试钉死预算（仿 NOLO_TEST_DIFF_WIDTH）。
  */
-function commandHeadGist(command: string): string {
-  const trimmed = command.trim();
-  if (!trimmed) return "";
-  // Arguments containing quoting, expansion, redirection, or substitution can
-  // make a naive token projection disclose data or mistake string content for
-  // a command. The expanded Run tree remains available for users who need it.
-  if (/[`$()<>]/.test(trimmed)) return "";
+const DEFAULT_RUN_GIST_MAX = 96;
 
-  const segments: string[] = [];
-  let start = 0;
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const char = trimmed[i]!;
-    if ((char === '"' || char === "'") && (i === 0 || trimmed[i - 1] !== "\\")) {
-      quote = quote === char ? null : quote ?? char;
-      continue;
-    }
-    if (quote) continue;
-    if (trimmed.startsWith("&&", i) || trimmed.startsWith("||", i)) {
-      segments.push(trimmed.slice(start, i));
-      i += 1;
-      start = i + 1;
-    } else if ([";", "|", "\n"].includes(char)) {
-      segments.push(trimmed.slice(start, i));
-      start = i + 1;
-    }
+function normalRunGistMaxWidth(
+  env: Record<string, string | undefined> = process.env,
+  columns?: number,
+): number {
+  const pinned = parseInt(env.NOLO_TEST_RUN_GIST_WIDTH ?? "", 10);
+  if (!Number.isNaN(pinned) && pinned > 0) return pinned;
+  const cols =
+    typeof columns === "number"
+      ? columns
+      : typeof process !== "undefined" && typeof process.stdout?.columns === "number"
+        ? process.stdout.columns
+        : 0;
+  if (cols > 0) {
+    return Math.max(48, Math.min(160, cols - 32));
   }
-  if (quote) return "";
-  segments.push(trimmed.slice(start));
+  return DEFAULT_RUN_GIST_MAX;
+}
 
-  const navSegments = new Set(["cd", "pushd", "popd", "source", "."]);
-  const contentEmitters = new Set(["echo", "printf"]);
-  // Only these tools have stable, user-facing subcommands. For all other
-  // tools show the executable alone; its first argument may be a secret path,
-  // URL, filename, or destructive target (cat /etc/passwd, rm credentials).
-  const safeSubcommandTools = new Set(["git", "bun", "npm", "pnpm", "yarn", "cargo", "go", "docker"]);
-  for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    let index = 0;
-    while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) index += 1;
-    if (index >= tokens.length) continue;
-    let executable = tokens[index]!;
-    if (executable === "env") {
-      index += 1;
-      while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) index += 1;
-      if (index >= tokens.length) continue;
-      executable = tokens[index]!;
-    }
-    if (navSegments.has(executable) || contentEmitters.has(executable)) continue;
-    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(executable)) continue;
-    const subcommand = tokens[index + 1];
-    const head = safeSubcommandTools.has(executable) && subcommand && /^[A-Za-z][A-Za-z0-9_-]*$/.test(subcommand)
-      ? `${executable} ${subcommand}`
-      : executable;
-    return gistClip(head, 24);
-  }
-  return "";
+/**
+ * 命令的「全量安全投影」（2026-09-02 owner 定调，替代旧的 24 字符 commandHeadGist）：
+ * 整条命令折叠成单行、过 redactSecrets 打码凭据形态，再按终端宽度截断；
+ * 复合 shell 的 && / ; / | 骨架原样保留。密钥护栏分层：redactSecrets 打码
+ * 高置信形态，normalToolGist 出口的 withholdIfSecretLike 对打码后仍可疑的串
+ * 整行放弃——宁可少显示，不上屏可疑串。命令参数/路径不再回避：它们在展开的
+ * Run 树里本来可见。
+ */
+function commandFullGist(command: string, max: number): string {
+  const oneLine = command.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "";
+  return truncateByDisplayWidth(redactSecrets(oneLine), max);
 }
 function pathBasenameGist(path: string): string {
   const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
@@ -756,11 +729,12 @@ function buildHighlightedEditLine(
 }
 
 /**
- * normal 模式的派生摘要（gist）：动作对象的最小可感知名词，不是原始参数。
- * 只从 localLoop 安全观测投影取值（metadata.path / metadata.command，已裁剪
- * <=240）；argumentsPreview 是模型可控的原始参数文本，绝不进 normal 行。
- * 缺失时回退纯「label ✓」形式。原则（2026-08-31 owner 定调）：用户不需要
- * 全量，但需要感知 agent 大概在干嘛——raw args 是管道噪音，gist 是产品反馈。
+ * normal 模式的派生摘要（gist）：只从 localLoop 安全观测投影取值
+ * （metadata.path / metadata.command，已裁剪 <=240）；argumentsPreview 是
+ * 模型可控的原始参数文本，绝不进 normal 行。缺失时回退纯「label ✓」形式。
+ * 原则演进：2026-08-31 owner 定调「raw args 是管道噪音，gist 是最小可感知
+ * 名词」；2026-09-02 owner 反转 Run 行——命令改全量安全投影（redactSecrets
+ * 脱敏 + 终端宽度截断），其余工具 gist 维持最小可感知名词不变。
  */
 function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
@@ -789,17 +763,17 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
   if (isRunToolName(toolName)) {
     const command = typeof metadata.command === "string" ? metadata.command : "";
     if (command) {
-      // Keep shell plumbing out of the compact activity line. For simple
-      // commands show the executable/subcommand gist; the full safe command
-      // remains available in the expanded Run tree.
-      return commandHeadGist(command);
+      // 2026-09-02 owner 定调：Run 行改「全量安全投影」——整条命令脱敏后按
+      // 终端宽度上屏（替代旧的 24 字符 head，参数/路径在展开 Run 树里本来
+      // 可见）。密钥护栏：redactSecrets 打码 + 出口 withholdIfSecretLike 兜底。
+      return commandFullGist(command, normalRunGistMaxWidth());
     }
   }
 
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
-  if (command) return commandHeadGist(command);
+  if (command) return commandFullGist(command, normalRunGistMaxWidth());
   const query = typeof metadata.query === "string" ? metadata.query : "";
   if (query) return clipCompactText(query, 64, "…");
   const remembered = event.toolName === "rememberMemory" && typeof metadata.content === "string"
