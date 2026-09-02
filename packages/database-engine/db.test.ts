@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 
 let moduleVersion = 0;
+const LOCK_RETRY_PATH = `/tmp/lock-retry-authority-${process.pid}-${Date.now()}`;
+const LOCK_FASTFAIL_PATH = `/tmp/lock-fastfail-authority-${process.pid}-${Date.now()}`;
 
 type FakeAuthorityStore = {
   location: string;
@@ -153,7 +155,7 @@ describe("database server db module", () => {
   });
 
   it("retries lock errors until the store opens within the deadline", async () => {
-    const fakeStore = createFakeStore("/tmp/lock-retry-authority", (store) => {
+    const fakeStore = createFakeStore(LOCK_RETRY_PATH, (store) => {
       if (store.openCalls <= 3) throw makeLockError();
       store.status = "open";
     });
@@ -178,7 +180,7 @@ describe("database server db module", () => {
   });
 
   it("throws the last lock error once the retry budget is exhausted", async () => {
-    const fakeStore = createFakeStore("/tmp/lock-retry-authority", () => {
+    const fakeStore = createFakeStore(LOCK_RETRY_PATH, () => {
       throw makeLockError();
     });
     const db = await importDbWithStore(fakeStore);
@@ -204,7 +206,7 @@ describe("database server db module", () => {
   it("quiet 模式下重试与失败都不打日志（CLI 只读兜底用）", async () => {
     // CLI/TUI 抢不到锁是预期内的（dev server 常驻持锁），逐秒 warn 会刷屏；
     // 调用方会退回更有用的 HTTP 错误，所以这条路径必须静默。
-    const fakeStore = createFakeStore("/tmp/lock-retry-authority", () => {
+    const fakeStore = createFakeStore(LOCK_RETRY_PATH, () => {
       throw makeLockError();
     });
     const db = await importDbWithStore(fakeStore);
@@ -227,7 +229,7 @@ describe("database server db module", () => {
   });
 
   it("rethrows non-lock errors immediately without retrying", async () => {
-    const fakeStore = createFakeStore("/tmp/lock-retry-authority", () => {
+    const fakeStore = createFakeStore(LOCK_RETRY_PATH, () => {
       throw makeIoError();
     });
     const db = await importDbWithStore(fakeStore);
@@ -251,7 +253,7 @@ describe("database server db module", () => {
     // 回归：默认预算曾是 90s，会把一次失败的进程交接变成 90 秒静默重试
     // （PM2 认为进程还活着，外部探针看不到异常，部署静默失败）。
     // 默认预算必须短到能让进程快速退出并被 PM2 重启。
-    const fakeStore = createFakeStore("/tmp/lock-fastfail-authority", () => {
+    const fakeStore = createFakeStore(LOCK_FASTFAIL_PATH, () => {
       throw makeLockError();
     });
     const db = await importDbWithStore(fakeStore);
@@ -273,7 +275,7 @@ describe("database server db module", () => {
     const previous = process.env.NOLO_SERVER_DB_OPEN_LOCK_TIMEOUT_MS;
     process.env.NOLO_SERVER_DB_OPEN_LOCK_TIMEOUT_MS = "2000";
     try {
-      const fakeStore = createFakeStore("/tmp/lock-retry-authority", () => {
+      const fakeStore = createFakeStore(LOCK_RETRY_PATH, () => {
         throw makeLockError();
       });
       const db = await importDbWithStore(fakeStore);

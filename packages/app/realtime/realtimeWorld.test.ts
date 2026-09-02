@@ -32,7 +32,12 @@ import {
   SseTransport,
   subscribeSharedSseEffect,
 } from "./sharedSseEffect";
-import { makeInMemoryEventStore } from "server/realtime/eventStoreCore";
+import {
+  EVENT_RETENTION_MS,
+  makeInMemoryEventStore,
+  ServerRealtimeWorld,
+  makeServerRealtimeWorldLayer,
+} from "server/realtime/eventStoreCore";
 import type { ServerEvent } from "server/realtime/eventStoreCore";
 
 // ── Test services（与 sharedSseEffect.test.ts 相同的虚拟时间基础设施） ──────
@@ -189,6 +194,33 @@ const yieldLoop = () => Effect.gen(function* () {
 // ── World tests ──────────────────────────────────────────────────────────────
 
 describe("realtime world (real client × real server core)", () => {
+  test("world replay uses TestClock for retention deterministically", async () => {
+    // store 时钟可变：让 E2（old）与 E1（fresh）有真实的时间差。
+    // retention 语义：rec.createdAt 与 world 的 Clock（TestClock）求年龄。
+    let storeNow = -7_200_000; // 比 TestClock(0) 早 2 小时
+    const store = makeInMemoryEventStore(() => storeNow);
+    store.append("space-clock", { type: "old" }, "E2"); // createdAt=-2h → 已过期
+    storeNow = -1_000;
+    store.append("space-clock", { type: "fresh" }, "E1"); // createdAt=-1s → 未过期
+    const program = Effect.gen(function* () {
+      const world = yield* ServerRealtimeWorld;
+      // TestClock=0：E2 年龄 2h > retention 被滤掉，E1 年龄 1s 保留
+      expect(yield* world.replay("space-clock", "E0")).toEqual([
+        { type: "fresh", _eventId: "E1" },
+      ]);
+      // 虚拟时钟推进 retention+2s：E1 也越过阈值
+      yield* TestClock.adjust(Duration.millis(EVENT_RETENTION_MS + 2_000));
+      expect(yield* world.replay("space-clock", "E0")).toEqual([]);
+    });
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(makeServerRealtimeWorldLayer(store)),
+      ) as Effect.Effect<A>
+    );
+  });
+
+
   test("convergence: connect → E1 → physical disconnect → E2/E3 → reconnect(Last-Event-ID=E1) → replay → [E1,E2,E3]", async () => {
     const server = new FakeServer();
     const network = new FakeNetwork(server);
