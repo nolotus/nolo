@@ -156,3 +156,72 @@ describe("memory rank", () => {
     expect(ranked[0]?.id).toBe("explicit");
   });
 });
+
+describe("零激活记忆的宽限期降权", () => {
+  const base = {
+    ownerType: "user" as const,
+    ownerId: "user1",
+    visibility: "private" as const,
+    subjectType: "user" as const,
+    subjectId: "user1",
+    importance: 0.8,
+    confidence: 0.8,
+  };
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+  it("过宽限期仍零激活的记忆，排在同期有激活的记忆之后", () => {
+    const items = [
+      {
+        ...base,
+        id: "zombie",
+        contentKey: "mem-zombie",
+        kind: "episodic" as const,
+        content: "一次性工程条目",
+        createdAt: daysAgo(20),
+        lastActivatedAt: daysAgo(20),
+        activationCount: 0,
+      },
+      {
+        ...base,
+        id: "useful",
+        contentKey: "mem-useful",
+        kind: "episodic" as const,
+        content: "反复用到的偏好",
+        createdAt: daysAgo(20),
+        lastActivatedAt: daysAgo(20),
+        activationCount: 8,
+      },
+    ];
+
+    const ranked = rankMemoryCandidates(items, "");
+    expect(ranked[0]?.id).toBe("useful");
+  });
+
+  it("宽限期内的新记忆不被降权（给新记忆证明自己的机会）", () => {
+    const items = [
+      {
+        ...base,
+        id: "fresh",
+        contentKey: "mem-fresh",
+        kind: "episodic" as const,
+        content: "刚写入的记忆",
+        createdAt: daysAgo(1),
+        lastActivatedAt: daysAgo(1),
+        activationCount: 0,
+      },
+      {
+        ...base,
+        id: "old",
+        contentKey: "mem-old",
+        kind: "episodic" as const,
+        content: "很久以前的记忆",
+        createdAt: daysAgo(60),
+        lastActivatedAt: daysAgo(60),
+        activationCount: 1,
+      },
+    ];
+
+    const ranked = rankMemoryCandidates(items, "");
+    expect(ranked[0]?.id).toBe("fresh");
+  });
+});

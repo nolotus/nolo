@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildMemoryOverlay } from "./overlay";
+import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "./overlay";
 import type { MemoryItem } from "./types";
 
 const makeItem = (overrides: Partial<MemoryItem> & { content: string; kind: MemoryItem["kind"] }): MemoryItem => ({
@@ -186,5 +186,88 @@ describe("buildMemoryOverlay - perKindLimit 边界", () => {
 
     expect(overlay).toContain("用户偏好");
     expect(overlay).not.toContain("工程记忆一");
+  });
+});
+
+describe("buildMemoryOverlay - 预算不足时截断而非静默丢弃", () => {
+  const longContent = (prefix: string) => prefix + "详细内容".repeat(120);
+
+  it("超预算的长记忆被截断保留，而不是整条消失", () => {
+    const items: MemoryItem[] = [
+      makeItem({ id: "s1", content: longContent("语义一："), kind: "semantic" }),
+      makeItem({ id: "s2", content: longContent("语义二："), kind: "semantic" }),
+    ];
+
+    const overlay = buildMemoryOverlay(items, { maxTokens: 400 })!;
+
+    // 两条都留下痕迹（第二条以截断形式），不再是只剩第一条
+    expect(overlay).toContain("语义一");
+    expect(overlay).toContain("语义二");
+    expect(overlay).toContain("已截断");
+  });
+
+  it("截断与丢弃都在 footer 中显式告知，并指向 queryMemory", () => {
+    const items: MemoryItem[] = [
+      makeItem({ id: "s1", content: longContent("语义一："), kind: "semantic" }),
+      makeItem({ id: "s2", content: longContent("语义二："), kind: "semantic" }),
+    ];
+
+    const overlay = buildMemoryOverlay(items, { maxTokens: 400 })!;
+
+    expect(overlay).toContain("queryMemory");
+    expect(overlay).toMatch(/截断|未显示/);
+  });
+
+  it("预算充足时不产生 footer，也不截断（保持原行为）", () => {
+    const items: MemoryItem[] = [
+      makeItem({ id: "s1", content: "短记忆一", kind: "semantic" }),
+      makeItem({ id: "e1", content: "短记忆二", kind: "episodic" }),
+    ];
+
+    const overlay = buildMemoryOverlay(items, { maxTokens: 2000 })!;
+
+    expect(overlay).toContain("短记忆一");
+    expect(overlay).toContain("短记忆二");
+    expect(overlay).not.toContain("已截断");
+    expect(overlay).not.toContain("queryMemory");
+  });
+
+  it("剩余预算过小时不产生无意义碎片，而是真丢弃并计入 footer", () => {
+    const items: MemoryItem[] = [
+      makeItem({ id: "s1", content: longContent("语义一："), kind: "semantic" }),
+      makeItem({ id: "s2", content: longContent("语义二："), kind: "semantic" }),
+      makeItem({ id: "s3", content: longContent("语义三："), kind: "semantic" }),
+    ];
+
+    const overlay = buildMemoryOverlay(items, { maxTokens: 320 })!;
+
+    // 不做无意义的两三个字碎片
+    expect(overlay).not.toMatch(/- 语义三：详细?…（本条已截断）/);
+    expect(overlay).toMatch(/截断|未显示/);
+  });
+});
+
+describe("overlay 默认预算与 runtime 常量一致", () => {
+  it("runtime 的 MEMORY_OVERLAY_TOKEN_BUDGET 直接引用 overlay 的 SSOT 常量", async () => {
+    const { MEMORY_OVERLAY_TOKEN_BUDGET } = await import("./runtime");
+    const { DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } = await import("./overlay");
+
+    // 编译期引用而非两处硬编码：此前用"构造特定 token 区间的记忆看是否被截断"
+    // 来黑盒探测，两边同时调大到饱和区时会漏报。
+    expect(MEMORY_OVERLAY_TOKEN_BUDGET).toBe(DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET);
+  });
+
+  it("不传 maxTokens 时使用默认预算", () => {
+    const items: MemoryItem[] = [
+      makeItem({ id: "s1", content: "语义记忆" + "内容".repeat(500), kind: "semantic" }),
+      makeItem({ id: "e1", content: "情景记忆" + "内容".repeat(500), kind: "episodic" }),
+    ];
+
+    const withExplicitBudget = buildMemoryOverlay(items, {
+      maxTokens: DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET,
+    });
+    const withDefaultBudget = buildMemoryOverlay(items);
+
+    expect(withDefaultBudget).toBe(withExplicitBudget);
   });
 });

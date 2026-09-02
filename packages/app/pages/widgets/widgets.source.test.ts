@@ -84,7 +84,7 @@ describe("Widgets source contract", () => {
     expect(homeSource).toContain(
       'const WidgetsSection = lazy(() => import("./widgets/WidgetsSection"))'
     );
-    expect(homeSource).toContain("home-authed-widgets-section");
+    expect(homeSource).toContain("homeStyles.homeAuthedWidgetsSection");
     expect(homeSource).toContain("<WidgetsSection");
     expect(homeSource).not.toContain('id: "usage"');
   });

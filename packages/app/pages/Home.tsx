@@ -30,6 +30,9 @@ import {
 } from "app/localFirst/onboardingDismissed";
 
 import { useSSRPublicAgents } from "ai/agent/publicAgentsSSRStore";
+import * as stylex from "@stylexjs/stylex";
+import { homeStyles } from "./HomeStyles";
+import { withLiteralClass } from "./share/withLiteralClass";
 import "./home-motion.css";
 import "./Home.css";
 
@@ -138,7 +141,7 @@ const Home = () => {
       tabsConfig.map(({ id, label, icon }) => ({
         id,
         label: (
-          <span className="tab-label-with-icon">
+          <span {...stylex.props(homeStyles.tabLabelWithIcon)}>
             {icon}
             <span>{label}</span>
           </span>
@@ -212,17 +215,29 @@ const Home = () => {
 
   return (
     <>
-      <div className={`home-layout ${showAuthedHome ? "home-layout--authed" : "home-layout--guest"}`}>
-        <main className="home-main">
+      <div
+        {...withLiteralClass(
+          `home-layout ${showAuthedHome ? "home-layout--authed" : "home-layout--guest"}`,
+          showAuthedHome ? homeStyles.homeLayoutAuthed : homeStyles.homeLayout
+        )}
+      >
+        <main
+          {...withLiteralClass(
+            "home-main",
+            homeStyles.homeMain,
+            showAuthedHome && homeStyles.homeMainAuthed
+          )}
+        >
           {showAuthedHome ? (
             <>
-              <section className="home-authed-widgets-section">
-                <div className="home-authed-widgets-header">
+              <section {...stylex.props(homeStyles.homeAuthedWidgetsSection)}>
+                <div {...stylex.props(homeStyles.homeAuthedWidgetsHeader)}>
                   <button
                     type="button"
-                    className={`home-edit-btn${
-                      isEditingWidgets ? " home-edit-btn--active" : ""
-                    }`}
+                    {...stylex.props(
+                      homeStyles.homeEditBtn,
+                      isEditingWidgets && homeStyles.homeEditBtnActive
+                    )}
                     onClick={() => { dismissWidgetsTip(); setIsEditingWidgets((v) => !v); }}
                   >
                     {isEditingWidgets
@@ -230,11 +245,17 @@ const Home = () => {
                       : t("homeTabs.editCustom", "修改")}
                   </button>
                   {!widgetsTipSeen && !isEditingWidgets && (
-                    <div className="home-widgets-tip">
-                      <p className="home-widgets-tip__text" role="status">
+                    <div
+                      {...withLiteralClass(
+                        "home-widgets-tip",
+                        homeStyles.homeWidgetsTip,
+                        homeStyles.homeWidgetsTipBefore
+                      )}
+                    >
+                      <p {...stylex.props(homeStyles.homeWidgetsTipText)} role="status">
                         {t("homeWidgets.customizeTip", "这里可以自定义首页：点「修改」后，可拖动卡片排序、拖卡片右下角调整大小、或隐藏不需要的模块。")}
                       </p>
-                      <button type="button" className="home-widgets-tip__done" onClick={dismissWidgetsTip}>
+                      <button type="button" {...stylex.props(homeStyles.homeWidgetsTipDone)} onClick={dismissWidgetsTip}>
                         {t("homeWidgets.customizeTipDone", "知道了")}
                       </button>
                     </div>
@@ -245,8 +266,14 @@ const Home = () => {
                 </Suspense>
               </section>
 
-              <section className="home-bottom-chat-shell">
-                <div className="home-primary-chat">
+              <section {...stylex.props(homeStyles.homeBottomChatShell)}>
+                <div
+                  {...withLiteralClass(
+                    "home-primary-chat",
+                    homeStyles.homePrimaryChat,
+                    homeStyles.homePrimaryChatInShell
+                  )}
+                >
                   <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
                 </div>
               </section>
@@ -259,12 +286,12 @@ const Home = () => {
                 <WelcomeSection />
               )}
 
-              <section id="ai-plaza-section" className="home-content-section">
-                <div className="home-plaza-bridge">
-                  <span className="home-plaza-bridge__kicker">{t("homeTabs.aiPlaza", "AI 广场")}</span>
-                  <span className="home-plaza-bridge__line" aria-hidden="true" />
+              <section id="ai-plaza-section" {...stylex.props(homeStyles.homeContentSection)}>
+                <div {...stylex.props(homeStyles.homePlazaBridge)}>
+                  <span {...stylex.props(homeStyles.homePlazaBridgeKicker)}>{t("homeTabs.aiPlaza", "AI 广场")}</span>
+                  <span {...stylex.props(homeStyles.homePlazaBridgeLine)} aria-hidden="true" />
                 </div>
-                <header className="home-content-header">
+                <header {...stylex.props(homeStyles.homeContentHeader)}>
                   <Tabs
                     selectedKey={activeTab}
                     onSelectionChange={(key) => handleTabsNavChange(key as string)}
@@ -279,14 +306,14 @@ const Home = () => {
                     </TabList>
                   </Tabs>
 
-                  <NavLink to={viewAllConfig.path} className="home-view-all-link">
+                  <NavLink to={viewAllConfig.path} {...stylex.props(homeStyles.homeViewAllLink)}>
                     <span>{viewAllConfig.label}</span>
                     <LuChevronRight size={16} aria-hidden="true" />
                   </NavLink>
                 </header>
 
                 <div
-                  className="home-content-body"
+                  {...withLiteralClass("home-content-body", homeStyles.homeContentBody)}
                   style={{ minHeight: contentMinHeight }}
                 >
                   <div

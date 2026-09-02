@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const homeSource = readFileSync(join(import.meta.dir, "Home.tsx"), "utf8");
 const homeCss = readFileSync(join(import.meta.dir, "Home.css"), "utf8");
+const homeStylesSource = readFileSync(join(import.meta.dir, "HomeStyles.ts"), "utf8");
 const welcomeSource = readFileSync(join(import.meta.dir, "WelcomeSection.tsx"), "utf8");
 const diagramSource = readFileSync(join(import.meta.dir, "WelcomeOrchestrationDiagram.tsx"), "utf8");
 const welcomeCss = [
@@ -23,7 +24,8 @@ const publicAgentsPreviewSource = readFileSync(
 describe("Home source contract", () => {
   it("renders the guest welcome section before mount to avoid CLS", () => {
     expect(homeSource).not.toContain("home-auth-placeholder");
-    expect(homeSource).toContain('className={`home-layout ${showAuthedHome ? "home-layout--authed" : "home-layout--guest"}`}');
+    // 布局根经 withLiteralClass 保留 hook 类名（home-motion.css 依赖 .home-layout）。
+    expect(homeSource).toContain('`home-layout ${showAuthedHome ? "home-layout--authed" : "home-layout--guest"}`');
     expect(homeSource).toContain("showAuthedHome ? (");
     expect(homeSource).toContain("<WelcomeSection />");
     expect(homeSource).not.toContain("<WelcomeSection />\n            )}\n          </section>");
@@ -152,11 +154,11 @@ describe("Home source contract", () => {
     expect(homeSource).toContain("<HomePaneSkeleton />");
     expect(homeCss).toContain(".activity-pane");
     expect(homeCss).toContain("home-activity-pane-in");
-    expect(homeCss).toContain(".home-pane-skeleton");
-    expect(homeCss).toContain(".home-plaza-bridge");
-    expect(homeCss).toContain(".home-plaza-bridge__kicker");
-    expect(homeCss).toContain("#ai-plaza-section");
-    expect(homeCss).toContain("scroll-margin-top");
+    expect(homeStylesSource).toContain("homeSkeleton:");
+    expect(homeStylesSource).toContain("homePlazaBridge:");
+    expect(homeStylesSource).toContain("homePlazaBridgeKicker:");
+    expect(homeSource).toContain('id="ai-plaza-section"');
+    expect(homeStylesSource).toContain("scrollMarginTop");
     expect(homeSource).toContain('import "./home-motion.css"');
     expect(welcomeCss).toContain(".wf-diagram-skeleton");
     expect(welcomeCss).toContain(".wf-stage-mobile-canvas");
@@ -176,16 +178,16 @@ describe("Home source contract", () => {
   it("gives the logged-in quick chat a dedicated primary action surface", () => {
     const quickChatCss = readFileSync(join(import.meta.dir, "QuickChat.css"), "utf8");
 
-    expect(homeSource).toContain('className="home-primary-chat"');
+    expect(homeSource).toContain('"home-primary-chat"');
     expect(homeSource).toContain('<QuickChat surface="home-primary" isEmptyState={isEmptyState} />');
     // Global Home must remain on home-primary, not the Space Home compact surface.
     expect(homeSource).not.toContain('surface="space-home-compact"');
     expect(homeCss).toContain(".home-primary-chat");
-    expect(homeCss).toContain(".home-hero-shell[data-mode=\"logged-in\"] .home-primary-chat");
-    expect(homeCss).toContain("background: transparent;");
-    expect(homeCss).toContain("box-shadow: none;");
     expect(homeCss).toContain("home-surface-in");
-    expect(homeCss).toContain(".home-bottom-chat-shell .home-primary-chat");
+    expect(homeStylesSource).toContain("homePrimaryChat:");
+    expect(homeStylesSource).toContain("homePrimaryChatInShell:");
+    expect(homeStylesSource).toContain('backgroundColor: "transparent"');
+    expect(homeStylesSource).toContain('boxShadow: "none"');
     expect(quickChatCss).not.toContain("--quick-chat-primary-shadow");
     expect(quickChatCss).toContain("/* Home primary keeps the shell clean; focus supplies the affordance. */");
     expect(quickChatCss).toContain(".quick-chat-container[data-surface=\"home-primary\"]");
@@ -197,10 +199,10 @@ describe("Home source contract", () => {
   });
 
   it("anchors bottom chat shell to the viewport bottom using flex layout and sticky fallback", () => {
-    expect(homeCss).toContain(".home-layout--authed");
-    expect(homeCss).toContain(".home-bottom-chat-shell");
-    expect(homeCss).toContain("margin-top: auto;");
-    expect(homeCss).toContain("position: sticky;");
+    expect(homeStylesSource).toContain("homeLayoutAuthed:");
+    expect(homeStylesSource).toContain("homeBottomChatShell:");
+    expect(homeStylesSource).toContain('marginTop: "auto"');
+    expect(homeStylesSource).toContain('position: "sticky"');
   });
 
   it("shows a one-time customize tip for home widgets and drops the edit done callback", () => {

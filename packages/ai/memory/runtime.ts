@@ -1,5 +1,5 @@
 import { touchMemoryItemsInDb } from "./storeShared";
-import { buildMemoryOverlay } from "./overlay";
+import { buildMemoryOverlay, DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET } from "./overlay";
 import { rankMemoryCandidates, type MemoryRankContext } from "./rank";
 import { chooseMemoryOwners, loadMemoryCandidatesFromDb } from "./queryShared";
 import { buildMemorySubjectsForAgent, resolveAgentMemoryPolicy } from "./policy";
@@ -12,8 +12,12 @@ export const COLD_STORAGE_CONFIDENCE = 0.3;
 /**
  * Memory overlay 的软上限 token 预算（粗估）。
  * 防止记忆膨胀吃掉 context window；超出时按 kind 优先级截断。
+ *
+ * 真值定义在 overlay.ts（SSOT）——两处各自硬编码会漂移，且黑盒守护测试
+ * 在两边同时调大到饱和区时会漏报，编译期引用才能真正杜绝。
+ * 取值依据见 DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET 的注释。
  */
-export const MEMORY_OVERLAY_TOKEN_BUDGET = 2000;
+export const MEMORY_OVERLAY_TOKEN_BUDGET = DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET;
 
 const normalizeSelectedContent = (text: string): string =>
   text
