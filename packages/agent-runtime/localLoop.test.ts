@@ -1,7 +1,10 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { getEventListeners } from "node:events";
+import { Duration, Effect, ManagedRuntime } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
+  LOCAL_TURN_ABORTED_CODE,
   resolveEmptyAssistantOutcome,
   runLocalAgentTurn,
   summarizeHistoricalToolContent,
@@ -5178,5 +5181,159 @@ describe("poisoned tool_call arguments (upstream stream truncation)", () => {
     expect(String(toolMsg?.content)).toContain("不是合法 JSON");
     expect(String(toolMsg?.content)).toContain("疑似上游流式截断");
     expect(String(toolMsg?.content)).toContain("重新完整调用");
+  });
+});
+
+// ── 第二刀：timeout + abort deterministic world（Effect v4 kernel）──────────
+//
+// timeout/abort 收敛进 runAbortableWithTimeout（Effect kernel）：timeout 走
+// Effect Clock，测试注入 ManagedRuntime(TestClock.layer()) 用 TestClock.adjust
+// 虚拟推进——9999ms 不触发 / +1ms 精确触发，全程零真实 sleep。abort 由外部
+// AbortSignal 桥接 raceFirst interruption，pending 中立即终止。所有被放弃的
+// provider promise 不取消（无取消契约），其后续 settle 由 kernel 吸收，无悬挂。
+describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", () => {
+  /** 微任务级 settle 探测（无真实 sleep）：已 settle 立即可见，否则仍 pending。 */
+  async function isPending(p: Promise<unknown>): Promise<boolean> {
+    return await Promise.race([
+      p.then(
+        () => false,
+        () => false,
+      ),
+      Promise.resolve(null).then(() => true),
+    ]);
+  }
+
+  /** 等 turn 进入 provider pending（微任务自旋，无真实 sleep）。 */
+  async function waitForProviderCall(providerCalls: unknown[], runtime: ManagedRuntime.ManagedRuntime<never, never>) {
+    let spins = 0;
+    while (providerCalls.length === 0 && spins < 1_000) {
+      await runtime.runPromise(Effect.yieldNow);
+      spins += 1;
+    }
+    expect(providerCalls.length).toBe(1);
+  }
+
+  function makeHangingAdapter(options: {
+    savedTurns: AgentRuntimeSaveTurnInput[];
+    providerCalls: number[];
+    provider1?: Promise<AgentRuntimeResult>;
+  }) {
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        name: "Hanging Agent",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input) => {
+        options.savedTurns.push(input);
+        return { dialogId: "dialog-hang" };
+      },
+      resolveProvider: async () => ({
+        model: "fake-local",
+        // Never resolves: simulates a long-running provider request.
+        complete: (messages: AgentRuntimeChatMessage[]) => {
+          options.providerCalls.push(messages.map((m) => ({ ...m })));
+          return options.provider1 ?? new Promise<AgentRuntimeResult>(() => {});
+        },
+      }),
+      executeTool: async () => {
+        throw new Error("tools should not run in this scenario");
+      },
+    };
+    return adapter;
+  }
+
+  test("timeout kernel: TestClock 推进 9999ms 不触发、再 +1ms 精确触发", async () => {
+    const runtime = ManagedRuntime.make(TestClock.layer());
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const providerCalls: AgentRuntimeChatMessage[][] = [];
+    let resolvePending!: (value: AgentRuntimeResult) => void;
+    const provider1 = new Promise<AgentRuntimeResult>((resolve) => {
+      resolvePending = resolve;
+    });
+    const adapter = makeHangingAdapter({ savedTurns, providerCalls, provider1 });
+
+    const turnPromise = runLocalAgentTurn({
+      adapter,
+      agentRef: "timeout-kernel",
+      input: "hang until the turn budget",
+      timeoutMs: 10_000,
+      effectRuntime: runtime,
+    } as any).then(
+      (r) => ({ kind: "fulfilled" as const, r }),
+      (e) => ({ kind: "rejected" as const, e }),
+    );
+
+    await waitForProviderCall(providerCalls, runtime);
+
+    // +9999ms：仍未 timeout，turn 仍 pending，无额外动作。
+    await runtime.runPromise(TestClock.adjust(Duration.millis(9_999)));
+    expect(await isPending(turnPromise)).toBe(true);
+    expect(providerCalls).toHaveLength(1);
+
+    // 再 +1ms：精确 timeout（code LLM_REQUEST_TIMEOUT，message 保留旧语义）。
+    await runtime.runPromise(TestClock.adjust(Duration.millis(1)));
+    const settled = await turnPromise;
+    expect(settled.kind).toBe("rejected");
+    const err = settled.e as Error & { code?: string };
+    expect(err.code).toBe("LLM_REQUEST_TIMEOUT");
+    expect(err.message).toBe("LLM request timed out after 10000ms (round 0)");
+    // timeout round 没被当正常完成：saveTurn 仍落盘（loopError 留档），
+    // 但没有 assistant 终稿。
+    expect(savedTurns).toHaveLength(1);
+    expect(savedTurns[0]!.messages.at(-1)!.role).toBe("user"); // 无 assistant 终稿
+
+    // cleanup：timeout 后继续大幅推进虚拟时间（+100s），无悬挂动作。
+    await runtime.runPromise(TestClock.adjust(Duration.millis(100_000)));
+    expect(providerCalls).toHaveLength(1);
+    expect(savedTurns).toHaveLength(1);
+
+    // 迟到结果不产生重复 terminal：provider 后续 resolve 被吸收，不再落盘。
+    resolvePending({ content: "迟到内容", model: "fake-local" } as AgentRuntimeResult);
+    for (let i = 0; i < 10; i++) await runtime.runPromise(Effect.yieldNow);
+    expect(savedTurns).toHaveLength(1);
+    expect(JSON.stringify(savedTurns[0]!.messages)).not.toContain("迟到内容");
+
+    await runtime.dispose();
+  });
+
+  test("abort kernel: provider pending 时外部 abort 立即终止，无下一轮", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const providerCalls: AgentRuntimeChatMessage[][] = [];
+    const controller = new AbortController();
+    const adapter = makeHangingAdapter({ savedTurns, providerCalls });
+
+    const turnPromise = runLocalAgentTurn({
+      adapter,
+      agentRef: "abort-kernel",
+      input: "take forever",
+      abortSignal: controller.signal,
+    }).then(
+      (r) => ({ kind: "fulfilled" as const, r }),
+      (e) => ({ kind: "rejected" as const, e }),
+    );
+
+    // 等 turn 进入 provider pending（微任务级，无真实 sleep；abort 场景不依赖
+    // TestClock，走生产默认 runtime）。
+    let spins = 0;
+    while (providerCalls.length === 0 && spins < 1_000) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      spins += 1;
+    }
+    expect(providerCalls).toHaveLength(1);
+
+    controller.abort();
+    const settled = await turnPromise;
+
+    expect(settled.kind).toBe("rejected");
+    expect((settled.e as Error & { code?: string }).code).toBe(LOCAL_TURN_ABORTED_CODE);
+    // 不会继续下一轮 / 不会继续调用 provider。
+    expect(providerCalls).toHaveLength(1);
+    // aborted round 不当正常完成：无 content 终稿，仅留档。
+    expect(savedTurns).toHaveLength(1);
+    expect(savedTurns[0]!.messages.at(-1)!.role).toBe("user");
   });
 });

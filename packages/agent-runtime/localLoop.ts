@@ -1,5 +1,7 @@
 import { clipCompactText } from "core/clipCompactText";
 import { toErrorMessage } from "core/errorMessage";
+import { runAbortableWithTimeout } from "./abortableKernel";
+import type { ManagedRuntime } from "effect";
 
 import type {
   AgentRuntimeHostAdapter,
@@ -172,6 +174,13 @@ export type LocalAgentTurnInput = {
    * 真正撤销；中断的回合仍会 saveTurn 留档。
    */
   abortSignal?: AbortSignal;
+  /**
+   * [test seam] 注入带 TestClock 的 Effect runtime：timeout 由虚拟时钟驱动，
+   * 测试可精确构造 9999ms 不触发 / +1ms 触发（deterministic world，无真实
+   * sleep）。生产调用方不传——kernel 走默认 runtime（真实 Clock），行为与
+   * 旧 setTimeout/Promise.race 实现一致。
+   */
+  effectRuntime?: ManagedRuntime.ManagedRuntime<never, never>;
   /**
    * 可选进度看门狗配置（用于防死循环/复读熔断）。
    */
@@ -465,57 +474,45 @@ async function runCompleteWithTimeout(args: {
   const complete = provider.complete(messages, options);
   let ok = false;
 
-  const signal = input.abortSignal;
-  let abortListener: (() => void) | undefined;
-  const racers: Promise<never>[] = [];
-  if (signal) {
-    racers.push(
-      new Promise<never>((_resolve, reject) => {
-        abortListener = () => reject(buildAbortedError());
-        if (signal.aborted) {
-          abortListener();
-          return;
-        }
-        signal.addEventListener("abort", abortListener, { once: true });
-      }),
-    );
-  }
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  // No default hard timeout: multi-round coding loops regularly exceed minutes.
-  // Only race a timer when the caller explicitly opts in.
-  if (typeof timeoutMs === "number") {
-    racers.push(
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`__llm_timeout__:${timeoutMs}`));
-        }, timeoutMs);
-      }),
-    );
-  }
-
   let result: AgentRuntimeResult | undefined;
   let errorMessage: string | undefined;
   try {
-    result =
-      racers.length === 0 ? await complete : await Promise.race([complete, ...racers]);
+    // timeout/abort 收敛进 Effect v4 kernel（runAbortableWithTimeout）：
+    // timeout 走 Clock（测试可注入 TestClock 虚拟推进），abort 经 AbortSignal
+    // 桥接 raceFirst interruption，输家 cleanup 必然执行（ensuring 兜底）。
+    // 无硬超时且无中止信号时保持零开销路径（直接 await，不进 kernel）。
+    if (typeof timeoutMs !== "number" && !input.abortSignal) {
+      result = await complete;
+    } else {
+      const outcome = await runAbortableWithTimeout({
+        task: complete,
+        timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
+        abortSignal: input.abortSignal,
+        runtime: input.effectRuntime,
+      });
+      if (outcome.kind === "done") {
+        result = outcome.value;
+        ok = true;
+        return result;
+      }
+      if (outcome.kind === "timeout") {
+        // provider.complete has no cancellation contract. Retrying here would leave
+        // the timed-out CLI process alive and start a duplicate invocation.
+        const timeoutError = new Error(
+          `LLM request timed out after ${timeoutMs}ms (round ${round})`,
+        ) as Error & { code?: string };
+        timeoutError.code = LLM_REQUEST_TIMEOUT;
+        throw timeoutError;
+      }
+      if (outcome.kind === "aborted") throw buildAbortedError();
+      throw outcome.error;
+    }
     ok = true;
     return result;
   } catch (error) {
     errorMessage = toErrorMessage(error);
-    const isTimeout =
-      error instanceof Error && error.message.startsWith("__llm_timeout__:");
-    if (!isTimeout) throw error;
-    // provider.complete has no cancellation contract. Retrying here would leave
-    // the timed-out CLI process alive and start a duplicate invocation.
-    const timeoutError = new Error(
-      `LLM request timed out after ${timeoutMs}ms (round ${round})`,
-    ) as Error & { code?: string };
-    timeoutError.code = LLM_REQUEST_TIMEOUT;
-    throw timeoutError;
+    throw error;
   } finally {
-    if (timer) clearTimeout(timer);
-    if (signal && abortListener) signal.removeEventListener("abort", abortListener);
     // Emit llm-end with per-request cache metrics for token-level analysis
     const usage = result?.usage;
     const cacheHit = Number(usage?.cache_read_input_tokens ?? usage?.prompt_cache_hit_tokens ?? 0);

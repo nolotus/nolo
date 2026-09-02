@@ -62,6 +62,12 @@ export type AgentSeedConfig = {
   outputPrice?: number;
   hasVision?: boolean;
   maxConcurrent?: number;
+  /**
+   * 推理强度。落进 agent 记录后由 pickAgentRuntimeInferenceOptions 发给上游。
+   * 只在需要偏离模型默认档时设置——例如 glm-5-3-flash 默认档的 reasoning token
+   * 计入输出计费，设 low 可关闭思考。
+   */
+  reasoning_effort?: string;
 };
 
 export type AgentSeed = AgentSeedConfig;
@@ -97,6 +103,8 @@ export type AgentSeedInput = {
   outputPrice?: number;
   hasVision?: boolean;
   maxConcurrent?: number;
+  /** 见 AgentSeedConfig.reasoning_effort。 */
+  reasoning_effort?: string;
 };
 
 export type PublicAgentSeedConfig = AgentSeedConfig & { presetKey: string };
@@ -349,6 +357,11 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
     "GLM 5.3 Flash 公开助手，廉价快档，适合高频轻量问答与批量任务。注意：该模型默认深度思考，思考过程 token 计入输出计费（输出 3.2 积分/百万 token），实际消耗高于同长度可见回复；把 agent 的 reasoning_effort 设为 low 可关闭思考——单轮问答实测输出 token 降到约 1/5，多轮工具循环里约降 4 成（工具轮本身思考就少），可见回复长度与工具调用正确性均不变；medium 档 token 略降但延迟不改善。",
   greeting: "你好，我是 GLM 5.3 Flash。轻量快速、价格低，适合日常问答与批量轻量任务。",
   prompt: "直接、简洁地完成任务；回答保持简短，先给结论。",
+  // 关掉思考：该模型默认档的 reasoning token 计入输出计费，而实测 low 档
+  // reasoning 输出为 0（10/10 样本），单轮问答输出 token 降到约 1/5、多轮工具
+  // 循环降约 4 成，可见回复长度、工具调用正确性与循环完成度均不变。
+  // medium 档只省约 29% token 且延迟不改善，故直接用 low。
+  reasoning_effort: "low",
   tools: [],
   tags: ["nolo", "glm", "flash"],
 });
