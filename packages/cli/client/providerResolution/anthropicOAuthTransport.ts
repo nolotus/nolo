@@ -47,19 +47,18 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
             stream: false,
             ...(tools.length > 0 ? { tools } : {}),
           },
-          fetchImpl: (url: string | URL | Request, init?: RequestInit) =>
+          fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
             fetchWithTransientRetry(fetchImpl, url, init, {
               sleep: deps.sleep,
               loopbackRequest,
-            }),
+            })) as unknown as typeof fetch,
         });
         await recordLocalAvailability(result.status, result.body);
         if (result.status < 200 || result.status >= 300) {
+          const errorObj = result.body?.error as Record<string, unknown> | undefined;
           const errMsg =
-            result.body?.error &&
-            typeof result.body.error === "object" &&
-            typeof result.body.error.message === "string"
-              ? result.body.error.message
+            typeof errorObj?.message === "string"
+              ? errorObj.message
               : JSON.stringify(result.body);
           throw new Error(
             `local Claude OAuth provider failed: HTTP ${result.status} ${errMsg}`,
@@ -68,7 +67,7 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
         const choice = Array.isArray(result.body.choices)
           ? result.body.choices[0]
           : undefined;
-        const message = choice?.message ?? {};
+        const message = (choice?.message ?? {}) as { content?: unknown; tool_calls?: unknown };
         const content = typeof message.content === "string" ? message.content : "";
         const tool_calls = Array.isArray(message.tool_calls)
           ? message.tool_calls

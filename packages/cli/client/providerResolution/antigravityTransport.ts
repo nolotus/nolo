@@ -57,7 +57,7 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
     return {
       model: agentConfig.model || "gemini-3.1-pro",
       complete: async (messages, options) => {
-        const openAiBody: Record<string, unknown> = {
+        const openAiBody = {
           model: agentConfig.model || "gemini-3.1-pro",
           messages,
           stream: false,
@@ -82,11 +82,11 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
             signal: options?.signal,
             onTextDelta: options?.onTextDelta,
             onReasoningDelta: options?.onReasoningDelta,
-            fetchImpl: (url: string | URL | Request, init?: RequestInit) =>
+            fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
               fetchWithTransientRetry(fetchImpl, url, init, {
                 sleep: deps.sleep,
                 loopbackRequest,
-              }),
+              })) as unknown as typeof fetch,
           });
         let result = await sendCcaRequest(accessToken);
         if (result.status === 401) {

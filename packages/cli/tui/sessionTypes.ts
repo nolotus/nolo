@@ -77,13 +77,24 @@ export type TuiState = {
   thinkingDisplay: ThinkingDisplayMode;
   turnTokens?: TurnTokenUsage;
   /**
-   * 整个对话累计消耗的平台积分（与 web 端 `selectCurrentDialogTokens` 的
-   * 持久化 totalCost 一致）。由服务端每轮把 `dialog.totalCost += 本轮cost`
-   * 累计而来（见 serverDialogProjection.ts），状态行据此展示「这段对话从
-   * 开始到现在累计烧了多少积分」，而不是只显示本轮 `turnTokens.credits`。
-   * platform 计费才有值；custom / cli 无该语义。
+   * 本对话在**本次 TUI 会话内**累计消耗的平台积分（每轮 turnCredits 相加）。
+   *
+   * 为什么本地累加而不是读服务端 `dialog.totalCost`：后者是异步投影——CLI 本地
+   * loop 先把 token 明细写在本地、随后才远端同步，服务端再据此累加 totalCost。
+   * 每轮结束立刻去读，读到的往往是上一轮的数（甚至首轮读到 0 而整行不显示）。
+   * 逐次调用的 cost 本来就在 usageRecords 里、CLI 手上就有，本地加即精确且无延迟。
+   *
+   * 只统计平台计费调用（billing_unit === "credits"）：自有 API / 订阅制（cli）
+   * 不扣平台积分，不进这个口径。
    */
-  dialogTotalCredits?: number;
+  sessionCredits?: number;
+  /**
+   * 续聊已有对话时，从服务端 `dialog.totalCost` 读到的历史累计，作为显示基数。
+   * 与 sessionCredits 语义不相交：base = 本次会话之前烧掉的，sessionCredits =
+   * 本次会话烧掉的，状态行显示两者之和。仅在 attach 对话时 seed 一次，
+   * 之后不再被异步读取覆盖（否则会把本会话的量重复计一遍）。
+   */
+  dialogCreditsBase?: number;
   /**
    * Measured estimate of built-in system+tools context (AGENTS.md, guidance,
    * skill index, tool schemas). Used by the status chip until provider usage

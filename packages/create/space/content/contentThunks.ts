@@ -170,6 +170,7 @@ export const updateContentPinned = createAsyncThunk(
       const payload = await updateContentPinnedAction(arg, thunkAPI);
       if (
         payload.updatedSpaceData &&
+        payload.spaceId &&
         getCurrentSpaceIdRaw() === payload.spaceId
       ) {
         updateCurrentSpaceIfMatch(payload.spaceId, payload.updatedSpaceData);

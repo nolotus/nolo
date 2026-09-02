@@ -95,7 +95,7 @@ function makeScriptedProvider(rounds: number, toolsPerRound: number) {
           model: "fake-local",
           tool_calls: Array.from({ length: toolsPerRound }, (_, i) => ({
             id: `call-${callCount}-${i}`,
-            type: "function",
+            type: "function" as const,
             function: {
               name: "execShell",
               arguments: JSON.stringify({ cmd: `echo bench-${callCount}-${i}` }),

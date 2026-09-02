@@ -589,18 +589,21 @@ describe("cli tui session", () => {
     expect(result.action).toEqual({ type: "compact", dialogId: "01OLD" });
   });
 
-  test("renderStatusLine displays credits suffix when apiSource is platform and credits > 0", () => {
+  test("renderStatusLine displays the credits suffix once the session has spent platform credits", () => {
     const state = {
       ...createInitialTuiState({}),
-      apiSource: "platform",
-      turnTokens: { input: 10_000, output: 2_000, credits: 0.5 },
+      sessionCredits: 0.5,
+      turnTokens: { input: 10_000, output: 2_000, credits: 0.1 },
     };
     const line = renderStatusLine(state);
     expect(line).toContain("⚡");
+    // 显示的是会话累计，不是本轮（turnTokens.credits = 0.1）。
     expect(line).toContain("0.50 积分");
   });
 
-  test("renderStatusLine hides credits suffix when apiSource is not platform or credits missing", () => {
+  test("renderStatusLine hides the credits suffix when nothing platform-billed was accumulated", () => {
+    // 自有 API：turnTokens.credits 是上游自报美元的 ×8 折算值，从不进会话累计
+    // （sumPlatformCredits 只认 billing_unit === "credits"），所以不显示。
     const stateCustom = {
       ...createInitialTuiState({}),
       apiSource: "custom",

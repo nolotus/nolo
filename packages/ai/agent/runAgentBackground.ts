@@ -232,7 +232,9 @@ export async function listenToDialogEvents(
                             onStatusChange?.("failed");
                             onFailed?.(errMsg);
                             reader.cancel().catch(() => { });
-                            reject(new Error(errMsg));
+                            const err = new Error(errMsg);
+                            err.name = "AgentRunFailedError";
+                            reject(err);
                             return;
                         }
                     }

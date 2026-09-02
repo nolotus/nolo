@@ -796,14 +796,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // forward-reference.
   let rawActionGateTokenHandler: ((token: string) => void) | null = null;
 
-  // --- 对话累计积分刷新 helper（workspace 闭包顶层，turn 完成与 /pick 共用） ---
-  // 状态行「⚡ X 积分」应显示整个对话累计消耗，而非本轮（turnTokens.credits）。
-  // 服务端每轮已把 `dialog.totalCost += 本轮cost` 累计（serverDialogProjection.ts），
-  // 因此读 dialog 记录的 totalCost 即「这段对话从开始到现在累计烧了多少积分」，
-  // 与 web 端 selectCurrentDialogTokens 的持久化语义一致。异步读取，不阻塞 turn。
+  // --- 对话积分基数 seed helper（workspace 闭包顶层，attach 已有对话时用） ---
+  //
+  // 状态行的积分显示 = 本次会话本地累加（accumulateSessionCredits，精确且无延迟）
+  // + 本对话在此之前的历史累计（这里从服务端 dialog 记录的 totalCost 读）。
+  //
+  // 为什么服务端值只能当 seed、不能当每轮的主显示源：CLI 本地 loop 的 token 明细
+  // 先落本地库、再远端同步，服务端据同步过来的明细才累加 totalCost。turn 一结束
+  // 就去读，读到的基本是上一轮的数——这正是「积分有时不显示 / 数值不准」的来源。
+  // 因此只在 attach 一个已有对话时读一次，且仅当本会话尚未在该对话上累计过
+  // （sessionCredits 为空）才写入，避免把本会话的消费重复计一遍。
   // 用 readDbRecord（/api/v1/db/read，只读单条 record，不含 messages）而非
-  // readDialogSnapshot，避免每轮拉全量消息的额外开销。
-  const refreshDialogTotalCredits = (dialogId: string, dialogKey: string) => {
+  // readDialogSnapshot，避免拉全量消息的额外开销。
+  const seedDialogCreditsBase = (dialogId: string, dialogKey: string) => {
     const env = options.env ?? process.env;
     const authToken = resolvePlatformAuthToken(env);
     if (!authToken) return;
@@ -816,18 +821,30 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       .then((record) => {
         if (sessionEnded) return;
         if (state.dialogId !== dialogId) return;
+        // 异步返回期间用户已经在这个对话里跑过 turn：本会话的量已被本地累加，
+        // 此时服务端 totalCost 可能已含同一笔，写入就是重复计数。放弃 seed。
+        if (state.sessionCredits !== undefined) return;
         const recordObj =
           record && typeof record === "object"
             ? (record as Record<string, unknown>)
             : null;
         const totalCost = recordObj ? Number(recordObj?.totalCost) : NaN;
         if (Number.isFinite(totalCost) && totalCost >= 0) {
-          state = { ...state, dialogTotalCredits: totalCost };
+          state = { ...state, dialogCreditsBase: totalCost };
         }
       })
       .catch(() => {
-        // 读取失败不打断 turn：状态行回退到本轮 credits，下一轮再尝试。
+        // 读取失败不打断 turn：状态行退化成只显示本会话累加值。
       });
+  };
+
+  // 每轮结束把本轮平台积分累加进会话累计。runResult.turnCredits 已是「本轮全部
+  // provider 调用之和」（见 client/tokenUsage.ts 的 sumPlatformCredits），且在
+  // 中断 / 失败的 turn 上同样有值——那些轮次的 provider 调用照样扣了费。
+  // 只在平台计费时有值：自有 API / 订阅制为 undefined，累计保持不变。
+  const accumulateSessionCredits = (credits: number | undefined) => {
+    if (credits === undefined || !Number.isFinite(credits)) return;
+    state = { ...state, sessionCredits: (state.sessionCredits ?? 0) + credits };
   };
 
   // --- Chat queue (TUI binding, no Redux) ---
@@ -914,7 +931,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     renderHistoryToOutput,
     scheduleRender,
     flushPendingRender,
-    refreshDialogTotalCredits,
+    seedDialogCreditsBase,
+    accumulateSessionCredits,
     emitCommandOutput,
   };
 
@@ -959,7 +977,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     emitCommandOutput,
     renderHistoryToOutput,
     scheduleRender,
-    refreshDialogTotalCredits,
+    seedDialogCreditsBase,
     persistExplicitAgentSwitch,
     persistAgentSelection,
     writeClipboard,

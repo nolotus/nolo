@@ -8,6 +8,16 @@ export interface IdentityUser {
   locale?: string;
   publicKey?: string;
   tokenVersion?: number;
+  balance?: number;
+  gptProAccess?: {
+    status?: string;
+    requiredRechargeAmount?: number;
+    rechargeAmount?: number;
+    source?: string;
+    sourceTxId?: string;
+    grantedAt?: number;
+    updatedAt?: number;
+  };
 }
 
 export type User = IdentityUser;

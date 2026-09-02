@@ -50,7 +50,7 @@ describe("Codex Responses adapter", () => {
         role: "assistant",
         content: [{ type: "output_text", text: "answer" }],
       },
-    ]);
+    ] as any);
   });
 
   test("builds Codex input with summary instead of public Responses content", () => {
@@ -196,7 +196,7 @@ describe("Codex Responses adapter", () => {
     });
 
     expect(result.status).toBe(200);
-    expect(result.body.choices?.[0]?.message).toEqual({
+    expect((result.body.choices as any[])?.[0]?.message).toEqual({
       role: "assistant",
       content: "PONG",
     });
@@ -298,7 +298,7 @@ describe("Codex Responses adapter", () => {
 
     expect(attempts).toBe(2);
     expect(result.status).toBe(200);
-    expect(result.body.choices?.[0]?.message).toEqual({ role: "assistant", content: "PONG" });
+    expect((result.body.choices as any[])?.[0]?.message).toEqual({ role: "assistant", content: "PONG" });
     expect(result.body.usage).toEqual({
       prompt_tokens: 3,
       completion_tokens: 1,

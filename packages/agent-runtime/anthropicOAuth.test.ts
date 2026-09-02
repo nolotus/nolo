@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import {
   ANTHROPIC_ACCESS_TOKEN_CLIENT_SKEW_MS,
   ANTHROPIC_OAUTH_BETA,
@@ -127,7 +128,7 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
       let capturedInit: RequestInit | undefined;
       const fakeNow = 5_000_000;
 
-      const fakeFetch: typeof fetch = async (url, init) => {
+      const fakeFetch = asFetch(async (url: any, init?: any) => {
         capturedUrl = String(url);
         capturedInit = init;
         return new Response(
@@ -139,7 +140,7 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
           }),
           { status: 200 }
         );
-      };
+      });
 
       const result = await refreshAnthropicToken(
         {
@@ -183,14 +184,15 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
     });
 
     test("handles error_description in error response", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             error: "invalid_grant",
             error_description: "Refresh token is invalid or expired",
           }),
           { status: 400 }
-        );
+        )
+      );
 
       await expect(
         refreshAnthropicToken(
@@ -206,13 +208,14 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
     });
 
     test("handles error code when error_description is absent", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             error: "invalid_client",
           }),
           { status: 401 }
-        );
+        )
+      );
 
       await expect(
         refreshAnthropicToken(
@@ -228,8 +231,9 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
     });
 
     test("handles non-JSON error response", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response("Gateway Timeout", { status: 504 });
+      const fakeFetch = asFetch(async () =>
+        new Response("Gateway Timeout", { status: 504 })
+      );
 
       await expect(
         refreshAnthropicToken(
@@ -245,8 +249,9 @@ describe("Anthropic OAuth Pure Runtime Seam", () => {
     });
 
     test("handles 200 response missing access_token", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response(JSON.stringify({}), { status: 200 });
+      const fakeFetch = asFetch(async () =>
+        new Response(JSON.stringify({}), { status: 200 })
+      );
 
       await expect(
         refreshAnthropicToken(

@@ -811,7 +811,10 @@ export interface AgentTurnContext {
   renderHistoryToOutput: () => void;
   scheduleRender: () => void;
   flushPendingRender: () => void;
-  refreshDialogTotalCredits: (dialogId: string, dialogKey: string) => void;
+  /** attach 已有对话时读一次服务端历史累计，作为状态行积分的基数。 */
+  seedDialogCreditsBase: (dialogId: string, dialogKey: string) => void;
+  /** 把本轮平台积分累加进会话累计（undefined = 本轮无平台计费，不动累计）。 */
+  accumulateSessionCredits: (credits: number | undefined) => void;
   emitCommandOutput: (text: string, command?: string) => void;
 }
 
@@ -1019,10 +1022,10 @@ export async function runOneAgentTurn(
           // 本轮已发起 agent 调用（消息已注入），消费切换通知。
           pendingCwdNotice: undefined,
         };
-        if (runResult.dialogId && nextDialogKey) {
-          ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-        }
       }
+      // 记账不挂在「有 dialogId / turnTokens」这个条件上：中断的 turn 常常
+      // 两者都没有，但前面已经跑掉的 provider 调用照样扣了费。
+      ctx.accumulateSessionCredits(runResult.turnCredits);
       scheduleTitlePatchSync(runResult);
       return { ok: false, aborted: true };
     }
@@ -1087,10 +1090,9 @@ export async function runOneAgentTurn(
         // 而非纯 child-run-completed 事件短路）时才清除。
         pendingCwdNotice: undefined,
       };
-      if (runResult.dialogId && nextDialogKey) {
-        ctx.refreshDialogTotalCredits(runResult.dialogId, nextDialogKey);
-      }
     }
+    // 同上：失败 / 中断的 turn 也要计进会话累计。
+    ctx.accumulateSessionCredits(runResult.turnCredits);
     scheduleTitlePatchSync(runResult);
     // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
     // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。

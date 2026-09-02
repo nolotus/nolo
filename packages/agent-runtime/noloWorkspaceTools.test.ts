@@ -146,9 +146,10 @@ describe("nolo workspace tools", () => {
     const tools = buildNoloWorkspaceOpenAiTools({
       toolNames: ["listAgents"],
     });
-    expect(tools[0].function.description).toContain("runnable agentKey");
-    expect(tools[0].function.description).toContain("Copy the agentKey verbatim");
-    expect(tools[0].function.description).toContain("do not infer it from the display name");
+    const fn = (tools[0] as any)?.function;
+    expect(fn?.description).toContain("runnable agentKey");
+    expect(fn?.description).toContain("Copy the agentKey verbatim");
+    expect(fn?.description).toContain("do not infer it from the display name");
   });
 
   test("readAgent requires the runnable agentKey from listAgents", () => {

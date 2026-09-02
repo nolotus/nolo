@@ -19,7 +19,7 @@ import { join, resolve } from "node:path";
 
 import { createLocalWorkspaceToolExecutors } from "../localWorkspaceTools";
 import { executeLocalToolWithPolicy } from "../localToolPolicy";
-import type { AgentRuntimeToolCall as AgentRuntimeToolCallInput } from "../types";
+import type { AgentRuntimeToolCallInput } from "../hostAdapter";
 
 const SAMPLES = (() => {
   const i = Bun.argv.indexOf("--samples");
@@ -33,14 +33,14 @@ writeFileSync(scratchFile, Array.from({ length: 200 }, (_, i) => `line ${i}`).jo
 mkdirSync(join(workspaceRoot, ".bench-scratch"), { recursive: true });
 
 const env: Record<string, string | undefined> = { ...process.env };
-const executors = createLocalWorkspaceToolExecutors({ workspaceRoot }) as Record<
+const executors: Record<
   string,
   (call: AgentRuntimeToolCallInput, opts?: any) => Promise<any>
->;
+> = createLocalWorkspaceToolExecutors({ workspaceRoot });
 // 策略层基线：同一条 executeLocalToolWithPolicy 路径，executor 立即返回。
-const noopExecutors = Object.fromEntries(
+const noopExecutors: typeof executors = Object.fromEntries(
   Object.keys(executors).map((name) => [name, async () => ({ content: "" })]),
-) as typeof executors;
+);
 
 const agentToolNames = Object.keys(executors);
 
@@ -125,7 +125,7 @@ async function runCase(c: Case, useNoop: boolean, readOffsetSeed: number) {
         ? { ...(c.args as object), offset: 1 + (readOffsetSeed % 50) }
         : c.args,
     ),
-  } as AgentRuntimeToolCallInput;
+  };
   c.before?.();
   const t0 = performance.now();
   await executeLocalToolWithPolicy({

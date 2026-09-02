@@ -65,6 +65,8 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 
 **拆分与 brief**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖先固化契约再派发，勿让多方各自猜同一接口。子任务自包含、只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证与用户沟通。测试类 DoD 必须钉死基线精确数字（派发前亲自跑测试记下 pass/fail 与既有失败归属），验收亲自复跑对照——超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」按未验证处理。
 
+**Tool call 参数体量纪律**：任何 tool_call（尤其 startAgentRun 的 task/brief 与 input）禁止内嵌大段原文——diff、日志、长文档、测试输出一律只传路径（worktree + 文件清单），由执行方自己 git diff / 读文件获取（内容还更新鲜）。单次 arguments 控制在 ~5k 字符内：过长会被上游流式截断成非法 JSON，触发 tool-error 后整轮重发。
+
 **commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
 - **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。

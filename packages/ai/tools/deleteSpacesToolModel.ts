@@ -63,7 +63,7 @@ const countMembers = (members: SpaceRecordLike["members"]) => {
 };
 
 export function filterSpaceDeletionCandidates(
-  memberships: SpaceMembershipLike[],
+  memberships: readonly SpaceMembershipLike[],
   query: DeleteSpacesQuery
 ) {
   const rawQuery = String(query.query ?? "").trim();

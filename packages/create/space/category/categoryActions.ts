@@ -44,7 +44,7 @@ export const setAllCategoriesCollapsed = createAsyncThunk(
   "space/setAllCategoriesCollapsed",
     async (
       input: { spaceId?: string; collapsed: boolean },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<Record<string, boolean>> => {
     try {
         const { getState } = thunkAPI;
@@ -98,7 +98,7 @@ export const toggleCategoryCollapse = createAsyncThunk(
   "space/toggleCategoryCollapse",
     async (
       input: { categoryId: string },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<Record<string, boolean>> => {
     try {
         const { getState } = thunkAPI;
@@ -153,7 +153,7 @@ export const addCategory = createAsyncThunk(
         categoryId?: string;
         order?: number;
       },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<{ spaceId: ULID; updatedSpaceData: SpaceData; newCategoryId: string; collapsedCategories: Record<string, boolean> }> => {
       const { spaceId: inputSpaceId, name, categoryId, order } = input;
       const { dispatch, getState } = thunkAPI;
@@ -234,7 +234,7 @@ export const deleteCategory = createAsyncThunk(
   "space/deleteCategory",
     async (
       input: { categoryId: string; spaceId: ULID },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<{
       spaceId: ULID;
       updatedSpaceData: SpaceData;
@@ -309,7 +309,7 @@ export const updateCategoryName = createAsyncThunk(
   "space/updateCategoryName",
     async (
       input: { spaceId: ULID; categoryId: string; name: string },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<{ spaceId: ULID; updatedSpaceData: SpaceData }> => {
       const { spaceId, categoryId, name } = input;
       const { dispatch, getState } = thunkAPI;
@@ -359,7 +359,7 @@ export const reorderCategories = createAsyncThunk(
   "space/reorderCategories",
     async (
       input: { spaceId: ULID; sortedCategoryIds: string[] },
-      thunkAPI: { dispatch: AppDispatch; getState: () => RootState }
+      thunkAPI: any
     ): Promise<{ spaceId: ULID; updatedSpaceData: SpaceData }> => {
       const { spaceId, sortedCategoryIds } = input;
       const { dispatch, getState } = thunkAPI;

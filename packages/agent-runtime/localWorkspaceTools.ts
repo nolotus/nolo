@@ -1988,7 +1988,7 @@ async function launchProcessTool(args: {
   const registry = getProcessRegistry();
   const envelope = registry.add({ pid, pgid, command, label, persist });
 
-  const cleanupChildOnHostSignal = (signal: NodeJS.Signals) => {
+  const cleanupChildOnHostSignal: NodeJS.SignalsListener = (signal) => {
     try {
       if (detached) {
         process.kill(-pid, signal);
@@ -2008,9 +2008,9 @@ async function launchProcessTool(args: {
 
   proc.on("close", (code) => {
     if (detached) {
-      process.removeListener("SIGHUP", cleanupChildOnHostSignal);
-      process.removeListener("SIGTERM", cleanupChildOnHostSignal);
-      process.removeListener("SIGINT", cleanupChildOnHostSignal);
+      (process as any).removeListener("SIGHUP", cleanupChildOnHostSignal);
+      (process as any).removeListener("SIGTERM", cleanupChildOnHostSignal);
+      (process as any).removeListener("SIGINT", cleanupChildOnHostSignal);
     }
     registry.markExited(pid, code ?? 1);
   });

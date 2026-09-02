@@ -137,7 +137,7 @@ async function readDialogInProcess(
   if (store.iterator) {
     const { start, end } = dialogMessageRange(dialogId);
     for await (const [, value] of store.iterator({ gte: start, lte: end })) {
-      const message = localDialogMessageRecordToRuntimeMessage(value);
+      const message = localDialogMessageRecordToRuntimeMessage(value as any);
       if (message) {
         rawMessages.push(message);
       } else if (value) {

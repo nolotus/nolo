@@ -31,7 +31,7 @@ export const fetchUserSpaceMemberships = createAsyncThunk(
     } catch (error) {
       // Wave C: error/membershipStatus 已剥至 module store。
       setMembershipRejected(
-        (error as { message?: string } | undefined)?.message,
+        (error as { message?: string } | undefined)?.message || "Failed to fetch space memberships",
         isSpaceMembershipRemoteUnavailableError(error)
       );
       throw error;

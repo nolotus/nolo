@@ -1,6 +1,7 @@
 export type LocalDialogReadResult = {
   meta: any;
   msgs: any[];
+  source?: string;
 };
 
 /**

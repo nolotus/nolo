@@ -11,6 +11,7 @@
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
+import * as nodeFs from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import {
   formatListRunsCard,

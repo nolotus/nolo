@@ -893,6 +893,34 @@ describe("handleTuiInput - /auto dispatch", () => {
     expect(stripAnsi(renderStatusLine(base))).not.toContain("auto");
   });
 
+  test("status line shows session credits without depending on apiSource", () => {
+    // 显示开关是「本对话有没有产生过平台计费」，不是启动时按静态 agent 目录
+    // 判出来的 apiSource——广场 agent / 别名条目会漏判，明明在扣积分却不显示。
+    const base = { ...createInitialTuiState({}), cwd: "/tmp/nolo-project" };
+    expect(
+      stripAnsi(renderStatusLine({ ...base, apiSource: undefined, sessionCredits: 0.42 }))
+    ).toContain("⚡ 0.42 积分");
+    expect(stripAnsi(renderStatusLine(base))).not.toContain("积分");
+  });
+
+  test("status line adds the resumed dialog's history base to this session's spend", () => {
+    // base = 本会话之前烧掉的（服务端 totalCost seed），sessionCredits = 本会话
+    // 烧掉的，两者语义不相交，直接相加。
+    const state = {
+      ...createInitialTuiState({}),
+      cwd: "/tmp/nolo-project",
+      dialogCreditsBase: 1.25,
+      sessionCredits: 0.75,
+    };
+    expect(stripAnsi(renderStatusLine(state))).toContain("⚡ 2.00 积分");
+  });
+
+  test("status line hides the credits chip while nothing has been charged", () => {
+    // 平台跑过但没扣到费（0）时不占位，避免状态行常驻一个恒为 0 的 chip。
+    const base = { ...createInitialTuiState({}), cwd: "/tmp/nolo-project" };
+    expect(stripAnsi(renderStatusLine({ ...base, sessionCredits: 0 }))).not.toContain("积分");
+  });
+
   test("narrow status drops context/cwd before dirty, running and auto", () => {
     const state = {
       ...createInitialTuiState({}),

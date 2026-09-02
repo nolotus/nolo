@@ -1761,7 +1761,7 @@ export function checkStaleRun(
     latest.pid = undefined;
     writeRunRecord(latest, deps);
     return latest;
-  });
+  }) ?? record;
 }
 
 function formatDuration(startedAt: string, endedAt?: string): string {

@@ -116,7 +116,8 @@ describe("runOneAgentTurn 注入收件箱兜底", () => {
       renderHistoryToOutput: noop,
       scheduleRender: noop,
       flushPendingRender: noop,
-      refreshDialogTotalCredits: noop,
+      seedDialogCreditsBase: noop,
+      accumulateSessionCredits: noop,
       emitCommandOutput: noop,
     };
     ctx.options.agentRunner = async () => options.onRun(ctx as AgentTurnContext);

@@ -8,6 +8,7 @@ import {
   resolveEmptyAssistantOutcome,
   runLocalAgentTurn,
   summarizeHistoricalToolContent,
+  type LocalAgentTurnResult,
 } from "./localLoop";
 import {
   MAX_REASONING_ONLY_REPAIRS,
@@ -17,7 +18,12 @@ import {
   STREAM_TRUNCATED_REASONING_MARKER,
 } from "./emptyAssistantRepair";
 import type { AgentRuntimeHostAdapter, AgentRuntimeSaveTurnInput } from "./hostAdapter";
-import type { AgentRuntimeChatMessage } from "./types";
+import type {
+  AgentRuntimeChatMessage,
+  AgentRuntimeMessageContent,
+  AgentRuntimeResult,
+  AgentRuntimeToolCall,
+} from "./types";
 import { FRESH_TOOL_OUTPUT_MAX_CHARS } from "../ai/agent/toolOutputPolicy";
 import { prepareTokenUsageData } from "../ai/token/prepareTokenUsageData";
 
@@ -211,8 +217,8 @@ describe("runLocalAgentTurn", () => {
     const parts = Array.isArray(lastUser?.content) ? lastUser!.content : [];
     expect(parts.length).toBe(3);
     // dynamic 区 = 运行时注入的时间块 + caller 的 turn-scope 块（\n\n 连接后并入 user 头部）
-    expect(String(parts[0]?.text)).toContain("--- 当前时间 ---");
-    expect(String(parts[0]?.text)).toContain(turnBlock);
+    expect(String((parts[0] as { type: "text"; text: string })?.text)).toContain("--- 当前时间 ---");
+    expect(String((parts[0] as { type: "text"; text: string })?.text)).toContain(turnBlock);
     expect(parts[1]).toEqual({ type: "text", text: "看这张图" });
     expect(parts[2]).toEqual({ type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } });
   });
@@ -2261,6 +2267,74 @@ describe("runLocalAgentTurn", () => {
     expect(savedTurns[0]?.result.error).toBe(true);
   });
 
+  test("a failed turn carries its already-charged usage records out on the error", async () => {
+    // 前两轮工具循环已经跑完并扣了费，第三次调用炸掉。saveTurn 存下了这批
+    // usageRecords，错误也必须带着它们出去——否则 TUI 的会话累计会凭空少算
+    // 一整轮，而余额是实实在在扣了的。
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    let call = 0;
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({
+        key: agentRef,
+        name: "Billed Agent",
+        model: "fake-local",
+      }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-billed-failure" };
+      },
+      resolveProvider: async () => ({
+        model: "fake-local",
+        complete: async () => {
+          call += 1;
+          if (call > 2) throw new Error("upstream exploded");
+          return {
+            content: "",
+            model: "fake-local",
+            tool_calls: [
+              {
+                id: `call-${call}`,
+                type: "function" as const,
+                function: { name: "globFiles", arguments: "{}" },
+              },
+            ],
+            usage: {
+              input_tokens: 100,
+              output_tokens: 10,
+              cost: 0.02,
+              billing_unit: "credits",
+              provider_call_id: `provider-call-${call}`,
+            },
+          };
+        },
+      }),
+      executeTool: async () => ({ content: "ok" }),
+    };
+
+    const error = await runLocalAgentTurn({
+      adapter,
+      agentRef: "billed",
+      input: "run the tools",
+    }).then(
+      () => null,
+      (err) => err as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] },
+    );
+
+    expect(error).not.toBeNull();
+    // 错误上带出的记录与 saveTurn 落盘的是同一批，两边账目不能分叉。
+    expect(error?.usageRecords).toEqual(savedTurns[0]?.usageRecords);
+    expect(error?.usageRecords).toHaveLength(2);
+    expect(
+      error?.usageRecords?.reduce(
+        (sum, record) => sum + Number(record.usage?.cost ?? 0),
+        0,
+      ),
+    ).toBeCloseTo(0.04, 10);
+  });
+
   test("loadDialogHistory failure still parks the user message on continueDialogId", async () => {
     const savedTurns: AgentRuntimeSaveTurnInput[] = [];
     const adapter: AgentRuntimeHostAdapter = {
@@ -2343,15 +2417,11 @@ describe("runLocalAgentTurn", () => {
     // complete 缺省时第二轮直接给最终答案。
     function buildToolLoopAdapter(opts: {
       toolName: string;
-      executeTool: () => Promise<unknown>;
+      executeTool: (call?: any, opts?: any) => Promise<any>;
       complete?: (
         messages: AgentRuntimeChatMessage[],
         call: number,
-      ) => Promise<{
-        content: string;
-        model: string;
-        tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
-      }>;
+      ) => Promise<AgentRuntimeResult>;
     }): AgentRuntimeHostAdapter {
       let calls = 0;
       return {
@@ -2362,7 +2432,7 @@ describe("runLocalAgentTurn", () => {
         saveTurn: async () => ({ dialogId: "dialog-tool-abort" }),
         resolveProvider: async () => ({
           model: "m",
-          complete: async (messages) => {
+          complete: async (messages): Promise<AgentRuntimeResult> => {
             calls += 1;
             if (opts.complete) return opts.complete(messages, calls);
             if (calls === 1) {
@@ -2370,7 +2440,7 @@ describe("runLocalAgentTurn", () => {
                 content: "calling tool",
                 model: "m",
                 tool_calls: [
-                  { id: "call-1", type: "function", function: { name: opts.toolName, arguments: "{}" } },
+                  { id: "call-1", type: "function" as const, function: { name: opts.toolName, arguments: "{}" } },
                 ],
               };
             }
@@ -2443,7 +2513,7 @@ describe("runLocalAgentTurn", () => {
         rejectTool = reject;
       });
       const unhandled: unknown[] = [];
-      const onUnhandled = (reason: unknown) => {
+      const onUnhandled: NodeJS.UnhandledRejectionListener = (reason) => {
         unhandled.push(reason);
       };
       process.on("unhandledRejection", onUnhandled);
@@ -2466,7 +2536,7 @@ describe("runLocalAgentTurn", () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(unhandled).toHaveLength(0);
       } finally {
-        process.removeListener("unhandledRejection", onUnhandled);
+        (process as any).removeListener("unhandledRejection", onUnhandled);
       }
     });
 
@@ -5222,7 +5292,13 @@ describe("poisoned tool_call arguments (upstream stream truncation)", () => {
       key: agentRef,
       model: "fake-local",
     }),
+    loadDialogHistory: async () => [],
     saveTurn: async () => ({ dialogId: "dialog-poison" }),
+    resolveProvider: async () => ({
+      model: "fake-local",
+      complete: async () => ({ content: "", model: "fake-local" }),
+    }),
+    executeTool: async () => ({ content: "" }),
     ...overrides,
   });
 
@@ -5290,10 +5366,10 @@ describe("poisoned tool_call arguments (upstream stream truncation)", () => {
           callCount++;
           if (callCount === 1) {
             return {
-              content: null,
+              content: "",
               tool_calls: [{
                 id: "call-trunc",
-                type: "function",
+                type: "function" as const,
                 function: { name: "exec_command", arguments: truncatedArgs },
               }],
               model: "fake-local",
@@ -5358,7 +5434,7 @@ describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", 
 
   function makeHangingAdapter(options: {
     savedTurns: AgentRuntimeSaveTurnInput[];
-    providerCalls: number[];
+    providerCalls: AgentRuntimeChatMessage[][];
     provider1?: Promise<AgentRuntimeResult>;
   }) {
     const adapter: AgentRuntimeHostAdapter = {
@@ -5421,7 +5497,7 @@ describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", 
     await runtime.runPromise(TestClock.adjust(Duration.millis(1)));
     const settled = await turnPromise;
     expect(settled.kind).toBe("rejected");
-    const err = settled.e as Error & { code?: string };
+    const err = (settled as { kind: "rejected"; e: unknown }).e as Error & { code?: string };
     expect(err.code).toBe("LLM_REQUEST_TIMEOUT");
     expect(err.message).toBe("LLM request timed out after 10000ms (round 0)");
     // timeout round 没被当正常完成：saveTurn 仍落盘（loopError 留档），
@@ -5472,7 +5548,7 @@ describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", 
     const settled = await turnPromise;
 
     expect(settled.kind).toBe("rejected");
-    expect((settled.e as Error & { code?: string }).code).toBe(LOCAL_TURN_ABORTED_CODE);
+    expect(((settled as { kind: "rejected"; e: unknown }).e as Error & { code?: string }).code).toBe(LOCAL_TURN_ABORTED_CODE);
     // 不会继续下一轮 / 不会继续调用 provider。
     expect(providerCalls).toHaveLength(1);
     // aborted round 不当正常完成：无 content 终稿，仅留档。

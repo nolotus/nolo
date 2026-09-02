@@ -194,9 +194,7 @@ export function extractFileOperationsFromCalls(
  * readFile/writeFile/editFile，避免本模块耦合 tool alias 系统。
  */
 export function formatFileOperationsFromMessages(
-  msgs: Array<{
-    tool_calls?: Array<{ function?: { name?: string; arguments?: unknown } }>;
-  }>,
+  msgs: Array<Record<string, any>>,
   resolveCanonicalName: (name: string) => string,
 ): string {
   const allOps: FileOperation[] = [];

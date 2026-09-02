@@ -15,7 +15,10 @@ export function mapOpenAiMessagesToCursorRuntimeMessages(
 
   return messages.map((raw) => {
     const m = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const role = typeof m.role === "string" && m.role ? m.role : "user";
+    const role: AgentRuntimeChatMessage["role"] =
+      m.role === "system" || m.role === "assistant" || m.role === "tool"
+        ? m.role
+        : "user";
     const content = m.content;
 
     if (typeof content === "string") {

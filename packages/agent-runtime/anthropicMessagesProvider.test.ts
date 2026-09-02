@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import {
   ANTHROPIC_OAUTH_BETA_HEADER,
   CLAUDE_CODE_SYSTEM_INSTRUCTION,
@@ -237,8 +238,8 @@ describe("Anthropic Messages adapter", () => {
       role: "user",
       content: [{ type: "text", text: "Third", cache_control: { type: "ephemeral" } }],
     });
-    for (let i = 0; i < body.messages.length - 1; i++) {
-      for (const block of (body.messages[i] as any).content) {
+    for (let i = 0; i < (body.messages as any[]).length - 1; i++) {
+      for (const block of ((body.messages as any[])[i] as any).content) {
         expect(block.cache_control).toBeUndefined();
       }
     }
@@ -271,7 +272,7 @@ describe("Anthropic Messages adapter", () => {
       agentConfig: agent,
       accessToken: "token",
       openAiBody: { messages: [{ role: "user", content: "hello" }] },
-      fetchImpl: async () => new Response(JSON.stringify({
+      fetchImpl: asFetch(async () => new Response(JSON.stringify({
         id: "msg_1",
         model: agent.model,
         content: [{ type: "text", text: "ok" }],
@@ -282,7 +283,7 @@ describe("Anthropic Messages adapter", () => {
           cache_read_input_tokens: 70,
           output_tokens: 5,
         },
-      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
     });
     expect(result.body.usage).toEqual(expect.objectContaining({
       prompt_tokens: 100,

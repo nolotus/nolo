@@ -89,7 +89,7 @@ export const writeAction = async (
     DataType.TABLE_ROW,
     DataType.EMAIL,
     DataType.AGENT,
-    DataType.AUTOMATION,
+    DataType.AGENT_AUTOMATION,
   ];
   if (!data.type || !VALID_TYPES.includes(data.type)) {
     logger.warn(
@@ -140,7 +140,7 @@ export const writeAction = async (
   } catch (error: any) {
     const errorMessage = `Write action failed for ${customKey}: ${error?.message || "Unknown error"
       }`;
-    logger.error("[writeAction] Error:", error);
+    logger.error({ error }, "[writeAction] Error");
     toast.error(`Failed to save data for ${customKey}.`);
     throw new Error(errorMessage);
   }

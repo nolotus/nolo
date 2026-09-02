@@ -154,7 +154,10 @@ export const toResponsesTools = (tools: any[] | undefined): any[] | undefined =>
 };
 
 export const convertMessagesToResponsesInput = (
-  messages: Array<Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown }>,
+  messages: Array<
+    | (Pick<Message, "role" | "content" | "tool_calls" | "tool_call_id"> & { reasoning_content?: unknown })
+    | { role: string; content?: any; tool_calls?: any; tool_call_id?: string; reasoning_content?: unknown }
+  >,
   options?: { stripReasoningContent?: boolean },
 ): ResponseInputItem[] => {
   const input: ResponseInputItem[] = [];
@@ -419,7 +422,8 @@ export const convertResponsesInputToMessages = (
 
     const textChunks: string[] = [];
     const parts: Array<Record<string, any>> = [];
-    for (const part of item.content ?? []) {
+    const contentParts = Array.isArray(item.content) ? item.content : [];
+    for (const part of contentParts) {
       if (!isRecord(part)) continue;
       if (part.type === "input_text" || part.type === "output_text") {
         const text = typeof part.text === "string" ? part.text : "";

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import {
   ANTIGRAVITY_ACCESS_TOKEN_CLIENT_SKEW_MS,
   ANTIGRAVITY_AUTH_URL,
@@ -242,7 +243,7 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
       let interceptedBody = "";
 
       const now = 20_000_000;
-      const fakeFetch: typeof fetch = async (input, init) => {
+      const fakeFetch = asFetch(async (input: any, init?: any) => {
         interceptedUrl = String(input);
         interceptedMethod = init?.method ?? "";
         interceptedHeaders = init?.headers;
@@ -260,7 +261,7 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
             headers: { "Content-Type": "application/json" },
           }
         );
-      };
+      });
 
       const baseCredential: OAuthCredential = {
         provider: "antigravity",
@@ -309,7 +310,7 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
 
     test("rotates refreshToken if the refresh endpoint returns a new one", async () => {
       const now = 20_000_000;
-      const fakeFetch: typeof fetch = async () => {
+      const fakeFetch = asFetch(async () => {
         return new Response(
           JSON.stringify({
             access_token: "ya29.new-access-token",
@@ -318,7 +319,7 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
-      };
+      });
 
       const result = await refreshAntigravityToken(
         {
@@ -341,13 +342,14 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("throws error when response is missing access_token", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             expires_in: 3600,
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        )
+      );
 
       await expect(
         refreshAntigravityToken(
@@ -363,14 +365,15 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("handles structured JSON error response with error_description", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             error: "invalid_grant",
             error_description: "Token has been expired or revoked.",
           }),
           { status: 400, headers: { "Content-Type": "application/json" } }
-        );
+        )
+      );
 
       await expect(
         refreshAntigravityToken(
@@ -388,13 +391,14 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("handles structured JSON error response with error only", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             error: "invalid_request",
           }),
           { status: 400, headers: { "Content-Type": "application/json" } }
-        );
+        )
+      );
 
       await expect(
         refreshAntigravityToken(
@@ -410,11 +414,12 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("handles non-JSON error response", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response("502 Bad Gateway: upstream server unavailable", {
           status: 502,
           headers: { "Content-Type": "text/plain" },
-        });
+        })
+      );
 
       await expect(
         refreshAntigravityToken(
@@ -432,10 +437,11 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("handles empty body error response", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response("", {
           status: 500,
-        });
+        })
+      );
 
       await expect(
         refreshAntigravityToken(
@@ -451,9 +457,9 @@ describe("antigravityOAuth Pure Runtime Seam", () => {
     });
 
     test("handles network exception during fetch", async () => {
-      const fakeFetch: typeof fetch = async () => {
+      const fakeFetch = asFetch(async () => {
         throw new Error("Connection refused (ECONNREFUSED)");
-      };
+      });
 
       await expect(
         refreshAntigravityToken(

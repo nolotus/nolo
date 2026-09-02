@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import { fetchAntigravityCloudCodeCompletion } from "./antigravityCloudCodeProvider";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 
@@ -15,7 +16,7 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
     const sseBody =
       'data: {"response":{"candidates":[{"content":{"parts":[{"text":"hello agy"}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}}\n\n';
 
-    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (url: RequestInfo | URL, init?: RequestInit) => {
       const href = String(url);
       expect(href).toContain("cloudcode-pa.googleapis.com");
       expect(href).toContain("streamGenerateContent");
@@ -32,7 +33,7 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
       });
-    };
+    });
 
     const result = await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -69,11 +70,12 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
     const textDeltas: string[] = [];
     const reasoningDeltas: string[] = [];
 
-    const fetchImpl = async () =>
+    const fetchImpl = asFetch(async () =>
       new Response(sseBody, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },
-      });
+      })
+    );
 
     const result = await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -103,13 +105,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("attaches skip_thought_signature sentinel to replayed functionCall parts for gemini-3", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -170,13 +172,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
           { role: "tool", tool_call_id: "call_1", content: "/workspace" },
         ],
       },
-      fetchImpl: async (_url, init) => {
+      fetchImpl: asFetch(async (_url, init) => {
         capturedBody = JSON.parse(String(init?.body));
         return new Response(
           'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         );
-      },
+      }),
     });
 
     expect(capturedBody.request.contents.map((c: any) => c.role)).toEqual([
@@ -210,11 +212,11 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
         model: "gemini-3.1-pro",
         messages: [{ role: "user", content: "ls 然后读 a.ts" }],
       },
-      fetchImpl: async () =>
+      fetchImpl: asFetch(async () =>
         new Response(sseBody, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        }),
+        })),
     });
 
     const toolCalls = (first.body.choices as any[])[0].message.tool_calls;
@@ -238,13 +240,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
           { role: "user", content: "继续" },
         ],
       },
-      fetchImpl: async (_url: RequestInfo | URL, init?: RequestInit) => {
+      fetchImpl: asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
         capturedBody = JSON.parse(String(init?.body));
         return new Response(
           'data: {"response":{"candidates":[{"content":{"parts":[{"text":"done"}]}}]}}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         );
-      },
+      }),
     });
 
     const modelTurn = capturedBody.request.contents.find(
@@ -271,11 +273,11 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
         model: "gemini-3-flash-preview",
         messages: [{ role: "user", content: "load review skill" }],
       },
-      fetchImpl: async () =>
+      fetchImpl: asFetch(async () =>
         new Response(sseBody, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        }),
+        })),
     });
 
     const toolCalls = (result.body.choices as any[])[0].message.tool_calls;
@@ -296,11 +298,11 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
         model: "gemini-3-flash-preview",
         messages: [{ role: "user", content: "run pwd" }],
       },
-      fetchImpl: async () =>
+      fetchImpl: asFetch(async () =>
         new Response(sseBody, {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
-        }),
+        })),
     });
 
     const toolCalls = (first.body.choices as any[])[0].message.tool_calls;
@@ -321,13 +323,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
           { role: "user", content: "next" },
         ],
       },
-      fetchImpl: async (_url: RequestInfo | URL, init?: RequestInit) => {
+      fetchImpl: asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
         capturedBody = JSON.parse(String(init?.body));
         return new Response(
           'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         );
-      },
+      }),
     });
 
     const modelTurn = capturedBody.request.contents.find(
@@ -345,20 +347,20 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
         accessToken: "t",
         metadata: {},
         openAiBody: { messages: [{ role: "user", content: "x" }] },
-        fetchImpl: async () => new Response("", { status: 500 }),
+        fetchImpl: asFetch(async () => new Response("", { status: 500 })),
       }),
     ).rejects.toThrow(/metadata\.projectId/);
   });
 
   test("converts image_url data URL parts into Gemini inlineData parts", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -398,13 +400,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("keeps an image-only user message even when there is no text", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -436,13 +438,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("merges adjacent same-role entries and flushes pending functionCall responses for Gemini turns requirement", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -482,13 +484,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("auto-flushes missing functionResponse when user sends new message without tool response", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -523,13 +525,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("correctly matches tool responses to pending calls by id when multiple calls share the same function name", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     await fetchAntigravityCloudCodeCompletion({
       agentConfig,
@@ -562,13 +564,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("claude model keeps Gemini contents wire and functionResponse carries tool_use id", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     const claudeAgentConfig = {
       ...agentConfig,
@@ -639,13 +641,13 @@ describe("fetchAntigravityCloudCodeCompletion", () => {
 
   test("claude model merges consecutive tool_results into one user message", async () => {
     let capturedBody: any;
-    const fetchImpl = async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = asFetch(async (_url: RequestInfo | URL, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body));
       return new Response(
         'data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n',
         { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    };
+    });
 
     const claudeAgentConfig = {
       ...agentConfig,

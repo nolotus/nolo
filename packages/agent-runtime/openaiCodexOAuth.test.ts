@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import {
   OPENAI_CODEX_ACCESS_TOKEN_CLIENT_SKEW_MS,
   OPENAI_CODEX_CLIENT_ID,
@@ -245,7 +246,7 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
         email: "refreshed@example.com",
       });
 
-      const fakeFetch: typeof fetch = async (input, init) => {
+      const fakeFetch = asFetch(async (input: any, init?: any) => {
         interceptedUrl = String(input);
         interceptedMethod = init?.method ?? "";
         interceptedHeaders = init?.headers;
@@ -263,7 +264,7 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
             headers: { "Content-Type": "application/json" },
           }
         );
-      };
+      });
 
       const result = await refreshOpenAiCodexToken(
         {
@@ -306,14 +307,15 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
 
     test("preserves existing refreshToken when refresh response omits it", async () => {
       const now = 5_000_000;
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             access_token: "rotated-access",
             expires_in: 3600,
           }),
           { status: 200 }
-        );
+        )
+      );
 
       const result = await refreshOpenAiCodexToken(
         {
@@ -333,14 +335,15 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
     });
 
     test("handles HTTP error response with error_description", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             error: "invalid_grant",
             error_description: "Refresh token has expired or is revoked",
           }),
           { status: 400 }
-        );
+        )
+      );
 
       await expect(
         refreshOpenAiCodexToken(
@@ -356,8 +359,9 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
     });
 
     test("handles non-JSON error response", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response("502 Bad Gateway - Cloudflare", { status: 502 });
+      const fakeFetch = asFetch(async () =>
+        new Response("502 Bad Gateway - Cloudflare", { status: 502 })
+      );
 
       await expect(
         refreshOpenAiCodexToken(
@@ -373,8 +377,9 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
     });
 
     test("handles 200 response missing access_token", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response(JSON.stringify({}), { status: 200 });
+      const fakeFetch = asFetch(async () =>
+        new Response(JSON.stringify({}), { status: 200 })
+      );
 
       await expect(
         refreshOpenAiCodexToken(
@@ -390,9 +395,9 @@ describe("OpenAI Codex OAuth Pure Runtime Seam", () => {
     });
 
     test("handles network fetch error", async () => {
-      const fakeFetch: typeof fetch = async () => {
+      const fakeFetch = asFetch(async () => {
         throw new Error("Connection reset by peer");
-      };
+      });
 
       await expect(
         refreshOpenAiCodexToken(

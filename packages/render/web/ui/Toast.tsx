@@ -149,7 +149,7 @@ function ToastItem({ toast }: { toast: InternalToast }) {
               onClick={() => {
                 if (toast.phase === "exiting") return;
                 toastManager.close(toast.id);
-                toast.action.onClick();
+                toast.action?.onClick();
               }}
             >
               {toast.action.label}

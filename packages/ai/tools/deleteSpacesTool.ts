@@ -24,7 +24,7 @@ export interface DeleteSpacesToolArgs {
 
 interface DeleteSpacesToolDeps {
   selectCurrentUserId: (state: any) => string | undefined;
-  selectMemberSpaces: (state: any) => SpaceMembershipLike[];
+  selectMemberSpaces: (state: any) => readonly SpaceMembershipLike[];
   readSpaceRecord: (thunkApi: any, spaceId: string) => Promise<SpaceRecordLike | null>;
   selectDeleteServers: (state: any) => string[];
   deleteServerKey: (
@@ -74,7 +74,7 @@ export const deleteSpacesFunctionSchema = {
 
 const defaultDeps: DeleteSpacesToolDeps = {
   selectCurrentUserId: selectIdentityUserId,
-  selectMemberSpaces: (state) => getAllMemberSpaces() as SpaceMembershipLike[],
+  selectMemberSpaces: (state) => getAllMemberSpaces() as readonly SpaceMembershipLike[],
   readSpaceRecord: async (thunkApi, spaceId) => {
     try {
       const record = await thunkApi.dispatch(

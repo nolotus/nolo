@@ -1425,8 +1425,8 @@ function warningsOf(result: { metadata?: Record<string, unknown> }) {
       toolNames: ["launchProcess", "listProcesses"],
       exposeShellTools: true,
     });
-    const launchSchema = openAiTools.find((t) => t.function.name === "launchProcess");
-    const launchProps = (launchSchema?.function.parameters as Record<string, Record<string, unknown>>)?.properties;
+    const launchSchema = openAiTools.find((t) => t.function?.name === "launchProcess");
+    const launchProps = (launchSchema?.function?.parameters as Record<string, Record<string, unknown>>)?.properties;
     expect(launchProps).toHaveProperty("persist");
 
     const launchRes = await executors.launchProcess({

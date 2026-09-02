@@ -54,6 +54,19 @@ export function renderComposerTokenChip(
   return `context: ${pctText}% (${formatTokenCount(used)}/${formatTokenCount(cw)})`;
 }
 
+/**
+ * 状态行展示的积分：续聊基数 + 本次会话累加。两者语义不相交，直接相加。
+ * 都没有时返回 undefined（而不是 0），让调用方区分「没花过」与「不该显示」。
+ */
+export function resolveStatusLineCredits(
+  state: Pick<TuiState, "sessionCredits" | "dialogCreditsBase">,
+): number | undefined {
+  const base = state.dialogCreditsBase;
+  const session = state.sessionCredits;
+  if (base === undefined && session === undefined) return undefined;
+  return (base ?? 0) + (session ?? 0);
+}
+
 // ─── Status line ────────────────────────────────────────────────────────────
 
 export function renderStatusLine(state: TuiState, maxWidth?: number) {
@@ -96,12 +109,14 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
     parts.push(`${branchText}${modifiedText}${untrackedText}`);
   }
 
-  // 优先展示整个对话累计的平台积分；仅当累计尚未加载（/new 首轮或读取失败）
-  // 时才回退到本轮 `turnTokens.credits`，避免状态行短暂无值。
-  const credits =
-    state.apiSource === "platform"
-      ? state.dialogTotalCredits ?? state.turnTokens?.credits
-      : undefined;
+  // 状态行的积分 = 续聊基数（服务端历史累计）+ 本次会话本地累加。
+  //
+  // 不再用 `apiSource === "platform"` 当显示开关：那是启动/切换时按静态 agent
+  // 目录判的，广场 agent、别名条目、以及自建但实际走平台推理的 agent 全都判不出
+  // 来，明明在扣积分却整轮不显示。改成看「本对话到底有没有产生过平台计费」——
+  // credits 只在 billing_unit === "credits" 时才累加，自有 API / 订阅制天然为
+  // 0，不显示，这正是「走平台才计积分」想要的判据本身。
+  const credits = resolveStatusLineCredits(state);
   const creditsSuffix =
     credits !== undefined && credits > 0
       ? ` · ⚡ ${credits.toFixed(2)} 积分`

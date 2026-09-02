@@ -299,6 +299,17 @@ export type RunAgentTurnResult = {
   pendingToolName?: string;
   localError?: unknown;
   turnTokens?: TurnTokenUsage;
+  /**
+   * 本轮实际扣掉的平台积分。
+   *
+   * 与 `turnTokens.credits` 分开的两个理由：
+   * - turnTokens 服务于上下文占用显示，只有 provider 回了 token usage 才存在；
+   *   而中断/失败的 turn 照样扣费，账不能跟着 token 一起丢。
+   * - 口径更严：只统计平台 billing 帧（billing_unit === "credits"），不含外部
+   *
+   * undefined = 本轮没有平台计费调用（而不是「扣了 0」）。
+   */
+  turnCredits?: number;
   /** Resolved context window for the agent that actually ran (auto-route aware). */
   contextWindow?: number;
 };

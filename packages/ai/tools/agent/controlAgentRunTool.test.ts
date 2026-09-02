@@ -333,16 +333,56 @@ describe("controlAgentRunFunc", () => {
     expect(lastListenToDialogEventsCalls[0][3].aborted).toBe(true);
   });
 
-  it("wait 收到 SSE failed 事件时按失败抛出，不返回 done", async () => {
+  it("wait 收到 SSE failed 事件时返回结构化 failed 状态与 errorMessage，不抛异常", async () => {
     setListenToDialogEventsImpl(async (...args: any[]) => {
       const onFailed = args[6];
       onFailed?.("API key expired");
-      throw new Error("API key expired");
+      const err = new Error("API key expired");
+      err.name = "AgentRunFailedError";
+      throw err;
+    });
+
+    const result = await controlAgentRunFunc(
+      { action: "wait", runId: "run-1", timeoutMs: 2000 },
+      makeThunkApi()
+    );
+
+    expect(result.rawData).toEqual({
+      runId: "run-1",
+      found: true,
+      status: "failed",
+      errorMessage: "API key expired",
+    });
+    expect(result.displayData).toContain("failed");
+    expect(result.displayData).toContain("API key expired");
+  });
+
+  it("wait 遇到底层连接/网络错误时仍抛出异常", async () => {
+    setListenToDialogEventsImpl(async () => {
+      throw new Error("事件流连接失败: ECONNREFUSED");
     });
 
     await expect(
       controlAgentRunFunc({ action: "wait", runId: "run-1", timeoutMs: 2000 }, makeThunkApi())
-    ).rejects.toThrow("API key expired");
+    ).rejects.toThrow("controlAgentRun(wait) 失败: 事件流连接失败: ECONNREFUSED");
+  });
+
+  it("wait 结束后清理外部 AbortSignal listener，防止长生命周期 signal 泄漏", async () => {
+    const controller = new AbortController();
+    let removed = false;
+    const origRemove = controller.signal.removeEventListener.bind(controller.signal);
+    controller.signal.removeEventListener = ((type: string, listener: any, options: any) => {
+      if (type === "abort") removed = true;
+      return origRemove(type, listener, options);
+    }) as any;
+
+    await controlAgentRunFunc(
+      { action: "wait", runId: "run-1", timeoutMs: 2000 },
+      makeThunkApi(),
+      { signal: controller.signal }
+    );
+
+    expect(removed).toBe(true);
   });
 
   it("SSE 订阅被 abort（监听器把 AbortError 吞成 resolve）也不误判为 done", async () => {

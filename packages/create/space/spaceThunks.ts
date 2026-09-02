@@ -94,7 +94,7 @@ export const addSpace = createAsyncThunk(
       addMemberSpace(payload);
       return payload;
     } catch (error) {
-      setMembershipRejected(errorMessage(error), false);
+      setMembershipRejected(errorMessage(error) || "添加空间失败", false);
       throw error;
     }
   }
@@ -104,7 +104,8 @@ export const deleteSpace = createAsyncThunk(
   "space/deleteSpace",
   async (arg: any, thunkAPI: any) => {
     const payload = await deleteSpaceAction(arg, thunkAPI);
-    const normalizedSpaceId = normalizeSpaceId(payload.spaceId);
+    const spaceId = typeof payload?.spaceId === "string" ? payload.spaceId : "";
+    const normalizedSpaceId = normalizeSpaceId(spaceId);
     const currentSpaceId = getCurrentSpaceIdRaw();
     const normalizedCurrentSpaceId = currentSpaceId
       ? normalizeSpaceId(currentSpaceId)

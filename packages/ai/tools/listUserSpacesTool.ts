@@ -75,11 +75,10 @@ export async function listUserSpacesFunc(
             role?: string;
         };
         // Selector typing can collapse membership fields under partial RootState shapes.
-        let memberSpaces = getAllMemberSpaces() as MemberSpaceRow[];
-
-        if (ownedOnly) {
-            memberSpaces = memberSpaces.filter((ms) => ms.role === "owner");
-        }
+        const allMembers = getAllMemberSpaces() as readonly MemberSpaceRow[];
+        let memberSpaces = ownedOnly
+            ? allMembers.filter((ms) => ms.role === "owner")
+            : [...allMembers];
 
         if (memberSpaces.length === 0) {
             return {

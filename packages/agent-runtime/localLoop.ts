@@ -1219,6 +1219,25 @@ function attachDialogIdToError(error: unknown, dialogId: string | undefined) {
 }
 
 /**
+ * 把本轮已发生的逐次调用计费证据挂到错误上。
+ *
+ * 中断（TUI Esc）和失败的 turn 一样在扣费——`persistFailedLocalTurn` 已经把
+ * usageRecords 存了下来、服务端也照常记账。但错误路径此前只把 dialogId 传出去，
+ * 调用方拿不到 usage，状态行的会话累计就漏掉这一整轮。长 turn 里 Esc 很常用，
+ * 漏的往往还是最贵的那几轮。
+ */
+function attachUsageRecordsToError(
+  error: unknown,
+  usageRecords: AgentRuntimeSaveTurnInput["usageRecords"],
+) {
+  if (!usageRecords?.length) return;
+  if (typeof error === "object" && error !== null) {
+    (error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }).usageRecords =
+      usageRecords;
+  }
+}
+
+/**
  * Persist a failed/aborted turn so TUI can keep `state.dialogId` and the next
  * user message continues the same conversation instead of opening a fresh one.
  * If saveTurn itself fails, fall back to continueDialogId when present.
@@ -1901,7 +1920,7 @@ export async function runLocalAgentTurn(
             !hasParsableObjectArguments(rawPoisonArguments)
           ) {
             throw new Error(
-              `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象。`,
+              `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`,
             );
           }
           const writeTool = toolName === "writeFile" || toolName === "editFile";
@@ -2126,6 +2145,23 @@ export async function runLocalAgentTurn(
       input.persistedInput,
       input.persistedInputReference,
     );
+    // 本轮全部计费证据（带外的压缩摘要调用排在前面）。saveTurn 与「挂到错误上
+    // 带给调用方」用的必须是同一批记录，否则状态行的会话累计和落盘账目会对不上。
+    const failedTurnUsageRecords = [
+      ...(compactionUsage
+        ? [{
+            callId:
+              typeof compactionUsage.provider_call_id === "string" &&
+              compactionUsage.provider_call_id.trim()
+                ? compactionUsage.provider_call_id.trim()
+                : crypto.randomUUID(),
+            usage: compactionUsage,
+            model: agentConfig.model || "unknown",
+            ...(agentConfig.provider ? { provider: agentConfig.provider } : {}),
+          }]
+        : []),
+      ...usageRecords,
+    ];
     const dialogId = await persistFailedLocalTurn({
       adapter: input.adapter,
       agentKey: agentConfig.key,
@@ -2136,25 +2172,14 @@ export async function runLocalAgentTurn(
       partialContent,
       usage: contextUsage,
       accountingUsage: addOutOfBandUsage(turnUsage, compactionUsage),
-      usageRecords: [
-        ...(compactionUsage
-          ? [{
-              callId:
-                typeof compactionUsage.provider_call_id === "string" &&
-                compactionUsage.provider_call_id.trim()
-                  ? compactionUsage.provider_call_id.trim()
-                  : crypto.randomUUID(),
-              usage: compactionUsage,
-              model: agentConfig.model || "unknown",
-              ...(agentConfig.provider ? { provider: agentConfig.provider } : {}),
-            }]
-          : []),
-        ...usageRecords,
-      ],
+      usageRecords: failedTurnUsageRecords,
       billingConfig,
       input,
     });
     attachDialogIdToError(loopError, dialogId);
+    // 中断/失败的 turn 同样扣了费：把逐次调用证据带出去，调用方才能把这一轮
+    // 计进会话累计。
+    attachUsageRecordsToError(loopError, failedTurnUsageRecords);
     // 失败路径同样落盘计时数据，避免中断时丢失已收集的相位。
     await loopTimingFlush();
     throw loopError;

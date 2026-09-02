@@ -307,7 +307,7 @@ export async function writeLocalTokenRecord(args: {
     const dateKey = format(timestamp, "yyyy-MM-dd");
     const statsKey = createTokenStatsKey(args.userId, dateKey);
     await runKeyed(statsKey, async () => {
-      let existingStats: unknown = null;
+      let existingStats: any = null;
       try {
         existingStats = await args.store.read(statsKey, { remote: false });
       } catch {
@@ -454,7 +454,7 @@ export async function writeDialog(args: {
   const hasSubjectRefs = localTurnHasSubjectRefs(args.input);
   const isLocalUser = args.userId === "local";
   // PERF: 暴露 remote sync promise 让测试可等待；调用方不 await（subjectRef 除外）。
-  let remoteSyncPromise: Promise<void> | undefined;
+  let remoteSyncPromise: Promise<unknown> | undefined;
   if (!isLocalUser) {
     if (hasSubjectRefs) {
       // subjectRef 场景保留 await + throw：task 关联的对话证据必须远端

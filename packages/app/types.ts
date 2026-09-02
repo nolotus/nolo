@@ -443,7 +443,11 @@ export interface SpaceMemberWithSpaceInfo {
   type?: DataType;
 }
 
-type MessageContentPartText = { type: "text"; text: string };
+type MessageContentPartText = {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
+};
 type MessageContentPartImageUrl = OpenAIImageContent;
 
 type MessageContentPart = MessageContentPartText | MessageContentPartImageUrl;

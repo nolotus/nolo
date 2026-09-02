@@ -113,7 +113,7 @@ export function parseSendError(errorMessage: string): ParsedSendError {
       try {
         const parsed = JSON.parse(candidate);
         payload = parsed;
-        const message = asString((parsed as Record<string, unknown>)?.error?.message);
+        const message = asString((parsed as Record<string, any>)?.error?.message ?? (parsed as Record<string, any>)?.message);
         if (message && message.trim().startsWith("{")) {
           // 内层又是一个 JSON 字符串，继续解析更内层
           candidate = message;

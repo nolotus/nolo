@@ -16,7 +16,14 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
-import { buildTurnTokenUsage, formatUsage, shouldShowUsage } from "./tokenUsage";
+import {
+  buildTurnTokenUsage,
+  formatUsage,
+  platformCreditsFromUsage,
+  shouldShowUsage,
+  sumPlatformCredits,
+  withTurnCredits,
+} from "./tokenUsage";
 
 import {
   createCliTurnOutput,
@@ -1036,6 +1043,10 @@ async function runHttpAgentTurn(
 
   const usage = formatUsage(data?.usage, data?.dialogId);
   if (usage && shouldShowUsage(options.env)) options.output.write(`${usage}\n`);
+  // 同流式分支：非流式 done 响应的 cost 已是整个 run 的汇总额。
+  const turnCredits = platformCreditsFromUsage(
+    data?.usage as Record<string, unknown> | undefined,
+  );
   return {
     exitCode: 0,
     ...(typeof data?.dialogId === "string" && data.dialogId
@@ -1045,6 +1056,7 @@ async function runHttpAgentTurn(
       data?.usage,
       typeof data?.model === "string" ? data.model : options.agentKey,
     ),
+    ...(turnCredits !== undefined ? { turnCredits } : {}),
   };
 }
 
@@ -1212,6 +1224,7 @@ async function runLocalAgentTurnForCli(
         : {}),
     });
     turnOutput.finish(result.content);
+    const turnCredits = sumPlatformCredits(result.usageRecords);
     return {
       exitCode: 0,
       dialogId: result.dialogId,
@@ -1220,7 +1233,12 @@ async function runLocalAgentTurnForCli(
       ...(result.emptyAssistantFallbackReason
         ? { emptyAssistantFallbackReason: result.emptyAssistantFallbackReason }
         : {}),
-      turnTokens: buildTurnTokenUsage(result.usage, result.model),
+      // 积分口径按「全轮」而非「最后一次调用」：result.usage 只是收尾那次
+      // provider 调用的 usage，本轮前面 N-1 次工具循环调用（以及自动压缩摘要）
+      // 的 cost 都只存在于 usageRecords 里。token 字段仍取 result.usage——
+      // 上下文占用本来就该看最后一次调用的累计输入，不是各次相加。
+      turnTokens: withTurnCredits(buildTurnTokenUsage(result.usage, result.model), turnCredits),
+      ...(turnCredits !== undefined ? { turnCredits } : {}),
     };
   } catch (error) {
     turnOutput.spinner.stop();
@@ -1228,6 +1246,12 @@ async function runLocalAgentTurnForCli(
     // so TUI can keep state.dialogId and the next message --continues instead
     // of opening a fresh dialog (402 / provider errors used to "amnesia").
     const savedDialogId = (error as { dialogId?: string })?.dialogId;
+    // 中断/失败前已经发生的 provider 调用照样扣了费（localLoop 把同一批
+    // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
+    // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
+    const abortedTurnCredits = sumPlatformCredits(
+      (error as { usageRecords?: Parameters<typeof sumPlatformCredits>[0] })?.usageRecords,
+    );
     if (
       (error as { code?: string })?.code === LOCAL_TURN_ABORTED_CODE ||
       options.abortSignal?.aborted
@@ -1243,6 +1267,7 @@ async function runLocalAgentTurnForCli(
         streamInterrupted: true,
         ...(savedDialogId ? { dialogId: savedDialogId } : {}),
         ...(pendingToolName ? { pendingToolName } : {}),
+        ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
       };
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
@@ -1270,6 +1295,7 @@ async function runLocalAgentTurnForCli(
       exitCode: 1,
       localError: error,
       ...(savedDialogId ? { dialogId: savedDialogId } : {}),
+      ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
     };
   }
 }

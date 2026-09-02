@@ -12,6 +12,8 @@ import {
   resolveAgentContextWindow,
   resolveAgentModelIdentity,
   resolveContextWindow,
+  sumPlatformCredits,
+  withTurnCredits,
 } from "./tokenUsage";
 
 describe("tokenUsage", () => {
@@ -178,6 +180,62 @@ describe("tokenUsage", () => {
         "nolo"
       )?.credits
     ).toBe(0.000202);
+  });
+
+  test("sumPlatformCredits adds up every platform-billed call in the turn", () => {
+    // 一轮里 3 次 provider 调用：result.usage 只会是最后一次（0.001），
+    // 状态行要的是三次之和。
+    expect(
+      sumPlatformCredits([
+        { usage: { cost: 0.004, billing_unit: "credits" } },
+        { usage: { cost: 0.002, billing_unit: "credits" } },
+        { usage: { cost: 0.001, billing_unit: "credits" } },
+      ])
+    ).toBeCloseTo(0.007, 10);
+  });
+
+  test("sumPlatformCredits ignores calls without the platform billing unit", () => {
+    // 自有 API / 订阅制不扣平台积分：即便上游自报 cost 也不折算进来，
+    // 否则会凭空造出一笔并不存在的平台消费。
+    expect(
+      sumPlatformCredits([
+        { usage: { cost: 1.5 } },
+        { usage: { cost: 2.5, billing_provider: "forged" } },
+      ])
+    ).toBeUndefined();
+    expect(
+      sumPlatformCredits([
+        { usage: { cost: 1.5 } },
+        { usage: { cost: 0.25, billing_unit: "credits" } },
+      ])
+    ).toBe(0.25);
+  });
+
+  test("sumPlatformCredits reports 0 for a platform call that was not charged", () => {
+    // 「跑了平台但这次没扣费」和「压根没走平台」是两件事：前者返回 0，
+    // 后者返回 undefined。
+    expect(sumPlatformCredits([{ usage: { cost: 0, billing_unit: "credits" } }])).toBe(0);
+    expect(sumPlatformCredits([])).toBeUndefined();
+    expect(sumPlatformCredits(undefined)).toBeUndefined();
+  });
+
+  test("withTurnCredits overrides the last-call credits with the turn total", () => {
+    const lastCallOnly = buildTurnTokenUsage(
+      { input_tokens: 10, output_tokens: 5, cost: 0.001, billing_unit: "credits" },
+      "nolo"
+    );
+    expect(lastCallOnly?.credits).toBe(0.001);
+    const wholeTurn = withTurnCredits(lastCallOnly, 0.007);
+    expect(wholeTurn?.credits).toBe(0.007);
+    // token 字段不受影响：上下文占用看的是最后一次调用的累计输入。
+    expect(wholeTurn?.input).toBe(10);
+    expect(wholeTurn?.output).toBe(5);
+  });
+
+  test("withTurnCredits keeps existing credits when the turn total is unknown", () => {
+    const tokens = buildTurnTokenUsage({ input_tokens: 1, output_tokens: 1 }, "nolo");
+    expect(withTurnCredits(tokens, undefined)).toBe(tokens);
+    expect(withTurnCredits(undefined, 0.5)).toBeUndefined();
   });
 
   test("formatUsage renders cache hit count and percentage", () => {

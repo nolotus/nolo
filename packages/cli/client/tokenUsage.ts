@@ -35,6 +35,9 @@ export type TurnTokenUsage = {
   cacheWrite?: number;
 };
 
+/** 平台计费帧自述的单位标记；与 chatBillingSse / runBilling 的写入端同一常量语义。 */
+export const PLATFORM_CREDIT_UNIT = "credits";
+
 const isUsableModelId = (model?: string | null): model is string => {
   const raw = model?.trim();
   return Boolean(raw) && raw !== "-" && raw !== "auto";
@@ -197,7 +200,7 @@ export function buildTurnTokenUsage(
   // 积分原样取值。服务端 billing 帧恒带 billing_unit（与 cost 同生共死），故平台
   // 计费路径必然命中；否则（含上游伪造 billing_provider/billing_model、字段缺失、
   // cost 无元数据）一律保守按外部 provider 自报美元 ×8 credits/USD 换算。
-  const isPlatformBilled = usage?.billing_unit === "credits";
+  const isPlatformBilled = usage?.billing_unit === PLATFORM_CREDIT_UNIT;
   const credits =
     rawCost !== undefined && rawCost > 0
       ? isPlatformBilled
@@ -210,6 +213,73 @@ export function buildTurnTokenUsage(
     ...(remaining != null ? { remaining } : {}),
     ...(credits !== undefined ? { credits } : {}),
   };
+}
+
+/**
+ * localLoop 每轮返回的逐次调用计费证据。一轮 agent turn 通常有 N 次 provider
+ * 调用（工具循环每轮一次 + 自动压缩摘要 + 标题生成），每条 usage 都已由
+ * platformChatProvider 的 `mergeBillingIntoUsage` 合并过该次调用的 billing 帧。
+ */
+export type UsageRecordLike = { usage?: Record<string, unknown> | null };
+
+/**
+ * 一轮内全部 provider 调用的平台积分之和。
+ *
+ * 为什么需要它：`result.usage` 只是**最后一次**调用的 usage，而 localLoop 的
+ * `mergeTurnUsage` 累加时只保留 token 字段、把 `cost` / `billing_unit` 丢掉。
+ * 于是只看 result.usage 的话，一轮跑 20 次工具、状态行只算得到第 20 次那一笔。
+ *
+ * 单位口径比 `buildTurnTokenUsage` 更严：这里**只认** `billing_unit === "credits"`
+ * 的平台计费帧，不做外部 provider 自报美元 ×8 的换算。状态行的积分 chip 回答的是
+ * 「我这次在平台上花了多少积分」——自有 API / 订阅制（cli）本就不扣平台积分，
+ * 把它们的自报成本折算进来会凭空造出一笔并不存在的消费。
+ *
+ * 返回 undefined 表示本轮没有任何平台计费调用（而不是「花了 0」）。
+ */
+export function sumPlatformCredits(
+  records?: readonly UsageRecordLike[] | null,
+): number | undefined {
+  if (!records?.length) return undefined;
+  let total = 0;
+  let sawPlatformCall = false;
+  for (const record of records) {
+    const credits = platformCreditsFromUsage(record?.usage);
+    if (credits === undefined) continue;
+    sawPlatformCall = true;
+    total += credits;
+  }
+  return sawPlatformCall ? total : undefined;
+}
+
+/**
+ * 单次调用的平台积分。口径与 `sumPlatformCredits` 同源：只认平台 billing 帧，
+ * 不做外部 provider 自报美元的换算。返回 undefined = 这次调用不是平台计费。
+ *
+ * 用在只拿得到一个聚合 usage 的路径上（server/HTTP 派发的 done 帧——那里的
+ * cost 已由 runBilling 汇总为整个 run 的总额，不像本地 loop 需要逐次相加）。
+ */
+export function platformCreditsFromUsage(
+  usage?: Record<string, unknown> | null,
+): number | undefined {
+  if (!usage || usage.billing_unit !== PLATFORM_CREDIT_UNIT) return undefined;
+  const cost = typeof usage.cost === "number" ? usage.cost : 0;
+  return Number.isFinite(cost) && cost > 0 ? cost : 0;
+}
+
+/**
+ * 用逐次调用求和出来的积分覆盖 `buildTurnTokenUsage` 从最后一次调用读到的
+ * `credits`。token 字段原样保留——只有计费口径需要全轮汇总。
+ *
+ * `tokens` 可能是 undefined（provider 没回 usage），此时积分也无处安放：调用方
+ * 拿到 undefined，会话累计这一轮就不加数，而不是凭空造一个只有 credits 的壳。
+ */
+export function withTurnCredits(
+  tokens: TurnTokenUsage | undefined,
+  credits: number | undefined,
+): TurnTokenUsage | undefined {
+  if (!tokens) return tokens;
+  if (credits === undefined) return tokens;
+  return { ...tokens, credits };
 }
 
 export function formatTokenCount(value: number) {

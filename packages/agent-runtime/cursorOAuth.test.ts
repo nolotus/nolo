@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { asFetch } from "./testFetchMock";
 import {
   CURSOR_ACCESS_TOKEN_CLIENT_SKEW_MS,
   CURSOR_LOGIN_URL,
@@ -173,7 +174,7 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
       const expSec = 1_700_003_600;
       const jwtToken = makeJwt({ exp: expSec });
 
-      const fakeFetch: typeof fetch = async (url, init) => {
+      const fakeFetch = asFetch(async (url: any, init?: any) => {
         capturedUrl = String(url);
         capturedInit = init;
         return new Response(
@@ -183,7 +184,7 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
-      };
+      });
 
       const oldCredential: OAuthCredential = {
         provider: "cursor",
@@ -217,13 +218,14 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
     });
 
     test("preserves previous refreshToken if response omits it", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response(
           JSON.stringify({
             accessToken: "new-opaque-access",
           }),
           { status: 200 }
-        );
+        )
+      );
 
       const refreshed = await refreshCursorToken(
         {
@@ -240,8 +242,9 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
     });
 
     test("throws with status and body detail when response is not ok", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response("Unauthorized: invalid grant", { status: 401 });
+      const fakeFetch = asFetch(async () =>
+        new Response("Unauthorized: invalid grant", { status: 401 })
+      );
 
       await expect(
         refreshCursorToken(
@@ -263,7 +266,7 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
         },
       }), { status: 502 });
 
-      const fakeFetch: typeof fetch = async () => responseWithBrokenText;
+      const fakeFetch = asFetch(async () => responseWithBrokenText);
 
       await expect(
         refreshCursorToken(
@@ -279,11 +282,12 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
     });
 
     test("throws when response JSON parsing fails", async () => {
-      const fakeFetch: typeof fetch = async () =>
+      const fakeFetch = asFetch(async () =>
         new Response("Not a JSON response", {
           status: 200,
           headers: { "Content-Type": "text/html" },
-        });
+        })
+      );
 
       await expect(
         refreshCursorToken(
@@ -299,9 +303,9 @@ describe("Cursor OAuth Pure Runtime Seam", () => {
     });
 
     test("throws when network request fails", async () => {
-      const fakeFetch: typeof fetch = async () => {
+      const fakeFetch = asFetch(async () => {
         throw new Error("Connection refused");
-      };
+      });
 
       await expect(
         refreshCursorToken(

@@ -411,7 +411,7 @@ const buildFormDataFromArgs = async (args: CreateAgentToolArgs): Promise<AgentFo
  */
 const findSpaceConfig = (
     nameOrId: string,
-    allSpaces: any[]
+    allSpaces: readonly any[]
 ): { spaceId: string; name: string } | null => {
     const query = toTrimmedString(nameOrId).toLowerCase();
     if (!query) return null;

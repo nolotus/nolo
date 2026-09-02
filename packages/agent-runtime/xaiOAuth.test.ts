@@ -164,7 +164,7 @@ describe("xaiOAuth pure seam", () => {
         return jsonResponse(TRUSTED_DISCOVERY);
       };
 
-      const discovery = await xaiOAuthDiscovery(fetchImpl as typeof fetch);
+      const discovery = await xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch);
       expect(discovery).toEqual({
         authorization_endpoint: AUTH_ENDPOINT,
         token_endpoint: TOKEN_ENDPOINT,
@@ -174,7 +174,7 @@ describe("xaiOAuth pure seam", () => {
 
     it("validates device_authorization_endpoint when requireDeviceAuthorization is true", async () => {
       const fetchImpl = async () => jsonResponse(TRUSTED_DISCOVERY);
-      const discovery = await xaiOAuthDiscovery(fetchImpl as typeof fetch, {
+      const discovery = await xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch, {
         requireDeviceAuthorization: true,
       });
       expect(discovery.device_authorization_endpoint).toBe(DEVICE_ENDPOINT);
@@ -188,7 +188,7 @@ describe("xaiOAuth pure seam", () => {
         });
 
       await expect(
-        xaiOAuthDiscovery(fetchImpl as typeof fetch, { requireDeviceAuthorization: true })
+        xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch, { requireDeviceAuthorization: true })
       ).rejects.toThrow("xAI OIDC discovery response was missing device_authorization_endpoint.");
     });
 
@@ -198,7 +198,7 @@ describe("xaiOAuth pure seam", () => {
           authorization_endpoint: AUTH_ENDPOINT,
         });
 
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         "xAI OIDC discovery response was missing required endpoints."
       );
     });
@@ -210,7 +210,7 @@ describe("xaiOAuth pure seam", () => {
           token_endpoint: TOKEN_ENDPOINT,
         });
 
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         /Invalid xAI authorization_endpoint/
       );
     });
@@ -222,7 +222,7 @@ describe("xaiOAuth pure seam", () => {
           token_endpoint: "https://evil.attacker.com/token",
         });
 
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         /Invalid xAI token_endpoint/
       );
     });
@@ -235,21 +235,21 @@ describe("xaiOAuth pure seam", () => {
           device_authorization_endpoint: "https://evil.attacker.com/device",
         });
 
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         /Invalid xAI device_authorization_endpoint/
       );
     });
 
     it("handles non-200 discovery response", async () => {
       const fetchImpl = async () => new Response("Server error", { status: 500 });
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         "xAI OIDC discovery returned status 500."
       );
     });
 
     it("handles HTML/Cloudflare challenge on discovery", async () => {
       const fetchImpl = async () => htmlResponse(403);
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         /xAI OIDC discovery failed \(403\): xAI returned an HTML\/Cloudflare challenge instead of OAuth JSON/
       );
     });
@@ -258,7 +258,7 @@ describe("xaiOAuth pure seam", () => {
       const fetchImpl = async () => {
         throw new Error("DNS resolution failed");
       };
-      await expect(xaiOAuthDiscovery(fetchImpl as typeof fetch)).rejects.toThrow(
+      await expect(xaiOAuthDiscovery(fetchImpl as unknown as typeof fetch)).rejects.toThrow(
         "xAI OIDC discovery failed: DNS resolution failed"
       );
     });
@@ -398,7 +398,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       const refreshed = await refreshXaiToken(initialCredential, {
-        fetchImpl: fetchImpl as typeof fetch,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
         now: () => fixedNow,
       });
 
@@ -434,7 +434,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       const refreshed = await refreshXaiToken(initialCredential, {
-        fetchImpl: fetchImpl as typeof fetch,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
         now: () => 2000,
       });
 
@@ -479,7 +479,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       await expect(
-        refreshXaiToken(credential, { fetchImpl: fetchImpl as typeof fetch })
+        refreshXaiToken(credential, { fetchImpl: fetchImpl as unknown as typeof fetch })
       ).rejects.toThrow("xAI token refresh failed: 400 Refresh token is expired or revoked");
     });
 
@@ -504,7 +504,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       await expect(
-        refreshXaiToken(credential, { fetchImpl: fetchImpl as typeof fetch })
+        refreshXaiToken(credential, { fetchImpl: fetchImpl as unknown as typeof fetch })
       ).rejects.toThrow(
         /xAI token refresh failed \(403\): xAI returned an HTML\/Cloudflare challenge instead of OAuth JSON/
       );
@@ -531,7 +531,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       await expect(
-        refreshXaiToken(credential, { fetchImpl: fetchImpl as typeof fetch })
+        refreshXaiToken(credential, { fetchImpl: fetchImpl as unknown as typeof fetch })
       ).rejects.toThrow(/Invalid xAI token_endpoint/);
     });
 
@@ -556,7 +556,7 @@ describe("xaiOAuth pure seam", () => {
       };
 
       await expect(
-        refreshXaiToken(credential, { fetchImpl: fetchImpl as typeof fetch })
+        refreshXaiToken(credential, { fetchImpl: fetchImpl as unknown as typeof fetch })
       ).rejects.toThrow("xAI token refresh failed: Connection reset by peer");
     });
 

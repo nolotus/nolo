@@ -134,4 +134,58 @@ describe("server dialog token projection", () => {
 
     expect(puts).toEqual([]);
   });
+
+  it("leaves the stable marker unwritten when the dialog record is missing, so a later writer can still project", async () => {
+    // CLI 本地对话：聊天代理中途计费时 dialog 记录还没同步到服务端权威库，
+    // 这一笔当场投影不了。若此时写下幂等 marker，稍后 CLI 明细同步带着同一个
+    // provider call 回来重投会直接撞 marker 返回，dialog.totalCost 永久少一笔。
+    const db = new MemoryDB();
+    const store = createTestAuthorityStore(db as any);
+    mock.module("database-engine/db", () => ({
+      getServerAuthorityStore: () => store,
+    }));
+    const { applyServerDialogProjectionDelta } = await import(
+      `./serverDialogProjection.ts?missing-dialog-retry=${Date.now()}`
+    );
+    mock.restore();
+
+    const projection = {
+      userId: "user-1",
+      dialogId: "dialog-late",
+      inputTokensDelta: 5,
+      outputTokensDelta: 1,
+      costDelta: 0.5,
+      projectionId: "token-user-1-1000-call-late",
+    };
+    const markerKey = createKey(
+      "dialog-token-projection",
+      "user-1",
+      "dialog-late",
+      projection.projectionId,
+    );
+
+    // 第一次：dialog 记录还不存在 → 跳过，且不留 marker。
+    await applyServerDialogProjectionDelta(projection);
+    expect(await db.get(markerKey).catch(() => null)).toBeFalsy();
+
+    // dialog 随 saveTurn 落地后，同一笔重投必须真正加上去。
+    const dialogKey = createKey(DataType.DIALOG, "user-1", "dialog-late");
+    await db.put(dialogKey, {
+      id: "dialog-late",
+      userId: "user-1",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0,
+    });
+    await applyServerDialogProjectionDelta(projection);
+    expect(await db.get(dialogKey)).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 1,
+      totalCost: 0.5,
+    });
+
+    // 补投之后 marker 就位，第三次不再重复累加。
+    await applyServerDialogProjectionDelta(projection);
+    expect(await db.get(dialogKey)).toMatchObject({ totalCost: 0.5 });
+  });
 });

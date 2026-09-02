@@ -18,7 +18,7 @@ import { callToolApi, getToolRequestContext } from "../toolApiClient";
 import { listenToDialogEvents } from "ai/agent/runAgentBackground";
 import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
-import { formatListRunsCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
+import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
 
 export const controlAgentRunFunctionSchema = {
     name: "controlAgentRun",
@@ -164,10 +164,10 @@ export async function controlAgentRunFunc(
         if (!runId) {
             throw new Error("controlAgentRun(wait): runId is required");
         }
-        return handleWait(thunkApi, { runId, timeoutMs });
+        return handleWait(thunkApi, { runId, timeoutMs }, _context);
     }
 
-    throw new Error(`controlAgentRun: unknown action "${action}"`);
+    throw new Error(`controlAgentRun: 未知 action "${action}"`);
 }
 
 // ── list ───────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ async function handleList(
                 hasMore,
                 ...(batchSummary ? { batchSummary } : {}),
             },
-            displayData: formatListRunsCard(runs, { count, total, hasMore, batchSummary }),
+            displayData: formatListRunsCard(runs),
         };
     } catch (e: any) {
         throw new Error(`controlAgentRun(list) 失败: ${toErrorMessage(e)}`);
@@ -259,7 +259,7 @@ async function handleStatus(
         if (!resData || resData.found === false) {
             return {
                 rawData: { found: false, runId: opts.runId },
-                displayData: `未找到 runId 为 ${opts.runId} 的运行记录。`,
+                displayData: formatNotFoundRunCard(),
             };
         }
 
@@ -317,13 +317,14 @@ async function handleAppend(
     opts: { runId?: string; dialogKey?: string; userInput: string; mode?: "enqueue" | "continue" }
 ): Promise<{ rawData: any; displayData: string }> {
     try {
-        const requestContext = getToolRequestContext(thunkApi);
+        const state = thunkApi.getState?.() ?? {};
+        const userId = (state as any)?.identity?.currentUser?.userId ?? (state as any)?.auth?.currentUser?.userId;
         const resolvedKey =
             opts.dialogKey ||
             (opts.runId?.startsWith("dialog-")
                 ? opts.runId
-                : opts.runId && requestContext?.userId
-                  ? `dialog-${requestContext.userId}-${opts.runId}`
+                : opts.runId && userId
+                  ? `dialog-${userId}-${opts.runId}`
                   : opts.runId);
 
         if (!resolvedKey) {
@@ -358,31 +359,33 @@ async function handleAppend(
 
 async function handleWait(
     thunkApi: any,
-    opts: { runId: string; timeoutMs?: number }
+    opts: { runId: string; timeoutMs?: number },
+    contextOpts?: { signal?: AbortSignal }
 ): Promise<{ rawData: any; displayData: string }> {
     const timeoutMs = opts.timeoutMs ?? 100000;
     const requestContext = getToolRequestContext(thunkApi);
-    const serverBase = requestContext?.serverBase;
+    const serverBase = requestContext.baseUrl || requestContext.currentServer;
+    const authHeader = requestContext.token ? `Bearer ${requestContext.token}` : "";
+
+    let cleanupSignal: (() => void) | null = null;
 
     try {
         const initial = await callToolApi(
             thunkApi,
             "/api/agent/runs/control",
-            { action: "status", runId: opts.runId, tailLines: 0 },
+            { action: "status", runId: opts.runId },
             { withAuth: true }
         );
-        const initialRun = initial?.data?.run ?? initial?.run;
-        if (!initialRun) {
-            return {
-                rawData: { found: false, runId: opts.runId, status: "not_found" },
-                displayData: `未找到 runId 为 ${opts.runId} 的运行记录，无法等待。`,
-            };
+        const resData = initial?.data ?? initial;
+        const initialRun = resData?.run;
+        if (!resData || resData.found === false || !initialRun) {
+            throw new Error(`等待失败：runId ${opts.runId} 不存在`);
         }
         const terminalStatuses = ["done", "failed", "cancelled", "orphaned"];
         if (terminalStatuses.includes(initialRun.status)) {
             const name = resolveRunLabel(initialRun);
             return {
-                rawData: { found: true, ...initialRun },
+                rawData: { runId: opts.runId, status: initialRun.status, content: initialRun.lastAssistantText, found: true, ...initialRun },
                 displayData: formatStatusRunCard(name, initialRun.status, {
                     runId: opts.runId,
                     lastToolNames: initialRun.lastToolNames,
@@ -394,54 +397,105 @@ async function handleWait(
             };
         }
 
-        const terminalEvent = await listenToDialogEvents({
-            dialogId: opts.runId,
-            serverBase,
-            timeoutMs,
+        const abortController = new AbortController();
+        if (contextOpts?.signal) {
+            if (contextOpts.signal.aborted) {
+                const err = new Error("SSE 订阅被外部中止");
+                err.name = "AgentWaitInterruptedError";
+                throw err;
+            }
+            const onAbort = () => abortController.abort();
+            contextOpts.signal.addEventListener("abort", onAbort, { once: true });
+            cleanupSignal = () => {
+                contextOpts.signal?.removeEventListener("abort", onAbort);
+            };
+        }
+
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<{ isTimeout: true }>((resolve) => {
+            timer = setTimeout(() => {
+                abortController.abort();
+                resolve({ isTimeout: true });
+            }, timeoutMs);
         });
 
-        const status =
-            terminalEvent.type === "done"
-                ? "done"
-                : terminalEvent.type === "failed"
-                  ? "failed"
-                  : terminalEvent.type === "timeout"
-                    ? "timeout"
-                    : terminalEvent.type === "cancelled"
-                      ? "cancelled"
-                      : "unknown";
+        const listenPromise = listenToDialogEvents(
+            opts.runId,
+            serverBase,
+            authHeader,
+            abortController.signal,
+        );
 
+        let raceResult: any;
+        try {
+            raceResult = await Promise.race([listenPromise, timeoutPromise]);
+        } catch (e: any) {
+            if (e?.name === "AgentRunFailedError") {
+                const errMsg = e.message || "未知错误";
+                const name = resolveRunLabel(initialRun);
+                return {
+                    rawData: {
+                        runId: opts.runId,
+                        found: true,
+                        status: "failed",
+                        errorMessage: errMsg,
+                    },
+                    displayData: formatStatusRunCard(name, "failed", {
+                        runId: opts.runId,
+                        errorMessage: errMsg,
+                    }),
+                };
+            }
+            throw e;
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+
+        if (raceResult && typeof raceResult === "object" && "isTimeout" in raceResult && raceResult.isTimeout) {
+            const rawData = {
+                runId: opts.runId,
+                found: true,
+                status: "timeout",
+                waitedMs: timeoutMs,
+            };
+            return {
+                rawData,
+                displayData: `已等待 ${timeoutMs}ms，runId: ${opts.runId} 仍在运行中（未达终态）。可稍后再次 wait 或改用 status/stop。`,
+            };
+        }
+
+        if (contextOpts?.signal?.aborted || (abortController.signal.aborted && !("isTimeout" in (raceResult ?? {})))) {
+            const err = new Error("SSE 订阅被外部中止");
+            err.name = "AgentWaitInterruptedError";
+            throw err;
+        }
+
+        const res = raceResult as { content?: string; usage?: unknown; status?: string; errorMessage?: string };
+        const status = res?.status ?? "done";
         const rawData: Record<string, unknown> = {
             runId: opts.runId,
             found: true,
             status,
-            ...(terminalEvent.text ? { lastAssistantText: terminalEvent.text } : {}),
-            ...(terminalEvent.error ? { errorMessage: terminalEvent.error } : {}),
+            content: res?.content,
+            usage: res?.usage,
+            ...(res?.errorMessage && { errorMessage: res.errorMessage }),
         };
-
-        if (status === "timeout") {
-            return {
-                rawData,
-                displayData: `等待超时（上限 ${timeoutMs}ms），runId: ${opts.runId} 仍在运行中。可稍后再 wait 或改用 status/stop。`,
-            };
-        }
 
         const name = resolveRunLabel(initialRun);
         return {
             rawData,
             displayData: formatStatusRunCard(name, status, {
                 runId: opts.runId,
-                lastAssistantText: terminalEvent.text,
-                errorMessage: terminalEvent.error,
+                lastAssistantText: res?.content,
+                errorMessage: res?.errorMessage,
             }),
         };
     } catch (e: any) {
-        if (isAbortError(e)) {
-            return {
-                rawData: { runId: opts.runId, status: "aborted" },
-                displayData: `等待已中断（runId: ${opts.runId}）。`,
-            };
+        if (isAbortError(e) || e?.name === "AgentWaitInterruptedError") {
+            throw e;
         }
         throw new Error(`controlAgentRun(wait) 失败: ${toErrorMessage(e)}`);
+    } finally {
+        cleanupSignal?.();
     }
 }

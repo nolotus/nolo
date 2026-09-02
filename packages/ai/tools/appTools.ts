@@ -1927,7 +1927,7 @@ export async function appVersionRestoreFunc(
     thunkApi,
     "/api/version/restore",
     { type: "app", entityId: appId, versionId, restoreMode: restoreMode ?? "source_only" },
-    { withAuth: true, method: "POST" }
+    { withAuth: true }
   );
 
   return {

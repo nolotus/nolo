@@ -512,7 +512,7 @@ export async function runWorkspaceCommand(args: {
     });
   }
   const exitPromise = waitForNodeProcessExit(proc);
-  const cleanupChildOnHostSignal = (signal: NodeJS.Signals) => {
+  const cleanupChildOnHostSignal: NodeJS.SignalsListener = (signal) => {
     if (typeof proc.pid === "number") {
       try { process.kill(-proc.pid, signal); } catch { /* already exited */ }
     }
@@ -524,9 +524,9 @@ export async function runWorkspaceCommand(args: {
   }
   const detachSignalCleanup = () => {
     if (!detached) return;
-    process.removeListener("SIGHUP", cleanupChildOnHostSignal);
-    process.removeListener("SIGTERM", cleanupChildOnHostSignal);
-    process.removeListener("SIGINT", cleanupChildOnHostSignal);
+    (process as any).removeListener("SIGHUP", cleanupChildOnHostSignal);
+    (process as any).removeListener("SIGTERM", cleanupChildOnHostSignal);
+    (process as any).removeListener("SIGINT", cleanupChildOnHostSignal);
   };
   exitPromise.then(detachSignalCleanup, detachSignalCleanup);
   const stdoutPromise = readNodeStream(proc.stdout);

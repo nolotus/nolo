@@ -488,7 +488,7 @@ function extractImages(content: AgentRuntimeChatMessage["content"]) {
         },
       });
     })
-    .filter((x: any) => x !== null);
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 }
 
 // ---------------------------------------------------------------------------

@@ -71,7 +71,7 @@ export const initialState: SettingState = {
   editorFontFamily: "SF Mono, Monaco, Cascadia Code, Roboto Mono, monospace",
   enableReadCurrentSpace: true,
   globalPrompt: "",
-  userTonePreset: "",
+  userTonePreset: "default",
   knowledgeCaptureLevel: DEFAULT_USER_PREFERENCE_PROFILE.knowledgeCaptureLevel,
   spaceContextLevel: DEFAULT_USER_PREFERENCE_PROFILE.spaceContextLevel,
   autoApproveSelfUpdateFields: [...DEFAULT_AUTO_APPROVED_SELF_UPDATE_FIELDS],

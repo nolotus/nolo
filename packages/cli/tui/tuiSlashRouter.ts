@@ -85,7 +85,7 @@ export interface SlashDispatchHost {
   readonly emitCommandOutput: (text: string, command?: string) => void;
   readonly renderHistoryToOutput: () => void;
   readonly scheduleRender: () => void;
-  readonly refreshDialogTotalCredits: (dialogId: string, dialogKey: string) => void;
+  readonly seedDialogCreditsBase: (dialogId: string, dialogKey: string) => void;
   readonly persistExplicitAgentSwitch: (previousAgentKey: string) => boolean;
   // readlineWorkspace 模块级函数（默认档不落盘的 agent 选择持久化），
   // pick-agent 分支与 persistExplicitAgentSwitch 共用；为避免反向依赖经 host 注入。
@@ -152,7 +152,7 @@ export async function runSubmittedSlashLine(
     emitCommandOutput,
     renderHistoryToOutput,
     scheduleRender,
-    refreshDialogTotalCredits,
+    seedDialogCreditsBase,
     persistExplicitAgentSwitch,
     persistAgentSelection,
     writeClipboard,
@@ -235,8 +235,10 @@ export async function runSubmittedSlashLine(
     host.state = {
       ...host.state,
       turnTokens: undefined,
-      // 新对话累计积分从 0 开始，清掉旧对话残留的累计值，等首轮读取后再回填。
-      dialogTotalCredits: undefined,
+      // 新对话的积分累计从 0 重新开始：既清掉旧对话的本会话累加，也清掉旧对话
+      // 的历史基数（新对话没有历史）。
+      sessionCredits: undefined,
+      dialogCreditsBase: undefined,
       cachedMemoryOverlay: undefined, // 新对话重新加载记忆
       estimatedContextTokens: estimateDefaultCliContextTokens({
         cwd: host.state.cwd,
@@ -287,9 +289,10 @@ export async function runSubmittedSlashLine(
         // composer chip falls back to the default CLI surface estimate and
         // the context percentage visibly drops. Mirrors the /clear reset.
         turnTokens: undefined,
-        // compact fork 出新的官方 dialog，其全量计费投影从新记录累计。
-        // 清掉旧累计值，等首轮读取后再回填新 dialog 的 totalCost。
-        dialogTotalCredits: undefined,
+        // compact fork 出新的官方 dialog，计费从新记录开始累计；新 dialog 没有
+        // 历史基数，本会话累加也随之归零。
+        sessionCredits: undefined,
+        dialogCreditsBase: undefined,
         cachedMemoryOverlay: undefined, // compact 创建新 dialog，重新加载记忆
         estimatedContextTokens: estimateDefaultCliContextTokens({
           cwd: host.state.cwd,
@@ -554,13 +557,15 @@ export async function runSubmittedSlashLine(
           dialogLabel: pickResult.dialog.title || pickResult.dialog.id,
           dialogTitle: pickResult.dialog.title,
           turnTokens: undefined,
-          // 切换对话先清空上一个对话的累计积分，等下面异步读取成功后回填；
+          // 切换对话先清空上一个对话的积分，等下面异步 seed 成功后回填历史基数；
           // 若读取失败也不至于把旧对话的累计值残留显示在状态行。
-          dialogTotalCredits: undefined,
+          sessionCredits: undefined,
+          dialogCreditsBase: undefined,
           cachedMemoryOverlay: undefined, // 切换对话后重新加载记忆
         };
-        // 切到已有对话时立即初始化「整个对话累计」积分（读 dialog 记录的 totalCost）。
-        refreshDialogTotalCredits(pickResult.dialog.id, pickResult.dialog.dbKey);
+        // 切到已有对话：读一次 dialog 记录的 totalCost 当历史基数，之后本会话
+        // 的消费由每轮本地累加叠加在它上面。
+        seedDialogCreditsBase(pickResult.dialog.id, pickResult.dialog.dbKey);
         clearCollapsedPasteStore(pasteStore);
         emitCommandOutput(
           `${t("resumedDialogPrefix")}: ${pickResult.dialog.title} (${pickResult.dialog.id})`,

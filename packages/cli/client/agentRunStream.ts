@@ -5,7 +5,12 @@ import {
   isClientVersionTooOldFailure,
 } from "./clientVersionTooOldFailure";
 import { createSseToolEventAdapter } from "./toolOutput";
-import { buildTurnTokenUsage, formatUsage, shouldShowUsage } from "./tokenUsage";
+import {
+  buildTurnTokenUsage,
+  formatUsage,
+  platformCreditsFromUsage,
+  shouldShowUsage,
+} from "./tokenUsage";
 import { Spinner } from "./agentRunSpinner";
 import { createCliTurnOutput } from "./agentRunOutput";
 import type { RunAgentTurnOptions, RunAgentTurnResult } from "./agentRunTypes";
@@ -179,9 +184,13 @@ export async function readStreamingAgentRun(
   const usageText = formatUsage(usage, dialogId);
   if (usageText && shouldShowUsage(options.env))
     options.output.write(`${usageText}\n`);
+  // server 派发的 done 帧里，cost 已由 runBilling 汇总成整个 run 的总额，
+  // 不像本地 loop 需要逐次相加。
+  const turnCredits = platformCreditsFromUsage(usage);
   return {
     exitCode: 0,
     ...(dialogId ? { dialogId } : {}),
     turnTokens: buildTurnTokenUsage(usage, options.agentKey),
+    ...(turnCredits !== undefined ? { turnCredits } : {}),
   };
 }

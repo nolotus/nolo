@@ -371,7 +371,7 @@ describe("unparsable-JSON-arguments poison defense", () => {
       user("dispatch"),
       assistant("", {
         tool_calls: [
-          { type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } },
+          { type: "function", function: { name: "startAgentRun", arguments: TRUNCATED_ARGS } } as any,
         ],
       }),
       tool("call_sanitize_1_0", "err", "startAgentRun"),
