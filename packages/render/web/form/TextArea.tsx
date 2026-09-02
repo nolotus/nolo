@@ -66,7 +66,7 @@ export const TextArea = ({
       isDisabled={props.disabled}
       className={`react-aria-TextField ${className}`}
       style={style}
-      value={props.value}
+      value={props.value != null ? String(props.value) : undefined}
       onChange={(v) => {
         // react-aria 的 TextField onChange 签名是 (value: string) => void，
         // 转成原生 event 形式，让调用方继续用 e.target.value。

@@ -66,7 +66,7 @@ export const MY_CONTENT_USER_DATA_TYPES: DataType[] = [
   DataType.AGENT,
 ];
 
-type UserContentRecord = Partial<AppSummaryRecord> & {
+export type UserContentRecord = Partial<AppSummaryRecord> & {
   dbKey?: string;
   contentKey?: string;
   type?: string;

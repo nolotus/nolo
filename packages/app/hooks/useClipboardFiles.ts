@@ -6,7 +6,7 @@ import type { ClipboardEvent, ClipboardEventHandler } from "react";
 export function deduplicateFiles<
     T extends { name: string; size: number; type: string; lastModified?: number }
 >(files: T[] | FileList): T[] {
-    const fileArray = Array.from(files) as T[];
+    const fileArray = (Array.isArray(files) ? files : Array.from(files)) as T[];
     const seen = new Set<string>();
     const result: T[] = [];
 
@@ -28,7 +28,7 @@ export function useClipboardFiles<T extends HTMLElement = HTMLElement>(
             const rawFiles = event.clipboardData?.files;
             if (rawFiles && rawFiles.length > 0) {
                 event.stopPropagation();
-                const uniqueFiles = deduplicateFiles(rawFiles);
+                const uniqueFiles = deduplicateFiles<File>(rawFiles);
                 if (uniqueFiles.length > 0) {
                     onFiles(uniqueFiles);
                 }

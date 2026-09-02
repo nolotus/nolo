@@ -24,7 +24,7 @@ import { sendFirstMessage } from "chat/messages/sendFirstMessage";
 import { resolvePendingAttachmentsToMessageParts } from "chat/messages/pendingAttachmentParts";
 import { resolveBrowserModelImageUrl } from "chat/messages/browserImageUrl";
 import { compactDialogAndForkAction } from "chat/dialog/actions/compactDialogAndForkAction";
-import { getPrimaryDialogAgentId } from "chat/dialog/dialogAgents";
+import { getPrimaryDialogAgentId, getActiveDialogAgentId } from "chat/dialog/dialogAgents";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import {
   isCompactDialogSlashCommand,

@@ -290,7 +290,6 @@ import {
   STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
-  type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
@@ -314,7 +313,6 @@ export {
   STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,
   LENGTH_TRUNCATED_REASONING_MARKER,
   MAX_TRUNCATED_REASONING_CHARS,
-  type EmptyAssistantFallbackReason,
   resolveEmptyAssistantOutcome,
   resolveEmptyAssistantFallbackMessage,
   formatLengthTruncatedReasoningTail,
@@ -1597,9 +1595,9 @@ export async function runLocalAgentTurn(
 
   const userInputText = extractUserInputText(input.input);
   let toolCallCount = 0;
-  // 允许承载空 assistant 兜底标记（emptyAssistantFallbackReason），
-  // 供上层（后台 run 编排者）据成因结算成败；仅本地类型放宽。
-  let result: AgentRuntimeResult & { emptyAssistantFallbackReason?: EmptyAssistantFallbackReason };
+  // 兜底标记（emptyAssistantFallbackReason / emptyAssistantOutputUsable）已
+  // 收敛到 AgentRuntimeResult 本体，这里不再需要本地类型放宽。
+  let result: AgentRuntimeResult;
   let turnUsage: Record<string, unknown> | undefined;
   let contextUsage: Record<string, unknown> | undefined;
   const usageRecords: NonNullable<AgentRuntimeSaveTurnInput["usageRecords"]> = [];
@@ -1797,10 +1795,17 @@ export async function runLocalAgentTurn(
           // 半截输出截断：正文已部分流出，保留原文，不重试也不替换；
           // 打截断标记让上层（子 run 结算/编排者）可观测并按截断语义接力。
           // errorMessage 记录告警文案（内容与正文分离，落盘记录可自解释）。
+          //
+          // hasVisibleOutput=true：本轮**有完整可见正文**，只是缺 finish_reason
+          // 收尾帧（部分上游从不发该帧）。这与 fallback 分支的「真的没拿到输出」
+          // 是两回事，但二者共用 reason="stream_truncated"，导致上层只看 reason
+          // 时把有正文的正常轮次也结算为 failed（实测：review 子任务完整输出
+          // 结论后仍被判 failed/exitCode=1）。这里显式标注正文可用，供结算层区分。
           result = {
             ...result,
             errorMessage: resolveEmptyAssistantFallbackMessage(outcome.reason),
             emptyAssistantFallbackReason: outcome.reason,
+            emptyAssistantOutputUsable: true,
             emptyAssistantRepairUsed,
           };
           break;

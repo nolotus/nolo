@@ -190,7 +190,6 @@ export const MessageLayout = memo(
               {/* Avatar + bubble only — actions are a sibling BELOW this row
                   so they never participate in avatar vertical alignment. */}
               <div
-                className="msg-bubble-row"
                 {...withLiteralClass(
                   "msg-bubble-row",
                   styles.msgBubbleRow,
@@ -221,7 +220,6 @@ export const MessageLayout = memo(
               </div>
               {actions && (
                 <div
-                  className="msg-actions-below"
                   {...withLiteralClass(
                     "msg-actions-below",
                     styles.msgActionsBelow,

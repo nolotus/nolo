@@ -49,7 +49,10 @@ import { selectRuntimeCurrentServer } from "app/stateViews/runtime";
 import { resolveAvatarUrl } from "ai/agent/avatarUtils";
 import { DarkModeSwitch } from "app/theme/web/DarkModeSwitch";
 // InviteRewards 在公开集不存在（life 包 cloud-only）；cloudLazy 用变量路径绕过 esbuild。
-const InviteRewards = cloudLazy("life/web/InviteRewards", () => null);
+const InviteRewards = cloudLazy<{ isOpen: boolean; onClose: () => void }>(
+  "life/web/InviteRewards",
+  () => null,
+);
 import "./layout.css";
 
 /** 👤 菜单项组件 - 提取以优化性能和可读性 */

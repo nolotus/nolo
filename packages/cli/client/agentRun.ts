@@ -93,6 +93,29 @@ const stripDebugNoise = (s: string) =>
     .replace(/\s*headers=\S+/g, "")
     .trim();
 
+/**
+ * 空 assistant 兜底标记的统一透传。
+ *
+ * 后台 run 结算（agentRunCommand 的 isRunResultStalledOrTruncated）依赖这两个
+ * 字段区分「有正文的收尾帧缺失」与「真的没拿到输出」；两处 fold 点（成功路径
+ * 与 localResult 折叠路径）此前各写一遍相同的 spread，新增字段时极易漏一处。
+ * 收敛到这里后，漏转发只会发生在这一处，且 agentRunTurnCredits.test 的透传
+ * 测试直接覆盖它。
+ */
+const pickEmptyAssistantFlags = (result: {
+  emptyAssistantFallbackReason?: string;
+  emptyAssistantOutputUsable?: boolean;
+}): {
+  emptyAssistantFallbackReason?: string;
+  emptyAssistantOutputUsable?: true;
+} => ({
+  ...(result.emptyAssistantFallbackReason
+    ? { emptyAssistantFallbackReason: result.emptyAssistantFallbackReason }
+    : {}),
+  ...(result.emptyAssistantOutputUsable ? { emptyAssistantOutputUsable: true as const } : {}),
+});
+
+
 function extractEmbeddedErrorMessage(message: string): string | undefined {
   const match = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(message);
   if (!match) return undefined;
@@ -1230,9 +1253,7 @@ async function runLocalAgentTurnForCli(
       dialogId: result.dialogId,
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
-      ...(result.emptyAssistantFallbackReason
-        ? { emptyAssistantFallbackReason: result.emptyAssistantFallbackReason }
-        : {}),
+      ...pickEmptyAssistantFlags(result),
       // 积分口径按「全轮」而非「最后一次调用」：result.usage 只是收尾那次
       // provider 调用的 usage，本轮前面 N-1 次工具循环调用（以及自动压缩摘要）
       // 的 cost 都只存在于 usageRecords 里。token 字段仍取 result.usage——
@@ -1388,9 +1409,7 @@ export function foldLocalResultForTui(
       : {}),
     // 空 assistant 兜底成因必须随行：后台 run 的结算（resolveRunOutcome 的
     // isStalledOrTruncated）靠它把截断轮判成 stalled 而不是 clean 失败。
-    ...(localResult.emptyAssistantFallbackReason
-      ? { emptyAssistantFallbackReason: localResult.emptyAssistantFallbackReason }
-      : {}),
+    ...pickEmptyAssistantFlags(localResult),
     ...(localResult.turnTokens ? { turnTokens: localResult.turnTokens } : {}),
     // 平台积分必须随行：runLocalAgentTurnForCli 里 sumPlatformCredits 已按
     // 「全轮逐次求和」算好（只认 billing_unit === "credits" 的平台计费帧）。

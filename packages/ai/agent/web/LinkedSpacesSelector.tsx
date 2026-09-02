@@ -152,7 +152,7 @@ const LinkedSpacesSelector: React.FC<LinkedSpacesSelectorProps> = ({
     const [selectedSpace, setSelectedSpace] = useState<SpaceOption | null>(null);
 
     // Get all spaces
-    const memberSpaces = useAllMemberSpaces() as Array<{ spaceId: string; spaceName?: string }>;
+    const memberSpaces = useAllMemberSpaces();
 
     // Convert to SpaceOption
     const availableSpaces: SpaceOption[] = useMemo(() =>

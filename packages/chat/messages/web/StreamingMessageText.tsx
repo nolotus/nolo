@@ -7,9 +7,9 @@ import { messageLayoutStyles } from "./messageLayoutStyles";
 
 function styledClass(
   literal: string,
-  ...styles: Array<Parameters<typeof stylex.props>[0] | false | null | undefined>
+  ...styles: Array<stylex.StyleXStyles | false | null | undefined>
 ): string {
-  const active = styles.filter(Boolean) as Parameters<typeof stylex.props>[0][];
+  const active = styles.filter(Boolean) as stylex.StyleXStyles[];
   const generated = stylex.props(...active).className;
   return generated ? `${literal} ${generated}` : literal;
 }

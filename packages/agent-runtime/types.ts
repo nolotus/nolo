@@ -155,10 +155,20 @@ export interface AgentRuntimeResult {
    * 上层（后台 run 编排者 / CLI 子 run 结算）据它决定是否结算为 failed。
    * 无此字段 = 正常轮。
    *
-   * 注意：ok_with_warning（半截输出截断，正文保留）也会带此标记——
-   * 编排者同样拿不到完整结论，结算语义与截断兜底一致。
+   * 注意：ok_with_warning（半截输出截断，正文保留）也会带此标记，
+   * 但那种情况下 emptyAssistantOutputUsable=true，结算层须区别对待。
    */
   emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  /**
+   * 带 emptyAssistantFallbackReason 但正文完整可用（ok_with_warning 分支）。
+   *
+   * 起因：ok_with_warning（有可见正文、只缺 finish_reason 收尾帧，部分上游
+   * 从不发该帧）与 fallback（真的没拿到输出）共用 reason="stream_truncated"，
+   * 上层只看 reason 就把有完整正文的正常轮次也结算为 failed。实测表现为
+   * review 子任务完整输出结论后仍被判 failed/exitCode=1，使「run 成功与否」
+   * 这一信号对自动化闸门不可用。
+   */
+  emptyAssistantOutputUsable?: boolean;
   /** 兜底/告警发生时，本轮是否已用过一次 repair（观测字段，不影响行为）。 */
   emptyAssistantRepairUsed?: boolean;
   policyState?: unknown;

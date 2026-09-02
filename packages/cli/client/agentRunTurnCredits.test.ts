@@ -52,6 +52,26 @@ describe("foldLocalResultForTui（状态行 ⚡ 积分的数据链）", () => {
     });
     expect(folded.emptyAssistantFallbackReason).toBe("length_truncated");
   });
+
+  // 与上一条配对：结算层靠这两个字段的组合区分「有正文的收尾帧缺失」与
+  // 「真的没拿到输出」，任一在 fold 时丢失都会让 run 成败判断失真。
+  test("emptyAssistantOutputUsable 随行——后台 run 结算区分可用截断依赖它", () => {
+    const folded = foldLocalResultForTui({
+      exitCode: 0,
+      emptyAssistantFallbackReason: "stream_truncated",
+      emptyAssistantOutputUsable: true,
+    });
+    expect(folded.emptyAssistantFallbackReason).toBe("stream_truncated");
+    expect(folded.emptyAssistantOutputUsable).toBe(true);
+  });
+
+  test("未标记 usable 时不虚构该字段（避免误判为可用）", () => {
+    const folded = foldLocalResultForTui({
+      exitCode: 0,
+      emptyAssistantFallbackReason: "stream_truncated",
+    });
+    expect(folded.emptyAssistantOutputUsable).toBeUndefined();
+  });
 });
 
 describe("run 记录与面板/dock 的积分显示", () => {

@@ -54,8 +54,8 @@ export const Slider = ({
 
   const progress = ((localValue - min) / (max - min)) * 100;
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
+  const handleInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
     setDragState({ value: val, dragging: true });
   }, []);
 

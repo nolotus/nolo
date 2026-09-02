@@ -14,7 +14,11 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { asTrimmedString } from "core/trimmedString";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
 import type { AgentRuntimeRequestedMode, AgentRuntimeHostAdapter, AgentRuntimeToolResult } from "../agentRuntimeLocal";
-import type { LocalAgentActionGate, LocalAgentLoopEvent, EmptyAssistantFallbackReason } from "../../agent-runtime/localLoop";
+import type { LocalAgentActionGate, LocalAgentLoopEvent } from "../../agent-runtime/localLoop";
+// EmptyAssistantFallbackReason 的定义与导出在 emptyAssistantRepair.ts——
+// 此前误从 localLoop 导入（localLoop 从未 re-export 过它），因 bun test 剥离
+// 类型而从未暴露，全量 tsc 报 TS2305。
+import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
 import type { UserChoiceRequest, UserChoiceResult } from "./localRuntimeAdapter";
 import type { CliFetchImpl } from "../cliFetch";
@@ -278,6 +282,11 @@ export type RunAgentTurnResult = {
    * 决定是否把本 run 结算为 failed。
    */
   emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  /**
+   * 带截断标记但正文完整可用（localLoop 的 ok_with_warning 分支）。
+   * 结算层据此不把「只是缺收尾帧」的正常轮次判为 failed。
+   */
+  emptyAssistantOutputUsable?: boolean;
   /**
    * Dialog title persisted for this turn (LLM-generated when available, else
    * the fallback used by buildAgentRuntimeDialogWritePlan). The TUI displays

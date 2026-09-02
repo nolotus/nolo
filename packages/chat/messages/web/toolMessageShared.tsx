@@ -25,9 +25,9 @@ import {
  */
 export const withLiteralClass = (
   literal: string,
-  ...styles: Array<Parameters<typeof stylex.props>[0] | false | null | undefined>
+  ...styles: Array<stylex.StyleXStyles | false | null | undefined>
 ): { className: string; style?: React.CSSProperties } => {
-  const active = styles.filter(Boolean) as Parameters<typeof stylex.props>[0][];
+  const active = styles.filter(Boolean) as stylex.StyleXStyles[];
   if (active.length === 0) return { className: literal };
   const props = stylex.props(...active) as { className?: string; style?: React.CSSProperties };
   return {

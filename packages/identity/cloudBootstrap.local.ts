@@ -4,10 +4,16 @@
 // 从 authTypes.local 直接导入（相对路径不走 package.json 条件导出）。
 import type { TokenManager } from "./authTypes.local";
 
+export type BootstrappedAuthState = {
+  currentToken?: string;
+  users?: readonly any[];
+  [key: string]: any;
+};
+
 export const syncWebAuthTokenCookie = (_tokens: readonly string[]): void => {};
 export const readBootstrappedAuthState = (
   _storage: Pick<Storage, "getItem">,
-): null => null;
+): BootstrappedAuthState | null => null;
 
 const noopTokenManager: TokenManager = {
   getTokens: async () => [],

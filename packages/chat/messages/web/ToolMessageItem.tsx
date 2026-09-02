@@ -312,7 +312,6 @@ export const ToolMessageItem = memo(
           >
             <button
               type="button"
-              className="tr-header"
               data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolStyles.header, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.header)}
               style={TR_HEADER_BUTTON_STYLE}
               onClick={() => {
@@ -436,7 +435,7 @@ export const ToolMessageItem = memo(
                   <button
                     type="button"
                     onClick={handleCopy}
-                    className="tr-act-btn" data-hook="messages-esc-tr-act-btn"
+                    data-hook="messages-esc-tr-act-btn"
                     {...withLiteralClass("tr-act-btn", toolStyles.actionButton)}
                     title={t("common:copy", "复制")}
                     aria-label={t("common:copy", "复制")}
@@ -465,7 +464,7 @@ export const ToolMessageItem = memo(
                   <button
                     type="button"
                     onClick={handleDeleteClick}
-                    className="tr-act-btn danger" data-hook="messages-esc-tr-act-btn-danger"
+                    data-hook="messages-esc-tr-act-btn-danger"
                     {...withLiteralClass("tr-act-btn danger", toolStyles.actionButton)}
                     title={t("delete", "删除")}
                     aria-label={t("delete", "删除")}
@@ -497,7 +496,6 @@ export const ToolMessageItem = memo(
                   </div>
                   <button
                     type="button"
-                    className="btn-primary-sm"
                     data-hook="messages-esc-btn-primary-sm" {...withLiteralClass("btn-primary-sm", toolStyles.primaryButton)}
                     disabled={activeRun.status === "running"}
                     aria-label={

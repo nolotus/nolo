@@ -30,7 +30,7 @@ export const buildReferencePickerSpaceItems = ({
   allSpacesLabel,
 }: {
   currentSpace?: { id: string; name: string } | null;
-  allMemberSpaces: Array<{ spaceId: string; spaceName: string }>;
+  allMemberSpaces: ReadonlyArray<{ spaceId: string; spaceName: string }>;
   allSpacesLabel: string;
 }) => {
   const items: ReferencePickerSpaceItem[] = [

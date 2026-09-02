@@ -295,13 +295,13 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
       )}
     >
       {isProcessing ? (
-        <div className="voice-dots" aria-hidden="true" {...withLiteralClass("voice-dots", messageInputStyles.voiceDots)}>
+        <div aria-hidden="true" {...withLiteralClass("voice-dots", messageInputStyles.voiceDots)}>
           <span {...stylex.props(messageInputStyles.voiceDot)} />
           <span {...stylex.props(messageInputStyles.voiceDot)} />
           <span {...stylex.props(messageInputStyles.voiceDot)} />
         </div>
       ) : isRecording ? (
-        <div className="voice-bars" aria-hidden="true" {...withLiteralClass("voice-bars", messageInputStyles.voiceBars)}>
+        <div aria-hidden="true" {...withLiteralClass("voice-bars", messageInputStyles.voiceBars)}>
           <span {...stylex.props(messageInputStyles.voiceBar)} />
           <span {...stylex.props(messageInputStyles.voiceBar)} />
           <span {...stylex.props(messageInputStyles.voiceBar)} />

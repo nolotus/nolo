@@ -81,7 +81,6 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
       >
         <button
           type="button"
-          className="tr-header"
           data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolMessageStyles.header)}
           style={TR_HEADER_BUTTON_STYLE}
           onClick={() => setCollapsed((p) => !p)}
@@ -150,11 +149,10 @@ export const ReadOnlyToolMessageItem = memo(({ message, conversationTodoEnabled 
   return (
     <div
       data-hook="messages-esc-tool-row"
-      {...withLiteralClass(`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`, toolStyles.row)}
+      {...withLiteralClass(`tool-msg-row ${statusStr} ${collapsed ? "is-collapsed" : ""}`, toolMessageStyles.row)}
     >
       <button
         type="button"
-        className="tr-header"
         data-hook="messages-esc-tr-header"
         {...withLiteralClass("tr-header", toolMessageStyles.header)}
         style={TR_HEADER_BUTTON_STYLE}

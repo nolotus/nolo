@@ -341,6 +341,7 @@ const AgentCreateApiPanel: React.FC<{
   setModel: (v: string) => void;
   activePresetFields: {
     lockCustomProviderUrl?: boolean;
+    keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
@@ -553,6 +554,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   setSubModel: (v: string) => void;
   activePresetFields: {
     lockCustomProviderUrl?: boolean;
+    keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
@@ -1192,6 +1194,7 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           setSubApiKey={setSubApiKey}
           credentialSynced={credentialSynced}
           setCredentialSynced={setCredentialSynced}
+          providerKeyRef={providerKeyRef}
           providerKeyRemembered={providerKeyRemembered}
           setProviderKeyRemembered={setProviderKeyRemembered}
           showCredentialSync={showCredentialSync}

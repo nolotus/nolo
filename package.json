@@ -95,7 +95,6 @@
     "ws": "8.21.3",
     "ansi-regex": "6.3.0",
     "string-width": "8.2.2",
-    "prop-types": "15.8.1",
     "@react-navigation/native": "latest",
     "js-yaml": "4.3.1"
   },

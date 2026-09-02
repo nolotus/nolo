@@ -22,7 +22,7 @@ export const stylexSmokeBadge = create({
 
 // props：顶层预编译一次，供任意 JSX 直接展开（如 <span {...stylexSmokeSpread} />）。
 // 构建期静态声明被编译为 { style: {...} }，无运行时依赖。
-export const stylexSmokeSpread = props({
+export const stylexSmokeSpread = (props as any)({
   color: "#ff1234",
   margin: "2px",
 });

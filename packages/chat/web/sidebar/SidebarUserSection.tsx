@@ -62,7 +62,10 @@ import {
 import { Dialog } from "render/web/ui/modal/Dialog";
 import Button from "render/web/ui/Button";
 // InviteRewards 在公开集不存在（life 包 cloud-only）；cloudLazy 用变量路径绕过 esbuild。
-const InviteRewards = cloudLazy("life/web/InviteRewards", () => null);
+const InviteRewards = cloudLazy<{ isOpen: boolean; onClose: () => void }>(
+  "life/web/InviteRewards",
+  () => null,
+);
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
 import { withLiteralClass } from "../withLiteralClass";

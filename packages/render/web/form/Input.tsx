@@ -56,7 +56,7 @@ export const Input = ({
       className={`react-aria-TextField ${className}`}
       style={style}
       id={id}
-      value={props.value}
+      value={props.value != null ? String(props.value) : undefined}
       onChange={(v) => {
         // react-aria 的 TextField onChange 签名是 (value: string) => void，
         // 而非原生 (e: ChangeEvent) => void。

@@ -17,7 +17,7 @@ export const changeUser = (_user: unknown) => NOOP_ACTION;
 export const fetchUserProfile = () => async () => NOOP_ACTION;
 export const initializeAuth = () => async () => NOOP_ACTION;
 export const deductBalance = (_amount: number) => NOOP_ACTION;
-export const replaceCurrentToken = (_token: string) => NOOP_ACTION;
+export const replaceCurrentToken = (_input: { token: string } | string) => NOOP_ACTION;
 
 // local 模式无多用户列表
 export const selectUsers = (_state: unknown): never[] => [];

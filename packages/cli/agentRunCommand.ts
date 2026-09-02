@@ -173,6 +173,37 @@ export function resolveRunOutcome(input: ResolveRunOutcomeInput): RunOutcome {
   }
 }
 
+// ── Empty-assistant settlement semantics ─────────────────────────────────
+// ok_with_warning（有完整正文、只缺 finish_reason 收尾帧）与 fallback（真没
+// 拿到输出）共用 reason 值，结算只能靠 emptyAssistantOutputUsable 区分。
+// 判定与 note 的构造收敛到下面两个纯函数，导出供测试直接断言。
+const FAILED_EMPTY_ASSISTANT_REASONS: ReadonlySet<string> = new Set([
+  "length_truncated",
+  "stream_truncated",
+  "repetition_loop",
+  "stagnant_tool_calls",
+]);
+
+export const isRunResultStalledOrTruncated = (result: {
+  emptyAssistantFallbackReason?: string;
+  emptyAssistantOutputUsable?: boolean;
+}): boolean =>
+  !result.emptyAssistantOutputUsable &&
+  FAILED_EMPTY_ASSISTANT_REASONS.has(result.emptyAssistantFallbackReason ?? "");
+
+export const resolveRunSettlementNote = (result: {
+  emptyAssistantFallbackReason?: string;
+  emptyAssistantOutputUsable?: boolean;
+}): { note: string } | {} => {
+  const reason = result.emptyAssistantFallbackReason;
+  if (!reason || !FAILED_EMPTY_ASSISTANT_REASONS.has(reason)) return {};
+  // 正文可用：不构成故障，note 只记录「上游缺收尾帧」这个现象本身。
+  if (result.emptyAssistantOutputUsable) {
+    return { note: `output complete but stream lacked finish frame: ${reason}` };
+  }
+  return { note: `empty assistant output: ${reason}` };
+};
+
 async function resolveAgentRunAgentKey(args: {
   agentInput: string;
   cliArgs: string[];
@@ -792,14 +823,17 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // 说明编排者拿不到完整结论，须结算为 failed 以便父级接力重派；
     // 普通空回复（empty_completion）不算故障，仍按 exitCode 判定。
     // saveTurn 已保留对话内容（见 localLoop），failed 结算不删改对话。
-    const isStalledOrTruncated =
-      result.emptyAssistantFallbackReason === "length_truncated" ||
-      result.emptyAssistantFallbackReason === "stream_truncated" ||
-      result.emptyAssistantFallbackReason === "repetition_loop" ||
-      result.emptyAssistantFallbackReason === "stagnant_tool_calls";
-    const truncationNote = isStalledOrTruncated
-      ? { note: `empty assistant output: ${result.emptyAssistantFallbackReason}` }
-      : {};
+    // emptyAssistantOutputUsable：localLoop 的 ok_with_warning 分支——本轮有
+    // 完整可见正文，只是缺 finish_reason 收尾帧（部分上游从不发该帧）。它与
+    // 真正没拿到输出的 fallback 共用 reason="stream_truncated"，若只看 reason
+    // 就会把正常完成的轮次判成 failed：实测 review 子任务完整输出结论并给出
+    // Verdict 后仍被结算为 failed/exitCode=1，导致「run 是否成功」对 CI 与
+    // 自动化闸门失去意义（本仓 pre-push 有 review 证据闸门）。
+    // 正文可用时不算故障——编排者拿得到结论，无需重派。
+    const isStalledOrTruncated = isRunResultStalledOrTruncated(result);
+    // 正文可用的告警轮次不结算为 failed，但仍留 note 保持可观测
+    // （上游缺收尾帧是真实现象，只是不构成故障）。
+    const truncationNote = resolveRunSettlementNote(result);
     const outcome = resolveRunOutcome({
       kind: "result",
       exitCode: result.exitCode,

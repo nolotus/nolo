@@ -33,6 +33,7 @@ class PageContentErrorBoundary extends Component<
     if (this.state.hasError) {
       return (
         <div
+          data-error-boundary="page-content"
           style={{
             display: "flex",
             flexDirection: "column",

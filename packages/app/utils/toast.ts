@@ -51,6 +51,8 @@ export const toast = Object.assign(
       add(message, "success", options),
     error: (message: ReactNode, options?: ToastOptions) =>
       add(message, "error", options),
+    info: (message: ReactNode, options?: ToastOptions) =>
+      add(message, "default", options),
     loading: (message: ReactNode, options?: ToastOptions) =>
       add(message, "loading", options),
     dismiss: (id?: string) => toastManager.close(id),

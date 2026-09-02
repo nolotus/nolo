@@ -686,7 +686,7 @@ const GeminiGallery: React.FC<ToolProps> = ({ rawData, isError, t }) => {
         </div>
       </div>
       {rawData.text && <p  {...withLiteralClass("t-block-desc", contentStyles.blockDesc)}>{rawData.text}</p>}
-      <div data-hook={files.length === 1 ? "messages-esc-g-grid-cols-1" : undefined} className={`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`} {...withLiteralClass(`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`, contentStyles.imageGrid, files.length === 1 && contentStyles.imageGridCols1)}>
+      <div data-hook={files.length === 1 ? "messages-esc-g-grid-cols-1" : undefined} {...withLiteralClass(`g-grid ${files.length === 1 ? "cols-1" : "cols-fill"}`, contentStyles.imageGrid, files.length === 1 && contentStyles.imageGridCols1)}>
         {files.map((f: any, i: number) => (
           <GeminiImageItem
             key={f.fileId || i}

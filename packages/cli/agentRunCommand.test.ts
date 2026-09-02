@@ -1255,6 +1255,62 @@ describe("cli agent run command", () => {
     expect(finalized[0].exitCode).not.toBe(0);
   });
 
+  // 回归：ok_with_warning（有完整可见正文、只缺 finish_reason 收尾帧）与真正
+  // 没拿到输出的 fallback 共用 reason="stream_truncated"。此前结算层只看
+  // reason，把正文完整的正常轮次也判成 failed——实测 review 子任务完整输出
+  // 结论并给出 Verdict 后仍被结算 failed/exitCode=1，使 run 成败对 CI 闸门失效。
+  test("background run: truncation flag with usable output finalizes as done", async () => {
+    const finalized: Array<{ runId: string; status: string; exitCode?: number; note?: string }> = [];
+    await runCommand(
+      ["frontend-implementer", "--msg", "review this diff", "--local"],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-usable-output" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-usable-output",
+          emptyAssistantFallbackReason: "stream_truncated",
+          emptyAssistantOutputUsable: true,
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+
+    expect(finalized).toHaveLength(1);
+    expect(finalized[0].status).toBe("done");
+    expect(finalized[0].exitCode).toBe(0);
+    // 仍保留可观测 note：上游缺收尾帧是真实现象，只是不构成故障
+    expect(finalized[0].note).toContain("finish frame");
+  });
+
+  // 反向锚定：没有 emptyAssistantOutputUsable 时，截断仍必须结算为 failed。
+  test("background run: truncation without usable output still finalizes as failed", async () => {
+    const finalized: Array<{ runId: string; status: string; exitCode?: number }> = [];
+    await runCommand(
+      ["frontend-implementer", "--msg", "fix ui", "--local"],
+      {
+        env: { NOLO_AGENT_RUN_CHILD: "1", NOLO_AGENT_RUN_ID: "run-child-unusable-output" },
+        scriptDir: "/repo/scripts",
+        output: { write() {} },
+        runner: async () => ({
+          exitCode: 0,
+          dialogId: "dialog-unusable-output",
+          emptyAssistantFallbackReason: "stream_truncated",
+        }),
+        finalizeRunRecord: (runId, update) => {
+          finalized.push({ runId, ...update });
+        },
+      }
+    );
+
+    expect(finalized).toHaveLength(1);
+    expect(finalized[0].status).toBe("failed");
+    expect(finalized[0].exitCode).not.toBe(0);
+  });
+
   test("background run: stream-truncated empty assistant output is finalized as failed with a reason note", async () => {
     const finalized: Array<{ runId: string; status: string; note?: string }> = [];
     await runCommand(

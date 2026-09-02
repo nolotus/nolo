@@ -183,7 +183,7 @@ export async function processPdfWithOcr(
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       const ctx = canvas.getContext("2d")!;
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      await (page.render as any)({ canvasContext: ctx, viewport }).promise;
       const base64 = canvas.toDataURL("image/jpeg", 0.92);
 
       const res = await fetch(`${serverOrigin}${endpoint}`, {

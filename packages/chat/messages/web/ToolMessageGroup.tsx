@@ -308,7 +308,7 @@ export const ToolMessageGroup = memo(
         >
           <button
             type="button"
-            className="tr-action-row" data-hook="messages-esc-tr-action-row"
+            data-hook="messages-esc-tr-action-row"
             {...withLiteralClass("tr-action-row", toolStyles.actionRow)}
             onClick={(event) => {
               event.stopPropagation();
@@ -356,7 +356,7 @@ export const ToolMessageGroup = memo(
         >
           <button
             type="button"
-            className="tr-phase-row" data-hook="messages-esc-tr-phase-row"
+            data-hook="messages-esc-tr-phase-row"
             {...withLiteralClass("tr-phase-row", toolStyles.phaseRow)}
             onClick={(event) => {
               event.stopPropagation();
@@ -429,7 +429,7 @@ export const ToolMessageGroup = memo(
         {showBody && (
           <div
             ref={bodyRef}
-            className="tr-body tool-group__body" data-hook="messages-esc-tr-body"
+            data-hook="messages-esc-tr-body"
             {...withLiteralClass("tr-body tool-group__body", toolStyles.groupBody)}
             onScroll={handleBodyScroll}
           >

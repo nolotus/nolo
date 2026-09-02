@@ -54,6 +54,9 @@ const identifierScore = (query: string, item: MemoryItem): number => {
   return matches / identifiers.length;
 };
 
+/** 一天的毫秒数。 */
+const DAY_MS = 86_400_000;
+
 /**
  * 写入后一直没被真正召回过的记忆，超过这个天数开始降权。
  * 新写入的记忆 lastActivatedAt === createdAt，recency 满分，会靠"新鲜"挤掉
@@ -62,28 +65,43 @@ const identifierScore = (query: string, item: MemoryItem): number => {
  */
 const UNPROVEN_MEMORY_GRACE_DAYS = 3;
 
-const activationScore = (item: MemoryItem, nowMs: number): number => {
+/** 零激活降权的下限——降权而非封杀，仍可被强关键词命中救回。 */
+const MIN_UNPROVEN_SCORE_FACTOR = 0.3;
+
+/** 零激活降权的半衰期（天）。 */
+const UNPROVEN_DECAY_HALF_LIFE_DAYS = 7;
+
+/**
+ * 基础激活分：近期被用过 + 用得多 = 高分。
+ */
+const provenActivationScore = (item: MemoryItem, nowMs: number): number => {
   const lastActivatedMs = Date.parse(item.lastActivatedAt || item.createdAt);
-  const ageDays = Math.max(0, (nowMs - lastActivatedMs) / 86_400_000);
+  const ageDays = Math.max(0, (nowMs - lastActivatedMs) / DAY_MS);
   const recency = 1 / (1 + ageDays / 7);
   const reinforcement = Math.min(1, Math.log1p(item.activationCount ?? 0) / 3);
-  const base = 0.7 * recency + 0.3 * reinforcement;
-
-  // 过了宽限期仍零激活 = 写进来就没人用过，逐步让位给被反复用到的记忆。
-  // 用创建时间判断（lastActivatedAt 对未激活条目恒等于 createdAt，无法区分）。
-  if ((item.activationCount ?? 0) === 0) {
-    const createdAgeDays = Math.max(
-      0,
-      (nowMs - Date.parse(item.createdAt)) / 86_400_000
-    );
-    if (createdAgeDays > UNPROVEN_MEMORY_GRACE_DAYS) {
-      const overdue = createdAgeDays - UNPROVEN_MEMORY_GRACE_DAYS;
-      // 半衰期 7 天，最低压到 30%——降权而非封杀，仍可被强关键词命中救回
-      return base * Math.max(0.3, 1 / (1 + overdue / 7));
-    }
-  }
-  return base;
+  return 0.7 * recency + 0.3 * reinforcement;
 };
+
+/**
+ * 零激活记忆的时间衰减因子。
+ *
+ * 过了宽限期仍零激活 = 写进来就没人用过，逐步让位给被反复用到的记忆。
+ * 用创建时间判断（lastActivatedAt 对未激活条目恒等于 createdAt，无法区分）。
+ * 返回 1 表示不衰减。
+ */
+const unprovenDecayFactor = (item: MemoryItem, nowMs: number): number => {
+  if ((item.activationCount ?? 0) !== 0) return 1;
+  const createdAgeDays = Math.max(0, (nowMs - Date.parse(item.createdAt)) / DAY_MS);
+  if (createdAgeDays <= UNPROVEN_MEMORY_GRACE_DAYS) return 1;
+  const overdue = createdAgeDays - UNPROVEN_MEMORY_GRACE_DAYS;
+  return Math.max(
+    MIN_UNPROVEN_SCORE_FACTOR,
+    1 / (1 + overdue / UNPROVEN_DECAY_HALF_LIFE_DAYS)
+  );
+};
+
+const activationScore = (item: MemoryItem, nowMs: number): number =>
+  provenActivationScore(item, nowMs) * unprovenDecayFactor(item, nowMs);
 
 const creationRecencyScore = (item: MemoryItem, nowMs: number): number => {
   const createdMs = Date.parse(item.createdAt);

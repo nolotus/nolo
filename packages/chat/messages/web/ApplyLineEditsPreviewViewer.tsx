@@ -24,7 +24,7 @@ const ApplyLineEditsPreviewViewer: React.FC<ToolProps> = ({
 
   return (
     <div {...withLiteralClass("t-content-block ale-preview-block", cs.contentBlock, cs.alePreview)}>
-      <div  {...withLiteralClass("t-block-header", contentStyles.blockHeader)}>
+      <div  {...withLiteralClass("t-block-header", cs.blockHeader)}>
         <div  {...withLiteralClass("t-badge warning", cs.badge, cs.badgeWarning)}>
           <LuTriangle size={14} aria-hidden="true" />
         </div>

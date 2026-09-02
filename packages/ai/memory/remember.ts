@@ -85,6 +85,50 @@ export interface RememberMemoryResult {
 
 const MEMORY_KINDS = new Set<MemoryKind>(["episodic", "semantic", "procedural"]);
 
+/**
+ * procedural 硬门：没有复现证据就降级 episodic。
+ * 只认非空字符串——空串/纯空白/非字符串都算没给。
+ * 返回生效 kind、是否降级与规整后的证据，供落库与返回值共用。
+ */
+const resolveEffectiveKind = (input: {
+  kind?: MemoryKind;
+  recurrenceEvidence?: string | null;
+}): { kind: MemoryKind; requestedKind: MemoryKind; downgraded: boolean; recurrenceEvidence: string } => {
+  const requestedKind = input.kind ?? "episodic";
+  if (!MEMORY_KINDS.has(requestedKind)) {
+    throw new Error("rememberMemory: kind must be episodic, semantic, or procedural");
+  }
+  const recurrenceEvidence =
+    typeof input.recurrenceEvidence === "string" ? input.recurrenceEvidence.trim() : "";
+  const downgraded = requestedKind === "procedural" && !recurrenceEvidence;
+  return {
+    requestedKind,
+    kind: downgraded ? "episodic" : requestedKind,
+    downgraded,
+    recurrenceEvidence,
+  };
+};
+
+/**
+ * 初始置信度按来源区分（§3.2 判别标准）：
+ * user-directive（用户明确要求记住）→ 高置信，可直接影响行为
+ * agent-inferred（agent 推测）→ 中低置信，只在恰好相关时轻提
+ * 注意：COLD_STORAGE_CONFIDENCE=0.3，纠正惩罚=-0.2。
+ * agent-inferred episodic 设 0.6 → 一次纠正降到 0.4（仍可用），两次纠正降到 0.2（冷藏）。
+ * 不设 0.5 是因为一次纠正就会到 0.3 边缘——太脆弱。
+ */
+const resolveBaseConfidence = (source: RememberMemorySource, kind: MemoryKind): number =>
+  source === "user-directive"
+    ? kind === "procedural" ? 0.88 : 0.85
+    : kind === "procedural" ? 0.68 : 0.6;
+
+const buildMemoryTags = (ownerType: MemoryOwnerType, kind: MemoryKind): string[] => {
+  const tags = ["agent-remembered"];
+  if (ownerType !== "user") tags.push("space-context");
+  if (kind === "procedural") tags.push("procedural-memory");
+  return tags;
+};
+
 export const rememberMemory = async (
   input: RememberMemoryInput
 ): Promise<RememberMemoryResult> => {
@@ -117,33 +161,15 @@ export const rememberMemory = async (
 
   const getDefaultDb = async () => (await import("database-engine/db")).default;
   const db = input.db ?? await getDefaultDb();
-  const requestedKind = input.kind ?? "episodic";
-  if (!MEMORY_KINDS.has(requestedKind)) {
-    throw new Error("rememberMemory: kind must be episodic, semantic, or procedural");
-  }
-
-  // procedural 硬门：没有复现证据就降级 episodic（理由见 recurrenceEvidence 注释）。
-  // 只认非空字符串——空串/纯空白/非字符串都算没给。
-  const recurrenceEvidence =
-    typeof input.recurrenceEvidence === "string"
-      ? input.recurrenceEvidence.trim()
-      : "";
-  const kindDowngraded = requestedKind === "procedural" && !recurrenceEvidence;
-  const kind: MemoryKind = kindDowngraded ? "episodic" : requestedKind;
+  const { kind, requestedKind, downgraded, recurrenceEvidence } = resolveEffectiveKind({
+    kind: input.kind,
+    recurrenceEvidence: input.recurrenceEvidence,
+  });
   const agentKey = input.agentKey?.trim() || null;
   const memorySubjectId = input.memorySubjectId?.trim() || agentKey;
   const source = input.source ?? "agent-inferred";
 
-  // 置信度按来源区分（§3.2 判别标准）：
-  // user-directive（用户明确要求记住）→ 高置信，可直接影响行为
-  // agent-inferred（agent 推测）→ 中低置信，只在恰好相关时轻提
-  // 注意：COLD_STORAGE_CONFIDENCE=0.3，纠正惩罚=-0.2。
-  // agent-inferred episodic 设 0.6 → 一次纠正降到 0.4（仍可用），两次纠正降到 0.2（冷藏）。
-  // 不设 0.5 是因为一次纠正就会到 0.3 边缘——太脆弱。
-  const baseConfidence =
-    source === "user-directive"
-      ? kind === "procedural" ? 0.88 : 0.85
-      : kind === "procedural" ? 0.68 : 0.6;
+  const baseConfidence = resolveBaseConfidence(source, kind);
 
   const savedWithSimilar = await Promise.all(
     targets.map(async (target) => {
@@ -186,10 +212,7 @@ export const rememberMemory = async (
         content,
         importance: kind === "procedural" ? 0.88 : target.ownerType === "user" ? 0.82 : 0.76,
         confidence: baseConfidence,
-        tags:
-          target.ownerType === "user"
-            ? ["agent-remembered", ...(kind === "procedural" ? ["procedural-memory"] : [])]
-            : ["agent-remembered", "space-context", ...(kind === "procedural" ? ["procedural-memory"] : [])],
+        tags: buildMemoryTags(target.ownerType, kind),
         // 复现证据随 item 落库：procedural 的「凭什么算 runbook」必须可追溯，
         // 否则通过硬门的条目日后同样无法复核。
         ...(kind === "procedural" && recurrenceEvidence
@@ -214,7 +237,7 @@ export const rememberMemory = async (
     for (const similar of entry.similarItems) similarById.set(similar.id, similar);
   }
   const similarMemories = [...similarById.values()]
-    .slice(0, 3)
+    .slice(0, SIMILAR_CANDIDATES_LIMIT)
     .map((item) => ({
       id: item.id,
       content: item.content,
@@ -228,7 +251,7 @@ export const rememberMemory = async (
     requestedScope: scope,
     requestedKind,
     savedKind: kind,
-    ...(kindDowngraded
+    ...(downgraded
       ? {
           kindDowngradeReason:
             "procedural 需要 recurrenceEvidence（说明此前在什么时候遇到过同一问题）；" +

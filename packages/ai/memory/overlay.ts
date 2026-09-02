@@ -162,13 +162,17 @@ export const DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET = 3200;
 const MIN_TRUNCATED_TOKENS = 20;
 
 /**
+ * 截断行的尾部标记。测试与文档都按这个文案检索，改名需同步 overlay.test.ts。
+ */
+const TRUNCATED_SUFFIX = "…（本条已截断）";
+
+/**
  * 把一行截断到目标 token 预算内，尾部加省略标记。
  * 预算不足以留下有意义片段时返回 null（调用方据此真丢弃）。
  */
 const truncateLineToTokens = (lineText: string, budgetTokens: number): string | null => {
   if (budgetTokens < MIN_TRUNCATED_TOKENS) return null;
-  const suffix = "…（本条已截断）";
-  const suffixTokens = estimateTokens(suffix);
+  const suffixTokens = estimateTokens(TRUNCATED_SUFFIX);
   const bodyBudget = budgetTokens - suffixTokens;
   if (bodyBudget < MIN_TRUNCATED_TOKENS / 2) return null;
 
@@ -182,7 +186,84 @@ const truncateLineToTokens = (lineText: string, budgetTokens: number): string | 
     cut += ch.length;
   }
   if (cut <= 2) return null;
-  return `${lineText.slice(0, cut).trimEnd()}${suffix}`;
+  return `${lineText.slice(0, cut).trimEnd()}${TRUNCATED_SUFFIX}`;
+};
+
+/** 候选行：预算装配的最小单元。 */
+interface OverlayLine {
+  kind: MemoryItem["kind"];
+  lineText: string;
+  lineTokens: number;
+}
+
+/**
+ * 预算装配结果：按 kind 分组的最终行 + 截断/丢弃计数（供 footer 提示）。
+ */
+interface BudgetFitResult {
+  keptByKind: Record<string, string[]>;
+  truncatedCount: number;
+  droppedCount: number;
+}
+
+/**
+ * 把候选行装配进剩余预算。
+ *
+ * 超预算的行不再整条丢弃，而是截断保留开头——实测记忆体量中位数 334 字符、
+ * p90 606 字符，一条 1000+ 字的工程记忆能吃掉大半预算并把后面几条短的用户
+ * 偏好全挤掉（9 条长记忆实测丢 3 条），而这类长记忆的开头通常已包含结论。
+ * 截断保留胜过整条消失。
+ */
+const fitLinesToBudget = (
+  allLines: OverlayLine[],
+  remainingBudget: number
+): BudgetFitResult => {
+  let usedTokens = 0;
+  const keptByKind: Record<string, string[]> = {};
+  let truncatedCount = 0;
+  let droppedCount = 0;
+  const pushLine = (kind: MemoryItem["kind"], lineText: string) => {
+    if (!keptByKind[kind]) keptByKind[kind] = [];
+    keptByKind[kind].push(lineText);
+  };
+
+  for (const candidate of allLines) {
+    const remaining = remainingBudget - usedTokens;
+    if (remaining <= 0) {
+      droppedCount += 1;
+      continue;
+    }
+    if (candidate.lineTokens <= remaining) {
+      usedTokens += candidate.lineTokens;
+      pushLine(candidate.kind, candidate.lineText);
+      continue;
+    }
+    // 放不下：若剩余预算够放一个有意义的片段就截断保留，否则真丢弃
+    const truncated = truncateLineToTokens(candidate.lineText, remaining);
+    if (!truncated) {
+      droppedCount += 1;
+      continue;
+    }
+    usedTokens += estimateTokens(truncated);
+    pushLine(candidate.kind, truncated);
+    truncatedCount += 1;
+  }
+  return { keptByKind, truncatedCount, droppedCount };
+};
+
+/**
+ * 预算不足导致的信息缺失必须可见：此前截断与丢弃都是静默的，模型以为
+ * 眼前这几条就是全部记忆，不会想到还能用 queryMemory 补查。
+ */
+const buildBudgetFooter = (fit: BudgetFitResult): string[] => {
+  const notices: string[] = [];
+  if (fit.truncatedCount > 0) {
+    notices.push(`${fit.truncatedCount} 条因预算被截断`);
+  }
+  if (fit.droppedCount > 0) {
+    notices.push(`${fit.droppedCount} 条未显示`);
+  }
+  if (notices.length === 0) return [];
+  return [`（${notices.join("、")}；需要完整内容或更多相关记忆时用 queryMemory 检索）`];
 };
 
 export const buildMemoryOverlay = (
@@ -220,37 +301,10 @@ export const buildMemoryOverlay = (
     )
     .sort((a, b) => (KIND_PRIORITY[a.kind] ?? 99) - (KIND_PRIORITY[b.kind] ?? 99));
 
-  // 预算内逐条加入。超预算的不再整条丢弃，而是截断保留开头——
-  // 实测记忆体量中位数 334 字符、p90 606 字符，一条 1000+ 字的工程记忆能吃掉
-  // 大半预算并把后面几条短的用户偏好全挤掉（9 条长记忆实测丢 3 条），
-  // 而这类长记忆的开头通常已包含结论。截断保留胜过整条消失。
-  let usedTokens = 0;
-  const keptByKind: Record<string, string[]> = {};
-  let truncatedCount = 0;
-  let droppedCount = 0;
-  for (const candidate of allLines) {
-    const remaining = remainingBudget - usedTokens;
-    if (remaining <= 0) {
-      droppedCount += 1;
-      continue;
-    }
-    if (candidate.lineTokens <= remaining) {
-      usedTokens += candidate.lineTokens;
-      if (!keptByKind[candidate.kind]) keptByKind[candidate.kind] = [];
-      keptByKind[candidate.kind].push(candidate.lineText);
-      continue;
-    }
-    // 放不下：若剩余预算够放一个有意义的片段就截断保留，否则真丢弃
-    const truncated = truncateLineToTokens(candidate.lineText, remaining);
-    if (!truncated) {
-      droppedCount += 1;
-      continue;
-    }
-    usedTokens += estimateTokens(truncated);
-    if (!keptByKind[candidate.kind]) keptByKind[candidate.kind] = [];
-    keptByKind[candidate.kind].push(truncated);
-    truncatedCount += 1;
-  }
+  const { keptByKind, truncatedCount, droppedCount } = fitLinesToBudget(
+    allLines,
+    remainingBudget
+  );
 
   // 按 kind 标题顺序组装 sections（semantic → procedural → episodic）
   const kindOrder: MemoryItem["kind"][] = ["semantic", "procedural", "episodic"];
@@ -265,19 +319,5 @@ export const buildMemoryOverlay = (
     return OVERLAY_HEADER_LINES.join("\n");
   }
 
-  // 预算不足导致的信息缺失必须可见：此前截断与丢弃都是静默的，模型以为
-  // 眼前这几条就是全部记忆，不会想到还能用 queryMemory 补查。
-  const notices: string[] = [];
-  if (truncatedCount > 0) {
-    notices.push(`${truncatedCount} 条因预算被截断`);
-  }
-  if (droppedCount > 0) {
-    notices.push(`${droppedCount} 条未显示`);
-  }
-  const footer =
-    notices.length > 0
-      ? [`（${notices.join("、")}；需要完整内容或更多相关记忆时用 queryMemory 检索）`]
-      : [];
-
-  return [...OVERLAY_HEADER_LINES, ...sections, ...footer].join("\n");
+  return [...OVERLAY_HEADER_LINES, ...sections, ...buildBudgetFooter({ keptByKind, truncatedCount, droppedCount })].join("\n");
 };

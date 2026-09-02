@@ -387,7 +387,15 @@ export const toolMessageStyles = stylex.create({
   phaseStatus: { position: "relative", zIndex: 1, width: 17, height: 17, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--textQuaternary, var(--textTertiary))", backgroundColor: "var(--backgroundPrimary, var(--background))", borderRadius: 999 },
 });
 
-export const toolMessageStatusStyles = {
+export type ToolStatusStyleGroup = Partial<{
+  row: stylex.StyleXStyles;
+  header: stylex.StyleXStyles;
+  summary: stylex.StyleXStyles;
+  body: stylex.StyleXStyles;
+  icon: stylex.StyleXStyles;
+}>;
+
+export const toolMessageStatusStyles: Record<string, ToolStatusStyleGroup> = {
   failed: {
     row: toolMessageStyles.rowFailed,
     header: toolMessageStyles.failedHeader,
@@ -406,4 +414,4 @@ export const toolMessageStatusStyles = {
     icon: toolMessageStyles.repairingIcon,
   },
   success: { summary: toolMessageStyles.successSummary },
-} as const;
+};

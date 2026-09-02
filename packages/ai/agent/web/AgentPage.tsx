@@ -754,7 +754,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
   const historySpaceNameById = useMemo(
     () =>
       new Map(
-        (memberSpaces as Array<{ spaceId: string; spaceName: string }>).map(
+        memberSpaces.map(
           (space) => [space.spaceId, space.spaceName || space.spaceId] as const,
         ),
       ),

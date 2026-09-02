@@ -110,7 +110,7 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
   const { t } = useTranslation("ai");
   const dispatch = useAppDispatch();
   const currentSpace = useCurrentSpaceFromEntity();
-  const allMemberSpaces = useAllMemberSpaces() as Array<{ spaceId: string; spaceName: string }>;
+  const allMemberSpaces = useAllMemberSpaces();
   const viewMode = useViewMode();
 
   const fetchedSpacesRef = useRef(new Set<string>());

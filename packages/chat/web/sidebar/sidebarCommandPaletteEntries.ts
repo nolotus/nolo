@@ -91,7 +91,7 @@ export function formatContentMeta(
 export function buildFavoritePaletteEntries(
   favoriteItems: MyContentListItem[],
   typeLabel: (item: MyContentListItem) => string,
-  limit = SIDEBAR_PALETTE_LIMITS.favorites,
+  limit: number = SIDEBAR_PALETTE_LIMITS.favorites,
 ): SidebarPaletteEntry[] {
   return favoriteItems.slice(0, limit).map((item) => {
     const title = contentTitle(item);
@@ -112,10 +112,10 @@ export function buildFavoritePaletteEntries(
 }
 
 export function buildSpacePaletteEntries(
-  spaces: MemberSpaceLike[],
+  spaces: readonly MemberSpaceLike[],
   spaceMetaLabel: string,
   unnamedSpaceLabel: string,
-  limit = SIDEBAR_PALETTE_LIMITS.spaces,
+  limit: number = SIDEBAR_PALETTE_LIMITS.spaces,
 ): SidebarPaletteEntry[] {
   return spaces.slice(0, limit).map((space) => {
     const title = space.spaceName?.trim() || space.spaceId || unnamedSpaceLabel;
@@ -137,7 +137,7 @@ export function buildContentPaletteEntries(
   recentItems: MyContentListItem[],
   excludeKeys: ReadonlySet<string>,
   typeLabel: (item: MyContentListItem) => string,
-  limit = SIDEBAR_PALETTE_LIMITS.content,
+  limit: number = SIDEBAR_PALETTE_LIMITS.content,
 ): SidebarPaletteEntry[] {
   return [...recentItems]
     .filter((item) => !isAllViewDialogImageAttachment(item))
@@ -166,7 +166,7 @@ export function buildPublicAgentPaletteEntries(
   agents: PublicAgentLike[],
   excludeKeys: ReadonlySet<string>,
   plazaMetaLabel: string,
-  limit = SIDEBAR_PALETTE_LIMITS.publicAgents,
+  limit: number = SIDEBAR_PALETTE_LIMITS.publicAgents,
 ): SidebarPaletteEntry[] {
   const entries: SidebarPaletteEntry[] = [];
 

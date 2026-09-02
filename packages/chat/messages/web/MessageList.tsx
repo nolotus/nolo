@@ -10,7 +10,6 @@ import React, {
   useMemo,
   Component,
 } from "react";
-import PropTypes from "prop-types";
 import { useAppDispatch, useAppSelector } from "app/store";
 import {
   selectAllMsgs,
@@ -95,10 +94,6 @@ class MessageRowErrorBoundary extends Component<
   MessageRowErrorBoundaryProps,
   MessageRowErrorBoundaryState
 > {
-  static propTypes = {
-    children: PropTypes.node.isRequired,
-  };
-
   state = { hasError: false };
 
   static getDerivedStateFromError() {

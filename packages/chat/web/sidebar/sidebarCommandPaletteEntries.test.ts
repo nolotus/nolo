@@ -81,7 +81,7 @@ describe("sidebarCommandPaletteEntries", () => {
       excluded,
       typeLabel,
     );
-    expect(content.map((entry) => entry.contentKey)).toEqual(["page-1", "meta-1"]);
+    expect(content.map((entry) => (entry as any).contentKey)).toEqual(["page-1", "meta-1"]);
     expect(content[0]?.meta).toBe("page · Work");
 
     const publicAgents = buildPublicAgentPaletteEntries(
@@ -93,7 +93,7 @@ describe("sidebarCommandPaletteEntries", () => {
       "AI 广场",
     );
     expect(publicAgents).toHaveLength(1);
-    expect(publicAgents[0]?.agentKey).toBe("agent-pub-2");
+    expect((publicAgents[0] as any)?.agentKey).toBe("agent-pub-2");
     expect(publicAgents[0]?.textValue).toContain("hello");
   });
 

@@ -8,6 +8,7 @@ import {
   MY_CONTENT_USER_DATA_TYPES,
   resolveUserContentRecordKey,
   type MyContentListItem,
+  type UserContentRecord,
 } from "app/utils/myContentItems";
 import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { selectRemoteServer } from "app/settings/settingSlice";
@@ -85,10 +86,10 @@ export function useMyContentItems(
   }, [userId]);
 
   const records = useMemo(() => {
-    if (!hasUser) return localRecords as unknown[];
+    if (!hasUser) return localRecords as UserContentRecord[];
     const mappings = listSyncMappings({ accountUserId: userId });
     return deduplicateContentRecordsWithMappings(
-      [...(localRecords as unknown[]), ...(accountRecords as unknown[])],
+      [...(localRecords as UserContentRecord[]), ...(accountRecords as UserContentRecord[])],
       mappings,
     );
     // mappingVersion included because dedup recompute depends on it.

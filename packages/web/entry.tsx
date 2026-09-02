@@ -189,7 +189,7 @@ const preloadedState = bootstrappedAuthState
   ? {
     ...serverPreloadedWithoutShare,
     auth: {
-      ...serverPreloadedWithoutShare.auth,
+      ...(serverPreloadedWithoutShare.auth || {}),
       ...bootstrappedAuthState,
     },
     settings: {
