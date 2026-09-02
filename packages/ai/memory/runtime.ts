@@ -158,6 +158,11 @@ const selectRuntimeMemoryItems = (
   );
   add(unique.find((item) => item.ownerType === "user"));
   add(unique.find((item) => item.ownerType === "space"));
+  // subject=user 的保底席位：长期偏好（"先看结论"、"别用黑话"）挂在 user subject 上，
+  // 而工程类记忆多挂在 agent subject 上。实测 220 条里 agent:143 / user:77，
+  // 若不保底，靠关键词打分的排序会让工程条目挤满 overlay，用户偏好一条都进不来。
+  // 注意不能用 ownerType 代替：这些条目 ownerType 全是 user，上面那条席位区分不出。
+  add(unique.find((item) => item.subjectType === "user"));
   add(unique.find((item) => item.kind === "procedural"));
   for (const item of unique) {
     add(item);

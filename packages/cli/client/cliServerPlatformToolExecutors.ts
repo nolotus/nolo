@@ -231,6 +231,10 @@ export function buildServerPlatformToolExecutors(args: {
       kind: parsed.kind ?? "episodic",
       source: "agent-inferred",
     };
+    // procedural 的复现证据透传给服务端硬门；缺失时服务端降级 episodic。
+    if (typeof parsed.recurrenceEvidence === "string" && parsed.recurrenceEvidence.trim()) {
+      body.recurrenceEvidence = parsed.recurrenceEvidence.trim();
+    }
     if (args.agentKey) body.agentKey = args.agentKey;
     const raw = await postServer("/api/memory/remember", body, {
       retryTransient: true,

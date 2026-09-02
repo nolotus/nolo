@@ -39,6 +39,7 @@ import {
 import { readXhsProfileFunctionSchema } from "../../ai/tools/readXhsProfileTool";
 import { readXPostFunctionSchema } from "../../ai/tools/readXPostTool";
 import { rememberMemoryFunctionSchema } from "../../ai/tools/rememberMemoryToolSchema";
+import { queryMemoryFunctionSchema } from "../../ai/tools/queryMemoryToolSchema";
 import { deleteMemoryFunctionSchema } from "../../ai/tools/deleteMemoryToolSchema";
 import {
   parseJsonObject,
@@ -280,6 +281,14 @@ export function buildServerPlatformOpenAiTools(args: { toolNames?: string[] }) {
           {
             type: "function",
             function: rememberMemoryFunctionSchema,
+          },
+        ]
+      : []),
+    ...(toolNameSet.has("queryMemory")
+      ? [
+          {
+            type: "function",
+            function: queryMemoryFunctionSchema,
           },
         ]
       : []),

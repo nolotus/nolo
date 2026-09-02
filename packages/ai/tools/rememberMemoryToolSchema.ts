@@ -17,7 +17,10 @@ export const rememberMemoryFunctionSchema = {
     "仍然不要记：一次性任务细节、当前任务进度、很快过期的事实。",
     "【演进更新】同一事实的状态/结论变化（如「未 push→已 push」「配额耗尽→已恢复」）是更新而非新事实：写入时用取代后的表述一次性说清；若本条已取代某条旧记忆，调用 deleteMemory 归档旧条，避免同主题多版本并存。",
     "【时效状态禁入】配额余量、限流冷却期限、部署当前状态等很快过期的快照不进长期记忆；这类信息用实时查询（如 listAgents、部署日志）获取当下真值，不要落进记忆。",
-    "只有重复出现的可执行流程/排障步骤才传 kind=procedural；一般偏好和事实保持默认 episodic。",
+    "【procedural 硬门】kind=procedural 必须同时传 recurrenceEvidence（说明同一问题此前在什么时候遇到过）；",
+    "给不出复现证据的一律按 episodic 存储（不报错，但你会在返回值里看到降级提示）。",
+    "判据：这个流程你**至少已经遇到过两次**才算 procedural。单次排障实录、某次事故的处理过程、",
+    "一次性调研结论都不是 procedural——哪怕它写得很像操作手册，也应该用默认的 episodic。",
     "scope 按内容性质选，不固定优先某一层：",
     "  - Space 协作约定/团队规则 → scope=space（当前 dialog 绑定 space 时）",
     "  - 用户个人身份或纯个人偏好 → scope=user（严格保存为用户主体）",
@@ -52,7 +55,14 @@ export const rememberMemoryFunctionSchema = {
         type: "string",
         enum: ["episodic", "semantic", "procedural"],
         description:
-          "记忆类型。默认 episodic。只有重复出现的可执行流程、排障步骤或稳定 runbook 才使用 procedural。",
+          "记忆类型。默认 episodic。只有你至少遇到过两次的可执行流程/稳定 runbook 才用 procedural，" +
+          "且必须同时提供 recurrenceEvidence，否则会被降级为 episodic。单次排障实录用 episodic。",
+      },
+      recurrenceEvidence: {
+        type: "string",
+        description:
+          "kind=procedural 时必填：同一问题此前在什么时候遇到过（时间/场景/对话），用于证明它确实重复出现。" +
+          "例如“2026-08-27 和 2026-09-01 两次部署都卡在同一处 PM2 残留实例”。缺失则本条降级为 episodic。",
       },
     },
     required: ["content"],

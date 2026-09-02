@@ -7,6 +7,7 @@ export interface RememberMemoryToolArgs {
   content: string;
   scope?: RememberMemoryScope;
   kind?: MemoryKind;
+  recurrenceEvidence?: string;
 }
 
 // Schema 定义在无依赖的姊妹模块里，供 CLI/desktop 本地 runtime 复用
@@ -22,6 +23,7 @@ export async function rememberMemoryFunc(
   const content = String(args.content ?? "").trim();
   const scope = args.scope ?? "auto";
   const kind = args.kind ?? "episodic";
+  const recurrenceEvidence = String(args.recurrenceEvidence ?? "").trim();
 
   if (!content) {
     throw new Error("rememberMemory 需要非空 content。");
@@ -31,6 +33,8 @@ export async function rememberMemoryFunc(
     success: boolean;
     content: string;
     requestedScope: RememberMemoryScope;
+    savedKind?: MemoryKind;
+    kindDowngradeReason?: string;
     resolvedScopes: Array<{ ownerType: string; ownerId: string }>;
     similarMemories?: Array<{ id: string; content: string; kind: string; createdAt: string }>;
   }>(
@@ -41,6 +45,7 @@ export async function rememberMemoryFunc(
       scope,
       kind,
       spaceId,
+      ...(recurrenceEvidence ? { recurrenceEvidence } : {}),
     },
     { withAuth: true }
   );
@@ -53,8 +58,13 @@ export async function rememberMemoryFunc(
     ? `\n提示：已有 ${similar.length} 条语义相近的既有记忆（如 ${similar[0].id}："${similar[0].content.slice(0, 48)}…"）。若本条已取代它，请调用 deleteMemory 归档旧条，避免同主题版本堆积。`
     : "";
 
+  // 降级必须回传给模型：否则它以为写进了 runbook，实际按 episodic 存了。
+  const downgradeHint = result.kindDowngradeReason
+    ? `\n注意：${result.kindDowngradeReason}`
+    : "";
+
   return {
     rawData: result,
-    displayData: `已记住这条${scopeLabel}记忆。${similarHint}`,
+    displayData: `已记住这条${scopeLabel}记忆。${downgradeHint}${similarHint}`,
   };
 }

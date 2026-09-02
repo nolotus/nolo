@@ -9,7 +9,8 @@ import { runLocalAgentTurn } from "../../agent-runtime/localLoop";
 import { buildLocalWorkspaceToolset } from "../../agent-runtime/localWorkspaceTools";
 import { WORKSPACE_TOOL_NAMES } from "../../agent-runtime/localWorkspaceToolDefs";
 import { resolveCliEffectiveEnabledPacks } from "./localRuntimeAdapter";
-import { expandEnabledPacks, applyDisabledTools } from "ai/tools/toolPacks";
+import { expandEnabledPacks, applyDisabledTools, CAPABILITY_PACKS } from "ai/tools/toolPacks";
+import { buildServerPlatformOpenAiTools } from "./localRuntimeTools";
 import type { PermissionRequest } from "../../agent-runtime/actionGate";
 import {
   clearCliLocalRuntimePreparedAgentCache,
@@ -151,8 +152,10 @@ describe("CLI local runtime adapter", () => {
     "ask_user",
     ...DEFAULT_LOCAL_CODING_TOOL_NAMES,
     // long-term-memory 是 always-on 能力包：CLI 每个未 ablation 的 agent 都能看到
-    // rememberMemory + deleteMemory，TUI 的「记住 X」才会走 tool call 而非 shell 兜底。
+    // queryMemory + rememberMemory + deleteMemory，TUI 的「记住 X」才会走 tool call
+    // 而非 shell 兜底，「上次说过的偏好」也才能主动召回而非只靠 overlay 预载。
     "rememberMemory",
+    "queryMemory",
     "deleteMemory",
     "exa_search",
     "fetchWebpage",
@@ -1541,6 +1544,7 @@ describe("CLI local runtime adapter", () => {
       "ask_user",
       ...DEFAULT_LOCAL_CODING_TOOL_NAMES,
       "rememberMemory",
+      "queryMemory",
       "deleteMemory",
       "exa_search",
       "fetchWebpage",
@@ -2648,6 +2652,7 @@ describe("CLI local runtime adapter", () => {
       "ask_user",
       ...SHELL_LOCAL_CODING_TOOL_NAMES,
       "rememberMemory",
+      "queryMemory",
       "deleteMemory",
       "exa_search",
       "fetchWebpage",
@@ -2708,6 +2713,7 @@ describe("CLI local runtime adapter", () => {
       "ask_user",
       ...LEGACY_WRITE_LOCAL_CODING_TOOL_NAMES,
       "rememberMemory",
+      "queryMemory",
       "deleteMemory",
       "exa_search",
       "fetchWebpage",
@@ -5457,6 +5463,32 @@ describe("CLI local policy tool names 派生自 schema", () => {
       toolName: "rememberMemory",
     });
     expect(decision.allowed).toBe(true);
+  });
+
+  /**
+   * 回归：long-term-memory 能力包声明 queryMemory/rememberMemory/deleteMemory 三件套，
+   * 但 buildServerPlatformOpenAiTools 一度只有 remember/delete 两个分支，queryMemory
+   * 的 executor 明明已接线却永远不下发 schema——记忆只写不读，system prompt 里
+   * 「拿不准就 queryMemory」指向一个模型看不见的工具。
+   *
+   * 上面按名单逐个断言的写法正是漏网原因，这里改为对能力包全集做闭环校验：
+   * 能力包声明的每个工具都必须同时具备 schema 下发与 executor。
+   */
+  test("long-term-memory 能力包声明的工具全部 schema 下发且 executor 已接线", () => {
+    const pack = CAPABILITY_PACKS.find((p) => p.id === "long-term-memory");
+    expect(pack).toBeDefined();
+    const declared = pack!.tools;
+    expect(declared).toContain("queryMemory");
+
+    const advertised = buildServerPlatformOpenAiTools({
+      toolNames: declared,
+    }).map((tool: any) => tool.function.name);
+    const executors = buildExecutors();
+
+    for (const name of declared) {
+      expect(advertised).toContain(name);
+      expect(executors[name]).toBeFunction();
+    }
   });
 
   test("默认 agent 名单含 startAgentRun/controlAgentRun 且 policy 放行", () => {

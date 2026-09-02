@@ -30,6 +30,18 @@ export interface RememberMemoryInput {
    */
   source?: RememberMemorySource;
   /**
+   * procedural 的复现证据：这个流程/排障步骤此前在什么时候遇到过。
+   *
+   * 长期记忆里 procedural 的定义是「重复出现的可执行流程」，但 kind 由模型自行
+   * 传入，仅靠 schema 描述约束无效——实测 220 条存量里 92 条（42%）是被误标成
+   * procedural 的一次性排障实录，它们挤占 overlay 里 procedural 的固定配额，
+   * 导致真正的 runbook 召不回来。
+   *
+   * 因此 procedural 需要显式给出复现证据；给不出的一律降级为 episodic
+   * （降级而非报错：记忆写入不该因为分类不准就丢内容）。
+   */
+  recurrenceEvidence?: string | null;
+  /**
    * Optional agent subject key. When provided, the resolved owner target's
    * subject is rewritten to { subjectType: "agent", subjectId: agentKey } so
    * the memory shows up in that agent's "这个 Agent 记得你什么" tab.
@@ -43,6 +55,13 @@ export interface RememberMemoryResult {
   success: true;
   content: string;
   requestedScope: RememberMemoryScope;
+  /**
+   * 请求的 kind 与实际落库的 kind——procedural 缺复现证据被降级时两者不同。
+   * 调用方（工具层）据此告知模型「这条按 episodic 存了」，避免它以为写进了 runbook。
+   */
+  requestedKind: MemoryKind;
+  savedKind: MemoryKind;
+  kindDowngradeReason?: string;
   savedItems: MemoryItem[];
   /**
    * 语义近邻旧条（软查重提示）：本条非精确命中时，同 owner/kind/subject 下
@@ -98,10 +117,19 @@ export const rememberMemory = async (
 
   const getDefaultDb = async () => (await import("database-engine/db")).default;
   const db = input.db ?? await getDefaultDb();
-  const kind = input.kind ?? "episodic";
-  if (!MEMORY_KINDS.has(kind)) {
+  const requestedKind = input.kind ?? "episodic";
+  if (!MEMORY_KINDS.has(requestedKind)) {
     throw new Error("rememberMemory: kind must be episodic, semantic, or procedural");
   }
+
+  // procedural 硬门：没有复现证据就降级 episodic（理由见 recurrenceEvidence 注释）。
+  // 只认非空字符串——空串/纯空白/非字符串都算没给。
+  const recurrenceEvidence =
+    typeof input.recurrenceEvidence === "string"
+      ? input.recurrenceEvidence.trim()
+      : "";
+  const kindDowngraded = requestedKind === "procedural" && !recurrenceEvidence;
+  const kind: MemoryKind = kindDowngraded ? "episodic" : requestedKind;
   const agentKey = input.agentKey?.trim() || null;
   const memorySubjectId = input.memorySubjectId?.trim() || agentKey;
   const source = input.source ?? "agent-inferred";
@@ -162,7 +190,17 @@ export const rememberMemory = async (
           target.ownerType === "user"
             ? ["agent-remembered", ...(kind === "procedural" ? ["procedural-memory"] : [])]
             : ["agent-remembered", "space-context", ...(kind === "procedural" ? ["procedural-memory"] : [])],
+        // 复现证据随 item 落库：procedural 的「凭什么算 runbook」必须可追溯，
+        // 否则通过硬门的条目日后同样无法复核。
+        ...(kind === "procedural" && recurrenceEvidence
+          ? { recurrenceEvidence }
+          : {}),
         patternKey: kind === "procedural" ? "procedural-runbook" : "agent-remember",
+        // sourceKind 显式落库：此前全靠 getMemorySourceKind 从 patternKey 反推，
+        // 导致全库 220 条 sourceKind 均为 undefined，overlay 无从区分
+        // 「用户明确说的」与「agent 自己猜的」。派生函数保留给历史条目兜底。
+        sourceKind:
+          source === "user-directive" ? "explicit-user-directive" : "agent-tool",
         sourceDialogId: input.dialogId ?? undefined,
       });
       await writeMemoryItemWithIndexesToDb(db, item);
@@ -188,6 +226,15 @@ export const rememberMemory = async (
     success: true,
     content,
     requestedScope: scope,
+    requestedKind,
+    savedKind: kind,
+    ...(kindDowngraded
+      ? {
+          kindDowngradeReason:
+            "procedural 需要 recurrenceEvidence（说明此前在什么时候遇到过同一问题）；" +
+            "未提供，已按 episodic 存储。若确实是重复出现的流程，请补充复现证据后重新记录。",
+        }
+      : {}),
     savedItems,
     similarMemories,
     resolvedScopes: targets.map((target) => ({

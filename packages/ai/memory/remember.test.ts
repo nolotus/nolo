@@ -154,6 +154,8 @@ describe("rememberMemory", () => {
       content: "Memory recall 失败时，先看 selectedItems，再看 system message 组装。",
       scope: "space",
       kind: "procedural",
+      // 名副其实的 repeated runbook：硬门要求显式复现证据
+      recurrenceEvidence: "同一排查顺序在两次 recall 故障中都奏效。",
     });
 
     const items = await loadMemoryCandidatesFromDb(db, {
@@ -274,6 +276,7 @@ describe("rememberMemory", () => {
       userId: "user1",
       content: "用户确认的排障步骤",
       kind: "procedural",
+      recurrenceEvidence: "同一步骤已复现两次。",
       source: "user-directive",
     });
     const agentProc = await rememberMemory({
@@ -281,6 +284,7 @@ describe("rememberMemory", () => {
       userId: "user1",
       content: "agent 推测的排障步骤",
       kind: "procedural",
+      recurrenceEvidence: "同一步骤已复现两次。",
       source: "agent-inferred",
     });
 
@@ -422,5 +426,105 @@ describe("rememberMemory", () => {
     });
 
     expect(r1.savedItems[0]?.id).toBe(r2.savedItems[0]?.id);
+  });
+  /**
+   * procedural 硬门回归。
+   *
+   * 背景：kind 由模型自行传入，而 schema 描述（"重复出现的可执行流程"）约束不住它——
+   * 实测 220 条存量记忆里 92 条（42%）是被误标成 procedural 的一次性排障实录，
+   * 挤占了 overlay 中 procedural 的固定 top-k 配额，真正的 runbook 反而召不回来。
+   * 因此 procedural 需要显式复现证据，缺失则降级 episodic（降级而非报错：
+   * 分类不准不应导致记忆内容丢失）。
+   */
+  describe("procedural 复现证据硬门", () => {
+    it("procedural 缺 recurrenceEvidence 时降级为 episodic 并回传降级原因", async () => {
+      const result = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "某次部署卡在 PM2 残留实例，手动清理后恢复。",
+        kind: "procedural",
+      });
+
+      expect(result.requestedKind).toBe("procedural");
+      expect(result.savedKind).toBe("episodic");
+      expect(result.savedItems[0]?.kind).toBe("episodic");
+      // 降级必须可见，否则调用方以为写进了 runbook
+      expect(result.kindDowngradeReason).toContain("recurrenceEvidence");
+    });
+
+    it("procedural 带 recurrenceEvidence 时保留 procedural 并留存证据", async () => {
+      const result = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "部署前必须先清理 PM2 残留 nolo 实例。",
+        kind: "procedural",
+        recurrenceEvidence: "2026-08-27 与 2026-09-01 两次部署都卡在同一处。",
+      });
+
+      expect(result.savedKind).toBe("procedural");
+      expect(result.savedItems[0]?.kind).toBe("procedural");
+      // 证据随 item 落库，日后可复核"凭什么算 runbook"
+      expect(result.savedItems[0]?.recurrenceEvidence).toContain("2026-08-27");
+      expect(result.kindDowngradeReason).toBeUndefined();
+    });
+
+    it("空白 recurrenceEvidence 视同未提供", async () => {
+      const result = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "空白证据不应通过硬门。",
+        kind: "procedural",
+        recurrenceEvidence: "   ",
+      });
+
+      expect(result.savedKind).toBe("episodic");
+    });
+
+    it("episodic / semantic 不受硬门影响", async () => {
+      const ep = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "这个用户更喜欢先看结论。",
+      });
+      const se = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "该仓库的 alpha 分支是集成线。",
+        kind: "semantic",
+      });
+
+      expect(ep.savedKind).toBe("episodic");
+      expect(se.savedKind).toBe("semantic");
+      expect(ep.kindDowngradeReason).toBeUndefined();
+      expect(se.kindDowngradeReason).toBeUndefined();
+    });
+  });
+  /**
+   * sourceKind 显式落库回归。
+   *
+   * 此前 sourceKind 从不写入，全靠 getMemorySourceKind 从 patternKey 反推——
+   * 实测全库 220 条 sourceKind 均为 undefined。派生逻辑对历史条目仍需保留，
+   * 但新写入必须自带来源，否则 overlay 无法区分"用户说的"与"agent 猜的"。
+   */
+  describe("sourceKind 显式落库", () => {
+    it("user-directive 落 explicit-user-directive", async () => {
+      const r = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "用户明确要求记住的事。",
+        source: "user-directive",
+      });
+      expect(r.savedItems[0]?.sourceKind).toBe("explicit-user-directive");
+    });
+
+    it("agent-inferred 落 agent-tool", async () => {
+      const r = await rememberMemory({
+        db,
+        userId: "user1",
+        content: "agent 自己判断值得记的事。",
+        source: "agent-inferred",
+      });
+      expect(r.savedItems[0]?.sourceKind).toBe("agent-tool");
+    });
   });
 });
