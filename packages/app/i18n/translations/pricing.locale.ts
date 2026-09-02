@@ -71,8 +71,10 @@ export default {
           name: "Model Name",
           input: "Input / 1M Points",
           output: "Output / 1M Points",
+          cache: "Cache Hit / 1M Points",
           vision: "Vision"
         },
+        cacheNote: "Cache hit: repeated identical input prefixes are billed at a lower cached rate. \"—\" means the model has no cached pricing.",
         faqTitle: "Frequently Asked Questions",
         faqSubtitle: "Have questions? Check here first",
         faq: [
@@ -162,8 +164,10 @@ export default {
           name: "模型名称",
           input: "输入 / 1M 积分",
           output: "输出 / 1M 积分",
+          cache: "缓存命中 / 1M 积分",
           vision: "视觉识别"
         },
+        cacheNote: "缓存命中：相同前缀的重复输入按更低的缓存价计费；「—」表示该模型暂无缓存价。",
         searchBoxPlaceholder: "按模型名搜索...",
         faqTitle: "常见问题",
         faqSubtitle: "有疑问？先看这里",
@@ -254,8 +258,10 @@ export default {
           name: "模型名稱",
           input: "輸入 / 1M 積分",
           output: "輸出 / 1M 積分",
+          cache: "快取命中 / 1M 積分",
           vision: "視覺識別"
         },
+        cacheNote: "快取命中：相同前綴的重複輸入按更低的快取價計費；「—」表示該模型暫無快取價。",
         faqTitle: "常見問題",
         faqSubtitle: "有疑問？先看這裡",
         faq: [
@@ -345,8 +351,10 @@ export default {
           name: "モデル名",
           input: "入力 / 1M ポイント",
           output: "出力 / 1M ポイント",
+          cache: "キャッシュヒット / 1M ポイント",
           vision: "ビジョン認識"
         },
+        cacheNote: "キャッシュヒット：同じ接頭辞の繰り返し入力は、より低いキャッシュ価格で課金されます。「—」はキャッシュ価格が設定されていないモデルです。",
         faqTitle: "よくある質問",
         faqSubtitle: "ご質問がありますか？ まずはこちらをご確認ください",
         faq: [
