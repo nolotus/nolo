@@ -27,6 +27,7 @@ import {
     LuTrash2,
 } from "react-icons/lu";
 import type { TableSortRule } from "./tablePrefs";
+import { isImeComposingKeyEvent } from "./keyboardUtils";
 import { TableGridRow, type TableGridRowProps } from "./TableGridRow";
 import type { SelectCellEditorAnchor } from "./SelectCellEditor";
 import type { LongTextCellInfo } from "./LongTextDialog";
@@ -326,6 +327,10 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
                                                 setEditingColumnId(null);
                                             }}
                                             onKeyDown={(e) => {
+                                                if (isImeComposingKeyEvent(e)) {
+                                                    // IME 组合中：选字确认不算重命名确认。
+                                                    return;
+                                                }
                                                 if (e.key === "Enter") {
                                                     e.preventDefault();
                                                     handleRenameColumnConfirm(

@@ -80,6 +80,38 @@ export const writeTablePrefs = (tableKey: string | undefined, prefs: TablePrefs)
 };
 
 /**
+ * 行的「最近活动时间」：updatedAt 优先，缺失时回退 createdAt（与
+ * fetchAndCacheTableRows 的合并冲突裁决口径一致），解析失败按 0。
+ */
+export const rowActivityTimestamp = (row: Record<string, any>): number => {
+  const parsed =
+    asFiniteTimestamp(row?.updatedAt) ?? asFiniteTimestamp(row?.createdAt);
+  return parsed ?? 0;
+};
+
+const asFiniteTimestamp = (raw: unknown): number | null => {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+/**
+ * 无列排序规则、无手动行序时的确定性默认排序：最近活动的行置顶。
+ * - 主键：rowActivityTimestamp 降序（刚添加/刚改状态的行浮上来）；
+ * - 平局：dbKey 降序（ULID 时间有序，key 更大 = 创建更晚 = 排更前），
+ *   保证不同设备、不同本地缓存状态下看到同一顺序。
+ */
+export const applyDefaultRecentSort = <T extends Record<string, any>>(
+  rows: T[],
+  getKey: (row: T) => string
+): T[] =>
+  [...rows].sort((a, b) => {
+    const diff = rowActivityTimestamp(b) - rowActivityTimestamp(a);
+    if (diff !== 0) return diff;
+    return getKey(b).localeCompare(getKey(a));
+  });
+
+/**
  * 把 manualOrder 应用到 rows 列表：
  * - 在 manualOrder 里的 row 按 manualOrder 顺序排前；
  * - 没在 manualOrder 里的 row 保持原相对顺序，追加到末尾；

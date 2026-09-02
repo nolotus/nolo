@@ -3,6 +3,7 @@
 
 import React from "react";
 import Button from "render/web/ui/Button";
+import { isImeComposingKeyEvent } from "./keyboardUtils";
 import InlineEditInput from "render/web/ui/InlineEditInput";
 import ContentIcon from "render/contentIcon/ContentIcon";
 import ContentIconPicker from "render/contentIcon/ContentIconPicker";
@@ -75,6 +76,10 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
                         onChange={(e) => setTableTitleInput(e.target.value)}
                         onBlur={() => handleUpdateTitle(tableTitleInput)}
                         onKeyDown={(e) => {
+                            // IME 组合中（中文选字确认）不触发表格操作。
+                            if (isImeComposingKeyEvent(e)) {
+                                return;
+                            }
                             if (e.key === "Enter") {
                                 handleUpdateTitle(tableTitleInput);
                             } else if (e.key === "Escape") {
@@ -123,7 +128,11 @@ export const TablePageHeader: React.FC<TablePageHeaderProps> = ({
                         placeholder="新列名称..."
                         value={newColumnName}
                         onChange={(e) => setNewColumnName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
+                        onKeyDown={(e) =>
+                            !isImeComposingKeyEvent(e) &&
+                            e.key === "Enter" &&
+                            handleAddColumn()
+                        }
                     />
                     <Button
                         variant="ghost"

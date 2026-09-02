@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { LuCheck, LuPlus } from "react-icons/lu";
 import { computePopupPosition } from "./popupUtils";
+import { isImeComposingKeyEvent } from "./keyboardUtils";
 import { useActiveItemNavigation, usePopupDismiss } from "./usePopupBehavior";
 
 export type SelectCellEditorAnchor = {
@@ -111,6 +112,10 @@ const SelectCellEditor: React.FC<SelectCellEditorProps> = ({
     const handleCreateKeyDown = (
         event: React.KeyboardEvent<HTMLInputElement>
     ) => {
+        // IME 组合中（中文选字确认）不提交，避免 Enter 上屏被当成新建选项。
+        if (isImeComposingKeyEvent(event)) {
+            return;
+        }
         // 阻止冒泡到容器 listbox 的键盘导航（Enter 会被当成选中当前项）。
         event.stopPropagation();
         if (event.key === "Enter") {

@@ -7,6 +7,7 @@
 //   （容器持焦、↑/↓ 循环、Enter 触发、Esc/Tab 关闭、高亮项滚入可视区）。
 
 import React, { useEffect, useId, useRef, useState } from "react";
+import { isImeComposingKeyEvent } from "./keyboardUtils";
 
 export type UsePopupDismissOptions = {
   /** 返回 true 时忽略本次 Esc（如内联输入态的 Esc 由输入框自行处理）。 */
@@ -119,6 +120,11 @@ export const useActiveItemNavigation = ({
   }, [activeIndex]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // IME 组合中（如中文输入法选字确认）：Enter/Space 会被输入法消费，
+    // 不代表「选中高亮项」；方向键同理只服务于候选词，不做列表导航。
+    if (isImeComposingKeyEvent(event)) {
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       // itemCount=0 时取模得 NaN 并泄漏给 activeIndex/aria-activedescendant；
       // 空列表无项可导航，直接忽略方向键。

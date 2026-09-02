@@ -15,7 +15,6 @@ import type { TableColumn } from "./types";
 export interface UseRowInsertionOptions {
     tenantId?: string;
     tableId?: string;
-    rows: any[];
     sortedAndOrderedRows: any[];
     primaryColumn?: TableColumn;
     sortRule: TableSortRule | null;
@@ -32,7 +31,6 @@ export interface UseRowInsertionOptions {
 export function useRowInsertion({
     tenantId,
     tableId,
-    rows,
     sortedAndOrderedRows,
     primaryColumn,
     sortRule,
@@ -64,7 +62,11 @@ export function useRowInsertion({
             if (sortRule) {
                 toast("已按当前排序规则放置新行");
             } else if (anchor.type !== "bottom") {
-                const visibleKeys = rows
+                // 用「当前显示序」物化手动行序（与 rowOrderUtils 的
+                // 视觉位置 = 持久位置契约一致）：默认按最近活动排序后，
+                // 原始 rows（本地缓存创建序）与屏幕顺序不同，若用 rows
+                // 物化，右键插入会让整表跳回旧顺序且新行落错位置。
+                const visibleKeys = sortedAndOrderedRows
                     .filter((row: any) => row?.dbKey)
                     .map((row: any) => row.dbKey as string);
                 const nextOrder = insertKeyIntoOrder(
@@ -91,7 +93,7 @@ export function useRowInsertion({
             manualOrder,
             persistPrefs,
             primaryColumn,
-            rows,
+            sortedAndOrderedRows,
             selectedOwnerFilter,
             selectedStatusFilter,
             setEditingCell,

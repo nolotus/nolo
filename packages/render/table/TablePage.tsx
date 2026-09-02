@@ -28,7 +28,11 @@ import {
 import { useTable } from "./useTable";
 import NoMatch from "../NoMatch";
 
-import { applyManualOrder, type TableSortRule } from "./tablePrefs";
+import {
+    applyDefaultRecentSort,
+    applyManualOrder,
+    type TableSortRule,
+} from "./tablePrefs";
 import { resolveSelectOptions } from "./selectCellUtils";
 import RowContextMenu from "./RowContextMenu";
 import SelectCellEditor, {
@@ -405,7 +409,13 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
             return partitionEmptyLast(sortedModelRows, sortRule.columnId);
         }
 
-        return applyManualOrder(filteredRows, manualOrder, (r: any) => r.dbKey);
+        // 无列排序规则时按「最近活动」降序兜底：刚添加/刚改状态的行置顶，
+        // 且不再依赖本地缓存的迭代顺序（不同设备顺序一致）。
+        return applyManualOrder(
+            applyDefaultRecentSort(filteredRows, (r: any) => r.dbKey),
+            manualOrder,
+            (r: any) => r.dbKey
+        );
     }, [activeDisplayMode, filteredRows, manualOrder, sortRule, table]);
 
     const editingRowIndex = useMemo(() => {
@@ -421,7 +431,6 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
     } = useRowInsertion({
         tenantId,
         tableId,
-        rows,
         sortedAndOrderedRows,
         primaryColumn,
         sortRule,

@@ -3,6 +3,7 @@
 
 import { useCallback, useState } from "react";
 import { updateCell } from "./tableSlice";
+import { isImeComposingKeyEvent } from "./keyboardUtils";
 import type { TableColumn } from "./types";
 
 export function useCellEditing(
@@ -122,6 +123,12 @@ export function useCellEditing(
         (
             e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
         ) => {
+            // IME 组合中（如中文输入法选字确认）：Enter/Tab/Escape 都是输入法
+            // 操作，不是表格编辑指令。
+            if (isImeComposingKeyEvent(e)) {
+                return;
+            }
+
             if (e.key === "Tab") {
                 e.preventDefault();
                 switchCell(e.shiftKey ? "prev" : "next");
