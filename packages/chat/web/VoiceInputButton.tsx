@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { LuMic } from "react-icons/lu";
