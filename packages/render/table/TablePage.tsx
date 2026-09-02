@@ -418,7 +418,6 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
         handleInsertRowBelow,
         handleInsertRowAbove,
         handleAddRowTop,
-        handleAddRowBottom,
     } = useRowInsertion({
         tenantId,
         tableId,
@@ -820,7 +819,6 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
                         currentSpaceId={currentSpaceId}
                         TableActivityBadge={TableActivityBadge}
                         shouldWindowGridRows={shouldWindowGridRows}
-                        handleAddRowBottom={handleAddRowBottom}
                         handleStartEdit={handleStartEdit}
                         handleEditingValueChange={handleEditingValueChange}
                         finishEdit={finishEdit}

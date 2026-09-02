@@ -984,29 +984,6 @@
     background: var(--border);
   }
 
-  /* ── 底部「+ 新增一行」行 ─────────────────────────── */
-  .table-page__add-row-btn {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    width: 100%;
-    min-height: 32px;
-    padding: var(--space-1) var(--space-4);
-    border: none;
-    background: transparent;
-    color: var(--textTertiary);
-    font: inherit;
-    font-size: var(--fontSize-sm);
-    text-align: left;
-    cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
-  }
-
-  .table-page__add-row-btn:hover {
-    background: var(--backgroundHover);
-    color: var(--textSecondary);
-  }
-
   /* ── 拖拽手柄列（最左固定列，行操作 gutter） ────────── */
   .table-page__drag-column {
     width: 32px;
@@ -1137,15 +1114,9 @@
   }
 
   /* Grid body scroll + windowing (OPT-FE-05). Owned by TablePage, not layout. */
-  .table-page__grid-scroll {
-    max-height: min(70vh, calc(100vh - 220px));
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    /* Nested .table-container already has horizontal overflow; cancel its outer margin fight */
-    margin: 0;
-  }
-
+  /* 滚动容器自身样式已迁至 TableGridSection 的 StyleX（tableGridStyles.scrollViewport，
+     flex 撑满 .table-page 剩余高度）；此处 hook class 仅用于对 BaseTable 内部
+     .table-container / .data-table 做后代覆盖（StyleX 不支持后代选择器）。 */
   .table-page__grid-scroll .table-container {
     margin: 0;
     max-height: none;
@@ -1155,11 +1126,6 @@
   .table-page__grid-scroll .data-table {
     /* Keep sticky thead working inside this scroller */
     overflow: visible;
-  }
-
-  .table-page__window-spacer td {
-    background: transparent !important;
-    pointer-events: none;
   }
 
   /* ── 列头：排序按钮 + 排序指示器 ───────────────────── */

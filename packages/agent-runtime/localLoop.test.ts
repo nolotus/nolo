@@ -2523,8 +2523,8 @@ describe("runLocalAgentTurn", () => {
         input: "go",
         abortSignal: controller.signal,
       });
-      // LLM 阶段（runCompleteWithTimeout）与工具阶段（raceWithAbort）的 listener
-      // 都必须在 finally 清理；残留即泄漏（去掉 finally 清理后本断言变红）。
+      // LLM 阶段（runCompleteWithTimeout）与工具阶段（runAbortableToolTask）的 listener
+      // 都必须在 ensuring / cleanup 清理；残留即泄漏。
       expect(getEventListeners(controller.signal as any, "abort")).toHaveLength(0);
     });
   });
@@ -5478,5 +5478,234 @@ describe("runLocalAgentTurn timeout/abort (Effect kernel deterministic world)", 
     // aborted round 不当正常完成：无 content 终稿，仅留档。
     expect(savedTurns).toHaveLength(1);
     expect(savedTurns[0]!.messages.at(-1)!.role).toBe("user");
+  });
+
+  test("tool abort deterministic: tool pending 时外部 abort 立即终止，无下一轮且语义完整", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const providerMessages: AgentRuntimeChatMessage[][] = [];
+    const loopEvents: any[] = [];
+    let toolExecutionCount = 0;
+    const controller = new AbortController();
+
+    let resolveTool!: (value: { content: string }) => void;
+    const toolPromise = new Promise<{ content: string }>((resolve) => {
+      resolveTool = resolve;
+    });
+
+    const adapter: AgentRuntimeHostAdapter = {
+      host: "cli",
+      capabilities: ["local-provider", "local-persistence"],
+      loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+      loadDialogHistory: async () => [],
+      saveTurn: async (input) => {
+        savedTurns.push(input);
+        return { dialogId: "dialog-tool-abort" };
+      },
+      resolveProvider: async () => ({
+        model: "m",
+        complete: async (messages) => {
+          providerMessages.push(messages);
+          if (providerMessages.length === 1) {
+            return {
+              content: "calling tool",
+              model: "m",
+              tool_calls: [
+                {
+                  id: "call-det-1",
+                  type: "function" as const,
+                  function: { name: "pending_tool", arguments: "{}" },
+                },
+              ],
+            };
+          }
+          return { content: "second round answer", model: "m" };
+        },
+      }),
+      executeTool: async () => {
+        toolExecutionCount += 1;
+        return toolPromise;
+      },
+    };
+
+    const turnPromise = runLocalAgentTurn({
+      adapter,
+      agentRef: "tool-abort-det",
+      input: "call pending tool",
+      abortSignal: controller.signal,
+      onLoopEvent: (event) => loopEvents.push(event as any),
+    }).then(
+      (r) => ({ kind: "fulfilled" as const, r }),
+      (e) => ({ kind: "rejected" as const, e }),
+    );
+
+    // 等待 tool-start 发生（微任务轮询，确定性无真实 sleep）
+    let spins = 0;
+    while (toolExecutionCount === 0 && spins < 1_000) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      spins += 1;
+    }
+    expect(toolExecutionCount).toBe(1);
+    expect(loopEvents.some((e) => e.kind === "tool-start")).toBe(true);
+
+    // 触发外部中止
+    controller.abort();
+    const settled = await turnPromise;
+
+    // 1. turn 终止并保持 LOCAL_TURN_ABORTED 语义与 pendingToolName
+    expect(settled.kind).toBe("rejected");
+    if (settled.kind === "rejected") {
+      const err = settled.e as Error & { code?: string; pendingToolName?: string };
+      expect(err.code).toBe(LOCAL_TURN_ABORTED_CODE);
+      expect(err.pendingToolName).toBe("pending_tool");
+    }
+
+    // 2. 不会重复 executeTool
+    expect(toolExecutionCount).toBe(1);
+
+    // 3. 不会继续下一轮 / 不会继续调用 provider
+    expect(providerMessages).toHaveLength(1);
+
+    // 4. 不会产出正常 tool-result 给 provider
+    const hasToolResultInMessages = providerMessages.some((round) =>
+      round.some((m) => m.role === "tool" && String(m.content).includes("late resolved content")),
+    );
+    expect(hasToolResultInMessages).toBe(false);
+
+    // 5. saveTurn 仅留档用户消息与 tool call 尝试，无第二轮正常 content
+    expect(savedTurns).toHaveLength(1);
+
+    // 清理 pending tool 防止挂起
+    resolveTool({ content: "late resolved content" });
+  });
+
+  test("tool cleanup deterministic: abort 后原 pending tool 迟到 resolve/reject 不触发重复事件、无 unhandledRejection 且 listener 清理", async () => {
+    const savedTurns: AgentRuntimeSaveTurnInput[] = [];
+    const loopEvents: any[] = [];
+    const controller = new AbortController();
+
+    let resolveTool!: (value: { content: string }) => void;
+    let rejectTool!: (error: Error) => void;
+    const toolPromise1 = new Promise<{ content: string }>((resolve, reject) => {
+      resolveTool = resolve;
+      rejectTool = reject;
+    });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    (process as any).on("unhandledRejection", onUnhandled);
+
+    try {
+      const adapter: AgentRuntimeHostAdapter = {
+        host: "cli",
+        capabilities: ["local-provider", "local-persistence"],
+        loadAgentConfig: async (agentRef) => ({ key: agentRef, name: "A", model: "m" }),
+        loadDialogHistory: async () => [],
+        saveTurn: async (input) => {
+          savedTurns.push(input);
+          return { dialogId: "dialog-tool-cleanup" };
+        },
+        resolveProvider: async () => ({
+          model: "m",
+          complete: async () => ({
+            content: "calling slow tool",
+            model: "m",
+            tool_calls: [
+              {
+                id: "call-clean-1",
+                type: "function" as const,
+                function: { name: "slow_cleanup_tool", arguments: "{}" },
+              },
+            ],
+          }),
+        }),
+        executeTool: async () => toolPromise1,
+      };
+
+      const turnPromise = runLocalAgentTurn({
+        adapter,
+        agentRef: "tool-cleanup-det",
+        input: "run slow tool",
+        abortSignal: controller.signal,
+        onLoopEvent: (event) => loopEvents.push(event),
+      }).then(
+        (r) => ({ kind: "fulfilled" as const, r }),
+        (e) => ({ kind: "rejected" as const, e }),
+      );
+
+      // 等待进入 tool 执行
+      let spins = 0;
+      while (!loopEvents.some((e) => e.kind === "tool-start") && spins < 1_000) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        spins += 1;
+      }
+
+      // 中止
+      controller.abort();
+      const settled = await turnPromise;
+      expect(settled.kind).toBe("rejected");
+      if (settled.kind === "rejected") {
+        expect((settled.e as any)?.code).toBe(LOCAL_TURN_ABORTED_CODE);
+      }
+
+      const toolEndCountBefore = loopEvents.filter((e) => e.kind === "tool-end").length;
+      const saveTurnCountBefore = savedTurns.length;
+
+      // 迟到 resolve
+      resolveTool({ content: "late resolved content" });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // 断言：无重复 tool-end、无额外 saveTurn
+      const toolEndCountAfterResolve = loopEvents.filter((e) => e.kind === "tool-end").length;
+      expect(toolEndCountAfterResolve).toBe(toolEndCountBefore);
+      expect(savedTurns.length).toBe(saveTurnCountBefore);
+
+      // 迟到 reject 测试：再跑一个 abort 后 late reject 的场景
+      const controller2 = new AbortController();
+      let lateRejectTool!: (error: Error) => void;
+      const toolPromise2 = new Promise<{ content: string }>((_resolve, reject) => {
+        lateRejectTool = reject;
+      });
+
+      const adapter2: AgentRuntimeHostAdapter = {
+        ...adapter,
+        executeTool: async () => toolPromise2,
+      };
+
+      const turnPromise2 = runLocalAgentTurn({
+        adapter: adapter2,
+        agentRef: "tool-cleanup-reject",
+        input: "run slow tool reject",
+        abortSignal: controller2.signal,
+      }).then(
+        (r) => ({ kind: "fulfilled" as const, r }),
+        (e) => ({ kind: "rejected" as const, e }),
+      );
+
+      let spins2 = 0;
+      while (spins2 < 1_000) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        spins2 += 1;
+        if (spins2 > 5) break; // 微任务让 turn 进入 executeTool
+      }
+
+      controller2.abort();
+      const settled2 = await turnPromise2;
+      expect(settled2.kind).toBe("rejected");
+
+      // 迟到 reject
+      lateRejectTool(new Error("late tool explosion"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // 无 unhandledRejection
+      expect(unhandled).toHaveLength(0);
+
+      // AbortSignal listener 均已清理
+      expect(getEventListeners(controller.signal as any, "abort")).toHaveLength(0);
+      expect(getEventListeners(controller2.signal as any, "abort")).toHaveLength(0);
+    } finally {
+      (process as any).removeListener("unhandledRejection", onUnhandled);
+    }
   });
 });

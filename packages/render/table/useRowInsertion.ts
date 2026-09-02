@@ -124,15 +124,10 @@ export function useRowInsertion({
         void insertRowAt({ type: "top" });
     }, [insertRowAt]);
 
-    const handleAddRowBottom = useCallback(() => {
-        void insertRowAt({ type: "bottom" });
-    }, [insertRowAt]);
-
     return {
         insertRowAt,
         handleInsertRowBelow,
         handleInsertRowAbove,
         handleAddRowTop,
-        handleAddRowBottom,
     };
 }

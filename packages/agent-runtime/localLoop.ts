@@ -402,45 +402,26 @@ function throwIfAborted(input: LocalAgentTurnInput) {
   if (input.abortSignal?.aborted) throw buildAbortedError();
 }
 
-/**
- * 与 runCompleteWithTimeout 里的 abort racer 同构：signal 触发即抛
- * LOCAL_TURN_ABORTED，不等被 race 的 promise 结束。用于工具执行——
- * executeTool 大多不接收 abortSignal，abort 后必须放弃等待、把控制权
- * 交还给上层（execShell 自己消费 signal，会真被 SIGTERM/SIGKILL 掉）。
- *
- * 被放弃的 promise 不取消（取消是各工具自己的契约），只挂空 catch 防
- * unhandled rejection；pendingToolName 透出「中止时 <toolName> 仍在进行，
- * 它可能已经完成」。
- */
-async function raceWithAbort<T>(
+async function runAbortableToolTask<T>(
   input: LocalAgentTurnInput,
-  promise: Promise<T>,
+  task: Promise<T>,
   pendingToolName?: string,
 ): Promise<T> {
-  const signal = input.abortSignal;
-  if (!signal) return promise;
-  let abortListener: (() => void) | undefined;
-  const abortPromise = new Promise<never>((_resolve, reject) => {
-    abortListener = () => {
-      const error = buildAbortedError() as Error & { pendingToolName?: string };
-      if (pendingToolName) error.pendingToolName = pendingToolName;
-      promise.catch(() => {});
-      reject(error);
-    };
-    if (signal.aborted) {
-      abortListener();
-      return;
-    }
-    signal.addEventListener("abort", abortListener, { once: true });
+  if (!input.abortSignal) return task;
+  const outcome = await runAbortableWithTimeout({
+    task,
+    abortSignal: input.abortSignal,
+    runtime: input.effectRuntime,
   });
-  try {
-    return await Promise.race([promise, abortPromise]);
-  } finally {
-    // 与 runCompleteWithTimeout 一致：必须清 listener，否则多轮 turn 会在
-    // 同一个 signal 上堆积几十个 listener（Node 到 11 个即打
-    // MaxListenersExceededWarning）。
-    if (signal && abortListener) signal.removeEventListener("abort", abortListener);
+  if (outcome.kind === "done") return outcome.value;
+  if (outcome.kind === "failed") throw outcome.error;
+  if (outcome.kind === "aborted") {
+    const error = buildAbortedError() as Error & { pendingToolName?: string };
+    if (pendingToolName) error.pendingToolName = pendingToolName;
+    throw error;
   }
+  // timeout outcome is impossible without timeoutMs
+  throw buildAbortedError();
 }
 
 function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number | undefined {
@@ -1944,7 +1925,7 @@ export async function runLocalAgentTurn(
                 toolName,
                 toolCallId: toolCall.id,
               };
-              const replacement = await raceWithAbort(
+              const replacement = await runAbortableToolTask(
                 input,
                 input.onActionGate(gate),
                 `${toolName} confirmation`,
@@ -1983,7 +1964,7 @@ export async function runLocalAgentTurn(
                 : {}),
             });
             const execStartedAtMs = Date.now();
-            toolResult = await raceWithAbort(input, executePromise, toolName);
+            toolResult = await runAbortableToolTask(input, executePromise, toolName);
             toolExecMs = Date.now() - execStartedAtMs;
           }
           const actionGate = buildActionGate({
@@ -1992,7 +1973,7 @@ export async function runLocalAgentTurn(
             metadata: toolResult.metadata,
           });
           if (actionGate && input.onActionGate) {
-            const replacement = await raceWithAbort(input, input.onActionGate(actionGate), `${toolName} action gate`);
+            const replacement = await runAbortableToolTask(input, input.onActionGate(actionGate), `${toolName} action gate`);
             if (replacement) {
               toolResult = replacement;
             }

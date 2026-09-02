@@ -7,6 +7,7 @@ import {
     useVirtualizer,
     type Range,
 } from "@tanstack/react-virtual";
+import * as stylex from "@stylexjs/stylex";
 
 import {
     BaseTable,
@@ -22,7 +23,6 @@ import {
     LuArrowUpDown,
     LuChevronLeft,
     LuChevronRight,
-    LuPlus,
     LuStar,
     LuTrash2,
 } from "react-icons/lu";
@@ -32,6 +32,31 @@ import type { SelectCellEditorAnchor } from "./SelectCellEditor";
 import type { LongTextCellInfo } from "./LongTextDialog";
 
 const MIN_COLUMN_WIDTH = 80;
+
+// Grid 滚动视口与占位行样式（StyleX）。
+// 滚动容器 flex 撑满 .table-page 剩余高度，表体区域直达页面底部；
+// 遗留 hook class "table-page__grid-scroll" 仍保留在 className 上，
+// 供 table.css 对 BaseTable 内部 .table-container / .data-table 做后代覆盖
+// （StyleX 不支持后代选择器）。
+const tableGridStyles = stylex.create({
+    scrollViewport: {
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflow: "auto",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
+        margin: 0,
+    },
+    spacerCell: {
+        padding: 0,
+        borderWidth: 0,
+    },
+});
+
+// stylex.props() 返回 { className }，若在 handwritten hook class 之后展开会覆盖它；
+// 参照 QuickChatRuntime 的既有模式显式合并。
+const gridScrollStyleProps = stylex.props(tableGridStyles.scrollViewport);
+const spacerCellStyleProps = stylex.props(tableGridStyles.spacerCell);
 
 export interface TableGridSectionProps {
     gridScrollRef: React.RefObject<HTMLDivElement | null>;
@@ -59,7 +84,6 @@ export interface TableGridSectionProps {
     currentSpaceId: string | null;
     TableActivityBadge: React.ComponentType<{ row: any; spaceId?: string | null }>;
     shouldWindowGridRows: boolean;
-    handleAddRowBottom: () => void;
     handleStartEdit: (dbKey: string, columnName: string, value: string) => void;
     handleEditingValueChange: (value: string) => void;
     finishEdit: (save: boolean) => void;
@@ -108,7 +132,6 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
     currentSpaceId,
     TableActivityBadge,
     shouldWindowGridRows,
-    handleAddRowBottom,
     handleStartEdit,
     handleEditingValueChange,
     finishEdit,
@@ -264,7 +287,10 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
 
     return (
         <div
-            className="table-page__grid-scroll"
+            {...gridScrollStyleProps}
+            className={["table-page__grid-scroll", gridScrollStyleProps.className]
+                .filter(Boolean)
+                .join(" ")}
             ref={gridScrollRef}
             data-windowed={shouldWindowGridRows ? "true" : "false"}
             data-mounted-rows={String(mountedGridRowCount)}
@@ -461,7 +487,7 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
                 <tbody>
                     {shouldWindowGridRows && gridTopSpacerPx > 0 && (
                         <tr style={{ height: `${gridTopSpacerPx}px` }}>
-                            <td colSpan={gridColSpan} style={{ padding: 0, border: 0 }} />
+                            <td colSpan={gridColSpan} {...spacerCellStyleProps} />
                         </tr>
                     )}
                     {shouldWindowGridRows
@@ -479,7 +505,7 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
                         )}
                     {shouldWindowGridRows && gridBottomSpacerPx > 0 && (
                         <tr style={{ height: `${gridBottomSpacerPx}px` }}>
-                            <td colSpan={gridColSpan} style={{ padding: 0, border: 0 }} />
+                            <td colSpan={gridColSpan} {...spacerCellStyleProps} />
                         </tr>
                     )}
                     {mountedGridRowCount === 0 && (
@@ -489,19 +515,6 @@ export const TableGridSection: React.FC<TableGridSectionProps> = ({
                             </BaseTableCell>
                         </BaseTableRow>
                     )}
-                    <BaseTableRow className="table-page__add-row-row">
-                        <BaseTableCell colSpan={gridColSpan} className="table-page__add-row-cell">
-                            <Button
-                                variant="ghost"
-                                size="small"
-                                className="table-page__add-row-btn"
-                                onClick={handleAddRowBottom}
-                            >
-                                <LuPlus size={14} aria-hidden="true" />
-                                <span>新增一行</span>
-                            </Button>
-                        </BaseTableCell>
-                    </BaseTableRow>
                 </tbody>
             </BaseTable>
         </div>
