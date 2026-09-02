@@ -5,6 +5,7 @@ import {
   PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+  isRuninfraRouting,
 } from "./platformHostedRoutingTable";
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
@@ -165,5 +166,34 @@ describe("PLATFORM_HOSTED_ROUTING_TABLE & resolvePlatformHostedRouting", () => {
     expect(resolvePlatformHostedRouting("")).toBeUndefined();
     expect(resolvePlatformHostedRouting(null)).toBeUndefined();
     expect(resolvePlatformHostedRouting(undefined)).toBeUndefined();
+  });
+});
+
+describe("isRuninfraRouting isolation", () => {
+  it("matches runinfra by provider, endpoint, or routed model", () => {
+    expect(isRuninfraRouting(null, null, "runinfra")).toBe(true);
+    expect(
+      isRuninfraRouting(null, "https://api.runinfra.ai/v1/chat/completions", null),
+    ).toBe(true);
+    expect(isRuninfraRouting("glm-5-3-flash", null, "nolo")).toBe(true);
+  });
+
+  it("does not misfire for other platform-hosted providers", () => {
+    // crof / google / openai / deepseek / xai 必须完全不受 RunInfra 逻辑影响。
+    expect(isRuninfraRouting("glm-5.3", null, "nolo")).toBe(false);
+    expect(isRuninfraRouting("kimi-k3", null, "nolo")).toBe(false);
+    expect(isRuninfraRouting("gemini-3.7-flash", null, "nolo")).toBe(false);
+    expect(isRuninfraRouting(null, "https://crof.ai/v1/chat/completions", "crof")).toBe(
+      false,
+    );
+    expect(isRuninfraRouting(null, "https://api.openai.com/v1/responses", "openai")).toBe(
+      false,
+    );
+  });
+
+  it("returns false for unknown or empty input rather than throwing", () => {
+    expect(isRuninfraRouting(null, null, null)).toBe(false);
+    expect(isRuninfraRouting("", "", "")).toBe(false);
+    expect(isRuninfraRouting("no-such-model", null, "nolo")).toBe(false);
   });
 });

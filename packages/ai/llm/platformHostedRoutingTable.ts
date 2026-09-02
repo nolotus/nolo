@@ -294,3 +294,28 @@ export function resolvePlatformHostedMinClientVersion(
 ): string | undefined {
   return resolvePlatformHostedRouting(model)?.minClientVersion;
 }
+
+/**
+ * 判定给定的模型 / URL / provider 是否路由到 RunInfra。
+ */
+export function isRuninfraRouting(
+  model?: string | null,
+  endpoint?: string | null,
+  provider?: string | null,
+): boolean {
+  if (provider === "runinfra") return true;
+  if (endpoint && /api\.runinfra\.ai/i.test(endpoint)) return true;
+  if (provider && provider !== "nolo" && provider !== "runinfra") {
+    return false;
+  }
+  const routing = resolvePlatformHostedRouting(model);
+  if (
+    routing &&
+    (routing.keyName === "runinfra" ||
+      routing.usageProvider === "runinfra" ||
+      /api\.runinfra\.ai/i.test(routing.endpoint))
+  ) {
+    return true;
+  }
+  return false;
+}
