@@ -210,6 +210,58 @@ describe("patchAction", () => {
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
+  it("re-checks local db after hydration: patch lands on concurrently-written newer record, not the stale snapshot", async () => {
+    const { patchAction } = await loadModule();
+    baseState.settings.syncServers = [];
+    scheduleConfiguredPatchReplicationMock.mockClear();
+
+    const remoteRecord = {
+      id: "msg-a",
+      type: "msg",
+      role: "assistant",
+      content: [{ type: "text", text: "stale server copy" }],
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    };
+    fetchFromServerMock.mockImplementation(async () => remoteRecord);
+
+    // 第一次 get：本地 miss；fetchFromServer 返回后的重读：本地已被并发写入较新版本
+    const localConcurrentRecord = {
+      id: "msg-a",
+      type: "msg",
+      role: "assistant",
+      content: [{ type: "text", text: "newer local write" }],
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-02T00:00:00.000Z",
+    };
+    let getCalls = 0;
+    const db = {
+      get: mock(async () => {
+        getCalls += 1;
+        return getCalls === 1 ? null : localConcurrentRecord;
+      }),
+      put: mock(async () => undefined),
+    };
+
+    const result = await patchAction(
+      {
+        dbKey: "dialog-d1-msg-m1",
+        changes: { isStreaming: false },
+        preferredServerOrigin: "https://preferred.nolo.chat",
+      },
+      {
+        extra: { db },
+        getState: () => baseState,
+      } as any
+    );
+
+    // patch 必须落在较新的本地数据上，而不是水合快照（否则 db.put 覆盖丢数据）
+    expect(result.content).toEqual([{ type: "text", text: "newer local write" }]);
+    expect(result.isStreaming).toBe(false);
+    expect(db.put).toHaveBeenCalledWith("dialog-d1-msg-m1", result);
+    expect(scheduleConfiguredPatchReplicationMock).toHaveBeenCalledTimes(1);
+  });
+
   it("fails with a clear error when the record is missing both locally and on the server", async () => {
     const { patchAction } = await loadModule();
     baseState.settings.syncServers = [];

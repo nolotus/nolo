@@ -3,6 +3,42 @@ import { describe, expect, it } from "bun:test";
 import { calculatePrice } from "./calculatePrice";
 
 describe("calculatePrice", () => {
+  it("clamps cache_read exceeding input_tokens instead of charging a negative (free) cost", () => {
+    // 修复前：miss = 100 - 5000 = -4900 → 总成本为负 → sanitizeCost 归零 → 免单
+    const result = calculatePrice({
+      provider: "nolo",
+      modelName: "deepseek-v4-pro",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 5_000,
+        cost: 0,
+      },
+    });
+
+    // clamp 后 cacheRead=100（全按 cache hit 计），成本必须为正
+    expect(result.cost).toBeGreaterThan(0);
+  });
+
+  it("clamps cache_read to input_tokens: over-reported cache hits are billed at the hit floor", () => {
+    // cache_read (2M) > input_tokens (1M)：clamp 后 cacheRead=1M、miss=0
+    const result = calculatePrice({
+      provider: "nolo",
+      modelName: "deepseek-v4-pro",
+      usage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 2_000_000,
+        cost: 0,
+      },
+    });
+
+    // 1M × 0.24 (cache read) + 1M × 15.2 (output) = 15.44
+    expect(result.cost).toBe(15.44);
+  });
+
   it("converts OpenRouter usage.cost from account credits into platform credits", () => {
     const result = calculatePrice({
       provider: "openrouter",

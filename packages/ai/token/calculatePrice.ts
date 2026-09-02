@@ -303,9 +303,15 @@ const calculateCacheBasedCost = (
 
   // 直连调用方可能不带 cache 字段：undefined 参与减法得 NaN，经 sanitizeCost
   // 变 0 漏账。缺省按 0 计（全量 cache miss）。
-  const cacheRead = cache_read_input_tokens ?? 0;
-  const outputTokens = output_tokens ?? 0;
-  const cacheMissTokens = input_tokens - cacheRead;
+  // provider 异常返回 cache_read > input_tokens 时，cacheMissTokens 会为负，
+  // 经 sanitizeCost 归零导致整次调用免单：clamp 到 [0, input_tokens] 区间。
+  const inputTokens = Math.max(0, input_tokens ?? 0);
+  const cacheRead = Math.min(
+    Math.max(0, cache_read_input_tokens ?? 0),
+    inputTokens
+  );
+  const outputTokens = Math.max(0, output_tokens ?? 0);
+  const cacheMissTokens = inputTokens - cacheRead;
   const cacheHitPrice = resolvedPrice.inputCacheHit || 0;
 
   const regularTotal =

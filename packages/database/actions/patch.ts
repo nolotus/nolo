@@ -119,7 +119,10 @@ export const patchAction = async (
           `Cannot apply patch: Data not found locally or on server for key: ${dbKey}.`
         );
       }
-      currentData = remoteData;
+      // 水合是异步的：等待期间本地可能已被并发写入（另一 patch / 同步回写）。
+      // 写回前重读本地，命中则以本地为权威，避免用水合快照覆盖较新的本地数据。
+      const latestLocal = await db.get(dbKey);
+      currentData = latestLocal ?? remoteData;
     }
 
     const patchChanges = Object.prototype.hasOwnProperty.call(changes, "updatedAt")
