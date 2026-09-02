@@ -53,7 +53,7 @@ describe("toolOutput", () => {
     expect(failed).not.toContain("\x1b[2m");
   });
 
-  test("normal mode reports the action and status without shell plumbing", () => {
+  test("normal mode surfaces the safe command prefix but hides fluent sensitive words", () => {
     const format = createToolEventFormatter(false);
     format(toolEvent({
       type: "tool-call",
@@ -68,9 +68,91 @@ describe("toolOutput", () => {
     }));
     expect(output).toContain(toolLabel("execShell"));
     expect(output).toContain("✓");
+    // Safe prefix is surfaced so the user sees what ran.
+    expect(output).toContain("bun test");
+    // Sensitive / content-only segments stay hidden.
     expect(output).not.toContain("/secret/work");
     expect(output).not.toContain("echo token");
-    expect(output).not.toContain("bun test");
+  });
+
+  test("normal mode advances past cd / env prefixes to the first real command", () => {
+    const format = createToolEventFormatter(false);
+    const cases: Array<[string, string]> = [
+      ["cd /Users/nolotus/bun-nolo && git status", "git status"],
+      ["NOLO=1 bun test", "bun test"],
+      ["env NOLO=1 bun test", "bun test"],
+      ["git log --oneline -5 | head -3", "git log"],
+      ["git status || git log", "git status"],
+      ["git status; git log", "git status"],
+      ["git status\ngit log", "git status"],
+      ["echo hello && git status && git log", "git status"],
+    ];
+    for (const [command, want] of cases) {
+      const output = format(toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: { exitCode: 0, command },
+      }));
+      expect(output).toContain(`▸ Run · ${want}  ✓`);
+    }
+  });
+
+  test("normal mode keeps safe command prefixes when arguments are quoted", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: 'git commit -m "fix: update"' },
+    }));
+    expect(output).toContain("▸ Run · git commit  ✓");
+    expect(output).not.toContain("fix: update");
+
+    const chained = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: 'echo "hello; git status" && git status' },
+    }));
+    expect(chained).toContain("▸ Run · git status  ✓");
+    expect(chained).not.toContain("hello");
+  });
+
+  test("normal mode hides shell syntax and limits unknown command details", () => {
+    const format = createToolEventFormatter(false);
+    const hiddenCommands = [
+      'echo "$SECRET"',
+      'echo "token; cat /etc/passwd"',
+      "printf '%s' \"$TOKEN\"",
+      "$(cat /secret/credentials.json)",
+      "cat < /etc/passwd",
+    ];
+    for (const command of hiddenCommands) {
+      const output = format(toolEvent({
+        type: "tool-result",
+        toolName: "execShell",
+        metadata: { exitCode: 0, command },
+      }));
+      expect(output).toBe("▸ Run  ✓\n");
+    }
+
+    const safeUnknown = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "cat /etc/passwd" },
+    }));
+    expect(safeUnknown).toContain("▸ Run · cat  ✓");
+    expect(safeUnknown).not.toContain("/etc/passwd");
+  });
+
+  test("normal mode shows only allowlisted subcommands for known tools", () => {
+    const format = createToolEventFormatter(false);
+    const output = format(toolEvent({
+      type: "tool-result",
+      toolName: "execShell",
+      metadata: { exitCode: 0, command: "git --git-dir=/secret status" },
+    }));
+    expect(output).toContain("▸ Run · git  ✓");
+    expect(output).not.toContain("--git-dir");
+    expect(output).not.toContain("/secret");
   });
 
   test("normal mode shows the safe command detail for Run", () => {

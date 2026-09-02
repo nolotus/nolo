@@ -471,19 +471,71 @@ function gistClip(value: string, max = NORMAL_TOOL_GIST_MAX): string {
 }
 
 /**
- * 简单命令的动作名词：前两个 token（程序 + 子命令，如 "bun test"）。
- * 复合 shell——管道 / && / ; / 重定向 / 命令替换 / env 前缀 / cd 开头——
- * 按管道噪音处理，不给摘要：gist 只回答「在跑什么」，绝不携带参数细节。
+ * 命令的「安全动作前缀」：程序名 + 子命令（如 "git status"、"bun test"）。
+ * 复合 shell（&& / ; / 管道 / env 前缀 / cd 开头）按顺序取第一个真正可执行的
+ * 命令段：跳过 cd/pushd/popd/source/. 等导航段、跳过内容输出命令（echo/printf，
+ * 其下一个 token 是展示内容不是动作），并对段内做 env 前缀剥离——这样单行 Run
+ * 能看到「在跑什么」，但对管道里的路径 / token 等敏感参数仍不泄露。gist 只回答
+ * 「在跑什么」，绝不携带参数细节。
  */
 function commandHeadGist(command: string): string {
-  const trimmed = command.replace(/\s+/g, " ").trim();
-  if (!trimmed || /[|;&<>`$]/.test(trimmed)) return "";
-  const tokens = trimmed.split(" ");
-  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]!)) return "";
-  if (["cd", "pushd", "popd", "source", "."].includes(tokens[0]!)) return "";
-  return gistClip(tokens.slice(0, 2).join(" "), 24);
-}
+  const trimmed = command.trim();
+  if (!trimmed) return "";
+  // Arguments containing quoting, expansion, redirection, or substitution can
+  // make a naive token projection disclose data or mistake string content for
+  // a command. The expanded Run tree remains available for users who need it.
+  if (/[`$()<>]/.test(trimmed)) return "";
 
+  const segments: string[] = [];
+  let start = 0;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const char = trimmed[i]!;
+    if ((char === '"' || char === "'") && (i === 0 || trimmed[i - 1] !== "\\")) {
+      quote = quote === char ? null : quote ?? char;
+      continue;
+    }
+    if (quote) continue;
+    if (trimmed.startsWith("&&", i) || trimmed.startsWith("||", i)) {
+      segments.push(trimmed.slice(start, i));
+      i += 1;
+      start = i + 1;
+    } else if ([";", "|", "\n"].includes(char)) {
+      segments.push(trimmed.slice(start, i));
+      start = i + 1;
+    }
+  }
+  if (quote) return "";
+  segments.push(trimmed.slice(start));
+
+  const navSegments = new Set(["cd", "pushd", "popd", "source", "."]);
+  const contentEmitters = new Set(["echo", "printf"]);
+  // Only these tools have stable, user-facing subcommands. For all other
+  // tools show the executable alone; its first argument may be a secret path,
+  // URL, filename, or destructive target (cat /etc/passwd, rm credentials).
+  const safeSubcommandTools = new Set(["git", "bun", "npm", "pnpm", "yarn", "cargo", "go", "docker"]);
+  for (const segment of segments) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    let index = 0;
+    while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) index += 1;
+    if (index >= tokens.length) continue;
+    let executable = tokens[index]!;
+    if (executable === "env") {
+      index += 1;
+      while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]!)) index += 1;
+      if (index >= tokens.length) continue;
+      executable = tokens[index]!;
+    }
+    if (navSegments.has(executable) || contentEmitters.has(executable)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(executable)) continue;
+    const subcommand = tokens[index + 1];
+    const head = safeSubcommandTools.has(executable) && subcommand && /^[A-Za-z][A-Za-z0-9_-]*$/.test(subcommand)
+      ? `${executable} ${subcommand}`
+      : executable;
+    return gistClip(head, 24);
+  }
+  return "";
+}
 function pathBasenameGist(path: string): string {
   const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
   const base = segments.pop();
