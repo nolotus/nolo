@@ -140,6 +140,12 @@ export const PLATFORM_HOSTED_GLM_53_FLASH_PRICE = {
   output: toPlatformCredits(0.4), // 3.2 credits
 } as const;
 
+export const PLATFORM_HOSTED_GLM_53_FLASH_BASETEN_PRICE = {
+  input: toPlatformCredits(0.1),
+  inputCacheHit: 0.168,
+  output: toPlatformCredits(0.4),
+} as const;
+
 export const isPlatformHostedGlm53FlashModel = (
   model?: string | null,
 ): boolean => {

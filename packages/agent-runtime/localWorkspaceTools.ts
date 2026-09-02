@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
-import { spawnSync, spawn as spawnChildProcess } from "node:child_process";
+import { spawn as spawnChildProcess } from "node:child_process";
 
 import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
@@ -1174,32 +1174,20 @@ async function writeFileTool(args: {
   });
   const activity = extractActivity(parsed);
 
-  // Optional: run git diff --stat for a quick summary of what changed.
-  let diffStat: string | undefined;
-  try {
-    const stats: string[] = [];
-  for (const ref of ["", "--cached"]) {
-    const result = spawnSync("git", ["diff", ref, "--stat", "--", relativePath], {
-      cwd: args.workspaceRoot,
-      timeout: 3000,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const out = (result.stdout ?? "").trim();
-    if (out) stats.push(out);
-  }
-    if (stats.length > 0) diffStat = stats.join("; ");
-  } catch (err: unknown) {
-    diffStat = `[git diff unavailable: ${toErrorMessage(err)}]`;
-  }
-
+  // 这里曾经跑两次 `spawnSync("git", ["diff", …, "--stat"])`（工作区 + 暂存区）
+  // 来生成 metadata.diffStat。实测（__bench__/localToolExecBench.ts）：仓库内
+  // writeFile 中位 37.2ms，其中真实写盘只有 ~0.2ms，其余全是这两个**同步阻塞**
+  // 的 git 子进程；agent loop 里每次写文件都付一遍，还会卡住整个事件循环
+  // （并发工具执行与 TUI 渲染一起停摆）。而 diffStat 全仓库无任何消费方；
+  // formatToolMessageContent（localLoop.ts）只对 globFiles/codeSearch/readFile
+  // 把 metadata 拼进发给模型的 content，writeFile 不在白名单里——这个字段从来
+  // 没进过模型可见内容。editFile 这条更常用的写路径也从不产出它。故整体移除。
   return {
     content: `wrote ${relativePath}`,
     metadata: {
       path: relativePath,
       bytes: Buffer.byteLength(content),
       totalLines: content.length === 0 ? 0 : content.split(/\r?\n/).length,
-      ...(diffStat ? { diffStat } : {}),
       ...(activity ? { activity } : {}),
     },
   };

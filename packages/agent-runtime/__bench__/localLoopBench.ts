@@ -23,11 +23,20 @@ const { runLocalAgentTurn } = await import("../localLoop");
 // ─────────────────────────────────────────────────────────────────────────────
 // 场景矩阵
 // ─────────────────────────────────────────────────────────────────────────────
-const SCENARIOS = [
-  { rounds: 1, toolsPerRound: 1, samples: 7 },
-  { rounds: 10, toolsPerRound: 3, samples: 7 },
-  { rounds: 30, toolsPerRound: 3, samples: 7 },
-];
+// --long 追加长循环档：真实 agent run 常见 100–300 轮，用于暴露「每轮全量扫描
+// 历史」这类 O(n²) 形状（30 轮档看不出来）。
+const SCENARIOS = Bun.argv.includes("--long")
+  ? [
+      { rounds: 30, toolsPerRound: 3, samples: 3 },
+      { rounds: 100, toolsPerRound: 3, samples: 3 },
+      { rounds: 200, toolsPerRound: 3, samples: 3 },
+      { rounds: 300, toolsPerRound: 3, samples: 3 },
+    ]
+  : [
+      { rounds: 1, toolsPerRound: 1, samples: 7 },
+      { rounds: 10, toolsPerRound: 3, samples: 7 },
+      { rounds: 30, toolsPerRound: 3, samples: 7 },
+    ];
 
 // 相位分类：一次性（整 turn 一次）/ 每轮 / 每工具
 const ONCE_PHASES = new Set([

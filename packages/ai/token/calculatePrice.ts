@@ -13,6 +13,7 @@ import {
   isPlatformHostedDeepSeekV4Model,
   isPlatformHostedImageModel,
   isPlatformHostedOpenAIImageModel,
+  PLATFORM_HOSTED_GLM_53_FLASH_BASETEN_PRICE,
 } from "ai/llm/platformHosted";
 
 // ==================== 接口定义 ====================
@@ -300,19 +301,23 @@ const calculateCacheBasedCost = (
   const { input: effectiveInputPrice, output: effectiveOutputPrice } =
     getEffectivePrices(resolvedPrice, externalPrice);
 
-  const cacheMissTokens = input_tokens - cache_read_input_tokens;
+  // 直连调用方可能不带 cache 字段：undefined 参与减法得 NaN，经 sanitizeCost
+  // 变 0 漏账。缺省按 0 计（全量 cache miss）。
+  const cacheRead = cache_read_input_tokens ?? 0;
+  const outputTokens = output_tokens ?? 0;
+  const cacheMissTokens = input_tokens - cacheRead;
   const cacheHitPrice = resolvedPrice.inputCacheHit || 0;
 
   const regularTotal =
     (cacheMissTokens * resolvedPrice.input +
-      cache_read_input_tokens * cacheHitPrice +
-      output_tokens * resolvedPrice.output) /
+      cacheRead * cacheHitPrice +
+      outputTokens * resolvedPrice.output) /
     1_000_000;
 
   const chargeTotal =
     (cacheMissTokens * effectiveInputPrice +
-      cache_read_input_tokens * cacheHitPrice +
-      output_tokens * effectiveOutputPrice) /
+      cacheRead * cacheHitPrice +
+      outputTokens * effectiveOutputPrice) /
     1_000_000;
 
   return {
@@ -320,8 +325,8 @@ const calculateCacheBasedCost = (
     charge: chargeTotal,
     details: {
       inputCost: (cacheMissTokens * resolvedPrice.input) / 1_000_000,
-      outputCost: (output_tokens * resolvedPrice.output) / 1_000_000,
-      cachingReadCost: (cache_read_input_tokens * cacheHitPrice) / 1_000_000,
+      outputCost: (outputTokens * resolvedPrice.output) / 1_000_000,
+      cachingReadCost: (cacheRead * cacheHitPrice) / 1_000_000,
       cachingWriteCost: 0,
     },
   };
@@ -553,6 +558,21 @@ export const calculatePrice = ({
   try {
     model = getModelConfig(provider as any, modelName);
   } catch {
+    // 严格锚定 Baseten 目录里 GLM 5.3 Flash 的两个合法别名（完整模型名或
+    // 用户配置的短名），不收子串——任何含 glm-5.3-flash 的未知/拼写错误
+    // 模型名必须保持计费异常路径，不能用 fallback 掩盖配置错误（review 2026-09-02）。
+    if (provider === "baseten" && /^(?:zai-org\/)?glm-5[.-]3-flash$/i.test(modelName)) {
+      const costs = calculateBasicCost(
+        { name: modelName, hasVision: true, price: PLATFORM_HOSTED_GLM_53_FLASH_BASETEN_PRICE },
+        usage,
+        "baseten",
+        externalPrice,
+        billingServiceTier,
+        nowMs,
+      );
+      const pay = calculatePayDistribution(costs, externalPrice, sharingLevel);
+      return { cost: sanitizeCost(costs.charge), pay };
+    }
     // 出图模型已收进 nolo 平台托管目录；历史记录仍可能带 provider=openai/google，
     // 按模型名回落到 nolo 目录，避免退化成零成本虚拟模型。
     if (isPlatformHostedImageModel(modelName)) {
