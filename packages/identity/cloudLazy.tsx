@@ -25,15 +25,10 @@ import { isCloudEdition } from "identity";
 export function cloudLazy<P = {}>(cloudPath: string, fallback: ComponentType<P>): ComponentType<P> {
   return lazy(() => {
     if (!isCloudEdition) return Promise.resolve({ default: fallback });
-    // dev 模式下浏览器无法解析 bare specifier（如 "life/web/InviteRewards"），
-    // 因为没有 import map。dev 模式直接返回 fallback。
-    if (process.env.NODE_ENV !== "production") {
-      return Promise.resolve({ default: fallback });
-    }
-    // 生产构建：用静态路径映射让 esbuild 能 resolve 并打包成 chunk。
-    // 之前用变量路径绕过 esbuild static resolution 是因为 local edition 没有
-    // life/auth 包，但 esbuild 已用 nolo-cloud condition，cloud 包都存在。
-    // 变量路径导致浏览器运行时遇到 bare specifier 无法解析 → 白屏。
+    // dev 模式：esDev（esbuild）同样能把 string literal 的 import() 打成
+    // chunk（723a24ed7 之后路径已是 literal，不再依赖 import map），
+    // 之前「dev 直接返回 fallback」会导致侧边栏等 cloud 组件在 dev 下
+    // 永远空白（2026-09-02 修复）。仅 local edition（无 life/auth 包）保留 fallback。
     return resolveCloudLazyImport(cloudPath);
   });
 }

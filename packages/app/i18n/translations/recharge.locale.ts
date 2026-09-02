@@ -7,7 +7,7 @@ import {
 export default {
   [Language.EN]: {
     translation: {
-      recharge: {
+      recharge_page: {
         title: "Recharge",
         viewPricing: "View pricing",
         channel: { online: "Online payment", transfer: "QR transfer" },
@@ -84,7 +84,7 @@ export default {
   },
   [Language.ZH_CN]: {
     translation: {
-      recharge: {
+      recharge_page: {
         title: "充值",
         viewPricing: "查看价格",
         channel: { online: "在线支付", transfer: "扫码转账" },
@@ -157,7 +157,7 @@ export default {
   },
   [Language.ZH_HANT]: {
     translation: {
-      recharge: {
+      recharge_page: {
         title: "儲值",
         viewPricing: "查看價格",
         channel: { online: "線上支付", transfer: "掃碼轉帳" },
@@ -230,7 +230,7 @@ export default {
   },
   [Language.JA]: {
     translation: {
-      recharge: {
+      recharge_page: {
         title: "チャージ",
         viewPricing: "料金を見る",
         channel: { online: "オンライン決済", transfer: "QR送金" },

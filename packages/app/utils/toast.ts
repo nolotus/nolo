@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 // Web toast adapter — react-hot-toast style API, backed by render/web/ui/Toast.
 // The .native.ts variant handles React Native separately.
 
-import { toastManager, type ToastType } from "render/web/ui/Toast";
+// 只接 store（纯 TS）：Toast.tsx 静态携带 StyleX 编译期载体
+// （toast.styles.ts），bun 裸运行时（CLI / agent run worker）加载即崩。
+import { toastManager, type ToastType } from "render/web/ui/toastStore";
 
 type ToastOptions = {
   /** Auto-dismiss timeout in ms (react-hot-toast alias `duration` supported) */

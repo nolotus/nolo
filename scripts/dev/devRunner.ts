@@ -34,7 +34,18 @@ const PROCESS_CONFIGS: Record<ProcessKey, ProcessConfig> = {
     key: "api",
     label: "api",
     colorCode: "36",
-    command: [BUN_BIN, "--conditions=nolo-cloud", "./packages/server/entry.ts"],
+    // --preload：server SSR 渲染链 import 到 *Styles.ts（stylex.keyframes），
+    // 裸 bun 无 stylex 编译通道会启动即崩（phase3 后 toast.styles.ts 事故，
+    // 2026-09-02）。顶层 bunfig preload 只对 bun run 生效，spawn 的子进程
+    // 需要显式 flag。stylexBunTestPlugin.ts 是这条编译通道的唯一实现
+    // （文件名历史遗留，功能与 bun test 无关）。
+    command: [
+      BUN_BIN,
+      "--preload",
+      "./scripts/test/stylexBunTestPlugin.ts",
+      "--conditions=nolo-cloud",
+      "./packages/server/entry.ts",
+    ],
     env: {
       HTTP_PORT,
       // Match `dev:api` (package.json) and devControlRuntime: enable the

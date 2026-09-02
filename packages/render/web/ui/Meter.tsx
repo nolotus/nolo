@@ -1,11 +1,10 @@
+import * as stylex from "@stylexjs/stylex";
 import {
   Meter as AriaMeter,
   type MeterProps as AriaMeterProps,
 } from "react-aria-components/Meter";
-import "./Meter.css";
 
-const joinClass = (base: string, extra?: string): string =>
-  extra ? `${base} ${extra}` : base;
+import { meterStyles } from "./meter.styles";
 
 export interface MeterProps extends AriaMeterProps {
   label?: string;
@@ -19,26 +18,38 @@ export function Meter({
   className,
   ...props
 }: MeterProps) {
+  const meterClassName = [
+    stylex.props(
+      meterStyles.meter,
+      hideLabel && meterStyles.hideLabel,
+    ).className,
+    typeof className === "string" ? className : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <AriaMeter
       {...props}
-      className={joinClass(
-        "react-aria-Meter nolo-meter",
-        typeof className === "string" ? className : undefined
-      )}
+      className={meterClassName}
       data-hide-label={hideLabel || undefined}
     >
       {({ percentage, valueText }) => (
         <>
           {label && !hideLabel ? (
-            <span className="nolo-meter-label">{label}</span>
+            <span {...stylex.props(meterStyles.label)}>{label}</span>
           ) : null}
           {!hideLabel ? (
-            <span className="nolo-meter-value">{valueText}</span>
+            <span {...stylex.props(meterStyles.value)}>{valueText}</span>
           ) : null}
-          <div className="nolo-meter-track">
+          <div
+            {...stylex.props(
+              meterStyles.track,
+              hideLabel && meterStyles.trackInFlow,
+            )}
+          >
             <div
-              className="nolo-meter-fill"
+              {...stylex.props(meterStyles.fill)}
               style={{
                 width: `${percentage}%`,
                 // Keep a readable sliver for tiny non-zero values.

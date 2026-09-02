@@ -111,6 +111,25 @@ const bodyHashOf = (body: BodyInit | null | undefined) => {
  */
 const CONNECT_TIMEOUT_MS = 30_000;
 
+/**
+ * fetchWithConnectTimeout 自己的「无响应头」计时器产生的错误标记（Symbol，
+ * 不与 DOMException 内建只读属性冲突，也不会与任何字符串字段撞名）。
+ * 调用方外层 deadline（如 AbortSignal.timeout(llmRequestTimeoutMs)）超时时
+ * fetch 同样以 name === "TimeoutError" 的 DOMException 拒绝——名称无法区分
+ * 两种来源，重试/fallback 语义却截然不同（前者是上游静默，后者是调用方
+ * 主动放弃，绝不应触发额外上游调用）。只认此标记即可精确判别。
+ */
+export const CONNECT_TIMEOUT_ERROR = Symbol("nolo.connectTimeout");
+
+/** 仅当错误来自 fetchWithConnectTimeout 自己的无响应头计时器时为 true。 */
+export function isFetchConnectTimeoutError(error: unknown): boolean {
+  return (
+    !!error &&
+    (error as { name?: unknown }).name === "TimeoutError" &&
+    (error as Record<PropertyKey, unknown>)[CONNECT_TIMEOUT_ERROR] === true
+  );
+}
+
 export async function fetchWithConnectTimeout(
   fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   url: string,
@@ -123,12 +142,14 @@ export async function fetchWithConnectTimeout(
     ? AbortSignal.any([existingSignal, controller.signal])
     : controller.signal;
   const timer = setTimeout(() => {
-    controller.abort(
-      new DOMException(
-        `Upstream sent no response headers within ${connectTimeoutMs}ms`,
-        "TimeoutError"
-      )
+    const timeoutError = new DOMException(
+      `Upstream sent no response headers within ${connectTimeoutMs}ms`,
+      "TimeoutError"
     );
+    (timeoutError as unknown as Record<PropertyKey, unknown>)[
+      CONNECT_TIMEOUT_ERROR
+    ] = true;
+    controller.abort(timeoutError);
   }, connectTimeoutMs);
   try {
     return await fetchImpl(url, { ...init, signal });

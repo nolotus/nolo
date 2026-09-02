@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
 import {
   ComboBox as AriaComboBoxRoot,
@@ -14,7 +15,8 @@ import {
 } from "./Select";
 import { Popover } from "./Popover";
 import { LuChevronDown } from "react-icons/lu";
-import "./AriaComboBox.css";
+
+import { comboBoxStyles } from "./ariaComboBox.styles";
 
 export interface ComboBoxProps<T extends object> extends Omit<
   AriaComboBoxProps<T>,
@@ -39,23 +41,38 @@ export function AriaComboBox<T extends object>({
   return (
     <AriaComboBoxRoot
       {...props}
-      className={
-        typeof className === "function"
-          ? (renderProps) =>
-              `react-aria-ComboBox ${className(renderProps) ?? ""}`.trim()
-          : `react-aria-ComboBox ${className ?? ""}`.trim()
+      className={(renderProps) =>
+        [
+          stylex.props(comboBoxStyles.root).className,
+          typeof className === "function"
+            ? className(renderProps) ?? ""
+            : className ?? "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       }
     >
-      {label && <Label className="react-aria-Label">{label}</Label>}
-      <div className="combobox-field">
-        <Input className="react-aria-Input inset" placeholder={placeholder} />
-        <AriaButton className="combobox-trigger" aria-label="展开选项">
+      {label && (
+        <Label {...stylex.props(comboBoxStyles.label)}>{label}</Label>
+      )}
+      <div {...stylex.props(comboBoxStyles.field)}>
+        <Input
+          {...stylex.props(comboBoxStyles.input)}
+          placeholder={placeholder}
+        />
+        <AriaButton
+          {...stylex.props(comboBoxStyles.trigger)}
+          aria-label="展开选项"
+        >
           <LuChevronDown size={16} />
         </AriaButton>
       </div>
       {description && <Description>{description}</Description>}
       <FieldError>{errorMessage}</FieldError>
-      <Popover hideArrow className="combobox-popover">
+      <Popover
+        hideArrow
+        className={stylex.props(comboBoxStyles.popover).className}
+      >
         <ComboBoxListBox>{children}</ComboBoxListBox>
       </Popover>
     </AriaComboBoxRoot>

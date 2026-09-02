@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
@@ -7,9 +8,14 @@ import {
   LuCircleAlert as LuAlertCircle,
   LuLoaderCircle as LuLoader2,
 } from "react-icons/lu";
-import "./Toast.css";
+import { toastStyles } from "./toast.styles";
+import {
+  toastManager,
+  type InternalToast,
+  type ToastType,
+} from "./toastStore";
 
-export type ToastType = "success" | "error" | "loading" | "default";
+export type { ToastType } from "./toastStore";
 
 const TYPE_ICONS: Partial<Record<ToastType, typeof LuCheckCircle2>> = {
   success: LuCheckCircle2,
@@ -17,93 +23,9 @@ const TYPE_ICONS: Partial<Record<ToastType, typeof LuCheckCircle2>> = {
   loading: LuLoader2,
 };
 
-interface InternalToast {
-  id: string;
-  title: ReactNode;
-  description?: ReactNode;
-  action?: { label: string; onClick: () => void };
-  position?: { x: number; y: number };
-  type?: ToastType;
-  icon?: ReactNode;
-  timeout?: number;
-  phase: "entering" | "visible" | "exiting";
-}
-
-type Listener = () => void;
-
-// Must match the CSS transition duration (.toast-root transition) so exits
-// finish before the node is removed.
-const EXIT_MS = 320;
-
-class ToastStore {
-  private toasts: InternalToast[] = [];
-  private listeners = new Set<Listener>();
-  private nextId = 0;
-
-  subscribe = (listener: Listener): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-
-  getSnapshot = (): InternalToast[] => this.toasts;
-
-  add(item: {
-    id?: string;
-    title: ReactNode;
-    description?: ReactNode;
-    action?: { label: string; onClick: () => void };
-    position?: { x: number; y: number };
-    type?: ToastType;
-    icon?: ReactNode;
-    timeout?: number;
-  }): string {
-    const id = item.id ?? `toast-${++this.nextId}`;
-    const filtered = this.toasts.filter((t) => t.id !== id);
-    const entry: InternalToast = { ...item, id, phase: "entering" };
-    this.toasts = [...filtered, entry];
-    this.notify();
-
-    // entering → visible next frame; removing data-starting-style fires the
-    // CSS enter transition.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        this.toasts = this.toasts.map((t) =>
-          t.id === id ? { ...t, phase: "visible" } : t,
-        );
-        this.notify();
-      }),
-    );
-
-    if (item.timeout && item.timeout > 0) {
-      setTimeout(() => this.close(id), item.timeout);
-    }
-
-    return id;
-  }
-
-  close(id?: string) {
-    if (id) {
-      if (!this.toasts.some((t) => t.id === id)) return;
-      this.toasts = this.toasts.map((t) =>
-        t.id === id ? { ...t, phase: "exiting" } : t,
-      );
-    } else {
-      this.toasts = this.toasts.map((t) => ({ ...t, phase: "exiting" }));
-    }
-    this.notify();
-    setTimeout(() => {
-      this.toasts = id ? this.toasts.filter((t) => t.id !== id) : [];
-      this.notify();
-    }, EXIT_MS);
-  }
-
-  private notify = () => {
-    this.listeners.forEach((fn) => fn());
-  };
-}
-
-// Module-level toast manager — usable from outside React (toast.ts adapter).
-export const toastManager = new ToastStore();
+// Toast 状态存储已拆至 ./toastStore（非 UI 下游只接 store，不接 StyleX 载体）。
+// 兼容既有 import 路径（App.tsx / app/utils/toast.ts 之外的直接引用）。
+export { toastManager } from "./toastStore";
 
 function ToastItem({ toast }: { toast: InternalToast }) {
   const type = toast.type;
@@ -112,7 +34,7 @@ function ToastItem({ toast }: { toast: InternalToast }) {
 
   return (
     <div
-      className="toast-root"
+      className={`toast-root ${stylex.props(toastStyles.root).className ?? ""}`}
       data-starting-style={toast.phase === "entering" ? "" : undefined}
       data-ending-style={toast.phase === "exiting" ? "" : undefined}
       data-type={type}
@@ -123,28 +45,33 @@ function ToastItem({ toast }: { toast: InternalToast }) {
           : undefined
       }
     >
-      <div className="toast-content">
+      <div {...stylex.props(toastStyles.content)}>
         {icon ? (
-          <span className="toast-icon" aria-hidden="true">
+          <span {...stylex.props(toastStyles.icon)} aria-hidden="true">
             {icon}
           </span>
         ) : (
           TypeIcon && (
             <TypeIcon
-              className={`toast-icon${type ? ` ${type}` : ""}`}
+              {...stylex.props(
+                toastStyles.icon,
+                type === "success" && toastStyles.iconSuccess,
+                type === "error" && toastStyles.iconError,
+                type === "loading" && toastStyles.iconLoading,
+              )}
               aria-hidden="true"
             />
           )
         )}
-        <div className="toast-text-wrapper">
-          <div className="toast-title">{toast.title}</div>
+        <div {...stylex.props(toastStyles.textWrapper)}>
+          <div {...stylex.props(toastStyles.title)}>{toast.title}</div>
           {toast.description && (
-            <div className="toast-description">{toast.description}</div>
+            <div {...stylex.props(toastStyles.description)}>{toast.description}</div>
           )}
           {toast.action && (
             <button
               type="button"
-              className="toast-action"
+              className={`toast-action ${stylex.props(toastStyles.action).className ?? ""}`.trim()}
               disabled={toast.phase === "exiting"}
               onClick={() => {
                 if (toast.phase === "exiting") return;
@@ -159,7 +86,7 @@ function ToastItem({ toast }: { toast: InternalToast }) {
       </div>
       <button
         type="button"
-        className="toast-close"
+        className={`toast-close ${stylex.props(toastStyles.close).className ?? ""}`.trim()}
         aria-label="Close"
         onClick={() => toastManager.close(toast.id)}
       >
@@ -190,7 +117,7 @@ export function MyToastRegion() {
 
   if (!mounted) return null;
   return createPortal(
-    <div className="toast-viewport">
+    <div {...stylex.props(toastStyles.viewport)}>
       <ToastList />
     </div>,
     document.body,

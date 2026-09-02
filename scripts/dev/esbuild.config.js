@@ -110,6 +110,12 @@ const stylexEsbuildPlugin = ENABLE_STYLEX
       useCSSLayers: false,
       importSources: ["@stylexjs/stylex"],
       unstable_moduleResolution: { type: "commonJS" },
+      // 与 bun test preload（stylexBunTestPlugin.ts）对齐：0.19 默认开启的
+      // enableMediaQueryOrder（lastMediaQueryWinsTransform）在本仓所有
+      // *Styles.ts 上报 Invalid media query syntax（文件语法经 node+babel
+      // 同参数验证全部合法）。全仓样式同属性至多一个断点，
+      // last/first-wins 无行为差异，显式关闭消除 esbuild/esDev 构建失败。
+      enableMediaQueryOrder: false,
     })
   : null;
 
@@ -146,6 +152,7 @@ if (ENABLE_STYLEX) {
         useCSSLayers: false,
         importSources: ["@stylexjs/stylex"],
         unstable_moduleResolution: { type: "commonJS" },
+        enableMediaQueryOrder: false,
       },
       { framework: "esbuild" },
     );

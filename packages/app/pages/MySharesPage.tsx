@@ -1,4 +1,4 @@
-import "./MySharesPage.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useEffect, useState } from "react";
 import { NavLink } from "app/routing";
 import {
@@ -24,6 +24,7 @@ import { loadOwnerSharesAcrossServers } from "share/loadOwnerShares";
 import { getShareTypeLabel } from "share/types";
 import { toast } from "app/utils/toast"
 import { DataType } from "create/types";
+import { coverStyles, mySharesPageStyles as styles } from "./MySharesPageStyles";
 
 const PAGE_SIZE = 30;
 
@@ -101,8 +102,8 @@ const MySharesPage: React.FC = () => {
 
   if (!userId) {
     return (
-      <div className="MySharesPage">
-        <div className="MySharesPage__empty">
+      <div {...stylex.props(styles.root)}>
+        <div {...stylex.props(styles.empty)}>
           {t("myShares.requireLogin", "请先登录后查看你的分享。")}
         </div>
       </div>
@@ -110,48 +111,48 @@ const MySharesPage: React.FC = () => {
   }
 
   return (
-    <div className="MySharesPage">
-      <header className="MySharesPage__header">
+    <div {...stylex.props(styles.root)}>
+      <header {...stylex.props(styles.header)}>
         <div>
-          <h1>{t("myShares.title", "我的分享")}</h1>
-          <p>{t("myShares.subtitle", "你发布和分享出去的页面、对话、表格与应用。")}</p>
+          <h1 {...stylex.props(styles.headerTitle)}>{t("myShares.title", "我的分享")}</h1>
+          <p {...stylex.props(styles.headerText)}>{t("myShares.subtitle", "你发布和分享出去的页面、对话、表格与应用。")}</p>
         </div>
-        <NavLink to="/share/community" className="MySharesPage__communityLink">
+        <NavLink to="/share/community" {...stylex.props(styles.communityLink)}>
           {t("myShares.browseCommunity", "浏览社区")}
         </NavLink>
       </header>
 
       {loading && (
-        <div className="MySharesPage__status">
+        <div {...stylex.props(styles.status)}>
           {t("myShares.loading", "正在加载...")}
         </div>
       )}
       {error && !loading && (
-        <div className="MySharesPage__status">{error}</div>
+        <div {...stylex.props(styles.status)}>{error}</div>
       )}
       {!loading && !error && shares.length === 0 && (
-        <div className="MySharesPage__empty">
+        <div {...stylex.props(styles.empty)}>
           <p>{t("myShares.empty", "还没有任何分享。")}</p>
           <p>{t("myShares.emptyHint", "在文章、对话或表格页面点击分享按钮即可创建。")}</p>
         </div>
       )}
 
       {!loading && shares.length > 0 && (
-        <div className="MySharesPage__list">
+        <div {...stylex.props(styles.list)}>
           {shares.slice(0, visibleCount).map((share) => (
-            <article key={share.token} className="MySharesPage__item">
+            <article key={share.token} {...stylex.props(styles.item)}>
               {share.coverImage ? (
                 <NavLink
                   to={createWebSharePath(share.token)}
-                  className="MySharesPage__cover"
+                  {...stylex.props(styles.cover)}
                   aria-label={share.title || t("unknown", "未命名")}
                 >
-                  <img src={share.coverImage} alt="" />
+                  <img {...stylex.props(styles.coverImage)} src={share.coverImage} alt="" />
                 </NavLink>
               ) : (
                 <NavLink
                   to={createWebSharePath(share.token)}
-                  className={`MySharesPage__cover MySharesPage__cover--${share.type}`}
+                  {...stylex.props(styles.cover, coverStyles[share.type as keyof typeof coverStyles])}
                   aria-label={share.title || t("unknown", "未命名")}
                 >
                   {React.createElement(getShareTypeIcon(share.type), {
@@ -162,7 +163,7 @@ const MySharesPage: React.FC = () => {
               )}
               <button
                 type="button"
-                className="MySharesPage__deleteBtn"
+                {...stylex.props(styles.deleteBtn)}
                 disabled={deletingTokens.has(share.token)}
                 onClick={() => void handleDelete(share.token)}
                 aria-label={t("delete", "删除")}
@@ -170,23 +171,23 @@ const MySharesPage: React.FC = () => {
               >
                 <LuTrash2 size={16} aria-hidden="true" />
               </button>
-              <div className="MySharesPage__itemMain">
+              <div {...stylex.props(styles.itemMain)}>
                 <NavLink
                   to={createWebSharePath(share.token)}
-                  className="MySharesPage__itemTitle"
+                  {...stylex.props(styles.itemTitle)}
                 >
                   {share.title || t("unknown", "未命名")}
                 </NavLink>
-                <div className="MySharesPage__itemMeta">
-                  <span className="MySharesPage__badge">
+                <div {...stylex.props(styles.itemMeta)}>
+                  <span {...stylex.props(styles.badge)}>
                     {getShareTypeLabel(share.type)}
                   </span>
-                  <span className="MySharesPage__visibility">
+                  <span {...stylex.props(styles.visibility)}>
                     {share.visibility === "community"
                       ? t("share_visibility_public", "公开")
                       : t("share_visibility_private", "私人")}
                   </span>
-                  <span className="MySharesPage__time">
+                  <span {...stylex.props(styles.time)}>
                     {formatShareTime(
                       share.updatedAt && share.updatedAt > share.createdAt
                         ? share.updatedAt
@@ -195,7 +196,7 @@ const MySharesPage: React.FC = () => {
                   </span>
                 </div>
                 {(share.agentName || share.description) && (
-                  <p className="MySharesPage__itemDescription">
+                  <p {...stylex.props(styles.itemDescription)}>
                     {share.agentName || share.description}
                   </p>
                 )}
@@ -206,10 +207,10 @@ const MySharesPage: React.FC = () => {
       )}
 
       {visibleCount < shares.length && !loading && (
-        <div className="MySharesPage__loadMore">
+        <div {...stylex.props(styles.loadMore)}>
           <button
             type="button"
-            className="MySharesPage__loadMoreBtn"
+            {...stylex.props(styles.loadMoreBtn)}
             onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
           >
             {t("myShares.loadMore", "加载更多")}

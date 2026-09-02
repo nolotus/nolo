@@ -158,6 +158,14 @@ const loadQuickChatRuntime = async () => {
     useUserId: () => selectedUserId,
   }));
 
+  // fetchUserProfile 已随 identity 包迁移到 identity/actions（组件 import
+  // 路径）。此前 mock 的是旧路径 auth/authSlice，永不命中——真实 thunk
+  // 落到 dispatch mock 的 fallback 返回，`.unwrap` 不存在而 TypeError
+  // （14 个失败的真实根因，先于 stage 文案里的「请先登录」）。
+  mock.module("identity/actions", () => ({
+    fetchUserProfile: () => ({ type: "auth/fetchUserProfile" }),
+  }));
+
   mock.module("app/store", () => ({
     ...actualStore,
     useAppDispatch: () => (action: { type?: string; payload?: any }) => {
@@ -436,7 +444,10 @@ describe("QuickChatRuntime", () => {
     expect(createDialogAction?.payload?.skipGreeting).toBe(true);
     expect(createDialogAction?.payload?.skipAgentConfigRead).toBe(true);
     expect(createDialogAction?.payload?.optimisticReturnBeforeWrite).toBe(true);
-    expect(createDialogAction?.payload?.title).toBe("DeepSeek V4 Flash");
+    // 默认档（QUICK_CHAT_DEFAULT_TIER_AGENTS.flash = 内置 nolo agent）路由出的
+    // 对话统一标题 "nolo"——型号换代不改标题（QuickChatRuntime 的
+    // QUICK_CHAT_AGENT_TITLES 注释）。此前期望具体型号名是迁移前旧行为。
+    expect(createDialogAction?.payload?.title).toBe("nolo");
     expect(navigateCalls).toEqual([
       {
         path: "/space/1/dialog-user-quick-1",

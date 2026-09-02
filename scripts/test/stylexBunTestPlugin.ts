@@ -25,39 +25,56 @@
 import { transformAsync } from "@babel/core";
 
 const STYLEX_FILE_FILTER =
-  /(^|\/)packages\/(?:ai\/agent|app|chat|create|life)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
+  /(^|\/)packages\/(?:ai\/agent|app|auth|chat|create|life|render)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
 
 Bun.plugin({
   name: "stylex-static-compile",
   setup(build) {
+    // @babel/core 的 transformAsync 在 bun 下并发调用不安全（内部缓存竞态，
+    // 会以 "Invalid media query syntax" 之类的假错炸掉 transform，2026-09-02
+    // life 页 StyleX 迁移新增 15 个 *Styles.ts 后在多目录合跑中稳定复现）。
+    // 这里用 promise 链把所有 onLoad 的编译串行化：文件数量增长不改变正确性。
+    let compileChain: Promise<unknown> = Promise.resolve();
+
     build.onLoad({ filter: STYLEX_FILE_FILTER }, async (args) => {
       const source = await Bun.file(args.path).text();
       if (!source.includes("@stylexjs/stylex")) return undefined;
 
-      const result = await transformAsync(source, {
-        filename: args.path,
-        babelrc: false,
-        configFile: false,
-        sourceType: "module",
-        parserOpts: { plugins: ["typescript"] },
-        plugins: [
-          // 纯 TS 载体文件：先剥类型再跑 stylex（无 JSX，交给 bun loader）
-          "@babel/plugin-transform-typescript",
-          [
-            "@stylexjs/babel-plugin",
-            {
-              // 与 scripts/dev/esbuild.config.js / buildRenderBundle.ts 保持一致
-              useCSSLayers: false,
-              importSources: ["@stylexjs/stylex"],
-              unstable_moduleResolution: { type: "commonJS" },
-              dev: false,
-              runtimeInjection: false,
-            },
+      const task = compileChain.then(async () => {
+        const result = await transformAsync(source, {
+          filename: args.path,
+          babelrc: false,
+          configFile: false,
+          sourceType: "module",
+          parserOpts: { plugins: ["typescript"] },
+          plugins: [
+            // 纯 TS 载体文件：先剥类型再跑 stylex（无 JSX，交给 bun loader）
+            "@babel/plugin-transform-typescript",
+            [
+              "@stylexjs/babel-plugin",
+              {
+                // 与 scripts/dev/esbuild.config.js / buildRenderBundle.ts 保持一致
+                useCSSLayers: false,
+                importSources: ["@stylexjs/stylex"],
+                unstable_moduleResolution: { type: "commonJS" },
+                dev: false,
+                runtimeInjection: false,
+                // 显式关闭：0.19 默认开启的 lastMediaQueryWinsTransform 在 bun
+                // test 的模块图下会因 @stylexjs/shared 的 MediaQuery parser
+                // 循环依赖加载顺序差异，把合法的 "@media (max-width: ...)"
+                // key 误判为非法（node/esbuild 同配置正常，bun test 稳定炸）。
+                // 测试编译只用于运行时类名合并，不消费 media 规则排序语义；
+                // 本仓样式同属性至多一个断点，last/first-wins 无行为差异。
+                enableMediaQueryOrder: false,
+              },
+            ],
           ],
-        ],
+        });
+        return { contents: result?.code ?? source, loader: "js" as const };
       });
-
-      return { contents: result?.code ?? source, loader: "js" };
+      // 失败不许断链：后续文件的编译仍要继续（各自抛各自的错）。
+      compileChain = task.catch(() => undefined);
+      return task;
     });
   },
 });

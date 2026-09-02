@@ -146,6 +146,10 @@ export function createStylexPlugin(): Plugin {
     useCSSLayers: false,
     importSources: ["@stylexjs/stylex"],
     unstable_moduleResolution: { type: "commonJS" },
+    // 与 esbuild.config.js / bun test preload 对齐：0.19 默认开启的
+    // lastMediaQueryWinsTransform 在本仓 *Styles.ts 上报 Invalid media query
+    // syntax（同属性至多一个断点，last/first-wins 无行为差异）
+    enableMediaQueryOrder: false,
   });
 }
 
