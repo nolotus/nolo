@@ -49,6 +49,23 @@ test("readPastedText appends the exact next startLine when paging", async () => 
   expect(result.metadata).toMatchObject({ endLine: 200, nextStartLine: 201 });
 });
 
+test("readPastedText suggests parallel ranges when several pages remain", async () => {
+  const { id, executor } = createPasteExecutor((line) => `paste-line-${line}`, 630);
+
+  const result = await read(executor, { pasteId: id });
+
+  expect(result.content).toContain("Continue with startLine=201");
+  // Remaining 430 lines fit two fully-delivered segments: 201-420, 421-630.
+  expect(result.content).toContain("parallel calls");
+  expect(result.content).toContain("201-420");
+  expect(result.content).toContain("421-630");
+  expect(result.metadata).toMatchObject({
+    endLine: 200,
+    nextStartLine: 201,
+    remainingLines: 430,
+  });
+});
+
 test("readPastedText answers covered re-reads with a notice, force refetches", async () => {
   const { id, executor } = createPasteExecutor((line) => `paste-line-${line}`, 220);
 

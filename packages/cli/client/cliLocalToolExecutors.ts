@@ -57,6 +57,11 @@ const MAX_PASTED_TEXT_LINES_PER_READ = 200;
 // over-one-page paste (e.g. 210 lines requested as 1-210) is delivered by a
 // single call instead of forcing a tail-fetching second read.
 const PASTED_TEXT_EXPLICIT_OVERSHOOT_LINES = 20;
+// A single explicit call is always honored in full up to this many lines
+// (paging cap + overshoot margin). Used to size the parallel-fetch hint:
+// segments at or below this length never need a second tail-fetching read.
+const FULLY_DELIVERED_SEGMENT_LINES =
+  MAX_PASTED_TEXT_LINES_PER_READ + PASTED_TEXT_EXPLICIT_OVERSHOOT_LINES;
 const PASTE_LEDGER_MAX_RECORDS = 64;
 
 export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
@@ -145,9 +150,29 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
     const clamped = explicitEnd !== undefined && endLine < explicitEnd && endLine < lines.length;
     const paged = explicitEnd === undefined && endLine < lines.length;
     const needsFooter = clamped || paged;
-    const content = needsFooter
-      ? `${delivered}\n[readPastedText: returned lines ${startLine}-${endLine} of ${lines.length}. Continue with startLine=${endLine + 1}.]`
-      : delivered;
+    const nextStartLine = endLine + 1;
+    const remainingLines = lines.length - endLine;
+    // When more than one fully-deliverable segment remains, the footer also
+    // spells out parallel range examples so a caller can fetch everything in
+    // one turn instead of paging serially, one round-trip at a time.
+    const footer = !needsFooter
+      ? undefined
+      : remainingLines <= FULLY_DELIVERED_SEGMENT_LINES
+        ? `[readPastedText: returned lines ${startLine}-${endLine} of ${lines.length}. Continue with startLine=${nextStartLine}.]`
+        : (() => {
+            const firstEnd = Math.min(
+              nextStartLine + FULLY_DELIVERED_SEGMENT_LINES - 1,
+              lines.length,
+            );
+            const secondStart = firstEnd + 1;
+            const secondEnd = Math.min(secondStart + FULLY_DELIVERED_SEGMENT_LINES - 1, lines.length);
+            return (
+              `[readPastedText: returned lines ${startLine}-${endLine} of ${lines.length}. ` +
+              `Continue with startLine=${nextStartLine}, or fetch the remaining ${remainingLines} lines ` +
+              `in one turn with parallel calls (e.g. ${nextStartLine}-${firstEnd}, ${secondStart}-${secondEnd})]`
+            );
+          })();
+    const content = needsFooter ? `${delivered}\n${footer}` : delivered;
 
     const metadata = {
       pasteId,
@@ -159,7 +184,9 @@ export function createReadPastedTextExecutor(store: CollapsedPasteStore) {
       // Continuation pointer whenever more content exists, even when an
       // explicit request was honored in full — the schema contract says a
       // truncated read advertises the exact next startLine.
-      ...(endLine < lines.length ? { nextStartLine: endLine + 1 } : {}),
+      ...(endLine < lines.length
+        ? { nextStartLine: endLine + 1, remainingLines: lines.length - endLine }
+        : {}),
       source: "tui-paste-store",
     };
     // Provider-facing historical messages carry a bounded metadata suffix
