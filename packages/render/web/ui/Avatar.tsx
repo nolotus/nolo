@@ -1,8 +1,10 @@
 // render/web/ui/Avatar.tsx
-import "../ui.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useMemo } from "react";
 import { LuUser, LuBot } from "react-icons/lu";
 import { useImageLoadFallback } from "app/hooks/useImageLoadFallback";
+
+import { avatarStyles } from "./avatar.styles";
 
 interface AvatarProps {
   name?: string;
@@ -66,7 +68,7 @@ export const Avatar: React.FC<AvatarProps> = ({
         <img
           src={src!}
           alt={name}
-          className="avatar-image"
+          {...stylex.props(avatarStyles.image)}
           onError={handleImageError}
         />
       );
@@ -92,9 +94,18 @@ export const Avatar: React.FC<AvatarProps> = ({
   const accessibleName =
     name.trim() || (avatarType === "agent" ? "Agent" : "User");
 
+  const { className: sxClassName } = stylex.props(
+    avatarStyles.base,
+    avatarStyles[size],
+    avatarType === "agent" ? avatarStyles.agent : avatarStyles.user,
+    shape === "full" ? avatarStyles.shapeFull : avatarStyles.shapeRounded,
+    onClick && avatarStyles.clickable,
+  );
+  const classes = [sxClassName, className].filter(Boolean).join(" ");
+
   return (
     <div
-      className={`avatar avatar--${size} avatar--${avatarType} avatar--shape-${shape} ${onClick ? "avatar--clickable" : ""} ${className}`}
+      className={classes}
       onClick={onClick}
       onKeyDown={onClick ? handleKeyDown : undefined}
       role={onClick ? "button" : undefined}

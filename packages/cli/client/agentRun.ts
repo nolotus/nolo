@@ -1367,6 +1367,45 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   return { exitCode: 1 };
 }
 
+/**
+ * 本地 turn 结果 → 对外 RunAgentTurnResult 的唯一重建口。
+ *
+ * 为什么是显式函数而不是调用点手写展开：auto→local 成功路径有两处重建
+ * （主路径 + 本地配置刷新重试），各自手写白名单曾在 fix/tui-session-credits
+ * 里漏掉 `turnCredits` —— TUI 的 accumulateSessionCredits 拿到 undefined，
+ * 状态行 ⚡ 从此不显示，而 context 芯片（turnTokens）正常，形成「扣了费、
+ * 上下文在走、积分消失」的不对称。收敛到一处 + 单测钉死字段清单。
+ */
+export function foldLocalResultForTui(
+  localResult: RunAgentTurnResult,
+): RunAgentTurnResult {
+  return {
+    exitCode: localResult.exitCode,
+    ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
+    title: localResult.title,
+    ...(localResult.titlePatchPromise
+      ? { titlePatchPromise: localResult.titlePatchPromise }
+      : {}),
+    // 空 assistant 兜底成因必须随行：后台 run 的结算（resolveRunOutcome 的
+    // isStalledOrTruncated）靠它把截断轮判成 stalled 而不是 clean 失败。
+    ...(localResult.emptyAssistantFallbackReason
+      ? { emptyAssistantFallbackReason: localResult.emptyAssistantFallbackReason }
+      : {}),
+    ...(localResult.turnTokens ? { turnTokens: localResult.turnTokens } : {}),
+    // 平台积分必须随行：runLocalAgentTurnForCli 里 sumPlatformCredits 已按
+    // 「全轮逐次求和」算好（只认 billing_unit === "credits" 的平台计费帧）。
+    ...(localResult.turnCredits !== undefined
+      ? { turnCredits: localResult.turnCredits }
+      : {}),
+    ...(localResult.streamInterrupted
+      ? { streamInterrupted: localResult.streamInterrupted }
+      : {}),
+    ...(localResult.pendingToolName
+      ? { pendingToolName: localResult.pendingToolName }
+      : {}),
+  };
+}
+
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
   const authToken = resolveAuthToken(options.env);
   const runtimeMode = resolveRequestedRuntimeMode(options);
@@ -1382,23 +1421,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
         reportFailure: false,
       });
       if (localResult.exitCode === 0) {
-        return {
-          exitCode: localResult.exitCode,
-          ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
-          title: localResult.title,
-          ...(localResult.titlePatchPromise
-            ? { titlePatchPromise: localResult.titlePatchPromise }
-            : {}),
-          ...(localResult.turnTokens
-            ? { turnTokens: localResult.turnTokens }
-            : {}),
-          ...(localResult.streamInterrupted
-            ? { streamInterrupted: localResult.streamInterrupted }
-            : {}),
-          ...(localResult.pendingToolName
-            ? { pendingToolName: localResult.pendingToolName }
-            : {}),
-        };
+        return foldLocalResultForTui(localResult);
       }
       if (
         isMissingLocalAgentConfigError(localResult.localError, options.agentKey)
@@ -1414,19 +1437,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
               reportFailure: false,
             });
             if (retriedLocalResult.exitCode === 0) {
-              return {
-                exitCode: retriedLocalResult.exitCode,
-                ...(retriedLocalResult.dialogId
-                  ? { dialogId: retriedLocalResult.dialogId }
-                  : {}),
-                title: retriedLocalResult.title,
-                ...(retriedLocalResult.titlePatchPromise
-                  ? { titlePatchPromise: retriedLocalResult.titlePatchPromise }
-                  : {}),
-                ...(retriedLocalResult.turnTokens
-                  ? { turnTokens: retriedLocalResult.turnTokens }
-                  : {}),
-              };
+              return foldLocalResultForTui(retriedLocalResult);
             }
           }
         } catch {

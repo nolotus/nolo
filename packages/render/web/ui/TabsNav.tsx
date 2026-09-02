@@ -1,7 +1,8 @@
 // "render/web/ui/TabsNav";
-import "./TabsNav.css";
-import "../ui.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
+
+import { tabsNavStyles } from "./tabsNav.styles";
 
 export interface Tab {
   id: number | string;
@@ -29,6 +30,9 @@ const TabsNav: React.FC<TabsNavProps> = ({
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
   const tabButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // 原 .tabs:focus-within::after 的等价实现：nav 内任意元素聚焦即视为 focus-within
+  const [hasFocusWithin, setHasFocusWithin] = useState(false);
 
   const rawIndex = tabs.findIndex((tab) => tab.id === activeTab);
   const activeIndex = rawIndex < 0 ? 0 : rawIndex;
@@ -148,11 +152,27 @@ const TabsNav: React.FC<TabsNavProps> = ({
     <nav
       ref={navRef as React.RefObject<HTMLElement>}
       id={id}
-      className={`tabs-nav ${className}`}
+      className={[stylex.props(tabsNavStyles.nav).className, className]
+        .filter(Boolean)
+        .join(" ")}
       role="tablist"
       aria-orientation="horizontal"
+      onFocus={() => setHasFocusWithin(true)}
+      onBlur={() => setHasFocusWithin(false)}
     >
-      <div className="tabs" style={tabsStyle} ref={tabsRef}>
+      <div
+        className={stylex.props(tabsNavStyles.tabs).className}
+        style={tabsStyle}
+        ref={tabsRef}
+      >
+        {/* 滑块：原 .tabs::after，真实 DOM；焦点描边等价 focus-within */}
+        <span
+          aria-hidden="true"
+          className={`tabs-slider ${stylex.props(
+            tabsNavStyles.slider,
+            hasFocusWithin && tabsNavStyles.sliderFocusOutline,
+          ).className ?? ""}`}
+        />
         {tabs.map((tab, index) => {
           const isActive = activeTab === tab.id;
           const tabControlId =
@@ -174,7 +194,10 @@ const TabsNav: React.FC<TabsNavProps> = ({
               aria-selected={isActive}
               aria-controls={panelId}
               tabIndex={isActive ? 0 : -1}
-              className="tab-item"
+              {...stylex.props(
+                tabsNavStyles.tabItem,
+                !tab.disabled && tabsNavStyles.tabItemHover,
+              )}
             >
               {tab.label}
             </button>

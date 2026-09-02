@@ -1,5 +1,6 @@
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
+  formatCreditsChip,
   formatTokenCount,
   renderTokenStatus,
   type TurnTokenUsage,
@@ -116,21 +117,25 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
   // 来，明明在扣积分却整轮不显示。改成看「本对话到底有没有产生过平台计费」——
   // credits 只在 billing_unit === "credits" 时才累加，自有 API / 订阅制天然为
   // 0，不显示，这正是「走平台才计积分」想要的判据本身。
+  //
+  // 积分是**独立 chip**，不再拼接进 context 芯片尾部：宽度降级时两者解耦，
+  // context 段可以先让路，积分 chip 撑到只剩必保段才丢（用户盯的就是它）。
   const credits = resolveStatusLineCredits(state);
-  const creditsSuffix =
-    credits !== undefined && credits > 0
-      ? ` · ⚡ ${credits.toFixed(2)} 积分`
-      : "";
   const tokenSegment = themeText(
     renderComposerTokenChip(
       state.turnTokens,
       state.contextWindow,
       state.estimatedContextTokens,
-    ) + creditsSuffix,
+    ),
     "muted",
     colorEnabled,
   );
+  const creditsSegment =
+    credits !== undefined && credits > 0
+      ? themeText(formatCreditsChip(credits), "muted", colorEnabled)
+      : "";
   parts.push(tokenSegment);
+  if (creditsSegment) parts.push(creditsSegment);
 
   // In-flight work chip: local background tasks plus active (non-terminal)
   // agent runs from the local run registry (throttled). This is a REQUIRED
@@ -151,10 +156,13 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
   let visibleParts = parts;
   if (maxWidth && maxWidth > 0) {
     const widthOf = (segments: string[]) => displayWidth(stripAnsi(segments.join(" · "))) + 2;
-    // Context, cwd and identity are useful orientation, but none is an
-    // actionable state. Drop them in that order before allowing terminal
-    // clipping to hide dirty/running/auto-confirm.
-    for (const optional of [tokenSegment, cwdSegment, agentSegment]) {
+    // 可让路段的丢弃顺序（挤宽度时从先到后）：
+    //   cwd（终端标题/上下文已有）→ agent 名（默认档可省）→ context chip →
+    //   积分 chip（最后才丢——用户盯的就是它，且它是「花了多少钱」的唯一
+    //   可见口径）。
+    // git 脏 / ⚙ running / ⏵ auto 是必保状态，任何宽度都不让。
+    for (const optional of [cwdSegment, agentSegment, tokenSegment, creditsSegment]) {
+      if (!optional) continue;
       if (widthOf(visibleParts) <= maxWidth) break;
       visibleParts = visibleParts.filter((part) => part !== optional);
     }
@@ -193,6 +201,10 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
           "warning",
           colorEnabled,
         ));
+      }
+      // 积分是用户盯的唯一「花了多少」口径，极限窄宽也以紧凑形式保留。
+      if (creditsSegment) {
+        emergency.push(themeText(formatCreditsChip(credits ?? 0, { compact: true }), "muted", colorEnabled));
       }
       visibleParts = [emergency.join(" ")];
     }
@@ -421,6 +433,35 @@ export function renderTuiHelp(colorEnabled = resolveCliColorEnabled()) {
  * muted/default tokens so the eye lands on the values. Layout, field order and
  * wording are unchanged: only color and one alignment fix.
  */
+/**
+ * /credits 诊断面板：一次性打印积分显示链每一环的当前真值。
+ *
+ * 为什么存在：「扣了费但 ⚡ 不显示」曾因链路里一处静默丢字段排查了整个上午
+ * （foldLocalResultForTui 丢 turnCredits）。链路是
+ *   usageRecords(billing帧) → sumPlatformCredits → turnCredits
+ *   → accumulateSessionCredits → sessionCredits + dialogCreditsBase → ⚡，
+ * 任何一环 undefined 都静默降级。这个命令把每一环摊开，断在哪一环一眼可见。
+ */
+export function renderCreditsDebug(
+  state: TuiState,
+  colorEnabled = resolveCliColorEnabled(),
+) {
+  const credits = resolveStatusLineCredits(state);
+  const lines = [
+    "[credits debug] 积分链路真值",
+    `• dialogCreditsBase : ${state.dialogCreditsBase?.toFixed(4) ?? "undefined（服务端基数未 seed——/pick 后首次读取失败或服务端未写 totalCost）"}`,
+    `• sessionCredits    : ${state.sessionCredits?.toFixed(4) ?? "undefined（本会话还没有平台计费轮）"}`,
+    `• 状态行显示        : ${credits !== undefined && credits > 0 ? formatCreditsChip(credits) : "（无 ⚡——两段合计为 0/undefined）"}`,
+    `• turnTokens.credits: ${state.turnTokens?.credits?.toFixed(4) ?? "undefined"}（本轮最后一次调用的折算值，仅供参考，不进状态行）`,
+    `• contextWindow     : ${state.contextWindow ?? "unknown"}`,
+    "• 判定口径：只有 billing_unit === \"credits\" 的平台计费帧才累计；自有 API / 订阅制恒为 undefined。",
+    "• 若刚跑完平台计费轮仍无 ⚡：检查 runAgentTurn 返回是否带 turnCredits（foldLocalResultForTui 白名单）。",
+  ];
+  return lines
+    .map((line) => (colorEnabled ? themeText(line, "chrome") : line))
+    .join("\n");
+}
+
 export function renderContextPanel(
   state: TuiState,
   colorEnabled = resolveCliColorEnabled(),

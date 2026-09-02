@@ -604,16 +604,15 @@ describe("cli tui session", () => {
   test("renderStatusLine hides the credits suffix when nothing platform-billed was accumulated", () => {
     // 自有 API：turnTokens.credits 是上游自报美元的 ×8 折算值，从不进会话累计
     // （sumPlatformCredits 只认 billing_unit === "credits"），所以不显示。
+    // 状态行只认 sessionCredits/dialogCreditsBase，与 agent 来源无关。
     const stateCustom = {
       ...createInitialTuiState({}),
-      apiSource: "custom",
       turnTokens: { input: 10_000, output: 2_000, credits: 0.5 },
     };
     expect(renderStatusLine(stateCustom)).not.toContain("⚡");
 
     const stateNoCredits = {
       ...createInitialTuiState({}),
-      apiSource: "platform",
       turnTokens: { input: 10_000, output: 2_000 },
     };
     expect(renderStatusLine(stateNoCredits)).not.toContain("⚡");

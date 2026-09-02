@@ -17,14 +17,14 @@ describe("radius scale source contract", () => {
   });
 
   test("maps core primitives to semantic radius tiers", () => {
-    const ui = read("packages/render/web/ui.css");
+    const buttonStyles = read("packages/render/web/ui/button.styles.ts");
     const form = read("packages/render/web/form.css");
     const modal = read("packages/render/web/modal.css");
     const settings = read("packages/app/settings/web/settings.css");
     const layout = read("packages/render/layout/layout.css");
     const sidebar = read("packages/chat/web/sidebarStyles.ts");
 
-    expect(ui).toContain("--btn-radius: var(--radius-xs)");
+    expect(buttonStyles).toContain('borderRadius: "var(--radius-xs)"');
     expect(form).toContain("border-radius: var(--radius-sm)");
     expect(modal).toContain(".c-dialog");
     expect(modal).toContain("border-radius: var(--radius-md)");

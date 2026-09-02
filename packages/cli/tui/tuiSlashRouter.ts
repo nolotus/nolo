@@ -422,7 +422,6 @@ export async function runSubmittedSlashLine(
             model: pickResult.model,
             userLanguage: host.state.userLanguage,
           }),
-          ...(pickResult.apiSource ? { apiSource: pickResult.apiSource } : {}),
           cachedMemoryOverlay: undefined, // 切换 agent 后重新加载记忆
         };
         persistAgentSelection(host.state, options.env ?? process.env);

@@ -23,6 +23,7 @@ export type {
 // Rendering
 export {
   renderStatusLine,
+  renderCreditsDebug,
   composeStatusLineWithQueue,
   renderWelcome,
   renderPrompt,

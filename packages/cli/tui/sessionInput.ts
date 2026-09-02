@@ -368,6 +368,7 @@ export const SLASH_COMMANDS = [
   "/theme",
   "/context",
   "/ctx",
+  "/credits",
   "/cd",
   "/runtime",
   "/auto",

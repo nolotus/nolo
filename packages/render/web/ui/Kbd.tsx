@@ -10,6 +10,7 @@
 // ⌘ / ⌫ render as lucide icons (system fonts drop those glyphs in <kbd> on
 // most Mac setups); Enter / Esc / letters stay as plain text.
 import React from "react";
+import * as stylex from "@stylexjs/stylex";
 import {
   LuCommand,
   LuCornerDownLeft,
@@ -18,15 +19,19 @@ import {
 } from "react-icons/lu";
 import { formatShortcut } from "app/settings/shortcutUtils";
 
-import "../ui.css";
+import { kbdStyles } from "./kbd.styles";
 
 const ICON_SIZE = 11;
 
+const iconProps = stylex.props(kbdStyles.icon);
+
 const KEY_ICONS: Record<string, React.ReactNode> = {
-  "\u2318": <LuCommand size={ICON_SIZE} aria-hidden="true" />,
-  "\u232B": <LuDelete size={ICON_SIZE} aria-hidden="true" />,
-  "\u2325": <LuOption size={ICON_SIZE} aria-hidden="true" />,
-  Enter: <LuCornerDownLeft size={ICON_SIZE} aria-hidden="true" />,
+  "\u2318": <LuCommand size={ICON_SIZE} aria-hidden="true" {...iconProps} />,
+  "\u232B": <LuDelete size={ICON_SIZE} aria-hidden="true" {...iconProps} />,
+  "\u2325": <LuOption size={ICON_SIZE} aria-hidden="true" {...iconProps} />,
+  Enter: (
+    <LuCornerDownLeft size={ICON_SIZE} aria-hidden="true" {...iconProps} />
+  ),
 };
 
 const renderKey = (part: string): React.ReactNode =>
@@ -41,17 +46,21 @@ export interface KbdProps extends React.HTMLAttributes<HTMLElement> {
 
 const Kbd: React.FC<KbdProps> = ({ shortcut, children, className, ...rest }) => {
   const label = shortcut ? formatShortcut(shortcut) : children;
-  const capClass = ["kbd", className].filter(Boolean).join(" ");
+  const capClass = [stylex.props(kbdStyles.kbd).className, className]
+    .filter(Boolean)
+    .join(" ");
   const parts = typeof label === "string" && label.includes(" + ")
     ? label.split(" + ")
     : null;
 
   if (parts) {
     return (
-      <span className="kbd-sequence" {...rest}>
+      <span {...stylex.props(kbdStyles.sequence)} {...rest}>
         {parts.map((part, i) => (
           <React.Fragment key={part}>
-            {i > 0 && <span className="kbd-sequence__sep">+</span>}
+            {i > 0 && (
+              <span {...stylex.props(kbdStyles.sequenceSep)}>+</span>
+            )}
             <kbd className={capClass}>{renderKey(part)}</kbd>
           </React.Fragment>
         ))}

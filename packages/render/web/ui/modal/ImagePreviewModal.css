@@ -64,6 +64,21 @@
   line-height: 1.6;
 }
 
+/* .loading-spinner 容器：原依赖 ui.css 全局 .loading-spinner 类（旋转 + 阴影），
+   ui.css 的 LoadingSpinner 分区已迁 StyleX，这里自包含一份 1:1 等价规则 */
+.preview-container .loading-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px var(--shadowLight);
+  animation: loadingSpin 0.9s linear infinite;
+}
+
+@keyframes loadingSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 .spinner-icon {
   width: 32px;
   height: var(--control-sm);

@@ -1941,7 +1941,7 @@ describe("cli agent run client", () => {
         saveTurn: async () => ({ dialogId: "dialog-auto-local" }),
         resolveProvider: async () => ({
           model: "fake-local",
-          complete: async () => ({ content: "auto local ok", model: "fake-local" }),
+          complete: async () => ({ stream_complete: true, content: "auto local ok", model: "fake-local" }),
         }),
         executeTool: async () => {
           throw new Error("no tools expected");
@@ -2051,7 +2051,7 @@ describe("cli agent run client", () => {
           model: "fake-local",
           complete: async () => {
             localCompletions += 1;
-            return { content: "auto local after refresh", model: "fake-local" };
+            return { stream_complete: true, content: "auto local after refresh", model: "fake-local" };
           },
         }),
         executeTool: async () => {
@@ -2246,7 +2246,7 @@ describe("cli agent run client", () => {
           model: "MiniMax-M3",
           complete: async () => {
             providerCalled = true;
-            return { content: "local minimax ok", model: "MiniMax-M3" };
+            return { stream_complete: true, content: "local minimax ok", model: "MiniMax-M3" };
           },
         }),
         executeTool: async () => ({ content: "[]" }),
@@ -2295,7 +2295,7 @@ describe("cli agent run client", () => {
           model: "agy",
           complete: async () => {
             providerCalled = true;
-            return { content: "agy local ok", model: "agy" };
+            return { stream_complete: true, content: "agy local ok", model: "agy" };
           },
         }),
         executeTool: async () => {
@@ -2350,7 +2350,7 @@ describe("cli agent run client", () => {
           model: "deepseek-v4-flash",
           complete: async () => {
             providerCalled = true;
-            return { content: "local fullstack ok", model: "deepseek-v4-flash" };
+            return { stream_complete: true, content: "local fullstack ok", model: "deepseek-v4-flash" };
           },
         }),
         executeTool: async () => ({ content: "ok" }),
@@ -2453,7 +2453,7 @@ describe("cli agent run client", () => {
           model: "agy",
           complete: async () => {
             providerCalled = true;
-            return { content: "local agy ok", model: "agy" };
+            return { stream_complete: true, content: "local agy ok", model: "agy" };
           },
         }),
         executeTool: async () => ({ content: "[]" }),
@@ -2504,7 +2504,7 @@ describe("cli agent run client", () => {
         saveTurn: async () => ({ dialogId: "dialog-refreshed-local" }),
         resolveProvider: async () => ({
           model: "agy",
-          complete: async () => ({ content: "refreshed local agy ok", model: "agy" }),
+          complete: async () => ({ stream_complete: true, content: "refreshed local agy ok", model: "agy" }),
         }),
         executeTool: async () => ({ content: "[]" }),
       },
@@ -2653,7 +2653,7 @@ describe("cli agent run client", () => {
           model: "fake-local",
           complete: async () => {
             providerCalled = true;
-            return { content: "local nolo with tools", model: "fake-local" };
+            return { stream_complete: true, content: "local nolo with tools", model: "fake-local" };
           },
         }),
         executeTool: async () => ({ content: "[]" }),

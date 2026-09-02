@@ -38,6 +38,11 @@ export type AgentRunSnapshot = {
   agentName?: string;
   /** Task the run was delegated, clipped by the producer. */
   taskPreview?: string;
+  /**
+   * 本次 run 实际消耗的平台积分（本地 registry 收尾自报）。缺省 = 没有平台
+   * 计费（自有 API / 订阅制），面板不显示积分段。
+   */
+  credits?: number;
   toolCallCount?: number;
   lastToolNames?: string[];
   lastAssistantText?: string;
@@ -138,6 +143,9 @@ function buildSnapshot(
       : {}),
     ...(lastToolNames ? { lastToolNames } : {}),
     ...(lastAssistantText ? { lastAssistantText } : {}),
+    ...(typeof parsed.credits === "number" && Number.isFinite(parsed.credits)
+      ? { credits: parsed.credits }
+      : {}),
     ...(errorMessage ? { errorMessage } : {}),
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(finishedAt !== undefined ? { finishedAt } : {}),

@@ -1,8 +1,10 @@
 // render/web/ui/SearchInput.tsx
-import "../ui.css";
-import React, { useId, useRef } from "react";
+import * as stylex from "@stylexjs/stylex";
+import React, { useId, useRef, useState } from "react";
 import { LuX, LuSearch } from "react-icons/lu";
 import Button from "./Button";
+
+import { searchInputStyles } from "./searchInput.styles";
 
 interface SearchInputProps {
   value: string;
@@ -63,14 +65,8 @@ const SearchInput: React.FC<SearchInputProps> = ({
   const inputAriaLabel = label ? undefined : placeholder || "搜索";
   // Dismissible overlays keep the × control available while empty.
   const showClearControl = dismissible || !isEmpty;
-  const wrapperClassName = [
-    "search-form",
-    formClassName,
-    className,
-    `search-form--${size}`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // 原 :focus-within .search-icon-left 后代选择器的 state 等价
+  const [fieldFocused, setFieldFocused] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,38 +84,70 @@ const SearchInput: React.FC<SearchInputProps> = ({
     }
   };
 
+  // data-* 属性保留（role=search 语义与测试钩子），样式改由状态 props 组合
+  const formProps = {
+    "data-empty": isEmpty,
+    "data-dismissible": dismissible || undefined,
+    "data-disabled": disabled || undefined,
+    "data-invalid": hasError || undefined,
+  } as const;
+
+  const searchBtnClassName = stylex.props(
+    searchInputStyles.searchBtn,
+    size === "small" && searchInputStyles.searchBtnSmall,
+  ).className;
+
   return (
     <form
       onSubmit={handleSubmit}
-      className={wrapperClassName}
-      data-empty={isEmpty}
-      data-dismissible={dismissible || undefined}
-      data-disabled={disabled || undefined}
-      data-invalid={hasError || undefined}
+      {...stylex.props(searchInputStyles.form)}
+      className={[stylex.props(searchInputStyles.form).className, formClassName, className]
+        .filter(Boolean)
+        .join(" ")}
+      {...formProps}
       role="search"
     >
       {label && (
-        <label htmlFor={fieldId} className="search-input-label">
+        <label
+          htmlFor={fieldId}
+          {...stylex.props(searchInputStyles.label)}
+        >
           {label}
         </label>
       )}
 
-      <div className="search-container">
-        <div className="input-field-wrapper">
-          <LuSearch className="search-icon-left" size={18} aria-hidden="true" />
+      <div {...stylex.props(searchInputStyles.container)}>
+        <div
+          {...stylex.props(
+            searchInputStyles.fieldWrapper,
+            size === "small" && searchInputStyles.fieldWrapperSmall,
+            hasError && searchInputStyles.fieldWrapperInvalid,
+            disabled && searchInputStyles.fieldWrapperDisabled,
+          )}
+        >
+          <LuSearch
+            {...stylex.props(
+              searchInputStyles.iconLeft,
+              fieldFocused && searchInputStyles.iconLeftFocused,
+            )}
+            size={18}
+            aria-hidden="true"
+          />
           <input
             ref={inputRef}
             id={fieldId}
-            name={name}
             type="text"
-            placeholder={placeholder}
+            name={name}
             value={value}
-            disabled={disabled}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
             autoFocus={autoFocus}
+            disabled={disabled}
             aria-label={inputAriaLabel}
             aria-invalid={hasError || undefined}
             aria-describedby={describedBy}
-            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => setFieldFocused(true)}
+            onBlur={() => setFieldFocused(false)}
             onKeyDown={(e) => {
               // Default: Escape clears only when there is text.
               // Dismissible: Escape always exits (empty = cancel search mode).
@@ -128,18 +156,26 @@ const SearchInput: React.FC<SearchInputProps> = ({
                 handleClear();
               }
             }}
-            className="search-input-field"
+            {...stylex.props(
+              searchInputStyles.field,
+              disabled && searchInputStyles.fieldDisabled,
+            )}
           />
 
           {/* Clear / dismiss: hidden when empty unless dismissible overlay mode. */}
           <div
-            className={`clear-btn-wrapper${showClearControl ? " visible" : ""}`}
+            {...stylex.props(
+              searchInputStyles.clearWrapper,
+              showClearControl
+                ? searchInputStyles.clearWrapperVisible
+                : searchInputStyles.clearWrapperHidden,
+            )}
             aria-hidden={!showClearControl}
           >
             <button
               type="button"
               onClick={handleClear}
-              className="clear-icon-button"
+              {...stylex.props(searchInputStyles.clearButton)}
               title={clearAriaLabel}
               aria-label={clearAriaLabel}
               tabIndex={!showClearControl || disabled ? -1 : 0}
@@ -150,12 +186,12 @@ const SearchInput: React.FC<SearchInputProps> = ({
           </div>
         </div>
 
-        <div className="search-action">
+        <div {...stylex.props(searchInputStyles.action)}>
           <Button
             type="submit"
             variant="primary"
             size="medium" // 调整为 medium 配合胶囊高度
-            className="search-btn"
+            className={searchBtnClassName}
             disabled={disabled}
             aria-label={searchButtonLabel}
           >
@@ -165,13 +201,16 @@ const SearchInput: React.FC<SearchInputProps> = ({
       </div>
 
       {description && !hasError && (
-        <div id={descriptionId} className="search-input-description">
+        <div
+          id={descriptionId}
+          {...stylex.props(searchInputStyles.description)}
+        >
           {description}
         </div>
       )}
 
       {hasError && (
-        <div id={errorId} className="search-input-error" role="alert">
+        <div id={errorId} {...stylex.props(searchInputStyles.error)} role="alert">
           {errorMessage}
         </div>
       )}

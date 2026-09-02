@@ -282,8 +282,23 @@ export function withTurnCredits(
   return { ...tokens, credits };
 }
 
-export function formatTokenCount(value: number) {
-  if (!Number.isFinite(value) || value < 0) return "—";
+/**
+ * 平台积分的 UI 统一口径。所有展示位（状态行 chip、面板行、dock 行、
+ * /credits 诊断）都从这一处取格式——改文案/精度只动这里。
+ *
+ * - 完整形（默认）：`⚡ 0.04 积分`
+ * - 紧凑形（compact，多 run 行/极限窄宽）：`⚡0.04`
+ */
+export function formatCreditsChip(
+  credits: number,
+  options?: { compact?: boolean }
+): string {
+  return options?.compact
+    ? `⚡${credits.toFixed(2)}`
+    : `⚡ ${credits.toFixed(2)} 积分`;
+}
+
+export function formatTokenCount(value: number) {  if (!Number.isFinite(value) || value < 0) return "—";
   if (value < 1000) return String(Math.round(value));
   if (value < 1_000_000) {
     const compact = value / 1000;

@@ -651,6 +651,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }),
   );
   clearWatchdogs();
+  // run 级积分累计：quota fallback 与队列 drain 都会整体替换 result，只看
+  // 最终 result.turnCredits 会少记前面各轮。turnCredits undefined = 该轮无
+  // 平台计费（自有 API），跳过不造 0。
+  let runCreditsTotal: number | undefined = result.turnCredits;
 
   // Quota auto-fallback: when a run fails because the provider reports a
   // quota/limit (HTTP 429 or CliProviderQuotaError, or an error message that
@@ -674,7 +678,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     clearWatchdogs();
     if (fallbackResult.exitCode === 0) {
       result = fallbackResult;
-    } else {
+    }
+    // fallback 轮的平台积分同样进 run 级累计（成功/失败都可能已扣费）。
+    if (fallbackResult.turnCredits !== undefined) {
+      runCreditsTotal = (runCreditsTotal ?? 0) + fallbackResult.turnCredits;
+    }
+    if (fallbackResult.exitCode !== 0) {
       // Fallback also failed: report the fallback failure normally and keep
       // the fallback's error for downstream surfacing. Prefer whichever
       // dialogId we have so the caller can still --continue.
@@ -727,6 +736,10 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         );
         clearWatchdogs();
         result = turnResult;
+        // drain 轮积分进 run 级累计（result 被整体替换，不累计就丢）。
+        if (turnResult.turnCredits !== undefined) {
+          runCreditsTotal = (runCreditsTotal ?? 0) + turnResult.turnCredits;
+        }
         if (result.exitCode !== 0) {
           break;
         }
@@ -796,6 +809,9 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       status: outcome.status,
       exitCode: outcome.exitCode,
       dialogId: result.dialogId,
+      // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
+      // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
+      ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
       ...truncationNote,
     },
     {

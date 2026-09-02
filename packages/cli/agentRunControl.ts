@@ -41,6 +41,12 @@ export type RunRecord = {
   status: RunStatus;
   exitCode?: number;
   endedAt?: string;
+  /**
+   * 本次 run 实际消耗的平台积分（本地进程收尾时自报，sumPlatformCredits 口径，
+   * 只含 billing_unit === "credits" 的平台计费轮）。缺省 = 该 run 没有平台计费
+   * （自有 API / 订阅制）。dock 行显示「⚡ x.xx」用。
+   */
+  credits?: number;
   logPath: string;
   queuePath?: string;
   dialogId?: string;
@@ -1568,6 +1574,8 @@ export function finalizeRunRecord(
     status: RunRecord["status"];
     exitCode?: number;
     dialogId?: string;
+    /** 本次 run 实际消耗的平台积分（run 进程自报）。 */
+    credits?: number;
     /** Diagnostic note for callers/logs; not persisted on the run record. */
     note?: string;
   },
@@ -1582,6 +1590,9 @@ export function finalizeRunRecord(
     record.status = update.status;
     if (typeof update.exitCode === "number") record.exitCode = update.exitCode;
     if (update.dialogId) record.dialogId = update.dialogId;
+    if (typeof update.credits === "number" && Number.isFinite(update.credits)) {
+      record.credits = update.credits;
+    }
     record.endedAt = now().toISOString();
     // A self-reported terminal status is ground truth; drop any orphan verdict
     // an earlier reconciler pass may have written.

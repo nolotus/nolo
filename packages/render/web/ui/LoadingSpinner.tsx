@@ -1,6 +1,7 @@
 // render/web/ui/LoadingSpinner.tsx
-import "../ui.css";
-import type React from "react";
+import * as stylex from "@stylexjs/stylex";
+
+import { spinnerStyles } from "./loadingSpinner.styles";
 
 interface LoadingSpinnerProps {
   size?: number; // 直径
@@ -14,18 +15,17 @@ function LoadingSpinner({
   thickness = 2,
   className = "",
 }: LoadingSpinnerProps) {
+  const { className: sxClass } = stylex.props(spinnerStyles.spinner);
   return (
-    <>
-      <span
-        className={`loading-spinner ${className}`.trim()}
-        style={{
-          width: size,
-          height: size,
-          borderWidth: thickness,
-        }}
-        aria-hidden="true"
-      />
-    </>
+    <span
+      className={[sxClass, className].filter(Boolean).join(" ")}
+      style={{
+        width: size,
+        height: size,
+        borderWidth: thickness,
+      }}
+      aria-hidden="true"
+    />
   );
 }
 

@@ -1,0 +1,206 @@
+/* ReadOnlyMarkdownContent —— markdown 正文后代元素样式（自 ui.css 分区 1:1 迁出）。
+ *
+ * 该组件以 dangerouslySetInnerHTML 渲染 markdown，子元素无法挂 StyleX 类，
+ * 后代元素选择器是 StyleX 的结构性盲区，故本文件保留为组件自有 CSS。
+ * 颜色/间距仍引用全局 design token（--text、--space-* 等）。
+ */
+
+.ReadOnlyMarkdownContent {
+            color: var(--text);
+            width: 100%;
+          }
+          .ReadOnlyMarkdownContent__body {
+            color: var(--text);
+            font-size: var(--fontSize-base);
+            line-height: 1.8;
+            letter-spacing: 0.005em;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }
+          .ReadOnlyMarkdownContent__body > :first-child {
+            margin-top: 0;
+          }
+          .ReadOnlyMarkdownContent__body > :last-child {
+            margin-bottom: 0;
+          }
+          .ReadOnlyMarkdownContent__body h1 {
+            color: var(--text);
+            font-weight: 700;
+            font-size: 2rem;
+            line-height: var(--leading-tight);
+            margin: var(--space-10) 0 var(--space-5);
+            letter-spacing: -0.025em;
+          }
+          .ReadOnlyMarkdownContent__body h2 {
+            color: var(--text);
+            font-weight: 650;
+            font-size: var(--fontSize-2xl);
+            line-height: var(--leading-tight);
+            margin: var(--space-8) 0 var(--space-4);
+            letter-spacing: -0.02em;
+          }
+          .ReadOnlyMarkdownContent__body h3 {
+            color: var(--text);
+            font-weight: 600;
+            font-size: var(--fontSize-xl);
+            line-height: var(--leading-normal);
+            margin: var(--space-6) 0 var(--space-3);
+            letter-spacing: -0.015em;
+          }
+          .ReadOnlyMarkdownContent__body h4 {
+            color: var(--text);
+            font-weight: 600;
+            font-size: var(--fontSize-lg);
+            line-height: var(--leading-normal);
+            margin: var(--space-5) 0 var(--space-2);
+          }
+          .ReadOnlyMarkdownContent__body h5 {
+            color: var(--text);
+            font-weight: 600;
+            font-size: var(--fontSize-lg);
+            line-height: var(--leading-normal);
+            margin: var(--space-4) 0 var(--space-2);
+          }
+          .ReadOnlyMarkdownContent__body h6 {
+            color: var(--textSecondary);
+            font-weight: 600;
+            font-size: var(--fontSize-base);
+            line-height: var(--leading-relaxed);
+            margin: var(--space-3) 0 var(--space-1);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+          .ReadOnlyMarkdownContent__body p,
+          .ReadOnlyMarkdownContent__body ul,
+          .ReadOnlyMarkdownContent__body ol,
+          .ReadOnlyMarkdownContent__body blockquote,
+          .ReadOnlyMarkdownContent__body pre,
+          .ReadOnlyMarkdownContent__body table {
+            margin: var(--space-4) 0;
+          }
+          .ReadOnlyMarkdownContent__body ul,
+          .ReadOnlyMarkdownContent__body ol {
+            padding-left: var(--space-4);
+            line-height: var(--leading-relaxed);
+          }
+          .ReadOnlyMarkdownContent__body ul ul,
+          .ReadOnlyMarkdownContent__body ul ol,
+          .ReadOnlyMarkdownContent__body ol ul,
+          .ReadOnlyMarkdownContent__body ol ol {
+            margin: var(--space-1) 0;
+            padding-left: var(--space-3);
+          }
+          .ReadOnlyMarkdownContent__body li + li {
+            margin-top: var(--space-1);
+          }
+          .ReadOnlyMarkdownContent__body li {
+            line-height: var(--leading-relaxed);
+          }
+          .ReadOnlyMarkdownContent__body li > p {
+            margin: 0;
+          }
+          .ReadOnlyMarkdownContent__body a {
+            color: var(--primary);
+            text-decoration: underline;
+            text-decoration-color: var(--primary);
+            text-underline-offset: 0.14em;
+          }
+          .ReadOnlyMarkdownContent__body blockquote {
+            border-left: 4px solid var(--primary);
+            border-radius: 0 var(--space-1) var(--space-1) 0;
+            padding: var(--space-3) var(--space-5);
+            color: var(--textSecondary);
+            background: var(--backgroundSecondary);
+            box-shadow: inset 3px 0 0 var(--primary), var(--shadow1);
+          }
+          .ReadOnlyMarkdownContent__body blockquote > :first-child {
+            margin-top: 0;
+          }
+          .ReadOnlyMarkdownContent__body blockquote > :last-child {
+            margin-bottom: 0;
+          }
+          .ReadOnlyMarkdownContent__body code {
+            font-family:
+              var(--font-mono, "JetBrains Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+            font-size: 0.9em;
+          }
+          .ReadOnlyMarkdownContent__body :not(pre) > code {
+            background: var(--backgroundSecondary);
+            color: var(--primary);
+            border: 1px solid var(--border);
+            border-radius: var(--space-1);
+            padding: 0.1em 0.35em;
+          }
+          .ReadOnlyMarkdownContent__body pre {
+            background: var(--codeBackground);
+            border: 1px solid var(--borderSubtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4);
+            overflow: auto;
+          }
+          .ReadOnlyMarkdownContent__body pre code {
+            background: transparent;
+            border: 0;
+            padding: 0;
+            font-size: var(--fontSize-base);
+            color: inherit;
+            font-feature-settings: "calt" 1, "liga" 1;
+          }
+          .ReadOnlyMarkdownContent__body table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid var(--borderSubtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            background: var(--background);
+          }
+          .ReadOnlyMarkdownContent__body th,
+          .ReadOnlyMarkdownContent__body td {
+            border-bottom: 1px solid var(--borderSubtle);
+            padding: 6px var(--space-3);
+            text-align: left;
+            vertical-align: top;
+            line-height: var(--leading-normal);
+          }
+          .ReadOnlyMarkdownContent__body th p,
+          .ReadOnlyMarkdownContent__body td p {
+            margin: 0;
+          }
+          .ReadOnlyMarkdownContent__body thead th {
+            background: var(--backgroundSecondary);
+            font-weight: 600;
+          }
+          .ReadOnlyMarkdownContent__body tbody tr:last-child td {
+            border-bottom: 0;
+          }
+          .ReadOnlyMarkdownContent__body img {
+            max-width: 100%;
+            height: auto;
+            border-radius: var(--radius-lg);
+            display: block;
+            margin: var(--space-4) 0;
+          }
+          .ReadOnlyMarkdownContent__body hr {
+            border: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+            margin: var(--space-6) 0;
+          }
+          .ReadOnlyMarkdownContent__body input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            margin-right: var(--space-2);
+            accent-color: var(--textSecondary);
+            vertical-align: middle;
+          }
+          @media (max-width: 768px) {
+            .ReadOnlyMarkdownContent__body {
+              font-size: var(--fontSize-base);
+              line-height: var(--leading-relaxed);
+            }
+          }
+          @media (min-width: 768px) {
+            .ReadOnlyMarkdownContent__body {
+              font-size: var(--fontSize-lg);
+            }
+          }

@@ -1,4 +1,4 @@
-import "../ui.css";
+import "./ReadOnlyMarkdownContent.css";
 import React, { useEffect, useMemo, useState } from "react";
 import { useAppSelector } from "app/store";
 import { selectRuntimeCurrentServer } from "app/stateViews/runtime";

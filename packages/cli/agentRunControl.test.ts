@@ -1042,6 +1042,31 @@ describe("agent run control plane", () => {
     expect(record.endedAt).toBe("2025-01-01T00:00:00.000Z");
   });
 
+  test("finalizeRunRecord 落盘 run 自报的平台积分 credits", () => {
+    const deps = createDeps();
+    writeRunRecord(
+      {
+        runId: "run-credits",
+        agentKey: "a",
+        startedAt: "2025-01-01T00:00:00.000Z",
+        status: "running",
+        logPath: "/home/test/.nolo/runs/run-credits.log",
+      },
+      deps
+    );
+    finalizeRunRecord(
+      "run-credits",
+      { status: "done", exitCode: 0, credits: 0.0521 },
+      deps
+    );
+    expect(readRunRecord("run-credits", deps)?.credits).toBe(0.0521);
+    // 无计费（自有 API）不写字段；非有限值忽略。
+    finalizeRunRecord("run-credits", { status: "done", exitCode: 0 }, deps);
+    expect(readRunRecord("run-credits", deps)?.credits).toBe(0.0521);
+    finalizeRunRecord("run-credits", { status: "done", exitCode: 0, credits: NaN }, deps);
+    expect(readRunRecord("run-credits", deps)?.credits).toBe(0.0521);
+  });
+
   test("runAgentPsCommand lists runs", async () => {
     const deps = createDeps();
     const { output, lines } = createMockOutput();

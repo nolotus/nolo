@@ -1,6 +1,8 @@
 // render/web/ui/Table.tsx
-import "../ui.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { useState, useCallback, useMemo, useEffect } from "react";
+
+import { tableChromeStyles } from "./table.styles";
 import { Path, Node as SlateNode } from "slate";
 import { ColumnResizer } from "create/editor/ColumnResizer";
 import {
@@ -278,13 +280,17 @@ export const Table: React.FC<TableProps> = ({
         headerControls={
           canShowHeaderControls && (
             <div
-              className={`table-header-controls ${
-                showExportMenu ? "is-active" : ""
-              }`}
+              className={[
+                "table-header-controls",
+                stylex.props(tableChromeStyles.headerControls).className,
+                showExportMenu ? "is-active" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
             >
               <button
                 type="button"
-                className="table-action-button"
+                {...stylex.props(tableChromeStyles.actionButton)}
                 onClick={() => void handleConvertToDataTable()}
                 disabled={isConverting}
               >
@@ -299,7 +305,7 @@ export const Table: React.FC<TableProps> = ({
               <div style={{ position: "relative" }}>
                 <button
                   type="button"
-                  className="table-action-button"
+                  {...stylex.props(tableChromeStyles.actionButton)}
                   onClick={() => setShowExportMenu(!showExportMenu)}
                 >
                   <LuDownload size={14} aria-hidden="true" />
@@ -307,24 +313,24 @@ export const Table: React.FC<TableProps> = ({
                 </button>
 
                 {showExportMenu && (
-                  <div className="export-menu">
+                  <div {...stylex.props(tableChromeStyles.exportMenu)}>
                     <button
                       type="button"
-                      className="export-option"
+                      {...stylex.props(tableChromeStyles.exportOption)}
                       onClick={() => void handleExport("csv")}
                     >
                       <LuFileText size={14} aria-hidden="true" /> CSV
                     </button>
                     <button
                       type="button"
-                      className="export-option"
+                      {...stylex.props(tableChromeStyles.exportOption)}
                       onClick={() => void handleExport("json")}
                     >
                       <LuFileText size={14} aria-hidden="true" /> JSON
                     </button>
                     <button
                       type="button"
-                      className="export-option"
+                      {...stylex.props(tableChromeStyles.exportOption)}
                       onClick={() => void handleExport("xlsx")}
                     >
                       <LuTable size={14} aria-hidden="true" /> XLSX

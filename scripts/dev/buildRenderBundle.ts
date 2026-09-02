@@ -45,10 +45,17 @@ const WORKSPACE_PACKAGES = [
 function resolveWorkspaceSubpath(pkg: string, subpath: string, repoRoot: string): string | null {
   const basePath = join(repoRoot, "packages", pkg, subpath);
 
-  // 1. 优先尝试扩展名匹配（例如 app/hooks -> packages/app/hooks.ts）
-  for (const ext of [".tsx", ".ts", ".jsx", ".js", ".json"]) {
-    const withExt = `${basePath}${ext}`;
-    if (existsSync(withExt) && statSync(withExt).isFile()) return withExt;
+  // 1. 优先尝试扩展名匹配（例如 app/hooks -> packages/app/hooks.ts）。
+  //    identity 等包使用 .cloud/.local 构建变体（package.json exports 的
+  //    nolo-cloud 条件映射），SSR bundle 为 cloud edition，故按
+  //    无变体 -> .cloud -> .local 顺序尝试，避免解析失败回落到
+  //    packages: "external" 后由运行时直接转译源码（stylex 未编译会炸）。
+  const VARIANTS = ["", ".cloud", ".local"];
+  for (const variant of VARIANTS) {
+    for (const ext of [".tsx", ".ts", ".jsx", ".js", ".json"]) {
+      const withExt = `${basePath}${variant}${ext}`;
+      if (existsSync(withExt) && statSync(withExt).isFile()) return withExt;
+    }
   }
 
   // 2. 尝试精确文件

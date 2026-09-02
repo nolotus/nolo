@@ -815,3 +815,18 @@
   .align-justify:lang(en) {
     text-justify: inter-word;
   }
+
+/* ── Table 控制栏显隐（自 ui.css「Table」分区迁入：祖先 hover 选择器
+   StyleX 无法表达，语义类名由 Table.tsx 保留挂载；布局/配色在 table.styles.ts）── */
+.table-header-controls {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+  pointer-events: none;
+}
+
+/* Hover 表格容器时显示，或者菜单打开时强制显示 */
+.table-container:hover .table-header-controls,
+.table-header-controls.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}

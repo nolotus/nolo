@@ -1,5 +1,8 @@
-import "../ui.css";
+// render/web/ui/PageLoading.tsx
+import * as stylex from "@stylexjs/stylex";
 import React from "react";
+
+import { pageLoadingStyles } from "./pageLoading.styles";
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
 
 export interface PageLoadingProps {
@@ -17,7 +20,7 @@ export interface PageLoadingProps {
 
 /**
  * 通用页面加载状态组件：
- * - 居中展示 StreamingIndicator
+ * - 居中展示 StreamingIndicator（bare 裸形态，原为后代选择器覆盖）
  * - 支持自定义提示文案
  * - 可选是否占满可用高度
  * - 不对外暴露 style，避免破坏统一布局
@@ -30,13 +33,18 @@ const PageLoading: React.FC<PageLoadingProps> = ({
     <div
       role="status"
       aria-live="polite"
-      className={`page-loading${fullHeight ? " page-loading--full" : ""}`}
+      {...stylex.props(
+        pageLoadingStyles.page,
+        fullHeight && pageLoadingStyles.full,
+      )}
     >
-      <div className="loading-indicator-wrap">
-        <StreamingIndicator />
+      <div {...stylex.props(pageLoadingStyles.indicatorWrap)}>
+        <StreamingIndicator bare />
       </div>
 
-      {message && <span className="loading-text">{message}</span>}
+      {message && (
+        <span {...stylex.props(pageLoadingStyles.text)}>{message}</span>
+      )}
     </div>
   );
 };

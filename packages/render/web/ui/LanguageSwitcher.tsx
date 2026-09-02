@@ -1,11 +1,13 @@
 // render/ui/LanguageSwitcher.tsx
-import "../ui.css";
+import * as stylex from "@stylexjs/stylex";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Language } from "app/i18n/types";
 import { Button as RacButton } from "react-aria-components";
 import { LuLanguages } from "react-icons/lu";
 import { MenuTrigger, Menu, MenuItem } from "render/web/ui/Menu";
+
+import { langSwitcherStyles } from "./languageSwitcher.styles";
 
 // 使用场景：多语言切换选择器
 const languages = [
@@ -28,16 +30,25 @@ const LanguageSwitcher = memo(({ iconOnly = false }: LanguageSwitcherProps) => {
     languages.find((lang) => lang.code === i18n.language) || languages[0];
 
   return (
-    <div className="lang-switcher">
+    <div {...stylex.props(langSwitcherStyles.switcher)}>
       <MenuTrigger>
         <RacButton
-          className={`lang-button${iconOnly ? " lang-button--icon-only" : ""}`}
+          className={stylex.props(
+            langSwitcherStyles.button,
+            iconOnly && langSwitcherStyles.iconOnly,
+          ).className}
           aria-label="切换语言"
           {...(iconOnly ? { title: "语言" } : {})}
         >
-          <LuLanguages size={16} className="lang-icon" aria-hidden="true" />
+          <LuLanguages
+            size={16}
+            {...stylex.props(langSwitcherStyles.icon)}
+            aria-hidden="true"
+          />
           {!iconOnly && (
-            <span className="lang-current">{currentLanguage.name}</span>
+            <span {...stylex.props(langSwitcherStyles.current)}>
+              {currentLanguage.name}
+            </span>
           )}
         </RacButton>
         <Menu

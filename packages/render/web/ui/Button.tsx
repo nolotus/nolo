@@ -1,8 +1,18 @@
 // 文件: render/web/ui/Button.tsx
 
-import "../ui.css";
 import React from "react";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "app/routing";
+
+import {
+  buttonStyles,
+  buttonActiveStyles,
+  buttonContentGapStyles,
+  buttonHoverStyles,
+  buttonLeadingStyles,
+  buttonSizeStyles,
+  buttonVariantStyles,
+} from "./button.styles";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "ghost" | "danger";
@@ -54,35 +64,40 @@ const Button = ({
     onClick?.(e as any);
   };
 
-  const classes = [
-    "btn",
-    `btn-${variant}`,
-    `btn-${size}`,
-    block && "btn-block",
-    loading && "btn-loading",
-    isDisabled && "btn-disabled",
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // 根元素样式：variant 静态样式始终挂载；hover/active/focusRing 仅在非
+  // disabled 时挂载，等价于原 `:hover:not(.btn-disabled)` / `:active:not(...)`。
+  const { className: rootClassName } = stylex.props(
+    buttonStyles.base,
+    buttonSizeStyles[size],
+    block && buttonStyles.block,
+    buttonVariantStyles[variant],
+    !isDisabled && buttonHoverStyles[variant],
+    !isDisabled && buttonActiveStyles[variant],
+    isDisabled && buttonStyles.disabled,
+    !isDisabled && buttonStyles.focusRing,
+  );
+
+  const incomingStyle = (rest as any).style as
+    | React.CSSProperties
+    | undefined;
+  const { style: _incomingStyle, ...restProps } = rest as any;
+  const inlineStyle: React.CSSProperties | undefined = isLink
+    ? { textDecoration: "none", ...incomingStyle }
+    : incomingStyle;
+
+  // 外部 className 保留透传（追加在 StyleX 类之后，行为与原实现一致）
+  const classes = [rootClassName, className].filter(Boolean).join(" ");
 
   const commonProps: any = {
+    ...restProps,
     className: classes,
+    style: inlineStyle,
     onClick: handleClick,
     // 显式设置 aria-label 和 title
     "aria-label": finalAriaLabel,
     title: title,
     ...(isNativeButton ? { disabled: isDisabled, type } : {}),
-    ...(isLink
-      ? {
-        to: to || "#",
-        style: {
-          textDecoration: "none",
-          ...(rest as any).style,
-        },
-      }
-      : {}),
-    ...rest,
+    ...(isLink ? { to: to || "#" } : {}),
   };
 
   return (
@@ -90,17 +105,28 @@ const Button = ({
       {React.createElement(
         Component as any,
         commonProps as any,
-        <span className={`btn-content${loading ? " btn-content--loading" : ""}`}>
+        <span
+          {...stylex.props(
+            buttonStyles.contentBase,
+            buttonContentGapStyles[size],
+            loading && buttonStyles.contentLoading,
+          )}
+        >
           {loading ? (
-            <span className="btn-spinner-wrap" aria-hidden="true" />
+            <span {...stylex.props(buttonStyles.spinnerWrap)} aria-hidden="true" />
           ) : (
             icon && (
-              <span className="btn-leading" aria-hidden="true">
-                <span className="btn-icon">{icon}</span>
+              <span
+                {...stylex.props(buttonStyles.leadingBase, buttonLeadingStyles[size])}
+                aria-hidden="true"
+              >
+                <span {...stylex.props(buttonStyles.icon)}>{icon}</span>
               </span>
             )
           )}
-          {shouldRenderText && <span className="btn-text">{children}</span>}
+          {shouldRenderText && (
+            <span {...stylex.props(buttonStyles.text)}>{children}</span>
+          )}
         </span>
       )}
     </>

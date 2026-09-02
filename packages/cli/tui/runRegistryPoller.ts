@@ -124,6 +124,10 @@ export function snapshotFromRunRecord(
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
     ...(typeof counters?.toolCalls === "number" ? { toolCallCount: counters.toolCalls } : {}),
+    // 收尾自报的平台积分 → dock 行「⚡ x.xx 积分」。
+    ...(typeof record.credits === "number" && Number.isFinite(record.credits)
+      ? { credits: record.credits }
+      : {}),
     // note 在终态时是死因（"orphaned: process gone…"），非终态时只是备注。
     ...(record.note && isAgentRunTerminalStatus(record.status)
       ? { errorMessage: record.note }
@@ -147,6 +151,7 @@ function fingerprint(snapshot: AgentRunSnapshot): string {
     snapshot.toolCallCount ?? -1,
     snapshot.errorMessage ?? "",
     snapshot.finishedAt ?? 0,
+    snapshot.credits ?? -1,
     snapshot.inFlight ? [snapshot.inFlight.kind, snapshot.inFlight.name, snapshot.inFlight.startedAt] : null,
   ]);
 }

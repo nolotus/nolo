@@ -6,6 +6,7 @@
  * 这个格式化函数。渲染逻辑一字未改。
  */
 
+import { formatCreditsChip } from "../client/tokenUsage";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
   getAgentRunStatusIcon,
@@ -80,10 +81,15 @@ export function formatAgentRunPanelLines(
   // （例如 `thinking 12s`），避免把 run 总时长和当前动作时长混为一谈。
   const age = formatTerminalRunAge(snapshot, now);
   const agePart = age ? ` · ${age}` : "";
+  // 平台积分只在收尾自报后出现；缺省（自有 API / 订阅制）不渲染。
+  const creditsPart =
+    typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)
+      ? ` · ${formatCreditsChip(snapshot.credits)}`
+      : "";
 
   if (!colorEnabled) {
     lines.push(
-      `🤖 Sub-Agent: ${name}${runId} · ${statusSymbol} ${status}${unassignedPart}${agePart}${progressPart}${errPart}`
+      `🤖 Sub-Agent: ${name}${runId} · ${statusSymbol} ${status}${unassignedPart}${agePart}${progressPart}${creditsPart}${errPart}`
     );
   } else {
     const botIcon = themeText("🤖", "accent", true);
@@ -96,8 +102,9 @@ export function formatAgentRunPanelLines(
     const unassignedText = unassignedPart ? themeText(unassignedPart, "muted") : "";
     const ageText = agePart ? themeText(agePart, "chrome") : "";
     const progressText = progressPart ? themeText(progressPart, "chrome") : "";
+    const creditsText = creditsPart ? themeText(creditsPart, "muted") : "";
     const errorText = errPart ? themeText(errPart, "danger") : "";
-    lines.push(`${botIcon}${labelText}${nameText}${statusText}${unassignedText}${ageText}${progressText}${errorText}`);
+    lines.push(`${botIcon}${labelText}${nameText}${statusText}${unassignedText}${ageText}${progressText}${creditsText}${errorText}`);
   }
 
   const detail = formatPanelDetail(snapshot);

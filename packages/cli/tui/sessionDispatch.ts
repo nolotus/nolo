@@ -10,7 +10,6 @@ import {
 } from "../cliEnvHelpers";
 import {
   DEFAULT_TUI_AGENT_KEY,
-  PLATFORM_AGENTS,
   resolveCatalogPlatformAgents,
 } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
@@ -30,7 +29,7 @@ import {
 } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
-import { formatElapsedSeconds, renderContextPanel, renderKnownAgents, renderTuiHelp } from "./sessionRender";
+import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import type { TuiState, TuiInputResult, ThinkingDisplayMode } from "./sessionTypes";
@@ -107,16 +106,13 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
       ...resolveAgentModelIdentity({ agentKey, agentName }),
     }),
-    apiSource: PLATFORM_AGENTS.some((entry) => entry.key === agentKey)
-      ? "platform"
-      : undefined,
   };
 }
 
 
 function applyAgentSwitch(
   state: TuiState,
-  target: { name: string; key: string; model?: string; apiSource?: string },
+  target: { name: string; key: string; model?: string },
 ) {
   const contextWindow = resolveAgentContextWindow({
     agentKey: target.key,
@@ -136,7 +132,6 @@ function applyAgentSwitch(
         model: target.model,
         userLanguage: state.userLanguage,
       }),
-      apiSource: target.apiSource,
     },
     output: `Switched to ${target.name}. ${
       state.dialogId ? `Dialog kept: ${state.dialogId}` : "Dialog kept: new"
@@ -314,6 +309,9 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
     case "/context":
     case "/ctx":
       return { nextState: state, output: renderContextPanel(state) };
+    case "/credits":
+      // 积分链路诊断：断在哪一环一眼可见（见 renderCreditsDebug 注释）。
+      return { nextState: state, output: renderCreditsDebug(state) };
     case "/runtime": {
       if (argText !== "auto" && argText !== "local" && argText !== "server") {
         return {

@@ -1,0 +1,102 @@
+import { describe, expect, test } from "bun:test";
+
+import { foldLocalResultForTui } from "./agentRun";
+import type { RunAgentTurnResult } from "./agentRunTypes";
+import { snapshotFromRunRecord } from "../tui/runRegistryPoller";
+import type { RunRecord } from "../agentRunControl";
+import { formatAgentRunPanelLines } from "../tui/agentRunPanelLines";
+import { formatRunDockLines } from "../tui/runDock";
+import type { AgentRunSnapshot } from "./agentRunSnapshot";
+
+describe("foldLocalResultForTui（状态行 ⚡ 积分的数据链）", () => {
+  test("turnCredits 必须随行——重建丢字段就是「扣了费但 ⚡ 永不显示」的回归", () => {
+    // 上游 runLocalAgentTurnForCli 已用 withTurnCredits 把 turnTokens.credits
+    // 覆盖成全轮求和值；fold 只负责不再丢字段。
+    const local: RunAgentTurnResult = {
+      exitCode: 0,
+      dialogId: "01DIALOG",
+      title: "t",
+      turnTokens: { input: 1000, output: 10, credits: 0.038 },
+      turnCredits: 0.038,
+    };
+    const folded = foldLocalResultForTui(local);
+    expect(folded.turnCredits).toBe(0.038);
+    expect(folded.turnTokens?.credits).toBe(0.038);
+    expect(folded.dialogId).toBe("01DIALOG");
+  });
+
+  test("无平台计费（自有 API）时 turnCredits 缺省、不造 0", () => {
+    const local: RunAgentTurnResult = {
+      exitCode: 0,
+      turnTokens: { input: 1000, output: 10 },
+    };
+    const folded = foldLocalResultForTui(local);
+    expect(folded.turnCredits).toBeUndefined();
+    expect("turnCredits" in folded).toBe(false);
+  });
+
+  test("失败字段（streamInterrupted / pendingToolName）照旧透传", () => {
+    const folded = foldLocalResultForTui({
+      exitCode: 0,
+      streamInterrupted: true,
+      pendingToolName: "Edit",
+    });
+    expect(folded.streamInterrupted).toBe(true);
+    expect(folded.pendingToolName).toBe("Edit");
+  });
+
+  test("emptyAssistantFallbackReason 随行——后台 run 结算 stalled 依赖它", () => {
+    const folded = foldLocalResultForTui({
+      exitCode: 0,
+      emptyAssistantFallbackReason: "length_truncated",
+    });
+    expect(folded.emptyAssistantFallbackReason).toBe("length_truncated");
+  });
+});
+
+describe("run 记录与面板/dock 的积分显示", () => {
+  const baseRecord = {
+    runId: "run-1",
+    agentKey: "a",
+    agentName: "AGY Flash",
+    startedAt: new Date(1_700_000_000_000).toISOString(),
+    endedAt: new Date(1_700_000_006_000).toISOString(),
+    status: "done" as const,
+    exitCode: 0,
+    logPath: "/tmp/run-1.log",
+  };
+
+  test("snapshotFromRunRecord 携带收尾自报的 credits", () => {
+    const snapshot = snapshotFromRunRecord({ ...baseRecord, credits: 0.12 } as RunRecord, Date.now());
+    expect(snapshot.credits).toBe(0.12);
+  });
+
+  test("没有平台计费的 run 不带 credits 字段", () => {
+    const snapshot = snapshotFromRunRecord({ ...baseRecord } as RunRecord, Date.now());
+    expect(snapshot.credits).toBeUndefined();
+  });
+
+  test("单 run 面板行显示「⚡ x.xx 积分」", () => {
+    const lines = formatAgentRunPanelLines(
+      { runId: "run-1", status: "done", agentName: "AGY Flash", credits: 0.12, logKey: "" },
+      false,
+      1_700_000_010_000
+    );
+    expect(lines[0]).toContain("⚡ 0.12 积分");
+  });
+
+  test("多 run dock 行显示紧凑积分", () => {
+    const lines = formatRunDockLines(
+      [
+        { runId: "run-1", status: "done", agentName: "A", credits: 0.05, logKey: "" },
+        { runId: "run-2", status: "done", agentName: "B", logKey: "" },
+      ],
+      false,
+      1_700_000_010_000
+    );
+    const row1 = lines.find((l) => l.includes("A #")) ?? "";
+    expect(row1).toContain("⚡0.05");
+    const row2 = lines.find((l) => l.includes("B #")) ?? "";
+    expect(row2).not.toContain("⚡");
+  });
+});

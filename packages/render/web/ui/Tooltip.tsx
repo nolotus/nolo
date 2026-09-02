@@ -7,6 +7,7 @@
 // FocusableContext. TriggerWrapper merges them onto an inner <span> so the
 // original children (<span>/<button>/<Button>) don't need forwardRef.
 import React, { useContext } from "react";
+import * as stylex from "@stylexjs/stylex";
 import {
   OverlayArrow,
   Tooltip as AriaTooltip,
@@ -14,6 +15,11 @@ import {
   TooltipTrigger as AriaTooltipTrigger,
 } from "react-aria-components/Tooltip";
 import { FocusableContext } from "react-aria/private/interactions/useFocusable";
+
+import {
+  tooltipStyles,
+  type TooltipArrowStyle,
+} from "./tooltip.styles";
 
 type LegacyPlacement =
   | "top"
@@ -85,15 +91,37 @@ export const Tooltip: React.FC<TooltipProps> = ({
     return <>{children}</>;
   }
 
+  // 原 CSS 仅按 data-placement 精确值给出 margin/入场位移/箭头旋转，
+  // 对角 placement 按 react-aria 的规范化首词对齐同侧行为。
+  const side = placement.split(" ")[0] as "top" | "bottom" | "left" | "right";
+  const placementStyle = {
+    top: tooltipStyles.placementTop,
+    bottom: tooltipStyles.placementBottom,
+    left: tooltipStyles.placementLeft,
+    right: tooltipStyles.placementRight,
+  }[side];
+  const arrowRotation: TooltipArrowStyle | null = {
+    top: null,
+    bottom: tooltipStyles.arrowRotateBottom,
+    left: tooltipStyles.arrowRotateLeft,
+    right: tooltipStyles.arrowRotateRight,
+  }[side];
+
   return (
     <AriaTooltipTrigger delay={delay}>
       <TriggerWrapper>{children}</TriggerWrapper>
       <AriaTooltip
         placement={PLACEMENT_MAP[placement] as AriaTooltipProps["placement"]}
         offset={6}
+        className={stylex.props(tooltipStyles.tooltip, placementStyle).className}
       >
         <OverlayArrow>
-          <svg width={8} height={8} viewBox="0 0 8 8">
+          <svg
+            width={8}
+            height={8}
+            viewBox="0 0 8 8"
+            {...stylex.props(tooltipStyles.arrow, arrowRotation)}
+          >
             <path d="M0 0 L4 4 L8 0" />
           </svg>
         </OverlayArrow>

@@ -18,6 +18,7 @@
  * 一个 shape，两个界面不可能对同一个 run 的状态各说各话。
  */
 
+import { formatCreditsChip } from "../client/tokenUsage";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import {
   clipText,
@@ -343,6 +344,10 @@ function formatRunDockRow(
   if (unassigned) facts.push(unassigned);
   if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
     facts.push(`${snapshot.toolCallCount} tools`);
+  }
+  // 平台积分（收尾自报）。多 run 行宽有限，用紧凑形式「⚡0.04」。
+  if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
+    facts.push(formatCreditsChip(snapshot.credits, { compact: true }));
   }
   // 「此刻在做什么」压过「最后做过什么」：前者由本地 registry 轮询提供且带
   // 自己的计时，后者只是历史。终态 run 没有此刻，直接跳过。
