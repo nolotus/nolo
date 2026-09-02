@@ -2,6 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import React from "react";
 import { messageLayoutStyles as layoutStyles } from "chat/messages/web/messageLayoutStyles";
 import "chat/messages/web/messagesStylexEscapeHatch.css";
+import { withLiteralClass } from "./withLiteralClass";
 
 const isAssistantToolStub = (message: any): boolean =>
   message?.role === "assistant" &&
@@ -47,39 +48,37 @@ const ShareDialogPreview: React.FC<{ messages: any[] }> = ({ messages }) => {
             className="ShareImportPage-msgWrapper"
           >
             <div
-              className={`msg ${isAssistant ? "robot" : "self"}`}
-              {...stylex.props(
+              {...withLiteralClass(
+                `msg ${isAssistant ? "robot" : "self"}`,
                 layoutStyles.msg,
                 !isAssistant && layoutStyles.msgSelf
               )}
             >
               <div
-                className="msg-inner desktop"
-                {...stylex.props(layoutStyles.msgInnerDesktop)}
+                {...withLiteralClass("msg-inner desktop", layoutStyles.msgInnerDesktop)}
               >
                 <div
-                  className="content-area"
                   {...stylex.props(
                     layoutStyles.contentArea,
                     isAssistant ? layoutStyles.contentAreaRobot : layoutStyles.contentAreaSelf
                   )}
                 >
                   {isAssistant && (
-                    <div className="robot-name" {...stylex.props(layoutStyles.robotName)}>
+                    <div {...stylex.props(layoutStyles.robotName)}>
                       AI Assistant
                     </div>
                   )}
                   <div
-                    className={`msg-body ${isAssistant ? "robot" : "self"}`}
                     data-hook="messages-esc-msg-body"
-                    {...stylex.props(
+                    {...withLiteralClass(
+                      `msg-body ${isAssistant ? "robot" : "self"}`,
                       layoutStyles.msgBody,
                       isAssistant ? layoutStyles.msgBodyRobot : layoutStyles.msgBodySelf
                     )}
                   >
-                    <div className="msg-content" {...stylex.props(layoutStyles.msgContent)}>
-                      <div className="message-text" {...stylex.props(layoutStyles.messageText)}>
-                        <div className="simple-text" {...stylex.props(layoutStyles.simpleText)}>
+                    <div {...stylex.props(layoutStyles.msgContent)}>
+                      <div {...withLiteralClass("message-text", layoutStyles.messageText)}>
+                        <div {...withLiteralClass("simple-text", layoutStyles.simpleText)}>
                           {text}
                         </div>
                       </div>

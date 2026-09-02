@@ -16,6 +16,7 @@ import { LuBot, LuBrain, LuInfo, LuLightbulb, LuSparkles, LuWrench, LuX } from "
 import type { FormData } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { toolsTabStyles as styles } from "./toolsTabStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import {
   buildAgentSkillConfigPatch,
   resolveAgentSkillConfig,
@@ -161,7 +162,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
   return (
     <div {...stylex.props(styles.panel)}>
       <section
-        className="agent-create-esc-tools-section"
         {...stylex.props(styles.section, styles.sectionHero)}
       >
         <div {...stylex.props(styles.headingCopy)}>
@@ -171,7 +171,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
       </section>
 
       <section
-        className="agent-create-esc-tools-section"
         {...stylex.props(styles.section)}
       >
         <div
@@ -205,8 +204,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
               {skillState.skillSummaries.map((skill) => (
                 <article
                   key={skill.dbKey}
-                  className="agent-create-esc-tools-skill-card agent-create-esc-tools-skill-card--selected"
-                  {...stylex.props(styles.skillCard, styles.skillCardSelected)}
+                  {...withLiteralClass("agent-create-esc-tools-skill-card agent-create-esc-tools-skill-card--selected", styles.skillCard, styles.skillCardSelected)}
                 >
                   <div {...stylex.props(styles.skillCardHeader)}>
                     <span
@@ -265,8 +263,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                       <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.boundTools")}</div>
                       <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.toolNames.map((toolId) => (
-                          <span key={toolId} className="agent-create-esc-tools-chip"
-                            {...stylex.props(styles.chip)}>
+                          <span key={toolId} {...stylex.props(styles.chip)}>
                             {getToolDisplayLabel(toolId, t)}
                           </span>
                         ))}
@@ -279,8 +276,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                       <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.requiredSkills")}</div>
                       <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.requiredSkills.map((skillId) => (
-                          <span key={skillId} className="agent-create-esc-tools-chip"
-                            {...stylex.props(styles.chip)}>
+                          <span key={skillId} {...stylex.props(styles.chip)}>
                             {skillId}
                           </span>
                         ))}
@@ -293,8 +289,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
                       <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.recommendedSkills")}</div>
                       <div {...stylex.props(styles.chipsRow)}>
                         {activeDetail.recommendedSkills.map((skillId) => (
-                          <span key={skillId} className="agent-create-esc-tools-chip"
-                            {...stylex.props(styles.chip)}>
+                          <span key={skillId} {...stylex.props(styles.chip)}>
                             {skillId}
                           </span>
                         ))}
@@ -314,7 +309,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
           </>
         ) : (
           <div
-            className="agent-create-esc-tools-empty-state"
             {...stylex.props(styles.emptyState)}
           >
             <div {...stylex.props(styles.summaryEmpty)}>{t("toolsTab.noSkillsSelected")}</div>
@@ -343,7 +337,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
       </section>
 
       <section
-        className="agent-create-esc-tools-section"
         {...stylex.props(styles.section)}
       >
         <div
@@ -389,7 +382,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
           </>
         ) : (
           <div
-            className="agent-create-esc-tools-collapsed-note"
             {...stylex.props(styles.collapsedNote)}
           >
             {t("toolsTab.manualToolsCollapsed", { count: value.length })}
@@ -398,7 +390,6 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
       </section>
 
       <section
-        className="agent-create-esc-tools-section"
         {...stylex.props(styles.section)}
       >
         <div {...stylex.props(styles.sectionHeading)}>
@@ -416,8 +407,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
             <div {...stylex.props(styles.skillCardLabel)}>{t("toolsTab.recommendedHints")}</div>
             <div {...stylex.props(styles.chipsRow)}>
               {skillState.recommendedSkillHints.map((hint) => (
-                <span key={hint} className="agent-create-esc-tools-chip"
-                      {...stylex.props(styles.chip)}>
+                <span key={hint} {...stylex.props(styles.chip)}>
                   {hint}
                 </span>
               ))}
@@ -445,8 +435,7 @@ const ToolsTabField: React.FC<ToolsTabFieldProps> = ({
         {runtimeToolLabels.length > 0 ? (
           <div {...stylex.props(styles.chipsRow)}>
             {runtimeToolLabels.map((tool) => (
-              <span key={tool.id} className="agent-create-esc-tools-chip"
-                      {...stylex.props(styles.chip)}>
+              <span key={tool.id} {...stylex.props(styles.chip)}>
                 {tool.label}
               </span>
             ))}

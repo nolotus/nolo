@@ -274,13 +274,13 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   return (
     <button
       type="button"
-      className={`voice-btn ${stateClass} ${className}`}
       data-hook={className.includes("voice-btn-in-send") ? "chat-esc-voice-btn-send" : undefined}
       onClick={handleClick}
       disabled={isProcessing}
       aria-label={label}
       title={label}
-      {...stylex.props(
+      {...withLiteralClass(
+        `voice-btn ${stateClass} ${className}`,
         messageInputStyles.voiceBtn,
         isRecording
           ? messageInputStyles.voiceBtnRecording
@@ -294,13 +294,13 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
       )}
     >
       {isProcessing ? (
-        <div className="voice-dots" aria-hidden="true" {...stylex.props(messageInputStyles.voiceDots)}>
+        <div className="voice-dots" aria-hidden="true" {...withLiteralClass("voice-dots", messageInputStyles.voiceDots)}>
           <span {...stylex.props(messageInputStyles.voiceDot)} />
           <span {...stylex.props(messageInputStyles.voiceDot)} />
           <span {...stylex.props(messageInputStyles.voiceDot)} />
         </div>
       ) : isRecording ? (
-        <div className="voice-bars" aria-hidden="true" {...stylex.props(messageInputStyles.voiceBars)}>
+        <div className="voice-bars" aria-hidden="true" {...withLiteralClass("voice-bars", messageInputStyles.voiceBars)}>
           <span {...stylex.props(messageInputStyles.voiceBar)} />
           <span {...stylex.props(messageInputStyles.voiceBar)} />
           <span {...stylex.props(messageInputStyles.voiceBar)} />

@@ -25,6 +25,7 @@ import { useViewMode } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
 import * as stylex from "@stylexjs/stylex";
 import { referencesSelectorStyles as styles } from "./referencesSelectorStyles";
+import { withLiteralClass } from "./withLiteralClass";
 
 // The shared cooperation space is our canonical source of public agents / public skills.
 // However, `space.visibility = "public"` does not yet imply anonymous DB reads for its
@@ -488,9 +489,8 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
       return (
         <label
             key={item.dbKey}
-            className="agent-create-esc-rs-item"
             data-selected={!!selected}
-            {...stylex.props(styles.item, selected && styles.itemSelected)}
+            {...withLiteralClass("agent-create-esc-rs-item", styles.item, selected && styles.itemSelected)}
           >
           <div>
             <input
@@ -500,9 +500,8 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
               {...stylex.props(styles.checkInput)}
             />
             <div
-              className="agent-create-esc-rs-check"
               data-checked={!!selected}
-              {...stylex.props(styles.checkboxUi)}
+              {...withLiteralClass("agent-create-esc-rs-check", styles.checkboxUi)}
             />
           </div>
 
@@ -525,8 +524,7 @@ const ReferencesSelector: React.FC<ReferencesSelectorProps> = ({
           </div>
 
           <div
-              className="agent-create-esc-rs-item-actions"
-              {...stylex.props(styles.itemActions)}
+              {...withLiteralClass("agent-create-esc-rs-item-actions", styles.itemActions)}
             >
             <Tooltip content={t("references.previewDoc", "预览文档")} delay={200}>
               <button

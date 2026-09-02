@@ -26,18 +26,17 @@ export const ImageGenerationCard = memo(function ImageGenerationCard({
   profileLabel?: string;
 }) {
   return (
-    <div className="image-generation-wait-card" aria-live="polite" {...stylex.props(styles.wrap)}>
+    <div aria-live="polite" {...stylex.props(styles.wrap)}>
       <div
-        className="image-generation-wait-card__canvas"
         role="img"
         aria-label="图片生成进度画布"
         {...stylex.props(styles.canvas)}
       >
-        <span className="image-generation-wait-card__dots" aria-hidden="true" {...stylex.props(styles.dots)} />
-        <span className="image-generation-wait-card__glow" aria-hidden="true" {...stylex.props(styles.glow)} />
-        <span className="image-generation-wait-card__glow-breathe" aria-hidden="true" {...stylex.props(styles.glowBreathe)} />
+        <span aria-hidden="true" {...stylex.props(styles.dots)} />
+        <span aria-hidden="true" {...stylex.props(styles.glow)} />
+        <span aria-hidden="true" {...stylex.props(styles.glowBreathe)} />
         {stageLabel && (
-          <span className="image-generation-wait-card__res" {...stylex.props(styles.res)}>
+          <span {...stylex.props(styles.res)}>
             {stageLabel}
             {typeof elapsedSeconds === "number" && elapsedSeconds > 0
               ? ` · ${elapsedSeconds}s`
@@ -45,22 +44,22 @@ export const ImageGenerationCard = memo(function ImageGenerationCard({
           </span>
         )}
       </div>
-      <div className="image-generation-wait-card__meta" {...stylex.props(styles.meta)}>
-        <span className="image-generation-wait-card__label" {...stylex.props(styles.label)}>
+      <div {...stylex.props(styles.meta)}>
+        <span {...stylex.props(styles.label)}>
           正在生成图片
         </span>
         {typeof elapsedSeconds === "number" && elapsedSeconds > 0 && (
-          <span className="image-generation-wait-card__hint" {...stylex.props(styles.hint)}>
+          <span {...stylex.props(styles.hint)}>
             已等待 {elapsedSeconds} 秒
           </span>
         )}
         {profileLabel && (
-          <span className="image-generation-wait-card__hint" {...stylex.props(styles.hint)}>
+          <span {...stylex.props(styles.hint)}>
             {profileLabel}
           </span>
         )}
         {waitHint && (
-          <span className="image-generation-wait-card__hint" {...stylex.props(styles.hint)}>
+          <span {...stylex.props(styles.hint)}>
             {waitHint}
           </span>
         )}

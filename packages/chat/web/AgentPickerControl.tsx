@@ -17,6 +17,7 @@ import type { AgentPickerCandidate } from "../hooks/useAgentPickerCandidates";
 import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
 import * as stylex from "@stylexjs/stylex";
 import { agentPickerControlStyles as apStyles } from "./agentPickerControlStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 
 export type AgentPickerDefaultOption = {
@@ -184,22 +185,19 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
   return (
     <div
       data-hook={open ? "chat-esc-ap-open" : undefined}
-      className={className}
-      {...stylex.props(apStyles.root)}
+      {...withLiteralClass(className || "", apStyles.root)}
     >
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
         <RACButton
           data-hook="chat-esc-ap-trigger"
-          className="agent-picker__trigger"
-          {...stylex.props(apStyles.trigger)}
+          {...withLiteralClass("agent-picker__trigger", apStyles.trigger)}
           aria-label={triggerAria}
         >
           <span {...stylex.props(apStyles.triggerIcon)} aria-hidden="true">
             {triggerIcon}
           </span>
           <span
-            className="agent-picker__trigger-label"
-            {...stylex.props(apStyles.triggerLabel)}
+            {...withLiteralClass("agent-picker__trigger-label", apStyles.triggerLabel)}
           >
             {triggerLabel}
           </span>
@@ -213,8 +211,7 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
           placement="top start"
           offset={6}
           hideArrow
-          className="nolo-select-popup select-popover"
-          {...stylex.props(apStyles.popover)}
+          {...withLiteralClass("nolo-select-popup select-popover", apStyles.popover)}
           style={{ width: 280, padding: 0 }}
         >
           {hint && <div {...stylex.props(apStyles.hint)}>{hint}</div>}

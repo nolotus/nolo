@@ -124,7 +124,10 @@ const MainLayout: React.FC = () => {
   const isSpaceRoute = isSpaceRoutePath(location.pathname);
   const isLifeRoute = location.pathname.startsWith("/life");
   const isDesktopApp = getIsDesktopApp();
-  const renderSiteFooter = shouldRenderSiteFooter(location.pathname);
+  // 登录后首页是工作区视图，不渲染页脚（法务入口在侧栏用户菜单）。
+  const renderSiteFooter = shouldRenderSiteFooter(location.pathname, {
+    isLoggedIn,
+  });
   const renderChatSidebar = shouldRenderChatSidebar({
     isLoggedIn,
     hasMounted,

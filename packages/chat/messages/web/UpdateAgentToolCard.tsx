@@ -13,6 +13,7 @@ import { toTrimmedString } from "core/toTrimmedString";
 import { resolveAgentCardDialogKey } from "./resolveAgentCardDialogKey";
 import { messagesStyles as mStyles } from "./messagesStyles";
 import { createAgentToolCardStyles as cStyles } from "./createAgentToolCardStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 interface UpdateAgentToolCardProps {
@@ -75,35 +76,34 @@ const UpdateAgentToolCard: React.FC<UpdateAgentToolCardProps> = ({ rawData, isEr
     };
 
     return (
-        <div className="premium-agent-card update-style" {...stylex.props(cStyles.card, mStyles.uatcCard)}>
-            <div className="pa-glow" {...stylex.props(mStyles.uatcGlow)} />
+        <div {...stylex.props(cStyles.card, mStyles.uatcCard)}>
+            <div {...stylex.props(mStyles.uatcGlow)} />
             <div
-                className="pa-content"
-                {...stylex.props(cStyles.content, mStyles.uatcContent)}
                 data-hook="messages-esc-pa-content"
+                {...withLiteralClass("pa-content", cStyles.content, mStyles.uatcContent)}
             >
-                <div className="pa-left" {...stylex.props(cStyles.left)}>
-                    <div className="pa-avatar-wrap" {...stylex.props(cStyles.avatarWrap)}>
-                        <div className="pa-avatar" {...stylex.props(cStyles.avatar)}>
+                <div {...stylex.props(cStyles.left)}>
+                    <div {...stylex.props(cStyles.avatarWrap)}>
+                        <div {...stylex.props(cStyles.avatar)}>
                             <LuWrench size={22} aria-hidden="true" />
                         </div>
-                        <div className="pa-status-dot" {...stylex.props(cStyles.statusDot)} />
+                        <div {...stylex.props(cStyles.statusDot)} />
                     </div>
-                    <div className="pa-info" {...stylex.props(cStyles.info)}>
-                        <div className="pa-name-row" {...stylex.props(cStyles.titleRow)}>
-                            <span className="pa-name" {...stylex.props(cStyles.name)}>{displayName}</span>
-                            <div className="pa-update-badge" {...stylex.props(mStyles.uatcUpdatedBadge)}>
+                    <div {...stylex.props(cStyles.info)}>
+                        <div {...stylex.props(cStyles.titleRow)}>
+                            <span {...stylex.props(cStyles.name)}>{displayName}</span>
+                            <div {...stylex.props(mStyles.uatcUpdatedBadge)}>
                                 {t("updateAgent.badge") || "已更新"}
                             </div>
                         </div>
-                        <div className="pa-meta" {...stylex.props(cStyles.meta)}>
-                            <span className="pa-meta-item" {...stylex.props(cStyles.metaItem)}>
+                        <div {...stylex.props(cStyles.meta)}>
+                            <span {...stylex.props(cStyles.metaItem)}>
                                 <LuCpu size={10} aria-hidden="true" />
                                 {model}
                             </span>
-                            <span className="pa-meta-sep" {...stylex.props(cStyles.metaSep)}>•</span>
+                            <span {...stylex.props(cStyles.metaSep)}>•</span>
                             {isPublic && (
-                                <span className="pa-meta-item" {...stylex.props(cStyles.metaItem)}>
+                                <span {...stylex.props(cStyles.metaItem)}>
                                     <LuShieldCheck size={10} aria-hidden="true" />
                                     {t("createAgent.public") || "Public"}
                                 </span>
@@ -112,15 +112,13 @@ const UpdateAgentToolCard: React.FC<UpdateAgentToolCardProps> = ({ rawData, isEr
                     </div>
                 </div>
                 <div
-                    className="pa-right"
-                    {...stylex.props(cStyles.right)}
                     data-hook="messages-esc-pa-right"
+                    {...withLiteralClass("pa-right", cStyles.right)}
                 >
                     <button
                         type="button"
-                        className="pa-action-btn"
-                        {...stylex.props(cStyles.actionBtn, isStarting && cStyles.actionBtnDisabled)}
                         data-hook="messages-esc-pa-action-btn"
+                        {...withLiteralClass("pa-action-btn", cStyles.actionBtn, isStarting && cStyles.actionBtnDisabled)}
                         onClick={() => startDialog()}
                         disabled={isStarting}
                     >

@@ -4,6 +4,7 @@ import React, { memo } from "react";
 import { LuFileSpreadsheet, LuFileText } from "react-icons/lu";
 import { LuMessageSquare } from "react-icons/lu";
 import { fileItemStyles as styles } from "./fileItemStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 const FILE_TYPE_CONFIG = {
@@ -64,20 +65,20 @@ export const FileItem = memo(
     return (
       <>
         <div
-          className={[
-            "file-item",
-            variant,
-            isMobile ? "mobile" : "",
-            isProcessing ? "processing" : "",
-            error ? "error" : "",
-          ].join(" ")}
           data-hook={[
             "messages-esc-file-item",
             variant === "message" ? "messages-esc-file-item-message" : "messages-esc-file-item-attachment",
             isProcessing ? "messages-esc-file-item-processing" : "",
             error ? "messages-esc-file-item-error" : "",
           ].filter(Boolean).join(" ")}
-          {...stylex.props(
+          {...withLiteralClass(
+            [
+              "file-item",
+              variant,
+              isMobile ? "mobile" : "",
+              isProcessing ? "processing" : "",
+              error ? "error" : "",
+            ].join(" "),
             styles.item,
             variant === "message" && styles.message,
             variant === "attachment" && styles.attachment,
@@ -103,9 +104,9 @@ export const FileItem = memo(
           }}
         >
           <div
-            className="file-icon-wrapper"
             data-hook="messages-esc-file-icon-wrapper"
-            {...stylex.props(
+            {...withLiteralClass(
+              "file-icon-wrapper",
               styles.iconWrapper,
               variant === "message" && styles.iconWrapperMessage,
               variant === "attachment" && styles.iconWrapperAttachment
@@ -114,22 +115,20 @@ export const FileItem = memo(
           >
             <IconComponent
               size={isAttachment ? 14 : 16}
-              className="file-icon"
               data-hook="messages-esc-file-icon"
-              {...stylex.props(styles.icon)}
+              {...withLiteralClass("file-icon", styles.icon)}
             />
           </div>
 
           {isAttachment ? (
             <div className="file-info">
               <span
-                className="file-name"
-                {...stylex.props(styles.name, styles.nameAttachment)}
+                {...withLiteralClass("file-name", styles.name, styles.nameAttachment)}
               >
                 {displayName}
               </span>
               <div className="file-meta">
-                <span className="file-ext" {...stylex.props(styles.ext)}>{config.ext}</span>
+                <span {...withLiteralClass("file-ext", styles.ext)}>{config.ext}</span>
                 {file?.size ? (
                   <span className="file-size">{formatSize(file.size)}</span>
                 ) : null}
@@ -137,8 +136,7 @@ export const FileItem = memo(
             </div>
           ) : (
             <span
-              className="file-name"
-              {...stylex.props(styles.name, styles.nameMessage)}
+              {...withLiteralClass("file-name", styles.name, styles.nameMessage)}
             >
               {file?.name || "未知文件"}
             </span>
@@ -146,12 +144,12 @@ export const FileItem = memo(
 
           {isAttachment && isProcessing && (
             <div className="processing-indicator">
-              <div className="spinner" {...stylex.props(styles.spinner)} />
+              <div {...stylex.props(styles.spinner)} />
             </div>
           )}
 
           {isAttachment && error && (
-            <div className="error-indicator" {...stylex.props(styles.errorIndicator)}>
+            <div {...stylex.props(styles.errorIndicator)}>
               ⚠️
             </div>
           )}

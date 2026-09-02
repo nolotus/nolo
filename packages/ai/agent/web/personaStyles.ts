@@ -14,8 +14,10 @@ export const personaStyles = stylex.create({
     width: "72px",
     height: "72px",
     borderRadius: "var(--radius-sm)",
-    background: "var(--backgroundSecondary)",
-    border: "2px dashed var(--borderLight)",
+    backgroundColor: "var(--backgroundSecondary)",
+    borderWidth: "2px",
+    borderStyle: "dashed",
+    borderColor: "var(--borderLight)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -36,14 +38,14 @@ export const personaStyles = stylex.create({
     cursor: "pointer",
     ":hover": {
       borderColor: "var(--primary)",
-      background:
+      backgroundColor:
         "var(--primaryGhost, color-mix(in srgb, var(--primary) 8%, transparent))",
     },
   },
   avatarOverlay: {
     position: "absolute",
     inset: 0,
-    background: "rgba(0, 0, 0, 0.45)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",

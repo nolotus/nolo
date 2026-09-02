@@ -64,8 +64,8 @@ export const thinkingSectionStyles = stylex.create({
   labelShimmer: {
     color: "transparent",
     WebkitTextFillColor: "transparent",
-    background:
-      "linear-gradient(90deg, var(--textMuted, var(--textTertiary)) 0%, var(--textMuted, var(--textTertiary)) 30%, color-mix(in srgb, var(--textMuted, var(--textTertiary)) 45%, transparent) 45%, color-mix(in srgb, var(--textMuted, var(--textTertiary)) 45%, transparent) 55%, var(--textMuted, var(--textTertiary)) 70%, var(--textMuted, var(--textTertiary)) 100%)",
+    backgroundImage:
+    "linear-gradient(90deg, var(--textMuted, var(--textTertiary)) 0%, var(--textMuted, var(--textTertiary)) 30%, color-mix(in srgb, var(--textMuted, var(--textTertiary)) 45%, transparent) 45%, color-mix(in srgb, var(--textMuted, var(--textTertiary)) 45%, transparent) 55%, var(--textMuted, var(--textTertiary)) 70%, var(--textMuted, var(--textTertiary)) 100%)",
     backgroundSize: "300% 100%",
     WebkitBackgroundClip: "text",
     backgroundClip: "text",

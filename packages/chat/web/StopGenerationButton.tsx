@@ -22,7 +22,6 @@ const StopGenerationButtonComponent: React.FC = () => {
 
   return (
     <button
-      className="stop-generation-btn"
       onClick={handleStop}
       type="button"
       {...stylex.props(messageInputStyles.stopGenerationBtn)}

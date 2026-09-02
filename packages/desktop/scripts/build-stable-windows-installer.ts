@@ -4,6 +4,7 @@ import {
   resolveWindowsInstallerRecoverySource,
 } from "./buildStableWindowsInstallerRecovery";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
+import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import {
   cpSync,
   existsSync,
@@ -484,6 +485,7 @@ async function recoverInstallerFromRawTar() {
     const payloadDir = findWindowsPayloadDir(tempDir);
     await ensureRecoveryAppRuntime(payloadDir);
     await pruneClassicLevelPrebuilds(payloadDir);
+    patchElectrobunWindowsCore(join(payloadDir, "bin", "ElectrobunCore.dll"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
 

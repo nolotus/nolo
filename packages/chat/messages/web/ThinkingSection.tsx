@@ -9,6 +9,7 @@ import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
 import { OrbActivityIndicator } from "./OrbActivityIndicator";
 import { useTranslation } from "react-i18next";
 import { thinkingSectionStyles as styles } from "./thinkingSectionStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 interface ThinkingSectionProps {
@@ -50,16 +51,14 @@ export const ThinkingSection = memo(
 
     return (
       <>
-        <div className="thinking-container" {...stylex.props(styles.container)}>
+        <div {...stylex.props(styles.container)}>
           <button
-            className="thinking-toggle"
-            {...stylex.props(styles.toggle)}
+            type="button"
             onClick={toggleThinking}
             aria-expanded={isExpanded}
-            type="button"
+            {...withLiteralClass("thinking-toggle", styles.toggle)}
           >
             <div
-              className="thinking-icon"
               {...stylex.props(styles.icon)}
               aria-hidden="true"
             >
@@ -72,7 +71,6 @@ export const ThinkingSection = memo(
               )}
             </div>
             <span
-              className="thinking-label"
               {...stylex.props(
                 styles.label,
                 isStreaming && styles.labelShimmer
@@ -82,7 +80,6 @@ export const ThinkingSection = memo(
             </span>
           </button>
           <div
-            className={`thinking-content ${isExpanded ? "expanded" : "collapsed"}`}
             {...stylex.props(
               styles.content,
               isExpanded ? styles.contentExpanded : styles.contentCollapsed
@@ -90,13 +87,11 @@ export const ThinkingSection = memo(
           >
             {isExpanded && slate && (
               <div
-                className="thinking-inner"
                 {...stylex.props(styles.inner)}
               >
                 <div
-                  className="thinking-editor-wrapper"
                   data-hook="messages-esc-thinking-editor-wrapper"
-                  {...stylex.props(styles.editorWrapper)}
+                  {...withLiteralClass("thinking-editor-wrapper", styles.editorWrapper)}
                 >
                   <Editor
                     initialValue={slate}

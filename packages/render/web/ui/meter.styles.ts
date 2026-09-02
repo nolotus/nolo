@@ -56,7 +56,9 @@ export const meterStyles = stylex.create({
     overflow: "hidden",
     "@media (forced-colors: active)": {
       backgroundColor: "Canvas",
-      border: "1px solid ButtonText",
+      borderWidth: "1px",
+      borderStyle: "solid",
+      borderColor: "ButtonText",
     },
   },
   // .nolo-meter[data-hide-label] .nolo-meter-track（hideLabel 时 grid-area 归 auto）

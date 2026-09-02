@@ -15,6 +15,7 @@ import PagePreviewDialog from "render/web/ui/modal/PagePreviewDialog";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import * as stylex from "@stylexjs/stylex";
 import { referencesTabStyles as styles } from "./referencesTabStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import { publishSettingsTabStyles as publishStyles } from "./publishSettingsTabStyles";
 import type { FormData } from "../createAgentSchema";
 
@@ -134,7 +135,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
       <div {...stylex.props(styles.manager)}>
         <div {...stylex.props(styles.grid)}>
           <section
-            className="agent-create-esc-ref-card"
             {...stylex.props(styles.card)}
           >
             <header {...stylex.props(styles.cardHeader)}>
@@ -153,7 +153,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                           {t("references.knowledge")}
                         </h3>
                         <span
-                          className="agent-create-esc-ref-card-count"
                           {...stylex.props(styles.cardCount)}
                         >{knowledgeCount}</span>
                       </div>
@@ -182,20 +181,17 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                   {knowledgeRefs.map((ref) => (
                     <div
                         key={ref.dbKey}
-                        className="agent-create-esc-ref-item"
                         {...stylex.props(styles.item)}
                       >
                       <a
                         href={buildPageLink(ref)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="agent-create-esc-ref-link"
-                          {...stylex.props(styles.itemMain, styles.itemLink)}
+                        {...withLiteralClass("agent-create-esc-ref-link", styles.itemMain, styles.itemLink)}
                         onClick={(e) => handleItemClick(e, ref)}
                       >
                         <div
-                          className="agent-create-esc-ref-title"
-                          {...stylex.props(styles.itemTitle)}
+                          {...withLiteralClass("agent-create-esc-ref-title", styles.itemTitle)}
                         >{ref.title || ref.dbKey}</div>
                         <div {...stylex.props(styles.itemMeta)}>{ref.dbKey}</div>
                       </a>
@@ -215,7 +211,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                 </div>
               ) : (
                 <div
-                  className="agent-create-esc-ref-empty"
                   {...stylex.props(styles.empty)}
                 >
                   <div {...stylex.props(styles.emptyTitle)}>
@@ -230,7 +225,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
           </section>
 
           <section
-            className="agent-create-esc-ref-card"
             {...stylex.props(styles.card)}
           >
             <header {...stylex.props(styles.cardHeader)}>
@@ -249,7 +243,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                           {t("references.instruction")}
                         </h3>
                         <span
-                          className="agent-create-esc-ref-card-count"
                           {...stylex.props(styles.cardCount)}
                         >
                           {instructionCount}
@@ -282,20 +275,17 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                   {instructionRefs.map((ref) => (
                     <div
                         key={ref.dbKey}
-                        className="agent-create-esc-ref-item"
                         {...stylex.props(styles.item)}
                       >
                       <a
                         href={buildPageLink(ref)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="agent-create-esc-ref-link"
-                          {...stylex.props(styles.itemMain, styles.itemLink)}
+                        {...withLiteralClass("agent-create-esc-ref-link", styles.itemMain, styles.itemLink)}
                         onClick={(e) => handleItemClick(e, ref)}
                       >
                         <div
-                          className="agent-create-esc-ref-title"
-                          {...stylex.props(styles.itemTitle)}
+                          {...withLiteralClass("agent-create-esc-ref-title", styles.itemTitle)}
                         >{ref.title || ref.dbKey}</div>
                         <div {...stylex.props(styles.itemMeta)}>{ref.dbKey}</div>
                       </a>
@@ -315,7 +305,6 @@ const ReferencesTab: React.FC<ReferencesTabProps> = ({ errors, values, set }) =>
                 </div>
               ) : (
                 <div
-                  className="agent-create-esc-ref-empty"
                   {...stylex.props(styles.empty)}
                 >
                   <div {...stylex.props(styles.emptyTitle)}>

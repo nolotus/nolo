@@ -1,0 +1,1 @@
+export { withLiteralClass } from "../withLiteralClass";

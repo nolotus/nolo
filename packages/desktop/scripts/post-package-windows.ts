@@ -1,6 +1,7 @@
 import { withTempDir } from "./codesign-local";
 import { readPayloadVersionInfo } from "./payload-version";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
+import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import { cp, mkdir, readdir } from "node:fs/promises";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -285,6 +286,7 @@ export const createWindowsInstallerArtifact = async ({
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
     await pruneClassicLevelPrebuilds(payloadDir);
+    patchElectrobunWindowsCore(join(payloadDir, "bin", "ElectrobunCore.dll"));
 
     const versionInfo = readPayloadVersionInfo(payloadDir);
     const version = asOptionalTrimmedString(versionInfo?.version) ?? "0.1.0";

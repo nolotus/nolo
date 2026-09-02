@@ -12,7 +12,7 @@ export const greetingMenuStyles = stylex.create({
     marginTop: "var(--space-2)",
     padding: "var(--space-2) var(--space-3)",
     borderRadius: "var(--radius-sm)",
-    background: "var(--backgroundSecondary)",
+    backgroundColor: "var(--backgroundSecondary)",
     boxShadow:
       "0 1px 3px var(--shadowLight), inset 0 1px 0 rgba(255, 255, 255, 0.02)",
   },
@@ -40,8 +40,10 @@ export const greetingMenuStyles = stylex.create({
   item: {
     padding: "var(--space-2)",
     borderRadius: "var(--radius-sm)",
-    background: "var(--background)",
-    border: "1px solid var(--borderLight)",
+    backgroundColor: "var(--background)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderLight)",
     boxShadow: "0 1px 2px var(--shadowLight)",
   },
   row: {
@@ -72,8 +74,9 @@ export const greetingMenuStyles = stylex.create({
   remove: {
     marginLeft: "var(--space-1)",
     marginBottom: "var(--space-1)",
-    border: "none",
-    background: "transparent",
+    borderWidth: 0,
+    borderStyle: "none",
+    backgroundColor: "transparent",
     color: "var(--textQuaternary)",
     cursor: "pointer",
     padding: "4px",
@@ -85,7 +88,7 @@ export const greetingMenuStyles = stylex.create({
     transition:
       "background-color 0.18s ease-out, color 0.18s ease-out, transform 0.16s ease-out",
     ":hover": {
-      background: "var(--backgroundHover)",
+      backgroundColor: "var(--backgroundHover)",
       color: "var(--error)",
       transform: "translateY(-0.5px)",
     },
@@ -105,8 +108,10 @@ export const greetingMenuStyles = stylex.create({
     alignItems: "center",
     gap: "var(--space-1)",
     borderRadius: "999px",
-    border: "1px dashed var(--border)",
-    background: "transparent",
+    borderWidth: "1px",
+    borderStyle: "dashed",
+    borderColor: "var(--border)",
+    backgroundColor: "transparent",
     color: "var(--primary)",
     fontSize: "var(--fontSize-sm)",
     padding: "3px 10px",
@@ -114,7 +119,7 @@ export const greetingMenuStyles = stylex.create({
     transition:
       "background-color 0.18s ease-out, border-color 0.18s ease-out, transform 0.16s ease-out, box-shadow 0.18s ease-out",
     ":hover": {
-      background: "var(--background)",
+      backgroundColor: "var(--background)",
       borderColor: "var(--borderHover)",
       boxShadow: "0 1px 3px var(--shadowLight)",
       transform: "translateY(-0.5px)",

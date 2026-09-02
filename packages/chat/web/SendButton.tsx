@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import { LuArrowUp, LuLoader } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
@@ -110,7 +111,6 @@ const SendButton: React.FC<SendButtonProps> = ({
   return (
     <button
       type="button"
-      className={`send-button ${variantClass}`}
       data-hook="chat-esc-send-button"
       data-testid={testId}
       data-loading={isLoading ? "true" : undefined}
@@ -120,7 +120,8 @@ const SendButton: React.FC<SendButtonProps> = ({
       disabled={isEffectivelyDisabled}
       aria-label={ariaLabel}
       title={ariaTitle}
-      {...stylex.props(
+      {...withLiteralClass(
+        `send-button ${variantClass}`,
         messageInputStyles.sendButton,
         canAbort
           ? messageInputStyles.stopMode
@@ -132,27 +133,25 @@ const SendButton: React.FC<SendButtonProps> = ({
     >
       {canAbort ? (
         <div
-          className="stop-indicator"
           aria-hidden="true"
-          {...stylex.props(messageInputStyles.stopIndicator)}
+          {...withLiteralClass("stop-indicator", messageInputStyles.stopIndicator)}
         />
       ) : isLoading ? (
         <LuLoader
           size={20}
           strokeWidth={1.8}
-          className="send-loading-icon"
           data-hook="chat-esc-send-loading"
           aria-hidden="true"
-          {...stylex.props(messageInputStyles.sendLoadingIcon)}
+          {...withLiteralClass("send-loading-icon", messageInputStyles.sendLoadingIcon)}
         />
       ) : (
         <LuArrowUp
           size={20}
           strokeWidth={1.75}
-          className={`send-icon ${isAnimating ? "animating" : ""}`}
           data-hook="chat-esc-send-icon"
           aria-hidden="true"
-          {...stylex.props(
+          {...withLiteralClass(
+            `send-icon ${isAnimating ? "animating" : ""}`,
             messageInputStyles.sendIcon,
             isAnimating && messageInputStyles.sendIconAnimating
           )}

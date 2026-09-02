@@ -451,7 +451,6 @@ const AgentForm: React.FC<AgentFormProps> = ({
             )}
 
             <div
-              className="agent-create-esc-form-header"
               {...stylex.props(afs.formHeader)}
             >
               <TabsNav
@@ -470,7 +469,6 @@ const AgentForm: React.FC<AgentFormProps> = ({
             </div>
 
             <div
-              className="agent-create-esc-form-footer"
               {...stylex.props(afs.formFooter)}
             >
               {isCreate && !readOnly && (

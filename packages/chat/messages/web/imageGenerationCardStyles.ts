@@ -144,8 +144,8 @@ export const imageGenerationCardStyles = stylex.create({
     maxWidth: 208,
   },
   label: {
-    background:
-      "linear-gradient(90deg, var(--textPrimary) 0%, var(--textPrimary) 30%, color-mix(in srgb, var(--textPrimary) 45%, transparent) 45%, color-mix(in srgb, var(--textPrimary) 45%, transparent) 55%, var(--textPrimary) 70%, var(--textPrimary) 100%)",
+    backgroundImage:
+    "linear-gradient(90deg, var(--textPrimary) 0%, var(--textPrimary) 30%, color-mix(in srgb, var(--textPrimary) 45%, transparent) 45%, color-mix(in srgb, var(--textPrimary) 45%, transparent) 55%, var(--textPrimary) 70%, var(--textPrimary) 100%)",
     backgroundSize: "300% 100%",
     WebkitBackgroundClip: "text",
     backgroundClip: "text",

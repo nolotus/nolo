@@ -26,11 +26,14 @@ import {
 export const withLiteralClass = (
   literal: string,
   ...styles: Array<Parameters<typeof stylex.props>[0] | false | null | undefined>
-): { className: string } => {
+): { className: string; style?: React.CSSProperties } => {
   const active = styles.filter(Boolean) as Parameters<typeof stylex.props>[0][];
   if (active.length === 0) return { className: literal };
-  const { className } = stylex.props(...active) as { className?: string };
-  return { className: className ? `${literal} ${className}` : literal };
+  const props = stylex.props(...active) as { className?: string; style?: React.CSSProperties };
+  return {
+    className: props.className ? `${literal} ${props.className}` : literal,
+    ...(props.style ? { style: props.style } : {}),
+  };
 };
 
 

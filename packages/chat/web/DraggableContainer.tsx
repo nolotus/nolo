@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "./sidebarStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 
 interface DraggableContainerProps {
@@ -71,8 +72,8 @@ export const DraggableContainer: React.FC<DraggableContainerProps> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`DraggableContainer ${getDragOverClass()}`}
-      {...stylex.props(
+      {...withLiteralClass(
+        `DraggableContainer ${getDragOverClass()}`,
         sidebarStyles.draggableContainer,
         isDraggingOver &&
           dragType === "category" &&

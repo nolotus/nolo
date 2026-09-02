@@ -796,7 +796,6 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
 
   return (
     <div
-      className="memory-saved-container"
       {...withLiteralClass("memory-saved-container", styles.memorySavedContainer)}
       data-testid="memory-saved-container"
     >
@@ -808,25 +807,21 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
         return (
           <div
             key={memoryKey}
-            className="memory-saved-item"
             {...withLiteralClass("memory-saved-item", styles.memorySavedItem)}
             data-testid="memory-saved-item"
           >
             <span
-              className="memory-saved-icon"
               {...withLiteralClass("memory-saved-icon", styles.memorySavedIcon)}
               aria-hidden="true"
             >
               <LuBrain size={14} aria-hidden="true" />
             </span>
             <span
-              className="memory-saved-prefix"
               {...withLiteralClass("memory-saved-prefix", styles.memorySavedPrefix)}
             >
               {prefix}：
             </span>
             <span
-              className="memory-saved-content"
               {...withLiteralClass("memory-saved-content", styles.memorySavedContent)}
               title={mem.content}
             >

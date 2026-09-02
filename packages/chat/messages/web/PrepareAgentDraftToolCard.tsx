@@ -61,18 +61,17 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
   };
 
   return (
-    <div className="agent-draft-card" {...stylex.props(styles.card)}>
+    <div {...stylex.props(styles.card)}>
       <div
-        className="agent-draft-card__icon"
         {...stylex.props(styles.icon)}
         aria-hidden="true"
       >
         <LuBot size={20} />
       </div>
-      <div className="agent-draft-card__body" {...stylex.props(styles.body)}>
-        <div className="agent-draft-card__header" {...stylex.props(styles.header)}>
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.header)}>
           <div>
-            <div className="agent-draft-card__eyebrow" {...stylex.props(styles.eyebrow)}>
+            <div {...stylex.props(styles.eyebrow)}>
               {version
                 ? t("guidedCreate.draftCardVersion", "Agent 草稿 第 {{version}} 版", { version })
                 : t("guidedCreate.draftCardEyebrow", "Agent 草稿")}
@@ -81,7 +80,7 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
               {draft.name || t("guidedCreate.untitled", "未命名 AI")}
             </h3>
           </div>
-          <span className="agent-draft-card__status" {...stylex.props(styles.status)}>
+          <span {...stylex.props(styles.status)}>
             {isPanelOpen
               ? t("guidedCreate.draftPanelOpen", "右侧编辑区")
               : unresolved.length
@@ -91,12 +90,12 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
         </div>
 
         {draft.promptSummary && (
-          <p className="agent-draft-card__summary" {...stylex.props(styles.summary)}>
+          <p {...stylex.props(styles.summary)}>
             {draft.promptSummary}
           </p>
         )}
 
-        <div className="agent-draft-card__meta" {...stylex.props(styles.meta)}>
+        <div {...stylex.props(styles.meta)}>
           <span {...stylex.props(styles.metaItem)}>
             <LuSparkles size={13} aria-hidden="true" />
             {capabilityLabels.length
@@ -116,12 +115,12 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
         </div>
 
         {unresolved.length > 0 && (
-          <div className="agent-draft-card__missing" {...stylex.props(styles.missing)}>
+          <div {...stylex.props(styles.missing)}>
             {t("guidedCreate.missing", "还需要补充：")} {unresolved.join(", ")}
           </div>
         )}
 
-        <div className="agent-draft-card__hint" {...stylex.props(styles.hint)}>
+        <div {...stylex.props(styles.hint)}>
           <LuSparkles size={13} aria-hidden="true" {...stylex.props(styles.hintIcon)} />
           <span>
             {isPanelOpen
@@ -136,12 +135,9 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
           </span>
         </div>
       </div>
-      <div className="agent-draft-card__actions" {...stylex.props(styles.actions)}>
+      <div {...stylex.props(styles.actions)}>
         <button
           type="button"
-          className={`agent-draft-card__action agent-draft-card__action--panel ${
-            isPanelOpen ? "is-active" : ""
-          }`}
           {...stylex.props(
             styles.action,
             styles.actionPanel,
@@ -157,7 +153,6 @@ const PrepareAgentDraftToolCard: React.FC<PrepareAgentDraftToolCardProps> = ({
         </button>
         <button
           type="button"
-          className="agent-draft-card__action agent-draft-card__action--secondary"
           {...stylex.props(styles.action, styles.actionSecondary)}
           onClick={() =>
             navigate(secondaryAction.url || "/create/agent", {

@@ -2,6 +2,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import React, { memo, useEffect, useRef } from "react";
 
@@ -76,22 +77,19 @@ const AgentMentionMenuComponent: React.FC<AgentMentionMenuProps> = ({
   return (
     <>
       <div
-        className="message-input__mentions"
         ref={containerRef}
-        {...stylex.props(messageInputStyles.mentions)}
+        {...withLiteralClass("message-input__mentions", messageInputStyles.mentions)}
       >
         {headerText && (
           <div
-            className="message-input__mentions-header"
-            {...stylex.props(messageInputStyles.mentionsHeader)}
+            {...withLiteralClass("message-input__mentions-header", messageInputStyles.mentionsHeader)}
           >
             {headerText}
           </div>
         )}
 
         <ul
-          className="message-input__mentions-list"
-          {...stylex.props(messageInputStyles.mentionsList)}
+          {...withLiteralClass("message-input__mentions-list", messageInputStyles.mentionsList)}
         >
           {agents.map((agent, index) => {
             const isActive = index === highlightIndex;
@@ -99,9 +97,6 @@ const AgentMentionMenuComponent: React.FC<AgentMentionMenuProps> = ({
             return (
               <li
                 key={agent.agentKey}
-                className={`message-input__mentions-item${
-                  isActive ? " is-active" : ""
-                }`}
                 onMouseDown={(event) => {
                   // 阻止 textarea 失焦
                   event.preventDefault();
@@ -110,14 +105,14 @@ const AgentMentionMenuComponent: React.FC<AgentMentionMenuProps> = ({
                 onMouseEnter={() => {
                   if (onHover) onHover(index);
                 }}
-                {...stylex.props(
+                {...withLiteralClass(
+                  `message-input__mentions-item${isActive ? " is-active" : ""}`,
                   messageInputStyles.mentionsItem,
                   isActive && messageInputStyles.mentionsItemActive
                 )}
               >
                 <span
-                  className="message-input__mentions-item-name"
-                  {...stylex.props(messageInputStyles.mentionsItemName)}
+                  {...withLiteralClass("message-input__mentions-item-name", messageInputStyles.mentionsItemName)}
                 >
                   {agent.name}
                 </span>

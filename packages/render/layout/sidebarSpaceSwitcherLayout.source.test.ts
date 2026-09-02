@@ -43,7 +43,7 @@ describe("sidebar space switcher layout source contract", () => {
       'import TopbarSpaceSwitcher from "render/layout/TopbarSpaceSwitcher";'
     );
     expect(chatSidebarSource).not.toContain("ChatSidebarSearchRow");
-    expect(chatSidebarSource).toContain('className="ChatSidebar__scope-wrapper"');
+    expect(chatSidebarSource).toContain('withLiteralClass("ChatSidebar__scope-wrapper"');
     expect(chatSidebarSource).toContain('<TopbarSpaceSwitcher placement="sidebar" />');
     expect(chatSidebarSource).not.toContain('className="ChatSidebar__scope-row"');
     expect(chatSidebarSource).not.toContain("<CreateMenuButton");
@@ -97,13 +97,13 @@ describe("sidebar space switcher layout source contract", () => {
     expect(sidebarStyles).toContain("topBar");
     expect(sidebarStyles).toContain('minWidth: 0');
     expect(escapeHatchCss).toContain(".ChatSidebar__scope-wrapper .TpSw--sidebar");
-    expect(chatSidebarSource).toContain('className="ChatSidebar__search-btn"');
+    expect(chatSidebarSource).toContain('withLiteralClass("ChatSidebar__search-btn"');
     expect(sidebarStyles).not.toContain("createRowSearching");
     expect(sidebarStyles).not.toContain("SidebarSearchRow");
   });
 
   it("opens sidebar search as a command palette (mod+k)", () => {
-    expect(chatSidebarSource).toContain('className="ChatSidebar__search-btn"');
+    expect(chatSidebarSource).toContain('withLiteralClass("ChatSidebar__search-btn"');
     expect(chatSidebarSource).toContain("SidebarCommandPalette");
     expect(chatSidebarSource).toContain("COMMAND_PALETTE_SHORTCUT");
     expect(chatSidebarSource).toContain("setCommandPaletteOpen(true)");

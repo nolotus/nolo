@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
 import React, { memo, useMemo } from "react";
 import { orbActivityIndicatorStyles as styles } from "./orbActivityIndicatorStyles";
+import { withLiteralClass } from "./toolMessageShared";
 
 /**
  * OrbActivityIndicator —— 代理活动指示器（Orbs）
@@ -139,25 +140,21 @@ export const OrbActivityIndicator = memo(function OrbActivityIndicator({
 
   return (
     <span
-      className={`orb-activity-indicator${className ? ` ${className}` : ""}`}
       aria-hidden="true"
-      {...stylex.props(styles.root)}
+      {...withLiteralClass(className ? `orb-activity-indicator ${className}` : "orb-activity-indicator", styles.root)}
     >
       <span
-        className="orb-activity-indicator__glyph"
         style={{ width: size, height: size }}
         {...stylex.props(styles.glyph)}
       >
         {latticeCells.length > 0 && (
           <span
-            className="orb-activity-indicator__lattice"
             style={{ ["--orbK" as string]: k }}
             {...stylex.props(styles.lattice)}
           >
             {latticeCells.map((c) => (
               <span
                 key={c.key}
-                className="orb-activity-indicator__cell"
                 style={
                   c.still
                     ? { left: c.left, top: c.top }
@@ -177,14 +174,12 @@ export const OrbActivityIndicator = memo(function OrbActivityIndicator({
         )}
         {ringCells.length > 0 && (
           <span
-            className="orb-activity-indicator__ring"
             style={{ ["--orbK" as string]: k }}
             {...stylex.props(styles.ring)}
           >
             {ringCells.map((c) => (
               <span
                 key={c.key}
-                className="orb-activity-indicator__ring-dot"
                 style={{
                   transform: `translate(${c.rx}px, ${c.ry}px)`,
                   animationDelay: `${c.delay}ms`,

@@ -4,6 +4,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "./chatInputCardStyles";
 import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import React, {
   useCallback,
@@ -866,15 +867,14 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     <>
       <div
         ref={rootRef}
-        className={`message-input ${
-          processingCount > 0 ? "message-input--processing" : ""
-        }`}
+        {...withLiteralClass(
+          `message-input ${processingCount > 0 ? "message-input--processing" : ""}`,
+          messageInputStyles.container
+        )}
         style={composerVtStyle}
-        {...stylex.props(messageInputStyles.container)}
       >
         <div
-          className="message-input__wrapper"
-          {...stylex.props(messageInputStyles.wrapper)}
+          {...withLiteralClass("message-input__wrapper", messageInputStyles.wrapper)}
         >
           <BrowseContextIndicator />
           <MessageInputAttachmentsPanel
@@ -916,8 +916,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
           {pastedBlocks.length > 0 && (
             <div
-              className="message-input__paste-chips"
-              {...stylex.props(messageInputStyles.pasteChips)}
+              {...withLiteralClass("message-input__paste-chips", messageInputStyles.pasteChips)}
             >
               {pastedBlocks.map((block, index) => (
                 <MessageInputChip
@@ -1019,8 +1018,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
           {showIndicator && (
             <div
-              className="message-input__indicator"
-              {...stylex.props(messageInputStyles.indicator)}
+              {...withLiteralClass("message-input__indicator", messageInputStyles.indicator)}
             >
               <div className="message-input__spinner" />
               <span>{indicatorText}</span>

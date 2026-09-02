@@ -142,12 +142,11 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
       title={<span style={{ display:"flex", alignItems:"center", gap:8 }}><LuCalendarClock size={18} aria-hidden="true"/>新建定时任务</span>}
       size="medium"
     >
-      <div className="CTM" {...stylex.props(messageInputStyles.ctm)}>
+      <div {...stylex.props(messageInputStyles.ctm)}>
 
         {/* 任务名称 */}
-        <div className="CTM__field" {...stylex.props(messageInputStyles.ctmField)}>
+        <div {...stylex.props(messageInputStyles.ctmField)}>
           <label
-            className="CTM__label"
             htmlFor={titleId}
             {...stylex.props(messageInputStyles.ctmLabel)}
           >
@@ -155,7 +154,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
           </label>
           <input
             id={titleId}
-            className="CTM__input"
             type="text"
             placeholder="例：每日代码审查"
             value={title}
@@ -165,9 +163,8 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
         </div>
 
         {/* 任务描述 */}
-        <div className="CTM__field" {...stylex.props(messageInputStyles.ctmField)}>
+        <div {...stylex.props(messageInputStyles.ctmField)}>
           <label
-            className="CTM__label"
             htmlFor={taskPromptId}
             {...stylex.props(messageInputStyles.ctmLabel)}
           >
@@ -175,7 +172,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
           </label>
           <textarea
             id={taskPromptId}
-            className="CTM__textarea"
             rows={3}
             placeholder="告诉 AI 要做什么。例：检查今天的代码提交，列出潜在风险点"
             value={taskPrompt}
@@ -186,14 +182,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
 
         {/* 执行时间 — multi-control group; structure forbids single htmlFor */}
         <div
-          className="CTM__field"
           role="group"
           aria-labelledby={scheduleLabelId}
           {...stylex.props(messageInputStyles.ctmField)}
         >
           <div
             id={scheduleLabelId}
-            className="CTM__label"
             {...stylex.props(messageInputStyles.ctmLabel)}
           >
             执行时间
@@ -201,14 +195,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
 
           {/* 频率选择 */}
           <div
-            className="CTM__freq-row"
             role="group"
             aria-label="频率"
             {...stylex.props(messageInputStyles.ctmFreqRow)}
           >
             {(["hourly", "daily", "weekly", "custom"] as Frequency[]).map(f => (
               <button key={f} type="button"
-                className={`CTM__freq-btn ${freq === f ? "is-active" : ""}`}
                 onClick={() => setFreq(f)}
                 aria-pressed={freq === f}
                 {...stylex.props(
@@ -224,13 +216,11 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
           {/* 时间细节 */}
           {freq !== "custom" && (
             <div
-              className="CTM__time-row"
               {...stylex.props(messageInputStyles.ctmTimeRow)}
             >
               {/* 每周：星期选择 */}
               {freq === "weekly" && (
                 <Select
-                  className="CTM__select"
                   selectedKey={String(weekday)}
                   onSelectionChange={(key) =>
                     setWeekday(key == null ? 0 : Number(key))
@@ -253,13 +243,11 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
               {freq === "hourly" ? (
                 <>
                   <span
-                    className="CTM__time-label"
                     {...stylex.props(messageInputStyles.ctmTimeLabel)}
                   >
                     每小时
                   </span>
                   <Select
-                    className="CTM__select"
                     selectedKey={String(minute)}
                     onSelectionChange={(key) =>
                       setMinute(key == null ? 0 : Number(key))
@@ -277,7 +265,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
                     ))}
                   </Select>
                   <span
-                    className="CTM__time-label"
                     {...stylex.props(messageInputStyles.ctmTimeLabel)}
                   >
                     执行
@@ -287,7 +274,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
                 /* 每天/每周：选时 + 分 */
                 <>
                   <Select
-                    className="CTM__select"
                     selectedKey={String(hour)}
                     onSelectionChange={(key) =>
                       setHour(key == null ? 0 : Number(key))
@@ -305,7 +291,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
                     ))}
                   </Select>
                   <Select
-                    className="CTM__select"
                     selectedKey={String(minute)}
                     onSelectionChange={(key) =>
                       setMinute(key == null ? 0 : Number(key))
@@ -331,7 +316,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
           {freq === "custom" && (
             <input
               id={cronId}
-              className="CTM__input CTM__input--mono"
               type="text"
               placeholder="例：0 2 * * 1-5（工作日凌晨2点）"
               value={rawCron}
@@ -346,17 +330,14 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
 
           {/* 人类可读描述 */}
           <div
-            className="CTM__cron-preview"
             {...stylex.props(messageInputStyles.ctmCronPreview)}
           >
             <span
-              className="CTM__cron-desc"
               {...stylex.props(messageInputStyles.ctmCronDesc)}
             >
               {cronDesc}
             </span>
             <code
-              className="CTM__cron-code"
               {...stylex.props(messageInputStyles.ctmCronCode)}
             >
               {cronExpr}
@@ -366,25 +347,21 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
 
         {/* Agent 选择 — button group; structure forbids single htmlFor */}
         <div
-          className="CTM__field"
           role="group"
           aria-labelledby={agentLabelId}
           {...stylex.props(messageInputStyles.ctmField)}
         >
           <div
-            className="CTM__agent-header"
             {...stylex.props(messageInputStyles.ctmAgentHeader)}
           >
             <div
               id={agentLabelId}
-              className="CTM__label"
               {...stylex.props(messageInputStyles.ctmLabel)}
             >
               选择 Agent *
             </div>
             <button
               type="button"
-              className="CTM__reload"
               onClick={() => reload()}
               title="刷新"
               aria-label="刷新"
@@ -394,17 +371,15 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
             </button>
           </div>
           {loading ? (
-            <p className="CTM__hint" {...stylex.props(messageInputStyles.ctmHint)}>加载中…</p>
+            <p {...stylex.props(messageInputStyles.ctmHint)}>加载中…</p>
           ) : agents.length === 0 ? (
-            <p className="CTM__hint" {...stylex.props(messageInputStyles.ctmHint)}>暂无 Agent，请先在"Agent"页面创建</p>
+            <p {...stylex.props(messageInputStyles.ctmHint)}>暂无 Agent，请先在"Agent"页面创建</p>
           ) : (
             <div
-              className="CTM__agent-list"
               {...stylex.props(messageInputStyles.ctmAgentList)}
             >
               {(agents as (Agent & { dbKey: string })[]).map(agent => (
                 <button key={agent.dbKey} type="button"
-                  className={`CTM__agent-btn ${selectedAgentKey === agent.dbKey ? "is-active" : ""}`}
                   onClick={() => setSelectedAgentKey(agent.dbKey)}
                   {...stylex.props(
                     messageInputStyles.ctmAgentBtn,
@@ -412,14 +387,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
                   )}
                 >
                   <span
-                    className="CTM__agent-name"
                     {...stylex.props(messageInputStyles.ctmAgentName)}
                   >
                     {agent.name || agent.dbKey}
                   </span>
                   {agent.apiSource === "cli" && (
                     <span
-                      className="CTM__badge CTM__badge--cli"
                       {...stylex.props(
                         messageInputStyles.ctmBadge,
                         messageInputStyles.ctmBadgeCli
@@ -430,7 +403,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
                   )}
                   {agent.apiSource === "custom" && (
                     <span
-                      className="CTM__badge CTM__badge--local"
                       {...stylex.props(
                         messageInputStyles.ctmBadge,
                         messageInputStyles.ctmBadgeLocal
@@ -445,10 +417,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, spac
           )}
         </div>
 
-        {error && <p className="CTM__error" {...stylex.props(messageInputStyles.ctmError)}>{error}</p>}
+        {error && <p {...stylex.props(messageInputStyles.ctmError)}>{error}</p>}
 
         <div
-          className="CTM__actions"
           {...stylex.props(messageInputStyles.ctmActions)}
         >
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>取消</Button>

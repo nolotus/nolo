@@ -65,6 +65,7 @@ import Button from "render/web/ui/Button";
 const InviteRewards = cloudLazy("life/web/InviteRewards", () => null);
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
+import { withLiteralClass } from "../withLiteralClass";
 import "../chatStylexEscapeHatch.css";
 
 const getNotificationIcon = (item: AppNotification) => {
@@ -99,7 +100,6 @@ const PortalDropdown: React.FC<{
 
   return createPortal(
     <div
-      className={`SidebarUserSection__dropdown is-open ${className || ""}`}
       data-hook="chat-esc-user-dropdown"
       role={role}
       onPointerDown={(e) => e.stopPropagation()}
@@ -111,7 +111,8 @@ const PortalDropdown: React.FC<{
         left: rect.left + 8,
         width: rect.width - 16,
       }}
-      {...stylex.props(
+      {...withLiteralClass(
+        `SidebarUserSection__dropdown is-open ${className || ""}`,
         sidebarStyles.sidebarUserSectionDropdown,
         sidebarStyles.sidebarUserSectionDropdownOpen,
         className?.includes("SidebarUserSection__dropdown--menu") &&
@@ -272,20 +273,17 @@ export const SidebarUserSection: React.FC = () => {
 
   return (
     <div
-      className="SidebarUserSection"
       ref={sectionRef}
-      {...stylex.props(sidebarStyles.sidebarUserSection)}
+      {...withLiteralClass("SidebarUserSection", sidebarStyles.sidebarUserSection)}
     >
       <div
-        className="SidebarUserSection__row"
         {...stylex.props(sidebarStyles.sidebarUserSectionRow)}
       >
         {/* 左侧：头像进 Life，chevron 打开账号菜单 */}
         <div
-          className="SidebarUserSection__card-wrap"
           ref={menuContainerRef}
-          style={{ flex: 1, minWidth: 0 }}
           {...stylex.props(sidebarStyles.sidebarUserSectionCardWrap)}
+          style={{ flex: 1, minWidth: 0 }}
         >
           <Tooltip
             content={t("goToProfile", "个人主页")}
@@ -294,7 +292,6 @@ export const SidebarUserSection: React.FC = () => {
           >
             <button
               type="button"
-              className="SidebarUserSection__profile"
               onClick={handleOpenLifeProfile}
               aria-label={t("goToProfile", "个人主页")}
               {...stylex.props(sidebarStyles.sidebarUserSectionProfile)}
@@ -307,7 +304,6 @@ export const SidebarUserSection: React.FC = () => {
                 src={avatarUrl || undefined}
               />
               <span
-                className="SidebarUserSection__username"
                 title={authUser.email || authUser.username}
                 {...stylex.props(sidebarStyles.sidebarUserSectionUsername)}
               >
@@ -517,14 +513,12 @@ export const SidebarUserSection: React.FC = () => {
 
       {/* 右侧：操作按钮 */}
       <div
-        className="SidebarUserSection__actions"
         {...stylex.props(sidebarStyles.sidebarUserSectionActions)}
       >
         {/* 设置 */}
         <Tooltip content={t("settings.title", "设置")} placement="top" disabled={isMobile}>
           <button
             type="button"
-            className="SidebarUserSection__tool-btn"
             onClick={handleOpenSettings}
             aria-label={t("settings.title", "设置")}
             {...stylex.props(sidebarStyles.sidebarUserSectionToolBtn)}
@@ -534,14 +528,12 @@ export const SidebarUserSection: React.FC = () => {
         </Tooltip>
         {/* 通知 */}
         <div
-          className="SidebarUserSection__tool-wrap"
           ref={bellContainerRef}
           {...stylex.props(sidebarStyles.sidebarUserSectionToolWrap)}
         >
           <Tooltip content={t("notifications.title", "通知")} placement="top" disabled={isMobile}>
             <button
               type="button"
-              className={`SidebarUserSection__tool-btn ${bellOpen ? "is-active" : ""}`}
               onClick={() => { setBellOpen((prev) => !prev); setMenuOpen(false); }}
               aria-label={
                 unreadCount > 0
@@ -561,7 +553,6 @@ export const SidebarUserSection: React.FC = () => {
               <LuBell size={17} aria-hidden="true" />
               {unreadCount > 0 && (
                 <span
-                  className="SidebarUserSection__badge"
                   aria-hidden="true"
                   {...stylex.props(sidebarStyles.sidebarUserSectionBadge)}
                 >

@@ -43,7 +43,9 @@ export const tabsNavStyles = stylex.create({
     gridAutoColumns: "max-content",
     position: "relative",
     borderRadius: 999,
-    border: "1px solid color-mix(in srgb, var(--borderLight) 92%, transparent)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "color-mix(in srgb, var(--borderLight) 92%, transparent)",
     backgroundColor: "var(--surfaceInteractive, var(--backgroundSecondary))",
     padding: 2,
     alignItems: "stretch",
@@ -70,7 +72,8 @@ export const tabsNavStyles = stylex.create({
   },
   // .tab-item（含 [data-active] / [disabled] 状态变体）
   tabItem: {
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     outline: "none",
     margin: 0,
     paddingInline: "clamp(0.7rem, 1.6vw + 0.2rem, 1.5rem)",

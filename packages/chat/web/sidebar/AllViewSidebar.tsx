@@ -89,7 +89,6 @@ const readStoredRecentFilter = (): SidebarTypeFilterId => {
 const SidebarSkeleton: React.FC<{ itemsCount?: number }> = ({ itemsCount = 4 }) => {
   return (
     <div
-      className="SidebarSkeleton"
       aria-busy="true"
       aria-label="Loading..."
       {...stylex.props(sidebarStyles.sidebarSkeleton)}
@@ -97,15 +96,12 @@ const SidebarSkeleton: React.FC<{ itemsCount?: number }> = ({ itemsCount = 4 }) 
       {Array.from({ length: itemsCount }).map((_, idx) => (
         <div
           key={idx}
-          className="SidebarSkeleton__item"
           {...stylex.props(sidebarStyles.sidebarSkeletonItem)}
         >
           <div
-            className="SidebarSkeleton__icon"
             {...stylex.props(sidebarStyles.sidebarSkeletonIcon)}
           />
           <div
-            className="SidebarSkeleton__text"
             {...stylex.props(sidebarStyles.sidebarSkeletonText)}
           />
         </div>
@@ -210,7 +206,6 @@ const RecentVirtualList: React.FC<{
   );
   return (
     <div
-      className="AllViewSidebar__recent-list"
       {...stylex.props(sidebarStyles.allViewRecentList)}
     >
       <SidebarVirtualizedList

@@ -413,7 +413,10 @@ export const croStyles = stylex.create({
   },
   /* __spinner：keyframes 定义在 dialogStylexEscapeHatch.css */
   aicSpinner: {
-    animation: "AppendInstructionControl-spin 0.8s linear infinite",
+    animationName: "AppendInstructionControl-spin",
+    animationDuration: "0.8s",
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
   },
   aicError: {
     backgroundColor: "rgba(220, 38, 38, 0.08)",

@@ -30,9 +30,11 @@ export const referencesSelectorStyles = stylex.create({
   list: {
     flex: 1,
     overflowY: "auto",
-    border: "1px solid var(--border)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--border)",
     borderRadius: "var(--radius-md)",
-    background: "var(--backgroundSecondary)",
+    backgroundColor: "var(--backgroundSecondary)",
     boxShadow: "inset 0 2px 4px rgba(0,0,0,0.02)",
   },
   status: {
@@ -47,7 +49,9 @@ export const referencesSelectorStyles = stylex.create({
   spinner: {
     width: "16px",
     height: "16px",
-    border: "2px solid var(--border)",
+    borderWidth: "2px",
+    borderStyle: "solid",
+    borderColor: "var(--border)",
     borderTopColor: "var(--primary)",
     borderRadius: "50%",
     animationName: stylex.keyframes({
@@ -62,7 +66,9 @@ export const referencesSelectorStyles = stylex.create({
   },
   // 原 section 相邻兄弟 border-top 规则 → 挂在第二个 section 上
   sectionAdjacent: {
-    borderTop: "1px solid var(--borderLight)",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--borderLight)",
   },
   sectionHeader: {
     display: "flex",
@@ -70,7 +76,7 @@ export const referencesSelectorStyles = stylex.create({
     justifyContent: "space-between",
     gap: "12px",
     padding: "12px 14px 10px",
-    background: "var(--backgroundSecondary)",
+    backgroundColor: "var(--backgroundSecondary)",
     position: "sticky",
     top: 0,
     zIndex: 1,
@@ -85,13 +91,15 @@ export const referencesSelectorStyles = stylex.create({
     height: "24px",
     padding: "0 8px",
     borderRadius: "999px",
-    background: "var(--backgroundTertiary)",
+    backgroundColor: "var(--backgroundTertiary)",
     color: "var(--textSecondary)",
     fontSize: "var(--fontSize-xs)",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    border: "1px solid var(--borderLight)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderLight)",
   },
   sectionEmpty: {
     padding: "12px 14px 16px",
@@ -109,16 +117,18 @@ export const referencesSelectorStyles = stylex.create({
     alignItems: "center",
     gap: "12px",
     padding: "10px 14px",
-    borderBottom: "1px solid var(--borderLight)",
-    background: "var(--background)",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--borderLight)",
+    backgroundColor: "var(--background)",
     cursor: "pointer",
     transition: "background 0.15s",
     ":hover": {
-      background: "var(--backgroundHover)",
+      backgroundColor: "var(--backgroundHover)",
     },
   },
   itemSelected: {
-    background: "var(--primaryBg)",
+    backgroundColor: "var(--primaryBg)",
   },
   // 原复选框 input 隐藏规则 → 直接挂在 <input> 上
   checkInput: {
@@ -127,7 +137,9 @@ export const referencesSelectorStyles = stylex.create({
   checkboxUi: {
     width: "18px",
     height: "18px",
-    border: "2px solid var(--textQuaternary)",
+    borderWidth: "2px",
+    borderStyle: "solid",
+    borderColor: "var(--textQuaternary)",
     borderRadius: "var(--radius-sm)",
     position: "relative",
     transition: "all 0.2s",
@@ -171,22 +183,24 @@ export const referencesSelectorStyles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
-    border: "1px solid transparent",
-    background: "transparent",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
+    backgroundColor: "transparent",
     color: "var(--textTertiary)",
     transition: "all 0.2s",
   },
   iconBtnGhost: {
     borderColor: "var(--border)",
-    background: "var(--background)",
+    backgroundColor: "var(--background)",
     ":hover": {
-      background: "var(--backgroundHover)",
+      backgroundColor: "var(--backgroundHover)",
       color: "var(--text)",
       boxShadow: "0 1px 4px var(--shadowLight)",
     },
   },
   iconBtnType: {
-    background: "var(--background)",
+    backgroundColor: "var(--background)",
     ":hover": {
       transform: "scale(1.05)",
       boxShadow: "0 2px 8px var(--shadowLight)",
@@ -199,16 +213,18 @@ export const referencesSelectorStyles = stylex.create({
   iconBtnTypeInstruction: {
     borderColor: "transparent",
     color: "var(--primary)",
-    background: "var(--primary)15",
+    backgroundColor: "var(--primary)15",
   },
   summary: {
     padding: "10px 14px",
-    background: "var(--backgroundTertiary)",
+    backgroundColor: "var(--backgroundTertiary)",
     borderRadius: "var(--radius-md)",
     fontSize: "var(--fontSize-sm)",
     color: "var(--textSecondary)",
     textAlign: "center",
-    border: "1px solid var(--borderLight)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderLight)",
   },
   summaryDetail: {
     opacity: 0.8,

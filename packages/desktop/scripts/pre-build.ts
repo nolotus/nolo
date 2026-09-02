@@ -3,6 +3,7 @@ import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { validateWorkspacePackageLinks } from "../../../scripts/dev/workspaceLinkGuard";
 import { patchElectrobunMacosFfi } from "./patch-electrobun-macos-ffi";
+import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import { ensureBundledRipgrep } from "./ensure-bundled-ripgrep";
 import { ensureElectrobunCore } from "./ensure-electrobun-core";
 
@@ -43,6 +44,7 @@ try {
   if (core.patched) {
     console.log(`[pre-build] electrobun core binaries ensured in ${core.distDir}`);
   }
+  patchElectrobunWindowsCore();
 } catch (error) {
   if (process.env.NOLO_DESKTOP_SKIP_ELECTROBUN_CORE === "1") {
     console.warn("[pre-build] electrobun core ensure skipped:", error);

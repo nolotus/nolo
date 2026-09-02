@@ -54,6 +54,7 @@ import { normalizeServerOrigin } from "core/serverOrigin";
 import type { FormData } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
+import { withLiteralClass } from "./withLiteralClass";
 
 // CLI 模型列表（从 AdvancedSettingsTab 提取）
 const COPILOT_CLI_MODELS = [
@@ -368,7 +369,6 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
             {isCustomApi && (
               <div
-                className="agent-create-esc-custom-api-box"
                 {...stylex.props(modelStyles.customApiBox)}
               >
                 <FormField label={t("form.model")} required error={errors.model} {...common}>
@@ -390,7 +390,6 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
             {isCliApi && (
               <div
-                className="agent-create-esc-custom-api-box"
                 {...stylex.props(modelStyles.customApiBox)}
               >
                 <FormField label="CLI 工具" {...common}>
@@ -485,7 +484,6 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
             {isCustomApi && (
               <div
-                className="agent-create-esc-custom-api-box"
                 {...stylex.props(modelStyles.customApiBox)}
               >
                 <FormField label="Provider" required {...common}>
@@ -647,7 +645,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
                     <div {...stylex.props(modelStyles.cliInfoBox)}>
                       <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>ℹ️ 本地模型绑定说明</p>
-                      <ul className="agent-create-esc-cli-info-list" {...stylex.props(modelStyles.cliInfoBoxList)}>
+                      <ul {...withLiteralClass("agent-create-esc-cli-info-list", modelStyles.cliInfoBoxList)}>
                         <li>这里的 `127.0.0.1` 只对绑定的那台机器自己有效。</li>
                         <li>远程端应通过 Agent 使用模型，而不是直接访问 `127.0.0.1`。</li>
                         <li>这是 machine binding 路径，不需要公开模型域名。</li>
@@ -660,7 +658,6 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
             {isCliApi && (
               <div
-                className="agent-create-esc-custom-api-box"
                 {...stylex.props(modelStyles.customApiBox)}
               >
                 <FormField label="CLI 工具" {...common}>
@@ -752,7 +749,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
                 <div {...stylex.props(modelStyles.cliInfoBox)}>
                   <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>ℹ️ 使用前提</p>
-                  <ul className="agent-create-esc-cli-info-list" {...stylex.props(modelStyles.cliInfoBoxList)}>
+                  <ul {...withLiteralClass("agent-create-esc-cli-info-list", modelStyles.cliInfoBoxList)}>
                     {selectedCliProvider === "agy" ? (
                       <>
                         <li>已安装 <code>agy</code> CLI 并完成本机登录</li>

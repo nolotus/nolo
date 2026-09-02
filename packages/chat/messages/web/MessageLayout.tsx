@@ -7,6 +7,7 @@ import Avatar from "render/web/ui/Avatar";
 import { StreamingPendingIndicator } from "./StreamingPendingIndicator";
 import { useActionsHoverPin } from "../../hooks/useActionsHoverPin";
 import { messageLayoutStyles as styles } from "./messageLayoutStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 export interface MessageLayoutProps {
@@ -102,8 +103,8 @@ export const MessageLayout = memo(
     const isSelf = type === "self";
 
     const avatarDesktop = (
-      <div className="avatar-area" {...stylex.props(styles.avatarArea)}>
-        <div className="avatar-wrapper" {...stylex.props(styles.avatarWrapper)}>
+      <div {...withLiteralClass("avatar-area", styles.avatarArea)}>
+        <div {...withLiteralClass("avatar-wrapper", styles.avatarWrapper)}>
           <Avatar
             name={displayName}
             type={isRobot ? "agent" : "user"}
@@ -114,8 +115,7 @@ export const MessageLayout = memo(
           />
           {isRobot && isStreaming && !hasVisibleContent && (
             <div
-              className="avatar-indicator-pos"
-              {...stylex.props(styles.avatarIndicatorPos)}
+              {...withLiteralClass("avatar-indicator-pos", styles.avatarIndicatorPos)}
             >
               <StreamingPendingIndicator size="sm" />
             </div>
@@ -126,15 +126,15 @@ export const MessageLayout = memo(
 
     const robotName = isRobot && displayName && (
       <div
-        className={`robot-name${isTouch ? " mobile" : ""}`}
-        {...stylex.props(
+        {...withLiteralClass(
+          `robot-name${isTouch ? " mobile" : ""}`,
           styles.robotName,
           isTouch && styles.robotNameMobile
         )}
       >
         {displayName}
         {isCliAgent && (
-          <span className="cli-badge" {...stylex.props(styles.cliBadge)}>
+          <span {...withLiteralClass("cli-badge", styles.cliBadge)}>
             <LuTerminal size={isTouch ? 10 : 11} aria-hidden="true" />
             CLI
           </span>
@@ -145,15 +145,15 @@ export const MessageLayout = memo(
     return (
       <>
         <div
-          className={[
-            "msg",
-            type,
-            collapsed ? "collapsed" : "",
-            showActions ? "actions-visible" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          {...stylex.props(
+          {...withLiteralClass(
+            [
+              "msg",
+              type,
+              collapsed ? "collapsed" : "",
+              showActions ? "actions-visible" : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
             styles.msg,
             isSelf ? styles.msgSelf : null,
             showActions ? styles.msgHover : null
@@ -167,21 +167,23 @@ export const MessageLayout = memo(
           {/* ── 桌面端 ── */}
           {!isTouch && (
             <div
-              className={[
-                "msg-inner",
-                "desktop",
-                "msg-hover-target",
-                isActionsHover ? "is-actions-hover" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
               data-hook={[
                 "messages-esc-msg-hover-target",
                 isActionsHover ? "messages-esc-is-actions-hover" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
-              {...stylex.props(styles.msgInnerDesktop)}
+              {...withLiteralClass(
+                [
+                  "msg-inner",
+                  "desktop",
+                  "msg-hover-target",
+                  isActionsHover ? "is-actions-hover" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+                styles.msgInnerDesktop
+              )}
               onMouseEnter={onActionsEnter}
               onMouseLeave={onActionsLeave}
             >
@@ -189,24 +191,25 @@ export const MessageLayout = memo(
                   so they never participate in avatar vertical alignment. */}
               <div
                 className="msg-bubble-row"
-                {...stylex.props(
+                {...withLiteralClass(
+                  "msg-bubble-row",
                   styles.msgBubbleRow,
                   isSelf && styles.msgBubbleRowSelf
                 )}
               >
                 {avatarDesktop}
                 <div
-                  className="content-area"
-                  {...stylex.props(
+                  {...withLiteralClass(
+                    "content-area",
                     styles.contentArea,
                     isSelf ? styles.contentAreaSelf : styles.contentAreaRobot
                   )}
                 >
                   {robotName}
                   <div
-                    className={`msg-body ${type}`}
                     data-hook="messages-esc-msg-body"
-                    {...stylex.props(
+                    {...withLiteralClass(
+                      `msg-body ${type}`,
                       styles.msgBody,
                       isSelf ? styles.msgBodySelf : styles.msgBodyRobot
                     )}
@@ -219,7 +222,8 @@ export const MessageLayout = memo(
               {actions && (
                 <div
                   className="msg-actions-below"
-                  {...stylex.props(
+                  {...withLiteralClass(
+                    "msg-actions-below",
                     styles.msgActionsBelow,
                     isSelf && styles.msgActionsBelowSelf
                   )}
@@ -233,13 +237,11 @@ export const MessageLayout = memo(
           {/* ── 移动端 ── */}
           {isTouch && (
             <div
-              className="msg-inner mobile"
-              {...stylex.props(styles.msgInnerMobile)}
+              {...withLiteralClass("msg-inner mobile", styles.msgInnerMobile)}
             >
-              <div className="msg-header" {...stylex.props(styles.msgHeader)}>
+              <div {...withLiteralClass("msg-header", styles.msgHeader)}>
                 <div
-                  className="avatar-wrapper"
-                  {...stylex.props(styles.avatarWrapper)}
+                  {...withLiteralClass("avatar-wrapper", styles.avatarWrapper)}
                 >
                   <Avatar
                     name={displayName}
@@ -251,8 +253,8 @@ export const MessageLayout = memo(
                   />
                   {isRobot && isStreaming && !hasVisibleContent && (
                     <div
-                      className="avatar-indicator-pos mobile"
-                      {...stylex.props(
+                      {...withLiteralClass(
+                        "avatar-indicator-pos mobile",
                         styles.avatarIndicatorPos,
                         styles.avatarIndicatorPosMobile
                       )}
@@ -264,13 +266,12 @@ export const MessageLayout = memo(
                 {robotName}
               </div>
               <div
-                className="content-area mobile"
-                {...stylex.props(styles.contentArea, styles.contentAreaMobile)}
+                {...withLiteralClass("content-area mobile", styles.contentArea, styles.contentAreaMobile)}
               >
                 <div
-                  className={`msg-body ${type} mobile`}
                   data-hook="messages-esc-msg-body"
-                  {...stylex.props(
+                  {...withLiteralClass(
+                    `msg-body ${type} mobile`,
                     styles.msgBody,
                     isSelf ? styles.msgBodySelf : styles.msgBodyRobot,
                     isSelf ? styles.msgBodySelfMobile : styles.msgBodyRobotMobile

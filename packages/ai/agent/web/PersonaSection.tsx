@@ -28,6 +28,7 @@ import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type { FormData } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { personaStyles as avatarStyles } from "./personaStyles";
+import { withLiteralClass } from "./withLiteralClass";
 
 type GreetingValue =
   | string
@@ -116,8 +117,7 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
           ) : (
             <button
               type="button"
-              className="agent-create-esc-avatar-preview--clickable"
-              {...stylex.props(avatarStyles.avatarPreview, avatarStyles.avatarPreviewClickable)}
+              {...withLiteralClass("agent-create-esc-avatar-preview--clickable", avatarStyles.avatarPreview, avatarStyles.avatarPreviewClickable)}
               onClick={() => fileInputRef.current?.click()}
               aria-label={t("form.avatarUpload", "上传头像")}
             >
@@ -127,9 +127,8 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
                 <LuCamera size={22} className="agent-avatar-placeholder" aria-hidden="true" />
               )}
               <div
-                className="agent-create-esc-avatar-overlay"
                 aria-hidden="true"
-                {...stylex.props(avatarStyles.avatarOverlay)}
+                {...withLiteralClass("agent-create-esc-avatar-overlay", avatarStyles.avatarOverlay)}
               >
                 <LuCamera size={16} aria-hidden="true" />
               </div>

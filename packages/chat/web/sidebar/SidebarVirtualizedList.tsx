@@ -10,6 +10,7 @@
 import React from "react";
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
+import { withLiteralClass } from "../withLiteralClass";
 import "../chatStylexEscapeHatch.css";
 import {
   ListBox,
@@ -137,7 +138,6 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
       <ListBox
         ref={listRef}
         aria-label="Sidebar items"
-        className="SidebarVirtualizedList__scroller"
         data-hook="chat-esc-sidebar-scroller"
         items={items}
         dependencies={dependencies}
@@ -146,8 +146,8 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
         selectionBehavior={selectionBehavior}
         selectedKeys={selectedKeys as any}
         onSelectionChange={onSelectionChange}
+        {...withLiteralClass("SidebarVirtualizedList__scroller", sidebarStyles.scroller)}
         style={{ height }}
-        {...stylex.props(sidebarStyles.scroller)}
       >
         {(item: T) => (
           <ListBoxItem

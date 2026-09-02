@@ -3,6 +3,7 @@ import React from "react";
 import type { ToolProps } from "./ToolMessageTypes";
 import type { TodoItem } from "ai/tools/agent/setTodoListTool";
 import { todoCardStyles as styles } from "./todoCardStyles";
+import { withLiteralClass } from "./toolMessageShared";
 
 export interface TodoCardProps extends Partial<ToolProps> {
   rawData?: any;
@@ -19,7 +20,6 @@ const IconListTodo = () => (
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="chat-todo-header-icon"
     {...stylex.props(styles.headerIcon)}
   >
     <rect x="3" y="5" width="6" height="6" rx="1" />
@@ -40,7 +40,6 @@ const IconCheckCircle = () => (
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="chat-todo-icon status-done"
     {...stylex.props(styles.icon, styles.iconDone)}
     aria-label="completed"
   >
@@ -59,7 +58,6 @@ const IconLoader = () => (
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="chat-todo-icon status-in_progress"
     {...stylex.props(styles.icon, styles.iconInProgress)}
     aria-label="in progress"
   >
@@ -84,7 +82,6 @@ const IconCircle = () => (
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className="chat-todo-icon status-pending"
     {...stylex.props(styles.icon, styles.iconPending)}
     aria-label="pending"
   >
@@ -115,16 +112,15 @@ export const TodoCard: React.FC<TodoCardProps> = ({ rawData, isError }) => {
   if (!todos || todos.length === 0) {
     return (
       <div
-        className="chat-todo-card"
-        {...stylex.props(styles.card)}
         data-testid="chat-todo-card"
+        {...withLiteralClass("chat-todo-card", styles.card)}
       >
-        <div className="chat-todo-header" {...stylex.props(styles.header)}>
-          <div className="chat-todo-title-wrap" {...stylex.props(styles.titleWrap)}>
+        <div {...stylex.props(styles.header)}>
+          <div {...stylex.props(styles.titleWrap)}>
             <IconListTodo />
             <span>任务清单</span>
           </div>
-          <span className="chat-todo-progress-text" {...stylex.props(styles.progressText)}>已清空</span>
+          <span {...withLiteralClass("chat-todo-progress-text", styles.progressText)}>已清空</span>
         </div>
       </div>
     );
@@ -135,37 +131,33 @@ export const TodoCard: React.FC<TodoCardProps> = ({ rawData, isError }) => {
 
   return (
     <div
-      className="chat-todo-card"
-      {...stylex.props(styles.card)}
       data-testid="chat-todo-card"
+      {...withLiteralClass("chat-todo-card", styles.card)}
     >
-      <div className="chat-todo-header" {...stylex.props(styles.header)}>
-        <div className="chat-todo-title-wrap" {...stylex.props(styles.titleWrap)}>
+      <div {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.titleWrap)}>
           <IconListTodo />
           <span>任务清单</span>
         </div>
         <span
-          className="chat-todo-progress-text"
-          {...stylex.props(styles.progressText)}
           data-testid="chat-todo-progress-text"
+          {...withLiteralClass("chat-todo-progress-text", styles.progressText)}
         >
           {doneCount} / {todos.length} ({progressPercent}%)
         </span>
       </div>
 
       <div
-        className="chat-todo-progress-bar-bg"
-        {...stylex.props(styles.progressBarBg)}
         data-testid="chat-todo-progress-bar-bg"
+        {...withLiteralClass("chat-todo-progress-bar-bg", styles.progressBarBg)}
       >
         <div
-          className="chat-todo-progress-bar-fill"
           {...stylex.props(styles.progressBarFill)}
           style={{ width: `${progressPercent}%` }}
         />
       </div>
 
-      <div className="chat-todo-list" {...stylex.props(styles.list)}>
+      <div {...stylex.props(styles.list)}>
         {todos.map((item, index) => {
           const status = item.status || "pending";
           const isDone = status === "done";
@@ -173,16 +165,14 @@ export const TodoCard: React.FC<TodoCardProps> = ({ rawData, isError }) => {
           return (
             <div
               key={index}
-              className={`chat-todo-item status-${status}`}
-              {...stylex.props(styles.item)}
               data-testid={`todo-item-${index}`}
               data-status={status}
+              {...withLiteralClass(`chat-todo-item status-${status}`, styles.item)}
             >
               {isDone && <IconCheckCircle />}
               {isInProgress && <IconLoader />}
               {status === "pending" && <IconCircle />}
               <span
-                className="chat-todo-text"
                 {...stylex.props(
                   styles.text,
                   isDone && styles.textDone,

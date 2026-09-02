@@ -1,21 +1,23 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
 import { execFileSync } from "node:child_process";
+import { basename, join } from "node:path";
 
-const files = [
-  "messagesStyles.ts", "messageActionsStyles.ts", "messageLayoutStyles.ts",
-  "appDeployCardStyles.ts", "prepareAgentDraftToolCardStyles.ts",
-  "createAgentToolCardStyles.ts", "fileItemStyles.ts", "todoCardStyles.ts",
-  "messageToolConfirmBarStyles.ts",
-].map((name) => `packages/chat/messages/web/${name}`);
+/** Properties which StyleX currently accepts but silently omits from generated CSS.
+ *  Logical border shorthands are pinned to the exact four names: borderBlockStartWidth,
+ *  borderInlineColor etc. are REAL longhands and must not be flagged. */
+export const SILENT_DROP_PROPERTIES = /^(?:background|border|border(?:Top|Right|Bottom|Left|BlockStart|BlockEnd|InlineStart|InlineEnd)|animation)$/;
+/** Deliberately documented so this scanner does not become a generic CSS shorthand linter. */
+export const VERIFIED_SURVIVING_PROPERTIES = new Set([
+  "backgroundColor", "backgroundImage", "margin", "padding", "font", "transition",
+]);
 
-// Find property spans by balancing (), [], and {} while ignoring strings/comments.
-// This deliberately does not parse TypeScript: a property value may be multiline,
-// an object variant, a token identifier, 0, or contain nested @media objects.
-const shorthand = /^(?:background|border|border(?:Top|Right|Bottom|Left|Block|Inline)(?:Start|End)?)$/;
+export type ShorthandHit = { property: string; line: number; span: string };
 function lineOf(text: string, offset: number) { return text.slice(0, offset).split("\n").length; }
-function scan(text: string) {
-  const hits: { property: string; line: number; span: string }[] = [];
+
+// Balance delimiters while ignoring strings/comments. This catches object literals,
+// nested media queries, and values returned by dynamic style functions without a TS AST.
+export function scanStylexShorthandSpans(text: string): ShorthandHit[] {
+  const hits: ShorthandHit[] = [];
   let i = 0, quote = "", comment = "";
   while (i < text.length) {
     if (comment === "line") { if (text[i] === "\n") comment = ""; i++; continue; }
@@ -24,10 +26,8 @@ function scan(text: string) {
     if (text.slice(i, i + 2) === "//") { comment = "line"; i += 2; continue; }
     if (text.slice(i, i + 2) === "/*") { comment = "block"; i += 2; continue; }
     if (text[i] === '"' || text[i] === "'" || text[i] === "`") { quote = text[i]; i++; continue; }
-    if ("({[".includes(text[i])) { i++; continue; }
-    if (")}]".includes(text[i])) { i++; continue; }
     const m = text.slice(i).match(/^([A-Za-z][A-Za-z0-9]*)\s*:/);
-    if (m && shorthand.test(m[1])) {
+    if (m && SILENT_DROP_PROPERTIES.test(m[1])) {
       const start = i, valueStart = i + m[0].length;
       let j = valueStart, q = "", depth = 0;
       for (; j < text.length; j++) {
@@ -35,8 +35,8 @@ function scan(text: string) {
         if (q) { if (c === "\\") j++; else if (c === q) q = ""; continue; }
         if (c === '"' || c === "'" || c === "`") { q = c; continue; }
         if ("({[".includes(c)) depth++;
-        else if (")}]".includes(c)) { if (depth === 0) break; depth--; }
-        else if (c === "," && depth === 0) break;
+        else if (")} ]".replace(/ /g, "").includes(c)) { if (!depth) break; depth--; }
+        else if (c === "," && !depth) break;
       }
       hits.push({ property: m[1], line: lineOf(text, start), span: text.slice(start, j).trim() });
       i = j; continue;
@@ -45,14 +45,22 @@ function scan(text: string) {
   }
   return hits;
 }
-const report = files.map((file) => {
-  const source = process.argv.includes("--git")
-    ? execFileSync("git", ["show", `HEAD:${file}`], { encoding: "utf8" })
-    : readFileSync(file, "utf8");
-  const hits = scan(source);
-  return `${basename(file)} (${hits.length})\n${hits.map((h) => `  ${basename(file)}:${h.line} ${h.span.replace(/\s+/g, " ")}`).join("\n")}`;
-}).join("\n\n") + "\n";
-const out = "docs/plans/2026-08-31-chat-messages-stylex-shorthand-baseline.txt";
-writeFileSync(out, report);
-console.log(report);
-console.log(`Wrote ${out}`);
+
+export function discoverStylexFiles(root: string): string[] {
+  const files = execFileSync("git", ["ls-files", "packages"], { cwd: root, encoding: "utf8" })
+    .split("\n").filter(Boolean);
+  return files.filter((file) => /(?:Styles\.ts|\.stylex\.ts)$/.test(file) ||
+    /\.(?:ts|tsx)$/.test(file) && /stylex\.(?:create|keyframes|defineVars|createTheme)\s*\(/.test(readFileSync(join(root, file), "utf8")));
+}
+
+if (import.meta.main) {
+  const root = process.cwd();
+  const rows = discoverStylexFiles(root).map((file) => {
+    const hits = scanStylexShorthandSpans(readFileSync(join(root, file), "utf8"));
+    return `${file} (${hits.length})\n${hits.map((h) => `  ${basename(file)}:${h.line} ${h.span.replace(/\\s+/g, " ")}`).join("\n")}`;
+  });
+  const report = rows.join("\n\n") + "\n";
+  const out = "/tmp/stylex-shorthand-baseline.txt";
+  writeFileSync(out, report);
+  console.log(report); console.log(`Wrote ${out}`);
+}

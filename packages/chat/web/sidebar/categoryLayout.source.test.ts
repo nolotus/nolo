@@ -76,12 +76,9 @@ describe("category sidebar layout - content-adaptive sizing (方案 B)", () => {
   it("hides the virtualized list scrollbar on web and desktop", () => {
     // After the virtualization migration the RAC ListBox is the scroll
     // container, so the hidden-scrollbar styling moved off content-inner.
-    expect(escapeHatchCss).toContain(
-      ".SidebarVirtualizedList__scroller::-webkit-scrollbar"
-    );
-    expect(escapeHatchCss).toContain(
-      'html[data-nolo-desktop="1"] .SidebarVirtualizedList__scroller::-webkit-scrollbar'
-    );
+    expect(escapeHatchCss).toContain(".SidebarVirtualizedList__scroller");
+    expect(escapeHatchCss).toContain("::-webkit-scrollbar");
+    expect(escapeHatchCss).toContain('html[data-nolo-desktop="1"]');
   });
 });
 

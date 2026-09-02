@@ -8,6 +8,7 @@ import { buildAgentFormDataFromGuidedDraft } from "ai/agent/guidedCreation/draft
 import { DEFAULT_MODEL } from "ai/llm/providers";
 import type { GuidedAgentDraft } from "ai/agent/guidedCreation/types";
 import { guidedAgentCreatePageStyles as styles } from "./guidedAgentCreatePageStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./agentPageStylexEscapeHatch.css";
 
 const EMPTY_MANUAL_DRAFT: GuidedAgentDraft = {
@@ -43,7 +44,7 @@ const GuidedAgentCreatePage: React.FC = () => {
   );
 
   return (
-    <div className="manual-agent-create" {...stylex.props(styles.container)}>
+    <div {...withLiteralClass("manual-agent-create", styles.container)}>
       <header {...stylex.props(styles.header)}>
         <span {...stylex.props(styles.icon)}>
           <LuSettings size={18} aria-hidden="true" />

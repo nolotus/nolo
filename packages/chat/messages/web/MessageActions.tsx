@@ -26,6 +26,7 @@ import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { TFunction } from "i18next";
 import { useMessageDelete } from "../hooks/useMessageDelete";
 import { messageActionsStyles as styles } from "./messageActionsStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 const SAVE_TITLE_TIMEOUT_MS = 1500;
@@ -332,9 +333,8 @@ export const MessageActions = ({
     return (
       <>
         <div
-          className={`actions desktop ${showActions ? "show" : ""}`}
           data-hook={["messages-esc-actions-desktop", showActions ? "messages-esc-show" : ""].filter(Boolean).join(" ")}
-          {...stylex.props(styles.actionsDesktop)}
+          {...withLiteralClass(`actions desktop ${showActions ? "show" : ""}`, styles.actionsDesktop)}
           data-message-actions="desktop"
         >
           {actions.map(
@@ -342,9 +342,9 @@ export const MessageActions = ({
               <Tooltip key={key} content={label} placement="top">
                 <button
                   type="button"
-                  className={`action-btn ${active ? "active" : ""} ${busy ? "busy" : ""}`}
                   data-hook="messages-esc-action-btn"
-                  {...stylex.props(
+                  {...withLiteralClass(
+                    `action-btn ${active ? "active" : ""} ${busy ? "busy" : ""}`,
                     styles.actionBtn,
                     active && styles.actionBtnActive,
                     disabled && styles.actionBtnDisabled,
@@ -357,9 +357,8 @@ export const MessageActions = ({
                 >
                   {busy ? (
                     <span
-                      className="action-spinner"
                       data-hook="messages-esc-action-spinner"
-                      {...stylex.props(styles.actionSpinner)}
+                      {...withLiteralClass("action-spinner", styles.actionSpinner)}
                       aria-hidden="true"
                     />
                   ) : (
@@ -379,16 +378,14 @@ export const MessageActions = ({
   return (
     <>
       <div
-        className="actions-overlay mobile"
         data-hook="messages-esc-actions-overlay-mobile"
-        {...stylex.props(styles.actionsOverlayMobile)}
+        {...withLiteralClass("actions-overlay mobile", styles.actionsOverlayMobile)}
         data-message-actions="mobile"
       >
         <button
           type="button"
-          className="overlay-backdrop"
           data-hook="messages-esc-overlay-backdrop"
-          {...stylex.props(styles.overlayBackdrop)}
+          {...withLiteralClass("overlay-backdrop", styles.overlayBackdrop)}
           aria-label={t("closeActions", "关闭操作")}
           onClick={(e) => {
             e.stopPropagation();
@@ -403,23 +400,22 @@ export const MessageActions = ({
           }}
         />
         <dialog
-          className="actions-panel"
           data-hook="messages-esc-actions-panel"
-          {...stylex.props(styles.actionsPanel)}
+          {...withLiteralClass("actions-panel", styles.actionsPanel)}
           open
           aria-label={t("messageActions", "消息操作")}
         >
-          <div className="panel-header" {...stylex.props(styles.panelHeader)}>
-            <div className="panel-indicator" {...stylex.props(styles.panelIndicator)} />
+          <div {...stylex.props(styles.panelHeader)}>
+            <div {...stylex.props(styles.panelIndicator)} />
           </div>
-          <div className="actions-grid" {...stylex.props(styles.actionsGrid)}>
+          <div {...stylex.props(styles.actionsGrid)}>
             {actions.map(
               ({ key, icon: Icon, handler, label, active, disabled, busy }) => (
                 <button
                   type="button"
                   key={key}
-                  className={`action-item ${active ? "active" : ""} ${busy ? "busy" : ""}`}
-                  {...stylex.props(
+                  {...withLiteralClass(
+                    `action-item ${active ? "active" : ""} ${busy ? "busy" : ""}`,
                     styles.actionItem,
                     active && styles.actionItemActive,
                     disabled && styles.actionBtnDisabled,
@@ -435,7 +431,6 @@ export const MessageActions = ({
                   disabled={disabled || undefined}
                 >
                   <div
-                    className="action-icon"
                     {...stylex.props(
                       styles.actionIcon,
                       active && styles.actionIconActive
@@ -443,16 +438,15 @@ export const MessageActions = ({
                   >
                     {busy ? (
                       <span
-                        className="action-spinner"
                         data-hook="messages-esc-action-spinner"
-                        {...stylex.props(styles.actionSpinner, styles.actionSpinnerLarge)}
+                        {...withLiteralClass("action-spinner", styles.actionSpinner, styles.actionSpinnerLarge)}
                         aria-hidden="true"
                       />
                     ) : (
                       <Icon size={20} />
                     )}
                   </div>
-                  <span className="action-label" {...stylex.props(styles.actionLabel)}>{label}</span>
+                  <span {...stylex.props(styles.actionLabel)}>{label}</span>
                 </button>
               ),
             )}

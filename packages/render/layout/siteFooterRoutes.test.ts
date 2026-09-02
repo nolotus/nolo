@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { shouldRenderSiteFooter } from "./siteFooterRoutes";
 
 describe("shouldRenderSiteFooter", () => {
-  test("renders on the home page and marketing/legal routes", () => {
+  test("renders on the home page and marketing/legal routes for guests", () => {
     for (const path of [
       "/",
       "/pricing",
@@ -16,6 +16,24 @@ describe("shouldRenderSiteFooter", () => {
       "/downloads",
     ]) {
       expect(shouldRenderSiteFooter(path)).toBe(true);
+    }
+  });
+
+  test("hides the footer on the logged-in home only", () => {
+    expect(shouldRenderSiteFooter("/", { isLoggedIn: true })).toBe(false);
+    // 其它内容型页面登录后仍渲染页脚（合规入口）。
+    for (const path of [
+      "/pricing",
+      "/terms",
+      "/privacy",
+      "/aup",
+      "/about",
+      "/contact",
+      "/guide",
+      "/downloads",
+      "/share/community",
+    ]) {
+      expect(shouldRenderSiteFooter(path, { isLoggedIn: true })).toBe(true);
     }
   });
 

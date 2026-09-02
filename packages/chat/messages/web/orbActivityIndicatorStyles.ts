@@ -83,7 +83,7 @@ export const orbActivityIndicatorStyles = stylex.create({
     width: 3,
     height: 3,
     borderRadius: 999,
-    background: "currentColor",
+    backgroundColor: "currentColor",
     opacity: restInk,
   },
   cellStill: {
@@ -130,7 +130,7 @@ export const orbActivityIndicatorStyles = stylex.create({
     height: 3,
     margin: "-1.5px 0 0 -1.5px",
     borderRadius: 999,
-    background: "currentColor",
+    backgroundColor: "currentColor",
     opacity: ringRest,
   },
   ringDotChase: {

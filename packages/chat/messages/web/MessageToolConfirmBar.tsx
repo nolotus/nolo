@@ -12,6 +12,7 @@ import {
   translateGateTitle,
 } from "chat/toolConfirmPolicy";
 import { messageToolConfirmBarStyles as styles } from "./messageToolConfirmBarStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import "./messagesStylexEscapeHatch.css";
 
 interface MessageToolConfirmBarProps {
@@ -107,15 +108,14 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
   return (
     <>
       <div
-      className="tool-confirm-row"
-      {...stylex.props(styles.row)}
       data-testid="tool-confirm-row"
+      {...withLiteralClass("tool-confirm-row", styles.row)}
     >
         <button
           type="button"
-          className="tool-confirm-button"
           data-hook="messages-esc-tool-confirm-button"
-          {...stylex.props(
+          {...withLiteralClass(
+            "tool-confirm-button",
             styles.button,
             buttonDisabled && styles.buttonDisabled
           )}
@@ -126,10 +126,8 @@ export const MessageToolConfirmBar: React.FC<MessageToolConfirmBarProps> = ({
         </button>
         {statusText && (
           <div
-            className={`tool-confirm-status ${
-              statusClass === "success" ? "success" : "failed"
-            }`}
-            {...stylex.props(
+            {...withLiteralClass(
+              `tool-confirm-status ${statusClass === "success" ? "success" : "failed"}`,
               styles.status,
               statusClass === "success"
                 ? styles.statusSuccess

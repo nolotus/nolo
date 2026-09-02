@@ -30,7 +30,9 @@ export const comboBoxStyles = stylex.create({
   field: {
     display: "flex",
     alignItems: "center",
-    border: "1px solid var(--border, #d1d5db)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--border, #d1d5db)",
     borderRadius: "var(--radius-sm, 6px)",
     backgroundColor: "var(--background, #ffffff)",
     overflow: "hidden",
@@ -45,7 +47,8 @@ export const comboBoxStyles = stylex.create({
   },
   // .react-aria-ComboBox .react-aria-Input（reset；Input 是 TSX 渲染的元素）
   input: {
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     outline: "none",
     backgroundColor: "transparent",
     flex: 1,
@@ -57,7 +60,8 @@ export const comboBoxStyles = stylex.create({
   },
   // .react-aria-ComboBox .combobox-trigger
   trigger: {
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     borderRadius: 0,
     margin: 0,
     backgroundColor: "transparent",

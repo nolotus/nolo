@@ -24,6 +24,7 @@ import type { ReasoningEffort } from "../createAgentSchema";
 import { getAvailableReasoningEfforts } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { agentFormStyles as afs } from "./agentFormStyles";
+import { withLiteralClass } from "./withLiteralClass";
 
 export type { CreateRunMode, AgentCreateQuickDraft };
 export {
@@ -149,8 +150,8 @@ const AgentCreateModeCards: React.FC<{
             role="radio"
             aria-checked={isActive}
             disabled={busy}
-            className="agent-create-esc-source-card"
-            {...stylex.props(
+            {...withLiteralClass(
+              "agent-create-esc-source-card",
               afs.createSourceCard,
               isActive && afs.createSourceCardActive
             )}
@@ -245,8 +246,7 @@ const AgentCreatePlatformPanel: React.FC<{
   const { t } = useTranslation("ai");
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="platform">
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
         </span>
@@ -262,8 +262,7 @@ const AgentCreatePlatformPanel: React.FC<{
           onChange={(e) => setPrompt(e.target.value)}
         />
       </label>
-      <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
           label={t("createAgent.quickCreate.modelLabel", "模型")}
@@ -379,8 +378,7 @@ const AgentCreateApiPanel: React.FC<{
   const { t } = useTranslation("ai");
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="api">
-      <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
           label={t("form.provider", "Provider 模板")}
@@ -401,8 +399,7 @@ const AgentCreateApiPanel: React.FC<{
           ))}
         </Select>
       </div>
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("form.customProviderUrl", "服务商 URL")}
         </span>
@@ -420,8 +417,7 @@ const AgentCreateApiPanel: React.FC<{
           autoComplete="off"
         />
       </label>
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("form.apiKey", "API 密钥")}
         </span>
@@ -439,8 +435,7 @@ const AgentCreateApiPanel: React.FC<{
         onChange={setCredentialSynced}
         busy={busy}
       />
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("form.model", "模型")}
         </span>
@@ -476,8 +471,7 @@ const AgentCreateApiPanel: React.FC<{
           />
         )}
       </label>
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
         </span>
@@ -512,8 +506,7 @@ const AgentCreateApiPanel: React.FC<{
           );
         })()}
       </label>
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
         </span>
@@ -611,8 +604,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   const { t } = useTranslation("ai");
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="subscription">
-      <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
           label={t("createAgent.quickCreate.subscriptionBrand", "订阅 / 方案")}
@@ -671,8 +663,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
           ) : null}
           {oauth.connection.kind === "connected" ? (
             <>
-              <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+              <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
                 <Select
                   className="agent-create-esc-source-select"
                   label={t("form.model", "模型")}
@@ -697,8 +688,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
                   })}
                 </Select>
               </div>
-              <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+              <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
                 <span {...stylex.props(afs.createSourceFieldLabel)}>
                   {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
                 </span>
@@ -733,8 +723,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
                   );
                 })()}
               </label>
-              <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+              <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
                 <span {...stylex.props(afs.createSourceFieldLabel)}>
                   {t("createAgent.quickCreate.prompt", "系统提示词")}
                 </span>
@@ -782,8 +771,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
         </>
       ) : (
         <>
-          <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("form.customProviderUrl", "服务商 URL")}
             </span>
@@ -797,8 +785,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
               autoComplete="off"
             />
           </label>
-          <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("form.apiKey", "API 密钥")}
             </span>
@@ -830,8 +817,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
               label="记住此服务商密钥"
             />
           ) : null}
-          <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("form.model", "模型")}
             </span>
@@ -870,8 +856,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
               />
             )}
           </label>
-          <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
             </span>
@@ -906,8 +891,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
               );
             })()}
           </label>
-          <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("createAgent.quickCreate.prompt", "系统提示词")}
             </span>
@@ -979,8 +963,7 @@ const AgentCreateCliPanel: React.FC<{
   const { t } = useTranslation("ai");
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="cli">
-      <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
           label={t("createAgent.quickCreate.cliProvider", "CLI 工具")}
@@ -995,8 +978,7 @@ const AgentCreateCliPanel: React.FC<{
           ))}
         </Select>
       </div>
-      <div className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
           label={t("createAgent.quickCreate.runLocation", "运行位置")}
@@ -1048,8 +1030,7 @@ const AgentCreateCliPanel: React.FC<{
           </button>
         ) : null}
       </div>
-      <label className="agent-create-esc-source-field"
-      {...stylex.props(afs.createSourceField)}>
+      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
         </span>

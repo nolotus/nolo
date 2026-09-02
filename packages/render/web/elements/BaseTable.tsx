@@ -22,6 +22,7 @@ interface BaseTableProps extends React.TableHTMLAttributes<HTMLTableElement> {
 
 export const BaseTable: React.FC<BaseTableProps> = ({
   columns = [],
+  className = "",
   containerStyle,
   headerControls,
   style,
@@ -44,7 +45,11 @@ export const BaseTable: React.FC<BaseTableProps> = ({
 
       <div className="table-container" style={containerStyle}>
         {headerControls}
-        <table className="data-table" style={style} {...tableProps}>
+        <table
+          className={["data-table", className].filter(Boolean).join(" ")}
+          style={style}
+          {...tableProps}
+        >
           {hasCustomWidth && (
             <colgroup>
               {columns.map((col, index) => (

@@ -4,7 +4,7 @@
 // desktop 客户端直接 import 此入口，公开仓库可独立 build。
 
 import { serve, file as bunFile } from "bun";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { readFileSync } from "node:fs";
 import { desktopRuntimeRoutes, prewarmDesktopRuntimeRoutes } from "./desktopRuntimeRoutes";
 
@@ -131,12 +131,14 @@ export const bootstrapServer = async (): Promise<void> => {
           relativePath = relativePath.slice("/public".length);
         }
 
-        // Serve direct files from publicDir. Guard with startsWith(publicDir + "/")
-        // so join() results outside the public dir (traversal attempts) never reach
+        // Serve direct files from publicDir. Guard with startsWith(publicDirPrefix)
+        // so join/resolve results outside the public dir (traversal attempts) never reach
         // the filesystem; "/" itself resolves to publicDir and falls through to the
         // SPA shell below.
-        const resolvedPath = join(publicDir, relativePath);
-        if (resolvedPath.startsWith(`${publicDir}/`)) {
+        const publicDirPrefix = publicDir.endsWith(sep) ? publicDir : `${publicDir}${sep}`;
+        const cleanRelative = relativePath.replace(/^[/\\]+/, "");
+        const resolvedPath = resolve(publicDir, cleanRelative);
+        if (resolvedPath.startsWith(publicDirPrefix)) {
           const file = bunFile(resolvedPath);
           if (await file.exists()) {
             // Same cache contract as the legacy publicRequestHandler; assets are

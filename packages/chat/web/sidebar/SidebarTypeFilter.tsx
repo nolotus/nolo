@@ -1,6 +1,7 @@
 import React from "react";
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
+import { withLiteralClass } from "../withLiteralClass";
 import "../chatStylexEscapeHatch.css";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "render/web/ui/Tooltip";
@@ -106,11 +107,11 @@ export const SidebarTypeFilter: React.FC<{
 
   return (
     <div
-      className={`SidebarTypeFilter${disabled ? " is-disabled" : ""}`}
       data-hook="chat-esc-sidebar-type-filter"
       role="group"
       aria-label={ariaLabel || t("allView.recent", "最近")}
-      {...stylex.props(
+      {...withLiteralClass(
+        `SidebarTypeFilter${disabled ? " is-disabled" : ""}`,
         sidebarStyles.sidebarTypeFilter,
         disabled && sidebarStyles.sidebarTypeFilterDisabled
       )}
@@ -121,7 +122,6 @@ export const SidebarTypeFilter: React.FC<{
           <Tooltip key={id} content={label} placement="top">
             <button
               type="button"
-              className={`SidebarTypeFilter-button${isActive ? " is-active" : ""}`}
               data-hook="chat-esc-sidebar-type-filter-button"
               data-recent-filter={id}
               aria-pressed={isActive}
@@ -130,7 +130,8 @@ export const SidebarTypeFilter: React.FC<{
                 event.stopPropagation();
                 if (!disabled) onChange(id);
               }}
-              {...stylex.props(
+              {...withLiteralClass(
+                `SidebarTypeFilter-button${isActive ? " is-active" : ""}`,
                 sidebarStyles.sidebarTypeFilterButton,
                 isActive && sidebarStyles.sidebarTypeFilterButtonActive
               )}

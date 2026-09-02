@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import "./chatStylexEscapeHatch.css";
 import React, { memo } from "react";
 import { LuChevronDown } from "react-icons/lu";
@@ -20,10 +21,9 @@ const ScrollToBottomButtonComponent: React.FC<ScrollToBottomButtonProps> = ({
   return (
     <button
       type="button"
-      className="scroll-to-bottom-button"
       onClick={onClick}
       aria-label="滚动到底部"
-      {...stylex.props(messageInputStyles.scrollToBottomButton)}
+      {...withLiteralClass("scroll-to-bottom-button", messageInputStyles.scrollToBottomButton)}
     >
       <LuChevronDown size={18} aria-hidden="true" />
     </button>

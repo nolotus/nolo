@@ -77,7 +77,6 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
   return (
     <>
       <div
-        className="image-config-row"
         data-testid="image-config-row"
         {...stylex.props(messageInputStyles.imageConfigRow)}
       >
@@ -89,7 +88,6 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
             onSelectionChange={(key) =>
               handleImageProfileChange(key == null ? "" : String(key))
             }
-            className="image-config-row__select"
             {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem
@@ -126,7 +124,6 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
             onSelectionChange={(key) =>
               handleAspectRatioChange(key == null ? "" : String(key))
             }
-            className="image-config-row__select"
             {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem id="" textValue={t("imageAspectDefault", "比例: 默认")}>
@@ -146,7 +143,6 @@ const ImageConfigRow: React.FC<ImageConfigRowProps> = ({
             onSelectionChange={(key) =>
               handleImageSizeChange(key == null ? "" : String(key))
             }
-            className="image-config-row__select"
             {...stylex.props(messageInputStyles.imageConfigRowSelect)}
           >
             <SelectItem id="" textValue={t("imageSizeDefault", "清晰度: 默认")}>

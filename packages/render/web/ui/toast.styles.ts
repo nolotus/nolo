@@ -49,7 +49,9 @@ export const toastStyles = stylex.create({
     padding: "var(--space-3, 12px) var(--space-4, 16px)",
     backgroundColor: "var(--background, #ffffff)",
     color: "var(--text, #18181b)",
-    border: "1px solid var(--borderMuted, var(--borderLight, rgba(0, 0, 0, 0.08)))",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderMuted, var(--borderLight, rgba(0, 0, 0, 0.08)))",
     borderRadius: "var(--radius-lg, var(--radius-md, 12px))",
     boxShadow:
       "0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)",
@@ -101,10 +103,14 @@ export const toastStyles = stylex.create({
   },
   iconLoading: {
     color: "var(--info, var(--primary, #3b82f6))",
-    animation: {
-      default: `${spin} 1s linear infinite`,
+    // shorthand 会被 StyleX 静默丢弃，必须 longhand（animationName 支持 RM 变体）
+    animationName: {
+      default: spin,
       "@media (prefers-reduced-motion: reduce)": "none",
     },
+    animationDuration: "1s",
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
   },
   // ── Text ──
   // .toast-text-wrapper
@@ -142,7 +148,9 @@ export const toastStyles = stylex.create({
     fontWeight: "var(--fontWeight-semibold, 600)",
     color: "var(--primary, #3b82f6)",
     backgroundColor: "var(--primaryGhost, rgba(59, 130, 246, 0.1))",
-    border: "1px solid transparent",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
     borderRadius: "var(--radius-sm, var(--radius-xs, 6px))",
     cursor: "pointer",
     WebkitTapHighlightColor: "transparent",
@@ -167,7 +175,8 @@ export const toastStyles = stylex.create({
   close: {
     flex: "0 0 auto",
     backgroundColor: "none",
-    border: "none",
+    borderWidth: 0,
+    borderStyle: "none",
     appearance: "none",
     borderRadius: "var(--radius-sm, var(--radius-xs, 6px))",
     height: 28,

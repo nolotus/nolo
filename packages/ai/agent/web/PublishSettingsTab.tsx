@@ -71,7 +71,7 @@ const PublishSettingsTab = ({
 
       {/* 2. 仅在 isPublic 为 true 时渲染公开设置容器 */}
       {isPublic && (
-        <div className="agent-create-esc-public-settings-group" {...stylex.props(styles.publicSettingsGroup)}>
+        <div {...stylex.props(styles.publicSettingsGroup)}>
           <FormField
             label={t("publish.whitelist.label", "白名单")}
             helperText={t(

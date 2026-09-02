@@ -551,10 +551,9 @@ function SidebarItemRow({
               </button>
             ) : null}
             <span
-              {...stylex.props(styles.title, isActive && styles.titleActive)}
+              {...stylex.props(styles.title, isActive && styles.titleActive, isChildRow && styles.titleChild)}
               data-status={dialogStatusTone}
               title={displayTitle}
-              style={isChildRow ? { paddingLeft: 8 } : undefined}
             >
               {displayTitle}
             </span>

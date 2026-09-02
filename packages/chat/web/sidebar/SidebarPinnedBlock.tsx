@@ -1,6 +1,7 @@
 import React from "react";
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
+import { withLiteralClass } from "../withLiteralClass";
 import "../chatStylexEscapeHatch.css";
 import { useLocation, useParams } from "app/routing";
 import { useTranslation } from "react-i18next";
@@ -114,8 +115,7 @@ export const SidebarPinnedBlock: React.FC<SidebarPinnedBlockProps> = ({
   return (
     <>
       <div
-        className={`SidebarPinnedBlock ${className}`}
-        {...stylex.props(sidebarStyles.pinnedBlockWrapper)}
+        {...withLiteralClass(`SidebarPinnedBlock ${className}`, sidebarStyles.pinnedBlockWrapper)}
       >
         {items.map((item) => {
           const itemSpaceId = item.spaceId ?? currentSpaceId ?? null;
