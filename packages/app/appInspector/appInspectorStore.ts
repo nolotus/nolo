@@ -17,6 +17,8 @@ let appKey: string | null = null;
 let selectedNode: AppSelectedNode | null = null;
 /** 本地预览是否占据主区（对话被挤到右侧）。 */
 let previewOpen = false;
+/** 出菜区 iframe 当前加载的 URL；null = 面板自己起本地预览服务（旧行为）。 */
+let previewUrl: string | null = null;
 
 const notify = (): void => {
   for (const listener of listeners) {
@@ -58,8 +60,24 @@ export function setPreviewOpen(next: boolean): void {
   bump();
 }
 
+export function setPreviewUrl(next: string | null): void {
+  previewUrl = next;
+  bump();
+}
+
+export function setPreview(open: boolean, url?: string | null): void {
+  previewOpen = open;
+  if (url !== undefined) previewUrl = url;
+  if (!open) inspecting = false;
+  bump();
+}
+
 export function getPreviewOpen(): boolean {
   return previewOpen;
+}
+
+export function getPreviewUrl(): string | null {
+  return previewUrl;
 }
 
 export function getInspecting(): boolean {
@@ -100,10 +118,16 @@ export function useLocalPreviewOpen(): boolean {
   return getPreviewOpen();
 }
 
+export function useLocalPreviewUrl(): string | null {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return getPreviewUrl();
+}
+
 export function resetAppInspectorStoreForTests(): void {
   inspecting = false;
   appKey = null;
   selectedNode = null;
   previewOpen = false;
+  previewUrl = null;
   bump();
 }

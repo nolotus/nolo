@@ -141,7 +141,9 @@ describe("runinfraError classifier", () => {
       "FUNCTION_PAYLOAD_TOO_LARGE",
     );
     expect(bareResult.action).toBe("fix-request");
-    expect(bareResult.userFacingMessage).toBe("发送内容过长，请缩短内容或分次发送");
+    expect(bareResult.userFacingMessage).toBe(
+      "请求体积过大（长对话上下文或大图片）。请新开对话、精简内容，或压缩/裁剪图片后重试",
+    );
     expect(bareResult.userFacingMessage).not.toContain("FUNCTION_PAYLOAD_TOO_LARGE");
     expect(bareResult.internalMessage).toBe("FUNCTION_PAYLOAD_TOO_LARGE");
 
@@ -152,7 +154,9 @@ describe("runinfraError classifier", () => {
       "<html><body>413 Request Entity Too Large</body></html>",
     );
     expect(html413Result.action).toBe("fix-request");
-    expect(html413Result.userFacingMessage).toBe("发送内容过长，请缩短内容或分次发送");
+    expect(html413Result.userFacingMessage).toBe(
+      "请求体积过大（长对话上下文或大图片）。请新开对话、精简内容，或压缩/裁剪图片后重试",
+    );
     expect(html413Result.userFacingMessage).not.toContain("html");
     expect(html413Result.userFacingMessage).not.toContain("413");
   });

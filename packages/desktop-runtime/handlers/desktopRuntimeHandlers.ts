@@ -21,6 +21,7 @@ export {
   handleDesktopUpdaterPost,
 } from "./desktopUpdaterHandler";
 export { handleDesktopClipboardPost } from "./desktopClipboardHandler";
+export { handleDesktopPreviewOpenPost } from "./desktopPreviewHandler";
 export { handleDesktopCredentialsPost } from "./desktopCredentialBrokerHandler";
 export { handleDesktopAuthSessionGet } from "./desktopAuthSessionHandler";
 export {

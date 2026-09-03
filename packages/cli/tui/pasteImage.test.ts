@@ -364,8 +364,8 @@ describe("pasteImage", () => {
     expect(summary).toContain("2.3 KB");
   });
 
-  test("DEFAULT_MAX_IMAGE_BYTES is 8 MB", () => {
-    expect(DEFAULT_MAX_IMAGE_BYTES).toBe(8 * 1024 * 1024);
+  test("DEFAULT_MAX_IMAGE_BYTES is 4 MB", () => {
+    expect(DEFAULT_MAX_IMAGE_BYTES).toBe(4 * 1024 * 1024);
   });
 });
 

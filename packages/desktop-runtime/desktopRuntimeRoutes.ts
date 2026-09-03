@@ -26,6 +26,7 @@ export const prewarmDesktopRuntimeRoutes = (): void => {
 export const desktopRuntimeRoutes: Record<string, any> = createApiRouteFamily([
   { path: "/api/desktop-updater", handlers: { GET: d("handleDesktopUpdaterGet"), POST: d("handleDesktopUpdaterPost") } },
   { path: "/api/desktop/clipboard", handlers: { POST: d("handleDesktopClipboardPost") } },
+  { path: "/api/desktop/preview/open", handlers: { POST: d("handleDesktopPreviewOpenPost") } },
   { path: "/api/desktop/credentials", enableCors: false, handlers: { POST: d("handleDesktopCredentialsPost") } },
   { path: "/api/desktop/pick-folder", handlers: { POST: d("handleDesktopPickFolder") } },
   { path: "/api/desktop/chrome-connector/status", handlers: { GET: d("handleDesktopChromeConnectorStatusGet") } },

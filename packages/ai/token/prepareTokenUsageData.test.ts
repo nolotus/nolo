@@ -5,6 +5,85 @@ import { createTokenRecord } from "./saveTokenRecord";
 import { findModelConfig } from "ai/llm/providers";
 
 describe("prepareTokenUsageData", () => {
+  it("ignores stale persisted prices for a code-owned builtin agent after model rerouting", () => {
+    const prepared = prepareTokenUsageData({
+      rawUsage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        billing_provider: "nolo",
+        billing_model: "glm-5-3-flash",
+      },
+      agentConfig: {
+        provider: "nolo",
+        model: "kimi-k2.6",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+        apiSource: "platform",
+      },
+      userId: "user-1",
+      agentId: "agent-pub-01NOLOAPPBLD000000019KCKT0",
+      dialogId: "dialog-1",
+      timestamp: 12345,
+    });
+
+    expect(prepared.billedModel).toBe("glm-5-3-flash");
+    expect(prepared.tokenData.cost).toBe(4);
+  });
+
+  it("preserves explicit pricing for an ordinary creator-owned public agent", () => {
+    const prepared = prepareTokenUsageData({
+      rawUsage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        billing_provider: "nolo",
+        billing_model: "glm-5-3-flash",
+      },
+      agentConfig: {
+        provider: "nolo",
+        model: "kimi-k2.6",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+        // A conflicting/stale record id must not override the canonical key.
+        id: "01NOLOAPPBLD000000019KCKT0",
+        userId: "creator-1",
+        apiSource: "custom",
+        sharingLevel: "full",
+      },
+      userId: "buyer-1",
+      agentId: "agent-pub-01CREATORAGENT000000000001",
+      dialogId: "dialog-1",
+      timestamp: 12345,
+    });
+
+    expect(prepared.billedModel).toBe("glm-5-3-flash");
+    expect(prepared.tokenData.cost).toBe(16.8);
+    expect(prepared.tokenData.pay["creator-1"]).toBe(12.8);
+  });
+
+  it("ignores persisted prices for a platform agent whose key is not in the builtin set", () => {
+    const prepared = prepareTokenUsageData({
+      rawUsage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        billing_provider: "nolo",
+        billing_model: "glm-5-3-flash",
+      },
+      agentConfig: {
+        provider: "nolo",
+        model: "kimi-k2.6",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+        apiSource: "platform",
+      },
+      userId: "user-1",
+      agentId: "agent-pub-01NOTINBUILTINSET00000000A",
+      dialogId: "dialog-1",
+      timestamp: 12345,
+    });
+
+    expect(prepared.tokenData.cost).toBe(4);
+  });
+
   it("prefers billing metadata from usage over the agent fallback", () => {
     const prepared = prepareTokenUsageData({
       rawUsage: {

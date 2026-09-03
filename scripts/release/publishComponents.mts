@@ -65,10 +65,8 @@ export function commitAndPush(versions: Map<Component, string>, dryRun: boolean,
   git(["add", ...paths], repositoryRoot);
   try { git(["diff", "--cached", "--quiet"], repositoryRoot); return; } catch { /* staged changes exist */ }
   try {
-    // Bot 生成的是版本簿记提交（版本号 + CHANGELOG），作者署名/审查 trailer 规则不适用；
-    // runner 上安装的仓库钩子会拦掉无 trailer 的提交（2026-09-02/03 main version-bump 连续失败根因）。
-    git(["commit", "--no-verify", "-m", `chore(release): ${[...versions].map(([c, v]) => `${c}-v${v}`).join(", ")}`], repositoryRoot);
-    if (pushRemote) git(["push", "--no-verify", "origin", `HEAD:refs/heads/${branch}`], repositoryRoot);
+    git(["commit", "-m", `chore(release): ${[...versions].map(([c, v]) => `${c}-v${v}`).join(", ")}`], repositoryRoot);
+    if (pushRemote) git(["push", "origin", `HEAD:refs/heads/${branch}`], repositoryRoot);
   } catch (e) {
     // A failed commit/push must not leave staged release material behind.
     git(["reset", "--mixed", "HEAD"], repositoryRoot);
@@ -131,7 +129,7 @@ export async function planAndPublish({ branch = "alpha", dryRun = false, reposit
       const tag = tagFor(r.component, r.next); const prior = existingTag(tag);
       if (prior === git(["rev-parse", "HEAD"])) continue;
       if (prior) throw new ReleaseStateForkError(r.component, [tag]);
-      git(["tag", "-a", tag, "-m", tag]); git(["push", "--no-verify", "origin", tag]);
+      git(["tag", "-a", tag, "-m", tag]); git(["push", "origin", tag]);
     } catch (error) {
       tagErrors.push(error instanceof Error ? error : new Error(String(error)));
       console.error(`[component-release] ${r.component} tag/push failed`, error);

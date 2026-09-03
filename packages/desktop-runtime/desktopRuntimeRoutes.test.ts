@@ -20,6 +20,7 @@ describe("desktopRuntimeRoutes", () => {
     expect(Object.keys(desktopRuntimeRoutes)).toEqual([
       "/api/desktop-updater",
       "/api/desktop/clipboard",
+      "/api/desktop/preview/open",
       "/api/desktop/credentials",
       "/api/desktop/pick-folder",
       "/api/desktop/chrome-connector/status",

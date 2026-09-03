@@ -250,6 +250,49 @@ if (isDesktopShell) {
   // reads this global, which only the embedded desktop server injects.
   (window as Window & { __NOLO_DESKTOP__?: boolean }).__NOLO_DESKTOP__ = true;
 
+  // Desktop bridge for server-side handlers (e.g. /api/desktop/preview/open)
+  // to open the LOCAL PREVIEW SPLIT's iframe at a given URL inside this window.
+  // Assigned here so packages/desktop/src/bun can reach it via webview.executeJavascript.
+  try {
+    void import("app/appInspector/appInspectorStore").then((m) => {
+      (window as any).__noloSetDesktopPreview = (open: boolean, url?: string | null) => {
+        m.setPreview(open, typeof url === "string" ? url : url ?? undefined);
+      };
+    });
+  } catch {
+    // non-fatal at boot
+  }
+
+  // Desktop "click-to-preview": clicking any cross-origin http(s) link opens it
+  // in the LocalPreviewSplit iframe instead of navigating away or launching an
+  // external browser. The agent just replies with a URL — no tool, no skill
+  // needed. Same-origin links keep SPA routing; Cmd/Ctrl+click (and middle
+  // click) keep the external-browser escape hatch.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute("href") ?? "";
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
+      if (url.origin === window.location.origin) return; // SPA router handles these
+      event.preventDefault();
+      void import("app/appInspector/appInspectorStore").then((m) => {
+        m.setPreview(true, url.toString());
+      });
+    },
+    true
+  );
+
   // 劫持 console 桥接到 Electrobun 主进程
   const sendToHost = (window as any).__electrobunSendToHost;
   const sendDesktopDiagnostic = (event: string, payload: DesktopDiagnosticPayload = {}) => {

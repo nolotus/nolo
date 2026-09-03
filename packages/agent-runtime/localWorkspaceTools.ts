@@ -2156,6 +2156,71 @@ async function tasksTool(_args: {
   };
 }
 
+async function openDesktopPreviewTool(args: {
+  call: AgentRuntimeToolCallInput;
+}): Promise<AgentRuntimeToolResult> {
+  const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
+  const url = typeof parsed.url === "string" ? parsed.url.trim() : "";
+  if (!url) {
+    return {
+      content: JSON.stringify({ error: "openDesktopPreview requires a non-empty url." }),
+      metadata: { status: "failed" },
+    };
+  }
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return {
+        content: JSON.stringify({ error: "url must be an absolute http(s) URL." }),
+        metadata: { status: "failed" },
+      };
+    }
+  } catch {
+    return {
+      content: JSON.stringify({ error: "url must be an absolute http(s) URL." }),
+      metadata: { status: "failed" },
+    };
+  }
+
+  const port = Number(process.env.NOLO_DESKTOP_SERVER_PORT ?? 3233);
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/desktop/preview/open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const bodyText = await response.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      body = { raw: bodyText };
+    }
+    if (!response.ok) {
+      const message = isRecord(body) && typeof body.error === "string"
+        ? body.error
+        : `preview open failed (HTTP ${response.status})`;
+      return {
+        content: JSON.stringify({ error: message }),
+        metadata: { status: "failed", httpStatus: response.status },
+      };
+    }
+    return {
+      content: JSON.stringify({ ok: true, url, note: "desktop preview opened" }),
+      metadata: { status: "done", url },
+    };
+  } catch (error) {
+    return {
+      content: JSON.stringify({
+        error:
+          "Desktop preview bridge unreachable; this tool only works inside Nolo Desktop. " +
+          toErrorMessage(error),
+      }),
+      metadata: { status: "failed" },
+    };
+  }
+}
+
 export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) {
   const fileAccess = args.confirmExternalFileAccess
     ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
@@ -2238,5 +2303,6 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
     }),
     taskStop: (call: AgentRuntimeToolCallInput) => taskStopTool({ call }),
     tasks: (call: AgentRuntimeToolCallInput) => tasksTool({ call }),
+    openDesktopPreview: (call: AgentRuntimeToolCallInput) => openDesktopPreviewTool({ call }),
   };
 }

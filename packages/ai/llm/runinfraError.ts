@@ -104,7 +104,8 @@ export function classifyRuninfraError(
       type: "invalid_request_error",
       code: "payload_too_large",
       requestId: headerRequestId,
-      userFacingMessage: "发送内容过长，请缩短内容或分次发送",
+      userFacingMessage:
+        "请求体积过大（长对话上下文或大图片）。请新开对话、精简内容，或压缩/裁剪图片后重试",
       internalMessage: bodyText?.trim() || "FUNCTION_PAYLOAD_TOO_LARGE (HTTP 413)",
     };
   }

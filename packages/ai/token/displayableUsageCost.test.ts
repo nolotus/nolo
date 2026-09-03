@@ -11,6 +11,76 @@ describe("resolveDisplayableUsageCost (展示层积分 cost 解析)", () => {
   };
   const usage = { input_tokens: 100, output_tokens: 50 };
 
+  it("shows the actual catalog cost for a builtin with stale persisted prices", () => {
+    const cost = resolveDisplayableUsageCost({
+      billingAgentConfig: {
+        provider: "nolo",
+        model: "glm-5-3-flash",
+        apiSource: "platform",
+        id: "01NOLOAPPBLD000000019KCKT0",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+      },
+      agentId: "agent-pub-01NOLOAPPBLD000000019KCKT0",
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+      userId: "user-1",
+    });
+
+    expect(cost).toBe(4);
+  });
+
+  it("keeps creator pricing when canonical identity conflicts with a stale builtin raw id", () => {
+    const cost = resolveDisplayableUsageCost({
+      billingAgentConfig: {
+        provider: "nolo",
+        model: "glm-5-3-flash",
+        apiSource: "custom",
+        id: "01NOLOAPPBLD000000019KCKT0",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+      },
+      agentId: "agent-pub-01CREATORAGENT000000000001",
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+      userId: "user-1",
+    });
+
+    expect(cost).toBe(16.8);
+  });
+
+  it("does not infer builtin pricing from a mutable raw id without a canonical key", () => {
+    const cost = resolveDisplayableUsageCost({
+      billingAgentConfig: {
+        provider: "nolo",
+        model: "glm-5-3-flash",
+        apiSource: "custom",
+        id: "01NOLOAPPBLD000000019KCKT0",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+      },
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+      userId: "user-1",
+    });
+
+    expect(cost).toBe(16.8);
+  });
+
+  it("platform apiSource + persisted prices + no canonical key → catalog price (fail-closed, 事故形状)", () => {
+    const cost = resolveDisplayableUsageCost({
+      billingAgentConfig: {
+        provider: "nolo",
+        model: "glm-5-3-flash",
+        apiSource: "platform",
+        id: "01NOLOAPPBLD000000019KCKT0",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+      },
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+      userId: "user-1",
+    });
+
+    expect(cost).toBe(4);
+  });
+
   it("billable > 0 → 返回 cost（platform agent 真实计费）", () => {
     const cost = resolveDisplayableUsageCost({
       billingAgentConfig: platformAgent,

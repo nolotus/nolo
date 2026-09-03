@@ -26,7 +26,13 @@ const MIME_BY_EXTENSION: Record<ImageExtension, string> = {
  * base64 编码后约 11 MB JSON payload,不会让 fetch / stream 卡顿。
  * 超出后会被静默忽略并提示(每个 path 在当前 session 内只提示一次)。
  */
-export const DEFAULT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/**
+ * 单图硬上限（压缩后仍超限则拒绝发送）。
+ * 图片以 base64 内联进消息体（+33% 膨胀），且请求体会叠加完整对话历史；上限过大时
+ * 长上下文对话极易撞平台边缘网关的单请求体上限（413 FUNCTION_PAYLOAD_TOO_LARGE）。
+ * 正常图片经 compressImage 收敛到 TARGET_IMAGE_BYTES (1.5MB) 内，此处 4MB 是兜底拒绝线。
+ */
+export const DEFAULT_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 export type AttachedImage = {
   dataUrl: string;

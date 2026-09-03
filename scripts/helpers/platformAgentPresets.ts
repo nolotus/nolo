@@ -111,6 +111,8 @@ export const PLATFORM_DEMO_AGENTS: AgentSeedConfig[] = [
     tools: ["taobaoTmallProductScraper", "jdProductScraper"],
     provider: "openai",
     model: "gpt-5.6-luna",
+    // 显式价格不再写入记录（buildAgentRecord 会剥掉平台公共字段）；保留这里
+    // 仅为维持 hasVision 的「pricesProvided」推导语义，勿改成真实售卖价。
     inputPrice: 8,
     outputPrice: 48,
     isPublic: true,

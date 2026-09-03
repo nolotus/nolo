@@ -16,6 +16,7 @@ import {
   setSelectedNode,
   useAppInspecting,
   useAppSelectedNode,
+  useLocalPreviewUrl,
 } from "app/appInspector/appInspectorStore";
 import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
 
@@ -33,7 +34,10 @@ export default function LocalPreviewPanel() {
   const boundFolder = space?.boundFolder;
   const spaceId = space?.id;
 
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const storePreviewUrl = useLocalPreviewUrl();
+  const previewUrl = storePreviewUrl ?? localPreviewUrl;
+  const setPreviewUrl = setLocalPreviewUrl;
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [nonce, setNonce] = useState(0);
@@ -129,8 +133,11 @@ export default function LocalPreviewPanel() {
   }, [boundFolder, spaceId]);
 
   useEffect(() => {
+    // If agent opened a preview via store (openPreview tool), don't auto-start
+    // the panel's own static-server — the iframe is already pointing elsewhere.
+    if (storePreviewUrl) return;
     void start();
-  }, [start]);
+  }, [start, storePreviewUrl]);
 
   // 页面卸载时不停服务：用户通常会在预览和对话之间来回切，反复冷启动 vite 更难用。
   // 进程退出由 localPreviewRoutes 的 exit 钩子兜底。
@@ -138,8 +145,10 @@ export default function LocalPreviewPanel() {
   // 预览服务器活在宿主进程的内存里，宿主一重启（dev 模式每次热重载都重启）
   // 它就没了。iframe 会停在最后一帧，看着一切正常，实际上标注和刷新都失效。
   // 所以定期问宿主它是否还在服务，不在就重开并换上新地址。
+  // store URL 模式（agent/点击打开的外部地址）不归这套自管服务管，跳过轮询，
+  // 否则会误启静态服务、甚至用错误横幅顶掉正在显示的 iframe。
   useEffect(() => {
-    if (!previewUrl || !spaceId) return;
+    if (storePreviewUrl || !previewUrl || !spaceId) return;
     let cancelled = false;
 
     const timer = setInterval(async () => {
@@ -162,7 +171,7 @@ export default function LocalPreviewPanel() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [previewUrl, spaceId, start]);
+  }, [previewUrl, spaceId, start, storePreviewUrl]);
 
   const previewOrigin = useMemo(
     () => (previewUrl ? new URL(previewUrl).origin : null),
@@ -206,7 +215,9 @@ export default function LocalPreviewPanel() {
 
   useEffect(() => () => setInspecting(false), []);
 
-  if (!boundFolder) {
+  // 无绑定文件夹的 space 也能预览：agent 或点击打开的 store URL 不依赖
+  // boundFolder，只有面板自启动的本地静态服务才需要它。
+  if (!boundFolder && !storePreviewUrl) {
     return (
       <div style={{ padding: 24 }}>
         当前空间没有绑定本地文件夹，无法预览。可以在空间设置里绑定一个目录。
@@ -264,8 +275,11 @@ export default function LocalPreviewPanel() {
           刷新
         </Button>
 
-        <span className="LocalPreview__path" title={boundFolder}>
-          {boundFolder}
+        <span
+          className="LocalPreview__path"
+          title={storePreviewUrl ?? boundFolder}
+        >
+          {storePreviewUrl ?? boundFolder}
         </span>
 
         {selectedNode ? (

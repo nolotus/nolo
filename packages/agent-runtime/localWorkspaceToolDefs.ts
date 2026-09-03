@@ -29,11 +29,13 @@ const WORKSPACE_TOOL_NAMES = [
   "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskLogs", "taskStop", "tasks",
+  "openDesktopPreview",
 ] as const;
 
 // Process-control tools ride the same gate as listProcesses: they only exist
 // to follow up on tasks the shell tools spawned, so exposing them without
-// shell access would hand out dangling handles.
+// shell access would hand out dangling handles. openDesktopPreview is a pure
+// UI action (no process handle) and stays with the workspace-level tools.
 const SHELL_TOOL_NAMES = [
   "execShell", "launchProcess", "listProcesses",
   "taskWait", "taskLogs", "taskStop", "tasks",
@@ -284,6 +286,30 @@ function buildLaunchProcessTool(): OpenAiCompatibleTool {
   };
 }
 
+function buildOpenDesktopPreviewTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "openDesktopPreview",
+      description:
+        "Open the desktop app's local preview split (main-area iframe) at the given URL. " +
+        "Use after `launchProcess` once the dev server is confirmed healthy. " +
+        "The preview appears inside the main window (right side of the split becomes the artifact area), keeping the conversation on the right. " +
+        "Only available on the desktop runtime; returns an error elsewhere.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "Absolute http(s) URL to load in the preview browser window.",
+          },
+        },
+        required: ["url"],
+      },
+    },
+  };
+}
+
 function buildListProcessesTool(): OpenAiCompatibleTool {
   return {
     type: "function",
@@ -423,6 +449,7 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "captureVisualState") return buildCaptureVisualStateTool();
   if (toolName === "execShell") return buildExecShellTool(toolName);
   if (toolName === "launchProcess") return buildLaunchProcessTool();
+  if (toolName === "openDesktopPreview") return buildOpenDesktopPreviewTool();
   if (toolName === "listProcesses") return buildListProcessesTool();
   if (toolName === "taskWait") return buildTaskWaitTool();
   if (toolName === "taskLogs") return buildTaskLogsTool();

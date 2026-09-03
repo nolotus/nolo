@@ -92,22 +92,13 @@ describe("component publisher", () => {
     expect(() => git(cwd, ["diff", "--cached", "--quiet"])).not.toThrow();
   });
 
-  it("bot release commit bypasses repo hooks (2026-09-02/03 main version-bump 失败根因)", () => {
+  it("clears staged release files when commit fails", () => {
     const cwd = fixture();
+    write(cwd, "packages/cli/package.json", '{"name":"fixture","version":"1.0.1-alpha.1"}\n');
+    git(cwd, ["add", "packages/cli/package.json"]);
     const hook = join(cwd, ".git/hooks/pre-commit");
     writeFileSync(hook, "#!/bin/sh\nexit 1\n");
     chmodSync(hook, 0o755);
-    write(cwd, "packages/cli/package.json", '{"name":"fixture","version":"1.0.1-alpha.1"}\n');
-    expect(() => commitAndPush(new Map([["cli", "1.0.1-alpha.1"]]), false, cwd, false)).not.toThrow();
-    expect(git(cwd, ["log", "-1", "--pretty=%s"])).toBe("chore(release): cli-v1.0.1-alpha.1");
-  });
-
-  it("clears staged release files when commit genuinely fails", () => {
-    const cwd = fixture();
-    write(cwd, "packages/cli/package.json", '{"name":"fixture","version":"1.0.1-alpha.1"}\n');
-    // 钩子已被 --no-verify 绕过（见上一个用例），这里用只读 COMMIT_EDITMSG 注入
-    // 一个与钩子无关的真实提交失败（bun execFileSync 不继承运行时 env，无法走身份缺失路径）。
-    chmodSync(join(cwd, ".git", "COMMIT_EDITMSG"), 0o444);
     expect(() => commitAndPush(new Map([["cli", "1.0.1-alpha.1"]]), false, cwd, false)).toThrow("release commit/push failed");
     expect(() => git(cwd, ["diff", "--cached", "--quiet"])).not.toThrow();
   });

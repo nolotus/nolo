@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { randomFillSync } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import {
   compressImage,
   MAX_IMAGE_DIMENSION,
   MAX_IMAGE_SIZE_BYTES,
+  TARGET_IMAGE_BYTES,
 } from "./compressImage";
 import {
   readImageAsDataUrl,
@@ -43,8 +45,8 @@ describe("compressImage", () => {
     expect(result.mime).toBe("image/png");
   });
 
-  test("超过尺寸阈值（>2048px 宽）时等比缩放并保持宽高比", async () => {
-    // 3000x1500 横屏图像，宽 > 2048
+  test("超过尺寸阈值（>1568px 宽）时等比缩放并保持宽高比", async () => {
+    // 3000x1500 横屏图像，宽 > 1568
     const wideBuf = await sharp({
       create: {
         width: 3000,
@@ -63,13 +65,13 @@ describe("compressImage", () => {
     expect(result.compressedBytes).toBe(result.buffer.byteLength);
 
     const meta = await sharp(result.buffer).metadata();
-    expect(meta.width).toBe(2048);
-    expect(meta.height).toBe(1024);
+    expect(meta.width).toBe(1568);
+    expect(meta.height).toBe(784);
     expect(meta.format).toBe("png");
   });
 
-  test("超过尺寸阈值（>2048px 高）时竖屏等比缩放", async () => {
-    // 1000x4000 竖屏图像，高 > 2048
+  test("超过尺寸阈值（>1568px 高）时竖屏等比缩放", async () => {
+    // 1000x4000 竖屏图像，高 > 1568
     const tallBuf = await sharp({
       create: {
         width: 1000,
@@ -85,16 +87,67 @@ describe("compressImage", () => {
 
     expect(result.compressed).toBe(true);
     const meta = await sharp(result.buffer).metadata();
-    expect(meta.height).toBe(2048);
-    expect(meta.width).toBe(512);
+    expect(meta.height).toBe(1568);
+    expect(meta.width).toBe(392);
   });
 
-  test("超过体积阈值（>5MB）但尺寸 <= 2048px 时进行压缩重编码", async () => {
+  function makeNoiseRaw(width: number, height: number): Uint8Array {
+    // 必须用 CSPRNG 噪声：LCG 低位序列周期极短（256），deflate 会把周期性压掉，
+    // 导致 PNG 体积不超标、JPEG 降级链不被触发
+    const raw = new Uint8Array(width * height * 3);
+    randomFillSync(raw);
+    return raw;
+  }
+
+  test("未超尺寸但超过发送目标的噪点 PNG 转为 JPEG 并收敛体积（截图场景根治 413）", async () => {
+    // 噪点不可无损压缩：PNG 重压后仍远超 1.5MB 发送目标 → 应白底 flatten 转 JPEG
+    const width = 1000;
+    const height = 1000;
+    const noisyPng = await sharp(makeNoiseRaw(width, height), {
+      raw: { width, height, channels: 3 },
+    })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
+
+    expect(noisyPng.byteLength).toBeGreaterThan(TARGET_IMAGE_BYTES);
+    expect(width).toBeLessThanOrEqual(MAX_IMAGE_DIMENSION);
+
+    const result = await compressImage(noisyPng, "image/png");
+
+    expect(result.compressed).toBe(true);
+    expect(result.mime).toBe("image/jpeg");
+    expect(result.compressedBytes).toBeLessThan(noisyPng.byteLength / 2);
+    expect(result.compressedBytes).toBeLessThanOrEqual(TARGET_IMAGE_BYTES);
+
+    const meta = await sharp(result.buffer).metadata();
+    expect(meta.format).toBe("jpeg");
+  });
+
+  test("小幅超发送目标的 JPEG 按硬触发线放行，不做无谓重编码", async () => {
+    // JPEG/WebP 已是有损格式，1.5MB~5MB 区间重压收益有限，预检直接放行
+    const width = 1500;
+    const height = 1125;
+    const noisyJpeg = await sharp(makeNoiseRaw(width, height), {
+      raw: { width, height, channels: 3 },
+    })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    expect(noisyJpeg.byteLength).toBeGreaterThan(TARGET_IMAGE_BYTES);
+    expect(noisyJpeg.byteLength).toBeLessThanOrEqual(MAX_IMAGE_SIZE_BYTES);
+
+    const result = await compressImage(noisyJpeg, "image/jpeg");
+
+    expect(result.compressed).toBe(false);
+    expect(result.buffer).toBe(noisyJpeg);
+  });
+
+  test("超过体积阈值（>5MB）但尺寸 <= 1568px 时进行压缩重编码", async () => {
     // 构造一个体积 > 5MB 的未压缩 PNG
     const uncompressedPng = await sharp({
       create: {
-        width: 1800,
-        height: 1800,
+        width: 1500,
+        height: 1500,
         channels: 4,
         background: { r: 120, g: 60, b: 240, alpha: 1 },
       },
@@ -128,7 +181,7 @@ describe("compressImage", () => {
 
     expect(result.compressed).toBe(true);
     const meta = await sharp(result.buffer).metadata();
-    expect(meta.width).toBe(2048);
+    expect(meta.width).toBe(1568);
     expect(meta.format).toBe("jpeg");
   });
 
@@ -186,7 +239,7 @@ describe("compressImage", () => {
     const goodResult = await compressImage(validBuf, "image/png");
     expect(goodResult.compressed).toBe(true);
     const meta = await sharp(goodResult.buffer).metadata();
-    expect(meta.width).toBe(2048);
+    expect(meta.width).toBe(1568);
   });
 
   test("图片在压缩后（或降级原图）仍超过 maxBytes 时，抛出 too-large", async () => {

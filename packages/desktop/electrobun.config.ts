@@ -2,27 +2,34 @@ import type { ElectrobunConfig } from "electrobun";
 import { resolve } from "node:path";
 import { DESKTOP_APP_VERSION } from "./desktopVersion";
 
-/** Absolute globs for checkout-root runtime dirs only (not package-local data trees). */
+/**
+ * Repo-root runtime dirs that must never trigger a desktop rebuild.
+ *
+ * IMPORTANT: electrobun's watcher matches watchIgnore globs against paths
+ * RELATIVE to the project root (packages/desktop) — see shouldIgnore() in
+ * electrobun's cli, which does path.relative(projectRoot, fullPath) before
+ * glob matching. Absolute repo-root globs (e.g. "/repo/data/**") therefore
+ * NEVER match a project-relative candidate like "../../data/x.json" and are
+ * silently dead config. Repo-root dirs must be ignored via "../../<dir>/**"
+ * patterns; package-local trees (packages/<pkg>/data) stay watched because
+ * their candidates ("../../packages/<pkg>/data/...") don't match these.
+ */
 export const resolveRepoRootRuntimeWatchIgnores = (
-  repoRoot = resolve(import.meta.dir, "../..")
+  _repoRoot = resolve(import.meta.dir, "../..")
 ) =>
-  ["data", "logs", "temp", "tmp", "nolo"].map(
-    (dir) => `${repoRoot.replace(/\\/g, "/")}/${dir}/**`
-  );
+  ["data", "logs", "temp", "tmp", "nolo"].map((dir) => `../../${dir}/**`);
 
 /** Trees handled by the web watcher or unrelated to the Desktop Bun process. */
 export const resolveDesktopDevWatchIgnores = (
-  repoRoot = resolve(import.meta.dir, "../..")
-) => {
-  const root = repoRoot.replace(/\\/g, "/");
-  return [
-    `${root}/docs/**`,
-    `${root}/public/**`,
-    `${root}/packages/render/**`,
-    `${root}/packages/rn/**`,
-    `${root}/packages/ai/agent/web/**`,
+  _repoRoot = resolve(import.meta.dir, "../..")
+) =>
+  [
+    "../../docs/**",
+    "../../public/**",
+    "../../packages/render/**",
+    "../../packages/rn/**",
+    "../../packages/ai/agent/web/**",
   ];
-};
 
 const hasDeveloperId = Boolean(process.env.ELECTROBUN_DEVELOPER_ID);
 const hasAppleApiNotaryCreds = Boolean(
@@ -128,8 +135,9 @@ export default {
     // Electrobun watches parent dirs of relative watch entries (e.g. ../../App.tsx
     // → repo root). Built-in ignoreDirs are relative to packages/desktop only, so
     // ignore repo-root .git / node_modules / runtime dir churn that would otherwise
-    // rebuild-storm. Runtime dirs use absolute repo-root globs so packages/*/data
-    // source trees stay watched.
+    // rebuild-storm. Runtime/dev-ignore globs are PROJECT-RELATIVE ("../../x/**")
+    // because electrobun matches watchIgnore against path.relative(projectRoot,
+    // fullPath) — absolute globs never match and are dead config.
     watchIgnore: [
       "**/.git/**",
       "**/node_modules/**",

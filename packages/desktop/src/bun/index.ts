@@ -277,6 +277,16 @@ const sanitizeDesktopDiagExtra = (
 let desktopBootStartedAt = Date.now();
 /** Last phase entered; attached to fatal handlers for failure localization. */
 let desktopCurrentPhase = "boot:start";
+/**
+ * Flips to true once the desktop runtime has finished booting and is serving.
+ * Deliberately a plain boolean, NOT derived from desktopCurrentPhase: the
+ * uncaughtException/unhandledRejection handlers call desktopDiag("boot:error")
+ * BEFORE deciding fate, and desktopDiag overwrites desktopCurrentPhase — so a
+ * phase-string comparison inside those handlers would always see "boot:error"
+ * and never fire (dead guard). This flag is only ever set to true, never
+ * mutated by desktopDiag.
+ */
+let isDesktopBootReady = false;
 
 type DesktopDiagLevel = "info" | "warn" | "error";
 
@@ -317,19 +327,71 @@ const desktopDiag = (
 
 const registerDesktopFatalDiagnostics = () => {
   process.on("uncaughtException", (error) => {
+    // Snapshot BEFORE desktopDiag overwrites desktopCurrentPhase.
+    const phaseAtFailure = desktopCurrentPhase;
+    // Post-boot: a stray background error (e.g. a TypeError inside Bun's
+    // internal postgres query resolution during a failed sync) must not kill
+    // the whole desktop client — the window and its LevelDB state are fine,
+    // and quitting on a background sync error just reads as "the client
+    // crashed" to the user. Boot-time failures stay fatal (unknown startup
+    // state is unsafe to serve).
+    if (isDesktopBootReady) {
+      desktopDiag("runtime:error", "uncaughtException after boot; continuing", {
+        level: "warn",
+        phaseAtFailure,
+        error: formatPhaseError(error),
+      });
+      console.error(
+        "[desktop non-fatal] uncaughtException after boot",
+        formatDiagnosticError(error),
+      );
+      return;
+    }
     desktopDiag("boot:error", "uncaughtException", {
       level: "error",
-      phaseAtFailure: desktopCurrentPhase,
+      phaseAtFailure,
       error: formatPhaseError(error),
     });
     console.error("[desktop fatal] uncaughtException", formatDiagnosticError(error));
+    // Boot-time failures stay fatal (unknown startup state is unsafe to serve).
+    // After boot:ready, a stray background error (e.g. a TypeError inside Bun's
+    // internal postgres query resolution) must not kill the whole desktop
+    // client — the window and its LevelDB state are fine, and quitting on a
+    // background sync error just reads as "the client crashed" to the user.
+    const postBoot = desktopCurrentPhase === "boot:ready";
+    if (postBoot) {
+      desktopDiag("runtime:error", "uncaughtException after boot; continuing", {
+        level: "warn",
+        phaseAtFailure: desktopCurrentPhase,
+        error: formatPhaseError(error),
+      });
+      return;
+    }
     process.exit(1);
   });
 
   process.on("unhandledRejection", (reason) => {
+    // Snapshot BEFORE desktopDiag overwrites desktopCurrentPhase.
+    const phaseAtFailure = desktopCurrentPhase;
+    // Same post-boot policy as uncaughtException: background async failures
+    // (tool subprocess errors, remote-sync fetch failures) must not tear down
+    // the desktop window. The tool/spawn allowlist below remains as extra
+    // armor for the pre-boot window.
+    if (isDesktopBootReady) {
+      desktopDiag("runtime:error", "unhandledRejection after boot; continuing", {
+        level: "warn",
+        phaseAtFailure,
+        error: formatPhaseError(reason),
+      });
+      console.error(
+        "[desktop non-fatal] unhandledRejection after boot",
+        formatDiagnosticError(reason),
+      );
+      return;
+    }
     desktopDiag("boot:error", "unhandledRejection", {
       level: "error",
-      phaseAtFailure: desktopCurrentPhase,
+      phaseAtFailure,
       error: formatPhaseError(reason),
     });
     console.error("[desktop fatal] unhandledRejection", formatDiagnosticError(reason));
@@ -521,6 +583,39 @@ type BrowserWindowLike = {
 
 let browserWindow: BrowserWindowLike | undefined;
 let openDesktopBrowser: (url?: string) => void = () => {};
+
+// Bridge used by server-side handlers (e.g. /api/desktop/preview/open) that
+// need to trigger a native desktop capability. The desktop host assigns this
+// after mainWindow exists; server handlers call it with a host-message payload.
+function installDesktopApiRequestBridge(mainWindow: { webview: { executeJavascript: (js: string) => unknown } }) {
+  (globalThis as any).__noloDesktopApiRequest = async (payload: {
+    type?: string;
+    action?: string;
+    url?: string;
+  }) => {
+    if (payload?.type === "nolo-preview-open") {
+      const url = typeof payload.url === "string" ? payload.url : "";
+      if (!url) throw new Error("nolo-preview-open requires url");
+      const escaped = JSON.stringify(url);
+      // Call the webview's global appInspectorStore setter; the web entry
+      // exposes this as a global for the desktop bridge to reach.
+      mainWindow.webview.executeJavascript(
+        `globalThis.__noloSetDesktopPreview?.(true, ${escaped});`,
+      );
+      return;
+    }
+    if (
+      payload?.type === "nolo-desktop-browser-action" &&
+      payload?.action === "open"
+    ) {
+      openDesktopBrowser(
+        typeof payload.url === "string" && payload.url ? payload.url : undefined,
+      );
+      return;
+    }
+    throw new Error(`unsupported desktopApiRequest type: ${payload?.type ?? "<none>"}`);
+  };
+}
 
 const DESKTOP_NAVIGATION_ACTIONS = {
   back: "desktop:navigate-back",
@@ -745,7 +840,8 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
     (globalThis as any).__noloLastHostMessage = __stamp;
 
     if ((detail as any).type === "nolo-desktop-browser-action" && (detail as any).action === "open") {
-      openDesktopBrowser();
+      const targetUrl = (detail as any).url;
+      openDesktopBrowser(typeof targetUrl === "string" && targetUrl ? targetUrl : undefined);
       return;
     }
 
@@ -1061,6 +1157,7 @@ desktopDiag("server:listening", "embedded server ready", { serverUrl });
 
 if (isHeadlessProbe) {
   console.log("[desktop] headless probe mode enabled; BrowserWindow startup skipped");
+  isDesktopBootReady = true;
   desktopDiag("boot:ready", "headless probe ready; BrowserWindow skipped");
   await new Promise(() => {});
 }
@@ -1149,6 +1246,7 @@ setupDesktopNavigationMenu(mainWindow as any);
 if (shouldInstallInjectedDesktopChrome) {
   setupDesktopNavigationChrome(mainWindow as any);
 }
+installDesktopApiRequestBridge(mainWindow as any);
 
 openDesktopBrowser = (targetUrl?: string) => {
   if (browserWindow) {
@@ -1403,6 +1501,7 @@ const scheduleInitialUpdateCheck = () => {
 
 scheduleInitialUpdateCheck();
 
+isDesktopBootReady = true;
 desktopDiag("boot:ready", "desktop boot ready", {
   origin: serverUrl,
   smoke: isSmokeProbe,

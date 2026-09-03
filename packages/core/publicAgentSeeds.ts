@@ -165,13 +165,21 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
   const tags: string[] = input.tags ? [...input.tags] : [];
 
   const isPlatformHosted = isNoloHostedProvider(input.provider);
-  let inputPrice = isPlatformHosted ? 0 : input.inputPrice;
-  let outputPrice = isPlatformHosted ? 0 : input.outputPrice;
+  // 写端断根：平台公共 agent（nolo 托管 / apiSource=platform / isPublic 未声明 custom）
+  // 的记录不携带价格字段——定价唯一真值源是代码目录。快照价只属于创作者
+  // （apiSource=custom）；写进平台记录的任何快照都是跨模型污染原料（2026-09-03 事故）。
+  const isPlatformPriced =
+    !isPlatformHostedImageModel(input.model) &&
+    (isPlatformHosted ||
+      input.apiSource === "platform" ||
+      (input.isPublic === true && !input.apiSource));
+  let inputPrice = isPlatformPriced ? undefined : input.inputPrice;
+  let outputPrice = isPlatformPriced ? undefined : input.outputPrice;
   let hasVision = input.hasVision;
   const pricesProvided =
     input.inputPrice !== undefined || input.outputPrice !== undefined;
 
-  if (!isPlatformHosted && (inputPrice === undefined || outputPrice === undefined)) {
+  if (!isPlatformPriced && (inputPrice === undefined || outputPrice === undefined)) {
     const pricing = getModelPricing(providerForLookup, input.model);
     if (!pricing) {
       throw new Error(`未找到模型价格元数据: ${providerForLookup}/${input.model}`);
@@ -211,16 +219,22 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
     }
   }
 
-  return {
-    ...input,
+  // 写端断根：平台公共记录物理不含价格字段（undefined 的键也不会写入 KV JSON）。
+  const { inputPrice: _strippedInputPrice, outputPrice: _strippedOutputPrice, ...inputRest } =
+    input;
+  const record = {
+    ...inputRest,
     tools,
     isPublic,
     allowFork,
     tags,
-    inputPrice,
-    outputPrice,
     hasVision,
   } as T & AgentSeedConfig;
+  if (!isPlatformPriced) {
+    record.inputPrice = inputPrice;
+    record.outputPrice = outputPrice;
+  }
+  return record;
 }
 
 // ── 导出公共 Agent ID 常量 ──

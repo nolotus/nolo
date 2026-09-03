@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import config, {
   resolveDesktopBunVersion,
   resolveDesktopDevWatchIgnores,
@@ -114,7 +114,6 @@ describe("desktop electrobun config", () => {
 
   it("ignores repo-root .git, node_modules, and runtime dirs while watching source parents", () => {
     const repoRoot = resolve(import.meta.dir, "../..");
-    const normalizedRepoRoot = repoRoot.replace(/\\/g, "/");
     const runtimeIgnores = resolveRepoRootRuntimeWatchIgnores(repoRoot);
     const devIgnores = resolveDesktopDevWatchIgnores(repoRoot);
 
@@ -128,43 +127,70 @@ describe("desktop electrobun config", () => {
       ...runtimeIgnores,
       ...devIgnores,
     ]);
+    // Globs must be PROJECT-RELATIVE (relative to packages/desktop): electrobun's
+    // watcher matches watchIgnore against path.relative(projectRoot, fullPath),
+    // so absolute repo-root globs never match any candidate (dead config).
     expect(runtimeIgnores).toEqual([
-      `${normalizedRepoRoot}/data/**`,
-      `${normalizedRepoRoot}/logs/**`,
-      `${normalizedRepoRoot}/temp/**`,
-      `${normalizedRepoRoot}/tmp/**`,
-      `${normalizedRepoRoot}/nolo/**`,
+      "../../data/**",
+      "../../logs/**",
+      "../../temp/**",
+      "../../tmp/**",
+      "../../nolo/**",
     ]);
     expect(config.build.watch).toContain("../../App.tsx");
     expect(config.build.watch).toContain("../../index.js");
-    expect(devIgnores).toContain(`${normalizedRepoRoot}/docs/**`);
-    expect(devIgnores).toContain(`${normalizedRepoRoot}/public/**`);
-    expect(devIgnores).toContain(`${normalizedRepoRoot}/packages/render/**`);
-    expect(devIgnores).toContain(`${normalizedRepoRoot}/packages/ai/agent/web/**`);
+    expect(devIgnores).toContain("../../docs/**");
+    expect(devIgnores).toContain("../../public/**");
+    expect(devIgnores).toContain("../../packages/render/**");
+    expect(devIgnores).toContain("../../packages/ai/agent/web/**");
+
+    // Mirror electrobun's shouldIgnore(): globs match against
+    // path.relative(projectRoot=packages/desktop, fullPath), posix-joined.
+    const projectRoot = resolve(repoRoot, "packages/desktop");
+    const rel = (fullPath: string) =>
+      relative(projectRoot, resolve(fullPath))
+        .split(sep)
+        .join("/");
 
     const gitIgnore = new Bun.Glob("**/.git/**");
     const nodeModulesIgnore = new Bun.Glob("**/node_modules/**");
     const runtimeGlobs = runtimeIgnores.map((pattern) => new Bun.Glob(pattern));
+    const devGlobs = devIgnores.map((pattern) => new Bun.Glob(pattern));
 
     const gitPath = `${repoRoot}/.git/objects/pack/pack-abc.pack`;
     const nodeModulesPath = `${repoRoot}/node_modules/some-pkg/index.js`;
     const rootDataPath = `${repoRoot}/data/sampler.out.log`;
-    const rootLogsPath = `${repoRoot}/logs/app.log`;
+    const rootLogsPath = `${repoRoot}/logs/dev-control/api.command`;
     const rootTempPath = `${repoRoot}/temp/cache.bin`;
     const rootTmpPath = `${repoRoot}/tmp/scratch.txt`;
+    const rootPublicPath = `${repoRoot}/public/latest-assets.json`;
+    // Runtime artifacts that actually triggered rebuild storms (2026-09-03):
+    // update-checker writes into public/, runtime writes into data/ and logs/.
+    const rebuildStormPaths = [rootPublicPath, rootDataPath, rootLogsPath];
     const packageDataPath = `${repoRoot}/packages/chat/data/schema.ts`;
     const sourcePath = `${repoRoot}/packages/app/pages/QuickChat.tsx`;
 
-    expect(gitIgnore.match(gitPath)).toBe(true);
-    expect(nodeModulesIgnore.match(nodeModulesPath)).toBe(true);
-    expect(runtimeGlobs.some((g) => g.match(rootDataPath))).toBe(true);
-    expect(runtimeGlobs.some((g) => g.match(rootLogsPath))).toBe(true);
-    expect(runtimeGlobs.some((g) => g.match(rootTempPath))).toBe(true);
-    expect(runtimeGlobs.some((g) => g.match(rootTmpPath))).toBe(true);
+    expect(gitIgnore.match(rel(gitPath))).toBe(true);
+    expect(nodeModulesIgnore.match(rel(nodeModulesPath))).toBe(true);
+    expect(runtimeGlobs.some((g) => g.match(rel(rootDataPath)))).toBe(true);
+    expect(runtimeGlobs.some((g) => g.match(rel(rootLogsPath)))).toBe(true);
+    expect(runtimeGlobs.some((g) => g.match(rel(rootTempPath)))).toBe(true);
+    expect(runtimeGlobs.some((g) => g.match(rel(rootTmpPath)))).toBe(true);
+    expect(devGlobs.some((g) => g.match(rel(rootPublicPath)))).toBe(true);
+    // The exact files observed triggering spurious desktop rebuilds must all
+    // be ignored: no rebuild may fire for runtime artifact churn.
+    for (const p of rebuildStormPaths) {
+      const ignored =
+        runtimeGlobs.some((g) => g.match(rel(p))) ||
+        devGlobs.some((g) => g.match(rel(p)));
+      expect(ignored).toBe(true);
+    }
 
-    expect(gitIgnore.match(sourcePath)).toBe(false);
-    expect(nodeModulesIgnore.match(sourcePath)).toBe(false);
-    expect(runtimeGlobs.some((g) => g.match(packageDataPath))).toBe(false);
-    expect(runtimeGlobs.some((g) => g.match(sourcePath))).toBe(false);
+    expect(gitIgnore.match(rel(sourcePath))).toBe(false);
+    expect(nodeModulesIgnore.match(rel(sourcePath))).toBe(false);
+    // Package-local data trees stay watched (not ignored).
+    expect(runtimeGlobs.some((g) => g.match(rel(packageDataPath)))).toBe(false);
+    expect(runtimeGlobs.some((g) => g.match(rel(sourcePath)))).toBe(false);
+    expect(devGlobs.some((g) => g.match(rel(sourcePath)))).toBe(false);
   });
 });

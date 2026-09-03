@@ -29,6 +29,8 @@ import type { RawUsage } from "./types";
 export function resolveDisplayableUsageCost(args: {
   /** 已组装好的计费配置（含 provider/model/price/apiSource/apiKeyRef 等）。 */
   billingAgentConfig: BillingAgentConfig;
+  /** Canonical agent key; authoritative over a persisted config id. */
+  agentId?: string;
   /** 本次用量；null/undefined 视为空 usage。 */
   usage?: RawUsage | null;
   /** 归属用户。空 / "local"（未登录）由 resolveBillableForAgent 判为不计费。 */
@@ -39,6 +41,7 @@ export function resolveDisplayableUsageCost(args: {
       resolveTokenUsagePricing({
         rawUsage: (args.usage ?? {}) as RawUsage,
         agentConfig: args.billingAgentConfig,
+        agentId: args.agentId,
       });
     if (cost <= 0) return undefined;
     const billable = resolveBillableForAgent({

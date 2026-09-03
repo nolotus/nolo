@@ -1,4 +1,5 @@
 import { extractUserId } from "core/prefix";
+import { isBuiltinPlatformAgentKey } from "core/builtinAgents";
 import { calculatePrice } from "./calculatePrice";
 import { normalizeUsage } from "./normalizeUsage";
 import { resolveBillingTarget } from "./resolveBillingTarget";
@@ -40,6 +41,8 @@ export interface ResolvedTokenUsagePricing {
 export function resolveTokenUsagePricing(args: {
   rawUsage: RawUsage;
   agentConfig: BillingAgentConfig;
+  /** Canonical agent key when it is available separately from the config. */
+  agentId?: string;
   nowMs?: number;
 }): ResolvedTokenUsagePricing {
   const { rawUsage, agentConfig, nowMs } = args;
@@ -53,9 +56,31 @@ export function resolveTokenUsagePricing(args: {
   const billedModel = billingTarget.model;
   const billedServiceTier = billingTarget.serviceTier;
 
-  const hasExternalPrice =
+  // Only the call-site canonical key is trusted for this policy. A mutable
+  // record id must never grant builtin pricing semantics when the canonical
+  // identity is missing or points at another agent.
+  const canonicalAgentId = args.agentId?.trim();
+  const isCodeOwnedBuiltin = isBuiltinPlatformAgentKey(canonicalAgentId);
+
+  // 身份制主判据：apiSource 挂在计费配置本体上，不依赖调用点是否记得传
+  // canonical key（key 是可选参数，漏传即守卫静默失效）。platform = 平台自营，
+  // 定价唯一来源是代码目录；记录价只属于创作者（apiSource=custom）。
+  // 名单命中保留为兜底信号。
+  const isPlatformBilled = agentConfig.apiSource === "platform";
+  const hasPersistedPrices =
     (agentConfig.inputPrice !== undefined && agentConfig.inputPrice > 0) ||
     (agentConfig.outputPrice !== undefined && agentConfig.outputPrice > 0);
+  if (isPlatformBilled && !isCodeOwnedBuiltin && hasPersistedPrices) {
+    console.warn(
+      `[billing] platform agent ignored persisted prices (input=${agentConfig.inputPrice}, output=${agentConfig.outputPrice}); canonical key missing or not in builtin set: "${canonicalAgentId || ""}"`,
+    );
+  }
+
+  // Builtin pricing follows the catalog entry of the upstream that actually
+  // served the request. Persisted prices belong to creator-owned agents; on a
+  // code-owned builtin they are only a stale snapshot after model rerouting.
+  const hasExternalPrice =
+    !isCodeOwnedBuiltin && !isPlatformBilled && hasPersistedPrices;
 
   const { cost, pay } = calculatePrice({
     provider: billedProvider,
@@ -209,6 +234,7 @@ export const prepareTokenUsageData = ({
     resolveTokenUsagePricing({
       rawUsage,
       agentConfig,
+      agentId: resolvedAgentId,
       nowMs: timestamp,
     });
 

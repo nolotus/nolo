@@ -193,8 +193,9 @@ describe("platform hosted seed pricing policy", () => {
   it("defers all nolo and legacy ollama-cloud public seed prices to catalog pricing", () => {
     for (const seed of PUBLIC_AGENT_DEFS) {
       if (seed.provider === "nolo") {
-        expect(seed.inputPrice).toBe(0);
-        expect(seed.outputPrice).toBe(0);
+        // 写端断根：平台公共记录不携带价格字段（2026-09-03 事故回归锚）
+        expect("inputPrice" in seed).toBe(false);
+        expect("outputPrice" in seed).toBe(false);
       }
     }
   });

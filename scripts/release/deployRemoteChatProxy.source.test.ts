@@ -120,18 +120,8 @@ describe("chat-proxy app 名与 core 停机匹配式的隔离", () => {
       "recover_nolo_on_exit",
     ]) {
       const body = sliceFunction(source, fn);
-      // c080a29a4 起 core 启动路径合法引用共享内部 token 文件（变量 + ensure 函数，
-      // 均为下划线形式）；隔离契约的目标是 core 生命周期函数不得对 chat-proxy
-      // PM2 应用有任何操作，故剔除 token 标识符与注释行后再断言。
-      const code = body
-        .split("\n")
-        .filter((line) => !line.trimStart().startsWith("#"))
-        .join("\n")
-        .toLowerCase()
-        .replaceAll("ensure_chat_proxy_internal_token_file", "")
-        .replaceAll("chat_proxy_internal_token_file", "");
-      expect(code, `${fn} 不该操作 chat proxy`).not.toContain("chat_proxy");
-      expect(code, `${fn} 不该操作 chat proxy`).not.toContain("chat-proxy");
+      expect(body.toLowerCase(), `${fn} 不该提到 chat proxy`).not.toContain("chat_proxy");
+      expect(body.toLowerCase(), `${fn} 不该提到 chat proxy`).not.toContain("chat-proxy");
     }
   });
 });
