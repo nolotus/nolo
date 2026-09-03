@@ -133,7 +133,7 @@ describe("applyTokenUsageToDayStats", () => {
       models: { "gpt-4": { count: 3, tokens: { input: 300, output: 150 }, cost: 0.03 , failedCount: 0 } },
       providers: {},
     };
-    const result = applyTokenUsageToDayStats(legacyPrev as DayStats, delta);
+    const result = applyTokenUsageToDayStats(legacyPrev as unknown as DayStats, delta);
     expect(result.total.count).toBe(4);
     expect(result.total.tokens.cacheRead).toBe(0); // normalized from legacy
     expect(result.agents).toBeDefined();

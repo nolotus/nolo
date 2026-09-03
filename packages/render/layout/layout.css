@@ -2466,6 +2466,25 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   background: #dc2626;
   transform: scale(1.2);
 }
+/* 点击后等待 drain 窗口结束：红点变成旋转环，cursor 提示等待中 */
+.DevReloadBadge--checking {
+  width: 12px;
+  height: 12px;
+  top: 0;
+  right: 0;
+  background: transparent;
+  border: 2px solid rgba(239, 68, 68, 0.25);
+  border-top-color: #ef4444;
+  animation: devReloadSpin 0.8s linear infinite;
+  cursor: wait;
+}
+.DevReloadBadge--checking:hover {
+  background: transparent;
+  transform: none;
+}
+@keyframes devReloadSpin {
+  to { transform: rotate(360deg); }
+}
 @keyframes devReloadPulse {
   0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
   70%  { box-shadow: 0 0 0 4px rgba(239,68,68,0); }

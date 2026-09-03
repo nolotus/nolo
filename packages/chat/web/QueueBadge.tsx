@@ -63,8 +63,10 @@ function QueueBadgeImpl({ dialogKey, isRunning }: QueueBadgeProps) {
     <div {...stylex.props(queueBadgeStyles.badge)} ref={popoverRef}>
       <button
         type="button"
-        data-hook={`chat-esc-queue-pill${count === 0 ? " chat-esc-queue-pill-running" : ""}`}
-        {...stylex.props(queueBadgeStyles.pill)}
+        {...stylex.props(
+          queueBadgeStyles.pill,
+          count === 0 && queueBadgeStyles.pillRunning,
+        )}
         aria-live="polite"
         onClick={() => setOpen((v) => !v)}
         aria-label={
@@ -102,8 +104,7 @@ function QueueBadgeImpl({ dialogKey, isRunning }: QueueBadgeProps) {
             ))}
             {count > previewMax && (
               <li
-                data-hook="chat-esc-queue-item-more"
-                {...stylex.props(queueBadgeStyles.item)}
+                {...stylex.props(queueBadgeStyles.item, queueBadgeStyles.itemMore)}
               >
                 {t("queueBadgeMore", "还有 {{n}} 条", { n: count - previewMax })}
               </li>

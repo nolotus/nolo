@@ -7,16 +7,16 @@ import * as stylex from "@stylexjs/stylex";
  * - ChildRunDetailModal.tsx（modal* 命名空间键）
  * - AppendInstructionControl.tsx（aic* 命名空间键）
  * 与原 CSS 保持 1:1：同一元素、同一声明、同值。
- *
- * 逃生舱（dialogStylexEscapeHatch.css，hook: dialog-esc-cro-* /
- * dialog-esc-cdm-* / dialog-esc-aic-*）：collapsedRail:hover、
- * iconButton hover/disabled、state--error、retry:hover、item:hover/
- * :focus-visible、modal state--error、messageBody--empty、
- * aic input focus/disabled、submit hover/disabled、--continue submit
- * 阶梯、spin keyframes —— 均为同名属性竞争或 StyleX 不支持的
- * 选择器/关键帧，按基线源码顺序下沉 unlayered 保持级联。
- * status 变体与基础无同名属性，无竞争，留在 StyleX 条件组合。
  */
+const aicSpinKeyframes = stylex.keyframes({
+  from: {
+    transform: "rotate(0deg)",
+  },
+  to: {
+    transform: "rotate(360deg)",
+  },
+});
+
 export const croStyles = stylex.create({
   // ── ChildRunObserverPanel ──
   panel: {
@@ -44,13 +44,19 @@ export const croStyles = stylex.create({
   collapsedRail: {
     alignItems: "center",
     alignSelf: "stretch",
-    backgroundColor: "var(--background, #ffffff)",
+    backgroundColor: {
+      default: "var(--background, #ffffff)",
+      ":hover": "var(--backgroundSecondary, #f3f4f6)",
+    },
     borderWidth: 0,
     borderStyle: "none",
     borderLeftWidth: "1px",
     borderLeftStyle: "solid",
     borderLeftColor: "var(--borderMuted, var(--borderLight, var(--border, #e5e7eb)))",
-    color: "var(--textSecondary, #6b7280)",
+    color: {
+      default: "var(--textSecondary, #6b7280)",
+      ":hover": "var(--text, #111827)",
+    },
     cursor: "pointer",
     display: "flex",
     flex: "0 0 44px",
@@ -134,12 +140,25 @@ export const croStyles = stylex.create({
   },
   iconButton: {
     alignItems: "center",
-    backgroundColor: "transparent",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "var(--backgroundSecondary, #f3f4f6)",
+    },
     borderWidth: 0,
     borderStyle: "none",
     borderRadius: "var(--radius-xs, 6px)",
-    color: "var(--textSecondary, #6b7280)",
-    cursor: "pointer",
+    color: {
+      default: "var(--textSecondary, #6b7280)",
+      ":hover": "var(--text, #111827)",
+    },
+    cursor: {
+      default: "pointer",
+      ":disabled": "default",
+    },
+    opacity: {
+      default: null,
+      ":disabled": 0.55,
+    },
     display: "inline-flex",
     height: "28px",
     justifyContent: "center",
@@ -161,9 +180,15 @@ export const croStyles = stylex.create({
     padding: "12px 6px",
     textAlign: "left",
   },
+  stateError: {
+    color: "var(--errorText, #b91c1c)",
+  },
   retry: {
     alignSelf: "flex-start",
-    backgroundColor: "transparent",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "var(--backgroundSecondary, #f3f4f6)",
+    },
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--borderLight, #d1d5db))",
@@ -187,7 +212,15 @@ export const croStyles = stylex.create({
     backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight, #e5e7eb))",
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight, #e5e7eb))",
+      ":hover": "var(--primary, #2563eb)",
+      ":focus-visible": "var(--primary, #2563eb)",
+    },
+    outline: {
+      default: null,
+      ":focus-visible": "none",
+    },
     borderRadius: "var(--radius-sm, 8px)",
     color: "inherit",
     cursor: "pointer",
@@ -334,6 +367,10 @@ export const croStyles = stylex.create({
     overflowWrap: "anywhere",
     whiteSpace: "pre-wrap",
   },
+  messageBodyEmpty: {
+    color: "var(--textSecondary, #9ca3af)",
+    fontStyle: "italic",
+  },
   modalFooter: {
     borderTopWidth: "1px",
     borderTopStyle: "solid",
@@ -379,12 +416,30 @@ export const croStyles = stylex.create({
     gap: "8px",
   },
   aicInput: {
-    backgroundColor: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
+    backgroundColor: {
+      default: "var(--surfaceInset, var(--backgroundSecondary, #f9fafb))",
+      ":disabled": "var(--backgroundSecondary, #f3f4f6)",
+    },
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight, #d1d5db))",
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight, #d1d5db))",
+      ":focus": "var(--primary, #2563eb)",
+    },
+    outline: {
+      default: null,
+      ":focus": "none",
+    },
     borderRadius: "var(--radius-sm, 8px)",
     color: "var(--text, #111827)",
+    cursor: {
+      default: null,
+      ":disabled": "not-allowed",
+    },
+    opacity: {
+      default: null,
+      ":disabled": 0.75,
+    },
     flex: "1 1 auto",
     fontSize: "13px",
     lineHeight: 1.4,
@@ -394,12 +449,22 @@ export const croStyles = stylex.create({
   },
   aicSubmit: {
     alignItems: "center",
-    backgroundColor: "var(--primary, #2563eb)",
+    backgroundColor: {
+      default: "var(--primary, #2563eb)",
+      ":hover": "var(--primaryHover, #1d4ed8)",
+    },
     borderWidth: 0,
     borderStyle: "none",
     borderRadius: "var(--radius-sm, 8px)",
     color: "#ffffff",
-    cursor: "pointer",
+    cursor: {
+      default: "pointer",
+      ":disabled": "not-allowed",
+    },
+    opacity: {
+      default: null,
+      ":disabled": 0.55,
+    },
     display: "inline-flex",
     flexShrink: 0,
     fontSize: "12px",
@@ -411,9 +476,14 @@ export const croStyles = stylex.create({
     transition: "background-color 0.15s ease, opacity 0.15s ease",
     whiteSpace: "nowrap",
   },
-  /* __spinner：keyframes 定义在 dialogStylexEscapeHatch.css */
+  aicSubmitContinue: {
+    backgroundColor: {
+      default: "var(--success, #16a34a)",
+      ":hover": "#15803d",
+    },
+  },
   aicSpinner: {
-    animationName: "AppendInstructionControl-spin",
+    animationName: aicSpinKeyframes,
     animationDuration: "0.8s",
     animationTimingFunction: "linear",
     animationIterationCount: "infinite",

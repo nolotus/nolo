@@ -26,16 +26,30 @@ export const agentPickerControlStyles = stylex.create({
     padding: "6px 10px",
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight))",
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight))",
+      ":hover": "var(--borderSubtle)",
+    },
     borderRadius: "999px",
-    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
-    color: "var(--textMuted, var(--textSecondary))",
+    backgroundColor: {
+      default: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
+      ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
+    },
+    color: {
+      default: "var(--textMuted, var(--textSecondary))",
+      ":hover": "var(--primary)",
+    },
     fontSize: "12px",
     fontWeight: 500,
     lineHeight: 1,
     cursor: "pointer",
     transition:
       "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
+  },
+  triggerOpen: {
+    backgroundColor: "var(--surfaceInteractiveHover, var(--backgroundHover))",
+    color: "var(--primary)",
+    borderColor: "var(--borderSubtle)",
   },
   triggerIcon: {
     display: "inline-flex",
@@ -88,12 +102,19 @@ export const agentPickerControlStyles = stylex.create({
     borderWidth: 0,
     borderStyle: "none",
     borderRadius: "8px",
-    backgroundColor: "transparent",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
+    },
     color: "var(--text)",
     fontSize: "13px",
     textAlign: "left",
     cursor: "pointer",
     transition: "background 0.15s ease",
+  },
+  itemBtnActive: {
+    backgroundColor: "color-mix(in srgb, var(--primary) 8%, transparent)",
+    color: "var(--primary)",
   },
   /* 存量规则：当前 TSX 未渲染 .agent-picker__item-icon 元素，1:1 保留 */
   itemIcon: {
@@ -101,7 +122,7 @@ export const agentPickerControlStyles = stylex.create({
     flexShrink: 0,
     color: "var(--textSecondary)",
   },
-  /* 来源层 badge：收藏★ / 我的 user / 广场 bot / 默认 zap（变体见逃生舱） */
+  /* 来源层 badge：收藏★ / 我的 user / 广场 bot / 默认 zap */
   badge: {
     display: "inline-flex",
     alignItems: "center",
@@ -112,6 +133,21 @@ export const agentPickerControlStyles = stylex.create({
     borderRadius: "6px",
     color: "var(--textSecondary)",
     backgroundColor: "var(--bg-subtle, var(--surfaceInset, var(--backgroundSecondary)))",
+  },
+  badgeFavorite: {
+    color: "var(--warning, #f5a623)",
+    backgroundColor: "rgba(245, 166, 35, 0.12)",
+  },
+  badgeOwned: {
+    color: "var(--primary)",
+    backgroundColor: "rgba(0, 120, 212, 0.12)",
+  },
+  badgePublic: {
+    color: "var(--textSecondary)",
+  },
+  badgeDefault: {
+    color: "var(--primary)",
+    backgroundColor: "color-mix(in srgb, var(--primary) 12%, transparent)",
   },
   itemText: {
     display: "flex",

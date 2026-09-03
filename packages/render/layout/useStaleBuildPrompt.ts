@@ -23,6 +23,32 @@ const readRemoteBuildSha = async (): Promise<string | null> => {
   return typeof buildSha === "string" && buildSha.length > 0 ? buildSha : null;
 };
 
+// ── 点红点后的安全 reload ────────────────────────────────────────────────────
+//
+// 红点亮只代表「有新版本」，但点击时刻可能仍在 drain 窗口内（另一次部署进行中）。
+// window.location.reload() 是浏览器顶层导航，没有 JS 重试层，撞进窗口会把
+// 503 core_draining 的 body 原样渲染成页面。因此先轮询 /api/core/meta：该端点
+// 不访问 DB，drain 期间被 admission gate 拒成 503；拿到 200 即代表新进程已从
+// reusePort 组接管流量，此刻 reload 不会再撞 drain。
+// 超时兜底与客户端 drain 重试预算（30×1.5s≈45s）同量级，超时照常 reload，
+// 最坏退回与旧行为一致。
+const WAIT_READY_POLL_MS = 1_000;
+const WAIT_READY_TIMEOUT_MS = 45_000;
+
+export const waitUntilServerReadyThenReload = async (): Promise<void> => {
+  const deadline = Date.now() + WAIT_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    let remoteSha: string | null = null;
+    try {
+      remoteSha = await readRemoteBuildSha();
+    } catch {
+      // 网络错误：视同尚未就绪，下一拍重试
+    }
+    if (remoteSha) return;
+    await new Promise((resolve) => setTimeout(resolve, WAIT_READY_POLL_MS));
+  }
+};
+
 /**
  * Production: compare boot-time buildSha with /api/core/meta; user reloads manually.
  * Dev bootSha is empty — badge stays hidden.

@@ -75,7 +75,6 @@ const EmptyState = memo(
             {actionText && onAction && (
                 <button
                     type="button"
-                    data-hook="dialog-esc-est-btn"
                     {...stylex.props(dialogPageStyles.emptyStateBtn)}
                     onClick={onAction}
                 >

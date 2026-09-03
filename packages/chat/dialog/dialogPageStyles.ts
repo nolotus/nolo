@@ -150,6 +150,10 @@ export const dialogPageStyles = stylex.create({
     fontWeight: 600,
     padding: 0,
     flexShrink: 0,
+    textDecoration: {
+      default: "none",
+      ":hover": "underline",
+    },
   },
 
   // ── PageAssistantPanel.tsx / ObjectAssistantPanel.tsx ──
@@ -253,12 +257,30 @@ export const dialogPageStyles = stylex.create({
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--primaryGhost)",
-    backgroundColor: "var(--primary)",
+    backgroundColor: {
+      default: "var(--primary)",
+      ":hover": "var(--hover)",
+    },
     color: "var(--background)",
     fontSize: "0.8rem",
     fontWeight: 500,
     cursor: "pointer",
+    transform: {
+      default: null,
+      ":hover": "translateY(-1px)",
+    },
+    outline: {
+      default: null,
+      ":focus-visible": "2px solid var(--focus)",
+    },
+    outlineOffset: {
+      default: null,
+      ":focus-visible": "2px",
+    },
     transition: "all 0.2s ease",
-    boxShadow: "0 1px 2px 0 var(--shadowLight)",
+    boxShadow: {
+      default: "0 1px 2px 0 var(--shadowLight)",
+      ":hover": "0 4px 10px -2px var(--primaryGhost)",
+    },
   },
 });

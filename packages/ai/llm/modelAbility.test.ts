@@ -21,6 +21,8 @@ describe("modelAbility", () => {
     expect(getModelAbility("glm-5.2")).toEqual({ passAt1: 44, benchmarkScore: 51 });
     expect(getModelAbility("gemini-3.6-flash")).toEqual({ passAt1: 49, benchmarkScore: 50 });
     expect(getModelAbility("gemini-3.7-flash")).toEqual({ passAt1: 58, benchmarkScore: 65, writingScore: 88 });
+    // 3.8 基准快照未出，暂沿用 3.7 分数占位（见 MODEL_ABILITY_TABLE TODO）
+    expect(getModelAbility("gemini-3.8-flash")).toEqual({ passAt1: 58, benchmarkScore: 65, writingScore: 88 });
     expect(getModelAbility("qwen3.8-max")).toEqual({ passAt1: 57, writingScore: 77 });
     expect(getModelAbility("muse-spark-1.2")).toEqual({ passAt1: 55 });
     expect(getModelAbility("muse-spark-1.1")).toEqual({ passAt1: 53 });
@@ -41,6 +43,7 @@ describe("modelAbility", () => {
     expect(getModelAbility("openai/gpt-5.6-sol-medium")).toEqual({ passAt1: 73, benchmarkScore: 59, writingScore: 80 });
     expect(getModelAbility("claude-opus-4-6-thinking")).toEqual({ passAt1: 65, benchmarkScore: 68, writingScore: 78 });
     expect(getModelAbility("gemini-3.7-flash-tiered")).toEqual({ passAt1: 58, benchmarkScore: 65, writingScore: 88 });
+    expect(getModelAbility("gemini-3.8-flash-tiered")).toEqual({ passAt1: 58, benchmarkScore: 65, writingScore: 88 });
     expect(getModelAbility("kimi-k3:cloud")).toEqual({ passAt1: 69, benchmarkScore: 57, writingScore: 81 });
     expect(normalizeModelName("  GLM-5.2  ")).toBe("glm-5.2");
   });

@@ -209,6 +209,7 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     defaultReasoningEffort: "medium",
     modelOptions: [
       { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", hasVision: true, recommended: true },
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", hasVision: true },
       { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
       { id: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 Thinking", hasVision: true },

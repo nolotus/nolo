@@ -382,7 +382,7 @@ describe("calculatePrice", () => {
     const result = calculatePrice({
       provider: "runinfra",
       modelName: "glm-5-3-flash",
-      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0 },
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     });
     expect(result.cost).toBe(4);
   });
@@ -391,13 +391,13 @@ describe("calculatePrice", () => {
     const result = calculatePrice({
       provider: "baseten",
       modelName: "zai-org/GLM-5.3-Flash",
-      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0 },
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     });
     expect(result.cost).toBe(5.2);
   });
 
   it("prices cached RunInfra and Baseten input using each provider's cache rate", () => {
-    const usage = { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 1_000_000 };
+    const usage = { input_tokens: 1_000_000, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 1_000_000 };
     expect(calculatePrice({ provider: "runinfra", modelName: "glm-5-3-flash", usage }).cost).toBe(0.08);
     expect(calculatePrice({ provider: "baseten", modelName: "zai-org/GLM-5.3-Flash", usage }).cost).toBe(0.24);
   });

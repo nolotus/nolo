@@ -24,12 +24,24 @@ import { buildDelegatedTaskContent, formatStartRunCard, resolveRunLabel, TASK_PR
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
 
-export const startAgentRunFunctionSchema = {
+/**
+ * 按宿主能力裁剪后的 startAgentRun schema。
+ *
+ * `supportsWait:false` 用于那些**执行器根本不实现同步派发**的宿主（cli-local
+ * 的 startAgentRun 执行器永远 spawn 后立即返回，从不解析 wait/resultMode）。
+ * 在那里声明 wait 不是「多给一个选项」，是撒谎：模型以为自己拿到了结果，实际
+ * 拿到的是一个 runId。schema 必须跟着执行器走。
+ */
+export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean }) {
+    const supportsWait = opts?.supportsWait !== false;
+    return {
     name: "startAgentRun",
     description:
         "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，之后用 controlAgentRun 观察/停止，等终态通知，禁止轮询。" +
-        "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
-        "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。",
+        (supportsWait
+            ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
+              "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
+            : "本宿主只有异步派发，没有同步等待：run 到终态会自动唤醒对话把结果送回来。"),
     parameters: {
         type: "object",
         properties: {
@@ -67,19 +79,23 @@ export const startAgentRunFunctionSchema = {
                     "传了 batchId 时默认即记录（每批对应一项 todo）。" +
                     "todo 状态由关联 run 状态 + review 结论推导，用 controlAgentRun(action:\"todo\") 查询。",
             },
-            wait: {
-                type: "boolean",
-                description:
-                    "可选。为 true 时同步等待子任务完成并直接返回结果（订阅 SSE 等 done/failed），不返回 runId。" +
-                    "阻塞等待会冻结当前对话，仅限三种情况（见顶层描述）；默认 false（异步，返回 runId 后用 controlAgentRun 观察）。",
-                default: false,
-            },
-            resultMode: {
-                type: "string",
-                enum: ["full", "summary"],
-                default: "full",
-                description: "可选。full=返回完整输出；summary=只返回子任务总结（截断中间部分）。默认 full。",
-            },
+            ...(supportsWait
+                ? {
+                      wait: {
+                          type: "boolean",
+                          description:
+                              "可选。为 true 时同步等待子任务完成并直接返回结果（订阅 SSE 等 done/failed），不返回 runId。" +
+                              "阻塞等待会冻结当前对话，仅限三种情况（见顶层描述）；默认 false（异步，返回 runId 后用 controlAgentRun 观察）。",
+                          default: false,
+                      },
+                      resultMode: {
+                          type: "string",
+                          enum: ["full", "summary"],
+                          default: "full",
+                          description: "可选。full=返回完整输出；summary=只返回子任务总结（截断中间部分）。默认 full。",
+                      },
+                  }
+                : {}),
             parentDialogId: {
                 type: "string",
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
@@ -87,7 +103,11 @@ export const startAgentRunFunctionSchema = {
         },
         required: ["agentKey", "task"],
     },
-};
+    };
+}
+
+/** 全集 schema：服务端 / 支持同步派发的宿主用它。 */
+export const startAgentRunFunctionSchema = buildStartAgentRunFunctionSchema();
 
 interface StartAgentRunArgs {
     agentKey: string;

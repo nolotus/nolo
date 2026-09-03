@@ -158,6 +158,8 @@ export default {
       privateDialogGuestHint:
         "The /dialog-… route is only available to signed-in users who have permission to this dialog. If you want to share it with someone else, use a /share/<token> link instead.",
       thinkingProcess: "Thinking Process",
+      thinkingActive: "Thinking…",
+      thinkingDone: "Thought for {{seconds}}s",
       thinkingContent: "Thinking Content",
       answerContent: "Answer",
       // Mobile Upload
@@ -532,6 +534,8 @@ export default {
       privateDialogGuestHint:
         "当前 /dialog-… 路由只对登录且有权限的账号可见。若要把这段对话发给别人，请改用 /share/<token> 链接。",
       thinkingProcess: "思考过程",
+      thinkingActive: "思考中…",
+      thinkingDone: "思考了 {{seconds}}s",
       thinkingContent: "思考内容",
       answerContent: "回答",
       deleteMessageTitle: "删除消息",
@@ -891,6 +895,8 @@ export default {
       privateDialogGuestHint:
         "目前 /dialog-… 路由只對已登入且有權限的帳號可見。若要把這段對話分享給別人，請改用 /share/<token> 連結。",
       thinkingProcess: "思考過程",
+      thinkingActive: "思考中…",
+      thinkingDone: "思考了 {{seconds}}s",
       thinkingContent: "思考內容",
       answerContent: "回答",
       deleteMessageTitle: "刪除訊息",
@@ -1195,6 +1201,8 @@ export default {
       privateDialogGuestHint:
         "/dialog-… ルートは、このダイアログに権限のあるログイン済みユーザーだけが開けます。他の人に共有したい場合は、/share/<token> リンクを使ってください。",
       thinkingProcess: "思考プロセス",
+      thinkingActive: "考えています…",
+      thinkingDone: "{{seconds}}秒考えた",
       thinkingContent: "思考内容",
       answerContent: "回答",
       // Mobile Upload

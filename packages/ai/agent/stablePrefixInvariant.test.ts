@@ -7,6 +7,12 @@ describe("stablePrefixInvariant", () => {
   const sampleAgentConfig: AgentRuntimeConfig = {
     dbKey: "agent-test-invariant-001",
     name: "Invariant Test Agent",
+    provider: "test",
+    userId: "user-invariant-test",
+    useServerProxy: false,
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    createdAt: 0,
+    isPublic: false,
     prompt: "You are a specialized invariant check agent for prompt caching.",
     model: "gemini-2.5-flash",
     tools: ["web_search", "memory_read", "rememberMemory", "ask_user"],

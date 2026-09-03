@@ -25,6 +25,40 @@ describe("foldLocalResultForTui（状态行 ⚡ 积分的数据链）", () => {
     expect(folded.dialogId).toBe("01DIALOG");
   });
 
+  test("usageRecords 必须随行——cli-local 计费审计（逐帧 JSONL）依赖它", () => {
+    // fold 白名单历史上漏过 turnCredits；usageRecords 是同坑位新字段：
+    // 丢了就是「auto 模式下审计日志只有 turnCredits、没有逐帧明细」。
+    const usageRecords = [
+      {
+        callId: "call-1",
+        usage: {
+          input_tokens: 121171,
+          output_tokens: 452,
+          cache_read_input_tokens: 118656,
+          cache_creation_input_tokens: 0,
+          cost: 0.024018,
+          billing_unit: "credits",
+        },
+        model: "glm-5-3-flash",
+        provider: "nolo",
+      },
+    ];
+    const folded = foldLocalResultForTui({
+      exitCode: 0,
+      dialogId: "01DIALOG",
+      title: "t",
+      turnCredits: 0.024018,
+      usageRecords,
+    });
+    expect(folded.usageRecords).toEqual(usageRecords);
+    expect(folded.usageRecords?.[0]?.usage?.cost).toBe(0.024018);
+  });
+
+  test("无 usageRecords 时不虚构该字段", () => {
+    const folded = foldLocalResultForTui({ exitCode: 0, turnCredits: 0.01 });
+    expect("usageRecords" in folded).toBe(false);
+  });
+
   test("无平台计费（自有 API）时 turnCredits 缺省、不造 0", () => {
     const local: RunAgentTurnResult = {
       exitCode: 0,

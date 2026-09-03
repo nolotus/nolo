@@ -233,32 +233,17 @@
   color: var(--primary);
 }
 
-/* [data-hook="thread-item"] —— AgentPage.tsx
- * 保留原因：:last-child 去除底边框，以及 hover 状态 border 透明与 padding-left 位移 */
+/* [data-hook="thread-item"]:last-child —— AgentPage.tsx
+ * 保留原因：:last-child 去除底边框，StyleX 无法表达结构伪类 */
 [data-hook="thread-item"]:last-child:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   border-bottom: none;
 }
 
-[data-hook="thread-item"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  border-bottom-color: transparent;
-  padding-left: var(--space-3);
-}
-
 /* [data-hook="history-delete-btn"] —— AgentPage.tsx
  * 保留原因：父级 hover 联动显示历史删除按钮，StyleX 无法表达父子联动 hover */
-[data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  opacity: 0;
-}
-
 [data-hook="history-item"]:hover [data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook="thread-item"]:hover [data-hook="history-delete-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   opacity: 0.6;
-}
-
-[data-hook="history-delete-btn"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  opacity: 1 !important;
-  color: var(--danger, #ef4444);
-  background: var(--backgroundHover);
 }
 
 /* [data-hook="chip-group"]:first-child —— AgentPage.tsx

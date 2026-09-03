@@ -224,7 +224,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
         </div>
         <button
           type="button"
-          data-hook="dialog-esc-adp-icon-button"
           {...stylex.props(agentDraftPanelStyles.iconButton)}
           onClick={onClose}
           aria-label="关闭草稿面板"
@@ -239,7 +238,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           <input
             value={name}
             disabled={isCreated}
-            data-hook="dialog-esc-adp-field-control"
             {...stylex.props(agentDraftPanelStyles.fieldControl)}
             onChange={(event) => setName(event.target.value)}
           />
@@ -250,7 +248,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           <textarea
             value={introduction}
             disabled={isCreated}
-            data-hook="dialog-esc-adp-field-control"
             {...stylex.props(
               agentDraftPanelStyles.fieldControl,
               agentDraftPanelStyles.fieldTextareaMin
@@ -265,7 +262,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           <textarea
             value={prompt}
             disabled={isCreated}
-            data-hook="dialog-esc-adp-field-control"
             {...stylex.props(
               agentDraftPanelStyles.fieldControl,
               agentDraftPanelStyles.fieldTextareaMin
@@ -297,7 +293,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
             <input
               value={capabilityText}
               disabled={isCreated}
-              data-hook="dialog-esc-adp-field-control"
               {...stylex.props(
                 agentDraftPanelStyles.fieldControl,
                 agentDraftPanelStyles.technicalInput
@@ -350,10 +345,10 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
           <div {...stylex.props(agentDraftPanelStyles.toggleGroup)}>
             <button
               type="button"
-              data-hook={`dialog-esc-adp-toggle-button${
-                !isPublic ? " dialog-esc-adp-toggle-active" : ""
-              }`}
-              {...stylex.props(agentDraftPanelStyles.toggleButton)}
+              {...stylex.props(
+                agentDraftPanelStyles.toggleButton,
+                !isPublic && agentDraftPanelStyles.toggleButtonActive,
+              )}
               disabled={isCreated}
               onClick={() => setIsPublic(false)}
             >
@@ -362,10 +357,10 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
             </button>
             <button
               type="button"
-              data-hook={`dialog-esc-adp-toggle-button${
-                isPublic ? " dialog-esc-adp-toggle-active" : ""
-              }`}
-              {...stylex.props(agentDraftPanelStyles.toggleButton)}
+              {...stylex.props(
+                agentDraftPanelStyles.toggleButton,
+                isPublic && agentDraftPanelStyles.toggleButtonActive,
+              )}
               disabled={isCreated}
               onClick={() => setIsPublic(true)}
             >
@@ -388,7 +383,6 @@ export const AgentDraftPanel: React.FC<AgentDraftPanelProps> = ({
         )}
         <button
           type="button"
-          data-hook="dialog-esc-adp-primary"
           {...stylex.props(
             agentDraftPanelStyles.actionShared,
             agentDraftPanelStyles.primary

@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-const callToolApiMock = mock(async () => ({
+// 对齐 deleteMemoryFunc 内 callToolApi<T> 的返回契约（dryRun 预检 / 确认删除两种形态），
+// 避免 mock 返回类型推断过窄导致 mockResolvedValueOnce 无法传入 dryRun 等字段。
+type DeleteMemoryApiResult = {
+  success: boolean;
+  dryRun?: boolean;
+  matchedCount?: number;
+  deletedCount?: number;
+  deletedIds?: string[];
+  deletionToken?: string;
+  preview?: Array<{ id: string; content: string; kind: string }>;
+};
+
+const callToolApiMock = mock(async (): Promise<DeleteMemoryApiResult> => ({
   success: true,
   deletedCount: 1,
   deletedIds: ["m1"],

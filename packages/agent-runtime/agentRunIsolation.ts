@@ -91,6 +91,27 @@ export function isSubtaskRun(env: RunIsolationEnvLike | undefined): boolean {
 }
 
 /**
+ * 终态唤醒通道的环境标记。
+ *
+ * 由交互式宿主在**真正接上投递通道那一刻**写入（TUI 的 readlineWorkspace 在
+ * 绑定 runWakeHandler 时设置）——不是「我是 TUI」，而是「后台 run 到终态时，
+ * 确实有人能把对话接回来」。非交互模式（管道 / print）走同一份 TUI 代码但
+ * runWakeHandler 保持 null，所以这个标记必须由赋值点来写，不能由代码路径推断。
+ *
+ * 唯一消费者是工具表裁剪：有唤醒就不给 controlAgentRun 的 `wait` 动作。
+ *
+ * 子进程会继承这个环境变量，但无害——子任务的编排工具整组被
+ * SUBTASK_REMOVED_TOOL_NAMES 剥离，它压根拿不到 controlAgentRun。
+ */
+export const RUN_WAKE_CHANNEL_ENV = "NOLO_RUN_WAKE";
+
+export function hasRunWakeChannel(env: RunIsolationEnvLike | undefined): boolean {
+  if (!env) return false;
+  const value = env[RUN_WAKE_CHANNEL_ENV];
+  return typeof value === "string" && value.length > 0 && value !== "0";
+}
+
+/**
  * Filter a tool-name list for the resolved run kind.
  *
  * - Interactive runs (`isSubtask=false`): returned unchanged — zero behavior

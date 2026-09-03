@@ -164,10 +164,6 @@ export const PLATFORM_HOSTED_GEMINI_37_FLASH_PRICE = {
   cachingRead: 0.42, // 0.6 credits
 } as const;
 
-export const isPlatformHostedGeminiModel = (
-  model?: string | null,
-): boolean => asTrimmedLowercaseString(model) === PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL;
-
 /**
  * 出图模型（平台托管语义）：记录侧 provider=nolo，实际上游分别是
  * OpenAI（gpt-image-2，key 用 OPENAI_API_KEY）与 Google 官方原生 API

@@ -313,8 +313,10 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
       description:
         "Block until a background task (from launchProcess, or an execShell command that detached) reaches a terminal state, or until timeoutMs elapses. "
         + "Returns {outcome, status, exitCode?, cursor, events}: outcome \"terminal\" with status exited|failed|stopped when it finished, "
-        + "outcome \"timeout\" with status \"running\" when it is still going (call again to keep waiting), "
+        + "outcome \"timeout\" with status \"running\" when it outlived the whole budget, "
         + "outcome \"not-found\" for an unknown taskId, or outcome \"evicted\" when the event trail aged out (never wait again in that case). "
+        + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer than that — go do other work and come back, rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
+        + "For a cheap liveness peek use taskLogs (non-blocking) or pass a small timeoutMs. "
         + "`cursor` is the highest event seq covered by this response — pass it to taskLogs to read only newer events.",
       parameters: {
         type: "object",
@@ -327,7 +329,7 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
           timeoutMs: {
             type: "number",
             description:
-              "Wait budget in milliseconds. Defaults to 60000; values above 300000 are clamped to 300000.",
+              "Wait budget in milliseconds. Defaults to the 300000 maximum (one call covers the whole budget and returns early the moment the task ends); values above 300000 are clamped. Pass a small value only when you want a quick liveness check instead of the result.",
           },
         },
         required: ["taskId"],

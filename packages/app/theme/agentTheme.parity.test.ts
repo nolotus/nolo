@@ -18,6 +18,7 @@ import { join } from "node:path";
  * MUST NOT be derived dynamically from generator functions.
  */
 const NEUTRAL_LIGHT_GOLDEN = {
+  chatInputCardShadow: "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
   surfaceGlassHeader: "color-mix(in srgb, #FFFFFF 95%, transparent)",
   borderGlassHeader: "#F4F4F5",
   surfaceGlassFooter: "color-mix(in srgb, #FFFFFF 85%, transparent)",
@@ -44,6 +45,7 @@ const NEUTRAL_LIGHT_GOLDEN = {
 };
 
 const NEUTRAL_DARK_GOLDEN = {
+  chatInputCardShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px var(--shadowLight), 0 16px 32px -20px var(--shadowHeavy)",
   surfaceGlassHeader: "color-mix(in srgb, #18181B 92%, transparent)",
   borderGlassHeader: "rgba(255, 255, 255, 0.08)",
   surfaceGlassFooter: "color-mix(in srgb, #18181B 80%, transparent)",
@@ -70,6 +72,7 @@ const NEUTRAL_DARK_GOLDEN = {
 };
 
 const CATPPUCCIN_LIGHT_GOLDEN = {
+  chatInputCardShadow: "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
   surfaceGlassHeader: "color-mix(in srgb, #FFFFFF 95%, transparent)",
   borderGlassHeader: "#D8DEE4",
   surfaceGlassFooter: "color-mix(in srgb, #FFFFFF 85%, transparent)",
@@ -96,6 +99,7 @@ const CATPPUCCIN_LIGHT_GOLDEN = {
 };
 
 const CATPPUCCIN_DARK_GOLDEN = {
+  chatInputCardShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px var(--shadowLight), 0 16px 32px -20px var(--shadowHeavy)",
   surfaceGlassHeader: "color-mix(in srgb, #1E1E2E 92%, transparent)",
   borderGlassHeader: "rgba(255, 255, 255, 0.08)",
   surfaceGlassFooter: "color-mix(in srgb, #1E1E2E 80%, transparent)",

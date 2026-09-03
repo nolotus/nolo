@@ -1,3 +1,21 @@
+/**
+ * OpenAI 兼容协议 Provider 适配器（Inference Compatibility Seam）。
+ *
+ * 遵循 Agent Harness Playbook 原则：
+ * 1. 【协议归一化（Inference Normalization）】：主 Agent 循环（localLoop / agentThread）
+ *    面向统一的标准消息与事件流编程，不直接感知上游各家 Provider 的非标行为。
+ * 2. 【显式模型怪癖矩阵（Explicit Quirks Matrix）】：将各厂商在 Wire 格式、Header 身份、
+ *    历史消息校验、采样参数限制等方面的特殊需求收拢在适配层处理：
+ *    - Wire 协议选择：`resolveOpenAiCompatibleWire`（`responses` vs `chat.completions`）
+ *    - 身份伪装与指纹：`kimiIdentityHeaders`（Kimi Coding 官方 UA）
+ *    - 严格 Gateway 历史清洗：`sanitizeForOutbound`（Ollama/vLLM 拒绝历史废弃 tool_call）
+ *    - 思考链字段过滤：`shouldStripReasoningContentForOutbound`（DeepSeek/Claude 历史回传）
+ *    - 采样与参数修正：`normalizeChatCompletionsBodyForProvider`（如 max_completion_tokens）
+ *    - 流式 Usage 帧显式启用：`getUsageRequestOptions`（如 stream_options.include_usage）
+ *
+ * 演进原则：如需新增或修改某家模型的特殊兼容逻辑，优先在上述专用 helper 中以纯函数形式扩充，
+ * 禁止将特定模型的分支条件（`if (model.includes(...))`）直接侵入到通用执行循环。
+ */
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import type {
   AgentRuntimeChatMessage,

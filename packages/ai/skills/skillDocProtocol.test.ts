@@ -131,6 +131,13 @@ gates:
     expect(markdown).toContain("Skill body");
     expect(markdown).toContain("<!-- skill-config");
     expect(markdown).toContain("exa_search");
+
+    // round-trip：build 产出的文档必须能被 parseSkillDocProtocol 解析出工具面
+    const parsed = parseSkillDocProtocol(markdown);
+    expect(parsed.meta?.skillConfig?.id).toBe("web-research");
+    expect(parsed.meta?.skillConfig?.toolNames).toEqual(["exa_search"]);
+    expect(parsed.meta?.skillConfig?.triggerMode).toBe("explicit");
+    expect(parsed.content).toContain("Skill body");
   });
 
   it("builds workflow-config hidden blocks", () => {

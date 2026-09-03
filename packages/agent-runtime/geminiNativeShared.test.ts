@@ -3,11 +3,44 @@ import {
   convertOpenAiToolsToGemini,
   accumulateGeminiChunks,
   accumulateGeminiStream,
+  resolveGeminiModelQuirks,
   isGemini3Model,
   SKIP_THOUGHT_SIGNATURE,
 } from "./geminiNativeShared";
 
 describe("geminiNativeShared", () => {
+  describe("resolveGeminiModelQuirks", () => {
+    test("identifies standard gemini-3 models that allow sentinel", () => {
+      const quirks = resolveGeminiModelQuirks("gemini-3.1-pro");
+      expect(quirks.requiresThoughtSignature).toBe(true);
+      expect(quirks.allowsThoughtSignatureSentinel).toBe(true);
+      expect(quirks.isClaudeCrossModel).toBe(false);
+    });
+
+    test("identifies strict signature gemini models (3.5 / flash-preview) that forbid sentinel", () => {
+      const q35 = resolveGeminiModelQuirks("gemini-3.5-flash");
+      expect(q35.requiresThoughtSignature).toBe(true);
+      expect(q35.allowsThoughtSignatureSentinel).toBe(false);
+
+      const qPreview = resolveGeminiModelQuirks("gemini-3-flash-preview");
+      expect(qPreview.requiresThoughtSignature).toBe(true);
+      expect(qPreview.allowsThoughtSignatureSentinel).toBe(false);
+    });
+
+    test("identifies older gemini models without thought signature requirement", () => {
+      const quirks = resolveGeminiModelQuirks("gemini-2.5-flash");
+      expect(quirks.requiresThoughtSignature).toBe(false);
+      expect(quirks.allowsThoughtSignatureSentinel).toBe(false);
+      expect(quirks.isClaudeCrossModel).toBe(false);
+    });
+
+    test("identifies claude cross-model on antigravity", () => {
+      const quirks = resolveGeminiModelQuirks("claude-3-7-sonnet");
+      expect(quirks.requiresThoughtSignature).toBe(false);
+      expect(quirks.isClaudeCrossModel).toBe(true);
+    });
+  });
+
   describe("isGemini3Model", () => {
     test("matches gemini-3 variants", () => {
       expect(isGemini3Model("gemini-3.1-pro")).toBe(true);

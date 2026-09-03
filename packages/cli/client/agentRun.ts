@@ -1260,6 +1260,7 @@ async function runLocalAgentTurnForCli(
       // 上下文占用本来就该看最后一次调用的累计输入，不是各次相加。
       turnTokens: withTurnCredits(buildTurnTokenUsage(result.usage, result.model), turnCredits),
       ...(turnCredits !== undefined ? { turnCredits } : {}),
+      ...(result.usageRecords?.length ? { usageRecords: result.usageRecords } : {}),
     };
   } catch (error) {
     turnOutput.spinner.stop();
@@ -1270,9 +1271,10 @@ async function runLocalAgentTurnForCli(
     // 中断/失败前已经发生的 provider 调用照样扣了费（localLoop 把同一批
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
-    const abortedTurnCredits = sumPlatformCredits(
-      (error as { usageRecords?: Parameters<typeof sumPlatformCredits>[0] })?.usageRecords,
-    );
+    const abortedUsageRecords = (
+      error as { usageRecords?: Parameters<typeof sumPlatformCredits>[0] }
+    )?.usageRecords;
+    const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
       (error as { code?: string })?.code === LOCAL_TURN_ABORTED_CODE ||
       options.abortSignal?.aborted
@@ -1289,6 +1291,7 @@ async function runLocalAgentTurnForCli(
         ...(savedDialogId ? { dialogId: savedDialogId } : {}),
         ...(pendingToolName ? { pendingToolName } : {}),
         ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
+        ...(abortedUsageRecords?.length ? { usageRecords: abortedUsageRecords } : {}),
       };
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
@@ -1317,6 +1320,7 @@ async function runLocalAgentTurnForCli(
       localError: error,
       ...(savedDialogId ? { dialogId: savedDialogId } : {}),
       ...(abortedTurnCredits !== undefined ? { turnCredits: abortedTurnCredits } : {}),
+      ...(abortedUsageRecords?.length ? { usageRecords: abortedUsageRecords } : {}),
     };
   }
 }
@@ -1416,6 +1420,12 @@ export function foldLocalResultForTui(
     ...(localResult.turnCredits !== undefined
       ? { turnCredits: localResult.turnCredits }
       : {}),
+    // 逐帧用量明细必须随行：cli-local 计费走 fail-open 客户端记账，服务端没有
+    // 逐帧记录，TUI 计费审计（appendTurnBillingAudit）要靠它对账。白名单历史上
+    // 漏过 turnCredits（fix/tui-session-credits），usageRecords 是同坑位新字段。
+    ...(localResult.usageRecords?.length
+      ? { usageRecords: localResult.usageRecords }
+      : {}),
     ...(localResult.streamInterrupted
       ? { streamInterrupted: localResult.streamInterrupted }
       : {}),
@@ -1473,6 +1483,14 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
         // Keep localError so TUI can show balance/quota/dialog-preserved hints
         // instead of only the raw auto-runtime line.
         ...(localResult.localError ? { localError: localResult.localError } : {}),
+        // 失败轮同样可能已发生平台计费（abort/失败照样扣费）：turnCredits 与
+        // 逐帧明细一起随行，否则审计日志在 auto 失败路径上缺账。
+        ...(localResult.turnCredits !== undefined
+          ? { turnCredits: localResult.turnCredits }
+          : {}),
+        ...(localResult.usageRecords?.length
+          ? { usageRecords: localResult.usageRecords }
+          : {}),
       };
     }
   }

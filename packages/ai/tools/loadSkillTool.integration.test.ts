@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import { buildSkillDocMarkdown } from "ai/skills/skillDocProtocol";
+import * as stateViewsRuntimeActual from "app/stateViews/runtime";
+import * as dialogRuntimeStoreActual from "chat/dialog/dialogRuntimeStore";
+import * as dbSliceActual from "database/dbSlice";
+import * as setDialogExtraReferencesActual from "chat/dialog/actions/setDialogExtraReferencesAction";
 
 const originalFetch = globalThis.fetch;
 let moduleVersion = 0;
@@ -21,18 +24,25 @@ const notFoundResponse = () =>
 let writtenExtraReferences: Array<{ dbKey: string; title: string }> = [];
 
 async function loadLoadSkillTool() {
+  // mock.module 用「真实导出展开 + 仅覆盖所需项」：bun 的 mock.restore() 无法还原
+  // 已被固化的 ESM 绑定，若整体替换 dbSlice 等共享模块，同进程后续测试文件的
+  // 其他导出（如 dbSlice.read）会丢失（SyntaxError: Export named 'read' not found）。
   mock.module("app/stateViews/runtime", () => ({
+    ...stateViewsRuntimeActual,
     selectRuntimeSnapshot: () => runtime,
   }));
   // mock dialog 依赖：getActiveDialogKey 返回固定对话，selectById 返回现有 references，
   // setDialogExtraReferencesAction 记录写入内容。
   mock.module("chat/dialog/dialogRuntimeStore", () => ({
+    ...dialogRuntimeStoreActual,
     getActiveDialogKey: () => "dialog-user-1-test",
   }));
   mock.module("database/dbSlice", () => ({
+    ...dbSliceActual,
     selectById: () => ({ extraReferences: [] }),
   }));
   mock.module("chat/dialog/actions/setDialogExtraReferencesAction", () => ({
+    ...setDialogExtraReferencesActual,
     setDialogExtraReferencesAction: async (refs: any[]) => {
       writtenExtraReferences = refs.map((r: any) => ({
         dbKey: r.dbKey,
@@ -90,11 +100,6 @@ describe("loadSkill coding builtin fallback (agent self-loads coding mid-convers
     expect(result.displayData).toContain("Review 纪律");
     expect(result.displayData).toContain("startAgentRun");
     expect(result.displayData).toContain("code-quality");
-    // 内容必须可被 skillDocProtocol 解析出工具面（code 工具 + review 派发工具）。
-    const parsed = buildSkillDocMarkdown
-      ? { ok: true }
-      : { ok: false };
-    expect(parsed.ok).toBe(true);
   });
 
   it("writes the coding skill reference into dialog.extraReferences (tool-surface expansion)", async () => {

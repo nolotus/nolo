@@ -212,7 +212,6 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
       <>
         <button
           type="button"
-          data-hook="dialog-esc-cro-collapsed-rail"
           {...stylex.props(croStyles.collapsedRail)}
           onClick={() => setIsExpanded(true)}
           aria-expanded={false}
@@ -256,7 +255,6 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
           <div {...stylex.props(croStyles.headerActions)}>
             <button
               type="button"
-              data-hook="dialog-esc-cro-icon-button"
               {...stylex.props(croStyles.iconButton)}
               onClick={() => void fetchChildRuns()}
               disabled={isLoading}
@@ -267,7 +265,6 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
             </button>
             <button
               type="button"
-              data-hook="dialog-esc-cro-icon-button"
               {...stylex.props(croStyles.iconButton)}
               onClick={() => setIsExpanded(false)}
               aria-expanded={true}
@@ -292,14 +289,12 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
 
           {loadState === "error" ? (
             <div
-              data-hook="dialog-esc-cro-state-error"
-              {...stylex.props(croStyles.state)}
+              {...stylex.props(croStyles.state, croStyles.stateError)}
               role="alert"
             >
               <div>{errorMessage || t("childRunObserver.loadFailed")}</div>
               <button
                 type="button"
-                data-hook="dialog-esc-cro-retry"
                 {...stylex.props(croStyles.retry)}
                 onClick={() => void fetchChildRuns()}
               >
@@ -336,7 +331,6 @@ export const ChildRunObserverPanel: React.FC<ChildRunObserverPanelProps> = ({
                   <li key={thread.threadId}>
                     <button
                       type="button"
-                      data-hook="dialog-esc-cro-item"
                       {...stylex.props(croStyles.item)}
                       onClick={() => openChild(thread)}
                     >

@@ -74,11 +74,17 @@ export const agentDraftPanelStyles = stylex.create({
   },
   iconButton: {
     alignItems: "center",
-    backgroundColor: "transparent",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "var(--backgroundSecondary, #f3f4f6)",
+    },
     borderWidth: 0,
     borderStyle: "none",
     borderRadius: "var(--radius-xs)",
-    color: "var(--textSecondary, #6b7280)",
+    color: {
+      default: "var(--textSecondary, #6b7280)",
+      ":hover": "var(--text, #111827)",
+    },
     cursor: "pointer",
     display: "inline-flex",
     height: "30px",
@@ -102,15 +108,36 @@ export const agentDraftPanelStyles = stylex.create({
     fontWeight: 600,
     gap: "6px",
   },
-  /* __field input / __field textarea 共享基础（变体见逃生舱） */
+  /* __field input / __field textarea 共享基础 */
   fieldControl: {
-    backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",
+    backgroundColor: {
+      default: "var(--backgroundSecondary, var(--background, #ffffff))",
+      ":disabled": "var(--backgroundTertiary, var(--backgroundSecondary, #f9fafb))",
+    },
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
+      ":focus": "var(--primary, var(--accent, #2563eb))",
+    },
     borderRadius: "var(--radius-xs)",
     caretColor: "var(--text, #111827)",
-    color: "var(--text, #111827)",
+    color: {
+      default: "var(--text, #111827)",
+      ":disabled": "var(--textSecondary, #4b5563)",
+    },
+    cursor: {
+      default: null,
+      ":disabled": "default",
+    },
+    boxShadow: {
+      default: null,
+      ":focus": "0 0 0 2px var(--focusRing, rgba(37, 99, 235, 0.18))",
+    },
+    outline: {
+      default: null,
+      ":focus": "none",
+    },
     font: "inherit",
     fontSize: "13px",
     fontWeight: 400,
@@ -219,13 +246,25 @@ export const agentDraftPanelStyles = stylex.create({
     borderColor: "var(--borderMuted, var(--borderLight, var(--border, #d1d5db)))",
     borderRadius: "var(--radius-xs)",
     color: "var(--textSecondary, #4b5563)",
-    cursor: "pointer",
+    cursor: {
+      default: "pointer",
+      ":disabled": "default",
+    },
+    opacity: {
+      default: null,
+      ":disabled": 0.82,
+    },
     display: "inline-flex",
     fontSize: "13px",
     fontWeight: 600,
     gap: "6px",
     justifyContent: "center",
     minHeight: "34px",
+  },
+  toggleButtonActive: {
+    backgroundColor: "var(--primary, #2563eb)",
+    borderColor: "var(--primary, #2563eb)",
+    color: "var(--primaryText, #ffffff)",
   },
   footer: {
     borderTopWidth: "1px",
@@ -285,6 +324,14 @@ export const agentDraftPanelStyles = stylex.create({
     borderStyle: "solid",
     borderColor: "var(--primary, #2563eb)",
     color: "var(--primaryText, #ffffff)",
+    cursor: {
+      default: "pointer",
+      ":disabled": "default",
+    },
+    opacity: {
+      default: null,
+      ":disabled": 0.55,
+    },
   },
   secondary: {
     backgroundColor: "var(--backgroundSecondary, var(--background, #ffffff))",

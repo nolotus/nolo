@@ -17,6 +17,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
 import { resolveExecutableOnPath } from "./runtimeCompat";
 import { getProcessRegistry } from "./processRegistry";
+import { spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
 export const EXEC_SHELL_DETACH_ENV = "NOLO_EXEC_SHELL_DETACH_MS";
@@ -349,9 +350,24 @@ export function resolveDetachMs(override: number | undefined): number {
   return parsed === undefined ? DEFAULT_EXEC_SHELL_DETACH_MS : parsed;
 }
 
-export function truncateToolOutput(value: string, limit = 20_000): string {
+export function truncateToolOutput(
+  value: string,
+  limit = 20_000,
+  options?: { toolName?: string; workspaceRoot?: string },
+): string {
   if (value.length <= limit) return value;
-  const approxMarkerLen = 40;
+  let spillNote = "";
+  try {
+    const spill = spillToolOutput({
+      content: value,
+      toolName: options?.toolName ?? "execShell",
+      workspaceRoot: options?.workspaceRoot,
+    });
+    spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}`;
+  } catch {
+    // Fail-open: ignore spill errors to prevent breaking execution
+  }
+  const approxMarkerLen = 40 + spillNote.length;
   if (limit <= approxMarkerLen) return value.slice(0, limit);
   const remaining = limit - approxMarkerLen;
   const headSize = Math.floor(remaining * 0.3);
@@ -359,20 +375,66 @@ export function truncateToolOutput(value: string, limit = 20_000): string {
   const head = value.slice(0, headSize);
   const tail = value.slice(-tailSize);
   const actualRemoved = value.length - headSize - tailSize;
-  return `${head}\n\n[... truncated ${actualRemoved} chars ...]\n\n${tail}`;
+  return `${head}\n\n[... truncated ${actualRemoved} chars${spillNote} ...]\n\n${tail}`;
 }
 
-export function readNodeStream(stream: NodeJS.ReadableStream | null): Promise<string> {
+export const DEFAULT_MAX_STREAM_BUFFER_BYTES = 5 * 1024 * 1024; // 5MB 流式内存防爆硬上限
+
+export function readNodeStream(
+  stream: NodeJS.ReadableStream | null,
+  maxBytes = DEFAULT_MAX_STREAM_BUFFER_BYTES,
+): Promise<string> {
   if (!stream) return Promise.resolve("");
   return new Promise<string>((resolveStream, rejectStream) => {
     const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const formatLimit =
+      maxBytes >= 1024 * 1024
+        ? `${Math.round(maxBytes / (1024 * 1024))}MB`
+        : `${Math.round(maxBytes / 1024)}KB`;
+
+    const finalize = (truncated = false) => {
+      if (settled) return;
+      settled = true;
+      let text = Buffer.concat(chunks).toString("utf8");
+      if (truncated) {
+        text += `\n\n[stream pipe truncated: output exceeded ${formatLimit} buffer limit]`;
+      }
+      resolveStream(text);
+    };
+
     stream.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      if (settled) return;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (totalBytes + buf.length >= maxBytes) {
+        const remaining = Math.max(0, maxBytes - totalBytes);
+        if (remaining > 0) {
+          chunks.push(buf.subarray(0, remaining));
+        }
+        try {
+          if (typeof (stream as any).destroy === "function") {
+            (stream as any).destroy();
+          }
+        } catch {
+          // fail-open
+        }
+        finalize(true);
+        return;
+      }
+      totalBytes += buf.length;
+      chunks.push(buf);
     });
-    stream.on("error", rejectStream);
-    stream.on("end", () => {
-      resolveStream(Buffer.concat(chunks).toString("utf8"));
+
+    stream.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      rejectStream(error);
     });
+
+    stream.on("end", () => finalize(false));
+    stream.on("close", () => finalize(false));
   });
 }
 
@@ -695,10 +757,17 @@ export async function runWorkspaceCommand(args: {
     exitCode,
     timedOut,
     aborted,
-    content: truncateToolOutput([
-      stdout.trim() ? `stdout:\n${stdout.trim()}` : "",
-      stderr.trim() ? `stderr:\n${stderr.trim()}` : "",
-      `exitCode: ${exitCode}`,
-    ].filter(Boolean).join("\n\n"), args.outputLimit),
+    content: truncateToolOutput(
+      [
+        stdout.trim() ? `stdout:\n${stdout.trim()}` : "",
+        stderr.trim() ? `stderr:\n${stderr.trim()}` : "",
+        `exitCode: ${exitCode}`,
+      ].filter(Boolean).join("\n\n"),
+      args.outputLimit,
+      {
+        toolName: "execShell",
+        workspaceRoot: args.workspaceRoot,
+      },
+    ),
   };
 }

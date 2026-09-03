@@ -23,7 +23,7 @@ describe("Ollama Cloud Kimi catalog", () => {
     });
   });
 
-  it("lists Kimi, hosted DeepSeek V4, GLM 5.3, Gemini 3.7 Flash, Claude, Grok, and image models under nolo provider", () => {
+  it("lists Kimi, hosted DeepSeek V4, GLM 5.3, Gemini 3.7 Flash, Grok, and image models under nolo provider", () => {
     const models = getModelsByProvider("nolo");
     expect(models.map((m) => m.name).sort()).toEqual(
       [
@@ -36,9 +36,6 @@ describe("Ollama Cloud Kimi catalog", () => {
         "glm-5-3-flash",
         "nemotron-3-5-lightning-30b",
         "gemini-3.7-flash",
-        "anthropic/claude-sonnet-5",
-        "anthropic/claude-opus-5",
-        "anthropic/claude-fable-5",
         "grok-4.6",
         // 出图模型收进 nolo 平台托管（上游 OpenAI / Google，模型名保持不变）
         "gpt-image-2",
@@ -57,6 +54,8 @@ describe("Ollama Cloud Kimi catalog", () => {
     expect(models.some((m) => m.name === "gemini-3.7-flash")).toBe(true);
     // Claude Haiku 4.5 已下架（无使用量），nolo 目录不再提供
     expect(models.some((m) => m.name === "anthropic/claude-haiku-4-5")).toBe(false);
+    // Claude 系整体下架（2026-09-01）：路由表仅保留兼容重映射，目录不再上架
+    expect(models.some((m) => m.name.startsWith("anthropic/claude"))).toBe(false);
     expect(
       models
         .filter((m) => m.name.startsWith("kimi"))
@@ -162,6 +161,21 @@ describe("Ollama Cloud Kimi catalog", () => {
         cachingRead: 0.6,
       },
     });
+  });
+
+  it("keeps Gemini 3.8 out of the nolo platform catalog; Google native stays available", () => {
+    // 平台托管/计费目录不收录 Gemini 3.8（官方定价未确认，避免未确认价格进入真实计费路径）
+    expect(
+      getModelsByProvider("nolo").some((m) => m.name === "gemini-3.8-flash")
+    ).toBe(false);
+    // 3.7 与现有默认模型保持不变
+    expect(getModelConfig("nolo", "gemini-3.7-flash")).toBeDefined();
+    expect(DEFAULT_MODEL).toEqual({
+      provider: "nolo",
+      name: "deepseek-v4-flash-vision-exp",
+    });
+    // Google 直连目录同步可用（provider=google 通道 / OAuth native）
+    expect(googleModels.some((m) => m.name === "gemini-3.8-flash")).toBe(true);
   });
 
   it("keeps platform DeepSeek V4 Flash at the official peak/off-peak pricing", () => {

@@ -16,30 +16,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-/* ═══ 自 queue-badge.css 迁出（QueueBadge.tsx）═══ */
-
-/* ── 状态与变体竞争规则（hover / variant）──
- * 保留原因：变体与基础类存在同名属性竞争，原级联靠源码顺序让
- * 后者胜出；StyleX 原子类在 @layer 内无法保证该顺序，下沉到
- * unlayered 保持级联稳定（unlayered 恒胜 @layer，与原结果一致），
- * 多条规则之间按原源码顺序排列。 */
-
-/* .queue-badge__pill:hover（与基础 background 竞争）—— QueueBadge.tsx */
-[data-hook~="chat-esc-queue-pill"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--nolo-surface-3, rgba(120, 120, 120, 0.2));
-}
-
-/* .queue-badge__pill--running（与基础 border-color/color 竞争）—— QueueBadge.tsx */
-[data-hook~="chat-esc-queue-pill-running"] {
-  border-color: var(--nolo-accent, #6b8afd);
-  color: var(--nolo-accent, #6b8afd);
-}
-
-/* .queue-badge__item--more（与 __item 基础 color 竞争）—— QueueBadge.tsx */
-[data-hook~="chat-esc-queue-item-more"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--nolo-text-secondary, rgba(120, 120, 120, 0.8));
-  font-style: italic;
-}
+/* ═══ 自 queue-badge.css 迁出（已全部迁入 queueBadgeStyles.ts StyleX）═══ */
 
 /* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
 
@@ -92,90 +69,9 @@
   animation-delay: 0.8s;
 }
 
-/* ── 状态与变体竞争规则（hover / active / muted / hangup）──
- * 保留原因：变体与基础类在 background/color/transform 上同名竞争，
- * 原级联靠「特异性 + 源码顺序」决胜（hangup 后于 hover、
- * hangup:hover 特异性最高）；@layer 原子类无法复现该顺序，
- * 整条阶梯按原源码顺序下沉 unlayered。变体 hook 以双属性选择器
- * 保持与原 `.control-btn.muted` 同级的相对特异性。 */
+/* ── control-btn 的 hover/active/muted/hangup 已迁入 liveVoicePanelStyles.ts StyleX ── */
 
-/* .live-voice-panel .control-btn:hover */
-[data-hook~="chat-esc-lv-control-btn"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--hoverBg, rgba(255, 255, 255, 0.18));
-}
-
-/* .live-voice-panel .control-btn:active */
-[data-hook~="chat-esc-lv-control-btn"]:active:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  transform: scale(0.95);
-}
-
-/* .live-voice-panel .control-btn.muted */
-[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-muted"] {
-  color: var(--textMuted, var(--textTertiary, #aaa));
-}
-
-/* .live-voice-panel .control-btn.hangup */
-[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-hangup"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--error, #ef4444);
-  color: white;
-}
-
-/* .live-voice-panel .control-btn.hangup:hover */
-[data-hook~="chat-esc-lv-control-btn"][data-hook~="chat-esc-lv-control-hangup"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: color-mix(in srgb, var(--error) 90%, black);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--error) 30%, transparent);
-}
-
-/* ═══ 自 AgentPickerControl.css 迁出（AgentPickerControl.tsx）═══ */
-
-/* ── 状态与变体竞争规则（hover / open / active / badge 变体）──
- * 保留原因：与基础 background/color/border-color 同名竞争，
- * 原级联靠源码顺序决胜；下沉 unlayered 后按原源码顺序排列，
- * is-active 后于 hover（原规则特异性更高 + 靠后，悬停选中项
- * 保持选中底色），badge 变体均为整组替换基础 color/background。 */
-
-/* .agent-picker__trigger:hover, .agent-picker.is-open .agent-picker__trigger */
-[data-hook~="chat-esc-ap-trigger"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-ap-open"] [data-hook~="chat-esc-ap-trigger"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-  color: var(--primary);
-  border-color: var(--borderSubtle);
-}
-
-/* .agent-picker__item > button:hover */
-[data-hook~="chat-esc-ap-item-btn"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--surfaceInteractiveHover, var(--backgroundHover));
-}
-
-/* .agent-picker__item.is-active > button */
-[data-hook~="chat-esc-ap-item-active"] [data-hook~="chat-esc-ap-item-btn"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: color-mix(in srgb, var(--primary) 8%, transparent);
-  color: var(--primary);
-}
-
-/* .agent-picker__item-badge.is-favorite */
-[data-hook~="chat-esc-ap-badge-favorite"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--warning, #f5a623);
-  background: rgba(245, 166, 35, 0.12);
-}
-
-/* .agent-picker__item-badge.is-owned */
-[data-hook~="chat-esc-ap-badge-owned"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--primary);
-  background: rgba(0, 120, 212, 0.12);
-}
-
-/* .agent-picker__item-badge.is-public */
-[data-hook~="chat-esc-ap-badge-public"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--textSecondary);
-}
-
-/* .agent-picker__item-badge.is-default */
-[data-hook~="chat-esc-ap-badge-default"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-}
+/* ═══ 自 AgentPickerControl.css 迁出（已全部迁入 agentPickerControlStyles.ts StyleX）═══ */
 
 /* ═══ 自 sidebar/CommandPalette.css 迁出（CommandPalette.tsx +
  *     SidebarCommandPalette.tsx）═══ */
@@ -359,11 +255,6 @@
 [data-hook~="chat-esc-cp-overlay"][data-exiting]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-cp-modal"][data-entering]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 [data-hook~="chat-esc-cp-modal"][data-exiting]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    animation: none;
-  }
-
-  /* .command-palette-spinner（reduce；胜过 @layer 内的 StyleX 动画） */
-  [data-hook~="chat-esc-cp-spinner"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
     animation: none;
   }
 }

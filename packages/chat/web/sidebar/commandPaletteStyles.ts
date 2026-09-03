@@ -119,6 +119,9 @@ export const commandPaletteStyles = stylex.create({
     animationTimingFunction: "linear",
     animationIterationCount: "infinite",
     color: "var(--textTertiary)",
+    "@media (prefers-reduced-motion: reduce)": {
+      animationName: "none",
+    },
   },
   section: {
     display: "contents",

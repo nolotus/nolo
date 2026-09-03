@@ -20,91 +20,144 @@ import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
 
-export const controlAgentRunFunctionSchema = {
-    name: "controlAgentRun",
-    description:
-        "观察和控制后台 agent run（五 action：list/status/stop/append/wait，另有 todo 查询）。" +
-        "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。" +
-        "盯梢/轮询/阻塞纪律见 system prompt「多 Agent 编排」段：异步派发后等终态通知、不要轮询；" +
-        "阻塞等待（wait action 或 startAgentRun wait:true）会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作。" +
-        "本工具供你自己做决策用：用户界面已实时显示每条 run 的状态，不必为「让用户看到状态」而调用，返回值也不要复述给用户。",
-    parameters: {
-        type: "object",
-        properties: {
-            action: {
-                type: "string",
-                enum: ["list", "status", "stop", "todo", "wait", "append"],
-                description:
-                    "list=列出 run（省略 runId）；status=查单条 run 状态 + 可选日志；stop=取消 run；" +
-                    "append=向任务追加指令（运行中入队，终态 continuation）；" +
-                    "wait=终态阻塞等待：订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回，不是轮询；" +
-                    "todo=列出 runtime todo（由 startAgentRun 的 batchId/trackTodo 产生）。",
-            },
-            runId: {
-                type: "string",
-                description:
-                    "目标 run 的 ID（startAgentRun 返回的 runId）。action=list 时省略。",
-            },
-            dialogKey: {
-                type: "string",
-                description:
-                    "可选。action=append 时目标 dialog 的 dbKey（如 dialog-user-xxx）。缺省时由 runId 推导。",
-            },
-            userInput: {
-                type: "string",
-                description:
-                    "action=append 时追加给该任务的新指令或纠偏文本。",
-            },
-            mode: {
-                type: "string",
-                enum: ["enqueue", "continue"],
-                description:
-                    "可选。action=append 时的追加模式：enqueue=加入队列供下一轮消费；continue=终态续跑。缺省时自动根据 run 状态适配。",
-            },
-            timeoutMs: {
-                type: "number",
-                description:
-                    "可选。action=wait 的等待上限（毫秒），默认 100000。超时返回 status=\"timeout\"（不是失败），可稍后再 wait 或改用 status/stop。",
-                default: 100000,
-            },
-            tailLines: {
-                type: "number",
-                description:
-                    "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
-                    "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。",
-                default: 0,
-            },
-            batchId: {
-                type: "string",
-                description:
-                    "可选。action=list 时只返回该批次的 run（startAgentRun 返回值或入参中的 batchId）。",
-            },
-            status: {
-                type: "string",
-                description:
-                    "可选。action=list 时按状态过滤，单值或逗号分隔多值（如 'running,orphaned'）。" +
-                    "与 statusFilter 同义，status 优先；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
-            },
-            statusFilter: {
-                type: "string",
-                enum: ["running", "done", "failed", "cancelled", "orphaned", "all"],
-                description:
-                    "可选。action=list 时按状态过滤，默认 all。与 status 同义（status 优先，且 status 支持多值）。",
-            },
-            limit: {
-                type: "number",
-                description:
-                    "可选。action=list 时限制返回数量，默认 20，上限 200。不带任何参数不会返回全量。",
-            },
-            offset: {
-                type: "number",
-                description:
-                    "可选。action=list 时跳过前 N 条，配合 limit 翻页。默认 0。",
-            },
-        },
-        required: ["action"],
-    },
+/**
+ * 可用 action 的全集。`wait` 是唯一一个「观察者阻塞」动作，也是唯一一个能
+ * 被环境裁掉的：见 buildControlAgentRunFunctionSchema 的注释。
+ */
+export const CONTROL_AGENT_RUN_ACTIONS = [
+    "list",
+    "status",
+    "stop",
+    "todo",
+    "wait",
+    "append",
+] as const;
+
+export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number];
+
+/** 每个 action 在 `action` 参数描述里的那一句（顺序由调用方给的 actions 决定）。 */
+const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
+    list: "list=列出 run（省略 runId）",
+    status: "status=查单条 run 状态 + 可选日志",
+    stop: "stop=取消 run",
+    append: "append=向任务追加指令（运行中入队，终态 continuation）",
+    wait: "wait=终态阻塞等待：订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回，不是轮询",
+    todo: "todo=列出 runtime todo（由 startAgentRun 的 batchId/trackTodo 产生）",
 };
+
+/**
+ * 按环境裁剪后的 controlAgentRun schema。
+ *
+ * 为什么 `wait` 可以被裁掉：它是「观察者阻塞」——冻结当前对话去等一条 run 到
+ * 终态。有终态唤醒通道的宿主（交互式 TUI）根本不需要它：run 结束时唤醒会把
+ * 对话接回来。把它留在工具表里的代价不是零——模型会用连续的 `wait` 当轮询使，
+ * 每一次超时都要在 transcript 上解释「我等超时了 ≠ 它失败了」，而这两件事在
+ * 返回载荷里共用同一个 `status` 字段。删掉动作，那道解释题就不存在了。
+ *
+ * 契约：`actions` 只做减法，且必须是 CONTROL_AGENT_RUN_ACTIONS 的子集；缺省
+ * 给全集（服务端 / 无唤醒宿主原样保留 wait）。
+ */
+export function buildControlAgentRunFunctionSchema(opts?: {
+    actions?: readonly ControlAgentRunAction[];
+}) {
+    const actions = opts?.actions ?? CONTROL_AGENT_RUN_ACTIONS;
+    const hasWait = actions.includes("wait");
+    const actionList = actions.filter((a) => a !== "todo").join("/");
+    return {
+        name: "controlAgentRun",
+        description:
+            `观察和控制后台 agent run（action：${actionList}，另有 todo 查询）。` +
+            (hasWait
+                ? "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。"
+                : "用 startAgentRun 拿到 runId 后跟进度、追加指令或叫停。") +
+            "盯梢/轮询纪律见 system prompt「多 Agent 编排」段：异步派发后等终态通知、不要轮询；" +
+            (hasWait
+                ? "阻塞等待（wait action）会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 无并行工作可做。"
+                : "本环境有终态唤醒：run 到终态会自动把对话接回来，所以没有阻塞等待动作——派发后直接收尾，不要用连续查状态代替等待。") +
+            "本工具供你自己做决策用：用户界面已实时显示每条 run 的状态，不必为「让用户看到状态」而调用，返回值也不要复述给用户。",
+        parameters: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: [...actions],
+                    description: actions
+                        .map((a) => ACTION_DESCRIPTIONS[a])
+                        .join("；"),
+                },
+                runId: {
+                    type: "string",
+                    description:
+                        "目标 run 的 ID（startAgentRun 返回的 runId）。action=list 时省略。",
+                },
+                dialogKey: {
+                    type: "string",
+                    description:
+                        "可选。action=append 时目标 dialog 的 dbKey（如 dialog-user-xxx）。缺省时由 runId 推导。",
+                },
+                userInput: {
+                    type: "string",
+                    description:
+                        "action=append 时追加给该任务的新指令或纠偏文本。",
+                },
+                mode: {
+                    type: "string",
+                    enum: ["enqueue", "continue"],
+                    description:
+                        "可选。action=append 时的追加模式：enqueue=加入队列供下一轮消费；continue=终态续跑。缺省时自动根据 run 状态适配。",
+                },
+                ...(hasWait
+                    ? {
+                          timeoutMs: {
+                              type: "number",
+                              description:
+                                  "可选。action=wait 的等待上限（毫秒），默认 100000。超时返回 status=\"timeout\"（不是失败），可稍后再 wait 或改用 status/stop。",
+                              default: 100000,
+                          },
+                      }
+                    : {}),
+                tailLines: {
+                    type: "number",
+                    description:
+                        "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
+                        "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。",
+                    default: 0,
+                },
+                batchId: {
+                    type: "string",
+                    description:
+                        "可选。action=list 时只返回该批次的 run（startAgentRun 返回值或入参中的 batchId）。",
+                },
+                status: {
+                    type: "string",
+                    description:
+                        "可选。action=list 时按状态过滤，单值或逗号分隔多值（如 'running,orphaned'）。" +
+                        "与 statusFilter 同义，status 优先；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
+                },
+                statusFilter: {
+                    type: "string",
+                    enum: ["running", "done", "failed", "cancelled", "orphaned", "all"],
+                    description:
+                        "可选。action=list 时按状态过滤，默认 all。与 status 同义（status 优先，且 status 支持多值）。",
+                },
+                limit: {
+                    type: "number",
+                    description:
+                        "可选。action=list 时限制返回数量，默认 20，上限 200。不带任何参数不会返回全量。",
+                },
+                offset: {
+                    type: "number",
+                    description:
+                        "可选。action=list 时跳过前 N 条，配合 limit 翻页。默认 0。",
+                },
+            },
+            required: ["action"],
+        },
+    };
+}
+
+/** 全集 schema：服务端与无终态唤醒的宿主（裸 CLI / headless）用它。 */
+export const controlAgentRunFunctionSchema = buildControlAgentRunFunctionSchema();
 
 interface ControlAgentRunArgs {
     action: "list" | "status" | "stop" | "todo" | "wait" | "append";

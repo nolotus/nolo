@@ -18,8 +18,8 @@ describe("wireAdapters index", () => {
   });
 
   test("getChatWireAdapter returns registered adapters", () => {
-    expect(getChatWireAdapter("responses")).toBe(chatWireAdapters.responses);
-    expect(getChatWireAdapter("completions")).toBe(chatWireAdapters.completions);
+    expect(getChatWireAdapter("responses")).toBe(chatWireAdapters.responses!);
+    expect(getChatWireAdapter("completions")).toBe(chatWireAdapters.completions!);
   });
 
   test("unregistered wire throws with a registration hint", () => {

@@ -123,6 +123,16 @@ export const thinkingSectionStyles = stylex.create({
     borderLeftColor: "var(--borderMuted, var(--borderLight))",
     position: "relative",
   },
+  /**
+   * 滚动视口（aicss thinking-reasoning）：思考内容超限时内部滚动而非撑高整条消息；
+   * 上下渐隐遮罩由组件按滚动位置以内联 style 注入（动态，StyleX 不管）。
+   */
+  viewport: {
+    maxHeight: 220,
+    overflowY: "auto",
+    overscrollBehaviorY: "contain",
+    scrollbarWidth: "thin",
+  },
   editorWrapper: {
     fontSize: "var(--fontSize-sm)",
     color: "var(--textMuted, var(--textTertiary))",

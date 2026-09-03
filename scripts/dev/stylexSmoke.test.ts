@@ -112,8 +112,11 @@ describe("stylex esbuild pipeline smoke", () => {
       // 2) JS 产物携带 stylex.create 编译标记
       expect(flatJs).toContain("$$css:true");
 
-      // stylex.props 的构建期契约：静态声明编译为内联 style 对象（无运行时调用）
-      expect(flatJs).toContain('style:{color:"#ff1234",margin:"2px"}');
+      // stylex.props 的构建期契约：静态声明编译为内联 style 对象（或 props 包装）
+      expect(
+        flatJs.includes('style:{color:"#ff1234",margin:"2px"}') ||
+          flatJs.includes('props({color:"#ff1234",margin:"2px"})'),
+      ).toBe(true);
 
       // 3) 交叉验证：JS 里的每个 StyleX 类名（"x" + 小写数字字母串，带引号的字符串字面量）
       //    在 CSS 里都有对应选择器

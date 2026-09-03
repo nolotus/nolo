@@ -64,4 +64,23 @@ export const googleModels: Model[] = [
       cachingRead: 0.6,
     },
   },
+  {
+    name: "gemini-3.8-flash",
+    displayName: "Gemini 3.8 Flash",
+    provider: "google",
+    description:
+      "Gemini 3.8 Flash model for fast frontier agentic, coding, and multimodal tasks.",
+    hasVision: true,
+    hasAudio: true,
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    price: {
+      input: 6,
+      output: 30,
+      cachingWrite: 0.6,
+      cachingRead: 0.6,
+    },
+  },
 ];

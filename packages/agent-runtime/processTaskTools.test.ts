@@ -180,6 +180,19 @@ describe("taskWait", () => {
     expect(registry.getByTaskId(task.taskId)?.status).toBe("running");
   });
 
+  // 默认预算 == 上限，是有意的，不是笔误。
+  //
+  // 差额只会变成钱：一次 tool 往返 = 一次完整模型请求（整个对话重发），所以
+  // 60s 默认值下一个跑 4 分钟的构建要花 4 次全量重发，其中 3 次的内容是
+  // 「还没好」。等待循环放在工具里免费，放在模型手上按轮计费。
+  // 想快速探活仍然可以显式传小 timeoutMs——默认值只决定「没想过这件事的
+  // 调用」落在哪边，而那一边应该是便宜的一边。
+  test("默认等待预算等于上限：一次调用覆盖整个预算，不靠模型续等", () => {
+    expect(TASK_WAIT_DEFAULT_TIMEOUT_MS).toBe(TASK_WAIT_MAX_TIMEOUT_MS);
+    // 显式小预算仍然原样生效（快速探活没被这个默认值堵死）。
+    expect(resolveTaskWaitTimeoutMs(1_000)).toEqual({ timeoutMs: 1_000, clamped: false });
+  });
+
   test("timeoutMs is clamped to the hard ceiling and the clamp is reported", async () => {
     expect(resolveTaskWaitTimeoutMs(undefined)).toEqual({
       timeoutMs: TASK_WAIT_DEFAULT_TIMEOUT_MS,

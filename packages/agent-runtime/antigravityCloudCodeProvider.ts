@@ -16,6 +16,7 @@ import {
   convertOpenAiToolsToGemini,
   accumulateGeminiChunks,
   accumulateGeminiStream,
+  resolveGeminiModelQuirks,
   isGemini3Model,
 } from "./geminiNativeShared";
 
@@ -83,10 +84,11 @@ function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) {
   const { wireModelId: model, profile } = resolveAntigravityWireModel(logicalModel);
 
   const rawMessages = Array.isArray(args.openAiBody.messages) ? args.openAiBody.messages : [];
-  const isClaude = model.toLowerCase().includes("claude");
+  const quirks = resolveGeminiModelQuirks(model);
+  const isClaude = quirks.isClaudeCrossModel;
 
   const { contents, systemTexts } = convertOpenAiMessagesToGemini(rawMessages, {
-    attachSkipThoughtSignature: isGemini3Model(model),
+    attachSkipThoughtSignature: quirks.allowsThoughtSignatureSentinel,
   });
   if (contents.length === 0) {
     throw new Error("Antigravity Cloud Code Assist request has no user/model contents.");

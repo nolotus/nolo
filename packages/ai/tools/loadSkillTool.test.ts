@@ -236,7 +236,7 @@ describe("loadSkillTool", () => {
       slug: "web-research",
       disabled: true,
     });
-    expect(result.rawData.body).toBeUndefined();
+    expect((result.rawData as { body?: unknown }).body).toBeUndefined();
     expect(result.displayData).toContain("已被禁用");
     // 未打到 skill page 读取——正文没有真正加载。
     const fetchCalls = (globalThis.fetch as any).mock.calls.map((c: any) =>

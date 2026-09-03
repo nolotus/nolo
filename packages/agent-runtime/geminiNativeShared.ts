@@ -1,17 +1,29 @@
 /**
- * Gemini native generateContent 共享逻辑。
+ * Gemini Native generateContent 共享协议与模型怪癖适配器（Google/Antigravity Quirk Matrix）。
  *
- * 三条路径共用：
- * - 路径A: antigravityCloudCodeProvider（Antigravity OAuth → Cloud Code Assist）
- * - 路径B: server chatHandler → googleNativeChat（Platform Proxy → Google AI API）
- * - 路径C: googleNativeChat image（仅 image，不涉及 tool calls）
+ * 遵循 Agent Harness Playbook 原则：将 Google/Gemini 专有的线格式、状态机与怪癖隔离在共享层。
  *
- * thought_signature 处理：
- * - 捕获：从 Gemini 流式响应中提取 thoughtSignature（functionCall part 自身
- *   或前置 thought part），存入 tool_calls 的 thought_signature 字段
- * - 回放：构建请求时把签名放回 functionCall part，缺失时用哨兵兜底
- * - 哨兵：gemini-3 接受 skip_thought_signature_validator；gemini-3.5/flash-preview
- *   不接受哨兵，必须用真实签名
+ * 核心调用路径（三条共用）：
+ * - 路径A: antigravityCloudCodeProvider（Google Cloud Code Assist / Antigravity OAuth）
+ * - 路径B: server chatHandler → googleNativeChat（平台托管代理直连 Google AI API）
+ * - 路径C: googleNativeChat image（多模态视觉图像专属路径）
+ *
+ * 核心模型怪癖与契约（Gemini Specific Quirks）：
+ * 1. 【Thought Signature 签名不变式】：
+ *    - 捕获：从流式响应中提取 `thoughtSignature`（存在于 `functionCall` part 自身或前置 `thought` part 中）；
+ *    - 回放：多轮历史重放时必须将签名原样挂载回 `functionCall` part；
+ *    - 失败模式：gemini-3 缺失签名报错 400（INVALID_ARGUMENT）；而 gemini-3.5 / flash-preview 更为隐蔽——
+ *      若签名不合法直接返回空 STOP 帧（0 completion tokens，模型假死沉默）；
+ *    - 哨兵兼容：`SKIP_THOUGHT_SIGNATURE`（"skip_thought_signature_validator"）仅 gemini-3 允许兜底，3.5 必须真实签名。
+ *
+ * 2. 【严格的角色交替与 Tool 响应闭合（Turn Alternation & Auto-Flush）】：
+ *    - Gemini API 强制要求 `user` 与 `model` 严格交替出现，相邻同角色消息必须合并；
+ *    - 每个 `functionCall` 必须紧随对应的 `functionResponse`。若用户未回传 tool 输出即发送新指令，
+ *      必须自动 flush 补齐占位 `functionResponse`，否则 API 报 400 拒绝。
+ *
+ * 3. 【Cloud Code 网关跨模型（Claude on Cloud Code）映射】：
+ *    - 网关 request schema 为 Gemini proto，但后端运行 Claude 时需借助 `functionResponse.id`
+ *      建立 `tool_result` 关联，并打上 `labels.used_claude` 标签。
  */
 
 import type { AgentRuntimeChatMessage, AgentRuntimeToolCall } from "./types";
@@ -19,9 +31,34 @@ import type { AgentRuntimeChatMessage, AgentRuntimeToolCall } from "./types";
 /** 哨兵：gemini-3 可用，gemini-3.5/flash-preview 不接受。 */
 export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
 
-/** Gemini 3 family gates the thought_signature requirement. */
+/** Gemini / Google 模型的显式怪癖特征（Quirk Matrix） */
+export type GeminiModelQuirks = {
+  /** 是否需要 Thought Signature 签名回放（Gemini 3 家族） */
+  requiresThoughtSignature: boolean;
+  /** 当缺失真实签名时，是否允许使用哨兵兜底（gemini-3 允许；3.5 / flash-preview 必须真实签名） */
+  allowsThoughtSignatureSentinel: boolean;
+  /** 是否是经由 Gemini Wire 代理的 Claude 跨模型 */
+  isClaudeCrossModel: boolean;
+};
+
+/** 解析 Gemini 家族模型及跨模型代理的特征矩阵 */
+export function resolveGeminiModelQuirks(modelId: string): GeminiModelQuirks {
+  const lower = modelId.toLowerCase();
+  const isGemini3 = lower.includes("gemini-3");
+  const isStrictSignatureModel =
+    lower.includes("gemini-3.5") || lower.includes("flash-preview");
+  const isClaude = lower.includes("claude");
+
+  return {
+    requiresThoughtSignature: isGemini3,
+    allowsThoughtSignatureSentinel: isGemini3 && !isStrictSignatureModel,
+    isClaudeCrossModel: isClaude,
+  };
+}
+
+/** Gemini 3 family gates the thought_signature requirement. (保持兼容别名) */
 export function isGemini3Model(modelId: string): boolean {
-  return modelId.includes("gemini-3");
+  return resolveGeminiModelQuirks(modelId).requiresThoughtSignature;
 }
 
 // ---- Types ----

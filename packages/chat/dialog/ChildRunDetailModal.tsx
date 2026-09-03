@@ -189,8 +189,7 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
 
       {loadState === "error" ? (
         <div
-          data-hook="dialog-esc-cdm-state-error"
-          {...stylex.props(croStyles.modalState)}
+          {...stylex.props(croStyles.modalState, croStyles.stateError)}
           role="alert"
         >
           {errorMessage || t("childRunObserver.detailLoadFailed")}
@@ -214,12 +213,10 @@ export const ChildRunDetailModal: React.FC<ChildRunDetailModalProps> = ({
                 {message.role || "message"}
               </div>
               <div
-                data-hook={
-                  message.content
-                    ? undefined
-                    : "dialog-esc-cdm-message-body-empty"
-                }
-                {...stylex.props(croStyles.modalMessageBody)}
+                {...stylex.props(
+                  croStyles.modalMessageBody,
+                  !message.content && croStyles.messageBodyEmpty,
+                )}
               >
                 {message.content || t("childRunObserver.emptyContent")}
               </div>

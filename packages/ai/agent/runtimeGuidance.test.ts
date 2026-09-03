@@ -84,7 +84,7 @@ describe("runtimeGuidance", () => {
 
   it("no longer emits web research policy from runtime guidance (moved to toolGuidedSections.webAccess)", () => {
     const blocks = buildRuntimeGuidanceBlocks(["execShell", "fetchWebpage"]);
-    expect(blocks.webResearchToolPolicy).toBeUndefined();
+    expect("webResearchToolPolicy" in blocks).toBe(false);
   });
 
   it("builds safe website registration guidance for browser plus email agents", () => {

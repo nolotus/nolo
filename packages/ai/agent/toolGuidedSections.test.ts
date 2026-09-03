@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { resolveToolGuidedSections } from "./toolGuidedSections";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  resolveToolGuidedSections,
+  TOOL_GUIDED_SECTION_ORDER,
+} from "./toolGuidedSections";
 import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority";
 
 describe("toolGuidedSections", () => {
@@ -34,5 +39,30 @@ describe("toolGuidedSections", () => {
     expect(prompt).toContain("禁止调用平台 Agent");
     expect(prompt).toContain("授权是一次性的");
     expect(prompt).toContain("派发前自检");
+  });
+
+  // 工具轮次经济学：一次 tool 往返 = 一次完整模型请求，同轮多调用几乎不额外
+  // 花钱、分多轮则成倍。loop 早就支持一轮多工具，这段是去把它用起来。
+  test("有任何工具就注入轮次经济学纪律", () => {
+    const sections = resolveToolGuidedSections(["readFile"]);
+    expect(sections.toolRoundEconomy).toContain("一次 tool 往返 = 一次完整的模型请求");
+    expect(sections.toolRoundEconomy).toContain("在同一轮里一次发完");
+    // 等待类工具的预算纪律与 taskWait 的默认值改动是同一件事的两半。
+    expect(sections.toolRoundEconomy).toContain("按预计耗时一次给足预算");
+  });
+
+  test("没有任何工具的 agent 不注入（纯对话 agent 不需要这条）", () => {
+    expect(resolveToolGuidedSections([]).toolRoundEconomy).toBe("");
+  });
+
+  // 这个文件自己的注释警告过「历史上顺序 drift 过」：注入顺序表和
+  // buildSystemPrompt 的显式 layer 列表是两份手写清单，加 section 必须同时改
+  // 两处，漏一处的后果是该段在其中一条装配线上静默消失（localLoop 有、
+  // buildSystemPrompt 没有，或反过来）。这里把两份清单钉在一起。
+  test("注入顺序表里的每一段都被 buildSystemPrompt 显式装配", () => {
+    const source = readFileSync(join(import.meta.dir, "buildSystemPrompt.ts"), "utf8");
+    for (const id of TOOL_GUIDED_SECTION_ORDER) {
+      expect(source).toContain(`toolSections.${id}`);
+    }
   });
 });

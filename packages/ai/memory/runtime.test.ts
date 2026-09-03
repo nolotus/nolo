@@ -16,7 +16,6 @@ const writeItem = (partial: Partial<MemoryItem> & { id: string; content: string 
       subjectType: "user",
       subjectId: "user1",
       kind: "episodic",
-      content: partial.content,
       importance: 0.9,
       confidence: 0.9,
       ...partial,

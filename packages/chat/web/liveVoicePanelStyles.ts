@@ -115,8 +115,31 @@ export const liveVoicePanelStyles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
-    backgroundColor: "var(--activeBg, rgba(255, 255, 255, 0.12))",
+    backgroundColor: {
+      default: "var(--activeBg, rgba(255, 255, 255, 0.12))",
+      ":hover": "var(--hoverBg, rgba(255, 255, 255, 0.2))",
+    },
     color: "var(--text, white)",
+    transform: {
+      default: null,
+      ":hover": "translateY(-1px)",
+      ":active": "translateY(0)",
+    },
     transition: "all var(--motionDuration, 0.2s) var(--motionEase, ease)",
+  },
+  controlBtnMuted: {
+    backgroundColor: "var(--errorGhost, rgba(239, 68, 68, 0.2))",
+    color: "var(--error, #ef4444)",
+  },
+  controlBtnHangup: {
+    backgroundColor: {
+      default: "var(--error, #ef4444)",
+      ":hover": "color-mix(in srgb, var(--error) 90%, black)",
+    },
+    color: "white",
+    boxShadow: {
+      default: null,
+      ":hover": "0 4px 12px color-mix(in srgb, var(--error) 30%, transparent)",
+    },
   },
 });

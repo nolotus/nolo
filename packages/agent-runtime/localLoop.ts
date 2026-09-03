@@ -1,3 +1,17 @@
+/**
+ * Agent 本地执行主循环（Local Execution Loop / Agent Harness Engine）。
+ *
+ * 遵循 Agent Harness Playbook 核心准则：
+ * 1. 【有界工作与输出防爆（Bounded Work & Spills）】：
+ *    - 工具输出受 `toolOutputPolicy` 严格截断（`FRESH_TOOL_OUTPUT_MAX_CHARS`）；
+ *    - 超过阈值的大输出通过 `spillToolOutput` 溢出落盘，仅向上下文注入索引与摘要，保护内存与 Token 预算。
+ * 2. 【严格取消级联（Cancellation Propagation）】：
+ *    - 每次模型调用与工具执行严格绑定 `abortSignal` 与 `runAbortableWithTimeout`，
+ *      用户中断或会话中止信号立即下发至底层进程/网络流，严禁孤儿进程与挂起 Promise。
+ * 3. 【状态单调演进（Monotonic Turn Journaling）】：
+ *    - 工具调用与执行结果必须严格成对记录（`sanitizeToolCallPairing`）；
+ *    - 每一轮推进通过 `hostAdapter.saveTurn` 沉淀权威日志。
+ */
 import { clipCompactText } from "core/clipCompactText";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";

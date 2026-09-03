@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   LuRotateCcw,
   LuPencil,
@@ -36,7 +37,7 @@ type WidgetId =
 
 // 编辑态“添加模块”区域里各 widget 的展示名：优先复用已有 i18n key，
 // fallback 中文，不改动大 locale 文件。
-function widgetLabel(id: WidgetId, t: (key: any, fallback?: any) => any): string {
+function widgetLabel(id: WidgetId, t: TFunction): string {
   switch (id) {
     case "calendar":
       return t("widgets.calendar.title", "日历");

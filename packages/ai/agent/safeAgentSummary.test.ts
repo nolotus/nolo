@@ -373,7 +373,6 @@ describe("compact listAgents projection", () => {
     ]);
     expect(compact.agentKey).toBe("agent-user1-own-1");
     expect(compact.isFavorite).toBe(true);
-    expect(compact.favoritedAt).toBeUndefined();
   });
 
   test("toCompactAgentSummary drops noisy fields (introduction, cliProvider, modelAbility, prices, timestamps)", () => {

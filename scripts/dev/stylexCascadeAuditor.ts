@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { globSync } from "glob";
 import * as babelParser from "@babel/parser";
 import postcss from "postcss";
@@ -12,6 +12,164 @@ export interface ElementIndexItem {
   hooks: string[];
   hasStylex: boolean;
   stylexCalls: string[];
+}
+
+export type StylexPropertyIndex = Map<string, Map<string, Map<string, Set<string>>>>;
+
+export function buildStylexPropertyIndex(root: string): StylexPropertyIndex {
+  const files = globSync("packages/**/*.{ts,tsx}", { cwd: root, absolute: true });
+  const rawFileStyles = new Map<string, Map<string, Map<string, Set<string>>>>();
+
+  for (const file of files) {
+    const code = readFileSync(file, "utf8");
+    if (!code.includes("stylex.create") && !code.includes("create(")) continue;
+    try {
+      const ast = babelParser.parse(code, {
+        sourceType: "module",
+        plugins: ["jsx", "typescript"],
+      });
+
+      const varMap = new Map<string, Map<string, Set<string>>>();
+
+      function walk(node: any) {
+        if (!node || typeof node !== "object") return;
+        if (
+          node.type === "VariableDeclarator" &&
+          node.id?.type === "Identifier" &&
+          node.init?.type === "CallExpression"
+        ) {
+          const varName = node.id.name;
+          const callee = node.init.callee;
+          const isCreate =
+            (callee.type === "MemberExpression" &&
+              callee.object?.name === "stylex" &&
+              callee.property?.name === "create") ||
+            (callee.type === "Identifier" && callee.name === "create");
+
+          if (isCreate && node.init.arguments[0]?.type === "ObjectExpression") {
+            const keyMap = new Map<string, Set<string>>();
+            for (const prop of node.init.arguments[0].properties) {
+              if (prop.type === "ObjectProperty" && prop.key) {
+                const styleKey = prop.key.name || prop.key.value;
+                const cssProps = new Set<string>();
+                if (prop.value?.type === "ObjectExpression") {
+                  for (const inner of prop.value.properties) {
+                    if (inner.type === "ObjectProperty" && inner.key) {
+                      const name = inner.key.name || inner.key.value;
+                      if (typeof name === "string") {
+                        const kebab = name.replace(/([A-Z])/g, "-$1").toLowerCase();
+                        cssProps.add(kebab);
+                        if (kebab === "background" || kebab === "background-color") {
+                          cssProps.add("background");
+                          cssProps.add("background-color");
+                        }
+                        if (kebab.startsWith("border")) {
+                          cssProps.add("border");
+                          cssProps.add("border-color");
+                          cssProps.add("border-width");
+                          cssProps.add("border-style");
+                          cssProps.add("border-top");
+                          cssProps.add("border-bottom");
+                          cssProps.add("border-left");
+                          cssProps.add("border-right");
+                        }
+                        if (kebab === "padding") {
+                          cssProps.add("padding");
+                          cssProps.add("padding-left");
+                          cssProps.add("padding-right");
+                          cssProps.add("padding-top");
+                          cssProps.add("padding-bottom");
+                        }
+                      }
+                    }
+                  }
+                }
+                keyMap.set(styleKey, cssProps);
+              }
+            }
+            varMap.set(varName, keyMap);
+          }
+        }
+
+        for (const key of Object.keys(node)) {
+          if (key === "parent") continue;
+          const child = node[key];
+          if (Array.isArray(child)) {
+            for (const c of child) walk(c);
+          } else if (child && typeof child === "object") {
+            walk(child);
+          }
+        }
+      }
+
+      walk(ast);
+      if (varMap.size > 0) rawFileStyles.set(file, varMap);
+    } catch {
+      // Ignored
+    }
+  }
+
+  const resolvedIndex: StylexPropertyIndex = new Map();
+
+  for (const file of files) {
+    if (!file.endsWith(".tsx")) continue;
+    const code = readFileSync(file, "utf8");
+    try {
+      const ast = babelParser.parse(code, {
+        sourceType: "module",
+        plugins: ["jsx", "typescript"],
+      });
+
+      const combinedVarMap = new Map<string, Map<string, Set<string>>>();
+      const local = rawFileStyles.get(file);
+      if (local) {
+        for (const [k, v] of local) combinedVarMap.set(k, v);
+      }
+
+      function walkImport(node: any) {
+        if (!node || typeof node !== "object") return;
+        if (node.type === "ImportDeclaration" && node.source?.value) {
+          const importPath = node.source.value;
+          const candidatePaths = [
+            resolve(dirname(file), importPath + ".ts"),
+            resolve(dirname(file), importPath + ".tsx"),
+            resolve(dirname(file), importPath, "index.ts"),
+            resolve(dirname(file), importPath, "index.tsx"),
+          ];
+          for (const cp of candidatePaths) {
+            if (rawFileStyles.has(cp)) {
+              const importedStyles = rawFileStyles.get(cp)!;
+              for (const spec of node.specifiers || []) {
+                if (spec.type === "ImportSpecifier" || spec.type === "ImportDefaultSpecifier") {
+                  const localName = spec.local.name;
+                  const importedName = spec.imported ? spec.imported.name : localName;
+                  if (importedStyles.has(importedName)) {
+                    combinedVarMap.set(localName, importedStyles.get(importedName)!);
+                  }
+                }
+              }
+            }
+          }
+        }
+        for (const k of Object.keys(node)) {
+          if (k === "parent") continue;
+          const child = node[k];
+          if (Array.isArray(child)) {
+            for (const c of child) walkImport(c);
+          } else if (child && typeof child === "object") {
+            walkImport(child);
+          }
+        }
+      }
+
+      walkImport(ast);
+      if (combinedVarMap.size > 0) resolvedIndex.set(file, combinedVarMap);
+    } catch {
+      // Ignored
+    }
+  }
+
+  return resolvedIndex;
 }
 
 export function buildTsxElementIndex(root: string): ElementIndexItem[] {
@@ -256,6 +414,7 @@ export function compareSpecificity(s1: Specificity, s2: Specificity): number {
 export interface StylexSpecificities {
   globalMax: Specificity;
   standardMax: Specificity;
+  standardBaseMax: Specificity;
   pseudoMax: Specificity;
   pseudoMaxMap: Record<string, Specificity>;
   topBranches: string[];
@@ -279,6 +438,7 @@ export function deriveStylexSpecificities(
   const root = postcss.parse(content);
   let globalMax: Specificity = { A: 0, B: 0, C: 0 };
   let standardMax: Specificity = { A: 0, B: 0, C: 0 };
+  let standardBaseMax: Specificity = { A: 0, B: 0, C: 0 };
   let pseudoMax: Specificity = { A: 0, B: 0, C: 0 };
   const pseudoMaxMap: Record<string, Specificity> = {};
   let topBranches: string[] = [];
@@ -296,20 +456,26 @@ export function deriveStylexSpecificities(
           topBranches.push(branch);
         }
 
-        const pseudoMatch = branch.match(/::[a-zA-Z0-9_-]+/);
+        const pseudoMatch = branch.match(
+          /(?:::|:(?:before|after|placeholder|selection|backdrop|marker|file-selector-button|-webkit-[a-z0-9_-]+|-moz-[a-z0-9_-]+))[a-zA-Z0-9_-]*/i,
+        );
         if (pseudoMatch) {
-          const pName = pseudoMatch[0];
+          const pName = pseudoMatch[0].toLowerCase();
           if (compareSpecificity(spec, pseudoMax) > 0) pseudoMax = spec;
           const prev = pseudoMaxMap[pName] || { A: 0, B: 0, C: 0 };
           if (compareSpecificity(spec, prev) > 0) pseudoMaxMap[pName] = spec;
         } else {
           if (compareSpecificity(spec, standardMax) > 0) standardMax = spec;
+          // Standard base class (no special attribute selector attached like [data-positioned], [data-pressed])
+          if (!/\[[^\]]+\]/i.test(branch)) {
+            if (compareSpecificity(spec, standardBaseMax) > 0) standardBaseMax = spec;
+          }
         }
       }
     }
   });
 
-  return { globalMax, standardMax, pseudoMax, pseudoMaxMap, topBranches };
+  return { globalMax, standardMax, standardBaseMax, pseudoMax, pseudoMaxMap, topBranches };
 }
 
 export interface RuleAuditResult {
@@ -386,6 +552,7 @@ export function auditEscapeHatchFiles(
 
   const entryCssPath = options.entryCssPath || join(root, "public/assets/entry.css");
   const derived = deriveStylexSpecificities(entryCssPath);
+  const propertyIndex = buildStylexPropertyIndex(root);
 
   let opponentStandardMax = derived.standardMax;
   let opponentPseudoMaxMap = derived.pseudoMaxMap;
@@ -441,13 +608,60 @@ export function auditEscapeHatchFiles(
         const withStylex = matches.filter((e) => e.hasStylex);
         if (withStylex.length > 0) {
           if (target.pseudoElement) {
-            const pseudoKeyword = target.pseudoElement.replace(/^::/, "");
+            const pseudoKeyword = target.pseudoElement.replace(/^::?/, "");
             const hasPseudoInStylex = withStylex.some((el) =>
               el.stylexCalls.some((call) => call.includes(pseudoKeyword)),
             );
             if (hasPseudoInStylex) matchedStylexElements.push(...withStylex);
           } else {
-            matchedStylexElements.push(...withStylex);
+            // Check if there is any overlapping CSS property between decls and StyleX calls
+            const hatchProps = Object.keys(decls).map((p) => p.toLowerCase());
+            let hasPropertyCollision = false;
+
+            for (const el of withStylex) {
+              const varMap = propertyIndex.get(el.file);
+              if (!varMap) {
+                hasPropertyCollision = true;
+                break;
+              }
+              for (const call of el.stylexCalls) {
+                const refs = call.matchAll(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/g);
+                let checkedAny = false;
+                for (const r of refs) {
+                  const varName = r[1];
+                  const keyName = r[2];
+                  const keyMap = varMap.get(varName);
+                  if (keyMap) {
+                    const set = keyMap.get(keyName);
+                    if (set) {
+                      checkedAny = true;
+                      for (const hp of hatchProps) {
+                        if (set.has(hp)) {
+                          hasPropertyCollision = true;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                  if (hasPropertyCollision) break;
+                }
+                if (!checkedAny) {
+                  for (const km of varMap.values()) {
+                    for (const set of km.values()) {
+                      for (const hp of hatchProps) {
+                        if (set.has(hp)) hasPropertyCollision = true;
+                      }
+                    }
+                  }
+                }
+                if (hasPropertyCollision) break;
+              }
+              if (hasPropertyCollision) break;
+            }
+
+            if (hasPropertyCollision) {
+              matchedStylexElements.push(...withStylex);
+            }
           }
         }
       }
@@ -473,10 +687,19 @@ export function auditEscapeHatchFiles(
       let allSelectorsWin = true;
       for (const rawSel of rawSelectors) {
         const spec = calculateSpecificity(rawSel);
-        const pseudoMatch = rawSel.match(/::[a-zA-Z0-9_-]+/);
+        const pseudoMatch = rawSel.match(
+          /(?:::|:(?:before|after|placeholder|selection|backdrop|marker|file-selector-button|-webkit-[a-z0-9_-]+|-moz-[a-z0-9_-]+))[a-zA-Z0-9_-]*/i,
+        );
         let oppMax = opponentStandardMax;
         if (pseudoMatch) {
-          oppMax = opponentPseudoMaxMap[pseudoMatch[0]] || { A: 0, B: 0, C: 0 };
+          const pName = pseudoMatch[0].toLowerCase();
+          oppMax = opponentPseudoMaxMap[pName] || { A: 0, B: 0, C: 0 };
+        } else if (!options.maxOpponentOverride) {
+          // If the element does not target data-positioned / data-entering / data-exiting, its opponent is standardBaseMax
+          const hasAttributedOpponent = /\[data-(?:positioned|entering|exiting)\]/i.test(rawSel);
+          if (!hasAttributedOpponent && derived.standardBaseMax) {
+            oppMax = derived.standardBaseMax;
+          }
         }
         const wins = compareSpecificity(spec, oppMax) > 0;
         if (!wins) allSelectorsWin = false;

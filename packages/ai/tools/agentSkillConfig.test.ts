@@ -214,7 +214,7 @@ describe("resolveAgentRequiredPackIds — 宿主的能力来源", () => {
 describe("三宿主接线（P3b）", () => {
   it("web / desktop / cli 的 pack 解析器都吃 skills，且对存量记录等价", async () => {
     const { resolveDesktopEffectiveEnabledPacks } = await import(
-      "../../server/handlers/desktopAgentRuntimeTurnService"
+      "../../desktop-runtime/handlers/desktopAgentRuntimeTurnService"
     );
     const { resolveCliEffectiveEnabledPacks } = await import(
       "../../cli/client/localRuntimeTools"
@@ -236,7 +236,7 @@ describe("三宿主接线（P3b）", () => {
 
   it("recommended 档不进任何宿主的能力包展开", async () => {
     const { resolveDesktopEffectiveEnabledPacks } = await import(
-      "../../server/handlers/desktopAgentRuntimeTurnService"
+      "../../desktop-runtime/handlers/desktopAgentRuntimeTurnService"
     );
     const packs = resolveDesktopEffectiveEnabledPacks({
       skills: { "app-builder": "recommended" },

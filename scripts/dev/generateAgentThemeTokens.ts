@@ -88,6 +88,10 @@ export function computeAgentThemeTokens(
       surfaceOverlayStrong: palette.backgroundTertiary,
       borderOverlayStrong: palette.borderLight,
       chipText: palette.textSecondary,
+
+      // 9. Chat Input Card Shadow
+      chatInputCardShadow:
+        "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)",
     };
   }
 
@@ -139,6 +143,10 @@ export function computeAgentThemeTokens(
     surfaceOverlayStrong: `color-mix(in srgb, ${palette.backgroundSecondary} 80%, transparent)`,
     borderOverlayStrong: `color-mix(in srgb, ${palette.border} 60%, transparent)`,
     chipText: palette.text,
+
+    // 9. Chat Input Card Shadow
+    chatInputCardShadow:
+      "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px var(--shadowLight), 0 16px 32px -20px var(--shadowHeavy)",
   };
 }
 

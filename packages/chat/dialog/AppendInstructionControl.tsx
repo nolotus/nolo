@@ -183,7 +183,6 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
 
   return (
     <form
-      data-hook={`dialog-esc-aic-root${mode === "continue" ? " dialog-esc-aic-continue" : ""}`}
       {...rootStyleProps}
       className={rootClassName}
       onSubmit={handleSubmit}
@@ -240,7 +239,6 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
         <input
           id={inputId}
           type="text"
-          data-hook="dialog-esc-aic-input"
           {...stylex.props(croStyles.aicInput)}
           value={input}
           onInput={(e) => setInput((e.target as HTMLInputElement).value)}
@@ -252,8 +250,10 @@ export const AppendInstructionControl: React.FC<AppendInstructionControlProps> =
         />
         <button
           type="submit"
-          data-hook="dialog-esc-aic-submit"
-          {...stylex.props(croStyles.aicSubmit)}
+          {...stylex.props(
+            croStyles.aicSubmit,
+            mode === "continue" && croStyles.aicSubmitContinue,
+          )}
           disabled={isSending || !input.trim()}
           aria-label={buttonLabel}
         >

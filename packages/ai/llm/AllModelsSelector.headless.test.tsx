@@ -157,12 +157,12 @@ describe("AllModelsSelector headless", () => {
     expect(grokOption).toBeDefined();
   });
 
-  test("dedupes same-name models: Claude Sonnet 5 appears exactly once", async () => {
-    // 前置：目录收敛后 anthropic/claude-sonnet-5 只由平台托管 nolo 注册一条，
-    // 去重逻辑本身仍需保证选择器里同名模型不重复出现。
+  test("directory convergence: Claude Sonnet 5 is no longer in ALL_MODELS", async () => {
+    // 目录收敛后 anthropic/claude-sonnet-5 已不在平台目录
+    // （deepinfra 源仍定义该模型，但不进 ALL_MODELS）。
     expect(
-      ALL_MODELS.filter((m) => m.name === "anthropic/claude-sonnet-5").length
-    ).toBeGreaterThanOrEqual(1);
+      ALL_MODELS.filter((m) => m.name === "anthropic/claude-sonnet-5")
+    ).toHaveLength(0);
 
     const { Selector } = await loadSelector();
     const onChange = (_item: ModelWithProvider | null) => {
@@ -189,7 +189,7 @@ describe("AllModelsSelector headless", () => {
     const claudeSonnet5Options = options.filter((node) =>
       (node.textContent ?? "").includes("Claude Sonnet 5")
     );
-    // 去重后选择器里同名模型只保留一条（平台托管 nolo 优先）
-    expect(claudeSonnet5Options).toHaveLength(1);
+    // 目录不含 Claude，选择器不应出现同名 option
+    expect(claudeSonnet5Options).toHaveLength(0);
   });
 });

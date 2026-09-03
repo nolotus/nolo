@@ -15,179 +15,9 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-/* ═══ 自 AgentDraftPanel.css 迁出（AgentDraftPanel.tsx）═══ */
+/* ═══ 自 AgentDraftPanel.css 迁出（已全部迁入 agentDraftPanelStyles.ts StyleX）═══ */
 
-/* ── 状态与变体竞争规则（hover / disabled / focus / 变体）──
- * 保留原因：与各自基础规则在 background/color/border/opacity 等
- * 同名属性上竞争，原级联靠源码顺序决胜；StyleX 原子类在 @layer
- * 内无法保证该顺序，按原源码顺序下沉 unlayered。
- * :not(:disabled) / ::placeholder 为 StyleX 不支持的选择器。 */
-
-/* .AgentDraftPanel__iconButton:hover */
-[data-hook~="dialog-esc-adp-icon-button"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--backgroundSecondary, #f3f4f6);
-  color: var(--text, #111827);
-}
-
-/* .AgentDraftPanel__field input:not(:disabled),
-   .AgentDraftPanel__field textarea:not(:disabled) */
-[data-hook~="dialog-esc-adp-field-control"]:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  -webkit-text-fill-color: var(--text, #111827);
-  opacity: 1;
-}
-
-/* .AgentDraftPanel__field input:disabled,
-   .AgentDraftPanel__field textarea:disabled */
-[data-hook~="dialog-esc-adp-field-control"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  -webkit-text-fill-color: var(--textSecondary, #4b5563);
-  background: var(--backgroundTertiary, var(--backgroundSecondary, #f9fafb));
-  cursor: default;
-  opacity: 1;
-}
-
-/* .AgentDraftPanel__field input::placeholder,
-   .AgentDraftPanel__field textarea::placeholder */
-[data-hook~="dialog-esc-adp-field-control"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::placeholder {
-  color: var(--textSecondary, #6b7280);
-  opacity: 0.8;
-}
-
-/* .AgentDraftPanel__field input:focus,
-   .AgentDraftPanel__field textarea:focus */
-[data-hook~="dialog-esc-adp-field-control"]:focus:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  border-color: var(--primary, var(--accent, #2563eb));
-  box-shadow: 0 0 0 2px var(--focusRing, rgba(37, 99, 235, 0.18));
-  outline: none;
-}
-
-/* .AgentDraftPanel__toggleGroup button:disabled */
-[data-hook~="dialog-esc-adp-toggle-button"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  cursor: default;
-  opacity: 0.82;
-}
-
-/* .AgentDraftPanel__toggleGroup button.is-active
- * （与基础 background/border-color/color 竞争；位于 :disabled 之后，
- * 禁用 + 选中并存时按源码顺序保持选中态外观） */
-[data-hook~="dialog-esc-adp-toggle-button"][data-hook~="dialog-esc-adp-toggle-active"] {
-  background: var(--primary, #2563eb);
-  border-color: var(--primary, #2563eb);
-  color: var(--primaryText, #ffffff);
-}
-
-/* .AgentDraftPanel__primary:disabled */
-[data-hook~="dialog-esc-adp-primary"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  cursor: default;
-  opacity: 0.55;
-}
-
-/* ═══ 自 ChildRunObserverPanel.css 迁出（ChildRunObserverPanel.tsx /
-   ChildRunDetailModal.tsx / AppendInstructionControl.tsx）═══ */
-
-/* ── 状态与变体竞争规则（hover / disabled / focus-visible / 变体）──
- * 保留原因：与各自基础规则在 background/color/border/opacity 等
- * 同名属性上竞争，原级联靠源码顺序决胜；StyleX 原子类在 @layer
- * 内无法保证该顺序，按原源码顺序下沉 unlayered。
- * :not(:disabled) / :focus-visible 为 StyleX 不支持的选择器。 */
-
-/* .ChildRunObserverPanel__collapsedRail:hover（与基础 background/color 竞争）*/
-[data-hook~="dialog-esc-cro-collapsed-rail"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--backgroundSecondary, #f3f4f6);
-  color: var(--text, #111827);
-}
-
-/* .ChildRunObserverPanel__iconButton:hover:not(:disabled)（与基础
- * background/color 竞争；:not() 为 StyleX 不支持的选择器） */
-[data-hook~="dialog-esc-cro-icon-button"]:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--backgroundSecondary, #f3f4f6);
-  color: var(--text, #111827);
-}
-
-/* .ChildRunObserverPanel__iconButton:disabled（与基础 cursor 竞争） */
-[data-hook~="dialog-esc-cro-icon-button"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  cursor: default;
-  opacity: 0.55;
-}
-
-/* .ChildRunObserverPanel__state--error（变体与基础 color 竞争） */
-[data-hook~="dialog-esc-cro-state-error"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--errorText, #b91c1c);
-}
-
-/* .ChildRunObserverPanel__retry:hover（与基础 background 竞争） */
-[data-hook~="dialog-esc-cro-retry"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--backgroundSecondary, #f3f4f6);
-}
-
-/* .ChildRunObserverPanel__item:hover,
-   .ChildRunObserverPanel__item:focus-visible（与基础 border-color 竞争；
-   :focus-visible 为 StyleX 不支持的选择器） */
-[data-hook~="dialog-esc-cro-item"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="dialog-esc-cro-item"]:focus-visible:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  border-color: var(--primary, #2563eb);
-  outline: none;
-}
-
-/* .ChildRunDetailModal__state--error（变体与基础 color 竞争） */
-[data-hook~="dialog-esc-cdm-state-error"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--errorText, #b91c1c);
-}
-
-/* .ChildRunDetailModal__messageBody--empty（变体与基础 color 竞争） */
-[data-hook~="dialog-esc-cdm-message-body-empty"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  color: var(--textSecondary, #9ca3af);
-  font-style: italic;
-}
-
-/* .AppendInstructionControl__input:focus（与基础 border-color 竞争） */
-[data-hook~="dialog-esc-aic-input"]:focus:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  border-color: var(--primary, #2563eb);
-  outline: none;
-}
-
-/* .AppendInstructionControl__input:disabled（与基础 background 竞争） */
-[data-hook~="dialog-esc-aic-input"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--backgroundSecondary, #f3f4f6);
-  cursor: not-allowed;
-  opacity: 0.75;
-}
-
-/* .AppendInstructionControl__submit:hover:not(:disabled)（与基础 background 竞争） */
-[data-hook~="dialog-esc-aic-submit"]:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--primaryHover, #1d4ed8);
-}
-
-/* .AppendInstructionControl__submit:disabled（与基础 cursor 竞争） */
-[data-hook~="dialog-esc-aic-submit"]:disabled:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-/* .AppendInstructionControl--continue .AppendInstructionControl__submit
- *（修饰类作用于后代 submit，StyleX 无后代选择器；与基础 background
- * 竞争，位于 :hover/:disabled 之后按源码顺序覆盖基础 submit 配色） */
-[data-hook~="dialog-esc-aic-continue"] [data-hook~="dialog-esc-aic-submit"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--success, #16a34a);
-}
-
-/* .AppendInstructionControl--continue .AppendInstructionControl__submit:hover:not(:disabled) */
-[data-hook~="dialog-esc-aic-continue"]
-  [data-hook~="dialog-esc-aic-submit"]:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: #15803d;
-}
-
-/* ── StyleX 不支持的 @keyframes ──
- * 保留原因：keyframes 无法进 stylex.create；动画声明本体
- * （animation 属性）在 croStyles.aicSpinner（@layer 内），
- * keyframes 名称全局引用此处定义。 */
-@keyframes AppendInstructionControl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* ═══ 自 ChildRunObserverPanel.css 迁出（已全部迁入 childRunObserverStyles.ts StyleX）═══ */
 
 /* ═══ 自 DialogPage.css 迁出（DialogPage.tsx / PageAssistantPanel.tsx /
    ObjectAssistantPanel.tsx）═══ */
@@ -302,12 +132,6 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   margin: 0 auto;
   padding: 0 var(--space-4);
   box-sizing: border-box;
-}
-
-/* .DialogPage__context-banner-link:hover（text-decoration 基础无竞争，
-   但 :hover 为 StyleX 不支持的选择器，随范式一律走逃生舱） */
-[data-hook~="dialog-esc-dp-banner-link"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  text-decoration: underline;
 }
 
 /* 小屏手机（<= 480px）：几乎铺满，减少左右留白 */
@@ -468,19 +292,4 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   line-height: 1.55;
   min-height: 40px;
   border-radius: var(--radius-xs);
-}
-
-/* ── 空状态按钮交互态（:hover/:focus-visible 为 StyleX 不支持的选择器）── */
-
-/* .empty-state__btn:hover（与基础 background/transform/box-shadow 竞争） */
-[data-hook~="dialog-esc-est-btn"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  background: var(--hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px -2px var(--primaryGhost);
-}
-
-/* .empty-state__btn:focus-visible */
-[data-hook~="dialog-esc-est-btn"]:focus-visible:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }

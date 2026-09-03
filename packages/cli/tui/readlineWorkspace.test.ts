@@ -38,6 +38,7 @@ import {
   wrapTextToLines,
   wrapTranscriptLine,
 } from "./readlineWorkspace";
+import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
 import { getCliLocale, setCliLocale, t } from "./i18n";
 import {
   diffLineSequences,
@@ -4270,6 +4271,75 @@ describe("run completion wake (TUI 终态唤醒)", () => {
       expect(turnsProcessed[2]).toContain("done");
 
       input.write("/exit\r");
+      input.end();
+      await Promise.race([
+        workspacePromise,
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } finally {
+      restore();
+    }
+  }, 20000);
+
+  // 唤醒通道标记：工具表靠它决定要不要给出 controlAgentRun 的 wait 动作。
+  // 两个方向都要钉死——写漏了 TUI 白留一个会被当轮询用的 wait，写多了
+  // （比如按「是不是 TUI」推断）非交互宿主会连同它唯一的等待手段一起失去。
+  test("接上唤醒通道时给 turn 路径的 env 打标记", async () => {
+    const { restore } = await withNoloHomeDir();
+    try {
+      const { input, output } = makeIo();
+      const env: Record<string, string | undefined> = {};
+      let turnCount = 0;
+      const workspacePromise = startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env,
+        agentRunner: async () => {
+          turnCount++;
+          return { exitCode: 0, dialogId: "dlg-wake-env" };
+        },
+      } as any);
+
+      input.write("hello\r");
+      await waitFor(() => turnCount === 1);
+      // 标记必须写在 turn 路径实际读的那个 env 对象上（tuiTurnRunner 用
+      // `ctx.options.env ?? process.env`），不是 effectiveEnv 那份早期快照。
+      expect(env[RUN_WAKE_CHANNEL_ENV]).toBe("1");
+
+      input.write("/exit\r");
+      input.end();
+      await Promise.race([
+        workspacePromise,
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } finally {
+      restore();
+    }
+  }, 20000);
+
+  test("非交互输入（无 TTY）不打标记——那里没人能把对话接回来", async () => {
+    const { restore } = await withNoloHomeDir();
+    try {
+      const { input, output } = makeIo();
+      input.isTTY = false;
+      const env: Record<string, string | undefined> = {};
+      let turnCount = 0;
+      const workspacePromise = startTuiWorkspace({
+        scriptDir: "",
+        input,
+        output,
+        env,
+        agentRunner: async () => {
+          turnCount++;
+          return { exitCode: 0, dialogId: "dlg-wake-env-2" };
+        },
+      } as any);
+
+      input.write("hello\r");
+      await waitFor(() => turnCount === 1);
+      expect(env[RUN_WAKE_CHANNEL_ENV]).toBeUndefined();
+
       input.end();
       await Promise.race([
         workspacePromise,

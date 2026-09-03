@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   deriveAgentRunTodoStatus,
+  projectTodosFromRuns,
   summarizeAgentRunTodo,
   type AgentRunTodoRecord,
   type AgentRunTodoRunSummary,
@@ -105,3 +106,50 @@ describe("agentRunTodo — summarizeAgentRunTodo", () => {
     expect(summary).toBe("待执行");
   });
 });
+
+describe("agentRunTodo — projectTodosFromRuns", () => {
+  it("从 runs 列表纯函数投影出 Todo 结构", () => {
+    const runs = [
+      {
+        runId: "run-1",
+        batchId: "batch-A",
+        agentName: "Writer",
+        status: "done",
+        startedAt: "2026-09-03T05:00:00.000Z",
+        endedAt: "2026-09-03T05:01:00.000Z",
+        task: "Write blog post",
+      },
+      {
+        runId: "run-2",
+        batchId: "batch-A",
+        agentName: "Reviewer",
+        status: "running",
+        startedAt: "2026-09-03T05:02:00.000Z",
+        task: "Review blog post",
+      },
+      {
+        runId: "run-3",
+        batchId: "batch-B",
+        agentName: "Deployer",
+        status: "failed",
+        startedAt: "2026-09-03T05:03:00.000Z",
+        endedAt: "2026-09-03T05:04:00.000Z",
+      },
+    ];
+
+    const todos = projectTodosFromRuns(runs);
+    expect(todos.length).toBe(2);
+
+    const todoA = todos.find((t) => t.id === "todo-batch-A");
+    expect(todoA).toBeDefined();
+    expect(todoA?.status).toBe("running"); // 有一个在 running
+    expect(todoA?.runIds).toEqual(["run-1", "run-2"]);
+    expect(todoA?.title).toBe("Write blog post");
+
+    const todoB = todos.find((t) => t.id === "todo-batch-B");
+    expect(todoB).toBeDefined();
+    expect(todoB?.status).toBe("failed");
+    expect(todoB?.runIds).toEqual(["run-3"]);
+  });
+});
+

@@ -132,6 +132,12 @@ describe("resolveAgentImageInputSupport", () => {
     }
   });
 
+  it("recognizes Gemini 3.8 Flash and its Antigravity tiered aliases as vision-capable", () => {
+    for (const model of ["gemini-3.8-flash", "gemini-3.8-flash-medium", "gemini-3.8-flash-tiered"]) {
+      expect(resolveAgentImageInputSupport({ provider: "google", model })).toBe(true);
+    }
+  });
+
   it("folds antigravity effort suffix so gemini-3.6-flash-high is treated as vision", () => {
     // agy-flash 等 dispatch agent 存的是带 effort 后缀的 wire id（gemini-3.6-flash-high），
     // catalog 只收基础名 gemini-3.6-flash（hasVision:true）。精确匹配会漏判为无 vision，

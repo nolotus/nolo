@@ -269,6 +269,7 @@ export const buildSystemPromptContext = (options: {
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },
     { id: "core-persona", owner: "agent", cacheScope: "session", content: corePersonaSection },
+    { id: "tool-round-economy", owner: "platform", cacheScope: "session", content: toolSections.toolRoundEconomy },
     { id: "agent-orchestration", owner: "platform", cacheScope: "session", content: toolSections.agentOrchestration },
     { id: "agent-collaboration", owner: "platform", cacheScope: "session", content: toolSections.agentCollaboration },
     { id: "web-access", owner: "platform", cacheScope: "session", content: toolSections.webAccess },

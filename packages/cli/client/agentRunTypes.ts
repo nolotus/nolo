@@ -25,6 +25,7 @@ import type { CliFetchImpl } from "../cliFetch";
 import type { ModelLayerOverride } from "../../agent-runtime/modelLayerOverride";
 import type { ContextBlockScope } from "../../agent-runtime/contextBlockScope";
 import type { TurnTokenUsage } from "./tokenUsage";
+import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 
 export type EnvLike = Record<string, string | undefined>;
 
@@ -319,6 +320,12 @@ export type RunAgentTurnResult = {
    * undefined = 本轮没有平台计费调用（而不是「扣了 0」）。
    */
   turnCredits?: number;
+  /**
+   * 本轮逐次 provider 调用的用量明细（localLoop 的 usageRecords 原样透传）。
+   * turnCredits 只有汇总值；cli-local 前台对话的计费走 fail-open 客户端记账，
+   * 服务端没有逐帧明细，调用方（如 TUI 计费审计）要逐帧对账只能从这里拿。
+   */
+  usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"];
   /** Resolved context window for the agent that actually ran (auto-route aware). */
   contextWindow?: number;
 };

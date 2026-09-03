@@ -757,7 +757,6 @@ const DialogPage = ({
           <span {...stylex.props(dialogPageStyles.contextBannerText)}>{description}</span>
           <button
             type="button"
-            data-hook="dialog-esc-dp-banner-link"
             {...stylex.props(dialogPageStyles.contextBannerLink)}
             onClick={() => {
               logDialogPage("Navigating to inherited source dialog", {

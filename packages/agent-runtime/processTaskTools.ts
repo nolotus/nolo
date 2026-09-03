@@ -29,8 +29,18 @@ import {
 import { truncateToolOutput } from "./workspaceShell";
 import { formatToolOverflowMarker, spillToolOutput } from "./toolSpillStore";
 
-/** Default wait budget for one taskWait call. */
-export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * Default wait budget for one taskWait call — deliberately equal to the ceiling.
+ *
+ * 它曾经是 60s，而上限是 5min。差额不是「更安全」，是钱：一次 tool 往返等于
+ * 一次完整的模型请求（整个对话重发），所以一个跑 4 分钟的构建在 60s 预算下要
+ * 花掉 4 次全量重发，而这 4 次里有 3 次的内容是「还没好」。等待循环放在工具
+ * 里一分钱不要，放在模型手上按轮计费——同样的墙上时间，成本差一个量级。
+ *
+ * 短预算仍然拿得到：显式传一个小 timeoutMs 就是一次快速探活。默认值只决定
+ * 「没想过这件事的调用」落在哪边，而那一边应该是便宜的一边。
+ */
+export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 5 * 60_000;
 /**
  * Hard ceiling for `timeoutMs`. A model asking for "wait an hour" must not be
  * able to pin one agent turn open: the request is clamped and the caller gets

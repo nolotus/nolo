@@ -32,6 +32,8 @@ const MODEL_ABILITY_TABLE: Record<string, ModelAbility> = {
   "claude-sonnet-5": { passAt1: 54, benchmarkScore: 53 },
   "deepseek-v4-flash": { passAt1: 53 },
   "gemini-3.7-flash": { passAt1: 58, benchmarkScore: 65, writingScore: 88 },
+  // TODO(benchmark): gemini-3.8-flash 官方基准快照未出，暂沿用 3.7 分数占位，确认后更新。
+  "gemini-3.8-flash": { passAt1: 58, benchmarkScore: 65, writingScore: 88 },
   "muse-spark-1.1": { passAt1: 53 },
   "gpt-5.4": { passAt1: 52 },
   "gemini-3.6-flash": { passAt1: 49, benchmarkScore: 50 },

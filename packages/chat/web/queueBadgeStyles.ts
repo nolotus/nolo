@@ -29,12 +29,19 @@ export const queueBadgeStyles = stylex.create({
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--nolo-border, rgba(120, 120, 120, 0.35))",
-    backgroundColor: "var(--nolo-surface-2, rgba(120, 120, 120, 0.12))",
+    backgroundColor: {
+      default: "var(--nolo-surface-2, rgba(120, 120, 120, 0.12))",
+      ":hover": "var(--nolo-surface-3, rgba(120, 120, 120, 0.2))",
+    },
     color: "var(--nolo-text-secondary, inherit)",
     fontSize: "0.75rem",
     lineHeight: 1.4,
     cursor: "pointer",
     transition: "background 0.15s ease",
+  },
+  pillRunning: {
+    borderColor: "var(--nolo-accent, #6b8afd)",
+    color: "var(--nolo-accent, #6b8afd)",
   },
   icon: {
     fontSize: "0.7rem",
@@ -98,5 +105,9 @@ export const queueBadgeStyles = stylex.create({
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+  },
+  itemMore: {
+    color: "var(--nolo-text-secondary, rgba(120, 120, 120, 0.8))",
+    fontStyle: "italic",
   },
 });

@@ -223,8 +223,8 @@ describe("compactionShared", () => {
       const metrics = buildCompactionMetrics({
         reason: "context_budget",
         previousSummary: "old summary",
-        msgsToCompress: ["msg1", "msg2"],
-        msgsToKeep: ["msg3"],
+        msgsToCompress: [{ content: "msg1" }, { content: "msg2" }],
+        msgsToKeep: [{ content: "msg3" }],
         newSummary: "new summary",
         estimateTokens,
         estimateMessageTokens,
@@ -241,8 +241,8 @@ describe("compactionShared", () => {
       const metrics = buildCompactionMetrics({
         reason: "manual",
         previousSummary: "",
-        msgsToCompress: ["a"],
-        msgsToKeep: ["b"],
+        msgsToCompress: [{ content: "a" }],
+        msgsToKeep: [{ content: "b" }],
         newSummary: "first",
         estimateTokens,
         estimateMessageTokens,

@@ -30,8 +30,14 @@ import { resolveAgentRequiredPackIds } from "../../ai/tools/agentSkillConfig";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import {
   filterToolNamesForRunKind,
+  hasRunWakeChannel,
   isSubtaskRun,
 } from "../../agent-runtime/agentRunIsolation";
+import {
+  CONTROL_AGENT_RUN_ACTIONS,
+  buildControlAgentRunFunctionSchema,
+} from "../../ai/tools/agent/controlAgentRunTool";
+import { buildStartAgentRunFunctionSchema } from "../../ai/tools/agent/startAgentRunTool";
 import { canonicalizeToolNames } from "../../ai/tools/toolNameAliases";
 import {
   buildNoloWorkspaceOpenAiTools,
@@ -108,10 +114,51 @@ export function buildOpenAiTools(args: {
     }),
     ...buildServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({ toolNames: args.toolNames }),
-    ...prepareTools(
-      ["startAgentRun", "controlAgentRun"].filter((name) => toolNameSet.has(name)),
-    ),
+    ...buildOrchestrationOpenAiTools({
+      toolNameSet,
+      env: args.env,
+    }),
   ];
+}
+
+/**
+ * 编排工具（startAgentRun / controlAgentRun）的 cli-local 投影。
+ *
+ * 两处裁剪，动机不同，别合并：
+ *
+ * - startAgentRun 的 `wait` / `resultMode` **无条件**去掉。cli-local 的执行器
+ *   （createCliStartAgentRunExecutor）永远 spawn 后立即返回，从不读这两个参数。
+ *   留着就是 schema 在替执行器撒谎。这不是策略，是对齐事实。
+ * - controlAgentRun 的 `wait` 动作**按唤醒通道**去掉。执行器是支持它的，但有
+ *   终态唤醒时它是纯冗余：唤醒会把对话接回来。留着的实际代价是模型拿连续
+ *   `wait` 当轮询用，而 wait 超时与 run 进程超时在返回载荷里共用 `status`
+ *   字段，于是「我等超时了」被渲染成「它失败了」。
+ */
+function buildOrchestrationOpenAiTools(args: {
+  toolNameSet: Set<string>;
+  env: EnvLike;
+}) {
+  const names = ["startAgentRun", "controlAgentRun"].filter((name) =>
+    args.toolNameSet.has(name),
+  );
+  if (names.length === 0) return [];
+  const waitCapableActions = CONTROL_AGENT_RUN_ACTIONS.filter(
+    (action) => action !== "wait",
+  );
+  const controlSchema = hasRunWakeChannel(args.env)
+    ? buildControlAgentRunFunctionSchema({ actions: waitCapableActions })
+    : buildControlAgentRunFunctionSchema();
+  const startSchema = buildStartAgentRunFunctionSchema({ supportsWait: false });
+  // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
+  return prepareTools(names).map((tool: any) => {
+    if (tool?.function?.name === "controlAgentRun") {
+      return { ...tool, function: controlSchema };
+    }
+    if (tool?.function?.name === "startAgentRun") {
+      return { ...tool, function: startSchema };
+    }
+    return tool;
+  });
 }
 
 const CLI_DEFAULT_TOOLS = ["exa_search", "fetchWebpage", "ask_user"] as const;

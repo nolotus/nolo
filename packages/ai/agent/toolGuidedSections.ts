@@ -19,7 +19,7 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 观察/停止。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
-1. 盯梢：**异步派发后立即收尾，等终态通知。** 阻塞等待（wait:true / controlAgentRun wait）会冻结对话，仅限：① 预计 <100s 且马上要用结果；② 用户明确要求同步等待或正在与该子任务对话；③ 环境不支持终态唤醒且无并行工作（已异步派出的用 controlAgentRun(action:"wait", runId) 阻塞到终态）。支持终态唤醒的环境（桌面 TUI / web）：多分钟级 run 一律异步派发并立即收尾，终态自动摘要唤醒后继续；串行依赖不是阻塞对话的理由——靠 wake 接力。无终态唤醒的环境（裸 CLI、服务端 runtime）才用 wait 阻塞，同样不要自己循环查。
+1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由——靠 wake 接力。是否允许阻塞等待，由工具表自己回答，不用你判断环境：controlAgentRun 的 action 里有 wait 就说明这里没有终态唤醒通道，可以用它阻塞到终态（同样不要自己循环 wait，那是伪装成等待的轮询）；没有 wait 就说明 run 到终态会自动把对话接回来，派发完直接收尾。
 2. 禁止轮询/禁空转/别复述 status，语义以两个工具的描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：独立子任务一次派完，等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
 4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态，别假设「派发了就在跑」。`;
@@ -51,7 +51,7 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 
 **派发通道**：
 - 目标记录声明了 delegation.serverBase / runtimeServerBase → 自动路由，无需重复填；用户给出可访问 origin 时可传 serverBase 覆盖。勿臆造地址、勿把 localhost 当远端机器。
-- startAgentRun wait:false 只是已启动不表示完成；done/failed 后靠 terminal wake 继续父对话，读 child evidence 决定下一步。阻塞等待仅限：① 预计 <100s 且马上要用 ② 用户明确要求同步（或正在与该子任务对话）③ 环境无终态唤醒且无并行工作；否则异步派发立即收尾。要前台实时发言用 runStreamingAgent。
+- startAgentRun 返回 runId 只是已启动不表示完成；done/failed 后靠 terminal wake 继续父对话，读 child evidence 决定下一步。能不能同步等待看工具表给了什么参数/动作（见「多 Agent 编排」段），没给就是异步派发立即收尾。要前台实时发言用 runStreamingAgent。
 - 多 Agent 协作不限于代码任务：游戏设计、电影策划、写作、运营、研究等异步分工场景同样适用。
 
 **发散 / 会商（系统级决策机制）**：
@@ -154,11 +154,39 @@ const buildAgentConfigMaintenanceInstructions = (agentTools: string[]): string =
 // ============================================================================
 type ToolGuidedSection = {
     id: string;
+    /** 命中任一即注入。与 triggerAnyTool 二选一。 */
     triggerTools: string[];
+    /** 只要 agent 有任何工具就注入（跨工具的通用纪律用它，避免枚举全部工具名）。 */
+    triggerAnyTool?: boolean;
     build: (agentTools: string[]) => string;
 };
 
+/**
+ * 工具轮次经济学（有任何工具就注入）。
+ *
+ * 为什么要专门写一条：一次 tool 往返的成本不是「调了一次工具」，是「回去问了
+ * 一次模型」——整个对话（system prompt + 全部历史 + 全部工具 schema）会被重发
+ * 一遍。所以同一轮里发 5 个工具调用和发 1 个，价格几乎一样；分 5 轮各发 1 个，
+ * 价格是 5 倍。
+ *
+ * 而 loop 早就支持一轮多工具（localLoop 对 tool_calls 逐条执行完才回到模型），
+ * 实测却只有约 11.3% 的轮次用上了、约 20% 的工具调用本可并行——也就是说这条
+ * 能力一直闲着。这段文字就是去把它用起来。
+ */
+const TOOL_ROUND_ECONOMY_INSTRUCTIONS = `--- 工具轮次经济学 ---
+一次 tool 往返 = 一次完整的模型请求（整个对话重发）。同一轮里发多个工具调用几乎不额外花钱，分多轮各发一个则是成倍的钱。
+- **已经知道要做的、互不依赖的调用，在同一轮里一次发完**（读多个文件、查多处引用、几处独立的检查），不要一个一个来回问。
+- 只有「下一步要做什么取决于上一步的结果」时才分轮。
+- 一次调用里能表达的就别拆成多次：用 glob 的花括号组一次匹配多种后缀、用一条命令代替三条、按需要的行范围读文件而不是先全读再回头找。
+- 等待类工具（taskWait 等）按预计耗时一次给足预算，不要用短超时反复续等——那是把循环放在了最贵的地方。`;
+
 const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
+    {
+        id: "toolRoundEconomy",
+        triggerTools: [],
+        triggerAnyTool: true,
+        build: () => TOOL_ROUND_ECONOMY_INSTRUCTIONS,
+    },
     {
         id: "agentOrchestration",
         triggerTools: [
@@ -201,6 +229,7 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
  * menuUsage / webAccess 在两条装配线里互换）。改顺序只改这里。
  */
 export const TOOL_GUIDED_SECTION_ORDER = [
+    "toolRoundEconomy",
     "agentOrchestration",
     "agentCollaboration",
     "webAccess",
@@ -220,7 +249,10 @@ export const TOOL_GUIDED_SECTION_ORDER = [
 export function resolveToolGuidedSections(agentTools: string[]): Record<string, string> {
     const out: Record<string, string> = {};
     for (const section of TOOL_GUIDED_SECTIONS) {
-        if (section.triggerTools.some((t) => agentTools.includes(t))) {
+        const triggered = section.triggerAnyTool
+            ? agentTools.length > 0
+            : section.triggerTools.some((t) => agentTools.includes(t));
+        if (triggered) {
             out[section.id] = section.build(agentTools);
         } else {
             out[section.id] = "";

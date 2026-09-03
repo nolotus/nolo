@@ -19,6 +19,10 @@ const WIRE_PROFILES: Readonly<Record<string, AntigravityWireProfile>> = {
   // The UI labels its effort variants (Low/Medium/High), but the literal
   // -medium/-high ids return 404 from streamGenerateContent.
   "gemini-3.7-flash-tiered": { modelEnum: "MODEL_PLACEHOLDER_M301", maxOutputTokens: 65536 },
+  // Gemini 3.8 Flash 沿用 3.7 的 tiered 兼容策略：仓库内暂无 Antigravity discovery
+  // 证据确认 3.8 的 wire modelEnum，禁止虚构，先只声明同档输出上限；enum 待
+  // discovery 证据到位后补齐。
+  "gemini-3.8-flash-tiered": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-low": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-medium": { maxOutputTokens: 65536 },
   "gemini-3.6-flash-high": { maxOutputTokens: 65536 },
@@ -52,6 +56,15 @@ export function resolveAntigravityWireModel(logicalModelId: string): ResolvedAnt
     ["gemini-3.7-flash-low", "gemini-3.7-flash-medium", "gemini-3.7-flash-high"].includes(lower)
   ) {
     const wireModelId = "gemini-3.7-flash-tiered";
+    return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
+  }
+
+  // Gemini 3.8 Flash：与 3.7 相同的 tiered 折叠（logical id 与 effort 别名统一到 -tiered）。
+  if (
+    lower === "gemini-3.8-flash" ||
+    ["gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high"].includes(lower)
+  ) {
+    const wireModelId = "gemini-3.8-flash-tiered";
     return { wireModelId, profile: WIRE_PROFILES[wireModelId] };
   }
 

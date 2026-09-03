@@ -25,6 +25,7 @@ import {
 } from "./activityIndicator";
 import { createRunRegistryPoller } from "./runRegistryPoller";
 import { createRunCompletionWatcher } from "./runCompletionWatcher";
+import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
 import {
   createTurnRequest,
   type InternalTurnEvent,
@@ -1224,6 +1225,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       flushPendingRender();
       fixedInput.exitOutputMode(buffer, cursorPos);
     };
+    // 唤醒通道在这一行才真正接上——非交互模式（管道 / print）走同一份代码但
+    // 永远到不了这里。工具表靠这个标记决定要不要给出 controlAgentRun 的 wait
+    // 动作：有人能把对话接回来，就不需要冻结对话去等。写在赋值点而不是模块
+    // 顶层，是因为「是不是 TUI」和「有没有投递通道」不是一回事。
+    //
+    // 写进 turn 路径实际读的那个 env 对象（tuiTurnRunner 用
+    // `ctx.options.env ?? process.env`），别写进 effectiveEnv——那是 run 记录
+    // 读取用的快照，构造得更早，也不流向工具表。
+    (options.env ?? process.env)[RUN_WAKE_CHANNEL_ENV] = "1";
     runWakeHandler = (event: InternalTurnEvent | string) => {
       if (done) return;
       if (busy || fixedInput.isPaused()) {

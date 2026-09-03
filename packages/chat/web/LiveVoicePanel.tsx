@@ -218,8 +218,10 @@ export const LiveVoicePanel: React.FC<LiveVoicePanelProps> = ({ agentId, dialogI
       </div>
       <div {...stylex.props(liveVoicePanelStyles.controls)}>
         <button
-          data-hook={`chat-esc-lv-control-btn${isMuted ? " chat-esc-lv-control-muted" : ""}`}
-          {...stylex.props(liveVoicePanelStyles.controlBtn)}
+          {...stylex.props(
+            liveVoicePanelStyles.controlBtn,
+            isMuted && liveVoicePanelStyles.controlBtnMuted,
+          )}
           onClick={() => setIsMuted((muted) => !muted)}
           title={isMuted ? t("liveVoice.unmute", "Unmute") : t("liveVoice.mute", "Mute")}
           aria-label={isMuted ? t("liveVoice.unmute", "Unmute") : t("liveVoice.mute", "Mute")}
@@ -228,8 +230,10 @@ export const LiveVoicePanel: React.FC<LiveVoicePanelProps> = ({ agentId, dialogI
           {isMuted ? <LuMicOff aria-hidden="true" /> : <LuMic aria-hidden="true" />}
         </button>
         <button
-          data-hook="chat-esc-lv-control-btn chat-esc-lv-control-hangup"
-          {...stylex.props(liveVoicePanelStyles.controlBtn)}
+          {...stylex.props(
+            liveVoicePanelStyles.controlBtn,
+            liveVoicePanelStyles.controlBtnHangup,
+          )}
           onClick={onClose}
           title={t("liveVoice.hangUp", "Hang up")}
           aria-label={t("liveVoice.hangUp", "Hang up")}

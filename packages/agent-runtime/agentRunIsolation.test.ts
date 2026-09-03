@@ -7,6 +7,8 @@ import {
   filterToolNamesForRunKind,
   isSubtaskRun,
   subtaskBlockedToolNames,
+  hasRunWakeChannel,
+  RUN_WAKE_CHANNEL_ENV,
 } from "./agentRunIsolation";
 
 describe("isSubtaskRun", () => {
@@ -119,5 +121,21 @@ describe("tool name sets", () => {
     expect(ORCHESTRATION_TOOL_NAMES.has("listAgents")).toBe(true);
     expect(ORCHESTRATION_TOOL_NAMES.has("readAgent")).toBe(true);
     expect(ORCHESTRATION_TOOL_NAMES.has("runStreamingAgent")).toBe(true);
+  });
+});
+
+describe("hasRunWakeChannel", () => {
+  it("只认赋值点写下的显式标记", () => {
+    expect(hasRunWakeChannel({ [RUN_WAKE_CHANNEL_ENV]: "1" })).toBe(true);
+    expect(hasRunWakeChannel({ [RUN_WAKE_CHANNEL_ENV]: "yes" })).toBe(true);
+  });
+
+  it("缺失 / 空串 / \"0\" 都算没有唤醒通道", () => {
+    // 非交互模式（管道 / print）走同一份 TUI 代码但从不写这个标记——
+    // 它必须默认为「没有」，否则那些宿主会连 wait 一起失去。
+    expect(hasRunWakeChannel(undefined)).toBe(false);
+    expect(hasRunWakeChannel({})).toBe(false);
+    expect(hasRunWakeChannel({ [RUN_WAKE_CHANNEL_ENV]: "" })).toBe(false);
+    expect(hasRunWakeChannel({ [RUN_WAKE_CHANNEL_ENV]: "0" })).toBe(false);
   });
 });

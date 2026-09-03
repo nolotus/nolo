@@ -16,6 +16,7 @@
  */
 import type { createInterface } from "node:readline";
 import { runAgentTurn, type RunAgentTurnResult } from "../client/agentRun";
+import { appendTurnBillingAudit } from "../client/turnBillingAudit";
 import {
   createCliLocalRuntimeAdapter,
   type UserChoiceRequest,
@@ -1026,6 +1027,12 @@ export async function runOneAgentTurn(
       // 记账不挂在「有 dialogId / turnTokens」这个条件上：中断的 turn 常常
       // 两者都没有，但前面已经跑掉的 provider 调用照样扣了费。
       ctx.accumulateSessionCredits(runResult.turnCredits);
+      appendTurnBillingAudit({
+        dialogId: runResult.dialogId ?? null,
+        turnCredits: runResult.turnCredits ?? null,
+        usageRecords: runResult.usageRecords,
+        aborted: true,
+      });
       scheduleTitlePatchSync(runResult);
       return { ok: false, aborted: true };
     }
@@ -1093,6 +1100,14 @@ export async function runOneAgentTurn(
     }
     // 同上：失败 / 中断的 turn 也要计进会话累计。
     ctx.accumulateSessionCredits(runResult.turnCredits);
+    appendTurnBillingAudit({
+      dialogId: runResult.dialogId ?? null,
+      turnCredits: runResult.turnCredits ?? null,
+      usageRecords: runResult.usageRecords,
+      // 普通中断（Esc）同样属于「账照记、轮未正常收尾」，审计行标注出来，
+      // 与 1028 行 forceStop 路径及正常完成轮区分开。
+      ...(wasAborted || runResult.streamInterrupted ? { aborted: true } : {}),
+    });
     scheduleTitlePatchSync(runResult);
     // 把失败原因翻成人话：余额 / 额度 / 「对话已保留」/ 「本轮未入档」。
     // 用户预期是：屏幕上看得见的上一句，下一句「继续」不能变成失忆新开场。
