@@ -1,4 +1,211 @@
 
+## 0.38.0
+
+## 0.38.0 (2026-09-03)
+
+### Features
+
+* **desktop:** open external links in the preview split ([a23ea18](https://github.com/nolotus/bun-nolo/commit/a23ea186b3323fc62f8f4d49372edbbb6944834e))
+
+### Bug Fixes
+
+* **billing:** builtin 平台 agent 无视记录价快照并在写端断根 ([978a5dc](https://github.com/nolotus/bun-nolo/commit/978a5dc10fa760095fb81e583dce6d979644181a))
+* **desktop:** keep client alive after post-boot uncaught exceptions ([0f59396](https://github.com/nolotus/bun-nolo/commit/0f593964f698823e2f4e79a8d6346b0df4d78ca1))
+* **desktop:** make dev watchIgnore globs actually match (project-relative) ([de2a5c9](https://github.com/nolotus/bun-nolo/commit/de2a5c902fe3da75d3932efaabca73ec01c8693c))
+* **tui:** 收敛贴图体积根治长上下文 413 (FUNCTION_PAYLOAD_TOO_LARGE) ([71a5ce7](https://github.com/nolotus/bun-nolo/commit/71a5ce728d3279bc856436ffe78b481e036e4786))
+
+
+## 0.37.0
+
+## 0.37.0 (2026-09-03)
+
+### Features
+
+* **agent-runtime:** record tool execution time as observation-only metadata ([6da68c5](https://github.com/nolotus/bun-nolo/commit/6da68c55c73c687b3eae0a99379a678c98990f01))
+* **agent-runtime:** 增加子进程输出流式字节硬上限防爆拦截 ([350c82e](https://github.com/nolotus/bun-nolo/commit/350c82e88da4513f4aa8ae4a395888f4e19e1e73))
+* **agent-runtime:** 联动 workspaceShell 截断与 Spill 溢出落盘保护 ([6846512](https://github.com/nolotus/bun-nolo/commit/6846512bb9d081cf9f0c4097c0aa3cc0fa66fb5a))
+* **agent:** review 阶段划分——实现/测试阶段不被 review 阻塞，提交前循环由用户确认触发 ([6e52b41](https://github.com/nolotus/bun-nolo/commit/6e52b4152c7c22ebd734d209bd5bf013bfe3b255))
+* **agents:** 派发选人收藏优先硬门写入选人契约与 AGENTS.md ([8a5a374](https://github.com/nolotus/bun-nolo/commit/8a5a374fbb57036d9060f5dd23d9585ab5f08adf))
+* **agent:** 编码任务分档改为两账判据，review 独立性放宽为与执行者不同 ([c817e35](https://github.com/nolotus/bun-nolo/commit/c817e35f4b5d6a27626e082c4f37865a59e24a79))
+* **ai:** add Gemini 3.8 OAuth model support ([2338cbc](https://github.com/nolotus/bun-nolo/commit/2338cbcd008c6c1fc47b1bed3c0c382d05637d42))
+* **ai:** 增加 projectTodosFromRuns 纯投影函数 ([1f87ea2](https://github.com/nolotus/bun-nolo/commit/1f87ea2261bd7a4a8c1e92fc9739b9ae0067d694))
+* **chat:** add AICSS image generation progress card ([8bb34c0](https://github.com/nolotus/bun-nolo/commit/8bb34c0ad70f8f88a8adb52a4616dd9dda13e002))
+* **chat:** AICSS 风格 thinking/orb/diff 视觉升级 ([7e507f1](https://github.com/nolotus/bun-nolo/commit/7e507f17c346f92eec89481dcf4179edc46aa68b))
+* **chat:** connect AICSS streaming thinking state ([9a4ed14](https://github.com/nolotus/bun-nolo/commit/9a4ed14aae3c99b60a8d13dab09b96a6c48796d0))
+* **chat:** 后台 run 终态唤醒不再伪造用户消息，落 wakeEvents 渲染系统行 ([86eff1b](https://github.com/nolotus/bun-nolo/commit/86eff1bd7f2e5261413e406ed02e879fafd6823b))
+* **cli:** add turn-level billing audit log for cli-local TUI dialogs ([06d9aee](https://github.com/nolotus/bun-nolo/commit/06d9aee1ca8272c4ef2f179b676488e396d5e50c))
+* **cli:** normal-mode tool rows show duration and secret-gated gists ([396d0e9](https://github.com/nolotus/bun-nolo/commit/396d0e93613e65c3767cdd6e077f538100accc8b))
+* **cli:** readPastedText 续读 footer 在剩余多页时给出并行切段提示 ([d29aea5](https://github.com/nolotus/bun-nolo/commit/d29aea5a3b96313e04c4ed9cdd509c8c4799de11))
+* **cli:** Run 行 gist 改全命令安全投影 ([c066b51](https://github.com/nolotus/bun-nolo/commit/c066b517367750d4f7a63ee33a9aad6f20b4f602))
+* **plaza:** 下架 Claude 系模型，兼容路由统一指向 glm-5-3-flash ([09b55e8](https://github.com/nolotus/bun-nolo/commit/09b55e83097c19c2bb3456b2114bd20433552790))
+* **server:** T2 close the loop - consume CallPlan in chat-proxy role ([aee3877](https://github.com/nolotus/bun-nolo/commit/aee38772c255115b0ce87d7f1d649ed952b5d221))
+* **stylex:** add shorthand and JSX collision guards ([ed75d28](https://github.com/nolotus/bun-nolo/commit/ed75d28cf609c051214c47b96b32d2add5bd7a17))
+* **stylex:** runtime closure - typecheck:web gate, boundary guard, browser smoke ([9ced5bd](https://github.com/nolotus/bun-nolo/commit/9ced5bd9e6491c774f6a44365a26235158564cd2))
+* **tui:** add /cd command to switch working directory ([6b7d6b8](https://github.com/nolotus/bun-nolo/commit/6b7d6b89cd1233f80b434cdb14f77260f622e491))
+* **tui:** fold consecutive tool calls into detail trees (Run/Read/Search/Fetch) ([a9907dc](https://github.com/nolotus/bun-nolo/commit/a9907dcac3808a15550c70d07c22af694b8359ce))
+* **tui:** make /cd actually usable — switch message, path completion, cd - ([0f53c53](https://github.com/nolotus/bun-nolo/commit/0f53c53d2468e282d93b83ee34820a28f1b4f5bd))
+* **tui:** merge tool display into single mode with gist and folding ([5ee8fae](https://github.com/nolotus/bun-nolo/commit/5ee8fae691496005bb3189ed8b6444f3d3945772))
+* **tui:** show actionable tool details and edit diffs ([7e017b2](https://github.com/nolotus/bun-nolo/commit/7e017b29643cf3df228c64668f36ca63ae0f33f6))
+* **tui:** show tool activity details ([32b5f9f](https://github.com/nolotus/bun-nolo/commit/32b5f9f2dc9a06f41266f285e38e09c07ed9ba01))
+* **tui:** 写文件确认门补齐逃生口——/auto 覆盖 + NOLO_CLI_WRITE_GATE ([9e1d9c7](https://github.com/nolotus/bun-nolo/commit/9e1d9c7aa5a4e4ceecc5fdf1526e24b038228582))
+* **tui:** 后台 run 终态唤醒直接注入当前 agent loop，不再排队 ([c449feb](https://github.com/nolotus/bun-nolo/commit/c449feb6dabf5e8e428696ce168cd2dc1d2ebe1e))
+* **tui:** 显示选择收敛——干掉 /tools /density /thinking，唯一默认体验+环境变量兜底 ([0f1d81b](https://github.com/nolotus/bun-nolo/commit/0f1d81b658dd28bf1c89d6d38de20ef9b31542a9))
+* **tui:** 粘贴体验优化——附件条+Backspace撤销、macOS osascript 剪贴板兜底、临时文件清扫、折叠 chip 首行预览 ([d6fefc7](https://github.com/nolotus/bun-nolo/commit/d6fefc7a0a74461e5c3f77a8d2fe1e21535c7bdb))
+* **tui:** 默认显示打磨——问答成组间距、thinking 痕迹、工具行降噪 ([4502342](https://github.com/nolotus/bun-nolo/commit/450234264ce752611c3cfebfd4f15d5edb945909))
+* **web:** pricing 页 StyleX 改版，价格表新增缓存命中价列 ([617a106](https://github.com/nolotus/bun-nolo/commit/617a106e10a0e74faed460ec596b25d2ede4de16))
+
+### Bug Fixes
+
+* **agent-runtime:** align auto-dialog continuation with quick-chat first turn (nolo) ([bc1b142](https://github.com/nolotus/bun-nolo/commit/bc1b142d3d7de3a5d139615bea15dd2a3efd8234))
+* **agent-runtime:** record gemini cache hits and cli-local stable prefix hash in token usage ([94bc052](https://github.com/nolotus/bun-nolo/commit/94bc052ca1e07dd41308cf6c56c5379d54939a22))
+* **agent-runtime:** Responses wire 保留缓存 token 细分字段 + 统一缓存字段别名读取 ([724de83](https://github.com/nolotus/bun-nolo/commit/724de83f2c1cc99f038995357f58e9b59b431b78))
+* **agent:** agentRunHosted 模型平台 key 缺失快速失败 + Claude 兼容计价兜底 ([7b1ad1d](https://github.com/nolotus/bun-nolo/commit/7b1ad1d8d70745dd1bb0a8d6e02a3dc5dccbbbd1))
+* **agent:** downgrade unparsable tool_call arguments before send to un-deadlock dialogs ([f14cb88](https://github.com/nolotus/bun-nolo/commit/f14cb881f96e78e48dca825b59bf05f89150a2f4))
+* **agent:** enforce tool_call args size discipline to prevent stream truncation ([79239b6](https://github.com/nolotus/bun-nolo/commit/79239b65a26019bccab09fe473a01b27403c4dfd))
+* **agent:** intercept unparsable tool_call arguments before executor with explicit diagnosis ([c120c4e](https://github.com/nolotus/bun-nolo/commit/c120c4eb8e639647a87487d20b6812f0fb9d5696))
+* **agents:** correct parallel dialog guidance and require fee consent ([732a55e](https://github.com/nolotus/bun-nolo/commit/732a55ed74da8ac2e14c98dc896633275223fa9d))
+* **ai:** request stream usage for kimi-code and custom kimi endpoints ([c4f0ece](https://github.com/nolotus/bun-nolo/commit/c4f0ecec7aab31d3555112ebf8cb57ba6a1d1668))
+* **ai:** 修正 GLM 5.3 Flash「思考不可关闭」的错误断言并透出可关闭口径 ([2fa6fef](https://github.com/nolotus/bun-nolo/commit/2fa6fef0f4aba32df6e373a2bbbba822c3b7e708))
+* **billing:** baseten GLM flash fallback gating, legacy cache tokens, NaN guard ([4885ddc](https://github.com/nolotus/bun-nolo/commit/4885ddca0415792657ac9f1921c43e9ee218c2d0))
+* **billing:** clamp cache_read 超界负成本，防止 sanitizeCost 归零免单 ([e2730bf](https://github.com/nolotus/bun-nolo/commit/e2730bf2fd158c07fdd94bc21cae250097214fc5))
+* **billing:** price provider fallback calls separately ([dffd72f](https://github.com/nolotus/bun-nolo/commit/dffd72f48e3ade4687cb6a8ed66c256759e165ae))
+* **billing:** token 扣费锁粒度改 per-user + ledger conflict 重试 + CLI 402 重试 ([fb7d705](https://github.com/nolotus/bun-nolo/commit/fb7d70535439f0908915c12d0fdf7254ab6b7a97))
+* **chat:** add missing getActiveDialogAgentId import in useMessageInputSend ([4c7a13d](https://github.com/nolotus/bun-nolo/commit/4c7a13df46603c5c3bfe7ae23841028ecd25d6e3))
+* **chat:** add missing withLiteralClass import to VoiceInputButton ([fd7b8d1](https://github.com/nolotus/bun-nolo/commit/fd7b8d12a466d24ac56b0bf1fd52b5f8091ac44e))
+* **chat:** wire tool card StyleX styles and keep DOM class anchors ([15dc5e0](https://github.com/nolotus/bun-nolo/commit/15dc5e0ccbaec90fa97efef98855d984b9f1cd71))
+* **chat:** 思考区对齐 AICSS thinking-reasoning 交互 ([33d44e4](https://github.com/nolotus/bun-nolo/commit/33d44e49150f2a44a44aedec0e772b901acf0f3c))
+* **cli:** agent run 结果契约——status 与 exitCode 永远一致，前台超时生效 ([1d1a46e](https://github.com/nolotus/bun-nolo/commit/1d1a46e4faed1b8a34a17802306fc6ae51c781a3))
+* **cli:** clientLogger 循环引用误报修复与构建链路加固——codex 会话遗留改动收编 ([7a25a81](https://github.com/nolotus/bun-nolo/commit/7a25a81d1ef5cdeea9b0cfea53443199039d4112))
+* **cli:** remove pino from published runtime ([1534e25](https://github.com/nolotus/bun-nolo/commit/1534e254187a4e0b3843ae877e3ccfb50f9d8aed))
+* **cli:** show safe command prefixes in TUI runs ([24a1e2a](https://github.com/nolotus/bun-nolo/commit/24a1e2ab4b1dc065df7993abc12b21ee235f6553))
+* **cli:** surface 429 cooldown in agent list and gate HTTP dispatch locally ([a5fab6d](https://github.com/nolotus/bun-nolo/commit/a5fab6d8cb21bc515020bd79200923f3baf4453e))
+* **cli:** TUI 工具表去掉 controlAgentRun 的 wait 动作与 startAgentRun 的空头同步参数 ([1ec83c4](https://github.com/nolotus/bun-nolo/commit/1ec83c48543627222ea42554824751552f226fa2))
+* **cli:** 合入 fix/stream-stall 子 run 结算修复 ([6b71d1b](https://github.com/nolotus/bun-nolo/commit/6b71d1b7d8a2ac39c98a5342b9f9ee4ba5553108))
+* **cli:** 正文完整的收尾帧缺失不再把子 run 结算为 failed ([2df8b0c](https://github.com/nolotus/bun-nolo/commit/2df8b0cc5588dbf0365482a2a13faf17ce896036))
+* **cli:** 确认门鼠标误取消 + n 键失效 ([a3030e4](https://github.com/nolotus/bun-nolo/commit/a3030e4cd318b017e90c166d924438caf251455b))
+* **database:** hydrate server record on patch local miss ([8581452](https://github.com/nolotus/bun-nolo/commit/85814525bb8fed2f8179a32ee6b637a44515d6fc))
+* **database:** patch hydrate 前重读本地，避免覆盖并发写入 ([074020f](https://github.com/nolotus/bun-nolo/commit/074020f224b3b2e1a1a91b8ee5045ae2ec345228))
+* **deploy:** point chat-proxy's CallPlanClient at core (NOLO_CORE_INTERNAL_URL) ([64a587b](https://github.com/nolotus/bun-nolo/commit/64a587b869b75ed436ae88ef05027b9ea91ce583))
+* **deps:** packages/app 显式声明 date-fns-tz/date-fns 直接依赖 ([181d7e0](https://github.com/nolotus/bun-nolo/commit/181d7e0d18094364e4917a6497bc4a9524815726))
+* **desktop:** harden electrobun windows core port patch ([dde9de8](https://github.com/nolotus/bun-nolo/commit/dde9de87dba97577e798313b38dd93f966973c67))
+* **desktop:** shift Windows ElectrobunCore websocket base port to 50001 ([0da7ffd](https://github.com/nolotus/bun-nolo/commit/0da7ffd8cf2aeceec03f728b7a3512f57c895612))
+* **desktop:** 修复 stable 打包白屏——embedded server 静态路由与动态 HTML 壳 ([3ac36d3](https://github.com/nolotus/bun-nolo/commit/3ac36d367bea6ae672e2a7dd8410aef84ade2980))
+* **desktop:** 修复所有 trusted-desktop API 403——embedded server 补全局 server 实例注入 ([d0af3e8](https://github.com/nolotus/bun-nolo/commit/d0af3e8e10284bf01155752042848fe8e4f36568))
+* **dev:** resolve .cloud/.local condition variants in SSR bundle alias ([c904992](https://github.com/nolotus/bun-nolo/commit/c9049921c4e0acb86913f0f235e2f994e0355c33))
+* **dev:** stylex 编译管线 4 处入口对齐 enableMediaQueryOrder:false ([bcfaf25](https://github.com/nolotus/bun-nolo/commit/bcfaf25d2748a8a9bbe8f31465a2f0c8e7fe5342))
+* **dev:** StyleX 编译通道提为顶层 preload + cloudLazy 移除 dev 空壳早退 ([ee843c2](https://github.com/nolotus/bun-nolo/commit/ee843c20690c9e7a26fc9c725ba71f637baaef50))
+* **drain:** 浏览器顶层导航撞 drain 窗口改返回自动重试页，红点刷新先探测再 reload ([29121a3](https://github.com/nolotus/bun-nolo/commit/29121a31d8bfac544a034d2be9f2129dfacd254a))
+* **memory:** add similar-memory soft dedupe to stop version pile-up on write ([9956a8e](https://github.com/nolotus/bun-nolo/commit/9956a8ea026168476b715bf09bb7a79ed0460100))
+* **memory:** overlay 预算提到 3200 并把默认值收敛为单一真值源 ([0352940](https://github.com/nolotus/bun-nolo/commit/0352940cf59c42972f7f7ef3cc8b977e4a9bd414))
+* **memory:** 修复 queryMemory 从不下发、procedural 错分与 user 偏好被挤占 ([0cbbd54](https://github.com/nolotus/bun-nolo/commit/0cbbd5481ece7173ca266d5a89025d0e94853ebf))
+* **memory:** 合入 fix/memory-budget overlay 预算与真值源收敛 ([2a3adaa](https://github.com/nolotus/bun-nolo/commit/2a3adaa0bfa5a784b0dd12aaeb7f47997935914f))
+* **memory:** 合入 fix/memory-loading 记忆加载机制优化 ([249841e](https://github.com/nolotus/bun-nolo/commit/249841e67e6cb2dfd0843655ca191f76b6614750))
+* **memory:** 合入 fix/memory-p0 记忆层三处结构性修复 ([f7234b6](https://github.com/nolotus/bun-nolo/commit/f7234b65956e78d69c53abcb6432276770273a5f))
+* **memory:** 预算不足时截断保留而非静默丢弃，并降权僵尸记忆 ([3dcee75](https://github.com/nolotus/bun-nolo/commit/3dcee75173e413cb6ddc148297b6e016f28bd2f0))
+* **realtime:** direct fallback without BroadcastChannel, reset backoff on connect ([ec5a412](https://github.com/nolotus/bun-nolo/commit/ec5a4124f7eff5295d6b8430a4f3337b0273bfad))
+* **realtime:** per-key SSE cursor + Effect realtime kernel ([e254e9b](https://github.com/nolotus/bun-nolo/commit/e254e9b8c6e0def93fc5cbe78c5bc66cab8ffd33))
+* **release:** stable 通道污染自愈 + Linux 桌面构建依赖安装 ([ac09403](https://github.com/nolotus/bun-nolo/commit/ac09403a48cc78a39fd12bb12d75d9dd40672548))
+* **render:** break docStore -> spaceSlice circular static import ([cefea19](https://github.com/nolotus/bun-nolo/commit/cefea19dbd35a88ad305e8b1b4fc7c226265592b))
+* **render:** 拆出 toastStore 纯 TS 模块——修复 run worker/CLI 裸 bun 崩溃 ([6b4d319](https://github.com/nolotus/bun-nolo/commit/6b4d319ac446b6d0ea92ad55ffa0505eeb314df8))
+* **server:** accept FILE metadata writes on write route with sanitization ([91dac8f](https://github.com/nolotus/bun-nolo/commit/91dac8ff0548232a7732b094e482fb7ae47ad8ce))
+* **server:** dialog 投影在 dialog 记录缺失时不再写幂等 marker ([75bef07](https://github.com/nolotus/bun-nolo/commit/75bef0736fe139abc07eb51cc089a322e86105f0))
+* **server:** fallback GLM Flash to Baseten ([9ae2f7b](https://github.com/nolotus/bun-nolo/commit/9ae2f7bd1030500a0d161fe1b6e8eb4f66fb56c7))
+* **server:** GLM 5.3 Flash connect-timeout 时自动切换 baseten fallback ([ef7584c](https://github.com/nolotus/bun-nolo/commit/ef7584cd9f5ef2ed3c99549b6d3f21dc248a964a))
+* **server:** 修复增量引入的 typecheck:server 阻塞项 ([f8d6aab](https://github.com/nolotus/bun-nolo/commit/f8d6aab185a912349158791113518f4a6d694863))
+* **server:** 按 RunInfra 契约处理上游错误与幂等重试 ([d576b46](https://github.com/nolotus/bun-nolo/commit/d576b46471508891f2586e252b4fb6e3153409f2))
+* **stylex:** convert silent-drop shorthand properties to longhand ([0f03911](https://github.com/nolotus/bun-nolo/commit/0f039116e86c5fba9cb0af241c62689a72ae6c70))
+* **stylex:** resolve props clobbering, dead hooks, and inline style dual control ([e53e5db](https://github.com/nolotus/bun-nolo/commit/e53e5db55737dfd7a0739312ed661c2e4ca38cbb))
+* **stylex:** separate BaseTable className from rest props; pin guard baselines ([3f08c9c](https://github.com/nolotus/bun-nolo/commit/3f08c9c1f36c52eea7753360a4c7929233295081))
+* **table:** 中文输入法选字 Enter 不再误触发表格编辑指令 ([66c6f2f](https://github.com/nolotus/bun-nolo/commit/66c6f2f06beeda8e0e1a709d0ef904f8f5e8daeb))
+* **table:** 无显式排序时按最近活动置顶，修复右键插入行落错位置 ([e82b66d](https://github.com/nolotus/bun-nolo/commit/e82b66d3bee8ef0c33ee8dc5d1b7c8e8fcf087aa))
+* **table:** 表格区域撑满页面底部并移除底部「新增一行」，样式迁移至 StyleX ([23840bd](https://github.com/nolotus/bun-nolo/commit/23840bd3fca0ecfaaf0bc009031ee8af76e5bd68))
+* **tui:** backfill parentDialogId for runs spawned in a session's first turn ([321a653](https://github.com/nolotus/bun-nolo/commit/321a653797fdf21737d0f518b6333afcf55f2cd8))
+* **tui:** 写文件确认门接入 dialogHost，修复弹窗被重绘擦掉导致 turn 假死 ([522659a](https://github.com/nolotus/bun-nolo/commit/522659a91ad59b909ce3b57fed4f996955f96dfb))
+* **tui:** 状态行 ⚡ 积分随行修复——fold 收敛重建白名单，run 级积分跨轮累计 ([8537c33](https://github.com/nolotus/bun-nolo/commit/8537c3339c8dd0dcf761114de0d048b99612add5))
+* **tui:** 状态行积分改为会话累计 + 对话基数 seed，只认平台计费帧 ([3b90cfe](https://github.com/nolotus/bun-nolo/commit/3b90cfe2f2d011bac28beca6fa3c376ab3aca290))
+* **tui:** 补齐 tui-paste-optimize 合并时丢失的 readlineWorkspace 集成点 ([7a6f709](https://github.com/nolotus/bun-nolo/commit/7a6f7098e577537f2b9de495ee337cc115d64975))
+* **ui:** hide site footer on logged-in home ([19ecae4](https://github.com/nolotus/bun-nolo/commit/19ecae4ca0f0460bba81946d754937b057d0dd6b))
+* **ui:** toast loading icon needs animationName longhand ([1aa2d8e](https://github.com/nolotus/bun-nolo/commit/1aa2d8ebeeecfed166d66074031623d6e3f26a55))
+* **web:** 补回 pricing 页 StyleX 迁移漏掉的容器/表格/卡片层样式 ([07895bf](https://github.com/nolotus/bun-nolo/commit/07895bf12291372e3908cc2b6556edb9fd720d54))
+
+### Performance Improvements
+
+* **agent-runtime:** add --long loop bench and record loop/TUI/persistence baselines ([8dd034c](https://github.com/nolotus/bun-nolo/commit/8dd034c7f8aa8abfa59de089313f3d060fa58528))
+* **agent-runtime:** clamp hybrid remote-read fallback with timeout ([ac227bc](https://github.com/nolotus/bun-nolo/commit/ac227bc2bd1be4df968de99673b30035e77f2178))
+* **agent-runtime:** drop blocking git diff spawns from writeFile ([5aac982](https://github.com/nolotus/bun-nolo/commit/5aac98204c15beb26df17a9e741ed6451a087980))
+* **agent-runtime:** throttle spill cleanup per directory ([6c73f37](https://github.com/nolotus/bun-nolo/commit/6c73f375055aa4f51f955ac89f831af5a02f94f2))
+* **agent-runtime:** 削减 tool 往返轮次——轮次经济学纪律、taskWait 默认预算、删除占用误判 ([9f2e036](https://github.com/nolotus/bun-nolo/commit/9f2e036cab51e02692a21d0387c362485a6555e7))
+* **agent-runtime:** 平台 chat 请求带稳定 prompt_cache_key（多副本缓存亲和） ([9e93465](https://github.com/nolotus/bun-nolo/commit/9e934653a49e3be9b1598bbdc1b482fe547af08d))
+* **agent:** move turn-scope dynamic blocks out of system for upstream prompt cache ([bb63cfe](https://github.com/nolotus/bun-nolo/commit/bb63cfe481448b81df782ddc01eec818d910c593))
+* **agents:** default glm-5-3-flash seed to reasoning_effort=low ([cc84c46](https://github.com/nolotus/bun-nolo/commit/cc84c46a4726461fd4e9582b83de992dc47e743e))
+* **cli:** add external stage-differential probe for alpha server timing ([a34abe0](https://github.com/nolotus/bun-nolo/commit/a34abe0e06213942cf9b325325cc096fefc15c1d))
+* **cli:** add LLM round-trip stage breakdown probe ([b84cb59](https://github.com/nolotus/bun-nolo/commit/b84cb59e0c2d817478395e80d193073f8bcd58d6))
+* **cli:** add loop-shaped upstream prefix cache probe ([c7bbd67](https://github.com/nolotus/bun-nolo/commit/c7bbd67ad60f80eef6ce16b8ee1795b16083a3de))
+* **cli:** add TTFT tail probe; measurement refutes the heavy-tail hypothesis ([51505db](https://github.com/nolotus/bun-nolo/commit/51505dbfbc3c83ecbfb1ad13719a342325000207))
+* **cli:** incremental streaming turn render in TUI history ([f9859fc](https://github.com/nolotus/bun-nolo/commit/f9859fc30592139c275774ceae4c9729db9277f4))
+* **server:** 流式路径排除出 Caddy encode + 平台流式请求放弃压缩协商 ([57bcba5](https://github.com/nolotus/bun-nolo/commit/57bcba57ed9758bd6c92d2845fa64928040d8e62))
+
+
+## 0.36.4
+
+## 0.36.4 (2026-08-31)
+
+### Bug Fixes
+
+* **deps:** packages/app 显式声明 date-fns-tz/date-fns 直接依赖 ([459ba02](https://github.com/nolotus/bun-nolo/commit/459ba0262b92260fbc02db019429d99b8b7f2129))
+
+
+## 0.36.3
+
+## 0.36.3 (2026-08-31)
+
+### Bug Fixes
+
+* **desktop:** 修复所有 trusted-desktop API 403——embedded server 补全局 server 实例注入 ([23247c7](https://github.com/nolotus/bun-nolo/commit/23247c79aa5ffa66c9bd3e3b4f49941086ed61ef))
+
+
+## 0.36.2
+
+## 0.36.2 (2026-08-31)
+
+### Bug Fixes
+
+* **release:** stable 通道污染自愈 + Linux 桌面构建依赖安装 ([4d7f352](https://github.com/nolotus/bun-nolo/commit/4d7f3526dbaf2cc5e219843c8ae3e951a7b379b5))
+
+
+## 0.36.1
+
+## 0.36.1 (2026-08-31)
+
+### Bug Fixes
+
+* **desktop:** 修复 stable 打包白屏——embedded server 静态路由与动态 HTML 壳 ([6966c81](https://github.com/nolotus/bun-nolo/commit/6966c81c0c5678860266c1b2df987c88fe3ea259))
+
+
+## 0.36.0
+
+## 0.36.0 (2026-08-31)
+
+### Features
+
+* **chat:** 标题模型切换平台托管 Nemotron 3.5 Lightning 30B 并优化成本与稳定性 ([9495868](https://github.com/nolotus/bun-nolo/commit/94958683ae541e6928379fd43706cd67c99ccc4c))
+* **chat:** 标题模型定为 glm-5-3-flash，json mode 泛化为标题路径统一实现 ([256d5c6](https://github.com/nolotus/bun-nolo/commit/256d5c68931467b6c6ff1221418d4d64aa900a1c))
+* **runtime:** 会话首写文件确认门 ([21322a0](https://github.com/nolotus/bun-nolo/commit/21322a0606cd47f57001fa0fd71e539eccfa7ce2))
+* **runtime:** 会话首写文件确认门——TUI 可达 + 会话级批准态 ([1de669a](https://github.com/nolotus/bun-nolo/commit/1de669a8d1050e626496dccdfd9e17b23700c52f))
+* **runtime:** 写入门第三轮收口——Cursor 穿透 + readline 语义 + 测试补全 ([c06e7eb](https://github.com/nolotus/bun-nolo/commit/c06e7ebda4a7773bcad29feaf464589dc5cfabcb))
+
+### Bug Fixes
+
+* **auth:** repair 判定对齐 audit 口径，消除 deleted-user projection 盲区 ([54829bb](https://github.com/nolotus/bun-nolo/commit/54829bba7479fb6132a3f511f140be34b7eaa1f2))
+* **chat:** 标题 max_tokens 提至 3072，适配 Nemotron 强制 thinking ([1241aea](https://github.com/nolotus/bun-nolo/commit/1241aeaf00b7b2acdce4d5be647ab02a95a16f41))
+* **release:** 恢复被并行 release 整合误降级的版本文件至 0.53.0-alpha.1 ([1d3f985](https://github.com/nolotus/bun-nolo/commit/1d3f985266125c89f4b8018de6c751544f7afb74))
+* **tui:** normal 模式泄露修复全链收口——transcript/dock/start 卡三路脱敏 ([02cb670](https://github.com/nolotus/bun-nolo/commit/02cb6705e533107008a8f7f96b64031014de4604))
+
+### Performance Improvements
+
+* **chat:** 标题 Nemotron 启用 json mode，跳过 thinking 提速约 5 倍并降耗约 100 倍 ([0f0cef7](https://github.com/nolotus/bun-nolo/commit/0f0cef783ffbf417038c21ad3f4ebe22bc1b64c8))
+
+
 ## 0.35.0
 
 ## 0.35.0 (2026-08-31)
