@@ -15,10 +15,19 @@ import type { ToolCallPresentation } from "./toolCallPresentation";
  * toggle always wins afterwards — same rule as buildActivityTimeline actions.
  * No spinning loaders; terminal states use the shared StatusIcon dot.
  *
- * Flex contract (P0.5): status icon / verb / context / diff meta / duration /
- * chevron keep intrinsic width (flexShrink 0); the target segment is the only
- * flexible child (flex:1 + min-width:0) and clips for real via the shared
- * toolStyles.truncate entry (u-truncate stays as a legacy DOM anchor).
+ * Flex contract (P1): status icon / verb / diff meta / duration / chevron keep
+ * intrinsic width; the target is the MAIN flexible column (flex:1 +
+ * min-width:0, clips for real via the shared toolStyles.truncate entry;
+ * u-truncate stays as a legacy DOM anchor). Context is the weakest signal:
+ * shrinkable under an explicit max-width cap, hidden on very narrow
+ * viewports. Visual hierarchy: status → verb → target (primary) → context
+ * (muted) → meta/duration/chevron.
+ *
+ * Interaction: the header is its own hover/focus unit —
+ * messages-esc-tool-call-row-header (light hover + focus-visible ring in
+ * messagesStylexEscapeHatch.css) — deliberately not the legacy timeline
+ * action-row hook, so the old timeline hover can never override the flat
+ * row's own states.
  */
 export interface ToolCallRowProps {
   presentation: ToolCallPresentation;
@@ -59,7 +68,7 @@ export const ToolCallRow = memo(
         <button
           type="button"
           data-hook="messages-esc-tool-call-row-header"
-          {...withLiteralClass("tool-call-row__header tr-action-row", toolStyles.actionRow)}
+          {...withLiteralClass("tool-call-row__header", toolStyles.rowHeader)}
           onClick={presentation.expandable ? () => setUserExpanded(!expanded) : undefined}
           aria-expanded={presentation.expandable ? expanded : undefined}
           aria-controls={presentation.expandable ? detailId : undefined}
@@ -72,8 +81,8 @@ export const ToolCallRow = memo(
           />
           <span
             {...withLiteralClass(
-              "tool-call-row__label u-truncate",
-              toolStyles.rowLabel
+              "tool-call-row__verb u-truncate",
+              toolStyles.rowVerb
             )}
           >
             {presentation.verb}
@@ -82,7 +91,8 @@ export const ToolCallRow = memo(
             <span
               {...withLiteralClass(
                 "tool-call-row__context u-truncate",
-                toolStyles.rowContext
+                toolStyles.rowContext,
+                toolStyles.truncate
               )}
             >
               {presentation.context}
@@ -91,7 +101,7 @@ export const ToolCallRow = memo(
           {presentation.target ? (
             <span
               {...withLiteralClass(
-                "tool-call-row__detail u-truncate",
+                "tool-call-row__target u-truncate",
                 toolStyles.rowTarget,
                 toolStyles.truncate
               )}
@@ -124,7 +134,7 @@ export const ToolCallRow = memo(
             <span
               aria-hidden="true"
               data-hook="messages-esc-tool-call-row-chevron"
-              {...withLiteralClass("tool-call-row__chevron tr-action-chevron", toolStyles.actionChevron)}
+              {...withLiteralClass("tool-call-row__chevron", toolStyles.actionChevron)}
             >
               {expanded ? <LuChevronDown size={13} /> : <LuChevronRight size={13} />}
             </span>
@@ -133,7 +143,7 @@ export const ToolCallRow = memo(
         {expanded && (
           <div
             id={detailId}
-            {...withLiteralClass("tool-call-row__body tr-action-detail", toolStyles.actionDetail)}
+            {...withLiteralClass("tool-call-row__body", toolStyles.rowDetail)}
           >
             <ToolMessageContent
               toolName={message?.toolName}

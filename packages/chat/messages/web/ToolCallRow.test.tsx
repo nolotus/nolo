@@ -71,8 +71,8 @@ describe("ToolCallRow", () => {
     expect(header?.tagName).toBe("BUTTON");
     expect(header?.getAttribute("type")).toBe("button");
     // Contract fields drive the row: verb + target + grounded context + duration.
-    expect(container.querySelector(".tool-call-row__label")?.textContent).toBe("读取");
-    expect(container.querySelector(".tool-call-row__detail")?.textContent).toBe("README.md");
+    expect(container.querySelector(".tool-call-row__verb")?.textContent).toBe("读取");
+    expect(container.querySelector(".tool-call-row__target")?.textContent).toBe("README.md");
     expect(container.querySelector(".tool-call-row__context")?.textContent).toBe("L3–L7");
     expect(container.querySelector(".tool-call-row__duration")?.textContent).toBe("450ms");
     // Raw API names never leak.
@@ -106,34 +106,44 @@ describe("ToolCallRow", () => {
         .find((c) => c.startsWith("tool-call-row__"))
     );
     const position = (name: string) => segments.findIndex((c) => c === name);
-    expect(position("tool-call-row__label")).toBeGreaterThanOrEqual(0);
+    expect(position("tool-call-row__verb")).toBeGreaterThanOrEqual(0);
     expect(position("tool-call-row__context")).toBeGreaterThan(
-      position("tool-call-row__label")
+      position("tool-call-row__verb")
     );
-    expect(position("tool-call-row__detail")).toBeGreaterThan(
+    expect(position("tool-call-row__target")).toBeGreaterThan(
       position("tool-call-row__context")
     );
     expect(position("tool-call-row__duration")).toBeGreaterThan(
-      position("tool-call-row__detail")
+      position("tool-call-row__target")
     );
     expect(position("tool-call-row__chevron")).toBeGreaterThan(
       position("tool-call-row__duration")
     );
-    // Truncation classes stay wired on both text segments.
-    expect(header!.querySelector(".tool-call-row__detail")?.className).toContain(
+    // Truncation classes stay wired on every text segment: target / context
+    // both clip for real (P1 context is shrinkable), verb keeps u-truncate.
+    expect(header!.querySelector(".tool-call-row__target")?.className).toContain(
       "u-truncate"
     );
-    expect(header!.querySelector(".tool-call-row__label")?.className).toContain(
+    expect(header!.querySelector(".tool-call-row__context")?.className).toContain(
+      "u-truncate"
+    );
+    expect(header!.querySelector(".tool-call-row__verb")?.className).toContain(
       "u-truncate"
     );
 
-    // Style contract (P0.5), asserted on the style/row SOURCE: bun's stylex
+    // Style contract (P1), asserted on the style/row SOURCE: bun's stylex
     // pipeline compiles create() into hashed class maps at test time and
     // never injects the stylesheet, so the uncompiled declarations are the
-    // stable truth. Fixed segments never shrink.
-    expect(stylesSource).toMatch(/rowLabel: \{\s*flexShrink: 0,/);
-    expect(stylesSource).toContain("rowContext: { flexShrink: 0 }");
-    expect(stylesSource).toMatch(/rowTarget: \{\s*flex: 1,\s*minWidth: 0,\s*\}/);
+    // stable truth. Fixed segments never shrink; context is the only
+    // shrinkable text segment, capped by an explicit max-width (and hidden
+    // on very narrow viewports so the row never overflows horizontally).
+    expect(stylesSource).toMatch(/rowVerb: \{\s*flexShrink: 0,/);
+    expect(stylesSource).toMatch(
+      /rowContext: \{\s*minWidth: 0,\s*flexShrink: 1,\s*maxWidth: 240,/
+    );
+    expect(stylesSource).toContain('"@media (max-width: 640px)": { maxWidth: 140 }');
+    expect(stylesSource).toContain('"@media (max-width: 460px)": { display: "none" }');
+    expect(stylesSource).toMatch(/rowTarget: \{\s*flex: 1,\s*minWidth: 0,/);
     expect(stylesSource).toMatch(/duration: \{[^}]*flexShrink: 0/);
     expect(stylesSource).toMatch(/actionChevron: \{[^}]*flexShrink: 0/);
     // HIGH review fix: the shared `truncate` entry is the single clipping
@@ -145,16 +155,18 @@ describe("ToolCallRow", () => {
     // …and the row wires exactly these entries onto its segments — the
     // target span mounts BOTH the flexible rowTarget AND the clipping
     // truncate entry (no duplicated declarations between the two).
-    expect(rowSource).toContain("toolStyles.rowLabel");
-    expect(rowSource).toContain("toolStyles.rowContext");
+    expect(rowSource).toContain("toolStyles.rowVerb");
     expect(rowSource).toMatch(
-      /"tool-call-row__detail u-truncate",\s*toolStyles\.rowTarget,\s*toolStyles\.truncate/
+      /"tool-call-row__context u-truncate",\s*toolStyles\.rowContext,\s*toolStyles\.truncate/
+    );
+    expect(rowSource).toMatch(
+      /"tool-call-row__target u-truncate",\s*toolStyles\.rowTarget,\s*toolStyles\.truncate/
     );
 
     // DOM wiring proof: every compiled class from rowTarget AND truncate is
     // physically present on the mounted target element.
     const detail = header!.querySelector(
-      ".tool-call-row__detail"
+      ".tool-call-row__target"
     ) as HTMLElement | null;
     expect(detail).toBeTruthy();
     const detailClasses = (detail!.getAttribute("class") ?? "").split(" ");
@@ -299,5 +311,49 @@ describe("ToolCallRow", () => {
       header?.click();
     });
     expect(container.querySelector(".tool-call-row__body")).toBeNull();
+  });
+
+  it("keeps the flat header decoupled from the legacy timeline hover", async () => {
+    const container = await mount(
+      rowFor({
+        id: "row-flat",
+        toolName: "readFile",
+        toolPayload: { input: { path: "README.md" } },
+        content: "{}",
+      })
+    );
+    const header = container.querySelector(
+      ".tool-call-row__header"
+    ) as HTMLElement | null;
+    // Dedicated hook drives the escape-hatch hover/focus rules; the legacy
+    // tr-action-row hover selector cannot match this element.
+    expect(header?.getAttribute("data-hook")).toBe(
+      "messages-esc-tool-call-row-header"
+    );
+    expect(header?.className).not.toContain("tr-action-row");
+
+    // Source contract: 28–32px density, transparent row; the expanded body
+    // uses the light rowDetail indent instead of the timeline actionDetail.
+    expect(stylesSource).toMatch(/rowHeader: \{[^}]*minHeight: 30,/);
+    expect(stylesSource).toMatch(
+      /rowHeader: \{[^}]*backgroundColor: "transparent"/
+    );
+    expect(rowSource).toContain("toolStyles.rowHeader");
+    expect(rowSource).not.toContain("tr-action-row");
+    expect(rowSource).toMatch(/"tool-call-row__body",\s*toolStyles\.rowDetail/);
+    expect(rowSource).not.toContain("toolStyles.actionDetail");
+
+    // Escape hatch wires the light hover + focus ring onto the dedicated hook
+    // (the old tr-action-row rules target a different data-hook entirely).
+    const escapeHatchSource = readFileSync(
+      new URL("./messagesStylexEscapeHatch.css", import.meta.url),
+      "utf8"
+    );
+    expect(escapeHatchSource).toMatch(
+      /\[data-hook~="messages-esc-tool-call-row-header"\]:hover:not\(:disabled\)/
+    );
+    expect(escapeHatchSource).toMatch(
+      /\[data-hook~="messages-esc-tool-call-row-header"\]:focus-visible/
+    );
   });
 });

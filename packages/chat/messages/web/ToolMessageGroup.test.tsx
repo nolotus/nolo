@@ -735,6 +735,65 @@ describe("ToolMessageGroup", () => {
     expect(container.textContent).not.toContain("450ms");
   });
 
+  it("splits flat groups from named phases: flat body drops the connector indent", async () => {
+    // Generic activity action → implicit 执行工具步骤 phase → flat branch.
+    const flatMessage = {
+      id: "flat-1",
+      role: "tool",
+      toolName: "execShell",
+      isStreaming: true,
+      metadata: { activity: { action: { title: "bun test", detail: "run tests" } } },
+      content: "{\"ok\":true}",
+    };
+    const container = await mount(
+      <ToolMessageGroup messages={[flatMessage]} />
+    );
+    const flatBody = container.querySelector(
+      ".tool-group__body"
+    ) as HTMLElement | null;
+    expect(flatBody?.className).toContain("tool-group__body--flat");
+    expect(container.querySelector(".tool-call-flat-list")).toBeTruthy();
+    expect(container.querySelector(".tr-action-list")).toBeNull();
+    expect(container.querySelector(".tool-call-row__header")).toBeTruthy();
+
+    // Named phases keep the timeline connector chrome (no flat modifier).
+    const namedTool = {
+      id: "tool-analyze",
+      role: "tool",
+      toolName: "execShell",
+      isStreaming: true,
+      metadata: {
+        activity: {
+          plan: { phases: [{ id: "lookup", title: "查找资料" }] },
+          phase: { id: "lookup", title: "查找资料" },
+          action: { title: "计算增长率", detail: "growth ranking" },
+        },
+      },
+      content: "{\"ok\":true}",
+    };
+    await rerender(
+      <ToolMessageGroup
+        messages={[namedTool]}
+        activityMessages={[
+          namedTool,
+          {
+            id: "assistant-final",
+            role: "assistant",
+            content: "已完成。",
+            metadata: {
+              activity: { phase: { id: "lookup", title: "查找资料", status: "success" } },
+            },
+          },
+        ]}
+      />
+    );
+    const namedBody = container.querySelector(
+      ".tool-group__body"
+    ) as HTMLElement | null;
+    expect(namedBody?.className).not.toContain("tool-group__body--flat");
+    expect(container.querySelector(".tr-phase-list")).toBeTruthy();
+  });
+
   it("never lets a hidden setTodoList affect any visible group state", async () => {
     const hiddenFailedTodo = {
       id: "todo-hidden",

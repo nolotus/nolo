@@ -358,6 +358,15 @@
 [data-hook~="messages-esc-tr-header"]:hover [data-hook~="messages-esc-tr-summary"] { color: var(--textSecondary); opacity: 1; }
 [data-hook~="messages-esc-tr-action-row"]:hover { color: var(--textSecondary); background-color: transparent; }
 [data-hook~="messages-esc-tr-action-row"]:hover [data-hook~="messages-esc-tr-action-chevron"] { color: var(--textSecondary); opacity: 1; }
+
+/* ── ToolCallRow 平铺行 header（ToolCallRow.tsx，P1）──
+ * 保留原因：:hover:not(:disabled) 复合伪类与 :focus-visible 焦点环是 StyleX
+ * 之外的状态样式；平铺行 header 只携带 messages-esc-tool-call-row-header
+ * hook，与上方旧 tr-action-row hover 的选择器（messages-esc-tr-action-row）
+ * 互不相交——旧 timeline hover 无法覆盖平铺行自己的 hover/focus 状态。 */
+[data-hook~="messages-esc-tool-call-row-header"]:hover:not(:disabled) { background-color: var(--surfaceInteractiveHover, var(--backgroundHover)); }
+[data-hook~="messages-esc-tool-call-row-header"]:hover [data-hook~="messages-esc-tool-call-row-chevron"] { opacity: 1; }
+[data-hook~="messages-esc-tool-call-row-header"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
 [data-hook~="messages-esc-tr-header"]:hover [data-hook~="messages-esc-tr-chevron"] { opacity: 1; }
 [data-hook~="messages-esc-t-content-block"]:hover { border-color: var(--borderMuted, transparent); }
 [data-hook~="messages-esc-t-inline-link"]:hover { background: var(--surfaceInteractiveHover, var(--backgroundHover)); border-color: var(--primaryBorder, var(--primary)); transform: translateY(-1px); }

@@ -518,12 +518,15 @@ export const ToolMessageGroup = memo(
           <div
             ref={bodyRef}
             data-hook="messages-esc-tr-body"
-            {...withLiteralClass("tr-body tool-group__body", toolStyles.groupBody)}
+            {...withLiteralClass(
+              `tr-body tool-group__body${namedPhases.length > 0 ? "" : " tool-group__body--flat"}`,
+              namedPhases.length > 0 ? toolStyles.groupBody : toolStyles.groupBodyFlat
+            )}
             onScroll={handleBodyScroll}
           >
             <div ref={bodyContentRef} className="tr-body-content">
               {useFlatActions && flatActions.length > 0 ? (
-                <div  {...withLiteralClass("tr-action-list", toolStyles.actionList)}>
+                <div  {...withLiteralClass("tool-call-flat-list", toolStyles.flatList)}>
                   {flatActions.map((action) => {
                     const message = action.message as any;
                     // Artifact-class actions keep their dedicated card instead

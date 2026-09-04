@@ -90,4 +90,33 @@ describe("ToolMessageItem source contract", () => {
     // the old wasStreaming guard left refreshed / history rows expanded
     expect(toolMessageItemSource).not.toContain("wasStreamingRef");
   });
+
+  test("P1 flat/named split: flat group body carries no connector, named phases keep the timeline chrome", () => {
+    const groupSource = readFileSync(
+      new URL("./ToolMessageGroup.tsx", import.meta.url),
+      "utf8",
+    );
+    const stylesSource = readFileSync(
+      new URL("./toolMessageStyles.ts", import.meta.url),
+      "utf8",
+    );
+    // Body branches on namedPhases: flat groups take the connector-free
+    // groupBodyFlat; named phases keep the timeline groupBody (border/indent).
+    expect(groupSource).toContain("toolStyles.groupBodyFlat");
+    expect(groupSource).toContain(
+      "namedPhases.length > 0 ? toolStyles.groupBody : toolStyles.groupBodyFlat"
+    );
+    // The ordinary flat list is its own container, not the timeline list.
+    expect(groupSource).toMatch(/"tool-call-flat-list", toolStyles\.flatList/);
+    // Named phases keep the timeline connector list untouched.
+    expect(groupSource).toMatch(/"tr-action-list", toolStyles\.actionList/);
+    // groupBodyFlat / flatList carry no left border and no big indent.
+    expect(stylesSource).not.toMatch(/groupBodyFlat: \{[^}]*borderLeft/);
+    expect(stylesSource).not.toMatch(/groupBodyFlat: \{[^}]*marginLeft/);
+    expect(stylesSource).not.toMatch(/groupBodyFlat: \{[^}]*paddingLeft: [1-9]/);
+    expect(stylesSource).not.toMatch(/flatList: \{[^}]*marginLeft/);
+    // Flat row detail uses the light rowDetail indent; the timeline
+    // actionDetail chrome stays for named phases only.
+    expect(stylesSource).toMatch(/rowDetail: \{[^}]*marginLeft: 24/);
+  });
 });

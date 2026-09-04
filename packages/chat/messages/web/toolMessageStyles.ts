@@ -330,6 +330,28 @@ export const toolMessageStyles = stylex.create({
     marginLeft: 26,
     overflow: "hidden",
   },
+  // Flat group body/list (P1): ordinary tool-call groups drop the timeline
+  // connector — no left border, no big indent. Named-phase groups keep
+  // `groupBody` + `actionList` above/below.
+  groupBodyFlat: {
+    maxHeight: "min(32vh, 280px)",
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    paddingTop: 4,
+    paddingRight: 0,
+    paddingBottom: 8,
+    paddingLeft: 0,
+  },
+  flatList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    minWidth: 0,
+    overflow: "hidden",
+  },
   action: { position: "relative", minWidth: 0 },
   actionRow: {
     width: "100%",
@@ -374,20 +396,71 @@ export const toolMessageStyles = stylex.create({
     color: "var(--textQuaternary, var(--textTertiary))",
     opacity: 0.8,
   },
-  // ToolCallRow flex contract (P0.5): verb/context stay intrinsic width
-  // (flexShrink 0); the target is the ONLY flexible segment — flex:1 +
-  // minWidth:0. Real clipping (nowrap/hidden/ellipsis) comes from the shared
+  // ToolCallRow flex contract (P1): verb keeps intrinsic width (flexShrink 0);
+  // the target is the MAIN flexible column (flex:1 + minWidth:0, mono so the
+  // operand reads as primary content); context is the weakest signal —
+  // explicitly shrinkable (minWidth:0 + flexShrink:1) under a hard max-width
+  // cap. Real clipping (nowrap/hidden/ellipsis) comes from the shared
   // `truncate` entry mounted alongside it, so a long no-space path shrinks
   // inside its own box instead of pushing duration/chevron out of the header.
-  rowLabel: {
+  // Narrow viewports shrink the context cap further and finally hide it —
+  // the row must never overflow horizontally (rowContext media queries).
+  rowVerb: {
     flexShrink: 0,
     fontSize: "var(--fontSize-sm)",
     fontWeight: 500,
   },
-  rowContext: { flexShrink: 0 },
+  rowContext: {
+    minWidth: 0,
+    flexShrink: 1,
+    maxWidth: 240,
+    fontSize: 12,
+    color: "var(--textQuaternary, var(--textTertiary))",
+    "@media (max-width: 640px)": { maxWidth: 140 },
+    "@media (max-width: 460px)": { display: "none" },
+  },
   rowTarget: {
     flex: 1,
     minWidth: 0,
+    fontFamily: "var(--font-mono, monospace)",
+  },
+  // Flat row anatomy (P1): 28–32px density, transparent on the flat group
+  // body. Light hover + focus-visible ring live in
+  // messagesStylexEscapeHatch.css under the messages-esc-tool-call-row-header
+  // hook — a dedicated selector the legacy tr-action-row hover rules
+  // (messages-esc-tr-action-row) never match, so the timeline hover cannot
+  // override the flat row's own states.
+  rowHeader: {
+    width: "100%",
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 30,
+    paddingTop: 4,
+    paddingRight: 6,
+    paddingBottom: 4,
+    paddingLeft: 6,
+    borderWidth: 0,
+    borderStyle: "none",
+    borderTopLeftRadius: "var(--radius-xs)", borderTopRightRadius: "var(--radius-xs)", borderBottomRightRadius: "var(--radius-xs)", borderBottomLeftRadius: "var(--radius-xs)",
+    color: "var(--textMuted, var(--textSecondary))",
+    backgroundColor: "transparent",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  // Expanded flat row body: light indent only — the named-phase timeline
+  // keeps its actionDetail chrome (P1 flat/named split).
+  rowDetail: {
+    marginTop: 2,
+    marginRight: 0,
+    marginBottom: 6,
+    marginLeft: 24,
+    paddingTop: 0,
+    paddingRight: 4,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    color: "var(--textSecondary)",
   },
   actionDetail: {
     marginTop: 4,
