@@ -221,15 +221,13 @@ export const prepareTokenUsageData = ({
   stable_prefix_estimated_tokens,
   entry_path,
 }: PrepareTokenUsageDataParams): PreparedTokenUsageData => {
+  // 空 agentId 是安全的：apiSource=platform 走目录价（守卫兜底），
+  // custom 走记录价（创作者）。这里不再 throw——throw 会让客户端
+  // 记录保存（desktop/cli-local）整批失败，属于静默漏记。
   const resolvedAgentId =
     (typeof agentId === "string" && agentId.trim()) ||
     (typeof cybotId === "string" && cybotId.trim()) ||
     "";
-  if (!resolvedAgentId) {
-    throw new Error(
-      "prepareTokenUsageData requires a non-empty agentId or cybotId"
-    );
-  }
   const { usage, billedProvider, billedModel, billedServiceTier, cost, pay, hasExternalPrice } =
     resolveTokenUsagePricing({
       rawUsage,

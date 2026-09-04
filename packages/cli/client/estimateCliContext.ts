@@ -16,7 +16,6 @@ import { resolveToolGuidedSections } from "../../ai/agent/toolGuidedSections";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import { expandEnabledPacks } from "../../ai/tools/toolPacks";
-import { buildCurrentTimeBlock } from "../../agent-runtime/currentTimeContext";
 import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
 import { buildUserResponseLanguageContext } from "../../agent-runtime/userResponseLanguage";
 import {
@@ -123,7 +122,6 @@ export function estimateDefaultCliContextTokens(opts: {
     guidance.contextLayerContract,
     guidance.emailRegistrationWorkflow,
     ...Object.values(toolSections),
-    buildCurrentTimeBlock(new Date()),
     readAgentsMd(cwd),
     buildSkillDiscoveryContextBlock(cwd) ?? "",
   ];

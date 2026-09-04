@@ -852,7 +852,7 @@ describe("cli agent run command", () => {
     expect(factoryCwds).toEqual(["/repo/project"]);
     expect(chunks.join("")).toContain("working locally");
     expect(chunks.join("")).toContain("polish notifications");
-    expect(chunks.join("")).toContain("local:--- 当前时间 ---");
+    expect(chunks.join("")).not.toContain("--- 当前时间 ---");
     expect(chunks.join("")).toContain("dialog-command-local");
   });
 
@@ -912,7 +912,7 @@ describe("cli agent run command", () => {
     expect(chunks.join("")).toContain("working locally");
     expect(chunks.join("")).toContain("dialog-command-auto-refresh");
     expect(chunks.join("")).toContain("polish notifications");
-    expect(chunks.join("")).toContain("local:--- 当前时间 ---");
+    expect(chunks.join("")).not.toContain("--- 当前时间 ---");
   });
 
   test("switches to --fallback-agent once when a local run hits a quota (CliProviderQuotaError)", async () => {

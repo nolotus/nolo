@@ -24,5 +24,6 @@ describe("startupProtocol", () => {
     expect(block).toContain("checkEnv({ check: 'context' })");
     expect(block).toContain("Windows 默认 PowerShell");
     expect(block).toContain("Linux/macOS 默认 bash");
+    expect(block).toContain("shell `date` 获取");
   });
 });

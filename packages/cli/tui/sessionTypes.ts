@@ -132,6 +132,12 @@ export type TuiAction =
        * 失败(ENOENT/超过大小/不是图片)的会被丢弃,留在 message 里给用户文本。
        */
       imagePaths?: string[];
+      /**
+       * 扩展名命中但探测不可读的图片路径（macOS tccd 拦了 TemporaryItems
+       * 截图临时目录是主场景）。router 用它们做剪贴板兜底——截图拖入时
+       * 图像同时在系统剪贴板里，读位图数据不受路径沙盒影响。
+       */
+      unreadableImagePaths?: string[];
     }
   | {
       type: "compact";

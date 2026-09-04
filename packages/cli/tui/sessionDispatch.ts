@@ -172,12 +172,23 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
 
   if (!isLikelySlashCommand(trimmed)) {
     const hints = detectImagePaths(trimmed, state.cwd);
-    const stripped = stripImageTokens(trimmed, hints);
+    // 只 strip 可读路径：unreadable token（文件不存在 / 被沙盒拦）必须保留在
+    // 原文里——用户打字提到尚不存在的 .png 不应被静默删字，路径文本本身是
+    // 兜底失败时的唯一线索。
+    const readableHints = hints.filter((hint) => !hint.unreadable);
+    const unreadableHints = hints.filter((hint) => hint.unreadable);
+    const stripped = stripImageTokens(trimmed, readableHints);
     const finalMessage = stripped.length > 0 ? stripped : trimmed;
-    const imagePaths = hints.map((hint) => hint.resolvedPath);
+    const imagePaths = readableHints.map((hint) => hint.resolvedPath);
     const preview =
       hints.length > 0
-        ? hints.map((hint) => `found image: ${hint.resolvedPath}`).join("\n")
+        ? hints
+            .map((hint) =>
+              hint.unreadable
+                ? `image path unreadable: ${hint.resolvedPath}`
+                : `found image: ${hint.resolvedPath}`,
+            )
+            .join("\n")
         : "";
 
     return {
@@ -190,6 +201,9 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         runtimeMode: state.runtimeMode,
         ...(state.dialogId ? { continueDialogId: state.dialogId } : {}),
         ...(imagePaths.length > 0 ? { imagePaths } : {}),
+        ...(unreadableHints.length > 0
+          ? { unreadableImagePaths: unreadableHints.map((h) => h.resolvedPath) }
+          : {}),
       },
     };
   }

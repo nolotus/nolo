@@ -21,7 +21,6 @@ const CLARIFICATION_MODE_INSTRUCTIONS = `在你还不了解用户意图时，通
 
 const isBrowser = typeof window !== "undefined";
 import { compileContextLayers, type CompiledContext } from "./contextCompiler";
-import { buildCurrentTimeBlock } from "./currentTimeContext";
 import { Contexts } from "../types";
 
 // ============================================================================
@@ -295,12 +294,6 @@ export const buildSystemPromptContext = (options: {
     { id: "app-working-memory", owner: "runtime", cacheScope: "turn", content: appWorkingMemorySection },
     { id: "dialog-summary", owner: "runtime", cacheScope: "turn", content: dialogSummarySection },
     { id: "editing-context", owner: "runtime", cacheScope: "turn", content: editingContextSection },
-    {
-      id: "current-time",
-      owner: "platform",
-      cacheScope: "turn",
-      content: buildCurrentTimeBlock(now, timeZone),
-    },
   ]);
 };
 

@@ -49,7 +49,6 @@ import { hasImageInRuntimeMessages, stripImagePartsFromMessages } from "../ai/ag
 import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
 import { canonicalizeToolNames } from "./toolNameAliases";
-import { buildCurrentTimeBlock } from "./currentTimeContext";
 import {
   estimateContextTokens,
   hashStablePrefixContent,
@@ -1447,8 +1446,8 @@ export async function runLocalAgentTurn(
   });
   // 与 web/server 对齐：为本地宿主注入 runtime guidance 块（startup-protocol /
   // context-layer-contract / email-registration-workflow / web-research-tool-policy，
-  // 仅保留非空块）与 current-time 块。guidance 块作为 session-scope（稳定前缀，
-  // 利于 prefix cache），current-time 块作为 turn-scope（动态后缀）。
+  // 仅保留非空块）。guidance 块作为 session-scope（稳定前缀，利于 prefix cache）。
+  // current-time 时间块已删除：模型需要精确时间时用 shell `date` 自行获取。
   // Guidance must describe the tools the model can actually call. Hosts that
   // drop undeliverable names report the survivors via exposedToolNames; fall
   // back to the declared list for hosts that expose everything they declare.
@@ -1477,10 +1476,7 @@ export async function runLocalAgentTurn(
       .map((content) => content.trim())
       .filter((content): content is string => content.length > 0)
       .map((content) => ({ content, cacheScope: "session" as const }));
-  const currentTimeScope: ContextBlockScope[] = [
-    { content: buildCurrentTimeBlock(new Date(), undefined), cacheScope: "turn" as const },
-  ];
-  // Built-in scopes (identity/guidance/time) always come first; the caller's
+  // Built-in scopes (identity/guidance) always come first; the caller's
   // normalized scopes follow. normalizeContextBlockScopes reconciles
   // input.contextBlockScopes (authoritative) with input.contextBlocks
   // (legacy plain strings → turn-scope) so a caller that only supplies
@@ -1492,7 +1488,6 @@ export async function runLocalAgentTurn(
   const mergedContextBlockScopes: ContextBlockScope[] = [
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
-    ...currentTimeScope,
     ...callerScopes,
   ];
   loopTimingMark("buildContextBlocks", 0);

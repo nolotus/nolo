@@ -221,7 +221,7 @@ describe("runLocalAgentTurn", () => {
     const parts = Array.isArray(lastUser?.content) ? lastUser!.content : [];
     expect(parts.length).toBe(3);
     // dynamic 区 = 运行时注入的时间块 + caller 的 turn-scope 块（\n\n 连接后并入 user 头部）
-    expect(String((parts[0] as { type: "text"; text: string })?.text)).toContain("--- 当前时间 ---");
+    expect(String((parts[0] as { type: "text"; text: string })?.text)).not.toContain("--- 当前时间 ---");
     expect(String((parts[0] as { type: "text"; text: string })?.text)).toContain(turnBlock);
     expect(parts[1]).toEqual({ type: "text", text: "看这张图" });
     expect(parts[2]).toEqual({ type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } });
@@ -900,7 +900,7 @@ describe("runLocalAgentTurn", () => {
       persistedInputReference: compactReference,
     });
 
-    expect(providerUserContent).toContain("--- 当前时间 ---");
+    expect(providerUserContent).not.toContain("--- 当前时间 ---");
     expect(String(providerUserContent).endsWith(compactReference)).toBe(true);
     expect(savedTurns[0]?.messages.find((message) => message.role === "user")?.content).toBe(
       expandedInput,
@@ -3449,7 +3449,7 @@ describe("runLocalAgentTurn", () => {
     expect(msgs[4].tool_calls).toBeUndefined();
   });
 
-  test("injects runtime guidance and current-time blocks into the system message", async () => {
+  test("injects runtime guidance blocks into the system message", async () => {
     let providerMessages: any[] = [];
     const adapter: AgentRuntimeHostAdapter = {
       host: "desktop",
@@ -3492,13 +3492,13 @@ describe("runLocalAgentTurn", () => {
     const systemContent = String(systemMessage?.content ?? "");
     // startup-protocol guidance 块标记。
     expect(systemContent).toContain("--- 启动协议 ---");
-    // 前缀缓存契约：current-time 是 turn-scope，不再进 system（会切断其身后
-    // 全部历史的前缀缓存），改并入末尾 user 头部。
+    // 时间块已删除：system 与末尾 user 头部都不再注入 current-time 块，
+    // 模型需要精确时间时用 shell `date` 自行获取。
     expect(systemContent).not.toContain("--- 当前时间 ---");
-    const guidanceLastUser = [...providerMessages].reverse().find((m) => m.role === "user");
-    const guidanceLastUserContent = String(guidanceLastUser?.content ?? "");
-    expect(guidanceLastUserContent).toContain("--- 当前时间 ---");
-    expect(guidanceLastUserContent).toContain(`当前日期: ${new Date().toISOString().slice(0, 10)}`);
+    const guidanceLastUserContent = String(
+      [...providerMessages].reverse().find((m) => m.role === "user")?.content ?? "",
+    );
+    expect(guidanceLastUserContent).not.toContain("--- 当前时间 ---");
     // execShell + fetchWebpage 时，网页研究工具策略由 webAccess 段承载
     // （生产环境勿用 execShell 抓网页）。
     expect(systemContent).toContain("不要用 execShell 调 curl/grep/sed");
@@ -3545,9 +3545,9 @@ describe("runLocalAgentTurn", () => {
     const systemMessage = providerMessages.find((m) => m.role === "system");
     expect(systemMessage).toBeDefined();
     const systemContent = String(systemMessage?.content ?? "");
-    // current-time 仍然注入（与工具无关）——前缀缓存契约下在末尾 user 头部。
+    // 时间块已删除：末尾 user 头部不应再出现 current-time 块。
     const noToolsLastUser = [...providerMessages].reverse().find((m) => m.role === "user");
-    expect(String(noToolsLastUser?.content)).toContain("--- 当前时间 ---");
+    expect(String(noToolsLastUser?.content)).not.toContain("--- 当前时间 ---");
     // tool-gated guidance 块未被触发，不注入空内容。
     expect(systemContent).not.toContain("--- 邮箱验证码注册流程 ---");
     expect(systemContent).not.toContain("不要用 execShell 调 curl/grep/sed");

@@ -29,6 +29,9 @@ export const buildStartupProtocolBlock = (
     lines.push(
       "- 执行命令时根据环境选 shell（Windows 默认 PowerShell，Linux/macOS 默认 bash）；收集多个只读事实优先合并为一次 shell 复合调用，避免拆成细碎探针。"
     );
+    lines.push(
+      "- 需要当前精确时间（分钟/秒）时，通过 shell `date` 获取，不要凭记忆或估算。"
+    );
   }
 
   return lines.join("\n");

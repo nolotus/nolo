@@ -505,12 +505,13 @@ describe("handleTuiInput - inline image detection in chat path", () => {
     }
   });
 
-  test("missing image path does not trip detection", () => {
+  test("missing image path stays in message and surfaces as unreadableImagePaths", () => {
     const state = { ...createInitialTuiState({}), cwd };
     const ghost = join(cwd, "ghost.png");
     const result = handleTuiInput(`look at this ${ghost}`, state);
     if (result.action?.type === "chat") {
       expect(result.action.imagePaths).toBeUndefined();
+      expect(result.action.unreadableImagePaths).toEqual([ghost]);
       expect(result.action.message).toBe(`look at this ${ghost}`);
     }
   });

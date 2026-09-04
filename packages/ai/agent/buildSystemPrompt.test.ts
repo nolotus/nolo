@@ -191,7 +191,7 @@ describe("buildSystemPrompt", () => {
     expect(compiled.cacheProfile.misorderedLayerIds).toEqual([]);
   });
 
-  it("puts full current time into a turn-scoped layer instead of the identity block", async () => {
+  it("keeps the current time block out of the compiled layers", async () => {
     const { buildSystemPromptContext } = await loadPromptBuilders();
     const compiled = buildSystemPromptContext({
       agentConfig: {
@@ -212,14 +212,9 @@ describe("buildSystemPrompt", () => {
     const currentTime = compiled.layers.find((layer: { id: string }) => layer.id === "current-time");
 
     expect(identity?.content).not.toContain("当前时间:");
-    expect(currentTime?.cacheScope).toBe("turn");
-    // Hour precision, not minute: the block sits in the dynamic suffix, so a
-    // per-minute change would invalidate the downstream cache breakpoint on
-    // nearly every turn. See toHourPrecision in currentTimeContext.ts.
-    expect(currentTime?.content).toContain("当前本地时间: 2026-06-04 01:00");
-    expect(currentTime?.content).not.toContain("01:52");
-    expect(currentTime?.content).toContain("本地时区: Asia/Shanghai");
-    expect(currentTime?.content).toContain("UTC 时间: 2026-06-03T17:00");
+    // current-time 层已删除：不再注入任何时间块，模型需要精确时间时用
+    // shell `date` 自行获取（`now`/`timeZone` 参数保留但不再产生任何层）。
+    expect(currentTime).toBeUndefined();
   });
 
   it("includes skill guidance when runtime skill hints exist", async () => {

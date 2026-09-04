@@ -123,12 +123,14 @@ describe("pasteImage", () => {
     try {
       const png = join(dir, "a.png");
       writeFileSync(png, "");
-      // 非 WSL(wsl:false):C:\... 是相对路径,解析到 cwd 下且不存在 → 不识别
+      // 非 WSL(wsl:false):C:\... 是相对路径,解析到 cwd 下且不存在 → 标 unreadable
       const detected = detectImagePaths("C:\\Users\\me\\a.png", dir, { wsl: false });
-      expect(detected).toEqual([]);
-      // 注入 wsl:true 后应被映射为 /mnt/c/... ,目标不存在 → 仍返回空(安全,不抛错)
+      expect(detected).toHaveLength(1);
+      expect(detected[0]?.unreadable).toBe(true);
+      // 注入 wsl:true 后应被映射为 /mnt/c/... ,目标不存在 → 仍标 unreadable(安全,不抛错)
       const mapped = detectImagePaths("C:\\Users\\me\\a.png", dir, { wsl: true });
-      expect(mapped).toEqual([]);
+      expect(mapped).toHaveLength(1);
+      expect(mapped[0]?.unreadable).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -144,8 +146,10 @@ describe("pasteImage", () => {
       // 构造一个 Windows 路径,其映射结果恰好落到真实文件上:
       // 不成立(映射固定 /mnt 前缀),故此处只验证映射后存在性校验路径:
       // C:\<cwd中无盘符> 不被误识别。
+      // C:\<cwd中无盘符> 不被误识别为存在文件 → 标 unreadable。
       const detected = detectImagePaths(`C:\\${png}`, dir, { wsl: true });
-      expect(detected).toEqual([]);
+      expect(detected).toHaveLength(1);
+      expect(detected[0]?.unreadable).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -169,7 +173,7 @@ describe("pasteImage", () => {
     }
   });
 
-  test("detectImagePaths only returns paths that exist", () => {
+  test("detectImagePaths marks existing paths readable and missing paths unreadable", () => {
     const dir = makeTempDir();
     try {
       const real = join(dir, "real.png");
@@ -180,8 +184,10 @@ describe("pasteImage", () => {
         `look at this ${real} and this ${missing}`,
         dir
       );
-      expect(detected).toHaveLength(1);
-      expect(detected[0]?.resolvedPath).toBe(real);
+      expect(detected).toHaveLength(2);
+      const byPath = new Map(detected.map((h) => [h.resolvedPath, h]));
+      expect(byPath.get(real)?.unreadable).toBeUndefined();
+      expect(byPath.get(missing)?.unreadable).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

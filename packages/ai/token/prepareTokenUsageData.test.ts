@@ -332,27 +332,38 @@ describe("prepareTokenUsageData", () => {
     expect(prepared.tokenData.provider_request_ids).toEqual(["req_abc"]);
   });
 
-  it("fails closed when neither agentId nor cybotId is provided", () => {
-    expect(() =>
-      prepareTokenUsageData({
-        rawUsage: { input_tokens: 10, output_tokens: 20 },
-        agentConfig: { provider: "openai", model: "gpt-5.5" },
-        agentId: "",
-        dialogId: "dialog-1",
-      })
-    ).toThrow(/non-empty agentId or cybotId/);
+  it("empty agentId is safe: pricing resolves via apiSource guard instead of throwing", () => {
+    const prepared = prepareTokenUsageData({
+      rawUsage: { input_tokens: 10, output_tokens: 20 },
+      agentConfig: { provider: "openai", model: "gpt-5.5" },
+      agentId: "",
+      dialogId: "dialog-1",
+    });
+
+    expect(typeof prepared.tokenData.cost).toBe("number");
   });
 
-  it("fails closed when both agentId and cybotId are blank", () => {
-    expect(() =>
-      prepareTokenUsageData({
-        rawUsage: { input_tokens: 10, output_tokens: 20 },
-        agentConfig: { provider: "openai", model: "gpt-5.5" },
-        agentId: "   ",
-        cybotId: "",
-        dialogId: "dialog-1",
-      })
-    ).toThrow(/non-empty agentId or cybotId/);
+  it("blank agentId and cybotId with platform apiSource still guards to catalog pricing", () => {
+    const prepared = prepareTokenUsageData({
+      rawUsage: {
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        billing_provider: "nolo",
+        billing_model: "glm-5-3-flash",
+      },
+      agentConfig: {
+        provider: "nolo",
+        model: "glm-5-3-flash",
+        inputPrice: 3.36,
+        outputPrice: 13.44,
+        apiSource: "platform",
+      },
+      agentId: "   ",
+      cybotId: "",
+      dialogId: "dialog-1",
+    });
+
+    expect(prepared.tokenData.cost).toBe(4);
   });
 
   it("writes both agentId and cybotId from legacy cybotId-only input", () => {

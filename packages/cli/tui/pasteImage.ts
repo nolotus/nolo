@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
@@ -48,6 +48,13 @@ export type DetectedImageToken = {
   raw: string;
   /** 反斜杠转义解析后的字面值,用于 existsSync / 扩展名判定 / readFile */
   resolvedPath: string;
+  /**
+   * 图片扩展名命中但文件探测失败（不存在 / 无读权限，如 macOS tccd 拦了
+   * 截图临时目录）。statSync 同时覆盖两种失败且不细分（对调用方的兜底
+   * 语义等价：用户意图都是要发这张图），由 dispatch 层决定剪贴板兜底或
+   * 提示；探测通过的既有路径不带此字段（undefined）。
+   */
+  unreadable?: boolean;
 };
 
 export type ImageReadErrorCode =
@@ -155,6 +162,21 @@ function isImagePath(path: string): boolean {
 }
 
 /**
+ * 同步探测路径是否可读（存在且有读权限）。
+ * 不能用 existsSync：它对「不存在」和「权限不足」都返回 false，而这个
+ * 探测结果要透传给调用方做剪贴板兜底——必须基于真实 syscall 结果，否则
+ * 探测本身就会掩盖权限问题。不细分两种失败原因：对兜底语义二者等价。
+ */
+function isReadableFilePath(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 从一行输入里检测可能作为 image attachment 的 token。
  *
  * 规则(平衡考虑):
@@ -188,7 +210,12 @@ export function detectImagePaths(
     if (wsl) candidate = mapWindowsPathToWsl(candidate);
     const resolved = resolveImageSource(candidate, cwd);
     if (!isImagePath(resolved)) continue;
-    if (!existsSync(resolved)) continue;
+    if (!isReadableFilePath(resolved)) {
+      // 读不到（不存在 / macOS tccd 沙盒拒了 TemporaryItems 等）也要带回去，
+      // 让 dispatch 层决定剪贴板兜底或提示；静默丢弃会让用户误以为路径已生效。
+      out.push({ raw: token.raw, resolvedPath: resolved, unreadable: true });
+      continue;
+    }
     out.push({ raw: token.raw, resolvedPath: resolved });
   }
   return out;

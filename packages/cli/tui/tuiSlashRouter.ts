@@ -48,7 +48,8 @@ import {
 } from "./tuiHistory";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
-import { resolveAttachmentImageUrls } from "./pasteImage";
+import { mergeAttachedImages, resolveAttachmentImageUrls } from "./pasteImage";
+import { readClipboardImage } from "./clipboardImage";
 import { themeText, applyDetectedBackground } from "./theme";
 import { detectTerminalBackground } from "./detectBackground";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
@@ -646,6 +647,35 @@ export async function runSubmittedSlashLine(
   }
 
   if (result.action?.type === "chat") {
+    // 剪贴板兜底：macOS 截图拖入时文件落在截图 App 的临时沙盒目录
+    // (/var/folders/.../TemporaryItems/NSIRD_screencaptureui_*)，stat 直接被
+    // tccd 拒（EPERM）。但截图时图像同时进了系统剪贴板，读位图数据不经过
+    // 路径沙盒——这正是 oh-my-pi 的做法。每个 unreadable 路径尝试一次剪贴
+    // 板读取；失败（剪贴板无图 / 远程会话）就给可行动的 Ctrl+V 提示而非静默。
+    const unreadable = result.action.unreadableImagePaths ?? [];
+    if (unreadable.length > 0) {
+      for (const path of unreadable) {
+        try {
+          const image = await readClipboardImage({ env: options.env ?? process.env });
+          host.state = {
+            ...host.state,
+            attachedImages: mergeAttachedImages(host.state.attachedImages, [image]),
+          };
+          emitCommandOutput(
+            `[nolo] image attached from clipboard (path unreadable: ${path})`,
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          emitCommandOutput(
+            themeText(
+              `[nolo] image unreadable and clipboard fallback failed: ${path} (${msg}). Tip: use Ctrl+V to paste the image instead.`,
+              "warning",
+              resolveCliColorEnabled(),
+            ),
+          );
+        }
+      }
+    }
     // 读取本轮待发送附件为 dataUrl（chat action 内联路径 + host.state 暂存附件）。
     // 失败回调直接写 output。清空动作留在调用点，与下方"发送即消费"注释一起。
     const { imageUrls } = await resolveAttachmentImageUrls({
