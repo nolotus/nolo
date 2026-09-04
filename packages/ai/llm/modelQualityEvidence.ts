@@ -1,6 +1,6 @@
 // ai/llm/modelQualityEvidence.ts
 //
-// Domain-aware model quality evidence (v1 skeleton).
+// Domain-aware model quality evidence (v1.1).
 //
 // Principles:
 // - domain-specific: evidence is only meaningful for one ModelQualityDomain
@@ -11,6 +11,9 @@
 //   together with benchmark identity/version; never normalized into a
 //   universal 0-100 scale
 // - no universal score: no overallScore / trustScore / percentile / confidence
+//
+// Curated real evidence rows live in modelQualityEvidenceData.ts (data-only);
+// types, benchmark priority and resolvers live here.
 //
 // Note on legacy metadata: modelAbility is legacy display/reference metadata
 // and is not the source of truth for future domain-aware routing.
@@ -39,9 +42,9 @@ export interface ModelQualityEvidence {
 
   domain: ModelQualityDomain;
 
-  /** Benchmark family identity, e.g. "terminal-bench-4" or "swe-bench". */
+  /** Benchmark identity exactly as declared in DOMAIN_BENCHMARK_PRIORITY, e.g. "terminal-bench-4" or "deepswe-1.1". */
   benchmark: string;
-  /** Optional benchmark release/version within the family. */
+  /** Optional display/audit release label (e.g. "4.0"); identity matching uses `benchmark` only. */
   benchmarkVersion?: string;
 
   /** Raw, benchmark-native score. Never normalized. */
@@ -49,6 +52,9 @@ export interface ModelQualityEvidence {
 
   /** Optional ISO timestamp of when the score was measured. */
   measuredAt?: string;
+
+  /** Public page the score was read from; minimal provenance for audit. */
+  sourceUrl?: string;
 }
 
 /**
@@ -59,16 +65,18 @@ export interface ModelQualityEvidence {
  * resolveModelQualityEvidence). Adding a new benchmark family/version to the
  * front of a list is how "newer benchmark wins" is expressed.
  */
-export const DOMAIN_BENCHMARK_PRIORITY = {
+export const DOMAIN_BENCHMARK_PRIORITY: {
+  readonly [K in ModelQualityDomain]?: readonly string[];
+} = {
   "coding.terminal": [
     "terminal-bench-4",
     "terminal-bench-3",
     "terminal-bench-2.1",
   ],
   "coding.rails": ["agents-on-rails"],
-  "coding.repo": ["swe-bench"],
+  "coding.repo": ["deepswe-1.1"],
   "design.website": ["design-arena-website"],
-} as const;
+};
 
 /**
  * Pick the single best evidence entry for one candidate model in one domain.
