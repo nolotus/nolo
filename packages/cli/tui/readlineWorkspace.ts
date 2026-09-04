@@ -20,6 +20,7 @@ import { spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
+import { runWithInputRequiredAttention } from "./terminalNotification";
 import {
   createActivityIndicator,
 } from "./activityIndicator";
@@ -1165,16 +1166,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // around the subprocess. See resolveActionGate's docstring in
         // tuiTurnRunner.ts for why (activity-indicator repaint erasure) and
         // for which of the two dialogHost entry points each kind uses.
-        return await resolveActionGate(gate, {
-          dialogHost,
-          input,
-          output,
-          spawnRunner,
-          registerToken: (handler) => { rawActionGateTokenHandler = handler; },
-          pauseComposer: () => fixedInput.pause(),
-          resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
-          resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
-        });
+        // Agent 自主运行中被 gate 拦下等用户接管终端：input-required
+        // attention。confirm / cancel / exception / Ctrl+C / turn abort 无论
+        // 从哪条路退出，finally 都保证清掉 Windows Terminal progress。
+        return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+          resolveActionGate(gate, {
+            dialogHost,
+            input,
+            output,
+            spawnRunner,
+            registerToken: (handler) => { rawActionGateTokenHandler = handler; },
+            pauseComposer: () => fixedInput.pause(),
+            resumeComposerFromSubprocess: () => fixedInput.resumeFromSubprocess(),
+            resumeComposerFromDialog: () => fixedInput.resumeFromDialog(),
+          }),
+        );
       };
       const confirmDestructiveAction = async (request: PermissionRequest) => {
         // /auto on（会话级权限自动化）：跳过确认弹窗直接放行。state 是
@@ -1182,13 +1188,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 本地处理并回写），这里在调用时读取，拿到的总是最新值。
         // 只短路破坏性操作确认；actionGate（handoff/input 类）不走这里。
         if (state.autoConfirm) return true;
-        return await dialogHost.run((anchor) =>
-          runConfirmDialog({
-            request,
-            input: input as any,
-            output: output as any,
-            ...anchor,
-          }),
+        // 破坏性操作确认同属「Agent 等用户决定」：立即提醒，任何应答路径
+        // （approve / cancel / Esc / 异常）都由 finally 清掉 progress。
+        return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+          dialogHost.run((anchor) =>
+            runConfirmDialog({
+              request,
+              input: input as any,
+              output: output as any,
+              ...anchor,
+            }),
+          ),
         );
       };
       return { actionGateHandler, confirmDestructiveAction };

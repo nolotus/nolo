@@ -39,6 +39,8 @@ import {
   wrapTranscriptLine,
 } from "./readlineWorkspace";
 import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
+import type { LocalAgentActionGate } from "../../agent-runtime/localLoop";
+import { TURN_COMPLETION_ATTENTION_THRESHOLD_MS } from "./terminalNotification";
 import { getCliLocale, setCliLocale, t } from "./i18n";
 import {
   diffLineSequences,
@@ -4653,4 +4655,258 @@ describe("Backspace 附件撤销守卫（无附件时行为不变）", () => {
     input.end();
     await Promise.race([wp, Bun.sleep(3000)]);
   });
+});
+
+// ── Terminal attention ──────────────────────────────────────────────────────
+// input-required 的三个入口（actionGate / ask_user / 破坏性确认）统一走
+// runWithInputRequiredAttention：进入等待立即 BEL（Windows Terminal 下追加
+// OSC 9;4 indeterminate），任何退出路径 finally 清 progress。以下测试驱动
+// 真实 workspace（PassThrough 即 TUI 的真实 output 流，TUI 框架与 attention
+// 序列写在同一份流上），证明 BEL/OSC 最终到达真实 TUI output，而不是只测
+// 一个 fake stream；attention 只写 output 流、从不进 history/transcript。
+
+const ATTENTION_OSC_INDETERMINATE = "\x1b]9;4;3";
+const ATTENTION_OSC_CLEAR = "\x1b]9;4;0";
+
+function createAttentionTtyPair() {
+  const input = new PassThrough();
+  const chunks: Buffer[] = [];
+  const output = new PassThrough();
+  output.on("data", (chunk: Buffer) => chunks.push(chunk));
+  (input as unknown as { isTTY?: boolean; setRawMode?: () => void }).isTTY = true;
+  (input as unknown as { setRawMode?: (mode: boolean) => void }).setRawMode = () => {};
+  (output as unknown as { isTTY?: boolean; rows?: number; columns?: number }).isTTY = true;
+  (output as unknown as { rows?: number }).rows = 24;
+  (output as unknown as { columns?: number }).columns = 120;
+  return { input, output, stdoutText: () => Buffer.concat(chunks).toString("utf8") };
+}
+
+async function waitUntilAttention(predicate: () => boolean, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await Bun.sleep(20);
+  }
+  return predicate();
+}
+
+const attentionConfirmGate: LocalAgentActionGate = {
+  id: "gate-attention-1",
+  kind: "confirm",
+  title: "确认写入文件",
+  body: "这是要确认的正文",
+  toolName: "writeFile",
+  toolCallId: "call-1",
+};
+
+describe("terminal attention — input-required wiring through the workspace", () => {
+  test("permission gate in Windows Terminal: BEL + indeterminate while waiting, clear after the user answers", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let gateAnswered = false;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { WT_SESSION: "test-session", NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        await opt.actionGateHandler!(attentionConfirmGate);
+        gateAnswered = true;
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("go\r");
+    expect(
+      await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_INDETERMINATE)),
+    ).toBe(true);
+    expect(stdoutText().includes("\x07")).toBe(true);
+
+    // 默认高亮 Cancel，上移到 Allow 再回车（与 resolveActionGate 测试同款按键）。
+    input.write("\x1b[A");
+    input.write("\r");
+
+    expect(await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_CLEAR))).toBe(true);
+    expect(stdoutText().indexOf(ATTENTION_OSC_CLEAR)).toBeGreaterThan(
+      stdoutText().indexOf(ATTENTION_OSC_INDETERMINATE),
+    );
+    expect(await waitUntilAttention(() => gateAnswered)).toBe(true);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+
+  test("permission gate in Windows Terminal: user cancelling also clears the progress", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let gateAnswered = false;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { WT_SESSION: "test-session", NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        await opt.actionGateHandler!(attentionConfirmGate);
+        gateAnswered = true;
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("go\r");
+    expect(
+      await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_INDETERMINATE)),
+    ).toBe(true);
+
+    // 直接回车 = 默认高亮的 Cancel。clear 必须照常发生（finally 路径）。
+    input.write("\r");
+    expect(await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_CLEAR))).toBe(true);
+    expect(await waitUntilAttention(() => gateAnswered)).toBe(true);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+
+  test("permission gate outside Windows Terminal: BEL only, never OSC 9;4", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let gateAnswered = false;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        await opt.actionGateHandler!(attentionConfirmGate);
+        gateAnswered = true;
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("go\r");
+    expect(await waitUntilAttention(() => stdoutText().includes("确认写入文件"))).toBe(true);
+    expect(stdoutText().includes("\x07")).toBe(true);
+    expect(stdoutText().includes("\x1b]9;4")).toBe(false);
+
+    input.write("\r");
+    expect(await waitUntilAttention(() => gateAnswered)).toBe(true);
+    expect(stdoutText().includes("\x1b]9;4")).toBe(false);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+
+  test("ask_user in Windows Terminal: attention while the choice dialog is open, cleared after answering", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let choiceResolved = false;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { WT_SESSION: "test-session", NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        const choice = await opt.requestUserChoice!({
+          question: "Pick one:",
+          choices: [
+            { id: "a", label: "Option A", userMessage: "A" },
+            { id: "b", label: "Option B", userMessage: "B" },
+          ],
+          blocking: true,
+        });
+        opt.output?.write(`CHOICE_ACCEPTED:${String((choice as { label?: string }).label)}`);
+        choiceResolved = true;
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("ask me\r");
+    expect(await waitUntilAttention(() => stdoutText().includes("Option A"))).toBe(true);
+    expect(stdoutText().includes(ATTENTION_OSC_INDETERMINATE)).toBe(true);
+
+    input.write("\r");
+    expect(await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_CLEAR))).toBe(true);
+    expect(await waitUntilAttention(() => stdoutText().includes("CHOICE_ACCEPTED"))).toBe(true);
+    expect(await waitUntilAttention(() => choiceResolved)).toBe(true);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+
+  test("destructive confirmation in Windows Terminal: attention while waiting, cleared after the user answers", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let confirmResolved = false;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { WT_SESSION: "test-session", NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        await opt.confirmDestructiveAction!({
+          id: "perm-attention-1",
+          tool: "execShell",
+          action: "file_delete",
+          title: "删除文件",
+        });
+        confirmResolved = true;
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("rm it\r");
+    expect(
+      await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_INDETERMINATE)),
+    ).toBe(true);
+
+    input.write("\r"); // 默认高亮为取消。
+    expect(await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_CLEAR))).toBe(true);
+    expect(await waitUntilAttention(() => confirmResolved)).toBe(true);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+  });
+});
+
+describe("terminal attention — turn-completed threshold through the workspace", () => {
+  // turn 2 要真实睡过 5s 阈值，超出 bun test 默认单测超时，显式放宽。
+  test(
+    "short success turn stays silent; long success turn rings the bell on the real output",
+    async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let turnCount = 0;
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async () => {
+        turnCount += 1;
+        if (turnCount === 2) {
+          await Bun.sleep(TURN_COMPLETION_ATTENTION_THRESHOLD_MS + 250);
+        }
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    // 窗口标题 OSC 0/2 序列同样以 BEL 结尾（buildWindowTitle），先剔除再
+    // 断言「裸 BEL」——turn-completed attention 在非 WT 环境只写一个 \x07。
+    const standaloneBellSeen = () =>
+      stdoutText().replace(/\x1b\][02];[^\x07]*\x07/g, "").includes("\x07");
+
+    // 短对话：绝不响。
+    input.write("quick\r");
+    expect(await waitUntilAttention(() => turnCount >= 1)).toBe(true);
+    await Bun.sleep(300); // 留出 BEL 决策点（runAgentChat 返回后立即评估）
+    expect(standaloneBellSeen()).toBe(false);
+
+    // 长任务（> 阈值）：响铃。
+    input.write("long\r");
+    expect(await waitUntilAttention(() => standaloneBellSeen(), 10_000)).toBe(true);
+
+    input.write("/exit\r");
+    input.end();
+    await Promise.race([wp, Bun.sleep(3000)]);
+    },
+    15_000,
+  );
 });

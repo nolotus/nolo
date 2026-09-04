@@ -76,7 +76,11 @@ import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
-import { emitTerminalBell, shouldEmitTerminalBell } from "./terminalNotification";
+import {
+  emitTerminalAttention,
+  runWithInputRequiredAttention,
+  shouldEmitTerminalBell,
+} from "./terminalNotification";
 import {
   createHistoryOutputStream,
   startTurn,
@@ -943,18 +947,27 @@ export async function runOneAgentTurn(
   const requestUserChoice =
     isInteractiveInput(ctx.input) && ctx.dialogHost
       ? async (choiceReq: UserChoiceRequest): Promise<UserChoiceResult> => {
-          try {
-            return await ctx.dialogHost!.run((anchor) =>
-              runAskChoiceDialog({
-                request: choiceReq,
-                input: ctx.input as NodeJS.ReadStream,
-                output: ctx.output as NodeJS.WritableStream,
-                ...anchor,
-              }),
-            );
-          } catch {
-            return { kind: "cancelled" };
-          }
+          // ask_user 把 Agent 从自主运行切成等用户选择：立即提醒（BEL +
+          // Windows Terminal indeterminate progress，无时长门槛——等待本身
+          // 就值得提醒）；作答 / 取消 / 异常任何退出路径都由 finally 清掉
+          // progress（见 runWithInputRequiredAttention）。
+          return await runWithInputRequiredAttention(
+            { output: ctx.output, env: ctx.effectiveEnv },
+            async () => {
+              try {
+                return await ctx.dialogHost!.run((anchor) =>
+                  runAskChoiceDialog({
+                    request: choiceReq,
+                    input: ctx.input as NodeJS.ReadStream,
+                    output: ctx.output as NodeJS.WritableStream,
+                    ...anchor,
+                  }),
+                );
+              } catch {
+                return { kind: "cancelled" };
+              }
+            },
+          );
         }
       : undefined;
   ctx.runRegistryPoller.beginHold();
@@ -967,6 +980,7 @@ export async function runOneAgentTurn(
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
+    const turnStartedAtMs = Date.now();
     const runResult = await runAgentChat(
       ctx.options.scriptDir,
       ctx.state,
@@ -1042,15 +1056,23 @@ export async function runOneAgentTurn(
     }
     const wasAborted = ctx.activeTurnAbort.signal.aborted;
     ctx.activeTurnAbort = null;
+    // turn-completed attention 只对「跑了足够久的成功长任务」响：300ms 的
+    // 普通聊天每句都响会非常烦（门槛见 TURN_COMPLETION_ATTENTION_THRESHOLD_MS）。
+    // Windows Terminal 下附带一条 OSC 9;4 clear，防御性清掉任何残留 progress。
     if (
       shouldEmitTerminalBell({
         wasAborted,
         streamInterrupted: runResult.streamInterrupted,
         exitCode: runResult.exitCode,
         interactive: isInteractiveInput(ctx.input),
+        durationMs: Date.now() - turnStartedAtMs,
       })
     ) {
-      emitTerminalBell(ctx.output);
+      emitTerminalAttention({
+        output: ctx.output,
+        env: ctx.effectiveEnv,
+        reason: "turn-completed",
+      });
     }
     if (isInteractiveInput(ctx.input)) {
       finalizeCurrentTurn(ctx.history);
