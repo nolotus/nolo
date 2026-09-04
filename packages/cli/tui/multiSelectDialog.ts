@@ -34,7 +34,7 @@ import { SGR_MOUSE_REGEX, parseScrollAction } from "./tuiScrollbar";
  *
  * The keyboard layer is the same `createRawKeyReader` used by selectDialog /
  * askChoiceDialog / confirmDialog - one implementation. That reader
- * disambiguates a bare ESC from an ESC-led CSI/SGR sequence with a bounded
+ * disambiguates a bare ESC from an ESC-led ANSI escape or SGR sequence with a bounded
  * 30ms wait: a lone ESC stays pending until either a continuation byte
  * arrives (then the whole `\x1b[<...M` / arrow CSI is reassembled and handed
  * to the caller) or the timer fires with no continuation (then it is a
@@ -166,6 +166,8 @@ export async function runMultiSelectDialog<TValue>(args: {
       }),
     bottomAnchored,
     resolveBottomRow,
+    session,
+    setReservedRows: (args as any).setReservedRows,
   });
   const paint = painter.paint;
 
@@ -285,10 +287,10 @@ export async function runMultiSelectDialog<TValue>(args: {
     session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
+    painter.clear();
     if (input.isTTY) {
       drainInputBuffer(input);
       session.releaseRaw(rawAcquired);
-      painter.clear();
     }
   }
 }

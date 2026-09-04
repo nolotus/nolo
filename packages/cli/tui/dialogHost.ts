@@ -43,6 +43,9 @@ export type DialogHostComposer = {
   /** The fixed input owns the user `/mouse on|off` preference. */
   isMouseEnabled?(): boolean;
   setMouseEnabled?(enabled: boolean): void;
+  /** Phase 3: report foreground modal row reservation to the composer / workspace */
+  setReservedRows?(rows: number): void;
+  getReservedRows?(): number;
 };
 
 /**
@@ -88,6 +91,10 @@ export type DialogSession = {
   acquireRaw(): boolean;
   /** Restore raw mode exactly when a matching `acquireRaw()` returned true. */
   releaseRaw(acquired: boolean): void;
+  /** Report the number of screen rows reserved by the active modal. */
+  setReservedRows?(rows: number): void;
+  /** Get currently reserved row count. */
+  getReservedRows?(): number;
 };
 
 /** Canonical dialog-owned mouse reporting pair (standalone sessions only). */
@@ -105,6 +112,7 @@ export function createStandaloneDialogSession(args: {
   output: NodeJS.WritableStream;
 }): DialogSession {
   let mouseReportingOwned = false;
+  let reservedRows = 0;
   return {
     setMouseReporting(enabled) {
       if (enabled && !mouseReportingOwned) {
@@ -125,6 +133,12 @@ export function createStandaloneDialogSession(args: {
     releaseRaw(acquired) {
       if (!acquired) return;
       args.input.setRawMode?.(false);
+    },
+    setReservedRows(rows) {
+      reservedRows = Math.max(0, rows);
+    },
+    getReservedRows() {
+      return reservedRows;
     },
   };
 }
@@ -148,6 +162,9 @@ export type DialogAnchor = {
    * at the pre-resize rows.
    */
   bottomRow: () => number;
+  /** Phase 3: report modal rows reserved above the composer */
+  setReservedRows?: (rows: number) => void;
+  getReservedRows?: () => number;
 };
 
 export type DialogHost = {
@@ -166,6 +183,7 @@ export type DialogHost = {
   /** True while `run()` or `withKeyboard()` currently holds the keyboard. */
   isKeyboardClaimed(): boolean;
   repaint(): void;
+  getReservedRows(): number;
 };
 
 const DEFAULT_TTY_ROWS = 24;
@@ -215,6 +233,7 @@ export function createDialogHost(args: {
   // nowhere else for it to live.
   let keyboardClaimed = false;
   let foregroundRepaint: (() => void) | null = null;
+  let reservedRows = 0;
 
   // Host-owned terminal session handed to every framed dialog via the anchor.
   // Mouse reporting: the workspace composer is the owner of record — pause()
@@ -232,8 +251,16 @@ export function createDialogHost(args: {
     },
     acquireRaw: () => false,
     releaseRaw: () => {},
+    setReservedRows: (rows) => {
+      const next = Math.max(0, rows);
+      if (next !== reservedRows) {
+        reservedRows = next;
+        args.composer.setReservedRows?.(next);
+        args.renderUnderlay?.();
+      }
+    },
+    getReservedRows: () => reservedRows,
   };
-
 
   const claimKeyboard = () => {
     keyboardClaimed = true;
@@ -266,6 +293,8 @@ export function createDialogHost(args: {
             output: args.output,
             inputLines: args.composer.getInputLines(),
           }),
+        setReservedRows: (rows) => hostedSession.setReservedRows?.(rows),
+        getReservedRows: () => hostedSession.getReservedRows?.() ?? 0,
       };
       claimKeyboard();
       // pause() flips isPaused(), which is what suppresses the transcript
@@ -275,6 +304,7 @@ export function createDialogHost(args: {
       try {
         return await body(anchor);
       } finally {
+        hostedSession.setReservedRows?.(0);
         foregroundRepaint = null;
         resetHistoryFrameDiffCache(args.output);
         args.composer.resumeFromDialog();
@@ -300,5 +330,6 @@ export function createDialogHost(args: {
       args.renderUnderlay?.();
       foregroundRepaint?.();
     },
+    getReservedRows: () => reservedRows,
   };
 }

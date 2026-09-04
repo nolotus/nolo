@@ -636,6 +636,15 @@ export function describeLocalRunFailure(
   message: string,
   rawError?: unknown,
 ): string {
+  if (
+    rawError &&
+    typeof rawError === "object" &&
+    "code" in rawError &&
+    (rawError as { code?: unknown }).code === "PLATFORM_STREAM_INTERRUPTED"
+  ) {
+    return "[nolo] The platform LLM stream was interrupted before the turn completed. Your conversation was preserved. Send another message to continue.\n";
+  }
+
   // 客户端版本闸门拒绝（本地 self-check 在 providerResolution 抛错，Error 上带
   // code + 结构化 detail）：渲染含模型/所需版本/升级命令的可操作提示。与
   // agentRunStream 的 server-run 分支共用同一份渲染，避免文案漂移。

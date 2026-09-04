@@ -48,6 +48,7 @@ import { t } from "./i18n";
 import {
   clearAnchoredLines,
   computeVisibleWindow,
+  createDialogFramePainter,
   createRawKeyReader,
   createWheelThrottle,
   drainInputBuffer,
@@ -67,11 +68,11 @@ import type { UserChoiceRequest, UserChoiceResult } from "../client/localRuntime
 
 // ── Rendering ──────────────────────────────────────────────────────
 
-const CSI_TAB = "\t";
-const CSI_SHIFT_TAB = "\x1b[Z";
-const CSI_BACKSPACE = "\x7f";
-const CSI_BACKSPACE_ALT = "\b";
-const CSI_SPACE = " ";
+const KEY_TAB = "\t";
+const KEY_SHIFT_TAB = "\x1b[Z";
+const KEY_BACKSPACE = "\x7f";
+const KEY_BACKSPACE_ALT = "\b";
+const KEY_SPACE = " ";
 
 export type AskChoiceCursor = {
   /** 0-based line index inside the rendered frame. */
@@ -268,7 +269,6 @@ export async function runAskChoiceDialog(args: {
 
   const wheelThrottle = createWheelThrottle();
   let rawAcquired = false;
-  let renderedLineCount = 0;
   const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
   const resolveBottomRow = () =>
     Math.max(
@@ -277,118 +277,22 @@ export async function runAskChoiceDialog(args: {
         ? args.bottomRow()
         : args.bottomRow ?? 0,
     );
-  let lastBottomRow = 0;
-  // Whether we have already scrolled the transcript up once to make room for
-  // the panel. On the first anchored paint we Scroll Up `lineCount` lines so
-  // the existing messages move into scrollback (still reachable by scrolling
-  // up) instead of being overwritten by the panel's absolute-row paint.
-  let scrolledHeadroom = false;
-  // Unanchored Other-focus paint leaves the real cursor mid-frame for IME.
-  // Next paint / exit clear must restore to "one line below previous frame"
-  // before the classic `\x1b[1A\x1b[2K` clear loop, or the UI drifts upward.
-  let unanchoredCursorLift = 0;
-  const restoreUnanchoredCursor = () => {
-    if (unanchoredCursorLift <= 0) return;
-    output.write(`\x1b[${unanchoredCursorLift}B`);
-    unanchoredCursorLift = 0;
-  };
 
-  const paint = () => {
-    const frame = renderAskChoiceFrame(state, { bottomAnchored });
-    const lines = frame.text.split("\n");
-    const lineCount = lines.length;
-    const canPosition = outputIsTty(output) && typeof output.write === "function";
-
-    if (bottomAnchored && canPosition) {
-      const anchorRow = resolveBottomRow();
-      const ttyRows =
-        typeof output === "object" &&
-        output !== null &&
-        "rows" in output &&
-        typeof (output as { rows?: unknown }).rows === "number"
-          ? (output as { rows: number }).rows
-          : 24;
-
-      if (!scrolledHeadroom) {
-        // First paint: scroll the whole screen up by `lineCount` lines so the
-        // panel occupies freshly blanked rows at the bottom instead of painting
-        // over existing messages. `CSI n S` (Scroll Up) scrolls the entire
-        // scroll region (full screen by default) up by n lines regardless of
-        // cursor position: the top n lines enter scrollback (still reachable by
-        // scrolling up) and n blank lines appear at the bottom. The panel then
-        // paints into those blank rows via the existing CUP loop, so messages
-        // are pushed up rather than overwritten.
-        const scrollN = Math.min(lineCount, Math.max(0, ttyRows - 1));
-        if (scrollN > 0) {
-          output.write(`\x1b[${scrollN}S`);
-        }
-        scrolledHeadroom = true;
-      } else if (lineCount > renderedLineCount) {
-        // Subsequent paint: if the panel grew taller (switching question tabs,
-        // Other text wrapping, detail expanding), scroll up by the delta so the
-        // newly grown top lines land in newly blanked bottom rows instead of
-        // clearing and overwriting whatever sits above the panel.
-        const delta = lineCount - renderedLineCount;
-        const scrollN = Math.min(delta, Math.max(0, ttyRows - 1));
-        if (scrollN > 0) {
-          output.write(`\x1b[${scrollN}S`);
-        }
-      }
-
-      clearAnchoredLines(
-        output,
-        lastBottomRow > 0 ? lastBottomRow : anchorRow,
-        renderedLineCount,
-      );
-      for (let i = 0; i < lines.length; i++) {
-        const row = anchorRow - (lines.length - 1 - i);
-        if (row < 1) break;
-        output.write(`\x1b[${row};1H\x1b[2K${lines[i]}`);
-      }
-      lastBottomRow = anchorRow;
-      renderedLineCount = lineCount;
-      unanchoredCursorLift = 0;
-      // Place the real cursor on the Other text so IME candidates follow it.
-      if (frame.otherCursor) {
-        const cursorRow =
-          anchorRow - (lineCount - 1 - frame.otherCursor.lineIndex);
-        if (cursorRow >= 1) {
-          output.write(`\x1b[${cursorRow};${frame.otherCursor.col + 1}H`);
-        }
-      }
-      return;
-    }
-
-    if (canPosition) {
-      restoreUnanchoredCursor();
-      for (let i = 0; i < renderedLineCount; i++) {
-        output.write("\x1b[1A\x1b[2K");
-      }
-      if (renderedLineCount > 0 && lineCount > renderedLineCount) {
-        const delta = lineCount - renderedLineCount;
-        output.write("\n".repeat(delta));
-        output.write(`\x1b[${delta}A`);
-      }
-      output.write(`${frame.text}\n`);
-      renderedLineCount = lineCount;
-      if (frame.otherCursor) {
-        // Unanchored path: frame was written then a trailing \n, so the
-        // cursor sits one line below the frame. Walk back to the Other row
-        // and CUP to its column.
-        const linesFromBottom = lineCount - frame.otherCursor.lineIndex;
-        output.write(`\x1b[${linesFromBottom}A`);
-        output.write(`\x1b[${frame.otherCursor.col + 1}G`);
-        unanchoredCursorLift = linesFromBottom;
-      }
-      return;
-    }
-
-    if (typeof output.write === "function") {
-      output.write(`${frame.text}\n`);
-    }
-    renderedLineCount = lineCount;
-    unanchoredCursorLift = 0;
-  };
+  const painter = createDialogFramePainter({
+    output,
+    render: () => {
+      const frame = renderAskChoiceFrame(state, { bottomAnchored });
+      return {
+        text: frame.text,
+        cursor: frame.otherCursor,
+      };
+    },
+    bottomAnchored,
+    resolveBottomRow,
+    session,
+    setReservedRows: (args as any).setReservedRows,
+  });
+  const paint = painter.paint;
 
   const resizeTarget = output as NodeJS.WritableStream & {
     on?: (event: string, listener: () => void) => void;
@@ -454,9 +358,9 @@ export async function runAskChoiceDialog(args: {
       const q = state.questions[state.activeIndex];
       const isOtherRow = qs.cursorIndex >= q.choices.length;
 
-      if (sequence === CSI_SHIFT_TAB) {
+      if (sequence === KEY_SHIFT_TAB) {
         action = { type: "PREV_TAB" };
-      } else if (sequence === CSI_TAB) {
+      } else if (sequence === KEY_TAB) {
         action = { type: "NEXT_TAB" };
       } else if (isCancel(sequence)) {
         action = { type: "CANCEL" };
@@ -464,7 +368,7 @@ export async function runAskChoiceDialog(args: {
         action = { type: "MOVE_CURSOR", delta: -1 };
       } else if (isArrowDown(sequence)) {
         action = { type: "MOVE_CURSOR", delta: 1 };
-      } else if (sequence === CSI_SPACE) {
+      } else if (sequence === KEY_SPACE) {
         if (qs.otherFocused) {
           // Literal space while typing Other (single + multi).
           action = {
@@ -493,8 +397,8 @@ export async function runAskChoiceDialog(args: {
           action = { type: "SELECT_AT_CURSOR" };
         }
       } else if (
-        sequence === CSI_BACKSPACE ||
-        sequence === CSI_BACKSPACE_ALT
+        sequence === KEY_BACKSPACE ||
+        sequence === KEY_BACKSPACE_ALT
       ) {
         if (qs.otherFocused && qs.otherText.length > 0) {
           // Delete one Unicode code point, not one UTF-16 unit, so a CJK
@@ -556,22 +460,10 @@ export async function runAskChoiceDialog(args: {
     session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
+    painter.clear();
     if (input.isTTY) {
       drainInputBuffer(input);
       session.releaseRaw(rawAcquired);
-      if (bottomAnchored) {
-        clearAnchoredLines(
-          output,
-          lastBottomRow > 0 ? lastBottomRow : resolveBottomRow(),
-          renderedLineCount,
-        );
-      } else {
-        restoreUnanchoredCursor();
-        for (let i = 0; i < renderedLineCount; i++) {
-          output.write("\x1b[1A\x1b[2K");
-        }
-      }
-      renderedLineCount = 0;
     }
   }
 

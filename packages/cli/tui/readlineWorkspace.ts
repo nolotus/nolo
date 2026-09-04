@@ -191,6 +191,7 @@ import {
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
 // 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
 import { createTuiRender } from "./tuiRender";
+import { resolveHistoryViewportHeight } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
 // 本文件 → tuiSlashRouter；后者禁止回指本文件。
@@ -656,7 +657,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       fixedInput.repaint(buffer, cursorPos);
     },
     onTranscriptScroll: (action) => {
-      applyScrollAction(history, action as import("./tuiScrollbar").ScrollAction, output, fixedInput.getInputLines());
+      applyScrollAction(
+        history,
+        action as import("./tuiScrollbar").ScrollAction,
+        output,
+        fixedInput.getInputLines(),
+        dialogHost.getReservedRows(),
+      );
     },
     output: output as NodeJS.WritableStream,
     // The decoder-drain hook is only bound once the interactive raw-mode
@@ -699,6 +706,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       get cursorPos() {
         return cursorPos;
       },
+      getReservedRows: () => dialogHost.getReservedRows(),
     });
 
   const refreshGitStatus = (): void => {
@@ -1323,7 +1331,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const tty = output as { rows?: number; columns?: number };
         const rows = tty.rows ?? 24;
         const columns = tty.columns ?? 80;
-        const visibleHeight = Math.max(1, rows - fixedInput.getInputLines());
+        const reservedRows = dialogHost.getReservedRows();
+        const visibleHeight = Math.max(
+          1,
+          resolveHistoryViewportHeight(
+            rows,
+            fixedInput.getInputLines(),
+            reservedRows,
+          ),
+        );
         const contentWidth = Math.max(1, columns - 1);
         const step = autoScrollStep();
 
@@ -1351,6 +1367,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           lastDragMouseX - 1,
           contentWidth,
           history.scrollTop,
+          visibleHeight,
         );
         if (hit) {
           selectionState.head = hit;
@@ -1612,7 +1629,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         const tty = output as { rows?: number; columns?: number };
         const rows = tty.rows ?? 24;
         const columns = tty.columns ?? 80;
-        const visibleHeight = Math.max(1, rows - fixedInput.getInputLines());
+        const reservedRows = dialogHost.getReservedRows();
+        const visibleHeight = Math.max(
+          1,
+          resolveHistoryViewportHeight(
+            rows,
+            fixedInput.getInputLines(),
+            reservedRows,
+          ),
+        );
         const contentWidth = Math.max(1, columns - 1);
         const screenRow = mouseEvent.y - 1;
         const screenCol = mouseEvent.x - 1;
@@ -1626,6 +1651,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               screenCol,
               contentWidth,
               history.scrollTop,
+              visibleHeight,
             );
             selectionState.anchor = hit;
             selectionState.head = hit;
@@ -1651,6 +1677,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             screenCol,
             contentWidth,
             history.scrollTop,
+            visibleHeight,
           );
           if (hit) {
             selectionState.head = hit;
@@ -1680,6 +1707,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
               screenCol,
               contentWidth,
               history.scrollTop,
+              visibleHeight,
             );
             if (releaseHit) selectionState.head = releaseHit;
           }

@@ -71,6 +71,60 @@ import {
 // Platform endpoint selection is resolved before this adapter; this module
 // handles both chat.completions and Responses wire formats.
 
+export class PlatformStreamInterruptedError extends Error {
+  readonly code = "PLATFORM_STREAM_INTERRUPTED";
+  override readonly name = "PlatformStreamInterrupted";
+  readonly phase: "pre-headers" | "streaming";
+  readonly httpStatus: number;
+  readonly frameCount: number;
+  readonly textChars: number;
+  readonly sawDone: boolean;
+  readonly sawUsage: boolean;
+  readonly sawFinishReason: boolean;
+  readonly elapsedMs: number;
+
+  constructor(args: {
+    message?: string;
+    phase: "pre-headers" | "streaming";
+    httpStatus?: number;
+    frameCount?: number;
+    textChars?: number;
+    sawDone?: boolean;
+    sawUsage?: boolean;
+    sawFinishReason?: boolean;
+    elapsedMs?: number;
+    cause?: unknown;
+  }) {
+    super(
+      args.message ??
+        `Platform LLM stream interrupted (${args.phase}, frames=${args.frameCount ?? 0}, chars=${args.textChars ?? 0})`,
+      args.cause !== undefined ? { cause: args.cause } : undefined,
+    );
+    this.name = "PlatformStreamInterrupted";
+    this.phase = args.phase;
+    this.httpStatus = args.httpStatus ?? (args.phase === "streaming" ? 200 : 0);
+    this.frameCount = args.frameCount ?? 0;
+    this.textChars = args.textChars ?? 0;
+    this.sawDone = args.sawDone ?? false;
+    this.sawUsage = args.sawUsage ?? false;
+    this.sawFinishReason = args.sawFinishReason ?? false;
+    this.elapsedMs = args.elapsedMs ?? 0;
+    if (args.cause !== undefined && this.cause === undefined) {
+      this.cause = args.cause;
+    }
+  }
+}
+
+function isAbortOrTimeoutError(error: unknown): boolean {
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+    return error.name === "AbortError" || error.name === "TimeoutError";
+  }
+  if (error instanceof Error) {
+    return error.name === "AbortError" || error.name === "TimeoutError";
+  }
+  return false;
+}
+
 type EnvLike = Record<string, string | undefined>;
 
 const CHAT_PROXY_PATH = "/api/v1/chat";
@@ -196,6 +250,7 @@ export function buildPlatformChatCompletionRequest(args: {
    * runtime 调用会塌成同一个桶。
    */
   dialogId?: string;
+  requestId?: string;
 }) {
   const usesResponsesApi = isResponsesEndpoint(args.providerConfig.endpoint);
   const requestOptions = usesResponsesApi
@@ -280,6 +335,7 @@ export function buildPlatformChatCompletionRequest(args: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${args.providerConfig.authToken}`,
+        ...(args.requestId ? { "x-request-id": args.requestId } : {}),
         // 流式请求显式放弃压缩协商。实测记录（2026-09-01，glm-5-3-flash 经
         // nolo.chat）：某个时间窗内 SSE 响应带 content-encoding: gzip 返回，
         // 整条流被攒成 1 个 chunk，首字节 = 总生成时长（5.8/10.6/16.3s）；
@@ -559,6 +615,8 @@ export async function readPlatformChatSseCompletion(args: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
 }) {
+  const startedAtMs = Date.now();
+  let frameCount = 0;
   const state = {
     content: "",
     reasoning: "",
@@ -578,8 +636,38 @@ export async function readPlatformChatSseCompletion(args: {
     sawDone: false,
   };
 
-  for await (const frame of readSseFrames(args.response)) {
-    processPlatformChatSseEvent(frame, state);
+  try {
+    for await (const frame of readSseFrames(args.response)) {
+      frameCount += 1;
+      processPlatformChatSseEvent(frame, state);
+    }
+  } catch (cause) {
+    if (cause instanceof PlatformStreamInterruptedError) {
+      throw cause;
+    }
+    // 用户主动中断 / 连接期超时是调用方自己的意图（localLoop abort 路径、
+    // requestTimeoutMs），不能伪装成「流中断」：否则 abort 诊断与用户文案
+    // 都会被带偏（与 pre-headers catch 的 ：823 透传口径一致）。
+    if (isAbortOrTimeoutError(cause)) {
+      throw cause;
+    }
+    const elapsedMs = Date.now() - startedAtMs;
+    const textChars = state.content.length;
+    const sawDone = state.sawDone;
+    const sawUsage = Boolean(state.usage);
+    const sawFinishReason = Boolean(state.finishReason);
+    throw new PlatformStreamInterruptedError({
+      message: cause instanceof Error ? cause.message : "Platform chat SSE stream interrupted",
+      phase: "streaming",
+      httpStatus: 200,
+      frameCount,
+      textChars,
+      sawDone,
+      sawUsage,
+      sawFinishReason,
+      elapsedMs,
+      cause,
+    });
   }
 
   // Flush any think-tag parser state held across chunk boundaries (mirrors
@@ -600,6 +688,9 @@ export async function readPlatformChatSseCompletion(args: {
   }
   // 代理把上游故障编成 HTTP 200 + 错误帧；不抛就会伪装成空回答落进对话历史。
   throwIfChatCompletionStreamFailed(state);
+
+  const streamComplete = state.sawDone || Boolean(state.usage) || Boolean(state.finishReason);
+  const streamTruncated = !streamComplete;
 
   if (state.usesResponsesApi) {
     const response = state.completedResponsesPayload;
@@ -630,13 +721,13 @@ export async function readPlatformChatSseCompletion(args: {
             ? completionsToolCalls
             : finalizeResponsesToolCalls(state.responsesToolCalls);
     const finalUsage = mergeBillingIntoUsage(state.usage, state.billing);
-    const streamComplete = state.sawDone || !!state.usage || !!state.finishReason;
     return {
       content: normalizedFinal.content || state.content,
       ...(state.reasoning ? { reasoning_content: state.reasoning } : {}),
       ...(tool_calls.length > 0 ? { tool_calls } : {}),
       ...(finalUsage ? { usage: finalUsage } : {}),
       ...(streamComplete ? { stream_complete: true } : {}),
+      ...(streamTruncated ? { streamTruncated: true } : {}),
       // finish_reason 供 executePlatformChatCompletion 穿透给 localLoop 的
       // 空轮/截断判定；此前 reader 从不回传，流式路径恒缺。
       ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
@@ -645,13 +736,13 @@ export async function readPlatformChatSseCompletion(args: {
 
   const tool_calls = finalizeAccumulatedToolCalls(state.accumulatedToolCalls);
   const finalUsage = mergeBillingIntoUsage(state.usage, state.billing);
-  const streamComplete = state.sawDone || !!state.usage || !!state.finishReason;
   return {
     content: state.content,
     ...(state.reasoning ? { reasoning_content: state.reasoning } : {}),
     ...(tool_calls.length > 0 ? { tool_calls } : {}),
     ...(finalUsage ? { usage: finalUsage } : {}),
     ...(streamComplete ? { stream_complete: true } : {}),
+    ...(streamTruncated ? { streamTruncated: true } : {}),
     ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
   };
 }
@@ -686,6 +777,7 @@ export async function executePlatformChatCompletion(args: {
   fetchImpl: FetchLike;
   /** 计费归因用；透传给 buildPlatformChatCompletionRequest。 */
   dialogId?: string;
+  requestId?: string;
   stream?: boolean;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
@@ -702,6 +794,7 @@ export async function executePlatformChatCompletion(args: {
     tools: args.tools,
     stream: args.stream,
     ...(args.dialogId ? { dialogId: args.dialogId } : {}),
+    ...(args.requestId ? { requestId: args.requestId } : {}),
   });
   const controller = args.requestTimeoutMs ? new AbortController() : undefined;
   const timer = controller
@@ -716,6 +809,7 @@ export async function executePlatformChatCompletion(args: {
         args.requestTimeoutMs,
       )
     : undefined;
+  const startedAtMs = Date.now();
   let res: Response;
   try {
     res = await args.fetchImpl(request.url, {
@@ -725,6 +819,22 @@ export async function executePlatformChatCompletion(args: {
         : args.signal
           ? { signal: args.signal }
           : {}),
+    });
+  } catch (error) {
+    if (isAbortOrTimeoutError(error) || error instanceof PlatformStreamInterruptedError) {
+      throw error;
+    }
+    throw new PlatformStreamInterruptedError({
+      message: error instanceof Error ? error.message : "Platform chat request failed before headers",
+      phase: "pre-headers",
+      httpStatus: 0,
+      frameCount: 0,
+      textChars: 0,
+      sawDone: false,
+      sawUsage: false,
+      sawFinishReason: false,
+      elapsedMs: Date.now() - startedAtMs,
+      cause: error,
     });
   } finally {
     // 响应头已到（或请求失败）：解除计时，别掐正在流式输出的 body。
@@ -762,6 +872,7 @@ export async function executePlatformChatCompletion(args: {
       ...(streamed.reasoning_content ? { reasoning_content: streamed.reasoning_content } : {}),
       ...(streamed.usage ? { usage: streamed.usage } : {}),
       ...(streamed.stream_complete ? { stream_complete: true } : {}),
+      ...(streamed.streamTruncated ? { stream_truncated: true } : {}),
       // 流式 finish_reason 此前在 reader 与本返回两处都断掉，localLoop 的
       // finish_reason==="length" 截断诊断在流式路径从未生效——与
       // openAiCompatibleProvider 的穿透对齐。
@@ -797,6 +908,7 @@ export async function executePlatformChatCompletionWithFallback(args: {
   fetchImpl: FetchLike;
   /** 计费归因用；透传给 executePlatformChatCompletion。 */
   dialogId?: string;
+  requestId?: string;
   serverUrls: string[];
   requestTimeoutMs?: number;
   stream?: boolean;
@@ -812,6 +924,7 @@ export async function executePlatformChatCompletionWithFallback(args: {
       fetchImpl: args.fetchImpl,
       stream: args.stream,
       ...(args.dialogId ? { dialogId: args.dialogId } : {}),
+      ...(args.requestId ? { requestId: args.requestId } : {}),
       ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
       ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
     });
@@ -844,6 +957,7 @@ export async function executePlatformChatCompletionWithFallback(args: {
         fetchImpl: args.fetchImpl,
         stream: args.stream,
         ...(args.dialogId ? { dialogId: args.dialogId } : {}),
+        ...(args.requestId ? { requestId: args.requestId } : {}),
         ...(onTextDelta ? { onTextDelta } : {}),
         ...(onReasoningDelta ? { onReasoningDelta } : {}),
         // 只限「连接+首字节」；响应开始后长回答不受此超时影响。

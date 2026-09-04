@@ -24,6 +24,7 @@ export interface TuiRenderHost {
   readonly fixedInput: FixedInputController;
   readonly buffer: string;
   readonly cursorPos: number;
+  readonly getReservedRows?: () => number;
 }
 
 /**
@@ -91,11 +92,13 @@ export function createTuiRender(host: TuiRenderHost) {
     if (syncingLayout) return;
     syncingLayout = true;
     try {
+      const reservedRows = host.getReservedRows?.() ?? 0;
       renderHistory(
         output,
         history,
         host.fixedInput.getInputLines(),
         selectionState,
+        reservedRows,
       );
     } finally {
       syncingLayout = false;

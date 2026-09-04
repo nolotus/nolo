@@ -63,10 +63,10 @@ export function createWheelThrottle(limit = 3, windowMs = 80) {
   };
 }
 
-const CSI_ARROW_UP = "\x1b[A";
-const CSI_ARROW_DOWN = "\x1b[B";
-const CSI_ARROW_UP_APP = "\x1bOA";
-const CSI_ARROW_DOWN_APP = "\x1bOB";
+const KEY_ARROW_UP = "\x1b[A";
+const KEY_ARROW_DOWN = "\x1b[B";
+const KEY_ARROW_UP_APP = "\x1bOA";
+const KEY_ARROW_DOWN_APP = "\x1bOB";
 const DEFAULT_MAX_VISIBLE = 8;
 
 export function computeVisibleWindow(args: {
@@ -168,40 +168,69 @@ export function clearAnchoredLines(
   }
 }
 
+export type DialogFrameRenderResult =
+  | string
+  | {
+      text: string;
+      cursor?: { lineIndex: number; col: number } | null;
+    };
+
 /**
- * Shared frame painter for the list dialogs (select + multiSelect). Owns the
- * three paint regimes in one place so both dialogs stay byte-identical:
- *   - bottom-anchored + positionable output: clear where the frame WAS
- *     (tracked `lastBottomRow`), repaint at the row the composer occupies
- *     NOW — this is what makes the frame follow a terminal resize;
+ * Shared frame painter for framed dialogs (select, multiSelect, askChoice, confirm).
+ * Owns the three paint regimes in one place:
+ *   - bottom-anchored + positionable output: report reservation to host,
+ *     clear where the frame WAS (tracked `lastBottomRow`), repaint at the row
+ *     the composer occupies NOW — this is what makes the frame follow a terminal resize
+ *     and support modal growth/shrink without physical scrolling;
  *   - positionable output: clear the previously rendered lines, write below;
  *   - anything else (pipe / capture streams): plain writes.
- * `clear()` removes the last painted frame using the same regime, so a
- * dialog's cleanup never erases rows it did not paint.
+ * `clear()` removes the last painted frame using the same regime and resets reservation to 0,
+ * so a dialog's cleanup never erases rows it did not paint.
  */
 export function createDialogFramePainter(args: {
   output: NodeJS.WritableStream;
-  /** Build the frame text for the current state. */
-  render: () => string;
+  /** Build the frame text (or text + cursor) for the current state. */
+  render: () => DialogFrameRenderResult;
   bottomAnchored: boolean;
   /** Lazily resolved 1-indexed row the frame's last line sits on. */
   resolveBottomRow: () => number;
+  session?: DialogSession;
+  setReservedRows?: (rows: number) => void;
 }) {
   let renderedLineCount = 0;
   let lastBottomRow = 0;
+  let unanchoredCursorLift = 0;
+
+  const restoreUnanchoredCursor = () => {
+    if (unanchoredCursorLift <= 0) return;
+    if (typeof args.output.write === "function") {
+      args.output.write(`\x1b[${unanchoredCursorLift}B`);
+    }
+    unanchoredCursorLift = 0;
+  };
+
+  const reportReservation = (rows: number) => {
+    args.setReservedRows?.(rows);
+    args.session?.setReservedRows?.(rows);
+  };
+
   const paint = () => {
-    const frame = args.render();
-    const lines = frame.split("\n");
+    const rawFrame = args.render();
+    const frameText = typeof rawFrame === "string" ? rawFrame : rawFrame.text;
+    const cursor =
+      typeof rawFrame === "object" && rawFrame !== null ? rawFrame.cursor : null;
+    const lines = frameText.split("\n");
     const lineCount = lines.length;
     const canPosition =
       outputIsTty(args.output) && typeof args.output.write === "function";
 
     if (args.bottomAnchored && canPosition) {
+      reportReservation(lineCount);
       const anchorRow = args.resolveBottomRow();
       clearAnchoredLines(
         args.output,
         lastBottomRow > 0 ? lastBottomRow : anchorRow,
-        renderedLineCount
+        renderedLineCount,
       );
       for (let i = 0; i < lines.length; i += 1) {
         const row = anchorRow - (lines.length - 1 - i);
@@ -210,41 +239,72 @@ export function createDialogFramePainter(args: {
       }
       lastBottomRow = anchorRow;
       renderedLineCount = lineCount;
+
+      if (cursor) {
+        const cursorLineOffset = lineCount - 1 - cursor.lineIndex;
+        const cursorRow = anchorRow - cursorLineOffset;
+        if (cursorRow >= 1) {
+          args.output.write(`\x1b[${cursorRow};${cursor.col + 1}H`);
+        }
+      }
       return;
     }
 
     if (canPosition) {
+      restoreUnanchoredCursor();
       clearRenderedLines(args.output, renderedLineCount);
+      if (renderedLineCount > 0 && lineCount > renderedLineCount) {
+        const delta = lineCount - renderedLineCount;
+        args.output.write("\n".repeat(delta));
+        args.output.write(`\x1b[${delta}A`);
+      }
+      if (typeof args.output.write === "function") {
+        args.output.write(`${frameText}\n`);
+      }
+      renderedLineCount = lineCount;
+      if (cursor) {
+        const linesFromBottom = lineCount - cursor.lineIndex;
+        args.output.write(`\x1b[${linesFromBottom}A`);
+        args.output.write(`\x1b[${cursor.col + 1}G`);
+        unanchoredCursorLift = linesFromBottom;
+      }
+      return;
     }
+
     if (typeof args.output.write === "function") {
-      args.output.write(`${frame}\n`);
+      args.output.write(`${frameText}\n`);
     }
     renderedLineCount = lineCount;
+    unanchoredCursorLift = 0;
   };
   return {
     paint,
     clear() {
+      reportReservation(0);
       if (args.bottomAnchored) {
         clearAnchoredLines(
           args.output,
           lastBottomRow > 0 ? lastBottomRow : args.resolveBottomRow(),
-          renderedLineCount
+          renderedLineCount,
         );
       } else {
+        restoreUnanchoredCursor();
         clearRenderedLines(args.output, renderedLineCount);
       }
       renderedLineCount = 0;
+      unanchoredCursorLift = 0;
     },
+    getRenderedLineCount: () => renderedLineCount,
   };
 }
 
 
 export function isArrowUp(sequence: string) {
-  return sequence === CSI_ARROW_UP || sequence === CSI_ARROW_UP_APP;
+  return sequence === KEY_ARROW_UP || sequence === KEY_ARROW_UP_APP;
 }
 
 export function isArrowDown(sequence: string) {
-  return sequence === CSI_ARROW_DOWN || sequence === CSI_ARROW_DOWN_APP;
+  return sequence === KEY_ARROW_DOWN || sequence === KEY_ARROW_DOWN_APP;
 }
 
 export function isSubmit(sequence: string) {
@@ -287,10 +347,10 @@ export function createRawKeyReader(input: NodeJS.ReadStream): KeyReader {
       }
       if (mouse === undefined) return undefined; // incomplete report, wait
       for (const candidate of [
-        CSI_ARROW_UP,
-        CSI_ARROW_DOWN,
-        CSI_ARROW_UP_APP,
-        CSI_ARROW_DOWN_APP,
+        KEY_ARROW_UP,
+        KEY_ARROW_DOWN,
+        KEY_ARROW_UP_APP,
+        KEY_ARROW_DOWN_APP,
       ]) {
         if (buffer.startsWith(candidate)) {
           buffer = buffer.slice(candidate.length);
@@ -503,6 +563,8 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
       }),
     bottomAnchored,
     resolveBottomRow,
+    session,
+    setReservedRows: (args as any).setReservedRows,
   });
   const paint = painter.paint;
 
@@ -591,10 +653,10 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
     session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
+    painter.clear();
     if (input.isTTY) {
       drainInputBuffer(input);
       session.releaseRaw(rawAcquired);
-      painter.clear();
     }
   }
 }

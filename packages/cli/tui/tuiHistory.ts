@@ -33,6 +33,7 @@ import {
 } from "./theme";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER } from "../client/toolOutput";
+import { resolveHistoryViewportHeight } from "./tuiLayout";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
@@ -197,6 +198,7 @@ type HistoryFrameBuffer = {
   rows: number;
   columns: number;
   inputLines: number;
+  reservedRows?: number;
   lines: string[];
 };
 
@@ -1198,13 +1200,17 @@ export function renderHistory(
   output: NodeJS.WritableStream,
   history: TurnHistory,
   inputLines: number,
-  selection?: TuiSelectionState
+  selection?: TuiSelectionState,
+  reservedRows = 0,
 ): void {
   const tty = output as { isTTY?: boolean; rows?: number; columns?: number };
   if (!tty.isTTY) return;
   const rows = tty.rows ?? 24;
   const columns = tty.columns ?? 80;
-  const visibleHeight = Math.max(1, rows - inputLines);
+  const visibleHeight = Math.max(
+    1,
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+  );
   const contentWidth = Math.max(1, columns - 1);
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
@@ -1321,6 +1327,7 @@ export function renderHistory(
     prevBuffer.rows === rows &&
     prevBuffer.columns === columns &&
     prevBuffer.inputLines === inputLines &&
+    (prevBuffer.reservedRows ?? 0) === reservedRows &&
     prevBuffer.lines.length === visibleHeight;
   const prevLines = isGeometryCompatible ? prevBuffer.lines : undefined;
 
@@ -1350,6 +1357,7 @@ export function renderHistory(
       rows,
       columns,
       inputLines,
+      reservedRows,
       lines: nextLines,
     });
   }
@@ -1389,12 +1397,16 @@ export function applyScrollAction(
   history: TurnHistory,
   action: ScrollAction,
   output: NodeJS.WritableStream,
-  inputLines: number
+  inputLines: number,
+  reservedRows = 0,
 ): void {
   const tty = output as { rows?: number; columns?: number };
   const rows = tty.rows ?? 24;
   const columns = tty.columns ?? 80;
-  const visibleHeight = Math.max(1, rows - inputLines);
+  const visibleHeight = Math.max(
+    1,
+    resolveHistoryViewportHeight(rows, inputLines, reservedRows),
+  );
   const contentWidth = Math.max(1, columns - 1);
   const { totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
   let totalLines = finalizedLines;

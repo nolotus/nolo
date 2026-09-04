@@ -155,6 +155,7 @@ function resolveSelectableColumnRange(
 
 /**
  * 将屏幕行/列坐标转换为全局绝对坐标 SelectionPoint (globalRow + col)。
+ * 若传入 visibleHeight，当 screenRow 超出 [0, visibleHeight - 1] 视口范围时（如落在 modal 预留区或 composer 输入区）返回 null。
  */
 export function hitTestHistory(
   history: TurnHistory,
@@ -162,7 +163,11 @@ export function hitTestHistory(
   screenCol: number,
   _contentWidth: number,
   scrollTop: number,
+  visibleHeight?: number,
 ): SelectionPoint | null {
+  if (visibleHeight !== undefined && (screenRow < 0 || screenRow >= visibleHeight)) {
+    return null;
+  }
   const globalRow = Math.max(0, scrollTop + screenRow);
   const col = Math.max(0, screenCol);
   return { globalRow, col };
