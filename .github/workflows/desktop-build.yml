@@ -1,25 +1,10 @@
 name: Desktop Build
 
 on:
-  push:
-    branches: [alpha, main]
-    paths:
-      - "packages/desktop/**"
-      - "packages/app/**"
-      - "packages/chat/**"
-      - "packages/render/**"
-      - "packages/ai/**"
-      - "packages/agent-runtime/**"
-      - "packages/core/**"
-      - "packages/identity/**"
-      - "packages/web/**"
-      - "packages/shared/**"
-      - "scripts/dev/**"
-      - ".github/workflows/desktop-build.yml"
   workflow_dispatch:
     inputs:
       targets:
-        description: "Build targets"
+        description: "Build targets (repair/rebuild scope)"
         required: true
         default: all
         type: choice
@@ -28,6 +13,10 @@ on:
           - windows
           - macos
           - linux
+      version:
+        description: "Target desktop version (must equal projection-release-metadata.json at HEAD)"
+        required: true
+        type: string
 
 concurrency:
   group: desktop-build-${{ github.ref }}
@@ -41,24 +30,32 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.targets.outputs.matrix }}
-      channel: ${{ steps.channel.outputs.channel }}
-      tag: ${{ steps.tag.outputs.tag }}
+      channel: ${{ steps.metadata.outputs.channel }}
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
     steps:
-      - id: channel
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - id: metadata
+        name: Validate projection release metadata (fail closed)
         run: |
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            echo "channel=stable" >> "$GITHUB_OUTPUT"
-          else
-            echo "channel=alpha" >> "$GITHUB_OUTPUT"
-          fi
-      - id: tag
-        run: |
-          echo "tag=desktop-${{ steps.channel.outputs.channel }}-v$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # channel/version 只来自 projection-release-metadata.json（bun-nolo 生成，
+          # channel 由 SemVer 解析）。任何缺失、结构损坏、intent 缺失或与
+          # --expect-version 绑定不符都直接失败：不猜 channel，不重新生成版本。
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts \
+            --expect-intent release \
+            --expect-version "${{ inputs.version }}" \
+            --set-outputs channel,version,tag
       - id: targets
         run: |
           TARGETS="${{ github.event_name == 'push' && 'all' || inputs.targets }}"
           case "$TARGETS" in
-            all) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"}]}' >> "$GITHUB_OUTPUT" ;;
+            all) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"},{"os":"ubuntu-latest","label":"linux"}]}' >> "$GITHUB_OUTPUT" ;;
             windows) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"}]}' >> "$GITHUB_OUTPUT" ;;
             macos) echo 'matrix={"include":[{"os":"macos-latest","label":"macos"}]}' >> "$GITHUB_OUTPUT" ;;
             linux) echo 'matrix={"include":[{"os":"ubuntu-latest","label":"linux"}]}' >> "$GITHUB_OUTPUT" ;;

@@ -1,6 +1,6 @@
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
-import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
+import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
 import {
   compareAgentSelection,
   type AgentSelectionCandidate,
@@ -10,7 +10,7 @@ import {
 import {
   resolveBillingSource,
   type BillingSource,
-} from "./agentDiscovery";
+} from "./agentBilling";
 
 export {
   resolveAgentSelectionPriority,

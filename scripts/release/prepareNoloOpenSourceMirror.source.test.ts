@@ -1,4 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import {
+  PROJECTION_RELEASE_METADATA_FILENAME,
+  buildProjectionReleaseMetadata,
+  buildReleaseTag,
+  evaluateProjectionReleaseExpectations,
+  parseProjectionReleaseMetadata,
+  resolveChannelFromSemVer,
+  serializeProjectionReleaseMetadata,
+} from "./projectionReleaseMetadata";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,15 +42,38 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     expect(versionBumpSource).not.toContain('if [ "\\${GITHUB_REF}" = "refs/heads/main" ]');
   });
 
-  test("gates public desktop build dispatch on desktop version changes", () => {
+  test("gates public desktop dispatch on declared projection release metadata (not diffs, not branches)", () => {
     const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
     const versionBumpSource = source.slice(source.indexOf("const versionBump ="));
-    expect(versionBumpSource).toContain("Decide whether desktop build is needed");
-    expect(versionBumpSource).toContain("packages/desktop/package.json");
+    // 普通投影变化跳过 Desktop；只有 metadata 声明的 release 才 dispatch。
+    expect(versionBumpSource).toContain("Decide whether a desktop release is declared");
+    expect(versionBumpSource).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --print-version");
     expect(versionBumpSource).toContain("if: steps.desktop.outputs.build == 'true'");
-    expect(versionBumpSource).toContain('EVENT_NAME: \\${{ github.event_name }}');
-    expect(versionBumpSource).toContain('0000000000000000000000000000000000000000');
-    expect(versionBumpSource).toContain('git rev-parse --verify --quiet "\\$BEFORE_SHA^{commit}"');
+    // 旧的 before/after diff 启发式已删除：intent 单源是 projection release metadata。
+    expect(versionBumpSource).not.toContain("BEFORE_SHA");
+    // dispatch 显式绑定 metadata 版本，desktop-build 侧 fail-closed 复核。
+    expect(versionBumpSource).toContain('gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION"');
+  });
+
+  test("generated desktop-build workflow validates release metadata fail-closed and never derives channel from branch", () => {
+    const source = readFileSync(join(REPO_ROOT, "scripts/release/prepareNoloOpenSourceMirror.ts"), "utf8");
+    const desktopBuildSource = source.slice(source.indexOf("const desktopBuild ="), source.indexOf("const versionBump ="));
+    // dispatch-only：普通 projection push 不再直接触发 Desktop 发布。
+    expect(desktopBuildSource).toContain("workflow_dispatch:");
+    expect(desktopBuildSource).not.toContain("push:");
+    expect(desktopBuildSource).not.toContain("refs/heads/main");
+    expect(desktopBuildSource).not.toContain("GITHUB_REF");
+    // channel/version 单源来自 metadata；repair/rebuild 必须绑定目标版本。
+    // （断言匹配 prepare 源码的原始文本：模板字面量里的续行 \\ 与 \\${{ 均按原样出现。）
+    expect(desktopBuildSource).toContain("assertProjectionReleaseMetadata.ts \\\\");
+    expect(desktopBuildSource).toContain("--expect-intent release \\\\");
+    expect(desktopBuildSource).toContain('--expect-version "\\${{ inputs.version }}" \\\\');
+    expect(desktopBuildSource).toContain("--set-outputs channel,version,tag");
+    expect(desktopBuildSource).toContain("version:");
+
+    // targets=all 覆盖三平台，与发布步 NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES 契约一致。
+    expect(desktopBuildSource).toMatch(/all\) echo 'matrix=\{"include":\[\{"os":"windows-latest","label":"windows"\},\{"os":"macos-latest","label":"macos"\},\{"os":"ubuntu-latest","label":"linux"\}\]}'/);
+    expect(desktopBuildSource).toContain('NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES: "1"');
   });
 
   test("adds a post-publish npm install health check to the public CLI workflow", () => {
@@ -402,11 +434,22 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     await writeFile(join(tmpGateTestDir, "scripts/test/setupDomGlobals.ts"), "");
     await writeFile(
       join(tmpGateTestDir, "packages/desktop/package.json"),
-      JSON.stringify({ name: "desktop" }),
+      JSON.stringify({ name: "desktop", version: "0.63.0-alpha.7" }),
     );
     await writeFile(
       join(tmpGateTestDir, "packages/database/package.json"),
       JSON.stringify({ name: "database" }),
+    );
+    await writeFile(
+      join(tmpGateTestDir, PROJECTION_RELEASE_METADATA_FILENAME),
+      serializeProjectionReleaseMetadata({
+        schemaVersion: 1,
+        component: "desktop",
+        version: "0.63.0-alpha.7",
+        channel: "alpha",
+        releaseIntent: "none",
+        provenance: { sourceSha: "a".repeat(40), sourceBranch: "alpha" },
+      }),
     );
   };
 
@@ -417,6 +460,59 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     const result = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
     expect(result.passed).toBe(false);
     expect(result.violations.some((v) => v.category === "missing-scaffold")).toBe(true);
+  });
+
+  test("fails when projection release metadata is missing (no inferred release intent)", async () => {
+    await createCleanScaffold();
+    await rm(join(tmpGateTestDir, PROJECTION_RELEASE_METADATA_FILENAME));
+
+    const result = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
+    expect(result.passed).toBe(false);
+    expect(result.violations.some((v) => v.category === "release-metadata" && /missing/.test(v.message))).toBe(true);
+  });
+
+  test("fails when projection release metadata is malformed or lies about channel", async () => {
+    await createCleanScaffold();
+    await writeFile(join(tmpGateTestDir, PROJECTION_RELEASE_METADATA_FILENAME), "{ not json");
+
+    const malformed = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
+    expect(malformed.passed).toBe(false);
+    expect(malformed.violations.some((v) => v.category === "release-metadata")).toBe(true);
+
+    await writeFile(
+      join(tmpGateTestDir, PROJECTION_RELEASE_METADATA_FILENAME),
+      serializeProjectionReleaseMetadata({
+        schemaVersion: 1,
+        component: "desktop",
+        version: "0.63.0-alpha.7",
+        // SemVer 解析结果是 alpha，metadata 却谎报 stable：生成侧必须拦下
+        channel: "stable",
+        releaseIntent: "none",
+        provenance: { sourceSha: "b".repeat(40), sourceBranch: "alpha" },
+      }),
+    );
+    const channelLie = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
+    expect(channelLie.passed).toBe(false);
+    expect(channelLie.violations.some((v) => v.category === "release-metadata" && /channel/.test(v.message))).toBe(true);
+  });
+
+  test("fails when projection release metadata version drifts from packages/desktop/package.json", async () => {
+    await createCleanScaffold();
+    await writeFile(
+      join(tmpGateTestDir, PROJECTION_RELEASE_METADATA_FILENAME),
+      serializeProjectionReleaseMetadata({
+        schemaVersion: 1,
+        component: "desktop",
+        version: "0.63.0",
+        channel: "stable",
+        releaseIntent: "release",
+        provenance: { sourceSha: "c".repeat(40), sourceBranch: "main" },
+      }),
+    );
+
+    const result = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
+    expect(result.passed).toBe(false);
+    expect(result.violations.some((v) => v.category === "release-metadata" && /drifts/.test(v.message))).toBe(true);
   });
 
   test("fails when a hard-denied private package is present (including auth)", async () => {
@@ -578,6 +674,26 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     expect(publicVersionBump).toContain("branches: [main]");
     expect(publicVersionBump).toContain("version.includes('-') ? 'alpha' : 'latest'");
     expect(publicVersionBump).toContain('gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"');
+    expect(publicVersionBump).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --print-version");
+
+    // 生成的公开仓 workflow：dispatch-only、metadata fail-closed、targets=all 三平台。
+    const publicDesktopBuild = readFileSync(join(outDir, ".github/workflows/desktop-build.yml"), "utf8");
+    expect(publicDesktopBuild).not.toContain("push:");
+    expect(publicDesktopBuild).toContain("assertProjectionReleaseMetadata.ts");
+    expect(publicDesktopBuild).toContain('{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"},{"os":"ubuntu-latest","label":"linux"}');
+
+    // 生成的 projection release metadata：结构合法、版本与投影一致、channel 由 SemVer 解析。
+    const generatedMetadata = parseProjectionReleaseMetadata(
+      readFileSync(join(outDir, PROJECTION_RELEASE_METADATA_FILENAME), "utf8"),
+    );
+    const projectedDesktopVersion = (
+      JSON.parse(readFileSync(join(REPO_ROOT, "packages/desktop/package.json"), "utf8")) as { version?: string }
+    ).version;
+    expect(generatedMetadata.version).toBe(projectedDesktopVersion);
+    expect(generatedMetadata.channel).toBe(resolveChannelFromSemVer(projectedDesktopVersion ?? ""));
+    expect(generatedMetadata.releaseIntent === "release" || generatedMetadata.releaseIntent === "none").toBe(true);
+    expect(generatedMetadata.provenance.sourceSha).toMatch(/^[0-9a-f]{40}$/);
+
     await rm(outDir, { recursive: true, force: true });
   });
 
@@ -591,5 +707,156 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     const result = await verifyPublicProjectionGate({ outDir: tmpGateTestDir });
     expect(result.passed).toBe(true);
     expect(result.violations).toHaveLength(0);
+  });
+});
+
+describe("projection release metadata (bun-nolo owns release intent)", () => {
+  const ALPHA_VERSION = "0.63.0-alpha.7";
+  const STABLE_VERSION = "0.64.0";
+
+  test("resolves channel from SemVer only — alpha prerelease, stable release, fail closed otherwise", () => {
+    expect(resolveChannelFromSemVer(ALPHA_VERSION)).toBe("alpha");
+    expect(resolveChannelFromSemVer(STABLE_VERSION)).toBe("stable");
+    expect(resolveChannelFromSemVer("1.2.3-alpha.1+build.5")).toBe("alpha");
+
+    // 非法 SemVer：fail closed，禁止猜测 channel
+    expect(() => resolveChannelFromSemVer("not-a-version")).toThrow(/invalid SemVer/);
+    expect(() => resolveChannelFromSemVer("1.2")).toThrow(/invalid SemVer/);
+    expect(() => resolveChannelFromSemVer("01.2.3")).toThrow(/invalid SemVer/);
+    // 未知 prerelease channel：metadata schema 只表达 alpha/stable → fail closed
+    expect(() => resolveChannelFromSemVer("1.2.3-beta.1")).toThrow(/unsupported prerelease channel/);
+    expect(() => resolveChannelFromSemVer("1.2.3-rc.1")).toThrow(/unsupported prerelease channel/);
+  });
+
+  test("expresses desktop alpha release / stable release / no release intent from component tags", () => {
+    const alpha = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: ALPHA_VERSION,
+      headTags: [`desktop-v${ALPHA_VERSION}`, "cli-v0.33.0-alpha.33"],
+      sourceSha: "a".repeat(40),
+      sourceBranch: "alpha",
+    });
+    expect(alpha.releaseIntent).toBe("release");
+    expect(alpha.channel).toBe("alpha");
+    expect(buildReleaseTag(alpha)).toBe(`desktop-alpha-v${ALPHA_VERSION}`);
+
+    const stable = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: STABLE_VERSION,
+      headTags: [`desktop-v${STABLE_VERSION}`],
+      sourceSha: "b".repeat(40),
+      sourceBranch: "main",
+    });
+    expect(stable.releaseIntent).toBe("release");
+    expect(stable.channel).toBe("stable");
+    expect(buildReleaseTag(stable)).toBe(`desktop-stable-v${STABLE_VERSION}`);
+
+    // 普通 projection 变化：desktop 版本没被打 release tag ⇒ 无 release intent
+    const noIntent = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: ALPHA_VERSION,
+      headTags: ["cli-v0.33.0-alpha.33"],
+      sourceSha: "c".repeat(40),
+      sourceBranch: "alpha",
+    });
+    expect(noIntent.releaseIntent).toBe("none");
+    // intent=none 仍保留 channel/version/provenance，供审计与 repair 对账
+    expect(noIntent.channel).toBe("alpha");
+    expect(noIntent.version).toBe(ALPHA_VERSION);
+    expect(noIntent.provenance.sourceSha).toBe("c".repeat(40));
+  });
+
+  test("never derives channel from the public branch", () => {
+    // 公开仓只有 main；把 alpha 版本投影到 main 分支也必须是 alpha channel。
+    const onMain = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: ALPHA_VERSION,
+      headTags: [`desktop-v${ALPHA_VERSION}`],
+      sourceSha: "d".repeat(40),
+      sourceBranch: "main",
+    });
+    expect(onMain.channel).toBe("alpha");
+    expect(onMain.releaseIntent).toBe("release");
+
+    // 反向同理：stable 版本在 alpha 分支上仍是 stable channel。
+    const onAlpha = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: STABLE_VERSION,
+      headTags: [`desktop-v${STABLE_VERSION}`],
+      sourceSha: "e".repeat(40),
+      sourceBranch: "alpha",
+    });
+    expect(onAlpha.channel).toBe("stable");
+  });
+
+  test("parses serialized metadata fail-closed (structure, channel lie, provenance)", () => {
+    const metadata = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: ALPHA_VERSION,
+      headTags: [`desktop-v${ALPHA_VERSION}`],
+      sourceSha: "f".repeat(40),
+      sourceBranch: "alpha",
+    });
+    const roundTrip = parseProjectionReleaseMetadata(serializeProjectionReleaseMetadata(metadata));
+    expect(roundTrip).toEqual(metadata);
+
+    expect(() => parseProjectionReleaseMetadata("{")).toThrow(/not valid JSON/);
+    expect(() => parseProjectionReleaseMetadata('{"schemaVersion":99}')).toThrow(/schemaVersion/);
+    expect(() =>
+      parseProjectionReleaseMetadata(
+        serializeProjectionReleaseMetadata({ ...metadata, channel: "stable" }),
+      ),
+    ).toThrow(/does not match SemVer-derived channel/);
+    expect(() =>
+      parseProjectionReleaseMetadata(serializeProjectionReleaseMetadata({ ...metadata, releaseIntent: "publish" as never })),
+    ).toThrow(/releaseIntent/);
+    expect(() =>
+      parseProjectionReleaseMetadata(
+        serializeProjectionReleaseMetadata({ ...metadata, provenance: { sourceSha: "deadbeef", sourceBranch: "alpha" } }),
+      ),
+    ).toThrow(/sourceSha/);
+  });
+
+  test("evaluates expectations: drift fails closed, missing intent is a skip signal, version binding mismatch fails closed", () => {
+    const metadata = buildProjectionReleaseMetadata({
+      repoRoot: REPO_ROOT,
+      desktopVersion: ALPHA_VERSION,
+      headTags: [],
+      sourceSha: "1".repeat(40),
+      sourceBranch: "alpha",
+    });
+
+    // metadata 与投影 package.json 漂移 → throw（CLI 层映射为硬失败）
+    expect(() =>
+      evaluateProjectionReleaseExpectations({
+        metadata,
+        projectedDesktopVersion: "0.63.0-alpha.6",
+        expectIntent: true,
+      }),
+    ).toThrow(/drifts/);
+
+    // 合法 metadata 但无 release intent → 跳过信号（exit 1），不是错误
+    expect(
+      evaluateProjectionReleaseExpectations({ metadata, projectedDesktopVersion: ALPHA_VERSION, expectIntent: true }),
+    ).toBe("no-declared-intent");
+
+    // 有 intent 时绑定版本不匹配 → fail closed
+    const release = { ...metadata, releaseIntent: "release" as const };
+    expect(
+      evaluateProjectionReleaseExpectations({
+        metadata: release,
+        projectedDesktopVersion: ALPHA_VERSION,
+        expectIntent: true,
+        expectVersion: "0.63.0-alpha.6",
+      }),
+    ).toBe("version-binding-mismatch");
+    expect(
+      evaluateProjectionReleaseExpectations({
+        metadata: release,
+        projectedDesktopVersion: ALPHA_VERSION,
+        expectIntent: true,
+        expectVersion: ALPHA_VERSION,
+      }),
+    ).toBe("ok");
   });
 });

@@ -150,6 +150,11 @@ describe("nolo workspace tools", () => {
     expect(fn?.description).toContain("runnable agentKey");
     expect(fn?.description).toContain("Copy the agentKey verbatim");
     expect(fn?.description).toContain("do not infer it from the display name");
+    expect(fn?.parameters.properties.scope.enum).toEqual(["preferred", "public", "all"]);
+    expect(fn?.parameters.properties.publicOnly.description).toContain("Deprecated");
+    expect(fn?.parameters.properties.showUnavailable).toBeDefined();
+    expect(fn?.parameters.properties.verbose).toBeDefined();
+    expect(fn?.parameters.properties.space).toBeDefined();
   });
 
   test("readAgent requires the runnable agentKey from listAgents", () => {

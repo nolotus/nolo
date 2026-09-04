@@ -10,8 +10,10 @@ import {
 } from "../agent/safeAgentSummary";
 import {
   buildAgentDiscoveryResult,
+  resolveDiscoveryScope,
   type DiscoveryScope,
 } from "../agent/agentDiscovery";
+import { fetchPublicAgentsForDiscovery } from "../agent/publicAgentDiscovery";
 import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
@@ -630,6 +632,15 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   const limit = clampNoloPositiveInteger(args?.limit, 100, 500);
   const userRecords = await queryBestRecords(thunkApi, DataType.AGENT, limit);
   const favoritesMap = await fetchUserFavoriteAgentMap(thunkApi);
+  const runtime = getRuntime(thunkApi);
+  const scope = resolveDiscoveryScope({ scope: args?.scope, publicOnly: args?.publicOnly });
+  const publicRecords = scope === "preferred"
+    ? []
+    : await fetchPublicAgentsForDiscovery({
+        serverBase: runtime?.currentServer ?? "",
+        token: runtime?.currentToken,
+        limit,
+      });
 
   const recordsMap = new Map<string, any>();
   for (const record of userRecords) {
@@ -657,7 +668,6 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
     }
   }
 
-  const runtime = getRuntime(thunkApi);
   const userId = runtime?.currentUserId ?? undefined;
   // NOTE: We intentionally do NOT pass publicRecordExists here.
   // record.isPublic is a flag on the private record; it does NOT prove the
@@ -666,10 +676,11 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   // reads — not worth it for a convenience field. Per the safe-summary contract:
   // omit publicKey rather than emit one that cannot resolve. Explicit
   // record.publicKey (if present) is still trusted by toSafeAgentSummary.
-  const agents = Array.from(recordsMap.values()).map((record) =>
+  const agents = [...Array.from(recordsMap.values()), ...publicRecords].map((record) =>
     toSafeAgentSummary(record, {
       favoritesMap,
       userId,
+      publicRecordExists: publicRecords.includes(record) ? true : undefined,
     })
   );
 

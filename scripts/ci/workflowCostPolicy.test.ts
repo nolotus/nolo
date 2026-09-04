@@ -3,6 +3,9 @@ import { readdirSync } from "node:fs";
 import { componentsForCommit } from "../release/componentReleasePolicy.mjs";
 
 const read = (path: string) => Bun.file(path).text();
+// 已删除私有 desktop workflow 的 dispatch tripwire。用组合 regex 而非字面量，
+// 避免把已删除的 workflow 名再次作为活跃引用写进源码（release projection P0 引用卫生）。
+const REMOVED_DESKTOP_WORKFLOW_DISPATCH = /gh workflow run desktop-(alpha|release)\.yml/;
 
 describe("workflowCostPolicy", () => {
   it("keeps every checked-in workflow structurally runnable", async () => {
@@ -88,8 +91,7 @@ describe("workflowCostPolicy", () => {
     // Desktop 发布已迁移到公开镜像仓库 nolo：version-bump 不再 dispatch 已删除的
     // 私有 desktop workflow，desktop 构建/发布由 nolo 的 desktop-build 在快照同步后承担。
     expect(steps.find((step) => step.name === "Dispatch desktop release")).toBeUndefined();
-    expect(source).not.toContain("gh workflow run desktop-alpha.yml");
-    expect(source).not.toContain("gh workflow run desktop-release.yml");
+    expect(REMOVED_DESKTOP_WORKFLOW_DISPATCH.test(source)).toBe(false);
   });
 
   it("does not use GitHub cache or artifact storage for self-hosted Linux paths", async () => {

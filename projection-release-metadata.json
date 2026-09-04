@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "component": "desktop",
+  "version": "0.35.0",
+  "channel": "stable",
+  "releaseIntent": "none",
+  "provenance": {
+    "sourceSha": "e4533f4b68e28c2035cd1e7dfaaf44106912f509",
+    "sourceBranch": "alpha"
+  }
+}

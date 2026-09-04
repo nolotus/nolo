@@ -66,6 +66,9 @@ const mockQueryFetch = (records: unknown[]) => {
         { status: 200 },
       );
     }
+    if (url.includes("/rpc/getPublicAgents")) {
+      return new Response(JSON.stringify({ data: { data: records } }), { status: 200 });
+    }
     if (url.includes("/rpc/listFavorites") || url.includes("/api/v1/db/read/")) {
       return new Response(JSON.stringify({ data: [] }), { status: 200 });
     }
@@ -137,6 +140,20 @@ describe("listAgentsFunc", () => {
     );
     const agents = (result.rawData as any).agents;
     expect(agents).toHaveLength(3);
+  });
+
+  it("public datasource failure is surfaced instead of becoming an empty success", async () => {
+    mockQueryFetch(agentRecords);
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (String(input).includes("/rpc/getPublicAgents")) {
+        return new Response("catalog unavailable", { status: 503 });
+      }
+      return previousFetch(input, init);
+    }) as typeof fetch;
+    await expect(listAgentsFunc({ scope: "public" }, buildThunkApi())).rejects.toThrow(
+      "Public agent catalog request failed (503)",
+    );
   });
 
   it("游客（无 token/userId）返回空结果而非抛错", async () => {

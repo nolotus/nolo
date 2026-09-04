@@ -101,10 +101,12 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       description: "Confirmed dialog ids or dbKeys to delete.",
     },
   }, ["query"]);
-  add("listAgents", "List the current user's agents with runnable agentKey for delegation. Copy the agentKey verbatim; do not infer it from the display name. Agents currently rate-limited (429) are hidden by default and summarized in `unavailableAgents` with `unavailableCount`; pass showUnavailable: true to include them in `agents`.", {
-    space: stringToolParam("Optional space id or URL."),
-    publicOnly: { type: "boolean", description: "Only show public agents." },
+  add("listAgents", "List agents for delegation. Default scope='preferred' returns the user's favorites, owned, OAuth, custom API, and local agents only; scope='public' discovers shared/marketplace agents; scope='all' returns their deduplicated union. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. Rate-limited agents are hidden unless showUnavailable is true.", {
+    scope: { type: "string", enum: ["preferred", "public", "all"], description: "Discovery scope; preferred is the default and does not load the public marketplace." },
+    publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
     showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+    verbose: { type: "boolean", description: "Return full safe-summary details when supported." },
+    space: stringToolParam("Optional space id or URL."),
   });
   add("readAgent", "Read one agent's full config by exact agentKey returned by listAgents (agent-<userId>-<id> or agent-pub-<id>); do not use the display name.", {
     agent: stringToolParam("Exact agentKey from listAgents (preferred; copy verbatim; plain id or URL are compatibility fallbacks)."),
@@ -524,7 +526,11 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
       const cliArgs = ["agent", "list"];
       const space = noloStringArg(args.space);
       if (space) cliArgs.push("--space", space);
+      const scope = noloStringArg(args.scope);
+      if (scope) cliArgs.push("--scope", scope);
       if (args.publicOnly === true) cliArgs.push("--public-only");
+      if (args.showUnavailable === true) cliArgs.push("--show-unavailable");
+      if (args.verbose === true) cliArgs.push("--verbose");
       cliArgs.push("--json", "--safe");
       return cliArgs;
     }

@@ -120,6 +120,14 @@ describe("toSafeListedAgentSummary publicKey omission", () => {
   });
 });
 
+describe("parseAgentListArgs scope", () => {
+  it("parses explicit discovery scope and preserves legacy publicOnly", () => {
+    expect(parseAgentListArgs(["--scope", "public"]).scope).toBe("public");
+    expect(parseAgentListArgs(["--scope", "all"]).scope).toBe("all");
+    expect(parseAgentListArgs(["--public-only"]).publicOnly).toBe(true);
+  });
+});
+
 describe("parseAgentListArgs show-unavailable flag", () => {
   it("defaults to hidden and honors --show-unavailable", () => {
     expect(parseAgentListArgs([]).showUnavailable).toBe(false);

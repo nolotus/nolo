@@ -1,4 +1,8 @@
-import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
+import {
+  resolveBillingSource,
+  type AgentBillingCandidate,
+  type BillingSource,
+} from "./agentBilling";
 import type {
   SafeAgentSummary,
   CompactSafeAgentSummary,
@@ -12,74 +16,9 @@ import {
 } from "./safeAgentSummary";
 import { isAgentUnavailableNow } from "./agentAvailabilityShared";
 
-export type BillingSource =
-  | "user_subscription"
-  | "user_api"
-  | "platform_credits"
-  | "local";
-
 export type DiscoveryScope = "preferred" | "public" | "all";
-
-export interface AgentBillingCandidate {
-  local?: boolean;
-  isLocal?: boolean;
-  cliProvider?: string | null;
-  apiSource?: string | null;
-  provider?: string | null;
-  billingSource?: BillingSource | string | null;
-  isOAuth?: boolean;
-  apiKeyRef?: string | null;
-  isOwned?: boolean;
-  isPublic?: boolean;
-}
-
-/**
- * Resolve the explicit billing source for an agent.
- *
- * Rules:
- * 1. local: CLI local provider, local runtime, or explicit local flags.
- * 2. user_subscription: OAuth subscriptions (Anthropic/OpenAI/xAI OAuth via serverProxyPolicy).
- * 3. user_api: Custom API keys / endpoints configured on owned/custom agents.
- * 4. platform_credits: Public plaza agents, platform API sources, or unconfigured platform routes.
- */
-export function resolveBillingSource(candidate: AgentBillingCandidate): BillingSource {
-  if (
-    candidate?.local === true ||
-    candidate?.isLocal === true ||
-    candidate?.cliProvider === "local" ||
-    candidate?.apiSource === "local" ||
-    candidate?.provider === "local" ||
-    candidate?.billingSource === "local"
-  ) {
-    return "local";
-  }
-
-  // 非自有 Agent 的 OAuth/custom 信号（apiKeyRef/apiSource/billingSource）是
-  // record 作者可自声明的字段，不能证明由当前用户的订阅或 API 付费。无法
-  // 证明用户付费时一律保守归类 platform_credits：宁可对平台计费资源展示
-  // 扣费告知，也绝不把平台计费错标成 user 免费（错标方向才是危险的）。
-  if (candidate?.isOwned !== true) {
-    return "platform_credits";
-  }
-
-  if (
-    candidate?.isOAuth === true ||
-    candidate?.billingSource === "user_subscription" ||
-    candidate?.apiSource === "oauth" ||
-    isOAuthApiKeyRef(candidate?.apiKeyRef)
-  ) {
-    return "user_subscription";
-  }
-
-  if (
-    candidate?.apiSource === "custom" ||
-    candidate?.billingSource === "user_api"
-  ) {
-    return "user_api";
-  }
-
-  return "platform_credits";
-}
+export { resolveBillingSource };
+export type { AgentBillingCandidate, BillingSource };
 
 /**
  * Preferred agents:
@@ -157,18 +96,37 @@ export function resolveDiscoveryScope(args?: {
 /**
  * Filter agents according to the discovery scope.
  */
+function agentIdentityKeys(agent: SafeAgentSummary): string[] {
+  return [agent.agentKey, agent.publicKey, agent.id].filter(
+    (key): key is string => typeof key === "string" && key.length > 0,
+  );
+}
+
+export function deduplicateAgentSummaries<T extends SafeAgentSummary>(agents: T[]): T[] {
+  const byIdentity = new Map<string, T>();
+  for (const agent of agents) {
+    const keys = agentIdentityKeys(agent);
+    const existing = keys.map((key) => byIdentity.get(key)).find(Boolean);
+    if (!existing) {
+      for (const key of keys) byIdentity.set(key, agent);
+      continue;
+    }
+    // Hydrated favorites carry the preferred semantics; otherwise retain the
+    // first catalog record and never expose the same runnable agent twice.
+    const winner = isPreferredAgent(agent) && !isPreferredAgent(existing) ? agent : existing;
+    for (const key of new Set([...agentIdentityKeys(existing), ...keys])) byIdentity.set(key, winner);
+  }
+  return [...new Set(byIdentity.values())];
+}
+
 export function filterAgentsByScope<T extends SafeAgentSummary>(
   agents: T[],
   scope: DiscoveryScope
 ): T[] {
-  if (scope === "preferred") {
-    return agents.filter((agent) => isPreferredAgent(agent));
-  }
-  if (scope === "public") {
-    return agents.filter((agent) => isPublicDiscoveryAgent(agent));
-  }
-  // scope === "all": deduplicated union of preferred and public agents
-  return agents.filter((agent) => isPreferredAgent(agent) || agent.isPublic === true);
+  const unique = deduplicateAgentSummaries(agents);
+  if (scope === "preferred") return unique.filter((agent) => isPreferredAgent(agent));
+  if (scope === "public") return unique.filter((agent) => isPublicDiscoveryAgent(agent));
+  return unique.filter((agent) => isPreferredAgent(agent) || agent.isPublic === true);
 }
 
 export interface BuildAgentDiscoveryResultOptions<T extends SafeAgentSummary> {

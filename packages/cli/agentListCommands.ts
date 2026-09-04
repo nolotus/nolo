@@ -7,6 +7,7 @@ import {
   listLocalCachedAgents,
   listRemoteAgentsAcrossServers,
   listRemoteAgents,
+  listRemotePublicAgents,
   normalizeListedAgent,
   parseAgentListArgs,
   isAgentUnavailableNow,
@@ -37,7 +38,16 @@ export async function runAgentListCommand(
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const { wantJson, wantSafe, publicOnly, idsOnly, showUnavailable, verbose } = parseAgentListArgs(args);
+  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose } = parseAgentListArgs(args);
+  if (requestedScope && !["preferred", "public", "all"].includes(requestedScope)) {
+    throw new Error(`Invalid scope '${requestedScope}'`);
+  }
+  if (requestedScope && publicOnly && requestedScope !== "public") {
+    throw new Error(`Conflicting arguments: scope='${requestedScope}' conflicts with publicOnly=true.`);
+  }
+  // Keep the legacy CLI --public-only path on its existing companion-proof
+  // filtering; explicit --scope=public uses the marketplace datasource.
+  const scope = requestedScope ?? "preferred";
   const spaceInput = readOption(args, "--space") ?? readOption(args, "--space-id");
 
   const authToken = resolveAuthToken(args, env);
@@ -88,6 +98,19 @@ export async function runAgentListCommand(
           readDbRecord,
         });
         source = "remote-cache";
+      }
+    }
+
+    if (scope !== "preferred") {
+      const publicAgents = await Promise.all(serverUrls.map((url) => listRemotePublicAgents({
+        authToken, fetchImpl, serverUrl: url, limit: 500,
+      })));
+      agents = publicAgents.flat();
+      if (scope === "all") {
+        const preferred = await listRemoteAgentsAcrossServers({
+          authToken, fallbackFetchImpl, fetchImpl, serverUrls, userId,
+        });
+        agents = [...preferred.agents, ...agents];
       }
     }
 

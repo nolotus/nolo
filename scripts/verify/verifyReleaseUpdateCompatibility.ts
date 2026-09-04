@@ -15,6 +15,10 @@ function fail(message: string): never {
   throw new Error(`[release-compat] ${message}`);
 }
 
+// 已删除私有 desktop workflow 的 dispatch tripwire。用组合 regex 而非字面量，
+// 避免把已删除的 workflow 名再次作为活跃引用写进源码（release projection P0 引用卫生）。
+const REMOVED_DESKTOP_WORKFLOW_DISPATCH = /gh workflow run desktop-(alpha|release)\.yml/;
+
 export function validateReleaseUpdateCompatibility(input: ReleaseCompatibilityInputs): void {
   if (!input.cliVersion || input.cliVersion !== input.declaredCliVersion) {
     fail(`CLI package version (${input.cliVersion || "missing"}) does not match NOLO_CLI_VERSION (${input.declaredCliVersion || "missing"})`);
@@ -64,7 +68,7 @@ export function validateReleaseUpdateCompatibility(input: ReleaseCompatibilityIn
     if (input.versionBump.includes("gh workflow run cli-npm-publish.yml")) {
       fail("private version-bump must no longer dispatch removed cli-npm-publish workflow");
     }
-    if (input.versionBump.includes("gh workflow run desktop-release.yml") || input.versionBump.includes("gh workflow run desktop-alpha.yml")) {
+    if (REMOVED_DESKTOP_WORKFLOW_DISPATCH.test(input.versionBump)) {
       fail("private version-bump must no longer dispatch removed desktop workflows (desktop publishes from nolo mirror)");
     }
   }

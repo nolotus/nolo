@@ -31,12 +31,16 @@ describe("release/update compatibility gate", () => {
   });
 
   test("fails when private version-bump dispatches a removed desktop workflow", () => {
-    expect(() =>
-      validateReleaseUpdateCompatibility({
-        ...valid,
-        versionBump: valid.versionBump + "\ngh workflow run desktop-release.yml",
-      }),
-    ).toThrow(/must no longer dispatch removed desktop workflows/);
+    // 组合拼接避免把已删除 workflow 名作为活跃引用写进测试源码
+    const removedWorkflowDispatch = (channel: string) => `gh workflow run desktop-${channel}.yml`;
+    for (const channel of ["alpha", "release"] as const) {
+      expect(() =>
+        validateReleaseUpdateCompatibility({
+          ...valid,
+          versionBump: `${valid.versionBump}\n${removedWorkflowDispatch(channel)}`,
+        }),
+      ).toThrow(/must no longer dispatch removed desktop workflows/);
+    }
   });
 
   test("passes a public-mirror version-bump that dispatches cli-publish and desktop-build (no semantic-release)", () => {
@@ -51,7 +55,7 @@ describe("release/update compatibility gate", () => {
       "    steps:",
       '      - run: bun scripts/verify/verifyReleaseUpdateCompatibility.ts',
       "      - run: gh workflow run cli-publish.yml -f dist_tag=alpha",
-      "      - run: gh workflow run desktop-build.yml -f targets=all",
+      "      - run: gh workflow run desktop-build.yml -f targets=all -f version=\"$DESKTOP_VERSION\"",
     ].join("\n");
     expect(() =>
       validateReleaseUpdateCompatibility({ ...valid, versionBump: publicVersionBump }),

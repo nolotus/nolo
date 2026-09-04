@@ -39,38 +39,33 @@ jobs:
           CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
           gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
 
-      - name: Decide whether desktop build is needed
+      - name: Decide whether a desktop release is declared
         id: desktop
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.sha }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          # workflow_dispatch 没有 before；手动触发时保持可发布 desktop。
-          if [ "$EVENT_NAME" != "push" ] || [ -z "$BEFORE_SHA" ]; then
+          # Projection release metadata（bun-nolo 生成、随投影 commit 同步）是
+          # desktop release intent 的唯一来源。普通投影变化（无 release intent）
+          # 跳过 Desktop；metadata 缺失/损坏/与 packages/desktop/package.json
+          # 漂移时 assert 脚本以非 0/1 退出码硬失败（fail closed）。
+          DECISION=0
+          DECLARED_VERSION="$(bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --print-version)" || DECISION=$?
+          if [ "$DECISION" -eq 0 ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # branch 创建时 GitHub 会把 before 置为 40 个 0；它不是可 diff 的 commit。
-          # 无法确认 before 时保守放行 desktop build，避免守卫本身把发布打红。
-          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || ! git rev-parse --verify --quiet "$BEFORE_SHA^{commit}" >/dev/null; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # 公开仓的版本号由 bun-nolo release engine 单源决定；desktop 版本没变
-          # 说明这次投影不需要产出 desktop 安装包，避免 CLI-only sync 触发整套
-          # macOS/Windows desktop build（以及无关的 stable 版本守卫红噪音）。
-          if git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" -- packages/desktop/package.json | grep -q .; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
+            echo "version=$DECLARED_VERSION" >> "$GITHUB_OUTPUT"
+          elif [ "$DECISION" -eq 1 ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "projection release metadata failed fail-closed validation (exit $DECISION)" >&2
+            exit "$DECISION"
           fi
 
       - name: Dispatch desktop build
         if: steps.desktop.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DESKTOP_VERSION: ${{ steps.desktop.outputs.version }}
         run: |
           set -euo pipefail
-          gh workflow run desktop-build.yml -f targets=all
+          # 只 dispatch 已声明的 release metadata；目标版本显式绑定 metadata，
+          # desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild 同入口）。
+          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION"

@@ -153,12 +153,19 @@ export function sortListedAgents(agents: ListedAgent[]) {
   return agents;
 }
 
+function readArgValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value && !value.startsWith("--") ? value : undefined;
+}
+
 export function parseAgentListArgs(args: string[]) {
   return {
     wantJson: args.includes("--json"),
     wantSafe: args.includes("--safe"),
     publicOnly: args.includes("--public-only"),
     idsOnly: args.includes("--ids-only"),
+    scope: readArgValue(args, "--scope"),
     showUnavailable: args.includes("--show-unavailable"),
     // --safe 默认输出精简投影（与 server listAgents 一致，防大列表被截断）；
     // --verbose 拿回完整字段集排障。
@@ -217,6 +224,29 @@ async function hasReadableRecord(args: {
   } catch {
     return false;
   }
+}
+
+export async function listRemotePublicAgents(args: {
+  authToken: string;
+  fetchImpl: CliFetchImpl;
+  serverUrl: string;
+  limit?: number;
+}) {
+  const response = await args.fetchImpl(`${args.serverUrl}/rpc/getPublicAgents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${args.authToken}` },
+    body: JSON.stringify({ limit: Math.min(args.limit ?? 500, 500), summary: true }),
+  });
+  if (!response.ok) throw new Error(`Public agent catalog request failed (${response.status})`);
+  const payload: any = await response.json();
+  const records = Array.isArray(payload?.data?.data)
+    ? payload.data.data
+    : Array.isArray(payload?.data) ? payload.data : [];
+  return records
+    .filter((record: any) => record?.isPublic === true)
+    .map((record: any) => normalizeListedAgent({ ...record, userId: record?.userId || "system" }))
+    .filter((agent: ListedAgent | null): agent is ListedAgent => agent != null)
+    .map((agent) => ({ ...agent, publicRecordExists: true }));
 }
 
 export async function listRemoteAgents(args: {
