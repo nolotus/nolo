@@ -167,7 +167,6 @@ export async function runMultiSelectDialog<TValue>(args: {
     bottomAnchored,
     resolveBottomRow,
     session,
-    setReservedRows: (args as any).setReservedRows,
   });
   const paint = painter.paint;
 

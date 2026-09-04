@@ -43,9 +43,6 @@ export type DialogHostComposer = {
   /** The fixed input owns the user `/mouse on|off` preference. */
   isMouseEnabled?(): boolean;
   setMouseEnabled?(enabled: boolean): void;
-  /** Phase 3: report foreground modal row reservation to the composer / workspace */
-  setReservedRows?(rows: number): void;
-  getReservedRows?(): number;
 };
 
 /**
@@ -255,7 +252,6 @@ export function createDialogHost(args: {
       const next = Math.max(0, rows);
       if (next !== reservedRows) {
         reservedRows = next;
-        args.composer.setReservedRows?.(next);
         args.renderUnderlay?.();
       }
     },

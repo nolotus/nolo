@@ -83,12 +83,7 @@ export function createTuiRender(host: TuiRenderHost) {
     }, RENDER_THROTTLE_MS);
   };
 
-  const renderHistoryToOutput = () => {
-    // A dialog (picker / confirm) owns the screen while paused. Repainting the
-    // transcript underneath it erases the frame — mid-turn confirms streamed
-    // tokens over the prompt, so it flashed and vanished while still holding
-    // the keyboard, and the turn looked hung.
-    if (host.fixedInput.isPaused()) return;
+  const renderHistoryCore = () => {
     if (syncingLayout) return;
     syncingLayout = true;
     try {
@@ -105,5 +100,27 @@ export function createTuiRender(host: TuiRenderHost) {
     }
   };
 
-  return { renderHistoryToOutput, scheduleRender, flushPendingRender };
+  const renderHistoryToOutput = () => {
+    // A dialog (picker / confirm) owns the screen while paused. Repainting the
+    // transcript underneath it erases the frame — mid-turn confirms streamed
+    // tokens over the prompt, so it flashed and vanished while still holding
+    // the keyboard, and the turn looked hung.
+    if (host.fixedInput.isPaused()) return;
+    renderHistoryCore();
+  };
+
+  /**
+   * Explicit authorized underlay repaint while a modal dialog is active
+   * (paused). Reads current reserved rows and re-renders history under the dialog.
+   */
+  const renderHistoryUnderDialog = () => {
+    renderHistoryCore();
+  };
+
+  return {
+    renderHistoryToOutput,
+    renderHistoryUnderDialog,
+    scheduleRender,
+    flushPendingRender,
+  };
 }

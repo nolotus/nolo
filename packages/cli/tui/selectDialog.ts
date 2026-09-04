@@ -195,7 +195,6 @@ export function createDialogFramePainter(args: {
   /** Lazily resolved 1-indexed row the frame's last line sits on. */
   resolveBottomRow: () => number;
   session?: DialogSession;
-  setReservedRows?: (rows: number) => void;
 }) {
   let renderedLineCount = 0;
   let lastBottomRow = 0;
@@ -210,7 +209,6 @@ export function createDialogFramePainter(args: {
   };
 
   const reportReservation = (rows: number) => {
-    args.setReservedRows?.(rows);
     args.session?.setReservedRows?.(rows);
   };
 
@@ -564,7 +562,6 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
     bottomAnchored,
     resolveBottomRow,
     session,
-    setReservedRows: (args as any).setReservedRows,
   });
   const paint = painter.paint;
 

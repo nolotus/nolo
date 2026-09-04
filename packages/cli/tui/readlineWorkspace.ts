@@ -653,7 +653,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     },
     inputPolicy: { wheel: "modal", pageKeys: "transcript" },
     renderUnderlay: () => {
-      renderHistoryToOutput();
+      renderHistoryUnderDialog();
       fixedInput.repaint(buffer, cursorPos);
     },
     onTranscriptScroll: (action) => {
@@ -692,8 +692,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // （output / history / selectionState）直接传值。解构保持原函数名，全部
   // 渲染调用点零改动。渲染是输出字节序列敏感区，函数体逐行搬移未动。
   const selectionState = createSelectionState();
-  const { renderHistoryToOutput, scheduleRender, flushPendingRender } =
-    createTuiRender({
+  const {
+    renderHistoryToOutput,
+    renderHistoryUnderDialog,
+    scheduleRender,
+    flushPendingRender,
+  } = createTuiRender({
       output,
       history,
       selectionState,
