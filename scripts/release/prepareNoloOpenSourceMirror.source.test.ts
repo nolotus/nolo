@@ -47,11 +47,16 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     const versionBumpSource = source.slice(source.indexOf("const versionBump ="));
     // 普通投影变化跳过 Desktop；只有 metadata 声明的 release 才 dispatch。
     expect(versionBumpSource).toContain("Decide whether a desktop release is declared");
-    expect(versionBumpSource).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --print-version");
+    // 机器输出契约：version 只经 --set-outputs 写入 $GITHUB_OUTPUT（纯 SemVer）。
+    expect(versionBumpSource).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version");
+    // 不再把 assert 的 stdout（含人读日志）捕获进变量 —— 无日志/换行污染。
+    expect(versionBumpSource).not.toContain("--print-version");
+    expect(versionBumpSource).not.toContain("DECLARED_VERSION");
     expect(versionBumpSource).toContain("if: steps.desktop.outputs.build == 'true'");
     // 旧的 before/after diff 启发式已删除：intent 单源是 projection release metadata。
     expect(versionBumpSource).not.toContain("BEFORE_SHA");
-    // dispatch 显式绑定 metadata 版本，desktop-build 侧 fail-closed 复核。
+    // dispatch 显式绑定 metadata 版本（来自 GITHUB_OUTPUT），desktop-build 侧 fail-closed 复核。
+    expect(versionBumpSource).toContain("DESKTOP_VERSION: \\${{ steps.desktop.outputs.version }}");
     expect(versionBumpSource).toContain('gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION"');
   });
 
@@ -70,6 +75,16 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     expect(desktopBuildSource).toContain('--expect-version "\\${{ inputs.version }}" \\\\');
     expect(desktopBuildSource).toContain("--set-outputs channel,version,tag");
     expect(desktopBuildSource).toContain("version:");
+
+    // dispatch-only ⇒ targets 直接取 inputs（不可达的 push 分支已清理）。
+    expect(desktopBuildSource).toContain('TARGETS="\\${{ inputs.targets }}"');
+    expect(desktopBuildSource).not.toContain("github.event_name == 'push'");
+
+    // 不可变 release 契约：不 delete/recreate；同 tag 已存在（含
+    // same version/different SHA 重发）即 fail closed。
+    expect(desktopBuildSource).not.toContain("gh release delete");
+    expect(desktopBuildSource).toContain("gh release view");
+    expect(desktopBuildSource).toContain("refusing to delete/recreate");
 
     // targets=all 覆盖三平台，与发布步 NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES 契约一致。
     expect(desktopBuildSource).toMatch(/all\) echo 'matrix=\{"include":\[\{"os":"windows-latest","label":"windows"\},\{"os":"macos-latest","label":"macos"\},\{"os":"ubuntu-latest","label":"linux"\}\]}'/);
@@ -674,13 +689,24 @@ describe("verifyPublicProjectionGate fail-closed assertions", () => {
     expect(publicVersionBump).toContain("branches: [main]");
     expect(publicVersionBump).toContain("version.includes('-') ? 'alpha' : 'latest'");
     expect(publicVersionBump).toContain('gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"');
-    expect(publicVersionBump).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --print-version");
+    // 机器输出：version 经 --set-outputs 进 GITHUB_OUTPUT（纯 SemVer），
+    // dispatch 消费 job output —— 生成文件里没有 stdout 捕获/日志混入路径。
+    expect(publicVersionBump).toContain("assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version");
+    expect(publicVersionBump).not.toContain("--print-version");
+    expect(publicVersionBump).not.toContain("DECLARED_VERSION");
+    expect(publicVersionBump).toContain("DESKTOP_VERSION: ${{ steps.desktop.outputs.version }}");
 
     // 生成的公开仓 workflow：dispatch-only、metadata fail-closed、targets=all 三平台。
     const publicDesktopBuild = readFileSync(join(outDir, ".github/workflows/desktop-build.yml"), "utf8");
     expect(publicDesktopBuild).not.toContain("push:");
     expect(publicDesktopBuild).toContain("assertProjectionReleaseMetadata.ts");
     expect(publicDesktopBuild).toContain('{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"},{"os":"ubuntu-latest","label":"linux"}');
+    // targets 直接取 dispatch inputs；发布步不 delete/recreate，同 tag fail closed。
+    expect(publicDesktopBuild).toContain('TARGETS="${{ inputs.targets }}"');
+    expect(publicDesktopBuild).not.toContain("github.event_name == 'push'");
+    expect(publicDesktopBuild).not.toContain("gh release delete");
+    expect(publicDesktopBuild).toContain("gh release view");
+    expect(publicDesktopBuild).toContain("refusing to delete/recreate");
 
     // 生成的 projection release metadata：结构合法、版本与投影一致、channel 由 SemVer 解析。
     const generatedMetadata = parseProjectionReleaseMetadata(

@@ -47,11 +47,12 @@ jobs:
           # desktop release intent 的唯一来源。普通投影变化（无 release intent）
           # 跳过 Desktop；metadata 缺失/损坏/与 packages/desktop/package.json
           # 漂移时 assert 脚本以非 0/1 退出码硬失败（fail closed）。
+          # 机器输出契约：version 只经 --set-outputs 写入 $GITHUB_OUTPUT（纯
+          # SemVer 单值）；绝不捕获 assert 的 stdout（内含人读日志，混入即污染）。
           DECISION=0
-          DECLARED_VERSION="$(bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --print-version)" || DECISION=$?
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version || DECISION=$?
           if [ "$DECISION" -eq 0 ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "version=$DECLARED_VERSION" >> "$GITHUB_OUTPUT"
           elif [ "$DECISION" -eq 1 ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else

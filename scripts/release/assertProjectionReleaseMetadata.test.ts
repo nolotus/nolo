@@ -62,26 +62,42 @@ describe("assertProjectionReleaseMetadata CLI contract", () => {
   it("passes a declared release, binds the target version, and emits GitHub outputs", async () => {
     const dir = await makeFixture({ metadata: declaredMetadata() });
     const outputFile = join(dir, "github-output.txt");
-    const { exitCode, stderr } = await run(
+    const { stdout, stderr, exitCode } = await run(
       dir,
       ["--expect-intent", "release", "--expect-version", ALPHA_VERSION, "--set-outputs", "channel,version,tag", "--print-version"],
       { GITHUB_OUTPUT: outputFile },
     );
-    expect(stderr).toBe("");
     expect(exitCode).toBe(0);
+    // 流契约：人读日志走 stderr；stdout 只保留 --print-version 的单行 SemVer。
+    expect(stderr).toContain("[projection-release-metadata] ok");
+    expect(stdout).toBe(`${ALPHA_VERSION}\n`);
+    // GITHUB_OUTPUT 是纯字段值：无日志混入、无空行、仅一个结尾换行。
     const outputs = await readFile(outputFile, "utf8");
-    expect(outputs).toContain(`version=${ALPHA_VERSION}`);
-    expect(outputs).toContain("channel=alpha");
-    expect(outputs).toContain(`tag=desktop-alpha-v${ALPHA_VERSION}`);
+    expect(outputs).toBe(
+      [`channel=alpha`, `version=${ALPHA_VERSION}`, `tag=desktop-alpha-v${ALPHA_VERSION}`].join("\n") + "\n",
+    );
+  });
+
+  it("writes a pure machine-readable version output with no logs or stray newlines", async () => {
+    // version-bump workflow 的消费契约：--set-outputs version 只写纯 SemVer。
+    const dir = await makeFixture({ metadata: declaredMetadata() });
+    const outputFile = join(dir, "github-output.txt");
+    const { stdout, exitCode } = await run(dir, ["--expect-intent", "release", "--set-outputs", "version"], {
+      GITHUB_OUTPUT: outputFile,
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe("");
+    expect(await readFile(outputFile, "utf8")).toBe(`version=${ALPHA_VERSION}\n`);
   });
 
   it("exit 1 (skip signal) when valid metadata declares no desktop release intent", async () => {
     const dir = await makeFixture({ metadata: declaredMetadata({ releaseIntent: "none" }) });
-    const { stdout, exitCode } = await run(dir, ["--expect-intent", "release", "--print-version"]);
+    const { stdout, stderr, exitCode } = await run(dir, ["--expect-intent", "release", "--print-version"]);
     expect(exitCode).toBe(1);
-    expect(stdout).toContain("releaseIntent=none");
-    // 跳过信号：不输出 --print-version 的独立版本行（只有说明性日志）
-    expect(stdout.split("\n").filter((line) => line === ALPHA_VERSION)).toEqual([]);
+    // 说明性日志走 stderr（不污染机器输出流）
+    expect(stderr).toContain("releaseIntent=none");
+    // 跳过信号：stdout 为空（不输出 --print-version 的独立版本行）
+    expect(stdout).toBe("");
   });
 
   it("exit 2 fail closed when the metadata file is missing", async () => {

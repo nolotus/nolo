@@ -53,7 +53,8 @@ jobs:
             --set-outputs channel,version,tag
       - id: targets
         run: |
-          TARGETS="${{ github.event_name == 'push' && 'all' || inputs.targets }}"
+          # workflow_dispatch-only：targets 直接取 dispatch inputs（无 push 触发路径）。
+          TARGETS="${{ inputs.targets }}"
           case "$TARGETS" in
             all) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"},{"os":"ubuntu-latest","label":"linux"}]}' >> "$GITHUB_OUTPUT" ;;
             windows) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"}]}' >> "$GITHUB_OUTPUT" ;;
@@ -197,7 +198,15 @@ jobs:
           if [ "$CHANNEL" = "alpha" ]; then
             FLAGS="$FLAGS --prerelease"
           fi
-          gh release delete "$TAG" --yes 2>/dev/null || true
+          # 不可变 release 契约（no delete/recreate）：目标 tag 的 Release 已存在
+          # 即 fail closed——包括 same version/different SHA 的重发企图。release
+          # 存在性是唯一事实（无服务、无状态文件）；repair/retry 只能绑定 metadata
+          # 声明的同一 version 重跑（release 尚未创建时），要换产物必须回 bun-nolo
+          # bump 版本生成新 tag。
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists — refusing to delete/recreate (immutable release contract); same-version republish is not allowed" >&2
+            exit 1
+          fi
           gh release create "$TAG" release-assets/* \
             --title "Desktop ${CHANNEL} $(date -u +%Y-%m-%d)" \
             $FLAGS

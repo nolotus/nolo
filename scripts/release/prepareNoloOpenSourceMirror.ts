@@ -1429,6 +1429,8 @@ jobs:
   // 或人工 repair 绑定 metadata 中的目标版本）才会进入本 workflow。
   // channel/version 一律来自 projection-release-metadata.json（channel 在
   // bun-nolo 侧由 SemVer 解析），绝不从 public branch 推断，也不重新生成版本。
+  // 发布步不做 delete/recreate：目标 tag 的 GitHub Release 已存在即 fail closed
+  // （same version/different SHA 的重发同样被拒），无服务、无状态文件。
   // `all` 覆盖 windows/macos/linux 三平台，与发布步的
   // NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES 契约一致（Linux 产物是必需品）。
   const desktopBuild = `name: Desktop Build
@@ -1486,7 +1488,8 @@ jobs:
             --set-outputs channel,version,tag
       - id: targets
         run: |
-          TARGETS="\${{ github.event_name == 'push' && 'all' || inputs.targets }}"
+          # workflow_dispatch-only：targets 直接取 dispatch inputs（无 push 触发路径）。
+          TARGETS="\${{ inputs.targets }}"
           case "$TARGETS" in
             all) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"},{"os":"macos-latest","label":"macos"},{"os":"ubuntu-latest","label":"linux"}]}' >> "$GITHUB_OUTPUT" ;;
             windows) echo 'matrix={"include":[{"os":"windows-latest","label":"windows"}]}' >> "$GITHUB_OUTPUT" ;;
@@ -1630,7 +1633,15 @@ jobs:
           if [ "$CHANNEL" = "alpha" ]; then
             FLAGS="$FLAGS --prerelease"
           fi
-          gh release delete "$TAG" --yes 2>/dev/null || true
+          # 不可变 release 契约（no delete/recreate）：目标 tag 的 Release 已存在
+          # 即 fail closed——包括 same version/different SHA 的重发企图。release
+          # 存在性是唯一事实（无服务、无状态文件）；repair/retry 只能绑定 metadata
+          # 声明的同一 version 重跑（release 尚未创建时），要换产物必须回 bun-nolo
+          # bump 版本生成新 tag。
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists — refusing to delete/recreate (immutable release contract); same-version republish is not allowed" >&2
+            exit 1
+          fi
           gh release create "$TAG" release-assets/* \\
             --title "Desktop \${CHANNEL} \$(date -u +%Y-%m-%d)" \\
             $FLAGS
@@ -1761,11 +1772,12 @@ jobs:
           # desktop release intent 的唯一来源。普通投影变化（无 release intent）
           # 跳过 Desktop；metadata 缺失/损坏/与 packages/desktop/package.json
           # 漂移时 assert 脚本以非 0/1 退出码硬失败（fail closed）。
+          # 机器输出契约：version 只经 --set-outputs 写入 $GITHUB_OUTPUT（纯
+          # SemVer 单值）；绝不捕获 assert 的 stdout（内含人读日志，混入即污染）。
           DECISION=0
-          DECLARED_VERSION="$(bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --print-version)" || DECISION=$?
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version || DECISION=$?
           if [ "$DECISION" -eq 0 ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "version=$DECLARED_VERSION" >> "$GITHUB_OUTPUT"
           elif [ "$DECISION" -eq 1 ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else

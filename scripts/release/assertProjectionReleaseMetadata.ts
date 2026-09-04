@@ -14,6 +14,11 @@
 //     [--expect-intent release] [--expect-version <semver>] \
 //     [--print-version] [--set-outputs channel,version,tag]
 //
+// 机器输出契约：人读日志一律走 stderr；stdout 只承载机器可读值（--print-version
+// 的单行 SemVer）。--set-outputs 把纯字段值写入 $GITHUB_OUTPUT（无日志、无多余
+// 换行）——workflow 必须消费 GITHUB_OUTPUT / --print-version，不得捕获 stdout
+// 混入日志（version-bump 与 desktop-build 均按此契约消费）。
+//
 // 退出码（fail-closed 分类，供 workflow 分支处理）：
 //   0  metadata 合法且全部期望满足
 //   1  metadata 合法但未声明 desktop release intent（--expect-intent release 时）
@@ -125,7 +130,7 @@ export function runAssertProjectionReleaseMetadata(
   }
 
   if (status === "no-declared-intent") {
-    console.log(
+    console.error(
       `[projection-release-metadata] desktop ${metadata.version} (${metadata.channel}) has releaseIntent=none — no declared desktop release in this projection`,
     );
     return { exitCode: 1 };
@@ -137,7 +142,7 @@ export function runAssertProjectionReleaseMetadata(
     return { exitCode: 3 };
   }
 
-  console.log(
+  console.error(
     `[projection-release-metadata] ok: desktop ${metadata.version} channel=${metadata.channel} intent=${metadata.releaseIntent} source=${metadata.provenance.sourceSha}${metadata.provenance.sourceBranch ? `@${metadata.provenance.sourceBranch}` : ""}`,
   );
   if (options.setOutputs.length) {
