@@ -85,6 +85,12 @@ describe("prepareNoloOpenSourceMirror public projection manifest & constants", (
     expect(desktopBuildSource).not.toContain("gh release delete");
     expect(desktopBuildSource).toContain("gh release view");
     expect(desktopBuildSource).toContain("refusing to delete/recreate");
+    const immutablePreflightIndex = desktopBuildSource.indexOf("Immutable release preflight");
+    const buildJobIndex = desktopBuildSource.indexOf("  build:");
+    const publishDownloadsIndex = desktopBuildSource.indexOf("publishDesktopDownloads.ts");
+    expect(immutablePreflightIndex).toBeGreaterThanOrEqual(0);
+    expect(buildJobIndex).toBeGreaterThan(immutablePreflightIndex);
+    expect(publishDownloadsIndex).toBeGreaterThan(buildJobIndex);
 
     // targets=all 覆盖三平台，与发布步 NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES 契约一致。
     expect(desktopBuildSource).toMatch(/all\) echo 'matrix=\{"include":\[\{"os":"windows-latest","label":"windows"\},\{"os":"macos-latest","label":"macos"\},\{"os":"ubuntu-latest","label":"linux"\}\]}'/);

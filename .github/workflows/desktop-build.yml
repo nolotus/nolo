@@ -51,6 +51,29 @@ jobs:
             --expect-intent release \
             --expect-version "${{ inputs.version }}" \
             --set-outputs channel,version,tag
+      - name: Immutable release preflight
+        id: immutable-release
+        env:
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # 必须在任何 runner build / R2 publish 副作用之前拒绝已存在的
+          # deterministic GitHub Release。非 404 错误（权限、网络等）也必须失败，
+          # 不能把未知状态误当成“tag 不存在”。release job 中保留二次检查用于 TOCTOU。
+          set +e
+          RELEASE_LOOKUP="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>&1)"
+          LOOKUP_STATUS=$?
+          set -e
+          if [ "$LOOKUP_STATUS" -eq 0 ]; then
+            echo "::error::release ${RELEASE_TAG} already exists — refusing to build or publish it again" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$RELEASE_LOOKUP" | grep -Eq 'HTTP/[0-9.]+ 404|HTTP [0-9.]+ 404'; then
+            echo "::error::could not verify whether release ${RELEASE_TAG} exists (gh api exit ${LOOKUP_STATUS})" >&2
+            printf '%s\n' "$RELEASE_LOOKUP" >&2
+            exit 1
+          fi
+
       - id: targets
         run: |
           # workflow_dispatch-only：targets 直接取 dispatch inputs（无 push 触发路径）。
