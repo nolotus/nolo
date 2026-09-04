@@ -45,6 +45,10 @@ export async function runAgentPicker(args: {
   /** Dock the list above the composer; see runSelectDialog.bottomAnchored. */
   bottomAnchored?: boolean;
   bottomRow?: number | (() => number);
+  inputPolicy?: import("./dialogHost").DialogInputPolicy;
+  onTranscriptScroll?: (action: string) => void;
+  registerForegroundRepaint?: (repaint: () => void) => void;
+  mouseEnabled?: boolean;
 }) {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -95,6 +99,10 @@ export async function runAgentPicker(args: {
     readKey: args.readKey,
     bottomAnchored: args.bottomAnchored,
     bottomRow: args.bottomRow,
+    inputPolicy: args.inputPolicy,
+    onTranscriptScroll: args.onTranscriptScroll,
+    registerForegroundRepaint: args.registerForegroundRepaint,
+    mouseEnabled: args.mouseEnabled,
   });
   if (result.kind === "cancelled") {
     return { kind: "cancelled" as const, entries };

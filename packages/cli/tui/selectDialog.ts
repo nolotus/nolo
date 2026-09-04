@@ -376,6 +376,10 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   output?: NodeJS.WritableStream;
   readKey?: KeyReader;
   wheelPolicy?: "move" | "ignore";
+  inputPolicy?: import("./dialogHost").DialogInputPolicy;
+  onTranscriptScroll?: (action: string) => void;
+  mouseEnabled?: boolean;
+  registerForegroundRepaint?: (repaint: () => void) => void;
   /**
    * Dock the list above the composer instead of letting it scroll to the top
    * of the terminal. When true, `bottomRow` (1-indexed absolute cursor row)
@@ -464,16 +468,17 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
     off?: (event: string, listener: () => void) => void;
   };
   const onOutputResize = () => paint();
+  args.registerForegroundRepaint?.(paint);
 
   try {
     // Re-enable mouse tracking for wheel scroll inside the dialog.
-    output.write("\x1b[?1006h\x1b[?1000h");
+    if (args.mouseEnabled !== false) output.write("\x1b[?1006h\x1b[?1000h");
     // Do not pause the stream here: the key reader listens via 'data' events,
     // which an explicit pause() would silence.
     if (input.isTTY && !wasRaw) {
       input.setRawMode?.(true);
     }
-    if (bottomAnchored && outputIsTty(output)) {
+    if (bottomAnchored && outputIsTty(output) && !args.registerForegroundRepaint) {
       resizeTarget.on?.("resize", onOutputResize);
     }
     paint();
@@ -487,6 +492,14 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
       // Mouse wheel scrolls the list (batch-throttled so a single gesture's
       // dozens of reports don't send the highlight flying).
       const scrollAction = parseScrollAction(sequence);
+      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && args.inputPolicy?.wheel === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
+      if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && args.inputPolicy?.pageKeys === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
         if (args.wheelPolicy === "ignore") {
           continue; // non-list modals (confirm) silently swallow wheel

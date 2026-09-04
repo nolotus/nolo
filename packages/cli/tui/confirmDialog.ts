@@ -73,6 +73,9 @@ export async function runConfirmDialog(args: {
    */
   bottomAnchored?: boolean;
   bottomRow?: number | (() => number);
+  onTranscriptScroll?: (action: string) => void;
+  mouseEnabled?: boolean;
+  registerForegroundRepaint?: (repaint: () => void) => void;
 }): Promise<boolean> {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -134,11 +137,16 @@ export async function runConfirmDialog(args: {
     titleLines,
     input,
     output,
-    // confirm is a non-list modal: a wheel scroll must do nothing at all — no
-    // highlight move, no repaint, no cancel (spec). Without this it would
-    // inherit runSelectDialog's default "move" and let the wheel flip
-    // Allow/Deny, which is the opposite of the intended silent-swallow.
+    // Transcript routing is primary; ignore is a defensive fallback when no
+    // transcript callback is available. Wheel must never flip Allow/Cancel.
     wheelPolicy: "ignore",
+    // Intentionally not anchor.inputPolicy: confirm's wheel/page routing is
+    // fixed by the Phase 1 spec (always transcript); host policy never
+    // overrides it for this two-item gate.
+    inputPolicy: { wheel: "transcript", pageKeys: "transcript" },
+    onTranscriptScroll: args.onTranscriptScroll,
+    mouseEnabled: args.mouseEnabled,
+    registerForegroundRepaint: args.registerForegroundRepaint,
     ...(args.readKey ? { readKey: args.readKey } : {}),
     ...(args.bottomAnchored ? { bottomAnchored: args.bottomAnchored } : {}),
     ...(args.bottomRow ? { bottomRow: args.bottomRow } : {}),

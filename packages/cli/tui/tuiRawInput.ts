@@ -148,6 +148,7 @@ export type FixedInputController = {
    * transcript; keyboard scrolling stays available.
    */
   setMouseEnabled(enabled: boolean): void;
+  isMouseEnabled(): boolean;
   /**
    * Toggle the terminal alternate-screen buffer (DECSET 1049).
    *
@@ -175,6 +176,7 @@ export function createNoopFixedInput(): FixedInputController {
     getInputLines: () => 1,
     isPaused: () => false,
     setMouseEnabled() {},
+    isMouseEnabled: () => true,
     setAltScreenEnabled() {},
   };
 }
@@ -530,6 +532,7 @@ export function createFixedInput(
         write("\x1b[?1002l\x1b[?1006l");
       }
     },
+    isMouseEnabled: () => mouseEnabled,
     setAltScreenEnabled(enabled: boolean) {
       if (enabled) {
         enterAltScreen(output);

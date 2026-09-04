@@ -234,6 +234,10 @@ export async function runAskChoiceDialog(args: {
   readKey?: KeyReader;
   bottomAnchored?: boolean;
   bottomRow?: number | (() => number);
+  inputPolicy?: import("./dialogHost").DialogInputPolicy;
+  onTranscriptScroll?: (action: string) => void;
+  mouseEnabled?: boolean;
+  registerForegroundRepaint?: (repaint: () => void) => void;
 }): Promise<UserChoiceResult> {
   const { request } = args;
 
@@ -384,15 +388,16 @@ export async function runAskChoiceDialog(args: {
     off?: (event: string, listener: () => void) => void;
   };
   const onOutputResize = () => paint();
+  args.registerForegroundRepaint?.(paint);
 
   try {
     // Re-enable mouse tracking for wheel scroll inside the dialog.
     // dialogHost.pause() disabled it; resumeFromDialog() re-enables on exit.
-    output.write("\x1b[?1006h\x1b[?1000h");
+    if (args.mouseEnabled !== false) output.write("\x1b[?1006h\x1b[?1000h");
     if (input.isTTY && !wasRaw) {
       input.setRawMode?.(true);
     }
-    if (bottomAnchored && outputIsTty(output)) {
+    if (bottomAnchored && outputIsTty(output) && !args.registerForegroundRepaint) {
       resizeTarget.on?.("resize", onOutputResize);
     }
     paint();
@@ -407,6 +412,14 @@ export async function runAskChoiceDialog(args: {
       // Mouse wheel scrolls the choice list (batch-throttled so a single
       // gesture's dozens of reports don't send the cursor flying).
       const scrollAction = parseScrollAction(sequence);
+      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && args.inputPolicy?.wheel === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
+      if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && args.inputPolicy?.pageKeys === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;

@@ -646,6 +646,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       },
       getInputLines: () => fixedInput.getInputLines(),
       isPaused: () => fixedInput.isPaused(),
+      isMouseEnabled: () => fixedInput.isMouseEnabled(),
+    },
+    inputPolicy: { wheel: "modal", pageKeys: "transcript" },
+    renderUnderlay: () => {
+      renderHistoryToOutput();
+      fixedInput.repaint(buffer, cursorPos);
+    },
+    onTranscriptScroll: (action) => {
+      applyScrollAction(history, action as import("./tuiScrollbar").ScrollAction, output, fixedInput.getInputLines());
     },
     output: output as NodeJS.WritableStream,
     // The decoder-drain hook is only bound once the interactive raw-mode
@@ -1091,18 +1100,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const performResizePaint = () => {
       if (done) return;
       if (fixedInput.isPaused()) {
-        // A dialog (picker / confirm) owns the rows above the composer.
-        // Repaint the transcript + composer underneath anyway: terminal
-        // reflow on resize garbles absolute-row frames (stale fragments,
-        // vanished composer), and the dialog's own resize listener —
-        // registered after this one — repaints its frame on top.
-        output.write("\x1b[?2026h\x1b[?25l");
-        try {
-          renderHistory(output, history, fixedInput.getInputLines());
-          fixedInput.repaint(buffer, cursorPos);
-        } finally {
-          output.write("\x1b[?25h\x1b[?2026l");
-        }
+        // DialogHost owns this repaint transaction: underlay first, modal
+        // foreground last. This is independent of listener registration order.
+        dialogHost.repaint();
         return;
       }
       flushPendingRender();

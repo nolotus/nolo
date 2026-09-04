@@ -33,13 +33,32 @@ export type DialogHostComposer = {
   resumeFromDialog(): void;
   getInputLines(): number;
   isPaused(): boolean;
+  /** The fixed input owns the user `/mouse on|off` preference. */
+  isMouseEnabled?(): boolean;
+  setMouseEnabled?(enabled: boolean): void;
 };
 
 /**
- * Where a dialog frame should be drawn. Pass straight through to
- * `runSelectDialog` / `runMultiSelectDialog` / `runConfirmDialog`.
+ * Input-routing contract for one modal session: which keys belong to the
+ * modal and which fall through to the workspace transcript. This type is also
+ * the ownership carrier for foreground-repaint registration and mouse
+ * preference (see DialogAnchor). Note: `pageKeys: "modal"` is currently a
+ * fall-through — selectDialog keeps its default page handling until Phase 2
+ * adds owned page navigation; "ignore" suppresses transcript routing.
  */
+export type DialogInputPolicy = {
+  wheel: "modal" | "transcript" | "ignore";
+  pageKeys: "modal" | "transcript" | "ignore";
+};
+
 export type DialogAnchor = {
+  /** Explicit routing contract for input not owned by the modal. */
+  inputPolicy: DialogInputPolicy;
+  /** Workspace-owned transcript routing; the host never owns history state. */
+  onTranscriptScroll?: (action: string) => void;
+  registerForegroundRepaint?(repaint: () => void): void;
+  /** Mouse reporting preference at session open. */
+  mouseEnabled: boolean;
   bottomAnchored: true;
   /**
    * Lazily resolved 1-indexed absolute row the last line of the frame sits
@@ -66,6 +85,7 @@ export type DialogHost = {
   withKeyboard<T>(body: () => Promise<T>): Promise<T>;
   /** True while `run()` or `withKeyboard()` currently holds the keyboard. */
   isKeyboardClaimed(): boolean;
+  repaint(): void;
 };
 
 const DEFAULT_TTY_ROWS = 24;
@@ -104,6 +124,9 @@ export function createDialogHost(args: {
    * (tests, the non-raw readline input path) can omit it.
    */
   drainDecoder?: () => void;
+  inputPolicy?: DialogInputPolicy;
+  onTranscriptScroll?: (action: string) => void;
+  renderUnderlay?: () => void;
 }): DialogHost {
   // The single source of truth for "does a modal currently own the
   // keyboard". Callers used to keep their own copy of this flag and set it
@@ -111,6 +134,8 @@ export function createDialogHost(args: {
   // three of the six call sites forget it. Owning it here means there is
   // nowhere else for it to live.
   let keyboardClaimed = false;
+  let foregroundRepaint: (() => void) | null = null;
+
 
   const claimKeyboard = () => {
     keyboardClaimed = true;
@@ -130,7 +155,12 @@ export function createDialogHost(args: {
 
   return {
     async run(body) {
+      const mouseStateBefore = args.composer.isMouseEnabled?.() ?? true;
       const anchor: DialogAnchor = {
+        inputPolicy: args.inputPolicy ?? { wheel: "modal", pageKeys: "transcript" },
+        onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); foregroundRepaint?.(); },
+        registerForegroundRepaint: (repaint) => { foregroundRepaint = repaint; },
+        mouseEnabled: args.composer.isMouseEnabled?.() ?? true,
         bottomAnchored: true,
         bottomRow: () =>
           resolveDialogBottomRow({
@@ -146,8 +176,14 @@ export function createDialogHost(args: {
       try {
         return await body(anchor);
       } finally {
+        foregroundRepaint = null;
         resetHistoryFrameDiffCache(args.output);
         args.composer.resumeFromDialog();
+        // resumeFromDialog restores the normal composer mode; restore the
+        // exact pre-modal preference afterwards (notably `/mouse off`).
+        if (args.composer.setMouseEnabled) {
+          args.composer.setMouseEnabled(mouseStateBefore);
+        }
         releaseKeyboard();
       }
     },
@@ -160,5 +196,10 @@ export function createDialogHost(args: {
       }
     },
     isKeyboardClaimed: () => keyboardClaimed,
+    repaint: () => {
+      if (!keyboardClaimed) return;
+      args.renderUnderlay?.();
+      foregroundRepaint?.();
+    },
   };
 }
