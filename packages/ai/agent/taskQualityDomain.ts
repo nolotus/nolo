@@ -48,40 +48,38 @@ const RAILS_SIGNALS: readonly RegExp[] = [
   /\brails[ -](?:controller|model|migration|app|project|route|view)\b/i,
 ];
 
-/** Strong design-goal signals: the task outcome itself is visual quality. */
+/** Design signals must express a visual outcome, not merely name a UI surface. */
 const DESIGN_GOAL_SIGNALS: readonly RegExp[] = [
-  /\blanding[\s-]?page\b/i,
-  /\bwebsite[\s-]?design\b/i,
-  /\bui[\s-]?design\b/i,
-  /\bweb[\s-]?(?:design|visual|ui)\b/i,
-  /\bvisual[\s-]?(?:hierarchy|design)\b/i,
   /\bredesign(?:ing)?\b/i,
-  /\bfront-?end[\s-]?visual\b/i,
+  /\b(?:improve|enhance) (?:the )?(?:visual hierarchy|visual design|appearance)\b/i,
+  /\b(?:polish|refine) (?:the )?(?:spacing|styling|typography|layout|design)\b/i,
+  /\b(?:adjust|improve|refine) (?:the )?(?:layout|spacing|typography|styling)\b/i,
   /\blook(?:s)? more like\b/i,
   /\bmake (?:it|this|them|the) look\b/i,
+  /\b(?:redesign|improve|enhance|polish|refine|adjust)\b[^.!?\n]*\b(?:landing[\s-]?page|website|web(?:site)?|ui|visual|appearance|design)\b/i,
+];
+
+/** Capability names can explicitly identify a design skill without making task nouns goals. */
+const DESIGN_AUXILIARY_SIGNALS: readonly RegExp[] = [
+  /\bweb[ -]?design\b/i,
+  /\bui[ -]?design\b/i,
+  /\bvisual[ -]?(?:design|review)\b/i,
 ];
 
 /** Incidental design words: only design signals when no repo outcome matched. */
 const DESIGN_INCIDENTAL_SIGNALS: readonly RegExp[] = [/\blayout\b/i, /\bstyling\b/i];
 
-/** Strong terminal-goal signals: environment/package/shell IS the outcome. */
+/** Terminal signals must describe an environment/execution outcome, not a noun in code. */
 const TERMINAL_GOAL_SIGNALS: readonly RegExp[] = [
-  /\bdocker\b/i,
-  /\bapt(?:-get)?\b/i,
-  /\bbrew\b/i,
-  /\byum\b/i,
-  /\bshell\b/i,
-  /\bbash\b/i,
-  /\bzsh\b/i,
-  /\bterminal\b/i,
-  /\bcommand[ -]line\b/i,
+  /\b(?:set up|setup|configure) (?:the )?(?:docker|ci|shell|terminal|environment)\b/i,
+  /\b(?:install|remove|upgrade)\b[^.!?\n]*\b(?:package|dependency|ffmpeg)\b/i,
+  /\b(?:figure out|debug|diagnose|explain) why (?:this )?(?:shell|terminal|command)\b/i,
   /\bcommands? (?:fails?|failed|failure|not found|exits?|timed? out)\b/i,
   /\brun (?:a |the )?command\b/i,
   /\bpackage manager\b/i,
   /\bsystem package\b/i,
   /\bdependency installation\b/i,
   /\benvironment setup\b/i,
-  /\bsetup (?:the )?environment\b/i,
   /\bci (?:failure|failed|pipeline|job)\b/i,
 ];
 
@@ -105,12 +103,12 @@ const TASK_SIGNAL_RULES: ReadonlyArray<{
 }> = [
   { domain: "coding.rails", patterns: RAILS_SIGNALS },
   { domain: "design.website", patterns: DESIGN_GOAL_SIGNALS },
-  { domain: "coding.terminal", patterns: TERMINAL_GOAL_SIGNALS },
   {
     // coding.repo is the default coding domain: code modification outcomes.
     domain: "coding.repo",
     patterns: [
       /\bbugs?\b/i,
+      /\b(?:typescript|javascript|python|ruby) error\b/i,
       /\bregressions?\b/i,
       /\brefactor(?:ing)?\b/i,
       /\bimplement (?:a |an |the )?(?:new |missing )?feature\b/i,
@@ -125,6 +123,7 @@ const TASK_SIGNAL_RULES: ReadonlyArray<{
       /(?:^|\s)[\w.@/-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|ex|exs|php|vue|svelte)\b/i,
     ],
   },
+  { domain: "coding.terminal", patterns: TERMINAL_GOAL_SIGNALS },
   { domain: "design.website", patterns: DESIGN_INCIDENTAL_SIGNALS },
   { domain: "coding.terminal", patterns: TERMINAL_INCIDENTAL_SIGNALS },
   {
@@ -168,7 +167,7 @@ export function resolveTaskQualityDomain(
       return "coding.rails";
     }
     if (
-      [...DESIGN_GOAL_SIGNALS, ...DESIGN_INCIDENTAL_SIGNALS].some((pattern) =>
+      [...DESIGN_AUXILIARY_SIGNALS, ...DESIGN_GOAL_SIGNALS, ...DESIGN_INCIDENTAL_SIGNALS].some((pattern) =>
         pattern.test(auxiliary),
       )
     ) {
