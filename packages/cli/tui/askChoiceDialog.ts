@@ -31,6 +31,11 @@ import {
   normalizeAskChoiceArgs,
 } from "ai/tools/askChoiceState";
 import {
+  createStandaloneDialogSession,
+  type DialogInputPolicy,
+  type DialogSession,
+} from "./dialogHost";
+import {
   DIALOG_CHECKED,
   DIALOG_CURSOR,
   DIALOG_UNCHECKED,
@@ -234,10 +239,11 @@ export async function runAskChoiceDialog(args: {
   readKey?: KeyReader;
   bottomAnchored?: boolean;
   bottomRow?: number | (() => number);
-  inputPolicy?: import("./dialogHost").DialogInputPolicy;
+  inputPolicy?: DialogInputPolicy;
   onTranscriptScroll?: (action: string) => void;
   mouseEnabled?: boolean;
   registerForegroundRepaint?: (repaint: () => void) => void;
+  session?: DialogSession;
 }): Promise<UserChoiceResult> {
   const { request } = args;
 
@@ -258,9 +264,10 @@ export async function runAskChoiceDialog(args: {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
   const readKey = args.readKey ?? createRawKeyReader(input);
+  const session = args.session ?? createStandaloneDialogSession({ input, output });
 
   const wheelThrottle = createWheelThrottle();
-  const wasRaw = Boolean(input.isTTY && input.isRaw);
+  let rawAcquired = false;
   let renderedLineCount = 0;
   const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
   const resolveBottomRow = () =>
@@ -391,12 +398,12 @@ export async function runAskChoiceDialog(args: {
   args.registerForegroundRepaint?.(paint);
 
   try {
-    // Re-enable mouse tracking for wheel scroll inside the dialog.
-    // dialogHost.pause() disabled it; resumeFromDialog() re-enables on exit.
-    if (args.mouseEnabled !== false) output.write("\x1b[?1006h\x1b[?1000h");
-    if (input.isTTY && !wasRaw) {
-      input.setRawMode?.(true);
-    }
+    // Mouse reporting for the dialog window is session-owned: the hosted
+    // session re-enables what the composer paused; the standalone session
+    // writes its canonical enable pair. The matching disable happens in the
+    // finally, also through the session.
+    if (args.mouseEnabled !== false) session.setMouseReporting(true);
+    if (input.isTTY) rawAcquired = session.acquireRaw();
     if (bottomAnchored && outputIsTty(output) && !args.registerForegroundRepaint) {
       resizeTarget.on?.("resize", onOutputResize);
     }
@@ -412,15 +419,18 @@ export async function runAskChoiceDialog(args: {
       // Mouse wheel scrolls the choice list (batch-throttled so a single
       // gesture's dozens of reports don't send the cursor flying).
       const scrollAction = parseScrollAction(sequence);
-      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && args.inputPolicy?.wheel === "transcript") {
+      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && (args.inputPolicy?.wheel ?? "modal") === "transcript") {
         args.onTranscriptScroll?.(scrollAction);
         continue;
       }
-      if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && args.inputPolicy?.pageKeys === "transcript") {
+      if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && (args.inputPolicy?.pageKeys ?? "modal") === "transcript") {
         args.onTranscriptScroll?.(scrollAction);
         continue;
       }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
+        if ((args.inputPolicy?.wheel ?? "modal") === "ignore") {
+          continue;
+        }
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;
         state = askChoiceReducer(state, {
@@ -543,12 +553,12 @@ export async function runAskChoiceDialog(args: {
       }
     }
   } finally {
-    output.write("\x1b[?1000l\x1b[?1006l");
+    session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
     if (input.isTTY) {
       drainInputBuffer(input);
-      if (!wasRaw) input.setRawMode?.(false);
+      session.releaseRaw(rawAcquired);
       if (bottomAnchored) {
         clearAnchoredLines(
           output,

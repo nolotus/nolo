@@ -23,6 +23,13 @@
  * handoff-gate text prompt, which has no dialog frame) are now the *only*
  * two places #3/#4 happen — a new modal cannot forget a step because there is
  * no step left for it to do by hand.
+ *
+ * Phase 2 adds terminal ownership to the same split: the host session owns
+ * SGR mouse reporting and raw-mode acquire/release (see `DialogSession`), so
+ * dialogs never write terminal-mode ANSI themselves and cannot strand a
+ * terminal in raw mode or clobber the user's `/mouse off` preference. The
+ * only non-hosted writers left are the standalone session's canonical pair,
+ * used by tests and non-workspace pickers.
  */
 
 import { resetHistoryFrameDiffCache } from "./tuiHistory";
@@ -41,15 +48,86 @@ export type DialogHostComposer = {
 /**
  * Input-routing contract for one modal session: which keys belong to the
  * modal and which fall through to the workspace transcript. This type is also
- * the ownership carrier for foreground-repaint registration and mouse
- * preference (see DialogAnchor). Note: `pageKeys: "modal"` is currently a
- * fall-through — selectDialog keeps its default page handling until Phase 2
- * adds owned page navigation; "ignore" suppresses transcript routing.
+ * the ownership carrier for foreground-repaint registration, mouse
+ * preference, and the host-owned terminal session (see DialogSession).
+ * `pageKeys: "modal"` stays a fall-through — the list dialogs keep their
+ * default page handling (no owned page navigation yet); "ignore" suppresses
+ * transcript routing. All wheel semantics live here: "modal" moves the
+ * dialog's own cursor, "transcript" routes the event to the workspace
+ * history, "ignore" swallows it (confirm's wheel must never flip a choice).
  */
 export type DialogInputPolicy = {
   wheel: "modal" | "transcript" | "ignore";
   pageKeys: "modal" | "transcript" | "ignore";
 };
+
+/**
+ * Terminal lifecycle ownership for one modal session. The host wires this to
+ * the workspace's composer owner; standalone sessions (tests, non-workspace
+ * pickers) acquire and release the terminal themselves. Dialogs call these
+ * around their event loop — they must never write terminal-mode ANSI or
+ * toggle raw mode directly, because a modal that crashes mid-loop would then
+ * strand the terminal in a state it no longer owns.
+ */
+export type DialogSession = {
+  /**
+   * Enable/disable SGR mouse reporting for the dialog window. Hosted
+   * sessions route the enable side to the composer owner (which `pause()`
+   * disabled for the modal) and leave the disable side to the host's
+   * post-session preference restore; standalone sessions write the canonical
+   * enable/disable pair, strictly paired so a dialog that never enabled
+   * never disables either.
+   */
+  setMouseReporting(enabled: boolean): void;
+  /**
+   * Ensure raw input for the dialog loop. Returns true only when THIS call
+   * acquired raw mode (the terminal was a TTY and not already raw) — the
+   * caller must pass that result to `releaseRaw`. Hosted sessions always
+   * return false: the workspace composer owns raw mode for the whole session.
+   */
+  acquireRaw(): boolean;
+  /** Restore raw mode exactly when a matching `acquireRaw()` returned true. */
+  releaseRaw(acquired: boolean): void;
+};
+
+/** Canonical dialog-owned mouse reporting pair (standalone sessions only). */
+const DIALOG_MOUSE_ENABLE = "\x1b[?1006h\x1b[?1000h";
+const DIALOG_MOUSE_DISABLE = "\x1b[?1000l\x1b[?1006l";
+
+/**
+ * Terminal session for dialogs running outside the workspace host: tests and
+ * standalone pickers. Owns raw-mode acquire/release and the SGR mouse
+ * reporting pair; the enable/disable writes are strictly paired so cleanup
+ * never touches a mode the dialog did not turn on.
+ */
+export function createStandaloneDialogSession(args: {
+  input: NodeJS.ReadStream;
+  output: NodeJS.WritableStream;
+}): DialogSession {
+  let mouseReportingOwned = false;
+  return {
+    setMouseReporting(enabled) {
+      if (enabled && !mouseReportingOwned) {
+        mouseReportingOwned = true;
+        args.output.write(DIALOG_MOUSE_ENABLE);
+        return;
+      }
+      if (!enabled && mouseReportingOwned) {
+        mouseReportingOwned = false;
+        args.output.write(DIALOG_MOUSE_DISABLE);
+      }
+    },
+    acquireRaw() {
+      if (!args.input.isTTY || args.input.isRaw) return false;
+      args.input.setRawMode?.(true);
+      return true;
+    },
+    releaseRaw(acquired) {
+      if (!acquired) return;
+      args.input.setRawMode?.(false);
+    },
+  };
+}
 
 export type DialogAnchor = {
   /** Explicit routing contract for input not owned by the modal. */
@@ -59,6 +137,8 @@ export type DialogAnchor = {
   registerForegroundRepaint?(repaint: () => void): void;
   /** Mouse reporting preference at session open. */
   mouseEnabled: boolean;
+  /** Host-owned terminal lifecycle (mouse reporting + raw mode). */
+  session: DialogSession;
   bottomAnchored: true;
   /**
    * Lazily resolved 1-indexed absolute row the last line of the frame sits
@@ -136,6 +216,24 @@ export function createDialogHost(args: {
   let keyboardClaimed = false;
   let foregroundRepaint: (() => void) | null = null;
 
+  // Host-owned terminal session handed to every framed dialog via the anchor.
+  // Mouse reporting: the workspace composer is the owner of record — pause()
+  // disabled reporting for the modal window, so the dialog re-enables it
+  // through here when the user preference allows, and run()'s finally
+  // restores the exact pre-modal preference afterwards. Raw mode: the
+  // composer already owns it for the whole workspace session; dialogs never
+  // acquire or release it in hosted mode.
+  const hostedSession: DialogSession = {
+    setMouseReporting: (enabled) => {
+      if (enabled) args.composer.setMouseEnabled?.(true);
+      // The disable side belongs to the post-session restore below, not to
+      // the dialog: disabling here would clobber the preference the host
+      // must hand back when the modal closes.
+    },
+    acquireRaw: () => false,
+    releaseRaw: () => {},
+  };
+
 
   const claimKeyboard = () => {
     keyboardClaimed = true;
@@ -161,6 +259,7 @@ export function createDialogHost(args: {
         onTranscriptScroll: (action) => { args.onTranscriptScroll?.(action); foregroundRepaint?.(); },
         registerForegroundRepaint: (repaint) => { foregroundRepaint = repaint; },
         mouseEnabled: args.composer.isMouseEnabled?.() ?? true,
+        session: hostedSession,
         bottomAnchored: true,
         bottomRow: () =>
           resolveDialogBottomRow({

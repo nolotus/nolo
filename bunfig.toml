@@ -14,7 +14,7 @@ conditions = ["nolo-cloud", "default"]
 # *Styles.ts（含 stylex.keyframes/firstThatWorks）都需要这条编译通道，
 # 否则启动即崩（phase3 后 toast.styles.ts 曾让 dev server 与全部
 # agent fork 起不来，见 run 孤儿化事故）。bun test 的编译通道同源。
-preload = ["./scripts/test/stylexBunTestPlugin.ts"]
+preload = ["./scripts/public-build/stylexBunPlugin.ts"]
 
 [test]
 # Playwright e2e/**/*.spec.ts → bun run test:e2e / playwright

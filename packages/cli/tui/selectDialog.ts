@@ -4,6 +4,7 @@ import {
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
+import { createStandaloneDialogSession, type DialogSession } from "./dialogHost";
 import { t } from "./i18n";
 import { consumeSgrMouseSequence, parseScrollAction } from "./tuiScrollbar";
 
@@ -166,6 +167,77 @@ export function clearAnchoredLines(
     output.write(`\x1b[${row};1H\x1b[2K`);
   }
 }
+
+/**
+ * Shared frame painter for the list dialogs (select + multiSelect). Owns the
+ * three paint regimes in one place so both dialogs stay byte-identical:
+ *   - bottom-anchored + positionable output: clear where the frame WAS
+ *     (tracked `lastBottomRow`), repaint at the row the composer occupies
+ *     NOW — this is what makes the frame follow a terminal resize;
+ *   - positionable output: clear the previously rendered lines, write below;
+ *   - anything else (pipe / capture streams): plain writes.
+ * `clear()` removes the last painted frame using the same regime, so a
+ * dialog's cleanup never erases rows it did not paint.
+ */
+export function createDialogFramePainter(args: {
+  output: NodeJS.WritableStream;
+  /** Build the frame text for the current state. */
+  render: () => string;
+  bottomAnchored: boolean;
+  /** Lazily resolved 1-indexed row the frame's last line sits on. */
+  resolveBottomRow: () => number;
+}) {
+  let renderedLineCount = 0;
+  let lastBottomRow = 0;
+  const paint = () => {
+    const frame = args.render();
+    const lines = frame.split("\n");
+    const lineCount = lines.length;
+    const canPosition =
+      outputIsTty(args.output) && typeof args.output.write === "function";
+
+    if (args.bottomAnchored && canPosition) {
+      const anchorRow = args.resolveBottomRow();
+      clearAnchoredLines(
+        args.output,
+        lastBottomRow > 0 ? lastBottomRow : anchorRow,
+        renderedLineCount
+      );
+      for (let i = 0; i < lines.length; i += 1) {
+        const row = anchorRow - (lines.length - 1 - i);
+        if (row < 1) break;
+        args.output.write(`\x1b[${row};1H\x1b[2K${lines[i]}`);
+      }
+      lastBottomRow = anchorRow;
+      renderedLineCount = lineCount;
+      return;
+    }
+
+    if (canPosition) {
+      clearRenderedLines(args.output, renderedLineCount);
+    }
+    if (typeof args.output.write === "function") {
+      args.output.write(`${frame}\n`);
+    }
+    renderedLineCount = lineCount;
+  };
+  return {
+    paint,
+    clear() {
+      if (args.bottomAnchored) {
+        clearAnchoredLines(
+          args.output,
+          lastBottomRow > 0 ? lastBottomRow : args.resolveBottomRow(),
+          renderedLineCount
+        );
+      } else {
+        clearRenderedLines(args.output, renderedLineCount);
+      }
+      renderedLineCount = 0;
+    },
+  };
+}
+
 
 export function isArrowUp(sequence: string) {
   return sequence === CSI_ARROW_UP || sequence === CSI_ARROW_UP_APP;
@@ -375,11 +447,16 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   input?: NodeJS.ReadStream;
   output?: NodeJS.WritableStream;
   readKey?: KeyReader;
-  wheelPolicy?: "move" | "ignore";
   inputPolicy?: import("./dialogHost").DialogInputPolicy;
   onTranscriptScroll?: (action: string) => void;
   mouseEnabled?: boolean;
   registerForegroundRepaint?: (repaint: () => void) => void;
+  /**
+   * Host-owned terminal lifecycle. Provided by dialogHost's anchor; dialogs
+   * running outside the workspace fall back to a standalone session that
+   * owns SGR mouse reporting and raw mode itself.
+   */
+  session?: DialogSession;
   /**
    * Dock the list above the composer instead of letting it scroll to the top
    * of the terminal. When true, `bottomRow` (1-indexed absolute cursor row)
@@ -403,66 +480,37 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
   const readKey = args.readKey ?? createRawKeyReader(input);
+  const session = args.session ?? createStandaloneDialogSession({ input, output });
 
   const wheelThrottle = createWheelThrottle();
-  const wasRaw = Boolean(input.isTTY && input.isRaw);
-  let renderedLineCount = 0;
+  let rawAcquired = false;
   const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
   const resolveBottomRow = () =>
     Math.max(
       1,
       typeof args.bottomRow === "function" ? args.bottomRow() : args.bottomRow ?? 0
     );
-  // Anchor of the last actual paint, tracked separately from resolveBottomRow()
-  // so a resize moves the frame: clear where it WAS, repaint where it IS.
-  let lastBottomRow = 0;
 
-  const paint = () => {
-    const frame = renderSelectDialog({
-      items,
-      selectedIndex,
-      title: args.title,
-      ...(args.titleLines ? { titleLines: args.titleLines } : {}),
-      maxVisible: args.maxVisible,
-    });
-    const lines = frame.split("\n");
-    const lineCount = lines.length;
-    const canPosition = outputIsTty(output) && typeof output.write === "function";
-
-    if (bottomAnchored && canPosition) {
-      const anchorRow = resolveBottomRow();
-      clearAnchoredLines(
-        output,
-        lastBottomRow > 0 ? lastBottomRow : anchorRow,
-        renderedLineCount
-      );
-      for (let i = 0; i < lines.length; i += 1) {
-        const row = anchorRow - (lines.length - 1 - i);
-        if (row < 1) break;
-        output.write(`\x1b[${row};1H\x1b[2K${lines[i]}`);
-      }
-      lastBottomRow = anchorRow;
-      renderedLineCount = lineCount;
-      return;
-    }
-
-    if (canPosition) {
-      clearRenderedLines(output, renderedLineCount);
-      output.write(`${frame}\n`);
-      renderedLineCount = lineCount;
-      return;
-    }
-
-    if (typeof output.write === "function") {
-      output.write(`${frame}\n`);
-    }
-    renderedLineCount = lineCount;
-  };
+  const painter = createDialogFramePainter({
+    output,
+    render: () =>
+      renderSelectDialog({
+        items,
+        selectedIndex,
+        title: args.title,
+        ...(args.titleLines ? { titleLines: args.titleLines } : {}),
+        maxVisible: args.maxVisible,
+      }),
+    bottomAnchored,
+    resolveBottomRow,
+  });
+  const paint = painter.paint;
 
   // While anchored, the dialog owns its rows — re-paint on terminal resize so
   // the frame follows the composer to its new position. The workspace's own
-  // resize handler skips repainting while a dialog is up (composer paused), so
-  // this listener is the only thing keeping the frame docked during a drag.
+  // resize handler routes through dialogHost.repaint() while a dialog is up,
+  // so this listener is only for standalone runs: hosted dialogs register as
+  // the host's foreground repaint instead and never attach a second listener.
   const resizeTarget = output as NodeJS.WritableStream & {
     on?: (event: string, listener: () => void) => void;
     off?: (event: string, listener: () => void) => void;
@@ -471,13 +519,14 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
   args.registerForegroundRepaint?.(paint);
 
   try {
-    // Re-enable mouse tracking for wheel scroll inside the dialog.
-    if (args.mouseEnabled !== false) output.write("\x1b[?1006h\x1b[?1000h");
+    // Mouse reporting for the dialog window is session-owned: the hosted
+    // session re-enables what the composer paused; the standalone session
+    // writes its canonical enable pair. The matching disable happens in the
+    // finally, also through the session.
+    if (args.mouseEnabled !== false) session.setMouseReporting(true);
     // Do not pause the stream here: the key reader listens via 'data' events,
     // which an explicit pause() would silence.
-    if (input.isTTY && !wasRaw) {
-      input.setRawMode?.(true);
-    }
+    if (input.isTTY) rawAcquired = session.acquireRaw();
     if (bottomAnchored && outputIsTty(output) && !args.registerForegroundRepaint) {
       resizeTarget.on?.("resize", onOutputResize);
     }
@@ -489,10 +538,14 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
         return { kind: "cancelled" };
       }
 
-      // Mouse wheel scrolls the list (batch-throttled so a single gesture's
-      // dozens of reports don't send the highlight flying).
+      // Wheel semantics live entirely in the input policy: "transcript"
+      // routes the event to the workspace history, "ignore" swallows it
+      // (a two-choice gate must never move under the wheel), and "modal"
+      // (the default for standalone list pickers) moves the selection,
+      // batch-throttled so one gesture's dozens of reports don't send the
+      // highlight flying.
       const scrollAction = parseScrollAction(sequence);
-      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && args.inputPolicy?.wheel === "transcript") {
+      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && (args.inputPolicy?.wheel ?? "modal") === "transcript") {
         args.onTranscriptScroll?.(scrollAction);
         continue;
       }
@@ -501,8 +554,8 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
         continue;
       }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
-        if (args.wheelPolicy === "ignore") {
-          continue; // non-list modals (confirm) silently swallow wheel
+        if ((args.inputPolicy?.wheel ?? "modal") === "ignore") {
+          continue;
         }
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;
@@ -535,22 +588,13 @@ export async function runSelectDialog<T extends SelectDialogItem>(args: {
       }
     }
   } finally {
-    output.write("\x1b[?1000l\x1b[?1006l");
+    session.setMouseReporting(false);
     resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
     if (input.isTTY) {
       drainInputBuffer(input);
-      if (!wasRaw) input.setRawMode?.(false);
-      if (bottomAnchored) {
-        clearAnchoredLines(
-          output,
-          lastBottomRow > 0 ? lastBottomRow : resolveBottomRow(),
-          renderedLineCount
-        );
-      } else {
-        clearRenderedLines(output, renderedLineCount);
-      }
-      renderedLineCount = 0;
+      session.releaseRaw(rawAcquired);
+      painter.clear();
     }
   }
 }

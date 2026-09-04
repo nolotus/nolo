@@ -178,6 +178,7 @@ export async function runDialogPicker(args: {
   onTranscriptScroll?: (action: string) => void;
   registerForegroundRepaint?: (repaint: () => void) => void;
   mouseEnabled?: boolean;
+  session?: import("./dialogHost").DialogSession;
 }): Promise<DialogPickerResult> {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -211,6 +212,7 @@ export async function runDialogPicker(args: {
     onTranscriptScroll: args.onTranscriptScroll,
     registerForegroundRepaint: args.registerForegroundRepaint,
     mouseEnabled: args.mouseEnabled,
+    session: args.session,
   });
   if (result.kind === "cancelled") {
     return { kind: "cancelled" };

@@ -9,6 +9,7 @@ import {
   type KeyReader,
   type SelectDialogItem,
 } from "./selectDialog";
+import type { DialogSession } from "./dialogHost";
 
 type ConfirmDialogItem = SelectDialogItem & {
   value: boolean;
@@ -76,6 +77,7 @@ export async function runConfirmDialog(args: {
   onTranscriptScroll?: (action: string) => void;
   mouseEnabled?: boolean;
   registerForegroundRepaint?: (repaint: () => void) => void;
+  session?: DialogSession;
 }): Promise<boolean> {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -137,16 +139,15 @@ export async function runConfirmDialog(args: {
     titleLines,
     input,
     output,
-    // Transcript routing is primary; ignore is a defensive fallback when no
-    // transcript callback is available. Wheel must never flip Allow/Cancel.
-    wheelPolicy: "ignore",
-    // Intentionally not anchor.inputPolicy: confirm's wheel/page routing is
-    // fixed by the Phase 1 spec (always transcript); host policy never
-    // overrides it for this two-item gate.
+    // Fixed by the modal-ownership spec: this two-item gate never owns the
+    // wheel — "transcript" routes wheel/page events to the workspace history,
+    // and when no transcript callback exists (standalone runs) the event is
+    // simply dropped. The wheel must never flip Allow/Cancel.
     inputPolicy: { wheel: "transcript", pageKeys: "transcript" },
     onTranscriptScroll: args.onTranscriptScroll,
     mouseEnabled: args.mouseEnabled,
     registerForegroundRepaint: args.registerForegroundRepaint,
+    session: args.session,
     ...(args.readKey ? { readKey: args.readKey } : {}),
     ...(args.bottomAnchored ? { bottomAnchored: args.bottomAnchored } : {}),
     ...(args.bottomRow ? { bottomRow: args.bottomRow } : {}),

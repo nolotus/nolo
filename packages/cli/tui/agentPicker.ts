@@ -49,6 +49,7 @@ export async function runAgentPicker(args: {
   onTranscriptScroll?: (action: string) => void;
   registerForegroundRepaint?: (repaint: () => void) => void;
   mouseEnabled?: boolean;
+  session?: import("./dialogHost").DialogSession;
 }) {
   const output = args.output ?? process.stdout;
   const input = args.input ?? process.stdin;
@@ -103,6 +104,7 @@ export async function runAgentPicker(args: {
     onTranscriptScroll: args.onTranscriptScroll,
     registerForegroundRepaint: args.registerForegroundRepaint,
     mouseEnabled: args.mouseEnabled,
+    session: args.session,
   });
   if (result.kind === "cancelled") {
     return { kind: "cancelled" as const, entries };

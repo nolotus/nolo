@@ -7,9 +7,15 @@ import {
   renderOverflowAbove,
   renderOverflowBelow,
 } from "./dialogFrame";
+import {
+  createStandaloneDialogSession,
+  type DialogInputPolicy,
+  type DialogSession,
+} from "./dialogHost";
 import { t } from "./i18n";
 import {
   computeVisibleWindow,
+  createDialogFramePainter,
   createRawKeyReader,
   createWheelThrottle,
   drainInputBuffer,
@@ -18,7 +24,6 @@ import {
   isCancel,
   isSubmit,
   outputIsTty,
-  clearRenderedLines,
   STREAM_CLOSED,
   type KeyReader,
 } from "./selectDialog";
@@ -106,12 +111,18 @@ export async function runMultiSelectDialog<TValue>(args: {
   items: MultiSelectDialogItem<TValue>[];
   title?: string;
   maxVisible?: number;
-  /** Require at least one checked item before Enter submits. */
   required?: boolean;
-  input?: NodeJS.ReadableStream;
+  input?: NodeJS.ReadStream;
   output?: NodeJS.WritableStream;
   /** Inject a custom key reader (tests); defaults to createRawKeyReader. */
   readKey?: KeyReader;
+  inputPolicy?: DialogInputPolicy;
+  onTranscriptScroll?: (action: string) => void;
+  mouseEnabled?: boolean;
+  registerForegroundRepaint?: (repaint: () => void) => void;
+  session?: DialogSession;
+  bottomAnchored?: boolean;
+  bottomRow?: number | (() => number);
 }): Promise<MultiSelectDialogResult<TValue>> {
   const items = args.items;
   if (items.length === 0) {
@@ -121,10 +132,10 @@ export async function runMultiSelectDialog<TValue>(args: {
   const output = args.output ?? process.stdout;
   const input = (args.input ?? process.stdin) as NodeJS.ReadStream;
   const readKey = args.readKey ?? createRawKeyReader(input);
+  const session = args.session ?? createStandaloneDialogSession({ input, output });
 
   const wheelThrottle = createWheelThrottle();
-  const wasRaw = Boolean(input.isTTY && input.isRaw);
-  let renderedLineCount = 0;
+  let rawAcquired = false;
   let cursor = 0;
   let selectedValues: TValue[] = items
     .filter((item) => item.selected)
@@ -135,40 +146,42 @@ export async function runMultiSelectDialog<TValue>(args: {
   // arrow / wheel dismisses it.
   let error: string | undefined;
 
-  const paint = () => {
-    const frame = renderMultiSelectFrame({
-      items,
-      cursor,
-      selectedValues,
-      title: args.title,
-      maxVisible: args.maxVisible,
-      ...(error ? { error } : {}),
-    });
-    const lines = frame.split("\n");
-    const lineCount = lines.length;
-    const canPosition = outputIsTty(output) && typeof output.write === "function";
-    if (canPosition) {
-      clearRenderedLines(output, renderedLineCount);
-      output.write(`${frame}\n`);
-    } else if (typeof output.write === "function") {
-      output.write(`${frame}\n`);
-    }
-    renderedLineCount = lineCount;
-  };
+  const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
+  const resolveBottomRow = () =>
+    Math.max(
+      1,
+      typeof args.bottomRow === "function" ? args.bottomRow() : args.bottomRow ?? 0,
+    );
 
-  // setRawMode + mouse-tracking enable + the first paint live INSIDE the try
-  // so a throw here (or any failure before the loop) still hits the finally
-  // that restores raw mode and disables mouse tracking. Leaving them outside
-  // the try, as the previous build did, meant an exception stranded the
-  // user's terminal in raw mode with mouse tracking on — the CRITICAL-2
-  // finding; LOW-1 moves the enable write in here too for the same reason.
+  const painter = createDialogFramePainter({
+    output,
+    render: () =>
+      renderMultiSelectFrame({
+        items,
+        cursor,
+        selectedValues,
+        title: args.title,
+        maxVisible: args.maxVisible,
+        ...(error ? { error } : {}),
+      }),
+    bottomAnchored,
+    resolveBottomRow,
+  });
+  const paint = painter.paint;
+
+  const resizeTarget = output as NodeJS.WritableStream & {
+    on?: (event: string, listener: () => void) => void;
+    off?: (event: string, listener: () => void) => void;
+  };
+  const onOutputResize = () => paint();
+  args.registerForegroundRepaint?.(paint);
+
   try {
-    if (input.isTTY && !wasRaw) {
-      input.setRawMode?.(true);
+    if (args.mouseEnabled !== false) session.setMouseReporting(true);
+    if (input.isTTY) rawAcquired = session.acquireRaw();
+    if (bottomAnchored && outputIsTty(output) && !args.registerForegroundRepaint) {
+      resizeTarget.on?.("resize", onOutputResize);
     }
-    // Re-enable SGR mouse tracking so wheel events reach the dialog. Inside
-    // the try so the finally's `\x1b[?1000l\x1b[?1006l` always pairs with it.
-    output.write("\x1b[?1006h\x1b[?1000h");
     paint();
 
     while (true) {
@@ -184,12 +197,19 @@ export async function runMultiSelectDialog<TValue>(args: {
         paint();
       }
 
-      // Mouse wheel moves the highlight like the arrow keys, including their
-      // wrap-at-boundary behavior (spec: "滚轮等价于方向键上下", and existing
-      // arrow keys wrap). A clamp here would diverge from ↑/↓, so we mirror
-      // the arrow branches below instead of stopping at the edge.
       const scrollAction = parseScrollAction(sequence);
+      if ((scrollAction === "wheel-up" || scrollAction === "wheel-down") && (args.inputPolicy?.wheel ?? "modal") === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
+      if (scrollAction && scrollAction !== "wheel-up" && scrollAction !== "wheel-down" && (args.inputPolicy?.pageKeys ?? "modal") === "transcript") {
+        args.onTranscriptScroll?.(scrollAction);
+        continue;
+      }
       if (scrollAction === "wheel-up" || scrollAction === "wheel-down") {
+        if ((args.inputPolicy?.wheel ?? "modal") === "ignore") {
+          continue;
+        }
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;
         cursor =
@@ -262,13 +282,13 @@ export async function runMultiSelectDialog<TValue>(args: {
       }
     }
   } finally {
-    output.write("\x1b[?1000l\x1b[?1006l");
+    session.setMouseReporting(false);
+    resizeTarget.off?.("resize", onOutputResize);
     readKey.dispose?.();
     if (input.isTTY) {
       drainInputBuffer(input);
-      if (!wasRaw) input.setRawMode?.(false);
-      clearRenderedLines(output, renderedLineCount);
-      renderedLineCount = 0;
+      session.releaseRaw(rawAcquired);
+      painter.clear();
     }
   }
 }

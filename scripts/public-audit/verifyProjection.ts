@@ -7,16 +7,15 @@
 // 用法：bun scripts/public-audit/verifyProjection.ts [repoRoot]
 // （repoRoot 省略时 = 本文件所在仓的根）
 //
-// 边界（刻意保持，Phase 1 契约）：
-// - 不包含 private 仓（bun-nolo）的包清单 / 裁剪规则 / sanitization 规则
-// - 不包含 provider 价格 rewrite、private provider alias
-// - 不包含 private auth/billing 实现拓扑；只声明「公开投影里什么禁止存在」
+// 边界（Phase 2A 契约）：
+// - 独立自洽：仅依赖 Node/Bun 标准库，不依赖私有 runtime boundary contract
+// - 正向白名单：仅描述公开包清单，不暴露私有包 inventory 与内部拓扑
+// - 全树审计：校验 scaffold 完整性、依赖闭包合法性、发布元数据一致性与无敏感/测试资产
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isForbiddenDatabaseImport } from "../../packages/database/databaseBoundaryContract";
 
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -30,6 +29,7 @@ const REQUIRED_FILES = [
   // Build：web bundle 链（CI web build + desktop pre-build 子进程）
   "scripts/dev/esbuild.config.js",
   "scripts/dev/esBuild.js",
+  "scripts/public-build/stylexBunPlugin.ts",
   // Audit：projection verifier 与 release/CI 依赖
   ".github/workflows/ci.yml",
   ".github/workflows/cli-publish.yml",
@@ -51,20 +51,33 @@ const REQUIRED_FILES = [
   "projection-release-metadata.json",
 ] as const;
 
-// 禁止进入公开投影的包（服务端/收费/鉴权核心与内部工具）。
-// packages/server 例外：允许存在，但只允许 entry.ts stub（desktop runtime resolve 需要）。
-const FORBIDDEN_PACKAGES = new Set([
-  "auth",
-  "daemon",
-  "nolo-ci",
-  "leveldb",
-  "remotion-demo",
-  "game",
-  "rn",
-  "cli-darwin-arm64",
+// 公开投影允许存在的 package 集合（正向白名单 / public packages policy）
+const PUBLIC_PACKAGES = new Set([
+  "agent-runtime",
+  "ai",
+  "app",
+  "billing",
+  "chat",
+  "cli",
+  "connector-experimental",
+  "core",
+  "create",
+  "database",
+  "database-engine",
+  "desktop",
+  "desktop-chrome-connector",
+  "desktop-runtime",
+  "form",
+  "identity",
+  "integrations",
+  "lab",
+  "render",
+  "share",
+  "shared",
+  "web",
 ]);
 
-// 凭据/私钥类文件名模式（通用凭据卫生，不含 private 仓拓扑信息）
+// 凭据/私钥类文件名模式（通用凭据卫生）
 const CREDENTIAL_FILE_PATTERNS: readonly RegExp[] = [
   /^\.env($|\.)/,
   /\.pem$/,
@@ -118,8 +131,12 @@ async function walkFiles(
   }
 }
 
-// private-only import specifier（最小公开边界声明，与数据库边界契约组合判定）
-function privateOnlyImportRule(specifier: string): string | null {
+// 检查非公开或越界模块 import。
+// Phase 2A 契约：本函数是 packages/database/databaseBoundaryContract
+// 的 isForbiddenDatabaseImport 的超集；一致性由
+// scripts/release/publicProjectionBoundary.test.ts 的 drift 防护测试锚定，
+// 两套规则任何一侧收紧/放松导致 contract 判禁而本规则漏报时测试即报警。
+export function privateOnlyImportRule(specifier: string): string | null {
   const normalized = specifier.replace(/^\.\.?\//, "").replace(/^@nolo\//, "");
   if (
     normalized === "auth/server" ||
@@ -138,8 +155,18 @@ function privateOnlyImportRule(specifier: string): string | null {
   ) {
     return "billing/index.cloud";
   }
-  const db = isForbiddenDatabaseImport(specifier);
-  return db.forbidden ? (db.rule ?? "database-boundary") : null;
+  if (
+    normalized === "database/server" ||
+    normalized.startsWith("database/server/") ||
+    normalized === "packages/database/server" ||
+    normalized.startsWith("packages/database/server/") ||
+    normalized.includes("/database/server") ||
+    /^(?:\.\.\/)+database\/server(?:\/.*)?$/.test(specifier) ||
+    /^(?:\.\.\/)+server\/routes(?:\/.*)?$/.test(specifier)
+  ) {
+    return "packages/database/server";
+  }
+  return null;
 }
 
 function isPathLikeFileToken(token: string): boolean {
@@ -157,7 +184,7 @@ export async function verifyProjection(
     if (!existsSync(join(rootDir, rel))) add(`missing-required: ${rel}`);
   }
 
-  // 2. packages：禁止包 / manifest 可解析 / workspace 依赖闭包合法
+  // 2. packages：正向包白名单校验 / manifest 可解析 / workspace 依赖闭包合法
   const packagesDir = join(rootDir, "packages");
   const packageNames = new Set<string>();
   if (existsSync(packagesDir)) {
@@ -165,12 +192,8 @@ export async function verifyProjection(
       if (entry.isDirectory()) packageNames.add(entry.name);
     }
     for (const name of packageNames) {
-      if (FORBIDDEN_PACKAGES.has(name)) add(`forbidden-package: packages/${name}`);
-      if (name === "server") {
-        // 只允许 entry.ts stub
-        for (const f of await readdir(join(packagesDir, "server"))) {
-          if (f !== "entry.ts") add(`forbidden-package-content: packages/server/${f}（只允许 entry.ts stub）`);
-        }
+      if (!PUBLIC_PACKAGES.has(name)) {
+        add(`unexpected-package: packages/${name}（不在公开包白名单中）`);
         continue;
       }
       if (name === "desktop-chrome-connector") {

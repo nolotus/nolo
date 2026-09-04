@@ -647,6 +647,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       getInputLines: () => fixedInput.getInputLines(),
       isPaused: () => fixedInput.isPaused(),
       isMouseEnabled: () => fixedInput.isMouseEnabled(),
+      setMouseEnabled: (enabled) => fixedInput.setMouseEnabled(enabled),
     },
     inputPolicy: { wheel: "modal", pageKeys: "transcript" },
     renderUnderlay: () => {
