@@ -87,11 +87,20 @@ export const loadMemoryCandidatesFromDb = async (
     kinds?: MemoryKind[];
     ownerLimit?: number;
     ownerFallback?: "never" | "onSubjectMiss" | "always";
+    /**
+     * Corroborated procedural reserve：在常规 per-(subject,kind) 窗口之外，
+     * 额外读取一个更深的 procedural 小窗口（深度 = 2×ownerLimit，见实现处
+     * 探查注释），只捞 `recurrenceEvidence` 非空的条目，最多 reserve 条。
+     * 保护"已通过 recurrence gate 的 runbook"不因 latest-N 掉出候选池；
+     * legacy（无 recurrenceEvidence）procedural 不会因此被捞回。
+     */
+    corroboratedProceduralReserve?: number;
   }
 ): Promise<MemoryItem[]> => {
   const kinds = input.kinds ?? ["episodic", "semantic", "procedural"];
   const ownerLimit = input.ownerLimit ?? 12;
   const ownerFallback = input.ownerFallback ?? "onSubjectMiss";
+  const reserve = Math.max(0, input.corroboratedProceduralReserve ?? 0);
   const ownerKeySet = new Set(
     input.owners
       .filter((owner) => owner.ownerId)
@@ -123,6 +132,27 @@ export const loadMemoryCandidatesFromDb = async (
         ]
       )
     : subjectResults;
+
+  // Corroborated procedural reserve：对每个 subject 的 procedural 索引做一次
+  // 更深的 bounded 探查（深度 = 2×ownerLimit，audit 实测 28-33 条的 procedural
+  // bucket 全覆盖），只收 recurrenceEvidence 非空的条目，全局最多 reserve 条
+  // （按 createdAt 新者优先）。同一索引、同一 loader 原语，不新建索引/不扫描全库。
+  if (reserve > 0 && kinds.includes("procedural")) {
+    const probeLimit = ownerLimit * 2;
+    const reserveResults = await Promise.all(
+      subjects.map((subject) =>
+        loadSubjectKindItemsFromDb(db, subject, "procedural", probeLimit)
+      )
+    );
+    const corroborated = reserveResults
+      .flat()
+      .filter((item) => item && item.recurrenceEvidence)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, reserve);
+    for (const item of corroborated) {
+      results.push([item]);
+    }
+  }
 
   const kindSet = new Set(kinds);
   const seen = new Set<string>();

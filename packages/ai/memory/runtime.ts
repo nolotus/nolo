@@ -19,6 +19,19 @@ export const COLD_STORAGE_CONFIDENCE = 0.3;
  */
 export const MEMORY_OVERLAY_TOKEN_BUDGET = DEFAULT_MEMORY_OVERLAY_TOKEN_BUDGET;
 
+/**
+ * Candidate window 契约（Candidate Recall Audit 2026-09-04 结论）：
+ * - proactive runtime：cheap/shallow，每 (subject×kind) 只取最新 DEFAULT 条；
+ * - queryMemory：deeper/bounded，显式用 QUERY_MEMORY_OWNER_LIMIT 找回窗口外记忆，
+ *   仍走同一 rank/selection（deeper retrieval，不是 memory dump）；
+ * - corroborated procedural：很小的长期 reserve，保护通过 recurrence gate 的
+ *   runbook 不因 latest-N 掉出候选池（audit 实证：verified runbook 写入 1 天即出窗）。
+ */
+export const DEFAULT_MEMORY_RUNTIME_OWNER_LIMIT = 20;
+export const QUERY_MEMORY_OWNER_LIMIT = 100;
+/** 已 corroborated（recurrenceEvidence 非空）procedural 的额外候选席位上限。 */
+export const CORROBORATED_PROCEDURAL_RESERVE = 5;
+
 const normalizeSelectedContent = (text: string): string =>
   text
     .trim()
@@ -181,6 +194,17 @@ export const resolveMemoryRuntime = async (input: {
   agentKey: string;
   memorySubjectId?: string | null;
   userInput: string;
+  /**
+   * candidate 窗口深度（per subject×kind / per owner）。
+   * 缺省 = DEFAULT_MEMORY_RUNTIME_OWNER_LIMIT（proactive cheap/shallow）；
+   * queryMemory 显式传 QUERY_MEMORY_OWNER_LIMIT（deeper/bounded）。
+   */
+  ownerLimit?: number;
+  /**
+   * corroborated procedural reserve 席位数。缺省 = CORROBORATED_PROCEDURAL_RESERVE。
+   * 传 0 可关闭（测试用）。
+   */
+  corroboratedProceduralReserve?: number;
 }): Promise<MemoryRuntimeResolution> => {
   const owners = chooseMemoryOwners({
     userId: input.userId,
@@ -201,8 +225,10 @@ export const resolveMemoryRuntime = async (input: {
       policy,
     }),
     kinds: ["episodic", "semantic", "procedural"],
-    ownerLimit: 20,
+    ownerLimit: input.ownerLimit ?? DEFAULT_MEMORY_RUNTIME_OWNER_LIMIT,
     ownerFallback: policy.ownerFallback,
+    corroboratedProceduralReserve:
+      input.corroboratedProceduralReserve ?? CORROBORATED_PROCEDURAL_RESERVE,
   });
 
   const rankContext: MemoryRankContext = {
