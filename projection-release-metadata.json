@@ -1,11 +1,19 @@
 {
-  "schemaVersion": 1,
-  "component": "desktop",
-  "version": "0.35.0",
-  "channel": "stable",
-  "releaseIntent": "none",
+  "schemaVersion": 2,
+  "components": {
+    "cli": {
+      "version": "0.54.0-alpha.2",
+      "channel": "alpha",
+      "releaseIntent": "none"
+    },
+    "desktop": {
+      "version": "0.35.0",
+      "channel": "stable",
+      "releaseIntent": "none"
+    }
+  },
   "provenance": {
-    "sourceSha": "8b0672ce4389bba689fb25c7b5bc708caaa36a01",
+    "sourceSha": "e28232597b01f58eb2f220dcb4eca780381fc043",
     "sourceBranch": "alpha"
   }
 }

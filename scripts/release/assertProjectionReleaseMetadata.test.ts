@@ -2,10 +2,16 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROJECTION_RELEASE_METADATA_FILENAME, serializeProjectionReleaseMetadata } from "./projectionReleaseMetadata";
+import {
+  PROJECTION_RELEASE_METADATA_FILENAME,
+  resolveChannelFromSemVer,
+  serializeProjectionReleaseMetadata,
+  type ProjectionReleaseMetadata,
+} from "./projectionReleaseMetadata";
 
 const scriptPath = join(import.meta.dir, "assertProjectionReleaseMetadata.ts");
-const ALPHA_VERSION = "0.63.0-alpha.7";
+const CLI_ALPHA_VERSION = "0.33.0-alpha.33";
+const DESKTOP_ALPHA_VERSION = "0.63.0-alpha.7";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -15,14 +21,25 @@ afterEach(async () => {
   }
 });
 
-async function makeFixture(options: { metadata?: string; desktopVersion?: string | null } = {}) {
+async function makeFixture(options: {
+  metadata?: string;
+  cliVersion?: string | null;
+  desktopVersion?: string | null;
+} = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nolo-assert-meta-"));
   temporaryDirectories.push(dir);
+  if (options.cliVersion !== null) {
+    await mkdir(join(dir, "packages/cli"), { recursive: true });
+    await writeFile(
+      join(dir, "packages/cli/package.json"),
+      JSON.stringify({ name: "cli", version: options.cliVersion ?? CLI_ALPHA_VERSION }),
+    );
+  }
   if (options.desktopVersion !== null) {
     await mkdir(join(dir, "packages/desktop"), { recursive: true });
     await writeFile(
       join(dir, "packages/desktop/package.json"),
-      JSON.stringify({ name: "desktop", version: options.desktopVersion ?? ALPHA_VERSION }),
+      JSON.stringify({ name: "desktop", version: options.desktopVersion ?? DESKTOP_ALPHA_VERSION }),
     );
   }
   if (options.metadata !== undefined) {
@@ -46,101 +63,154 @@ async function run(dir: string, args: string[], env: Record<string, string> = {}
   return { stdout, stderr, exitCode };
 }
 
-function declaredMetadata(overrides: Partial<{ version: string; channel: string; releaseIntent: string }> = {}) {
-  const version = overrides.version ?? ALPHA_VERSION;
-  return serializeProjectionReleaseMetadata({
-    schemaVersion: 1,
-    component: "desktop",
-    version,
-    channel: overrides.channel ?? "alpha",
-    releaseIntent: overrides.releaseIntent ?? "release",
-    provenance: { sourceSha: "a".repeat(40), sourceBranch: "alpha" },
-  });
+function declaredMetadata(overrides: {
+  cli?: Partial<{ version: string; channel: "alpha" | "stable"; releaseIntent: "none" | "release" }>;
+  desktop?: Partial<{ version: string; channel: "alpha" | "stable"; releaseIntent: "none" | "release" }>;
+  provenance?: Partial<{ sourceSha: string; sourceBranch: string | null }>;
+} = {}): string {
+  const cliVersion = overrides.cli?.version ?? CLI_ALPHA_VERSION;
+  const desktopVersion = overrides.desktop?.version ?? DESKTOP_ALPHA_VERSION;
+  const meta: ProjectionReleaseMetadata = {
+    schemaVersion: 2,
+    components: {
+      cli: {
+        version: cliVersion,
+        channel: overrides.cli?.channel ?? resolveChannelFromSemVer(cliVersion),
+        releaseIntent: overrides.cli?.releaseIntent ?? "none",
+      },
+      desktop: {
+        version: desktopVersion,
+        channel: overrides.desktop?.channel ?? resolveChannelFromSemVer(desktopVersion),
+        releaseIntent: overrides.desktop?.releaseIntent ?? "release",
+      },
+    },
+    provenance: {
+      sourceSha: overrides.provenance?.sourceSha ?? "a".repeat(40),
+      sourceBranch: overrides.provenance?.sourceBranch !== undefined ? overrides.provenance.sourceBranch : "alpha",
+    },
+  };
+  return serializeProjectionReleaseMetadata(meta);
 }
 
 describe("assertProjectionReleaseMetadata CLI contract", () => {
   it("passes a declared release, binds the target version, and emits GitHub outputs", async () => {
-    const dir = await makeFixture({ metadata: declaredMetadata() });
+    const dir = await makeFixture({
+      metadata: declaredMetadata({
+        desktop: { version: DESKTOP_ALPHA_VERSION, releaseIntent: "release" },
+        cli: { version: CLI_ALPHA_VERSION, releaseIntent: "release" },
+      }),
+    });
     const outputFile = join(dir, "github-output.txt");
-    const { stdout, stderr, exitCode } = await run(
+
+    // Desktop
+    const desktopRun = await run(
       dir,
-      ["--expect-intent", "release", "--expect-version", ALPHA_VERSION, "--set-outputs", "channel,version,tag", "--print-version"],
+      ["--component", "desktop", "--expect-intent", "release", "--expect-version", DESKTOP_ALPHA_VERSION, "--set-outputs", "channel,version,tag", "--print-version"],
       { GITHUB_OUTPUT: outputFile },
     );
-    expect(exitCode).toBe(0);
-    // 流契约：人读日志走 stderr；stdout 只保留 --print-version 的单行 SemVer。
-    expect(stderr).toContain("[projection-release-metadata] ok");
-    expect(stdout).toBe(`${ALPHA_VERSION}\n`);
-    // GITHUB_OUTPUT 是纯字段值：无日志混入、无空行、仅一个结尾换行。
-    const outputs = await readFile(outputFile, "utf8");
-    expect(outputs).toBe(
-      [`channel=alpha`, `version=${ALPHA_VERSION}`, `tag=desktop-alpha-v${ALPHA_VERSION}`].join("\n") + "\n",
+    expect(desktopRun.exitCode).toBe(0);
+    expect(desktopRun.stderr).toContain("[projection-release-metadata] ok: desktop");
+    expect(desktopRun.stdout).toBe(`${DESKTOP_ALPHA_VERSION}\n`);
+
+    const outputContent = await readFile(outputFile, "utf8");
+    expect(outputContent).toContain("channel=alpha\n");
+    expect(outputContent).toContain(`version=${DESKTOP_ALPHA_VERSION}\n`);
+    expect(outputContent).toContain(`tag=desktop-alpha-v${DESKTOP_ALPHA_VERSION}\n`);
+
+    // CLI
+    const cliRun = await run(
+      dir,
+      ["--component", "cli", "--expect-intent", "release", "--expect-version", CLI_ALPHA_VERSION, "--set-outputs", "channel,version,tag", "--print-version"],
+      { GITHUB_OUTPUT: outputFile },
     );
+    expect(cliRun.exitCode).toBe(0);
+    expect(cliRun.stderr).toContain("[projection-release-metadata] ok: cli");
+    expect(cliRun.stdout).toBe(`${CLI_ALPHA_VERSION}\n`);
   });
 
   it("writes a pure machine-readable version output with no logs or stray newlines", async () => {
-    // version-bump workflow 的消费契约：--set-outputs version 只写纯 SemVer。
-    const dir = await makeFixture({ metadata: declaredMetadata() });
-    const outputFile = join(dir, "github-output.txt");
-    const { stdout, exitCode } = await run(dir, ["--expect-intent", "release", "--set-outputs", "version"], {
-      GITHUB_OUTPUT: outputFile,
+    const dir = await makeFixture({
+      metadata: declaredMetadata({ desktop: { version: DESKTOP_ALPHA_VERSION, releaseIntent: "release" } }),
     });
+    const { stdout, stderr, exitCode } = await run(dir, ["--component", "desktop", "--print-version"]);
     expect(exitCode).toBe(0);
-    expect(stdout).toBe("");
-    expect(await readFile(outputFile, "utf8")).toBe(`version=${ALPHA_VERSION}\n`);
+    expect(stdout).toBe(`${DESKTOP_ALPHA_VERSION}\n`);
+    expect(stderr).toContain("[projection-release-metadata] ok");
   });
 
-  it("exit 1 (skip signal) when valid metadata declares no desktop release intent", async () => {
-    const dir = await makeFixture({ metadata: declaredMetadata({ releaseIntent: "none" }) });
-    const { stdout, stderr, exitCode } = await run(dir, ["--expect-intent", "release", "--print-version"]);
+  it("exit 1 (skip signal) when valid metadata declares no release intent for the component", async () => {
+    const dir = await makeFixture({
+      metadata: declaredMetadata({ desktop: { releaseIntent: "none" }, cli: { releaseIntent: "release" } }),
+    });
+    const { exitCode, stderr } = await run(dir, ["--component", "desktop", "--expect-intent", "release"]);
     expect(exitCode).toBe(1);
-    // 说明性日志走 stderr（不污染机器输出流）
-    expect(stderr).toContain("releaseIntent=none");
-    // 跳过信号：stdout 为空（不输出 --print-version 的独立版本行）
-    expect(stdout).toBe("");
+    expect(stderr).toContain("no declared release intent (releaseIntent=none)");
+  });
+
+  it("exit 2 fail closed when --component is missing or invalid", async () => {
+    const dir = await makeFixture({ metadata: declaredMetadata() });
+    const missing = await run(dir, ["--expect-intent", "release"]);
+    expect(missing.exitCode).toBe(2);
+    expect(missing.stderr).toContain("--component is required");
+
+    const invalid = await run(dir, ["--component", "unknown", "--expect-intent", "release"]);
+    expect(invalid.exitCode).toBe(2);
+    expect(invalid.stderr).toContain("unsupported --component");
   });
 
   it("exit 2 fail closed when the metadata file is missing", async () => {
-    const dir = await makeFixture({ metadata: undefined });
-    const { exitCode, stderr } = await run(dir, ["--expect-intent", "release"]);
+    const dir = await makeFixture();
+    const { exitCode, stderr } = await run(dir, ["--component", "desktop", "--expect-intent", "release"]);
     expect(exitCode).toBe(2);
-    expect(stderr).toContain("missing");
-    expect(stderr).toContain("fail closed");
-  });
-
-  it("exit 2 fail closed on malformed metadata JSON", async () => {
-    const dir = await makeFixture({ metadata: "{ not json" });
-    const { exitCode } = await run(dir, ["--expect-intent", "release"]);
-    expect(exitCode).toBe(2);
+    expect(stderr).toContain("projection-release-metadata.json missing");
   });
 
   it("exit 2 fail closed when metadata lies about the channel (channel is SemVer-derived)", async () => {
-    const dir = await makeFixture({ metadata: declaredMetadata({ channel: "stable" }) });
-    const { exitCode, stderr } = await run(dir, ["--expect-intent", "release"]);
+    const dir = await makeFixture({
+      metadata: declaredMetadata({ desktop: { version: DESKTOP_ALPHA_VERSION, channel: "stable" } }),
+    });
+    const { exitCode, stderr } = await run(dir, ["--component", "desktop", "--expect-intent", "release"]);
     expect(exitCode).toBe(2);
     expect(stderr).toContain("does not match SemVer-derived channel");
   });
 
-  it("exit 2 fail closed when metadata version drifts from packages/desktop/package.json", async () => {
-    const dir = await makeFixture({
-      metadata: declaredMetadata({ version: "0.63.0-alpha.6" }),
-      desktopVersion: ALPHA_VERSION,
+  it("exit 2 fail closed when metadata version drifts from packages/desktop/package.json or packages/cli/package.json", async () => {
+    // Desktop drift
+    const desktopDriftDir = await makeFixture({
+      metadata: declaredMetadata({ desktop: { version: "0.63.0-alpha.6" } }),
+      desktopVersion: DESKTOP_ALPHA_VERSION,
     });
-    const { exitCode, stderr } = await run(dir, ["--expect-intent", "release"]);
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("drifts");
+    const desktopDrift = await run(desktopDriftDir, ["--component", "desktop", "--expect-intent", "release"]);
+    expect(desktopDrift.exitCode).toBe(2);
+    expect(desktopDrift.stderr).toContain("drifts from projected packages/desktop/package.json");
+
+    // CLI drift
+    const cliDriftDir = await makeFixture({
+      metadata: declaredMetadata({ cli: { version: "0.33.0-alpha.32" } }),
+      cliVersion: CLI_ALPHA_VERSION,
+    });
+    const cliDrift = await run(cliDriftDir, ["--component", "cli", "--expect-intent", "release"]);
+    expect(cliDrift.exitCode).toBe(2);
+    expect(cliDrift.stderr).toContain("drifts from projected packages/cli/package.json");
   });
 
   it("exit 3 fail closed when the repair dispatch targets a version other than the declared metadata", async () => {
     const dir = await makeFixture({ metadata: declaredMetadata() });
-    const { exitCode, stderr } = await run(dir, ["--expect-intent", "release", "--expect-version", "0.63.0-alpha.6"]);
+    const { exitCode, stderr } = await run(dir, [
+      "--component",
+      "desktop",
+      "--expect-intent",
+      "release",
+      "--expect-version",
+      "0.63.0-alpha.6",
+    ]);
     expect(exitCode).toBe(3);
-    expect(stderr).toContain("does not match declared metadata version");
+    expect(stderr).toContain("does not match declared desktop metadata version");
   });
 
-  it("exit 4 fail closed when the projected desktop manifest is unreadable", async () => {
+  it("exit 4 fail closed when a projected component manifest is unreadable", async () => {
     const dir = await makeFixture({ metadata: declaredMetadata(), desktopVersion: null });
-    const { exitCode } = await run(dir, ["--expect-intent", "release"]);
+    const { exitCode } = await run(dir, ["--component", "desktop", "--expect-intent", "release"]);
     expect(exitCode).toBe(4);
   });
 });

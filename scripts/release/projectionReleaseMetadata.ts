@@ -1,30 +1,42 @@
 // scripts/release/projectionReleaseMetadata.ts
-// bun-nolo → nolo projection release metadata（release projection P0）。
+// bun-nolo → nolo projection release metadata（release projection P0/P1）。
 //
 // 职责边界（一句话）：
 //   bun-nolo owns release intent; nolo owns release execution.
 //
-// - bun-nolo 在生成投影时单源决定“这次投影是否声明 desktop 发布”，
-//   以 metadata 文件形式随投影 commit 落到公开仓。
+// - bun-nolo 在生成投影时单源决定“这次投影对 cli / desktop 各自声明了什么
+//   release”，以 metadata 文件形式随投影 commit 落到公开仓。
 // - 公开仓 workflow 只执行已声明的 release；workflow_dispatch 仅作为
-//   repair/rebuild，且必须绑定 metadata 中的目标版本（fail closed）。
-// - channel 一律由投影 SemVer 解析（`-alpha.N` prerelease → alpha，
+//   repair/rebuild，且必须显式绑定 metadata 声明的目标版本 + 本次投影 commit
+//   SHA（projection_sha，严格 40-hex），fail closed。
+// - channel 一律由各组件投影 SemVer 解析（`-alpha.N` prerelease → alpha，
 //   无 prerelease → stable）。绝不由 public branch 推断：公开仓只有 main，
 //   用 branch 推断会把 alpha 发布误标成 stable。
+//   CLI 的 npm dist-tag 是 channel 的确定性映射：alpha → alpha，stable → latest。
 // - 判定 release intent 的单源是 bun-nolo 的 component tag：
-//   HEAD 指向 `desktop-v<version>` tag ⇒ 本次投影声明 desktop release。
-//   （与 publishComponents.mts 的 "Tags are the only channel state" 一致。）
+//   HEAD 指向 `cli-v<version>` ⇒ cli release；`desktop-v<version>` ⇒ desktop
+//   release（与 publishComponents.mts 的 "Tags are the only channel state" 一致）。
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const PROJECTION_RELEASE_METADATA_SCHEMA_VERSION = 1;
+export const PROJECTION_RELEASE_METADATA_SCHEMA_VERSION = 2;
 /** 生成的 metadata 文件在投影仓/公开仓中的固定路径（repo root 相对）。 */
 export const PROJECTION_RELEASE_METADATA_FILENAME = "projection-release-metadata.json";
 export const DESKTOP_PACKAGE_MANIFEST_PATH = "packages/desktop/package.json";
+export const CLI_PACKAGE_MANIFEST_PATH = "packages/cli/package.json";
 
 export type ProjectionChannel = "alpha" | "stable";
 export type ProjectionReleaseIntent = "none" | "release";
+export type ProjectionComponent = "cli" | "desktop";
+
+export const PROJECTION_COMPONENTS = ["cli", "desktop"] as const;
+
+/** component tag 前缀：release intent 的单源（bun-nolo component tags）。 */
+export const COMPONENT_TAG_PREFIX: Record<ProjectionComponent, string> = {
+  cli: "cli-v",
+  desktop: "desktop-v",
+};
 
 export interface ProjectionReleaseProvenance {
   /** 生成投影时 bun-nolo 的 HEAD SHA。 */
@@ -33,15 +45,19 @@ export interface ProjectionReleaseProvenance {
   sourceBranch: string | null;
 }
 
-export interface ProjectionReleaseMetadata {
-  schemaVersion: number;
-  component: "desktop";
-  /** 投影后的 desktop 版本（严格 SemVer）。 */
+export interface ComponentProjectionReleaseMetadata {
+  /** 投影后的组件版本（严格 SemVer）。 */
   version: string;
   /** 由 version 的 SemVer prerelease 解析；与 sourceBranch 无关。 */
   channel: ProjectionChannel;
-  /** "none"：本次投影不发布 desktop；"release"：声明一次 desktop release。 */
+  /** "none"：本次投影不发布该组件；"release"：声明一次该组件 release。 */
   releaseIntent: ProjectionReleaseIntent;
+}
+
+export interface ProjectionReleaseMetadata {
+  schemaVersion: number;
+  /** cli / desktop 两组件各自的 release intent / version / channel。 */
+  components: Record<ProjectionComponent, ComponentProjectionReleaseMetadata>;
   provenance: ProjectionReleaseProvenance;
 }
 
@@ -79,34 +95,46 @@ export function parseStrictSemVer(version: string): ParsedSemVer | null {
 export function resolveChannelFromSemVer(version: string): ProjectionChannel {
   const parsed = parseStrictSemVer(version);
   if (!parsed) {
-    throw new Error(`[projection-release-metadata] invalid SemVer version: ${JSON.stringify(version)}`);
+    throw new Error(`[projection-release-metadata] invalid SemVer: ${JSON.stringify(version)}`);
   }
-  if (parsed.prerelease.length === 0) return "stable";
-  if (parsed.prerelease[0] === "alpha") return "alpha";
+  const first = parsed.prerelease[0];
+  if (!first) return "stable";
+  if (first === "alpha") return "alpha";
   throw new Error(
-    `[projection-release-metadata] unsupported prerelease channel in ${version} (only "alpha" prereleases map to the alpha channel)`,
+    `[projection-release-metadata] unsupported prerelease channel in ${JSON.stringify(version)} (only -alpha.* prereleases map to a known channel)`,
   );
 }
 
-/** 公开仓 GitHub Release 的确定性 tag：同一版本永远同一 tag，不重新生成版本。 */
-export function buildReleaseTag(metadata: Pick<ProjectionReleaseMetadata, "channel" | "version">): string {
-  return `desktop-${metadata.channel}-v${metadata.version}`;
+/** npm dist-tag 是 CLI channel 的确定性映射：alpha → alpha，stable → latest。 */
+export function resolveNpmDistTagFromChannel(channel: ProjectionChannel): "alpha" | "latest" {
+  return channel === "alpha" ? "alpha" : "latest";
 }
 
-function git(args: string[], cwd: string): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-
-/** 读取 bun-nolo 侧 desktop 版本（投影版本的单源 manifest）。 */
-export function readDesktopVersion(repoRoot: string): string {
-  const manifest = JSON.parse(readFileSync(join(repoRoot, DESKTOP_PACKAGE_MANIFEST_PATH), "utf8")) as {
+/** 读取 bun-nolo 侧组件版本（投影版本的单源 manifest）。 */
+export function readComponentVersion(repoRoot: string, component: ProjectionComponent): string {
+  const manifestPath = component === "cli" ? CLI_PACKAGE_MANIFEST_PATH : DESKTOP_PACKAGE_MANIFEST_PATH;
+  const manifest = JSON.parse(readFileSync(join(repoRoot, manifestPath), "utf8")) as {
     version?: string;
   };
   const version = manifest.version?.trim() ?? "";
   if (!version) {
-    throw new Error(`[projection-release-metadata] ${DESKTOP_PACKAGE_MANIFEST_PATH} has no version field`);
+    throw new Error(`[projection-release-metadata] ${manifestPath} has no version field`);
   }
   return version;
+}
+
+/** 读取 bun-nolo 侧 desktop 版本。 */
+export function readDesktopVersion(repoRoot: string): string {
+  return readComponentVersion(repoRoot, "desktop");
+}
+
+/** 读取 bun-nolo 侧 cli 版本。 */
+export function readCliVersion(repoRoot: string): string {
+  return readComponentVersion(repoRoot, "cli");
+}
+
+function git(args: string[], repoRoot: string): string {
+  return execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" }).trim();
 }
 
 /** HEAD 上的全部 tag（默认实现；测试可注入）。 */
@@ -130,6 +158,8 @@ function gitCurrentBranch(repoRoot: string): string | null {
 
 export interface BuildProjectionReleaseMetadataInput {
   repoRoot: string;
+  /** 覆盖 cli 版本读取（默认读 packages/cli/package.json）。 */
+  cliVersion?: string;
   /** 覆盖 desktop 版本读取（默认读 packages/desktop/package.json）。 */
   desktopVersion?: string;
   /** 覆盖 HEAD tags（默认 `git tag --points-at HEAD`；测试注入用）。 */
@@ -140,27 +170,48 @@ export interface BuildProjectionReleaseMetadataInput {
   sourceBranch?: string | null;
 }
 
-/** 生成投影 release metadata（bun-nolo 侧，generator 单源）。 */
+/** 生成投影 release metadata（bun-nolo 侧，generator 单源；cli + desktop 两组件）。 */
 export function buildProjectionReleaseMetadata(input: BuildProjectionReleaseMetadataInput): ProjectionReleaseMetadata {
   const { repoRoot } = input;
-  const version = input.desktopVersion ?? readDesktopVersion(repoRoot);
-  const channel = resolveChannelFromSemVer(version);
   const headTags = input.headTags ?? gitTagsAtHead(repoRoot);
-  const releaseIntent: ProjectionReleaseIntent = headTags.includes(`desktop-v${version}`) ? "release" : "none";
+  const versions: Record<ProjectionComponent, string> = {
+    cli: input.cliVersion ?? readCliVersion(repoRoot),
+    desktop: input.desktopVersion ?? readDesktopVersion(repoRoot),
+  };
+  const components = Object.fromEntries(
+    PROJECTION_COMPONENTS.map((component) => {
+      const version = versions[component];
+      return [
+        component,
+        {
+          version,
+          channel: resolveChannelFromSemVer(version),
+          releaseIntent: headTags.includes(`${COMPONENT_TAG_PREFIX[component]}${version}`)
+            ? ("release" as const)
+            : ("none" as const),
+        },
+      ];
+    }),
+  ) as ProjectionReleaseMetadata["components"];
   const sourceSha = input.sourceSha ?? gitHeadSha(repoRoot);
   const sourceBranch = input.sourceBranch !== undefined ? input.sourceBranch : gitCurrentBranch(repoRoot);
   return {
     schemaVersion: PROJECTION_RELEASE_METADATA_SCHEMA_VERSION,
-    component: "desktop",
-    version,
-    channel,
-    releaseIntent,
+    components,
     provenance: { sourceSha, sourceBranch },
   };
 }
 
 export function serializeProjectionReleaseMetadata(metadata: ProjectionReleaseMetadata): string {
   return `${JSON.stringify(metadata, null, 2)}\n`;
+}
+
+/** 公开仓 release tag：deterministic `<component>-<channel>-v<version>`。 */
+export function buildReleaseTag(
+  component: ProjectionComponent,
+  metadata: Pick<ComponentProjectionReleaseMetadata, "channel" | "version">,
+): string {
+  return `${component}-${metadata.channel}-v${metadata.version}`;
 }
 
 /**
@@ -184,15 +235,37 @@ export function parseProjectionReleaseMetadata(raw: string): ProjectionReleaseMe
   if (meta.schemaVersion !== PROJECTION_RELEASE_METADATA_SCHEMA_VERSION) {
     fail(`unsupported schemaVersion ${JSON.stringify(meta.schemaVersion)} (expected ${PROJECTION_RELEASE_METADATA_SCHEMA_VERSION})`);
   }
-  if (meta.component !== "desktop") fail(`unsupported component ${JSON.stringify(meta.component)} (expected "desktop")`);
-  if (typeof meta.version !== "string") fail("version must be a string");
-  const channel = resolveChannelFromSemVer(meta.version);
-  if (meta.channel !== channel) {
-    fail(`channel ${JSON.stringify(meta.channel)} does not match SemVer-derived channel ${JSON.stringify(channel)} for version ${meta.version}`);
+  if (typeof meta.components !== "object" || meta.components === null) {
+    fail("components must be an object with cli and desktop entries");
   }
-  if (meta.releaseIntent !== "none" && meta.releaseIntent !== "release") {
-    fail(`releaseIntent must be "none" or "release", got ${JSON.stringify(meta.releaseIntent)}`);
-  }
+  const rawComponents = meta.components as Record<string, unknown>;
+  const components = Object.fromEntries(
+    PROJECTION_COMPONENTS.map((component) => {
+      const raw = rawComponents[component];
+      if (typeof raw !== "object" || raw === null) {
+        fail(`components.${component} must be an object`);
+      }
+      const entry = raw as Record<string, unknown>;
+      if (typeof entry.version !== "string") fail(`components.${component}.version must be a string`);
+      const channel = resolveChannelFromSemVer(entry.version as string);
+      if (entry.channel !== channel) {
+        fail(
+          `components.${component}.channel ${JSON.stringify(entry.channel)} does not match SemVer-derived channel ${JSON.stringify(channel)} for version ${JSON.stringify(entry.version)}`,
+        );
+      }
+      if (entry.releaseIntent !== "none" && entry.releaseIntent !== "release") {
+        fail(`components.${component}.releaseIntent must be "none" or "release", got ${JSON.stringify(entry.releaseIntent)}`);
+      }
+      return [
+        component,
+        {
+          version: entry.version,
+          channel,
+          releaseIntent: entry.releaseIntent,
+        },
+      ] as const;
+    }),
+  ) as ProjectionReleaseMetadata["components"];
   if (typeof meta.provenance !== "object" || meta.provenance === null) fail("provenance must be an object");
   const provenance = meta.provenance as Record<string, unknown>;
   if (typeof provenance.sourceSha !== "string" || !/^[0-9a-f]{40}$/.test(provenance.sourceSha)) {
@@ -203,23 +276,23 @@ export function parseProjectionReleaseMetadata(raw: string): ProjectionReleaseMe
   }
   return {
     schemaVersion: PROJECTION_RELEASE_METADATA_SCHEMA_VERSION,
-    component: "desktop",
-    version: meta.version,
-    channel,
-    releaseIntent: meta.releaseIntent,
+    components,
     provenance: { sourceSha: provenance.sourceSha, sourceBranch: provenance.sourceBranch },
   };
 }
 
-/** metadata 与同一投影 commit 内的 packages/desktop/package.json 的漂移检查。 */
+/** metadata 与同一投影 commit 内 packages/<component>/package.json 的漂移检查（cli + desktop）。 */
 export function validateMetadataAgainstProjection(
   metadata: ProjectionReleaseMetadata,
-  projectedDesktopVersion: string,
+  projectedVersions: { cli: string; desktop: string },
 ): void {
-  if (metadata.version !== projectedDesktopVersion) {
-    throw new Error(
-      `[projection-release-metadata] metadata version ${metadata.version} drifts from projected ${DESKTOP_PACKAGE_MANIFEST_PATH} version ${projectedDesktopVersion}`,
-    );
+  for (const component of PROJECTION_COMPONENTS) {
+    const manifestPath = component === "cli" ? CLI_PACKAGE_MANIFEST_PATH : DESKTOP_PACKAGE_MANIFEST_PATH;
+    if (metadata.components[component].version !== projectedVersions[component]) {
+      throw new Error(
+        `[projection-release-metadata] metadata components.${component}.version ${metadata.components[component].version} drifts from projected ${manifestPath} version ${projectedVersions[component]}`,
+      );
+    }
   }
 }
 
@@ -230,8 +303,11 @@ export type ProjectionReleaseExpectationStatus =
 
 export interface EvaluateProjectionReleaseExpectationsInput {
   metadata: ProjectionReleaseMetadata;
-  projectedDesktopVersion: string;
-  /** 要求 releaseIntent === "release"（repair/rebuild 与正式发布路径都用）。 */
+  /** 同一投影 commit 内 cli + desktop manifest 的版本（漂移检查对两者都做）。 */
+  projectedVersions: { cli: string; desktop: string };
+  /** 评估哪个组件的 intent / version 绑定。 */
+  component: ProjectionComponent;
+  /** 要求该组件 releaseIntent === "release"（repair/rebuild 与正式发布路径都用）。 */
   expectIntent: boolean;
   /** 绑定目标版本（workflow_dispatch repair 必须显式传入）。 */
   expectVersion?: string;
@@ -240,18 +316,19 @@ export interface EvaluateProjectionReleaseExpectationsInput {
 /**
  * 期望校验（结构合法之后才到这里）。返回值由 CLI 映射为退出码：
  * - ok                     → 0
- * - no-declared-intent     → 1（合法 metadata 但未声明发布：普通投影变化的正常跳过信号）
- * - version-binding-mismatch → 3（dispatch 传入版本与 metadata 不符：fail closed）
- * 漂移（metadata vs package.json）直接 throw → CLI exit 2（fail closed）。
+ * - no-declared-intent     → 1（合法 metadata 但未声明该组件发布：普通投影变化的正常跳过信号）
+ * - version-binding-mismatch → 3（dispatch 传入版本与该组件 metadata 不符：fail closed）
+ * 漂移（metadata vs 任一 package.json）直接 throw → CLI exit 2（fail closed）。
  */
 export function evaluateProjectionReleaseExpectations(
   input: EvaluateProjectionReleaseExpectationsInput,
 ): ProjectionReleaseExpectationStatus {
-  validateMetadataAgainstProjection(input.metadata, input.projectedDesktopVersion);
-  if (input.expectIntent && input.metadata.releaseIntent !== "release") {
+  validateMetadataAgainstProjection(input.metadata, input.projectedVersions);
+  const declared = input.metadata.components[input.component];
+  if (input.expectIntent && declared.releaseIntent !== "release") {
     return "no-declared-intent";
   }
-  if (input.expectVersion !== undefined && input.metadata.version !== input.expectVersion) {
+  if (input.expectVersion !== undefined && declared.version !== input.expectVersion) {
     return "version-binding-mismatch";
   }
   return "ok";

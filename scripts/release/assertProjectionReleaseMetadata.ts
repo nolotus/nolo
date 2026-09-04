@@ -2,43 +2,48 @@
 // scripts/release/assertProjectionReleaseMetadata.ts
 // 公开仓（nolotus/nolo）workflow 使用的 projection release metadata 校验入口。
 //
-// 设计契约（release projection P0）：
+// 设计契约（release projection P0/P1）：
 // - metadata 由 bun-nolo 生成并随投影 commit 同步（bun-nolo owns release intent）；
 //   本脚本只在公开仓侧 fail-closed 校验（nolo owns release execution）。
-// - channel/version 只来自 metadata（channel 在生成侧已由 SemVer 解析），
+// - metadata 表达 cli + desktop 两组件各自的 releaseIntent/version/channel；
+//   channel/version 只来自 metadata（channel 在生成侧已由 SemVer 解析），
 //   绝不从 branch 推断，也绝不重新生成版本。
-// - workflow_dispatch（repair/rebuild）必须用 --expect-version 绑定目标版本。
+// - workflow_dispatch（repair/rebuild）必须用 --component + --expect-version
+//   绑定目标组件与目标版本。
 //
 // 用法：
 //   bun ./scripts/release/assertProjectionReleaseMetadata.ts \
-//     [--expect-intent release] [--expect-version <semver>] \
+//     --component <cli|desktop> [--expect-intent release] [--expect-version <semver>] \
 //     [--print-version] [--set-outputs channel,version,tag]
 //
 // 机器输出契约：人读日志一律走 stderr；stdout 只承载机器可读值（--print-version
 // 的单行 SemVer）。--set-outputs 把纯字段值写入 $GITHUB_OUTPUT（无日志、无多余
 // 换行）——workflow 必须消费 GITHUB_OUTPUT / --print-version，不得捕获 stdout
-// 混入日志（version-bump 与 desktop-build 均按此契约消费）。
+// 混入日志（version-bump 与 cli/desktop build 均按此契约消费）。
 //
 // 退出码（fail-closed 分类，供 workflow 分支处理）：
 //   0  metadata 合法且全部期望满足
-//   1  metadata 合法但未声明 desktop release intent（--expect-intent release 时）
-//      —— 普通投影变化的正常“跳过 desktop”信号
-//   2  metadata 缺失 / JSON 非法 / 结构或 channel 非法 / 与 package.json 漂移
-//      —— 投影自身损坏，必须硬失败
-//   3  --expect-version 与 metadata.version 不一致 —— repair 绑定错误，硬失败
-//   4  packages/desktop/package.json 缺失或不可解析 —— 投影损坏，硬失败
+//   1  metadata 合法但未声明所选组件的 release intent（--expect-intent release 时）
+//      —— 普通投影变化的正常“跳过该组件”信号
+//   2  metadata 缺失 / JSON 非法 / 结构或 channel 非法 / 与任一组件 package.json 漂移
+//      / 参数非法 —— 投影自身损坏，必须硬失败
+//   3  --expect-version 与所选组件 metadata.version 不一致 —— repair 绑定错误，硬失败
+//   4  组件 package.json（cli 或 desktop）缺失或不可解析 —— 投影损坏，硬失败
 import { existsSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CLI_PACKAGE_MANIFEST_PATH,
   DESKTOP_PACKAGE_MANIFEST_PATH,
   PROJECTION_RELEASE_METADATA_FILENAME,
   buildReleaseTag,
   evaluateProjectionReleaseExpectations,
   parseProjectionReleaseMetadata,
-  readDesktopVersion,
+  readComponentVersion,
+  type ProjectionComponent,
 } from "./projectionReleaseMetadata";
 
 interface CliOptions {
+  component: ProjectionComponent;
   expectIntent: boolean;
   expectVersion?: string;
   printVersion: boolean;
@@ -46,10 +51,21 @@ interface CliOptions {
 }
 
 function parseArguments(args: string[]): CliOptions {
-  const options: CliOptions = { expectIntent: false, printVersion: false, setOutputs: [] };
+  const options: CliOptions = {
+    component: undefined as unknown as ProjectionComponent,
+    expectIntent: false,
+    printVersion: false,
+    setOutputs: [],
+  };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--expect-intent") {
+    if (arg === "--component") {
+      const value = args[++index];
+      if (value !== "cli" && value !== "desktop") {
+        throw new Error(`unsupported --component value: ${JSON.stringify(value)} (expected "cli" or "desktop")`);
+      }
+      options.component = value;
+    } else if (arg === "--expect-intent") {
       const value = args[++index];
       if (value !== "release") {
         throw new Error(`unsupported --expect-intent value: ${JSON.stringify(value)} (only "release" is meaningful here)`);
@@ -67,6 +83,9 @@ function parseArguments(args: string[]): CliOptions {
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
+  }
+  if (options.component === undefined) {
+    throw new Error('--component is required (expected "cli" or "desktop"); refusing to guess (fail closed)');
   }
   return options;
 }
@@ -108,11 +127,18 @@ export function runAssertProjectionReleaseMetadata(
     return { exitCode: 2 };
   }
 
-  let projectedDesktopVersion: string;
+  // 漂移检查对 cli + desktop 两个 manifest 都做：投影是一致快照，
+  // 任一组件的 metadata/manifest 漂移都意味着投影损坏（fail closed）。
+  let projectedVersions: { cli: string; desktop: string };
   try {
-    projectedDesktopVersion = readDesktopVersion(repoRoot);
+    projectedVersions = {
+      cli: readComponentVersion(repoRoot, "cli"),
+      desktop: readComponentVersion(repoRoot, "desktop"),
+    };
   } catch (error) {
-    console.error(`[projection-release-metadata] cannot read ${DESKTOP_PACKAGE_MANIFEST_PATH}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[projection-release-metadata] cannot read component manifest (${CLI_PACKAGE_MANIFEST_PATH} / ${DESKTOP_PACKAGE_MANIFEST_PATH}): ${error instanceof Error ? error.message : String(error)}`,
+    );
     return { exitCode: 4 };
   }
 
@@ -120,7 +146,8 @@ export function runAssertProjectionReleaseMetadata(
   try {
     status = evaluateProjectionReleaseExpectations({
       metadata,
-      projectedDesktopVersion,
+      projectedVersions,
+      component: options.component,
       expectIntent: options.expectIntent,
       expectVersion: options.expectVersion,
     });
@@ -129,27 +156,28 @@ export function runAssertProjectionReleaseMetadata(
     return { exitCode: 2 };
   }
 
+  const declared = metadata.components[options.component];
   if (status === "no-declared-intent") {
     console.error(
-      `[projection-release-metadata] desktop ${metadata.version} (${metadata.channel}) has releaseIntent=none — no declared desktop release in this projection`,
+      `[projection-release-metadata] ${options.component} has no declared release intent (releaseIntent=none) — ordinary projection change, skipping (exit 1 signal)`,
     );
     return { exitCode: 1 };
   }
   if (status === "version-binding-mismatch") {
     console.error(
-      `[projection-release-metadata] requested version ${JSON.stringify(options.expectVersion)} does not match declared metadata version ${metadata.version} — repair must target the declared version (fail closed)`,
+      `[projection-release-metadata] requested version ${JSON.stringify(options.expectVersion)} does not match declared ${options.component} metadata version ${declared.version} — repair must target the declared version (fail closed)`,
     );
     return { exitCode: 3 };
   }
 
   console.error(
-    `[projection-release-metadata] ok: desktop ${metadata.version} channel=${metadata.channel} intent=${metadata.releaseIntent} source=${metadata.provenance.sourceSha}${metadata.provenance.sourceBranch ? `@${metadata.provenance.sourceBranch}` : ""}`,
+    `[projection-release-metadata] ok: ${options.component} ${declared.version} channel=${declared.channel} intent=${declared.releaseIntent} source=${metadata.provenance.sourceSha}${metadata.provenance.sourceBranch ? `@${metadata.provenance.sourceBranch}` : ""}`,
   );
   if (options.setOutputs.length) {
     const fields: Record<string, string> = {
-      channel: metadata.channel,
-      version: metadata.version,
-      tag: buildReleaseTag(metadata),
+      channel: declared.channel,
+      version: declared.version,
+      tag: buildReleaseTag(options.component, declared),
     };
     const selected: Record<string, string> = {};
     for (const field of options.setOutputs) {
@@ -158,8 +186,8 @@ export function runAssertProjectionReleaseMetadata(
     }
     writeGithubOutputs(selected);
   }
-  if (options.printVersion) console.log(metadata.version);
-  return { exitCode: 0, version: metadata.version };
+  if (options.printVersion) console.log(declared.version);
+  return { exitCode: 0, version: declared.version };
 }
 
 // 退出码语义见文件头注释；脚本可被测试直接 import（runAssertProjectionReleaseMetadata）。

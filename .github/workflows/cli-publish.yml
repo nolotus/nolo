@@ -11,6 +11,14 @@ on:
         options:
           - alpha
           - latest
+      version:
+        description: "Target CLI version (must equal projection-release-metadata.json at projection_sha)"
+        required: true
+        type: string
+      projection_sha:
+        description: "Exact public projection commit SHA (40-hex) to publish from"
+        required: true
+        type: string
 
 concurrency:
   group: cli-npm-publish-${{ inputs.dist_tag }}
@@ -22,10 +30,41 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Validate dispatch binding (fail closed)
+        run: |
+          set -euo pipefail
+          # repair/rebuild 与自动发布同契约：必须显式绑定 40-hex 投影 SHA 与
+          # metadata 声明的目标版本；缺失或非法格式直接硬失败。
+          if ! printf '%s' "${{ inputs.projection_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::projection_sha must be an exact 40-hex commit SHA, got '${{ inputs.projection_sha }}'" >&2
+            exit 2
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.projection_sha }}
+          clean: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - id: metadata
+        name: Validate projection release metadata (fail closed)
+        run: |
+          set -euo pipefail
+          # metadata 校验与 npm publish 基于同一 projection_sha；channel/version
+          # 只来自 projection-release-metadata.json，绝不从 branch 推断。
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts \
+            --component cli \
+            --expect-intent release \
+            --expect-version "${{ inputs.version }}" \
+            --set-outputs channel,version,tag
+          # npm dist-tag 必须与 metadata channel 一致（alpha→alpha，stable→latest）。
+          case "${{ steps.metadata.outputs.channel }}:${{ inputs.dist_tag }}" in
+            alpha:alpha|stable:latest) ;;
+            *)
+              echo "::error::dist_tag '${{ inputs.dist_tag }}' does not match metadata channel '${{ steps.metadata.outputs.channel }}' (alpha→alpha, stable→latest)" >&2
+              exit 2
+              ;;
+          esac
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -52,6 +91,10 @@ jobs:
             node: 26
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 健康检查读的 packages/cli/package.json 版本必须就是本次发布的版本：
+          # 绑定同一 projection_sha，不读可能已前移的默认分支。
+          ref: ${{ inputs.projection_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}

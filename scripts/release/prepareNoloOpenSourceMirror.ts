@@ -869,20 +869,24 @@ export async function verifyPublicProjectionGate(input: {
   } else {
     try {
       const metadata = parseProjectionReleaseMetadata(await readFile(metadataPath, "utf8"));
-      const desktopManifestPath = join(outDir, "packages", "desktop", "package.json");
-      let projectedVersion: string | undefined;
-      try {
-        projectedVersion = (JSON.parse(await readFile(desktopManifestPath, "utf8")) as { version?: string }).version;
-      } catch {
-        // 缺 manifest / 不可解析的情况由后续 denied-package/manifest 校验兜底；
-        // 这里只负责 metadata 与 manifest 的漂移检查。
-      }
-      if (projectedVersion !== undefined && metadata.version !== projectedVersion) {
-        violations.push({
-          category: "release-metadata",
-          message: `Projection release metadata version ${metadata.version} drifts from packages/desktop/package.json version ${projectedVersion}`,
-          path: PROJECTION_RELEASE_METADATA_FILENAME,
-        });
+      // cli + desktop 两个 manifest 都做漂移检查：metadata 是投影级契约，
+      // 任一组件版本漂移都意味着投影损坏（fail closed）。
+      for (const component of ["cli", "desktop"] as const) {
+        const manifestPath = join(outDir, "packages", component, "package.json");
+        let projectedVersion: string | undefined;
+        try {
+          projectedVersion = (JSON.parse(await readFile(manifestPath, "utf8")) as { version?: string }).version;
+        } catch {
+          // 缺 manifest / 不可解析的情况由后续 denied-package/manifest 校验兜底；
+          // 这里只负责 metadata 与 manifest 的漂移检查。
+        }
+        if (projectedVersion !== undefined && metadata.components[component].version !== projectedVersion) {
+          violations.push({
+            category: "release-metadata",
+            message: `Projection release metadata components.${component}.version ${metadata.components[component].version} drifts from packages/${component}/package.json version ${projectedVersion}`,
+            path: PROJECTION_RELEASE_METADATA_FILENAME,
+          });
+        }
       }
     } catch (error) {
       violations.push({
@@ -1426,9 +1430,12 @@ jobs:
   // Desktop build: 仅 workflow_dispatch（repair/rebuild 入口）。
   // 普通 projection 变化不直接发布 Desktop；只有 projection release metadata
   // 声明了 release intent（由 bun-nolo 生成、version-bump.yml 校验后 dispatch，
-  // 或人工 repair 绑定 metadata 中的目标版本）才会进入本 workflow。
-  // channel/version 一律来自 projection-release-metadata.json（channel 在
-  // bun-nolo 侧由 SemVer 解析），绝不从 public branch 推断，也不重新生成版本。
+  // 或人工 repair 显式绑定 metadata 中的目标版本 + 投影 SHA）才会进入本 workflow。
+  // dispatch 必须显式绑定 version + projection_sha（严格 40-hex 的公开投影
+  // commit SHA）：metadata validation、build、R2/GitHub release 全部基于同一
+  // commit，绝不回退到默认分支 HEAD。channel/version 一律来自
+  // projection-release-metadata.json（channel 在 bun-nolo 侧由 SemVer 解析），
+  // 绝不从 public branch 推断，也不重新生成版本。
   // 发布步不做 delete/recreate：目标 tag 的 GitHub Release 已存在即 fail closed
   // （same version/different SHA 的重发同样被拒），无服务、无状态文件。
   // `all` 覆盖 windows/macos/linux 三平台，与发布步的
@@ -1449,7 +1456,11 @@ on:
           - macos
           - linux
       version:
-        description: "Target desktop version (must equal projection-release-metadata.json at HEAD)"
+        description: "Target desktop version (must equal projection-release-metadata.json at projection_sha)"
+        required: true
+        type: string
+      projection_sha:
+        description: "Exact public projection commit SHA (40-hex) to build/release from"
         required: true
         type: string
 
@@ -1469,8 +1480,19 @@ jobs:
       version: \${{ steps.metadata.outputs.version }}
       tag: \${{ steps.metadata.outputs.tag }}
     steps:
+      - name: Validate dispatch binding (fail closed)
+        run: |
+          set -euo pipefail
+          # repair/rebuild 与自动发布同契约：必须显式绑定 40-hex 投影 SHA 与
+          # metadata 声明的目标版本；缺失或非法格式直接硬失败，绝不 checkout
+          # 默认分支 HEAD。
+          if ! printf '%s' "\${{ inputs.projection_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::projection_sha must be an exact 40-hex commit SHA, got '\${{ inputs.projection_sha }}'" >&2
+            exit 2
+          fi
       - uses: actions/checkout@v4
         with:
+          ref: \${{ inputs.projection_sha }}
           clean: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -1480,9 +1502,11 @@ jobs:
         run: |
           set -euo pipefail
           # channel/version 只来自 projection-release-metadata.json（bun-nolo 生成，
-          # channel 由 SemVer 解析）。任何缺失、结构损坏、intent 缺失或与
-          # --expect-version 绑定不符都直接失败：不猜 channel，不重新生成版本。
+          # channel 由 SemVer 解析）；校验基于 inputs.projection_sha 这一个 commit。
+          # 任何缺失、结构损坏、intent 缺失或与 --expect-version 绑定不符都直接
+          # 失败：不猜 channel，不重新生成版本。
           bun ./scripts/release/assertProjectionReleaseMetadata.ts \\
+            --component desktop \\
             --expect-intent release \\
             --expect-version "\${{ inputs.version }}" \\
             --set-outputs channel,version,tag
@@ -1529,6 +1553,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # 构建内容 = select-targets 校验过的同一 projection_sha（不变式：
+          # metadata validation / build / R2 / GitHub release 全部基于同一 SHA）。
+          ref: \${{ inputs.projection_sha }}
           clean: true
       - name: Setup reusable Windows desktop workspace
         if: runner.os == 'Windows'
@@ -1604,6 +1631,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 发布侧工具链与构建内容同源：绑定同一 projection_sha。
+          ref: \${{ inputs.projection_sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -1627,7 +1657,7 @@ jobs:
         run: |
           bun ./scripts/release/publishDesktopDownloads.ts \\
             --channel "\${{ needs.select-targets.outputs.channel }}" \\
-            --build-sha "\${{ github.sha }}"
+            --build-sha "\${{ inputs.projection_sha }}"
 
       - name: Verify legacy alias URLs
         run: |
@@ -1652,7 +1682,7 @@ jobs:
           cp -r packages/desktop/artifacts/desktop-linux/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-windows/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-macos/* release-assets/ 2>/dev/null || true
-          FLAGS="--notes 'Desktop \${CHANNEL} build from \${{ github.sha }}'"
+          FLAGS="--notes 'Desktop \${CHANNEL} build from \${{ inputs.projection_sha }}'"
           if [ "$CHANNEL" = "alpha" ]; then
             FLAGS="$FLAGS --prerelease"
           fi
@@ -1671,9 +1701,13 @@ jobs:
 `;
   await writeFile(join(githubDir, "desktop-build.yml"), desktopBuild);
 
-  // CLI npm publish: 手动触发，发布 nolo-cli 到 npm（alpha/latest dist-tag）。
-  // 用 ubuntu-latest（公开仓库免费），只需 NPM_TOKEN secret。
-  // 去掉了私有仓库的 mirror-open-source job（公开仓库自身就是源）。
+  // CLI npm publish: 仅 workflow_dispatch（自动路径由公开仓 version-bump 在
+  // metadata 声明 cli release 时 dispatch；人工 repair/rebuild 走同一入口）。
+  // dispatch 必须显式绑定 version + projection_sha（严格 40-hex 的公开投影
+  // commit SHA）：checkout、metadata 校验、npm publish 全部基于同一 commit，
+  // 绝不回退到默认分支 HEAD。npm dist-tag 由 metadata channel 单源映射：
+  // prerelease → alpha，stable → latest（alpha→alpha、stable→latest），
+  // 绝不由 public branch 推断。
   const cliPublish = `name: Publish CLI to npm
 
 on:
@@ -1687,6 +1721,14 @@ on:
         options:
           - alpha
           - latest
+      version:
+        description: "Target CLI version (must equal projection-release-metadata.json at projection_sha)"
+        required: true
+        type: string
+      projection_sha:
+        description: "Exact public projection commit SHA (40-hex) to publish from"
+        required: true
+        type: string
 
 concurrency:
   group: cli-npm-publish-\${{ inputs.dist_tag }}
@@ -1698,10 +1740,41 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Validate dispatch binding (fail closed)
+        run: |
+          set -euo pipefail
+          # repair/rebuild 与自动发布同契约：必须显式绑定 40-hex 投影 SHA 与
+          # metadata 声明的目标版本；缺失或非法格式直接硬失败。
+          if ! printf '%s' "\${{ inputs.projection_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::projection_sha must be an exact 40-hex commit SHA, got '\${{ inputs.projection_sha }}'" >&2
+            exit 2
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: \${{ inputs.projection_sha }}
+          clean: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - id: metadata
+        name: Validate projection release metadata (fail closed)
+        run: |
+          set -euo pipefail
+          # metadata 校验与 npm publish 基于同一 projection_sha；channel/version
+          # 只来自 projection-release-metadata.json，绝不从 branch 推断。
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts \\
+            --component cli \\
+            --expect-intent release \\
+            --expect-version "\${{ inputs.version }}" \\
+            --set-outputs channel,version,tag
+          # npm dist-tag 必须与 metadata channel 一致（alpha→alpha，stable→latest）。
+          case "\${{ steps.metadata.outputs.channel }}:\${{ inputs.dist_tag }}" in
+            alpha:alpha|stable:latest) ;;
+            *)
+              echo "::error::dist_tag '\${{ inputs.dist_tag }}' does not match metadata channel '\${{ steps.metadata.outputs.channel }}' (alpha→alpha, stable→latest)" >&2
+              exit 2
+              ;;
+          esac
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -1728,6 +1801,10 @@ jobs:
             node: 26
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 健康检查读的 packages/cli/package.json 版本必须就是本次发布的版本：
+          # 绑定同一 projection_sha，不读可能已前移的默认分支。
+          ref: \${{ inputs.projection_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: \${{ matrix.node }}
@@ -1742,10 +1819,16 @@ jobs:
 `;
   await writeFile(join(githubDir, "cli-publish.yml"), cliPublish);
 
-  // Version bump: public main 更新时验证兼容性并 dispatch 发布。
+  // Version bump: public main 更新时验证兼容性并按 metadata intent 分发发布。
   // 版本号由 bun-nolo 的统一 release engine 决定（single-source），随 mirror
   // 同步到公开仓库（packages/*/package.json 的 version 字段已含正确版本）。
   // 公开仓库不跑 release engine——快照式无历史会导致版本号推断错误。
+  // cli / desktop 的 release intent 单源是 projection-release-metadata.json
+  // （bun-nolo component tags 生成）：只有声明 release 的组件才 dispatch；
+  // 普通投影（两组件都 intent=none）两者都跳过；CLI-only / Desktop-only /
+  // combined 各只执行声明过的组件。dispatch 一律显式绑定 version +
+  // projection_sha（本次 ${{ github.sha }}，即 metadata 所在的投影 commit），
+  // 绝不按 branch 或 source diff 猜测。
   const versionBump = `name: Version Bump
 
 on:
@@ -1767,7 +1850,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: \${{ github.ref_name }}
+          # 绑定本次事件的确切 commit（push 触发 = 被推送的投影 commit）：
+          # metadata 校验与 dispatch 传出的 projection_sha 必须同源。
+          ref: \${{ github.sha }}
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
@@ -1777,28 +1862,60 @@ jobs:
       - name: Verify release compatibility
         run: bun scripts/verify/verifyReleaseUpdateCompatibility.ts
 
-      - name: Dispatch CLI npm publish
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve CLI release intent
+        id: cli
         run: |
           set -euo pipefail
-          # The public projection has only main. Preserve the private release
-          # channel by deriving npm's dist-tag from the projected SemVer.
-          CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
-          gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
+          # Projection release metadata（bun-nolo 生成、随投影 commit 同步）是
+          # CLI release intent 的唯一来源。普通投影变化（intent=none）跳过 CLI
+          # （重发布成本高，绝不为普通投影重复发布 npm）；metadata 缺失/损坏/
+          # 与任一组件 package.json 漂移时 assert 脚本以非 0/1 退出码硬失败
+          # （fail closed）。机器输出契约：version/channel 只经 --set-outputs
+          # 写入 $GITHUB_OUTPUT（纯单值）；绝不捕获 assert 的 stdout（内含
+          # 人读日志，混入即污染）。
+          DECISION=0
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --component cli --expect-intent release --set-outputs version,channel || DECISION=$?
+          if [ "$DECISION" -eq 0 ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DECISION" -eq 1 ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "projection release metadata failed fail-closed validation (exit $DECISION)" >&2
+            exit "$DECISION"
+          fi
 
-      - name: Decide whether a desktop release is declared
+      - name: Dispatch CLI npm publish
+        if: steps.cli.outputs.build == 'true'
+        env:
+          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          CLI_VERSION: \${{ steps.cli.outputs.version }}
+          CLI_CHANNEL: \${{ steps.cli.outputs.channel }}
+          PROJECTION_SHA: \${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # 只 dispatch 已声明的 CLI release：version 与本次投影 commit SHA
+          # 显式绑定，cli-publish 侧会再做一次 fail-closed 校验（repair/rebuild
+          # 同入口）。npm dist-tag 是 metadata channel 的确定性映射：
+          # alpha→alpha，stable→latest；绝不从 public branch 推断。
+          case "$CLI_CHANNEL" in
+            alpha) DIST_TAG=alpha ;;
+            stable) DIST_TAG=latest ;;
+            *) echo "unknown CLI channel from metadata: $CLI_CHANNEL" >&2; exit 2 ;;
+          esac
+          gh workflow run cli-publish.yml -f dist_tag="$DIST_TAG" -f version="$CLI_VERSION" -f projection_sha="$PROJECTION_SHA"
+
+      - name: Resolve desktop release intent
         id: desktop
         run: |
           set -euo pipefail
           # Projection release metadata（bun-nolo 生成、随投影 commit 同步）是
-          # desktop release intent 的唯一来源。普通投影变化（无 release intent）
-          # 跳过 Desktop；metadata 缺失/损坏/与 packages/desktop/package.json
-          # 漂移时 assert 脚本以非 0/1 退出码硬失败（fail closed）。
-          # 机器输出契约：version 只经 --set-outputs 写入 $GITHUB_OUTPUT（纯
-          # SemVer 单值）；绝不捕获 assert 的 stdout（内含人读日志，混入即污染）。
+          # desktop release intent 的唯一来源。普通投影变化（intent=none）跳过
+          # Desktop；metadata 缺失/损坏/与任一组件 package.json 漂移时 assert
+          # 脚本以非 0/1 退出码硬失败（fail closed）。机器输出契约：version 只经
+          # --set-outputs 写入 $GITHUB_OUTPUT（纯 SemVer 单值）；绝不捕获
+          # assert 的 stdout（内含人读日志，混入即污染）。
           DECISION=0
-          bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version || DECISION=$?
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --component desktop --expect-intent release --set-outputs version || DECISION=$?
           if [ "$DECISION" -eq 0 ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           elif [ "$DECISION" -eq 1 ]; then
@@ -1813,11 +1930,13 @@ jobs:
         env:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           DESKTOP_VERSION: \${{ steps.desktop.outputs.version }}
+          PROJECTION_SHA: \${{ github.sha }}
         run: |
           set -euo pipefail
-          # 只 dispatch 已声明的 release metadata；目标版本显式绑定 metadata，
-          # desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild 同入口）。
-          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION"
+          # 只 dispatch 已声明的 desktop release；目标版本与本次投影 commit SHA
+          # 显式绑定，desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild
+          # 同入口）。
+          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION" -f projection_sha="$PROJECTION_SHA"
 `;
   await writeFile(join(githubDir, "version-bump.yml"), versionBump);
 }
@@ -2001,15 +2120,20 @@ export async function prepareNoloOpenSourceMirror(input: {
   // 6.5. 生成公开仓库 scaffold（README、LICENSE、CONTRIBUTING、SECURITY、CI）
   await generatePublicScaffold(outDir);
 
-  // 6.6. Projection release metadata（release projection P0）
-  // bun-nolo owns release intent：desktop 是否发布由 component tag 单源判定
-  // （HEAD 指向 desktop-v<version> ⇒ release），channel 由该版本 SemVer 解析，
-  // 绝不由 public branch 推断。metadata 随投影 commit 落到公开仓，
-  // 公开仓 workflow 只执行这里声明过的 release（nolo owns release execution）。
+  // 6.6. Projection release metadata（release projection P0/P1）
+  // bun-nolo owns release intent：cli / desktop 是否发布由 component tag 单源判定
+  // （HEAD 指向 cli-v<version> / desktop-v<version> ⇒ 该组件 release），
+  // channel 由各组件版本 SemVer 解析，绝不由 public branch 推断。
+  // metadata 随投影 commit 落到公开仓，公开仓 workflow 只执行这里声明过的
+  // release（nolo owns release execution）。
   const releaseMetadata = buildProjectionReleaseMetadata({ repoRoot });
   await writeFile(join(outDir, PROJECTION_RELEASE_METADATA_FILENAME), serializeProjectionReleaseMetadata(releaseMetadata));
+  const describeComponent = (component: "cli" | "desktop") => {
+    const declared = releaseMetadata.components[component];
+    return `${component} ${declared.version} channel=${declared.channel} intent=${declared.releaseIntent}`;
+  };
   console.log(
-    `Projection release metadata: desktop ${releaseMetadata.version} channel=${releaseMetadata.channel} intent=${releaseMetadata.releaseIntent} (source ${releaseMetadata.provenance.sourceSha}${releaseMetadata.provenance.sourceBranch ? `@${releaseMetadata.provenance.sourceBranch}` : ""})`,
+    `Projection release metadata: ${describeComponent("cli")}; ${describeComponent("desktop")} (source ${releaseMetadata.provenance.sourceSha}${releaseMetadata.provenance.sourceBranch ? `@${releaseMetadata.provenance.sourceBranch}` : ""})`,
   );
 
   // 7. Fail-closed 安全 Gate 验证

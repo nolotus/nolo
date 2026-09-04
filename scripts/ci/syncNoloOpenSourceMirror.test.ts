@@ -57,7 +57,7 @@ async function makePrivateRepo() {
 // 用 bare 仓库模拟真实 GitHub 远端（非 bare 会拒绝 push 到已 checkout 分支）。
 async function makePublicRepo(cliVersion: string) {
   const work = await makeRepo();
-  await commit(work, "packages/cli/package.json", `{"version":"${cliVersion}"}\n`, "chore: sync open-source public projection 2026-08-28\n\nSource-Commit: abc123\nSource-Release-Tag: cli-v0.33.0-alpha.33");
+  await commit(work, "packages/cli/package.json", `{"version":"${cliVersion}"}\n`, "chore: sync open-source public projection 2026-08-28\n\nSource-Commit: abc123");
   const bare = await mkdtemp(join(tmpdir(), "nolo-sync-pub-bare-"));
   temporaryDirectories.push(bare);
   await git(work, ["clone", "--bare", "-q", ".", bare]);
@@ -119,7 +119,7 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     const message = await git(publicRepo, ["log", "-1", "--format=%B"]);
     expect(message).toContain("chore: sync open-source public projection");
     expect(message).toContain("Source-Commit:");
-    expect(message).toContain("Source-Release-Tag:");
+    expect(message).not.toContain("Source-Release-Tag:");
 
     // 投影内容已更新
     const cliVersion = await git(publicRepo, ["show", `${publicHeadAfter}:packages/cli/package.json`]);
@@ -146,7 +146,7 @@ describe("syncNoloOpenSourceMirror.sh", () => {
     expect(exitCode).toBe(0, stderr);
     expect(stdout).toContain("投影无变化（no-op）");
     expect(stdout).toContain("Source-Commit:");
-    expect(stdout).toContain("Source-Release-Tag:");
+    expect(stdout).not.toContain("Source-Release-Tag:");
     expect(await git(publicRepo, ["rev-parse", "HEAD"])).toBe(publicHeadBefore);
   });
 });

@@ -19,7 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          # 绑定本次事件的确切 commit（push 触发 = 被推送的投影 commit）：
+          # metadata 校验与 dispatch 传出的 projection_sha 必须同源。
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
@@ -29,28 +31,60 @@ jobs:
       - name: Verify release compatibility
         run: bun scripts/verify/verifyReleaseUpdateCompatibility.ts
 
-      - name: Dispatch CLI npm publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve CLI release intent
+        id: cli
         run: |
           set -euo pipefail
-          # The public projection has only main. Preserve the private release
-          # channel by deriving npm's dist-tag from the projected SemVer.
-          CLI_DIST_TAG=$(node -p "require('./packages/cli/package.json').version.includes('-') ? 'alpha' : 'latest'")
-          gh workflow run cli-publish.yml -f dist_tag="$CLI_DIST_TAG"
+          # Projection release metadata（bun-nolo 生成、随投影 commit 同步）是
+          # CLI release intent 的唯一来源。普通投影变化（intent=none）跳过 CLI
+          # （重发布成本高，绝不为普通投影重复发布 npm）；metadata 缺失/损坏/
+          # 与任一组件 package.json 漂移时 assert 脚本以非 0/1 退出码硬失败
+          # （fail closed）。机器输出契约：version/channel 只经 --set-outputs
+          # 写入 $GITHUB_OUTPUT（纯单值）；绝不捕获 assert 的 stdout（内含
+          # 人读日志，混入即污染）。
+          DECISION=0
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --component cli --expect-intent release --set-outputs version,channel || DECISION=$?
+          if [ "$DECISION" -eq 0 ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DECISION" -eq 1 ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "projection release metadata failed fail-closed validation (exit $DECISION)" >&2
+            exit "$DECISION"
+          fi
 
-      - name: Decide whether a desktop release is declared
+      - name: Dispatch CLI npm publish
+        if: steps.cli.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLI_VERSION: ${{ steps.cli.outputs.version }}
+          CLI_CHANNEL: ${{ steps.cli.outputs.channel }}
+          PROJECTION_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # 只 dispatch 已声明的 CLI release：version 与本次投影 commit SHA
+          # 显式绑定，cli-publish 侧会再做一次 fail-closed 校验（repair/rebuild
+          # 同入口）。npm dist-tag 是 metadata channel 的确定性映射：
+          # alpha→alpha，stable→latest；绝不从 public branch 推断。
+          case "$CLI_CHANNEL" in
+            alpha) DIST_TAG=alpha ;;
+            stable) DIST_TAG=latest ;;
+            *) echo "unknown CLI channel from metadata: $CLI_CHANNEL" >&2; exit 2 ;;
+          esac
+          gh workflow run cli-publish.yml -f dist_tag="$DIST_TAG" -f version="$CLI_VERSION" -f projection_sha="$PROJECTION_SHA"
+
+      - name: Resolve desktop release intent
         id: desktop
         run: |
           set -euo pipefail
           # Projection release metadata（bun-nolo 生成、随投影 commit 同步）是
-          # desktop release intent 的唯一来源。普通投影变化（无 release intent）
-          # 跳过 Desktop；metadata 缺失/损坏/与 packages/desktop/package.json
-          # 漂移时 assert 脚本以非 0/1 退出码硬失败（fail closed）。
-          # 机器输出契约：version 只经 --set-outputs 写入 $GITHUB_OUTPUT（纯
-          # SemVer 单值）；绝不捕获 assert 的 stdout（内含人读日志，混入即污染）。
+          # desktop release intent 的唯一来源。普通投影变化（intent=none）跳过
+          # Desktop；metadata 缺失/损坏/与任一组件 package.json 漂移时 assert
+          # 脚本以非 0/1 退出码硬失败（fail closed）。机器输出契约：version 只经
+          # --set-outputs 写入 $GITHUB_OUTPUT（纯 SemVer 单值）；绝不捕获
+          # assert 的 stdout（内含人读日志，混入即污染）。
           DECISION=0
-          bun ./scripts/release/assertProjectionReleaseMetadata.ts --expect-intent release --set-outputs version || DECISION=$?
+          bun ./scripts/release/assertProjectionReleaseMetadata.ts --component desktop --expect-intent release --set-outputs version || DECISION=$?
           if [ "$DECISION" -eq 0 ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           elif [ "$DECISION" -eq 1 ]; then
@@ -65,8 +99,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DESKTOP_VERSION: ${{ steps.desktop.outputs.version }}
+          PROJECTION_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # 只 dispatch 已声明的 release metadata；目标版本显式绑定 metadata，
-          # desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild 同入口）。
-          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION"
+          # 只 dispatch 已声明的 desktop release；目标版本与本次投影 commit SHA
+          # 显式绑定，desktop-build 侧会再做一次 fail-closed 校验（repair/rebuild
+          # 同入口）。
+          gh workflow run desktop-build.yml -f targets=all -f version="$DESKTOP_VERSION" -f projection_sha="$PROJECTION_SHA"

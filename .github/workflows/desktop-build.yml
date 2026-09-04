@@ -14,7 +14,11 @@ on:
           - macos
           - linux
       version:
-        description: "Target desktop version (must equal projection-release-metadata.json at HEAD)"
+        description: "Target desktop version (must equal projection-release-metadata.json at projection_sha)"
+        required: true
+        type: string
+      projection_sha:
+        description: "Exact public projection commit SHA (40-hex) to build/release from"
         required: true
         type: string
 
@@ -34,8 +38,19 @@ jobs:
       version: ${{ steps.metadata.outputs.version }}
       tag: ${{ steps.metadata.outputs.tag }}
     steps:
+      - name: Validate dispatch binding (fail closed)
+        run: |
+          set -euo pipefail
+          # repair/rebuild 与自动发布同契约：必须显式绑定 40-hex 投影 SHA 与
+          # metadata 声明的目标版本；缺失或非法格式直接硬失败，绝不 checkout
+          # 默认分支 HEAD。
+          if ! printf '%s' "${{ inputs.projection_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::projection_sha must be an exact 40-hex commit SHA, got '${{ inputs.projection_sha }}'" >&2
+            exit 2
+          fi
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.projection_sha }}
           clean: true
       - uses: oven-sh/setup-bun@v2
         with:
@@ -45,9 +60,11 @@ jobs:
         run: |
           set -euo pipefail
           # channel/version 只来自 projection-release-metadata.json（bun-nolo 生成，
-          # channel 由 SemVer 解析）。任何缺失、结构损坏、intent 缺失或与
-          # --expect-version 绑定不符都直接失败：不猜 channel，不重新生成版本。
+          # channel 由 SemVer 解析）；校验基于 inputs.projection_sha 这一个 commit。
+          # 任何缺失、结构损坏、intent 缺失或与 --expect-version 绑定不符都直接
+          # 失败：不猜 channel，不重新生成版本。
           bun ./scripts/release/assertProjectionReleaseMetadata.ts \
+            --component desktop \
             --expect-intent release \
             --expect-version "${{ inputs.version }}" \
             --set-outputs channel,version,tag
@@ -94,6 +111,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # 构建内容 = select-targets 校验过的同一 projection_sha（不变式：
+          # metadata validation / build / R2 / GitHub release 全部基于同一 SHA）。
+          ref: ${{ inputs.projection_sha }}
           clean: true
       - name: Setup reusable Windows desktop workspace
         if: runner.os == 'Windows'
@@ -169,6 +189,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 发布侧工具链与构建内容同源：绑定同一 projection_sha。
+          ref: ${{ inputs.projection_sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -192,7 +215,7 @@ jobs:
         run: |
           bun ./scripts/release/publishDesktopDownloads.ts \
             --channel "${{ needs.select-targets.outputs.channel }}" \
-            --build-sha "${{ github.sha }}"
+            --build-sha "${{ inputs.projection_sha }}"
 
       - name: Verify legacy alias URLs
         run: |
@@ -217,7 +240,7 @@ jobs:
           cp -r packages/desktop/artifacts/desktop-linux/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-windows/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-macos/* release-assets/ 2>/dev/null || true
-          FLAGS="--notes 'Desktop ${CHANNEL} build from ${{ github.sha }}'"
+          FLAGS="--notes 'Desktop ${CHANNEL} build from ${{ inputs.projection_sha }}'"
           if [ "$CHANNEL" = "alpha" ]; then
             FLAGS="$FLAGS --prerelease"
           fi
