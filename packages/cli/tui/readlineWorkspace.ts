@@ -272,7 +272,10 @@ const SIGNAL_EXIT_CODE: Partial<Record<NodeJS.Signals, number>> = {
  */
 const restoreAltScreen = () => {
   try {
-    if (altScreenRestoreOutput) leaveAltScreen(altScreenRestoreOutput);
+    if (altScreenRestoreOutput) {
+      altScreenRestoreOutput.write("\x1b[?2004l\x1b[?25h\x1b[?2026l\x1b[?1002l\x1b[?1006l\x1b[r");
+      leaveAltScreen(altScreenRestoreOutput);
+    }
   } catch {
     // Stream destroyed / write failed: the terminal is already gone.
   }
@@ -1165,6 +1168,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       input.off("end", finish);
       input.off("close", finish);
       onData.destroy();
+      fixedInput.disable();
       output.write("\x1b[?2004l");
       output.write("\x1b[?25h\x1b[?2026l");
       input.setRawMode?.(false);

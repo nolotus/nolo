@@ -580,10 +580,15 @@ export function waitForRawActionGate(
       settled = true;
       hooks?.registerToken?.(null);
       input.off("data", onData);
+      input.off?.("end", onEnd);
+      input.off?.("close", onEnd);
       resolve(result);
     };
     const cancel = (reason: string) => finish(buildGateCancelledResult(gate, reason));
     const fail = (message: string) => finish(buildGateFailedResult(gate, message));
+    const onEnd = () => {
+      cancel("interrupted");
+    };
     const runCommand = async () => {
       if (settled || commandRunning) return;
       commandRunning = true;
@@ -630,7 +635,7 @@ export function waitForRawActionGate(
     };
     const handleToken = (text: string) => {
       if (settled || commandRunning) return;
-      if (text.includes(CTRL_C) || (isConfirmation && text === ESC)) {
+      if (text.includes(CTRL_C) || text.includes("\x04") || (isConfirmation && text === ESC)) {
         cancel("interrupted");
         return;
       }
@@ -656,6 +661,8 @@ export function waitForRawActionGate(
       const text = String(chunk);
       handleToken(text);
     };
+    input.on?.("end", onEnd);
+    input.on?.("close", onEnd);
     if (hooks?.registerToken) {
       hooks.registerToken(handleToken);
     } else {
@@ -752,18 +759,21 @@ export async function resolveActionGate(
   // to compute and the subprocess-vs-dialog resume split below is specific
   // to this gate kind).
   return deps.dialogHost.withKeyboard(async () => {
-    let subprocessRan = false;
+    let subprocessResumed = false;
     deps.pauseComposer();
     try {
       return await waitForRawActionGate(deps.input, deps.output, gate, deps.spawnRunner, {
         beforeSubprocess: () => {
-          subprocessRan = true;
+          // Subprocess starting
         },
-        afterSubprocess: deps.resumeComposerFromSubprocess,
+        afterSubprocess: () => {
+          subprocessResumed = true;
+          deps.resumeComposerFromSubprocess();
+        },
         registerToken: deps.registerToken,
       });
     } finally {
-      if (!subprocessRan) deps.resumeComposerFromDialog();
+      if (!subprocessResumed) deps.resumeComposerFromDialog();
     }
   });
 }

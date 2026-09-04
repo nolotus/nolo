@@ -241,10 +241,12 @@ export function createDialogHost(args: {
   // acquire or release it in hosted mode.
   const hostedSession: DialogSession = {
     setMouseReporting: (enabled) => {
-      if (enabled) args.composer.setMouseEnabled?.(true);
-      // The disable side belongs to the post-session restore below, not to
-      // the dialog: disabling here would clobber the preference the host
-      // must hand back when the modal closes.
+      // If user preference is mouse-off, never enable terminal mouse reporting.
+      const pref = args.composer.isMouseEnabled?.() ?? true;
+      if (!pref) return;
+      if (enabled) {
+        args.composer.setMouseEnabled?.(true);
+      }
     },
     acquireRaw: () => false,
     releaseRaw: () => {},
