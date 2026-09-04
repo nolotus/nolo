@@ -8,6 +8,10 @@ import {
   omitNullishAgentSummaryFields,
   type SafeAgentSummary,
 } from "../agent/safeAgentSummary";
+import {
+  buildAgentDiscoveryResult,
+  type DiscoveryScope,
+} from "../agent/agentDiscovery";
 import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
@@ -604,12 +608,18 @@ export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDispla
 export const listAgentsFunctionSchema = {
   name: "listAgents",
   description:
-    "List the current user's Nolo agents as safe summaries. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public) plus name, model, provider, apiSource, tools, isFavorite, isOAuth, isOwned, isPublic. Copy `agentKey` verbatim into startAgentRun. Set `verbose: true` for troubleshooting to also get prices, introduction, modelAbility and timestamps. Results prioritize favorites, then OAuth/custom, then owned, then public. Rate-limited agents (429, nextAvailableAt in the future) are hidden by default; set `showUnavailable: true` to include them; `unavailableCount` and `unavailableAgents` carry their nextAvailableAt recovery timestamps.",
+    "List Nolo agents available for delegation as safe summaries. By default (scope='preferred'), returns the user's preferred agents (favorites, self-owned, OAuth subscriptions, custom API, and local agents). Note: favorited public agents stay in preferred and may still consume platform credits - check each agent's billingSource before dispatching. If no suitable preferred candidate is found or the user explicitly asks to explore public/shared agents, call with scope='public' (public agents may consume platform credits). scope='all' returns the deduplicated union for troubleshooting/management. listAgents does not automatically fallback to public agents. The `agents` array carries a compact agent-selection projection per agent: runnable `agentKey` (agent-<userId>-<id> owned, agent-pub-<id> public), name, model, provider, apiSource, billingSource ('user_subscription' | 'user_api' | 'platform_credits' | 'local'), tools, isFavorite, isOAuth, isOwned, isPublic. Copy `agentKey` verbatim into startAgentRun. Rate-limited agents (429, nextAvailableAt in the future) are hidden by default; unavailableCount and unavailableAgents carry their nextAvailableAt recovery timestamps; pass `showUnavailable: true` to include them. Set `verbose: true` for full safe summary details.",
   parameters: {
     type: "object",
     properties: {
       limit: { type: "integer", description: "Maximum agents to return. Default 100, max 500." },
-      publicOnly: { type: "boolean", description: "Only show public agents." },
+      scope: {
+        type: "string",
+        enum: ["preferred", "public", "all"],
+        description:
+          "Discovery scope. 'preferred' (default): user's favorites, owned, OAuth, custom API, and local agents. 'public': shared/marketplace agents not in preferred (may use platform credits). 'all': deduplicated union for inspection.",
+      },
+      publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
       showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
       verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
     },
@@ -656,46 +666,30 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   // reads — not worth it for a convenience field. Per the safe-summary contract:
   // omit publicKey rather than emit one that cannot resolve. Explicit
   // record.publicKey (if present) is still trusted by toSafeAgentSummary.
-  let agents = Array.from(recordsMap.values()).map((record) =>
+  const agents = Array.from(recordsMap.values()).map((record) =>
     toSafeAgentSummary(record, {
       favoritesMap,
       userId,
     })
   );
 
-  // 429 限流中（nextAvailableAt 在未来）的 agent 默认不列出，避免 AI/用户
-  // 选到当下打不了的 agent。deadline <= now 的视为已恢复，正常保留。
-  // 先应用 publicOnly（及任何其它维度过滤），再统计 unavailableCount 与 unavailableAgents，保证
-  // 计数与列表同口径。
-  const now = Date.now();
-  if (args?.publicOnly === true) {
-    agents = agents.filter((agent) => agent.isPublic);
-  }
-  const unavailableList = agents.filter((a) => isAgentUnavailableNow(a, now));
-  const unavailableCount = unavailableList.length;
-  const unavailableAgents = sortSafeAgentSummaries(unavailableList).map(toUnavailableAgentSummary);
-  if (args?.showUnavailable !== true) {
-    agents = agents.filter((a) => !isAgentUnavailableNow(a, now));
-  }
-  agents = sortSafeAgentSummaries(agents);
-  // 默认精简投影（与 server listAgents 保持一致）：只保留选人决策所需字段，
-  // 防止大列表被 host 按字节截断后模型照抄别的条目格式猜 agentKey。
-  // 必须在 429 过滤与排序之后执行：isAgentUnavailableNow 依赖 nextAvailableAt，
-  // compareAgentSelection 依赖 favoritedAt/updatedAt，先投影会把它们裁掉。
-  // verbose: true 返回完整字段集（省略 null 值键）用于排障。
-  const projectedAgents =
-    args?.verbose === true
-      ? agents.map(omitNullishAgentSummaryFields)
-      : agents.map(toCompactAgentSummary);
+  const discovery = buildAgentDiscoveryResult({
+    agents,
+    scope: args?.scope,
+    publicOnly: args?.publicOnly,
+    showUnavailable: args?.showUnavailable,
+    verbose: args?.verbose,
+  });
+
   return {
     rawData: {
       success: true,
-      total: projectedAgents.length,
-      unavailableCount,
-      unavailableAgents,
-      agents: projectedAgents,
+      total: discovery.total,
+      unavailableCount: discovery.unavailableCount,
+      unavailableAgents: discovery.unavailableAgents,
+      agents: discovery.agents,
     },
-    displayData: formatAgentListCard(agents),
+    displayData: formatAgentListCard(discovery.agents as any),
   };
 }
 

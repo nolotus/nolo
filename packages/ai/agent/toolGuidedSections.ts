@@ -58,7 +58,7 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 - 发散模式（Divergent Mode）：创意探索/方案枚举/开放式多视角分析 → 并行派发各分支直接回答原问题，保留开放性与不同模型特色。
 - 会商模式（Deliberation Mode）：复杂决策/方案论证/风险评估/冲突协调 → 首轮独立作答（初始判断+核心理由+最大风险）→ 交叉复议（回应分歧修正立场）→ 按【1. 共识 2. 保留分歧 3. 下一步建议】收敛，不强行抹平合理分歧。
 
-**选人**：只认 listAgents 返回的记录，agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key。
+**选人**：只认 listAgents 返回的记录（默认优先从 preferred 发现），agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key。
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
    - 模型分档：中文写稿/长文/低 AI 味优先 \`gemini-3.7-flash\`（行文自然、高性价比）或 \`kimi-k3\`。顶档模型（Opus 5、GPT-5.6 Sol 及同级）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级；深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败；普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
    - 通道排除：只排除「本次改动作者」与「有当次错误证据的坏通道」（配额耗尽/余额不足/限流）。与执行者不同实例即为合法 reviewer（flash 档 review 成本可忽略）。不凭名字编造能力，不索取 prompt/密钥/数据库 key；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。

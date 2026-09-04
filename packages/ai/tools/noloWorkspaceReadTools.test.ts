@@ -14,7 +14,11 @@ const originalFetch = globalThis.fetch;
 
 const buildThunkApi = () => ({
   getState: () => ({
-    auth: { currentToken: "test-token", userId: "user-1" },
+    auth: {
+      currentToken: "test-token",
+      currentUser: { userId: "user-1" },
+      userId: "user-1",
+    },
     settings: {},
   }),
 });
@@ -22,8 +26,8 @@ const buildThunkApi = () => ({
 const agentRecords = [
   {
     id: "agent-1",
-    dbKey: "agent-user-1-agent-1",
-    userId: "user-1",
+    dbKey: "agent-local-agent-1",
+    userId: "local",
     name: "Private Agent",
     model: "gpt-test",
     isPublic: false,
@@ -32,12 +36,23 @@ const agentRecords = [
   },
   {
     id: "agent-2",
-    dbKey: "agent-user-1-agent-2",
-    userId: "user-1",
+    dbKey: "agent-local-agent-2",
+    userId: "local",
     name: "Public Agent",
     model: "gpt-test",
     isPublic: true,
     updatedAt: "2026-07-02T00:00:00.000Z",
+    tools: ["read"],
+  },
+  {
+    id: "agent-3",
+    dbKey: "agent-pub-agent-3",
+    publicKey: "agent-pub-agent-3",
+    userId: "other-user",
+    name: "Shared Public Agent",
+    model: "gpt-test",
+    isPublic: true,
+    updatedAt: "2026-07-03T00:00:00.000Z",
     tools: ["read"],
   },
 ];
@@ -72,14 +87,9 @@ describe("listAgentsFunc", () => {
       expect(agent).not.toHaveProperty("privateKey");
       expect(agent).not.toHaveProperty("dbKey");
     }
-    // listAgentsFunc 按 updatedAt 降序排列（最新在前），不依赖顺序断言字段。
-    // 本单测 mock 无可解析的登录身份（selectIdentityUserId 链路），按既有安全
-    // 契约省略 agentKey；server 侧 listAgentsServer.test.ts 覆盖 agentKey 正向断言。
-    for (const agent of agents) {
-      expect(agent).not.toHaveProperty("agentKey");
-    }
     const byName = new Map<string, any>(agents.map((agent: any) => [agent.name, agent]));
     expect(byName.get("Private Agent")?.isPublic).toBe(false);
+    expect(byName.get("Private Agent")?.billingSource).toBe("platform_credits");
     expect(byName.get("Private Agent")?.tools).toEqual(["read", "exa_search"]);
     // 默认精简投影：噪音字段一律不出现。
     for (const field of ["id", "introduction", "cliProvider", "modelAbility", "updatedAt", "inputPrice", "outputPrice"]) {
@@ -100,13 +110,14 @@ describe("listAgentsFunc", () => {
       ((result.rawData as any).agents as any[]).map((agent) => [agent.name, agent]),
     );
     expect(byName.get("Private Agent")?.updatedAt).toBe("2026-07-01T00:00:00.000Z");
+    expect(byName.get("Private Agent")?.billingSource).toBe("platform_credits");
     // 完整摘要同样不给私有 agent 一个无法解析的 publicKey。
     expect(byName.get("Private Agent")).not.toHaveProperty("publicKey");
     // fixture 里 handle/introduction/价格等均为 null → 整个响应不出现 null 值键。
     expect(raw).not.toContain("null");
   });
 
-  it("publicOnly=true 只返回公开 agent", async () => {
+  it("publicOnly=true 只返回公开 agent（映射到 scope=public，排除 preferred）", async () => {
     mockQueryFetch(agentRecords);
     const result = await listAgentsFunc(
       { publicOnly: true },
@@ -114,7 +125,18 @@ describe("listAgentsFunc", () => {
     );
     const agents = (result.rawData as any).agents;
     expect(agents).toHaveLength(1);
-    expect(agents[0].name).toBe("Public Agent");
+    expect(agents[0].name).toBe("Shared Public Agent");
+    expect(agents[0].billingSource).toBe("platform_credits");
+  });
+
+  it("scope='all' 返回 preferred 和 public 的去重并集", async () => {
+    mockQueryFetch(agentRecords);
+    const result = await listAgentsFunc(
+      { scope: "all" },
+      buildThunkApi(),
+    );
+    const agents = (result.rawData as any).agents;
+    expect(agents).toHaveLength(3);
   });
 
   it("游客（无 token/userId）返回空结果而非抛错", async () => {
@@ -140,8 +162,8 @@ describe("listAgentsFunc", () => {
       ...agentRecords,
       {
         id: "agent-rate-limited",
-        dbKey: "agent-user-1-agent-rate-limited",
-        userId: "user-1",
+        dbKey: "agent-local-agent-rate-limited",
+        userId: "local",
         name: "Rate Limited Agent",
         model: "claude-3-5-sonnet",
         provider: "anthropic",
@@ -183,8 +205,8 @@ describe("listAgentsFunc", () => {
       ...agentRecords,
       {
         id: "agent-rate-limited",
-        dbKey: "agent-user-1-agent-rate-limited",
-        userId: "user-1",
+        dbKey: "agent-local-agent-rate-limited",
+        userId: "local",
         name: "Rate Limited Agent",
         model: "claude-3-5-sonnet",
         provider: "anthropic",

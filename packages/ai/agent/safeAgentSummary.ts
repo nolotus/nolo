@@ -7,12 +7,18 @@ import {
   resolveAgentSelectionPriority,
   isUserConfiguredAgent,
 } from "./agentSelectionPriority";
+import {
+  resolveBillingSource,
+  type BillingSource,
+} from "./agentDiscovery";
 
 export {
   resolveAgentSelectionPriority,
   isUserConfiguredAgent,
   compareAgentSelection,
   type AgentSelectionCandidate,
+  resolveBillingSource,
+  type BillingSource,
 };
 
 export interface SafeAgentSummary {
@@ -33,6 +39,7 @@ export interface SafeAgentSummary {
   provider: string | null;
   apiSource: string | null;
   cliProvider: string | null;
+  billingSource: BillingSource;
   tools: string[];
   inputPrice: number | null;
   outputPrice: number | null;
@@ -232,6 +239,15 @@ export function toSafeAgentSummary(
     : undefined;
   const isOwned = isOwnedByRecord || Boolean(ownedKey);
   const isOAuth = isOAuthApiKeyRef(record?.apiKeyRef);
+  const billingSource = resolveBillingSource({
+    ...record,
+    isOAuth,
+    isOwned,
+    apiSource,
+    cliProvider,
+    provider,
+    isPublic,
+  });
 
   // Runnable agentKey for delegation: owned agents → agent-<userId>-<id> (the
   // current user can always resolve these); confirmed public agents → their
@@ -259,6 +275,7 @@ export function toSafeAgentSummary(
     provider,
     apiSource,
     cliProvider,
+    billingSource,
     tools,
     inputPrice,
     outputPrice,
@@ -292,6 +309,7 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "model",
   "provider",
   "apiSource",
+  "billingSource",
   "isFavorite",
   "isOAuth",
   "isOwned",
