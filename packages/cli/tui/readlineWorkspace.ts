@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable } from "node:stream";
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
@@ -2019,9 +2020,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     return;
   }
 
-  const rl = createInterface({ input, output });
+  // Bun 1.4 can lose lines when readline is attached directly to a non-TTY
+  // stream that has already been ended. Pipe through a fresh stream so the
+  // source's buffered chunks are replayed to readline in normal order.
+  const readlineInput = new PassThrough();
+  input.pipe(readlineInput);
+  const rl = createInterface({ input: readlineInput, output });
+  const shouldRenderPrompt = isInteractiveInput(input);
   rl.setPrompt(renderPrompt(state));
-  rl.prompt();
+  if (shouldRenderPrompt) rl.prompt();
 
   try {
     for await (const line of rl) {
@@ -2038,6 +2045,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // runTuiWorkspace 的可变绑定（runSubmittedLine 会把 handleTuiInput
           // 的 nextState 回写），这里在调用时读取，拿到的总是最新值。
           if (state.autoConfirm) return true;
+          // Non-TTY input has no interactive confirmation channel. Resolve the
+          // request conservatively without calling rl.question(): Bun 1.4
+          // closes readline as soon as an ended pipe is consumed, so waiting
+          // on that interface would silently drop the current line.
+          if (!isInteractiveInput(input)) {
+            return false;
+          }
           rl.pause();
           try {
             return await dialogHost.run((anchor) =>
@@ -2054,9 +2068,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         },
       );
       if (shouldExit) break;
-      output.write(`\n${renderStatusLine(state)}\n`);
-      rl.setPrompt(renderPrompt(state));
-      rl.prompt();
+      if (shouldRenderPrompt) {
+        output.write(`\n${renderStatusLine(state)}\n`);
+        rl.setPrompt(renderPrompt(state));
+        rl.prompt();
+      }
     }
   } finally {
     const registry = getProcessRegistry();

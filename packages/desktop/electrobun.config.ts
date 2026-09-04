@@ -51,7 +51,7 @@ export const resolveDesktopBunVersion = (
   env: { NOLO_DESKTOP_BUN_VERSION?: string } = process.env as {
     NOLO_DESKTOP_BUN_VERSION?: string;
   }
-) => env.NOLO_DESKTOP_BUN_VERSION ?? "1.3.14";
+) => env.NOLO_DESKTOP_BUN_VERSION ?? "1.4.1";
 
 export const resolveGeneratePatch = (
   platform = process.platform,

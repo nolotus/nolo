@@ -151,9 +151,11 @@ async function run() {
       roots.push(root);
       const executors = createLocalWorkspaceToolExecutors({
         workspaceRoot: root,
-        commandOutputLimit: 100,
+        // Leave enough room for the truncation marker and spill metadata; a
+        // limit smaller than that marker intentionally returns a plain prefix.
+        commandOutputLimit: 500,
       });
-      const longString = "abcdefghijklmnopqrstuvwxyz0123456789".repeat(5); // Length 180
+      const longString = "abcdefghijklmnopqrstuvwxyz0123456789".repeat(100); // Length 3600
       const limited = await executors.execShell({
         id: "call-shell-output-limit",
         name: "execShell",

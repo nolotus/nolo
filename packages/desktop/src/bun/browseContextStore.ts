@@ -112,7 +112,7 @@ registerBrowseCapability({
 registerBrowseCapability({
   id: "text-extractor",
   alwaysOn: false,
-  onNavigate: null,
+  // onNavigate 缺省（可选字段）：无导航注入，语义与显式 null 一致
   resolve: (current) => current,
 });
 
