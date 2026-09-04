@@ -12,8 +12,10 @@ import {
   readToolCallArgs,
   resolveToolCallMode,
   resolveToolCallStatus,
+  resolveToolCallVerb,
   summarizeToolCallStatuses,
 } from "./toolCallPresentation";
+import chatLocale from "../../chat.locale";
 
 const zhTranslator = (key: string, fallback: string) => {
   // Simulate an i18n store that only overrides one key; everything else misses.
@@ -43,6 +45,28 @@ describe("resolveToolCallStatus", () => {
     expect(resolveToolCallStatus({ content: "{\"error\":\"boom\"}" })).toBe("failed");
     expect(isToolCallFailed({ content: "{\"error\":\"boom\"}" })).toBe(true);
     expect(isToolCallFailed({ content: "{\"ok\":true}" })).toBe(false);
+  });
+
+  it("lets error evidence outrank a claimed success", () => {
+    expect(
+      resolveToolCallStatus({
+        toolPayload: { status: "success" },
+        content: "{\"error\":\"boom\"}",
+      })
+    ).toBe("failed");
+    expect(
+      resolveToolCallStatus({
+        toolPayload: { status: "success", error: "boom" },
+        content: "{\"ok\":true}",
+      })
+    ).toBe("failed");
+    // Cancellation keeps its own meaning even with an abort-style error string.
+    expect(
+      resolveToolCallStatus({
+        toolPayload: { status: "cancelled", error: "aborted" },
+        content: "{}",
+      })
+    ).toBe("cancelled");
   });
 });
 
@@ -333,5 +357,121 @@ describe("summarizeToolCallStatuses / formatToolGroupStatusSummary", () => {
     expect(
       formatToolGroupStatusSummary({ total: 2, running: 1, failed: 0 }, zhTranslator)
     ).toBe("2 calls · 1 个运行中");
+  });
+});
+
+describe("resolveToolCallVerb (minimal verb i18n)", () => {
+  const enVerb = (key: string, fallback: string) => {
+    if (key === "toolVerbs.readFile") return "Read";
+    if (key === "toolVerbs.execShell") return "Run";
+    return fallback;
+  };
+
+  it("uses the locale verb when the chat locale provides it", () => {
+    expect(resolveToolCallVerb("readFile", "readFile", enVerb)).toBe("Read");
+    expect(resolveToolCallVerb("execShell", "execShell", enVerb)).toBe("Run");
+    expect(
+      buildToolCallPresentation({ toolName: "readFile", content: "{}" }, enVerb).verb
+    ).toBe("Read");
+  });
+
+  it("collapses snake_case / legacy aliases onto canonical i18n keys", () => {
+    expect(resolveToolCallVerb("exec_shell", "exec_shell", enVerb)).toBe("Run");
+    expect(resolveToolCallVerb("shell", "shell", enVerb)).toBe("Run");
+  });
+
+  it("keeps zh defaults on i18n misses and never leaks key paths", () => {
+    expect(resolveToolCallVerb("readFile", "readFile")).toBe("读取");
+    expect(resolveToolCallVerb("readFile", "readFile", (_key, fb) => fb)).toBe("读取");
+    expect(resolveToolCallVerb("readFile", "readFile", (key) => key)).toBe("读取");
+  });
+
+  it("unmapped tools keep the display-name chain", () => {
+    expect(resolveToolCallVerb("customThing", "customThing", enVerb)).toBe(
+      "customThing"
+    );
+  });
+});
+
+describe("searchWorkspace target / context mapping", () => {
+  const present = (input: Record<string, unknown>) =>
+    buildToolCallPresentation({
+      toolName: "searchWorkspace",
+      toolPayload: { input },
+      content: "{}",
+    });
+
+  it("prefers query ?? pattern ?? glob for the target", () => {
+    expect(
+      present({ query: "tool verb", pattern: "*.ts", glob: "**/*.tsx" }).target
+    ).toBe("tool verb");
+    expect(present({ pattern: "*.ts", glob: "**/*.tsx" }).target).toBe("*.ts");
+    expect(present({ glob: "**/*.tsx" }).target).toBe("**/*.tsx");
+  });
+
+  it("surfaces a real args path as context and never guesses one", () => {
+    expect(present({ query: "q", path: "packages/chat" }).context).toBe(
+      "packages/chat"
+    );
+    expect(present({ query: "q" }).context).toBeUndefined();
+  });
+});
+
+describe("chat.locale toolVerbs completeness", () => {
+  const TOOL_VERB_I18N_KEYS = [
+    "readFile",
+    "readWorkspaceFile",
+    "writeFile",
+    "writeWorkspaceFile",
+    "editFile",
+    "replaceWorkspaceText",
+    "applyDiff",
+    "globFiles",
+    "searchWorkspace",
+    "codeSearch",
+    "exa_search",
+    "firecrawl_search",
+    "fetchWebpage",
+    "firecrawl_scrape",
+    "execShell",
+    "loadSkill",
+    "listAgents",
+    "readAgent",
+    "startAgentRun",
+    "startPreview",
+    "getPreviewStatus",
+    "stopPreview",
+    "releasePreview",
+    "captureVisualState",
+    "appDeploy",
+    "setTodoList",
+    "ask_user",
+    "runStreamingAgent",
+  ] as const;
+  const LOCALES = ["en", "zh-CN", "zh-Hant", "ja"] as const;
+
+  it("only targets locales the chat locale actually defines", () => {
+    for (const lng of LOCALES) {
+      expect((chatLocale as any)[lng]?.translation).toBeTruthy();
+    }
+  });
+
+  for (const lng of LOCALES) {
+    it(`completes toolVerbs for ${lng}`, () => {
+      const verbs = (chatLocale as any)[lng].translation.toolVerbs;
+      expect(verbs).toBeTruthy();
+      for (const key of TOOL_VERB_I18N_KEYS) {
+        expect(typeof verbs[key]).toBe("string");
+        expect((verbs[key] as string).length).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it("keeps English verbs Latin — no Chinese fallback leaks into en", () => {
+    const enVerbs: Record<string, string> = (chatLocale as any).en.translation
+      .toolVerbs;
+    for (const key of TOOL_VERB_I18N_KEYS) {
+      expect(/^[\x20-\x7E]+$/.test(enVerbs[key])).toBe(true);
+    }
   });
 });

@@ -7,8 +7,8 @@ import React, {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { LuChevronDown, LuChevronRight, LuWrench } from "react-icons/lu";
-import { StatusIcon, safeParse, withLiteralClass, formatToolDuration } from "./toolMessageShared";
+import { LuChevronDown, LuChevronRight } from "react-icons/lu";
+import { StatusIcon, safeParse, withLiteralClass } from "./toolMessageShared";
 import ToolMessageContent from "./ToolMessageContent";
 import { messagesStyles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
@@ -134,17 +134,19 @@ export const ToolMessageGroup = memo(
       [t]
     );
 
-    // Single visibility pass: every header stat (summary counts, badge, last
-    // settled duration) and the fallback body MUST use the same filtered list
-    // so a hidden setTodoList can never surface its duration in the header.
+    // Single visibility pass (P0.5): every displayed state — header summary
+    // counts, card status (messageStatus/overallStatus), and the fallback
+    // body — MUST derive from this same filtered list, so a hidden setTodoList
+    // can never leak its status, count, failure, or body into the group.
     const visibleMessages = useMemo(
       () => messages.filter((msg) => isVisibleTodoMessage(msg, conversationTodoEnabled)),
       [messages, conversationTodoEnabled]
     );
 
     // Compact header summary: total / running / failed calls (i18n-aware).
-    // Real duration stays in the trailing badge — this string never
-    // synthesizes timing data.
+    // This summary owns the ONLY count in the header — the old wrench count
+    // badge was a duplicate and is gone (P0.5). Durations live on the rows,
+    // never on the header.
     const summary = useMemo(() => {
       return formatToolGroupStatusSummary(
         summarizeToolCallStatuses(visibleMessages),
@@ -188,23 +190,6 @@ export const ToolMessageGroup = memo(
     const isRowModeMessage = (msg: any) =>
       resolveToolCallMode(msg?.toolName) === "row";
 
-    // Astryx collapsed-surface count: same visibility rule as the body rows
-    // (setTodoList hidden when the conversation todo is off).
-    const visibleToolCount = useMemo(() => visibleMessages.length, [visibleMessages]);
-
-    // Trailing duration badge mirrors the latest settled call (same rule as
-    // RN) — computed over VISIBLE messages only, so a hidden setTodoList
-    // cannot put its duration on the header.
-    const lastSettled = useMemo(() => {
-      for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-        const msg = visibleMessages[index] as any;
-        const payload = msg?.toolPayload;
-        if (payload?.startedAt && payload?.finishedAt) return payload;
-      }
-      return null;
-    }, [visibleMessages]);
-    const durationText = formatToolDuration(lastSettled);
-
     const timeline = useMemo(() => {
       return buildActivityTimeline(
         (activityMessages ?? messages).filter((message: any) =>
@@ -216,7 +201,9 @@ export const ToolMessageGroup = memo(
     const messageStatus = useMemo(() => {
       let hasRunning = false;
       let lastSettledStatus: "failed" | "success" | null = null;
-      for (const msg of messages) {
+      // P0.5: derive from the SAME visible list as the summary/body — a
+      // hidden setTodoList failure must not fail the whole card.
+      for (const msg of visibleMessages) {
         const rawData = safeParse(msg.content);
         const isError =
           msg.toolPayload?.status === "failed" ||
@@ -227,7 +214,7 @@ export const ToolMessageGroup = memo(
       }
       if (hasRunning) return "running";
       return lastSettledStatus ?? "success";
-    }, [messages, canCollapse]);
+    }, [visibleMessages, canCollapse]);
 
     const hasTimeline = timeline.phases.length > 0;
     /** Only generic placeholder phase(s) — show flat actions, no phase chrome. */
@@ -499,23 +486,8 @@ export const ToolMessageGroup = memo(
         <div {...withLiteralClass(`tr-icon ${overallStatus}`, toolStyles.icon)}>
           <StatusIcon status={overallStatus} toolName="" />
         </div>
-        {/* Astryx collapsed-surface count badge: wrench + tool count. */}
-        <span
-          data-hook="messages-esc-tr-count-badge"
-          {...withLiteralClass("tool-group__count-badge", toolStyles.countBadge)}
-          aria-hidden="true"
-        >
-          <LuWrench size={10} />
-          <span {...withLiteralClass("tool-group__count-text", toolStyles.countText)}>
-            {visibleToolCount}
-          </span>
-        </span>
+        {/* Single count semantic: the i18n summary owns the call count. */}
         <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary)}>{summary}</span>
-        {!!durationText && (
-          <span data-hook="messages-esc-tr-duration" {...withLiteralClass("tr-duration", toolStyles.duration)}>
-            {durationText}
-          </span>
-        )}
       </div>
     );
 

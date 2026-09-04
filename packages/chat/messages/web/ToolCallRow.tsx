@@ -14,6 +14,11 @@ import type { ToolCallPresentation } from "./toolCallPresentation";
  * ToolMessageContent's groupDetail renderers. Running rows auto-open, a user
  * toggle always wins afterwards — same rule as buildActivityTimeline actions.
  * No spinning loaders; terminal states use the shared StatusIcon dot.
+ *
+ * Flex contract (P0.5): status icon / verb / context / diff meta / duration /
+ * chevron keep intrinsic width (flexShrink 0); the target segment is the only
+ * flexible child (flex:1 + min-width:0) and clips for real via the shared
+ * toolStyles.truncate entry (u-truncate stays as a legacy DOM anchor).
  */
 export interface ToolCallRowProps {
   presentation: ToolCallPresentation;
@@ -68,22 +73,28 @@ export const ToolCallRow = memo(
           <span
             {...withLiteralClass(
               "tool-call-row__label u-truncate",
-              toolStyles.truncate,
-              toolStyles.actionLabel
+              toolStyles.rowLabel
             )}
           >
             {presentation.verb}
           </span>
           {presentation.context ? (
             <span
-              {...withLiteralClass("tool-call-row__context u-truncate", toolStyles.truncate)}
+              {...withLiteralClass(
+                "tool-call-row__context u-truncate",
+                toolStyles.rowContext
+              )}
             >
               {presentation.context}
             </span>
           ) : null}
           {presentation.target ? (
             <span
-              {...withLiteralClass("tool-call-row__detail u-truncate", toolStyles.truncate)}
+              {...withLiteralClass(
+                "tool-call-row__detail u-truncate",
+                toolStyles.rowTarget,
+                toolStyles.truncate
+              )}
             >
               {presentation.target}
             </span>

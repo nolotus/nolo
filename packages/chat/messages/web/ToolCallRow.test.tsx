@@ -1,7 +1,15 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from "bun:test";
+import { readFileSync } from "node:fs";
 import React, { act } from "react";
 import { renderInDom } from "../../../testing/domRender";
 import { buildToolCallPresentation } from "./toolCallPresentation";
+import { toolMessageStyles } from "./toolMessageStyles";
+
+const rowSource = readFileSync(new URL("./ToolCallRow.tsx", import.meta.url), "utf8");
+const stylesSource = readFileSync(
+  new URL("./toolMessageStyles.ts", import.meta.url),
+  "utf8"
+);
 
 // ToolMessageContent pulls redux / editor machinery; rows only render it as a
 // detail body. Mock it out exactly like ToolMessageGroup.test.tsx does so the
@@ -69,6 +77,92 @@ describe("ToolCallRow", () => {
     expect(container.querySelector(".tool-call-row__duration")?.textContent).toBe("450ms");
     // Raw API names never leak.
     expect(container.textContent).not.toContain("readFile");
+  });
+
+  it("keeps verb/context/meta/duration/chevron intrinsic while the target flexes and truncates", async () => {
+    const container = await mount(
+      rowFor({
+        id: "row-flex",
+        role: "tool",
+        toolName: "execShell",
+        toolPayload: {
+          input: { cmd: "bun test", cwd: "packages/chat" },
+          startedAt: 1000,
+          finishedAt: 1250,
+        },
+        content: "{}",
+      })
+    );
+
+    const header = container.querySelector(
+      ".tool-call-row__header"
+    ) as HTMLElement | null;
+    expect(header).toBeTruthy();
+    // DOM contract: fixed segments plus the flexible target, in stable order.
+    // (SVG nodes expose className as SVGAnimatedString — read the attribute.)
+    const segments = Array.from(header!.querySelectorAll("[class]")).map((el) =>
+      (el.getAttribute("class") ?? "")
+        .split(" ")
+        .find((c) => c.startsWith("tool-call-row__"))
+    );
+    const position = (name: string) => segments.findIndex((c) => c === name);
+    expect(position("tool-call-row__label")).toBeGreaterThanOrEqual(0);
+    expect(position("tool-call-row__context")).toBeGreaterThan(
+      position("tool-call-row__label")
+    );
+    expect(position("tool-call-row__detail")).toBeGreaterThan(
+      position("tool-call-row__context")
+    );
+    expect(position("tool-call-row__duration")).toBeGreaterThan(
+      position("tool-call-row__detail")
+    );
+    expect(position("tool-call-row__chevron")).toBeGreaterThan(
+      position("tool-call-row__duration")
+    );
+    // Truncation classes stay wired on both text segments.
+    expect(header!.querySelector(".tool-call-row__detail")?.className).toContain(
+      "u-truncate"
+    );
+    expect(header!.querySelector(".tool-call-row__label")?.className).toContain(
+      "u-truncate"
+    );
+
+    // Style contract (P0.5), asserted on the style/row SOURCE: bun's stylex
+    // pipeline compiles create() into hashed class maps at test time and
+    // never injects the stylesheet, so the uncompiled declarations are the
+    // stable truth. Fixed segments never shrink.
+    expect(stylesSource).toMatch(/rowLabel: \{\s*flexShrink: 0,/);
+    expect(stylesSource).toContain("rowContext: { flexShrink: 0 }");
+    expect(stylesSource).toMatch(/rowTarget: \{\s*flex: 1,\s*minWidth: 0,\s*\}/);
+    expect(stylesSource).toMatch(/duration: \{[^}]*flexShrink: 0/);
+    expect(stylesSource).toMatch(/actionChevron: \{[^}]*flexShrink: 0/);
+    // HIGH review fix: the shared `truncate` entry is the single clipping
+    // source and really carries nowrap + hidden + ellipsis (rowTarget alone
+    // has no clipping — a long no-space target would overflow its flex box).
+    expect(stylesSource).toMatch(
+      /truncate: \{\s*whiteSpace: "nowrap",\s*overflow: "hidden",\s*textOverflow: "ellipsis",?\s*\}/
+    );
+    // …and the row wires exactly these entries onto its segments — the
+    // target span mounts BOTH the flexible rowTarget AND the clipping
+    // truncate entry (no duplicated declarations between the two).
+    expect(rowSource).toContain("toolStyles.rowLabel");
+    expect(rowSource).toContain("toolStyles.rowContext");
+    expect(rowSource).toMatch(
+      /"tool-call-row__detail u-truncate",\s*toolStyles\.rowTarget,\s*toolStyles\.truncate/
+    );
+
+    // DOM wiring proof: every compiled class from rowTarget AND truncate is
+    // physically present on the mounted target element.
+    const detail = header!.querySelector(
+      ".tool-call-row__detail"
+    ) as HTMLElement | null;
+    expect(detail).toBeTruthy();
+    const detailClasses = (detail!.getAttribute("class") ?? "").split(" ");
+    for (const entry of [toolMessageStyles.rowTarget, toolMessageStyles.truncate]) {
+      for (const cls of Object.values(entry as Record<string, unknown>)) {
+        if (typeof cls === "string") expect(detailClasses).toContain(cls);
+      }
+    }
   });
 
   it("renders diff meta only when the message really carries added/removed", async () => {

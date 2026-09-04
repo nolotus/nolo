@@ -63,17 +63,25 @@ describe("ToolMessageItem source contract", () => {
     expect(toolMessageItemSource).toContain('statusStr === "success"');
   });
 
-  test("group headers share the Astryx surface: wrench count badge + duration", () => {
+  test("group headers keep one count semantic and no group duration (P0.5)", () => {
     const groupSource = readFileSync(
       new URL("./ToolMessageGroup.tsx", import.meta.url),
       "utf8",
     );
-    expect(groupSource).toContain("messages-esc-tr-count-badge");
-    expect(groupSource).toContain("visibleToolCount");
-    expect(groupSource).toContain("messages-esc-tr-duration");
-    // Group rows share the same StatusIcon (15%-tint dot) as tool rows.
+    // Exactly one count: the i18n summary owns the call count — the wrench
+    // count badge was a duplicate and is gone.
+    expect(groupSource).toContain("messages-esc-tr-summary");
+    expect(groupSource).not.toContain("messages-esc-tr-count-badge");
+    expect(groupSource).not.toContain("tool-group__count-badge");
+    expect(groupSource).not.toContain("LuWrench");
+    // No last-settled group duration badge: rows own their real durations.
+    expect(groupSource).not.toContain("messages-esc-tr-duration");
+    expect(groupSource).not.toContain("const lastSettled");
+    // All displayed group state derives from the single visible list.
+    expect(groupSource).toContain("visibleMessages");
+    expect(groupSource).toContain("for (const msg of visibleMessages)");
+    // Group rows still share the Astryx StatusIcon surface.
     expect(groupSource).toContain("StatusIcon");
-    expect(readFileSync(new URL("./toolMessageStyles.ts", import.meta.url), "utf8")).toContain("countBadge");
   });
 
   test("completed tool rows auto-collapse so only the active row stays open", () => {

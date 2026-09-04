@@ -704,35 +704,73 @@ describe("ToolMessageGroup", () => {
     // contract this test pins.
   });
 
-  it("never lets a hidden setTodoList drive the header duration badge", async () => {
-    const hiddenTodo = {
+  it("renders exactly one count and no group duration in the header", async () => {
+    const messages = [
+      {
+        id: "g-1",
+        role: "tool",
+        toolName: "readFile",
+        toolPayload: { input: { path: "README.md" }, startedAt: 1000, finishedAt: 1450 },
+        content: "{\"ok\":true}",
+      },
+      {
+        id: "g-2",
+        role: "tool",
+        toolName: "execShell",
+        toolPayload: { input: { cmd: "bun test" }, startedAt: 2000, finishedAt: 9000 },
+        content: "{\"ok\":true}",
+      },
+    ];
+
+    const container = await mount(<ToolMessageGroup messages={messages} canCollapse />);
+
+    // Single count semantic (P0.5): the i18n summary owns the call count;
+    // the old wrench count badge was a duplicate and is gone.
+    expect(container.querySelector('[data-hook="messages-esc-tr-count-badge"]')).toBeNull();
+    expect(container.querySelectorAll(".tool-group__count-text")).toHaveLength(0);
+    expect(container.textContent).toContain("2 个调用");
+    // No group-level duration anywhere — rows own their real durations.
+    expect(container.querySelector('[data-hook="messages-esc-tr-duration"]')).toBeNull();
+    expect(container.textContent).not.toContain("7.0s");
+    expect(container.textContent).not.toContain("450ms");
+  });
+
+  it("never lets a hidden setTodoList affect any visible group state", async () => {
+    const hiddenFailedTodo = {
       id: "todo-hidden",
       role: "tool",
       toolName: "setTodoList",
-      toolPayload: { startedAt: 1000, finishedAt: 9000 },
-      content: "{\"todos\":[]}",
+      toolPayload: { status: "failed", startedAt: 1000, finishedAt: 9000 },
+      content: JSON.stringify({ error: "todo write failed" }),
     };
     const agents = { id: "agents-h", role: "tool", toolName: "listAgents", content: "[]" };
 
-    // Conversation todo disabled → setTodoList is invisible everywhere,
-    // including the trailing duration badge.
+    // Conversation todo disabled → setTodoList is invisible everywhere: no
+    // card, no failed status, no count, no failure segment, no duration.
     const hidden = await mount(
       <ToolMessageGroup
-        messages={[hiddenTodo, agents]}
+        messages={[hiddenFailedTodo, agents]}
         canCollapse={false}
         conversationTodoEnabled={false}
       />
     );
     expect(hidden.querySelector(".tool-group__item")).toBeNull();
     expect(hidden.querySelector('[data-hook="messages-esc-tr-duration"]')).toBeNull();
+    expect(hidden.querySelector(".tool-msg-row")?.className).not.toContain("failed");
+    expect(hidden.textContent).toContain("1 个调用");
+    expect(hidden.textContent).not.toContain("1 个失败");
+    expect(
+      hidden.querySelectorAll('[data-hook="messages-esc-tool-call-row"]')
+    ).toHaveLength(1);
 
-    // Visible again → the real settled span shows up on the badge.
+    // Visible again → the card slot returns and the failure is honestly
+    // counted in the summary segments.
     const visible = await mount(
-      <ToolMessageGroup messages={[hiddenTodo, agents]} canCollapse={false} />
+      <ToolMessageGroup messages={[hiddenFailedTodo, agents]} canCollapse={false} />
     );
-    expect(visible.querySelector('[data-hook="messages-esc-tr-duration"]')?.textContent).toBe(
-      "8.0s"
-    );
+    expect(visible.querySelector(".tool-group__item")).toBeTruthy();
+    expect(visible.textContent).toContain("2 个调用");
+    expect(visible.textContent).toContain("1 个失败");
   });
 
   it("keeps the card failed when the last settled action fails", async () => {

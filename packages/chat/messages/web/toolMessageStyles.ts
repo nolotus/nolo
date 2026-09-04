@@ -103,27 +103,8 @@ export const toolMessageStyles = stylex.create({
   statusDotGlyph: {
     position: "relative",
   },
-  // Astryx collapsed-surface count badge: wrench glyph + tool count, shared
-  // with the RN ToolMessageGroup header.
-  countBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 3,
-    borderRadius: 9,
-    paddingTop: 2,
-    paddingRight: 6,
-    paddingBottom: 2,
-    paddingLeft: 6,
-    backgroundColor: "var(--backgroundSecondary, rgba(127,127,127,0.08))",
-    flexShrink: 0,
-    color: "var(--textTertiary)",
-  },
-  countText: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: "var(--textSecondary)",
-  },
-  // Trailing duration badge on completed rows, e.g. `1.2s` / `850ms`.
+  // Trailing duration badge on completed rows, e.g. `1.2s` / `850ms`. Also
+  // styles the ToolCallRow diff meta segment (mono + never shrinks).
   duration: {
     fontFamily: "var(--font-mono, monospace)",
     fontSize: 11,
@@ -392,6 +373,21 @@ export const toolMessageStyles = stylex.create({
     flexShrink: 0,
     color: "var(--textQuaternary, var(--textTertiary))",
     opacity: 0.8,
+  },
+  // ToolCallRow flex contract (P0.5): verb/context stay intrinsic width
+  // (flexShrink 0); the target is the ONLY flexible segment — flex:1 +
+  // minWidth:0. Real clipping (nowrap/hidden/ellipsis) comes from the shared
+  // `truncate` entry mounted alongside it, so a long no-space path shrinks
+  // inside its own box instead of pushing duration/chevron out of the header.
+  rowLabel: {
+    flexShrink: 0,
+    fontSize: "var(--fontSize-sm)",
+    fontWeight: 500,
+  },
+  rowContext: { flexShrink: 0 },
+  rowTarget: {
+    flex: 1,
+    minWidth: 0,
   },
   actionDetail: {
     marginTop: 4,

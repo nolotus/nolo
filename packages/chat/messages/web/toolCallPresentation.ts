@@ -160,6 +160,45 @@ const TOOL_VERBS: Record<string, string> = {
   runStreamingAgent: "转交",
 };
 
+/**
+ * Collapse snake_case / legacy aliases onto canonical `toolVerbs.*` i18n keys
+ * so the chat locale carries one entry per verb family (minimal keys).
+ */
+const TOOL_VERB_I18N_KEY_ALIASES: Record<string, string> = {
+  read_file: "readFile",
+  write_file: "writeFile",
+  edit_file: "editFile",
+  glob_files: "globFiles",
+  code_search: "codeSearch",
+  fetch_webpage: "fetchWebpage",
+  exec_shell: "execShell",
+  shell: "execShell",
+};
+
+/**
+ * Localized action verb (P0.5): prefers `toolVerbs.<key>` from the chat
+ * locale, falls back to the zh default from TOOL_VERBS. Unmapped tools keep
+ * the resolveToolDisplayName chain — raw API names never leak, and an i18n
+ * miss never swaps languages (key paths / empty strings keep the default).
+ */
+export function resolveToolCallVerb(
+  toolName: string | undefined,
+  normalized: string,
+  translate?: ToolCallTranslate
+): string {
+  const fallback = TOOL_VERBS[normalized];
+  if (!fallback) {
+    return resolveToolDisplayName(toolName || undefined, translate);
+  }
+  if (!translate) return fallback;
+  const key = `toolVerbs.${TOOL_VERB_I18N_KEY_ALIASES[normalized] ?? normalized}`;
+  const translated = asOptionalTrimmedString(translate(key, fallback));
+  // Miss shapes: createToolNameTranslator returns the fallback; naive test
+  // doubles return the key path or "". Both keep the zh default.
+  if (!translated || translated === key) return fallback;
+  return translated;
+}
+
 /** Tools that render dedicated cards instead of expandable rows. */
 const ARTIFACT_MODE_TOOLS = new Set([
   "applyDiff",
@@ -213,6 +252,13 @@ export function resolveToolCallStatus(
   message: ToolCallMessageInput | undefined | null
 ): ToolCallStatus {
   const payloadStatus = asTrimmedString(readPayload(message)?.status);
+  // Error evidence outranks a *claimed success* (P0.5): a settled payload can
+  // claim success while payload/content carries a real error. Other explicit
+  // statuses keep their own meaning — cancellation persists an
+  // "aborted"-style error string that must not repaint the row as failed.
+  if (payloadStatus === "success" && isToolCallFailed(message)) {
+    return "failed";
+  }
   if (VALID_PAYLOAD_STATUSES.has(payloadStatus)) {
     return payloadStatus as ToolCallStatus;
   }
@@ -333,8 +379,15 @@ export function buildToolCallTarget(
       break;
     case "globFiles":
     case "glob_files":
-    case "searchWorkspace":
       target =
+        asOptionalTrimmedString(args.pattern) ??
+        asOptionalTrimmedString(args.glob) ??
+        "";
+      break;
+    case "searchWorkspace":
+      // query is the primary operand; pattern/glob are legacy aliases.
+      target =
+        asOptionalTrimmedString(args.query) ??
         asOptionalTrimmedString(args.pattern) ??
         asOptionalTrimmedString(args.glob) ??
         "";
@@ -384,6 +437,11 @@ export function buildToolCallContext(
         asOptionalTrimmedString(contentRecord?.cwd) ??
         asOptionalTrimmedString(args?.cwd);
       return cwd || undefined;
+    }
+    case "searchWorkspace": {
+      // Workspace scope: only when the real args actually carry a path —
+      // never guessed from query/pattern content.
+      return asOptionalTrimmedString(args?.path) || undefined;
     }
     case "readFile":
     case "read_file":
@@ -490,8 +548,7 @@ export function buildToolCallPresentation(
   const parsedContent = safeParseContent(message?.content);
   const contentRecord = isRecord(parsedContent) ? parsedContent : undefined;
 
-  const verb =
-    TOOL_VERBS[normalized] ?? resolveToolDisplayName(toolName || undefined, translate);
+  const verb = resolveToolCallVerb(toolName, normalized, translate);
   const target = buildToolCallTarget(toolName, args);
   const context = buildToolCallContext(toolName, args, contentRecord);
   const status = resolveToolCallStatus(message);
@@ -560,9 +617,8 @@ const interpolateCount = (template: string, count: number) =>
 
 /**
  * Compact grouped header summary: total calls, plus running / failed counts
- * when non-zero ("2 个调用 · 1 个运行中 · 1 个失败"). Real duration is
- * rendered separately by the trailing header badge — this string never
- * invents timing data.
+ * when non-zero ("2 个调用 · 1 个运行中 · 1 个失败"). The header does not
+ * render duration; timing appears only in each tool-call row.
  *
  * i18n keys (zh fallbacks; the chat locale may override):
  * - toolGroup.totalCalls   "{{count}} 个调用"
