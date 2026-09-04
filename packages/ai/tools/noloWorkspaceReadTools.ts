@@ -662,6 +662,15 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
         return null;
       });
       if (favRecord) {
+        // 收藏水化读成功 = favKey 真实可解析的直接证明（与 server 端
+        // noloWorkspaceServerTools 的 readDbRecord 路径同一证明标准）。把这份
+        // 证明传导给 toSafeAgentSummary：直接钉住这个已验证的 key 本身，不依赖
+        // record.id 重新派生；绝不从 isPublic 推导未经验证的 key——那会破坏
+        // 「isPublic 标志 ≠ public record 存在证明」的既有 invariant。
+        if (favKey.startsWith("agent-pub-")) {
+          favRecord.publicRecordExists = true;
+          favRecord.publicKey = favKey;
+        }
         const key = favRecord?.dbKey || favRecord?.id || favKey;
         recordsMap.set(key, favRecord);
       }
@@ -669,12 +678,13 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   }
 
   const userId = runtime?.currentUserId ?? undefined;
-  // NOTE: We intentionally do NOT pass publicRecordExists here.
+  // NOTE: We intentionally do NOT pass publicRecordExists for plain records.
   // record.isPublic is a flag on the private record; it does NOT prove the
   // agent-pub-<id> record actually exists (real data has isPublic=true with no
-  // readable public record). Verifying existence would require N extra remote
-  // reads — not worth it for a convenience field. Per the safe-summary contract:
-  // omit publicKey rather than emit one that cannot resolve. Explicit
+  // readable public record). The ONE exception is the favorite hydration read
+  // above: a successful readBestRecord(favKey) is direct existence proof, and
+  // that verified favKey is pinned as publicKey there. Per the safe-summary
+  // contract: omit publicKey rather than emit one that cannot resolve. Explicit
   // record.publicKey (if present) is still trusted by toSafeAgentSummary.
   const agents = [...Array.from(recordsMap.values()), ...publicRecords].map((record) =>
     toSafeAgentSummary(record, {

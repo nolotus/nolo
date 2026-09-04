@@ -6,6 +6,7 @@ import {
   omitNullishAgentSummaryFields,
   resolveFavoriteStatus,
 } from "./safeAgentSummary";
+import { DEEPSEEK_API_POLICY } from "../economics/economicsPolicy";
 
 describe("safeAgentSummary", () => {
   test("toSafeAgentSummary extracts safe summary fields and redacts secrets", () => {
@@ -362,6 +363,7 @@ describe("compact listAgents projection", () => {
     expect(Object.keys(compact).sort()).toEqual([
       "agentKey",
       "apiSource",
+      "billingSource",
       "isFavorite",
       "isOAuth",
       "isOwned",
@@ -451,5 +453,114 @@ describe("compact listAgents projection", () => {
       .map(toCompactAgentSummary)
       .map((a) => shortKey(a.agentKey));
     expect(projectedKeys).toEqual(sortedKeys);
+  });
+});
+
+describe("agent economics snapshot (Phase 2A)", () => {
+  // Mon 2026-09-07 02:00 UTC — inside DeepSeek's 01:00–04:00 UTC peak window.
+  const MON_PEAK = Date.UTC(2026, 8, 7, 2, 0);
+
+  const deepseekRecord = {
+    id: "ds-1",
+    dbKey: "agent-user1-ds-1",
+    name: "DS Bot",
+    model: "deepseek-chat",
+    provider: "deepseek",
+    apiSource: "custom",
+    customProviderUrl: "https://api.deepseek.com/v1",
+    isPublic: false,
+  };
+
+  test("DeepSeek API source carries the peak economics snapshot at a pinned instant", () => {
+    const summary = toSafeAgentSummary(deepseekRecord, { userId: "user1", now: MON_PEAK });
+    expect(summary.economics).toEqual({
+      source: "deepseek_api",
+      policyVersion: DEEPSEEK_API_POLICY.version,
+      period: "peak",
+      priceMultiplier: 2,
+      changesAt: Date.UTC(2026, 8, 7, 4, 0),
+    });
+    // 端点只用于确认官方来源，绝不进入输出。
+    expect(JSON.stringify(summary)).not.toContain("deepseek.com");
+    expect(summary).not.toHaveProperty("customProviderUrl");
+  });
+
+  test("off-peak instant yields the 1× multiplier", () => {
+    const summary = toSafeAgentSummary(deepseekRecord, {
+      userId: "user1",
+      now: Date.UTC(2026, 8, 7, 11, 0), // Mon 11:00 UTC — outside both windows
+    });
+    expect(summary.economics).toMatchObject({ period: "off_peak", priceMultiplier: 1 });
+  });
+
+  test("BigModel GLM Coding Plan source resolves via Asia/Shanghai peak hours", () => {
+    // Wed 2026-09-09 06:00 UTC == 14:00 Shanghai → peak start (inclusive).
+    const summary = toSafeAgentSummary(
+      {
+        ...deepseekRecord,
+        id: "bm-1",
+        dbKey: "agent-user1-bm-1",
+        name: "BM Bot",
+        model: "glm-5.3",
+        provider: "bigmodel",
+        customProviderUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+      },
+      { userId: "user1", now: Date.UTC(2026, 8, 9, 6, 0) }
+    );
+    expect(summary.economics).toMatchObject({
+      source: "bigmodel_glm_coding_plan",
+      period: "peak",
+      quotaMultiplier: 1,
+    });
+  });
+
+  test("neutral/unknown sources omit economics entirely", () => {
+    // 国际版 Z.AI 计划没有 docs.bigmodel.cn 证据 → neutral。
+    const zai = toSafeAgentSummary(
+      {
+        id: "z-1",
+        dbKey: "agent-user1-z-1",
+        name: "Z Bot",
+        provider: "zai",
+        customProviderUrl: "https://api.z.ai/api/coding/paas/v4",
+      },
+      { userId: "user1", now: MON_PEAK }
+    );
+    expect(zai).not.toHaveProperty("economics");
+    const unknown = toSafeAgentSummary(
+      { id: "u-1", dbKey: "agent-user1-u-1", name: "U Bot", provider: "openai" },
+      { userId: "user1", now: MON_PEAK }
+    );
+    expect(unknown).not.toHaveProperty("economics");
+    // bigmodel 同域按量计费端点 ≠ coding plan → neutral。
+    const metered = toSafeAgentSummary(
+      {
+        ...deepseekRecord,
+        provider: "bigmodel",
+        customProviderUrl: "https://open.bigmodel.cn/api/paas/v4",
+      },
+      { userId: "user1", now: MON_PEAK }
+    );
+    expect(metered).not.toHaveProperty("economics");
+  });
+
+  test("compact projection carries the small snapshot but never the full policy/windows", () => {
+    const summary = toSafeAgentSummary(deepseekRecord, { userId: "user1", now: MON_PEAK });
+    const compact: Record<string, unknown> = toCompactAgentSummary(summary);
+    expect(compact.economics).toMatchObject({ source: "deepseek_api", period: "peak" });
+    const serialized = JSON.stringify(compact);
+    expect(serialized).not.toContain('"windows"');
+    expect(serialized).not.toContain("startMinute");
+    expect(serialized).not.toContain("weekdays");
+    expect(serialized).not.toContain("effectiveFrom");
+    expect(serialized).not.toContain("sourceUrl");
+    // neutral 来源的 compact 不出现 economics 键。
+    const neutralCompact = toCompactAgentSummary(
+      toSafeAgentSummary(
+        { id: "x", dbKey: "agent-user1-x", name: "X", provider: "zai" },
+        { userId: "user1", now: MON_PEAK }
+      )
+    );
+    expect(neutralCompact).not.toHaveProperty("economics");
   });
 });

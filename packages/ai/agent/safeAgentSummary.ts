@@ -11,6 +11,8 @@ import {
   resolveBillingSource,
   type BillingSource,
 } from "./agentBilling";
+import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
+import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
 
 export {
   resolveAgentSelectionPriority,
@@ -47,6 +49,14 @@ export interface SafeAgentSummary {
   isFavorite: boolean;
   favoritedAt: number | string | null;
   isPublic: boolean;
+  /**
+   * Phase 2A economics snapshot (peak/off-peak phase + price/quota multiplier)
+   * for sources with sufficient official evidence (DeepSeek API, BigModel GLM
+   * Coding Plan). Omitted entirely for neutral/unknown sources — never guess.
+   * The compact snapshot never carries the full policy/windows; those stay in
+   * packages/ai/economics.
+   */
+  economics?: AgentEconomicsSnapshot;
   /** True when the agent is owned by the current user (record.userId matches). */
   isOwned: boolean;
   /** True when the agent uses one of the supported user OAuth subscriptions. */
@@ -67,6 +77,11 @@ export interface SafeAgentSummaryOptions {
   userId?: string;
   /** Caller-confirmed signal: does the public record agent-pub-<id> actually exist? */
   publicRecordExists?: boolean;
+  /**
+   * Instant the economics snapshot is resolved at (epoch ms). Defaults to
+   * Date.now(); tests pass a fixed value for deterministic snapshots.
+   */
+  now?: number;
 }
 
 function parseTimestamp(val: unknown): number {
@@ -249,6 +264,19 @@ export function toSafeAgentSummary(
     isPublic,
   });
 
+  // Phase 2A economics：只对官方证据足够的 source（DeepSeek API、BigModel GLM
+  // Coding Plan）产出快照；证据不足的 source 返回 null，字段整体省略（neutral）。
+  // customProviderUrl 只用于确认官方端点，绝不进入输出。
+  const economics = resolveEconomicsSnapshot(
+    {
+      provider,
+      apiSource,
+      customProviderUrl:
+        typeof record?.customProviderUrl === "string" ? record.customProviderUrl : null,
+    },
+    options?.now ?? Date.now()
+  );
+
   // Runnable agentKey for delegation: owned agents → agent-<userId>-<id> (the
   // current user can always resolve these); confirmed public agents → their
   // publicKey. Omitted when there is no signed-in user or the key cannot resolve,
@@ -283,6 +311,7 @@ export function toSafeAgentSummary(
     isFavorite: favStatus.isFavorite,
     favoritedAt: favStatus.favoritedAt,
     isPublic,
+    ...(economics ? { economics } : {}),
     isOwned,
     isOAuth,
     ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
@@ -315,6 +344,9 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "isOwned",
   "isPublic",
   "tools",
+  // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
+  // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
+  "economics",
   // 仅限流中的 agent 才会带（可用 agent 上不存在）。对"现在能不能选它"是
   // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
   // 所以通常根本不占字节。

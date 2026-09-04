@@ -489,3 +489,165 @@ describe("workspace read tools drain-window retry (shared layer wiring)", () => 
     expect(favCalls).toBe(30);
   });
 });
+
+describe("listAgents favorite public hydration (Phase 2A)", () => {
+  const sharedFavRecord = {
+    id: "shared-fav",
+    dbKey: "agent-pub-shared-fav",
+    name: "Shared Favorite Bot",
+    model: "gpt-test",
+    isPublic: true,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    tools: ["read"],
+  };
+
+  type MockOptions = {
+    userRecords?: unknown[];
+    favoriteItems?: { id: string; favoritedAt?: number }[];
+    readByDbKey?: Record<string, unknown>;
+    publicCatalog?: unknown[];
+  };
+
+  /** listAgents 的四个远端依赖：query 用户记录 / listFavorites / db read / getPublicAgents。 */
+  const mockListAgentsFetch = (options: MockOptions) => {
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes("/api/v1/db/query/")) {
+        return new Response(JSON.stringify({ data: { data: options.userRecords ?? [] } }), { status: 200 });
+      }
+      if (url.includes("/rpc/listFavorites")) {
+        const items = options.favoriteItems ?? [];
+        return new Response(JSON.stringify({ items, ids: items.map((item) => item.id) }), { status: 200 });
+      }
+      if (url.includes("/api/v1/db/read/")) {
+        const key = decodeURIComponent(url.split("/api/v1/db/read/")[1]?.split("?")[0] ?? "");
+        const record = options.readByDbKey?.[key];
+        if (record === undefined) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify({ data: record }), { status: 200 });
+      }
+      if (url.includes("/rpc/getPublicAgents")) {
+        return new Response(JSON.stringify({ data: { data: options.publicCatalog ?? [] } }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+  };
+
+  it("hydrated favorite agent-pub-* read success proves publicKey → runnable agentKey without any input key", async () => {
+    mockListAgentsFetch({
+      userRecords: [
+        {
+          id: "own-1",
+          dbKey: "agent-local-own-1",
+          userId: "local",
+          name: "Own Bot",
+          model: "gpt-test",
+          isPublic: false,
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          tools: [],
+        },
+      ],
+      favoriteItems: [{ id: "agent-pub-shared-fav", favoritedAt: 1700000002000 }],
+      readByDbKey: { "agent-pub-shared-fav": sharedFavRecord },
+    });
+
+    const result = await listAgentsFunc({}, buildThunkApi());
+    const agents = (result.rawData as any).agents;
+    const fav = agents.find((agent: any) => agent.name === "Shared Favorite Bot");
+
+    // 收藏水化读成功本身就是 agent-pub-<id> 存在的证明：即使记录本身不带
+    // publicKey/publicRecordExists 输入，也必须产出可运行的 agentKey。
+    expect(fav).toBeDefined();
+    expect(fav.agentKey).toBe("agent-pub-shared-fav");
+    expect(fav.isPublic).toBe(true);
+    expect(fav.isFavorite).toBe(true);
+    expect(fav).not.toHaveProperty("privateKey");
+    expect(fav).not.toHaveProperty("dbKey");
+
+    // 私有自有记录照常给出 owned key，但绝不合成 publicKey。
+    const own = agents.find((agent: any) => agent.name === "Own Bot");
+    expect(own.agentKey).toBe("agent-local-own-1");
+    expect(own).not.toHaveProperty("publicKey");
+  });
+
+  it("scope=all dedupes the hydrated favorite with the catalog entry, keeping favorite metadata + runnable key", async () => {
+    mockListAgentsFetch({
+      userRecords: [
+        {
+          id: "own-1",
+          dbKey: "agent-local-own-1",
+          userId: "local",
+          name: "Own Bot",
+          model: "gpt-test",
+          isPublic: false,
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          tools: [],
+        },
+      ],
+      favoriteItems: [{ id: "agent-pub-shared-fav", favoritedAt: 1700000002000 }],
+      readByDbKey: { "agent-pub-shared-fav": sharedFavRecord },
+      publicCatalog: [
+        {
+          id: "shared-fav",
+          dbKey: "agent-pub-shared-fav",
+          publicKey: "agent-pub-shared-fav",
+          name: "Shared Favorite Bot",
+          model: "gpt-test",
+          isPublic: true,
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          tools: ["read"],
+        },
+      ],
+    });
+
+    const result = await listAgentsFunc({ scope: "all" }, buildThunkApi());
+    const agents = (result.rawData as any).agents;
+    const favEntries = agents.filter((agent: any) => agent.agentKey === "agent-pub-shared-fav");
+
+    // 同一 agent 只出现一次（all 去重），且胜出条目同时保留收藏元数据和可运行 key。
+    expect(favEntries).toHaveLength(1);
+    expect(favEntries[0].isFavorite).toBe(true);
+    expect(favEntries[0].isPublic).toBe(true);
+    // 不存在丢失 agentKey 的重复身份条目。
+    expect(agents.filter((agent: any) => agent.name === "Shared Favorite Bot")).toHaveLength(1);
+    // 自有 agent 仍在列表中。
+    expect(agents.some((agent: any) => agent.name === "Own Bot")).toBe(true);
+    expect((result.rawData as any).total).toBe(2);
+
+    // verbose 视角：收藏时间戳等完整元数据随胜出条目保留。
+    const verbose = await listAgentsFunc({ scope: "all", verbose: true }, buildThunkApi());
+    const verboseFav = (verbose.rawData as any).agents.find(
+      (agent: any) => agent.agentKey === "agent-pub-shared-fav"
+    );
+    expect(verboseFav.favoritedAt).toBe(1700000002000);
+    expect(verboseFav.publicKey).toBe("agent-pub-shared-fav");
+  });
+
+  it("favorite read failure keeps the invariant: no synthesized agent-pub key from isPublic alone", async () => {
+    mockListAgentsFetch({
+      userRecords: [
+        {
+          id: "pub-flagged",
+          dbKey: "agent-local-pub-flagged",
+          userId: "local",
+          name: "Flagged Public Bot",
+          model: "gpt-test",
+          isPublic: true,
+          updatedAt: "2026-07-01T00:00:00.000Z",
+          tools: [],
+        },
+      ],
+      favoriteItems: [{ id: "agent-pub-shared-fav", favoritedAt: 1700000002000 }],
+      // 收藏水化读 404：没有证明就不得给出 agent-pub-*。
+      readByDbKey: {},
+    });
+
+    const result = await listAgentsFunc({}, buildThunkApi());
+    const agents = (result.rawData as any).agents;
+    expect(agents.some((agent: any) => agent.agentKey === "agent-pub-shared-fav")).toBe(false);
+    expect(agents.every((agent: any) => !agent.publicKey)).toBe(true);
+    // isPublic=true 的自有记录仍标记 isPublic，但不产生 publicKey/agentKey 之外的可运行公开键。
+    const flagged = agents.find((agent: any) => agent.name === "Flagged Public Bot");
+    expect(flagged.isPublic).toBe(true);
+    expect(flagged).not.toHaveProperty("publicKey");
+  });
+});
