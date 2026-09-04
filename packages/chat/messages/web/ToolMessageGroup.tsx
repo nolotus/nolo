@@ -7,8 +7,8 @@ import React, {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { LuChevronDown, LuChevronRight } from "react-icons/lu";
-import { StatusIcon, safeParse, withLiteralClass } from "./toolMessageShared";
+import { LuChevronDown, LuChevronRight, LuWrench } from "react-icons/lu";
+import { StatusIcon, safeParse, withLiteralClass, formatToolDuration } from "./toolMessageShared";
 import ToolMessageContent from "./ToolMessageContent";
 import { messagesStyles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
@@ -16,10 +16,16 @@ import "./messagesStylexEscapeHatch.css";
 import {
   buildActivityTimeline,
   createToolNameTranslator,
-  formatToolGroupHeaderSummary,
   type ActivityTimelineAction,
   type ActivityTimelinePhase,
 } from "./toolDisplayName";
+import ToolCallRow from "./ToolCallRow";
+import {
+  buildToolCallPresentation,
+  formatToolGroupStatusSummary,
+  resolveToolCallMode,
+  summarizeToolCallStatuses,
+} from "./toolCallPresentation";
 
 /** Button reset so `.tr-header` keeps layout when used as `<button>`. */
 const TR_HEADER_BUTTON_STYLE: React.CSSProperties = {
@@ -64,9 +70,17 @@ function pinBodyToBottom(
   ignoreScrollRef.current += 2;
   el.scrollTop = el.scrollHeight;
   // Safety clear if no scroll event is delivered (already at bottom / no overflow).
-  requestAnimationFrame(() => {
-    if (ignoreScrollRef.current > 0) ignoreScrollRef.current -= 1;
-  });
+  // rAF guard: bun+jsdom exposes a requestAnimationFrame that throws when
+  // called (no real frame loop); fall back to a microtask-free no-op.
+  try {
+    const raf = (globalThis as { requestAnimationFrame?: (cb: () => void) => number }).requestAnimationFrame;
+    if (!raf) return;
+    raf(() => {
+      if (ignoreScrollRef.current > 0) ignoreScrollRef.current -= 1;
+    });
+  } catch {
+    // rAF unavailable in this environment; ignore-counter cleanup is best-effort.
+  }
 }
 
 export interface ToolMessageGroupProps {
@@ -107,13 +121,89 @@ export const ToolMessageGroup = memo(
     /** Skip N onScroll updates caused by our own pinBodyToBottom writes. */
     const ignoreBodyScrollRef = useRef(0);
 
+    const toolNameTranslator = useMemo(
+      () =>
+        createToolNameTranslator((key, options) => {
+          // No String() coercion here: a non-string t() return (i18n miss
+          // variants / test-double t implementations that hand back the
+          // options object) must fall through to the zh fallback inside
+          // createToolNameTranslator instead of rendering "[object Object]".
+          const value: unknown = t(key, options as any);
+          return typeof value === "string" ? value : "";
+        }),
+      [t]
+    );
+
+    // Single visibility pass: every header stat (summary counts, badge, last
+    // settled duration) and the fallback body MUST use the same filtered list
+    // so a hidden setTodoList can never surface its duration in the header.
+    const visibleMessages = useMemo(
+      () => messages.filter((msg) => isVisibleTodoMessage(msg, conversationTodoEnabled)),
+      [messages, conversationTodoEnabled]
+    );
+
+    // Compact header summary: total / running / failed calls (i18n-aware).
+    // Real duration stays in the trailing badge — this string never
+    // synthesizes timing data.
     const summary = useMemo(() => {
-      // Prefer human activity titles ("浏览目录 × 8") over API names ("globFiles × 8").
-      return formatToolGroupHeaderSummary(
-        messages,
-        createToolNameTranslator((key, options) => String(t(key, options as any)))
+      return formatToolGroupStatusSummary(
+        summarizeToolCallStatuses(visibleMessages),
+        toolNameTranslator
       );
-    }, [messages, t]);
+    }, [visibleMessages, toolNameTranslator]);
+
+    /** Ordinary calls → flat presentation model (pure mapping). */
+    const toToolCallPresentation = (msg: any) =>
+      buildToolCallPresentation(msg, toolNameTranslator);
+
+    /**
+     * Artifact-class tools (setTodoList/TodoCard, applyDiff/DiffViewer, image
+     * cards, appDeploy …) keep their dedicated ToolMessageContent renderer,
+     * ALWAYS mounted — they must never degrade into a disabled flat row that
+     * hides the card body after the call settles.
+     */
+    const renderArtifactDetail = (msg: any) => (
+      <div
+        key={msg.id ?? msg.dbKey ?? msg.tool_call_id ?? msg.toolCallId}
+        {...withLiteralClass("tool-group__item", toolStyles.groupItem)}
+      >
+        <ToolMessageContent
+          toolName={msg.toolName}
+          rawData={safeParse(msg.content)}
+          isError={
+            msg.toolPayload?.status === "failed" ||
+            !!msg.toolPayload?.error ||
+            !!safeParse(msg.content)?.error
+          }
+          t={t}
+          openPreview={() => {}}
+          navigateToPage={() => {}}
+          presentation="groupDetail"
+          conversationTodoEnabled={conversationTodoEnabled}
+        />
+      </div>
+    );
+
+    /** Artifact/handoff/interactive tools never go through flat rows. */
+    const isRowModeMessage = (msg: any) =>
+      resolveToolCallMode(msg?.toolName) === "row";
+
+    // Astryx collapsed-surface count: same visibility rule as the body rows
+    // (setTodoList hidden when the conversation todo is off).
+    const visibleToolCount = useMemo(() => visibleMessages.length, [visibleMessages]);
+
+    // Trailing duration badge mirrors the latest settled call (same rule as
+    // RN) — computed over VISIBLE messages only, so a hidden setTodoList
+    // cannot put its duration on the header.
+    const lastSettled = useMemo(() => {
+      for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+        const msg = visibleMessages[index] as any;
+        const payload = msg?.toolPayload;
+        if (payload?.startedAt && payload?.finishedAt) return payload;
+      }
+      return null;
+    }, [visibleMessages]);
+    const durationText = formatToolDuration(lastSettled);
 
     const timeline = useMemo(() => {
       return buildActivityTimeline(
@@ -213,10 +303,20 @@ export const ToolMessageGroup = memo(
 
       pinBodyToBottom(el, stickToBottomRef, ignoreBodyScrollRef);
       // Running action details / fonts can settle one frame later — pin again.
-      const raf = requestAnimationFrame(() => {
-        pinBodyToBottom(el, stickToBottomRef, ignoreBodyScrollRef);
-      });
-      return () => cancelAnimationFrame(raf);
+      // rAF guard: bun+jsdom/SSR-like environments may lack a working rAF;
+      // the synchronous pin above already keeps the scroller usable.
+      try {
+        const rafImpl = (globalThis as { requestAnimationFrame?: (cb: () => void) => number }).requestAnimationFrame;
+        if (!rafImpl) return;
+        const raf = rafImpl(() => {
+          pinBodyToBottom(el, stickToBottomRef, ignoreBodyScrollRef);
+        });
+        return () => {
+          if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
+        };
+      } catch {
+        return;
+      }
     }, [
       expanded,
       messages,
@@ -399,7 +499,23 @@ export const ToolMessageGroup = memo(
         <div {...withLiteralClass(`tr-icon ${overallStatus}`, toolStyles.icon)}>
           <StatusIcon status={overallStatus} toolName="" />
         </div>
+        {/* Astryx collapsed-surface count badge: wrench + tool count. */}
+        <span
+          data-hook="messages-esc-tr-count-badge"
+          {...withLiteralClass("tool-group__count-badge", toolStyles.countBadge)}
+          aria-hidden="true"
+        >
+          <LuWrench size={10} />
+          <span {...withLiteralClass("tool-group__count-text", toolStyles.countText)}>
+            {visibleToolCount}
+          </span>
+        </span>
         <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary)}>{summary}</span>
+        {!!durationText && (
+          <span data-hook="messages-esc-tr-duration" {...withLiteralClass("tr-duration", toolStyles.duration)}>
+            {durationText}
+          </span>
+        )}
       </div>
     );
 
@@ -435,32 +551,41 @@ export const ToolMessageGroup = memo(
           >
             <div ref={bodyContentRef} className="tr-body-content">
               {useFlatActions && flatActions.length > 0 ? (
-                <div  {...withLiteralClass("tr-action-list", toolStyles.actionList)}>{flatActions.map(renderAction)}</div>
+                <div  {...withLiteralClass("tr-action-list", toolStyles.actionList)}>
+                  {flatActions.map((action) => {
+                    const message = action.message as any;
+                    // Artifact-class actions keep their dedicated card instead
+                    // of a collapsible row (content must stay reachable).
+                    if (!isRowModeMessage(message)) {
+                      return renderArtifactDetail(message);
+                    }
+                    return (
+                      <ToolCallRow
+                        key={action.id}
+                        presentation={toToolCallPresentation(message)}
+                        message={message}
+                        t={t}
+                        conversationTodoEnabled={conversationTodoEnabled}
+                      />
+                    );
+                  })}
+                </div>
               ) : namedPhases.length > 0 ? (
                 <div  {...withLiteralClass("tr-phase-list", toolStyles.phaseList)}>{namedPhases.map(renderPhase)}</div>
               ) : (
-                messages.filter((msg) => isVisibleTodoMessage(msg, conversationTodoEnabled)).map((msg) => (
-                  <div
-                    key={msg.id ?? msg.dbKey ?? msg.tool_call_id}
-                    
-                    {...withLiteralClass("tool-group__item", toolStyles.groupItem)}
-                  >
-                    <ToolMessageContent
-                      toolName={msg.toolName}
-                      rawData={safeParse(msg.content)}
-                      isError={
-                        msg.toolPayload?.status === "failed" ||
-                        !!msg.toolPayload?.error ||
-                        !!safeParse(msg.content)?.error
-                      }
+                visibleMessages.map((msg) =>
+                  isRowModeMessage(msg) ? (
+                    <ToolCallRow
+                      key={msg.id ?? msg.dbKey ?? msg.tool_call_id ?? msg.toolCallId}
+                      presentation={toToolCallPresentation(msg)}
+                      message={msg}
                       t={t}
-                      openPreview={() => {}}
-                      navigateToPage={() => {}}
-                      presentation="groupDetail"
                       conversationTodoEnabled={conversationTodoEnabled}
                     />
-                  </div>
-                ))
+                  ) : (
+                    renderArtifactDetail(msg)
+                  )
+                )
               )}
             </div>
           </div>

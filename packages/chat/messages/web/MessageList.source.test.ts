@@ -177,11 +177,13 @@ describe("OPT-FE-01 message list memo / re-render boundary", () => {
     expect(messageLayoutSource).toContain("onMouseLeave");
     expect(messageLayoutSource).toContain("{avatarDesktop}");
     // Actions are a sibling under the bubble row (not nested inside it).
-    const rowOpen = messageLayoutSource.indexOf('className="msg-bubble-row"');
+    // Anchor on the withLiteralClass literal (className is now a spread via
+    // withLiteralClass, not a bare JSX className attribute).
+    const rowOpen = messageLayoutSource.indexOf('"msg-bubble-row"');
     const rowAvatar = messageLayoutSource.indexOf("{avatarDesktop}", rowOpen);
     const rowBody = messageLayoutSource.indexOf("msg-body", rowOpen);
     const actions = messageLayoutSource.indexOf(
-      'className="msg-actions-below"',
+      '"msg-actions-below"',
       rowOpen
     );
     expect(rowOpen).toBeGreaterThanOrEqual(0);

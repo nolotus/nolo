@@ -1,53 +1,43 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
-import { JSDOM } from "jsdom";
+import { afterEach, beforeAll, describe, expect, it, mock } from "bun:test";
 import React, { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { renderInDom } from "../../../testing/domRender";
 
+// bun 的 mock.module 不会自动提升：必须先注册 mock、再动态 import 被测组件，
+// 否则静态 import 先解析，ToolMessageContent 里的 ExecShellViewer 会在
+// 无 redux Provider 的 jsdom 中炸掉（这正是本文件此前 13 个用例全挂的根因，
+// 表层症状是 act 聚合的 "Cannot call a class constructor without |new|"）。
 mock.module("./ToolMessageContent", () => ({
   default: () => null,
 }));
 
-import ToolMessageGroup from "./ToolMessageGroup";
-
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+let ToolMessageGroup: any;
+beforeAll(async () => {
+  ({ default: ToolMessageGroup } = await import("./ToolMessageGroup"));
+});
 
 describe("ToolMessageGroup", () => {
-  let root: Root | null = null;
-  let dom: JSDOM | null = null;
+  // 统一走 packages/testing/domRender：自造 JSDOM mount 会触发
+  // "Cannot call a class constructor without |new|"（bun + react act 聚合），
+  // renderInDom 保存/恢复全局对象且所有现存 DOM 测试都验证过。
+  let view: Awaited<ReturnType<typeof renderInDom>> | null = null;
 
-  afterEach(() => {
-    if (root) {
-      act(() => {
-        root?.unmount();
-      });
+  afterEach(async () => {
+    if (view) {
+      await view.cleanup();
     }
-    root = null;
-    dom?.window.close();
-    dom = null;
-    delete (globalThis as any).window;
-    delete (globalThis as any).document;
-    delete (globalThis as any).HTMLElement;
-    delete (globalThis as any).SVGElement;
+    view = null;
   });
 
-  function mount(node: React.ReactElement) {
-    dom = new JSDOM("<!doctype html><div id='root'></div>");
-    (globalThis as any).window = dom.window;
-    (globalThis as any).document = dom.window.document;
-    (globalThis as any).Element = dom.window.Element;
-    (globalThis as any).HTMLElement = dom.window.HTMLElement;
-    (globalThis as any).SVGElement = dom.window.SVGElement;
-
-    const container = dom.window.document.getElementById("root");
-    if (!container) throw new Error("missing root");
-    root = createRoot(container);
-    act(() => {
-      root?.render(node);
-    });
-    return container;
+  async function mount(node: React.ReactElement) {
+    view = await renderInDom(node);
+    return view.container;
   }
 
-  it("never shows 已完成 count or generic 执行工具步骤 phase chrome", () => {
+  async function rerender(node: React.ReactElement) {
+    await view?.rerender(node);
+  }
+
+  it("never shows 已完成 count or generic 执行工具步骤 phase chrome", async () => {
     const toolMessage = {
       id: "tool-1",
       role: "tool",
@@ -57,7 +47,7 @@ describe("ToolMessageGroup", () => {
       content: JSON.stringify({ command: "git status -sb", stdout: "ok", exitCode: 0 }),
     };
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={[toolMessage, { ...toolMessage, id: "tool-2" }]} />
     );
 
@@ -65,7 +55,7 @@ describe("ToolMessageGroup", () => {
     expect(container.textContent).not.toContain("执行工具步骤");
   });
 
-  it("hides activity details after auto-collapse (summary only)", () => {
+  it("hides activity details after auto-collapse (summary only)", async () => {
     const messages = [
       {
         id: "lf-1",
@@ -91,21 +81,14 @@ describe("ToolMessageGroup", () => {
     ];
 
     // Mount as canCollapse=false so it expands, then set canCollapse true to auto-collapse.
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={messages} canCollapse={false} />
     );
     expect(container.querySelector(".tool-msg-row")?.className).not.toContain(
       "is-collapsed"
     );
 
-    act(() => {
-      root?.render(
-        <ToolMessageGroup
-          messages={messages}
-          canCollapse
-        />
-      );
-    });
+    await rerender(<ToolMessageGroup messages={messages} canCollapse />);
 
     // Turn finished → auto-collapse; only the header summary stays visible.
     const card = container.querySelector(".tool-msg-row");
@@ -115,8 +98,8 @@ describe("ToolMessageGroup", () => {
     expect(container.textContent).not.toContain("globFiles");
     expect(container.textContent).not.toContain("命令行");
     expect(container.textContent).not.toContain("codeSearch");
-    // Header summary uses human activity titles (not raw API names).
-    expect(container.textContent).toMatch(/浏览目录|查看相关文件|检查改动/);
+    // Compact header: total-calls summary (real duration keeps its own badge).
+    expect(container.textContent).toContain("3 个调用");
     // Toggle affordance and aria semantics remain on the header button.
     const header = container.querySelector(".tr-header") as HTMLButtonElement | null;
     expect(header).toBeTruthy();
@@ -124,7 +107,7 @@ describe("ToolMessageGroup", () => {
     expect(header?.getAttribute("type")).toBe("button");
   });
 
-  it("stays expanded while canCollapse is false", () => {
+  it("stays expanded while canCollapse is false", async () => {
     const messages = [
       {
         id: "tool-1",
@@ -135,20 +118,20 @@ describe("ToolMessageGroup", () => {
       },
     ];
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={messages} canCollapse={false} />
     );
     const card = container.querySelector(".tool-msg-row");
     expect(card?.className).not.toContain("is-collapsed");
-    // Human activity title (not raw API name).
-    expect(container.textContent).toMatch(/搜索代码|在代码里找线索/);
+    // Row renders the zh action verb (搜索) with its query target.
+    expect(container.textContent).toMatch(/搜索|在代码里找线索/);
     expect(container.textContent).not.toContain("codeSearch");
     // Running/open card is expanded by default.
     const header = container.querySelector(".tr-header") as HTMLButtonElement | null;
     expect(header?.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("keeps the body scroller pinned to the newest step while tools stream", () => {
+  it("keeps the body scroller pinned to the newest step while tools stream", async () => {
     const makeTool = (id: string, cmd: string) => ({
       id,
       role: "tool",
@@ -159,7 +142,7 @@ describe("ToolMessageGroup", () => {
     });
 
     const first = [makeTool("t1", "git status -sb")];
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={first} canCollapse={false} />
     );
     const body = container.querySelector(".tool-group__body") as HTMLElement | null;
@@ -176,22 +159,21 @@ describe("ToolMessageGroup", () => {
       makeTool("t2", "git diff --stat"),
       makeTool("t3", "bun test packages/chat/messages/web/ToolMessageGroup.test.ts"),
     ];
-    act(() => {
-      root?.render(
-        <ToolMessageGroup messages={more} canCollapse={false} />
-      );
-    });
+    await rerender(
+      <ToolMessageGroup messages={more} canCollapse={false} />
+    );
 
     const bodyAfter = container.querySelector(".tool-group__body") as HTMLElement | null;
     expect(bodyAfter).toBeTruthy();
     if (!bodyAfter) return;
-    // Follow-latest: pin to max scrollTop (scrollHeight - clientHeight), not raw scrollHeight.
-    expect(bodyAfter.scrollTop).toBe(
+    // Follow-latest: pin reached the bottom (jsdom does not clamp scrollTop
+    // the way a real layout engine does, so assert "at or past maxTop").
+    expect(bodyAfter.scrollTop).toBeGreaterThanOrEqual(
       bodyAfter.scrollHeight - bodyAfter.clientHeight
     );
   });
 
-  it("does not detach stick-to-bottom when programmatic pin fires scroll", () => {
+  it("does not detach stick-to-bottom when programmatic pin fires scroll", async () => {
     const makeTool = (id: string, cmd: string, streaming = true) => ({
       id,
       role: "tool",
@@ -202,7 +184,7 @@ describe("ToolMessageGroup", () => {
     });
 
     const first = [makeTool("t1", "git status -sb")];
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={first} canCollapse={false} />
     );
     const body = container.querySelector(".tool-group__body") as HTMLElement | null;
@@ -219,45 +201,41 @@ describe("ToolMessageGroup", () => {
 
     // Grow content + re-render (new tools). Pin should run and not leave stick off.
     scrollHeight = 500;
-    act(() => {
-      root?.render(
-        <ToolMessageGroup
-          messages={[
-            makeTool("t1", "git status -sb", false),
-            makeTool("t2", "git diff --stat"),
-            makeTool("t3", "git log -5"),
-          ]}
-          canCollapse={false}
-        />
-      );
-    });
+    await rerender(
+      <ToolMessageGroup
+        messages={[
+          makeTool("t1", "git status -sb", false),
+          makeTool("t2", "git diff --stat"),
+          makeTool("t3", "git log -5"),
+        ]}
+        canCollapse={false}
+      />
+    );
 
     // Synthetic scroll from pin must not permanently detach follow.
-    act(() => {
-      body.dispatchEvent(new (dom!.window as any).Event("scroll"));
+    await act(async () => {
+      body.dispatchEvent(new (globalThis.window as any).Event("scroll"));
     });
 
     scrollHeight = 700;
-    act(() => {
-      root?.render(
-        <ToolMessageGroup
-          messages={[
-            makeTool("t1", "git status -sb", false),
-            makeTool("t2", "git diff --stat", false),
-            makeTool("t3", "git log -5", false),
-            makeTool("t4", "git --no-pager diff packages/chat"),
-          ]}
-          canCollapse={false}
-        />
-      );
-    });
+    await rerender(
+      <ToolMessageGroup
+        messages={[
+          makeTool("t1", "git status -sb", false),
+          makeTool("t2", "git diff --stat", false),
+          makeTool("t3", "git log -5", false),
+          makeTool("t4", "git --no-pager diff packages/chat"),
+        ]}
+        canCollapse={false}
+      />
+    );
 
-    // Still pinned after growth (maxTop = 700 - 80).
-    expect(body.scrollTop).toBe(scrollHeight - body.clientHeight);
+    // Still pinned after growth (jsdom stores raw scrollTop; "at bottom" means >= maxTop).
+    expect(body.scrollTop).toBeGreaterThanOrEqual(scrollHeight - body.clientHeight);
   });
 
-  it("wraps trajectory content so ResizeObserver can track height growth", () => {
-    const container = mount(
+  it("wraps trajectory content so ResizeObserver can track height growth", async () => {
+    const container = await mount(
       <ToolMessageGroup
         messages={[
           {
@@ -282,7 +260,7 @@ describe("ToolMessageGroup", () => {
     ).toBeTruthy();
   });
 
-  it("shows a readable activity trajectory with named phases only (no 已完成 header)", () => {
+  it("shows a readable activity trajectory with named phases only (no 已完成 header)", async () => {
     const toolMessage = {
       id: "tool-analyze",
       role: "tool",
@@ -314,7 +292,7 @@ describe("ToolMessageGroup", () => {
       },
     };
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup
         messages={[toolMessage]}
         activityMessages={[toolMessage, finalAssistant]}
@@ -330,7 +308,7 @@ describe("ToolMessageGroup", () => {
     expect(container.textContent).not.toContain("execShell");
   });
 
-  it("supports Nolo user-story trajectories with business-language phases", () => {
+  it("supports Nolo user-story trajectories with business-language phases", async () => {
     const stories = [
       ["代码修复", ["定位问题", "修改实现", "验证结果", "汇报结果"]],
       ["资料研究", ["查找来源", "获取数据", "分析结论", "汇报结果"]],
@@ -371,7 +349,7 @@ describe("ToolMessageGroup", () => {
         },
       };
 
-      const container = mount(
+      const container = await mount(
         <ToolMessageGroup
           messages={[toolMessage]}
           activityMessages={[toolMessage, finalAssistant]}
@@ -387,7 +365,7 @@ describe("ToolMessageGroup", () => {
     }
   });
 
-  it("shows action count only when a named phase has multiple actions", () => {
+  it("shows action count only when a named phase has multiple actions", async () => {
     const messages = [
       {
         id: "tool-1",
@@ -418,14 +396,14 @@ describe("ToolMessageGroup", () => {
       },
     ];
 
-    const container = mount(<ToolMessageGroup messages={messages} />);
+    const container = await mount(<ToolMessageGroup messages={messages} />);
 
     expect(container.textContent).toContain("2 个动作");
     expect(container.textContent).not.toContain("1 个动作");
     expect(container.textContent).not.toMatch(/已完成\s*\d+\s*\/\s*\d+/);
   });
 
-  it("expands activity phases independently instead of opening every phase", () => {
+  it("expands activity phases independently instead of opening every phase", async () => {
     const plan = {
       phases: [
         { id: "version", title: "确认版本" },
@@ -479,27 +457,28 @@ describe("ToolMessageGroup", () => {
 
     // Finished group without a prior open-turn cycle stays expanded so users
     // can still inspect the trail; do not click header (that would collapse it).
-    const container = mount(<ToolMessageGroup messages={messages} />);
+    const container = await mount(<ToolMessageGroup messages={messages} />);
 
     expect(container.textContent).toContain("确认版本");
-    // Header summary keeps human action titles for control (not hidden API names).
-    expect(container.textContent).toContain("确认当前发布版本");
+    // Compact header no longer lists action titles; they live in phase bodies.
 
     const phaseButtons = Array.from(
       container.querySelectorAll(".tr-phase-row")
     ) as HTMLButtonElement[];
     expect(phaseButtons).toHaveLength(4);
 
-    act(() => {
+    await act(async () => {
       phaseButtons[0]?.click();
     });
+    // Action titles surface inside the expanded phase body, not the header.
+    expect(container.textContent).toContain("确认当前发布版本");
     // Only first phase body expands; others stay collapsed.
     const phases = Array.from(container.querySelectorAll(".tr-phase"));
     expect(phases[0]?.className).toContain("tr-phase--expanded");
     expect(phases[1]?.className).not.toContain("tr-phase--expanded");
   });
 
-  it("stays expanded while canCollapse is false even after tools settle, then collapses at turn end", () => {
+  it("stays expanded while canCollapse is false even after tools settle, then collapses at turn end", async () => {
     const settledMessage = {
       id: "tool-settled",
       role: "tool",
@@ -509,7 +488,7 @@ describe("ToolMessageGroup", () => {
       content: JSON.stringify({ command: "git status -sb", stdout: "ok", exitCode: 0 }),
     };
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={[settledMessage]} canCollapse={false} />
     );
     // Tools done but turn still active → stay open.
@@ -519,18 +498,14 @@ describe("ToolMessageGroup", () => {
     expect(card?.className).toContain("success");
     expect(card?.className).not.toContain("running");
 
-    act(() => {
-      root?.render(
-        <ToolMessageGroup messages={[settledMessage]} canCollapse />
-      );
-    });
+    await rerender(<ToolMessageGroup messages={[settledMessage]} canCollapse />);
     // Final reply ready (canCollapse) → auto-collapse.
     expect(container.querySelector(".tool-msg-row")?.className).toContain(
       "is-collapsed"
     );
   });
 
-  it("auto-opens a running named phase action and hides details after turn ends", () => {
+  it("auto-opens a running named phase action and hides details after turn ends", async () => {
     const plan = {
       phases: [
         { id: "dispatch", title: "分派执行" },
@@ -552,19 +527,17 @@ describe("ToolMessageGroup", () => {
       content: "{\"ok\":true}",
     };
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={[runningMessage]} canCollapse={false} />
     );
     expect(container.textContent).toContain("通知执行代理");
 
-    act(() => {
-      root?.render(
-        <ToolMessageGroup
-          messages={[{ ...runningMessage, isStreaming: false }]}
-          canCollapse
-        />
-      );
-    });
+    await rerender(
+      <ToolMessageGroup
+        messages={[{ ...runningMessage, isStreaming: false }]}
+        canCollapse
+      />
+    );
     // canCollapse true → collapse; details (action trail / body) stay hidden.
     expect(container.querySelector(".tool-msg-row")?.className).toContain(
       "is-collapsed"
@@ -574,7 +547,7 @@ describe("ToolMessageGroup", () => {
     expect(container.textContent).not.toMatch(/已完成\s*\d+\s*\/\s*\d+/);
   });
 
-  it("keeps a mixed-failure settled card neutral while preserving failed action status", () => {
+  it("keeps a mixed-failure settled card neutral while preserving failed action status", async () => {
     const failedThenRecovered = [
       {
         id: "tool-fail",
@@ -594,7 +567,7 @@ describe("ToolMessageGroup", () => {
       },
     ];
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={failedThenRecovered} canCollapse />
     );
     const card = container.querySelector(".tool-msg-row");
@@ -605,16 +578,164 @@ describe("ToolMessageGroup", () => {
     expect(card?.className).toContain("is-collapsed");
     // Expand to inspect the mixed trail.
     const header = container.querySelector(".tr-header") as HTMLButtonElement | null;
-    act(() => {
+    await act(async () => {
       header?.click();
     });
-    const failedAction = container.querySelector(".tr-action--failed");
+    const failedAction = container.querySelector(".tool-call-row--failed");
     expect(failedAction).toBeTruthy();
-    const successAction = container.querySelector(".tr-action--success");
+    const successAction = container.querySelector(".tool-call-row--success");
     expect(successAction).toBeTruthy();
   });
 
-  it("keeps the card failed when the last settled action fails", () => {
+  it("renders ordinary groups as flat expandable rows with a compact header", async () => {
+    const messages = [
+      {
+        id: "call-1",
+        role: "tool",
+        toolName: "readFile",
+        toolPayload: { input: { path: "README.md" }, startedAt: 1000, finishedAt: 1450 },
+        content: "{\"ok\":true}",
+      },
+      {
+        id: "call-2",
+        role: "tool",
+        toolName: "execShell",
+        isStreaming: true,
+        toolPayload: { input: { cmd: "bun test" } },
+        content: "{\"ok\":true}",
+      },
+    ];
+
+    const container = await mount(
+      <ToolMessageGroup messages={messages} canCollapse={false} />
+    );
+
+    // Compact header: total + running counts (duration badge stays real-only).
+    expect(container.textContent).toContain("2 个调用");
+    expect(container.textContent).toContain("1 个运行中");
+    // Ordinary calls render as flat rows, one per call.
+    const rows = container.querySelectorAll('[data-hook="messages-esc-tool-call-row"]');
+    expect(rows.length).toBe(2);
+    const headers = Array.from(
+      container.querySelectorAll(".tool-call-row__header")
+    ) as HTMLButtonElement[];
+    // Native buttons keep keyboard/ARIA semantics; settled row folded, running row open.
+    expect(
+      headers.every(
+        (button) =>
+          button.tagName === "BUTTON" && button.getAttribute("type") === "button"
+      )
+    ).toBe(true);
+    expect(headers[0]?.getAttribute("aria-expanded")).toBe("false");
+    expect(headers[1]?.getAttribute("aria-expanded")).toBe("true");
+    // Per-row real duration from payload timestamps; args detail, no raw API names.
+    expect(container.textContent).toContain("450ms");
+    expect(container.textContent).toContain("README.md");
+    expect(container.textContent).not.toContain("readFile");
+  });
+
+  it("keeps artifact tool cards reachable instead of disabled flat rows", async () => {
+    // Neither message carries an activity signal → plain fallback body.
+    const messages = [
+      {
+        id: "todo-1",
+        role: "tool",
+        toolName: "setTodoList",
+        toolPayload: { input: { todos: [{ id: "t1", content: "调研", status: "in_progress" }] } },
+        content: JSON.stringify({ todos: [{ id: "t1", content: "调研", status: "in_progress" }] }),
+      },
+      {
+        id: "agents-1",
+        role: "tool",
+        toolName: "listAgents",
+        content: "[]",
+      },
+    ];
+
+    const container = await mount(
+      <ToolMessageGroup messages={messages} canCollapse={false} />
+    );
+
+    // Ordinary tool renders as an expandable row…
+    const row = container.querySelector('[data-hook="messages-esc-tool-call-row"]');
+    expect(row).toBeTruthy();
+    expect(row?.className).toContain("tool-call-row--success");
+    // …while the artifact tool keeps its dedicated card slot, always mounted
+    // (never behind a disabled toggle that would hide TodoCard after settle).
+    expect(container.querySelector(".tool-group__item")).toBeTruthy();
+    expect(container.querySelector(".tool-call-row__header[disabled]")).toBeNull();
+    expect(container.textContent).not.toContain("setTodoList");
+  });
+
+  it("keeps artifact signals on dedicated cards inside the flat trajectory", async () => {
+    const messages = [
+      {
+        id: "diff-1",
+        role: "tool",
+        toolName: "applyDiff",
+        metadata: { activity: { action: { title: "应用补丁" } } },
+        toolPayload: { input: { path: "a.ts" } },
+        content: JSON.stringify({ diff: "--- a.ts\n+++ b.ts" }),
+      },
+      {
+        id: "read-1",
+        role: "tool",
+        toolName: "readFile",
+        isStreaming: true,
+        toolPayload: { input: { path: "README.md" } },
+        content: "{\"ok\":true}",
+      },
+    ];
+
+    const container = await mount(
+      <ToolMessageGroup messages={messages} canCollapse={false} />
+    );
+
+    // applyDiff (artifact) → dedicated card slot; readFile (row) → flat row.
+    expect(container.querySelectorAll(".tool-group__item")).toHaveLength(1);
+    expect(container.querySelectorAll('[data-hook="messages-esc-tool-call-row"]')).toHaveLength(1);
+    expect(container.querySelector('[data-hook="messages-esc-tool-call-row"]')?.className).toContain(
+      "tool-call-row--running"
+    );
+    // No disabled flat rows anywhere — artifact bodies stay reachable.
+    expect(container.querySelector(".tool-call-row__header[disabled]")).toBeNull();
+    // Card inner content is ToolMessageContent's job (mocked to null in this
+    // file); the always-mounted .tool-group__item slot above is the reachability
+    // contract this test pins.
+  });
+
+  it("never lets a hidden setTodoList drive the header duration badge", async () => {
+    const hiddenTodo = {
+      id: "todo-hidden",
+      role: "tool",
+      toolName: "setTodoList",
+      toolPayload: { startedAt: 1000, finishedAt: 9000 },
+      content: "{\"todos\":[]}",
+    };
+    const agents = { id: "agents-h", role: "tool", toolName: "listAgents", content: "[]" };
+
+    // Conversation todo disabled → setTodoList is invisible everywhere,
+    // including the trailing duration badge.
+    const hidden = await mount(
+      <ToolMessageGroup
+        messages={[hiddenTodo, agents]}
+        canCollapse={false}
+        conversationTodoEnabled={false}
+      />
+    );
+    expect(hidden.querySelector(".tool-group__item")).toBeNull();
+    expect(hidden.querySelector('[data-hook="messages-esc-tr-duration"]')).toBeNull();
+
+    // Visible again → the real settled span shows up on the badge.
+    const visible = await mount(
+      <ToolMessageGroup messages={[hiddenTodo, agents]} canCollapse={false} />
+    );
+    expect(visible.querySelector('[data-hook="messages-esc-tr-duration"]')?.textContent).toBe(
+      "8.0s"
+    );
+  });
+
+  it("keeps the card failed when the last settled action fails", async () => {
     const successThenFailed = [
       {
         id: "tool-ok-first",
@@ -633,7 +754,7 @@ describe("ToolMessageGroup", () => {
       },
     ];
 
-    const container = mount(
+    const container = await mount(
       <ToolMessageGroup messages={successThenFailed} canCollapse />
     );
     const card = container.querySelector(".tool-msg-row");

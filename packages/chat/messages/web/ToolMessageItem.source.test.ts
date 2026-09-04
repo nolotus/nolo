@@ -52,6 +52,30 @@ describe("ToolMessageItem source contract", () => {
     expect(stylesSource).not.toContain("tool-running-pulse");
   });
 
+  test("status dots follow the Astryx filled-circle anatomy and completed rows show a duration", () => {
+    // Terminal states render as filled colored dots with a white glyph.
+    expect(toolMessageSharedSource).toContain("statusDot");
+    expect(toolMessageSharedSource).toContain("formatToolDuration");
+    expect(toolMessageSharedSource).toContain("finishedAt");
+    // Header rows carry a monospace duration badge (web anchor: messages-esc-tr-duration).
+    expect(toolMessageItemSource).toContain("messages-esc-tr-duration");
+    expect(toolMessageItemSource).toContain("formatToolDuration");
+    expect(toolMessageItemSource).toContain('statusStr === "success"');
+  });
+
+  test("group headers share the Astryx surface: wrench count badge + duration", () => {
+    const groupSource = readFileSync(
+      new URL("./ToolMessageGroup.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(groupSource).toContain("messages-esc-tr-count-badge");
+    expect(groupSource).toContain("visibleToolCount");
+    expect(groupSource).toContain("messages-esc-tr-duration");
+    // Group rows share the same StatusIcon (15%-tint dot) as tool rows.
+    expect(groupSource).toContain("StatusIcon");
+    expect(readFileSync(new URL("./toolMessageStyles.ts", import.meta.url), "utf8")).toContain("countBadge");
+  });
+
   test("completed tool rows auto-collapse so only the active row stays open", () => {
     expect(toolMessageItemSource).toContain('statusStr === "success"');
     expect(toolMessageItemSource).toContain("userCollapsedOverrideRef");

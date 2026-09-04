@@ -31,7 +31,7 @@ import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { messagesStyles as styles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles, toolMessageStatusStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
-import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
+import { safeParse, StatusIcon, withLiteralClass, formatToolDuration } from "./toolMessageShared";
 import {
   buildRunStreamingAgentHandoffPresentation,
   normalizeToolDisplaySummary,
@@ -105,6 +105,13 @@ export const ToolMessageItem = memo(
         : isError
           ? "failed"
           : "success";
+    // Astryx-style trailing duration badge; only terminal success shows it.
+    const durationText = statusStr === "success" ? formatToolDuration(toolPayload) : null;
+    // Failure detail for the status-dot tooltip (Astryx echoes errorMessage on the icon).
+    const errorMessageText =
+      toolPayload?.error?.message ||
+      (typeof rawData?.error === "string" ? rawData.error : rawData?.error?.message) ||
+      undefined;
 
     const toolRunId = toolPayload?.toolRunId;
     const activeRun = useToolRunById(toolRunId ?? "");
@@ -323,9 +330,14 @@ export const ToolMessageItem = memo(
               <div  {...withLiteralClass("tr-main", toolStyles.main)}>
                 <div
                   {...withLiteralClass(`tr-icon ${statusStr}`, toolStyles.icon, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.icon)}>
-                  <StatusIcon status={statusStr} toolName={toolName} />
+                  <StatusIcon status={statusStr} toolName={toolName} errorMessage={errorMessageText} />
                 </div>
                 <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.summary)}>{handoff.summary}</span>
+                {!!durationText && (
+                  <span data-hook="messages-esc-tr-duration" {...withLiteralClass("tr-duration", toolStyles.duration)}>
+                    {durationText}
+                  </span>
+                )}
               </div>
               <div  aria-hidden="true" data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolStyles.chevron)}>
                 {collapsed ? (
@@ -416,9 +428,14 @@ export const ToolMessageItem = memo(
               <div  {...withLiteralClass("tr-main", toolStyles.main)}>
                 <div
                   {...withLiteralClass(`tr-icon ${statusStr}`, toolStyles.icon, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.icon)}>
-                  <StatusIcon status={statusStr} toolName={toolName} />
+                  <StatusIcon status={statusStr} toolName={toolName} errorMessage={errorMessageText} />
                 </div>
                 <span  data-hook="messages-esc-tr-summary" {...withLiteralClass("tr-summary u-truncate", toolStyles.truncate, toolStyles.summary, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.summary)}>{displaySummary}</span>
+                {!!durationText && (
+                  <span data-hook="messages-esc-tr-duration" {...withLiteralClass("tr-duration", toolStyles.duration)}>
+                    {durationText}
+                  </span>
+                )}
               </div>
               <div  aria-hidden="true" data-hook="messages-esc-tr-chevron" {...withLiteralClass("tr-chevron", toolStyles.chevron)}>
                 {collapsed ? (

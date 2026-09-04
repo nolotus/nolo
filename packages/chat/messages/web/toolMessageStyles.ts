@@ -76,6 +76,62 @@ export const toolMessageStyles = stylex.create({
     fontSize: 14,
     marginTop: 1,
   },
+  // Astryx ChatToolCalls status dot: 15%-tinted status-colored circle behind a
+  // status-colored glyph. Tone comes from the icon-* color class on the same
+  // element; the tint uses currentColor at 0.15 opacity.
+  statusDot: {
+    position: "relative",
+    width: 16,
+    height: 16,
+    borderRadius: "50%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  statusDotBg: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: "inherit",
+    backgroundColor: "currentColor",
+    opacity: 0.15,
+  },
+  statusDotGlyph: {
+    position: "relative",
+  },
+  // Astryx collapsed-surface count badge: wrench glyph + tool count, shared
+  // with the RN ToolMessageGroup header.
+  countBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: 9,
+    paddingTop: 2,
+    paddingRight: 6,
+    paddingBottom: 2,
+    paddingLeft: 6,
+    backgroundColor: "var(--backgroundSecondary, rgba(127,127,127,0.08))",
+    flexShrink: 0,
+    color: "var(--textTertiary)",
+  },
+  countText: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--textSecondary)",
+  },
+  // Trailing duration badge on completed rows, e.g. `1.2s` / `850ms`.
+  duration: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 11,
+    color: "var(--textQuaternary)",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    paddingTop: 2,
+  },
   summary: {
     fontSize: "var(--fontSize-sm)",
     fontWeight: 500,

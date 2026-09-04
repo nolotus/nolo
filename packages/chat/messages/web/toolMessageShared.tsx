@@ -6,8 +6,10 @@ import { messagesStyles } from "./messagesStyles";
 import {
   LuCheck,
   LuCircle,
-  LuCircleAlert,
-  LuTerminal,
+  LuClock,
+  LuMinus,
+  LuWrench,
+  LuX,
 } from "react-icons/lu";
 import {
   previewToolText,
@@ -49,15 +51,74 @@ export const safeParse = (content: any) => {
 export const StatusIcon = ({
   status,
   toolName,
+  errorMessage,
 }: {
   status: string;
   toolName?: string;
+  /** Echoed as a native tooltip on the failed dot (Astryx ChatToolCalls behavior). */
+  errorMessage?: string;
 }) => {
-  if (status === "running") return <LuCircle {...withLiteralClass("icon-primary", messagesStyles.iconPrimary)} aria-hidden="true" />;
-  if (status === "repairing") return <LuCircle {...withLiteralClass("icon-warning", messagesStyles.iconWarning)} aria-hidden="true" />;
-  if (status === "failed") return <LuCircleAlert {...withLiteralClass("icon-error", messagesStyles.iconError)} aria-hidden="true" />;
-  if (status === "pending") return <LuCircle {...withLiteralClass("icon-muted", messagesStyles.iconMuted)} aria-hidden="true" />;
-  return <LuCheck {...withLiteralClass("icon-success", messagesStyles.iconSuccess)} aria-hidden="true" />;
+  // Astryx ChatToolCalls anatomy (read from @astryxdesign/core source):
+  // terminal states render as a 15%-tinted status-colored circle behind a
+  // status-colored glyph; running/pending stay as static outline icons —
+  // spinning loaders are an explicit no-go for tool rows (see source
+  // contract tests on both web and RN).
+  if (status === "running")
+    return <LuCircle {...withLiteralClass("icon-primary", messagesStyles.iconPrimary)} aria-hidden="true" />;
+  if (status === "pending")
+    return <LuClock {...withLiteralClass("icon-muted", messagesStyles.iconMuted)} aria-hidden="true" />;
+
+  const isFailed = status === "failed";
+  const isRepairing = status === "repairing";
+  // Cancelled settles neutral-muted: neither success nor failure.
+  const isCancelled = status === "cancelled";
+  const toneClass = isFailed
+    ? "icon-error"
+    : isRepairing
+      ? "icon-warning"
+      : isCancelled
+        ? "icon-muted"
+        : "icon-success";
+  const toneStyle = isFailed
+    ? messagesStyles.iconError
+    : isRepairing
+      ? messagesStyles.iconWarning
+      : isCancelled
+        ? messagesStyles.iconMuted
+        : messagesStyles.iconSuccess;
+  const Glyph = isFailed ? LuX : isRepairing ? LuWrench : isCancelled ? LuMinus : LuCheck;
+  return (
+    <span
+      {...withLiteralClass(`status-dot ${toneClass}`, toolMessageStyles.statusDot, toneStyle)}
+      title={isFailed ? errorMessage : undefined}
+      aria-hidden="true"
+    >
+      <span {...stylex.props(toolMessageStyles.statusDotBg)} aria-hidden="true" />
+      <Glyph
+        size={11}
+        color="currentColor"
+        strokeWidth={isFailed ? 3 : 2.5}
+        {...stylex.props(toolMessageStyles.statusDotGlyph)}
+      />
+    </span>
+  );
+};
+
+/**
+ * Short human duration for completed tool rows (Astryx-style trailing badge):
+ * `850ms` under a second, else `1.2s`. Returns null when the payload lacks
+ * timing data or the numbers are nonsensical.
+ */
+export const formatToolDuration = (
+  payload?: { startedAt?: number; finishedAt?: number } | null
+): string | null => {
+  const startedAt = payload?.startedAt;
+  const finishedAt = payload?.finishedAt;
+  if (typeof startedAt !== "number" || typeof finishedAt !== "number") return null;
+  const ms = finishedAt - startedAt;
+  if (!(ms > 0)) return null;
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 };
 
 /**
