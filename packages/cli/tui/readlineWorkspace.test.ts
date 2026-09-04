@@ -4736,6 +4736,35 @@ describe("terminal attention — input-required wiring through the workspace", (
     await Promise.race([wp, Bun.sleep(3000)]);
   });
 
+  test("session teardown clears progress when the gate is still waiting", async () => {
+    const { input, output, stdoutText } = createAttentionTtyPair();
+    let resolveGateStarted!: () => void;
+    const gateStarted = new Promise<void>((resolve) => {
+      resolveGateStarted = resolve;
+    });
+    const wp = startTuiWorkspace({
+      scriptDir: "",
+      input,
+      output,
+      env: { WT_SESSION: "test-session", NOLO_CLI_GIT_STATUS: "0" },
+      agentRunner: async (opt) => {
+        resolveGateStarted();
+        await opt.actionGateHandler!(attentionConfirmGate);
+        return { exitCode: 0, dialogId: "test-dialog" };
+      },
+    });
+
+    input.write("go\r");
+    await gateStarted;
+    expect(
+      await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_INDETERMINATE)),
+    ).toBe(true);
+    input.end();
+
+    expect(await waitUntilAttention(() => stdoutText().includes(ATTENTION_OSC_CLEAR))).toBe(true);
+    await expect(wp).resolves.toBeUndefined();
+  });
+
   test("permission gate in Windows Terminal: user cancelling also clears the progress", async () => {
     const { input, output, stdoutText } = createAttentionTtyPair();
     let gateAnswered = false;

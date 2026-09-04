@@ -20,7 +20,10 @@ import { spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
-import { runWithInputRequiredAttention } from "./terminalNotification";
+import {
+  clearTerminalAttentionProgress,
+  runWithInputRequiredAttention,
+} from "./terminalNotification";
 import {
   createActivityIndicator,
 } from "./activityIndicator";
@@ -1131,6 +1134,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         resizeTimer = null;
       }
       clearSelection();
+      // Session teardown is the last-resort owner of Windows Terminal progress
+      // cleanup. It is intentionally best-effort and idempotent: an interaction
+      // normally clears in runWithInputRequiredAttention's finally, while this
+      // path also covers teardown racing an unsettled interaction.
+      clearTerminalAttentionProgress({ output, env: effectiveEnv });
       // run 停靠区的 timer 跨 turn 存活，只有会话退出才该停——否则 /exit 之后
       // 它还在往一个已经不归自己管的终端上重绘。
       runRegistryPoller.dispose();
@@ -1140,6 +1148,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       clearCollapsedPasteStore(pasteStore);
       resizeTarget.off?.("resize", onResize);
       input.off("data", onData);
+      input.off("end", finish);
+      input.off("close", finish);
       onData.destroy();
       output.write("\x1b[?2004l");
       output.write("\x1b[?25h\x1b[?2026l");
@@ -1991,6 +2001,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     composerDecoderDrain = () => onData.destroy();
     try {
       input.on("data", onData);
+      // Input shutdown can race an unsettled dialog/gate. Route stream end
+      // through the same idempotent teardown so terminal progress is cleared
+      // even when the interaction promise never gets a chance to settle.
+      input.once("end", finish);
+      input.once("close", finish);
       fixedInput.repaint(buffer, cursorPos);
       refreshGitStatus();
       await new Promise<void>((resolve) => {
