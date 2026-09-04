@@ -20,6 +20,9 @@ import AgentForm from "ai/agent/web/AgentForm";
 import { resolveAvatarUrl } from "ai/agent/avatarUtils";
 import { resolveMessageAgentKey } from "../messageAgent";
 import { selectLastAssistantMessage } from "../messageSlice";
+import { matchContextualFragment } from "../contextualFragment";
+import { extractTextFromContent } from "../extractTextFromContent";
+import ContextualStatusRow from "./ContextualStatusRow";
 
 export type MessageItemProps = {
   message: any;
@@ -177,6 +180,12 @@ export const MessageItem = memo(
     // 自动迁移 base64 图片为远程文件 URL（只读模式跳过）
     useBase64Migration(readOnly ? null : message);
 
+    // ContextualFragment：系统注入 user role 的上下文片段（后台 run 终态
+    // 唤醒等）不进用户气泡，渲染为紧凑状态行（契约见 ../contextualFragment.ts）。
+    // 匹配放在 isSelf/isRobot 分支前，且所有 hook 已先执行，无条件调用。
+    const contentText = extractTextFromContent(content);
+    const fragmentKind = matchContextualFragment(contentText);
+
     const actionsNode =
       !readOnly && enableActions ? (
         <MessageActions
@@ -194,6 +203,11 @@ export const MessageItem = memo(
     const confirmBarNode = isRobot && !readOnly ? (
       <MessageToolConfirmBar messageId={message?.id} isRobot={isRobot} />
     ) : undefined;
+
+    // 命中片段 → 折叠状态行，不走 MessageLayout（无头像/气泡/操作栏）。
+    if (fragmentKind) {
+      return <ContextualStatusRow text={contentText} kind={fragmentKind} />;
+    }
 
     return (
       <>

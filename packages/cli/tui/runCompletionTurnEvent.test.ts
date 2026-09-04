@@ -240,10 +240,10 @@ describe("subAgent terminal event & chat queue loop", () => {
     expect(ephShape.dialogId).toBeUndefined();
 
     const text = event.text;
-    expect(text).toContain("runId: run-ephemeral");
-    expect(text).toContain("ephemeral: true");
-    expect(text).toContain("runId: run-timeout");
-    expect(text).toContain("status: timeout");
+    expect(text).toContain('runId="run-ephemeral"');
+    expect(text).toContain('ephemeral="true"');
+    expect(text).toContain('runId="run-timeout"');
+    expect(text).toContain('status="timeout"');
   });
 
   test("7. 普通 status 不 ack、不抑制 wake；wait:true 消费确实 ack 且不重复 wake", async () => {
@@ -931,8 +931,8 @@ describe("subAgent terminal event & chat queue loop", () => {
       const ev = executedTurns[0]?.event as ChildRunCompletedTurnEvent;
       expect(ev.runs).toHaveLength(1);
       expect(ev.runs[0]?.runId).toBe("run-p2");
-      expect(ev.text).toContain("runId: run-p2");
-      expect(ev.text).not.toContain("runId: run-p1");
+      expect(ev.text).toContain('runId="run-p2"');
+      expect(ev.text).not.toContain('runId="run-p1"');
       expect(watcher.isAcknowledged("run-p1")).toBe(true);
       expect(watcher.isAcknowledged("run-p2")).toBe(true);
     } finally {

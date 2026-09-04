@@ -4267,7 +4267,8 @@ describe("run completion wake (TUI 终态唤醒)", () => {
       releaseSecondTurn!();
       await waitFor(() => turnCount === 3);
       expect(turnsProcessed[2]).toContain("run-wake-1");
-      expect(turnsProcessed[2]).toContain("终态");
+      // 标记化后 wake 文案以 ContextualFragment 标记包裹。
+      expect(turnsProcessed[2]).toContain("<background_run_completion");
       expect(turnsProcessed[2]).toContain("done");
 
       input.write("/exit\r");
@@ -4391,7 +4392,8 @@ describe("run completion wake (TUI 终态唤醒)", () => {
       await writeRecord("done");
       await waitFor(() => turnCount === 3);
       expect(turnsProcessed[2]).toContain("run-wake-2");
-      expect(turnsProcessed[2]).toContain("终态");
+      // 标记化后 wake 文案以 ContextualFragment 标记包裹。
+      expect(turnsProcessed[2]).toContain("<background_run_completion");
 
       input.write("/exit\r");
       input.end();

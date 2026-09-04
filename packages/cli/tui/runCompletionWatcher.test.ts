@@ -14,12 +14,17 @@ import {
   filterUnclaimedChildRuns,
   buildWakeMessage,
   buildWakeDisplayText,
+  WAKE_TOTAL_TOKEN_BUDGET,
 } from "./runCompletionWatcher";
+import { matchContextualFragment } from "../../chat/messages/contextualFragment";
+import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import type { ChildRunCompletedTurnEvent, InternalTurnEvent } from "core/chat/internalTurnEvent";
 
 const T0 = 1_700_000_000_000;
 
-function record(over: Partial<RunRecord> & { runId: string }): RunRecord {
+function record(
+  over: Partial<RunRecord> & { runId: string; error?: string }
+): RunRecord {
   return {
     agentKey: "agent-user-worker",
     agentName: "Worker",
@@ -79,12 +84,19 @@ describe("createRunCompletionWatcher", () => {
       parentDialogId: "dlg-1",
     });
     const text = event.text;
-    expect(text).toContain("runId: run-a");
-    expect(text).toContain("status: done");
-    expect(text).toContain("agent: Worker");
-    expect(text).toContain("childDialogId: child-dialog-1");
+    // ContextualFragment 标记格式：以 <background_run_completion> 精确包裹。
+    expect(text.startsWith("<background_run_completion")).toBe(true);
+    expect(text.endsWith("</background_run_completion>")).toBe(true);
+    expect(matchContextualFragment(text)).toBe("background_run_completion");
+    expect(text).toContain('runId="run-a"');
+    expect(text).toContain('status="done"');
+    expect(text).toContain('agent="Worker"');
+    expect(text).toContain('childDialogId="child-dialog-1"');
     // 成功完成不报 exitCode：诊断字段只在失败时才值得占上下文。
     expect(text).not.toContain("exitCode");
+    // 标记化后不再有自辩教学段。
+    expect(text).not.toContain("以上是你通过 startAgentRun");
+    expect(text).not.toContain("系统内部事件，不是用户消息");
   });
 
   test("失败终态仍带 exitCode 与活动计数（诊断信息不被瘦身掉）", () => {
@@ -104,7 +116,7 @@ describe("createRunCompletionWatcher", () => {
       }),
     ]);
     const event = h.wakes[0] as ChildRunCompletedTurnEvent;
-    expect(event.text).toContain("exitCode: 1");
+    expect(event.text).toContain('exitCode="1"');
     expect(event.text).toContain("3 tool calls");
   });
 
@@ -233,7 +245,7 @@ describe("createRunCompletionWatcher", () => {
     const event = h.wakes[0] as ChildRunCompletedTurnEvent;
     expect(event.runs).toHaveLength(2);
     expect(event.runs.map((r) => r.runId)).toEqual(["run-1", "run-2"]);
-    expect(event.text).toContain("2 条");
+    expect(event.text).toContain('count="2"');
   });
 
   test("ephemeral run 提供 fallback 说明，不崩溃", () => {
@@ -248,7 +260,63 @@ describe("createRunCompletionWatcher", () => {
     expect(h.wakes).toHaveLength(1);
     const event = h.wakes[0] as ChildRunCompletedTurnEvent;
     expect(event.runs[0]?.ephemeral).toBe(true);
-    expect(event.text).toContain("ephemeral: true");
+    expect(event.text).toContain('ephemeral="true"');
+  });
+
+  test("token 上限：超长错误负载被截断，整条消息不超总预算", () => {
+    const h = setup();
+    // 带行号的长错误：尾部内容与截断后的头部不重叠，可断言「尾巴没进来」。
+    const hugeError = Array.from(
+      { length: 2000 },
+      (_, i) => `line-${i}: detailed failure trace`
+    ).join("\n");
+    h.watcher.observe([record({ runId: "run-huge" })]);
+    h.watcher.observe([
+      record({
+        runId: "run-huge",
+        status: "failed",
+        exitCode: 1,
+        error: hugeError,
+      }),
+    ]);
+    const event = h.wakes[0] as ChildRunCompletedTurnEvent;
+    expect(event.text).toContain("error: ");
+    // 整条消息（骨架 + 截断后的错误负载）不超总预算。
+    expect(estimateTokenCount(event.text)).toBeLessThanOrEqual(
+      WAKE_TOTAL_TOKEN_BUDGET
+    );
+    // 错误尾巴确实被截掉，不整段进上下文。
+    expect(event.text).not.toContain(hugeError.slice(-100));
+    expect(matchContextualFragment(event.text)).toBe(
+      "background_run_completion"
+    );
+  });
+
+  test("多条失败均摊错误预算，总量仍不超总 token 上限", () => {
+    const h = setup();
+    const hugeError = "错".repeat(20_000);
+    h.watcher.observe([
+      record({ runId: "run-f1" }),
+      record({ runId: "run-f2" }),
+      record({ runId: "run-f3" }),
+      record({ runId: "run-f4" }),
+      record({ runId: "run-f5" }),
+    ]);
+    h.watcher.observe(
+      [1, 2, 3, 4, 5].map((i) =>
+        record({
+          runId: `run-f${i}`,
+          status: "failed",
+          exitCode: 1,
+          error: hugeError,
+        })
+      )
+    );
+    const event = h.wakes[0] as ChildRunCompletedTurnEvent;
+    expect(event.text).toContain('count="5"');
+    expect(estimateTokenCount(event.text)).toBeLessThanOrEqual(
+      WAKE_TOTAL_TOKEN_BUDGET
+    );
   });
 
   test("切走 dialog 期间 run 完成，切回来仍能唤醒（H1 回归）", () => {
@@ -323,10 +391,10 @@ describe("filterUnclaimedChildRuns (投递时刻 ack 复核)", () => {
 
       // 验证重建后的文案仅包含 run-3
       const text = buildWakeMessage(res.remainingRuns, T0 + 10_000);
-      expect(text).toContain("1 条后台 run 已到达终态");
-      expect(text).toContain("runId: run-3");
-      expect(text).not.toContain("runId: run-1");
-      expect(text).not.toContain("runId: run-2");
+      expect(text).toContain('count="1"');
+      expect(text).toContain('runId="run-3"');
+      expect(text).not.toContain('runId="run-1"');
+      expect(text).not.toContain('runId="run-2"');
 
       const displayText = buildWakeDisplayText(res.remainingRuns, T0 + 10_000);
       expect(displayText).toContain("1 条后台 run 已完成");

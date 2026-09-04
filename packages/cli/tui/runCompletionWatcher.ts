@@ -32,6 +32,7 @@ import {
   isAgentRunTerminalStatus,
   resolveRunLabel,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
+import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import {
   normalizeRunCompletionShape,
   type AgentRunCompletionShape,
@@ -109,21 +110,157 @@ export function describeRun(
   return lines;
 }
 
+/** 失败 run 错误负载的单条 token 预算（plan：500 token 近似）。 */
+export const WAKE_ERROR_PAYLOAD_TOKEN_BUDGET = 500;
+/** 整条唤醒消息的 token 上限：多条失败时均摊，防失控日志刷爆上下文。 */
+export const WAKE_TOTAL_TOKEN_BUDGET = 2000;
+
+/** XML 属性转义（agent 名/runId 理论上可能带引号或尖括号）。 */
+const escapeXmlAttribute = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * 按中文感知 token 估算把文本截断到预算内（二分前缀长度）。
+ * 估算沿用 estimateContextTokens 的唯一实现 ai/context/tokenUtils。
+ */
+export function clipTextToTokenBudget(
+  text: string,
+  budgetTokens: number
+): string {
+  if (!text || budgetTokens <= 0) return "";
+  if (estimateTokenCount(text) <= budgetTokens) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (estimateTokenCount(text.slice(0, mid)) <= budgetTokens) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return text.slice(0, lo);
+}
+
+/** 失败 run 的错误/备注负载，截断到给定 token 预算。 */
+function failureErrorPayload(
+  record: RunRecord | AgentRunCompletionShape,
+  budgetTokens: number
+): string {
+  if (budgetTokens <= 0) return "";
+  const recordError =
+    "error" in record && typeof record.error === "string" ? record.error : undefined;
+  const raw =
+    typeof record.note === "string" && record.note.trim()
+      ? record.note
+      : typeof recordError === "string" && recordError.trim()
+        ? recordError
+        : "";
+  // 先按字符粗剪封顶，避免超长输入拖慢二分。
+  return clipTextToTokenBudget(clipText(raw, 2000), budgetTokens);
+}
+
+function buildRunElement(
+  record: RunRecord | AgentRunCompletionShape,
+  nowMs: number,
+  errorBudgetTokens: number
+): string {
+  const attrs = [
+    `runId="${escapeXmlAttribute(String(record.runId))}"`,
+    `agent="${escapeXmlAttribute(resolveRunLabel(record as any))}"`,
+    `status="${escapeXmlAttribute(String(record.status))}"`,
+  ];
+  const verbose = isFailureStatus(record.status);
+  if (verbose && typeof record.exitCode === "number") {
+    attrs.push(`exitCode="${record.exitCode}"`);
+  }
+  // 「结果去哪取」（ephemeral / childDialogId）任何状态都要给，否则模型会
+  // 去 readDialog 一个不存在的对话（同 describeRun 的取舍）。
+  if (record.ephemeral) {
+    attrs.push(`ephemeral="true"`);
+  } else if (record.dialogId) {
+    attrs.push(`childDialogId="${escapeXmlAttribute(record.dialogId)}"`);
+  } else {
+    attrs.push(`childDialogId="missing"`);
+  }
+  const duration = runDuration(record, nowMs);
+  if (duration) attrs.push(`duration="${escapeXmlAttribute(duration)}"`);
+  if (!verbose) {
+    // 成功 run 不报 exitCode / 活动计数；note 保留为属性（结果指针）。
+    const note =
+      typeof record.note === "string" && record.note.trim()
+        ? clipText(record.note, WAKE_NOTE_MAX_CHARS)
+        : "";
+    if (note) attrs.push(`note="${escapeXmlAttribute(note)}"`);
+    return `<run ${attrs.join(" ")} />`;
+  }
+  const body: string[] = [];
+  const errorText = failureErrorPayload(record, errorBudgetTokens);
+  if (errorText) body.push(`error: ${errorText}`);
+  const counters = record.activity?.counters;
+  if (
+    counters &&
+    typeof counters.toolCalls === "number" &&
+    typeof counters.llmCalls === "number" &&
+    typeof counters.fileEdits === "number"
+  ) {
+    body.push(
+      `activity: ${counters.toolCalls} tool calls · ${counters.llmCalls} llm calls · ${counters.fileEdits} edits`
+    );
+  }
+  if (body.length === 0) return `<run ${attrs.join(" ")} />`;
+  return `<run ${attrs.join(" ")}>\n${body.join("\n")}\n</run>`;
+}
+
+function renderWakeMessage(elements: string[], count: number): string {
+  return [
+    `<background_run_completion count="${count}">`,
+    ...elements,
+    `需要完整输出时: controlAgentRun(action: "status", runId, tailLines: 30)`,
+    `</background_run_completion>`,
+  ].join("\n");
+}
+
+/**
+ * 送进模型的 wake 摘要：ContextualFragment 标记格式（识别契约见
+ * chat/messages/contextualFragment.ts）。旧版尾部那段自辩教学文案已删——
+ * 处理纪律在 system prompt「多 Agent 编排」段，标记内只留一行取日志提示。
+ */
 export function buildWakeMessage(
   finished: (RunRecord | AgentRunCompletionShape)[],
   nowMs: number = Date.now()
 ): string {
-  const lines = [
-    `【后台 run 终态通知】你派出的 ${finished.length} 条后台 run 已到达终态：`,
-  ];
-  for (const record of finished) {
-    lines.push("", ...describeRun(record, nowMs));
-  }
-  lines.push(
-    "",
-    "以上是你通过 startAgentRun 派出的后台 run 的终态通知（系统内部事件，不是用户消息）。请阅读上面的摘要并自己决定下一步：汇总结果、继续后续工作、或向用户汇报结论。需要完整输出时用 controlAgentRun(action:\"status\", runId, tailLines:30) 拉取对应 run 的日志。"
+  const failedCount = finished.filter((r) => isFailureStatus(r.status)).length;
+  // 先量骨架（零错误负载），总预算扣除骨架后按失败条数均摊，单条不超过
+  // 500 token；每条再预留余量给 error: 前缀与换行等结构开销。
+  const skeleton = renderWakeMessage(
+    finished.map((r) => buildRunElement(r, nowMs, 0)),
+    finished.length
   );
-  return lines.join("\n");
+  const perErrorBudget =
+    failedCount > 0
+      ? Math.min(
+          WAKE_ERROR_PAYLOAD_TOKEN_BUDGET,
+          Math.max(
+            0,
+            Math.floor(
+              (WAKE_TOTAL_TOKEN_BUDGET - estimateTokenCount(skeleton)) /
+                failedCount -
+                8
+            ),
+          )
+        )
+      : 0;
+  return renderWakeMessage(
+    finished.map((r) =>
+      buildRunElement(r, nowMs, isFailureStatus(r.status) ? perErrorBudget : 0)
+    ),
+    finished.length
+  );
 }
 
 /**

@@ -62,6 +62,7 @@ import {
   buildWakeDisplayText,
   type RunCompletionWatcher,
 } from "./runCompletionWatcher";
+import { matchContextualFragment } from "../../chat/messages/contextualFragment";
 import {
   createTurnRequest,
   type ChildRunCompletedTurnEvent,
@@ -900,9 +901,12 @@ export async function runOneAgentTurn(
   // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
   // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
   // 气泡——否则每条 run 完成都在对话里伪造一条几百字的「用户消息」。
+  // 片段识别统一走 chat/messages/contextualFragment.ts 注册表：wake 文案
+  // 标记化后格式来源单一，这里不再自行猜文本形态。
   const isInternalEvent = req.event.kind !== "user";
+  const isContextualFragment = matchContextualFragment(message) !== null;
   const transcriptText =
-    req.event.kind === "child-run-completed"
+    isContextualFragment && req.event.kind === "child-run-completed"
       ? (req.event.displayText ?? req.event.text)
       : message;
   startTurn(ctx.history, isInternalEvent ? "assistant" : "user");
