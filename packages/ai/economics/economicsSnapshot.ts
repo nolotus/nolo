@@ -176,6 +176,21 @@ export function selectEconomicsPolicyVersion(
   );
 }
 
+function findNextPolicyBoundary(
+  policy: EconomicsPolicy,
+  at: number,
+  policies: readonly EconomicsPolicy[]
+): number | undefined {
+  const boundaries = [
+    policy.effectiveUntil,
+    ...policies
+      .filter((candidate) => candidate.id === policy.id)
+      .map((candidate) => candidate.effectiveFrom)
+      .filter((value): value is number => value !== undefined && value > at),
+  ].filter((value): value is number => value !== undefined && value > at);
+  return boundaries.length > 0 ? Math.min(...boundaries) : undefined;
+}
+
 export function resolveEconomicsSnapshot(
   input: EconomicsSourceInput,
   at: number,
@@ -190,7 +205,11 @@ export function resolveEconomicsSnapshot(
     period === "peak" ? policy.peakPriceMultiplier : policy.offPeakPriceMultiplier;
   const quotaMultiplier =
     period === "peak" ? policy.peakQuotaMultiplier : policy.offPeakQuotaMultiplier;
-  const changesAt = findNextEconomicsBoundary(policy, at);
+  const windowBoundary = findNextEconomicsBoundary(policy, at);
+  const policyBoundary = findNextPolicyBoundary(policy, at, policies);
+  const changesAt = [windowBoundary, policyBoundary]
+    .filter((value): value is number => value !== undefined)
+    .sort((a, b) => a - b)[0];
   return {
     source: sourceId,
     policyVersion: policy.version,

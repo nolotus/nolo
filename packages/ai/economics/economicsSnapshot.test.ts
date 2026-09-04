@@ -15,6 +15,7 @@ import {
 /** 2026-09-07 is a Monday; 2026-09-04 a Friday (verified via Date arithmetic below). */
 const utc = (day: number, hour = 0, minute = 0, ms = 0) => Date.UTC(2026, 8, day, hour, minute, 0, ms);
 
+const EFFECTIVE = Date.UTC(2026, 7, 16, 16, 0, 0);
 const deepseekInput = {
   provider: "deepseek",
   apiSource: "custom",
@@ -163,6 +164,20 @@ describe("different sources do not share policy state", () => {
   });
 });
 
+describe("effectiveFrom and source identity", () => {
+  test("DeepSeek policy is inactive before its documented start and active at it", () => {
+    expect(resolveEconomicsSnapshot(deepseekInput, EFFECTIVE - 1)).toBeNull();
+    expect(resolveEconomicsSnapshot(deepseekInput, EFFECTIVE)?.policyVersion).toBe(DEEPSEEK_API_POLICY.version);
+  });
+
+  test("platform and malformed or deceptive endpoints fail closed", () => {
+    expect(resolveEconomicsSnapshot({ ...deepseekInput, apiSource: "platform" }, EFFECTIVE)).toBeNull();
+    expect(resolveEconomicsSnapshot({ provider: "bigmodel", apiSource: "platform", customProviderUrl: "https://open.bigmodel.cn/api/coding/paas/v4" }, EFFECTIVE)).toBeNull();
+    expect(resolveEconomicsSnapshot({ provider: "deepseek", apiSource: "custom", customProviderUrl: "https://deepseek.com.evil.example/v1" }, EFFECTIVE)).toBeNull();
+    expect(resolveEconomicsSnapshot({ provider: "deepseek", apiSource: "custom", customProviderUrl: "not a url" }, EFFECTIVE)).toBeNull();
+  });
+});
+
 describe("unknown sources stay neutral", () => {
   test("no snapshot is produced without sufficient evidence", () => {
     expect(resolveEconomicsSnapshot({}, utc(7, 2))).toBeNull();
@@ -210,7 +225,15 @@ describe("versioned policy selection (effectiveFrom/effectiveUntil)", () => {
   });
 
   test("version selection is scoped per source id", () => {
-    // A deepseek version table must never answer for bigmodel and vice versa.
     expect(selectEconomicsPolicyVersion([basePolicy], "bigmodel_glm_coding_plan", T - 1)).toBeNull();
+  });
+
+  test("changesAt is the earliest policy or window boundary", () => {
+    const v1: EconomicsPolicy = { ...DEEPSEEK_API_POLICY, version: "v1", effectiveFrom: T - 10_000, effectiveUntil: T + 30 * 60_000 };
+    const v2: EconomicsPolicy = { ...DEEPSEEK_API_POLICY, version: "v2", effectiveFrom: T + 30 * 60_000 };
+    expect(resolveEconomicsSnapshot(deepseekInput, T + 15 * 60_000, [v1, v2])?.changesAt).toBe(T + 30 * 60_000);
+
+    const gapV2: EconomicsPolicy = { ...v2, effectiveFrom: T + 90 * 60_000 };
+    expect(resolveEconomicsSnapshot(deepseekInput, T + 15 * 60_000, [v1, gapV2])?.changesAt).toBe(T + 30 * 60_000);
   });
 });

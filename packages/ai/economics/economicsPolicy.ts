@@ -77,6 +77,7 @@ export const DEEPSEEK_API_POLICY: EconomicsPolicy = {
     { timezone: "UTC", weekdays: WEEKDAYS_MON_FRI, startMinute: 60, endMinute: 240 },
     { timezone: "UTC", weekdays: WEEKDAYS_MON_FRI, startMinute: 360, endMinute: 600 },
   ],
+  effectiveFrom: Date.UTC(2026, 7, 16, 16, 0, 0),
   peakPriceMultiplier: 2,
   offPeakPriceMultiplier: 1,
   sourceUrl: DEEPSEEK_PRICING_DOC,
@@ -123,9 +124,8 @@ export interface EconomicsSourceInput {
  * Match a raw agent source onto an economics source id, or null when the
  * evidence is insufficient (neutral). Matching is deliberately conservative:
  *
- * - deepseek_api: provider "deepseek". If the record carries a custom endpoint,
- *   it must point at the official deepseek.com host — third-party proxies that
- *   merely host DeepSeek models do not share the official peak pricing.
+ * - deepseek_api: provider "deepseek" with a valid official endpoint and a
+ *   non-platform source; third-party proxies and platform routes are neutral.
  * - bigmodel_glm_coding_plan: provider "bigmodel" AND a coding-plan endpoint.
  *   bigmodel.cn serves a metered API on the same domain, and the peak/quota
  *   evidence only covers the GLM Coding Plan. The international "zai" plan is
@@ -136,15 +136,26 @@ export function resolveEconomicsSourceId(
 ): EconomicsSourceId | null {
   const provider =
     typeof input?.provider === "string" ? input.provider.trim().toLowerCase() : "";
-  const url =
-    typeof input?.customProviderUrl === "string" ? input.customProviderUrl.trim().toLowerCase() : "";
+  if (input?.apiSource?.trim().toLowerCase() === "platform") return null;
+  const rawUrl = typeof input?.customProviderUrl === "string" ? input.customProviderUrl.trim() : "";
+  let hostname = "";
+  let pathname = "";
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      hostname = parsed.hostname.toLowerCase();
+      pathname = parsed.pathname;
+    } catch {
+      return null;
+    }
+  }
 
   if (provider === "deepseek") {
-    if (url && !url.includes("deepseek.com")) return null;
-    return "deepseek_api";
+    if (rawUrl && hostname !== "api.deepseek.com") return null;
+    return rawUrl ? "deepseek_api" : null;
   }
   if (provider === "bigmodel") {
-    if (url.includes("bigmodel.cn") && url.includes("/coding/")) {
+    if (hostname === "open.bigmodel.cn" && pathname.startsWith("/api/coding/")) {
       return "bigmodel_glm_coding_plan";
     }
     return null;

@@ -52,10 +52,11 @@ describe("economics policy registry (versioned, evidence-backed)", () => {
 
   test("unconfirmed facts are not encoded: no effectiveUntil promos, no capacity/concurrency fields", () => {
     for (const policy of ECONOMICS_POLICIES) {
-      // BigModel 夜间活动未确认 effectiveUntil；DeepSeek 窗口无官方起止日期。
+      // BigModel 夜间活动未确认 effectiveUntil。
       expect(policy.effectiveUntil).toBeUndefined();
-      expect(policy.effectiveFrom).toBeUndefined();
     }
+    expect(DEEPSEEK_API_POLICY.effectiveFrom).toBe(Date.UTC(2026, 7, 16, 16, 0, 0));
+    expect(BIGMODEL_GLM_CODING_PLAN_POLICY.effectiveFrom).toBeUndefined();
     const serialized = JSON.stringify(ECONOMICS_POLICIES);
     // 并发额度（2500/500/2500）与动态并发 capacityClass 一律不入 policy。
     expect(serialized).not.toContain("capacity");
@@ -66,11 +67,13 @@ describe("economics policy registry (versioned, evidence-backed)", () => {
 
 describe("resolveEconomicsSourceId (conservative source matching)", () => {
   test("matches the official DeepSeek API", () => {
-    expect(resolveEconomicsSourceId({ provider: "deepseek" })).toBe("deepseek_api");
-    expect(resolveEconomicsSourceId({ provider: " DeepSeek " })).toBe("deepseek_api");
+    expect(resolveEconomicsSourceId({ provider: "deepseek", apiSource: "platform" })).toBeNull();
+    expect(resolveEconomicsSourceId({ provider: "deepseek" })).toBeNull();
+    expect(resolveEconomicsSourceId({ provider: " DeepSeek ", customProviderUrl: "https://api.deepseek.com/v1" })).toBe("deepseek_api");
     expect(
       resolveEconomicsSourceId({
         provider: "deepseek",
+        apiSource: "custom",
         customProviderUrl: "https://api.deepseek.com/v1",
       })
     ).toBe("deepseek_api");
