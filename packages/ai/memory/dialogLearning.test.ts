@@ -79,7 +79,7 @@ describe("captureDialogLearnings", () => {
     { role: "user", content: "好了，搞定了" },
   ] as any[];
 
-  it("writes procedural memories from LLM extraction", async () => {
+  it("first observation is saved as episodic, never procedural directly", async () => {
     const llmCall = async () =>
       JSON.stringify([
         { pattern: "error_resolution", content: "Ollama 端口被占用时用 lsof 查找并 kill 进程" },
@@ -96,7 +96,8 @@ describe("captureDialogLearnings", () => {
     });
 
     expect(saved).toHaveLength(1);
-    expect(saved[0].kind).toBe("procedural");
+    // 单次经验只能"被记住发生过"，绝不能直接获得 procedural 身份——这是 procedural 硬门
+    expect(saved[0].kind).toBe("episodic");
     expect(saved[0].confidence).toBe(0.5);
     expect(saved[0].sourceKind).toBe("dialog-learning");
     expect(saved[0].tags).toContain("dialog-learning");
@@ -104,14 +105,14 @@ describe("captureDialogLearnings", () => {
     expect(saved[0].sourceDialogId).toBe("dialog-1");
   });
 
-  it("upgrades to semantic when same pattern found in different dialog", async () => {
-    // First dialog — write procedural
+  it("upgrades the SAME pattern to procedural only on a second independent dialog", async () => {
+    // First dialog — 单次观察，episodic
     const llmCall = async () =>
       JSON.stringify([
         { pattern: "workaround", content: "DeepSeek 不支持 JSON mode，用 prompt 约束输出" },
       ]);
 
-    await captureDialogLearnings({
+    const saved1 = await captureDialogLearnings({
       db: testDb,
       userId: "user-1",
       spaceId: null,
@@ -120,8 +121,10 @@ describe("captureDialogLearnings", () => {
       trace: mockTrace,
       llmCall,
     });
+    expect(saved1).toHaveLength(1);
+    expect(saved1[0].kind).toBe("episodic");
 
-    // Second dialog — same pattern, different dialog → should upgrade to semantic
+    // Second dialog — 同一 pattern 在独立 dialog 再次出现 → 升级 procedural
     const saved2 = await captureDialogLearnings({
       db: testDb,
       userId: "user-1",
@@ -133,9 +136,13 @@ describe("captureDialogLearnings", () => {
     });
 
     expect(saved2).toHaveLength(1);
-    expect(saved2[0].kind).toBe("semantic");
+    expect(saved2[0].kind).toBe("procedural");
+    // 第二条独立 dialog 的出现本身就是 recurrence evidence
+    expect(saved2[0].recurrenceEvidence).toContain("dialog-1");
+    expect(saved2[0].recurrenceEvidence).toContain("dialog-2");
     expect(saved2[0].confidence).toBeGreaterThan(0.5);
-    expect(saved2[0].tags).toContain("consolidated-dialog-learning");
+    expect(saved2[0].tags).toContain("corroborated-dialog-learning");
+    expect(saved2[0].sourceDialogId).toBe("dialog-2");
   });
 
   it("skips when llmCall not provided", async () => {
@@ -200,7 +207,7 @@ describe("captureDialogLearnings", () => {
         { pattern: "error_resolution", content: "用 lsof 查端口" },
       ]);
 
-    // First call writes procedural
+    // First call writes episodic（第一次观察）
     await captureDialogLearnings({
       db: testDb,
       userId: "user-1",
@@ -244,13 +251,78 @@ describe("captureDialogLearnings", () => {
     const candidates = await loadMemoryCandidatesFromDb(testDb, {
       owners: [{ ownerType: "user", ownerId: "user-1" }],
       subjects: [{ subjectType: "agent", subjectId: "agent-test" }],
-      kinds: ["procedural", "semantic"],
+      kinds: ["episodic", "procedural"],
       ownerLimit: 100,
     });
 
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].kind).toBe("procedural");
+    expect(candidates[0].kind).toBe("episodic"); // 单次观察不入 procedural
     expect(candidates[0].content).toBe("每次部署前先跑测试再跑构建");
     expect(candidates[0].sourceKind).toBe("dialog-learning");
+  });
+
+  it("different patterns must NOT promote each other even across dialogs", async () => {
+    const llm403a = async () =>
+      JSON.stringify([
+        { pattern: "error_resolution", content: "403 原因是 auth token 过期，重新登录" },
+      ]);
+    const llm403b = async () =>
+      JSON.stringify([
+        { pattern: "error_resolution", content: "403 原因是 rate limit，等配额窗口恢复" },
+      ]);
+
+    const saved1 = await captureDialogLearnings({
+      db: testDb, userId: "user-1", spaceId: null, agentKey: "agent-test",
+      dialogId: "dialog-a", trace: mockTrace, llmCall: llm403a,
+    });
+    expect(saved1[0]?.kind).toBe("episodic");
+
+    const saved2 = await captureDialogLearnings({
+      db: testDb, userId: "user-1", spaceId: null, agentKey: "agent-test",
+      dialogId: "dialog-b", trace: mockTrace, llmCall: llm403b,
+    });
+    // 内容不同 → patternKey 不同 → 不得升级，两条都保持 episodic
+    expect(saved2).toHaveLength(1);
+    expect(saved2[0]?.kind).toBe("episodic");
+
+    const all = await loadMemoryCandidatesFromDb(testDb, {
+      owners: [{ ownerType: "user", ownerId: "user-1" }],
+      subjects: [{ subjectType: "agent", subjectId: "agent-test" }],
+      kinds: ["procedural"],
+      ownerLimit: 100,
+    });
+    expect(all).toHaveLength(0);
+  });
+
+  it("regression guard: first observation must NOT become procedural directly", async () => {
+    // 回退检测：若实现被撤回到"第一次写入直接 procedural"，本断言立刻失败。
+    const llmCall = async () =>
+      JSON.stringify([
+        { pattern: "error_resolution", content: "PM2 残留进程导致端口占用" },
+      ]);
+    const saved = await captureDialogLearnings({
+      db: testDb, userId: "user-1", spaceId: null, agentKey: "agent-test",
+      dialogId: "dialog-1", trace: mockTrace, llmCall,
+    });
+    expect(saved[0]?.kind).not.toBe("procedural");
+    expect(saved[0]?.kind).toBe("episodic");
+  });
+
+  it("regression guard: second dialog upgrades to procedural, NOT semantic", async () => {
+    // 回退检测：若实现被撤回到"第二次升级 semantic"，本断言立刻失败。
+    const llmCall = async () =>
+      JSON.stringify([
+        { pattern: "workaround", content: "用 prompt 约束 JSON 输出格式" },
+      ]);
+    await captureDialogLearnings({
+      db: testDb, userId: "user-1", spaceId: null, agentKey: "agent-test",
+      dialogId: "dialog-1", trace: mockTrace, llmCall,
+    });
+    const saved2 = await captureDialogLearnings({
+      db: testDb, userId: "user-1", spaceId: null, agentKey: "agent-test",
+      dialogId: "dialog-2", trace: mockTrace, llmCall,
+    });
+    expect(saved2[0]?.kind).toBe("procedural");
+    expect(saved2[0]?.kind).not.toBe("semantic");
   });
 });

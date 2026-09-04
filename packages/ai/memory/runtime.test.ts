@@ -304,4 +304,86 @@ describe("memory runtime", () => {
     // 确认输出在合理范围内（不会无限膨胀）
     expect(result.promptBlock!.length).toBeLessThan(2000);
   });
+
+  it("records retrieval (not use): selecting into overlay increments the retrieval counter once", async () => {
+    const { createMemoryKey } = await import("database/keys");
+    await writeItem({ id: "m-ret", content: "用户的常用检索测试内容" });
+
+    const result = await resolveMemoryRuntime({
+      db,
+      userId: "user1",
+      agentKey: "agent-a",
+      userInput: "检索测试内容",
+    });
+    const picked = result.selectedItems.find((item) => item.id === "m-ret");
+    expect(picked).toBeDefined();
+
+    // 系统能确定的只有 retrieval：被注入 overlay。这不能证明模型使用了它。
+    const stored = await db.get(createMemoryKey("user", "user1", "m-ret"));
+    expect(stored.activationCount).toBe(1); // legacy storage name = retrieval count
+    expect(Date.parse(stored.lastActivatedAt)).toBeGreaterThan(
+      Date.parse(stored.createdAt) - 1
+    );
+  });
+
+  it("cold start: a brand-new memory (zero retrievals) still ranks on strong signals", async () => {
+    await writeItem({
+      id: "m-new",
+      kind: "semantic",
+      content: "用户偏好简洁直接的回答风格",
+      importance: 0.95,
+      confidence: 0.9,
+    });
+
+    const result = await resolveMemoryRuntime({
+      db,
+      userId: "user1",
+      agentKey: "agent-a",
+      userInput: "回答风格偏好",
+    });
+
+    // 新建的 memory activationCount=0（零检索历史），但 query/语义匹配是强信号，
+    // 足以把它带进 overlay——retrieval 历史只是弱信号，不是准入门槛。
+    expect(result.selectedItems.some((item) => item.id === "m-new")).toBe(true);
+  });
+
+  it("retrieval history acts as a weak ranking signal, not the dominant one", async () => {
+    // 高检索次数但与 query 无关 vs 零检索但精准命中 query：强信号必须胜出。
+    await writeItem({
+      id: "m-hyped",
+      content: "某条经常被召回但与此处无关的工程杂记",
+      activationCount: 50, // legacy: retrieved 50 times
+    });
+    await writeItem({
+      id: "m-relevant",
+      kind: "semantic",
+      content: "用户偏好简洁直接的回答风格",
+      importance: 0.95,
+      confidence: 0.9,
+    });
+
+    const result = await resolveMemoryRuntime({
+      db,
+      userId: "user1",
+      agentKey: "agent-a",
+      userInput: "回答风格偏好",
+    });
+
+    const ids = result.selectedItems.map((item) => item.id);
+    expect(ids).toContain("m-relevant");
+    expect(ids).toContain("m-hyped"); // 两条都进 overlay，但顺序必须正确
+    expect(ids.indexOf("m-relevant")).toBeLessThan(ids.indexOf("m-hyped"));
+
+    // 定量约束：retrieval 信号对总分的贡献上限是 0.09（当前权重）；
+    // 如果未来被改成 dominant（≥0.25）这里会失败，防止"retrieval 被当作
+    // successful-use reinforcement"回退。直接对比 scoreMemoryItem 数值。
+    const { scoreMemoryItem } = await import("./rank");
+    const keys = await import("database/keys");
+    const hyped = await db.get(keys.createMemoryKey("user", "user1", "m-hyped"));
+    const relevant = await db.get(keys.createMemoryKey("user", "user1", "m-relevant"));
+    const nowMs = Date.now();
+    const hypedScore = scoreMemoryItem(hyped, "回答风格偏好", nowMs);
+    const relevantScore = scoreMemoryItem(relevant, "回答风格偏好", nowMs);
+    expect(relevantScore).toBeGreaterThan(hypedScore);
+  });
 });

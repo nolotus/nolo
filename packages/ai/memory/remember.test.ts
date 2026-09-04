@@ -321,8 +321,8 @@ describe("rememberMemory", () => {
     });
     const matching = items.filter((i) => i.content === content);
     expect(matching).toHaveLength(1);
-    // activationCount 应该提升
-    expect(matching[0]?.activationCount).toBe(1);
+    // 去重命中不等于检索：activationCount 保持初始 0（只有 touchMemoryItemsInDb 记账 retrieval）
+    expect(matching[0]?.activationCount).toBe(0);
   });
 
   it("dedup takes higher confidence when source upgrades", async () => {

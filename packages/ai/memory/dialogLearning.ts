@@ -6,17 +6,25 @@
  * - dialogLearning 提取 error_resolution/workaround/repeated_workflow（怎么解决问题）
  *
  * 触发点：captureCompletedMemoryTurn（确定性，每次 agent run 结束）
- * 写入：kind=procedural, confidence=0.5, tags=["dialog-learning", ...]
+ * 写入 gate（与 remember.ts 的 procedural 硬门对齐）：
+ *   第一次观察 → kind=episodic, confidence=0.5（单次经验，不得冒充流程）
+ *   同一 patternKey 在**另一个独立 dialog** 再次出现 → 升级同一条记录为
+ *   kind=procedural（第二个独立来源即 recurrence evidence；先删旧 kind 索引
+ *   再重写，避免 stale index 和 overlay 重复）。
  *
  * ECC continuous-learning-v2 的核心洞察：hook 是 100% 可靠的，skill 是 50-80%。
  * bun-nolo 的 captureCompletedMemoryTurn 已经是确定性触发点，只需在此加入 LLM 提取。
  */
 
 import type { AgentRuntimeChatMessage as ChatMessage } from "agent-runtime/types";
+import {
+  createMemoryOwnerIndexKey,
+  createMemorySubjectKindIndexKey,
+} from "database/keys";
 import { createMemoryItem, writeMemoryItemWithIndexesToDb } from "./storeShared";
 import { loadMemoryCandidatesFromDb } from "./queryShared";
 import { buildAgentSubjectTarget, resolveUserOrSpaceMemoryTarget } from "./scope";
-import type { MemoryItem, MemoryOwnerRef, MemoryVisibility } from "./types";
+import type { MemoryItem, MemoryKind, MemoryOwnerRef, MemoryVisibility } from "./types";
 
 /** LLM 调用函数签名——由调用方注入（server: 直接 fetch, client: dispatch(runLlm)） */
 export type DialogLearningLlmCall = (systemPrompt: string, content: string) => Promise<string>;
@@ -138,19 +146,20 @@ export const parseDialogLearningResponse = (raw: string): DialogLearningCandidat
 const buildPatternKey = (pattern: string, content: string): string =>
   `dialog-learning:${pattern}:${content.toLowerCase().slice(0, 100)}`;
 
-const sameDialogLearning = (item: MemoryItem, candidate: DialogLearningCandidate, agentKey: string) =>
+const sameDialogLearning = (item: MemoryItem, candidate: DialogLearningCandidate, subjectId: string) =>
   item.subjectType === "agent" &&
-  item.subjectId === agentKey &&
+  item.subjectId === subjectId &&
   item.patternKey === buildPatternKey(candidate.pattern, candidate.content);
 
 /**
  * 在对话结束时提取可复用的过程性知识。
- * 确定性触发（由 captureCompletedMemoryTurn 调用），LLM 提取，写入 procedural memory。
+ * 确定性触发（由 captureCompletedMemoryTurn 调用），LLM 提取。
  *
- * 置信度生命周期：
- * - 初始 0.5（单次观察，低于显式 0.9，高于冷存 0.3）
- * - 跨 dialog 重复：+0.06（复用 understanding 的升级机制，从 episodic 升为 semantic）
- * - 用户纠正：-0.2（复用 correction.ts）
+ * 写入 gate（与 remember.ts 的 procedural 硬门对齐，见 resolveEffectiveKind）：
+ * - 首次观察 → episodic, confidence 0.5（单次经验，不得冒充流程）
+ * - 同一 patternKey 在**另一个独立 dialog** 再次出现 → 升级为 procedural，
+ *   第二个来源即 recurrence evidence；升级覆盖同一条记录，不新增重复条目。
+ * - 不再向 semantic 升级（那是旧实现的语义颠倒）。
  */
 export const captureDialogLearnings = async (
   input: CaptureDialogLearningsInput
@@ -184,11 +193,13 @@ export const captureDialogLearnings = async (
   const candidates = parseDialogLearningResponse(rawResponse);
   if (candidates.length === 0) return [];
 
-  // 加载已有 memory 检查重复
+  // 加载已有 memory 检查重复——只看同 pattern 的 episodic（第一次观察）与
+  // procedural（已 corroborated）。semantic 属于 understanding/remember 的领域，
+  // dialogLearning 不再向 semantic 升级（那是旧的颠倒语义）。
   const existing = await loadMemoryCandidatesFromDb(input.db, {
     owners: [subjectTarget.owner as MemoryOwnerRef],
     subjects: [{ subjectType: subjectTarget.subjectType, subjectId: subjectTarget.subjectId }],
-    kinds: ["procedural", "semantic"],
+    kinds: ["episodic", "procedural"],
     ownerLimit: 100,
   });
 
@@ -198,53 +209,71 @@ export const captureDialogLearnings = async (
 
   for (const candidate of candidates) {
     const patternKey = buildPatternKey(candidate.pattern, candidate.content);
-    const sameItems = existing.filter((item) => sameDialogLearning(item, candidate, input.agentKey));
+    const sameItems = existing.filter((item) => sameDialogLearning(item, candidate, subjectTarget.subjectId));
 
-    // 已有 semantic 升级版——跳过
-    const existingSemantic = sameItems.find((item) => item.kind === "semantic");
-    if (existingSemantic) continue;
+    const existingEpisodic = sameItems.find((item) => item.kind === "episodic");
+    const existingProcedural = sameItems.find((item) => item.kind === "procedural");
 
-    // 已有 episodic 且来自不同 dialog——升级为 semantic
-    const existingEpisode = sameItems.find((item) => item.kind === "procedural");
-    if (
-      existingEpisode &&
-      existingEpisode.sourceDialogId &&
-      existingEpisode.sourceDialogId !== input.dialogId
-    ) {
-      const semantic = createMemoryItem({
-        ownerType: owner.ownerType,
-        ownerId: owner.ownerId,
-        visibility,
-        subjectType: subjectTarget.subjectType,
-        subjectId: subjectTarget.subjectId,
-        kind: "semantic",
-        content: candidate.content,
-        importance: Math.min(0.95, 0.6 + 0.03),
-        confidence: Math.min(0.86, 0.5 + 0.06),
-        tags: [DIALOG_LEARNING_TAG, `dialog-learning:${candidate.pattern}`, "consolidated-dialog-learning"],
-        patternKey,
-        sourceKind: "dialog-learning",
+    // 已有独立 dialog 的 procedural——同一模式已 corroborated（可能正在别的 dialog 再次提取）
+    if (existingProcedural && existingProcedural.sourceDialogId !== input.dialogId) {
+      // 本任务不做语义去重，重复 pattern 由 contentKey 去重天然合并；仅刷新 source
+      continue;
+    }
+
+    // 同一 dialog 已提取过同 pattern——不计作一次新的独立观察
+    if (existingEpisodic && existingEpisodic.sourceDialogId === input.dialogId) {
+      continue;
+    }
+
+    // 第二次独立 dialog 出现同一 pattern：升级 episodic → procedural。
+    // kind 进入 subject-kind 索引后缀，必须先删旧索引再重写，否则留下
+    // 指向 same memoryKey 的 stale episodic index。
+    if (existingEpisodic && existingEpisodic.sourceDialogId !== input.dialogId) {
+      const batch = input.db.batch();
+      batch.del(createMemoryOwnerIndexKey(
+        existingEpisodic.ownerType,
+        existingEpisodic.ownerId,
+        existingEpisodic.createdAt,
+        existingEpisodic.id
+      ));
+      batch.del(createMemorySubjectKindIndexKey(
+        existingEpisodic.subjectType,
+        existingEpisodic.subjectId,
+        existingEpisodic.kind,
+        existingEpisodic.createdAt,
+        existingEpisodic.id
+      ));
+      await batch.write();
+
+      const upgraded: MemoryItem = {
+        ...existingEpisodic,
+        kind: "procedural",
+        importance: Math.min(0.95, (existingEpisodic.importance ?? 0.6) + 0.03),
+        confidence: Math.min(0.95, (existingEpisodic.confidence ?? 0.5) + 0.08),
+        recurrenceEvidence: `dialog-learning: same patternKey again in dialog ${input.dialogId} (first seen in ${existingEpisodic.sourceDialogId})`,
         sourceDialogId: input.dialogId,
-      });
-      await writeMemoryItemWithIndexesToDb(input.db, semantic);
-      existing.push(semantic);
-      saved.push(semantic);
+        tags: Array.from(new Set([
+          ...(existingEpisodic.tags ?? []),
+          "corroborated-dialog-learning",
+        ])),
+      };
+      await writeMemoryItemWithIndexesToDb(input.db, upgraded);
+      // 替换本地 existing 记录，保证本轮后续 candidate 看到的是升级后的版本
+      existing.splice(existing.indexOf(existingEpisodic), 1, upgraded as any);
+      saved.push(upgraded);
       continue;
     }
 
-    // 同一 dialog 已有——跳过
-    if (existingEpisode && existingEpisode.sourceDialogId === input.dialogId) {
-      continue;
-    }
-
-    // 新建 procedural
-    const procedural = createMemoryItem({
+    // 全新 pattern：作为单次经验保存为 episodic（绝不直接成为 procedural）。
+    // 这保证单次 error_resolution / workaround 只能"被记住发生过"，
+    // 必须等第二个独立 dialog 再次提取同一 pattern 才有资格成为长期流程。
+    const episodic = createMemoryItem({
       ownerType: owner.ownerType,
       ownerId: owner.ownerId,
       visibility,
       subjectType: subjectTarget.subjectType,
       subjectId: subjectTarget.subjectId,
-      kind: "procedural",
+      kind: "episodic",
       content: candidate.content,
       importance: 0.6,
       confidence: 0.5,
@@ -253,9 +282,9 @@ export const captureDialogLearnings = async (
       sourceKind: "dialog-learning",
       sourceDialogId: input.dialogId,
     });
-    await writeMemoryItemWithIndexesToDb(input.db, procedural);
-    existing.push(procedural);
-    saved.push(procedural);
+    await writeMemoryItemWithIndexesToDb(input.db, episodic);
+    existing.push(episodic);
+    saved.push(episodic);
   }
 
   return saved;

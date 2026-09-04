@@ -25,7 +25,9 @@ export interface MemoryItem {
   kind: MemoryKind;
   content: string;
   createdAt: string;
+  /** Legacy storage name: this is a RETRIEVAL timestamp, set whenever the item is selected into the prompt overlay. Retrieval ≠ use — see touchMemoryItemsInDb. */
   lastActivatedAt: string;
+  /** Legacy storage name: this is a RETRIEVAL count (times injected into overlay), not a usage or usefulness count. Weak retrieval-relevance signal only. */
   activationCount: number;
   importance: number;
   confidence: number;

@@ -226,6 +226,8 @@ export const resolveMemoryRuntime = async (input: {
     return { selectedItems: [], promptBlock: null };
   }
 
+  // 标记 retrieval：只能证明这些记忆被注入 overlay，不代表模型使用了它们
+  // （retrieved ≠ used ≠ useful）。见 storeShared.ts 的字段语义说明。
   await touchMemoryItemsInDb(input.db, ranked);
   return {
     selectedItems: ranked,

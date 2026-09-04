@@ -59,6 +59,11 @@ export const memoryContentKeyInput = (
   content: item.content,
 });
 
+/**
+ * Legacy storage names: the `activationCount` / `lastActivatedAt` fields on
+ * MemoryItem actually record **retrieval/exposure**, not use. See types.ts.
+ * Use `retrievalCountOf(item)` / `lastRetrievedAtOf(item)` for reads.
+ */
 export const createMemoryItem = (
   input: Omit<MemoryItem, "id" | "createdAt" | "lastActivatedAt" | "activationCount" | "contentKey">
 ): MemoryItem => {
@@ -67,11 +72,25 @@ export const createMemoryItem = (
     id: ulid(),
     contentKey: computeMemoryContentKey(input),
     createdAt: now,
-    lastActivatedAt: now,
-    activationCount: 0,
+    lastActivatedAt: now, // legacy storage: this is the retrieval timestamp
+    activationCount: 0, // legacy storage: this is the retrieval count
     ...input,
   };
 };
+
+/**
+ * Semantic accessors for the legacy retrieval fields. Prefer these over direct
+ * `.activationCount` / `.lastActivatedAt` reads so call sites express
+ * retrieval semantics instead of "activation".
+ */
+export const retrievalCountOf = (item: {
+  activationCount?: number;
+}): number => item.activationCount ?? 0;
+
+export const lastRetrievedAtOf = (item: {
+  lastActivatedAt?: string;
+  createdAt: string;
+}): string => item.lastActivatedAt || item.createdAt;
 
 export const writeMemoryItemWithIndexesToDb = async (
   db: any,
@@ -152,6 +171,17 @@ export const adjustMemoryConfidenceInDb = async (
   return updated;
 };
 
+/**
+ * Mark memory items as RETRIEVED: they were selected into the prompt overlay
+ * and exposed to the model. Called from a single site (memory runtime after
+ * `selectRuntimeMemoryItems`). This does NOT mean the model used them, let alone
+ * used them successfully (retrieved ≠ used ≠ useful).
+ *
+ * Note: `activationCount` / `lastActivatedAt` are legacy storage names; the
+ * fields actually record retrieval/exposure. Renaming them would require a
+ * persisted-data migration across local DBs and server rekey/merge code, so
+ * we keep the names and fix the semantics in comments and helpers instead.
+ */
 export const touchMemoryItemsInDb = async (
   db: any,
   items: MemoryItem[],
@@ -162,8 +192,9 @@ export const touchMemoryItemsInDb = async (
   for (const item of items) {
     batch.put(createMemoryKey(item.ownerType, item.ownerId, item.id), {
       ...item,
+      // retrieval bookkeeping on legacy storage names — see doc comment above
       lastActivatedAt: now,
-      activationCount: (item.activationCount ?? 0) + 1,
+      activationCount: retrievalCountOf(item) + 1,
     });
   }
   await batch.write();

@@ -193,8 +193,9 @@ export const rememberMemory = async (
       if (existing) {
         const updated: MemoryItem = {
           ...existing,
-          lastActivatedAt: new Date().toISOString(),
-          activationCount: (existing.activationCount ?? 0) + 1,
+          // 保留检索字段原值：去重命中只是"我们记住了同一件事"，
+          // 并不是这条记忆被重新检索进 overlay。touchMemoryItemsInDb
+          // 是唯一的 retrieval 记账路径。
           confidence: Math.max(existing.confidence ?? 0, baseConfidence),
           sourceDialogId: input.dialogId ?? existing.sourceDialogId,
         };
