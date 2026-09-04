@@ -5,7 +5,7 @@ import {
   resolveShellCommandArg,
 } from "../shellCommandPolicy";
 import {
-  buildWorkspaceShellCommand,
+  buildWorkspaceShellPlan,
   findWorkspaceShellEscapeToken,
   buildWorkspaceShellEscapeBlockedResult,
   extractActivity,
@@ -30,7 +30,7 @@ export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiComp
     function: {
       name: toolName,
       description:
-        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to perform complete verification in one step instead of multiple small roundtrips. Do not cd into guessed paths; commands already run from the workspace root. Commands block until exit. Long-running commands (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) automatically detach to background returning {detached: true, pid, label}; for persistent services, prefer launchProcess.`,
+        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to perform complete verification in one step instead of multiple small roundtrips. Do not cd into guessed paths; commands already run from the workspace root. Commands block until exit. Long-running commands (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) automatically detach to background returning {detached: true, pid, label}; for persistent services, prefer launchProcess. On Windows the resolved shell may be Windows PowerShell 5.1 (metadata.shellKind="powershell5"): it does not support '&&'/'||' or $PSStyle — join commands with ';' or split into multiple calls. metadata.shellKind="pwsh" means PowerShell 7+ with full syntax. Read resolvedShell/shellKind from any execShell result before writing Windows-specific syntax.`,
       parameters: {
         type: "object",
         properties: {
@@ -133,13 +133,15 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
       };
     }
 
+    const shellPlan = buildWorkspaceShellPlan({
+      toolName: "execShell",
+      command,
+      shell: normalized.shell,
+    });
+
     const result = await runWorkspaceCommand({
       workspaceRoot,
-      command: buildWorkspaceShellCommand({
-        toolName: "execShell",
-        command,
-        shell: normalized.shell,
-      }),
+      command: shellPlan.argv,
       timeoutMs: resolveExecShellTimeoutMs(ctx.commandTimeoutMs),
       outputLimit: ctx.commandOutputLimit,
       commandPrefix: ctx.commandPrefix,
@@ -154,6 +156,8 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
         command,
         exitCode: result.exitCode,
         timedOut: result.timedOut,
+        resolvedShell: shellPlan.resolvedShell,
+        ...(shellPlan.shellKind ? { shellKind: shellPlan.shellKind } : {}),
         ...(result.aborted ? { aborted: true } : {}),
         ...(result.detached
           ? {

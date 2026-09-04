@@ -89,3 +89,55 @@ describe("MessageContent image waiting state", () => {
     }
   });
 });
+
+describe("MessageContent errorMeta failure card", () => {
+  it("renders SendErrorCard when errorMeta is present", async () => {
+    const MessageContent = await loadMessageContent();
+    const onRetry = mock(() => {});
+    const view = await renderInDom(
+      <MessageContent
+        content="[发送失败] fallback text"
+        thinkContent=""
+        role="other"
+        isStreaming={false}
+        errorMeta={{
+          kind: "timeout",
+          retryable: true,
+          summary: "请求超时",
+          actionHint: "服务响应超时，请稍后重试",
+        }}
+        onRetry={onRetry}
+      />
+    );
+
+    try {
+      expect(view.getByText("请求超时")).toBeTruthy();
+      expect(view.getByText("建议：服务响应超时，请稍后重试")).toBeTruthy();
+      const retryBtn = view.container.querySelector(".send-error-card__retry-btn");
+      expect(retryBtn).toBeTruthy();
+      (retryBtn as HTMLButtonElement).click();
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("renders plain markdown for legacy send failure without errorMeta", async () => {
+    const MessageContent = await loadMessageContent();
+    const view = await renderInDom(
+      <MessageContent
+        content="[发送失败] 旧版纯文本消息"
+        thinkContent=""
+        role="other"
+        isStreaming={false}
+      />
+    );
+
+    try {
+      expect(view.container.querySelector(".send-error-card")).toBeNull();
+      expect(view.container.textContent).toContain("[发送失败] 旧版纯文本消息");
+    } finally {
+      await view.cleanup();
+    }
+  });
+});

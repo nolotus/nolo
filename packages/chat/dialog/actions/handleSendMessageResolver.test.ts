@@ -59,7 +59,7 @@ describe("resolveHandleSendMessageContext", () => {
     });
 
     expect(result.agentKeyToUse).toBe(
-      "agent-pub-01DSV4FLASHPB00000000JFPFD",
+      "agent-pub-01NOLOAPPBLD000000019KCKT0",
     );
   });
 
@@ -73,9 +73,9 @@ describe("resolveHandleSendMessageContext", () => {
     });
 
     expect(result.agentConfigToUse).toMatchObject({
-      dbKey: "agent-pub-01DSV4FLASHPB00000000JFPFD",
+      dbKey: "agent-pub-01NOLOAPPBLD000000019KCKT0",
       provider: "nolo",
-      model: "deepseek-v4-flash",
+      model: "glm-5-3-flash",
       useServerProxy: true,
     });
   });
@@ -93,7 +93,7 @@ describe("resolveHandleSendMessageContext", () => {
     // 旧 dialog 的 stickyTier="image" 映射到 flash 档（图片由预处理管道处理）
     expect(result.agentConfigToUse).toMatchObject({
       provider: "nolo",
-      model: "deepseek-v4-flash",
+      model: "glm-5-3-flash",
     });
   });
 

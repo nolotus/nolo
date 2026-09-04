@@ -177,12 +177,30 @@ export function tokenizeShellPrefix(command: string): string[] {
   return tokens;
 }
 
-export function wrapPowerShellCommand(command: string): string {
+/**
+ * Windows PowerShell variant of the resolved executable:
+ * - "pwsh"        → PowerShell 7+ (supports `&&`/`||`, `$PSStyle`)
+ * - "powershell5" → Windows PowerShell 5.1 (no `&&`/`||`; `$PSStyle` throws
+ *   PropertyNotFound and spams stderr on every command)
+ */
+export type PowerShellShellKind = "pwsh" | "powershell5";
+
+/** Candidate order is single-sourced here: pwsh (7+) wins over 5.1 when both exist. */
+export const POWERSHELL_CANDIDATES: readonly string[] = ["pwsh", "powershell.exe", "powershell"];
+
+export function resolvePowerShellShellKind(executable: string): PowerShellShellKind {
+  const base = (executable.split(/[\\/]/).pop() ?? "").toLowerCase();
+  return base === "pwsh" || base === "pwsh.exe" ? "pwsh" : "powershell5";
+}
+
+export function wrapPowerShellCommand(command: string, shellKind: PowerShellShellKind = "pwsh"): string {
   return [
     "[Console]::InputEncoding=[System.Text.Encoding]::UTF8",
     "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
     "$OutputEncoding=[System.Text.Encoding]::UTF8",
-    "$PSStyle.OutputRendering='PlainText'",
+    // $PSStyle only exists on PowerShell 7+; injecting it on 5.1 makes every
+    // command emit a PropertyNotFound error on stderr.
+    ...(shellKind === "pwsh" ? ["$PSStyle.OutputRendering='PlainText'"] : []),
     command,
   ].join("; ");
 }
@@ -191,19 +209,26 @@ export function findPowerShellExecutable(): string | null {
   return resolveExecutableOnPath("pwsh") || resolveExecutableOnPath("powershell.exe") || resolveExecutableOnPath("powershell");
 }
 
-export function buildPowerShellCommand(command: string): string[] {
-  const executable = findPowerShellExecutable();
-  if (!executable) throw new Error("PowerShell is not available on this machine.");
+export function buildPowerShellSpawnArgs(args: {
+  executable: string;
+  command: string;
+}): string[] {
   return [
-    executable,
+    args.executable,
     "-NoLogo",
     "-NoProfile",
     "-NonInteractive",
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
-    wrapPowerShellCommand(command),
+    wrapPowerShellCommand(args.command, resolvePowerShellShellKind(args.executable)),
   ];
+}
+
+export function buildPowerShellCommand(command: string): string[] {
+  const executable = findPowerShellExecutable();
+  if (!executable) throw new Error("PowerShell is not available on this machine.");
+  return buildPowerShellSpawnArgs({ executable, command });
 }
 
 export function buildBashCommand(command: string): string[] {
@@ -212,16 +237,42 @@ export function buildBashCommand(command: string): string[] {
   return [executable, "-lc", command];
 }
 
+export type WorkspaceShellPlan = {
+  argv: string[];
+  resolvedShell: "bash" | "powershell";
+  executable: string;
+  shellKind?: PowerShellShellKind;
+};
+
+export function buildWorkspaceShellPlan(args: {
+  toolName: string;
+  command: string;
+  shell?: unknown;
+}): WorkspaceShellPlan {
+  if (args.shell === "bash") {
+    const argv = buildBashCommand(args.command);
+    return { argv, resolvedShell: "bash", executable: argv[0] ?? "bash" };
+  }
+  if (args.shell === "powershell" || process.platform === "win32") {
+    const executable = findPowerShellExecutable();
+    if (!executable) throw new Error("PowerShell is not available on this machine.");
+    return {
+      argv: buildPowerShellSpawnArgs({ executable, command: args.command }),
+      resolvedShell: "powershell",
+      executable,
+      shellKind: resolvePowerShellShellKind(executable),
+    };
+  }
+  const argv = buildBashCommand(args.command);
+  return { argv, resolvedShell: "bash", executable: argv[0] ?? "bash" };
+}
+
 export function buildWorkspaceShellCommand(args: {
   toolName: string;
   command: string;
   shell?: unknown;
 }): string[] {
-  if (args.shell === "powershell") return buildPowerShellCommand(args.command);
-  if (args.shell === "bash") return buildBashCommand(args.command);
-  return process.platform === "win32"
-    ? buildPowerShellCommand(args.command)
-    : buildBashCommand(args.command);
+  return buildWorkspaceShellPlan(args).argv;
 }
 
 export function findWorkspaceShellEscapeToken(command: string): string | null {

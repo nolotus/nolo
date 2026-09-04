@@ -33,6 +33,44 @@ export type MessageContentPart = OpenAITextContent | OpenAIImageContent;
 
 export type CompletionFinishReason = "stop" | "tool_calls" | "length" | "content_filter" | null;
 
+// ========== 发送错误与重试元信息 ==========
+export type SendErrorKind =
+  | "network"
+  | "timeout"
+  | "auth"
+  | "rate_limit"
+  | "server"
+  | "unknown";
+
+export type SendErrorStage =
+  | "desktop_local_runtime"
+  | "server_proxy"
+  | "provider"
+  | "client_fetch";
+
+export interface MessageErrorMeta {
+  /** 错误分类 */
+  kind: SendErrorKind;
+  /** 是否可手动/自动重试 */
+  retryable: boolean;
+  /** 发生故障的调用环节（若能判定） */
+  stage?: SendErrorStage | string;
+  /** 错误摘要（用于失败卡片标题展示） */
+  summary?: string;
+  /** 建议用户采取的动作提示 */
+  actionHint?: string;
+  /** 账号验证等外链（如 Google 登录验证） */
+  validationUrl?: string;
+  /** 验证链接的展示文案 */
+  validationLinkText?: string;
+  /** 附加辅助链接 */
+  extraLinks?: Array<{ text: string; url: string }>;
+  /** 技术细节回退文本（可展开查看） */
+  fallbackText?: string;
+  /** 原始错误文本 */
+  rawError?: string;
+}
+
 // ========== Token Usage ==========
 export interface CompletionUsage {
   completion_tokens: number;
@@ -186,6 +224,9 @@ export interface Message {
   userId?: string;
   usage?: any;
   metadata?: Record<string, unknown>;
+
+  /** 结构化发送失败元数据（失败卡片与重试渲染）。 */
+  errorMeta?: MessageErrorMeta;
 
   /** 自动重试进度（UI 展示「自动重试 N/M · Xs」）。仅流式等待期间存在。 */
   retryProgress?: {

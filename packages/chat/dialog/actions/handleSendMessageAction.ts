@@ -5,26 +5,37 @@ import type { AgentRuntimeOptions } from "ai/agent/types";
 import {
     messageStreamEnd,
     prepareAndPersistUserMessage,
+    selectAllMsgs,
 } from "chat/messages/messageSlice";
+import type { MessageErrorMeta } from "chat/messages/types";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 import { readAndWait, selectById } from "database/dbSlice";
 import type { DialogConfig } from "app/types";
 import { createDialogMessageKeyAndId } from "database/keys";
 import { extractCustomId } from "core/prefix";
+import { waitForAbortableDelay } from "core/abortableDelay";
 import { resolveHandleSendMessageContext } from "./handleSendMessageResolver";
 import {
     buildSendErrorMessageMarkdown,
     parseSendError,
 } from "./parseOAuthError";
-import { getActiveDialogKey } from "../dialogRuntimeStore";
+import {
+    addActiveController,
+    getActiveDialogKey,
+    removeActiveController,
+} from "../dialogRuntimeStore";
 
 export interface HandleSendMessageArgs {
-    userInput: string | any[];
+    userInput?: string | any[];
     dialogKey?: string;
     runtimeOptions?: AgentRuntimeOptions;
     /** 可选：本轮显式指定要调用的 Agent ID（来自 @mention） */
     targetAgentKey?: string;
     quickChatPerfStartedAt?: number;
+    /** 是否重试失败的 agent 轮次（跳过持久化用户消息） */
+    isRetry?: boolean;
+    /** 重试的目标失败消息 ID（用于精确向上查找该失败轮对应的用户输入） */
+    retryMessageId?: string;
 }
 
 interface HandleSendMessageThunkApi {
@@ -152,34 +163,40 @@ const finalizeQuickChatStreamStartupFailure = async (
 };
 
 /**
- * 从 provider 错误文本里结构化解析出可读、可操作的消息（含验证链接），
- * 而不是把原始 JSON dump 进对话。
- */
-const buildActionableErrorText = (errorMessage: string): string => {
-    return buildSendErrorMessageMarkdown(parseSendError(errorMessage));
-};
-
-/**
  * 发送失败时把错误写进对话流（作为一条 assistant 错误消息），
- * 让用户可以直接在对话里看到并操作（例如点击验证链接），
- * 而不是只弹一个瞬间消失的 toast。
+ * 让用户可以直接在对话里看到并操作（例如点击验证链接或手动重试），
+ * 同时携带结构化的 errorMeta 元数据。
  */
 const finalizeSendFailureInDialog = async (
     dispatch: any,
     dialogConfig: DialogConfig,
     agentKey: string,
-    errorMessage: string,
+    errorInput: unknown,
 ) => {
     const dialogKey = dialogConfig.dbKey;
     const dialogId = dialogConfig.id ?? (dialogKey ? extractCustomId(dialogKey) : "");
     const { key: msgKey, messageId } = createDialogMessageKeyAndId(dialogId);
+
+    const parsed = parseSendError(errorInput);
+    const errorMeta: MessageErrorMeta = {
+        kind: parsed.kind,
+        retryable: parsed.retryable,
+        stage: parsed.stage,
+        summary: parsed.summary,
+        actionHint: parsed.actionHint,
+        validationUrl: parsed.validationUrl,
+        validationLinkText: parsed.validationLinkText,
+        extraLinks: parsed.extraLinks,
+        fallbackText: parsed.fallbackText,
+        rawError: parsed.fallbackText,
+    };
 
     await dispatch(
         messageStreamEnd({
             finalContentBuffer: [
                 {
                     type: "text",
-                    text: `[发送失败]\n\n${buildActionableErrorText(errorMessage)}`,
+                    text: buildSendErrorMessageMarkdown(parsed),
                 },
             ],
             totalUsage: null,
@@ -191,6 +208,9 @@ const finalizeSendFailureInDialog = async (
             dialogKey: dialogKey ?? "",
             messageId,
             reasoningBuffer: "",
+            messageMetadata: {
+                errorMeta,
+            },
         })
     ).unwrap?.();
 };
@@ -199,6 +219,7 @@ const finalizeSendFailureInDialog = async (
  * 发送用户消息（当前对话）：
  * - 支持 runtimeOptions：用于为当前轮次额外注入工具 / 编辑上下文
  * - 支持 targetAgentKey：本轮可显式指定要调用的 Agent（例如通过 @mention）
+ * - 支持 isRetry：重跑失败轮次且不重复落用户消息
  * - 默认行为不变：老调用只传 userInput 仍然有效
  */
 export const handleSendMessageAction = async (
@@ -223,16 +244,58 @@ export const handleSendMessageAction = async (
             cybotCount: dialogConfig.cybots?.length ?? 0,
         });
 
-        // 步骤 1: 准备并持久化用户的消息
-        await dispatch(
-            prepareAndPersistUserMessage({
-                userInput: args.userInput as string,
-                dialogConfig,
-            })
-        ).unwrap();
-        logQuickChatPerfStage(args.quickChatPerfStartedAt, "handle-send-message-user-persisted", {
-            dialogKey: dialogConfig.dbKey,
-        });
+        let effectiveRawUserInput = args.userInput;
+
+        // 步骤 1: 准备并持久化用户的消息（重试模式下跳过持久化）
+        if (args.isRetry) {
+            // 重试模式：若调用方未显式传入 userInput，则在消息历史中查找对应的 user 消息
+            if (!effectiveRawUserInput) {
+                const dialogId = dialogConfig.id ?? (dialogConfig.dbKey ? extractCustomId(dialogConfig.dbKey) : "");
+                const state = getState();
+                try {
+                    const messages = selectAllMsgs(state as any, dialogId) as any[];
+                    if (Array.isArray(messages) && messages.length > 0) {
+                        let targetIndex = messages.length - 1;
+                        if (args.retryMessageId) {
+                            const foundIdx = messages.findIndex((m) => m?.id === args.retryMessageId);
+                            if (foundIdx >= 0) {
+                                targetIndex = foundIdx;
+                            }
+                        }
+                        // 从 targetIndex 往前（向上）查找最近一条 user 消息
+                        for (let i = targetIndex; i >= 0; i--) {
+                            const m = messages[i];
+                            if (m?.role === "user" && m.content) {
+                                effectiveRawUserInput = m.content;
+                                break;
+                            }
+                        }
+                    }
+                } catch {
+                    // best-effort history lookup
+                }
+            }
+
+            // 若依然未找到任何可重试的用户输入，直接退出，绝不 dispatch 空文本
+            if (
+                !effectiveRawUserInput ||
+                (typeof effectiveRawUserInput === "string" && !effectiveRawUserInput.trim()) ||
+                (Array.isArray(effectiveRawUserInput) && effectiveRawUserInput.length === 0)
+            ) {
+                console.warn("[handleSendMessage] isRetry: No preceding user message found to retry.");
+                return rejectWithValue("未找到可重试的用户输入");
+            }
+        } else {
+            await dispatch(
+                prepareAndPersistUserMessage({
+                    userInput: (args.userInput ?? "") as string,
+                    dialogConfig,
+                })
+            ).unwrap();
+            logQuickChatPerfStage(args.quickChatPerfStartedAt, "handle-send-message-user-persisted", {
+                dialogKey: dialogConfig.dbKey,
+            });
+        }
 
         // 步骤 2: 计算本轮要实际调用的 agentKey
         const resolvedContext = resolveHandleSendMessageContext({
@@ -250,7 +313,7 @@ export const handleSendMessageAction = async (
         }
 
         // 步骤 2.5: 按对话意图动态挂载浏览上下文能力包（仅桌面端浏览器窗口开着时）
-        const userInputText = typeof args.userInput === "string" ? args.userInput : "";
+        const userInputText = typeof effectiveRawUserInput === "string" ? effectiveRawUserInput : "";
         const isDesktopContext =
             typeof window !== "undefined" &&
             typeof location !== "undefined" &&
@@ -260,20 +323,71 @@ export const handleSendMessageAction = async (
             : "";
         const effectiveUserInput = browseContextPrefix
             ? `${browseContextPrefix}\n\n${userInputText}`
-            : args.userInput;
+            : (effectiveRawUserInput ?? "");
 
-        // 步骤 3: 触发 Agent 的回合
-        const streamResult = await dispatch(
-            streamAgentChatTurn({
-                agentKey: agentKeyToUse,
-                ...(agentConfigToUse ? { agentConfig: agentConfigToUse } : {}),
-                userInput: effectiveUserInput,
-                dialogKey: dialogConfig.dbKey,
-                parentMessageId: undefined,
-                runtimeOptions: effectiveRuntimeOptions,
-                quickChatPerfStartedAt: args.quickChatPerfStartedAt,
-            })
-        ).unwrap();
+        // 步骤 3: 触发 Agent 的回合（启动阶段对瞬态网络/超时错误自动退避重试 1 次）
+        let streamResult: any;
+        const maxStartupAttempts = 2;
+
+        for (let attempt = 1; attempt <= maxStartupAttempts; attempt++) {
+            try {
+                streamResult = await dispatch(
+                    streamAgentChatTurn({
+                        agentKey: agentKeyToUse,
+                        ...(agentConfigToUse ? { agentConfig: agentConfigToUse } : {}),
+                        userInput: effectiveUserInput,
+                        dialogKey: dialogConfig.dbKey,
+                        parentMessageId: undefined,
+                        runtimeOptions: effectiveRuntimeOptions,
+                        quickChatPerfStartedAt: args.quickChatPerfStartedAt,
+                    })
+                ).unwrap();
+                // streamAgentChatTurn 返回 { aborted: true } 表示用户在流中已取消，静默退出
+                if (streamResult && typeof streamResult === "object" && (streamResult as any).aborted) {
+                    return;
+                }
+                break;
+            } catch (turnErr: any) {
+                const parsed = parseSendError(turnErr);
+                if (
+                    attempt < maxStartupAttempts &&
+                    (parsed.kind === "network" || parsed.kind === "timeout")
+                ) {
+                    const delayMs = attempt * 800;
+                    const retryAbortController = new AbortController();
+                    const retryKey = `retry:${dialogConfig.dbKey ?? "global"}`;
+                    try {
+                        dispatch(
+                            addActiveController({
+                                messageId: retryKey,
+                                controller: retryAbortController,
+                                dialogKey: dialogConfig.dbKey,
+                            })
+                        );
+                        await waitForAbortableDelay(delayMs, retryAbortController.signal);
+                    } catch {
+                        // 被用户 Stop/abort 唤醒
+                    } finally {
+                        dispatch(
+                            removeActiveController({
+                                messageId: retryKey,
+                                dialogKey: dialogConfig.dbKey,
+                            })
+                        );
+                    }
+
+                    // 检查在退避窗口期间是否被用户取消
+                    if (retryAbortController.signal.aborted) {
+                        console.info("[handleSendMessage] Auto-retry cancelled by user stop during backoff window.");
+                        return;
+                    }
+
+                    continue;
+                }
+                throw turnErr;
+            }
+        }
+
         // undefined = turn 静默未启动(启动失败,写错误文案);
         // { aborted: true } = 用户取消或竞态取消(streamAgentChatTurn 的 abort
         // 标记)——不是失败,不写错误文案。
@@ -302,7 +416,7 @@ export const handleSendMessageAction = async (
             : typeof error === "string"
             ? error
             : error?.message || error?.error || String(error);
-        // 把错误写进对话流，用户可以直接在对话里看到并操作（如点击验证链接），
+        // 把错误写进对话流，用户可以直接在对话里看到并操作（如点击验证链接/重试），
         // 而不是只弹一个瞬间消失的 toast。仅在已拿到 dialogConfig 与 agentKey
         // 时才能写（没有 agentKey 说明连发送上下文都不完整，交给上层处理）。
         try {
@@ -311,7 +425,7 @@ export const handleSendMessageAction = async (
                     dispatch,
                     dialogConfig,
                     agentKeyToUse,
-                    errorMessage,
+                    error,
                 );
                 return rejectWithValue({
                     __errorInDialog: true,

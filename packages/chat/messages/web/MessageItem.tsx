@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { useAppSelector } from "app/store";
+import { useAppDispatch, useAppSelector } from "app/store";
 import { useUserId } from "identity";
 import { useFetchData } from "app/hooks";
 import { useCouldEdit } from "identity";
@@ -23,6 +23,7 @@ import { selectLastAssistantMessage } from "../messageSlice";
 import { matchContextualFragment } from "../contextualFragment";
 import { extractTextFromContent } from "../extractTextFromContent";
 import ContextualStatusRow from "./ContextualStatusRow";
+import { handleSendMessage } from "../../dialog/dialogSlice";
 
 export type MessageItemProps = {
   message: any;
@@ -104,6 +105,7 @@ export const MessageItem = memo(
     enableActions = true,
     isStreaming: isStreamingProp,
   }: MessageItemProps) => {
+    const dispatch = useAppDispatch();
     const currentUserId = useUserId();
     const currentServer = useAppSelector(selectRuntimeCurrentServer);
 
@@ -118,6 +120,21 @@ export const MessageItem = memo(
     // isStreaming 极少被写入（messageSlice 不置 true），仅作兜底。
     const isStreaming = isStreamingProp ?? message?.isStreaming ?? false;
     const messageAgentKey = resolveMessageAgentKey(message);
+    const errorMeta = message?.errorMeta ?? message?.metadata?.errorMeta;
+
+    const handleRetry = useCallback(() => {
+      const dialogKey =
+        message?.dialogKey ||
+        (message?.dialogId ? `dialog-${message.dialogId}` : undefined);
+      dispatch(
+        handleSendMessage({
+          isRetry: true,
+          retryMessageId: message?.id,
+          dialogKey,
+          targetAgentKey: messageAgentKey || undefined,
+        })
+      );
+    }, [dispatch, message?.dialogKey, message?.dialogId, message?.id, messageAgentKey]);
 
     const isSelf = role === "user" && (currentUserId === userId || !messageAgentKey);
     const isRobot = role !== "user";
@@ -234,6 +251,8 @@ export const MessageItem = memo(
               messageId={message?.id}
               finishReason={message?.finishReason}
               retryProgress={message?.retryProgress}
+              errorMeta={errorMeta}
+              onRetry={errorMeta?.retryable ? handleRetry : undefined}
             />
           }
           actions={actionsNode}

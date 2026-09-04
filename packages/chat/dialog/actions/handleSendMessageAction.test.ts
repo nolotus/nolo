@@ -6,6 +6,30 @@ import {
 import { fileURLToPath } from "node:url";
 const realMessageSlice = await import("chat/messages/messageSlice");
 const realDbSlice = await import("database/dbSlice");
+import {
+  resolveDialogRuntimeAgentConfig,
+  resolveDialogRuntimeAgentKey,
+} from "../dialogAgentPolicy";
+
+const resolveHandleSendMessageContextMock = mock((input: any): any => {
+  const { dialogConfig, targetAgentKey, runtimeOptions } = input;
+  if (dialogConfig?.dbKey === "dialog-noagent") {
+    return {
+      agentKeyToUse: undefined,
+      agentConfigToUse: undefined,
+      effectiveRuntimeOptions: undefined,
+    };
+  }
+  return {
+    agentKeyToUse: resolveDialogRuntimeAgentKey(dialogConfig, targetAgentKey),
+    agentConfigToUse:
+      resolveDialogRuntimeAgentConfig(dialogConfig, targetAgentKey) ?? undefined,
+    effectiveRuntimeOptions:
+      dialogConfig?.category === "user-overlay-profile"
+        ? buildPersonalizationRuntimeOptionsMock(runtimeOptions ?? {})
+        : runtimeOptions,
+  };
+});
 
 const prepareAndPersistUserMessageMock = mock((payload: any): any => ({
   kind: "prepareAndPersistUserMessage",
@@ -56,6 +80,9 @@ const loadHandleSendMessageAction = async () => {
   mock.module("ai/policy/personalizationDialog", () => ({
     PERSONALIZATION_DIALOG_CATEGORY: "user-overlay-profile",
     buildPersonalizationRuntimeOptions: buildPersonalizationRuntimeOptionsMock,
+  }));
+  mock.module("./handleSendMessageResolver", () => ({
+    resolveHandleSendMessageContext: resolveHandleSendMessageContextMock,
   }));
 
   const module = await import(`./handleSendMessageAction.ts?test=${moduleVersion++}`);
@@ -526,6 +553,7 @@ const result = await handleSendMessageAction(
     const dialogConfig = {
       dbKey: "dialog-noagent",
       id: "noagent",
+      agentMode: "fixed" as const,
       cybots: [],
     };
     selectByIdMock.mockReturnValue(dialogConfig);
@@ -554,6 +582,356 @@ const result = await handleSendMessageAction(
     );
 
     // 没有 agent 时提前 return，不写错误消息也不 reject
+    expect(result).toBeUndefined();
+    expect(messageStreamEndMock).not.toHaveBeenCalled();
+    expect(rejectWithValue).not.toHaveBeenCalled();
+  });
+
+  it("skips prepareAndPersistUserMessage in retry mode and reuses last user message", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-retry-1",
+      id: "retry-1",
+      cybots: ["agent-1"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    const historyMessages = [
+      { id: "msg-user-1", role: "user", content: "请帮我写一段代码" },
+      {
+        id: "msg-assistant-1",
+        role: "assistant",
+        content: "[发送失败]",
+        errorMeta: { kind: "network", retryable: true },
+      },
+    ];
+
+    const dispatch = mock((action: any) => {
+      if (action.kind === "readAndWait") {
+        return { unwrap: async () => dialogConfig };
+      }
+      if (action.kind === "streamAgentChatTurn") {
+        return { unwrap: async () => ({}) };
+      }
+      return action;
+    });
+
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-retry-1");
+
+    await handleSendMessageAction(
+      { isRetry: true },
+      {
+        dispatch,
+        getState: () =>
+          ({
+            message: {
+              dialogStateById: {
+                "retry-1": {
+                  msgs: {
+                    ids: ["msg-user-1", "msg-assistant-1"],
+                    entities: {
+                      "msg-user-1": historyMessages[0],
+                      "msg-assistant-1": historyMessages[1],
+                    },
+                  },
+                },
+              },
+            },
+          }) as any,
+        rejectWithValue,
+      }
+    );
+
+    // 重试时不重复落用户消息
+    expect(prepareAndPersistUserMessageMock).not.toHaveBeenCalled();
+    // 成功触发了 streamAgentChatTurn，且提取了上一条 user 消息
+    expect(streamAgentChatTurnMock).toHaveBeenCalledTimes(1);
+    expect(streamAgentChatTurnMock.mock.calls[0][0].userInput).toBe(
+      "请帮我写一段代码"
+    );
+  });
+
+  it("attaches structured errorMeta when final failure occurs", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-fail-1",
+      id: "fail-1",
+      cybots: ["agent-err"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    const dispatch = mock((action: any) => {
+      if (action.kind === "prepareAndPersistUserMessage") {
+        return { unwrap: async () => ({}) };
+      }
+      if (action.kind === "streamAgentChatTurn") {
+        return {
+          unwrap: async () => {
+            throw new Error("TypeError: Failed to fetch");
+          },
+        };
+      }
+      if (action.kind === "messageStreamEnd") {
+        return { unwrap: async () => ({}) };
+      }
+      return action;
+    });
+
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-fail-1");
+
+    const result = await handleSendMessageAction(
+      { userInput: "hello" },
+      {
+        dispatch,
+        getState: () => ({ dialog: {} }) as any,
+        rejectWithValue,
+      }
+    );
+
+    expect(result).toEqual({
+      __errorInDialog: true,
+      message: "TypeError: Failed to fetch",
+    });
+
+    expect(messageStreamEndMock).toHaveBeenCalledTimes(1);
+    const endPayload = messageStreamEndMock.mock.calls[0][0];
+    expect(endPayload.messageMetadata?.errorMeta).toBeDefined();
+    expect(endPayload.messageMetadata?.errorMeta?.kind).toBe("network");
+    expect(endPayload.messageMetadata?.errorMeta?.retryable).toBe(true);
+    expect(endPayload.messageMetadata?.errorMeta?.summary).toBe("连接中断");
+    expect(endPayload.messageMetadata?.errorMeta?.actionHint).toContain("网络波动或服务端瞬时问题");
+  });
+
+  it("automatically retries transient network errors during startup and succeeds", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-auto-retry",
+      id: "auto-retry",
+      cybots: ["agent-retry"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    let streamTurnCalls = 0;
+    const dispatch = mock((action: any) => {
+      if (action.kind === "prepareAndPersistUserMessage") {
+        return { unwrap: async () => ({}) };
+      }
+      if (action.kind === "streamAgentChatTurn") {
+        streamTurnCalls++;
+        if (streamTurnCalls === 1) {
+          // 第一次调用模拟网络瞬断失败
+          return {
+            unwrap: async () => {
+              throw new Error("TypeError: Failed to fetch");
+            },
+          };
+        }
+        // 第二次重试成功
+        return {
+          unwrap: async () => ({
+            outcome: "done",
+          }),
+        };
+      }
+      return action;
+    });
+
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-auto-retry");
+
+    const result = await handleSendMessageAction(
+      { userInput: "retry please" },
+      {
+        dispatch,
+        getState: () => ({ dialog: {} }) as any,
+        rejectWithValue,
+      }
+    );
+
+    // 应该调用了 2 次 streamAgentChatTurn（1 次失败 + 1 次重试成功）
+    expect(streamTurnCalls).toBe(2);
+    expect(messageStreamEndMock).not.toHaveBeenCalled();
+    expect(rejectWithValue).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+  });
+
+  it("[MEDIUM-3] anchors retry input to the preceding user message of the target retryMessageId", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-retry-anchor",
+      id: "retry-anchor",
+      cybots: ["agent-1"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    // 历史场景：A(user) -> A_fail(assistant) -> B(user) -> B_done(assistant)
+    // 用户此时点击 A_fail 卡片上的重试，必须重试 A，而不是 B！
+    const historyMessages = [
+      { id: "msg-user-A", role: "user", content: "这是问题 A" },
+      { id: "msg-asst-A-fail", role: "assistant", content: "[发送失败]" },
+      { id: "msg-user-B", role: "user", content: "这是问题 B" },
+      { id: "msg-asst-B-done", role: "assistant", content: "回答 B" },
+    ];
+
+    const dispatch = mock((action: any) => {
+      if (action.kind === "streamAgentChatTurn") {
+        return { unwrap: async () => ({}) };
+      }
+      return action;
+    });
+
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-retry-anchor");
+
+    await handleSendMessageAction(
+      { isRetry: true, retryMessageId: "msg-asst-A-fail" },
+      {
+        dispatch,
+        getState: () =>
+          ({
+            message: {
+              dialogStateById: {
+                "retry-anchor": {
+                  msgs: {
+                    ids: historyMessages.map((m) => m.id),
+                    entities: Object.fromEntries(historyMessages.map((m) => [m.id, m])),
+                  },
+                },
+              },
+            },
+          }) as any,
+        rejectWithValue,
+      }
+    );
+
+    expect(prepareAndPersistUserMessageMock).not.toHaveBeenCalled();
+    expect(streamAgentChatTurnMock).toHaveBeenCalledTimes(1);
+    expect(streamAgentChatTurnMock.mock.calls[0][0].userInput).toBe("这是问题 A");
+  });
+
+  it("[MEDIUM-3] rejects and does not dispatch when history has no preceding user message", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-retry-empty",
+      id: "retry-empty",
+      cybots: ["agent-1"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    const dispatch = mock((action: any) => action);
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-retry-empty");
+
+    const result = await handleSendMessageAction(
+      { isRetry: true },
+      {
+        dispatch,
+        getState: () =>
+          ({
+            message: {
+              dialogStateById: {
+                "retry-empty": {
+                  msgs: {
+                    ids: [],
+                    entities: {},
+                  },
+                },
+              },
+            },
+          }) as any,
+        rejectWithValue,
+      }
+    );
+
+    expect(result).toBe("未找到可重试的用户输入");
+    expect(streamAgentChatTurnMock).not.toHaveBeenCalled();
+    expect(prepareAndPersistUserMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("[MEDIUM-1] aborts retry loop silently when user stops during backoff window", async () => {
+    const handleSendMessageAction = await loadHandleSendMessageAction();
+    prepareAndPersistUserMessageMock.mockClear();
+    streamAgentChatTurnMock.mockClear();
+    messageStreamEndMock.mockClear();
+    selectByIdMock.mockClear();
+    readAndWaitMock.mockClear();
+
+    const dialogConfig = {
+      dbKey: "dialog-abort-retry",
+      id: "abort-retry",
+      cybots: ["agent-1"],
+    };
+    selectByIdMock.mockReturnValue(dialogConfig);
+
+    let streamTurnCalls = 0;
+    const dispatch = mock((action: any) => {
+      if (action.kind === "prepareAndPersistUserMessage") {
+        return { unwrap: async () => ({}) };
+      }
+      if (action.kind === "streamAgentChatTurn") {
+        streamTurnCalls++;
+        return {
+          unwrap: async () => {
+            throw new Error("TypeError: Failed to fetch");
+          },
+        };
+      }
+      if (action.type === "dialogRuntime/addActiveController") {
+        // 模拟在退避等待期间，用户点击了 Stop 触发了 abort
+        setTimeout(() => {
+          action.payload.controller.abort();
+        }, 10);
+      }
+      return action;
+    });
+
+    const rejectWithValue = mock((value: unknown) => value);
+    setActiveDialogKey("dialog-abort-retry");
+
+    const result = await handleSendMessageAction(
+      { userInput: "abort during retry" },
+      {
+        dispatch,
+        getState: () => ({ dialog: {} }) as any,
+        rejectWithValue,
+      }
+    );
+
+    // 仅尝试了第 1 次，在第 1 次失败后的 sleep 期间被 abort，未触发第 2 次重试
+    expect(streamTurnCalls).toBe(1);
+    // 静默退出，不写错误卡片
     expect(result).toBeUndefined();
     expect(messageStreamEndMock).not.toHaveBeenCalled();
     expect(rejectWithValue).not.toHaveBeenCalled();

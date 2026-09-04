@@ -484,17 +484,20 @@ import {
 process.env[DESKTOP_ENTRYPOINT_ENV_VAR] = join(import.meta.dir, "index.js");
 
 // Resolve desktop process cwd before any server/runtime code runs.
-// Priority: NOLO_DESKTOP_CWD env > packaged install dir (version.json present)
+// Priority: NOLO_DESKTOP_CWD env > user home dir (version.json present)
 // > dev-mode monorepo root (walk-up) > leave cwd as electrobun default.
 // In dev, version.json is absent so without this branch cwd stays at
 // `.app/Contents/MacOS` — ugly to display and semantically wrong as the agent
 // runtime workspace. Walking up to the monorepo root gives a short, correct
 // cwd that is injected into `window.__NOLO_DESKTOP_CWD__` for the webview.
+// Packaged builds used to chdir to EXECUTABLE_DIR, which made every execShell
+// inherit the install dir (`...\Nolo Desktop\bin\` on Windows) and broke all
+// relative paths; the user's home dir is the safer default workspace root.
 const desktopCwdOverride = process.env.NOLO_DESKTOP_CWD?.trim();
 if (desktopCwdOverride) {
     process.chdir(desktopCwdOverride);
 } else if (existsSync(join(PACKAGED_RESOURCES_DIR, "version.json"))) {
-    process.chdir(EXECUTABLE_DIR);
+    process.chdir(homedir());
 } else {
     const monorepoRoot = findMonorepoRoot([
         process.cwd(),

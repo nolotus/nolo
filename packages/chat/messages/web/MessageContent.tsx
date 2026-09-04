@@ -15,10 +15,11 @@ import {
   extractCanvasSnapshotText,
   parseCanvasSnapshotMessage,
 } from "render/canvas/canvasSnapshotParser";
-import type { CompletionFinishReason } from "../types";
+import type { CompletionFinishReason, MessageErrorMeta } from "../types";
 import * as stylex from "@stylexjs/stylex";
 import { messageContentFinishReasonStyles } from "./messageContentFinishReasonStyles";
 import CanvasSnapshotMessage from "render/canvas/CanvasSnapshotMessage";
+import { SendErrorCard } from "./SendErrorCard";
 
 type MessageContentProps = {
   content: any;
@@ -32,6 +33,10 @@ type MessageContentProps = {
    * 在 assistant 气泡下方渲染一条克制提示，其余值不展示。
    */
   finishReason?: CompletionFinishReason;
+  /** 结构化错误元数据（发送失败卡片） */
+  errorMeta?: MessageErrorMeta;
+  /** 手动重试回调 */
+  onRetry?: () => void;
   /** 自动重试进度（UI 展示「自动重试 N/M · Xs」）。 */
   retryProgress?: {
     attempt: number;
@@ -52,6 +57,8 @@ function areMessageContentPropsEqual(
     prev.isStreaming === next.isStreaming &&
     prev.messageId === next.messageId &&
     prev.finishReason === next.finishReason &&
+    prev.errorMeta === next.errorMeta &&
+    prev.onRetry === next.onRetry &&
     prev.retryProgress === next.retryProgress
   );
 }
@@ -65,6 +72,8 @@ export const MessageContent = memo(
     isStreaming = false,
     messageId,
     finishReason,
+    errorMeta,
+    onRetry,
     retryProgress,
   }: MessageContentProps) => {
     const { t } = useTranslation("chat");
@@ -261,12 +270,16 @@ export const MessageContent = memo(
               <span className="empty-content__line" />
             </div>
           )}
-          {isEmptyFinishedAssistant && (
+          {isEmptyFinishedAssistant && !errorMeta && (
             <div className="empty-assistant-fallback" role="status">
               未收到回复内容，请重试。
             </div>
           )}
-          {renderContent}
+          {errorMeta ? (
+            <SendErrorCard errorMeta={errorMeta} onRetry={onRetry} />
+          ) : (
+            renderContent
+          )}
         </div>
 
         {role !== "self" && finishReason === "length" && (
