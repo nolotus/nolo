@@ -17,15 +17,6 @@ conditions = ["nolo-cloud", "default"]
 preload = ["./scripts/test/stylexBunTestPlugin.ts"]
 
 [test]
-preload = [
-  "./scripts/test/setupDomGlobals.ts",
-  # StyleX 静态 API 编译通道：顶层 preload 只对 bun run / 裸 bun 进程生效，
-  # bun test 需要在 [test] 段重复挂载（Bun 的 preload 分段语义，2026-09-02 实测）。
-  "./scripts/test/stylexBunTestPlugin.ts",
-  # 每个测试进程独占一个临时 NOLO_HOME，避免测试写开发者真实的 ~/.nolo
-  # （agent 选择、本地 LevelDB、broker 端点都曾被测试改写）。
-  "./scripts/test/isolateNoloHome.ts",
-]
 # Playwright e2e/**/*.spec.ts → bun run test:e2e / playwright
 # Detox e2e/{home,space}.test.ts → detox (not bun)
 # Keep e2e/*.source.test.ts discoverable as bun unit contracts

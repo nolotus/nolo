@@ -152,7 +152,7 @@ jobs:
           NOLO_DESKTOP_SMOKE_SETUP: packages/desktop/smoke-artifacts/NoloDesktop-Smoke-Setup.exe
           NOLO_DESKTOP_SMOKE_LAUNCHER: Nolo Desktop Smoke.vbs
         run: |
-          ./scripts/verify/desktop/smokeInstalledWindowsDesktop.ps1
+          ./scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1
 
       - name: Build desktop (${{ matrix.label }})
         if: runner.os != 'Windows' || needs.select-targets.outputs.channel != 'stable'
@@ -220,11 +220,11 @@ jobs:
       - name: Verify legacy alias URLs
         run: |
           if [ "${{ needs.select-targets.outputs.channel }}" = "stable" ]; then
-            bun ./scripts/verify/desktop/verifyLegacyDesktopDownloadAlias.ts \
+            bun ./scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts \
               https://nolo.chat/public/downloads \
               packages/desktop/artifacts stable
           else
-            bun ./scripts/verify/desktop/verifyLegacyDesktopDownloadAlias.ts \
+            bun ./scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts \
               https://us.nolo.chat/public/downloads \
               packages/desktop/artifacts alpha
           fi

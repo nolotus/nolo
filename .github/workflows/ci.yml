@@ -13,6 +13,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - name: Projection safety gate
-        run: bun scripts/release/prepareNoloOpenSourceMirror.ts --out-dir /tmp/nolo-mirror-check
+        run: bun scripts/public-audit/verifyProjection.ts
       - name: Build web bundle
         run: bun scripts/dev/esbuild.config.js

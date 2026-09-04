@@ -75,7 +75,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NOLO_CLI_PUBLISH_DIST_TAG: ${{ inputs.dist_tag }}
           NOLO_CLI_PUBLISH_NPM_PREFIX: ${{ runner.temp }}/nolo-cli-prefix
-        run: bash ./scripts/ci/runCliPublishCi.sh
+        run: bash ./scripts/ci/runCliPublishPublic.sh
 
   npm-install-health:
     name: npm install health (${{ matrix.os }} / Node ${{ matrix.node }})

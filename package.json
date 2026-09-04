@@ -8,9 +8,7 @@
     "build": "cd packages/desktop && bun run build",
     "build:alpha": "cd packages/desktop && bun run build:alpha",
     "build:stable": "cd packages/desktop && bun run build:stable",
-    "test": "bun test",
-    "verify:cli-local-broker": "bun ./scripts/verify/verifyCliLocalBrokerConcurrency.ts",
-    "verify:cli-local-broker:contracts": "bun test packages/cli/localRuntimeBrokerBoundary.source.test.ts packages/cli/localRuntimeAuthority.test.ts packages/cli/localRuntimeDb.test.ts packages/cli/agentRuntimeCommands.test.ts packages/database/server/cliAuthorityBrokerClient.test.ts packages/database/server/cliAuthorityBrokerServer.test.ts packages/cli/agentPullCommand.test.ts packages/cli/client/localRuntimeAdapter.test.ts packages/database/server/db.source.test.ts packages/database/server/legacyServerDb.test.ts scripts/verify/verifyCliLocalBrokerConcurrency.source.test.ts"
+    "verify:projection": "bun ./scripts/public-audit/verifyProjection.ts"
   },
   "dependencies": {
     "@azure/core-asynciterator-polyfill": "^1.0.2",

@@ -17,11 +17,11 @@ import {
   type DesktopPublishConfig,
   type DesktopBuiltUpdateMetadata,
   type DesktopPublishPlatformInput,
-} from "../helpers/desktopReleasePublisher";
+} from "./desktopReleasePublisher";
 import {
   sha256Hex,
   uploadS3Object,
-} from "../helpers/s3Upload";
+} from "./s3Upload";
 import {
   normalizeDesktopReleaseManifest,
   type DesktopReleaseManifest,
