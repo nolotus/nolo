@@ -132,7 +132,8 @@ export function buildOpenAiTools(args: {
  * - controlAgentRun 的 `wait` 动作**按唤醒通道**去掉。执行器是支持它的，但有
  *   终态唤醒时它是纯冗余：唤醒会把对话接回来。留着的实际代价是模型拿连续
  *   `wait` 当轮询用，而 wait 超时与 run 进程超时在返回载荷里共用 `status`
- *   字段，于是「我等超时了」被渲染成「它失败了」。
+ *   字段，于是「我等超时了」被渲染成「它失败了」。有唤醒时同时把 status 收缩
+ *   成诊断语义（wakeEnabled），顶层「跟进度」affordance 一并移除。
  */
 function buildOrchestrationOpenAiTools(args: {
   toolNameSet: Set<string>;
@@ -145,9 +146,11 @@ function buildOrchestrationOpenAiTools(args: {
   const waitCapableActions = CONTROL_AGENT_RUN_ACTIONS.filter(
     (action) => action !== "wait",
   );
-  const controlSchema = hasRunWakeChannel(args.env)
-    ? buildControlAgentRunFunctionSchema({ actions: waitCapableActions })
-    : buildControlAgentRunFunctionSchema();
+  const wakeChannel = hasRunWakeChannel(args.env);
+  const controlSchema = buildControlAgentRunFunctionSchema({
+    ...(wakeChannel ? { actions: waitCapableActions } : {}),
+    wakeEnabled: wakeChannel,
+  });
   const startSchema = buildStartAgentRunFunctionSchema({ supportsWait: false });
   // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
   return prepareTools(names).map((tool: any) => {

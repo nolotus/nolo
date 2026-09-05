@@ -220,7 +220,7 @@ function renderWakeMessage(elements: string[], count: number): string {
   return [
     `<background_run_completion count="${count}">`,
     ...elements,
-    `需要完整输出时: controlAgentRun(action: "status", runId, tailLines: 30)`,
+    `需要完整输出/失败详情时: controlAgentRun(action: "status", runId, tailLines: 30)`,
     `</background_run_completion>`,
   ].join("\n");
 }

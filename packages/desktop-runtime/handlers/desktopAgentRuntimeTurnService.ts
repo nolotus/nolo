@@ -371,7 +371,7 @@ function buildDesktopStartAgentRunToolExecutor(args: {
     }
 
     // 统一派发语义：wait:true 同步（inline_result，返回 content）；wait 缺省/
-    // false 异步（background_handoff，立即返回 runId 用 controlAgentRun 观察）。
+    // false 异步（background_handoff，立即返回 runId，控制/诊断用 controlAgentRun）。
     const wait = parsed.wait === true;
     const background = !wait;
     // batchId 始终返回（未传时现铸一个），与 startAgentRun 工具契约一致。

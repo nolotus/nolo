@@ -46,6 +46,14 @@ const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
 };
 
 /**
+ * wake-enabled 环境的 `status` 句：诊断语义，不是进度 API。running 进度由宿主
+ * 观察（registry poller → dock；终态 → wake），status 只回答「是不是卡住了 /
+ * 失败详情是什么」，不承担等待完成或常规进度跟踪。
+ */
+const WAKE_STATUS_ACTION_DESCRIPTION =
+    "status=按需诊断单条 run：仅在怀疑卡死、失败后看详情/日志（tailLines>0）、或用户明确询问执行细节时调用；正常运行的进度由宿主观察，禁止连续 status 查询等待完成";
+
+/**
  * 按环境裁剪后的 controlAgentRun schema。
  *
  * 为什么 `wait` 可以被裁掉：它是「观察者阻塞」——冻结当前对话去等一条 run 到
@@ -55,25 +63,34 @@ const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
  * 返回载荷里共用同一个 `status` 字段。删掉动作，那道解释题就不存在了。
  *
  * 契约：`actions` 只做减法，且必须是 CONTROL_AGENT_RUN_ACTIONS 的子集；缺省
- * 给全集（服务端 / 无唤醒宿主原样保留 wait）。
+ * 给全集（服务端 / 无唤醒宿主原样保留 wait）。`wakeEnabled` 声明宿主有终态
+ * 唤醒通道；缺省按「有没有 wait」推导（历史上唯一裁掉 wait 的场景就是有唤醒），
+ * 显式传入用于「没有 wait 但也没有唤醒」的宿主——此时不承诺 wake，status 也
+ * 保持宽松语义（它可能是那里唯一的观察手段）。
  */
 export function buildControlAgentRunFunctionSchema(opts?: {
     actions?: readonly ControlAgentRunAction[];
+    wakeEnabled?: boolean;
 }) {
     const actions = opts?.actions ?? CONTROL_AGENT_RUN_ACTIONS;
     const hasWait = actions.includes("wait");
+    const wake = opts?.wakeEnabled ?? !hasWait;
     const actionList = actions.filter((a) => a !== "todo").join("/");
     return {
         name: "controlAgentRun",
         description:
             `观察和控制后台 agent run（action：${actionList}，另有 todo 查询）。` +
-            (hasWait
-                ? "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。"
-                : "用 startAgentRun 拿到 runId 后跟进度、追加指令或叫停。") +
+            (wake
+                ? "本环境有终态唤醒（terminal wake）：正常后台 run 派发后直接收尾，宿主会持续观察生命周期并在 run 到终态时自动把父对话接回来。"
+                : hasWait
+                    ? "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。"
+                    : "用 startAgentRun 拿到 runId 后跟进度、追加指令或叫停。") +
             "盯梢/轮询纪律见 system prompt「多 Agent 编排」段：异步派发后等终态通知、不要轮询；" +
             (hasWait
                 ? "阻塞等待（wait action）会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 无并行工作可做。"
-                : "本环境有终态唤醒：run 到终态会自动把对话接回来，所以没有阻塞等待动作——派发后直接收尾，不要用连续查状态代替等待。") +
+                : wake
+                    ? "本工具没有阻塞等待动作，只用于控制、异常诊断和必要的一次性状态检查，不用于等待完成或持续跟踪进度，不要用连续查状态代替等待。"
+                    : "") +
             "本工具供你自己做决策用：用户界面已实时显示每条 run 的状态，不必为「让用户看到状态」而调用，返回值也不要复述给用户。",
         parameters: {
             type: "object",
@@ -82,7 +99,11 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                     type: "string",
                     enum: [...actions],
                     description: actions
-                        .map((a) => ACTION_DESCRIPTIONS[a])
+                        .map((a) =>
+                            a === "status" && wake
+                                ? WAKE_STATUS_ACTION_DESCRIPTION
+                                : ACTION_DESCRIPTIONS[a],
+                        )
                         .join("；"),
                 },
                 runId: {
@@ -120,7 +141,9 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                     type: "number",
                     description:
                         "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
-                        "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。",
+                        (wake
+                            ? "状态摘要含 progress（inFlight=此刻在执行什么、idleMs），用于一次性判断「它是不是卡住了」；正常运行的进度由宿主观察，不要反复调用 status 盯 progress。"
+                            : "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。"),
                     default: 0,
                 },
                 batchId: {

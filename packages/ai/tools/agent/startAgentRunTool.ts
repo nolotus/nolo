@@ -3,7 +3,7 @@
 // startAgentRun tool — starts a background agent run. Two modes:
 //
 //   - default (wait:false): Unix analogy fork + exec. Returns a runId
-//     (= dialogId = threadId) immediately; observe / stop via controlAgentRun.
+//     (= dialogId = threadId) immediately; control / diagnose via controlAgentRun.
 //     异步派发后禁止轮询查询——不要反复调 status 等结果，用户界面已实时显示
 //     每条 run 状态；wait:true 仅限三条例外（<100s 且马上要用 / 用户明确要求
 //     同步 / 环境不支持终态唤醒且无并行工作），阻塞会冻结对话，见 wait 参数描述。
@@ -43,7 +43,7 @@ export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean
     return {
     name: "startAgentRun",
     description:
-        "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，之后用 controlAgentRun 观察/停止，等终态通知，禁止轮询。" +
+        "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，派发后直接收尾等终态通知，禁止轮询；controlAgentRun 用于控制（叫停/追加指令）与异常诊断。" +
         (supportsWait
             ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
               "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
@@ -92,7 +92,7 @@ export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean
                           type: "boolean",
                           description:
                               "可选。为 true 时同步等待子任务完成并直接返回结果（订阅 SSE 等 done/failed），不返回 runId。" +
-                              "阻塞等待会冻结当前对话，仅限三种情况（见顶层描述）；默认 false（异步，返回 runId 后用 controlAgentRun 观察）。",
+                              "阻塞等待会冻结当前对话，仅限三种情况（见顶层描述）；默认 false（异步，返回 runId 后直接收尾等终态通知）。",
                           default: false,
                       },
                       resultMode: {

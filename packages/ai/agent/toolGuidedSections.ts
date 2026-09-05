@@ -17,12 +17,12 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 // 选人优先级契约由「多 Agent 协作」段唯一承载，本段只保留派发之后的盯梢与排错。
 // ============================================================================
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
-用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 观察/停止。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
+用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 控制/诊断。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
 1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由——靠 wake 接力。是否允许阻塞等待，由工具表自己回答，不用你判断环境：controlAgentRun 的 action 里有 wait 就说明这里没有终态唤醒通道，可以用它阻塞到终态（同样不要自己循环 wait，那是伪装成等待的轮询）；没有 wait 就说明 run 到终态会自动把对话接回来，派发完直接收尾。
-2. 禁止轮询/禁空转/别复述 status，语义以两个工具的描述为准。controlAgentRun 只在「答案会改变你下一步动作」时用（能否汇总、要不要叫停/补派）；一次性死活检查用 status(runId, tailLines:0)。并行：独立子任务一次派完，等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有真实文件/数据依赖或 brief 明示冲突面时才串行。
+2. 禁止轮询/禁空转/别复述 status，语义以两个工具的描述为准。完成门是终态唤醒：正常后台 run 派发后收尾，能否汇总、要不要继续由 terminal wake 决定，不要用主动 status 判断。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看状态摘要）。并行：独立子任务一次派完，等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
-4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志；stop 之前先看日志确认是真卡死，并用 list/status 确认 run 真实存在且非终态，别假设「派发了就在跑」。`;
+4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 自证 not found，但对已终态 run 不要 stop（会覆盖终态结论），不确定就先一次 status。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
