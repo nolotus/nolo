@@ -1,7 +1,8 @@
 // packages/cli/client/compactDialog.ts
 // HTTP-only compact helper for CLI TUI (no Redux store available).
-// Compares and forks: generate a summary of the old dialog, write it back,
-// then create a new dialog that inherits the compressed context.
+// Compares and forks: generate a summary of the old dialog, write it back
+// to the source dialog, then create a fork that carries only lineage,
+// referenceKeys, and allowed config fields (compression state starts clean).
 
 import { extractCustomId } from "core/prefix";
 import { ulid } from "ulid";
@@ -267,11 +268,13 @@ async function resolveContextWindow(
  * 2. Use planCompression to decide whether/how much to compress.
  * 3. If compression is needed, call the summary LLM and write the summary
  *    back to the old dialog.
- * 4. Fork the dialog, inheriting the compressed context (summary + markers).
+ * 4. Fork the dialog, carrying only lineage (inheritedFromDialogKey/Title),
+ *    referenceKeys, and allowed config fields; compression state
+ *    (summary/summarizedBeforeId/compressionCount) starts clean in the fork.
  * 5. Register the new dialog in the space sidebar (best-effort).
  *
  * This mirrors the Web `compactDialogAndForkAction` semantics: "compress then
- * fork with inherited summary" — not "fork clean".
+ * fork" — compression results stay dialog-local and are NOT inherited.
  */
 export async function compactDialog(options: {
   serverUrl: string;
