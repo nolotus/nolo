@@ -67,6 +67,7 @@ const COPILOT_CLI_MODELS = [
   { value: "claude-opus-4.6-fast", label: "Claude Opus 4.6 Fast（30x）" },
   { value: "claude-opus-4.5", label: "Claude Opus 4.5（3x）" },
   { value: "claude-sonnet-4", label: "Claude Sonnet 4（1x）" },
+  { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
   { value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
@@ -83,7 +84,8 @@ const COPILOT_CLI_MODELS = [
 ];
 
 const GEMINI_CLI_MODELS = [
-  { value: "", label: "默认 (gemini-3.7-flash)" },
+  { value: "", label: "默认 (gemini-3.8-flash)" },
+  { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
   { value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
 ];

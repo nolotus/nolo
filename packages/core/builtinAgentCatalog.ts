@@ -180,14 +180,14 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   // 存量记录由 modelUpgradeTable 迁移到 nolo/glm-5-3-flash，兼容期请求由
   // platformHostedRoutingTable 重映射；客户端下架提示走 publicAgents.removedFromPlaza。
   // Gemini 文本档只上架最新一代：旧版留在广场只会分散选择、拉长列表，而
-  // 用户想要的是「最新的那个 Gemini」。gemini-3.6-flash 这个**模型**仍然保留
+  // 用户想要的是「最新的那个 Gemini」。旧版模型仍可保留用于兼容历史请求，
   // （modelAbility / 定价表照旧），下架的只是广场入口。
   {
     id: "01GEM37FLPB00000000FJCRNC",
     group: "public",
-    name: "Gemini 3.7 Flash",
+    name: "Gemini 3.8 Flash",
     provider: "google",
-    model: "gemini-3.7-flash",
+    model: "gemini-3.8-flash",
     runtimeFallback: true,
   },
   {

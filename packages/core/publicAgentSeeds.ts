@@ -399,15 +399,16 @@ export const GROK_4_6_DEF = defineAgentSeed({
   tags: ["xai", "grok"],
 });
 
-export const GEMINI_3_7_FLASH_DEF = defineAgentSeed({
+export const GEMINI_3_8_FLASH_DEF = defineAgentSeed({
+  // 种子串冻结以维持确定性 ID 稳定，勿随版本改名。
   id: deterministicId("01GEM37FLPB", "shared-space-google-gemini-3-7-flash"),
-  presetKey: "gemini-3.7-flash",
-  name: "Gemini 3.7 Flash",
+  presetKey: "gemini-3.8-flash",
+  name: "Gemini 3.8 Flash",
   provider: "google",
-  model: "gemini-3.7-flash",
+  model: "gemini-3.8-flash",
   isPublic: true,
-  introduction: "Gemini 3.7 Flash 公开助手，适合快速前沿问答、代码、多模态和长上下文任务。",
-  greeting: "你好，我是 Gemini 3.7 Flash。适合快速处理长上下文、多模态和代码任务。",
+  introduction: "Gemini 3.8 Flash 公开助手，适合快速前沿问答、代码、多模态和长上下文任务。",
+  greeting: "你好，我是 Gemini 3.8 Flash。适合快速处理长上下文、多模态和代码任务。",
   prompt:
     "优先直接完成任务；需要推理或写代码时保持步骤清晰、结论可靠。",
   tools: [],
@@ -567,7 +568,7 @@ export const PUBLIC_AGENT_DEFS = [
   GLM_5_3_DEF,
   GLM_5_3_FLASH_DEF,
   GROK_4_6_DEF,
-  GEMINI_3_7_FLASH_DEF,
+  GEMINI_3_8_FLASH_DEF,
   GPT_IMAGE_2_GENERATOR_DEF,
   GPT_IMAGE_2_EDITOR_DEF,
   GPT_IMAGE_2_CONTINUOUS_DEF,

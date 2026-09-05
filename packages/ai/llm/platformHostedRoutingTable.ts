@@ -25,6 +25,7 @@ export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
 export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
 export const PLATFORM_HOSTED_GLM_53_FLASH_MODEL = "glm-5-3-flash";
+export const PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL = "gemini-3.8-flash";
 export const PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL = "gemini-3.7-flash";
 export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image-preview";
@@ -159,7 +160,16 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   },
-  // Gemini 3.7 Flash -> Google official OpenAI-compatible endpoint
+  // Gemini 3.8 Flash -> Google official OpenAI-compatible endpoint
+  [PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL]: {
+    endpoint:
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    usageProvider: "google",
+    keyName: "google",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // Gemini 3.7 Flash -> Google official OpenAI-compatible endpoint (historical compat)
   [PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL]: {
     endpoint:
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",

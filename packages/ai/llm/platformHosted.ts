@@ -21,6 +21,7 @@ import {
   PLATFORM_HOSTED_GLM_53_MODEL,
   PLATFORM_HOSTED_GLM_52_MODEL,
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+  PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
@@ -154,10 +155,10 @@ export const isPlatformHostedGlm53FlashModel = (
 };
 
 /**
- * Gemini 3.7 Flash（平台托管语义）：直连 Google 官方原生 API（gemini-3.7-flash，
+ * Gemini 3.8 Flash（平台托管语义）：直连 Google 官方原生 API（gemini-3.8-flash，
  * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
  */
-export const PLATFORM_HOSTED_GEMINI_37_FLASH_PRICE = {
+export const PLATFORM_HOSTED_GEMINI_38_FLASH_PRICE = {
   input: 4.2, // 6.0 credits
   output: 21, // 30.0 credits
   cachingWrite: 0.42, // 0.6 credits
@@ -443,10 +444,10 @@ export const platformHostedModels = [
     supportsReasoningEffort: true,
   },
   {
-    name: PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
-    displayName: "Gemini 3.7 Flash",
+    name: PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL,
+    displayName: "Gemini 3.8 Flash",
     hasVision: true,
-    price: { ...PLATFORM_HOSTED_GEMINI_37_FLASH_PRICE },
+    price: { ...PLATFORM_HOSTED_GEMINI_38_FLASH_PRICE },
     maxOutputTokens: 65536,
     contextWindow: 1_048_576,
     supportsTool: true,
