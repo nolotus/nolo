@@ -38,8 +38,12 @@ import { extractCustomId } from "core/prefix";
  * 在那里声明 wait 不是「多给一个选项」，是撒谎：模型以为自己拿到了结果，实际
  * 拿到的是一个 runId。schema 必须跟着执行器走。
  */
-export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean }) {
+export function buildStartAgentRunFunctionSchema(opts?: {
+    supportsWait?: boolean;
+    wakeEnabled?: boolean;
+}) {
     const supportsWait = opts?.supportsWait !== false;
+    const wakeEnabled = opts?.wakeEnabled === true;
     return {
     name: "startAgentRun",
     description:
@@ -47,7 +51,9 @@ export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean
         (supportsWait
             ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
               "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
-            : "本宿主只有异步派发，没有同步等待：run 到终态会自动唤醒对话把结果送回来。"),
+            : wakeEnabled
+                ? "只支持异步派发；run 到终态会自动通过 terminal wake 把父对话接回来；派发后直接收尾，不要轮询"
+                : "只支持异步派发，startAgentRun 不提供同步等待；需要等终态时可用 controlAgentRun(wait)（若该 action 可用）；不要假设会自动 terminal wake"),
     parameters: {
         type: "object",
         properties: {

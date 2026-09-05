@@ -151,7 +151,10 @@ function buildOrchestrationOpenAiTools(args: {
     ...(wakeChannel ? { actions: waitCapableActions } : {}),
     wakeEnabled: wakeChannel,
   });
-  const startSchema = buildStartAgentRunFunctionSchema({ supportsWait: false });
+  const startSchema = buildStartAgentRunFunctionSchema({
+    supportsWait: false,
+    wakeEnabled: wakeChannel,
+  });
   // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
   return prepareTools(names).map((tool: any) => {
     if (tool?.function?.name === "controlAgentRun") {

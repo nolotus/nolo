@@ -21,8 +21,8 @@ import { toErrorMessage } from "core/errorMessage";
 import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
 
 /**
- * 可用 action 的全集。`wait` 是唯一一个「观察者阻塞」动作，也是唯一一个能
- * 被环境裁掉的：见 buildControlAgentRunFunctionSchema 的注释。
+ * 可用 action 的全集。`actions` 描述能力面；`wakeEnabled` 独立描述宿主
+ * 是否确实提供 terminal wake。
  */
 export const CONTROL_AGENT_RUN_ACTIONS = [
     "list",
@@ -64,9 +64,8 @@ const WAKE_STATUS_ACTION_DESCRIPTION =
  *
  * 契约：`actions` 只做减法，且必须是 CONTROL_AGENT_RUN_ACTIONS 的子集；缺省
  * 给全集（服务端 / 无唤醒宿主原样保留 wait）。`wakeEnabled` 声明宿主有终态
- * 唤醒通道；缺省按「有没有 wait」推导（历史上唯一裁掉 wait 的场景就是有唤醒），
- * 显式传入用于「没有 wait 但也没有唤醒」的宿主——此时不承诺 wake，status 也
- * 保持宽松语义（它可能是那里唯一的观察手段）。
+ * 唤醒通道；缺省为 false，不从 actions 推导。actions 与 wakeEnabled 正交：
+ * 前者是工具动作能力面，后者是宿主是否真的有 terminal wake。
  */
 export function buildControlAgentRunFunctionSchema(opts?: {
     actions?: readonly ControlAgentRunAction[];
@@ -74,7 +73,7 @@ export function buildControlAgentRunFunctionSchema(opts?: {
 }) {
     const actions = opts?.actions ?? CONTROL_AGENT_RUN_ACTIONS;
     const hasWait = actions.includes("wait");
-    const wake = opts?.wakeEnabled ?? !hasWait;
+    const wake = opts?.wakeEnabled === true;
     const actionList = actions.filter((a) => a !== "todo").join("/");
     return {
         name: "controlAgentRun",

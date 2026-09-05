@@ -814,15 +814,29 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     // action === "stop"
-    if (typeof record.pid === "number") {
-      const confirmed = await terminateRunProcess(record, "SIGTERM", deps);
+    const reconciled = checkStaleRun(record.runId, deps) ?? record;
+    if (isAgentRunTerminalStatus(reconciled.status)) {
+      const labels = agentRunCardLabels();
+      return {
+        content: JSON.stringify({
+          runId: reconciled.runId,
+          found: true,
+          status: reconciled.status,
+        }),
+        metadata: {
+          displayData: formatStopRunCard(reconciled.status, labels),
+        },
+      };
+    }
+    if (typeof reconciled.pid === "number") {
+      const confirmed = await terminateRunProcess(reconciled, "SIGTERM", deps);
       if (!confirmed) {
         // 进程 SIGKILL 后仍存活：不标记 killed，如实上报。
         return {
           content: JSON.stringify({
             runId: record.runId,
             found: true,
-            status: record.status,
+            status: reconciled.status,
             stopConfirmed: false,
           }),
           metadata: {
@@ -831,7 +845,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         };
       }
     }
-    finalizeRunRecord(record.runId, { status: "killed" }, deps);
+    finalizeRunRecord(reconciled.runId, { status: "killed" }, deps);
     const labels = agentRunCardLabels();
     return {
       content: JSON.stringify({ runId: record.runId, found: true, status: "killed" }),
