@@ -1,5 +1,5 @@
-// Generates structured run acceptance reports when an agent run reaches a terminal state.
-// Writes markdown to ~/.nolo/runs/<runId>.report.md and structured JSON to ~/.nolo/runs/<runId>.report.json.
+// Generates compatibility acceptance reports for the supervise workflow.
+// The normal run path persists DoD results directly in ~/.nolo/runs/<runId>.json.
 
 import { homedir as nodeHomedir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,10 @@ import {
   type FsLike,
   type RunRecord,
 } from "./agentRunControl";
+import {
+  executeDoDCommand,
+  type DoDCommandResult,
+} from "./agentRunDoD";
 
 export type AgentRunReportDeps = {
   env?: Record<string, string | undefined>;
@@ -25,13 +29,6 @@ export type AgentRunReportDeps = {
   spawnSync?: typeof nodeSpawnSync;
   execFileSync?: typeof nodeExecFileSync;
   forceReport?: boolean;
-};
-
-export type DoDCommandResult = {
-  command: string;
-  exitCode: number | "timeout" | "error";
-  stdoutTail: string[];
-  stderrTail: string[];
 };
 
 export type RunReportJson = {
@@ -64,76 +61,10 @@ export function formatDuration(startedAt: string, endedAt?: string, now?: Date):
   return `${seconds}s`;
 }
 
-export function extractTailLines(text: string | undefined | null, count: number): string[] {
-  if (!text) return [];
-  const lines = String(text).split(/\r?\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return lines.slice(Math.max(0, lines.length - count));
-}
-
 function formatCodeBlockCell(lines: string[]): string {
   if (lines.length === 0) return "-";
   const escaped = lines.map((line) => line.replace(/\|/g, "\\|")).join("<br>");
   return `<pre>${escaped}</pre>`;
-}
-
-export function executeDoDCommand(
-  cmd: string,
-  cwd: string | undefined,
-  deps: AgentRunReportDeps = {}
-): DoDCommandResult {
-  const spawnSync = deps.spawnSync ?? nodeSpawnSync;
-  try {
-    const res = spawnSync(cmd, {
-      shell: true,
-      cwd: cwd || process.cwd(),
-      timeout: 120_000,
-      maxBuffer: 10 * 1024 * 1024,
-      encoding: "utf8",
-    });
-
-    if (res.error) {
-      const errCode = (res.error as any).code;
-      if (errCode === "ETIMEDOUT" || res.signal === "SIGTERM" || res.signal === "SIGKILL") {
-        return {
-          command: cmd,
-          exitCode: "timeout",
-          stdoutTail: extractTailLines(res.stdout, 20),
-          stderrTail: extractTailLines(res.stderr || res.error.message, 10),
-        };
-      }
-      return {
-        command: cmd,
-        exitCode: "error",
-        stdoutTail: extractTailLines(res.stdout, 20),
-        stderrTail: extractTailLines(res.stderr || res.error.message, 10),
-      };
-    }
-
-    if (res.status === null && (res.signal === "SIGTERM" || res.signal === "SIGKILL")) {
-      return {
-        command: cmd,
-        exitCode: "timeout",
-        stdoutTail: extractTailLines(res.stdout, 20),
-        stderrTail: extractTailLines(res.stderr, 10),
-      };
-    }
-
-    const exitCode = typeof res.status === "number" ? res.status : "error";
-    return {
-      command: cmd,
-      exitCode,
-      stdoutTail: extractTailLines(res.stdout, 20),
-      stderrTail: extractTailLines(res.stderr, 10),
-    };
-  } catch (err) {
-    return {
-      command: cmd,
-      exitCode: "error",
-      stdoutTail: [],
-      stderrTail: extractTailLines(err instanceof Error ? err.message : String(err), 10),
-    };
-  }
 }
 
 export type GitSummaryResult = {

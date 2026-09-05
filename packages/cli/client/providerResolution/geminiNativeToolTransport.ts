@@ -117,6 +117,8 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
             content: text,
             model,
             tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+            finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+            stream_complete: true,
             ...(usage ? { usage } : {}),
             trace: messages,
           };

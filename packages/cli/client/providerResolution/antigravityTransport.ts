@@ -128,6 +128,7 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
         const choice = Array.isArray(result.body.choices)
           ? (result.body.choices[0] as
               | {
+                  finish_reason?: string | null;
                   message?: {
                     content?: string | null;
                     tool_calls?: AgentRuntimeToolCall[];
@@ -158,9 +159,12 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
           provider: agentConfig.provider || "google-antigravity",
           ...(tool_calls ? { tool_calls } : {}),
           // fetchAntigravityCloudCodeCompletion 已把 CCA 流聚合完毕并归一化成
-          // OpenAI chat.completions 形状：choices[0] + usage
-          // （prompt_tokens/completion_tokens/total_tokens）。必须透传，否则
-          // localLoop 的 lastUsage 无 token 数，TUI context chip 拿不到更新。
+          // OpenAI chat.completions 形状：choices[0].finish_reason（"stop"/"tool_calls"）
+          // + usage（prompt_tokens/completion_tokens/total_tokens）。必须透传，否则
+          // localLoop 在收尾轮无 finish_reason / stream_complete 时会误判成 stream_truncated，
+          // 进而导致后台 run 结算被 resolveRunOutcome 熔断判成 status=failed / exitCode=1。
+          finish_reason: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined,
+          stream_complete: true,
           usage: result.body?.usage as Record<string, any> | undefined,
           trace: messages,
         };

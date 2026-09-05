@@ -87,9 +87,11 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
           provider: "anthropic",
           ...(tool_calls ? { tool_calls } : {}),
           // fetchAnthropicMessagesCompletion 已把 Anthropic Messages 响应归一化成
-          // OpenAI chat.completions 形状：choices[0] + usage（prompt_tokens/
-          // output_tokens/cache_*）。必须透传，否则 localLoop 的 lastUsage 无
-          // token 数，TUI context chip 拿不到更新（与 Codex OAuth 分支同因）。
+          // OpenAI chat.completions 形状：choices[0].finish_reason（"stop"/"tool_calls"）
+          // + usage（prompt_tokens/output_tokens/cache_*）。必须透传，否则 localLoop 在
+          // 收尾轮无 finish_reason / stream_complete 时会误判成 stream_truncated（与 Antigravity 同理）。
+          finish_reason: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined,
+          stream_complete: true,
           usage: result.body?.usage as Record<string, any> | undefined,
           trace: messages,
         };

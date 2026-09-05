@@ -24,9 +24,9 @@ import {
 import {
   generateRunReport,
   parseDoDResultsFromMarkdown,
-  type DoDCommandResult,
   type RunReportJson,
 } from "./agentRunReport";
+import type { DoDCommandResult } from "./agentRunDoD";
 import { readOption, resolveCliEntrypointPath } from "./cliEnvHelpers";
 import { toErrorMessage } from "../core/errorMessage";
 
@@ -243,8 +243,12 @@ export function evaluateRunAcceptance(
     };
   }
 
-  if (reportData?.reportJson?.dodResults && reportData.reportJson.dodResults.length > 0) {
-    const dodResults = reportData.reportJson.dodResults;
+  const persistedDoDResults =
+    reportData?.reportJson?.dodResults && reportData.reportJson.dodResults.length > 0
+      ? reportData.reportJson.dodResults
+      : record.dodResults;
+  if (persistedDoDResults && persistedDoDResults.length > 0) {
+    const dodResults = persistedDoDResults;
     const failures = dodResults.filter((r) => r.exitCode !== 0);
     if (failures.length > 0) {
       const failedCmds = failures
@@ -285,7 +289,7 @@ export function evaluateRunAcceptance(
 
   return {
     passed: false,
-    reason: "DoD verification results not found in run report",
+    reason: "DoD verification results not found in run record or compatibility report",
   };
 }
 

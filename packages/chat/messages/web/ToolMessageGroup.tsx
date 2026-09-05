@@ -120,6 +120,9 @@ export const ToolMessageGroup = memo(
     const stickToBottomRef = useRef(true);
     /** Skip N onScroll updates caused by our own pinBodyToBottom writes. */
     const ignoreBodyScrollRef = useRef(0);
+    /** Epoch for the latest user row disclosure; suppresses only its RO pass. */
+    const disclosureEpochRef = useRef(0);
+    const suppressDisclosurePinRef = useRef(-1);
 
     const toolNameTranslator = useMemo(
       () =>
@@ -225,11 +228,17 @@ export const ToolMessageGroup = memo(
       () => timeline.phases.flatMap((phase) => phase.actions),
       [timeline.phases]
     );
+    // A generic timeline may omit signal-less messages; ordinary grouped calls
+    // must still render every visible row, especially when a second tool
+    // streams in after a single-flat call.
+    const flatMessages = useMemo(
+      () => visibleMessages.filter((message) => isRowModeMessage(message)),
+      [visibleMessages]
+    );
     const namedPhases = useMemo(
       () => timeline.phases.filter((phase) => !isGenericPhaseTitle(phase.title)),
       [timeline.phases]
     );
-
     // Header icon reflects THIS group's tools only — not "awaiting final reply".
     // Expand/collapse is controlled by `canCollapse`; do not fake-spin settled tools.
     const overallStatus = useMemo(() => {
@@ -280,6 +289,11 @@ export const ToolMessageGroup = memo(
     const actionCount = useFlatActions
       ? flatActions.length
       : namedPhases.reduce((n, phase) => n + phase.actions.length, 0);
+    const isSingleOrdinaryRow =
+      visibleMessages.length === 1 &&
+      namedPhases.length === 0 &&
+      isRowModeMessage(visibleMessages[0]);
+    const showBody = expanded && !isSingleOrdinaryRow;
 
     // Keep the compact body scroller pinned to the newest step while streaming.
     // max-height caps the body; without pin, new tools append below the fold.
@@ -333,6 +347,13 @@ export const ToolMessageGroup = memo(
       let ro: ResizeObserver;
       try {
         ro = new ResizeObserverImpl(() => {
+          if (
+            suppressDisclosurePinRef.current >= 0 &&
+            suppressDisclosurePinRef.current === disclosureEpochRef.current
+          ) {
+            suppressDisclosurePinRef.current = -1;
+            return;
+          }
           pinBodyToBottom(el, stickToBottomRef, ignoreBodyScrollRef);
         });
       } catch {
@@ -340,12 +361,11 @@ export const ToolMessageGroup = memo(
       }
       ro.observe(content);
       return () => ro.disconnect();
-    }, [expanded, useFlatActions, actionCount]);
+    }, [expanded, showBody, useFlatActions, actionCount]);
 
     const handleBodyScroll = () => {
       if (ignoreBodyScrollRef.current > 0) {
-        ignoreBodyScrollRef.current -= 1;
-        return;
+        ignoreBodyScrollRef.current = 0;
       }
       const el = bodyRef.current;
       if (!el) return;
@@ -360,6 +380,18 @@ export const ToolMessageGroup = memo(
       }
       setExpanded(next);
     };
+
+    const handleUserRowDisclosure = (_rowExpanded: boolean) => {
+      disclosureEpochRef.current += 1;
+      suppressDisclosurePinRef.current = disclosureEpochRef.current;
+    };
+
+    // A new message/activity projection is runtime growth, not disclosure.
+    // Clear the one-shot suppression before the next observer pass so a new
+    // tool or streaming output can resume follow-latest behavior.
+    useLayoutEffect(() => {
+      suppressDisclosurePinRef.current = -1;
+    }, [messages, activityMessages]);
 
     const toggleAction = (actionId: string) => {
       setExpandedActions((prev) => {
@@ -480,7 +512,6 @@ export const ToolMessageGroup = memo(
       );
     };
 
-    const showBody = expanded;
     const headerMain = (
       <div  {...withLiteralClass("tr-main", toolStyles.main)}>
         <div {...withLiteralClass(`tr-icon ${overallStatus}`, toolStyles.icon)}>
@@ -496,7 +527,7 @@ export const ToolMessageGroup = memo(
         data-hook="messages-esc-tool-row"
         {...withLiteralClass(`tool-msg-row ${overallStatus} ${expanded ? "" : "is-collapsed"}`, toolStyles.row)}
       >
-        <button
+        {!isSingleOrdinaryRow && <button
           type="button"
           data-hook="messages-esc-tr-header" {...withLiteralClass("tr-header", toolStyles.header)}
           style={TR_HEADER_BUTTON_STYLE}
@@ -512,7 +543,18 @@ export const ToolMessageGroup = memo(
               <LuChevronRight size={14} />
             )}
           </div>
-        </button>
+        </button>}
+
+        {isSingleOrdinaryRow ? (
+          <ToolCallRow
+            key={visibleMessages[0].id ?? visibleMessages[0].dbKey ?? visibleMessages[0].tool_call_id ?? visibleMessages[0].toolCallId}
+            presentation={toToolCallPresentation(visibleMessages[0])}
+            message={visibleMessages[0]}
+            t={t}
+            conversationTodoEnabled={conversationTodoEnabled}
+            onUserDisclosureChange={handleUserRowDisclosure}
+          />
+        ) : null}
 
         {showBody && (
           <div
@@ -525,25 +567,22 @@ export const ToolMessageGroup = memo(
             onScroll={handleBodyScroll}
           >
             <div ref={bodyContentRef} className="tr-body-content">
-              {useFlatActions && flatActions.length > 0 ? (
+              {useFlatActions && visibleMessages.length > 0 ? (
                 <div  {...withLiteralClass("tool-call-flat-list", toolStyles.flatList)}>
-                  {flatActions.map((action) => {
-                    const message = action.message as any;
-                    // Artifact-class actions keep their dedicated card instead
-                    // of a collapsible row (content must stay reachable).
-                    if (!isRowModeMessage(message)) {
-                      return renderArtifactDetail(message);
-                    }
-                    return (
+                  {visibleMessages.map((message) =>
+                    isRowModeMessage(message) ? (
                       <ToolCallRow
-                        key={action.id}
+                        key={message.id ?? message.dbKey ?? message.tool_call_id ?? message.toolCallId}
                         presentation={toToolCallPresentation(message)}
                         message={message}
                         t={t}
                         conversationTodoEnabled={conversationTodoEnabled}
+                        onUserDisclosureChange={handleUserRowDisclosure}
                       />
-                    );
-                  })}
+                    ) : (
+                      renderArtifactDetail(message)
+                    )
+                  )}
                 </div>
               ) : namedPhases.length > 0 ? (
                 <div  {...withLiteralClass("tr-phase-list", toolStyles.phaseList)}>{namedPhases.map(renderPhase)}</div>
@@ -556,6 +595,7 @@ export const ToolMessageGroup = memo(
                       message={msg}
                       t={t}
                       conversationTodoEnabled={conversationTodoEnabled}
+                      onUserDisclosureChange={handleUserRowDisclosure}
                     />
                   ) : (
                     renderArtifactDetail(msg)

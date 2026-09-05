@@ -3,31 +3,12 @@ registry = "https://registry.npmjs.org"
 linker = "hoisted"
 
 # ⚠️ 这些 conditions 只影响 `bun install` 的依赖解析，不影响 `bun run` 的 runtime module resolution。
-# Runtime module resolution 需要 CLI flag --conditions=nolo-cloud（见 deployRemote.sh / restartAlphaNolo.sh）。
+# Runtime module resolution 需要 CLI flag --conditions=nolo-cloud。
 # 如果遗漏 --conditions=nolo-cloud，identity/cloudRoutes 会走 local 分支（空数组），
 # cloud-only 路由（login/signup/life/*）在 SSR 不注册 → 白屏。
-# server/entry.ts 的 bootstrapServer 有 boot assert 会在 production 模式下检测并崩溃。
 conditions = ["nolo-cloud", "default"]
 
 # 全局 StyleX 静态 API 编译通道（2026-09-02 提为顶层）：
 # 任何裸 bun 进程（dev server SSR、CLI、agent run worker）import 到
 # *Styles.ts（含 stylex.keyframes/firstThatWorks）都需要这条编译通道，
-# 否则启动即崩（phase3 后 toast.styles.ts 曾让 dev server 与全部
-# agent fork 起不来，见 run 孤儿化事故）。bun test 的编译通道同源。
 preload = ["./scripts/public-build/stylexBunPlugin.ts"]
-
-[test]
-# Playwright e2e/**/*.spec.ts → bun run test:e2e / playwright
-# Detox e2e/{home,space}.test.ts → detox (not bun)
-# Keep e2e/*.source.test.ts discoverable as bun unit contracts
-# dist/ 是 gitignore 的构建产物。构建会把测试文件一并拷进去，陈旧副本被 bun test
-# 收集后会以 "X is not a function" 之类的假失败出现（require 路径已失效），
-# 数量还会盖过真实失败。仓库里没有任何被跟踪的测试住在 dist 下，可安全排除。
-pathIgnorePatterns = [
-  "**/dist/**",
-  "scripts/benchmarks/fixtures/**",
-  "**/benchmarks/fixtures/**",
-  "e2e/**/*.spec.ts",
-  "e2e/home.test.ts",
-  "e2e/space.test.ts",
-]

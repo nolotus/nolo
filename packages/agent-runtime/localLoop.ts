@@ -3,7 +3,10 @@
  *
  * 遵循 Agent Harness Playbook 核心准则：
  * 1. 【有界工作与输出防爆（Bounded Work & Spills）】：
- *    - 工具输出受 `toolOutputPolicy` 严格截断（`FRESH_TOOL_OUTPUT_MAX_CHARS`）；
+ *    - 工具输出受 `toolOutputPolicy` 的 per-tool 稳定预算严格截断
+ *      （stable provider-visible projection：同一 tool execution 的 provider
+ *      可见表示从第一次进入 transcript 起逐字节不变，见
+ *      docs/plans/2026-09-05-tool-output-cache-stability.md）；
  *    - 超过阈值的大输出通过 `spillToolOutput` 溢出落盘，仅向上下文注入索引与摘要，保护内存与 Token 预算。
  * 2. 【严格取消级联（Cancellation Propagation）】：
  *    - 每次模型调用与工具执行严格绑定 `abortSignal` 与 `runAbortableWithTimeout`，
@@ -60,10 +63,7 @@ import type {
 import type { ContextBlockScope } from "./contextBlockScope";
 import { normalizeContextBlockScopes } from "./contextBlockScope";
 import {
-  MAX_HISTORICAL_TOOL_CONTENT_CHARS,
-  FRESH_TOOL_OUTPUT_MAX_CHARS,
   clipToolText,
-  resolveHistoricalToolContentCap,
   resolveToolOutputProfile,
 } from "../ai/agent/toolOutputPolicy";
 import {
@@ -871,6 +871,21 @@ function projectToolContentForProvider(args: {
   if (embeddedMetadataIndex >= 0 && content.length <= args.maxChars) {
     return content;
   }
+  // Idempotence guard (stable-projection contract): buildMessages projects
+  // cross-turn history via summarizeHistoricalToolContent, then
+  // prepareMessagesForProviderCall projects the SAME message again in the same
+  // request. The second pass must be a no-op for already-projected content,
+  // otherwise the diagnostic suffix would be re-clipped (initialBudget =
+  // maxChars - 120 < projected length) and the bytes would drift between
+  // provider calls — exactly the cache-prefix break this policy exists to
+  // prevent. Only content that still fits the budget short-circuits; oversized
+  // raw output is always projected.
+  if (
+    content.length <= args.maxChars &&
+    content.includes(`\n\n[${args.label}; originalChars=`)
+  ) {
+    return content;
+  }
   const headRatio = resolveToolOutputProfile(args.toolName).headRatio;
   const initialBudget = Math.max(
     1,
@@ -926,6 +941,13 @@ type PreparedProviderMessages = {
   metrics: LocalAgentContextMetrics;
 };
 
+// 单一稳定 label：同一条 tool 消息在 fresh、同 turn 更早轮、跨 turn 历史三个
+// 投影点必须携带完全相同的诊断后缀文本，否则跨 turn 后缀变化本身就是一次
+// byte 漂移（前缀缓存断裂）。沿用 in-turn 历史文本：desktop-runtime 的披露
+// 折叠按 `"\n\n[in-turn tool result"` 切分，改文案会破坏该解析。
+const TOOL_OUTPUT_PROJECTION_LABEL =
+  "in-turn tool result truncated/projected before next provider call";
+
 // Exported for the cross-turn retention regression test: the ledger gate in
 // the read executors and this projection must agree on the same cap, or the
 // dedup notice can claim "still in context" for content history already cut.
@@ -938,11 +960,15 @@ export function summarizeHistoricalToolContent(
     content,
     toolName,
     metadata,
-    // Same single source of truth as the server path and the read ledgers:
-    // read-family tools keep their profile historical cap (4800) cross-turn,
-    // unprofiled tools fall back to the flat historical budget.
-    maxChars: resolveHistoricalToolContentCap(toolName, MAX_HISTORICAL_TOOL_CONTENT_CHARS),
-    label: "historical tool result truncated for the next turn",
+    // Stable projection contract: the SAME per-tool profile budget and label
+    // as prepareMessagesForProviderCall, so the first provider-visible
+    // representation of a tool execution is byte-identical on every later
+    // round and across turns. Read-family profiles keep their ledger cap
+    // (4800); unprofiled tools use the default profile (4000) instead of the
+    // old flat 1600 — a historical rewrite below the fresh budget was itself
+    // a cache-prefix break (see docs/plans/2026-09-05-tool-output-cache-stability.md).
+    maxChars: resolveToolOutputProfile(toolName).maxChars,
+    label: TOOL_OUTPUT_PROJECTION_LABEL,
   });
 }
 
@@ -952,23 +978,24 @@ function prepareMessagesForProviderCall(
   // 发 provider 前的唯一咽喉点：先修掉 tool_calls/tool 配对违规（孤儿 tool、悬空 tool_calls），
   // 再走原 map。脏历史不能原样发给 OpenAI 兼容接口。
   const paired = sanitizeToolCallPairing(messages);
-  // 「最新一轮」= 消息序列末尾最长的一段连续 tool 消息。它们刚由本轮最近的工具调用
-  // 产出，下一次 provider 调用要立刻读懂它们，给宽预算 FRESH_TOOL_OUTPUT_MAX_CHARS。
-  // 这一段之前的 tool 消息属于同一 turn 内更早的轮次——它们在本轮已经不再是「最新
-  // 关注点」，但仍会在每次 provider 调用里重发，必须压回 per-tool profile 的紧上限
-  // （resolveToolOutputProfile(toolName).maxChars），否则一个 N 轮工具循环会让上下文
-  // 随轮数线性膨胀到 fresh×N。跨 turn 的历史已在 prepareHistoryForNextTurn 走过
-  // summarizeHistoricalToolContent，这里不动它们。判定只基于消息序列本身，不引入
-  // 任何可变状态/参数链/配置项。See T3.
-  let freshRunStart = paired.length;
-  while (freshRunStart > 0 && paired[freshRunStart - 1].role === "tool") {
-    freshRunStart -= 1;
-  }
+  // Stable provider-visible projection：所有 in-turn tool 消息（含刚产出的 fresh
+  // 消息）使用与跨 turn 历史（summarizeHistoricalToolContent）完全相同的
+  // per-tool 预算与 label。投影因此是 (content, toolName, metadata) 的纯函数，
+  // 同一 tool execution 第一次进入 provider transcript 后每轮 byte-identical。
+  // 旧「fresh 32k 宽窗口 → 非 fresh 回压 profile → 跨 turn 1.6k」三档设计会在
+  // 每轮把上一轮的 tool 消息改写一次（实测 17,779 → 4,361 字符），前缀缓存
+  // 从该消息起整体失效（2026-08-25 事故同类根因）。超预算部分仍由
+  // projectToolContentForProvider 通过 spillToolOutput 完整落盘（内容寻址路径，
+  // (toolName, content) 纯函数），provider 看到 deterministic projection +
+  // spillFile 引用；durable 历史/UI 保留完整原文。fresh 窗口的质量代价由 spill
+  // 重读（readFile/grep spill 文件）覆盖，属于已拍板的产品决策
+  // （docs/plans/2026-09-05-tool-output-cache-stability.md，推翻
+  // 2026-09-02 perf sweep 中「仅性能收益不足」的否决——本次目标是 cache ROI）。
   let toolMessageCount = 0;
   let rawToolContentChars = 0;
   let projectedToolContentChars = 0;
   let truncatedToolResults = 0;
-  const projected = paired.map((message, index) => {
+  const projected = paired.map((message) => {
     const { context_reference: _contextReference, ...providerMessage } = message;
     const sanitizedContent =
       providerMessage.content == null
@@ -985,16 +1012,12 @@ function prepareMessagesForProviderCall(
     }
     toolMessageCount += 1;
     rawToolContentChars += contentCharCount(sanitizedContent);
-    const isFresh = index >= freshRunStart;
-    const maxChars = isFresh
-      ? FRESH_TOOL_OUTPUT_MAX_CHARS
-      : resolveToolOutputProfile(providerMessage.toolName).maxChars;
     const projectedContent = projectToolContentForProvider({
       content: sanitizedContent,
       toolName: providerMessage.toolName,
       metadata: providerMessage.tool_result_metadata,
-      maxChars,
-      label: "in-turn tool result truncated/projected before next provider call",
+      maxChars: resolveToolOutputProfile(providerMessage.toolName).maxChars,
+      label: TOOL_OUTPUT_PROJECTION_LABEL,
     });
     projectedToolContentChars += contentCharCount(projectedContent);
     if (contentCharCount(projectedContent) < contentCharCount(sanitizedContent)) {

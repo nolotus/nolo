@@ -11,7 +11,7 @@ import * as stylex from "@stylexjs/stylex";
 export const messageInputStyles = stylex.create({
   /* ── ActionButton / SendButton ── */
   sendButton: {
-    "--button-size": "44px",
+    "--button-size": "36px",
     width: "var(--button-size)",
     height: "var(--button-size)",
     position: "relative",
@@ -28,13 +28,13 @@ export const messageInputStyles = stylex.create({
     cursor: "pointer",
     flexShrink: 0,
     "@media (max-width: 768px)": {
-      "--button-size": "40px",
+      "--button-size": "36px",
     },
     "@media (max-width: 480px)": {
       "--button-size": "36px",
     },
     "@media (min-width: 769px)": {
-      "--button-size": "48px",
+      "--button-size": "36px",
     },
   },
   sendMode: {
@@ -697,8 +697,8 @@ export const messageInputStyles = stylex.create({
     alignItems: "center",
     gap: "8px",
     maxWidth: "100%",
-    margin: "0 0 8px 48px",
-    padding: "6px 10px",
+    margin: "0 0 6px 0",
+    padding: "4px 8px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "var(--borderMuted, var(--border))",
@@ -706,7 +706,7 @@ export const messageInputStyles = stylex.create({
     backgroundColor: "var(--surfaceRaised, var(--backgroundSecondary))",
     color: "var(--textSecondary)",
     fontSize: "var(--fontSize-sm)",
-    boxShadow: "0 8px 20px -18px var(--shadowMedium)",
+    boxShadow: "0 2px 6px -4px var(--shadowMedium)",
   },
   canvasEditChipActionable: {
     borderColor: "color-mix(in srgb, var(--primary) 28%, var(--border))",
@@ -742,7 +742,7 @@ export const messageInputStyles = stylex.create({
     justifyContent: "space-between",
     gap: "12px",
     maxWidth: "100%",
-    margin: "0 0 10px 48px",
+    margin: "0 0 10px 0",
     padding: "9px 10px 9px 12px",
     borderWidth: "1px",
     borderStyle: "solid",
@@ -750,7 +750,7 @@ export const messageInputStyles = stylex.create({
     borderRadius: "var(--radius-sm)",
     backgroundColor: "color-mix(in srgb, var(--errorGhost, rgba(239, 68, 68, 0.08)) 72%, var(--surfaceRaised, var(--background)))",
     color: "var(--text)",
-    boxShadow: "0 10px 24px -20px var(--shadowMedium)",
+    boxShadow: "0 4px 12px -8px var(--shadowMedium)",
     "@media (max-width: 640px)": {
       marginLeft: 0,
     },

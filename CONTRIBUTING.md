@@ -7,8 +7,8 @@ generated from the canonical source. Here's how to contribute:
 
 1. Install [Bun](https://bun.sh/)
 2. `bun install`
-3. `bun scripts/release/prepareNoloOpenSourceMirror.ts --out-dir /tmp/check` to verify projection
-4. `bun scripts/dev/esbuild.config.js` to verify build
+3. `bun scripts/public-audit/verifyProjection.ts` to verify the projection boundary
+4. `bun scripts/dev/esBuild.js` to verify the web build
 
 ## Code Structure
 
@@ -20,8 +20,8 @@ generated from the canonical source. Here's how to contribute:
 ## Submitting Changes
 
 1. Fork and create a feature branch
-2. Run `bun scripts/release/prepareNoloOpenSourceMirror.ts --out-dir /tmp/check` to verify projection
-3. Run `bun scripts/dev/esbuild.config.js` to verify build
+2. Run `bun scripts/public-audit/verifyProjection.ts` to verify the projection boundary
+3. Run `bun scripts/dev/esBuild.js` to verify the web build
 4. Open a PR with a clear description
 
 ## Security

@@ -82,7 +82,7 @@ const DEFAULT_ACCEPT = [
 /** 按钮样式：提升到组件外，方便维护与复用 */
 const FILE_UPLOAD_BUTTON_STYLES = `
   .upload-button {
-    --button-size: 44px;
+    --button-size: 36px;
     width: var(--button-size);
     height: var(--button-size);
     border-radius: 50%; /* 圆形按钮 */
@@ -134,7 +134,7 @@ const FILE_UPLOAD_BUTTON_STYLES = `
 
   /* 移动端调整 */
   @media (max-width: 768px) {
-    .upload-button { --button-size: 40px; }
+    .upload-button { --button-size: 36px; }
   }
 
   @media (max-width: 480px) {
@@ -142,7 +142,7 @@ const FILE_UPLOAD_BUTTON_STYLES = `
   }
 
   @media (min-width: 769px) {
-    .upload-button { --button-size: 48px; }
+    .upload-button { --button-size: 36px; }
   }
 `;
 

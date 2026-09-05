@@ -397,8 +397,8 @@ export const toolMessageStyles = stylex.create({
     opacity: 0.8,
   },
   // ToolCallRow flex contract (P1): verb keeps intrinsic width (flexShrink 0);
-  // the target is the MAIN flexible column (flex:1 + minWidth:0, mono so the
-  // operand reads as primary content); context is the weakest signal —
+  // the target is the MAIN flexible column (flex:1 + minWidth:0); context is
+  // the weakest signal —
   // explicitly shrinkable (minWidth:0 + flexShrink:1) under a hard max-width
   // cap. Real clipping (nowrap/hidden/ellipsis) comes from the shared
   // `truncate` entry mounted alongside it, so a long no-space path shrinks
@@ -422,7 +422,6 @@ export const toolMessageStyles = stylex.create({
   rowTarget: {
     flex: 1,
     minWidth: 0,
-    fontFamily: "var(--font-mono, monospace)",
   },
   // Flat row anatomy (P1): 28–32px density, transparent on the flat group
   // body. Light hover + focus-visible ring live in

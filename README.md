@@ -24,14 +24,9 @@ bun install
 bun run build
 ```
 
-### Test
-```bash
-bun test
-```
-
 ### CLI
 ```bash
-bun run cli
+bun packages/cli/index.ts
 # or after global install:
 nolo chat
 nolo run "summarize this agent's recent 10 dialogs"

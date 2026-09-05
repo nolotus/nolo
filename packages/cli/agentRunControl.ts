@@ -27,6 +27,8 @@ export type RunActivity = {
   updatedAt: string;
 };
 
+import type { DoDCommandResult } from "./agentRunDoD";
+
 export type RunStatus = "running" | "done" | "failed" | "timeout" | "killed" | "orphaned";
 
 export type RunRecord = {
@@ -68,6 +70,14 @@ export type RunRecord = {
   activity?: RunActivity;
   /** DoD commands to verify when run reaches terminal state. */
   dodCommands?: string[];
+  /**
+   * DoD 验收结果，收尾时与终态一起写入（见 finalizeRunRecord）。
+   *
+   * 刻意和 status 同一次写入：一条只说 done、不带验收结论的记录会让编排者
+   * 把「进程退出码 0」当成「活干对了」。`dodCommands` 声明过就必须等结论
+   * 一起落盘，哪怕终态因此晚出现几秒。
+   */
+  dodResults?: DoDCommandResult[];
   /** Git HEAD commit hash at spawn time. */
   spawnHead?: string;
   /**
@@ -1108,12 +1118,10 @@ export async function gcRunRecords(
     const jsonPath = resolveRunRecordPath(record.runId, deps.env, deps.homedir);
     const logPath = resolveRunLogPath(record.runId, deps.env, deps.homedir);
     const queuePath = record.queuePath ?? resolveRunQueuePath(record.runId, deps.env, deps.homedir);
-    const reportPath = resolveRunReportPath(record.runId, deps.env, deps.homedir);
-    const reportJsonPath = resolveRunReportJsonPath(record.runId, deps.env, deps.homedir);
     const msgPath =
       record.msgFile ?? join(resolveRunsDir(deps.env, deps.homedir), `${record.runId}.msg.md`);
 
-    // 1. Delete auxiliary files FIRST (.log, .msg.md, .queue.jsonl, and optional .report.md / .report.json)
+    // 1. Delete auxiliary files FIRST (.log, .msg.md, .queue.jsonl)
     // 队列文件删除走 withQueueLock 互斥，防止与并发读写交错
     const logOk = tryUnlinkFile(fs, logPath);
     const msgOk = tryUnlinkFile(fs, msgPath);
@@ -1127,8 +1135,10 @@ export async function gcRunRecords(
         queueOk = false;
       }
     }
-    tryUnlinkFile(fs, reportPath);
-    tryUnlinkFile(fs, reportJsonPath);
+    // 历史遗留的报告文件与本 run 同名，顺手带走（不存在则是 no-op）。
+    const runsDirForLegacy = resolveRunsDir(deps.env, deps.homedir);
+    tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.md`));
+    tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.json`));
 
     // 2. If any auxiliary file failed to delete, KEEP the .json index file
     // so future GC passes can discover and retry sweeping this run.
@@ -1576,8 +1586,10 @@ export function finalizeRunRecord(
     dialogId?: string;
     /** 本次 run 实际消耗的平台积分（run 进程自报）。 */
     credits?: number;
-    /** Diagnostic note for callers/logs; not persisted on the run record. */
+    /** Diagnostic note for callers/logs, persisted on the run record. */
     note?: string;
+    /** DoD 验收结果，与终态同一次写入（见 RunRecord.dodResults）。 */
+    dodResults?: DoDCommandResult[];
   },
   deps: AgentRunControlDeps = {}
 ): void {
@@ -1593,7 +1605,13 @@ export function finalizeRunRecord(
     if (typeof update.credits === "number" && Number.isFinite(update.credits)) {
       record.credits = update.credits;
     }
+    if (update.dodResults && update.dodResults.length > 0) {
+      record.dodResults = update.dodResults;
+    }
     record.endedAt = now().toISOString();
+    if (typeof update.note === "string" && update.note.trim()) {
+      record.note = update.note.trim();
+    }
     // A self-reported terminal status is ground truth; drop any orphan verdict
     // an earlier reconciler pass may have written.
     if (record.note?.startsWith("orphaned:")) record.note = undefined;

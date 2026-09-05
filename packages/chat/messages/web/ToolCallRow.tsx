@@ -35,6 +35,8 @@ export interface ToolCallRowProps {
   message: any;
   t: (key: string, options?: any) => string;
   conversationTodoEnabled?: boolean;
+  /** Called only for explicit user disclosure changes, not status auto-open. */
+  onUserDisclosureChange?: (expanded: boolean) => void;
 }
 
 export const ToolCallRow = memo(
@@ -43,6 +45,7 @@ export const ToolCallRow = memo(
     message,
     t,
     conversationTodoEnabled = true,
+    onUserDisclosureChange,
   }: ToolCallRowProps) => {
     const detailId = `tool-call-row-detail-${useId()}`;
     /** null = follow the status-derived default; boolean = user decided. */
@@ -69,7 +72,15 @@ export const ToolCallRow = memo(
           type="button"
           data-hook="messages-esc-tool-call-row-header"
           {...withLiteralClass("tool-call-row__header", toolStyles.rowHeader)}
-          onClick={presentation.expandable ? () => setUserExpanded(!expanded) : undefined}
+          onClick={
+            presentation.expandable
+              ? () => {
+                  const nextExpanded = !expanded;
+                  setUserExpanded(nextExpanded);
+                  onUserDisclosureChange?.(nextExpanded);
+                }
+              : undefined
+          }
           aria-expanded={presentation.expandable ? expanded : undefined}
           aria-controls={presentation.expandable ? detailId : undefined}
           disabled={!presentation.expandable || undefined}

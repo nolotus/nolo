@@ -160,32 +160,22 @@ export const classifyConversationLoad = (
 /**
  * 压缩历史 tool_result 内容，防止大体积工具返回值撑爆上下文。
  *
- * 策略（两档，见 toolOutputPolicy.projectToolMessageContent）：
- * - 最近一个 tool 轮次（最后一条 assistant tool_calls + 对应 tool 结果）：
- *   优先保留完整，但超过 FRESH_TOOL_OUTPUT_MAX_CHARS (32,000) 时按头尾裁剪。
- *   此前该档无任何上限，一条 13M 字符的工具结果会原样进请求、超出模型上下文窗口。
- * - 更早的 tool 消息：内容截断到 maxChars (默认 800)，并追加截断标记
+ * 策略（stable provider-visible projection，见 toolOutputPolicy.projectToolMessageContent）：
+ * 所有 tool 消息——无论是否是最近一个 tool 轮次——都用同一个 per-tool profile
+ * 预算（resolveToolOutputProfile(toolName).maxChars）投影。投影是
+ * (content, toolName) 的纯函数，因此同一 tool execution 第一次进入 provider
+ * transcript 后，后续每一轮请求中它的字节完全一致，prompt 前缀缓存不在旧 tool
+ * 消息处断裂。旧的 fresh(32k)/historical(800) 双档会把同一条消息在轮间改写成
+ * 不同字节（cache-prefix break）。
+ * web/server 路径没有 spill 基础设施：完整原文保留在 durable dialog 存储（UI
+ * 可读），provider 只看到 deterministic projection + 截断标记。
  *
  * 在 filterAndCleanMessages 之后、trimMessagesWithSummary 之前调用。
  */
 export const compressOldToolResults = (
     messages: OpenAIMessage[],
-    maxChars = 800,
 ): OpenAIMessage[] => {
-    // 找到最后一条 assistant 消息（含 tool_calls）的索引
-    let lastToolCallAssistantIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (
-            messages[i].role === "assistant" &&
-            Array.isArray((messages[i] as any).tool_calls) &&
-            (messages[i] as any).tool_calls.length > 0
-        ) {
-            lastToolCallAssistantIdx = i;
-            break;
-        }
-    }
-
-    return messages.map((msg, idx) => {
+    return messages.map((msg) => {
         // 只处理 tool 消息
         if (msg.role !== "tool") return msg;
 
@@ -195,9 +185,7 @@ export const compressOldToolResults = (
         // 可被独立测试且不受本模块的 mock.module 桩影响）。
         const projected = projectToolMessageContent({
             content,
-            isFresh: idx > lastToolCallAssistantIdx,
             toolName: (msg as any).name,
-            historicalMaxChars: maxChars,
         });
 
         if (projected === content) return msg;

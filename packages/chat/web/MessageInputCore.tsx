@@ -876,75 +876,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         <div
           {...withLiteralClass("message-input__wrapper", messageInputStyles.wrapper)}
         >
-          <BrowseContextIndicator />
-          <MessageInputAttachmentsPanel
-            imagePreviews={imgPreviews as PendingImagePreview[]}
-            pendingFiles={pendingFilesWithStatus}
-            onRemoveImage={hookRemoveImage}
-            processingFiles={processingFileIds}
-            isMobile={isMobile}
-          />
-
-          {resolvedImageUiConfig && (
-            <MessageInputImageConfigPanel
-              visible={showImageConfigRow}
-              aspectRatio={imageAspectRatio}
-              imageSize={imageSize}
-              imageProfileKey={imageProfileKey}
-              imageUiConfig={resolvedImageUiConfig}
-              onAspectRatioChange={setImageAspectRatio}
-              onImageSizeChange={setImageSize}
-              onImageProfileChange={(v) => setImageProfileKey(v as any)}
-            />
-          )}
-
-          {canvasEditSelection && (
-            <MessageInputChip
-              label={canvasChipLabel}
-              onDismiss={handleDismissCanvasEdit}
-              dismissAriaLabel="取消画布编辑目标"
-            />
-          )}
-
-          {editingSession && (
-            <MessageInputChip
-              label={editingChipLabel}
-              onDismiss={cancelEditingSession}
-              dismissAriaLabel={t("cancelEditingMessage", "取消编辑消息")}
-            />
-          )}
-
-          {pastedBlocks.length > 0 && (
-            <div
-              {...withLiteralClass("message-input__paste-chips", messageInputStyles.pasteChips)}
-            >
-              {pastedBlocks.map((block, index) => (
-                <MessageInputChip
-                  key={block.id}
-                  className="message-input__paste-chip"
-                  label={t(
-                    "pastedTextChip",
-                    "Pasted text #{{id}} · {{lines}} lines · {{size}}",
-                    {
-                      id: index + 1,
-                      lines: countTextLines(block.text),
-                      size: formatPasteByteSize(
-                        estimatePasteBytes(block.text),
-                      ),
-                    },
-                  )}
-                  onActivate={() => expandPastedBlock(block.id)}
-                  activateAriaLabel={t(
-                    "expandPastedText",
-                    "Expand pasted text into the input",
-                  )}
-                  onDismiss={() => removePastedBlock(block.id)}
-                  dismissAriaLabel={t("removePastedText", "Remove pasted text")}
-                />
-              ))}
-            </div>
-          )}
-
+          {/* ═══ Runtime Status (Outside Composer Shell, Above) ═══ */}
           <MessageInputActivityPanel
             messages={currentMessages}
             isActive={isLoopRunning || hasStreamingMessage}
@@ -973,14 +905,84 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             onDismiss={handleDismissDelete}
           />
 
-          {/* 选中元素不在输入框显示芯片：选中能力保留（注入 agent），
-              点选后靠 iframe 高亮反馈，发送消息后自动清除（见 sendMessage）。 */}
-
+          {/* ═══ Composer Shell (Single unified card surface) ═══ */}
           <div
             data-hook="chat-esc-chat-input-card"
             {...cardStyleProps}
             className={[cardStyleProps.className, "message-input__box"].filter(Boolean).join(" ")}
           >
+            {/* ── Context Area (Attachments, Browse, Image config, Edit chips, Paste chips) ── */}
+            <BrowseContextIndicator />
+
+            <MessageInputAttachmentsPanel
+              imagePreviews={imgPreviews as PendingImagePreview[]}
+              pendingFiles={pendingFilesWithStatus}
+              onRemoveImage={hookRemoveImage}
+              processingFiles={processingFileIds}
+              isMobile={isMobile}
+            />
+
+            {resolvedImageUiConfig && (
+              <MessageInputImageConfigPanel
+                visible={showImageConfigRow}
+                aspectRatio={imageAspectRatio}
+                imageSize={imageSize}
+                imageProfileKey={imageProfileKey}
+                imageUiConfig={resolvedImageUiConfig}
+                onAspectRatioChange={setImageAspectRatio}
+                onImageSizeChange={setImageSize}
+                onImageProfileChange={(v) => setImageProfileKey(v as any)}
+              />
+            )}
+
+            {canvasEditSelection && (
+              <MessageInputChip
+                label={canvasChipLabel}
+                onDismiss={handleDismissCanvasEdit}
+                dismissAriaLabel="取消画布编辑目标"
+              />
+            )}
+
+            {editingSession && (
+              <MessageInputChip
+                label={editingChipLabel}
+                onDismiss={cancelEditingSession}
+                dismissAriaLabel={t("cancelEditingMessage", "取消编辑消息")}
+              />
+            )}
+
+            {pastedBlocks.length > 0 && (
+              <div
+                {...withLiteralClass("message-input__paste-chips", messageInputStyles.pasteChips)}
+              >
+                {pastedBlocks.map((block, index) => (
+                  <MessageInputChip
+                    key={block.id}
+                    className="message-input__paste-chip"
+                    label={t(
+                      "pastedTextChip",
+                      "Pasted text #{{id}} · {{lines}} lines · {{size}}",
+                      {
+                        id: index + 1,
+                        lines: countTextLines(block.text),
+                        size: formatPasteByteSize(
+                          estimatePasteBytes(block.text),
+                        ),
+                      },
+                    )}
+                    onActivate={() => expandPastedBlock(block.id)}
+                    activateAriaLabel={t(
+                      "expandPastedText",
+                      "Expand pasted text into the input",
+                    )}
+                    onDismiss={() => removePastedBlock(block.id)}
+                    dismissAriaLabel={t("removePastedText", "Remove pasted text")}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* ── Input Area ── */}
             <MessageInputComposer
               areaRef={areaRef}
               text={text}
@@ -1004,6 +1006,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               onHoverMention={handleHoverMention}
             />
 
+            {/* ── Controls Bar ── */}
             <MessageInputControlsBar
               fileUploadDisabled={fileUploadDisabled}
               onFilesSelected={processFiles}

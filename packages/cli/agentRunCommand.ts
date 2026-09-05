@@ -45,7 +45,7 @@ import {
   spawnLocalBackgroundRun,
   type AgentRunControlDeps,
 } from "./agentRunControl";
-import { generateRunReport } from "./agentRunReport";
+import { runDoDCommands, type DoDCommandResult } from "./agentRunDoD";
 import {
   normalizeCliImageInput,
   prependFeatureWorktreeInstruction,
@@ -114,7 +114,7 @@ export type AgentRunCommandDeps = {
   spawnLocalBackgroundRun?: typeof spawnLocalBackgroundRun;
   finalizeRunRecord?: typeof finalizeRunRecord;
   readRunRecord?: typeof readRunRecord;
-  generateRunReport?: typeof generateRunReport;
+  runDoDCommands?: typeof runDoDCommands;
   popQueueMessages?: typeof popQueueMessages;
   popSingleQueueMessage?: typeof popSingleQueueMessage;
   /** Override for tests; defaults to `process.exit`. */
@@ -818,6 +818,11 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // If this process was spawned as a local background child, finalize the
   // registry record so the parent `nolo agent ps/status` sees the outcome.
   if (typeof childRunId === "string" && childRunId.length > 0) {
+    const childRecordForDoD = (deps.readRunRecord ?? readRunRecord)(childRunId, {
+      env,
+      homedir: deps.homedir,
+      fs: deps.fs,
+    });
     // 空 assistant 兜底（不抛错、exitCode 仍 0）：截断型（length/stream）
     // 与死循环/空转熔断型（repetition_loop/stagnant_tool_calls）
     // 说明编排者拿不到完整结论，须结算为 failed 以便父级接力重派；
@@ -839,10 +844,28 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       exitCode: result.exitCode,
       isStalledOrTruncated,
     });
+    // DoD 验收在结算之前跑，结果与终态同一次写入。
+    //
+    // 顺序是有意的：先结算再验收会让唤醒通道抢在结论之前把「done」送到编排者
+    // 手上，而「进程退出码 0」不等于「活干对了」——nolo-plan 的原话是「无数字
+    // 的『测试通过』按未验证处理」。终态因此晚出现几秒，换的是它出现时带着结论。
+    //
+    // 声明了才跑：没有 dodCommands 的 run 一条命令都不会被执行。
+    let dodResults: DoDCommandResult[] | undefined;
+    try {
+      dodResults = (deps.runDoDCommands ?? runDoDCommands)(
+        childRecordForDoD?.dodCommands,
+        childRecordForDoD?.cwd,
+      );
+    } catch (dodError) {
+      console.warn(`[nolo] DoD verification failed to run for ${childRunId}:`, dodError);
+    }
+
     await (deps.finalizeRunRecord ?? finalizeRunRecord)(childRunId, {
       status: outcome.status,
       exitCode: outcome.exitCode,
       dialogId: result.dialogId,
+      ...(dodResults ? { dodResults } : {}),
       // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
       // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
@@ -855,23 +878,6 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       now: deps.now,
     });
 
-    try {
-      const record = (deps.readRunRecord ?? readRunRecord)(childRunId, {
-        env,
-        homedir: deps.homedir,
-        fs: deps.fs,
-      });
-      if (record) {
-        await (deps.generateRunReport ?? generateRunReport)(record, {
-          env,
-          homedir: deps.homedir,
-          fs: deps.fs,
-          now: deps.now,
-        });
-      }
-    } catch (reportError) {
-      console.warn(`[nolo] failed to generate run report for ${childRunId}:`, reportError);
-    }
   }
 
   return result.exitCode;

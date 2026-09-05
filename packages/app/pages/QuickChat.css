@@ -292,9 +292,9 @@
         }
 
         /* Smaller buttons inside quick-chat card */
-        .quick-chat-box .upload-button { --button-size: 40px; }
-        .quick-chat-box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) { --button-size: 40px; }
-        .quick-chat-box .voice-btn-in-send { width: 40px; height: 40px; }
+        .quick-chat-box .upload-button { --button-size: 36px; }
+        .quick-chat-box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) { --button-size: 36px; }
+        .quick-chat-box .voice-btn-in-send { width: 36px; height: 36px; }
 
         .quick-chat-box .upload-button,
 .quick-chat-box .send-button:not(.send-mode):not(.stop-mode) {

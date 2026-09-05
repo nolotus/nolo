@@ -15,4 +15,4 @@ jobs:
       - name: Projection safety gate
         run: bun scripts/public-audit/verifyProjection.ts
       - name: Build web bundle
-        run: bun scripts/dev/esbuild.config.js
+        run: bun scripts/dev/esBuild.js

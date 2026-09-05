@@ -29,6 +29,7 @@ const REQUIRED_FILES = [
   // Build：web bundle 链（CI web build + desktop pre-build 子进程）
   "scripts/dev/esbuild.config.js",
   "scripts/dev/esBuild.js",
+  "scripts/dev/checkDangling.mjs",
   "scripts/public-build/stylexBunPlugin.ts",
   // Audit：projection verifier 与 release/CI 依赖
   ".github/workflows/ci.yml",
@@ -184,6 +185,21 @@ export async function verifyProjection(
     if (!existsSync(join(rootDir, rel))) add(`missing-required: ${rel}`);
   }
 
+  // 1.5 公开 surface 形状：无内部 docs/；.github/workflows 只有本仓生成的 4 个
+  // （只断言公开树自身的最终形状，不引用任何私有排除清单或私有布局）。
+  if (existsSync(join(rootDir, "docs"))) {
+    add("unexpected-subtree: docs/（公开投影不携带内部文档目录）");
+  }
+  const workflowsDir = join(rootDir, ".github", "workflows");
+  if (existsSync(workflowsDir)) {
+    const generatedWorkflows = new Set(["ci.yml", "cli-publish.yml", "desktop-build.yml", "version-bump.yml"]);
+    for (const entry of await readdir(workflowsDir)) {
+      if (!generatedWorkflows.has(entry)) {
+        add(`unexpected-workflow: .github/workflows/${entry}（公开 CI 只包含本仓生成的 4 个 workflow）`);
+      }
+    }
+  }
+
   // 2. packages：正向包白名单校验 / manifest 可解析 / workspace 依赖闭包合法
   const packagesDir = join(rootDir, "packages");
   const packageNames = new Set<string>();
@@ -212,6 +228,11 @@ export async function verifyProjection(
       } catch (error) {
         add(`manifest-parse: packages/${name}/package.json (${error instanceof Error ? error.message : String(error)})`);
         continue;
+      }
+      // 公开投影只暴露最终 public surface：私有投影 policy 元数据（若出现）
+      // 意味着「哪些路径被私有策略排除」的布局知识泄露进了公开仓。
+      if (manifest !== null && typeof manifest === "object" && "noloProjection" in manifest) {
+        add(`private-policy-leak: packages/${name}/package.json carries noloProjection`);
       }
       for (const depField of ["dependencies", "devDependencies"] as const) {
         for (const [depName, spec] of Object.entries(manifest[depField] ?? {})) {
