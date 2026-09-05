@@ -100,8 +100,9 @@ async function patchDialog(
 
 /**
  * Fields carried forward from the source dialog into the fork.
- * Includes compression state so the new dialog continues with the
- * compressed context (summary + summarizedBeforeId + referenceKeys).
+ * Conversation references (referenceKeys) and configuration are preserved,
+ * while dialog-local transcript cursors and compression state
+ * (summary, summarizedBeforeId, compressionCount) start clean.
  */
 const FORKED_CARRY_FIELDS = [
   "cybots",
@@ -114,11 +115,6 @@ const FORKED_CARRY_FIELDS = [
   "schedule",
   "taskPrompt",
   "executionMode",
-  // Compression state — inherited so the forked dialog continues with
-  // the compressed context rather than starting clean.
-  "summary",
-  "summarizedBeforeId",
-  "compressionCount",
 ] as const;
 
 function buildForkedDialogRecord(
@@ -370,6 +366,9 @@ export async function compactDialog(options: {
               }
             }
 
+            // referenceKeys participate in the fork carry (FORKED_CARRY_FIELDS);
+            // summary/summarizedBeforeId/compressionCount stay dialog-local and
+            // are deliberately NOT mirrored onto `current` for the fork.
             await patchDialog(fetchImpl, options.serverUrl, options.authToken, dialogKey, {
               summary: newSummary.trim(),
               summarizedBeforeId: plan.newSummarizedBeforeId,
@@ -378,10 +377,6 @@ export async function compactDialog(options: {
               summaryPending: false,
             });
 
-            // Update `current` so the fork inherits the new summary + keys
-            current.summary = newSummary.trim();
-            current.summarizedBeforeId = plan.newSummarizedBeforeId;
-            current.compressionCount = compressionCount + 1;
             current.referenceKeys = Array.from(extractedKeys);
 
             summaryGenerated = true;
