@@ -1,5 +1,4 @@
 export { runAgentListCommand } from "./agentListCommands";
-export { runAgentSuperviseCommand } from "./agentSuperviseCommands";
 export {
   runAgentBindCurrentCommand,
   runAgentRuntimeDoctorCommand,

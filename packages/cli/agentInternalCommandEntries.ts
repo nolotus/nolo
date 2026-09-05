@@ -61,15 +61,6 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runAgentKillCommand } = await import("./agentRunControl");
       return runAgentKillCommand(args, { ...deps, output: process.stdout });
     }),
-    createContextCommand(["agent", "supervise"], "Supervise serial task execution with watchdog and retries", async (args, ctx) => {
-      const { runAgentSuperviseCommand } = await import("./agentSuperviseCommands");
-      return runAgentSuperviseCommand(args, {
-        env: ctx.env,
-        scriptDir: ctx.scriptDir,
-        cliEntrypointPath: ctx.entrypointPath,
-        output: process.stdout,
-      });
-    }),
     createEnvCommand(["agent", "setup-offline-marxists"], "Create or update the Marxists.org offline book agent", async (args, deps) => {
       const { runSetupOfflineMarxistsAgentCommand } = await import("./offlineMarxistsAgentCommand");
       return runSetupOfflineMarxistsAgentCommand(args, deps);
