@@ -64,7 +64,9 @@ export function applyMessageStreamingUpsert(
   // - longer/append updates and non-prefix replacements still go through
   //   untouched, so deliberate segment replacements and corrections surface.
   // Tool/image/part-array messages keep the exact whole-object replace
-  // semantics they always had.
+  // semantics they always had. Reasoning is protected separately and more
+  // narrowly: metadata-only snapshots materialize the streaming default ""
+  // but must not erase reasoning already accumulated for this assistant turn.
   if (
     existing &&
     existing.role === "assistant" &&
@@ -76,6 +78,19 @@ export function applyMessageStreamingUpsert(
     existing.content.startsWith(merged.content)
   ) {
     merged.content = existing.content;
+  }
+
+  if (
+    existing &&
+    existing.role === "assistant" &&
+    merged.role === "assistant" &&
+    typeof existing.thinkContent === "string" &&
+    existing.thinkContent.length > 0 &&
+    typeof merged.thinkContent === "string" &&
+    merged.thinkContent.length < existing.thinkContent.length &&
+    existing.thinkContent.startsWith(merged.thinkContent)
+  ) {
+    merged.thinkContent = existing.thinkContent;
   }
 
   return merged;

@@ -64,7 +64,8 @@ export function isAwaitingVisibleAssistantReply(
   return false;
 }
 
-function hasVisibleAssistantContent(msg: any): boolean {
+/** Assistant 行是否有可见正文（stub / 隐藏 orchestrator 行不算）。 */
+export function hasVisibleAssistantContent(msg: any): boolean {
   if (!msg || msg.role !== "assistant") return false;
   if (isAssistantToolStub(msg)) return false;
   if (isHiddenOrchestratorToolMessage(msg)) return false;

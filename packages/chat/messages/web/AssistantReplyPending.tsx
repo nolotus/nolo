@@ -1,23 +1,31 @@
-import React, { memo } from "react";
+import { memo } from "react";
 import { OrbActivityIndicator } from "./OrbActivityIndicator";
+import type { ConversationActivity } from "../../runtime/conversationActivity";
+
+export interface AssistantReplyPendingProps {
+  /**
+   * 单一主 working signal（chat/runtime/conversationActivity 的 projection）。
+   * 本组件只在 activity.kind === "starting"（请求已发、尚无 reasoning /
+   * tool / answer）时渲染 —— thinking / tool / answering 阶段由各自的
+   * 消息面（ThinkingSection / ToolMessageGroup / 正文+cursor）担任主角，
+   * 这里必须让位，避免两个 working signal 同屏。
+   */
+  activity: ConversationActivity;
+}
 
 /**
- * Placeholder row shown while the agent loop is running but no visible
- * assistant message has arrived yet.
+ * "◌ 正在处理…" 轻量单行 —— starting 阶段唯一的 working signal。
+ * 其余 activity kind 一律返回 null（互斥规则收口在本组件内，消费方无需自判）。
  */
-export const AssistantReplyPending = memo(function AssistantReplyPending() {
+export const AssistantReplyPending = memo(function AssistantReplyPending({
+  activity,
+}: AssistantReplyPendingProps) {
+  if (activity.kind !== "starting") return null;
+
   return (
-    <div className="assistant-reply-pending" aria-live="polite" aria-busy="true">
-      <div className="assistant-reply-pending__avatar" aria-hidden="true">
-        <OrbActivityIndicator variant="s1-thinking" size={18} />
-      </div>
-      <div className="assistant-reply-pending__body">
-        <div className="assistant-reply-pending__label">正在回复…</div>
-        <div className="empty-content" aria-hidden="true">
-          <span className="empty-content__line empty-content__line--short" />
-          <span className="empty-content__line" />
-        </div>
-      </div>
+    <div className="assistant-reply-pending assistant-reply-pending--starting" aria-live="polite">
+      <OrbActivityIndicator variant="s1-thinking" size={14} />
+      <span className="assistant-reply-pending__label">{activity.label}</span>
     </div>
   );
 });

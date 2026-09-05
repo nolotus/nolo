@@ -40,10 +40,6 @@ export const queueBadgeStyles = stylex.create({
     cursor: "pointer",
     transition: "background 0.15s ease",
   },
-  pillRunning: {
-    borderColor: "var(--nolo-accent, #6b8afd)",
-    color: "var(--nolo-accent, #6b8afd)",
-  },
   icon: {
     fontSize: "0.7rem",
     opacity: 0.8,

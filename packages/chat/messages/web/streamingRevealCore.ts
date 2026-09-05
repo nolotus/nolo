@@ -46,6 +46,11 @@ export function computeRevealStep(behind: number): number {
   return behind - HUGE_BURST_TAIL_GRAPHEMES;
 }
 
+export type StreamingRevealOptions = {
+  /** Explicit lifecycle token. Changing it starts a new canonical segment. */
+  resetKey?: string | number;
+};
+
 export type RevealTargetRelation = "append" | "transient-shrink" | "replace";
 
 export function classifyRevealTarget(
@@ -62,11 +67,21 @@ export function classifyRevealTarget(
 /**
  * Next visible projection for a reveal tick. Grapheme-safe: the returned
  * string is always a whole-grapheme prefix of `target` (append), `visible`
- * itself (frozen transient shrink) or all of `target` (replacement snap).
+ * itself (frozen transient shrink), or all of `target` when an explicit
+ * `resetKey` is provided (same-segment replacements freeze instead).
  */
-export function nextRevealContent(target: string, visible: string): string {
+export function nextRevealContent(
+  target: string,
+  visible: string,
+  options?: StreamingRevealOptions
+): string {
   const relation = classifyRevealTarget(target, visible);
-  if (relation === "replace") return target;
+  // A non-prefix target is not evidence of a new segment. Freeze the
+  // projection until the canonical stream grows back. A caller that has an
+  // explicit lifecycle boundary may opt into the replacement projection.
+  if (relation === "replace") {
+    return options?.resetKey !== undefined ? target : visible;
+  }
   if (relation === "transient-shrink") return visible;
 
   const targetGraphemes = splitVisibleCharacters(target);

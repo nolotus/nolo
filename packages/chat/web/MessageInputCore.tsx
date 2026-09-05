@@ -1076,10 +1076,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
           <RunningProcessesPanel messages={currentMessages} />
 
-          <QueueBadge
-            dialogKey={currentDialogKey}
-            isRunning={isLoopRunning || hasStreamingMessage}
-          />
+          {/* QueueBadge 只负责 queue：count===0 不渲染；
+              「正在进行」由 ConversationActivity 单一主 working signal 表达。 */}
+          <QueueBadge dialogKey={currentDialogKey} />
 
           <MessageInputConfirmPanel
             visible={!!(pendingDeleteRun && pendingDeleteConfig)}

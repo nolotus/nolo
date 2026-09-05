@@ -65,6 +65,7 @@ import { extractCustomId } from "core/prefix";
 import { useAllToolRuns } from "ai/tools/toolRunStore";
 import { LuBrain } from "react-icons/lu";
 import { AssistantReplyPending } from "./AssistantReplyPending";
+import { useConversationActivity } from "../../runtime/conversationActivity";
 import { IntermediateNarrationRow } from "./IntermediateNarrationRow";
 import TodoCard from "./TodoCard";
 import { selectLatestConversationTodo } from "../todoState";
@@ -535,6 +536,16 @@ const MessagesList: React.FC<MessagesListProps> = ({
     [isRunning, messages]
   );
 
+  // 单一主 working signal：activity 是既有 runtime facts 的 projection
+  // （activeControllers / streamingMessageId / 消息尾部内容 / toolRunStore）。
+  // starting 之外的阶段由 ThinkingSection / ToolMessageGroup / 正文+cursor
+  // 担任主角，AssistantReplyPending 只在 starting 时出现。
+  const conversationActivity = useConversationActivity({
+    messages,
+    dialogId,
+    dialogKey: activeDialogKey,
+  });
+
   // Styles live in messagesStyles.ts (avoid rebuilding a large unused style string each stream tick).
 
   return (
@@ -652,9 +663,9 @@ const MessagesList: React.FC<MessagesListProps> = ({
           );
         })}
 
-        {awaitingAssistantReply && (
+        {conversationActivity.kind === "starting" && (
           <div className="chat-messages__item-wrapper chat-messages__item-wrapper--pending">
-            <AssistantReplyPending />
+            <AssistantReplyPending activity={conversationActivity} />
           </div>
         )}
 

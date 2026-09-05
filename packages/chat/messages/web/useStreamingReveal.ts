@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  classifyRevealTarget,
-  nextRevealContent,
-  REVEAL_TICK_MS,
-} from "./streamingRevealCore";
+import { nextRevealContent, REVEAL_TICK_MS } from "./streamingRevealCore";
 
 export { splitVisibleCharacters } from "./streamingRevealCore";
 export { REVEAL_TICK_MS };
@@ -32,6 +28,7 @@ export type UseStreamingRevealOptions = {
    * never replay the typewriter and never animate edits).
    */
   active?: boolean;
+  resetKey?: string | number;
   scheduler?: RevealScheduler;
   tickMs?: number;
 };
@@ -56,6 +53,7 @@ export function useStreamingReveal(
 ): string {
   const {
     active = true,
+    resetKey,
     scheduler = defaultScheduler,
     tickMs = REVEAL_TICK_MS,
   } = options ?? {};
@@ -118,6 +116,8 @@ export function useStreamingReveal(
     }
   }
 
+  const previousResetKeyRef = useRef(resetKey);
+
   useEffect(() => {
     unmountedRef.current = false;
     return () => {
@@ -129,8 +129,21 @@ export function useStreamingReveal(
   // Canonical updates: refresh the target only. Never clear a pending reveal
   // tick here — that is exactly what starved the previous implementation.
   useEffect(() => {
+    const reset = previousResetKeyRef.current !== resetKey;
+    previousResetKeyRef.current = resetKey;
     targetRef.current = content;
     if (unmountedRef.current) return;
+
+    if (reset) {
+      clearRevealTimer();
+      if (activeRef.current) {
+        commit("");
+        scheduleRevealTick();
+      } else {
+        commit(content);
+      }
+      return;
+    }
 
     if (!activeRef.current) {
       clearRevealTimer();
@@ -140,16 +153,8 @@ export function useStreamingReveal(
 
     if (visibleRef.current === content) return;
 
-    if (classifyRevealTarget(content, visibleRef.current) === "replace") {
-      // Deliberate segment replacement: snap so canonical corrections surface
-      // instead of hiding them behind a stale frozen prefix.
-      clearRevealTimer();
-      commit(content);
-      return;
-    }
-
     scheduleRevealTick();
-  }, [content]);
+  }, [content, resetKey]);
 
   useEffect(() => {
     if (unmountedRef.current) return;
