@@ -11,6 +11,26 @@ export type StreamingInlineReactArtifactParts = {
 
 const REACT_FENCE_START_RE = /```(jsx|tsx)(?:[^\n`]*)?\n/gi;
 
+// Trailing "```…" fragment (no newline yet) that may still resolve into a
+// jsx/tsx fence opening.
+const TRAILING_BACKTICK_RUN_RE = /`{3,}([^\n]*)$/;
+const REACT_FENCE_LANGS = ["jsx", "tsx"];
+
+/**
+ * Whether a trailing fence fragment ("```" + streamed language/info chars so
+ * far) could still grow into a react fence opening once more content arrives.
+ * Empty info ("```"), react languages and their strict prefixes
+ * ("j", "js", "t", "ts", "tx") stay ambiguous; anything already decided
+ * ("```tsx preview" is ambiguous until its newline, but "```ts\ncode" or
+ * "``` 表示代码块" are not) is shown normally.
+ */
+function couldStillBecomeReactFence(info: string): boolean {
+  const lower = info.toLowerCase();
+  if (!lower) return true;
+  if (REACT_FENCE_LANGS.some((lang) => lower.startsWith(lang))) return true;
+  return REACT_FENCE_LANGS.some((lang) => lang.startsWith(lower));
+}
+
 function isPreviewCandidate(code: string): boolean {
   return /function\s+Example\s*\(/.test(code);
 }
@@ -55,6 +75,15 @@ export function extractStreamingInlineReactArtifact(
   }
 
   visibleText += content.slice(cursor);
+
+  // Withhold an ambiguous trailing fence fragment: the tail has not been shown
+  // yet, so re-interpreting it as a fence later never deletes text the user
+  // has already seen. Once the line resolves into something else (a non-react
+  // fence, plain text), the fragment reappears with the rest of that line.
+  const partialFence = TRAILING_BACKTICK_RUN_RE.exec(visibleText);
+  if (partialFence && couldStillBecomeReactFence(partialFence[1])) {
+    visibleText = visibleText.slice(0, partialFence.index);
+  }
 
   return {
     visibleText: compactVisibleText(visibleText),

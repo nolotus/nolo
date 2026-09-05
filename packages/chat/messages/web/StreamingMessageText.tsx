@@ -2,7 +2,8 @@ import React, { memo, useMemo } from "react";
 import * as stylex from "@stylexjs/stylex";
 import { StreamingStructuredMarkdown } from "./StreamingStructuredMarkdown";
 import { buildStreamingMarkdownModel } from "./streamingMarkdownModel";
-import { splitVisibleCharacters, useStreamingReveal } from "./useStreamingReveal";
+import { splitVisibleCharacters } from "./streamingRevealCore";
+import { useStreamingReveal } from "./useStreamingReveal";
 import { messageLayoutStyles } from "./messageLayoutStyles";
 
 function styledClass(
@@ -47,7 +48,11 @@ const StreamingTextSpan = memo(({ content }: { content: string }) => {
 
 export const StreamingMessageText = memo(
   ({ content, isStreaming = true }: { content: string; isStreaming?: boolean }) => {
-    const visibleContent = useStreamingReveal(content);
+    // `active: isStreaming` keeps settled segments from replaying the
+    // typewriter: once streaming ends the revealed text is already complete,
+    // so only the cursor/streaming chrome disappears — no remount, no
+    // re-reveal from an empty string.
+    const visibleContent = useStreamingReveal(content, { active: isStreaming });
     const model = useMemo(
       () => buildStreamingMarkdownModel(visibleContent),
       [visibleContent]

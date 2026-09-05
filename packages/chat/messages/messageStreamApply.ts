@@ -31,19 +31,20 @@ import type { Message } from "./types";
  * the fixed streaming defaults (`isStreaming: true`, empty content/think),
  * so `isStreaming` stays `true` regardless of whether the chunk carries it.
  *
- * @param existing Optional previous message record. The legacy entity-adapter
- *   upsert REPLACED the whole record (no field merge), so existing fields were
- *   dropped on every streaming chunk. This helper intentionally does NOT merge
- *   `existing`; callers that need to preserve prior fields must spread them
- *   into `chunk` themselves. Returning a standalone payload keeps the semantics
- *   identical to the old inline upsert call.
+ * @param existing Optional previous message record. The entity-adapter upsert
+ *   REPLACES the whole record (no field merge), so fields the chunk omits fall
+ *   back to the streaming defaults. The only exception is the narrow monotonic
+ *   text guard below: assistant *textual* streaming must not lose
+ *   already-streamed body text to a metadata-only or transiently-shorter
+ *   chunk (retry progress, image-generation stage updates, reset buffers).
  */
 export function applyMessageStreamingUpsert(
   existing: Message | undefined,
   chunk: Partial<Message> & { id: string },
 ): Message {
-  void existing; // entity-adapter upsert = whole-object replace, not merge
-
+  // Entity-adapter upsert = whole-object replace, not a field merge. `existing`
+  // is only read by the narrow monotonic guard below; everything else keeps
+  // the exact replace semantics of the legacy reducer.
   const merged = {
     isStreaming: true,
     content: "",
@@ -54,6 +55,28 @@ export function applyMessageStreamingUpsert(
   // isStreaming is authoritative for streaming upserts; never let a chunk turn
   // it off mid-stream (the old reducer hard-coded it true).
   merged.isStreaming = true;
+
+  // Monotonic text guard (narrow, not a general field merge):
+  // - applies only to assistant records with plain-string content;
+  // - only when the incoming string content is a strict, shorter PREFIX of
+  //   what is already there (transient shrink — e.g. `content: ""` carried by
+  //   a retry-progress or image-stage update);
+  // - longer/append updates and non-prefix replacements still go through
+  //   untouched, so deliberate segment replacements and corrections surface.
+  // Tool/image/part-array messages keep the exact whole-object replace
+  // semantics they always had.
+  if (
+    existing &&
+    existing.role === "assistant" &&
+    merged.role === "assistant" &&
+    typeof existing.content === "string" &&
+    existing.content.length > 0 &&
+    typeof merged.content === "string" &&
+    merged.content.length < existing.content.length &&
+    existing.content.startsWith(merged.content)
+  ) {
+    merged.content = existing.content;
+  }
 
   return merged;
 }
