@@ -217,6 +217,15 @@ export async function fetchAntigravityCloudCodeCompletion(
       onTextDelta: args.onTextDelta,
       onReasoningDelta: args.onReasoningDelta,
     });
+  // 异常轮可观测（2026-09-05 排障教训）：owner 通道出现「200 + usage + 零正文」
+  // 微输出轮（out 1-80，finishReason 未知），聚合层此前丢弃全部结构信息，
+  // 事后只能从 usage 数字倒推。无正文且无工具时打出关键信号——低频（正常
+  // 轮永不触发）、永久保留。
+  if (!text && toolCalls.length === 0) {
+    console.warn(
+      `[antigravity] empty completion: finishReason=${JSON.stringify(finishReason)} reasoningLen=${reasoningContent?.length ?? 0} usage=${JSON.stringify(usage) ?? "none"} model=${String(envelope.model)} base=${new URL(url).host}`,
+    );
+  }
   // 200 空流防护：正文/思考/工具全空，且 finishReason 与 usage 也缺席——
   // 上游通道级异常（2026-09-05 实证：antigravity 软限流返回空 SSE，无任何
   // candidate 帧）。伪装成 finish_reason="stop" 的空补全会被 emptyAssistantRepair
