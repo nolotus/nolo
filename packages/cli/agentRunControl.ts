@@ -1632,6 +1632,75 @@ export function transitionRunToTerminal(
 }
 
 /**
+ * Authoritative child self-settlement on top of the strict record lock.
+ *
+ * `transitionRunToTerminal` is deliberately single-attempt: control-plane
+ * writers (stop / kill / reconciler) can afford to lose the race and report
+ * "pending reconcile". A child settling its own outcome cannot — the update
+ * carries ground truth that exists nowhere else (real exitCode / dialogId /
+ * credits / DoD results / failure note) and the child process is about to
+ * exit, so a silently dropped write leaves the record `running` with the
+ * process gone; the next stale reconcile then flips it into a false
+ * `orphaned`.
+ *
+ * This wrapper keeps every invariant of the strict lock (no unlocked write,
+ * terminal monotonic, orphan correction only over `orphaned`) and adds one
+ * thing: bounded retry while the lock is briefly held. The record critical
+ * section is read → modify → tmp write → rename → unlock, so genuine
+ * contention resolves in milliseconds — a few short retries suffice.
+ *
+ * - `transitioned` / `kept` / `not_found` return immediately, no retry.
+ * - `kept` on a *different* terminal status than intended: the durable
+ *   outcome wins (terminal monotonic); log a warning, never overwrite.
+ * - Still `contended` after the last attempt: console.error + the returned
+ *   `contended` result — never a silent success.
+ */
+export const AUTHORITATIVE_SETTLE_MAX_ATTEMPTS = 4;
+export const AUTHORITATIVE_SETTLE_RETRY_DELAY_MS = 15;
+
+export async function settleRunTerminalAuthoritatively(
+  runId: string,
+  update: {
+    status: RunRecord["status"];
+    exitCode?: number;
+    dialogId?: string;
+    credits?: number;
+    note?: string;
+    dodResults?: DoDCommandResult[];
+  },
+  deps: AgentRunControlDeps = {},
+  transition: typeof transitionRunToTerminal = transitionRunToTerminal,
+): Promise<TerminalTransitionResult> {
+  const attempt = (): TerminalTransitionResult | undefined =>
+    transition(runId, update, deps, { allowOverOrphaned: true });
+  let result: TerminalTransitionResult | undefined = attempt();
+  for (
+    let attemptNo = 1;
+    result?.kind === "contended" && attemptNo < AUTHORITATIVE_SETTLE_MAX_ATTEMPTS;
+    attemptNo += 1
+  ) {
+    await (deps.sleep ?? defaultSleep)(AUTHORITATIVE_SETTLE_RETRY_DELAY_MS);
+    result = attempt();
+  }
+  if (result?.kind === "contended") {
+    console.error(
+      `[nolo] authoritative settlement for run ${runId} lost the record lock ` +
+        `${AUTHORITATIVE_SETTLE_MAX_ATTEMPTS} times; durable record still ` +
+        `${result.record.status} — terminal status pending reconcile, child ` +
+        `outcome (exitCode/dialogId/credits/DoD) may be lost`,
+    );
+  } else if (result?.kind === "kept" && result.record.status !== update.status) {
+    console.warn(
+      `[nolo] run ${runId} already terminal (${result.record.status}); ` +
+        `keeping the durable outcome over intended ${update.status}`,
+    );
+  }
+  // The test seam may return void; callers treat that as "settled by the
+  // stub" — surface it as a no-op rather than crashing.
+  return result ?? { kind: "not_found" };
+}
+
+/**
  * Legacy compatibility shim — do NOT use in new code; call
  * `transitionRunToTerminal` directly. Safe by default: an already-terminal
  * record is never overwritten, `orphaned` included. Child self-settlement

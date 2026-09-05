@@ -792,7 +792,6 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     const transition = transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
     const finalRecord =
       transition.kind === "not_found" ? reconciled
-      : transition.kind === "contended" ? transition.record
       : transition.record;
     const labels = agentRunCardLabels();
     return {

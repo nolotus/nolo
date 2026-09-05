@@ -38,6 +38,7 @@ import {
 import {
   createRunActivityTracker,
   finalizeRunRecord,
+  settleRunTerminalAuthoritatively,
   transitionRunToTerminal,
   popQueueMessages,
   popSingleQueueMessage,
@@ -129,7 +130,7 @@ export type AgentRunCommandDeps = {
    * unset (defaults to false).
    */
   memoryRecallDisabled?: boolean;
-} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "generateRunId">;
+} & Pick<AgentRunControlDeps, "homedir" | "spawn" | "fs" | "now" | "sleep" | "generateRunId">;
 
 function resolvePositiveMs(value: unknown, fallback: number): number {
   return parsePositiveFiniteNumberOrFallback(value, fallback);
@@ -309,23 +310,27 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // Foreground runs have no registry record to finalize (no childRunId); the
   // watchdog can still write a truthful process exit code, it just skips the
   // finalizeRunRecord call in that case.
-  const finalizeWatchdogOutcome = (
+  const finalizeWatchdogOutcome = async (
     outcome: RunOutcome,
     note: string,
-  ) => {
+  ): Promise<void> => {
     if (!hasRegistry) return;
-    (deps.transitionRunToTerminal ?? transitionRunToTerminal)(
+    // Watchdog settlement carries the child's *real* process exit code
+    // (contract: done ⇔ exit 0), so it counts as authoritative settlement,
+    // same as the post-exit settlement below. The caller awaits this before
+    // exitFromWatchdog: once the process is gone nothing can repair a
+    // dropped terminal write, so brief lock contention is retried (bounded)
+    // instead of silently leaving the record running → false orphan.
+    await settleRunTerminalAuthoritatively(
       childRunId as string,
       { status: outcome.status, exitCode: outcome.exitCode, note },
-      { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
-      // Watchdog settlement carries the child's *real* process exit code
-      // (contract: done ⇔ exit 0), so it counts as authoritative settlement,
-      // same as the post-exit settlement below.
-      { allowOverOrphaned: true },
+      { env, homedir: deps.homedir, fs: deps.fs, now: deps.now, sleep: deps.sleep },
+      // Test seam: stubbed transitions keep their single-attempt semantics.
+      deps.transitionRunToTerminal,
     );
   };
   if (armStallWatchdog) {
-    stallTimer = setInterval(() => {
+    stallTimer = setInterval(async () => {
       if (timedOut || stalled) return;
       const activity = activityTracker?.getActivity();
       const lastEventAtMs = activity
@@ -348,20 +353,23 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         const note = `stalled: no progress for ${stallTimeoutMs}ms`;
         output.write(`[nolo] local run ${note}\n`);
         const outcome = resolveRunOutcome({ kind: "stall" });
-        finalizeWatchdogOutcome(outcome, note);
+        // The bounded retry must finish before the process exits — after
+        // exitFromWatchdog nothing in this process can repair a dropped
+        // terminal write.
+        await finalizeWatchdogOutcome(outcome, note);
         rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
         exitFromWatchdog(outcome.exitCode);
       }
     }, Math.min(stallTimeoutMs, 10_000));
   }
   if (armTimeoutWatchdog) {
-    timeoutTimer = setTimeout(() => {
+    timeoutTimer = setTimeout(async () => {
       timedOut = true;
       clearWatchdogs();
       const note = `timed out after ${parsed.timeoutMs}ms`;
       output.write(`[nolo] local run ${note}\n`);
       const outcome = resolveRunOutcome({ kind: "timeout" });
-      finalizeWatchdogOutcome(outcome, note);
+      await finalizeWatchdogOutcome(outcome, note);
       rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
       exitFromWatchdog(outcome.exitCode);
     }, parsed.timeoutMs);
@@ -866,7 +874,12 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       console.warn(`[nolo] DoD verification failed to run for ${childRunId}:`, dodError);
     }
 
-    await (deps.transitionRunToTerminal ?? transitionRunToTerminal)(childRunId, {
+    // Authoritative child settlement: this process owns the real outcome
+    // (exitCode / dialogId / credits / DoD / failure note) and exits right
+    // after, so a contended strict lock is retried (bounded) instead of
+    // silently dropped. Orphan-correction authority preserved: only
+    // orphaned → done/failed may pass; every other terminal stays put.
+    await settleRunTerminalAuthoritatively(childRunId, {
       status: outcome.status,
       exitCode: outcome.exitCode,
       dialogId: result.dialogId,
@@ -881,7 +894,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       homedir: deps.homedir,
       fs: deps.fs,
       now: deps.now,
-    }, { allowOverOrphaned: true });
+      sleep: deps.sleep,
+    }, deps.transitionRunToTerminal);
 
   }
 
