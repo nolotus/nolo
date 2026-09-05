@@ -658,21 +658,39 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   height: 36px !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 768px) {
   .message-input__box .upload-button,
-[data-hook~="chat-esc-chat-input-card"] .upload-button {
-    --button-size: 36px !important;
+  [data-hook~="chat-esc-chat-input-card"] .upload-button {
+    --button-size: 40px !important;
   }
   .message-input__box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    --button-size: 36px !important;
+  [data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    --button-size: 40px !important;
   }
   .message-input__box .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    width: 36px !important;
-    height: 36px !important;
+  [data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-input__box .upload-button,
+  [data-hook~="chat-esc-chat-input-card"] .upload-button {
+    --button-size: 40px !important;
+  }
+  .message-input__box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    --button-size: 40px !important;
+  }
+  .message-input__box .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    width: 40px !important;
+    height: 40px !important;
   }
 }
 

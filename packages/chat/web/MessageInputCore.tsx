@@ -53,10 +53,7 @@ import {
   useChatInputSeed,
   publishChatInputSeed,
 } from "chat/hooks/useChatInputSeed";
-import {
-  publishCanvasEditSelection,
-  useCanvasEditSelection,
-} from "render/canvas/canvasEditContext";
+import { useCanvasEditSelection } from "render/canvas/canvasEditContext";
 import {
   filterFavoriteAgentsByQuery,
   resolveFavoriteAgentSummaries,
@@ -841,18 +838,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     void sendMessageRef.current(transcript);
   }, [sendMessageRef]);
 
-  const handleDismissCanvasEdit = useCallback(() => {
-    publishCanvasEditSelection(null);
-  }, []);
-
   const sendDisabled =
     !hasContent ||
     isSendBlocked ||
     (!canMultiImg && imgPreviews.length > 1);
-
-  const canvasChipLabel = canvasEditSelection
-    ? `正在编辑 ${canvasEditSelection.part} · ${canvasEditSelection.type}`
-    : "";
 
   const editingChipLabel = t(
     "editingMessageNotice",
@@ -935,13 +924,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               />
             )}
 
-            {canvasEditSelection && (
-              <MessageInputChip
-                label={canvasChipLabel}
-                onDismiss={handleDismissCanvasEdit}
-                dismissAriaLabel="取消画布编辑目标"
-              />
-            )}
+            {/* 画布选中上下文：不在输入框显示芯片（由 iframe/画布自身高亮反馈，发送时注入并在发送后自动清除） */}
 
             {editingSession && (
               <MessageInputChip

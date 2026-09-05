@@ -132,17 +132,17 @@ const FILE_UPLOAD_BUTTON_STYLES = `
     outline: none;
   }
 
-  /* 移动端调整 */
-  @media (max-width: 768px) {
+  /* 移动端调整：保持 40px 合理触控热区 */
+  @media (min-width: 769px) {
     .upload-button { --button-size: 36px; }
+  }
+
+  @media (max-width: 768px) {
+    .upload-button { --button-size: 40px; }
   }
 
   @media (max-width: 480px) {
-    .upload-button { --button-size: 36px; }
-  }
-
-  @media (min-width: 769px) {
-    .upload-button { --button-size: 36px; }
+    .upload-button { --button-size: 40px; }
   }
 `;
 

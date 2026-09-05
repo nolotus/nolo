@@ -27,14 +27,14 @@ export const messageInputStyles = stylex.create({
       "background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease",
     cursor: "pointer",
     flexShrink: 0,
-    "@media (max-width: 768px)": {
-      "--button-size": "36px",
-    },
-    "@media (max-width: 480px)": {
-      "--button-size": "36px",
-    },
     "@media (min-width: 769px)": {
       "--button-size": "36px",
+    },
+    "@media (max-width: 768px)": {
+      "--button-size": "40px",
+    },
+    "@media (max-width: 480px)": {
+      "--button-size": "40px",
     },
   },
   sendMode: {
@@ -232,16 +232,16 @@ export const messageInputStyles = stylex.create({
     borderRadius: "50%",
   },
   voiceBtnInSend: {
-    width: "var(--button-size, 44px)",
-    height: "var(--button-size, 44px)",
+    width: "var(--button-size, 36px)",
+    height: "var(--button-size, 36px)",
     borderRadius: "50%",
     "@media (max-width: 768px)": {
       width: "40px",
       height: "40px",
     },
     "@media (max-width: 480px)": {
-      width: "36px",
-      height: "36px",
+      width: "40px",
+      height: "40px",
     },
   },
   voiceDots: {
@@ -884,34 +884,32 @@ export const messageInputStyles = stylex.create({
   textarea: {
     flex: 1,
     maxHeight: "360px",
-    padding: "12px 16px",
+    padding: "var(--space-2) 0",
     fontSize: "var(--fontSize-base)",
     lineHeight: "var(--leading-relaxed)",
-    borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "var(--borderSubtle)",
-    backgroundColor: "var(--surfaceRaised, var(--backgroundSecondary))",
+    borderRadius: 0,
+    borderWidth: 0,
+    borderStyle: "none",
+    borderColor: "transparent",
+    backgroundColor: "transparent",
     color: "var(--text)",
     resize: "none",
     outline: "none",
-    boxShadow:
-      "0 1px 2px var(--shadowLight), 0 10px 24px -20px var(--shadowMedium)",
+    boxShadow: "none",
     transition:
-      "height 0.15s ease-out, max-height 0.15s ease-out, border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease",
+      "height 0.15s ease-out, max-height 0.15s ease-out",
     "::placeholder": {
       color: "var(--textTertiary)",
       opacity: 0.8,
     },
     ":focus": {
-      backgroundColor: "var(--surfaceRaised, var(--background))",
+      backgroundColor: "transparent",
       borderColor: "transparent",
-      boxShadow:
-        "0 0 0 3px var(--focusRing), 0 12px 28px -20px var(--shadowMedium), 0 2px 4px var(--shadowLight)",
+      boxShadow: "none",
     },
     ":disabled": {
       opacity: 0.6,
-      backgroundColor: "var(--backgroundTertiary)",
+      backgroundColor: "transparent",
       cursor: "not-allowed",
       borderColor: "transparent",
       boxShadow: "none",
