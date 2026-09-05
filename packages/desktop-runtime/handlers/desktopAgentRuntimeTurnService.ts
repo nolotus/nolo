@@ -388,20 +388,20 @@ function buildDesktopStartAgentRunToolExecutor(args: {
     const presentationIntent = background ? "background_handoff" : "inline_result";
     const threadKind = background ? "background" : "inline";
 
+    // Desktop child context is an explicit adapter contract. Workspace authority
+    // remains in cwd/restrictShellToWorkspace and is not copied as parent metadata.
     const childRuntimeContext = {
-      ...(args.runtimeContext ?? {}),
-      surface: "desktop",
+      surface: "electron-bun",
       entrypoint: "agent-tool:startAgentRun",
       threadKind,
       presentationIntent,
       ...(parentThreadId ? { parentThreadId } : {}),
       ...(rootThreadId ? { rootThreadId } : {}),
-      ...(args.workspaceAuthority.kind === "authorized"
-        ? {
-            workspaceRoot: args.workspaceAuthority.root,
-            workspaceKind: "current",
-            workspaceAccess: "inherited",
-          }
+      ...(args.runtimeContext?.subjectRefs ? { subjectRefs: args.runtimeContext.subjectRefs } : {}),
+      // Transitive deny ceiling: blockedToolNames must flow downward so a child
+      // cannot restore tools banned in the current execution chain (TASK-SPEC E2).
+      ...(args.runtimeContext?.blockedToolNames?.length
+        ? { blockedToolNames: args.runtimeContext.blockedToolNames }
         : {}),
     };
 
