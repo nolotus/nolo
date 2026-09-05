@@ -27,10 +27,10 @@
  * 已收编入 token agentThemeTokens.chatInputCardShadow。 */
 [data-hook~="chat-esc-chat-input-card"]:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
-  border-color: var(--primaryBorder, var(--primary));
+  border-color: color-mix(in srgb, var(--primary, #6366f1) 60%, var(--border, #e4e4e7));
   box-shadow:
-    0 0 0 3px var(--focusRing),
-    0 16px 34px -28px var(--shadowMedium);
+    0 0 0 2px color-mix(in srgb, var(--primary, #6366f1) 20%, transparent),
+    0 4px 12px -8px var(--shadowMedium);
 }
 
 /* ═══ 自 LiveVoicePanel.css 迁出（LiveVoicePanel.tsx）═══ */
@@ -633,10 +633,17 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
 [data-hook~="chat-esc-chat-input-card"] .message-input__textarea {
   background: transparent !important;
   border-color: transparent !important;
+  border: none !important;
   border-radius: 0 !important;
   outline: none !important;
   box-shadow: none !important;
-  padding: var(--space-2) 0 !important;
+  padding: 4px 0 !important;
+  min-height: 24px;
+}
+
+.activity-progress-panel,
+.running-processes-panel {
+  margin-bottom: var(--space-2, 8px) !important;
 }
 
 /* .message-input__box nested controls */

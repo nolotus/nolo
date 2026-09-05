@@ -22,7 +22,7 @@ export const chatInputCardStyles = stylex.create({
     flexDirection: "column",
     backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
     borderRadius: "var(--radius-lg, var(--radius-md, 12px))",
-    padding: "var(--space-3) var(--space-4)",
+    padding: "var(--space-2) var(--space-4)",
     position: "relative",
     transition:
       "border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease",
@@ -34,7 +34,7 @@ export const chatInputCardStyles = stylex.create({
     width: "100%",
     boxSizing: "border-box",
     "@media (max-width: 768px)": {
-      padding: "var(--inputPadding, 10px 14px)",
+      padding: "var(--inputPadding, 8px 12px)",
       borderRadius: "var(--radius-md, 12px)",
     },
   },

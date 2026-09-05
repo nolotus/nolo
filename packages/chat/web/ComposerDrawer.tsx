@@ -7,6 +7,7 @@ import { LuChevronDown, LuGlobe, LuImage, LuPaperclip } from "react-icons/lu";
 import * as stylex from "@stylexjs/stylex";
 import { composerDrawerStyles } from "./composerDrawerStyles";
 import { withLiteralClass } from "./withLiteralClass";
+import { DialogUsageTrigger } from "./DialogUsageTrigger";
 
 export type ComposerDrawerProps = {
   attachmentCount?: number;
@@ -73,106 +74,94 @@ export const ComposerDrawer = memo(function ComposerDrawer({
 
   return (
     <div {...withLiteralClass("composer-drawer", composerDrawerStyles.root)}>
-      <button
-        type="button"
+      <div
         {...withLiteralClass("composer-drawer__toggle-bar", composerDrawerStyles.toggleBar)}
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-controls={contentId}
-        aria-label={toggleAriaLabel}
-        title={toggleAriaLabel}
       >
-        <div {...stylex.props(composerDrawerStyles.summaryLeft)}>
-          {attachmentCount > 0 && (
-            <span
-              {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
-            >
-              <LuPaperclip
-                size={12}
-                aria-hidden="true"
-                {...stylex.props(composerDrawerStyles.badgeIcon)}
-              />
-              <span>
-                {attachmentCount}
-                {processingAttachmentCount > 0 ? (
-                  <>
-                    {" · "}
-                    <span aria-hidden="true">⏳</span>
-                    {" "}
-                    {processingAttachmentCount}
-                  </>
-                ) : null}
+        <button
+          type="button"
+          {...withLiteralClass("composer-drawer__summary-btn", composerDrawerStyles.summaryBtn)}
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          aria-label={toggleAriaLabel}
+          title={toggleAriaLabel}
+        >
+          <div {...stylex.props(composerDrawerStyles.summaryLeft)}>
+            {attachmentCount > 0 && (
+              <span
+                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+              >
+                <LuPaperclip
+                  size={12}
+                  aria-hidden="true"
+                  {...stylex.props(composerDrawerStyles.badgeIcon)}
+                />
+                <span>
+                  {attachmentCount}
+                  {processingAttachmentCount > 0 ? (
+                    <>
+                      {" · "}
+                      <span aria-hidden="true">⏳</span>
+                      {" "}
+                      {processingAttachmentCount}
+                    </>
+                  ) : null}
+                </span>
               </span>
-            </span>
-          )}
+            )}
 
-          {hasBrowseContext && (
-            <span
-              {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
-            >
-              <LuGlobe
-                size={12}
-                aria-hidden="true"
-                {...stylex.props(composerDrawerStyles.badgeIcon)}
-              />
-              <span>{browseHost || "Web"}</span>
-            </span>
-          )}
+            {hasBrowseContext && (
+              <span
+                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+              >
+                <LuGlobe
+                  size={12}
+                  aria-hidden="true"
+                  {...stylex.props(composerDrawerStyles.badgeIcon)}
+                />
+                <span>{browseHost || "Web"}</span>
+              </span>
+            )}
 
-          {imageConfigSummary && (
-            <span
-              {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
-            >
-              <LuImage
-                size={12}
-                aria-hidden="true"
-                {...stylex.props(composerDrawerStyles.badgeIcon)}
-              />
-              <span>{imageConfigSummary}</span>
-            </span>
-          )}
-        </div>
+            {imageConfigSummary && (
+              <span
+                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+              >
+                <LuImage
+                  size={12}
+                  aria-hidden="true"
+                  {...stylex.props(composerDrawerStyles.badgeIcon)}
+                />
+                <span>{imageConfigSummary}</span>
+              </span>
+            )}
+          </div>
+        </button>
 
         <div {...stylex.props(composerDrawerStyles.summaryRight)}>
-          {typeof usagePercent === "number" && usagePercent > 0 && (
-            <div
-              {...withLiteralClass(
-                "composer-drawer__mini-progress",
-                composerDrawerStyles.miniProgressWrap
-              )}
-              role="progressbar"
-              aria-label={t("contextUsagePercent", "上下文用量 {{percent}}%", {
-                percent: usagePercent,
-              })}
-              aria-valuenow={usagePercent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              title={t("contextUsagePercent", "上下文用量 {{percent}}%", {
-                percent: usagePercent,
-              })}
-            >
-              <div {...stylex.props(composerDrawerStyles.miniProgressTrack)}>
-                <div
-                  {...stylex.props(composerDrawerStyles.miniProgressFill)}
-                  style={{ width: `${Math.min(100, Math.max(0, usagePercent))}%` }}
-                />
-              </div>
-              <span {...stylex.props(composerDrawerStyles.miniProgressText)}>
-                {usagePercent}%
-              </span>
-            </div>
-          )}
+          {typeof usagePercent === "number" && usagePercent > 0 ? (
+            <DialogUsageTrigger usagePercentOverride={usagePercent} />
+          ) : null}
 
-          <span
-            {...stylex.props(
-              composerDrawerStyles.chevron,
-              expanded && composerDrawerStyles.chevronExpanded
-            )}
+          <button
+            type="button"
+            {...withLiteralClass("composer-drawer__chevron-btn", composerDrawerStyles.chevronBtn)}
+            onClick={onToggle}
+            aria-expanded={expanded}
+            aria-controls={contentId}
+            aria-label={toggleAriaLabel}
           >
-            <LuChevronDown size={14} aria-hidden="true" />
-          </span>
+            <span
+              {...stylex.props(
+                composerDrawerStyles.chevron,
+                expanded && composerDrawerStyles.chevronExpanded
+              )}
+            >
+              <LuChevronDown size={14} aria-hidden="true" />
+            </span>
+          </button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div

@@ -24,6 +24,10 @@ import {
   TASK_PREVIEW_MAX,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
+  buildDelegatedTaskContent,
+  calculateDelegatedPayloadMetrics,
+} from "./cliProviderHelpers";
+import {
   type AgentRunControlDeps,
   type FsLike,
   type RunRecord,
@@ -233,10 +237,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     if (!task) throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     const nowMs = resolveNowMs(deps);
 
-    const message =
-      typeof args.input === "undefined"
-        ? task
-        : `${task}\n\n--- 附加输入 ---\n${JSON.stringify(args.input)}`;
+    const message = buildDelegatedTaskContent(task, args.input);
+    const payloadMetrics = calculateDelegatedPayloadMetrics(task, args.input, message);
 
     // --msg-file 占位会被 spawnLocalBackgroundRun 的 rewriteMsgFileArg 改写为
     // runs 目录里的内容快照（~/.nolo/runs/<runId>.msg.md）；--bg 会被子进程剥离。
@@ -347,6 +349,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         batchId: resolvedBatchId,
         ...(agentName ? { agentName } : {}),
         ...(taskPreview ? { taskPreview } : {}),
+        payloadMetrics,
       }),
       metadata: {
         displayData: formatStartRunCard(displayName, "running", {
@@ -354,6 +357,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
           runId,
           labels,
         }),
+        payloadMetrics,
       },
     };
   };

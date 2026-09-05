@@ -20,7 +20,13 @@
 
 import { runAgentBackground } from "ai/agent/runAgentBackground";
 import { toErrorMessage } from "core/errorMessage";
-import { buildDelegatedTaskContent, formatStartRunCard, resolveRunLabel, TASK_PREVIEW_MAX } from "./agentRunDisplayHelpers";
+import {
+    buildDelegatedTaskContent,
+    calculateDelegatedPayloadMetrics,
+    formatStartRunCard,
+    resolveRunLabel,
+    TASK_PREVIEW_MAX,
+} from "./agentRunDisplayHelpers";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
 
@@ -51,11 +57,12 @@ export function buildStartAgentRunFunctionSchema(opts?: { supportsWait?: boolean
             },
             task: {
                 type: "string",
-                description: "委托给该 Agent 的子任务描述（自然语言）。建议包含必要的上下文说明。",
+                description:
+                    "委托给该 Agent 的精简子任务指令/brief。推荐通过共享引用（如 commit hash、文件路径与行号区间 path:1-50、dialogId、artifact id 等）指引子任务自行读取，严禁将完整文件内容、全量 git diff、长日志或仓库总说明复制进 task。",
             },
             input: {
                 description:
-                    "可选。JSON 或字符串，作为本次子任务的附加输入（如抓取到的原始数据、上下文片段等）。",
+                    "可选。仅用于传递子任务无法通过本地文件系统或共享引用直接读取的真实外部输入（如外部 API 响应、瞬时数据）。已有共享引用或无需附加数据时请省略，切勿重复复制 task 描述。",
             },
             agentName: {
                 type: "string",
@@ -136,7 +143,7 @@ export async function startAgentRunFunc(
     args: StartAgentRunArgs,
     thunkApi: any,
     _context?: { parentMessageId?: string; signal?: AbortSignal; toolRunId?: string }
-): Promise<{ rawData: any; displayData: string }> {
+): Promise<{ rawData: any; displayData: string; metadata?: Record<string, unknown> }> {
     const { agentKey, task, input, agentName, ephemeral, batchId, wait } = args;
     const resultMode = args.resultMode ?? "full";
     const { dispatch } = thunkApi;
@@ -159,6 +166,7 @@ export async function startAgentRunFunc(
     }
 
     const content = buildDelegatedTaskContent(task, input);
+    const payloadMetrics = calculateDelegatedPayloadMetrics(task, input, content);
 
     // 从入参或模块级单例取当前对话 key/id，提取 id 作为 parentDialogId 透传给服务端，
     // 让后台子对话记录父子关系，供侧边栏折叠。无当前对话且无入参时降级不传。
@@ -198,6 +206,9 @@ export async function startAgentRunFunc(
                 rawData:
                     resultMode === "summary" ? summarizeChildContent(fullContent) : fullContent,
                 displayData: `✅ startAgentRun 同步完成，dialogId: ${bgResult.dialogId}${resultMode === "summary" ? "（summary）" : ""}`,
+                metadata: {
+                    payloadMetrics,
+                },
             };
         }
 
@@ -225,11 +236,15 @@ export async function startAgentRunFunc(
                 batchId: effectiveBatchId,
                 ...(resolvedName ? { agentName: resolvedName } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
+                payloadMetrics,
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
                 task: taskPreview,
                 runId,
             }),
+            metadata: {
+                payloadMetrics,
+            },
         };
     } catch (e: any) {
         throw new Error(`startAgentRun 启动 Agent [${agentKey}] 失败: ${toErrorMessage(e)}`);

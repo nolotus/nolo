@@ -1,13 +1,8 @@
-// packages/chat/web/MessageInputControlsBar.tsx
-// Left tools + right send/voice strip. Memoized to skip re-render when only
-// textarea text changes but derived control props stay equal.
-
 import * as stylex from "@stylexjs/stylex";
 import React, { memo } from "react";
 import FileUploadButton from "./FileUploadButton";
 import VoiceInputButton from "./VoiceInputButton";
 import SendButton from "./SendButton";
-import { DialogUsageTrigger } from "./DialogUsageTrigger";
 import {
   AgentPickerControl,
   type AgentPickerControlProps,
@@ -69,7 +64,6 @@ export const MessageInputControlsBar = memo(function MessageInputControlsBar({
           .filter(Boolean)
           .join(" ")}
       >
-        <DialogUsageTrigger />
         {showVoiceInput ? (
           <VoiceInputButton
             onTranscribed={onTranscribed}

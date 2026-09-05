@@ -17,8 +17,9 @@ export const queueBadgeStyles = stylex.create({
     position: "relative",
     display: "inline-flex",
     alignItems: "center",
-    marginLeft: "0.5rem",
+    marginBottom: "var(--space-2, 8px)",
     flexShrink: 0,
+    alignSelf: "flex-start",
   },
   pill: {
     display: "inline-flex",

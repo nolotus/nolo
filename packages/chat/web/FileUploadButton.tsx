@@ -86,46 +86,41 @@ const FILE_UPLOAD_BUTTON_STYLES = `
     width: var(--button-size);
     height: var(--button-size);
     border-radius: 50%; /* 圆形按钮 */
-    border: 1px solid var(--borderMuted, var(--borderLight));
+    border: 1px solid transparent;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)));
-    color: var(--textMuted, var(--textSecondary));
+    background: transparent;
+    color: var(--textSecondary);
     cursor: pointer;
-    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     flex-shrink: 0;
-    box-shadow: 0 1px 2px var(--shadowLight);
+    box-shadow: none;
   }
 
   .upload-button:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
     pointer-events: none;
   }
 
   .upload-button:hover:not(:disabled) {
-    background: var(--surfaceInteractiveHover, var(--backgroundHover));
+    background: var(--surfaceInteractiveHover, var(--backgroundHover, rgba(0, 0, 0, 0.05)));
     color: var(--primary);
-    border-color: var(--borderSubtle);
-    transform: translateY(-1px);
-    box-shadow: 0 6px 14px -12px var(--shadowMedium);
+    border-color: transparent;
+    transform: none;
+    box-shadow: none;
   }
 
   .upload-button:active:not(:disabled) {
-    transform: translateY(0);
-    transition-duration: 0.1s;
-    box-shadow: 
-      0 1px 3px var(--shadowLight),
-      inset 0 2px 4px rgba(0, 0, 0, 0.03);
+    transform: scale(0.96);
   }
 
   .upload-button:focus-visible {
     outline: none;
     box-shadow: 
       0 0 0 2px var(--background),
-      0 0 0 4px var(--primary),
-      0 1px 3px var(--shadowLight);
+      0 0 0 4px var(--primary);
   }
 
   .upload-button:focus:not(:focus-visible) {

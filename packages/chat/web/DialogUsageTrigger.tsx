@@ -3,7 +3,6 @@ import React from "react";
 import { DialogTrigger, Button as RACButton } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Popover } from "render/web/ui/Popover";
-import { DialogUsageGaugeIcon } from "./DialogUsageGaugeIcon";
 import { useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
 import { getModelContextWindow } from "ai/llm/getModelContextWindow";
@@ -17,7 +16,9 @@ import {
   getDialogTokenTotal,
 } from "chat/dialog/dialogUsageFormat";
 
-export const DialogUsageTrigger: React.FC = () => {
+export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = ({
+  usagePercentOverride,
+}) => {
   const { t } = useTranslation(["common", "chat"]);
 
   const tokenStats = useAppSelector(selectCurrentDialogTokens);
@@ -35,21 +36,35 @@ export const DialogUsageTrigger: React.FC = () => {
     tokenStats?.outputTokens ?? 0
   );
 
+  const percent =
+    typeof usagePercentOverride === "number"
+      ? usagePercentOverride
+      : contextWindow > 0 && totalTokens > 0
+        ? getContextWindowUsagePercent(totalTokens, contextWindow)
+        : undefined;
+
+  if (typeof percent !== "number" || percent <= 0) return null;
+
   return (
     <DialogTrigger>
       <RACButton
-        className="dialog-usage-trigger"
-        aria-label={t("chat:dialogUsageTitle", "会话用量")}
-        {...{ title: t("chat:dialogUsageTitle", "会话用量") } as any}
+        className="dialog-usage-trigger composer-drawer__mini-progress"
+        aria-label={t("chat:contextUsagePercent", "上下文用量 {{percent}}%", {
+          percent,
+        })}
+        {...{
+          title: t("chat:contextUsagePercent", "上下文用量 {{percent}}%", {
+            percent,
+          }),
+        } as any}
       >
-        <DialogUsageGaugeIcon
-          size={22}
-          fillPercent={
-            contextWindow > 0 && totalTokens > 0
-              ? getContextWindowUsagePercent(totalTokens, contextWindow)
-              : undefined
-          }
-        />
+        <div className="composer-drawer__mini-progress-track">
+          <div
+            className="composer-drawer__mini-progress-fill"
+            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+          />
+        </div>
+        <span className="composer-drawer__mini-progress-text">{percent}%</span>
       </RACButton>
       <Popover
         placement="top end"

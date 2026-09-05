@@ -21,27 +21,27 @@ export const agentPickerControlStyles = stylex.create({
   trigger: {
     display: "inline-flex",
     alignItems: "center",
-    gap: "6px",
+    gap: "4px",
     maxWidth: "180px",
-    padding: "6px 10px",
+    padding: "4px 8px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: {
-      default: "var(--borderMuted, var(--borderLight))",
-      ":hover": "var(--borderSubtle)",
+      default: "transparent",
+      ":hover": "var(--borderMuted, var(--borderLight))",
     },
-    borderRadius: "999px",
+    borderRadius: "var(--radius-xs, 6px)",
     backgroundColor: {
-      default: "var(--surfaceInset, var(--surfaceRaised, var(--backgroundSecondary)))",
+      default: "transparent",
       ":hover": "var(--surfaceInteractiveHover, var(--backgroundHover))",
     },
     color: {
-      default: "var(--textMuted, var(--textSecondary))",
-      ":hover": "var(--primary)",
+      default: "var(--textSecondary)",
+      ":hover": "var(--text)",
     },
     fontSize: "12px",
     fontWeight: 500,
-    lineHeight: 1,
+    lineHeight: 1.2,
     cursor: "pointer",
     transition:
       "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
@@ -49,7 +49,7 @@ export const agentPickerControlStyles = stylex.create({
   triggerOpen: {
     backgroundColor: "var(--surfaceInteractiveHover, var(--backgroundHover))",
     color: "var(--primary)",
-    borderColor: "var(--borderSubtle)",
+    borderColor: "var(--borderMuted, var(--borderLight))",
   },
   triggerIcon: {
     display: "inline-flex",

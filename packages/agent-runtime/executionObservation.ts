@@ -24,6 +24,15 @@ export type AgentExecutionContextMetrics = {
   dynamicContextChars: number;
 };
 
+export type DelegatedPayloadMetrics = {
+  taskChars: number;
+  inputChars: number;
+  totalChars: number;
+  estimatedTaskTokens: number;
+  estimatedInputTokens: number;
+  estimatedTotalTokens: number;
+};
+
 export type AgentExecutionObservationEvent =
   | {
       kind: "llm-start";
