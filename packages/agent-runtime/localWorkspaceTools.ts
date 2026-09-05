@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
 
@@ -969,17 +969,30 @@ function isPathInsideRoot(root: string, targetPath: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-async function isRuntimeOwnedSpillPath(targetPath: string): Promise<boolean> {
+/**
+ * Resolve a runtime-owned spill target, or return null when the path is not a
+ * trusted spill read. Resolves to the canonical (fully realpath-resolved)
+ * target so callers re-open the exact path that passed containment instead of
+ * re-walking the original — possibly symlink-swappable — route (TOCTOU).
+ */
+async function resolveRuntimeOwnedSpillPath(targetPath: string): Promise<string | null> {
   const spillRoot = resolveNoloStateDir("spills");
-  if (!isPathInsideRoot(spillRoot, targetPath)) return false;
+  if (!isPathInsideRoot(spillRoot, targetPath)) return null;
+  // The spill root itself must be a real directory (lstat, final component
+  // only): if `spills` is replaced by a symlink, realpath(spillRoot) moves
+  // with it and containment against the moved root would trust an
+  // attacker-chosen external directory. Symlinked parents (e.g. macOS /var →
+  // /private/var) are unaffected — only the final component is checked.
+  const rootStat = await lstat(spillRoot).catch(() => undefined);
+  if (rootStat?.isDirectory() !== true) return null;
   // Lexical containment is not sufficient: a spill-root symlink may point at
   // credentials or another sensitive external file. Only trust an existing
   // target whose resolved path remains inside the real spill root.
   try {
     const [realRoot, realTarget] = await Promise.all([realpath(spillRoot), realpath(targetPath)]);
-    return isPathInsideRoot(realRoot, realTarget);
+    return isPathInsideRoot(realRoot, realTarget) ? realTarget : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -993,10 +1006,10 @@ export async function resolveLocalWorkspaceToolPath(args: {
   const workspaceRoot = resolve(args.workspaceRoot);
   const targetPath = resolve(workspaceRoot, args.requestedPath);
   const insideWorkspace = isPathInsideWorkspace({ workspaceRoot, targetPath });
-  const trustedSpill = !insideWorkspace && args.allowRuntimeOwnedSpill === true
-    ? await isRuntimeOwnedSpillPath(targetPath)
-    : false;
-  if (!insideWorkspace && !trustedSpill) {
+  const trustedSpillPath = !insideWorkspace && args.allowRuntimeOwnedSpill === true
+    ? await resolveRuntimeOwnedSpillPath(targetPath)
+    : null;
+  if (!insideWorkspace && trustedSpillPath === null) {
     if (args.confirmExternalFileAccess) {
       const request: PermissionRequest = {
         id: "permission-file-external-access",
@@ -1021,7 +1034,10 @@ export async function resolveLocalWorkspaceToolPath(args: {
       }
     }
   }
-  return targetPath;
+  // Trusted spill reads must proceed through the canonical target that passed
+  // containment; workspace paths and user-confirmed external paths keep the
+  // requested path untouched.
+  return trustedSpillPath ?? targetPath;
 }
 
 export const READ_FILE_MAX_CHAR_LIMIT = 32_000;
