@@ -12,6 +12,7 @@
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
 import * as nodeFs from "node:fs";
+import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
 import { existsSync, readFileSync } from "node:fs";
 import {
   formatListRunsCard,
@@ -37,7 +38,7 @@ import {
   claimRunRecord,
   commitRunRecordClaim,
   releaseRunRecordAck,
-  finalizeRunRecord,
+  transitionRunToTerminal,
   findRunRecord,
   gcRunRecords,
   popAllQueueEntries,
@@ -82,6 +83,7 @@ export type CliAgentRunToolExecutorDeps = {
   todoStore?: AgentRunTodoStore;
   /** 时钟（epoch ms）；缺省 Date.now()。共享层禁止取，适配层允许。 */
   nowMs?: () => number;
+  terminateRunProcess?: typeof terminateRunProcess;
 } & AgentRunControlDeps;
 
 const noopOutput: OutputLike = { write: () => {} };
@@ -728,89 +730,31 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       //
       // ttl 绑定本次 wait 实际使用的 timeoutMs + 宽限（缺省时为 100s + 60s ≈ 160s），
       // 避免缺省 timeoutMs 时租约落回 15min 兜底导致崩溃自愈延迟过长。
-      const claimToken = claimRunRecord(record.runId, {
-        ...deps,
-        ttlMs: timeoutMs + ACK_LEASE_GRACE_MS,
+      let claimToken: string | null = null;
+      const result = await waitForRunTerminal({
+        read: () => checkStaleRun(record.runId, deps) ?? record,
+        isTerminal: (state) => isAgentRunTerminalStatus(state.status),
+        pollIntervalMs: WAIT_POLL_INTERVAL_MS,
+        timeoutMs,
+        abortSignal,
+        sleep: deps.sleep,
+        claim: {
+          acquire: () => {
+            claimToken = claimRunRecord(record.runId, { ...deps, ttlMs: timeoutMs + ACK_LEASE_GRACE_MS });
+            return claimToken;
+          },
+          commit: (token) => { if (token) commitRunRecordClaim(record.runId, token, deps); else ackRunRecord(record.runId, deps); },
+          release: (token) => { if (token) releaseRunRecordAck(record.runId, token, deps); },
+        },
       });
-      // 租约必须在「本次 wait 没能把结果交出去」的每一条退出路径上释放，不
-      // 只是超时：turn 被强停时 raceWithAbort 直接孤儿化这个 promise，finally
-      // 可能很久之后才跑（甚至进程已被硬杀根本不跑）。token 保证迟到的释放
-      // 不会误删后来者的租约，ttl 保证进程被杀时租约自己过期——两者一起，
-      // 泄漏的 claim 不会再让这条 run 的完成永久静默。
-      let claimConsumed = false;
-      try {
-        const startMs = resolveNowMs(deps);
-        const deadline = startMs + timeoutMs;
-        const baseSleep =
-          deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-        // abort 要能立刻打断休眠，否则强停后仍要空转一个轮询间隔才收手。
-        // baseSleep 异常要透传，防止挂死或 unhandled rejection。
-        const sleep = abortSignal
-          ? (ms: number) =>
-              new Promise<void>((resolve, reject) => {
-                const done = () => {
-                  abortSignal.removeEventListener("abort", done);
-                  resolve();
-                };
-                abortSignal.addEventListener("abort", done, { once: true });
-                Promise.resolve(baseSleep(ms))
-                  .then(done)
-                  .catch((err) => {
-                    abortSignal.removeEventListener("abort", done);
-                    reject(err);
-                  });
-              })
-          : baseSleep;
-        let reconciled = record;
-        for (;;) {
-          reconciled = checkStaleRun(record.runId, deps) ?? record;
-          if (isAgentRunTerminalStatus(reconciled.status)) break;
-          if (abortSignal?.aborted) {
-            // turn 被强停：立刻收手，让 finally 释放租约。抛错而不是返回结
-            // 果，因为这次 wait 没有拿到任何结论——run 仍在跑，它的完成必须
-            // 重新走唤醒通道。
-            throw new Error("controlAgentRun(wait) 已被中止。");
-          }
-          const nowMs = resolveNowMs(deps);
-          const waitedMs = nowMs - startMs;
-          if (nowMs >= deadline) {
-            // 超时：run 仍未终态。返回 status="timeout" 标记（非失败），附带真实
-            // runStatus + progress 让调用方判断它是否还在干活。claim 由 finally
-            // 释放，run 之后真到终态时重新走终态唤醒通道。
-            return {
-              content: JSON.stringify({
-                runId: reconciled.runId,
-                found: true,
-                status: "timeout",
-                runStatus: reconciled.status,
-                pid: reconciled.pid ?? null,
-                agentKey: reconciled.agentKey,
-                ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
-                startedAt: reconciled.startedAt,
-                waitedMs,
-                timeoutMs,
-                ...buildProgressField(reconciled, nowMs),
-              }),
-              metadata: {
-                displayData: `⏳ wait 超时（${Math.round(waitedMs / 1000)}s），run 仍在运行：可稍后再 wait，或改用 status/stop`,
-              },
-            };
-          }
-          await sleep(WAIT_POLL_INTERVAL_MS);
-        }
-        // 到达终态：失败终态同样回填熔断表（Q 接线，与 status 一致）；返回与
-        // status 相同形状的结果（含 dialogId/exitCode/progress，不带日志）。
-        // 结果确实由本次调用交出，claim 保留——这才是「已有人收走」。
-        const payload = buildRunStatusPayload(reconciled, deps);
-        if (claimToken) commitRunRecordClaim(record.runId, claimToken, deps);
-        else ackRunRecord(reconciled.runId, deps);
-        claimConsumed = true;
-        return payload;
-      } finally {
-        if (!claimConsumed && claimToken) {
-          releaseRunRecordAck(record.runId, claimToken, deps);
-        }
+      if (result.kind === "aborted") throw new Error("controlAgentRun(wait) 已被中止。");
+      if (result.kind === "failed") throw result.error;
+      if (result.kind === "timeout") {
+        const reconciled = result.lastState ?? record;
+        const nowMs = resolveNowMs(deps);
+        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: `⏳ wait 超时（${Math.round(result.waitedMs / 1000)}s），run 仍在运行：可稍后再 wait，或改用 status/stop` } };
       }
+      return buildRunStatusPayload(result.state, deps);
     }
 
     // action === "stop"
@@ -829,7 +773,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       };
     }
     if (typeof reconciled.pid === "number") {
-      const confirmed = await terminateRunProcess(reconciled, "SIGTERM", deps);
+      const confirmed = await (deps.terminateRunProcess ?? terminateRunProcess)(reconciled, "SIGTERM", deps);
       if (!confirmed) {
         // 进程 SIGKILL 后仍存活：不标记 killed，如实上报。
         return {
@@ -845,11 +789,12 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         };
       }
     }
-    finalizeRunRecord(reconciled.runId, { status: "killed" }, deps);
+    const transition = transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
+    const finalRecord = transition.kind === "not_found" ? reconciled : transition.record;
     const labels = agentRunCardLabels();
     return {
-      content: JSON.stringify({ runId: record.runId, found: true, status: "killed" }),
-      metadata: { displayData: formatStopRunCard("killed", labels) },
+      content: JSON.stringify({ runId: finalRecord.runId, found: true, status: finalRecord.status }),
+      metadata: { displayData: formatStopRunCard(finalRecord.status, labels) },
     };
   };
 }

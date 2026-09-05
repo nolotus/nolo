@@ -1562,7 +1562,12 @@ export function releaseRunRecordAck(
   });
 }
 
-export function finalizeRunRecord(
+export type TerminalTransitionResult =
+  | { kind: "not_found" }
+  | { kind: "transitioned"; record: RunRecord }
+  | { kind: "kept"; record: RunRecord };
+
+export function transitionRunToTerminal(
   runId: string,
   update: {
     status: RunRecord["status"];
@@ -1572,16 +1577,21 @@ export function finalizeRunRecord(
     credits?: number;
     /** Diagnostic note for callers/logs, persisted on the run record. */
     note?: string;
-    /** DoD 验收结果，与终态同一次写入（见 RunRecord.dodResults）。 */
+    /** DoD 验收结果，与终态同一次写入。 */
     dodResults?: DoDCommandResult[];
   },
-  deps: AgentRunControlDeps = {}
-): void {
-  // Same critical section as reconciliation: a real terminal status must not
-  // race a concurrent orphan verdict, in either direction.
-  withRunRecordLock(runId, deps, () => {
+  deps: AgentRunControlDeps = {},
+  options: { allowOverOrphaned?: boolean } = {},
+): TerminalTransitionResult {
+  return withRunRecordLock(runId, deps, () => {
     const record = readRunRecord(runId, deps);
-    if (!record) return;
+    if (!record) return { kind: "not_found" };
+    // A terminal record is authoritative. Only child self-settlement may
+    // correct orphaned; all other terminal-to-terminal writes are blocked.
+    if (sharedIsAgentRunTerminalStatus(record.status) &&
+        !(options.allowOverOrphaned === true && record.status === "orphaned")) {
+      return { kind: "kept", record };
+    }
     const now = deps.now ?? (() => new Date());
     record.status = update.status;
     if (typeof update.exitCode === "number") record.exitCode = update.exitCode;
@@ -1596,11 +1606,34 @@ export function finalizeRunRecord(
     if (typeof update.note === "string" && update.note.trim()) {
       record.note = update.note.trim();
     }
-    // A self-reported terminal status is ground truth; drop any orphan verdict
-    // an earlier reconciler pass may have written.
+    // A self-reported terminal status is ground truth; drop any orphan verdict.
     if (record.note?.startsWith("orphaned:")) record.note = undefined;
     writeRunRecord(record, deps);
-  });
+    return { kind: "transitioned", record };
+  }) ?? { kind: "not_found" };
+}
+
+/**
+ * Legacy compatibility shim — do NOT use in new code; call
+ * `transitionRunToTerminal` directly. This alias keeps the historical
+ * orphan-correct semantics by carrying `allowOverOrphaned: true`, i.e. callers
+ * silently gain the right to overwrite an `orphaned` verdict with a
+ * self-reported terminal result. All other terminal→terminal writes stay
+ * blocked, same as the guarded helper.
+ */
+export function finalizeRunRecord(
+  runId: string,
+  update: {
+    status: RunRecord["status"];
+    exitCode?: number;
+    dialogId?: string;
+    credits?: number;
+    note?: string;
+    dodResults?: DoDCommandResult[];
+  },
+  deps: AgentRunControlDeps = {}
+): void {
+  transitionRunToTerminal(runId, update, deps, { allowOverOrphaned: true });
 }
 
 /**
@@ -2202,20 +2235,25 @@ async function runSignalCommand(
     deps.output.write(`Run not found: ${target}\n`);
     return 1;
   }
-  if (typeof record.pid !== "number") {
-    deps.output.write(`Run has no pid: ${record.runId}\n`);
+  const reconciled = checkStaleRun(record.runId, deps) ?? record;
+  if (sharedIsAgentRunTerminalStatus(reconciled.status)) {
+    deps.output.write(`Run ${reconciled.runId} is already ${reconciled.status}.\n`);
+    return 0;
+  }
+  if (typeof reconciled.pid !== "number") {
+    deps.output.write(`Run has no pid: ${reconciled.runId}\n`);
     return 1;
   }
-  const confirmed = await terminateRunProcess(record, signal, deps);
+  const confirmed = await terminateRunProcess(reconciled, signal, deps);
   if (!confirmed) {
     deps.output.write(
       `Failed to ${verb} ${record.runId} (pid ${record.pid}): process still alive after SIGKILL.\n`
     );
     return 1;
   }
-  finalizeRunRecord(record.runId, { status: "killed" }, deps);
+  transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
   deps.output.write(
-    `Stopped ${record.runId} (pid ${record.pid}): process group confirmed gone.\n`
+    `Stopped ${reconciled.runId} (pid ${reconciled.pid}): process group confirmed gone.\n`
   );
   return 0;
 }

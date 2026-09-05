@@ -38,6 +38,7 @@ import {
 import {
   createRunActivityTracker,
   finalizeRunRecord,
+  transitionRunToTerminal,
   popQueueMessages,
   popSingleQueueMessage,
   readRunRecord,
@@ -112,7 +113,7 @@ export type AgentRunCommandDeps = {
   resolveWorkflowReference?: typeof resolveWorkflowReference;
   resolveAgentRunAgentKey?: typeof resolveAgentRunAgentKey;
   spawnLocalBackgroundRun?: typeof spawnLocalBackgroundRun;
-  finalizeRunRecord?: typeof finalizeRunRecord;
+  transitionRunToTerminal?: typeof transitionRunToTerminal;
   readRunRecord?: typeof readRunRecord;
   runDoDCommands?: typeof runDoDCommands;
   popQueueMessages?: typeof popQueueMessages;
@@ -313,10 +314,11 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     note: string,
   ) => {
     if (!hasRegistry) return;
-    (deps.finalizeRunRecord ?? finalizeRunRecord)(
+    (deps.transitionRunToTerminal ?? transitionRunToTerminal)(
       childRunId as string,
       { status: outcome.status, exitCode: outcome.exitCode, note },
       { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
+      { allowOverOrphaned: true },
     );
   };
   if (armStallWatchdog) {
@@ -861,7 +863,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       console.warn(`[nolo] DoD verification failed to run for ${childRunId}:`, dodError);
     }
 
-    await (deps.finalizeRunRecord ?? finalizeRunRecord)(childRunId, {
+    await (deps.transitionRunToTerminal ?? transitionRunToTerminal)(childRunId, {
       status: outcome.status,
       exitCode: outcome.exitCode,
       dialogId: result.dialogId,
@@ -876,7 +878,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       homedir: deps.homedir,
       fs: deps.fs,
       now: deps.now,
-    });
+    }, { allowOverOrphaned: true });
 
   }
 
