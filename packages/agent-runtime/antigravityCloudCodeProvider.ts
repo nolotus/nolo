@@ -217,6 +217,30 @@ export async function fetchAntigravityCloudCodeCompletion(
       onTextDelta: args.onTextDelta,
       onReasoningDelta: args.onReasoningDelta,
     });
+  // 200 空流防护：正文/思考/工具全空，且 finishReason 与 usage 也缺席——
+  // 上游通道级异常（2026-09-05 实证：antigravity 软限流返回空 SSE，无任何
+  // candidate 帧）。伪装成 finish_reason="stop" 的空补全会被 emptyAssistantRepair
+  // 判成 empty_completion：repair 复调只会继续烧通道配额，最后熔断成误导性的
+  // 「模型连续返回空消息」。返回 502 让 loop 直接以 LLM API error 终止——
+  // 方向明确、不复调、可观测。finishReason 在场（如 SAFETY/MAX_TOKENS）的
+  // 空正文轮不落入：那是上游明确表态，由既有 finish_reason 映射路径处理。
+  const emptyStream =
+    !text &&
+    !reasoningContent &&
+    toolCalls.length === 0 &&
+    !finishReason &&
+    !usage;
+  if (emptyStream) {
+    return {
+      status: 502,
+      body: {
+        error: {
+          message:
+            "antigravity upstream returned an empty stream (no content, finishReason or usage); channel degradation, not model emptiness",
+        },
+      },
+    };
+  }
   const message: Record<string, unknown> = {
     role: "assistant",
     content: text || null,
