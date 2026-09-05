@@ -31,8 +31,8 @@ export const createInactiveComposerSuggestionState =
 /**
  * Resolves the active suggestion provider at the cursor. Agent @mention
  * detection keeps its existing semantics (email-like at-signs and
- * whitespace-broken mentions stay inactive); slash commands only trigger at
- * input start or after whitespace. @ wins when both could match.
+ * whitespace-broken mentions stay inactive); slash commands only trigger when
+ * all prefix before the slash is whitespace. @ wins when both could match.
  */
 export const resolveComposerSuggestionState = (
   value: string,

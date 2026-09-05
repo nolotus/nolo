@@ -65,7 +65,7 @@ export interface RunAgentBackgroundArgs {
     ephemeral?: boolean;
     /**
      * Run kind. "subtask" (default for this background dispatch) = agent-run
-     * isolation: zero project context, no orchestration tools, no git-write
+     * isolation: zero project context, no orchestration tools, no interaction
      * tools. Omit to keep the legacy interactive behavior.
      */
     runKind?: "interactive" | "subtask";

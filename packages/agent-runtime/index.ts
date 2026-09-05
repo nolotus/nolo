@@ -261,6 +261,7 @@ export {
 } from "./runtimeToolPolicy";
 export {
   DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS,
+  DEFAULT_SUBTASK_REFERENCE_NOLO_WORKSPACE_TOOLS,
   inferOwnerIdFromRuntimeAgentKey,
   isPublicRuntimeAgentRef,
   redactAgentRecordForWorkspaceTool,

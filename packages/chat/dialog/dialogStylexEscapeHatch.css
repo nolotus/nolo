@@ -110,7 +110,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 
 /* .DialogPage-root .message-input —— 强制 composer 常规流布局
  *（覆盖 message-input 域的 sticky 定位），unlayered 保持覆盖强度 */
-[data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+[data-hook~="dialog-esc-dp-root"] .message-input {
   position: static;
   bottom: auto;
   background: var(--background);
@@ -127,7 +127,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* .DialogPage-root .message-input__wrapper —— 与首页 home-primary
  * composer（QuickChat.css, 760px）同宽：主页→对话页 shared-element
  * morph 尺寸稳定，宽屏下输入框不再随内容列拉宽。 */
-[data-hook~="dialog-esc-dp-root"] .message-input__wrapper:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+[data-hook~="dialog-esc-dp-root"] .message-input__wrapper {
   max-width: min(760px, var(--dialog-content-max-width));
   margin: 0 auto;
   padding: 0 var(--space-4);
@@ -137,7 +137,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* 小屏手机（<= 480px）：几乎铺满，减少左右留白 */
 @media (max-width: 480px) {
   /* .DialogPage-root .message-input */
-  [data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  [data-hook~="dialog-esc-dp-root"] .message-input {
     padding-inline: 10px;
   }
 
@@ -160,7 +160,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* 一般手机 / 小平板（481~768px） */
 @media (min-width: 481px) and (max-width: 768px) {
   /* .DialogPage-root .message-input */
-  [data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  [data-hook~="dialog-esc-dp-root"] .message-input {
     padding-inline: 12px;
   }
 
@@ -183,7 +183,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* 笔记本 / 小桌面（769~1199px） */
 @media (min-width: 769px) and (max-width: 1199px) {
   /* .DialogPage-root .message-input */
-  [data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  [data-hook~="dialog-esc-dp-root"] .message-input {
     padding-inline: 20px;
   }
 }
@@ -191,7 +191,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* 大屏桌面（1200~1599px，例如 24 寸） */
 @media (min-width: 1200px) and (max-width: 1599px) {
   /* .DialogPage-root .message-input */
-  [data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  [data-hook~="dialog-esc-dp-root"] .message-input {
     padding-inline: 24px;
   }
 }
@@ -199,7 +199,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 /* 超大屏（>= 1600px，例如 27 寸） */
 @media (min-width: 1600px) {
   /* .DialogPage-root .message-input */
-  [data-hook~="dialog-esc-dp-root"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  [data-hook~="dialog-esc-dp-root"] .message-input {
     padding-inline: 32px;
   }
 }
@@ -248,7 +248,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 
 /* 覆盖全局 .message-input 样式：在侧边栏内不再 sticky，而是普通流布局贴底 */
 /* .page-assistant-panel__chat .message-input */
-[data-hook~="dialog-esc-pap-chat"] .message-input:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+[data-hook~="dialog-esc-pap-chat"] .message-input {
   position: static;
   bottom: auto;
   padding-bottom: var(--space-3);
@@ -258,7 +258,7 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
 }
 
 /* .page-assistant-panel__chat .message-input__wrapper */
-[data-hook~="dialog-esc-pap-chat"] .message-input__wrapper:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+[data-hook~="dialog-esc-pap-chat"] .message-input__wrapper {
   max-width: 100%;
   padding: 0;
 }

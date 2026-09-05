@@ -10,6 +10,8 @@ import {
   clampSuggestionHighlightIndex,
   type ComposerSuggestionItem,
 } from "./composerSuggestions";
+import { messageInputStyles } from "./messageInputStyles";
+import { withLiteralClass } from "./withLiteralClass";
 
 export type MessageInputComposerProps = {
   areaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -79,14 +81,18 @@ export const MessageInputComposer = memo(function MessageInputComposer({
     : {};
 
   return (
-    <div className="message-input__textarea-wrap">
+    <div
+      {...withLiteralClass(
+        "message-input__textarea-wrap",
+        messageInputStyles.textareaWrap
+      )}
+    >
       <TextField
         style={{ flex: 1, display: "flex", width: "100%" }}
         aria-label={ariaLabel}
       >
         <TextArea
           ref={areaRef as React.RefObject<HTMLTextAreaElement>}
-          className="message-input__textarea"
           value={text}
           rows={1}
           placeholder={placeholder}
@@ -98,6 +104,10 @@ export const MessageInputComposer = memo(function MessageInputComposer({
           onBlur={onBlur}
           onPaste={onPaste}
           {...comboboxAriaProps}
+          {...withLiteralClass(
+            "message-input__textarea",
+            messageInputStyles.textarea
+          )}
         />
       </TextField>
 

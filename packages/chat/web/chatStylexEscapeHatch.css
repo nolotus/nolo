@@ -25,7 +25,7 @@
  * 下沉 unlayered 保持聚焦态覆盖（含暗色下聚焦仍走本规则）。
  * 暗色 `[data-theme="dark"]` box-shadow 覆盖不走本文件，
  * 已收编入 token agentThemeTokens.chatInputCardShadow。 */
-[data-hook~="chat-esc-chat-input-card"]:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+[data-hook~="chat-esc-chat-input-card"]:focus-within {
   background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
   border-color: color-mix(in srgb, var(--primary, #6366f1) 60%, var(--border, #e4e4e7));
   box-shadow:
@@ -585,45 +585,45 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .send-button:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-button"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-button:hover,
+  [data-hook~="chat-esc-send-button"]:hover {
     transform: none;
   }
-  .send-button:active:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-button"]:active:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-button:active:not(:disabled),
+  [data-hook~="chat-esc-send-button"]:active:not(:disabled) {
     transform: scale(0.96);
     transition-duration: 0.1s;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.send-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.stop-indicator:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.send-loading-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-icon"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-button,
+  .send-icon,
+  .stop-indicator,
+  .send-loading-icon,
+  [data-hook~="chat-esc-send-button"],
+  [data-hook~="chat-esc-send-icon"] {
     transition: none !important;
   }
-  .send-button:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-button"]:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-button:hover,
+  [data-hook~="chat-esc-send-button"]:hover {
     transform: none !important;
   }
-  .send-icon.animating:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-icon"].animating:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-icon.animating,
+  [data-hook~="chat-esc-send-icon"].animating {
     animation: none !important;
     opacity: 0.6;
   }
-  .send-loading-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-loading"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-loading-icon,
+  [data-hook~="chat-esc-send-loading"] {
     animation: none !important;
   }
 }
 
 @media (prefers-contrast: high) {
-  .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.send-button.stop-mode:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  .send-button,
+  .send-button.stop-mode,
+  [data-hook~="chat-esc-send-button"] {
     border-width: 1.5px !important;
   }
 }
@@ -777,77 +777,9 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   }
 }
 
-/* .message-input__box .message-input__textarea —— 旧 message-input.css 1:1 迁入（原带 !important 的透明覆盖） */
-.message-input__box .message-input__textarea,
-[data-hook~="chat-esc-chat-input-card"] .message-input__textarea {
-  background: transparent !important;
-  border-color: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  padding: 4px 0 !important;
-  min-height: 24px;
-}
-
 .activity-progress-panel,
 .running-processes-panel {
   margin-bottom: var(--space-2, 8px) !important;
-}
-
-/* .message-input__box nested controls */
-.message-input__box .upload-button,
-[data-hook~="chat-esc-chat-input-card"] .upload-button {
-  --button-size: 36px !important;
-}
-
-.message-input__box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  --button-size: 36px !important;
-}
-
-.message-input__box .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-[data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  width: 36px !important;
-  height: 36px !important;
-}
-
-@media (max-width: 768px) {
-  .message-input__box .upload-button,
-  [data-hook~="chat-esc-chat-input-card"] .upload-button {
-    --button-size: 40px !important;
-  }
-  .message-input__box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    --button-size: 40px !important;
-  }
-  .message-input__box .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    width: 40px !important;
-    height: 40px !important;
-  }
-}
-
-@media (max-width: 480px) {
-  .message-input__box .upload-button,
-  [data-hook~="chat-esc-chat-input-card"] .upload-button {
-    --button-size: 40px !important;
-  }
-  .message-input__box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-send-button"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    --button-size: 40px !important;
-  }
-  .message-input__box .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] .voice-btn-in-send:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-  [data-hook~="chat-esc-chat-input-card"] [data-hook~="chat-esc-voice-btn-send"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-    width: 40px !important;
-    height: 40px !important;
-  }
 }
 
 /* .message-input__canvas-edit-chip button & span */

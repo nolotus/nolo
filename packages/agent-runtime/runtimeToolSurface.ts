@@ -19,6 +19,13 @@ export const DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS = [
   "cliDoctor",
 ] as const;
 
+export const DEFAULT_SUBTASK_REFERENCE_NOLO_WORKSPACE_TOOLS = [
+  "readDialog",
+  "queryDialogsBySubjectRef",
+  "readDoc",
+  "queryTableRows",
+] as const;
+
 export type RuntimeToolSurfaceHost =
   | "web"
   | "cli"
@@ -39,6 +46,9 @@ export type RuntimeToolSurfaceInput = {
   invocationVisibility?: RuntimeToolSurfaceVisibility;
   runtimeHost: RuntimeToolSurfaceHost;
   trustedPrivateInvocation?: boolean;
+  injectPrivateDefaults?: boolean;
+  defaultInjectedToolNames?: readonly string[] | null;
+  additionalRequiredToolNames?: readonly string[] | null;
 };
 
 export type RuntimeToolSurfaceResult = {
@@ -63,6 +73,9 @@ export type RuntimeToolSurfaceForAgentInput = {
   sharingLevel?: string | null;
   runtimeHost: RuntimeToolSurfaceHost;
   trustedPrivateInvocation?: boolean;
+  injectPrivateDefaults?: boolean;
+  defaultInjectedToolNames?: readonly string[] | null;
+  additionalRequiredToolNames?: readonly string[] | null;
 };
 
 function uniqueToolNames(values: readonly string[]) {
@@ -97,7 +110,14 @@ export function resolveRuntimeToolSurface(
   const explicitToolNames = uniqueToolNames(args.explicitToolNames ?? []);
 
   if (canInjectPrivateDefaults(args)) {
-    const injectedToolNames = [...DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS];
+    const baseInjected =
+      args.injectPrivateDefaults === false
+        ? (args.defaultInjectedToolNames ?? DEFAULT_SUBTASK_REFERENCE_NOLO_WORKSPACE_TOOLS)
+        : (args.defaultInjectedToolNames ?? DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS);
+    const injectedToolNames = uniqueToolNames([
+      ...baseInjected,
+      ...(args.additionalRequiredToolNames ?? []),
+    ]);
     return {
       explicitToolNames,
       injectedToolNames,
@@ -109,10 +129,14 @@ export function resolveRuntimeToolSurface(
     };
   }
 
+  const injectedToolNames = uniqueToolNames(args.additionalRequiredToolNames ?? []);
   return {
     explicitToolNames,
-    injectedToolNames: [],
-    finalToolNames: explicitToolNames,
+    injectedToolNames,
+    finalToolNames: uniqueToolNames([
+      ...explicitToolNames,
+      ...injectedToolNames,
+    ]),
     auditReason: explicitOnlyReason(args),
   };
 }
@@ -157,6 +181,9 @@ export function resolveRuntimeToolSurfaceForAgent(
     invocationVisibility: visibility,
     runtimeHost: args.runtimeHost,
     trustedPrivateInvocation: args.trustedPrivateInvocation,
+    injectPrivateDefaults: args.injectPrivateDefaults,
+    defaultInjectedToolNames: args.defaultInjectedToolNames,
+    additionalRequiredToolNames: args.additionalRequiredToolNames,
   });
 }
 

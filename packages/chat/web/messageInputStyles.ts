@@ -27,13 +27,7 @@ export const messageInputStyles = stylex.create({
       "background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease",
     cursor: "pointer",
     flexShrink: 0,
-    "@media (min-width: 769px)": {
-      "--button-size": "36px",
-    },
     "@media (max-width: 768px)": {
-      "--button-size": "40px",
-    },
-    "@media (max-width: 480px)": {
       "--button-size": "40px",
     },
   },
@@ -236,10 +230,6 @@ export const messageInputStyles = stylex.create({
     height: "var(--button-size, 36px)",
     borderRadius: "50%",
     "@media (max-width: 768px)": {
-      width: "40px",
-      height: "40px",
-    },
-    "@media (max-width: 480px)": {
       width: "40px",
       height: "40px",
     },
@@ -824,8 +814,10 @@ export const messageInputStyles = stylex.create({
   },
   textarea: {
     flex: 1,
+    minHeight: "24px",
     maxHeight: "360px",
-    padding: "var(--space-2) 0",
+    padding: "4px 0",
+    boxSizing: "border-box",
     fontSize: "var(--fontSize-base)",
     lineHeight: "var(--leading-relaxed)",
     borderRadius: 0,
@@ -847,6 +839,7 @@ export const messageInputStyles = stylex.create({
       backgroundColor: "transparent",
       borderColor: "transparent",
       boxShadow: "none",
+      outline: "none",
     },
     ":disabled": {
       opacity: 0.6,
