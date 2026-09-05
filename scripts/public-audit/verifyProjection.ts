@@ -11,6 +11,9 @@
 // - 独立自洽：仅依赖 Node/Bun 标准库，不依赖私有 runtime boundary contract
 // - 正向白名单：仅描述公开包清单，不暴露私有包 inventory 与内部拓扑
 // - 全树审计：校验 scaffold 完整性、依赖闭包合法性、发布元数据一致性与无敏感/测试资产
+// Consolidation（2026-09-05）：必需文件 / 公开包集 / workflow 集不再硬编码在本文件 ——
+// 单一真源是生成器落盘的 public-projection-contract.json（投影根目录）；契约缺失、
+// 损坏或形状非法（含 role typo）一律 fail closed。
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -19,64 +22,15 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-// Audit：公开投影必需的 Runtime / Build / Audit 文件（缺失即 fail）
-const REQUIRED_FILES = [
-  // Runtime / Build scaffold
-  "package.json",
-  "bunfig.toml",
-  "tsconfig.json",
-  ".bun-version",
-  // Build：web bundle 链（CI web build + desktop pre-build 子进程）
-  "scripts/dev/esbuild.config.js",
-  "scripts/dev/esBuild.js",
-  "scripts/dev/checkDangling.mjs",
-  "scripts/public-build/stylexBunPlugin.ts",
-  // Audit：projection verifier 与 release/CI 依赖
-  ".github/workflows/ci.yml",
-  ".github/workflows/cli-publish.yml",
-  ".github/workflows/desktop-build.yml",
-  ".github/workflows/version-bump.yml",
-  "scripts/public-audit/verifyProjection.ts",
-  "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
-  "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
-  "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
-  "scripts/release/assertProjectionReleaseMetadata.ts",
-  "scripts/release/projectionReleaseMetadata.ts",
-  "scripts/release/prepareCliPublishPackage.ts",
-  "scripts/release/publishDesktopDownloads.ts",
-  "scripts/release/desktopReleasePublisher.ts",
-  "scripts/release/s3Upload.ts",
-  "scripts/ci/runCliPublishPublic.sh",
-  "scripts/ci/verifyLinuxDesktopDeps.sh",
-  // Release provenance
-  "projection-release-metadata.json",
-] as const;
+// 契约 role 集合（与私有侧 publicProjectionContract.ts 对齐；typo fail closed）
+const PROJECTION_CONTRACT_ROLES = new Set(["runtime", "build", "audit", "release"]);
 
-// 公开投影允许存在的 package 集合（正向白名单 / public packages policy）
-const PUBLIC_PACKAGES = new Set([
-  "agent-runtime",
-  "ai",
-  "app",
-  "billing",
-  "chat",
-  "cli",
-  "connector-experimental",
-  "core",
-  "create",
-  "database",
-  "database-engine",
-  "desktop",
-  "desktop-chrome-connector",
-  "desktop-runtime",
-  "form",
-  "identity",
-  "integrations",
-  "lab",
-  "render",
-  "share",
-  "shared",
-  "web",
-]);
+type PublicProjectionContract = {
+  schemaVersion: number;
+  packages: string[];
+  requiredPaths: { path: string; role: string }[];
+  workflows: string[];
+};
 
 // 凭据/私钥类文件名模式（通用凭据卫生）
 const CREDENTIAL_FILE_PATTERNS: readonly RegExp[] = [
@@ -174,15 +128,97 @@ function isPathLikeFileToken(token: string): boolean {
   return /\.(ts|tsx|js|jsx|mjs|cjs|sh|ps1)$/.test(token);
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string" && v.trim() !== "");
+}
+
+// 读取并校验投影契约（fail closed）：缺失 / 解析失败 / 未知 schemaVersion /
+// 形状非法（含 role typo）都返回 null，由调用方直接整体失败。
+async function loadProjectionContract(
+  rootDir: string,
+  add: (msg: string) => void,
+): Promise<PublicProjectionContract | null> {
+  const contractPath = join(rootDir, "public-projection-contract.json");
+  if (!existsSync(contractPath)) {
+    add("missing-required: public-projection-contract.json（投影契约缺失，fail closed）");
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(contractPath, "utf8"));
+  } catch (error) {
+    add(`projection-contract: 解析失败（${error instanceof Error ? error.message : String(error)}）`);
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    add("projection-contract: 契约必须是 JSON object");
+    return null;
+  }
+  const raw = parsed as Record<string, unknown>;
+  if (raw.schemaVersion !== 1) {
+    add(`projection-contract: 不支持的 schemaVersion（${JSON.stringify(raw.schemaVersion)}）`);
+    return null;
+  }
+  let shapeOk = true;
+  if (!isNonEmptyStringArray(raw.packages)) {
+    add("projection-contract: packages 必须是非空 string 数组");
+    shapeOk = false;
+  }
+  if (!isNonEmptyStringArray(raw.workflows)) {
+    add("projection-contract: workflows 必须是非空 string 数组");
+    shapeOk = false;
+  }
+  if (!Array.isArray(raw.requiredPaths) || raw.requiredPaths.length === 0) {
+    add("projection-contract: requiredPaths 必须是非空数组");
+    shapeOk = false;
+  } else {
+    for (const entry of raw.requiredPaths) {
+      if (typeof entry !== "object" || entry === null) {
+        add(`projection-contract: requiredPaths 条目必须是 object（got ${JSON.stringify(entry)}）`);
+        shapeOk = false;
+        continue;
+      }
+      const e = entry as Record<string, unknown>;
+      if (typeof e.path !== "string" || e.path.trim() === "") {
+        add(`projection-contract: requiredPaths 条目 path 非法（${JSON.stringify(e.path)}）`);
+        shapeOk = false;
+      }
+      if (!PROJECTION_CONTRACT_ROLES.has(String(e.role))) {
+        // role typo / 未知 role：契约是承诺，拼错的承诺不生效（fail closed）。
+        add(
+          `projection-contract: requiredPaths["${String(e.path)}"] role 非法（${JSON.stringify(e.role)}；允许 runtime/build/audit/release）`,
+        );
+        shapeOk = false;
+      }
+    }
+  }
+  if (!shapeOk) return null;
+  return {
+    schemaVersion: 1,
+    packages: raw.packages as string[],
+    requiredPaths: raw.requiredPaths as { path: string; role: string }[],
+    workflows: raw.workflows as string[],
+  };
+}
+
 export async function verifyProjection(
   rootDir: string = DEFAULT_ROOT,
 ): Promise<{ passed: boolean; violations: string[] }> {
   const violations: string[] = [];
   const add = (msg: string) => violations.push(msg);
 
-  // 1. 必需 scaffold / build / audit 文件
-  for (const rel of REQUIRED_FILES) {
-    if (!existsSync(join(rootDir, rel))) add(`missing-required: ${rel}`);
+  // 0. 投影契约（fail closed）：缺失 / 损坏 / 形状非法 → 直接整体失败，
+  // 其余检查在没有可信清单时没有意义。
+  const contract = await loadProjectionContract(rootDir, add);
+  if (contract === null) {
+    return { passed: false, violations };
+  }
+
+  // 1. 契约必需文件（按 runtime/build/audit/release 分角色；缺失即 fail）
+  for (const entry of contract.requiredPaths) {
+    if (!existsSync(join(rootDir, entry.path))) {
+      add(`missing-required: ${entry.path}（role=${entry.role}）`);
+    }
   }
 
   // 1.5 公开 surface 形状：无内部 docs/；.github/workflows 只有本仓生成的 4 个
@@ -191,12 +227,16 @@ export async function verifyProjection(
     add("unexpected-subtree: docs/（公开投影不携带内部文档目录）");
   }
   const workflowsDir = join(rootDir, ".github", "workflows");
-  if (existsSync(workflowsDir)) {
-    const generatedWorkflows = new Set(["ci.yml", "cli-publish.yml", "desktop-build.yml", "version-bump.yml"]);
-    for (const entry of await readdir(workflowsDir)) {
-      if (!generatedWorkflows.has(entry)) {
-        add(`unexpected-workflow: .github/workflows/${entry}（公开 CI 只包含本仓生成的 4 个 workflow）`);
-      }
+  const contractWorkflows = new Set(contract.workflows);
+  const presentWorkflows = new Set(existsSync(workflowsDir) ? await readdir(workflowsDir) : []);
+  for (const entry of presentWorkflows) {
+    if (!contractWorkflows.has(entry)) {
+      add(`unexpected-workflow: .github/workflows/${entry}（公开 CI 只包含契约声明的 ${contract.workflows.length} 个 workflow）`);
+    }
+  }
+  for (const entry of contract.workflows) {
+    if (!presentWorkflows.has(entry)) {
+      add(`missing-workflow: .github/workflows/${entry}（契约声明但投影缺失）`);
     }
   }
 
@@ -207,8 +247,9 @@ export async function verifyProjection(
     for (const entry of await readdir(packagesDir, { withFileTypes: true })) {
       if (entry.isDirectory()) packageNames.add(entry.name);
     }
+    const contractPackages = new Set(contract.packages);
     for (const name of packageNames) {
-      if (!PUBLIC_PACKAGES.has(name)) {
+      if (!contractPackages.has(name)) {
         add(`unexpected-package: packages/${name}（不在公开包白名单中）`);
         continue;
       }
@@ -243,6 +284,11 @@ export async function verifyProjection(
             add(`broken-workspace-dep: packages/${name} ${depName} -> ${spec}（目标包不在投影中）`);
           }
         }
+      }
+    }
+    for (const name of contract.packages) {
+      if (!packageNames.has(name)) {
+        add(`missing-package: packages/${name}（契约声明的公开包在投影中缺失）`);
       }
     }
   } else {

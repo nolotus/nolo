@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    "agent-runtime",
+    "ai",
+    "app",
+    "billing",
+    "chat",
+    "cli",
+    "connector-experimental",
+    "core",
+    "create",
+    "database",
+    "database-engine",
+    "desktop",
+    "desktop-chrome-connector",
+    "desktop-runtime",
+    "form",
+    "identity",
+    "integrations",
+    "lab",
+    "render",
+    "share",
+    "shared",
+    "web"
+  ],
+  "requiredPaths": [
+    {
+      "path": "package.json",
+      "role": "runtime"
+    },
+    {
+      "path": "bunfig.toml",
+      "role": "runtime"
+    },
+    {
+      "path": "tsconfig.json",
+      "role": "runtime"
+    },
+    {
+      "path": ".bun-version",
+      "role": "runtime"
+    },
+    {
+      "path": "scripts/dev/esbuild.config.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/esBuild.js",
+      "role": "build"
+    },
+    {
+      "path": "scripts/dev/checkDangling.mjs",
+      "role": "build"
+    },
+    {
+      "path": "scripts/public-build/stylexBunPlugin.ts",
+      "role": "build"
+    },
+    {
+      "path": "public-projection-contract.json",
+      "role": "audit"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "role": "audit"
+    },
+    {
+      "path": "scripts/public-audit/verifyProjection.ts",
+      "role": "audit"
+    },
+    {
+      "path": ".github/workflows/cli-publish.yml",
+      "role": "release"
+    },
+    {
+      "path": ".github/workflows/desktop-build.yml",
+      "role": "release"
+    },
+    {
+      "path": ".github/workflows/version-bump.yml",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/verifyReleaseUpdateCompatibility.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1",
+      "role": "release"
+    },
+    {
+      "path": "scripts/public-audit/desktop/verifyLegacyDesktopDownloadAlias.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/assertProjectionReleaseMetadata.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/projectionReleaseMetadata.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/prepareCliPublishPackage.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/publishDesktopDownloads.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/desktopReleasePublisher.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/release/s3Upload.ts",
+      "role": "release"
+    },
+    {
+      "path": "scripts/ci/runCliPublishPublic.sh",
+      "role": "release"
+    },
+    {
+      "path": "scripts/ci/verifyLinuxDesktopDeps.sh",
+      "role": "release"
+    },
+    {
+      "path": "projection-release-metadata.json",
+      "role": "release"
+    }
+  ],
+  "workflows": [
+    "ci.yml",
+    "cli-publish.yml",
+    "desktop-build.yml",
+    "version-bump.yml"
+  ]
+}
