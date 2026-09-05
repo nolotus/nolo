@@ -866,10 +866,11 @@ export function createCliLocalRuntimeAdapter(
         : call;
       // Inject the current TUI conversation as the parent for local background
       // run delegations. Without this, a child run spawned from inside a TUI
-      // turn carries no link to its orchestrating dialog, so the run-overlay
-      // cannot answer "which runs belong to this conversation?". We inject
-      // only when (a) this is a startAgentRun call and (b) we actually know
-      // the current dialog id — otherwise leave the call untouched.
+      // turn carries no link to its orchestrating dialog, preventing proper
+      // conversation scoping for the TUI run dock, terminal wake attribution,
+      // and Web child thread queries. We inject only when (a) this is a
+      // startAgentRun call and (b) we actually know the current dialog id —
+      // otherwise leave the call untouched.
       let injectedCall = contextualCall;
       // startAgentRun 且本轮无法盖章（无 deps.parentDialogId、模型也未显式
       // 传参——新会话首轮 dialogId 尚未生成就是这种情形）时置 true；执行

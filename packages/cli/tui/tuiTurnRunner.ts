@@ -1010,8 +1010,8 @@ export async function runOneAgentTurn(
         onAgentRunStatus: (snapshot) => {
           if (snapshot) {
             ctx.activityIndicator.updateAgentRun(snapshot);
-            // run 进面板的唯一入口就在这里，所以轮询器也只在这里起表；
-            // 它自己在没有活跃 run 时会停。
+            // onAgentRunStatus 为活跃 run 更新指示器并确保轮询器运行；
+            // runRegistryPoller 也会独立扫描本地 registry 发现新 run。
             ctx.runRegistryPoller.ensureRunning();
           } else {
             ctx.activityIndicator.clearAgentRun();
