@@ -11,8 +11,6 @@ import {
   isRunTerminalStatus,
   readRunRecord,
   resolveRunsDir,
-  resolveRunReportPath,
-  resolveRunReportJsonPath,
   spawnLocalBackgroundRun,
   terminateRunProcess,
   writeRunRecord,
@@ -21,11 +19,6 @@ import {
   type RunRecord,
   type RunStatus,
 } from "./agentRunControl";
-import {
-  generateRunReport,
-  parseDoDResultsFromMarkdown,
-  type RunReportJson,
-} from "./agentRunReport";
 import type { DoDCommandResult } from "./agentRunDoD";
 import { readOption, resolveCliEntrypointPath } from "./cliEnvHelpers";
 import { toErrorMessage } from "../core/errorMessage";
@@ -46,8 +39,6 @@ export type SuperviseTaskAttempt = {
   endedAt?: string;
   status: RunStatus | "stalled" | "unknown";
   exitCode?: number;
-  reportPath?: string;
-  reportJsonPath?: string;
   dodPassed?: boolean;
   error?: string;
 };
@@ -223,10 +214,7 @@ export type AcceptanceResult = {
   dodResults?: DoDCommandResult[];
 };
 
-export function evaluateRunAcceptance(
-  record: RunRecord,
-  reportData?: { reportJson?: RunReportJson; reportMarkdown?: string }
-): AcceptanceResult {
+export function evaluateRunAcceptance(record: RunRecord): AcceptanceResult {
   if (record.status !== "done") {
     return {
       passed: false,
@@ -243,53 +231,31 @@ export function evaluateRunAcceptance(
     };
   }
 
-  const persistedDoDResults =
-    reportData?.reportJson?.dodResults && reportData.reportJson.dodResults.length > 0
-      ? reportData.reportJson.dodResults
-      : record.dodResults;
-  if (persistedDoDResults && persistedDoDResults.length > 0) {
-    const dodResults = persistedDoDResults;
-    const failures = dodResults.filter((r) => r.exitCode !== 0);
-    if (failures.length > 0) {
-      const failedCmds = failures
-        .map((f) => `"${f.command}" (exitCode: ${f.exitCode})`)
-        .join(", ");
-      return {
-        passed: false,
-        reason: `DoD verification failed: ${failedCmds}`,
-        dodResults,
-      };
-    }
+  // 验收唯一真值源：run 记录里的 dodResults。声明了 dodCommands 却没有结论
+  // 视为未验证（fail）——不回退读磁盘、不现场生成任何兼容报告。
+  if (!record.dodResults || record.dodResults.length === 0) {
     return {
-      passed: true,
-      reason: "All DoD commands passed successfully",
-      dodResults,
+      passed: false,
+      reason: "DoD verification results not found in run record (dodCommands declared but dodResults missing)",
     };
   }
 
-  if (reportData?.reportMarkdown) {
-    const parsed = parseDoDResultsFromMarkdown(reportData.reportMarkdown);
-    if (parsed.dodResults.length > 0) {
-      const failures = parsed.dodResults.filter((r) => r.exitCode !== 0);
-      if (failures.length > 0) {
-        const failedCmds = failures
-          .map((f) => `"${f.command}" (exitCode: ${f.exitCode})`)
-          .join(", ");
-        return {
-          passed: false,
-          reason: `DoD verification failed: ${failedCmds}`,
-        };
-      }
-      return {
-        passed: true,
-        reason: "All DoD commands passed successfully (parsed from report.md)",
-      };
-    }
+  const dodResults = record.dodResults;
+  const failures = dodResults.filter((r) => r.exitCode !== 0);
+  if (failures.length > 0) {
+    const failedCmds = failures
+      .map((f) => `"${f.command}" (exitCode: ${f.exitCode})`)
+      .join(", ");
+    return {
+      passed: false,
+      reason: `DoD verification failed: ${failedCmds}`,
+      dodResults,
+    };
   }
-
   return {
-    passed: false,
-    reason: "DoD verification results not found in run record or compatibility report",
+    passed: true,
+    reason: "All DoD commands passed successfully",
+    dodResults,
   };
 }
 
@@ -393,20 +359,18 @@ export function renderSuperviseSummaryMarkdown(summary: SuperviseSummary): strin
   lines.push("");
   lines.push("## 任务明细");
   lines.push("");
-  lines.push("| 序号 | 任务标题 | 尝试次数 | 最终状态 | 最终 Run ID | 验收报告 |");
-  lines.push("| --- | --- | --- | --- | --- | --- |");
+  lines.push("| 序号 | 任务标题 | 尝试次数 | 最终状态 | 最终 Run ID |");
+  lines.push("| --- | --- | --- | --- | --- |");
 
   for (let i = 0; i < summary.tasks.length; i++) {
     const t = summary.tasks[i];
     const taskNum = i + 1;
     const attemptsCount = t.attempts.length;
     const finalRunId = t.finalRunId || (t.attempts[t.attempts.length - 1]?.runId ?? "-");
-    const lastAttempt = t.attempts[t.attempts.length - 1];
-    const reportLink = lastAttempt?.reportPath ? `\`${lastAttempt.reportPath}\`` : "-";
     lines.push(
       `| ${taskNum} | ${t.task.title.replace(/\|/g, "\\|")} | ${attemptsCount} | ${
         t.finalStatus
-      } | ${finalRunId} | ${reportLink} |`
+      } | ${finalRunId} |`
     );
   }
   lines.push("");
@@ -423,8 +387,8 @@ export function renderSuperviseSummaryMarkdown(summary: SuperviseSummary): strin
         att.dodPassed === false ? "DoD未通过" : att.status === "stalled" ? "停滞止损" : att.status;
       lines.push(
         `  - 尝试 #${attemptNum}: Run ID \`${att.runId}\` — 状态: ${statusNote}${
-          att.reportPath ? ` — [报告: ${att.reportPath}]` : ""
-        }${att.error ? ` (${att.error})` : ""}`
+          att.error ? ` (${att.error})` : ""
+        }`
       );
     }
     lines.push("");
@@ -663,40 +627,9 @@ export async function runAgentSuperviseCommand(
             logPath: "",
           };
 
-          // Locate report files
-          const reportPath = resolveRunReportPath(runId, env, homedir);
-          const reportJsonPath = resolveRunReportJsonPath(runId, env, homedir);
-          let reportMarkdown: string | undefined;
-          let reportJson: RunReportJson | undefined;
-
-          try {
-            if (fs.existsSync(reportJsonPath)) {
-              reportJson = JSON.parse(fs.readFileSync(reportJsonPath, "utf8"));
-            }
-          } catch {
-            // ignore parse error
-          }
-
-          try {
-            if (fs.existsSync(reportPath)) {
-              reportMarkdown = fs.readFileSync(reportPath, "utf8");
-            }
-          } catch {
-            // ignore read error
-          }
-
-          // If neither report exists on disk yet, generate report synchronously
-          if (!reportJson && !reportMarkdown) {
-            try {
-              const gen = await generateRunReport(terminalRecord, { env, homedir, fs, now, forceReport: true });
-              reportMarkdown = gen.markdown;
-              reportJson = gen.report;
-            } catch {
-              // ignore
-            }
-          }
-
-          const acceptance = evaluateRunAcceptance(terminalRecord, { reportJson, reportMarkdown });
+          // 验收唯一真值源：run 记录（~/.nolo/runs/<runId>.json）里的 dodResults。
+          // 不读取、不生成任何兼容报告文件。
+          const acceptance = evaluateRunAcceptance(terminalRecord);
 
           if (acceptance.passed) {
             taskDone = true;
@@ -707,8 +640,6 @@ export async function runAgentSuperviseCommand(
               endedAt: terminalRecord.endedAt ?? now().toISOString(),
               status: terminalRecord.status,
               exitCode: terminalRecord.exitCode,
-              reportPath: fs.existsSync(reportPath) ? reportPath : undefined,
-              reportJsonPath: fs.existsSync(reportJsonPath) ? reportJsonPath : undefined,
               dodPassed: true,
             });
             output.write(`[nolo] [${task.title}] PASSED (run ${runId})\n`);
@@ -720,8 +651,6 @@ export async function runAgentSuperviseCommand(
               endedAt: terminalRecord.endedAt ?? now().toISOString(),
               status: isStalled ? "stalled" : terminalRecord.status,
               exitCode: terminalRecord.exitCode,
-              reportPath: fs.existsSync(reportPath) ? reportPath : undefined,
-              reportJsonPath: fs.existsSync(reportJsonPath) ? reportJsonPath : undefined,
               dodPassed: false,
               error: acceptance.reason,
             });

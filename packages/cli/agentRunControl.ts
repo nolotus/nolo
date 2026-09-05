@@ -614,22 +614,6 @@ export async function popQueueMessages(
   return entries.map((e) => e.text);
 }
 
-export function resolveRunReportPath(
-  runId: string,
-  env?: EnvLike,
-  homedir = nodeHomedir
-): string {
-  return join(resolveRunsDir(env, homedir), `${runId}.report.md`);
-}
-
-export function resolveRunReportJsonPath(
-  runId: string,
-  env?: EnvLike,
-  homedir = nodeHomedir
-): string {
-  return join(resolveRunsDir(env, homedir), `${runId}.report.json`);
-}
-
 export function defaultGenerateRunId(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const random = Math.random().toString(36).slice(2, 8);

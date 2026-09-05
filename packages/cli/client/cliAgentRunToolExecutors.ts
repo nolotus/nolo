@@ -41,7 +41,6 @@ import {
   serializeQueueEntries,
   withQueueLock,
   queryRunRecords,
-  resolveRunReportPath,
   spawnLocalBackgroundRun,
   terminateRunProcess,
 } from "../agentRunControl";
@@ -177,9 +176,6 @@ function buildRunStatusPayload(
   const logLines = opts.logTail ? opts.logTail.split("\n") : undefined;
   const name = resolveRunLabel(reconciled);
   const labels = agentRunCardLabels();
-  const fs = resolveFs(deps);
-  const reportPath = resolveRunReportPath(reconciled.runId, deps.env, deps.homedir);
-  const reportExists = Boolean(fs.existsSync?.(reportPath));
   return {
     content: JSON.stringify({
       runId: reconciled.runId,
@@ -203,7 +199,6 @@ function buildRunStatusPayload(
         : reconciled.dialogId
         ? { dialogId: reconciled.dialogId }
         : {}),
-      ...(reportExists ? { reportPath } : {}),
       // Progress is what makes tailLines:0 an actual answer to "is it
       // stuck?". Without it a poll returns `running` and a pid, so the only
       // way to tell a working run from a wedged one was to pull 30 lines of
@@ -215,7 +210,6 @@ function buildRunStatusPayload(
       ...(logLines ? { logLines } : {}),
     }),
     metadata: {
-      ...(reportExists ? { reportPath } : {}),
       displayData: formatStatusRunCard(name, reconciled.status, {
         runId: reconciled.runId,
         timing: {

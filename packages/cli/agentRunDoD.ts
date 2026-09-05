@@ -7,7 +7,8 @@
 // 更糟的是默认不落盘之后，验收命令照跑（真的花时间），结果直接扔掉——纪律在
 // 默认路径上是空转的。
 //
-// 所以报告子系统已从 run 命令路径移除；supervise 侧仍可生成兼容报告，DoD 结果落在
+// 所以报告子系统（agentRunReport.ts：markdown 渲染、json 落盘、git 摘要、
+// supervise 兼容报告）已整体删除；supervise 验收只读 run 记录。DoD 结果落在
 // 已经存在的载体：`~/.nolo/runs/<runId>.json` 本来就有 activity / note / exitCode，
 // dodResults 是它多一个字段，不是又一个子系统。
 
