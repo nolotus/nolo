@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
 
 import { toErrorMessage } from "core/errorMessage";
@@ -184,6 +184,7 @@ import {
 } from "./localWorkspaceToolDefs";
 import { isImmediateDetachShellCommand } from "./shellCommandPolicy";
 import { invokeCapability } from "./capabilities";
+import { resolveNoloStateDir } from "./noloStateDir";
 
 function readTrimmedString(value: unknown): string | undefined {
   return asOptionalTrimmedString(value);
@@ -963,14 +964,39 @@ async function runWorkspaceCommandLimitedLines(args: {
 }
 
 
+function isPathInsideRoot(root: string, targetPath: string): boolean {
+  const rel = relative(resolve(root), resolve(targetPath));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+async function isRuntimeOwnedSpillPath(targetPath: string): Promise<boolean> {
+  const spillRoot = resolveNoloStateDir("spills");
+  if (!isPathInsideRoot(spillRoot, targetPath)) return false;
+  // Lexical containment is not sufficient: a spill-root symlink may point at
+  // credentials or another sensitive external file. Only trust an existing
+  // target whose resolved path remains inside the real spill root.
+  try {
+    const [realRoot, realTarget] = await Promise.all([realpath(spillRoot), realpath(targetPath)]);
+    return isPathInsideRoot(realRoot, realTarget);
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveLocalWorkspaceToolPath(args: {
   workspaceRoot: string;
   requestedPath: string;
   confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
+  /** Only read/search operations may use the runtime-owned spill exception. */
+  allowRuntimeOwnedSpill?: boolean;
 }) {
   const workspaceRoot = resolve(args.workspaceRoot);
   const targetPath = resolve(workspaceRoot, args.requestedPath);
-  if (!isPathInsideWorkspace({ workspaceRoot, targetPath })) {
+  const insideWorkspace = isPathInsideWorkspace({ workspaceRoot, targetPath });
+  const trustedSpill = !insideWorkspace && args.allowRuntimeOwnedSpill === true
+    ? await isRuntimeOwnedSpillPath(targetPath)
+    : false;
+  if (!insideWorkspace && !trustedSpill) {
     if (args.confirmExternalFileAccess) {
       const request: PermissionRequest = {
         id: "permission-file-external-access",
@@ -1057,6 +1083,7 @@ async function readFileTool(args: {
   const absolutePath = await resolveLocalWorkspaceToolPath({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
+    allowRuntimeOwnedSpill: true,
     ...(args.confirmExternalFileAccess
       ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
       : {}),
@@ -1359,12 +1386,18 @@ async function scanWorkspaceTextMatches(args: {
   caseSensitive: boolean;
   contextLines?: number;
 }) {
-  const files = scanWorkspaceGlobFiles({
-    workspaceRoot: args.workspaceRoot,
-    pattern: "**/*",
-    relativeSearchPath: args.relativeSearchPath,
-    exclude: args.exclude,
-  });
+  // A single external file target (runtime spill recovery greps an absolute
+  // spill path) is not a directory: glob-scanning it yields nothing, so search
+  // that file directly. Directory targets keep the existing scan behavior.
+  const rootStat = await stat(args.workspaceRoot).catch(() => undefined);
+  const files = rootStat?.isFile()
+    ? [args.workspaceRoot]
+    : scanWorkspaceGlobFiles({
+        workspaceRoot: args.workspaceRoot,
+        pattern: "**/*",
+        relativeSearchPath: args.relativeSearchPath,
+        exclude: args.exclude,
+      });
   const results: string[] = [];
   const seenContext = new Set<string>();
   let matchCount = 0;
@@ -1494,6 +1527,7 @@ export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs)
   const searchPath = await resolveLocalWorkspaceToolPath({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
+    allowRuntimeOwnedSpill: true,
     ...(args.confirmExternalFileAccess
       ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
       : {}),
@@ -1542,9 +1576,16 @@ export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs)
     ...exclude.flatMap((excludePattern) => ["--exclude", excludePattern]),
   ];
   let searchEngine: WorkspaceSearchEngine = "js";
-  let binariesUnavailable = !rgBinary && !grepBinary;
+  // A single-file target (runtime spill recovery greps an absolute spill
+  // path) must not go through rg/grep: their cwd/target layout assumes a
+  // directory, and a file cwd yields path-less `line:content` rows with
+  // broken match metadata. Route file targets straight to
+  // scanWorkspaceTextMatches so every environment emits the same absolute
+  // `path:line:content` format.
+  const searchTargetIsFile = (await stat(searchPath).catch(() => undefined))?.isFile() === true;
+  let binariesUnavailable = searchTargetIsFile || (!rgBinary && !grepBinary);
   const result = await (async (): Promise<WorkspaceExecResult | WorkspaceExecLimitedLinesResult> => {
-    if (rgCommand) {
+    if (rgCommand && !searchTargetIsFile) {
       try {
         const rgResult = maxResults && contextLines === undefined
           ? await runWorkspaceCommandLimitedLines({
@@ -1564,7 +1605,7 @@ export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs)
         // Fall through to grep / scanWorkspaceTextMatches.
       }
     }
-    if (grepBinary) {
+    if (grepBinary && !searchTargetIsFile) {
       const grepCommand = [
         grepBinary,
         "-R",
