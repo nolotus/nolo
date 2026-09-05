@@ -182,6 +182,13 @@ function resolveAntigravityFinishReason(upstream?: string): string {
   ) {
     return "content_filter";
   }
+  // 模型发起了畸形函数调用（端点已丢弃调用、无 parts）。典型诱因是工具
+  // schema 含 Gemini 不支持的构造（已在 convertOpenAiToolsToGemini 净化，
+  // 2026-09-05 生产实证 root cause）。映射 content_filter：确定性失败，
+  // 不应落入 empty repair 循环烧配额。
+  if (normalized === "MALFORMED_FUNCTION_CALL") {
+    return "content_filter";
+  }
   return "stop";
 }
 

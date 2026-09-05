@@ -335,6 +335,150 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
 }
 
 /**
+ * Gemini Schema 是 JSON Schema 的严格子集：oneOf/anyOf/allOf、const、
+ * additionalProperties、type 数组等构造一概不支持。透传会导致 declaration
+ * 被拒（单工具场景 HTTP 400）或调用期校验失败——模型发起的函数调用被
+ * 端点丢弃，finishReason=MALFORMED_FUNCTION_CALL 且无 parts（2026-09-05
+ * 生产实证：收藏 OAuth agent 全天「模型连续返回空消息」熔断的根因）。
+ * 递归净化：只拷贝 Gemini 认识的字段（构造上等价于允许清单），
+ * 组合子（oneOf/anyOf/allOf/const/type 数组）归并为宽松 schema。
+ */
+function sanitizeGeminiSchemaNode(
+  node: unknown,
+  active?: WeakSet<object>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!node || typeof node !== "object" || Array.isArray(node)) {
+    return { type: "string" };
+  }
+  // 循环引用防护：当前递归路径上再次遇到同一节点 → 安全兜底，不再下钻
+  // （schema 以 unknown 传入，不保证来自可序列化 JSON；CLI 本地路径可能
+  // 传入运行时构造的自引用对象）。
+  if (active?.has(node)) {
+    return { type: "object", description: "(circular schema reference)" };
+  }
+  const seen = active ?? new WeakSet<object>();
+  seen.add(node);
+  try {
+    return sanitizeGeminiSchemaNodeInner(node, out, seen);
+  } finally {
+    seen.delete(node);
+  }
+}
+
+function sanitizeGeminiSchemaNodeInner(
+  src: Record<string, unknown>,
+  out: Record<string, unknown>,
+  seen: WeakSet<object>,
+): Record<string, unknown> {
+
+  // type 数组（["string","null"]）→ 首个非 null 类型 + nullable
+  if (Array.isArray(src.type)) {
+    const firstNonNull = src.type.find((t) => t !== "null");
+    if (typeof firstNonNull === "string") out.type = firstNonNull;
+    out.nullable = true;
+  } else if (typeof src.type === "string") {
+    out.type = src.type;
+  }
+
+  if (typeof src.description === "string") out.description = src.description;
+  if (typeof src.minimum === "number") out.minimum = src.minimum;
+  if (typeof src.maximum === "number") out.maximum = src.maximum;
+  if (Array.isArray(src.enum) && src.enum.length > 0) out.enum = src.enum;
+  if (src.nullable === true) out.nullable = true;
+  // const → enum（Gemini 无 const）
+  if ("const" in src && src.const !== undefined && !out.enum) {
+    out.enum = [src.const as unknown];
+  }
+
+  // oneOf/anyOf → 各分支 properties 并集 + required 交集（宽松归并）
+  const variantBranches = [
+    ...(Array.isArray(src.oneOf) ? src.oneOf : []),
+    ...(Array.isArray(src.anyOf) ? src.anyOf : []),
+  ];
+  if (variantBranches.length > 0) {
+    const mergedProperties: Record<string, unknown> = {};
+    let requiredIntersection: string[] | undefined;
+    for (const branch of variantBranches) {
+      const sanitized = sanitizeGeminiSchemaNode(branch, seen);
+      const branchProperties = (sanitized.properties as Record<string, unknown>) ?? {};
+      for (const [key, value] of Object.entries(branchProperties)) {
+        const previous = mergedProperties[key];
+        // 同名属性：enum 收并集（典型：各分支用 const 区分变体），其余后者覆盖
+        const prevEnum = (previous as { enum?: unknown[] })?.enum;
+        const nextEnum = (value as { enum?: unknown[] })?.enum;
+        if (prevEnum && nextEnum) {
+          mergedProperties[key] = {
+            ...(value as Record<string, unknown>),
+            enum: [...new Set([...prevEnum, ...nextEnum])],
+          };
+        } else {
+          mergedProperties[key] = value;
+        }
+      }
+      const branchRequired = Array.isArray(sanitized.required)
+        ? (sanitized.required as string[])
+        : [];
+      requiredIntersection =
+        requiredIntersection === undefined
+          ? [...branchRequired]
+          : requiredIntersection.filter((r) => branchRequired.includes(r));
+    }
+    out.properties = {
+      ...((out.properties as Record<string, unknown>) ?? {}),
+      ...mergedProperties,
+    };
+    if (requiredIntersection !== undefined && requiredIntersection.length > 0) {
+      out.required = requiredIntersection;
+    }
+    if (typeof out.type !== "string") out.type = "object";
+  }
+  // allOf → 浅合并（后者覆盖前者：同名属性/嵌套节点整体替换），required 并集
+  if (Array.isArray(src.allOf)) {
+    for (const branch of src.allOf) {
+      const sanitized = sanitizeGeminiSchemaNode(branch, seen);
+      out.properties = {
+        ...((out.properties as Record<string, unknown>) ?? {}),
+        ...((sanitized.properties as Record<string, unknown>) ?? {}),
+      };
+      if (Array.isArray(sanitized.required)) {
+        out.required = [
+          ...new Set([
+            ...((out.required as string[]) ?? []),
+            ...((sanitized.required as string[]) ?? []),
+          ]),
+        ];
+      }
+    }
+    if (typeof out.type !== "string") out.type = "object";
+  }
+
+  if (src.properties && typeof src.properties === "object") {
+    const properties: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(
+      src.properties as Record<string, unknown>,
+    )) {
+      properties[key] = sanitizeGeminiSchemaNode(value, seen);
+    }
+    out.properties = properties;
+    if (typeof out.type !== "string") out.type = "object";
+  }
+  if (Array.isArray(src.required)) {
+    const properties = (out.properties ?? {}) as Record<string, unknown>;
+    const required = [...new Set(src.required as unknown[])].filter(
+      (r): r is string => typeof r === "string" && r in properties,
+    );
+    if (required.length > 0) out.required = required;
+  }
+  if (src.items !== undefined) {
+    out.items = sanitizeGeminiSchemaNode(src.items, seen);
+    if (typeof out.type !== "string") out.type = "array";
+  }
+  if (typeof out.type !== "string") out.type = "object";
+  return out;
+}
+
+/**
  * Convert OpenAI-format tools to Gemini functionDeclarations.
  */
 export function convertOpenAiToolsToGemini(
@@ -354,7 +498,9 @@ export function convertOpenAiToolsToGemini(
     declarations.push({
       name,
       description: typeof fn.description === "string" ? fn.description : "",
-      parameters: (fn.parameters ?? { type: "object", properties: {} }) as Record<string, unknown>,
+      parameters: sanitizeGeminiSchemaNode(
+        fn.parameters ?? { type: "object", properties: {} },
+      ),
     });
   }
   if (declarations.length === 0) return undefined;
