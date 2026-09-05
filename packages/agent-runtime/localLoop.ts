@@ -46,6 +46,7 @@ import { sanitizeToolCallPairing } from "./toolCallPairing";
 import { downgradeUnparsableToolCalls, hasParsableObjectArguments } from "./outboundHistorySanitize";
 import { summarizeToolArguments } from "./summarizeToolArguments";
 import { buildIdentityBlock } from "./identityBlock";
+import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages, stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
@@ -157,6 +158,8 @@ export type LocalAgentTurnInput = {
   inheritedFromDialogKey?: string;
   parentDialogId?: string;
   runtimeContext?: Record<string, any> | null;
+  /** Dispatched leaf runs receive parent-facing final-response guidance. */
+  runKind?: "interactive" | "subtask";
   timeoutMs?: number;
   background?: boolean;
   noStream?: boolean;
@@ -1495,6 +1498,7 @@ export async function runLocalAgentTurn(
       // 注入顺序遵循 TOOL_GUIDED_SECTION_ORDER（与 buildSystemPrompt 的显式
       // layer 列表同源），禁止用 Object.values 自行定序。
       ...TOOL_GUIDED_SECTION_ORDER.map((id) => toolGuidedSections[id] ?? ""),
+      ...(input.runKind === "subtask" ? [LEAF_FINAL_HANDOFF_INSTRUCTIONS] : []),
     ]
       .map((content) => content.trim())
       .filter((content): content is string => content.length > 0)

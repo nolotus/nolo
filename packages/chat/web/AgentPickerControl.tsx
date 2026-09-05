@@ -180,6 +180,7 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
   return (
     <div
       {...withLiteralClass(className || "", apStyles.root)}
+      title={triggerLabel}
     >
       <DialogTrigger isOpen={open} onOpenChange={setOpen}>
         <RACButton
@@ -190,7 +191,13 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
           )}
           aria-label={triggerAria}
         >
-          <span {...stylex.props(apStyles.triggerIcon)} aria-hidden="true">
+          <span
+            {...withLiteralClass(
+              "agent-picker__trigger-icon",
+              apStyles.triggerIcon
+            )}
+            aria-hidden="true"
+          >
             {triggerIcon}
           </span>
           <span
@@ -200,7 +207,11 @@ const AgentPickerControlBase: React.FC<AgentPickerControlProps> = ({
           </span>
           <LuChevronDown
             size={12}
-            {...stylex.props(apStyles.caret, open && apStyles.caretOpen)}
+            {...withLiteralClass(
+              "agent-picker__trigger-caret",
+              apStyles.caret,
+              open && apStyles.caretOpen
+            )}
             aria-hidden="true"
           />
         </RACButton>

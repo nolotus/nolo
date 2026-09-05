@@ -1205,6 +1205,7 @@ async function runLocalAgentTurnForCli(
       category: options.category,
       inheritedFromDialogKey: options.inheritedFromDialogKey,
       parentDialogId: options.parentDialogId,
+      runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
       background: options.background,
       noStream: options.noStream,
       ...(runtimeContext ? { runtimeContext } : {}),

@@ -86,17 +86,25 @@ export const ComposerDrawer = memo(function ComposerDrawer({
           aria-label={toggleAriaLabel}
           title={toggleAriaLabel}
         >
-          <div {...stylex.props(composerDrawerStyles.summaryLeft)}>
+          <div
+            {...withLiteralClass(
+              "composer-drawer__summary-left",
+              composerDrawerStyles.summaryLeft
+            )}
+          >
             {attachmentCount > 0 && (
               <span
-                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+                {...withLiteralClass(
+                  "composer-drawer__badge composer-drawer__badge--attachments",
+                  composerDrawerStyles.badge
+                )}
               >
                 <LuPaperclip
                   size={12}
                   aria-hidden="true"
                   {...stylex.props(composerDrawerStyles.badgeIcon)}
                 />
-                <span>
+                <span className="composer-drawer__badge-text composer-drawer__badge-text--attachments">
                   {attachmentCount}
                   {processingAttachmentCount > 0 ? (
                     <>
@@ -112,33 +120,48 @@ export const ComposerDrawer = memo(function ComposerDrawer({
 
             {hasBrowseContext && (
               <span
-                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+                {...withLiteralClass(
+                  "composer-drawer__badge composer-drawer__badge--browse",
+                  composerDrawerStyles.badge
+                )}
               >
                 <LuGlobe
                   size={12}
                   aria-hidden="true"
                   {...stylex.props(composerDrawerStyles.badgeIcon)}
                 />
-                <span>{browseHost || "Web"}</span>
+                <span className="composer-drawer__badge-text composer-drawer__badge-text--browse">
+                  {browseHost || "Web"}
+                </span>
               </span>
             )}
 
             {imageConfigSummary && (
               <span
-                {...withLiteralClass("composer-drawer__badge", composerDrawerStyles.badge)}
+                {...withLiteralClass(
+                  "composer-drawer__badge composer-drawer__badge--image",
+                  composerDrawerStyles.badge
+                )}
               >
                 <LuImage
                   size={12}
                   aria-hidden="true"
                   {...stylex.props(composerDrawerStyles.badgeIcon)}
                 />
-                <span>{imageConfigSummary}</span>
+                <span className="composer-drawer__badge-text composer-drawer__badge-text--image">
+                  {imageConfigSummary}
+                </span>
               </span>
             )}
           </div>
         </button>
 
-        <div {...stylex.props(composerDrawerStyles.summaryRight)}>
+        <div
+          {...withLiteralClass(
+            "composer-drawer__summary-right",
+            composerDrawerStyles.summaryRight
+          )}
+        >
           {typeof usagePercent === "number" && usagePercent > 0 ? (
             <DialogUsageTrigger usagePercentOverride={usagePercent} />
           ) : null}

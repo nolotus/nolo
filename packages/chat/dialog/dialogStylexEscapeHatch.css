@@ -263,33 +263,3 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   padding: 0;
 }
 
-/* 侧边栏内缩小按钮，防止溢出 */
-/* .page-assistant-panel__chat .upload-button */
-[data-hook~="dialog-esc-pap-chat"] .upload-button {
-  --button-size: 36px;
-}
-
-/* .page-assistant-panel__chat .send-button */
-[data-hook~="dialog-esc-pap-chat"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-  --button-size: 36px;
-}
-
-/* .page-assistant-panel__chat .voice-btn-in-send */
-[data-hook~="dialog-esc-pap-chat"] .voice-btn-in-send {
-  width: 36px;
-  height: 36px;
-}
-
-/* .page-assistant-panel__chat .message-input__controls */
-[data-hook~="dialog-esc-pap-chat"] .message-input__controls {
-  gap: var(--space-2);
-}
-
-/* .page-assistant-panel__chat .message-input__textarea */
-[data-hook~="dialog-esc-pap-chat"] .message-input__textarea {
-  padding: 8px 12px;
-  font-size: 15px;
-  line-height: 1.55;
-  min-height: 40px;
-  border-radius: var(--radius-xs);
-}

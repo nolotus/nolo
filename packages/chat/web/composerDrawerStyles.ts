@@ -72,7 +72,8 @@ export const composerDrawerStyles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: "6px",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
+    overflow: "hidden",
     minWidth: 0,
   },
   summaryRight: {
@@ -94,6 +95,8 @@ export const composerDrawerStyles = stylex.create({
     color: "var(--textSecondary)",
     fontSize: "11px",
     fontWeight: 500,
+    flexShrink: 0,
+    maxWidth: "100%",
   },
   badgeIcon: {
     display: "inline-flex",

@@ -628,6 +628,134 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   }
 }
 
+/* ═══ Composer Container Query Root & Density Contract ═══ */
+
+.message-input__wrapper,
+.chat-input-card,
+[data-hook~="chat-esc-chat-input-card"] {
+  container-type: inline-size;
+  container-name: chat-composer;
+}
+
+/* ── Compact Density Tier (<= 600px container) ── */
+@container chat-composer (max-width: 600px) {
+  .chat-input-card,
+  [data-hook~="chat-esc-chat-input-card"] {
+    padding: 6px 12px;
+  }
+
+  .message-input__controls {
+    gap: var(--space-2, 8px);
+  }
+
+  .message-input__controls-left,
+  .message-input__controls-right {
+    gap: 6px;
+  }
+
+  /* Agent Picker: tighter padding, max width, hide caret */
+  .agent-picker__trigger {
+    padding: 3px 6px;
+    max-width: 120px;
+    gap: 3px;
+  }
+
+  .agent-picker__trigger-label {
+    max-width: 80px;
+  }
+
+  .agent-picker__trigger-caret {
+    display: none;
+  }
+
+  /* ComposerDrawer summary: compact badges & shortened mini progress */
+  .composer-drawer__summary-left {
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .composer-drawer__badge-text--browse {
+    display: none;
+  }
+
+  .composer-drawer__badge-text--image {
+    max-width: 60px;
+  }
+
+  .composer-drawer__mini-progress-track {
+    width: 24px;
+  }
+}
+
+/* ── Narrow Density Tier (<= 400px container) ── */
+@container chat-composer (max-width: 400px) {
+  .chat-input-card,
+  [data-hook~="chat-esc-chat-input-card"] {
+    padding: 6px 8px;
+  }
+
+  .message-input__controls {
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .message-input__controls-left,
+  .message-input__controls-right {
+    gap: 4px;
+  }
+
+  /* Agent Picker: icon only, aria-label and title preserved */
+  .agent-picker__trigger {
+    padding: 3px 6px;
+    max-width: 32px;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .agent-picker__trigger-label {
+    display: none;
+  }
+
+  .agent-picker__trigger-caret {
+    display: none;
+  }
+
+  /* ComposerDrawer summary: strictly 1 row, icons only for secondary context */
+  .composer-drawer__toggle-bar {
+    padding: 1px 2px;
+  }
+
+  .composer-drawer__summary-left {
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .composer-drawer__badge {
+    padding: 2px 5px;
+    gap: 3px;
+  }
+
+  .composer-drawer__badge-text--browse {
+    display: none;
+  }
+
+  .composer-drawer__badge-text--image {
+    display: none;
+  }
+
+  .composer-drawer__mini-progress-track {
+    display: none;
+  }
+
+  .composer-drawer__mini-progress {
+    padding: 0 4px;
+    height: 22px;
+    font-size: 11px;
+  }
+}
+
 /* .message-input__box .message-input__textarea —— 旧 message-input.css 1:1 迁入（原带 !important 的透明覆盖） */
 .message-input__box .message-input__textarea,
 [data-hook~="chat-esc-chat-input-card"] .message-input__textarea {
