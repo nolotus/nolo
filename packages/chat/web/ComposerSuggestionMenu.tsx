@@ -9,7 +9,10 @@ import * as stylex from "@stylexjs/stylex";
 import "./chatStylexEscapeHatch.css";
 import React, { memo, useEffect, useRef } from "react";
 import { withLiteralClass } from "./withLiteralClass";
-import type { ComposerSuggestionItem } from "./composerSuggestions";
+import {
+  clampSuggestionHighlightIndex,
+  type ComposerSuggestionItem,
+} from "./composerSuggestions";
 
 const composerSuggestionStyles = stylex.create({
   menu: {
@@ -110,10 +113,10 @@ const ComposerSuggestionMenuComponent: React.FC<ComposerSuggestionMenuProps> = (
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const clampedHighlightIndex =
-    items.length > 0
-      ? Math.min(Math.max(highlightIndex, 0), items.length - 1)
-      : -1;
+  const clampedHighlightIndex = clampSuggestionHighlightIndex(
+    highlightIndex,
+    items.length
+  );
   const headerId = `${listboxId}-label`;
 
   /**
@@ -145,10 +148,14 @@ const ComposerSuggestionMenuComponent: React.FC<ComposerSuggestionMenuProps> = (
     const maxScrollTop = container.scrollHeight - container.clientHeight;
     const nextScrollTop = Math.min(Math.max(targetScrollTop, 0), maxScrollTop);
 
-    container.scrollTo({
-      top: nextScrollTop,
-      behavior: "auto",
-    });
+    if (typeof container.scrollTo === "function") {
+      container.scrollTo({
+        top: nextScrollTop,
+        behavior: "auto",
+      });
+    } else {
+      container.scrollTop = nextScrollTop;
+    }
   }, [clampedHighlightIndex, visible, items.length]);
 
   if (!visible || items.length === 0) return null;

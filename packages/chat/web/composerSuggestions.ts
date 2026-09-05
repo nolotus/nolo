@@ -47,6 +47,18 @@ export const resolveComposerSuggestionState = (
 
 export const moveSuggestionHighlightIndex = moveMentionHighlightIndex;
 
+/**
+ * Clamps a suggestion highlight index into the valid item range [0, itemCount - 1].
+ * Returns -1 when itemCount is zero or negative.
+ */
+export const clampSuggestionHighlightIndex = (
+  highlightIndex: number,
+  itemCount: number
+): number => {
+  if (itemCount <= 0) return -1;
+  return Math.min(Math.max(highlightIndex, 0), itemCount - 1);
+};
+
 /** One presentation row of the unified suggestion menu. */
 export interface ComposerSuggestionItem {
   /** Stable identity, e.g. `agent:<agentKey>` or `command:/new`. */

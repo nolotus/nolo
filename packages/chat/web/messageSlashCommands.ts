@@ -54,9 +54,10 @@ export const createInactiveSlashCommandTriggerState =
 
 /**
  * Detects an inline slash-command trigger at the cursor.
- * "/" only triggers at the very start of the input or right after
- * whitespace, so URLs (https://…), fractions (1/2) and paths (a/b) never
- * open the menu. The query must stay whitespace-free until the cursor.
+ * "/" only triggers at the very start of the input or when preceded ONLY by
+ * whitespace across the entire prefix (e.g. "   /c", "\n/new", "\t/compact").
+ * Text before the slash (e.g. "hello /c", "foo /new", "https://…", "1/2")
+ * never triggers. The query must stay whitespace-free until the cursor.
  */
 export const resolveSlashCommandTriggerState = (
   value: string,
@@ -69,7 +70,7 @@ export const resolveSlashCommandTriggerState = (
     const ch = textValue[i];
 
     if (ch === "/") {
-      if (i > 0 && !/\s/.test(textValue[i - 1])) {
+      if (textValue.slice(0, i).trim() !== "") {
         break;
       }
 

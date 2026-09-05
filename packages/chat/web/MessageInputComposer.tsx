@@ -6,7 +6,10 @@
 import React, { memo, useId } from "react";
 import { TextField, TextArea } from "react-aria-components";
 import ComposerSuggestionMenu from "./ComposerSuggestionMenu";
-import type { ComposerSuggestionItem } from "./composerSuggestions";
+import {
+  clampSuggestionHighlightIndex,
+  type ComposerSuggestionItem,
+} from "./composerSuggestions";
 
 export type MessageInputComposerProps = {
   areaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -56,12 +59,21 @@ export const MessageInputComposer = memo(function MessageInputComposer({
   // textarea into an aria combobox pointing at the highlighted option.
   const hasSuggestionOptions =
     suggestionMenuVisible && suggestionItems.length > 0;
+  const effectiveHighlightIndex = hasSuggestionOptions
+    ? clampSuggestionHighlightIndex(
+        suggestionHighlightIndex,
+        suggestionItems.length
+      )
+    : -1;
   const comboboxAriaProps = hasSuggestionOptions
     ? ({
         role: "combobox",
         "aria-expanded": true,
         "aria-controls": suggestionListboxId,
-        "aria-activedescendant": `${suggestionListboxId}-opt-${suggestionHighlightIndex}`,
+        "aria-activedescendant":
+          effectiveHighlightIndex >= 0
+            ? `${suggestionListboxId}-opt-${effectiveHighlightIndex}`
+            : undefined,
         "aria-autocomplete": "list",
       } as React.AriaAttributes & { role: string })
     : {};
@@ -92,7 +104,7 @@ export const MessageInputComposer = memo(function MessageInputComposer({
       <ComposerSuggestionMenu
         visible={suggestionMenuVisible}
         items={suggestionItems}
-        highlightIndex={suggestionHighlightIndex}
+        highlightIndex={effectiveHighlightIndex}
         headerText={suggestionHeaderText}
         listboxId={suggestionListboxId}
         onSelect={onSelectSuggestion}

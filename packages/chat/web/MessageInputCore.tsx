@@ -72,8 +72,10 @@ import {
 } from "./messageInputAgentUi";
 import {
   buildAgentMentionInsertion,
+  type MentionState,
 } from "./messageInputMention";
 import {
+  clampSuggestionHighlightIndex,
   createInactiveComposerSuggestionState,
   moveSuggestionHighlightIndex,
   resolveComposerSuggestionState,
@@ -83,6 +85,7 @@ import {
 import {
   buildSlashCommandInsertion,
   filterSlashCommandsByQuery,
+  type SlashCommandTriggerState,
 } from "./messageSlashCommands";
 import {
   countTextLines,
@@ -532,7 +535,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
       const result = buildAgentMentionInsertion({
         currentValue,
         cursorPos,
-        mentionState: suggestionState,
+        mentionState: suggestionState as MentionState,
         agent,
       });
       if (!result) return;
@@ -559,13 +562,16 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
    */
   const fillSlashCommand = useCallback(
     (command: string) => {
+      if (!suggestionState.active || suggestionState.kind !== "slash-command") {
+        return;
+      }
       const textarea = areaRef.current;
       const currentValue = textarea?.value ?? textRef.current ?? "";
       const cursorPos = textarea?.selectionStart ?? currentValue.length;
       const result = buildSlashCommandInsertion({
         currentValue,
         cursorPos,
-        triggerState: suggestionState,
+        triggerState: suggestionState as SlashCommandTriggerState,
         command,
       });
       if (!result) return;
@@ -591,15 +597,24 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   const selectComposerSuggestion = useCallback(
     (index: number) => {
       if (suggestionState.kind === "agent") {
-        const target =
-          filteredFavoriteAgents[index] ?? filteredFavoriteAgents[0];
+        const clampedIndex = clampSuggestionHighlightIndex(
+          index,
+          filteredFavoriteAgents.length
+        );
+        if (clampedIndex < 0) return;
+        const target = filteredFavoriteAgents[clampedIndex];
         if (target) {
           insertMention(target);
         }
         return;
       }
       if (suggestionState.kind === "slash-command") {
-        const command = filteredSlashCommands[index] ?? filteredSlashCommands[0];
+        const clampedIndex = clampSuggestionHighlightIndex(
+          index,
+          filteredSlashCommands.length
+        );
+        if (clampedIndex < 0) return;
+        const command = filteredSlashCommands[clampedIndex];
         if (command) {
           fillSlashCommand(command.command);
         }
