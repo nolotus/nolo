@@ -309,10 +309,17 @@ export const ALWAYS_ON_PACK_IDS = [
  *   addition. Used for ablation runs (CLI `NOLO_*` declared-only mode) and for
  *   inline-artifact agents, whose "纯产物生成、无交互工具" semantics any injected
  *   pack would break.
+ * - `includeAlwaysOnPacks` (default true): when false, skip the unconditional
+ *   `ALWAYS_ON_PACK_IDS` injection. Subtask/leaf runs pass false — those packs
+ *   exist to make interactive runs convenient (memory + skills defaults), and a
+ *   dispatched subtask must only get them when the agent explicitly declared
+ *   them. The constants themselves are untouched; hosts choose per run kind.
  * - `emptyFallbackPacks`: added **only** when the agent has never configured
  *   packs. For opt-out-able host defaults — the CLI's `code` pack is here
  *   because an agent whose packs are `["web-search"]` has deliberately
- *   unchecked `code`, and must not have it forced back on.
+ *   unchecked `code`, and must not have it forced back on. This stays on for
+ *   subtask runs: it is host-required (a CLI leaf with zero declared packs
+ *   would otherwise have no file/shell tools at all).
  * - `hostPacks`: added idempotently whenever the host can actually back them,
  *   regardless of what the agent declared. Desktop's workspace-gated `code`
  *   is the only current user.
@@ -322,6 +329,7 @@ export const ALWAYS_ON_PACK_IDS = [
 export function resolveEffectiveEnabledPacks(args: {
   enabledPacks?: string[] | null;
   declaredOnly?: boolean;
+  includeAlwaysOnPacks?: boolean;
   emptyFallbackPacks?: string[];
   hostPacks?: string[];
 }): string[] {
@@ -332,7 +340,7 @@ export function resolveEffectiveEnabledPacks(args: {
       ...base,
       ...(base.length === 0 ? (args.emptyFallbackPacks ?? []) : []),
       ...(args.hostPacks ?? []),
-      ...ALWAYS_ON_PACK_IDS,
+      ...(args.includeAlwaysOnPacks === false ? [] : ALWAYS_ON_PACK_IDS),
     ]),
   ];
 }

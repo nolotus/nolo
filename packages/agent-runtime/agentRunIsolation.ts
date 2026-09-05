@@ -141,3 +141,79 @@ export function filterToolNamesForRunKind(
 export function subtaskBlockedToolNames(): string[] {
   return [...SUBTASK_REMOVED_TOOL_NAMES];
 }
+
+/**
+ * Run-kind discrimination for request-based hosts (server `AgentRunRequest.runKind`).
+ * Anything that is not exactly "subtask" is interactive — the safe default,
+ * because every existing interactive entry point predates the field.
+ */
+export type AgentRunKind = "interactive" | "subtask";
+
+export function normalizeAgentRunKind(value: unknown): AgentRunKind {
+  return value === "subtask" ? "subtask" : "interactive";
+}
+
+/**
+ * Subtask capability-surface trimming contract
+ * --------------------------------------------
+ * Beyond the orchestration/interaction removal above, a dispatched subtask
+ * (leaf) must not inherit the *implicit convenience defaults* that exist to
+ * make interactive runs useful out of the box:
+ *
+ * - ALWAYS_ON capability packs (long-term-memory, skills) — dropped unless the
+ *   agent explicitly declared them (enabledPacks / required skill packs).
+ * - Host default tools (CLI `exa_search`/`fetchWebpage`/`ask_user`) — dropped;
+ *   `ask_user` is also interaction-required and stripped either way.
+ * - Default-mounted system capabilities (agent-orchestration) — dropped;
+ *   orchestration tools are subtask-removed anyway, so skipping the mount at
+ *   the source keeps the final surface identical without add-then-remove.
+ * - Companion web/browser pack padding (LIGHT_WEB / FULL_BROWSER) — dropped;
+ *   explicitly declared tools and reference-required tools still come through
+ *   untouched, only the implicit same-pack companions are skipped.
+ *
+ * Explicit declarations (enabledPacks, direct tools, required skill packs),
+ * the host-required CLI `code` fallback, reference-required tools, and the
+ * creator's `disabledTools` (which keep final precedence) are all unchanged.
+ * Interactive runs never skip any of these — interactive behavior is
+ * byte-identical before/after.
+ */
+
+/**
+ * Pure debug/evidence helper — NOT on the production tool-resolution path.
+ *
+ * Classifies each retained tool name against the subtask trimming contract so
+ * tests and debugging can show WHY a tool survived a subtask trim: it was
+ * explicitly declared, host-required, reference-required, or a mounted system
+ * capability. Tools with no legitimate source are flagged `unexplained` —
+ * under the trimming contract a minimal leaf should not carry them.
+ */
+export type SubtaskToolSource =
+  | "explicit"
+  | "host-required"
+  | "reference-required"
+  | "system";
+
+export function classifySubtaskToolSources(args: {
+  toolNames: ReadonlyArray<string>;
+  explicitToolNames?: ReadonlyArray<string> | null;
+  hostRequiredToolNames?: ReadonlyArray<string> | null;
+  referenceRequiredToolNames?: ReadonlyArray<string> | null;
+  systemToolNames?: ReadonlyArray<string> | null;
+}): Array<{ toolName: string; sources: SubtaskToolSource[]; unexplained: boolean }> {
+  const bySource: Array<[SubtaskToolSource, ReadonlyArray<string> | null | undefined]> = [
+    ["explicit", args.explicitToolNames],
+    ["host-required", args.hostRequiredToolNames],
+    ["reference-required", args.referenceRequiredToolNames],
+    ["system", args.systemToolNames],
+  ];
+  const sourceSets = bySource.map(([source, names]) => ({
+    source,
+    names: new Set(names ?? []),
+  }));
+  return args.toolNames.map((toolName) => {
+    const sources = sourceSets
+      .filter(({ names }) => names.has(toolName))
+      .map(({ source }) => source);
+    return { toolName, sources, unexplained: sources.length === 0 };
+  });
+}

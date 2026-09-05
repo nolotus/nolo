@@ -166,11 +166,16 @@ const CLI_DEFAULT_TOOLS = ["exa_search", "fetchWebpage", "ask_user"] as const;
 function addDefaultCliCoreTools(
   toolNames: string[],
   env?: EnvLike,
+  args?: { skipHostDefaults?: boolean },
 ): string[] {
   // FORCED_TOOLS 当前为空。ask_user 走 CLI_DEFAULT_TOOLS 默认注入（TUI 有
   // AskChoice dialog 交互通道）；headless/declared-only 模式仍不注入
   // （ask_user 需要交互，headless 无 requestUserChoice 通道）。
-  const declaredOnly = env && shouldUseDeclaredOnlyLocalWorkspaceTools(env);
+  // subtask（skipHostDefaults）同样跳过——exa_search/fetchWebpage/ask_user 是
+  // 交互便利默认，叶子任务只保留显式声明（见 agentRunIsolation.ts 裁剪契约）。
+  const declaredOnly =
+    args?.skipHostDefaults === true ||
+    (env ? shouldUseDeclaredOnlyLocalWorkspaceTools(env) : false);
   const injected = declaredOnly
     ? [...FORCED_TOOLS]
     : [...FORCED_TOOLS, ...CLI_DEFAULT_TOOLS];
@@ -182,10 +187,16 @@ export function resolveCliEffectiveEnabledPacks(args: {
   /** 新三态字段；存在时以它为准，缺失则回落 enabledPacks。 */
   skills?: Record<string, unknown> | null;
   declaredOnly?: boolean;
+  /** Subtask/leaf run：跳过 ALWAYS_ON（memory/skills）交互默认包。 */
+  isSubtask?: boolean;
 }): string[] {
   return resolveEffectiveEnabledPacks({
     enabledPacks: resolveAgentRequiredPackIds(args),
     declaredOnly: args.declaredOnly,
+    // 子任务不继承 ALWAYS_ON 交互默认（memory/skills）——agent 显式声明
+    // （enabledPacks / required skill packs）的包照常展开；code 兜底是
+    // host-required，子任务保留（否则零声明叶子上没有任何文件/shell 工具）。
+    includeAlwaysOnPacks: args.isSubtask !== true,
     emptyFallbackPacks: ["code"],
   });
 }
@@ -221,28 +232,39 @@ export function resolveCliRequestedToolNames(
   systemBuiltinSkills?: Record<string, boolean> | null,
 ): string[] {
   const declaredOnly = shouldUseDeclaredOnlyLocalWorkspaceTools(env);
-  const expanded = addDefaultLightWebToolsForConfiguredAgents(
-    addDefaultCliCoreTools(
-      canonicalizeToolNames(
-        expandEnabledPacks(
-          resolveCliEffectiveEnabledPacks({
-            enabledPacks: (agentConfig as any)?.enabledPacks,
-            skills: (agentConfig as any)?.skills,
-            declaredOnly,
-          }),
-          resolveRequestedRuntimeToolNames({ agentConfig }),
-        ),
+  const isSubtask = isSubtaskRun(env);
+  // Subtask capability-surface trimming（契约见 agentRunIsolation.ts）：
+  // 子任务跳过隐式交互便利默认——ALWAYS_ON memory/skills 包、CLI 默认
+  // web/ask_user 工具、默认挂载的系统能力（agent-orchestration，反正最后
+  // 也会被 run-kind 过滤剥掉，源头跳过避免先加后减）、LIGHT_WEB 同包伴随注入。
+  // 显式 enabledPacks/direct tools、host-required 的 code 兜底、disabledTools
+  // 最终优先、declared-only 语义、末尾的 run-kind 隔离过滤全部不变。
+  const coreExpanded = addDefaultCliCoreTools(
+    canonicalizeToolNames(
+      expandEnabledPacks(
+        resolveCliEffectiveEnabledPacks({
+          enabledPacks: (agentConfig as any)?.enabledPacks,
+          skills: (agentConfig as any)?.skills,
+          declaredOnly,
+          isSubtask,
+        }),
+        resolveRequestedRuntimeToolNames({ agentConfig }),
       ),
-      env,
     ),
-    agentConfig,
+    env,
+    { skipHostDefaults: isSubtask },
   );
+  // 子任务不做 LIGHT_WEB 伴随注入：显式声明的 web 工具本身照常保留，
+  // 只是隐式补齐的同包伙伴（如只声明 fetchWebpage 时的 exa_search）不再出现。
+  const expanded = isSubtask
+    ? coreExpanded
+    : addDefaultLightWebToolsForConfiguredAgents(coreExpanded, agentConfig);
   const filtered = applySystemBuiltinSkillFilter(
     // Default-on system capabilities (agent-orchestration) are mounted for
-    // every non-declared-only agent before the global filter runs, so the
-    // user's global "off" still wins. declared-only (ablation) runs keep
-    // their strict surface.
-    declaredOnly ? expanded : addDefaultSystemCapabilityTools(expanded),
+    // every non-declared-only interactive agent before the global filter runs,
+    // so the user's global "off" still wins. declared-only (ablation) and
+    // subtask runs keep their strict surface.
+    declaredOnly || isSubtask ? expanded : addDefaultSystemCapabilityTools(expanded),
     systemBuiltinSkills,
   );
   const afterDisabled = applyDisabledTools(
@@ -251,11 +273,11 @@ export function resolveCliRequestedToolNames(
   );
   // Agent-run isolation: dispatched subtasks (NOLO_AGENT_RUN_CHILD=1) lose
   // orchestration tools (startAgentRun/controlAgentRun/listAgents/... ) and
-  // git write tools (gitAdd/gitCommit/gitCreateBranch/commitWorkspace). The
-  // subtask keeps all "干活" tools + read-only git. Interactive runs unchanged.
-  // Applied at the tool-NAME layer so the prepareTools cache key (built from
-  // this final list) stays coherent across run kinds.
-  return filterToolNamesForRunKind(afterDisabled, isSubtaskRun(env));
+  // interaction tools (ask_user). The subtask keeps all "干活" tools.
+  // Interactive runs unchanged. Applied at the tool-NAME layer so the
+  // prepareTools cache key (built from this final list) stays coherent across
+  // run kinds.
+  return filterToolNamesForRunKind(afterDisabled, isSubtask);
 }
 
 export function resolveProviderOpenAiToolBundle(
