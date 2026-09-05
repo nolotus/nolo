@@ -57,7 +57,6 @@ import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
 import {
   isAssistantToolStub,
-  isAwaitingVisibleAssistantReply,
   isIntermediateAssistantProgress,
   shouldAutoCollapseToolGroup,
 } from "./assistantReplyPendingState";
@@ -194,14 +193,19 @@ const MessagesList: React.FC<MessagesListProps> = ({
     !!activeDialogKey && Object.keys(activeControllers).length > 0;
   const loopStopReason = useLoopStopReason(isRunning);
   const allToolRuns = useAllToolRuns();
+  const currentMessageIds = useMemo(
+    () => new Set(messages.map((message: any) => message?.id).filter(Boolean)),
+    [messages]
+  );
   const hasUnresolvedConfirmRun = useMemo(
     () =>
       allToolRuns.some(
         (run) =>
+          currentMessageIds.has(run.messageId) &&
           run.interaction === "confirm" &&
           (run.status === "pending" || run.status === "running")
       ),
-    [allToolRuns]
+    [allToolRuns, currentMessageIds]
   );
   const visibleLoopStopReason =
     loopStopReason === "pending" && !hasUnresolvedConfirmRun
@@ -531,11 +535,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
     [renderMessages, currentDialogConfig]
   );
 
-  const awaitingAssistantReply = useMemo(
-    () => isAwaitingVisibleAssistantReply(messages, isRunning),
-    [isRunning, messages]
-  );
-
   // 单一主 working signal：activity 是既有 runtime facts 的 projection
   // （activeControllers / streamingMessageId / 消息尾部内容 / toolRunStore）。
   // starting 之外的阶段由 ThinkingSection / ToolMessageGroup / 正文+cursor
@@ -544,6 +543,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
     messages,
     dialogId,
     dialogKey: activeDialogKey,
+    toolRuns: allToolRuns,
   });
 
   // Styles live in messagesStyles.ts (avoid rebuilding a large unused style string each stream tick).
@@ -590,7 +590,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
             const canCollapse = shouldAutoCollapseToolGroup({
               entries: renderEntries,
               groupIndex: entryIndex,
-              isRunning: isRunning || awaitingAssistantReply,
+              isRunning,
               hasStreamingMessage,
             });
             return (

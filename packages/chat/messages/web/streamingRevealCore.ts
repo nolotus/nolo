@@ -46,11 +46,6 @@ export function computeRevealStep(behind: number): number {
   return behind - HUGE_BURST_TAIL_GRAPHEMES;
 }
 
-export type StreamingRevealOptions = {
-  /** Explicit lifecycle token. Changing it starts a new canonical segment. */
-  resetKey?: string | number;
-};
-
 export type RevealTargetRelation = "append" | "transient-shrink" | "replace";
 
 export function classifyRevealTarget(
@@ -70,29 +65,17 @@ export function classifyRevealTarget(
  * itself (frozen transient shrink), or all of `target` when an explicit
  * `resetKey` is provided (same-segment replacements freeze instead).
  */
-export function nextRevealContent(
-  target: string,
-  visible: string,
-  options?: StreamingRevealOptions
-): string {
+export function nextRevealContent(target: string, visible: string): string {
   const relation = classifyRevealTarget(target, visible);
-  // A non-prefix target is not evidence of a new segment. Freeze the
-  // projection until the canonical stream grows back. A caller that has an
-  // explicit lifecycle boundary may opt into the replacement projection.
-  if (relation === "replace") {
-    return options?.resetKey !== undefined ? target : visible;
-  }
-  if (relation === "transient-shrink") return visible;
+  // A core segment never infers lifecycle boundaries: all non-prefix updates
+  // freeze until the hook explicitly starts a new segment.
+  if (relation === "replace" || relation === "transient-shrink") return visible;
 
   const targetGraphemes = splitVisibleCharacters(target);
-  const visibleCount =
-    visible.length === 0 ? 0 : splitVisibleCharacters(visible).length;
+  const visibleCount = visible.length === 0 ? 0 : splitVisibleCharacters(visible).length;
   const behind = targetGraphemes.length - visibleCount;
   if (behind <= 0) return visible;
-
-  const nextCount = Math.min(
-    targetGraphemes.length,
-    visibleCount + computeRevealStep(behind)
-  );
-  return targetGraphemes.slice(0, nextCount).join("");
+  return targetGraphemes
+    .slice(0, Math.min(targetGraphemes.length, visibleCount + computeRevealStep(behind)))
+    .join("");
 }

@@ -1,44 +1,24 @@
-// packages/chat/runtime/conversationActivity.ts
-//
-// ConversationActivity —— 「正在进行」的单一主 working signal（纯函数 projection）。
-//
-// 定位（域 B 契约）：
-// - 它 NOT a truth source：只把已有 runtime facts（activeControllers /
-//   streamingMessageId / 消息尾部内容 / toolRunStore）投影成一个极小的
-//   union，供 UI 消费；不持久化、不进 Redux、不为动画加全局 state。
-// - 优先级从用户视角出发：
-//     waiting-user → syncing → active tool → thinking → answering → starting → idle
-//   数据不足以区分的中间态一律回落 starting（"正在处理…"），不虚构精细阶段。
-// - label 为 zh 文案（与现有 UI 硬编码中文风格一致）；工具显示名复用
-//   toolDisplayName 的 locale-independent 默认表，绝不暴露 raw tool_call id。
-
+// Pure semantic projection for the chat working signal. Keep this module
+// independent of web presentation, i18n, and Redux.
 import { useMemo } from "react";
 import {
-  isAssistantToolStub,
   hasVisibleAssistantContent,
-} from "chat/messages/web/assistantReplyPendingState";
+  isAssistantToolStub,
+} from "chat/messages/assistantMessageFacts";
+
 import { isHiddenOrchestratorToolMessage } from "chat/messages/toolPresentation";
-import { resolveToolDisplayName } from "chat/messages/web/toolDisplayName";
 import { useHasStreamingMessage } from "chat/messages/messageSessionStore";
 import { useActiveControllers } from "chat/dialog/dialogRuntimeStore";
-import { useAllToolRuns } from "ai/tools/toolRunStore";
 
-// ===== 输出契约（极小 union，均带 label）=====
-
-export type ConversationActivityKind =
-  | "idle"
-  | "starting"
-  | "thinking"
-  | "tool"
-  | "answering"
-  | "waiting-user"
-  | "syncing";
-
-export interface ConversationActivity {
-  kind: ConversationActivityKind;
-  /** 用户可见的 zh 文案；idle 为空串（消费方不应渲染 idle）。 */
-  label: string;
-}
+export type ConversationActivity =
+  | { kind: "idle" }
+  | { kind: "starting" }
+  | { kind: "thinking" }
+  | { kind: "tool"; toolName: string }
+  | { kind: "answering" }
+  | { kind: "waiting-user" }
+  | { kind: "syncing" };
+export type ConversationActivityKind = ConversationActivity["kind"];
 
 // ===== 输入契约（全部来自既有事实源，禁止新造事实）=====
 
@@ -60,7 +40,7 @@ export interface ConversationActivityInput {
 }
 
 /** 无事发生时的稳定引用（消费方可直接判 kind）。 */
-export const IDLE_ACTIVITY: ConversationActivity = { kind: "idle", label: "" };
+export const IDLE_ACTIVITY: ConversationActivity = { kind: "idle" };
 
 /**
  * 纯投影：优先级 waiting-user → syncing → tool → thinking → answering →
@@ -69,28 +49,17 @@ export const IDLE_ACTIVITY: ConversationActivity = { kind: "idle", label: "" };
 export function projectConversationActivity(
   input: ConversationActivityInput
 ): ConversationActivity {
-  if (input.waitingForUser) {
-    return { kind: "waiting-user", label: "等待确认…" };
-  }
-  if (input.syncing) {
-    return { kind: "syncing", label: "正在同步…" };
-  }
+  if (input.waitingForUser) return { kind: "waiting-user" };
+  if (input.syncing) return { kind: "syncing" };
   if (input.activeToolNames.length > 0) {
-    // 多个并行 run 取最近启动的一个作为主叙述；显示名走 toolDisplayName，
-    // 不暴露 raw id / API 名（未知工具回落其规范化名，与 ToolCallRow 同策略）。
     const primary = input.activeToolNames[input.activeToolNames.length - 1];
-    return { kind: "tool", label: `正在${resolveToolDisplayName(primary)}…` };
+    return { kind: "tool", toolName: primary };
   }
-  if (input.isThinkingLive) {
-    return { kind: "thinking", label: "正在思考…" };
-  }
+  if (input.isThinkingLive) return { kind: "thinking" };
   if (input.hasStreamingMessage && input.hasVisibleAssistantText) {
-    return { kind: "answering", label: "正在回复…" };
+    return { kind: "answering" };
   }
-  if (input.isRunning || input.hasStreamingMessage) {
-    // 请求已发但无 reasoning/tool/answer —— 唯一诚实的兜底。
-    return { kind: "starting", label: "正在处理…" };
-  }
+  if (input.isRunning || input.hasStreamingMessage) return { kind: "starting" };
   return IDLE_ACTIVITY;
 }
 
@@ -147,6 +116,22 @@ export interface UseConversationActivityArgs {
   dialogId?: string | null;
   /** 运行时 dialogKey（dialogRuntimeStore.activeControllers 的 key）。 */
   dialogKey?: string | null;
+  /** Caller-owned snapshot; keeps this hook Redux/store-subscription free. */
+  toolRuns: readonly { messageId?: string; status?: string; interaction?: string; toolName?: string }[];
+}
+
+/** Keep the global tool-run snapshot scoped to the current dialog. */
+export function filterToolRunsForMessages<T extends { messageId?: string }>(
+  runs: readonly T[],
+  messages: readonly unknown[]
+): T[] {
+  const messageIds = new Set(
+    messages.flatMap((message) => {
+      const id = message && typeof message === "object" ? (message as { id?: unknown }).id : undefined;
+      return typeof id === "string" ? [id] : [];
+    })
+  );
+  return runs.filter((run) => typeof run.messageId === "string" && messageIds.has(run.messageId));
 }
 
 /** toolRunStore → 交互事实：非 confirm 的在途 run 与未决 confirm。 */
@@ -154,6 +139,7 @@ export function deriveToolRunFacts(runs: readonly {
   status?: string;
   interaction?: string;
   toolName?: string;
+  messageId?: string;
 }[]): Pick<ConversationActivityInput, "activeToolNames" | "waitingForUser"> {
   const activeToolNames: string[] = [];
   let waitingForUser = false;
@@ -177,10 +163,9 @@ export function deriveToolRunFacts(runs: readonly {
 export function useConversationActivity(
   args: UseConversationActivityArgs
 ): ConversationActivity {
-  const { messages, dialogId, dialogKey } = args;
+  const { messages, dialogId, dialogKey, toolRuns } = args;
   const hasStreamingMessage = useHasStreamingMessage(dialogId);
   const activeControllers = useActiveControllers(dialogKey ?? undefined);
-  const toolRuns = useAllToolRuns();
 
   const isRunning =
     !!dialogKey && Object.keys(activeControllers).length > 0;
@@ -189,7 +174,10 @@ export function useConversationActivity(
     () => deriveTrailingAssistantFacts(messages, hasStreamingMessage),
     [messages, hasStreamingMessage]
   );
-  const toolFacts = useMemo(() => deriveToolRunFacts(toolRuns), [toolRuns]);
+  const toolFacts = useMemo(
+    () => deriveToolRunFacts(filterToolRunsForMessages(toolRuns, messages)),
+    [toolRuns, messages]
+  );
 
   return projectConversationActivity({
     isRunning,
