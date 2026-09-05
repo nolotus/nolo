@@ -21,11 +21,20 @@ import { selectIdentityUserBalance } from "identity/selectors";
 import { toast } from "app/utils/toast";
 import {
   abortAllMessages,
+  selectCurrentDialogTokens,
   useCurrentDialogKey,
   usePendingFiles,
   useActiveControllers,
 } from "../dialog/dialogSlice";
 import { useCurrentDialogConfig } from "../dialog/useCurrentDialogConfig";
+import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
+import { useFetchData } from "app/hooks";
+import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
+import { getModelContextWindow } from "ai/llm/getModelContextWindow";
+import {
+  getContextWindowUsagePercent,
+  getDialogTokenTotal,
+} from "chat/dialog/dialogUsageFormat";
 import {
   selectAllMsgs,
   useHasStreamingMessage,
@@ -79,7 +88,11 @@ import { extractCustomId } from "core/prefix";
 import { useAppSelectedNode } from "app/appInspector/appInspectorStore";
 import { MessageInputComposer } from "./MessageInputComposer";
 import { MessageInputControlsBar } from "./MessageInputControlsBar";
-import { BrowseContextIndicator } from "./BrowseContextIndicator";
+import {
+  BrowseContextIndicator,
+  useBrowseContext,
+} from "./BrowseContextIndicator";
+import { ComposerDrawer } from "./ComposerDrawer";
 import type { AgentPickerControlProps } from "./AgentPickerControl";
 import {
   MessageInputActivityPanel,
@@ -838,6 +851,103 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     void sendMessageRef.current(transcript);
   }, [sendMessageRef]);
 
+  const tokenStats = useAppSelector(selectCurrentDialogTokens);
+  const activeAgentId = getActiveDialogAgentId(currentDialogConfig);
+  const { data: activeAgent } = useFetchData<Agent>(activeAgentId || undefined);
+  const resolvedAgent =
+    activeAgent && activeAgentId
+      ? applyBuiltinAgentRuntimeOverride(activeAgentId, activeAgent)
+      : activeAgent;
+  const contextWindow = getModelContextWindow(resolvedAgent?.model || "");
+  const totalTokens = getDialogTokenTotal(
+    tokenStats?.inputTokens ?? 0,
+    tokenStats?.outputTokens ?? 0
+  );
+  const usagePercent =
+    contextWindow > 0 && totalTokens > 0
+      ? getContextWindowUsagePercent(totalTokens, contextWindow)
+      : undefined;
+
+  const browseContext = useBrowseContext();
+  const browseHost = useMemo(() => {
+    if (!browseContext?.url) return undefined;
+    try {
+      return new URL(browseContext.url).hostname;
+    } catch {
+      return undefined;
+    }
+  }, [browseContext?.url]);
+
+  const imageConfigSummary = useMemo(() => {
+    if (!showImageConfigRow) return undefined;
+    const parts = [imageAspectRatio, imageSize].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : "Image";
+  }, [showImageConfigRow, imageAspectRatio, imageSize]);
+
+  const totalAttachmentCount =
+    (imgPreviews?.length ?? 0) + (pendingFilesWithStatus?.length ?? 0);
+
+  const [drawerExpanded, setDrawerExpanded] = useState(true);
+  const prevAttachmentCountRef = useRef(totalAttachmentCount);
+
+  useEffect(() => {
+    if (
+      totalAttachmentCount > prevAttachmentCountRef.current &&
+      totalAttachmentCount > 0
+    ) {
+      setDrawerExpanded(true);
+    }
+    prevAttachmentCountRef.current = totalAttachmentCount;
+  }, [totalAttachmentCount]);
+
+  const handleToggleDrawer = useCallback(() => {
+    setDrawerExpanded((prev) => !prev);
+  }, []);
+
+  const drawerContent = useMemo(
+    () => (
+      <>
+        <BrowseContextIndicator />
+
+        <MessageInputAttachmentsPanel
+          imagePreviews={imgPreviews as PendingImagePreview[]}
+          pendingFiles={pendingFilesWithStatus}
+          onRemoveImage={hookRemoveImage}
+          processingFiles={processingFileIds}
+          isMobile={isMobile}
+        />
+
+        {resolvedImageUiConfig && (
+          <MessageInputImageConfigPanel
+            visible={showImageConfigRow}
+            aspectRatio={imageAspectRatio}
+            imageSize={imageSize}
+            imageProfileKey={imageProfileKey}
+            imageUiConfig={resolvedImageUiConfig}
+            onAspectRatioChange={setImageAspectRatio}
+            onImageSizeChange={setImageSize}
+            onImageProfileChange={(v) => setImageProfileKey(v as any)}
+          />
+        )}
+      </>
+    ),
+    [
+      imgPreviews,
+      pendingFilesWithStatus,
+      hookRemoveImage,
+      processingFileIds,
+      isMobile,
+      resolvedImageUiConfig,
+      showImageConfigRow,
+      imageAspectRatio,
+      imageSize,
+      imageProfileKey,
+      setImageAspectRatio,
+      setImageSize,
+      setImageProfileKey,
+    ]
+  );
+
   const sendDisabled =
     !hasContent ||
     isSendBlocked ||
@@ -901,28 +1011,19 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             className={[cardStyleProps.className, "message-input__box"].filter(Boolean).join(" ")}
           >
             {/* ── Context Area (Attachments, Browse, Image config, Edit chips, Paste chips) ── */}
-            <BrowseContextIndicator />
-
-            <MessageInputAttachmentsPanel
-              imagePreviews={imgPreviews as PendingImagePreview[]}
-              pendingFiles={pendingFilesWithStatus}
-              onRemoveImage={hookRemoveImage}
-              processingFiles={processingFileIds}
-              isMobile={isMobile}
-            />
-
-            {resolvedImageUiConfig && (
-              <MessageInputImageConfigPanel
-                visible={showImageConfigRow}
-                aspectRatio={imageAspectRatio}
-                imageSize={imageSize}
-                imageProfileKey={imageProfileKey}
-                imageUiConfig={resolvedImageUiConfig}
-                onAspectRatioChange={setImageAspectRatio}
-                onImageSizeChange={setImageSize}
-                onImageProfileChange={(v) => setImageProfileKey(v as any)}
-              />
-            )}
+            {/* ── Secondary Context Drawer (Attachments, Browse, Image config, Usage) ── */}
+            <ComposerDrawer
+              attachmentCount={totalAttachmentCount}
+              processingAttachmentCount={processingFileIds.size}
+              hasBrowseContext={Boolean(browseContext?.url)}
+              browseHost={browseHost}
+              imageConfigSummary={imageConfigSummary}
+              usagePercent={usagePercent}
+              expanded={drawerExpanded}
+              onToggle={handleToggleDrawer}
+            >
+              {drawerContent}
+            </ComposerDrawer>
 
             {/* 画布选中上下文：不在输入框显示芯片（由 iframe/画布自身高亮反馈，发送时注入并在发送后自动清除） */}
 

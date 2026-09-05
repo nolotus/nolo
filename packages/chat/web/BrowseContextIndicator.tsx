@@ -4,18 +4,18 @@
 import { memo, useEffect, useState } from "react";
 import { LuGlobe } from "react-icons/lu";
 
-type BrowseContextInfo = {
+export type BrowseContextInfo = {
   url: string;
   title: string;
 } | null;
 
-const isDesktopContext = (): boolean => {
+export const isDesktopContext = (): boolean => {
   if (typeof window === "undefined" || typeof location === "undefined") return false;
   const host = location.hostname;
   return host === "127.0.0.1" || host === "localhost";
 };
 
-const useBrowseContext = (): BrowseContextInfo => {
+export const useBrowseContext = (): BrowseContextInfo => {
   const [info, setInfo] = useState<BrowseContextInfo>(null);
 
   useEffect(() => {
