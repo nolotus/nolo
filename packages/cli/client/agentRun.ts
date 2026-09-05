@@ -29,6 +29,11 @@ import {
   createCliTurnOutput,
   formatAssistantResponseForCli,
 } from "./agentRunOutput";
+import {
+  isCliAuthorityBrokerProtocolError,
+  isCliAuthorityBrokerTimeoutError,
+  isCliAuthorityBrokerUnavailableError,
+} from "../../database-engine/cliAuthorityBrokerClient";
 import { readStreamingAgentRun } from "./agentRunStream";
 import {
   describeClientVersionTooOldFailure,
@@ -703,6 +708,50 @@ export function describeLocalRunFailure(
         )
       : extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
     return `[nolo] ${shownMessage}\n`;
+  }
+
+  // Local authority broker failures: unresponsive broker timeout, attach/ownership
+  // contention, unreachability, or protocol errors must render actionable local
+  // broker guidance without blaming local credentials/config or upstream LLM.
+  if (
+    isCliAuthorityBrokerTimeoutError(rawError) ||
+    /CLI authority broker .* timed out/i.test(message)
+  ) {
+    const cleaned = stripDebugNoise(message);
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
+      `The local authority broker timed out and did not respond in time (an existing broker process may be unresponsive). Check the local broker process or retry, ${SERVER_FALLBACK_HINT}.\n`
+    );
+  }
+
+  if (/CLI authority broker could not attach or take ownership/i.test(message)) {
+    const cleaned = stripDebugNoise(message);
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
+      `The local runtime could not attach to an existing broker or take database ownership. Check running broker processes holding the local authority store or retry, ${SERVER_FALLBACK_HINT}.\n`
+    );
+  }
+
+  if (
+    isCliAuthorityBrokerUnavailableError(rawError) ||
+    /CLI authority broker unavailable at/i.test(message)
+  ) {
+    const cleaned = stripDebugNoise(message);
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
+      `The local authority broker is unavailable. Start or restart the local authority broker and retry, ${SERVER_FALLBACK_HINT}.\n`
+    );
+  }
+
+  if (
+    isCliAuthorityBrokerProtocolError(rawError) ||
+    /CLI authority broker protocol|CLI authority broker .* returned malformed response/i.test(message)
+  ) {
+    const cleaned = stripDebugNoise(message);
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
+      `The local authority broker returned a protocol or malformed response error. Check the running broker process and retry, ${SERVER_FALLBACK_HINT}.\n`
+    );
   }
 
   const cls = classifyLocalRunError(message);
