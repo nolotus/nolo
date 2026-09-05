@@ -1017,6 +1017,7 @@ export const TUI_TREE_END = "\u0002";
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
   reset?: () => void;
+  consume?: (event: LocalAgentToolEvent) => void;
 };
 
 export function createToolEventFormatter(
@@ -1078,6 +1079,17 @@ export function createToolEventFormatter(
     return formatNormalToolLine(event, call, colorEnabled);
   }) as ToolEventFormatter;
   format.reset = () => { tree = null; };
+  format.consume = (event: LocalAgentToolEvent) => {
+    if (event.type === "tool-call") {
+      pending.set(event.toolCallId, {
+        toolName: event.toolName,
+        argumentsPreview: event.argumentsPreview,
+      });
+      return;
+    }
+    pending.delete(event.toolCallId);
+    tree = null;
+  };
   return format;
 }
 

@@ -13,7 +13,11 @@
  */
 
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
-import { resolveRunLabel, isAgentNameFallback } from "../../ai/tools/agent/agentRunDisplayHelpers";
+import {
+  resolveRunLabel,
+  isAgentNameFallback,
+  isAgentRunTerminalStatus,
+} from "../../ai/tools/agent/agentRunDisplayHelpers";
 
 /**
  * 执行者此刻正在做的那一件事。
@@ -195,4 +199,33 @@ export function parseAgentRunEvent(event: LocalAgentToolEvent): ParsedAgentRunEv
   if (!status) return null;
   if (!snapshot.runId) return null;
   return { kind: "status", snapshot };
+}
+
+function isFailedToolEvent(event: LocalAgentToolEvent): boolean {
+  if (event.type === "tool-error") return true;
+  if (event.metadata?.actionGate) return false;
+  const exitCode = event.metadata?.exitCode;
+  if (typeof exitCode === "number" && exitCode !== 0) return true;
+  if (event.metadata?.failed || event.metadata?.timedOut) return true;
+  return false;
+}
+
+const LIVE_RUN_STATUSES = new Set(["running", "pending"]);
+
+/**
+ * Identify transient running/pending status observations from `controlAgentRun`.
+ * These events update the docked run panel (onAgentRunStatus) but are not
+ * printed to the normal text transcript to avoid polling clutter.
+ */
+export function isLiveAgentRunObservation(
+  event: LocalAgentToolEvent,
+  parsed?: ParsedAgentRunEvent | null,
+): boolean {
+  if (event.type !== "tool-result") return false;
+  if (event.toolName !== "controlAgentRun") return false;
+  if (isFailedToolEvent(event)) return false;
+  const resolved = parsed !== undefined ? parsed : parseAgentRunEvent(event);
+  if (!resolved || resolved.kind !== "status") return false;
+  if (!LIVE_RUN_STATUSES.has(resolved.snapshot.status)) return false;
+  return true;
 }

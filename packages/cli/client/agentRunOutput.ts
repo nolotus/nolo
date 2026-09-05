@@ -7,7 +7,7 @@ import {
   createToolEventFormatter,
   formatConservativeActiveToolLabel,
 } from "./toolOutput";
-import { parseAgentRunEvent } from "./agentRunSnapshot";
+import { isLiveAgentRunObservation, parseAgentRunEvent } from "./agentRunSnapshot";
 import { Spinner, formatElapsed } from "./agentRunSpinner";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 import { dimCliText } from "./terminalStyles";
@@ -186,13 +186,15 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   };
 
   const handleToolEvent = (event: LocalAgentToolEvent) => {
-    const chunk =
-      eventMode === "jsonl"
-        ? formatToolJsonEvent(event)
-        : formatToolEvent(event);
-
     if (eventMode === "jsonl") {
+      const chunk = formatToolJsonEvent(event);
       options.output.write(chunk);
+      if (options.onAgentRunStatus) {
+        const parsed = parseAgentRunEvent(event);
+        if (parsed) {
+          options.onAgentRunStatus(parsed.snapshot);
+        }
+      }
       return;
     }
 
@@ -204,50 +206,37 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     // text (it was already flushed by the preceding tool-call).
     if (event.type === "tool-call") {
       renderWriter.flush();
-    }
+      formatToolEvent(event);
+      spinner.stop();
+      options.activityReporter?.(null);
 
-    // ── Stop spinner before writing tool content ───────────────────
-    // The spinner's \r clear must hit the spinner's own line, not a line
-    // we are about to emit. The old code placed `spinner.stop()` after
-    // `if (!chunk) return`, so buffered-class tool-results (chunk="")
-    // returned early and left the `· Read xxx (0s)` frame permanently in
-    // the transcript. Stopping unconditionally here also makes stop() a
-    // no-op when no spinner is active (see agentRunSpinner.ts).
-    spinner.stop();
-    options.activityReporter?.(null);
+      // Mid-stream tool-calls interrupt assistant text. Break onto a new
+      // line when assistant text was just flushed in this same event
+      // (streamedAssistantText is set by writeVisibleAssistantChunk via
+      // renderWriter.flush, and reset right after the newline). This
+      // ensures exactly ONE separator between a text segment and the first
+      // tool that follows it. Subsequent buffered tool-calls (chunk="")
+      // do not re-trigger the newline because streamedAssistantText is
+      // already false — that was the source of the ~19 stray blank lines.
+      // Note: `printedAssistantLabel` is intentionally excluded: it stays
+      // true for the entire turn and would re-trigger "\n" on every call.
+      if (streamedAssistantText) {
+        options.output.write("\n");
+        streamedAssistantText = false;
+      }
 
-    // Mid-stream tool-calls interrupt assistant text. Break onto a new
-    // line when assistant text was just flushed in this same event
-    // (streamedAssistantText is set by writeVisibleAssistantChunk via
-    // renderWriter.flush, and reset right after the newline). This
-    // ensures exactly ONE separator between a text segment and the first
-    // tool that follows it. Subsequent buffered tool-calls (chunk="")
-    // do not re-trigger the newline because streamedAssistantText is
-    // already false — that was the source of the ~19 stray blank lines.
-    // Note: `printedAssistantLabel` is intentionally excluded: it stays
-    // true for the entire turn and would re-trigger "\n" on every call.
-    if (event.type === "tool-call" && streamedAssistantText) {
-      options.output.write("\n");
-      streamedAssistantText = false;
-    }
-
-    // Write tool content. The single-mode formatter renders a full line per
-    // tool-result immediately; there is no internal buffering left.
-    if (chunk) {
-      writeToolOutput(chunk);
-    }
-
-    // ── Post-write: start spinner for in-flight tool-calls ──────────
-    // The activity label carries the verb only, never the argument preview:
-    // for shell-running tools the preview is the command line itself
-    // (cwd/echo/pipeline), which must not surface anywhere — including the
-    // composer activity line.
-    if (event.type === "tool-call") {
+      // ── Post-write: start spinner for in-flight tool-calls ──────────
+      // The activity label carries the verb only, never the argument preview:
+      // for shell-running tools the preview is the command line itself
+      // (cwd/echo/pipeline), which must not surface anywhere — including the
+      // composer activity line.
       const activeLabel = formatConservativeActiveToolLabel(event);
       spinner.show(activeLabel);
       options.activityReporter?.(activeLabel);
+      return;
     }
 
+    // ── Tool Result / Tool Error (Text presentation path) ───────────
     // Feed the docked run panel. `controlAgentRun` matters as much as
     // `startAgentRun` here: subscribing to the fork alone pinned the panel to
     // the run's first status, so it kept showing `running` for the rest of the
@@ -257,11 +246,30 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     // `null`: the dock holds several runs at once now, so "the server has never
     // heard of run X" has to name X. Sending null would have wiped the panel —
     // including the sibling runs that are still very much alive.
-    if (options.onAgentRunStatus) {
-      const parsed = parseAgentRunEvent(event);
-      if (parsed) {
-        options.onAgentRunStatus(parsed.snapshot);
-      }
+    const parsedRunEvent = parseAgentRunEvent(event);
+    if (options.onAgentRunStatus && parsedRunEvent) {
+      options.onAgentRunStatus(parsedRunEvent.snapshot);
+    }
+
+    // ── Stop spinner before writing tool content ───────────────────
+    // The spinner's \r clear must hit the spinner's own line, not a line
+    // we are about to emit. Stopping unconditionally here also makes stop()
+    // a no-op when no spinner is active (see agentRunSpinner.ts).
+    spinner.stop();
+    options.activityReporter?.(null);
+
+    // Route-before-render: live running observations update the dock only
+    // and do not enter the text transcript.
+    if (isLiveAgentRunObservation(event, parsedRunEvent)) {
+      formatToolEvent.consume?.(event);
+      return;
+    }
+
+    // Write tool content. The single-mode formatter renders a full line per
+    // tool-result immediately; there is no internal buffering left.
+    const chunk = formatToolEvent(event);
+    if (chunk) {
+      writeToolOutput(chunk);
     }
   };
 
