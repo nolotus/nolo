@@ -1565,7 +1565,9 @@ export function releaseRunRecordAck(
 export type TerminalTransitionResult =
   | { kind: "not_found" }
   | { kind: "transitioned"; record: RunRecord }
-  | { kind: "kept"; record: RunRecord };
+  | { kind: "kept"; record: RunRecord }
+  /** Lock was held by another writer: nothing was written. `record` is the durable record re-read after losing the race. */
+  | { kind: "contended"; record: RunRecord };
 
 export function transitionRunToTerminal(
   runId: string,
@@ -1583,14 +1585,22 @@ export function transitionRunToTerminal(
   deps: AgentRunControlDeps = {},
   options: { allowOverOrphaned?: boolean } = {},
 ): TerminalTransitionResult {
-  return withRunRecordLock(runId, deps, () => {
+  // Strict arbitration: a terminal transition that loses the record lock must
+  // never write unlocked — the winner's durable result (e.g. done) would be
+  // clobbered by this caller's (e.g. killed).
+  const settled = withRunRecordLock(runId, deps, () => {
     const record = readRunRecord(runId, deps);
-    if (!record) return { kind: "not_found" };
+    if (!record) return { kind: "not_found" as const };
     // A terminal record is authoritative. Only child self-settlement may
-    // correct orphaned; all other terminal-to-terminal writes are blocked.
-    if (sharedIsAgentRunTerminalStatus(record.status) &&
-        !(options.allowOverOrphaned === true && record.status === "orphaned")) {
-      return { kind: "kept", record };
+    // correct orphaned, and only with a real outcome (done/failed); all other
+    // terminal-to-terminal writes — orphaned → killed/timeout included — are
+    // blocked.
+    const orphanCorrection =
+      options.allowOverOrphaned === true &&
+      record.status === "orphaned" &&
+      (update.status === "done" || update.status === "failed");
+    if (sharedIsAgentRunTerminalStatus(record.status) && !orphanCorrection) {
+      return { kind: "kept", record } as const;
     }
     const now = deps.now ?? (() => new Date());
     record.status = update.status;
@@ -1609,17 +1619,25 @@ export function transitionRunToTerminal(
     // A self-reported terminal status is ground truth; drop any orphan verdict.
     if (record.note?.startsWith("orphaned:")) record.note = undefined;
     writeRunRecord(record, deps);
-    return { kind: "transitioned", record };
-  }) ?? { kind: "not_found" };
+    return { kind: "transitioned", record } as const;
+  }, { strict: true });
+  if (settled !== undefined) return settled;
+  // Lock contended: no write. Re-read the durable record so callers can tell
+  // "already settled elsewhere" (kept) from "still active — whoever holds the
+  // lock owns the transition; retry later if it matters" (contended).
+  const record = readRunRecord(runId, deps);
+  if (!record) return { kind: "not_found" };
+  if (sharedIsAgentRunTerminalStatus(record.status)) return { kind: "kept", record };
+  return { kind: "contended", record };
 }
 
 /**
  * Legacy compatibility shim — do NOT use in new code; call
- * `transitionRunToTerminal` directly. This alias keeps the historical
- * orphan-correct semantics by carrying `allowOverOrphaned: true`, i.e. callers
- * silently gain the right to overwrite an `orphaned` verdict with a
- * self-reported terminal result. All other terminal→terminal writes stay
- * blocked, same as the guarded helper.
+ * `transitionRunToTerminal` directly. Safe by default: an already-terminal
+ * record is never overwritten, `orphaned` included. Child self-settlement
+ * that genuinely needs to correct an `orphaned` verdict must call
+ * `transitionRunToTerminal` with an explicit `{ allowOverOrphaned: true }`
+ * so the extra authority is visible at the call site.
  */
 export function finalizeRunRecord(
   runId: string,
@@ -1633,7 +1651,7 @@ export function finalizeRunRecord(
   },
   deps: AgentRunControlDeps = {}
 ): void {
-  transitionRunToTerminal(runId, update, deps, { allowOverOrphaned: true });
+  transitionRunToTerminal(runId, update, deps);
 }
 
 /**
@@ -2251,9 +2269,11 @@ async function runSignalCommand(
     );
     return 1;
   }
-  transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
+  const transition = transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
   deps.output.write(
-    `Stopped ${reconciled.runId} (pid ${reconciled.pid}): process group confirmed gone.\n`
+    transition.kind === "contended"
+      ? `Stopped ${reconciled.runId} (pid ${reconciled.pid}): process group confirmed gone; terminal status pending reconcile.\n`
+      : `Stopped ${reconciled.runId} (pid ${reconciled.pid}): process group confirmed gone.\n`
   );
   return 0;
 }

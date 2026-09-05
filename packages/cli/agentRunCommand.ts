@@ -318,6 +318,9 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       childRunId as string,
       { status: outcome.status, exitCode: outcome.exitCode, note },
       { env, homedir: deps.homedir, fs: deps.fs, now: deps.now },
+      // Watchdog settlement carries the child's *real* process exit code
+      // (contract: done ⇔ exit 0), so it counts as authoritative settlement,
+      // same as the post-exit settlement below.
       { allowOverOrphaned: true },
     );
   };

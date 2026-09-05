@@ -790,11 +790,26 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       }
     }
     const transition = transitionRunToTerminal(reconciled.runId, { status: "killed" }, deps);
-    const finalRecord = transition.kind === "not_found" ? reconciled : transition.record;
+    const finalRecord =
+      transition.kind === "not_found" ? reconciled
+      : transition.kind === "contended" ? transition.record
+      : transition.record;
     const labels = agentRunCardLabels();
     return {
-      content: JSON.stringify({ runId: finalRecord.runId, found: true, status: finalRecord.status }),
-      metadata: { displayData: formatStopRunCard(finalRecord.status, labels) },
+      content: JSON.stringify({
+        runId: finalRecord.runId,
+        found: true,
+        status: finalRecord.status,
+        // 进程已确认终止、但 terminal 记录被并发 writer 占住（待 reconcile）：
+        // 如实标记 terminal 未落盘，不偷偷重写 killed。
+        ...(transition.kind === "contended" ? { terminalPersisted: false } : {}),
+      }),
+      metadata: {
+        displayData:
+          transition.kind === "contended"
+            ? `${formatStopRunCard(finalRecord.status, labels)} (pending reconcile)`
+            : formatStopRunCard(finalRecord.status, labels),
+      },
     };
   };
 }
