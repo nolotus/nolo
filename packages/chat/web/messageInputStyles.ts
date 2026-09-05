@@ -3,7 +3,7 @@ import * as stylex from "@stylexjs/stylex";
 /**
  * 消息输入区样式体系（message-input.css → StyleX 1:1 迁出，2026-08-30）。
  * MessageInputContainer, MessageInputCore, SendButton, VoiceInputButton,
- * AgentMentionMenu, CreateTaskModal, ImageConfigRow, ScrollToBottomButton, etc.
+ * CreateTaskModal, ImageConfigRow, ScrollToBottomButton, etc.
  *
  * 与原 CSS 保持 1:1：同一元素、同一声明、同值。
  * 运行时 :root 变量由 GlobalThemeController 注入，var(--global-*) 原样保留。
@@ -328,68 +328,9 @@ export const messageInputStyles = stylex.create({
     },
   },
 
-  /* ── AgentMentionMenu ── */
-  mentions: {
-    position: "absolute",
-    left: 0,
-    bottom: "100%",
-    marginBottom: "4px",
-    width: "260px",
-    maxHeight: "240px",
-    overflowY: "auto",
-    backgroundColor: "var(--background)",
-    borderRadius: "var(--radius-xs)",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "var(--border)",
-    boxShadow: "0 4px 12px var(--shadowMedium)",
-    zIndex: 20,
-    "@media (max-width: 768px)": {
-      width: "220px",
-    },
-  },
-  mentionsHeader: {
-    padding: "4px 10px",
-    fontSize: "var(--fontSize-sm)",
-    color: "var(--textSecondary)",
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--border)",
-  },
-  mentionsList: {
-    listStyle: "none",
-    margin: 0,
-    padding: "4px 0",
-  },
-  mentionsItem: {
-    display: "flex",
-    alignItems: "center",
-    padding: "8px 10px",
-    cursor: "pointer",
-    fontSize: "var(--fontSize-sm)",
-    color: "var(--text)",
-    borderLeftWidth: "3px",
-    borderLeftStyle: "solid",
-    borderLeftColor: "transparent",
-    borderRadius: "var(--radius-xs)",
-    margin: "1px 4px",
-    transition: "background 0.12s ease-out, border-color 0.12s ease-out",
-    ":hover": {
-      backgroundColor: "rgba(37, 99, 235, 0.08)",
-      borderLeftColor: "var(--primary, #2563eb)",
-    },
-  },
-  mentionsItemActive: {
-    backgroundColor: "rgba(37, 99, 235, 0.08)",
-    borderLeftColor: "var(--primary, #2563eb)",
-  },
-  mentionsItemName: {
-    fontWeight: 500,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    overflow: "hidden",
-    width: "100%",
-  },
+  /* ── ComposerSuggestionMenu (unified @mention / slash surface) ──
+     Styles live in ComposerSuggestionMenu.tsx (stylex) with literal class
+     hooks + narrow-container rules in chatStylexEscapeHatch.css. */
 
   /* ── CreateTaskModal ── */
   ctm: {

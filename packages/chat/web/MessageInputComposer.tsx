@@ -1,12 +1,12 @@
 // packages/chat/web/MessageInputComposer.tsx
-// Textarea + IME hooks + mention menu. Memoized so sibling chrome can skip
-// re-render when only unrelated parent state changes (and vice versa when
-// mention props stay stable while other panels update).
+// Textarea + IME hooks + unified suggestion surface. Memoized so sibling
+// chrome can skip re-render when only unrelated parent state changes (and
+// vice versa when suggestion props stay stable while other panels update).
 
-import React, { memo } from "react";
+import React, { memo, useId } from "react";
 import { TextField, TextArea } from "react-aria-components";
-import AgentMentionMenu from "./AgentMentionMenu";
-import type { FavoriteAgentSummary } from "./messageInputAgentUi";
+import ComposerSuggestionMenu from "./ComposerSuggestionMenu";
+import type { ComposerSuggestionItem } from "./composerSuggestions";
 
 export type MessageInputComposerProps = {
   areaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -20,12 +20,12 @@ export type MessageInputComposerProps = {
   onBlur: () => void;
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
-  mentionMenuVisible: boolean;
-  filteredFavoriteAgents: FavoriteAgentSummary[];
-  mentionHighlightIndex: number;
-  mentionHeaderText: string;
-  onSelectMention: (agent: FavoriteAgentSummary) => void;
-  onHoverMention: (index: number) => void;
+  suggestionMenuVisible: boolean;
+  suggestionItems: ComposerSuggestionItem[];
+  suggestionHighlightIndex: number;
+  suggestionHeaderText: string;
+  onSelectSuggestion: (index: number) => void;
+  onHoverSuggestion: (index: number) => void;
 };
 
 export const MessageInputComposer = memo(function MessageInputComposer({
@@ -40,13 +40,32 @@ export const MessageInputComposer = memo(function MessageInputComposer({
   onBlur,
   onKeyDown,
   onPaste,
-  mentionMenuVisible,
-  filteredFavoriteAgents,
-  mentionHighlightIndex,
-  mentionHeaderText,
-  onSelectMention,
-  onHoverMention,
+  suggestionMenuVisible,
+  suggestionItems,
+  suggestionHighlightIndex,
+  suggestionHeaderText,
+  onSelectSuggestion,
+  onHoverSuggestion,
 }: MessageInputComposerProps) {
+  // Stable per-instance prefix so the textarea combobox wiring and the
+  // listbox/option ids always refer to the same suggestion surface.
+  const suggestionIdPrefix = useId();
+  const suggestionListboxId = `${suggestionIdPrefix}-composer-suggestion-listbox`;
+
+  // Dynamic combobox semantics: only an actively open surface turns the
+  // textarea into an aria combobox pointing at the highlighted option.
+  const hasSuggestionOptions =
+    suggestionMenuVisible && suggestionItems.length > 0;
+  const comboboxAriaProps = hasSuggestionOptions
+    ? ({
+        role: "combobox",
+        "aria-expanded": true,
+        "aria-controls": suggestionListboxId,
+        "aria-activedescendant": `${suggestionListboxId}-opt-${suggestionHighlightIndex}`,
+        "aria-autocomplete": "list",
+      } as React.AriaAttributes & { role: string })
+    : {};
+
   return (
     <div className="message-input__textarea-wrap">
       <TextField
@@ -66,16 +85,18 @@ export const MessageInputComposer = memo(function MessageInputComposer({
           onKeyDown={onKeyDown}
           onBlur={onBlur}
           onPaste={onPaste}
+          {...comboboxAriaProps}
         />
       </TextField>
 
-      <AgentMentionMenu
-        visible={mentionMenuVisible}
-        agents={filteredFavoriteAgents}
-        highlightIndex={mentionHighlightIndex}
-        headerText={mentionHeaderText}
-        onSelect={onSelectMention}
-        onHover={onHoverMention}
+      <ComposerSuggestionMenu
+        visible={suggestionMenuVisible}
+        items={suggestionItems}
+        highlightIndex={suggestionHighlightIndex}
+        headerText={suggestionHeaderText}
+        listboxId={suggestionListboxId}
+        onSelect={onSelectSuggestion}
+        onHover={onHoverSuggestion}
       />
     </div>
   );

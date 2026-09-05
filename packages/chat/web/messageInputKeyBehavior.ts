@@ -1,23 +1,30 @@
 export type MessageInputKeyAction =
   | "none"
-  | "mention-next"
-  | "mention-prev"
-  | "mention-select"
-  | "mention-close"
+  | "suggestion-next"
+  | "suggestion-prev"
+  | "suggestion-select"
+  | "suggestion-close"
   | "send";
 
+/**
+ * Suggestion-surface-generic key decision for the composer textarea.
+ * Arrow/Enter/Tab/Escape route to the unified suggestion actions while the
+ * surface is open, regardless of whether the active provider is an agent
+ * @mention or a slash command. IME-deferred Enter, modal ownership and the
+ * mobile Enter behavior are unchanged.
+ */
 export const decideMessageInputKeyAction = ({
   key,
   shiftKey,
   isMobile,
-  hasMentionMenu,
+  hasSuggestionMenu,
   shouldDeferEnterForIme,
   hasActiveModal = false,
 }: {
   key: string;
   shiftKey: boolean;
   isMobile: boolean;
-  hasMentionMenu: boolean;
+  hasSuggestionMenu: boolean;
   shouldDeferEnterForIme: boolean;
   hasActiveModal?: boolean;
 }): MessageInputKeyAction => {
@@ -25,28 +32,28 @@ export const decideMessageInputKeyAction = ({
     return "none";
   }
 
-  if (hasMentionMenu) {
+  if (hasSuggestionMenu) {
     if (key === "ArrowDown") {
-      return "mention-next";
+      return "suggestion-next";
     }
 
     if (key === "ArrowUp") {
-      return "mention-prev";
+      return "suggestion-prev";
     }
 
     if (key === "Enter") {
       if (shouldDeferEnterForIme) {
         return "none";
       }
-      return "mention-select";
+      return "suggestion-select";
     }
 
     if (key === "Tab") {
-      return "mention-select";
+      return "suggestion-select";
     }
 
     if (key === "Escape") {
-      return "mention-close";
+      return "suggestion-close";
     }
   }
 
@@ -56,4 +63,3 @@ export const decideMessageInputKeyAction = ({
 
   return "none";
 };
-

@@ -72,11 +72,18 @@ import {
 } from "./messageInputAgentUi";
 import {
   buildAgentMentionInsertion,
-  createInactiveMentionState,
-  moveMentionHighlightIndex,
-  resolveAgentMentionState,
-  type MentionState,
 } from "./messageInputMention";
+import {
+  createInactiveComposerSuggestionState,
+  moveSuggestionHighlightIndex,
+  resolveComposerSuggestionState,
+  type ComposerSuggestionItem,
+  type ComposerSuggestionState,
+} from "./composerSuggestions";
+import {
+  buildSlashCommandInsertion,
+  filterSlashCommandsByQuery,
+} from "./messageSlashCommands";
 import {
   countTextLines,
   estimatePasteBytes,
@@ -301,10 +308,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     setImageProfileKey(undefined);
   }, [imageProfileKey, selectedImageProfile]);
 
-  const [mentionState, setMentionState] = useState<MentionState>(() =>
-    createInactiveMentionState()
-  );
-  const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
+  const [suggestionState, setSuggestionState] =
+    useState<ComposerSuggestionState>(() =>
+      createInactiveComposerSuggestionState()
+    );
+  const [suggestionHighlightIndex, setSuggestionHighlightIndex] = useState(0);
   // 记录本轮通过 @ 选择的目标 Agent（可选）
   const [mentionTargetAgentKey, setMentionTargetAgentKey] = useState<
     string | null
@@ -473,12 +481,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   );
 
   /**
-   * 更新 @mention 状态
+   * 更新统一 suggestion 状态（@ 收藏助手 / / 命令补全）
    */
-  const updateMentionState = useCallback(
+  const updateSuggestionState = useCallback(
     (value: string, cursorIndex: number) => {
-      setMentionState(resolveAgentMentionState(value, cursorIndex));
-      setMentionHighlightIndex(0);
+      setSuggestionState(resolveComposerSuggestionState(value, cursorIndex));
+      setSuggestionHighlightIndex(0);
     },
     []
   );
@@ -489,19 +497,26 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         autoResizeOnChange(event);
         const cursor =
           event.target.selectionStart ?? event.target.value.length;
-        updateMentionState(event.target.value, cursor);
+        updateSuggestionState(event.target.value, cursor);
       },
-      [autoResizeOnChange, updateMentionState]
+      [autoResizeOnChange, updateSuggestionState]
     );
 
   const filteredFavoriteAgents = useMemo(() => {
     return filterFavoriteAgentsByQuery({
       favoriteAgents,
       isAgentMentionActive:
-        mentionState.active && mentionState.kind === "agent",
-      query: mentionState.query,
+        suggestionState.active && suggestionState.kind === "agent",
+      query: suggestionState.query,
     });
-  }, [mentionState, favoriteAgents]);
+  }, [suggestionState, favoriteAgents]);
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!suggestionState.active || suggestionState.kind !== "slash-command") {
+      return [];
+    }
+    return filterSlashCommandsByQuery(suggestionState.query);
+  }, [suggestionState]);
 
   /**
    * 在当前光标位置插入 @AgentName，并记录本轮目标 Agent
@@ -510,21 +525,22 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     (agent: FavoriteAgentSummary) => {
       const textarea = areaRef.current;
       if (!textarea) return;
+      if (!suggestionState.active || suggestionState.kind !== "agent") return;
 
       const currentValue = textarea.value ?? "";
       const cursorPos = textarea.selectionStart ?? currentValue.length;
       const result = buildAgentMentionInsertion({
         currentValue,
         cursorPos,
-        mentionState,
+        mentionState: suggestionState,
         agent,
       });
       if (!result) return;
 
       setText(result.nextText);
       setMentionTargetAgentKey(result.targetAgentKey);
-      setMentionState(result.nextMentionState);
-      setMentionHighlightIndex(result.nextMentionHighlightIndex);
+      setSuggestionState(result.nextMentionState);
+      setSuggestionHighlightIndex(result.nextMentionHighlightIndex);
 
       requestAnimationFrame(() => {
         if (!areaRef.current) return;
@@ -534,17 +550,67 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         areaRef.current.setSelectionRange(nextCursor, nextCursor);
       });
     },
-    [mentionState, setText]
+    [suggestionState, setText]
+  );
+
+  /**
+   * 选中 / 命令建议：只把完整命令填入 textarea，不执行。
+   * 执行语义仍留在发送路径（resolveChatSendDecision）。
+   */
+  const fillSlashCommand = useCallback(
+    (command: string) => {
+      const textarea = areaRef.current;
+      const currentValue = textarea?.value ?? textRef.current ?? "";
+      const cursorPos = textarea?.selectionStart ?? currentValue.length;
+      const result = buildSlashCommandInsertion({
+        currentValue,
+        cursorPos,
+        triggerState: suggestionState,
+        command,
+      });
+      if (!result) return;
+
+      setText(result.nextText);
+      setSuggestionState(result.nextTriggerState);
+      setSuggestionHighlightIndex(result.nextHighlightIndex);
+
+      requestAnimationFrame(() => {
+        if (!areaRef.current) return;
+        const nextCursor =
+          result.nextText.length - currentValue.slice(cursorPos).length;
+        areaRef.current.focus();
+        areaRef.current.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [suggestionState, setText]
+  );
+
+  /**
+   * 统一选择入口：按当前 provider 分发（agent 插入 / 命令仅填充）。
+   */
+  const selectComposerSuggestion = useCallback(
+    (index: number) => {
+      if (suggestionState.kind === "agent") {
+        const target =
+          filteredFavoriteAgents[index] ?? filteredFavoriteAgents[0];
+        if (target) {
+          insertMention(target);
+        }
+        return;
+      }
+      if (suggestionState.kind === "slash-command") {
+        const command = filteredSlashCommands[index] ?? filteredSlashCommands[0];
+        if (command) {
+          fillSlashCommand(command.command);
+        }
+      }
+    },
+    [suggestionState, filteredFavoriteAgents, filteredSlashCommands, insertMention, fillSlashCommand]
   );
 
   const setMentionStateInactive = useCallback(() => {
-    setMentionState({
-      active: false,
-      kind: null,
-      query: "",
-      startIndex: -1,
-    });
-    setMentionHighlightIndex(0);
+    setSuggestionState(createInactiveComposerSuggestionState());
+    setSuggestionHighlightIndex(0);
     setMentionTargetAgentKey(null);
   }, []);
 
@@ -672,6 +738,33 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     [handleFilesPaste]
   );
 
+  // Unified suggestion surface items (agent mentions + slash commands).
+  const suggestionItems = useMemo<ComposerSuggestionItem[]>(() => {
+    if (!suggestionState.active) return [];
+    if (suggestionState.kind === "agent") {
+      return filteredFavoriteAgents.map((agent) => ({
+        key: `agent:${agent.agentKey}`,
+        label: agent.name,
+      }));
+    }
+    if (suggestionState.kind === "slash-command") {
+      return filteredSlashCommands.map((command) => ({
+        key: `command:${command.command}`,
+        label: command.command,
+        description: t(command.descriptionKey, command.descriptionFallback),
+      }));
+    }
+    return [];
+  }, [suggestionState, filteredFavoriteAgents, filteredSlashCommands, t]);
+
+  const suggestionMenuVisible =
+    suggestionState.active && suggestionItems.length > 0;
+
+  const suggestionHeaderText =
+    suggestionState.kind === "slash-command"
+      ? t("slashCommandsLabel", "斜杠命令")
+      : t("mentionFavoritesLabel", "选择要 @ 的收藏助手");
+
   const handleTextareaKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> =
     useCallback(
       (event) => {
@@ -680,10 +773,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           isComposing: isComposingRef.current,
           lastCompositionEndAt: lastCompositionEndAtRef.current,
         });
-        const hasMentionMenu =
-          mentionState.active &&
-          mentionState.kind === "agent" &&
-          filteredFavoriteAgents.length > 0;
         const hasActiveModal =
           Boolean(pendingDeleteRun && pendingDeleteConfig) ||
           (typeof document !== "undefined" &&
@@ -698,52 +787,46 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
             key: event.key,
             shiftKey: event.shiftKey,
             isMobile,
-            hasMentionMenu,
+            hasSuggestionMenu: suggestionMenuVisible,
             shouldDeferEnterForIme: shouldDeferEnter,
             hasActiveModal,
           })
         ) {
-          case "mention-next":
+          case "suggestion-next":
             event.preventDefault();
             event.stopPropagation();
-            setMentionHighlightIndex((prev) =>
-              moveMentionHighlightIndex({
+            setSuggestionHighlightIndex((prev) =>
+              moveSuggestionHighlightIndex({
                 previousIndex: prev,
-                optionCount: filteredFavoriteAgents.length,
+                optionCount: suggestionItems.length,
                 direction: "next",
               })
             );
             return;
 
-          case "mention-prev":
+          case "suggestion-prev":
             event.preventDefault();
             event.stopPropagation();
-            setMentionHighlightIndex((prev) =>
-              moveMentionHighlightIndex({
+            setSuggestionHighlightIndex((prev) =>
+              moveSuggestionHighlightIndex({
                 previousIndex: prev,
-                optionCount: filteredFavoriteAgents.length,
+                optionCount: suggestionItems.length,
                 direction: "prev",
               })
             );
             return;
 
-          case "mention-select": {
+          case "suggestion-select":
             event.preventDefault();
             event.stopPropagation();
-            const target =
-              filteredFavoriteAgents[mentionHighlightIndex] ??
-              filteredFavoriteAgents[0];
-            if (target) {
-              insertMention(target);
-            }
+            selectComposerSuggestion(suggestionHighlightIndex);
             return;
-          }
 
-          case "mention-close":
+          case "suggestion-close":
             event.preventDefault();
             event.stopPropagation();
-            setMentionState(createInactiveMentionState());
-            setMentionHighlightIndex(0);
+            setSuggestionState(createInactiveComposerSuggestionState());
+            setSuggestionHighlightIndex(0);
             return;
 
           case "send":
@@ -766,10 +849,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         isMobile,
         sendMessage,
         composeOutgoingText,
-        mentionState,
-        filteredFavoriteAgents,
-        mentionHighlightIndex,
-        insertMention,
+        suggestionMenuVisible,
+        suggestionItems,
+        suggestionHighlightIndex,
+        selectComposerSuggestion,
         pendingDeleteRun,
         pendingDeleteConfig,
         isGenerating,
@@ -813,11 +896,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     !!resolvedImageUiConfig?.showControls &&
     !!resolvedImageUiConfig.supportsImageConfig;
 
-  const mentionMenuVisible =
-    mentionState.active &&
-    mentionState.kind === "agent" &&
-    filteredFavoriteAgents.length > 0;
-
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
   }, []);
@@ -836,8 +914,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     setIsTextareaFocused(false);
   }, []);
 
-  const handleHoverMention = useCallback((index: number) => {
-    setMentionHighlightIndex(index);
+  const handleHoverSuggestion = useCallback((index: number) => {
+    setSuggestionHighlightIndex(index);
   }, []);
 
   const handleVoiceTranscribed = useCallback(
@@ -1079,15 +1157,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               onBlur={handleTextareaBlur}
               onKeyDown={handleTextareaKeyDown}
               onPaste={handleTextareaPaste}
-              mentionMenuVisible={mentionMenuVisible}
-              filteredFavoriteAgents={filteredFavoriteAgents}
-              mentionHighlightIndex={mentionHighlightIndex}
-              mentionHeaderText={t(
-                "mentionFavoritesLabel",
-                "选择要 @ 的收藏助手"
-              )}
-              onSelectMention={insertMention}
-              onHoverMention={handleHoverMention}
+              suggestionMenuVisible={suggestionMenuVisible}
+              suggestionItems={suggestionItems}
+              suggestionHighlightIndex={suggestionHighlightIndex}
+              suggestionHeaderText={suggestionHeaderText}
+              onSelectSuggestion={selectComposerSuggestion}
+              onHoverSuggestion={handleHoverSuggestion}
             />
 
             {/* ── Controls Bar ── */}

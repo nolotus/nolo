@@ -756,6 +756,27 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   }
 }
 
+/* ── ComposerSuggestionMenu: unified suggestion surface density ──
+   Base styles are owned by ComposerSuggestionMenu.tsx (stylex);
+   container-query behavior lives here (StyleX does not support @container). */
+@container chat-composer (max-width: 600px) {
+  .composer-suggestion {
+    max-width: min(220px, 100%);
+  }
+}
+
+@container chat-composer (max-width: 400px) {
+  /* Narrow container: the menu never exceeds the composer width and the
+     secondary description collapses so rows stay single-line. */
+  .composer-suggestion {
+    max-width: 100%;
+  }
+
+  .composer-suggestion__item-description {
+    display: none;
+  }
+}
+
 /* .message-input__box .message-input__textarea —— 旧 message-input.css 1:1 迁入（原带 !important 的透明覆盖） */
 .message-input__box .message-input__textarea,
 [data-hook~="chat-esc-chat-input-card"] .message-input__textarea {
