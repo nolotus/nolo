@@ -146,6 +146,13 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
         const tool_calls = Array.isArray(message.tool_calls)
           ? message.tool_calls
           : undefined;
+        // thinking 模型的 reasoning-only / length 截断轮：reasoning_content 是
+        // localLoop 区分「模型在思考（可 repair）」与「真·空轮」的唯一信号。
+        const reasoning_content =
+          typeof (message as { reasoning_content?: unknown }).reasoning_content ===
+            "string"
+            ? (message as { reasoning_content: string }).reasoning_content
+            : undefined;
         logLocalRuntimeDiagnostic("provider.request.result", {
           agentKey: agentConfig.key,
           transport: "antigravity-cloud-code",
@@ -158,6 +165,7 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
           model: agentConfig.model || "gemini-3.1-pro",
           provider: agentConfig.provider || "google-antigravity",
           ...(tool_calls ? { tool_calls } : {}),
+          ...(reasoning_content ? { reasoning_content } : {}),
           // fetchAntigravityCloudCodeCompletion 已把 CCA 流聚合完毕并归一化成
           // OpenAI chat.completions 形状：choices[0].finish_reason（"stop"/"tool_calls"）
           // + usage（prompt_tokens/completion_tokens/total_tokens）。必须透传，否则

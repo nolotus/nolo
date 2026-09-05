@@ -160,6 +160,31 @@ async function readSseJsonChunks(response: Response): Promise<unknown[]> {
 }
 
 /** Call Cloud Code Assist and return an OpenAI chat.completion-shaped JSON body. */
+/**
+ * 上游 Gemini finishReason → OpenAI finish_reason。
+ *
+ * 聚合层此前硬编码推断（有 tool_calls → "tool_calls"，否则一律 "stop"），
+ * 丢弃上游真实收尾原因：thinking 模型（gemini-3.8-flash 等）遇到大任务书
+ * 时输出预算可能被思考耗尽——上游实际是 MAX_TOKENS 截断、正文零字，循环
+ * 却把它判成 empty_completion 反复 repair，最后熔断成「模型连续返回空消
+ * 息」（2026-09-05 收藏 OAuth agent 15KB 任务派发的实证根因）。
+ * MAX_TOKENS → "length"（空轮兜底走 length_truncated，明确诊断不重试）；
+ * SAFETY/RECITATION 类 → "content_filter"；未知/缺省维持 "stop"。
+ */
+function resolveAntigravityFinishReason(upstream?: string): string {
+  const normalized = (upstream ?? "").trim().toUpperCase();
+  if (normalized === "MAX_TOKENS") return "length";
+  if (
+    normalized === "SAFETY" ||
+    normalized === "RECITATION" ||
+    normalized === "PROHIBITED_CONTENT" ||
+    normalized === "BLOCKLIST"
+  ) {
+    return "content_filter";
+  }
+  return "stop";
+}
+
 export async function fetchAntigravityCloudCodeCompletion(
   args: AntigravityCloudCodeCallArgs,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -187,16 +212,20 @@ export async function fetchAntigravityCloudCodeCompletion(
   }
 
   const chunkStream = streamSseDataValues(response, parseSseDataLineJson);
-  const { text, toolCalls, usage } = await accumulateGeminiStream(chunkStream, {
-    onTextDelta: args.onTextDelta,
-    onReasoningDelta: args.onReasoningDelta,
-  });
+  const { text, toolCalls, usage, finishReason, reasoningContent } =
+    await accumulateGeminiStream(chunkStream, {
+      onTextDelta: args.onTextDelta,
+      onReasoningDelta: args.onReasoningDelta,
+    });
   const message: Record<string, unknown> = {
     role: "assistant",
     content: text || null,
   };
   if (toolCalls.length > 0) {
     message.tool_calls = toolCalls;
+  }
+  if (reasoningContent) {
+    message.reasoning_content = reasoningContent;
   }
 
   return {
@@ -206,7 +235,10 @@ export async function fetchAntigravityCloudCodeCompletion(
         {
           index: 0,
           message,
-          finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+          finish_reason:
+            toolCalls.length > 0
+              ? "tool_calls"
+              : resolveAntigravityFinishReason(finishReason),
         },
       ],
       ...(usage ? { usage } : {}),

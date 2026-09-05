@@ -12,6 +12,9 @@ import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
+import { isAntigravityOAuthAgent } from "../../agent-runtime/antigravityOAuth";
+import { isOAuthApiKeyRef } from "../../agent-runtime/serverProxyPolicy";
+import { resolveLocalUserId } from "./cliAgentConfigHelpers";
 import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
@@ -302,20 +305,66 @@ function wrapLoadAgentConfigWithModelOverride(
   };
 }
 
+/**
+ * 「走所有者通道」提示的去重：同一输出流只打印一次。TUI 的 output 流跨轮
+ * 复用，而该 skip 是稳态路由而非异常——每轮重复打印成噪音（2026-09-05
+ * 用户反馈）。WeakSet 持流引用不阻碍 GC；非对象输出流退回每轮打印。
+ */
+const oauthChannelSkipReportedOutputs = new WeakSet<object>();
+
+/**
+ * 非本人所有的 OAuth 订阅 agent 不认领本地 runtime。
+ *
+ * 收藏 / 空间共享来的 OAuth agent（antigravity / chatgpt / claude / cursor /
+ * xai）的模型调用走的是「agent 所有者」的订阅通道：服务端 loop 已按
+ * resolveCredentialOwnerUserId 用所有者凭据解析。CLI 本地认领时读到的却是
+ * 本机 OAuth store——那里面即使恰好有同名 provider 凭据，也是**收藏者自己**
+ * 的订阅，静默代跑等于烧自己的个人配额（2026-09 实证：收藏他人 antigravity
+ * agent 后本地跑，429 冷却还连带标记了收藏者自己的同凭据 agent）。
+ *
+ * 所有权信号与 withResolvedRuntimeToolSurface 同源：rawRecord.userId（兼读
+ * ownerUserId）；历史本地记录缺 ownerId 时维持原行为（视为自己的 agent，
+ * 避免误伤本地自建 agent）。显式 --local 仍可强制本机（用户自担）。
+ */
+function resolveOAuthChannelOwnerSkip(
+  agentConfig: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>>,
+  options: RunAgentTurnOptions,
+): string | null {
+  if (!agentConfig) return null;
+  const apiKeyRef =
+    typeof agentConfig.apiKeyRef === "string" ? agentConfig.apiKeyRef : undefined;
+  if (!isOAuthApiKeyRef(apiKeyRef) && !isAntigravityOAuthAgent(agentConfig)) {
+    return null;
+  }
+  const rawRecord =
+    (agentConfig as { rawRecord?: Record<string, unknown> }).rawRecord ?? {};
+  const ownerUserId =
+    asOptionalTrimmedString(rawRecord.userId) ??
+    asOptionalTrimmedString(rawRecord.ownerUserId);
+  if (!ownerUserId) return null;
+  const localUserId = resolveLocalUserId(options.env);
+  if (ownerUserId === localUserId) return null;
+  return (
+    `[nolo] auto runtime: skipping local runtime because ${options.agentKey} runs on its owner's ` +
+    `OAuth subscription channel (owner ${ownerUserId}, this machine runs as ${localUserId}). ` +
+    "Use --local explicitly to force this machine's own subscription.\n"
+  );
+}
+
 async function shouldSkipAutoLocalForServerPlatformTools(
   options: RunAgentTurnOptions,
 ) {
   if (isBuiltinNoloAgentRef(options.agentKey)) return false;
-  if (options.localRuntimeCwd) {
-    return false;
-  }
   const knownServerPlatformAgent = isKnownServerPlatformAgent(options);
   const adapter = resolveLocalRuntimeAdapter(options);
-  if (!adapter) return knownServerPlatformAgent;
+  if (!adapter) {
+    return options.localRuntimeCwd ? false : knownServerPlatformAgent;
+  }
   let agentConfig;
   try {
     agentConfig = await adapter.loadAgentConfig(options.agentKey);
   } catch {
+    if (options.localRuntimeCwd) return false;
     if (knownServerPlatformAgent) {
       options.output.write(
         `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a known platform agent. ` +
@@ -323,6 +372,26 @@ async function shouldSkipAutoLocalForServerPlatformTools(
       );
       return true;
     }
+    return false;
+  }
+  // 所有权 gate 必须在 localRuntimeCwd 早退之前：TUI 恒传环境性 cwd 且默认
+  // auto 模式，gate 放在早退之后对 TUI 主场景永不生效（review HIGH, 2026-09-05）。
+  // cwd 运行仍豁免本函数其余全部 gate（显式本地语义不变）。
+  const oauthChannelOwnerSkip = resolveOAuthChannelOwnerSkip(agentConfig, options);
+  if (oauthChannelOwnerSkip) {
+    if (
+      !options.output ||
+      typeof options.output !== "object" ||
+      !oauthChannelSkipReportedOutputs.has(options.output)
+    ) {
+      if (options.output && typeof options.output === "object") {
+        oauthChannelSkipReportedOutputs.add(options.output);
+      }
+      options.output.write(oauthChannelOwnerSkip);
+    }
+    return true;
+  }
+  if (options.localRuntimeCwd) {
     return false;
   }
   if (isCliProviderAgentConfig(agentConfig)) {
@@ -1416,7 +1485,21 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   const baseRecord =
     (config as { rawRecord?: Record<string, unknown> }).rawRecord ??
     (config as unknown as Record<string, unknown>);
-  const credentialKey = resolveCredentialKeyWithFallback(baseRecord);
+  let credentialKey = resolveCredentialKeyWithFallback(baseRecord);
+  // 外来 OAuth agent（resolveOAuthChannelOwnerSkip 命中）的 run 走所有者通道，
+  // 不使用本机凭据——本机 credential 级冷却条目对其是 false positive（收藏者
+  // 自己的历史 429 会把走所有者通道的 run 拦到窗口重置）。排除之；agent 级
+  // nextAvailableAt（server 记录，反映所有者通道可用性）仍然生效，probe 亦跳过
+  // （不写本机凭据的探测时间）。
+  if (
+    credentialKey &&
+    resolveOAuthChannelOwnerSkip(
+      config as Parameters<typeof resolveOAuthChannelOwnerSkip>[0],
+      options,
+    )
+  ) {
+    credentialKey = undefined;
+  }
   const agentLevelAt = (baseRecord as { nextAvailableAt?: unknown }).nextAvailableAt;
   const agentLevelNextAvailableAt =
     typeof agentLevelAt === "number" && Number.isFinite(agentLevelAt)

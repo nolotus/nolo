@@ -373,12 +373,17 @@ export type GeminiAccumulatorState = {
   toolCalls: AgentRuntimeToolCall[];
   usage?: Record<string, unknown>;
   pendingThoughtSignature?: string;
+  /** 最后一个 chunk 的 candidate.finishReason（原始 Gemini 枚举，如 MAX_TOKENS/STOP）。 */
+  finishReason?: string;
+  /** thought part 思考文本累积；reasoning-only 空轮与截断兜底都依赖它。 */
+  reasoning: string;
 };
 
 export function createGeminiAccumulatorState(): GeminiAccumulatorState {
   return {
     text: "",
     toolCalls: [],
+    reasoning: "",
   };
 }
 
@@ -434,6 +439,17 @@ export function applyGeminiChunk(
     : [];
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object") continue;
+    const candidateFinishReason = (candidate as { finishReason?: unknown })
+      .finishReason;
+    if (
+      typeof candidateFinishReason === "string" &&
+      candidateFinishReason.trim()
+    ) {
+      // 上游收尾原因必须透传：thinking 模型把输出预算耗在思考上时，上游是
+      // MAX_TOKENS 截断，丢掉它会让空轮被误判成 empty_completion（循环反复
+      // repair 后熔断成「模型连续返回空消息」）。多次出现取最后一次。
+      state.finishReason = candidateFinishReason.trim();
+    }
     const parts = Array.isArray(
       (candidate as { content?: { parts?: unknown[] } }).content?.parts,
     )
@@ -455,6 +471,7 @@ export function applyGeminiChunk(
             options.onTextDelta(piece);
           }
         } else {
+          state.reasoning += piece;
           if (piece && options?.onReasoningDelta) {
             options.onReasoningDelta(piece);
           }
@@ -518,6 +535,8 @@ export function accumulateGeminiChunks(
   text: string;
   toolCalls: AgentRuntimeToolCall[];
   usage?: Record<string, unknown>;
+  finishReason?: string;
+  reasoningContent?: string;
 } {
   const state = createGeminiAccumulatorState();
   for (const chunk of chunks) {
@@ -527,6 +546,8 @@ export function accumulateGeminiChunks(
     text: state.text,
     toolCalls: state.toolCalls,
     usage: state.usage,
+    finishReason: state.finishReason,
+    reasoningContent: state.reasoning,
   };
 }
 
@@ -540,6 +561,8 @@ export async function accumulateGeminiStream(
   text: string;
   toolCalls: AgentRuntimeToolCall[];
   usage?: Record<string, unknown>;
+  finishReason?: string;
+  reasoningContent?: string;
 }> {
   const state = createGeminiAccumulatorState();
   for await (const chunk of stream) {
@@ -549,6 +572,8 @@ export async function accumulateGeminiStream(
     text: state.text,
     toolCalls: state.toolCalls,
     usage: state.usage,
+    finishReason: state.finishReason,
+    reasoningContent: state.reasoning,
   };
 }
 
