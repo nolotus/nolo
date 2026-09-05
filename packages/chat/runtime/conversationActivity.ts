@@ -1,14 +1,12 @@
 // Pure semantic projection for the chat working signal. Keep this module
-// independent of web presentation, i18n, and Redux.
-import { useMemo } from "react";
+// independent of web presentation, i18n, React, and Redux: callers own all
+// store subscriptions and pass in existing facts.
 import {
   hasVisibleAssistantContent,
   isAssistantToolStub,
 } from "chat/messages/assistantMessageFacts";
 
 import { isHiddenOrchestratorToolMessage } from "chat/messages/toolPresentation";
-import { useHasStreamingMessage } from "chat/messages/messageSessionStore";
-import { useActiveControllers } from "chat/dialog/dialogRuntimeStore";
 
 export type ConversationActivity =
   | { kind: "idle" }
@@ -23,9 +21,9 @@ export type ConversationActivityKind = ConversationActivity["kind"];
 // ===== 输入契约（全部来自既有事实源，禁止新造事实）=====
 
 export interface ConversationActivityInput {
-  /** agent loop 有活跃 controller（dialogRuntimeStore.activeControllers）。 */
+  /** agent loop 有活跃 controller（调用方从 runtime facts 订阅）。 */
   isRunning: boolean;
-  /** 本对话存在流式中的消息（messageSessionStore.streamingMessageId）。 */
+  /** 本对话存在流式中的消息（调用方已订阅的既有事实）。 */
   hasStreamingMessage: boolean;
   /** 流式 assistant 行已有可见正文（deriveTrailingAssistantFacts 派生）。 */
   hasVisibleAssistantText: boolean;
@@ -107,17 +105,14 @@ export function deriveTrailingAssistantFacts(
   return NO_TRAILING_FACTS;
 }
 
-// ===== 只读 selector hook（store 只读，不写任何 state）=====
+// ===== 纯组合投影（输入全部由调用方订阅后传入，本模块不做任何订阅）=====
 
-export interface UseConversationActivityArgs {
-  /** 消息列表由调用方传入（MessageList 已订阅，避免二次 Redux 订阅）。 */
-  messages: readonly unknown[];
-  /** 会话 id（messageSessionStore / Redux messages 的 key）。 */
-  dialogId?: string | null;
-  /** 运行时 dialogKey（dialogRuntimeStore.activeControllers 的 key）。 */
-  dialogKey?: string | null;
-  /** Caller-owned snapshot; keeps this hook Redux/store-subscription free. */
-  toolRuns: readonly { messageId?: string; status?: string; interaction?: string; toolName?: string }[];
+/** 结构化最小契约：与 toolRunStore 的 run 形状对齐，不引入 store 依赖。 */
+export interface ToolRunFactLike {
+  messageId?: string;
+  status?: string;
+  interaction?: string;
+  toolName?: string;
 }
 
 /** Keep the global tool-run snapshot scoped to the current dialog. */
@@ -135,12 +130,9 @@ export function filterToolRunsForMessages<T extends { messageId?: string }>(
 }
 
 /** toolRunStore → 交互事实：非 confirm 的在途 run 与未决 confirm。 */
-export function deriveToolRunFacts(runs: readonly {
-  status?: string;
-  interaction?: string;
-  toolName?: string;
-  messageId?: string;
-}[]): Pick<ConversationActivityInput, "activeToolNames" | "waitingForUser"> {
+export function deriveToolRunFacts(
+  runs: readonly ToolRunFactLike[]
+): Pick<ConversationActivityInput, "activeToolNames" | "waitingForUser"> {
   const activeToolNames: string[] = [];
   let waitingForUser = false;
   for (const run of runs) {
@@ -155,36 +147,45 @@ export function deriveToolRunFacts(runs: readonly {
   return { activeToolNames, waitingForUser };
 }
 
+export interface DeriveConversationActivityInput {
+  /** 当前对话消息列表（caller-owned snapshot）。 */
+  messages: readonly unknown[];
+  /** 本对话存在流式中的消息（调用方已订阅的既有事实）。 */
+  hasStreamingMessage: boolean;
+  /**
+   * agent loop 有活跃 controller。由调用方用既有事实计算；空 dialogKey
+   * 必须视为 false（避免跨对话误报），与 MessageList 现行逻辑一致。
+   */
+  isRunning: boolean;
+  /** 全局 toolRunStore 快照；内部先按当前消息过滤，保持 dialog isolation。 */
+  toolRuns: readonly ToolRunFactLike[];
+  /** 同步中。当前无真实事实源，恒为 falsy；出现事实后再接线。 */
+  syncing?: boolean;
+}
+
 /**
- * 组装既有事实并投影为 ConversationActivity。所有订阅均为只读；
- * isRunning 的计算与 MessageList 原逻辑逐字对齐（activeDialogKey 为空
- * 视为非运行，避免跨对话误报）。
+ * 纯组合投影：订阅链是 store → MessageList → 既有 facts → 本函数 → UI，
+ * 本模块不主动 subscribe runtime store（web/rn 共用，无 React/Redux/i18n）。
+ * 内部先 filterToolRunsForMessages 保持 dialog isolation，再 deriveToolRunFacts。
  */
-export function useConversationActivity(
-  args: UseConversationActivityArgs
+export function deriveConversationActivity(
+  input: DeriveConversationActivityInput
 ): ConversationActivity {
-  const { messages, dialogId, dialogKey, toolRuns } = args;
-  const hasStreamingMessage = useHasStreamingMessage(dialogId);
-  const activeControllers = useActiveControllers(dialogKey ?? undefined);
-
-  const isRunning =
-    !!dialogKey && Object.keys(activeControllers).length > 0;
-
-  const trailing = useMemo(
-    () => deriveTrailingAssistantFacts(messages, hasStreamingMessage),
-    [messages, hasStreamingMessage]
+  const trailing = deriveTrailingAssistantFacts(
+    input.messages,
+    input.hasStreamingMessage,
   );
-  const toolFacts = useMemo(
-    () => deriveToolRunFacts(filterToolRunsForMessages(toolRuns, messages)),
-    [toolRuns, messages]
-  );
+
+  const scopedRuns = filterToolRunsForMessages(input.toolRuns, input.messages);
+  const toolFacts = deriveToolRunFacts(scopedRuns);
 
   return projectConversationActivity({
-    isRunning,
-    hasStreamingMessage,
+    isRunning: input.isRunning,
+    hasStreamingMessage: input.hasStreamingMessage,
     hasVisibleAssistantText: trailing.hasVisibleAssistantText,
     isThinkingLive: trailing.isThinkingLive,
     activeToolNames: toolFacts.activeToolNames,
     waitingForUser: toolFacts.waitingForUser,
+    syncing: input.syncing,
   });
 }

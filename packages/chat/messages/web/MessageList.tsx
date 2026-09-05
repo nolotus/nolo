@@ -64,7 +64,7 @@ import { extractCustomId } from "core/prefix";
 import { useAllToolRuns } from "ai/tools/toolRunStore";
 import { LuBrain } from "react-icons/lu";
 import { AssistantReplyPending } from "./AssistantReplyPending";
-import { useConversationActivity } from "../../runtime/conversationActivity";
+import { deriveConversationActivity } from "../../runtime/conversationActivity";
 import { IntermediateNarrationRow } from "./IntermediateNarrationRow";
 import TodoCard from "./TodoCard";
 import { selectLatestConversationTodo } from "../todoState";
@@ -535,16 +535,21 @@ const MessagesList: React.FC<MessagesListProps> = ({
     [renderMessages, currentDialogConfig]
   );
 
-  // 单一主 working signal：activity 是既有 runtime facts 的 projection
-  // （activeControllers / streamingMessageId / 消息尾部内容 / toolRunStore）。
+  // 单一主 working signal：activity 是既有 runtime facts 的纯 projection。
+  // 本组件已持有全部订阅（activeControllers / streamingMessageId / 消息尾部
+  // 内容 / toolRunStore），组合函数只做纯投影、不再二次订阅 store。
   // starting 之外的阶段由 ThinkingSection / ToolMessageGroup / 正文+cursor
   // 担任主角，AssistantReplyPending 只在 starting 时出现。
-  const conversationActivity = useConversationActivity({
-    messages,
-    dialogId,
-    dialogKey: activeDialogKey,
-    toolRuns: allToolRuns,
-  });
+  const conversationActivity = useMemo(
+    () =>
+      deriveConversationActivity({
+        messages,
+        hasStreamingMessage,
+        isRunning,
+        toolRuns: allToolRuns,
+      }),
+    [messages, hasStreamingMessage, isRunning, allToolRuns],
+  );
 
   // Styles live in messagesStyles.ts (avoid rebuilding a large unused style string each stream tick).
 
