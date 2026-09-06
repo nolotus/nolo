@@ -34,7 +34,6 @@ import {
   CODE_PLANNER_WEB_CAPABILITY_PACK_IDS,
 } from "ai/skills/codePlannerSkills";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { asTrimmedString } from "core/trimmedString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { NOLO_CLUSTER_SERVERS } from "database/config";
@@ -352,20 +351,6 @@ function buildDesktopStartAgentRunToolExecutor(args: {
     if (!task) {
       return {
         content: JSON.stringify({ error: "startAgentRun: task is required" }),
-        metadata: { serverPlatformTool: true, startAgentRun: true },
-      };
-    }
-
-    const allowedChildAgentKeys = asTrimmedNonEmptyStringArray(
-      args.runtimeContext?.allowedChildAgentKeys,
-    );
-    if (allowedChildAgentKeys.length > 0 && !allowedChildAgentKeys.includes(agentKey)) {
-      return {
-        content: JSON.stringify({
-          error: "startAgentRun: agentKey is not allowed by parent runtimeContext.allowedChildAgentKeys",
-          agentKey,
-          allowedChildAgentKeys,
-        }),
         metadata: { serverPlatformTool: true, startAgentRun: true },
       };
     }

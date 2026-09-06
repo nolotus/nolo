@@ -4,9 +4,6 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 export const CURRENT_OPERATOR_USER_ID = "0e95801d90";
 export const NOLO_DEFAULT_AGENT_ID = "01NOLOAPPBLD000000019KCKT0";
 export const NOLO_DEFAULT_AGENT_KEY = publicAgentKey(NOLO_DEFAULT_AGENT_ID);
-export const NOLO_PROJECT_MANAGER_AGENT_ID = "01NOLOPROJMGR00000000MSVGG";
-export const NOLO_PROJECT_MANAGER_AGENT_KEY =
-  ownedAgentKey(CURRENT_OPERATOR_USER_ID, NOLO_PROJECT_MANAGER_AGENT_ID);
 export const NOLO_FRONTEND_AGENT_ID = "01FRONTENDAG0000000115N4E1";
 export const NOLO_FRONTEND_AGENT_KEY =
   ownedAgentKey(CURRENT_OPERATOR_USER_ID, NOLO_FRONTEND_AGENT_ID);
@@ -26,8 +23,6 @@ const AGENT_ALIAS_TO_KEY: Record<string, string> = {
   "frontend agent": NOLO_FRONTEND_AGENT_KEY,
   "前端agent": NOLO_FRONTEND_AGENT_KEY,
   "前端 agent": NOLO_FRONTEND_AGENT_KEY,
-  "project-manager": NOLO_PROJECT_MANAGER_AGENT_KEY,
-  pm: NOLO_PROJECT_MANAGER_AGENT_KEY,
 
   // Explicit local CLI agents. These are ordinary private agent records that
   // run through the current computer local runtime when unbound.

@@ -259,9 +259,6 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
     args.childDialogRecord.subjectRefs,
     [{ kind: "dialog", id: childDialogId, role: "completed-child-dialog" }],
   );
-  const allowedChildAgentKeys = normalizeRemoteStringList(
-    args.input.runtimeContext?.allowedChildAgentKeys,
-  );
   const allowedToolNames = normalizeRemoteStringList(
     args.input.runtimeContext?.allowedToolNames,
   );
@@ -297,7 +294,6 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
           terminalStatus: "done",
         }),
         subjectRefs,
-        ...(allowedChildAgentKeys.length ? { allowedChildAgentKeys } : {}),
         ...(allowedToolNames.length ? { allowedToolNames } : {}),
         ...(blockedToolNames.length ? { blockedToolNames } : {}),
       },

@@ -666,7 +666,6 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     ...(parsed.parentWakeOnTerminal ? { parentWakeOnTerminal: true } : {}),
     ...(parsed.subjectDialogKey ? { subjectDialogKey: parsed.subjectDialogKey } : {}),
     ...(parsed.subjectRefs?.length ? { subjectRefs: parsed.subjectRefs } : {}),
-    ...(parsed.allowedChildAgentKeys?.length ? { allowedChildAgentKeys: parsed.allowedChildAgentKeys } : {}),
     ...(skillAllowedToolOverride !== undefined
       ? { allowedToolNames: skillAllowedToolOverride }
       : parsed.allowedToolNames?.length

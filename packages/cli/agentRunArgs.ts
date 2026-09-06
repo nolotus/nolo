@@ -44,7 +44,6 @@ export type ParsedAgentRunArgs = {
   parentWakeOnTerminal?: boolean;
   subjectDialogKey?: string;
   subjectRefs?: Array<{ kind: string; id: string; role?: string }>;
-  allowedChildAgentKeys?: string[];
   allowedToolNames?: string[];
   blockedToolNames?: string[];
   background: boolean;
@@ -232,7 +231,7 @@ export function writeUsage(
   }
   output.write(
     "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--allowed-child-agent <agent>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -266,9 +265,6 @@ export function parseAgentRunArgs(
   const subjectRefs = readRepeatedFlagValues(args, "--subject-ref")
     .map(parseSubjectRef)
     .filter((ref): ref is { kind: string; id: string; role?: string } => Boolean(ref));
-  const allowedChildAgentKeys = readRepeatedFlagValues(args, "--allowed-child-agent")
-    .map((value) => resolveCliAgentKeyInput(value.trim()))
-    .filter(Boolean);
   const fallbackAgentKeys = readRepeatedFlagValues(args, "--fallback-agent")
     .map((value) => resolveCliAgentKeyInput(value.trim()))
     .filter(Boolean);
@@ -349,7 +345,6 @@ export function parseAgentRunArgs(
     ...(parentDialogRef?.dialogId ? { parentWakeOnTerminal: true } : {}),
     ...(subjectDialogKey ? { subjectDialogKey } : {}),
     ...(subjectRefs.length ? { subjectRefs } : {}),
-    ...(allowedChildAgentKeys.length ? { allowedChildAgentKeys } : {}),
     ...(fallbackAgentKeys.length ? { fallbackAgentKeys } : {}),
     ...(allowedToolNames.length ? { allowedToolNames } : {}),
     ...(cwd ? { cwd } : {}),

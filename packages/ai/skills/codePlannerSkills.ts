@@ -14,9 +14,6 @@
 
 import type { ReferenceItem } from "app/types";
 import {
-  DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
-} from "core/builtinAgents";
-import {
   buildSkillDocMarkdown,
   type SkillDocConfig,
   type SkillTriggerMode,
@@ -83,23 +80,20 @@ export const CODE_PLANNER_ROOT_SKILL_ID = buildCodePlannerSkillId(
 );
 
 /**
- * Build the dispatch-executors prompt patch from the platform public candidate
- * key list. Every exact key must appear so the model can startAgentRun without
- * listAgents/readAgent discovery.
+ * Build the dispatch-executors prompt patch using discovery-first protocol.
+ * Candidates are discovered dynamically via listAgents rather than precompiled.
  */
-export function buildDispatchExecutorsPromptPatch(
-  candidateKeys: readonly string[] = DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
-): string {
-  const keys = candidateKeys.map((key) => key.trim()).filter(Boolean);
-  if (keys.length === 0) {
-    throw new Error("buildDispatchExecutorsPromptPatch requires at least one candidate key");
-  }
-
+export function buildDispatchExecutorsPromptPatch(): string {
   return [
     "派发协议：",
     "- 唯一真实分派通道是 startAgentRun。禁止声称使用了本机 CLI 或 nolo agent run（除非用户当前会话本身就是 CLI）。",
-    "- 默认执行候选是下列平台公开 Agent key（无固定角色、无打分），按顺序优先考虑；无需先做发现调用：",
-    ...keys.map((key, index) => `  ${index + 1}. ${key}`),
+    "- 当任务适合委派时，先调用 listAgents 获取当前可用候选。",
+    "- 默认使用 preferred scope；只有没有合适候选或用户明确要求探索公开 Agent 时再查询 public。",
+    "- 根据用户指定、任务能力、runtime、billingSource、availability、cost 和可用 quality evidence 选择。",
+    "- agentKey 必须原样复制 listAgents 返回值。",
+    "- 然后调用 startAgentRun。",
+    "- 不假设任何固定 implementer/reviewer/coder 角色。",
+    "- 不维护静态平台 executor pool。",
     "- started ≠ completed：startAgentRun 成功返回真实 runId（同步 wait:true 则返回结果）后才能说「已启动」；异步派发成功只表示 started。",
     "- 多文件实现、大重构、新建模块应派发执行者；单点小改可直接用工作区工具完成。",
     "- 不要写死 owner 私有 agentKey。",
@@ -186,19 +180,15 @@ export const CODE_PLANNER_SKILL_SEEDS: readonly CodePlannerSkillSeedDef[] = [
     slug: "dispatch-executors",
     title: "dispatch-executors",
     description:
-      "startAgentRun dispatch protocol for Code Planner executor candidates.",
+      "listAgents discovery and startAgentRun dispatch protocol for Code Planner.",
     body: [
       "# dispatch-executors",
       "",
-      "Only startAgentRun is granted. Default candidate keys are platform public agents;",
-      "hard allowlisting is enforced by runtimeContext.allowedChildAgentKeys when wired.",
+      "Discover candidates via listAgents and dispatch chosen exact agentKey via startAgentRun.",
     ].join("\n"),
     triggerMode: "required",
-    toolNames: ["startAgentRun"],
-    // Keys come from core/builtinAgents — do not hard-code a separate list here.
-    promptPatch: buildDispatchExecutorsPromptPatch(
-      DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
-    ),
+    toolNames: ["listAgents", "startAgentRun"],
+    promptPatch: buildDispatchExecutorsPromptPatch(),
   },
   {
     slug: "code-planning",
@@ -271,16 +261,13 @@ export function compileCodePlannerEffectiveTools(): string[] {
 
 /**
  * Synchronously compile effective prompt patches in graph order.
- * Dispatch patch is regenerated from candidate keys so every exact key appears.
  */
-export function compileCodePlannerEffectivePromptPatches(
-  candidateKeys: readonly string[] = DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
-): string[] {
+export function compileCodePlannerEffectivePromptPatches(): string[] {
   const patches: string[] = [];
 
   for (const slug of collectCodePlannerReachableSkillSlugs()) {
     if (slug === "dispatch-executors") {
-      patches.push(buildDispatchExecutorsPromptPatch(candidateKeys));
+      patches.push(buildDispatchExecutorsPromptPatch());
       continue;
     }
     const patch = seedBySlug(slug).promptPatch;
@@ -293,15 +280,14 @@ export function compileCodePlannerEffectivePromptPatches(
 /** Append compiled skill prompt patches under a thin Agent base prompt. */
 export function buildCodePlannerCompiledAgentPrompt(
   basePrompt: string,
-  candidateKeys: readonly string[] = DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
 ): string {
   const trimmedBase = basePrompt.trim();
-  const patches = compileCodePlannerEffectivePromptPatches(candidateKeys);
+  const patches = compileCodePlannerEffectivePromptPatches();
   if (patches.length === 0) return trimmedBase;
   return [trimmedBase, "", ...patches].join("\n").trim();
 }
 
-/** Compiled 11-tool compatibility snapshot (sync; no remote I/O). */
+/** Compiled compatibility snapshot (sync; no remote I/O). */
 export const CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS: readonly string[] =
   compileCodePlannerEffectiveTools();
 
@@ -310,10 +296,8 @@ export const CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS: readonly string[] =
  * quick-chat tier agent for a single turn (workspaceToolsHint=true). Same
  * content the dedicated Code Planner agent compiled into its prompt.
  */
-export function buildCodeWorkSkillPrompt(
-  candidateKeys: readonly string[] = DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS,
-): string {
-  return compileCodePlannerEffectivePromptPatches(candidateKeys).join("\n\n");
+export function buildCodeWorkSkillPrompt(): string {
+  return compileCodePlannerEffectivePromptPatches().join("\n\n");
 }
 
 export function buildCodePlannerSkillConfig(

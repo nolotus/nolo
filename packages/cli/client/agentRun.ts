@@ -61,7 +61,6 @@ export type { RunAgentTurnOptions, RunAgentTurnResult, TaskEvidenceInput };
 import { Spinner } from "./agentRunSpinner";
 import {
   resolveServerPlatformToolNames,
-  isKnownServerPlatformAgent,
 } from "./agentRunPlatformTools";
 import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
 import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
@@ -356,23 +355,14 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   options: RunAgentTurnOptions,
 ) {
   if (isBuiltinNoloAgentRef(options.agentKey)) return false;
-  const knownServerPlatformAgent = isKnownServerPlatformAgent(options);
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter) {
-    return options.localRuntimeCwd ? false : knownServerPlatformAgent;
+    return false;
   }
   let agentConfig;
   try {
     agentConfig = await adapter.loadAgentConfig(options.agentKey);
   } catch {
-    if (options.localRuntimeCwd) return false;
-    if (knownServerPlatformAgent) {
-      options.output.write(
-        `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a known platform agent. ` +
-          "Use --local explicitly to force local workspace tools.\n",
-      );
-      return true;
-    }
     return false;
   }
   // 所有权 gate 必须在 localRuntimeCwd 早退之前：TUI 恒传环境性 cwd 且默认
@@ -405,13 +395,6 @@ async function shouldSkipAutoLocalForServerPlatformTools(
       `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is bound to ${boundMachineId}` +
         (currentMachineId ? ` and this machine is ${currentMachineId}.` : ".") +
         " Use --local explicitly to force the current machine.\n",
-    );
-    return true;
-  }
-  if (knownServerPlatformAgent) {
-    options.output.write(
-      `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a known platform agent. ` +
-        "Use --local explicitly to force local workspace tools.\n",
     );
     return true;
   }
@@ -929,8 +912,7 @@ function shouldAttemptAutoLocal(options: RunAgentTurnOptions) {
   }
   if (
     options.env.NOLO_DISABLE_CLI_WORKSPACE_TOOLS !== "1" &&
-    resolveAuthToken(options.env) &&
-    !isKnownServerPlatformAgent(options)
+    resolveAuthToken(options.env)
   ) {
     return true;
   }
@@ -1029,9 +1011,6 @@ async function runHttpAgentTurn(
   // 缺失时不发头 —— server 侧 fail-open，见 platformHostedClientVersionGate。
   const clientVersionHeader = resolveClientVersion(options.env ?? {});
   const subjectRefs = buildSubjectRefs(options);
-  const allowedChildAgentKeys = options.allowedChildAgentKeys?.filter((key) =>
-    key.trim(),
-  );
   const allowedToolNames = options.allowedToolNames?.filter((name) =>
     name.trim(),
   );
@@ -1069,7 +1048,6 @@ async function runHttpAgentTurn(
           ? { dialogAgentMode: options.dialogAgentMode }
           : {}),
         ...(subjectRefs ? { subjectRefs } : {}),
-        ...(allowedChildAgentKeys?.length ? { allowedChildAgentKeys } : {}),
         ...(blockedToolNames?.length ? { blockedToolNames } : {}),
         ...(allowedToolNames?.length ? { allowedToolNames } : {}),
       },
@@ -1252,9 +1230,6 @@ async function runLocalAgentTurnForCli(
   }
 
   const subjectRefs = buildSubjectRefs(options);
-  const allowedChildAgentKeys = options.allowedChildAgentKeys?.filter((key) =>
-    key.trim(),
-  );
   const allowedToolNames = options.allowedToolNames?.filter((name) =>
     name.trim(),
   );
@@ -1263,7 +1238,6 @@ async function runLocalAgentTurnForCli(
   );
   const runtimeContext: Record<string, any> | undefined =
     subjectRefs ||
-    allowedChildAgentKeys?.length ||
     allowedToolNames?.length ||
     blockedToolNames?.length ||
     options.parentWakeOnTerminal ||
@@ -1273,7 +1247,6 @@ async function runLocalAgentTurnForCli(
           ...(options.dialogAgentMode
             ? { dialogAgentMode: options.dialogAgentMode }
             : {}),
-          ...(allowedChildAgentKeys?.length ? { allowedChildAgentKeys } : {}),
           ...(allowedToolNames?.length ? { allowedToolNames } : {}),
           ...(blockedToolNames?.length ? { blockedToolNames } : {}),
           ...(options.parentWakeOnTerminal

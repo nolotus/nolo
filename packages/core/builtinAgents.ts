@@ -63,15 +63,6 @@ export const PUBLIC_NANO_BANANA_2_LITE_AGENT_ID = entry("01NB2LITEGEN00000001XE1
 export const PUBLIC_NANO_BANANA_2_LITE_AGENT_KEY = publicAgentKey(PUBLIC_NANO_BANANA_2_LITE_AGENT_ID);
 
 /**
- * Default Code Planner executor candidate pool.
- * No fixed roles, no scoring — just a simple allowlist-shaped key list.
- * Runtime hard allowlist wiring is Phase 1 (`runtimeContext.allowedChildAgentKeys`).
- */
-export const DEFAULT_CODE_PLANNER_EXECUTOR_CANDIDATE_KEYS = [
-  PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY,
-] as const;
-
-/**
  * Quick-chat 档位 agent：执行真相在代码里（agent-runtime/builtinPlatformAgentConfigs），
  * 对应的 agent-pub-* 记录按设计可以不存在（runtime fallback 合成配置）。
  *

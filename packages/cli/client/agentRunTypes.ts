@@ -185,7 +185,6 @@ export type RunAgentTurnOptions = {
   parentWakeOnTerminal?: boolean;
   subjectDialogKey?: string;
   subjectRefs?: AgentRunSubjectRef[];
-  allowedChildAgentKeys?: string[];
   blockedToolNames?: string[];
   allowedToolNames?: string[];
   background?: boolean;
