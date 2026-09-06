@@ -28,6 +28,23 @@ import { t } from "../tui/i18n";
  */
 const IDENTITY_LABEL_SEPARATOR = " > ";
 
+export const THINKING_PREVIEW_BUFFER_LIMIT = 512;
+
+/**
+ * Append a chunk of reasoning to the rolling preview buffer, keeping at most
+ * the last `limit` characters (O(1) presentation-only buffer bound).
+ */
+export function appendThinkingPreview(
+  current: string,
+  chunk: string,
+  limit: number = THINKING_PREVIEW_BUFFER_LIMIT,
+): string {
+  if (limit <= 0) return "";
+  const combined = current + chunk;
+  if (combined.length <= limit) return combined;
+  return combined.slice(combined.length - limit);
+}
+
 export function formatCompactionSummaryLine(
   event: Extract<
     AgentExecutionObservationEvent,
@@ -119,31 +136,47 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   let everStreamedAnyText = false;
   let printedAssistantLabel = false;
   let thinkState = createThinkParserState();
-  // thinking 痕迹计时：首末打点跨度（spinner 上的思考流结束后，在 transcript
+  // thinking 痕迹计时：当前 phase 首末打点跨度（思考流结束后，在 transcript
   // 留一行 dim「✻ 思考 Xs」。showThinking=false 时不打点，痕迹自然零输出，
   // 与 NOLO_CLI_THINKING=hide 全隐契约一致；痕迹只进 TUI 显示层，不进持久化消息。
   let thinkingFirstAt: number | null = null;
-  let thinkingLastAt = 0;
-  let accumulatedThinking = "";
+  let thinkingPreview = "";
 
-  const markThinkingActivity = () => {
-    const now = Date.now();
-    if (thinkingFirstAt === null) thinkingFirstAt = now;
-    thinkingLastAt = now;
+  const markThinkingDelta = (chunk: string) => {
+    if (!showThinking) return;
+    // 在同一个尚未发生 tool/新 phase 转换的正文流式段内，迟到的 stray reasoning
+    // 不应抢回 activity，避免正文流式输出时闪烁。
+    if (streamedAssistantText) return;
+
+    if (thinkingFirstAt === null) {
+      thinkingFirstAt = Date.now();
+      thinkingPreview = "";
+    }
+    thinkingPreview = appendThinkingPreview(thinkingPreview, chunk);
+    spinner.setThinkingHint(thinkingPreview);
+    reportThinkingProgress();
   };
+
   const reportThinkingProgress = () => {
     if (!showThinking) return;
-    const preview = truncateThinkingHint(accumulatedThinking, 60);
-    const label = preview ? `Thinking: ${preview}` : "Thinking…";
+    const preview = truncateThinkingHint(thinkingPreview, 60);
+    const label = preview
+      ? t("thinkingActivePreview", preview)
+      : t("thinkingActive");
     options.activityReporter?.(label);
   };
-  const writeThinkingTrace = () => {
+
+  const endThinkingPhase = () => {
     if (thinkingFirstAt === null) return;
-    const seconds = Math.max(0, Math.round((thinkingLastAt - thinkingFirstAt) / 1000));
+    const seconds = Math.max(0, Math.round((Date.now() - thinkingFirstAt) / 1000));
     thinkingFirstAt = null;
+    thinkingPreview = "";
+    spinner.stop();
+    options.activityReporter?.(null);
     // 0 秒的思考没有信息量，不打点：零内容行只会打断「工具组 → 正文」的节奏。
-    if (seconds < 1) return;
-    options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
+    if (seconds >= 1) {
+      options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
+    }
   };
   // 压缩观测事件：一个 turn 至多渲染一行摘要。记录最后一条 compaction 事件，
   // 在 finish() 统一输出（保持与既有逐字节输出行为一致，无压缩事件零输出）。
@@ -173,20 +206,11 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     const parsed = processThinkChunk(chunk, thinkState);
     thinkState = parsed.state;
     if (!parsed.content && !parsed.reasoning) return;
-    // Reasoning from inline think tags goes to the spinner hint, not visible content.
-    // 正文一旦流出，本 turn 不再回到 thinking live（与 Web useThinkingVisibility
-    // 的「正文开始后永不再 live」语义一致），迟到的 reasoning delta 不得闪回活动行。
-    if (showThinking && parsed.reasoning && !everStreamedAnyText) {
-      markThinkingActivity();
-      accumulatedThinking += parsed.reasoning;
-      spinner.setThinkingHint(accumulatedThinking);
-      reportThinkingProgress();
+    if (parsed.reasoning) {
+      markThinkingDelta(parsed.reasoning);
     }
     if (!parsed.content) return;
-    writeThinkingTrace();
-    accumulatedThinking = "";
-    spinner.stop();
-    options.activityReporter?.(null);
+    endThinkingPhase();
     if (!printedAssistantLabel) {
       if (!assistantLabelManaged) {
         options.output.write(`\n${options.agentName}${IDENTITY_LABEL_SEPARATOR}`);
@@ -220,10 +244,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     if (event.type === "tool-call") {
       renderWriter.flush();
       formatToolEvent(event);
-      writeThinkingTrace();
-      accumulatedThinking = "";
-      spinner.stop();
-      options.activityReporter?.(null);
+      endThinkingPhase();
 
       // Mid-stream tool-calls interrupt assistant text. Break onto a new
       // line when assistant text was just flushed in this same event
@@ -300,12 +321,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       // Thinking content scrolls live on the spinner line instead of
       // being written as separate output. The spinner shows a truncated
       // hint of what the model is currently reasoning about.
-      if (showThinking && !everStreamedAnyText) {
-        markThinkingActivity();
-        accumulatedThinking += chunk;
-        spinner.setThinkingHint(accumulatedThinking);
-        reportThinkingProgress();
-      }
+      markThinkingDelta(chunk);
     },
     handleToolEvent,
     /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。 */
@@ -320,16 +336,15 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       options.activityReporter?.(activeLabel);
     },
     finish(fallbackContent?: string) {
-      spinner.stop();
-      options.activityReporter?.(null);
-      writeThinkingTrace();
-      accumulatedThinking = "";
       // Flush any residual think-tag buffer.
       const flushedThink = flushThinkParser(thinkState);
       thinkState = flushedThink.state;
       if (flushedThink.content) {
         writeVisibleAssistantChunk(flushedThink.content);
       }
+      endThinkingPhase();
+      spinner.stop();
+      options.activityReporter?.(null);
       if (streamedAssistantText) {
         renderWriter.flush();
         options.output.write("\n");

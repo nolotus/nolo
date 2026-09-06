@@ -315,6 +315,14 @@ const STRINGS = {
   // --- Tool trace copy ------------------------------------------------------
   // The compact trace shows only status, never timing or output size: a line
   // count told the user nothing actionable and the ms figure read as noise.
+  thinkingActive: {
+    en: "Thinking…",
+    zh: "思考中…",
+  },
+  thinkingActivePreview: {
+    en: "Thinking: {0}",
+    zh: "思考中：{0}",
+  },
   thinkingTraceLine: {
     en: "✻ Thought for {0}",
     zh: "✻ 思考 {0}",
