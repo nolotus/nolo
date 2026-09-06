@@ -360,7 +360,7 @@ function sanitizeGeminiSchemaNode(
   const seen = active ?? new WeakSet<object>();
   seen.add(node);
   try {
-    return sanitizeGeminiSchemaNodeInner(node, out, seen);
+    return sanitizeGeminiSchemaNodeInner(node as Record<string, unknown>, out, seen);
   } finally {
     seen.delete(node);
   }
