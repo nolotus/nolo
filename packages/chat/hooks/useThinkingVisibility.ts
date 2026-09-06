@@ -6,6 +6,7 @@
 // - 用户手动 toggle 永远优先，之后不再被自动展开/折叠覆盖
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { hasVisibleAssistantContentValue } from "../messages/assistantMessageFacts";
 
 /**
  * 思考开始时间戳按 messageId 记录：流式过程中组件可能因虚拟化 remount，
@@ -20,7 +21,8 @@ export const useThinkingVisibility = (
   messageId?: string
 ) => {
   const hasThink = thinkContent.trim().length > 0;
-  const thinkingLive = isStreaming && hasThink && !content;
+  const hasVisibleContent = hasVisibleAssistantContentValue(content);
+  const thinkingLive = isStreaming && hasThink && !hasVisibleContent;
 
   const [manual, setManual] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);

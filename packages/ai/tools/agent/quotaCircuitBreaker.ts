@@ -20,6 +20,8 @@
 export const QUOTA_ERROR_PATTERNS: ReadonlyArray<RegExp> = [
   /429/,
   /quota/i,
+  /access_terminated_error/i,
+  /(?:weekly|monthly)\s*(?:\([^)]*\)\s*)?usage\s+limit/i,
   /rate\s*limit/i,
   /too\s*many\s*requests/i,
   /额度/,
@@ -153,9 +155,13 @@ export function isQuotaExhaustedError(error: unknown): boolean {
     return QUOTA_ERROR_PATTERNS.some((pattern) => pattern.test(error));
   }
   const maybeStatus = (error as { status?: unknown }).status;
-  if (typeof maybeStatus === "number" && maybeStatus === 429) return true;
   const maybeStatusCode = (error as { statusCode?: unknown }).statusCode;
-  if (typeof maybeStatusCode === "number" && maybeStatusCode === 429) return true;
+  const status = typeof maybeStatus === "number" ? maybeStatus : maybeStatusCode;
+  if (status === 429) return true;
+  if (status === 403) {
+    const message = extractMessage(error);
+    return QUOTA_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  }
   return false;
 }
 

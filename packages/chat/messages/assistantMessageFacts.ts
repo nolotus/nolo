@@ -18,7 +18,22 @@ export function hasVisibleAssistantContent(msg: any): boolean {
   if (!msg || msg.role !== "assistant") return false;
   if (isAssistantToolStub(msg)) return false;
   if (isHiddenOrchestratorToolMessage(msg)) return false;
-  if (typeof msg.content === "string") return msg.content.trim().length > 0;
-  if (Array.isArray(msg.content)) return msg.content.length > 0;
-  return false;
+  return hasVisibleAssistantContentValue(msg.content);
+}
+
+/** Whether a Content value contains actual user-visible assistant output. */
+export function hasVisibleAssistantContentValue(content: unknown): boolean {
+  if (typeof content === "string") return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+
+  return content.some((part) => {
+    if (!part || typeof part !== "object") return false;
+    if ((part as { type?: unknown }).type === "text") {
+      return typeof (part as { text?: unknown }).text === "string" &&
+        (part as { text: string }).text.trim().length > 0;
+    }
+    return (part as { type?: unknown }).type === "image_url" &&
+      typeof (part as { image_url?: unknown }).image_url === "object" &&
+      (part as { image_url: { url?: unknown } }).image_url?.url != null;
+  });
 }

@@ -13,6 +13,7 @@ import { selectShowThinking } from "app/settings/settingSlice";
 import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
 import Editor from "create/editor/Editor";
 import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
+import { hasVisibleAssistantContentValue } from "../assistantMessageFacts";
 import { OrbActivityIndicator } from "./OrbActivityIndicator";
 import { useTranslation } from "react-i18next";
 import { thinkingSectionStyles as styles } from "./thinkingSectionStyles";
@@ -94,7 +95,9 @@ export const ThinkingSection = memo(
     const shouldRender = role !== "self" && thinkContent && showThinking;
 
     const thinkingLive =
-      isStreaming && !messageContent && !!thinkContent;
+      isStreaming &&
+      !!thinkContent &&
+      !hasVisibleAssistantContentValue(messageContent);
     const label = thinkingLive
       ? t("thinkingActive")
       : thinkingSeconds != null

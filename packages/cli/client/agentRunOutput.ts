@@ -8,7 +8,7 @@ import {
   formatConservativeActiveToolLabel,
 } from "./toolOutput";
 import { isLiveAgentRunObservation, parseAgentRunEvent } from "./agentRunSnapshot";
-import { Spinner, formatElapsed } from "./agentRunSpinner";
+import { Spinner, formatElapsed, truncateThinkingHint } from "./agentRunSpinner";
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 import { dimCliText } from "./terminalStyles";
 import { t } from "../tui/i18n";
@@ -124,10 +124,18 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   // 与 NOLO_CLI_THINKING=hide 全隐契约一致；痕迹只进 TUI 显示层，不进持久化消息。
   let thinkingFirstAt: number | null = null;
   let thinkingLastAt = 0;
+  let accumulatedThinking = "";
+
   const markThinkingActivity = () => {
     const now = Date.now();
     if (thinkingFirstAt === null) thinkingFirstAt = now;
     thinkingLastAt = now;
+  };
+  const reportThinkingProgress = () => {
+    if (!showThinking) return;
+    const preview = truncateThinkingHint(accumulatedThinking, 60);
+    const label = preview ? `Thinking: ${preview}` : "Thinking…";
+    options.activityReporter?.(label);
   };
   const writeThinkingTrace = () => {
     if (thinkingFirstAt === null) return;
@@ -166,12 +174,17 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     thinkState = parsed.state;
     if (!parsed.content && !parsed.reasoning) return;
     // Reasoning from inline think tags goes to the spinner hint, not visible content.
-    if (showThinking && parsed.reasoning) {
+    // 正文一旦流出，本 turn 不再回到 thinking live（与 Web useThinkingVisibility
+    // 的「正文开始后永不再 live」语义一致），迟到的 reasoning delta 不得闪回活动行。
+    if (showThinking && parsed.reasoning && !everStreamedAnyText) {
       markThinkingActivity();
-      spinner.setThinkingHint(parsed.reasoning);
+      accumulatedThinking += parsed.reasoning;
+      spinner.setThinkingHint(accumulatedThinking);
+      reportThinkingProgress();
     }
     if (!parsed.content) return;
     writeThinkingTrace();
+    accumulatedThinking = "";
     spinner.stop();
     options.activityReporter?.(null);
     if (!printedAssistantLabel) {
@@ -207,6 +220,8 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     if (event.type === "tool-call") {
       renderWriter.flush();
       formatToolEvent(event);
+      writeThinkingTrace();
+      accumulatedThinking = "";
       spinner.stop();
       options.activityReporter?.(null);
 
@@ -285,9 +300,11 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       // Thinking content scrolls live on the spinner line instead of
       // being written as separate output. The spinner shows a truncated
       // hint of what the model is currently reasoning about.
-      if (showThinking) {
+      if (showThinking && !everStreamedAnyText) {
         markThinkingActivity();
-        spinner.setThinkingHint(chunk);
+        accumulatedThinking += chunk;
+        spinner.setThinkingHint(accumulatedThinking);
+        reportThinkingProgress();
       }
     },
     handleToolEvent,
@@ -306,6 +323,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       spinner.stop();
       options.activityReporter?.(null);
       writeThinkingTrace();
+      accumulatedThinking = "";
       // Flush any residual think-tag buffer.
       const flushedThink = flushThinkParser(thinkState);
       thinkState = flushedThink.state;

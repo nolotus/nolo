@@ -138,8 +138,27 @@ function parseResetAtText(value: string, now: number): number | undefined {
  * 误读成相对时长并短路本判定。
  */
 function matchesPeriodicUsageLimitText(text: string): boolean {
-  return /weekly usage limit|monthly usage limit/i.test(text);
+  return /(?:weekly|monthly)\s*(?:\([^)]*\)\s*)?usage\s+limit/i.test(text);
 }
+
+/**
+ * Narrow quota predicate for HTTP 403 responses. A bare 403 remains an auth
+ * failure; only provider text that explicitly describes exhausted quota is
+ * allowed to enter the unavailable/cooldown path.
+ */
+export function isQuotaLimited403Body(body: unknown): boolean {
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+  return (
+    matchesPeriodicUsageLimitText(text) ||
+    /access_terminated_error/i.test(text) ||
+    /(?:quota|usage)\s+(?:is\s+)?(?:exhausted|depleted|used\s+up|reached)/i.test(text) ||
+    /(?:quota|usage).{0,40}\b(?:reset|resets)\s+at\b/i.test(text)
+  );
+}
+export type AvailabilityAction =
+  | { kind: "clear" }
+  | { kind: "mark"; nextAvailableAt: number }
+  | { kind: "noop" };
 
 /**
  * 把一次上游 429 响应解析成绝对的 epoch-ms 可用时刻。
@@ -184,15 +203,9 @@ export function resolveNextAvailableAt(
   return clampCooldownDeadline(parsed, now);
 }
 
-export type AvailabilityAction =
-  | { kind: "clear" }
-  | { kind: "mark"; nextAvailableAt: number }
-  | { kind: "noop" };
-
 /**
  * 纯决策：把一次上游 status + body 映射成可用性动作。
- * 2xx → clear（恢复）；429 → mark（解析复位时刻）；
- * 5xx → mark（短默认窗口，避免反复打挂掉的 provider）；其余（1xx/3xx/4xx）→ noop。
+ * 2xx → clear；429 → mark；403 配额耗尽 → mark；5xx → mark；其余 → noop。
  * 执行（读写记录）由各端适配层负责。
  */
 export function resolveAvailabilityAction(
@@ -201,6 +214,9 @@ export function resolveAvailabilityAction(
   now: number,
   headers?: Headers | Record<string, string> | null,
 ): AvailabilityAction {
+  if (status === 403 && isQuotaLimited403Body(body)) {
+    return { kind: "mark", nextAvailableAt: resolveNextAvailableAt(body, now, headers) };
+  }
   if (status >= 200 && status < 300) return { kind: "clear" };
   if (status === 429) {
     return { kind: "mark", nextAvailableAt: resolveNextAvailableAt(body, now, headers) };

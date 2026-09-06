@@ -78,6 +78,7 @@ import {
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
+  isQuotaLimited403Body,
   mergeAvailabilityDeadline,
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
@@ -553,7 +554,7 @@ type LocalRunErrorClass =
  *   other 4xx          → upstream        (provider-side rejection, not local config)
  *   no HTTP match      → generic         (genuinely local config/runtime — "fix local credential")
  */
-function classifyLocalRunError(message: string): LocalRunErrorClass {
+export function classifyLocalRunError(message: string): LocalRunErrorClass {
   const m = message.match(PROVIDER_HTTP_FAILED_RE);
   if (!m) return { kind: "generic" };
   const status = Number(m[2]);
@@ -561,8 +562,13 @@ function classifyLocalRunError(message: string): LocalRunErrorClass {
     ? "platform"
     : "local";
 
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return { kind: "auth", transport, status };
+  }
+  if (status === 403) {
+    return isQuotaLimited403Body(message)
+      ? { kind: "rate-limit", transport, status }
+      : { kind: "auth", transport, status };
   }
   if (status === 400 || status === 422) {
     return { kind: "rejected-payload", transport, status };

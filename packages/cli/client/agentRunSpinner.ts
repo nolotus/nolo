@@ -17,7 +17,7 @@ export function formatElapsed(totalSeconds: number): string {
  * line. Keeps the last `maxLen` characters of accumulated thinking so the
  * user sees what the model is currently reasoning about.
  */
-function truncateThinkingHint(text: string, maxLen: number): string {
+export function truncateThinkingHint(text: string, maxLen: number): string {
   const cleaned = text.replace(/\n/g, " ").trim();
   if (cleaned.length <= maxLen) return cleaned;
   return "…" + cleaned.slice(cleaned.length - maxLen + 1);
