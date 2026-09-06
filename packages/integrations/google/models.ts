@@ -83,4 +83,42 @@ export const googleModels: Model[] = [
       cachingRead: 0.6,
     },
   },
+  {
+    name: "gemini-2.5-pro",
+    displayName: "Gemini 2.5 Pro",
+    provider: "google",
+    description:
+      "Gemini 2.5 Pro model for complex reasoning, coding, and large context multimodal tasks.",
+    hasVision: true,
+    hasAudio: true,
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    price: {
+      input: 10,
+      output: 40,
+      cachingWrite: 2.5,
+      cachingRead: 2.5,
+    },
+  },
+  {
+    name: "gemini-3.1-pro",
+    displayName: "Gemini 3.1 Pro",
+    provider: "google",
+    description:
+      "Gemini 3.1 Pro frontier reasoning, coding, and multimodal model.",
+    hasVision: true,
+    hasAudio: true,
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    price: {
+      input: 16,
+      output: 96,
+      cachingWrite: 4,
+      cachingRead: 4,
+    },
+  },
 ];

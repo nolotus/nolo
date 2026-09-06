@@ -23,6 +23,8 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_38_FLASH_MODEL,
   PLATFORM_HOSTED_GEMINI_37_FLASH_MODEL,
+  PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
+  PLATFORM_HOSTED_GEMINI_31_PRO_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL,
   PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL,
@@ -163,6 +165,28 @@ export const PLATFORM_HOSTED_GEMINI_38_FLASH_PRICE = {
   output: 21, // 30.0 credits
   cachingWrite: 0.42, // 0.6 credits
   cachingRead: 0.42, // 0.6 credits
+} as const;
+
+/**
+ * Gemini 2.5 Pro（平台托管语义）：直连 Google 官方原生 API（gemini-2.5-pro，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ */
+export const PLATFORM_HOSTED_GEMINI_25_PRO_PRICE = {
+  input: toPlatformCredits(1.25), // 10.0 credits
+  output: toPlatformCredits(5.0), // 40.0 credits
+  cachingWrite: toPlatformCredits(0.3125), // 2.5 credits
+  cachingRead: toPlatformCredits(0.3125), // 2.5 credits
+} as const;
+
+/**
+ * Gemini 3.1 Pro（平台托管语义）：直连 Google 官方原生 API（gemini-3.1-pro，
+ * key 用 GEMINI_API_KEY / GOOGLE_API_KEY）。
+ */
+export const PLATFORM_HOSTED_GEMINI_31_PRO_PRICE = {
+  input: toPlatformCredits(2.0), // 16.0 credits
+  output: toPlatformCredits(12.0), // 96.0 credits
+  cachingWrite: toPlatformCredits(0.5), // 4.0 credits
+  cachingRead: toPlatformCredits(0.5), // 4.0 credits
 } as const;
 
 /**
@@ -448,6 +472,26 @@ export const platformHostedModels = [
     displayName: "Gemini 3.8 Flash",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_GEMINI_38_FLASH_PRICE },
+    maxOutputTokens: 65536,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GEMINI_25_PRO_MODEL,
+    displayName: "Gemini 2.5 Pro",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_25_PRO_PRICE },
+    maxOutputTokens: 65536,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GEMINI_31_PRO_MODEL,
+    displayName: "Gemini 3.1 Pro",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GEMINI_31_PRO_PRICE },
     maxOutputTokens: 65536,
     contextWindow: 1_048_576,
     supportsTool: true,

@@ -70,6 +70,8 @@ const COPILOT_CLI_MODELS = [
   { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
   { value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+  { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -88,6 +90,8 @@ const GEMINI_CLI_MODELS = [
   { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
   { value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+  { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
 ];
 
 const CODEX_CLI_MODELS = [

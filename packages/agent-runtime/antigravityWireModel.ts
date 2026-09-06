@@ -36,6 +36,7 @@ const WIRE_PROFILES: Readonly<Record<string, AntigravityWireProfile>> = {
   "claude-sonnet-4-6": { maxOutputTokens: 64000 },
   "claude-opus-4-6-thinking": { maxOutputTokens: 64000 },
   "gemini-2.5-flash": { maxOutputTokens: 65536 },
+  "gemini-2.5-pro": { maxOutputTokens: 65536 },
 };
 
 /**
