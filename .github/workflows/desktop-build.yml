@@ -72,6 +72,10 @@ jobs:
         id: immutable-release
         env:
           RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          # gh api 需要显式 token（同模板其他 step 一致）；缺失时 gh 报 exit 4，
+          # fail-closed 会把「无法验证 release 存在性」当拒绝理由（2026-09-09
+          # 首次真实 dispatch 实测踩中）。
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # 必须在任何 runner build / R2 publish 副作用之前拒绝已存在的
