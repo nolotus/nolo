@@ -1,4 +1,13 @@
 
+## 0.55.0-alpha.2
+
+## 0.55.0-alpha.2 (2026-09-09)
+
+### Bug Fixes
+
+* **stream:** respect downstream backpressure in chat proxy ([1b8affb](https://github.com/nolotus/bun-nolo/commit/1b8affbe6f81f8ec4f9c1079b6a5c345181f500c))
+
+
 ## 0.55.0-alpha.1
 
 ## 0.55.0-alpha.1 (2026-09-09)
