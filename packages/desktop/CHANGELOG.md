@@ -1,4 +1,16 @@
 
+## 0.54.0-alpha.7
+
+## 0.54.0-alpha.7 (2026-09-09)
+
+### Bug Fixes
+
+* **deps:** packages/app 显式声明 date-fns-tz/date-fns 直接依赖 ([459ba02](https://github.com/nolotus/bun-nolo/commit/459ba0262b92260fbc02db019429d99b8b7f2129))
+* **desktop:** 修复 stable 打包白屏——embedded server 静态路由与动态 HTML 壳 ([6966c81](https://github.com/nolotus/bun-nolo/commit/6966c81c0c5678860266c1b2df987c88fe3ea259))
+* **desktop:** 修复所有 trusted-desktop API 403——embedded server 补全局 server 实例注入 ([23247c7](https://github.com/nolotus/bun-nolo/commit/23247c79aa5ffa66c9bd3e3b4f49941086ed61ef))
+* **release:** stable 通道污染自愈 + Linux 桌面构建依赖安装 ([4d7f352](https://github.com/nolotus/bun-nolo/commit/4d7f3526dbaf2cc5e219843c8ae3e951a7b379b5))
+
+
 ## 0.54.0-alpha.6
 
 ## 0.54.0-alpha.6 (2026-09-09)
