@@ -1,4 +1,13 @@
 
+## 0.55.0-alpha.3
+
+## 0.55.0-alpha.3 (2026-09-09)
+
+### Bug Fixes
+
+* **desktop:** pin electrobun 2 build.mainProcess to bun to restore installer size ([94d9fdb](https://github.com/nolotus/bun-nolo/commit/94d9fdba872cf7952a94bff79644b45bcf4c791b))
+
+
 ## 0.55.0-alpha.2
 
 ## 0.55.0-alpha.2 (2026-09-09)

@@ -77,6 +77,15 @@ export default {
   build: {
     buildFolder: "build",
     artifactFolder: "artifacts",
+    // electrobun 2 defaults build.mainProcess to "cottontail" (its own JSC
+    // runtime, ~56MB binary). Leaving it unset during the v1→v2 migration
+    // silently (a) swapped the packaged runtime from bun.exe (~98MB) to
+    // cottontail.exe, shrinking the Windows installer from ~48.5MB to 37MB —
+    // below the 47MB release size gate — and (b) routed the build through the
+    // cottontail spec, where build.bun minify/external/sourcemap are dropped.
+    // The Nolo desktop main process requires real Bun (bun:ffi dlopen, 
+    // bun:sqlite), so pin the Bun main process explicitly.
+    mainProcess: "bun",
     bun: {
       entrypoint: "src/bun/index.ts",
       minify: true,
@@ -87,10 +96,10 @@ export default {
       // NOTE (hutch 0.24.3): `external` / `minify` / `sourcemap` / `define` in
       // build.bun are all silently dropped from the cottontail build spec
       // (hutch-engine cottontail-build-helper passes only entryPoints/bundle/
-      // platform/format/outfile/alias through). Keep them declared anyway —
-      // they become effective once upstream fixes spec construction — and see
-      // pre-build.ts for the chromium-bidi stub compensating for eager
-      // resolution of playwright-core's bundled require("chromium-bidi/...").
+      // platform/format/outfile/alias through) — with mainProcess: "bun" they
+      // are honored again. See pre-build.ts for the chromium-bidi stub that
+      // compensates for eager resolution of playwright-core's bundled
+      // require("chromium-bidi/...").
       external: [
         "react-native",
         "react-native/*",
