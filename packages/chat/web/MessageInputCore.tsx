@@ -1048,7 +1048,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
   const editingChipLabel = t(
     "editingMessageNotice",
-    "正在编辑历史消息，发送后将丢弃其后的消息"
+    "正在编辑历史消息，发送后将丢弃其后的消息。系统可能需要重新读取部分对话内容。"
   );
 
   const placeholder =

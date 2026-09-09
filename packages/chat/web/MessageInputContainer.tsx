@@ -162,7 +162,13 @@ const MessageInputContainer = forwardRef<
       try {
         await dispatch(setPrimaryDialogAgent(agentKey)).unwrap();
         toast.success(
-          t("switchModelContinueSuccess", "已切换模型，并继续当前对话")
+          t("switchModelContinueSuccess", "已切换模型，并继续当前对话"),
+          {
+            description: t(
+              "contextReprocessingNotice",
+              "切换模型或编辑历史消息后，系统可能需要重新读取部分对话内容。"
+            ),
+          }
         );
       } catch (error) {
         console.error(

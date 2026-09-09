@@ -113,6 +113,8 @@ export default {
       chooseAnotherModelDialogTitle: "Choose another model",
       useThisModelContinue: "Continue with this model",
       switchModelContinueSuccess: "Switched model and continued this conversation",
+      contextReprocessingNotice:
+        "The system may need to reread part of this conversation after switching models or editing an earlier message.",
       switchModelContinueFailed: "Failed to switch model. Please try again.",
       noAlternativeModels: "No other available models",
       noAvailableAgentMessage: "No available Agent message",
@@ -137,7 +139,7 @@ export default {
       editSeeded: "Editing message",
       editEmptyContent: "No editable text in this message",
       editingMessageNotice:
-        "Editing a previous message. Sending will discard all later messages.",
+        "Editing a previous message. Sending will discard all later messages. The system may need to reread part of this conversation.",
       cancelEditingMessage: "Cancel editing message",
       branchMessage: "Branch",
       branchCreated: "Branch chat created",
@@ -530,6 +532,8 @@ export default {
       chooseAnotherModelDialogTitle: "选择其他模型",
       useThisModelContinue: "用这个模型继续",
       switchModelContinueSuccess: "已切换模型，并继续当前对话",
+      contextReprocessingNotice:
+        "切换模型或编辑历史消息后，系统可能需要重新读取部分对话内容。",
       switchModelContinueFailed: "切换模型失败，请重试",
       noAlternativeModels: "没有其他可用模型",
       noAvailableAgentMessage: "没有可用的智能体消息",
@@ -553,7 +557,8 @@ export default {
       editMessage: "编辑消息",
       editSeeded: "已进入编辑模式",
       editEmptyContent: "消息没有可编辑的文本",
-      editingMessageNotice: "正在编辑历史消息，发送后将丢弃其后的消息",
+      editingMessageNotice:
+        "正在编辑历史消息，发送后将丢弃其后的消息。系统可能需要重新读取部分对话内容。",
       cancelEditingMessage: "取消编辑消息",
       branchMessage: "分支",
       branchCreated: "已创建分支对话",
@@ -940,6 +945,10 @@ export default {
       chooseAnotherModelDialogTitle: "選擇其他模型",
       useThisModelContinue: "用這個模型繼續",
       switchModelContinueSuccess: "已切換模型，並繼續當前對話",
+      contextReprocessingNotice:
+        "切換模型或編輯歷史訊息後，系統可能需要重新讀取部分對話內容。",
+      editingMessageNotice:
+        "正在編輯歷史訊息，發送後將丟棄其後的訊息。系統可能需要重新讀取部分對話內容。",
       switchModelContinueFailed: "切換模型失敗，請重試",
       noAlternativeModels: "沒有其他可用模型",
       noAvailableAgentMessage: "沒有可用的智能體消息",
@@ -1285,6 +1294,10 @@ export default {
       chooseAnotherModelDialogTitle: "別のモデルを選択",
       useThisModelContinue: "このモデルで続ける",
       switchModelContinueSuccess: "モデルを切り替えて現在の会話を続けました",
+      contextReprocessingNotice:
+        "モデルの切り替えや過去のメッセージの編集後は、会話の一部を再読み込みする場合があります。",
+      editingMessageNotice:
+        "過去のメッセージを編集中です。送信すると、それ以降のメッセージは破棄されます。会話の一部を再読み込みする場合があります。",
       switchModelContinueFailed: "モデルの切り替えに失敗しました。再試行してください。",
       noAlternativeModels: "利用可能な他のモデルがありません",
       noAvailableAgentMessage: "利用可能なエージェントメッセージがありません",
