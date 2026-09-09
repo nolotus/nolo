@@ -160,6 +160,10 @@ jobs:
 
       - name: Build desktop (${{ matrix.label }})
         if: runner.os != 'Windows' || needs.select-targets.outputs.channel != 'stable'
+        # alpha 渠道下 Windows 也会进此 step（channel != 'stable'），run 脚本是
+        # bash 语法，必须显式 shell: bash——Windows 默认 pwsh 会 ParserError
+        #（2026-09-09 desktop-alpha-v0.54.0-alpha.1 首次 windows 构建实测踩中）。
+        shell: bash
         env:
           TMPDIR: ${{ runner.temp }}
           NOLO_DESKTOP_BUILD_RPM: "1"
