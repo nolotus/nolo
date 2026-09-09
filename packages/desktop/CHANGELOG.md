@@ -1,4 +1,13 @@
 
+## 0.54.0-alpha.2
+
+## 0.54.0-alpha.2 (2026-09-09)
+
+### Bug Fixes
+
+* **desktop:** tolerate drive-prefixed member names in Windows tarball extraction ([a2b9187](https://github.com/nolotus/bun-nolo/commit/a2b91871b2ef1404b2cdf3fbf9233c2b2e62467c))
+
+
 ## 0.54.0-alpha.1
 
 ## 0.54.0-alpha.1 (2026-09-09)

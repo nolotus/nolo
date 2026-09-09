@@ -2,6 +2,7 @@ import { withTempDir } from "./codesign-local";
 import { readPayloadVersionInfo } from "./payload-version";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
 import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
+import { extractWindowsTarball } from "./windows-tarball-extract";
 import { cp, mkdir, readdir } from "node:fs/promises";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -32,18 +33,9 @@ const windowsSmokeArtifactDir = resolve(import.meta.dir, "../smoke-artifacts");
 const DEFAULT_WINDOWS_INSTALLER_COMPRESSION = "lzma2/max";
 const DEFAULT_WINDOWS_INSTALLER_SOLID_COMPRESSION = "yes";
 
-const resolveWindowsPayloadDir = async (tempDir: string) => {
-  const entries = await readdir(tempDir);
-  const payloadDir = entries
-    .map((name) => join(tempDir, name))
-    .find((path) => existsSync(join(path, "Resources", "main.js")) && existsSync(join(path, "bin")));
-
-  if (!payloadDir) {
-    throw new Error(`Unable to locate extracted Windows desktop payload in ${tempDir}`);
-  }
-
-  return payloadDir;
-};
+// Payload discovery lives in windows-tarball-extract.ts (extractWindowsTarball
+// returns the payload dir directly); the v1 flat-contract check plus the
+// bounded nested fallback are handled there by findWindowsPayloadDir.
 
 const resolveWindowsInstallerCompression = () => {
   const compression =
@@ -269,20 +261,13 @@ export const createWindowsInstallerArtifact = async ({
 
   await withTempDir("nolo-desktop-win-installer-", async (tempDir) => {
     const tarballPath = join(artifactDir, windowsTarballName);
-    const extractProc = Bun.spawn(
-      ["tar", "--zstd", "-xf", tarballPath, "-C", tempDir],
-      {
-        stdout: "inherit",
-        stderr: "inherit",
-      }
-    );
-
-    const extractExitCode = await extractProc.exited;
-    if (extractExitCode !== 0) {
-      throw new Error(`failed to extract ${tarballPath} with exit code ${extractExitCode}`);
-    }
-
-    const payloadDir = await resolveWindowsPayloadDir(tempDir);
+    // hutch Windows tarballs may carry drive-prefixed member names (GNU tar
+    // `tar -cf <abs> -C <abs.dir> <name>` on Windows runners). Extract with
+    // --force-local + a drive-prefix --transform and locate the payload via
+    // the tolerant finder; see windows-tarball-extract.ts and public run
+    // 34331735636 for the failure this replaces ("tar: C\:\\...: Cannot
+    // open" → zstd Broken pipe).
+    const payloadDir = await extractWindowsTarball(tarballPath, tempDir);
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
     await pruneClassicLevelPrebuilds(payloadDir);
