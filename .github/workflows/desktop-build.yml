@@ -112,6 +112,13 @@ jobs:
       matrix: ${{ fromJson(needs.select-targets.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.os }}
+    env:
+      # Windows 上 shell: bash 会把 Git 的 GNU tar 放进 PATH；GNU tar 把
+      # "D:..." 盘符路径当远程主机（Cannot connect to D: resolve failed）。
+      # hutch 打包 updater tar.zst 与我们脚本里的 tar 调用都会踩中
+      #（2026-09-09 desktop-alpha-v0.54.0-alpha.1 windows job 实测）。
+      # GNU tar 读 TAR_OPTIONS；bsdtar（macOS）完全忽略该环境变量，无副作用。
+      TAR_OPTIONS: --force-local
     steps:
       - uses: actions/checkout@v4
         with:
