@@ -1,4 +1,13 @@
 
+## 0.54.0-alpha.5
+
+## 0.54.0-alpha.5 (2026-09-09)
+
+### Bug Fixes
+
+* **dev:** report profiler artifact only when generated ([b557bc7](https://github.com/nolotus/bun-nolo/commit/b557bc776aee378f3964ec1ec363aca2948ddfcf))
+
+
 ## 0.54.0-alpha.4
 
 ## 0.54.0-alpha.4 (2026-09-09)
