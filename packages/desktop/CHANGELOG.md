@@ -1,4 +1,13 @@
 
+## 0.54.0-alpha.3
+
+## 0.54.0-alpha.3 (2026-09-09)
+
+### Bug Fixes
+
+* **desktop:** upgrade Electrobun websocket port byte-patch to v2 encoding ([509f098](https://github.com/nolotus/bun-nolo/commit/509f098a705076587e2707c22c0c8c204f34ced4))
+
+
 ## 0.54.0-alpha.2
 
 ## 0.54.0-alpha.2 (2026-09-09)
