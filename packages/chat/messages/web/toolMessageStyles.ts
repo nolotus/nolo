@@ -14,7 +14,7 @@ export const toolMessageStyles = stylex.create({
     marginTop: 0,
     marginRight: 0,
     marginBottom: 0,
-    marginLeft: 60,
+    marginLeft: "var(--chat-assistant-content-offset, calc(32px + var(--space-4)))",
     transition: "all 0.18s ease",
     borderTopLeftRadius: "var(--radius-sm, 8px)", borderTopRightRadius: "var(--radius-sm, 8px)", borderBottomRightRadius: "var(--radius-sm, 8px)", borderBottomLeftRadius: "var(--radius-sm, 8px)",
     backgroundColor: "transparent",

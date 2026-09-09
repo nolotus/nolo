@@ -15,6 +15,13 @@
  * ─────────────────────────────────────────────────────────────
  */
 
+/* Avatar-less assistant/tool rows share MessageLayout's avatar column + gap.
+ * Only the wrapper gets the offset — IntermediateNarrationRow's inner
+ * `.intermediate-narration` must not double-apply it. */
+.chat-messages__item-wrapper--narration {
+  margin-left: var(--chat-assistant-content-offset, calc(32px + var(--space-4)));
+}
+
 /* ═══ 自 MessageToolConfirmBar.css 迁出（MessageToolConfirmBar.tsx）═══ */
 
 /* ── 状态与变体竞争规则（hover / disabled）──

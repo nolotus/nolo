@@ -239,6 +239,8 @@ export const messagesStyles = stylex.create({
     paddingBottom: 24,
   },
   messagesListWrapper: {
+    // Shared with avatar-less assistant rows and tool rows.
+    "--chat-assistant-content-offset": "calc(32px + var(--space-4))",
     display: "flex",
     flexDirection: "column",
     gap: "var(--space-4)",

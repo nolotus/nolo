@@ -1,4 +1,13 @@
 
+## 0.54.0-alpha.6
+
+## 0.54.0-alpha.6 (2026-09-09)
+
+### Bug Fixes
+
+* **chat:** hide mid-turn empty-reply placeholder and settle tool UI after turn ends ([0d6793a](https://github.com/nolotus/bun-nolo/commit/0d6793a1104335b626d36a07d67b79c0fb308f8f))
+
+
 ## 0.54.0-alpha.5
 
 ## 0.54.0-alpha.5 (2026-09-09)

@@ -56,6 +56,7 @@ import { useLoopStopReason } from "./useLoopStopReason";
 import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
 import {
+  hasVisibleAssistantContent,
   isAssistantToolStub,
   isIntermediateAssistantProgress,
   shouldAutoCollapseToolGroup,
@@ -128,6 +129,32 @@ const buildMessageRenderEntries = (
     if (!msg || typeof msg.id !== "string") continue;
     if (isHiddenOrchestratorToolMessage(msg)) continue;
     if (isAssistantToolStub(msg)) continue;
+
+    // An empty assistant row at the start of a tool loop is only a transport
+    // placeholder. Keep an empty final reply so MessageContent can show its
+    // retry affordance, but do not render the placeholder when this turn has
+    // visible work/content before the next user message.
+    const isEmptyAssistant =
+      msg.role === "assistant" &&
+      !hasVisibleAssistantContent(msg) &&
+      (!Array.isArray(msg.tool_calls) || msg.tool_calls.length === 0);
+    if (isEmptyAssistant) {
+      let hasLaterVisibleTurnContent = false;
+      for (let j = i + 1; j < messages.length; j += 1) {
+        const next = messages[j];
+        if (!next || isHiddenOrchestratorToolMessage(next) || isAssistantToolStub(next)) continue;
+        if (next.role === "user") break;
+        if (
+          next.role === "tool" ||
+          (next.role === "assistant" &&
+            (hasVisibleAssistantContent(next) || Array.isArray(next.tool_calls)))
+        ) {
+          hasLaterVisibleTurnContent = true;
+          break;
+        }
+      }
+      if (hasLaterVisibleTurnContent) continue;
+    }
 
     entries.push({ type: "single", key: msg.id, message: msg });
   }
@@ -592,18 +619,34 @@ const MessagesList: React.FC<MessagesListProps> = ({
             // Expand/collapse only — header status icons follow each group's tools.
             // Historical groups (user after) fold even while a later turn runs;
             // idle turns without a final reply also fold so chrome can settle.
-            const canCollapse = shouldAutoCollapseToolGroup({
-              entries: renderEntries,
-              groupIndex: entryIndex,
-              isRunning,
-              hasStreamingMessage,
-            });
+            const canCollapse =
+              shouldAutoCollapseToolGroup({
+                entries: renderEntries,
+                groupIndex: entryIndex,
+                isRunning,
+                hasStreamingMessage,
+              }) ||
+              // A stale session-level running flag must not keep settled tool
+              // UI open. The row's own streaming flag is the reliable UI fact.
+              (!hasStreamingMessage &&
+                entry.messages.every((message) => !message?.isStreaming));
+            const settledMessages =
+              canCollapse && !hasStreamingMessage
+                ? entry.messages.map((message) =>
+                    message?.toolPayload?.status === "running"
+                      ? {
+                          ...message,
+                          toolPayload: { ...message.toolPayload, status: "success" },
+                        }
+                      : message,
+                  )
+                : entry.messages;
             return (
               <React.Fragment key={entry.key}>
                 <div className="chat-messages__item-wrapper">
                   <MessageRowErrorBoundary>
                     <ToolMessageGroup
-                      messages={entry.messages}
+                      messages={settledMessages}
                       activityMessages={entry.activityMessages}
                       canCollapse={canCollapse}
                       conversationTodoEnabled={conversationTodoEnabled}
