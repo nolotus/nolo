@@ -1,4 +1,13 @@
 
+## 0.54.0-alpha.4
+
+## 0.54.0-alpha.4 (2026-09-09)
+
+### Bug Fixes
+
+* **desktop:** disable rpm strip for CEF-bundled Linux package ([72f2757](https://github.com/nolotus/bun-nolo/commit/72f275788444e7065947c6edefff6e47b26b5c2a))
+
+
 ## 0.54.0-alpha.3
 
 ## 0.54.0-alpha.3 (2026-09-09)

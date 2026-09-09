@@ -83,6 +83,11 @@ export const createLinuxRpmArtifact = async ({
     const rpmIconFilesLine = hasRpmIcon ? "/usr/share/icons/hicolor/512x512/apps/nolo-desktop.png" : "";
 
     const specContent = `
+# v2 Linux bundles CEF (libcef.so); rpm 的 brp-strip 对它报
+# "libcef.so[malloc_hook]: invalid operation" 挂掉 %install（2026-09-09
+# desktop-alpha-v0.54.0-alpha.3 linux job 实测）。我们发布的是预编译二进制，
+# strip 本无收益——把 %__strip 改成 /bin/true，brp-strip 随之变 no-op。
+%global __strip /bin/true
 Name:           nolo-desktop
 Version:        ${version}
 Release:        1%{?dist}
