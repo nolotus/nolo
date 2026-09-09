@@ -1,4 +1,17 @@
 
+## 0.56.0-alpha.1
+
+## 0.56.0-alpha.1 (2026-09-09)
+
+### Features
+
+* **desktop:** 重做更新设置页并修正更新状态机语义 ([15bf1cd](https://github.com/nolotus/bun-nolo/commit/15bf1cd59479386682f84f078158875cb62d5168))
+
+### Bug Fixes
+
+* **desktop:** 消除 dev 启动的 web 资源复制竞态（黑屏根因） ([3ecbbe3](https://github.com/nolotus/bun-nolo/commit/3ecbbe3a58de143d6717ace6faab827c38db68cb))
+
+
 ## 0.55.0-alpha.3
 
 ## 0.55.0-alpha.3 (2026-09-09)

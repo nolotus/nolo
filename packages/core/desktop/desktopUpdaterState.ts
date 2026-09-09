@@ -41,6 +41,7 @@ export type DesktopUpdaterSummaryPhase =
   | "ready_to_install"
   | "applying"
   | "up_to_date"
+  | "ahead_of_channel"
   | "invalid_remote"
   | "error";
 
@@ -80,6 +81,13 @@ const normalizeError = (value: string | undefined) => {
   return normalized ? normalized : null;
 };
 
+const getSummaryTone = (phase: DesktopUpdaterSummaryPhase): DesktopUpdaterSummary["tone"] => {
+  if (phase === "error" || phase === "invalid_remote") return "error";
+  if (phase === "ahead_of_channel" || phase === "ready_to_install") return "success";
+  if (["checking", "update_available", "downloading", "applying"].includes(phase)) return "info";
+  return "neutral";
+};
+
 export function deriveDesktopUpdaterSummary(
   input: Pick<
     DesktopUpdaterSnapshotInput,
@@ -112,6 +120,8 @@ export function deriveDesktopUpdaterSummary(
     phase = "downloading";
   } else if (input.activeOperation === "check" || latestStatusCode === "checking") {
     phase = "checking";
+  } else if (assessment.phase === "ahead_of_channel") {
+    phase = "ahead_of_channel";
   } else if (assessment.phase === "invalid_remote") {
     phase = "invalid_remote";
   } else if (assessment.phase === "ready_to_install") {
@@ -129,19 +139,7 @@ export function deriveDesktopUpdaterSummary(
 
   return {
     phase,
-    tone:
-      phase === "error"
-        ? "error"
-        : phase === "invalid_remote"
-        ? "error"
-        : phase === "ready_to_install"
-          ? "success"
-          : phase === "checking" ||
-              phase === "update_available" ||
-              phase === "downloading" ||
-              phase === "applying"
-            ? "info"
-            : "neutral",
+    tone: getSummaryTone(phase),
     isBusy,
     hasChecked: phase !== "not_checked",
     primaryAction,

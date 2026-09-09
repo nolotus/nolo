@@ -204,6 +204,21 @@
   color: var(--text);
 }
 
+.desktop-update-card__channel-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin: var(--space-1) 0;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font-size: var(--fontSize-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .desktop-update-card__badge {
   display: inline-flex;
   align-items: center;

@@ -319,8 +319,8 @@ export const DESKTOP_NAVIGATION_CHROME_SCRIPT = `
       const snapshot = await readDesktopUpdateSnapshot();
       applyDesktopUpdateButtonState(snapshot);
       applyBrandVersion(snapshot);
-      if (snapshot?.updateInfo?.updateReady) return snapshot;
-      if (attempt > 0 && !snapshot?.activeOperation) return snapshot;
+      if (snapshot?.updateInfo?.updateReady) return;
+      if (attempt > 0 && !snapshot?.activeOperation) return;
       await new Promise((resolve) => globalThis.setTimeout?.(resolve, 1000));
     }
     const snapshot = await readDesktopUpdateSnapshot();
@@ -370,15 +370,9 @@ export const DESKTOP_NAVIGATION_CHROME_SCRIPT = `
       })
         .then(async () => {
           if (nextAction === "download") {
-            const readySnapshot = await waitForDesktopUpdateReady();
-            if (readySnapshot?.updateInfo?.updateReady) {
-              await globalThis.fetch?.("/api/desktop-updater", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ action: "apply" }),
-              });
-            }
+            await waitForDesktopUpdateReady();
           }
+          // The apply endpoint body: JSON.stringify({ action: "apply" }) is only called by an explicit user action.
           await refreshDesktopUpdateButton();
         })
         .catch(() => {})

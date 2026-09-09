@@ -203,7 +203,22 @@ const getBundledAssetDirName = async () => {
   return match[1];
 };
 
-const copyBundledAssets = async () => {
+/**
+ * 复制期间的一致性协议：esbuild 只在构建成功结束时重写 latest-assets.json
+ * 并清理旧 chunk（见 scripts/dev/esDev.js 的 devBuildSignalPlugin），所以
+ * 复制前后信号文件内容一致 = 复制窗口内没有构建完成 = 快照自洽。
+ * 不一致（信号变化或 ENOENT）则整体重试；重试耗尽响亮报错——
+ * 宁可构建失败，也不能打包出 entry.js 引用了缺失 chunk 的黑屏应用。
+ */
+const ASSET_COPY_MAX_ATTEMPTS = 10;
+const ASSET_COPY_RETRY_DELAY_MS = 500;
+
+const readAssetBuildSignal = () =>
+  Bun.file(latestAssetsPath)
+    .text()
+    .catch(() => null);
+
+const copyBundledAssetsOnce = async () => {
   const bundledAssetDirName = await getBundledAssetDirName();
   const sourceAssetsDir = join(sourcePublicDir, bundledAssetDirName);
   const targetAssetsDir = join(desktopPublicDir, bundledAssetDirName);
@@ -217,23 +232,37 @@ const copyBundledAssets = async () => {
     const targetPath = join(targetAssetsDir, entry.name);
 
     if (entry.isDirectory()) {
-      try {
-        await cp(sourcePath, targetPath, {
-          recursive: true,
-          filter: (path) => !path.endsWith(".map"),
-        });
-      } catch (e: any) {
-        if (e.code !== "ENOENT") throw e;
-      }
+      await cp(sourcePath, targetPath, {
+        recursive: true,
+        filter: (path) => !path.endsWith(".map"),
+      });
       continue;
     }
 
+    await cp(sourcePath, targetPath);
+  }
+};
+
+const copyBundledAssets = async () => {
+  for (let attempt = 1; attempt <= ASSET_COPY_MAX_ATTEMPTS; attempt++) {
+    const signalBefore = await readAssetBuildSignal();
+    let copyComplete = true;
     try {
-      await cp(sourcePath, targetPath);
+      await copyBundledAssetsOnce();
     } catch (e: any) {
-      if (e.code !== "ENOENT") throw e;
+      if (e?.code !== "ENOENT" || attempt === ASSET_COPY_MAX_ATTEMPTS) throw e;
+      copyComplete = false;
+    }
+    const signalAfter = await readAssetBuildSignal();
+    if (copyComplete && signalBefore === signalAfter) return;
+    if (attempt < ASSET_COPY_MAX_ATTEMPTS) {
+      await Bun.sleep(ASSET_COPY_RETRY_DELAY_MS);
     }
   }
+  throw new Error(
+    `Web assets kept changing during desktop asset copy (${ASSET_COPY_MAX_ATTEMPTS} attempts). ` +
+      `Wait for the running web build to settle, then retry.`,
+  );
 };
 
 const copyTopLevelPublicFiles = async () => {

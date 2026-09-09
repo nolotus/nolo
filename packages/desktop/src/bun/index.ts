@@ -1496,6 +1496,7 @@ const notifyDesktopUpdateChrome = () => {
 };
 
 const scheduleInitialUpdateCheck = () => {
+  // 检查可以自动进行；下载与安装始终由用户在设置页或工具栏显式触发。
   const delayMs = Number(process.env.NOLO_DESKTOP_UPDATE_CHECK_DELAY_MS ?? 12000);
   setTimeout(async () => {
     try {

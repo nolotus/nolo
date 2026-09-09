@@ -37,6 +37,7 @@ export type DesktopUpdateAssessment = {
     | "not_checked"
     | "update_available"
     | "ready_to_install"
+    | "ahead_of_channel"
     | "invalid_remote";
   code: DesktopUpdateAssessmentCode;
   message: string | null;
@@ -165,10 +166,12 @@ export function assessDesktopUpdateCandidate(args: {
   }
 
   if (versionDelta < 0) {
-    return invalidAssessment(
-      "remote_downgrade",
-      `Blocked remote desktop update for ${args.platform}: remote version ${remoteVersion} is older than installed version ${args.localInfo.version}.`,
-    );
+    return {
+      phase: "ahead_of_channel",
+      code: "remote_downgrade",
+      message: `当前版本 ${args.localInfo.version} 已领先发布通道（通道版本 ${remoteVersion}），暂时没有可用更新。`,
+      primaryAction: null,
+    };
   }
 
   if (versionDelta === 0 && updateInfo.hash && updateInfo.hash !== args.localInfo.hash) {
