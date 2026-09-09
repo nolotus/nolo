@@ -33,6 +33,7 @@ import { getModelContextWindow } from "ai/llm/getModelContextWindow";
 import { projectToolMessageContent } from "./toolOutputPolicy";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { selectIdentityUserId } from "identity/selectors";
+import { getSessionSnapshotForState } from "identity/sessionSource";
 import {
     getModelPricing,
     getPrices,
@@ -450,9 +451,9 @@ export const validateAccessAndBalance = (
         // Platform path without balance: ask for login instead of a false "loading" state.
         // Prefer the session object over selectors alone so parallel test mocks of
         // `selectIdentityUserId` cannot mis-classify a logged-out client as "balance loading".
+        // Phase 5：auth slice 已删除（store 里恒为 {}），改读显式绑定的会话快照。
         const hasSessionUser = Boolean(
-            (state as { auth?: { currentUser?: { userId?: string } | null } })
-                ?.auth?.currentUser?.userId,
+            getSessionSnapshotForState(state)?.activeAccountId,
         );
         if (!currentUserId || !hasSessionUser) {
             return "请登录后使用平台模型，或改用本地自定义/API/CLI Agent。";
@@ -502,9 +503,9 @@ export const fetchMemoryOverlayContext = async (
     userInput: string | any[],
     dialogConfig?: DialogConfig,
 ): Promise<string | null> => {
-    const token = typeof (state as any)?.auth?.currentToken === "string"
-        ? (state as any).auth.currentToken
-        : null;
+    // Phase 5：auth slice 已删除（恒为 {}），token 与 hasSessionUser 同源，
+    // 直读显式绑定的会话快照（绕开可被兄弟套件 mock 的 selector 表）。
+    const token = getSessionSnapshotForState(state)?.activeToken ?? null;
     const currentServer = typeof (state as any)?.settings?.currentServer === "string"
         ? (state as any).settings.currentServer
         : null;

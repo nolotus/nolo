@@ -3,6 +3,7 @@
 
 import type { DialogConfig } from "app/types";
 import { selectById as selectDbRecordById } from "database/dbSlice";
+import { selectIdentityToken } from "identity/selectors";
 import { serializeMessageContent } from "./messageContent";
 import type { Message } from "./types";
 
@@ -74,8 +75,7 @@ export async function captureUnderstandingFromCompletedUiTurn(
   if (!latestUserInput) return;
 
   const state = input.state;
-  const token =
-    typeof state?.auth?.currentToken === "string" ? state.auth.currentToken : null;
+  const token = selectIdentityToken(state) ?? null;
   const baseUrl = resolveMemoryCaptureBaseUrl(state);
   // Anonymous / server-less sessions have nowhere to persist to. Recall is
   // equally unavailable there, so skipping keeps both sides consistent.

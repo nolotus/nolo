@@ -130,6 +130,8 @@ export type AgentRuntimeToolCallInput = {
   userInput?: string;
   /** Host-injected turn context; never supplied by the model. */
   runtimeContext?: Record<string, any> | null;
+  /** Canonical effective tool surface for local execution enforcement. */
+  runToolNames?: string[];
 };
 
 export type AgentRuntimeToolResult = {

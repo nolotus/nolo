@@ -88,6 +88,15 @@ export interface NormalizedUsage extends BillingUsageMetadata {
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
   cost: number;
+  /**
+   * Authoritative observed timing（见 ai/token/providerCallTiming）：Nolo
+   * logical invocation 的 monotonic 相对毫秒，落盘只存数值。只做观测——
+   * 不参与 billing/cache 计算，无独立 performance DB，selector 尚未消费。
+   * request 发出到第一条真实模型输出。仅流式调用有；非流式不伪造。
+   */
+  firstOutputMs?: number;
+  /** Authoritative observed timing：完整 provider call 的毫秒数。 */
+  callDurationMs?: number;
 }
 
 /** 请求入口路径，用于按调用面切片缓存命中率。 */
@@ -194,6 +203,15 @@ export interface TokenRecord {
   stable_prefix_estimated_tokens?: number;
   /** 请求入口路径，用于按调用面切片命中率。 */
   entry_path?: EntryPath;
+  /**
+   * Authoritative observed timing（见 ai/token/providerCallTiming）：Nolo
+   * logical invocation 的 monotonic 相对毫秒，落盘只存数值。只做观测——
+   * 不参与 billing/cache 计算，无独立 performance DB，selector 尚未消费。
+   * request 发出到第一条真实模型输出；仅流式调用有。无 timing 的旧记录缺省。
+   */
+  firstOutputMs?: number;
+  /** Authoritative observed timing：完整 provider call 的毫秒数；旧记录缺省。 */
+  callDurationMs?: number;
 }
 
 // Token统计数据

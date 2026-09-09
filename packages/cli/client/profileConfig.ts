@@ -13,7 +13,10 @@ import { canonicalizeNoloServerUrl } from "core/noloServerUrl";
 
 export type NoloProfile = {
   serverUrl: string;
+  /** Legacy single-account credential; read for backward compatibility only. */
   authToken?: string;
+  /** Account session credentials; index 0 is the active account. */
+  tokens?: string[];
   agentKey?: string;
   agentName?: string;
   /** TUI interface language saved by /lang; surfaces as NOLO_LANG. */
@@ -67,16 +70,52 @@ export function loadProfileConfig(path = getDefaultProfileConfigPath()): NoloPro
   return parsed;
 }
 
+function normalizeProfileTokens(profile: NoloProfile): string[] {
+  const tokens = Array.isArray(profile.tokens)
+    ? profile.tokens.filter((token): token is string => typeof token === "string" && token.trim().length > 0)
+    : [];
+  if (tokens.length > 0) return tokens;
+  return typeof profile.authToken === "string" && profile.authToken.trim()
+    ? [profile.authToken.trim()]
+    : [];
+}
+
 export function clearProfileAuthToken(path = getDefaultProfileConfigPath()): boolean {
   if (isProtectedHomeProfileWrite(path)) return false;
   const config = loadProfileConfig(path);
   if (!config) return false;
   const profile = config.profiles[config.currentProfile];
-  if (!profile?.authToken?.trim()) return false;
+  if (!profile || normalizeProfileTokens(profile).length === 0) return false;
   delete profile.authToken;
+  delete profile.tokens;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return true;
+}
+
+export function getProfileTokens(
+  config: NoloProfileConfig | null
+): string[] {
+  if (!config) return [];
+  const profile = config.profiles[config.currentProfile];
+  return profile ? normalizeProfileTokens(profile) : [];
+}
+
+export function saveProfileTokens(
+  tokens: readonly string[],
+  path = getDefaultProfileConfigPath()
+): NoloProfileConfig | null {
+  if (isProtectedHomeProfileWrite(path)) return null;
+  const config = loadProfileConfig(path);
+  if (!config) return null;
+  const profile = config.profiles[config.currentProfile];
+  if (!profile) return null;
+  const normalized = [...new Set(tokens.map((token) => token.trim()).filter(Boolean))];
+  profile.tokens = normalized;
+  delete profile.authToken;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return config;
 }
 
 export function saveDefaultProfile(
@@ -92,10 +131,21 @@ export function saveDefaultProfile(
     );
   }
   const existing = loadProfileConfig(path);
+  const existingDefault = existing?.profiles?.default;
+  // Legacy profiles may carry only `authToken`; normalizeProfileTokens folds
+  // that into the token list, so logging in on top of a legacy profile is
+  // upgraded to the canonical `tokens` shape by this same write.
+  const existingTokens = existingDefault ? normalizeProfileTokens(existingDefault) : [];
+  const authToken = profile.authToken.trim();
+  // Canonical form: `tokens[0]` is the active account and the legacy
+  // `authToken` mirror is always deleted. Dedupe is by exact token —
+  // re-login with the same token just promotes it to active; a different
+  // token keeps the previous one as a secondary account.
+  const { authToken: _legacyAuthToken, ...preserved } = existingDefault ?? {};
   const mergedDefault: NoloProfile = {
-    ...(existing?.profiles?.default ?? {}),
+    ...preserved,
     serverUrl: normalizeProfileServerUrl(profile.serverUrl),
-    authToken: profile.authToken.trim(),
+    tokens: [authToken, ...existingTokens.filter((token) => token !== authToken)],
   };
   const config: NoloProfileConfig = {
     currentProfile: "default",
@@ -118,7 +168,7 @@ export function buildEnvFromProfile(
   return {
     NOLO_PROFILE: config.currentProfile,
     NOLO_SERVER: profile.serverUrl,
-    ...(profile.authToken?.trim() ? { AUTH_TOKEN: profile.authToken.trim() } : {}),
+    ...(getProfileTokens(config)[0] ? { AUTH_TOKEN: getProfileTokens(config)[0] } : {}),
     ...(profile.agentKey ? { NOLO_AGENT: profile.agentKey } : {}),
     ...(profile.agentName ? { NOLO_AGENT_NAME: profile.agentName } : {}),
     ...(profile.locale ? { NOLO_LANG: profile.locale } : {}),

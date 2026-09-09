@@ -17,7 +17,7 @@ export const codeSearchFunctionSchema = {
         "使用 ripgrep (rg) 在项目代码中搜索文本，或按 glob 列出文件。",
         "",
         "推荐场景：",
-        "- mode=content：按关键词搜索代码内容，替代旧的 searchRepo。",
+        "- mode=content：按关键词搜索代码内容。",
         "- mode=files：按路径范围和 glob 列出文件。",
         "",
         "参数说明：",

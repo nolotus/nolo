@@ -27,6 +27,7 @@ import {
 } from "database/authority/deviceLocal";
 import { isTombstoneRecord } from "database/tombstones";
 import { SPACE_MEMBERSHIP_REMOTE_UNAVAILABLE } from "./isSpaceMembershipRemoteUnavailableError";
+import { selectIdentityUserId } from "identity/selectors";
 
 type MembershipWithSource = SpaceMemberWithSpaceInfo & {
   sourceServer?: string;
@@ -536,7 +537,7 @@ export const fetchUserSpaceMembershipsAction = async (
       // account's list. resetSpace clears memberSpaces but cannot cancel an
       // already-running promise, so we gate the dispatch here.
       const activeUserId =
-        thunkAPI.getState()?.auth?.currentUser?.userId ?? null;
+        selectIdentityUserId(thunkAPI.getState()) ?? null;
       if (activeUserId !== userId) return;
       if (rawRecovered.length === 0) return;
       // Strip internal-only fields before dispatch, mirroring the thunk's

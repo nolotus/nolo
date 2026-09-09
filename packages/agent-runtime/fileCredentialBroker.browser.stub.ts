@@ -3,7 +3,7 @@
  *
  * - Public web: in-memory Map (session-only).
  * - Desktop webview: HTTP bridge to host Bun `POST /api/desktop/credentials`
- *   which persists via createFileCredentialBroker under ~/.nolo/credentials/keys/.
+ *   which persists via createFileCredentialBroker under `$NOLO_HOME/credentials/keys/` (or `~/.nolo/credentials/keys/` when `NOLO_HOME` is unset).
  *
  * Host put failures must throw so migrate never strips raw keys silently.
  */

@@ -7,8 +7,16 @@ import type { AgentRuntimeMessageContent } from "./types";
  * 引入 repair prompt 时，不会意外带入 localLoop 及其 Node 原生模块依赖（child_process, fs, path）。
  */
 
+/**
+ * 空轮修复提示。工具相关措辞必须与声明边界一致：模型空轮的常见根因之一是
+ * 试图调用「未在本次请求中声明」的工具——上游（如 antigravity）会把这种
+ * functionCall 静默剥掉、返回 STOP + 空正文。若此时还笼统鼓励「直接输出
+ * tool_calls」，模型只会反复重发那个注定被剥掉的调用，直至熔断（2026-09-08
+ * 生产实证：分享 agent tools:[] 场景，指名调用未声明的 listDir/bash 必现）。
+ * 因此提示必须钉死边界：只能用已声明的工具，缺工具就用文字说明能力边界。
+ */
 export const EMPTY_ASSISTANT_REPAIR_PROMPT =
-  "请给出明确的文字回答或执行下一步：如果任务已完成，请直接总结结果；如果需要调用工具，请直接输出 tool_calls。请切勿返回空内容。";
+  "请给出明确的文字回答或执行下一步：如果任务已完成，请直接总结结果；如果需要调用工具，只能调用本次请求中已声明的工具——你想用的工具不在声明列表中时，不要尝试调用它，直接用文字说明该能力当前不可用。请切勿返回空内容。";
 export const EMPTY_ASSISTANT_FALLBACK_MESSAGE =
   "模型连续返回空消息，当前任务未完成。请重试当前步骤，或给出更具体的修改范围。";
 

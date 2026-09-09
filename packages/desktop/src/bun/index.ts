@@ -493,6 +493,13 @@ process.env[DESKTOP_ENTRYPOINT_ENV_VAR] = join(import.meta.dir, "index.js");
 // Packaged builds used to chdir to EXECUTABLE_DIR, which made every execShell
 // inherit the install dir (`...\Nolo Desktop\bin\` on Windows) and broke all
 // relative paths; the user's home dir is the safer default workspace root.
+// Electrobun resolves its FFI dylibs from `dirname(process.argv0)` and
+// `process.cwd()`; the dev launcher spawns `./bun` (relative argv0), so once
+// the chdir below runs, both dlopen candidates resolve against the NEW cwd
+// and FFI init fails with "Electrobun FFI is unavailable". Absolutize argv0
+// up-front so dylib resolution stays correct no matter where we chdir.
+process.argv0 = resolve(process.argv0);
+
 const desktopCwdOverride = process.env.NOLO_DESKTOP_CWD?.trim();
 if (desktopCwdOverride) {
     process.chdir(desktopCwdOverride);

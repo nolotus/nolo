@@ -15,8 +15,11 @@
 // - deliberately NOT recorded: Design Arena website Elo (changelog confirms
 //   the model additions but the public page exposes no stable exact values),
 //   Muse Spark 1.3 (Artificial Analysis Intelligence Index is not a
-//   domain-specific quality benchmark; output speed / TTFT belong to a future
-//   separate speed dimension), pre-4.0 Terminal-Bench snapshots.
+//   domain-specific quality benchmark; speed is already observed at runtime as
+//   firstOutputMs / callDurationMs timing facts on token records — see
+//   ai/token/providerCallTiming.ts — but the model selector does not consume
+//   those observed-speed facts yet, so there is still no speed dimension here),
+//   pre-4.0 Terminal-Bench snapshots.
 
 import type { ModelQualityEvidence } from "./modelQualityEvidence";
 

@@ -5,8 +5,7 @@ import type { RouteObject, Location as RouterLocation } from "app/routing";
 import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
 
-import { useAppDispatch, useAppSelector } from "app/store";
-import { initializeAuth } from "identity/actions";
+import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { useIdentity } from "identity";
 import i18n from "app/i18n/client";
 import { addHostToCurrentServer, getSettings } from "app/settings/settingSlice";
@@ -56,6 +55,7 @@ type BackgroundState = {
 
 export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
   const dispatch = useAppDispatch();
+  const accountSession = useAccountSessionService();
   // useIdentity().userId 是 SSR-safe（mount 前返回 undefined，与 SSR 一致），
   // 避免 hydrate 首帧 userId 不匹配导致 React 丢弃 SSR DOM → 白屏。
   const { userId } = useIdentity();
@@ -106,7 +106,11 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
           if (!isDesktopApp) {
             dispatch(addHostToCurrentServer(runtimeOrigin));
           }
-          await dispatch(initializeAuth()).unwrap();
+          // Phase 2: initialization orchestration lives in the session service.
+          if (!accountSession) {
+            throw new Error("account session service unavailable");
+          }
+          await accountSession.initialize();
         } catch (e) {
           console.error("系统初始化失败:", e);
         }

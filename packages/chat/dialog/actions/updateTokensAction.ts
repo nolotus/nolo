@@ -10,7 +10,8 @@ import {
   saveTokenRecord,
 } from "ai/token/saveTokenRecord";
 import { createClientLogger } from "core/clientLogger";
-import { deductBalance } from "identity/actions"; // <--- 1. 导入新的 deductBalance action
+import type { AccountSessionService } from "identity/types";
+import { selectIdentityUser } from "identity/selectors";
 import { prepareTokenUsageData } from "ai/token/prepareTokenUsageData";
 import { findModelConfig } from "ai/llm/providers";
 import { resolveMessageOwner } from "chat/messages/resolveMessageOwner";
@@ -149,7 +150,7 @@ export const updateTokensAction = async (
   thunkApi: any
 ) => {
   const state = thunkApi.getState();
-  const { currentUser } = state.auth;
+  const currentUser = selectIdentityUser(state);
   // Same owner priority as message writes (resolveMessageOwner): dialog
   // config → dialog key (dialog-local-*) → account → "local". Logged-out
   // local dialogs produce token-local-* / token-stats-day-user-local-* and
@@ -238,7 +239,11 @@ export const updateTokensAction = async (
 
   if (persistedTokenData.billable === true ||
       (persistedTokenData.billable === undefined && result.cost > 0)) {
-    thunkApi.dispatch(deductBalance(result.cost));
+    // Phase 5: deduction goes straight to the explicit AccountSessionService
+    // carried in the thunk extra (extra.accountSession). Null in SSR / local
+    // edition → no deduction, matching the retired identity/actions shim.
+    (thunkApi.extra?.accountSession as AccountSessionService | null | undefined)
+      ?.deductBalance(result.cost);
   }
 
   if (dialogKey) {

@@ -9,7 +9,11 @@ import {
 } from "app/viewTransitions";
 import { toast } from "app/utils/toast"
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
+import {
+  useAccountSessionService,
+  useAppDispatch,
+  useAppSelector,
+} from "app/store";
 import {
   createDialog, type PendingFile, clearPendingAttachments, usePendingFiles, } from "chat/dialog/dialogSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
@@ -30,7 +34,7 @@ import { useFileDropZone } from "app/hooks/useFileDropZone";
 import { shouldDeferEnterForIme } from "app/utils/ime";
 import { compactWorkspacePath } from "app/utils/compactWorkspacePath";
 import { read, selectEntities } from "database/dbSlice";
-import { fetchUserProfile } from "identity/actions";
+import { fetchAccountProfile } from "identity/accountProfile";
 import {
   selectSpaceById,
 } from "create/space/spaceCurrentSelectors";
@@ -172,6 +176,8 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const currentUserBalance = useAppSelector(selectIdentityUserBalance);
   const { currentServer, currentToken: token } =
     useAppSelector(selectRuntimeSnapshot);
+  // Phase 5：余额刷新直连 auth/session，写入显式解析的 AccountSessionService。
+  const accountSession = useAccountSessionService();
   const ocrModel = useAppSelector(selectOcrModel);
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
@@ -300,6 +306,11 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   );
 
   const ensureCurrentBalanceLoaded = useCallback(async () => {
+    // Local edition / no session service: balance check is skipped (no billing).
+    if (!accountSession) {
+      return undefined;
+    }
+
     if (typeof currentUserBalanceRef.current === "number") {
       return currentUserBalanceRef.current;
     }
@@ -309,10 +320,17 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
 
     if (!balanceLoadPromiseRef.current) {
-      balanceLoadPromiseRef.current = Promise.resolve(
-        dispatch(fetchUserProfile()).unwrap()
-      )
+      // server/token 缺参由 fetchAccountProfile 自身校验并抛
+      // missing_profile_request_params，走与旧 thunk 一致的统一错误路径。
+      balanceLoadPromiseRef.current = fetchAccountProfile({
+        serverUrl: currentServer ?? "",
+        token: token ?? "",
+        userId: currentUserId,
+      })
         .then((profile) => {
+          // 与旧 fetchUserProfile thunk 一致：刷新结果回写会话 Core（余额等），
+          // 失败原样抛给调用方的统一错误处理（notifyStartupError / toast）。
+          accountSession?.updateAccountProfile(profile);
           const nextBalance =
             typeof profile?.balance === "number"
               ? profile.balance
@@ -329,7 +347,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
 
     return balanceLoadPromiseRef.current;
-  }, [currentUserId, dispatch]);
+  }, [accountSession, currentServer, currentUserId, token]);
 
   const startQuickChat = useCallback(async (overrideText?: string) => {
     const startedAt = getQuickChatPerfNow();

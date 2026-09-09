@@ -1,5 +1,6 @@
 import type { RootState } from "app/store";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
+import { selectIdentityUser } from "identity/selectors";
 import { getAllServers } from "database/actions/common";
 import type { UserAuthorityRegistry } from "database/authority/userAuthorityRegistry";
 
@@ -45,7 +46,9 @@ const resolveRuntimeUserAuthorityRegistry = (
     return settingsRegistry as UserAuthorityRegistry;
   }
 
-  const userRegistry = (state.auth?.currentUser as any)?.authorityRegistry;
+  const userRegistry = (selectIdentityUser(state) as {
+    authorityRegistry?: unknown;
+  } | null)?.authorityRegistry;
   if (userRegistry && typeof userRegistry === "object") {
     return userRegistry as UserAuthorityRegistry;
   }

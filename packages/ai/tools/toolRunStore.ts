@@ -18,6 +18,7 @@ import {
 import { useSyncExternalStore } from "react";
 import { toErrorMessage } from "core/errorMessage";
 import { asOptionalTrimmedString } from "core/optionalString";
+import { selectIdentityUserId } from "identity/selectors";
 import type { ProcessLaunchInfo } from "chat/messages/types";
 import type { ToolBehavior, ToolInteraction } from ".";
 import { getToolResultErrorData } from "./toolResultError";
@@ -342,7 +343,8 @@ export const executeToolRun: AsyncThunk<
 
       if (run.toolName === "deleteSpaces") {
         const latestState = thunkApi.getState() as any;
-        const userId = latestState.auth?.currentUser?.userId;
+        // Phase 5：auth slice 已删除（恒为 {}），userId 走显式绑定的会话。
+        const userId = selectIdentityUserId(latestState);
         if (userId) {
           const { fetchUserSpaceMemberships } = await import("create/space/member/memberThunks");
           await thunkApi.dispatch(fetchUserSpaceMemberships(userId) as any);

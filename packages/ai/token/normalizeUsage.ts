@@ -8,6 +8,9 @@ import {
   readCacheCreationInputTokens,
   readCacheReadInputTokens,
 } from "./cacheTokenFields";
+// Observed timing（firstOutputMs / callDurationMs）统一走共享归一化：
+// 有限、非负、取整毫秒；无效值丢弃。见 providerCallTiming.normalizeTimingMs。
+import { normalizeTimingMs } from "./providerCallTiming";
 import { RawUsage, NormalizedUsage } from "./types";
 
 const normalizeStringArray = (value: unknown): string[] | undefined => {
@@ -34,6 +37,9 @@ const readFiniteNumberField = (
 
 const readCostInUsdTicks = (usage: unknown): number | undefined =>
   readFiniteNumberField(usage, "cost_in_usd_ticks");
+
+// Observed timing 字段（firstOutputMs / callDurationMs）统一走共享归一化：
+// 有限、非负、取整毫秒；无效值丢弃。见 ai/token/providerCallTiming。
 
 export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUsage => {
   if (!usage || typeof usage !== "object") {
@@ -105,6 +111,17 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
   const providerRequestIds = normalizeStringArray(
     (usage as any).provider_request_ids
   );
+  // Alpha/production rows written by Phase 1 before the canonical rename may
+  // still arrive at this boundary. Read the legacy aliases only here; all
+  // normalized output and new writes remain canonical.
+  const firstOutputMs = normalizeTimingMs(
+    readFiniteNumberField(usage, "firstOutputMs") ??
+      readFiniteNumberField(usage, "firstTokenMs"),
+  );
+  const callDurationMs = normalizeTimingMs(
+    readFiniteNumberField(usage, "callDurationMs") ??
+      readFiniteNumberField(usage, "durationMs"),
+  );
 
   return {
     input_tokens: inputTokens,
@@ -131,5 +148,7 @@ export const normalizeUsage = (usage: RawUsage | null | undefined): NormalizedUs
     ...(serverBilled ? { server_billed: true } : {}),
     ...(providerCallId ? { provider_call_id: providerCallId } : {}),
     ...(xaiTicks !== undefined ? { cost_in_usd_ticks: xaiTicks } : {}),
+    ...(firstOutputMs !== undefined ? { firstOutputMs } : {}),
+    ...(callDurationMs !== undefined ? { callDurationMs } : {}),
   };
 };

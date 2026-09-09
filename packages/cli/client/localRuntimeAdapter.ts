@@ -640,10 +640,16 @@ export function createCliLocalRuntimeAdapter(
             systemBuiltinSkills,
           )
         : [];
+      const effectiveToolNames = [...requestedToolNames, ...additionalToolNames];
       activeAgentToolNames = buildLocalPolicyToolNames({
         agentKey: agentConfig?.key,
-        toolNames: [...requestedToolNames, ...additionalToolNames],
+        toolNames: effectiveToolNames,
         env: deps.env,
+        buildProviderOpenAiTools: (toolArgs) =>
+          buildOpenAiTools({
+            ...toolArgs,
+            effectiveToolNames,
+          }),
       });
       runtimeToolExecutionLimits =
         resolveLocalWorkspaceExecutorOptionsFromPolicy(
@@ -721,8 +727,12 @@ export function createCliLocalRuntimeAdapter(
         output: deps.output,
         cwd: workspaceRoot,
         titleGenerator: createLocalDialogTitleGenerator(deps, {
-          apiKeyRefResolver: createOAuthApiKeyRefResolver(),
-          credentialBroker: createFileCredentialBroker(),
+          apiKeyRefResolver: createOAuthApiKeyRefResolver({
+            migration: { enableLegacyMigration: true },
+          }),
+          credentialBroker: createFileCredentialBroker({
+            migration: { enableLegacyMigration: true },
+          }),
           loopbackRequest,
         }),
       }),
@@ -806,8 +816,15 @@ export function createCliLocalRuntimeAdapter(
 
       // Local-first: OAuth resolver + file credential broker (metered API keys).
       // Broker is preferred inside buildProviderExecutionPlan when both are present.
-      const apiKeyRefResolver = createOAuthApiKeyRefResolver();
-      const credentialBroker = createFileCredentialBroker();
+      const legacyCredentialMigration = {
+        enableLegacyMigration: true,
+      } as const;
+      const apiKeyRefResolver = createOAuthApiKeyRefResolver({
+        migration: legacyCredentialMigration,
+      });
+      const credentialBroker = createFileCredentialBroker({
+        migration: legacyCredentialMigration,
+      });
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
       const authToken = asOptionalTrimmedString(deps.env.AUTH_TOKEN);
       const syncFetcher = authToken
@@ -908,6 +925,7 @@ export function createCliLocalRuntimeAdapter(
       const result = await executeLocalToolWithPolicy({
         env: deps.env,
         agentToolNames: activeAgentToolNames,
+        runToolNames: activeAgentToolNames,
         call: injectedCall,
         executors: localToolExecutors,
         abortSignal: opts?.abortSignal,

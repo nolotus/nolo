@@ -1,5 +1,12 @@
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+  isMeaningfulResponsesOutput,
+  observeMeaningfulProviderResponse,
+  withProviderCallTimingFields,
+} from "ai/token/providerCallTiming";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 import type { CredentialBroker } from "./credentialBroker";
 import type {
@@ -59,6 +66,7 @@ import {
   applyChatCompletionDelta,
   extractChatCompletionStreamError,
   flushChatCompletionStream,
+  observeFirstMeaningfulChatCompletionDelta,
   throwIfChatCompletionStreamFailed,
   type ChatCompletionStreamError,
   type ChatCompletionStreamState,
@@ -340,7 +348,7 @@ export function buildPlatformChatCompletionRequest(args: {
         // nolo.chat）：某个时间窗内 SSE 响应带 content-encoding: gzip 返回，
         // 整条流被攒成 1 个 chunk，首字节 = 总生成时长（5.8/10.6/16.3s）；
         // 同一分钟交替发起的 identity 请求为 123-138 chunks、首字节
-        // 1.2-3.6s。即压缩中间件一旦介入，流式的全部 TTFT 收益归零。
+        // 1.2-3.6s。即压缩中间件一旦介入，流式的首个输出收益归零。
         // 该窗口之后线上不再压缩 SSE（同一探针 6/6 未压缩），具体是哪一跳
         // 压的没有定论；边缘侧已把流式路径排除出 encode
         // （configureCaddyProxy.sh），这里是不依赖任何中间跳行为的客户端兜底
@@ -581,6 +589,9 @@ function processPlatformChatSseEvent(
       if (dsml.content) {
         state.content += dsml.content;
         state.onTextDelta?.(dsml.content);
+        if (isMeaningfulResponsesOutput(parsed)) {
+          observeFirstMeaningfulChatCompletionDelta(state);
+        }
       }
       continue;
     }
@@ -590,6 +601,9 @@ function processPlatformChatSseEvent(
     ) {
       state.reasoning += parsed.delta;
       state.onReasoningDelta?.(parsed.delta);
+      if (isMeaningfulResponsesOutput(parsed)) {
+        observeFirstMeaningfulChatCompletionDelta(state);
+      }
       continue;
     }
     if (
@@ -598,6 +612,9 @@ function processPlatformChatSseEvent(
       eventType === "response.function_call_arguments.delta" ||
       eventType === "response.function_call_arguments.done"
     ) {
+      if (isMeaningfulResponsesOutput(parsed)) {
+        observeFirstMeaningfulChatCompletionDelta(state);
+      }
       applyResponsesToolEvent(state.responsesToolCalls, parsed);
       continue;
     }
@@ -614,6 +631,8 @@ export async function readPlatformChatSseCompletion(args: {
   usesResponsesApi: boolean;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
+  /** Observed-speed timing：首个有效 delta 到达时触发一次。 */
+  onMeaningfulDelta?: () => void;
 }) {
   const startedAtMs = Date.now();
   let frameCount = 0;
@@ -625,6 +644,7 @@ export async function readPlatformChatSseCompletion(args: {
     usesResponsesApi: args.usesResponsesApi,
     onTextDelta: args.onTextDelta,
     onReasoningDelta: args.onReasoningDelta,
+    ...(args.onMeaningfulDelta ? { onMeaningfulDelta: args.onMeaningfulDelta } : {}),
     completedResponsesPayload: undefined as any,
     responsesToolCalls: createResponsesToolAccumulator(),
     dsmlToolCallState: createDsmlParserState(),
@@ -810,6 +830,9 @@ export async function executePlatformChatCompletion(args: {
       )
     : undefined;
   const startedAtMs = Date.now();
+  // Observed provider-call timing：从请求发出到完整收尾（含流式读毕）。
+  const timingTracker = createProviderCallTimingTracker();
+  const observeMeaningful = () => observeMeaningfulProviderResponse(timingTracker);
   let res: Response;
   try {
     res = await args.fetchImpl(request.url, {
@@ -857,14 +880,24 @@ export async function executePlatformChatCompletion(args: {
     Boolean(args.stream && (args.onTextDelta || args.onReasoningDelta)) &&
     contentType.includes("text/event-stream");
 
+  // timing 只在返回组装时收尾一次；usage 缺席就没有载体（不硬造记录）。
+  const withTiming = <T extends { usage?: Record<string, any> }>(result: T): T => {
+    const usage = withProviderCallTimingFields(
+      result.usage,
+      finalizeProviderCallTiming(timingTracker),
+    );
+    return { ...result, ...(usage ? { usage } : {}) };
+  };
+
   if (shouldStream) {
     const streamed = await readPlatformChatSseCompletion({
       response: res,
       usesResponsesApi,
       ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
       ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
+      onMeaningfulDelta: observeMeaningful,
     });
-    return {
+    return withTiming({
       content: streamed.content,
       model: args.providerConfig.model,
       provider: args.providerConfig.provider,
@@ -878,16 +911,17 @@ export async function executePlatformChatCompletion(args: {
       // openAiCompatibleProvider 的穿透对齐。
       ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
       trace: args.messages,
-    };
+    });
   }
 
   const raw = await res.text().catch(() => "");
   const data = parsePlatformChatCompletionData(raw);
-  return parsePlatformChatCompletionResponse({
+  // 非流式：没有 first-output 语义，只落 callDurationMs。
+  return withTiming(parsePlatformChatCompletionResponse({
     providerConfig: args.providerConfig,
     data,
     trace: args.messages,
-  });
+  }));
 }
 
 /**

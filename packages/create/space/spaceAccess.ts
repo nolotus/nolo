@@ -3,6 +3,7 @@ import { createSpaceKey, normalizeSpaceId } from "create/space/spaceKeys";
 import { fetchFromServer, getAllServers } from "database/actions/common";
 import { normalizeKnownServerOrigin } from "database/config";
 import { isTombstoneRecord } from "database/tombstones";
+import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
 
 export interface SpaceRemoteAuth {
   token: string | null;
@@ -28,8 +29,8 @@ const resolveSpaceRemoteServers = (state: any): string[] => {
 };
 
 export const selectSpaceRemoteAuth = (state: any): SpaceRemoteAuth => ({
-  token: state?.auth?.currentToken ?? null,
-  userId: state?.auth?.currentUser?.userId ?? null,
+  token: selectIdentityToken(state) ?? null,
+  userId: selectIdentityUserId(state) ?? null,
   servers: resolveSpaceRemoteServers(state),
 });
 

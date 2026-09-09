@@ -16,6 +16,7 @@
 
 import { callToolApi, getToolRequestContext } from "../toolApiClient";
 import { listenToDialogEvents } from "ai/agent/runAgentBackground";
+import { selectIdentityUserId } from "identity/selectors";
 import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
@@ -393,7 +394,9 @@ async function handleAppend(
 ): Promise<{ rawData: any; displayData: string }> {
     try {
         const state = thunkApi.getState?.() ?? {};
-        const userId = (state as any)?.identity?.currentUser?.userId ?? (state as any)?.auth?.currentUser?.userId;
+        // Phase 5：identity 不再是 Redux domain，auth fallback 也随 slice 删除；
+        // userId 一律来自显式绑定的 AccountSessionCore。
+        const userId = selectIdentityUserId(state);
         const resolvedKey =
             opts.dialogKey ||
             (opts.runId?.startsWith("dialog-")

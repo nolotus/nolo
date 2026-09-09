@@ -651,12 +651,17 @@ export async function resolveDesktopConfiguredProvider(args: {
       const choice = Array.isArray(body.choices) ? body.choices[0] : undefined;
       const message = choice?.message ?? {};
       const content = typeof message.content === "string" ? message.content : "";
+      const reasoning_content =
+        typeof (message as { reasoning_content?: unknown }).reasoning_content === "string"
+          ? (message as { reasoning_content: string }).reasoning_content
+          : undefined;
       if (content && onTextDelta) onTextDelta(content);
       return {
         content,
         model: String(body.model || model),
         provider: args.agentConfig.provider || ref,
         ...(Array.isArray(message.tool_calls) ? { tool_calls: message.tool_calls } : {}),
+        ...(reasoning_content ? { reasoning_content } : {}),
         // 透传收尾元数据：finish_reason 让消费方区分「正常说完/撞长度/要调工具」，
         // stream_complete 证明聚合后的 body 已完整（desktop 空轮同样有误报截断风险）。
         finish_reason: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined,
@@ -728,12 +733,32 @@ export async function resolveDesktopConfiguredProvider(args: {
             onReasoningDelta: options?.onReasoningDelta,
             fetchImpl,
           });
+          await recordAgentAvailabilityFromResponse({ agent: args.agentConfig as any, status: result.status, body: result.body });
+          if (result.providerFailure) {
+            return {
+              content: "",
+              model,
+              provider: args.agentConfig.provider || "google-antigravity",
+              finish_reason: "error",
+              stream_complete: true,
+              error: true,
+              errorMessage: result.providerFailure.message,
+              providerEvents: result.providerEvents,
+              providerFailure: result.providerFailure,
+              runtimeProviderFailure: result.runtimeProviderFailure,
+              trace: messages,
+            };
+          }
           if (result.status !== 200) {
-            await recordAgentAvailabilityFromResponse({ agent: args.agentConfig as any, status: result.status, body: result.body });
             throw new Error(`local Antigravity OAuth provider failed: HTTP ${result.status} ${JSON.stringify(result.body)}`);
           }
-          await recordAgentAvailabilityFromResponse({ agent: args.agentConfig as any, status: result.status, body: result.body });
-          return completeFromOpenAiShape(result.body, messages);
+          const res = completeFromOpenAiShape(result.body, messages);
+          return {
+            ...res,
+            providerEvents: result.providerEvents,
+            ...(result.providerFailure ? { providerFailure: result.providerFailure } : {}),
+            ...(result.runtimeProviderFailure ? { runtimeProviderFailure: result.runtimeProviderFailure } : {}),
+          };
         },
       };
     }

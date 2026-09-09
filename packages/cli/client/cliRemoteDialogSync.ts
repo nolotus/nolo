@@ -14,7 +14,6 @@
 
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliFetchImpl } from "../cliFetch";
 import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
@@ -36,10 +35,6 @@ export function prepareRemoteDialogEvidenceRecord(key: string, value: any) {
     record.type = "msg";
   }
   return record;
-}
-
-export function normalizeRemoteStringList(value: unknown): string[] {
-  return [...new Set(asTrimmedNonEmptyStringArray(value))];
 }
 
 function normalizeRemoteSubjectRef(value: unknown) {
@@ -259,12 +254,6 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
     args.childDialogRecord.subjectRefs,
     [{ kind: "dialog", id: childDialogId, role: "completed-child-dialog" }],
   );
-  const allowedToolNames = normalizeRemoteStringList(
-    args.input.runtimeContext?.allowedToolNames,
-  );
-  const blockedToolNames = normalizeRemoteStringList(
-    args.input.runtimeContext?.blockedToolNames,
-  );
   const wakeResponse = await args.fetchImpl(`${args.serverUrl}/api/agent/run`, {
     method: "POST",
     headers: {
@@ -294,8 +283,6 @@ async function maybeWakeParentDialogAfterLocalSync(args: {
           terminalStatus: "done",
         }),
         subjectRefs,
-        ...(allowedToolNames.length ? { allowedToolNames } : {}),
-        ...(blockedToolNames.length ? { blockedToolNames } : {}),
       },
     }),
   });

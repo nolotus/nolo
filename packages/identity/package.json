@@ -30,11 +30,26 @@
     "./useDeleteOwnAccountFlow": {
       "default": "./useDeleteOwnAccountFlow.local.ts"
     },
+    "./useIdentity": {
+      "default": "./useIdentity.local.ts"
+    },
+    "./accountProfile": {
+      "default": "./accountProfile.local.ts"
+    },
+    "./storeSession": {
+      "default": "./storeSession.local.ts"
+    },
     "./cloudLazy": {
       "default": "./cloudLazy.tsx"
     },
     "./types": {
       "default": "./types.ts"
+    },
+    "./sessionSource": {
+      "default": "./sessionSource.ts"
+    },
+    "./session/accountSessionStore": {
+      "default": "./session/accountSessionStore.ts"
     }
   },
   "devDependencies": {

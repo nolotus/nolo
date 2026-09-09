@@ -68,6 +68,7 @@ import type { DesktopAgentRuntimeEnv } from "./desktopAgentRuntimeHostFacts";
 import { readXPostFunc, readXPostFunctionSchema } from "ai/tools/readXPostTool";
 import { readXhsProfileFunc, readXhsProfileFunctionSchema } from "ai/tools/readXhsProfileTool";
 import { TOOL_PACKS, FORCED_TOOLS, applyDisabledTools, expandEnabledPacks, resolveEffectiveEnabledPacks, applySystemBuiltinSkillFilter } from "ai/tools/toolPacks";
+import { applyToolSurfaceConstraints } from "agent-runtime";
 import { resolveAgentRequiredPackIds } from "ai/tools/agentSkillConfig";
 import { prepareTools } from "ai/tools/prepareTools";
 import { inferCaptureIntent } from "ai/policy/runtimePolicy";
@@ -79,7 +80,7 @@ import { INTERACTION_REQUIRED_TOOL_NAMES } from "agent-runtime/agentRunIsolation
  * than DESKTOP_REMOTE_REQUEST_TIMEOUT_MS (which covers long provider calls).
  * The turn must not stall on a slow memory service.
  */
-const DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS = 5_000;
+const DESKTOP_MEMORY_OVERLAY_TIMEOUT_MS = 1_000;
 import {
   buildSpaceContextLayer,
   buildUserGlobalPromptLayer,
@@ -615,7 +616,8 @@ function buildDesktopLocalToolExecutors(args: {
   createId?: () => string;
   runChildDesktopTurn?: DesktopStartAgentRunChildRunner;
 }) {
-  return {
+  const allowedNames = args.toolNames ? new Set(args.toolNames) : null;
+  const executors = {
     ...createLocalWorkspaceToolExecutors({
       workspaceRoot: args.workspaceRoot,
       commandTimeoutMs: args.commandTimeoutMs,
@@ -692,6 +694,9 @@ function buildDesktopLocalToolExecutors(args: {
       };
     },
   };
+  return allowedNames
+    ? Object.fromEntries(Object.entries(executors).filter(([name]) => allowedNames.has(name)))
+    : executors;
 }
 
 export const buildDesktopChromeConnectorOpenAiToolsForTest = buildDesktopChromeConnectorOpenAiTools;
@@ -998,11 +1003,27 @@ export function createDesktopAgentRuntimeActions(args: {
         requestedToolNames,
         (agentConfig as any)?.disabledTools,
       );
+      requestedToolNames = applyToolSurfaceConstraints(
+        {
+          explicitToolNames: requestedToolNames,
+          injectedToolNames: [],
+          finalToolNames: requestedToolNames,
+        },
+        {
+          allowedToolNames: Array.isArray(args.runtimeContext?.allowedToolNames)
+            ? args.runtimeContext.allowedToolNames
+            : undefined,
+          blockedToolNames: args.runtimeContext?.blockedToolNames,
+        },
+      ).finalToolNames;
 
       activeAgentToolNames = buildDesktopLocalPolicyToolNames({
         toolNames: requestedToolNames,
         env: activeEnv,
-        useDeclaredToolNamesOnly,
+        useDeclaredToolNamesOnly:
+          useDeclaredToolNamesOnly ||
+          args.runtimeContext?.allowedToolNames !== undefined ||
+          args.runtimeContext?.blockedToolNames !== undefined,
       });
       const executionLimits = resolveLocalWorkspaceExecutorOptionsFromPolicy(currentRunPolicy);
       executors = buildDesktopLocalToolExecutors({
@@ -1037,6 +1058,7 @@ export function createDesktopAgentRuntimeActions(args: {
           blockDestructiveWithoutConfirmation: true,
           env: activeEnv,
           agentToolNames: activeAgentToolNames,
+          runToolNames: activeAgentToolNames,
           call,
           executors,
         }),
@@ -1047,6 +1069,7 @@ export function createDesktopAgentRuntimeActions(args: {
       blockDestructiveWithoutConfirmation: true,
       env: activeEnv,
       agentToolNames: activeAgentToolNames,
+      runToolNames: activeAgentToolNames,
       call,
       executors,
     }),

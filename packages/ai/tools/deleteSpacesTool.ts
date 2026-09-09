@@ -1,4 +1,4 @@
-import { selectIdentityUserId } from "identity/selectors";
+import { selectIdentityUserId, selectIdentityToken } from "identity/selectors";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { deleteSpace } from "create/space/spaceThunks";
@@ -95,7 +95,7 @@ const defaultDeps: DeleteSpacesToolDeps = {
   },
   deleteServerKey: async (thunkApi, server, dbKey) => {
     const state = thunkApi.getState();
-    const token = state?.auth?.currentToken;
+    const token = selectIdentityToken(state);
     if (!server) {
       return { ok: false, status: 0, detail: "missing server" };
     }

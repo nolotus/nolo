@@ -13,6 +13,7 @@
  */
 import { flushThinkParser, processThinkChunk, type ThinkParseState } from "./thinkTagParser";
 import { extractUsageFromSsePayload } from "ai/token/sseUsageExtract";
+import { isMeaningfulChatCompletionOutput } from "ai/token/providerCallTiming";
 import {
   accumulateToolCallDelta,
   type ToolCallAccumulator,
@@ -49,7 +50,26 @@ export type ChatCompletionStreamState = {
   toolCallTextState: ToolCallTextParseState;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
+  /**
+   * Observed-speed timing：首个有效模型内容（reasoning/text/tool-call 的
+   * 非空 delta）到达时触发一次。heartbeat/usage/billing 帧与空 delta 不会
+   * 触发。见 ai/token/providerCallTiming。
+   */
+  onMeaningfulDelta?: () => void;
+  /** 首个有效 delta 是否已触发（去重标记）。 */
+  sawMeaningfulDelta?: boolean;
 };
+
+/**
+ * 首个有效 delta 判据点：只在第一次命中时回调 onMeaningfulDelta，之后静默。
+ */
+export function observeFirstMeaningfulChatCompletionDelta(
+  state: ChatCompletionStreamState,
+): void {
+  if (!state.onMeaningfulDelta || state.sawMeaningfulDelta) return;
+  state.sawMeaningfulDelta = true;
+  state.onMeaningfulDelta();
+}
 
 /**
  * 从一个已解析的 SSE data 对象里提取错误帧。
@@ -150,6 +170,14 @@ export function applyChatCompletionDelta(
 
   const delta = parsed?.choices?.[0]?.delta;
   if (!delta || typeof delta !== "object") return false;
+
+  // 共享 first-output 判据（ai/token/providerCallTiming）：reasoning/text/
+  // tool-call 的非空 delta 才算有效输出；server 代理与 loop.ts 的原始帧路径
+  // 用同一判据，两侧语义不得漂移。判定一次、去重交给
+  // observeFirstMeaningfulChatCompletionDelta。
+  if (isMeaningfulChatCompletionOutput(delta)) {
+    observeFirstMeaningfulChatCompletionDelta(state);
+  }
 
   // reasoning_content (DeepSeek) / reasoning (Ollama, Qwen3)
   // Note: tool-call text markers in reasoning are not stripped here —

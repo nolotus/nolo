@@ -16,6 +16,9 @@
 | `identity/authReducer` | `authReducer.cloud.ts` | `authReducer.local.ts` | auth reducer |
 | `identity/authTypes` | `authTypes.cloud.ts` | `authTypes.local.ts` | TokenManager 等类型 |
 | `identity/useDeleteOwnAccountFlow` | `useDeleteOwnAccountFlow.cloud.ts` | `useDeleteOwnAccountFlow.local.ts` | 删账号 hook |
+| `identity/useIdentity` | `useIdentity.cloud.ts` | `useIdentity.local.ts` | 身份读取 React hook |
+| `identity/accountProfile` | `accountProfile.cloud.ts` | `accountProfile.local.ts` | 账号 Profile 读取 |
+| `identity/storeSession` | `storeSession.cloud.ts` | `storeSession.local.ts` | Redux store 会话运行时组装 |
 
 非 edition 导出（两版共用）：`identity`（barrel）、`identity/cloudLazy`（条件 lazy helper）、`identity/types`。
 

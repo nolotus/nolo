@@ -1,5 +1,6 @@
 // database/requests.ts
 import { isAbortError } from "core/abortError";
+import { selectIdentityToken } from "identity/selectors";
 import { API_ENDPOINTS } from "./config";
 
 
@@ -46,8 +47,8 @@ export const noloRequest = async (
   const headers: Record<string, string> = (config.headers as Record<string, string>) || {
     "Content-Type": "application/json",
   };
-  // 从 state 中安全地获取 token
-  const token = state?.auth?.currentToken;
+  // 从绑定的 AccountSessionCore 读 token（Phase 5：state.auth 已删）
+  const token = selectIdentityToken(state) ?? null;
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }

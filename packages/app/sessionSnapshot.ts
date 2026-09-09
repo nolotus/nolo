@@ -1,15 +1,13 @@
-// 会话快照桥：把 redux 里的身份/服务器状态镜像为模块级快照，
-// 让 usage 域（useUsageApiDeps / 余额卡片）读端脱离 redux API。
-//
-// 设计：
-// - 本文件**零依赖**（不 import 任何 slice/selector）——快照的读取函数
-//   （SnapshotReader）由 createAppStore 用闭包注入（见 app/store.ts），
-//   避免把 reducer 树静态拉进用法域 import 图（曾因循环 import 炸测试）。
-// - 写端仍是 redux reducer；本模块仅订阅镜像。
-// - 读端一律 useSyncExternalStore(get/set)；测试 mock.module 本文件即可，
-//   无需 redux Provider。
-// - 未来全量剥离 redux 时，把 configureSessionSnapshot 换成模块 setter，
-//   读端零改动。
+/**
+ * @deprecated Legacy compatibility projection.
+ * 会话快照桥：旧 app/settings 读端（usage 域卡片、浪点配置、多服务器删除）的过渡镜像。
+ *
+ * 架构边界说明（Phase 1.1+）：
+ * - identity / account / token / balance 的权威读端已迁至 `AccountSessionCore`（`packages/auth/session` 与 `identity` hooks）。
+ * - 业务与身份 UI 禁止新增对本文件的依赖。
+ * - server / servers 等设置域状态未来将迁移至独立 settings / runtime 快照。
+ * - 本文件仅保留供现有 usage/surf widget 等 legacy 消费方兼容使用。
+ */
 import { useSyncExternalStore } from "react";
 
 export interface SessionSnapshot {

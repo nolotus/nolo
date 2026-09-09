@@ -18,6 +18,7 @@
 import { clipCompactText } from "core/clipCompactText";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
+import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
 import type { ManagedRuntime } from "effect";
 import {
   createLocalLoopObservationBoundary,
@@ -41,7 +42,6 @@ import type {
   AgentRuntimeResult,
   AgentRuntimeToolCall,
 } from "./types";
-
 import { sanitizeToolCallPairing } from "./toolCallPairing";
 import { downgradeUnparsableToolCalls, hasParsableObjectArguments } from "./outboundHistorySanitize";
 import { summarizeToolArguments } from "./summarizeToolArguments";
@@ -1416,7 +1416,7 @@ export async function runLocalAgentTurn(
     // 注意：模块级计时状态为单 turn 设计，并发跑多个 turn 且开启门控时数据会交错
     // （仅调试工具，不影响生产路径）。
     loopTimingMark("turnStart", 0);
-  const agentConfig = await input.adapter.loadAgentConfig(input.agentRef);
+  let agentConfig = await input.adapter.loadAgentConfig(input.agentRef);
   if (!agentConfig) {
     const error = new Error(
       `agentRef "${input.agentRef}" 未匹配到本地 agent。这不是配置缺失，请用 listAgents 查看可用 agent，再用 readAgent 解析 agentKey，勿手工拼 key。`,
@@ -1427,6 +1427,32 @@ export async function runLocalAgentTurn(
     error.code = LOCAL_AGENT_CONFIG_MISSING_CODE;
     error.agentRef = input.agentRef;
     throw error;
+  }
+  const runtimeContext = input.runtimeContext;
+  const runConstraints = {
+    allowedToolNames: Array.isArray(runtimeContext?.allowedToolNames)
+      ? runtimeContext.allowedToolNames
+      : undefined,
+    blockedToolNames: Array.isArray(runtimeContext?.blockedToolNames)
+      ? runtimeContext.blockedToolNames
+      : undefined,
+  };
+  if (runConstraints.allowedToolNames !== undefined || runConstraints.blockedToolNames !== undefined) {
+    const toolNames = Array.isArray(agentConfig.toolNames) ? agentConfig.toolNames : [];
+    const constrainedSurface = applyToolSurfaceConstraints(
+      { explicitToolNames: toolNames, injectedToolNames: [], finalToolNames: toolNames },
+      runConstraints,
+    );
+    agentConfig = {
+      ...agentConfig,
+      toolNames: constrainedSurface.finalToolNames,
+      exposedToolNames: constrainedSurface.finalToolNames,
+      ...(agentConfig.rawRecord
+        ? { rawRecord: { ...agentConfig.rawRecord, toolNames: constrainedSurface.finalToolNames } }
+        : {}),
+      toolSurface: constrainedSurface,
+      runScopedToolSurface: constrainedSurface,
+    } as typeof agentConfig;
   }
   const rawBillingConfig = agentConfig.rawRecord ?? {};
   const billingConfig: NonNullable<AgentRuntimeSaveTurnInput["billingConfig"]> = {
@@ -1805,6 +1831,14 @@ export async function runLocalAgentTurn(
         };
         break;
       }
+      if (result.runtimeProviderFailure) {
+        result = {
+          ...result,
+          error: true,
+          errorMessage: result.runtimeProviderFailure.message,
+        };
+        break;
+      }
       const toolCalls = result.tool_calls ?? [];
       const rawToolCallsCount = (result.tool_calls?.length ?? 0) || (Array.isArray((result as any).raw_tool_calls) ? (result as any).raw_tool_calls.length : 0);
       loopTimingMark("postLlmProcessing", round);
@@ -2058,6 +2092,9 @@ export async function runLocalAgentTurn(
               ...(userInputText ? { userInput: userInputText } : {}),
               ...(input.runtimeContext
                 ? { runtimeContext: input.runtimeContext }
+                : {}),
+              ...((agentConfig as any).runScopedToolSurface?.finalToolNames
+                ? { runToolNames: (agentConfig as any).runScopedToolSurface.finalToolNames }
                 : {}),
               ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
             }, {

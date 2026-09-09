@@ -1,13 +1,21 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, rm } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { validateWorkspacePackageLinks } from "../../../scripts/dev/workspaceLinkGuard";
-import { patchElectrobunMacosFfi } from "./patch-electrobun-macos-ffi";
-import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import { ensureBundledRipgrep } from "./ensure-bundled-ripgrep";
-import { ensureElectrobunCore } from "./ensure-electrobun-core";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
+const desktopRoot = resolve(import.meta.dir, "..");
+const generatedDir = join(desktopRoot, ".generated");
+const vendorDir = join(generatedDir, "vendor");
+// electrobun 2 copy keys may not escape the project root (UnsafeOutputPath),
+// so every runtime tree that lives outside packages/desktop is physically
+// staged here and the copy map references the in-root path only.
+const chromiumBidiStubDir = join(vendorDir, "chromium-bidi");
+// Cottontail's bundler resolves bare specifiers from the repo root's
+// node_modules (it ignores packages/desktop's own tree), so the generated
+// stub must be written there to be resolvable at bundle time.
+const chromiumBidiStubInstallDir = join(repoRoot, "node_modules", "chromium-bidi");
 const sourcePublicDir = join(repoRoot, "public");
 const sourceAssetsDir = join(sourcePublicDir, "assets");
 const sourceAssetBuildManifestDir = join(sourcePublicDir, ".asset-builds");
@@ -33,27 +41,100 @@ if (workspaceLinkErrors.length > 0) {
   throw new Error(`Unsafe workspace package links:\n${workspaceLinkErrors.join("\n")}`);
 }
 
-patchElectrobunMacosFfi();
+// --- electrobun 2 staging -------------------------------------------------
+//
+// 1) Runtime node_modules trees (LevelDB stack). electrobun v1 copied these
+//    via build.copy entries pointing at the repo-root node_modules; v2
+//    rejects copy keys that escape the project root (UnsafeOutputPath), so
+//    stage them into .generated/vendor/<pkg> and copy from there. classic-
+//    level resolves its native .node prebuild via node-gyp-build at runtime,
+//    so the whole tree (not just JS) must be physically present inside the
+//    packaged app at Resources/app/node_modules/<name>.
+// 2) chromium-bidi stub. hutch 0.24.3 drops build.bun.external from the
+//    cottontail build spec (upstream bug — external/minify/sourcemap/define
+//    never reach Bun.build), so playwright-core gets bundled and its
+//    coreBundle eagerly requires "chromium-bidi/lib/cjs/..." paths that no
+//    longer exist upstream. Provide a resolvable inert stub package so the
+//    bundler resolves it; this must not depend on hand-patched node_modules.
+const stagedNodeModuleNames = [
+  "abstract-level",
+  "classic-level",
+  "is-buffer",
+  "level-supports",
+  "level-transcoder",
+  "maybe-combine-errors",
+  "module-error",
+  "node-gyp-build",
+] as const;
+const stagedWorkspacePackages = [
+  { name: "desktop-chrome-connector", destName: "desktop-chrome-connector" },
+  { name: "integrations/x-reader", destName: "x-reader" },
+  { name: "integrations/xhs-reader", destName: "xhs-reader" },
+] as const;
 
-// Electrobun 1.18.4-beta.6 on Windows ships without ElectrobunCore.dll in
-// dist-win-x64/. The CLI launcher only auto-downloads the CLI tarball, not
-// the core tarball, so dev/build fails with ENOENT. This detects the gap and
-// downloads the matching core tarball from the GitHub release.
-try {
-  const core = await ensureElectrobunCore();
-  if (core.patched) {
-    console.log(`[pre-build] electrobun core binaries ensured in ${core.distDir}`);
+const stageRuntimeTrees = async () => {
+  if (process.env.NOLO_DESKTOP_SKIP_VENDOR_STAGE === "1") {
+    console.warn("[pre-build] skipping vendor staging (NOLO_DESKTOP_SKIP_VENDOR_STAGE=1)");
+    return;
   }
-  patchElectrobunWindowsCore();
-} catch (error) {
-  if (process.env.NOLO_DESKTOP_SKIP_ELECTROBUN_CORE === "1") {
-    console.warn("[pre-build] electrobun core ensure skipped:", error);
-  } else {
-    throw new Error(
-      `Failed to ensure electrobun core binaries. Set NOLO_DESKTOP_SKIP_ELECTROBUN_CORE=1 to bypass.\n${error}`,
-    );
+  await rm(vendorDir, { recursive: true, force: true });
+  for (const name of stagedNodeModuleNames) {
+    const source = join(repoRoot, "node_modules", name);
+    if (!existsSync(source)) {
+      throw new Error(
+        `Missing runtime dependency to stage: ${source}. Run "bun install" at the repo root first.`
+      );
+    }
+    const target = join(vendorDir, "node_modules", name);
+    await cp(source, target, { recursive: true });
   }
-}
+  for (const { name, destName } of stagedWorkspacePackages) {
+    const source = join(repoRoot, "packages", name);
+    const target = join(vendorDir, "packages", destName);
+    await cp(source, target, { recursive: true });
+  }
+};
+
+/**
+ * Write an inert chromium-bidi stub package so the cottontail bundler can
+ * resolve playwright-core's eager
+ * require("chromium-bidi/lib/cjs/{bidiMapper/BidiMapper,cdp/CdpConnection}")
+ * without hand-patching node_modules. The canonical copy lives in
+ * .generated/vendor/chromium-bidi; it is mirrored into the repo-root
+ * node_modules because that is where Cottontail resolves bare specifiers.
+ * See electrobun.config.ts build.bun external note for the upstream hutch
+ * bug (spec drops `external`) this works around.
+ */
+const writeChromiumBidiStub = async () => {
+  await mkdir(chromiumBidiStubDir, { recursive: true });
+  const files: Array<[string, string]> = [
+    [
+      "package.json",
+      JSON.stringify(
+        {
+          name: "chromium-bidi",
+          version: "0.0.0-nolo-desktop-stub",
+          main: "./lib/cjs/stub.js",
+        },
+        null,
+        2
+      ) + "\n",
+    ],
+    ["lib/cjs/bidiMapper/BidiMapper.js", "// chromium-bidi stub (see packages/desktop/scripts/pre-build.ts): playwright-core's bundled coreBundle eagerly requires this path; the project never uses the bidi channel.\nmodule.exports = {};\n"],
+    ["lib/cjs/cdp/CdpConnection.js", "// chromium-bidi stub (see packages/desktop/scripts/pre-build.ts): playwright-core's bundled coreBundle eagerly requires this path; the project never uses the bidi channel.\nmodule.exports = {};\n"],
+  ];
+  for (const [relPath, content] of files) {
+    const target = join(chromiumBidiStubDir, relPath);
+    await mkdir(resolve(target, ".."), { recursive: true });
+    await writeFile(target, content);
+  }
+  // Mirror into the location Cottontail actually resolves from (idempotent).
+  // NOTE: 与把 chromium-bidi 加入 devDependencies 互斥——此处每次无条件
+  // rm+覆盖 repo 根 node_modules/chromium-bidi；若未来改用真实包（上游
+  // hutch 修复 external 丢弃后），必须连同本 stub 生成逻辑一起删除。
+  await rm(chromiumBidiStubInstallDir, { recursive: true, force: true });
+  await cp(chromiumBidiStubDir, chromiumBidiStubInstallDir, { recursive: true });
+};
 
 // Stage platform ripgrep for Desktop local codeSearch/globFiles (does not require user brew install).
 try {
@@ -173,6 +254,9 @@ const copyPublicRuntimeDirectories = async () => {
     await copyRequiredDir(join(sourcePublicDir, dirName), join(desktopPublicDir, dirName));
   }
 };
+
+await stageRuntimeTrees();
+await writeChromiumBidiStub();
 
 await rm(desktopPublicDir, { recursive: true, force: true });
 await mkdir(desktopPublicDir, { recursive: true });

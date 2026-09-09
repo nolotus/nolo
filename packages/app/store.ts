@@ -1,11 +1,19 @@
-import { configureStore, type ThunkDispatch, type UnknownAction } from "@reduxjs/toolkit";
-import { TypedUseSelectorHook, useDispatch, useSelector } from "react-redux";
+import { configureStore, combineReducers, type ThunkDispatch, type UnknownAction } from "@reduxjs/toolkit";
+import { useContext } from "react";
+import { ReactReduxContext, TypedUseSelectorHook, useDispatch, useSelector } from "react-redux";
 import { reducer } from "./reducer";
 import {
   attachSessionSnapshot,
   configureSessionSnapshot,
 } from "app/sessionSnapshot";
 import { selectRemoteServer, selectRemoteServers } from "app/settings/settingSlice";
+import {
+  bindStoreSessionRuntime,
+  createStoreSessionCore,
+  type AccountSessionCore,
+  type AccountSessionService,
+} from "identity/storeSession";
+import { withIdentitySessionReader } from "identity/sessionSource";
 import { selectIdentityUserBalance, selectIdentityUserId, selectIdentityToken } from "identity";
 import type { TokenManager } from "identity/authTypes";
 import type { Level } from "level";
@@ -27,6 +35,13 @@ export interface RootState {
 export type AppExtra = {
   db: Level<string, any> | null;
   tokenManager: TokenManager | null;
+  /**
+   * Session orchestration owner (Phase 2). Populated by `createAppStore` when a
+   * Core + TokenManager are available (browser / RN); null in SSR. Auth slice
+   * lifecycle thunks delegate to it, and web callers may use it directly via
+   * `getAccountSessionService` / `useAccountSessionService`.
+   */
+  accountSession?: AccountSessionService | null;
   /**
    * Chat queue adapter (cross-platform queue core → Redux bridge). Populated
    * after the store is created in `createAppStore`. Lifecycle thunks
@@ -83,6 +98,7 @@ interface CreateStoreOptions {
   dbInstance?: Level<string, any>;
   tokenManager?: TokenManager;
   preloadedState?: Partial<RootState>;
+  accountSessionCore?: AccountSessionCore;
 }
 
 export const createAppStore = (options: CreateStoreOptions = {}): any => {
@@ -126,16 +142,43 @@ const createAppStoreInner = (options: CreateStoreOptions = {}): any => {
   const extra: AppExtra = {
     db: dbInstance || null,
     tokenManager: tokenManager || null,
+    accountSession: null,
   };
 
+  // Session ownership (Phase 5): AccountSessionService owns the lifecycle
+  // orchestration, AccountSessionCore owns identity state. There is no Redux
+  // mirror and no module-global Core: web/desktop creates its Core per store
+  // here; SSR (no window) creates no Core and no service — per-request stores
+  // must not share mutable session state.
+  const sessionCore =
+    options.accountSessionCore || createStoreSessionCore();
+
   const store = configureStore({
-    reducer,
+    // Per-store identity binding (Phase 5): every state this store produces
+    // carries its own runtime's snapshot reader, so the non-React identity
+    // selectors resolve the owning store's session even when several stores
+    // are composed in one process (tests, RN fast refresh). SSR (no Core)
+    // stays unwrapped and reads logged-out.
+    reducer: sessionCore
+      ? withIdentitySessionReader(
+          combineReducers(reducer as Record<string, any>),
+          sessionCore
+        )
+      : reducer,
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({
         serializableCheck: false,
         thunk: { extraArgument: extra },
       }),
     preloadedState,
+  });
+
+  bindStoreSessionRuntime({
+    store,
+    extra,
+    sessionCore,
+    tokenManager,
+    getServerUrl: () => selectRemoteServer(store.getState() as any),
   });
 
   // Wire the chat queue adapter now that the store exists. Dynamic import to
@@ -158,6 +201,33 @@ export type AppStore = any;
 
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
 export const useAppDispatch = () => useDispatch<AppDispatch>();
+
+/** Read the session orchestration owner bound to a store (null when absent). */
+export const getAccountSessionService = (
+  store: { accountSession?: AccountSessionService | null } | null | undefined
+): AccountSessionService | null => store?.accountSession ?? null;
+
+/**
+ * Detach a store's session runtime. Idempotent: safe to call repeatedly and
+ * on stores that never composed a session runtime (SSR). Runtimes that
+ * recreate stores (tests, RN fast refresh) must dispose stale stores.
+ */
+export const disposeAccountSessionStore = (
+  store: { disposeAccountSession?: () => void } | null | undefined
+): void => {
+  store?.disposeAccountSession?.();
+};
+
+/**
+ * Hook form for web callers that issue session commands directly.
+ * Provider-less/SSR safe: resolves to null when no store context exists.
+ */
+export const useAccountSessionService = (): AccountSessionService | null => {
+  const contextValue = useContext(ReactReduxContext) as
+    | { store?: { accountSession?: AccountSessionService | null } }
+    | undefined;
+  return getAccountSessionService(contextValue?.store);
+};
 
 declare global {
   interface Window {

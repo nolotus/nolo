@@ -31,7 +31,7 @@ type AgentCredentialBrokerFactory = (
   options?: CreateFileCredentialBrokerOptions
 ) => CredentialBroker;
 
-/** Production default: file-backed broker under ~/.nolo/credentials/keys. */
+/** Production default: file-backed broker under `$NOLO_HOME/credentials/keys/` (or `~/.nolo/credentials/keys/` when `NOLO_HOME` is unset). */
 let createAgentCredentialBroker: AgentCredentialBrokerFactory =
   createFileCredentialBroker;
 

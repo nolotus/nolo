@@ -1,4 +1,5 @@
 import { registerRNUploadAdapter } from "./requests";
+import { selectIdentityToken } from "identity/selectors";
 import { API_ENDPOINTS } from "./config";
 
 export const initRNUploadAdapter = () => {
@@ -9,7 +10,7 @@ export const initRNUploadAdapter = () => {
 
     const ReactNativeBlobUtil = (await import("react-native-blob-util")).default;
     const wrappedPath = ReactNativeBlobUtil.wrap(normalizeBlobUtilPath((file as any).uri));
-    const token = state?.auth?.currentToken;
+    const token = selectIdentityToken(state) ?? null;
     const headers: Record<string, string> = {
       "Content-Type": "multipart/form-data",
     };

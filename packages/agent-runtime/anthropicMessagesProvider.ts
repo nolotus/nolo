@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { isAdaptiveThinkingModelId } from "integrations/anthropic/anthropicOAuthModels";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+} from "ai/token/providerCallTiming";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 
 export const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -478,6 +482,10 @@ export async function fetchAnthropicMessagesCompletion(args: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<{ status: number; body: JsonRecord; headers?: Headers }> {
+  // Observed Nolo logical invocation timing。非流式（一次性 JSON body）没有
+  // first-output 语义，不伪造 firstOutputMs，只落 callDurationMs
+  // （见 ai/token/providerCallTiming）。
+  const timingTracker = createProviderCallTimingTracker();
   const response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: {
@@ -496,7 +504,16 @@ export async function fetchAnthropicMessagesCompletion(args: {
     error: { message: await response.text().catch(() => response.statusText) },
   }))) as JsonRecord;
   if (!response.ok) return { status: response.status, body: payload, headers: response.headers };
-  return { status: 200, body: mapAnthropicMessageToOpenAi(payload) };
+  const mapped = mapAnthropicMessageToOpenAi(payload);
+  const timing = finalizeProviderCallTiming(timingTracker);
+  const usage = (mapped as { usage?: Record<string, unknown> }).usage;
+  if (usage && typeof usage === "object" && timing.callDurationMs !== undefined) {
+    (mapped as { usage: Record<string, unknown> }).usage = {
+      ...usage,
+      callDurationMs: timing.callDurationMs,
+    };
+  }
+  return { status: 200, body: mapped };
 }
 
 export function isAnthropicOAuthAgent(

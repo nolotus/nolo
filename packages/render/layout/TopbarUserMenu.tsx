@@ -25,15 +25,10 @@ import {
   Button as RacButton } from
 "react-aria-components";
 
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
+import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { SettingRoutePaths } from "app/settings/config";
-import {
-  selectUsers,
-  signOut,
-  changeUser,
-  fetchUserProfile,
-} from "identity/actions";
-import { useCurrentUser, useUserId } from "identity";
+import { useCurrentUser, useUserId, useAccounts } from "identity";
 import { cloudLazy } from "identity/cloudLazy";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { Tooltip } from "render/web/ui/Tooltip";
@@ -87,9 +82,10 @@ const TopbarUserMenu: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();
+  const accountSession = useAccountSessionService();
   const authUser = useCurrentUser();
 
-  const users = useAppSelector(selectUsers);
+  const users = useAccounts();
   const currentUserId = useUserId();
   const balance = useAppSelector(selectIdentityUserBalance);
   const currentServer = useAppSelector(selectRuntimeCurrentServer);
@@ -107,11 +103,9 @@ const TopbarUserMenu: React.FC = () => {
   [users, currentUserId]
   );
 
-  useEffect(() => {
-    if (currentUserId) {
-      dispatch(fetchUserProfile());
-    }
-  }, [currentUserId, dispatch]);
+  // Phase 5: profile refresh via the explicit AccountSessionService (see
+  // useAccountProfileRefresh) — no identity/actions thunk dispatch.
+  useAccountProfileRefresh();
 
   const isMobile = useIsMobile(768);
 
@@ -125,8 +119,9 @@ const TopbarUserMenu: React.FC = () => {
   }, [navigate]);
 
   const handleLogout = useCallback(() => {
-    dispatch(signOut() as any).unwrap().then(() => navigate("/"));
-  }, [dispatch, navigate]);
+    // Phase 2: 登出编排由 AccountSessionService 拥有；Redux 仅镜像 Core。
+    accountSession?.signOut().then(() => navigate("/"));
+  }, [accountSession, navigate]);
 
   const handleOpenLifeUsage = useCallback(() => {
     setMenuOpen(false);
@@ -277,7 +272,7 @@ const TopbarUserMenu: React.FC = () => {
                   <div className="topbar-user-menu__list">
                     {otherUsers.map((u: any) => u &&
                       <Tooltip key={u.userId} content={t("switchToThisAccount", "切换账号")} placement="left" disabled={isMobile}>
-                        <UserMenuItem icon={LuUser} text={u.username} onClick={() => dispatch(changeUser(u))} onClose={() => setMenuOpen(false)} />
+                        <UserMenuItem icon={LuUser} text={u.username} onClick={() => void accountSession?.switchAccount(u.userId).catch(() => {})} onClose={() => setMenuOpen(false)} />
                       </Tooltip>
                     )}
                   </div>

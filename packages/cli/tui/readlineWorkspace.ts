@@ -13,6 +13,7 @@ import {
   readLastAgentSelectionAudit,
   saveProfileAgentSelection,
 } from "../client/profileConfig";
+import { createTuiAccountSessionRuntime } from "./accountSessionRuntime";
 import {
   checkForCliUpdate,
   runSelfUpdateDetailed,
@@ -439,10 +440,14 @@ function persistAgentSelection(
 let latestWorkspaceThemeOwner = 0;
 
 async function runTuiWorkspace(options: WorkspaceOptions) {
+  const accountSessionRuntime = createTuiAccountSessionRuntime(options.env ?? process.env);
+  try {
   // Locale detection at module load only sees process.env; the workspace env
   // merges the profile config (NOLO_LANG from /lang) on top.
-  initCliLocale(options.env ?? process.env);
-  let state = createInitialTuiState(options.env ?? process.env);
+  const runtimeEnv = options.env ?? process.env;
+  initCliLocale(runtimeEnv);
+  await accountSessionRuntime.initialize();
+  let state = createInitialTuiState(runtimeEnv);
   // 启动预热 agent 目录缓存：/agent 打开即命中（SWR，后台失败静默）。
   prefetchAgentCatalog({ env: options.env ?? process.env });
   const input = options.input ?? defaultInput;
@@ -2128,6 +2133,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     sessionEnded = true;
     rl.close();
   }
+} finally {
+  accountSessionRuntime.dispose();
+}
 }
 
 export async function startTuiWorkspace(options: WorkspaceOptions) {

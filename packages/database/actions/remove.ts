@@ -2,6 +2,7 @@
 
 import type { DbThunkApi } from "database/thunkApiTypes";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
+import { selectIdentityToken } from "identity/selectors";
 
 import { fetchFromClientDb } from "./common";
 import { deleteFileFromIndexedDb } from "../fileStorage";
@@ -41,7 +42,7 @@ export const removeAction = async (
     preferredServerOrigin,
     currentServer,
     syncServers,
-    hasToken: Boolean(state?.auth?.currentToken),
+    hasToken: Boolean(selectIdentityToken(state)),
   });
 
   // 1) 先查本地是否有这条数据

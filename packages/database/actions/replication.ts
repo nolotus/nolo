@@ -1,5 +1,6 @@
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
+import { selectIdentityUserId, selectIdentityUser } from "identity/selectors";
 import { getAllServers } from "./common";
 import {
   noloDeleteRequest,
@@ -20,7 +21,7 @@ const isReadonlyPublicRecordKey = (dbKey: string): boolean =>
   dbKey.startsWith("agent-pub-");
 
 const normalizeCurrentUserId = (state: any): string | null => {
-  const userId = state?.auth?.currentUser?.userId;
+  const userId = selectIdentityUserId(state);
   return asOptionalTrimmedString(userId) ?? null;
 };
 
@@ -53,11 +54,12 @@ export const resolveAuthorityReplicationServers = ({
   const authority = resolveRecordAuthority({
     dbKey,
     record,
-    currentUserId: state?.auth?.currentUser?.userId,
+    currentUserId: selectIdentityUserId(state),
     currentServer,
     userAuthorityRegistry:
       state?.settings?.userAuthorityRegistry ??
-      state?.auth?.currentUser?.authorityRegistry,
+      (selectIdentityUser(state) as { authorityRegistry?: unknown } | null)
+        ?.authorityRegistry,
   });
 
   // Device-local records must never leave the device.
@@ -151,11 +153,12 @@ export const resolveUploadReplicationServers = ({
   const authority = resolveRecordAuthority({
     dbKey: uploadConfig.customKey,
     record: uploadConfig.metadata,
-    currentUserId: state?.auth?.currentUser?.userId,
+    currentUserId: selectIdentityUserId(state),
     currentServer,
     userAuthorityRegistry:
       state?.settings?.userAuthorityRegistry ??
-      state?.auth?.currentUser?.authorityRegistry,
+      (selectIdentityUser(state) as { authorityRegistry?: unknown } | null)
+        ?.authorityRegistry,
   });
 
   if (authority.ownerUserId || authority.authorityServer) {
@@ -200,7 +203,8 @@ export const scheduleExistingRecordReplication = ({
     currentServer,
     userAuthorityRegistry:
       state?.settings?.userAuthorityRegistry ??
-      state?.auth?.currentUser?.authorityRegistry,
+      (selectIdentityUser(state) as { authorityRegistry?: unknown } | null)
+        ?.authorityRegistry,
   });
   if (authority.ownerUserId && currentUserId && authority.ownerUserId !== currentUserId) {
     return [];
@@ -226,7 +230,7 @@ export const scheduleExistingRecordReplication = ({
       userId:
         typeof localData?.userId === "string"
           ? localData.userId
-          : state?.auth?.currentUser?.userId,
+          : selectIdentityUserId(state),
     },
     state
   );

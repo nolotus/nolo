@@ -97,6 +97,13 @@ export type AgentRuntimeOutputBlock =
       result?: { content: string; metadata?: Record<string, unknown> };
     };
 
+export type RuntimeProviderFailure = {
+  /** Human-readable message suitable for runtime error persistence. */
+  message: string;
+  /** Whether the runtime may retry this provider failure. */
+  retryable: boolean;
+};
+
 export interface AgentRuntimeResult {
   content: string;
   model: string;
@@ -117,6 +124,8 @@ export interface AgentRuntimeResult {
   trace?: AgentRuntimeChatMessage[];
   tool_calls?: AgentRuntimeToolCall[];
   reasoning_content?: string;
+  /** Generic terminal provider failure used by local/server control flow. */
+  runtimeProviderFailure?: RuntimeProviderFailure;
   runtimeToolNames?: string[];
   runtimeToolSurface?: unknown;
   toolCallCount?: number;

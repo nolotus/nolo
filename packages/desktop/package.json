@@ -17,7 +17,7 @@
     "build:stable:windows-installer": "bun ./scripts/build-stable-windows-installer.ts"
   },
   "dependencies": {
-    "electrobun": "1.18.4-beta.6",
+    "electrobun": "^2.0.1",
     "rcedit": "^5.0.2"
   }
 }

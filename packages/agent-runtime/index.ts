@@ -262,6 +262,7 @@ export {
 export {
   DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS,
   DEFAULT_SUBTASK_REFERENCE_NOLO_WORKSPACE_TOOLS,
+  applyToolSurfaceConstraints,
   inferOwnerIdFromRuntimeAgentKey,
   isPublicRuntimeAgentRef,
   redactAgentRecordForWorkspaceTool,
@@ -330,6 +331,8 @@ export type {
 } from "./platformChatProvider";
 export type {
   RuntimeToolSurfaceHost,
+  RuntimeToolSurfaceNames,
+  ToolSurfaceConstraints,
   RuntimeToolSurfaceForAgentInput,
   RuntimeToolSurfaceInput,
   RuntimeToolSurfaceResult,
@@ -366,7 +369,22 @@ export type {
   AgentRuntimeToolPolicy,
   AgentRuntimeToolCall,
   AgentRuntimeWorkspaceMode,
+  RuntimeProviderFailure,
 } from "./types";
+export type {
+  AntigravityProviderEvent,
+  AntigravityProviderFailure,
+  AntigravityRuntimeResult,
+  AntigravitySemanticResult,
+} from "./antigravitySemanticTypes";
+
+export {
+  fetchAntigravityCloudCodeCompletion,
+  normalizeAntigravityCompletion,
+  resolveAntigravityFinishReason,
+  snapshotAntigravityProviderCall,
+  type AntigravityProviderCallSnapshot,
+} from "./antigravityCloudCodeProvider";
 
 export {
   assertCloudGrantAllowed,

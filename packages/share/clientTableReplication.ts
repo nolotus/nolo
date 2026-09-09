@@ -1,5 +1,10 @@
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { noloPatchRequest, noloWriteRequest } from "database/requests";
+// Phase 5: the bearer token comes from the identity session source bound to
+// the owning store's state (per-store reader); there is no `state.auth`
+// currentToken mirror to read anymore (guarded by
+// identity/authMigrationBoundary.source.test.ts).
+import { getSessionSnapshotForState } from "identity/sessionSource";
 
 type BootstrapArgs = {
   shareDbKey: string;
@@ -29,7 +34,9 @@ const defaultLoadOriginTableSnapshot = async (args: BootstrapArgs) => {
   }
 
   const headers: Record<string, string> = {};
-  const tokenValue = args.thunkApi?.getState?.()?.auth?.currentToken;
+  const tokenValue = getSessionSnapshotForState(
+    args.thunkApi?.getState?.() ?? null
+  )?.activeToken;
   if (typeof tokenValue === "string" && tokenValue.length > 0) {
     headers.Authorization = `Bearer ${tokenValue}`;
   }

@@ -29,7 +29,6 @@ if (!existsSync(wrapperResourcesPath)) {
 const WRAPPER_PHYSICAL_RESOURCE_DIRS = [
   "app",
   "integrations",
-  "desktop-chrome-connector",
 ];
 
 const innerArchivePath = (await readdir(wrapperResourcesPath))
@@ -61,6 +60,23 @@ await withTempDir("nolo-desktop-inner-", async (tempDir) => {
   const innerResourcesPath = join(innerAppBundlePath, "Contents", "Resources");
   await cp(appIconIcnsPath, join(wrapperResourcesPath, "AppIcon.icns"));
   await cp(appIconIcnsPath, join(innerResourcesPath, "AppIcon.icns"));
+
+  // electrobun 2: build.copy destinations must stay inside the project root
+  // (UnsafeOutputPath), so the workspace source packages that v1 copied to
+  // Resources/integrations ("../x" destinations) now land at
+  // Resources/app/<dest>. Relocate them to the
+  // v1-parity location (sibling of app/) before the inner archive is
+  // repacked — both the wrapper and the standalone .app.tar.zst artifact
+  // derive from this archive.
+  const innerAppPath = join(innerResourcesPath, "app");
+  for (const dirName of ["integrations", "desktop-chrome-connector"]) {
+    const stagedPath = join(innerAppPath, dirName);
+    if (!existsSync(stagedPath)) continue;
+    const targetPath = join(innerResourcesPath, dirName);
+    await rm(targetPath, { recursive: true, force: true });
+    await cp(stagedPath, targetPath, { recursive: true });
+    await rm(stagedPath, { recursive: true, force: true });
+  }
 
   if (shouldRunLocalAdhocCodesign) {
     await adhocCodesignAppBundle(innerAppBundlePath);

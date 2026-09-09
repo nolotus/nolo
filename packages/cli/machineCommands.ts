@@ -26,6 +26,9 @@ import {
   type LocalCliExecutor,
 } from "./machineWsRunDispatch";
 import {
+  createMachineToolInvokeHandlers,
+} from "./machineToolInvokeDispatch";
+import {
   defaultConnectWebSocket,
   runMachineWsSession,
   type ConnectorWebSocketOptions,
@@ -38,6 +41,35 @@ export {
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
+
+// WS 消息 demux：tool.invoke（机器工具路由 v1，只读）优先识别；其余帧
+// （agent.run / agent.run.cancel / connector.keepalive 等）原样交给
+// handleConnectorRunMessage。send 直接复用会话注入的 sender，回包
+// 格式由各自的 handler 决定（tool.invoke → tool.result）。
+type MachineWsMessageDemuxHandlers = {
+  toolInvoke: {
+    handleToolInvokeMessage: (
+      message: string,
+      send: (message: string) => void
+    ) => Promise<string | null>;
+  };
+};
+
+async function handleMachineWsMessageDemux(
+  message: string,
+  send: (message: string) => void,
+  handlers: MachineWsMessageDemuxHandlers,
+  runConnectorMessage: () => Promise<void>
+) {
+  try {
+    const toolResult = await handlers.toolInvoke.handleToolInvokeMessage(message, send);
+    if (toolResult !== null) return;
+  } catch {
+    // tool.invoke 分支自身保证不抛（畸形帧/执行错误都已折算成 tool.result error）；
+    // 这里兜底吞掉，绝不让单条消息击穿 WS 会话。
+  }
+  await runConnectorMessage();
+}
 
 type MachineCommandDeps = {
   env?: EnvLike;
@@ -249,6 +281,13 @@ export async function runMachineConnectCommand(
     const maxAttempts = deps.maxConnectorAttempts ?? Infinity;
     const sleep = deps.sleep ?? defaultSleep;
     const reconnectDelayMs = resolveConnectorReconnectDelayMs(env);
+    // 机器工具路由 v1（只读）：executors 按 daemon 进程建一次（刻意跨 WS
+    // 重连存活）；机器路由不挂 readFile 去重 ledger，跨 server 会话重读
+    // 文件始终返回真实内容（M3 隔离）。workspaceRoot = daemon 进程 cwd
+    // （用户运行 nolo connect 的目录）。
+    const toolInvokeHandlers = createMachineToolInvokeHandlers({
+      workspaceRoot: process.cwd(),
+    });
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       if (deps.signal?.aborted) {
         return 0;
@@ -273,22 +312,28 @@ export async function runMachineConnectCommand(
             fetchImpl,
           }),
         onMessage: (message, send) =>
-          handleConnectorRunMessage(
+          handleMachineWsMessageDemux(
             message,
             send,
-            deps.executeCli ?? defaultExecuteCli,
-            {
-              ...env,
-              NOLO_SERVER: runtimeServerUrl,
-              NOLO_SERVER_URL: runtimeServerUrl,
-              BASE_URL: runtimeServerUrl,
-              AUTH_TOKEN: authToken,
-              NOLO_MACHINE_API_KEY: authToken,
-            },
-            fetchImpl,
-            {
-              buildConnectorCliPrompt,
-            }
+            { toolInvoke: toolInvokeHandlers },
+            () =>
+              handleConnectorRunMessage(
+                message,
+                send,
+                deps.executeCli ?? defaultExecuteCli,
+                {
+                  ...env,
+                  NOLO_SERVER: runtimeServerUrl,
+                  NOLO_SERVER_URL: runtimeServerUrl,
+                  BASE_URL: runtimeServerUrl,
+                  AUTH_TOKEN: authToken,
+                  NOLO_MACHINE_API_KEY: authToken,
+                },
+                fetchImpl,
+                {
+                  buildConnectorCliPrompt,
+                }
+              )
           ),
       });
       const exitCode = sessionResult.exitCode;

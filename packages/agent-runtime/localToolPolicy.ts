@@ -130,6 +130,8 @@ export function resolveLocalToolPolicy(args: {
 export async function executeLocalToolWithPolicy(args: {
   env: EnvLike;
   agentToolNames?: string[];
+  /** Final run-scoped surface; unlike policy declarations, this is a deny ceiling. */
+  runToolNames?: string[];
   call: AgentRuntimeToolCallInput;
   executors?: Record<string, (call: AgentRuntimeToolCallInput, opts?: Record<string, unknown>) => Promise<AgentRuntimeToolResult>>;
   confirmed?: boolean;
@@ -174,6 +176,9 @@ export async function executeLocalToolWithPolicy(args: {
    */
   blockDestructiveWithoutConfirmation?: boolean;
 }): Promise<AgentRuntimeToolResult> {
+  if (args.runToolNames !== undefined && !args.runToolNames.includes(normalizeLocalToolName(args.call.name))) {
+    throw new Error(`${args.call.name} is outside the final run tool surface.`);
+  }
   const decision = resolveLocalToolPolicy({
     env: args.env,
     agentToolNames: args.agentToolNames,

@@ -13,6 +13,7 @@ import { getUserDataItemTimestamp, mergeAndDedupUserData } from "database/userDa
 import { getAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectCurrentSpace } from "create/space/spaceCurrentSelectors";
+import { selectIdentityUserId } from "identity/selectors";
 
 type SearchWorkspaceArgs = { query: string };
 
@@ -33,11 +34,6 @@ type SearchWorkspaceResult = {
 };
 
 type SearchWorkspaceState = {
-  auth?: {
-    currentUser?: {
-      userId?: string | null;
-    } | null;
-  };
   settings?: {
     currentServer?: string;
   };
@@ -183,7 +179,7 @@ const loadLocalMyContentResults = async (
   thunkApi: SearchWorkspaceThunkApi,
   state: SearchWorkspaceState
 ): Promise<MyContentListItem[]> => {
-  const userId = state.auth?.currentUser?.userId?.trim();
+  const userId = selectIdentityUserId(state)?.trim();
   if (!userId) {
     throw new Error("无法搜索全部内容，因为当前用户未登录。");
   }

@@ -495,7 +495,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         acc.filter((t) => tools.includes(t))
       );
       if (skillAllowed.length === 0) {
-        output.write(`[nolo] warning: attached skills declare incompatible allowed-tools; no tool restriction enforced\n`);
+        output.write(`[nolo] warning: attached skills declare incompatible allowed-tools; this run has no tools\n`);
       }
       // Intersect with user-provided --allowed-tool (if any), else use skill set
       skillAllowedToolOverride = parsed.allowedToolNames?.length

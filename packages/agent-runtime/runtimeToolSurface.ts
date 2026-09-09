@@ -39,6 +39,38 @@ export type RuntimeToolSurfaceVisibility =
   | "anonymous"
   | "shared";
 
+export type RuntimeToolSurfaceNames = {
+  explicitToolNames: string[];
+  injectedToolNames: string[];
+  finalToolNames: string[];
+};
+
+export type ToolSurfaceConstraints = {
+  /** Undefined means no positive constraint; [] explicitly allows no tools. */
+  allowedToolNames?: readonly string[] | null;
+  blockedToolNames?: readonly string[] | null;
+};
+
+/** Apply only run-scoped narrowing; runtime policy and hard isolation are upstream. */
+export function applyToolSurfaceConstraints<T extends RuntimeToolSurfaceNames>(
+  surface: T,
+  constraints: ToolSurfaceConstraints,
+): T {
+  const allowed = constraints.allowedToolNames == null
+    ? null
+    : new Set(asTrimmedNonEmptyStringArray(constraints.allowedToolNames));
+  const blocked = new Set(asTrimmedNonEmptyStringArray(constraints.blockedToolNames ?? []));
+  const narrow = (names: readonly string[]) => names.filter((name) =>
+    (allowed === null || allowed.has(name)) && !blocked.has(name),
+  );
+  return {
+    ...surface,
+    explicitToolNames: narrow(surface.explicitToolNames),
+    injectedToolNames: narrow(surface.injectedToolNames),
+    finalToolNames: narrow(surface.finalToolNames),
+  };
+}
+
 export type RuntimeToolSurfaceInput = {
   explicitToolNames?: string[] | null;
   currentUserId?: string | null;
@@ -51,10 +83,7 @@ export type RuntimeToolSurfaceInput = {
   additionalRequiredToolNames?: readonly string[] | null;
 };
 
-export type RuntimeToolSurfaceResult = {
-  explicitToolNames: string[];
-  injectedToolNames: string[];
-  finalToolNames: string[];
+export type RuntimeToolSurfaceResult = RuntimeToolSurfaceNames & {
   auditReason:
     | "private-authenticated-defaults"
     | "explicit-only-public"
@@ -142,10 +171,7 @@ export function resolveRuntimeToolSurface(
 }
 
 export function isPublicRuntimeAgentRef(value: unknown) {
-  return (
-    typeof value === "string" &&
-    (value.startsWith("agent-pub-"))
-  );
+  return typeof value === "string" && value.startsWith("agent-pub-");
 }
 
 export function inferOwnerIdFromRuntimeAgentKey(value: unknown) {

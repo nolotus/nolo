@@ -1,7 +1,7 @@
 import { extractUserId } from "core/prefix";
 import { isSystemAdmin } from "core/init";
 
-import { useUserId } from "./useIdentity";
+import { useUserId } from "identity";
 
 /**
  * Pure decision for "can this user edit the record behind dbKey?".

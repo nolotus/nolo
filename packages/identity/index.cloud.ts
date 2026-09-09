@@ -4,7 +4,8 @@ export {
   useToken,
   useIsLoggedIn,
   useCurrentUser,
-} from "./useIdentity";
+  useAccounts,
+} from "./useIdentity.cloud";
 export type { IdentitySnapshot, IdentityUser, User } from "./types";
 export {
   selectIdentityIsLoggedIn,

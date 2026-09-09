@@ -259,7 +259,9 @@ export function buildDesktopOpenAiTools(args: {
   useDeclaredToolNamesOnly?: boolean;
 }) {
   const toolset = buildDesktopLocalWorkspaceToolset(args);
-  const forcedTools = prepareTools([...FORCED_TOOLS]);
+  const forcedTools = prepareTools(
+    [...FORCED_TOOLS].filter((toolName) => (args.toolNames ?? []).includes(toolName)),
+  );
   const tools: any[] = [
     ...forcedTools,
     ...buildLocalWorkspaceOpenAiTools({
@@ -300,6 +302,8 @@ export function buildDesktopLocalWorkspaceToolset(args: {
   const toolset = buildLocalWorkspaceToolset({
     declaredToolNames: toolNames,
     exposeShellTools: true,
+    // A turn passes true after applying run constraints; ordinary config loading
+    // keeps the historical host default expansion.
     useDeclaredToolNamesOnly:
       args.useDeclaredToolNamesOnly === true
         ? true

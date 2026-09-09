@@ -2,6 +2,12 @@ import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+  observeMeaningfulProviderResponseAt,
+  withProviderCallTimingFields,
+} from "ai/token/providerCallTiming";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 import type { AgentRuntimeToolCall } from "./types";
 import {
@@ -85,6 +91,8 @@ export type CodexResponsesCallArgs = {
   maxAttempts?: number;
   /** 注入退避等待，便于测试。 */
   sleep?: (ms: number) => Promise<unknown>;
+  /** 注入 monotonic clock，便于验证 logical invocation timing。 */
+  now?: () => number;
 };
 
 type CodexRequestIdentity = {
@@ -267,6 +275,7 @@ const defaultSleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 async function callCodexResponsesOnce(
   args: CodexResponsesCallArgs,
   accountId: string,
+  timingTracker: ReturnType<typeof createProviderCallTimingTracker>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const identity = createCodexRequestIdentity();
@@ -289,7 +298,22 @@ async function callCodexResponsesOnce(
   }
 
   const events = await readSseEvents(response);
-  const { text, toolCalls, usage, failure } = aggregateResponsesStream(events);
+  let firstAcceptedOutputAt: number | undefined;
+  const { text, toolCalls, usage, failure } = aggregateResponsesStream(events, {
+    onMeaningfulDelta: () => {
+      firstAcceptedOutputAt ??= timingTracker.now();
+    },
+  });
+
+  // Only commit a first-output timestamp after this attempt is accepted. A
+  // failed attempt may have emitted partial output, but that output is not
+  // exposed to the caller and must not become the logical invocation's first
+  // output observation.
+  if (!failure && firstAcceptedOutputAt !== undefined) {
+    observeMeaningfulProviderResponseAt(timingTracker, firstAcceptedOutputAt);
+  }
+  const timingFields = finalizeProviderCallTiming(timingTracker);
+  const usageWithTiming = withProviderCallTimingFields(usage, timingFields);
 
   // 流内失败一律当失败上报，即使已经收到部分 text：半条被上游掐断的回复不该
   // 被当成完整回合喂回循环。调用方拿到的是真实状态码 + 上游原文。
@@ -322,7 +346,7 @@ async function callCodexResponsesOnce(
           finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
         },
       ],
-      ...(usage ? { usage } : {}),
+      ...(usageWithTiming ? { usage: usageWithTiming } : {}),
     },
   };
 }
@@ -355,12 +379,13 @@ export async function fetchCodexResponsesCompletion(
     ? Math.min(10, Math.max(1, Math.floor(requestedMaxAttempts)))
     : CODEX_STREAM_MAX_ATTEMPTS;
 
-  let result = await callCodexResponsesOnce(args, accountId);
+  const timingTracker = createProviderCallTimingTracker(args.now);
+  let result = await callCodexResponsesOnce(args, accountId, timingTracker);
   for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
     if (!RETRYABLE_CODEX_STREAM_STATUSES.has(result.status)) break;
     if (args.signal?.aborted) break;
     await sleep(CODEX_STREAM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
-    result = await callCodexResponsesOnce(args, accountId);
+    result = await callCodexResponsesOnce(args, accountId, timingTracker);
   }
   return result;
 }

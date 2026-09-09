@@ -27,15 +27,26 @@ export async function* readSseFrames(
       boundary = findSseFrameBoundary(buffer);
     }
   }
+  const remaining = decoder.decode();
+  if (remaining) {
+    buffer += remaining;
+    let boundary = findSseFrameBoundary(buffer);
+    while (boundary) {
+      yield buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.separatorLength);
+      boundary = findSseFrameBoundary(buffer);
+    }
+  }
   if (buffer.trim()) yield buffer;
 }
 
 /**
  * 找到一个完整 SSE 帧的边界起点（空行位置）。
  *
- * SSE 规范允许行终止符为 CRLF、LF 或 CR，但实际主流服务器只发 `\n\n`（llama.cpp /
- * OpenAI 兼容）或 `\r\n\r\n`（RFC 8624 严格实现）两种。这里同时认这两种，取最早出现
- * 者，避免换到 CRLF 服务器时帧被 `\n` 判断撑开导致跨 chunk 拼不拢。
+ * SSE 规范理论允许行终止符为 CRLF、LF 或 CR。实际主流 LLM 上游服务端只发送
+ * `\n\n`（LF 换行）与 `\r\n\r\n`（CRLF 换行）两种形式。本项目传输层明确支持
+ * 这两种边界模式（取最早出现者），避免 CRLF 帧被错误截断；不引入对独立 CR（`\r\r`）
+ * 的非必要宽泛解析，使实现与实测支持子集严格一致。
  *
  * 返回边界起点 index 和该分隔符总长度，供调用方跳过；没有完整空行时返回 null。
  */
@@ -67,6 +78,16 @@ export async function* streamSseDataValues<T>(
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const parsed = parse(line);
+      if (parsed) yield parsed;
+    }
+  }
+  const remaining = decoder.decode();
+  if (remaining) {
+    buffer += remaining;
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {

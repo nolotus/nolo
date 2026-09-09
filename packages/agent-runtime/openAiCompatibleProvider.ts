@@ -17,6 +17,12 @@
  * 禁止将特定模型的分支条件（`if (model.includes(...))`）直接侵入到通用执行循环。
  */
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+  observeMeaningfulProviderResponse,
+  withProviderCallTimingFields,
+} from "ai/token/providerCallTiming";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeResult,
@@ -260,6 +266,8 @@ export async function readOpenAiCompatibleSseCompletion(args: {
   response: Response;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
+  /** Observed-speed timing：首个有效 delta 到达时触发一次。 */
+  onMeaningfulDelta?: () => void;
 }) {
   const state: ChatCompletionStreamState & { sawDone: boolean } = {
     content: "",
@@ -270,6 +278,7 @@ export async function readOpenAiCompatibleSseCompletion(args: {
     toolCallTextState: createToolCallTextParserState(),
     onTextDelta: args.onTextDelta,
     onReasoningDelta: args.onReasoningDelta,
+    ...(args.onMeaningfulDelta ? { onMeaningfulDelta: args.onMeaningfulDelta } : {}),
     sawDone: false,
   };
 
@@ -320,6 +329,10 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   onHttpResult?: (result: { status: number; body?: unknown }) => Promise<void> | void;
 }): Promise<AgentRuntimeResult> {
   const isResponses = resolveOpenAiCompatibleWire(args.providerConfig) === "responses";
+
+  // Observed provider-call timing：从请求发出（含 401 刷新重试）到完整收尾。
+  const timingTracker = createProviderCallTimingTracker();
+  const observeMeaningful = () => observeMeaningfulProviderResponse(timingTracker);
 
   const send = async (apiKey: string) => {
     const request = buildOpenAiCompatibleChatCompletionRequest({
@@ -374,14 +387,24 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   const contentType = res.headers.get("content-type") ?? "";
   const isEventStream = contentType.includes("text/event-stream");
 
+  // timing 只在返回组装时收尾一次；usage 缺席就没有载体（不硬造记录）。
+  const withTiming = <T extends { usage?: Record<string, any> }>(result: T): T => {
+    const usage = withProviderCallTimingFields(
+      result.usage,
+      finalizeProviderCallTiming(timingTracker),
+    );
+    return { ...result, ...(usage ? { usage } : {}) };
+  };
+
   if (isEventStream) {
     if (isResponses) {
       const streamed = await readResponsesSseCompletion({
         response: res,
         ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
         ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
+        onMeaningfulDelta: observeMeaningful,
       });
-      return {
+      return withTiming({
         content: streamed.content,
         model: args.providerConfig.model,
         provider: args.providerConfig.provider,
@@ -391,15 +414,16 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
         ...(streamed.stream_complete ? { stream_complete: true } : {}),
         ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
         trace: args.messages,
-      };
+      });
     }
 
     const streamed = await readOpenAiCompatibleSseCompletion({
       response: res,
       ...(args.onTextDelta ? { onTextDelta: args.onTextDelta } : {}),
       ...(args.onReasoningDelta ? { onReasoningDelta: args.onReasoningDelta } : {}),
+      onMeaningfulDelta: observeMeaningful,
     });
-    return {
+    return withTiming({
       content: streamed.content,
       model: args.providerConfig.model,
       provider: args.providerConfig.provider,
@@ -409,7 +433,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
       ...(streamed.stream_complete ? { stream_complete: true } : {}),
       ...(streamed.finish_reason ? { finish_reason: streamed.finish_reason } : {}),
       trace: args.messages,
-    };
+    });
   }
 
   const raw = await res.text().catch(() => "");
@@ -421,16 +445,16 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   }
 
   if (isResponses) {
-    return parseOpenAiCompatibleResponsesResponse({
+    return withTiming(parseOpenAiCompatibleResponsesResponse({
       providerConfig: args.providerConfig,
       data,
       trace: args.messages,
-    });
+    }));
   }
 
-  return parseOpenAiCompatibleChatCompletionResponse({
+  return withTiming(parseOpenAiCompatibleChatCompletionResponse({
     providerConfig: args.providerConfig,
     data,
     trace: args.messages,
-  });
+  }));
 }

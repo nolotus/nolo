@@ -9,6 +9,7 @@
 import { ownedAgentKey } from "core/prefix";
 import type { MachineRunPermissionPolicy } from "../ai/agent/machineRunPermissions";
 import { runLocalAgentTurn, type LocalAgentToolEvent } from "../agent-runtime/localLoop";
+import { applyToolSurfaceConstraints } from "../agent-runtime/runtimeToolSurface";
 import { resolveLocalRuntimeEnvFromPolicy } from "../agent-runtime/runtimeToolPolicy";
 import {
   resolveMachineRunPermissionPolicy as defaultResolveMachineRunPermissionPolicy,
@@ -357,12 +358,25 @@ export async function defaultRunConnectorLocalRuntimeAgent(args: {
   const agentConfigRaw = readField(payload, "agentConfig");
   const payloadAgentConfig = asRecordOrEmpty(agentConfigRaw);
   const policy = runtimePolicyFromConnectorPayload(args.parsed);
-  const toolNames = mergeToolNames(
+  const candidateToolNames = mergeToolNames(
     readField(payloadAgentConfig, "toolNames"),
     readField(payloadAgentConfig, "tools"),
     policy?.agentTools,
     policy?.runtimeTools,
   );
+  const runtimeContext = asRecordOrEmpty(readField(payload, "runtimeContext"));
+  const constrainedSurface = applyToolSurfaceConstraints(
+    { explicitToolNames: candidateToolNames, injectedToolNames: [], finalToolNames: candidateToolNames },
+    {
+      allowedToolNames: Array.isArray(readField(runtimeContext, "allowedToolNames"))
+        ? readField(runtimeContext, "allowedToolNames") as string[]
+        : undefined,
+      blockedToolNames: Array.isArray(readField(runtimeContext, "blockedToolNames"))
+        ? readField(runtimeContext, "blockedToolNames") as string[]
+        : undefined,
+    },
+  );
+  const toolNames = constrainedSurface.finalToolNames;
   const apiSourceRaw = readField(payloadAgentConfig, "apiSource");
   const providerRaw = readField(payloadAgentConfig, "provider");
   const agentRecord: Record<string, unknown> = {
@@ -373,6 +387,7 @@ export async function defaultRunConnectorLocalRuntimeAgent(args: {
     apiSource: typeof apiSourceRaw === "string" ? apiSourceRaw : "platform",
     provider: typeof providerRaw === "string" ? providerRaw : (typeof apiSourceRaw === "string" ? apiSourceRaw : "openai"),
     toolNames,
+    runScopedToolSurface: constrainedSurface,
     ...(policy ? { runtimeToolPolicy: policy } : {}),
   };
   // 同一条记录挂多个别名，让下游按任意候选 key 查都能命中。

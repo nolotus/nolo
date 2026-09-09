@@ -46,13 +46,6 @@ const shouldCodesignMacRelease = hasDeveloperId;
 const shouldNotarizeMacRelease =
   hasDeveloperId && (hasAppleApiNotaryCreds || hasAppleIdNotaryCreds);
 
-export const resolveDesktopBunVersion = (
-  platform = process.platform,
-  env: { NOLO_DESKTOP_BUN_VERSION?: string } = process.env as {
-    NOLO_DESKTOP_BUN_VERSION?: string;
-  }
-) => env.NOLO_DESKTOP_BUN_VERSION ?? "1.4.2";
-
 export const resolveGeneratePatch = (
   platform = process.platform,
   env: {
@@ -84,14 +77,20 @@ export default {
   build: {
     buildFolder: "build",
     artifactFolder: "artifacts",
-    bunVersion: resolveDesktopBunVersion(),
     bun: {
       entrypoint: "src/bun/index.ts",
       minify: true,
-      sourcemap: "none",
+      sourcemap: false, // v2 type: boolean | "inline" | "external" | "linked" ("none" was removed)
       // Desktop bundles never execute React Native upload code or server-side
       // browser automation during normal startup, so keep those optional
       // dependency trees out of Bun's desktop/server bundle graph.
+      // NOTE (hutch 0.24.3): `external` / `minify` / `sourcemap` / `define` in
+      // build.bun are all silently dropped from the cottontail build spec
+      // (hutch-engine cottontail-build-helper passes only entryPoints/bundle/
+      // platform/format/outfile/alias through). Keep them declared anyway —
+      // they become effective once upstream fixes spec construction — and see
+      // pre-build.ts for the chromium-bidi stub compensating for eager
+      // resolution of playwright-core's bundled require("chromium-bidi/...").
       external: [
         "react-native",
         "react-native/*",
@@ -110,17 +109,24 @@ export default {
     },
     copy: {
       ".generated/public": "public",
-      "../../node_modules/abstract-level": "node_modules/abstract-level",
-      "../../node_modules/classic-level": "node_modules/classic-level",
-      "../../node_modules/is-buffer": "node_modules/is-buffer",
-      "../../node_modules/level-supports": "node_modules/level-supports",
-      "../../node_modules/level-transcoder": "node_modules/level-transcoder",
-      "../../node_modules/maybe-combine-errors": "node_modules/maybe-combine-errors",
-      "../../node_modules/module-error": "node_modules/module-error",
-      "../../node_modules/node-gyp-build": "node_modules/node-gyp-build",
-      "../../packages/desktop-chrome-connector": "../desktop-chrome-connector",
-      "../../packages/integrations/x-reader": "../integrations/x-reader",
-      "../../packages/integrations/xhs-reader": "../integrations/xhs-reader",
+      // electrobun 2: copy keys/values may not escape the project root
+      // (UnsafeOutputPath) and "../x" destinations are rejected outright.
+      // Everything that used to come from repo-root node_modules / workspace
+      // packages is staged by scripts/pre-build.ts into .generated/vendor/
+      // and copied from there. Workspace packages land under integrations/
+      // (→ Resources/app/integrations) and post-wrap relocates them to the
+      // v1-parity location (Resources/integrations, sibling of app/).
+      ".generated/vendor/node_modules/abstract-level": "node_modules/abstract-level",
+      ".generated/vendor/node_modules/classic-level": "node_modules/classic-level",
+      ".generated/vendor/node_modules/is-buffer": "node_modules/is-buffer",
+      ".generated/vendor/node_modules/level-supports": "node_modules/level-supports",
+      ".generated/vendor/node_modules/level-transcoder": "node_modules/level-transcoder",
+      ".generated/vendor/node_modules/maybe-combine-errors": "node_modules/maybe-combine-errors",
+      ".generated/vendor/node_modules/module-error": "node_modules/module-error",
+      ".generated/vendor/node_modules/node-gyp-build": "node_modules/node-gyp-build",
+      ".generated/vendor/packages/desktop-chrome-connector": "integrations/desktop-chrome-connector",
+      ".generated/vendor/packages/x-reader": "integrations/x-reader",
+      ".generated/vendor/packages/xhs-reader": "integrations/xhs-reader",
       // Platform-staged ripgrep (ensure-bundled-ripgrep.ts → vendor/ripgrep/staged)
       "vendor/ripgrep/staged": "bin",
     },
@@ -139,6 +145,9 @@ export default {
     // because electrobun matches watchIgnore against path.relative(projectRoot,
     // fullPath) — absolute globs never match and are dead config.
     watchIgnore: [
+      // pre-build re-stages vendor deps into .generated/ on every build;
+      // watching that tree loops build → write → rebuild (dev --watch storm).
+      ".generated/**",
       "**/.git/**",
       "**/node_modules/**",
       "**/*.test.ts",
@@ -156,6 +165,11 @@ export default {
         process.env.NOLO_DESKTOP_BRANDED_DMG === "0",
       defaultRenderer: "native",
       notarize: shouldNotarizeMacRelease,
+      // v2 default resolves "icon.iconset" against the project root; the repo
+      // keeps the iconset under assets/ (hutch warns when it is missing —
+      // post-wrap still injects AppIcon.icns as a fallback, but declare the
+      // real source so DMG/app icons come from the iconset directly).
+      icons: "assets/icon.iconset",
     },
     linux: {
       bundleCEF: true,

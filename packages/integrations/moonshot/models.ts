@@ -62,6 +62,7 @@ export const moonshotModels: Model[] = [
  * - 模型 ID 与开放平台不同：这里是 `k3` / `kimi-for-coding` /
  *   `kimi-for-coding-highspeed`，不是 `kimi-k3`。填模型版本名（如 "Kimi K3"）
  *   会调用失败，必须填 Model ID。
+ * - 四个型号均支持图片输入；k3-256k 不支持视频不代表不支持图片。
  * - 订阅不按 token 计费，price 留 0（由会员额度抵扣，不在本表体现）。
  * - 调用权限随会员档位变化：Andante 不支持 k3；Moderato 的 k3 限 256k 上下文；
  *   Allegretto 及以上 k3 可用满 1M；highspeed 需 Allegretto 及以上。
@@ -72,7 +73,7 @@ export const kimiCodeModels: Model[] = [
   {
     name: "k3",
     displayName: "Kimi K3",
-    hasVision: false,
+    hasVision: true,
     contextWindow: 1_000_000,
     maxOutputTokens: 262_144,
     jsonOutput: true,
@@ -89,7 +90,7 @@ export const kimiCodeModels: Model[] = [
   {
     name: "k3-256k",
     displayName: "Kimi K3 256K",
-    hasVision: false,
+    hasVision: true,
     contextWindow: 262_144,
     maxOutputTokens: 262_144,
     jsonOutput: true,
@@ -106,7 +107,7 @@ export const kimiCodeModels: Model[] = [
   {
     name: "kimi-for-coding",
     displayName: "Kimi K2.7 Code",
-    hasVision: false,
+    hasVision: true,
     contextWindow: 262_144,
     maxOutputTokens: 262_144,
     jsonOutput: true,
@@ -123,7 +124,7 @@ export const kimiCodeModels: Model[] = [
   {
     name: "kimi-for-coding-highspeed",
     displayName: "Kimi K2.7 Code 高速版",
-    hasVision: false,
+    hasVision: true,
     contextWindow: 262_144,
     maxOutputTokens: 262_144,
     jsonOutput: true,

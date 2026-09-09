@@ -15,6 +15,7 @@ import type {
   OAuthCredential,
   OAuthTokenStore,
 } from "../../agent-runtime/oauthTokenStore";
+import type { CredentialMigrationOptions } from "../../agent-runtime/credentialLocationMigration";
 import { createOAuthTokenStore } from "./token-store";
 import {
   runOpenAiCodexBrowserPkce,
@@ -33,8 +34,19 @@ export type ServerSyncConfig = {
 
 export type AuthProviderCommandDeps = OAuthFlowDeps & {
   noBrowserByDefault?: boolean;
-  /** Optional store; production defaults to createOAuthTokenStore(). */
+  /**
+   * Optional store; production defaults to createOAuthTokenStore() with legacy
+   * credential migration enabled explicitly (same composition as the local
+   * runtime adapter). Tests usually inject an in-memory store (fail-closed).
+   */
   tokenStore?: OAuthTokenStore;
+  /**
+   * Migration options forwarded to the default production token store.
+   * Tests inject { mode: "test", legacyHomeDir } to keep legacy paths off the
+   * real home directory. Omitting it keeps the production default
+   * ({ enableLegacyMigration: true }); tests never rely on ambient env.
+   */
+  credentialMigration?: CredentialMigrationOptions;
   /**
    * Optional override for --sync-to-server resolution.
    * Tests inject this instead of mock.module("../client/profileConfig"),
@@ -46,7 +58,7 @@ export type AuthProviderCommandDeps = OAuthFlowDeps & {
 const SYNC_HELP_LINE = `  --sync-to-server     After local save, push the credential to your nolo server
                        (default when NOLO_SERVER + AUTH_TOKEN / profile are set).
   --no-sync-to-server  Skip server sync even when server config is available.
-  --sync-only          Push ~/.nolo/credentials/<provider>.json to the server without re-login.`;
+  --sync-only          Push $NOLO_HOME/credentials/<provider>.json (or ~/.nolo/credentials when NOLO_HOME is unset) to the server without re-login.`;
 
 const CHATGPT_HELP_TEXT = `Authorize nolo-cli to call the OpenAI Codex / ChatGPT Plus API on your behalf.
 
@@ -64,7 +76,7 @@ ${SYNC_HELP_LINE}
 
 The default flow is device-code, which works headless: open the printed URL on any
 machine with a browser where you are already logged into ChatGPT. After approval, the
-access and refresh tokens are stored in ~/.nolo/credentials/chatgpt.json.
+access and refresh tokens are stored in $NOLO_HOME/credentials/chatgpt.json (or ~/.nolo/credentials/chatgpt.json when NOLO_HOME is unset).
 
 Agents can reference the stored token by setting apiKeyRef: "chatgpt" with
 apiSource: "custom" and provider: "openai".
@@ -81,7 +93,7 @@ Usage:
 Default (interactive desktop): OIDC PKCE loopback on 127.0.0.1:56121.
 Headless / SSH / Docker: use --device-code or --no-browser (RFC 8628 device
 authorization; no localhost callback). After approval, tokens are stored in
-~/.nolo/credentials/xai.json.
+$NOLO_HOME/credentials/xai.json (or ~/.nolo/credentials/xai.json when NOLO_HOME is unset).
 
 The OAuth client_id is the same fixed value used by NousResearch/hermes-agent
 (MIT), oh-my-pi, and OpenClaw; xAI does not publish a public client registration flow.
@@ -107,7 +119,7 @@ Usage:
 
 Opens a browser to https://accounts.google.com (OIDC PKCE loopback on 127.0.0.1:51121).
 After approval, the flow provisions a Cloud Code Assist project and stores the
-access and refresh tokens in ~/.nolo/credentials/antigravity.json.
+access and refresh tokens in $NOLO_HOME/credentials/antigravity.json (or ~/.nolo/credentials/antigravity.json when NOLO_HOME is unset).
 
 The OAuth client_id/secret are the same base64-decoded values used by
 oh-my-pi; Google does not publish a public Cloud Code Assist client registration.
@@ -132,7 +144,7 @@ Usage:
 
 The default flow returns to a loopback callback on localhost:54545. With
 --no-browser, paste the final callback URL or authorization code into the
-terminal. Tokens are stored in ~/.nolo/credentials/claude.json.
+terminal. Tokens are stored in $NOLO_HOME/credentials/claude.json (or ~/.nolo/credentials/claude.json when NOLO_HOME is unset).
 
 Options:
   --browser         Open the Anthropic authorization page (default).
@@ -157,7 +169,7 @@ https://api2.cursor.sh/auth/poll until you approve. There is no loopback
 callback — this is a poll-based device flow, so it works in headless / SSH /
 Docker environments too.
 
-After approval, tokens are stored in ~/.nolo/credentials/cursor.json.
+After approval, tokens are stored in $NOLO_HOME/credentials/cursor.json (or ~/.nolo/credentials/cursor.json when NOLO_HOME is unset).
 Agents can reference the stored token with apiKeyRef: "cursor".
 
 Options:
@@ -176,7 +188,7 @@ Usage:
 
 Opens a browser to https://dash.cloudflare.com (OAuth 2.0 PKCE loopback on
 127.0.0.1:56122). After approval, the OAuth access token is stored locally in
-~/.nolo/credentials/cloudflare.json.
+$NOLO_HOME/credentials/cloudflare.json (or ~/.nolo/credentials/cloudflare.json when NOLO_HOME is unset).
 
 To use this flow you must first create a Cloudflare OAuth client in the
 Cloudflare Dashboard (Manage Account > OAuth clients) and obtain a client_id.
@@ -339,7 +351,16 @@ export async function runAuthProviderCommand(
 ): Promise<number> {
   const output = deps.output ?? console;
   const error = deps.error ?? console;
-  const tokenStore = deps.tokenStore ?? createOAuthTokenStore();
+  // Production: default store composes legacy credential migration explicitly
+  // (same policy as localRuntimeAdapter / apiKeyRefResolver). --sync-only with
+  // NOLO_HOME set must still see a legacy ~/.nolo credential and migrate it.
+  // Canonical location stays env/home-dir resolved (homeDir=undefined);
+  // tests isolate via credentialMigration.legacyHomeDir + their own NOLO_HOME.
+  const tokenStore = deps.tokenStore
+    ?? createOAuthTokenStore(
+      undefined,
+      deps.credentialMigration ?? { enableLegacyMigration: true },
+    );
 
   if (args.includes("--help") || args.includes("-h")) {
     output.log(HELP_BY_PROVIDER[provider]);

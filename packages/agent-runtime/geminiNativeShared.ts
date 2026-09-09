@@ -514,6 +514,21 @@ export type GeminiChunkAccumulatorOptions = {
   onReasoningDelta?: (chunk: string) => void;
 };
 
+/**
+ * Provider-neutral Gemini decode event：Gemini native generateContent 流解码产生的
+ * 语义事件，供 Antigravity CCA / platform native / image 三条路径共用。
+ *
+ * thought_signature 不单独建事件：它附着在 tool_call.toolCall.thought_signature
+ * （AgentRuntimeToolCall）与 accumulator 的 pendingThoughtSignature 上，
+ * 捕获/回放/哨兵语义见「Thought Signature 签名不变式」。
+ */
+export type GeminiDecodeEvent =
+  | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
+  | { kind: "tool_call"; toolCall: AgentRuntimeToolCall }
+  | { kind: "usage"; usage: Record<string, unknown> }
+  | { kind: "finish"; reason?: string };
+
 export type GeminiAccumulatorState = {
   text: string;
   toolCalls: AgentRuntimeToolCall[];
@@ -523,6 +538,8 @@ export type GeminiAccumulatorState = {
   finishReason?: string;
   /** thought part 思考文本累积；reasoning-only 空轮与截断兜底都依赖它。 */
   reasoning: string;
+  /** Provider-native semantic events, preserved before the compatibility facade. */
+  events: GeminiDecodeEvent[];
 };
 
 export function createGeminiAccumulatorState(): GeminiAccumulatorState {
@@ -530,6 +547,7 @@ export function createGeminiAccumulatorState(): GeminiAccumulatorState {
     text: "",
     toolCalls: [],
     reasoning: "",
+    events: [],
   };
 }
 
@@ -578,6 +596,7 @@ export function applyGeminiChunk(
       total_tokens: total,
       ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
     };
+    state.events.push({ kind: "usage", usage: state.usage });
   }
 
   const candidates = Array.isArray(response.candidates)
@@ -595,6 +614,7 @@ export function applyGeminiChunk(
       // MAX_TOKENS 截断，丢掉它会让空轮被误判成 empty_completion（循环反复
       // repair 后熔断成「模型连续返回空消息」）。多次出现取最后一次。
       state.finishReason = candidateFinishReason.trim();
+      state.events.push({ kind: "finish", reason: state.finishReason });
     }
     const parts = Array.isArray(
       (candidate as { content?: { parts?: unknown[] } }).content?.parts,
@@ -613,13 +633,15 @@ export function applyGeminiChunk(
         const piece = (part as { text: string }).text;
         if (!isThought) {
           state.text += piece;
-          if (piece && options?.onTextDelta) {
-            options.onTextDelta(piece);
+          if (piece) {
+            state.events.push({ kind: "text", text: piece });
+            if (options?.onTextDelta) options.onTextDelta(piece);
           }
         } else {
           state.reasoning += piece;
-          if (piece && options?.onReasoningDelta) {
-            options.onReasoningDelta(piece);
+          if (piece) {
+            state.events.push({ kind: "reasoning", text: piece });
+            if (options?.onReasoningDelta) options.onReasoningDelta(piece);
           }
         }
       }
@@ -651,14 +673,16 @@ export function applyGeminiChunk(
             ? partSignature
             : state.pendingThoughtSignature;
         state.pendingThoughtSignature = undefined;
-        state.toolCalls.push({
+        const toolCall = {
           id,
-          type: "function",
+          type: "function" as const,
           function: { name, arguments: JSON.stringify(argsObj) },
           ...(typeof resolvedSignature === "string" && resolvedSignature
             ? { thought_signature: resolvedSignature }
             : {}),
-        });
+        };
+        state.toolCalls.push(toolCall);
+        state.events.push({ kind: "tool_call", toolCall });
       }
     }
   }
@@ -683,6 +707,7 @@ export function accumulateGeminiChunks(
   usage?: Record<string, unknown>;
   finishReason?: string;
   reasoningContent?: string;
+  events: GeminiDecodeEvent[];
 } {
   const state = createGeminiAccumulatorState();
   for (const chunk of chunks) {
@@ -694,6 +719,7 @@ export function accumulateGeminiChunks(
     usage: state.usage,
     finishReason: state.finishReason,
     reasoningContent: state.reasoning,
+    events: state.events,
   };
 }
 
@@ -709,6 +735,7 @@ export async function accumulateGeminiStream(
   usage?: Record<string, unknown>;
   finishReason?: string;
   reasoningContent?: string;
+  events: GeminiDecodeEvent[];
 }> {
   const state = createGeminiAccumulatorState();
   for await (const chunk of stream) {
@@ -720,6 +747,7 @@ export async function accumulateGeminiStream(
     usage: state.usage,
     finishReason: state.finishReason,
     reasoningContent: state.reasoning,
+    events: state.events,
   };
 }
 

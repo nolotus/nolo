@@ -8,6 +8,7 @@ import { asTrimmedString } from "core/trimmedString";
 import { extractCustomId } from "core/prefix";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
+import { selectIdentityUserId } from "identity/selectors";
 
 const DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview" as const;
 
@@ -43,8 +44,10 @@ const selectCurrentDialogKeyFromState = (_state: any): string | null =>
 const selectCurrentSpaceIdFromState = (_state: any): string | null =>
     getCurrentSpaceId();
 
-const selectUserIdFromState = (state: any): string | null =>
-    typeof state?.auth?.currentUser?.userId === "string" ? state.auth.currentUser.userId : null;
+const selectUserIdFromState = (state: any): string | null => {
+    const userId = selectIdentityUserId(state);
+    return typeof userId === "string" ? userId : null;
+};
 
 const selectCurrentServerFromState = (state: any): string | null =>
     typeof state?.settings?.currentServer === "string" ? state.settings.currentServer : null;

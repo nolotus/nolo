@@ -59,7 +59,7 @@ export type ApiKeyRefResolver = (
 
 /**
  * Load a secret from the local credential broker by explicit ref.
- * Prefer this for metered API keys stored under ~/.nolo/credentials/keys/.
+ * Prefer this for metered API keys stored under `$NOLO_HOME/credentials/keys/` (or `~/.nolo/credentials/keys/` when `NOLO_HOME` is unset).
  */
 export async function resolveCredentialFromBroker(
   broker: CredentialBroker,

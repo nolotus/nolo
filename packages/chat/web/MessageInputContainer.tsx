@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "app/routing";
 import { useSendPermission } from "../hooks/useSendPermission";
 import { useAppSelector, useAppDispatch } from "app/store";
-import { fetchUserProfile } from "identity/actions";
+import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { useCurrentUser, useUserId } from "identity";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { GPT_PRO_BLOCKED_MESSAGE, shouldBlockForGptPro } from "core/gptProTier";
@@ -92,11 +92,9 @@ const MessageInputContainer = forwardRef<
     null
   );
 
-  useEffect(() => {
-    if (userId) {
-      dispatch(fetchUserProfile());
-    }
-  }, [userId, dispatch]);
+  // Phase 5: profile refresh via the explicit AccountSessionService (see
+  // useAccountProfileRefresh) — no identity/actions thunk dispatch.
+  useAccountProfileRefresh();
 
   useEffect(() => {
     if (!activeAgentId) {

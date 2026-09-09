@@ -24,19 +24,14 @@ import {
   LuScale,
 } from "react-icons/lu";
 
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
+import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { SettingRoutePaths } from "app/settings/config";
 import {
   AppRoutePaths,
   QUICK_CHAT_FEEDBACK_LAUNCH_PATH,
 } from "app/constants/routePaths";
-import {
-  selectUsers,
-  signOut,
-  changeUser,
-  fetchUserProfile,
-} from "identity/actions";
-import { useCurrentUser, useUserId } from "identity";
+import { useCurrentUser, useUserId, useAccounts } from "identity";
 import { cloudLazy } from "identity/cloudLazy";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { read, selectById } from "database/dbSlice";
@@ -133,10 +128,11 @@ export const SidebarUserSection: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useAppDispatch();
+  const accountSession = useAccountSessionService();
   const authUser = useCurrentUser();
   const isMobile = useIsMobile(768);
 
-  const users = useAppSelector(selectUsers);
+  const users = useAccounts();
   const currentUserId = useUserId();
   const balance = useAppSelector(selectIdentityUserBalance);
   const currentServer = useAppSelector(selectRuntimeCurrentServer);
@@ -183,11 +179,9 @@ export const SidebarUserSection: React.FC = () => {
   }, []);
 
   // --- 用户数据加载 ---
-  useEffect(() => {
-    if (currentUserId) {
-      dispatch(fetchUserProfile());
-    }
-  }, [currentUserId, dispatch]);
+  // Phase 5: profile refresh via the explicit AccountSessionService (see
+  // useAccountProfileRefresh) — no identity/actions thunk dispatch.
+  useAccountProfileRefresh();
 
   const profileKey = useMemo(
     () => (currentUserId ? createUserKey.profile(currentUserId) : null),
@@ -254,10 +248,9 @@ export const SidebarUserSection: React.FC = () => {
 
 
   const handleLogout = useCallback(() => {
-    dispatch(signOut() as any)
-      .unwrap()
-      .then(() => navigate("/"));
-  }, [dispatch, navigate]);
+    // Phase 2: 登出编排由 AccountSessionService 拥有；Redux 仅镜像 Core。
+    accountSession?.signOut().then(() => navigate("/"));
+  }, [accountSession, navigate]);
 
   const handleOpenNotificationItem = (item: AppNotification) => {
     setBellOpen(false);
@@ -423,7 +416,9 @@ export const SidebarUserSection: React.FC = () => {
                         type="button"
                         className="topbar-user-menu__item"
                         onClick={() => {
-                          dispatch(changeUser(u));
+                          void accountSession
+                            ?.switchAccount(u.userId)
+                            .catch(() => {});
                           setMenuOpen(false);
                         }}
                       >

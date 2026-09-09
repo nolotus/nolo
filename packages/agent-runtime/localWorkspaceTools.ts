@@ -24,6 +24,19 @@ import type {
 } from "./hostAdapter";
 import type { PermissionRequest } from "./actionGate";
 import { createGlob, resolveExecutableOnPath } from "./runtimeCompat";
+import { searchFileTextMatches } from "./fileTextSearch";
+// Root-.gitignore reader shared with fileTextSearch's JS fallback. The local
+// wrappers below keep the historical call sites unchanged; this module is the
+// single source of truth for the best-effort ignore subset (see gitignore.ts).
+import { hasRootGitignore as readHasRootGitignore, readRootGitignorePatterns as readRootGitignorePatternList } from "./gitignore";
+
+async function hasRootGitignore(workspaceRoot: string): Promise<boolean> {
+  return readHasRootGitignore(workspaceRoot);
+}
+
+async function readRootGitignorePatterns(workspaceRoot: string): Promise<string[]> {
+  return readRootGitignorePatternList(workspaceRoot);
+}
 import { getProcessRegistry } from "./processRegistry";
 import {
   formatTaskLogsContent,
@@ -54,6 +67,13 @@ type LocalWorkspaceToolArgs = {
    * body and command (the exact external path) verbatim.
    */
   confirmExternalFileAccess?: (request: PermissionRequest) => Promise<boolean>;
+  /**
+   * Opt out of the readFile dedup ledger (M3 isolation for the machine
+   * tool-invocation route): a long-lived daemon must not dedup reads across
+   * server sessions. Omit (default) for the TUI/host path — the ledger is
+   * created internally per executor map.
+   */
+  readFileNoLedger?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
   /** Optional override for rg resolution (tests / hosts without PATH binaries). */
@@ -68,14 +88,21 @@ const DEFAULT_EXEC_SHELL_DETACH_MS = 120000;
 const DEFAULT_LOCAL_API_ORIGIN = "http://127.0.0.1:38123";
 
 /**
- * Build/generated artifact globs that are ALWAYS excluded from search results,
- * even when `includeIgnored: true`. User-supplied `exclude` patterns are
- * additive — they cannot re-include these.
+ * Globs that the local/Cursor search primitive ALWAYS excludes from search
+ * results, even when `includeIgnored: true`: runtime/VC infrastructure
+ * (.git/.nolo/node_modules — the historical primitive-level defaults) plus
+ * build/generated artifacts. internalSearchWorkspace passes this list as its
+ * explicit caller policy (the generic primitive ships no defaults of its
+ * own), so these exclusions survive empty .gitignore files and
+ * includeIgnored.
  *
  * Internal: only consumed by the Cursor `internalSearchWorkspace` primitive.
  * Not part of any public tool schema.
  */
 export const ALWAYS_EXCLUDED_GLOBS: readonly string[] = [
+  ".git/**",
+  ".nolo/**",
+  "node_modules/**",
   "*.tsbuildinfo",
   "dist/**",
   "build/**",
@@ -301,8 +328,10 @@ function isPathInsideWorkspace(args: {
  * Alternate parameter names various provider models (cursor/grok, kimi, etc.)
  * use in tool-call arguments instead of our canonical schema field names.
  * Listed here as a single source so adding a new provider only touches one place.
+ * Also re-exported (via localWorkspaceToolInternals.ts) for the machine-side
+ * path preflight, which must extract the exact path the executor will open.
  */
-const PATH_FIELD_ALIASES = ["path", "file_path", "filePath", "filename", "file", "target_file", "targetFile", "file_to_read", "fileToRead", "target_path", "read_path", "path_to_read", "pathToRead"] as const;
+export const PATH_FIELD_ALIASES = ["path", "file_path", "filePath", "filename", "file", "target_file", "targetFile", "file_to_read", "fileToRead", "target_path", "read_path", "path_to_read", "pathToRead"] as const;
 const OLD_TEXT_FIELD_ALIASES = ["oldText", "old_string", "oldString", "search", "search_string", "find", "match"] as const;
 const NEW_TEXT_FIELD_ALIASES = ["newText", "new_string", "newString", "replacement", "replace"] as const;
 const SEARCH_QUERY_FIELD_ALIASES = ["query", "search_query", "searchQuery", "q", "pattern", "search"] as const;
@@ -1125,6 +1154,9 @@ async function readFileTool(args: {
   // a short notice instead of resending content; force:true bypasses this.
   // Truncated reads are never recorded — the model only saw part of them, so
   // a follow-up read of the same range stays legitimate.
+  // Dedup runs only when a ledger was injected (TUI host path). The machine
+  // tool-invocation route passes no ledger, so every machine readFile returns
+  // real content regardless of `force`.
   const force = parsed.force === true;
   const ledger = args.readLedger;
   const requestRange = { startLine: sliced.startLine, endLine: sliced.endLine };
@@ -1287,31 +1319,6 @@ async function editFileTool(args: {
       ...(activity ? { activity } : {}),
     },
   };
-}
-
-async function hasRootGitignore(workspaceRoot: string) {
-  try {
-    await stat(resolve(workspaceRoot, ".gitignore"));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readRootGitignorePatterns(workspaceRoot: string) {
-  try {
-    const content = await readFile(resolve(workspaceRoot, ".gitignore"), "utf8");
-    return content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#") && !line.startsWith("!"))
-      .map((line) => {
-        const unanchored = line.replace(/^\//, "");
-        return unanchored.endsWith("/") ? `${unanchored}**` : unanchored;
-      });
-  } catch {
-    return [];
-  }
 }
 
 async function filterRootGitignoredFiles(args: {
@@ -1531,202 +1538,51 @@ export interface InternalListWorkspaceEntriesArgs {
  */
 export async function internalSearchWorkspace(args: InternalSearchWorkspaceArgs): Promise<AgentRuntimeToolResult> {
   const requestedPath = args.path ?? ".";
-  const query = args.query;
-  if (!query) {
-    throw new Error("internalSearchWorkspace requires a non-empty query.");
-  }
-  const maxResults = args.maxResults ?? 200;
-  const contextLines = args.contextLines;
-  const literal = false;
-  const caseSensitive = args.caseSensitive === false ? false : true;
-  const exclude = [] as string[];
+  if (!args.query) throw new Error("internalSearchWorkspace requires a non-empty query.");
   const searchPath = await resolveLocalWorkspaceToolPath({
     workspaceRoot: args.workspaceRoot,
     requestedPath,
     allowRuntimeOwnedSpill: true,
-    ...(args.confirmExternalFileAccess
-      ? { confirmExternalFileAccess: args.confirmExternalFileAccess }
-      : {}),
+    ...(args.confirmExternalFileAccess ? { confirmExternalFileAccess: args.confirmExternalFileAccess } : {}),
   });
-  const isInside = isPathInsideWorkspace({
-    workspaceRoot: resolve(args.workspaceRoot),
-    targetPath: searchPath,
+  const workspaceRoot = resolve(args.workspaceRoot);
+  const inside = isPathInsideWorkspace({ workspaceRoot, targetPath: searchPath });
+  const result = await searchFileTextMatches({
+    root: inside ? workspaceRoot : searchPath,
+    target: inside ? normalizeWorkspaceRelativePath({ workspaceRoot, targetPath: searchPath }) : ".",
+    query: args.query,
+    regex: true,
+    caseSensitive: args.caseSensitive !== false,
+    contextLines: args.contextLines,
+    maxResults: args.maxResults ?? 200,
+    includeIgnored: args.workspaceRoot.includes(".worktrees") || !inside,
+    absolutePaths: !inside,
+    exclude: inside ? [...ALWAYS_EXCLUDED_GLOBS] : [],
   });
-  const includeIgnored = args.workspaceRoot.includes(".worktrees") || !isInside;
-  const execWorkspaceRoot = isInside ? args.workspaceRoot : searchPath;
-  const relativeSearchPath = isInside
-    ? normalizeWorkspaceRelativePath({
-        workspaceRoot: resolve(args.workspaceRoot),
-        targetPath: searchPath,
-      })
-    : ".";
-  const rgBinary = resolveRipgrepBinary();
-  const grepBinary = resolveGrepBinary();
-  const rgCommand = rgBinary
-    ? [
-        rgBinary,
-        "--line-number",
-        "--no-heading",
-        "--hidden",
-        ...(literal ? ["--fixed-strings"] : []),
-        ...(caseSensitive ? [] : ["--ignore-case"]),
-        ...(contextLines !== undefined ? ["--context", String(contextLines)] : []),
-        ...(includeIgnored ? ["--no-ignore"] : []),
-        "--glob",
-        "!node_modules",
-        "--glob",
-        "!.git",
-        ...(isInside ? ALWAYS_EXCLUDED_GLOBS.flatMap((g) => ["--glob", `!${g}`]) : []),
-        ...exclude.flatMap((excludePattern) => ["--glob", `!${excludePattern}`]),
-        "--",
-        query,
-        relativeSearchPath,
-      ]
-    : null;
-  const grepExcludeArgs = [
-    ...ALWAYS_EXCLUDED_GLOBS.flatMap((g) => {
-      if (!g.endsWith("/**")) return ["--exclude", g];
-      const dir = g.replace(/\/\*\*$/, "");
-      return dir.includes("/") ? [] : [`--exclude-dir=${dir}`];
-    }),
-    ...exclude.flatMap((excludePattern) => ["--exclude", excludePattern]),
-  ];
-  let searchEngine: WorkspaceSearchEngine = "js";
-  // A single-file target (runtime spill recovery greps an absolute spill
-  // path) must not go through rg/grep: their cwd/target layout assumes a
-  // directory, and a file cwd yields path-less `line:content` rows with
-  // broken match metadata. Route file targets straight to
-  // scanWorkspaceTextMatches so every environment emits the same absolute
-  // `path:line:content` format.
-  const searchTargetIsFile = (await stat(searchPath).catch(() => undefined))?.isFile() === true;
-  let binariesUnavailable = searchTargetIsFile || (!rgBinary && !grepBinary);
-  const result = await (async (): Promise<WorkspaceExecResult | WorkspaceExecLimitedLinesResult> => {
-    if (rgCommand && !searchTargetIsFile) {
-      try {
-        const rgResult = maxResults && contextLines === undefined
-          ? await runWorkspaceCommandLimitedLines({
-              workspaceRoot: execWorkspaceRoot,
-              command: rgCommand,
-              maxLines: maxResults,
-            })
-          : await runWorkspaceCommand({
-              workspaceRoot: execWorkspaceRoot,
-              command: rgCommand,
-            });
-        if (!rgResult.spawnFailed) {
-          searchEngine = "ripgrep";
-          return rgResult;
-        }
-      } catch {
-        // Fall through to grep / scanWorkspaceTextMatches.
-      }
-    }
-    if (grepBinary && !searchTargetIsFile) {
-      const grepCommand = [
-        grepBinary,
-        "-R",
-        "-n",
-        "-I",
-        ...(literal ? ["-F"] : []),
-        ...(caseSensitive ? [] : ["-i"]),
-        ...(contextLines !== undefined ? ["-C", String(contextLines)] : []),
-        "--exclude-dir=node_modules",
-        "--exclude-dir=.git",
-        ...grepExcludeArgs,
-        query,
-        relativeSearchPath,
-      ];
-      try {
-        const grepResult = maxResults && contextLines === undefined
-          ? await runWorkspaceCommandLimitedLines({
-              workspaceRoot: execWorkspaceRoot,
-              command: grepCommand,
-              maxLines: maxResults,
-            })
-          : await runWorkspaceCommand({
-              workspaceRoot: execWorkspaceRoot,
-              command: grepCommand,
-            });
-        if (!grepResult.spawnFailed) {
-          searchEngine = "grep";
-          return grepResult;
-        }
-        binariesUnavailable = true;
-      } catch {
-        binariesUnavailable = true;
-      }
-    } else {
-      binariesUnavailable = true;
-    }
-    // Both binaries missing or failed to spawn — force JS fallback below.
-    return {
-      stdout: "",
-      stderr: "",
-      exitCode: 0,
-      limitedByMaxResults: false,
-      spawnFailed: true as const,
-    };
-  })();
-  let outputLines = result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd().replace(/^\.\//, ""))
-    .filter(Boolean);
-  outputLines = dropAlwaysExcludedLines(outputLines);
-  let limitedByMaxResults = "limitedByMaxResults" in result && result.limitedByMaxResults === true;
-  const forceJsFallback = binariesUnavailable || result.spawnFailed === true;
-  if (
-    outputLines.length === 0
-    && (
-      forceJsFallback
-      || (result.exitCode === 0 && (includeIgnored || !(await hasRootGitignore(execWorkspaceRoot))))
-    )
-  ) {
-    const fallback = await scanWorkspaceTextMatches({
-      workspaceRoot: execWorkspaceRoot,
-      relativeSearchPath,
-      query,
-      exclude: [...ALWAYS_EXCLUDED_GLOBS, ...exclude],
-      maxResults,
-      literal,
-      caseSensitive,
-      contextLines,
-    });
-    outputLines = fallback.lines;
-    limitedByMaxResults = fallback.limitedByMaxResults;
-    searchEngine = "js";
-  }
-  if (contextLines !== undefined && outputLines.length > 0) {
-    const limited = limitSearchOutputByMatches(outputLines, maxResults);
-    outputLines = limited.lines;
-    limitedByMaxResults = limitedByMaxResults || limited.truncated;
-  }
-  const matchLines = outputLines.filter((line) => /:\d+:/.test(line));
-  const matchedFiles = Array.from(new Set(matchLines.flatMap((line) => {
-    const match = line.match(/^(.*?):\d+:/);
-    return match?.[1] ? [match[1]] : [];
-  })));
+  const outputLines = result.matches.flatMap((match) => [
+    ...match.before.map((line, index) => `${match.path}:${Math.max(1, match.line - match.before.length + index)}-${line}`),
+    `${match.path}:${match.line}:${match.text}`,
+    ...match.after.map((line, index) => `${match.path}:${match.line + index + 1}-${line}`),
+  ]);
   const rawContent = outputLines.join("\n");
   const content = truncateToolOutput(rawContent, SEARCH_OUTPUT_CHAR_LIMIT);
-  const truncatedByByteLimit = content.length !== rawContent.length;
+  const matchLines = result.matches.map((match) => `${match.path}:${match.line}:${match.text}`);
   return {
     content,
     metadata: {
-      query,
+      query: args.query,
       path: requestedPath,
-      searchedPath: relativeSearchPath,
+      searchedPath: inside ? normalizeWorkspaceRelativePath({ workspaceRoot, targetPath: searchPath }) : ".",
       count: outputLines.length,
-      matchCount: matchLines.length,
-      matchedFiles,
-      truncated: limitedByMaxResults || truncatedByByteLimit,
-      limitedByMaxResults,
-      ...(truncatedByByteLimit ? { truncatedByByteLimit: true } : {}),
-      ...(maxResults ? { maxResults } : {}),
-      exitCode: result.exitCode,
-      searchEngine,
+      matchCount: result.totalMatches,
+      matchedFiles: Array.from(new Set(result.matches.map((match) => match.path))),
+      truncated: result.truncated || content.length !== rawContent.length,
+      limitedByMaxResults: result.truncated,
+      ...(args.maxResults ? { maxResults: args.maxResults } : {}),
+      searchEngine: result.engine,
     },
   };
 }
-
 /**
  * Internal list primitive (Cursor ls bridge). Replicates the legacy
  * listWorkspaceEntries: readdir+stat, directories emitted with a trailing "/",
@@ -2284,7 +2140,9 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
     : {};
   // One dedup ledger per executor map (per session/turn): readFile answers
   // repeated reads of unchanged, still-in-context ranges with a notice.
-  const readFileLedger = new Map<string, LedgerEntry>();
+  // readFileNoLedger (machine tool-invocation route) opts out entirely —
+  // every readFile returns real content (M3 isolation); TUI keeps the ledger.
+  const readFileLedger = args.readFileNoLedger === true ? null : new Map<string, LedgerEntry>();
   return {
     editFile: (call: AgentRuntimeToolCallInput) => editFileTool({
       call,
@@ -2302,7 +2160,7 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
     readFile: (call: AgentRuntimeToolCallInput) => readFileTool({
       call,
       workspaceRoot: args.workspaceRoot,
-      readLedger: readFileLedger,
+      ...(readFileLedger ? { readLedger: readFileLedger } : {}),
       ...fileAccess,
     }),
     writeFile: (call: AgentRuntimeToolCallInput) => writeFileTool({

@@ -3,7 +3,28 @@
   "compilerOptions": {
     "composite": false,
     "noEmit": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "paths": {
+      // Electrobun 2 has no runtime types at node_modules/electrobun — the
+      // devkit SDK is projected by `electrobun sync` into .hutch/devkit.
+      // Explicit paths are REQUIRED in worktrees: node resolution would
+      // otherwise walk up to the main checkout's node_modules and resolve
+      // the stale v1 package's dist/ types (BP-5). Keys mirror
+      // .hutch/devkit/tsconfig.json; keep them in sync after regenerating.
+      "electrobun": ["./.hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/bun": ["./.hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/main": ["./.hutch/devkit/api/sdks/main/index.ts"],
+      "electrobun/bun/*": ["./.hutch/devkit/api/sdks/main/entries/*"],
+      "electrobun/main/*": ["./.hutch/devkit/api/sdks/main/entries/*"],
+      "electrobun/rpc": ["./.hutch/devkit/api/sdks/main/entries/rpc.ts"],
+      "electrobun/view": ["./.hutch/devkit/api/browser/index.ts"],
+      "electrobun/browser/ui": ["./.hutch/devkit/api/browser/ui/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "electrobun.config.ts", "scripts/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "electrobun.config.ts",
+    "hutch.config.ts",
+    "scripts/**/*.ts"
+  ]
 }

@@ -7,6 +7,7 @@ import {
   clearProfileAuthToken,
   getCurrentProfile,
   getDefaultProfileConfigPath,
+  getProfileTokens,
   loadProfileConfig,
   saveDefaultProfile,
 } from "./client/profileConfig";
@@ -344,7 +345,7 @@ export function runWhoamiCommand(
   const env = deps.env ?? process.env;
   const config = loadProfileConfig(deps.configPath);
   const profile = getCurrentProfile(config);
-  const profileToken = profile?.authToken?.trim() ?? "";
+  const profileToken = getProfileTokens(config)[0]?.trim() ?? "";
   const envToken = resolveAuthTokenFromEnv(env);
 
   if (!profileToken && !envToken) {

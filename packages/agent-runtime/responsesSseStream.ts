@@ -1,4 +1,5 @@
 import type { AgentRuntimeToolCall } from "./types";
+import { isMeaningfulResponsesOutput } from "ai/token/providerCallTiming";
 import {
   applyResponsesToolEvent,
   createResponsesToolAccumulator,
@@ -64,6 +65,8 @@ export type ResponsesStreamAggregation = {
 export function createResponsesStreamCollector(callbacks?: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
+  /** Observed-speed timing：首个有效 delta 到达时触发一次（见 ai/token/providerCallTiming）。 */
+  onMeaningfulDelta?: () => void;
   fallbackPrefix?: string;
 }) {
   let content = "";
@@ -72,8 +75,19 @@ export function createResponsesStreamCollector(callbacks?: {
   let usage: Record<string, unknown> | undefined;
   let failure: ResponsesStreamFailure | undefined;
   let completedResponse: Record<string, unknown> | undefined;
+  // 首个有效 delta 只记一次（见 ai/token/providerCallTiming）。
+  let sawMeaningfulDelta = false;
+  const observeMeaningfulOnce = () => {
+    if (sawMeaningfulDelta) return;
+    sawMeaningfulDelta = true;
+    callbacks?.onMeaningfulDelta?.();
+  };
 
   const processEvent = (ev: Record<string, unknown>) => {
+    // 共享 first-output 判据（ai/token/providerCallTiming）：与 server 代理
+    // （chatProxyBilling 的原始帧路径）和 loop.ts 用同一 Responses 语义；
+    // 首写胜出去重交给 observeMeaningfulOnce。
+    if (isMeaningfulResponsesOutput(ev)) observeMeaningfulOnce();
     const type = String(ev.type ?? "");
     if (type === "error") {
       failure = failure ?? toResponsesStreamFailure(ev.error, callbacks?.fallbackPrefix);
@@ -175,9 +189,12 @@ export function createResponsesStreamCollector(callbacks?: {
 
 export function aggregateResponsesStream(
   events: Record<string, unknown>[],
-  options?: { fallbackPrefix?: string },
+  options?: { fallbackPrefix?: string; onMeaningfulDelta?: () => void },
 ) {
-  const collector = createResponsesStreamCollector({ fallbackPrefix: options?.fallbackPrefix ?? "Codex" });
+  const collector = createResponsesStreamCollector({
+    fallbackPrefix: options?.fallbackPrefix ?? "Codex",
+    ...(options?.onMeaningfulDelta ? { onMeaningfulDelta: options.onMeaningfulDelta } : {}),
+  });
   for (const ev of events) {
     collector.processEvent(ev);
   }
@@ -194,11 +211,14 @@ export async function readResponsesSseCompletion(args: {
   response: Response;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
+  /** Observed-speed timing：首个有效 delta 到达时触发一次。 */
+  onMeaningfulDelta?: () => void;
   fallbackPrefix?: string;
 }): Promise<ResponsesStreamAggregation> {
   const collector = createResponsesStreamCollector({
     onTextDelta: args.onTextDelta,
     onReasoningDelta: args.onReasoningDelta,
+    ...(args.onMeaningfulDelta ? { onMeaningfulDelta: args.onMeaningfulDelta } : {}),
     fallbackPrefix: args.fallbackPrefix ?? "Responses",
   });
 

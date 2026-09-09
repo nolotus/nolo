@@ -6,6 +6,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -13,6 +14,11 @@ import {
   type CredentialBroker,
   type CredentialRef,
 } from "./credentialBroker";
+import {
+  getLegacyCredentialPath,
+  migrateLegacyCredentialFile,
+  type CredentialMigrationOptions,
+} from "./credentialLocationMigration";
 import { getCredentialsDir } from "./oauthTokenStore";
 
 export type StoredApiKeyCredential = {
@@ -25,7 +31,7 @@ export function getApiKeyCredentialsDir(homeDir?: string): string {
 }
 
 /**
- * Map a credential ref to a single filename under ~/.nolo/credentials/keys/.
+ * Map a credential ref to a single filename under `$NOLO_HOME/credentials/keys/` (or `~/.nolo/credentials/keys/` when `NOLO_HOME` is unset).
  * Colons become underscores so refs like `api-key:agent-foo` stay portable.
  */
 export function credentialRefToFileName(ref: CredentialRef): string {
@@ -58,10 +64,35 @@ function writePrivateFile(path: string, body: string): void {
   }
 }
 
+function migrateApiKeyCredentialIfNeeded(
+  ref: CredentialRef,
+  homeDir: string | undefined,
+  migration?: CredentialMigrationOptions,
+): void {
+  if (homeDir !== undefined || !migration?.enableLegacyMigration) return;
+  const legacyHomeDir = migration.legacyHomeDir ?? homedir();
+  const relativePath = join("keys", credentialRefToFileName(ref));
+  migrateLegacyCredentialFile({
+    canonicalPath: getApiKeyCredentialPath(ref),
+    legacyPath: getLegacyCredentialPath(relativePath, legacyHomeDir),
+    mode: migration.mode ?? (migration.legacyHomeDir ? "test" : "production"),
+    isValid: (raw) => {
+      try {
+        const parsed = JSON.parse(raw) as StoredApiKeyCredential;
+        return typeof parsed?.secret === "string" && Boolean(parsed.secret);
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
 export function readApiKeyCredential(
   ref: CredentialRef,
   homeDir?: string,
+  migration?: CredentialMigrationOptions,
 ): string | null {
+  migrateApiKeyCredentialIfNeeded(ref, homeDir, migration);
   const path = getApiKeyCredentialPath(ref, homeDir);
   if (!existsSync(path)) return null;
   try {
@@ -102,27 +133,33 @@ export function removeApiKeyCredential(ref: CredentialRef, homeDir?: string): vo
   unlinkSync(path);
 }
 
-export function hasApiKeyCredential(ref: CredentialRef, homeDir?: string): boolean {
-  return readApiKeyCredential(ref, homeDir) !== null;
+export function hasApiKeyCredential(
+  ref: CredentialRef,
+  homeDir?: string,
+  migration?: CredentialMigrationOptions,
+): boolean {
+  return readApiKeyCredential(ref, homeDir, migration) !== null;
 }
 
 export type CreateFileCredentialBrokerOptions = {
   homeDir?: string;
   now?: () => number;
+  migration?: CredentialMigrationOptions;
 };
 
 /**
  * File-backed CredentialBroker for metered API keys.
- * OAuth tokens remain under ~/.nolo/credentials/<provider>.json via oauthTokenStore.
+ * OAuth tokens remain under `$NOLO_HOME/credentials/<provider>.json` (or `~/.nolo/credentials/<provider>.json` when `NOLO_HOME` is unset) via oauthTokenStore.
  */
 export function createFileCredentialBroker(
   options: CreateFileCredentialBrokerOptions = {},
 ): CredentialBroker {
   const homeDir = options.homeDir;
+  const migration = options.migration;
   const now = options.now ?? Date.now;
   return {
     get(ref) {
-      return readApiKeyCredential(ref, homeDir);
+      return readApiKeyCredential(ref, homeDir, migration);
     },
     put(ref, secret) {
       writeApiKeyCredential(ref, secret, homeDir, now());
@@ -131,7 +168,7 @@ export function createFileCredentialBroker(
       removeApiKeyCredential(ref, homeDir);
     },
     has(ref) {
-      return hasApiKeyCredential(ref, homeDir);
+      return hasApiKeyCredential(ref, homeDir, migration);
     },
   };
 }

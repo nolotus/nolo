@@ -6,7 +6,13 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  getLegacyCredentialPath,
+  migrateLegacyCredentialFile,
+  type CredentialMigrationOptions,
+} from "./credentialLocationMigration";
 import { resolveNoloStateDir } from "./noloStateDir";
 
 export type OAuthProvider =
@@ -75,10 +81,37 @@ function writePrivateFile(path: string, body: string): void {
   }
 }
 
+function isValidOAuthCredential(raw: string, provider: OAuthProvider): boolean {
+  try {
+    const parsed = JSON.parse(raw) as OAuthCredential;
+    return parsed?.provider === provider && typeof parsed.accessToken === "string" && Boolean(parsed.accessToken);
+  } catch {
+    return false;
+  }
+}
+
+function migrateOAuthCredentialIfNeeded(
+  provider: OAuthProvider,
+  homeDir: string | undefined,
+  migration?: CredentialMigrationOptions,
+): void {
+  if (homeDir !== undefined || !migration?.enableLegacyMigration) return;
+  const legacyHomeDir = migration.legacyHomeDir ?? homedir();
+  const canonicalPath = getCredentialPath(provider);
+  migrateLegacyCredentialFile({
+    canonicalPath,
+    legacyPath: getLegacyCredentialPath(`${provider}.json`, legacyHomeDir),
+    mode: migration.mode ?? (migration.legacyHomeDir ? "test" : "production"),
+    isValid: (raw) => isValidOAuthCredential(raw, provider),
+  });
+}
+
 export function readOAuthCredential(
   provider: OAuthProvider,
-  homeDir?: string
+  homeDir?: string,
+  migration?: CredentialMigrationOptions,
 ): OAuthCredential | null {
+  migrateOAuthCredentialIfNeeded(provider, homeDir, migration);
   const path = getCredentialPath(provider, homeDir);
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, "utf8");
@@ -107,10 +140,13 @@ export function removeOAuthCredential(provider: OAuthProvider, homeDir?: string)
   unlinkSync(path);
 }
 
-export function createOAuthTokenStore(homeDir?: string): OAuthTokenStore {
+export function createOAuthTokenStore(
+  homeDir?: string,
+  migration?: CredentialMigrationOptions,
+): OAuthTokenStore {
   return {
     read(provider) {
-      return readOAuthCredential(provider, homeDir);
+      return readOAuthCredential(provider, homeDir, migration);
     },
     write(provider, credential) {
       writeOAuthCredential(provider, credential, homeDir);
@@ -137,10 +173,11 @@ export async function resolveFreshAccessToken(args: {
   refresh?: OAuthRefreshFn;
   skewMs?: number;
   now?: () => number;
+  migration?: CredentialMigrationOptions;
   /** 强制刷新（401 重试路径）：即便本地认为 token 仍新鲜也重新换一次。 */
   force?: boolean;
 }): Promise<string | null> {
-  const store = args.store ?? createOAuthTokenStore(args.homeDir);
+  const store = args.store ?? createOAuthTokenStore(args.homeDir, args.migration);
   const now = args.now ?? Date.now;
   const credential = store.read(args.provider);
   if (!credential) return null;

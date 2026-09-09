@@ -6,7 +6,7 @@
  * 2. Local credential broker via bare `credentialRef`
  *    - Web Desktop: esbuild rewrites `fileCredentialBroker` → browser stub → host HTTP
  *    - RN Metro: resolves `fileCredentialBroker.native` → Keychain
- *    - Node/Bun: file broker under ~/.nolo/credentials/keys/
+ *    - Node/Bun: file broker under `$NOLO_HOME/credentials/keys/` (or `~/.nolo/credentials/keys/` when `NOLO_HOME` is unset)
  *
  * Security:
  * - Never use this helper to hydrate server-proxy `KEY`, Redux, Agent, Dialog, logs, URLs.

@@ -1,5 +1,5 @@
 /**
- * Browser stub for OAuth token file store. Webview cannot read ~/.nolo/credentials.
+ * Browser stub for OAuth token file store. Webview cannot read `$NOLO_HOME/credentials` (or `~/.nolo/credentials` when `NOLO_HOME` is unset).
  * Real OAuth resolution for desktop host uses the Node/Bun implementation.
  */
 

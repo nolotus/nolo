@@ -17,6 +17,7 @@ import { isRecord } from "core/isRecord";
 import { extractCustomId } from "core/prefix";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { selectIdentityToken } from "identity/selectors";
 
 // ─────────────────────────────────────────────
 // 基础提取：从 Redux state 中获取服务器配置
@@ -54,8 +55,10 @@ const resolveDesktopSafeServer = (value?: string | null): string => {
 const selectCurrentServerFromState = (state: any): string =>
     resolveDesktopSafeServer(state?.settings?.currentServer);
 
-const selectCurrentTokenFromState = (state: any): string | null =>
-    typeof state?.auth?.currentToken === "string" ? state.auth.currentToken : null;
+const selectCurrentTokenFromState = (state: any): string | null => {
+    const token = selectIdentityToken(state);
+    return typeof token === "string" ? token : null;
+};
 
 const selectCurrentDialogKeyFromState = (_state: any): string | null =>
     getActiveDialogKey();
@@ -76,7 +79,6 @@ const DESKTOP_LOCAL_TOOL_PATHS = new Set([
     "/api/apply-edit",
     "/api/apply-line-edits",
     "/api/code-search",
-    "/api/search-repo",
     "/api/desktop/files/roots",
     "/api/desktop/files/roots/request",
     "/api/desktop/files/list",

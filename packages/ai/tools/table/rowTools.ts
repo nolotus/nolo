@@ -3,6 +3,7 @@ import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asNonEmptyStringArray } from "core/stringArray";
 import { buildNoloTableQueryRequest } from "../../../agent-runtime/noloWorkspaceTools";
+import { selectIdentityUserId } from "identity/selectors";
 import {
   applyRowFilters,
   formatKnownColumns,
@@ -23,10 +24,10 @@ const toPreviewJson = (value: unknown, maxLength = 600): string => {
   }
 };
 
-const selectCurrentUserId = (state: RootState) =>
-  typeof state.auth?.currentUser?.userId === "string"
-    ? state.auth.currentUser.userId
-    : undefined;
+const selectCurrentUserId = (state: RootState) => {
+  const userId = selectIdentityUserId(state as never);
+  return typeof userId === "string" ? userId : undefined;
+};
 
 const normalizeTableQueryArgs = (args: any, thunkApi: any) => {
   const state = thunkApi.getState() as RootState;

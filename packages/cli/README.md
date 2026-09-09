@@ -98,7 +98,7 @@ nolo auth cloudflare    # Cloudflare OAuth (email routing, etc.)
 ```
 
 - 授权 **第三方 API 访问**，让 Agent 使用你的个人订阅额度调用模型
-- token 保存在 `~/.nolo/credentials/<provider>.json`
+- token 保存在 `$NOLO_HOME/credentials/<provider>.json`（`NOLO_HOME` 未设置时为 `~/.nolo/credentials/<provider>.json`）
 - Agent 通过 `apiKeyRef: "<provider>"` + `apiSource: "custom"` 引用这些凭据
 - **不替代 `nolo login`**——管理 Nolo 资源仍需先登录平台
 
@@ -225,8 +225,8 @@ nolo table add-column --table meta-<userId>-<tableId> --schema-write-ok --name "
 - `nolo agent email bind <agent> --email <address>` 将已有地址绑定到 agent。
 - `nolo agent email create-and-provision <slug> --name <display> [--local-part pay] [--copy-provider-from <agent>]` 一步创建 agent 并开通邮箱。
 - `nolo auth cloudflare [--client-id <id>] [--generate-token] [--zone-name <domain>] [--write-to-env [path]]` 通过 Cloudflare 自托管 OAuth 授权并可选生成 `Zone:Email Routing:Edit` 的 API Token，还可直接写入 `.env`。
-- `nolo auth claude [--no-browser] [--sync-to-server|--no-sync-to-server]` 通过 PKCE + `localhost:54545` 回调授权 Claude Pro/Max；`--no-browser` 时可粘贴最终回调 URL/授权码。凭据保存到 `~/.nolo/credentials/claude.json`。若已配置 `NOLO_SERVER`+`AUTH_TOKEN`（或 profile），登录成功后会自动 sync 到 server；可用 `--no-sync-to-server` 或 `NOLO_OAUTH_AUTO_SYNC=0` 关闭。Agent 使用 `provider: "anthropic"`、`apiKeyRef: "claude"`。
-- `nolo auth cursor [--no-browser] [--sync-to-server|--no-sync-to-server]` 通过 poll-based device flow 授权 Cursor Pro（无需回调端口）。打开 `https://cursor.com/loginDeepControl` 并轮询 `api2.cursor.sh/auth/poll` 获取 token。凭据保存到 `~/.nolo/credentials/cursor.json`。同样在 server 配置存在时自动 sync。Agent 使用 `provider: "cursor"`、`apiKeyRef: "cursor"`，模型如 `cursor-grok-4.5-high`（Cursor Models 池；裸 `cursor-grok-4.5` 会由 provider 兼容映射到 high）。
+- `nolo auth claude [--no-browser] [--sync-to-server|--no-sync-to-server]` 通过 PKCE + `localhost:54545` 回调授权 Claude Pro/Max；`--no-browser` 时可粘贴最终回调 URL/授权码。凭据保存到 `$NOLO_HOME/credentials/claude.json`（未设置 `NOLO_HOME` 时为 `~/.nolo/credentials/claude.json`）。若已配置 `NOLO_SERVER`+`AUTH_TOKEN`（或 profile），登录成功后会自动 sync 到 server；可用 `--no-sync-to-server` 或 `NOLO_OAUTH_AUTO_SYNC=0` 关闭。Agent 使用 `provider: "anthropic"`、`apiKeyRef: "claude"`。
+- `nolo auth cursor [--no-browser] [--sync-to-server|--no-sync-to-server]` 通过 poll-based device flow 授权 Cursor Pro（无需回调端口）。打开 `https://cursor.com/loginDeepControl` 并轮询 `api2.cursor.sh/auth/poll` 获取 token。凭据保存到 `$NOLO_HOME/credentials/cursor.json`（未设置 `NOLO_HOME` 时为 `~/.nolo/credentials/cursor.json`）。同样在 server 配置存在时自动 sync。Agent 使用 `provider: "cursor"`、`apiKeyRef: "cursor"`，模型如 `cursor-grok-4.5-high`（Cursor Models 池；裸 `cursor-grok-4.5` 会由 provider 兼容映射到 high）。
 - `nolo agent grant <agent> --to <userId>` 给对方发点对点额度授权（收藏 ≠ 授权；公共/跨空间需要）。
 - `nolo agent grants <agent>` 列出该 agent 的有效授权。
 - `nolo agent revoke-grant <agent> --from <userId>` 撤销授权。

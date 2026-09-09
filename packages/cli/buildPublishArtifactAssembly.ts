@@ -22,11 +22,16 @@ type ReachableWorkspaceFilesByPackage = Record<string, string[]>;
 type WorkspaceFileTarget = {
   packageName: string;
   relativeFilePath: string;
+  /** Real source file when the dist path differs from the source layout
+   * (exports-map edition files are flattened to their plain subpath). */
+  sourceFilePath?: string;
 };
 
 type WorkspaceGraph = {
   packageOrder: string[];
   filesByPackage: ReachableWorkspaceFilesByPackage;
+  /** distPath → real source file, for exports-map edition flattening. */
+  sourceOverrides?: Map<string, string>;
 };
 
 export type InlineWorkspaceDependenciesOptions = {
@@ -34,6 +39,7 @@ export type InlineWorkspaceDependenciesOptions = {
   distDir: string;
   workspaceDeps: string[];
   reachableFilesByPackage?: ReachableWorkspaceFilesByPackage;
+  sourceOverrides?: Map<string, string>;
   extractExternalImports: (content: string) => string[];
   rewriteCrossPackageImports: (
     content: string,
@@ -131,6 +137,7 @@ export async function buildPublishArtifactAssembly(
     distDir,
     workspaceDeps,
     reachableFilesByPackage: reachableWorkspaceGraph.filesByPackage,
+    sourceOverrides: reachableWorkspaceGraph.sourceOverrides,
     extractExternalImports,
     rewriteCrossPackageImports,
     warn,
@@ -157,6 +164,7 @@ export async function inlineWorkspaceDependencies(
     distDir,
     workspaceDeps,
     reachableFilesByPackage,
+    sourceOverrides,
     extractExternalImports,
     rewriteCrossPackageImports,
     warn,
@@ -174,6 +182,7 @@ export async function inlineWorkspaceDependencies(
           reachableFilesByPackage
         ),
         filesByPackage: reachableFilesByPackage,
+        sourceOverrides,
       }
     : collectWholePackageWorkspaceFiles(sourceDir, workspaceDeps);
   const inlinedDeps: string[] = [];
@@ -191,7 +200,9 @@ export async function inlineWorkspaceDependencies(
         continue;
       }
 
-      const sourcePath = join(depSourceDir, relativeFilePath);
+      const sourcePath =
+        workspaceGraph.sourceOverrides?.get(`${depName}/${relativeFilePath}`) ??
+        join(depSourceDir, relativeFilePath);
       if (!existsSync(sourcePath)) {
         warn(`Warning: workspace file not found: ${sourcePath}`);
         continue;
@@ -348,11 +359,18 @@ function collectReachableWorkspaceFiles(
   const workspacePackageDirs = listWorkspacePackageDirs(sourceDir);
   const packageOrder: string[] = [];
   const filesByPackage = new Map<string, Set<string>>();
+  const sourceOverrides = new Map<string, string>();
   const pending: WorkspaceFileTarget[] = [];
 
   const enqueue = (target: WorkspaceFileTarget | null) => {
     if (!target || !shouldInlineWorkspaceFile(target.relativeFilePath)) {
       return;
+    }
+    if (target.sourceFilePath) {
+      sourceOverrides.set(
+        `${target.packageName}/${target.relativeFilePath}`,
+        target.sourceFilePath
+      );
     }
 
     let files = filesByPackage.get(target.packageName);
@@ -395,7 +413,9 @@ function collectReachableWorkspaceFiles(
   while (pending.length > 0) {
     const target = pending.pop()!;
     const packageDir = join(packagesDir, target.packageName);
-    const sourcePath = join(packageDir, target.relativeFilePath);
+    const sourcePath =
+      target.sourceFilePath ??
+      join(packageDir, target.relativeFilePath);
     if (!existsSync(sourcePath)) {
       continue;
     }
@@ -422,6 +442,7 @@ function collectReachableWorkspaceFiles(
         Array.from(filesByPackage.get(packageName) ?? []),
       ])
     ),
+    sourceOverrides,
   };
 }
 
@@ -647,6 +668,32 @@ function resolveWorkspaceImport(args: {
 
   const subPath =
     importPath === packageName ? "index" : importPath.slice(packageName.length + 1);
+  const exportsResolved = resolveExportsMapSubpath(
+    packagesDir,
+    packageName,
+    subPath
+  );
+  if (exportsResolved) {
+    // Register the edition-resolved file under the plain subpath name so the
+    // rewritten `../<pkg>/<subPath>` import specifier resolves in the dist
+    // tree (exports-map indirection does not exist as a real file there).
+    const extension = exportsResolved.slice(
+      exportsResolved.lastIndexOf(".")
+    );
+    const target = toWorkspaceFileTarget(
+      packagesDir,
+      workspacePackageDirs,
+      exportsResolved
+    );
+    if (target) {
+      return {
+        ...target,
+        relativeFilePath: `${subPath}${extension}`,
+        sourceFilePath: exportsResolved,
+      };
+    }
+    return null;
+  }
   return toWorkspaceFileTarget(
     packagesDir,
     workspacePackageDirs,
@@ -707,6 +754,43 @@ function resolveImportAbsolutePath(importBase: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Resolve a workspace-package subpath through its package.json `exports`
+ * map (edition-injected packages expose e.g. `identity/selectors` only via
+ * `exports["./selectors"]`, never as a plain file). Edition selection uses
+ * the `nolo-cloud` condition first, then `default` — mirroring runtime
+ * resolution so the dist graph inlines the same files the server runs.
+ */
+function resolveExportsMapSubpath(
+  packagesDir: string,
+  packageName: string,
+  subPath: string
+): string | null {
+  const manifestPath = join(packagesDir, packageName, "package.json");
+  if (!existsSync(manifestPath)) {
+    return null;
+  }
+  let manifest: any;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch {
+    return null;
+  }
+  const entry =
+    subPath === "index"
+      ? manifest?.exports?.["."]
+      : manifest?.exports?.[`./${subPath}`];
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const target =
+    entry["nolo-cloud"] ?? entry.default ?? entry["node"] ?? entry.import;
+  if (typeof target !== "string" || !target.startsWith("./")) {
+    return null;
+  }
+  return resolveImportAbsolutePath(join(packagesDir, packageName, target));
 }
 
 function extractPackageNameFromImportPath(importPath: string): string {

@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { replaceCurrentToken } from "identity/actions";
 import { useCurrentUser, useToken } from "identity";
 import { useTranslation } from "react-i18next";
 import { LuClock3 } from "react-icons/lu";
 
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAccountSessionService, useAppSelector } from "app/store";
 import { selectRemoteServer } from "app/settings/settingSlice";
 import { authRoutes } from "core/authRoutes";
 import { toast } from "app/utils/toast"
@@ -61,7 +60,7 @@ const SecurityStatItem: React.FC<{
 const SecuritySettings: React.FC = () => {
   const user = useCurrentUser();
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
+  const accountSession = useAccountSessionService();
   const currentServer = useAppSelector(selectRemoteServer);
   const currentToken = useToken();
 
@@ -214,7 +213,10 @@ const SecuritySettings: React.FC = () => {
       );
 
       try {
-        await dispatch(replaceCurrentToken({ token: nextToken }) as any).unwrap();
+        if (!accountSession) {
+          throw new Error("replace_token_failed");
+        }
+        await accountSession.replaceActiveToken(nextToken);
       } catch {
         throw new Error("replace_token_failed");
       }

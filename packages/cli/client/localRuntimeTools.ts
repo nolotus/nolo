@@ -57,8 +57,11 @@ export function buildOpenAiTools(args: {
   agentKey?: string;
   toolNames?: string[];
   env: EnvLike;
+  /** Explicit final run surface; when set, no host defaults may be re-added. */
+  effectiveToolNames?: string[];
 }) {
   const toolset = buildLocalWorkspaceToolsetForEnv(args);
+  const workspaceToolNames = toolset.toolNames;
   const toolNameSet = new Set(args.toolNames ?? []);
   const uiAskChoiceTools = toolNameSet.has("ask_user")
     ? prepareTools(["ask_user"])
@@ -109,7 +112,7 @@ export function buildOpenAiTools(args: {
     ...uiAskChoiceTools,
     ...readPastedTextTools,
     ...buildLocalWorkspaceOpenAiTools({
-      toolNames: toolset.toolNames,
+      toolNames: args.effectiveToolNames ?? workspaceToolNames,
       exposeShellTools: toolset.exposeShellTools,
     }),
     ...buildServerPlatformOpenAiTools({ toolNames: args.toolNames }),
@@ -294,28 +297,36 @@ export function resolveProviderOpenAiToolBundle(
 ) {
   const requestedToolNames = [
     ...new Set([
-      ...resolveCliRequestedToolNames(agentConfig, env, null),
+      ...(Array.isArray((agentConfig as any).runScopedToolSurface?.finalToolNames)
+        ? (agentConfig as any).runScopedToolSurface.finalToolNames
+        : resolveCliRequestedToolNames(agentConfig, env, null)),
       ...additionalToolNames,
     ]),
   ];
   const tools = buildTools({
     agentKey: agentConfig.key,
     toolNames: requestedToolNames,
+    ...(Array.isArray((agentConfig as any).runScopedToolSurface?.finalToolNames)
+      ? { effectiveToolNames: requestedToolNames }
+      : {}),
     env,
-  });
+  } as Parameters<typeof buildTools>[0]);
   return { requestedToolNames, tools };
 }
 
 export function buildLocalWorkspaceToolsetForEnv(args: {
   toolNames?: string[];
   env: EnvLike;
+  useDeclaredToolNamesOnly?: boolean;
 }) {
   const toolset = buildLocalWorkspaceToolset({
     declaredToolNames: args.toolNames,
     exposeShellTools: true,
-    useDeclaredToolNamesOnly: shouldUseDeclaredOnlyLocalWorkspaceTools(
-      args.env,
-    ),
+    // The requested list is already the effective run surface. Re-expanding
+    // shell/workspace defaults here would bypass run-scoped constraints.
+    useDeclaredToolNamesOnly: args.useDeclaredToolNamesOnly === true ||
+      (args.useDeclaredToolNamesOnly === undefined &&
+        shouldUseDeclaredOnlyLocalWorkspaceTools(args.env)),
   });
   return toolset;
 }

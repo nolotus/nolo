@@ -1048,8 +1048,8 @@ async function runHttpAgentTurn(
           ? { dialogAgentMode: options.dialogAgentMode }
           : {}),
         ...(subjectRefs ? { subjectRefs } : {}),
-        ...(blockedToolNames?.length ? { blockedToolNames } : {}),
-        ...(allowedToolNames?.length ? { allowedToolNames } : {}),
+        ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
+        ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
       },
       ...(options.continueDialogId
         ? { continueDialogId: options.continueDialogId }
@@ -1238,8 +1238,8 @@ async function runLocalAgentTurnForCli(
   );
   const runtimeContext: Record<string, any> | undefined =
     subjectRefs ||
-    allowedToolNames?.length ||
-    blockedToolNames?.length ||
+    allowedToolNames !== undefined ||
+    blockedToolNames !== undefined ||
     options.parentWakeOnTerminal ||
     options.dialogAgentMode
       ? {
@@ -1247,8 +1247,8 @@ async function runLocalAgentTurnForCli(
           ...(options.dialogAgentMode
             ? { dialogAgentMode: options.dialogAgentMode }
             : {}),
-          ...(allowedToolNames?.length ? { allowedToolNames } : {}),
-          ...(blockedToolNames?.length ? { blockedToolNames } : {}),
+          ...(allowedToolNames !== undefined ? { allowedToolNames } : {}),
+          ...(blockedToolNames !== undefined ? { blockedToolNames } : {}),
           ...(options.parentWakeOnTerminal
             ? { parentWakeOnTerminal: true }
             : {}),
@@ -1302,6 +1302,7 @@ async function runLocalAgentTurnForCli(
       category: options.category,
       inheritedFromDialogKey: options.inheritedFromDialogKey,
       parentDialogId: options.parentDialogId,
+      runtimeContext,
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
       background: options.background,
       noStream: options.noStream,
@@ -1325,7 +1326,7 @@ async function runLocalAgentTurnForCli(
           // 第 4 级降级提示：模型不支持图片，已用占位文本替代；给用户 escape hatch。
           // 不阻断当前轮——agent 拿到的是 [Image content omitted...] 占位文本，能继续跑。
           options.output.write(
-            "[nolo] 当前 agent 不支持图片输入，已用占位文本替代。要完整图片理解可 /switch 到 Kimi K2.6。\n",
+            "[nolo] 当前 agent 被配置为不支持图片输入，图片已用占位文本替代。请检查模型的图片能力配置，或用 /switch 选择支持图片的 agent 后重新发送图片。\n",
           );
         }
         if (event.kind === "compaction") {

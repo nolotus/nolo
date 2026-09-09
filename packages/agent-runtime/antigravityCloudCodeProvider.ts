@@ -3,6 +3,12 @@ import { randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
+import type { AgentRuntimeToolCall } from "./types";
+import type {
+  AntigravityProviderEvent,
+  AntigravityProviderFailure,
+  AntigravitySemanticResult,
+} from "./antigravitySemanticTypes";
 import {
   getAntigravityUserAgent,
   readAntigravityProjectId,
@@ -31,6 +37,67 @@ const STREAM_PATH = "/v1internal:streamGenerateContent?alt=sse";
  * thought_signature 捕获/回放/哨兵逻辑已提取到 geminiNativeShared.ts，
  * 供 antigravity 路径和 platform proxy native 路径共用。
  */
+
+export type AntigravityProviderCallSnapshot = {
+  model: unknown;
+  request: {
+    contents: unknown;
+    systemInstruction?: unknown;
+    tools?: unknown;
+    toolConfig?: unknown;
+    generationConfig?: unknown;
+    labels?: Record<string, unknown>;
+  };
+  requestType: unknown;
+};
+
+/**
+ * Stable provider-call contract for comparing credential routes.
+ *
+ * Deliberately keeps model/wire/tool/signature and provider-semantic labels
+ * (such as used_claude, used_claude_conservative, model_enum). It removes only
+ * per-call or identity/transport entropy: project, requestId, sessionId,
+ * trajectory/step entropy (trajectory_id, last_step_index), userAgent, URL host,
+ * and Authorization are not provider semantics.
+ */
+export function snapshotAntigravityProviderCall(
+  envelope: Record<string, unknown>,
+): AntigravityProviderCallSnapshot {
+  const request = envelope.request;
+  const requestRecord = request && typeof request === "object"
+    ? (request as Record<string, unknown>)
+    : {};
+
+  let semanticLabels: Record<string, unknown> | undefined;
+  if (requestRecord.labels && typeof requestRecord.labels === "object") {
+    const rawLabels = requestRecord.labels as Record<string, unknown>;
+    const filtered: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rawLabels)) {
+      if (key === "trajectory_id" || key === "last_step_index") continue;
+      filtered[key] = value;
+    }
+    if (Object.keys(filtered).length > 0) {
+      semanticLabels = filtered;
+    }
+  }
+
+  return {
+    model: envelope.model,
+    request: {
+      contents: requestRecord.contents,
+      ...( "systemInstruction" in requestRecord
+        ? { systemInstruction: requestRecord.systemInstruction }
+        : {}),
+      ...( "tools" in requestRecord ? { tools: requestRecord.tools } : {}),
+      ...( "toolConfig" in requestRecord ? { toolConfig: requestRecord.toolConfig } : {}),
+      ...( "generationConfig" in requestRecord
+        ? { generationConfig: requestRecord.generationConfig }
+        : {}),
+      ...( semanticLabels ? { labels: semanticLabels } : {} ),
+    },
+    requestType: envelope.requestType,
+  };
+}
 
 type AntigravityCloudCodeCallArgs = {
   agentConfig: AgentRuntimeAgentConfig;
@@ -171,7 +238,7 @@ async function readSseJsonChunks(response: Response): Promise<unknown[]> {
  * MAX_TOKENS → "length"（空轮兜底走 length_truncated，明确诊断不重试）；
  * SAFETY/RECITATION 类 → "content_filter"；未知/缺省维持 "stop"。
  */
-function resolveAntigravityFinishReason(upstream?: string): string {
+export function resolveAntigravityFinishReason(upstream?: string): string {
   const normalized = (upstream ?? "").trim().toUpperCase();
   if (normalized === "MAX_TOKENS") return "length";
   if (
@@ -182,19 +249,114 @@ function resolveAntigravityFinishReason(upstream?: string): string {
   ) {
     return "content_filter";
   }
-  // 模型发起了畸形函数调用（端点已丢弃调用、无 parts）。典型诱因是工具
-  // schema 含 Gemini 不支持的构造（已在 convertOpenAiToolsToGemini 净化，
-  // 2026-09-05 生产实证 root cause）。映射 content_filter：确定性失败，
-  // 不应落入 empty repair 循环烧配额。
-  if (normalized === "MALFORMED_FUNCTION_CALL") {
-    return "content_filter";
-  }
   return "stop";
+}
+
+export type {
+  AntigravityProviderEvent,
+  AntigravityProviderFailure,
+  AntigravitySemanticResult,
+};
+
+export type AntigravityDecodedCompletion = {
+  text: string;
+  toolCalls: AgentRuntimeToolCall[];
+  usage?: Record<string, unknown>;
+  finishReason?: string;
+  reasoningContent?: string;
+  events: AntigravityProviderEvent[];
+};
+
+/** Normalize decoded Gemini output once, then expose the legacy facade unchanged. */
+export function normalizeAntigravityCompletion(
+  decoded: AntigravityDecodedCompletion,
+): AntigravitySemanticResult {
+  const { text, toolCalls, usage, finishReason, reasoningContent, events } = decoded;
+  const normalizedFinishReason = (finishReason ?? "").trim().toUpperCase();
+  if (!text && !reasoningContent && toolCalls.length === 0 && !finishReason && !usage) {
+    const body = {
+      error: {
+        message:
+          "antigravity upstream returned an empty stream (no content, finishReason or usage); channel degradation, not model emptiness",
+      },
+      provider_events: events,
+    };
+    return {
+      status: 502,
+      text: "",
+      toolCalls: [],
+      providerEvents: events,
+      body,
+    };
+  }
+  if (normalizedFinishReason === "MALFORMED_FUNCTION_CALL") {
+    const message =
+      "antigravity upstream returned MALFORMED_FUNCTION_CALL (model generated an invalid function call or tool arguments were rejected by upstream)";
+    const providerFailure: AntigravityProviderFailure = {
+      kind: "provider_failure",
+      provider: "antigravity",
+      code: "MALFORMED_FUNCTION_CALL",
+      message,
+      providerReason: "MALFORMED_FUNCTION_CALL",
+      retryable: false,
+      status: 502,
+    };
+    return {
+      status: 502,
+      text: "",
+      toolCalls: [],
+      finishReason,
+      providerEvents: events,
+      providerFailure,
+      runtimeProviderFailure: {
+        message: providerFailure.message,
+        retryable: providerFailure.retryable,
+      },
+      body: {
+        error: {
+          message,
+          code: "MALFORMED_FUNCTION_CALL",
+          category: "malformed_function_call",
+          providerReason: "MALFORMED_FUNCTION_CALL",
+          retryable: false,
+        },
+        provider_failure: providerFailure,
+        provider_events: events,
+      },
+    };
+  }
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    content: text || null,
+  };
+  if (toolCalls.length > 0) message.tool_calls = toolCalls;
+  if (reasoningContent) message.reasoning_content = reasoningContent;
+  return {
+    status: 200,
+    text,
+    ...(reasoningContent ? { reasoningContent } : {}),
+    toolCalls,
+    ...(usage ? { usage } : {}),
+    ...(finishReason ? { finishReason } : {}),
+    providerEvents: events,
+    body: {
+      choices: [{
+        index: 0,
+        message,
+        finish_reason:
+          toolCalls.length > 0
+            ? "tool_calls"
+            : resolveAntigravityFinishReason(finishReason),
+      }],
+      ...(usage ? { usage } : {}),
+      provider_events: events,
+    },
+  };
 }
 
 export async function fetchAntigravityCloudCodeCompletion(
   args: AntigravityCloudCodeCallArgs,
-): Promise<{ status: number; body: Record<string, unknown> }> {
+): Promise<AntigravitySemanticResult> {
   const fetchImpl = args.fetchImpl ?? fetch;
   const { url, envelope } = buildCloudCodeAssistPayload(args);
   const response = await fetchImpl(url, {
@@ -212,6 +374,9 @@ export async function fetchAntigravityCloudCodeCompletion(
     const errorText = await response.text();
     return {
       status: response.status,
+      text: "",
+      toolCalls: [],
+      providerEvents: [],
       // 保留上游结构：Antigravity 的限流 body 同样携带结构化的重置信息，
       // 压成字符串会让冷却退化成 5 分钟默认值。
       body: parseUpstreamErrorBody(errorText, response.statusText),
@@ -219,69 +384,24 @@ export async function fetchAntigravityCloudCodeCompletion(
   }
 
   const chunkStream = streamSseDataValues(response, parseSseDataLineJson);
-  const { text, toolCalls, usage, finishReason, reasoningContent } =
+  const { text, toolCalls, usage, finishReason, reasoningContent, events } =
     await accumulateGeminiStream(chunkStream, {
       onTextDelta: args.onTextDelta,
       onReasoningDelta: args.onReasoningDelta,
     });
-  // 异常轮可观测（2026-09-05 排障教训）：owner 通道出现「200 + usage + 零正文」
-  // 微输出轮（out 1-80，finishReason 未知），聚合层此前丢弃全部结构信息，
-  // 事后只能从 usage 数字倒推。无正文且无工具时打出关键信号——低频（正常
-  // 轮永不触发）、永久保留。
-  if (!text && toolCalls.length === 0) {
+  // The decoder produces the semantic result; this call is the compatibility bridge.
+  const normalized = normalizeAntigravityCompletion({
+    text,
+    toolCalls,
+    usage,
+    finishReason,
+    reasoningContent,
+    events,
+  });
+  if (normalized.status !== 200 || (!text && toolCalls.length === 0)) {
     console.warn(
       `[antigravity] empty completion: finishReason=${JSON.stringify(finishReason)} reasoningLen=${reasoningContent?.length ?? 0} usage=${JSON.stringify(usage) ?? "none"} model=${String(envelope.model)} base=${new URL(url).host}`,
     );
   }
-  // 200 空流防护：正文/思考/工具全空，且 finishReason 与 usage 也缺席——
-  // 上游通道级异常（2026-09-05 实证：antigravity 软限流返回空 SSE，无任何
-  // candidate 帧）。伪装成 finish_reason="stop" 的空补全会被 emptyAssistantRepair
-  // 判成 empty_completion：repair 复调只会继续烧通道配额，最后熔断成误导性的
-  // 「模型连续返回空消息」。返回 502 让 loop 直接以 LLM API error 终止——
-  // 方向明确、不复调、可观测。finishReason 在场（如 SAFETY/MAX_TOKENS）的
-  // 空正文轮不落入：那是上游明确表态，由既有 finish_reason 映射路径处理。
-  const emptyStream =
-    !text &&
-    !reasoningContent &&
-    toolCalls.length === 0 &&
-    !finishReason &&
-    !usage;
-  if (emptyStream) {
-    return {
-      status: 502,
-      body: {
-        error: {
-          message:
-            "antigravity upstream returned an empty stream (no content, finishReason or usage); channel degradation, not model emptiness",
-        },
-      },
-    };
-  }
-  const message: Record<string, unknown> = {
-    role: "assistant",
-    content: text || null,
-  };
-  if (toolCalls.length > 0) {
-    message.tool_calls = toolCalls;
-  }
-  if (reasoningContent) {
-    message.reasoning_content = reasoningContent;
-  }
-
-  return {
-    status: 200,
-    body: {
-      choices: [
-        {
-          index: 0,
-          message,
-          finish_reason:
-            toolCalls.length > 0
-              ? "tool_calls"
-              : resolveAntigravityFinishReason(finishReason),
-        },
-      ],
-      ...(usage ? { usage } : {}),
-    },
-  };
+  return normalized;
 }
