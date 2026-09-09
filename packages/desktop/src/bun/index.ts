@@ -3,6 +3,11 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { createServer } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
+import {
+  armHardExitWatchdog,
+  armParentDeathWatch,
+  killServerChildTree,
+} from "./serverChildLifecycle";
 import { fileURLToPath } from "node:url";
 import { dlopen } from "bun:ffi";
 import { readXPostWithBridge } from "../../../../packages/integrations/x-reader/bridge/readXPostWithBridge";
@@ -517,6 +522,12 @@ if (desktopCwdOverride) {
 }
 
 if (process.env.NOLO_DESKTOP_SERVER_CHILD === "1") {
+  // 父进程死亡（含被 TerminateProcess）时控制管道 EOF——立即自我了断，
+  // 否则孤儿化的 server 子进程会一直占着安装目录镜像锁，更新 helper 干等。
+  armParentDeathWatch(() => {
+    console.log("[desktop server] parent process gone; exiting");
+    process.exit(0);
+  });
   const { bootstrapServer } = await import("desktop-runtime/entry");
   await bootstrapServer();
   await new Promise(() => {});
@@ -1136,6 +1147,7 @@ process.env.NOLO_DESKTOP = "1";
 process.env.NOLO_SERVER_DB_PATH = join(desktopChannelDir, "data", "leveldb");
 
 let serverChild: ChildProcess | undefined;
+let serverChildControlPipe: NodeJS.WritableStream | undefined;
 let shutdownEmbeddedServer: ((reason?: string) => Promise<void>) | undefined;
 
 if (process.platform === "win32" && !isDev) {
@@ -1144,9 +1156,13 @@ if (process.platform === "win32" && !isDev) {
       ...process.env,
       NOLO_DESKTOP_SERVER_CHILD: "1",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    // fd 3 是控制管道：父进程只要活着就持有写端，一旦死亡（含被
+    // TerminateProcess）OS 关闭写端，子进程读到 EOF 自我了断。
+    stdio: ["ignore", "pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  // 父侧持有即可，永不写入；保持引用防止被 GC 提前关闭误触发自毁。
+  serverChildControlPipe = serverChild.stdio[3] ?? undefined;
   serverChild.stdout?.on("data", (chunk) => {
     console.log(`[desktop server] ${chunk.toString("utf8").trimEnd()}`);
   });
@@ -1183,7 +1199,11 @@ const shutdownDesktop = (reason: string) => {
     shutdownDesktopPromise = (async () => {
       console.log(`[desktop:instance-lock] phase=instance-lock shutdown reason=${reason}`);
       desktopLocalConnector.stop?.(reason);
-      serverChild?.kill();
+      // Windows 上 server 是独立子进程：树杀带走它和 agent run 等孙进程，
+      // 否则孤儿进程占着安装目录镜像锁，更新 helper 无法换文件。
+      killServerChildTree(serverChild);
+      serverChildControlPipe?.destroy();
+      serverChildControlPipe = undefined;
       await shutdownEmbeddedServer?.(reason);
       desktopInstanceLock.release();
     })();
@@ -1518,10 +1538,24 @@ desktopDiag("boot:ready", "desktop boot ready", {
   smoke: isSmokeProbe,
 });
 
-mainWindow.on("close", async () => {
-  await shutdownDesktop("desktop-window-close");
+// quit/close 必须确定性退出：清理若被残留句柄拖住（或 electrobun 在主进程
+// 被终止前没等 async handler 跑完），看门狗强制 process.exit，保证 Windows
+// 更新 helper 看到进程死亡、文件锁释放。
+const shutdownDesktopAndExit = (reason: string) => {
+  const cancelWatchdog = armHardExitWatchdog(() => {
+    console.error(`[desktop] shutdown watchdog fired (${reason}); forcing exit`);
+    process.exit(0);
+  });
+  void shutdownDesktop(reason).finally(() => {
+    cancelWatchdog();
+    process.exit(0);
+  });
+};
+
+mainWindow.on("close", () => {
+  shutdownDesktopAndExit("desktop-window-close");
 });
 
-Electrobun.events.on("before-quit", async () => {
-  await shutdownDesktop("desktop-before-quit");
+Electrobun.events.on("before-quit", () => {
+  shutdownDesktopAndExit("desktop-before-quit");
 });
