@@ -4,6 +4,7 @@ import { ThemePicker } from "app/theme/web/ThemePicker";
 import { DarkModeSwitch } from "app/theme/web/DarkModeSwitch";
 import { DensitySwitch } from "app/theme/web/DensitySwitch";
 import { FontPresetPicker } from "app/theme/web/FontPresetPicker";
+import { NavigationPlacementSwitch } from "./NavigationPlacementSwitch";
 
 const SettingSection: React.FC<{
   title: string;
@@ -47,6 +48,16 @@ const Appearance: React.FC = () => {
           description={t("settings.appearance.density.description", "紧凑模式让侧边栏更小，宽松模式更易点击")}
         >
           <DensitySwitch />
+        </SettingSection>
+
+        <SettingSection
+          title={t("settings.appearance.navigationPlacement.title", "导航位置")}
+          description={t(
+            "settings.appearance.navigationPlacement.description",
+            "选择桌面端主导航位于左侧或右侧"
+          )}
+        >
+          <NavigationPlacementSwitch />
         </SettingSection>
 
         <SettingSection

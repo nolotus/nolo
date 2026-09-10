@@ -29,11 +29,13 @@ import {
   DEFAULT_RIGHT_SIDEBAR_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
 } from "app/layout/rightSidebarPreference";
+import { useNavigationPlacement } from "app/layout/navigationPlacementPreference";
 import {
   resolveCompanionEffectiveWidth,
   pointerXToCompanionWidth,
   MAIN_CONTENT_MIN_WIDTH,
 } from "./rightSidebarGeometry";
+import { pointerXToNavigationWidth } from "./navigationGeometry";
 import { useIsMobile } from "app/hooks/useIsMobile";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { shouldRenderChatSidebar } from "./mainLayoutSidebar";
@@ -96,6 +98,7 @@ const MainLayout: React.FC = () => {
   const isMobile = useIsMobile(768);
 
   const sidebarRef = useRef<HTMLElement | null>(null);
+  const mainLayoutRef = useRef<HTMLDivElement | null>(null);
   const rightSidebarRef = useRef<HTMLElement | null>(null);
   const lastWidthRef = useRef(sidebarWidth);
   const autoClosedByViewportRef = useRef(false);
@@ -122,6 +125,7 @@ const MainLayout: React.FC = () => {
   );
 
   const preferredWidth = useRightSidebarPreferredWidth();
+  const navigationPlacement = useNavigationPlacement();
   const targetPreferred = rightSidebar.requestedWidth ?? preferredWidth;
   const geometry = resolveCompanionEffectiveWidth({
     preferredWidth: targetPreferred,
@@ -263,7 +267,22 @@ const MainLayout: React.FC = () => {
     onStart: () => setIsResizing(true),
     onMove: (clientX) => {
       requestAnimationFrame(() => {
-        const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, clientX));
+        const rootEl = mainLayoutRef.current;
+        const domRect = rootEl?.getBoundingClientRect();
+        const rect =
+          domRect && domRect.width > 0
+            ? domRect
+            : {
+                left: 0,
+                right: typeof window !== "undefined" ? window.innerWidth : 1200,
+                width: typeof window !== "undefined" ? window.innerWidth : 1200,
+              };
+        const rawWidth = pointerXToNavigationWidth({
+          clientX,
+          containerRect: rect,
+          placement: navigationPlacement,
+        });
+        const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(rawWidth)));
         if (sidebarRef.current) {
           sidebarRef.current.style.width = `${newWidth}px`;
         }
@@ -415,6 +434,9 @@ const MainLayout: React.FC = () => {
     };
   }, [isOpen, isMobile, hasSidebar, isRightOpen]);
 
+  const placementClass =
+    navigationPlacement === "end" ? "MainLayout--navigation-end" : "";
+
   return (
     <MainSidebarContext.Provider
       value={{
@@ -431,7 +453,10 @@ const MainLayout: React.FC = () => {
           currentId: rightSidebar.id,
         }}
       >
-        <div className={`MainLayout ${isResizing ? "is-resizing" : ""}`}>
+        <div
+          ref={mainLayoutRef}
+          className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""}`.trim()}
+        >
         {/* 左侧常驻侧边栏 */}
         {hasSidebar && (
           <aside

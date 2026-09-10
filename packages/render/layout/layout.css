@@ -79,6 +79,10 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   background: var(--background);
 }
 
+.MainLayout--navigation-end .MainLayout__center {
+  order: 1;
+}
+
 /* TopBar Suspense slot: same box as .topbar so lazy chunk resolve is 0px height jump */
 .MainLayout__topbarSlot {
   height: var(--topbar-height);
@@ -121,6 +125,14 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
     transform var(--sidebar-slide-duration) var(--sidebar-slide-ease),
     box-shadow 180ms ease-out;
   will-change: width, transform;
+}
+
+.MainLayout--navigation-end .MainLayout__sidebar {
+  order: 2;
+  box-shadow:
+    -1px 0 0 0 rgba(0, 0, 0, 0.018),
+    -3px 0 8px -1px rgba(0, 0, 0, 0.02),
+    -6px 0 16px -3px rgba(0, 0, 0, 0.015);
 }
 
 [data-theme="dark"] .MainLayout__sidebar {
@@ -273,6 +285,10 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   display: flex;
   justify-content: center;
 }
+.MainLayout--navigation-end .MainLayout__resizeHandle {
+  left: -3px;
+  right: auto;
+}
 .MainLayout__resizeHandle::after {
   content: '';
   width: 100%;
@@ -388,6 +404,24 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   }
   .MainLayout__sidebar.is-open {
     transform: translateX(0);
+  }
+
+  /* 移动端覆盖一切 placement 影响：抽屉始终保持从左滑出 */
+  .MainLayout--navigation-end .MainLayout__sidebar {
+    left: 0;
+    right: auto;
+    order: initial;
+    box-shadow:
+      1px 0 0 0 rgba(0, 0, 0, 0.025),
+      6px 0 16px -2px rgba(0, 0, 0, 0.04),
+      12px 0 32px -6px rgba(0, 0, 0, 0.03);
+    transform: translateX(-100%);
+  }
+  .MainLayout--navigation-end .MainLayout__sidebar.is-open {
+    transform: translateX(0);
+  }
+  .MainLayout--navigation-end .MainLayout__center {
+    order: initial;
   }
 
   /* 桌面端注入标题栏模式：MainLayout 整体下移了一个 --topbar-height，

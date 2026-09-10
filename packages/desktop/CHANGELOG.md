@@ -1,4 +1,18 @@
 
+## 0.62.0-alpha.1
+
+## 0.62.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add navigation placement preference ([f6d153f](https://github.com/nolotus/bun-nolo/commit/f6d153f2df118ba83da33c2dc58a4ffef73d6665))
+
+### Bug Fixes
+
+* **layout:** restore dialog page height chain in LocalPreviewSplit ([27398ea](https://github.com/nolotus/bun-nolo/commit/27398ea7a00a27724fb57f98e26643900868e7e0))
+* **layout:** restore dialog page height chain in LocalPreviewSplit ([0bf855c](https://github.com/nolotus/bun-nolo/commit/0bf855cbd6e426cc419ec5e7d2919747e5479d7e))
+
+
 ## 0.61.0-alpha.1
 
 ## 0.61.0-alpha.1 (2026-09-10)

@@ -10,6 +10,18 @@
   min-height: 0;
 }
 
+/* __dialog / __preview 是 WorkbenchSplit__surface（flex column）里的唯一
+   子节点：既要做 flex item 撑满 surface 高度，又要做 flex 容器让内部
+   DialogPage shell 的 flex:1 / root 的 height:100% 生效。缺了这层，
+   整条高度链断在这里，对话内容塌缩到顶部（输入框不贴底）。 */
+.LocalPreviewSplit__dialog,
+.LocalPreviewSplit__preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* 对话列变窄之后，输入框按默认高度只剩一行多，打字很局促，给它更高的
    起始高度和上限。作用域限定在分栏打开时（--open 作用域与旧行为一致），
    不影响全宽的对话页。 */
