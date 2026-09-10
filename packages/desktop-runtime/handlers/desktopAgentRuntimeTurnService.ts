@@ -123,6 +123,7 @@ import {
   buildDesktopServerWebToolBody,
   buildDesktopServerPlatformOpenAiTools,
   buildDesktopOpenAiTools,
+  addDesktopDefaultWebTools,
   buildDesktopLocalWorkspaceToolset,
   buildDesktopLocalPolicyToolNames,
   filterDesktopChromeConnectorToolNames,
@@ -935,9 +936,17 @@ export function createDesktopAgentRuntimeActions(args: {
       });
       const resolvedDeclaredToolNames = narrowDesktopNoloToolsForTurn({
         agentConfig,
-        toolNames: expandEnabledPacks(
-          effectiveEnabledPacks,
-          resolveRequestedRuntimeToolNames({ agentConfig }),
+        // Host 默认联网工具（对齐 CLI 的 CLI_DEFAULT_TOOLS 兜底，桌面端无
+        // ask_user 通道故只补 exa_search/fetchWebpage）：tier agent 的
+        // declared-only 工具面不动，其余交互 agent 无条件补齐。放在
+        // narrow 之前，纯浏览器操作意图的轮次仍收窄到 chrome-only；
+        // 用户的全局「联网搜索」开关与 disabledTools 在下游仍会生效。
+        toolNames: addDesktopDefaultWebTools(
+          expandEnabledPacks(
+            effectiveEnabledPacks,
+            resolveRequestedRuntimeToolNames({ agentConfig }),
+          ),
+          { skip: isTierAgent },
         ),
         input: args.input,
       });

@@ -34,6 +34,32 @@ export const DESKTOP_SERVER_TABLE_TOOL_NAMES = ["createTable", "addTableRow", "a
 export const DESKTOP_SERVER_TABLE_TOOL_NAME_SET = new Set<string>(DESKTOP_SERVER_TABLE_TOOL_NAMES);
 export const DESKTOP_SERVER_WEB_TOOL_NAMES = ["fetchWebpage", "exa_search", "firecrawl_scrape", "firecrawl_search"] as const;
 export const DESKTOP_SERVER_WEB_TOOL_NAME_SET = new Set<string>(DESKTOP_SERVER_WEB_TOOL_NAMES);
+/**
+ * Host-level default web tools, mirroring CLI `CLI_DEFAULT_TOOLS`
+ * (packages/cli/client/localRuntimeTools.ts) minus `ask_user` — desktop has no
+ * requestUserChoice interaction channel, so the interaction tool stays stripped
+ * via INTERACTION_REQUIRED_TOOL_NAMES downstream.
+ *
+ * Injected for every non-tier interactive desktop agent regardless of declared
+ * tools: the web-search capability boundary stays opt-in for *declared*
+ * surfaces (tier agents / declared-only), but an interactive desktop agent
+ * should not end up with shell tools yet no way to reach the web (previously
+ * agents fell back to `curl` via execShell).
+ *
+ * Injected BEFORE `narrowDesktopNoloToolsForTurn` so pure browser-operation
+ * turns still narrow to chrome-connector-only, and BEFORE
+ * `applySystemBuiltinSkillFilter` / `disabledTools` so the user's global
+ * "联网搜索" switch and per-agent disables still win.
+ */
+export const DESKTOP_DEFAULT_WEB_TOOL_NAMES = ["exa_search", "fetchWebpage"] as const;
+
+export function addDesktopDefaultWebTools(
+  toolNames: string[],
+  args?: { skip?: boolean },
+): string[] {
+  if (args?.skip) return toolNames;
+  return [...new Set([...toolNames, ...DESKTOP_DEFAULT_WEB_TOOL_NAMES])];
+}
 export const DESKTOP_SERVER_START_AGENT_RUN_TOOL_NAME = "startAgentRun" as const;
 export const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_TOOL_NAMES);
 export const BUILTIN_NOLO_AGENT_ID = "01NOLOAPPBLD000000019KCKT0";
