@@ -545,6 +545,17 @@ rmSync(smokeArtifactDir, { recursive: true, force: true });
 
 const exitCode = await runElectrobunStable();
 if (exitCode === 0) {
+  // electrobun 原生 postPackage 并不保证产出 smoke installer（artifact 探测
+  // 找不到 -Setup.zip/tarball 时 post-package 直接 exit(0)，smoke-artifacts
+  // 目录为空）。stable smoke 步骤无条件期待该文件，缺失即连败
+  // （public run 34374530935 等 "Missing Windows setup artifact" 连败）。
+  // exit 0 时校验产物，缺失则从 payload 目录补产一次。
+  const expectedSmokeSetup = join(smokeArtifactDir, `${WINDOWS_DESKTOP_SMOKE_OUTPUT_BASE_FILENAME}.exe`);
+  if (existsSync(expectedSmokeSetup)) {
+    process.exit(0);
+  }
+  log("electrobun stable build did not produce the smoke installer; attempting recovery");
+  await recoverInstallerFromRawTar();
   process.exit(0);
 }
 
