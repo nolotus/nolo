@@ -20,6 +20,7 @@ const REASONING_MODEL_NAMES = new Set([
   "gemini-3-pro-preview",
   "gemini-3.1-pro-preview",
   "gpt-5.5-pro",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

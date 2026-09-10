@@ -17,6 +17,7 @@ export interface ModelAbility {
 // reference includes pass@1, benchmarkScore and domain writingScore.
 const MODEL_ABILITY_TABLE: Record<string, ModelAbility> = {
   "claude-opus-5": { passAt1: 74, benchmarkScore: 61, writingScore: 82 },
+  "gpt-6-astra": { passAt1: 85, benchmarkScore: 90, writingScore: 92 },
   "claude-opus-4-6": { passAt1: 65, benchmarkScore: 68, writingScore: 78 },
   "gpt-5.6-sol": { passAt1: 73, benchmarkScore: 59, writingScore: 80 },
   "claude-fable-5": { passAt1: 70 },

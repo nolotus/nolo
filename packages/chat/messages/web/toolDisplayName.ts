@@ -211,6 +211,35 @@ export function extractToolCallArgs(toolPayload?: Record<string, unknown> | null
   return undefined;
 }
 
+/**
+ * TUI-style readFile range label from call args: numeric startLine/endLine
+ * (bun-nolo readFile tool) or a `lines` slice string ("40-120" range, "120-"
+ * from-line, "-50" tail, "50" head). Undefined for anything unparseable —
+ * never guessed.
+ */
+export function formatReadFileArgsLineRange(
+  toolArgs: Record<string, unknown> | undefined | null,
+): string | undefined {
+  if (!toolArgs) return undefined;
+  const start = asOptionalFiniteNumber(toolArgs.startLine);
+  const end = asOptionalFiniteNumber(toolArgs.endLine);
+  if (typeof start === "number" && start >= 1) {
+    if (typeof end === "number" && end >= start) return `L${start}–L${end}`;
+    return `L${start}–`;
+  }
+  const raw = asOptionalTrimmedString(toolArgs.lines);
+  if (!raw) return undefined;
+  const range = raw.match(/^(\d+)-(\d+)$/);
+  if (range) return `L${range[1]}–L${range[2]}`;
+  const from = raw.match(/^(\d+)-$/);
+  if (from) return `L${from[1]}–`;
+  const tail = raw.match(/^-(\d+)$/);
+  if (tail) return `末尾 ${tail[1]} 行`;
+  const head = raw.match(/^(\d+)$/);
+  if (head) return `前 ${head[1]} 行`;
+  return undefined;
+}
+
 export function formatToolRowHeaderSummary(args: {
   toolName?: string | null;
   toolArgs?: Record<string, unknown> | null;
@@ -238,6 +267,19 @@ export function formatToolRowHeaderSummary(args: {
 
   switch (normalizedToolName) {
     case "readFile":
+    case "read_file":
+    case "readWorkspaceFile": {
+      const filePath =
+        asOptionalTrimmedString(toolArgs?.path) ??
+        asOptionalTrimmedString(toolArgs?.filePath);
+      const lineRange = formatReadFileArgsLineRange(toolArgs);
+      detail = filePath
+        ? lineRange
+          ? `${filePath} ${lineRange}`
+          : filePath
+        : undefined;
+      break;
+    }
     case "writeFile":
     case "editFile":
       detail = asOptionalTrimmedString(toolArgs?.path);

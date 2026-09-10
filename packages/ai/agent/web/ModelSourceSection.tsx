@@ -73,6 +73,7 @@ const COPILOT_CLI_MODELS = [
   { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
   { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { value: "gpt-6-astra", label: "GPT-6 Astra" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
   { value: "gpt-5.3-codex", label: "GPT-5.3-Codex" },
@@ -96,6 +97,7 @@ const GEMINI_CLI_MODELS = [
 
 const CODEX_CLI_MODELS = [
   { value: "", label: "默认" },
+  { value: "gpt-6-astra", label: "GPT-6 Astra" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },

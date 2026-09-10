@@ -54,6 +54,18 @@ const GPT_5_6_LUNA_PRICE: ModelPrice = {
   inputCacheHit: 0.16,
 };
 
+const GPT_6_ASTRA_STANDARD_PRICE: ModelPrice = {
+  input: 80,
+  output: 400,
+  inputCacheHit: 8,
+};
+
+const GPT_6_ASTRA_LONG_CONTEXT_PRICE: ModelPrice = {
+  input: 160,
+  output: 600,
+  inputCacheHit: 16,
+};
+
 export const openAIModels: Model[] = [
   {
     name: "gpt-5.5",
@@ -121,6 +133,25 @@ export const openAIModels: Model[] = [
     maxOutputTokens: 128_000,
     supportsReasoningEffort: true,
     price: GPT_5_6_LUNA_PRICE,
+  },
+  {
+    name: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    endpointKey: "responses",
+    hasVision: true,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsReasoningEffort: true,
+    price: GPT_6_ASTRA_STANDARD_PRICE,
+    pricingStrategy: {
+      type: "tiered_context",
+      tiers: [
+        {
+          minContext: 272_001,
+          price: GPT_6_ASTRA_LONG_CONTEXT_PRICE,
+        },
+      ],
+    },
   },
   {
     name: "gpt-5.5-pro",

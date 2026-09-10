@@ -5,14 +5,16 @@ import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
+import { isQuietDetailTool } from "./toolCallPresentation";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
  *
  * Anatomy mirrors the timeline action rows: native `<button>` header (free
  * Enter/Space keyboard support) + collapsible detail body that reuses
- * ToolMessageContent's groupDetail renderers. Running rows auto-open, a user
- * toggle always wins afterwards — same rule as buildActivityTimeline actions.
+ * ToolMessageContent's groupDetail renderers. Running rows auto-open (except
+ * quiet-detail tools like execShell/readFile, which stay folded TUI-style), a
+ * user toggle always wins afterwards — same rule as buildActivityTimeline actions.
  * No spinning loaders; terminal states use the shared StatusIcon dot.
  *
  * Flex contract (P1): status icon / verb / diff meta / duration / chevron keep
@@ -50,7 +52,13 @@ export const ToolCallRow = memo(
     const detailId = `tool-call-row-detail-${useId()}`;
     /** null = follow the status-derived default; boolean = user decided. */
     const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
-    const expanded = userExpanded ?? presentation.status === "running";
+    // Quiet-detail tools (execShell/readFile) stay folded even while running
+    // (TUI parity) — long terminal output / file contents must not flood the
+    // chat; one click opens the body. Other rows keep running auto-open.
+    const expanded =
+      userExpanded ??
+      (presentation.status === "running" &&
+        !isQuietDetailTool(message?.toolName));
 
     const rawData = safeParse(message?.content);
     const isError =

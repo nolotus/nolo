@@ -47,6 +47,7 @@ import {
   extractToolCallArgs,
   formatToolRowHeaderSummary,
 } from "./toolDisplayName";
+import { isQuietDetailTool } from "./toolCallPresentation";
 
 const normalizeParallelPreview = (value: unknown) => {
   const text = asTrimmedString(value);
@@ -186,9 +187,13 @@ export const ToolMessageItem = memo(
     );
 
     const [collapsed, setCollapsed] = useState(() => {
-      // 进行中 / 需用户操作 / 失败：展开（失败要让用户看见错误）。
-      if (showConfirmBanner || isStreaming || isRepairableFailure || isError)
-        return false;
+      // 需用户操作 / 失败：展开（失败要让用户看见错误）。
+      if (showConfirmBanner || isRepairableFailure || isError) return false;
+      // 命令/读文件等长输出工具（TUI 对齐）：默认折叠成一行摘要，
+      // 运行中也不自动摊开，想看详情再点开。
+      if (isQuietDetailTool(toolName)) return true;
+      // 进行中：展开，让用户看到实时进度。
+      if (isStreaming) return false;
       // 个别工具（如星盘）产品上要求默认可见。
       if (toolName === "ziweiChart") return false;
       // 已完成的工具行默认折叠 —— loop 里只让“当前正在跑”的那行展开，
@@ -218,6 +223,8 @@ export const ToolMessageItem = memo(
     useEffect(() => {
       if (showConfirmBanner) return;
       if (statusStr === "running" || statusStr === "repairing") {
+        // 长输出工具运行中保持折叠（TUI 对齐）；失败时再展开见下。
+        if (isQuietDetailTool(toolName)) return;
         userCollapsedOverrideRef.current = false;
         setCollapsed(false);
         return;
@@ -225,7 +232,16 @@ export const ToolMessageItem = memo(
       if (statusStr === "success" && !userCollapsedOverrideRef.current) {
         setCollapsed(true);
       }
-    }, [statusStr, showConfirmBanner]);
+      // 长输出工具运行时是折叠的，失败后自动展开让用户看见错误；
+      // 用户手动折叠过则不抢回。
+      if (
+        statusStr === "failed" &&
+        isQuietDetailTool(toolName) &&
+        !userCollapsedOverrideRef.current
+      ) {
+        setCollapsed(false);
+      }
+    }, [statusStr, showConfirmBanner, toolName]);
 
     const handleCopy = (e: React.MouseEvent) => {
       e.stopPropagation();

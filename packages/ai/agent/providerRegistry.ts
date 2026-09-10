@@ -181,6 +181,7 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     defaultReasoningEffort: "medium",
     modelOptions: [
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", hasVision: true, recommended: true },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", hasVision: true },
       { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", hasVision: true },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", hasVision: true },
     ],

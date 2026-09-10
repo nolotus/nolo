@@ -29,6 +29,7 @@ import { asTrimmedString } from "core/trimmedString";
 import {
   buildFallbackActivity,
   extractToolCallArgs,
+  formatReadFileArgsLineRange,
   normalizeToolNameKey,
   normalizeToolActivity,
   resolveToolDisplayName,
@@ -54,6 +55,26 @@ export type ToolCallStatus =
  * so interactive/handoff/artifact tools classify correctly even though they
  * never render through ToolCallRow. */
 export type ToolCallMode = "row" | "interactive" | "handoff" | "artifact";
+
+/**
+ * Quiet-detail tools (TUI parity): their bodies are long terminal output or
+ * file contents, so the row stays a folded one-line summary by default —
+ * even while running — and opens only on explicit user click. Failures still
+ * surface via the standalone item's error auto-open.
+ */
+const QUIET_DETAIL_TOOL_KEYS = new Set([
+  "execShell",
+  "exec_shell",
+  "shell",
+  "readFile",
+  "read_file",
+  "readWorkspaceFile",
+]);
+
+/** True when the tool's detail body must stay folded until the user opens it. */
+export function isQuietDetailTool(toolName: string | undefined): boolean {
+  return QUIET_DETAIL_TOOL_KEYS.has(normalizeToolNameKey(toolName));
+}
 
 export interface ToolCallDiffMeta {
   added: number;
@@ -367,7 +388,10 @@ export function buildToolCallTarget(
     case "editFile":
     case "edit_file":
     case "replaceWorkspaceText":
-      target = asOptionalTrimmedString(args.path) ?? "";
+      target =
+        asOptionalTrimmedString(args.path) ??
+        asOptionalTrimmedString(args.filePath) ??
+        "";
       break;
     case "codeSearch":
     case "code_search":
@@ -461,7 +485,10 @@ export function buildToolCallContext(
       ) {
         return `L${start}–L${end}`;
       }
-      return undefined;
+      // In-flight rows have no response range yet — fall back to the
+      // requested range from args (startLine/endLine numbers or a `lines`
+      // slice string), so a folded row still reads 读取 <file> L40–L120.
+      return formatReadFileArgsLineRange(args);
     }
     default:
       return undefined;
