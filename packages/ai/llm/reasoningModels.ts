@@ -8,9 +8,7 @@ import { PROVIDER_REASONING_EFFORT_VALUES, type ReasoningEffort } from "../agent
  * 它们使用 thinking.budget_tokens / thinking_config 机制。
  */
 const REASONING_MODEL_NAMES = new Set([
-  "deepseek-v4-flash",
-  "deepseek-v4-flash-vision-exp",
-  "deepseek-v4-pro",
+  "deepseek-flash",
   "gemini-3.7-flash",
   "gemini-3.8-flash",
   "gemini-3.6-flash",

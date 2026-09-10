@@ -4,7 +4,7 @@
 // 都基于这里的纯函数实现自己的调用通道。
 
 /** 分类器使用的小模型（平台代理）。 */
-export const INTENT_MODEL = "deepseek-v4-flash";
+export const INTENT_MODEL = "deepseek-flash";
 export const INTENT_PROVIDER = "nolo";
 
 /** 分类器 LLM 调用超时（ms），超时后走 fallback。 */

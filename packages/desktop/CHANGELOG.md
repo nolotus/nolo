@@ -1,4 +1,13 @@
 
+## 0.63.0-alpha.1
+
+## 0.63.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **agent:** consolidate DeepSeek catalog to deepseek-flash with legacy migration ([f0d9a24](https://github.com/nolotus/bun-nolo/commit/f0d9a24ed1ec70f827d0a79ed0e53ed21e956114))
+
+
 ## 0.62.0-alpha.1
 
 ## 0.62.0-alpha.1 (2026-09-10)

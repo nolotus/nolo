@@ -101,6 +101,9 @@ const ANTHROPIC_MODEL_ALIASES: Record<string, string> = {
 const NOLO_MODEL_ALIASES: Record<string, string> = {
   "glm-5.2": "glm-5.3",
   "glm-5.3-flash": "glm-5-3-flash",
+  "deepseek-v4-flash": "deepseek-flash",
+  "deepseek-v4-flash-vision-exp": "deepseek-flash",
+  "deepseek-v4-pro": "deepseek-flash",
 };
 
 const normalizeLookupProvider = (provider?: string | null): LookupProvider | null => {

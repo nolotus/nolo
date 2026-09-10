@@ -267,13 +267,13 @@ export const GPT_5_6_LUNA_DEF = defineAgentSeed({
 export const DEEPSEEK_V4_FLASH_DEF = defineAgentSeed({
   id: PUBLIC_DEEPSEEK_V4_FLASH_AGENT_ID,
   presetKey: "deepseek-v4-flash",
-  name: "DeepSeek V4 Flash",
+  name: "DeepSeek Flash",
   provider: "nolo",
-  model: "deepseek-v4-flash-vision-exp",
+  model: "deepseek-flash",
   isPublic: true,
   introduction:
-    "DeepSeek V4 Flash 公开助手，适合高性价比通用问答、代码与长上下文任务。",
-  greeting: "你好，我是 DeepSeek V4 Flash。适合快速处理通用问题、代码和长上下文任务。",
+    "DeepSeek Flash 公开助手，适合高性价比通用问答、代码与长上下文任务。",
+  greeting: "你好，我是 DeepSeek Flash。适合快速处理通用问题、代码和长上下文任务。",
   prompt:
     "优先快速、直接、稳定地完成任务；需要推理时保持步骤清晰。",
   tools: [],
@@ -286,6 +286,7 @@ export const DEEPSEEK_V4_PRO_DEF = defineAgentSeed({
   name: "DeepSeek V4 Pro",
   provider: "nolo",
   model: "deepseek-v4-pro",
+  hasVision: false,
   isPublic: true,
   introduction: "DeepSeek V4 Pro 公开助手，适合复杂推理、代码、agentic 工作流与长上下文任务。",
   greeting: "你好，我是 DeepSeek V4 Pro。适合复杂推理、代码分析和长上下文任务。",

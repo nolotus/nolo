@@ -33,9 +33,13 @@ export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-
 export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image-preview";
 export const PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
-export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash";
+export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-flash";
+/** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL = "deepseek-v4-flash-vision-exp";
+/** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
+/** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
+export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash";
 export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL = "nemotron-3-5-lightning-30b";
 
 /**
@@ -275,7 +279,7 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: false,
   },
-  // DeepSeek Flash / Vision -> DeepSeek Responses API（agentRun 走专用 responses 编排）
+  // DeepSeek Flash -> DeepSeek Responses API（agentRun 走专用 responses 编排）
   [PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL]: {
     endpoint: "https://api.deepseek.com/responses",
     usageProvider: "deepseek",
@@ -283,20 +287,30 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: false,
   },
+  // Legacy DeepSeek model aliases -> remap upstreamModelId to deepseek-flash
+  [PLATFORM_HOSTED_LEGACY_DEEPSEEK_V4_FLASH_MODEL]: {
+    endpoint: "https://api.deepseek.com/responses",
+    usageProvider: "deepseek",
+    keyName: "deepseek",
+    upstreamModelId: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
+    wire: "responses",
+    agentRunHosted: false,
+  },
   [PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL]: {
     endpoint: "https://api.deepseek.com/responses",
     usageProvider: "deepseek",
     keyName: "deepseek",
+    upstreamModelId: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
     wire: "responses",
     agentRunHosted: false,
   },
-  // deepseek-v4-pro 独立于 flash 走 RunInfra（官方 chat.completions wire，非 DeepSeek responses）
   [PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
-    wire: "chat.completions",
-    agentRunHosted: true,
+    endpoint: "https://api.deepseek.com/responses",
+    usageProvider: "deepseek",
+    keyName: "deepseek",
+    upstreamModelId: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
+    wire: "responses",
+    agentRunHosted: false,
   },
 };
 

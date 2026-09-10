@@ -301,13 +301,11 @@ export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE = {
   output: toPlatformCredits(0.15),
 } as const;
 
-/**
- */
-export const PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE = {
-  input: 3.36, // 4.8 credits
-  inputCacheHit: 0.168, // 0.24 credits
-  output: toPlatformCredits(1.9), // 15.2 credits
-} as const;
+export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_MODELS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
+  "deepseek-v4-pro",
+] as const;
 
 export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
   // 旧实现只按北京钟点判断（00:00-08:00 为低谷），缺少星期维度，导致周末白天
@@ -330,7 +328,7 @@ export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
 };
 
 export const getPlatformHostedDeepSeekV4Price = (
-  _model: string,
+  _model?: string | null,
   nowMs = Date.now(),
 ) => {
   const isOffPeak = isDeepSeekOffPeakBeijingTime(nowMs);
@@ -339,9 +337,21 @@ export const getPlatformHostedDeepSeekV4Price = (
     : PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE;
 };
 
-export const isPlatformHostedDeepSeekV4Model = (model: string): boolean =>
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL;
+export const getPlatformHostedDeepSeekPrice = getPlatformHostedDeepSeekV4Price;
+
+export const isPlatformHostedDeepSeekModel = (
+  model?: string | null,
+): boolean => {
+  const m = asTrimmedLowercaseString(model);
+  return (
+    m === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
+    PLATFORM_HOSTED_LEGACY_DEEPSEEK_MODELS.includes(m as any)
+  );
+};
+
+export const isPlatformHostedDeepseekModel = isPlatformHostedDeepSeekModel;
+export const isPlatformHostedDeepSeekV4Model = isPlatformHostedDeepSeekModel;
+export const isPlatformHostedDeepseekFlashModel = isPlatformHostedDeepSeekModel;
 
 export const PLATFORM_HOSTED_DEEPSEEK_CHAT_COMPLETIONS_URL =
   "https://api.deepseek.com/chat/completions";
@@ -357,14 +367,6 @@ export type PlatformDeepseekFlashRoutePlan =
       credentialProvider: "deepseek";
       wire: "responses";
     };
-
-export const isPlatformHostedDeepseekModel = (
-  model?: string | null,
-): boolean =>
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
-  model === PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL;
-
-export const isPlatformHostedDeepseekFlashModel = isPlatformHostedDeepseekModel;
 
 export const isPlatformDeepseekHosted = (
   provider?: string | null,
@@ -500,33 +502,11 @@ export const platformHostedModels = [
   },
   {
     name: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
-    displayName: "DeepSeek V4 Flash",
-    hasVision: false,
-    price: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
-    peakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
-    offPeakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE },
-    maxOutputTokens: 384_000,
-    contextWindow: 1_000_000,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
-  {
-    name: PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
-    displayName: "DeepSeek V4 Flash Vision Exp",
+    displayName: "DeepSeek Flash",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
     peakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
     offPeakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE },
-    maxOutputTokens: 384_000,
-    contextWindow: 1_000_000,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
-  {
-    name: PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-    displayName: "DeepSeek V4 Pro",
-    hasVision: false,
-    price: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PRICE },
     maxOutputTokens: 384_000,
     contextWindow: 1_000_000,
     supportsTool: true,

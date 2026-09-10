@@ -70,7 +70,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     group: "builtin",
     name: "应用构建助手",
     provider: "nolo",
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
   },
   {
     id: "01ECOMMERCEAG00000001PYQ2J",
@@ -84,21 +84,21 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     group: "builtin",
     name: "AI 创建助手",
     provider: "nolo",
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
   },
   {
     id: "01NOLOFEEDBACKA000000000R2",
     group: "builtin",
     name: "反馈入口",
     provider: "nolo",
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
   },
   {
     id: "01CHROMEOPR000000000001",
     group: "builtin",
     name: "Chrome 操作员",
     provider: "nolo",
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
   },
   // ── quick-chat 档位 public（图片助手已无 runtimeFallback，见下方图片档段） ──
   // 2026-09-10 兜底最小化：runtimeFallback 只保留产品代码显式引用的条目
@@ -108,9 +108,9 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   {
     id: "01DSV4FLASHPB00000000JFPFD",
     group: "public",
-    name: "DeepSeek V4 Flash Vision Exp",
+    name: "DeepSeek Flash",
     provider: "nolo",
-    model: "deepseek-v4-flash-vision-exp",
+    model: "deepseek-flash",
     runtimeFallback: true,
   },
   {

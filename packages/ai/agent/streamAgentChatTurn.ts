@@ -472,7 +472,9 @@ export const streamAgentChatTurnHandler = async (
         }
         if (
             runtimeOptions?.quickChatReasoningEffort &&
-            (rawAgentConfig.model === "deepseek-v4-flash" ||
+            (rawAgentConfig.model === "deepseek-flash" ||
+                rawAgentConfig.model === "deepseek-v4-flash" ||
+                rawAgentConfig.model === "deepseek-v4-flash-vision-exp" ||
                 rawAgentConfig.model === "deepseek-v4-pro")
         ) {
             rawAgentConfig = {

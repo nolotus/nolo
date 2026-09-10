@@ -36,20 +36,39 @@ export interface ModelUpgrade {
   kind?: ModelUpgradeKind;
 }
 
-export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [  {
+export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
+  {
     from: { provider: "deepinfra", model: "deepseek-v4-flash" },
-    to: { provider: "nolo", model: "deepseek-v4-flash" },
+    to: { provider: "nolo", model: "deepseek-flash" },
     reason: "deepinfra 不托管 deepseek-v4-flash 命名，统一走 nolo 平台托管",
   },
   {
     from: { provider: "deepseek", model: "deepseek-v4-flash" },
-    to: { provider: "nolo", model: "deepseek-v4-flash" },
+    to: { provider: "nolo", model: "deepseek-flash" },
     reason: "deepseek provider 已下架（2026-08-13），统一走 nolo 平台托管",
   },
   {
     from: { provider: "deepseek", model: "deepseek-v4-pro" },
-    to: { provider: "nolo", model: "deepseek-v4-pro" },
+    to: { provider: "nolo", model: "deepseek-flash" },
     reason: "deepseek provider 已下架（2026-08-13），统一走 nolo 平台托管",
+  },
+  {
+    from: { provider: "nolo", model: "deepseek-v4-flash" },
+    to: { provider: "nolo", model: "deepseek-flash" },
+    reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "deepseek-v4-flash-vision-exp" },
+    to: { provider: "nolo", model: "deepseek-flash" },
+    reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
+    kind: "upgrade",
+  },
+  {
+    from: { provider: "nolo", model: "deepseek-v4-pro" },
+    to: { provider: "nolo", model: "deepseek-flash" },
+    reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
+    kind: "upgrade",
   },
   // Claude 系 2026-09-01 全线停止维护（广场下架 + nolo 托管列表移除），存量记录
   // 一律兼容迁移到 nolo GLM 5.3 Flash；兼容期请求由 platformHosted 路由表重映射。
@@ -90,8 +109,8 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [  {
   },
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
-    to: { provider: "nolo", model: "deepseek-v4-pro" },
-    reason: "MiniMax M3 记录统一到 nolo DeepSeek V4 Pro（fireworks 通道收敛）",
+    to: { provider: "nolo", model: "deepseek-flash" },
+    reason: "MiniMax M3 记录统一到 nolo DeepSeek Flash（fireworks 通道收敛）",
   },
   {
     from: { provider: "xai", model: "grok-4.5" },
@@ -122,14 +141,19 @@ export interface ModelIdentity {
 }
 
 /** DeepSeek 家族模型：第三方 provider 托管时一律迁到 nolo（规则级兜底，不维护 provider 列表）。 */
-const DEEPSEEK_FAMILY_MODELS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+const DEEPSEEK_FAMILY_MODELS = new Set([
+  "deepseek-flash",
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
+  "deepseek-v4-pro",
+]);
 
 /**
  * 已下架且无兼容替代的模型（跨 provider 判定，name 大小写不敏感）。
- * 表内无显式条目时兜底到 nolo DeepSeek V4 Flash。来源：git 下线记录 +
+ * 表内无显式条目时兜底到 nolo DeepSeek Flash。来源：git 下线记录 +
  * modelRegistry 移除清单（kimi-k2.7-code、kimi-k2.5、minimax-m2p7、
  * qwen3p6-plus、devstral、o3-pro 等）。
- * 注意：有显式兼容目标的（如 minimax-m3 → deepseek-v4-pro）不进本集合。
+ * 注意：有显式兼容目标的（如 minimax-m3 → deepseek-flash）不进本集合。
  */
 const DELISTED_MODELS = new Set([
   "kimi-k2.7-code", // 2026-08 Kimi K2.7 Coding 支持移除
@@ -167,7 +191,7 @@ const NOLO_ONLY_DELISTED_MODELS = new Set([
 /** 无兼容替代的下架模型统一兜底目标。 */
 export const DELISTED_MODEL_FALLBACK = {
   provider: "nolo",
-  model: "deepseek-v4-flash",
+  model: "deepseek-flash",
 } as const;
 
 /** 查表：给定 provider + model，返回命中迁移（无则 undefined）。provider/model 大小写不敏感。 */
@@ -188,16 +212,16 @@ export function lookupModelUpgrade(
   if (p !== "nolo" && DEEPSEEK_FAMILY_MODELS.has(m)) {
     return {
       from: { provider: p, model: m },
-      to: { provider: "nolo", model: m },
+      to: { provider: "nolo", model: "deepseek-flash" },
       reason: "第三方 provider 的 DeepSeek 系列模型统一迁移到 nolo 平台托管",
     };
   }
-  // 兜底规则：已下架且无显式兼容映射的模型，一律迁移到 nolo DeepSeek V4 Flash。
+  // 兜底规则：已下架且无显式兼容映射的模型，一律迁移到 nolo DeepSeek Flash。
   if (DELISTED_MODELS.has(m)) {
     return {
       from: { provider: p, model: m },
       to: { ...DELISTED_MODEL_FALLBACK },
-      reason: `模型 ${m} 已下架且无兼容替代，统一兜底到 nolo DeepSeek V4 Flash`,
+      reason: `模型 ${m} 已下架且无兼容替代，统一兜底到 nolo DeepSeek Flash`,
     };
   }
   // 平台 nolo 专属下架：仅 nolo provider 的存量记录兜底，直连通道（deepinfra 等）不受影响。
@@ -205,7 +229,7 @@ export function lookupModelUpgrade(
     return {
       from: { provider: p, model: m },
       to: { ...DELISTED_MODEL_FALLBACK },
-      reason: `模型 ${m} 已从 nolo 平台下架，兜底到 nolo DeepSeek V4 Flash（直连通道不受影响）`,
+      reason: `模型 ${m} 已从 nolo 平台下架，兜底到 nolo DeepSeek Flash（直连通道不受影响）`,
     };
   }
   return undefined;
