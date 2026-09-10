@@ -1,7 +1,7 @@
 
-## 0.57.0
+## 0.60.0
 
-## 0.57.0 (2026-09-10)
+## 0.60.0 (2026-09-10)
 
 ### Features
 
@@ -27,6 +27,33 @@
 * **layout:** polish WorkbenchSplit interaction and accessibility ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8addaad879f73790b29465a5579f28f83))
 * **layout:** WorkbenchSplit drag follows pointer in real time ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879a83ffba186c31d5b1eca8fb50107dbd))
 * **webview:** 消除 stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e61815b93564220d4bbdf837686ae644a)), closes [#root](https://github.com/nolotus/bun-nolo/issues/root)
+
+## 0.59.0 (2026-09-10)
+
+### Features
+
+* **layout:** WorkbenchSplit 双工作面分栏 primitive（Chat+Preview 自由分配空间/交换位置/比例偏好持久化） ([2599726](https://github.com/nolotus/bun-nolo/commit/259972655))
+* **chat:** sidebar 虚拟化列表接入 fluid hover 连续高亮 ([7e22c56](https://github.com/nolotus/bun-nolo/commit/7e22c569f))
+* **chat:** execShell/readFile 工具行默认折叠 + TUI 式摘要 ([e982f3f](https://github.com/nolotus/bun-nolo/commit/e982f3f30))
+* **agent:** GPT-6 Astra 模型进 OpenAI 目录与创建选择器 ([5e6ac2e](https://github.com/nolotus/bun-nolo/commit/5e6ac2ebc))
+* **ai:** dimension-aware quality evidence 与 writing.creative domain ([98c451c](https://github.com/nolotus/bun-nolo/commit/98c451cc5))
+* **desktop:** 首次运行引导加「本机 CLI 已登录」直达选项 ([d6e6856](https://github.com/nolotus/bun-nolo/commit/d6e6856bb))
+* **ai:** 支持 gemini-2.5-pro / gemini-3.1-pro ([c731b99](https://github.com/nolotus/bun-nolo/commit/c731b997b))
+
+### Bug Fixes
+
+* **layout:** 分栏拖拽实时跟手（track 引用 CSS 变量） ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879))
+* **layout:** LocalPreviewSplit 占满容器高度（对话框顶到上方的根因） ([df6a2ad](https://github.com/nolotus/bun-nolo/commit/df6a2ad06))
+* **layout:** 分栏交互收尾：swap 按钮/键盘可访问性/disabled 态 ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8a))
+* **desktop:** stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e6))
+* **webview:** 消除 stable 客户端 bundle 顶层 process 引用 ([eea434d](https://github.com/nolotus/bun-nolo/commit/eea434d86))
+* **chat:** 折叠 exec 工具卡片超长 shell 命令 ([87dfffc](https://github.com/nolotus/bun-nolo/commit/87dfffcbd))
+* **desktop:** 桌面端交互 agent 默认补齐 exa_search/fetchWebpage ([4163f9f](https://github.com/nolotus/bun-nolo/commit/4163f9fc5))
+
+### Chores
+
+* **desktop:** electrobun 工具链 2.0.1 → 2.0.2-beta.17（Hutch 0.26 + Cottontail 0.6） ([8e7897b](https://github.com/nolotus/bun-nolo/commit/8e7897bcf))
+
 
 
 ## 0.56.0
