@@ -1,4 +1,13 @@
 
+## 0.59.0-alpha.2
+
+## 0.59.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **layout:** WorkbenchSplit drag follows pointer in real time ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879a83ffba186c31d5b1eca8fb50107dbd))
+
+
 ## 0.59.0-alpha.1
 
 ## 0.59.0-alpha.1 (2026-09-10)

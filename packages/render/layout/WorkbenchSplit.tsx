@@ -254,7 +254,10 @@ export default function WorkbenchSplit({
 
   // 稳定槽位：track 模板与 gridColumn 随 placement/open 切换，React 树里
   // 三个槽位的位置、key、child identity 都不变。
-  const secondaryTrack = `${Math.max(secondaryPx, 0)}px`;
+  // secondary track 引用 var(--workbench-secondary-px)：pointermove 只写
+  // 该变量即可实时驱动 track 宽度（浏览器解析 var，无 React 重渲染）；
+  // 若烤死字面 px，拖动期间视觉不动、松手才跳变（不顺滑的根因）。
+  const secondaryTrack = "var(--workbench-secondary-px)";
   const separatorTrack = `${WORKBENCH_SEPARATOR_SIZE}px`;
   const gridTemplateColumns = !secondaryOpen
     ? `minmax(0, 1fr) 0px 0px`
