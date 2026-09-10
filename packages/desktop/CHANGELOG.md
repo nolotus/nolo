@@ -1,4 +1,13 @@
 
+## 0.58.0-alpha.1
+
+## 0.58.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add WorkbenchSplit dual-surface split primitive ([2599726](https://github.com/nolotus/bun-nolo/commit/2599726556f48a0b3dbd5df030e0498435f8def0))
+
+
 ## 0.57.0-alpha.2
 
 ## 0.57.0-alpha.2 (2026-09-10)

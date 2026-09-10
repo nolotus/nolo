@@ -1,0 +1,42 @@
+/* app/pages/LocalPreviewSplit.css — 对话页分栏的表面细节。
+   水平空间分配、resize、placement 交换都由 WorkbenchSplit 负责；
+   这里只剩打开态的输入框高度和 swap 按钮。 */
+
+/* 对话列变窄之后，输入框按默认高度只剩一行多，打字很局促，给它更高的
+   起始高度和上限。作用域限定在分栏打开时（--open 作用域与旧行为一致），
+   不影响全宽的对话页。 */
+.LocalPreviewSplit--open .message-input__textarea {
+  min-height: 96px;
+  max-height: 320px;
+}
+
+.LocalPreviewSplit__swap {
+  position: absolute;
+  top: 8px;
+  right: calc(var(--workbench-secondary-px, 0px) + 12px);
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: var(--textSecondary, #6b7280);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.LocalPreviewSplit:hover .LocalPreviewSplit__swap,
+.LocalPreviewSplit__swap:focus-visible,
+.LocalPreviewSplit__swap:active {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .LocalPreviewSplit__swap {
+    transition: none;
+  }
+}

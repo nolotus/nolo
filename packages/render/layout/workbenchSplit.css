@@ -1,0 +1,58 @@
+/* render/layout/workbenchSplit.css — WorkbenchSplit 双工作面水平分栏。
+   track 模板与 gridColumn 由 TSX 按placement/open 计算（单一真源）；
+   本文件只负责盒模型、分隔符视觉与 reduced-motion。 */
+
+.WorkbenchSplit {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.WorkbenchSplit--resizing {
+  transition: none;
+}
+
+.WorkbenchSplit__surface {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.WorkbenchSplit__separator {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+/* 分隔符视觉：1px 中线，rest 态极淡、hover/拖动时高亮。 */
+.WorkbenchSplit__separator::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.WorkbenchSplit__separator:not([aria-disabled="true"])::before {
+  background: var(--border, #e5e7eb);
+}
+
+.WorkbenchSplit__separator:hover::before,
+.WorkbenchSplit--resizing .WorkbenchSplit__separator::before {
+  background: var(--primary, #2563eb);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .WorkbenchSplit,
+  .WorkbenchSplit__separator::before {
+    transition: none;
+  }
+}
