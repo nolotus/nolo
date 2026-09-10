@@ -55,8 +55,6 @@ export const getObjectAssistantLabels = (
   }
 };
 
-export const getSideChatLabels = getObjectAssistantLabels;
-
 /** 判断是否 Mac，用于快捷键提示 */
 export const useIsMac = (): boolean =>
   useMemo(
