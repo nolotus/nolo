@@ -44,6 +44,16 @@ export type TuiState = {
    * 若在 turn 运行中切换（busy 路径），该消息会一直保留到下一个 turn 被读取。
    */
   pendingCwdNotice?: string;
+  /**
+   * 后台进程任务（launchProcess / 超时 detach 的 execShell）终态通知队列，
+   * 复用 pendingCwdNotice 的模式：进程 registry 的 onProcessTerminal 订阅者在
+   * 任务进入终态（exited/failed/stopped）时把单行摘要 push 进来；下一个
+   * 真实 turn 组装时作为 turn-scope context block 注入 agent（模型与用户
+   * 同时知情），消费后整体清空。清空覆盖全部 turn 终态（成功/失败/取消/
+   * 强制停止），与 pendingCwdNotice 的生命周期写法一致。turn 运行中到达的
+   * 通知会一直累积到下一个 turn 被读取。
+   */
+  pendingProcessNotices?: string[];
   attachedDocs: string[];
   /**
    * Skill refs attached to the workspace via /skill attach.

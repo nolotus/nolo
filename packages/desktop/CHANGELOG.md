@@ -1,4 +1,13 @@
 
+## 0.67.0-alpha.1
+
+## 0.67.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **tui:** notify agent when background OS tasks reach terminal state ([3e1254e](https://github.com/nolotus/bun-nolo/commit/3e1254e1e1c35d61190b09af4a14b782476d0d28))
+
+
 ## 0.66.0-alpha.1
 
 ## 0.66.0-alpha.1 (2026-09-10)

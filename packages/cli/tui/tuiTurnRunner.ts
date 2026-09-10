@@ -77,6 +77,10 @@ import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
+  buildProcessTerminalTurnMessage,
+  parsePendingProcessNoticeLine,
+} from "./processTerminalNotice";
+import {
   emitTerminalAttention,
   runWithInputRequiredAttention,
   shouldEmitTerminalBell,
@@ -255,6 +259,25 @@ async function runAgentChat(
     ? [{ content: state.pendingCwdNotice, cacheScope: "turn" as const }]
     : [];
 
+  // 后台进程任务终态通知：与 cwdNotice 同一注入模式（turn-scope context
+  // block）。关键差异：通知可能在 turn 运行中继续到达（后台任务随时终态），
+  // 所以组装时先快照本轮要注入的行，消费点只清掉快照里的行——清空若用
+  // 整体覆盖（= []），会把 turn 运行期间新到达、还没注入过的通知一并吞掉，
+  // 造成「任务终了 agent 永远不知情」。生命周期红线仍然满足：快照里的行
+  // 在全部 turn 终态（成功/失败/取消/强制停止/无 dialogId 异常）都会被移除。
+  const injectedProcessNoticeLines = state.pendingProcessNotices
+    ? [...state.pendingProcessNotices]
+    : [];
+  const processNoticeBlocks =
+    injectedProcessNoticeLines.length > 0
+      ? [{
+          content: buildProcessTerminalTurnMessage(
+            injectedProcessNoticeLines.map(parsePendingProcessNoticeLine),
+          ),
+          cacheScope: "turn" as const,
+        }]
+      : [];
+
   const contextBlockScopes: ContextBlockScope[] = partitionScopedBlocks([
     ...renderTurnContextBlocksWithScope(layers),
     responseGuidelinesBlock,
@@ -268,6 +291,7 @@ async function runAgentChat(
       .map((content) => ({ content, cacheScope: "turn" as const })),
     ...renderTurnContextBlocksWithScope([memoryOverlayLayer]),
     ...cwdNoticeBlocks,
+    ...processNoticeBlocks,
   ]);
   // 新会话首轮 state.dialogId 尚未生成（turn 结束后才从 result 回填），
   // 该轮派发的后台 run 无法注入 parentDialogId——adapter 通过
@@ -987,6 +1011,19 @@ export async function runOneAgentTurn(
     TurnRequest | InternalTurnEvent | string
   >();
   ctx.turnInjectionInbox = injectionInbox;
+  // 后台进程任务终态通知：组装前先快照本轮要注入的行，消费点只清掉快照里的行。
+  const injectedProcessNoticeLines = ctx.state.pendingProcessNotices
+    ? [...ctx.state.pendingProcessNotices]
+    : [];
+  const consumeInjectedProcessNotices = (): string[] => {
+    if (injectedProcessNoticeLines.length === 0) {
+      return ctx.state.pendingProcessNotices ?? [];
+    }
+    const injected = new Set(injectedProcessNoticeLines);
+    return (ctx.state.pendingProcessNotices ?? []).filter(
+      (line) => !injected.has(line),
+    );
+  };
   try {
     ctx.activeTurnAbort = new AbortController();
     ctx.activeTurnEpoch = myEpoch;
@@ -1047,8 +1084,10 @@ export async function runOneAgentTurn(
           : {}),
         ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
         ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-        // 本轮已发起 agent 调用（消息已注入），消费切换通知。
+        // 本轮已发起 agent 调用（消息已注入），消费切换通知与进程终态通知。
         pendingCwdNotice: undefined,
+        // 只移除本轮注入过的行（见 processNoticeBlocks 的快照注释）。
+        pendingProcessNotices: consumeInjectedProcessNotices(),
       };
       // 记账不挂在「有 dialogId / turnTokens」这个条件上：中断的 turn 常常
       // 两者都没有，但前面已经跑掉的 provider 调用照样扣了费。
@@ -1125,10 +1164,12 @@ export async function runOneAgentTurn(
         ? { estimatedContextTokens: runResult.turnTokens.input }
         : {}),
       ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-      // 切换消息本轮已注入 agent 上下文（runAgentChat 已读），消费掉，
-      // 避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实 turn、
-      // 而非纯 child-run-completed 事件短路）时才清除。
+      // 切换消息/进程终态通知本轮已注入 agent 上下文（runAgentChat 已读），
+      // 消费掉，避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实
+      // turn、而非纯 child-run-completed 事件短路）时才清除。
       pendingCwdNotice: undefined,
+      // 只移除本轮注入过的行（见 processNoticeBlocks 的快照注释）。
+      pendingProcessNotices: consumeInjectedProcessNotices(),
     };
     // 同上：失败 / 中断的 turn 也要计进会话累计。
     ctx.accumulateSessionCredits(runResult.turnCredits);
@@ -1159,6 +1200,16 @@ export async function runOneAgentTurn(
     ctx.runRegistryPoller.endHold();
     ctx.activityIndicator.stop();
     ctx.activeTurnAbort = null;
+    // 生命周期红线（与 pendingCwdNotice 的无条件清空同款）：turn 的任何
+    // 终态——成功/失败/取消/无 dialogId 异常——都必须消费掉本轮已注入的
+    // 通知，否则它们会在下一个 turn 重复注入。state 折叠的两处
+    // （forceStop / 正常路径）只覆盖「runAgentChat 正常返回」的走向；这里
+    // 的 finally 兜底抛异常路径。注意清空按快照差集进行：turn 运行期间新
+    // 到达、还没注入过的通知必须保留（见 processNoticeBlocks 的注释）。
+    ctx.state = {
+      ...ctx.state,
+      pendingProcessNotices: consumeInjectedProcessNotices(),
+    };
     // 兜底不丢唤醒：turn 结束（正常/abort/异常/preemptAndAbortForDrain）时，
     // 收件箱里还有 loop 没来得及消化的条目，就逐条落回 chat 队列，走既有的
     // 排队 + markAcknowledged 过滤路径，在下一个 turn 被消费。

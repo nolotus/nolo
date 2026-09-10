@@ -146,6 +146,15 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
     parts.push(themeText(`⚙ ${runningTaskCount} running`, "info", colorEnabled));
   }
 
+  // 终态通知 chip：还有几条后台任务终态没被下一个 turn 消费。通知一旦注入
+  // turn 上下文即清空，chip 归零——它只是「agent 即将知晓」的待办指示，不是
+  // 常驻统计（终态详情在通知行和 /procs 里）。与 running chip 同 token：
+  // 必保字段，不参与宽度降级。
+  const pendingProcessCount = state.pendingProcessNotices?.length ?? 0;
+  if (pendingProcessCount > 0) {
+    parts.push(themeText(`⚙ ${pendingProcessCount} finished`, "info", colorEnabled));
+  }
+
   // 会话级权限自动化标识：仅在 /auto on 时出现，提示用户确认弹窗已被跳过
   // （破坏性 shell / 外部文件访问不再逐次询问）。warning 色与 git 分支 chip
   // 同语义——"需要留意的状态"。off / undefined 时不渲染任何内容。

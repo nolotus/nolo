@@ -88,6 +88,10 @@ import { toErrorMessage } from "core/errorMessage";
 import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
+import {
+  formatProcessTerminalNoticeLine,
+} from "./processTerminalNotice";
+import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
 // S3 迁移：turn 执行与队列 drain（runOneAgentTurn / ensureChatQueueBinding /
 // preemptAndAbortForDrain / AgentTurnContext）及前奏区函数（runAgentChat /
 // waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
@@ -626,6 +630,29 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (text) => runWakeHandler?.(text),
   });
+  // ── 进程任务终态通知（pendingProcessNotices）──
+  // 订阅进程 registry 的终态发射：launchProcess / 超时 detach 的 execShell
+  // 进入终态（exited/failed/stopped）时，把单行摘要 push 进
+  // state.pendingProcessNotices；下一个真实 turn 组装时作为 turn-scope
+  // context block 注入 agent（tuiTurnRunner 消费后清空）。补发策略：注册时
+  // 点不补发——本会话启动之前已终态的任务（上个会话遗留）不重新打扰；
+  // 本会话内每次终态转变（markExited / kill）由 registry 保证至多发射一次。
+  // 渲染：状态栏在 ⚙ running chip 旁追加 "⚙ N finished"（见 renderStatusLine），
+  // 到达即 scheduleRender 刷新；非 TTY（readline/管道）路径没有状态行，
+  // 直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的丢弃策略一致）。
+  const pushPendingProcessNotice = (notice: ProcessTerminalNotice): void => {
+    if (sessionEnded) return;
+    const line = formatProcessTerminalNoticeLine(notice);
+    state = {
+      ...state,
+      pendingProcessNotices: [...(state.pendingProcessNotices ?? []), line],
+    };
+    // 与 gitStatus 异步回调同样的守卫与节流：会话退出后丢弃陈旧重绘。
+    scheduleRender();
+  };
+  const unsubscribeProcessTerminal = getProcessRegistry().onProcessTerminal(
+    pushPendingProcessNotice,
+  );
   const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
@@ -2115,6 +2142,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
   } finally {
     const registry = getProcessRegistry();
+    // 会话退出：摘掉终态订阅，registry 单例继续服务下个生命周期。
+    unsubscribeProcessTerminal();
     // Full-truth list() is correct here: only launchProcess registrations ever
     // set persist, and transient foreground envelopes (workspaceShell
     // pre-registration) always have persist=false, so they can't inflate this

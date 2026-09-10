@@ -73,13 +73,58 @@ function mintTaskId(pid: number): string {
   return `ptask-${pid}-${Date.now().toString(36)}-${taskIdCounter.toString(36)}`;
 }
 
+/** A terminal-state notification pushed to TUI consumers (see onProcessTerminal). */
+export type ProcessTerminalNotice = {
+  taskId: string;
+  pid: number;
+  label: string;
+  command: string;
+  /** Registry status axis value at the terminal transition. */
+  status: "stopped" | "exited" | "failed";
+  exitCode?: number;
+};
+
+export type ProcessTerminalListener = (notice: ProcessTerminalNotice) => void;
+
 export class ProcessRegistry {
   private processes = new Map<number, RegisteredProcess>();
   private byTaskId = new Map<string, number>();
   private eventLog: ProcessTaskEventLog;
+  private terminalListeners = new Set<ProcessTerminalListener>();
 
   constructor(eventLogOptions?: ProcessTaskEventLogOptions) {
     this.eventLog = new ProcessTaskEventLog(eventLogOptions);
+  }
+
+  /**
+   * Subscribe to terminal transitions (markExited / kill). Fired synchronously
+   * at the same instant the terminal event is appended to the task event log,
+   * so consumers (TUI pending-notice buffer) observe the same ordering as the
+   * audit stream. Each task fires at most once: markExited is gated on the
+   * "running" status, kill()/stopAll() on the same guard, and late close
+   * events after a user stop are already suppressed by the status check.
+   *
+   * Returns an unsubscribe function. Registration does NOT replay terminal
+   * states for tasks that already terminated before subscription (no
+   * backfill): the event log keeps the audit trail, and replaying would
+   * double-notify tasks the previous session already surfaced.
+   */
+  onProcessTerminal(listener: ProcessTerminalListener): () => void {
+    this.terminalListeners.add(listener);
+    return () => {
+      this.terminalListeners.delete(listener);
+    };
+  }
+
+  /** Emit a terminal notice synchronously; listener errors must not break registry callers. */
+  private emitTerminal(notice: ProcessTerminalNotice): void {
+    for (const listener of [...this.terminalListeners]) {
+      try {
+        listener(notice);
+      } catch {
+        // A broken consumer (e.g. a torn-down TUI) must not break the spawn/exit path.
+      }
+    }
   }
 
   /**
@@ -195,6 +240,15 @@ export class ProcessRegistry {
       }
       item.status = "stopped";
       this.eventLog.append({ taskId: item.taskId, pid, type: "killed" });
+      // User-initiated terminal transition — notify on the same instant (once:
+      // guarded by the "running" check, further kill() calls see "stopped").
+      this.emitTerminal({
+        taskId: item.taskId,
+        pid,
+        label: item.label,
+        command: item.command,
+        status: "stopped",
+      });
       return true;
     }
     return false;
@@ -219,6 +273,13 @@ export class ProcessRegistry {
         }
         item.status = "stopped";
         this.eventLog.append({ taskId: item.taskId, pid: item.pid, type: "killed" });
+        this.emitTerminal({
+          taskId: item.taskId,
+          pid: item.pid,
+          label: item.label,
+          command: item.command,
+          status: "stopped",
+        });
       }
     }
   }
@@ -236,6 +297,17 @@ export class ProcessRegistry {
         taskId: item.taskId,
         pid,
         type: "exited",
+        exitCode,
+      });
+      // Same-instant terminal emission as the event-log append (see
+      // onProcessTerminal). Guarded by the "running" check above, so each
+      // task notifies at most once.
+      this.emitTerminal({
+        taskId: item.taskId,
+        pid,
+        label: item.label,
+        command: item.command,
+        status: item.status,
         exitCode,
       });
     }
@@ -269,6 +341,9 @@ export class ProcessRegistry {
     this.processes.clear();
     this.byTaskId.clear();
     this.eventLog.clear();
+    // Registry teardown (tests / workspace reuse in-process) must not leave
+    // listeners subscribed to a different lifecycle's envelopes.
+    this.terminalListeners.clear();
   }
 }
 
