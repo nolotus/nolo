@@ -18,11 +18,13 @@
 //   enough — "fix the story editor bug" stays coding.repo — and technical or
 //   business prose (README, PR description, docs, summary, email, product
 //   description, code comments) is never creative writing;
-// - the creative-writing group is additionally vetoed by code context
-//   (code-object nouns plus the repo outcome signals: "story parser",
-//   "scene state machine", "logic in src/story.ts"): the group is skipped
-//   entirely, so the task falls through to the later repo/terminal rules — no
-//   reordering needed to keep code work out of creative writing;
+// - the creative-writing group is vetoed by a "code work context" (a change
+//   verb acting on a code artifact, a shell/code script kind, or a code path:
+//   "rewrite the story parser", "logic in src/story.ts"). A code artifact
+//   mentioned anywhere else in the sentence does NOT veto — "a story about a
+//   parser that dreams" stays creative. The same list is a coding.repo signal,
+//   so a vetoed task resolves to coding.repo rather than falling through to
+//   null, and no rule order had to change;
 // - strong design/terminal GOAL signals beat repo modification ("redesign
 //   this landing page" is design even when a repo is touched);
 // - repo modification outcome > INCIDENTAL design/terminal keywords
@@ -102,15 +104,48 @@ const TERMINAL_INCIDENTAL_SIGNALS: readonly RegExp[] = [
 ];
 
 /**
+ * Code artifacts: the objects a code-modification verb can act on.
+ *
+ * Vocabulary only — never a signal by itself. Naming a code artifact is not the
+ * same as working on code: "a story about a parser that dreams" mentions a
+ * parser but is prose (see CODE_WORK_CONTEXT_SIGNALS). It is also the
+ * disambiguator for `novel` in CREATIVE_WRITING_FORM.
+ *
+ * Kept to artifacts that mean "software" in a creative-writing sentence. Words
+ * a literary task also uses (`interface` — a social interface, `class` — social
+ * classes, `logic`) stay out on purpose: they would veto real prose, and the
+ * repo outcome signals already cover them in code contexts.
+ */
+const CODE_ARTIFACT_NOUNS =
+  String.raw`(?:parsers?|serializers?|serializ\w*|deserializ\w*|tokenizers?|lexers?|compilers?|components?|modules?|functions?|methods?|hooks?|reducers?|schemas?|apis?|endpoints?|regex(?:es)?|state machines?|renderers?|code)`;
+
+/**
+ * `novel` is polysemous, so it only counts as a literary form when it stands as
+ * a head noun: at the end of the phrase, as a possessive ("the novel's
+ * ending"), or followed by a literary continuation — punctuation, an adverb
+ * ("rewrite the novel beautifully"), a preposition, a copula/narrative verb
+ * ("is", "tells", "called", "titled"), a participle, or another literary noun.
+ *
+ * Any *other* word after it means the adjective sense — "a novel function/
+ * class/meta function" is a *new* thing, not fiction. That reading is the safe
+ * one here: an unrecognized continuation resolves to null or to code work
+ * instead of injecting prose-quality evidence, and no blocklist has to
+ * enumerate every code noun or metaphor a person might write. The adverb branch
+ * additionally refuses to fire in front of a code artifact, so a noun that
+ * happens to end in "-ly" ("a novel assembly parser") cannot slip through.
+ */
+const NOVEL_HEAD_NOUN_LOOKAHEAD =
+  String.raw`(?=\s*(?:[.,;:!?)"'’”]|$|['’]s\b|\w+ly\b(?!\s+(?:${CODE_ARTIFACT_NOUNS}))|(?:about|in|into|of|on|to|with|without|whose|where|when|that|which|is|was|are|were|tells|follows|begins|ends|reads|feels|called|titled|named|entitled|explores|examines|depicts|chronicles|following|featuring|telling|set|starring|based|written|chapter|scene|story|prose|novella|trilogy|manuscript|draft)\b))`;
+
+/**
  * Literary forms that can identify creative writing — only together with a
  * creation/continuation verb, or inside an unambiguous phrase (see below).
  *
  * `script` is deliberately absent: "write a bash script" is terminal/repo work,
- * screenwriting is matched through `screenplay` instead. `novel` is guarded
- * against its adjective sense ("a novel approach").
+ * screenwriting is matched through `screenplay` instead.
  */
 const CREATIVE_WRITING_FORM =
-  String.raw`(?:short story|story|fiction|novel(?!\s+(?:approach|idea|way|method|technique|solution|design|algorithm|strategy))|novella|poem|poetry|screenplay|chapter|prose|scene)`;
+  String.raw`(?:short story|story|fiction|novels?${NOVEL_HEAD_NOUN_LOOKAHEAD}|novella|poem|poetry|screenplay|chapter|prose|scene)`;
 
 /**
  * Creative-writing signals: a literary form reached by a creation/continuation
@@ -122,7 +157,7 @@ const CREATIVE_WRITING_FORM =
  */
 const CREATIVE_WRITING_SIGNALS: readonly RegExp[] = [
   new RegExp(
-    String.raw`\b(?:write|writing|draft|compose|create|continue|continuing|extend|rewrite|edit)\b[^.!?\n]{0,40}\b${CREATIVE_WRITING_FORM}\b`,
+    String.raw`\b(?:write|writing|draft|compose|create|continue|continuing|extend|rewrite|edit|tell|telling|narrate|narrating)\b[^.!?\n]{0,40}\b${CREATIVE_WRITING_FORM}\b`,
     "i",
   ),
   /\b(?:short story|flash fiction|creative writing|fiction writing|story writing|novel writing|science fiction|poetry)\b/i,
@@ -157,35 +192,57 @@ const REPO_OUTCOME_SIGNALS: readonly RegExp[] = [
   /\btests? (?:are |is )?(?:failing|failed|broken)\b/i,
 ];
 
+/** Verbs that ask to change something that already exists in code. */
+const CODE_MODIFICATION_VERBS =
+  String.raw`(?:rewrite|rewriting|edit|editing|fix|fixing|refactor|refactoring|implement|implementing|update|updating|replace|replacing|rename|renaming|migrate|migrating|patch|patching|modify|modifying|change|changing|port|porting|debug|debugging)`;
+
 /**
- * Code-shaped object nouns: wording that says the work *is* code.
+ * Contexts where the object of the task *is code* — the only thing that may
+ * keep a literary noun out of writing.creative:
  *
- * These turn a literary noun into a modifier ("the story parser", "the scene
- * state machine") — the cases where a creation verb plus a literary noun must
- * not be read as prose.
+ * 1. a change verb acting on a code artifact inside a two-word window
+ *    ("rewrite the story parser", "update the story serializer");
+ * 2. an explicit shell/code script kind ("write a bash script" is not
+ *    screenwriting);
+ * 3. a code path with a source extension ("rewrite story.ts").
+ *
+ * Deliberately *not* a signal: a code artifact anywhere else in the sentence.
+ * "Write a story about an API that gains consciousness" and "Fix the story
+ * parser" differ in structure, not in vocabulary — only the second one makes
+ * the code artifact the object of a change verb, so only the second is vetoed.
+ * A literary noun that *modifies* a code artifact ("story parser") counts as
+ * the same structure: there the code artifact is the head noun of the work.
  */
-const CODE_OBJECT_SIGNALS: readonly RegExp[] = [
-  /\b(?:parsers?|parsing|serializ\w*|deserializ\w*|tokeniz\w*|lexers?|compilers?|components?|modules?|classes|functions?|methods?|hooks?|reducers?|schemas?|interfaces?|apis?|sdks?|endpoints?|regex(?:es)?|state machines?|renderers?)\b/i,
-  /\b(?:code|source files?)\b/i,
+const CODE_WORK_CONTEXT_SIGNALS: readonly RegExp[] = [
+  // 1. A change verb acting on a code artifact inside a two-word window
+  //    ("rewrite the story parser", "update the story serializer").
+  new RegExp(
+    String.raw`\b${CODE_MODIFICATION_VERBS}\b(?:\s+[\p{L}'’-]+){0,2}\s+${CODE_ARTIFACT_NOUNS}\b`,
+    "iu",
+  ),
+  // 2. A literary noun used as the modifier of a code artifact, whatever the
+  //    verb distance is — the code artifact is the head noun ("story parser",
+  //    "scene state machine", "story component"). The preposition form
+  //    ("a story about a parser") is prose and deliberately does not match.
+  new RegExp(String.raw`\b${CREATIVE_WRITING_FORM}\s+${CODE_ARTIFACT_NOUNS}\b`, "iu"),
+  // 3. 中文：修改动词 + 代码对象（"改写小说解析器的代码"）。
+  /(?:改写|重写|修改|修复|重构|更新|实现|调整)[^。！？\n]{0,8}(?:代码|源码|解析器|序列化|组件|模块|函数|接口|状态机|渲染器|仓库)/,
+  // 4. A code path with a source extension.
   CODE_PATH_SIGNAL,
-  // Shell/code scripts only; a screenwriting "script" is not a shell script.
-  /\b(?:bash|shell|node|python|npm|docker|ci) scripts?\b/i,
-  // 中文代码语境。
-  /(?:代码|源码|仓库|重构|解析器|序列化|组件|模块|函数|接口|状态机|报错|单元测试)/,
 ];
 
 /**
- * Hard negatives for the creative-writing group: code / repo context never
- * becomes prose. Reuses the repo outcome signals (rather than restating them,
- * so the two lists can never drift) plus the code-object nouns above.
+ * Hard negatives for writing.creative: CODE_WORK_CONTEXT_SIGNALS plus one
+ * veto-only guard.
  *
- * A hit cancels the creative group and evaluation continues with the later
- * repo/terminal rules — it never asserts a domain by itself. Generic verbs like
- * "build" stay out, so "build the character arc" remains creative.
+ * "Write a bash script that prints a story" is not screenwriting, so an
+ * explicit code-script kind keeps it out of creative writing — but that guard
+ * is deliberately NOT a repo signal, so it cannot steal shell work
+ * ("write a bash script to install ffmpeg") from coding.terminal.
  */
 const CREATIVE_WRITING_VETOES: readonly RegExp[] = [
-  ...CODE_OBJECT_SIGNALS,
-  ...REPO_OUTCOME_SIGNALS,
+  ...CODE_WORK_CONTEXT_SIGNALS,
+  /\b(?:bash|shell|node|python|npm|docker|ci) scripts?\b/i,
 ];
 
 /**
@@ -218,10 +275,18 @@ const TASK_SIGNAL_RULES: ReadonlyArray<{
   { domain: "design.website", patterns: DESIGN_INCIDENTAL_SIGNALS },
   { domain: "coding.terminal", patterns: TERMINAL_INCIDENTAL_SIGNALS },
   {
+    // Same list the creative veto uses, deliberately placed after the
+    // incidental design/terminal groups: "update the component styling" keeps
+    // its design.website domain, while "edit the story component" — which
+    // nothing above claims — still lands in coding.repo instead of null.
+    domain: "coding.repo",
+    patterns: CODE_WORK_CONTEXT_SIGNALS,
+  },
+  {
     // Rare by design: only standalone, framework-free coding craft.
     domain: "coding.general",
     patterns: [
-      /\b(?:write|implement) (?:a|an|the) [a-z0-9 -]*(?:algorithm|parser|regex|data structure|small function|standalone function|utility function)\b/i,
+      /\b(?:write|implement) (?:a|an|the) [a-z0-9 -]*(?:algorithm|parser|regex|data structure|function)\b/i,
       /\bexplain (?:this |the |that )?code\b/i,
       /\bstandalone (?:function|script|algorithm)\b/i,
     ],
