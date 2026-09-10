@@ -18,6 +18,11 @@
 //   enough — "fix the story editor bug" stays coding.repo — and technical or
 //   business prose (README, PR description, docs, summary, email, product
 //   description, code comments) is never creative writing;
+// - the creative-writing group is additionally vetoed by code context
+//   (code-object nouns plus the repo outcome signals: "story parser",
+//   "scene state machine", "logic in src/story.ts"): the group is skipped
+//   entirely, so the task falls through to the later repo/terminal rules — no
+//   reordering needed to keep code work out of creative writing;
 // - strong design/terminal GOAL signals beat repo modification ("redesign
 //   this landing page" is design even when a repo is touched);
 // - repo modification outcome > INCIDENTAL design/terminal keywords
@@ -129,38 +134,85 @@ const CREATIVE_WRITING_SIGNALS: readonly RegExp[] = [
 ];
 
 /**
+ * A file path carrying a code extension — unambiguous code work. Shared by the
+ * repo rule and the creative-writing veto so the two can never drift apart.
+ */
+const CODE_PATH_SIGNAL =
+  /(?:^|\s)[\w.@/-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|ex|exs|php|vue|svelte)\b/i;
+
+/** Code modification outcomes — the coding.repo rule's own signal list. */
+const REPO_OUTCOME_SIGNALS: readonly RegExp[] = [
+  /\bbugs?\b/i,
+  /\b(?:typescript|javascript|python|ruby) error\b/i,
+  /\bregressions?\b/i,
+  /\brefactor(?:ing)?\b/i,
+  /\bimplement (?:a |an |the )?(?:new |missing )?feature\b/i,
+  /\brake\b/i,
+  /\brepo(?:sitory)?\b/i,
+  /\bcodebase\b/i,
+  /\bcode review\b/i,
+  /\bpull request\b/i,
+  /\bPR(?:s)?\b/,
+  /\bcommits?\b/i,
+  /\btests? (?:are |is )?(?:failing|failed|broken)\b/i,
+];
+
+/**
+ * Code-shaped object nouns: wording that says the work *is* code.
+ *
+ * These turn a literary noun into a modifier ("the story parser", "the scene
+ * state machine") — the cases where a creation verb plus a literary noun must
+ * not be read as prose.
+ */
+const CODE_OBJECT_SIGNALS: readonly RegExp[] = [
+  /\b(?:parsers?|parsing|serializ\w*|deserializ\w*|tokeniz\w*|lexers?|compilers?|components?|modules?|classes|functions?|methods?|hooks?|reducers?|schemas?|interfaces?|apis?|sdks?|endpoints?|regex(?:es)?|state machines?|renderers?)\b/i,
+  /\b(?:code|source files?)\b/i,
+  CODE_PATH_SIGNAL,
+  // Shell/code scripts only; a screenwriting "script" is not a shell script.
+  /\b(?:bash|shell|node|python|npm|docker|ci) scripts?\b/i,
+  // 中文代码语境。
+  /(?:代码|源码|仓库|重构|解析器|序列化|组件|模块|函数|接口|状态机|报错|单元测试)/,
+];
+
+/**
+ * Hard negatives for the creative-writing group: code / repo context never
+ * becomes prose. Reuses the repo outcome signals (rather than restating them,
+ * so the two lists can never drift) plus the code-object nouns above.
+ *
+ * A hit cancels the creative group and evaluation continues with the later
+ * repo/terminal rules — it never asserts a domain by itself. Generic verbs like
+ * "build" stay out, so "build the character arc" remains creative.
+ */
+const CREATIVE_WRITING_VETOES: readonly RegExp[] = [
+  ...CODE_OBJECT_SIGNALS,
+  ...REPO_OUTCOME_SIGNALS,
+];
+
+/**
  * Ordered high-confidence signal groups; first group with a hit wins.
  * Goal-level groups (rails → creative writing → design → terminal → repo) outrank incidental
  * keyword groups (design → terminal) — that sandwich is what keeps "fix the
  * layout bug in src/App.tsx" in coding.repo while "redesign this landing
- * page" stays design.website.
+ * page" stays design.website. A group may additionally declare `vetoes`
+ * (writing.creative does): a veto hit skips that group and evaluation continues,
+ * which is how code context wins over a literary noun without reordering.
  */
 const TASK_SIGNAL_RULES: ReadonlyArray<{
   domain: ModelQualityDomain;
   patterns: readonly RegExp[];
+  /**
+   * Optional hard negatives: a hit cancels this group for the task (evaluation
+   * continues with the next group). Never asserts a domain by itself.
+   */
+  vetoes?: readonly RegExp[];
 }> = [
   { domain: "coding.rails", patterns: RAILS_SIGNALS },
-  { domain: "writing.creative", patterns: CREATIVE_WRITING_SIGNALS },
+  { domain: "writing.creative", patterns: CREATIVE_WRITING_SIGNALS, vetoes: CREATIVE_WRITING_VETOES },
   { domain: "design.website", patterns: DESIGN_GOAL_SIGNALS },
   {
     // coding.repo is the default coding domain: code modification outcomes.
     domain: "coding.repo",
-    patterns: [
-      /\bbugs?\b/i,
-      /\b(?:typescript|javascript|python|ruby) error\b/i,
-      /\bregressions?\b/i,
-      /\brefactor(?:ing)?\b/i,
-      /\bimplement (?:a |an |the )?(?:new |missing )?feature\b/i,
-      /\brake\b/i,
-      /\brepo(?:sitory)?\b/i,
-      /\bcodebase\b/i,
-      /\bcode review\b/i,
-      /\bpull request\b/i,
-      /\bPR(?:s)?\b/,
-      /\bcommits?\b/i,
-      /\btests? (?:are |is )?(?:failing|failed|broken)\b/i,
-      /(?:^|\s)[\w.@/-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|ex|exs|php|vue|svelte)\b/i,
-    ],
+    patterns: [...REPO_OUTCOME_SIGNALS, CODE_PATH_SIGNAL],
   },
   { domain: "coding.terminal", patterns: TERMINAL_GOAL_SIGNALS },
   { domain: "design.website", patterns: DESIGN_INCIDENTAL_SIGNALS },
@@ -191,6 +243,7 @@ export function resolveTaskQualityDomain(
   const task = input.task?.trim();
   if (task) {
     for (const rule of TASK_SIGNAL_RULES) {
+      if (rule.vetoes?.some((veto) => veto.test(task))) continue;
       if (rule.patterns.some((pattern) => pattern.test(task))) {
         return rule.domain;
       }

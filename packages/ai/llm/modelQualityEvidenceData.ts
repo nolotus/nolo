@@ -8,8 +8,13 @@
 // changing the resolver.
 //
 // Provenance rules:
-// - every entry carries a sourceUrl pointing at the public page the score was
-//   read from, plus measuredAt for the snapshot date;
+// - every curated entry carries a sourceUrl pointing at the public page the
+//   score was read from;
+// - snapshot evidence — values that move over time (leaderboards, Elo ranks) —
+//   additionally carries measuredAt with the snapshot date. Creative Writing v3
+//   is such a snapshot, so every one of its rows has measuredAt; the older
+//   coding rows were transcribed without a recorded date and deliberately keep
+//   none (never invent a date just to satisfy this note);
 // - no guessing: a model without a confirmed score for a domain simply has no
 //   entry (missing evidence must stay missing, never 0);
 // - every entry is one atomic fact: (model, domain, dimension, benchmark) and
