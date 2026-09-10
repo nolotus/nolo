@@ -28,6 +28,16 @@
   user-select: none;
 }
 
+/* closed 态：分隔符整体禁用（pointerdown 在 TSX 已拦截，这里补视觉与光标）。 */
+.WorkbenchSplit__separator[aria-disabled="true"] {
+  cursor: default;
+}
+
+.WorkbenchSplit__separator:focus-visible {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: -2px;
+}
+
 /* 分隔符视觉：1px 中线，rest 态极淡、hover/拖动时高亮。 */
 .WorkbenchSplit__separator::before {
   content: "";
@@ -45,8 +55,13 @@
   background: var(--border, #e5e7eb);
 }
 
-.WorkbenchSplit__separator:hover::before,
-.WorkbenchSplit--resizing .WorkbenchSplit__separator::before {
+.WorkbenchSplit__separator[aria-disabled="true"]::before {
+  background: transparent;
+}
+
+.WorkbenchSplit__separator:not([aria-disabled="true"]):hover::before,
+.WorkbenchSplit--resizing
+  .WorkbenchSplit__separator:not([aria-disabled="true"])::before {
   background: var(--primary, #2563eb);
 }
 

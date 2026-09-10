@@ -59,15 +59,21 @@ export default function LocalPreviewSplit({ children }: { children: React.ReactN
         secondaryMinSize={PREVIEW_MIN_SIZE}
         onSecondaryFractionChange={handleFractionChange}
       />
-      <button
-        type="button"
-        className="LocalPreviewSplit__swap"
-        onClick={handleSwap}
-        title="交换预览与对话位置"
-        aria-label="交换预览与对话位置"
-      >
-        ⇄
-      </button>
+      {previewOpen ? (
+        <button
+          type="button"
+          className={`LocalPreviewSplit__swap ${
+            preference.placement === "primary-end"
+              ? "LocalPreviewSplit__swap--secondary-start"
+              : "LocalPreviewSplit__swap--secondary-end"
+          }`}
+          onClick={handleSwap}
+          title="交换预览与对话位置"
+          aria-label="交换预览与对话位置"
+        >
+          ⇄
+        </button>
+      ) : null}
     </div>
   );
 }

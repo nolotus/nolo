@@ -17,6 +17,8 @@ export type WorkbenchPlacement = "primary-start" | "primary-end";
 const DEFAULT_SECONDARY_FRACTION = 0.4;
 const DEFAULT_MIN_SIZE = 320;
 export const WORKBENCH_SEPARATOR_SIZE = 8;
+/** 键盘 resize 每次移动的 px 步长。 */
+export const WORKBENCH_KEYBOARD_STEP_PX = 32;
 /** 首次测量前的可用宽度兜底（SSR / 无布局环境），只影响首帧，量测后立即修正。 */
 const FALLBACK_AVAILABLE_WIDTH = 1280;
 
@@ -180,6 +182,8 @@ export default function WorkbenchSplit({
 
   const handleSeparatorPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      // closed 态分隔符 disabled：不进 drag state，不产生任何交互。
+      if (!secondaryOpen) return;
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -196,7 +200,7 @@ export default function WorkbenchSplit({
       window.addEventListener("pointerup", handlePointerUp);
       window.addEventListener("pointercancel", handlePointerUp);
     },
-    [handlePointerMove, handlePointerUp]
+    [handlePointerMove, handlePointerUp, secondaryOpen]
   );
 
   // 卸载时兜底恢复全局样式（拖动中途 unmount）。
@@ -215,6 +219,38 @@ export default function WorkbenchSplit({
     if (!secondaryOpen) return;
     onSecondaryFractionChange?.(0.5);
   }, [secondaryOpen, onSecondaryFractionChange]);
+
+  // 键盘 resize：与 pointer 拖拽共用同一套 clamp + fraction 换算。
+  // 方向语义跟随 placement——指针朝 secondary 方向移动 = Arrow 同侧增大：
+  //   primary-start（secondary 在右）：ArrowLeft → secondary 变大
+  //   primary-end   （secondary 在左）：ArrowRight → secondary 变大
+  const moveSecondaryBy = useCallback(
+    (deltaPx: 1 | -1) => {
+      if (!secondaryOpen || availableWidth <= 0) return;
+      const directed = placement === "primary-end" ? -deltaPx : deltaPx;
+      const currentPx = clamp(
+        Math.round(availableWidth * secondaryFraction),
+        minEffectivePx,
+        maxSecondaryPx
+      );
+      const px = clamp(currentPx + directed * WORKBENCH_KEYBOARD_STEP_PX, minEffectivePx, maxSecondaryPx);
+      onSecondaryFractionChange?.(Math.round((px / availableWidth) * 100) / 100);
+    },
+    [secondaryOpen, availableWidth, placement, secondaryFraction, minEffectivePx, maxSecondaryPx, onSecondaryFractionChange]
+  );
+
+  const handleSeparatorKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        moveSecondaryBy(1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        moveSecondaryBy(-1);
+      }
+    },
+    [moveSecondaryBy]
+  );
 
   // 稳定槽位：track 模板与 gridColumn 随 placement/open 切换，React 树里
   // 三个槽位的位置、key、child identity 都不变。
@@ -250,8 +286,15 @@ export default function WorkbenchSplit({
         style={{ gridColumn: "2" }}
         role="separator"
         aria-orientation="vertical"
+        aria-disabled={!secondaryOpen}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round((secondaryPx / Math.max(availableWidth, 1)) * 100)}
+        aria-label="调整两个工作面的宽度"
+        tabIndex={secondaryOpen ? 0 : -1}
         onPointerDown={handleSeparatorPointerDown}
         onDoubleClick={handleSeparatorDoubleClick}
+        onKeyDown={handleSeparatorKeyDown}
       />
       <div
         className="WorkbenchSplit__surface"

@@ -1,4 +1,13 @@
 
+## 0.58.0-alpha.2
+
+## 0.58.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **layout:** polish WorkbenchSplit interaction and accessibility ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8addaad879f73790b29465a5579f28f83))
+
+
 ## 0.58.0-alpha.1
 
 ## 0.58.0-alpha.1 (2026-09-10)

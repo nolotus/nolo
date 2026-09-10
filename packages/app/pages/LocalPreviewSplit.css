@@ -1,6 +1,6 @@
 /* app/pages/LocalPreviewSplit.css — 对话页分栏的表面细节。
    水平空间分配、resize、placement 交换都由 WorkbenchSplit 负责；
-   这里只剩打开态的输入框高度和 swap 按钮。 */
+   这里只剩打开态的输入框高度和 swap 按钮（仅 preview 打开时渲染）。 */
 
 /* 对话列变窄之后，输入框按默认高度只剩一行多，打字很局促，给它更高的
    起始高度和上限。作用域限定在分栏打开时（--open 作用域与旧行为一致），
@@ -13,7 +13,6 @@
 .LocalPreviewSplit__swap {
   position: absolute;
   top: 8px;
-  right: calc(var(--workbench-secondary-px, 0px) + 12px);
   z-index: 5;
   width: 24px;
   height: 24px;
@@ -27,6 +26,16 @@
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s ease;
+}
+
+/* 按钮锚定 separator 方向：secondary 在右（primary-start）时贴右侧，
+   secondary 在左（primary-end）时贴左侧——不假设 secondary 永远在右。 */
+.LocalPreviewSplit__swap--secondary-end {
+  right: calc(var(--workbench-secondary-px, 0px) + 12px);
+}
+
+.LocalPreviewSplit__swap--secondary-start {
+  left: calc(var(--workbench-secondary-px, 0px) + 12px);
 }
 
 .LocalPreviewSplit:hover .LocalPreviewSplit__swap,

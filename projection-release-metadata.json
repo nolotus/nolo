@@ -7,13 +7,13 @@
       "releaseIntent": "none"
     },
     "desktop": {
-      "version": "0.58.0-alpha.1",
+      "version": "0.58.0-alpha.2",
       "channel": "alpha",
       "releaseIntent": "release"
     }
   },
   "provenance": {
-    "sourceSha": "38c01596a1188509f9244f82bf3d234cf0270b94",
+    "sourceSha": "a690ad9a810356ecf5b1649e409ee04100708ed4",
     "sourceBranch": "alpha"
   }
 }
