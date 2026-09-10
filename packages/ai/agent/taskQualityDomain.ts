@@ -12,6 +12,12 @@
 // Rule semantics (checked in order):
 // - explicitDomain wins outright (stable exit for future planner/routing);
 // - framework-specific > everything (Rails beats design/terminal/repo);
+// - creative-writing needs a literary FORM plus a creation/continuation verb
+//   ("write a short sci-fi story", "续写这段小说") or an unambiguous phrase
+//   ("creative writing", "short story"). A bare "story"/"novel"/"scene" is NOT
+//   enough — "fix the story editor bug" stays coding.repo — and technical or
+//   business prose (README, PR description, docs, summary, email, product
+//   description, code comments) is never creative writing;
 // - strong design/terminal GOAL signals beat repo modification ("redesign
 //   this landing page" is design even when a repo is touched);
 // - repo modification outcome > INCIDENTAL design/terminal keywords
@@ -91,8 +97,40 @@ const TERMINAL_INCIDENTAL_SIGNALS: readonly RegExp[] = [
 ];
 
 /**
+ * Literary forms that can identify creative writing — only together with a
+ * creation/continuation verb, or inside an unambiguous phrase (see below).
+ *
+ * `script` is deliberately absent: "write a bash script" is terminal/repo work,
+ * screenwriting is matched through `screenplay` instead. `novel` is guarded
+ * against its adjective sense ("a novel approach").
+ */
+const CREATIVE_WRITING_FORM =
+  String.raw`(?:short story|story|fiction|novel(?!\s+(?:approach|idea|way|method|technique|solution|design|algorithm|strategy))|novella|poem|poetry|screenplay|chapter|prose|scene)`;
+
+/**
+ * Creative-writing signals: a literary form reached by a creation/continuation
+ * verb, or a phrase that is unambiguous on its own.
+ *
+ * Intentionally excluded (must stay non-creative): README / PR description /
+ * documentation / summary / email / product description / code comments, and
+ * Chinese 写代码 / 写文档 / 写测试 / 写邮件 / 写总结.
+ */
+const CREATIVE_WRITING_SIGNALS: readonly RegExp[] = [
+  new RegExp(
+    String.raw`\b(?:write|writing|draft|compose|create|continue|continuing|extend|rewrite|edit)\b[^.!?\n]{0,40}\b${CREATIVE_WRITING_FORM}\b`,
+    "i",
+  ),
+  /\b(?:short story|flash fiction|creative writing|fiction writing|story writing|novel writing|science fiction|poetry)\b/i,
+  // 中文：创作/续写动词 + 文学体裁（"写一个短篇小说"、"续写这段小说"）。
+  /(?:写|创作|撰写|编写|续写|来一篇|来个)[^。！？\n]{0,12}(?:小说|故事|诗歌|诗|散文|剧本|短篇|文学)/,
+  // 中文：体裁 + 创作动作（"小说续写"、"故事大纲"、"人物对白"）。
+  /(?:小说|故事|诗歌|散文|剧本)[^。！？\n]{0,6}(?:续写|创作|大纲|开头|对白|人物|情节)/,
+  /(?:创意写作|文学创作|小说创作)/,
+];
+
+/**
  * Ordered high-confidence signal groups; first group with a hit wins.
- * Goal-level groups (rails → design → terminal → repo) outrank incidental
+ * Goal-level groups (rails → creative writing → design → terminal → repo) outrank incidental
  * keyword groups (design → terminal) — that sandwich is what keeps "fix the
  * layout bug in src/App.tsx" in coding.repo while "redesign this landing
  * page" stays design.website.
@@ -102,6 +140,7 @@ const TASK_SIGNAL_RULES: ReadonlyArray<{
   patterns: readonly RegExp[];
 }> = [
   { domain: "coding.rails", patterns: RAILS_SIGNALS },
+  { domain: "writing.creative", patterns: CREATIVE_WRITING_SIGNALS },
   { domain: "design.website", patterns: DESIGN_GOAL_SIGNALS },
   {
     // coding.repo is the default coding domain: code modification outcomes.

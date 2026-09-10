@@ -1,13 +1,24 @@
 // ai/llm/modelAbility.ts
 //
-// Minimal code-level model capability table.
+// Minimal code-level model capability table — LEGACY display/reference metadata.
 // Values are 0-100 scores transcribed from benchmark snapshots and domain evaluations.
 // No composite score, no steps, no recommendedFor — just optional numeric capability signals.
+//
+// Boundary (do not blur): this table is NOT the quality truth for task routing.
+// Domain-aware routing reads ai/llm/modelQualityEvidence.ts, where each domain
+// carries its own independent dimensions (e.g. writing.creative has separate
+// preference / rubric / slop / repetition / length evidence, each with its own
+// benchmark identity and direction). `writingScore` here is a coarse legacy
+// reference number: it must never be treated as that creative-writing evidence,
+// and the two must never be combined, weighted or averaged. The default
+// listAgents compact projection does not carry modelAbility at all, so the
+// selector normally never sees this table.
 
-/** Optional capability metadata for a model. */
+/** Optional capability metadata for a model. Legacy reference values — see the file header. */
 export interface ModelAbility {
   passAt1?: number;
   benchmarkScore?: number;
+  /** Legacy coarse domain reference score (0-100). Not the writing.creative evidence. */
   writingScore?: number;
 }
 
