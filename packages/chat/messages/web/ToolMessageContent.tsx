@@ -50,7 +50,7 @@ import {
   buildZiweiChartDocTitle,
 } from "../ziweiChartDoc";
 import { CollapsibleToolText, withLiteralClass } from "./toolMessageShared";
-import { shouldPreviewToolText } from "../toolPresentation";
+import { previewToolText, shouldPreviewToolText } from "../toolPresentation";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 
 /* --- 代码文件预览（用于 readFile 等：只看最终文件） --- */
@@ -383,6 +383,42 @@ const CodeChangeViewer: React.FC<ToolProps> = ({ rawData, isError, t }) => {
 
 /* --- Shell 执行结果 / 危险命令拦截 --- */
 
+/**
+ * 长命令（如粘贴的整段路径/脚本）默认只挂预览到 DOM，
+ * 点击「展开命令」才渲染全文，避免撑爆终端窗口头部。
+ */
+const SHELL_CMD_PREVIEW_CHARS = 240;
+const SHELL_CMD_PREVIEW_LINES = 3;
+
+const ShellCommandCode: React.FC<{ text: string }> = ({ text }) => {
+  const [expanded, setExpanded] = useState(false);
+  const meta = useMemo(
+    () => previewToolText(text, SHELL_CMD_PREVIEW_CHARS, SHELL_CMD_PREVIEW_LINES),
+    [text]
+  );
+  const display = expanded || !meta.truncated ? text : meta.preview;
+
+  return (
+    <code  {...withLiteralClass("shell-cmd", contentStyles.shellCmd)}>
+      {display}
+      {!expanded && meta.truncated ? "…" : null}
+      {meta.truncated ? (
+        <button
+          type="button"
+          className="btn-tiny"
+          style={{ marginLeft: 8 }}
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+        >
+          {expanded ? "收起" : `展开命令 (${meta.totalChars.toLocaleString()} 字符)`}
+        </button>
+      ) : null}
+    </code>
+  );
+};
+
 const ExecShellViewer: React.FC<ToolProps> = ({
   rawData,
   isError,
@@ -496,7 +532,7 @@ const ExecShellViewer: React.FC<ToolProps> = ({
       <div  {...withLiteralClass("bash-terminal-window", contentStyles.bashTerminal)}>
         <div  {...withLiteralClass("bash-prompt-line", contentStyles.bashPromptLine)}>
           <span  {...withLiteralClass("bash-prompt-char", contentStyles.bashPromptChar)}>&gt;_</span>
-          <code  {...withLiteralClass("shell-cmd", contentStyles.shellCmd)}>{cwd ? `${cwd} $ ${command}` : command}</code>
+          <ShellCommandCode text={cwd ? `${cwd} $ ${command}` : command} />
           <div  {...withLiteralClass("shell-meta-inline", contentStyles.shellMeta)}>
             {exitCode !== undefined && (
               <span  {...withLiteralClass("shell-exit-code", contentStyles.shellExit)}>
