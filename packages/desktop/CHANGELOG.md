@@ -1,4 +1,28 @@
 
+## 0.57.0-alpha.1
+
+## 0.57.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **agent:** add GPT-6 Astra model to OpenAI catalog and agent creation pickers ([5e6ac2e](https://github.com/nolotus/bun-nolo/commit/5e6ac2ebc1488981f96ecd5c0a7a274355a646f4))
+* **ai:** add dimension-aware quality evidence and writing.creative domain ([98c451c](https://github.com/nolotus/bun-nolo/commit/98c451cc5a81e3e5e2c2a7a885da4000362e970f))
+* **chat:** fold execShell/readFile tool rows by default with TUI-style summaries ([e982f3f](https://github.com/nolotus/bun-nolo/commit/e982f3f308749f84f23c8969db023957f9f19c4d))
+* **chat:** sidebar 虚拟化列表接入 fluid hover 连续高亮 ([7e22c56](https://github.com/nolotus/bun-nolo/commit/7e22c569f0744d7a37f33eebf0c4ffee16f8559d))
+
+### Bug Fixes
+
+* **ai:** judge creative-writing code context structurally ([11db185](https://github.com/nolotus/bun-nolo/commit/11db185a4d34558fed9aa84cb53c9e06aa490acc))
+* **ai:** keep code-context tasks out of writing.creative ([18a2b4d](https://github.com/nolotus/bun-nolo/commit/18a2b4dbfe493ca0706c5c5024f9c670296174b1))
+* **chat:** fluid hover enabled=false 契约与 rowSize 几何推导 ([1fb5382](https://github.com/nolotus/bun-nolo/commit/1fb53824370790ea4c4d5e90c28f54321c1ece4a))
+* **chat:** 折叠 exec 工具卡片中的超长 shell 命令 ([87dfffc](https://github.com/nolotus/bun-nolo/commit/87dfffcbd3a164ef08858db20f2492460795afc9))
+* **desktop:** stable 安装脚本 electrobun exit 0 分支补产 smoke installer ([97e82dc](https://github.com/nolotus/bun-nolo/commit/97e82dcb852f39506d07731cc1f879c932c79a5e))
+* **desktop:** 修复 Windows 更新安装卡死（helper 干等文件锁） ([cd08e9a](https://github.com/nolotus/bun-nolo/commit/cd08e9ae71fa5ce74c80abf4e842e71873f29000))
+* **desktop:** 对齐 package.json 版本至 tag 声明的 0.56.0-alpha.1 ([f0b1b77](https://github.com/nolotus/bun-nolo/commit/f0b1b774831827c386d84ec31570666aab09c185))
+* **desktop:** 恢复被合并静默吞掉的 dev 编排器脚本入口 ([09508d9](https://github.com/nolotus/bun-nolo/commit/09508d9d977119dc72128d4527fe8a9095433989))
+* **desktop:** 桌面端交互 agent 默认补齐 exa_search/fetchWebpage ([4163f9f](https://github.com/nolotus/bun-nolo/commit/4163f9fc55eb434c647ccd0eb19e3d2b5e5ae3d1))
+
+
 ## 0.56.0-alpha.1
 
 ## 0.56.0-alpha.1 (2026-09-09)
