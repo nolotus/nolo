@@ -148,6 +148,7 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
         body: rawBody,
         provider: args.providerConfig.provider,
         model: args.providerConfig.model,
+        endpoint: args.providerConfig.endpoint,
       });
 
   const endpoint = args.providerConfig.endpoint;

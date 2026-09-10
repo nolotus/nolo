@@ -280,5 +280,6 @@ export const generateOpenAIRequestBody = (
     body: requestBody,
     provider: providerName,
     model: requestBody.model,
+    endpoint: agentConfig.customProviderUrl,
   });
 };

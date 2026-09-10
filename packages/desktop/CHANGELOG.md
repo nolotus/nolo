@@ -1,4 +1,13 @@
 
+## 0.60.0-alpha.2
+
+## 0.60.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **cli:** fix TUI Ollama context tracking, stream usage and truncation ([33e4461](https://github.com/nolotus/bun-nolo/commit/33e4461beae687a05188aeeb76e3ff09a0939837))
+
+
 ## 0.60.0-alpha.1
 
 ## 0.60.0-alpha.1 (2026-09-10)

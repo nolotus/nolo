@@ -1,3 +1,4 @@
+import { getModelContextWindow } from "ai/llm/getModelContextWindow";
 import {
   isFireworksKimiModel,
   isNoloHostedProvider,
@@ -7,12 +8,14 @@ import {
   requiresBareImageUrl,
   toBareImageUrlMessages,
 } from "core/chat/bareImageUrlShape";
+import { isOllamaEndpoint } from "core/ollamaEndpoint";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 
 type NormalizeChatCompletionsBodyArgs = {
   body: Record<string, any>;
   provider: string;
   model: string;
+  endpoint?: string;
 };
 
 /** Moonshot 开放平台旗舰模型 id（api.moonshot.cn OpenAI 兼容模式）。 */
@@ -35,10 +38,17 @@ const isKimiK3ProviderModel = (provider: string, model: string): boolean => {
   );
 };
 
+const isOllamaProviderOrEndpoint = (provider: string, endpoint?: string): boolean => {
+  const p = asTrimmedLowercaseString(provider);
+  if (p === "ollama" || p === "ollama-cloud") return true;
+  return isOllamaEndpoint(endpoint);
+};
+
 export const normalizeChatCompletionsBodyForProvider = ({
   body,
   provider,
   model,
+  endpoint,
 }: NormalizeChatCompletionsBodyArgs): Record<string, any> => {
   const nextBody: Record<string, any> = { ...body, model };
   const normalizedProvider = asTrimmedLowercaseString(provider);
@@ -59,6 +69,26 @@ export const normalizeChatCompletionsBodyForProvider = ({
     if (typeof nextBody.max_tokens === "number") {
       nextBody.max_completion_tokens = nextBody.max_tokens;
       delete nextBody.max_tokens;
+    }
+  }
+
+  // Ollama 默认 num_ctx 仅为 2048，导致长对话和工具定义被静默截断。
+  // 注入 options.num_ctx 确保 Ollama 为模型分配正确的上下文缓冲区。
+  // 对未知模型（fallback 到 256k）使用安全的 32k 默认，避免本地显存 OOM。
+  if (isOllamaProviderOrEndpoint(provider, endpoint)) {
+    const existingNumCtx = nextBody.options?.num_ctx ?? nextBody.num_ctx;
+    if (existingNumCtx === undefined) {
+      const cw = getModelContextWindow(model);
+      const safeNumCtx =
+        typeof cw === "number" && cw > 0
+          ? cw === 256_000
+            ? 32_768
+            : Math.min(cw, 131_072)
+          : 32_768;
+      nextBody.options = {
+        ...nextBody.options,
+        num_ctx: safeNumCtx,
+      };
     }
   }
 

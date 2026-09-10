@@ -1,3 +1,4 @@
+import { isOllamaEndpoint } from "core/ollamaEndpoint";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 
 export interface UsageRequestOptions {
@@ -52,10 +53,8 @@ const STREAM_USAGE_PROVIDERS = new Set([
   "kimi-code",
 ]);
 
-// Kimi Code endpoint marker for user-configured custom providers. Duplicated
-// from agent-runtime/kimiUserAgent.ts isKimiEndpoint on purpose: ai/llm must
-// not depend on agent-runtime, and both copies guard the same wire behavior —
-// update them together.
+// Kimi Code endpoint marker for user-configured custom providers.
+// Duplicated from agent-runtime on purpose: ai/llm must not depend on agent-runtime.
 const KIMI_CODE_ENDPOINT_MARKER = "api.kimi.com";
 
 const isKimiCodeEndpoint = (endpoint?: string | null): boolean =>
@@ -74,12 +73,13 @@ export const getUsageRequestOptions = (
   const api = options?.api ?? "chat-completions";
 
   // custom 是用户手配的任意 OpenAI 兼容网关，不能整体进白名单（严格网关不认
-  // stream_options 会 400）；但指向 Kimi For Coding 端点的 custom agent 已实测
-  // 支持 include_usage，按 endpoint 精准放行，否则订阅流式永远没有 usage 帧
-  //（TUI context 面板不动 + 计费只剩字符估算）。
+  // stream_options 会 400）；但指向 Kimi For Coding 或本地/云端 Ollama 端点的
+  // custom agent 已实测支持 include_usage，按 endpoint 精准放行，否则订阅/本地流式
+  // 永远没有 usage 帧（TUI context 面板不动 + 计费只剩字符估算）。
   const shouldRequestStreamUsage =
     STREAM_USAGE_PROVIDERS.has(normalizedProvider) ||
-    (normalizedProvider === "custom" && isKimiCodeEndpoint(options?.endpoint));
+    (normalizedProvider === "custom" &&
+      (isKimiCodeEndpoint(options?.endpoint) || isOllamaEndpoint(options?.endpoint)));
 
   if (api === "responses") {
     return EXTRA_USAGE_FIELD_PROVIDERS.has(normalizedProvider)

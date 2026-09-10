@@ -56,6 +56,14 @@ function stripPreviewSuffix(model: string): string {
   return model;
 }
 
+function stripModelTag(model: string): string {
+  const colonIndex = model.indexOf(":");
+  if (colonIndex > 0) {
+    return model.slice(0, colonIndex);
+  }
+  return model;
+}
+
 // 全量模型映射表（context window 解析用）：name + displayName 双键，值带 provider。
 let fullModelMap: Map<string, ModelWithProvider> | null = null;
 
@@ -121,6 +129,60 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   if (normalizedName.includes("minimax-m2") || normalizedName.includes("minimax_m2")) return 262_144;
   // 200k 档
   if (normalizedName.includes("claude")) return 200_000;
+  // 128k 档 (常见开源与 Ollama 本地模型)
+  if (
+    normalizedName.includes("llama3.1") ||
+    normalizedName.includes("llama-3.1") ||
+    normalizedName.includes("llama3.2") ||
+    normalizedName.includes("llama-3.2") ||
+    normalizedName.includes("llama3.3") ||
+    normalizedName.includes("llama-3.3") ||
+    normalizedName.includes("qwen2.5") ||
+    normalizedName.includes("qwen-2.5") ||
+    normalizedName.includes("mistral-nemo") ||
+    normalizedName.includes("phi3.5") ||
+    normalizedName.includes("phi-3.5") ||
+    normalizedName.includes("phi4") ||
+    normalizedName.includes("phi-4")
+  ) {
+    return 131_072;
+  }
+  // 32k 档
+  if (
+    normalizedName.includes("qwen2") ||
+    normalizedName.includes("qwen-2") ||
+    normalizedName.includes("mistral") ||
+    normalizedName.includes("mixtral")
+  ) {
+    return 32_768;
+  }
+  // 16k 档
+  if (
+    normalizedName.includes("codellama") ||
+    normalizedName.includes("starcoder") ||
+    normalizedName.includes("phi3") ||
+    normalizedName.includes("phi-3")
+  ) {
+    return 16_384;
+  }
+  // 8k 档
+  if (
+    normalizedName.includes("llama3") ||
+    normalizedName.includes("llama-3") ||
+    normalizedName.includes("gemma2") ||
+    normalizedName.includes("gemma-2") ||
+    normalizedName.includes("gemma")
+  ) {
+    return 8_192;
+  }
+  // 4k 档
+  if (
+    normalizedName.includes("llama2") ||
+    normalizedName.includes("llama-2") ||
+    normalizedName.includes("llama")
+  ) {
+    return 4_096;
+  }
   return undefined;
 }
 
@@ -135,19 +197,28 @@ export const getModelContextWindow = (modelName: string): number => {
   const normalizedName = modelName.toLowerCase();
   const map = getFullModelMap();
 
-  const candidates = [modelName, normalizedName];
-  const strippedEffort = stripEffortSuffix(modelName);
-  if (strippedEffort !== modelName) {
-    candidates.push(strippedEffort, strippedEffort.toLowerCase());
+  const rawCandidates = [modelName, normalizedName];
+  const strippedTag = stripModelTag(modelName);
+  if (strippedTag !== modelName) {
+    rawCandidates.push(strippedTag, strippedTag.toLowerCase());
   }
-  const strippedPreview = stripPreviewSuffix(modelName);
-  if (strippedPreview !== modelName) {
-    candidates.push(strippedPreview, strippedPreview.toLowerCase());
-  }
-  if (strippedEffort !== modelName) {
-    const strippedBoth = stripPreviewSuffix(strippedEffort);
-    if (strippedBoth !== strippedEffort) {
-      candidates.push(strippedBoth, strippedBoth.toLowerCase());
+
+  const candidates: string[] = [];
+  for (const base of rawCandidates) {
+    candidates.push(base);
+    const strippedEffort = stripEffortSuffix(base);
+    if (strippedEffort !== base) {
+      candidates.push(strippedEffort, strippedEffort.toLowerCase());
+    }
+    const strippedPreview = stripPreviewSuffix(base);
+    if (strippedPreview !== base) {
+      candidates.push(strippedPreview, strippedPreview.toLowerCase());
+    }
+    if (strippedEffort !== base) {
+      const strippedBoth = stripPreviewSuffix(strippedEffort);
+      if (strippedBoth !== strippedEffort) {
+        candidates.push(strippedBoth, strippedBoth.toLowerCase());
+      }
     }
   }
 
