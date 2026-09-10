@@ -63,7 +63,7 @@ export function addDesktopDefaultWebTools(
 export const DESKTOP_SERVER_START_AGENT_RUN_TOOL_NAME = "startAgentRun" as const;
 export const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_TOOL_NAMES);
 export const BUILTIN_NOLO_AGENT_ID = "01NOLOAPPBLD000000019KCKT0";
-export const QUICK_CHAT_TIER_AGENT_KEYS = new Set<string>([PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY]);
+export const QUICK_CHAT_DEFAULT_AGENT_KEYS = new Set<string>([PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY]);
 
 export function collectAgentIdentityValues(agentConfig?: AgentRuntimeAgentConfig | null): string[] {
   return [
@@ -78,23 +78,23 @@ export function collectAgentIdentityValues(agentConfig?: AgentRuntimeAgentConfig
 }
 
 /**
- * 判断 agentConfig 是否为 quick-chat 通用档内置 agent。
+ * 判断 agentConfig 是否为 quick-chat 默认内置 agent。
  * 同时检查 config.key 与 rawRecord 里的 dbKey，覆盖 record store 命中
  * 与 BUILTIN_PLATFORM_AGENT_CONFIGS 合成两种路径。
  */
-export function isQuickChatTierAgent(agentConfig?: AgentRuntimeAgentConfig | null): boolean {
+export function isQuickChatDefaultAgent(agentConfig?: AgentRuntimeAgentConfig | null): boolean {
   return collectAgentIdentityValues(agentConfig).some((value) =>
-    QUICK_CHAT_TIER_AGENT_KEYS.has(value),
+    QUICK_CHAT_DEFAULT_AGENT_KEYS.has(value),
   );
 }
 
 
 /**
- * workspaceToolsHint=true 时，通用档 agent 本轮挂载 code-planning skill：
+ * workspaceToolsHint=true 时，默认 agent 本轮挂载 code-planning skill：
  * 追加编译好的 skill prompt 协议（search-first / workspace / web / dispatch）。
  * 幂等：prompt 已包含协议时不重复追加。
  */
-export function applyCodeWorkSkillPromptToTierAgentConfig(
+export function applyCodeWorkSkillPromptToDefaultAgentConfig(
   agentConfig: AgentRuntimeAgentConfig,
 ): AgentRuntimeAgentConfig {
   const skillPrompt = buildCodeWorkSkillPrompt();
@@ -108,7 +108,7 @@ export function applyCodeWorkSkillPromptToTierAgentConfig(
 }
 
 /**
- * workspaceToolsHint=true 时包装 loadAgentConfig：命中通用档 agent 则挂载
+ * workspaceToolsHint=true 时包装 loadAgentConfig：命中默认 agent 则挂载
  * code-planning skill 的 prompt 协议（工具面在 resolveProvider 一侧注入）。
  */
 export function wrapDesktopActionsWithCodeWorkSkillPack(
@@ -120,8 +120,8 @@ export function wrapDesktopActionsWithCodeWorkSkillPack(
     ...base,
     loadAgentConfig: async (agentRef) => {
       const agentConfig = await base.loadAgentConfig(agentRef);
-      if (!agentConfig || !isQuickChatTierAgent(agentConfig)) return agentConfig;
-      return applyCodeWorkSkillPromptToTierAgentConfig(agentConfig);
+      if (!agentConfig || !isQuickChatDefaultAgent(agentConfig)) return agentConfig;
+      return applyCodeWorkSkillPromptToDefaultAgentConfig(agentConfig);
     },
   };
 }

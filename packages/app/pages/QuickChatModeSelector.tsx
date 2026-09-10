@@ -1,6 +1,6 @@
 // 首页 QuickChat 的 agent 选择器：复用对话页 AgentPickerControl。
 // 语义：空选 = 默认档 nolo（builtinAgentCatalog 的 nolo 条目，当前指向
-// DeepSeek V4 Flash Vision Exp，原生支持图片输入）；手动选一个 agent
+// deepseek-flash，原生支持图片输入）；手动选一个 agent
 // 即用该 agent 覆盖默认档（quickChatAutoAgentId）。不再有分类相关档位文案。
 
 import React, { useCallback, useMemo } from "react";

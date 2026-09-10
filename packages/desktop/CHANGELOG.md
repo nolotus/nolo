@@ -1,4 +1,13 @@
 
+## 0.66.0-alpha.1
+
+## 0.66.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **chat:** remove quick-chat tiers and switch default nolo agent to deepseek-flash ([e9b21a2](https://github.com/nolotus/bun-nolo/commit/e9b21a22f32797e7f2d014595a58e7ed4c6d677d))
+
+
 ## 0.65.0-alpha.1
 
 ## 0.65.0-alpha.1 (2026-09-10)

@@ -47,7 +47,7 @@ const FLASH_PROFILE = createProfile({
   tier: "flash",
   legacyAgentKey: BUILTIN_NOLO_AGENT_KEY,
   name: "nolo",
-  model: "glm-5-3-flash",
+  model: "deepseek-flash",
 });
 
 /**

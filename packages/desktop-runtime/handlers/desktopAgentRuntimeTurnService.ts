@@ -104,8 +104,8 @@ import {
 } from "../../desktop-chrome-connector/chromeConnector";
 import {
   collectAgentIdentityValues,
-  isQuickChatTierAgent,
-  applyCodeWorkSkillPromptToTierAgentConfig,
+  isQuickChatDefaultAgent,
+  applyCodeWorkSkillPromptToDefaultAgentConfig,
   wrapDesktopActionsWithCodeWorkSkillPack,
   extractDesktopTurnInputText,
   isBuiltinNoloDesktopAgent,
@@ -923,9 +923,9 @@ export function createDesktopAgentRuntimeActions(args: {
       const currentRunPolicy = resolveCurrentRunRuntimeToolPolicy(agentConfig);
       activeEnv = resolveLocalRuntimeEnvFromPolicy(args.env, currentRunPolicy);
 
-      // quick-chat 通用档内置 agent：默认不注入工作区工具；仅当
+      // quick-chat 默认内置 agent：默认不注入工作区工具；仅当
       // workspaceToolsHint=true 时挂载完整 code-planning skill 工具面。其他 agent 走原逻辑。
-      const isTierAgent = isQuickChatTierAgent(agentConfig);
+      const isDefaultAgent = isQuickChatDefaultAgent(agentConfig);
       // 桌面端空间绑定文件夹并已授权时，自动开 code + agent-orchestration 能力包
       // ——让绑文件夹的 agent 显式拿到代码工具与多 agent 编排（含 listAgents 发现）。
       // 兜底仍保留，不改变存量 agent 行为；这里只是让 enabledPacks 声明更准确。
@@ -937,7 +937,7 @@ export function createDesktopAgentRuntimeActions(args: {
       const resolvedDeclaredToolNames = narrowDesktopNoloToolsForTurn({
         agentConfig,
         // Host 默认联网工具（对齐 CLI 的 CLI_DEFAULT_TOOLS 兜底，桌面端无
-        // ask_user 通道故只补 exa_search/fetchWebpage）：tier agent 的
+        // ask_user 通道故只补 exa_search/fetchWebpage）：默认 agent 的
         // declared-only 工具面不动，其余交互 agent 无条件补齐。放在
         // narrow 之前，纯浏览器操作意图的轮次仍收窄到 chrome-only；
         // 用户的全局「联网搜索」开关与 disabledTools 在下游仍会生效。
@@ -946,13 +946,13 @@ export function createDesktopAgentRuntimeActions(args: {
             effectiveEnabledPacks,
             resolveRequestedRuntimeToolNames({ agentConfig }),
           ),
-          { skip: isTierAgent },
+          { skip: isDefaultAgent },
         ),
         input: args.input,
       });
       let requestedToolNames: string[];
       let useDeclaredToolNamesOnly = false;
-      if (isTierAgent) {
+      if (isDefaultAgent) {
         if (args.workspaceToolsHint === true) {
           // 挂载 code-planning skill 自有工具面（工作区读写/shell + startAgentRun），
           // 联网部分不由 skill 私藏，改从系统能力包展开——这样下面的
@@ -976,7 +976,7 @@ export function createDesktopAgentRuntimeActions(args: {
       }
 
       // 强制工具层（当前为空）跨所有环境、所有模式注入。
-      // declared-only / tier agent 默认空工具的分支也能拿到 FORCED 层。
+      // declared-only / 默认 agent 空工具的分支也能拿到 FORCED 层。
       requestedToolNames = [...new Set([...requestedToolNames, ...FORCED_TOOLS])];
       // ask_user 在桌面端不支持：desktop-runtime 没有 requestUserChoice 交互
       // 通道，也没有 AskChoice 面板渲染（Web/TUI 默认注入，桌面端剥离）。

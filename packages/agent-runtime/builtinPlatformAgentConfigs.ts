@@ -13,8 +13,7 @@
  *
  * Coverage（由 catalog 的 runtimeFallback 标记决定，2026-09-10 兜底最小化后）：
  * - builtin nolo：平台路由默认 agent，@nolo 在记录缺失时保持可用
- * - quick-chat 档位：DeepSeek V4 Flash Vision Exp（PLATFORM_TIER_AGENT_KEYS +
- *   desktop QUICK_CHAT_TIER）与 DeepSeek V4 Pro / GLM 5.3 Flash
+ * - quick-chat 默认档：deepseek-flash（PLATFORM_TIER_AGENT_KEYS）与 DeepSeek V4 Pro / GLM 5.3 Flash
  *   （SYSTEM_BUILTIN_TRUSTED）
  * - Kimi K2.6 兼容：PLATFORM_TIER_AGENT_KEYS 的 image 兼容档位 key
  * - 广场公开聊天档（Luna/GLM/Grok/Gemini）与图片助手已从兜底退场：线上记录由

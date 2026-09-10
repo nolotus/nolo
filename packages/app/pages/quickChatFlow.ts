@@ -167,12 +167,6 @@ export const logQuickChatPerf = (
  * QuickChat 模式选择 & 模型路由
  * ────────────────────────────────────────── */
 
-/**
- * 可配置的档位：快速 / 平衡 / 质量。
- * 图片档已移除（有图走 flash + 预处理管道）；保留 "image" 在类型里
- * 以兼容旧持久化 dialog 的 stickyTier。
- */
-export type QuickChatTier = "flash" | "balanced" | "quality" | "image";
 /** 执行策略：自动路由。不是模型档位。 */
 export type QuickChatModeType = "auto";
 export type QuickChatMode = { mode: QuickChatModeType };
@@ -230,13 +224,10 @@ export function resolveQuickChatPlaceholderMeta(
   ];
 }
 
-// 三档内置默认 agentKey 的唯一真相源在 settings/quickChatTierDefaults.ts
+// 快捷对话默认 agentKey 的唯一真相源在 settings/quickChatTierDefaults.ts
 // (避免 settings 包反向 import pages 层导致循环依赖);此处 re-export 保持
 // 既有调用方不变。
-export {
-  QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY,
-  QUICK_CHAT_DEFAULT_TIER_AGENTS,
-} from "app/settings/quickChatTierDefaults";
+export { QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY } from "app/settings/quickChatTierDefaults";
 
 /**
  * 编码任务意图（实现/修 bug/重构/测试构建，含「先调查再实现」混合句式）。
@@ -245,29 +236,17 @@ export {
 
 /**
  * 选择 quick-chat 目标 agent：纯文本路由。
- * 图片档已移除——有图时仍走 flash 档，纯文本模型收到图片时仅剥离为占位文本。
+ * 图片档已移除——有图时仍走默认档，纯文本模型收到图片时仅剥离为占位文本。
  * 不再调 LLM 分类器，不再自动切 Kimi。
  */
-export interface ResolveQuickChatAgentInput {
-  hasImages: boolean;
-  /**
-   * 返回某档位当前生效的智能体（"flash" / "balanced" / "quality"）。
-   * "image" 已移除，但保留在 QuickChatTier 中以兼容旧持久化 dialog。
-   */
-  resolveTierAgent: (tier: Exclude<QuickChatTier, "image">) => string;
-}
-
 /** 选择 quick-chat 目标 agent 的结果。 */
 export interface ResolveQuickChatAgentResult {
   agentKey: string;
 }
 
-export async function resolveQuickChatAgentKey({
-  hasImages: _hasImages,
-  resolveTierAgent,
-}: ResolveQuickChatAgentInput): Promise<ResolveQuickChatAgentResult> {
-  // 有图无图都走 flash 档；纯文本模型收到图片时仅剥离为占位文本。
-  const agentKey = resolveTierAgent("flash");
+export async function resolveQuickChatAgentKey(): Promise<ResolveQuickChatAgentResult> {
+  // 有图无图都走单一默认 agent（内置 nolo 本体）；纯文本模型收到图片时仅剥离为占位文本。
+  const agentKey = QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY;
   QUICK_CHAT_DEBUG &&
     console.log("[QuickChatRoute] resolveQuickChatAgentKey", { agentKey });
   return { agentKey };

@@ -61,7 +61,7 @@ export function formatAgentSourceLabel(entry: AgentCatalogEntry): string {
 export const PLATFORM_AGENTS: AgentCatalogEntry[] = [
   {
     // 名称与模型都从 builtinAgentCatalog 派生：`/switch` 里的 nolo 项直接显示
-    // 它实际指向的模型（当前 DeepSeek V4 Flash Vision Exp），换代自动跟随。
+    // 它实际指向的模型（当前 deepseek-flash），换代自动跟随。
     name: BUILTIN_NOLO_AGENT_NAME,
     key: DEFAULT_TUI_AGENT_KEY,
     model: BUILTIN_NOLO_AGENT_MODEL,

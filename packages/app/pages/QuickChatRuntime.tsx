@@ -58,7 +58,6 @@ import {
   logQuickChatPerf,
   resolveQuickChatAgentKey,
   QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY,
-  QUICK_CHAT_DEFAULT_TIER_AGENTS,
   allowsQuickChatModelOverride,
 } from "./quickChatFlow";
 import { buildQuickChatModelOverride } from "ai/agent/quickChatModelOverride";
@@ -71,7 +70,6 @@ import {
 import {
   resolveQuickChatPlaceholderMeta,
   type QuickChatMode,
-  type QuickChatTier,
 } from "./quickChatFlow";
 import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
 import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
@@ -152,13 +150,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     ) || "";
   const { data: autoOverrideAgent } = useFetchData<Agent>(autoAgentId || null);
   const allDbEntities = useAppSelector((state) => state.db?.entities ?? {});
-  // 默认档已改为写死常量(QUICK_CHAT_DEFAULT_TIER_AGENTS,现指向 nolo 本体),
-  // 不再走用户设置;有图无图都走同一个默认档（纯文本模型收到图片时仅剥离为占位文本）。
-  const resolveTierAgent = useCallback(
-    (tier: Exclude<QuickChatTier, "image">) => QUICK_CHAT_DEFAULT_TIER_AGENTS[tier],
-    [],
-  );
-  // 发送前档位未定，用默认 agent（nolo）承载 live-audio 检测与语音面板回退。
+  // 发送前用默认 agent（nolo）承载 live-audio 检测与语音面板回退。
   const currentModeAgentId = defaultAgentId;
   const shouldReadCurrentAgent =
     currentModeAgentId !== noloAgentId && !!currentModeAgentId;
@@ -390,13 +382,10 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const hasImages = filesArray.length > 0 || pendingFiles.length > 0;
       const firstMessageText = buildQuickChatFirstMessageText(trimmedText, hasImages);
       const specialistAgentId = initialAgentIdRef.current;
-      // resolveQuickChatAgentKey：有图无图都走 flash 档（预处理管道处理图片）；专职 agent 不走自动路由。
+      // resolveQuickChatAgentKey：有图无图都走单一默认 agent（内置 nolo 本体）；专职 agent 不走自动路由。
       const resolvedAgent = specialistAgentId
         ? { agentKey: specialistAgentId }
-        : await resolveQuickChatAgentKey({
-            hasImages,
-            resolveTierAgent,
-          });
+        : await resolveQuickChatAgentKey();
       const effectiveAgentId = resolvedAgent.agentKey || defaultAgentId;
       // 仅当路由落在通用档（自动选 model 的结果）时应用模型层覆盖；
       // 专职 agent / image 档 / 手动指定 agent 保持原样。
@@ -582,7 +571,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     navigate,
     defaultAgentId,
     currentSpaceId,
-    resolveTierAgent,
     clearInput,
     clearFileStatus,
     agentName,
