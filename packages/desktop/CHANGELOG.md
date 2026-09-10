@@ -1,4 +1,15 @@
 
+## 0.60.0-alpha.4
+
+## 0.60.0-alpha.4 (2026-09-10)
+
+### Bug Fixes
+
+* **agent:** default new-agent model to nolo-hosted deepseek-v4-flash ([0854198](https://github.com/nolotus/bun-nolo/commit/08541986db7db24f774d45d4b037aa324a55d816))
+* **layout:** clamp companion below preferred min on narrow stages ([d6edaa5](https://github.com/nolotus/bun-nolo/commit/d6edaa56789b8af0342b9514ddfea25352916cd2))
+* **tui:** make /cd take effect end-to-end across runtime, git status and notice lifecycle ([d03ae65](https://github.com/nolotus/bun-nolo/commit/d03ae654a785a2377370b92f06c3e5fc5e6aea28))
+
+
 ## 0.60.0-alpha.3
 
 ## 0.60.0-alpha.3 (2026-09-10)

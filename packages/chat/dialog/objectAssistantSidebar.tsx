@@ -20,7 +20,7 @@ export const openObjectAssistantSidebar = (
     kind,
     contentKey,
     sidebarId,
-    width = 360,
+    width,
     closeOnRouteChange = true,
   }: OpenObjectAssistantSidebarArgs,
 ) => {

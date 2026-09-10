@@ -1,0 +1,67 @@
+// render/layout/rightSidebarGeometry.ts — Companion / RightSidebar 几何计算纯函数。
+import {
+  DEFAULT_RIGHT_SIDEBAR_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+} from "app/layout/rightSidebarPreference";
+
+export const MAIN_CONTENT_MIN_WIDTH = 320;
+
+export interface CompanionGeometryInput {
+  preferredWidth: number;
+  containerWidth: number;
+  minWidth?: number;
+  mainMinWidth?: number;
+  separatorSize?: number;
+}
+
+export interface CompanionGeometryResult {
+  effectiveWidth: number;
+  minWidth: number;
+  maxWidth: number;
+}
+
+/**
+ * 纯几何解析函数：根据用户偏好宽度和当前可用容器宽度，动态计算 effectiveWidth 和允许的 maxWidth。
+ * 核心原则：
+ * 1. 空间受限时：Main content minimum 优先于 Companion preferred minimum。
+ * 2. 空间不足时：Companion 允许临时低于 preferred minimum (280)，最低可至 0。
+ * 3. 任何情况下：绝不让容器出现负值，优先保障主内容区的最小可用空间。
+ * 4. 容器收窄只临时压缩 effectiveWidth，不污染用户持久化的 preferredWidth。
+ */
+export const resolveCompanionEffectiveWidth = (
+  input: CompanionGeometryInput
+): CompanionGeometryResult => {
+  const minWidth = Math.max(0, input.minWidth ?? RIGHT_SIDEBAR_MIN_WIDTH);
+  const mainMinWidth = Math.max(0, input.mainMinWidth ?? MAIN_CONTENT_MIN_WIDTH);
+  const separatorSize = Math.max(0, input.separatorSize ?? 0);
+  const containerWidth = Math.max(0, input.containerWidth);
+
+  const maxWidth = Math.max(
+    0,
+    containerWidth - mainMinWidth - separatorSize
+  );
+
+  const effectiveMinWidth = Math.min(minWidth, maxWidth);
+
+  const effectiveWidth = Math.min(
+    maxWidth,
+    Math.max(effectiveMinWidth, input.preferredWidth)
+  );
+
+  return {
+    effectiveWidth,
+    minWidth: effectiveMinWidth,
+    maxWidth,
+  };
+};
+
+/**
+ * 纯坐标解析函数：根据 PointerEvent clientX 和容器 bounding rect 计算右侧 Companion 宽度。
+ * 不依赖 window.innerWidth，确保在 Navigation 折叠/不同容器内坐标计算准确。
+ */
+export const pointerXToCompanionWidth = (
+  clientX: number,
+  containerRect: { right: number; width: number }
+): number => {
+  return Math.round(containerRect.right - clientX);
+};

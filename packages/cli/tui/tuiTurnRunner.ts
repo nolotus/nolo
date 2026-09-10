@@ -288,7 +288,7 @@ async function runAgentChat(
     // explicitly so the next real turn cannot keep using the workspace's
     // launch-time NOLO_LANG value while the estimator already uses the new one.
     userLanguage: state.userLanguage,
-    localRuntimeCwd: process.cwd(),
+    localRuntimeCwd: state.cwd,
     scriptDir,
     env: {
       ...env,
@@ -1028,30 +1028,28 @@ export async function runOneAgentTurn(
     // dialogId/turnTokens 的状态折叠仍可安全执行（纯数据，不碰 UI 锁）。
     const wasForceStopped = ctx.forcedStopEpoch === myEpoch;
     if (wasForceStopped) {
-      if (runResult.dialogId || runResult.turnTokens) {
-        const nextDialogKey = runResult.dialogId
-          ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
-            ? ctx.state.dialogKey
-            : ctx.state.dialogOwnerId
-              ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
-              : undefined
-          : ctx.state.dialogKey;
-        ctx.state = {
-          ...ctx.state,
-          ...(runResult.dialogId
-            ? {
-                dialogId: runResult.dialogId,
-                dialogKey: nextDialogKey,
-                dialogLabel: runResult.title || runResult.dialogId,
-                ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-              }
-            : {}),
-          ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-          ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-          // 本轮已发起 agent 调用（消息已注入），消费切换通知。
-          pendingCwdNotice: undefined,
-        };
-      }
+      const nextDialogKey = runResult.dialogId
+        ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
+          ? ctx.state.dialogKey
+          : ctx.state.dialogOwnerId
+            ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
+            : undefined
+        : ctx.state.dialogKey;
+      ctx.state = {
+        ...ctx.state,
+        ...(runResult.dialogId
+          ? {
+              dialogId: runResult.dialogId,
+              dialogKey: nextDialogKey,
+              dialogLabel: runResult.title || runResult.dialogId,
+              ...(runResult.title ? { dialogTitle: runResult.title } : {}),
+            }
+          : {}),
+        ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+        ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+        // 本轮已发起 agent 调用（消息已注入），消费切换通知。
+        pendingCwdNotice: undefined,
+      };
       // 记账不挂在「有 dialogId / turnTokens」这个条件上：中断的 turn 常常
       // 两者都没有，但前面已经跑掉的 provider 调用照样扣了费。
       ctx.accumulateSessionCredits(runResult.turnCredits);
@@ -1099,41 +1097,39 @@ export async function runOneAgentTurn(
         ctx.emitCommandOutput(t("turnStopped"));
       }
     }
-    if (runResult.dialogId || runResult.turnTokens || runResult.contextWindow) {
-      const nextDialogKey = runResult.dialogId
-        ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
-          ? ctx.state.dialogKey
-          : ctx.state.dialogOwnerId
-            ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
-            : undefined
-        : ctx.state.dialogKey;
-      ctx.state = {
-        ...ctx.state,
-        ...(runResult.dialogId
-          ? {
-              dialogId: runResult.dialogId,
-              dialogKey: nextDialogKey,
-              dialogLabel: runResult.title || runResult.dialogId,
-              ...(runResult.title ? { dialogTitle: runResult.title } : {}),
-            }
-          : {}),
-        ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
-        ...(runResult.contextWindow
-          ? { contextWindow: runResult.contextWindow }
-          : {}),
-        // input_tokens 是累计上下文输入（含历史消息），把它持久化到
-        // estimatedContextTokens：下一轮若 provider 不返回 usage，context
-        // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
-        ...(runResult.turnTokens && runResult.turnTokens.input > 0
-          ? { estimatedContextTokens: runResult.turnTokens.input }
-          : {}),
-        ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
-        // 切换消息本轮已注入 agent 上下文（runAgentChat 已读），消费掉，
-        // 避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实 turn、
-        // 而非纯 child-run-completed 事件短路）时才清除。
-        pendingCwdNotice: undefined,
-      };
-    }
+    const nextDialogKey = runResult.dialogId
+      ? runResult.dialogId === ctx.state.dialogId && ctx.state.dialogKey
+        ? ctx.state.dialogKey
+        : ctx.state.dialogOwnerId
+          ? `dialog-${ctx.state.dialogOwnerId}-${runResult.dialogId}`
+          : undefined
+      : ctx.state.dialogKey;
+    ctx.state = {
+      ...ctx.state,
+      ...(runResult.dialogId
+        ? {
+            dialogId: runResult.dialogId,
+            dialogKey: nextDialogKey,
+            dialogLabel: runResult.title || runResult.dialogId,
+            ...(runResult.title ? { dialogTitle: runResult.title } : {}),
+          }
+        : {}),
+      ...(runResult.turnTokens ? { turnTokens: runResult.turnTokens } : {}),
+      ...(runResult.contextWindow
+        ? { contextWindow: runResult.contextWindow }
+        : {}),
+      // input_tokens 是累计上下文输入（含历史消息），把它持久化到
+      // estimatedContextTokens：下一轮若 provider 不返回 usage，context
+      // chip 仍显示真实累计占用而不是回退到启动时的静态估算。
+      ...(runResult.turnTokens && runResult.turnTokens.input > 0
+        ? { estimatedContextTokens: runResult.turnTokens.input }
+        : {}),
+      ...(runResult.cachedMemoryOverlay !== undefined ? { cachedMemoryOverlay: runResult.cachedMemoryOverlay } : {}),
+      // 切换消息本轮已注入 agent 上下文（runAgentChat 已读），消费掉，
+      // 避免下轮重复注入。仅当确实发起了 agent 调用（本轮是真实 turn、
+      // 而非纯 child-run-completed 事件短路）时才清除。
+      pendingCwdNotice: undefined,
+    };
     // 同上：失败 / 中断的 turn 也要计进会话累计。
     ctx.accumulateSessionCredits(runResult.turnCredits);
     appendTurnBillingAudit({

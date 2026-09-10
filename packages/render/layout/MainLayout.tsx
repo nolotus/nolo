@@ -23,6 +23,17 @@ import RightSidebarContext, {
   RightSidebarOptions,
 } from "./RightSidebarContext";
 import MainSidebarContext from "./MainSidebarContext";
+import {
+  useRightSidebarPreferredWidth,
+  setRightSidebarPreferredWidth,
+  DEFAULT_RIGHT_SIDEBAR_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+} from "app/layout/rightSidebarPreference";
+import {
+  resolveCompanionEffectiveWidth,
+  pointerXToCompanionWidth,
+  MAIN_CONTENT_MIN_WIDTH,
+} from "./rightSidebarGeometry";
 import { useIsMobile } from "app/hooks/useIsMobile";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { shouldRenderChatSidebar } from "./mainLayoutSidebar";
@@ -57,14 +68,11 @@ if (typeof window !== "undefined") {
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 360;
-const RIGHT_SIDEBAR_DEFAULT_WIDTH = 360;
-const RIGHT_SIDEBAR_MIN_WIDTH = 280;
-const RIGHT_SIDEBAR_MAX_WIDTH = 640;
 
 interface RightSidebarState {
   isOpen: boolean;
   content: React.ReactNode | null;
-  width: number;
+  requestedWidth: number | null;
   closeOnRouteChange: boolean;
   id?: string;
 }
@@ -99,7 +107,7 @@ const MainLayout: React.FC = () => {
   const [rightSidebar, setRightSidebar] = useState<RightSidebarState>({
     isOpen: false,
     content: null,
-    width: RIGHT_SIDEBAR_DEFAULT_WIDTH,
+    requestedWidth: null,
     closeOnRouteChange: true,
     id: undefined,
   });
@@ -108,7 +116,36 @@ const MainLayout: React.FC = () => {
     id: undefined,
   });
 
+  const contentRowRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1200
+  );
+
+  const preferredWidth = useRightSidebarPreferredWidth();
+  const targetPreferred = rightSidebar.requestedWidth ?? preferredWidth;
+  const geometry = resolveCompanionEffectiveWidth({
+    preferredWidth: targetPreferred,
+    containerWidth,
+  });
+  const effectiveWidth = geometry.effectiveWidth;
+
   const isRightOpen = rightSidebar.isOpen;
+
+  // 监听 contentRow 容器尺寸变化（Navigation 折叠/展开或窗口 resize），动态适配 effectiveWidth
+  useEffect(() => {
+    const el = contentRowRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        if (w > 0) {
+          setContainerWidth(w);
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (sidebarWidth > 0) {
@@ -184,7 +221,7 @@ const MainLayout: React.FC = () => {
       setRightSidebar({
         isOpen: true,
         content,
-        width: options?.width ?? RIGHT_SIDEBAR_DEFAULT_WIDTH,
+        requestedWidth: options?.width ?? null,
         closeOnRouteChange: options?.closeOnRouteChange ?? true,
         id: options?.id,
       });
@@ -249,12 +286,22 @@ const MainLayout: React.FC = () => {
     onStart: () => setIsRightResizing(true),
     onMove: (clientX) => {
       requestAnimationFrame(() => {
-        const newWidth = Math.min(
-          RIGHT_SIDEBAR_MAX_WIDTH,
-          Math.max(RIGHT_SIDEBAR_MIN_WIDTH, window.innerWidth - clientX)
-        );
+        const rowEl = contentRowRef.current;
+        const domRect = rowEl?.getBoundingClientRect();
+        const rect =
+          domRect && domRect.width > 0 && domRect.right > 0
+            ? domRect
+            : {
+                right: typeof window !== "undefined" ? window.innerWidth : 1200,
+                width: typeof window !== "undefined" ? window.innerWidth : 1200,
+              };
+        const rawWidth = pointerXToCompanionWidth(clientX, rect);
+        const { effectiveWidth: clamped } = resolveCompanionEffectiveWidth({
+          preferredWidth: rawWidth,
+          containerWidth: rect.width,
+        });
         if (rightSidebarRef.current) {
-          rightSidebarRef.current.style.width = `${newWidth}px`;
+          rightSidebarRef.current.style.width = `${clamped}px`;
         }
       });
     },
@@ -263,12 +310,46 @@ const MainLayout: React.FC = () => {
         const finalWidth = parseInt(rightSidebarRef.current.style.width, 10);
         rightSidebarRef.current.style.width = "";
         if (!isNaN(finalWidth)) {
-          setRightSidebar((prev) => ({ ...prev, width: finalWidth }));
+          setRightSidebarPreferredWidth(finalWidth);
+          setRightSidebar((prev) => ({ ...prev, requestedWidth: null }));
         }
       }
       setIsRightResizing(false);
     },
   });
+
+  const handleRightResizeKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "Home" ||
+        e.key === "End"
+      ) {
+        e.preventDefault();
+        const step = 20;
+        let next = targetPreferred;
+        if (e.key === "ArrowLeft") {
+          // Divider 左移 -> Companion 变宽
+          next = targetPreferred + step;
+        } else if (e.key === "ArrowRight") {
+          // Divider 右移 -> Companion 变窄
+          next = targetPreferred - step;
+        } else if (e.key === "Home") {
+          next = DEFAULT_RIGHT_SIDEBAR_WIDTH;
+        } else if (e.key === "End") {
+          next = geometry.maxWidth;
+        }
+        const { effectiveWidth: finalClamped } = resolveCompanionEffectiveWidth({
+          preferredWidth: next,
+          containerWidth,
+        });
+        setRightSidebarPreferredWidth(finalClamped);
+        setRightSidebar((prev) => ({ ...prev, requestedWidth: null }));
+      }
+    },
+    [containerWidth, geometry.maxWidth, targetPreferred]
+  );
 
   // 快捷键：Ctrl/Cmd + B 切换左侧栏
   useEffect(() => {
@@ -389,7 +470,7 @@ const MainLayout: React.FC = () => {
             />
           </Suspense>
 
-          <div className="MainLayout__contentRow">
+          <div ref={contentRowRef} className="MainLayout__contentRow">
             {/* 中间主内容：这里滚动 */}
             <main className="MainLayout__main">
               <PageContentErrorBoundary>
@@ -412,7 +493,7 @@ const MainLayout: React.FC = () => {
                 isMobile
                   ? undefined
                   : {
-                    width: isRightOpen ? rightSidebar.width : 0,
+                    width: isRightOpen ? effectiveWidth : 0,
                   }
               }
               aria-hidden={!isRightOpen}
@@ -420,7 +501,15 @@ const MainLayout: React.FC = () => {
               {!isMobile && isRightOpen && (
                 <div
                   className="MainLayout__rightResizeHandle"
+                  role="separator"
+                  tabIndex={0}
+                  aria-orientation="vertical"
+                  aria-valuenow={effectiveWidth}
+                  aria-valuemin={geometry.minWidth}
+                  aria-valuemax={geometry.maxWidth}
+                  aria-label="调整侧边栏宽度"
                   onPointerDown={startRightResizing}
+                  onKeyDown={handleRightResizeKeyDown}
                 />
               )}
               {rightSidebar.content && (

@@ -1506,9 +1506,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 与 refreshGitStatus 相同的 kill switch：测试/禁用场景不 spawn git。
         if ((options.env?.NOLO_CLI_GIT_STATUS ?? process.env.NOLO_CLI_GIT_STATUS) !== "0") {
           const gitStatus = await detectGitStatusAsync(state.cwd);
-          if (gitStatus !== undefined) {
-            state = { ...state, gitStatus };
-          }
+          state = { ...state, gitStatus };
         }
         scheduleRender();
       } else if (res.action) {

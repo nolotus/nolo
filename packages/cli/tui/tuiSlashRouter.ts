@@ -381,9 +381,7 @@ export async function runSubmittedSlashLine(
     // 测试/禁用场景不 spawn git。
     if ((options.env?.NOLO_CLI_GIT_STATUS ?? process.env.NOLO_CLI_GIT_STATUS) !== "0") {
       const gitStatus = await detectGitStatusAsync(host.state.cwd);
-      if (gitStatus !== undefined) {
-        host.state = { ...host.state, gitStatus };
-      }
+      host.state = { ...host.state, gitStatus };
     }
     // 切换消息写入对话历史（role="local"，与 /switch 的消息同通道），
     // 用户可见且 agent 后续 turn 能读到（见 runAgentChat 的上下文组装）。

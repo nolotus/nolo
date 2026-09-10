@@ -529,7 +529,6 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
       return;
     }
     open(<FileDetailsPanel pageKey={pageKey} />, {
-      width: 360,
       closeOnRouteChange: true,
       id: "fileDetails",
     });

@@ -281,14 +281,19 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
           action: { type: "cwd-refresh", switchMessage },
         };
       }
-      // `~` 展开为当前用户 home；其余交给 node:path 按当前 cwd 解析
+      // 引号包裹路径剥离首尾引号；`~` 展开为当前用户 home；其余交给 node:path 按当前 cwd 解析
       // （支持相对/绝对路径）。解析结果必须存在且为目录，否则报错不改状态。
+      const unquoted =
+        (argText.startsWith('"') && argText.endsWith('"') && argText.length >= 2) ||
+        (argText.startsWith("'") && argText.endsWith("'") && argText.length >= 2)
+          ? argText.slice(1, -1)
+          : argText;
       const expanded =
-        argText === "~"
+        unquoted === "~"
           ? homedir()
-          : argText.startsWith("~/") || argText.startsWith("~\\")
-            ? resolve(homedir(), argText.slice(2))
-            : argText;
+          : unquoted.startsWith("~/") || unquoted.startsWith("~\\")
+            ? resolve(homedir(), unquoted.slice(2))
+            : unquoted;
       const target = resolve(state.cwd, expanded);
       try {
         if (!statSync(target).isDirectory()) {

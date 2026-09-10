@@ -45,7 +45,7 @@ import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
   PLATFORM_HOSTED_KIMI_PROVIDER,
 } from "./kimi";
-import { PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL } from "./platformHosted";
+import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "./platformHosted";
 import { opencodeGoModels } from "integrations/opencode/models";
 export { supportedReasoningModels } from "./reasoningModels";
 export { getCloudflareWorkersAiChatCompletionsUrl } from "./cloudflare";
@@ -309,7 +309,7 @@ export function getProviderByModelName(modelName: string): LookupProvider | unde
 /** 默认模型配置（provider + model 成对出现，避免分散硬编码） */
 export const DEFAULT_MODEL = {
   provider: PLATFORM_HOSTED_KIMI_PROVIDER as Provider,
-  name: PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
+  name: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
 } as const;
 
 /** 统一获取 ChatCompletion / Responses 等端点 */
