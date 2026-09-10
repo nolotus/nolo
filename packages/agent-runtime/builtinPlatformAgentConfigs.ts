@@ -11,12 +11,16 @@
  * Provider/model truth source: `packages/core/builtinAgentCatalog.ts`
  * (`runtimeFallback: true` 条目)。本表由目录派生，不手抄。
  *
- * Coverage（由 catalog 的 runtimeFallback 标记决定）：
- * - flash / pro / image tier：DeepSeek V4 Flash / Pro、Kimi K2.6
- * - public image agents (进站即可生成图片)：GPT Image 2 生成/编辑/连续创作、
- *   Nano Banana 2 Lite
- * - builtin nolo：平台路由默认 agent，@nolo 在记录缺失时保持可用。
- *   具体型号见 catalog 条目本身，此处不复述——复述过的地方都随换代过期了。
+ * Coverage（由 catalog 的 runtimeFallback 标记决定，2026-09-10 兜底最小化后）：
+ * - builtin nolo：平台路由默认 agent，@nolo 在记录缺失时保持可用
+ * - quick-chat 档位：DeepSeek V4 Flash Vision Exp（PLATFORM_TIER_AGENT_KEYS +
+ *   desktop QUICK_CHAT_TIER）与 DeepSeek V4 Pro / GLM 5.3 Flash
+ *   （SYSTEM_BUILTIN_TRUSTED）
+ * - Kimi K2.6 兼容：PLATFORM_TIER_AGENT_KEYS 的 image 兼容档位 key
+ * - 广场公开聊天档（Luna/GLM/Grok/Gemini）与图片助手已从兜底退场：线上记录由
+ *   历史播种持有，记录缺失时按「Agent not found」显式失败，不再合成无
+ *   prompt/tools 的裸配置。具体型号见 catalog 条目本身，此处不复述——
+ *   复述过的地方都随换代过期了。
  *
  * 注意：记录存在时**不再**完全让位给记录。builtin 组的 provider/model 由
  * 代码托管，见本文件末尾的 `applyBuiltinAgentRuntimeOverride`。

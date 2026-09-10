@@ -248,38 +248,6 @@ export {
   PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
 };
 
-export const GPT_5_6_SOL_DEF = defineAgentSeed({
-  id: deterministicId("01GPT56SOLPB", "shared-space-openai-gpt-5-6-sol"),
-  presetKey: "gpt-5.6-sol",
-  name: "GPT-5.6 Sol",
-  provider: "openai",
-  model: "gpt-5.6-sol",
-  isPublic: true,
-  platformAudit: true,
-  introduction: "OpenAI GPT-5.6 Sol 公开助手（旗舰），适合复杂推理、长链路 agent、大规模代码与多步任务。",
-  greeting: "你好，我是 GPT-5.6 Sol 公共助手。把高难度任务直接交给我即可。",
-  prompt:
-    "优先直接完成任务；面对复杂任务先理清目标、约束和关键风险，再给出可靠结果。",
-  tools: [],
-  tags: ["openai"],
-});
-
-export const GPT_5_6_TERRA_DEF = defineAgentSeed({
-  id: deterministicId("01GPT56TERPB", "shared-space-openai-gpt-5-6-terra"),
-  presetKey: "gpt-5.6-terra",
-  name: "GPT-5.6 Terra",
-  provider: "openai",
-  model: "gpt-5.6-terra",
-  isPublic: true,
-  platformAudit: true,
-  introduction: "OpenAI GPT-5.6 Terra 公开助手（均衡档），适合日常交互、agentic 编码与常规生产负载。",
-  greeting: "你好，我是 GPT-5.6 Terra。均衡档位，适合日常任务与常规编码。",
-  prompt:
-    "优先直接完成任务；面对复杂任务时保持简洁、可执行、可复核。",
-  tools: [],
-  tags: ["openai"],
-});
-
 export const GPT_5_6_LUNA_DEF = defineAgentSeed({
   id: deterministicId("01GPT56LUNPB", "shared-space-openai-gpt-5-6-luna"),
   presetKey: "gpt-5.6-luna",
@@ -292,22 +260,6 @@ export const GPT_5_6_LUNA_DEF = defineAgentSeed({
   greeting: "你好，我是 GPT-5.6 Luna。轻量档位，适合快速、低成本任务。",
   prompt:
     "优先快速完成任务；保持回答直接、结论明确。",
-  tools: [],
-  tags: ["openai"],
-});
-
-export const GPT_5_5_PRO_DEF = defineAgentSeed({
-  id: deterministicId("01GPT55PROPUB", "shared-space-openai-gpt-5-5-pro"),
-  presetKey: "gpt-5.5-pro",
-  name: "GPT-5.5 Pro",
-  provider: "openai",
-  model: "gpt-5.5-pro",
-  isPublic: true,
-  platformAudit: true,
-  introduction: "OpenAI GPT-5.5 Pro 公开助手，适合高难度推理、审阅、规划与关键决策。",
-  greeting: "你好，我是 GPT-5.5 Pro。适合复杂推理、规划、审阅和高要求任务。",
-  prompt:
-    "面对高难度任务先建立清晰判断框架，再给出结构化、可执行、可验证的结果。",
   tools: [],
   tags: ["openai"],
 });
@@ -559,10 +511,7 @@ export const NANO_BANANA_2_LITE_GENERATOR_DEF = defineAgentSeed({
 });
 
 export const PUBLIC_AGENT_DEFS = [
-  GPT_5_6_SOL_DEF,
-  GPT_5_6_TERRA_DEF,
   GPT_5_6_LUNA_DEF,
-  GPT_5_5_PRO_DEF,
   DEEPSEEK_V4_FLASH_DEF,
   DEEPSEEK_V4_PRO_DEF,
   GLM_5_3_DEF,

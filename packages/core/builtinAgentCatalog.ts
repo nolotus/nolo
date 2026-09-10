@@ -7,7 +7,7 @@
  * 派生关系（手抄全部消失）：
  * - `packages/core/builtinAgents.ts` 的 key/id 常量 → 从本目录派生
  * - `packages/agent-runtime/builtinPlatformAgentConfigs.ts` 的运行时兜底表 → 从
- *   `runtimeFallback: true` 条目派生（quick-chat 档位 + 图片档，记录缺失时合成配置）
+ *   `runtimeFallback: true` 条目派生（2026-09-10 兜底最小化后仅 nolo + quick-chat 档位 + Kimi K2.6 兼容，记录缺失时合成配置）
  * - `scripts/updatePlazaModels.ts` 的 TARGETS → 从本目录派生
  *
  * 内容字段（introduction / greeting / prompt / tools / tags / 价格）留在
@@ -43,8 +43,9 @@ export type BuiltinAgentCatalogEntry = {
    */
   group: "builtin" | "public" | "internal";
   /**
-   * true = 需要运行时兜底（quick-chat 档位 / 图片档 / @nolo 引导）。
+   * true = 需要运行时兜底（@nolo 引导 / quick-chat 档位 / Kimi K2.6 兼容）。
    * 记录在本地/远端缺失时，runtime 用目录合成配置，保证进站即用。
+   * 2026-09-10 兜底最小化：广场档与图片助手不再兜底（记录缺失时明确 404）。
    */
   runtimeFallback?: boolean;
   // 图片工作流字段（与 createSpaceAgents 的 imageWorkflow/imageConfig 对齐）
@@ -99,7 +100,11 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     provider: "nolo",
     model: "deepseek-v4-flash",
   },
-  // ── quick-chat 档位 / 图片档 public（runtimeFallback）──
+  // ── quick-chat 档位 public（图片助手已无 runtimeFallback，见下方图片档段） ──
+  // 2026-09-10 兜底最小化：runtimeFallback 只保留产品代码显式引用的条目
+  // （nolo 默认档、PLATFORM_TIER_AGENT_KEYS 的 flash/image-compat、
+  // SYSTEM_BUILTIN_TRUSTED 的 flash/pro/glm-flash）。广场档与图片助手不再
+  // 兜底——记录缺失时明确报 Agent not found，而不是合成无 prompt 的裸配置。
   {
     id: "01DSV4FLASHPB00000000JFPFD",
     group: "public",
@@ -122,7 +127,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "GLM 5.3",
     provider: "nolo",
     model: "glm-5.3",
-    runtimeFallback: true,
   },
   {
     id: "01GLMFLASHPB00000000BT20BC",
@@ -144,21 +148,24 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   // ── 广场公开聊天档（从 createSpaceAgents PUBLIC_AGENT_DEFS 收编，2026-08-19）──
   // ID 与 createSpaceAgents 的 deterministicId 结果一致；provider 按 agentSeedBuilder
   // 默认规则：显式 provider 用显式值，未写则 openai。
+  // 2026-09-10 预设收敛：GPT-5.6 Sol/Terra、GPT-5.5 Pro 从广场退场转 internal 兼容，
+  // 公开聊天档只保留 Luna + nolo 托管组 + 图片档（图片档仍在广场，但不再 runtimeFallback）。
   {
     id: "01GPT56SOLPB00000000VXMGCW",
-    group: "public",
-    name: "GPT-5.6 Sol",
+    // 已从广场/预设退场（2026-09-10）：保留 internal 兼容条目，仅为存量 agent
+    // 记录提供运行时路由；不再出现在广场与 createSpaceAgents 播种清单。
+    group: "internal",
+    name: "GPT-5.6 Sol（兼容）",
     provider: "openai",
     model: "gpt-5.6-sol",
-    runtimeFallback: true,
   },
   {
     id: "01GPT56TERPB00000001UX7RKW",
-    group: "public",
-    name: "GPT-5.6 Terra",
+    // 已从广场/预设退场（2026-09-10）：同 Sol，internal 兼容。
+    group: "internal",
+    name: "GPT-5.6 Terra（兼容）",
     provider: "openai",
     model: "gpt-5.6-terra",
-    runtimeFallback: true,
   },
   {
     id: "01GPT56LUNPB00000001VVVZHS",
@@ -166,15 +173,14 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "GPT-5.6 Luna",
     provider: "openai",
     model: "gpt-5.6-luna",
-    runtimeFallback: true,
   },
   {
     id: "01GPT55PROPUB00000000IV47M",
-    group: "public",
-    name: "GPT-5.5 Pro",
+    // 已从广场/预设退场（2026-09-10）：internal 兼容，理由同 Sol。
+    group: "internal",
+    name: "GPT-5.5 Pro（兼容）",
     provider: "openai",
     model: "gpt-5.5-pro",
-    runtimeFallback: true,
   },
   // Claude Sonnet/Opus/Fable 5 已从广场下架（2026-09-01，平台停止维护 Claude 系）：
   // 存量记录由 modelUpgradeTable 迁移到 nolo/glm-5-3-flash，兼容期请求由
@@ -188,7 +194,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Gemini 3.8 Flash",
     provider: "google",
     model: "gemini-3.8-flash",
-    runtimeFallback: true,
   },
   {
     id: "01GROK46PLAZ00000001PTJZ3K",
@@ -196,7 +201,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Grok 4.6",
     provider: "xai",
     model: "grok-4.6",
-    runtimeFallback: true,
   },
   {
     id: "01GPTIMG2GEN00000000SSEBOS",
@@ -204,7 +208,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "GPT Image 2 图片生成器",
     provider: "openai",
     model: "gpt-5.6-luna",
-    runtimeFallback: true,
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "generate",
@@ -216,7 +219,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "GPT Image 2 图片编辑器",
     provider: "openai",
     model: "gpt-5.6-luna",
-    runtimeFallback: true,
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "edit",
@@ -228,7 +230,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "GPT Image 2 连续创作助手",
     provider: "openai",
     model: "gpt-5.6-luna",
-    runtimeFallback: true,
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "continuous",
@@ -240,7 +241,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     name: "Nano Banana 2 Lite 文生图",
     provider: "google",
     model: "gemini-3.1-flash-lite-image",
-    runtimeFallback: true,
     hasImageOutput: true,
   },
 ];
@@ -254,7 +254,7 @@ export function builtinAgentCatalogEntryById(
   return CATALOG_BY_ID.get(id);
 }
 
-/** 所有需要运行时兜底的目录条目（quick-chat 档位 + 图片档 + @nolo） */
+/** 所有需要运行时兜底的目录条目（nolo + quick-chat 档位 + Kimi K2.6 兼容） */
 export function builtinRuntimeFallbackEntries(): BuiltinAgentCatalogEntry[] {
   return BUILTIN_AGENT_CATALOG.filter((e) => e.runtimeFallback === true);
 }
