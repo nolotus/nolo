@@ -215,7 +215,12 @@ export function useSidebarFluidHover({
   // The layer mounts as a Virtualizer sibling, so on the very first render
   // pass the ListBox may not be in the DOM yet — retry a few frames before
   // giving up (bounded; giving up keeps legacy :hover intact).
+  //
+  // enabled=false 完整退回 legacy :hover：不设 data-fluid-hover（否则会触发
+  // escape-hatch 抑制器把行级原生 :hover 关掉）、不挂 portal。动态切换
+  // true↔false 时 cleanup 会清 attribute 并卸载 portal，两个方向都必须正确。
   React.useEffect(() => {
+    if (!enabled) return;
     const el = containerRef.current;
     if (!el) return;
     let attempts = 0;
@@ -235,8 +240,9 @@ export function useSidebarFluidHover({
     return () => {
       if (timer !== null) window.clearTimeout(timer);
       el.removeAttribute("data-fluid-hover");
+      setMountEl(null);
     };
-  }, [containerRef]);
+  }, [containerRef, enabled]);
 
   const visible = !dragging && activeIndex !== null;
   const top = activeIndex !== null ? activeIndex * rowSize : lastTopRef.current;

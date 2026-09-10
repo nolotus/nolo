@@ -194,7 +194,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
       <SidebarFluidHoverLayer
         containerRef={listRef}
         rowSize={rowSize}
-        rowHeight={SIDEBAR_VIRTUAL_ROW_SIZE - SIDEBAR_VIRTUAL_ROW_GAP}
+        rowHeight={Math.max(0, rowSize - SIDEBAR_VIRTUAL_ROW_GAP)}
         itemCount={items.length}
       />
     </>
