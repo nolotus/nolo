@@ -53,7 +53,6 @@ export default {
         "Tell AI what to change. Best for copy, typography, color, layout, and iterative feature updates.",
       appEditor_chatMode_hint:
         "If you only want to tweak copy, spacing, colors, or a specific feature, start here.",
-      appEditor_chatMode_openAssistant: "Open Assistant",
       appEditor_switchToCode: "Switch to Code Editing",
       appEditor_backToChat: "Back to Chat Editing",
       appEditor_codeMode_title: "Code Editing",
@@ -164,7 +163,6 @@ export default {
         "直接告诉 AI 你想改什么。适合改文案、字体、颜色、布局和功能迭代。",
       appEditor_chatMode_hint:
         "如果你只是想改字体、颜色、间距、文案或某个功能，优先用这个模式。",
-      appEditor_chatMode_openAssistant: "打开右侧助手",
       appEditor_switchToCode: "切换到代码编辑",
       appEditor_backToChat: "返回对话编辑",
       appEditor_codeMode_title: "代码编辑",
@@ -275,7 +273,6 @@ export default {
         "直接告訴 AI 你想改什麼。適合修改文案、字體、顏色、版面和功能迭代。",
       appEditor_chatMode_hint:
         "如果你只是想調整字體、顏色、間距、文案或某個功能，優先用這個模式。",
-      appEditor_chatMode_openAssistant: "打開右側助手",
       appEditor_switchToCode: "切換到程式碼編輯",
       appEditor_backToChat: "返回對話編輯",
       appEditor_codeMode_title: "程式碼編輯",
@@ -389,7 +386,6 @@ export default {
         "AI に何を変えたいか伝えてください。文案、文字サイズ、色、レイアウト、機能改善に向いています。",
       appEditor_chatMode_hint:
         "文案、余白、色、特定の機能だけを変えたいなら、まずこちらを使ってください。",
-      appEditor_chatMode_openAssistant: "アシスタントを開く",
       appEditor_switchToCode: "コード編集に切り替える",
       appEditor_backToChat: "会話編集に戻る",
       appEditor_codeMode_title: "コード編集",

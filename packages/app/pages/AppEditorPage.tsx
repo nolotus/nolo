@@ -16,7 +16,6 @@ import {
 import { useAppDetail } from "app/hooks/useAppDetail";
 import {
   APP_EDIT_MODE_SEARCH_PARAM,
-  buildAppAssistantSidebarId,
   buildAppChatEditorPath,
   buildAppCodeEditorPath,
   buildAppDetailPath,
@@ -27,8 +26,9 @@ import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useToken } from "identity";
 import { selectRemoteServer } from "app/settings/settingSlice";
-import { useRightSidebar } from "render/layout/RightSidebarContext";
-import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
+import AppEditorWorkbench from "./AppEditorWorkbench";
+import ObjectAssistantPanel from "chat/dialog/ObjectAssistantPanel";
+
 import {
   setInspecting,
   setSelectedNode,
@@ -39,6 +39,8 @@ import { patch } from "database/dbSlice";
 import ContentIcon from "render/contentIcon/ContentIcon";
 import ContentIconPicker from "render/contentIcon/ContentIconPicker";
 import type { ContentIcon as ContentIconValue } from "render/contentIcon/types";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type WorkspaceMode = "chat" | "code";
 
@@ -63,14 +65,11 @@ interface DeployStatusResult {
   };
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const AppEditorPage: React.FC = () => {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const [searchParams] = useSearchParams();
-  const { open, isOpen, currentId } = useRightSidebar();
   const currentToken = useToken();
   const currentServer = useAppSelector(selectRemoteServer);
   const {
@@ -107,11 +106,6 @@ const AppEditorPage: React.FC = () => {
   );
 
   const appServerOrigin = app?.serverOrigin ?? routeServerOrigin;
-  const assistantSidebarId = routeAppKey
-    ? buildAppAssistantSidebarId(routeAppKey)
-    : undefined;
-  const isAppAssistantOpen = isOpen && assistantSidebarId === currentId;
-  const assistantAutoOpenKeyRef = useRef<string | null>(null);
 
   const isInspecting = useAppInspecting();
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -139,7 +133,7 @@ const AppEditorPage: React.FC = () => {
         if (!testAccess) throw new Error("No body");
         setCanInspect(true);
         setInspecting(true);
-        
+
         unmountInspectorRef.current = installInspector(iframeDoc, (node) => {
           setSelectedNode({ appKey: app.appKey!, node });
           setInspecting(false);
@@ -164,7 +158,6 @@ const AppEditorPage: React.FC = () => {
     };
   }, []);
 
-
   const buildEditorTarget = useCallback(
     (appKey: string, mode: WorkspaceMode) => {
       if (mode === "chat") {
@@ -186,18 +179,6 @@ const AppEditorPage: React.FC = () => {
     if (!app?.appKey || !routeAppKey || app.appKey === routeAppKey) return;
     navigate(buildEditorTarget(app.appKey, effectiveMode), { replace: true });
   }, [app?.appKey, buildEditorTarget, effectiveMode, legacyAppKey, navigate, pageKey, routeAppKey]);
-
-  useEffect(() => {
-    if (effectiveMode !== "chat" || !routeAppKey || !assistantSidebarId) return;
-    const openKey = `${routeAppKey}:${effectiveMode}`;
-    if (assistantAutoOpenKeyRef.current === openKey) return;
-    assistantAutoOpenKeyRef.current = openKey;
-    openObjectAssistantSidebar(open, {
-      kind: "app",
-      contentKey: routeAppKey,
-      sidebarId: assistantSidebarId,
-    });
-  }, [assistantSidebarId, effectiveMode, open, routeAppKey]);
 
   const sourceFiles = useMemo(() => {
     if (Array.isArray(app?.files) && app.files.length > 0) {
@@ -261,15 +242,6 @@ const AppEditorPage: React.FC = () => {
     setSaveError(null);
     setSaveMessage(null);
   }, [sourceFiles]);
-
-  const handleOpenAssistant = useCallback(() => {
-    if (!routeAppKey || !assistantSidebarId) return;
-    openObjectAssistantSidebar(open, {
-      kind: "app",
-      contentKey: routeAppKey,
-      sidebarId: assistantSidebarId,
-    });
-  }, [assistantSidebarId, open, routeAppKey]);
 
   const handleAppIconSelect = useCallback(async (nextIcon: ContentIconValue | null) => {
     if (!routeAppKey) return;
@@ -371,7 +343,7 @@ const AppEditorPage: React.FC = () => {
 
         if (statusJson.status === "failed") {
           throw new Error(
-            statusJson.error?.message ??
+            statusJson?.error?.message ??
               statusJson.summary ??
               t("appEditor_codeMode_failed", "源码保存失败，请检查代码后重试。")
           );
@@ -510,73 +482,72 @@ const AppEditorPage: React.FC = () => {
           </section>
 
           {effectiveMode === "chat" && (
-            <section className="AppEditorPage__chatMode">
-              <div className="AppEditorPage__chatToolbar">
-                <button
-                  type="button"
-                  className={`AppEditorPage__btn AppEditorPage__btn--${isInspecting ? "primary" : "secondary"}`}
-                  onClick={handleInspectToggle}
-                  disabled={!canInspect}
-                  title={canInspect ? t("appEditor_chatMode_inspect", "选择元素") : t("appEditor_chatMode_inspect_disabled", "当前预览地址跨域，暂不支持点选")}
-                >
-                  <LuMousePointerClick size={16} aria-hidden="true" />
-                  <span>{t("appEditor_chatMode_inspect", "选择元素")}</span>
-                </button>
-                {!isAppAssistantOpen && (
-                  <button
-                    type="button"
-                    className="AppEditorPage__btn AppEditorPage__btn--primary"
-                    onClick={handleOpenAssistant}
-                  >
-                    <LuBot size={16} aria-hidden="true" />
-                    <span>{t("appEditor_chatMode_openAssistant", "打开右侧助手")}</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="AppEditorPage__previewCard">
-                {previewUrl ? (
-                  <iframe
-                    key={iframeNonce}
-                    ref={iframeRef}
-                    onLoad={() => {
-                      if (isInspecting && app?.appKey) {
-                        // try to re-install if still inspecting
-                        const iframeDoc = iframeRef.current?.contentDocument;
-                        if (iframeDoc) {
-                           try {
-                             if (!iframeDoc.body) throw new Error("no body");
-                             if(unmountInspectorRef.current) {
-                                unmountInspectorRef.current();
-                             }
-                             unmountInspectorRef.current = installInspector(iframeDoc, (node) => {
-                                setSelectedNode({ appKey: app.appKey!, node });
-                                setInspecting(false);
-                                if (unmountInspectorRef.current) {
-                                  unmountInspectorRef.current();
-                                  unmountInspectorRef.current = null;
-                                }
-                             });
-                           } catch(e) {}
-                        }
-                      }
-                    }}
-                    src={
-                      iframeNonce > 0
-                        ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_r=${iframeNonce}`
-                        : previewUrl
-                    }
-                    title={app.userFriendlyName}
-                    className="AppEditorPage__frame"
-                    sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-                  />
-                ) : (
-                  <div className="AppEditorPage__status">
-                    {t("appEditor_missingUrl", "当前应用还没有可访问地址")}
+            <AppEditorWorkbench
+              primary={
+              <section className="AppEditorPage__chatMode">
+                  <div className="AppEditorPage__chatToolbar">
+                    <button
+                      type="button"
+                      className={`AppEditorPage__btn AppEditorPage__btn--${isInspecting ? "primary" : "secondary"}`}
+                      onClick={handleInspectToggle}
+                      disabled={!canInspect}
+                      title={canInspect ? t("appEditor_chatMode_inspect", "选择元素") : t("appEditor_chatMode_inspect_disabled", "当前预览地址跨域，暂不支持点选")}
+                    >
+                      <LuMousePointerClick size={16} aria-hidden="true" />
+                      <span>{t("appEditor_chatMode_inspect", "选择元素")}</span>
+                    </button>
                   </div>
-                )}
-              </div>
-            </section>
+
+                  <div className="AppEditorPage__previewCard">
+                    {previewUrl ? (
+                      <iframe
+                        key={iframeNonce}
+                        ref={iframeRef}
+                        onLoad={() => {
+                          if (isInspecting && app?.appKey) {
+                            // try to re-install if still inspecting
+                            const iframeDoc = iframeRef.current?.contentDocument;
+                            if (iframeDoc) {
+                               try {
+                                 if (!iframeDoc.body) throw new Error("no body");
+                                 if(unmountInspectorRef.current) {
+                                    unmountInspectorRef.current();
+                                 }
+                                 unmountInspectorRef.current = installInspector(iframeDoc, (node) => {
+                                    setSelectedNode({ appKey: app.appKey!, node });
+                                    setInspecting(false);
+                                    if (unmountInspectorRef.current) {
+                                      unmountInspectorRef.current();
+                                      unmountInspectorRef.current = null;
+                                    }
+                                 });
+                               } catch(e) {}
+                            }
+                          }
+                        }}
+                        src={
+                          iframeNonce > 0
+                            ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}_r=${iframeNonce}`
+                            : previewUrl
+                        }
+                        title={app.userFriendlyName}
+                        className="AppEditorPage__frame"
+                        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+                      />
+                    ) : (
+                      <div className="AppEditorPage__status">
+                        {t("appEditor_missingUrl", "当前应用还没有可访问地址")}
+                      </div>
+                    )}
+                  </div>
+              </section>
+              }
+              secondary={
+              <section className="AppEditorPage__assistantPane">
+                <ObjectAssistantPanel kind="app" contentKey={routeAppKey} />
+              </section>
+              }
+            />
           )}
 
           {effectiveMode === "code" && (

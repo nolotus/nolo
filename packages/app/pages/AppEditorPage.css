@@ -5,8 +5,74 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 18px 22px;
+  gap: 12px;
+  padding: 14px 16px 20px;
+}
+
+/* Workbench（App Surface ⇆ App Assistant）填充 Hero 以下的剩余高度；
+   分栏本身由 WorkbenchSplit 的 grid 管理，这里只提供高度与收缩约束。 */
+.AppEditorPage__workbench {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* swap 按钮：仅 hover 时显形，锚定 separator 方向（不假设 secondary 恒在右）。 */
+.AppEditorPage__workbenchSwap {
+  position: absolute;
+  top: 8px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: var(--textSecondary, #6b7280);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.AppEditorPage__workbenchSwap--secondary-end {
+  right: calc(var(--workbench-secondary-px, 0px) + 12px);
+}
+
+.AppEditorPage__workbenchSwap--secondary-start {
+  left: calc(var(--workbench-secondary-px, 0px) + 12px);
+}
+
+.AppEditorPage__workbench:hover .AppEditorPage__workbenchSwap,
+.AppEditorPage__workbenchSwap:focus-visible,
+.AppEditorPage__workbenchSwap:active {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .AppEditorPage__workbenchSwap {
+    transition: none;
+  }
+}
+
+.AppEditorPage__workbench .WorkbenchSplit {
+  flex: 1;
+  min-height: 0;
+}
+
+.AppEditorPage__workbenchPrimary,
+.AppEditorPage__workbenchSecondary {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.AppEditorPage__assistantPane {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .AppEditorPage__hero,
@@ -169,7 +235,7 @@
 .AppEditorPage__frame {
   width: 100%;
   flex: 1;
-  min-height: 50vh;
+  min-height: 320px;
   border: none;
   display: block;
   background: #fff;
