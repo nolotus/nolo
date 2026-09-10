@@ -49,6 +49,10 @@ export const TOOL_PACKS = {
     "execShell",
     "launchProcess",
     "listProcesses",
+    "taskWait",
+    "taskLogs",
+    "taskStop",
+    "tasks",
   ],
   // 表格读写。唯一真相源——app-builder 能力包与 table object skill 都从这里取，
   // 以前两边各抄一份，改一个忘另一个就会静默不同步。
