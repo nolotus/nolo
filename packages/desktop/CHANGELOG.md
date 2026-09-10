@@ -1,4 +1,13 @@
 
+## 0.60.0-alpha.3
+
+## 0.60.0-alpha.3 (2026-09-10)
+
+### Bug Fixes
+
+* **billing:** sync DeepSeek Flash peak/off-peak prices with 2026-09-10 official cut ([b988331](https://github.com/nolotus/bun-nolo/commit/b98833128999c60d7051c93ea82cc561b540ac70))
+
+
 ## 0.60.0-alpha.2
 
 ## 0.60.0-alpha.2 (2026-09-10)

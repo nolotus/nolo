@@ -282,16 +282,17 @@ const createPlatformHostedGeminiImageModel = ({
  * 官方价为人民币（¥/1M tokens），经 toCnyCredits 加价后计入积分。
  * 括号内为官方原价。
  */
+// 官方 2026-09-10 12:00 起降价：高峰 ¥2/¥0.04/¥8，空闲 ¥1/¥0.02/¥4。
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE = {
-  input: toCnyCredits(3), // ¥3
-  inputCacheHit: toCnyCredits(0.1), // ¥0.1
-  output: toCnyCredits(9), // ¥9
+  input: toCnyCredits(2), // ¥2
+  inputCacheHit: toCnyCredits(0.04), // ¥0.04
+  output: toCnyCredits(8), // ¥8
 } as const;
 
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE = {
-  input: toCnyCredits(1.5), // ¥1.5
-  inputCacheHit: toCnyCredits(0.05), // ¥0.05
-  output: toCnyCredits(4.5), // ¥4.5
+  input: toCnyCredits(1), // ¥1
+  inputCacheHit: toCnyCredits(0.02), // ¥0.02
+  output: toCnyCredits(4), // ¥4
 } as const;
 
 export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE = {
