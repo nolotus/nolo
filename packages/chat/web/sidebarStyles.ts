@@ -197,6 +197,10 @@ export const sidebarStyles = stylex.create({
   },
   scroller: {
     display: "block",
+    // Stacking context for the fluid-hover highlight layer (rendered with
+    // z-index:-1 inside this scroller, below the RAC row slots).
+    position: "relative",
+    zIndex: 0,
     padding: 0,
     margin: 0,
     overflow: "auto",

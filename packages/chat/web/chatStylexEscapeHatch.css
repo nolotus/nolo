@@ -875,3 +875,26 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   border-radius: 999px;
   min-width: 0;
 }
+
+/* 白名单保留：跨组件 fluid hover 抑制器（StyleX 无法表达
+ * [data-fluid-hover] 祖先 + :hover + 持久态 data 属性排除的组合选择器）。
+ *
+ * SidebarVirtualizedList 接入共享 fluid hover 高亮层后，普通行的 transient
+ * :hover 背景改由列表级 highlight 提供（z-index:-1，画在行背景之下），行级
+ * :hover 底色必须关闭以免叠加。只关背景色：SidebarItemRow 的 isHovered
+ * （drag handle / 行内操作显隐）不受影响；持久态（active / selected / open /
+ * dragging）行被 :not(...) 排除，其背景照常。移除 fluid hover 能力
+ * （hook 不再设置 data-fluid-hover）即自动恢复原生 :hover。 */
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"]:hover:not([data-active]):not([data-selected]):not([data-open]):not([data-dragging]) {
+  background-color: transparent;
+}
+
+/* 持久态行在指针悬停时保持自己的底色（修掉旧级联里 .item:hover 覆盖
+ * .active/.selected 的老问题；仅在 fluid hover 列表内生效）。 */
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-active]:hover {
+  background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+[data-fluid-hover="on"] [data-hook~="create-space-sidebar-row"][data-selected]:hover {
+  background-color: var(--primaryGhost);
+}

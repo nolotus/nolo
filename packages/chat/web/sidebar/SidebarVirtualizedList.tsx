@@ -21,6 +21,7 @@ import {
   Virtualizer,
   ListLayout,
 } from "react-aria-components/Virtualizer";
+import { SidebarFluidHoverLayer } from "./SidebarFluidHoverLayer";
 
 /**
  * Fixed row pitch used by All View recent + category lists (px).
@@ -28,6 +29,13 @@ import {
  * 列表滚过分组边界时行距不会跳。
  */
 export const SIDEBAR_VIRTUAL_ROW_SIZE = 36;
+
+/**
+ * Visual row height inside a virtual slot (px). Slot = visual row + gap:
+ * 32px row（--sidebar-row-height）+ 4px gap = 36px pitch. The fluid-hover
+ * highlight uses this to match the visual row, not the full slot.
+ */
+export const SIDEBAR_VIRTUAL_ROW_GAP = 4;
 
 /**
  * Estimate how many row DOM nodes RAC Virtualizer would keep mounted for a
@@ -131,6 +139,7 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
     el.scrollTop = Math.max(0, scrollToIndex * rowSize + rowSize / 2 - el.clientHeight / 2);
   }, [scrollToIndex, rowSize, items.length]);
   return (
+    <>
     <Virtualizer
       layout={ListLayout}
       layoutOptions={{ rowSize, gap: 0, padding: 0 }}
@@ -177,6 +186,17 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
           </ListBoxItem>
         )}
       </ListBox>
-    </Virtualizer>
+      </Virtualizer>
+      {/* List-level continuous hover (shared highlight layer instead of
+          per-row :hover). Leaf sibling of the Virtualizer: its hover state
+          updates never re-render the Virtualizer or rows. O(1) pointer math
+          via the fixed rowSize contract; see SidebarFluidHoverLayer. */}
+      <SidebarFluidHoverLayer
+        containerRef={listRef}
+        rowSize={rowSize}
+        rowHeight={SIDEBAR_VIRTUAL_ROW_SIZE - SIDEBAR_VIRTUAL_ROW_GAP}
+        itemCount={items.length}
+      />
+    </>
   );
 }
