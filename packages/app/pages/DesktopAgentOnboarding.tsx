@@ -13,6 +13,7 @@ export type DesktopOnboardingDismissReason =
   | "skip"
   | "login"
   | "signup"
+  | "path-cli"
   | "path-byo"
   | "path-membership";
 
@@ -130,12 +131,36 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
           </li>
           <li>
             <Link
+              to={`${LOCAL_CREATE}?path=membership&access=cli`}
+              className="desktop-agent-onboarding__option"
+              data-testid="desktop-onboarding-path-cli"
+              onClick={() => dismiss("path-cli")}
+            >
+              <span className="desktop-agent-onboarding__option-num">3</span>
+              <span className="desktop-agent-onboarding__option-body">
+                <span className="desktop-agent-onboarding__option-title">
+                  {t(
+                    "localFirst.onboarding.path.cli",
+                    "本机 CLI 已登录",
+                  )}
+                </span>
+                <span className="desktop-agent-onboarding__option-hint">
+                  {t(
+                    "localFirst.onboarding.path.cliHint",
+                    "Claude Code、Codex、Grok CLI 等，检测后直接用",
+                  )}
+                </span>
+              </span>
+            </Link>
+          </li>
+          <li>
+            <Link
               to={`${LOCAL_CREATE}?path=membership`}
               className="desktop-agent-onboarding__option"
               data-testid="desktop-onboarding-path-membership"
               onClick={() => dismiss("path-membership")}
             >
-              <span className="desktop-agent-onboarding__option-num">3</span>
+              <span className="desktop-agent-onboarding__option-num">4</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
                   {t(
@@ -159,7 +184,7 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
               data-testid="desktop-onboarding-path-byo"
               onClick={() => dismiss("path-byo")}
             >
-              <span className="desktop-agent-onboarding__option-num">4</span>
+              <span className="desktop-agent-onboarding__option-num">5</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
                   {t(

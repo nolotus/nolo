@@ -1,4 +1,17 @@
 
+## 0.59.0-alpha.1
+
+## 0.59.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **onboarding:** add local CLI option to desktop first-run guide ([d6e6856](https://github.com/nolotus/bun-nolo/commit/d6e6856bb60287f69172b737a2c12fd2817480de))
+
+### Bug Fixes
+
+* **layout:** LocalPreviewSplit must fill MainLayout__main height ([df6a2ad](https://github.com/nolotus/bun-nolo/commit/df6a2ad062c0feab22e79cc1021c37e5ba79cd9d))
+
+
 ## 0.58.0-alpha.2
 
 ## 0.58.0-alpha.2 (2026-09-10)

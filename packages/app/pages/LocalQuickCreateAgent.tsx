@@ -60,6 +60,12 @@ function parsePath(raw: string | null): LocalCreatePath | null {
   return null;
 }
 
+/** 深链预选会员接入方式（onboarding CLI 直达用）；仅开放 cli——oauth/api_key
+ *  语义上仍需用户手动选择（oauth 尚未开放完成授权），非法值静默忽略。 */
+function parseMembershipAccess(raw: string | null): MembershipAccess | null {
+  return raw === "cli" ? "cli" : null;
+}
+
 function filterByPath(
   path: LocalCreatePath,
   membershipAccess: MembershipAccess | null,
@@ -138,10 +144,11 @@ const LocalQuickCreateAgent = () => {
   const ownerUserId = asOptionalTrimmedString(accountUserId) ?? "local";
 
   const initialPath = parsePath(searchParams.get("path"));
+  const initialAccess = parseMembershipAccess(searchParams.get("access"));
 
   const [path, setPath] = useState<LocalCreatePath | null>(initialPath);
   const [membershipAccess, setMembershipAccess] =
-    useState<MembershipAccess | null>(null);
+    useState<MembershipAccess | null>(initialAccess);
   const [sourceKey, setSourceKey] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");

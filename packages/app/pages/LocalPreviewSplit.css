@@ -1,6 +1,14 @@
 /* app/pages/LocalPreviewSplit.css — 对话页分栏的表面细节。
    水平空间分配、resize、placement 交换都由 WorkbenchSplit 负责；
-   这里只剩打开态的输入框高度和 swap 按钮（仅 preview 打开时渲染）。 */
+   这里只剩容器高度、打开态的输入框高度和 swap 按钮（仅 preview 打开时渲染）。 */
+
+/* 占满 MainLayout__main（flex column）的可用高度——旧版内联样式有
+   width/height: 100%，迁移时遗漏导致对话列塌缩到内容高度。 */
+.LocalPreviewSplit {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
 
 /* 对话列变窄之后，输入框按默认高度只剩一行多，打字很局促，给它更高的
    起始高度和上限。作用域限定在分栏打开时（--open 作用域与旧行为一致），
