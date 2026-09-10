@@ -67,6 +67,7 @@ export const useSendPermission = (userBalance: number = 0) => {
     currentUserId: currentUserId ?? null,
     userBalance,
     serverPrices,
+    isDesktop: typeof process !== "undefined" ? process.env?.NOLO_DESKTOP === "1" : false,
   });
 
   const messages = useAppSelector((state) =>

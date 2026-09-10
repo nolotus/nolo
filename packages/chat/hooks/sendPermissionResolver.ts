@@ -24,6 +24,7 @@ export function resolveSendPermissionState(input: {
   currentUserId: string | null;
   userBalance: number;
   serverPrices: ServerPrices;
+  isDesktop?: boolean;
 }): {
   isLoading: boolean;
   sendPermission: SendPermissionCheck;
@@ -37,6 +38,7 @@ export function resolveSendPermissionState(input: {
     currentUserId,
     userBalance,
     serverPrices,
+    isDesktop,
   } = input;
 
   if (currentDialogKey && !hasDialogConfig) {
@@ -63,7 +65,7 @@ export function resolveSendPermissionState(input: {
   // auto 模式对话由调用方用 execution profile 补齐配置，走到这里就是真的没配置：
   // 不再按平台放行，宁可显式报错也不要放出一次注定失败的发送。
   if (!agentConfig) {
-    if (process.env.NOLO_DESKTOP === "1") {
+    if (isDesktop) {
       return {
         isLoading: false,
         sendPermission: {

@@ -1,4 +1,13 @@
 
+## 0.57.0-alpha.2
+
+## 0.57.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **webview:** 消除 stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e61815b93564220d4bbdf837686ae644a)), closes [#root](https://github.com/nolotus/bun-nolo/issues/root)
+
+
 ## 0.57.0-alpha.1
 
 ## 0.57.0-alpha.1 (2026-09-10)

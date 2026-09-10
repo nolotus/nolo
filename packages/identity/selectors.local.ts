@@ -5,7 +5,10 @@ export type { IdentityUser, User };
 
 // Local implementation of identity selectors
 // Always returns a fixed single-user setup
-const LOCAL_USER_ID = process.env.NOLO_LOCAL_USER_ID || process.env.NOLO_USER_ID || "local";
+const LOCAL_USER_ID =
+  (typeof process !== "undefined" ? process.env?.NOLO_LOCAL_USER_ID : undefined) ||
+  (typeof process !== "undefined" ? process.env?.NOLO_USER_ID : undefined) ||
+  "local";
 const LOCAL_USER: IdentityUser = {
   userId: LOCAL_USER_ID,
   username: "Local User",

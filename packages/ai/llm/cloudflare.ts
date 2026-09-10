@@ -8,7 +8,7 @@ import type { Model } from "./types";
 export const CF_GLM_5_2_MODEL = "@cf/zai-org/glm-5.2";
 
 export const getCloudflareWorkersAiChatCompletionsUrl = (
-  accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
+  accountId = (typeof process !== "undefined" ? process.env?.CLOUDFLARE_ACCOUNT_ID : undefined)?.trim()
 ): string => {
   if (!accountId) {
     throw new Error(

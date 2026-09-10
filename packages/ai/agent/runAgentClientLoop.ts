@@ -152,7 +152,7 @@ export async function runAgentClientLoop(
         agentKey,
       });
       const toolExecutionMs = Date.now() - toolStartTime;
-      if (process.env.NOLO_CACHE_OPT_DEBUG) {
+      if (typeof process !== "undefined" ? process.env?.NOLO_CACHE_OPT_DEBUG : false) {
         console.log(`[cache-opt] toolExecutionMs=${toolExecutionMs}`);
       }
 

@@ -3,7 +3,9 @@ import type { IdentitySnapshot, IdentityUser, User } from "./types";
 export type { IdentitySnapshot, IdentityUser, User };
 
 const LOCAL_USER_ID =
-  process.env.NOLO_LOCAL_USER_ID || process.env.NOLO_USER_ID || "local";
+  (typeof process !== "undefined" ? process.env?.NOLO_LOCAL_USER_ID : undefined) ||
+  (typeof process !== "undefined" ? process.env?.NOLO_USER_ID : undefined) ||
+  "local";
 const LOCAL_USER: IdentityUser = {
   userId: LOCAL_USER_ID,
   username: "Local User",
