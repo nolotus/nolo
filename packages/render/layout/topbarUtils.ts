@@ -17,7 +17,7 @@ export interface TopBarProps {
   isSidebarOpen?: boolean;
 }
 
-export const getSideChatLabels = (
+export const getObjectAssistantLabels = (
   t: (key: string, fallback?: string) => string,
   type: ContentKeyType
 ) => {
@@ -54,6 +54,8 @@ export const getSideChatLabels = (
       };
   }
 };
+
+export const getSideChatLabels = getObjectAssistantLabels;
 
 /** 判断是否 Mac，用于快捷键提示 */
 export const useIsMac = (): boolean =>

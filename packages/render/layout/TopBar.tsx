@@ -500,24 +500,24 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
 
         {/* 右侧 */}
         <div className="topbar__section topbar__section--right">
-          {s.showSideChatButton && (
+          {s.showObjectAssistantAction && (
             <div className="topbar__action-slot">
               <Tooltip
                 content={
-                  s.isRightChatOpen
-                    ? s.sideChatLabels.hide
-                    : s.sideChatLabels.open
+                  s.isObjectAssistantOpen
+                    ? s.objectAssistantLabels.hide
+                    : s.objectAssistantLabels.open
                 }
                 placement="bottom"
               >
                 <button
                   type="button"
-                  className={`topbar__button topbar__button--sidechat ${s.isRightChatOpen ? "is-active" : ""}`}
-                  onClick={s.handleTogglePageAssistant}
+                  className={`topbar__button topbar__button--sidechat ${s.isObjectAssistantOpen ? "is-active" : ""}`}
+                  onClick={s.handleToggleObjectAssistant}
                   aria-label={
-                    s.isRightChatOpen
-                      ? s.sideChatLabels.hide
-                      : s.sideChatLabels.open
+                    s.isObjectAssistantOpen
+                      ? s.objectAssistantLabels.hide
+                      : s.objectAssistantLabels.open
                   }
                 >
                   <LuMessageCircle size={16} aria-hidden="true" />

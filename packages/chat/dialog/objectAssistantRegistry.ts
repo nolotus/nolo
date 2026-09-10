@@ -11,6 +11,35 @@ import { PLATFORM_HOSTED_KIMI_PROVIDER } from "ai/llm/kimi";
 export type ObjectAssistantKind = "page" | "table" | "app" | "image" | "file";
 export type BuiltinObjectAssistantKind = Exclude<ObjectAssistantKind, "app">;
 
+/**
+ * 纯解析器：根据 contentKeyType 解析对应的 ObjectAssistantKind。
+ * 唯一的对象助手能力真值映射：
+ * app   -> app
+ * page  -> page
+ * meta  -> table
+ * image -> image
+ * file  -> file
+ * 其余   -> null
+ */
+export const resolveObjectAssistantKind = (
+  contentKeyType?: string | null,
+): ObjectAssistantKind | null => {
+  switch (contentKeyType) {
+    case "app":
+      return "app";
+    case "page":
+      return "page";
+    case "meta":
+      return "table";
+    case "image":
+      return "image";
+    case "file":
+      return "file";
+    default:
+      return null;
+  }
+};
+
 /** ObjectAssistantKind → 对应的 skill kind（page→doc, 其余同名）。 */
 export const OBJECT_ASSISTANT_TO_SKILL: Record<BuiltinObjectAssistantKind, BuiltinObjectSkillKind> = {
   page: "doc",

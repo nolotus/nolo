@@ -37,6 +37,7 @@ import { useRightSidebar } from "./RightSidebarContext";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import {
+  getObjectAssistantLabels,
   getSideChatLabels,
   useIsMac,
 } from "./topbarUtils";
@@ -49,6 +50,7 @@ import { readAppServerOrigin } from "app/constants/appEditor";
 import {
   buildObjectAssistantSidebarId,
   isObjectAssistantSidebarId,
+  resolveObjectAssistantKind,
 } from "chat/dialog/objectAssistantRegistry";
 
 import { selectDeleteShortcut } from "app/settings/settingSlice";
@@ -189,9 +191,9 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
   const showFileDeleteButton = showEdit && isFileContent;
   const showAgentDeleteButton =
     showEdit && contentKeyType === "agent";
-  const showSideChatButton = ["app", "page", "meta", "image", "file"].includes(
-    contentKeyType,
-  );
+  const objectAssistantKind = resolveObjectAssistantKind(contentKeyType);
+  const showObjectAssistantAction = objectAssistantKind !== null;
+  const showSideChatButton = showObjectAssistantAction;
   const showShareButton =
     isLoggedIn &&
     ((contentKeyType === "page" && !!pageEntity) ||
@@ -207,11 +209,12 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
       contentKeyType === "dialog") &&
     !!pageKey;
 
-  const sideChatLabels = useMemo(
+  const objectAssistantLabels = useMemo(
     () =>
-      getSideChatLabels((key, fallback) => t(key, fallback as string), contentKeyType),
+      getObjectAssistantLabels((key, fallback) => t(key, fallback as string), contentKeyType),
     [contentKeyType, t],
   );
+  const sideChatLabels = objectAssistantLabels;
 
   const {
     isFavorited: isAgentFavorited,
@@ -235,10 +238,11 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
   const appAssistantId = routeAppKey
     ? buildAppAssistantSidebarId(routeAppKey)
     : null;
-  const isRightChatOpen =
+  const isObjectAssistantOpen =
     isOpen &&
     (isObjectAssistantSidebarId(currentId) ||
       (!!appAssistantId && currentId === appAssistantId));
+  const isRightChatOpen = isObjectAssistantOpen;
   const isFileDetailsOpen = isOpen && currentId === "fileDetails";
 
   useClickOutside(mobileOverflowRef as any, (event) => {
@@ -504,32 +508,24 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     ],
   );
 
-  const handleTogglePageAssistant = useCallback(() => {
-    const objectKind =
-      contentKeyType === "app"
-        ? "app"
-        : contentKeyType === "meta"
-          ? "table"
-          : contentKeyType === "page" ||
-              contentKeyType === "image" ||
-              contentKeyType === "file"
-            ? contentKeyType
-            : null;
-    const objectKey = objectKind === "app" ? routeAppKey : pageKey;
-    if (!objectKind || !objectKey) return;
-    if (isRightChatOpen) {
+  const handleToggleObjectAssistant = useCallback(() => {
+    if (!objectAssistantKind) return;
+    const objectKey = objectAssistantKind === "app" ? routeAppKey : pageKey;
+    if (!objectKey) return;
+    if (isObjectAssistantOpen) {
       close();
       return;
     }
     openObjectAssistantSidebar(open, {
-      kind: objectKind,
+      kind: objectAssistantKind,
       contentKey: objectKey,
       sidebarId:
-        objectKind === "app"
+        objectAssistantKind === "app"
           ? buildAppAssistantSidebarId(objectKey)
-          : buildObjectAssistantSidebarId(objectKind, objectKey),
+          : buildObjectAssistantSidebarId(objectAssistantKind, objectKey),
     });
-  }, [close, contentKeyType, isRightChatOpen, open, pageKey, routeAppKey]);
+  }, [close, isObjectAssistantOpen, objectAssistantKind, open, pageKey, routeAppKey]);
+  const handleTogglePageAssistant = handleToggleObjectAssistant;
 
   const handleToggleFileDetails = useCallback(() => {
     if (!pageKey || !isFileContent) return;
@@ -684,13 +680,17 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     showMetaDeleteButton,
     showFileDeleteButton,
     showAgentDeleteButton,
+    objectAssistantKind,
+    showObjectAssistantAction,
     showSideChatButton,
     showAgentFavoriteButton,
     showContentFavoriteButton,
     showFavoriteButton,
     showShareButton,
     isFileContent,
+    objectAssistantLabels,
     sideChatLabels,
+    isObjectAssistantOpen,
     isRightChatOpen,
     isAgentFavorited,
     toggleAgentFavorite,
@@ -711,6 +711,7 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     handleToggleEdit,
     handleSave,
     handleShare,
+    handleToggleObjectAssistant,
     handleTogglePageAssistant,
     handleToggleFileDetails,
     handleOpenDeleteConfirm,
