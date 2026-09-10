@@ -41,6 +41,10 @@ const AboutPage = lazy(() => import("app/pages/AboutPage"));
 const ContactPage = lazy(() => import("app/pages/ContactPage"));
 // Dialog and other content keys: keep dynamic so space/routes cannot force DialogPage into the shell graph.
 const PageLoader = lazy(() => import("render/page/PageLoader"));
+const BrowserPage = lazy(() => import("app/pages/browser-workbench/BrowserPage"));
+const BrowserFixturePage = lazy(
+  () => import("app/pages/browser-workbench/BrowserFixturePage"),
+);
 const AgentEmailE2EPage = cloudLazy("app/email/AgentEmailE2EPage", () => null);
 const AgentInboxPage = lazy(() => import("ai/agent/web/AgentInboxPage"));
 const SpaceInvite = cloudLazy("create/space/pages/SpaceInvite", () => null);
@@ -111,6 +115,11 @@ const commonRoutes = [
 
 export const routes = () => [
   {
+    // iframe fixture 必须裸渲染，不能套 MainLayout shell，否则 iframe 内会出现整个 app。
+    path: "/dev/browser-fixture",
+    element: withSuspense(<BrowserFixturePage />, "Browser Fixture"),
+  },
+  {
     path: "/",
     element: <MainLayout />,
     children: [
@@ -179,6 +188,10 @@ export const routes = () => [
       {
         path: "dev/email-e2e",
         element: withSuspense(<AgentEmailE2EPage />, "Agent Email E2E"),
+      },
+      {
+        path: "dev/browser-workbench",
+        element: withSuspense(<BrowserPage />, "Browser Workbench"),
       },
     ],
   },

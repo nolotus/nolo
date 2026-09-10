@@ -1,4 +1,13 @@
 
+## 0.65.0-alpha.1
+
+## 0.65.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **browser:** add minimal browser workbench ([8c64326](https://github.com/nolotus/bun-nolo/commit/8c64326d484beb6e8209193ba4b2cabad36710e7))
+
+
 ## 0.64.0-alpha.2
 
 ## 0.64.0-alpha.2 (2026-09-10)
