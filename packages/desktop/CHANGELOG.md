@@ -1,4 +1,17 @@
 
+## 0.61.0-alpha.1
+
+## 0.61.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add responsive workbench presentation ([54b5628](https://github.com/nolotus/bun-nolo/commit/54b562800bfd937592361be4fb31ce68ccb21c99))
+
+### Bug Fixes
+
+* **layout:** normalize workbench active surface control ([39453dc](https://github.com/nolotus/bun-nolo/commit/39453dc4f5e32506c72c09bcac241de6d0805256))
+
+
 ## 0.60.0-alpha.4
 
 ## 0.60.0-alpha.4 (2026-09-10)

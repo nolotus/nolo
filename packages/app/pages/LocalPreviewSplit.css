@@ -52,6 +52,11 @@
   opacity: 1;
 }
 
+.LocalPreviewSplit:has(.WorkbenchSplit--narrow) .LocalPreviewSplit__swap,
+.LocalPreviewSplit .WorkbenchSplit--narrow ~ .LocalPreviewSplit__swap {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .LocalPreviewSplit__swap {
     transition: none;

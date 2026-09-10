@@ -50,6 +50,11 @@
   opacity: 1;
 }
 
+.AppEditorPage__workbench:has(.WorkbenchSplit--narrow) .AppEditorPage__workbenchSwap,
+.AppEditorPage__workbench .WorkbenchSplit--narrow ~ .AppEditorPage__workbenchSwap {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .AppEditorPage__workbenchSwap {
     transition: none;

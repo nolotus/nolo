@@ -46,6 +46,8 @@ const AppEditorWorkbench: React.FC<AppEditorWorkbenchProps> = ({ primary, second
         primaryMinSize={APP_SURFACE_MIN_SIZE}
         secondaryMinSize={APP_ASSISTANT_MIN_SIZE}
         onSecondaryFractionChange={handleFractionChange}
+        primaryLabel="应用预览"
+        secondaryLabel="应用助手"
       />
       <button
         type="button"

@@ -9,6 +9,46 @@
   min-height: 0;
 }
 
+.WorkbenchSplit--narrow {
+  display: flex;
+  flex-direction: column;
+}
+
+.WorkbenchSplit__switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--backgroundSecondary, #f4f4f5);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.WorkbenchSplit__switch-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--textSecondary, #71717a);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.WorkbenchSplit__switch-btn:hover {
+  color: var(--text, #18181b);
+  background: var(--backgroundHover, #e4e4e7);
+}
+
+.WorkbenchSplit__switch-btn.is-active {
+  color: var(--text, #18181b);
+  background: var(--surface, #ffffff);
+  border-color: var(--border, #e5e7eb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
 .WorkbenchSplit--resizing {
   transition: none;
 }
@@ -19,6 +59,16 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.WorkbenchSplit--narrow .WorkbenchSplit__surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.WorkbenchSplit--narrow .WorkbenchSplit__surface.is-hidden {
+  display: none !important;
 }
 
 .WorkbenchSplit__separator {

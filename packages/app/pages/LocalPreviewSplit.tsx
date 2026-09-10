@@ -26,6 +26,15 @@ const PREVIEW_MIN_SIZE = 320;
 export default function LocalPreviewSplit({ children }: { children: React.ReactNode }) {
   const previewOpen = useLocalPreviewOpen();
   const preference = useWorkbenchPreference();
+  const [activeSurface, setActiveSurface] = React.useState<"primary" | "secondary">("primary");
+  const prevPreviewOpenRef = React.useRef(previewOpen);
+
+  React.useEffect(() => {
+    if (!prevPreviewOpenRef.current && previewOpen) {
+      setActiveSurface("secondary");
+    }
+    prevPreviewOpenRef.current = previewOpen;
+  }, [previewOpen]);
 
   const handleFractionChange = useCallback((fraction: number) => {
     setWorkbenchSecondaryFraction(fraction);
@@ -58,6 +67,10 @@ export default function LocalPreviewSplit({ children }: { children: React.ReactN
         primaryMinSize={CHAT_MIN_SIZE}
         secondaryMinSize={PREVIEW_MIN_SIZE}
         onSecondaryFractionChange={handleFractionChange}
+        primaryLabel="对话"
+        secondaryLabel="预览"
+        activeSurface={activeSurface}
+        onActiveSurfaceChange={setActiveSurface}
       />
       {previewOpen ? (
         <button
