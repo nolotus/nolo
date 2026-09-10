@@ -1,4 +1,13 @@
 
+## 0.64.0-alpha.1
+
+## 0.64.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add companion placement preference ([3ab7b23](https://github.com/nolotus/bun-nolo/commit/3ab7b2340a7ca660e3a554a10a84d1489db80e19))
+
+
 ## 0.63.0-alpha.1
 
 ## 0.63.0-alpha.1 (2026-09-10)

@@ -3,6 +3,7 @@ import {
   DEFAULT_RIGHT_SIDEBAR_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
 } from "app/layout/rightSidebarPreference";
+import type { CompanionPlacement } from "app/layout/companionPlacementPreference";
 
 export const MAIN_CONTENT_MIN_WIDTH = 320;
 
@@ -55,13 +56,51 @@ export const resolveCompanionEffectiveWidth = (
   };
 };
 
+export interface PointerXToCompanionWidthInput {
+  clientX: number;
+  containerRect: { left: number; right: number };
+  placement?: CompanionPlacement;
+}
+
 /**
- * 纯坐标解析函数：根据 PointerEvent clientX 和容器 bounding rect 计算右侧 Companion 宽度。
+ * 纯坐标解析函数：根据 PointerEvent clientX 和容器 bounding rect 计算 Companion 宽度。
+ * - placement === "end": right - clientX (右边缘向左测距)
+ * - placement === "start": clientX - left (左边缘向右测距)
  * 不依赖 window.innerWidth，确保在 Navigation 折叠/不同容器内坐标计算准确。
  */
 export const pointerXToCompanionWidth = (
-  clientX: number,
-  containerRect: { right: number; width: number }
+  input: PointerXToCompanionWidthInput
 ): number => {
+  const { clientX, containerRect, placement = "end" } = input;
+  if (placement === "start") {
+    return Math.round(clientX - containerRect.left);
+  }
   return Math.round(containerRect.right - clientX);
+};
+
+export interface CompanionKeyboardDeltaInput {
+  key: string;
+  placement?: CompanionPlacement;
+}
+
+export const COMPANION_KEYBOARD_RESIZE_STEP = 20;
+
+/**
+ * 键盘方向调整增量计算纯函数：
+ * - end placement (面板在右): ArrowLeft 变宽 (+step), ArrowRight 变窄 (-step)
+ * - start placement (面板在左): ArrowLeft 变窄 (-step), ArrowRight 变宽 (+step)
+ * 返回 null 表示非方向键。
+ */
+export const resolveCompanionKeyboardDelta = (
+  input: CompanionKeyboardDeltaInput
+): number | null => {
+  const { key, placement = "end" } = input;
+  const step = COMPANION_KEYBOARD_RESIZE_STEP;
+  if (key === "ArrowLeft") {
+    return placement === "start" ? -step : step;
+  }
+  if (key === "ArrowRight") {
+    return placement === "start" ? step : -step;
+  }
+  return null;
 };

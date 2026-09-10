@@ -5,6 +5,7 @@ import { DarkModeSwitch } from "app/theme/web/DarkModeSwitch";
 import { DensitySwitch } from "app/theme/web/DensitySwitch";
 import { FontPresetPicker } from "app/theme/web/FontPresetPicker";
 import { NavigationPlacementSwitch } from "./NavigationPlacementSwitch";
+import { CompanionPlacementSwitch } from "./CompanionPlacementSwitch";
 
 const SettingSection: React.FC<{
   title: string;
@@ -58,6 +59,16 @@ const Appearance: React.FC = () => {
           )}
         >
           <NavigationPlacementSwitch />
+        </SettingSection>
+
+        <SettingSection
+          title={t("settings.appearance.companionPlacement.title", "伴随面板位置")}
+          description={t(
+            "settings.appearance.companionPlacement.description",
+            "选择桌面端伴随面板位于左侧或右侧"
+          )}
+        >
+          <CompanionPlacementSwitch />
         </SettingSection>
 
         <SettingSection

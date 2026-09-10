@@ -30,9 +30,11 @@ import {
   RIGHT_SIDEBAR_MIN_WIDTH,
 } from "app/layout/rightSidebarPreference";
 import { useNavigationPlacement } from "app/layout/navigationPlacementPreference";
+import { useCompanionPlacement } from "app/layout/companionPlacementPreference";
 import {
   resolveCompanionEffectiveWidth,
   pointerXToCompanionWidth,
+  resolveCompanionKeyboardDelta,
   MAIN_CONTENT_MIN_WIDTH,
 } from "./rightSidebarGeometry";
 import { pointerXToNavigationWidth } from "./navigationGeometry";
@@ -126,6 +128,7 @@ const MainLayout: React.FC = () => {
 
   const preferredWidth = useRightSidebarPreferredWidth();
   const navigationPlacement = useNavigationPlacement();
+  const companionPlacement = useCompanionPlacement();
   const targetPreferred = rightSidebar.requestedWidth ?? preferredWidth;
   const geometry = resolveCompanionEffectiveWidth({
     preferredWidth: targetPreferred,
@@ -311,10 +314,16 @@ const MainLayout: React.FC = () => {
           domRect && domRect.width > 0 && domRect.right > 0
             ? domRect
             : {
+                // 兜底与 Navigation 侧一致：以视口为容器，left=0 保证 start placement 不静默错位
+                left: 0,
                 right: typeof window !== "undefined" ? window.innerWidth : 1200,
                 width: typeof window !== "undefined" ? window.innerWidth : 1200,
               };
-        const rawWidth = pointerXToCompanionWidth(clientX, rect);
+        const rawWidth = pointerXToCompanionWidth({
+          clientX,
+          containerRect: rect,
+          placement: companionPlacement,
+        });
         const { effectiveWidth: clamped } = resolveCompanionEffectiveWidth({
           preferredWidth: rawWidth,
           containerWidth: rect.width,
@@ -346,14 +355,13 @@ const MainLayout: React.FC = () => {
         e.key === "End"
       ) {
         e.preventDefault();
-        const step = 20;
         let next = targetPreferred;
-        if (e.key === "ArrowLeft") {
-          // Divider 左移 -> Companion 变宽
-          next = targetPreferred + step;
-        } else if (e.key === "ArrowRight") {
-          // Divider 右移 -> Companion 变窄
-          next = targetPreferred - step;
+        const delta = resolveCompanionKeyboardDelta({
+          key: e.key,
+          placement: companionPlacement,
+        });
+        if (delta !== null) {
+          next = targetPreferred + delta;
         } else if (e.key === "Home") {
           next = DEFAULT_RIGHT_SIDEBAR_WIDTH;
         } else if (e.key === "End") {
@@ -367,7 +375,7 @@ const MainLayout: React.FC = () => {
         setRightSidebar((prev) => ({ ...prev, requestedWidth: null }));
       }
     },
-    [containerWidth, geometry.maxWidth, targetPreferred]
+    [companionPlacement, containerWidth, geometry.maxWidth, targetPreferred]
   );
 
   // 快捷键：Ctrl/Cmd + B 切换左侧栏
@@ -495,7 +503,10 @@ const MainLayout: React.FC = () => {
             />
           </Suspense>
 
-          <div ref={contentRowRef} className="MainLayout__contentRow">
+          <div
+            ref={contentRowRef}
+            className={`MainLayout__contentRow ${companionPlacement === "start" ? "MainLayout__contentRow--companion-start" : ""}`.trim()}
+          >
             {/* 中间主内容：这里滚动 */}
             <main className="MainLayout__main">
               <PageContentErrorBoundary>
