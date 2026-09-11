@@ -1,4 +1,13 @@
 
+## 0.68.0-alpha.1
+
+## 0.68.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **agent:** add platform-wide response behavior guidelines ([73d02f2](https://github.com/nolotus/bun-nolo/commit/73d02f24b82e83b9a909cd367c9b515326b2f6a2))
+
+
 ## 0.67.0-alpha.4
 
 ## 0.67.0-alpha.4 (2026-09-11)
