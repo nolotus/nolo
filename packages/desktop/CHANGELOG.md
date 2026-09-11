@@ -1,4 +1,18 @@
 
+## 0.71.0-alpha.1
+
+## 0.71.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **agent:** add CommandCode subscription preset ([e512ab2](https://github.com/nolotus/bun-nolo/commit/e512ab2adb1961e6ba9236a4434f5de6c852bdfe))
+* **web:** drop new-chat from create menu, rename manual agent create ([39cea16](https://github.com/nolotus/bun-nolo/commit/39cea168cfb1ae7dcd83cf27df2487b63f6cd8cc))
+
+### Bug Fixes
+
+* **agent:** only prune stale public-agent cache on authoritative results ([c7ff520](https://github.com/nolotus/bun-nolo/commit/c7ff520c03b4264fadad2fee041038576c09c0cb))
+
+
 ## 0.70.0-alpha.1
 
 ## 0.70.0-alpha.1 (2026-09-11)

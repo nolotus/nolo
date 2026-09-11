@@ -337,11 +337,16 @@ export function planPublicAgentCatalogView({
       (agent) => !staleIdsToHideSet.has(getPublicAgentId(agent) ?? "")
     ),
   });
-  const pruneIds = planStalePublicAgentPrunes({
-    localAgents,
-    toDeleteIds,
-    currentUserId,
-  });
+  // prune（物理删除本地缓存）与 hide 同源：远端结果不具权威性（请求全失败/
+  // 未拿到权威列表）时，toDeleteIds 只反映「本次没拿到」，不反映「远端已删」；
+  // 若不设守卫，一次网络故障就会把本地公开 AI 缓存全部 prune 掉。
+  const pruneIds = hasAuthoritativeRemoteResult
+    ? planStalePublicAgentPrunes({
+        localAgents,
+        toDeleteIds,
+        currentUserId,
+      })
+    : [];
 
   return {
     visibleAgents,

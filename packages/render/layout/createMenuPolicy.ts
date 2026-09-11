@@ -1,7 +1,6 @@
 export const CREATE_MENU_OPEN_COUNT_THRESHOLD = 3;
 
 export type CreateMenuItemId =
-  | "new-chat"
   | "new-page"
   | "new-table"
   | "create-agent-manual"
@@ -9,7 +8,6 @@ export type CreateMenuItemId =
   | "upload-file";
 
 export const CREATE_MENU_ITEM_ORDER: readonly CreateMenuItemId[] = [
-  "new-chat",
   "new-page",
   "new-table",
   "create-agent-manual",

@@ -87,7 +87,7 @@ export default {
         chat: "Start Chat",
         public: "Public",
         byConversation: "Create AI by Conversation",
-        manualConfiguration: "Manual Configuration",
+        manualConfiguration: "Create AI",
         quickCreate: {
           reasoningEffort: "Reasoning Effort",
           reasoningEffortOptions: {
@@ -508,7 +508,7 @@ export default {
         chat: "开始聊天",
         public: "公开",
         byConversation: "用对话创建 AI",
-        manualConfiguration: "手动配置 AI",
+        manualConfiguration: "创建AI",
         quickCreate: {
           reasoningEffort: "推理强度",
           reasoningEffortOptions: {
@@ -923,7 +923,7 @@ export default {
         chat: "開始聊天",
         public: "公開",
         byConversation: "用對話建立 AI",
-        manualConfiguration: "手動設定 AI",
+        manualConfiguration: "建立AI",
         quickCreate: {
           reasoningEffort: "推理強度",
           reasoningEffortOptions: {
@@ -1265,7 +1265,7 @@ export default {
         chat: "チャットを開始",
         public: "公開",
         byConversation: "会話で AI を作成",
-        manualConfiguration: "手動設定で AI を作成",
+        manualConfiguration: "AIを作成",
         quickCreate: {
           reasoningEffort: "推論強度",
           reasoningEffortOptions: {

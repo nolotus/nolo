@@ -3,6 +3,7 @@ import { ANTIGRAVITY_CLOUD_CODE_BASE_URL } from "../../agent-runtime/antigravity
 import { qwenModels, qwenTokenPlanModels } from "../../integrations/qwen/models";
 import { moonshotModels, kimiCodeModels } from "../../integrations/moonshot/models";
 import { opencodeGoModels } from "../../integrations/opencode/models";
+import { commandCodeModels } from "../../integrations/commandcode/models";
 import type { ReasoningEffort } from "./createAgentSchema";
 // 统一维护 agent 创建时可选择的 provider：
 // - subscription OAuth 提供商（如 ChatGPT Plus/Pro、SuperGrok、Antigravity）
@@ -84,6 +85,22 @@ const OPENCODE_GO_MODEL_OPTIONS: ReadonlyArray<{
   recommended?: boolean;
   hasVision?: boolean;
 }> = opencodeGoModels.map((m, i) => ({
+  id: m.name,
+  label: m.displayName ?? m.name,
+  hasVision: m.hasVision,
+  ...(i === 0 ? { recommended: true } : {}),
+}));
+
+/**
+ * CommandCode 订阅可选模型，由 commandCodeModels 派生。
+ * Provider API（OpenAI 兼容）按订阅额度计费，任意官方模型 ID 透传。
+ */
+const COMMAND_CODE_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+}> = commandCodeModels.map((m, i) => ({
   id: m.name,
   label: m.displayName ?? m.name,
   hasVision: m.hasVision,
@@ -328,6 +345,19 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     baseUrl: "https://api.kimi.com/coding/v1",
     defaultModel: "kimi-for-coding",
     modelOptions: KIMI_CODE_MODEL_OPTIONS,
+    commercialKind: "subscription",
+    accessVariant: "token_plan_endpoint",
+  },
+  {
+    kind: "api_key_template",
+    id: "commandcode",
+    label: "CommandCode",
+    description:
+      "CommandCode 订阅（Studio 生成 API Key，GOAT/Pro/Max/Team 可用，聚合 DeepSeek/Kimi/Qwen/GLM/Claude/GPT/Gemini）",
+    provider: "commandcode",
+    baseUrl: "https://api.commandcode.ai/provider/v1",
+    defaultModel: "deepseek/deepseek-v4-flash",
+    modelOptions: COMMAND_CODE_MODEL_OPTIONS,
     commercialKind: "subscription",
     accessVariant: "token_plan_endpoint",
   },

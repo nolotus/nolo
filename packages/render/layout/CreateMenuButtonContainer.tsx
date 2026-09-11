@@ -16,13 +16,11 @@ import {
 import { createDocState } from "render/page/docStore";
 import {
   LuFileText,
-  LuMessageSquare,
   LuBot,
   LuGrid2X2,
   LuUpload,
   LuCalendarClock,
 } from "react-icons/lu";
-import { AppRoutePaths } from "app/constants/routePaths";
 import { useCreateTable } from "render/table/useCreateTable";
 import CreateTaskModal from "chat/web/CreateTaskModal";
 import { selectCurrentSpace, selectCurrentSpaceId, selectViewMode } from "create/space/spaceCurrentSelectors";
@@ -130,16 +128,6 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     createMenuOpenCount,
   });
 
-  const createChat = useCallback(() => {
-    closeMenu();
-    const spaceId = currentSpaceId ?? currentSpace?.id ?? null;
-    navigate(
-      spaceId
-        ? `${AppRoutePaths.CHAT}?spaceId=${encodeURIComponent(spaceId)}`
-        : AppRoutePaths.CHAT
-    );
-  }, [closeMenu, currentSpaceId, currentSpace?.id, navigate]);
-
   const createNewPageAndClose = useCallback(async () => {
     setIsCreatingPage(true);
     try {
@@ -184,9 +172,6 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const handleAction = useCallback(
     (key: Key) => {
       switch (key) {
-        case "new-chat":
-          createChat();
-          break;
         case "new-page":
           void createNewPageAndClose();
           break;
@@ -210,7 +195,6 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       }
     },
     [
-      createChat,
       createNewPageAndClose,
       createNewTable,
       sidebarScopedSpaceId,
@@ -223,17 +207,6 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
 
   const renderMenuItem = (id: CreateMenuItemId): React.ReactNode => {
     switch (id) {
-      case "new-chat": {
-        const label = t("chat:newchat", "新建对话");
-        return (
-          <MenuItem key={id} id={id} textValue={label}>
-            <LuMessageSquare size={16} aria-hidden="true" />
-            <span slot="label" title={label}>
-              {label}
-            </span>
-          </MenuItem>
-        );
-      }
       case "new-page": {
         const label = t("newPage");
         return (
@@ -275,7 +248,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         );
       }
       case "create-agent-manual": {
-        const label = t("agent:create_agent_manual", "手动配置 AI");
+        const label = t("agent:create_agent_manual", "创建AI");
         return (
           <MenuItem key={id} id={id} textValue={label}>
             <LuBot size={16} aria-hidden="true" />

@@ -71,7 +71,7 @@ const CARD_DEFS: {
     descKey: "createAgent.runMode.subscription.desc",
     descDefault: "使用已有订阅，无需按量付费。",
     footnoteKey: "createAgent.runMode.subscription.footnote",
-    footnoteDefault: "支持 ChatGPT、SuperGrok、Token Plan、Ollama Cloud。",
+    footnoteDefault: "支持 ChatGPT、SuperGrok、Token Plan、Ollama Cloud、CommandCode。",
   },
   {
     id: "api",

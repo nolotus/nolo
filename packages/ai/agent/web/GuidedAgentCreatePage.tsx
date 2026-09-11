@@ -51,7 +51,7 @@ const GuidedAgentCreatePage: React.FC = () => {
         </span>
         <div>
           <h1 {...stylex.props(styles.headerTitle)}>
-            {t("guidedCreate.manualTitle", "手动配置 AI")}
+            {t("guidedCreate.manualTitle", "创建AI")}
           </h1>
           <p {...stylex.props(styles.headerSubtitle)}>
             {t(
