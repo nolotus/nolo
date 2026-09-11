@@ -1,6 +1,6 @@
 import type { SpaceContent, SpaceData, ULID } from "app/types";
 import { patch } from "database/dbSlice";
-import { renameTable } from "render/table/tableSlice";
+import { renameTable } from "render/table/tableStore";
 import { SEPARATOR } from "database/keys";
 import {
   loadSpaceContentOrThrow,

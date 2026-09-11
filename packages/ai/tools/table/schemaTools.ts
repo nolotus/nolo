@@ -1,12 +1,11 @@
 import { patchRecord, loadTableMetaOrThrow, ensureRowsLoaded, resolveTableIdentity } from "./toolShared";
-import type { RootState } from "app/store";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
 import type { TableColumn } from "render/table/types";
 import { ulid } from "database/utils/ulid";
 
 const requireTableIdentity = (args: { tenantId?: string; tableId?: string }, thunkApi: any) => {
-  const state = thunkApi.getState() as RootState;
+  const state = thunkApi.getState();
   const { tenantId, tableId } = resolveTableIdentity(args, state);
   if (!tenantId || !tableId) {
     throw new Error("需要显式提供 tenantId 和 tableId，或在已打开的表页面中调用。");

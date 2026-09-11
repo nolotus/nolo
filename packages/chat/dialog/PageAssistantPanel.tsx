@@ -23,7 +23,7 @@ import { useTranslation } from "react-i18next";
 
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
 
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAppDispatch } from "app/store";
 import { useIsLoggedIn } from "identity";
 import type { ReferenceItem } from "app/types";
 import {
@@ -49,7 +49,7 @@ import {
 } from "chat/messages/messageSlice";
 import { ChatArea } from "chat/web/ChatArea";
 import { extractCustomId } from "core/prefix";
-import { selectCurrentTable } from "render/table/tableSlice";
+import { useCurrentTable } from "render/table/tableStore";
 import ObjectAssistantPanel from "./ObjectAssistantPanel";
 import { ChatDisplayContext } from "chat/messages/web/ChatDisplayContext";
 
@@ -409,7 +409,7 @@ export const ArtifactAssistantPanel = memo(
 // --- 页面默认包装：仅在当前有表格时注入 table 编辑上下文 ---
 
 const PageAssistantPanelBase: React.FC = () => {
-    const currentTable = useAppSelector(selectCurrentTable);
+    const currentTable = useCurrentTable();
     return <ObjectAssistantPanel kind={currentTable ? "table" : "page"} contentKey={currentTable?.dbKey} />;
 };
 

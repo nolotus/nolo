@@ -7,7 +7,7 @@ import { isAgentKey, isPageKey, splitKey } from "database/keys";
 import { extractUserId } from "core/prefix";
 import { isSystemAdmin } from "core/init";
 import { deleteDialog } from "chat/dialog/dialogSlice";
-import { deleteTable } from "render/table/tableSlice";
+import { deleteTable } from "render/table/tableStore";
 import {
   DEVICE_LOCAL_OWNER_ID,
   isDeviceLocalSpaceBody,

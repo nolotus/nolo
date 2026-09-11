@@ -24,7 +24,7 @@ import {
     updateColumnWidth,
     setTableFocusContext,
     updateTableIcon,
-} from "./tableSlice";
+} from "./tableStore";
 import { useTable } from "./useTable";
 import NoMatch from "../NoMatch";
 
@@ -40,7 +40,6 @@ import SelectCellEditor, {
 } from "./SelectCellEditor";
 import { selectCurrentSpaceId } from "create/space/spaceCurrentSelectors";
 import { updateContentTitle } from "create/space/content/contentThunks";
-import { useAppSelector } from "app/store";
 import {
     findColumnByNameOrLabel,
     getColumnFilterOptions,

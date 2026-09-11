@@ -262,7 +262,7 @@ export const processDocumentFile = async ({
 
       // 按需加载 xlsx & table actions
       const XLSX = await import("xlsx");
-      const { createTable, addRow } = await import("render/table/tableSlice");
+      const { createTable, addRow } = await import("render/table/tableStore");
       const { addPendingFile } = await import("../dialog/dialogSlice");
 
       const buffer = await file.arrayBuffer();

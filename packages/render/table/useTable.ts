@@ -1,15 +1,12 @@
 // packages/render/table/useTable.ts
 
 import { useEffect, useMemo } from "react";
-import { useAppDispatch, useAppSelector } from "app/store";
+import { useAppDispatch } from "app/store";
 import {
     initTable,
     loadTableRows,
-    selectCurrentTable,
-    selectTableIsLoading,
-    selectTableError,
-    selectTableRows,
-} from "./tableSlice";
+    useTableField,
+} from "./tableStore";
 import { SEPARATOR } from "database/keys";
 import { useToken, useUserId } from "identity";
 
@@ -45,11 +42,11 @@ export const useTable = (tableKey: string | undefined, options: UseTableOptions 
         }
     }, [dispatch, enabled, valid, tenantId, tableId, currentToken, currentUserId]);
 
-    // 3. Selectors
-    const tableMeta = useAppSelector(selectCurrentTable);
-    const isLoading = useAppSelector(selectTableIsLoading);
-    const error = useAppSelector(selectTableError);
-    const rows = useAppSelector(selectTableRows);
+    // 3. Domain Store Reads (peeled out of Redux)
+    const tableMeta = useTableField((s) => s.currentTable);
+    const isLoading = useTableField((s) => s.isLoading);
+    const error = useTableField((s) => s.error);
+    const rows = useTableField((s) => s.rows);
 
     return {
         tenantId,

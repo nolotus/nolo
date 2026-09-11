@@ -15,7 +15,6 @@ import { join } from "node:path";
 
 /** Files allowed to declare Redux slices via createSlice / buildCreateSlice. */
 export const WHITELISTED_SLICE_FILES: readonly string[] = [
-  "packages/render/table/tableSlice.ts",
   "packages/database/dbSlice.ts",
   "packages/chat/messages/messageSlice.ts",
   "packages/app/settings/settingSlice.tsx",
@@ -110,10 +109,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/ai/tools/importDataTool.ts",
   "packages/ai/tools/importSkillTool.ts",
   "packages/ai/tools/listUserSpacesTool.ts",
-  "packages/ai/tools/table/addTableRowTool.ts",
-  "packages/ai/tools/table/rowTools.ts",
-  "packages/ai/tools/table/schemaTools.ts",
-  "packages/ai/tools/table/toolShared.ts",
   "packages/app/actions/syncAppRecord.ts",
   "packages/app/components/AppCard.tsx",
   "packages/app/email/AgentEmailE2EPage.tsx",
@@ -297,9 +292,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/render/page/SaveStatusIndicator.tsx",
   "packages/render/page/createPageAction.ts",
   "packages/render/surf/screens/SurfWeatherLabelCol.tsx",
-  "packages/render/table/TablePage.tsx",
-  "packages/render/table/createTableAction.ts",
-  "packages/render/table/deleteTableAction.ts",
   "packages/render/table/useCreateTable.ts",
   "packages/render/table/useTable.ts",
   "packages/render/table/useTableShareActions.ts",
@@ -343,7 +335,6 @@ export const WHITELISTED_RTK_FILES: readonly string[] = [
   "packages/database/actions/fetchUserData.ts",
   "packages/database/dbSlice.ts",
   "packages/database/thunkApiTypes.ts",
-  "packages/render/table/tableSlice.ts",
   "packages/rn/redux/store.ts",
 ] as const;
 

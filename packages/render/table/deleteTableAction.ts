@@ -1,6 +1,5 @@
 // 文件路径: render/table/deleteTableAction.ts
 
-import type { RootState, AppDispatch } from "app/store";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { SEPARATOR, createKey } from "database/keys";
 import { scheduleDeleteReplication } from "database/actions/replication";
@@ -98,8 +97,8 @@ export const deleteTableAction = async (
     getState,
     extra,
   }: {
-    dispatch: AppDispatch;
-    getState: () => RootState;
+    dispatch: any;
+    getState: () => any;
     extra: { db: any };
   }
 ): Promise<string> => {

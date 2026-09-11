@@ -3,7 +3,7 @@
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
-import { createTable } from "render/table/tableSlice";
+import { createTable } from "render/table/tableStore";
 import { SEPARATOR } from "database/keys";
 
 type ColumnType =
@@ -229,7 +229,7 @@ export const createTableFunctionSchema = {
 };
 
 /**
- * [Executor] 创建一张新表（调用 tableSlice.createTable thunk）
+ * [Executor] 创建一张新表（调用 tableStore.createTable）
  */
 export async function createTableFunc(
     args: CreateTableToolArgs,

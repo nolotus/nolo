@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "app/utils/toast"
 import { useAppDispatch } from "app/store";
 import { useUserId } from "identity";
-import { createTable, addRow } from "./tableSlice";
+import { createTable, addRow } from "./tableStore";
 import { buildScopedPagePath } from "create/space/contentKeyUtils";
 
 interface UseCreateTableOptions {

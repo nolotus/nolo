@@ -6,10 +6,10 @@ import { useCurrentUser } from "identity";
 import { readAndWait, write, selectById } from "database/dbSlice";
 import { useDocState, getDocState } from "render/page/docStore";
 import {
-  selectCurrentTable,
-  selectTableFocusContext,
-  selectTableRows,
-} from "render/table/tableSlice";
+  useCurrentTable,
+  useTableFocusContext,
+  useTableRows,
+} from "render/table/tableStore";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
 import { useAppDetail } from "app/hooks/useAppDetail";
@@ -69,10 +69,10 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
   const doc = useDocState();
   const docTitle = doc.title;
   const docFocusContext = doc.focusContext;
-  const table = useAppSelector(selectCurrentTable);
+  const table = useCurrentTable();
   const appSelectedNode = useAppSelectedNode();
-  const tableFocusContext = useAppSelector(selectTableFocusContext);
-  const tableRows = useAppSelector(selectTableRows);
+  const tableFocusContext = useTableFocusContext();
+  const tableRows = useTableRows();
   const entity = useAppSelector((state) =>
     contentKey ? selectById(state, contentKey) : null
   );

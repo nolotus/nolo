@@ -10,7 +10,7 @@ import {
     isTaskKey,
 } from "database/keys";
 import { deleteDialog } from "chat/dialog/dialogSlice";
-import { deleteTable } from "render/table/tableSlice";
+import { deleteTable } from "render/table/tableStore";
 import {
   deleteContentFromSpace,
 } from "create/space/content/contentThunks";

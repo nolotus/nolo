@@ -15,7 +15,7 @@ import { toast } from "app/utils/toast";
 import { LuDownload, LuFileText, LuTable, LuTable2 } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
 import { SEPARATOR } from "database/keys";
-import { createTable, addRow } from "render/table/tableSlice";
+import { createTable, addRow } from "render/table/tableStore";
 import { BaseTable, BaseTableRow, BaseTableCell } from "../elements/BaseTable";
 
 // --- 1. 通用 Props 定义 ---

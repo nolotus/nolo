@@ -1,4 +1,3 @@
-import type { RootState } from "app/store";
 import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asNonEmptyStringArray } from "core/stringArray";
@@ -24,18 +23,18 @@ const toPreviewJson = (value: unknown, maxLength = 600): string => {
   }
 };
 
-const selectCurrentUserId = (state: RootState) => {
+const selectCurrentUserId = (state: any) => {
   const userId = selectIdentityUserId(state as never);
   return typeof userId === "string" ? userId : undefined;
 };
 
 const normalizeTableQueryArgs = (args: any, thunkApi: any) => {
-  const state = thunkApi.getState() as RootState;
+  const state = thunkApi.getState();
   return buildNoloTableQueryRequest(args ?? {}, selectCurrentUserId(state)) ?? args;
 };
 
 const requireTableIdentity = (args: { tenantId?: string; tableId?: string }, thunkApi: any) => {
-  const state = thunkApi.getState() as RootState;
+  const state = thunkApi.getState();
   const { tenantId, tableId } = resolveTableIdentity(args, state);
   if (!tenantId || !tableId) {
     throw new Error("需要显式提供 tenantId 和 tableId，或在已打开的表页面中调用。");

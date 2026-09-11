@@ -2,7 +2,7 @@
 // 看板视图计算与拖拽 Hook。
 
 import { useCallback, useMemo, useState } from "react";
-import { updateCell } from "./tableSlice";
+import { updateCell } from "./tableStore";
 import {
     EMPTY_TABLE_COLUMNS,
     GRID_DISPLAY_MODE,

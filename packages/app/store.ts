@@ -19,8 +19,8 @@ import type { TokenManager } from "identity/authTypes";
 import type { Level } from "level";
 
 // RootState: automatically derived from the active root reducer map.
-// Only active legacy slices (message, db, settings, table) remain.
-// Historical slices (auth, plan, doc, space) have been migrated out.
+// Only active legacy slices (message, db, settings) remain.
+// Historical slices (auth, plan, doc, space, table) have been migrated out.
 export type RootState = {
   [K in keyof RootReducer]: ReturnType<RootReducer[K]>;
 };

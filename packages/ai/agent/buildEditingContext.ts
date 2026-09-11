@@ -4,7 +4,7 @@ import type { RootState } from "app/store";
 import type { AgentRuntimeOptions } from "./types";
 import { buildCanvasNodeEditingContextSummary } from "./canvasEditingContext";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { selectCurrentTable, selectTableRows } from "render/table/tableSlice";
+import { getTableState, selectCurrentTable, selectTableRows } from "render/table/tableStore";
 import { getDocState } from "render/page/docStore";
 
 type AppConstraintPack = {
@@ -145,8 +145,9 @@ export const buildEditingContextSummary = (
 
     // 1) 表格场景：基于当前表 meta + 行数据
     if (targetKind === "table") {
-        const table = selectCurrentTable(state);
-        const rows = selectTableRows(state);
+        const tableState = getTableState();
+        const table = selectCurrentTable(tableState);
+        const rows = selectTableRows(tableState);
         const metadata = runtimeOptions?.editingTarget?.metadata;
         const focusContext =
             metadata && typeof metadata === "object" ? metadata.focusContext : null;

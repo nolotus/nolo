@@ -4,7 +4,6 @@ import { formatISO } from "date-fns";
 import { ulid } from "ulid";
 import i18n from "app/i18n/client";
 
-import type { RootState, AppDispatch } from "app/store";
 import { selectIdentityUserId } from "identity/selectors";
 import { addContentToSpace } from "create/space/content/contentThunks";
 import { isRecord } from "core/isRecord";
@@ -186,7 +185,7 @@ export const createTableAction = async (
     columns,
     withDefaultRows = true,
   }: CreateTableArgs = {},
-  { dispatch, getState }: { dispatch: AppDispatch; getState: () => RootState }
+  { dispatch, getState }: { dispatch: any; getState: () => any }
 ): Promise<string> => {
   const state = getState();
   const userId = selectIdentityUserId(state);

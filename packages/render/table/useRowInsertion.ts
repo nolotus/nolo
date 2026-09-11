@@ -3,7 +3,7 @@
 
 import { useCallback } from "react";
 import { toast } from "app/utils/toast";
-import { addRow } from "./tableSlice";
+import { addRow } from "./tableStore";
 import {
     anchorForInsertAbove,
     insertKeyIntoOrder,

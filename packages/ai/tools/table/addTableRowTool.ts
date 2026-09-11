@@ -1,15 +1,14 @@
 // 文件: ai/tools/table/addTableRowTool.ts
 
-import type { RootState } from "app/store";
 import { isRecord } from "core/isRecord";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
-import { addRow } from "render/table/tableSlice";
+import { addRow, getTableState } from "render/table/tableStore";
 
 /**
  * [Schema] addTableRow：在当前已打开的表中新增一行数据
  *
  * 设计要点：
- * - 默认情况下，从当前 Redux 状态里的 tableSlice.currentTable 推断 tenantId / tableId
+ * - 默认情况下，从当前 tableStore.currentTable 推断 tenantId / tableId
  * - LLM 主要只需要关心 values（列名 -> 值）
  * - 如果没有当前表，又没显式传 tenantId / tableId，则报错
  */
@@ -91,17 +90,14 @@ const extractLegacyValues = (args: AddTableRowArgs | undefined): Record<string, 
  * [Executor] 在当前表中新增一行
  *
  * - 优先从 args.tenantId / args.tableId 取值
- * - 否则使用 state.table.currentTable 的 tenantId / tableId
+ * - 否则使用当前表（tableStore.currentTable）的 tenantId / tableId
  * - 如果当前表元数据可用，会自动过滤掉不存在的列名，并在 displayData 提示
  */
 export async function addTableRowFunc(
     args: AddTableRowArgs,
     thunkApi: any
 ): Promise<AddTableRowResult> {
-    const state = thunkApi.getState() as RootState;
-    const tableState = state.table as RootState["table"];
-
-    const currentTable = tableState.currentTable;
+    const currentTable = getTableState().currentTable;
 
     const tenantId = args?.tenantId ?? currentTable?.tenantId;
     const tableId = args?.tableId ?? currentTable?.tableId;

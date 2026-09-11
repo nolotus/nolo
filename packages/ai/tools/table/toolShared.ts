@@ -1,15 +1,14 @@
-import type { RootState } from "app/store";
 import { readAndWait, patch, write } from "database/dbSlice";
 import { metaKey, rowKey } from "database/keys";
 import { DataType } from "create/types";
-import { loadTableRows } from "render/table/tableSlice";
+import { loadTableRows, getTableState } from "render/table/tableStore";
 import type { TableMeta } from "render/table/types";
 
 export const resolveTableIdentity = (
   args: { tenantId?: string; tableId?: string },
-  state: RootState
+  _state?: any
 ) => {
-  const currentTable = state.table.currentTable;
+  const currentTable = getTableState().currentTable;
   const tenantId = args.tenantId ?? currentTable?.tenantId;
   const tableId = args.tableId ?? currentTable?.tableId;
   return { tenantId, tableId, currentTable };
@@ -45,8 +44,8 @@ export async function ensureRowsLoaded(
     throw new Error(message);
   }
 
-  const state = thunkApi.getState() as RootState;
-  return state.table.rows.filter(
+  const loadedRows = Array.isArray(result?.payload) ? result.payload : getTableState().rows;
+  return loadedRows.filter(
     (row: any) => row?.tenantId === tenantId && row?.tableId === tableId && !row?.deletedAt
   );
 }

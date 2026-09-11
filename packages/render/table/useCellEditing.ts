@@ -2,7 +2,7 @@
 // 单元格内联编辑与键盘导航 Hook。
 
 import { useCallback, useState } from "react";
-import { updateCell } from "./tableSlice";
+import { updateCell } from "./tableStore";
 import { isImeComposingKeyEvent } from "./keyboardUtils";
 import type { TableColumn } from "./types";
 
