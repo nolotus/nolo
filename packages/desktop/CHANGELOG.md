@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.5
+
+## 0.71.0-alpha.5 (2026-09-11)
+
+### Performance Improvements
+
+* **tui:** bound cross-server agent catalog fetch with deadline and circuit breaker ([1b6f50c](https://github.com/nolotus/bun-nolo/commit/1b6f50c9926174ce8541d9561a39b3ea003517e6))
+
+
 ## 0.71.0-alpha.4
 
 ## 0.71.0-alpha.4 (2026-09-11)

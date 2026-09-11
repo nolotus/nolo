@@ -7,6 +7,7 @@ import {
   type ListedAgent,
 } from "../agentListHelpers";
 import { getReadableCliDb } from "../agentCommandSupport";
+import type { CliKvDb } from "../client/hybridRecordStore";
 import { queryUserRecords, readDbRecord } from "../agentRecordHelpers";
 import { readLiveDbRecordAfterTombstoneMerge } from "../globalRecordOperations";
 import type { CliFetchImpl } from "../cliFetch";
@@ -170,6 +171,148 @@ let agentCatalogRawLoadInFlight: Promise<RawCatalogData> | null = null;
 /** 缓存「新鲜」窗口：窗口内重复打开 /agent 不再触发后台刷新。 */
 const AGENT_CATALOG_FRESH_MS = 15_000;
 
+/**
+ * 目录网络请求截止时间：跨服务器用 Promise.all 合并，最慢的服务器决定整体耗时。
+ * 实测（2026-09）备用服务器 us.nolo.chat 曾出现 3.5s~10s 的查询耗时，把首次
+ * /switch 冷加载拖到 7~10s。前台等待有上限，超时的服务器放弃、走既有降级链
+ * （本地 DB / 单服务器重试）；后台刷新用更宽的预算，慢服务器最终仍能合并进缓存。
+ */
+const AGENT_CATALOG_FOREGROUND_DEADLINE_MS = 2_500;
+const AGENT_CATALOG_BACKGROUND_DEADLINE_MS = 8_000;
+
+/** 测试与调优入口：NOLO_TUI_CATALOG_DEADLINE_MS 覆盖两档默认值。 */
+export function resolveCatalogDeadlineMs(
+  kind: "foreground" | "background",
+  env: EnvLike,
+): number {
+  const override = Number.parseInt(env.NOLO_TUI_CATALOG_DEADLINE_MS ?? "", 10);
+  if (Number.isFinite(override) && override > 0) return override;
+  return kind === "foreground"
+    ? AGENT_CATALOG_FOREGROUND_DEADLINE_MS
+    : AGENT_CATALOG_BACKGROUND_DEADLINE_MS;
+}
+
+/**
+ * 慢/挂死服务器熔断：前台跨服务器请求失败（含截止超时）的服务器进入冷却，
+ * 冷却期内前台请求只打其余服务器；后台刷新用完整 server 列表探活，恢复即复位。
+ * 实测（2026-09）us.nolo.chat 持续挂死时，主站 55ms 就能出全量数据，
+ * 无熔断的话每次冷加载都要陪慢服务器吃满 2.5s 截止时间。
+ */
+const SERVER_TRIP_AFTER_CONSECUTIVE_FAILURES = 1;
+const SERVER_COOLDOWN_MS = 5 * 60_000;
+
+type ServerHealthState = {
+  consecutiveFailures: number;
+  trippedAt: number;
+};
+
+const serverHealth = new Map<string, ServerHealthState>();
+
+/** 测试与显式刷新用：清空熔断状态。 */
+export function resetServerHealthForTest() {
+  serverHealth.clear();
+}
+
+/** 供测试注入时间源，生产 undefined（用 Date.now）。 */
+let serverHealthNow: () => number = () => Date.now();
+
+export function setServerHealthClockForTest(now: () => number) {
+  serverHealthNow = now;
+}
+
+/** 前台视角的可用服务器列表：冷却中的服务器被熔断跳过。 */
+export function filterHealthyServers(serverUrls: string[]): string[] {
+  const now = serverHealthNow();
+  const healthy = serverUrls.filter((url) => {
+    const state = serverHealth.get(url);
+    if (!state) return true;
+    return !(
+      state.consecutiveFailures >= SERVER_TRIP_AFTER_CONSECUTIVE_FAILURES &&
+      now - state.trippedAt < SERVER_COOLDOWN_MS
+    );
+  });
+  // 全部都在冷却时放行全量（宁可慢也不能一个服务器都不打）。
+  return healthy.length > 0 ? healthy : serverUrls;
+}
+
+function recordServerFailures(failures: Array<{ serverUrl: string }>) {
+  const now = serverHealthNow();
+  for (const failure of failures) {
+    const state = serverHealth.get(failure.serverUrl) ?? {
+      consecutiveFailures: 0,
+      trippedAt: 0,
+    };
+    state.consecutiveFailures += 1;
+    if (state.consecutiveFailures >= SERVER_TRIP_AFTER_CONSECUTIVE_FAILURES) {
+      state.trippedAt = now;
+    }
+    serverHealth.set(failure.serverUrl, state);
+  }
+}
+
+function recordServerSuccesses(serverUrls: string[]) {
+  for (const url of serverUrls) serverHealth.delete(url);
+}
+
+/**
+ * 给 fetchImpl 套一层截止时间：到点后 Promise 以可识别错误 reject，
+ * 上层降级链（本地 DB / 单服务器重试）接手。
+ * 注意不能因 init.signal 已存在就旁路：fetchWithTransportFallback 会给
+ * 无 signal 的请求自动挂 AbortSignal.timeout(10s)，旁路会让截止时间失效。
+ */
+export function withFetchDeadline(
+  fetchImpl: CliFetchImpl,
+  deadlineMs: number,
+): CliFetchImpl {
+  return async (input, init) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`catalog fetch deadline exceeded (${deadlineMs}ms)`)),
+        deadlineMs,
+      );
+    });
+    const signal = init?.signal;
+    let onAbort: (() => void) | undefined;
+    let aborted: Promise<never> | null = null;
+    if (signal) {
+      if (signal.aborted) {
+        // 已 abort 的 signal 不能参与竞速：fetch 可能立即成功而 abort 永不触发，
+        // 调用方语义（放弃此次请求）会被静默吞掉。
+        throw signal.reason ?? new Error("catalog fetch aborted");
+      }
+      aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(signal.reason ?? new Error("catalog fetch aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+    try {
+      // 头部与 body 都在截止时间内：实测慢服务器会出现「响应头先到、body 挂死」，
+      // 只竞速 headers 的话 res.text() 仍会被底层 10s abort 拖住。
+      // 目录链路的消费方全部只读 text，缓冲 body 不改变语义。
+      const response = await Promise.race([
+        fetchImpl(input, init),
+        deadline,
+        ...(aborted ? [aborted] : []),
+      ]);
+      const text = await Promise.race([
+        response.text(),
+        deadline,
+        ...(aborted ? [aborted] : []),
+      ]);
+      return new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      // 摘除 listener，避免长期存活的 signal 上累积闭包。
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    }
+  };
+}
+
 /** 清空目录缓存（测试与显式刷新用）。 */
 export function invalidateAgentCatalogCache() {
   agentCatalogCache = null;
@@ -187,6 +330,8 @@ export async function loadAgentCatalog(args: {
   currentKey: string;
   fetchImpl?: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
+  /** 测试注入：替代 getReadableCliDb 的本地 DB 降级通道。生产中 undefined。 */
+  getDb?: () => Promise<unknown>;
 }): Promise<AgentCatalogEntry[]> {
   const env = args.env ?? process.env;
   const authToken = resolveAuthToken([], env);
@@ -240,7 +385,10 @@ function refreshAgentCatalogInBackground(
   cacheKey: string,
 ) {
   if (agentCatalogRefreshInFlight) return;
-  agentCatalogRefreshInFlight = fetchRawCatalogData(args, env)
+  agentCatalogRefreshInFlight = fetchRawCatalogData(
+    { ...args, deadlineKind: "background" },
+    env,
+  )
     .then((rawData) => {
       const entries = mergeCatalogEntries(
         args.currentKey,
@@ -293,13 +441,19 @@ async function fetchRawCatalogData(
   args: {
     env?: EnvLike;
     currentKey: string;
+    deadlineKind?: "foreground" | "background";
     fetchImpl?: CliFetchImpl;
     fallbackFetchImpl?: CliFetchImpl;
+    /** 测试注入：替代 getReadableCliDb 的本地 DB 降级通道。生产中 undefined。 */
+    getDb?: () => Promise<unknown>;
   },
   env: EnvLike,
 ): Promise<RawCatalogData> {
-  const fetchImpl = args.fetchImpl ?? fetch;
-  const fallbackFetchImpl = args.fallbackFetchImpl;
+  const deadlineMs = resolveCatalogDeadlineMs(args.deadlineKind ?? "foreground", env);
+  const fetchImpl = withFetchDeadline(args.fetchImpl ?? fetch, deadlineMs);
+  const fallbackFetchImpl = args.fallbackFetchImpl
+    ? withFetchDeadline(args.fallbackFetchImpl, deadlineMs)
+    : undefined;
   const authToken = resolveAuthToken([], env);
   const userId = authToken ? parseUserIdFromAuthToken(authToken) : null;
 
@@ -308,7 +462,13 @@ async function fetchRawCatalogData(
   }
 
   const serverUrl = resolveServerUrl(env);
-  const serverUrls = resolveServerCandidates([], env, serverUrl);
+  const allServerUrls = resolveServerCandidates([], env, serverUrl);
+  // 后台刷新不熔断（探活恢复）；前台跳过冷却中的慢/挂死服务器。
+  const serverUrls =
+    (args.deadlineKind ?? "foreground") === "foreground"
+      ? filterHealthyServers(allServerUrls)
+      : allServerUrls;
+  const fetchStartedAt = performance.now();
   // 保留原始 ListedAgent[]，供 orphan hydrate 做三键（privateKey/publicKey/id）去重，
   // 与 agentListCommands.ts 的 `nolo agent list --safe` 对齐，避免同一 agent 重复入目。
   let listedAgents: ListedAgent[] = [];
@@ -328,20 +488,45 @@ async function fetchRawCatalogData(
       userId,
     });
     listedAgents = remoteResult.agents;
+    // 截止时间把「最慢服务器拖死整个目录」转成了 per-server 失败；
+    // listUserRecordsFromServers 会吞掉失败返回空列表，这里识别「一台都没拿到」
+    // 的情形，转投既有降级链（本地 DB → 单服务器重试），而不是给用户一个空目录。
+    if (listedAgents.length === 0) {
+      // 记账要在转投降级链之前：全失败（如全部超时）也应让慢服务器进入熔断冷却，
+      // 否则每次前台加载都重新陪所有慢服务器吃满截止时间。
+      recordServerFailures(remoteResult.failures);
+      throw new Error(
+        remoteResult.failures.length
+          ? remoteResult.failures.map((f) => `${f.serverUrl}: ${f.error}`).join("; ")
+          : "no agents returned by any server",
+      );
+    }
+    recordServerSuccesses(serverUrls.filter((url) =>
+      !remoteResult.failures.some((f) => f.serverUrl === url)
+    ));
+    recordServerFailures(remoteResult.failures);
   } catch {
     try {
-      const db = await getReadableCliDb({ write: () => {} });
+      const db = args.getDb
+        ? (await args.getDb() as CliKvDb)
+        : await getReadableCliDb({ write: () => {} });
       listedAgents = await listLocalCachedAgents({ db, userId });
     } catch {
-      listedAgents = await listRemoteAgents({
-        authToken,
-        fallbackFetchImpl,
-        fetchImpl,
-        serverUrl,
-        userId,
-        queryUserRecords,
-        readDbRecord,
-      });
+      try {
+        listedAgents = await listRemoteAgents({
+          authToken,
+          fallbackFetchImpl,
+          fetchImpl,
+          serverUrl,
+          userId,
+          queryUserRecords,
+          readDbRecord,
+        });
+      } catch {
+        // 所有通道（跨服务器查询 / 本地 DB / 单服务器重试）都不可用：
+        // 返回空私有目录（仅平台内置项可切换），而不是把异常抛给 TUI 交互流。
+        listedAgents = [];
+      }
     }
   }
   const privateAgents = listedAgents.map(listedAgentToCatalogEntry);
@@ -368,38 +553,59 @@ async function fetchRawCatalogData(
     existingKeys.add(agent.id);
   }
 
+  // orphan 读取共享同一个 deadline 预算：目录主链路（agents + favorites）用掉的
+  // 时间从预算里扣，剩余不足时跳过剩余 orphan——错过项由 SWR 后台刷新补齐，
+  // 不能让兜底读取把首次 /switch 再次拖过预算。
   await Promise.all(
     Object.keys(favoritedAtByKey).map(async (favKey) => {
       if (existingKeys.has(favKey)) return;
+      const remainingMs = deadlineMs - (performance.now() - fetchStartedAt);
+      if (remainingMs <= 0) return;
       try {
-        const favRead = await readLiveDbRecordAfterTombstoneMerge({
-          authToken,
-          dbKey: favKey,
-          fallbackFetchImpl,
-          fetchImpl,
-          serverUrls,
+        let orphanTimer: ReturnType<typeof setTimeout> | undefined;
+        const orphanDeadline = new Promise<never>((_, reject) => {
+          orphanTimer = setTimeout(
+            () => reject(new Error("orphan hydrate deadline")),
+            remainingMs,
+          );
         });
-        const record = favRead.record;
-        if (!record || (record.type && record.type !== "agent")) return;
-        const norm = normalizeListedAgent(record);
-        if (!norm) return;
-        // 同源去重：normalize 后的 privateKey/publicKey/id 任一已存在则跳过
-        if (
-          existingKeys.has(norm.privateKey) ||
-          existingKeys.has(norm.publicKey) ||
-          existingKeys.has(norm.id)
-        ) {
-          return;
+        try {
+          const favRead = await Promise.race([
+            readLiveDbRecordAfterTombstoneMerge({
+              authToken,
+              dbKey: favKey,
+              fallbackFetchImpl,
+              fetchImpl,
+              serverUrls,
+            }),
+            orphanDeadline,
+          ]);
+          void orphanTimer; // cleared in finally below
+          const record = favRead.record;
+          if (!record || (record.type && record.type !== "agent")) return;
+          const norm = normalizeListedAgent(record);
+          if (!norm) return;
+          // 同源去重：normalize 后的 privateKey/publicKey/id 任一已存在则跳过
+          if (
+            existingKeys.has(norm.privateKey) ||
+            existingKeys.has(norm.publicKey) ||
+            existingKeys.has(norm.id)
+          ) {
+            return;
+          }
+          existingKeys.add(norm.privateKey);
+          existingKeys.add(norm.publicKey);
+          existingKeys.add(norm.id);
+          privateAgents.push(listedAgentToCatalogEntry(norm));
+        } finally {
+          if (orphanTimer) clearTimeout(orphanTimer);
         }
-        existingKeys.add(norm.privateKey);
-        existingKeys.add(norm.publicKey);
-        existingKeys.add(norm.id);
-        privateAgents.push(listedAgentToCatalogEntry(norm));
       } catch {
         // orphan favorite key, skip it.
       }
     }),
   );
+
 
   return { privateAgents, favoritedAtByKey };
 }
