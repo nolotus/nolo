@@ -185,33 +185,17 @@ applyAgentThemeToElement(
   themeModePreload.isDark
 );
 
-const preloadedState = bootstrappedAuthState
-  ? {
-    ...serverPreloadedWithoutShare,
-    auth: {
-      ...(serverPreloadedWithoutShare.auth || {}),
-      ...bootstrappedAuthState,
-    },
-    settings: {
-      ...serverPreloadedWithoutShare.settings,
-      ...themeModePreload,
-      ...devLoginSettings,
-      ...(storedThemeName ? { themeName: storedThemeName } : {}),
-      ...(storedThemeDensity ? { density: storedThemeDensity } : {}),
-      ...(storedFontPreset ? { fontPreset: storedFontPreset } : {}),
-    },
-  }
-  : {
-    ...serverPreloadedWithoutShare,
-    settings: {
-      ...serverPreloadedWithoutShare.settings,
-      ...themeModePreload,
-      ...devLoginSettings,
-      ...(storedThemeName ? { themeName: storedThemeName } : {}),
-      ...(storedThemeDensity ? { density: storedThemeDensity } : {}),
-      ...(storedFontPreset ? { fontPreset: storedFontPreset } : {}),
-    },
-  };
+const preloadedState = {
+  ...serverPreloadedWithoutShare,
+  settings: {
+    ...serverPreloadedWithoutShare.settings,
+    ...themeModePreload,
+    ...devLoginSettings,
+    ...(storedThemeName ? { themeName: storedThemeName } : {}),
+    ...(storedThemeDensity ? { density: storedThemeDensity } : {}),
+    ...(storedFontPreset ? { fontPreset: storedFontPreset } : {}),
+  },
+};
 const hostname = window.location.hostname;
 const requestedLng = window.__SSR_LANG__ || window.navigator.language;
 const desktopSearchParams = new URLSearchParams(window.location.search);

@@ -1,55 +1,232 @@
 
-## 0.62.0
+## 0.70.0-alpha.1
 
-## 0.62.0 (2026-09-11)
+## 0.70.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **cli:** in-TUI /login device-code auth + accurate not-logged-in 401 hint ([21280ed](https://github.com/nolotus/bun-nolo/commit/21280edf1967bf4e86da958db10a922a31502769))
+* **cli:** refresh welcome screen — daily tips, neutral daylight sky, non-blocking sweep animation ([0045c83](https://github.com/nolotus/bun-nolo/commit/0045c8335b6e179cb6439e5c45e6737806e3a122))
+
+
+## 0.69.0-alpha.1
+
+## 0.69.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **payments:** rework Waffo CNY recharge with shared quote module ([8ccc3a4](https://github.com/nolotus/bun-nolo/commit/8ccc3a41892dd915a85d01b4e1be46e78cadb45e))
+
+
+## 0.68.0-alpha.1
+
+## 0.68.0-alpha.1 (2026-09-11)
 
 ### Features
 
 * **agent:** add platform-wide response behavior guidelines ([73d02f2](https://github.com/nolotus/bun-nolo/commit/73d02f24b82e83b9a909cd367c9b515326b2f6a2))
-* **browser:** add minimal browser workbench ([8c64326](https://github.com/nolotus/bun-nolo/commit/8c64326d484beb6e8209193ba4b2cabad36710e7))
-* **chat:** remove quick-chat tiers and switch default nolo agent to deepseek-flash ([e9b21a2](https://github.com/nolotus/bun-nolo/commit/e9b21a22f32797e7f2d014595a58e7ed4c6d677d))
-* **cli:** in-TUI /login device-code auth + accurate not-logged-in 401 hint ([21280ed](https://github.com/nolotus/bun-nolo/commit/21280edf1967bf4e86da958db10a922a31502769))
-* **cli:** refresh welcome screen — daily tips, neutral daylight sky, non-blocking sweep animation ([0045c83](https://github.com/nolotus/bun-nolo/commit/0045c8335b6e179cb6439e5c45e6737806e3a122))
-* **payments:** rework Waffo CNY recharge with shared quote module ([8ccc3a4](https://github.com/nolotus/bun-nolo/commit/8ccc3a41892dd915a85d01b4e1be46e78cadb45e))
-* **tui:** notify agent when background OS tasks reach terminal state ([3e1254e](https://github.com/nolotus/bun-nolo/commit/3e1254e1e1c35d61190b09af4a14b782476d0d28))
+
+
+## 0.67.0-alpha.4
+
+## 0.67.0-alpha.4 (2026-09-11)
+
+### Bug Fixes
+
+* **cli:** close ANSI formatting after user message gutter to prevent accent color leak ([12013c2](https://github.com/nolotus/bun-nolo/commit/12013c25c3211cac71290572cf142470e84b3ce0))
+* **cli:** upgrade dark mode accent ansi fallback to bright blue and modernize status icon ([4d2c7d9](https://github.com/nolotus/bun-nolo/commit/4d2c7d9c8ae6f5f3b2f8a02d0287ac1c585e08c2))
+
+
+## 0.67.0-alpha.3
+
+## 0.67.0-alpha.3 (2026-09-11)
+
+### Bug Fixes
+
+* **chat:** merge fix/sidebar-scroll-chain → alpha ([75489ba](https://github.com/nolotus/bun-nolo/commit/75489ba5c6a478f58013d724b157bfb0b4f5fef2))
+* **chat:** 侧边栏嵌套滚轮被 overscroll contain 吞掉，恢复 scroll chaining ([d6e448d](https://github.com/nolotus/bun-nolo/commit/d6e448d0f413395547e6dae157ad254022cf83ed))
+
+
+## 0.67.0-alpha.2
+
+## 0.67.0-alpha.2 (2026-09-11)
 
 ### Bug Fixes
 
 * **app:** isolate browser probe routes from production ([37061bb](https://github.com/nolotus/bun-nolo/commit/37061bbd517323ca02bdccc1b101900283633c2a)), closes [app/utils/env#isDevelopment](https://github.com/app/utils/env/issues/isDevelopment)
-* **chat:** merge fix/sidebar-scroll-chain → alpha ([75489ba](https://github.com/nolotus/bun-nolo/commit/75489ba5c6a478f58013d724b157bfb0b4f5fef2))
-* **chat:** 侧边栏嵌套滚轮被 overscroll contain 吞掉，恢复 scroll chaining ([d6e448d](https://github.com/nolotus/bun-nolo/commit/d6e448d0f413395547e6dae157ad254022cf83ed))
-* **cli:** close ANSI formatting after user message gutter to prevent accent color leak ([12013c2](https://github.com/nolotus/bun-nolo/commit/12013c25c3211cac71290572cf142470e84b3ce0))
+
+
+## 0.67.0-alpha.1
+
+## 0.67.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **tui:** notify agent when background OS tasks reach terminal state ([3e1254e](https://github.com/nolotus/bun-nolo/commit/3e1254e1e1c35d61190b09af4a14b782476d0d28))
+
+
+## 0.66.0-alpha.1
+
+## 0.66.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **chat:** remove quick-chat tiers and switch default nolo agent to deepseek-flash ([e9b21a2](https://github.com/nolotus/bun-nolo/commit/e9b21a22f32797e7f2d014595a58e7ed4c6d677d))
+
+
+## 0.65.0-alpha.1
+
+## 0.65.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **browser:** add minimal browser workbench ([8c64326](https://github.com/nolotus/bun-nolo/commit/8c64326d484beb6e8209193ba4b2cabad36710e7))
+
+
+## 0.64.0-alpha.2
+
+## 0.64.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
 * **cli:** expose process task tools in CODE pack so prompt and gate agree ([cbf25eb](https://github.com/nolotus/bun-nolo/commit/cbf25ebf5530e8a16165462795150ecb3c7da626))
-* **cli:** upgrade dark mode accent ansi fallback to bright blue and modernize status icon ([4d2c7d9](https://github.com/nolotus/bun-nolo/commit/4d2c7d9c8ae6f5f3b2f8a02d0287ac1c585e08c2))
 
 
-## 0.61.0
+## 0.64.0-alpha.1
 
-## 0.61.0 (2026-09-10)
+## 0.64.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add companion placement preference ([3ab7b23](https://github.com/nolotus/bun-nolo/commit/3ab7b2340a7ca660e3a554a10a84d1489db80e19))
+
+
+## 0.63.0-alpha.1
+
+## 0.63.0-alpha.1 (2026-09-10)
 
 ### Features
 
 * **agent:** consolidate DeepSeek catalog to deepseek-flash with legacy migration ([f0d9a24](https://github.com/nolotus/bun-nolo/commit/f0d9a24ed1ec70f827d0a79ed0e53ed21e956114))
-* **layout:** add companion placement preference ([3ab7b23](https://github.com/nolotus/bun-nolo/commit/3ab7b2340a7ca660e3a554a10a84d1489db80e19))
+
+
+## 0.62.0-alpha.1
+
+## 0.62.0-alpha.1 (2026-09-10)
+
+### Features
+
 * **layout:** add navigation placement preference ([f6d153f](https://github.com/nolotus/bun-nolo/commit/f6d153f2df118ba83da33c2dc58a4ffef73d6665))
+
+### Bug Fixes
+
+* **layout:** restore dialog page height chain in LocalPreviewSplit ([27398ea](https://github.com/nolotus/bun-nolo/commit/27398ea7a00a27724fb57f98e26643900868e7e0))
+* **layout:** restore dialog page height chain in LocalPreviewSplit ([0bf855c](https://github.com/nolotus/bun-nolo/commit/0bf855cbd6e426cc419ec5e7d2919747e5479d7e))
+
+
+## 0.61.0-alpha.1
+
+## 0.61.0-alpha.1 (2026-09-10)
+
+### Features
+
 * **layout:** add responsive workbench presentation ([54b5628](https://github.com/nolotus/bun-nolo/commit/54b562800bfd937592361be4fb31ce68ccb21c99))
-* **layout:** use WorkbenchSplit for AppEditor chat mode ([6d5b8e7](https://github.com/nolotus/bun-nolo/commit/6d5b8e7d6b51ae3ccf7f279dd9572f34928edccc))
+
+### Bug Fixes
+
+* **layout:** normalize workbench active surface control ([39453dc](https://github.com/nolotus/bun-nolo/commit/39453dc4f5e32506c72c09bcac241de6d0805256))
+
+
+## 0.60.0-alpha.4
+
+## 0.60.0-alpha.4 (2026-09-10)
 
 ### Bug Fixes
 
 * **agent:** default new-agent model to nolo-hosted deepseek-v4-flash ([0854198](https://github.com/nolotus/bun-nolo/commit/08541986db7db24f774d45d4b037aa324a55d816))
-* **billing:** sync DeepSeek Flash peak/off-peak prices with 2026-09-10 official cut ([b988331](https://github.com/nolotus/bun-nolo/commit/b98833128999c60d7051c93ea82cc561b540ac70))
-* **cli:** fix TUI Ollama context tracking, stream usage and truncation ([33e4461](https://github.com/nolotus/bun-nolo/commit/33e4461beae687a05188aeeb76e3ff09a0939837))
 * **layout:** clamp companion below preferred min on narrow stages ([d6edaa5](https://github.com/nolotus/bun-nolo/commit/d6edaa56789b8af0342b9514ddfea25352916cd2))
-* **layout:** normalize workbench active surface control ([39453dc](https://github.com/nolotus/bun-nolo/commit/39453dc4f5e32506c72c09bcac241de6d0805256))
-* **layout:** restore dialog page height chain in LocalPreviewSplit ([27398ea](https://github.com/nolotus/bun-nolo/commit/27398ea7a00a27724fb57f98e26643900868e7e0))
-* **layout:** restore dialog page height chain in LocalPreviewSplit ([0bf855c](https://github.com/nolotus/bun-nolo/commit/0bf855cbd6e426cc419ec5e7d2919747e5479d7e))
 * **tui:** make /cd take effect end-to-end across runtime, git status and notice lifecycle ([d03ae65](https://github.com/nolotus/bun-nolo/commit/d03ae654a785a2377370b92f06c3e5fc5e6aea28))
 
 
-## 0.60.0
+## 0.60.0-alpha.3
 
-## 0.60.0 (2026-09-10)
+## 0.60.0-alpha.3 (2026-09-10)
+
+### Bug Fixes
+
+* **billing:** sync DeepSeek Flash peak/off-peak prices with 2026-09-10 official cut ([b988331](https://github.com/nolotus/bun-nolo/commit/b98833128999c60d7051c93ea82cc561b540ac70))
+
+
+## 0.60.0-alpha.2
+
+## 0.60.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **cli:** fix TUI Ollama context tracking, stream usage and truncation ([33e4461](https://github.com/nolotus/bun-nolo/commit/33e4461beae687a05188aeeb76e3ff09a0939837))
+
+
+## 0.60.0-alpha.1
+
+## 0.60.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** use WorkbenchSplit for AppEditor chat mode ([6d5b8e7](https://github.com/nolotus/bun-nolo/commit/6d5b8e7d6b51ae3ccf7f279dd9572f34928edccc))
+
+
+## 0.59.0-alpha.2
+
+## 0.59.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **layout:** WorkbenchSplit drag follows pointer in real time ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879a83ffba186c31d5b1eca8fb50107dbd))
+
+
+## 0.59.0-alpha.1
+
+## 0.59.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **onboarding:** add local CLI option to desktop first-run guide ([d6e6856](https://github.com/nolotus/bun-nolo/commit/d6e6856bb60287f69172b737a2c12fd2817480de))
+
+### Bug Fixes
+
+* **layout:** LocalPreviewSplit must fill MainLayout__main height ([df6a2ad](https://github.com/nolotus/bun-nolo/commit/df6a2ad062c0feab22e79cc1021c37e5ba79cd9d))
+
+
+## 0.58.0-alpha.2
+
+## 0.58.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **layout:** polish WorkbenchSplit interaction and accessibility ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8addaad879f73790b29465a5579f28f83))
+
+
+## 0.58.0-alpha.1
+
+## 0.58.0-alpha.1 (2026-09-10)
+
+### Features
+
+* **layout:** add WorkbenchSplit dual-surface split primitive ([2599726](https://github.com/nolotus/bun-nolo/commit/2599726556f48a0b3dbd5df030e0498435f8def0))
+
+
+## 0.57.0-alpha.2
+
+## 0.57.0-alpha.2 (2026-09-10)
+
+### Bug Fixes
+
+* **webview:** 消除 stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e61815b93564220d4bbdf837686ae644a)), closes [#root](https://github.com/nolotus/bun-nolo/issues/root)
+
+
+## 0.57.0-alpha.1
+
+## 0.57.0-alpha.1 (2026-09-10)
 
 ### Features
 
@@ -57,8 +234,6 @@
 * **ai:** add dimension-aware quality evidence and writing.creative domain ([98c451c](https://github.com/nolotus/bun-nolo/commit/98c451cc5a81e3e5e2c2a7a885da4000362e970f))
 * **chat:** fold execShell/readFile tool rows by default with TUI-style summaries ([e982f3f](https://github.com/nolotus/bun-nolo/commit/e982f3f308749f84f23c8969db023957f9f19c4d))
 * **chat:** sidebar 虚拟化列表接入 fluid hover 连续高亮 ([7e22c56](https://github.com/nolotus/bun-nolo/commit/7e22c569f0744d7a37f33eebf0c4ffee16f8559d))
-* **layout:** add WorkbenchSplit dual-surface split primitive ([2599726](https://github.com/nolotus/bun-nolo/commit/2599726556f48a0b3dbd5df030e0498435f8def0))
-* **onboarding:** add local CLI option to desktop first-run guide ([d6e6856](https://github.com/nolotus/bun-nolo/commit/d6e6856bb60287f69172b737a2c12fd2817480de))
 
 ### Bug Fixes
 
@@ -71,104 +246,46 @@
 * **desktop:** 对齐 package.json 版本至 tag 声明的 0.56.0-alpha.1 ([f0b1b77](https://github.com/nolotus/bun-nolo/commit/f0b1b774831827c386d84ec31570666aab09c185))
 * **desktop:** 恢复被合并静默吞掉的 dev 编排器脚本入口 ([09508d9](https://github.com/nolotus/bun-nolo/commit/09508d9d977119dc72128d4527fe8a9095433989))
 * **desktop:** 桌面端交互 agent 默认补齐 exa_search/fetchWebpage ([4163f9f](https://github.com/nolotus/bun-nolo/commit/4163f9fc55eb434c647ccd0eb19e3d2b5e5ae3d1))
-* **layout:** LocalPreviewSplit must fill MainLayout__main height ([df6a2ad](https://github.com/nolotus/bun-nolo/commit/df6a2ad062c0feab22e79cc1021c37e5ba79cd9d))
-* **layout:** polish WorkbenchSplit interaction and accessibility ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8addaad879f73790b29465a5579f28f83))
-* **layout:** WorkbenchSplit drag follows pointer in real time ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879a83ffba186c31d5b1eca8fb50107dbd))
-* **webview:** 消除 stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e61815b93564220d4bbdf837686ae644a)), closes [#root](https://github.com/nolotus/bun-nolo/issues/root)
-
-## 0.59.0 (2026-09-10)
-
-### Features
-
-* **layout:** WorkbenchSplit 双工作面分栏 primitive（Chat+Preview 自由分配空间/交换位置/比例偏好持久化） ([2599726](https://github.com/nolotus/bun-nolo/commit/259972655))
-* **chat:** sidebar 虚拟化列表接入 fluid hover 连续高亮 ([7e22c56](https://github.com/nolotus/bun-nolo/commit/7e22c569f))
-* **chat:** execShell/readFile 工具行默认折叠 + TUI 式摘要 ([e982f3f](https://github.com/nolotus/bun-nolo/commit/e982f3f30))
-* **agent:** GPT-6 Astra 模型进 OpenAI 目录与创建选择器 ([5e6ac2e](https://github.com/nolotus/bun-nolo/commit/5e6ac2ebc))
-* **ai:** dimension-aware quality evidence 与 writing.creative domain ([98c451c](https://github.com/nolotus/bun-nolo/commit/98c451cc5))
-* **desktop:** 首次运行引导加「本机 CLI 已登录」直达选项 ([d6e6856](https://github.com/nolotus/bun-nolo/commit/d6e6856bb))
-* **ai:** 支持 gemini-2.5-pro / gemini-3.1-pro ([c731b99](https://github.com/nolotus/bun-nolo/commit/c731b997b))
-
-### Bug Fixes
-
-* **layout:** 分栏拖拽实时跟手（track 引用 CSS 变量） ([32e75b8](https://github.com/nolotus/bun-nolo/commit/32e75b879))
-* **layout:** LocalPreviewSplit 占满容器高度（对话框顶到上方的根因） ([df6a2ad](https://github.com/nolotus/bun-nolo/commit/df6a2ad06))
-* **layout:** 分栏交互收尾：swap 按钮/键盘可访问性/disabled 态 ([dd4694d](https://github.com/nolotus/bun-nolo/commit/dd4694d8a))
-* **desktop:** stable 客户端 bundle 模块顶层裸 process.env 引用 ([6526ba3](https://github.com/nolotus/bun-nolo/commit/6526ba3e6))
-* **webview:** 消除 stable 客户端 bundle 顶层 process 引用 ([eea434d](https://github.com/nolotus/bun-nolo/commit/eea434d86))
-* **chat:** 折叠 exec 工具卡片超长 shell 命令 ([87dfffc](https://github.com/nolotus/bun-nolo/commit/87dfffcbd))
-* **desktop:** 桌面端交互 agent 默认补齐 exa_search/fetchWebpage ([4163f9f](https://github.com/nolotus/bun-nolo/commit/4163f9fc5))
-
-### Chores
-
-* **desktop:** electrobun 工具链 2.0.1 → 2.0.2-beta.17（Hutch 0.26 + Cottontail 0.6） ([8e7897b](https://github.com/nolotus/bun-nolo/commit/8e7897bcf))
 
 
+## 0.56.0-alpha.1
 
-## 0.56.0
-
-## 0.56.0 (2026-09-09)
+## 0.56.0-alpha.1 (2026-09-09)
 
 ### Features
 
-* **chat:** explain context reprocessing ([a631508](https://github.com/nolotus/bun-nolo/commit/a63150862d5caa83526c190cba4256ddc6ca7234))
 * **desktop:** 重做更新设置页并修正更新状态机语义 ([15bf1cd](https://github.com/nolotus/bun-nolo/commit/15bf1cd59479386682f84f078158875cb62d5168))
 
 ### Bug Fixes
 
-* **desktop:** pin electrobun 2 build.mainProcess to bun to restore installer size ([94d9fdb](https://github.com/nolotus/bun-nolo/commit/94d9fdba872cf7952a94bff79644b45bcf4c791b))
 * **desktop:** 消除 dev 启动的 web 资源复制竞态（黑屏根因） ([3ecbbe3](https://github.com/nolotus/bun-nolo/commit/3ecbbe3a58de143d6717ace6faab827c38db68cb))
-* **stream:** respect downstream backpressure in chat proxy ([1b8affb](https://github.com/nolotus/bun-nolo/commit/1b8affbe6f81f8ec4f9c1079b6a5c345181f500c))
 
 
-## 0.55.0
+## 0.55.0-alpha.3
 
-## 0.55.0 (2026-09-09)
-
-### Features
-
-* **agent:** add Antigravity semantic and credential seams ([07fe166](https://github.com/nolotus/bun-nolo/commit/07fe166376616ed13f4d1fbbc381ebe646473365))
-* **agent:** consume Antigravity semantic runtime results ([7950d11](https://github.com/nolotus/bun-nolo/commit/7950d11f361a9d4e1221c71a29bbbb36f83a8801))
-* **agent:** record observed provider timing facts ([945735b](https://github.com/nolotus/bun-nolo/commit/945735b73444ce09b7b7ecafed727c2c72b108c2))
-* **ai:** 编排注入新增「任务分型与收工预算」段，纪律从项目 skill 上移产品级 ([3f82cd4](https://github.com/nolotus/bun-nolo/commit/3f82cd4d5d4bbcf0dab4ea4f13f006c50d6793c0))
-* **auth:** complete account session phase 3 ([655ae70](https://github.com/nolotus/bun-nolo/commit/655ae7060d8831115ac97b2834401f343ff474cd))
-* **auth:** introduce cross-platform AccountSessionCore for session read truth (Phase 1) ([2bde302](https://github.com/nolotus/bun-nolo/commit/2bde302a2fe50ed1e79a566a1b7f02e91232d1cb))
-* **auth:** make account session service the lifecycle owner ([13159cd](https://github.com/nolotus/bun-nolo/commit/13159cd08589891d1dc4da606601041b2180995c))
-* **auth:** purify Redux reducer and establish unidirectional AccountSessionReduxBridge (Phase 1.1) ([25213e2](https://github.com/nolotus/bun-nolo/commit/25213e296125f452c19480bd5b956a8842bfcff2))
-* **auth:** remove redux account session compatibility ([31c0a00](https://github.com/nolotus/bun-nolo/commit/31c0a00a383369617070c43347007de7b13d698b))
-* **cli:** execute machine-routed read-only tool invocations in connector daemon ([4779c28](https://github.com/nolotus/bun-nolo/commit/4779c288299c5f153ed288a357a21806abc5c740))
-* **cli:** integrate TUI account sessions ([62a2ffd](https://github.com/nolotus/bun-nolo/commit/62a2ffde42bb363c97c32a80ee0046d07daa2c02))
-* **desktop:** patch electrobun cstring 回调兼容 bun >= 1.4.0，恢复 bunVersion 1.4.2 ([3d51bfa](https://github.com/nolotus/bun-nolo/commit/3d51bfa70c379cda0b93db65929f4bb46107217f))
-* **desktop:** 迁移 electrobun 1.18.4-beta.6 → 2.0.1（Hutch 工具链） ([50f92ee](https://github.com/nolotus/bun-nolo/commit/50f92eec7f77ae905f18049e945e25d3a4522733))
-* **observability:** 合并 chat-proxy 流生命周期事件与 stale sweep TypeError 修复 ([f5febf9](https://github.com/nolotus/bun-nolo/commit/f5febf99f763883b26efbb38e94dc6fcdb270c9f))
-* **observability:** 补齐 chat-proxy 流生命周期事件并修复 stale dialog sweep TypeError ([50b0e29](https://github.com/nolotus/bun-nolo/commit/50b0e291f443220efed179f92f445be29a2aa9ad))
+## 0.55.0-alpha.3 (2026-09-09)
 
 ### Bug Fixes
 
-* **agent:** align Codex timing with logical invocations ([aad5790](https://github.com/nolotus/bun-nolo/commit/aad5790a311a9b1659f2097a893ba96d8fab0b3c))
-* **agent:** finalize Antigravity invocation timeout semantics ([c471c6f](https://github.com/nolotus/bun-nolo/commit/c471c6f994c51e1ea7a7976b394c53848e371aaf))
-* **agent:** keep local Antigravity credential refresh semantic ([e7f3e0b](https://github.com/nolotus/bun-nolo/commit/e7f3e0b41c8b85572ad4bb065d88530f9d77f616))
-* **agent:** pin declared-tool boundary in empty-turn repair prompt ([fa50c85](https://github.com/nolotus/bun-nolo/commit/fa50c8507d7c3abe4dc922f6fbe4324cd568b5fd))
-* **agent:** restore Gemini semantic type boundaries ([c1f9589](https://github.com/nolotus/bun-nolo/commit/c1f958924aa3abf27c5f899ed5e036ea16face4b))
-* **auth:** compose legacy credential migration explicitly ([b95f32b](https://github.com/nolotus/bun-nolo/commit/b95f32bbcbbae8ea2f470e08662b1c46fb3cd1fa))
-* **auth:** enforce atomic session transition and explicit sign-out state ([e010ce9](https://github.com/nolotus/bun-nolo/commit/e010ce968f6b0634e4b0d1f39f606017687b9c8f))
-* **auth:** harden session migration boundary ([f7c2d17](https://github.com/nolotus/bun-nolo/commit/f7c2d17d27a49288cb01214b0b448436d711d5b0))
-* **auth:** make credential migration fail-closed ([3b70b6c](https://github.com/nolotus/bun-nolo/commit/3b70b6ca68639f82a763b7664976cbe9b7dfda9e))
-* **auth:** migrate credentials into NOLO_HOME ([a50507a](https://github.com/nolotus/bun-nolo/commit/a50507a650819750097932d5b96204cfff94ab50))
-* **auth:** restore multi-account session consistency ([7f5474e](https://github.com/nolotus/bun-nolo/commit/7f5474e3c1c69f54b9a99032db6abc734cd0584c))
-* **chat:** hide mid-turn empty-reply placeholder and settle tool UI after turn ends ([0d6793a](https://github.com/nolotus/bun-nolo/commit/0d6793a1104335b626d36a07d67b79c0fb308f8f))
-* **cli:** complete legacy credential migration for auth sync-only ([189cce1](https://github.com/nolotus/bun-nolo/commit/189cce1d2c668f7e6dd3dcbff25855db1bb007cc))
-* **cli:** preserve image input for Kimi Code models ([02277bb](https://github.com/nolotus/bun-nolo/commit/02277bb6ee7630c9197d305464ef1971977d8094))
-* **desktop:** disable rpm strip for CEF-bundled Linux package ([72f2757](https://github.com/nolotus/bun-nolo/commit/72f275788444e7065947c6edefff6e47b26b5c2a))
-* **desktop:** stop dev --watch rebuild storm from .generated staging ([7da6366](https://github.com/nolotus/bun-nolo/commit/7da6366e41d876f86307c958dec7ddd722b9e458))
-* **desktop:** tolerate drive-prefixed member names in Windows tarball extraction ([a2b9187](https://github.com/nolotus/bun-nolo/commit/a2b91871b2ef1404b2cdf3fbf9233c2b2e62467c))
-* **desktop:** upgrade Electrobun websocket port byte-patch to v2 encoding ([509f098](https://github.com/nolotus/bun-nolo/commit/509f098a705076587e2707c22c0c8c204f34ced4))
-* **desktop:** 修复 dev 启动崩溃与 webview 桥断连——argv0 绝对化 + bun pin 1.3.8 ([f8d5581](https://github.com/nolotus/bun-nolo/commit/f8d55812e946acc413d3fcdf9dacf9ad1392b1eb))
-* **dev:** report profiler artifact only when generated ([b557bc7](https://github.com/nolotus/bun-nolo/commit/b557bc776aee378f3964ec1ec363aca2948ddfcf))
-* **open-source:** decouple auth imports from public packages via identity edition injection ([ed46fb8](https://github.com/nolotus/bun-nolo/commit/ed46fb8527099624d4666a657c71d0024bd2c5de))
-* **search:** finalize workspace search phase 2 ([215e19b](https://github.com/nolotus/bun-nolo/commit/215e19b2db76dbc334b819c17f859cec28a85719))
-* **search:** restore fast lexical search fallback ([d486659](https://github.com/nolotus/bun-nolo/commit/d486659534f120860d5716b1fdd1a8913974ada8))
-* **search:** separate lexical mechanism from policies ([29b0a80](https://github.com/nolotus/bun-nolo/commit/29b0a805ff7cff138fc0c8c21eebdc9dfe77234a))
-* **search:** separate workspace and source search semantics ([21dacef](https://github.com/nolotus/bun-nolo/commit/21dacefabe4730d45f8f9c877f0ff0e85d6e9d6d))
+* **desktop:** pin electrobun 2 build.mainProcess to bun to restore installer size ([94d9fdb](https://github.com/nolotus/bun-nolo/commit/94d9fdba872cf7952a94bff79644b45bcf4c791b))
+
+
+## 0.55.0-alpha.2
+
+## 0.55.0-alpha.2 (2026-09-09)
+
+### Bug Fixes
+
+* **stream:** respect downstream backpressure in chat proxy ([1b8affb](https://github.com/nolotus/bun-nolo/commit/1b8affbe6f81f8ec4f9c1079b6a5c345181f500c))
+
+
+## 0.55.0-alpha.1
+
+## 0.55.0-alpha.1 (2026-09-09)
+
+### Features
+
+* **chat:** explain context reprocessing ([a631508](https://github.com/nolotus/bun-nolo/commit/a63150862d5caa83526c190cba4256ddc6ca7234))
 
 
 ## 0.54.0-alpha.7

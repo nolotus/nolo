@@ -1,7 +1,7 @@
 import { configureStore, combineReducers, type ThunkDispatch, type UnknownAction } from "@reduxjs/toolkit";
 import { useContext } from "react";
 import { ReactReduxContext, TypedUseSelectorHook, useDispatch, useSelector } from "react-redux";
-import { reducer } from "./reducer";
+import { reducer, type RootReducer } from "./reducer";
 import {
   attachSessionSnapshot,
   configureSessionSnapshot,
@@ -18,19 +18,12 @@ import { selectIdentityUserBalance, selectIdentityUserId, selectIdentityToken } 
 import type { TokenManager } from "identity/authTypes";
 import type { Level } from "level";
 
-// RootState: explicit interface — NOT derived from AppStore or reducer map.
-// This avoids TS2456/TS2502 circular alias errors caused by cross-slice
-// module imports when resolving the reducer map at type-evaluation time.
-export interface RootState {
-  auth: any;
-  plan: any;
-  message: any;
-  doc: any;
-  db: any;
-  settings: any;
-  space: any;
-  table: any;
-}
+// RootState: automatically derived from the active root reducer map.
+// Only active legacy slices (message, db, settings, table) remain.
+// Historical slices (auth, plan, doc, space) have been migrated out.
+export type RootState = {
+  [K in keyof RootReducer]: ReturnType<RootReducer[K]>;
+};
 
 export type AppExtra = {
   db: Level<string, any> | null;

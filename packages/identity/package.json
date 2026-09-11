@@ -21,9 +21,6 @@
     "./cloudBootstrap": {
       "default": "./cloudBootstrap.local.ts"
     },
-    "./authReducer": {
-      "default": "./authReducer.local.ts"
-    },
     "./authTypes": {
       "default": "./authTypes.local.ts"
     },

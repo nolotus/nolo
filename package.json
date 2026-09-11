@@ -85,7 +85,6 @@
     "date-fns-tz": "2.0.1",
     "sucrase": "3.35.1",
     "react-stately": "3.49.0",
-    "redux": "5.0.1",
     "bun": "latest",
     "electrobun": "2.0.1",
     "rcedit": "5.0.2",

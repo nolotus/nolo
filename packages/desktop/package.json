@@ -1,12 +1,12 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.62.0",
+  "version": "0.70.0-alpha.1",
   "type": "module",
   "scripts": {
     "prepare:web": "cd ../.. && NODE_ENV=production bun ./scripts/dev/esBuild.js",
     "dev:web": "cd ../.. && NODE_ENV=development bun ./scripts/dev/esDev.js",
-    "dev": "concurrently -k \"bun run dev:web\" \"bun run dev:electrobun\"",
+    "dev": "bun ./scripts/devDesktop.ts",
     "dev:electrobun": "NOLO_DESKTOP_SKIP_WEB_BUILD=1 electrobun dev --watch",
     "refresh-dev-ui": "bun ./scripts/refresh-dev-ui.ts",
     "build": "electrobun build",

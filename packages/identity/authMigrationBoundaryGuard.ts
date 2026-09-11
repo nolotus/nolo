@@ -30,17 +30,11 @@ import { join } from "node:path";
  */
 
 /**
- * Root reducers allowed to import `identity/authReducer` and register the
- * empty `auth` key (the empty `{}` shape only — never business session
- * fields). The RN root store is `packages/rn/redux/store.ts`; the old dead
- * `packages/rn/store.ts` (mobileStore) was deleted and is NOT whitelisted —
- * recreating it, or adding any other file to this list, is a conscious
- * whitelist change that must be justified against the boundary contract in
- * review.
+ * Root reducers (Phase 6): auth compatibility shell has been completely
+ * removed. Root reducers must NOT register an `auth` key or import
+ * `identity/authReducer`.
  */
 export const MIGRATION_BOUNDARY_FILES = [
-  "packages/identity/authReducer.cloud.ts",
-  "packages/identity/authReducer.local.ts",
   "packages/app/reducer.ts",
   "packages/rn/redux/store.ts",
 ] as const;
@@ -64,6 +58,8 @@ const SLICE_FILE_CANDIDATES = [
   "packages/auth/authSlice.ts",
   "packages/auth/authSlice.cloud.ts",
   "packages/auth/authSlice.local.ts",
+  "packages/identity/authReducer.cloud.ts",
+  "packages/identity/authReducer.local.ts",
 ] as const;
 
 export type BoundaryViolation = { file: string; reason: string };
@@ -171,20 +167,13 @@ export function scanSource(rel: string, source: string): BoundaryViolation[] {
     }
   }
 
-  const isBoundaryFile = (MIGRATION_BOUNDARY_FILES as readonly string[]).includes(rel);
-  if (!isBoundaryFile && /from\s*["']identity\/authReducer["']/.test(code)) {
-    add("imports identity/authReducer outside the migration-boundary whitelist");
+  if (/from\s*["']identity\/authReducer["']/.test(code)) {
+    add("imports the deleted identity/authReducer module");
   }
+  const isBoundaryFile = (MIGRATION_BOUNDARY_FILES as readonly string[]).includes(rel);
   if (isBoundaryFile) {
-    for (const field of AUTH_BUSINESS_FIELDS) {
-      for (const form of authFieldBoundaryForms(field)) {
-        if (form.test(code)) {
-          add(
-            `boundary file must not hold auth business fields in the auth key: ${field}`
-          );
-          break;
-        }
-      }
+    if (/\bget\s+auth\s*\(\s*\)/.test(code) || /\bauth\s*:\s*\w+/.test(code)) {
+      add("root reducer must not register an auth key");
     }
   }
 

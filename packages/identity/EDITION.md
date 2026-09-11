@@ -13,7 +13,6 @@
 | `identity/cloudRoutes` | `cloudRoutes.cloud.ts` | `cloudRoutes.local.ts` | auth+life 路由数组 |
 | `identity/RequireSignedIn` | `RequireSignedIn.cloud.tsx` | `RequireSignedIn.local.tsx` | 登录守卫组件 |
 | `identity/cloudBootstrap` | `cloudBootstrap.cloud.ts` | `cloudBootstrap.local.ts` | token manager + auth state bootstrap |
-| `identity/authReducer` | `authReducer.cloud.ts` | `authReducer.local.ts` | auth reducer |
 | `identity/authTypes` | `authTypes.cloud.ts` | `authTypes.local.ts` | TokenManager 等类型 |
 | `identity/useDeleteOwnAccountFlow` | `useDeleteOwnAccountFlow.cloud.ts` | `useDeleteOwnAccountFlow.local.ts` | 删账号 hook |
 | `identity/useIdentity` | `useIdentity.cloud.ts` | `useIdentity.local.ts` | 身份读取 React hook |
