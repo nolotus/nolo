@@ -1841,20 +1841,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             selectionState.head &&
             !areSelectionPointsEqual(selectionState.anchor, selectionState.head)
           ) {
-            const textToCopy = extractSelectedText(
-              history,
-              selectionState.anchor,
-              selectionState.head,
-              contentWidth,
-            );
-            if (textToCopy.length > 0) {
-              writeClipboard(textToCopy)
-                .catch((error) => {
-                  emitCommandOutput(
-                    `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
-                  );
-                });
-            }
+            // Releasing a drag only finalizes the TUI selection. Clipboard
+            // writes for a mouse selection must remain explicit (Ctrl+C): an asynchronous
+            // write here can finish after the user copies newer text in
+            // another app and restore stale TUI content over it.
             selectionState.dragging = false;
           } else {
             clearSelection();

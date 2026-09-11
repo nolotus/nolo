@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.7
+
+## 0.71.0-alpha.7 (2026-09-11)
+
+### Bug Fixes
+
+* **tui:** prevent stale mouse selection clipboard writes ([d310532](https://github.com/nolotus/bun-nolo/commit/d310532552e0df99677017a1c7f82707ec6be2d3))
+
+
 ## 0.71.0-alpha.6
 
 ## 0.71.0-alpha.6 (2026-09-11)
