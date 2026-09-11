@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.2
+
+## 0.71.0-alpha.2 (2026-09-11)
+
+### Bug Fixes
+
+* **app:** freeze redux consumer entry points ([737a88b](https://github.com/nolotus/bun-nolo/commit/737a88b365fd7458d432fe753fc86844303abf98))
+
+
 ## 0.71.0-alpha.1
 
 ## 0.71.0-alpha.1 (2026-09-11)
