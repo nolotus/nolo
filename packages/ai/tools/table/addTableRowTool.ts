@@ -2,26 +2,23 @@
 
 import { isRecord } from "core/isRecord";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
-import { addRow, getTableState } from "render/table/tableStore";
+import { addRow } from "render/table/tableStore";
+import { resolveTableIdentity, loadTableMetaOrThrow } from "./toolShared";
 
 /**
- * [Schema] addTableRow：在当前已打开的表中新增一行数据
+ * [Schema] addTableRow：在指定表中新增一行数据
  *
  * 设计要点：
- * - 默认情况下，从当前 tableStore.currentTable 推断 tenantId / tableId
+ * - 必须显式提供 tenantId / tableId
  * - LLM 主要只需要关心 values（列名 -> 值）
- * - 如果没有当前表，又没显式传 tenantId / tableId，则报错
  */
 export const addTableRowFunctionSchema = {
     name: "addTableRow",
     description:
         [
             "在指定表中新增一行数据。",
-            "【重要】如果你是在对话（chat）中调用此函数（而非在表格页面的「页面助手」中），",
-            "则必须显式传入 tenantId 和 tableId。这两个值可从 createTable 的返回结果中获取。",
-            "如果你刚刚调用了 createTable，请务必将其返回的 tenantId 和 tableId 传入此函数。",
-            "只有在表格页面打开「页面助手」时，tenantId 和 tableId 才可以省略（会自动推断）。",
-            "【重要】表格字段必须放在 values 对象里，不要把 content、status 这类列名直接放在顶层。",
+            "必须显式传入 tenantId 和 tableId。这两个值可从创建表或查询表的返回结果中获取。",
+            "表格字段必须放在 values 对象里，不要把 content、status 这类列名直接放在顶层。",
             '完整示例：{"tenantId":"u1","tableId":"t1","values":{"content":"希望支持支付宝支付","status":"待处理"}}。',
         ].join("\n"),
     parameters: {
@@ -42,16 +39,14 @@ export const addTableRowFunctionSchema = {
             },
             tenantId: {
                 type: "string",
-                description:
-                    "租户 ID。在对话（chat）中调用时必须显式传入，从 createTable 的返回结果获取。",
+                description: "目标表的租户 ID。必须显式传入。",
             },
             tableId: {
                 type: "string",
-                description:
-                    "表 ID。在对话（chat）中调用时必须显式传入，从 createTable 的返回结果获取。",
+                description: "目标表的表 ID。必须显式传入。",
             },
         },
-        required: ["values"],
+        required: ["tenantId", "tableId", "values"],
     },
 };
 
@@ -87,29 +82,26 @@ const extractLegacyValues = (args: AddTableRowArgs | undefined): Record<string, 
 };
 
 /**
- * [Executor] 在当前表中新增一行
+ * [Executor] 在指定表中新增一行
  *
- * - 优先从 args.tenantId / args.tableId 取值
- * - 否则使用当前表（tableStore.currentTable）的 tenantId / tableId
- * - 如果当前表元数据可用，会自动过滤掉不存在的列名，并在 displayData 提示
+ * - 底层 executor 显式要求 tenantId / tableId
+ * - 从数据库/存储层显式加载 tableMeta，不依赖 UI currentTable
  */
 export async function addTableRowFunc(
     args: AddTableRowArgs,
     thunkApi: any
 ): Promise<AddTableRowResult> {
-    const currentTable = getTableState().currentTable;
-
-    const tenantId = args?.tenantId ?? currentTable?.tenantId;
-    const tableId = args?.tableId ?? currentTable?.tableId;
-    const normalizedValues =
-        args?.values !== undefined ? args.values : extractLegacyValues(args);
-    const values = (normalizedValues ?? {}) as Record<string, any>;
+    const { tenantId, tableId } = resolveTableIdentity(args);
 
     if (!tenantId || !tableId) {
         throw new Error(
-            "addTableRow 只能在已打开某张表的页面中调用，或显式提供 tenantId 和 tableId。"
+            "addTableRow 必须显式提供 tenantId 和 tableId。"
         );
     }
+
+    const normalizedValues =
+        args?.values !== undefined ? args.values : extractLegacyValues(args);
+    const values = (normalizedValues ?? {}) as Record<string, any>;
 
     if (!isRecord(values)) {
         throw new Error(
@@ -117,11 +109,13 @@ export async function addTableRowFunc(
         );
     }
 
+    const tableMeta = await loadTableMetaOrThrow(thunkApi, tenantId, tableId);
+
     // 兜底：禁止传空对象 {}，要求至少提供一个字段
     if (Object.keys(values).length === 0) {
-        const knownCols = currentTable
-            ? currentTable.columns.map((c: any) => c.name).join(", ") || "(无列定义)"
-            : "(当前表字段未知)";
+        const knownCols = tableMeta && Array.isArray(tableMeta.columns)
+            ? tableMeta.columns.map((c: any) => c.name).join(", ") || "(无列定义)"
+            : "(目标表字段未知)";
 
         throw new Error(
             `addTableRow.values 不能为空：你需要至少为一个字段提供值。\n` +
@@ -132,12 +126,8 @@ export async function addTableRowFunc(
     let sanitizedValues: Record<string, any> = values;
     let ignoredColumns: string[] = [];
 
-    if (
-        currentTable &&
-        currentTable.tenantId === tenantId &&
-        currentTable.tableId === tableId
-    ) {
-        const allowedColumns = new Set(currentTable.columns.map((c: any) => c.name));
+    if (tableMeta && Array.isArray(tableMeta.columns) && tableMeta.columns.length > 0) {
+        const allowedColumns = new Set(tableMeta.columns.map((c: any) => c.name));
 
         sanitizedValues = {};
         ignoredColumns = [];
@@ -155,10 +145,10 @@ export async function addTableRowFunc(
             Object.keys(values).length > 0
         ) {
             const knownCols =
-                currentTable.columns.map((c: any) => c.name).join(", ") || "(无列定义)";
+                tableMeta.columns.map((c: any) => c.name).join(", ") || "(无列定义)";
 
             throw new Error(
-                `addTableRow 失败：提供的字段名都不在当前表中。\n` +
+                `addTableRow 失败：提供的字段名都不在目标表中。\n` +
                 `已知字段: ${knownCols}\n` +
                 `请仅使用这些字段名作为 key。`
             );
@@ -181,14 +171,13 @@ export async function addTableRowFunc(
         const createdRow = actionResult.payload as any;
 
         const tableLabel =
-            currentTable?.displayName ||
-            currentTable?.tableId ||
-            tableId ||
-            "当前表";
+            tableMeta?.displayName ||
+            tableMeta?.tableId ||
+            tableId;
 
         const ignoredInfo =
             ignoredColumns.length > 0
-                ? `\n\n注意：以下字段在当前表中不存在，已被忽略：${ignoredColumns.join(
+                ? `\n\n注意：以下字段在目标表中不存在，已被忽略：${ignoredColumns.join(
                     ", "
                 )}`
                 : "";

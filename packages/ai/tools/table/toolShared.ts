@@ -1,17 +1,14 @@
 import { readAndWait, patch, write } from "database/dbSlice";
 import { metaKey, rowKey } from "database/keys";
 import { DataType } from "create/types";
-import { loadTableRows, getTableState } from "render/table/tableStore";
+import { loadTableRows } from "render/table/tableStore";
 import type { TableMeta } from "render/table/types";
 
 export const resolveTableIdentity = (
   args: { tenantId?: string; tableId?: string },
   _state?: any
-) => {
-  const currentTable = getTableState().currentTable;
-  const tenantId = args.tenantId ?? currentTable?.tenantId;
-  const tableId = args.tableId ?? currentTable?.tableId;
-  return { tenantId, tableId, currentTable };
+): { tenantId?: string; tableId?: string } => {
+  return { tenantId: args?.tenantId, tableId: args?.tableId };
 };
 
 export async function loadTableMetaOrThrow(
@@ -19,11 +16,16 @@ export async function loadTableMetaOrThrow(
   tenantId: string,
   tableId: string
 ): Promise<TableMeta> {
-  const result = await thunkApi.dispatch(readAndWait(metaKey(tenantId, tableId)));
-  if (!readAndWait.fulfilled.match(result) || !result.payload) {
+  const key = metaKey(tenantId, tableId);
+  const result = await thunkApi.dispatch(readAndWait(key));
+  const isMatch =
+    typeof readAndWait?.fulfilled?.match === "function"
+      ? readAndWait.fulfilled.match(result)
+      : result?.type === "fulfilled" || Boolean(result?.payload);
+  if (!isMatch || !result?.payload) {
     const message =
-      (result.payload as any)?.message ||
-      result.error?.message ||
+      (result?.payload as any)?.message ||
+      result?.error?.message ||
       `找不到表 ${tableId} 的定义。`;
     throw new Error(message);
   }
@@ -44,7 +46,7 @@ export async function ensureRowsLoaded(
     throw new Error(message);
   }
 
-  const loadedRows = Array.isArray(result?.payload) ? result.payload : getTableState().rows;
+  const loadedRows = Array.isArray(result?.payload) ? result.payload : [];
   return loadedRows.filter(
     (row: any) => row?.tenantId === tenantId && row?.tableId === tableId && !row?.deletedAt
   );

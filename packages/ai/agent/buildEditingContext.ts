@@ -4,8 +4,10 @@ import type { RootState } from "app/store";
 import type { AgentRuntimeOptions } from "./types";
 import { buildCanvasNodeEditingContextSummary } from "./canvasEditingContext";
 import { asOptionalTrimmedString } from "core/optionalString";
-import { getTableState, selectCurrentTable, selectTableRows } from "render/table/tableStore";
+import { getTableState } from "render/table/tableStore";
 import { getDocState } from "render/page/docStore";
+import { metaKey } from "database/keys";
+import { DataType } from "create/types";
 
 type AppConstraintPack = {
     id: string;
@@ -127,6 +129,32 @@ const formatAppConstraintPacks = (packs: AppConstraintPack[]): string[] => {
     ];
 };
 
+export function resolveEditingTargetTableIdentity(editingTarget?: {
+    kind?: string;
+    key?: string;
+    tenantId?: string;
+    tableId?: string;
+    metadata?: Record<string, unknown>;
+}): { tenantId: string; tableId: string } | null {
+    if (!editingTarget || editingTarget.kind !== "table") return null;
+
+    const metadata = editingTarget.metadata;
+    const tenantId =
+        (typeof editingTarget.tenantId === "string" && editingTarget.tenantId) ||
+        (typeof metadata?.tenantId === "string" && metadata.tenantId) ||
+        (editingTarget.key?.startsWith("meta-") ? editingTarget.key.split("-")[1] : undefined);
+
+    const tableId =
+        (typeof editingTarget.tableId === "string" && editingTarget.tableId) ||
+        (typeof metadata?.tableId === "string" && metadata.tableId) ||
+        (editingTarget.key?.startsWith("meta-")
+            ? editingTarget.key.split("-").slice(2).join("-")
+            : editingTarget.key);
+
+    if (!tenantId || !tableId) return null;
+    return { tenantId, tableId };
+}
+
 /**
  * 根据当前 Redux 状态 + 本次调用的 runtimeOptions，生成「当前编辑对象」的自然语言描述。
  *
@@ -143,12 +171,64 @@ export const buildEditingContextSummary = (
 ): string | null => {
     const targetKind = runtimeOptions?.editingTarget?.kind;
 
-    // 1) 表格场景：基于当前表 meta + 行数据
+    // 1) 表格场景：基于 explicit target 表 meta + 行数据
     if (targetKind === "table") {
-        const tableState = getTableState();
-        const table = selectCurrentTable(tableState);
-        const rows = selectTableRows(tableState);
-        const metadata = runtimeOptions?.editingTarget?.metadata;
+        const editingTarget = runtimeOptions?.editingTarget;
+        const targetIdentity = resolveEditingTargetTableIdentity(editingTarget);
+        if (!targetIdentity) return null;
+
+        const { tenantId, tableId } = targetIdentity;
+        const targetDbKey = metaKey(tenantId, tableId);
+
+        // 1. 优先从 DB / state 缓存读取对应表
+        const dbEntities = (state as any)?.db?.entities;
+        const metaFromDb = dbEntities?.[targetDbKey];
+
+        // 2. 检查 state.table (用于兼容单元测试传入的 mock state)
+        const stateTable = (state as any)?.table;
+        const metaFromStateTable =
+            stateTable?.currentTable?.tableId === tableId ||
+            stateTable?.currentTable?.dbKey === targetDbKey
+                ? stateTable.currentTable
+                : null;
+
+        // 3. 检查 UI TableStore 优化缓存（仅当 target 严格匹配当前 active 表时才能作为 optimization）
+        const uiTableState = getTableState();
+        const metaFromUiCache =
+            uiTableState.currentTable?.tenantId === tenantId &&
+            uiTableState.currentTable?.tableId === tableId
+                ? uiTableState.currentTable
+                : null;
+
+        const table = metaFromDb ?? metaFromStateTable ?? metaFromUiCache ?? {
+            tenantId,
+            tableId,
+            displayName: editingTarget?.title ?? tableId,
+            description: editingTarget?.summary ?? "",
+            columns: Array.isArray(editingTarget?.metadata?.columns)
+                ? (editingTarget?.metadata?.columns as any[])
+                : Array.isArray(editingTarget?.metadata?.columnNames)
+                ? (editingTarget?.metadata?.columnNames as string[]).map((name) => ({ name, label: name }))
+                : [],
+        };
+
+        // 查找对应 rows（严格隔离 target 表）
+        let rows: any[] = [];
+        if (metaFromUiCache && Array.isArray(uiTableState.rows)) {
+            rows = uiTableState.rows;
+        } else if (metaFromStateTable && Array.isArray(stateTable?.rows)) {
+            rows = stateTable.rows;
+        } else if (dbEntities) {
+            rows = Object.values(dbEntities).filter(
+                (entity: any) =>
+                    entity?.type === DataType.TABLE_ROW &&
+                    entity?.tenantId === tenantId &&
+                    entity?.tableId === tableId &&
+                    !entity?.deletedAt
+            );
+        }
+
+        const metadata = editingTarget?.metadata;
         const focusContext =
             metadata && typeof metadata === "object" ? metadata.focusContext : null;
 

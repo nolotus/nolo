@@ -8,7 +8,7 @@ const requireTableIdentity = (args: { tenantId?: string; tableId?: string }, thu
   const state = thunkApi.getState();
   const { tenantId, tableId } = resolveTableIdentity(args, state);
   if (!tenantId || !tableId) {
-    throw new Error("需要显式提供 tenantId 和 tableId，或在已打开的表页面中调用。");
+    throw new Error("需要显式提供 tenantId 和 tableId。");
   }
   return { tenantId, tableId };
 };

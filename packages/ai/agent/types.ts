@@ -35,6 +35,14 @@ export interface AgentRuntimeOptions {
          */
         summary?: string;
         /**
+         * 可选：表格/实体租户 ID（显式 execution identity）
+         */
+        tenantId?: string;
+        /**
+         * 可选：表格/实体 ID（显式 execution identity）
+         */
+        tableId?: string;
+        /**
          * 可选：与当前编辑目标相关的轻量元数据。
          * 例如应用的 framework、url、fileNames 等。
          */

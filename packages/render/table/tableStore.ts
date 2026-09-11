@@ -320,7 +320,16 @@ export const loadTableRows = createTableCommand(
     const { tenantId, tableId } = args;
     const db = extra?.db;
 
-    setState((s) => ({ ...s, error: null }));
+    setState((s) => {
+      if (
+        s.currentTable &&
+        s.currentTable.tenantId === tenantId &&
+        s.currentTable.tableId === tableId
+      ) {
+        return { ...s, error: null };
+      }
+      return s;
+    });
 
     try {
       const stateObj = getState ? getState() : {};
@@ -334,11 +343,29 @@ export const loadTableRows = createTableCommand(
         remoteServers,
       });
 
-      setState((s) => ({ ...s, rows }));
+      setState((s) => {
+        if (
+          s.currentTable &&
+          s.currentTable.tenantId === tenantId &&
+          s.currentTable.tableId === tableId
+        ) {
+          return { ...s, rows };
+        }
+        return s;
+      });
       return rows;
     } catch (e: any) {
       const msg = e?.message || "加载表行失败";
-      setState((s) => ({ ...s, error: msg, rows: [] }));
+      setState((s) => {
+        if (
+          s.currentTable &&
+          s.currentTable.tenantId === tenantId &&
+          s.currentTable.tableId === tableId
+        ) {
+          return { ...s, error: msg, rows: [] };
+        }
+        return s;
+      });
       throw e;
     }
   }
@@ -355,7 +382,16 @@ export const addRow = createTableCommand(
   async (args: AddRowArgs, { dispatch }: any = {}) => {
     const { tenantId, tableId, values } = args;
 
-    setState((s) => ({ ...s, error: null }));
+    setState((s) => {
+      if (
+        s.currentTable &&
+        s.currentTable.tenantId === tenantId &&
+        s.currentTable.tableId === tableId
+      ) {
+        return { ...s, error: null };
+      }
+      return s;
+    });
 
     try {
       const { dbKey, rowId } = rowKey.create(tenantId, tableId);
@@ -397,7 +433,16 @@ export const addRow = createTableCommand(
       return row;
     } catch (e: any) {
       const msg = e?.message || "新增表行失败";
-      setState((s) => ({ ...s, error: msg }));
+      setState((s) => {
+        if (
+          s.currentTable &&
+          s.currentTable.tenantId === tenantId &&
+          s.currentTable.tableId === tableId
+        ) {
+          return { ...s, error: msg };
+        }
+        return s;
+      });
       throw e;
     }
   }
@@ -406,10 +451,24 @@ export const addRow = createTableCommand(
 export const deleteRow = createTableCommand(
   "table/deleteRow",
   async (dbKey: string, { dispatch, getState, extra }: any = {}) => {
-    setState((s) => ({ ...s, error: null }));
-
     try {
-      const row = state.rows.find((item: any) => item?.dbKey === dbKey);
+      let row = state.rows.find((item: any) => item?.dbKey === dbKey);
+
+      if (!row && extra?.db && typeof extra.db.get === "function") {
+        try {
+          row = await extra.db.get(dbKey);
+        } catch {
+          // ignore
+        }
+      }
+      if (!row && dispatch) {
+        try {
+          const readAction = await safeDispatch(dispatch, readAndWait(dbKey));
+          row = readAction?.payload || readAction;
+        } catch {
+          // ignore
+        }
+      }
 
       if (!row) {
         throw new Error(`当前表中找不到要删除的行：${dbKey}`);

@@ -287,6 +287,14 @@ export const buildObjectAssistantRuntimeOptions = (
   }
 
   if (kind === "table") {
+    const metaTenantId =
+      typeof metadata?.tenantId === "string" ? metadata.tenantId : undefined;
+    const metaTableId =
+      typeof metadata?.tableId === "string" ? metadata.tableId : undefined;
+    const keyParts = contentKey?.startsWith("meta-") ? contentKey.split("-") : [];
+    const tenantId = metaTenantId ?? (keyParts.length >= 3 ? keyParts[1] : undefined);
+    const tableId = metaTableId ?? (keyParts.length >= 3 ? keyParts.slice(2).join("-") : contentKey ?? undefined);
+
     return {
       editingTarget: {
         kind: "table",
@@ -295,6 +303,8 @@ export const buildObjectAssistantRuntimeOptions = (
         summary:
           summary ??
           "当前对象是一张数据表。优先帮助用户理解字段、记录和结构，再做新增或修改。",
+        tenantId,
+        tableId,
         metadata,
       },
     };
