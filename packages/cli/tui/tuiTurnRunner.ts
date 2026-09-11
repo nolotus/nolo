@@ -70,6 +70,8 @@ import {
   type TurnRequest,
 } from "core/chat/internalTurnEvent";
 import { DEFAULT_TUI_AGENT_KEY, type TuiState } from "./session";
+import type { AttachedImage } from "./pasteImage";
+import type { ClipboardImageDeps } from "./clipboardImage";
 import { dimCliText, resolveCliColorEnabled } from "../client/terminalStyles";
 import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
@@ -123,6 +125,8 @@ export type WorkspaceOptions = {
   fetchImpl?: typeof fetch;
   saveAgentSelection?: typeof saveProfileAgentSelection;
   clipboardWriter?: (text: string) => Promise<void>;
+  clipboardReader?: () => Promise<string>;
+  clipboardImageReader?: (deps?: ClipboardImageDeps) => Promise<AttachedImage>;
 };
 
 

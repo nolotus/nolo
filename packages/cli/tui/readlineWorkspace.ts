@@ -46,6 +46,7 @@ import {
   summarizeAttachment,
 } from "./pasteImage";
 import {
+  ClipboardImageError,
   getDefaultClipboardTempDir,
   readClipboardImage,
   sweepStaleClipboardFiles,
@@ -451,6 +452,28 @@ let latestWorkspaceThemeOwner = 0;
 const WELCOME_ANIM_MAX_FRAME = 8;
 const WELCOME_ANIM_INTERVAL_MS = 70;
 
+/**
+ * 判断剪贴板图像读取错误是否可回退到系统文本读取。
+ *
+ * 仅当错误明确表示剪贴板无图片（empty-clipboard）或图片读取能力不可用
+ * （binary-missing / unsupported-platform）时允许文本回退；
+ * 远程会话（remote-session）、图片过大（too-large）、解析/超时失败（read-failed）
+ * 等非 empty/read-unavailable 真错误绝不伪装成文本。
+ */
+export function isClipboardImageFallbackEligible(error: unknown): boolean {
+  const code =
+    error instanceof ClipboardImageError
+      ? error.code
+      : typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : undefined;
+  return (
+    code === "empty-clipboard" ||
+    code === "binary-missing" ||
+    code === "unsupported-platform"
+  );
+}
+
 async function runTuiWorkspace(options: WorkspaceOptions) {
   const startupThemeMode = resolveTuiThemeMode(
     options.env ?? process.env,
@@ -484,6 +507,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           output,
           sendOsc52: isInteractiveInput(input),
         });
+  const readClipboardText =
+    options.clipboardReader ??
+    (async () => {
+      const { default: clipboard } = await import("clipboardy");
+      return await clipboard.read();
+    });
+  const readImage = options.clipboardImageReader ?? readClipboardImage;
   const selfUpdater: SelfUpdater =
     options.selfUpdater ?? ((target) => runSelfUpdateDetailed({
       output: target,
@@ -1904,7 +1934,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
       if (isPasteShortcut) {
         try {
-          const image = await readClipboardImage({
+          const image = await readImage({
             env: options.env ?? process.env,
           });
           state = {
@@ -1913,6 +1943,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           };
           emitCommandOutput(summarizeAttachment(image));
         } catch (error) {
+          if (isClipboardImageFallbackEligible(error)) {
+            let clipboardText = "";
+            try {
+              clipboardText = await readClipboardText();
+            } catch {
+              clipboardText = "";
+            }
+            if (clipboardText.length > 0) {
+              const pasteResult = applyTuiInputKey(
+                buffer,
+                `${PASTE_TOKEN_PREFIX}${clipboardText}`,
+                {},
+                cursorPos,
+                { pasteStore, cwd: state.cwd },
+              );
+              buffer = pasteResult.buffer;
+              cursorPos = pasteResult.cursorPos;
+              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+              return;
+            }
+          }
           const msg = error instanceof Error ? error.message : String(error);
           emitCommandOutput(
             themeText(`[nolo] ${msg}`, "warning", resolveCliColorEnabled()),

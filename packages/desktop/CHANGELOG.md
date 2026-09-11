@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.6
+
+## 0.71.0-alpha.6 (2026-09-11)
+
+### Bug Fixes
+
+* **tui:** preserve text paste when clipboard has no image ([58e7e9a](https://github.com/nolotus/bun-nolo/commit/58e7e9a79353f5ec423c849a4b3f1af4a18847ab))
+
+
 ## 0.71.0-alpha.5
 
 ## 0.71.0-alpha.5 (2026-09-11)
