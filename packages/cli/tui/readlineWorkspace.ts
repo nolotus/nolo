@@ -444,6 +444,11 @@ function persistAgentSelection(
 let latestWorkspaceThemeOwner = 0;
 
 async function runTuiWorkspace(options: WorkspaceOptions) {
+  const startupThemeMode = resolveTuiThemeMode(
+    options.env ?? process.env,
+    "terminal",
+  );
+  setActiveThemeMode(startupThemeMode);
   const accountSessionRuntime = createTuiAccountSessionRuntime(options.env ?? process.env);
   try {
   // Locale detection at module load only sees process.env; the workspace env
@@ -498,18 +503,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     output.write("\x1b[2J\x1b[H");
   }
 
-  // Terminal-native mode needs no background probe: Ghostty owns light/dark
-  // switching and the TUI emits only default-background + ANSI indexed colors.
-  // Fixed modes still probe once so their optional tinted surfaces can blend
-  // against the actual terminal base without delaying the default path.
-  // Each workspace starts from the product default. The optional env override
-  // belongs to this workspace only; it must not inherit a previous workspace's
-  // module-global command state when tests/embedders reuse the process.
-  const startupThemeMode = resolveTuiThemeMode(
-    options.env ?? process.env,
-    "terminal",
-  );
-  setActiveThemeMode(startupThemeMode);
   if (startupThemeMode !== "terminal") {
     const detected = await detectTerminalBackground({
       stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },

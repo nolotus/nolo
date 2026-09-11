@@ -63,7 +63,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
       muted: { hex: "5E6A78", ansiFallback: "\x1b[90m" }, // denser slate — 687584 read too blue in dense prose (inline code/tool labels); 5E6A78 pulls blue down while staying darker than the old value
     },
     dark: {
-      accent: { hex: "5BA3D9", ansiFallback: "\x1b[34m" }, // trail dark primary (was wrongly copied from catppuccin 89B4FA)
+      accent: { hex: "5BA3D9", ansiFallback: "\x1b[94m" }, // trail dark primary (was wrongly copied from catppuccin 89B4FA)
       chrome: { hex: "6C7086", ansiFallback: "\x1b[90m" },
       success: { hex: "5CB87A", ansiFallback: "\x1b[32m" }, // trail dark success (was A6E3A1)
       warning: { hex: "E6B35C", ansiFallback: "\x1b[33m" }, // trail dark warning (was F9E2AF)
@@ -83,7 +83,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
       muted: { hex: "6E7781", ansiFallback: "\x1b[90m" },
     },
     dark: {
-      accent: { hex: "89B4FA", ansiFallback: "\x1b[34m" }, // Catppuccin Mocha Blue
+      accent: { hex: "89B4FA", ansiFallback: "\x1b[94m" }, // Catppuccin Mocha Blue
       chrome: { hex: "6C7086", ansiFallback: "\x1b[90m" },
       success: { hex: "A6E3A1", ansiFallback: "\x1b[32m" },
       warning: { hex: "F9E2AF", ansiFallback: "\x1b[33m" },
@@ -103,7 +103,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
       muted: { hex: "716E61", ansiFallback: "\x1b[90m" },
     },
     dark: {
-      accent: { hex: "7E9CD8", ansiFallback: "\x1b[34m" }, // crystalBlue
+      accent: { hex: "7E9CD8", ansiFallback: "\x1b[94m" }, // crystalBlue
       chrome: { hex: "727169", ansiFallback: "\x1b[90m" },
       success: { hex: "98BB6C", ansiFallback: "\x1b[32m" },
       warning: { hex: "E6C384", ansiFallback: "\x1b[33m" },
@@ -123,7 +123,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
       muted: { hex: "6E6A8A", ansiFallback: "\x1b[90m" },
     },
     dark: {
-      accent: { hex: "8B9CF4", ansiFallback: "\x1b[34m" },
+      accent: { hex: "8B9CF4", ansiFallback: "\x1b[94m" },
       chrome: { hex: "5A5772", ansiFallback: "\x1b[90m" },
       success: { hex: "26BD6C", ansiFallback: "\x1b[32m" },
       warning: { hex: "F5A623", ansiFallback: "\x1b[33m" },
@@ -143,7 +143,7 @@ export const THEME_PALETTES: Record<string, Record<TuiBrightness, TuiThemeColors
       muted: { hex: "797593", ansiFallback: "\x1b[90m" },
     },
     dark: {
-      accent: { hex: "EB6F92", ansiFallback: "\x1b[35m" },
+      accent: { hex: "EB6F92", ansiFallback: "\x1b[95m" },
       chrome: { hex: "6E6A86", ansiFallback: "\x1b[90m" },
       success: { hex: "9CCFD8", ansiFallback: "\x1b[32m" },
       warning: { hex: "F6C177", ansiFallback: "\x1b[33m" },

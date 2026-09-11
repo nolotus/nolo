@@ -91,7 +91,7 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
     state.modeLabel && state.modeLabel !== "auto"
       ? ` · ${state.modeLabel}`
       : "";
-  const agentLabel = `🏔 ${agentDisplayName}${modeSuffix}`;
+  const agentLabel = `✦ ${agentDisplayName}${modeSuffix}`;
   const agentSegment = themeText(agentLabel, "accent", colorEnabled);
 
   const cwdSegment = themeText(`📁 ${formatCwd(state.cwd)}`, "info", colorEnabled);

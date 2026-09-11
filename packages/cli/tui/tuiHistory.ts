@@ -474,9 +474,9 @@ export function layoutTurnRows(
   if (role === "user") {
     const logicalLines = content.split("\n");
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
-    const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  ` : "┃  ";
-    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  ` : "┃  ";
-    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  ` : "┃  ";
+    const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
     const prefixWidth = 3;
 
@@ -793,8 +793,8 @@ function renderTailTurnBlock(
   if (role === "user") {
     const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
-    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  ` : "┃  ";
-    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  ` : "┃  ";
+    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const lines: string[] = [];
     for (const rawLine of content.split("\n")) {
       const styledLine = `${multilinePrefix}${rawLine}`;

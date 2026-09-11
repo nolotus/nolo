@@ -1,4 +1,14 @@
 
+## 0.67.0-alpha.4
+
+## 0.67.0-alpha.4 (2026-09-11)
+
+### Bug Fixes
+
+* **cli:** close ANSI formatting after user message gutter to prevent accent color leak ([12013c2](https://github.com/nolotus/bun-nolo/commit/12013c25c3211cac71290572cf142470e84b3ce0))
+* **cli:** upgrade dark mode accent ansi fallback to bright blue and modernize status icon ([4d2c7d9](https://github.com/nolotus/bun-nolo/commit/4d2c7d9c8ae6f5f3b2f8a02d0287ac1c585e08c2))
+
+
 ## 0.67.0-alpha.3
 
 ## 0.67.0-alpha.3 (2026-09-11)
