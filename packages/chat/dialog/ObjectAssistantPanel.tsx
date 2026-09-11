@@ -194,6 +194,8 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
         kind,
         contentKey: contentKey ?? table?.dbKey ?? undefined,
         title: table?.displayName ?? table?.tableId ?? entity?.title ?? "未命名表格",
+        tenantId: table?.tenantId,
+        tableId: table?.tableId,
         metadata: {
           tenantId: table?.tenantId,
           tableId: table?.tableId,

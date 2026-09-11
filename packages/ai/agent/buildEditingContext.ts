@@ -142,14 +142,12 @@ export function resolveEditingTargetTableIdentity(editingTarget?: {
     const tenantId =
         (typeof editingTarget.tenantId === "string" && editingTarget.tenantId) ||
         (typeof metadata?.tenantId === "string" && metadata.tenantId) ||
-        (editingTarget.key?.startsWith("meta-") ? editingTarget.key.split("-")[1] : undefined);
+        undefined;
 
     const tableId =
         (typeof editingTarget.tableId === "string" && editingTarget.tableId) ||
         (typeof metadata?.tableId === "string" && metadata.tableId) ||
-        (editingTarget.key?.startsWith("meta-")
-            ? editingTarget.key.split("-").slice(2).join("-")
-            : editingTarget.key);
+        undefined;
 
     if (!tenantId || !tableId) return null;
     return { tenantId, tableId };
@@ -236,7 +234,7 @@ export const buildEditingContextSummary = (
         if (!table) return null;
 
 
-        const columns = Array.isArray(table.columns) ? table.columns : [];
+        const columns: any[] = Array.isArray(table.columns) ? table.columns : [];
 
 
         const columnSummaries = columns.length

@@ -255,6 +255,8 @@ type RuntimeArgs = {
   contentKey?: string | null;
   title?: string | null;
   summary?: string | null;
+  tenantId?: string | null;
+  tableId?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -287,13 +289,14 @@ export const buildObjectAssistantRuntimeOptions = (
   }
 
   if (kind === "table") {
-    const metaTenantId =
-      typeof metadata?.tenantId === "string" ? metadata.tenantId : undefined;
-    const metaTableId =
-      typeof metadata?.tableId === "string" ? metadata.tableId : undefined;
-    const keyParts = contentKey?.startsWith("meta-") ? contentKey.split("-") : [];
-    const tenantId = metaTenantId ?? (keyParts.length >= 3 ? keyParts[1] : undefined);
-    const tableId = metaTableId ?? (keyParts.length >= 3 ? keyParts.slice(2).join("-") : contentKey ?? undefined);
+    const tenantId =
+      (typeof args.tenantId === "string" && args.tenantId) ||
+      (typeof metadata?.tenantId === "string" && metadata.tenantId) ||
+      undefined;
+    const tableId =
+      (typeof args.tableId === "string" && args.tableId) ||
+      (typeof metadata?.tableId === "string" && metadata.tableId) ||
+      undefined;
 
     return {
       editingTarget: {
