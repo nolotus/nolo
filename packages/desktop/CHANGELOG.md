@@ -1,4 +1,13 @@
 
+## 0.69.0-alpha.1
+
+## 0.69.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **payments:** rework Waffo CNY recharge with shared quote module ([8ccc3a4](https://github.com/nolotus/bun-nolo/commit/8ccc3a41892dd915a85d01b4e1be46e78cadb45e))
+
+
 ## 0.68.0-alpha.1
 
 ## 0.68.0-alpha.1 (2026-09-11)

@@ -21,11 +21,11 @@ export default {
         customPlaceholder:
           "Enter a whole number between {{min}} and {{max}} points",
         rateHint:
-          "{{min}}-{{max}} points per order (whole numbers). The larger the top-up, the lower the price per point.",
+          "{{min}}-{{max}} whole-number credits per order. Each credit has CNY 1 principal; card processing fees are shown separately. Tax and bank FX may be added at checkout.",
         neverExpire: "Points never expire.",
         unlockPro: "{{n}} more points unlocks Pro — real-time web search and batch file analysis.",
         bestValue: "Best value",
-        customAmountHint: "This order costs about {{price}}.",
+        customAmountHint: "Principal CNY {{principalCny}}; payment fee about USD {{feeUsd}}; total USD {{totalUsd}}. FX is the configured checkout rate: CNY {{cnyPerUsd}} per USD. Tax and bank FX may be added at checkout.",
         waffoTrust:
           "Payments are processed by Waffo Pancake under PCI-DSS. Points are credited automatically once the payment is confirmed.",
         methodLabel: "Payment method",
@@ -97,11 +97,11 @@ export default {
         recommended: "推荐",
         customPlaceholder: "请输入 {{min}}-{{max}} 之间的整数积分",
         rateHint:
-          "单笔 {{min}}-{{max}} 积分（整数）。充得越多，每积分单价越低。",
+          "单笔 {{min}}-{{max}} 积分（整数）。每积分本金为人民币 1 元；支付手续费单独显示，税费和银行汇率可能在结账时另计。",
         neverExpire: "积分永久有效，不设有效期。",
         unlockPro: "再充 {{n}} 积分即可解锁专业版：实时联网搜索、批量文件分析。",
         bestValue: "最划算",
-        customAmountHint: "本次约需 {{price}}。",
+        customAmountHint: "本金人民币 {{principalCny}}；支付手续费约 USD {{feeUsd}}；合计 USD {{totalUsd}}。汇率为结账配置汇率：1 USD = {{cnyPerUsd}} 元。税费和银行汇率可能在结账时另计。",
         waffoTrust:
           "支付由 Waffo Pancake 处理并符合 PCI-DSS 国际安全标准，回调确认后积分自动到账。",
         methodLabel: "支付方式",
@@ -170,11 +170,11 @@ export default {
         recommended: "推薦",
         customPlaceholder: "請輸入 {{min}}-{{max}} 之間的整數積分",
         rateHint:
-          "單筆 {{min}}-{{max}} 積分（整數）。儲值越多，每積分單價越低。",
+          "單筆 {{min}}-{{max}} 積分（整數）。每積分本金為人民幣 1 元；支付手續費單獨顯示，稅費和銀行匯率可能在結帳時另計。",
         neverExpire: "積分永久有效，不設有效期限。",
         unlockPro: "再儲值 {{n}} 積分即可解鎖專業版：即時聯網搜尋、批次檔案分析。",
         bestValue: "最划算",
-        customAmountHint: "本次約需 {{price}}。",
+        customAmountHint: "本金人民幣 {{principalCny}}；支付手續費約 USD {{feeUsd}}；合計 USD {{totalUsd}}。匯率為結帳配置匯率：1 USD = {{cnyPerUsd}} 元。稅費和銀行匯率可能在結帳時另計。",
         waffoTrust:
           "支付由 Waffo Pancake 處理並符合 PCI-DSS 國際安全標準，回呼確認後積分自動入帳。",
         methodLabel: "支付方式",
@@ -243,11 +243,11 @@ export default {
         recommended: "おすすめ",
         customPlaceholder: "{{min}}〜{{max}} の整数ポイントを入力してください",
         rateHint:
-          "1回あたり {{min}}〜{{max}} ポイント（整数）。金額が大きいほど1ポイント単価が下がります。",
+          "1回 {{min}}〜{{max}}ポイント（整数）。各ポイントの元本は人民元1元で、決済手数料は別表示です。税・銀行の為替差は決済時に加わる場合があります。",
         neverExpire: "ポイントに有効期限はありません。",
         unlockPro: "あと {{n}} ポイントでプロ版（リアルタイム検索・一括ファイル分析）が解放されます。",
         bestValue: "最もお得",
-        customAmountHint: "今回のお支払いは約 {{price}} です。",
+        customAmountHint: "元本は人民元 {{principalCny}}、決済手数料は約 USD {{feeUsd}}、合計は USD {{totalUsd}} です。為替は設定済みの決済換算レート（1 USD = {{cnyPerUsd}} 元）です。税・銀行の為替差は決済時に加わる場合があります。",
         waffoTrust:
           "決済は Waffo Pancake が PCI-DSS 準拠で処理します。確認後、ポイントは自動的に反映されます。",
         methodLabel: "決済方法",
