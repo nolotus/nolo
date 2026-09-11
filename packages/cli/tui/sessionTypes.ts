@@ -106,6 +106,13 @@ export type TuiState = {
    */
   dialogCreditsBase?: number;
   /**
+   * 本轮 turn 进行中已确认的平台计费帧折算之和（逐帧实时累加）。
+   * 数据源：llm-end 事件的 usage（仅 billing_unit === "credits" 的帧）。
+   * 轮末与权威 turnCredits 结算时清零（accumulateSessionCredits 统一口径），
+   * 避免同一次调用被 live 值与 sessionCredits 双计。非平台计费恒为 undefined。
+   */
+  liveTurnCredits?: number;
+  /**
    * Measured estimate of built-in system+tools context (AGENTS.md, guidance,
    * skill index, tool schemas). Used by the status chip until provider usage
    * arrives in turnTokens.

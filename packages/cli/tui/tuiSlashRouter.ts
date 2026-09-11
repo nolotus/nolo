@@ -241,6 +241,7 @@ export async function runSubmittedSlashLine(
       // 的历史基数（新对话没有历史）。
       sessionCredits: undefined,
       dialogCreditsBase: undefined,
+      liveTurnCredits: undefined,
       cachedMemoryOverlay: undefined, // 新对话重新加载记忆
       estimatedContextTokens: estimateDefaultCliContextTokens({
         cwd: host.state.cwd,
@@ -295,6 +296,7 @@ export async function runSubmittedSlashLine(
         // 历史基数，本会话累加也随之归零。
         sessionCredits: undefined,
         dialogCreditsBase: undefined,
+        liveTurnCredits: undefined,
         cachedMemoryOverlay: undefined, // compact 创建新 dialog，重新加载记忆
         estimatedContextTokens: estimateDefaultCliContextTokens({
           cwd: host.state.cwd,
@@ -560,6 +562,7 @@ export async function runSubmittedSlashLine(
           // 若读取失败也不至于把旧对话的累计值残留显示在状态行。
           sessionCredits: undefined,
           dialogCreditsBase: undefined,
+          liveTurnCredits: undefined,
           cachedMemoryOverlay: undefined, // 切换对话后重新加载记忆
         };
         // 切到已有对话：读一次 dialog 记录的 totalCost 当历史基数，之后本会话

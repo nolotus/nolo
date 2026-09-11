@@ -51,6 +51,12 @@ export type AgentExecutionObservationEvent =
       model?: string;
       providerCallId?: string;
       errorMessage?: string;
+      /**
+       * 原始 provider usage 帧（含 cost / billing_unit / token 计数）。
+       * 供 CLI TUI 做轮内实时积分显示（platformCreditsFromUsage 折算）；
+       * token 级分析仍用下方 cache 投影，勿依赖本字段做上下文计算。
+       */
+      usage?: Record<string, unknown>;
       /** Per-request cache metrics from provider usage, for token-level analysis. */
       cache?: {
         inputTokens: number;

@@ -521,6 +521,10 @@ async function runCompleteWithTimeout(args: {
         ? { providerCallId: usage.provider_call_id.trim() }
         : {}),
       ...(errorMessage ? { errorMessage } : {}),
+      // 原始 usage 帧随行：CLI TUI 的实时积分（liveTurnCredits）靠它逐帧
+      // 折算，不必等整轮结束才看到 ⚡ 增长。与 cache 投影互补——cache 是
+      // token 级分析口径，usage 是计费口径（cost / billing_unit）。
+      ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
       ...(inputTokens > 0 || cacheHit > 0 || cacheMiss > 0
         ? {
             cache: {

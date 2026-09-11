@@ -1,4 +1,13 @@
 
+## 0.73.0-alpha.1
+
+## 0.73.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **tui:** show platform credits live during a turn instead of only at turn end ([5b0daf7](https://github.com/nolotus/bun-nolo/commit/5b0daf779c92848a1bea5b087afea9617d0a054c))
+
+
 ## 0.72.0-alpha.1
 
 ## 0.72.0-alpha.1 (2026-09-11)

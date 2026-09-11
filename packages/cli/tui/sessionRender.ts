@@ -60,12 +60,18 @@ export function renderComposerTokenChip(
  * 都没有时返回 undefined（而不是 0），让调用方区分「没花过」与「不该显示」。
  */
 export function resolveStatusLineCredits(
-  state: Pick<TuiState, "sessionCredits" | "dialogCreditsBase">,
+  state: Pick<
+    TuiState,
+    "sessionCredits" | "dialogCreditsBase" | "liveTurnCredits"
+  >,
 ): number | undefined {
   const base = state.dialogCreditsBase;
   const session = state.sessionCredits;
-  if (base === undefined && session === undefined) return undefined;
-  return (base ?? 0) + (session ?? 0);
+  const live = state.liveTurnCredits;
+  if (base === undefined && session === undefined && live === undefined) {
+    return undefined;
+  }
+  return (base ?? 0) + (session ?? 0) + (live ?? 0);
 }
 
 // ─── Status line ────────────────────────────────────────────────────────────

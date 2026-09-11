@@ -36,8 +36,8 @@ import {
 import { resolvePlatformAuthToken } from "../../agent-runtime/providerResolution";
 import { resolveCliMemory } from "../memoryRecall";
 import { readDbRecord } from "../agentRecordHelpers";
-import { resolveAgentContextWindow } from "../client/tokenUsage";
-import type { LocalAgentActionGate } from "../../agent-runtime/localLoop";
+import { resolveAgentContextWindow, platformCreditsFromUsage } from "../client/tokenUsage";
+import type { LocalAgentActionGate, LocalAgentLoopEvent } from "../../agent-runtime/localLoop";
 import type { ContextBlockScope } from "../../agent-runtime/contextBlockScope";
 import {
   readCommandActionGatePayload,
@@ -162,6 +162,13 @@ async function runAgentChat(
      * 原样透传给 agentRunner → runAgentTurn → local loop。
      */
     drainInjections?: () => string[];
+    /**
+     * 轮内实时平台计费帧：每次 provider 调用结束（llm-end 带平台 billing
+     * usage）回调一次，参数为该帧折算的积分。实现方负责累加进
+     * state.liveTurnCredits 并 scheduleRender；轮末由 finally 统一清零，
+     * 权威 turnCredits 经 accumulateSessionCredits 接管，不双计。
+     */
+    onLiveTurnCredits?: (credits: number) => void;
   } = {}
 ) {
   // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
@@ -382,6 +389,18 @@ async function runAgentChat(
     // transcript 的进展卡片；dock 本身也靠它接收模型轮询带回来的快照。
     ...(options.onAgentRunStatus ? { onAgentRunStatus: options.onAgentRunStatus } : {}),
     ...(options.drainInjections ? { drainInjections: options.drainInjections } : {}),
+    // 轮内实时积分：llm-end 带原始 usage 时按平台计费口径逐帧折算上报。
+    // 口径与轮末 sumPlatformCredits 同源（platformCreditsFromUsage），
+    // 只认 billing_unit === "credits" 的帧；非平台计费不产生回调。
+    ...(options.onLiveTurnCredits
+      ? {
+          onLoopEvent: (event: LocalAgentLoopEvent) => {
+            if (event.kind !== "llm-end" || !event.usage) return;
+            const credits = platformCreditsFromUsage(event.usage);
+            if (credits !== undefined) options.onLiveTurnCredits!(credits);
+          },
+        }
+      : {}),
     ...(skillAllowedTools !== undefined
       ? { allowedToolNames: skillAllowedTools }
       : {}),
@@ -939,6 +958,11 @@ export async function runOneAgentTurn(
   ctx.forcedStop = false;
   ctx.turnEpoch += 1;
   const myEpoch = ctx.turnEpoch;
+  // 轮内实时积分从 0 开始：上一轮若经异常路径退出（runAgentChat 抛出、
+  // accumulateSessionCredits 未执行），这里兜底清掉残留，防止下一轮把
+  // 旧账叠加进 live 值造成重复显示。正常路径的清零在
+  // accumulateSessionCredits（readlineWorkspace 侧）。
+  ctx.state = { ...ctx.state, liveTurnCredits: undefined };
   ctx.history.followBottom = true;
   // 屏幕上印什么 ≠ 送进模型的是什么。终态唤醒是系统事件，不是用户发言：
   // 模型仍收完整摘要（message），transcript 只留一行紧凑状态，且不套用户
@@ -1057,6 +1081,19 @@ export async function runOneAgentTurn(
           } else {
             ctx.activityIndicator.clearAgentRun();
           }
+        },
+        // 轮内实时积分：每帧即累加进 liveTurnCredits 并节流重绘，让 ⚡ 在
+        // provider 调用完成时就跳一下，而不是等整轮结束才出现。轮末由
+        // accumulateSessionCredits 用权威 turnCredits 结算（readlineWorkspace
+        // 侧清零 live 值），本会话三条退出路径（正常 / abort / forceStop）
+        // 都汇聚在那里，live 残留不会跨轮泄漏。
+        onLiveTurnCredits: (credits) => {
+          if (ctx.sessionEnded) return;
+          ctx.state = {
+            ...ctx.state,
+            liveTurnCredits: (ctx.state.liveTurnCredits ?? 0) + credits,
+          };
+          ctx.scheduleRender();
         },
       },
     );

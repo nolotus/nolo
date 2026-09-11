@@ -978,6 +978,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 中断 / 失败的 turn 上同样有值——那些轮次的 provider 调用照样扣了费。
   // 只在平台计费时有值：自有 API / 订阅制为 undefined，累计保持不变。
   const accumulateSessionCredits = (credits: number | undefined) => {
+    // liveTurnCredits 随权威值结算一并清零：本轮的量已并入 sessionCredits
+    // （runResult.turnCredits 是「全轮逐次求和」的权威口径，与 llm-end 逐帧
+    // 折算同源），再保留 live 值就是双计。credits 为 undefined（非平台计费）
+    // 时同样清——本轮既然没有平台计费帧，live 值也不可能是真实消费。
+    state = { ...state, liveTurnCredits: undefined };
     if (credits === undefined || !Number.isFinite(credits)) return;
     state = { ...state, sessionCredits: (state.sessionCredits ?? 0) + credits };
   };
