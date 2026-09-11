@@ -404,9 +404,9 @@ export function scanReduxSource(rel: string, source: string): ReduxBoundaryViola
   // Check app/store Redux APIs. Session/domain APIs exported by app/store are
   // deliberately not included in this set, so non-Redux migrations remain free
   // to use them.
-  const appStoreImportRegex = /(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s+from\s*["'](?:app\/store|\.\.?\/store)["']/g;
+  const appStoreImportRegex = /(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s+from\s*["']app\/store["']/g;
   const importsReduxAppStoreApi =
-    /import\s+\*\s+as\s+\w+\s+from\s*["'](?:app\/store|\.\.?\/store)["']/.test(
+    /import\s+\*\s+as\s+\w+\s+from\s*["']app\/store["']/.test(
       code
     ) ||
     Array.from(code.matchAll(appStoreImportRegex)).some((match) =>

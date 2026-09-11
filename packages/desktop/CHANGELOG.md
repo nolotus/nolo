@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.3
+
+## 0.71.0-alpha.3 (2026-09-11)
+
+### Bug Fixes
+
+* **app:** narrow redux boundary to canonical app/store entry ([436f68d](https://github.com/nolotus/bun-nolo/commit/436f68dce6be293dfc02264daa8b32ef6835f5d8))
+
+
 ## 0.71.0-alpha.2
 
 ## 0.71.0-alpha.2 (2026-09-11)

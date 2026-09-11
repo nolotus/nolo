@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAppDispatch } from "./store";
+import { useAppDispatch } from "app/store";
 import { read, readAndWait } from "database/dbSlice";
 
 const toFetchError = (err: unknown): Error => {
