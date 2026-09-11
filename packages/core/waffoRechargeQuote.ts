@@ -12,7 +12,7 @@ export interface WaffoRechargeQuote {
   totalUsd: string;
   feeCny: string;
   totalCny: string;
-  currency: "USD";
+  currency: "USD" | "CNY";
   cnyPerUsd: number;
 }
 
@@ -34,7 +34,8 @@ const money = (value: number) => (value / 100).toFixed(2);
 
 export const quoteWaffoRecharge = (
   credits: number,
-  pricing: WaffoRechargePricing
+  pricing: WaffoRechargePricing,
+  currency: "USD" | "CNY" = "USD"
 ): WaffoRechargeQuote => {
   if (!Number.isSafeInteger(credits) || credits <= 0) {
     throw new Error("credits must be a positive integer");
@@ -51,29 +52,28 @@ export const quoteWaffoRecharge = (
     throw new Error("invalid Waffo recharge pricing");
   }
 
-  // 本金按标准货币舍入（展示值 ≈ 面额）；总额向上取整做 gross-up，
-  // 保证扣除通道费后净收入 ≥ 本金，零头全部归入 fee。
   const principalCny = credits;
+  if (currency === "CNY") {
+    const principalCnyCents = credits * 100;
+    // 直接在 fen 上取整；centsCeil 接收元单位会再 ×100，这里不能复用。
+    const feeCnyCents = Math.ceil(principalCnyCents * pricing.processorPercent / (1 - pricing.processorPercent));
+    const totalCnyCents = principalCnyCents + feeCnyCents;
+    if (totalCnyCents > MAX_CENTS) throw new Error("Waffo recharge amount exceeds safe monetary precision");
+    return {
+      credits, principalCny, principalUsd: "0.00", feeUsd: "0.00", totalUsd: "0.00",
+      feeCny: money(feeCnyCents), totalCny: money(totalCnyCents), currency, cnyPerUsd: pricing.cnyPerUsd,
+    };
+  }
+  // USD card: gross-up processor fees while keeping the CNY principal explicit.
   const principalUsdCents = centsRound(principalCny / pricing.cnyPerUsd);
   const fixedCents = centsCeil(pricing.processorFixed);
   const grossCents = (principalUsdCents + fixedCents) / (1 - pricing.processorPercent);
   const totalUsdCents = centsCeil(grossCents / 100);
-  if (totalUsdCents < principalUsdCents || totalUsdCents > MAX_CENTS) {
-    throw new Error("Waffo recharge amount exceeds safe monetary precision");
-  }
+  if (totalUsdCents < principalUsdCents || totalUsdCents > MAX_CENTS) throw new Error("Waffo recharge amount exceeds safe monetary precision");
   const feeUsdCents = totalUsdCents - principalUsdCents;
-  const totalCny = totalUsdCents * pricing.cnyPerUsd / 100;
-  const feeCny = feeUsdCents * pricing.cnyPerUsd / 100;
-
   return {
-    credits,
-    principalCny,
-    principalUsd: money(principalUsdCents),
-    feeUsd: money(feeUsdCents),
-    totalUsd: money(totalUsdCents),
-    feeCny: feeCny.toFixed(2),
-    totalCny: totalCny.toFixed(2),
-    currency: "USD",
-    cnyPerUsd: pricing.cnyPerUsd,
+    credits, principalCny, principalUsd: money(principalUsdCents), feeUsd: money(feeUsdCents), totalUsd: money(totalUsdCents),
+    feeCny: (feeUsdCents * pricing.cnyPerUsd / 100).toFixed(2),
+    totalCny: (totalUsdCents * pricing.cnyPerUsd / 100).toFixed(2), currency, cnyPerUsd: pricing.cnyPerUsd,
   };
 };

@@ -1,4 +1,13 @@
 
+## 0.72.0-alpha.1
+
+## 0.72.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **payments:** add CNY WeChat channel with per-channel minimums ([e7e3189](https://github.com/nolotus/bun-nolo/commit/e7e31891b9c3fc6f875296a8864cce7476269f8f))
+
+
 ## 0.71.0-alpha.7
 
 ## 0.71.0-alpha.7 (2026-09-11)

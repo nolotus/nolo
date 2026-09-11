@@ -31,6 +31,7 @@ export default {
         methodLabel: "Payment method",
         methods: {
           waffo: { name: "Global payment", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "WeChat Pay (CNY)", desc: "Pay in RMB via WeChat; 1 credit = CNY 1 principal + 3.9% processing fee" },
           wechat: { name: "WeChat Pay", desc: "QR transfer" },
           alipay: { name: "Alipay", desc: "QR transfer" },
           cryptoDesc: "{{network}} network",
@@ -107,6 +108,7 @@ export default {
         methodLabel: "支付方式",
         methods: {
           waffo: { name: "全球支付", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "微信支付（人民币）", desc: "人民币直付微信，1 积分 = 1 元本金 + 3.9% 支付手续费" },
           wechat: { name: "微信支付", desc: "扫码转账" },
           alipay: { name: "支付宝", desc: "扫码转账" },
           cryptoDesc: "{{network}} 网络",
@@ -180,6 +182,7 @@ export default {
         methodLabel: "支付方式",
         methods: {
           waffo: { name: "全球支付", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "微信支付（人民幣）", desc: "人民幣直付微信，1 積分 = 1 元本金 + 3.9% 支付手續費" },
           wechat: { name: "微信支付", desc: "掃碼轉帳" },
           alipay: { name: "支付寶", desc: "掃碼轉帳" },
           cryptoDesc: "{{network}} 網路",
@@ -253,6 +256,7 @@ export default {
         methodLabel: "決済方法",
         methods: {
           waffo: { name: "グローバル決済", desc: "Visa / MasterCard / Apple Pay" },
+          cnyWechat: { name: "WeChat Pay（人民元）", desc: "人民元でそのまま支払い、1ポイント = 1元の元本 + 3.9% の決済手数料" },
           wechat: { name: "WeChat Pay", desc: "QR送金" },
           alipay: { name: "Alipay", desc: "QR送金" },
           cryptoDesc: "{{network}} ネットワーク",
