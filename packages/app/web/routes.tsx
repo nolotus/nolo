@@ -113,12 +113,23 @@ const commonRoutes = [
   { path: ":pageKey", element: withSuspense(<PageLoader />, "页面内容") },
 ];
 
+// Browser spike 探针路由只在 dev/test 构建注册，production 路由表完全不包含它们。
+// 判断必须内联在注册点：esbuild define 把 process.env.NODE_ENV 静态替换为 "production"
+// 后，内联表达式在 minify（生产默认开）下整支折叠消失；抽成共享 const 实测会把死分支
+// 留在产物里（esbuild 不做跨语句常量传播）。注意 NOLO_WEB_SKIP_MINIFY=1 时只剩运行时
+// 挡板；也不能用 app/utils/env 的 isDevelopment——浏览器 bundle（无 process 全局）恒为
+// true，挡不住 production。
 export const routes = () => [
-  {
-    // iframe fixture 必须裸渲染，不能套 MainLayout shell，否则 iframe 内会出现整个 app。
-    path: "/dev/browser-fixture",
-    element: withSuspense(<BrowserFixturePage />, "Browser Fixture"),
-  },
+  // fixture 是 iframe 内容页，必须保持裸 route（不套 MainLayout）。
+  ...(process.env.NODE_ENV !== "production"
+    ? [
+        {
+          // iframe fixture 必须裸渲染，不能套 MainLayout shell，否则 iframe 内会出现整个 app。
+          path: "/dev/browser-fixture",
+          element: withSuspense(<BrowserFixturePage />, "Browser Fixture"),
+        },
+      ]
+    : []),
   {
     path: "/",
     element: <MainLayout />,
@@ -189,10 +200,15 @@ export const routes = () => [
         path: "dev/email-e2e",
         element: withSuspense(<AgentEmailE2EPage />, "Agent Email E2E"),
       },
-      {
-        path: "dev/browser-workbench",
-        element: withSuspense(<BrowserPage />, "Browser Workbench"),
-      },
+      // workbench 是 shell 探针页，必须保持 MainLayout child route。
+      ...(process.env.NODE_ENV !== "production"
+        ? [
+            {
+              path: "dev/browser-workbench",
+              element: withSuspense(<BrowserPage />, "Browser Workbench"),
+            },
+          ]
+        : []),
     ],
   },
 ];

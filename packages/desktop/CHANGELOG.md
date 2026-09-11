@@ -1,4 +1,13 @@
 
+## 0.67.0-alpha.2
+
+## 0.67.0-alpha.2 (2026-09-11)
+
+### Bug Fixes
+
+* **app:** isolate browser probe routes from production ([37061bb](https://github.com/nolotus/bun-nolo/commit/37061bbd517323ca02bdccc1b101900283633c2a)), closes [app/utils/env#isDevelopment](https://github.com/app/utils/env/issues/isDevelopment)
+
+
 ## 0.67.0-alpha.1
 
 ## 0.67.0-alpha.1 (2026-09-10)
