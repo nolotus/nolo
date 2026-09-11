@@ -1,4 +1,13 @@
 
+## 0.71.0-alpha.4
+
+## 0.71.0-alpha.4 (2026-09-11)
+
+### Bug Fixes
+
+* **agent:** inherit provider configuration when creating agents ([b99fa0c](https://github.com/nolotus/bun-nolo/commit/b99fa0c2d0ead5d2a277299def2cd12b4fe7e5a6))
+
+
 ## 0.71.0-alpha.3
 
 ## 0.71.0-alpha.3 (2026-09-11)

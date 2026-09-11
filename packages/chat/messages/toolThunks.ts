@@ -51,6 +51,7 @@ interface ProcessToolDataPayload {
   toolCall: any;
   parentMessageId: string;
   toolRunId: string;
+  agentKey?: string;
 }
 
 export interface HandleToolCallsPayload {
@@ -65,7 +66,7 @@ export interface HandleToolCallsPayload {
 const processToolData = createAsyncThunk(
   "message/processToolData",
   async (args: ProcessToolDataPayload, thunkApi: any) => {
-    const { toolCall, parentMessageId, toolRunId } = args;
+    const { toolCall, parentMessageId, toolRunId, agentKey } = args;
     const { dispatch, rejectWithValue } = thunkApi;
 
     const func = toolCall.function;
@@ -218,6 +219,7 @@ const processToolData = createAsyncThunk(
       const toolResult = await found.executor(executionToolArgs, thunkApi, {
         parentMessageId,
         toolRunId,
+        agentKey,
       });
 
       const rawData = toolResult?.rawData ?? toolResult;
@@ -422,6 +424,7 @@ export const handleToolCalls = createAsyncThunk(
             toolCall: { ...toolCall, id: toolCallId },
             parentMessageId: messageId,
             toolRunId,
+            agentKey: agentConfig.dbKey,
           })
         ).unwrap();
 

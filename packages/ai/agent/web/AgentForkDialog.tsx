@@ -11,7 +11,11 @@ import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { Dialog } from "render/web/ui/modal/Dialog";
 import Button from "render/web/ui/Button";
-import { buildForkAgentFormData } from "ai/agent/forkAgent";
+import {
+  assertForkedAgentProviderConfig,
+  buildForkAgentFormData,
+  getForkedAgentProviderExpectation,
+} from "ai/agent/forkAgent";
 import { getPublicAgentDbKey } from "ai/agent/publicAgentIdentity";
 import { createAgentKey } from "database/keys";
 import type { Agent } from "app/types";
@@ -111,19 +115,22 @@ const AgentForkDialog: React.FC<AgentForkDialogProps> = ({
         full = fetched as Agent;
       }
 
-      // 2) 构造 formData，不允许复制时提示并关闭。
-      const formData = buildForkAgentFormData(full);
+      // 2) 构造 formData。先确认认证主体，再由共享策略决定是否能继承 apiKeyRef。
+      if (!currentUserId) {
+        toast.error(t("fork.failed", "复制失败，请稍后重试"));
+        return;
+      }
+      const formData = buildForkAgentFormData(full, {
+        targetUserId: currentUserId,
+      });
       if (!formData) {
         toast.error(t("fork.notAllowed", "这个 AI 不允许复制"));
         onClose();
         return;
       }
+      const expectedProviderConfig = getForkedAgentProviderExpectation(formData);
 
       // 3) 创建：spaceId 传 undefined = 「全部视图 / 不归属空间」。
-      if (!currentUserId) {
-        toast.error(t("fork.failed", "复制失败，请稍后重试"));
-        return;
-      }
       const createdAgent = await dispatch(
         createAgent({
           userId: currentUserId,
@@ -133,6 +140,7 @@ const AgentForkDialog: React.FC<AgentForkDialogProps> = ({
           spaceId: target,
         }),
       ).unwrap();
+      assertForkedAgentProviderConfig(createdAgent, expectedProviderConfig);
 
       if (target) {
         const agentDbKey = createdAgent.isPublic

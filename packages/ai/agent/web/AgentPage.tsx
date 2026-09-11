@@ -937,10 +937,7 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
     item?.allowFork === true &&
     isLoggedIn &&
     !!currentUserId &&
-    item.userId !== currentUserId &&
-    // 非 platform（custom / cli）依赖作者本机凭证，buildForkAgentFormData 会拒绝，
-    // 这里同步守门，避免按钮显示了却在确认时被拒。
-    (!item.apiSource || item.apiSource === "platform");
+    item.userId !== currentUserId;
   const [forkVisible, setForkVisible] = useState(false);
   const openFork = useCallback(() => setForkVisible(true), []);
   const closeFork = useCallback(() => setForkVisible(false), []);

@@ -91,8 +91,7 @@ const AgentBlockComponent = ({
     hasMounted &&
     item.allowFork === true &&
     isLoggedIn &&
-    item.userId !== currentUserId &&
-    (!item.apiSource || item.apiSource === "platform");
+    item.userId !== currentUserId;
 
   const [forkVisible, setForkVisible] = useState(false);
   const openFork = useCallback(() => setForkVisible(true), []);

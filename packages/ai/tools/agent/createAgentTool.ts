@@ -15,6 +15,13 @@ import type { ModelWithProvider } from "ai/llm/models";
 import i18n from "app/i18n";
 import { toTrimmedString } from "core/toTrimmedString";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
+import type { ToolExecutorContext } from "ai/tools";
+import { fetchAgentByDbKey } from "./agentUpdateShared";
+import {
+    assertForkedAgentProviderConfig,
+    buildForkAgentFormData,
+    getForkedAgentProviderExpectation,
+} from "ai/agent/forkAgent";
 
 type ReasoningEffort = "low" | "medium" | "high";
 
@@ -38,8 +45,11 @@ export type GreetingConfigArg = {
 
 export type CreateAgentToolArgs = {
     name: string;
+    /** Overrides when cloning the currently running Agent (schema leaves these optional). */
     model: string;
-    provider: string; // 必填
+    provider: string;
+    /** Explicitly select platform billing; otherwise source Agent API settings are inherited. */
+    apiSource?: "platform";
     prompt?: string;
     introduction?: string;
     greeting?: string | GreetingConfigArg; // 支持纯文本或带 menu 的对象
@@ -109,8 +119,9 @@ const findModelConfig = async (
 
 /**
  * [Schema] createAgent 工具定义：供 LLM 规划时调用
- * - name / model / provider 必填：保证创建出来的 Agent 配置完整且无歧义
- * - 其余字段可选：用于进一步定制 Agent 行为
+ * - name 必填；model 可显式覆盖，否则继承当前源 Agent
+ * - provider 仅供无源上下文的兼容创建；有源时继承且不可由模型越权改变
+ * - apiSource 只暴露显式 platform 选择，避免默认值意外改变计费来源
  */
 export const createAgentToolFunctionSchema = {
     name: "createAgent",
@@ -129,6 +140,11 @@ export const createAgentToolFunctionSchema = {
             provider: {
                 type: "string",
                 description: i18n.t("tools.createAgent.params.provider"),
+            },
+            apiSource: {
+                type: "string",
+                enum: ["platform"],
+                description: "显式选择平台计费；不传则继承当前 Agent 的 API 来源。",
             },
             prompt: {
                 type: "string",
@@ -292,8 +308,7 @@ export const createAgentToolFunctionSchema = {
                 ),
             },
         },
-        // provider 必填
-        required: ["name", "model", "provider"],
+        required: ["name"],
     },
 };
 
@@ -314,7 +329,7 @@ const normalizeTags = (tags?: string[] | string): string => {
  * - 不暴露自定义 API 字段（customProviderUrl / apiKey 等）
  * - 根据 (model, provider) 自动补 hasVision 等能力字段
  */
-const buildFormDataFromArgs = async (args: CreateAgentToolArgs): Promise<AgentFormData> => {
+const buildPlatformFormDataFromArgs = async (args: CreateAgentToolArgs): Promise<AgentFormData> => {
     const {
         name,
         model,
@@ -436,7 +451,8 @@ const findSpaceConfig = (
  */
 export async function createAgentToolFunc(
     args: CreateAgentToolArgs,
-    thunkApi: any
+    thunkApi: any,
+    runtime?: ToolExecutorContext,
 ): Promise<{ rawData: Agent; displayData: string }> {
     const state = thunkApi.getState() as RootState;
     const currentUserId = selectIdentityUserId(state);
@@ -449,17 +465,10 @@ export async function createAgentToolFunc(
         throw new Error("创建 Agent 失败：当前未登录或缺少 userId。");
     }
 
-    const { name, model, provider, linkedSpaces } =
-        args || ({} as CreateAgentToolArgs);
+    const { name, linkedSpaces } = args || ({} as CreateAgentToolArgs);
 
     if (!name || typeof name !== "string" || !name.trim()) {
         throw new Error("创建 Agent 失败：必须提供非空的 name 字段。");
-    }
-    if (!model || typeof model !== "string" || !model.trim()) {
-        throw new Error("创建 Agent 失败：必须提供非空的 model 字段。");
-    }
-    if (!provider || typeof provider !== "string" || !provider.trim()) {
-        throw new Error("创建 Agent 失败：必须提供非空的 provider 字段。");
     }
 
     // --- 处理 Space ID / Name 解析 ---
@@ -488,9 +497,56 @@ export async function createAgentToolFunc(
         }
     }
 
-    const formData = await buildFormDataFromArgs(args);
-    // 覆盖为解析后的 ID 列表
-    formData.linkedSpaces = resolvedLinkedSpaces;
+    const db = (thunkApi.extra as any)?.db;
+    const sourceAgent = runtime?.agentKey
+        ? await fetchAgentByDbKey(runtime.agentKey, db)
+        : null;
+    let formData: AgentFormData;
+    if (sourceAgent) {
+        const inherited = buildForkAgentFormData(
+            // Internal creation is not a marketplace fork; policy still enforces all secret boundaries.
+            { ...sourceAgent, allowFork: true },
+            {
+                targetUserId: currentUserId,
+                overrides: {
+                    name: toTrimmedString(name),
+                    ...(typeof args.model === "string" ? { model: toTrimmedString(args.model) } : {}),
+                    ...(args.apiSource === "platform" ? { apiSource: "platform" as const } : {}),
+                },
+            },
+        );
+        if (!inherited) throw new Error("创建 Agent 失败：无法继承当前 Agent 配置。");
+        // Provider/API fields stay source-owned; only name/model and behavioural args are overrides.
+        // Explicit behavioural arguments still override inherited behaviour.
+        Object.assign(inherited, {
+            name: toTrimmedString(name),
+            ...(args.prompt !== undefined ? { prompt: args.prompt } : {}),
+            ...(args.introduction !== undefined ? { introduction: args.introduction } : {}),
+            ...(args.greeting !== undefined ? { greeting: args.greeting } : {}),
+            ...(args.tools !== undefined ? { tools: args.tools } : {}),
+            ...(args.disabledTools !== undefined ? { disabledTools: args.disabledTools } : {}),
+            ...(args.enabledPacks !== undefined ? { enabledPacks: args.enabledPacks } : {}),
+            ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
+            ...(args.top_p !== undefined ? { top_p: args.top_p } : {}),
+            ...(args.frequency_penalty !== undefined ? { frequency_penalty: args.frequency_penalty } : {}),
+            ...(args.presence_penalty !== undefined ? { presence_penalty: args.presence_penalty } : {}),
+            ...(args.max_tokens !== undefined ? { max_tokens: args.max_tokens } : {}),
+            ...(args.reasoning_effort !== undefined ? { reasoning_effort: args.reasoning_effort } : {}),
+            isPublic: !!args.isPublic,
+            allowFork: !!args.allowFork,
+            tags: normalizeTags(args.tags),
+            references: (args.references as any) ?? [],
+            linkedSpaces: resolvedLinkedSpaces,
+        });
+        formData = inherited as AgentFormData;
+    } else {
+        if (!args.model?.trim() || !args.provider?.trim()) {
+            throw new Error("创建 Agent 失败：无法识别源 Agent 时必须提供 model 和 provider。");
+        }
+        formData = await buildPlatformFormDataFromArgs(args);
+        formData.linkedSpaces = resolvedLinkedSpaces;
+    }
+    const expectedProviderConfig = getForkedAgentProviderExpectation(formData as any);
 
     try {
         const agent: Agent = await thunkApi
@@ -502,6 +558,7 @@ export async function createAgentToolFunc(
                 })
             )
             .unwrap();
+        assertForkedAgentProviderConfig(agent, expectedProviderConfig);
 
         // 自动添加到当前空间侧边栏
         const currentSpaceId = getCurrentSpaceId();

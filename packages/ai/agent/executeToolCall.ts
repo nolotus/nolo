@@ -42,6 +42,7 @@ export async function executeToolCall(
     }
     const result = await toolDefinition.executor(toolArgs, thunkApi, {
       parentMessageId: context?.parentMessageId ?? "",
+      agentKey: context?.agentKey,
     });
     // executor 返回 { rawData, displayData? } 或直接返回字符串
     const raw = result?.rawData ?? result;
