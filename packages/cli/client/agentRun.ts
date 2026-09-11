@@ -619,13 +619,36 @@ type FailureCtx = {
 function buildAuthFailure(ctx: FailureCtx): string {
   // 401/403 is the one case where "fix the local credential" is correct.
   // For the platform transport the credential lives on nolo.chat, not the
-  // local machine, so point there instead.
-  const fix = ctx.where === "server chat proxy"
-    ? `Check the agent's provider/api-key settings on nolo.chat`
-    : `Fix the local credential/config and retry`;
+  // local machine, so point there instead — UNLESS the server explicitly said
+  // no token was provided at all (AUTH_NO_TOKEN): then the problem is this
+  // install not being logged in, not the agent's settings, and the fix text
+  // must say so (run `nolo login` / set AUTH_TOKEN), matching the copy already
+  // used by the non-interactive no-token path below.
+  const platformNoToken =
+    ctx.where === "server chat proxy" && isAuthNoTokenBody(ctx.message);
+  const fix = platformNoToken
+    ? `This install is not logged in — run \`nolo login\`, or set AUTH_TOKEN / NOLO_SERVER`
+    : ctx.where === "server chat proxy"
+      ? `Check the agent's provider/api-key settings on nolo.chat`
+      : `Fix the local credential/config and retry`;
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected). Detail: ${ctx.message} ` +
     `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
+  );
+}
+
+/**
+ * Detect the server's "no authentication token provided" 401 body so the auth
+ * failure hint can distinguish "this install never sent a token" (local login
+ * problem) from "the token was sent but the agent's platform credentials are
+ * wrong" (agent settings problem on nolo.chat). Matches both the parsed
+ * `authCode` field and the plain message, and survives the body being inlined
+ * into the error string by describeProviderFailure.
+ */
+export function isAuthNoTokenBody(message: string): boolean {
+  return (
+    /"authCode"\s*:\s*"AUTH_NO_TOKEN"/i.test(message) ||
+    /no authentication token provided/i.test(message)
   );
 }
 

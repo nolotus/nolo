@@ -204,6 +204,7 @@ import {
   runSubmittedSlashLine,
   type SlashDispatchHost,
 } from "./tuiSlashRouter";
+import { runTuiLogin } from "./tuiLogin";
 export {
   type FixedInputController,
   createNoopFixedInput,
@@ -443,6 +444,13 @@ function persistAgentSelection(
 // renderer singleton while a workspace is alive.
 let latestWorkspaceThemeOwner = 0;
 
+// Welcome sweep animation: one static first frame, then this many frames
+// replayed after composer setup (~0.6s total). Sweep math lives in
+// buildColoredScene (sweepLen reaches full 3 frames before maxFrames, so the
+// last frames hold a steady lit wordmark while stars/waves settle).
+const WELCOME_ANIM_MAX_FRAME = 8;
+const WELCOME_ANIM_INTERVAL_MS = 70;
+
 async function runTuiWorkspace(options: WorkspaceOptions) {
   const startupThemeMode = resolveTuiThemeMode(
     options.env ?? process.env,
@@ -512,20 +520,37 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (detected) applyDetectedBackground(detected);
   }
 
-  // Paint the welcome banner once, statically. The previous 15-frame animation
-  // blocked composer setup for ~1.5s (the input box only appeared after the
-  // loop finished) and repainted by moving the cursor up a fixed 8 lines. When
-  // any banner line wrapped on a narrow terminal the real on-screen line count
-  // exceeded 8, so the cursor never reached the top and each frame's sky row
-  // (✦ 🌙  ·) was left behind, stacking into the vertical columns seen in the
-  // bug report. A single static frame performs no cursor rewind, so wrapping
-  // can never corrupt it, and the composer mounts immediately afterwards. The
-  // terminal width is passed through so renderWelcome can drop the wide scene
-  // art on narrow terminals instead of letting it wrap.
+  // Paint the welcome banner, then animate it AFTER the composer mounts.
+  // The old 15-frame loop blocked composer setup for ~1.5s and rewound the
+  // cursor by a fixed 8 lines, which wrapped rows corrupted; the current
+  // design paints one static first frame (composer mounts right after), then
+  // replays the sweep via repaintBanner() — the wrap-safe, BSU/ESU-wrapped
+  // path also used for the update hint — so animation never blocks input and
+  // can never mis-count wrapped lines. When animation is disabled (non-TTY,
+  // tests, NOLO_CLI_NO_WELCOME_ANIM=1) maxFrames=0 keeps the wordmark fully
+  // lit on the static frame.
+  const welcomeAnimEnabled =
+    Boolean((output as { isTTY?: boolean }).isTTY) &&
+    process.env.NODE_ENV !== "test" &&
+    ((options.env ?? process.env).NOLO_CLI_NO_WELCOME_ANIM ?? "") !== "1";
   const bannerColumns = (output as { columns?: number }).columns;
   // 首帧字符串复用两次：写出 + 行数计算。避免把渲染逻辑（含主题/终端状态
-  // 读取）执行两遍，导致首帧与行数计算不一致。
-  const initialWelcome = renderWelcome(state, 0, 0, bannerColumns);
+  // 读取）执行两遍，导致首帧与行数计算不一致。宽度和 TTY 已知时逐行截断到
+  // 列宽（与 repaintBanner 同一函数）：长 tip / version 行在窄终端物理换行
+  // 会让实际行数超过逻辑行数，后续 repaint 的清行循环对不上，残留碎片。
+  const rawWelcome = renderWelcome(
+    state,
+    0,
+    welcomeAnimEnabled ? WELCOME_ANIM_MAX_FRAME : 0,
+    bannerColumns,
+  );
+  const initialWelcome =
+    typeof bannerColumns === "number"
+      ? rawWelcome
+          .split("\n")
+          .map((line) => padOrTruncateToWidth(line, Math.max(1, bannerColumns)))
+          .join("\n")
+      : rawWelcome;
   output.write(initialWelcome);
   let initialBannerLineCount = initialWelcome.split("\n").length;
 
@@ -757,7 +782,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 都当无更新），NOLO_CLI_NO_UPDATE_CHECK=1 可整体禁用。结果到达时若用户还
   // 停在欢迎页（未开始对话），从顶部重绘 banner 把 /update 提示带出来；已
   // 在对话中则只更新 state，不打断当前画面。
-  const repaintBanner = () => {
+  const repaintBanner = (frame = 0, maxFrames = 0) => {
     if (!(output as { isTTY?: boolean }).isTTY) return;
     // modal / dialog 拥有屏幕（如 /help、confirm）时不重绘，否则会擦掉弹层。
     if (fixedInput.isPaused()) return;
@@ -765,8 +790,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 终端可能已 resize：重绘时实时读宽度，让 renderWelcome 重新决定是否
     // 保留 scene，避免旧宽度下画的 banner 在新宽度 wrap 出残留。
     const currentColumns = (output as { columns?: number }).columns ?? 80;
-    const welcome = renderWelcome(state, 0, 0, currentColumns);
-    const lines = welcome.split("\n");
+    const welcome = renderWelcome(state, frame, maxFrames, currentColumns);
+    // welcome 以换行结尾，pinned agent notice 当初紧随其后再写一段；重绘时
+    // 必须一并重写，否则清行（clearLines 含 notice 行数）会把它从屏幕上抹掉。
+    const lines = (welcome + (pinnedAgentNotice ?? "")).split("\n");
     // 窄终端下 update hint / welcome hint 这类长行会物理换行，破坏"逻辑行数 =
     // 物理行数"的逐行定位；写入前按列宽截断，保证每行正好占一行。
     const safeWidth = Math.max(1, currentColumns);
@@ -807,6 +834,28 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       scheduleRender();
     }
   });
+
+  // 欢迎屏 sweep 动画：首帧已静态画出（sweep 未点亮），此处 composer 挂载
+  // 完毕后用 repaintBanner 的换行安全路径（padOrTruncateToWidth + BSU/ESU +
+  // composer 重绘）异步点亮，绝不阻塞输入。第一轮 turn 开始或播完即停；
+  // unref 保证计时器不拖住进程退出。
+  if (welcomeAnimEnabled) {
+    let animFrame = 0;
+    const animTimer = setInterval(() => {
+      animFrame += 1;
+      if (
+        sessionEnded ||
+        history.turns.length > 0 ||
+        history.currentRole !== null ||
+        animFrame >= WELCOME_ANIM_MAX_FRAME
+      ) {
+        clearInterval(animTimer);
+        return;
+      }
+      repaintBanner(animFrame, WELCOME_ANIM_MAX_FRAME);
+    }, WELCOME_ANIM_INTERVAL_MS);
+    animTimer.unref?.();
+  }
 
   let autoScrollTimer: ReturnType<typeof setInterval> | null = null;
   let lastDragMouseX = 1;
@@ -1529,6 +1578,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           state = { ...state, gitStatus };
         }
         scheduleRender();
+      } else if (res.action?.type === "login") {
+        // busy 期间的 /login：与空闲路径共用 runTuiLogin（同一服务端契约、
+        // 同一落盘），但输出走 raw output.write——busy 期间 streaming repaint
+        // 拥有 transcript pane，emitCommandOutput 的 history 写入会与流式
+        // 渲染竞争（与 handleBusyLocalSlash 其他分支的临时 notice 同形态）。
+        // 登录是长等待操作，做完后 token 热写进 env，下一 turn 立即生效。
+        const env = options.env ?? process.env;
+        state = res.nextState;
+        const outcome = await runTuiLogin(res.action.args ?? [], (text) => {
+          output.write(`${text}\n`);
+        });
+        if (outcome.status === "success") {
+          env.AUTH_TOKEN = outcome.token;
+        }
       } else if (res.action) {
         // `/switch` with no target (interactive picker) and `/switch
         // list` need to take over the screen, which races the in-flight

@@ -47,6 +47,7 @@ import {
   type TurnHistory,
 } from "./tuiHistory";
 import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
+import { runTuiLogin } from "./tuiLogin";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import { mergeAttachedImages, resolveAttachmentImageUrls } from "./pasteImage";
 import { readClipboardImage } from "./clipboardImage";
@@ -641,6 +642,22 @@ export async function runSubmittedSlashLine(
           themeText(`[nolo] Command execution failed: ${toErrorMessage(error)}`, "danger", resolveCliColorEnabled())
         );
       }
+    }
+  }
+
+  if (result.action?.type === "login") {
+    // /login 的 TUI 内登录流（空闲路径）。busy 路径走
+    // readlineWorkspace.handleBusyLocalSlash 的同名分支，两处共用
+    // runTuiLogin，保证行为一致。成功后把 token 热写进 options.env：
+    // 聊天分支每轮经 resolvePlatformAuthToken(options.env) 读取 bearer，
+    // 当前会话立即生效，无需重启；env 是 TUI 进程内的对象，会话级覆盖
+    // 不影响父 shell。
+    const env = host.options.env ?? process.env;
+    const outcome = await runTuiLogin(result.action.args ?? [], (text) =>
+      emitCommandOutput(text)
+    );
+    if (outcome.status === "success") {
+      env.AUTH_TOKEN = outcome.token;
     }
   }
 

@@ -283,6 +283,21 @@ export function detectSystemBrightnessFromEnv(
  * 5. Default to "dark" — the most common developer terminal setting.
  */
 export function resolveTuiBrightness(env: Record<string, string | undefined> = process.env): TuiBrightness {
+  // Palette callers keep the "dark" default — it is the most common developer
+  // terminal setting and either palette stays readable on the rare ambiguous
+  // middle-ground background.
+  return resolveTuiBrightnessSignal(env) ?? "dark";
+}
+
+/**
+ * Same resolution chain as resolveTuiBrightness, but returns null when no
+ * source in the chain has said anything (terminal-native mode, no probe
+ * result, no COLORFGBG, no system signal). Use this for day/night *symbols*
+ * (the welcome scene's sun/moon): with no real signal they should stay
+ * neutral rather than pretend it is night. Palette decisions should use
+ * resolveTuiBrightness, which falls back to "dark".
+ */
+export function resolveTuiBrightnessSignal(env: Record<string, string | undefined> = process.env): TuiBrightness | null {
   const explicit = (env.NOLO_TUI_THEME ?? "").trim().toLowerCase();
   if (explicit === "light") return "light";
   if (explicit === "dark") return "dark";
@@ -300,10 +315,7 @@ export function resolveTuiBrightness(env: Record<string, string | undefined> = p
     if (!Number.isNaN(bg) && bg >= 7 && bg <= 15) return "light";
   }
 
-  const sys = detectSystemBrightnessFromEnv(env);
-  if (sys) return sys;
-
-  return "dark";
+  return detectSystemBrightnessFromEnv(env);
 }
 
 /** Resolve an env override first, then the process-wide user mode. */

@@ -130,7 +130,7 @@ const defaultOpenBrowser = async (url: string) => {
     return false;
   }
 };
-export { defaultOpenBrowser };
+export { defaultOpenBrowser, saveTokenLogin };
 
 
 async function saveTokenLogin(args: {

@@ -1,4 +1,14 @@
 
+## 0.70.0-alpha.1
+
+## 0.70.0-alpha.1 (2026-09-11)
+
+### Features
+
+* **cli:** in-TUI /login device-code auth + accurate not-logged-in 401 hint ([21280ed](https://github.com/nolotus/bun-nolo/commit/21280edf1967bf4e86da958db10a922a31502769))
+* **cli:** refresh welcome screen — daily tips, neutral daylight sky, non-blocking sweep animation ([0045c83](https://github.com/nolotus/bun-nolo/commit/0045c8335b6e179cb6439e5c45e6737806e3a122))
+
+
 ## 0.69.0-alpha.1
 
 ## 0.69.0-alpha.1 (2026-09-11)

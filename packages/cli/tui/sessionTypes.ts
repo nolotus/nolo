@@ -173,6 +173,12 @@ export type TuiAction =
       command: string;
     }
   | {
+      /** /login：TUI 内发起浏览器 device-code 登录，成功后热写 env.AUTH_TOKEN。 */
+      type: "login";
+      /** /login 后的原始参数（如 ["--server", "https://..."]），交由执行器校验。 */
+      args?: string[];
+    }
+  | {
       type: "pick-agent";
     }
   | {

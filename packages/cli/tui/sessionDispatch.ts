@@ -707,11 +707,21 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
         nextState: state,
         output: t("customizeHint"),
       };
-    case "/login":
+    case "/login": {
+      // `/login` 无参数：仍输出 MVP 提示（老用户肌肉记忆），但补一句新能力；
+      // `/login --server <url>` 等带参形式直接发起 TUI 内登录流。
+      if (!argText) {
+        return {
+          nextState: state,
+          output: `${t("loginHint")}\n${t("loginTuiStart")}`,
+        };
+      }
       return {
         nextState: state,
-        output: t("loginHint"),
+        output: "",
+        action: { type: "login", args: rest },
       };
+    }
     case "/profile":
       return {
         nextState: state,

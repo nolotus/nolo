@@ -7,14 +7,14 @@ import {
 } from "../client/tokenUsage";
 import { resolveCatalogPlatformAgents } from "./agentCatalog";
 import { renderDialogTitle } from "./dialogFrame";
-import { t } from "./i18n";
+import { dailyWelcomeTip, t } from "./i18n";
 import { displayWidth } from "./readlineWorkspace";
 import { stripAnsi, visibleWidth } from "./tuiAnsi";
 import {
   themeText,
   themeColorSequence,
   surfaceBackgroundSequence,
-  resolveTuiBrightness,
+  resolveTuiBrightnessSignal,
 } from "./theme";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import type { TuiState } from "./sessionTypes";
@@ -271,13 +271,17 @@ export function composeStatusLineWithQueue(
 // Vertical landscape: mountain (left) → sky (right) → ground → NOLO → waves.
 // All glyphs are common BMP (no emoji/PUA/Nerd Font).
 
-function buildPlainScene(isDark: boolean, frame: number = 0, maxFrames: number = 0): string {
-  let skyLine = `                      ${isDark ? "🌙" : "☀"}`;
-  if (isDark) {
+function buildPlainScene(isDark: boolean | null, frame: number = 0, maxFrames: number = 0): string {
+  // isDark === null means no real brightness signal (terminal-native mode):
+  // keep the sky neutral — no sun, no moon — instead of pretending it's night.
+  let skyLine: string | null = null;
+  if (isDark === true) {
     const star1 = frame % 6 < 3 ? "✦" : "⋆";
     const star2 = frame % 4 < 2 ? "⋆" : "·";
     const star3 = frame % 5 < 2 ? "·" : "✦";
-    skyLine = `      ${star1}               🌙    ${star2}    ${star3}`;
+    skyLine = `      ${star1}               ☾    ${star2}    ${star3}`;
+  } else if (isDark === false) {
+    skyLine = `                      ☀`;
   }
 
   const wavePattern = "_.~^~.";
@@ -286,7 +290,7 @@ function buildPlainScene(isDark: boolean, frame: number = 0, maxFrames: number =
   const wave = longWave.slice(offset, offset + 25);
 
   return [
-    skyLine,
+    ...(skyLine ? [skyLine] : []),
     "             ╱╲                     █▄ █ ▄▀▀▄ █    ▄▀▀▄",
     "            ╱  ╲  ╱╲                █ ▀█ █  █ █    █  █",
     "           ╱    ╲╱  ╲               ▀  ▀  ▀▀  ▀▀▀▀  ▀▀",
@@ -295,7 +299,7 @@ function buildPlainScene(isDark: boolean, frame: number = 0, maxFrames: number =
   ].join("\n");
 }
 
-function buildColoredScene(isDark: boolean, frame: number = 0, maxFrames: number = 0): string {
+function buildColoredScene(isDark: boolean | null, frame: number = 0, maxFrames: number = 0): string {
   const pk = themeColorSequence("chrome");    // mountain + ground
   const sk = themeColorSequence("warning");   // moon / sun
   const tr = themeColorSequence("success");   // trees
@@ -306,12 +310,14 @@ function buildColoredScene(isDark: boolean, frame: number = 0, maxFrames: number
   const b  = "\x1b[1m";
   const rs = "\x1b[0m";
 
-  let skyLine = `                      ${sk}${isDark ? "🌙" : "☀"}${r}`;
-  if (isDark) {
+  let skyLine: string | null = null;
+  if (isDark === true) {
     const star1 = frame % 6 < 3 ? "✦" : "⋆";
     const star2 = frame % 4 < 2 ? "⋆" : "·";
     const star3 = frame % 5 < 2 ? "·" : "✦";
-    skyLine = `      ${mu}${star1}${r}               ${sk}🌙${r}    ${mu}${star2}${r}    ${mu}${star3}${r}`;
+    skyLine = `      ${mu}${star1}${r}               ${sk}☾${r}    ${mu}${star2}${r}    ${mu}${star3}${r}`;
+  } else if (isDark === false) {
+    skyLine = `                      ${sk}☀${r}`;
   }
 
   const wavePattern = "_.~^~.";
@@ -339,7 +345,7 @@ function buildColoredScene(isDark: boolean, frame: number = 0, maxFrames: number
   const nolo3 = colorLine(line3, false);
 
   return [
-    skyLine,
+    ...(skyLine ? [skyLine] : []),
     `             ${pk}╱╲${r}                     ${nolo1}`,
     `            ${pk}╱  ╲  ╱╲${r}                ${nolo2}`,
     `           ${pk}╱    ╲╱  ╲${r}               ${nolo3}`,
@@ -355,8 +361,12 @@ export function renderWelcome(
   columns?: number,
 ) {
   const colorEnabled = resolveCliColorEnabled();
-  const brightness = resolveTuiBrightness();
-  const isDark = brightness === "dark";
+  // Day/night symbols need a *real* signal. In terminal-native mode with no
+  // probe result / COLORFGBG / system preference, resolveTuiBrightnessSignal
+  // returns null and the scene keeps a neutral sky — painting a moon on a
+  // light terminal (the old behavior) inverted the scene's contrast.
+  const brightnessSignal = resolveTuiBrightnessSignal();
+  const isDark = brightnessSignal === null ? null : brightnessSignal === "dark";
 
   let sceneArt = colorEnabled
     ? buildColoredScene(isDark, frame, maxFrames)
@@ -375,28 +385,25 @@ export function renderWelcome(
     if (columns < widestSceneCol) sceneArt = "";
   }
 
-  const versionLine = colorEnabled
-    ? `${themeColorSequence("accent")}nolo\x1b[0m ${state.cliVersion ?? ""} | server ${state.serverUrl}`.replace("  |", " |")
-    : `nolo ${state.cliVersion ?? ""} | server ${state.serverUrl}`.replace("  |", " |");
+  // "nolo" 走 themeText（遵守 theme token 纪律，含正确的 reset）；版本号
+  // 为空时不留双空格，也不用补丁式的 replace 修空格。
+  const noloLabel = themeText("nolo", "accent", colorEnabled);
+  const versionLine = `${noloLabel}${state.cliVersion ? ` ${state.cliVersion}` : ""} | server ${state.serverUrl}`;
 
   // 版本发布快（alpha 每次合入即发版），欢迎页在检查到新版本时补一行升级
   // 提示。无更新 / 检查不可用时 updateAvailable 为空，这一行不出现，
   // welcome 保持原来的紧凑布局（"keeps the welcome compact" 测试契约）。
   const updateLine = state.updateAvailable
     ? themeText(
-        t(
-          "updateAvailable",
-          state.updateAvailable.latestVersion,
-          state.cliVersion ?? t("versionUnknown"),
-        ),
+        t("updateAvailable", state.updateAvailable.latestVersion),
         "accent",
         colorEnabled,
       )
     : null;
 
   const body = sceneArt
-    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), t("welcomeHint"), ""]
-    : [versionLine, ...(updateLine ? [updateLine] : []), t("welcomeHint"), ""];
+    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""]
+    : [versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""];
   return body.join("\n");
 }
 

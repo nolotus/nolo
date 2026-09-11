@@ -58,11 +58,38 @@ export function newlineHint(platform: string = process.platform): string {
   return platform === "win32" ? "Ctrl+J" : "Shift+Enter";
 }
 
+/**
+ * Rotating welcome-screen tips, one per day. The composer placeholder already
+ * covers "type / for commands", so these spend the welcome screen's one hint
+ * line on capability discovery instead of repeating it. Day-seeded (not
+ * random) so the tip is stable across restarts within a day.
+ */
+const WELCOME_TIPS: Record<CliLocale, string[]> = {
+  en: [
+    `Tip: ${newlineHint()} for a newline; /help lists all commands.`,
+    "Tip: paste a screenshot or drag an image into the terminal — nolo can see it.",
+    "Tip: /doc attach <doc> brings a doc into this conversation's context.",
+    "Tip: /theme switches colors; terminal mode follows your terminal's day/night.",
+    "Tip: /history resumes a recent dialog; /agents lists your agents.",
+  ],
+  zh: [
+    `提示：${newlineHint()} 换行；/help 列出全部命令。`,
+    "提示：直接粘贴截图或把图片拖进终端，nolo 看得懂。",
+    "提示：/doc attach <doc> 把文档挂进当前对话的上下文。",
+    "提示：/theme 切换配色；terminal 模式跟随终端的日夜主题。",
+    "提示：/history 回到最近对话；/agents 查看可用 Agent。",
+  ],
+};
+
+export function dailyWelcomeTip(now: number = Date.now()): string {
+  const tips = WELCOME_TIPS[currentLocale];
+  const day = Math.floor(now / 86_400_000);
+  return tips[day % tips.length];
+}
+
 const STRINGS = {
-  welcomeHint: {
-    en: `Tell nolo what you want. Use /help for commands. ${newlineHint()} for newline.`,
-    zh: `告诉 nolo 你想要什么。输入 /help 查看命令。${newlineHint()} 换行。`,
-  },
+  // Welcome hint lives in WELCOME_TIPS + dailyWelcomeTip() (rotating daily
+  // tips); the composer placeholder already covers "type / for commands".
   promptLabel: {
     en: "❯ ",
     zh: "❯ ",
@@ -584,7 +611,7 @@ const STRINGS = {
       "  /customize            Describe how you want to tune nolo",
       "  /tasks                List background process tasks (aliases: /jobs, /procs)",
       "  /stop <pid|all>       Stop background process tasks",
-      "  /login                Show login/profile hint",
+      "  /login                Show login/profile hint (/login --server <url> to log in here)",
       "  /profile              Show active profile",
       "  /update               Update the nolo CLI install",
       "  /version              Show version/update hint",
@@ -622,7 +649,7 @@ const STRINGS = {
       "  /customize            描述你想怎么调教 nolo",
       "  /tasks                列出后台子进程任务（别名：/jobs, /procs）",
       "  /stop <pid|all>       停止指定的后台任务",
-      "  /login                查看登录 / 配置提示",
+      "  /login                查看登录 / 配置提示（/login --server <url> 可在本会话内登录）",
       "  /profile              查看当前配置环境",
       "  /update               更新 nolo CLI",
       "  /version              查看版本与更新提示",
@@ -754,14 +781,56 @@ const STRINGS = {
     en: "MVP login uses profile/env auth. Set AUTH_TOKEN, NOLO_SERVER, or NOLO_PROFILE before starting nolo.",
     zh: "MVP 登录走 profile/环境变量认证。启动 nolo 前请设置 AUTH_TOKEN、NOLO_SERVER 或 NOLO_PROFILE。",
   },
+  loginTuiStart: {
+    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL).",
+    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接）。",
+  },
+  loginUsage: {
+    en: "Usage: /login [--server <url>]. Unsupported flags: {0}",
+    zh: "用法：/login [--server <url>]。不支持的参数：{0}",
+  },
+  loginStarted: {
+    en: "Open this URL to authorize nolo-cli:\n{0}\nCode: {1}",
+    zh: "打开这个链接授权 nolo-cli：\n{0}\n授权码：{1}",
+  },
+  loginBrowserFailed: {
+    en: "Could not open a browser automatically. Paste the URL above into a browser.",
+    zh: "无法自动打开浏览器，请把上面的链接粘贴到浏览器里。",
+  },
+  loginWaiting: {
+    en: "[nolo] Waiting for browser authorization ({0} remaining)... (Ctrl+C to cancel)",
+    zh: "[nolo] 等待浏览器授权（剩余 {0}）……按 Ctrl+C 取消",
+  },
+  loginStillWaiting: {
+    en: "[nolo] Still waiting... ({0} remaining)",
+    zh: "[nolo] 仍在等待……（剩余 {0}）",
+  },
+  loginSuccess: {
+    en: "Logged in. Token saved to profile; this session now uses it immediately.",
+    zh: "登录成功。Token 已写入 profile，当前会话立即生效。",
+  },
+  loginFailed: {
+    en: "Login failed: {0}",
+    zh: "登录失败：{0}",
+  },
+  loginTimeout: {
+    en: "Login timed out. Run /login again, or use `nolo login --token <jwt>` in a shell.",
+    zh: "登录超时。请重新执行 /login，或在 shell 里用 nolo login --token <jwt>。",
+  },
+  loginCancelled: {
+    en: "Login cancelled.",
+    zh: "已取消登录。",
+  },
   versionInfo: {
     en: "nolo {0}\nUpdate this install with: nolo update\nIf repo-local output differs, publish/install the latest npm package first.",
     zh: "nolo {0}\n用 nolo update 更新当前安装。\n如果本地仓库输出的版本不同，请先发布/安装最新的 npm 包。",
   },
   versionUnknown: { en: "unknown version", zh: "未知版本" },
   updateAvailable: {
-    en: "New nolo {0} available (you have {1}) — run /update to upgrade",
-    zh: "新版本 nolo {0} 可用（当前 {1}）— 运行 /update 升级",
+    // 保持短：这行在窄终端物理换行会破坏 banner 重绘的行数计算。当前版本
+    // 号上一行 version line 已有，不重复。
+    en: "↑ nolo {0} available — /update to upgrade",
+    zh: "↑ nolo {0} 可用 — /update 升级",
   },
   // --- Dialog list / timestamps -----------------------------------------
   recentDialogs: { en: "Recent dialogs:", zh: "最近对话：" },
