@@ -1,4 +1,14 @@
 
+## 0.67.0-alpha.3
+
+## 0.67.0-alpha.3 (2026-09-11)
+
+### Bug Fixes
+
+* **chat:** merge fix/sidebar-scroll-chain → alpha ([75489ba](https://github.com/nolotus/bun-nolo/commit/75489ba5c6a478f58013d724b157bfb0b4f5fef2))
+* **chat:** 侧边栏嵌套滚轮被 overscroll contain 吞掉，恢复 scroll chaining ([d6e448d](https://github.com/nolotus/bun-nolo/commit/d6e448d0f413395547e6dae157ad254022cf83ed))
+
+
 ## 0.67.0-alpha.2
 
 ## 0.67.0-alpha.2 (2026-09-11)

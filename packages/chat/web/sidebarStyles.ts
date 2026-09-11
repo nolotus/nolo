@@ -209,7 +209,12 @@ export const sidebarStyles = stylex.create({
     flex: "1 1 auto",
     minHeight: 0,
     width: "100%",
-    overscrollBehavior: "contain",
+    // 禁止在此设置 overscroll-behavior: contain —— 内层列表是嵌套在
+    // AllViewSidebar__scroll-area 里的二级 scroll container，contain 会切断
+    // scroll chaining：内容未撑满或滚到边界时 wheel 被整口吞掉，表现为
+    // "鼠标悬停在列表上滚不动、必须先点一下"。保持默认 auto，让 wheel 在
+    // 内层滚不动时沿 DOM 链冒泡给外层 scroll-area；外层仍带 contain，
+    // 不会继续穿透到页面 body。
   },
   overflowHint: {
     display: "flex",
