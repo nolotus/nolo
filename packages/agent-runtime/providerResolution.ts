@@ -12,6 +12,7 @@ import {
   resolvePlatformHostedCredentialProvider,
 } from "./platformProviderEndpoints";
 import { evaluatePlatformHostedClientVersionGate, buildClientVersionGateErrorDetail } from "../ai/llm/platformHostedClientVersionGate";
+import { CLI_PROVIDER_VALUES } from "../ai/agent/cliProviders";
 import { CLIENT_VERSION_TOO_OLD_CODE } from "core/clientVersionGate";
 
 type EnvLike = Record<string, string | undefined>;
@@ -226,7 +227,15 @@ export function hasDirectOpenAiCompatibleProvider(env: EnvLike) {
 }
 
 export function resolveAgentProviderMode(agentConfig: AgentRuntimeAgentConfig): AgentProviderMode {
-  if (agentConfig.apiSource === "cli" || agentConfig.provider === "cli" || agentConfig.cliProvider) {
+  // cliProvider 白名单防御：机器派发 payload 的 cliProvider 是服务端
+  // `cliProvider ?? provider` 兜底产物。平台 agent（provider="nolo"）会带出
+  // cliProvider:"nolo"，若不设防会被判成 CLI 模式，平台代理通道被跳过、
+  // 直连通道又拒绝 cli 模式，整条链失败。非白名单名不作数。
+  const cliProviderName = asTrimmedLowercaseString(agentConfig.cliProvider);
+  const hasRealCliProvider =
+    Boolean(cliProviderName && (CLI_PROVIDER_VALUES as readonly string[]).includes(cliProviderName)) ||
+    asTrimmedLowercaseString(agentConfig.provider) === "cli";
+  if (agentConfig.apiSource === "cli" || (hasRealCliProvider && agentConfig.apiSource !== "platform")) {
     return "cli";
   }
   if (agentConfig.apiSource === "custom" || agentConfig.customProviderUrl) {

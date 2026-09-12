@@ -128,11 +128,19 @@ export const CLI_PROVIDER_NAMES = new Set([
 
 /**
  * Check whether the agent config maps to a CLI provider.
+ *
+ * 与 cliProviderHelpers.isCliProviderAgent 同一语义（白名单防御）：
+ * 服务端派发 payload 会把 provider 兜底进 cliProvider（cliProvider ?? provider），
+ * 平台 agent（provider:"nolo"）因此带出 cliProvider:"nolo"，不能据此判成 CLI。
+ * 只有白名单内的 CLI 名、显式 apiSource:"cli" 或 provider:"cli" 才算 CLI agent。
  */
 export function isCliProviderAgentConfig(agentConfig: any) {
+  if (asTrimmedLowercaseString(agentConfig?.apiSource) === "cli") return true;
   const cliProvider = asTrimmedLowercaseString(agentConfig?.cliProvider);
+  if (cliProvider && CLI_PROVIDER_NAMES.has(cliProvider)) return true;
   const provider = asTrimmedLowercaseString(agentConfig?.provider);
-  return Boolean(cliProvider) || CLI_PROVIDER_NAMES.has(provider);
+  if (provider === "cli") return true;
+  return CLI_PROVIDER_NAMES.has(provider);
 }
 
 /**

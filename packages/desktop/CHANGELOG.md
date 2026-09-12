@@ -1,4 +1,13 @@
 
+## 0.73.0-alpha.2
+
+## 0.73.0-alpha.2 (2026-09-12)
+
+### Bug Fixes
+
+* **cli:** platform agents with runtimeBinding route to machine connector instead of CLI misdispatch ([ab02c60](https://github.com/nolotus/bun-nolo/commit/ab02c608c10c84946d76eb2f1898cd6e464fdf5b))
+
+
 ## 0.73.0-alpha.1
 
 ## 0.73.0-alpha.1 (2026-09-11)

@@ -398,6 +398,22 @@ async function shouldSkipAutoLocalForServerPlatformTools(
     );
     return true;
   }
+  if (resolveBoundMachineId(agentConfig)) {
+    // 平台形态的绑定 agent（apiSource=platform + runtimeBinding.machineId）：
+    // 模型跑在平台、工具在绑定机器执行，本地 auto 不该在当前机器直跑
+    // （本地既没有绑定机器的工具权限，也没有它的连接器）。跳过本地，
+    // 走服务端 /api/agent/run → 机器连接器派发。
+    const currentMachineId =
+      (await resolveCurrentMachineId(options))?.trim() || "";
+    const boundMachineId = resolveBoundMachineId(agentConfig);
+    if (currentMachineId && currentMachineId === boundMachineId) return false;
+    options.output.write(
+      `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a platform agent bound to machine ${boundMachineId}` +
+        (currentMachineId ? ` (this machine is ${currentMachineId}).` : ".") +
+        " The server will dispatch it to the bound machine connector.\n",
+    );
+    return true;
+  }
   if (isMachineBoundLocalhostCustomProvider(agentConfig)) {
     options.output.write(
       `[nolo] auto runtime: skipping local runtime because ${options.agentKey} is a machine-bound localhost custom provider. ` +

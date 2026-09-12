@@ -15,6 +15,8 @@ import { buildCliPrompt } from "../../ai/agent/cliPrompt";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import type { DelegatedPayloadMetrics } from "../../agent-runtime/executionObservation";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
+import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { CLI_PROVIDER_NAMES } from "./agentRunTypes";
 
 export type { DelegatedPayloadMetrics };
 
@@ -119,18 +121,23 @@ export function parseJsonObject(raw: string) {
 }
 
 export function isCliProviderAgent(agentConfig: AgentRuntimeAgentConfig) {
-  return Boolean(
-    agentConfig.apiSource === "cli" ||
-      agentConfig.provider === "cli" ||
-      agentConfig.cliProvider,
-  );
+  // 防御：机器派发 payload 里 cliProvider 是服务端 `cliProvider ?? provider`
+  // 兜底出来的。平台 agent（provider="nolo"）会被误判成 CLI worker 并以
+  // "Unknown CLI provider: nolo" 失败。非白名单 CLI 名不算 CLI agent，
+  // 落回 TRANSPORTS 链上的平台代理通道。
+  const providerName = asTrimmedLowercaseString(agentConfig.cliProvider);
+  if (providerName && CLI_PROVIDER_NAMES.has(providerName)) return true;
+  if (agentConfig.apiSource === "cli") return true;
+  if (asTrimmedLowercaseString(agentConfig.provider) === "cli") return true;
+  return false;
 }
 
 export function resolveCliProviderName(agentConfig: AgentRuntimeAgentConfig) {
-  return (
-    (agentConfig.cliProvider || agentConfig.provider || "codex").trim() ||
-    "codex"
-  );
+  const explicit = asTrimmedLowercaseString(agentConfig.cliProvider);
+  if (explicit && CLI_PROVIDER_NAMES.has(explicit)) return explicit;
+  const providerName = asTrimmedLowercaseString(agentConfig.provider);
+  if (providerName && CLI_PROVIDER_NAMES.has(providerName)) return providerName;
+  return "codex";
 }
 
 export function stringifyRuntimeMessageContent(
