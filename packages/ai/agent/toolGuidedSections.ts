@@ -185,12 +185,33 @@ const TOOL_ROUND_ECONOMY_INSTRUCTIONS = `--- 工具轮次经济学 ---
 - 一次调用里能表达的就别拆成多次：用 glob 的花括号组一次匹配多种后缀、用一条命令代替三条、按需要的行范围读文件而不是先全读再回头找。
 - 等待类工具（taskWait 等）按预计耗时一次给足预算，不要用短超时反复续等——那是把循环放在了最贵的地方。`;
 
+// ============================================================================
+// 权限提升（有 execShell 时注入）
+// 背景：需要 root 的命令失败时，模型历史上只会把 sudo 命令抛回给用户手抄
+// （2026-09-13 OOM 事故处理实录：用户回复"懒得跑 pkexec"）。桌面会话里
+// polkit/pkexec 能把密码框直接弹到用户屏幕上，交互成本接近于零。本段把
+// 优先级写进行为规则：GUI 授权 → 用户级等价方案 → 粘贴式降级，禁止静默绕过。
+// ============================================================================
+const PRIVILEGE_ESCALATION_INSTRUCTIONS = `--- 权限提升 ---
+命令失败且原因指向权限不足（sudo: 需要密码 / Permission denied / EACCES / Operation not permitted）时，优先把「输密码」这一步交还给用户的图形授权通道，而不是把 sudo 命令抛回给用户手抄：
+1. 桌面会话（Linux 有 DISPLAY/WAYLAND_DISPLAY）直接跑 \`pkexec <命令>\`：polkit 会在用户屏幕弹 GUI 密码框。弹之前先一句话说明要做什么、为何需要 root，避免凭空弹窗；复杂命令先写成脚本再 \`pkexec bash /tmp/xxx.sh\`。
+2. pkexec 不可用或非图形会话时按代价升序降级：
+   - 用户级等价方案先行：systemctl --user set-property、无特权配置路径、setcap、把用户加入所需组（重新登录生效）等——很多「必须 root」其实有 user 级等价物。
+   - 确实绕不开：给出一条可直接粘贴的命令（多步合并成一条），一次性说清副作用，等用户回报结果再继续；不要让用户来回跑多步、不要重复索要。
+3. Windows 用 \`Start-Process -Verb RunAs\`（UAC 弹窗）、macOS 用 \`osascript ... with administrator privileges\`，交互原则相同：弹窗前先说明、失败后不重复打扰。
+4. 禁止静默绕过：不重试同一特权命令赌运气、不用管道/环境变量喂密码给 sudo、不修改 polkit/sudoers 放宽授权。`;
+
 const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
     {
         id: "toolRoundEconomy",
         triggerTools: [],
         triggerAnyTool: true,
         build: () => TOOL_ROUND_ECONOMY_INSTRUCTIONS,
+    },
+    {
+        id: "privilegeEscalation",
+        triggerTools: ["execShell"],
+        build: () => PRIVILEGE_ESCALATION_INSTRUCTIONS,
     },
     {
         id: "agentOrchestration",
@@ -235,6 +256,7 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
  */
 export const TOOL_GUIDED_SECTION_ORDER = [
     "toolRoundEconomy",
+    "privilegeEscalation",
     "agentOrchestration",
     "agentCollaboration",
     "webAccess",

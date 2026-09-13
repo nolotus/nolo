@@ -1,4 +1,13 @@
 
+## 0.77.0-alpha.1
+
+## 0.77.0-alpha.1 (2026-09-13)
+
+### Features
+
+* **agent:** add privilege escalation guidance section ([dd7878c](https://github.com/nolotus/bun-nolo/commit/dd7878c0ea7173ee0a8210d0b7e418612a8f8915))
+
+
 ## 0.76.0-alpha.4
 
 ## 0.76.0-alpha.4 (2026-09-13)
