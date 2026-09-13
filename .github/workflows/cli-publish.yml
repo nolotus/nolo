@@ -57,7 +57,12 @@ jobs:
             --expect-intent release \
             --expect-version "${{ inputs.version }}" \
             --set-outputs channel,version,tag
+      - name: Verify dist-tag matches metadata channel
+        run: |
+          set -euo pipefail
           # npm dist-tag 必须与 metadata channel 一致（alpha→alpha，stable→latest）。
+          # 必须独立成步：同一步内引用本步 outputs 的表达式在步骤开始前求值，
+          # 恒为空串（2026-09-13 发布失败实证），step outputs 只对后续步骤可见。
           case "${{ steps.metadata.outputs.channel }}:${{ inputs.dist_tag }}" in
             alpha:alpha|stable:latest) ;;
             *)
