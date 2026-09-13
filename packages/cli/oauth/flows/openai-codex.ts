@@ -25,6 +25,7 @@ import {
   type RefreshOpenAiCodexTokenDeps,
 } from "../../../agent-runtime/openaiCodexOAuth";
 import { startCallbackServer } from "../callback-server";
+import { renderDeviceCodeDisplay } from "../deviceCodeDisplay";
 import { generatePkcePair } from "../pkce";
 import {
   createOAuthTokenStore,
@@ -220,9 +221,14 @@ export async function runOpenAiCodexDeviceCode(
 ): Promise<OAuthCredential> {
   const now = deps.now ?? Date.now;
   const start = await startDeviceCodeFlow(deps);
-  deps.output?.log?.("Authorize nolo-cli for ChatGPT / OpenAI Codex:");
-  deps.output?.log?.(OPENAI_CODEX_DEVICE_VERIFICATION_URL);
-  deps.output?.log?.(`Enter code: ${start.userCode}`);
+  for (const line of renderDeviceCodeDisplay({
+    provider: "ChatGPT / OpenAI Codex",
+    verificationUrl: OPENAI_CODEX_DEVICE_VERIFICATION_URL,
+    userCode: start.userCode,
+    notes: ["Code expires in ~15 minutes. Never share the code or tokens."],
+  })) {
+    deps.output?.log?.(line);
+  }
 
   if (deps.openBrowser) {
     const opened = await deps.openBrowser(OPENAI_CODEX_DEVICE_VERIFICATION_URL);

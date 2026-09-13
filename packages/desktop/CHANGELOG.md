@@ -1,4 +1,13 @@
 
+## 0.74.0-alpha.1
+
+## 0.74.0-alpha.1 (2026-09-13)
+
+### Features
+
+* **cli:** box and bold device-code display in nolo auth flows ([a322a14](https://github.com/nolotus/bun-nolo/commit/a322a14354e56876871101eb45da735bfb235a33))
+
+
 ## 0.73.0-alpha.3
 
 ## 0.73.0-alpha.3 (2026-09-13)

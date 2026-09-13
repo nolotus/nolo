@@ -2,6 +2,7 @@
 // (L93-111, L2979-3160, L5286-5469), via oh-my-pi/packages/ai/src/registry/oauth/xai-oauth.ts.
 // Device-code path aligns with openclaw/openclaw extensions/xai/xai-oauth.ts (RFC 8628).
 import { startCallbackServer, type CallbackServerHandle } from "../callback-server";
+import { renderDeviceCodeDisplay } from "../deviceCodeDisplay";
 import { generatePkcePair } from "../pkce";
 import { createOAuthTokenStore } from "../token-store";
 import type {
@@ -486,15 +487,17 @@ export async function runXaiOAuthDeviceCode(
   const browserUrl = start.verificationUriComplete ?? start.verificationUri;
   const expiresMinutes = Math.max(1, Math.round(start.expiresInMs / 60_000));
 
-  output.log("Authorize nolo-cli for xAI Grok (device code / headless):");
-  output.log(`  URL: ${start.verificationUri}`);
-  if (start.verificationUriComplete) {
-    output.log(`  Complete URL: ${start.verificationUriComplete}`);
+  for (const line of renderDeviceCodeDisplay({
+    provider: "xAI Grok",
+    verificationUrl: start.verificationUri,
+    completeUrl: start.verificationUriComplete,
+    userCode: start.userCode,
+    notes: [
+      `Code expires in ~${expiresMinutes} minute(s). Never share the code or tokens.`,
+    ],
+  })) {
+    output.log(line);
   }
-  output.log(`  Code: ${start.userCode}`);
-  output.log(
-    `  Code expires in ~${expiresMinutes} minute(s). Never share the code or tokens.`
-  );
 
   if (deps.openBrowser) {
     try {
