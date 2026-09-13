@@ -1,4 +1,13 @@
 
+## 0.77.0-alpha.4
+
+## 0.77.0-alpha.4 (2026-09-13)
+
+### Performance Improvements
+
+* **test:** lazy @babel/core in stylexBunPlugin + test:light for pure-logic packages ([bceb211](https://github.com/nolotus/bun-nolo/commit/bceb21143127bbd69b5f9ff6c8f5b00edc37a344))
+
+
 ## 0.77.0-alpha.3
 
 ## 0.77.0-alpha.3 (2026-09-13)

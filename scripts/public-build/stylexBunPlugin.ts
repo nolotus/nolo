@@ -21,60 +21,75 @@
  * - 组件 TSX 里的 stylex.props() 是运行时安全函数（styleq 合并类名），
  *   接收已编译的样式对象即可，无需 Babel；
  * - JSX/TS 语法交给 bun 原生 loader，避免 Babel 重排代码。
+ *
+ * 按需跳过（2026-09-13）：NOLO_TEST_NO_STYLEX=1 时完全不注册插件、
+ * 完全不加载 @babel/core 模块图（实测挂载 +35MB/worker：68MB vs 33MB）。
+ * 供 runLightTests.sh（纯逻辑包测试）使用；消费 StyleX 的包误用会
+ * fail loudly（stylex.create 运行时 throw），不会静默错译。
+ * 注意必须用动态 import：顶层静态 import 会让跳过失效（ESM 静态解析
+ * 协议强制提前求值 @babel/core，RSS 依旧 68MB——review 实证 2026-09-13）。
  */
-import { transformAsync } from "@babel/core";
-
 const STYLEX_FILE_FILTER =
   /(^|\/)packages\/(?:ai\/agent|app|auth|chat|create|life|render)\/.*([Ss]tyles\.ts|\.stylex\.ts)$/;
 
-Bun.plugin({
-  name: "stylex-static-compile",
-  setup(build) {
-    // @babel/core 的 transformAsync 在 bun 下并发调用不安全（内部缓存竞态，
-    // 会以 "Invalid media query syntax" 之类的假错炸掉 transform，2026-09-02
-    // life 页 StyleX 迁移新增 15 个 *Styles.ts 后在多目录合跑中稳定复现）。
-    // 这里用 promise 链把所有 onLoad 的编译串行化：文件数量增长不改变正确性。
-    let compileChain: Promise<unknown> = Promise.resolve();
+if (process.env.NOLO_TEST_NO_STYLEX === "1") {
+  console.log("[stylexBunPlugin] NOLO_TEST_NO_STYLEX=1 → 跳过 StyleX 编译通道（省 ~35MB/worker）");
+} else {
+  Bun.plugin({
+    name: "stylex-static-compile",
+    setup(build) {
+      // @babel/core 的 transformAsync 在 bun 下并发调用不安全（内部缓存竞态，
+      // 会以 "Invalid media query syntax" 之类的假错炸掉 transform，2026-09-02
+      // life 页 StyleX 迁移新增 15 个 *Styles.ts 后在多目录合跑中稳定复现）。
+      // 这里用 promise 链把所有 onLoad 的编译串行化：文件数量增长不改变正确性。
+      // 动态 import：仅在真正需要编译时加载 @babel/core（~35MB 模块图）。
+      let babelPromise: Promise<typeof import("@babel/core")> | null = null;
+      const loadBabel = () =>
+        (babelPromise ??= import("@babel/core"));
 
-    build.onLoad({ filter: STYLEX_FILE_FILTER }, async (args) => {
-      const source = await Bun.file(args.path).text();
-      if (!source.includes("@stylexjs/stylex")) return undefined;
+      let compileChain: Promise<unknown> = Promise.resolve();
 
-      const task = compileChain.then(async () => {
-        const result = await transformAsync(source, {
-          filename: args.path,
-          babelrc: false,
-          configFile: false,
-          sourceType: "module",
-          parserOpts: { plugins: ["typescript"] },
-          plugins: [
-            // 纯 TS 载体文件：先剥类型再跑 stylex（无 JSX，交给 bun loader）
-            "@babel/plugin-transform-typescript",
-            [
-              "@stylexjs/babel-plugin",
-              {
-                // 与 scripts/dev/esbuild.config.js / buildRenderBundle.ts 保持一致
-                useCSSLayers: false,
-                importSources: ["@stylexjs/stylex"],
-                unstable_moduleResolution: { type: "commonJS" },
-                dev: false,
-                runtimeInjection: false,
-                // 显式关闭：0.19 默认开启的 lastMediaQueryWinsTransform 在 bun
-                // 下的模块图会因 @stylexjs/shared 的 MediaQuery parser
-                // 循环依赖加载顺序差异，把合法的 "@media (max-width: ...)"
-                // key 误判为非法（node/esbuild 同配置正常，bun test 稳定炸）。
-                // 运行时编译只用于运行时类名合并，不消费 media 规则排序语义；
-                // 本仓样式同属性至多一个断点，last/first-wins 无行为差异。
-                enableMediaQueryOrder: false,
-              },
+      build.onLoad({ filter: STYLEX_FILE_FILTER }, async (args) => {
+        const source = await Bun.file(args.path).text();
+        if (!source.includes("@stylexjs/stylex")) return undefined;
+
+        const task = compileChain.then(async () => {
+          const { transformAsync } = await loadBabel();
+          const result = await transformAsync(source, {
+            filename: args.path,
+            babelrc: false,
+            configFile: false,
+            sourceType: "module",
+            parserOpts: { plugins: ["typescript"] },
+            plugins: [
+              // 纯 TS 载体文件：先剥类型再跑 stylex（无 JSX，交给 bun loader）
+              "@babel/plugin-transform-typescript",
+              [
+                "@stylexjs/babel-plugin",
+                {
+                  // 与 scripts/dev/esbuild.config.js / buildRenderBundle.ts 保持一致
+                  useCSSLayers: false,
+                  importSources: ["@stylexjs/stylex"],
+                  unstable_moduleResolution: { type: "commonJS" },
+                  dev: false,
+                  runtimeInjection: false,
+                  // 显式关闭：0.19 默认开启的 lastMediaQueryWinsTransform 在 bun
+                  // 下的模块图会因 @stylexjs/shared 的 MediaQuery parser
+                  // 循环依赖加载顺序差异，把合法的 "@media (max-width: ...)"
+                  // key 误判为非法（node/esbuild 同配置正常，bun test 稳定炸）。
+                  // 运行时编译只用于运行时类名合并，不消费 media 规则排序语义；
+                  // 本仓样式同属性至多一个断点，last/first-wins 无行为差异。
+                  enableMediaQueryOrder: false,
+                },
+              ],
             ],
-          ],
+          });
+          return { contents: result?.code ?? source, loader: "js" as const };
         });
-        return { contents: result?.code ?? source, loader: "js" as const };
+        // 失败不许断链：后续文件的编译仍要继续（各自抛各自的错）。
+        compileChain = task.catch(() => undefined);
+        return task;
       });
-      // 失败不许断链：后续文件的编译仍要继续（各自抛各自的错）。
-      compileChain = task.catch(() => undefined);
-      return task;
-    });
-  },
-});
+    },
+  });
+}
