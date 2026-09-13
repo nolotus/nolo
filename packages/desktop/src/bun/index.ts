@@ -1228,7 +1228,10 @@ const mainWindow = (() => {
       title: "Nolo Desktop",
       url: initialWindowUrl,
       frame: initialFrame,
-      titleBarStyle: "hiddenInset",
+      // Linux has no inset native controls; hiddenInset leaves the compositor's
+      // titlebar above our injected shell. Use a borderless window there so the
+      // custom shell is the single titlebar.
+      titleBarStyle: process.platform === "linux" ? "hidden" : "hiddenInset",
     });
     console.log("[desktop] BrowserWindow created");
     desktopDiag("window:create", "BrowserWindow created", {

@@ -3,7 +3,7 @@
   width: 100%;
   max-width: var(--home-content-max-width, 1040px);
   margin: 0 auto;
-  padding: clamp(20px, 4vw, 40px) 0 clamp(32px, 5vw, 56px);
+  padding: clamp(20px, 3vw, 36px) 0 clamp(28px, 4vw, 48px);
   display: flex;
   justify-content: center;
   animation: home-surface-in var(--home-motion-duration-slow, 280ms)
@@ -11,72 +11,82 @@
 }
 
 .desktop-agent-onboarding__panel {
-  position: relative;
-  width: min(100%, 520px);
-  padding: clamp(24px, 3.5vw, 32px);
-  border-radius: 22px;
-  border: 1px solid color-mix(in srgb, var(--border, #fff) 65%, transparent);
-  background: color-mix(in srgb, var(--backgroundSecondary, #16161c) 92%, transparent);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 7%, transparent) inset,
-    0 24px 60px -28px rgba(0, 0, 0, 0.45);
+  width: min(100%, 640px);
+  padding: 26px;
+  border: 1px solid color-mix(in srgb, var(--border, #d8dde5) 82%, transparent);
+  border-radius: 20px;
+  background: var(--background, #fff);
+  box-shadow: 0 20px 50px -36px rgba(16, 24, 40, 0.38);
+}
+
+.desktop-agent-onboarding__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
 }
 
 .desktop-agent-onboarding__title {
-  margin: 0 0 8px;
-  font-size: clamp(22px, 3.5vw, 28px);
-  line-height: 1.2;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  margin: 0 0 6px;
   color: var(--text);
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .desktop-agent-onboarding__description {
-  margin: 0 0 18px;
-  font-size: 14.5px;
-  line-height: 1.55;
+  margin: 0;
   color: var(--textSecondary);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-.desktop-agent-onboarding__options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.desktop-agent-onboarding__options > li {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: block;
+.desktop-agent-onboarding__group + .desktop-agent-onboarding__group {
+  margin-top: 18px;
 }
 
 .desktop-agent-onboarding__group-label {
-  margin: 0 0 2px;
+  margin: 0 0 8px;
+  color: var(--textSecondary);
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--textTertiary, var(--textSecondary));
+  letter-spacing: 0.01em;
 }
 
-.desktop-agent-onboarding__group-label--spaced {
-  margin-top: 10px;
+.desktop-agent-onboarding__options {
+  display: grid;
+  gap: 9px;
+}
+
+.desktop-agent-onboarding__options--nolo {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.desktop-agent-onboarding__options--sources {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .desktop-agent-onboarding__option {
+  min-width: 0;
+  min-height: 78px;
+  padding: 14px;
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 15px 16px;
-  border-radius: 14px;
-  border: 1px solid var(--border, #333);
-  background: color-mix(in srgb, var(--background, #000) 65%, transparent);
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, #d8dde5) 88%, transparent);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--backgroundSecondary, #f7f8fa) 78%, var(--background, #fff));
   color: var(--text);
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.desktop-agent-onboarding__option--primary {
+  border-color: color-mix(in srgb, var(--primary, #376fd0) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary, #376fd0) 7%, var(--background, #fff));
 }
 
 .desktop-agent-onboarding__option:hover,
@@ -87,65 +97,75 @@
 }
 
 .desktop-agent-onboarding__option:hover {
-  border-color: color-mix(in srgb, var(--primary, #6d7cff) 50%, var(--border));
-  background: color-mix(in srgb, var(--primary, #6d7cff) 10%, var(--background, #000));
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--primary, #376fd0) 54%, var(--border));
+  background: color-mix(in srgb, var(--primary, #376fd0) 9%, var(--background, #fff));
+  box-shadow: 0 8px 20px -18px color-mix(in srgb, var(--primary, #376fd0) 80%, transparent);
 }
 
-.desktop-agent-onboarding__option-num {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  margin-top: 1px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--primary, #6d7cff);
-  background: color-mix(in srgb, var(--primary, #6d7cff) 14%, transparent);
+.desktop-agent-onboarding__option:focus-visible,
+.desktop-agent-onboarding__skip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary, #376fd0) 58%, transparent);
+  outline-offset: 2px;
 }
 
 .desktop-agent-onboarding__option-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
 }
 
 .desktop-agent-onboarding__option-title {
-  font-size: 15px;
-  font-weight: 600;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 620;
   line-height: 1.35;
 }
 
 .desktop-agent-onboarding__option-hint {
-  font-size: 13px;
-  line-height: 1.4;
-  font-weight: 450;
   color: var(--textSecondary);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.desktop-agent-onboarding__footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px 20px;
-  margin-top: 18px;
-  padding-top: 4px;
+.desktop-agent-onboarding__arrow {
+  flex: 0 0 auto;
+  color: var(--textTertiary, var(--textSecondary));
+  font-size: 21px;
+  font-weight: 300;
+  line-height: 1;
 }
 
-.desktop-agent-onboarding__link {
+.desktop-agent-onboarding__skip {
+  flex: 0 0 auto;
   border: 0;
   background: transparent;
-  padding: 0;
+  padding: 5px 0;
   color: var(--textSecondary);
-  font-size: 13px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
-.desktop-agent-onboarding__link:hover {
+.desktop-agent-onboarding__skip:hover {
   color: var(--text);
+}
+
+@media (max-width: 760px) {
+  .desktop-agent-onboarding__panel {
+    padding: 22px;
+  }
+
+  .desktop-agent-onboarding__options--sources {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .desktop-agent-onboarding__header {
+    gap: 12px;
+  }
+
+  .desktop-agent-onboarding__options--nolo {
+    grid-template-columns: 1fr;
+  }
 }

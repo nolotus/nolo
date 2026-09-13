@@ -19,10 +19,6 @@ export type DesktopOnboardingDismissReason =
 
 const LOCAL_CREATE = `/${CreateRoutePaths.CREATE_LOCAL_AGENT}`;
 
-/**
- * Desktop first-run: two buckets (Nolo / BYO), four cards into local create or auth.
- * Path query pre-selects LocalQuickCreateAgent step.
- */
 const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
   const { t } = useTranslation();
 
@@ -50,168 +46,125 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
       aria-labelledby="desktop-agent-onboarding-title"
     >
       <div className="desktop-agent-onboarding__panel">
-        <h1
-          id="desktop-agent-onboarding-title"
-          className="desktop-agent-onboarding__title"
-        >
-          {t("localFirst.onboarding.title", "怎么开始？")}
-        </h1>
-        <p className="desktop-agent-onboarding__description">
-          {t(
-            "localFirst.onboarding.description",
-            "用 Nolo 最快上手，或本地直连自己的源——都不用绕弯。",
-          )}
-        </p>
-
-        <ul
-          className="desktop-agent-onboarding__options"
-          data-testid="desktop-onboarding-options"
-        >
-          <li className="desktop-agent-onboarding__options-meta">
-            <p className="desktop-agent-onboarding__group-label">
-              {t("localFirst.onboarding.group.nolo", "用 Nolo · 零配置最快")}
+        <header className="desktop-agent-onboarding__header">
+          <div>
+            <h1
+              id="desktop-agent-onboarding-title"
+              className="desktop-agent-onboarding__title"
+            >
+              {t("localFirst.onboarding.title", "怎么开始？")}
+            </h1>
+            <p className="desktop-agent-onboarding__description">
+              {t(
+                "localFirst.onboarding.description",
+                "用 Nolo 直接开始，或连接你已经在用的 AI。",
+              )}
             </p>
-          </li>
-          <li>
+          </div>
+          <button
+            type="button"
+            className="desktop-agent-onboarding__skip"
+            onClick={() => dismiss("skip")}
+            data-testid="desktop-onboarding-skip"
+          >
+            {t("localFirst.onboarding.skipCta", "暂时跳过")}
+          </button>
+        </header>
+
+        <div className="desktop-agent-onboarding__group">
+          <p className="desktop-agent-onboarding__group-label">
+            {t("localFirst.onboarding.group.nolo", "用 Nolo · 最快开始")}
+          </p>
+          <div className="desktop-agent-onboarding__options desktop-agent-onboarding__options--nolo">
             <Link
               to="/signup"
-              className="desktop-agent-onboarding__option"
+              className="desktop-agent-onboarding__option desktop-agent-onboarding__option--primary"
               data-testid="desktop-onboarding-signup"
               onClick={() => dismiss("signup")}
             >
-              <span className="desktop-agent-onboarding__option-num">1</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
-                  {t(
-                    "localFirst.onboarding.path.signup",
-                    "注册即用（送额度）",
-                  )}
+                  {t("localFirst.onboarding.path.signup", "注册即用")}
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
-                  {t(
-                    "localFirst.onboarding.path.signupHint",
-                    "创建账号即可开始，无需先配模型",
-                  )}
+                  {t("localFirst.onboarding.path.signupHint", "新账号有免费额度，无需配置模型")}
                 </span>
               </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
             </Link>
-          </li>
-          <li>
             <Link
               to="/login"
               className="desktop-agent-onboarding__option"
               data-testid="desktop-onboarding-login"
               onClick={() => dismiss("login")}
             >
-              <span className="desktop-agent-onboarding__option-num">2</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
-                  {t(
-                    "localFirst.onboarding.path.login",
-                    "已有 Nolo 账号 · 登录",
-                  )}
+                  {t("localFirst.onboarding.path.login", "已有账号，登录 Nolo")}
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
-                  {t(
-                    "localFirst.onboarding.path.loginHint",
-                    "同步你已有的助手与额度",
-                  )}
+                  {t("localFirst.onboarding.path.loginHint", "同步已有助手和额度")}
                 </span>
               </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
             </Link>
-          </li>
+          </div>
+        </div>
 
-          <li className="desktop-agent-onboarding__options-meta">
-            <p className="desktop-agent-onboarding__group-label desktop-agent-onboarding__group-label--spaced">
-              {t(
-                "localFirst.onboarding.group.byo",
-                "用我自己的 · 本地直连免登录",
-              )}
-            </p>
-          </li>
-          <li>
+        <div className="desktop-agent-onboarding__group">
+          <p className="desktop-agent-onboarding__group-label">
+            {t("localFirst.onboarding.group.byo", "连接我已有的 AI · 本地使用")}
+          </p>
+          <div className="desktop-agent-onboarding__options desktop-agent-onboarding__options--sources">
             <Link
               to={`${LOCAL_CREATE}?path=membership&access=cli`}
               className="desktop-agent-onboarding__option"
               data-testid="desktop-onboarding-path-cli"
               onClick={() => dismiss("path-cli")}
             >
-              <span className="desktop-agent-onboarding__option-num">3</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
-                  {t(
-                    "localFirst.onboarding.path.cli",
-                    "本机 CLI 已登录",
-                  )}
+                  {t("localFirst.onboarding.path.cli", "本机 CLI 已登录")}
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
-                  {t(
-                    "localFirst.onboarding.path.cliHint",
-                    "Claude Code、Codex、Grok CLI 等，检测后直接用",
-                  )}
+                  {t("localFirst.onboarding.path.cliHint", "Claude Code、Codex、Grok CLI")}
                 </span>
               </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
             </Link>
-          </li>
-          <li>
             <Link
               to={`${LOCAL_CREATE}?path=membership`}
               className="desktop-agent-onboarding__option"
               data-testid="desktop-onboarding-path-membership"
               onClick={() => dismiss("path-membership")}
             >
-              <span className="desktop-agent-onboarding__option-num">4</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
-                  {t(
-                    "localFirst.onboarding.path.membership",
-                    "我在用某家 AI 会员/订阅",
-                  )}
+                  {t("localFirst.onboarding.path.membership", "我有 AI 会员或订阅")}
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
-                  {t(
-                    "localFirst.onboarding.path.membershipHint",
-                    "Claude、ChatGPT、Grok、Token Plan…",
-                  )}
+                  {t("localFirst.onboarding.path.membershipHint", "Claude、ChatGPT、Grok 等")}
                 </span>
               </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
             </Link>
-          </li>
-          <li>
             <Link
               to={`${LOCAL_CREATE}?path=byo`}
               className="desktop-agent-onboarding__option"
               data-testid="desktop-onboarding-path-byo"
               onClick={() => dismiss("path-byo")}
             >
-              <span className="desktop-agent-onboarding__option-num">5</span>
               <span className="desktop-agent-onboarding__option-body">
                 <span className="desktop-agent-onboarding__option-title">
-                  {t(
-                    "localFirst.onboarding.path.byo",
-                    "我有 API Key / 本地模型",
-                  )}
+                  {t("localFirst.onboarding.path.byo", "我有 API Key 或本地模型")}
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
-                  {t(
-                    "localFirst.onboarding.path.byoHint",
-                    "OpenAI Key、Ollama、LM Studio、兼容端点",
-                  )}
+                  {t("localFirst.onboarding.path.byoHint", "OpenAI、Ollama、LM Studio、兼容端点")}
                 </span>
               </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
             </Link>
-          </li>
-        </ul>
-
-        <div className="desktop-agent-onboarding__footer">
-          <button
-            type="button"
-            className="desktop-agent-onboarding__link"
-            onClick={() => dismiss("skip")}
-            data-testid="desktop-onboarding-skip"
-          >
-            {t("localFirst.onboarding.skipCta", "先随便看看")}
-          </button>
+          </div>
         </div>
       </div>
     </section>

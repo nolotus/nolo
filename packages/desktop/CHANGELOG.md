@@ -1,4 +1,17 @@
 
+## 0.75.0-alpha.1
+
+## 0.75.0-alpha.1 (2026-09-13)
+
+### Features
+
+* **desktop:** clarify first-run onboarding choices ([f17eb79](https://github.com/nolotus/bun-nolo/commit/f17eb793142c5242e7c5430efb1c01b17b71a761))
+
+### Bug Fixes
+
+* **desktop:** remove duplicate Linux titlebar ([e108a3d](https://github.com/nolotus/bun-nolo/commit/e108a3d3d53c61464f79fda8407fe32505207b24))
+
+
 ## 0.74.0-alpha.1
 
 ## 0.74.0-alpha.1 (2026-09-13)
