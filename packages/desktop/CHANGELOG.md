@@ -1,4 +1,14 @@
 
+## 0.73.0-alpha.3
+
+## 0.73.0-alpha.3 (2026-09-13)
+
+### Bug Fixes
+
+* **desktop:** center and restore window geometry ([3bdceb4](https://github.com/nolotus/bun-nolo/commit/3bdceb439e5c86c55148c6ada786c2126c8a4674))
+* **desktop:** show onboarding for local users ([34690c6](https://github.com/nolotus/bun-nolo/commit/34690c66c0fa1d700fc8abc95acbf761a035be67))
+
+
 ## 0.73.0-alpha.2
 
 ## 0.73.0-alpha.2 (2026-09-12)

@@ -8,7 +8,7 @@ import { LuChevronRight, LuGlobe, LuUsers } from "react-icons/lu";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta } from "app/hooks/usePageMeta";
 import { buildStaticPageMeta } from "app/seo/pageMeta";
-import { useCurrentUser, useIsLoggedIn } from "identity";
+import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
 import WelcomeSection from "./WelcomeSection";
@@ -50,7 +50,11 @@ const Home = () => {
   const hasMounted = useHasMounted();
   const isLoggedIn = useIsLoggedIn();
   const currentUser = useCurrentUser();
+  const token = useToken();
   const homePublicAgents = useSSRPublicAgents();
+  // Local User remains the authenticated home owner for local data/widgets.
+  // A token only distinguishes a real cloud account when deciding whether the
+  // Desktop first-run guide still needs to be shown.
   const showAuthedHome = hasMounted && isLoggedIn && !!currentUser;
   const pageMeta = useMemo(
     () => buildStaticPageMeta(t, showAuthedHome ? "default" : "home"),
@@ -79,8 +83,9 @@ const Home = () => {
   );
   // Runtime check (not module-load const) so ?noloDesktop=1 / injected flag works in preview.
   const isDesktopApp = getIsDesktopApp();
+  const hasCloudAccount = Boolean(token);
   const showDesktopOnboarding =
-    isDesktopApp && !showAuthedHome && !onboardingDismissed;
+    isDesktopApp && !hasCloudAccount && !onboardingDismissed;
 
   const handleDismissOnboarding = useCallback(() => {
     setOnboardingDismissed(true);
@@ -228,7 +233,9 @@ const Home = () => {
             showAuthedHome && homeStyles.homeMainAuthed
           )}
         >
-          {showAuthedHome ? (
+          {showDesktopOnboarding ? (
+            <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
+          ) : showAuthedHome ? (
             <>
               <section {...stylex.props(homeStyles.homeAuthedWidgetsSection)}>
                 <div {...stylex.props(homeStyles.homeAuthedWidgetsHeader)}>
@@ -280,11 +287,7 @@ const Home = () => {
             </>
           ) : (
             <>
-              {showDesktopOnboarding ? (
-                <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
-              ) : isDesktopApp ? null : (
-                <WelcomeSection />
-              )}
+              {!isDesktopApp && <WelcomeSection />}
 
               <section id="ai-plaza-section" {...stylex.props(homeStyles.homeContentSection)}>
                 <div {...stylex.props(homeStyles.homePlazaBridge)}>

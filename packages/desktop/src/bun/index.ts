@@ -29,6 +29,10 @@ import {
 } from "./browseContextStore";
 import { BROWSER_CHROME_SCRIPT } from "./browserChromeTemplates";
 import {
+  resolveInitialWindowFrame,
+  savePersistedWindowState,
+} from "./desktopWindowState";
+import {
   resolveDesktopChannelDir,
   resolveDesktopDataRoot,
   resolveDesktopPublicDir,
@@ -1104,36 +1108,6 @@ try {
   console.warn("[desktop] failed to read public latest-assets.json", error);
 }
 
-const resolveInitialWindowFrame = () => {
-  if (process.platform !== "win32") {
-    return {
-      width: 1440,
-      height: 920,
-      x: 120,
-      y: 80,
-    };
-  }
-
-  const primaryDisplay = Screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
-  const targetWidth = Math.max(1280, Math.min(Math.round(workArea.width * 0.75), workArea.width));
-  const targetHeight = Math.max(800, Math.min(Math.round(workArea.height * 0.8), workArea.height));
-  const targetX = workArea.x + Math.max(0, Math.floor((workArea.width - targetWidth) / 2));
-  const targetY = workArea.y + Math.max(0, Math.floor((workArea.height - targetHeight) / 2));
-
-  console.log(`[desktop] primary display scale factor ${primaryDisplay.scaleFactor}`);
-  console.log(
-    `[desktop] target logical frame ${targetWidth}x${targetHeight} at ${targetX},${targetY}`
-  );
-
-  return {
-    width: targetWidth,
-    height: targetHeight,
-    x: targetX,
-    y: targetY,
-  };
-};
-
 process.env.NODE_ENV = isDev ? "development" : "production";
 if (!isDev) {
   process.env.NOLO_FORCE_PRODUCTION = "1";
@@ -1221,7 +1195,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-const initialFrame = resolveInitialWindowFrame();
+const initialFrame = resolveInitialWindowFrame({
+  channelDir: desktopChannelDir,
+  screen: Screen,
+});
 const shouldInstallInjectedDesktopChrome = true;
 
 // Generic probe hook: optional initial path for Desktop E2E (production-off; unset in normal use).
@@ -1552,10 +1529,23 @@ const shutdownDesktopAndExit = (reason: string) => {
   });
 };
 
+const saveMainWindowState = () => {
+  try {
+    savePersistedWindowState(
+      desktopChannelDir,
+      (mainWindow as any).getFrame?.()
+    );
+  } catch (error) {
+    console.warn("[desktop] failed to save window state", error);
+  }
+};
+
 mainWindow.on("close", () => {
+  saveMainWindowState();
   shutdownDesktopAndExit("desktop-window-close");
 });
 
 Electrobun.events.on("before-quit", () => {
+  saveMainWindowState();
   shutdownDesktopAndExit("desktop-before-quit");
 });
