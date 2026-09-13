@@ -1,4 +1,13 @@
 
+## 0.60.0-alpha.2
+
+## 0.60.0-alpha.2 (2026-09-13)
+
+### Bug Fixes
+
+* **release:** pass version and projection_sha to cli-publish dispatch ([34847f2](https://github.com/nolotus/bun-nolo/commit/34847f2b62894434b1dffcf58f73ceb782c7f02a))
+
+
 ## 0.60.0-alpha.1
 
 ## 0.60.0-alpha.1 (2026-09-13)
