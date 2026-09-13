@@ -4,7 +4,7 @@
     "cli": {
       "version": "0.61.0-alpha.2",
       "channel": "alpha",
-      "releaseIntent": "none"
+      "releaseIntent": "release"
     },
     "desktop": {
       "version": "0.77.0-alpha.3",
