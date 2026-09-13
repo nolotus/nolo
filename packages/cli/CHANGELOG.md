@@ -1,4 +1,13 @@
 
+## 0.60.0-alpha.5
+
+## 0.60.0-alpha.5 (2026-09-13)
+
+### Bug Fixes
+
+* **welcome:** repair mobile horizontal overflow on guest homepage ([ee329f0](https://github.com/nolotus/bun-nolo/commit/ee329f0fbff6679d82423479fe21ee0dfacca235))
+
+
 ## 0.60.0-alpha.4
 
 ## 0.60.0-alpha.4 (2026-09-13)

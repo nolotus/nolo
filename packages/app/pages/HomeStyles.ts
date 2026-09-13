@@ -33,6 +33,9 @@ export const homeStyles = stylex.create({
     flexBasis: "0%",
   },
   homeMain: {
+    width: "100%",
+    boxSizing: "border-box",
+    minWidth: 0,
     maxWidth: "1080px",
     marginTop: 0,
     marginRight: "auto",

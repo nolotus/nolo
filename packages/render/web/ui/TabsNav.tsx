@@ -161,7 +161,9 @@ const TabsNav: React.FC<TabsNavProps> = ({
       onBlur={() => setHasFocusWithin(false)}
     >
       <div
-        className={stylex.props(tabsNavStyles.tabs).className}
+        className={[stylex.props(tabsNavStyles.tabs).className, "tabs"]
+          .filter(Boolean)
+          .join(" ")}
         style={tabsStyle}
         ref={tabsRef}
       >
@@ -177,6 +179,10 @@ const TabsNav: React.FC<TabsNavProps> = ({
           const isActive = activeTab === tab.id;
           const tabControlId =
             panelId != null ? `${panelId}-tab-${String(tab.id)}` : undefined;
+          const tabItemProps = stylex.props(
+            tabsNavStyles.tabItem,
+            !tab.disabled && tabsNavStyles.tabItemHover,
+          );
 
           return (
             <button
@@ -194,10 +200,10 @@ const TabsNav: React.FC<TabsNavProps> = ({
               aria-selected={isActive}
               aria-controls={panelId}
               tabIndex={isActive ? 0 : -1}
-              {...stylex.props(
-                tabsNavStyles.tabItem,
-                !tab.disabled && tabsNavStyles.tabItemHover,
-              )}
+              {...tabItemProps}
+              className={[tabItemProps.className, "tab-item"]
+                .filter(Boolean)
+                .join(" ")}
             >
               {tab.label}
             </button>

@@ -22,6 +22,9 @@
   --home-content-max-width: 980px;
   /* 对应 Home.tsx 的 HOME_PANE_MIN_HEIGHT，改值需两边同步 */
   --home-pane-min-height: 340px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 /* ── 动画与 keyframes ──

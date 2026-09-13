@@ -5,6 +5,9 @@
   z-index: 2;
   margin-bottom: 72px;
   padding: 0 20px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .ws-orchestration-head {
@@ -19,15 +22,20 @@
   margin: 0 auto 28px;
   max-width: 680px;
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
+.ws-orchestration-tabs > div,
 .ws-orchestration-tabs .tabs {
   width: 100%;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-columns: unset;
   grid-auto-flow: unset;
+  box-sizing: border-box;
 }
 
+.ws-orchestration-tabs button,
 .ws-orchestration-tabs .tab-item {
   min-width: 0;
   padding: 0 10px;
@@ -36,6 +44,7 @@
   color: var(--ws-text-sub);
 }
 
+.ws-orchestration-tabs button[data-active="true"],
 .ws-orchestration-tabs .tab-item[data-active="true"] {
   color: var(--ws-text);
   font-weight: 650;
@@ -905,24 +914,36 @@
 @media (max-width: 768px) {
   .ws-orchestration-section {
     margin-bottom: 64px;
+    padding: 0 12px;
   }
 
-  /* tabs 是 nowrap 的，不给它横向滚动就会把整页 min-content 撑到 500+ */
   .ws-orchestration-tabs {
     max-width: 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
+    margin-bottom: 20px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
-  .ws-orchestration-tabs::-webkit-scrollbar {
-    display: none;
+  .ws-orchestration-tabs > div,
+  .ws-orchestration-tabs .tabs {
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-columns: unset;
+    grid-auto-flow: unset;
+    height: auto;
+    min-height: 44px;
+    padding: 2px;
   }
 
+  .ws-orchestration-tabs button,
   .ws-orchestration-tabs .tab-item {
-    font-size: 0.8rem;
-    padding: 0 12px;
-    flex-shrink: 0;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    padding: 4px 4px;
+    white-space: normal;
+    word-break: break-word;
+    text-align: center;
+    min-width: 0;
   }
 
   .ws-final-cta-actions {
