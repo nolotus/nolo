@@ -1,4 +1,13 @@
 
+## 0.77.0-alpha.3
+
+## 0.77.0-alpha.3 (2026-09-13)
+
+### Performance Improvements
+
+* **dev:** periodic esbuild watch restart + --smol for test:heavy ([855f77b](https://github.com/nolotus/bun-nolo/commit/855f77bafc6d3c53d048abd132c571adac686145))
+
+
 ## 0.77.0-alpha.2
 
 ## 0.77.0-alpha.2 (2026-09-13)
