@@ -291,7 +291,6 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/render/page/RenderPage.tsx",
   "packages/render/page/SaveStatusIndicator.tsx",
   "packages/render/page/createPageAction.ts",
-  "packages/render/surf/screens/SurfWeatherLabelCol.tsx",
   "packages/render/table/useCreateTable.ts",
   "packages/render/table/useTable.ts",
   "packages/render/table/useTableShareActions.ts",

@@ -1,6 +1,5 @@
 import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { subscribeSharedSse } from "app/realtime/sharedSse";
 import { selectRuntimeRemoteServers, selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { fetchUserDataThunk } from "database/actions/fetchUserData";
@@ -175,40 +174,55 @@ export function useUserNotifications() {
 
   useEffect(() => {
     if (!currentUserId || !currentServer) return;
-
-    const channel = `user-${currentUserId}`;
-    const dispose = subscribeSharedSse({
-      key: `${currentServer}:${channel}`,
-      url: `${currentServer}/api/events/${channel}`,
-      headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : undefined,
-      onEvent: (event) => {
-        let notificationRecord: NotificationRecord | null = null;
-        if (isNotificationEventPayload(event)) {
-          notificationRecord = event.notification;
-        } else if (event.type === "space.member_added") {
-          notificationRecord = buildLegacySpaceMemberRecord(event);
-        }
-        if (!notificationRecord) return;
-        void (async () => {
-          await dispatch(
-            cacheMergedUserDataThunk({ records: [notificationRecord as any] })
-          )
-            .unwrap()
-            .catch((error) => {
-              console.warn(
-                "[notifications] failed to cache live notification",
-                error
-              );
-            });
-          addNotification(
-            notificationRecordToAppNotification(notificationRecord, t as any)
-          );
-        })();
-      },
+    // 动态加载 subscribeSharedSse（纵深防御）：effect kernel 本就在懒加载
+    // chunk（entry 静态包 1.79MB 零 effect，metafile 证实），但静态 import
+    // 会让 Topbar chunk 与 effect chunk 之间的同步依赖边保留。改为挂载时
+    // 动态拉起：通知 bell 未挂载时 effect 完全不加载；后续做包体积巡检时
+    // 这条依赖边不应回填为静态 import。
+    let disposed = false;
+    let dispose: (() => void) | undefined;
+    void (async () => {
+      const { subscribeSharedSse } = await import("app/realtime/sharedSse");
+      if (disposed) return;
+      const channel = `user-${currentUserId}`;
+      dispose = subscribeSharedSse({
+        key: `${currentServer}:${channel}`,
+        url: `${currentServer}/api/events/${channel}`,
+        headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : undefined,
+        onEvent: (event) => {
+          let notificationRecord: NotificationRecord | null = null;
+          if (isNotificationEventPayload(event)) {
+            notificationRecord = event.notification;
+          } else if (event.type === "space.member_added") {
+            notificationRecord = buildLegacySpaceMemberRecord(event);
+          }
+          if (!notificationRecord) return;
+          void (async () => {
+            await dispatch(
+              cacheMergedUserDataThunk({ records: [notificationRecord as any] })
+            )
+              .unwrap()
+              .catch((error) => {
+                console.warn(
+                  "[notifications] failed to cache live notification",
+                  error
+                );
+              });
+            addNotification(
+              notificationRecordToAppNotification(notificationRecord, t as any)
+            );
+          })();
+        },
+      });
+    })().catch((error) => {
+      // 版本更新后旧 chunk 404 / 弱网离线：动态 import 失败不应产生
+      // 全局 unhandledrejection，通知订阅静默降级（轮询兜底见 hydrate）。
+      console.warn("[notifications] failed to load sharedSse module", error);
     });
 
     return () => {
-      dispose();
+      disposed = true;
+      dispose?.();
     };
   }, [currentServer, currentToken, currentUserId, dispatch, t]);
 }
