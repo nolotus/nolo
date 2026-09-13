@@ -1,4 +1,13 @@
 
+## 0.77.0-alpha.2
+
+## 0.77.0-alpha.2 (2026-09-13)
+
+### Performance Improvements
+
+* **scripts:** esbuild watchdog linux collector + memory-capped test:heavy ([3f26165](https://github.com/nolotus/bun-nolo/commit/3f261658c1d05bb46939228d6053f0001274ebad))
+
+
 ## 0.77.0-alpha.1
 
 ## 0.77.0-alpha.1 (2026-09-13)
