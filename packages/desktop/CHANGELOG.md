@@ -1,4 +1,13 @@
 
+## 0.76.0-alpha.3
+
+## 0.76.0-alpha.3 (2026-09-13)
+
+### Bug Fixes
+
+* **i18n:** guard double init so SSR language negotiation survives ([f81825e](https://github.com/nolotus/bun-nolo/commit/f81825efa690f16856d56316d19e811453cd98d6))
+
+
 ## 0.76.0-alpha.2
 
 ## 0.76.0-alpha.2 (2026-09-13)
