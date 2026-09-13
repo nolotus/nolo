@@ -49,7 +49,7 @@ export const CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
 
 /** Pinned Codex client version used by oh-my-pi / recent Codex CLI wire. */
-export const CODEX_CLIENT_VERSION = "0.144.1";
+export const CODEX_CLIENT_VERSION = "0.154.0";
 
 /** Official Codex login/request originator (Nolo auth flow uses the same value). */
 export const CODEX_ORIGINATOR = "codex_cli_rs";

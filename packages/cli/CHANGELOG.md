@@ -1,4 +1,13 @@
 
+## 0.60.0-alpha.3
+
+## 0.60.0-alpha.3 (2026-09-13)
+
+### Bug Fixes
+
+* **agent:** bump Codex client version to 0.154.0 for gpt-6-astra ([5ffd65b](https://github.com/nolotus/bun-nolo/commit/5ffd65b26ca2a687853a99c6c3000e20efdc5ee8))
+
+
 ## 0.60.0-alpha.2
 
 ## 0.60.0-alpha.2 (2026-09-13)
