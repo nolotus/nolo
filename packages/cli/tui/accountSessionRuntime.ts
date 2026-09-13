@@ -1,8 +1,8 @@
 import {
   composeAccountSessionRuntime,
   createAccountSessionCore,
-} from "../../auth/session";
-import type { TokenManager } from "../../auth/types";
+} from "core/accountSession";
+import type { TokenManager } from "core/accountSession/authTypes";
 import {
   getDefaultProfileConfigPath,
   getProfileTokens,
