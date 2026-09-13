@@ -1,4 +1,17 @@
 
+## 0.60.0-alpha.1
+
+## 0.60.0-alpha.1 (2026-09-13)
+
+### Features
+
+* **agent:** recommend GPT-6 Astra and add OpenAI prompt cache key ([4854f1d](https://github.com/nolotus/bun-nolo/commit/4854f1dfb1cee32684e7d98302e13ce4c34629a3))
+
+### Bug Fixes
+
+* **pricing:** drop zero-markup promise from FAQ copy ([0cda539](https://github.com/nolotus/bun-nolo/commit/0cda539ac113a9c8e4b1b23a5527941a5596c669))
+
+
 ## 0.59.0-alpha.1
 
 ## 0.59.0-alpha.1 (2026-09-13)

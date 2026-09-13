@@ -92,7 +92,7 @@ export default {
           },
           {
             q: "Is it more cost-effective than subscriptions?",
-            a: "Usually yes. Nolo charges at actual API cost with no subscription premium, so you only pay for real usage."
+            a: "Usually yes. Nolo uses transparent pay-as-you-go pricing based on actual token usage, with no subscription lock-in."
           }
         ]
       }
@@ -186,7 +186,7 @@ export default {
           },
           {
             q: "比包月订阅更划算吗？",
-            a: "通常更划算。Nolo 按实际 API 成本透明计费，没有订阅溢价，只为实际消耗付费。"
+            a: "通常更划算。Nolo 按实际 Token 消耗透明计费，无订阅绑定，只为实际用量付费。"
           }
         ]
       }

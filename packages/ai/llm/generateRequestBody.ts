@@ -8,6 +8,7 @@ import {
   resolveAgentCallPlan,
   resolveClientWire,
 } from "../../agent-runtime/agentCallPlan";
+import { stablePromptCacheKey } from "../../agent-runtime/promptCacheKey";
 import { Contexts } from "../types";
 import { getModelConfig } from "./providers";
 import type { Model } from "./types";
@@ -155,13 +156,24 @@ export const generateRequestBody = ({
     resolveAgentCallPlan(agentConfigForRequest as any, {})
   );
   if (clientWire === "responses") {
-    return generateResponseRequestBody(
+    const body = generateResponseRequestBody(
       agentConfigForRequest,
       [...(stableMessages ?? []), ...messages],
       contexts,
       prependSystemPrompt,
       responsesState,
     );
+    // 缓存路由亲和：generated instructions 含时间/摘要等动态尾巴，不能整串进键；
+    // model + agent 身份 + 自定义 prompt 是跨轮稳定子集。同 agent 同模型的轮次
+    body.prompt_cache_key ??= stablePromptCacheKey(
+      [
+        agentConfigForRequest.model,
+        agentConfigForRequest.dbKey ?? "",
+        agentConfigForRequest.prompt ?? "",
+      ],
+      "nolo-openai",
+    );
+    return body;
   }
 
   // 2) 其余走老版 chat/completions
