@@ -2,10 +2,20 @@ import type { CliKvDb } from "./client/hybridRecordStore";
 import type { CliFetchImpl } from "./cliFetch";
 import {
   toSafeAgentSummary,
+  deriveCredentialGroup,
+  summarizeCredentialGroups,
+  type CredentialKind,
+  type CredentialGroupSummary,
   type SafeAgentSummary,
   type SafeAgentSummaryOptions,
 } from "ai/agent/safeAgentSummary";
-export { isAgentUnavailableNow } from "ai/agent/agentAvailabilityShared";
+export {
+  isAgentUnavailableNow,
+  deriveCredentialGroup,
+  summarizeCredentialGroups,
+  type CredentialKind,
+  type CredentialGroupSummary,
+};
 import {
   listUserRecordsFromServers,
   readLiveDbRecordAfterTombstoneMerge,
@@ -38,6 +48,8 @@ export type ListedAgent = {
   credentialConfigured: boolean;
   credentialRef?: string;
   apiKeyRef?: string;
+  credentialGroup?: string;
+  credentialKind?: CredentialKind;
   /** 执行来源：platform=平台API  custom=自定义API  cli=订阅制 CLI 工具。 */
   apiSource?: string;
   /** apiSource=cli 时的具体 CLI（copilot/codex/claude 等订阅）。 */
@@ -75,6 +87,10 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
   const apiKeyRef = typeof record?.apiKeyRef === "string" && record.apiKeyRef
     ? record.apiKeyRef
     : undefined;
+  const rawCredRef = apiKeyRef || credentialRef;
+  const credInfo = deriveCredentialGroup(record?.credentialGroup ?? rawCredRef);
+  const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
+  const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
 
   return {
     id: rawId,
@@ -112,6 +128,8 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
     credentialConfigured,
     credentialRef,
     apiKeyRef,
+    ...(credentialGroup !== undefined ? { credentialGroup } : {}),
+    ...(credentialKind !== undefined ? { credentialKind } : {}),
     ...(typeof record?.apiSource === "string" && record.apiSource
       ? { apiSource: record.apiSource }
       : {}),

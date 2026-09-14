@@ -150,7 +150,7 @@ export const CODING_SKILL_SEEDS: readonly CodingSkillSeedDef[] = [
       "reviewer 不得修改被审文件、切分支、回滚他人改动、运行会写入工作区/远端的命令。不要整体禁用 shell/文件工具——review 需通过 `git diff`/`git status`/搜索/读取取证。允许只读 Git/shell 命令。若 reviewer 违反产生文件改动，规划者视该 review 无效并停止 run，不得自动回滚（工作树可能含他人改动）。",
       "",
       "## 派发与完成条件",
-      "- 一律非持久化（ephemeral）派发，完成后不留 dialog 记录：`startAgentRun(agentKey, task, { ephemeral: true })`；宿主工具不可用时用 CLI 带 `--ephemeral`。",
+      "- 派发：`startAgentRun(agentKey, task)`；宿主工具不可用时用 CLI。",
       "- 规划者只把 diff/背景/检查范围/验收证据/角色写进 spec；规则由本文件提供，不要复制进 prompt。",
       "- 只有带实际检查证据的 finding 或 `Clean review` 才算完成。空响应、只说「我先检查」、timeout 都不是证据；最多重试一次，仍无结论就标记 `review incomplete` 交 owner，禁止无限换 agent。",
       "",

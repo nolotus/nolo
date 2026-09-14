@@ -193,6 +193,13 @@ function buildRunStatusPayload(
       startedAt: reconciled.startedAt,
       endedAt: reconciled.endedAt ?? null,
       exitCode: reconciled.exitCode ?? null,
+      ...(reconciled.failureReason ? { failureReason: reconciled.failureReason } : {}),
+      ...(typeof reconciled.toolCallCount === "number"
+        ? { toolCallCount: reconciled.toolCallCount }
+        : {}),
+      ...(reconciled.lastAssistantText
+        ? { lastAssistantText: reconciled.lastAssistantText }
+        : {}),
       // Non-ephemeral runs expose dialogId so the caller can read the
       // agent's actual output via `nolo dialog read <dialogId>`. Ephemeral
       // runs do not persist a dialog (their ephemeral dialogId is synthetic)
@@ -222,6 +229,9 @@ function buildRunStatusPayload(
           startedAt: readTimestamp(reconciled.startedAt),
           finishedAt: readTimestamp(reconciled.endedAt),
         },
+        ...(typeof reconciled.toolCallCount === "number"
+          ? { toolCallCount: reconciled.toolCallCount }
+          : {}),
         logLines,
         labels,
       }),

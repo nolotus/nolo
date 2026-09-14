@@ -46,6 +46,7 @@ import {
   resolveRunQueuePath,
   spawnLocalBackgroundRun,
   type AgentRunControlDeps,
+  type RunFailureReason,
 } from "./agentRunControl";
 import { runDoDCommands, type DoDCommandResult } from "./agentRunDoD";
 import {
@@ -313,6 +314,11 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   const finalizeWatchdogOutcome = async (
     outcome: RunOutcome,
     note: string,
+    extra?: {
+      failureReason?: RunFailureReason;
+      toolCallCount?: number;
+      lastAssistantText?: string;
+    },
   ): Promise<void> => {
     if (!hasRegistry) return;
     // Watchdog settlement carries the child's *real* process exit code
@@ -321,9 +327,23 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     // exitFromWatchdog: once the process is gone nothing can repair a
     // dropped terminal write, so brief lock contention is retried (bounded)
     // instead of silently leaving the record running → false orphan.
+    const currentActivity = activityTracker?.getActivity();
+    const rawToolCount =
+      extra?.toolCallCount ?? currentActivity?.counters?.toolCalls;
+    const toolCallCount =
+      typeof rawToolCount === "number" && rawToolCount > 0
+        ? rawToolCount
+        : undefined;
     await settleRunTerminalAuthoritatively(
       childRunId as string,
-      { status: outcome.status, exitCode: outcome.exitCode, note },
+      {
+        status: outcome.status,
+        exitCode: outcome.exitCode,
+        note,
+        ...(extra?.failureReason ? { failureReason: extra.failureReason } : {}),
+        ...(toolCallCount !== undefined ? { toolCallCount } : {}),
+        ...(extra?.lastAssistantText ? { lastAssistantText: extra.lastAssistantText } : {}),
+      },
       { env, homedir: deps.homedir, fs: deps.fs, now: deps.now, sleep: deps.sleep },
       // Test seam: stubbed transitions keep their single-attempt semantics.
       deps.transitionRunToTerminal,
@@ -356,7 +376,11 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
         // The bounded retry must finish before the process exits — after
         // exitFromWatchdog nothing in this process can repair a dropped
         // terminal write.
-        await finalizeWatchdogOutcome(outcome, note);
+        const currentActivity = activityTracker?.getActivity();
+        await finalizeWatchdogOutcome(outcome, note, {
+          failureReason: "stalled",
+          toolCallCount: currentActivity?.counters?.toolCalls,
+        });
         rejectOnWatchdogFailure?.(new Error(`[nolo] local run ${note}`));
         exitFromWatchdog(outcome.exitCode);
       }
@@ -873,6 +897,33 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       console.warn(`[nolo] DoD verification failed to run for ${childRunId}:`, dodError);
     }
 
+    let failureReason: RunFailureReason | undefined;
+    let toolCallCount: number | undefined;
+    if (outcome.status === "failed") {
+      if (
+        result.emptyAssistantFallbackReason === "repetition_loop" ||
+        result.emptyAssistantFallbackReason === "stagnant_tool_calls"
+      ) {
+        failureReason = "stalled";
+      } else if (result.localError && isQuotaExhaustedError(result.localError)) {
+        failureReason = "provider_rate_limited";
+      } else if (result.localError) {
+        const errMsg = toErrorMessage(result.localError).toLowerCase();
+        if (errMsg.includes("config_unresolved") || errMsg.includes("unresolved config")) {
+          failureReason = "config_unresolved";
+        } else {
+          failureReason = "provider_error";
+        }
+      }
+      const currentActivity = activityTracker?.getActivity();
+      const rawToolCount =
+        currentActivity?.counters?.toolCalls ??
+        childRecordForDoD?.activity?.counters?.toolCalls;
+      if (typeof rawToolCount === "number" && rawToolCount > 0) {
+        toolCallCount = rawToolCount;
+      }
+    }
+
     // Authoritative child settlement: this process owns the real outcome
     // (exitCode / dialogId / credits / DoD / failure note) and exits right
     // after, so a contended strict lock is retried (bounded) instead of
@@ -886,6 +937,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       // run 级累计的平台积分（主轮 + fallback + drain 轮）：dock 行据此显示
       // 「⚡ x.xx」，让派发任务的消耗可见。undefined = 全程无平台计费。
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
+      ...(failureReason ? { failureReason } : {}),
+      ...(toolCallCount !== undefined ? { toolCallCount } : {}),
       ...truncationNote,
     },
     {

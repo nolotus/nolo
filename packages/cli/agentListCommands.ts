@@ -1,5 +1,5 @@
 import { toErrorMessage } from "core/errorMessage";
-import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
+import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, summarizeCredentialGroups, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -268,6 +268,8 @@ export async function runAgentListCommand(
         ? sortedSafeAgents.map(omitNullishAgentSummaryFields)
         : sortedSafeAgents.map(toCompactAgentSummary);
 
+      const credentialGroups = summarizeCredentialGroups(safeCandidates);
+
       output.write(JSON.stringify({
         success: true,
         userId,
@@ -275,6 +277,7 @@ export async function runAgentListCommand(
         total: sortedSafeAgents.length,
         unavailableCount: safeUnavailableCount,
         unavailableAgents: safeUnavailableAgents,
+        credentialGroups,
         agents: safeOutputAgents,
       }, null, 2));
       output.write("\n");
@@ -282,6 +285,7 @@ export async function runAgentListCommand(
     }
 
     if (wantJson) {
+      const credentialGroups = summarizeCredentialGroups(agentsForOutput);
       output.write(JSON.stringify({
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
@@ -290,6 +294,7 @@ export async function runAgentListCommand(
         total: agentsForOutput.length,
         publicCount: agentsForOutput.filter((agent) => agent.publicRecordExists).length,
         unavailableCount,
+        credentialGroups,
         source,
         agents: agentsForOutput,
       }, null, 2));

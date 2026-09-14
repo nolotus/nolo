@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
 import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
@@ -22,6 +23,73 @@ export {
   resolveBillingSource,
   type BillingSource,
 };
+
+export type CredentialKind = "oauth" | "api-key";
+
+export interface CredentialGroupSummary {
+  credentialGroup: string;
+  credentialKind: CredentialKind;
+  agentCount: number;
+  availableAt?: number;
+}
+
+export function deriveCredentialGroup(ref?: string | null): {
+  credentialGroup: string;
+  credentialKind: CredentialKind;
+} | undefined {
+  if (!ref || typeof ref !== "string") return undefined;
+  const trimmed = ref.trim();
+  if (!trimmed) return undefined;
+  if (isOAuthApiKeyRef(trimmed)) {
+    return {
+      credentialGroup: trimmed.toLowerCase(),
+      credentialKind: "oauth",
+    };
+  }
+  const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+  return {
+    credentialGroup: `cred-${hash}`,
+    credentialKind: "api-key",
+  };
+}
+
+export function summarizeCredentialGroups(
+  agents: Array<{
+    credentialGroup?: string;
+    credentialKind?: CredentialKind;
+    nextAvailableAt?: number;
+  }>,
+  now = Date.now(),
+): CredentialGroupSummary[] {
+  const groups = new Map<string, CredentialGroupSummary>();
+
+  for (const agent of agents) {
+    if (!agent.credentialGroup || !agent.credentialKind) continue;
+    const existing = groups.get(agent.credentialGroup);
+    const at =
+      typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > now
+        ? agent.nextAvailableAt
+        : undefined;
+
+    if (!existing) {
+      groups.set(agent.credentialGroup, {
+        credentialGroup: agent.credentialGroup,
+        credentialKind: agent.credentialKind,
+        agentCount: 1,
+        ...(at !== undefined ? { availableAt: at } : {}),
+      });
+    } else {
+      existing.agentCount += 1;
+      if (at !== undefined) {
+        existing.availableAt = Math.max(existing.availableAt ?? 0, at);
+      }
+    }
+  }
+
+  return Array.from(groups.values()).sort((a, b) =>
+    a.credentialGroup.localeCompare(b.credentialGroup),
+  );
+}
 
 export interface SafeAgentSummary {
   id: string | null;
@@ -63,6 +131,10 @@ export interface SafeAgentSummary {
   isOAuth: boolean;
   /** Epoch ms at which a provider quota/rate-limit is expected to recover. */
   nextAvailableAt?: number;
+  /** Stable non-secret identifier grouping agents that share the same credential. */
+  credentialGroup?: string;
+  /** Credential kind: oauth or api-key. */
+  credentialKind?: CredentialKind;
   updatedAt: string | number | null;
 }
 
@@ -292,6 +364,13 @@ export function toSafeAgentSummary(
     }
   }
 
+  const rawCredRef =
+    (typeof record?.apiKeyRef === "string" && record.apiKeyRef ? record.apiKeyRef : undefined) ??
+    (typeof record?.credentialRef === "string" && record.credentialRef ? record.credentialRef : undefined);
+  const credInfo = deriveCredentialGroup(record?.credentialGroup ?? rawCredRef);
+  const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
+  const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
+
   return {
     id,
     ...(agentKey !== undefined ? { agentKey } : {}),
@@ -315,6 +394,8 @@ export function toSafeAgentSummary(
     isOwned,
     isOAuth,
     ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
+    ...(credentialGroup !== undefined ? { credentialGroup } : {}),
+    ...(credentialKind !== undefined ? { credentialKind } : {}),
     updatedAt,
   };
 }
@@ -351,6 +432,8 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
   // 所以通常根本不占字节。
   "nextAvailableAt",
+  "credentialGroup",
+  "credentialKind",
 ] as const;
 
 export type CompactSafeAgentSummary = Pick<

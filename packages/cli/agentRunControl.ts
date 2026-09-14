@@ -31,6 +31,13 @@ import type { DoDCommandResult } from "./agentRunDoD";
 
 export type RunStatus = "running" | "done" | "failed" | "timeout" | "killed" | "orphaned";
 
+export type RunFailureReason =
+  | "stalled"
+  | "provider_rate_limited"
+  | "provider_error"
+  | "config_unresolved"
+  | "cancelled";
+
 export type RunRecord = {
   runId: string;
   pid?: number;
@@ -43,6 +50,12 @@ export type RunRecord = {
   status: RunStatus;
   exitCode?: number;
   endedAt?: string;
+  /** High-level typed failure cause on terminal failure / stall / cancel. */
+  failureReason?: RunFailureReason;
+  /** Number of tool calls executed before the run failed/stalled/ended. */
+  toolCallCount?: number;
+  /** Truncated last assistant text produced before failure/stall. */
+  lastAssistantText?: string;
   /**
    * 本次 run 实际消耗的平台积分（本地进程收尾时自报，sumPlatformCredits 口径，
    * 只含 billing_unit === "credits" 的平台计费轮）。缺省 = 该 run 没有平台计费
@@ -1581,6 +1594,9 @@ export function transitionRunToTerminal(
     note?: string;
     /** DoD 验收结果，与终态同一次写入。 */
     dodResults?: DoDCommandResult[];
+    failureReason?: RunFailureReason;
+    toolCallCount?: number;
+    lastAssistantText?: string;
   },
   deps: AgentRunControlDeps = {},
   options: { allowOverOrphaned?: boolean } = {},
@@ -1611,6 +1627,31 @@ export function transitionRunToTerminal(
     }
     if (update.dodResults && update.dodResults.length > 0) {
       record.dodResults = update.dodResults;
+    }
+    if (update.failureReason) {
+      record.failureReason = update.failureReason;
+    } else if (update.status === "killed") {
+      record.failureReason = "cancelled";
+    }
+    const resolvedToolCount =
+      typeof update.toolCallCount === "number"
+        ? update.toolCallCount
+        : record.activity?.counters?.toolCalls;
+    if (typeof resolvedToolCount === "number") {
+      record.toolCallCount = resolvedToolCount;
+    }
+    if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
+      record.lastAssistantText = update.lastAssistantText.slice(0, 2000);
+    } else if (!record.lastAssistantText && record.msgFile) {
+      try {
+        const fs = deps.fs ?? nodeFs;
+        if (fs.existsSync(record.msgFile)) {
+          const content = fs.readFileSync(record.msgFile, "utf8");
+          if (content) record.lastAssistantText = content.slice(0, 2000);
+        }
+      } catch {
+        // ignore
+      }
     }
     record.endedAt = now().toISOString();
     if (typeof update.note === "string" && update.note.trim()) {
@@ -1667,6 +1708,9 @@ export async function settleRunTerminalAuthoritatively(
     credits?: number;
     note?: string;
     dodResults?: DoDCommandResult[];
+    failureReason?: RunFailureReason;
+    toolCallCount?: number;
+    lastAssistantText?: string;
   },
   deps: AgentRunControlDeps = {},
   transition: typeof transitionRunToTerminal = transitionRunToTerminal,
@@ -1717,6 +1761,9 @@ export function finalizeRunRecord(
     credits?: number;
     note?: string;
     dodResults?: DoDCommandResult[];
+    failureReason?: RunFailureReason;
+    toolCallCount?: number;
+    lastAssistantText?: string;
   },
   deps: AgentRunControlDeps = {}
 ): void {

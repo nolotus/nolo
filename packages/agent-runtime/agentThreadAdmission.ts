@@ -6,13 +6,19 @@ import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
  * v0 policy: hard-coded to 2 until per-agent config is widely adopted.
  */
 export const DEFAULT_AGENT_THREAD_MAX_CONCURRENT = 2;
+export const DEFAULT_AGENT_THREAD_CREDENTIAL_BUDGET = 2;
 
 export type AgentThreadAdmissionConfig = {
   maxConcurrent?: unknown;
+  credentialBudget?: unknown;
 };
 
 export type AgentThreadAdmissionAgentConfig = {
   maxConcurrent?: unknown;
+  credentialBudget?: unknown;
+  apiKeyRef?: string | null;
+  credentialRef?: string | null;
+  cliProvider?: string | null;
   admission?: AgentThreadAdmissionConfig | null;
 } | null | undefined;
 
@@ -24,7 +30,7 @@ export type AgentThreadAdmissionDecision =
     }
   | {
       allowed: false;
-      reason: "max_concurrent_reached" | "agent_temporarily_unavailable";
+      reason: "max_concurrent_reached" | "agent_temporarily_unavailable" | "credential_concurrency_exhausted";
       activeThreadCount: number;
       maxConcurrent: number;
     };
@@ -43,10 +49,48 @@ export function resolveAgentThreadMaxConcurrent(
   return normalizeAgentThreadMaxConcurrent(agentConfig?.maxConcurrent);
 }
 
+export function resolveAgentThreadCredentialBudget(
+  agentConfig: AgentThreadAdmissionAgentConfig,
+): number | null {
+  const nestedLimit = normalizeAgentThreadMaxConcurrent(
+    agentConfig?.admission?.credentialBudget,
+  );
+  if (nestedLimit != null) return nestedLimit;
+  return normalizeAgentThreadMaxConcurrent(agentConfig?.credentialBudget);
+}
+
 export function decideAgentThreadAdmission(input: {
   agentConfig: AgentThreadAdmissionAgentConfig;
   activeThreadCount: number;
+  activeCredentialThreadCount?: number;
+  credentialBudget?: number;
 }): AgentThreadAdmissionDecision {
+  const isCliProvider = !!(input.agentConfig && (input.agentConfig as any).cliProvider);
+
+  if (input.activeCredentialThreadCount !== undefined) {
+    const credBudget =
+      input.credentialBudget ??
+      resolveAgentThreadCredentialBudget(input.agentConfig) ??
+      DEFAULT_AGENT_THREAD_CREDENTIAL_BUDGET;
+
+    if (input.activeCredentialThreadCount >= credBudget) {
+      return {
+        allowed: false,
+        reason: "credential_concurrency_exhausted",
+        activeThreadCount: input.activeCredentialThreadCount,
+        maxConcurrent: credBudget,
+      };
+    }
+  }
+
+  if (isCliProvider) {
+    return {
+      allowed: true,
+      activeThreadCount: input.activeThreadCount,
+      maxConcurrent: 999,
+    };
+  }
+
   const positiveActiveThreadCount = asOptionalPositiveFiniteNumber(
     input.activeThreadCount,
   );

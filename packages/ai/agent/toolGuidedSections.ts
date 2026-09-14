@@ -19,10 +19,10 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 控制/诊断。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
-1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由——由宿主能力决定如何接力。是否允许阻塞等待，由工具表自己回答，不用你猜测环境：controlAgentRun 的 action 里有 wait 就可以用它阻塞到终态（同样不要自己循环 wait，那是伪装成等待的轮询）；没有 wait 时按工具描述处理，不要据此推断一定存在 terminal wake，派发完直接收尾。
-2. 禁止轮询/禁空转/别复述 status，语义以两个工具的描述为准。正常后台 run 派发后收尾，能否汇总、要不要继续由宿主终态通知决定，不要用主动 status 判断。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看状态摘要）。并行：独立子任务一次派完，等各自终态逐个汇总。无文件交集、无真实数据依赖的任务默认并发派发——不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork 多实例，实例间无上下文共享）；只有真实文件/数据依赖或 brief 明示冲突面时才串行。
+1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由。是否允许阻塞等待由工具表回答，不用猜环境：controlAgentRun 有 wait action 就用它阻塞到终态（不要自己循环 wait——那是伪装成等待的轮询）；没有就按工具描述处理，不要推断一定存在 terminal wake。
+2. 禁止轮询、禁空转、别复述 status；语义以工具描述为准。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看摘要）；它不是 stop 前的 preflight。并行：无文件交集、无真实数据依赖的独立子任务默认并发派发；不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork，实例间无上下文共享），只有真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
-4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/已终态/运行中由控制平面自行处理（已终态原样返回、不会被覆盖）；status 仅用于异常诊断，不是 stop 前 mandatory preflight。`;
+4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/已终态/运行中由控制平面自行处理（已终态原样返回、不会被覆盖）。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
@@ -47,7 +47,7 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
 - **自己做**：纯问答/咨询/闲聊直接回答；两账均不命中的中小实现（典型 ≤3 个文件、1~2 次验证往返、无大输出、无 ≥2 个独立领域）直接完成，不声明、不派发。
 - **上下文账命中 → 派发**：验证循环 ≥3 次「跑命令→看报错→改」，或单步大输出（全量 typecheck 报错、长测试栈、大 diff、大文件读取）——整体交给子 agent 独立上下文，父 agent 只收结论。
 - **并行账命中 → 派发**：≥2 个互不依赖的独立领域，或仓库改动＋验证＋发布/迁移长链路 → 按领域并发派发。
-- 两账均不命中不凑数派发；实现演变为多轮验证循环时立即止损转派发。用户明确要求你亲自完成时按用户要求执行；仅当所有已验证派发通道均不可用（须有当次错误证据）才降级自做并说明。
+- 实现演变为多轮验证循环时立即止损转派发。用户明确要求你亲自完成时按用户要求执行；仅当所有已验证派发通道均不可用（须有当次错误证据）才降级自做并说明。
 
 **任务分型与收工预算（tool 调用即成本，预算先于勤奋）**：
 - **探索/spike 型**（路径或报错未知、验证外部假设）：brief 必须写工具调用或时间预算（如 ≤150 次调用 / ≤20 分钟），到达预算立即收工，输出「已验证事实 / 卡点 / 下一步建议」中间报告。DoD 是结论而非跑通；编排者凭报告决定续跑、转向还是放弃，禁止单 run 无限迭代到跑通。
@@ -74,12 +74,12 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 
 **commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
-- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun(ephemeral:true) 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
+- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
 - **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 nolo-plan「合并门」节）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
 
 --- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。
-- 自检：分档完成了吗？只保留当前动作需要的工具/历史/文件内容？派发的子任务边界和验收证据写清了吗？收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。`;
+- 收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。`;
 
 // ============================================================================
 // 交互说明（有 ask_user 工具时注入）

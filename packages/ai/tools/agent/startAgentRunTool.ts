@@ -48,6 +48,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
     name: "startAgentRun",
     description:
         "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，派发后直接收尾等终态通知，禁止轮询；controlAgentRun 用于控制（叫停/追加指令）与异常诊断。" +
+        "【派发纪律】通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；严禁在同一凭证上并发扇出，仅跨不同 credentialGroup 扇出；最强私有通道留给审查，执行优先使用低成本通道。" +
         (supportsWait
             ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
               "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
@@ -74,11 +75,11 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description: "可选。由 listAgents/readAgent 得到的可读 Agent 名称，用于 TUI 运行卡片展示。",
             },
-            ephemeral: {
-                type: "boolean",
-                description:
-                    "可选。为 true 时本次 run 不持久化 dialog（不留记录）。用于一次性审查（review）等不需留痕的场景。默认 false。",
-            },
+            // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
+            // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
+            // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
+            // 「不要用它」的克制指令更可靠（2026-09-14 owner 反馈）。CLI `--ephemeral`
+            // 与 server 透传保持不动，探活/烟测仍走 CLI 侧。
             batchId: {
                 type: "string",
                 description:
@@ -127,7 +128,6 @@ interface StartAgentRunArgs {
     task: string;
     input?: any;
     agentName?: string;
-    ephemeral?: boolean;
     batchId?: string;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
@@ -150,7 +150,7 @@ export async function startAgentRunFunc(
     thunkApi: any,
     _context?: { parentMessageId?: string; signal?: AbortSignal; toolRunId?: string }
 ): Promise<{ rawData: any; displayData: string; metadata?: Record<string, unknown> }> {
-    const { agentKey, task, input, agentName, ephemeral, batchId, wait } = args;
+    const { agentKey, task, input, agentName, batchId, wait } = args;
     const resultMode = args.resultMode ?? "full";
     const { dispatch } = thunkApi;
 
@@ -197,7 +197,6 @@ export async function startAgentRunFunc(
                 waitForCompletion: wait === true,
                 runKind: "subtask",
                 ...(parentDialogId ? { parentDialogId } : {}),
-                ...(ephemeral ? { ephemeral: true } : {}),
             })
         ).unwrap();
 

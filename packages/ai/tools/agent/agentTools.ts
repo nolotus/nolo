@@ -179,7 +179,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
         description: {
             name: "startAgentRun",
             description:
-                "后台启动一个 Agent 执行子任务，立即返回 runId，不阻塞当前对话。适合长任务、并行子任务、需要观察或叫停的场景。",
+                "后台启动一个 Agent 执行子任务，立即返回 runId，不阻塞当前对话。适合长任务、并行子任务、需要观察或叫停的场景。通道可用性当次重读，严禁同凭证扇出（仅跨 credentialGroup 扇出）。",
             category: "计划与编排",
         },
         behavior: "orchestrator",

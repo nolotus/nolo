@@ -7,12 +7,14 @@ import type {
   SafeAgentSummary,
   CompactSafeAgentSummary,
   UnavailableAgentSummary,
+  CredentialGroupSummary,
 } from "./safeAgentSummary";
 import {
   sortSafeAgentSummaries,
   toCompactAgentSummary,
   toUnavailableAgentSummary,
   omitNullishAgentSummaryFields,
+  summarizeCredentialGroups,
 } from "./safeAgentSummary";
 import { isAgentUnavailableNow } from "./agentAvailabilityShared";
 
@@ -142,6 +144,7 @@ export interface AgentDiscoveryResult {
   total: number;
   unavailableCount: number;
   unavailableAgents: UnavailableAgentSummary[];
+  credentialGroups: CredentialGroupSummary[];
   agents: (CompactSafeAgentSummary | SafeAgentSummary)[];
 }
 
@@ -167,6 +170,7 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
   const unavailableList = scopedAgents.filter((a) => isAgentUnavailableNow(a, now));
   const unavailableCount = unavailableList.length;
   const unavailableAgents = sortSafeAgentSummaries(unavailableList).map(toUnavailableAgentSummary);
+  const credentialGroups = summarizeCredentialGroups(scopedAgents, now);
 
   if (options.showUnavailable !== true) {
     scopedAgents = scopedAgents.filter((a) => !isAgentUnavailableNow(a, now));
@@ -182,6 +186,7 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     total: projectedAgents.length,
     unavailableCount,
     unavailableAgents,
+    credentialGroups,
     agents: projectedAgents,
   };
 }
