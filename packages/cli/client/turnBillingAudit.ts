@@ -1,4 +1,11 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { normalizeUsage } from "../../ai/token/normalizeUsage";
@@ -111,3 +118,61 @@ export function appendTurnBillingAudit(input: TurnBillingAuditInput): void {
     // 审计捕获绝不能影响计费主链路 / 对话可用性。
   }
 }
+
+/**
+ * 从 turn-billing.jsonl 尾部读取指定 dialog 最近一次调用的 input_tokens。
+ * 仅作为 dialog 记录未命中 lastInputTokens 时的轻量回退。
+ * 小 IO：只读取文件末尾最大 64KB，单次 read，禁止全量扫描大文件。
+ */
+export function readLastTurnBillingInputTokens(
+  dialogId: string,
+  env: { NOLO_HOME?: string } = process.env,
+): number | undefined {
+  if (!dialogId || typeof dialogId !== "string") return undefined;
+  try {
+    const logPath = resolveTurnBillingAuditLogPath(env);
+    const stat = statSync(logPath, { throwIfNoEntry: false });
+    if (!stat || !stat.isFile() || stat.size === 0) return undefined;
+
+    const maxBytesToRead = 64 * 1024;
+    const bytesToRead = Math.min(stat.size, maxBytesToRead);
+    const buffer = Buffer.alloc(bytesToRead);
+    const fd = openSync(logPath, "r");
+    try {
+      readSync(fd, buffer, 0, bytesToRead, stat.size - bytesToRead);
+    } finally {
+      closeSync(fd);
+    }
+
+    const text = buffer.toString("utf-8");
+    const lines = text.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed === "object" && parsed.dialogId === dialogId) {
+          if (Array.isArray(parsed.calls) && parsed.calls.length > 0) {
+            for (let j = parsed.calls.length - 1; j >= 0; j--) {
+              const call = parsed.calls[j];
+              if (
+                call &&
+                typeof call.input_tokens === "number" &&
+                Number.isFinite(call.input_tokens) &&
+                call.input_tokens > 0
+              ) {
+                return call.input_tokens;
+              }
+            }
+          }
+        }
+      } catch {
+        // partial first line from chunk boundary or malformed line, continue
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+

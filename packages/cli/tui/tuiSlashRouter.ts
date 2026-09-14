@@ -279,7 +279,20 @@ export async function runSubmittedSlashLine(
         authToken,
         dialogId: result.action.dialogId,
         summaryLlmCaller: options.summaryLlmCaller,
-      });
+        onProgress: (phase: string) => {
+          const phaseText =
+            phase === "reading"
+              ? t("compactPhaseReading")
+              : phase === "summarizing"
+                ? t("compactPhaseSummarizing")
+                : phase === "forking"
+                  ? t("compactPhaseForking")
+                  : undefined;
+          if (phaseText) {
+            emitCommandOutput(phaseText);
+          }
+        },
+      } as any);
       const elapsedSec = ((Date.now() - compactStart) / 1000).toFixed(1);
       host.state = {
         ...host.state,
@@ -330,11 +343,9 @@ export async function runSubmittedSlashLine(
             compactResult.dialogId,
             elapsed,
           );
-      output.write(`${message}\n`);
+      emitCommandOutput(message);
     } catch (error: any) {
-      output.write(
-        `[nolo] Compact failed: ${toErrorMessage(error)}\n`
-      );
+      emitCommandOutput(t("compactFailed", toErrorMessage(error)));
     }
   }
 

@@ -684,6 +684,38 @@ const STRINGS = {
     en: "Current dialog: new (nothing to compact yet)",
     zh: "当前对话还是新的（还没有可压缩的内容）",
   },
+  compactingDialog: {
+    en: "Compacting current dialog...",
+    zh: "正在压缩当前对话…",
+  },
+  compactPhaseReading: {
+    en: "Reading dialog messages…",
+    zh: "正在读取对话消息…",
+  },
+  compactPhaseSummarizing: {
+    en: "Generating summary…",
+    zh: "正在生成总结…",
+  },
+  compactPhaseForking: {
+    en: "Forking dialog…",
+    zh: "正在分叉新对话…",
+  },
+  compactFailed: {
+    en: "Compact failed: {0}",
+    zh: "压缩失败：{0}",
+  },
+  contextLengthExceeded: {
+    en: "Model context limit reached (requested {0} tokens / limit {1}). Suggest using /compact to compact current dialog, or /new to start a fresh dialog.",
+    zh: "已达模型上下文上限（请求 {0} tokens / 上限 {1}）。建议使用 /compact 压缩当前对话，或使用 /new 开始新对话。",
+  },
+  contextLengthExceededLimitOnly: {
+    en: "Model context limit reached (limit {0}). Suggest using /compact to compact current dialog, or /new to start a fresh dialog.",
+    zh: "已达模型上下文上限（上限 {0}）。建议使用 /compact 压缩当前对话，或使用 /new 开始新对话。",
+  },
+  contextLengthExceededGeneric: {
+    en: "Model context limit reached. Suggest using /compact to compact current dialog, or /new to start a fresh dialog.",
+    zh: "已达模型上下文上限。建议使用 /compact 压缩当前对话，或使用 /new 开始新对话。",
+  },
   compactDone: {
     en: "Compacted dialog {0} → {1}.",
     zh: "已压缩对话 {0} → {1}。",

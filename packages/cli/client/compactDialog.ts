@@ -6,6 +6,7 @@
 
 import { extractCustomId } from "core/prefix";
 import { ulid } from "ulid";
+import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import type { CliFetchImpl } from "../cliFetch";
 import type { Message } from "../../chat/messages/types";
 import { planCompression } from "../../ai/context/planCompression";
@@ -23,22 +24,12 @@ import {
 const DB_PATH = "/api/v1/db";
 
 /**
- * Extract userId from a JWT-style auth token without verifying the signature.
- * Mirrors the logic of `parseToken` in `auth/token.ts` without the crypto imports.
+ * Extract userId from an auth token (supporting 3-part JWT and 2-part profile tokens).
  * @internal - exported for testing only
  */
 export function parseTokenUserId(token: string): string | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const payloadBase64 = parts[1];
-    const payload = JSON.parse(
-      Buffer.from(payloadBase64, "base64").toString("utf8")
-    );
-    return typeof payload?.userId === "string" ? payload.userId : null;
-  } catch {
-    return null;
-  }
+  const userId = parseUserIdFromAuthToken(token);
+  return userId || null;
 }
 
 async function readDialogRecord(
@@ -86,13 +77,17 @@ async function patchDialog(
   dialogKey: string,
   changes: Record<string, unknown>
 ): Promise<void> {
+  // Server route (/api/v1/db/patch/:key) uses deepMerge(exist, body).
+  // Send top-level changes directly (not nested under { data: changes })
+  // matching canonical usage in scripts/verify/verifyDialogCrudAcrossServers.ts,
+  // so fields like summary, summarizedBeforeId, and referenceKeys merge at root.
   const res = await fetchImpl(`${serverUrl}${DB_PATH}/patch/${dialogKey}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ data: changes }),
+    body: JSON.stringify(changes),
   });
   if (!res.ok) {
     throw new Error(`Failed to patch dialog "${dialogKey}": HTTP ${res.status}`);
@@ -262,6 +257,20 @@ async function resolveContextWindow(
   return DEFAULT_CONTEXT_WINDOW;
 }
 
+export type CompactPhase = "reading" | "summarizing" | "forking";
+
+export interface CompactDialogOptions {
+  serverUrl: string;
+  authToken: string;
+  dialogId: string;
+  userId?: string;
+  fetchImpl?: CliFetchImpl;
+  /** Injected LLM caller for summary generation. Production wires the platform chat proxy. */
+  summaryLlmCaller?: SummaryLlmCaller;
+  /** Progress phase callback (called at start of reading -> summarizing -> forking). */
+  onProgress?: (phase: CompactPhase) => void;
+}
+
 /**
  * Compact the current dialog:
  * 1. Read the current dialog config and messages from the server.
@@ -276,22 +285,19 @@ async function resolveContextWindow(
  * This mirrors the Web `compactDialogAndForkAction` semantics: "compress then
  * fork" — compression results stay dialog-local and are NOT inherited.
  */
-export async function compactDialog(options: {
-  serverUrl: string;
-  authToken: string;
-  dialogId: string;
-  fetchImpl?: CliFetchImpl;
-  /** Injected LLM caller for summary generation. Production wires the platform chat proxy. */
-  summaryLlmCaller?: SummaryLlmCaller;
-}): Promise<CompactDialogResult> {
+export async function compactDialog(
+  options: CompactDialogOptions
+): Promise<CompactDialogResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const userId = parseTokenUserId(options.authToken);
+  const userId = options.userId || parseTokenUserId(options.authToken);
   if (!userId) {
     throw new Error(
       "[nolo] compact: cannot compact — invalid or missing auth token"
     );
   }
+
+  options.onProgress?.("reading");
 
   const dialogKey = `dialog-${userId}-${options.dialogId}`;
   const current = await readDialogRecord(
@@ -335,6 +341,7 @@ export async function compactDialog(options: {
       });
 
       if (plan.shouldCompress && plan.msgsToCompress.length > 0) {
+        options.onProgress?.("summarizing");
         const previousSummary = (current.summary as string) || "";
         const messagesText = formatMessagesForSummaryWithTruncation(plan.msgsToCompress);
         const fileOpsText = formatFileOperationsFromMessages(
@@ -402,6 +409,7 @@ export async function compactDialog(options: {
   }
 
   // --- Fork phase ---
+  options.onProgress?.("forking");
   const next = buildForkedDialogRecord(current, userId);
   await writeDialogRecord(fetchImpl, options.serverUrl, options.authToken, next);
   await addDialogToSpaceIfNeeded(

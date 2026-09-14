@@ -24,6 +24,7 @@ import {
   type FetchInit,
 } from "./localRuntimeFetchRetry";
 import { prepareTokenUsageData } from "../../ai/token/prepareTokenUsageData";
+import { normalizeUsage } from "../../ai/token/normalizeUsage";
 import { applyTokenUsageToDayStats } from "../../ai/token/applyTokenUsageToDayStats";
 import { createTokenKey, createTokenStatsKey } from "../../database/keys";
 import { runKeyed } from "core/keyedTaskQueue";
@@ -330,6 +331,36 @@ export async function writeLocalTokenRecord(args: {
   return ops;
 }
 
+/**
+ * 从 saveTurn 输入中提取「最后一次 provider 调用」的真实 input tokens。
+ * 针对多轮工具循环：
+ * 1. 优先从 usageRecords 倒序查找具有有效 input_tokens 的调用（compaction 位于 index 0，末尾为最近的主循环调用）；
+ * 2. 次选 input.result.usage（即 localLoop 最后一次 complete() 的 contextUsage）；
+ * 3. 绝不使用累加值（turnUsage / accountingUsage），避免多轮工具循环导致 token 虚高。
+ */
+export function extractLastProviderInputTokens(input: {
+  result?: { usage?: Record<string, unknown> };
+  usageRecords?: ReadonlyArray<{ usage?: Record<string, unknown> | null }>;
+}): number | undefined {
+  if (input.usageRecords && input.usageRecords.length > 0) {
+    for (let i = input.usageRecords.length - 1; i >= 0; i--) {
+      const record = input.usageRecords[i];
+      if (!record?.usage) continue;
+      const normalized = normalizeUsage(record.usage as any);
+      if (normalized.input_tokens > 0) {
+        return normalized.input_tokens;
+      }
+    }
+  }
+  if (input.result?.usage) {
+    const normalized = normalizeUsage(input.result.usage as any);
+    if (normalized.input_tokens > 0) {
+      return normalized.input_tokens;
+    }
+  }
+  return undefined;
+}
+
 export async function writeDialog(args: {
   store: HybridRecordStore;
   input: AgentRuntimeSaveTurnInput;
@@ -424,6 +455,25 @@ export async function writeDialog(args: {
     existingDialog,
     cwd: args.cwd,
   });
+
+  // 持久化该 dialog 上一次 provider 调用的真实 input tokens 到 dialog 记录（方案 a）。
+  // 若本轮无有效调用，保留已有 dialog 记录上的历史值。
+  const lastInputTokens =
+    extractLastProviderInputTokens(args.input) ??
+    (typeof existingDialog?.lastInputTokens === "number" &&
+    Number.isFinite(existingDialog.lastInputTokens) &&
+    existingDialog.lastInputTokens > 0
+      ? existingDialog.lastInputTokens
+      : undefined);
+  if (typeof lastInputTokens === "number" && lastInputTokens > 0) {
+    const dialogOp = plan.ops.find(
+      (op) => op.type === "put" && op.key === `dialog-${args.userId}-${plan.dialogId}`,
+    );
+    if (dialogOp && dialogOp.value && typeof dialogOp.value === "object") {
+      dialogOp.value.lastInputTokens = lastInputTokens;
+    }
+  }
+
   await args.store.batch(plan.ops);
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
@@ -641,6 +691,29 @@ export async function saveCliDialogSummary(args: {
     summaryPending: false,
     updatedAt: new Date().toISOString(),
   });
+}
+
+/**
+ * 从本地 per-dialog 记录读取上一次 provider 调用的真实 input tokens（方案 a）。
+ * 仅当数值有效 (>0 且有限) 时返回，缺失或异常返回 null 回退估算路径。
+ */
+export async function loadCliDialogLastContextUsage(args: {
+  store: HybridRecordStore;
+  userId: string;
+  dialogId: string;
+}): Promise<{ inputTokens?: number } | null> {
+  const dialogKey = resolveCliDialogRecordKey(args.userId, args.dialogId);
+  const record = await args.store.read(dialogKey);
+  if (!record || typeof record !== "object") return null;
+  const lastInputTokens = (record as any).lastInputTokens;
+  if (
+    typeof lastInputTokens === "number" &&
+    Number.isFinite(lastInputTokens) &&
+    lastInputTokens > 0
+  ) {
+    return { inputTokens: lastInputTokens };
+  }
+  return null;
 }
 
 /**

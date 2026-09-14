@@ -1559,6 +1559,49 @@ export async function runLocalAgentTurn(
     return resolvedProvider;
   };
 
+  // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）。
+  // 来源实现说明：
+  // 选择方案 a（adapter 扩展：saveTurn 时把最后一次 provider 调用的真实 input tokens 持久化到
+  // 本地 per-dialog 记录，并在 turn 开始时经 adapter.loadLastContextUsage 读回），并支持方案 b
+  // 作为平滑回退（从 turn-billing.jsonl 尾部小 IO 读取）。
+  // 理由：
+  // 1. dialog 记录是本地 authoritative store，单 key O(1) 读取，开销极小且无全量扫描风险；
+  // 2. 不依赖外部环境变量或特定终端/TUI 审计配置（如 NOLO_TURN_BILLING_AUDIT=0），在 headless / 纯 CLI / 测试环境中均可靠；
+  // 3. 容错回退机制：当 dialog 记录未命中时，尝试从 turn-billing.jsonl 尾部读取；若均缺失则安全回退到估算路径，不编造数值；
+  // 4. saveTurn 处取多轮工具循环中「最后一次 provider 调用」的真实 input tokens（而非累加值 turnUsage），精准反映真实上下文占用。
+  let realContextUsagePercent: number | undefined;
+  if (
+    input.continueDialogId &&
+    typeof (input.adapter as any).loadLastContextUsage === "function"
+  ) {
+    try {
+      const usage = await (input.adapter as any).loadLastContextUsage(
+        input.continueDialogId,
+      );
+      const inputTokens = usage?.inputTokens;
+      const contextWindow = getModelContextWindow(agentConfig.model);
+      // 守卫：数值合理（>0 且 ≤合理上界）才使用；归一化 clamp 到 [0, 1] 比例
+      // 归一化陷阱防范：planCompression.normalizeContextUsageRatio 将 >1 视为百分数且要求结果 ≤1。
+      // 如果直接传入 >1 的比例（如超限 1.04），会被二次除以 100 变成 1.04% 导致误判；
+      // 因此此处强制 clamp 至 [0, 1] 闭区间。
+      if (
+        typeof inputTokens === "number" &&
+        Number.isFinite(inputTokens) &&
+        inputTokens > 0 &&
+        typeof contextWindow === "number" &&
+        Number.isFinite(contextWindow) &&
+        contextWindow > 0
+      ) {
+        realContextUsagePercent = Math.min(
+          1,
+          Math.max(0, inputTokens / contextWindow),
+        );
+      }
+    } catch (err) {
+      console.warn("[localLoop] loadLastContextUsage failed:", err);
+    }
+  }
+
   // 自动上下文压缩：先于预算兜底。摘要持久化，压缩点之间前缀稳定以保住缓存。
   // 失败只记日志，绝不阻断本轮对话。
   // 摘要那次 LLM 调用是一次独立的计费调用，用量必须并入本轮 usage，
@@ -1571,6 +1614,7 @@ export async function runLocalAgentTurn(
       history,
       model: agentConfig.model,
       resolveProvider: resolveProviderOnce,
+      realContextUsagePercent,
     });
     history = compacted.history;
     compactionUsage = compacted.usage;

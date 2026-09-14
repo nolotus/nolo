@@ -883,6 +883,22 @@ export async function verifyDesktopReleaseArtifacts(input: {
       });
       continue;
     }
+    // Windows 的发布物是 Inno Setup 安装器，release runner 无法解包比对；其证据
+    // **只能**来自真实安装（installed）。extracted-payload 只对 Linux/macOS 的
+    // 归档成立 —— 若 Windows 出现该 kind（构建期误写、或有人拿无关归档冒充），
+    // 必须 fail closed：否则 gate 会接受一份与**被发布的安装器**无关的证据。
+    // 生产端（post-package.ts）已无条件跳过 Windows 的构建期 payload 证据；
+    // 这里是消费端的同一不变量，两层各自成立，不依赖对方。
+    if (platform === "windows" && evidence.evidenceKind !== "installed") {
+      violations.push({
+        capability: "artifact-integrity",
+        message:
+          `platform windows evidence must come from a real install ` +
+          `(evidenceKind=installed), got evidenceKind=${evidence.evidenceKind}`,
+        path: evidencePath,
+      });
+      continue;
+    }
     const payloadSources = evidence.payloadSources ?? [];
     if (payloadSources.length === 0) {
       violations.push({

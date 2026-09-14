@@ -144,15 +144,27 @@ const verifyDesktopCapability = async () => {
     );
   }
 
+  // Windows 的发布物是 Inno Setup 安装器：既无法在构建机上解包比对，也不是
+  // verifier 的 payload 契约里的归档。其能力证据**必须**由 installed smoke 在
+  // 真实安装后写入（见 smokeInstalledWindowsDesktop.ps1 的 installed 模式）。
+  //
+  // 这里必须无条件跳过：此前只在「没有可解包归档」时才早退，于是当 artifacts 里
+  // 恰好存在 .tar.zst（更新包/中间产物）时会写出 extracted-payload 证据，而它与
+  // smoke 写的 installed 证据**共用同一个文件名** desktop-capability-evidence.json
+  // —— 变成「谁后写谁生效」的脆弱依赖（2026-09-14 stable 日志实测出现过
+  // "extracted-payload capability evidence written for windows"）。
+  if (process.platform === "win32") {
+    console.log(
+      "[desktop-capability] Windows capability evidence is written by the installed smoke step; skipping build-time payload evidence",
+    );
+    return;
+  }
+
   const payloadArchives = (await readdir(artifactDir))
     .filter((name) => CAPABILITY_PAYLOAD_EXTENSIONS.some((ext) => name.endsWith(ext)))
     .sort();
 
   if (payloadArchives.length === 0) {
-    if (process.platform === "win32") {
-      console.log("[desktop-capability] Windows evidence is produced by the installed smoke step");
-      return;
-    }
     throw new Error(
       `[desktop-capability] no extractable payload archive (${CAPABILITY_PAYLOAD_EXTENSIONS.join(
         ", ",

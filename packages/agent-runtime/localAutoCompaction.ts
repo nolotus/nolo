@@ -298,6 +298,11 @@ export async function maybeAutoCompactLocalHistory(args: {
   resolveProvider: () => Promise<AgentRuntimeProvider>;
   /** Test override; production uses getModelContextWindow(model). */
   contextWindow?: number;
+  /**
+   * 上一次调用 provider 侧真实上下文占用（0..1 比例，如 Math.min(1, inputTokens / contextWindow)）。
+   * planCompression 据此在真实占用 ≥0.78 时强制触发，绕过本地启发式历史估算偏低导致的 400 溢出。
+   */
+  realContextUsagePercent?: number;
 }): Promise<LocalAutoCompactionResult> {
   const { adapter, dialogId, history } = args;
   const unchanged = (): LocalAutoCompactionResult => ({
@@ -413,6 +418,9 @@ export async function maybeAutoCompactLocalHistory(args: {
       ? estimateTokenCount(existingSummary)
       : undefined,
     ...(coldResume ? { force: true, reason: "context_budget" as const } : {}),
+    ...(args.realContextUsagePercent !== undefined
+      ? { realContextUsagePercent: args.realContextUsagePercent }
+      : {}),
   });
 
   const projectExisting = (): LocalAutoCompactionResult => {

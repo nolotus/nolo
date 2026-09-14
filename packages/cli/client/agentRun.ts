@@ -193,6 +193,25 @@ function parseEmbeddedBalanceDetails(
   }
 }
 
+export function parseContextLengthDetails(
+  message: string,
+): { requested?: string; max?: string } {
+  let max: string | undefined;
+  let requested: string | undefined;
+
+  const maxMatch = message.match(/maximum context length\s+(?:is|of)\s*(\d+)/i);
+  if (maxMatch) {
+    max = maxMatch[1];
+  }
+
+  const reqMatch = message.match(/(?:requested|resulted in|request of)\s*(\d+)/i);
+  if (reqMatch) {
+    requested = reqMatch[1];
+  }
+
+  return { requested, max };
+}
+
 async function resolveCurrentMachineId(options: RunAgentTurnOptions) {
   return options.currentMachineIdResolver
     ? options.currentMachineIdResolver(options.env)
@@ -804,6 +823,20 @@ export function describeLocalRunFailure(
           balanceDetails.current,
         )
       : extractEmbeddedErrorMessage(cleanedMessage) ?? fallback;
+    return `[nolo] ${shownMessage}\n`;
+  }
+
+  // Context length limit exceeded (HTTP 400 with "maximum context length") —
+  // render friendly localized guidance suggesting /compact or /new without
+  // blaming local credentials or displaying "local run unavailable".
+  if (/maximum context length/i.test(message)) {
+    const details = parseContextLengthDetails(message);
+    const shownMessage =
+      details.requested && details.max
+        ? t("contextLengthExceeded", details.requested, details.max)
+        : details.max
+          ? t("contextLengthExceededLimitOnly", details.max)
+          : t("contextLengthExceededGeneric");
     return `[nolo] ${shownMessage}\n`;
   }
 

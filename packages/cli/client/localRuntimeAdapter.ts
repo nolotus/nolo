@@ -393,6 +393,7 @@ export {
   resolveCliDialogRecordKey,
   loadCliDialogSummary,
   saveCliDialogSummary,
+  loadCliDialogLastContextUsage,
 } from "./localRuntimeDialog";
 import {
   getOrCreateSharedStore,
@@ -400,7 +401,9 @@ import {
   writeDialog,
   loadCliDialogSummary,
   saveCliDialogSummary,
+  loadCliDialogLastContextUsage,
 } from "./localRuntimeDialog";
+import { readLastTurnBillingInputTokens } from "./turnBillingAudit";
 
 /**
  * 「一次上游响应 → 可用性落盘」的可复用核心（模块级导出）。
@@ -715,6 +718,23 @@ export function createCliLocalRuntimeAdapter(
         sourceCount: input.sourceCount,
         schemaVersion: input.schemaVersion,
       }),
+    loadLastContextUsage: async (dialogId) => {
+      // 方案 a（主）：优先从 per-dialog 权威持久化记录读取上一次调用的真实 input tokens
+      const fromDialog = await loadCliDialogLastContextUsage({
+        store: await getOrCreateSharedStore(deps),
+        userId,
+        dialogId,
+      });
+      if (fromDialog?.inputTokens) {
+        return fromDialog;
+      }
+      // 方案 b（回退）：旧对话记录缺失 lastInputTokens 时，尝试从 turn-billing.jsonl 尾部轻量读取
+      const fromAudit = readLastTurnBillingInputTokens(dialogId, deps.env);
+      if (typeof fromAudit === "number" && fromAudit > 0) {
+        return { inputTokens: fromAudit };
+      }
+      return null;
+    },
     saveTurn: async (input) =>
       writeDialog({
         store: await getOrCreateSharedStore(deps),

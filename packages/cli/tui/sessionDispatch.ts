@@ -491,7 +491,7 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
       }
       return {
         nextState: state,
-        output: "Compacting current dialog...",
+        output: t("compactingDialog"),
         action: { type: "compact", dialogId: state.dialogId },
       };
     case "/agent":

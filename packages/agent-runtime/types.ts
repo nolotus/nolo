@@ -258,3 +258,14 @@ export type AgentRuntimeDecision = {
   missingLocalCapabilities: string[];
   syncAfterRun: boolean;
 };
+
+export type AgentRuntimeContextUsageRecord = {
+  inputTokens?: number;
+};
+
+export type AgentRuntimeContextUsageAdapter = {
+  loadLastContextUsage?(
+    dialogId: string,
+  ): Promise<AgentRuntimeContextUsageRecord | null>;
+};
+

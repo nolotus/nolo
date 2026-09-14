@@ -51,7 +51,9 @@ async function launchTuiWorkspace(args: { scriptDir: string; env: NodeJS.Process
   const { createTuiSummaryLlmCaller } = await import("./client/tuiSummaryLlmCaller");
   return startTuiWorkspace({
     ...args,
-    summaryLlmCaller: createTuiSummaryLlmCaller(args.env),
+    // Big dialogs produce ~300KB+ summary prompts that routinely take 25–30s+;
+    // the old 30s abort made manual /compact silently degrade to fork-only.
+    summaryLlmCaller: createTuiSummaryLlmCaller(args.env, { timeoutMs: 90_000 }),
   });
 }
 
