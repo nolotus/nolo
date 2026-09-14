@@ -1393,13 +1393,22 @@ export function createHistoryOutputStream(
   return stream as unknown as NodeJS.WritableStream;
 }
 
-export function applyScrollAction(
+/**
+ * 滚动所需的视口/内容度量（applyScrollAction 与平滑滚动推进器共用，保证
+ * clamp 口径一致）。行数统计走 buildTurnOffsets + countTurnLines——与
+ * applyScrollAction 历史实现逐行等价。
+ */
+export function computeScrollMetrics(
   history: TurnHistory,
-  action: ScrollAction,
   output: NodeJS.WritableStream,
   inputLines: number,
   reservedRows = 0,
-): void {
+): {
+  visibleHeight: number;
+  contentWidth: number;
+  totalLines: number;
+  maxScrollTop: number;
+} {
   const tty = output as { rows?: number; columns?: number };
   const rows = tty.rows ?? 24;
   const columns = tty.columns ?? 80;
@@ -1416,6 +1425,22 @@ export function applyScrollAction(
       countTurnLines(history.currentRole, history.currentContent, contentWidth);
   }
   const maxScrollTop = Math.max(0, totalLines - visibleHeight);
+  return { visibleHeight, contentWidth, totalLines, maxScrollTop };
+}
+
+export function applyScrollAction(
+  history: TurnHistory,
+  action: ScrollAction,
+  output: NodeJS.WritableStream,
+  inputLines: number,
+  reservedRows = 0,
+): void {
+  const { visibleHeight, maxScrollTop } = computeScrollMetrics(
+    history,
+    output,
+    inputLines,
+    reservedRows,
+  );
 
   history.followBottom = false;
 

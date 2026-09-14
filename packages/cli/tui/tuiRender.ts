@@ -122,5 +122,9 @@ export function createTuiRender(host: TuiRenderHost) {
     renderHistoryUnderDialog,
     scheduleRender,
     flushPendingRender,
+    // 立即绘制一帧同步帧（BSU/ESU + 光标隐藏）。流式路径走 33ms 节流的
+    // scheduleRender；平滑滚动推进器按 16ms 自己的节奏调用这里，避免被节流
+    // 抹平成"每 33ms 一跳"。
+    paintImmediate: paintSyncedFrame,
   };
 }

@@ -57,6 +57,12 @@ export function parseScrollAction(sequence: string): ScrollAction | null {
   }
 }
 
+/**
+ * 每条滚轮报告折算的行数。
+ * - 转录区滚轮由 tuiScrollAnimation 的推进器消费，作为默认步长
+ *   （环境变量 NOLO_TUI_WHEEL_LINES 可覆盖）；推进器再把距离逐帧限速发出。
+ * - applyScrollAction 的 wheel 分支（非动画路径）也用它做瞬时步长。
+ */
 export const WHEEL_SCROLL_LINES = 5;
 
 /**

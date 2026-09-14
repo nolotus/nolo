@@ -197,6 +197,7 @@ import {
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
 // 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
 import { createTuiRender } from "./tuiRender";
+import { createScrollAnimator } from "./tuiScrollAnimation";
 import { resolveHistoryViewportHeight } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
 // SlashDispatchHost）已迁至 ./tuiSlashRouter。依赖方向单向：
@@ -715,6 +716,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
   });
   const history = createTurnHistory();
+  // 对话框把滚轮/翻页路由回转录区时的统一入口。平滑滚动推进器依赖渲染集群
+  // （paintImmediate），要到 createTuiRender 之后才能创建，所以这里先用可变
+  // 绑定：创建后替换为推进器版本；替换前的调用（理论上不会发生）回落瞬时滚动。
+  let handleTranscriptScroll = (action: ScrollAction): void => {
+    applyScrollAction(
+      history,
+      action,
+      output,
+      fixedInput.getInputLines(),
+      dialogHost.getReservedRows(),
+    );
+  };
   // `fixedInput` is reassigned once the interactive composer is installed, so
   // the host delegates through the binding rather than capturing the noop.
   const dialogHost = createDialogHost({
@@ -740,13 +753,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       fixedInput.repaint(buffer, cursorPos);
     },
     onTranscriptScroll: (action) => {
-      applyScrollAction(
-        history,
-        action as import("./tuiScrollbar").ScrollAction,
-        output,
-        fixedInput.getInputLines(),
-        dialogHost.getReservedRows(),
-      );
+      handleTranscriptScroll(action as ScrollAction);
     },
     output: output as NodeJS.WritableStream,
     // The decoder-drain hook is only bound once the interactive raw-mode
@@ -780,6 +787,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     renderHistoryUnderDialog,
     scheduleRender,
     flushPendingRender,
+    paintImmediate,
   } = createTuiRender({
       output,
       history,
@@ -795,6 +803,32 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       },
       getReservedRows: () => dialogHost.getReservedRows(),
     });
+
+  // 平滑滚动推进器：滚轮报告只折算成目标位置，16ms/帧限速逼近（不再单帧瞬移）。
+  // paintImmediate 内部自带「对话框占用屏幕」暂停判断与 BSU/ESU 包裹。
+  const scrollAnimator = createScrollAnimator({
+    history,
+    output,
+    getInputLines: () => fixedInput.getInputLines(),
+    getReservedRows: () => dialogHost.getReservedRows(),
+    onPaint: () => paintImmediate(),
+    env: effectiveEnv,
+  });
+  handleTranscriptScroll = (action) => {
+    if (action === "wheel-up" || action === "wheel-down") {
+      scrollAnimator.wheel(action === "wheel-up" ? "up" : "down");
+      return;
+    }
+    // 键盘翻页/首尾仍是瞬跳：先停推进器，避免两套写入打架。
+    scrollAnimator.cancel();
+    applyScrollAction(
+      history,
+      action,
+      output,
+      fixedInput.getInputLines(),
+      dialogHost.getReservedRows(),
+    );
+  };
 
   const refreshGitStatus = (): void => {
     // Per-key fallback: an explicit options.env that omits the key still
@@ -1255,6 +1289,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (done) return;
       done = true;
       sessionEnded = true; // signal in-flight async git refresh to drop its repaint
+      scrollAnimator.cancel(); // stop any in-flight wheel animation before teardown
       if (resizeTimer !== null) {
         clearTimeout(resizeTimer);
         resizeTimer = null;
@@ -1439,6 +1474,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const startAutoScroll = (direction: "up" | "down", mouseX: number) => {
       autoScrollDirection = direction;
       lastDragMouseX = mouseX;
+      // 选区边缘自动滚动与滚轮动画互斥：接管 scrollTop 前先停推进器。
+      scrollAnimator.cancel();
       if (autoScrollTimer) return;
       autoScrollTimer = setInterval(() => {
         if (!selectionState.dragging || !selectionState.anchor || fixedInput.isPaused()) {
@@ -1742,16 +1779,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (mouseEvent) {
         if (fixedInput.isPaused()) return;
         if (mouseEvent.kind === "wheel") {
-          const scrollAction =
-            mouseEvent.wheelDirection === "down" ? "wheel-down" : "wheel-up";
-          applyScrollAction(history, scrollAction, output, fixedInput.getInputLines());
-          // One trackpad swipe delivers dozens of wheel reports. Painting each
-          // one synchronously means dozens of full unsynced transcript
-          // repaints that also fight the streaming render frames — the scroll
-          // visibly tears and lags. Fold them into the same throttled, BSU/ESU
-          // wrapped frame pipeline the stream uses: scrollTop is already
-          // updated, only the paint is coalesced.
-          scheduleRender();
+          // 平滑滚动：报告只折算成目标位置，推进器按 16ms/帧限速逼近。
+          // "一次手势几十条报告 → 单帧跳几十行"的瞬移由推进器消掉
+          // （详见 tuiScrollAnimation）。
+          scrollAnimator.wheel(
+            mouseEvent.wheelDirection === "down" ? "down" : "up",
+          );
           return;
         }
 
@@ -1773,6 +1806,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
         if (mouseEvent.kind === "press" && mouseEvent.button === "left") {
           stopAutoScroll();
+          // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
+          scrollAnimator.cancel();
           if (screenRow < visibleHeight && screenCol < contentWidth) {
             const hit = hitTestHistory(
               history,
@@ -1877,6 +1912,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // agent turn; block it only while a picker/confirm dialog or
         // subprocess owns the screen (repainting would corrupt their UI).
         if (fixedInput.isPaused()) return;
+        // 键盘翻页/首尾是瞬跳：先停掉可能在跑的滚轮动画，避免两套写入打架。
+        scrollAnimator.cancel();
         applyScrollAction(history, scrollAction, output, fixedInput.getInputLines());
         paintFrame(buffer);
         return;
