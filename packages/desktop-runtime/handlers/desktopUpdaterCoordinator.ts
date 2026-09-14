@@ -9,6 +9,7 @@ import {
   createDesktopUpdaterSnapshot,
   type DesktopUpdaterOperation,
   type DesktopUpdaterSnapshot,
+  type DesktopUpdaterStatusEntry,
 } from "core/desktop/desktopUpdaterState";
 import type { DesktopUpdaterReleaseArtifact } from "core/desktop/desktopUpdatePolicy";
 
@@ -40,6 +41,9 @@ type ReleaseArtifactState = {
   error: string | null;
 };
 
+/** 缓存条目自带 TTL：成功取回用完整 TTL，失败只允许短负缓存。 */
+type ManifestCacheEntry = ReleaseArtifactState & { ttlMs: number };
+
 export type DesktopUpdaterActionResult =
   | { ok: true; status: 202; snapshot: DesktopUpdaterSnapshot }
   | { ok: false; status: 409; error: string };
@@ -55,10 +59,22 @@ type DesktopUpdaterCoordinatorOptions = {
   fetchFn?: DesktopUpdaterFetch;
   now?: () => number;
   manifestCacheTtlMs?: number;
+  manifestNegativeCacheTtlMs?: number;
   onOperationError?: (operation: DesktopUpdaterAction, error: unknown) => void;
+  /**
+   * 持久化的「更新退出交接失败」状态（core/desktop/desktopUpdateShutdownStatus）。
+   * 有值时并进 statusHistory 使设置页可见；用户新发起 download/apply 时清除。
+   */
+  readShutdownStatusEntry?: () => DesktopUpdaterStatusEntry | null;
+  clearShutdownStatusEntry?: () => void;
 };
 
 const DEFAULT_MANIFEST_CACHE_TTL_MS = 30_000;
+/**
+ * 远端 manifest 拉取失败（HTTP 非 2xx / 网络 / 解析错误）是瞬时故障：
+ * 只允许短负缓存，防止把失败当 30s 真值缓存而遮蔽紧随其后的恢复。
+ */
+const DEFAULT_MANIFEST_NEGATIVE_CACHE_TTL_MS = 5_000;
 const LEGACY_MANIFEST_FILE_NAME = "desktop-release-manifest.json";
 
 const resolveDefaultDesktopReleasePlatform = (): DesktopReleasePlatform =>
@@ -100,11 +116,13 @@ export function createDesktopUpdaterCoordinator(
 ) {
   let activeOperation: DesktopUpdaterAction | null = null;
   let activeTask: Promise<void> | null = null;
-  const manifestCache = new Map<string, ReleaseArtifactState>();
+  const manifestCache = new Map<string, ManifestCacheEntry>();
   const fetcher = options.fetchFn ?? fetch;
   const now = options.now ?? Date.now;
   const manifestCacheTtlMs =
     options.manifestCacheTtlMs ?? DEFAULT_MANIFEST_CACHE_TTL_MS;
+  const manifestNegativeCacheTtlMs =
+    options.manifestNegativeCacheTtlMs ?? DEFAULT_MANIFEST_NEGATIVE_CACHE_TTL_MS;
   const resolvePlatform =
     options.resolvePlatform ?? resolveDefaultDesktopReleasePlatform;
   const onOperationError =
@@ -148,7 +166,7 @@ export function createDesktopUpdaterCoordinator(
       resolveDesktopManifestChannelFromOrigin(baseUrl);
     const cacheKey = `${manifestChannel}:${platform}:${baseUrl.replace(/\/+$/, "")}`;
     const cached = manifestCache.get(cacheKey);
-    if (cached && now() - cached.fetchedAt < manifestCacheTtlMs) {
+    if (cached && now() - cached.fetchedAt < cached.ttlMs) {
       return cached;
     }
 
@@ -169,9 +187,11 @@ export function createDesktopUpdaterCoordinator(
         artifact: artifact ? { platform, ...artifact } : null,
         error: artifact ? null : `manifest is missing a ${platform} artifact`,
       };
-      manifestCache.set(cacheKey, result);
+      manifestCache.set(cacheKey, { ...result, ttlMs: manifestCacheTtlMs });
       return result;
     } catch (error) {
+      // 瞬时失败只做短负缓存：窗口内避免每次快照都打远端，窗口一过立即重试，
+      // 不把失败当成完整 TTL 的「真值」缓存。
       const result = {
         fetchedAt: now(),
         artifact: null,
@@ -180,7 +200,10 @@ export function createDesktopUpdaterCoordinator(
             ? error.message
             : "failed to fetch desktop release manifest",
       };
-      manifestCache.set(cacheKey, result);
+      manifestCache.set(cacheKey, {
+        ...result,
+        ttlMs: manifestNegativeCacheTtlMs,
+      });
       return result;
     }
   };
@@ -204,6 +227,20 @@ export function createDesktopUpdaterCoordinator(
       ? await readPublishedReleaseArtifact(baseUrl, platform, channel)
       : { artifact: null, error: null };
 
+    // 历史合并：持久化的交接失败记录排在最前（时间上早于本会话的运行时记录）。
+    // 只动 statusHistory 不动 latestStatus，避免影响 summary 的 phase 推导。
+    const runtimeHistory = Updater.getStatusHistory() ?? [];
+    const persistedShutdownEntry = options.readShutdownStatusEntry?.();
+    const statusHistory =
+      persistedShutdownEntry &&
+      !runtimeHistory.some(
+        (entry) =>
+          entry.status === persistedShutdownEntry.status &&
+          entry.timestamp === persistedShutdownEntry.timestamp,
+      )
+        ? [persistedShutdownEntry, ...runtimeHistory]
+        : runtimeHistory;
+
     return createDesktopUpdaterSnapshot({
       desktop: true,
       platform,
@@ -217,7 +254,7 @@ export function createDesktopUpdaterCoordinator(
       buildConfig,
       updateInfo,
       latestStatus: latestStatus(runtime),
-      statusHistory: Updater.getStatusHistory(),
+      statusHistory,
       releaseArtifact: releaseArtifactState.artifact,
       manifestError: releaseArtifactState.error,
     } as Parameters<typeof createDesktopUpdaterSnapshot>[0]);
@@ -273,11 +310,17 @@ export function createDesktopUpdaterCoordinator(
         const runtime = await options.loadDesktopRuntime();
         if (action === "check") {
           await runtime.Updater.checkForUpdate();
-        } else if (action === "download") {
+          return;
+        }
+        if (action === "download") {
           await runtime.Updater.downloadUpdate();
         } else {
           await runtime.Updater.applyUpdate();
         }
+        // 下载/安装被 runtime 接受（操作成功完成）才算对上次交接失败的重试
+        // 成功，此时才清除持久化失败记录。预检 409 拒绝或操作抛错都不会走到
+        // 这里，旧失败记录保留（或被下一次成功的重试替换）。
+        options.clearShutdownStatusEntry?.();
       },
       action === "check",
     );

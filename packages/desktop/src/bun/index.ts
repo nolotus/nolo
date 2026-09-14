@@ -6,7 +6,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import {
   armHardExitWatchdog,
   armParentDeathWatch,
-  killServerChildTree,
+  resolveQuitWatchdogExitPlan,
+  stopServerChildTree,
+  type ServerChildStopOutcome,
 } from "./serverChildLifecycle";
 import { fileURLToPath } from "node:url";
 import { dlopen } from "bun:ffi";
@@ -16,6 +18,10 @@ import {
   sanitizeXhsBridgeOptions,
 } from "../../../../packages/integrations/xhs-reader/bridge/readXhsProfileWithBridge";
 import { isRecord } from "core/isRecord";
+import {
+  buildDesktopUpdateShutdownStatusEntry,
+  writeDesktopUpdateShutdownStatus,
+} from "core/desktop/desktopUpdateShutdownStatus";
 import {
   registerBrowseCapability,
   getBrowseContext,
@@ -1118,6 +1124,9 @@ process.env.NOLO_SERVER_AUTOSTART = "0";
 process.env.NOLO_SERVER_REGISTER_PROCESS_HANDLERS = "0";
 process.env.PLATFORM_SERVER_HOST = "127.0.0.1";
 process.env.NOLO_DESKTOP = "1";
+// server 子进程（Windows 打包）与 in-process server 共用：updater 快照据此
+// 读取/清除持久化的「更新退出交接失败」状态（core/desktop/desktopUpdateShutdownStatus）。
+process.env.NOLO_DESKTOP_CHANNEL_DIR = desktopChannelDir;
 process.env.NOLO_SERVER_DB_PATH = join(desktopChannelDir, "data", "leveldb");
 
 let serverChild: ChildProcess | undefined;
@@ -1165,6 +1174,7 @@ if (isHeadlessProbe) {
 const { startDesktopLocalConnector } = await import("./localConnector");
 const desktopLocalConnector = await startDesktopLocalConnector({ channel });
 let shutdownDesktopPromise: Promise<void> | null = null;
+let lastServerChildStop: ServerChildStopOutcome | null = null;
 
 // Keep shutdown idempotent so normal window close, app quit, and smoke probes
 // all reuse the same cleanup path instead of racing bespoke process teardown.
@@ -1175,7 +1185,8 @@ const shutdownDesktop = (reason: string) => {
       desktopLocalConnector.stop?.(reason);
       // Windows 上 server 是独立子进程：树杀带走它和 agent run 等孙进程，
       // 否则孤儿进程占着安装目录镜像锁，更新 helper 无法换文件。
-      killServerChildTree(serverChild);
+      // 有界等待 + 退出证据：交接前必须有确定的终止结论，不再 fire-and-forget。
+      lastServerChildStop = await stopServerChildTree(serverChild);
       serverChildControlPipe?.destroy();
       serverChildControlPipe = undefined;
       await shutdownEmbeddedServer?.(reason);
@@ -1492,7 +1503,10 @@ if (desktopE2eScriptPath) {
 const notifyDesktopUpdateChrome = () => {
   try {
     mainWindow.webview.executeJavascript("globalThis.__noloDesktopRefreshUpdateButton?.();");
-  } catch {}
+  } catch (error) {
+    // quit 阶段 webview 可能已销毁：明确记录而不是裸 catch 吞掉。
+    console.warn("[desktop] failed to notify update chrome", error);
+  }
 };
 
 const scheduleInitialUpdateCheck = () => {
@@ -1521,15 +1535,116 @@ desktopDiag("boot:ready", "desktop boot ready", {
 // quit/close 必须确定性退出：清理若被残留句柄拖住（或 electrobun 在主进程
 // 被终止前没等 async handler 跑完），看门狗强制 process.exit，保证 Windows
 // 更新 helper 看到进程死亡、文件锁释放。
+//
+// 更新交接失败（旧子树未在预算内确认终止）时：仓库内没有可验证的
+// close/before-quit 取消 API，无法真正中止原生退出，因此不伪装成功——
+// 持久化用户可见的失败状态（下次启动设置页 statusHistory 显示）、
+// launcher.log 显式报错、非零退出码。不宣称根治黑窗；Hutch 引擎窗口需真机验证。
+const resolvePendingUpdateReady = async (): Promise<boolean | null> => {
+  // 三态：true=有待应用更新；false=确认没有；null=探测出错/不可用（unknown）。
+  // unknown 绝不能折叠成 false——否则失败交接会被当成「无 pending update」
+  // 静默 exit(0)，更新无声丢弃。
+  try {
+    const info = await Updater.updateInfo?.();
+    if (info == null) return null;
+    return Boolean(info.updateReady);
+  } catch (error) {
+    console.warn("[desktop] failed to read pending update info during quit", error);
+    return null;
+  }
+};
+
+const recordUpdateHandoffFailure = (stop: ServerChildStopOutcome) => {
+  try {
+    writeDesktopUpdateShutdownStatus(
+      desktopChannelDir,
+      buildDesktopUpdateShutdownStatusEntry({
+        reason: stop.reason,
+        detail: "detail" in stop ? stop.detail : undefined,
+      }),
+    );
+  } catch (error) {
+    console.error("[desktop] failed to persist update shutdown status", error);
+  }
+};
+
 const shutdownDesktopAndExit = (reason: string) => {
+  // 看门狗兜底与正常退出路径执行同一套交接证据规则：pending update 的旧子树
+  // 终止证据未确认时绝不 exit(0)（更新会被无声丢弃），而是持久化用户可见的
+  // 失败状态并带非零退出码。确认窗口内的 updateInfo 探测有界，不会二次挂死。
   const cancelWatchdog = armHardExitWatchdog(() => {
-    console.error(`[desktop] shutdown watchdog fired (${reason}); forcing exit`);
-    process.exit(0);
+    void (async () => {
+      const plan = await resolveQuitWatchdogExitPlan({
+        stop: lastServerChildStop,
+        resolveUpdateReady: resolvePendingUpdateReady,
+      });
+      if (!plan.handoffConfirmed) {
+        console.error(
+          `[desktop] shutdown watchdog fired (${reason}); server child stop ` +
+            `evidence ${lastServerChildStop ? "not ok" : "missing"} ` +
+            `(updateReady=${plan.updateReady === null ? "unknown" : plan.updateReady})`,
+        );
+      }
+      if (plan.persistHandoffFailure) {
+        desktopDiag(
+          "quit:watchdog-handoff-failed",
+          "watchdog fired with unconfirmed update quit handoff",
+          {
+            level: "error",
+            reason,
+            updateReady: plan.updateReady,
+          },
+        );
+        console.error(
+          `[desktop] update quit-handoff unconfirmed at watchdog deadline: ` +
+            `recording user-visible status and exiting non-zero so the update is not silently dropped`,
+        );
+        recordUpdateHandoffFailure(
+          lastServerChildStop ?? {
+            ok: false,
+            reason: "timeout",
+            detail: "watchdog fired before server child stop evidence was recorded",
+          },
+        );
+      }
+      process.exit(plan.exitCode);
+    })().catch((error) => {
+      console.error("[desktop] shutdown watchdog exit decision failed", error);
+      process.exit(lastServerChildStop?.ok ? 0 : 1);
+    });
   });
-  void shutdownDesktop(reason).finally(() => {
+  void (async () => {
+    await shutdownDesktop(reason);
     cancelWatchdog();
+    const stop = lastServerChildStop;
+    if (stop && !stop.ok) {
+      const updateReady = await resolvePendingUpdateReady();
+      // unknown(null) 与 true 同样视为交接未确认：只有显式确认无更新
+      // （false）才允许 exit(0)；否则持久化用户可见失败状态并非零退出。
+      if (updateReady !== false) {
+        desktopDiag("quit:update-handoff-failed", "update quit handoff aborted", {
+          level: "error",
+          reason: stop.reason,
+          detail: "detail" in stop ? stop.detail : undefined,
+          updateReady,
+        });
+        console.error(
+          `[desktop] update quit-handoff failed: old server child tree did not terminate ` +
+            `(${stop.reason}${"detail" in stop && stop.detail ? `: ${stop.detail}` : ""}; ` +
+            `updateReady=${updateReady === null ? "unknown" : "true"}); ` +
+            `recording user-visible status and exiting non-zero so the update is not silently dropped`,
+        );
+        recordUpdateHandoffFailure(stop);
+        process.exit(1);
+        return;
+      }
+      console.error(
+        `[desktop] server child tree stop failed without a pending update ` +
+          `(${stop.reason}${"detail" in stop && stop.detail ? `: ${stop.detail}` : ""})`,
+      );
+    }
     process.exit(0);
-  });
+  })();
 };
 
 const saveMainWindowState = () => {

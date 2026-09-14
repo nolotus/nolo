@@ -1,5 +1,9 @@
 import { toErrorMessage } from "core/errorMessage";
 import {
+  clearDesktopUpdateShutdownStatus,
+  readDesktopUpdateShutdownStatus,
+} from "core/desktop/desktopUpdateShutdownStatus";
+import {
   createDesktopUpdaterCoordinator,
   type DesktopUpdaterAction,
 } from "./desktopUpdaterCoordinator";
@@ -21,8 +25,24 @@ const notDesktopResponse = () =>
 
 const loadDesktopRuntime = async () => import("electrobun/bun");
 
+// 主进程（index.ts）在启动 server 前注入 NOLO_DESKTOP_CHANNEL_DIR；server 侧
+// 用同一 channel dir 读写持久化的「更新退出交接失败」状态。未设置（如测试/
+// 非 desktop 环境）时不挂载，行为与之前一致。
+const resolveShutdownStatusChannelDir = () =>
+  process.env.NOLO_DESKTOP_CHANNEL_DIR?.trim() || null;
+
+const shutdownStatusChannelDir = resolveShutdownStatusChannelDir();
+
 const desktopUpdaterCoordinator = createDesktopUpdaterCoordinator({
   loadDesktopRuntime,
+  ...(shutdownStatusChannelDir
+    ? {
+        readShutdownStatusEntry: () =>
+          readDesktopUpdateShutdownStatus(shutdownStatusChannelDir),
+        clearShutdownStatusEntry: () =>
+          clearDesktopUpdateShutdownStatus(shutdownStatusChannelDir),
+      }
+    : {}),
 });
 
 function isDesktopUpdaterAction(value: unknown): value is DesktopUpdaterAction {

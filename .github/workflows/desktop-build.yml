@@ -255,9 +255,10 @@ jobs:
           cp -r packages/desktop/artifacts/desktop-linux/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-windows/* release-assets/ 2>/dev/null || true
           cp -r packages/desktop/artifacts/desktop-macos/* release-assets/ 2>/dev/null || true
-          FLAGS="--notes 'Desktop ${CHANNEL} build from ${{ inputs.projection_sha }}'"
+          RELEASE_NOTES="Desktop ${CHANNEL} build from ${{ inputs.projection_sha }}"
+          FLAGS=(--notes "$RELEASE_NOTES")
           if [ "$CHANNEL" = "alpha" ]; then
-            FLAGS="$FLAGS --prerelease"
+            FLAGS+=(--prerelease)
           fi
           # 不可变 release 契约（no delete/recreate）：目标 tag 的 Release 已存在
           # 即 fail closed——包括 same version/different SHA 的重发企图。release
@@ -270,4 +271,4 @@ jobs:
           fi
           gh release create "$TAG" release-assets/* \
             --title "Desktop ${CHANNEL} $(date -u +%Y-%m-%d)" \
-            $FLAGS
+            "${FLAGS[@]}"

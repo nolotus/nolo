@@ -13,11 +13,19 @@
  *      `recordChatProxyTokenUsage` used. The ledger dedupes the second charge
  *      (or completes a server-side failed attempt), so async billing failures
  *      are retryable without optimistic flags.
- *   2. The provider-call marker (`provider-call:{id}:token-record:v1`) is a
- *      fast-path optimization: when a client echoes a provider_call_id whose
- *      marker exists AND the marker's recordKey/userId match this token
- *      record, `handleToken` skips the charge without a ledger round-trip.
- *      It is NOT the security boundary — the ledger idempotency key is.
+ *   2. The provider-call marker (`provider-call:{id}:token-record:v1`) is the
+ *      server-owned SECURITY BOUNDARY for using the provider-call charge key
+ *      at all: a billing path may pass
+ *      `providerCallChargeIdempotencyKey(userId, providerCallId)` to the
+ *      ledger ONLY when the durable marker strictly authorizes THIS
+ *      (userId, recordKey) pair (`marker.tokenRecord.userId === userId` and
+ *      `marker.recordKey === tokenWrite.recordKey`). When the marker is
+ *      missing, replayed, or points at another record, every billing path
+ *      (handleToken, recordChatProxyTokenUsage, agent-run billing) falls back
+ *      to the token record's own `token:${recordKey}` key, so forged or
+ *      cross-record provider call ids can never collapse unrelated token
+ *      records onto one ledger key. The marker additionally lets `handleToken`
+ *      skip the ledger round-trip for a call the server already charged.
  *
  * Keep this module dependency-free so both the server chatHandler path and the
  * dataHandlers path share one definition and cannot drift on key shape.
@@ -39,6 +47,22 @@ export const providerCallChargeIdempotencyKey = (
   userId && providerCallId
     ? `provider-call:${encodeURIComponent(userId)}:${providerCallId}:charge:v1`
     : undefined;
+
+/**
+ * LEGACY unscoped provider-call charge key (`provider-call:{id}:charge:v1`),
+ * written by the agent-run billing path before marker gating existed.
+ * Historical settled charges may still live under this key, so the agent-run
+ * path passes it to the ledger as a `legacyIdempotencyKeys` compat probe:
+ * retries of records already billed under the old shape converge on that
+ * settled charge (duplicate) instead of double-charging after the key-shape
+ * migration. NEVER use it for new charges — it is not user-scoped, so two
+ * different token records sharing a provider call id would collapse onto one
+ * key.
+ */
+export const legacyUnscopedProviderCallChargeKey = (
+  providerCallId?: string
+): string | undefined =>
+  providerCallId ? `provider-call:${providerCallId}:charge:v1` : undefined;
 
 export type ProviderCallMarkerOutcome =
   | "pending"

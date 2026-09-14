@@ -180,9 +180,20 @@ const normalizeLedgerTransaction = (
   metadata: isRecord(value.metadata) ? value.metadata : undefined,
 });
 
+/**
+ * 从幂等键还原 providerCallId。
+ *
+ * 键有两种形状（见 providerCallBillingKeys）：
+ *   scoped（现行）：provider-call:<userId>:<providerCallId>:charge:v1
+ *   legacy（历史）：provider-call:<providerCallId>:charge:v1
+ * 旧的贪婪正则会把 scoped 键解析成 `userId:providerCallId`，导致 scoped 交易
+ * 与官方 evidence 关联失败、对账 drilldown 静默失真（只读路径，无资金影响）。
+ * userId 经 encodeURIComponent，不含裸 `:`，故可先试 scoped 再退 legacy，无歧义。
+ */
 const providerCallIdFromIdempotencyKey = (value: string | undefined) => {
-  const match = value?.match(/^provider-call:(.+):charge:v1$/);
-  return match?.[1];
+  const scoped = value?.match(/^provider-call:[^:]+:(.+):charge:v1$/);
+  if (scoped) return scoped[1];
+  return value?.match(/^provider-call:(.+):charge:v1$/)?.[1];
 };
 
 const intersects = (left: string[], right: Set<string>) =>
