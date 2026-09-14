@@ -151,7 +151,11 @@ jobs:
       - name: Build Windows desktop installer artifacts
         if: runner.os == 'Windows' && needs.select-targets.outputs.channel == 'stable'
         env:
-          ELECTROBUN_RELEASE_BASE_URL: https://github.com/nolotus/nolo/releases/latest/download
+          # 必须是**可达**的发布基座。此前指向 github.com/nolotus/nolo/releases/latest/download，
+          # 而该仓只有 Pre-release（desktop-alpha-*），GitHub 的 releases/latest 排除
+          # prerelease ⇒ 该 URL 恒 404（2026-09-14 实测）。这个值还会被
+          # electrobun.config 的 release.baseUrl 烘焙进产物，所以 404 同时污染构建与产物。
+          ELECTROBUN_RELEASE_BASE_URL: https://nolo.chat/public/downloads
           NOLO_DESKTOP_SKIP_PATCH: "1"
         run: bun run --cwd packages/desktop build:stable:windows-installer
 
@@ -178,7 +182,8 @@ jobs:
           TMPDIR: ${{ runner.temp }}
           NOLO_DESKTOP_BUILD_RPM: "1"
           NOLO_DESKTOP_BUILD_DEB: "1"
-          ELECTROBUN_RELEASE_BASE_URL: https://github.com/nolotus/nolo/releases/latest/download
+          # 同上：按渠道选可达基座，绝不使用恒 404 的 releases/latest。
+          ELECTROBUN_RELEASE_BASE_URL: ${{ needs.select-targets.outputs.channel == 'stable' && 'https://nolo.chat/public/downloads' || 'https://us.nolo.chat/public/downloads' }}
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
