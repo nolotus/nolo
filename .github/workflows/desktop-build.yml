@@ -254,7 +254,11 @@ jobs:
     # build-only：只构建与校验证据，绝不发布。整条发布链（R2 上传、legacy 别名、
     # GitHub Release、manifest）都不参与，因此 build-only 的绿色含义是
     # 「目标平台的构建与证据成立」，而不是任何渠道状态变化。
-    if: inputs.mode != 'build-only'
+    #
+    # !cancelled() 是必须的：build 是三条 matrix 腿，只要其中一条失败，GitHub 默认
+    # 会**跳过**依赖它的 release job，于是「逐平台独立发布」形同虚设——已成功的
+    # 平台也发不出去。取消则不应发布，故用 !cancelled() 而不是 always()。
+    if: ${{ !cancelled() && inputs.mode != 'build-only' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -273,10 +277,17 @@ jobs:
         with:
           path: packages/desktop/artifacts
 
-      - name: Verify desktop capability evidence (fail closed, all platforms)
+      - name: Verify desktop capability evidence (fail closed, per targeted platform)
+        id: capability-gate
+        # 逐平台独立发布：只校验**声明的目标平台**，声明了却没产出的平台记为 missing
+        # 交给最后一步响亮失败（产物照发，manifest 逐产物版本会如实呈现谁更新了）。
+        # 注意：产物存在但证据缺失仍然违规——允许缺席不等于允许未验证的产物。
         run: |
           bun ./scripts/public-audit/desktop/verifyDesktopPackageCapability.ts release \
-            --artifacts-dir packages/desktop/artifacts
+            --artifacts-dir packages/desktop/artifacts \
+            --platforms "${{ inputs.targets }}" \
+            --allow-partial \
+            --report-platforms "${{ runner.temp }}/capability-platforms.json"
 
       - name: Publish to R2 (CF CDN for China users)
         env:
@@ -289,9 +300,16 @@ jobs:
           NOLO_DESKTOP_REQUIRE_LINUX_PACKAGES: "1"
           MIN_WIN_INSTALLER_BYTES: "47000000"
         run: |
+          # 显式传平台，不依赖发布器的 --platform auto：gate 的 present 判据是「产物目录
+          # 存在」，发布器 auto 的判据是「source 可解析」；两者脱节时 auto 会**静默跳过**
+          # 该平台并返回 0，而会计步骤看到 missing 为空 → **假绿**（独立复审 HIGH）。
+          # 显式选择下发布器对无法解析的产物会抛 Missing required desktop artifact，
+          # 于是不一致立刻变响亮。
+          PLATFORM_ARGS=$(bun -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/capability-platforms.json","utf8"));console.log(s.present.map(p=>"--platform "+p).join(" "))')
           bun ./scripts/release/publishDesktopDownloads.ts \
             --channel "${{ needs.select-targets.outputs.channel }}" \
-            --build-sha "${{ inputs.projection_sha }}"
+            --build-sha "${{ inputs.projection_sha }}" \
+            $PLATFORM_ARGS
 
       - name: Verify legacy alias URLs
         run: |
@@ -320,11 +338,14 @@ jobs:
           # 改用 -exec + 形式，无需终止符转义。
           for platform in linux windows macos; do
             platform_dir="packages/desktop/artifacts/desktop-$platform"
-            if [ ! -d "$platform_dir" ]; then
-              echo "::error::missing artifact directory for platform $platform ($platform_dir)" >&2
-              exit 1
+            # 缺席是**合法**状态（逐平台独立发布）：跳过即可，由最后一步
+            # 「Fail if a targeted platform did not publish」统一响亮记账。
+            # 这里若硬失败，会把已就绪平台的备份 Release 一并丢掉，并把错误指向错误的原因
+            #（2026-09-14 独立复审 CRITICAL：这个守卫是本仓库早前为「全或无」加的，
+            # 语义变更后必须一起改，否则它与逐平台发布自相矛盾）。
+            if [ -d "$platform_dir" ]; then
+              find "$platform_dir" -maxdepth 1 -type f ! -name 'desktop-capability-evidence.json' -exec cp -t release-assets {} +
             fi
-            find "$platform_dir" -maxdepth 1 -type f ! -name 'desktop-capability-evidence.json' -exec cp -t release-assets {} +
           done
           # 空产物必须响亮失败：否则 release-assets 通配无匹配会把字面量路径交给 gh。
           if [ -z "$(ls -A release-assets)" ]; then
@@ -348,3 +369,15 @@ jobs:
           gh release create "$TAG" release-assets/* \
             --title "Desktop ${CHANNEL} $(date -u +%Y-%m-%d)" \
             "${FLAGS[@]}"
+
+      - name: Fail if a targeted platform did not publish
+        # 逐平台独立发布的前提是「缺席必须响亮」：产物照发（manifest 逐产物版本会如实
+        # 呈现谁更新了），但声明了却没有产出的平台要让这次 run 变红 —— 否则「少发一个
+        # 平台」就变成了静默降级。放在**最后**：先让已就绪平台的发布步骤全部跑完。
+        run: |
+          MISSING=$(bun -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/capability-platforms.json","utf8"));console.log(s.missing.join(","))')
+          if [ -n "$MISSING" ]; then
+            echo "::error::targeted platform(s) not published: $MISSING; the others were published and the manifest keeps the previous versions for these" >&2
+            exit 1
+          fi
+

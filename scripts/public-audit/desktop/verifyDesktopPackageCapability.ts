@@ -48,7 +48,7 @@
 //   bun verifyDesktopPackageCapability.ts payload --artifacts-dir <dir> --installer <path> [--installer <path> ...]
 //   bun verifyDesktopPackageCapability.ts installed --artifacts-dir <dir> --web-root <dir> --payload-artifact <path>
 //   bun verifyDesktopPackageCapability.ts release --artifacts-dir <dir> --identity-root <dir>
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -818,13 +818,59 @@ export async function writePackageEvidence(input: {
 }
 
 /** release 模式：三平台证据齐全 + 真实打包内容重推导 + artifact sha256 复核。 */
+/**
+ * 把 dispatch 的目标平台声明展开成平台列表。
+ * 空 / `all` 都表示三平台全要（保持既有严格语义）；未知值被忽略，避免拼错就静默放宽。
+ */
+export function expandReleasePlatforms(platforms?: string[]): ReleasePlatform[] {
+  if (!platforms || platforms.length === 0 || platforms.includes("all")) {
+    return [...RELEASE_PLATFORMS];
+  }
+  return platforms.filter((platform): platform is ReleasePlatform =>
+    (RELEASE_PLATFORMS as readonly string[]).includes(platform),
+  );
+}
+
+/**
+ * 逐平台状态：`present` = 该平台**实际产出了产物目录**（会被发布器按 auto 规则选中），
+ * `missing` = 声明了但缺席。
+ *
+ * 这个划分是整个「逐平台独立发布」的地基：发布器与 manifest 合并本来就支持子集，
+ * 缺的只是 gate 的「全或无」假设。缺席必须被**显式记账**而不是静默丢弃——调用方
+ * 拿到 missing 后要响亮失败，价值照发、红灯照留。
+ */
+export function collectDesktopReleasePlatformState(input: {
+  artifactsDir: string;
+  platforms?: string[];
+}): { declared: ReleasePlatform[]; present: ReleasePlatform[]; missing: ReleasePlatform[] } {
+  const declared = expandReleasePlatforms(input.platforms);
+  const artifactsDir = resolve(input.artifactsDir);
+  const present = declared.filter((platform) =>
+    existsSync(join(artifactsDir, `desktop-${platform}`)),
+  );
+  const missing = declared.filter((platform) => !present.includes(platform));
+  return { declared, present, missing };
+}
+
 export async function verifyDesktopReleaseArtifacts(input: {
   artifactsDir: string;
   identityRoot: string;
+  /** 声明的目标平台；缺省 = 三平台全要（既有严格语义不变）。 */
+  platforms?: string[];
+  /**
+   * true = 声明但缺席的平台不算违规（由调用方按 `collectDesktopReleasePlatformState`
+   * 的 missing 响亮记账）。注意：**产物存在但证据缺失仍然违规**——允许缺席不等于
+   * 允许未验证的产物，否则就拿走了「宁可少发也不误发」这条底线。
+   */
+  allowPartial?: boolean;
 }): Promise<CapabilityViolation[]> {
   const violations: CapabilityViolation[] = [];
   const artifactsDir = resolve(input.artifactsDir);
-  for (const platform of RELEASE_PLATFORMS) {
+  const declared = expandReleasePlatforms(input.platforms);
+  const platformsToVerify = input.allowPartial
+    ? declared.filter((platform) => existsSync(join(artifactsDir, `desktop-${platform}`)))
+    : declared;
+  for (const platform of platformsToVerify) {
     const platformDir = join(artifactsDir, `desktop-${platform}`);
     if (!existsSync(platformDir)) {
       violations.push({
@@ -1170,9 +1216,31 @@ async function main() {
   if (mode === "release") {
     const artifactsDir = readArg("--artifacts-dir");
     if (!artifactsDir) usage();
-    const violations = await verifyDesktopReleaseArtifacts({ artifactsDir, identityRoot });
+    const platforms = (readArg("--platforms") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const allowPartial = process.argv.includes("--allow-partial");
+    const reportPath = readArg("--report-platforms");
+    const state = collectDesktopReleasePlatformState({ artifactsDir, platforms });
+    if (reportPath) {
+      writeFileSync(reportPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    }
+    console.log(
+      `[desktop-capability] targeting ${state.declared.join("/")}; ` +
+        `present=${state.present.join("/") || "<none>"} missing=${state.missing.join("/") || "<none>"}`,
+    );
+    const violations = await verifyDesktopReleaseArtifacts({
+      artifactsDir,
+      identityRoot,
+      platforms,
+      allowPartial,
+    });
     if (violations.length > 0) fail(violations);
-    console.log("[desktop-capability] release gate passed for all platforms (windows/macos/linux)");
+    console.log(
+      `[desktop-capability] release gate passed for present=${state.present.join("/") || "<none>"}` +
+        (state.missing.length ? ` missing=${state.missing.join("/")}` : ""),
+    );
     return;
   }
   usage();
