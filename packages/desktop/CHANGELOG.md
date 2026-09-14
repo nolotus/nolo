@@ -1,4 +1,13 @@
 
+## 0.84.0-alpha.3
+
+## 0.84.0-alpha.3 (2026-09-14)
+
+### Bug Fixes
+
+* **agent:** keep key decision context with the orchestrator ([ea246ce](https://github.com/nolotus/bun-nolo/commit/ea246cefc31f30d135edddaacd089055ee40e7c7))
+
+
 ## 0.84.0-alpha.2
 
 ## 0.84.0-alpha.2 (2026-09-14)
