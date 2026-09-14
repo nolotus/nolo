@@ -2,8 +2,8 @@
 //
 // In-memory Execution Envelope registry for the ProcessTask layer (Phase 0).
 // Each spawned command is pre-registered at spawn time (stable taskId, see
-// docs/handoff/2026-08-27-async-task-agents-research-handoff.md 3.2；
-// 原始会商论证见 docs/handoff/2026-08-27-async-task-agents-archive.md §12.1 item 2)
+// docs/archive/handoff/2026-08-27-async-task-agents-research-handoff.md 3.2；
+// 原始会商论证见 docs/archive/handoff/2026-08-27-async-task-agents-archive.md §12.1 item 2)
 // and emits append-only lifecycle events into a ProcessTaskEventLog, so later
 // wait / log-cursor / task-card / recovery-audit consumers read one stream.
 //

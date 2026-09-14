@@ -1,4 +1,13 @@
 
+## 0.84.0-alpha.5
+
+## 0.84.0-alpha.5 (2026-09-14)
+
+### Bug Fixes
+
+* **read-dialog:** bound agent readDialog responses with a shared projection seam ([55cfd65](https://github.com/nolotus/bun-nolo/commit/55cfd6544ba10d827e44c52b4c73c34a3659ccb7))
+
+
 ## 0.84.0-alpha.4
 
 ## 0.84.0-alpha.4 (2026-09-14)

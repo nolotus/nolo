@@ -40,6 +40,7 @@ import {
   resolveNoloDialogInput,
   verifyNoloDialogSubjectRefQuery,
 } from "../../agent-runtime/noloWorkspaceTools";
+import { buildDialogReadEnvelope, DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS } from "../../agent-runtime/dialogReadProjection";
 import {
   buildDeleteDialogsPreview,
   filterDialogDeletionCandidates,
@@ -246,6 +247,7 @@ export const readDialogFunctionSchema = {
     "Read one persisted Nolo dialog, including metadata and recent messages.",
     "Prefer the full dialog dbKey (dialog-<userId>-<id>) or a dialog URL; a bare id only resolves for the currently logged-in user and cannot reliably read other users' or cross-server dialogs. Use listDialogs first when the target dialog is unclear.",
     "If a read fails, first confirm the dbKey via listDialogs; the returned meta includes runtime checkpoint/status info for agent-run dialogs; a local run's dialog lives in the local environment/local server and must be read there.",
+    "The response is budgeted: reasoning_content, tool_calls arguments, tool result content and metadata are head-truncated with projection stats (truncated, messagesTotal/messagesReturned, estimatedOriginalChars/omittedChars). For review or verification, read mode=\"status\" or the final verdict and take diffs from the worktree instead of pulling the full execution transcript.",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -255,7 +257,7 @@ export const readDialogFunctionSchema = {
         description:
           "Dialog dbKey (dialog-<userId>-<id>), dialog URL, or bare id (current user only).",
       },
-      limit: { type: "integer", description: "Message limit. Default 120, max 1000." },
+      limit: { type: "integer", description: "Message limit. Default 120, max 1000. The total serialized response is additionally capped (default 32000 chars) regardless of limit." },
     },
     required: ["dialog"],
   },
@@ -374,6 +376,7 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
   const meta = await readBestRecord(thunkApi, resolved.dbKey, true);
 
   let messages: any[] = [];
+  let sourceProjection: any = undefined;
   const serverBase = normalizeServerOrigin(runtime?.currentServer);
   if (serverBase && runtime?.currentToken) {
     // 读操作：/rpc/getConvMsgs 虽是 POST，但语义为查询历史消息，无副作用，
@@ -384,11 +387,25 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
         "Content-Type": "application/json",
         ...authHeaders(runtime.currentToken),
       },
-      body: JSON.stringify({ dialogId: resolved.dialogId, limit }),
+      // Agent-safe bounded 模式：数据源侧完成预算 projection，本进程不再
+      // 对全量消息做 materialize + 整体 stringify。
+      body: JSON.stringify({
+        dialogId: resolved.dialogId,
+        limit,
+        maxChars: DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS,
+      }),
     } as RequestInit).catch(() => null);
     if (response?.ok) {
-      const payload = await response.json().catch(() => []);
-      messages = Array.isArray(payload) ? payload : [];
+      const payload = await response.json().catch(() => null);
+      if (payload && typeof payload === "object" && Array.isArray(payload.messages)) {
+        // bounded 数据源：升序、有界，直接采用。
+        messages = payload.messages;
+        sourceProjection = payload.projection ?? undefined;
+      } else if (Array.isArray(payload)) {
+        // 旧 server 兼容：getConvMsgs 返回「从新到旧」，显式归一为升序
+        // （seam 输入契约），再走本地 seam 兜底投影。
+        messages = [...payload].reverse();
+      }
     } else if (response) {
       // drain 长预算耗尽：把共享层注入的友好文案透传为显式错误，不让读失败
       // 伪装成「0 条消息」；其余 503 维持旧行为（静默空消息）。
@@ -396,19 +413,23 @@ export async function readDialogFunc(args: any, thunkApi: any): Promise<ToolResu
     }
   }
 
+  // 统一最终 envelope builder：唯一拥有 maxResponseChars，rawData 总量
+  // （meta+messages+stats）由 builder 按实际序列化结果自证硬顶。
+  const built = buildDialogReadEnvelope({
+    meta,
+    messages,
+    ...(sourceProjection ? { stats: sourceProjection } : {}),
+    envelope: { success: true, dialogKey: resolved.dbKey, dialogId: resolved.dialogId },
+    options: { maxResponseChars: DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS },
+  });
+
   return {
-    rawData: {
-      success: true,
-      dialogKey: resolved.dbKey,
-      dialogId: resolved.dialogId,
-      meta,
-      messages,
-    },
+    rawData: built.envelope,
     displayData: jsonPreview({
       dialogKey: resolved.dbKey,
       title: meta?.title,
-      messageCount: messages.length,
-      messages,
+      messageCount: (built.envelope.messages as unknown[]).length,
+      messages: built.envelope.messages,
     }),
   };
 }

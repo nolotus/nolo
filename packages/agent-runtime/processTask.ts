@@ -2,8 +2,8 @@
 //
 // Single source of truth for the ProcessTask layer's status enums and
 // append-only lifecycle event model (Phase 0, see
-// docs/handoff/2026-08-27-async-task-agents-research-handoff.md 第 3 节；
-// 原始会商论证见 docs/handoff/2026-08-27-async-task-agents-archive.md §12.1/§12.3).
+// docs/archive/handoff/2026-08-27-async-task-agents-research-handoff.md 第 3 节；
+// 原始会商论证见 docs/archive/handoff/2026-08-27-async-task-agents-archive.md §12.1/§12.3).
 //
 // Layer boundary (§12.7 — "分层，不是漂移"):
 // - PROCESS_TASK_STATUSES below is the in-memory process registry's axis

@@ -38,6 +38,11 @@ import {
 import { asTrimmedString } from "core/trimmedString";
 import { isLevelNotFoundError } from "database/levelNotFoundError";
 import { isLevelLockError } from "database/levelLockError";
+import {
+  boundSummaryText,
+  buildDialogReadEnvelope,
+  projectDialogReadForAgent,
+} from "../agent-runtime/dialogReadProjection";
 
 const logger = createClientLogger("cli:dialog");
 
@@ -83,6 +88,7 @@ const VALUE_FLAGS = new Set([
   "--token",
   "--machine-key",
   "--user",
+  "--max-response-chars",
 ]);
 
 type ResultLimit = {
@@ -356,6 +362,10 @@ Options:
   --server <url>  Prefer this server when reading by raw dialog id.
   --token <jwt>   Override AUTH_TOKEN.
   --user <userId> Override dialog owner for raw dialog ids.
+  --max-response-chars <n>
+                  Cap the serialized response for agent/automation callers
+                  (shared budget projection; oversized fields are head-truncated
+                  with projection stats). Omit for the default full human export.
 
 Reads dialog metadata and messages as JSON.
 `);
@@ -410,6 +420,19 @@ function readDialogLimitArg(args: string[], fallback: number) {
   const raw = explicit ?? positional;
   if (!raw) return fallback;
   return parsePositiveIntegerOrFallback(raw, fallback);
+}
+
+/**
+ * Agent bridge 专用预算 flag（--max-response-chars <n>）。
+ * 人工 `nolo dialog read` 不带它 → 返回 null，走完整导出路径，
+ * 与 Agent bridge 显式分离；带它时在子进程内、打印前应用共享
+ * dialogReadProjection seam，父进程不先收全量 stdout 再截。
+ */
+function readDialogMaxResponseCharsArg(args: string[]): number | null {
+  const raw = readOption(args, "--max-response-chars");
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
 function readDialogOwnerId(args: string[], env: Record<string, string | undefined>, authToken: string) {
@@ -1560,24 +1583,107 @@ export async function runDialogReadCommand(
       readLocalDialogAtDbPath: deps.readLocalDialogAtDbPath,
     });
     const orderedMsgs = Array.isArray(read.msgs) ? [...read.msgs].reverse() : read.msgs;
-    const lastAssistantMessage = Array.isArray(orderedMsgs)
-      ? [...orderedMsgs].reverse().find((message) => message?.role === "assistant" || message?.authorRole === "assistant")
+    // Agent bridge 预算：带 --max-response-chars 时在子进程内、打印前应用共享
+    // projection seam；人工调用不带该 flag，保留完整导出（显式分离）。
+    // 顺序契约（防二次 reverse 事故）：fetchMessages/read.msgs 返回「从新到旧」，
+    // orderedMsgs 已经是升序（旧→新），直接作为 seam 输入；seam 超限时保留
+    // 最新（尾部），输出保持升序 —— 任何一侧都不得再做 reverse。
+    const agentMaxResponseChars = readDialogMaxResponseCharsArg(args);
+    const agentProjection = agentMaxResponseChars && Array.isArray(orderedMsgs)
+      ? projectDialogReadForAgent({
+          meta: read.meta,
+          messages: orderedMsgs,
+          options: { maxResponseChars: agentMaxResponseChars },
+        })
       : null;
-    const toolMessages = Array.isArray(orderedMsgs)
-      ? orderedMsgs.filter((message) => message?.role === "tool" || message?.authorRole === "tool")
+    // 输出统一使用投影后的 meta/messages，保证 bridge 输出完整、自洽、可解析：
+    // lastAssistantMessage/toolMessages/派生摘要均来自投影数组，
+    // messagesCount 与实际输出数组一致，原始数放 responseProjection.stats。
+    const outputMeta = (agentProjection ? agentProjection.meta : read.meta) as any;
+    const outputMsgs = (agentProjection ? agentProjection.messages : orderedMsgs) as any[];
+    const lastAssistantMessage = Array.isArray(outputMsgs)
+      ? [...outputMsgs].reverse().find((message) => message?.role === "assistant" || message?.authorRole === "assistant")
+      : null;
+    const toolMessages = Array.isArray(outputMsgs)
+      ? outputMsgs.filter((message) => message?.role === "tool" || message?.authorRole === "tool")
       : [];
     const toolNamesFromMessages = toolMessages
       .map((message) => toToolName(message?.toolName ?? message?.name))
       .filter(Boolean);
-    const toolsUsed = Array.isArray(read.meta?.toolsUsed) && read.meta.toolsUsed.length > 0
-      ? read.meta.toolsUsed.map((tool: unknown) => toToolName(tool)).filter(Boolean)
+    const toolsUsed = Array.isArray(outputMeta?.toolsUsed) && outputMeta.toolsUsed.length > 0
+      ? outputMeta.toolsUsed.map((tool: unknown) => toToolName(tool)).filter(Boolean)
       : uniq(toolNamesFromMessages);
-    const writtenFiles = Array.isArray(read.meta?.writtenFiles) && read.meta.writtenFiles.length > 0
-      ? uniq(asTrimmedNonEmptyStringArray(read.meta.writtenFiles))
+    const writtenFiles = Array.isArray(outputMeta?.writtenFiles) && outputMeta.writtenFiles.length > 0
+      ? uniq(asTrimmedNonEmptyStringArray(outputMeta.writtenFiles))
       : deriveWrittenFiles(toolMessages);
-    const toolErrors = Array.isArray(read.meta?.toolErrors) && read.meta.toolErrors.length > 0
-      ? uniq(asTrimmedNonEmptyStringArray(read.meta.toolErrors))
+    const toolErrors = Array.isArray(outputMeta?.toolErrors) && outputMeta.toolErrors.length > 0
+      ? uniq(asTrimmedNonEmptyStringArray(outputMeta.toolErrors))
       : deriveToolErrors(toolMessages);
+    const toolSummary = {
+      metaToolsCount: toolsUsed.length,
+      metaToolsUnique: [...new Set(toolsUsed)],
+      toolMessageCount: toolMessages.length,
+      toolNamesFromMessages: [...new Set(toolNamesFromMessages)],
+      toolMessageCountsByName: countByName(toolNamesFromMessages),
+    };
+
+    if (agentProjection && agentMaxResponseChars) {
+      // Agent bridge：统一最终 envelope builder（唯一拥有预算，serialized 自证
+      // <= --max-response-chars，完整合法 JSON，含 stats/summary/envelope 全部
+      // 开销）。lastAssistantMessage 只留小摘要（messages 尾部已含最新消息）；
+      // 预算不足时 summary 最先被 builder 丢弃。
+      const newestAssistant = Array.isArray(outputMsgs)
+        ? [...outputMsgs]
+            .reverse()
+            .find(
+              (message) =>
+                message?.role === "assistant" || message?.authorRole === "assistant",
+            )
+        : null;
+      const lastAssistantSummary = newestAssistant
+        ? {
+            role:
+              (newestAssistant as any)?.role ??
+              (newestAssistant as any)?.authorRole ??
+              null,
+            contentHead: boundSummaryText(
+              typeof (newestAssistant as any)?.content === "string"
+                ? (newestAssistant as any).content
+                : (newestAssistant as any)?.content
+                  ? JSON.stringify((newestAssistant as any).content)
+                  : "",
+              200,
+            ),
+          }
+        : null;
+      const built = buildDialogReadEnvelope({
+        meta: read.meta,
+        messages: agentProjection.messages,
+        stats: agentProjection.stats,
+        envelope: {
+          source: read.source as ReadSource,
+          base: read.resolvedBase,
+          triedBases: read.candidateBases,
+          httpAttempts: read.attempts,
+          spaceId: target.spaceId ?? null,
+          dialogId: target.dialogId,
+          dialogKey: target.dialogKey,
+          userId: target.userId ?? null,
+          messagesCount: agentProjection.stats.messagesReturned,
+        },
+        summary: {
+          writtenFiles,
+          toolsUsed,
+          toolErrors,
+          toolSummary,
+          lastAssistantMessage: lastAssistantSummary,
+        },
+        options: { maxResponseChars: agentMaxResponseChars },
+      });
+      output.write(built.serialized);
+      output.write("\n");
+      return 0;
+    }
 
     output.write(JSON.stringify({
       source: read.source as ReadSource,
@@ -1588,31 +1694,31 @@ export async function runDialogReadCommand(
       dialogId: target.dialogId,
       dialogKey: target.dialogKey,
       userId: target.userId,
-      title: read.meta?.title ?? null,
-      cybots: Array.isArray(read.meta?.cybots) ? read.meta.cybots : [],
-      category: read.meta?.category ?? null,
-      inheritedFromDialogKey: read.meta?.inheritedFromDialogKey ?? null,
-      inheritedFromDialogTitle: read.meta?.inheritedFromDialogTitle ?? null,
-      parentDialogId: read.meta?.parentDialogId ?? null,
-      rootDialogId: read.meta?.rootDialogId ?? null,
-      triggerType: read.meta?.triggerType ?? null,
-      executionMode: read.meta?.executionMode ?? null,
-      threadKind: read.meta?.threadKind ?? null,
-      presentationIntent: read.meta?.presentationIntent ?? null,
-      parentThreadId: read.meta?.parentThreadId ?? null,
-      rootThreadId: read.meta?.rootThreadId ?? null,
-      runtimeBinding: read.meta?.runtimeBinding ?? null,
-      runtimeContext: read.meta?.runtimeContext ?? null,
-      parentWake: read.meta?.parentWake ?? null,
-      subjectRefs: Array.isArray(read.meta?.subjectRefs) ? read.meta.subjectRefs : [],
-      status: read.meta?.status,
-      errorMessage: read.meta?.errorMessage ?? null,
-      runtimeCheckpoint: read.meta?.runtimeCheckpoint ?? null,
-      durationMs: read.meta?.durationMs,
-      finishedAt: read.meta?.finishedAt,
-      createdAt: read.meta?.createdAt,
-      updatedAt: read.meta?.updatedAt,
-      artifacts: read.meta?.artifacts ?? null,
+      title: outputMeta?.title ?? null,
+      cybots: Array.isArray(outputMeta?.cybots) ? outputMeta.cybots : [],
+      category: outputMeta?.category ?? null,
+      inheritedFromDialogKey: outputMeta?.inheritedFromDialogKey ?? null,
+      inheritedFromDialogTitle: outputMeta?.inheritedFromDialogTitle ?? null,
+      parentDialogId: outputMeta?.parentDialogId ?? null,
+      rootDialogId: outputMeta?.rootDialogId ?? null,
+      triggerType: outputMeta?.triggerType ?? null,
+      executionMode: outputMeta?.executionMode ?? null,
+      threadKind: outputMeta?.threadKind ?? null,
+      presentationIntent: outputMeta?.presentationIntent ?? null,
+      parentThreadId: outputMeta?.parentThreadId ?? null,
+      rootThreadId: outputMeta?.rootThreadId ?? null,
+      runtimeBinding: outputMeta?.runtimeBinding ?? null,
+      runtimeContext: outputMeta?.runtimeContext ?? null,
+      parentWake: outputMeta?.parentWake ?? null,
+      subjectRefs: Array.isArray(outputMeta?.subjectRefs) ? outputMeta.subjectRefs : [],
+      status: outputMeta?.status,
+      errorMessage: outputMeta?.errorMessage ?? null,
+      runtimeCheckpoint: outputMeta?.runtimeCheckpoint ?? null,
+      durationMs: outputMeta?.durationMs,
+      finishedAt: outputMeta?.finishedAt,
+      createdAt: outputMeta?.createdAt,
+      updatedAt: outputMeta?.updatedAt,
+      artifacts: outputMeta?.artifacts ?? null,
       writtenFiles,
       toolsUsed,
       toolErrors,
@@ -1623,10 +1729,10 @@ export async function runDialogReadCommand(
         toolNamesFromMessages: [...new Set(toolNamesFromMessages)],
         toolMessageCountsByName: countByName(toolNamesFromMessages),
       },
-      agentReply: read.meta?.agentReply ?? null,
-      messagesCount: Array.isArray(orderedMsgs) ? orderedMsgs.length : 0,
+      agentReply: outputMeta?.agentReply ?? null,
+      messagesCount: Array.isArray(outputMsgs) ? outputMsgs.length : 0,
       lastAssistantMessage,
-      messages: orderedMsgs,
+      messages: outputMsgs,
     }, null, 2));
     output.write("\n");
     return 0;

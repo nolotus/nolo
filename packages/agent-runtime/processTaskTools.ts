@@ -2,7 +2,7 @@
 //
 // Phase 1 tool layer for the ProcessTask stream: taskWait / taskLogs /
 // taskStop / tasks (see
-// docs/handoff/2026-08-27-async-task-agents-research-handoff.md §1.4).
+// docs/archive/handoff/2026-08-27-async-task-agents-research-handoff.md §1.4).
 //
 // Scope discipline:
 // - These four tools ONLY observe / stop tasks that were already spawned by

@@ -13,6 +13,13 @@
 import { dialogMessageRange } from "../database/keys";
 import { localDialogMessageRecordToRuntimeMessage } from "../cli/client/localDialogRecords";
 import {
+  BRIDGE_STREAM_MAX_CHARS,
+  buildDialogReadEnvelope,
+  createStreamingDialogReadProjector,
+  DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS,
+  readTextStreamUpToChars,
+} from "./dialogReadProjection";
+import {
   buildNoloWorkspaceCommandArgs,
   noloPositiveIntegerString,
   noloStringArg,
@@ -23,8 +30,7 @@ import {
 import { spawnToWebStreams } from "./runtimeCompat";
 
 async function readNoloProcessStream(readable: ReadableStream<Uint8Array> | null) {
-  if (!readable) return "";
-  return new Response(readable).text();
+  return readTextStreamUpToChars(readable, BRIDGE_STREAM_MAX_CHARS);
 }
 
 type NoloSpawnProcess = {
@@ -75,16 +81,18 @@ export async function runNoloWorkspaceCliTool(call: {
     readNoloProcessStream(proc.stderr),
     proc.exited,
   ]);
-  const content = `${stdout}${stderr}`;
+  const content = `${stdout.text}${stderr.text}`;
   if (exitCode !== 0) {
     throw new Error(content.trim() || `nolo ${cliArgs.join(" ")} exited ${exitCode}`);
   }
+  const bridgedOutputTruncated = stdout.truncated || stderr.truncated;
   return {
     content,
     metadata: {
       [args.metadataKind ?? "noloWorkspaceTool"]: true,
       command: ["nolo", ...cliArgs].join(" "),
       exitCode,
+      ...(bridgedOutputTruncated ? { bridgedOutputTruncated: true } : {}),
     },
   };
 }
@@ -132,36 +140,44 @@ async function readDialogInProcess(
   const limitNum = noloPositiveIntegerString(args.limit);
   const limit = limitNum ? Number(limitNum) : undefined;
 
-  // 读 messages
-  const rawMessages: unknown[] = [];
+  // 读 messages（流式投影：边迭代边累计/裁剪，不先持有完整 rawMessages ——
+  // 根因硬门：iterator 先收齐再投影等于没修）。store 键序即升序（旧→新），
+  // 与 streaming projector 的输入契约一致。
+  const projector = createStreamingDialogReadProjector({
+    maxResponseChars: DEFAULT_READ_DIALOG_MAX_RESPONSE_CHARS,
+    ...(limit !== undefined ? { maxMessages: limit } : {}),
+  });
   if (store.iterator) {
     const { start, end } = dialogMessageRange(dialogId);
     for await (const [, value] of store.iterator({ gte: start, lte: end })) {
-      const message = localDialogMessageRecordToRuntimeMessage(value as any);
+      const message = localDialogMessageRecordToRuntimeMessage(value as any) ?? value;
       if (message) {
-        rawMessages.push(message);
-      } else if (value) {
-        rawMessages.push(value);
+        projector.addMessage(message);
       }
     }
   }
 
-  const messages = limit !== undefined && rawMessages.length > limit
-    ? rawMessages.slice(rawMessages.length - limit)
-    : rawMessages;
+  // Agent 响应预算：in-process / server 工具 / CLI bridge 共享同一 projection
+  // seam（dialogReadProjection.ts），序列化前裁剪，避免工具密集对话构建无界多副本
+  // （完整 meta+messages、整体序列化串、持久 transcript）。
+  const projected = projector.finish(meta);
 
-  // 构造返回（与 CLI 输出格式对齐）
-  const result = {
-    dialogId,
-    dialogKey,
-    meta,
-    messages,
-    messagesCount: messages.length,
-    source: "in-process",
-  };
+  // 统一最终 envelope builder：唯一拥有 maxResponseChars，
+  // content = serialized（builder 自证 <= 预算，完整合法 JSON）。
+  const built = buildDialogReadEnvelope({
+    meta: projected.meta,
+    messages: projected.messages,
+    stats: projected.stats,
+    envelope: {
+      dialogId,
+      dialogKey,
+      messagesCount: projected.stats.messagesReturned,
+      source: "in-process",
+    },
+  });
 
   return {
-    content: JSON.stringify(result, null, 2),
+    content: built.serialized,
     metadata: { noloWorkspaceTool: true, readDialog: true, inProcess: true },
   };
 }
