@@ -49,7 +49,7 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
   },
   {
     from: { provider: "deepseek", model: "deepseek-v4-pro" },
-    to: { provider: "nolo", model: "deepseek-flash" },
+    to: { provider: "nolo", model: "deepseek-v4-pro" },
     reason: "deepseek provider 已下架（2026-08-13），统一走 nolo 平台托管",
   },
   {
@@ -64,12 +64,8 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
     reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
     kind: "upgrade",
   },
-  {
-    from: { provider: "nolo", model: "deepseek-v4-pro" },
-    to: { provider: "nolo", model: "deepseek-flash" },
-    reason: "DeepSeek 系列整合为 nolo DeepSeek Flash（deepseek-flash）",
-    kind: "upgrade",
-  },
+  // 注意：nolo/deepseek-v4-pro 不迁移——V4 Pro 已于 2026-09-14 恢复为平台托管
+  // 一等模型，存量 pro 记录留在 pro。
   // Claude 系 2026-09-01 全线停止维护（广场下架 + nolo 托管列表移除），存量记录
   // 一律兼容迁移到 nolo GLM 5.3 Flash；兼容期请求由 platformHosted 路由表重映射。
   {
@@ -212,7 +208,11 @@ export function lookupModelUpgrade(
   if (p !== "nolo" && DEEPSEEK_FAMILY_MODELS.has(m)) {
     return {
       from: { provider: p, model: m },
-      to: { provider: "nolo", model: "deepseek-flash" },
+      // deepseek-v4-pro 已恢复上架，保持 pro 身份；其余旧名统一到 flash。
+      to: {
+        provider: "nolo",
+        model: m === "deepseek-v4-pro" ? "deepseek-v4-pro" : "deepseek-flash",
+      },
       reason: "第三方 provider 的 DeepSeek 系列模型统一迁移到 nolo 平台托管",
     };
   }

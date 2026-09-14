@@ -36,7 +36,6 @@ export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-flash";
 /** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL = "deepseek-v4-flash-vision-exp";
-/** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
 /** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash";
@@ -304,11 +303,12 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "responses",
     agentRunHosted: false,
   },
+  // DeepSeek V4 Pro -> 官方 DeepSeek Responses API（2026-09-14 起官方继续提供
+  // V4 Pro，model id 直传，不再 remap 到 flash）。
   [PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL]: {
     endpoint: "https://api.deepseek.com/responses",
     usageProvider: "deepseek",
     keyName: "deepseek",
-    upstreamModelId: PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
     wire: "responses",
     agentRunHosted: false,
   },

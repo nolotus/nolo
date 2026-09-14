@@ -9,6 +9,7 @@ import { PROVIDER_REASONING_EFFORT_VALUES, type ReasoningEffort } from "../agent
  */
 const REASONING_MODEL_NAMES = new Set([
   "deepseek-flash",
+  "deepseek-v4-pro",
   "gemini-3.7-flash",
   "gemini-3.8-flash",
   "gemini-3.6-flash",

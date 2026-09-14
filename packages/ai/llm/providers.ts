@@ -103,7 +103,7 @@ const NOLO_MODEL_ALIASES: Record<string, string> = {
   "glm-5.3-flash": "glm-5-3-flash",
   "deepseek-v4-flash": "deepseek-flash",
   "deepseek-v4-flash-vision-exp": "deepseek-flash",
-  "deepseek-v4-pro": "deepseek-flash",
+  // deepseek-v4-pro 已恢复为平台托管一等模型（2026-09-14 官方继续提供），不再折到 flash。
 };
 
 const normalizeLookupProvider = (provider?: string | null): LookupProvider | null => {

@@ -295,16 +295,30 @@ export const PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE = {
   output: toCnyCredits(4), // ¥4
 } as const;
 
+// 官方 2026-09-14 宣布之后继续提供 V4 Pro，计费不变：
+// 高峰 ¥9 / ¥0.30(缓存命中) / ¥27，空闲减半 ¥4.5 / ¥0.15 / ¥13.5（每 1M tokens）。
+export const PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE = {
+  input: toCnyCredits(9), // ¥9
+  inputCacheHit: toCnyCredits(0.3), // ¥0.30
+  output: toCnyCredits(27), // ¥27
+} as const;
+
+export const PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE = {
+  input: toCnyCredits(4.5), // ¥4.5
+  inputCacheHit: toCnyCredits(0.15), // ¥0.15
+  output: toCnyCredits(13.5), // ¥13.5
+} as const;
+
 export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE = {
   input: toPlatformCredits(0.05),
   inputCacheHit: toPlatformCredits(0.01),
   output: toPlatformCredits(0.15),
 } as const;
 
+/** 已并入 deepseek-flash 计费的旧名（官方仍接受但按 flash 计费）。 */
 export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_MODELS = [
   "deepseek-v4-flash",
   "deepseek-v4-flash-vision-exp",
-  "deepseek-v4-pro",
 ] as const;
 
 export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
@@ -328,10 +342,16 @@ export const isDeepSeekOffPeakBeijingTime = (nowMs = Date.now()): boolean => {
 };
 
 export const getPlatformHostedDeepSeekV4Price = (
-  _model?: string | null,
+  model?: string | null,
   nowMs = Date.now(),
 ) => {
   const isOffPeak = isDeepSeekOffPeakBeijingTime(nowMs);
+  // pro 与 flash 官方价不同（pro 更贵）；legacy flash 旧名按 flash 计费。
+  if (asTrimmedLowercaseString(model) === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL) {
+    return isOffPeak
+      ? PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE
+      : PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE;
+  }
   return isOffPeak
     ? PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE
     : PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE;
@@ -345,6 +365,7 @@ export const isPlatformHostedDeepSeekModel = (
   const m = asTrimmedLowercaseString(model);
   return (
     m === PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL ||
+    m === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL ||
     PLATFORM_HOSTED_LEGACY_DEEPSEEK_MODELS.includes(m as any)
   );
 };
@@ -507,6 +528,19 @@ export const platformHostedModels = [
     price: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
     peakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_PEAK_PRICE },
     offPeakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_FLASH_OFF_PEAK_PRICE },
+    maxOutputTokens: 384_000,
+    contextWindow: 1_000_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
+    displayName: "DeepSeek V4 Pro",
+    hasVision: false,
+    price: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE },
+    peakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_PEAK_PRICE },
+    offPeakPrice: { ...PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE },
+    // 官方「输出长度 最大 384K」= 384_000（与 flash 条目同口径，非 384×1024）
     maxOutputTokens: 384_000,
     contextWindow: 1_000_000,
     supportsTool: true,

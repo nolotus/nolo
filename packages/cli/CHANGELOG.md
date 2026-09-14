@@ -1,4 +1,13 @@
 
+## 0.66.0-alpha.1
+
+## 0.66.0-alpha.1 (2026-09-14)
+
+### Features
+
+* **ai:** restore deepseek-v4-pro as platform-hosted model ([20351be](https://github.com/nolotus/bun-nolo/commit/20351be1ca6f1d8ea9557f520558ba8e432b5af4))
+
+
 ## 0.65.0-alpha.1
 
 ## 0.65.0-alpha.1 (2026-09-14)

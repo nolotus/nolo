@@ -9,6 +9,7 @@ import { getApproxPricePerImage } from "ai/llm/imagePricing";
 import {
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
+  PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
   isPlatformHostedClaudeModel,
   getPlatformHostedDeepSeekV4Price,
   isPlatformHostedDeepSeekV4Model,
@@ -611,7 +612,13 @@ export const calculatePrice = ({
       (provider === "nolo" || provider === "deepseek") &&
       isPlatformHostedDeepSeekV4Model(modelName)
     ) {
-      const hostedModel = getModelConfig("nolo", PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL);
+      // pro 已恢复为一等模型，按各自目录配置计价；flash 旧名经 alias 落到 flash 配置。
+      const hostedModel = getModelConfig(
+        "nolo",
+        asTrimmedLowercaseString(modelName) === PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL
+          ? PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL
+          : PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
+      );
       const costs = calculateBasicCost(
         hostedModel,
         usage,
