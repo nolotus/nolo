@@ -2,7 +2,7 @@
 // Above-the-box panels: attachments, image config, edit chips, activity.
 // Each section is memoized so keystrokes (text-only) do not re-commit them.
 
-import React, { lazy, memo, Suspense, useCallback, useMemo } from "react";
+import React, { lazy, memo, Suspense, useCallback, useMemo, useState } from "react";
 import type { ProcessLaunchInfo } from "chat/messages/types";
 import {
   useAllToolRuns,
@@ -191,6 +191,7 @@ export const RunningProcessesPanel = memo(function RunningProcessesPanel({
   messages,
 }: RunningProcessesPanelProps) {
   const toolRuns = useAllToolRuns();
+  const [stoppedPids, setStoppedPids] = useState<Set<number>>(() => new Set());
 
   const running = useMemo<RunningProcessEntry[]>(() => {
     const byPid = new Map<number, RunningProcessEntry>();
@@ -199,7 +200,9 @@ export const RunningProcessesPanel = memo(function RunningProcessesPanel({
     for (const run of toolRuns) {
       const p = run.processLaunch;
       if (p && p.status === "running" && typeof p.pid === "number") {
-        byPid.set(p.pid, { pid: p.pid, label: p.label, toolRunId: run.id });
+        if (!stoppedPids.has(p.pid)) {
+          byPid.set(p.pid, { pid: p.pid, label: p.label, toolRunId: run.id });
+        }
       }
     }
 
@@ -209,7 +212,7 @@ export const RunningProcessesPanel = memo(function RunningProcessesPanel({
         if (!msg || msg.role !== "tool") continue;
         const p = (msg as any)?.metadata?.processLaunch;
         if (isProcessLaunch(p) && p.status === "running") {
-          if (!byPid.has(p.pid)) {
+          if (!stoppedPids.has(p.pid) && !byPid.has(p.pid)) {
             byPid.set(p.pid, { pid: p.pid, label: p.label });
           }
         }
@@ -217,10 +220,11 @@ export const RunningProcessesPanel = memo(function RunningProcessesPanel({
     }
 
     return Array.from(byPid.values());
-  }, [toolRuns, messages]);
+  }, [toolRuns, messages, stoppedPids]);
 
   const handleStop = useCallback(
     (entry: RunningProcessEntry) => {
+      setStoppedPids((prev) => new Set(prev).add(entry.pid));
       const sendToHost = (globalThis as any).__electrobunSendToHost;
       if (typeof sendToHost === "function") {
         sendToHost({

@@ -234,9 +234,17 @@ export class ProcessRegistry {
 
     if (item.status === "running") {
       try {
-        process.kill(-item.pgid, signal);
+        if (process.platform === "win32") {
+          process.kill(item.pid, signal);
+        } else {
+          process.kill(-item.pgid, signal);
+        }
       } catch {
-        // ESRCH or unkillable - process might already be dead
+        try {
+          process.kill(item.pid, signal);
+        } catch {
+          // ESRCH or unkillable - process might already be dead
+        }
       }
       item.status = "stopped";
       this.eventLog.append({ taskId: item.taskId, pid, type: "killed" });
@@ -267,9 +275,17 @@ export class ProcessRegistry {
       if (opts?.backgroundOnly && item.transient) continue;
       if (item.status === "running" && (opts?.includePersist || !item.persist)) {
         try {
-          process.kill(-item.pgid, signal);
+          if (process.platform === "win32") {
+            process.kill(item.pid, signal);
+          } else {
+            process.kill(-item.pgid, signal);
+          }
         } catch {
-          // ESRCH guard
+          try {
+            process.kill(item.pid, signal);
+          } catch {
+            // ESRCH guard
+          }
         }
         item.status = "stopped";
         this.eventLog.append({ taskId: item.taskId, pid: item.pid, type: "killed" });
