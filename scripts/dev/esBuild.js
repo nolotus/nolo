@@ -9,7 +9,7 @@ import { copyFile, mkdir, readdir, readFile, rm, unlink, writeFile } from "node:
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
-import { config, timestamp, publicPath } from "./esbuild.config";
+import { config, timestamp, publicPath, webEdition } from "./esbuild.config";
 import { shouldPrecompressWebAssets } from "./webBuildPolicy";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
 import { copyRouteStyles } from "./routeStyles.js";
@@ -370,6 +370,10 @@ export const runMetaBuild = async () => {
     timestamp,
     buildTime: new Date().toISOString(),
     buildSha: process.env.NOLO_BUILD_SHA || process.env.GITHUB_SHA || null,
+
+    // Web edition 声明（desktop pre-build 据此 fail closed 校验打包的是
+    // nolo-desktop edition 产物，而不是旧 cloud/local 构建）。
+    edition: webEdition,
   };
 
   // 3. 写入 latest-assets.json（开发固定 entry 路径）

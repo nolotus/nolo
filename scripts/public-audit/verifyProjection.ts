@@ -240,6 +240,46 @@ export async function verifyProjection(
     }
   }
 
+  // 1.6 Phase 3 desktop-account-gate（公开侧重扫真实 tree/bytes，不盲信生成期声明）：
+  // - .generated 构建输出目录绝不进公开投影
+  // - sourcemap（*.map）绝不进公开投影
+  // - 公开 workflow 不得携带 NOLO_DESKTOP_SKIP_WEB_BUILD（公开 desktop 构建必须
+  //   真实构建 desktop edition web bundle）
+  {
+    const gateStack = [rootDir];
+    while (gateStack.length > 0) {
+      const current = gateStack.pop()!;
+      let entries;
+      try {
+        entries = await readdir(current, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = join(current, entry.name);
+        const rel = relative(rootDir, full).split("\\").join("/");
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules" || entry.name === ".git") continue;
+          if (entry.name === ".generated") {
+            add(`generated-output: ${rel}（desktop 打包期构建输出绝不进公开投影）`);
+          } else {
+            gateStack.push(full);
+          }
+        } else if (entry.isFile() && entry.name.endsWith(".map")) {
+          add(`sourcemap: ${rel}（sourcemap 绝不进公开投影）`);
+        }
+      }
+    }
+    for (const entry of presentWorkflows) {
+      const content = await readFile(join(workflowsDir, entry), "utf8").catch(() => "");
+      if (content.includes("NOLO_DESKTOP_SKIP_WEB_BUILD")) {
+        add(
+          `workflow-skip-web-build: .github/workflows/${entry}（公开 desktop 构建必须真实构建 desktop edition web bundle）`,
+        );
+      }
+    }
+  }
+
   // 2. packages：正向包白名单校验 / manifest 可解析 / workspace 依赖闭包合法
   const packagesDir = join(rootDir, "packages");
   const packageNames = new Set<string>();

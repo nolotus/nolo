@@ -679,6 +679,64 @@ function Wait-ForSmokeProbeCompletion {
   throw "Desktop smoke did not serve assets from the installed Resources directory: $ExpectedPublicDir.`nLauncher log:`n$log"
 }
 
+function Assert-InstalledCapabilityEvidence {
+  $evidenceDir = $env:NOLO_DESKTOP_CAPABILITY_EVIDENCE_DIR
+  if (-not $evidenceDir) {
+    # release smoke 是我们唯一的 Windows 能力证据来源：静默跳过会让 release gate
+    # 在一小时后的另一个 job 才报错，定位成本高且误导。release 模式下缺失即失败。
+    if ($isReleaseSmoke -and $env:GITHUB_ACTIONS -eq "true") {
+      throw "NOLO_DESKTOP_CAPABILITY_EVIDENCE_DIR is required for release smoke in CI; without it the Windows capability evidence is silently skipped."
+    }
+    return
+  }
+
+  $verifierCandidates = @(
+    "scripts/public-audit/desktop/verifyDesktopPackageCapability.ts",
+    "scripts/verify/desktop/verifyDesktopPackageCapability.ts"
+  )
+  $verifier = $verifierCandidates |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+  if (-not $verifier) {
+    throw "Desktop capability verifier not found; cannot record installed capability evidence."
+  }
+
+  # 证据必须绑定真实发布的安装器 bytes（不是 side-by-side smoke 安装器）。
+  $payloadArtifact = if ($usesIsolatedSmokeInstaller) {
+    Get-ChildItem -Path "packages/desktop/artifacts" -Filter "*Setup*.exe" |
+      Sort-Object Length -Descending |
+      Select-Object -First 1
+  } else {
+    $setup
+  }
+  if (-not $payloadArtifact) {
+    throw "No published Windows installer found to bind installed capability evidence."
+  }
+
+  # limitation 必须如实描述「被扫描的树」与「被绑定的安装器」之间的关系：
+  # - stable 走 side-by-side smoke 安装器（不污染操作机），被扫描的树来自它，
+  #   而 payloadSources 绑定的是真实发布安装器；两者的 web tree 等价性未被证明，
+  #   必须显式声明，不能让默认文案把这件事说成「扫描了发布安装器本身」。
+  # - alpha 安装的就是真实发布安装器，两者一致。
+  $limitation = if ($env:NOLO_DESKTOP_CAPABILITY_LIMITATION) {
+    $env:NOLO_DESKTOP_CAPABILITY_LIMITATION
+  } elseif ($usesIsolatedSmokeInstaller) {
+    "Inno Setup cannot be re-extracted on the Linux release runner. The scanned tree comes from a side-by-side smoke installer built in the same revision; payloadSources binds the published installer, whose embedded web tree equivalence is assumed, not proven."
+  } else {
+    "Inno Setup cannot be re-extracted on the Linux release runner. The scanned tree comes from a real per-user install of the published installer bound by payloadSources[0].sha256 on the Windows build runner."
+  }
+
+  Write-SmokePhase "recording installed desktop capability evidence from $expectedPublicDir"
+  & bun $verifier installed `
+    --artifacts-dir $evidenceDir `
+    --web-root $expectedPublicDir `
+    --payload-artifact $payloadArtifact.FullName `
+    --limitation $limitation
+  if ($LASTEXITCODE -ne 0) {
+    throw "Installed desktop capability evidence gate failed with exit code $LASTEXITCODE."
+  }
+}
+
 $expectedPublicDir = Join-Path $installDir "Resources\app\public"
 
 Assert-InstalledDesktopSecurityBoundary -BaseUrl $serverBase
@@ -697,5 +755,7 @@ if ($isReleaseSmoke) {
   }
   Stop-SmokeInstalledProcesses -IncludeScriptRoots
 }
+
+Assert-InstalledCapabilityEvidence
 
 Write-Host "Installed Windows desktop smoke passed with BrowserWindow startup in mode $smokeMode."

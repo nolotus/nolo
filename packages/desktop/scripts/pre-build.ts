@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { validateWorkspacePackageLinks } from "../../../scripts/dev/workspaceLinkGuard";
@@ -152,6 +152,48 @@ try {
   }
 }
 
+// --- Desktop edition fail-closed 校验 ---------------------------------------
+// 公开桌面只允许打包 nolo-desktop edition 的 web 产物。esBuild 把 `edition`
+// 写进 public/latest-assets.json；这里据此校验，避免把旧的 cloud/local 构建
+// 静默塞进安装包（隐私边界不允许悄悄退化成匿名-only Local edition）。
+type WebAssetManifest = { edition?: string };
+
+const readLatestAssetsManifest = (): WebAssetManifest | null => {
+  try {
+    return JSON.parse(readFileSync(latestAssetsPath, "utf8")) as WebAssetManifest;
+  } catch {
+    return null;
+  }
+};
+
+const desktopEditionMismatchError = (edition: string | undefined): Error =>
+  new Error(
+    `[desktop-edition-mismatch] packaged web bundle is not the desktop edition (latest-assets.json edition=${edition ?? "missing"}). Rebuild web assets with NOLO_WEB_EDITION=desktop.`
+  );
+
+const assertDesktopEditionManifest = (): void => {
+  const manifest = readLatestAssetsManifest();
+  if (manifest?.edition !== "desktop") {
+    throw desktopEditionMismatchError(manifest?.edition);
+  }
+};
+
+// Skip-web-build 路径（dev 流程）复用既有产物：声明了非 desktop edition 就
+// 硬失败；早期产物没有 edition 字段时仅告警（过渡容忍），随后重新构建补齐。
+const assertReusableDesktopEditionManifest = (): void => {
+  if (!existsSync(latestAssetsPath)) return;
+  const manifest = readLatestAssetsManifest();
+  if (manifest?.edition === undefined) {
+    console.warn(
+      "[desktop-pre-build] latest-assets.json has no edition field (pre-edition build); rebuild with NOLO_WEB_EDITION=desktop before shipping."
+    );
+    return;
+  }
+  if (manifest.edition !== "desktop") {
+    throw desktopEditionMismatchError(manifest.edition);
+  }
+};
+
 if (process.env.NOLO_DESKTOP_SKIP_WEB_BUILD !== "1") {
   await rm(sourceAssetsDir, { recursive: true, force: true });
   await rm(sourceAssetBuildManifestDir, { recursive: true, force: true });
@@ -163,6 +205,8 @@ if (process.env.NOLO_DESKTOP_SKIP_WEB_BUILD !== "1") {
       ...process.env,
       NODE_ENV: "production",
       NOLO_WEB_SKIP_META: "1",
+      // 公开桌面构建显式选择 nolo-desktop edition（见 esbuild.config.js）。
+      NOLO_WEB_EDITION: "desktop",
       // 注意：不要设 NOLO_WEB_SKIP_METAFILE=1——StyleX 启用后构建必须带 metafile
       //（插件定位 CSS asset + keepRecentAssetBuilds 靠它清理历史产物）；
       // desktop 打包前已清空 public/assets，keepRecent 无历史可删，行为安全。
@@ -175,6 +219,10 @@ if (process.env.NOLO_DESKTOP_SKIP_WEB_BUILD !== "1") {
   if (exitCode !== 0) {
     throw new Error(`Web asset build failed with exit code ${exitCode}`);
   }
+  // 刚构建的产物必须声明 desktop edition，否则打包失败（fail closed）。
+  assertDesktopEditionManifest();
+} else {
+  assertReusableDesktopEditionManifest();
 }
 
 /**

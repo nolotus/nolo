@@ -28,14 +28,16 @@ import {
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
 import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { SettingRoutePaths } from "app/settings/config";
-import { useCurrentUser, useUserId, useAccounts } from "identity";
+import { useCurrentUser, useUserId, useAccounts, useIsLoggedIn } from "identity";
 import { cloudLazy } from "identity/cloudLazy";
 import { selectIdentityUserBalance } from "identity/selectors";
+import { openDesktopAccountPage } from "identity/accountExternalActions";
 import { Tooltip } from "render/web/ui/Tooltip";
 import { Popover } from "render/web/ui/Popover";
 import Avatar from "render/web/ui/Avatar";
 
 import { useIsMobile } from "app/hooks/useIsMobile";
+import { getIsDesktopApp } from "app/utils/env";
 
 // 🔹 新增：读取用户 profile 里的 avatarFileId
 import { read, selectById } from "database/dbSlice";
@@ -84,6 +86,10 @@ const TopbarUserMenu: React.FC = () => {
   const dispatch = useAppDispatch();
   const accountSession = useAccountSessionService();
   const authUser = useCurrentUser();
+  // 真实 session 信号（desktop 匿名时为 false，但 useCurrentUser 兜底为
+  // Local User —— 无 session 显示 Local User 且本地路由不受登录门）。
+  const isLoggedIn = useIsLoggedIn();
+  const isDesktopApp = getIsDesktopApp();
 
   const users = useAccounts();
   const currentUserId = useUserId();
@@ -92,6 +98,7 @@ const TopbarUserMenu: React.FC = () => {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState(false);
 
   const balanceValue = typeof balance === "number" ? balance : 0;
   const isLoadingBalance = typeof balance !== "number";
@@ -120,8 +127,24 @@ const TopbarUserMenu: React.FC = () => {
 
   const handleLogout = useCallback(() => {
     // Phase 2: 登出编排由 AccountSessionService 拥有；Redux 仅镜像 Core。
-    accountSession?.signOut().then(() => navigate("/"));
+    // 登出失败必须可见（菜单内 role="alert"），绝不静默吞掉。
+    setSignOutError(false);
+    if (!accountSession) return;
+    accountSession
+      .signOut()
+      .then(() => navigate("/"))
+      .catch(() => setSignOutError(true));
   }, [accountSession, navigate]);
+
+  const handleRecharge = useCallback(() => {
+    setMenuOpen(false);
+    if (isDesktopApp) {
+      // 桌面端没有 /recharge 路由：充值入口走固定 allowlist 的账户中心外跳。
+      openDesktopAccountPage("accountCenter");
+      return;
+    }
+    navigate("/recharge");
+  }, [isDesktopApp, navigate]);
 
   const handleOpenLifeUsage = useCallback(() => {
     setMenuOpen(false);
@@ -134,13 +157,22 @@ const TopbarUserMenu: React.FC = () => {
   }, [navigate, location]);
 
 
-  // 📝 配置项缓存
-  const bottomActions = useMemo(() => [
-  { icon: LuLogIn, text: t("loginOtherUser", "登录其他用户"), onClick: handleLoginOther, className: "topbar-user-menu__item--login-other" },
-  { icon: LuUserPlus, text: t("inviteFriend"), onClick: handleInvite, className: "topbar-user-menu__item--invite" },
-  { icon: LuDownload, text: t("downloadClient", "下载客户端"), onClick: () => navigate("/downloads"), className: "topbar-user-menu__item--download" },
-  { icon: LuLogOut, text: t("logout"), onClick: handleLogout, className: "topbar-user-menu__item--logout" }],
-  [t, handleLoginOther, handleInvite, handleLogout, navigate]);
+  // 📝 配置项缓存。匿名（desktop 无 session）只保留登录入口与本地功能；
+  // 桌面端隐藏纯云端增长项（邀请）。
+  const bottomActions = useMemo(() => {
+    if (!isLoggedIn) {
+      return [
+        { icon: LuLogIn, text: t("login", "登录"), onClick: handleLoginOther, className: "topbar-user-menu__item--login" },
+        { icon: LuDownload, text: t("downloadClient", "下载客户端"), onClick: () => navigate("/downloads"), className: "topbar-user-menu__item--download" },
+      ];
+    }
+    return [
+    { icon: LuLogIn, text: t("loginOtherUser", "登录其他用户"), onClick: handleLoginOther, className: "topbar-user-menu__item--login-other" },
+    ...(isDesktopApp ? [] : [{ icon: LuUserPlus, text: t("inviteFriend"), onClick: handleInvite, className: "topbar-user-menu__item--invite" }]),
+    { icon: LuDownload, text: t("downloadClient", "下载客户端"), onClick: () => navigate("/downloads"), className: "topbar-user-menu__item--download" },
+    { icon: LuLogOut, text: t("logout"), onClick: handleLogout, className: "topbar-user-menu__item--logout" }];
+  },
+  [t, isLoggedIn, isDesktopApp, handleLoginOther, handleInvite, handleLogout, navigate]);
 
   // ================= 读取用户头像 =================
 
@@ -225,6 +257,7 @@ const TopbarUserMenu: React.FC = () => {
                     {authUser.email}
                   </div>
                 ) : null}
+                {isLoggedIn ? (
                 <div className="topbar-user-menu__balance-row">
                   <div className="topbar-user-menu__balance-copy">
                     <span className="topbar-user-menu__balance-label">{creditsUnit}</span>
@@ -234,12 +267,13 @@ const TopbarUserMenu: React.FC = () => {
                   </div>
                   <button
                     type="button" className="topbar-user-menu__btn-add"
-                    onClick={() => {navigate("/recharge");setMenuOpen(false);}}>
+                    onClick={handleRecharge}>
 
                     <LuPlus size={10} strokeWidth={3} aria-hidden="true" />
                     <span>{t("recharge", "充值")}</span>
                   </button>
                 </div>
+                ) : null}
               </div>
 
               <div className="topbar-user-menu__divider" />
@@ -251,12 +285,14 @@ const TopbarUserMenu: React.FC = () => {
                   onClick={handleOpenLifeUsage}
                   onClose={() => setMenuOpen(false)}
                 />
+                {!isDesktopApp ? (
                 <UserMenuItem
                   icon={LuShare2}
                   text={t("space:myShares.title", "我的分享")}
                   onClick={() => navigate("/life/shares")}
                   onClose={() => setMenuOpen(false)}
                 />
+                ) : null}
                 <UserMenuItem
                   icon={LuSettings}
                   text={t("settings.title", "设置")}
@@ -266,7 +302,7 @@ const TopbarUserMenu: React.FC = () => {
               </div>
 
               {/* Section 2: Account Switch */}
-              {otherUsers.length > 0 && (
+              {isLoggedIn && otherUsers.length > 0 && (
                 <>
                   <div className="topbar-user-menu__divider" />
                   <div className="topbar-user-menu__list">
@@ -291,6 +327,12 @@ const TopbarUserMenu: React.FC = () => {
               </div>
 
               <div className="topbar-user-menu__divider" />
+
+              {signOutError ? (
+                <div className="topbar-user-menu__signout-error" role="alert">
+                  {t("signOutFailed", "登出失败，请重试")}
+                </div>
+              ) : null}
 
               {/* Section 4: Functional Actions */}
               <div className="topbar-user-menu__list">

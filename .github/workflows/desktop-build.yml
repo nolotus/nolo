@@ -157,11 +157,14 @@ jobs:
 
       - name: Smoke installed Windows desktop artifact
         if: runner.os == 'Windows' && needs.select-targets.outputs.channel == 'stable'
-        timeout-minutes: 8
+        timeout-minutes: 12
         env:
           NOLO_DESKTOP_SMOKE_MODE: release
           NOLO_DESKTOP_SMOKE_SETUP: packages/desktop/smoke-artifacts/NoloDesktop-Smoke-Setup.exe
           NOLO_DESKTOP_SMOKE_LAUNCHER: Nolo Desktop Smoke.vbs
+          # Windows 证据只能来自真实安装：Inno Setup 安装器无法在 Linux release
+          # runner 上解包。smoke 安装后扫描安装目录并绑定真实发布的安装器 bytes。
+          NOLO_DESKTOP_CAPABILITY_EVIDENCE_DIR: packages/desktop/artifacts
         run: |
           ./scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1
 
@@ -190,6 +193,18 @@ jobs:
             bun run --cwd packages/desktop build:alpha
           fi
 
+      - name: Record installed Windows desktop capability evidence (alpha)
+        # alpha 的 Windows 也产出 Inno Setup 安装器，但只能在 Windows 上真实安装后
+        # 才能取到最终 public tree；在构建完成后立刻安装并扫描，fail closed。
+        if: runner.os == 'Windows' && needs.select-targets.outputs.channel != 'stable'
+        timeout-minutes: 12
+        env:
+          NOLO_DESKTOP_SMOKE_MODE: release
+          NOLO_DESKTOP_SMOKE_LAUNCHER: Nolo Desktop.vbs
+          NOLO_DESKTOP_CAPABILITY_EVIDENCE_DIR: packages/desktop/artifacts
+        run: |
+          ./scripts/public-audit/desktop/smokeInstalledWindowsDesktop.ps1
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -216,6 +231,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: packages/desktop/artifacts
+
+      - name: Verify desktop capability evidence (fail closed, all platforms)
+        run: |
+          bun ./scripts/public-audit/desktop/verifyDesktopPackageCapability.ts release \
+            --artifacts-dir packages/desktop/artifacts
 
       - name: Publish to R2 (CF CDN for China users)
         env:
@@ -252,9 +272,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp -r packages/desktop/artifacts/desktop-linux/* release-assets/ 2>/dev/null || true
-          cp -r packages/desktop/artifacts/desktop-windows/* release-assets/ 2>/dev/null || true
-          cp -r packages/desktop/artifacts/desktop-macos/* release-assets/ 2>/dev/null || true
+          # capability evidence JSON / snapshot 不进 GitHub Release（只发布安装包 + 更新元数据）。
+          # 注意：这里刻意避开 -exec 加反斜杠分号的写法——在 TS 模板字面量里该转义会被
+          # 求值成裸分号，提前终止 find，导致 release-assets 恒为空、通配无匹配，
+          # 从而每次发布必然失败（2026-09-14 独立审查发现的确定性 CI 回归）。
+          # 改用 -exec + 形式，无需终止符转义。
+          for platform in linux windows macos; do
+            platform_dir="packages/desktop/artifacts/desktop-$platform"
+            if [ ! -d "$platform_dir" ]; then
+              echo "::error::missing artifact directory for platform $platform ($platform_dir)" >&2
+              exit 1
+            fi
+            find "$platform_dir" -maxdepth 1 -type f ! -name 'desktop-capability-evidence.json' -exec cp -t release-assets {} +
+          done
+          # 空产物必须响亮失败：否则 release-assets 通配无匹配会把字面量路径交给 gh。
+          if [ -z "$(ls -A release-assets)" ]; then
+            echo "::error::no release assets were collected; refusing to create an empty GitHub Release" >&2
+            exit 1
+          fi
           RELEASE_NOTES="Desktop ${CHANNEL} build from ${{ inputs.projection_sha }}"
           FLAGS=(--notes "$RELEASE_NOTES")
           if [ "$CHANNEL" = "alpha" ]; then

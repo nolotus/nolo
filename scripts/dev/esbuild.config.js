@@ -32,6 +32,48 @@ const skillDiscoveryBrowserStub = join(
   "../../packages/agent-runtime/skillDiscovery.browser.stub.ts",
 );
 
+// ---- Web edition（package.json 条件导出版本）--------------------------------
+// cloud（默认）: 既有云端 web/SSR 构建，nolo-cloud 条件优先。
+// desktop: 公开桌面构建，显式选择 nolo-desktop 条件（排在 nolo-cloud/default
+//   之前）。缺 .desktop 实现时模块解析直接失败（fail closed），绝不静默落回
+//   local stub —— 隐私隔离不允许把公开桌面悄悄退化成匿名-only Local edition。
+const WEB_EDITION_CONDITIONS = {
+  cloud: ["browser", "nolo-cloud", "default"],
+  desktop: ["browser", "nolo-desktop", "default"],
+};
+
+export const resolveWebEditionConditions = (edition) => {
+  const conditions = WEB_EDITION_CONDITIONS[edition];
+  if (!conditions) {
+    throw new Error(
+      `Unknown NOLO_WEB_EDITION: "${edition}" (expected one of: ${Object.keys(
+        WEB_EDITION_CONDITIONS
+      ).join(", ")})`
+    );
+  }
+  return conditions;
+};
+
+export const webEdition = process.env.NOLO_WEB_EDITION || "cloud";
+
+// desktop edition 的 fail closed 闸门：任何 .cloud 模块（edition 接缝的实现文件）
+// 被解析进桌面 bundle 都直接构建失败，而不是把 cloud edition 源码打进公开包。
+// （auth/billing/admin 私有码的硬拒绝由公开投影 gates 负责，见
+// scripts/release/prepareNoloOpenSourceMirror.ts。）
+const desktopEditionFailClosedPlugin =
+  webEdition === "desktop"
+    ? {
+        name: "desktop-edition-fail-closed",
+        setup(build) {
+          build.onResolve({ filter: /\.cloud(\.tsx?)?$/ }, (args) => {
+            throw new Error(
+              `[desktop-edition] forbidden .cloud module import: "${args.path}" (imported by ${args.importer}) — desktop edition must not bundle cloud edition sources`
+            );
+          });
+        },
+      }
+    : null;
+
 // Browser and dev web builds both use platform: "browser"; stub node-only modules here.
 const agentRuntimeBrowserCompatPlugin = {
   name: "agent-runtime-browser-compat-stub",
@@ -255,7 +297,7 @@ const baseConfig = {
   },
 
   resolveExtensions: [".tsx", ".ts", ".jsx", ".js"],
-  conditions: ["browser", "nolo-cloud", "default"],
+  conditions: resolveWebEditionConditions(webEdition),
 
   // chunk 始终带 hash，方便强缓存
   chunkNames: "chunks/[name]-[hash]",
@@ -265,6 +307,8 @@ const baseConfig = {
 
   plugins: [
     agentRuntimeBrowserCompatPlugin,
+    // Desktop edition fail-closed gate（仅 NOLO_WEB_EDITION=desktop 时注入）。
+    ...(desktopEditionFailClosedPlugin ? [desktopEditionFailClosedPlugin] : []),
     // StyleX（@stylexjs/unplugin 的 esbuild 适配器）：
     // - 构建期用 Babel 编译 stylex.create / stylex.props（仅对 import 了 stylex 源的文件生效）；
     // - 构建结束后把聚合出的 StyleX CSS 追加到 metafile 定位的 CSS 产物（即 entry CSS）。

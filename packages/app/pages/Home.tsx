@@ -53,9 +53,11 @@ const Home = () => {
   const token = useToken();
   const homePublicAgents = useSSRPublicAgents();
   // Local User remains the authenticated home owner for local data/widgets.
-  // A token only distinguishes a real cloud account when deciding whether the
-  // Desktop first-run guide still needs to be shown.
-  const showAuthedHome = hasMounted && isLoggedIn && !!currentUser;
+  // Desktop edition: the session hooks report real isLoggedIn (anonymous=false)
+  // but the local home must stay the anonymous entry — currentUser carries the
+  // Local User fallback, a token only distinguishes a real cloud account when
+  // deciding whether the Desktop first-run guide still needs to be shown.
+  const showAuthedHome = hasMounted && !!currentUser;
   const pageMeta = useMemo(
     () => buildStaticPageMeta(t, showAuthedHome ? "default" : "home"),
     [showAuthedHome, t]

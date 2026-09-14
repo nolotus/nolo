@@ -45,6 +45,7 @@ import {
   findMonorepoRoot,
 } from "./runtimePaths";
 import { ensureLinuxDesktopEntry } from "./linuxDesktopEntry";
+import { reviewDesktopBrowserAction } from "./desktopAccountActionGuard";
 import {
   acquireDesktopInstanceLock,
   DESKTOP_SECOND_INSTANCE_EXIT_CODE,
@@ -635,14 +636,23 @@ function installDesktopApiRequestBridge(mainWindow: { webview: { executeJavascri
       );
       return;
     }
-    if (
-      payload?.type === "nolo-desktop-browser-action" &&
-      payload?.action === "open"
-    ) {
-      openDesktopBrowser(
-        typeof payload.url === "string" && payload.url ? payload.url : undefined,
+    if (payload?.type === "nolo-desktop-browser-action") {
+      // Receiver-side trust boundary: re-validate independently of the sender
+      // against the shared account URL policy (never trust the caller).
+      const review = reviewDesktopBrowserAction(payload);
+      if (review.kind === "open-url") {
+        openDesktopBrowser(review.url);
+        return;
+      }
+      if (review.kind === "open-default-browser") {
+        openDesktopBrowser();
+        return;
+      }
+      throw new Error(
+        review.kind === "reject"
+          ? `nolo-desktop-browser-action rejected: ${review.reason}`
+          : `unsupported desktopApiRequest type: ${payload?.type ?? "<none>"}`
       );
-      return;
     }
     throw new Error(`unsupported desktopApiRequest type: ${payload?.type ?? "<none>"}`);
   };
@@ -870,9 +880,17 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
     // Keep last message in a global so a post-crash inspector can recover it.
     (globalThis as any).__noloLastHostMessage = __stamp;
 
-    if ((detail as any).type === "nolo-desktop-browser-action" && (detail as any).action === "open") {
-      const targetUrl = (detail as any).url;
-      openDesktopBrowser(typeof targetUrl === "string" && targetUrl ? targetUrl : undefined);
+    if ((detail as any).type === "nolo-desktop-browser-action") {
+      // Receiver-side trust boundary (webview is untrusted): independently
+      // enforce the shared desktop account URL allowlist before any open.
+      const review = reviewDesktopBrowserAction(detail);
+      if (review.kind === "open-url") {
+        openDesktopBrowser(review.url);
+      } else if (review.kind === "open-default-browser") {
+        openDesktopBrowser();
+      } else if (review.kind === "reject") {
+        console.warn(`[host-message] nolo-desktop-browser-action rejected: ${review.reason}`);
+      }
       return;
     }
 

@@ -117,3 +117,79 @@ try {
 } catch (error) {
   console.warn("[desktop] Optional DEB generation failed; continuing with Linux tar artifacts:", error);
 }
+
+// --- Desktop capability gate (Phase 3) --------------------------------------
+// 打包完成后立即 fail-closed 验证公开 desktop capability（edition/匿名本地/
+// session bridge/隐私拒绝），把证据 JSON + capability web tree 快照写进 artifacts，
+// 供 release job 在 publishDesktopDownloads.ts 之前对真实 bytes 重新推导。
+// login/account action 属于 release gate（构建后路由接线），此处在证据中记录
+// 但不阻塞单平台构建 —— build hard gate 与 installed smoke 的边界见 verifier 头注释。
+// 证据必须派生自真实打包内容，绝不接受 `.generated/public` 复制品：
+// - Linux：扫描实际发布的 tar.zst / deb 归档里的 public tree；
+// - macOS：扫描实际发布的 .app.tar.zst 归档里的 public tree；
+// - Windows：Inno Setup 安装器无法在 release runner 上解包，证据由 Windows
+//   构建机上的 installed smoke 写入（见 smokeInstalledWindowsDesktop.ps1）。
+const CAPABILITY_PAYLOAD_EXTENSIONS = [".tar.zst", ".deb"] as const;
+
+const verifyDesktopCapability = async () => {
+  const repoRootFromScripts = resolve(import.meta.dir, "../../..");
+  const verifierCandidates = [
+    join(repoRootFromScripts, "scripts", "verify", "desktop", "verifyDesktopPackageCapability.ts"),
+    join(repoRootFromScripts, "scripts", "public-audit", "desktop", "verifyDesktopPackageCapability.ts"),
+  ];
+  const verifierPath = verifierCandidates.find((candidate) => existsSync(candidate));
+  if (!verifierPath) {
+    throw new Error(
+      `Desktop capability verifier not found (looked in:\n${verifierCandidates.join("\n")})`,
+    );
+  }
+
+  const payloadArchives = (await readdir(artifactDir))
+    .filter((name) => CAPABILITY_PAYLOAD_EXTENSIONS.some((ext) => name.endsWith(ext)))
+    .sort();
+
+  if (payloadArchives.length === 0) {
+    if (process.platform === "win32") {
+      console.log("[desktop-capability] Windows evidence is produced by the installed smoke step");
+      return;
+    }
+    throw new Error(
+      `[desktop-capability] no extractable payload archive (${CAPABILITY_PAYLOAD_EXTENSIONS.join(
+        ", ",
+      )}) found in ${artifactDir}; capability evidence cannot be derived from real packaged bytes`,
+    );
+  }
+
+  const args = [
+    process.execPath,
+    verifierPath,
+    "payload",
+    "--artifacts-dir",
+    artifactDir,
+    "--identity-root",
+    join(repoRootFromScripts, "packages", "identity"),
+  ];
+  for (const name of payloadArchives) {
+    args.push("--installer", join(artifactDir, name));
+  }
+
+  // macOS 的主发布物是 .dmg，而 dmg 无法在构建机上稳定解包比对：被扫描的是
+  // .app.tar.zst。若二者分叉，gate 发现不了，因此必须把这条边界写进证据，
+  // 不能让 extracted-payload 证据看起来像「扫过了渠道主下载物」。
+  const hasDmg = (await readdir(artifactDir)).some((name) => name.endsWith(".dmg"));
+  if (hasDmg) {
+    args.push(
+      "--limitation",
+      "The scanned tree comes from the .app.tar.zst payload. The channel's primary macOS download is the .dmg, whose embedded app bundle is bound by sha256 only and is not unpacked or compared on the build runner.",
+    );
+  }
+
+  const proc = Bun.spawnSync(args, { stdio: ["ignore", "inherit", "inherit"] });
+  if (!proc.success) {
+    throw new Error(
+      `[desktop-capability] packaged capability gate failed with exit code ${proc.exitCode}; refusing to publish artifacts`,
+    );
+  }
+};
+
+await verifyDesktopCapability();

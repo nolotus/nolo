@@ -21,6 +21,22 @@
 
 非 edition 导出（两版共用）：`identity`（barrel）、`identity/cloudLazy`（条件 lazy helper）、`identity/types`。
 
+## Desktop edition（nolo-desktop 条件，Phase 2）
+
+Desktop 行为与纯 local 不同的导出面在 `nolo-cloud`/`default` 之外显式声明 `nolo-desktop`（排第一，fail closed）：
+
+| 导出路径 | desktop 实现 | 与 local 的差异 |
+|---|---|---|
+| `identity`（barrel） | `index.desktop.ts` | session-aware hooks，`isCloudEdition=false` |
+| `identity/selectors` | `selectors.desktop.ts` | 真实 isLoggedIn；未绑定回退 Local User |
+| `identity/actions` | `actions.desktop.ts` | 委托公开 AccountSessionService；失败必须 rethrow |
+| `identity/cloudRoutes` | `cloudRoutes.desktop.tsx` | `/login`、`/life`、`/life/usage` 有意图页面（外跳 allowlist），绝不 NoMatch |
+| `identity/accountProfile` | `accountProfile.desktop.ts` | 复用公开 core/accountSession 的 profile 读取 |
+| `identity/cloudBootstrap` | `cloudBootstrap.desktop.ts` | desktopTokenManager（Phase 1） |
+| `identity/storeSession` | `storeSession.desktop.ts` | 真实会话 core/service 组装（Phase 1） |
+
+共用（非条件）：`identity/accountExternalActions`（固定 nolo.chat allowlist + `nolo-desktop-browser-action` host bridge 精确 schema）。契约测试：`desktopEdition.source.test.ts`、`accountActions.desktop.test.tsx`（含 `--conditions=nolo-desktop` 运行时解析探针）。
+
 ## 新增 edition 对的 4 步清单
 
 1. **创建文件对**：`<name>.cloud.ts`（委托 auth）+ `<name>.local.ts`（no-op）

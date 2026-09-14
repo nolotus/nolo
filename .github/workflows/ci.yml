@@ -15,4 +15,12 @@ jobs:
       - name: Projection safety gate
         run: bun scripts/public-audit/verifyProjection.ts
       - name: Build web bundle
+        # 必须显式声明 desktop edition：esbuild 默认 webEdition = "cloud"，而下一步
+        # 要求 latest-assets.json 的 edition === "desktop"。缺这个 env 会让公开仓
+        # 每次 push/PR 必然红，且这条 fail-closed 闸门从未有过绿色运行
+        # （2026-09-14 独立复审在渲染产物上复现）。
+        env:
+          NOLO_WEB_EDITION: desktop
         run: bun scripts/dev/esBuild.js
+      - name: Verify desktop edition web bundle (fail closed)
+        run: bun scripts/public-audit/desktop/verifyDesktopPackageCapability.ts web --web-root public --identity-root packages/identity

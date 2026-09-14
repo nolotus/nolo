@@ -4,21 +4,26 @@
   "type": "module",
   "exports": {
     ".": {
+      "nolo-desktop": "./index.desktop.ts",
       "default": "./index.local.ts"
     },
     "./selectors": {
+      "nolo-desktop": "./selectors.desktop.ts",
       "default": "./selectors.local.ts"
     },
     "./actions": {
+      "nolo-desktop": "./actions.desktop.ts",
       "default": "./actions.local.ts"
     },
     "./RequireSignedIn": {
       "default": "./RequireSignedIn.local.tsx"
     },
     "./cloudRoutes": {
+      "nolo-desktop": "./cloudRoutes.desktop.tsx",
       "default": "./cloudRoutes.local.ts"
     },
     "./cloudBootstrap": {
+      "nolo-desktop": "./cloudBootstrap.desktop.ts",
       "default": "./cloudBootstrap.local.ts"
     },
     "./authTypes": {
@@ -28,12 +33,21 @@
       "default": "./useDeleteOwnAccountFlow.local.ts"
     },
     "./useIdentity": {
+      "nolo-desktop": "./useIdentity.desktop.ts",
       "default": "./useIdentity.local.ts"
     },
     "./accountProfile": {
+      "nolo-desktop": "./accountProfile.desktop.ts",
       "default": "./accountProfile.local.ts"
     },
+    "./accountExternalActions": {
+      "default": "./accountExternalActions.ts"
+    },
+    "./accountUrlPolicy": {
+      "default": "./accountUrlPolicy.ts"
+    },
     "./storeSession": {
+      "nolo-desktop": "./storeSession.desktop.ts",
       "default": "./storeSession.local.ts"
     },
     "./cloudLazy": {
