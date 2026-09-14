@@ -156,7 +156,10 @@ jobs:
           # prerelease ⇒ 该 URL 恒 404（2026-09-14 实测）。这个值还会被
           # electrobun.config 的 release.baseUrl 烘焙进产物，所以 404 同时污染构建与产物。
           ELECTROBUN_RELEASE_BASE_URL: https://nolo.chat/public/downloads
-          NOLO_DESKTOP_SKIP_PATCH: "1"
+          # 刻意**不设** NOLO_DESKTOP_SKIP_PATCH：它会让 electrobun 在 Windows 上
+          # 跳过 delta patch 阶段，而实测该阶段被跳过时稳定版 payload 会缺运行时
+          # 三件套且**不产出 NoloDesktop.tar**（recovery 因此只能退到残缺 payload）。
+          # macOS/Linux 的稳定版构建从不设这个变量且一直正常，这里对齐它们。
         run: bun run --cwd packages/desktop build:stable:windows-installer
 
       - name: Smoke installed Windows desktop artifact

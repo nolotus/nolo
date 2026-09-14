@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -188,6 +189,17 @@ function completeRecoveryVersionInfo(
 }
 
 async function runElectrobunStable() {
+  // 刻意**不注入** NOLO_DESKTOP_SKIP_PATCH。
+  //
+  // 历史：这里曾硬编码 `NOLO_DESKTOP_SKIP_PATCH: "1"`，而 workflow 的 stable
+  // Windows 步骤也设了同一个变量——两处都设，等于把「启用 delta patch 阶段」
+  // 这件事永久关闭。macOS/Linux 的 stable 构建从不设它，且一直成功；Windows
+  // 是唯一失败的一条，因此该变量是唯一已知差异（2026-09-14 独立复审 HIGH：
+  // 只在 workflow 层删除会被此处重新注入而完全短路）。
+  //
+  // 注意 `build:stable:electrobun` 与 `build:stable` 是**同一条命令**
+  // （`electrobun build --env=stable`），所以本函数与 macOS/Linux 的差异只可能是
+  // 环境变量，而不是命令本身。
   const proc = Bun.spawn(["bun", "run", "build:stable:electrobun"], {
     cwd: desktopRoot,
     stdin: "ignore",
@@ -195,7 +207,6 @@ async function runElectrobunStable() {
     stderr: "inherit",
     env: {
       ...process.env,
-      NOLO_DESKTOP_SKIP_PATCH: "1",
     },
   });
   return proc.exited;
@@ -438,6 +449,38 @@ async function extractTar(tarPath: string, tempDir: string) {
   }
 }
 
+
+/** 有界地列出目录项（只列名字，不读内容），用于失败诊断。 */
+function logDirectoryListing(label: string, dir: string, maxEntries = 25) {
+  if (!existsSync(dir)) {
+    log(`[diagnostic] ${label}: <missing> ${dir}`);
+    return;
+  }
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .slice(0, maxEntries)
+      .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`);
+    log(`[diagnostic] ${label}: ${entries.join(", ") || "<empty>"} ${dir}`);
+  } catch (error) {
+    log(
+      `[diagnostic] ${label}: <unreadable> ${dir} (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+}
+
+/**
+ * 恢复失败时的结构诊断。稳定的输出让「electrobun 稳定版 Windows 打包到底产出
+ * 了什么」变成可比较的事实，而不是推测。
+ */
+function logRecoveryPayloadStructure(payloadDir: string) {
+  log("[diagnostic] recovery payload structure:");
+  logDirectoryListing("buildDir", buildDir);
+  log(`[diagnostic] rawTarPath present: ${existsSync(rawTarPath)} (${rawTarPath})`);
+  logDirectoryListing("payloadDir", payloadDir);
+  logDirectoryListing("payloadDir/bin", join(payloadDir, "bin"));
+  logDirectoryListing("payloadDir/Resources", join(payloadDir, "Resources"));
+}
+
 async function recoverInstallerFromRawTar() {
   if (process.platform !== "win32") {
     throw new Error("Windows installer recovery is only supported on Windows.");
@@ -474,7 +517,14 @@ async function recoverInstallerFromRawTar() {
     // fail closed：恢复是「从半成品里抢救」，必须在编译安装器之前断言运行时齐全。
     // 否则会安静地打出缺 bin/bun.exe 的安装器，直到 Windows 安装后 smoke 才报
     // "Missing installed Bun runtime"（2026-09-14 stable 连败实录）。
-    assertRecoveryPayloadComplete(payloadDir);
+    try {
+      assertRecoveryPayloadComplete(payloadDir);
+    } catch (error) {
+      // 失败时打印**真实**目录结构：缺件清单只说「缺什么」，不解释「electrobun
+      // 到底留下了什么」。此前只能靠跨 job 的日志拼凑，这里一次给全。
+      logRecoveryPayloadStructure(payloadDir);
+      throw error;
+    }
     await pruneClassicLevelPrebuilds(payloadDir);
     // DLL 的 PE 补丁在 gate 之后执行，故其缺失返回值无需再消费；
     // 若 patch 自身失败会自行 fail loud（见 patch-electrobun-windows-core.ts）。
