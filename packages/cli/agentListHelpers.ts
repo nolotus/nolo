@@ -9,6 +9,7 @@ import {
   type SafeAgentSummary,
   type SafeAgentSummaryOptions,
 } from "ai/agent/safeAgentSummary";
+import { isAgentUnavailableNow } from "ai/agent/agentAvailabilityShared";
 export {
   isAgentUnavailableNow,
   deriveCredentialGroup,

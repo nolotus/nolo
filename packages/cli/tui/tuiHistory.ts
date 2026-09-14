@@ -478,6 +478,14 @@ export function layoutTurnRows(
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
+    // Bold body text: in terminal mode / non-truecolor there is no bubble
+    // background (theme.ts: ANSI-16 has no safe subtle background), so the
+    // accent gutter alone was the only signal and user turns blended into
+    // assistant output. Bold works in every color-capable terminal and keeps
+    // user turns findable while scrolling. \x1b[22m closes bold only, so the
+    // bubble surface (when present) survives to end-of-row.
+    const boldOn = colorEnabled ? "\x1b[1m" : "";
+    const boldOff = colorEnabled ? "\x1b[22m" : "";
     const prefixWidth = 3;
 
     let lineSourceStart = 0;
@@ -485,7 +493,7 @@ export function layoutTurnRows(
     for (let i = 0; i < logicalLines.length; i++) {
       const line = logicalLines[i]!;
       const prefix = i === 0 ? firstPrefix : multilinePrefix;
-      const styledLine = `${prefix}${line}`;
+      const styledLine = `${prefix}${boldOn}${line}${boldOff}`;
       const prefixCharCount = prefix.length;
       const wrappedRows = wrapTranscriptLineWithLayout(
         styledLine,
@@ -795,9 +803,13 @@ function renderTailTurnBlock(
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    // Same bold body treatment as layoutTurnRows — streaming tail and
+    // finalized history must not drift apart.
+    const boldOn = colorEnabled ? "\x1b[1m" : "";
+    const boldOff = colorEnabled ? "\x1b[22m" : "";
     const lines: string[] = [];
     for (const rawLine of content.split("\n")) {
-      const styledLine = `${multilinePrefix}${rawLine}`;
+      const styledLine = `${multilinePrefix}${boldOn}${rawLine}${boldOff}`;
       const rows = wrapTranscriptLine(styledLine, contentWidth, hangingIndent);
       lines.push(
         ...(surfaceSeq ? rows.map((row) => fillUserBubbleRow(row, surfaceSeq, contentWidth)) : rows),

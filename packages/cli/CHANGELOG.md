@@ -1,4 +1,14 @@
 
+## 0.66.0-alpha.2
+
+## 0.66.0-alpha.2 (2026-09-14)
+
+### Bug Fixes
+
+* **cli:** restore agent availability helper export ([0ca1648](https://github.com/nolotus/bun-nolo/commit/0ca1648e69b2ebe09bff98fe603ef9c678df7dfb))
+* **tui:** bold user message body so input stands out from AI output ([e65426e](https://github.com/nolotus/bun-nolo/commit/e65426e4d15f948674a66b7491d24ada97275b42))
+
+
 ## 0.66.0-alpha.1
 
 ## 0.66.0-alpha.1 (2026-09-14)
