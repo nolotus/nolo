@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { fnv1a32Hex } from "core/fnv1a32";
 import { getModelAbility, type ModelAbility } from "../llm/modelAbility";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
 import { isOwnedAgentKey, ownedAgentKey, publicAgentKey } from "core/prefix";
@@ -46,7 +46,7 @@ export function deriveCredentialGroup(ref?: string | null): {
       credentialKind: "oauth",
     };
   }
-  const hash = createHash("sha256").update(trimmed).digest("hex").slice(0, 12);
+  const hash = fnv1a32Hex(trimmed);
   return {
     credentialGroup: `cred-${hash}`,
     credentialKind: "api-key",

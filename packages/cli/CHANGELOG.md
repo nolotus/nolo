@@ -1,4 +1,13 @@
 
+## 0.66.0-alpha.4
+
+## 0.66.0-alpha.4 (2026-09-14)
+
+### Bug Fixes
+
+* **ai:** keep node:crypto out of the browser bundle (credential group hash) ([7f5ef12](https://github.com/nolotus/bun-nolo/commit/7f5ef12ae107da8d844842bae8bfa760f3fc3297))
+
+
 ## 0.66.0-alpha.3
 
 ## 0.66.0-alpha.3 (2026-09-14)

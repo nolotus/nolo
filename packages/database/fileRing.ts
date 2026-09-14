@@ -1,17 +1,6 @@
 // 文件路径: database/fileRing.ts
 
-/**
- * 简单的 FNV-1a 32bit 字符串哈希
- * - 稳定、实现简单，适合作为 hash ring 的排序依据
- */
-const fnv1a32 = (str: string): number => {
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) {
-        hash ^= str.charCodeAt(i);
-        hash = (hash * 0x01000193) >>> 0; // 32bit
-    }
-    return hash >>> 0;
-};
+import { fnv1a32 } from "core/fnv1a32";
 
 /**
  * 通用服务器选择函数：
