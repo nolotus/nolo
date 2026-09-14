@@ -192,7 +192,14 @@ export function inspectRecoveryPayloadFile(
   group: RecoveryPayloadFileIssue["group"],
   deps: RecoveryPayloadIntegrityDeps = {},
 ): RecoveryPayloadFileIssue[] {
-  const resolved = { ...defaultDeps, ...deps };
+  // 显式逐项 ?? 合并：用展开合并时，显式传入的 `undefined` 会**覆盖**默认实现，
+  // 导致 `resolved.statFile is not a function`（2026-09-14 由新增的行为测试抓到）。
+  // 逐项 ?? 让「未提供」与「提供了 undefined」语义一致。
+  const resolved = {
+    statFile: deps.statFile ?? defaultDeps.statFile,
+    readBytesAt: deps.readBytesAt ?? defaultDeps.readBytesAt,
+    readText: deps.readText ?? defaultDeps.readText,
+  };
   const absolutePath = join(payloadDir, ...relativePath.split("/"));
   const stat = resolved.statFile(absolutePath);
 
@@ -460,4 +467,94 @@ export function ensureRecoveryPublicDir(
       `Windows installer recovery copied public assets but latest-assets.json is still missing: ${packagedLatestAssetsPath}`,
     );
   }
+}
+
+/**
+ * 恢复失败时的**结构化**诊断：缺件清单只说「缺什么」，不解释 electrobun 留下了
+ * 什么。这里把真实目录状态采成数据，失败时写成 JSON 工件，避免排查必须跨 job
+ * 捞日志（2026-09-14 的因果链就是从三个 job 的日志里拼出来的）。
+ *
+ * 只记录目录项名称与是否存在，不读文件内容，因此不会泄漏敏感信息。
+ */
+export type RecoveryPayloadDiagnostics = {
+  kind: "desktop-payload-structure-diagnostics";
+  createdAt: string;
+  buildDir: { path: string; present: boolean; entries: string[] };
+  rawTar: { path: string; present: boolean };
+  payloadDir: { path: string; present: boolean; entries: string[] };
+  payloadBin: { path: string; entries: string[] };
+  payloadResources: { path: string; entries: string[] };
+  missingFiles: Array<{ path: string; reason: string; group: string }>;
+};
+
+const listDirectoryEntries = (
+  dir: string,
+  maxEntries = 25,
+  deps: {
+    readEntries?: (path: string) => string[];
+  } = {},
+): string[] => {
+  // 目录不存在或不可读时返回空数组：诊断是**尽力而为**的旁路，绝不能因为它
+  // 自己失败而改变真实错误（缺件断言才是权威判据）。
+  try {
+    const reader =
+      deps.readEntries ??
+      ((path: string) =>
+        readdirSync(path, { withFileTypes: true }).map(
+          (entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`,
+        ));
+    // 排序：诊断产物的价值在于**跨 run 比对**，文件系统返回顺序不稳定会制造噪声。
+    return reader(dir).slice(0, maxEntries).sort();
+  } catch {
+    return [];
+  }
+};
+
+export function collectRecoveryPayloadDiagnostics(
+  payloadDir: string,
+  options: {
+    buildDir: string;
+    rawTarPath: string;
+    maxEntries?: number;
+    now?: () => Date;
+    statFile?: RecoveryPayloadIntegrityDeps["statFile"];
+    readEntries?: (path: string) => string[];
+  },
+): RecoveryPayloadDiagnostics {
+  const maxEntries = options.maxEntries ?? 25;
+  const now = options.now ?? (() => new Date());
+  const listDeps = {
+    statFile: options.statFile,
+    readEntries: options.readEntries,
+  };
+  const exists = (path: string) => {
+    if (options.statFile) return options.statFile(path) !== null;
+    return existsSync(path);
+  };
+  return {
+    kind: "desktop-payload-structure-diagnostics",
+    createdAt: now().toISOString(),
+    buildDir: {
+      path: options.buildDir,
+      present: exists(options.buildDir),
+      entries: listDirectoryEntries(options.buildDir, maxEntries, listDeps),
+    },
+    rawTar: { path: options.rawTarPath, present: exists(options.rawTarPath) },
+    payloadDir: {
+      path: payloadDir,
+      present: exists(payloadDir),
+      entries: listDirectoryEntries(payloadDir, maxEntries, listDeps),
+    },
+    payloadBin: {
+      path: join(payloadDir, "bin"),
+      entries: listDirectoryEntries(join(payloadDir, "bin"), maxEntries, listDeps),
+    },
+    payloadResources: {
+      path: join(payloadDir, "Resources"),
+      entries: listDirectoryEntries(join(payloadDir, "Resources"), maxEntries, listDeps),
+    },
+    missingFiles: findRecoveryPayloadIntegrityIssues(payloadDir, {
+      statFile: options.statFile,
+    }).map((issue) => ({ path: issue.path, reason: issue.reason, group: issue.group })),
+  };
 }

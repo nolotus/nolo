@@ -13,9 +13,21 @@ on:
           - windows
           - macos
           - linux
+      mode:
+        # build-only 存在的理由：验证「构建 + 证据」时不应产生任何渠道副作用，
+        # 也不应要求 release intent——否则像 2026-09-14 那样，一次只改
+        # scripts/release（不触碰 packages/desktop，故不 bump 版本、投影 intent=none）
+        # 的修复就完全无法在 CI 上验证。
+        description: "release = 构建并发布到 R2/渠道；build-only = 只构建并校验证据，绝不触碰渠道"
+        required: false
+        default: release
+        type: choice
+        options:
+          - release
+          - build-only
       version:
-        description: "Target desktop version (must equal projection-release-metadata.json at projection_sha)"
-        required: true
+        description: "Target desktop version (must equal projection-release-metadata.json at projection_sha); required only for mode=release"
+        required: false
         type: string
       projection_sha:
         description: "Exact public projection commit SHA (40-hex) to build/release from"
@@ -48,6 +60,12 @@ jobs:
             echo "::error::projection_sha must be an exact 40-hex commit SHA, got '${{ inputs.projection_sha }}'" >&2
             exit 2
           fi
+          # 发布模式必须显式绑定目标版本；build-only 不需要（它不校验 intent，
+          # 也不会发布任何东西）。
+          if [ "${{ inputs.mode }}" != "build-only" ] && [ -z "${{ inputs.version }}" ]; then
+            echo "::error::version is required for mode=release" >&2
+            exit 2
+          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.projection_sha }}
@@ -63,13 +81,24 @@ jobs:
           # channel 由 SemVer 解析）；校验基于 inputs.projection_sha 这一个 commit。
           # 任何缺失、结构损坏、intent 缺失或与 --expect-version 绑定不符都直接
           # 失败：不猜 channel，不重新生成版本。
-          bun ./scripts/release/assertProjectionReleaseMetadata.ts \
-            --component desktop \
-            --expect-intent release \
-            --expect-version "${{ inputs.version }}" \
-            --set-outputs channel,version,tag
+          # channel/version 与 intent 无关，两种模式都从同一真值源取；差别只在
+          # release 模式额外要求 intent=release 且版本与入参绑定。
+          # --expect-intent 本身是可选参数，因此 build-only 无需新增任何 CLI 面。
+          if [ "${{ inputs.mode }}" = "build-only" ]; then
+            bun ./scripts/release/assertProjectionReleaseMetadata.ts \
+              --component desktop \
+              --set-outputs channel,version,tag
+          else
+            bun ./scripts/release/assertProjectionReleaseMetadata.ts \
+              --component desktop \
+              --expect-intent release \
+              --expect-version "${{ inputs.version }}" \
+              --set-outputs channel,version,tag
+          fi
       - name: Immutable release preflight
         id: immutable-release
+        # build-only 不会创建 Release，preflight 无意义。
+        if: inputs.mode != 'build-only'
         env:
           RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
           # gh api 需要显式 token（同模板其他 step 一致）；缺失时 gh 报 exit 4，
@@ -222,6 +251,10 @@ jobs:
 
   release:
     needs: [select-targets, build]
+    # build-only：只构建与校验证据，绝不发布。整条发布链（R2 上传、legacy 别名、
+    # GitHub Release、manifest）都不参与，因此 build-only 的绿色含义是
+    # 「目标平台的构建与证据成立」，而不是任何渠道状态变化。
+    if: inputs.mode != 'build-only'
     runs-on: ubuntu-latest
     permissions:
       contents: write

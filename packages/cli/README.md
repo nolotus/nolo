@@ -282,6 +282,7 @@ npm pack
 - `nolo-cli` 作为入口包，包含一个 Node.js 兼容的 `index.js` 引导脚本
 - 引导脚本优先调用原生二进制；缺失时回退到 `bun index.ts`
 - **原生二进制通过 S3 下载站分发**（`install-nolo.sh`），不走 npm 可选依赖——npm 包始终是纯 JS/Bun 版本
+- `install-nolo.sh` 会把安装目录写进 shell 启动文件（已存在的 `~/.zshrc`/`~/.bashrc`/`~/.bash_profile`/`~/.profile`，缺失时创建登录 shell 对应的那个），bash/zsh 新终端开箱即用 `nolo`，无需手动改 PATH；写入以 `# nolo-cli-path` 为标记、可重复执行、可用 `NOLO_NO_MODIFY_PATH=1` 关闭
 
 支持的平台：macOS Apple Silicon（`darwin-arm64`）。
 

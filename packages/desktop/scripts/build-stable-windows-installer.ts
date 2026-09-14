@@ -1,6 +1,7 @@
 import * as rceditModule from "rcedit";
 import {
   assertRecoveryPayloadComplete,
+  collectRecoveryPayloadDiagnostics,
   ensureRecoveryPublicDir,
   findWindowsPayloadDir,
   isFreshBuildOutput,
@@ -450,35 +451,43 @@ async function extractTar(tarPath: string, tempDir: string) {
 }
 
 
-/** 有界地列出目录项（只列名字，不读内容），用于失败诊断。 */
-function logDirectoryListing(label: string, dir: string, maxEntries = 25) {
-  if (!existsSync(dir)) {
-    log(`[diagnostic] ${label}: <missing> ${dir}`);
-    return;
-  }
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true })
-      .slice(0, maxEntries)
-      .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`);
-    log(`[diagnostic] ${label}: ${entries.join(", ") || "<empty>"} ${dir}`);
-  } catch (error) {
-    log(
-      `[diagnostic] ${label}: <unreadable> ${dir} (${error instanceof Error ? error.message : String(error)})`,
-    );
-  }
-}
-
 /**
- * 恢复失败时的结构诊断。稳定的输出让「electrobun 稳定版 Windows 打包到底产出
- * 了什么」变成可比较的事实，而不是推测。
+ * 失败诊断：既打印人类可读日志，也写一份**结构化 JSON 工件**。
+ *
+ * JSON 落在 `artifacts/diagnostics/`（子目录）：它随平台产物一起被上传成 CI
+ * artifact，而发布步骤用 `-maxdepth 1 -type f` 收集 Release 资产，因此**天然**
+ * 不会被当成发布物——不需要再维护一份排除名单。
+ *
+ * 诊断本身绝不允许影响失败原因：写入失败只记一行日志。
  */
 function logRecoveryPayloadStructure(payloadDir: string) {
+  const diagnostics = collectRecoveryPayloadDiagnostics(payloadDir, {
+    buildDir,
+    rawTarPath,
+  });
+
   log("[diagnostic] recovery payload structure:");
-  logDirectoryListing("buildDir", buildDir);
-  log(`[diagnostic] rawTarPath present: ${existsSync(rawTarPath)} (${rawTarPath})`);
-  logDirectoryListing("payloadDir", payloadDir);
-  logDirectoryListing("payloadDir/bin", join(payloadDir, "bin"));
-  logDirectoryListing("payloadDir/Resources", join(payloadDir, "Resources"));
+  log(`[diagnostic] buildDir present=${diagnostics.buildDir.present}: ${diagnostics.buildDir.path}`);
+  log(`[diagnostic]   entries: ${diagnostics.buildDir.entries.join(", ") || "<empty>"}`);
+  log(`[diagnostic] rawTar present=${diagnostics.rawTar.present}: ${diagnostics.rawTar.path}`);
+  log(`[diagnostic] payloadDir present=${diagnostics.payloadDir.present}: ${diagnostics.payloadDir.path}`);
+  log(`[diagnostic]   entries: ${diagnostics.payloadDir.entries.join(", ") || "<empty>"}`);
+  log(`[diagnostic]   bin/: ${diagnostics.payloadBin.entries.join(", ") || "<empty>"}`);
+  log(`[diagnostic]   Resources/: ${diagnostics.payloadResources.entries.join(", ") || "<empty>"}`);
+  log(
+    `[diagnostic] missing: ${diagnostics.missingFiles.map((issue) => `${issue.path}(${issue.reason})`).join(", ") || "<none>"}`,
+  );
+
+  const diagnosticsPath = join(artifactDir, "diagnostics", "desktop-payload-structure.json");
+  try {
+    mkdirSync(join(artifactDir, "diagnostics"), { recursive: true });
+    writeFileSync(diagnosticsPath, `${JSON.stringify(diagnostics, null, 2)}\n`, "utf8");
+    log(`[diagnostic] wrote structured diagnostics: ${diagnosticsPath}`);
+  } catch (error) {
+    log(
+      `[diagnostic] failed to write structured diagnostics (${error instanceof Error ? error.message : String(error)}); log output above is authoritative`,
+    );
+  }
 }
 
 async function recoverInstallerFromRawTar() {
