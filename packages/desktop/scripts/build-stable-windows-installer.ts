@@ -1,6 +1,9 @@
 import * as rceditModule from "rcedit";
 import {
+  assertRecoveryPayloadComplete,
+  ensureRecoveryPublicDir,
   findWindowsPayloadDir,
+  isFreshBuildOutput,
   resolveWindowsInstallerRecoverySource,
 } from "./buildStableWindowsInstallerRecovery";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
@@ -269,32 +272,12 @@ async function ensureRecoveryAppRuntime(payloadDir: string) {
   }
 }
 
-function ensureRecoveryPublicDir(payloadDir: string) {
-  const packagedPublicDir = join(payloadDir, "Resources", "app", "public");
-  const packagedLatestAssetsPath = join(packagedPublicDir, "latest-assets.json");
-  if (existsSync(packagedLatestAssetsPath)) {
-    return;
-  }
-
-  if (!existsSync(desktopGeneratedPublicDir)) {
-    throw new Error(
-      `Missing desktop generated public assets for Windows installer recovery: ${desktopGeneratedPublicDir}`,
-    );
-  }
-
-  rmSync(packagedPublicDir, { recursive: true, force: true });
-  mkdirSync(join(payloadDir, "Resources", "app"), { recursive: true });
-  cpSync(desktopGeneratedPublicDir, packagedPublicDir, { recursive: true, force: true });
-
-  if (!existsSync(packagedLatestAssetsPath)) {
-    throw new Error(
-      `Windows installer recovery copied public assets but latest-assets.json is still missing: ${packagedLatestAssetsPath}`,
-    );
-  }
-
-  log(`restored packaged public assets for recovery payload: ${packagedPublicDir}`);
-}
-
+/**
+ * best-effort cosmetic patch：只负责给可执行文件嵌图标，**不承担运行时完整性校验**。
+ * 输入文件缺失时静默返回是有意的（调用方在 gate 之后，缺失已不可能）；图标修补
+ * 失败也只 warning，因为图标不影响启动。运行时完整性由
+ * `assertRecoveryPayloadComplete` 负责，不要把两者混在一起。
+ */
 async function applyWindowsExecutableIcon(exePath: string) {
   if (!existsSync(exePath)) {
     return;
@@ -484,7 +467,17 @@ async function recoverInstallerFromRawTar() {
 
     const payloadDir = findWindowsPayloadDir(tempDir);
     await ensureRecoveryAppRuntime(payloadDir);
+    // ensureRecoveryPublicDir 早已写好却一直没有调用点：缺 latest-assets.json 的
+    // payload 因此直接进安装器。先自愈可自愈的部分（app runtime + public 资产），
+    // 再对**无法自愈**的运行时文件 fail closed。
+    ensureRecoveryPublicDir(payloadDir, desktopGeneratedPublicDir);
+    // fail closed：恢复是「从半成品里抢救」，必须在编译安装器之前断言运行时齐全。
+    // 否则会安静地打出缺 bin/bun.exe 的安装器，直到 Windows 安装后 smoke 才报
+    // "Missing installed Bun runtime"（2026-09-14 stable 连败实录）。
+    assertRecoveryPayloadComplete(payloadDir);
     await pruneClassicLevelPrebuilds(payloadDir);
+    // DLL 的 PE 补丁在 gate 之后执行，故其缺失返回值无需再消费；
+    // 若 patch 自身失败会自行 fail loud（见 patch-electrobun-windows-core.ts）。
     patchElectrobunWindowsCore(join(payloadDir, "bin", "ElectrobunCore.dll"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
     await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
@@ -543,6 +536,8 @@ async function recoverInstallerFromRawTar() {
 
 rmSync(smokeArtifactDir, { recursive: true, force: true });
 
+const scriptStartedAtMs = Date.now();
+
 const exitCode = await runElectrobunStable();
 if (exitCode === 0) {
   // electrobun 原生 postPackage 并不保证产出 smoke installer（artifact 探测
@@ -550,9 +545,32 @@ if (exitCode === 0) {
   // 目录为空）。stable smoke 步骤无条件期待该文件，缺失即连败
   // （public run 34374530935 等 "Missing Windows setup artifact" 连败）。
   // exit 0 时校验产物，缺失则从 payload 目录补产一次。
+  //
+  // 不能只凭路径存在就早退：那会让「目录清理失败」或「其它步骤放入旧产物」绕过
+  // 后续所有校验（2026-09-14 跨家族复审的 MEDIUM）。该目录在运行 electrobun 前
+  // 已被清空，因此「mtime 不早于本次脚本启动」等价于「本次构建产出」。
   const expectedSmokeSetup = join(smokeArtifactDir, `${WINDOWS_DESKTOP_SMOKE_OUTPUT_BASE_FILENAME}.exe`);
+  if (isFreshBuildOutput(expectedSmokeSetup, scriptStartedAtMs)) {
+    // 早退同样必须验 payload：mtime 只证明「本次产出」，不证明产物内容可用，
+    // 而安装器与 payload 同源。
+    //
+    // 校验失败时**回退 recovery**，而不是直接抛错：recovery 会用同一份 payload
+    // 给出精确缺件清单，或在布局变化时真正补产，避免把「本可通过的构建」误杀
+    // （2026-09-14 独立复审 HIGH）。回退路径自身仍是 fail closed —— recovery 的
+    // 断言会拦住不完整 payload。
+    try {
+      assertRecoveryPayloadComplete(findWindowsPayloadDir(buildDir));
+      process.exit(0);
+    } catch (error) {
+      log(
+        `early-return payload validation failed (${error instanceof Error ? error.message : String(error)}); falling back to recovery`,
+      );
+    }
+  }
   if (existsSync(expectedSmokeSetup)) {
-    process.exit(0);
+    log(
+      `electrobun stable build left a smoke installer at ${expectedSmokeSetup} that could not be accepted as this run's verified output; refusing to reuse it and attempting recovery instead`,
+    );
   }
   log("electrobun stable build did not produce the smoke installer; attempting recovery");
   await recoverInstallerFromRawTar();
