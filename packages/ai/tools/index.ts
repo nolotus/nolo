@@ -191,6 +191,10 @@ import {
   wereadGatewayFunctionSchema,
   wereadGatewayFunc,
 } from "./wereadGatewayTool";
+import {
+  watchCompletionFunctionSchema,
+  watchCompletionFunc,
+} from "./watchCompletionTool";
 
 import {
   browser_closeSession_Schema,
@@ -494,6 +498,12 @@ export type ToolExecutorContext = {
   toolRunId?: string;
   agentKey?: string;
   userInput?: string;
+  /**
+   * 当前来源对话 id（watchCompletion 这类「终态订阅」工具用它定位唤醒目标）。
+   * 由运行时注入，模型不可见、不可传 —— 没有对话上下文的宿主留空，工具会把
+   * 缺失如实上报给端点（端点拒绝无父对话的订阅）。
+   */
+  dialogId?: string;
 };
 
 export interface ToolDefinition {
@@ -1994,6 +2004,19 @@ const baseToolDefinitions: ToolDefinition[] = [
     description: {
       name: "appDeploy",
       description: "将 JavaScript/TypeScript 代码部署为平台托管的 Web 应用。",
+      category: "应用部署",
+    },
+    behavior: "data",
+    uiGroup: "general",
+  },
+  {
+    id: "watchCompletion",
+    schema: watchCompletionFunctionSchema,
+    executor: watchCompletionFunc,
+    description: {
+      name: "watchCompletion",
+      description:
+        "登记一次业务终态订阅（nolo-ci 部署任务等），任务结束时自动唤醒本对话交付结果，等待期间零轮询。",
       category: "应用部署",
     },
     behavior: "data",

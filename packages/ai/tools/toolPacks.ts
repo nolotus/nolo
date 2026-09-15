@@ -53,6 +53,10 @@ export const TOOL_PACKS = {
     "taskLogs",
     "taskStop",
     "tasks",
+    // watchCompletion：push 后登记「业务终态订阅」，部署结束时服务端唤醒父对话
+    // （等待期间 0 轮询 0 token）。与代码工作流同链路（push → CI → 通知），随
+    // 「代码执行」能力包走。
+    "watchCompletion",
   ],
   // 表格读写。唯一真相源——app-builder 能力包与 table object skill 都从这里取，
   // 以前两边各抄一份，改一个忘另一个就会静默不同步。
