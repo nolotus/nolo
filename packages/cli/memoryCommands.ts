@@ -88,11 +88,12 @@ function readLimit(args: string[]) {
   return parsed > 0 ? parsed : undefined;
 }
 
-function assertNoUnknownFlags(args: string[]) {
+function assertNoUnknownFlags(args: string[], extraBooleanFlags: readonly string[] = []) {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (!value.startsWith("-")) continue;
     if (value === "--help" || value === "-h" || value === "--yes" || value === "--json") continue;
+    if (extraBooleanFlags.includes(value)) continue;
     if (VALUE_FLAGS.has(value)) {
       index += 1;
       continue;
@@ -431,6 +432,7 @@ Options:
   --scope <scope>          auto / user / space (default auto).
   --dialog-id <id>         Attach to a dialog.
   --space <spaceId>        Store under a space (requires space membership).
+  --resident               Mark as a resident user preference (always injected into overlay; hard gate: user subject + explicit directive + ≤240 chars).
   --json                    Print machine-readable JSON.
   --server <url>            Prefer this server and include known Nolo peers.
   --token <jwt>             Override AUTH_TOKEN.
@@ -443,7 +445,8 @@ function buildRememberBody(args: string[]) {
   const scope = readOption(args, "--scope")?.trim();
   const dialogId = readOption(args, "--dialog-id")?.trim();
   const spaceId = readOption(args, "--space")?.trim();
-  return { content, kind, scope, dialogId, spaceId };
+  const resident = hasFlag(args, "--resident");
+  return { content, kind, scope, dialogId, spaceId, resident };
 }
 
 async function postMemoryRemember(args: {
@@ -486,14 +489,14 @@ export async function runMemoryRememberCommand(
   }
 
   try {
-    assertNoUnknownFlags(args);
+    assertNoUnknownFlags(args, ["--resident"]);
     const authToken = resolveAuthToken(args, env);
     if (!authToken) {
       output.write("[nolo] memory remember requires an auth token. Run `nolo login` or set AUTH_TOKEN.\n");
       return 1;
     }
 
-    const { content, kind, scope, dialogId, spaceId } = buildRememberBody(args);
+    const { content, kind, scope, dialogId, spaceId, resident } = buildRememberBody(args);
     if (!content) {
       output.write("[nolo] memory remember requires --content <text>; use --help for examples.\n");
       return 1;
@@ -507,6 +510,7 @@ export async function runMemoryRememberCommand(
     const body: Record<string, unknown> = { content, kind, scope: normalizedScope };
     if (dialogId) body.dialogId = dialogId;
     if (spaceId) body.spaceId = spaceId;
+    if (resident) body.resident = true;
 
     const wantJson = hasFlag(args, "--json");
     const fetchImpl = deps.fetchImpl ?? fetch;
@@ -520,6 +524,12 @@ export async function runMemoryRememberCommand(
         output.write(`${JSON.stringify(result, null, 2)}\n`);
       } else {
         output.write(`${target}: remembered ${kind}\n`);
+        // resident 门禁被拒时必须可见：否则用户以为已常驻，实际只是普通条目。
+        const residentIgnoredReason = (result as { residentIgnoredReason?: unknown } | null)
+          ?.residentIgnoredReason;
+        if (typeof residentIgnoredReason === "string" && residentIgnoredReason) {
+          output.write(`[nolo] resident ignored: ${residentIgnoredReason}\n`);
+        }
       }
       return 0;
     } catch (error) {

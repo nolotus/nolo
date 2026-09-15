@@ -2,6 +2,7 @@ import { buildAgentSubjectTarget, resolveScopedMemoryTargets, type MemoryScope }
 import { createMemoryItem, writeMemoryItemWithIndexesToDb } from "./store";
 import { loadMemoryCandidatesFromDb } from "./query";
 import { tokenize } from "./rank";
+import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
 import type {
   MemoryItem,
   MemoryKind,
@@ -49,6 +50,16 @@ export interface RememberMemoryInput {
   agentKey?: string | null;
   /** Explicit relationship subject; overrides agentKey for storage ownership only. */
   memorySubjectId?: string | null;
+  /**
+   * 常驻偏好请求：要求这条记忆无条件进入 overlay 常驻区（不参与话题排序）。
+   *
+   * 硬门（全满足才生效）：effective subjectType=user ∧
+   * sourceKind=explicit-user-directive（source="user-directive" 或内容带
+   * EXPLICIT_REMEMBER_PREFIX_REGEX 显式前缀）∧ content ≤240 字符。
+   * 任一不满足则忽略 resident（降级为普通条目），拒绝原因见
+   * result.residentIgnoredReason。
+   */
+  resident?: boolean;
 }
 
 export interface RememberMemoryResult {
@@ -62,6 +73,16 @@ export interface RememberMemoryResult {
   requestedKind: MemoryKind;
   savedKind: MemoryKind;
   kindDowngradeReason?: string;
+  /** 调用方是否请求了 resident（常驻偏好）。 */
+  residentRequested: boolean;
+  /**
+   * resident 是否真正落库。false 且 requested=true 时说明未过硬门
+   * （subjectType 非 user / 非显式指令来源 / 内容超 240 字符），条目已按
+   * 普通记忆存储——调用方据此告知用户或模型，避免误以为已常驻。
+   */
+  residentApplied: boolean;
+  /** residentRequested=true 但未生效时的原因。 */
+  residentIgnoredReason?: string;
   savedItems: MemoryItem[];
   /**
    * 语义近邻旧条（软查重提示）：本条非精确命中时，同 owner/kind/subject 下
@@ -129,6 +150,64 @@ const buildMemoryTags = (ownerType: MemoryOwnerType, kind: MemoryKind): string[]
   return tags;
 };
 
+/**
+ * resident（常驻偏好）内容长度硬门：>240 字符的请求忽略 resident、降级普通条目。
+ * 常驻区独立预算有限（500 tokens），无条件入选的条目必须短小、跨话题可用。
+ * 导出供测试与调用方提示文案共用，不要另起数字。
+ */
+export const RESIDENT_MAX_CONTENT_CHARS = 240;
+
+/**
+ * 显式用户指令判定——与 sourceKind 落库共用同一表达式：
+ * - source="user-directive"：调用方（capture 流程 / server 显式来源）明确标注；
+ * - 内容带 EXPLICIT_REMEMBER_PREFIX_REGEX 显式前缀（「记住/请记住/以后记住/你要记住」）：
+ *   用户亲口下达的祈使句，按 explicit-user-directive 处理。
+ * 两处共用同一判定，避免"落库算 explicit、resident 门禁算 agent-tool"式漂移。
+ */
+const isExplicitUserDirectiveWrite = (
+  source: RememberMemorySource,
+  content: string
+): boolean => source === "user-directive" || EXPLICIT_REMEMBER_PREFIX_REGEX.test(content);
+
+/**
+ * resident 硬门：subjectType=user ∧ explicit-user-directive ∧ ≤240 字符。
+ * 三者缺一即忽略 resident（降级为普通条目）并给出原因——resident 是写侧唯一
+ * 质量门，装配侧（runtime.ts）对 resident 不再做任何话题/排序过滤。
+ */
+const resolveResidentGate = (input: {
+  requested: boolean;
+  explicitUserDirective: boolean;
+  subjectType: MemorySubjectType;
+  content: string;
+}): { applied: boolean; reason?: string } => {
+  if (!input.requested) return { applied: false };
+  if (input.subjectType !== "user") {
+    return {
+      applied: false,
+      reason:
+        `resident 仅支持 subjectType=user 的记忆（本条写入 subjectType=${input.subjectType}）；` +
+        "agent/space 主体的记忆会随话题变化，不能无条件注入。",
+    };
+  }
+  if (!input.explicitUserDirective) {
+    return {
+      applied: false,
+      reason:
+        'resident 仅支持用户明确指令来源（source="user-directive"，或内容带「记住/请记住」等显式前缀）；' +
+        "agent 推断/工具自记的条目不能常驻。",
+    };
+  }
+  if (input.content.length > RESIDENT_MAX_CONTENT_CHARS) {
+    return {
+      applied: false,
+      reason:
+        `resident 仅支持 ≤${RESIDENT_MAX_CONTENT_CHARS} 字符的偏好（本条 ${input.content.length} 字符）；` +
+        "常驻区预算有限，请精简内容后重试。",
+    };
+  }
+  return { applied: true };
+};
+
 export const rememberMemory = async (
   input: RememberMemoryInput
 ): Promise<RememberMemoryResult> => {
@@ -168,6 +247,11 @@ export const rememberMemory = async (
   const agentKey = input.agentKey?.trim() || null;
   const memorySubjectId = input.memorySubjectId?.trim() || agentKey;
   const source = input.source ?? "agent-inferred";
+  // sourceKind 落库与 resident 门禁共用同一显式判定（含显式前缀路径）。
+  const explicitUserDirective = isExplicitUserDirectiveWrite(source, content);
+  const residentRequested = input.resident === true;
+  // 每个 target 的 resident 门禁结果：把拒绝原因带回给调用方。
+  const residentGates: Array<{ applied: boolean; reason?: string }> = [];
 
   const baseConfidence = resolveBaseConfidence(source, kind);
 
@@ -180,6 +264,15 @@ export const rememberMemory = async (
       // 查重与写入必须用同一个 effective subject：scope=auto 且 memorySubjectId 存在时
       // 写入 agent subject，查重若仍按 owner subject 匹配会静默失效（review BLOCK 项）。
       const agentSubjectId = useAgentSubject ? memorySubjectId : null;
+
+      const residentGate = resolveResidentGate({
+        requested: residentRequested,
+        explicitUserDirective,
+        subjectType: subject.subjectType,
+        content,
+      });
+      residentGates.push(residentGate);
+      const residentFields = residentGate.applied ? { resident: true } : {};
 
       // 精确查重 + 语义近邻软查重：单次 DB 加载（subject/kind 在 DB 层过滤，
       // 避免按 owner 截断 200 条后旧条漏报）+ 单次遍历，避免重复读取与 tokenize。
@@ -198,6 +291,9 @@ export const rememberMemory = async (
           // 是唯一的 retrieval 记账路径。
           confidence: Math.max(existing.confidence ?? 0, baseConfidence),
           sourceDialogId: input.dialogId ?? existing.sourceDialogId,
+          // 去重命中时若硬门通过，把既有条目升级为常驻；门禁不过则保持原值
+          // （不因为一次非常驻请求清掉既有 resident）。
+          ...residentFields,
         };
         await writeMemoryItemWithIndexesToDb(db, updated);
         return { item: updated, similarItems: [] as MemoryItem[] };
@@ -223,9 +319,10 @@ export const rememberMemory = async (
         // sourceKind 显式落库：此前全靠 getMemorySourceKind 从 patternKey 反推，
         // 导致全库 220 条 sourceKind 均为 undefined，overlay 无从区分
         // 「用户明确说的」与「agent 自己猜的」。派生函数保留给历史条目兜底。
-        sourceKind:
-          source === "user-directive" ? "explicit-user-directive" : "agent-tool",
+        // explicit 判定含显式前缀路径，与 resident 门禁共用（见 isExplicitUserDirectiveWrite）。
+        sourceKind: explicitUserDirective ? "explicit-user-directive" : "agent-tool",
         sourceDialogId: input.dialogId ?? undefined,
+        ...residentFields,
       });
       await writeMemoryItemWithIndexesToDb(db, item);
       return { item, similarItems };
@@ -246,12 +343,22 @@ export const rememberMemory = async (
       createdAt: item.createdAt,
     }));
 
+  const residentApplied = savedItems.some((item) => item.resident === true);
+  const residentIgnoredReason =
+    residentRequested && !residentApplied
+      ? residentGates.find((gate) => gate.reason)?.reason ??
+        "resident 请求未生效：本条已按普通记忆存储。"
+      : undefined;
+
   return {
     success: true,
     content,
     requestedScope: scope,
     requestedKind,
     savedKind: kind,
+    residentRequested,
+    residentApplied,
+    ...(residentIgnoredReason ? { residentIgnoredReason } : {}),
     ...(downgraded
       ? {
           kindDowngradeReason:

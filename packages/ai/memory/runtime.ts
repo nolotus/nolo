@@ -31,6 +31,11 @@ export const DEFAULT_MEMORY_RUNTIME_OWNER_LIMIT = 20;
 export const QUERY_MEMORY_OWNER_LIMIT = 100;
 /** 已 corroborated（recurrenceEvidence 非空）procedural 的额外候选席位上限。 */
 export const CORROBORATED_PROCEDURAL_RESERVE = 5;
+/**
+ * resident（常驻偏好）无条件入选上限：resident 不参与话题排序、必进 overlay，
+ * 用条数上限防止常驻区无限膨胀（写入侧另有 ≤240 字符硬门，见 remember.ts）。
+ */
+export const RESIDENT_MEMORY_RUNTIME_LIMIT = 10;
 
 const normalizeSelectedContent = (text: string): string =>
   text
@@ -243,20 +248,32 @@ export const resolveMemoryRuntime = async (input: {
         ? { subjectType: "user", subjectId: input.userId }
         : null,
   };
+  // resident（常驻偏好）从排序候选中拆出：跨话题全程适用，不参与话题排序，
+  // 也不占检索区 per-kind 名额（overlay 里独立成节，避免同一条注入两次）。
+  // 写入侧硬门（remember.ts）保证只有用户明确指令的短偏好能带 resident；
+  // 这里无条件入选：按 createdAt 新→旧，上限 RESIDENT_MEMORY_RUNTIME_LIMIT。
+  const residentItems = candidates
+    .filter((item) => item.resident === true)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, RESIDENT_MEMORY_RUNTIME_LIMIT);
+  const retrievalCandidates = candidates.filter((item) => item.resident !== true);
+
   const ranked = selectRuntimeMemoryItems(
-    rankMemoryCandidates(candidates, input.userInput, rankContext),
+    rankMemoryCandidates(retrievalCandidates, input.userInput, rankContext),
     rankContext,
     input.userInput
   );
-  if (ranked.length === 0) {
+  const selected = [...residentItems, ...ranked];
+  if (selected.length === 0) {
     return { selectedItems: [], promptBlock: null };
   }
 
   // 标记 retrieval：只能证明这些记忆被注入 overlay，不代表模型使用了它们
-  // （retrieved ≠ used ≠ useful）。见 storeShared.ts 的字段语义说明。
-  await touchMemoryItemsInDb(input.db, ranked);
+  // （retrieved ≠ used ≠ useful）。resident 同样被注入，同样按 retrieval 记账。
+  // 见 storeShared.ts 的字段语义说明。
+  await touchMemoryItemsInDb(input.db, selected);
   return {
-    selectedItems: ranked,
-    promptBlock: buildMemoryOverlay(ranked, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET }),
+    selectedItems: selected,
+    promptBlock: buildMemoryOverlay(selected, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET }),
   };
 };
