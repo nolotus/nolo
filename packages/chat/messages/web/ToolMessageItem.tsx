@@ -31,6 +31,11 @@ import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { messagesStyles as styles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles, toolMessageStatusStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
+import {
+  buildAskChoicePersistChanges,
+  isAskChoiceResolved,
+  type AskChoiceResolution,
+} from "../askChoicePersistence";
 import { safeParse, StatusIcon, withLiteralClass, formatToolDuration } from "./toolMessageShared";
 import {
   buildRunStreamingAgentHandoffPresentation,
@@ -303,15 +308,44 @@ export const ToolMessageItem = memo(
     // --- ask_user ---
     if (toolName === "ask_user" || rawData?.type === "ask_user") {
       if (readOnly) return null; // 只读模式不显示交互选择框
-      const isResolved =
-        !!rawData?.selected || !!rawData?.cancelled || !!rawData?.answers;
+      const isResolved = isAskChoiceResolved(rawData);
+      // Stage 4 契约（事务式）：面板 await 本函数成功后才发送下一轮 user turn。
+      // 先 await write(dbKey).unwrap()（失败抛出 → 面板不发送、保持可重试），
+      // 成功后再 updateToolMessage（内存置为 submitted 只读态）。
+      const handleAskChoiceResolve = async (resolution: AskChoiceResolution) => {
+        const { nextRawData, nextToolPayload } = buildAskChoicePersistChanges(
+          rawData,
+          toolPayload,
+          resolution,
+        );
+        const changes = {
+          content: JSON.stringify(nextRawData),
+          toolPayload: nextToolPayload,
+        };
+        if (!dbKey) {
+          throw new Error("ask_user tool message is missing dbKey");
+        }
+        await dispatch(
+          write({
+            data: {
+              ...message,
+              ...changes,
+              type: DataType.MSG,
+            },
+            customKey: dbKey,
+          }),
+        ).unwrap();
+        dispatch(updateToolMessage({ id: message.id, changes }));
+      };
       return (
         <>
           <AskChoicePanelWeb
             rawData={rawData}
             toolPayload={toolPayload}
             dbKey={dbKey}
+            messageId={message.id}
             interactive={!isResolved && !isStreaming}
+            onResolve={handleAskChoiceResolve}
             onDelete={handleDeleteClick}
           />
           {deleteConfirmModal}

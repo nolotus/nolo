@@ -452,3 +452,97 @@ html[data-nolo-desktop="1"] [data-hook~="messages-esc-tr-body"]::-webkit-scrollb
   justify-content: center;
 }
 
+
+/* ═══ 自 messages.css 保留（AskChoicePanelWeb.tsx · ask_user 面板）═══
+ * 保留原因：恢复 .ui-choice-* 字面类名样式 —— 面板大量使用动态类名拼接
+ * （tab 的 active/answered/has-error、row.selected）、:hover/:disabled
+ * 级联与窄屏媒体查询，属于 StyleX 原子类不适合表达的逃生舱场景。 */
+
+.ui-choice-wrap { margin: 6px 0 10px 60px; max-width: 600px; position: relative; }
+.ui-choice-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ui-chip-btn {
+  display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px;
+  border-radius: var(--radius-sm); background: var(--surfaceInteractive, var(--background)); border: 1px solid var(--borderMuted, var(--borderLight));
+  color: var(--textSecondary); font-size: var(--fontSize-sm); cursor: pointer; transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.ui-chip-btn:hover { border-color: color-mix(in srgb, var(--primary) 24%, transparent); color: var(--primary); background: var(--accentSoft, var(--surfaceInteractive, var(--background))); }
+.ui-choice-delete {
+  position: absolute; top: -10px; right: -10px; width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  border: none; background: var(--background); color: var(--textQuaternary);
+  cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  opacity: 0; transform: scale(0.8); transition: all 0.2s ease;
+}
+.ui-choice-wrap:hover .ui-choice-delete { opacity: 1; transform: scale(1); }
+.ui-choice-delete:hover { background: var(--errorGhost); color: var(--error); }
+
+/* ── AskChoicePanel（多题 / 多选 / Other / 校验 / resolved 回看）── */
+.ui-choice-panel { border: 1px solid var(--borderMuted, var(--borderLight)); border-radius: var(--radius-md, 12px); padding: 12px; }
+.ui-choice-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.ui-choice-tab {
+  padding: 3px 12px; border-radius: 12px; border: 1px solid transparent;
+  background: transparent; color: var(--textTertiary); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.ui-choice-tab.active { background: color-mix(in srgb, var(--primary) 12%, transparent); border-color: var(--primary); color: var(--primary); }
+.ui-choice-tab.answered { color: var(--success); }
+.ui-choice-tab.has-error { border-color: var(--error); color: var(--error); }
+.ui-choice-tab-flag { display: inline-flex; align-items: center; }
+.ui-choice-tab-error-flag { font-size: 11px; font-weight: 700; }
+.ui-choice-question { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 6px; line-height: 1.5; }
+.ui-choice-required { color: var(--error); margin-left: 2px; }
+.ui-choice-progress { font-size: 12px; color: var(--textTertiary); margin-left: 8px; font-weight: 400; }
+.ui-choice-hint { font-size: 12px; color: var(--textTertiary); margin-bottom: 8px; }
+.ui-choice-error { font-size: 12px; color: var(--error); margin-bottom: 8px; }
+.ui-choice-list { display: flex; flex-direction: column; gap: 6px; }
+.ui-choice-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-radius: 10px; border: 1px solid var(--borderMuted, var(--borderLight));
+  background: var(--background); cursor: pointer; transition: all 0.15s ease; text-align: left; width: 100%;
+}
+.ui-choice-row:hover { border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
+.ui-choice-row.selected { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.ui-choice-row:disabled { opacity: 0.6; cursor: default; }
+.ui-choice-row-left { display: flex; align-items: center; gap: 10px; flex: 1; }
+.ui-choice-row-text { display: flex; flex-direction: column; }
+.ui-choice-row-label { font-size: 14px; font-weight: 500; color: var(--text); }
+.ui-choice-row-detail { font-size: 12px; color: var(--textTertiary); margin-top: 2px; line-height: 1.4; }
+.ui-choice-check { color: var(--primary); flex-shrink: 0; }
+.ui-choice-uncheck { color: var(--textTertiary); flex-shrink: 0; }
+.ui-choice-radio {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--textTertiary);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: border-color 0.15s;
+}
+.ui-choice-radio.checked { border-color: var(--primary); }
+.ui-choice-radio-inner { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }
+.ui-choice-other {
+  display: flex; align-items: flex-start; gap: 4px; padding: 8px 12px;
+  border-radius: 10px; border: 1px solid var(--borderMuted, var(--borderLight)); margin-top: 4px;
+}
+.ui-choice-other-label { font-size: 14px; color: var(--textTertiary); padding-top: 6px; white-space: nowrap; }
+.ui-choice-other-input {
+  flex: 1; border: none; outline: none; background: transparent;
+  font-size: 14px; color: var(--text); padding: 6px 0; min-height: 28px;
+}
+.ui-choice-other-input::placeholder { color: var(--textQuaternary); }
+.ui-choice-nav { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ui-choice-nav-btn {
+  padding: 4px 12px; border-radius: 8px; border: 1px solid var(--borderMuted, var(--borderLight));
+  background: transparent; color: var(--textSecondary); font-size: 12px; cursor: pointer; transition: all 0.15s ease;
+}
+.ui-choice-nav-btn:hover { border-color: color-mix(in srgb, var(--primary) 30%, transparent); color: var(--primary); }
+.ui-choice-nav-btn:disabled { opacity: 0.4; cursor: default; }
+.ui-choice-submit {
+  margin-top: 10px; padding: 8px 0; border-radius: 10px; border: none;
+  background: var(--borderMuted, var(--borderLight)); color: var(--textTertiary);
+  font-size: 14px; font-weight: 600; cursor: not-allowed; width: 100%; transition: all 0.15s ease;
+}
+.ui-choice-submit.enabled { background: var(--primary); color: #fff; cursor: pointer; }
+.ui-choice-submit.enabled:hover { opacity: 0.9; }
+
+/* ── 窄屏：面板贴左、页签可换行 ── */
+@media (max-width: 480px) {
+  .ui-choice-wrap { margin-left: 0; max-width: 100%; }
+  .ui-choice-row { padding: 8px 10px; }
+}

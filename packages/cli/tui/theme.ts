@@ -594,18 +594,23 @@ export function surfaceBackgroundSequence(
  * not mistaken for a `+`/`-` diff row, and the hue is accent rather than
  * success/danger/info so it never collides with them.
  *
+ * Unlike decorative chips and diff bands, this surface remains enabled in
+ * terminal mode when truecolor is available. It blends against the terminal's
+ * OSC 11 background, so the default mode gets an obvious user/AI boundary
+ * without hard-coding a dark or light canvas.
+ *
  * Returns "" without truecolor: ANSI-16 has no subtle background, and a
- * half-applied block would be worse than the gutter alone.
+ * half-applied block would be worse than the gutter + bold fallback.
  */
 export function userSurfaceBackgroundSequence(
   env: Record<string, string | undefined> = process.env,
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): string {
-  if (resolveTuiThemeMode(env) === "terminal") return "";
   if (!supportsTruecolor(env)) return "";
   const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
   const accentHex = palette[brightness].accent.hex;
-  const weight = brightness === "dark" ? 0.24 : 0.16;
+  // Stronger than the diff bands, but still quiet enough for multi-line input.
+  const weight = brightness === "dark" ? 0.30 : 0.20;
   return hexToBgSgr(blendHex(accentHex, resolveTerminalBaseHex(brightness), weight));
 }
 

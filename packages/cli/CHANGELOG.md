@@ -1,4 +1,14 @@
 
+## 0.69.0-alpha.2
+
+## 0.69.0-alpha.2 (2026-09-15)
+
+### Bug Fixes
+
+* **ask-user:** unify explicit multi-question interaction ([3afbef9](https://github.com/nolotus/bun-nolo/commit/3afbef9361b51b705b0f6ddca050ec93ffea9162))
+* **tui:** distinguish user messages from AI output ([8dac8fc](https://github.com/nolotus/bun-nolo/commit/8dac8fc8dc774782d20b1e1497ef87deacd56473))
+
+
 ## 0.69.0-alpha.1
 
 ## 0.69.0-alpha.1 (2026-09-15)

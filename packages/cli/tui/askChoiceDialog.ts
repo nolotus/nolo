@@ -6,10 +6,22 @@
  *
  * Keyboard map:
  *   ↑/↓        move cursor
- *   Space      toggle (multi-select) / focus Other
- *   Enter      submit (multi-select) / pick+advance (single-select) / save Other / submit
+ *   Enter/Space on a choice row: pick (single-select) / toggle (multi-select).
+ *               Never submits — the dialog only closes on an explicit action.
+ *   Enter      on the Other row: focus its input; while focused: save (blur).
+ *              Also never submits the form.
+ *   ↓ / ↑      past the last row / back: focus the form-level Submit row.
+ *   Enter      on the Submit row: send the whole form — the visible, always
+ *              reachable submit action.
+ *   Ctrl+S     submit shortcut, kept for muscle memory. It is NOT the only
+ *              way to send: the Submit row above is the primary entry and is
+ *              reachable with the arrow keys alone.
  *   Tab        next question tab
  *   Shift+Tab  prev question tab
+ *   1..9       quick-select the matching numbered row (Other's own number
+ *              focuses its input; digits type literally while it is focused).
+ *              The Submit row has NO number on purpose: a digit must never
+ *              dispatch SUBMIT.
  *   Esc        cancel
  *   printable  type into Other when focused (or on the Other row)
  *   Backspace  delete from Other when focused
@@ -26,8 +38,8 @@ import {
   type AskChoiceUiState,
   askChoiceReducer,
   buildAskChoiceResult,
-  canSubmit,
   createInitialAskChoiceState,
+  formatOutboundUserMessage,
   normalizeAskChoiceArgs,
 } from "ai/tools/askChoiceState";
 import {
@@ -73,6 +85,14 @@ const KEY_SHIFT_TAB = "\x1b[Z";
 const KEY_BACKSPACE = "\x7f";
 const KEY_BACKSPACE_ALT = "\b";
 const KEY_SPACE = " ";
+/** Ctrl+S — the explicit final submit (0x13 reaches a raw-mode stdin because
+ * Node's setRawMode disables IXON; same byte the workspace uses for send). */
+const KEY_CTRL_S = "\x13";
+
+/** Tab-bar completion markers: answered / required missing / optional. */
+const TAB_DONE = "✓";
+const TAB_MISSING = "!";
+const TAB_OPTIONAL = "·";
 
 export type AskChoiceCursor = {
   /** 0-based line index inside the rendered frame. */
@@ -87,14 +107,19 @@ export type AskChoiceFrame = {
   otherCursor: AskChoiceCursor | null;
 };
 
-function renderTabBar(
-  questions: AskChoiceQuestion[],
-  activeIndex: number,
-  colorEnabled: boolean,
-): string {
-  const tabs = questions.map((q, i) => {
-    const label = q.header || `Q${i + 1}`;
-    if (i === activeIndex) {
+function renderTabBar(state: AskChoiceUiState, colorEnabled: boolean): string {
+  const tabs = state.questions.map((q, i) => {
+    // Per-tab completion state: ✓ answered, ! required-but-unanswered,
+    // · optional-and-unanswered. The active tab switches from [label] to the
+    // accent style so the reducer's jump-to-first-unanswered is visible.
+    const qs = state.questionStates[i];
+    const hasAnswer =
+      qs.pickedId !== null ||
+      qs.selectedIds.length > 0 ||
+      qs.otherText.trim().length > 0;
+    const mark = hasAnswer ? TAB_DONE : q.required ? TAB_MISSING : TAB_OPTIONAL;
+    const label = `${mark} ${q.header || `Q${i + 1}`}`;
+    if (i === state.activeIndex) {
       return colorEnabled
         ? `${themeColorSequence("accent")} ${label} \x1b[0m`
         : `[${label}]`;
@@ -121,9 +146,10 @@ function otherRowPrefix(index: number): string {
 
 export function renderAskChoiceFrame(
   state: AskChoiceUiState,
-  options?: { bottomAnchored?: boolean },
+  options?: { bottomAnchored?: boolean; submitFocused?: boolean },
 ): AskChoiceFrame {
   const colorEnabled = resolveCliColorEnabled();
+  const submitFocused = options?.submitFocused === true;
   const q = state.questions[state.activeIndex];
   const qs = state.questionStates[state.activeIndex];
   const lines: string[] = [];
@@ -142,7 +168,19 @@ export function renderAskChoiceFrame(
 
   // Tab bar (only when multiple questions)
   if (state.questions.length > 1) {
-    lines.push(renderTabBar(state.questions, state.activeIndex, colorEnabled));
+    lines.push(renderTabBar(state, colorEnabled));
+    lines.push("");
+  }
+
+  // Validation feedback: the reducer already moved the active tab to the
+  // first unanswered required question, so explain why the submit did not go
+  // through instead of silently repainting the same frame.
+  if (state.validationAttempted) {
+    lines.push(
+      colorEnabled
+        ? themeText(`  ${t("askChoiceValidationRequired")}`, "warning", colorEnabled)
+        : `  ${t("askChoiceValidationRequired")}`,
+    );
     lines.push("");
   }
 
@@ -182,7 +220,9 @@ export function renderAskChoiceFrame(
   for (let i = window.start; i < window.end; i++) {
     if (i < q.choices.length) {
       const choice = q.choices[i];
-      const focused = qs.cursorIndex === i;
+      // While the Submit row holds the focus the row cursor is hidden, so
+      // exactly one line looks focused at any time.
+      const focused = qs.cursorIndex === i && !submitFocused;
       const checkbox = q.multiSelect
         ? qs.selectedIds.includes(choice.id)
           ? DIALOG_CHECKED
@@ -201,7 +241,7 @@ export function renderAskChoiceFrame(
     } else {
       // Other row — never paint a fake █; the real terminal cursor is CUPed
       // onto this text after paint so CJK IME windows anchor correctly.
-      const focused = qs.cursorIndex === i;
+      const focused = qs.cursorIndex === i && !submitFocused;
       const marker = focused ? DIALOG_CURSOR : " ";
       const plainPrefix = `${marker}${otherRowPrefix(i)}`;
       const plainRow = `${plainPrefix}${qs.otherText}`;
@@ -224,6 +264,17 @@ export function renderAskChoiceFrame(
   if (window.end < totalRows) {
     lines.push(renderOverflowBelow(totalRows - window.end));
   }
+
+  // Form-level Submit row: always visible, focused with ↓ from the last row,
+  // activated with Enter. It deliberately carries NO [n] badge — the numeric
+  // quick-select maps only to the numbered rows, so no digit can ever
+  // dispatch SUBMIT.
+  lines.push(
+    renderDialogRow({
+      label: t("askChoiceSubmitRow"),
+      focused: submitFocused,
+    }),
+  );
 
   lines.push("");
   lines.push(renderFooter(q.multiSelect, colorEnabled));
@@ -269,6 +320,9 @@ export async function runAskChoiceDialog(args: {
 
   const wheelThrottle = createWheelThrottle();
   let rawAcquired = false;
+  // TUI-local focus on the form-level Submit row (the row itself is rendered
+  // from this flag; the reducer's cursorIndex never leaves the real rows).
+  let submitFocused = false;
   const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
   const resolveBottomRow = () =>
     Math.max(
@@ -281,7 +335,7 @@ export async function runAskChoiceDialog(args: {
   const painter = createDialogFramePainter({
     output,
     render: () => {
-      const frame = renderAskChoiceFrame(state, { bottomAnchored });
+      const frame = renderAskChoiceFrame(state, { bottomAnchored, submitFocused });
       return {
         text: frame.text,
         cursor: frame.otherCursor,
@@ -336,6 +390,8 @@ export async function runAskChoiceDialog(args: {
         }
         const direction: 1 | -1 = scrollAction === "wheel-up" ? -1 : 1;
         if (wheelThrottle.step(direction) === 0) continue;
+        // A wheel step is list navigation: it leaves the Submit row.
+        submitFocused = false;
         state = askChoiceReducer(state, {
           type: "MOVE_CURSOR",
           delta: direction,
@@ -364,36 +420,68 @@ export async function runAskChoiceDialog(args: {
       } else if (isCancel(sequence)) {
         action = { type: "CANCEL" };
       } else if (isArrowUp(sequence)) {
+        if (submitFocused) {
+          // ↑ returns to the list: the row cursor never left the last row,
+          // so the highlight lands back exactly where it was.
+          submitFocused = false;
+          paint();
+          continue;
+        }
         action = { type: "MOVE_CURSOR", delta: -1 };
       } else if (isArrowDown(sequence)) {
+        const maxRowIndex = q.allowOther
+          ? q.choices.length
+          : q.choices.length - 1;
+        if (submitFocused) {
+          // ↓ on the Submit row stays there (it is the last focusable row).
+          continue;
+        }
+        if (qs.cursorIndex >= maxRowIndex) {
+          // ↓ past the last row focuses the form-level Submit row.
+          // MOVE_CURSOR clamps at the last row and clears otherFocused, so a
+          // focused Other input is saved (blur) — still without submitting.
+          submitFocused = true;
+          state = askChoiceReducer(state, { type: "MOVE_CURSOR", delta: 1 });
+          paint();
+          continue;
+        }
         action = { type: "MOVE_CURSOR", delta: 1 };
+      } else if (sequence === KEY_CTRL_S) {
+        // Ctrl+S stays as a shortcut for muscle memory; the Submit row +
+        // Enter above is the primary, always-visible way to send the form.
+        action = { type: "SUBMIT" };
       } else if (sequence === KEY_SPACE) {
+        if (submitFocused) {
+          // Space never activates the Submit row (Enter is its action), so a
+          // stray space cannot send the form.
+          continue;
+        }
         if (qs.otherFocused) {
           // Literal space while typing Other (single + multi).
           action = {
             type: "SET_OTHER_TEXT",
             text: qs.otherText + " ",
           };
-        } else if (q.multiSelect) {
-          // Space toggles a choice, or focuses Other.
-          action = { type: "TOGGLE_AT_CURSOR" };
         } else if (isOtherRow) {
-          // Single-select: Space on Other focuses the free-text input.
+          // Space on the Other row opens its free-text input (single + multi).
           action = { type: "FOCUS_OTHER" };
+        } else {
+          // On a choice row Space is a pick/toggle — never a submit.
+          action = { type: "TOGGLE_AT_CURSOR" };
         }
       } else if (isSubmit(sequence)) {
-        if (qs.otherFocused) {
-          // Enter in Other input → blur (save text)
-          action = { type: "BLUR_OTHER" };
-        } else if (isOtherRow && !qs.otherFocused) {
-          // Enter on Other row → focus it
-          action = { type: "FOCUS_OTHER" };
-        } else if (q.multiSelect) {
-          // Multi-select: Enter submits (Space toggles) — matches clack convention
+        // Enter acts on the focused row: on a choice it picks/toggles, on the
+        // Other row it opens the input, inside Other it only saves (blur) —
+        // and on the Submit row it sends the form. No pick/blur ever submits
+        // implicitly.
+        if (submitFocused) {
           action = { type: "SUBMIT" };
+        } else if (qs.otherFocused) {
+          action = { type: "BLUR_OTHER" };
+        } else if (isOtherRow) {
+          action = { type: "FOCUS_OTHER" };
         } else {
-          // Single-select: Enter picks (reducer auto-advances/submits)
-          action = { type: "SELECT_AT_CURSOR" };
+          action = { type: "TOGGLE_AT_CURSOR" };
         }
       } else if (
         sequence === KEY_BACKSPACE ||
@@ -408,6 +496,30 @@ export async function runAskChoiceDialog(args: {
             text: chars.slice(0, -1).join(""),
           };
         }
+      } else if (submitFocused) {
+        // Submit row focused: every other key (digits, printable text, IME
+        // bursts, backspace) is ignored — it must not pick a row, leak text
+        // into Other, or submit the form. ↑/Enter/Tab/Ctrl+S still work.
+        continue;
+      } else if (
+        sequence.length === 1 &&
+        sequence >= "1" &&
+        sequence <= "9" &&
+        !qs.otherFocused
+      ) {
+        // Real numeric quick-select for the [n] badges (the numbers used to
+        // be decorative). 1..choices.length picks/toggles that choice; the
+        // Other row's own number focuses its input. While the Other input is
+        // focused digits type literally (handled below, never here).
+        const rowIndex = Number(sequence) - 1;
+        if (rowIndex < q.choices.length) {
+          const choice = q.choices[rowIndex];
+          if (choice) action = { type: "SELECT_CHOICE", choiceId: choice.id };
+        } else if (rowIndex === q.choices.length && q.allowOther) {
+          action = { type: "FOCUS_OTHER" };
+        }
+        // The Submit row's position has no digit mapping on purpose: a digit
+        // there is a no-op and can never dispatch SUBMIT.
       } else if (
         sequence.length >= 1 &&
         sequence.charCodeAt(0) >= 32 &&
@@ -437,20 +549,17 @@ export async function runAskChoiceDialog(args: {
       if (action) {
         state = askChoiceReducer(state, action);
 
-        // After SELECT_AT_CURSOR in single-question single-select,
-        // the reducer auto-submits. Check phase.
+        // The only transitions out of `active` are explicit submits (Enter
+        // on the Submit row, Ctrl+S) or CANCEL — never a pick, a blur or a
+        // hint. An invalid SUBMIT keeps the dialog open: the reducer moved
+        // the active tab to the first unanswered required question and
+        // flagged validationAttempted, which the renderer shows.
         if (state.phase !== "active") break;
 
-        // If we just blurred Other on the last tab and all questions
-        // are answered, auto-submit. Non-last tabs: just save text.
-        if (
-          action.type === "BLUR_OTHER" &&
-          state.activeIndex >= state.questions.length - 1 &&
-          canSubmit(state)
-        ) {
-          state = askChoiceReducer(state, { type: "SUBMIT" });
-          break;
-        }
+        // Any dispatched action leaves the Submit row (the action either
+        // closed the dialog, switched tabs, or failed validation and jumped
+        // to the first unanswered question — the user lands back on a row).
+        submitFocused = false;
 
         paint();
       }
@@ -488,10 +597,11 @@ export async function runAskChoiceDialog(args: {
     };
   }
 
-  // Multi-question
+  // Multi-question: keep the question→answer mapping in the outbound text so
+  // the LLM sees which answer belongs to which question.
   return {
     kind: "multi-submitted",
     answers: result.answers,
-    userMessage: result.answers.map((a) => a.userMessage).filter(Boolean).join("\n\n"),
+    userMessage: formatOutboundUserMessage(normalized.questions, result.answers),
   };
 }

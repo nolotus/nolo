@@ -481,6 +481,10 @@ const STRINGS = {
     zh: "↑ Shift+滚轮可回看上方消息",
   },
   askChoiceSubmit: {
+    en: "submit ↓",
+    zh: "提交 ↓",
+  },
+  askChoiceSubmitRow: {
     en: "Submit",
     zh: "提交",
   },
@@ -489,20 +493,24 @@ const STRINGS = {
     zh: "其他",
   },
   askChoiceHintSingle: {
-    en: "Type your answer, then press Enter to save.",
-    zh: "输入回答后按 Enter 保存。",
+    en: "Enter/Space picks · in Other, Enter only saves · ↓ to Submit row, Enter sends",
+    zh: "Enter/空格 选择 · 其他中输入后 Enter 仅为保存 · ↓ 到提交行 Enter 发送",
   },
   askChoiceHintMulti: {
-    en: "Space to toggle, Enter to confirm selection.",
-    zh: "空格切换选中，Enter 确认提交。",
+    en: "Enter/Space toggles · ↓ to Submit row, Enter sends",
+    zh: "Enter/空格 切换选中 · ↓ 到提交行 Enter 发送",
   },
   askChoiceFooterSingle: {
-    en: "↵ pick/submit · tab switch · esc cancel",
-    zh: "↵ 选择/提交 · tab 切换 · esc 取消",
+    en: "↵ select · ↓ submit row ↵ send · ctrl+s send · tab switch · esc cancel",
+    zh: "↵ 选择 · ↓ 提交行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
   },
   askChoiceFooterMulti: {
-    en: "↵ submit · space toggle · tab switch · esc cancel",
-    zh: "↵ 提交 · space 切换 · tab 切换 · esc 取消",
+    en: "↵ toggle · ↓ submit row ↵ send · ctrl+s send · tab switch · esc cancel",
+    zh: "↵ 切换 · ↓ 提交行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
+  },
+  askChoiceValidationRequired: {
+    en: "Required questions are unanswered — jumped to the first one.",
+    zh: "必填问题尚未回答 — 已跳转到第一个未答题。",
   },
   askChoiceHistoryHint: {
     en: "Type a number to choose, or reply directly:",
