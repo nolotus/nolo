@@ -500,17 +500,26 @@ if ($install.ExitCode -ne 0) {
 }
 
 $launcher = Join-Path $installDir $smokeLauncherName
-$bun = Join-Path $installDir "bin\bun.exe"
-$entry = Join-Path $installDir "Resources\main.js"
 
 if (-not (Test-Path $launcher)) {
   throw "Missing installed launcher: $launcher"
 }
-if (-not (Test-Path $bun)) {
-  throw "Missing installed Bun runtime: $bun"
+
+# 布局无关的荷载守卫（2026-09-15）：v2 stable 的 wrapper 安装布局把真实 app 放在
+# Resources\<hash>.tar.zst 归档里，旧 flat 布局是 bin\bun.exe + Resources\main.js。
+# 两种形态都合法，installed 运行时由后续 launch / HTTP healthcheck / quick-chat
+# 行为 probe 证明，所以这里只断言「至少存在一种运行荷载形态」，不再单独要求 flat
+# 文件。只做最小标记检查：不识别「哪个归档是 payload」、不解析哈希——payload
+# discovery 属于打包侧（post-package / stableWindowsUploadSet），smoke 不重复实现。
+$payloadArchiveMarkers = @(Get-ChildItem -Path $installDir -Filter "*.tar.zst" -File -Recurse -ErrorAction SilentlyContinue)
+$flatRuntimePresent = (Test-Path (Join-Path $installDir "bin\bun.exe")) -and (Test-Path (Join-Path $installDir "Resources\main.js"))
+if ($payloadArchiveMarkers.Count -eq 0 -and -not $flatRuntimePresent) {
+  throw "Installed desktop payload has no runtime marker (no *.tar.zst archive and no flat bin\bun.exe + Resources\main.js pair): $installDir"
 }
-if (-not (Test-Path $entry)) {
-  throw "Missing installed desktop entry: $entry"
+if ($payloadArchiveMarkers.Count -gt 0) {
+  Write-SmokePhase "installed payload exposes $($payloadArchiveMarkers.Count) *.tar.zst archive(s) (wrapper layout)"
+} else {
+  Write-SmokePhase "installed payload uses flat runtime layout (bin\bun.exe + Resources\main.js)"
 }
 
 # Validate installation integrity

@@ -910,7 +910,7 @@ function projectToolContentForProvider(args: {
         content: contentForProjection,
         toolName: args.toolName,
       });
-      spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}`;
+      spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read full output via readFile`;
     } catch {
       // Ignore spill write failures to prevent breaking prompt generation
     }

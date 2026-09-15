@@ -3,9 +3,14 @@ import { readPayloadVersionInfo } from "./payload-version";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
 import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import { extractWindowsTarball } from "./windows-tarball-extract";
+import {
+  StableWindowsDiscoveryError,
+  discoverStableWindowsUpstreamSet,
+  stageStableWindowsUploadSet,
+} from "./stableWindowsUploadSet";
 import { cp, mkdir, readdir } from "node:fs/promises";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { asOptionalTrimmedString } from "core/optionalString";
 import * as rceditModule from "rcedit";
 
@@ -30,6 +35,7 @@ const appIconIcoPath = resolve(import.meta.dir, "../assets/icon.ico");
 const windowsLauncherTemplatePath = resolve(import.meta.dir, "../assets/windows-launcher.vbs");
 const windowsInstallerTemplatePath = resolve(import.meta.dir, "../assets/windows-installer.iss");
 const windowsSmokeArtifactDir = resolve(import.meta.dir, "../smoke-artifacts");
+const stableWindowsBuildDir = resolve(import.meta.dir, "../build/stable-win-x64");
 const DEFAULT_WINDOWS_INSTALLER_COMPRESSION = "lzma2/max";
 const DEFAULT_WINDOWS_INSTALLER_SOLID_COMPRESSION = "yes";
 
@@ -231,6 +237,63 @@ const compileWindowsInstaller = async ({
   return outputInstallerPath;
 };
 
+/**
+ * Stable (Electrobun v2) upload-set staging during postPackage.
+ *
+ * This runs only when the current build injected `NOLO_STABLE_BUILD_STARTED_AT_MS`
+ * (done by build:stable:windows-installer), because that baseline is what lets
+ * discovery prove every accepted file was produced by *this* run. Without a
+ * baseline we deliberately skip here — the same script stages the upload set
+ * after the electrobun build, so nothing is silently dropped.
+ *
+ * Only the typed discovery error ("no acceptable v2 output yet") is tolerated:
+ * every other IO/programming error propagates, so a broken discovery path can
+ * never masquerade as a skipped stage.
+ */
+const stageStableWindowsUploadSetFromV2IfAvailable = async ({
+  artifactDir,
+  buildEnv,
+}: {
+  artifactDir: string;
+  buildEnv?: string;
+}) => {
+  if (buildEnv !== "stable" && buildEnv !== "main") {
+    return;
+  }
+
+  const startedAtRaw = process.env.NOLO_STABLE_BUILD_STARTED_AT_MS?.trim();
+  const startedAtMs = startedAtRaw ? Number(startedAtRaw) : Number.NaN;
+  if (!Number.isFinite(startedAtMs)) {
+    console.log(
+      "[desktop] stable v2 upload-set staging skipped in postPackage: " +
+        "NOLO_STABLE_BUILD_STARTED_AT_MS is not set, so this run cannot prove provenance; " +
+        "build:stable:windows-installer stages the upload set after the build",
+    );
+    return;
+  }
+
+  try {
+    const upstream = discoverStableWindowsUpstreamSet({
+      buildDir: stableWindowsBuildDir,
+      runStartedAtMs: startedAtMs,
+    });
+    const staged = stageStableWindowsUploadSet({ upstream, artifactDir });
+    console.log(
+      `[desktop] staged stable Windows upload set from Electrobun v2 output: ` +
+        `${basename(staged.installerPath)}, ${basename(staged.versionedInstallerPath)}, ` +
+        `${basename(staged.updateBundlePath)}, ${basename(staged.updateJsonPath)}`,
+    );
+  } catch (error) {
+    if (!(error instanceof StableWindowsDiscoveryError)) {
+      throw error;
+    }
+    console.log(
+      `[desktop] stable v2 upload-set staging skipped in postPackage (${error.message}); ` +
+        "build:stable:windows-installer stages it after the build",
+    );
+  }
+};
+
 export const createWindowsInstallerArtifact = async ({
   artifactDir,
   buildEnv,
@@ -244,6 +307,8 @@ export const createWindowsInstallerArtifact = async ({
 
   rmSync(windowsSmokeArtifactDir, { recursive: true, force: true });
 
+  await stageStableWindowsUploadSetFromV2IfAvailable({ artifactDir, buildEnv });
+
   const artifactNames = await readdir(artifactDir);
   const windowsZipName = artifactNames.find(
     (name) => name.includes("-win-") && /^.+-Setup.*\.zip$/i.test(name)
@@ -256,6 +321,14 @@ export const createWindowsInstallerArtifact = async ({
   );
 
   if (!windowsZipName || !windowsTarballName) {
+    // 绝不静默返回：v2 通道下找不到 v1 的 -Setup.zip/-Setup tar 是预期状态，
+    // 但必须解释清楚，否则「构建成功、什么都没上传」会继续无人可查。
+    console.log(
+      `[desktop] no legacy -Setup zip/tarball in ${artifactDir} (found: ${
+        artifactNames.length > 0 ? artifactNames.join(", ") : "none"
+      }); v1 Windows installer compile skipped for ${buildEnv ?? "unknown"} build; ` +
+        "Electrobun v2 upload-set staging is handled by build:stable:windows-installer",
+    );
     return;
   }
 

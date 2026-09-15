@@ -1,4 +1,19 @@
 
+## 0.85.0-alpha.1
+
+## 0.85.0-alpha.1 (2026-09-15)
+
+### Features
+
+* **agent:** add tool-use discipline guidance section ([7125503](https://github.com/nolotus/bun-nolo/commit/7125503840709a1ba496d43eafe0fd554d75dba6))
+
+### Bug Fixes
+
+* **agent:** expand a leading ~/ in workspace tool paths ([2f5e0ed](https://github.com/nolotus/bun-nolo/commit/2f5e0ed8c0ebe2f61fc07a590d85e20321bba874))
+* **agent:** make thread admission fail closed ([382864f](https://github.com/nolotus/bun-nolo/commit/382864fdccff591c039784195e66fdd92bda521d))
+* **desktop:** restore stable Windows packaging ([3d5307e](https://github.com/nolotus/bun-nolo/commit/3d5307e465336ee286728ddf47df45c544f496ff))
+
+
 ## 0.84.0-alpha.5
 
 ## 0.84.0-alpha.5 (2026-09-14)

@@ -7,6 +7,13 @@ import {
   isFreshBuildOutput,
   resolveWindowsInstallerRecoverySource,
 } from "./buildStableWindowsInstallerRecovery";
+import {
+  StableWindowsDiscoveryError,
+  STABLE_WINDOWS_WRAPPER_LAUNCHER_RELATIVE_PATH,
+  buildStableWindowsUpdateJson,
+  discoverStableWindowsUpstreamSet,
+  stageStableWindowsUploadSet,
+} from "./stableWindowsUploadSet";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
 import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
 import {
@@ -189,7 +196,7 @@ function completeRecoveryVersionInfo(
   };
 }
 
-async function runElectrobunStable() {
+async function runElectrobunStable(buildStartedAtMs: number) {
   // 刻意**不注入** NOLO_DESKTOP_SKIP_PATCH。
   //
   // 历史：这里曾硬编码 `NOLO_DESKTOP_SKIP_PATCH: "1"`，而 workflow 的 stable
@@ -208,6 +215,9 @@ async function runElectrobunStable() {
     stderr: "inherit",
     env: {
       ...process.env,
+      // Provenance baseline for upload-set staging inside postPackage: files
+      // older than this run must never be accepted as this run's output.
+      NOLO_STABLE_BUILD_STARTED_AT_MS: String(buildStartedAtMs),
     },
   });
   return proc.exited;
@@ -564,12 +574,14 @@ async function recoverInstallerFromRawTar() {
     cpSync(outputInstallerPath, versionedInstallerPath);
     writeFileSync(
       join(artifactDir, "stable-win-x64-update.json"),
-      `${JSON.stringify({
-        version: versionInfo.version,
-        hash: versionInfo.hash,
-        platform: "win",
-        arch: "x64",
-      })}\n`,
+      `${JSON.stringify(
+        buildStableWindowsUpdateJson({
+          version: versionInfo.version,
+          hash: versionInfo.hash,
+        }),
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
 
@@ -593,12 +605,89 @@ async function recoverInstallerFromRawTar() {
   }
 }
 
+/**
+ * Stable smoke 安装器（side-by-side 身份）直接从 Electrobun v2 的
+ * `NoloDesktop/` wrapper payload 编译：wrapper 就是 launcher 在真实安装里看到的
+ * 布局，因此 smoke 安装的 app 与发布的 installer 同源，且省掉了解包 tar、
+ * 自愈 flat payload、断言 flat 布局这些被 supersede 的恢复机制。
+ */
+async function compileSmokeInstallerFromV2Wrapper(args: {
+  wrapperDir: string;
+  version: string;
+  tempDir: string;
+}) {
+  const launchScriptPath = join(args.tempDir, "Nolo Desktop Smoke.vbs");
+  const webView2BootstrapperPath = join(args.tempDir, "MicrosoftEdgeWebview2Setup.exe");
+  const scriptPath = join(args.tempDir, "windows-smoke-installer.iss");
+
+  writeFileSync(launchScriptPath, readFileSync(windowsLauncherTemplatePath, "utf8"), "utf8");
+  await downloadWebView2Bootstrapper(webView2BootstrapperPath);
+  await applyWindowsExecutableIcon(
+    join(args.wrapperDir, STABLE_WINDOWS_WRAPPER_LAUNCHER_RELATIVE_PATH),
+  );
+
+  return compileWindowsInstaller({
+    appId: WINDOWS_DESKTOP_SMOKE_APP_ID,
+    appName: WINDOWS_DESKTOP_SMOKE_APP_NAME,
+    launchScriptDestName: WINDOWS_DESKTOP_SMOKE_LAUNCH_SCRIPT_DEST_NAME,
+    launchScriptPath,
+    outputBaseFilename: WINDOWS_DESKTOP_SMOKE_OUTPUT_BASE_FILENAME,
+    outputDir: smokeArtifactDir,
+    payloadDir: args.wrapperDir,
+    scriptPath,
+    version: args.version,
+    webView2BootstrapperPath,
+  });
+}
+
 rmSync(smokeArtifactDir, { recursive: true, force: true });
 
 const scriptStartedAtMs = Date.now();
 
-const exitCode = await runElectrobunStable();
+const exitCode = await runElectrobunStable(scriptStartedAtMs);
 if (exitCode === 0) {
+  // Electrobun v2 自体就产出完整 stable 发布形态（Nolo Desktop-Setup.exe /
+  // -Setup.tar.zst / -Setup.metadata.json + NoloDesktop/ wrapper）。发布链要求的
+  // 上传集合（规范 installer、versioned exe、update bundle、富 schema
+  // update.json）由 stableWindowsUploadSet 从这份**本次构建**的输出规范化而来，
+  // 不再依赖 v1 的 -Setup.zip 探测或 recovery 拼接。
+  // 仅 typed discovery error（输出缺失/过期/畸形）才回退 recovery——这不是
+  // blanket catch：其它 IO / 编程错误直接抛出，绝不当成「什么都没找到」。
+  let stagedFromV2 = false;
+  const uploadSetTempDir = mkdtempSync(join(tmpdir(), "nolo-desktop-win-upload-set-"));
+  try {
+    const upstream = discoverStableWindowsUpstreamSet({
+      buildDir,
+      runStartedAtMs: scriptStartedAtMs,
+      fallbackVersion: readDesktopPackageVersion(),
+      fallbackHash: process.env.NOLO_BUILD_SHA?.trim() || process.env.GITHUB_SHA?.trim(),
+    });
+    const stagedUploadSet = stageStableWindowsUploadSet({ upstream, artifactDir });
+    const smokeInstallerPath = await compileSmokeInstallerFromV2Wrapper({
+      wrapperDir: upstream.wrapperDir,
+      version: upstream.version,
+      tempDir: uploadSetTempDir,
+    });
+    log(
+      `staged Electrobun v2 stable upload set in ${artifactDir}: ` +
+        `${basename(stagedUploadSet.installerPath)}, ${basename(stagedUploadSet.versionedInstallerPath)}, ` +
+        `${basename(stagedUploadSet.updateBundlePath)}, ${basename(stagedUploadSet.updateJsonPath)}`,
+    );
+    log(`built side-by-side smoke installer from the v2 wrapper payload: ${smokeInstallerPath}`);
+    stagedFromV2 = true;
+  } catch (error) {
+    if (!(error instanceof StableWindowsDiscoveryError)) {
+      throw error;
+    }
+    log(
+      `Electrobun v2 stable output was not usable for the upload set (${error.message}); attempting recovery`,
+    );
+  } finally {
+    rmSync(uploadSetTempDir, { recursive: true, force: true });
+  }
+  if (stagedFromV2) {
+    process.exit(0);
+  }
   // electrobun 原生 postPackage 并不保证产出 smoke installer（artifact 探测
   // 找不到 -Setup.zip/tarball 时 post-package 直接 exit(0)，smoke-artifacts
   // 目录为空）。stable smoke 步骤无条件期待该文件，缺失即连败

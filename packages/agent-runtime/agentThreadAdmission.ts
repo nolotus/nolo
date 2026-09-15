@@ -3,10 +3,10 @@ import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 
 /**
  * Default maxConcurrent used when an agent has no admission config.
- * v0 policy: hard-coded to 2 until per-agent config is widely adopted.
+ * Default policy until per-agent config is widely adopted.
  */
-export const DEFAULT_AGENT_THREAD_MAX_CONCURRENT = 2;
-export const DEFAULT_AGENT_THREAD_CREDENTIAL_BUDGET = 2;
+export const DEFAULT_AGENT_THREAD_MAX_CONCURRENT = 4;
+export const DEFAULT_AGENT_THREAD_CREDENTIAL_BUDGET = 4;
 
 export type AgentThreadAdmissionConfig = {
   maxConcurrent?: unknown;
@@ -30,7 +30,7 @@ export type AgentThreadAdmissionDecision =
     }
   | {
       allowed: false;
-      reason: "max_concurrent_reached" | "agent_temporarily_unavailable" | "credential_concurrency_exhausted";
+      reason: "max_concurrent_reached" | "agent_temporarily_unavailable" | "credential_concurrency_exhausted" | "admission_store_unavailable";
       activeThreadCount: number;
       maxConcurrent: number;
     };
