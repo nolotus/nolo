@@ -62,12 +62,12 @@ function buildWorkspacePathProperty() {
     type: "string",
     minLength: 1,
     description:
-      "Path relative to the workspace root. Defaults to workspace root when omitted.",
+      "Path relative to the workspace root. Absolute paths and ~/ (home directory) are also accepted. Defaults to workspace root when omitted.",
   };
 }
 
 function buildReadWorkspaceDescription() {
-  return "Read a UTF-8 text file inside the workspace. Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
+  return "Read a UTF-8 text file inside the workspace. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
 }
 
 function buildReadWorkspaceParameters() {
