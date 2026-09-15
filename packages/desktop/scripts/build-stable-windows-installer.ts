@@ -9,13 +9,13 @@ import {
 } from "./buildStableWindowsInstallerRecovery";
 import {
   StableWindowsDiscoveryError,
-  STABLE_WINDOWS_WRAPPER_LAUNCHER_RELATIVE_PATH,
   buildStableWindowsUpdateJson,
   discoverStableWindowsUpstreamSet,
   stageStableWindowsUploadSet,
 } from "./stableWindowsUploadSet";
 import { pruneClassicLevelPrebuilds } from "./prune-native-prebuilds";
 import { patchElectrobunWindowsCore } from "./patch-electrobun-windows-core";
+import { extractWindowsTarball } from "./windows-tarball-extract";
 import {
   cpSync,
   existsSync,
@@ -196,7 +196,7 @@ function completeRecoveryVersionInfo(
   };
 }
 
-async function runElectrobunStable(buildStartedAtMs: number) {
+async function runElectrobunStable() {
   // 刻意**不注入** NOLO_DESKTOP_SKIP_PATCH。
   //
   // 历史：这里曾硬编码 `NOLO_DESKTOP_SKIP_PATCH: "1"`，而 workflow 的 stable
@@ -213,12 +213,6 @@ async function runElectrobunStable(buildStartedAtMs: number) {
     stdin: "ignore",
     stdout: "inherit",
     stderr: "inherit",
-    env: {
-      ...process.env,
-      // Provenance baseline for upload-set staging inside postPackage: files
-      // older than this run must never be accepted as this run's output.
-      NOLO_STABLE_BUILD_STARTED_AT_MS: String(buildStartedAtMs),
-    },
   });
   return proc.exited;
 }
@@ -606,13 +600,59 @@ async function recoverInstallerFromRawTar() {
 }
 
 /**
- * Stable smoke 安装器（side-by-side 身份）直接从 Electrobun v2 的
- * `NoloDesktop/` wrapper payload 编译：wrapper 就是 launcher 在真实安装里看到的
- * 布局，因此 smoke 安装的 app 与发布的 installer 同源，且省掉了解包 tar、
- * 自愈 flat payload、断言 flat 布局这些被 supersede 的恢复机制。
+ * Stable smoke 安装器直接从「可运行 app 载荷」编译。
+ *
+ * 事故背景（2026-09-15）：Electrobun v2 产出的 `NoloDesktop/` 只是**自解压 stub**
+ * ——它的 `bin/launcher.exe` 是解压器本体，只有在 `.installer/<stem>.*` 邻接载荷
+ * 或内嵌载荷存在时才能工作；把 stub 当 app 安装并直接启动会打印
+ * "Not a valid self-extracting installer"（官方文档：wrapper 首启时解出内层 app）。
+ * 因此 smoke 载荷必须取真实 app：setup payload tar（= 发布 update bundle 同一份
+ * 文件 `Nolo Desktop-Setup.tar.zst`）解包后的目录；万一上游把 stub 塞进该 tar，
+ * 就再下钻一层取 `Resources/<hash>.tar.zst`。两条路都必须解出可运行布局（fail loud）。
  */
-async function compileSmokeInstallerFromV2Wrapper(args: {
-  wrapperDir: string;
+const SMOKE_RUNNABLE_MARKER_PATHS = [join("bin", "bun.exe"), join("Resources", "main.js")];
+
+function hasSmokeRunnableMarker(dir: string): boolean {
+  return SMOKE_RUNNABLE_MARKER_PATHS.every((relative) => existsSync(join(dir, relative)));
+}
+
+function findSingleInnerStubArchive(dir: string): string | null {
+  const resourcesDir = join(dir, "Resources");
+  if (!existsSync(resourcesDir)) return null;
+  const candidates = readdirSync(resourcesDir).filter((name) => /\.tar\.zst$/i.test(name));
+  return candidates.length === 1 ? join(resourcesDir, candidates[0]) : null;
+}
+
+async function resolveSmokeRunnablePayloadDir(args: {
+  payloadTarballPath: string;
+  tempDir: string;
+}): Promise<string> {
+  const outerTempDir = join(args.tempDir, "runnable-payload");
+  mkdirSync(outerTempDir, { recursive: true });
+  const payloadDir = await extractWindowsTarball(args.payloadTarballPath, outerTempDir);
+  if (hasSmokeRunnableMarker(payloadDir)) {
+    log(`smoke payload unfolded a runnable app: ${payloadDir}`);
+    return payloadDir;
+  }
+  const innerArchive = findSingleInnerStubArchive(payloadDir);
+  if (!innerArchive) {
+    throw new Error(
+      "stable smoke payload is neither a runnable app nor a single-wrapper stub: " +
+        `${payloadDir} (missing ${SMOKE_RUNNABLE_MARKER_PATHS.join(" + ")} and no single Resources/*.tar.zst)`,
+    );
+  }
+  log(`smoke payload tarball carried a wrapper stub; descending into ${basename(innerArchive)}`);
+  const innerTempDir = join(args.tempDir, "runnable-inner");
+  mkdirSync(innerTempDir, { recursive: true });
+  const innerDir = await extractWindowsTarball(innerArchive, innerTempDir);
+  if (!hasSmokeRunnableMarker(innerDir)) {
+    throw new Error(`wrapper inner archive did not unfold a runnable app: ${innerDir}`);
+  }
+  return innerDir;
+}
+
+async function compileSmokeInstallerFromRunnablePayload(args: {
+  payloadTarballPath: string;
   version: string;
   tempDir: string;
 }) {
@@ -622,9 +662,12 @@ async function compileSmokeInstallerFromV2Wrapper(args: {
 
   writeFileSync(launchScriptPath, readFileSync(windowsLauncherTemplatePath, "utf8"), "utf8");
   await downloadWebView2Bootstrapper(webView2BootstrapperPath);
-  await applyWindowsExecutableIcon(
-    join(args.wrapperDir, STABLE_WINDOWS_WRAPPER_LAUNCHER_RELATIVE_PATH),
-  );
+
+  const payloadDir = await resolveSmokeRunnablePayloadDir({
+    payloadTarballPath: args.payloadTarballPath,
+    tempDir: args.tempDir,
+  });
+  await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
 
   return compileWindowsInstaller({
     appId: WINDOWS_DESKTOP_SMOKE_APP_ID,
@@ -633,7 +676,7 @@ async function compileSmokeInstallerFromV2Wrapper(args: {
     launchScriptPath,
     outputBaseFilename: WINDOWS_DESKTOP_SMOKE_OUTPUT_BASE_FILENAME,
     outputDir: smokeArtifactDir,
-    payloadDir: args.wrapperDir,
+    payloadDir,
     scriptPath,
     version: args.version,
     webView2BootstrapperPath,
@@ -644,7 +687,7 @@ rmSync(smokeArtifactDir, { recursive: true, force: true });
 
 const scriptStartedAtMs = Date.now();
 
-const exitCode = await runElectrobunStable(scriptStartedAtMs);
+const exitCode = await runElectrobunStable();
 if (exitCode === 0) {
   // Electrobun v2 自体就产出完整 stable 发布形态（Nolo Desktop-Setup.exe /
   // -Setup.tar.zst / -Setup.metadata.json + NoloDesktop/ wrapper）。发布链要求的
@@ -663,8 +706,8 @@ if (exitCode === 0) {
       fallbackHash: process.env.NOLO_BUILD_SHA?.trim() || process.env.GITHUB_SHA?.trim(),
     });
     const stagedUploadSet = stageStableWindowsUploadSet({ upstream, artifactDir });
-    const smokeInstallerPath = await compileSmokeInstallerFromV2Wrapper({
-      wrapperDir: upstream.wrapperDir,
+    const smokeInstallerPath = await compileSmokeInstallerFromRunnablePayload({
+      payloadTarballPath: upstream.updateBundlePath,
       version: upstream.version,
       tempDir: uploadSetTempDir,
     });

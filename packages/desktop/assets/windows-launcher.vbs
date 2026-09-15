@@ -8,6 +8,7 @@ logDir = localAppData & "\chat.nolo.desktop"
 logPath = logDir & "\launcher.log"
 bunPath = appDir & "\bin\bun.exe"
 entryPath = appDir & "\Resources\main.js"
+wrapperLauncherPath = appDir & "\bin\launcher.exe"
 logEnabled = True
 
 Sub EnsureFolder(path)
@@ -62,9 +63,22 @@ Sub LogMessage(message)
 End Sub
 
 shell.CurrentDirectory = appDir & "\bin"
-LogMessage "Launching " & bunPath & " " & entryPath
 
-launchCommand = Chr(34) & bunPath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
+' Layout-adaptive entry (2026-09-15): Electrobun v2 stable installs use a wrapper
+' payload (bin\launcher.exe + Resources\<hash>.tar.zst with the real app inside),
+' while legacy flat payloads carry bin\bun.exe + Resources\main.js. Launch whichever
+' layout is actually installed; fail loudly (logged, non-zero) when neither exists.
+If fso.FileExists(bunPath) And fso.FileExists(entryPath) Then
+  LogMessage "Launching " & bunPath & " " & entryPath
+  launchCommand = Chr(34) & bunPath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
+ElseIf fso.FileExists(wrapperLauncherPath) Then
+  LogMessage "Launching " & wrapperLauncherPath
+  launchCommand = Chr(34) & wrapperLauncherPath & Chr(34)
+Else
+  LogMessage "No runnable desktop entry found in " & appDir & " (neither " & bunPath & " + " & entryPath & " nor " & wrapperLauncherPath & ")"
+  WScript.Quit 1
+End If
+
 If logEnabled Then
   launchCommand = launchCommand & " >> " & Chr(34) & logPath & Chr(34) & " 2>&1"
   launchCommand = launchCommand & " & echo [launcher] Process exited code !ERRORLEVEL! >> " & Chr(34) & logPath & Chr(34)

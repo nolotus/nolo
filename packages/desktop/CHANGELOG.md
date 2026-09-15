@@ -1,4 +1,15 @@
 
+## 0.85.0-alpha.2
+
+## 0.85.0-alpha.2 (2026-09-15)
+
+### Bug Fixes
+
+* **desktop:** adapt the Windows VBS entry to the v2 wrapper payload ([a2bead4](https://github.com/nolotus/bun-nolo/commit/a2bead4c4f2ea87a7adc4575d2c5432098429099))
+* **desktop:** build the stable Windows smoke from the runnable app payload ([218ccaa](https://github.com/nolotus/bun-nolo/commit/218ccaa5395c8c86c5b7c85bf93f29dc0805038f))
+* **desktop:** extract Windows tarballs with a portable-first tar strategy ([b6486f1](https://github.com/nolotus/bun-nolo/commit/b6486f1fa5d09203ee396abe6454e1b464458a77))
+
+
 ## 0.85.0-alpha.1
 
 ## 0.85.0-alpha.1 (2026-09-15)
