@@ -36,10 +36,6 @@ const STREAM_USAGE_PROVIDERS = new Set([
   "deepseek",
   "ollama",
   "ollama-cloud",
-  // endpoint; the hosted branch passes "upstream-k3" as the usage provider so these
-  // streams request the terminal usage chunk (same capability decision as
-  // deepinfra/vultr).
-  "upstream-k3",
   // RunInfra hosted fallback channel: OpenAI-compatible chat.completions
   // endpoint, supports stream_options.include_usage (measured to return
   // prompt_tokens_details.cached_tokens).

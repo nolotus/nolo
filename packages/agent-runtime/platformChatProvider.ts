@@ -149,6 +149,7 @@ export type PlatformChatProviderConfig = {
   apiKeyHeader?: string;
   apiSource?: string;
   /**
+   * 实际上游 provider id（usage 白名单查询用）。平台托管分流时设置（baseten /
    * runinfra / google…）；对外 provider 语义仍是 "nolo"——计费归属与错误分类
    * 锚定平台，与 server 侧 loopUpstream 的 primaryProvider vs
    * primaryUsageProvider 是同一组概念。
@@ -513,6 +514,7 @@ function processPlatformChatSseEvent(
     if (!trimmed.startsWith("data:")) continue;
     const payload = trimmed.slice(5).trim();
     if (!payload) continue;
+    // A number of OpenAI-compatible gateways (including Kimi/Moonshot) end a
     // healthy stream with only [DONE], without a trailing usage chunk or
     // finish_reason. Keep that transport-level completion evidence instead of
     // later treating the response as a cut-off stream.

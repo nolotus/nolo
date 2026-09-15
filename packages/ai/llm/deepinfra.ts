@@ -1,9 +1,8 @@
 // ai/llm/deepinfra.ts
 // Kimi + GLM removed from catalog — platform Kimi/GLM are nolo (Ollama Cloud) only.
-// Claude models: 记录侧统一走 nolo provider（平台代理），实际上游仍是 deepinfra，
-// 价格沿用 deepinfra 美元报价，Claude 全系统一 ×9（贵且强的档不应比 Haiku
-// 加价更低）。platformHosted.ts
-// 复用本文件的价格常量，避免两处魔法数字漂移。
+// Claude models: 记录侧统一走 nolo provider（平台代理），实际上游仍是 deepinfra。
+// 本文件是 deepinfra 直连目录，价格按 ×9 口径（贵且强的档不应比 Haiku 加价更低）；
+// 平台托管目录（platformHosted.ts）按平台积分 ×8 口径独立定价，两者不共用常量。
 
 export const DEEPINFRA_CLAUDE_HAIKU_PRICE = {
   input: 1 * 9,

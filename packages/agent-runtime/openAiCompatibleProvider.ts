@@ -73,6 +73,7 @@ export type OpenAiCompatibleProviderConfig = {
   requestOptions: Record<string, number | string>;
   wire?: "responses" | "chat.completions";
   /**
+   * 实际上游 provider id（usage 白名单查询用）。平台托管分流时设置（baseten /
    * runinfra / google…）；对外 provider 语义仍是 "nolo"——计费归属与错误分类
    * 锚定平台，与 server 侧 loopUpstream 的 primaryProvider vs
    * primaryUsageProvider 是同一组概念。
@@ -139,6 +140,7 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   };
 
   // chat.completions wire 必须过共享 per-provider body quirk 判定，与 server
+  // loopUpstream 主路径完全一致：平台托管 Kimi K3（provider=nolo，上游 Baseten）
   // 要求删除采样参数并把 max_tokens 改名 max_completion_tokens；本地直连不过
   // 这道判定会发出不合规 body，上游中途断流且照常扣费。responses wire 与
   // server 一致不走该判定（buildResponsesRequestBody 自成一体）。

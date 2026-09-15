@@ -11,7 +11,6 @@ export const getNoloKey = (
     | "deepinfra"
     | "anthropic"
     | "ollama-cloud"
-    | "upstream-k3"
     | "runinfra"
     | "baseten",
   env: Record<string, string | undefined> = process.env
@@ -37,14 +36,13 @@ export const getNoloKey = (
       );
     case "deepinfra":
       return env.DEEPINFRA_API_KEY;
-    case "upstream-k3":
-      return env.UPSTREAM_K3_API_KEY;
     case "runinfra":
       return env.RUNINFRA_API_KEY;
     case "baseten":
       return env.BASETEN_API_KEY;
     // provider "nolo" / "ollama-cloud" 没有自己的 key。
     //
+    // google / xai / deepinfra / baseten …），key 由那一侧的 case 提供。这里曾经
     // 兜底返回 OLLAMA_API_KEY，制造过两次 401：拿 ollama 的 key 去打
     // id，兜底就会把请求送到别家门口，报错还长得像「key 失效」。
     //

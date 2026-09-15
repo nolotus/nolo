@@ -4,6 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { createBrandedMacosDmg } from "./macos-dmg-installer";
 import { createWindowsInstallerArtifact } from "./post-package-windows";
 import { createLinuxRpmArtifact, createLinuxDebArtifact } from "./post-package-linux";
+import { applyLinuxLauncherPreflight } from "./linuxLauncherPreflight";
 
 const artifactDir = process.env.ELECTROBUN_ARTIFACT_DIR;
 if (!artifactDir) {
@@ -105,6 +106,13 @@ const createBrandedMacosDmgArtifacts = async () => {
 await syncMacArtifactTarballsFromWrapper();
 await createWindowsInstallerArtifact({ artifactDir, buildEnv });
 await createBrandedMacosDmgArtifacts();
+
+// Linux tar.zst is what the updater installs, and DEB/RPM are derived from it below —
+// wrap bin/launcher with the stale cross-host CEF lock preflight first so no shipped
+// Linux artifact can start CEF without it. Hard failure: a build that cannot wrap the
+// launcher must not publish (see scripts/linuxLauncherPreflight.ts).
+await applyLinuxLauncherPreflight({ artifactDir });
+
 try {
   await createLinuxRpmArtifact({ artifactDir, buildEnv });
 } catch (error) {

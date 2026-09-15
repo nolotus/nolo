@@ -10,7 +10,6 @@ import {
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-  isPlatformHostedClaudeModel,
   getPlatformHostedDeepSeekV4Price,
   isPlatformHostedDeepSeekV4Model,
   isPlatformHostedImageModel,
@@ -464,16 +463,24 @@ const calculateBasicCost = (
   switch (provider) {
     case "deepseek":
     case "openai":
-    case "deepinfra":
     case "runinfra":
     case "baseten":
       return calculateCacheBasedCost(resolvedPrice, usage, externalPrice);
 
+    // deepinfra：多数模型带上游缓存价（走 cache-hit 折扣）；无缓存价的模型
+    // （如 Claude 系，rate_per_input_token_cached=null）必须把 cache_read 按
+    // input 全价计——calculateCacheBasedCost 在缺 inputCacheHit 时取 0 价，
+    // 会把缓存 token 打成免费。与 nolo 组同一防御。
+    case "deepinfra":
+      return typeof resolvedPrice.inputCacheHit === "number"
+        ? calculateCacheBasedCost(resolvedPrice, usage, externalPrice)
+        : calculateSimpleCost(resolvedPrice, usage, externalPrice);
+
+    // nolo: honor inputCacheHit only when the model defines it (K3 has
     // without it keep simple full-price billing so cached tokens are not
     // priced at 0 — but a platform-hosted model用于 agentic 循环时必须补上
     // 这一项，否则每轮重放的上下文会被按 input 原价重复计费。
     case "nolo":
-    case "upstream-k3":
       return typeof resolvedPrice.inputCacheHit === "number"
         ? calculateCacheBasedCost(resolvedPrice, usage, externalPrice)
         : calculateSimpleCost(resolvedPrice, usage, externalPrice);
@@ -621,23 +628,6 @@ export const calculatePrice = ({
       );
       const costs = calculateBasicCost(
         hostedModel,
-        usage,
-        provider,
-        externalPrice,
-        billingServiceTier,
-        nowMs
-      );
-      const pay = calculatePayDistribution(costs, externalPrice, sharingLevel);
-      return { cost: sanitizeCost(costs.charge), pay };
-    }
-
-    // Claude 系已下架（2026-09-01）：存量兼容请求由 glm-5-3-flash 上游实际服务，
-    // 计价跟随实际上游模型（模型目录已无 claude 条目，否则会落到下方零成本
-    // 虚拟模型漏账）。兼容窗口结束后该分支自然失效。
-    if (provider === "nolo" && isPlatformHostedClaudeModel(modelName)) {
-      const compatModel = getModelConfig("nolo", PLATFORM_HOSTED_GLM_53_FLASH_MODEL);
-      const costs = calculateBasicCost(
-        compatModel,
         usage,
         provider,
         externalPrice,

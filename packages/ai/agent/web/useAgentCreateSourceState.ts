@@ -356,6 +356,7 @@ export function useAgentCreateSourceState({
         oauthConnected: false,
         credentialSynced: false,
         presetId: "",
+        // Kimi K3 (baseten upstream) defaults to high reasoning for stronger output;
         // other platform models keep the schema default (medium).
         reasoningEffort:
           platformModel === PLATFORM_HOSTED_KIMI_K3_MODEL

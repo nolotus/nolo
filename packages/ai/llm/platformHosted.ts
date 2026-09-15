@@ -17,7 +17,12 @@ import {
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
+  PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
+  PLATFORM_HOSTED_GPT_56_SOL_MODEL,
+  PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
+  PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
   PLATFORM_HOSTED_GLM_53_MODEL,
   PLATFORM_HOSTED_GLM_52_MODEL,
   PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
@@ -32,7 +37,6 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
-  PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
@@ -45,6 +49,7 @@ export const PLATFORM_HOSTED_CLAUDE_MODELS = [
   PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
 ] as const;
 
 export const isPlatformHostedClaudeModel = (
@@ -103,16 +108,19 @@ export const PLATFORM_HOSTED_KIMI_PRICE = {
 } as const;
 
 /**
+ * Kimi K3 上游为 Baseten（inference.baseten.co，key 用 BASETEN_API_KEY，body model
+ * https://www.baseten.co/library/kimi-k3/ ，2026-09-15）× 8 = 24 / 2.4 / 120 credits。
  */
 export const PLATFORM_HOSTED_KIMI_K3_PRICE = {
-  input: 16,
-  inputCacheHit: 2,
-  output: 64,
+  input: toPlatformCredits(3), // 24.0 credits
+  inputCacheHit: toPlatformCredits(0.3), // 2.4 credits
+  output: toPlatformCredits(15), // 120.0 credits
 } as const;
 
 /**
- * GLM 5.3（平台托管语义）：记录侧展示与主键为 `glm-5.3`（兼容历史 `glm-5.2`），
- * 保持 11.2 / 35.2 credits 不随上游变动（上游成本低于平台定价），
+ * GLM 5.3（平台托管语义）：记录侧展示与主键为 `glm-5.3`（兼容历史 `glm-5.2` 的
+ * legacy remap），实际上游为 Baseten 的 zai-org/GLM-5.3（key 用 BASETEN_API_KEY）。
+ * https://www.baseten.co/library/glm-53/ ，2026-09-15）× 8 = 11.2 / 1.12 / 35.2 credits。
  */
 export const isPlatformHostedGlmModel = (
   model?: string | null,
@@ -125,8 +133,55 @@ export const isPlatformHostedGlm53Model = isPlatformHostedGlmModel;
 
 export const PLATFORM_HOSTED_GLM_PRICE = {
   input: 7.84, // 11.2 credits
-  inputCacheHit: toPlatformCredits(0.06), // 0.48 credits
+  inputCacheHit: toPlatformCredits(0.14), // 1.12 credits
   output: 24.64, // 35.2 credits (35.2 = 35.2)
+} as const;
+
+/**
+ * Claude 系（平台托管语义，DeepInfra 上游，官方 id 与平台 id 同名）。
+ * DeepInfra 这批模型无缓存价（rate_per_input_token_cached=null），故不设
+ * inputCacheHit——计费侧按 input 全价计，缓存 token 不会被打 0 价漏账。
+ */
+export const PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE = {
+  input: toPlatformCredits(10), // 80 credits
+  output: toPlatformCredits(50), // 400 credits
+} as const;
+export const PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE = {
+  input: toPlatformCredits(5), // 40 credits
+  output: toPlatformCredits(25), // 200 credits
+} as const;
+export const PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE = {
+  input: toPlatformCredits(3), // 24 credits
+  output: toPlatformCredits(15), // 120 credits
+} as const;
+export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE = {
+  input: toPlatformCredits(1), // 8 credits
+  output: toPlatformCredits(5), // 40 credits
+} as const;
+
+/**
+ * GPT-6 / GPT-5.6 系（平台托管语义，OpenAI 官方 chat.completions）。
+ * 价目，平台价不随档位浮动。
+ */
+export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
+  input: toPlatformCredits(10), // 80 credits
+  inputCacheHit: toPlatformCredits(1), // 8 credits
+  output: toPlatformCredits(50), // 400 credits
+} as const;
+export const PLATFORM_HOSTED_GPT_56_SOL_PRICE = {
+  input: toPlatformCredits(4), // 32 credits
+  inputCacheHit: toPlatformCredits(0.4), // 3.2 credits
+  output: toPlatformCredits(20), // 160 credits
+} as const;
+export const PLATFORM_HOSTED_GPT_56_TERRA_PRICE = {
+  input: toPlatformCredits(2), // 16 credits
+  inputCacheHit: toPlatformCredits(0.2), // 1.6 credits
+  output: toPlatformCredits(12), // 96 credits
+} as const;
+export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
+  input: toPlatformCredits(0.2), // 1.6 credits
+  inputCacheHit: toPlatformCredits(0.02), // 0.16 credits
+  output: toPlatformCredits(1.2), // 9.6 credits
 } as const;
 
 /**
@@ -309,12 +364,6 @@ export const PLATFORM_HOSTED_DEEPSEEK_PRO_OFF_PEAK_PRICE = {
   output: toCnyCredits(13.5), // ¥13.5
 } as const;
 
-export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE = {
-  input: toPlatformCredits(0.05),
-  inputCacheHit: toPlatformCredits(0.01),
-  output: toPlatformCredits(0.15),
-} as const;
-
 /** 已并入 deepseek-flash 计费的旧名（官方仍接受但按 flash 计费）。 */
 export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_MODELS = [
   "deepseek-v4-flash",
@@ -449,16 +498,6 @@ export const resolvePlatformDeepseekFlashRoute = resolvePlatformDeepseekRoute;
 
 export const platformHostedModels = [
   {
-    name: PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL,
-    displayName: "Nemotron 3.5 Lightning 30B",
-    hasVision: false,
-    price: { ...PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_PRICE },
-    maxOutputTokens: 32768,
-    contextWindow: 262144,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-  },
-  {
     name: PLATFORM_HOSTED_KIMI_K3_MODEL,
     displayName: "Kimi K3",
     hasVision: true,
@@ -557,9 +596,85 @@ export const platformHostedModels = [
     supportsReasoningEffort: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
-  // Claude 系已下架（2026-09-01），不再出现在 nolo 托管模型列表；旧模型名请求由
-  // platformHostedRoutingTable 重映射到 glm-5-3-flash 做兼容。deepinfra 直连通道
-  // （用户自有 key）不受影响，见 ./deepinfra.ts。
+  // Claude 系（真实 DeepInfra 模型，官方 id 与平台 id 同名）：无缓存价，
+  // 计费按 input 全价（见 calculatePrice 的 deepinfra 分支）。
+  {
+    name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
+    displayName: "Claude Sonnet 5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE },
+    maxOutputTokens: 4092,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
+    name: PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
+    displayName: "Claude Opus 5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_OPUS_5_PRICE },
+    maxOutputTokens: 4092,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
+    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
+    displayName: "Claude Fable 5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_PRICE },
+    maxOutputTokens: 4092,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
+    name: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+    displayName: "Claude Haiku 4.5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE },
+    maxOutputTokens: 4092,
+    contextWindow: 200_000,
+    supportsTool: false,
+  },
+  // GPT-6 / GPT-5.6 系：OpenAI 官方 chat.completions，平台价按短上下文价目。
+  {
+    name: PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
+    displayName: "GPT-6 Astra",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_6_ASTRA_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GPT_56_SOL_MODEL,
+    displayName: "GPT-5.6 Sol",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_56_SOL_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
+    displayName: "GPT-5.6 Terra",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_56_TERRA_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
+    displayName: "GPT-5.6 Luna",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_56_LUNA_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
   {
     name: PLATFORM_HOSTED_GROK_4_6_MODEL,
     displayName: "Grok 4.6",

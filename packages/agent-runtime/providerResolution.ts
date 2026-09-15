@@ -488,8 +488,9 @@ export async function buildProviderExecutionPlan(args: {
     gateError.detail = buildClientVersionGateErrorDetail(clientVersionGate);
     throw gateError;
   }
-  // 查询使用；对外 provider 语义仍是 "nolo"。custom 模式不设置（用户自带
-  // provider 的行为不变）。
+  // 平台托管分流出的真实上游 id（baseten / runinfra / google…），
+  // 供 usage 白名单查询使用；对外 provider 语义仍是 "nolo"。custom 模式不设置
+  // （用户自带 provider 的行为不变）。
   const platformUsageProvider = resolvePlatformHostedCredentialProvider(provider, model);
   const endpoint = transportDecision.transport === "proxy"
     ? resolvePlatformProviderEndpoint(agentConfig)

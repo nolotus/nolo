@@ -43,8 +43,6 @@ export const PLATFORM_CHAT_COMPLETIONS_ENDPOINTS: Readonly<
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   // Moonshot AI（月之暗面）开放平台 OpenAI 兼容模式（按量计费）
   moonshot: "https://api.moonshot.cn/v1/chat/completions",
-  // 平台托管 Kimi K3 的实际上游
-  crof: "https://crof.ai/v1/chat/completions",
   // 平台托管 GLM 5.3 Flash 的实际上游（RunInfra 独家廉价快档）
   runinfra: "https://api.runinfra.ai/v1/chat/completions",
   // 无 nolo 默认上游：平台托管模型全部显式分流，未识别模型返回 undefined

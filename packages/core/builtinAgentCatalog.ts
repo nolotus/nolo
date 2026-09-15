@@ -182,9 +182,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     provider: "openai",
     model: "gpt-5.5-pro",
   },
-  // Claude Sonnet/Opus/Fable 5 已从广场下架（2026-09-01，平台停止维护 Claude 系）：
-  // 存量记录由 modelUpgradeTable 迁移到 nolo/glm-5-3-flash，兼容期请求由
-  // platformHostedRoutingTable 重映射；客户端下架提示走 publicAgents.removedFromPlaza。
+  // Claude Sonnet/Opus/Fable 5 广场入口 2026-09-01 下架；平台托管通道已于
+  // 2026-09-15 恢复真实 DeepInfra 模型（nolo 目录重新上架）。广场重新上架另行决策。
   // Gemini 文本档只上架最新一代：旧版留在广场只会分散选择、拉长列表，而
   // 用户想要的是「最新的那个 Gemini」。旧版模型仍可保留用于兼容历史请求，
   // （modelAbility / 定价表照旧），下架的只是广场入口。

@@ -270,8 +270,8 @@ function transcriptLength(messages: Array<{ role: string; content: string }>): n
 function buildTitleSystemPrompt(existingTitle?: string): string {
   const title = existingTitle?.trim();
   // 标题路径统一 json mode：模型把答案约束进 {"title": "..."} 并跳过 thinking
-  // （Nemotron 实测 completion 16-18 tokens vs 纯文本 1000-3000；glm 同样有效且
-  // 输出更贴题）。response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，
+  // （json mode 实测 completion 16-18 tokens vs 纯文本 1000-3000，输出更贴题）。
+  // response_format 与 reasoning_effort 同发会被 RunInfra 400 拒绝，
   // 故标题请求不发 reasoning_effort。
   const base = `${BUILTIN_TITLE_LLM_CONFIG.prompt}\n输出格式：返回 JSON 对象 {"title": "<标题>"}，除此之外不要有任何字符。`;
   return title

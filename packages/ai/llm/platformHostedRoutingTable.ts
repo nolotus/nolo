@@ -20,7 +20,12 @@ import {
 export const PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL = "anthropic/claude-sonnet-5";
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL = "anthropic/claude-opus-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL = "anthropic/claude-fable-5";
+export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5";
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
+export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
+export const PLATFORM_HOSTED_GPT_56_SOL_MODEL = "gpt-5.6-sol";
+export const PLATFORM_HOSTED_GPT_56_TERRA_MODEL = "gpt-5.6-terra";
+export const PLATFORM_HOSTED_GPT_56_LUNA_MODEL = "gpt-5.6-luna";
 export const PLATFORM_HOSTED_KIMI_K26_OPENROUTER_MODEL_ID = "qwen/qwen3.8-27b";
 export const PLATFORM_HOSTED_GLM_53_MODEL = "glm-5.3";
 export const PLATFORM_HOSTED_GLM_52_MODEL = "glm-5.2";
@@ -39,7 +44,6 @@ export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL = "deepseek-v4-flas
 export const PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro";
 /** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_LEGACY_DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash";
-export const PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL = "nemotron-3-5-lightning-30b";
 
 /**
  * 平台托管上游 id（credential / usage 白名单 / keyName 共用）。
@@ -51,7 +55,6 @@ export type PlatformHostedUpstreamId =
   | "openrouter"
   | "runinfra"
   | "baseten"
-  | "upstream-k3"
   | "google"
   | "openai"
   | "deepseek";
@@ -124,18 +127,22 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
+  // GLM 5.3 & GLM 5.2 -> Baseten（inference.baseten.co）
   [PLATFORM_HOSTED_GLM_53_MODEL]: {
-    endpoint: "https://crof.ai/v1/chat/completions",
-    usageProvider: "upstream-k3",
-    keyName: "upstream-k3",
+    endpoint: "https://inference.baseten.co/v1/chat/completions",
+    usageProvider: "baseten",
+    keyName: "baseten",
+    // Baseten model library 的官方 id
+    upstreamModelId: "zai-org/GLM-5.3",
     wire: "chat.completions",
     agentRunHosted: true,
   },
   [PLATFORM_HOSTED_GLM_52_MODEL]: {
-    endpoint: "https://crof.ai/v1/chat/completions",
-    usageProvider: "upstream-k3",
-    keyName: "upstream-k3",
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_MODEL,
+    endpoint: "https://inference.baseten.co/v1/chat/completions",
+    usageProvider: "baseten",
+    keyName: "baseten",
+    // legacy 5.2 显式 remap 到 baseten 的 zai-org/GLM-5.3，不得透传 "glm-5.2"
+    upstreamModelId: "zai-org/GLM-5.3",
     wire: "chat.completions",
     agentRunHosted: true,
   },
@@ -156,11 +163,13 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
   },
+  // Kimi K3 -> Baseten（inference.baseten.co；model library 的 moonshotai/Kimi-K3）
   // wire 要求专属 body quirk（删采样参数 + max_completion_tokens），旧客户端本地直连必断。
   [PLATFORM_HOSTED_KIMI_K3_MODEL]: {
-    endpoint: "https://crof.ai/v1/chat/completions",
-    usageProvider: "upstream-k3",
-    keyName: "upstream-k3",
+    endpoint: "https://inference.baseten.co/v1/chat/completions",
+    usageProvider: "baseten",
+    keyName: "baseten",
+    upstreamModelId: "moonshotai/Kimi-K3",
     wire: "chat.completions",
     agentRunHosted: true,
     minClientVersion: PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
@@ -226,32 +235,70 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     wire: "chat.completions",
     agentRunHosted: true,
   },
-  // Claude 系已下架（2026-09-01）：旧模型名保留路由做兼容，一律重映射到
-  // RunInfra 的 glm-5-3-flash（同 kimi-k2.6 → qwen 先例）。存量 agent 记录由
-  // modelUpgradeTable 迁移，这里兜住迁移窗口期与漏网请求。
+  // Claude 系（真实模型）：DeepInfra 官方 id 与平台 id 同名，无需重映射。
+  // DeepInfra 这批模型无缓存价（rate_per_input_token_cached=null），计费侧对
+  // 无 inputCacheHit 的 deepinfra 模型按 input 全价计（见 calculatePrice）。
   [PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   },
   [PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
   },
   [PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
-    upstreamModelId: PLATFORM_HOSTED_GLM_53_FLASH_MODEL,
+  },
+  [PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL]: {
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // GPT-6 / GPT-5.6 系（OpenAI 官方 chat.completions）：
+  // 平台价按短上下文价目定（长上下文档差价由平台吸收），见 platformHosted.ts。
+  [PLATFORM_HOSTED_GPT_6_ASTRA_MODEL]: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    usageProvider: "openai",
+    keyName: "openai",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_GPT_56_SOL_MODEL]: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    usageProvider: "openai",
+    keyName: "openai",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_GPT_56_TERRA_MODEL]: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    usageProvider: "openai",
+    keyName: "openai",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_GPT_56_LUNA_MODEL]: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    usageProvider: "openai",
+    keyName: "openai",
+    wire: "chat.completions",
+    agentRunHosted: true,
   },
   // Grok -> xAI（server agentRun 侧未分流，保持 no upstream route 报错）
   [PLATFORM_HOSTED_GROK_4_6_MODEL]: {
@@ -268,15 +315,6 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     keyName: "openai",
     wire: "responses",
     agentRunHosted: true,
-  },
-  // Nemotron 标题 LLM 内部专用，走 chatProxy；agentRun 不分流。
-  [PLATFORM_HOSTED_NEMOTRON_35_LIGHTNING_MODEL]: {
-    endpoint: "https://api.runinfra.ai/v1/chat/completions",
-    usageProvider: "runinfra",
-    keyName: "runinfra",
-    upstreamModelId: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
-    wire: "chat.completions",
-    agentRunHosted: false,
   },
   // DeepSeek Flash -> DeepSeek Responses API（agentRun 走专用 responses 编排）
   [PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL]: {

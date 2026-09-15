@@ -66,43 +66,9 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
   },
   // 注意：nolo/deepseek-v4-pro 不迁移——V4 Pro 已于 2026-09-14 恢复为平台托管
   // 一等模型，存量 pro 记录留在 pro。
-  // Claude 系 2026-09-01 全线停止维护（广场下架 + nolo 托管列表移除），存量记录
-  // 一律兼容迁移到 nolo GLM 5.3 Flash；兼容期请求由 platformHosted 路由表重映射。
-  {
-    from: { provider: "deepinfra", model: "anthropic/claude-sonnet-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "deepinfra", model: "anthropic/claude-opus-4-8" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "deepinfra", model: "anthropic/claude-opus-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "deepinfra", model: "anthropic/claude-fable-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），记录统一迁移到 nolo GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "nolo", model: "anthropic/claude-sonnet-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "nolo", model: "anthropic/claude-opus-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
-  },
-  {
-    from: { provider: "nolo", model: "anthropic/claude-fable-5" },
-    to: { provider: "nolo", model: "glm-5-3-flash" },
-    reason: "Claude 系停止维护（2026-09-01），nolo 存量记录迁移到 GLM 5.3 Flash",
-  },
+  // Claude 系 2026-09-15 起恢复为真实平台托管（DeepInfra 官方上游，
+  // anthropic/claude-{fable,opus,sonnet}-5 + haiku-4-5），存量 claude 记录
+  // 不再迁移，直接命中路由表的真实 Claude 分流。
   {
     from: { provider: "fireworks", model: "accounts/fireworks/models/minimax-m3" },
     to: { provider: "nolo", model: "deepseek-flash" },
@@ -121,13 +87,13 @@ export const MODEL_UPGRADE_TABLE: readonly ModelUpgrade[] = [
   {
     from: { provider: "nolo", model: "glm-5.2" },
     to: { provider: "nolo", model: "glm-5.3" },
-    reason: "GLM 5.2 升级为 GLM 5.3（OpenRouter z-ai/glm-5.3），统一走 nolo 平台托管",
+    reason: "GLM 5.2 升级为 GLM 5.3（baseten zai-org/GLM-5.3），统一走 nolo 平台托管",
     kind: "upgrade",
   },
   {
     from: { provider: "zai", model: "glm-5.2" },
     to: { provider: "nolo", model: "glm-5.3" },
-    reason: "GLM 5.2 升级为 GLM 5.3（OpenRouter z-ai/glm-5.3），统一走 nolo 平台托管",
+    reason: "GLM 5.2 升级为 GLM 5.3（baseten zai-org/GLM-5.3），统一走 nolo 平台托管",
   },
 ] as const;
 
@@ -175,15 +141,6 @@ const DELISTED_MODELS = new Set([
   "mimo-v2.5-pro", // Xiaomi MiMo provider 移除（2026-08）
 ]);
 
-/**
- * 平台 nolo 已下架、但直连通道（deepinfra 等用户自有 key）仍可用的模型：
- * 仅 nolo provider 的存量记录兜底到 DeepSeek Flash，直连通道不受影响。
- */
-const NOLO_ONLY_DELISTED_MODELS = new Set([
-  "anthropic/claude-haiku-4-5", // nolo 平台下架（2026-08-14）；deepinfra 直连仍可用
-  "claude-haiku-4-5", // 短名变体
-]);
-
 /** 无兼容替代的下架模型统一兜底目标。 */
 export const DELISTED_MODEL_FALLBACK = {
   provider: "nolo",
@@ -222,14 +179,6 @@ export function lookupModelUpgrade(
       from: { provider: p, model: m },
       to: { ...DELISTED_MODEL_FALLBACK },
       reason: `模型 ${m} 已下架且无兼容替代，统一兜底到 nolo DeepSeek Flash`,
-    };
-  }
-  // 平台 nolo 专属下架：仅 nolo provider 的存量记录兜底，直连通道（deepinfra 等）不受影响。
-  if (p === "nolo" && NOLO_ONLY_DELISTED_MODELS.has(m)) {
-    return {
-      from: { provider: p, model: m },
-      to: { ...DELISTED_MODEL_FALLBACK },
-      reason: `模型 ${m} 已从 nolo 平台下架，兜底到 nolo DeepSeek Flash（直连通道不受影响）`,
     };
   }
   return undefined;

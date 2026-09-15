@@ -211,7 +211,7 @@ export function defineAgentSeed<const T extends AgentSeedInput>(
   ];
   for (const [fieldName, text] of userVisibleTexts) {
     if (!text) continue;
-    const hit = text.match(/平台托管|runinfra|openrouter|crof|ollama/i);
+    const hit = text.match(/平台托管|runinfra|openrouter|ollama/i);
     if (hit) {
       throw new Error(
         `公开 agent seed「${input.name}」的用户可见字段 ${fieldName} 含上游路由/托管渠道词「${hit[0]}」，禁止写入（换供应商不应牵动用户文案；模型厂商名不在此限）`
