@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn as spawnChildProcess } from "node:child_process";
 
@@ -1026,13 +1025,6 @@ async function resolveRuntimeOwnedSpillPath(targetPath: string): Promise<string 
   }
 }
 
-/** Expand a leading `~` / `~/` prefix to the current user's home directory. */
-function expandHomePath(requestedPath: string): string {
-  if (requestedPath === "~") return homedir();
-  if (requestedPath.startsWith("~/")) return resolve(homedir(), requestedPath.slice(2));
-  return requestedPath;
-}
-
 export async function resolveLocalWorkspaceToolPath(args: {
   workspaceRoot: string;
   requestedPath: string;
@@ -1041,7 +1033,7 @@ export async function resolveLocalWorkspaceToolPath(args: {
   allowRuntimeOwnedSpill?: boolean;
 }) {
   const workspaceRoot = resolve(args.workspaceRoot);
-  const targetPath = resolve(workspaceRoot, expandHomePath(args.requestedPath));
+  const targetPath = resolve(workspaceRoot, args.requestedPath);
   const insideWorkspace = isPathInsideWorkspace({ workspaceRoot, targetPath });
   const trustedSpillPath = !insideWorkspace && args.allowRuntimeOwnedSpill === true
     ? await resolveRuntimeOwnedSpillPath(targetPath)

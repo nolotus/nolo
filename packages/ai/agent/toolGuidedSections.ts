@@ -7,7 +7,6 @@
  * 是仓库层级规则。本模块只依赖 agent-runtime/menuUsage，可安全被两个包共用。
  */
 import { MENU_USAGE_INSTRUCTIONS } from "agent-runtime/menuUsage";
-import { TOOL_USE_GUIDANCE } from "agent-runtime/toolUseGuidance";
 import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority";
 
 // ============================================================================
@@ -211,11 +210,6 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
         build: () => TOOL_ROUND_ECONOMY_INSTRUCTIONS,
     },
     {
-        id: "toolUseGuidance",
-        triggerTools: ["execShell"],
-        build: () => TOOL_USE_GUIDANCE,
-    },
-    {
         id: "privilegeEscalation",
         triggerTools: ["execShell"],
         build: () => PRIVILEGE_ESCALATION_INSTRUCTIONS,
@@ -263,7 +257,6 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
  */
 export const TOOL_GUIDED_SECTION_ORDER = [
     "toolRoundEconomy",
-    "toolUseGuidance",
     "privilegeEscalation",
     "agentOrchestration",
     "agentCollaboration",

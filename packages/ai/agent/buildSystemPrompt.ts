@@ -269,7 +269,6 @@ export const buildSystemPromptContext = (options: {
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },
     { id: "core-persona", owner: "agent", cacheScope: "session", content: corePersonaSection },
     { id: "tool-round-economy", owner: "platform", cacheScope: "session", content: toolSections.toolRoundEconomy },
-    { id: "tool-use-guidance", owner: "platform", cacheScope: "session", content: toolSections.toolUseGuidance },
     { id: "privilege-escalation", owner: "platform", cacheScope: "session", content: toolSections.privilegeEscalation },
     { id: "agent-orchestration", owner: "platform", cacheScope: "session", content: toolSections.agentOrchestration },
     { id: "agent-collaboration", owner: "platform", cacheScope: "session", content: toolSections.agentCollaboration },
