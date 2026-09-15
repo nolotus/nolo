@@ -604,7 +604,6 @@ export async function loadCliDialogSummary(args: {
 }): Promise<{
   summary: string;
   summarizedBeforeId?: string;
-  stubbedBeforeId?: string;
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: unknown;
@@ -618,7 +617,6 @@ export async function loadCliDialogSummary(args: {
       : "";
   if (!summary) return null;
   const summarizedBeforeId = (record as any).summarizedBeforeId;
-  const stubbedBeforeId = (record as any).stubbedBeforeId;
   const sourceHash = (record as any).sourceHash;
   const sourceCount = (record as any).sourceCount;
   // 键存在即透传（值为任意），由 validateStoredSummary 判无效：
@@ -628,9 +626,6 @@ export async function loadCliDialogSummary(args: {
     summary,
     ...(typeof summarizedBeforeId === "string" && summarizedBeforeId
       ? { summarizedBeforeId }
-      : {}),
-    ...(typeof stubbedBeforeId === "string" && stubbedBeforeId
-      ? { stubbedBeforeId }
       : {}),
     ...(typeof sourceHash === "string" && sourceHash
       ? { sourceHash }
@@ -648,7 +643,6 @@ export async function saveCliDialogSummary(args: {
   dialogId: string;
   summary: string;
   summarizedBeforeId?: string;
-  stubbedBeforeId?: string;
   sourceHash?: string;
   sourceCount?: number;
   schemaVersion?: number;
@@ -675,9 +669,6 @@ export async function saveCliDialogSummary(args: {
     ...(args.summarizedBeforeId !== undefined
       ? { summarizedBeforeId: args.summarizedBeforeId }
       : {}),
-    // 始终写入 stubbedBeforeId（包括 undefined → 清空旧 stub），保证
-    // 摘要路径生成新 summary 后旧 stub 边界被正确清除。
-    stubbedBeforeId: args.stubbedBeforeId,
     ...(args.sourceHash !== undefined
       ? { sourceHash: args.sourceHash }
       : {}),
@@ -688,7 +679,6 @@ export async function saveCliDialogSummary(args: {
       ? { schemaVersion: args.schemaVersion }
       : {}),
     compressionCount,
-    summaryPending: false,
     updatedAt: new Date().toISOString(),
   });
 }

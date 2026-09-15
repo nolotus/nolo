@@ -183,8 +183,6 @@ export type AgentRuntimeSaveTurnInput = {
 export type AgentRuntimeDialogSummary = {
   summary: string;
   summarizedBeforeId?: string;
-  /** 老工具输出 stub 档边界：此 id 之前（summarizedBeforeId 之后）的 tool 结果被替换为 stub。 */
-  stubbedBeforeId?: string;
   /**
    * 摘要锚点内容寻址校验：summarizedBeforeId 及其之前消息切片的 SHA-256
    * （JSON.stringify 后哈希，hex）。历史被 fork/编辑/裁剪后重算哈希不匹配，
@@ -240,7 +238,6 @@ export type AgentRuntimeHostAdapter = {
     dialogId: string;
     summary: string;
     summarizedBeforeId?: string;
-    stubbedBeforeId?: string;
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: number;

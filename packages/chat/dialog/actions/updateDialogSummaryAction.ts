@@ -7,9 +7,12 @@ import { patch, selectById } from "database/dbSlice";
 import { DialogConfig, Agent } from "app/types";
 import { getModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "ai/llm/getModelContextWindow";
 import { extractCustomId } from "core/prefix";
+import {
+    notifyCompressionFailure,
+    notifyCompressionSuccess,
+} from "./compressionNotice";
 import type { Message } from "chat/messages/types";
 import { planCompression } from "../../../ai/context/planCompression";
-import { estimateTokenCount } from "../../../ai/context/tokenUtils";
 import { extractReferenceKeysFromMessage } from "./extractReferenceKeys";
 import {
     COMPACTION_SUMMARY_SYSTEM_PROMPT,
@@ -50,6 +53,13 @@ export const updateDialogSummaryAction = async (
         preFetchedMessages?: Message[];
         force?: boolean;
         reason?: "task_completed" | "context_budget" | "manual";
+        /**
+         * 本轮最后一次 provider 调用的真实 input_tokens。
+         * 压缩触发只认这个真实遥测；缺失时 planCompression 落估算兜底。
+         * 传原始 token 数而非比例：与 contextWindow 的换算在这里完成，
+         * 保证分子分母同源。
+         */
+        lastRealInputTokens?: number;
     },
     thunkApi: any
 ) => {
@@ -89,10 +99,16 @@ export const updateDialogSummaryAction = async (
             contextWindow,
             force,
             reason: args.reason,
-            // 防死亡螺旋：用 summary 长度作为上次压缩后的基线。
-            lastCompactedTokenCount: dialogConfig.summary
-                ? estimateTokenCount(dialogConfig.summary)
-                : undefined,
+            ...(typeof args.lastRealInputTokens === "number" &&
+            args.lastRealInputTokens > 0 &&
+            contextWindow > 0
+                ? {
+                    realContextUsagePercent: Math.min(
+                        1,
+                        args.lastRealInputTokens / contextWindow,
+                    ),
+                }
+                : {}),
         });
 
         if (!plan.shouldCompress) return;
@@ -147,7 +163,6 @@ export const updateDialogSummaryAction = async (
                             summarizedBeforeId: newSummarizedBeforeId,
                             referenceKeys: Array.from(extractedKeys),
                             compressionCount: currentCount + 1,
-                            summaryPending: false, // Explicitly clear pending flag
                         },
                     })
                 ).unwrap();
@@ -162,9 +177,19 @@ export const updateDialogSummaryAction = async (
                     // summaryUsage 需要 runLlm 改造才能获取，当前留空。
                 });
                 console.log(formatCompactionMetricsLog(metrics));
+
+                // 压缩可见性：自动压缩成功必须让用户无成本感知，
+                // 否则「有没有生效」只能靠猜。手动 /compact 已有自己的
+                // 进度反馈，这里只对非 manual 的自动触发通知。
+                if (args.reason !== "manual") {
+                    notifyCompressionSuccess();
+                }
             }
         } catch (err) {
             console.error("[ContextCompression] Failed:", err);
+            // 失败也要可见：此前只打 console，用户侧表现为
+            // 「超限了也没自动压缩」且没有任何线索。
+            notifyCompressionFailure(err);
         }
     } finally {
         summarizingDialogs.delete(dialogKey);

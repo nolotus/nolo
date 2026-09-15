@@ -12,8 +12,6 @@
 import { createHash } from "node:crypto";
 
 import { planCompression } from "../ai/context/planCompression";
-import { TOOL_STUB_TEXT } from "../ai/context/planCompression";
-import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { canonicalizeToolName } from "./toolNameAliases";
 import {
@@ -93,7 +91,7 @@ export function hashSummarySourceSlice(
  *  - (a) summarizedBeforeId 在当前历史找不到 → 无效
  *  - (b) 找得到但重算切片哈希 ≠ stored.sourceHash → 无效（历史被编辑）
  *  - (c) 当前 history.length < stored.sourceCount → 历史被裁剪 → 无效
- * 任一无效 → 返回 null（丢弃摘要与 stub，由决策层重新压缩）。
+ * 任一无效 → 返回 null（丢弃摘要，由决策层重新压缩）。
  * stored.sourceHash 缺失（旧记录）→ 返回 undefined（保持现有 findIndex 行为）。
  */
 export function validateStoredSummary(args: {
@@ -159,8 +157,6 @@ export function projectHistoryWithSummary(args: {
   history: AgentRuntimeChatMessage[];
   summary: string;
   summarizedBeforeId?: string;
-  /** 老工具输出 stub 边界：此 id 及其之前（summarizedBeforeId 之后）的 tool 结果 content 被替换为 stub 文本。 */
-  stubbedBeforeId?: string;
 }): AgentRuntimeChatMessage[] {
   const bridged = toPlanCompressionMessages(args.history);
   let startIndex = 0;
@@ -169,69 +165,13 @@ export function projectHistoryWithSummary(args: {
     if (found !== -1) startIndex = found + 1;
   }
 
-  let stubEndIndex = -1;
-  if (args.stubbedBeforeId) {
-    const found = bridged.findIndex((m) => m.id === args.stubbedBeforeId);
-    if (found !== -1) stubEndIndex = found;
-  }
+  const projected = args.history.slice(startIndex);
 
-  const projected = args.history.slice(startIndex).map((message, i) => {
-    const absIndex = startIndex + i;
-    // stub 区间：summarizedBeforeId 之后、stubbedBeforeId 及其之前
-    if (
-      stubEndIndex !== -1 &&
-      message.role === "tool" &&
-      absIndex <= stubEndIndex
-    ) {
-      const content =
-        typeof message.content === "string"
-          ? TOOL_STUB_TEXT
-          : Array.isArray(message.content)
-            ? [{ type: "text" as const, text: TOOL_STUB_TEXT }]
-            : TOOL_STUB_TEXT;
-      return { ...message, content };
-    }
-    return message;
-  });
-
-  // stub-only 投影：summary 为空时不 prepend 空摘要消息，只做 stub 替换。
-  // 这避免「无已有摘要、首次进 stub 档」时把一条空摘要塞进 provider 历史。
   const summaryMsg =
     args.summary.trim().length > 0
       ? [buildLocalSummaryHistoryMessage(args.summary)]
       : [];
   return [...summaryMsg, ...projected];
-}
-
-/**
- * 把已持久化的 stubbedBeforeId 应用到 history 的一个副本上（等长等序，只替换
- * tool 消息的 content，不增删任何消息）。用于两个场景：
- * - HIGH-2：喂给 planCompression 的规划输入必须「已应用 stub」，否则已 stub 的
- *   工具输出会被再次计入 savedTokens（重复计入），可能反复选中 stub 档而投影
- *   仍超预算。
- * - 位置 id 契约：返回数组与 canonical history 逐位对齐，summarizedBeforeId /
- *   stubbedBeforeId 的 findIndex 对齐不受影响。
- */
-function applyStoredStubToHistory(
-  history: AgentRuntimeChatMessage[],
-  stubbedBeforeId?: string,
-): AgentRuntimeChatMessage[] {
-  if (!stubbedBeforeId) return history;
-  const bridged = toPlanCompressionMessages(history);
-  const stubEndIndex = bridged.findIndex((m) => m.id === stubbedBeforeId);
-  if (stubEndIndex === -1) return history;
-  return history.map((message, i) => {
-    if (i <= stubEndIndex && message.role === "tool") {
-      const content =
-        typeof message.content === "string"
-          ? TOOL_STUB_TEXT
-          : Array.isArray(message.content)
-            ? [{ type: "text" as const, text: TOOL_STUB_TEXT }]
-            : TOOL_STUB_TEXT;
-      return { ...message, content };
-    }
-    return message;
-  });
 }
 
 /**
@@ -273,18 +213,22 @@ export type LocalAutoCompactionResult = {
   metrics?: CompactionMetrics;
   /**
    * 压缩观测事件字段（可选，能映射就映射、拿不到就不给，禁止为凑数重计算）。
-   * 全部复用已有 CompactionMetrics / plan.stub 口径，与 executionObservation
+   * 全部复用已有 CompactionMetrics 口径，与 executionObservation
    * 的 compaction 事件直接对齐。
    */
-  reason?: "tool_stub" | "context_budget" | "cold_resume" | "invalid_summary";
+  reason?: "context_budget" | "cold_resume" | "invalid_summary";
   /** 压缩前估算 token（before = previousSummary + compressed）。 */
   beforeTokens?: number;
   /** 压缩后估算 token（after = newSummary + retained）。 */
   afterTokens?: number;
   /** 压缩省下的估算 token（before - after）。 */
   savedTokens?: number;
-  /** stub 路径：被替换为 stub 档的工具输出条数。 */
-  stubbedCount?: number;
+  /**
+   * 压缩决策命中但执行失败（目前是摘要 LLM 调用失败）时的简述。
+   * 调用方据此发「压缩失败」观测事件——失败不能只有 console.warn，
+   * 否则用户侧表现为「超限了也没压缩」且无任何线索。
+   */
+  failureMessage?: string;
 };
 
 export async function maybeAutoCompactLocalHistory(args: {
@@ -323,7 +267,6 @@ export async function maybeAutoCompactLocalHistory(args: {
   let stored: {
     summary: string;
     summarizedBeforeId?: string;
-    stubbedBeforeId?: string;
     sourceHash?: string;
     sourceCount?: number;
     schemaVersion?: unknown;
@@ -336,7 +279,7 @@ export async function maybeAutoCompactLocalHistory(args: {
   }
 
   // 摘要锚点内容寻址校验：sourceHash 存在时，若历史被 fork/编辑/裁剪导致
-  // 重算哈希不匹配或锚点失效，判摘要无效并连同 stub 一起丢弃，走「无摘要」
+  // 重算哈希不匹配或锚点失效，判摘要无效并丢弃，走「无摘要」
   // 路径由决策层重新压缩——否则 findIndex 落空会把投影退化成
   // 「摘要 + 全量历史」（比不压缩更贵）。旧记录缺 sourceHash → 保持原行为。
   // 此外 schemaVersion 已定义且不等于当前版本 → 生成逻辑改版，旧摘要同样判无效。
@@ -379,11 +322,6 @@ export async function maybeAutoCompactLocalHistory(args: {
     typeof stored?.summarizedBeforeId === "string"
       ? stored.summarizedBeforeId
       : undefined;
-  const storedStubbedBeforeId =
-    typeof stored?.stubbedBeforeId === "string" &&
-    stored.stubbedBeforeId
-      ? stored.stubbedBeforeId
-      : undefined;
 
   const contextWindow =
     typeof args.contextWindow === "number" &&
@@ -392,13 +330,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       ? args.contextWindow
       : getModelContextWindow(args.model ?? "");
 
-  // HIGH-2：规划输入必须是「应用了 storedStubbedBeforeId 的历史副本」——已 stub
-  // 的工具输出不能再以 canonical 原文计入 savedTokens（否则会重复计入、反复选中
-  // stub 档而实际投影仍超预算，延误摘要档）。副本等长等序（只替换 tool content），
-  // 位置 id 契约不受影响。摘要 token 由 summary 输入承担，不经消息列表。
-  const allMsgs = toPlanCompressionMessages(
-    applyStoredStubToHistory(history, storedStubbedBeforeId),
-  );
+  const allMsgs = toPlanCompressionMessages(history);
   // Cold-resume 判定：距上次活动很久再继续的对话，provider 前缀缓存必然已过期，
   // 这一轮无论如何都要全量重发整个上下文。那正是压缩最划算的时刻——反正要付
   // 全量未命中的钱，不如让重发的那份小一点，且后续每一轮都跟着受益。
@@ -412,29 +344,22 @@ export async function maybeAutoCompactLocalHistory(args: {
     summarizedBeforeId,
     summary: existingSummary,
     contextWindow,
-    // 防死亡螺旋：用 summary 长度作为上次压缩后的基线。如果新内容没让
-    // totalUsed 比 summary 本身增长超过 minNewTokens，不重复触发。
-    lastCompactedTokenCount: existingSummary
-      ? estimateTokenCount(existingSummary)
-      : undefined,
-    ...(coldResume ? { force: true, reason: "context_budget" as const } : {}),
+    ...(coldResume
+      ? { coldResume: true, reason: "cold_resume" as const }
+      : {}),
     ...(args.realContextUsagePercent !== undefined
       ? { realContextUsagePercent: args.realContextUsagePercent }
       : {}),
   });
 
   const projectExisting = (): LocalAutoCompactionResult => {
-    // HIGH-1：所有返回路径统一走投影，投影始终应用 storedStubbedBeforeId。
-    // summary 为空时省略摘要层（projectHistoryWithSummary 内部处理），但 stub
-    // 照常生效——「已 stub 但本轮不触发压缩」的轮次不能把老工具输出以原文重发。
-    // 仅在确实有内容可投影（摘要或 stub 任一）时才返回压缩投影；否则保持原样。
-    if (!existingSummary.trim() && !storedStubbedBeforeId) return unchanged();
+    // 有已持久化摘要时统一走投影；无摘要保持原样。
+    if (!existingSummary.trim()) return unchanged();
     return {
       history: projectHistoryWithSummary({
         history,
         summary: existingSummary,
         summarizedBeforeId,
-        stubbedBeforeId: storedStubbedBeforeId,
       }),
       compressed: true,
       summaryGenerated: false,
@@ -443,54 +368,6 @@ export async function maybeAutoCompactLocalHistory(args: {
 
   if (!plan.shouldCompress) {
     return projectExisting();
-  }
-
-  // stub 档：零成本回到预算，不生成摘要、不调 LLM。
-  if (plan.stub) {
-    const nextStubbedBeforeId = plan.stub.beforeId;
-    const changed = nextStubbedBeforeId !== storedStubbedBeforeId;
-    if (changed) {
-      try {
-        await adapter.saveDialogSummary({
-          dialogId,
-          summary: existingSummary,
-          summarizedBeforeId,
-          stubbedBeforeId: nextStubbedBeforeId,
-          // stub 档不改锚点切片 → 透传源校验字段保持读写对称
-          sourceHash: stored?.sourceHash,
-          sourceCount: stored?.sourceCount,
-          schemaVersion: COMPACTION_SUMMARY_SCHEMA_VERSION,
-        });
-      } catch (error) {
-        console.warn("[localLoop] saveDialogSummary (stub) failed:", error);
-      }
-    }
-    // stub 档 metrics（reason=tool_stub）
-    const metrics = buildCompactionMetricsFromPlan({
-      reason: "tool_stub",
-      previousSummary: existingSummary,
-      plan,
-      newSummary: existingSummary,
-    });
-    console.log(formatCompactionMetricsLog(metrics));
-
-    return {
-      history: projectHistoryWithSummary({
-        history,
-        summary: existingSummary,
-        summarizedBeforeId,
-        stubbedBeforeId: nextStubbedBeforeId,
-      }),
-      compressed: true,
-      summaryGenerated: false,
-      metrics,
-      reason: "tool_stub",
-      savedTokens: plan.stub.savedTokens,
-      stubbedCount: plan.stub.stubbedCount,
-      beforeTokens:
-        metrics.previousSummaryTokens + metrics.compressedTokens,
-      afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
-    };
   }
 
   try {
@@ -518,15 +395,16 @@ export async function maybeAutoCompactLocalHistory(args: {
       console.warn(
         "[localLoop] auto-compaction produced empty summary; keeping prior projection",
       );
-      return projectExisting();
+      return {
+        ...projectExisting(),
+        failureMessage: "summary model returned empty content",
+      };
     }
 
     await adapter.saveDialogSummary({
       dialogId,
       summary: newSummary,
       summarizedBeforeId: plan.newSummarizedBeforeId,
-      // 新摘要已覆盖 stub 区间 → 清空 stubbedBeforeId
-      stubbedBeforeId: undefined,
       // 内容寻址失效检测：存锚点切片哈希与长度，供下轮载入校验。
       sourceHash: hashSummarySourceSlice(history, plan.newSummarizedBeforeId),
       sourceCount: (() => {
@@ -573,6 +451,10 @@ export async function maybeAutoCompactLocalHistory(args: {
   } catch (error) {
     // 观测/优化功能：摘要失败绝不能让本轮对话失败。
     console.warn("[localLoop] auto-compaction failed:", error);
-    return projectExisting();
+    const failureMessage =
+      error instanceof Error && error.message
+        ? error.message.slice(0, 200)
+        : String(error).slice(0, 200);
+    return { ...projectExisting(), failureMessage };
   }
 }

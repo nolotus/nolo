@@ -76,6 +76,11 @@ import { planContextUsage } from "../ai/context/retention";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { maybeAutoCompactLocalHistory } from "./localAutoCompaction";
+import {
+  resolveCompressionTriggerRatio,
+  truncateToolOutputForContext,
+} from "../ai/context/toolOutputCap";
+import { normalizeUsage } from "../ai/token/normalizeUsage";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOLO_LOOP_TIMING instrumentation — measurement-only, zero behavior change.
@@ -1491,6 +1496,10 @@ export async function runLocalAgentTurn(
     throw error;
   }
   loopTimingMark("loadDialogHistory", 0);
+  // 轮内压缩的 canonical 坐标底稿：store 全量历史（未投影）。
+  // history 随后会被压缩投影/兜底裁剪整体替换（rebind，非原地改），
+  // 该引用保持全量原始顺序不变，锚点坐标与 store 持久化历史对齐。
+  const canonicalHistory = history;
   // Identity block (名称/ID/模型) — session-scope so it sits in the
   // stable prefix. Built from the resolved agentConfig so subscribed/custom
   // agents get their model name injected, matching the web and server paths
@@ -1561,14 +1570,16 @@ export async function runLocalAgentTurn(
 
   // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）。
   // 来源实现说明：
-  // 选择方案 a（adapter 扩展：saveTurn 时把最后一次 provider 调用的真实 input tokens 持久化到
-  // 本地 per-dialog 记录，并在 turn 开始时经 adapter.loadLastContextUsage 读回），并支持方案 b
-  // 作为平滑回退（从 turn-billing.jsonl 尾部小 IO 读取）。
-  // 理由：
-  // 1. dialog 记录是本地 authoritative store，单 key O(1) 读取，开销极小且无全量扫描风险；
-  // 2. 不依赖外部环境变量或特定终端/TUI 审计配置（如 NOLO_TURN_BILLING_AUDIT=0），在 headless / 纯 CLI / 测试环境中均可靠；
-  // 3. 容错回退机制：当 dialog 记录未命中时，尝试从 turn-billing.jsonl 尾部读取；若均缺失则安全回退到估算路径，不编造数值；
-  // 4. saveTurn 处取多轮工具循环中「最后一次 provider 调用」的真实 input tokens（而非累加值 turnUsage），精准反映真实上下文占用。
+  // 轮开始兜底判定的真实遥测：saveTurn 时把最后一次 provider 调用的真实
+  // input tokens 持久化到本地 per-dialog 记录，turn 开始经
+  // adapter.loadLastContextUsage 读回（单 key O(1)，headless/CLI 均可靠）。
+  // 记录缺失（旧对话）安全落到估算兜底。取「最后一次调用」而非累加值，
+  // 精准反映真实上下文占用。主防线是轮内检查（maybeCompactInLoop）。
+  const contextWindow = getModelContextWindow(agentConfig.model ?? "");
+  // 压缩触发线：随窗口留足「单轮工具灌水」余量（见 toolOutputCap.ts）。
+  // 轮开始与轮内 round 之间共用同一条线。
+  const compressionTriggerRatio = resolveCompressionTriggerRatio(contextWindow);
+
   let realContextUsagePercent: number | undefined;
   if (
     input.continueDialogId &&
@@ -1579,7 +1590,6 @@ export async function runLocalAgentTurn(
         input.continueDialogId,
       );
       const inputTokens = usage?.inputTokens;
-      const contextWindow = getModelContextWindow(agentConfig.model);
       // 守卫：数值合理（>0 且 ≤合理上界）才使用；归一化 clamp 到 [0, 1] 比例
       // 归一化陷阱防范：planCompression.normalizeContextUsageRatio 将 >1 视为百分数且要求结果 ≤1。
       // 如果直接传入 >1 的比例（如超限 1.04），会被二次除以 100 变成 1.04% 导致误判；
@@ -1607,6 +1617,40 @@ export async function runLocalAgentTurn(
   // 摘要那次 LLM 调用是一次独立的计费调用，用量必须并入本轮 usage，
   // 否则只出现在 provider 账单上、我们自己的 token 记账看不到。
   let compactionUsage: Record<string, unknown> | undefined;
+
+  // 压缩观测事件：compressed / summaryGenerated / 失败 任一发生才发射；
+  // 无压缩不发射。失败也要发射——「该压没压」必须用户可见。
+  // 轮开始与轮内 round 之间共用同一发射口（emitLoopEvent 本身已 fail-open）。
+  const emitCompactionObservation = (
+    compacted: Awaited<ReturnType<typeof maybeAutoCompactLocalHistory>>,
+  ) => {
+    if (
+      compacted.compressed ||
+      compacted.summaryGenerated ||
+      compacted.failureMessage
+    ) {
+      emitLoopEvent(observationBoundary, {
+        kind: "compaction",
+        atMs: Date.now(),
+        reason: compacted.reason ?? "context_budget",
+        summaryGenerated: compacted.summaryGenerated,
+        compressed: compacted.compressed,
+        ...(compacted.failureMessage
+          ? { failed: true, detail: compacted.failureMessage }
+          : {}),
+        ...(compacted.beforeTokens !== undefined
+          ? { beforeTokens: compacted.beforeTokens }
+          : {}),
+        ...(compacted.afterTokens !== undefined
+          ? { afterTokens: compacted.afterTokens }
+          : {}),
+        ...(compacted.savedTokens !== undefined
+          ? { savedTokens: compacted.savedTokens }
+          : {}),
+      });
+    }
+  };
+
   try {
     const compacted = await maybeAutoCompactLocalHistory({
       adapter: input.adapter,
@@ -1618,35 +1662,13 @@ export async function runLocalAgentTurn(
     });
     history = compacted.history;
     compactionUsage = compacted.usage;
-    // 压缩观测事件：compressed / summaryGenerated 任一为 true 才发射；
-    // 无压缩不发射。事件发射不能影响主流程（emitLoopEvent 本身已 fail-open）。
-    if (compacted.compressed || compacted.summaryGenerated) {
-      emitLoopEvent(observationBoundary, {
-        kind: "compaction",
-        atMs: Date.now(),
-        reason: compacted.reason ?? "context_budget",
-        summaryGenerated: compacted.summaryGenerated,
-        compressed: compacted.compressed,
-        ...(compacted.beforeTokens !== undefined
-          ? { beforeTokens: compacted.beforeTokens }
-          : {}),
-        ...(compacted.afterTokens !== undefined
-          ? { afterTokens: compacted.afterTokens }
-          : {}),
-        ...(compacted.savedTokens !== undefined
-          ? { savedTokens: compacted.savedTokens }
-          : {}),
-        ...(compacted.stubbedCount !== undefined
-          ? { stubbedCount: compacted.stubbedCount }
-          : {}),
-      });
-    }
+    emitCompactionObservation(compacted);
   } catch (error) {
     console.warn("[localLoop] auto-compaction unexpected error:", error);
   }
   loopTimingMark("maybeAutoCompactLocalHistory", 0);
 
-  // 上下文预算兜底：必须在 turnStartIndex 之前裁，否则该索引会指向错误位置。
+  // 上下文预算兜底：必须在消息组装之前裁，否则投影与原始消息错位。
   const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model);
   if (trimmedHistory.droppedCount > 0) {
     history = trimmedHistory.history;
@@ -1658,7 +1680,6 @@ export async function runLocalAgentTurn(
     mergedContextBlockScopes.some((block) => block.content.trim());
   const promptMessageCount =
     agentConfig.prompt?.trim() || hasContextBlocks ? 1 : 0;
-  const turnStartIndex = promptMessageCount + history.length;
   const builtMessages = buildMessages({
     prompt: agentConfig.prompt,
     contextBlockScopes: mergedContextBlockScopes,
@@ -1703,6 +1724,29 @@ export async function runLocalAgentTurn(
     });
   }
 
+  // 本轮产出消息的原始记录（持久化用）。轮内压缩会把工作视图 messages 换成
+  // 「摘要 + 保留尾部」投影；持久化不能跟投影走（否则丢本轮原始消息、且与
+  // 持久化锚点的 canonical 坐标系错位），所以从首轮起独立累计原始消息。
+  const rawTurnMessages: AgentRuntimeChatMessage[] = messages.slice(
+    promptMessageCount + history.length,
+  );
+  const pushMessage = (msg: AgentRuntimeChatMessage) => {
+    messages.push(msg);
+    rawTurnMessages.push(msg);
+  };
+  // 单条工具输出硬上限：让「单轮最大灌水增量」有界，轮内压缩触发线的
+  // 余量公式才成立（见 toolOutputCap.ts）。只截进入上下文/持久化的 content，
+  // 结构化数组 content（图片等）不截。
+  const capToolMessage = (
+    msg: AgentRuntimeChatMessage,
+  ): AgentRuntimeChatMessage =>
+    msg.role === "tool" && typeof msg.content === "string"
+      ? {
+          ...msg,
+          content: truncateToolOutputForContext(msg.content, contextWindow),
+        }
+      : msg;
+
   const userInputText = extractUserInputText(input.input);
   let toolCallCount = 0;
   // 兜底标记（emptyAssistantFallbackReason / emptyAssistantOutputUsable）已
@@ -1727,6 +1771,68 @@ export async function runLocalAgentTurn(
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
   const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
+
+  // 轮内压缩：真实占用 ≥ 触发线时，对「store 全量历史 + 本轮原始消息」
+  // （canonical 坐标）跑压缩管线，持久化新摘要/锚点，然后把发送视图换成
+  // 投影。rawTurnMessages 不参与替换——持久化始终落原始消息，与锚点坐标系
+  // 天然对齐。失败 fail-open（仅警告 + 观测事件），绝不带走本轮。
+  const maybeCompactInLoop = async (): Promise<void> => {
+    if (!input.continueDialogId) return;
+    if (!contextUsage) return;
+    const inputTokens = normalizeUsage(contextUsage as any).input_tokens;
+    if (!inputTokens || inputTokens <= 0) return;
+    const ratio = Math.min(1, inputTokens / contextWindow);
+    if (ratio < compressionTriggerRatio) return;
+    try {
+      const compacted = await maybeAutoCompactLocalHistory({
+        adapter: input.adapter,
+        dialogId: input.continueDialogId,
+        // canonical 坐标：store 全量历史 + 本轮消息的「持久化形态」
+        // （applyPersistedTurnInput 会把首条 user 消息换成 paste 展开形态）。
+        // 锚点与 sourceHash 都必须按持久化形态计算——否则下轮从 store
+        // 重载后重算 hash 必不匹配，摘要被判无效、白付一次摘要调用。
+        history: [
+          ...canonicalHistory,
+          ...applyPersistedTurnInput(
+            rawTurnMessages,
+            input.persistedInput,
+            input.persistedInputReference,
+          ),
+        ],
+        model: agentConfig.model,
+        resolveProvider: resolveProviderOnce,
+        realContextUsagePercent: ratio,
+      });
+      if (compacted.usage) {
+        compactionUsage = addOutOfBandUsage(compactionUsage, compacted.usage);
+      }
+      if (compacted.compressed) {
+        // 发送视图换投影：prompt 前缀保留，历史部分整体替换。
+        // compacted.compressed=false 时 history 是原样返回的 canonical
+        // 全量，不能换（会把完整历史塞回发送视图）。
+        // 投影从 canonical/raw 重建，需重跑循环前的两条管线：
+        // 1. prepareHistoryForNextTurn：规划用持久化形态（paste 全文），
+        //    发送视图必须恢复 context_reference 紧凑引用——否则 collapsed
+        //    paste 的全文会被重新发回 provider，违反 TUI paste 契约；
+        // 2. 毒丸 tool_calls 降级（幂等纯函数）。
+        // 图片剥离不用重跑，发送 seam 每次 provider 调用都会做
+        // filterImagePartsFromMessages。
+        messages = downgradeUnparsableToolCalls([
+          ...messages.slice(0, promptMessageCount),
+          ...prepareHistoryForNextTurn(
+            compacted.history,
+            input.adapter.host === "cli"
+              ? input.contextReferenceResolver
+              : undefined,
+          ),
+        ]).messages;
+      }
+      emitCompactionObservation(compacted);
+    } catch (error) {
+      console.warn("[localLoop] in-loop auto-compaction failed:", error);
+    }
+  };
+
   try {
     // resolveProvider used to sit outside the try: credential / provider-init
     // failures then skipped saveTurn, so TUI lost dialogId and the next
@@ -1747,7 +1853,7 @@ export async function runLocalAgentTurn(
       let injected = false;
       for (const text of pending) {
         if (typeof text !== "string" || !text.trim()) continue;
-        messages.push({ role: "user", content: text });
+        pushMessage({ role: "user", content: text });
         injected = true;
       }
       return injected;
@@ -1968,7 +2074,7 @@ export async function runLocalAgentTurn(
               ? { reasoning_content: result.reasoning_content }
               : {}),
           };
-          messages.push(assistantMessage);
+          pushMessage(assistantMessage);
           if (applyPendingInjections()) {
             // 注入续跑也是一个完整回合的结束：补 roundEnd 标记，让 timing 探针
             // 的相位序列保持「每轮都有 roundEnd」的不变式（与工具调用路径一致），
@@ -1980,6 +2086,7 @@ export async function runLocalAgentTurn(
           // 无注入：撤回刚才的预置 assistant 消息，交回统一的最终追加路径
           // （skipFinalAppend 语义与 thinkContent 附加都在那里处理）。
           messages.pop();
+          rawTurnMessages.pop();
         }
         break;
       }
@@ -2016,7 +2123,9 @@ export async function runLocalAgentTurn(
         if (hasInlineExecutedTools) {
           // Provider 流内已执行所有工具并推完文本（如 Cursor 流），
           // 消费完 outputBlocks 后直接 break 退出循环，单轮即终态，无多轮死循环风险。
-          messages.push(...blocksToOpenAiMessages(outputBlocks));
+          for (const blockMsg of blocksToOpenAiMessages(outputBlocks)) {
+            pushMessage(capToolMessage(blockMsg));
+          }
           skipFinalAppend = true;
           break;
         }
@@ -2024,7 +2133,7 @@ export async function runLocalAgentTurn(
         continue;
       }
       toolCallCount += toolCalls.length;
-      messages.push({
+      pushMessage({
         role: "assistant",
         content: result.content || null,
         ...(result.reasoning_content ? { reasoning_content: result.reasoning_content } : {}),
@@ -2267,17 +2376,19 @@ export async function runLocalAgentTurn(
           metadata: toolResult.metadata,
         });
         loopTimingMark("toolResultFormat", round);
-        messages.push({
-          role: "tool",
-          content: formatToolMessageContent({
+        pushMessage(
+          capToolMessage({
+            role: "tool",
+            content: formatToolMessageContent({
+              toolName,
+              content: toolResult.content,
+              metadata: observedMetadata,
+            }),
+            tool_call_id: toolCall.id,
             toolName,
-            content: toolResult.content,
-            metadata: observedMetadata,
+            ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
           }),
-          tool_call_id: toolCall.id,
-          toolName,
-          ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
-        });
+        );
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
       const toolExecutionGuardVerdict = progressGuard.observeToolExecution(
@@ -2300,6 +2411,10 @@ export async function runLocalAgentTurn(
         };
         break;
       }
+      // 轮内压缩主防线：工具结果灌水之后、下一轮 provider 调用之前。
+      // contextUsage 是刚完成的 provider 调用的真实遥测（手里就有，
+      // 不依赖持久化/估算）。触发线与轮开始共用同一条（compressionTriggerRatio）。
+      await maybeCompactInLoop();
       loopTimingMark("roundEnd", round);
       round += 1;
     }
@@ -2310,7 +2425,7 @@ export async function runLocalAgentTurn(
   // 即使 provider 循环失败（超时/额度/凭证等），也保存 dialog 以便续聊与复盘
   if (loopError) {
     const turnMessages = applyPersistedTurnInput(
-      messages.slice(turnStartIndex),
+      rawTurnMessages,
       input.persistedInput,
       input.persistedInputReference,
     );
@@ -2363,7 +2478,7 @@ export async function runLocalAgentTurn(
       result.emptyAssistantFallbackReason,
       result.reasoning_content,
     );
-    messages.push({
+    pushMessage({
       role: "assistant",
       content: result.content,
       // 与中间轮(:561)一致带上 reasoning_content,让 saveTurn 持久化思维链,
@@ -2375,7 +2490,7 @@ export async function runLocalAgentTurn(
     });
   }
   const turnMessages = applyPersistedTurnInput(
-    messages.slice(turnStartIndex),
+    rawTurnMessages,
     input.persistedInput,
     input.persistedInputReference,
   );

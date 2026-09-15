@@ -384,7 +384,6 @@ export async function compactDialog(
               summarizedBeforeId: plan.newSummarizedBeforeId,
               compressionCount: compressionCount + 1,
               referenceKeys: Array.from(extractedKeys),
-              summaryPending: false,
             });
 
             current.referenceKeys = Array.from(extractedKeys);

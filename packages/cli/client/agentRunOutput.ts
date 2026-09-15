@@ -18,8 +18,8 @@ import { t } from "../tui/i18n";
  * 数字缺失时省略对应片段；savedTokens 缺失时只省略「省约」片段，不做
  * before-after 二次推导（契约：token 数字只来自事件字段，禁止重算）。
  * 输出示例：
- *   `已压缩上下文：stub 12 条工具输出，省约 8.4k tokens`
  *   `已压缩上下文：生成历史摘要，省约 21k tokens`
+ *   `自动上下文压缩失败：provider timeout，本轮以未压缩上下文继续。…`
  */
 /**
  * Bare-CLI assistant identity label suffix: `<agentName> > `. The TUI is the
@@ -52,14 +52,13 @@ export function formatCompactionSummaryLine(
   > | null,
 ): string {
   if (!event) return "";
-  const action =
-    event.reason === "tool_stub"
-      ? "stub 工具输出"
-      : "生成历史摘要";
-  let detail = action;
-  if (typeof event.stubbedCount === "number") {
-    detail = `stub ${event.stubbedCount} 条工具输出`;
+  // 失败优先渲染：自动压缩尝试失败时明确告诉用户本轮是未压缩继续的，
+  // 避免「该压没压」无线索（此前仅 console.warn，TUI 重绘下不可见）。
+  if (event.failed) {
+    const reason = event.detail ? `：${event.detail}` : "";
+    return `${STYLE.dim}自动上下文压缩失败${reason}，本轮以未压缩上下文继续。若反复出现可手动 /compact。${STYLE.reset}\n`;
   }
+  let detail = "生成历史摘要";
   const saved =
     typeof event.savedTokens === "number"
       ? event.savedTokens

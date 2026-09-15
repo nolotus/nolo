@@ -12,6 +12,7 @@ import type { Message } from "../../chat/messages/types";
 import { estimateTokenCount } from "./tokenUtils";
 import { serializeMessageContent } from "../../chat/messages/messageContent";
 import { ConversationLoad, planContextUsage } from "ai/context/retention";
+import { resolveCompressionTriggerRatio } from "./toolOutputCap";
 
 // --- 常量 ---
 
@@ -21,15 +22,25 @@ export const MIN_COMPRESS_COUNT = 5;
 /** 主动归档时保留最后两条原文，避免刚给用户的结论立刻被折叠进 summary。 */
 export const ACTIVE_SUMMARY_TAIL_KEEP_COUNT = 2;
 
-/** stub 档保留最近 N 条 tool 结果原文，更早的 tool 输出被替换为一行 stub。 */
-export const STUB_KEEP_COUNT = 3;
+/**
+ * manual / cold_resume 的实际触发门槛：折叠数（pending - 保留尾部）还要过
+ * MIN_COMPRESS_COUNT，所以 pending 至少要 5 + 2 = 7 条才不会空转。
+ */
+export const MIN_TRIGGER_PENDING_COUNT =
+  MIN_COMPRESS_COUNT + ACTIVE_SUMMARY_TAIL_KEEP_COUNT;
 
-/** 被 stub 的 tool 输出替换成的占位文本。 */
-export const TOOL_STUB_TEXT = "[tool output cleared to save context]";
-
+/**
+ * 压缩触发线（真实 input_tokens / contextWindow 比例）。
+ * 公式与工具输出上限互为基础，真值在 toolOutputCap.ts，这里 re-export
+ * 供决策模块与运行时统一引用。
+ */
 // --- 类型 ---
 
-export type CompressionReason = "task_completed" | "context_budget" | "manual";
+export type CompressionReason =
+  | "task_completed"
+  | "context_budget"
+  | "manual"
+  | "cold_resume";
 
 export interface CompressionInput {
   allMsgs: Message[];
@@ -40,20 +51,11 @@ export interface CompressionInput {
   reason?: CompressionReason;
   realContextUsagePercent?: number;
   /**
-   * 防死亡螺旋守卫的基线 token 数。
-   *
-   * 当前调用方传的是 `estimateTokenCount(currentSummary)`——当前 summary 的
-   * token 估算。因为 totalUsed = summaryTokens + pendingTokens，而基线也是
-   * summaryTokens，守卫不等式 `totalUsed < baseline + minNew` 精确等价于
-   * `pendingTokens < minNew`，即「上次压缩点之后新增消息不足 minNew tokens
-   * 则不压缩」。这是守卫的实际语义，与字面含义（上次压缩的 totalUsed）不同
-   * 但方向安全：基线低估（忽略保留尾部）→ 守卫更宽松 → 不会误拦必要压缩。
-   *
-   * force=true 或 realContextUsagePercent >= 78% 的紧急路径绕过此守卫。
-   * 注意：78% 紧急出口依赖调用方传入真实遥测；若调用方不传 realContextUsagePercent，
-   * 紧急出口只剩 force（cold-resume 需 60 分钟空闲，活跃对话不命中）。
+   * 冷恢复：距上次活动超过 provider 缓存 TTL，缓存反正已冷，
+   * 全价发送时更小的上下文 = 更便宜。此时只要有足量新内容可折叠
+   * 即触发压缩（门槛见 MIN_TRIGGER_PENDING_COUNT）。
    */
-  lastCompactedTokenCount?: number;
+  coldResume?: boolean;
 }
 
 export interface CompressionPlan {
@@ -64,16 +66,6 @@ export interface CompressionPlan {
   newSummarizedBeforeId?: string;
   /** 本次决策相对于 allMsgs 的起点（summarizedBeforeId 之后第一条的下标）。 */
   startIndex: number;
-  /**
-   * stub 档（老工具输出自动压缩）。
-   *
-   * 上下文超预算时，先零成本把较老的 tool 结果 content 替换为一行 stub
-   * （保留最近 STUB_KEEP_COUNT 条原文），回不到预算才走摘要路径。
-   * beforeId：第 (STUB_KEEP_COUNT+1) 倒数第 STUB_KEEP_COUNT+1 条 tool 结果之前那条
-   * 的 id —— 更早的全部 stub；stubbedCount：被 stub 的 tool 消息数；
-   * savedTokens：原 content token 之和减去 stub 文本开销。
-   */
-  stub?: { beforeId: string; stubbedCount: number; savedTokens: number };
 }
 
 // --- 辅助函数（纯函数） ---
@@ -121,17 +113,6 @@ const hasOpenEndedToolCall = (msg: Message | undefined): boolean =>
   !!msg &&
   Array.isArray((msg as any).tool_calls) &&
   (msg as any).tool_calls.length > 0;
-
-const isActiveSummaryWorthDoing = (
-  pendingTokens: number,
-  contextWindow: number
-): boolean => {
-  const minTokens = Math.min(
-    40_000,
-    Math.max(10_000, Math.floor(contextWindow * 0.05))
-  );
-  return pendingTokens >= minTokens;
-};
 
 const classifyConversationLoad = (msgs: Message[]): ConversationLoad => {
   const N = 20;
@@ -192,58 +173,61 @@ function findPendingMessages(
 }
 
 /**
- * 判断是否应该触发压缩（预算/遥测/主动归档）。
+ * 判断是否应该触发压缩。
+ *
+ * 触发真值只有一条线：provider 上报的真实占用 ≥ 触发线（见
+ * resolveCompressionTriggerRatio，随窗口留足单轮灌水余量）。
+ * 估算超预算只在遥测缺失时兜底。cold_resume / manual 是两条独立的
+ * 主动路径，不参与占用判定。
  */
 function shouldTriggerCompaction(args: {
-  pendingTokens: number;
-  summaryTokens: number;
-  contextWindow: number;
+  pendingMsgCount: number;
+  totalUsed: number;
   historyBudget: number;
+  triggerRatio: number;
   force: boolean;
   reason?: CompressionReason;
   realContextUsagePercent?: number;
-  lastCompactedTokenCount?: number;
+  coldResume?: boolean;
   lastMsg?: Message;
-}): { trigger: boolean; triggeredByRealUsage: boolean; shouldRunActiveSummary: boolean } {
+}): {
+  trigger: boolean;
+  triggeredByRealUsage: boolean;
+  shouldRunActiveSummary: boolean;
+  triggeredByColdResume: boolean;
+} {
   const {
-    pendingTokens, summaryTokens, contextWindow, historyBudget,
-    force, reason, realContextUsagePercent, lastCompactedTokenCount, lastMsg,
+    pendingMsgCount, totalUsed, historyBudget, triggerRatio,
+    force, reason, realContextUsagePercent, coldResume, lastMsg,
   } = args;
 
-  const totalUsed = summaryTokens + pendingTokens;
   const usageRatio = normalizeContextUsageRatio(realContextUsagePercent);
 
-  let shouldTriggerByUsage = false;
-  if (usageRatio !== undefined) {
-    if (usageRatio >= 0.78) {
-      shouldTriggerByUsage = true;
-    } else if (usageRatio >= 0.65 && isActiveSummaryWorthDoing(pendingTokens, contextWindow)) {
-      shouldTriggerByUsage = true;
-    }
-  }
-  if (totalUsed >= historyBudget) {
-    shouldTriggerByUsage = true;
-  }
-
-  // 防死亡螺旋守卫
-  if (
-    typeof lastCompactedTokenCount === "number" &&
-    Number.isFinite(lastCompactedTokenCount) &&
-    lastCompactedTokenCount >= 0 &&
-    !force &&
-    !(usageRatio !== undefined && usageRatio >= 0.78)
-  ) {
-    const minNewTokensToCompress = Math.min(40_000, Math.max(5_000, Math.floor(contextWindow * 0.03)));
-    if (totalUsed < lastCompactedTokenCount + minNewTokensToCompress) {
-      return { trigger: false, triggeredByRealUsage: false, shouldRunActiveSummary: false };
-    }
-  }
+  const triggeredByRealUsage =
+    usageRatio !== undefined && usageRatio >= triggerRatio;
+  // 遥测缺失时的兜底：估算总量超预算。
+  const triggeredByEstimate =
+    usageRatio === undefined && totalUsed >= historyBudget;
 
   const shouldRunActiveSummary =
-    force && reason === "manual" && !hasOpenEndedToolCall(lastMsg) && isActiveSummaryWorthDoing(pendingTokens, contextWindow);
+    force &&
+    reason === "manual" &&
+    !hasOpenEndedToolCall(lastMsg) &&
+    pendingMsgCount >= MIN_TRIGGER_PENDING_COUNT;
 
-  const triggeredByRealUsage = usageRatio !== undefined && shouldTriggerByUsage;
-  return { trigger: shouldTriggerByUsage || shouldRunActiveSummary, triggeredByRealUsage, shouldRunActiveSummary };
+  const triggeredByColdResume =
+    coldResume === true && pendingMsgCount >= MIN_TRIGGER_PENDING_COUNT;
+
+  return {
+    trigger:
+      triggeredByRealUsage ||
+      triggeredByEstimate ||
+      shouldRunActiveSummary ||
+      triggeredByColdResume,
+    triggeredByRealUsage,
+    shouldRunActiveSummary,
+    triggeredByColdResume,
+  };
 }
 
 /**
@@ -272,72 +256,6 @@ function calculateCompressCount(
 }
 
 /**
- * 老工具输出 stub 档决策（零成本，不调 LLM）。
- *
- * 在 pending 范围内保留最后 STUB_KEEP_COUNT 条 tool 结果原文，更早的 tool 结果
- * content 替换成一行 stub。若替换后 totalUsed 能回到 historyBudget 内则返回
- * stub 档，否则返回 null 让调用方走摘要路径。
- *
- * stub 不受 guardToolChainBoundary 约束：消息一条不删，assistant(tool_calls) →
- * tool(result) 配对天然保留。唯一要求是不得 stub 到 summarizedBeforeId 之前
- * 已入摘要的区间——本函数只处理 pending 范围内的消息，天然满足。
- */
-function tryComputeStubPlan(
-  pendingMsgs: Message[],
-  totalUsed: number,
-  historyBudget: number,
-  startIndex: number,
-): CompressionPlan | null {
-  // 收集 pending 内「仍含原文」的 tool 结果下标（planCompression 基于投影后的
-  // 消息判定，已 stub 的 tool 结果 content 已是 stub 文本，不再重复计）。
-  const toolIndices: number[] = [];
-  for (let i = 0; i < pendingMsgs.length; i++) {
-    if (pendingMsgs[i].role === "tool") {
-      const content = serializeMessageContent(pendingMsgs[i].content) || "";
-      if (content !== TOOL_STUB_TEXT) toolIndices.push(i);
-    }
-  }
-  // 真正待 stub 的 tool 结果 ≤ STUB_KEEP_COUNT 条 → 不值得 stub
-  if (toolIndices.length <= STUB_KEEP_COUNT) return null;
-
-  // 保留最近 STUB_KEEP_COUNT 条 tool 结果原文；更早的 tool 结果全部 stub。
-  // 第一个被 stub 的是倒数第 (STUB_KEEP_COUNT+1) 条 tool 结果。
-  const firstStubbedIdx = toolIndices[toolIndices.length - STUB_KEEP_COUNT - 1];
-  const beforeMsg = pendingMsgs[firstStubbedIdx];
-  if (!beforeMsg) return null;
-
-  const stubOverhead = estimateTokenCount(TOOL_STUB_TEXT);
-  const stubbedMsgs = pendingMsgs.slice(0, firstStubbedIdx + 1).filter(
-    (m) => m.role === "tool",
-  );
-  // 被 stub 的 tool 结果的原 content token 之和（已 stub 的贡献近乎为 0）
-  const originalTokens = stubbedMsgs.reduce(
-    (s, m) => s + getMessageTokenCount(m),
-    0,
-  );
-  const savedTokens = Math.max(0, originalTokens - stubOverhead * stubbedMsgs.length);
-
-  if (totalUsed - savedTokens > historyBudget) return null;
-
-  const keptMsgs = pendingMsgs.slice(firstStubbedIdx + 1);
-  return {
-    shouldCompress: true,
-    compressCount: stubbedMsgs.length,
-    msgsToCompress: stubbedMsgs,
-    msgsToKeep: keptMsgs,
-    newSummarizedBeforeId: undefined,
-    startIndex,
-    stub: {
-      // beforeId = 第一条被 stub 的 tool 结果的消息 id；投影端按
-      // 「abs index <= beforeId 的 index 的 tool 消息」判定是否 stub。
-      beforeId: beforeMsg.id,
-      stubbedCount: stubbedMsgs.length,
-      savedTokens,
-    },
-  };
-}
-
-/**
  * 保护 tool chain 边界：不切断 assistant(tool_calls) → tool(result) 配对。
  */
 function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): number {
@@ -359,7 +277,7 @@ function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): 
 export function planCompression(input: CompressionInput): CompressionPlan {
   const {
     allMsgs, summarizedBeforeId, summary, contextWindow,
-    force = false, reason, realContextUsagePercent,
+    force = false, reason, realContextUsagePercent, coldResume,
   } = input;
 
   // 1. 找待处理消息
@@ -375,31 +293,28 @@ export function planCompression(input: CompressionInput): CompressionPlan {
   const { historyBudget, rawMessageBudget } = planContextUsage({
     contextWindow, summaryTokens: adjustedSummaryTokens, recentLoad,
   });
+  const triggerRatio = resolveCompressionTriggerRatio(contextWindow);
 
   // 3. 判断是否触发
-  const { trigger, triggeredByRealUsage, shouldRunActiveSummary } = shouldTriggerCompaction({
-    pendingTokens, summaryTokens, contextWindow, historyBudget,
-    force, reason, realContextUsagePercent,
-    lastCompactedTokenCount: input.lastCompactedTokenCount,
+  const {
+    trigger,
+    triggeredByRealUsage,
+    shouldRunActiveSummary,
+    triggeredByColdResume,
+  } = shouldTriggerCompaction({
+    pendingMsgCount: pendingMsgs.length,
+    totalUsed, historyBudget, triggerRatio,
+    force, reason, realContextUsagePercent, coldResume,
     lastMsg: pendingMsgs[pendingMsgs.length - 1],
   });
   if (!trigger) return emptyPlan(startIndex);
 
-  // 3.5 老工具输出 stub 档（零成本优先）：在 summary 档之前，先看能否靠
-  //     把较老 tool 结果 content 替换成一行 stub 回到预算内。回得进去就
-  //     不生成摘要、不调 LLM。stub 不受 guardToolChainBoundary 影响
-  //     （消息一条不删，tool_calls→tool 配对天然保留）。
-  const stubPlan = tryComputeStubPlan(
-    pendingMsgs,
-    totalUsed,
-    historyBudget,
-    startIndex,
-  );
-  if (stubPlan) return stubPlan;
-
   // 4. 算压缩条数 + 保护 tool chain
+  // 主动路径（手动 / 真实占用超线 / 冷恢复）折叠到只留尾部原文；
+  // 估算兜底路径按预算从后往前保留。
   let compressCount = calculateCompressCount(pendingMsgs, rawMessageBudget, {
-    keepTailCount: shouldRunActiveSummary || triggeredByRealUsage,
+    keepTailCount:
+      shouldRunActiveSummary || triggeredByRealUsage || triggeredByColdResume,
     totalUsed, historyBudget,
   });
   compressCount = guardToolChainBoundary(pendingMsgs, compressCount);

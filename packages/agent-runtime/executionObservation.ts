@@ -99,7 +99,7 @@ export type AgentExecutionObservationEvent =
       kind: "compaction";
       atMs: number;
       /** 与 CompactionMetrics.reason 口径一致。 */
-      reason: "tool_stub" | "context_budget" | "cold_resume" | "invalid_summary";
+      reason: "context_budget" | "cold_resume" | "invalid_summary";
       summaryGenerated: boolean;
       compressed: boolean;
       /** 压缩前估算 token（无对应估算口径则省略）。 */
@@ -108,8 +108,12 @@ export type AgentExecutionObservationEvent =
       afterTokens?: number;
       /** 压缩省下的估算 token（before - after）。 */
       savedTokens?: number;
-      /** stub 路径：被替换为 stub 档的工具输出条数。 */
-      stubbedCount?: number;
       droppedCount?: number;
+      /**
+       * 自动压缩尝试失败（如摘要 LLM 调用报错）：本轮以未压缩上下文继续。
+       * 失败必须可观测——此前只有 console.warn，TUI 重绘下用户完全无感，
+       * 表现为「上下文超限了也没自动压缩」。
+       */
+      failed?: boolean;
       detail?: string;
     };

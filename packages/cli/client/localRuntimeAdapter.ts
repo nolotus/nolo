@@ -403,7 +403,6 @@ import {
   saveCliDialogSummary,
   loadCliDialogLastContextUsage,
 } from "./localRuntimeDialog";
-import { readLastTurnBillingInputTokens } from "./turnBillingAudit";
 
 /**
  * 「一次上游响应 → 可用性落盘」的可复用核心（模块级导出）。
@@ -713,13 +712,14 @@ export function createCliLocalRuntimeAdapter(
         dialogId: input.dialogId,
         summary: input.summary,
         summarizedBeforeId: input.summarizedBeforeId,
-        stubbedBeforeId: input.stubbedBeforeId,
         sourceHash: input.sourceHash,
         sourceCount: input.sourceCount,
         schemaVersion: input.schemaVersion,
       }),
     loadLastContextUsage: async (dialogId) => {
-      // 方案 a（主）：优先从 per-dialog 权威持久化记录读取上一次调用的真实 input tokens
+      // 从 per-dialog 权威持久化记录读取上一次调用的真实 input tokens。
+      // 轮内压缩（localLoop round 间检查）成为主防线后，此处只服务轮开始
+      // 的兜底判定；记录缺失（旧对话）安全落到估算兜底，不再设第二回退。
       const fromDialog = await loadCliDialogLastContextUsage({
         store: await getOrCreateSharedStore(deps),
         userId,
@@ -727,11 +727,6 @@ export function createCliLocalRuntimeAdapter(
       });
       if (fromDialog?.inputTokens) {
         return fromDialog;
-      }
-      // 方案 b（回退）：旧对话记录缺失 lastInputTokens 时，尝试从 turn-billing.jsonl 尾部轻量读取
-      const fromAudit = readLastTurnBillingInputTokens(dialogId, deps.env);
-      if (typeof fromAudit === "number" && fromAudit > 0) {
-        return { inputTokens: fromAudit };
       }
       return null;
     },

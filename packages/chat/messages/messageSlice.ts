@@ -28,7 +28,6 @@ import {
   resolveInitMsgsFulfilledWriteMode,
   resolveInitMsgsHasMoreOlder,
 } from "./messageInitMsgsPolicy";
-import { resolveInitMsgsSummaryResume } from "./messageInitMsgsSummaryResume";
 import { isValidMessage } from "./messageValidation";
 import { selectIdentityUserId } from "identity/selectors";
 import { fetchAndCacheMessages, fetchAndCacheMessagesLocalFirst } from "./fetchAndCacheMessages";
@@ -38,6 +37,7 @@ import { asTrimmedString } from "core/trimmedString";
 import type { DialogConfig } from "app/types";
 import { selectCurrentDialogKey, updateDialogTitle, updateTokens } from "chat/dialog/dialogSlice";
 import { updateDialogSummaryAction } from "chat/dialog/actions/updateDialogSummaryAction";
+import { lastInputTokensFromRecords } from "ai/context/realContextUsage";
 import { normalizeAssistantContentBuffer } from "./messageContent";
 import { normalizeHistoricalReasoningMessage } from "./normalizeHistoricalReasoning";
 import {
@@ -672,27 +672,6 @@ export const messageSlice = createSliceWithThunks({
 
         const finalMessages = (await remotePromise).filter(isValidMessage);
 
-        // --- Post-fetch check: Resume suspended summary tasks ---
-        // Wave21: dialog 查找 + summaryPending/dbKey 判定抽到
-        // `messageInitMsgsSummaryResume`（Redux-free core，可独立单测）。
-        try {
-          const rootState = getState() as any;
-          const decision = resolveInitMsgsSummaryResume({
-            entities: rootState.db?.entities,
-            dialogId,
-          });
-          if (decision.resume) {
-            console.log("[initMsgs] Found suspended summary task, resuming...", decision.dialogKey);
-            thunkApi.dispatch(patch({ dbKey: decision.dialogKey, changes: { summaryPending: false } }));
-            updateDialogSummaryAction(
-              { dialogKey: decision.dialogKey, preFetchedMessages: finalMessages },
-              thunkApi
-            ).catch((err) => console.error("Resume summary failed:", err));
-          }
-        } catch {
-          console.error("[initMsgs] Failed to resume summary");
-        }
-
         return finalMessages;
       },
       {
@@ -1052,13 +1031,19 @@ export const messageSlice = createSliceWithThunks({
             finalMessage,
           ];
 
-          // 后台触发摘要更新（fire-and-forget，不阻塞主流程）
+          // 后台触发摘要更新（fire-and-forget，不阻塞主流程）。
+          // 真实遥测随行：本轮最后一次 provider 调用的真实占用比例——
+          // 压缩触发只认它，缺失时决策层落估算兜底。
           updateDialogSummaryAction(
             {
               dialogKey,
               preFetchedMessages: messagesForSummary,
               force: summaryForce,
               reason: summaryReason,
+              // 传原始 token 数而非比例：换算由决策侧用它自己解析的
+              // contextWindow 完成，保证分子分母同源（W5 窗口错配）。
+              lastRealInputTokens:
+                lastInputTokensFromRecords(billingUsageRecords),
             },
             { dispatch, getState }
           )
