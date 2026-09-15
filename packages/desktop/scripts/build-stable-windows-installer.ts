@@ -714,9 +714,10 @@ if (exitCode === 0) {
     log(
       `staged Electrobun v2 stable upload set in ${artifactDir}: ` +
         `${basename(stagedUploadSet.installerPath)}, ${basename(stagedUploadSet.versionedInstallerPath)}, ` +
-        `${basename(stagedUploadSet.updateBundlePath)}, ${basename(stagedUploadSet.updateJsonPath)}`,
+        `${basename(stagedUploadSet.setupZipPath)}, ${basename(stagedUploadSet.updateBundlePath)}, ` +
+        `${basename(stagedUploadSet.updateJsonPath)}`,
     );
-    log(`built side-by-side smoke installer from the v2 wrapper payload: ${smokeInstallerPath}`);
+    log(`built side-by-side smoke installer from the runnable app payload: ${smokeInstallerPath}`);
     stagedFromV2 = true;
   } catch (error) {
     if (!(error instanceof StableWindowsDiscoveryError)) {

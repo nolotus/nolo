@@ -12,6 +12,7 @@ import { join } from "node:path";
  * The stable release publisher instead requires exactly:
  *   stable-win-x64-NoloDesktop-Setup.exe            canonical installer
  *   stable-win-x64-NoloDesktop-Setup-<version>.exe  immutable versioned copy
+ *   stable-win-x64-NoloDesktop-Setup.zip            setup zip（hutch .installer 载荷三件套；Windows 渠道的真实分发物）
  *   stable-win-x64-NoloDesktop-stable.tar.zst       update bundle (payload)
  *   stable-win-x64-update.json                      rich metadata (canary schema)
  *
@@ -41,6 +42,7 @@ export const STABLE_WINDOWS_UPDATE_CHANNEL = "stable";
 
 export const STABLE_WINDOWS_UPLOAD_NAMES = {
   installer: "stable-win-x64-NoloDesktop-Setup.exe",
+  setupZip: "stable-win-x64-NoloDesktop-Setup.zip",
   updateBundle: "stable-win-x64-NoloDesktop-stable.tar.zst",
   updateJson: "stable-win-x64-update.json",
 } as const;
@@ -82,6 +84,7 @@ export type StableWindowsUpstreamSet = {
 export type StableWindowsUploadSet = {
   installerPath: string;
   versionedInstallerPath: string;
+  setupZipPath: string;
   updateBundlePath: string;
   updateJsonPath: string;
   version: string;
@@ -405,6 +408,23 @@ export function stageStableWindowsUploadSet(args: {
   const updateBundlePath = join(artifactDir, STABLE_WINDOWS_UPLOAD_NAMES.updateBundle);
   cpSync(upstream.updateBundlePath, updateBundlePath);
 
+  // hutch 的 Setup zip（内含 stem 匹配的 .installer/{metadata.json,tar.zst} 三件套）
+  // 是 Windows 渠道的真实分发物（官方文档：Hutch emits a Setup ZIP on Windows）。
+  // v1 重编译路径因文件名不含 "-win-" 从未认领它，导致 stable 发布只有裸 extractor
+  // 可发（被 MIN_WIN_INSTALLER_BYTES 正确拦下，public run 34934170719）；这里按渠道
+  // 前缀改名落位。缺 zip 属发布形态错误——直接失败（本轮 CI 与本地测试都要求它存在）。
+  const hutchZipCandidates = readdirSync(artifactDir).filter(
+    (name) => /NoloDesktop-Setup(?:-[0-9][^/]*)?\.zip$/i.test(name) && !name.startsWith("stable-"),
+  );
+  if (hutchZipCandidates.length !== 1) {
+    throw new Error(
+      `expected exactly one hutch Setup zip in ${artifactDir}, found: ` +
+        (hutchZipCandidates.length > 0 ? hutchZipCandidates.join(", ") : "none"),
+    );
+  }
+  const setupZipPath = join(artifactDir, STABLE_WINDOWS_UPLOAD_NAMES.setupZip);
+  cpSync(join(artifactDir, hutchZipCandidates[0]), setupZipPath);
+
   const updateJsonPath = join(artifactDir, STABLE_WINDOWS_UPLOAD_NAMES.updateJson);
   writeFileSync(
     updateJsonPath,
@@ -419,6 +439,7 @@ export function stageStableWindowsUploadSet(args: {
   return {
     installerPath,
     versionedInstallerPath,
+    setupZipPath,
     updateBundlePath,
     updateJsonPath,
     version: upstream.version,

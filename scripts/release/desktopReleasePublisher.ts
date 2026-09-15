@@ -144,7 +144,7 @@ const PLATFORM_PRIMARY_NAMES: Record<
     macos: "canary-macos-arm64-NoloDesktop-canary.dmg",
   },
   stable: {
-    windows: "stable-win-x64-NoloDesktop-Setup.exe",
+    windows: "stable-win-x64-NoloDesktop-Setup.zip",
     linux: "stable-linux-x64-NoloDesktop.tar.zst",
     macos: "stable-macos-arm64-NoloDesktop.dmg",
   },
@@ -233,7 +233,7 @@ function findDesktopPrimarySource(args: {
       const name = basename(file);
       return args.channel === "alpha"
         ? /^canary-win-x64-NoloDesktop-Setup-canary(?:-[0-9][^/]*)?\.exe$/i.test(name)
-        : /^stable-win-x64-NoloDesktop-Setup(?:-[0-9][^/]*)?\.exe$/i.test(name);
+        : /^stable-win-x64-NoloDesktop-Setup(?:-[0-9][^/]*)?\.zip$/i.test(name);
     });
   }
 

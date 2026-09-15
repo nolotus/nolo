@@ -5,7 +5,7 @@ import {
 
 const STABLE_CLIENT_DOWNLOAD_URLS = {
   android: "/public/downloads/nolo-latest.apk",
-  windows: "/public/downloads/stable-win-x64-NoloDesktop-Setup.exe",
+  windows: "/public/downloads/stable-win-x64-NoloDesktop-Setup.zip",
   linux: "/public/downloads/stable-linux-x64-NoloDesktop.tar.zst",
   linuxDeb: "/public/downloads/nolo-desktop_amd64.deb",
   linuxRpm: "/public/downloads/nolo-desktop_x86_64.rpm",

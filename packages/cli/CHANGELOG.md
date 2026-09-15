@@ -1,4 +1,13 @@
 
+## 0.68.0-alpha.2
+
+## 0.68.0-alpha.2 (2026-09-15)
+
+### Bug Fixes
+
+* **desktop:** ship hutch's Setup zip as the stable Windows download ([3342bde](https://github.com/nolotus/bun-nolo/commit/3342bde7f98798b4039267da4f8d31ee305a6be2))
+
+
 ## 0.68.0-alpha.1
 
 ## 0.68.0-alpha.1 (2026-09-15)
