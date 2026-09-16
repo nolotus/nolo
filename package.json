@@ -89,6 +89,7 @@
     "rcedit": "5.0.2",
     "nanoid": "3.3.18",
     "ws": "8.21.3",
+    "lovely-mermaid": "0.3.3",
     "ansi-regex": "6.3.0",
     "string-width": "8.2.2",
     "date-fns-tz": "2.0.1",

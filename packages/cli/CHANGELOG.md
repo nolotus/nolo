@@ -1,4 +1,22 @@
 
+## 0.74.0-alpha.1
+
+## 0.74.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **agent-runtime:** guide agents to render mermaid for structured explanations ([87d0fd4](https://github.com/nolotus/bun-nolo/commit/87d0fd4b676f8358b1a5af697cf1a36f80147281))
+* **cli:** render mermaid diagrams via lovely-mermaid ([249d944](https://github.com/nolotus/bun-nolo/commit/249d9440b0dc8a7ac8be17d572fa05bffd0835b5))
+
+### Bug Fixes
+
+* **cli:** consume git stderr in connector runGit to avoid hang ([f0d1b28](https://github.com/nolotus/bun-nolo/commit/f0d1b2839efe025deb531d0092c033bba39ff6fe))
+
+### Performance Improvements
+
+* **cli:** avoid pathological Bun JSON.stringify on cyclic delegation payloads ([aea5535](https://github.com/nolotus/bun-nolo/commit/aea553559629a2397fb48e6659a48fa2f0d6ad09))
+
+
 ## 0.73.0-alpha.1
 
 ## 0.73.0-alpha.1 (2026-09-16)

@@ -21,6 +21,66 @@ import { CLI_PROVIDER_NAMES } from "./agentRunTypes";
 export type { DelegatedPayloadMetrics };
 
 /**
+ * 快速循环引用预检。
+ *
+ * Bun (JSC) 的 JSON.stringify 遇到循环引用会病态慢（单次 ~1.5s 才抛
+ * TypeError），委托 payload 序列化路径会因此卡住调用方数秒。这里在原生
+ * stringify 之前先做一次显式 DFS 环检测：发现环立即抛错，走调用方既有的
+ * catch → "[Unserializable Input]" 分支（语义与原生一致，只是快）。
+ *
+ * 预算语义：
+ * - 访问节点数超过预算时放弃预检并返回 false，落回原生 stringify——超大
+ *   正常对象的行为与开销同从前完全一致（预检自身只多花预算内的毫秒级时间）。
+ * - 只沿"当前路径"判环（onPath = 祖先链），共享的非环引用（DAG）不会误报，
+ *   原生 stringify 会对 DAG 重复序列化，这里保持一致。
+ * - 带 toJSON 的对象跳过下钻（无法廉价推断其序列化结果），交给原生处理。
+ */
+const CYCLE_SCAN_NODE_BUDGET = 20_000;
+
+function keysForJson(value: object): string[] {
+  if (Array.isArray(value)) {
+    const keys: string[] = [];
+    for (let i = 0; i < value.length; i++) keys.push(String(i));
+    return keys;
+  }
+  return Object.keys(value);
+}
+
+function hasJsonCycle(root: unknown): boolean {
+  if (typeof root !== "object" || root === null) return false;
+  if (typeof (root as { toJSON?: unknown }).toJSON === "function") return false;
+
+  const onPath = new Set<object>([root]);
+  const stack: Array<{ holder: object; keys: string[]; index: number }> = [
+    { holder: root, keys: keysForJson(root), index: 0 },
+  ];
+  let visited = 1;
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame.index >= frame.keys.length) {
+      onPath.delete(frame.holder);
+      stack.pop();
+      continue;
+    }
+    const key = frame.keys[frame.index++];
+    let child: unknown;
+    try {
+      child = (frame.holder as Record<string, unknown>)[key];
+    } catch {
+      continue; // getter 抛错时交给原生 stringify 走既有报错路径
+    }
+    if (typeof child !== "object" || child === null) continue;
+    if (typeof (child as { toJSON?: unknown }).toJSON === "function") continue;
+    if (onPath.has(child)) return true;
+    if (++visited > CYCLE_SCAN_NODE_BUDGET) return false; // 超预算：放弃预检
+    onPath.add(child);
+    stack.push({ holder: child, keys: keysForJson(child), index: 0 });
+  }
+  return false;
+}
+
+/**
  * Build the unified task+input content for delegated agent calls.
  *
  * This is the CLI-side copy. The AI tool layer (ai/tools/agent/agentRunDisplayHelpers.ts)
@@ -47,6 +107,9 @@ export function buildDelegatedTaskContent(task: string, input?: any): string {
   }
   let jsonStr: string;
   try {
+    if (hasJsonCycle(input)) {
+      throw new TypeError("Converting circular structure to JSON");
+    }
     const serialized = JSON.stringify(input, null, 2);
     if (serialized === undefined) {
       return task;
@@ -78,6 +141,9 @@ export function calculateDelegatedPayloadMetrics(
       serializedInputForTokens = input;
     } else {
       try {
+        if (hasJsonCycle(input)) {
+          throw new TypeError("Converting circular structure to JSON");
+        }
         const serialized = JSON.stringify(input, null, 2);
         if (serialized !== undefined) {
           inputChars = serialized.length;

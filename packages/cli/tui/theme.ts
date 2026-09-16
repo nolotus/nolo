@@ -329,11 +329,42 @@ export function resolveTuiThemeMode(
   return fallback;
 }
 
-function hexToSgr(hex: string): string {
+function hexToSgrParams(hex: string): string {
   const r = Number.parseInt(hex.slice(0, 2), 16);
   const g = Number.parseInt(hex.slice(2, 4), 16);
   const b = Number.parseInt(hex.slice(4, 6), 16);
-  return `\x1b[38;2;${r};${g};${b}m`;
+  return `38;2;${r};${g};${b}`;
+}
+
+function hexToSgr(hex: string): string {
+  return `\x1b[${hexToSgrParams(hex)}m`;
+}
+
+/**
+ * SGR *parameters* (no CSI wrapper) for a theme token — e.g. `'38;2;46;125;181'`
+ * or `'90'`. This is the form lovely-mermaid's `AnsiTheme` consumes (its values
+ * are spliced into `\x1b[<value>m`, so a full sequence here would nest wrong).
+ * Byte-identical to what sits between `\x1b[` and `m` in
+ * {@link themeColorSequence}'s output.
+ */
+export function themeSgrParams(
+  token: TuiThemeToken,
+  env: Record<string, string | undefined> = process.env,
+  brightness: TuiBrightness = resolveTuiBrightness(env),
+): string {
+  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
+  const entry = palette[brightness][token];
+  return resolveTuiThemeMode(env) !== "terminal" && supportsTruecolor(env)
+    ? hexToSgrParams(entry.hex)
+    : entry.ansiFallback.slice(2, -1);
+}
+
+export function themeColorSequence(
+  token: TuiThemeToken,
+  env: Record<string, string | undefined> = process.env,
+  brightness: TuiBrightness = resolveTuiBrightness(env),
+): string {
+  return `\x1b[${themeSgrParams(token, env, brightness)}m`;
 }
 
 /**
@@ -617,18 +648,6 @@ export function userSurfaceBackgroundSequence(
   // stronger accent wash to remain visible at all.
   const weight = brightness === "dark" ? 0.30 : 0.08;
   return hexToBgSgr(blendHex(surfaceHex, resolveTerminalBaseHex(brightness), weight));
-}
-
-export function themeColorSequence(
-  token: TuiThemeToken,
-  env: Record<string, string | undefined> = process.env,
-  brightness: TuiBrightness = resolveTuiBrightness(env),
-): string {
-  const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
-  const entry = palette[brightness][token];
-  return resolveTuiThemeMode(env) !== "terminal" && supportsTruecolor(env)
-    ? hexToSgr(entry.hex)
-    : entry.ansiFallback;
 }
 
 export function themeText(

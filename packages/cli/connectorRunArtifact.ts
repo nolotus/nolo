@@ -56,8 +56,12 @@ async function runGit(
     stderr: "pipe",
     stdin: "ignore",
   });
-  const [stdout, exitCode] = await Promise.all([
+  const [stdout, , exitCode] = await Promise.all([
     readPipeText(proc.stdout),
+    // git 在非仓库目录对 diff 系子命令会向 stderr 打印整段 usage（数十 KB）：
+    // 不消费 stderr 会让 git 阻塞在写满的 stderr 管道上永不退出（bun:child_process），
+    // proc.exited 随之永不 resolve——connector 收尾整体挂死（2026-09-16 实测）。
+    readPipeText(proc.stderr),
     proc.exited,
   ]);
   if (exitCode !== 0) return null;

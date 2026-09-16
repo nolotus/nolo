@@ -225,7 +225,7 @@ const OUTPUT_FORMAT_GUIDANCE = [
   "- Use semantic Markdown by default.",
   "- Use tables for genuinely multi-column structured data.",
   "- Use $...$ or $$...$$ for mathematical expressions.",
-  "- Use ```mermaid fenced blocks only when diagrams materially clarify a process, dependency, architecture, or state transition.",
+  "- Use ```mermaid fenced blocks for process flows, sequences, state transitions, class/entity relations and architecture — they render as diagrams; skip when a sentence or list explains it better.",
   "- Use language-tagged fenced blocks for code.",
   "- Do not add tables or Mermaid for decoration; when complex syntax is uncertain, prefer plain Markdown or text.",
   "",
