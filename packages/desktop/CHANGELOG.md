@@ -1,4 +1,13 @@
 
+## 0.89.0-alpha.2
+
+## 0.89.0-alpha.2 (2026-09-16)
+
+### Bug Fixes
+
+* **tui:** soften user messages on light backgrounds ([50d80c3](https://github.com/nolotus/bun-nolo/commit/50d80c3d0a8f7cc602861b3d0bea8325d806f482))
+
+
 ## 0.89.0-alpha.1
 
 ## 0.89.0-alpha.1 (2026-09-16)

@@ -590,9 +590,11 @@ export function surfaceBackgroundSequence(
  * dialog titles and pickers all use accent). This tints the accent hue into
  * the terminal base so a user turn reads as a solid bubble.
  *
- * Weight is deliberately above the diff bands (0.18/0.12) so a user bubble is
- * not mistaken for a `+`/`-` diff row, and the hue is accent rather than
- * success/danger/info so it never collides with them.
+ * Dark mode uses a stronger accent wash than the diff bands so the bubble
+ * stays easy to find. On a light canvas, a blue wash at that strength reads
+ * like a selected row and clashes with the terminal's white background, so
+ * the surface uses a much quieter chrome wash instead; the accent gutter
+ * remains the identity cue.
  *
  * Unlike decorative chips and diff bands, this surface remains enabled in
  * terminal mode when truecolor is available. It blends against the terminal's
@@ -608,10 +610,13 @@ export function userSurfaceBackgroundSequence(
 ): string {
   if (!supportsTruecolor(env)) return "";
   const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
-  const accentHex = palette[brightness].accent.hex;
-  // Stronger than the diff bands, but still quiet enough for multi-line input.
-  const weight = brightness === "dark" ? 0.30 : 0.20;
-  return hexToBgSgr(blendHex(accentHex, resolveTerminalBaseHex(brightness), weight));
+  const surfaceHex = brightness === "light"
+    ? palette.light.chrome.hex
+    : palette.dark.accent.hex;
+  // White terminals need an almost-neutral boundary; dark terminals need the
+  // stronger accent wash to remain visible at all.
+  const weight = brightness === "dark" ? 0.30 : 0.08;
+  return hexToBgSgr(blendHex(surfaceHex, resolveTerminalBaseHex(brightness), weight));
 }
 
 export function themeColorSequence(
