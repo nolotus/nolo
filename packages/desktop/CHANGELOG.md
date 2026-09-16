@@ -1,4 +1,13 @@
 
+## 0.94.0-alpha.2
+
+## 0.94.0-alpha.2 (2026-09-16)
+
+### Bug Fixes
+
+* **desktop:** import the protected-page code and pin it with a driven worker test ([e93c6e4](https://github.com/nolotus/bun-nolo/commit/e93c6e40378507aa928f8d182ea216e036f8518e))
+
+
 ## 0.94.0-alpha.1
 
 ## 0.94.0-alpha.1 (2026-09-16)

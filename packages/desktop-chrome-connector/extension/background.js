@@ -4,6 +4,7 @@ import {
   CONNECTOR_PROTOCOL_VERSION,
   DETACH_IDLE_MS,
   OPENED_TABS_STORAGE_KEY,
+  PROTECTED_PAGE_CODE,
   buildCompactObservation,
   buildPageRevision,
   createElementRefRegistry,
