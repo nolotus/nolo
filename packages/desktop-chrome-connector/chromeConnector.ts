@@ -213,13 +213,48 @@ export function createChromeConnectorClient(args?: {
   };
 }
 
+/**
+ * Which capabilities each connector action needs. This mirrors the extension's own map in
+ * `extension/compactObservation.js`; the runtime keeps its copy so app code never imports extension
+ * sources at typecheck time, and a drift test asserts both sides agree.
+ *
+ * The runtime deliberately requires **more** for the clicking actions: `action_gate` is what stops an
+ * irreversible action before it happens, so an extension that cannot refuse one must not be allowed to
+ * click at all — even though it might otherwise claim full observation support.
+ */
+export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
+  list_tabs: ["tabs"],
+  open_tab: ["tabs"],
+  close_tab: ["tabs"],
+  read_page: ["compact_observation_v2"],
+  click: ["compact_observation_v2", "action_gate"],
+  type: ["compact_observation_v2", "action_gate"],
+  press: ["compact_observation_v2", "action_gate"],
+  scroll: ["compact_observation_v2"],
+  screenshot: ["browser_debug"],
+  read_console: ["browser_debug"],
+  read_network: ["browser_debug"],
+  detach: ["browser_debug"],
+};
+
+/** Features the runtime requires for an action; empty when the action needs none. */
+export function requiredFeaturesForConnectorAction(action: string): string[] {
+  return [...(REQUIRED_CHROME_CONNECTOR_FEATURES[action] ?? [])];
+}
+
+export type VerifiedChromeConnectorClient = ChromeConnectorClient & {
+  /** Feature names the installed extension advertised; populated after the handshake (first request). */
+  features(): string[];
+};
+
 export function createVerifiedChromeConnectorClient(args?: {
   client?: ChromeConnectorClient;
   expectedExtensionId?: string;
-}): ChromeConnectorClient {
+}): VerifiedChromeConnectorClient {
   const client = args?.client ?? createChromeConnectorClient();
   const expectedExtensionId = args?.expectedExtensionId ?? NOLO_CHROME_CONNECTOR_EXTENSION_ID;
   let verified: Promise<void> | null = null;
+  let negotiatedFeatures: string[] = [];
 
   const verify = async () => {
     const connectorInfo = await client.request("connector_info", {});
@@ -246,6 +281,11 @@ export function createVerifiedChromeConnectorClient(args?: {
         },
       );
     }
+    // Additive evolution rides here; an absent field means "no features", never "assume everything".
+    const rawFeatures = (connectorInfo as { features?: unknown })?.features;
+    negotiatedFeatures = Array.isArray(rawFeatures)
+      ? rawFeatures.filter((entry): entry is string => typeof entry === "string")
+      : [];
   };
 
   return {
@@ -255,7 +295,21 @@ export function createVerifiedChromeConnectorClient(args?: {
         throw error;
       });
       await verified;
+      const missing = requiredFeaturesForConnectorAction(action).filter(
+        (feature) => !negotiatedFeatures.includes(feature),
+      );
+      if (missing.length > 0) {
+        throw createConnectorError(
+          "CAPABILITY_UNSUPPORTED",
+          `The installed Nolo Browser Connector extension does not support ${missing.join(", ")} ` +
+            `(needed by ${action}). Reload or update the extension, then try again.`,
+          { action, missingFeatures: missing, requiredFeatures: requiredFeaturesForConnectorAction(action), features: [...negotiatedFeatures] },
+        );
+      }
       return client.request(action, payload);
+    },
+    features() {
+      return [...negotiatedFeatures];
     },
   };
 }

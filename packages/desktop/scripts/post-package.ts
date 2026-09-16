@@ -5,6 +5,9 @@ import { createBrandedMacosDmg } from "./macos-dmg-installer";
 import { createWindowsInstallerArtifact } from "./post-package-windows";
 import { createLinuxRpmArtifact, createLinuxDebArtifact } from "./post-package-linux";
 import { applyLinuxLauncherPreflight } from "./linuxLauncherPreflight";
+// 载荷兼容闸门必须与打包链同目录、static import：它随 packages/desktop 进公开投影，
+// 而 scripts/verify/** 不进投影（2026-09-16 公开仓构建 HookFailed 的根因）。
+import { verifyLinuxPayloadArtifacts } from "./verifyElectrobunPayloadCompat";
 
 const artifactDir = process.env.ELECTROBUN_ARTIFACT_DIR;
 if (!artifactDir) {
@@ -26,11 +29,8 @@ if (!existsSync(artifactDir)) {
 // Linux 载荷闸门（fail closed，2026-09-16 事故）：electrobun 自解压器不支持 GNU
 // longname（'L'）/硬链接 tar 记录——任何 >100 字符路径都会让 Setup 安装器与
 // in-app 更新在解包阶段以 TarUnsupportedFileType 中止。发布前扫描 Linux 产物，
-// 发现不兼容直接失败。详见 scripts/verify/desktop/verifyElectrobunPayloadCompat.ts。
+// 发现不兼容直接失败。详见同目录 verifyElectrobunPayloadCompat.ts。
 if (process.platform === "linux") {
-  const { verifyLinuxPayloadArtifacts } = await import(
-    "../../../scripts/verify/desktop/verifyElectrobunPayloadCompat"
-  );
   const reports = await verifyLinuxPayloadArtifacts(artifactDir);
   for (const report of reports) {
     console.log(

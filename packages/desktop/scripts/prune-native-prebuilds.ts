@@ -76,7 +76,7 @@ const CLASSIC_LEVEL_PACKAGE = "classic-level";
  * 103 字符并重新触发上面的问题。
  *
  * 只动 `.generated/vendor` 的 staged 副本，不碰仓库 node_modules；闸门见
- * scripts/verify/desktop/verifyElectrobunPayloadCompat.ts。
+ * packages/desktop/scripts/verifyElectrobunPayloadCompat.ts。
  */
 export async function pruneStagedClassicLevelForPackaging(
   stagedNodeModulesDir: string,

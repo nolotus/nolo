@@ -24,6 +24,11 @@ export type DesktopChromeConnectorStatus = {
   ok: true;
   extensionId: string;
   extensionPath: string;
+  /**
+   * Capabilities the installed extension advertised. Empty means it predates capability negotiation
+   * (or reported nothing), which is why single tools may answer CAPABILITY_UNSUPPORTED.
+   */
+  connectorFeatures: string[];
   nativeHost: {
     installed: boolean;
     manifestPath: string;
@@ -112,12 +117,33 @@ function readNativeManifest(path: string) {
 export async function buildDesktopChromeConnectorStatus(args: {
   env?: Record<string, string | undefined>;
   connectorRoot?: string;
+  platform?: string;
   requestChrome?: ChromeRequest;
 } = {}): Promise<DesktopChromeConnectorStatus> {
   const env = args.env ?? process.env;
   const connectorRoot = args.connectorRoot ?? connectorRootFromHere();
   const home = env.HOME || process.env.HOME || "";
-  const paths = resolveNativeHostInstallPaths({ home, connectorRoot });
+  let paths: ReturnType<typeof resolveNativeHostInstallPaths>;
+  try {
+    paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform: args.platform });
+  } catch (error) {
+    // An unsupported platform must produce a status answer, not a 500: the UI needs to render it.
+    return {
+      ok: true,
+      extensionId: readExtensionId(connectorRoot),
+      extensionPath: resolve(connectorRoot, "extension"),
+      connectorFeatures: [],
+      nativeHost: {
+        installed: false,
+        manifestPath: "",
+        wrapperPath: "",
+        allowedOriginMatches: false,
+        wrapperPathMatches: false,
+      },
+      rpc: { online: false, tabCount: null },
+      lastError: toErrorMessage(error),
+    };
+  }
   const extensionId = readExtensionId(connectorRoot);
   const nativeManifest = readNativeManifest(paths.nativeManifestPath);
   const expectedOrigin = `chrome-extension://${extensionId}/`;
@@ -131,6 +157,7 @@ export async function buildDesktopChromeConnectorStatus(args: {
     online: false,
     tabCount: null,
   };
+  let connectorFeatures: string[] = [];
   try {
     const requestChrome = args.requestChrome ?? createChromeConnectorClient().request;
     const connectorInfo = await requestChrome("connector_info", {});
@@ -154,6 +181,10 @@ export async function buildDesktopChromeConnectorStatus(args: {
       ? (tabsResult as { tabs: unknown[] }).tabs
       : [];
     rpc = { online: true, tabCount: tabs.length };
+    const rawFeatures = (connectorInfo as { features?: unknown })?.features;
+    connectorFeatures = Array.isArray(rawFeatures)
+      ? rawFeatures.filter((entry): entry is string => typeof entry === "string")
+      : [];
   } catch (error) {
     lastErrors.push(toErrorMessage(error));
   }
@@ -169,6 +200,7 @@ export async function buildDesktopChromeConnectorStatus(args: {
     ok: true,
     extensionId,
     extensionPath: resolve(connectorRoot, "extension"),
+    connectorFeatures,
     nativeHost: {
       installed: Boolean(nativeManifest),
       manifestPath: paths.nativeManifestPath,

@@ -1,4 +1,18 @@
 
+## 0.92.0-alpha.1
+
+## 0.92.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** negotiate Chrome connector capabilities instead of failing on any skew ([f2a10bb](https://github.com/nolotus/bun-nolo/commit/f2a10bb0bbbb63bc0865cca63d0a76d5e64c02c2))
+
+### Bug Fixes
+
+* **desktop:** install the Chrome native host on the right per-platform path ([4ac33c1](https://github.com/nolotus/bun-nolo/commit/4ac33c16478bdffde5c044f77839a7eaa422f385))
+* **desktop:** 载荷闸门迁入 desktop 包，锁死跨树 import 在公开投影缺失 ([840ed09](https://github.com/nolotus/bun-nolo/commit/840ed0998c728ec47c890e1132413f1d3fb9b672))
+
+
 ## 0.91.0-alpha.1
 
 ## 0.91.0-alpha.1 (2026-09-16)

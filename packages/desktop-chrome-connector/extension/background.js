@@ -1,5 +1,6 @@
 import {
   COMPACT_BUDGET,
+  CONNECTOR_FEATURES,
   CONNECTOR_PROTOCOL_VERSION,
   DETACH_IDLE_MS,
   OPENED_TABS_STORAGE_KEY,
@@ -722,6 +723,7 @@ async function handleAction(action, payload = {}) {
         version: chrome.runtime.getManifest().version,
         hostName: HOST_NAME,
         protocolVersion: CONNECTOR_PROTOCOL_VERSION,
+        features: [...CONNECTOR_FEATURES],
       };
     }
     case "list_tabs": {

@@ -9,6 +9,43 @@
 
 export const CONNECTOR_PROTOCOL_VERSION = "2";
 
+/**
+ * Feature names are part of the wire contract between the extension and the desktop app: a published
+ * name is never reused or redefined, and unknown names are ignored by the reader. Additive evolution
+ * goes here; only breaking changes bump {@link CONNECTOR_PROTOCOL_VERSION}.
+ */
+export const CONNECTOR_FEATURES = Object.freeze([
+  "tabs",
+  "compact_observation_v2",
+  "action_gate",
+  "browser_debug",
+]);
+
+const FEATURE_BY_ACTION = Object.freeze({
+  list_tabs: ["tabs"],
+  open_tab: ["tabs"],
+  close_tab: ["tabs"],
+  read_page: ["compact_observation_v2"],
+  click: ["compact_observation_v2"],
+  type: ["compact_observation_v2"],
+  press: ["compact_observation_v2"],
+  scroll: ["compact_observation_v2"],
+  screenshot: ["browser_debug"],
+  read_console: ["browser_debug"],
+  read_network: ["browser_debug"],
+  detach: ["browser_debug"],
+});
+
+/**
+ * The capabilities an action depends on. The runtime may require more than the extension declares
+ * here (it adds `action_gate` to the clicking actions); the drift test asserts the extension's list is
+ * always a subset of the runtime's.
+ */
+export function requiredFeatureForAction(action) {
+  const key = typeof action === "string" ? action : "";
+  return FEATURE_BY_ACTION[key] ?? null;
+}
+
 export const COMPACT_BUDGET = Object.freeze({
   detail: Object.freeze({
     compact: Object.freeze({ maxChars: 6000, maxElements: 35, maxNameChars: 120, maxHtmlChars: 0 }),

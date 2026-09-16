@@ -93,7 +93,8 @@ const stageRuntimeTrees = async () => {
   // 时报 TarUnsupportedFileType（2026-09-16 实测，官方 Setup 安装器解到第 770 个
   // 条目中止）。classic-level 的 C 源码/头文件与非本平台/musl prebuilds 会把路径
   // 推到 103–116 字符，必须在打包前从 staged 副本剪掉（仓库 node_modules 不动）。
-  // 闸门：scripts/verify/desktop/verifyElectrobunPayloadCompat.ts。
+  // 闸门：packages/desktop/scripts/verifyElectrobunPayloadCompat.ts（须与打包链同在
+  // desktop 包内，公开投影不含 scripts/verify/**）。
   const pruned = await pruneStagedClassicLevelForPackaging(join(vendorDir, "node_modules"));
   if (pruned.removed.length > 0) {
     console.log(`[pre-build] pruned classic-level payload entries: ${pruned.removed.join(", ")}`);

@@ -22,10 +22,15 @@ The extension manifest includes a fixed public key, so the unpacked extension id
 ahpdoopadkamnglhlacfjdfnonpjdplg
 ```
 
-The installer writes Chrome's native messaging manifest under:
+The installer writes Chrome's native messaging manifest to the location Chrome reads for the current
+platform:
 
 ```text
-~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.nolo.chrome_connector.json
+macOS:  ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.nolo.chrome_connector.json
+Linux:  ~/.config/google-chrome/NativeMessagingHosts/com.nolo.chrome_connector.json
+Windows: not implemented yet — Chrome looks the host up through the registry value
+         HKCU\Software\Google\Chrome\NativeMessagingHosts\com.nolo.chrome_connector instead of a
+         directory, and it starts the manifest's `path` as a process, so a shell wrapper will not work.
 ```
 
 That manifest points to a generated wrapper under:

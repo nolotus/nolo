@@ -24,10 +24,35 @@ function resolveNodePath() {
   return resolved || "node";
 }
 
+/**
+ * Where Chrome reads a *user-level* native messaging host manifest, per platform. Verified against
+ * Chrome's native messaging documentation: Chrome and Chromium use different directories, and Windows
+ * has no manifest directory at all (it looks the host up through a registry value instead).
+ */
+export function nativeMessagingHostsDir({
+  home = process.env.HOME || "",
+  platform = process.platform,
+} = {}) {
+  if (platform === "darwin") {
+    return resolve(home, "Library/Application Support/Google/Chrome/NativeMessagingHosts");
+  }
+  if (platform === "linux") {
+    return resolve(home, ".config/google-chrome/NativeMessagingHosts");
+  }
+  throw new Error(
+    `Native host installation is not implemented for platform "${platform}". Windows needs a registry value under ` +
+      "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts pointing at the manifest file, plus an executable launcher: " +
+      "Chrome starts the manifest's path as a process, so a shell wrapper will not work there.",
+  );
+}
+
 export function resolveNativeHostInstallPaths({
   home = process.env.HOME || "",
   connectorRoot = DEFAULT_CONNECTOR_ROOT,
+  platform = process.platform,
 } = {}) {
+  // Deliberately the same directory on every platform: the desktop app resolves its connector token
+  // from this path (packages/desktop-chrome-connector/chromeConnector.ts) and the two must not drift.
   const supportDir = resolve(home, "Library/Application Support/Nolo/ChromeConnector");
   return {
     connectorRoot,
@@ -35,8 +60,8 @@ export function resolveNativeHostInstallPaths({
     hostPath: resolve(connectorRoot, "native-host", "nolo-chrome-native-host.mjs"),
     templatePath: resolve(connectorRoot, "native-host", "com.nolo.chrome_connector.json"),
     nativeManifestPath: resolve(
-      home,
-      "Library/Application Support/Google/Chrome/NativeMessagingHosts/com.nolo.chrome_connector.json",
+      nativeMessagingHostsDir({ home, platform }),
+      "com.nolo.chrome_connector.json",
     ),
     supportDir,
     tokenPath: resolve(supportDir, "token"),
@@ -47,10 +72,11 @@ export function resolveNativeHostInstallPaths({
 export function installNativeHostManifest({
   home = process.env.HOME || "",
   connectorRoot = DEFAULT_CONNECTOR_ROOT,
+  platform = process.platform,
   extensionId,
   nodePath,
 } = {}) {
-  const paths = resolveNativeHostInstallPaths({ home, connectorRoot });
+  const paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform });
   const manifest = JSON.parse(readFileSync(paths.templatePath, "utf8"));
   const extensionManifest = JSON.parse(readFileSync(paths.extensionManifestPath, "utf8"));
   const resolvedExtensionId = extensionId || extensionIdFromPublicKey(extensionManifest.key);

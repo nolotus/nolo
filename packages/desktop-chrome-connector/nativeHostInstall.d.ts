@@ -1,8 +1,14 @@
 export function extensionIdFromPublicKey(publicKeyBase64: string): string;
 
+export function nativeMessagingHostsDir(options?: {
+  home?: string;
+  platform?: string;
+}): string;
+
 export function resolveNativeHostInstallPaths(options?: {
   home?: string;
   connectorRoot?: string;
+  platform?: string;
 }): {
   connectorRoot: string;
   extensionManifestPath: string;
@@ -17,6 +23,7 @@ export function resolveNativeHostInstallPaths(options?: {
 export function installNativeHostManifest(options?: {
   home?: string;
   connectorRoot?: string;
+  platform?: string;
   extensionId?: string;
   nodePath?: string;
 }): {
