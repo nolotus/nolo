@@ -1,4 +1,17 @@
 
+## 0.94.0-alpha.1
+
+## 0.94.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** self-reload the unpacked extension and localise its surface ([403d355](https://github.com/nolotus/bun-nolo/commit/403d35595f66c7b9e8f5ac69b8019009f83da2cd))
+
+### Bug Fixes
+
+* **desktop:** name protected pages and reuse the shipped brand icons ([d184770](https://github.com/nolotus/bun-nolo/commit/d1847701792febda93f7536db34b57c99a1f78dd))
+
+
 ## 0.93.0-alpha.1
 
 ## 0.93.0-alpha.1 (2026-09-16)

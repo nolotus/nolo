@@ -12,6 +12,7 @@ import {
   decideIrreversibleAction,
   deserializeOpenedTabs,
   isActivationKey,
+  isProtectedPageUrl,
   normalizeTabId,
   resolveActionTarget,
   serializeOpenedTabs,
@@ -43,12 +44,33 @@ function tabTarget(tabId) {
 }
 
 async function executeInTab(tabId, func, args = []) {
+  await assertScriptableTab(tabId);
   const [result] = await chrome.scripting.executeScript({
     target: tabTarget(tabId),
     func,
     args,
   });
   return result?.result;
+}
+
+/**
+ * Chrome answers "The extensions gallery cannot be scripted" for its own UI and the Web Store.
+ * Detecting it up front turns an opaque failure into something the model can act on: ask the user.
+ */
+async function assertScriptableTab(tabId) {
+  let url = "";
+  try {
+    const tab = await chrome.tabs.get(Number(tabId));
+    url = typeof tab?.url === "string" ? tab.url : "";
+  } catch {
+    return; // A missing tab is reported by the script call itself.
+  }
+  if (isProtectedPageUrl(url)) {
+    throw connectorError(
+      PROTECTED_PAGE_CODE,
+      `Chrome does not allow scripts on this page (${url.split("?")[0].slice(0, 80)}), so it cannot be read or operated automatically. Ask the user to look at it or act on it.`,
+    );
+  }
 }
 
 function pushBounded(store, tabId, entry, cap) {
@@ -682,6 +704,17 @@ async function runTargetedAction(action, payload) {
   try {
     result = await executeInTab(payload.tabId, pageOperation, [pageArgs]);
   } catch (error) {
+    if (error?.code === PROTECTED_PAGE_CODE) {
+      return {
+        ok: false,
+        verified: false,
+        effect: "failed",
+        action,
+        signal: PROTECTED_PAGE_CODE,
+        message: toMessage(error),
+        ...resolveExtra,
+      };
+    }
     refRegistry.invalidate(tabId);
     return verdictEnvelope(
       action,
@@ -853,6 +886,21 @@ async function handleAction(action, payload = {}) {
       openedTabs.remove(requested);
       await persistOpenedTabs();
       return { ok: true, closed, openedByConnector };
+    }
+    case "reload_extension": {
+      /**
+       * Host-only action (never a model-visible tool). On an unpacked install Chrome only re-reads the
+       * extension's files when the service worker restarts, so the desktop app would otherwise have to
+       * ask the user to click Reload in chrome://extensions. Answer first, then reload on the next tick.
+       */
+      setTimeout(() => {
+        try {
+          chrome.runtime.reload();
+        } catch (error) {
+          console.warn(`[nolo chrome connector] self reload skipped: ${toMessage(error)}`);
+        }
+      }, 400);
+      return { ok: true, reloading: true };
     }
     case "detach": {
       // Internal action: not model-visible, and never fatal when nothing is attached.

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html>
   <head>
     <meta charset="utf-8" />
     <title>Nolo Browser Connector</title>
@@ -69,18 +69,19 @@
     </style>
   </head>
   <body>
-    <h1>Nolo Browser Connector</h1>
-    <div class="state"><span class="dot" id="dot"></span><span id="state">Checking…</span></div>
+    <!-- All text comes from _locales via popup.js, so the popup follows the browser language. -->
+    <h1 id="title"></h1>
+    <div class="state"><span class="dot" id="dot"></span><span id="state"></span></div>
     <p id="hint"></p>
     <dl>
-      <dt>Desktop app</dt>
+      <dt id="label-desktop-app"></dt>
       <dd id="host">—</dd>
-      <dt>Protocol</dt>
+      <dt id="label-protocol"></dt>
       <dd id="protocol">—</dd>
-      <dt>Extension</dt>
+      <dt id="label-extension"></dt>
       <dd id="version">—</dd>
     </dl>
-    <footer>Page reads and actions run through Nolo Desktop. Cookies, passwords and profile databases are never read.</footer>
+    <footer id="privacy"></footer>
     <script src="popup.js"></script>
   </body>
 </html>

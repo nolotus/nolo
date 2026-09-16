@@ -1,0 +1,45 @@
+{
+  "extName": {
+    "message": "Nolo 浏览器连接器",
+    "description": "Chrome 中显示的扩展名称。"
+  },
+  "extDescription": {
+    "message": "让 Nolo Desktop 的本地智能体连接你正在使用的 Chrome 标签页。",
+    "description": "Chrome 与商店页面显示的扩展描述。"
+  },
+  "popupChecking": {
+    "message": "检查中…"
+  },
+  "popupConnected": {
+    "message": "已连接到 Nolo Desktop"
+  },
+  "popupConnectedHint": {
+    "message": "桌面端的智能体可以操作你指定的标签页。"
+  },
+  "popupDisconnected": {
+    "message": "未连接"
+  },
+  "popupDisconnectedHint": {
+    "message": "请打开本机的 Nolo Desktop 并启用 Chrome 连接器，然后重新打开此窗口。"
+  },
+  "popupStatusError": {
+    "message": "无法读取连接状态：$DETAIL$",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupDesktopApp": {
+    "message": "桌面应用"
+  },
+  "popupProtocol": {
+    "message": "协议版本"
+  },
+  "popupExtensionVersion": {
+    "message": "扩展版本"
+  },
+  "popupPrivacy": {
+    "message": "页面读取与操作都通过 Nolo Desktop 进行。绝不读取 Cookie、密码或 profile 数据库。"
+  }
+}

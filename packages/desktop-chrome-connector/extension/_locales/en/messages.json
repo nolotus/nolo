@@ -1,0 +1,45 @@
+{
+  "extName": {
+    "message": "Nolo Browser Connector",
+    "description": "Extension name shown in Chrome."
+  },
+  "extDescription": {
+    "message": "Connects Nolo Desktop local agents to the user's Chrome tabs.",
+    "description": "Extension description shown in Chrome and on the store listing."
+  },
+  "popupChecking": {
+    "message": "Checking…"
+  },
+  "popupConnected": {
+    "message": "Connected to Nolo Desktop"
+  },
+  "popupConnectedHint": {
+    "message": "Your desktop agent can work in the tabs you ask about."
+  },
+  "popupDisconnected": {
+    "message": "Not connected"
+  },
+  "popupDisconnectedHint": {
+    "message": "Open Nolo Desktop on this computer and enable the Chrome connector, then reopen this popup."
+  },
+  "popupStatusError": {
+    "message": "Could not read connector status: $DETAIL$",
+    "placeholders": {
+      "detail": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupDesktopApp": {
+    "message": "Desktop app"
+  },
+  "popupProtocol": {
+    "message": "Protocol"
+  },
+  "popupExtensionVersion": {
+    "message": "Extension"
+  },
+  "popupPrivacy": {
+    "message": "Page reads and actions run through Nolo Desktop. Cookies, passwords and profile databases are never read."
+  }
+}

@@ -10,8 +10,12 @@ add the Simplified Chinese translation as a second locale.
 ## Name (both locales)
 
 ```text
-Nolo Browser Connector
+English:  Nolo Browser Connector
+中文:      Nolo 浏览器连接器
 ```
+
+The Chinese name must match `_locales/zh_CN/messages.json` (`extName`) so the store listing and the
+extension name a Chinese user sees in `chrome://extensions` are the same string.
 
 ## Short description (max 132 characters)
 

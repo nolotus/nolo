@@ -9,6 +9,36 @@
 
 export const CONNECTOR_PROTOCOL_VERSION = "2";
 
+/** Chrome refuses script injection into its own UI and the Web Store; say so instead of failing oddly. */
+export const PROTECTED_PAGE_CODE = "PROTECTED_PAGE";
+
+const PROTECTED_URL_PREFIXES = Object.freeze([
+  "chrome://",
+  "chrome-untrusted://",
+  "chrome-search://",
+  "chrome-extension://",
+  "devtools://",
+  "edge://",
+  "about:",
+  "view-source:",
+  "https://chrome.google.com/webstore",
+  "https://chromewebstore.google.com",
+]);
+
+/**
+ * Chrome refuses script injection into its own UI, the Web Store and other browser-owned origins.
+ *
+ * `file://` and `data:` are deliberately absent: a file page fails because the extension has no file
+ * access (and enabling it is the user's choice), and `data:` URLs are not navigable tabs here. Both
+ * report their own, more specific error, so calling them "protected" would be misleading.
+ */
+
+export function isProtectedPageUrl(url) {
+  const value = typeof url === "string" ? url.trim().toLowerCase() : "";
+  if (!value) return false;
+  return PROTECTED_URL_PREFIXES.some((prefix) => value.startsWith(prefix));
+}
+
 /**
  * Feature names are part of the wire contract between the extension and the desktop app: a published
  * name is never reused or redefined, and unknown names are ignored by the reader. Additive evolution
