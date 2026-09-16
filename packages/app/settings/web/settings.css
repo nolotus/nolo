@@ -251,6 +251,24 @@
   gap: var(--space-3);
 }
 
+/* 非受管理安装（deb/rpm/Windows 安装器/手动解压）的引导入口：与主按钮同高，
+   但明确是“去别处取包”，所以用链接观感而不是按钮。 */
+.desktop-update-actions__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  min-height: 36px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border);
+  color: var(--primary);
+  font-size: var(--fontSize-sm);
+  text-decoration: none;
+}
+
+.desktop-update-actions__link:hover {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
 .desktop-update-progress {
   display: flex;
   flex-direction: column;

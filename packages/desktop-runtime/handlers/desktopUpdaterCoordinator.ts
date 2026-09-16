@@ -12,6 +12,11 @@ import {
   type DesktopUpdaterStatusEntry,
 } from "core/desktop/desktopUpdaterState";
 import type { DesktopUpdaterReleaseArtifact } from "core/desktop/desktopUpdatePolicy";
+import {
+  resolveDesktopInstallLocation,
+  type DesktopInstallLocation,
+} from "core/desktop/desktopInstallLocation";
+import { homedir } from "node:os";
 
 export type DesktopUpdaterRuntime = {
   BuildConfig: {
@@ -56,6 +61,8 @@ type DesktopUpdaterFetch = (
 type DesktopUpdaterCoordinatorOptions = {
   loadDesktopRuntime: () => Promise<DesktopUpdaterRuntime>;
   resolvePlatform?: () => DesktopReleasePlatform;
+  /** 安装位置判定（默认按 process.execPath 等真实环境推导，测试可注入）。 */
+  resolveInstallLocation?: () => DesktopInstallLocation;
   fetchFn?: DesktopUpdaterFetch;
   now?: () => number;
   manifestCacheTtlMs?: number;
@@ -125,6 +132,21 @@ export function createDesktopUpdaterCoordinator(
     options.manifestNegativeCacheTtlMs ?? DEFAULT_MANIFEST_NEGATIVE_CACHE_TTL_MS;
   const resolvePlatform =
     options.resolvePlatform ?? resolveDefaultDesktopReleasePlatform;
+  const resolveInstallLocation =
+    options.resolveInstallLocation ??
+    (() =>
+      resolveDesktopInstallLocation({
+        platform:
+          process.platform === "win32"
+            ? "win"
+            : process.platform === "darwin"
+              ? "macos"
+              : "linux",
+        execPath: process.execPath,
+        homeDir: homedir(),
+        xdgDataHome: process.env.XDG_DATA_HOME ?? null,
+        localAppData: process.env.LOCALAPPDATA ?? null,
+      }));
   const onOperationError =
     options.onOperationError ??
     ((operation, error) => {
@@ -244,6 +266,7 @@ export function createDesktopUpdaterCoordinator(
     return createDesktopUpdaterSnapshot({
       desktop: true,
       platform,
+      installLocation: resolveInstallLocation(),
       activeOperation,
       localInfo: {
         version,

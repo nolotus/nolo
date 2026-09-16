@@ -8,8 +8,13 @@ import {
   LuRocket,
 } from "react-icons/lu";
 import Button from "render/web/ui/Button";
+import { AppRoutePaths } from "app/constants/routePaths";
 import { isDesktopApp } from "app/utils/env";
 import { toErrorMessage } from "core/errorMessage";
+import {
+  describeDesktopUpdaterStatus,
+  describeDesktopUpdaterText,
+} from "core/desktop/desktopUpdaterMessages";
 import type {
   DesktopUpdaterOperation,
   DesktopUpdaterSnapshot,
@@ -46,6 +51,7 @@ const BADGE_LABEL_BY_PHASE: Record<DesktopUpdaterSummaryPhase, string> = {
   not_checked: "尚未检查",
   checking: "正在检查",
   update_available: "有新版本",
+  external_install: "需手动更新",
   downloading: "正在下载",
   ready_to_install: "可以安装",
   applying: "正在安装",
@@ -59,6 +65,7 @@ const PHASE_DESCRIPTION_BY_PHASE: Record<DesktopUpdaterSummaryPhase, string> = {
   not_checked: "还没有获取发布通道的最新信息。",
   checking: "正在检查当前通道是否有更新。",
   update_available: "发现可下载的新版本。",
+  external_install: "当前为系统/手动安装，应用内更新不可用；请到「客户端下载」页获取新版本。",
   downloading: "正在下载新版本，请保持应用运行。",
   ready_to_install: "更新已下载，重启应用即可完成安装。",
   applying: "正在安装更新，应用即将重启。",
@@ -141,7 +148,9 @@ const DesktopUpdates: React.FC = () => {
   const phase = summary?.phase ?? "not_checked";
   const statusTone = error ? "error" : summary?.tone ?? "neutral";
   const statusBadgeLabel = error ? "检查失败" : BADGE_LABEL_BY_PHASE[phase];
-  const statusDescription = error || summary?.statusMessage || PHASE_DESCRIPTION_BY_PHASE[phase];
+  const rawStatusDescription = error || summary?.statusMessage || null;
+  const statusDescription =
+    describeDesktopUpdaterText(rawStatusDescription) ?? PHASE_DESCRIPTION_BY_PHASE[phase];
   const primaryActionLabel = primaryAction ? PRIMARY_ACTION_LABELS[primaryAction] : null;
 
   if (!isDesktopApp) {
@@ -166,7 +175,7 @@ const DesktopUpdates: React.FC = () => {
             <span>最新构建：{shortHash(updateInfo?.hash)}</span>
             {updateInfo?.version ? <span>最新版本：{updateInfo.version}</span> : null}
           </div>
-          <div className="desktop-update-card__status">{statusDescription}</div>
+          <div className="desktop-update-card__status" title={rawStatusDescription && rawStatusDescription !== statusDescription ? rawStatusDescription : undefined}>{statusDescription}</div>
           {typeof progress === "number" ? <div className="desktop-update-progress"><div className="desktop-update-progress__bar"><div className="desktop-update-progress__fill" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div><div className="desktop-update-progress__meta"><span>{progress}%</span><span>{formatBytes(latestStatus?.details?.bytesDownloaded) || "--"} / {formatBytes(latestStatus?.details?.totalBytes) || "--"}</span></div></div> : null}
         </div>
       </SettingSection>
@@ -175,17 +184,21 @@ const DesktopUpdates: React.FC = () => {
         <div className="desktop-update-actions">
           <Button variant="secondary" icon={isBusy && snapshot?.activeOperation === "check" ? <LuLoaderCircle className="desktop-update-spin" aria-hidden="true" /> : <LuRefreshCw aria-hidden="true" />} loading={submittingAction === "check"} disabled={isBusy} onClick={() => void submitAction("check")}>检查更新</Button>
           {primaryAction ? <Button variant="primary" icon={isBusy && snapshot?.activeOperation === primaryAction ? <LuLoaderCircle className="desktop-update-spin" aria-hidden="true" /> : PRIMARY_ACTION_ICONS[primaryAction]} loading={submittingAction === primaryAction} disabled={isBusy} onClick={() => void submitAction(primaryAction)}>{primaryActionLabel}</Button> : null}
+          {phase === "external_install" ? <a className="desktop-update-actions__link" href={AppRoutePaths.CLIENT_DOWNLOADS}>打开下载页</a> : null}
         </div>
       </SettingSection>
 
       <SettingSection title="更新日志" description="按时间查看最近的检查、下载和安装事件。">
         <div className="desktop-update-timeline">
-          {snapshot?.statusHistory?.length ? snapshot.statusHistory.slice(-8).reverse().map((entry) => (
+          {snapshot?.statusHistory?.length ? snapshot.statusHistory.slice(-8).reverse().map((entry) => {
+            const label = describeDesktopUpdaterStatus(entry.status, entry.message);
+            return (
             <div key={`${entry.timestamp}-${entry.status}`} className="desktop-update-timeline__item">
               <div className="desktop-update-timeline__icon">{entry.status === "download-complete" || entry.status === "complete" ? <LuCheck size={14} aria-hidden="true" /> : <LuRefreshCw size={14} aria-hidden="true" />}</div>
-              <div className="desktop-update-timeline__content"><div className="desktop-update-timeline__message">{entry.message}</div><div className="desktop-update-timeline__time">{new Date(entry.timestamp).toLocaleString()}</div></div>
+              <div className="desktop-update-timeline__content"><div className="desktop-update-timeline__message" title={label && label !== entry.message ? entry.message : undefined}>{label ?? entry.message}</div><div className="desktop-update-timeline__time">{new Date(entry.timestamp).toLocaleString()}</div></div>
             </div>
-          )) : <div className="desktop-update-timeline__empty">暂无更新事件。</div>}
+            );
+          }) : <div className="desktop-update-timeline__empty">暂无更新事件。</div>}
         </div>
       </SettingSection>
     </div>

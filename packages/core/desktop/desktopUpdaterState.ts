@@ -4,6 +4,11 @@ import {
   type DesktopUpdateAssessment,
   type DesktopUpdaterReleaseArtifact,
 } from "./desktopUpdatePolicy";
+import type { DesktopInstallLocation } from "./desktopInstallLocation";
+
+/** 非受管理安装（/opt、%LOCALAPPDATA%\Programs、手动解压等）的引导文案。 */
+export const EXTERNAL_INSTALL_MESSAGE =
+  "当前为系统/手动安装，应用内更新不可用；请到「客户端下载」页获取新版本。";
 
 export type DesktopUpdaterOperation = "check" | "download" | "apply";
 
@@ -37,6 +42,7 @@ export type DesktopUpdaterSummaryPhase =
   | "not_checked"
   | "checking"
   | "update_available"
+  | "external_install"
   | "downloading"
   | "ready_to_install"
   | "applying"
@@ -59,6 +65,8 @@ export type DesktopUpdaterSummary = {
 export type DesktopUpdaterSnapshot = {
   desktop: true;
   platform: DesktopReleasePlatform;
+  /** 运行中安装是否位于 electrobun 受管理更新目录（决定能否应用内更新）。 */
+  installLocation: DesktopInstallLocation;
   activeOperation: DesktopUpdaterOperation | null;
   localInfo: DesktopUpdaterLocalInfo;
   buildConfig: unknown;
@@ -84,7 +92,10 @@ const normalizeError = (value: string | undefined) => {
 const getSummaryTone = (phase: DesktopUpdaterSummaryPhase): DesktopUpdaterSummary["tone"] => {
   if (phase === "error" || phase === "invalid_remote") return "error";
   if (phase === "ahead_of_channel" || phase === "ready_to_install") return "success";
-  if (["checking", "update_available", "downloading", "applying"].includes(phase)) return "info";
+  if (
+    ["checking", "update_available", "downloading", "applying", "external_install"].includes(phase)
+  )
+    return "info";
   return "neutral";
 };
 
@@ -92,6 +103,7 @@ export function deriveDesktopUpdaterSummary(
   input: Pick<
     DesktopUpdaterSnapshotInput,
     | "platform"
+    | "installLocation"
     | "activeOperation"
     | "localInfo"
     | "updateInfo"
@@ -102,6 +114,7 @@ export function deriveDesktopUpdaterSummary(
 ): DesktopUpdaterSummary {
   const latestStatusCode = input.latestStatus?.status ?? null;
   const updateError = normalizeError(input.updateInfo?.error);
+  const installLocation = input.installLocation ?? "managed";
   const isBusy = Boolean(input.activeOperation);
   const assessment = assessDesktopUpdateCandidate({
     platform: input.platform,
@@ -134,9 +147,17 @@ export function deriveDesktopUpdaterSummary(
     phase = "not_checked";
   }
 
+  // 非受管理安装（deb/rpm → /opt；Windows 安装器 → %LOCALAPPDATA%\Programs；手动解压等）：
+  // 检查更新可用，但 electrobun 会拒绝下载/应用。提前降级成引导态，绝不给必然失败的按钮。
+  if (
+    installLocation === "external" &&
+    (phase === "update_available" || phase === "ready_to_install")
+  ) {
+    phase = "external_install";
+  }
+
   const primaryAction =
     phase === "ready_to_install" ? "apply" : phase === "update_available" ? "download" : null;
-
   return {
     phase,
     tone: getSummaryTone(phase),
@@ -150,7 +171,11 @@ export function deriveDesktopUpdaterSummary(
         : primaryAction === "download"
           ? "Download update"
           : null,
-    statusMessage: updateError ?? assessment.message ?? input.latestStatus?.message ?? null,
+    statusMessage:
+      updateError ??
+      (phase === "external_install"
+        ? EXTERNAL_INSTALL_MESSAGE
+        : assessment.message ?? input.latestStatus?.message ?? null),
   };
 }
 
