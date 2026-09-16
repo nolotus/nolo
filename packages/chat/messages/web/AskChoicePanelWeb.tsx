@@ -6,14 +6,19 @@
  * same reducer from `ai/tools/askChoiceState`.
  *
  * Contract (docs/plans/2026-09-15-ask-user-unified-interaction.md):
- * - Selecting never auto-advances and never auto-sends; the only send is the
- *   explicit 提交 button (single- and multi-question forms alike).
+ * - A single-select answer is one step: picking (click / Enter / number key)
+ *   lands immediately — multi-question forms advance to the next unanswered
+ *   question, and when nothing is left unanswered the answer is persisted and
+ *   sent. Multi-select keeps the explicit 提交 button, and so does any form
+ *   that contains a multi-select question. The reducer only emits an
+ *   `answerSignal`; this component performs the focus/submit side effects.
  * - Submit persists first (onResolve → updateToolMessage + write(dbKey)) and
- *   only then dispatches the next user turn.
+ *   only then dispatches the next user turn; failures stay retryable and
+ *   in-flight duplicates are deduped by the shared command.
  * - Invalid submit moves to the first unanswered required question and shows
  *   inline validation feedback; resolved forms stay navigable read-only.
- * - Enter inside the Other input confirms the current answer (blur) but never
- *   submits the whole form.
+ * - Enter inside the Other input commits the answer exactly like a pick on a
+ *   single-select question (advance/send); on multi-select it only blurs.
  */
 
 import React, {
@@ -28,6 +33,7 @@ import { LuCheck, LuSquare, LuArrowRight, LuTrash2 } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
 import { handleSendMessage } from "chat/dialog/dialogSlice";
 import {
+  type AskChoiceAnswerSignal,
   type AskChoiceQuestion,
   type QuestionUiState,
   askChoiceReducer,
@@ -35,8 +41,10 @@ import {
   buildLegacyUserMessage,
   canSubmit,
   createInitialAskChoiceState,
+  formRequiresExplicitSubmit,
   isQuestionAnswered,
   normalizeAskChoiceArgs,
+  questionHasAnswer,
 } from "ai/tools/askChoiceState";
 import {
   type AskChoiceResolution,
@@ -177,6 +185,21 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   if (!activeQ || !activeQs) return null;
 
   const formCanSubmit = canSubmit(state);
+  // 是否阻止自动完成：仍仅由 multi-select 决定（多选无法推断“选完”）。
+  const needsExplicitSubmit = formRequiresExplicitSubmit(questions);
+  // 是否显示显式动作（完成/跳过）：多选题表单，或当前是可跳过（optional 且未答）的题。
+  const activeCanSkip =
+    state.phase === "active" &&
+    !activeQ.required &&
+    !questionHasAnswer(activeQ, activeQs);
+  const showAction = needsExplicitSubmit || activeCanSkip || persistFailed || submitting;
+  const actionLabel = persistFailed
+    ? "重试"
+    : activeCanSkip
+      ? "跳过"
+      : submitting
+        ? "提交中…"
+        : "完成";
   const showActiveError =
     !isResolved &&
     state.validationAttempted &&
@@ -235,6 +258,38 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         }
       });
   }, [isResolved, state, questions, dispatchAction]);
+
+  // 动作按钮：当前可跳过的 optional 题 → SKIP_CURRENT（reducer 只输出信号，
+  // effect 负责前进/发送）；其余（多选表单的「完成」/ 失败重试）→ 事务式提交。
+  const handleAction = useCallback(() => {
+    if (activeCanSkip && !persistFailed) {
+      dispatchAction({ type: "SKIP_CURRENT" });
+      return;
+    }
+    handleExplicitSubmit();
+  }, [activeCanSkip, persistFailed, dispatchAction, handleExplicitSubmit]);
+
+  // 单选「一步完成」信号消费：reducer 只输出信号，副作用在这里发生。
+  // - advance：自动跳到下一未答题后，把焦点移到该题的第一个控件；
+  // - complete：整表已答完 → 走与显式提交相同的事务式 command（persist → send）。
+  // 用对象身份去重：同一信号只处理一次（重渲染不会重发）。
+  const handledSignalRef = useRef<AskChoiceAnswerSignal | null>(null);
+  useEffect(() => {
+    const signal = state.answerSignal ?? null;
+    if (!signal || signal === handledSignalRef.current) return;
+    handledSignalRef.current = signal;
+    if (signal.kind === "advance") {
+      const nextQ = questions[signal.toIndex];
+      if (!nextQ) return;
+      if (nextQ.choices.length === 0 && nextQ.allowOther) {
+        otherInputRef.current?.focus();
+      } else {
+        rowRefs.current[0]?.focus();
+      }
+      return;
+    }
+    handleExplicitSubmit();
+  }, [state.answerSignal, questions, handleExplicitSubmit]);
 
   // Arrow keys move the cursor across choice rows (and the Other row), giving
   // the panel practical keyboard behavior on top of native tab/enter focus.
@@ -307,7 +362,7 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         )}
       </div>
 
-      {activeQ.multiSelect && <div className="ui-choice-hint">可多选，选完后点提交</div>}
+      {activeQ.multiSelect && <div className="ui-choice-hint">可多选，选完后点“完成”</div>}
       {state.phase === "cancelled" && <div className="ui-choice-hint">已取消</div>}
 
       {showActiveError && (
@@ -386,9 +441,12 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
                 // 不失焦、不触发任何确认/提交语义（keyCode 229 为组合期兼容信号）。
                 const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean };
                 if (native.isComposing || e.keyCode === 229) return;
-                // 非 IME 的 Enter 只确认当前答案（失焦），绝不提交整个表单。
+                // 非 IME 的 Enter：单选题与点选同一语义（确认并前进/发送）；
+                // 多选题保持显式提交（Enter 只失焦保存）。
                 e.preventDefault();
+                const commits = !activeQ.multiSelect && activeQs.otherText.trim();
                 e.currentTarget.blur();
+                if (commits) dispatchAction({ type: "COMMIT_OTHER" });
               }}
               placeholder="输入自定义回答…"
               disabled={isResolved || submitting}
@@ -426,15 +484,16 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         </div>
       )}
 
-      {/* Submit：唯一的显式发送动作；无效时点击触发校验跳转而非禁用 */}
-      {!isResolved && (
+      {/* 动作按钮：多选/混合表单的「完成」，当前 optional 可跳过题的「跳过」，
+          以及持久化失败的重试入口。纯必答单选表单靠选择一步发送，不渲染按钮。 */}
+      {!isResolved && showAction && (
         <button
           type="button"
           className={`ui-choice-submit ${formCanSubmit ? "enabled" : ""}`}
-          onClick={handleExplicitSubmit}
+          onClick={handleAction}
           disabled={submitting}
         >
-          {submitting ? "提交中…" : "提交"}
+          {actionLabel}
         </button>
       )}
     </div>

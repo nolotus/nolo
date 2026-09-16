@@ -1,4 +1,17 @@
 
+## 0.71.0-alpha.1
+
+## 0.71.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add compact Chrome observation protocol ([dae7f9d](https://github.com/nolotus/bun-nolo/commit/dae7f9d8b8b5fca28fdecbb845b4f16625ffd9da))
+
+### Bug Fixes
+
+* **ask-user:** reduce choice interaction steps ([1c7b631](https://github.com/nolotus/bun-nolo/commit/1c7b6316ab0f9c955055e599f71610bdae31cddd))
+
+
 ## 0.70.0-alpha.2
 
 ## 0.70.0-alpha.2 (2026-09-16)

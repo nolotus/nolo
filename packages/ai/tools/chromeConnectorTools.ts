@@ -53,9 +53,14 @@ const tabId = {
   description: "Chrome tab id returned by chrome_list_tabs or chrome_open_tab.",
 };
 
+const elementRef = {
+  type: "string",
+  description: "Revision-scoped ref like 1a2b3c4d-e2, copied verbatim from chrome_read_page; preferred over selector when available.",
+};
+
 const selector = {
   type: "string",
-  description: "CSS selector for the visible page element to operate on.",
+  description: "CSS selector for the visible page element to operate on; fallback when no elementRef is available.",
 };
 
 export const chromeListTabsFunctionSchema = baseSchema(
@@ -82,12 +87,21 @@ export const chromeOpenTabFunctionSchema = baseSchema(
 
 export const chromeReadPageFunctionSchema = baseSchema(
   "chrome_read_page",
-  "Read visible text and lightweight DOM state from a Chrome tab without reading cookies or profile databases.",
+  "Read a compact view of a Chrome tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for chrome_click and chrome_type instead of guessing selectors; use region to focus a big page. Does not read cookies or profile databases.",
   {
     tabId,
-    selector: {
-      ...selector,
-      description: "Optional CSS selector to limit the read to part of the page.",
+    region: {
+      type: "string",
+      description: "Optional CSS selector limiting the read to part of the page.",
+    },
+    maxChars: {
+      type: "number",
+      description: "Optional text character budget; the connector clamps it to a hard maximum.",
+    },
+    detail: {
+      type: "string",
+      enum: ["compact", "full"],
+      description: "compact (default) returns budgeted text; full raises the budget and adds capped HTML.",
     },
   },
   ["tabId"],
@@ -95,19 +109,21 @@ export const chromeReadPageFunctionSchema = baseSchema(
 
 export const chromeClickFunctionSchema = baseSchema(
   "chrome_click",
-  "Click a visible element in a Chrome tab. Do not use this for final submit/delete/payment/permission actions without action-time user confirmation.",
+  "Click a visible element in a Chrome tab by elementRef from chrome_read_page, or by CSS selector. Do not use this for final submit/delete/payment/permission actions without action-time user confirmation.",
   {
     tabId,
+    elementRef,
     selector,
   },
-  ["tabId", "selector"],
+  ["tabId"],
 );
 
 export const chromeTypeFunctionSchema = baseSchema(
   "chrome_type",
-  "Type text into a Chrome page element. Typing sensitive data into a third-party site counts as data transmission.",
+  "Type text into a Chrome page element identified by elementRef from chrome_read_page or by CSS selector. Typing sensitive data into a third-party site counts as data transmission.",
   {
     tabId,
+    elementRef,
     selector,
     text: {
       type: "string",
@@ -118,7 +134,7 @@ export const chromeTypeFunctionSchema = baseSchema(
       description: "Whether to clear the field before typing. Defaults to true.",
     },
   },
-  ["tabId", "selector", "text"],
+  ["tabId", "text"],
 );
 
 export const chromePressFunctionSchema = baseSchema(
@@ -179,12 +195,16 @@ export const chromeReadConsoleFunctionSchema = baseSchema(
 
 export const chromeReadNetworkFunctionSchema = baseSchema(
   "chrome_read_network",
-  "Read a recent network summary from a Chrome tab using debugger-backed connector state.",
+  "Read a deduplicated recent network summary from a Chrome tab using debugger-backed connector state. Static assets are filtered unless includeAssets is set.",
   {
     tabId,
     limit: {
       type: "number",
       description: "Maximum number of recent network entries to return.",
+    },
+    includeAssets: {
+      type: "boolean",
+      description: "Include images, CSS, fonts and other static assets. Defaults to false.",
     },
   },
   ["tabId"],

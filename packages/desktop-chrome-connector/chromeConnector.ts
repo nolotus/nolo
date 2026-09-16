@@ -20,6 +20,7 @@ export type ChromeConnectorError = Error & {
 };
 
 export const NOLO_CHROME_CONNECTOR_EXTENSION_ID = "ahpdoopadkamnglhlacfjdfnonpjdplg";
+export const NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION = "2";
 
 function defaultTokenPath() {
   return resolve(
@@ -123,6 +124,26 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
   };
 }
 
+const TARGET_REQUIRED_ACTIONS = new Set(["click", "type"]);
+
+/**
+ * Deterministic, connector-side guard for the two action styles. The extension re-checks the same
+ * rule, so a model call never reaches the RPC endpoint (or the page) without a resolvable target.
+ */
+export function validateChromeConnectorPayload(
+  action: string,
+  payload: ChromeConnectorRequestPayload,
+): void {
+  if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
+  const elementRef = typeof payload.elementRef === "string" ? payload.elementRef.trim() : "";
+  const selector = typeof payload.selector === "string" ? payload.selector.trim() : "";
+  if (elementRef || selector) return;
+  throw createConnectorError(
+    "ELEMENT_TARGET_REQUIRED",
+    "Provide elementRef from chrome_read_page or a CSS selector.",
+  );
+}
+
 export function createChromeConnectorClient(args?: {
   endpoint?: string;
   fetchImpl?: (
@@ -195,6 +216,19 @@ export function createVerifiedChromeConnectorClient(args?: {
         { expectedExtensionId, receivedExtensionId },
       );
     }
+    const receivedProtocolVersion = (connectorInfo as { protocolVersion?: unknown })?.protocolVersion;
+    if (receivedProtocolVersion !== NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION) {
+      throw createConnectorError(
+        "CHROME_CONNECTOR_PROTOCOL_MISMATCH",
+        `Chrome connector protocol mismatch: expected ${NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION}, received ${
+          typeof receivedProtocolVersion === "string" ? receivedProtocolVersion : "unknown"
+        }. Reload the Nolo Desktop Chrome Connector extension.`,
+        {
+          expectedProtocolVersion: NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
+          receivedProtocolVersion,
+        },
+      );
+    }
   };
 
   return {
@@ -233,6 +267,7 @@ export async function executeChromeConnectorTool(args: {
 
   try {
     const payload = parseArguments(args.call.arguments);
+    validateChromeConnectorPayload(action, payload);
     const result = await (args.client ?? createChromeConnectorClient()).request(action, payload);
     return {
       content: JSON.stringify({ ok: true, result }),

@@ -485,28 +485,40 @@ const STRINGS = {
     zh: "提交 ↓",
   },
   askChoiceSubmitRow: {
-    en: "Submit",
-    zh: "提交",
+    en: "Done",
+    zh: "完成",
+  },
+  askChoiceSkipRow: {
+    en: "Skip",
+    zh: "跳过",
   },
   askChoiceOtherLabel: {
     en: "Other",
     zh: "其他",
   },
   askChoiceHintSingle: {
-    en: "Enter/Space picks · in Other, Enter only saves · ↓ to Submit row, Enter sends",
-    zh: "Enter/空格 选择 · 其他中输入后 Enter 仅为保存 · ↓ 到提交行 Enter 发送",
+    en: "Enter/Space picks · single question sends · multi-question jumps to the next unanswered · Enter in Other confirms and continues",
+    zh: "Enter/空格 选择：单题直接发送、多题跳到下一未答题 · 其他输入后 Enter 确认并继续",
+  },
+  askChoiceHintOptional: {
+    en: "Optional question — Enter/Space picks (one step) · skip if you don't want to answer",
+    zh: "可选题 — Enter/空格 选择即完成 · 不想回答可跳过",
   },
   askChoiceHintMulti: {
-    en: "Enter/Space toggles · ↓ to Submit row, Enter sends",
-    zh: "Enter/空格 切换选中 · ↓ 到提交行 Enter 发送",
+    en: "Enter/Space toggles · ↓ to Done row, Enter sends",
+    zh: "Enter/空格 切换选中 · ↓ 到完成行 Enter 发送",
   },
   askChoiceFooterSingle: {
-    en: "↵ select · ↓ submit row ↵ send · ctrl+s send · tab switch · esc cancel",
-    zh: "↵ 选择 · ↓ 提交行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
+    en: "↵ pick/send · tab switch · esc cancel",
+    zh: "↵ 选择/发送 · tab 切换 · esc 取消",
+  },
+  askChoiceFooterSkip: {
+    en: "↵ pick/send · ↓ skip row ↵ skip · tab switch · esc cancel",
+    zh: "↵ 选择/发送 · ↓ 跳过行 ↵ 跳过 · tab 切换 · esc 取消",
   },
   askChoiceFooterMulti: {
-    en: "↵ toggle · ↓ submit row ↵ send · ctrl+s send · tab switch · esc cancel",
-    zh: "↵ 切换 · ↓ 提交行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
+    en: "↵ toggle · ↓ done row ↵ send · ctrl+s send · tab switch · esc cancel",
+    zh: "↵ 切换 · ↓ 完成行 ↵ 发送 · ctrl+s 发送 · tab 切换 · esc 取消",
   },
   askChoiceValidationRequired: {
     en: "Required questions are unanswered — jumped to the first one.",

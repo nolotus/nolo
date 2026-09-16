@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { toErrorMessage } from "core/errorMessage";
 import {
   createChromeConnectorClient,
+  NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
   type ChromeConnectorClient,
 } from "../../desktop-chrome-connector/chromeConnector";
 import {
@@ -102,6 +103,14 @@ export async function buildDesktopChromeConnectorStatus(args: {
         `Chrome connector extension id mismatch: expected ${extensionId}, received ${
           (connectorInfo as { extensionId?: string })?.extensionId ?? "unknown"
         }.`,
+      );
+    }
+    const receivedProtocolVersion = (connectorInfo as { protocolVersion?: string })?.protocolVersion;
+    if (receivedProtocolVersion !== NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION) {
+      throw new Error(
+        `Chrome connector protocol mismatch: expected ${NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION}, received ${
+          receivedProtocolVersion ?? "unknown"
+        }. Reload the Nolo Desktop Chrome Connector extension.`,
       );
     }
     const tabsResult = await requestChrome("list_tabs", {});

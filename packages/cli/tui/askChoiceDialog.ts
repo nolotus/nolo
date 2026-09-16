@@ -6,16 +6,19 @@
  *
  * Keyboard map:
  *   ↑/↓        move cursor
- *   Enter/Space on a choice row: pick (single-select) / toggle (multi-select).
- *               Never submits — the dialog only closes on an explicit action.
- *   Enter      on the Other row: focus its input; while focused: save (blur).
- *              Also never submits the form.
- *   ↓ / ↑      past the last row / back: focus the form-level Submit row.
- *   Enter      on the Submit row: send the whole form — the visible, always
- *              reachable submit action.
- *   Ctrl+S     submit shortcut, kept for muscle memory. It is NOT the only
- *              way to send: the Submit row above is the primary entry and is
- *              reachable with the arrow keys alone.
+ *   Enter/Space on a choice row: single-select → lands immediately: advance
+ *              to the next unanswered question, or close the dialog and send
+ *              when nothing is left unanswered; multi-select → toggle only
+ *              (the explicit Submit row stays required).
+ *   Enter      on the Other row: focus its input; while focused with text:
+ *              commit the answer like a single-select pick (advance/send);
+ *              empty text or multi-select only saves (blur).
+ *   ↓ / ↑      past the last row / back: focus the form-level action row
+ *              (「跳过」 for the current optional unanswered question,
+ *              「完成」 when the form contains a multi-select question).
+ *              Pure required single-select forms have no action row at all.
+ *   Enter      on the action row: skip the optional question / send the form.
+ *   Ctrl+S     activates the action row (完成/跳过); ignored without one.
  *   Tab        next question tab
  *   Shift+Tab  prev question tab
  *   1..9       quick-select the matching numbered row (Other's own number
@@ -39,8 +42,10 @@ import {
   askChoiceReducer,
   buildAskChoiceResult,
   createInitialAskChoiceState,
+  formRequiresExplicitSubmit,
   formatOutboundUserMessage,
   normalizeAskChoiceArgs,
+  questionHasAnswer,
 } from "ai/tools/askChoiceState";
 import {
   createStandaloneDialogSession,
@@ -128,12 +133,50 @@ function renderTabBar(state: AskChoiceUiState, colorEnabled: boolean): string {
       ? themeText(` ${label} `, "muted", colorEnabled)
       : ` ${label} `;
   });
-  const submitLabel = t("askChoiceSubmit");
-  return tabs.join("  ") + "  " + (colorEnabled ? themeText(submitLabel, "chrome", colorEnabled) : submitLabel);
+  // The trailing hint only exists when the dialog actually has an action row
+  // (完成 / 跳过): pure required single-select forms render no such row.
+  const actionRow = resolveAskChoiceActionRow(state);
+  const submitLabel = actionRow ? `${actionRow.label} ↓` : null;
+  if (!submitLabel) return tabs.join("  ");
+  return (
+    tabs.join("  ") +
+    "  " +
+    (colorEnabled ? themeText(submitLabel, "chrome", colorEnabled) : submitLabel)
+  );
 }
 
-function renderFooter(multiSelect: boolean, colorEnabled: boolean): string {
-  const hints = multiSelect ? t("askChoiceFooterMulti") : t("askChoiceFooterSingle");
+/**
+ * The contextual action row of the dialog:
+ * - `skip`   → current question is optional and still unanswered: explicit 跳过;
+ * - `submit` → the form contains a multi-select question: explicit 完成;
+ * - `null`   → pure required single-select form: nothing to trigger explicitly,
+ *              so the row (and its footer/keys) is not rendered at all.
+ */
+function resolveAskChoiceActionRow(
+  state: AskChoiceUiState,
+): { kind: "skip" | "submit"; label: string } | null {
+  const q = state.questions[state.activeIndex];
+  const qs = state.questionStates[state.activeIndex];
+  if (!q || !qs) return null;
+  if (!q.required && !questionHasAnswer(q, qs)) {
+    return { kind: "skip", label: t("askChoiceSkipRow") };
+  }
+  if (formRequiresExplicitSubmit(state.questions)) {
+    return { kind: "submit", label: t("askChoiceSubmitRow") };
+  }
+  return null;
+}
+
+function renderFooter(
+  actionRow: ReturnType<typeof resolveAskChoiceActionRow>,
+  colorEnabled: boolean,
+): string {
+  const hints =
+    actionRow?.kind === "skip"
+      ? t("askChoiceFooterSkip")
+      : actionRow?.kind === "submit"
+        ? t("askChoiceFooterMulti")
+        : t("askChoiceFooterSingle");
   return colorEnabled ? themeText(`  ${hints}`, "chrome", colorEnabled) : `  ${hints}`;
 }
 
@@ -152,6 +195,7 @@ export function renderAskChoiceFrame(
   const submitFocused = options?.submitFocused === true;
   const q = state.questions[state.activeIndex];
   const qs = state.questionStates[state.activeIndex];
+  const actionRow = resolveAskChoiceActionRow(state);
   const lines: string[] = [];
   let otherCursor: AskChoiceCursor | null = null;
 
@@ -196,6 +240,12 @@ export function renderAskChoiceFrame(
       colorEnabled
         ? themeText(`  ${t("askChoiceHintMulti")}`, "muted", colorEnabled)
         : `  ${t("askChoiceHintMulti")}`,
+    );
+  } else if (actionRow?.kind === "skip") {
+    lines.push(
+      colorEnabled
+        ? themeText(`  ${t("askChoiceHintOptional")}`, "muted", colorEnabled)
+        : `  ${t("askChoiceHintOptional")}`,
     );
   } else {
     lines.push(
@@ -265,19 +315,21 @@ export function renderAskChoiceFrame(
     lines.push(renderOverflowBelow(totalRows - window.end));
   }
 
-  // Form-level Submit row: always visible, focused with ↓ from the last row,
-  // activated with Enter. It deliberately carries NO [n] badge — the numeric
-  // quick-select maps only to the numbered rows, so no digit can ever
-  // dispatch SUBMIT.
-  lines.push(
-    renderDialogRow({
-      label: t("askChoiceSubmitRow"),
-      focused: submitFocused,
-    }),
-  );
+  // Contextual action row: 「完成」for forms containing a multi-select
+  // question, 「跳过」for the current optional unanswered question. Pure
+  // required single-select forms have nothing to trigger explicitly, so the
+  // row is omitted entirely (Enter on a choice already sends).
+  if (actionRow) {
+    lines.push(
+      renderDialogRow({
+        label: actionRow.label,
+        focused: submitFocused,
+      }),
+    );
+  }
 
   lines.push("");
-  lines.push(renderFooter(q.multiSelect, colorEnabled));
+  lines.push(renderFooter(actionRow, colorEnabled));
 
   return { text: lines.join("\n"), otherCursor };
 }
@@ -320,8 +372,9 @@ export async function runAskChoiceDialog(args: {
 
   const wheelThrottle = createWheelThrottle();
   let rawAcquired = false;
-  // TUI-local focus on the form-level Submit row (the row itself is rendered
-  // from this flag; the reducer's cursorIndex never leaves the real rows).
+  // TUI-local focus on the contextual action row (完成/跳过). The row itself is
+  // rendered from this flag; the reducer's cursorIndex never leaves the real
+  // rows. No action row → the flag is forced false.
   let submitFocused = false;
   const bottomAnchored = Boolean(args.bottomAnchored && args.bottomRow);
   const resolveBottomRow = () =>
@@ -412,6 +465,10 @@ export async function runAskChoiceDialog(args: {
       const qs = state.questionStates[state.activeIndex];
       const q = state.questions[state.activeIndex];
       const isOtherRow = qs.cursorIndex >= q.choices.length;
+      const actionRow = resolveAskChoiceActionRow(state);
+      // No action row (pure required single-select): the ↓-focus state can
+      // never stick around.
+      if (!actionRow) submitFocused = false;
 
       if (sequence === KEY_SHIFT_TAB) {
         action = { type: "PREV_TAB" };
@@ -437,9 +494,10 @@ export async function runAskChoiceDialog(args: {
           continue;
         }
         if (qs.cursorIndex >= maxRowIndex) {
-          // ↓ past the last row focuses the form-level Submit row.
-          // MOVE_CURSOR clamps at the last row and clears otherFocused, so a
-          // focused Other input is saved (blur) — still without submitting.
+          // ↓ past the last row focuses the action row (完成/跳过) when one
+          // exists. MOVE_CURSOR clamps at the last row and clears otherFocused,
+          // so a focused Other input is saved (blur) — still without submitting.
+          if (!actionRow) continue;
           submitFocused = true;
           state = askChoiceReducer(state, { type: "MOVE_CURSOR", delta: 1 });
           paint();
@@ -447,9 +505,13 @@ export async function runAskChoiceDialog(args: {
         }
         action = { type: "MOVE_CURSOR", delta: 1 };
       } else if (sequence === KEY_CTRL_S) {
-        // Ctrl+S stays as a shortcut for muscle memory; the Submit row +
-        // Enter above is the primary, always-visible way to send the form.
-        action = { type: "SUBMIT" };
+        // Ctrl+S activates the action row (完成/跳过); without one (pure
+        // required single-select forms) there is nothing to trigger.
+        if (!actionRow) continue;
+        action =
+          actionRow.kind === "skip"
+            ? { type: "SKIP_CURRENT" }
+            : { type: "SUBMIT" };
       } else if (sequence === KEY_SPACE) {
         if (submitFocused) {
           // Space never activates the Submit row (Enter is its action), so a
@@ -470,14 +532,22 @@ export async function runAskChoiceDialog(args: {
           action = { type: "TOGGLE_AT_CURSOR" };
         }
       } else if (isSubmit(sequence)) {
-        // Enter acts on the focused row: on a choice it picks/toggles, on the
-        // Other row it opens the input, inside Other it only saves (blur) —
-        // and on the Submit row it sends the form. No pick/blur ever submits
-        // implicitly.
+        // Enter acts on the focused row: on a single-select choice it lands
+        // immediately (advance to the next unanswered question, or send when
+        // nothing is left), on a multi-select row it toggles, on the Other
+        // row it opens the input, inside Other it commits the answer
+        // (single-select) or saves (multi-select), and on the Submit row it
+        // sends the form.
         if (submitFocused) {
-          action = { type: "SUBMIT" };
+          action =
+            actionRow?.kind === "skip"
+              ? { type: "SKIP_CURRENT" }
+              : { type: "SUBMIT" };
         } else if (qs.otherFocused) {
-          action = { type: "BLUR_OTHER" };
+          action =
+            !q.multiSelect && qs.otherText.trim()
+              ? { type: "COMMIT_OTHER" }
+              : { type: "BLUR_OTHER" };
         } else if (isOtherRow) {
           action = { type: "FOCUS_OTHER" };
         } else {
@@ -549,9 +619,16 @@ export async function runAskChoiceDialog(args: {
       if (action) {
         state = askChoiceReducer(state, action);
 
-        // The only transitions out of `active` are explicit submits (Enter
-        // on the Submit row, Ctrl+S) or CANCEL — never a pick, a blur or a
-        // hint. An invalid SUBMIT keeps the dialog open: the reducer moved
+        // A single-select answer that leaves nothing unanswered lands the
+        // form: the reducer only emits the `complete` signal (no side
+        // effects), so the dialog performs the actual SUBMIT here.
+        if (state.phase === "active" && state.answerSignal?.kind === "complete") {
+          state = askChoiceReducer(state, { type: "SUBMIT" });
+        }
+
+        // The transitions out of `active` are: a completing single-select
+        // answer, an explicit SUBMIT (Enter on the Submit row, Ctrl+S) or
+        // CANCEL. An invalid SUBMIT keeps the dialog open: the reducer moved
         // the active tab to the first unanswered required question and
         // flagged validationAttempted, which the renderer shows.
         if (state.phase !== "active") break;
@@ -593,7 +670,9 @@ export async function runAskChoiceDialog(args: {
     return {
       kind: "selected",
       userMessage: a.userMessage,
-      label: labels.join(", ") || a.otherText || "",
+      // Fallback covers the skip-only shape: no label/other text, but the
+      // outbound message carries the SKIPPED marker.
+      label: labels.join(", ") || a.otherText || a.userMessage || "",
     };
   }
 

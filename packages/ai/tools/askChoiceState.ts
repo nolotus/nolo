@@ -7,10 +7,26 @@
  * events produce identical state transitions on every platform.
  *
  * Contract (docs/plans/2026-09-15-ask-user-unified-interaction.md):
- * - Selecting a choice never advances the tab and never submits. The only
- *   transitions out of `active` are an explicit SUBMIT or CANCEL.
+ * - A single-select answer lands immediately (one step = done): the reducer
+ *   advances `activeIndex` to the next unanswered question and emits
+ *   `answerSignal: { kind: "advance" }`, or — when nothing is left
+ *   unanswered — emits `answerSignal: { kind: "complete" }` so the renderer
+ *   persists and sends. The reducer never runs side effects itself. Forms
+ *   containing any multi-select question never auto-complete: they keep the
+ *   explicit SUBMIT. Multi-select toggles never advance and never complete.
  * - A non-empty `Other` is an alternative answer, not an annotation: it is
  *   mutually exclusive with predefined choices, in both directions.
+ *   COMMIT_OTHER (Enter in the Other input) lands exactly like a pick on a
+ *   single-select question; on multi-select it is a no-op (explicit submit).
+ * - `SKIP_CURRENT` is the explicit skip for an optional, still-unanswered
+ *   current question (renderers only expose it there): jump to the next
+ *   unanswered question, or emit `complete` when nothing is left. Because it
+ *   is an explicit user action it may complete a form that contains
+ *   multi-select questions. The reducer refuses it for required or already
+ *   answered questions, so a skip can never bypass a required answer.
+ * - An unanswered optional question submitted as part of a form is marked in
+ *   the outbound text with `SKIPPED_ANSWER_MESSAGE`, so the LLM sees the skip
+ *   and a skip-only form still has a non-empty message to send.
  * - SUBMIT on an invalid form sets `validationAttempted` and moves
  *   `activeIndex` to the first unanswered required question instead of
  *   submitting.
@@ -68,6 +84,18 @@ export type QuestionUiState = {
 
 export type AskChoicePhase = "active" | "submitted" | "cancelled";
 
+/**
+ * One-shot signal emitted when a single-select answer lands. Renderers
+ * consume each signal exactly once (compare by object identity) because the
+ * reducer itself performs no side effects:
+ * - `advance`: the form jumped to `toIndex`; the renderer should focus it.
+ * - `complete`: every question is answered; the renderer should persist the
+ *   answers and send the next user turn.
+ */
+export type AskChoiceAnswerSignal =
+  | { kind: "advance"; fromIndex: number; toIndex: number }
+  | { kind: "complete"; fromIndex: number };
+
 export type AskChoiceUiState = {
   questions: AskChoiceQuestion[];
   /** Index of the currently visible question tab. */
@@ -76,6 +104,8 @@ export type AskChoiceUiState = {
   phase: AskChoicePhase;
   /** When true, highlights required unanswered questions or validation feedback. */
   validationAttempted?: boolean;
+  /** Latest landing signal; null/absent when no single-select answer landed. */
+  answerSignal?: AskChoiceAnswerSignal | null;
 };
 
 // ── Result (what gets sent back to the LLM) ────────────────────────
@@ -94,6 +124,12 @@ export type AskChoiceResult =
   | { kind: "submitted"; answers: QuestionAnswer[] }
   | { kind: "cancelled" };
 
+/**
+ * Outbound marker for an optional question the user explicitly skipped
+ * (`SKIP_CURRENT` / submitting a form with the optional question unanswered).
+ */
+export const SKIPPED_ANSWER_MESSAGE = "（跳过）";
+
 // ── Actions ────────────────────────────────────────────────────────
 
 export type AskChoiceAction =
@@ -101,6 +137,8 @@ export type AskChoiceAction =
   | { type: "TOGGLE_AT_CURSOR" }
   | { type: "SELECT_AT_CURSOR" }
   | { type: "SELECT_CHOICE"; choiceId: string }
+  | { type: "COMMIT_OTHER" }
+  | { type: "SKIP_CURRENT" }
   | { type: "FOCUS_OTHER" }
   | { type: "BLUR_OTHER" }
   | { type: "SET_OTHER_TEXT"; text: string }
@@ -258,6 +296,7 @@ export function createInitialAskChoiceState(
     }),
     phase: savedAnswers?.phase ?? (hasSaved ? "submitted" : "active"),
     validationAttempted: false,
+    answerSignal: null,
   };
 }
 
@@ -304,7 +343,7 @@ export function askChoiceReducer(
 
   switch (action.type) {
     case "CANCEL":
-      return { ...state, phase: "cancelled" };
+      return { ...state, phase: "cancelled", answerSignal: null };
 
     case "SUBMIT": {
       const firstUnanswered = findFirstUnansweredIndex(state);
@@ -315,7 +354,12 @@ export function askChoiceReducer(
           validationAttempted: true,
         };
       }
-      return { ...state, phase: "submitted", validationAttempted: false };
+      return {
+        ...state,
+        phase: "submitted",
+        validationAttempted: false,
+        answerSignal: null,
+      };
     }
 
     case "SWITCH_TAB": {
@@ -370,8 +414,9 @@ export function askChoiceReducer(
 
     // The one explicit "choose this option" action, addressed by choice id so
     // that click / tap handlers on every platform share the same behaviour as
-    // cursor-driven keys. Multi-select toggles, single-select picks. It never
-    // advances the tab and never submits.
+    // cursor-driven keys. Multi-select toggles; a single-select pick lands
+    // immediately (advance to the next unanswered question, or emit the
+    // `complete` signal so the renderer persists and sends).
     case "SELECT_CHOICE": {
       const qs = state.questionStates[state.activeIndex];
       const q = state.questions[state.activeIndex];
@@ -391,16 +436,22 @@ export function askChoiceReducer(
           otherText: "",
           otherFocused: false,
         };
-      } else {
-        newQs[state.activeIndex] = {
-          ...qs,
-          cursorIndex: choiceIndex,
-          pickedId: action.choiceId,
-          otherText: "",
-          otherFocused: false,
-        };
+        // Toggling never advances and never completes: the reducer cannot
+        // infer when the user is done with a multi-select question.
+        return { ...state, questionStates: newQs, validationAttempted: false };
       }
-      return { ...state, questionStates: newQs, validationAttempted: false };
+
+      newQs[state.activeIndex] = {
+        ...qs,
+        cursorIndex: choiceIndex,
+        pickedId: action.choiceId,
+        otherText: "",
+        otherFocused: false,
+      };
+      return landSingleSelectAnswer(
+        { ...state, questionStates: newQs, validationAttempted: false },
+        state.activeIndex,
+      );
     }
 
     case "SELECT_AT_CURSOR": {
@@ -421,6 +472,51 @@ export function askChoiceReducer(
       const choiceId = q.choices[qs.cursorIndex]?.id;
       if (!choiceId) return state;
       return askChoiceReducer(state, { type: "SELECT_CHOICE", choiceId });
+    }
+
+    // Enter in the Other input: identical landing semantics to a single-select
+    // pick, but only when the row carries an actual answer. Multi-select
+    // questions keep the explicit submit — Enter there is a no-op (renderers
+    // blur the input themselves) so toggling stays a purely local edit.
+    case "COMMIT_OTHER": {
+      const qs = state.questionStates[state.activeIndex];
+      const q = state.questions[state.activeIndex];
+      if (q.multiSelect || qs.otherText.trim().length === 0) return state;
+      const newQs = [...state.questionStates];
+      newQs[state.activeIndex] = { ...qs, otherFocused: false };
+      return landSingleSelectAnswer(
+        { ...state, questionStates: newQs, validationAttempted: false },
+        state.activeIndex,
+      );
+    }
+
+    // Explicit skip of the current optional, still-unanswered question.
+    // Renderers only expose it there; the reducer also refuses required or
+    // already-answered questions so a skip can never bypass a required answer.
+    case "SKIP_CURRENT": {
+      const q = state.questions[state.activeIndex];
+      const qs = state.questionStates[state.activeIndex];
+      if (!q || !qs || q.required || questionHasAnswer(q, qs)) return state;
+      const nextIndex = findNextUnansweredIndex(state, state.activeIndex);
+      if (nextIndex !== -1) {
+        return {
+          ...state,
+          activeIndex: nextIndex,
+          validationAttempted: false,
+          answerSignal: {
+            kind: "advance",
+            fromIndex: state.activeIndex,
+            toIndex: nextIndex,
+          },
+        };
+      }
+      // Nothing left unanswered: skipping the last optional question is an
+      // explicit completion, so even multi-select forms may complete here.
+      return {
+        ...state,
+        validationAttempted: false,
+        answerSignal: { kind: "complete", fromIndex: state.activeIndex },
+      };
     }
 
     case "FOCUS_OTHER": {
@@ -457,11 +553,84 @@ export function askChoiceReducer(
 
 // ── Queries ────────────────────────────────────────────────────────
 
+/**
+ * Landing rule for every single-select answer (pick or Other commit):
+ * jump to the next unanswered question, or report the form complete so the
+ * renderer can persist and send. Forms containing any multi-select question
+ * never auto-complete — the user confirms those with the explicit SUBMIT.
+ * Pure function: no side effects, only state + signal.
+ */
+function landSingleSelectAnswer(
+  state: AskChoiceUiState,
+  fromIndex: number,
+): AskChoiceUiState {
+  const nextIndex = findNextUnansweredIndex(state, fromIndex);
+  if (nextIndex !== -1) {
+    return {
+      ...state,
+      activeIndex: nextIndex,
+      answerSignal: { kind: "advance", fromIndex, toIndex: nextIndex },
+    };
+  }
+  if (formRequiresExplicitSubmit(state.questions)) {
+    return { ...state, answerSignal: null };
+  }
+  return { ...state, answerSignal: { kind: "complete", fromIndex } };
+}
+
+/**
+ * Index of the next unanswered question after `fromIndex`, searching forward
+ * and wrapping around; -1 when nothing is left unanswered. `fromIndex` itself
+ * is never returned. Optional questions count as answered (they never block,
+ * so they are never an advance target).
+ */
+export function findNextUnansweredIndex(
+  state: AskChoiceUiState,
+  fromIndex: number,
+): number {
+  const total = state.questions.length;
+  for (let step = 1; step < total; step += 1) {
+    const index = (fromIndex + step) % total;
+    const questionState = state.questionStates[index];
+    // A missing per-question state (streaming hydration lag) counts as
+    // unanswered instead of crashing the reducer.
+    if (
+      !questionState ||
+      !isQuestionAnswered(state.questions[index], questionState)
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Whether the form must keep an explicit 完成/提交 action: a multi-select
+ * question makes completion impossible to infer from a single click/toggle.
+ */
+export function formRequiresExplicitSubmit(
+  questions: AskChoiceQuestion[],
+): boolean {
+  return questions.some((q) => q.multiSelect);
+}
+
 /** Find the index of the first unanswered required question (-1 if all valid). */
 export function findFirstUnansweredIndex(state: AskChoiceUiState): number {
   return state.questions.findIndex(
     (q, i) => !isQuestionAnswered(q, state.questionStates[i]),
   );
+}
+
+/** Whether a question has a real answer (selection or Other text). */
+export function questionHasAnswer(
+  q: AskChoiceQuestion,
+  qs: QuestionUiState,
+): boolean {
+  const hasOther = q.allowOther && qs.otherText.trim().length > 0;
+  const hasSelection = q.multiSelect
+    ? qs.selectedIds.length > 0
+    : qs.pickedId !== null;
+  return hasOther || hasSelection;
 }
 
 /** Whether a question has a valid answer (selected or Other text). */
@@ -470,11 +639,7 @@ export function isQuestionAnswered(
   qs: QuestionUiState,
 ): boolean {
   if (!q.required) return true;
-  const hasOther = q.allowOther && qs.otherText.trim().length > 0;
-  const hasSelection = q.multiSelect
-    ? qs.selectedIds.length > 0
-    : qs.pickedId !== null;
-  return hasOther || hasSelection;
+  return questionHasAnswer(q, qs);
 }
 
 /** Whether the entire form can be submitted. */
@@ -516,11 +681,17 @@ export function buildAskChoiceResult(
       }
     }
 
+    // An unanswered optional question is an explicit skip: carry it in the
+    // outbound text so the LLM sees the user passed on it (and so a form whose
+    // only question was skipped still has a non-empty message to send).
+    const userMessage = parts.join("\n");
+    const skipped = userMessage.length === 0 && !q.required;
+
     return {
       questionId: q.id,
       selectedIds,
       otherText,
-      userMessage: parts.join("\n"),
+      userMessage: skipped ? SKIPPED_ANSWER_MESSAGE : userMessage,
     };
   });
 
