@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" fill="none" role="img" aria-label="nolo">
+  <title>nolo 品牌头像线稿（唯一几何真值源）</title>
+  <!--
+    真值来源：用户已确认的「01 / 亮蓝线稿」版本。
+    头形 M17 80V46Q17 31 32 31H68Q83 31 83 46V80（开口底边，无脸部填色、无嘴）
+    眼睛 rect 11x15 rx5.5 @ (30,52) 与 (59,52)；天线 M63 32L68 13（右斜约 15°）
+    描边宽度：头 8 / 眼 4 / 天线 5.5；round caps + round joins
+    颜色：主蓝 #2879CD；深色背景提亮蓝 #90C6FF；图标反白 #FFFEFA
+    本文件只描述几何与描边，颜色一律由 currentColor 决定，供多处复用。
+  -->
+  <g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path data-part="antenna" d="M63 32L68 13" stroke-width="5.5"/>
+    <path data-part="head" d="M17 80V46Q17 31 32 31H68Q83 31 83 46V80" stroke-width="8"/>
+    <rect data-part="eye-left" x="30" y="52" width="11" height="15" rx="5.5" stroke-width="4"/>
+    <rect data-part="eye-right" x="59" y="52" width="11" height="15" rx="5.5" stroke-width="4"/>
+  </g>
+</svg>

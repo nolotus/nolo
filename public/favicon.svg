@@ -1,17 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="brand-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0F172A"/>
-      <stop offset="0.55" stop-color="#111827"/>
-      <stop offset="1" stop-color="#0B1220"/>
-    </linearGradient>
-    <linearGradient id="brand-accent" x1="16" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22D3EE"/>
-      <stop offset="1" stop-color="#34D399"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="16" fill="url(#brand-bg)"/>
-  <rect x="9" y="9" width="46" height="46" rx="14" fill="#0B1220" stroke="url(#brand-accent)" stroke-width="2"/>
-  <path d="M22 44V20H27L40 35V20H44V44H39L26 29V44H22Z" fill="white"/>
-  <circle cx="45.5" cy="18.5" r="3.5" fill="#34D399"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024" fill="none" role="img" aria-label="nolo">
+  <!-- 由 public/brand/nolo-head.svg 派生（scripts/brand/generate-nolo-brand-assets.ts），请勿手改 -->
+  <rect width="100" height="100" rx="25.806" fill="#2879CD"/>
+  <g transform="translate(12.903225806451612 12.903225806451612) scale(0.7419354838709677)" stroke="#FFFEFA" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M63 32L68 13" stroke-width="5.5"/>
+    <path d="M17 80V46Q17 31 32 31H68Q83 31 83 46V80" stroke-width="8"/>
+    <rect x="30" y="52" width="11" height="15" rx="5.5" stroke-width="4"/>
+    <rect x="59" y="52" width="11" height="15" rx="5.5" stroke-width="4"/>
+  </g>
 </svg>
