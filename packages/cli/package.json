@@ -1,6 +1,6 @@
 {
   "name": "nolo-cli",
-  "version": "0.72.0-alpha.1",
+  "version": "0.73.0-alpha.1",
   "type": "module",
   "description": "Agent-first terminal workspace for Nolo",
   "bin": {
@@ -71,9 +71,9 @@
     "access": "public"
   },
   "dependencies": {
-    "@clack/core": "^1.4.3",
     "ansi-regex": "^6.3.0",
     "clipboardy": "^5.3.1",
+    "diff": "^8.0.2",
     "string-width": "^8.2.2",
     "ulid": "^2.3.0"
   },

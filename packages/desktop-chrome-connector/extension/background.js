@@ -864,6 +864,22 @@ async function handleAction(action, payload = {}) {
   }
 }
 
+/**
+ * The toolbar popup asks the worker whether the desktop app is actually connected. The popup is the
+ * only user-facing surface in the extension: it reports status and reads no page data.
+ */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "connector_status") return false;
+  sendResponse({
+    extensionId: chrome.runtime.id,
+    version: chrome.runtime.getManifest().version,
+    hostName: HOST_NAME,
+    protocolVersion: CONNECTOR_PROTOCOL_VERSION,
+    connected: Boolean(nativePort),
+  });
+  return false;
+});
+
 function connectNativeHost() {
   nativePort = chrome.runtime.connectNative(HOST_NAME);
   nativePort.onMessage.addListener(async (message) => {

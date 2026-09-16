@@ -56,6 +56,18 @@ const PrivacyPolicyPage: React.FC = () => {
         </section>
 
         <section {...stylex.props(policyPageStyles.section)}>
+          <h2 {...stylex.props(policyPageStyles.sectionTitle)}>{t("privacy.browserExtension.title")}</h2>
+          <p>{t("privacy.browserExtension.desc")}</p>
+          <ul {...stylex.props(policyPageStyles.list)}>
+            <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.browserExtension.page")}</li>
+            <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.browserExtension.debug")}</li>
+            <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.browserExtension.tabs")}</li>
+          </ul>
+          <p>{t("privacy.browserExtension.local")}</p>
+          <p>{t("privacy.browserExtension.irreversible")}</p>
+        </section>
+
+        <section {...stylex.props(policyPageStyles.section)}>
           <h2 {...stylex.props(policyPageStyles.sectionTitle)}>{t("privacy.section6.title")}</h2>
           <p>{t("privacy.section6.desc")}</p>
         </section>

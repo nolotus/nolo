@@ -1,4 +1,13 @@
 
+## 0.93.0-alpha.1
+
+## 0.93.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add the Chrome Web Store publishing kit ([00315ea](https://github.com/nolotus/bun-nolo/commit/00315ea16e33920b463e403a02887e26718b4aa6))
+
+
 ## 0.92.0-alpha.1
 
 ## 0.92.0-alpha.1 (2026-09-16)

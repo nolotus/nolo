@@ -48,8 +48,8 @@ export const CLI_PUBLISH_DEPENDENCY_DENYLIST = [
 ];
 
 export const CLI_PUBLISH_DEPENDENCY_ALLOWLIST = [
-  "@clack/core",
   "clipboardy",
+  "diff",
   "ulid",
   "level",
   "tweetnacl",

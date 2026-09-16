@@ -56,6 +56,24 @@ The native host listens on `127.0.0.1:38947` while Chrome keeps it running throu
 
 When Chrome reloads or stops the extension service worker, the native host exits as soon as the native messaging stdin pipe closes. This prevents stale native host processes from keeping `127.0.0.1:38947` occupied after extension reloads.
 
+## Status Popup
+
+The toolbar icon opens `extension/popup.html`, which asks the service worker (`connector_status`) whether
+Chrome is connected to the Nolo Desktop app and which protocol version is in play. It is the only
+user-facing surface in the extension and reads no page data.
+
+## Chrome Web Store Package
+
+Build the upload archive (contents of `extension/`, so `manifest.json` sits at the archive root):
+
+```bash
+bun packages/desktop-chrome-connector/scripts/buildStorePackage.mjs
+```
+
+The script refuses to produce a package without the four icons, and rejects development files
+(`*.md`, `.DS_Store`, maps). Listing copy, permission justifications, the privacy policy text and the
+ordered submission checklist live in [`store/`](store/).
+
 ## Desktop Diagnostics
 
 Nolo Desktop exposes connector diagnostics through the Local provider runtime settings page.
