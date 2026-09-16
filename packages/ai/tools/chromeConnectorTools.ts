@@ -1,6 +1,7 @@
 export const CHROME_CONNECTOR_TOOL_NAMES = [
   "chrome_list_tabs",
   "chrome_open_tab",
+  "chrome_close_tab",
   "chrome_read_page",
   "chrome_click",
   "chrome_type",
@@ -85,6 +86,15 @@ export const chromeOpenTabFunctionSchema = baseSchema(
   ["url"],
 );
 
+export const chromeCloseTabFunctionSchema = baseSchema(
+  "chrome_close_tab",
+  "Close a Chrome tab through the Nolo desktop Chrome connector. Prefer closing the tabs your own run opened with chrome_open_tab, and ask the user before closing a tab they are using. Pinned tabs are refused (TAB_PINNED); unknown tab ids fail (TAB_NOT_FOUND).",
+  {
+    tabId,
+  },
+  ["tabId"],
+);
+
 export const chromeReadPageFunctionSchema = baseSchema(
   "chrome_read_page",
   "Read a compact view of a Chrome tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for chrome_click and chrome_type instead of guessing selectors; use region to focus a big page. Does not read cookies or profile databases.",
@@ -109,7 +119,7 @@ export const chromeReadPageFunctionSchema = baseSchema(
 
 export const chromeClickFunctionSchema = baseSchema(
   "chrome_click",
-  "Click a visible element in a Chrome tab by elementRef from chrome_read_page, or by CSS selector. Do not use this for final submit/delete/payment/permission actions without action-time user confirmation.",
+  "Click a visible element in a Chrome tab by elementRef from chrome_read_page, or by CSS selector. Controls whose name indicates an irreversible external action (payment, send, delete, publish, permission change) are refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION: this desktop runtime has no approval channel, so name the control and ask the user to activate it themselves.",
   {
     tabId,
     elementRef,
@@ -120,7 +130,7 @@ export const chromeClickFunctionSchema = baseSchema(
 
 export const chromeTypeFunctionSchema = baseSchema(
   "chrome_type",
-  "Type text into a Chrome page element identified by elementRef from chrome_read_page or by CSS selector. Typing sensitive data into a third-party site counts as data transmission.",
+  "Type text into a Chrome page element identified by elementRef from chrome_read_page or by CSS selector. Typing into a control whose name indicates an irreversible external action is refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION, same as clicking it.",
   {
     tabId,
     elementRef,
@@ -139,7 +149,7 @@ export const chromeTypeFunctionSchema = baseSchema(
 
 export const chromePressFunctionSchema = baseSchema(
   "chrome_press",
-  "Send a keyboard key or shortcut to a Chrome tab.",
+  "Send a keyboard key or shortcut to a Chrome tab. Enter-like keys are refused with SENSITIVE_ACTION_REQUIRES_CONFIRMATION when the focused control is an irreversible action.",
   {
     tabId,
     key: {
@@ -213,6 +223,7 @@ export const chromeReadNetworkFunctionSchema = baseSchema(
 export const chromeConnectorToolSchemas = [
   chromeListTabsFunctionSchema,
   chromeOpenTabFunctionSchema,
+  chromeCloseTabFunctionSchema,
   chromeReadPageFunctionSchema,
   chromeClickFunctionSchema,
   chromeTypeFunctionSchema,

@@ -1,4 +1,4 @@
-import { getCurrentProfile, loadProfileConfig } from "../../cli/client/profileConfig";
+import { getCurrentProfile, getProfileTokens, loadProfileConfig } from "../../cli/client/profileConfig";
 // authenticateToken moved to lazy import to avoid pulling private server deps into public build
 import { isTrustedDesktopSameOriginRequest } from "../desktopRequestTrust";
 
@@ -42,7 +42,12 @@ export async function handleDesktopAuthSessionGet(
 
   const profileConfig = (deps.loadProfile ?? loadProfileConfig)();
   const profile = getCurrentProfile(profileConfig);
-  if (!profile?.authToken) {
+  // CLI profile 的规范形状是 `tokens: string[]`（遗留的 `authToken` 在写入时会被
+  // 删除，见 cli/client/profileConfig）。只读 `authToken` 会让桌面永远无法导入已有
+  // 登录态——2026-09-16 实测：CLI 已登录而桌面报 "no CLI profile found"、点击登录
+  // 也无法把浏览器会话带回桌面。
+  const tokens = getProfileTokens(profileConfig);
+  if (!profile || tokens.length === 0) {
     return new Response(JSON.stringify({ ok: true, tokens: [] }), {
       status: 200,
       headers: JSON_HEADERS,
@@ -65,7 +70,7 @@ export async function handleDesktopAuthSessionGet(
       throw err;
     }
   });
-  const isValidToken = await validateAuthToken(profile.authToken).catch(() => false);
+  const isValidToken = await validateAuthToken(tokens[0]).catch(() => false);
   if (!isValidToken) {
     return new Response(JSON.stringify({
       ok: true,
@@ -81,7 +86,7 @@ export async function handleDesktopAuthSessionGet(
 
   return new Response(JSON.stringify({
     ok: true,
-    tokens: [profile.authToken],
+    tokens: [...tokens],
     serverUrl: profile.serverUrl,
     profile: profileConfig?.currentProfile ?? null,
   }), {

@@ -3,6 +3,7 @@ import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { validateWorkspacePackageLinks } from "../../../scripts/dev/workspaceLinkGuard";
 import { ensureBundledRipgrep } from "./ensure-bundled-ripgrep";
+import { pruneStagedClassicLevelForPackaging } from "./prune-native-prebuilds";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 const desktopRoot = resolve(import.meta.dir, "..");
@@ -87,6 +88,15 @@ const stageRuntimeTrees = async () => {
     }
     const target = join(vendorDir, "node_modules", name);
     await cp(source, target, { recursive: true });
+  }
+  // electrobun 自解压器不支持 GNU longname（'L'）tar 记录：>100 字符路径会在解包
+  // 时报 TarUnsupportedFileType（2026-09-16 实测，官方 Setup 安装器解到第 770 个
+  // 条目中止）。classic-level 的 C 源码/头文件与非本平台/musl prebuilds 会把路径
+  // 推到 103–116 字符，必须在打包前从 staged 副本剪掉（仓库 node_modules 不动）。
+  // 闸门：scripts/verify/desktop/verifyElectrobunPayloadCompat.ts。
+  const pruned = await pruneStagedClassicLevelForPackaging(join(vendorDir, "node_modules"));
+  if (pruned.removed.length > 0) {
+    console.log(`[pre-build] pruned classic-level payload entries: ${pruned.removed.join(", ")}`);
   }
   for (const { name, destName } of stagedWorkspacePackages) {
     const source = join(repoRoot, "packages", name);

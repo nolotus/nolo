@@ -1,4 +1,20 @@
 
+## 0.91.0-alpha.1
+
+## 0.91.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
+* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
+
+### Bug Fixes
+
+* **desktop:** keep electrobun 安装载荷 tar 兼容并加验证闸门 ([1a12f8b](https://github.com/nolotus/bun-nolo/commit/1a12f8b26c14dc6f5902ce21aa1ed6ebaa8e1b82))
+* **desktop:** 桌面登录导入 CLI profile tokens[] 形状 ([c8480e5](https://github.com/nolotus/bun-nolo/commit/c8480e56ddcbcc21a6f9a10ac4cc9a988908338b))
+* **desktop:** 浏览器地址栏贴顶并补齐站点图标与安全指示 ([ca337a6](https://github.com/nolotus/bun-nolo/commit/ca337a64d74719b1bd599c205ca988a6f431b20a))
+
+
 ## 0.90.0-alpha.1
 
 ## 0.90.0-alpha.1 (2026-09-16)

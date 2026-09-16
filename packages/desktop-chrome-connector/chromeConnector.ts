@@ -60,6 +60,7 @@ type NativeHostRouterDeps = {
 const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_list_tabs: "list_tabs",
   chrome_open_tab: "open_tab",
+  chrome_close_tab: "close_tab",
   chrome_read_page: "read_page",
   chrome_click: "click",
   chrome_type: "type",
@@ -125,6 +126,7 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
 }
 
 const TARGET_REQUIRED_ACTIONS = new Set(["click", "type"]);
+const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach"]);
 
 /**
  * Deterministic, connector-side guard for the two action styles. The extension re-checks the same
@@ -134,6 +136,21 @@ export function validateChromeConnectorPayload(
   action: string,
   payload: ChromeConnectorRequestPayload,
 ): void {
+  if (TAB_ID_REQUIRED_ACTIONS.has(action)) {
+    const raw = payload.tabId;
+    const tabId = typeof raw === "string"
+      ? raw.trim()
+      : typeof raw === "number" && Number.isFinite(raw)
+        ? String(raw)
+        : "";
+    if (!tabId) {
+      throw createConnectorError(
+        "TAB_ID_REQUIRED",
+        `Provide the tabId from chrome_list_tabs before calling ${action}.`,
+      );
+    }
+    return;
+  }
   if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
   const elementRef = typeof payload.elementRef === "string" ? payload.elementRef.trim() : "";
   const selector = typeof payload.selector === "string" ? payload.selector.trim() : "";

@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -43,8 +43,44 @@ type SmokePageServer = {
   close(): Promise<void> | void;
 };
 
+/**
+ * Connector 树在不同布局下的相对位置（相对 bundler 产物的 `import.meta.dir`）：
+ * - dev / 单仓：`packages/desktop-runtime/handlers` → `../../desktop-chrome-connector`
+ *   即 `packages/desktop-chrome-connector`；
+ * - 打包（v1 parity）：`Resources/app/bun` → `../../desktop-chrome-connector`
+ *   即 `Resources/desktop-chrome-connector`；
+ * - 打包（flat Linux）：`Resources/app/bun` 下的 `../integrations/connector`
+ *   即 `Resources/app/integrations/connector`；mac 经 post-wrap 后为
+ *   `Resources/integrations/connector`。
+ * 逐项探测并选取第一个含 `extension/manifest.json` 的目录；全部落空时抛出带完整
+ * 候选列表的错误（2026-09-16 修复：此前只探测第一项，flat Linux 安装下连接器
+ * 功能因 ENOENT 直接不可用）。
+ */
+export const CONNECTOR_ROOT_CANDIDATES = [
+  "../../desktop-chrome-connector",
+  "../integrations/connector",
+  "../../integrations/connector",
+  "../integrations/desktop-chrome-connector",
+  "../../integrations/desktop-chrome-connector",
+] as const;
+
+/** 选取第一个含连接器清单的候选目录；用于测试与诊断。 */
+export function pickConnectorRoot(candidates: readonly string[]): string | null {
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "extension", "manifest.json"))) return dir;
+  }
+  return null;
+}
+
 function connectorRootFromHere() {
-  return resolve(import.meta.dir, "../../desktop-chrome-connector");
+  const candidates = CONNECTOR_ROOT_CANDIDATES.map((rel) => resolve(import.meta.dir, rel));
+  const found = pickConnectorRoot(candidates);
+  if (!found) {
+    throw new Error(
+      `desktop chrome connector root not found; probed: ${candidates.join(", ")}`,
+    );
+  }
+  return found;
 }
 
 function desktopOnly(env: Record<string, string | undefined>) {
@@ -224,15 +260,38 @@ function entriesContain(entries: unknown, pattern: string) {
     );
 }
 
+/**
+ * Cleanup is best effort by contract: a tab that is already gone, or a connector without the
+ * lifecycle actions, must not turn a passed smoke test into a failure.
+ */
+async function bestEffortChromeAction(
+  requestChrome: ChromeRequest,
+  action: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (typeof payload.tabId !== "string" || !payload.tabId) return false;
+  try {
+    await requestChrome(action, payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runDesktopChromeConnectorSmokeTest(args: {
   createSmokePageServer?: () => Promise<SmokePageServer>;
   requestChrome?: ChromeRequest;
 } = {}) {
   const smokeServer = await (args.createSmokePageServer ?? createDefaultSmokePageServer)();
   const requestChrome = args.requestChrome ?? createChromeConnectorClient().request;
+  let tabId = "";
+  // The finally block below mutates this object after the report is built, so the smoke report
+  // carries the real cleanup outcome instead of a snapshot taken before the cleanup ran. The flags
+  // say whether the connector accepted each release action, not that it proved an effect.
+  const cleanup = { detachAccepted: false, closeAccepted: false };
   try {
     const opened = await requestChrome("open_tab", { url: smokeServer.url, active: true });
-    const tabId = String((opened as { tab?: { id?: string } })?.tab?.id ?? "");
+    tabId = String((opened as { tab?: { id?: string } })?.tab?.id ?? "");
     if (!tabId) throw new Error("Chrome connector smoke test did not receive an opened tab id.");
 
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
@@ -272,8 +331,12 @@ export async function runDesktopChromeConnectorSmokeTest(args: {
       screenshotCaptured,
       consoleMatched,
       networkMatched,
+      cleanup,
     };
   } finally {
+    // Leak fix: this smoke test must not leave the tab or the debugger attachment behind.
+    cleanup.detachAccepted = await bestEffortChromeAction(requestChrome, "detach", { tabId });
+    cleanup.closeAccepted = await bestEffortChromeAction(requestChrome, "close_tab", { tabId });
     await smokeServer.close();
   }
 }

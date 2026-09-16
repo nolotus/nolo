@@ -143,6 +143,8 @@ export function buildCompactObservation(raw, options = {}) {
       }
       if (element?.disabled) shaped.disabled = true;
       if (element?.readonly) shaped.readonly = true;
+      // Marked so the model can plan around the gate instead of discovering it by being refused.
+      if (isIrreversibleActionName(shaped.name)) shaped.sensitive = true;
       return shaped;
     });
     const payload = {
@@ -391,6 +393,137 @@ export function isSensitiveActionName(name) {
 }
 
 /**
+ * The irreversible-action gate. Deliberately narrower than SENSITIVE_NAME_PATTERN: the broad pattern
+ * drives post-hoc verification, while this one stops the connector from performing an action whose
+ * external consequence the agent cannot undo afterwards.
+ *
+ * Erring towards blocking is intentional. Over-blocking costs the user one manual click; under-blocking
+ * can pay, delete or publish something.
+ */
+const IRREVERSIBLE_ACTION_PATTERN = new RegExp(
+  [
+    // money
+    "\\bpay\\b",
+    "pay ?now",
+    "\\bpayment\\b",
+    "\\bpurchase\\b",
+    "\\bbuy\\b",
+    "check ?out",
+    "place.*order",
+    "order ?now",
+    "submit.*order",
+    "complete ?(purchase|order|payment)",
+    "confirm ?(payment|order|purchase)",
+    "\\btransfer\\b",
+    "\\bdonate\\b",
+    // destructive
+    "\\bdelete\\b",
+    "\\bremove\\b",
+    "\\bunsubscribe\\b",
+    // publish / send
+    "\\bpublish\\b",
+    "\\bsend\\b",
+    // permissions and security
+    "\\brevoke\\b",
+    "\\bgrant\\b",
+    "\\bauthorize\\b",
+    "\\bpermission\\b",
+    // Chinese equivalents. 清空 is included (clearing a recycle bin is irreversible) but its plain
+    // English counterparts are not: "Clear search" and "Reset zoom" are ordinary local actions, and
+    // the Latin side has no equivalent that separates the destructive case.
+    "付款",
+    "支付",
+    "购买",
+    "下单",
+    "提交订单",
+    "结算",
+    "结账",
+    "转账",
+    "汇款",
+    "捐赠",
+    "提现",
+    "退款",
+    "预约",
+    "删除",
+    "移除",
+    "退订",
+    "取消订阅",
+    "清空",
+    "发布",
+    "公布",
+    "发送",
+    "授权",
+    "撤销授权",
+    "权限变更",
+    "同意授权",
+    "确认支付",
+    "确认下单",
+    "完成支付",
+  ].join("|"),
+  "i",
+);
+
+export const CONFIRMATION_REQUIRED_CODE = "SENSITIVE_ACTION_REQUIRES_CONFIRMATION";
+
+export function isIrreversibleActionName(name) {
+  return typeof name === "string" && IRREVERSIBLE_ACTION_PATTERN.test(name);
+}
+
+/**
+ * Keys that activate a focused control. Single source of truth: both the decision function below and
+ * the connector's press handler use it, because two copies of this list already drifted once (the
+ * handler kept its own Enter-only list, which made the Space branch unreachable).
+ */
+export function isActivationKey(key) {
+  const value = typeof key === "string" ? key : "";
+  return (
+    value === "Enter" ||
+    value === "NumpadEnter" ||
+    value === "Return" ||
+    value === " " ||
+    value === "Space" ||
+    value === "Spacebar"
+  );
+}
+
+const CONFIRMATION_REQUIRED_MESSAGE =
+  "This control is an irreversible external action (payment, send, delete, publish or permission change), and this " +
+  "desktop runtime has no interactive approval channel to ask the user with. Nolo does not perform such an action on " +
+  "the user's behalf: name the control, ask the user to activate it themselves, and stop here.";
+
+/**
+ * One decision point for the gate, so every action that can trigger an irreversible effect is refused
+ * in exactly the same shape. `null` means the action may proceed.
+ */
+export function decideIrreversibleAction(input = {}) {
+  const action = String(input.action ?? "");
+  const name = typeof input.name === "string" ? input.name : "";
+  if (!name) return null;
+  if (action === "click" || action === "type") {
+    if (!isIrreversibleActionName(name)) return null;
+  } else if (action === "press") {
+    const key = String(input.key ?? "");
+    // Space activates a focused button just like Enter, so both are gated through the shared
+    // predicate; a keyboard-only path (Tab to focus, then activate) must not bypass the click gate.
+    if (!isActivationKey(key) || !isIrreversibleActionName(name)) return null;
+  } else {
+    return null;
+  }
+  return {
+    ok: false,
+    code: CONFIRMATION_REQUIRED_CODE,
+    effect: "confirmation_required",
+    action,
+    signal: CONFIRMATION_REQUIRED_CODE,
+    target: {
+      name: name.slice(0, 200),
+      ...(input.tag ? { tag: String(input.tag) } : {}),
+    },
+    message: CONFIRMATION_REQUIRED_MESSAGE,
+  };
+}
+
+/**
  * Deterministic, risk-balanced verification. Cheap local signals can prove ordinary effects;
  * anything else is reported as `uncertain` so the model re-reads instead of blindly retrying.
  */
@@ -588,4 +721,107 @@ export function summarizeNetworkEntries(entries = [], options = {}) {
     dropped: Math.max(0, unique.length - shaped.length),
     filtered: all.length - list.length,
   };
+}
+
+/**
+ * Tab lifecycle: connector-opened tab ownership plus the single close guard. These helpers stay
+ * pure (no chrome.*, no DOM) so the bookkeeping and the refusal rules are unit-testable.
+ */
+
+/** Session storage key holding the ids of the tabs this connector opened itself. */
+export const OPENED_TABS_STORAGE_KEY = "noloConnectorOpenedTabs";
+
+/** Hard cap for tracked ownership entries; a long browser session must not grow unbounded. */
+export const OPENED_TABS_MAX = 200;
+
+/** Idle window after the last debugger-backed action before the attachment is released. */
+export const DETACH_IDLE_MS = 30000;
+
+/** Frozen close_tab failure codes: neither is a retry hint, and each needs different handling. */
+export const CLOSE_TAB_CODES = Object.freeze({
+  NOT_FOUND: "TAB_NOT_FOUND",
+  PINNED: "TAB_PINNED",
+});
+
+/** Chrome tab ids arrive as numbers from chrome.tabs and as strings from the native host. */
+export function normalizeTabId(tabId) {
+  if (typeof tabId === "number") return Number.isFinite(tabId) ? String(tabId) : "";
+  if (typeof tabId === "string") return tabId.trim();
+  return "";
+}
+
+/**
+ * Ownership bookkeeping for tabs opened through open_tab. It stays an explicit set instead of a flag
+ * on the tab because ownership has to survive service-worker suspension.
+ */
+export function createOpenedTabSet(initial = []) {
+  const ids = new Set();
+  const api = {
+    add(tabId) {
+      const id = normalizeTabId(tabId);
+      if (id) ids.add(id);
+      return api;
+    },
+    remove(tabId) {
+      ids.delete(normalizeTabId(tabId));
+      return api;
+    },
+    has(tabId) {
+      return ids.has(normalizeTabId(tabId));
+    },
+    get size() {
+      return ids.size;
+    },
+    toArray() {
+      return Array.from(ids).slice(-OPENED_TABS_MAX);
+    },
+    replace(list) {
+      ids.clear();
+      for (const entry of Array.isArray(list) ? list : []) api.add(entry);
+      return api;
+    },
+  };
+  return api.replace(initial);
+}
+
+/** Storage-safe projection: deduplicated, non-empty ids, newest entries kept. */
+export function serializeOpenedTabs(source) {
+  const list = Array.isArray(source)
+    ? source
+    : typeof source?.toArray === "function"
+      ? source.toArray()
+      : [];
+  const ids = new Set();
+  for (const entry of list) {
+    const id = normalizeTabId(entry);
+    if (id) ids.add(id);
+  }
+  return Array.from(ids).slice(-OPENED_TABS_MAX);
+}
+
+/** Malformed session state is non-fatal: a lost set only means list_tabs marks nothing. */
+export function deserializeOpenedTabs(raw) {
+  return serializeOpenedTabs(Array.isArray(raw) ? raw : []);
+}
+
+/**
+ * Single close guard for close_tab: a missing tab can never be closed, and a pinned tab belongs to
+ * the user's own layout, so both are refused before any chrome.tabs.remove call.
+ */
+export function decideCloseTab(input = {}) {
+  if (!input.exists) {
+    return {
+      ok: false,
+      code: CLOSE_TAB_CODES.NOT_FOUND,
+      message: "No Chrome tab with this id; it may already be closed.",
+    };
+  }
+  if (input.pinned) {
+    return {
+      ok: false,
+      code: CLOSE_TAB_CODES.PINNED,
+      message: "This Chrome tab is pinned; ask the user to close or unpin it.",
+    };
+  }
+  return { ok: true };
 }

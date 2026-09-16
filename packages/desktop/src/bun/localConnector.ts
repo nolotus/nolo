@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  getCurrentProfile,
+  getProfileTokens,
+  type NoloProfileConfig,
+} from "../../../cli/client/profileConfig";
 import { toErrorMessage } from "core/errorMessage";
 import { isLocalServerUrl } from "core/localOrigins";
 import { normalizeServerOrigin } from "core/serverOrigin";
@@ -8,14 +13,6 @@ import { resolvePlatformAuthToken } from "../../../agent-runtime/providerResolut
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
-
-type ProfileConfig = {
-  currentProfile?: string;
-  profiles?: Record<string, {
-    serverUrl?: string;
-    authToken?: string;
-  }>;
-};
 
 type StartDesktopConnectorDeps = {
   channel?: string;
@@ -76,20 +73,24 @@ export function resolveDesktopProfileEnv(
 ): EnvLike | null {
   if (!existsSync(configPath)) return null;
 
-  const parsed = JSON.parse(readFileSync(configPath, "utf8")) as ProfileConfig;
-  const currentProfile = parsed.currentProfile;
-  const profile = currentProfile ? parsed.profiles?.[currentProfile] : null;
-  if (!profile?.authToken) return null;
+  // CLI profile 的规范形状是 `tokens: string[]`（遗留的 `authToken` 在写入时会被
+  // 删除，见 cli/client/profileConfig）。只读 `authToken` 会让连接器在 CLI 已登录
+  // 时仍报 "no CLI profile found"（2026-09-16 实测）。使用 CLI 的规范化读取，
+  // 同时兼容旧配置文件。
+  const parsed = JSON.parse(readFileSync(configPath, "utf8")) as NoloProfileConfig;
+  const profile = getCurrentProfile(parsed);
+  const tokens = getProfileTokens(parsed);
+  if (!profile || tokens.length === 0) return null;
 
   return {
-    NOLO_PROFILE: currentProfile,
+    NOLO_PROFILE: parsed.currentProfile,
     NOLO_SERVER: resolveDesktopConnectorServerUrl({
       channel: options.channel,
       defaultServerUrl: options.defaultServerUrl,
       env: options.env,
       profileServerUrl: profile.serverUrl,
     }),
-    AUTH_TOKEN: profile.authToken,
+    AUTH_TOKEN: tokens[0],
   };
 }
 

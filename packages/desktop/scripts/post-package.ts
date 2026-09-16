@@ -23,6 +23,22 @@ if (!existsSync(artifactDir)) {
   process.exit(0);
 }
 
+// Linux 载荷闸门（fail closed，2026-09-16 事故）：electrobun 自解压器不支持 GNU
+// longname（'L'）/硬链接 tar 记录——任何 >100 字符路径都会让 Setup 安装器与
+// in-app 更新在解包阶段以 TarUnsupportedFileType 中止。发布前扫描 Linux 产物，
+// 发现不兼容直接失败。详见 scripts/verify/desktop/verifyElectrobunPayloadCompat.ts。
+if (process.platform === "linux") {
+  const { verifyLinuxPayloadArtifacts } = await import(
+    "../../../scripts/verify/desktop/verifyElectrobunPayloadCompat"
+  );
+  const reports = await verifyLinuxPayloadArtifacts(artifactDir);
+  for (const report of reports) {
+    console.log(
+      `[desktop] payload extractor-compat ok: ${report.artifactPath} (${report.entries} entries)`,
+    );
+  }
+}
+
 const buildRootDir = resolve(import.meta.dir, "../build");
 
 const findWrapperInnerArchive = async (channelDir: string) => {

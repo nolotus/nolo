@@ -1,4 +1,14 @@
 
+## 0.72.0-alpha.1
+
+## 0.72.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
+* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
+
+
 ## 0.71.0-alpha.1
 
 ## 0.71.0-alpha.1 (2026-09-16)

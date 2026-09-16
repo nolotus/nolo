@@ -133,7 +133,11 @@ export default {
       ".generated/vendor/node_modules/maybe-combine-errors": "node_modules/maybe-combine-errors",
       ".generated/vendor/node_modules/module-error": "node_modules/module-error",
       ".generated/vendor/node_modules/node-gyp-build": "node_modules/node-gyp-build",
-      ".generated/vendor/packages/desktop-chrome-connector": "integrations/desktop-chrome-connector",
+      // 目录名用 integrations/connector（而非 integrations/desktop-chrome-connector）：
+      // electrobun 自解压器要求 tar 路径 ≤100 字符，原名会让 native-host 清单路径达到
+      // 112 字符并中止解包（TarUnsupportedFileType，2026-09-16 实测）。运行时解析见
+      // desktopChromeConnectorHandler 的多路径探测。
+      ".generated/vendor/packages/desktop-chrome-connector": "integrations/connector",
       ".generated/vendor/packages/x-reader": "integrations/x-reader",
       ".generated/vendor/packages/xhs-reader": "integrations/xhs-reader",
       // Platform-staged ripgrep (ensure-bundled-ripgrep.ts → vendor/ripgrep/staged)

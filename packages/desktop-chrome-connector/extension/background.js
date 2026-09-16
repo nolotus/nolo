@@ -1,10 +1,19 @@
 import {
   COMPACT_BUDGET,
   CONNECTOR_PROTOCOL_VERSION,
+  DETACH_IDLE_MS,
+  OPENED_TABS_STORAGE_KEY,
   buildCompactObservation,
   buildPageRevision,
   createElementRefRegistry,
+  createOpenedTabSet,
+  decideCloseTab,
+  decideIrreversibleAction,
+  deserializeOpenedTabs,
+  isActivationKey,
+  normalizeTabId,
   resolveActionTarget,
+  serializeOpenedTabs,
   summarizeConsoleEntries,
   summarizeNetworkEntries,
   verifyActionEffect,
@@ -14,6 +23,14 @@ const HOST_NAME = "com.nolo.chrome_connector";
 const consoleByTab = new Map();
 const networkByTab = new Map();
 const refRegistry = createElementRefRegistry();
+const openedTabs = createOpenedTabSet();
+const detachTimers = new Map();
+/**
+ * Tabs this worker attached itself. MV3 suspends the worker while a `chrome.debugger` attachment
+ * survives, so a startup reconciliation must never release an attachment made by the current worker.
+ */
+const attachedInThisWorker = new Set();
+let openedTabsLoaded = null;
 let nativePort = null;
 
 function toMessage(error) {
@@ -50,6 +67,88 @@ function serializeTab(tab) {
   };
 }
 
+/** Everything the connector remembers about one tab: buffers, ref snapshot and detach timer. */
+function dropTabState(tabId) {
+  const id = normalizeTabId(tabId);
+  if (!id) return;
+  consoleByTab.delete(id);
+  networkByTab.delete(id);
+  refRegistry.invalidate(id);
+  const timer = detachTimers.get(id);
+  if (timer) clearTimeout(timer);
+  detachTimers.delete(id);
+}
+
+function connectorError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+/**
+ * Best effort by contract: a tab without an attachment (or an already closed tab) is already
+ * released, so a failed detach must never fail the action that triggered it.
+ */
+async function detachTab(tabId) {
+  const id = normalizeTabId(tabId);
+  if (!id) return false;
+  const timer = detachTimers.get(id);
+  if (timer) clearTimeout(timer);
+  detachTimers.delete(id);
+  try {
+    await chrome.debugger.detach(tabTarget(id));
+    attachedInThisWorker.delete(id);
+    return true;
+  } catch (error) {
+    console.warn(`[nolo chrome connector] debugger detach skipped for tab ${id}: ${toMessage(error)}`);
+    return false;
+  }
+}
+
+/** One timer per tab; every debugger-backed action resets the idle window. */
+function scheduleDetach(tabId) {
+  const id = normalizeTabId(tabId);
+  if (!id) return;
+  const timer = detachTimers.get(id);
+  if (timer) clearTimeout(timer);
+  detachTimers.set(id, setTimeout(() => {
+    detachTimers.delete(id);
+    void detachTab(id);
+  }, DETACH_IDLE_MS));
+}
+
+/**
+ * Ownership lives in chrome.storage.session: it survives service-worker suspension within one
+ * browser session and is cleared by the browser. Storage failures stay non-fatal.
+ */
+async function loadOpenedTabs() {
+  if (!openedTabsLoaded) {
+    openedTabsLoaded = (async () => {
+      try {
+        const stored = await chrome.storage.session.get(OPENED_TABS_STORAGE_KEY);
+        for (const id of deserializeOpenedTabs(stored?.[OPENED_TABS_STORAGE_KEY])) {
+          openedTabs.add(id);
+        }
+      } catch (error) {
+        console.warn(`[nolo chrome connector] opened-tab state unavailable: ${toMessage(error)}`);
+        // A transient failure must not disable ownership tracking for the rest of the worker's life.
+        openedTabsLoaded = null;
+      }
+    })();
+  }
+  return openedTabsLoaded;
+}
+
+async function persistOpenedTabs() {
+  try {
+    await chrome.storage.session.set({
+      [OPENED_TABS_STORAGE_KEY]: serializeOpenedTabs(openedTabs),
+    });
+  } catch (error) {
+    console.warn(`[nolo chrome connector] opened-tab state not persisted: ${toMessage(error)}`);
+  }
+}
+
 async function ensureDebugger(tabId) {
   const target = tabTarget(tabId);
   try {
@@ -61,6 +160,31 @@ async function ensureDebugger(tabId) {
   }
   await chrome.debugger.sendCommand(target, "Runtime.enable");
   await chrome.debugger.sendCommand(target, "Network.enable");
+  attachedInThisWorker.add(normalizeTabId(tabId));
+}
+
+/**
+ * A `chrome.debugger` attachment outlives the service worker that created it, so an idle timer can
+ * die with the worker and leave Chrome's "started debugging this browser" banner up for the rest of
+ * the browser session. On every worker start, release anything still attached that this worker did
+ * not attach itself. Detaching a target another debugger owns simply fails and is swallowed.
+ */
+async function reconcileDebuggerAttachments() {
+  try {
+    const targets = await chrome.debugger.getTargets();
+    for (const target of targets) {
+      if (!target?.attached) continue;
+      const tabId = normalizeTabId(target.tabId);
+      if (tabId && attachedInThisWorker.has(tabId)) continue;
+      try {
+        await chrome.debugger.detach(tabId ? tabTarget(tabId) : { targetId: target.id });
+      } catch {
+        // Not ours, already gone, or the tab closed underneath us.
+      }
+    }
+  } catch (error) {
+    console.warn(`[nolo chrome connector] debugger reconciliation skipped: ${toMessage(error)}`);
+  }
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -96,6 +220,19 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       timestamp: params.timestamp,
     }, COMPACT_BUDGET.network.rawCap);
   }
+});
+
+/** A removed tab has no attachment and no per-tab state worth keeping. */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const id = normalizeTabId(tabId);
+  dropTabState(id);
+  // Ownership lives in session storage, which the next worker instance has to load first.
+  void (async () => {
+    await loadOpenedTabs();
+    if (!openedTabs.has(id)) return;
+    openedTabs.remove(id);
+    await persistOpenedTabs();
+  })();
 });
 
 /**
@@ -200,6 +337,14 @@ function pageOperation(payload) {
       if (!bySelector) {
         return { code: "ELEMENT_NOT_FOUND", message: `Element not found: ${target.selector}` };
       }
+      // Guards the inspect-then-act window: the page must not be able to swap in a different control
+      // between the gate decision and the action.
+      if (target.expectedName && labelOf(bySelector) !== target.expectedName) {
+        return {
+          code: "STALE_PAGE_REVISION",
+          message: "The target changed on the page since it was inspected; re-read the page and retry.",
+        };
+      }
       return { element: bySelector };
     }
     const candidate = typeof target.index === "number" ? found.list[target.index] || null : null;
@@ -224,8 +369,53 @@ function pageOperation(payload) {
     return { element: candidate };
   }
 
+  /** The control an activation key would trigger, or null when nothing meaningful is focused. */
+  function activeControl() {
+    const element = document.activeElement || null;
+    if (!element || element === document.body || element === document.documentElement) return null;
+    const form = typeof element.closest === "function" ? element.closest("form") : null;
+    if (form) {
+      const submitControl = form.querySelector(
+        'button[type="submit"],input[type="submit"],button:not([type])',
+      );
+      if (submitControl) return submitControl;
+    }
+    return element;
+  }
+
   const op = String((payload && payload.op) || "");
   const region = String((payload && payload.region) || "");
+
+  if (op === "inspect") {
+    // Used before acting: the worker must know what a target *is* before deciding to refuse it.
+    let element = null;
+    if (payload.subject === "active") {
+      // null when focus sits on <body>: the page's whole text must never be read as a control name.
+      element = activeControl();
+    } else {
+      const found = candidates(region);
+      if (!found) {
+        return {
+          ok: false,
+          code: "REGION_NOT_FOUND",
+          message: `Region selector matched no element: ${region}`,
+        };
+      }
+      const resolved = resolveElement(found, { selector: payload.selector });
+      if (resolved.code) return { ok: false, code: resolved.code, message: resolved.message };
+      element = resolved.element;
+    }
+    if (!element) {
+      return { ok: false, code: "ELEMENT_NOT_FOUND", message: "There is no element to inspect." };
+    }
+    const tag = String(element.tagName || "").toLowerCase();
+    return {
+      ok: true,
+      name: labelOf(element),
+      tag,
+      type: tag === "input" ? String(element.type || "text").toLowerCase() : "",
+    };
+  }
 
   if (op === "read") {
     const found = candidates(region);
@@ -354,6 +544,18 @@ function pageOperation(payload) {
 
   if (op === "press") {
     const key = String((payload && payload.key) || "");
+    // Re-check the focused control: the page can move focus between the worker's decision and this dispatch.
+    if (typeof payload.expectedActiveName === "string" && payload.expectedActiveName) {
+      const current = activeControl();
+      const currentName = current ? labelOf(current) : "";
+      if (currentName !== payload.expectedActiveName) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The focused control changed since it was checked; re-read the page and retry.",
+        };
+      }
+    }
     const root = document.body || document.documentElement;
     const pressTarget = document.activeElement || root;
     const before = {
@@ -403,12 +605,58 @@ function verdictEnvelope(action, verification, extra = {}) {
   };
 }
 
+/** Selector targets carry no cached name, so the page is asked what the element is before acting. */
+async function inspectSelectorTarget(tabId, selector) {
+  const inspected = await executeInTab(tabId, pageOperation, [{ op: "inspect", selector }]);
+  if (!inspected || inspected.ok !== true) {
+    const code = typeof inspected?.code === "string" && inspected.code ? inspected.code : "ELEMENT_INSPECTION_FAILED";
+    throw connectorError(code, inspected?.message || "The target element could not be inspected before acting.");
+  }
+  return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+}
+
+/** The same question for the focused element, used before Enter-like key presses. */
+async function inspectActiveTarget(tabId) {
+  try {
+    const inspected = await executeInTab(tabId, pageOperation, [{ op: "inspect", subject: "active" }]);
+    if (inspected && inspected.ok === true) {
+      return { name: String(inspected.name ?? ""), tag: String(inspected.tag ?? "") };
+    }
+  } catch {
+    // Pressing a key with nothing inspectable is not an irreversible action.
+  }
+  return { name: "", tag: "" };
+}
+
 async function runTargetedAction(action, payload) {
   const tabId = String(payload.tabId);
   const target = resolveActionTarget(payload, refRegistry, { tabId, action });
   if (!target.ok) {
     return { ok: false, verified: false, effect: "failed", action, signal: target.code, message: target.message };
   }
+
+  // Irreversible external actions are refused before any page effect: this desktop runtime has no
+  // interactive approval channel, so the only safe completion is the user activating the control.
+  let gateTarget;
+  if (target.kind === "ref") {
+    gateTarget = { name: target.expect?.name ?? "", tag: target.expect?.tag ?? "" };
+  } else {
+    try {
+      gateTarget = await inspectSelectorTarget(payload.tabId, target.selector);
+    } catch (error) {
+      return {
+        ok: false,
+        verified: false,
+        effect: "failed",
+        action,
+        signal: error?.code || "ELEMENT_INSPECTION_FAILED",
+        message: toMessage(error),
+        selector: target.selector,
+      };
+    }
+  }
+  const refusal = decideIrreversibleAction({ action, name: gateTarget.name, tag: gateTarget.tag });
+  if (refusal) return { ...refusal, verified: false };
 
   const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
   const pageArgs = { op: action };
@@ -421,6 +669,8 @@ async function runTargetedAction(action, payload) {
     pageArgs.expectedName = target.expect.name;
   } else {
     pageArgs.selector = target.selector;
+    // The page re-verifies this before acting, so a swap between inspection and action fails closed.
+    if (gateTarget.name) pageArgs.expectedName = gateTarget.name;
   }
   if (action === "type") {
     pageArgs.text = typeof payload.text === "string" ? payload.text : "";
@@ -475,15 +725,24 @@ async function handleAction(action, payload = {}) {
       };
     }
     case "list_tabs": {
+      await loadOpenedTabs();
       const tabs = await chrome.tabs.query({});
-      return { tabs: tabs.map(serializeTab) };
+      return {
+        tabs: tabs.map((tab) => ({
+          ...serializeTab(tab),
+          openedByConnector: openedTabs.has(tab.id),
+        })),
+      };
     }
     case "open_tab": {
       const tab = await chrome.tabs.create({
         url: String(payload.url || "about:blank"),
         active: payload.active !== false,
       });
-      return { tab: serializeTab(tab) };
+      await loadOpenedTabs();
+      openedTabs.add(tab.id);
+      await persistOpenedTabs();
+      return { tab: { ...serializeTab(tab), openedByConnector: true } };
     }
     case "read_page": {
       const region = String(payload.region || payload.selector || "");
@@ -514,8 +773,16 @@ async function handleAction(action, payload = {}) {
     case "type":
       return await runTargetedAction("type", payload);
     case "press": {
+      const pressedKey = String(payload.key || "");
+      let expectedActiveName = "";
+      if (isActivationKey(pressedKey)) {
+        const active = await inspectActiveTarget(payload.tabId);
+        const refusal = decideIrreversibleAction({ action: "press", key: pressedKey, name: active.name, tag: active.tag });
+        if (refusal) return { ...refusal, verified: false };
+        expectedActiveName = active.name;
+      }
       const result = await executeInTab(payload.tabId, pageOperation, [
-        { op: "press", key: String(payload.key || "") },
+        { op: "press", key: pressedKey, ...(expectedActiveName ? { expectedActiveName } : {}) },
       ]);
       return verdictEnvelope("press", verifyActionEffect({ action: "press", result }), {
         pressed: String(payload.key || ""),
@@ -537,20 +804,58 @@ async function handleAction(action, payload = {}) {
         captureBeyondViewport: Boolean(payload.fullPage),
         format: "png",
       });
+      scheduleDetach(payload.tabId);
       return { dataUrl: `data:image/png;base64,${result.data}` };
     }
     case "read_console": {
       await ensureDebugger(payload.tabId);
       const entries = consoleByTab.get(String(payload.tabId)) || [];
+      scheduleDetach(payload.tabId);
       return summarizeConsoleEntries(entries, { limit: payload.limit });
     }
     case "read_network": {
       await ensureDebugger(payload.tabId);
       const entries = networkByTab.get(String(payload.tabId)) || [];
+      scheduleDetach(payload.tabId);
       return summarizeNetworkEntries(entries, {
         limit: payload.limit,
         includeLowValue: payload.includeAssets === true,
       });
+    }
+    case "close_tab": {
+      await loadOpenedTabs();
+      const requested = normalizeTabId(payload.tabId);
+      let tab = null;
+      try {
+        tab = await chrome.tabs.get(Number(requested));
+      } catch {
+        tab = null;
+      }
+      const openedByConnector = openedTabs.has(requested);
+      const decision = decideCloseTab({
+        exists: Boolean(tab),
+        pinned: Boolean(tab?.pinned),
+        openedByConnector,
+      });
+      if (!decision.ok) throw connectorError(decision.code, decision.message);
+
+      // Release the debugging banner before the tab disappears, then drop every trace of it.
+      await detachTab(requested);
+      const closed = {
+        id: normalizeTabId(tab.id),
+        url: tab.url || "",
+        title: tab.title || "",
+      };
+      await chrome.tabs.remove(tab.id);
+      dropTabState(requested);
+      openedTabs.remove(requested);
+      await persistOpenedTabs();
+      return { ok: true, closed, openedByConnector };
+    }
+    case "detach": {
+      // Internal action: not model-visible, and never fatal when nothing is attached.
+      const detached = await detachTab(payload.tabId);
+      return { ok: true, detached, tabId: normalizeTabId(payload.tabId) };
     }
     default:
       throw new Error(`Unknown Chrome connector action: ${action}`);
@@ -569,7 +874,7 @@ function connectNativeHost() {
         id: message.id,
         ok: false,
         error: {
-          code: "CHROME_EXTENSION_ACTION_FAILED",
+          code: error?.code || "CHROME_EXTENSION_ACTION_FAILED",
           message: toMessage(error),
         },
       });
@@ -585,4 +890,5 @@ function connectNativeHost() {
   });
 }
 
+void reconcileDebuggerAttachments();
 connectNativeHost();
