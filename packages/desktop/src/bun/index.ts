@@ -50,6 +50,8 @@ import {
   acquireDesktopInstanceLock,
   DESKTOP_SECOND_INSTANCE_EXIT_CODE,
 } from "./singleInstanceLock";
+import { primeElectrobunInstallMetadata } from "./electrobunInstallMetadata";
+import { migrateLegacyDesktopChannelData } from "./desktopDataDirMigration";
 
 const desktopEntrypointArgs = process.argv.slice(2);
 const EXTERNAL_READER_CHILD_REQUEST_ENV = "NOLO_EXTERNAL_READER_CHILD_REQUEST";
@@ -569,6 +571,20 @@ const {
   Updater,
 } = await import("electrobun/bun");
 
+// 必须在首次 `Updater.localInfo.channel()` 之前预热安装元数据（打包版 cwd 是
+// $HOME，electrobun 读不到 `../Resources/version.json`；细节见
+// electrobunInstallMetadata.ts）。
+const installMetadataPrime = await primeElectrobunInstallMetadata({
+  executableDir: EXECUTABLE_DIR,
+  packagedResourcesDir: PACKAGED_RESOURCES_DIR,
+  updater: Updater,
+});
+if (installMetadataPrime.primed) {
+  console.log(
+    `[desktop] primed electrobun install metadata channel=${installMetadataPrime.channel}`,
+  );
+}
+
 type DesktopBrowserWindow = {
   webview: {
     executeJavascript: (js: string) => void;
@@ -1054,6 +1070,19 @@ const { publicDir: bundledPublicDir, source: publicDirSource } =
     ],
   });
 const desktopChannelDir = resolveDesktopChannelDir(channel);
+// 既有安装的数据仍在无 channel 基目录，需一次性迁移到 `<base>/<channel>`；dev
+// 通道数据本就在 `<base>/dev`，不迁移（细节见 desktopDataDirMigration.ts）。
+if (!isDev) {
+  const legacyDataMigration = migrateLegacyDesktopChannelData({
+    legacyDir: resolveDesktopChannelDir(""),
+    channelDir: desktopChannelDir,
+  });
+  if (legacyDataMigration.moved.length > 0) {
+    console.log(
+      `[desktop] migrated legacy desktop data into ${desktopChannelDir}: ${legacyDataMigration.moved.join(", ")}`,
+    );
+  }
+}
 desktopDiag("boot:start", "desktop runtime boot starting", {
   channel,
   isDev,

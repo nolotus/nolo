@@ -1,4 +1,13 @@
 
+## 0.89.0-alpha.3
+
+## 0.89.0-alpha.3 (2026-09-16)
+
+### Bug Fixes
+
+* **desktop:** 预热 electrobun 安装元数据并迁移 legacy 数据目录，修复打包版检查更新失败 ([94aebdb](https://github.com/nolotus/bun-nolo/commit/94aebdb047ac4eb6308259ef9415b5e18a0b2031))
+
+
 ## 0.89.0-alpha.2
 
 ## 0.89.0-alpha.2 (2026-09-16)
