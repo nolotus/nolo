@@ -209,6 +209,8 @@ export type AgentRuntimeWorkspaceMode = "none" | "current" | "lease";
 
 export type AgentRuntimeShellPolicy = {
   enabled?: boolean;
+  /** "worktree"（自动任务 worktree runtime）已于 7edd430bd 移除，字面量保留仅作协议兼容；
+   *  当前无消费者，生效开关是 enabled。 */
   mode?: "off" | "worktree";
   commandPolicy?: "denylist" | "allowlist" | "approval";
   networkPolicy?: "default-deny" | "allowed" | "approval";

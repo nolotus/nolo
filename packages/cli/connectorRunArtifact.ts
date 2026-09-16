@@ -44,6 +44,9 @@ export function resolveConnectorRunCwd(args: {
   return cwd;
 }
 
+/** runGit 探针的安全上限：超时即 kill 子进程并按「无数据」降级（collect 侧 catch 兜 artifactError）。 */
+const RUN_GIT_TIMEOUT_MS = 10_000;
+
 async function runGit(
   args: string[],
   cwd: string,
@@ -62,7 +65,18 @@ async function runGit(
     // 不消费 stderr 会让 git 阻塞在写满的 stderr 管道上永不退出（bun:child_process），
     // proc.exited 随之永不 resolve——connector 收尾整体挂死（2026-09-16 实测）。
     readPipeText(proc.stderr),
-    proc.exited,
+    // 超时保险丝：该路径历史上出过「进程不退出」类挂死（见上）；超时 kill 后流关闭、
+    // Promise.all 收敛，-1 与真实非零退出一样走「无数据」降级。
+    new Promise<number>((resolve) => {
+      const timer = setTimeout(() => {
+        proc.kill();
+        resolve(-1);
+      }, RUN_GIT_TIMEOUT_MS);
+      void proc.exited.then((code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+    }),
   ]);
   if (exitCode !== 0) return null;
   return options.trim === false ? stdout.replace(/\r?\n$/, "") : stdout.trim();

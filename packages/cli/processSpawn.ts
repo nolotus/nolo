@@ -17,6 +17,8 @@ export type SpawnedProcess = {
   stdin: Writable | null;
   stdout: Readable | null;
   stderr: Readable | null;
+  /** 终止子进程（超时/取消等安全阀路径）。spawnProcess 实现为 SIGKILL；已退出时为 no-op。 */
+  kill: () => void;
 };
 
 export type SpawnFn = (options: SpawnProcessOptions) => SpawnedProcess;
@@ -51,6 +53,7 @@ export function spawnProcess(options: SpawnProcessOptions): SpawnedProcess {
       stdin: null,
       stdout: null,
       stderr: null,
+      kill: () => {},
     };
   }
 
@@ -64,6 +67,13 @@ export function spawnProcess(options: SpawnProcessOptions): SpawnedProcess {
     stdin: child.stdin,
     stdout: child.stdout,
     stderr: child.stderr,
+    kill: () => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    },
   };
 }
 

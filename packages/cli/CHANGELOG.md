@@ -5,6 +5,7 @@
 
 ### Bug Fixes
 
+* **cli:** fuse runGit with a timeout and tidy post-incident leftovers ([4d9e245](https://github.com/nolotus/bun-nolo/commit/4d9e245539c6eb5d11f80c5cee05b1c7e6b49b41))
 * **desktop:** 更新面板文案人话化（保留原文可查） ([38164e4](https://github.com/nolotus/bun-nolo/commit/38164e4129eae98cb4b44b25d091d81f38a26f5b))
 * **desktop:** 非受管理安装不再给必然失败的「下载更新」按钮 ([caceedc](https://github.com/nolotus/bun-nolo/commit/caceedc9020a0523e6c6d33ca738b2ecec8d3a93))
 
