@@ -131,6 +131,7 @@ const renderWindowsInstallerScript = ({
   appId = WINDOWS_DESKTOP_APP_ID,
   appName = WINDOWS_DESKTOP_APP_NAME,
   appIdentifier = appId,
+  appChannel = "stable",
   launchScriptDestName = WINDOWS_DESKTOP_LAUNCH_SCRIPT_DEST_NAME,
   launchScriptPath,
   outputBaseFilename,
@@ -142,6 +143,8 @@ const renderWindowsInstallerScript = ({
   appId?: string;
   appName?: string;
   appIdentifier?: string;
+  /** 安装落点的 channel 段（%LOCALAPPDATA%\<identifier>\<channel>\app）。 */
+  appChannel?: string;
   launchScriptDestName?: string;
   launchScriptPath: string;
   outputBaseFilename: string;
@@ -157,6 +160,7 @@ const renderWindowsInstallerScript = ({
     .replaceAll("__APP_VERSION__", version)
     .replaceAll("__APP_ID__", appId)
     .replaceAll("__APP_IDENTIFIER__", appIdentifier)
+    .replaceAll("__APP_CHANNEL__", appChannel)
     .replaceAll("__SOURCE_DIR__", payloadDir)
     .replaceAll("__OUTPUT_DIR__", outputDir)
     .replaceAll("__OUTPUT_BASE_FILENAME__", outputBaseFilename)
@@ -171,6 +175,7 @@ const renderWindowsInstallerScript = ({
 const compileWindowsInstaller = async ({
   appId,
   appName,
+  appChannel,
   launchScriptDestName,
   launchScriptPath,
   outputBaseFilename,
@@ -182,6 +187,7 @@ const compileWindowsInstaller = async ({
 }: {
   appId?: string;
   appName?: string;
+  appChannel?: string;
   launchScriptDestName?: string;
   launchScriptPath: string;
   outputBaseFilename: string;
@@ -204,6 +210,7 @@ const compileWindowsInstaller = async ({
     renderWindowsInstallerScript({
       appId,
       appName,
+      appChannel,
       launchScriptDestName,
       launchScriptPath,
       outputBaseFilename,
@@ -290,7 +297,10 @@ export const createWindowsInstallerArtifact = async ({
     await downloadWebView2Bootstrapper(webView2BootstrapperPath);
 
     const outputBaseFilename = windowsZipName.replace(/\.zip$/i, "");
+    // 安装落点的 channel 段取 payload 的 version.json（alpha 构建为 canary）。
+    const appChannel = asOptionalTrimmedString(versionInfo?.channel) ?? "stable";
     const outputInstallerPath = await compileWindowsInstaller({
+      appChannel,
       launchScriptPath,
       outputBaseFilename,
       outputDir: artifactDir,
@@ -306,6 +316,7 @@ export const createWindowsInstallerArtifact = async ({
     await compileWindowsInstaller({
       appId: WINDOWS_DESKTOP_SMOKE_APP_ID,
       appName: WINDOWS_DESKTOP_SMOKE_APP_NAME,
+      appChannel,
       launchScriptDestName: WINDOWS_DESKTOP_SMOKE_LAUNCH_SCRIPT_DEST_NAME,
       launchScriptPath,
       outputBaseFilename: WINDOWS_DESKTOP_SMOKE_OUTPUT_BASE_FILENAME,

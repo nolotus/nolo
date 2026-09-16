@@ -1,4 +1,19 @@
 
+## 0.96.0-alpha.1
+
+## 0.96.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **cli:** let the TUI drive the user's Chrome through the Nolo connector ([9ada25d](https://github.com/nolotus/bun-nolo/commit/9ada25dcb536022ae09132e0f295785b95d440b6))
+* **cli:** nolo chrome 组补充操作子命令（读页面/点击/输入等 11 个） ([d44444e](https://github.com/nolotus/bun-nolo/commit/d44444e772b95984842d80c18093838b5ed82ac0))
+
+### Bug Fixes
+
+* **desktop:** Linux 官方安装器发布到 R2 并作为推荐下载 ([f24a7e9](https://github.com/nolotus/bun-nolo/commit/f24a7e9a36fba0431cebdb1a7a36f54a50546c33))
+* **desktop:** Windows 安装器落到 electrobun 托管目录（恢复应用内自更新） ([11d1a7f](https://github.com/nolotus/bun-nolo/commit/11d1a7fab7b103d9cab4ba1c8454b348e9864c22)), closes [#define](https://github.com/nolotus/bun-nolo/issues/define)
+
+
 ## 0.95.0-alpha.2
 
 ## 0.95.0-alpha.2 (2026-09-16)

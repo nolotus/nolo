@@ -1,4 +1,6 @@
 #define AppName "__APP_NAME__"
+#define AppIdentifier "__APP_IDENTIFIER__"
+#define AppChannel "__APP_CHANNEL__"
 #define AppVersion "__APP_VERSION__"
 #define SourceDir "__SOURCE_DIR__"
 #define OutputDir "__OUTPUT_DIR__"
@@ -13,7 +15,11 @@ AppId={{__APP_ID__}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Nolo
-DefaultDirName={localappdata}\Programs\{#AppName}
+; 安装到 electrobun 的受管理更新目录 %LOCALAPPDATA%\<identifier>\<channel>\app：
+; 应用内更新（download/apply）要求可执行文件正好在该布局下，否则会以
+; "outside its managed update directory" 拒绝。\Programs\{#AppName} 正是
+; 「能检查更新、点下载必失败」的旧落点（2026-09-16 实测 Windows/Linux deb 同类）。
+DefaultDirName={localappdata}\{#AppIdentifier}\{#AppChannel}\app
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest

@@ -40,6 +40,8 @@ import {
   createCliStartAgentRunExecutor,
 } from "./cliAgentRunToolExecutors";
 import { setTodoListFunc } from "../../ai/tools/agent/setTodoListTool";
+import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
+import { buildCliChromeConnectorToolExecutors } from "./cliChromeConnectorToolExecutors";
 
 export type ReadToolFn = (
   args: Record<string, unknown>,
@@ -239,6 +241,11 @@ export function buildLocalToolExecutors(args: {
   cliEntrypoint?: string;
   /** Current executing agent key; used for memory policy. */
   agentKey?: string | null;
+  /**
+   * Nolo Chrome connector client behind the `chrome_*` executors (tests / alternate transports).
+   * Absent: a verified client is created lazily on the first chrome_* call.
+   */
+  chromeConnectorClient?: ChromeConnectorClient;
 }) {
   return {
     ...createLocalWorkspaceToolExecutors({
@@ -422,6 +429,12 @@ export function buildLocalToolExecutors(args: {
     ...(args.pastedTextStore
       ? { readPastedText: createReadPastedTextExecutor(args.pastedTextStore) }
       : {}),
+    // Nolo Browser Connector: the CLI drives the user's real Chrome through the same verified
+    // client + executor as the desktop runtime (before this, every chrome_* call answered
+    // "only executable in the Nolo desktop local runtime").
+    ...buildCliChromeConnectorToolExecutors(
+      args.chromeConnectorClient ? { client: args.chromeConnectorClient } : {},
+    ),
     ...(args.localToolExecutors ?? {}),
   };
 }

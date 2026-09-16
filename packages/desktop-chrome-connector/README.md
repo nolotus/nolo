@@ -41,6 +41,35 @@ That manifest points to a generated wrapper under:
 
 The wrapper uses an absolute Node executable path before launching the repository's open-source native host script. This avoids relying on Chrome's stripped-down native host `PATH`.
 
+## TUI Quick Start (nolo CLI)
+
+The TUI drives the user's Chrome through the same verified client and executors as Nolo Desktop — no
+desktop app required:
+
+```bash
+nolo chrome install   # native messaging manifest + token, per-platform path, idempotent token
+nolo chrome status    # manifest / token / live connection, plus one next step when something is missing
+nolo chrome reload    # after changing extension code: restart its service worker (host-only action)
+```
+
+`install` reuses the desktop installer (`installNativeHostManifest`), so it writes exactly what the
+desktop app writes and never overwrites an existing token. It resolves the connector from the current
+checkout; set `NOLO_CHROME_CONNECTOR_ROOT` to install from a different one. On Windows it reports the
+installer's explicit not-implemented error instead of writing a manifest Chrome ignores.
+
+`install` refuses to run from a git worktree: the wrapper embeds absolute paths, so installing from a
+checkout that is about to be deleted would break the connector silently once it disappears. Run it from
+the main checkout; `--force` (or an explicit `NOLO_CHROME_CONNECTOR_ROOT`) installs anyway.
+
+`status` separates the three fixable states: manifest missing or token missing → `nolo chrome install`;
+connector offline → load the unpacked extension (this directory's `extension/` folder) through
+`chrome://extensions` in Developer mode, or install it from the Chrome Web Store. `--json` prints the
+same report for scripts; the exit code is 0 only when the connector is fully online.
+
+The CLI's executor table answers all eleven `chrome_*` names (`chrome_list_tabs`, `chrome_read_page`,
+`chrome_click`, ...), each gated on the features the installed extension advertised — the same
+extension-id, protocol and `features` enforcement the desktop runtime applies.
+
 ## Runtime Link
 
 ```text

@@ -552,6 +552,9 @@ export function createCliLocalRuntimeAdapter(
     workspaceRoot,
     env: deps.env,
     fetchImpl,
+    ...(deps.chromeConnectorClient
+      ? { chromeConnectorClient: deps.chromeConnectorClient }
+      : {}),
     localToolExecutors: deps.localToolExecutors,
     readXPost: deps.readXPost,
     readXhsProfile: deps.readXhsProfile,
@@ -661,6 +664,9 @@ export function createCliLocalRuntimeAdapter(
         workspaceRoot,
         env: deps.env,
         fetchImpl,
+        ...(deps.chromeConnectorClient
+          ? { chromeConnectorClient: deps.chromeConnectorClient }
+          : {}),
         localToolExecutors: deps.localToolExecutors,
         readXPost: deps.readXPost,
         readXhsProfile: deps.readXhsProfile,

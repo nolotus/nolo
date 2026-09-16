@@ -29,6 +29,10 @@ import {
 import { resolveAgentRequiredPackIds } from "../../ai/tools/agentSkillConfig";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import {
+  CHROME_CONNECTOR_TOOL_NAMES,
+  type ChromeConnectorToolName,
+} from "../../ai/tools/chromeConnectorTools";
+import {
   filterToolNamesForRunKind,
   hasRunWakeChannel,
   isSubtaskRun,
@@ -52,6 +56,39 @@ import {
   buildDelegatedTaskContent,
 } from "./cliProviderHelpers";
 import { resolveRequestedRuntimeToolNames } from "../agentRuntimeLocal";
+
+const CLI_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(
+  CHROME_CONNECTOR_TOOL_NAMES,
+);
+
+/** Declared `chrome_*` names (agent manifest / run surface), order-preserving. */
+export function filterCliChromeConnectorToolNames(toolNames?: string[]) {
+  return (toolNames ?? []).filter((name): name is ChromeConnectorToolName =>
+    CLI_CHROME_CONNECTOR_TOOL_NAME_SET.has(name),
+  );
+}
+
+/**
+ * CLI projection of the Nolo Browser Connector (`chrome_*`) schemas.
+ *
+ * Mirrors desktop's `buildDesktopChromeConnectorOpenAiTools`: schemas come from
+ * the shared tool registry through `prepareTools` (never hand-copied), and
+ * explicit declaration is the only gate — no host switch. This projection is
+ * also what `buildLocalPolicyToolNames` summarizes, and `resolveLocalToolPolicy`
+ * allows any agent-declared tool in default mode (`NOLO_LOCAL_TOOL_MODE` not
+ * `restricted`); in restricted mode `chrome_*` follows the existing
+ * `NOLO_LOCAL_ALLOWED_TOOLS` rule like every other non-default tool.
+ *
+ * Before this existed, `buildOpenAiTools` dropped the declared `chrome_*`
+ * names, so the policy set never contained them and every call was denied
+ * ("not enabled for local runtime runs") even though `cliLocalToolExecutors`
+ * already registered real connector executors.
+ */
+export function buildCliChromeConnectorOpenAiTools(args: {
+  toolNames?: string[];
+}) {
+  return prepareTools(filterCliChromeConnectorToolNames(args.toolNames));
+}
 
 export function buildOpenAiTools(args: {
   agentKey?: string;
@@ -115,6 +152,7 @@ export function buildOpenAiTools(args: {
       toolNames: args.effectiveToolNames ?? workspaceToolNames,
       exposeShellTools: toolset.exposeShellTools,
     }),
+    ...buildCliChromeConnectorOpenAiTools({ toolNames: args.toolNames }),
     ...buildServerPlatformOpenAiTools({ toolNames: args.toolNames }),
     ...buildNoloWorkspaceOpenAiTools({ toolNames: args.toolNames }),
     ...buildOrchestrationOpenAiTools({

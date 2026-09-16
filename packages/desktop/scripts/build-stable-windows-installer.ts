@@ -370,6 +370,8 @@ function renderWindowsInstallerScript(args: {
   appId?: string;
   appName?: string;
   appIdentifier?: string;
+  /** 安装落点的 channel 段（%LOCALAPPDATA%\<identifier>\<channel>\app）。 */
+  appChannel?: string;
   launchScriptDestName?: string;
   launchScriptPath: string;
   outputBaseFilename?: string;
@@ -386,6 +388,7 @@ function renderWindowsInstallerScript(args: {
     .replaceAll("__APP_VERSION__", args.version)
     .replaceAll("__APP_ID__", appId)
     .replaceAll("__APP_IDENTIFIER__", args.appIdentifier ?? appId)
+    .replaceAll("__APP_CHANNEL__", args.appChannel ?? WINDOWS_DESKTOP_CHANNEL)
     .replaceAll("__SOURCE_DIR__", args.payloadDir)
     .replaceAll("__OUTPUT_DIR__", args.outputDir)
     .replaceAll("__OUTPUT_BASE_FILENAME__", args.outputBaseFilename ?? outputBaseFilename)

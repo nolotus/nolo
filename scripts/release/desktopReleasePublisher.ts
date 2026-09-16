@@ -173,6 +173,7 @@ const OPTIONAL_PATTERNS: Record<DesktopReleaseChannel, RegExp[]> = {
     /^canary-macos-arm64-NoloDesktop-canary\.app\.tar\.zst$/i,
     /^nolo-desktop[_-].*\.deb$/i,
     /^nolo-desktop[_-].*\.rpm$/i,
+    /^canary-linux-x64-.*-Setup\.tar\.gz$/i,
   ],
   stable: [
     /^stable-win-x64-NoloDesktop-Setup-[0-9][^/]*\.exe$/i,
@@ -180,11 +181,19 @@ const OPTIONAL_PATTERNS: Record<DesktopReleaseChannel, RegExp[]> = {
     /^stable-macos-arm64-NoloDesktop\.app\.tar\.zst$/i,
     /^nolo-desktop[_-].*\.deb$/i,
     /^nolo-desktop[_-].*\.rpm$/i,
+    /^stable-linux-x64-.*-Setup\.tar\.gz$/i,
   ],
 };
 
 const DEB_OPTIONAL_PATTERN = /^nolo-desktop[_-].*\.deb$/i;
 const RPM_OPTIONAL_PATTERN = /^nolo-desktop[_-].*\.rpm$/i;
+// Linux 自解压安装器（electrobun Setup）：装到受管理目录，是 Linux 上唯一能
+// 应用内自更新的安装方式（deb/rpm 走包管理器）。按渠道分别匹配：构建目录若混入
+// 另一渠道产物，不能被赋予本渠道的稳定别名（review P3）。
+const LINUX_SETUP_OPTIONAL_PATTERNS: Record<DesktopReleaseChannel, RegExp> = {
+  alpha: /^canary-linux-x64-.*-Setup\.tar\.gz$/i,
+  stable: /^stable-linux-x64-.*-Setup\.tar\.gz$/i,
+};
 
 function resolveDesktopPackageAliasUploadName(args: {
   channel: DesktopReleaseChannel;
@@ -200,6 +209,11 @@ function resolveDesktopPackageAliasUploadName(args: {
     return args.channel === "alpha"
       ? "nolo-desktop-canary_x86_64.rpm"
       : "nolo-desktop_x86_64.rpm";
+  }
+  if (LINUX_SETUP_OPTIONAL_PATTERNS[args.channel].test(name)) {
+    return args.channel === "alpha"
+      ? "nolo-desktop-canary-linux-installer.tar.gz"
+      : "nolo-desktop-linux-installer.tar.gz";
   }
   return undefined;
 }

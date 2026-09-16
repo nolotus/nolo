@@ -20,6 +20,7 @@ import type { IconType } from "react-icons";
 import "./ClientDownloadsPage.css";
 
 type LinuxPackageLinks = {
+  installer: string;
   tar: string;
   deb: string;
   rpm: string;
@@ -144,6 +145,7 @@ const ClientDownloadsPage: React.FC = () => {
       descKey: "clientDownloads.linuxDesc",
       meta: metaWithVersion("linux", CLIENT_DOWNLOAD_META.linux),
       href: {
+        installer: downloadUrls.linuxInstaller,
         tar: downloadUrls.linux,
         deb: downloadUrls.linuxDeb,
         rpm: downloadUrls.linuxRpm,
@@ -194,17 +196,25 @@ const ClientDownloadsPage: React.FC = () => {
 
               {linuxLinks ? (
                 <div className="client-download-card__linux-options">
+                  <a href={linuxLinks.installer} className="client-download-card__linux-option" target="_blank" rel="noreferrer">
+                    <span className="client-download-card__linux-format">TAR.GZ</span>
+                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxInstallerDesc", "自解压安装器 · 推荐（装后可应用内自动更新）")}</span>
+                    <span className="client-download-card__linux-option__hint">
+                      <code>{t("clientDownloads.linuxInstallerInstallHint", "解压后运行 ./installer")}</code>
+                    </span>
+                    <LuDownload size={14} aria-hidden="true" />
+                  </a>
                   <a href={linuxLinks.tar} className="client-download-card__linux-option" target="_blank" rel="noreferrer">
                     <span className="client-download-card__linux-format">TAR.ZST</span>
-                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxTarDesc", "通用 / 任意发行版")}</span>
+                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxTarDesc", "便携包 · 不参与应用内更新")}</span>
                     <span className="client-download-card__linux-option__hint">
-                      {t("clientDownloads.linuxTarInstallHint", "Extract and run bin/launcher — no install needed.")}
+                      {t("clientDownloads.linuxTarInstallHint", "解压后运行 bin/launcher（需手动替换升级）")}
                     </span>
                     <LuDownload size={14} aria-hidden="true" />
                   </a>
                   <a href={linuxLinks.deb} className="client-download-card__linux-option" target="_blank" rel="noreferrer">
                     <span className="client-download-card__linux-format">DEB</span>
-                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxDebDesc", "Debian / Ubuntu")}</span>
+                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxDebDesc", "Debian / Ubuntu · 由包管理器更新")}</span>
                     <span className="client-download-card__linux-option__hint">
                       <code>{t("clientDownloads.linuxDebInstallHint", "sudo apt install ./nolo-desktop_amd64.deb")}</code>
                     </span>
@@ -212,7 +222,7 @@ const ClientDownloadsPage: React.FC = () => {
                   </a>
                   <a href={linuxLinks.rpm} className="client-download-card__linux-option" target="_blank" rel="noreferrer">
                     <span className="client-download-card__linux-format">RPM</span>
-                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxRpmDesc", "Fedora / RHEL")}</span>
+                    <span className="client-download-card__linux-option__desc">{t("clientDownloads.linuxRpmDesc", "Fedora / RHEL · 由包管理器更新")}</span>
                     <span className="client-download-card__linux-option__hint">
                       <code>{t("clientDownloads.linuxRpmInstallHint", "sudo dnf install ./nolo-desktop_x86_64.rpm")}</code>
                     </span>

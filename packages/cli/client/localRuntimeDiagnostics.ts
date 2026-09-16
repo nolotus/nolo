@@ -15,6 +15,7 @@ import type {
   UserChoiceResult,
 } from "./localRuntimeAdapterTypes";
 import type { CollapsedPasteStore } from "core/collapsedPaste";
+import type { ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
 
 export type CliLocalRuntimeAdapterDeps = {
   env: EnvLike;
@@ -42,6 +43,11 @@ export type CliLocalRuntimeAdapterDeps = {
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
   requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
   pastedTextStore?: CollapsedPasteStore;
+  /**
+   * Nolo Chrome connector client for the CLI's `chrome_*` executors (tests / alternate transports).
+   * Absent: the executor table creates a verified client lazily on the first chrome_* call.
+   */
+  chromeConnectorClient?: ChromeConnectorClient;
   /**
    * Current TUI conversation id. Injected so local `startAgentRun` delegations
    * can stamp the spawned child run with this conversation as its
