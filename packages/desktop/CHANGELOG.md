@@ -1,4 +1,13 @@
 
+## 0.96.0-alpha.4
+
+## 0.96.0-alpha.4 (2026-09-17)
+
+### Bug Fixes
+
+* **dx:** serialize green typechecks to reduce peak memory ([9842453](https://github.com/nolotus/bun-nolo/commit/9842453e8ccd7b72c7c24525dbcfa6ed4ff5e60a))
+
+
 ## 0.96.0-alpha.3
 
 ## 0.96.0-alpha.3 (2026-09-17)
