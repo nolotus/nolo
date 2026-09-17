@@ -1,4 +1,13 @@
 
+## 0.98.0-alpha.1
+
+## 0.98.0-alpha.1 (2026-09-17)
+
+### Features
+
+* **agent:** add DeepSeek official API preset and brand logos in provider pickers ([1760676](https://github.com/nolotus/bun-nolo/commit/1760676d2fda8a7387289124de5d409614248fde))
+
+
 ## 0.97.0-alpha.1
 
 ## 0.97.0-alpha.1 (2026-09-17)

@@ -147,6 +147,7 @@ export function useAgentCreateSourceState({
       meteredPresets.map((p) => ({
         value: p.id,
         label: p.label,
+        provider: p.provider,
       })),
     [meteredPresets]
   );
@@ -155,6 +156,7 @@ export function useAgentCreateSourceState({
       subscriptionPresets.map((p) => ({
         value: p.id,
         label: `${p.label}${p.requiresDesktopOAuth ? " · OAuth" : ""}`,
+        provider: p.provider,
       })),
     [subscriptionPresets]
   );
