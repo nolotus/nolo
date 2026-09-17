@@ -1,4 +1,42 @@
 
+## 0.79.0-alpha.1
+
+## 0.79.0-alpha.1 (2026-09-17)
+
+### Features
+
+* **memory:** add adaptive recall context ([8cc022b](https://github.com/nolotus/bun-nolo/commit/8cc022b699f500c83bcc4b98870a95f8f42567fd))
+* **memory:** add lifetime benchmark runner protocol ([6ed8a4f](https://github.com/nolotus/bun-nolo/commit/6ed8a4fba55b3b4c22dcc09c23b7b6b492e244b5))
+* **memory:** add lifetime benchmark scale generator ([2c5ab5c](https://github.com/nolotus/bun-nolo/commit/2c5ab5c0e9f1e9d2c5dc76da656254709f911e59))
+* **memory:** add LLM checkpoint evaluator ([d2ebd64](https://github.com/nolotus/bun-nolo/commit/d2ebd643ff4665e357c53210a4c02df629292032))
+* **memory:** add one-hop memory inspect ([21e95d4](https://github.com/nolotus/bun-nolo/commit/21e95d499e8cbf101d2044882368d6e2ed882466))
+* **memory:** add provider-backed shadow interpreter ([49d76dd](https://github.com/nolotus/bun-nolo/commit/49d76ddc01480b579f33f3994681cbb41db11327))
+* **memory:** add semantic interpreter wire protocol ([91d2e2d](https://github.com/nolotus/bun-nolo/commit/91d2e2d41f9ee700f8d50d45eabf28d45a652dde))
+* **memory:** add structure health metrics ([77d28b1](https://github.com/nolotus/bun-nolo/commit/77d28b1e8b7bb0bae75f910f457822e549d1ad8d))
+* **memory:** add validated shadow interpreter protocol ([b5f06ee](https://github.com/nolotus/bun-nolo/commit/b5f06ee6c0b888108f23cd5ba5d18aef0e19687a))
+* **memory:** add vnext core memory types ([e231004](https://github.com/nolotus/bun-nolo/commit/e23100413a6a6a554674ae7cc84471cba3ca7b23))
+* **memory:** add vnext interpreter entity contract ([000952d](https://github.com/nolotus/bun-nolo/commit/000952dec41da71e6b3c633c8a68dfc62a177443))
+* **memory:** add vnext shadow store ([59a24d4](https://github.com/nolotus/bun-nolo/commit/59a24d41d6eef23a82240461c6ef479aeb7eb245))
+* **memory:** add vNext state recall ([3fe0737](https://github.com/nolotus/bun-nolo/commit/3fe07376f61843e4948a196075d8dd0ceb7da912))
+* **memory:** allow adaptive checkpoint context ([c589aeb](https://github.com/nolotus/bun-nolo/commit/c589aebe4c53b7c8582ecf797d03fe65c44ce215))
+* **memory:** define lifetime benchmark judge contract ([bdcc8cf](https://github.com/nolotus/bun-nolo/commit/bdcc8cff21e7dbd8b6e37d4e8104f830ccd5f64c))
+* **memory:** expose benchmark checkpoint artifacts ([5b4bb01](https://github.com/nolotus/bun-nolo/commit/5b4bb01661b95b52980cd9c35940d80aec432c9e))
+* **memory:** expose benchmark memory context trace ([dadb693](https://github.com/nolotus/bun-nolo/commit/dadb693400e1cac4fae8cb1784830aeba3023506))
+* **memory:** expose benchmark provider usage ([3a7e973](https://github.com/nolotus/bun-nolo/commit/3a7e973e3b0776dea194359f0b689d2c08d705ef))
+* **memory:** include strict interpreter output contract ([c0649b4](https://github.com/nolotus/bun-nolo/commit/c0649b4c4ff4d3f63df831a8c6f0f5dcff4c3241))
+* **memory:** meter benchmark provider calls ([b435538](https://github.com/nolotus/bun-nolo/commit/b435538204a907fd6f38868f72db0c794207d432))
+* **memory:** retain checkpoint debug artifacts ([0648e91](https://github.com/nolotus/bun-nolo/commit/0648e918a7deb08ce6ab2ff340550c22d824385f))
+* **memory:** summarize lifetime benchmark metrics ([63fbe35](https://github.com/nolotus/bun-nolo/commit/63fbe3568e41fcf8db322a16638ad3e593588ad3))
+
+### Bug Fixes
+
+* **memory:** close the first-round review findings in memory vNext ([d1c7ba0](https://github.com/nolotus/bun-nolo/commit/d1c7ba0a8c5a8ad49399ceed6bdea8f29da3838e))
+* **memory:** harden vNext mutation references ([9485160](https://github.com/nolotus/bun-nolo/commit/948516053fee9eee12cd1afda15e855fb39810cf))
+* **memory:** preserve state provenance during materialization ([24df7b0](https://github.com/nolotus/bun-nolo/commit/24df7b0603de8a2414bee0939e2b3f01efc6ef21))
+* **memory:** refuse to update or supersede an already retired State ([3bf77d6](https://github.com/nolotus/bun-nolo/commit/3bf77d65391d06417b4d22d74f40c39b0dd57eee))
+* **memory:** retain prior state evidence in LLM adapter ([4ef5a1e](https://github.com/nolotus/bun-nolo/commit/4ef5a1ece1657329ee4c0681dd6f8de3d2d82f26))
+
+
 ## 0.78.0-alpha.1
 
 ## 0.78.0-alpha.1 (2026-09-17)
