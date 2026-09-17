@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo } from "react";
 import { useAppDispatch } from "app/store";
+import type { ThunkDispatch, UnknownAction } from "@reduxjs/toolkit";
+import type { AppExtra, RootState } from "app/store";
 import {
     initTable,
     loadTableRows,
@@ -16,7 +18,13 @@ export interface UseTableOptions {
 
 export const useTable = (tableKey: string | undefined, options: UseTableOptions = {}) => {
     const { enabled = true } = options;
-    const dispatch = useAppDispatch();
+    // 表格域只允许 dispatch 真命令/真 thunk：把暴露给调用方的 dispatch 收窄成严格
+    // ThunkDispatch —— 形如 `dispatch(某模块 store setter(...))`（返回 void）的误用
+    // 会直接编译失败。这是 2026-09-17 事故（dispatch(undefined) → Redux #7，页面被
+    // 错误边界兜底）的类型层防线，见 docs/incidents/2026-09-17-table-page-focus-
+    // context-dispatch-crash.md。
+    const dispatch: ThunkDispatch<RootState, AppExtra, UnknownAction> =
+        useAppDispatch() as ThunkDispatch<RootState, AppExtra, UnknownAction>;
     const currentToken = useToken();
     const currentUserId = useUserId();
 

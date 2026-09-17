@@ -43,7 +43,7 @@ import type {
   AgentRuntimeToolCall,
 } from "./types";
 import { sanitizeToolCallPairing } from "./toolCallPairing";
-import { downgradeUnparsableToolCalls, hasParsableObjectArguments } from "./outboundHistorySanitize";
+import { downgradeUnparsableToolCalls, hasParsableObjectArguments, repairTruncatedToolArguments } from "./outboundHistorySanitize";
 import { summarizeToolArguments } from "./summarizeToolArguments";
 import { buildIdentityBlock } from "./identityBlock";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
@@ -2194,9 +2194,20 @@ export async function runLocalAgentTurn(
             rawPoisonArguments.trim() !== "" &&
             !hasParsableObjectArguments(rawPoisonArguments)
           ) {
-            throw new Error(
-              `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`,
-            );
+            // 先尝试「内容零损失」的尾补全（只补 `}`/`]`，见 repairTruncatedToolArguments）：
+            // 上游丢尾且截断点落在字符串外时无需再让模型重试一轮；补全不成立才走显式报错。
+            const repairedArguments =
+              repairTruncatedToolArguments(rawPoisonArguments);
+            if (repairedArguments) {
+              console.log(
+                `[tool-args-repair] ${toolName}: 补全被截断的 arguments（${rawPoisonArguments.length} → ${repairedArguments.length} 字符，内容零损失）`,
+              );
+              toolCall.function.arguments = repairedArguments;
+            } else {
+              throw new Error(
+                `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`,
+              );
+            }
           }
           const writeTool = toolName === "writeFile" || toolName === "editFile";
           // Only interactive hosts can approve the session gate. Headless/background

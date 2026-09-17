@@ -7,7 +7,10 @@ import {
     useVirtualizer,
     type Range,
 } from "@tanstack/react-virtual";
-import * as stylex from "@stylexjs/stylex";
+import {
+    gridScrollStyleProps,
+    spacerCellStyleProps,
+} from "./TableGridStyles";
 
 import {
     BaseTable,
@@ -33,31 +36,6 @@ import type { SelectCellEditorAnchor } from "./SelectCellEditor";
 import type { LongTextCellInfo } from "./LongTextDialog";
 
 const MIN_COLUMN_WIDTH = 80;
-
-// Grid 滚动视口与占位行样式（StyleX）。
-// 滚动容器 flex 撑满 .table-page 剩余高度，表体区域直达页面底部；
-// 遗留 hook class "table-page__grid-scroll" 仍保留在 className 上，
-// 供 table.css 对 BaseTable 内部 .table-container / .data-table 做后代覆盖
-// （StyleX 不支持后代选择器）。
-const tableGridStyles = stylex.create({
-    scrollViewport: {
-        flex: "1 1 auto",
-        minHeight: 0,
-        overflow: "auto",
-        WebkitOverflowScrolling: "touch",
-        overscrollBehavior: "contain",
-        margin: 0,
-    },
-    spacerCell: {
-        padding: 0,
-        borderWidth: 0,
-    },
-});
-
-// stylex.props() 返回 { className }，若在 handwritten hook class 之后展开会覆盖它；
-// 参照 QuickChatRuntime 的既有模式显式合并。
-const gridScrollStyleProps = stylex.props(tableGridStyles.scrollViewport);
-const spacerCellStyleProps = stylex.props(tableGridStyles.spacerCell);
 
 export interface TableGridSectionProps {
     gridScrollRef: React.RefObject<HTMLDivElement | null>;

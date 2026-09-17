@@ -315,6 +315,146 @@ export function hasParsableObjectArguments(raw: unknown): boolean {
   }
 }
 
+type JsonTailScan = {
+  inString: boolean;
+  /** 需要补齐的尾随闭合符（按需）。 */
+  closers: string;
+  /** 最后一个「字符串外」逗号的位置与当时的容器栈（用于回退丢尾成员）。 */
+  lastCommaOutsideString: { index: number; closers: string } | null;
+};
+
+/**
+ * 严格 JSON 字符串 token（RFC 8259）：`\.` 只允许合法转义（" \ / b f n r t 与 \uXXXX），
+ * 且不允许未转义控制字符。用于判断「逗号之后是否只有一个完全没开始的悬空 key」——
+ * 宽松正则（`\\.` / 未转义控制字符）会把被截断或非法的 key 误判成悬空 key，
+ * 于是静默丢成员后执行（独立 review 两轮都抓到了这一类，2026-09-17）。
+ */
+const STRICT_JSON_STRING_TOKEN =
+  /^"(?:[^"\\\u0000-\u001F]|\\["\\/bfnrt]|\\u[0-9A-Fa-f]{4})*"$/;
+
+function isStrictJsonStringToken(value: string): boolean {
+  if (!STRICT_JSON_STRING_TOKEN.test(value)) return false;
+  try {
+    // 双重验证：正则 + 真解析（正则的字符类再怎么写也只是近似）。
+    return typeof JSON.parse(value) === "string";
+  } catch {
+    return false;
+  }
+}
+
+function closersOf(openStack: readonly string[]): string {
+  return openStack
+    .slice()
+    .reverse()
+    .map((ch) => (ch === "{" ? "}" : "]"))
+    .join("");
+}
+
+/** 单次扫描：跟踪字符串/转义与容器栈，产出补全所需的闭合符。 */
+function scanJsonForTailRepair(input: string): JsonTailScan | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let lastCommaOutsideString: JsonTailScan["lastCommaOutsideString"] = null;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      stack.push(ch);
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      const open = stack.pop();
+      if (open !== (ch === "}" ? "{" : "[")) return null; // 结构本身已坏，不修
+      continue;
+    }
+    if (ch === ",") {
+      lastCommaOutsideString = { index: i, closers: closersOf(stack) };
+      continue;
+    }
+  }
+
+  return { inString, closers: closersOf(stack), lastCommaOutsideString };
+}
+
+/**
+ * 保守修复被上游截断的 tool_call arguments（2026-09-17，TUI 实测触发）。
+ *
+ * 只接受「**内容零损失**」的截断：扫描后 EOF 落在字符串之外，且最后一个完整
+ * token 是结构边界（`"` / `}` / `]`）或原文以**至多一个**尾逗号结尾（逗号证明
+ * 前一个 token 已完整；连续逗号=结构已坏 → 拒绝）。补上缺失的 `}` / `]`；
+ * 回退只在「被丢弃的尾成员是完全没开始的悬空 key」（逗号后仅一个字符串字面量、
+ * 无 `:` 无值）时允许。补全结果与模型原本生成的参数逐字节一致或仅少一个未开始
+ * 的成员，因此可安全执行。
+ *
+ * 拒绝的形态（返回 null，调用方保持显式报错 + 让模型重试）：
+ * - EOF 落在字符串内（`{"command":"ls -la`）：末尾字符串内容可能已被截短，
+ *   补全执行等于把截短的参数当真 —— 对 exec_command / writeFile 不可接受；
+ * - 末尾是数字/字面量且无逗号（`{"a":12` 可能是 `1234` 被截）：无法区分截断与完整；
+ * - 连续逗号等结构已坏（`{"a":1,,}`）；尾成员已出现 `:`/值（`{"a":1,"b":}`）；
+ * - 补全后无法解析为非空对象。
+ */
+export function repairTruncatedToolArguments(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  // 只剥「空白 + 至多一个尾逗号」：逗号证明前一个 token 已完整，但连续逗号
+  // （{"a":1,,）意味着结构本身已坏 —— 必须拒绝，不能吞掉。
+  const withoutTrailingSpace = raw.replace(/\s+$/, "");
+  const endsWithComma = withoutTrailingSpace.endsWith(",");
+  const trimmed = endsWithComma
+    ? withoutTrailingSpace.slice(0, -1).replace(/\s+$/, "")
+    : withoutTrailingSpace;
+  if (trimmed === "" || trimmed.endsWith(",")) return null;
+
+  const scan = scanJsonForTailRepair(trimmed);
+  if (!scan || scan.inString) return null;
+
+  const lastChar = trimmed[trimmed.length - 1];
+  const tailIsCompleteToken =
+    endsWithComma || lastChar === '"' || lastChar === "}" || lastChar === "]";
+  if (!tailIsCompleteToken) return null;
+
+  const candidates: string[] = [trimmed + scan.closers];
+  const lastComma = scan.lastCommaOutsideString;
+  if (lastComma && lastComma.index > 0) {
+    // 回退(候选 2)只在「被丢弃的尾成员是完全没开始的悬空 key」时允许：
+    // 逗号之后必须只有空白 + 一个**严格合法的** JSON 字符串字面量（key），
+    // 不含 `:`、不含任何值 token、不含非法/被截断的转义序列。
+    // 否则（{"a":1,"b":}、{"a":1,"b":true、{"a":1,"b\u12 …）一律拒绝走原报错路径。
+    const tailAfterComma = trimmed.slice(lastComma.index + 1).trim();
+    if (isStrictJsonStringToken(tailAfterComma)) {
+      const head = trimmed.slice(0, lastComma.index);
+      candidates.push(head + lastComma.closers);
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed).length > 0
+      ) {
+        return candidate;
+      }
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
 /**
  * Local-loop send-seam poison defense: downgrade assistant tool_calls whose
  * string `arguments` cannot be parsed as a JSON object (typical cause: the

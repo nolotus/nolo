@@ -1,35 +1,124 @@
 
-## 0.71.0
+## 0.75.0-alpha.3
 
-## 0.71.0 (2026-09-15)
+## 0.75.0-alpha.3 (2026-09-17)
+
+### Bug Fixes
+
+* **agent-runtime:** 工具参数尾截断可无损补全时直接执行，不再白跑一轮重试 ([da894d4](https://github.com/nolotus/bun-nolo/commit/da894d4decb97beeaad476f3796faf093637dc4a))
+
+
+## 0.75.0-alpha.2
+
+## 0.75.0-alpha.2 (2026-09-17)
+
+### Bug Fixes
+
+* **table:** 修正重命名列显示名/重命名表的命令参数名 ([9cfc459](https://github.com/nolotus/bun-nolo/commit/9cfc4595cc08eeaffcf36d9840c70ce85e1ecb67))
+* **table:** 去掉 setTableFocusContext 的 dispatch 包装，修复表格页渲染崩溃 ([8586fa9](https://github.com/nolotus/bun-nolo/commit/8586fa99a0017f50952c1319fb66cb62fe7347af)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7)
+* **table:** 给 listTableRows 的服务器读取加 5s 超时，修复表格加载可卡 60s+ ([66afa8a](https://github.com/nolotus/bun-nolo/commit/66afa8a883833abe1e1e9b547a52455a88b9b659))
+
+
+## 0.75.0-alpha.1
+
+## 0.75.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **cli:** let the TUI drive the user's Chrome through the Nolo connector ([9ada25d](https://github.com/nolotus/bun-nolo/commit/9ada25dcb536022ae09132e0f295785b95d440b6))
+* **cli:** nolo chrome 组补充操作子命令（读页面/点击/输入等 11 个） ([d44444e](https://github.com/nolotus/bun-nolo/commit/d44444e772b95984842d80c18093838b5ed82ac0))
+
+### Bug Fixes
+
+* **desktop:** Linux 官方安装器发布到 R2 并作为推荐下载 ([f24a7e9](https://github.com/nolotus/bun-nolo/commit/f24a7e9a36fba0431cebdb1a7a36f54a50546c33))
+
+
+## 0.74.0-alpha.2
+
+## 0.74.0-alpha.2 (2026-09-16)
+
+### Bug Fixes
+
+* **cli:** fuse runGit with a timeout and tidy post-incident leftovers ([4d9e245](https://github.com/nolotus/bun-nolo/commit/4d9e245539c6eb5d11f80c5cee05b1c7e6b49b41))
+* **desktop:** 更新面板文案人话化（保留原文可查） ([38164e4](https://github.com/nolotus/bun-nolo/commit/38164e4129eae98cb4b44b25d091d81f38a26f5b))
+* **desktop:** 非受管理安装不再给必然失败的「下载更新」按钮 ([caceedc](https://github.com/nolotus/bun-nolo/commit/caceedc9020a0523e6c6d33ca738b2ecec8d3a93))
+
+
+## 0.74.0-alpha.1
+
+## 0.74.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **agent-runtime:** guide agents to render mermaid for structured explanations ([87d0fd4](https://github.com/nolotus/bun-nolo/commit/87d0fd4b676f8358b1a5af697cf1a36f80147281))
+* **cli:** render mermaid diagrams via lovely-mermaid ([249d944](https://github.com/nolotus/bun-nolo/commit/249d9440b0dc8a7ac8be17d572fa05bffd0835b5))
+
+### Bug Fixes
+
+* **cli:** consume git stderr in connector runGit to avoid hang ([f0d1b28](https://github.com/nolotus/bun-nolo/commit/f0d1b2839efe025deb531d0092c033bba39ff6fe))
+
+### Performance Improvements
+
+* **cli:** avoid pathological Bun JSON.stringify on cyclic delegation payloads ([aea5535](https://github.com/nolotus/bun-nolo/commit/aea553559629a2397fb48e6659a48fa2f0d6ad09))
+
+
+## 0.73.0-alpha.1
+
+## 0.73.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add the Chrome Web Store publishing kit ([00315ea](https://github.com/nolotus/bun-nolo/commit/00315ea16e33920b463e403a02887e26718b4aa6))
+
+
+## 0.72.0-alpha.1
+
+## 0.72.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
+* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
+
+
+## 0.71.0-alpha.1
+
+## 0.71.0-alpha.1 (2026-09-16)
+
+### Features
+
+* **desktop:** add compact Chrome observation protocol ([dae7f9d](https://github.com/nolotus/bun-nolo/commit/dae7f9d8b8b5fca28fdecbb845b4f16625ffd9da))
+
+### Bug Fixes
+
+* **ask-user:** reduce choice interaction steps ([1c7b631](https://github.com/nolotus/bun-nolo/commit/1c7b6316ab0f9c955055e599f71610bdae31cddd))
+
+
+## 0.70.0-alpha.2
+
+## 0.70.0-alpha.2 (2026-09-16)
+
+### Bug Fixes
+
+* **tui:** soften user messages on light backgrounds ([50d80c3](https://github.com/nolotus/bun-nolo/commit/50d80c3d0a8f7cc602861b3d0bea8325d806f482))
+
+
+## 0.70.0-alpha.1
+
+## 0.70.0-alpha.1 (2026-09-15)
 
 ### Features
 
 * **server:** add watchCompletion — business-task terminal subscription with parent-dialog wake ([321a930](https://github.com/nolotus/bun-nolo/commit/321a93048ecbb6d0c7d6d39cb855f34fa3bbd163))
 
 
-## 0.70.1
+## 0.69.0-alpha.3
 
-## 0.70.1 (2026-09-15)
+## 0.69.0-alpha.3 (2026-09-15)
 
 ### Bug Fixes
 
 * **llm:** replace dead crof upstream with baseten; restore real Claude & add GPT-5.6/6 hosted models ([4e28ad6](https://github.com/nolotus/bun-nolo/commit/4e28ad6ccedb33989f15ebd020c894f5bbc903f6))
-
-
-## 0.70.0
-
-## 0.70.0 (2026-09-15)
-
-### Features
-
-* **ai:** 会商模式注入提示词补齐实战决策纪律 ([3031da4](https://github.com/nolotus/bun-nolo/commit/3031da4f85d0e27c8f8e6e75b35e22584afdeea4))
-* **memory:** 常驻偏好集——跨话题用户偏好无条件进入注入层 ([43ead3a](https://github.com/nolotus/bun-nolo/commit/43ead3ad18c930f3c756f11c796a7dbdb7cb109a))
-
-### Bug Fixes
-
-* **ask-user:** unify explicit multi-question interaction ([3afbef9](https://github.com/nolotus/bun-nolo/commit/3afbef9361b51b705b0f6ddca050ec93ffea9162))
-* **tui:** distinguish user messages from AI output ([8dac8fc](https://github.com/nolotus/bun-nolo/commit/8dac8fc8dc774782d20b1e1497ef87deacd56473))
 
 
 ## 0.69.0-alpha.2
@@ -530,7 +619,6 @@
 * **life:** show cache savings from real billing records (US-3.4) ([7850f75](https://github.com/nolotus/bun-nolo/commit/7850f75ecc728164b149b472adf8fe8b67d00c6b))
 * **life:** switch usage dashboard and records to server-authoritative API ([f7a793f](https://github.com/nolotus/bun-nolo/commit/f7a793f6808db5059bfc726415953a98dee408a9))
 * **life:** switch usage dashboard and records to server-authoritative API ([a4288e0](https://github.com/nolotus/bun-nolo/commit/a4288e0aec0e4fefad73e038f3500281b5ac3188))
-* **llm:** switch GLM 5.3/5.2 hosted upstream from OpenRouter to crof ([467bde9](https://github.com/nolotus/bun-nolo/commit/467bde9307aed37c36551566248ec0e270605523))
 * **memory:** add contentKey for cross-instance deduplication ([38712b0](https://github.com/nolotus/bun-nolo/commit/38712b075059031e8df6ef2e65106d371be1d26c))
 * **memory:** add token budget to memory overlay injection ([5ccaf6f](https://github.com/nolotus/bun-nolo/commit/5ccaf6f75b51f4327404df08df581e2591efd3c2))
 * **memory:** support user-scoped memory deletion with two-stage confirmation ([83d59cd](https://github.com/nolotus/bun-nolo/commit/83d59cd7a9cf369a2d1d569937972f560a04e0a6))
@@ -870,7 +958,6 @@
 
 ### Features
 
-* **llm:** switch GLM 5.3/5.2 hosted upstream from OpenRouter to crof ([467bde9](https://github.com/nolotus/bun-nolo/commit/467bde9307aed37c36551566248ec0e270605523))
 
 
 ## 0.41.0-alpha.1
