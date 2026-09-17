@@ -6,8 +6,7 @@ import { NavLink } from "app/routing";
 import { LuChevronRight, LuGlobe, LuUsers } from "react-icons/lu";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
-import { usePageMeta } from "app/hooks/usePageMeta";
-import { buildStaticPageMeta } from "app/seo/pageMeta";
+import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
@@ -58,10 +57,7 @@ const Home = () => {
   // Local User fallback, a token only distinguishes a real cloud account when
   // deciding whether the Desktop first-run guide still needs to be shown.
   const showAuthedHome = hasMounted && !!currentUser;
-  const pageMeta = useMemo(
-    () => buildStaticPageMeta(t, showAuthedHome ? "default" : "home"),
-    [showAuthedHome, t]
-  );
+  const pageMeta = useStaticPageMeta(showAuthedHome ? "default" : "home");
   const { items: myContentItems, loading: myContentLoading } = useMyContentItems();
   const isEmptyState = showAuthedHome && !myContentLoading && myContentItems.length === 0;
   const [isEditingWidgets, setIsEditingWidgets] = useState(false);
@@ -262,7 +258,7 @@ const Home = () => {
                       )}
                     >
                       <p {...stylex.props(homeStyles.homeWidgetsTipText)} role="status">
-                        {t("homeWidgets.customizeTip", "这里可以自定义首页：点「修改」后，可拖动卡片排序、拖卡片右下角调整大小、或隐藏不需要的模块。")}
+                        {t("homeWidgets.customizeTip", "Customize your home: click Customize to reorder, resize, or hide cards.")}
                       </p>
                       <button type="button" {...stylex.props(homeStyles.homeWidgetsTipDone)} onClick={dismissWidgetsTip}>
                         {t("homeWidgets.customizeTipDone", "知道了")}

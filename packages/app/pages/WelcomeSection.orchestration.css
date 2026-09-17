@@ -3,7 +3,7 @@
 .ws-orchestration-section {
   position: relative;
   z-index: 2;
-  margin-bottom: 72px;
+  margin-bottom: 56px;
   padding: 0 20px;
   width: 100%;
   box-sizing: border-box;
@@ -100,7 +100,7 @@
 
 .ws-orchestration-footnote {
   max-width: 640px;
-  margin: 32px auto 0;
+  margin: 20px auto 0;
   text-align: center;
   font-size: 0.88rem;
   color: var(--ws-text-sub);
@@ -114,6 +114,10 @@
 
 .ws-orchestration-stage {
   position: relative;
+  padding: 16px 20px 0;
+  border: 1px solid var(--ws-border);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--primary) 3%, var(--ws-bg));
 }
 
 @keyframes ws-orchestration-tab-in {

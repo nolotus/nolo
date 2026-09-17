@@ -686,14 +686,14 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
-        heroTitle: "AI that gets the work done with you",
-        heroDescription: "Say the goal. Finish it together.",
+        heroTitle: "Let your strongest model plan. Let lower-cost agents execute.",
+        heroDescription: "Nolo orchestrates your coding agents across models — so premium capacity handles the hard decisions, not every routine step.",
         ctaButton: "Start free",
         secondaryExplore: "Explore public agents",
         secondaryDownload: "Download desktop or mobile",
         secondaryPricing: "View pricing",
         trustMicro: "Free to join · No credit card needed · Cancel anytime",
-        heroLocalFirst: "Local-first · Works offline · Your data stays yours",
+        heroLocalFirst: "Open-source client (MIT) · Local-first · Your data stays yours",
         socialProof: {
           label: "Supported models and platforms",
           platforms: "Web · Desktop · iOS",
@@ -716,9 +716,9 @@ export default {
           description:
             "Nolo is strongest when you need memory, delegation, and real outputs in one place instead of stitching together separate AI tabs and tools.",
           label: "Homepage proof points",
-          multiAgent: "Direct one agent or delegate to multiple agents",
-          multiOutput: "Turn ideas into docs, apps, images, videos, and workflows",
-          multiDevice: "Explore on the web, then continue on desktop or mobile",
+          multiAgent: "Save premium-model capacity for hard problems. Route routine work to lower-cost agents.",
+          multiOutput: "Interrupt or steer a run mid-task, schedule it, or run it on your own machine",
+          multiDevice: "Step away from your desk — check progress, approve, and add instructions from your phone.",
         },
         fit: {
           kicker: "Who it fits",
@@ -1139,7 +1139,7 @@ export default {
         aiPlaza: "AI Plaza",
         shareCommunity: "Community Shares",
         custom: "Custom",
-        viewMore: "View more",
+        viewMore: "View all",
         enterCommunity: "Enter community",
         viewCustom: "View details",
         myContentPageSubtitle:
@@ -1983,14 +1983,14 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
-        heroTitle: "让 Nolo 和你一起创造",
-        heroDescription: "说出目标，一起把它做完。",
+        heroTitle: "让最强的模型规划，让更低成本的 Agent 执行。",
+        heroDescription: "Nolo 跨模型编排你的编码 Agent——让高价值算力专注核心决策，而不是消耗在每个常规步骤上。",
         ctaButton: "免费开始",
         secondaryExplore: "先逛逛公开 AI",
         secondaryDownload: "下载桌面端或移动端",
         secondaryPricing: "了解定价",
         trustMicro: "免费注册 · 无需信用卡 · 随时可停",
-        heroLocalFirst: "数据本地优先 · 离线也能用 · 对话属于你自己",
+        heroLocalFirst: "客户端开源 (MIT) · 本地优先 · 数据属于你自己",
         socialProof: {
           label: "已接入的 AI 模型与平台",
           platforms: "Web · 桌面端 · iOS",
@@ -2013,9 +2013,9 @@ export default {
           description:
             "如果你需要的是记住上下文、把任务委托出去、最后拿到真实成果，而不是同时开很多 AI 标签页自己拼，Nolo 的价值会更明显。",
           label: "首页能力证明",
-          multiAgent: "一个 Agent 自己带，多个 Agent 也能分工协作",
-          multiOutput: "想法可以落成文档、应用、图片、视频和可复用流程",
-          multiDevice: "先在网页上体验，再到桌面端或移动端继续",
+          multiAgent: "把最强模型的算力留给真正难的问题，日常任务交给成本更低的 Agent",
+          multiOutput: "中途随时叫停或引导任务，支持定时调度，也可直接在你自己的机器上运行",
+          multiDevice: "离开电脑也不失控——在手机上查看进度、批准操作、补充指令",
         },
         fit: {
           kicker: "适合谁",
@@ -3277,14 +3277,14 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
-        heroTitle: "讓 Nolo 和你一起創造",
-        heroDescription: "您說目標，它把結果交到您手裡。",
+        heroTitle: "讓最強模型規劃，讓更低成本的 Agent 執行。",
+        heroDescription: "Nolo 跨模型編排您的編碼 Agent——讓高價值算力專注核心決策，而不是消耗在每個常規步驟上。",
         ctaButton: "免費開始",
         secondaryExplore: "先逛逛公開 AI",
         secondaryDownload: "下載桌面端或行動端",
         secondaryPricing: "了解定價",
         trustMicro: "免費註冊 · 無需信用卡 · 隨時可停",
-        heroLocalFirst: "數據本地優先 · 離線也能用 · 對話屬於你自己",
+        heroLocalFirst: "用戶端開源 (MIT) · 本地優先 · 數據屬於你自己",
         socialProof: {
           label: "已接入的 AI 模型與平台",
           platforms: "Web · 桌面端 · iOS",
@@ -3307,9 +3307,9 @@ export default {
           description:
             "如果您需要的是記住上下文、把任務委託出去、最後拿到真實成果，而不是同時開很多 AI 分頁自己拼，Nolo 的價值會更明顯。",
           label: "首頁能力證明",
-          multiAgent: "一個 Agent 自己帶，多個 Agent 也能分工協作",
-          multiOutput: "想法可以落成文件、應用、圖片、影片與可重複使用流程",
-          multiDevice: "先在網頁上體驗，再到桌面端或行動端繼續",
+          multiAgent: "把最強模型的算力留給真正難的問題，日常任務交給成本更低的 Agent",
+          multiOutput: "中途隨時叫停或引導任務，支援定時排程，也可直接在您自己的機器上執行",
+          multiDevice: "離開電腦也不失控——在手機上查看進度、批准操作、補充指令",
         },
         fit: {
           kicker: "適合誰",
@@ -4509,14 +4509,14 @@ quickChat: {
 
       // === Combined Welcome Section ===
       welcomeSection: {
-        heroTitle: "AI と一緒に仕事を仕上げる",
-        heroDescription: "目標を伝えれば、使える成果が手元に届く。",
+        heroTitle: "最も強いモデルが計画し、より低コストなエージェントが実行する。",
+        heroDescription: "Nolo はモデルを横断してコーディングエージェントを統括し、プレミアムな容量を定型作業ではなく重要な意思決定に集中させます。",
         ctaButton: "無料で始める",
         secondaryExplore: "公開 AI を見る",
         secondaryDownload: "デスクトップ / モバイルを入手",
         secondaryPricing: "料金を見る",
         trustMicro: "無料登録 · クレジットカード不要 · いつでも退会可",
-        heroLocalFirst: "ローカル優先 · オフラインでも使える · データはあなたのもの",
+        heroLocalFirst: "オープンソースクライアント (MIT) · ローカル優先 · データはあなたのもの",
         socialProof: {
           label: "対応モデルとプラットフォーム",
           platforms: "Web · デスクトップ · iOS",
@@ -4539,9 +4539,9 @@ quickChat: {
           description:
             "文脈を覚え、タスクを任せ、最後に使える成果を受け取りたい人には、複数の AI タブを自分でつなぐより Nolo の価値が出ます。",
           label: "ホームの根拠ポイント",
-          multiAgent: "1 つの Agent を自分で動かすことも、複数 Agent に分担させることもできる",
-          multiOutput: "アイデアをドキュメント、アプリ、画像、動画、再利用可能なワークフローにできる",
-          multiDevice: "まずは web で試し、その後 desktop / mobile に移れる",
+          multiAgent: "最強モデルの力は本当に難しい問題のために。定型作業は低コストなエージェントへ",
+          multiOutput: "タスクの途中でいつでも中断や指示変更が可能。定期実行やローカルマシン上での実行にも対応",
+          multiDevice: "席を離れても大丈夫——進捗の確認、承認、指示の追加はスマホから",
         },
         fit: {
           kicker: "向いている人",

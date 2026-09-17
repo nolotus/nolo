@@ -50,7 +50,7 @@ const AgentCardActions = memo(
           size="medium"
           className="agent__primary"
         >
-          {isStarting ? t("starting") : t("quickStart", "开聊")}
+          {isStarting ? t("starting") : t("quickStart", "Chat")}
         </Button>
       </div>
     );

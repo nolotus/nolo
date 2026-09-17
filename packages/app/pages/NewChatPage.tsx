@@ -1,8 +1,7 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "app/routing";
-import { usePageMeta } from "app/hooks/usePageMeta";
-import { buildStaticPageMeta } from "app/seo/pageMeta";
+import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import QuickChat from "./QuickChat";
 import "./NewChatPage.css";
 
@@ -14,7 +13,7 @@ const NewChatPage: React.FC = () => {
   // `?launch=feedback` 等直达入口（用户菜单里的「我想反馈」）。
   const launch = searchParams.get("launch");
 
-  const pageMeta = useMemo(() => buildStaticPageMeta(t, "default"), [t]);
+  const pageMeta = useStaticPageMeta("default");
   usePageMeta(pageMeta);
 
   return (

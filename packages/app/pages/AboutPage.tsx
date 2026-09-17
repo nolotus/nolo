@@ -1,13 +1,12 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
-import { usePageMeta } from "app/hooks/usePageMeta";
-import { buildStaticPageMeta } from "app/seo/pageMeta";
+import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { Language } from "app/i18n/types";
 import "./StaticInfoPages.css";
 
 const AboutPage: React.FC = () => {
-  const { t, i18n } = useTranslation();
-  const pageMeta = useMemo(() => buildStaticPageMeta(t, "about"), [t]);
+  const { i18n } = useTranslation();
+  const pageMeta = useStaticPageMeta("about");
   usePageMeta(pageMeta);
 
   const lang = i18n.language;

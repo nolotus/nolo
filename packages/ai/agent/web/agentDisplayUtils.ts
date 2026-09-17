@@ -185,10 +185,10 @@ export const shouldShowAgentTokenCost = (
   (asOptionalFiniteNumber(agent.inputPrice) !== undefined ||
     asOptionalFiniteNumber(agent.outputPrice) !== undefined);
 
-export const formatAgentOutputPrice = (outputPrice?: number) =>
+export const formatAgentOutputPrice = (outputPrice?: number, creditsUnit = "积分") =>
   outputPrice === 0
-    ? formatModelCostPerMillion(outputPrice)
-    : `1M / ${formatModelCostPerMillion(outputPrice)}`;
+    ? formatModelCostPerMillion(outputPrice, creditsUnit)
+    : `1M / ${formatModelCostPerMillion(outputPrice, creditsUnit)}`;
 
 const isAutomationRunDialog = (dialog: DialogConfig): boolean =>
   dialog.triggerType === "automation_run" ||

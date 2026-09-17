@@ -48,6 +48,7 @@ import {
 import {
   ClipboardImageError,
   getDefaultClipboardTempDir,
+  isRemoteSession,
   readClipboardImage,
   sweepStaleClipboardFiles,
 } from "./clipboardImage";
@@ -509,7 +510,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             await clipboard.write(t);
           },
           output,
-          sendOsc52: isInteractiveInput(input),
+          // Local sessions have direct access to the user's OS clipboard and
+          // must not enqueue a redundant OSC 52 write behind it: that late
+          // terminal-side write can overwrite a newer browser copy. Over SSH,
+          // OSC 52 remains the only path to the client clipboard; a pipe/non-
+          // interactive remote session has no valid client clipboard channel.
+          transport: isRemoteSession(runtimeEnv)
+            ? isInteractiveInput(input)
+              ? "osc52"
+              : "unavailable"
+            : "system",
         });
   const readClipboardText =
     options.clipboardReader ??

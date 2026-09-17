@@ -1,8 +1,17 @@
 import { canonicalizeNoloServerUrl } from "core/noloServerUrl";
 
 export const DEFAULT_SITE_ORIGIN = "https://nolo.chat";
-export const DEFAULT_OG_IMAGE_PATH = "/public/nolo-og-card-zh.jpg";
+export const DEFAULT_OG_IMAGE_PATH_EN = "/public/nolo-og-card-en.jpg";
+export const DEFAULT_OG_IMAGE_PATH_ZH = "/public/nolo-og-card-zh.jpg";
+export const DEFAULT_OG_IMAGE_PATH = DEFAULT_OG_IMAGE_PATH_EN;
 export const DEFAULT_PAGE_ROBOTS = "index, follow";
+
+export const resolveOgImagePath = (lang?: string): string => {
+  if (lang && lang.toLowerCase().startsWith("zh")) {
+    return DEFAULT_OG_IMAGE_PATH_ZH;
+  }
+  return DEFAULT_OG_IMAGE_PATH_EN;
+};
 
 export type StaticPageMetaKey =
   | "default"
@@ -33,6 +42,7 @@ interface PageMetaInput {
   description: string;
   path: string;
   imagePath?: string;
+  lang?: string;
   robots?: string;
   type?: "website" | "article";
   alternateLanguages?: AlternateLanguageLink[];
@@ -137,7 +147,8 @@ export const resolvePageMeta = (
     title,
     description,
     path,
-    imagePath = DEFAULT_OG_IMAGE_PATH,
+    imagePath,
+    lang,
     robots = DEFAULT_PAGE_ROBOTS,
     type = "website",
     alternateLanguages,
@@ -147,7 +158,7 @@ export const resolvePageMeta = (
   title,
   description,
   url: buildAbsoluteMetaUrl(path, origin),
-  image: buildAbsoluteMetaUrl(imagePath, origin),
+  image: buildAbsoluteMetaUrl(imagePath ?? resolveOgImagePath(lang), origin),
   robots,
   type,
   alternateLanguages: alternateLanguages ?? buildAlternateLanguageLinks(path, origin),
@@ -156,7 +167,8 @@ export const resolvePageMeta = (
 export const buildStaticPageMeta = (
   t: TranslateFn,
   key: StaticPageMetaKey,
-  origin?: string
+  origin?: string,
+  lang?: string
 ) => {
   const config = STATIC_PAGE_META_CONFIG[key];
   return resolvePageMeta(
@@ -164,6 +176,7 @@ export const buildStaticPageMeta = (
       path: config.path,
       title: t(config.titleKey, { ns: "common" }),
       description: t(config.descriptionKey, { ns: "common" }),
+      lang,
     },
     origin
   );

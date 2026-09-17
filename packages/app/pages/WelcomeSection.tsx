@@ -234,6 +234,7 @@ const WelcomeSection = () => {
           <h1 className="ws-hero-title">
             <span className="ws-gradient-text">{t("welcomeSection.heroTitle")}</span>
           </h1>
+          <p className="ws-hero-desc">{t("welcomeSection.heroDescription")}</p>
           <ul className="ws-hero-highlights" aria-label={t("welcomeSection.highlightsLabel")}>
             {heroHighlights.map((item) => (
               <li key={item}>{item}</li>

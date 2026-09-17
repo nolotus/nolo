@@ -1,4 +1,17 @@
 
+## 0.78.0-alpha.1
+
+## 0.78.0-alpha.1 (2026-09-17)
+
+### Features
+
+* **app:** surface cost routing on the landing page and localize the OG card ([412a6ca](https://github.com/nolotus/bun-nolo/commit/412a6ca87417f413a05259cd5b0193ca19f36766))
+
+### Bug Fixes
+
+* **tui:** stop a duplicate OSC 52 write from restoring stale clipboard content ([76cb5aa](https://github.com/nolotus/bun-nolo/commit/76cb5aae5018185ddce4c414df1ed2e34e396927))
+
+
 ## 0.77.0-alpha.1
 
 ## 0.77.0-alpha.1 (2026-09-17)

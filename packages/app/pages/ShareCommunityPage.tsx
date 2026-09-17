@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ShareSummary } from "share/types";
 import { DataType } from "create/types";
 import { createWebSharePath, shareApi } from "share/link";
-import { usePageMeta } from "app/hooks/usePageMeta";
-import { buildStaticPageMeta } from "app/seo/pageMeta";
+import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useAppSelector } from "app/store";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { useSSRCommunityShares } from "share/shareStore";
@@ -67,7 +66,7 @@ const mapSummaryToItem = (s: ShareSummary): ShareCardItem => ({
 
 const ShareCommunityPage: React.FC = () => {
   const { t } = useTranslation();
-  const pageMeta = useMemo(() => buildStaticPageMeta(t, "shareCommunity"), [t]);
+  const pageMeta = useStaticPageMeta("shareCommunity");
   usePageMeta(pageMeta);
   const ssrData = useSSRCommunityShares();
   const hasSSRData = ssrData.data.length > 0;

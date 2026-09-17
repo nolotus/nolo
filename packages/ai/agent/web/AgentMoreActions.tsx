@@ -149,7 +149,7 @@ const AgentMoreActionsComponent = ({
         dispatch as { (action: unknown): { unwrap: () => Promise<unknown> } }
       );
       toast.success(
-        t("syncToAccountSuccess", "已同步到当前账号（本机 Agent 仍保留）")
+        t("syncToAccountSuccess", "Synced to the current account (local Agent kept)")
       );
       setSyncConfirmOpen(false);
     } catch (err) {
@@ -272,10 +272,10 @@ const AgentMoreActionsComponent = ({
               <div
                 className="agent__action-item agent__action-item--synced"
                 role="status"
-                aria-label={t("syncedToAccount", "已同步到当前账号")}
+                aria-label={t("syncedToAccount", "Synced to current account")}
               >
                 <LuCheck size={14} aria-hidden="true" />
-                <span>{t("syncedToAccount", "已同步到当前账号")}</span>
+                <span>{t("syncedToAccount", "Synced to current account")}</span>
               </div>
             )}
 

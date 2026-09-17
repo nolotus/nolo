@@ -3,8 +3,7 @@ import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LuChevronRight } from "react-icons/lu";
 import { NavLink } from "app/routing";
-import { usePageMeta } from "app/hooks/usePageMeta";
-import { buildStaticPageMeta } from "app/seo/pageMeta";
+import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import PublicAgents from "ai/agent/web/PublicAgents";
 import { useSSRPublicAgents } from "ai/agent/publicAgentsSSRStore";
 import ShareCommunityPreview from "app/pages/ShareCommunityPreview";
@@ -14,7 +13,7 @@ type ExploreTab = "aiPlaza" | "shareCommunity";
 
 const AgentExplore: React.FC = () => {
   const { t } = useTranslation();
-  const pageMeta = useMemo(() => buildStaticPageMeta(t, "explore"), [t]);
+  const pageMeta = useStaticPageMeta("explore");
   usePageMeta(pageMeta);
   // SSR 预载的公开 agents（explore 数据公开）：hydration 后首屏即渲染，无需等 RPC
   const ssrAgents = useSSRPublicAgents();

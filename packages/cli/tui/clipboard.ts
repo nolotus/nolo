@@ -1,19 +1,21 @@
 /**
- * 剪贴板写入增强：
- * - 系统剪贴板（pbcopy / powershell / wl-copy / xclip / clipboardy）
- * - 加上 OSC 52 转义序列，让远程 SSH / 现代终端也能无缝上剪贴板。
+ * 剪贴板写入使用一条明确的传输腿：
+ * - 本地会话写系统剪贴板（pbcopy / powershell / wl-copy / xclip / clipboardy）；
+ * - SSH 交互会话只发 OSC 52，由终端写客户端剪贴板。
  *
- * writeClipboard 先尝试系统剪贴板；无论系统剪贴板是否可用，都会通过
- * output.write 发送 OSC 52 序列（终端不支持时静默忽略，无害）。
+ * 同一次复制不能先写系统剪贴板、再补发 OSC 52。终端消费输出是异步的，晚到的
+ * OSC 52 会把用户随后在浏览器中复制的新内容覆盖成旧内容。
  */
+
+export type ClipboardWriteTransport = "system" | "osc52" | "unavailable";
 
 export type ClipboardTarget = {
   /** 系统剪贴板写入器（由调用方注入，默认 clipboardy）。 */
   systemWrite: (text: string) => Promise<void>;
   /** 终端输出流，用于发送 OSC 52 序列。 */
   output: { write: (chunk: string) => unknown };
-  /** 是否应发送 OSC 52（非 TTY 或明确关闭时传 false）。 */
-  sendOsc52?: boolean;
+  /** 本次复制唯一允许使用的传输腿。 */
+  transport: ClipboardWriteTransport;
 };
 
 /**
@@ -27,25 +29,22 @@ export function osc52SetClipboard(text: string, output: { write: (chunk: string)
 }
 
 /**
- * 统一的剪贴板写入入口：系统剪贴板 + OSC 52。
- * 系统剪贴板失败时不会抛出（降级为纯 OSC 52）；OSC 52 总是尽力发送。
+ * 统一的剪贴板写入入口。每次调用只走选定的一条腿，且失败向调用方报告；绝不在
+ * 已完成的系统写入后排队补发同一份旧内容。
  */
 export async function writeClipboard(
   text: string,
   target: ClipboardTarget,
 ): Promise<void> {
-  // 先尝试系统剪贴板，失败不致命（可能无 xclip/pbcopy）。
-  try {
+  if (target.transport === "system") {
     await target.systemWrite(text);
-  } catch {
-    // 忽略：降级到 OSC 52。
+    return;
   }
-  // OSC 52 尽力发送；非 TTY 或调用方要求关闭时才跳过。
-  if (target.sendOsc52 !== false) {
-    try {
-      osc52SetClipboard(text, target.output);
-    } catch {
-      // 忽略：终端不支持 OSC 52 时静默跳过。
-    }
+  if (target.transport === "osc52") {
+    osc52SetClipboard(text, target.output);
+    return;
   }
+  throw new Error(
+    "Client clipboard is unavailable in a non-interactive remote session.",
+  );
 }

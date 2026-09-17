@@ -36,7 +36,7 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     description:
       "While others chat, Nolo.Chat works. Orchestrate multiple AI agents that remember your rules, collaborate on complex tasks, and keep running overnight — delivering real results by morning.",
     home: {
-      title: "Nolo.Chat | AI that Remembers You and Gets the Work Done",
+      title: "Nolo — Let your strongest model plan. Let lower-cost agents execute.",
       description:
         "Work with GPT, Claude, DeepSeek and more in one AI workspace. Nolo remembers your context, lets multiple agents debate and collaborate, and turns ideas into docs, images, apps, and deliverables.",
     },
@@ -67,11 +67,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_CN]: {
-    title: "Nolo.Chat | 让 Nolo 认识你，记住你，和你一起创造",
+    title: "Nolo — 让最强的模型规划，让更低成本的 Agent 执行。",
     description:
       "别人是一个 AI 帮你聊，我们是多个 Agent 帮你做完。记住你的规则、多模型协作、夜间自动执行——今晚委托，明早交付网页、图片、文档。",
     home: {
-      title: "Nolo.Chat | 让 Nolo 认识你，记住你，和你一起创造",
+      title: "Nolo — 让最强的模型规划，让更低成本的 Agent 执行。",
       description:
         "把 GPT、Claude、DeepSeek 放进同一个 AI 工作台。Nolo 能记住你的上下文，让多个 Agent 协作或辩论，并直接产出文档、图片、网页和可交付结果。",
     },
@@ -102,11 +102,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_HANT]: {
-    title: "Nolo.Chat | 讓 Nolo 認識你，記住你，和你一起創造",
+    title: "Nolo — 讓最強模型規劃，讓更低成本的 Agent 執行。",
     description:
       "別人是一個 AI 幫你聊，我們是多個 Agent 幫你做完。記住你的規則、多模型協作、夜間自動執行——今晚委託，明早交付網頁、圖片、文件。",
     home: {
-      title: "Nolo.Chat | 讓 Nolo 認識你，記住你，和你一起創造",
+      title: "Nolo — 讓最強模型規劃，讓更低成本的 Agent 執行。",
       description:
         "把 GPT、Claude、DeepSeek 放進同一個 AI 工作台。Nolo 能記住你的上下文，讓多個 Agent 協作或辯論，並直接產出文件、圖片、網頁和可交付結果。",
     },
@@ -137,7 +137,7 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.JA]: {
-    title: "Nolo.Chat | チャットを超えた、あなた専属の AI チーム",
+    title: "Nolo — 最も強いモデルが計画し、より低コストなエージェントが実行する。",
     description:
       "他社が「一対一の会話」なら、Nolo.Chat は「複数 Agent が協力して仕事を完遂」。ルールを記憶し、夜間も自動実行。朝には成果物が届きます。",
     home: {

@@ -1,6 +1,23 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
-import type { PageMeta } from "app/seo/pageMeta";
+import {
+  buildStaticPageMeta,
+  type PageMeta,
+  type StaticPageMetaKey,
+} from "app/seo/pageMeta";
+
+export const useStaticPageMeta = (
+  key: StaticPageMetaKey,
+  origin?: string
+): PageMeta => {
+  const { t, i18n } = useTranslation();
+  const lang = i18n?.resolvedLanguage || i18n?.language;
+  return useMemo(
+    () => buildStaticPageMeta(t, key, origin, lang),
+    [t, key, origin, lang]
+  );
+};
 
 const upsertMeta = (
   selector: string,
