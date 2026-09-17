@@ -2,18 +2,18 @@
   "schemaVersion": 2,
   "components": {
     "cli": {
-      "version": "0.75.0-alpha.5",
+      "version": "0.75.0-alpha.6",
       "channel": "alpha",
       "releaseIntent": "release"
     },
     "desktop": {
-      "version": "0.96.0-alpha.5",
+      "version": "0.96.0-alpha.6",
       "channel": "alpha",
       "releaseIntent": "release"
     }
   },
   "provenance": {
-    "sourceSha": "2176d207b69790eda3b87f26b232d99b50988936",
+    "sourceSha": "70648ba867b398f6bf61047e314a528749806ed1",
     "sourceBranch": "alpha"
   }
 }

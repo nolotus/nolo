@@ -1,4 +1,13 @@
 
+## 0.75.0-alpha.6
+
+## 0.75.0-alpha.6 (2026-09-17)
+
+### Bug Fixes
+
+* **tui:** preserve user message contrast ([f958013](https://github.com/nolotus/bun-nolo/commit/f9580138ccc8964105dbaa96f7cb939f7501d72e))
+
+
 ## 0.75.0-alpha.5
 
 ## 0.75.0-alpha.5 (2026-09-17)
