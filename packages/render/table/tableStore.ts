@@ -27,7 +27,6 @@ import {
   addColumnOptionInMeta,
   addColumnToMeta,
   deleteColumnFromMeta,
-  renameColumnInMeta,
   renameColumnLabelInMeta,
   reorderColumnInMeta,
   updateColumnWidthInMeta,
@@ -119,16 +118,12 @@ export function subscribeTable(listener: () => void): () => void {
   };
 }
 
-export function getTableSnapshot(): number {
+function getTableSnapshot(): number {
   return version;
 }
 
 export function getTableState(): TableState {
   return state;
-}
-
-export function getTableField<T>(selector: (s: TableState) => T): T {
-  return selector(state);
 }
 
 export function resetTableStoreForTests(): void {
@@ -139,11 +134,6 @@ export function resetTableStoreForTests(): void {
 /* --------------------------------------------------------------------------
  * React Hooks (useSyncExternalStore)
  * ------------------------------------------------------------------------*/
-
-export function useTableState(): TableState {
-  useSyncExternalStore(subscribeTable, getTableSnapshot, getTableSnapshot);
-  return getTableState();
-}
 
 export function useTableField<T>(selector: (s: TableState) => T): T {
   useSyncExternalStore(subscribeTable, getTableSnapshot, getTableSnapshot);
@@ -160,14 +150,6 @@ export function useTableRows(): any[] {
 
 export function useTableFocusContext(): TableFocusContext | null {
   return useTableField((s) => s.focusContext);
-}
-
-export function useTableIsLoading(): boolean {
-  return useTableField((s) => s.isLoading);
-}
-
-export function useTableError(): string | null {
-  return useTableField((s) => s.error);
 }
 
 /* --------------------------------------------------------------------------
@@ -234,10 +216,6 @@ export const setTableFocusContext = (
   focusContext: TableFocusContext | null
 ): void => {
   setState((s) => ({ ...s, focusContext }));
-};
-
-export const resetTable = (): void => {
-  setState(() => createInitialState());
 };
 
 /* --------------------------------------------------------------------------
@@ -713,64 +691,6 @@ export const reorderColumn = createTableCommand(
   }
 );
 
-export interface RenameColumnArgs {
-  tenantId: string;
-  tableId: string;
-  oldName: string;
-  newName: string;
-}
-
-export const renameColumn = createTableCommand(
-  "table/renameColumn",
-  async (args: RenameColumnArgs, { dispatch }: any = {}) => {
-    const { tenantId, tableId, oldName, newName } = args;
-    const meta = state.currentTable;
-
-    if (!meta || meta.tenantId !== tenantId || meta.tableId !== tableId) {
-      throw new Error("当前没有加载对应的表定义");
-    }
-
-    const result = renameColumnInMeta(
-      meta,
-      state.rows,
-      { oldName, newName },
-      { nowIso: formatISO(new Date()) }
-    );
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-    const { meta: nextMeta, metaChanges, rows: newRows, rowPatches } =
-      result.value;
-
-    setState((s) => ({ ...s, error: null }));
-
-    try {
-      if (dispatch) {
-        await Promise.all(
-          rowPatches.map((p) => safeDispatch(dispatch, patch(p)))
-        );
-        await safeDispatch(
-          dispatch,
-          patch({ dbKey: meta.dbKey, changes: metaChanges })
-        );
-      }
-
-      setState((s) => ({
-        ...s,
-        currentTable: nextMeta,
-        rows: newRows,
-        isInitialized: true,
-      }));
-
-      return { meta: nextMeta, rows: newRows };
-    } catch (e: any) {
-      const msg = e?.message || "重命名字段失败";
-      setState((s) => ({ ...s, error: msg }));
-      throw e;
-    }
-  }
-);
-
 export interface RenameColumnLabelArgs {
   tenantId: string;
   tableId: string;
@@ -1096,28 +1016,3 @@ export const updateCell = createTableCommand(
     }
   }
 );
-
-/* --------------------------------------------------------------------------
- * Pure Selectors (Functions)
- * ------------------------------------------------------------------------*/
-
-export const selectCurrentTable = (s: TableState = state): TableMeta | null =>
-  s.currentTable;
-
-export const selectTableIsLoading = (s: TableState = state): boolean =>
-  s.isLoading;
-
-export const selectTableIsInitialized = (s: TableState = state): boolean =>
-  s.isInitialized;
-
-export const selectTableError = (s: TableState = state): string | null =>
-  s.error;
-
-export const selectTableColumns = (s: TableState = state): any[] =>
-  s.currentTable ? s.currentTable.columns : [];
-
-export const selectTableRows = (s: TableState = state): any[] => s.rows;
-
-export const selectTableFocusContext = (
-  s: TableState = state
-): TableFocusContext | null => s.focusContext;

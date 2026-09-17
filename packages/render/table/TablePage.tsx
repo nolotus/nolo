@@ -483,44 +483,17 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
         }
     }, [tableMeta]);
 
+    // 页面级 focusContext 载荷已无消费者（TableFocusContext 只声明单元格字段，
+    // buildEditingContext 也仅在 "columnName" in focusContext 时消费）；仅保留卸载清理。
     useEffect(() => {
-        if (!tableMeta || !tenantId || !tableId) return;
-
-        dispatch(
-            setTableFocusContext({
-                tableKey: `meta-${tenantId}-${tableId}`,
-                tableId,
-                tenantId,
-                displayName: tableMeta.displayName ?? tableMeta.tableId,
-                columns: columns.map((col: any) => ({
-                    id: col.id,
-                    name: col.name,
-                    label: col.label,
-                    type: col.type,
-                })),
-                rowCount: rows.length,
-                viewChoice: activeViewChoice,
-                canUseKanbanView,
-            })
-        );
-
         return () => {
-            dispatch(setTableFocusContext(null));
+            setTableFocusContext(null);
         };
-    }, [
-        dispatch,
-        tableMeta,
-        tenantId,
-        tableId,
-        columns,
-        rows.length,
-        activeViewChoice,
-        canUseKanbanView,
-    ]);
+    }, []);
 
     useEffect(() => {
         if (!editingCell) {
-            dispatch(setTableFocusContext(null));
+            setTableFocusContext(null);
             return;
         }
 
@@ -537,18 +510,16 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
         const cellPreview =
             row && column ? String(row[column.name] ?? "").slice(0, 200) : null;
 
-        dispatch(
-            setTableFocusContext({
-                rowDbKey: editingCell.dbKey,
-                columnName: editingCell.columnName,
-                rowIndex: rowIndex >= 0 ? rowIndex : null,
-                colIndex: colIndex >= 0 ? colIndex : null,
-                rowTitle,
-                cellPreview,
-                isEditing: true,
-            })
-        );
-    }, [columns, dispatch, editingCell, filteredRows, primaryColumn]);
+        setTableFocusContext({
+            rowDbKey: editingCell.dbKey,
+            columnName: editingCell.columnName,
+            rowIndex: rowIndex >= 0 ? rowIndex : null,
+            colIndex: colIndex >= 0 ? colIndex : null,
+            rowTitle,
+            cellPreview,
+            isEditing: true,
+        });
+    }, [columns, editingCell, filteredRows, primaryColumn]);
 
   useEffect(() => {
     if (!tableMeta || !selectedStatusFilter) return;
@@ -658,14 +629,14 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
     );
 
     const handleRenameColumnConfirm = useCallback(
-        (columnName: string, newLabel: string) => {
+        (columnId: string, newLabel: string) => {
             if (!tenantId || !tableId) return;
             void dispatch(
                 renameColumnLabel({
                     tenantId,
                     tableId,
-                    columnName,
-                    label: newLabel,
+                    columnId,
+                    newLabel,
                 })
             );
             setEditingColumnId(null);
@@ -682,7 +653,7 @@ const TablePage: React.FC<TablePageProps> = ({ tableKey }) => {
                 renameTable({
                     tenantId,
                     tableId,
-                    displayName: finalTitle,
+                    newName: finalTitle,
                 })
             );
             setIsRenamingTable(false);

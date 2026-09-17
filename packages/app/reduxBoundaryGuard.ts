@@ -39,6 +39,10 @@ export const WHITELISTED_REACT_REDUX_FILES: readonly string[] = [
   "packages/chat/messages/web/MessageActions.tsx",
   "packages/chat/messages/web/ToolMessageContent.tsx",
   "packages/create/space/spaceCurrentSelectors.ts",
+  // Desktop edition (2026-09 desktop account work) resolves the session Core
+  // through the react-redux store context as its public boundary.
+  "packages/identity/cloudRoutes.desktop.tsx",
+  "packages/identity/useIdentity.desktop.ts",
   "packages/render/layout/CreateMenuButtonContainer.tsx",
   "packages/render/layout/useTopBarState.tsx",
   "packages/rn/redux/store.ts",
@@ -459,6 +463,124 @@ export function scanReduxBoundary(root: string): ReduxBoundaryViolation[] {
   const violations: ReduxBoundaryViolation[] = [];
   for (const { rel, source } of collectProductionFiles(root)) {
     violations.push(...scanReduxSource(rel, source));
+  }
+  return violations;
+}
+
+/* --------------------------------------------------------------------------
+ * Peeled-domain guard: module-store void setters must never be dispatched
+ * ------------------------------------------------------------------------*/
+
+/**
+ * 2026-09-17 incident guard (`docs/incidents/2026-09-17-table-page-focus-context-dispatch-crash.md`).
+ *
+ * After a Redux slice is peeled into a standalone module store
+ * (`useSyncExternalStore` + plain sync mutators annotated `: void`), leftover
+ * `dispatch(setterFn(...))` call sites hand `undefined` to Redux, which throws
+ * minified error #7 ("Actions must be plain objects") at runtime — caught only
+ * by the page error boundary, invisible to typecheck and to the server.
+ * Peeled-store mutators must be called directly; this scan finds `dispatch(...)`
+ * wrapping them.
+ */
+
+export type PeeledStoreModule = {
+  /** Store module path relative to the repo root. */
+  module: string;
+  /** Alias import path without the packages/ prefix and extension. */
+  aliasKey: string;
+  /** Import-specifier suffix (e.g. "/tableStore") for relative imports. */
+  importSuffix: string;
+  /** Exported mutators annotated `: void` (must never be dispatched). */
+  voidSetters: string[];
+};
+
+const PEELED_STORE_FILE_RE = /(?:^|\/)[A-Za-z0-9_-]*[Ss]tore\.tsx?$/;
+const MODULE_STORE_MARKER = "useSyncExternalStore";
+
+/** `export function name(...): void` / `export const name = (...): void =>` */
+export function extractVoidSetterNames(source: string): string[] {
+  const code = stripComments(source);
+  const names = new Set<string>();
+  for (const match of code.matchAll(
+    /export\s+(?:async\s+)?function\s+(\w+)\s*\([\s\S]*?\)\s*:\s*void\b/g
+  )) {
+    names.add(match[1]);
+  }
+  for (const match of code.matchAll(
+    /export\s+const\s+(\w+)\s*=\s*\([\s\S]*?\)\s*:\s*void\s*=>/g
+  )) {
+    names.add(match[1]);
+  }
+  return [...names];
+}
+
+export function collectPeeledStoreModules(root: string): PeeledStoreModule[] {
+  const modules: PeeledStoreModule[] = [];
+  for (const { rel, source } of collectProductionFiles(root)) {
+    if (!PEELED_STORE_FILE_RE.test(rel)) continue;
+    if (!source.includes(MODULE_STORE_MARKER)) continue;
+    const voidSetters = extractVoidSetterNames(source);
+    if (voidSetters.length === 0) continue;
+    const aliasKey = rel.replace(/^packages\//, "").replace(/\.tsx?$/, "");
+    modules.push({
+      module: rel,
+      aliasKey,
+      importSuffix: `/${aliasKey.split("/").pop()}`,
+      voidSetters,
+    });
+  }
+  return modules;
+}
+
+function importedNamesFromStore(code: string, store: PeeledStoreModule): string[] {
+  const imported: string[] = [];
+  const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s*["']([^"']+)["']/g;
+  for (const match of code.matchAll(importRe)) {
+    const spec = match[2];
+    if (!spec.endsWith(store.importSuffix) && !spec.endsWith(store.aliasKey)) {
+      continue;
+    }
+    for (const raw of match[1].split(",")) {
+      const name = raw
+        .trim()
+        .replace(/^type\s+/, "")
+        .split(/\s+as\s+/)[0]
+        .trim();
+      if (name) imported.push(name);
+    }
+  }
+  return imported;
+}
+
+export function scanPeeledStoreDispatch(
+  rel: string,
+  source: string,
+  modules: readonly PeeledStoreModule[]
+): ReduxBoundaryViolation[] {
+  if (modules.length === 0) return [];
+  const code = stripComments(source);
+  const violations: ReduxBoundaryViolation[] = [];
+  for (const store of modules) {
+    const dispatched = importedNamesFromStore(code, store).filter(
+      (name) =>
+        store.voidSetters.includes(name) &&
+        new RegExp(`\\bdispatch\\s*\\(\\s*${name}\\s*\\(`).test(code)
+    );
+    for (const name of new Set(dispatched)) {
+      violations.push({
+        file: rel,
+        reason: `dispatch() wraps void setter ${name}() from ${store.module} — dispatch(undefined) throws Redux error #7 at runtime; call the module-store setter directly.`,
+      });
+    }
+  }
+  return violations;
+}
+
+export function scanPeeledStoreDispatches(root: string): ReduxBoundaryViolation[] {
+  const modules = collectPeeledStoreModules(root);
+  const violations: ReduxBoundaryViolation[] = [];
+  for (const { rel, source } of collectProductionFiles(root)) {
+    violations.push(...scanPeeledStoreDispatch(rel, source, modules));
   }
   return violations;
 }

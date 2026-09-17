@@ -1,6 +1,15 @@
 import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
+import { isAbortError } from "core/abortError";
 import { DataType } from "create/types";
 import { rowKey } from "database/keys";
+
+/**
+ * 服务器批量行读取上限，与 database/actions/common.ts 的 SERVER_TIMEOUT（5s）对齐。
+ * 没有上限时，无响应的服务器会把表格加载拖到网关超时（实测 us.nolo.chat ~61s 才
+ * 回 502），页面表现为长时间“加载中”；2026-09-17 排查记录见
+ * docs/incidents/2026-09-17-table-page-focus-context-dispatch-crash.md §7。
+ */
+const TABLE_ROWS_FETCH_TIMEOUT_MS = 5000;
 
 const getRowTimestamp = (row: any): number => {
   if (!row || typeof row !== "object") return 0;
@@ -85,50 +94,69 @@ const fetchTableRowsFromServer = async (
   server: string,
   tenantId: string,
   tableId: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch = fetch
 ): Promise<TableRowsSnapshot> => {
-  const res = await fetch(`${server}/rpc/listTableRows`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      tenantId,
-      tableId,
-      includeDeleted: true,
-      envelope: TABLE_SYNC_ENVELOPE,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    TABLE_ROWS_FETCH_TIMEOUT_MS
+  );
 
-  if (!res.ok) {
-    let msg = `加载表 ${tableId} 行失败（${res.status}）`;
-    try {
-      const err = await res.json();
-      if (err && typeof err.message === "string") {
-        msg = err.message;
+  try {
+    const res = await fetchImpl(`${server}/rpc/listTableRows`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        tenantId,
+        tableId,
+        includeDeleted: true,
+        envelope: TABLE_SYNC_ENVELOPE,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      let msg = `加载表 ${tableId} 行失败（${res.status}）`;
+      try {
+        const err = await res.json();
+        if (err && typeof err.message === "string") {
+          msg = err.message;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
+      throw new Error(msg);
     }
-    throw new Error(msg);
-  }
 
-  const data = await res.json();
-  if (Array.isArray(data)) {
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      return {
+        rows: data,
+        deletedRows: [],
+        tableMeta: null,
+        complete: false,
+      };
+    }
+    if (!data || typeof data !== "object" || !Array.isArray(data.rows)) {
+      throw new Error("服务器返回格式错误：预期为数组");
+    }
     return {
-      rows: data,
-      deletedRows: [],
-      tableMeta: null,
-      complete: false,
+      rows: data.rows,
+      deletedRows: Array.isArray(data.deletedRows) ? data.deletedRows : [],
+      tableMeta: data.tableMeta ?? null,
+      complete: data.complete === true,
     };
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw new Error(
+        `加载表 ${tableId} 行超时：${server} 在 ${TABLE_ROWS_FETCH_TIMEOUT_MS / 1000}s 内无响应`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (!data || typeof data !== "object" || !Array.isArray(data.rows)) {
-    throw new Error("服务器返回格式错误：预期为数组");
-  }
-  return {
-    rows: data.rows,
-    deletedRows: Array.isArray(data.deletedRows) ? data.deletedRows : [],
-    tableMeta: data.tableMeta ?? null,
-    complete: data.complete === true,
-  };
 };
 
 export const cacheMergedTableRows = async (db: any, mergedRows: any[]) => {
@@ -212,12 +240,15 @@ export const fetchAndCacheTableRows = async ({
   tableId,
   token,
   remoteServers = [],
+  fetchImpl = fetch,
 }: {
   db: any;
   tenantId: string;
   tableId: string;
   token?: string | null;
   remoteServers?: string[];
+  /** 测试注入缝，语义对齐 fetchWithTransientReadRetry 的 options.fetchImpl。 */
+  fetchImpl?: typeof fetch;
 }): Promise<any[]> => {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -229,7 +260,7 @@ export const fetchAndCacheTableRows = async ({
   const localRows = await loadLocalTableRows(db, tenantId, tableId);
   const remoteResults = await Promise.allSettled(
     remoteServers.map((server) =>
-      fetchTableRowsFromServer(server, tenantId, tableId, headers)
+      fetchTableRowsFromServer(server, tenantId, tableId, headers, fetchImpl)
     )
   );
 
