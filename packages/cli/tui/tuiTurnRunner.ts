@@ -849,6 +849,13 @@ export interface AgentTurnContext {
    * 见 turnInjectionInbox.ts。
    */
   turnInjectionInbox: TurnInjectionInbox<TurnRequest | InternalTurnEvent | string> | null;
+  /**
+   * 「这一轮是用户自己发的」提示（内部唤醒事件不调用）。进程任务终态自动续跑
+   * 用它把「同 dialog 连续 completion turn」计数清零，是防无界自唤醒链的一半
+   * 策略（见 agent-runtime/processTerminalResume.ts）。宿主未接线时为 undefined，
+   * 计数只增不减（仍然有上限，只是更保守）。
+   */
+  noteUserTurn?: () => void;
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
@@ -954,6 +961,11 @@ export async function runOneAgentTurn(
     }
   }
   const message = req.text;
+  // 用户自己发的轮次 = 「用户回来了」：进程任务自动续跑的链深清零（防循环策略
+  // 的一半）。放在这里而不是 runIdleTextTurn：busy 期间排队的用户消息由队列
+  // drain 直接进本函数，不会经过 runIdleTextTurn。内部唤醒事件（后台 run /
+  // 进程任务终态）不清零，否则 completion turn 自己就能把计数刷回去。
+  if (req.event.kind === "user") ctx.noteUserTurn?.();
   // 每轮 turn 开始时重置强制收尾标志，确保上一轮的强制停止不会泄漏到本轮。
   ctx.forcedStop = false;
   ctx.turnEpoch += 1;
@@ -972,7 +984,8 @@ export async function runOneAgentTurn(
   const isInternalEvent = req.event.kind !== "user";
   const isContextualFragment = matchContextualFragment(message) !== null;
   const transcriptText =
-    isContextualFragment && req.event.kind === "child-run-completed"
+    isContextualFragment
+    && (req.event.kind === "child-run-completed" || req.event.kind === "background-task-completed")
       ? (req.event.displayText ?? req.event.text)
       : message;
   startTurn(ctx.history, isInternalEvent ? "assistant" : "user");

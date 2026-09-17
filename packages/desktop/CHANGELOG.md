@@ -1,4 +1,13 @@
 
+## 0.97.0-alpha.1
+
+## 0.97.0-alpha.1 (2026-09-17)
+
+### Features
+
+* **cli:** auto-resume agent when owned background process reaches terminal state ([7804cd6](https://github.com/nolotus/bun-nolo/commit/7804cd6fd41b217571d98341d1141c11e2fcbb32))
+
+
 ## 0.96.0-alpha.7
 
 ## 0.96.0-alpha.7 (2026-09-17)

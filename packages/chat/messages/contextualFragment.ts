@@ -20,6 +20,8 @@
 export type ContextualFragmentKind =
   /** 新格式：buildWakeMessage 产出的后台 run 终态标记。 */
   | "background_run_completion"
+  /** 新格式：进程任务（launchProcess / detach 的 execShell）终态标记。 */
+  | "background_task_completion"
   /** server legacy：continueDialogContext 注入的历史 wake 摘要。 */
   | "server_legacy_wake"
   /** TUI legacy：旧版 buildWakeMessage 的【后台 run 终态通知】格式。 */
@@ -29,6 +31,8 @@ export type ContextualFragmentKind =
 
 const BACKGROUND_RUN_OPEN = "<background_run_completion";
 const BACKGROUND_RUN_CLOSE = "</background_run_completion>";
+const BACKGROUND_TASK_OPEN = "<background_task_completion";
+const BACKGROUND_TASK_CLOSE = "</background_task_completion>";
 
 // —— legacy 标记常量（格式来源见注释；不得随意改动，存量数据靠它识别） ——
 
@@ -64,6 +68,16 @@ const registry: readonly FragmentMatcher[] = [
       return (
         trimmed.startsWith(BACKGROUND_RUN_OPEN) &&
         trimmed.endsWith(BACKGROUND_RUN_CLOSE)
+      );
+    },
+  },
+  {
+    kind: "background_task_completion",
+    match: (text) => {
+      const trimmed = text.trim();
+      return (
+        trimmed.startsWith(BACKGROUND_TASK_OPEN) &&
+        trimmed.endsWith(BACKGROUND_TASK_CLOSE)
       );
     },
   },
@@ -148,6 +162,28 @@ function summarizeBackgroundRunCompletion(text: string): ContextualFragmentSumma
   return { kind: "background_run_completion", statusLine, failed, fullText: text };
 }
 
+/**
+ * 新格式 <background_task_completion> 的状态行。
+ *
+ * 进程任务没有子 dialog / 没有 run 记录（输出在 taskLogs 里按需取），所以摘要
+ * 只报「几条 + 首条 taskId + 状态」。`exited` 之外（failed / stopped）都算失败态。
+ */
+function summarizeBackgroundTaskCompletion(text: string): ContextualFragmentSummary {
+  const taskIds = [...text.matchAll(/\[Background task ([^ \]]+)/g)].map((m) => m[1]);
+  const statuses = [...text.matchAll(/status=(\w+)/g)].map((m) => m[1]);
+  const failed = statuses.some((status) => status !== "exited");
+  const icon = failed ? "✗" : "✓";
+  const firstStatus = statuses[0] ?? "terminal";
+  const firstTaskId = taskIds[0] ?? "";
+  const statusLine =
+    taskIds.length > 1
+      ? `${icon} ${taskIds.length} 条后台进程任务已结束 · 首条 ${clipLabel(firstTaskId, 16)} ${firstStatus}`
+      : `${icon} 后台进程任务 ${firstStatus}${
+          firstTaskId ? ` · ${clipLabel(firstTaskId, 16)}` : ""
+        }`;
+  return { kind: "background_task_completion", statusLine, failed, fullText: text };
+}
+
 /** 渲染层用：从片段全文提取紧凑状态行（识别失败返回 null）。 */
 export function describeContextualFragment(
   text: string
@@ -156,6 +192,9 @@ export function describeContextualFragment(
   if (!kind) return null;
   if (kind === "background_run_completion") {
     return summarizeBackgroundRunCompletion(text);
+  }
+  if (kind === "background_task_completion") {
+    return summarizeBackgroundTaskCompletion(text);
   }
   if (kind === "legacy_time_block") {
     const date = firstColonValue(text, "当前日期");

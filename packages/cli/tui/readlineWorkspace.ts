@@ -97,9 +97,11 @@ import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
 import {
+  buildProcessTaskCompletedTurnEvent,
   formatProcessTerminalNoticeLine,
 } from "./processTerminalNotice";
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
+import { createProcessTerminalAutoResumer } from "../../agent-runtime/processTerminalResume";
 // S3 迁移：turn 执行与队列 drain（runOneAgentTurn / ensureChatQueueBinding /
 // preemptAndAbortForDrain / AgentTurnContext）及前奏区函数（runAgentChat /
 // waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
@@ -680,7 +682,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (text) => runWakeHandler?.(text),
   });
-  // ── 进程任务终态通知（pendingProcessNotices）──
+  // ── 进程任务终态通知（pendingProcessNotices）+ 自动续跑 ──
   // 订阅进程 registry 的终态发射：launchProcess / 超时 detach 的 execShell
   // 进入终态（exited/failed/stopped）时，把单行摘要 push 进
   // state.pendingProcessNotices；下一个真实 turn 组装时作为 turn-scope
@@ -690,6 +692,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 渲染：状态栏在 ⚙ running chip 旁追加 "⚙ N finished"（见 renderStatusLine），
   // 到达即 scheduleRender 刷新；非 TTY（readline/管道）路径没有状态行，
   // 直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的丢弃策略一致）。
+  //
+  // 有归属的任务（派发时 runtimeContext 里带 dialogId/turnId）额外走自动续跑：
+  // 判定在 processTerminalResume.ts（归属匹配 / turn 活跃度 / 链深上限），投递
+  // 本体是下方 deliverProcessTerminalNotice——它需要 turn 机器（busy / 收件箱 /
+  // runWakeHandler）就绪，所以订阅在这里装（registry 不补发，装得越早越不漏），
+  // 投递体在交互区里覆盖式安装。
   const pushPendingProcessNotice = (notice: ProcessTerminalNotice): void => {
     if (sessionEnded) return;
     const line = formatProcessTerminalNoticeLine(notice);
@@ -700,9 +708,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 与 gitStatus 异步回调同样的守卫与节流：会话退出后丢弃陈旧重绘。
     scheduleRender();
   };
-  const unsubscribeProcessTerminal = getProcessRegistry().onProcessTerminal(
-    pushPendingProcessNotice,
-  );
+  // 投递体尚未安装（工作区启动中）时的兜底：维持既有「只提示」语义。
+  let deliverProcessTerminalNotice: (notice: ProcessTerminalNotice) => void =
+    pushPendingProcessNotice;
+  const unsubscribeProcessTerminal = getProcessRegistry().onProcessTerminal((notice) => {
+    deliverProcessTerminalNotice(notice);
+  });
   const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
@@ -1152,6 +1163,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 终态唤醒直投这里注入正在跑的 loop，不再走 chat 队列。见 turnInjectionInbox.ts。
   let turnInjectionInbox: AgentTurnContext["turnInjectionInbox"] = null;
 
+  // 「用户自己发了一轮」的提示钩子（进程任务自动续跑的链深清零用）。实现在交互区
+  // 里（需要 processTerminalResumer），这里先占位，语义与 turnInjectionInbox 同：
+  // 外层可变绑定 + ctx 转发，保证 turn 侧读到的永远是最新那个。
+  let noteUserTurnHook: (() => void) | null = null;
+
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
@@ -1170,6 +1186,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     set chatQueueBinding(v) { chatQueueBinding = v; },
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
+    noteUserTurn: () => noteUserTurnHook?.(),
 
     get sessionEnded() { return sessionEnded; },
     get buffer() { return buffer; },
@@ -1465,11 +1482,25 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       };
       return { actionGateHandler, confirmDestructiveAction };
     };
+    // 进程任务终态自动续跑的决策器：归属来自 registry 记录（派发时刻写入），
+    // 当前 dialog / turn 活跃度取自 UI 事实。只有「有人能把对话接回来」
+    // （交互会话 + 已装上唤醒通道）时才允许续跑，否则退回只提示且不消耗
+    // once-only 名额。判定规则见 processTerminalResume.ts。
+    const processTerminalResumer = createProcessTerminalAutoResumer({
+      readOwner: (taskId) => getProcessRegistry().getByTaskId(taskId)?.owner ?? null,
+      getCurrentDialogId: () => state.dialogId ?? null,
+      isTurnActive: () => busy || fixedInput.isPaused(),
+      canDeliver: () => !sessionEnded && !done && runWakeHandler !== null,
+    });
+    noteUserTurnHook = () => processTerminalResumer.noteUserTurn();
     // 空闲时把一段文本作为新 turn 直接跑。两个调用方：Enter 键的空闲手动
     // drain（空 Enter / Ctrl+S 落到这里的队首）和 run 终态唤醒。busy 标志、
     // enterOutputMode、notifyTurnEnd、失败时 emitCommandOutput(turnFailed)
     // 与直接发送路径保持同一份实现，不复制漂移。调用方必须保证当前空闲。
     const runIdleTextTurn = async (inputMsg: TurnRequest | InternalTurnEvent | string): Promise<void> => {
+      // 「用户回来了」的链深清零不在这里做：runOneAgentTurn 才是所有 turn 的
+      // 唯一入口（busy 期间排队的用户消息由队列 drain 直接进那里），清零钩子
+      // 挂在 ctx.noteUserTurn 上，见 tuiTurnRunner。
       const req = createTurnRequest(inputMsg);
       const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
       const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
@@ -1506,6 +1537,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // `ctx.options.env ?? process.env`），别写进 effectiveEnv——那是 run 记录
     // 读取用的快照，构造得更早，也不流向工具表。
     (options.env ?? process.env)[RUN_WAKE_CHANNEL_ENV] = "1";
+    // 内部事件（后台 run / 进程任务终态唤醒）在 transcript 上的显示：紧凑单行 +
+    // 流式安全插入。run 唤醒的 busy 分支与进程任务续跑共用这一份实现，避免两处
+    // 漂移（appendStreamSafeNotice 的理由见 turnInjectionInbox.ts）。
+    const printInternalEventLine = (displayText: string): void => {
+      const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
+      if (!isInteractiveInput(input)) {
+        // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
+        output.write(`${noticeLine}\n`);
+        return;
+      }
+      history.followBottom = true;
+      appendStreamSafeNotice(history, noticeLine, {
+        appendLocalTurn,
+        startTurn,
+      });
+      renderHistoryToOutput();
+    };
     runWakeHandler = (event: InternalTurnEvent | string) => {
       if (done) return;
       if (busy || fixedInput.isPaused()) {
@@ -1525,26 +1573,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // 不会把 currentRole 设回 assistant —— 注入发生在流式输出中途时，
           // 之后模型继续流出的文本会被静默吞掉（不保存也不渲染）。
           // appendStreamSafeNotice 会在插入状态行后重开 assistant 流式段。
+          // 显示文案优先用 displayText（系统事件的紧凑单行）；string 事件只有 text。
           const displayText =
-            typeof event !== "string" && event.kind === "child-run-completed"
-              ? (event.displayText ?? event.text)
-              : text;
-          const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
-          if (!isInteractiveInput(input)) {
-            // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
-            output.write(`${noticeLine}\n`);
-          } else {
-            history.followBottom = true;
-            appendStreamSafeNotice(history, noticeLine, {
-              appendLocalTurn,
-              startTurn,
-            });
-            renderHistoryToOutput();
-          }
+            typeof event === "string"
+              ? event
+              : event.kind === "user"
+                ? event.text
+                : (event.displayText ?? event.text);
+          printInternalEventLine(displayText);
         } else {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
           ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction)
             .enqueue(event);
+          // 这里刻意不补打印：inbox 不可用时的兜底与 run 终态唤醒共用本分支，
+          // 排队事实已经由 composer 的队列 UI 呈现；在此额外印 transcript 行会
+          // 让 run wake 的既有显示语义跟着变化，也会与队列 UI 重复。
         }
         if (fixedInput.active && !fixedInput.isPaused()) {
           fixedInput.repaint(buffer, cursorPos);
@@ -1556,6 +1599,29 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           `${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`,
         );
       });
+    };
+    // 进程任务终态投递体（订阅在构造早期已装上，这里补上真正的投递）：
+    //   - notice-only：无归属 / dialog 不匹配 / 重复 / 链深触顶 / 无通道 →
+    //     维持既有 pending 行（下一轮 context block 让模型知情），不续跑；
+    //   - 续跑：同一事实不再进 pendingProcessNotices（投递本身已经到位：busy 直投
+    //     收件箱、空闲起 completion turn），否则模型会在 inbox 文本之外又从下一轮
+    //     context block 看到同一行。屏幕上仍留一行 dim 记录。
+    deliverProcessTerminalNotice = (notice: ProcessTerminalNotice) => {
+      if (done || sessionEnded) return;
+      const decision = processTerminalResumer.decide(notice);
+      if (decision.kind === "notice-only") {
+        pushPendingProcessNotice(notice);
+        return;
+      }
+      // 屏幕记录交给下游各投递路径，deliver 不再自己打印：无条件 print 会让
+      // 「busy 直投收件箱」与「空闲 completion turn」两条成功路径都出现连续
+      // 两行相同 dim 行（前者由 runWakeHandler 的 injected 分支印、后者由
+      // tuiTurnRunner 写 transcript）。inbox 不可用时的 enqueue 兜底同样不打印，
+      // 那与 run 终态唤醒共用分支、且队列 UI 已呈现排队事实（见 runWakeHandler）。
+      runWakeHandler?.(buildProcessTaskCompletedTurnEvent(notice));
+      if (fixedInput.active && !fixedInput.isPaused()) {
+        fixedInput.repaint(buffer, cursorPos);
+      }
     };
 
     let autoScrollDirection: "up" | "down" = "up";
