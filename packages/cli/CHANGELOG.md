@@ -1,4 +1,13 @@
 
+## 0.75.0-alpha.4
+
+## 0.75.0-alpha.4 (2026-09-17)
+
+### Bug Fixes
+
+* **tui:** reduce wheel scrolling backlog with adaptive catch-up ([bba6016](https://github.com/nolotus/bun-nolo/commit/bba601658622dba14169705901da0d259569532c))
+
+
 ## 0.75.0-alpha.3
 
 ## 0.75.0-alpha.3 (2026-09-17)

@@ -6,6 +6,7 @@
 ### Bug Fixes
 
 * **dx:** serialize green typechecks to reduce peak memory ([9842453](https://github.com/nolotus/bun-nolo/commit/9842453e8ccd7b72c7c24525dbcfa6ed4ff5e60a))
+* **tui:** reduce wheel scrolling backlog with adaptive catch-up ([bba6016](https://github.com/nolotus/bun-nolo/commit/bba601658622dba14169705901da0d259569532c))
 
 
 ## 0.96.0-alpha.3

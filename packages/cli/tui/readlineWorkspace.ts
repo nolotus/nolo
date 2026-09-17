@@ -804,8 +804,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       getReservedRows: () => dialogHost.getReservedRows(),
     });
 
-  // 平滑滚动推进器：滚轮报告只折算成目标位置，16ms/帧限速逼近（不再单帧瞬移）。
-  // paintImmediate 内部自带「对话框占用屏幕」暂停判断与 BSU/ESU 包裹。
+  // 平滑滚动推进器：滚轮报告只折算成目标位置，16ms/帧逼近（不再单帧瞬移）。
+  // 默认按积压比例追赶（单条报告仍 5 行一帧；密集 burst 的单帧步长放大到
+  // ≤20 行，缩短停手后的拖尾）；用户显式给 NOLO_TUI_SCROLL_MAX_STEP 时回到
+  // 固定限速语义。paintImmediate 内部自带「对话框占用屏幕」暂停判断与 BSU/ESU 包裹。
   const scrollAnimator = createScrollAnimator({
     history,
     output,

@@ -18,7 +18,19 @@
  *
  * 手感可用环境变量调（非法值回落默认，读不到即默认）：
  * - NOLO_TUI_WHEEL_LINES      每条滚轮报告的行数（默认 WHEEL_SCROLL_LINES = 5，上限 50）
- * - NOLO_TUI_SCROLL_MAX_STEP  每帧最多推进的行数（默认 6，上限 100）
+ * - NOLO_TUI_SCROLL_MAX_STEP  每帧最多推进的行数（显式给值 = 固定限速，默认 6，上限 100）
+ *
+ * 默认模式不固定步长，而是「按积压比例追赶」：一条报告的欠账是 5 行（一帧
+ * 结清，轻滚精度不变），但同一 burst 里 20 条报告把欠账堆到 100 行时，若仍以
+ * 6 行/帧结清，这 272ms 全部发生在用户停手之后（"手停了画面还在滑"）。因此
+ * 空闲态默认步长跟随当前欠账放大，但仍逐帧可视且单帧有上限：
+ *
+ *   step = min(欠账, max(6, wheelLines, ceil(欠账 / 4)), max(20, wheelLines))
+ *
+ * 每报告距离仍恒为 wheelLines（总距离不增益、不丢失），反向仍从当前可见位置
+ * 起算。这是**有上限的追赶改进**：单帧步长 ≤ max(20, wheelLines)，因此对任意
+ * 大的 burst，尾延迟并不有界，只是大幅缩短且随欠账自适应。显式给出
+ * NOLO_TUI_SCROLL_MAX_STEP 时回到旧的固定限速 / 硬上限语义（不做追赶）。
  */
 import { computeScrollMetrics, type TurnHistory } from "./tuiHistory";
 import { WHEEL_SCROLL_LINES } from "./tuiScrollbar";
@@ -48,7 +60,14 @@ export type ScrollAnimatorDeps = {
 
 const SCROLL_ANIMATION_TICK_MS = 16;
 
+/** 空闲态默认步长的下限：单条报告（wheelLines）必须一帧结清。 */
 const DEFAULT_SCROLL_MAX_LINES_PER_TICK = 6;
+
+/** 默认追赶模式的单帧上限（用户未显式给 NOLO_TUI_SCROLL_MAX_STEP 时）。 */
+const ADAPTIVE_STEP_CAP = 20;
+
+/** 用户显式步长的硬上限（沿用原上限语义，不随追赶改动）。 */
+const EXPLICIT_STEP_CAP = 100;
 
 function readPositiveInt(
   raw: string | undefined,
@@ -61,18 +80,30 @@ function readPositiveInt(
   return Math.min(parsed, max);
 }
 
-/** 解析手感参数：环境变量优先，非法/缺省回落默认值并做上限收敛。 */
+/**
+ * 解析手感参数：环境变量优先，非法/缺省回落默认值并做上限收敛。
+ *
+ * `adaptiveStep` 表示「用户没有显式给合法步长」——此时每帧步长按积压比例
+ * 追赶；显式给值时保留固定限速 / 硬上限语义（不做追赶）。
+ */
 export function resolveScrollTuning(
   env: Record<string, string | undefined> = process.env,
-): { wheelLines: number; maxLinesPerTick: number } {
+): { wheelLines: number; maxLinesPerTick: number; adaptiveStep: boolean } {
+  const rawStep = env.NOLO_TUI_SCROLL_MAX_STEP;
+  const explicit = parseExplicitStep(rawStep);
   return {
     wheelLines: readPositiveInt(env.NOLO_TUI_WHEEL_LINES, WHEEL_SCROLL_LINES, 50),
-    maxLinesPerTick: readPositiveInt(
-      env.NOLO_TUI_SCROLL_MAX_STEP,
-      DEFAULT_SCROLL_MAX_LINES_PER_TICK,
-      100,
-    ),
+    maxLinesPerTick: explicit ?? DEFAULT_SCROLL_MAX_LINES_PER_TICK,
+    adaptiveStep: explicit === null,
   };
+}
+
+/** 合法显式步长（收敛到 EXPLICIT_STEP_CAP）；缺省 / 非法返回 null。 */
+function parseExplicitStep(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return Math.min(parsed, EXPLICIT_STEP_CAP);
 }
 
 const defaultTickTimer: ScrollTickTimer = {
@@ -89,9 +120,14 @@ const defaultTickTimer: ScrollTickTimer = {
  * 创建推进器。返回的 wheel/cancel 在主线程同步调用（键盘与鼠标事件路径）。
  */
 export function createScrollAnimator(deps: ScrollAnimatorDeps) {
-  const { wheelLines, maxLinesPerTick } = resolveScrollTuning(
+  const { wheelLines, maxLinesPerTick, adaptiveStep } = resolveScrollTuning(
     deps.env ?? process.env,
   );
+  // 追赶模式的单帧上限：至少 20，且不低于单条报告的 wheelLines（否则单报告
+  // 一帧结不清）。显式步长时只用用户给的固定上限。
+  const stepCap = adaptiveStep
+    ? Math.max(ADAPTIVE_STEP_CAP, wheelLines)
+    : maxLinesPerTick;
   const timer = deps.tickTimer ?? defaultTickTimer;
   const history = deps.history;
 
@@ -139,7 +175,21 @@ export function createScrollAnimator(deps: ScrollAnimatorDeps) {
       settle(maxScrollTop);
       return;
     }
-    const step = Math.sign(delta) * Math.min(Math.abs(delta), maxLinesPerTick);
+    // 单帧步长：显式步长 = 固定限速；默认 = 按积压比例追赶（下限保证单条
+    // 报告一帧结清，上限 stepCap）。两者都逐帧可视，不新增惯性。
+    const backlog = Math.abs(delta);
+    const limit = adaptiveStep
+      ? Math.min(
+          backlog,
+          Math.max(
+            DEFAULT_SCROLL_MAX_LINES_PER_TICK,
+            wheelLines,
+            Math.ceil(backlog / 4),
+          ),
+          stepCap,
+        )
+      : Math.min(backlog, maxLinesPerTick);
+    const step = Math.sign(delta) * limit;
     history.scrollTop += step;
     deps.onPaint();
     if (history.scrollTop === goal) {
