@@ -26,9 +26,7 @@ process.env.NOLO_HOME =
   process.env.NOLO_HOME ??
   `${process.env.TMPDIR ?? "/tmp"}/nolo-cache-probe-home-${process.pid}`;
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getProfileTokens, loadProfileConfig } from "../client/profileConfig";
 
 const arg = (name: string, fallback: string) => {
   const i = Bun.argv.indexOf(`--${name}`);
@@ -173,11 +171,9 @@ const {
   resolvePlatformChatProviderConfig,
 } = await import("../../agent-runtime/platformChatProvider");
 
-const cfg = JSON.parse(
-  fs.readFileSync(path.join(os.homedir(), ".nolo/config.json"), "utf8"),
-);
-const authToken = cfg?.profiles?.default?.authToken;
-if (!authToken) throw new Error("no authToken in ~/.nolo/config.json");
+const cfg = loadProfileConfig();
+const authToken = getProfileTokens(cfg)[0];
+if (!authToken) throw new Error("no auth token in the Nolo CLI profile");
 
 const providerConfig = await resolvePlatformChatProviderConfig({
   agentConfig: {

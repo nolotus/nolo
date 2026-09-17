@@ -19,9 +19,7 @@
  *
  * 运行：bun packages/cli/__perf__/llmRoundTripBreakdown.ts [--samples 5] [--ctx 30000] [--tools]
  */
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getProfileTokens, loadProfileConfig } from "../client/profileConfig";
 import {
   buildPlatformChatCompletionRequest,
   resolvePlatformChatProviderConfig,
@@ -229,11 +227,9 @@ const median = (xs: number[]) => {
 };
 
 async function main() {
-  const cfg = JSON.parse(
-    fs.readFileSync(path.join(os.homedir(), ".nolo/config.json"), "utf8"),
-  );
-  const authToken = cfg?.profiles?.default?.authToken;
-  if (!authToken) throw new Error("no authToken in ~/.nolo/config.json");
+  const cfg = loadProfileConfig();
+  const authToken = getProfileTokens(cfg)[0];
+  if (!authToken) throw new Error("no auth token in the Nolo CLI profile");
 
   const agentConfig = {
     key: "agent-0e95801d90-01GLMFLASHPB00000000BT20BC",

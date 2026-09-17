@@ -1,4 +1,13 @@
 
+## 0.75.0-alpha.7
+
+## 0.75.0-alpha.7 (2026-09-17)
+
+### Bug Fixes
+
+* **cli:** read auth tokens from the modern profile.tokens[] shape ([3137aa0](https://github.com/nolotus/bun-nolo/commit/3137aa08d177f87b2e7446f3fe19d2151e8ffffb))
+
+
 ## 0.75.0-alpha.6
 
 ## 0.75.0-alpha.6 (2026-09-17)
