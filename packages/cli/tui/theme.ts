@@ -305,23 +305,17 @@ export function resolveTuiBrightnessSignal(env: Record<string, string | undefine
   if (activeThemeMode !== "terminal") return activeThemeMode;
   if (resolvedBrightness) return resolvedBrightness;
 
-  const colorFgBgBrightness = detectColorFgBgBrightness(env);
-  if (colorFgBgBrightness) return colorFgBgBrightness;
+  const colorfgbg = env.COLORFGBG ?? "";
+  if (colorfgbg) {
+    const parts = colorfgbg.split(";");
+    // COLORFGBG format is "fg;bg" — the background value (2nd field) determines
+    // brightness: 0–6 = dark, 7–15 = light.
+    const bg = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : NaN;
+    if (!Number.isNaN(bg) && bg >= 0 && bg <= 6) return "dark";
+    if (!Number.isNaN(bg) && bg >= 7 && bg <= 15) return "light";
+  }
 
   return detectSystemBrightnessFromEnv(env);
-}
-
-function detectColorFgBgBrightness(
-  env: Record<string, string | undefined>,
-): TuiBrightness | null {
-  const parts = (env.COLORFGBG ?? "").split(";");
-  // COLORFGBG format is "fg;bg" — the final field is the background in
-  // terminals that include extra attributes. 0–6 = dark, 7–15 = light.
-  const bg = Number.parseInt(parts.at(-1) ?? "", 10);
-  if (Number.isNaN(bg)) return null;
-  if (bg >= 0 && bg <= 6) return "dark";
-  if (bg >= 7 && bg <= 15) return "light";
-  return null;
 }
 
 /** Resolve an env override first, then the process-wide user mode. */
@@ -634,11 +628,9 @@ export function surfaceBackgroundSequence(
  * remains the identity cue.
  *
  * Unlike decorative chips and diff bands, this surface remains enabled in
- * terminal mode when truecolor is available and the background is known from
- * OSC 11 or COLORFGBG. Until either terminal-owned signal exists, it stays
- * off: an OS appearance preference does not prove that the terminal uses the
- * same canvas, and guessing dark can bury its default foreground on a deep
- * band. The accent gutter + bold body remain visible in that fallback.
+ * terminal mode when truecolor is available. It blends against the terminal's
+ * OSC 11 background, so the default mode gets an obvious user/AI boundary
+ * without hard-coding a dark or light canvas.
  *
  * Returns "" without truecolor: ANSI-16 has no subtle background, and a
  * half-applied block would be worse than the gutter + bold fallback.
@@ -648,18 +640,6 @@ export function userSurfaceBackgroundSequence(
   brightness: TuiBrightness = resolveTuiBrightness(env),
 ): string {
   if (!supportsTruecolor(env)) return "";
-  // Terminal-native mode must not paint a full-width surface until the
-  // terminal has supplied a trustworthy light/dark signal. Falling back to
-  // "dark" here can put a deep blue band behind a light terminal's default
-  // dark foreground, making the user's own message unreadable. The accent
-  // gutter + bold body remain the safe, device-independent fallback.
-  if (
-    resolveTuiThemeMode(env) === "terminal" &&
-    activeTerminalBaseHex === null &&
-    detectColorFgBgBrightness(env) === null
-  ) {
-    return "";
-  }
   const palette = THEME_PALETTES[activeThemeName] ?? THEME_PALETTES.trail;
   const surfaceHex = brightness === "light"
     ? palette.light.chrome.hex

@@ -10,7 +10,6 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "anthropic-api",
   "gemini-api",
   "xai-api",
-  "deepseek-api",
   "qwen-api",
   "kimi-api",
   "minimax-api",

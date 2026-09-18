@@ -15,7 +15,6 @@ import {
   runWorkspaceCommand,
 } from "../workspaceShell";
 import type { CapabilityExecutionContext, ExecutableCapability, OpenAiCompatibleTool } from "./capability";
-import type { ProcessOwner } from "../processOwnership";
 
 export interface ExecShellInput {
   command: string;
@@ -149,10 +148,6 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
       abortSignal: ctx.abortSignal,
       detachMs: isImmediateDetachShellCommand({ command }) ? 0 : ctx.detachMs,
       stdin: typeof normalized.input === "string" ? normalized.input : undefined,
-      // Ownership of the turn that invoked this command: an auto-detached
-      // command keeps its parent dialog so its terminal can resume that
-      // conversation (see processOwnership.ts). Absent ctx.owner = unowned.
-      owner: (ctx.owner as ProcessOwner | null | undefined) ?? null,
     });
 
     return {

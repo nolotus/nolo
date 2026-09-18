@@ -7,7 +7,6 @@ import { useNavigate } from "app/routing";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
 import { ModelOptionLabel } from "./ModelOptionLabel";
-import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
 import { PasswordInput } from "render/web/form/Input";
 import { Checkbox } from "render/web/form/Checkbox";
 import { MANUAL_PROVIDER_PRESET_ID } from "../providerPresetApply";
@@ -330,7 +329,7 @@ const AgentCreateApiPanel: React.FC<{
   setPrompt: (v: string) => void;
   apiPresetId: string;
   applyApiPreset: (id: string) => void;
-  meteredPresetOptions: { value: string; label: string; provider?: string }[];
+  meteredPresetOptions: { value: string; label: string }[];
   customProviderUrl: string;
   setCustomProviderUrl: (v: string) => void;
   apiKey: string;
@@ -396,7 +395,7 @@ const AgentCreateApiPanel: React.FC<{
         >
           {meteredPresetOptions.map((p) => (
             <SelectItem key={p.value} id={p.value} textValue={p.label}>
-              <ProviderPresetOptionLabel label={p.label} provider={p.provider} />
+              {p.label}
             </SelectItem>
           ))}
         </Select>
@@ -540,11 +539,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   setPrompt: (v: string) => void;
   subPresetId: string;
   applySubPreset: (id: string) => void;
-  subscriptionPresetOptions: {
-    value: string;
-    label: string;
-    provider?: string;
-  }[];
+  subscriptionPresetOptions: { value: string; label: string }[];
   subCustomProviderUrl: string;
   setSubCustomProviderUrl: (v: string) => void;
   subApiKey: string;
@@ -627,7 +622,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
         >
           {subscriptionPresetOptions.map((p) => (
             <SelectItem key={p.value} id={p.value} textValue={p.label}>
-              <ProviderPresetOptionLabel label={p.label} provider={p.provider} />
+              {p.label}
             </SelectItem>
           ))}
         </Select>

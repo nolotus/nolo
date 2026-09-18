@@ -13,7 +13,7 @@ import {
   resolveCatalogPlatformAgents,
 } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
-import { detectFileReferences, detectImagePaths, summarizeAttachment } from "./pasteImage";
+import { detectImagePaths, summarizeAttachment } from "./pasteImage";
 import { parseCliLocale, setCliLocale, t } from "./i18n";
 import {
   getActiveThemeName,
@@ -180,24 +180,20 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
     const stripped = stripImageTokens(trimmed, readableHints);
     const finalMessage = stripped.length > 0 ? stripped : trimmed;
     const imagePaths = readableHints.map((hint) => hint.resolvedPath);
-    // 轻量文件引用：只做本地存在性确认，**不读内容、不上传**。路径文本原样留在
-    // message 里（模型看到的是路径字符串，不是文件内容），我们只回一行明确提示，
-    // 避免用户误以为模型已经看过文件。图片已由上面单独处理，这里排除它们。
-    const fileRefs = detectFileReferences(trimmed, state.cwd, {
-      exclude: hints.map((hint) => hint.resolvedPath),
-    });
-    const previewLines = [
-      ...hints.map((hint) =>
-        hint.unreadable
-          ? `image path unreadable: ${hint.resolvedPath}`
-          : `found image: ${hint.resolvedPath}`,
-      ),
-      ...fileRefs.map((ref) => t("pasteFilePathHint", ref.resolvedPath)),
-    ];
+    const preview =
+      hints.length > 0
+        ? hints
+            .map((hint) =>
+              hint.unreadable
+                ? `image path unreadable: ${hint.resolvedPath}`
+                : `found image: ${hint.resolvedPath}`,
+            )
+            .join("\n")
+        : "";
 
     return {
       nextState: state,
-      output: previewLines.join("\n"),
+      output: preview,
       action: {
         type: "chat",
         message: finalMessage,
@@ -582,19 +578,6 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
       }
       return { nextState: state, output: t("copyUsage") };
     }
-    case "/paste":
-      // 显式读剪贴板（fallback 通道）。原生粘贴（终端 bracketed paste / Ctrl+V）
-      // 才是主路径；这条命令用于终端不发 paste 事件、或用户想主动取剪贴板的场合。
-      // 真正的读取在 readlineWorkspace（与 Ctrl+V 共用同一份剪贴板流程），这里
-      // 只出 action，保证「收到文本」与「显式请求剪贴板」是两条可区分的路径。
-      if (argText) {
-        return { nextState: state, output: t("pasteUsage") };
-      }
-      return {
-        nextState: state,
-        output: "",
-        action: { type: "paste-clipboard" },
-      };
     case "/mouse": {
       if (argText !== "on" && argText !== "off") {
         return { nextState: state, output: t("mouseUsage") };
