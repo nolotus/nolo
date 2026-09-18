@@ -213,7 +213,10 @@
           display: flex;
           align-items: center;
           gap: 4px;
-          color: var(--primaryDark, var(--primary));
+          /* 强调色 chip 的文字必须压深才够 AA：直接复用 --primary/--primaryDark
+             在部分主题（如 mono 亮色）只有 2.1~2.5:1；这里按同一强调色压深 62%，
+             不新增 token，且随主题自动跟随。 */
+          color: color-mix(in srgb, var(--primary) 62%, black);
           background: var(--accentSoft, var(--primaryGhost));
           border-color: transparent;
         }
@@ -230,7 +233,7 @@
           display: flex;
           align-items: center;
           gap: 4px;
-          color: var(--primaryDark, var(--primary));
+          color: color-mix(in srgb, var(--primary) 62%, black);
           background: var(--accentSoft, var(--primaryGhost));
           border-color: transparent;
         }
@@ -239,7 +242,9 @@
            必须回到 primary（与 siteFooter / hero 的 dark 覆盖写法一致）。 */
         [data-theme="dark"] .agent__vision,
         [data-theme="dark"] .agent__runtime {
-          color: var(--primary);
+          /* 暗色底衬上要向白混才够 AA（--primary 在 mono/graphite/pink 的暗色
+             实测约 4.1~4.3:1）；与亮色的向黑混对称，同样不新增 token。 */
+          color: color-mix(in srgb, var(--primary) 62%, white);
         }
 
         .agent__tag--more {

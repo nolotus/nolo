@@ -364,7 +364,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                 title={t("home", "首页")}
                 aria-label={t("home", "首页")}
               >
-                <LuHouse size={17} strokeWidth={2.35} aria-hidden="true" />
+                <LuHouse size={16} aria-hidden="true" />
               </NavLink>
               <DevReloadBadge />
             </span>
@@ -393,7 +393,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                     `topbar__nav-link ${isActive ? "is-active" : ""}`
                   }
                 >
-                  <LuBadgeDollarSign className="topbar__nav-icon" size={15} aria-hidden="true" />
+                  <LuBadgeDollarSign className="topbar__nav-icon" size={16} aria-hidden="true" />
                   {t("topbar.pricing", "价格")}
                 </NavLink>
                 <NavLink
@@ -402,7 +402,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                     `topbar__nav-link topbar__nav-link--download-cta ${isActive ? "is-active" : ""}`
                   }
                 >
-                  <LuDownload className="topbar__nav-icon" size={15} aria-hidden="true" />
+                  <LuDownload className="topbar__nav-icon" size={16} aria-hidden="true" />
                   {t("downloadClient", "下载客户端")}
                 </NavLink>
               </div>

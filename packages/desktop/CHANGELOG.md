@@ -1,4 +1,15 @@
 
+## 0.103.0-alpha.3
+
+## 0.103.0-alpha.3 (2026-09-18)
+
+### Bug Fixes
+
+* **agent:** keep accent chips at AA contrast in every theme ([85c8845](https://github.com/nolotus/bun-nolo/commit/85c8845402d15185da644e794e1b517e65bb0605))
+* **home:** normalize diagram icons, bind z-index tiers and drop dead CSS ([5cce984](https://github.com/nolotus/bun-nolo/commit/5cce984b95aaa3bc43163ddf13babf5d878c476d))
+* **i18n:** gloss the zh Terms of Service entry like its siblings ([6a63f62](https://github.com/nolotus/bun-nolo/commit/6a63f628f463ba2e0a34aa762ade3445e2e7c3a5))
+
+
 ## 0.103.0-alpha.2
 
 ## 0.103.0-alpha.2 (2026-09-18)

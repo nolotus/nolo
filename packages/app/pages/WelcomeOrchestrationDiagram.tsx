@@ -83,7 +83,6 @@ type DiagramNode = {
   left: string;
   label: DiagramNodeLabel;
   icon: IconKind;
-  iconSize?: number;
   iconClassName?: string;
 };
 
@@ -144,7 +143,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "120px",
         label: { type: "t", key: "welcomeSection.showcase.chat" },
         icon: "message-square",
-        iconSize: 18,
       },
       {
         className: "n-start-form",
@@ -152,7 +150,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "120px",
         label: { type: "t", key: "welcomeSection.showcase.taskboard" },
         icon: "layout-dashboard",
-        iconSize: 18,
       },
       {
         className: "n-pm",
@@ -160,7 +157,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "260px",
         label: { type: "t", key: "welcomeSection.showcase.pm" },
         icon: "minimax",
-        iconSize: 22,
       },
       {
         className: "n-fe",
@@ -168,7 +164,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "400px",
         label: { type: "t", key: "welcomeSection.showcase.fe" },
         icon: "antigravity",
-        iconSize: 22,
       },
       {
         className: "n-be",
@@ -176,7 +171,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "400px",
         label: { type: "t", key: "welcomeSection.showcase.be" },
         icon: "codex",
-        iconSize: 22,
       },
       {
         className: "n-rev",
@@ -184,7 +178,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "540px",
         label: { type: "t", key: "welcomeSection.showcase.reviewer" },
         icon: "codex",
-        iconSize: 22,
       },
       {
         className: "n-rel",
@@ -192,7 +185,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "700px",
         label: { type: "t", key: "welcomeSection.showcase.release" },
         icon: "zap",
-        iconSize: 20,
       },
       {
         className: "n-web",
@@ -200,7 +192,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "840px",
         label: { type: "t", key: "welcomeSection.showcase.website" },
         icon: "app-window",
-        iconSize: 20,
       },
     ],
   },
@@ -227,7 +218,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "95px",
         label: { type: "videoAgent", key: "orchestrator" },
         icon: "minimax",
-        iconSize: 22,
       },
       {
         className: "n-b-gpt",
@@ -235,7 +225,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "360px",
         label: { type: "text", value: "GPT" },
         icon: "openai",
-        iconSize: 20,
         iconClassName: "is-brand-openai",
       },
       {
@@ -244,7 +233,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "360px",
         label: { type: "text", value: "Grok" },
         icon: "grok",
-        iconSize: 20,
         iconClassName: "is-brand-grok",
       },
       {
@@ -253,7 +241,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "360px",
         label: { type: "text", value: "Gemini" },
         icon: "gemini",
-        iconSize: 20,
         iconClassName: "is-brand-gemini",
       },
     ],
@@ -284,7 +271,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "150px",
         label: { type: "text", value: "GPT" },
         icon: "openai",
-        iconSize: 20,
         iconClassName: "is-brand-openai",
       },
       {
@@ -293,7 +279,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "390px",
         label: { type: "text", value: "Grok" },
         icon: "grok",
-        iconSize: 20,
         iconClassName: "is-brand-grok",
       },
       {
@@ -302,7 +287,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "630px",
         label: { type: "text", value: "Gemini" },
         icon: "gemini",
-        iconSize: 20,
         iconClassName: "is-brand-gemini",
       },
       {
@@ -311,7 +295,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "390px",
         label: { type: "videoAgent", key: "orchestrator" },
         icon: "brain",
-        iconSize: 20,
         iconClassName: "is-orchestrator",
       },
     ],
@@ -348,7 +331,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "95px",
         label: { type: "videoAgent", key: "orchestrator" },
         icon: "minimax",
-        iconSize: 22,
       },
       {
         className: "n-video-script",
@@ -356,7 +338,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "240px",
         label: { type: "videoAgent", key: "script" },
         icon: "claude",
-        iconSize: 22,
       },
       {
         className: "n-video-storyboard",
@@ -364,7 +345,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "425px",
         label: { type: "videoAgent", key: "storyboard" },
         icon: "gemini",
-        iconSize: 22,
       },
       {
         className: "n-video-visual",
@@ -372,7 +352,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "310px",
         label: { type: "videoAgent", key: "visual" },
         icon: "openai",
-        iconSize: 22,
       },
       {
         className: "n-video-editor",
@@ -380,7 +359,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "585px",
         label: { type: "videoAgent", key: "editor" },
         icon: "zap",
-        iconSize: 20,
       },
       {
         className: "n-video-deliver",
@@ -388,7 +366,6 @@ const DIAGRAM_CONFIGS: Record<OrchestrationDiagramTab, DiagramTabConfig> = {
         left: "710px",
         label: { type: "videoAgent", key: "deliver" },
         icon: "video",
-        iconSize: 20,
         iconClassName: "is-deliver",
       },
     ],
@@ -536,7 +513,7 @@ const DesktopNodes = ({
       >
         <div className="wf-glass-ring" />
         <div className={`wf-icon-core${node.iconClassName ? ` ${node.iconClassName}` : ""}`}>
-          <DiagramIcon kind={node.icon} size={node.iconSize ?? 20} />
+          <DiagramIcon kind={node.icon} size={20} />
         </div>
         <div className="wf-node-label">{resolveNodeLabel(node.label, t, videoAgentLabels)}</div>
       </div>
@@ -578,7 +555,7 @@ const MobileNodes = ({
         style={nodePositionStyle(node.top, node.left, viewBox)}
       >
         <div className={`wf-icon-core${node.iconClassName ? ` ${node.iconClassName}` : ""}`}>
-          <DiagramIcon kind={node.icon} size={node.iconSize ? Math.max(14, node.iconSize - 6) : 16} />
+          <DiagramIcon kind={node.icon} size={16} />
         </div>
         <div className="wf-node-label">{resolveNodeLabel(node.label, t, videoAgentLabels)}</div>
       </div>

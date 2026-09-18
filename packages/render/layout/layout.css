@@ -111,7 +111,7 @@ html[data-nolo-desktop-titlebar="hidden"] .MainLayout {
   flex-direction: column;
   flex-shrink: 0;
   position: relative;
-  z-index: 6;
+  z-index: var(--z-sidebar, 6);
   overflow: hidden;
   --sidebar-ambient-glow: color-mix(in srgb, var(--primary) 13%, transparent);
   background: radial-gradient(circle at 12% 8%, var(--sidebar-ambient-glow) 0%, transparent 65%), var(--backgroundSecondary);
@@ -395,7 +395,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   backdrop-filter: blur(4px);
   /* 仅移动端渲染：要压住页面内 sticky 内容（首页 quick-chat 输入条 z-index:20），
      同时低于抽屉本身（z-index:70）。 */
-  z-index: 60;
+  z-index: var(--z-mobileDrawerBackdrop, 60);
   animation: fadeIn 0.24s ease;
   touch-action: none; /* 降低移动端遮罩下仍然滚动背景的机会 */
   cursor: pointer;
@@ -417,7 +417,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     height: auto;
     /* 抽屉必须盖住页面内的 sticky 元素（如首页 quick-chat 输入条 z-index:20），
        否则移动端打开侧边栏会被内容挡住。见 --z-mobile-drawer 注释。 */
-    z-index: 70;
+    z-index: var(--z-mobileDrawer, 70);
     box-shadow:
       1px 0 0 0 rgba(0, 0, 0, 0.025),
       6px 0 16px -2px rgba(0, 0, 0, 0.04),
@@ -463,7 +463,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     top: var(--topbar-height); /* 与 TopBar 高度对齐 */
     bottom: 0;
     right: 0;
-    z-index: 70;
+    z-index: var(--z-mobileDrawer, 70);
     width: 85% !important;
     max-width: 320px;
     transform: translateX(100%);
@@ -1481,7 +1481,7 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     opacity var(--popover-duration) var(--popover-ease),
     transform var(--popover-duration) var(--popover-ease),
     visibility var(--popover-duration);
-  z-index: 1000; pointer-events: none;
+  z-index: var(--z-dropdown, 1000); pointer-events: none;
 }
 .topbar-dropdown--open,
 .topbar-dropdown[data-open] { opacity: 1; visibility: visible; transform: translateY(0) scale(1); pointer-events: auto; }

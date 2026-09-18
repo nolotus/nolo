@@ -54,7 +54,7 @@ export default {
   [Language.ZH_CN]: {
     translation: {
       terms: {
-        title: "服务条款",
+        title: "服务条款 (Terms of Service)",
         lastUpdated: "最后更新日期：2026年8月27日",
         intro:
           "欢迎使用 Nolo 提供的服务（以下简称“本服务”）。访问、注册或购买本服务积分，即表示您同意受本服务条款的约束。",
@@ -104,7 +104,7 @@ export default {
   [Language.ZH_HANT]: {
     translation: {
       terms: {
-        title: "服務條款",
+        title: "服務條款 (Terms of Service)",
         lastUpdated: "最後更新日期：2026年8月27日",
         intro:
           "歡迎使用 Nolo 提供的服務（以下簡稱“本服務”）。造訪、註冊或購買本服務積分，即表示您同意受本服務條款的約束。",
