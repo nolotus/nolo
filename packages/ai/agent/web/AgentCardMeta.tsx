@@ -62,7 +62,7 @@ const AgentCardMeta = ({ item }: AgentCardMetaProps) => {
 
       {showCliBadge && (
         <span className="agent__tag agent__cli">
-          <LuTerminal size={11} aria-hidden="true" />
+          <LuTerminal size={12} aria-hidden="true" />
           <span>CLI</span>
         </span>
       )}
@@ -71,13 +71,13 @@ const AgentCardMeta = ({ item }: AgentCardMetaProps) => {
           className="agent__tag agent__runtime"
           title={runtimeMachineId || ""}
         >
-          <LuLaptop size={11} aria-hidden="true" />
+          <LuLaptop size={12} aria-hidden="true" />
           <span>{runtimeLabel}</span>
         </span>
       )}
       {showVisionBadge && (
         <span className="agent__tag agent__vision">
-          <LuEye size={11} aria-hidden="true" />
+          <LuEye size={12} aria-hidden="true" />
           <span>{t("vision")}</span>
         </span>
       )}

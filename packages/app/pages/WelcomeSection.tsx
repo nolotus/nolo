@@ -379,7 +379,7 @@ const WelcomeSection = () => {
                 {t("welcomeSection.finalCta.primary")}
               </NavLink>
               <NavLink to="/downloads" className="ws-cta-btn ws-cta-download ws-cta-lg">
-                <LuDownload size={18} aria-hidden="true" />
+                <LuDownload size={16} aria-hidden="true" />
                 <span>{t("downloadClient", "下载客户端")}</span>
               </NavLink>
             </div>

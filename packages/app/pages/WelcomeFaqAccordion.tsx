@@ -21,7 +21,7 @@ const WelcomeFaqAccordion = ({ items, className = "" }: WelcomeFaqAccordionProps
         <Disclosure key={item.question} id={item.question} className="ws-faq-item">
           <Button slot="trigger" className="ws-faq-trigger">
             {item.question}
-            <LuChevronDown size={18} aria-hidden="true" className="ws-faq-trigger-icon" />
+            <LuChevronDown size={16} aria-hidden="true" className="ws-faq-trigger-icon" />
           </Button>
           <DisclosurePanel className="ws-faq-panel">
             <p>{item.answer}</p>

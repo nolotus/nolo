@@ -1,4 +1,13 @@
 
+## 0.103.0-alpha.4
+
+## 0.103.0-alpha.4 (2026-09-18)
+
+### Bug Fixes
+
+* **home:** put the remaining visible icons back on the 16/20/24 grid ([0b45d01](https://github.com/nolotus/bun-nolo/commit/0b45d014260ed17d04b1e2b05f4ceb6edc0c5434))
+
+
 ## 0.103.0-alpha.3
 
 ## 0.103.0-alpha.3 (2026-09-18)

@@ -224,7 +224,7 @@ const AgentMoreActionsComponent = ({
           aria-label={t("moreActions")}
           aria-expanded={showActions}
         >
-          <LuEllipsis size={18} aria-hidden="true" />
+          <LuEllipsis size={16} aria-hidden="true" />
         </button>
 
         {showActions && (
