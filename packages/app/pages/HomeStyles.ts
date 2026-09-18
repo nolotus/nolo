@@ -229,8 +229,8 @@ export const homeStyles = stylex.create({
     // 原 #ai-plaza-section 的 scroll-margin-top（锚点跳转留出顶部空间）。
     scrollMarginTop: "clamp(16px, 4vw, 32px)",
     "@media (max-width: 640px)": {
-      paddingTop: "var(--space-2)",
-      paddingBottom: "var(--space-2)",
+      paddingTop: "var(--space-6)",
+      paddingBottom: "var(--space-6)",
     },
   },
   homePlazaBridge: {

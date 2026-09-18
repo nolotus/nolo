@@ -1,4 +1,15 @@
 
+## 0.82.0-alpha.2
+
+## 0.82.0-alpha.2 (2026-09-18)
+
+### Bug Fixes
+
+* **home:** align landing-page spacing scale, surface radii and copy ([5ba9383](https://github.com/nolotus/bun-nolo/commit/5ba93835a8e34fe03b8b7d579a705e47632b4c3e))
+* **home:** close residual reduced-motion and contrast gaps ([042f104](https://github.com/nolotus/bun-nolo/commit/042f104d8078290674511adfadd052172b9e89e4))
+* **home:** repair landing-page a11y, SSR hydration and copy issues ([2e46dbe](https://github.com/nolotus/bun-nolo/commit/2e46dbe7f56c12859e2dcfdd296a53c7ca1d9bd3))
+
+
 ## 0.82.0-alpha.1
 
 ## 0.82.0-alpha.1 (2026-09-18)

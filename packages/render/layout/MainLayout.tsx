@@ -98,6 +98,8 @@ const MainLayout: React.FC = () => {
   const [isResizing, setIsResizing] = useState(false);
   const [isRightResizing, setIsRightResizing] = useState(false);
   const isMobile = useIsMobile(768);
+  // Keep the first client render identical to SSR; media-query behavior starts after mount.
+  const shouldRenderMobileLayout = hasMounted && isMobile;
 
   const sidebarRef = useRef<HTMLElement | null>(null);
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -470,7 +472,7 @@ const MainLayout: React.FC = () => {
           <aside
             ref={sidebarRef}
             className={`MainLayout__sidebar ${isOpen ? "is-open" : ""}`}
-            style={isMobile ? undefined : { width: sidebarWidth }}
+            style={shouldRenderMobileLayout ? undefined : { width: sidebarWidth }}
           >
             <div className="MainLayout__sidebarContent">{sidebarContent}</div>
             {isLoggedIn && (
@@ -478,7 +480,7 @@ const MainLayout: React.FC = () => {
                 <SidebarUserSection />
               </Suspense>
             )}
-            {!isMobile && (
+            {!shouldRenderMobileLayout && (
               <div
                 className="MainLayout__resizeHandle"
                 onPointerDown={startResizing}
@@ -526,7 +528,7 @@ const MainLayout: React.FC = () => {
               ref={rightSidebarRef}
               className={`MainLayout__rightSidebar ${isRightOpen ? "is-open" : ""} ${isRightResizing ? "is-right-resizing" : ""}`}
               style={
-                isMobile
+                shouldRenderMobileLayout
                   ? undefined
                   : {
                     width: isRightOpen ? effectiveWidth : 0,
@@ -534,7 +536,7 @@ const MainLayout: React.FC = () => {
               }
               aria-hidden={!isRightOpen}
             >
-              {!isMobile && isRightOpen && (
+              {!shouldRenderMobileLayout && isRightOpen && (
                 <div
                   className="MainLayout__rightResizeHandle"
                   role="separator"
@@ -560,7 +562,7 @@ const MainLayout: React.FC = () => {
         </div>
 
         {/* 移动端遮罩：任一侧栏打开就显示 */}
-        {isMobile && ((hasSidebar && isOpen) || isRightOpen) && (
+        {shouldRenderMobileLayout && ((hasSidebar && isOpen) || isRightOpen) && (
           <button
             type="button"
             className="MainLayout__backdrop"

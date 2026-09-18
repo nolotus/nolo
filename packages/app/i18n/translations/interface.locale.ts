@@ -1986,7 +1986,7 @@ export default {
         heroTitle: "让最强的模型规划，让更低成本的 Agent 执行。",
         heroDescription: "Nolo 跨模型编排你的编码 Agent——让高价值算力专注核心决策，而不是消耗在每个常规步骤上。",
         ctaButton: "免费开始",
-        secondaryExplore: "先逛逛公开 AI",
+        secondaryExplore: "浏览公开 AI",
         secondaryDownload: "下载桌面端或移动端",
         secondaryPricing: "了解定价",
         trustMicro: "免费注册 · 无需信用卡 · 随时可停",
@@ -2009,7 +2009,7 @@ export default {
         },
         proof: {
           kicker: "为什么从这里开始",
-          title: "更适合想要推进结果的人，而不只是想换个 prompt 皮肤的人",
+          title: "更适合想把结果推进下去的人，而不是只想换套提示词的人",
           description:
             "如果你需要的是记住上下文、把任务委托出去、最后拿到真实成果，而不是同时开很多 AI 标签页自己拼，Nolo 的价值会更明显。",
           label: "首页能力证明",
@@ -2027,7 +2027,7 @@ export default {
         faq: {
           kicker: "常见问题",
           title: "Agent 玩家真正想知道的",
-          description: "给已经在玩 Agent、想真正拿来干活的人，不是只想换个 prompt 皮肤的人。",
+          description: "给已经在用 Agent、想真正拿来干活的人，不是只想换套提示词的人。",
           context: {
             question: "Agent 之间的上下文是共享的吗？",
             answer:
@@ -2041,7 +2041,7 @@ export default {
           entry: {
             question: "一个任务里可以调度多个 Agent 吗？",
             answer:
-              "可以。Nolo 会根据任务自动或手动分发给不同的 Agent，它们可以并行工作、互相 Review，最后把结果汇总给你。",
+              "可以。Nolo 会根据任务自动或手动分发给不同的 Agent，它们可以并行工作、互相复核，最后把结果汇总给你。",
           },
           orchestration: {
             question: "编排方式是固定的吗？",
@@ -2230,8 +2230,8 @@ export default {
           kicker: "准备好就开始",
           title: "知道自己要做什么，就直接搭起来。",
           description:
-            "免费注册，几分钟就能配好你的第一个搭档。继续往下，也能逛社区里的公开 AI。",
-          primary: "创建我的工作台",
+            "免费注册，几分钟就能配好你的第一个搭档。继续往下，也能浏览社区里的公开 AI。",
+          primary: "免费开始",
         },
         cards: {
           create: {
@@ -3280,7 +3280,7 @@ export default {
         heroTitle: "讓最強模型規劃，讓更低成本的 Agent 執行。",
         heroDescription: "Nolo 跨模型編排您的編碼 Agent——讓高價值算力專注核心決策，而不是消耗在每個常規步驟上。",
         ctaButton: "免費開始",
-        secondaryExplore: "先逛逛公開 AI",
+        secondaryExplore: "瀏覽公開 AI",
         secondaryDownload: "下載桌面端或行動端",
         secondaryPricing: "了解定價",
         trustMicro: "免費註冊 · 無需信用卡 · 隨時可停",
@@ -3303,7 +3303,7 @@ export default {
         },
         proof: {
           kicker: "為什麼從這裡開始",
-          title: "更適合想推進結果的人，而不只是想換個 prompt 外皮的人",
+          title: "更適合想把結果推進下去的人，而不是只想換套提示詞的人",
           description:
             "如果您需要的是記住上下文、把任務委託出去、最後拿到真實成果，而不是同時開很多 AI 分頁自己拼，Nolo 的價值會更明顯。",
           label: "首頁能力證明",
@@ -3321,7 +3321,7 @@ export default {
         faq: {
           kicker: "常見問題",
           title: "Agent 玩家真正想知道的",
-          description: "給已經在玩 Agent、想真正拿來幹活的人，不是只想換個 prompt 外皮的人。",
+          description: "給已經在用 Agent、想真正拿來幹活的人，不是只想換套提示詞的人。",
           context: {
             question: "Agent 之間的上下文是共享的嗎？",
             answer:
@@ -3335,7 +3335,7 @@ export default {
           entry: {
             question: "一個任務裡可以調度多個 Agent 嗎？",
             answer:
-              "可以。Nolo 會根據任務自動或手動分發給不同的 Agent，它們可以並行工作、互相 Review，最後把結果匯總給您。",
+              "可以。Nolo 會根據任務自動或手動分發給不同的 Agent，它們可以並行工作、互相複核，最後把結果匯總給您。",
           },
           orchestration: {
             question: "編排方式是固定的嗎？",
@@ -3524,8 +3524,8 @@ export default {
           kicker: "準備好就開始",
           title: "知道自己要做什麼，就直接搭起來。",
           description:
-            "免費註冊，幾分鐘就能搭出您的第一個 AI。繼續往下，也能逛社群裡的公開 AI。",
-          primary: "建立我的工作台",
+            "免費註冊，幾分鐘就能搭出您的第一個 AI。繼續往下，也能瀏覽社群裡的公開 AI。",
+          primary: "免費開始",
         },
         cards: {
           create: {

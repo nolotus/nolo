@@ -49,7 +49,7 @@
   position: relative;
   z-index: 2;
   padding-top: 64px;
-  margin-bottom: 88px;
+  margin-bottom: var(--space-20);
   content-visibility: auto;
   /* 只给块轴占位高度。简写 `contain-intrinsic-size: auto 520px` 会同时把
      内联轴的固有宽度设成 520px，未渲染时把整页 min-content 撑到 520，
@@ -113,7 +113,7 @@
 }
 
 .ws-faq-item {
-  border-radius: 18px;
+  border-radius: var(--ws-radius, 24px);
   border: 1px solid var(--borderLight, #e5e5e5);
   background: var(--background);
   box-shadow: 0 10px 24px -22px var(--shadowMedium);
@@ -446,7 +446,7 @@
 
         .ws-sleep-badge {
            margin-top: 20px; z-index: 2; display: flex; align-items: center; gap: 8px;
-           color: #94a3b8; font-size: 0.8125rem; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 99px;
+           color: #94a3b8; font-size: 0.8125rem; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 999px;
         }
 
         /* === Animations === */
@@ -502,7 +502,7 @@
   align-items: flex-start;
   gap: 48px;
   padding: 40px 32px;
-  border-radius: 28px;
+  border-radius: var(--ws-radius, 24px);
   background: color-mix(in srgb, var(--primary) 4%, var(--ws-bg));
 }
 

@@ -102,6 +102,13 @@ export const tabsNavStyles = stylex.create({
       cursor: "not-allowed",
     },
   },
+  // Reuse Button's control-level keyboard focus language; keep the ring on the tab.
+  tabItemFocusRing: {
+    ":focus-visible": {
+      boxShadow:
+        "0 0 0 2px var(--background), 0 0 0 4px color-mix(in srgb, var(--primary) 50%, transparent)",
+    },
+  },
   // .tab-item:not([disabled]):hover（仅非 disabled 时挂载）
   tabItemHover: {
     ":hover": {

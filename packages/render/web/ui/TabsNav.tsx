@@ -10,13 +10,15 @@ export interface Tab {
   disabled?: boolean;
 }
 
-interface TabsNavProps {
+export interface TabsNavProps {
   tabs: Tab[];
   activeTab: number | string;
   onChange: (tabId: number | string) => void;
   className?: string;
   id?: string;
   panelId?: string;
+  /** Stable id for the active tab, suitable for aria-labelledby on the panel. */
+  activeTabId?: string;
 }
 
 const TabsNav: React.FC<TabsNavProps> = ({
@@ -26,6 +28,7 @@ const TabsNav: React.FC<TabsNavProps> = ({
   className = "",
   id,
   panelId,
+  activeTabId,
 }) => {
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
@@ -178,9 +181,14 @@ const TabsNav: React.FC<TabsNavProps> = ({
         {tabs.map((tab, index) => {
           const isActive = activeTab === tab.id;
           const tabControlId =
-            panelId != null ? `${panelId}-tab-${String(tab.id)}` : undefined;
+            activeTabId && isActive
+              ? activeTabId
+              : panelId != null
+                ? `${panelId}-tab-${String(tab.id)}`
+                : undefined;
           const tabItemProps = stylex.props(
             tabsNavStyles.tabItem,
+            !tab.disabled && tabsNavStyles.tabItemFocusRing,
             !tab.disabled && tabsNavStyles.tabItemHover,
           );
 

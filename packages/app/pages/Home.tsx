@@ -213,7 +213,6 @@ const Home = () => {
     [handleTabChange]
   );
 
-  const homePlazaTabsId = "home-plaza-tabs";
   const homePlazaPanelId = "home-plaza-panel";
 
   return (
@@ -324,7 +323,7 @@ const Home = () => {
                     className="activity-pane"
                     data-active="true"
                     role="tabpanel"
-                    aria-labelledby={homePlazaTabsId}
+                    aria-label={activePane.label}
                   >
                     <Suspense fallback={<HomePaneSkeleton />}>
                       {activePane.id === "communityAI" ? (

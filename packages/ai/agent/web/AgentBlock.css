@@ -139,16 +139,16 @@
         }
 
         .agent__price-label {
-          color: var(--textTertiary);
+          color: var(--textSecondary);
           font-weight: 500;
-          font-size: var(--fontSize-xs);
+          font-size: var(--fontSize-sm);
           white-space: nowrap;
         }
 
         .agent__price-unit {
-          color: var(--textTertiary);
+          color: var(--textSecondary);
           font-weight: 400;
-          font-size: var(--fontSize-xs);
+          font-size: var(--fontSize-sm);
           white-space: nowrap;
         }
 
@@ -178,16 +178,9 @@
           background: color-mix(in srgb, var(--primary) 6%, var(--surfaceRaised, var(--backgroundTertiary)));
           color: var(--textMuted, var(--textSecondary));
           padding: 2px 7px;
-          font-size: 11px;
+          font-size: var(--fontSize-sm);
           line-height: 1.35;
           white-space: nowrap;
-        }
-
-        .agent__model-cost span.agent__price-label {
-          border: none;
-          background: transparent;
-          padding: 0;
-          border-radius: 0;
         }
 
         .agent__model-cost strong {
@@ -205,7 +198,7 @@
         }
 
         .agent__tag {
-          font-size: var(--fontSize-xs);
+          font-size: var(--fontSize-sm);
           padding: 3px 8px;
           background: var(--surfaceInteractive, var(--backgroundTertiary));
           border-radius: 999px;
@@ -220,7 +213,7 @@
           display: flex;
           align-items: center;
           gap: 4px;
-          color: var(--primary);
+          color: var(--primaryDark, var(--primary));
           background: var(--accentSoft, var(--primaryGhost));
           border-color: transparent;
         }
@@ -237,9 +230,16 @@
           display: flex;
           align-items: center;
           gap: 4px;
-          color: var(--primary);
+          color: var(--primaryDark, var(--primary));
           background: var(--accentSoft, var(--primaryGhost));
           border-color: transparent;
+        }
+
+        /* 蓝色标签：亮色用 primaryDark 才够 AA；暗色下 primaryDark 反而更暗，
+           必须回到 primary（与 siteFooter / hero 的 dark 覆盖写法一致）。 */
+        [data-theme="dark"] .agent__vision,
+        [data-theme="dark"] .agent__runtime {
+          color: var(--primary);
         }
 
         .agent__tag--more {

@@ -268,13 +268,14 @@ const WelcomeSection = () => {
             className="ws-orchestration-tabs"
             id={orchestrationTabsId}
             panelId={orchestrationPanelId}
+            activeTabId={`${orchestrationPanelId}-tab-${orchestrationTab}`}
           />
 
           <div
             className="ws-orchestration-panel"
             role="tabpanel"
             id={orchestrationPanelId}
-            aria-labelledby={orchestrationTabsId}
+            aria-labelledby={`${orchestrationPanelId}-tab-${orchestrationTab}`}
           >
             <div key={orchestrationTab} className="ws-orchestration-tab-body">
               <p className="ws-orchestration-example-label">{activeExampleLabel}</p>

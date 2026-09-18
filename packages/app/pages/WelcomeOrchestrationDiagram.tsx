@@ -487,7 +487,7 @@ const DesktopTracksSvg = ({
   <svg
     className="wf-svg-lines"
     viewBox={config.viewBox}
-    aria-hidden={config.svgAriaHidden ? true : undefined}
+    aria-hidden={config.svgAriaHidden ?? (config === DIAGRAM_CONFIGS.coding ? true : undefined)}
   >
     <g className={config.tracksClassName ? `wf-tracks ${config.tracksClassName}` : "wf-tracks"}>
       {config.tracks.map((track) => (
