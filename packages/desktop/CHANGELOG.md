@@ -1,4 +1,52 @@
 
+## 0.75.0
+
+## 0.75.0 (2026-09-18)
+
+### Features
+
+* **agent-runtime:** guide agents to render mermaid for structured explanations ([87d0fd4](https://github.com/nolotus/bun-nolo/commit/87d0fd4b676f8358b1a5af697cf1a36f80147281))
+* **app:** surface cost routing on the landing page and localize the OG card ([09c0207](https://github.com/nolotus/bun-nolo/commit/09c0207d8d3cf8cfa8fffb2b43888791bd1fa82e))
+* **cli:** let the TUI drive the user's Chrome through the Nolo connector ([9ada25d](https://github.com/nolotus/bun-nolo/commit/9ada25dcb536022ae09132e0f295785b95d440b6))
+* **cli:** nolo chrome 组补充操作子命令（读页面/点击/输入等 11 个） ([d44444e](https://github.com/nolotus/bun-nolo/commit/d44444e772b95984842d80c18093838b5ed82ac0))
+* **cli:** render mermaid diagrams via lovely-mermaid ([249d944](https://github.com/nolotus/bun-nolo/commit/249d9440b0dc8a7ac8be17d572fa05bffd0835b5))
+* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
+* **desktop:** add compact Chrome observation protocol ([dae7f9d](https://github.com/nolotus/bun-nolo/commit/dae7f9d8b8b5fca28fdecbb845b4f16625ffd9da))
+* **desktop:** add the Chrome Web Store publishing kit ([00315ea](https://github.com/nolotus/bun-nolo/commit/00315ea16e33920b463e403a02887e26718b4aa6))
+* **desktop:** negotiate Chrome connector capabilities instead of failing on any skew ([f2a10bb](https://github.com/nolotus/bun-nolo/commit/f2a10bb0bbbb63bc0865cca63d0a76d5e64c02c2))
+* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
+* **desktop:** self-reload the unpacked extension and localise its surface ([403d355](https://github.com/nolotus/bun-nolo/commit/403d35595f66c7b9e8f5ac69b8019009f83da2cd))
+
+### Bug Fixes
+
+* **agent-runtime:** 工具参数尾截断可无损补全时直接执行，不再白跑一轮重试 ([da894d4](https://github.com/nolotus/bun-nolo/commit/da894d4decb97beeaad476f3796faf093637dc4a))
+* **ask-user:** reduce choice interaction steps ([1c7b631](https://github.com/nolotus/bun-nolo/commit/1c7b6316ab0f9c955055e599f71610bdae31cddd))
+* **cli:** consume git stderr in connector runGit to avoid hang ([f0d1b28](https://github.com/nolotus/bun-nolo/commit/f0d1b2839efe025deb531d0092c033bba39ff6fe))
+* **cli:** fuse runGit with a timeout and tidy post-incident leftovers ([4d9e245](https://github.com/nolotus/bun-nolo/commit/4d9e245539c6eb5d11f80c5cee05b1c7e6b49b41))
+* **desktop:** import the protected-page code and pin it with a driven worker test ([e93c6e4](https://github.com/nolotus/bun-nolo/commit/e93c6e40378507aa928f8d182ea216e036f8518e))
+* **desktop:** install the Chrome native host on the right per-platform path ([4ac33c1](https://github.com/nolotus/bun-nolo/commit/4ac33c16478bdffde5c044f77839a7eaa422f385))
+* **desktop:** keep electrobun 安装载荷 tar 兼容并加验证闸门 ([1a12f8b](https://github.com/nolotus/bun-nolo/commit/1a12f8b26c14dc6f5902ce21aa1ed6ebaa8e1b82))
+* **desktop:** Linux 官方安装器发布到 R2 并作为推荐下载 ([f24a7e9](https://github.com/nolotus/bun-nolo/commit/f24a7e9a36fba0431cebdb1a7a36f54a50546c33))
+* **desktop:** name protected pages and reuse the shipped brand icons ([d184770](https://github.com/nolotus/bun-nolo/commit/d1847701792febda93f7536db34b57c99a1f78dd))
+* **desktop:** Windows 安装器落到 electrobun 托管目录（恢复应用内自更新） ([11d1a7f](https://github.com/nolotus/bun-nolo/commit/11d1a7fab7b103d9cab4ba1c8454b348e9864c22)), closes [#define](https://github.com/nolotus/bun-nolo/issues/define)
+* **desktop:** 更新面板文案人话化（保留原文可查） ([38164e4](https://github.com/nolotus/bun-nolo/commit/38164e4129eae98cb4b44b25d091d81f38a26f5b))
+* **desktop:** 桌面登录导入 CLI profile tokens[] 形状 ([c8480e5](https://github.com/nolotus/bun-nolo/commit/c8480e56ddcbcc21a6f9a10ac4cc9a988908338b))
+* **desktop:** 浏览器地址栏贴顶并补齐站点图标与安全指示 ([ca337a6](https://github.com/nolotus/bun-nolo/commit/ca337a64d74719b1bd599c205ca988a6f431b20a))
+* **desktop:** 载荷闸门迁入 desktop 包，锁死跨树 import 在公开投影缺失 ([840ed09](https://github.com/nolotus/bun-nolo/commit/840ed0998c728ec47c890e1132413f1d3fb9b672))
+* **desktop:** 非受管理安装不再给必然失败的「下载更新」按钮 ([caceedc](https://github.com/nolotus/bun-nolo/commit/caceedc9020a0523e6c6d33ca738b2ecec8d3a93))
+* **desktop:** 预热 electrobun 安装元数据并迁移 legacy 数据目录，修复打包版检查更新失败 ([94aebdb](https://github.com/nolotus/bun-nolo/commit/94aebdb047ac4eb6308259ef9415b5e18a0b2031))
+* **dx:** serialize green typechecks to reduce peak memory ([9842453](https://github.com/nolotus/bun-nolo/commit/9842453e8ccd7b72c7c24525dbcfa6ed4ff5e60a))
+* **table:** 修正重命名列显示名/重命名表的命令参数名 ([9cfc459](https://github.com/nolotus/bun-nolo/commit/9cfc4595cc08eeaffcf36d9840c70ce85e1ecb67))
+* **table:** 去掉 setTableFocusContext 的 dispatch 包装，修复表格页渲染崩溃 ([8586fa9](https://github.com/nolotus/bun-nolo/commit/8586fa99a0017f50952c1319fb66cb62fe7347af)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7)
+* **table:** 给 listTableRows 的服务器读取加 5s 超时，修复表格加载可卡 60s+ ([66afa8a](https://github.com/nolotus/bun-nolo/commit/66afa8a883833abe1e1e9b547a52455a88b9b659))
+* **tui:** reduce wheel scrolling backlog with adaptive catch-up ([bba6016](https://github.com/nolotus/bun-nolo/commit/bba601658622dba14169705901da0d259569532c))
+* **tui:** soften user messages on light backgrounds ([50d80c3](https://github.com/nolotus/bun-nolo/commit/50d80c3d0a8f7cc602861b3d0bea8325d806f482))
+
+### Performance Improvements
+
+* **cli:** avoid pathological Bun JSON.stringify on cyclic delegation payloads ([aea5535](https://github.com/nolotus/bun-nolo/commit/aea553559629a2397fb48e6659a48fa2f0d6ad09))
+
+
 ## 0.74.0
 
 ## 0.74.0 (2026-09-16)
