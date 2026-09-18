@@ -25,7 +25,9 @@
  *
  * 运行：bun packages/cli/__perf__/alphaServerStageProbe.ts [--samples 10]
  */
-import { getProfileTokens, loadProfileConfig } from "../client/profileConfig";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const arg = (name: string, fallback: string) => {
   const i = Bun.argv.indexOf(`--${name}`);
@@ -34,9 +36,11 @@ const arg = (name: string, fallback: string) => {
 const SAMPLES = Math.max(3, Number(arg("samples", "10")) || 10);
 const BASE = arg("base", "https://nolo.chat").replace(/\/+$/, "");
 
-const cfg = loadProfileConfig();
-const authToken: string | undefined = getProfileTokens(cfg)[0];
-if (!authToken) throw new Error("no auth token in the Nolo CLI profile");
+const cfg = JSON.parse(
+  fs.readFileSync(path.join(os.homedir(), ".nolo/config.json"), "utf8"),
+);
+const authToken: string | undefined = cfg?.profiles?.default?.authToken;
+if (!authToken) throw new Error("no authToken in ~/.nolo/config.json");
 
 // 一条最小的合法 chat 请求体；S3 用的 agentKey 保证不存在（随机后缀）。
 const minimalMessages = [{ role: "user", content: "ping" }];

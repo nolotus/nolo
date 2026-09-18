@@ -39,7 +39,6 @@ async function readRootGitignorePatterns(workspaceRoot: string): Promise<string[
   return readRootGitignorePatternList(workspaceRoot);
 }
 import { getProcessRegistry } from "./processRegistry";
-import { readProcessOwner } from "./processOwnership";
 import {
   formatTaskLogsContent,
   runTaskLogs,
@@ -1857,9 +1856,6 @@ async function execShellTool(args: {
       confirmDestructiveAction: args.confirmDestructiveAction,
       blockDestructiveWithoutConfirmation: args.blockDestructiveWithoutConfirmation,
       onInvoke: args.onInvoke,
-      // Ownership is captured here (launch time) from the host-injected turn
-      // context, never re-derived when the task later reaches a terminal state.
-      owner: readProcessOwner(args.call.runtimeContext),
     },
   );
 }
@@ -1911,16 +1907,7 @@ async function launchProcessTool(args: {
 
   const pgid = detached ? pid : pid;
   const registry = getProcessRegistry();
-  const envelope = registry.add({
-    pid,
-    pgid,
-    command,
-    label,
-    persist,
-    // Launch-time ownership: the dialog/turn that asked for this background
-    // task. Terminal-time resume reads this record, never "current dialog".
-    owner: readProcessOwner(args.call.runtimeContext),
-  });
+  const envelope = registry.add({ pid, pgid, command, label, persist });
 
   const cleanupChildOnHostSignal: NodeJS.SignalsListener = (signal) => {
     try {

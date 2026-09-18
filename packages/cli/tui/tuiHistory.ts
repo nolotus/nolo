@@ -478,17 +478,14 @@ export function layoutTurnRows(
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const surfaceSeq = colorEnabled ? userSurfaceBackgroundSequence() : "";
-    // Body text: accent foreground + bold. The foreground color is the primary
-    // day/night-safe signal — it comes from the brightness-aware palette
-    // (truecolor hex, or ANSI-16 indexed fallback that follows the terminal's
-    // own theme), so it works even when the bubble surface is unavailable
-    // (no OSC 11 reply, non-truecolor). Bold is kept as the second,
-    // color-independent cue. \x1b[22m closes bold and \x1b[39m closes the
-    // foreground only, so the bubble surface (when present) survives to
-    // end-of-row.
+    // Bold body text: in terminal mode / non-truecolor there is no bubble
+    // background (theme.ts: ANSI-16 has no safe subtle background), so the
+    // accent gutter alone was the only signal and user turns blended into
+    // assistant output. Bold works in every color-capable terminal and keeps
+    // user turns findable while scrolling. \x1b[22m closes bold only, so the
+    // bubble surface (when present) survives to end-of-row.
     const boldOn = colorEnabled ? "\x1b[1m" : "";
     const boldOff = colorEnabled ? "\x1b[22m" : "";
-    const fgOff = colorEnabled ? "\x1b[39m" : "";
     const prefixWidth = 3;
 
     let lineSourceStart = 0;
@@ -496,7 +493,7 @@ export function layoutTurnRows(
     for (let i = 0; i < logicalLines.length; i++) {
       const line = logicalLines[i]!;
       const prefix = i === 0 ? firstPrefix : multilinePrefix;
-      const styledLine = `${prefix}${accentSeq}${boldOn}${line}${boldOff}${fgOff}`;
+      const styledLine = `${prefix}${boldOn}${line}${boldOff}`;
       const prefixCharCount = prefix.length;
       const wrappedRows = wrapTranscriptLineWithLayout(
         styledLine,
@@ -806,14 +803,13 @@ function renderTailTurnBlock(
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
     const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
     const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    // Same accent-foreground + bold body treatment as layoutTurnRows —
-    // streaming tail and finalized history must not drift apart.
+    // Same bold body treatment as layoutTurnRows — streaming tail and
+    // finalized history must not drift apart.
     const boldOn = colorEnabled ? "\x1b[1m" : "";
     const boldOff = colorEnabled ? "\x1b[22m" : "";
-    const fgOff = colorEnabled ? "\x1b[39m" : "";
     const lines: string[] = [];
     for (const rawLine of content.split("\n")) {
-      const styledLine = `${multilinePrefix}${accentSeq}${boldOn}${rawLine}${boldOff}${fgOff}`;
+      const styledLine = `${multilinePrefix}${boldOn}${rawLine}${boldOff}`;
       const rows = wrapTranscriptLine(styledLine, contentWidth, hangingIndent);
       lines.push(
         ...(surfaceSeq ? rows.map((row) => fillUserBubbleRow(row, surfaceSeq, contentWidth)) : rows),

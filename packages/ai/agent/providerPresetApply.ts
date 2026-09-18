@@ -55,13 +55,7 @@ export type ProviderPresetFieldBag = {
 export type ProviderPresetListGroup = {
   id: "subscription_oauth" | "subscription_token_plan" | "metered_api" | "manual";
   label: string;
-  items: {
-    id: string;
-    label: string;
-    description?: string;
-    /** Registry provider key（如 deepseek / moonshot），供下拉项解析品牌 logo。 */
-    provider?: string;
-  }[];
+  items: { id: string; label: string; description?: string }[];
 };
 
 export function formatProviderPresetLabel(entry: ProviderRegistryEntry): string {
@@ -164,7 +158,6 @@ export function listProviderPresetGroups(): ProviderPresetListGroup[] {
         id: p.id,
         label: p.label,
         description: p.description,
-        provider: p.provider,
       })),
     },
     {
@@ -174,7 +167,6 @@ export function listProviderPresetGroups(): ProviderPresetListGroup[] {
         id: p.id,
         label: p.label,
         description: p.description,
-        provider: p.provider,
       })),
     },
     {
@@ -190,8 +182,6 @@ export function listMeteredApiPresetOptions(): {
   id: string;
   label: string;
   description?: string;
-  /** Registry provider key，供下拉项解析品牌 logo；manual 项缺失。 */
-  provider?: string;
 }[] {
   return [
     ...CUSTOM_API_KEY_TEMPLATES.filter((p) => p.accessVariant === "metered_key").map(
@@ -199,7 +189,6 @@ export function listMeteredApiPresetOptions(): {
         id: p.id,
         label: p.label,
         description: p.description,
-        provider: p.provider,
       })
     ),
     { id: MANUAL_PROVIDER_PRESET_ID, label: "Manual / Other" },
@@ -216,8 +205,6 @@ export function listSubscriptionPresetOptions(): {
   label: string;
   description?: string;
   requiresDesktopOAuth: boolean;
-  /** Registry provider key，供下拉项解析品牌 logo。 */
-  provider?: string;
 }[] {
   const tokenPlans = CUSTOM_API_KEY_TEMPLATES.filter(
     (p) =>
@@ -228,7 +215,6 @@ export function listSubscriptionPresetOptions(): {
     label: p.label,
     description: p.description,
     requiresDesktopOAuth: false,
-    provider: p.provider,
   }));
 
   const oauth = SUBSCRIPTION_OAUTH_PROVIDERS.map((p) => ({
@@ -236,7 +222,6 @@ export function listSubscriptionPresetOptions(): {
     label: p.label,
     description: p.description,
     requiresDesktopOAuth: true,
-    provider: p.provider,
   }));
 
   return [...tokenPlans, ...oauth];

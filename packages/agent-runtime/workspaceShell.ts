@@ -17,7 +17,6 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
 import { resolveExecutableOnPath } from "./runtimeCompat";
 import { getProcessRegistry } from "./processRegistry";
-import type { ProcessOwner } from "./processOwnership";
 import { spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
@@ -585,13 +584,6 @@ export async function runWorkspaceCommand(args: {
   commandPrefix?: string[];
   abortSignal?: AbortSignal;
   detachMs?: number;
-  /**
-   * Parent dialog/turn that asked for this command (captured before spawn, see
-   * processOwnership.ts). It rides along on the pre-registered envelope, so an
-   * auto-detached command stays attributable to the conversation that launched
-   * it even after the user has moved on.
-   */
-  owner?: ProcessOwner | null;
 }): Promise<WorkspaceExecResult> {
   const timeoutMs = asOptionalPositiveFiniteNumber(args.timeoutMs);
   const detached = process.platform !== "win32";
@@ -628,10 +620,8 @@ export async function runWorkspaceCommand(args: {
       // Foreground grace-period envelope: not a user-visible background task
       // until promote() flips the marker on timeout detach (see
       // listBackground). Keeps the status line / /procs / /stop semantics
-      // identical to pre-Phase-0. Ownership rides along so the promoted record
-      // stays attributable without any terminal-time inference.
+      // identical to pre-Phase-0.
       transient: true,
-      owner: args.owner ?? null,
     });
   }
   const exitPromise = waitForNodeProcessExit(proc);
@@ -766,14 +756,7 @@ export async function runWorkspaceCommand(args: {
     // already returned in that case.
     const promoted = registry.promote(pid);
     const envelope = promoted
-      ?? registry.add({
-        pid,
-        pgid,
-        command: args.command.join(" "),
-        label,
-        promoted: true,
-        owner: args.owner ?? null,
-      });
+      ?? registry.add({ pid, pgid, command: args.command.join(" "), label });
     const taskId = envelope.taskId;
     proc.on("close", (code) => {
       detachSignalCleanup();

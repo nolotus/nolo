@@ -221,66 +221,6 @@ export function detectImagePaths(
   return out;
 }
 
-export type DetectedFileReference = {
-  /** 原始 token（保留引号 / `\ ` 转义），便于展示与去重。 */
-  raw: string;
-  /** 解析后的绝对路径。 */
-  resolvedPath: string;
-};
-
-/**
- * 检测「轻量本地文件引用」——**只做路径级确认，绝不读内容**。
- *
- * 与 detectImagePaths 的分工：图片路径会被读成 dataUrl 送进模型；其他文件
- * 只在本地确认「这个路径存在」并把路径文本留在消息里（模型看到的是路径，
- * 不是内容），用户拿到一行明确回执。这样既不 deep-read / upload 任意文件，
- * 也不会让用户以为模型已经看过文件内容。
- *
- * 保守规则（避免把散文当文件）：
- * - 必须带路径分隔符（`/` 或 `\`）或以 `~`/盘符开头——单独的 `notes.md`
- *   这种词不算引用；
- * - 必须有扩展名（1~8 位字母数字），且不是图片扩展名（图片走图片通道）；
- * - 必须真实存在且是可读的普通文件（目录不算）。
- */
-export function detectFileReferences(
-  line: string,
-  cwd: string,
-  opts: { wsl?: boolean; exclude?: readonly string[] } = {},
-): DetectedFileReference[] {
-  const wsl = opts.wsl ?? isWslEnvironment();
-  const excluded = new Set(opts.exclude ?? []);
-  const out: DetectedFileReference[] = [];
-  const seen = new Set<string>();
-  for (const token of tokenizePasteLine(line)) {
-    if (!token.raw || excluded.has(token.raw)) continue;
-    let candidate = token.decoded;
-    const uriPath = fileUriToPath(candidate);
-    if (uriPath !== null) candidate = uriPath;
-    if (wsl) candidate = mapWindowsPathToWsl(candidate);
-    if (candidate.startsWith("~")) candidate = resolveImageSource(candidate, cwd);
-    // 路径感：必须带分隔符或明确的家目录/盘符前缀。
-    const looksLikePath =
-      /[/\\]/.test(candidate) ||
-      candidate.startsWith("~") ||
-      /^[a-zA-Z]:/.test(candidate);
-    if (!looksLikePath) continue;
-    const ext = extnameOf(candidate);
-    if (!/^[a-z0-9]{1,8}$/.test(ext)) continue;
-    if (IMAGE_EXTENSION_SET.has(ext)) continue;
-    const resolved = resolveImageSource(candidate, cwd);
-    if (excluded.has(resolved) || seen.has(resolved)) continue;
-    if (!isReadableFilePath(resolved)) continue;
-    try {
-      if (!statSync(resolved).isFile()) continue;
-    } catch {
-      continue;
-    }
-    seen.add(resolved);
-    out.push({ raw: token.raw, resolvedPath: resolved });
-  }
-  return out;
-}
-
 type Tokenized = { raw: string; decoded: string };
 
 /**

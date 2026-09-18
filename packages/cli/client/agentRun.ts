@@ -1331,19 +1331,6 @@ async function runLocalAgentTurnForCli(
       : undefined;
   const currentDialogId = options.continueDialogId ?? ulid();
 
-  // Ownership stamp for workspace tools invoked inside this turn — background
-  // processes (launchProcess / auto-detached execShell) capture it at spawn
-  // time so their terminal can resume *the dialog that launched them*. The
-  // dialog id is known before the turn runs (continueDialogId, or the id minted
-  // for a brand-new conversation), so even the first turn of a new dialog is
-  // attributable without guessing from "the dialog open right now" later.
-  const turnId = `turn-${ulid()}`;
-  const runtimeContextWithOwnership: Record<string, any> = {
-    ...(runtimeContext ?? {}),
-    dialogId: currentDialogId,
-    turnId,
-  };
-
   const adapter = baseAdapter;
   const expandedMessage = options.pastedTextStore?.items.size
     ? expandCollapsedPastes(options.message, options.pastedTextStore)
@@ -1387,10 +1374,11 @@ async function runLocalAgentTurnForCli(
       category: options.category,
       inheritedFromDialogKey: options.inheritedFromDialogKey,
       parentDialogId: options.parentDialogId,
-      runtimeContext: runtimeContextWithOwnership,
+      runtimeContext,
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
       background: options.background,
       noStream: options.noStream,
+      ...(runtimeContext ? { runtimeContext } : {}),
       ...(options.contextBlockScopes?.length
         ? { contextBlockScopes: options.contextBlockScopes }
         : options.extraContextBlocks?.length

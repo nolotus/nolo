@@ -55,7 +55,6 @@ import type { FormData } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
 import { withLiteralClass } from "./withLiteralClass";
-import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
 
 // CLI 模型列表（从 AdvancedSettingsTab 提取）
 const COPILOT_CLI_MODELS = [
@@ -532,10 +531,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                                   textValue={textValue}
                                 >
                                   <SelectItemText className="nolo-select-item-text">
-                                    <ProviderPresetOptionLabel
-                                      label={textValue}
-                                      provider={item.provider}
-                                    />
+                                    {textValue}
                                   </SelectItemText>
                                   <SelectItemIndicator className="nolo-select-item-indicator">
                                     <LuCheck size={14} />

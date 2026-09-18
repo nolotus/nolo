@@ -4,7 +4,6 @@ import { qwenModels, qwenTokenPlanModels } from "../../integrations/qwen/models"
 import { moonshotModels, kimiCodeModels } from "../../integrations/moonshot/models";
 import { opencodeGoModels } from "../../integrations/opencode/models";
 import { commandCodeModels } from "../../integrations/commandcode/models";
-import { deepseekModels } from "../../integrations/deepseek/models";
 import type { ReasoningEffort } from "./createAgentSchema";
 // 统一维护 agent 创建时可选择的 provider：
 // - subscription OAuth 提供商（如 ChatGPT Plus/Pro、SuperGrok、Antigravity）
@@ -102,22 +101,6 @@ const COMMAND_CODE_MODEL_OPTIONS: ReadonlyArray<{
   recommended?: boolean;
   hasVision?: boolean;
 }> = commandCodeModels.map((m, i) => ({
-  id: m.name,
-  label: m.displayName ?? m.name,
-  hasVision: m.hasVision,
-  ...(i === 0 ? { recommended: true } : {}),
-}));
-
-/**
- * 由 integrations/deepseek/models 派生。第一项标记为推荐默认。
- * 与平台托管路由（provider=nolo）区分：这是用户自带 Key 的 metered 通道。
- */
-const DEEPSEEK_MODEL_OPTIONS: ReadonlyArray<{
-  id: string;
-  label: string;
-  recommended?: boolean;
-  hasVision?: boolean;
-}> = deepseekModels.map((m, i) => ({
   id: m.name,
   label: m.displayName ?? m.name,
   hasVision: m.hasVision,
@@ -454,20 +437,10 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     commercialKind: "api",
     accessVariant: "metered_key",
   },
-  // DeepSeek 模型统一改走 nolo provider（Ollama Cloud，thinking=max 快 28-49%）。
-  // 现按用户选择回归：自带 Key 的 metered 通道与平台托管通道并存，互不影响。
-  {
-    kind: "api_key_template",
-    id: "deepseek-api",
-    label: "DeepSeek API 用量计费",
-    description: "DeepSeek 官方 API（OpenAI 兼容，按量计费）",
-    provider: "deepseek",
-    baseUrl: "https://api.deepseek.com/v1",
-    defaultModel: "deepseek-v4-pro",
-    modelOptions: DEEPSEEK_MODEL_OPTIONS,
-    commercialKind: "api",
-    accessVariant: "metered_key",
-  },
+  // DeepSeek official API provider removed — all DeepSeek models now route
+  // through the nolo provider (Ollama Cloud). The "deepseek-api" template
+  // was retired on 2026-08-08 after benchmarks showed Ollama Cloud is
+  // 28-49% faster with thinking=max enabled.
   {
     kind: "api_key_template",
     id: "qwen-api",

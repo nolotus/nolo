@@ -1,6 +1,5 @@
 import type { AgentRuntimeToolResult } from "../hostAdapter";
 import type { PermissionRequest } from "../actionGate";
-import type { ProcessOwner } from "../processOwnership";
 
 export type OpenAiCompatibleTool = Record<string, unknown> & {
   type?: string;
@@ -13,8 +12,6 @@ export type OpenAiCompatibleTool = Record<string, unknown> & {
 
 export interface CapabilityExecutionContext {
   workspaceRoot?: string;
-  /** Parent dialog/turn that asked for this capability (see processOwnership.ts). */
-  owner?: ProcessOwner | null;
   commandTimeoutMs?: number;
   commandOutputLimit?: number;
   commandPrefix?: string[];
