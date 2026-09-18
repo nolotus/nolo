@@ -1,4 +1,19 @@
 
+## 0.81.0-alpha.1
+
+## 0.81.0-alpha.1 (2026-09-18)
+
+### Features
+
+* **render:** rebuild the site footer as a layered riverbank camping scene ([15083f9](https://github.com/nolotus/bun-nolo/commit/15083f907a7beacd90b7bbcfb67d8dbe8478ad16)), closes [#8482AD](https://github.com/nolotus/bun-nolo/issues/8482AD) [#d5eed2](https://github.com/nolotus/bun-nolo/issues/d5eed2) [#a5cba5](https://github.com/nolotus/bun-nolo/issues/a5cba5)
+
+### Bug Fixes
+
+* **agent:** classify owner subscription channels ([f27320d](https://github.com/nolotus/bun-nolo/commit/f27320d1b5160ea831dcace3f8f2afa8ae83903e))
+* **agent:** preserve shared agent keys ([2936fce](https://github.com/nolotus/bun-nolo/commit/2936fce4b9ba8f6ee90ab29a4708d9882600c7f5))
+* **render:** correct footer river geometry ([ca700c5](https://github.com/nolotus/bun-nolo/commit/ca700c57c17a75345942f1d7728947ab51c6e067))
+
+
 ## 0.80.0-alpha.2
 
 ## 0.80.0-alpha.2 (2026-09-18)

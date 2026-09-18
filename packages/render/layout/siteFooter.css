@@ -1,14 +1,230 @@
+/* 站点页脚：河畔草地露营场景 + 法务链接。
+   场景配色用 --camp-* 变量，随 [data-theme] 切换；
+   动画只在 prefers-reduced-motion: no-preference 下启用。 */
+
 .SiteFooter {
+  /* 浅色（默认）：河畔白昼。所有场景色用 color-mix 融入 var(--primary)，
+     随站点主题色（zinc / github / linear 等）自动呼应。 */
+  --camp-mountain-far: color-mix(in srgb, var(--primary) 12%, #85b882);
+  --camp-hill: color-mix(in srgb, var(--primary) 16%, #54944d);
+  --camp-ground: color-mix(in srgb, var(--primary) 12%, #2f6b36);
+  /* 水体：主题色只做轻微环境光染色（6~10%），保证任何主题下色相都稳定为"水蓝"。
+     42% 混色会让 rose 主题的河变成灰紫泥浆、mono（橙 primary）的河被互补抵消成灰青。
+     远端反射天空偏亮，近岸水色偏深，由 svg linearGradient 垂直过渡。 */
+  --camp-river-far: color-mix(in srgb, var(--primary) 6%, #8ccbe9);
+  --camp-river: color-mix(in srgb, var(--primary) 8%, #4a9dc9);
+  --camp-river-near: color-mix(in srgb, var(--primary) 10%, #35789f);
+  --camp-river-glint: color-mix(in srgb, var(--primary) 5%, #eefaff);
+  --camp-river-bank: color-mix(in srgb, var(--primary) 8%, #2b5f83);
+  --camp-pine: color-mix(in srgb, var(--primary) 8%, #256b45);
+  --camp-tree: color-mix(in srgb, var(--primary) 10%, #3f8450);
+  --camp-rock: color-mix(in srgb, var(--primary) 22%, #9aa5a0);
+  --camp-tuft: color-mix(in srgb, var(--primary) 8%, #245c2a);
+  --camp-trunk: #6d4c2f;
+  --camp-canoe: color-mix(in srgb, var(--primary) 14%, #7c4826);
+  --camp-canoe-rim: #9d6537;
+  --camp-bird: color-mix(in srgb, var(--primary) 25%, #4a6655);
+  --camp-tent-a: #ef8b3f;
+  --camp-tent-a-dark: #d1702a;
+  --camp-tent-b: #35a29b;
+  --camp-tent-b-dark: #26837d;
+  --camp-door: #5d3a1e;
+  --camp-door-glow: #ffd98a;
+  --camp-log: #7a5230;
+  --camp-flame: #ff9a3c;
+  --camp-flame-inner: #ffd66e;
+  --camp-link: #dcefdd;
+  --camp-link-hover: #ffffff;
+  /* 版权行 0.78rem 小文本：对 --camp-ground 全主题实测需 ≥4.5:1（WCAG AA），
+     原 #b9d8b6 最差仅 3.73:1（mono 橙主题），已提亮。 */
+  --camp-copy: #d5eed2;
+
   flex-shrink: 0;
   margin-top: auto;
-  padding: var(--space-8) var(--space-6);
-  border-top: 1px solid var(--border);
-  background: var(--background);
 }
 
+[data-theme="dark"] .SiteFooter {
+  /* 深色：地面营地，同样融入主题色 */
+  --camp-mountain-far: color-mix(in srgb, var(--primary) 10%, #1f422b);
+  --camp-hill: color-mix(in srgb, var(--primary) 14%, #265233);
+  --camp-ground: color-mix(in srgb, var(--primary) 10%, #1d4a2a);
+  --camp-river-far: color-mix(in srgb, var(--primary) 6%, #5893b8);
+  --camp-river: color-mix(in srgb, var(--primary) 8%, #33698c);
+  --camp-river-near: color-mix(in srgb, var(--primary) 10%, #214d6b);
+  --camp-river-glint: color-mix(in srgb, var(--primary) 5%, #b6e0f5);
+  --camp-river-bank: color-mix(in srgb, var(--primary) 8%, #17384f);
+  --camp-pine: color-mix(in srgb, var(--primary) 6%, #173d2a);
+  --camp-tree: color-mix(in srgb, var(--primary) 8%, #2a5e3c);
+  --camp-rock: color-mix(in srgb, var(--primary) 20%, #5b6670);
+  --camp-tuft: color-mix(in srgb, var(--primary) 6%, #173d22);
+  --camp-trunk: #4a3320;
+  --camp-canoe: color-mix(in srgb, var(--primary) 12%, #563318);
+  --camp-canoe-rim: #6e4222;
+  --camp-bird: color-mix(in srgb, var(--primary) 20%, #8ca695);
+  --camp-tent-a: #d97a33;
+  --camp-tent-a-dark: #b25f22;
+  --camp-tent-b: #2b857f;
+  --camp-tent-b-dark: #1f6863;
+  --camp-door: #3c2412;
+  --camp-link: #c4e4c6;
+  --camp-link-hover: #ffffff;
+  /* 版权行小文本对比度同上，原 #93bd93 最差仅 3.95:1 */
+  --camp-copy: #a5cba5;
+}
+
+/* ── 地面场景带 ─────────────────────────── */
+
+.SiteFooter__scene {
+  background: var(--background);
+  position: relative;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.SiteFooter__svg--desktop {
+  display: block;
+  width: 100%;
+  height: clamp(145px, 13vw, 210px);
+}
+
+.SiteFooter__svg--mobile {
+  display: none;
+  width: 100%;
+  height: clamp(120px, 28vw, 155px);
+}
+
+/* 超宽屏（≥1920px）：viewBox 比例 8:1，slice 在更宽的视口里会向上裁切。
+   抬高高度上限把远山重新收回画框，避免 2560/3440 带鱼屏把远山层整个削掉。 */
+@media (min-width: 1920px) {
+  .SiteFooter__svg--desktop {
+    height: clamp(210px, 9vw, 320px);
+  }
+}
+
+@media (max-width: 640px) {
+  .SiteFooter__svg--desktop {
+    display: none;
+  }
+  .SiteFooter__svg--mobile {
+    display: block;
+  }
+}
+
+/* 场景元素配色（填充走 CSS 变量，SVG 属性里用不了 var() 的场景统一放这里） */
+
+.sf-mountain-far { fill: var(--camp-mountain-far); opacity: 0.65; }
+.sf-hill { fill: var(--camp-hill); }
+.sf-meadow { fill: var(--camp-ground); }
+/* 水面走垂直渐变：上=远（反射天空偏亮），下=近（水色偏深），
+   让河流读起来是"有纵深的水"而不是一条平涂色带。
+   桌面/移动两套 svg 各自持有一份渐变定义，避免重复 id。 */
+.SiteFooter__svg--desktop .sf-river { fill: url(#sfRiverGradientDesktop); }
+.SiteFooter__svg--mobile .sf-river { fill: url(#sfRiverGradientMobile); }
+.sf-river-stop-far { stop-color: var(--camp-river-far); }
+.sf-river-stop-mid { stop-color: var(--camp-river); }
+.sf-river-stop-near { stop-color: var(--camp-river-near); }
+.sf-river-bank {
+  fill: none;
+  stroke: var(--camp-river-bank);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+.sf-tree circle { fill: var(--camp-tree); }
+.sf-rock { fill: var(--camp-rock); }
+.sf-tuft path {
+  fill: none;
+  stroke: var(--camp-tuft);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.sf-ripples path {
+  fill: none;
+  stroke: var(--camp-river-glint);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  opacity: 0.72;
+}
+.sf-pine path { fill: var(--camp-pine); }
+.sf-trunk { fill: var(--camp-trunk); }
+.sf-shadow { fill: rgba(0, 0, 0, 0.16); }
+.sf-tent-a { fill: var(--camp-tent-a); }
+.sf-tent-a-dark { fill: var(--camp-tent-a-dark); }
+.sf-tent-b { fill: var(--camp-tent-b); }
+.sf-tent-b-dark { fill: var(--camp-tent-b-dark); }
+.sf-tent-door { fill: var(--camp-door); }
+.sf-tent-door-glow { fill: var(--camp-door-glow); opacity: 0.55; }
+.sf-log { fill: var(--camp-log); }
+.sf-flame { fill: var(--camp-flame); }
+.sf-flame-inner { fill: var(--camp-flame-inner); }
+.sf-fire-glow { fill: var(--camp-flame); opacity: 0.18; }
+.sf-canoe { fill: var(--camp-canoe); }
+.sf-canoe-rim { fill: var(--camp-canoe-rim); }
+.sf-paddle { stroke: var(--camp-canoe-rim); stroke-width: 2; stroke-linecap: round; fill: none; }
+.sf-paddle-blade { fill: var(--camp-canoe-rim); }
+.sf-post { fill: var(--camp-trunk); }
+.sf-rope { stroke: var(--camp-door-glow); stroke-width: 1.2; stroke-dasharray: 2 1; fill: none; opacity: 0.75; }
+.sf-bird { fill: var(--camp-bird); }
+
+/* 夜间地面光点 */
+.sf-fireflies { display: none; }
+.sf-firefly { fill: #ffe58a; }
+[data-theme="dark"] .sf-fireflies { display: block; }
+
+/* ── 动画 ─────────────────────────────── */
+
+@media (prefers-reduced-motion: no-preference) {
+  .sf-ripples {
+    animation: sf-ripple-drift 4.5s ease-in-out infinite alternate;
+  }
+  .sf-flame,
+  .sf-flame-inner {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: sf-flame-flicker 0.9s ease-in-out infinite alternate;
+  }
+  .sf-fire-glow {
+    animation: sf-glow-pulse 1.8s ease-in-out infinite alternate;
+  }
+  .sf-tent-door-glow {
+    animation: sf-glow-pulse 2.6s ease-in-out infinite alternate;
+  }
+  .sf-canoe-group {
+    transform-box: fill-box;
+    transform-origin: 20% 50%;
+    animation: sf-canoe-bob 3.8s ease-in-out infinite alternate;
+  }
+  .sf-firefly {
+    animation: sf-twinkle 3.2s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes sf-ripple-drift {
+  from { transform: translateX(0); opacity: 0.62; }
+  to { transform: translateX(-8px); opacity: 0.9; }
+}
+@keyframes sf-flame-flicker {
+  from { transform: scaleY(1) skewX(0deg); }
+  to { transform: scaleY(1.14) skewX(2.5deg); }
+}
+@keyframes sf-glow-pulse {
+  from { opacity: 0.35; }
+  to { opacity: 0.75; }
+}
+@keyframes sf-canoe-bob {
+  from { transform: rotate(0deg) translateY(0); }
+  to { transform: rotate(-1.5deg) translateY(1.5px); }
+}
+@keyframes sf-twinkle {
+  from { opacity: 0.25; }
+  to { opacity: 1; }
+}
+
+/* ── 链接区（草地延展为底色） ─────────────── */
+
 .SiteFooter__inner {
-  max-width: 1100px;
-  margin: 0 auto;
+  background: var(--camp-ground);
+  padding: var(--space-5) var(--space-6) var(--space-6);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -25,25 +241,25 @@
 
 .SiteFooter__link {
   font-size: 0.82rem;
-  color: var(--textSecondary);
+  color: var(--camp-link);
   text-decoration: none;
   transition: color 0.16s ease;
 }
 
 .SiteFooter__link:hover {
-  color: var(--text);
+  color: var(--camp-link-hover);
   text-decoration: underline;
 }
 
 .SiteFooter__copyright {
   margin: 0;
   font-size: 0.78rem;
-  color: var(--textTertiary);
+  color: var(--camp-copy);
 }
 
 @media (max-width: 768px) {
-  .SiteFooter {
-    padding: var(--space-6) var(--space-4);
+  .SiteFooter__inner {
+    padding: var(--space-4) var(--space-4) var(--space-5);
   }
   .SiteFooter__links {
     gap: var(--space-2) var(--space-4);

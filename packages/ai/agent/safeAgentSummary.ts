@@ -58,6 +58,7 @@ export function summarizeCredentialGroups(
     credentialGroup?: string;
     credentialKind?: CredentialKind;
     nextAvailableAt?: number;
+    isOwned?: boolean;
   }>,
   now = Date.now(),
 ): CredentialGroupSummary[] {
@@ -65,6 +66,16 @@ export function summarizeCredentialGroups(
 
   for (const agent of agents) {
     if (!agent.credentialGroup || !agent.credentialKind) continue;
+    // 非自有 agent 的 credentialGroup 并**不代表「同一份凭据」**：
+    // deriveCredentialGroup 对 OAuth ref 是直接返回 provider 名
+    // （`credentialGroup: trimmed.toLowerCase()`，见本文件 deriveCredentialGroup），
+    // 所以别人共享给你的 agent 会和调用者自己的同名 provider 组撞名。并组之后
+    // availableAt 取 max，等于把**调用者自己的 429 冷却漏给别人的 agent**。
+    // 2026-09-18 实测：一条 owner 为 1c2b14b968 的共享 agent 被并进调用者的
+    // antigravity 组（agentCount 2），显示成「冷却至次日 11:03Z」，而它实际跑
+    // owner 的订阅通道、同一时刻可用。它不是调用者的凭据预算，不参与调用者的
+    // 分组汇总（`undefined` 视为未知，保持既有行为不变）。
+    if (agent.isOwned === false) continue;
     const existing = groups.get(agent.credentialGroup);
     const at =
       typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > now
@@ -206,6 +217,12 @@ export function resolveFavoriteStatus(
   if (typeof record?.dbKey === "string" && record.dbKey) candidateKeys.push(record.dbKey);
   if (typeof record?.privateKey === "string" && record.privateKey) candidateKeys.push(record.privateKey);
   if (typeof record?.publicKey === "string" && record.publicKey) candidateKeys.push(record.publicKey);
+  // 上游水化已验证的 key（空间共享 / grant 给你的 agent）：收藏记录里存的
+  // 就是这把 key，而不是 record.id。少了它，这类 agent 判不出 isFavorite，
+  // 会在 scope="preferred" 里被整条过滤掉。
+  if (typeof record?.verifiedAgentKey === "string" && record.verifiedAgentKey) {
+    candidateKeys.push(record.verifiedAgentKey);
+  }
   if (typeof record?.id === "string" && record.id) {
     candidateKeys.push(record.id);
     candidateKeys.push(publicAgentKey(record.id));
@@ -351,16 +368,25 @@ export function toSafeAgentSummary(
 
   // Runnable agentKey for delegation: owned agents → agent-<userId>-<id> (the
   // current user can always resolve these); confirmed public agents → their
-  // publicKey. Omitted when there is no signed-in user or the key cannot resolve,
-  // so models never see a key that would 404 in startAgentRun.
+  // publicKey; otherwise → the key the upstream hydration already proved
+  // resolvable under the caller's own credentials (space-shared / granted
+  // agents, whose owner is NOT the current user, so recomputing from id is
+  // impossible). Omitted when there is no signed-in user or no key at all, so
+  // models never see a key that would 404 in startAgentRun.
   // 优先用记录自带的真实 key，只有拿不到时才由 id 拼。record.id 在真实数据里
   // 有时就是整条 dbKey，盲目重拼会产出 agent-<uid>-agent-<uid>-<id> 这种 404 key。
+  const verifiedSharedKey =
+    typeof record?.verifiedAgentKey === "string" && record.verifiedAgentKey
+      ? record.verifiedAgentKey
+      : undefined;
   let agentKey: string | undefined;
   if (currentUserId) {
     if (isOwned) {
       agentKey = ownedKey ?? (id ? ownedAgentKey(currentUserId, id) : undefined);
     } else if (publicKey) {
       agentKey = publicKey;
+    } else {
+      agentKey = verifiedSharedKey;
     }
   }
 
