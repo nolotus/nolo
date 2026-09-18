@@ -771,6 +771,7 @@ export async function runWorkspaceCommand(args: {
         pgid,
         command: args.command.join(" "),
         label,
+        promoted: true,
         owner: args.owner ?? null,
       });
     const taskId = envelope.taskId;

@@ -67,6 +67,8 @@ export type RegisteredProcessInput = {
   command: string;
   label: string;
   persist?: boolean;
+  /** True once the envelope has been promoted to a background task (execShell detach). */
+  promoted?: boolean;
   /**
    * Mark the envelope as a transient foreground grace-period tracker. Only the
    * workspaceShell pre-registration sets this; omit it (false) for real
@@ -99,6 +101,11 @@ export type ProcessTerminalNotice = {
   /** Registry status axis value at the terminal transition. */
   status: "stopped" | "exited" | "failed";
   exitCode?: number;
+  /**
+   * True once the envelope has been promoted to a background task (execShell detach).
+   * Ambient processes (launchProcess) have promoted === false and are notice-only.
+   */
+  promoted?: boolean;
 };
 
 export type ProcessTerminalListener = (notice: ProcessTerminalNotice) => void;
@@ -158,7 +165,7 @@ export class ProcessRegistry {
       startedAt: Date.now(),
       status: "running",
       persist: proc.persist ?? false,
-      promoted: false,
+      promoted: proc.promoted ?? false,
       transient: proc.transient ?? false,
       owner: proc.owner ?? null,
     };
@@ -274,6 +281,7 @@ export class ProcessRegistry {
         label: item.label,
         command: item.command,
         status: "stopped",
+        promoted: item.promoted,
       });
       return true;
     }
@@ -313,6 +321,7 @@ export class ProcessRegistry {
           label: item.label,
           command: item.command,
           status: "stopped",
+          promoted: item.promoted,
         });
       }
     }
@@ -343,6 +352,7 @@ export class ProcessRegistry {
         command: item.command,
         status: item.status,
         exitCode,
+        promoted: item.promoted,
       });
     }
   }

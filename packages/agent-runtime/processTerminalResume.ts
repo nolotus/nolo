@@ -32,6 +32,8 @@ export type ProcessTerminalResumeReason =
   | "no-channel"
   /** 派发时刻没抓到归属（不是本 TUI 起的任务，或宿主没注入 runtimeContext）。 */
   | "unowned"
+  /** 显式后台/环境任务（launchProcess 等，promoted !== true）：只发通知不自动续跑。 */
+  | "not-promoted"
   /** 同一 taskId 已经续跑过一次。 */
   | "duplicate"
   /** 归属 dialog 不是当前 dialog（用户已 /switch 或 /new）。 */
@@ -120,6 +122,9 @@ export function decideProcessTerminalResume(
   if (!input.owner || !dialogId) {
     return { kind: "notice-only", reason: "unowned", taskId };
   }
+  if (!input.notice.promoted) {
+    return { kind: "notice-only", reason: "not-promoted", taskId };
+  }
   if (input.state.claimedTaskIds.has(taskId)) {
     return { kind: "notice-only", reason: "duplicate", taskId };
   }
@@ -156,6 +161,8 @@ export type ProcessTerminalAutoResumeDeps = {
   maxChainedCompletionTurns?: number;
   /** 诊断出口（可选）：每次决策回报一次，便于日志/测试观察。 */
   onDecision?: (decision: ProcessTerminalResumeDecision) => void;
+  /** 可选：从 registry 读是否已 promote（若 notice 未显式携带）。 */
+  isPromoted?: (taskId: string) => boolean;
 };
 
 export type ProcessTerminalAutoResumer = {
@@ -172,8 +179,10 @@ export function createProcessTerminalAutoResumer(
     state,
     noteUserTurn: () => state.noteUserTurn(),
     decide: (notice) => {
+      const promoted = notice.promoted ?? deps.isPromoted?.(notice.taskId) ?? false;
+      const effectiveNotice = notice.promoted === promoted ? notice : { ...notice, promoted };
       const decision = decideProcessTerminalResume({
-        notice,
+        notice: effectiveNotice,
         owner: deps.readOwner(notice.taskId),
         currentDialogId: deps.getCurrentDialogId(),
         turnActive: deps.isTurnActive(),

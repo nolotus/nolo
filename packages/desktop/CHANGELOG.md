@@ -1,4 +1,13 @@
 
+## 0.101.0-alpha.2
+
+## 0.101.0-alpha.2 (2026-09-18)
+
+### Bug Fixes
+
+* **agent-runtime:** restrict process terminal auto-resume to promoted execShell tasks ([c651395](https://github.com/nolotus/bun-nolo/commit/c65139521785c625007a08e44da989705efc490f))
+
+
 ## 0.101.0-alpha.1
 
 ## 0.101.0-alpha.1 (2026-09-18)

@@ -1498,6 +1498,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // once-only 名额。判定规则见 processTerminalResume.ts。
     const processTerminalResumer = createProcessTerminalAutoResumer({
       readOwner: (taskId) => getProcessRegistry().getByTaskId(taskId)?.owner ?? null,
+      isPromoted: (taskId) => getProcessRegistry().getByTaskId(taskId)?.promoted ?? false,
       getCurrentDialogId: () => state.dialogId ?? null,
       isTurnActive: () => busy || fixedInput.isPaused(),
       canDeliver: () => !sessionEnded && !done && runWakeHandler !== null,
