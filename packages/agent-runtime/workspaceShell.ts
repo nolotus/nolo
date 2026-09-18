@@ -17,6 +17,8 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRuntimeToolResult } from "./hostAdapter";
 import { resolveExecutableOnPath } from "./runtimeCompat";
 import { getProcessRegistry } from "./processRegistry";
+import type { ProcessOwner } from "./processOwnership";
+import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
 import { spillToolOutput } from "./toolSpillStore";
 
 export const EXEC_SHELL_TIMEOUT_ENV = "NOLO_EXEC_SHELL_TIMEOUT_MS";
@@ -534,6 +536,18 @@ export function spawnFailedCommandResult(error: unknown, outputLimit?: number) {
   };
 }
 
+type CapturedStream = { value: string; error?: string };
+
+function stdoutPromiseResult(promise: Promise<string>): Promise<CapturedStream> {
+  return promise.then(
+    (value) => ({ value }),
+    (error: unknown) => ({
+      value: "",
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  );
+}
+
 export type WorkspaceExecResult =
   | {
       stdout: string;
@@ -584,6 +598,13 @@ export async function runWorkspaceCommand(args: {
   commandPrefix?: string[];
   abortSignal?: AbortSignal;
   detachMs?: number;
+  /**
+   * Parent dialog/turn that asked for this command (captured before spawn, see
+   * processOwnership.ts). It rides along on the pre-registered envelope, so an
+   * auto-detached command stays attributable to the conversation that launched
+   * it even after the user has moved on.
+   */
+  owner?: ProcessOwner | null;
 }): Promise<WorkspaceExecResult> {
   const timeoutMs = asOptionalPositiveFiniteNumber(args.timeoutMs);
   const detached = process.platform !== "win32";
@@ -620,8 +641,10 @@ export async function runWorkspaceCommand(args: {
       // Foreground grace-period envelope: not a user-visible background task
       // until promote() flips the marker on timeout detach (see
       // listBackground). Keeps the status line / /procs / /stop semantics
-      // identical to pre-Phase-0.
+      // identical to pre-Phase-0. Ownership rides along so the promoted record
+      // stays attributable without any terminal-time inference.
       transient: true,
+      owner: args.owner ?? null,
     });
   }
   const exitPromise = waitForNodeProcessExit(proc);
@@ -642,8 +665,10 @@ export async function runWorkspaceCommand(args: {
     (process as any).removeListener("SIGINT", cleanupChildOnHostSignal);
   };
   exitPromise.then(detachSignalCleanup, detachSignalCleanup);
-  const stdoutPromise = readNodeStream(proc.stdout);
-  const stderrPromise = readNodeStream(proc.stderr);
+  // Attach rejection handlers immediately: detached streams may reject before
+  // the process close event, and Node otherwise reports an unhandled rejection.
+  const stdoutCapture = stdoutPromiseResult(readNodeStream(proc.stdout));
+  const stderrCapture = stdoutPromiseResult(readNodeStream(proc.stderr));
   const killChild = (signal: NodeJS.Signals) => {
     if (detached && typeof proc.pid === "number") {
       try {
@@ -756,11 +781,50 @@ export async function runWorkspaceCommand(args: {
     // already returned in that case.
     const promoted = registry.promote(pid);
     const envelope = promoted
-      ?? registry.add({ pid, pgid, command: args.command.join(" "), label });
+      ?? registry.add({
+        pid,
+        pgid,
+        command: args.command.join(" "),
+        label,
+        promoted: true,
+        owner: args.owner ?? null,
+      });
     const taskId = envelope.taskId;
+    // Result capsule ordering (detached close → capsule → markExited/wake):
+    // the detached process keeps its stdio pipes attached to us, so at close
+    // we can still drain the buffered output and build the bounded capsule
+    // BEFORE the terminal event/notice fires — the wake must already carry
+    // the result, because taskLogs cannot serve stdout/stderr and the
+    // lifecycle event log stays started/promoted/exited/killed only.
     proc.on("close", (code) => {
       detachSignalCleanup();
-      registry.markExited(pid, code ?? 1);
+      const exitCode = code ?? 1;
+      void (async () => {
+        const [stdoutResult, stderrResult] = await Promise.all([
+          stdoutCapture,
+          stderrCapture,
+        ]);
+        const stdout = stdoutResult.value;
+        const stderr = stderrResult.value;
+        let capsule: ProcessTaskResultCapsule | undefined;
+        try {
+          capsule = buildProcessTaskResultCapsule({
+            stdout,
+            stderr,
+            exitCode,
+            // Duration is measured from the registry envelope's startedAt
+            // (spawn moment), not from the detach moment.
+            startedAt: registry.get(pid)?.startedAt,
+            workspaceRoot: args.workspaceRoot,
+            captureError: [stdoutResult.error, stderrResult.error]
+              .filter(Boolean)
+              .join("; "),
+          });
+        } catch {
+          // Fail-open: a missing capsule beats a missed terminal event.
+        }
+        registry.markExited(pid, exitCode, capsule);
+      })();
     });
     const immediate = effectiveDetachMs === 0;
     const reason = immediate
@@ -786,10 +850,15 @@ export async function runWorkspaceCommand(args: {
     };
   }
 
-  const [stdout, rawStderr] = await Promise.all([
-    stdoutPromise,
-    stderrPromise,
+  const [stdoutCaptureResult, stderrCaptureResult] = await Promise.all([
+    stdoutCapture,
+    stderrCapture,
   ]);
+  const stdout = stdoutCaptureResult.value;
+  const rawStderr = stderrCaptureResult.value;
+  const streamCaptureError = [stdoutCaptureResult.error, stderrCaptureResult.error]
+    .filter(Boolean)
+    .join("; ");
   const exitCode = aborted ? 130 : timedOut ? 124 : Number(raceWinner);
   // Grace GC: the command ended before detach promotion, so drop the
   // pre-registered envelope ("不留痕是结果"). No-op after promotion; the

@@ -67,17 +67,17 @@ export function newlineHint(platform: string = process.platform): string {
 const WELCOME_TIPS: Record<CliLocale, string[]> = {
   en: [
     `Tip: ${newlineHint()} for a newline; /help lists all commands.`,
-    "Tip: paste a screenshot or drag an image into the terminal — nolo can see it.",
+    "Tip: drag an image file into the terminal — nolo sees it. A plain path works too.",
     "Tip: /doc attach <doc> brings a doc into this conversation's context.",
     "Tip: /theme switches colors; terminal mode follows your terminal's day/night.",
     "Tip: /history resumes a recent dialog; /agents lists your agents.",
   ],
   zh: [
     `提示：${newlineHint()} 换行；/help 列出全部命令。`,
-    "提示：直接粘贴截图或把图片拖进终端，nolo 看得懂。",
-    "提示：/doc attach <doc> 把文档挂进当前对话的上下文。",
-    "提示：/theme 切换配色；terminal 模式跟随终端的日夜主题。",
-    "提示：/history 回到最近对话；/agents 查看可用 Agent。",
+    "提示：把图片文件拖进终端最省事；也能直接输入图片路径。",
+    "提示：/doc attach <doc> 把文档挂进当前对话上下文。",
+    "提示：/theme 切换配色；日夜间跟随终端主题。",
+    "提示：/history 恢复最近对话；/agents 列出你的智能体。",
   ],
 };
 
@@ -596,6 +596,23 @@ const STRINGS = {
     en: "Agents:",
     zh: "智能体：",
   },
+  // --- Paste / clipboard ------------------------------------------------
+  pasteUsage: {
+    en: "Usage: /paste (no arguments). Reads your clipboard now: an image becomes an attachment, text lands in the draft. Tip: dragging an image file onto the terminal is the most reliable way to attach a picture.",
+    zh: "用法：/paste（无参数）。立即读取剪贴板：图片变附件，文本进草稿。提示：把图片文件拖进终端是附上图片最可靠的方式。",
+  },
+  pasteTextInserted: {
+    en: "Pasted {0} characters from the clipboard into the draft.",
+    zh: "已从剪贴板粘贴 {0} 个字符到草稿。",
+  },
+  pasteStaleDropped: {
+    en: "[nolo] Discarded a clipboard read that finished after the draft changed.",
+    zh: "[nolo] 剪贴板读取完成时草稿已变化，结果已丢弃。",
+  },
+  pasteFilePathHint: {
+    en: "file reference (path only, content not read): {0}",
+    zh: "文件引用（仅路径，未读取内容）：{0}",
+  },
   agentsTip: {
     en: "Tip: run /switch for the full picker, or /switch list for your private agents too.",
     zh: "提示：用 /switch 打开完整选择器，或 /switch list 连你的私有智能体一起列出。",
@@ -617,6 +634,9 @@ const STRINGS = {
       "  /resume <dialogId>    Resume a dialog directly by id",
       "  /lang <zh|en>         Switch interface language",
       "  /copy [all]           Copy the last reply (or the full conversation with \"all\") to the clipboard",
+      "  /paste                Read the clipboard now (image → attachment, text → draft)",
+      "  Drag a file in        Drop an image file on the terminal to attach it; other files stay paths",
+      "  Shift+Enter / Ctrl+J  Insert a newline in the draft",
       "  /mouse <on|off>       Toggle mouse mode (off = drag to select text)",
       "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell, external-file & file-write confirms)",
       "  /math <on|off>        Toggle math formula rendering (Unicode transcription)",
@@ -655,6 +675,9 @@ const STRINGS = {
       "  /resume <dialogId>    按 id 直接恢复对话",
       "  /lang <zh|en>         切换界面语言",
       "  /copy [all]           复制最后一条回复到剪贴板（加 all 复制完整对话）",
+      "  /paste                立即读剪贴板（图片→附件，文本→草稿）",
+      "  拖入文件              把图片文件拖进终端即成为附件；其他文件只留路径",
+      "  Shift+Enter / Ctrl+J  在草稿里换行",
       "  /mouse <on|off>       切换鼠标模式（off 后可直接拖选文本）",
       "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell、外部文件与写文件确认）",
       "  /math <on|off>        切换数学公式渲染（Unicode 转写）",

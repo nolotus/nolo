@@ -20,9 +20,7 @@
  *
  * 运行：bun packages/cli/__perf__/ttftTailProbe.ts [--samples 20]
  */
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getProfileTokens, loadProfileConfig } from "../client/profileConfig";
 import {
   buildPlatformChatCompletionRequest,
   resolvePlatformChatProviderConfig,
@@ -199,11 +197,9 @@ function report(label: string, shots: Shot[]) {
 }
 
 async function main() {
-  const cfg = JSON.parse(
-    fs.readFileSync(path.join(os.homedir(), ".nolo/config.json"), "utf8"),
-  );
-  const authToken = cfg?.profiles?.default?.authToken;
-  if (!authToken) throw new Error("no authToken in ~/.nolo/config.json");
+  const cfg = loadProfileConfig();
+  const authToken = getProfileTokens(cfg)[0];
+  if (!authToken) throw new Error("no auth token in the Nolo CLI profile");
 
   const providerConfig = await resolvePlatformChatProviderConfig({
     agentConfig: {

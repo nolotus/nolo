@@ -51,6 +51,7 @@ import { runTuiLogin } from "./tuiLogin";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import { mergeAttachedImages, resolveAttachmentImageUrls } from "./pasteImage";
 import { readClipboardImage } from "./clipboardImage";
+import type { ClipboardPasteSource } from "./pasteFlow";
 import { themeText, applyDetectedBackground } from "./theme";
 import { detectTerminalBackground } from "./detectBackground";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
@@ -96,6 +97,18 @@ export interface SlashDispatchHost {
     env: NodeJS.ProcessEnv | undefined,
   ) => void;
   readonly writeClipboard: (text: string) => Promise<void>;
+  /**
+   * 唯一的剪贴板读取 → 界面应用流程（与 Ctrl+V / 空 bracketed paste 共用）。
+   * `/paste` 命令经 action: "paste-clipboard" 回到这里执行。
+   */
+  readonly readAndApplyClipboard: (
+    source: ClipboardPasteSource,
+  ) => Promise<boolean>;
+  /**
+   * 作废在途的异步粘贴：草稿被提交/清空、或换了对话时调用。迟到结果会被丢弃，
+   * 不会写进别人的草稿。
+   */
+  readonly bumpDraftEpoch: () => void;
   readonly selfUpdater: SelfUpdater;
   readonly spawnRunner: typeof spawnProcess;
   readonly installAltScreenRestoreHandlers: (output: NodeJS.WritableStream) => void;
@@ -158,6 +171,8 @@ export async function runSubmittedSlashLine(
     persistExplicitAgentSwitch,
     persistAgentSelection,
     writeClipboard,
+    readAndApplyClipboard,
+    bumpDraftEpoch,
     selfUpdater,
     spawnRunner,
     installAltScreenRestoreHandlers,
@@ -181,16 +196,20 @@ export async function runSubmittedSlashLine(
   // 内部的 output.write 分支（不写 history），command 传空因为非交互模式
   // 没有"命令回显"的视觉概念。
   const interactive = isInteractiveInput(input);
+  // chat 的预览（"found image: ..." / "file reference (path only ...)"）是
+  // 提交回执：用户必须看到路径被识别。交互模式下 raw output.write 会落进
+  // 滚动区、被下一条 composer 重绘（\x1b[J）抹掉，因此与命令输出一样走
+  // emitCommandOutput 的 history/local-turn 通道；chat 预览不回声命令
+  // （用户消息本身随后由 runOneAgentTurn 渲染），command 传空。非 chat 命令
+  // 保持原有的命令行回显。非交互（管道/脚本）模式行为不变：emitCommandOutput
+  // 内部走 output.write，预览恰好输出一次。exit 走下方独立分支，不在此 emit。
+  const isChatAction = result.action?.type === "chat";
 
   if (result.action?.type !== "exit" && result.output) {
-    // 交互模式下 chat 的图片预览（"found image: ..."）不在此 raw write：
-    // renderHistory 拥有 transcript pane，raw write 会落进滚动区、被下一条
-    // composer 重绘（\x1b[J）抹掉——交互模式的 preview 本就走 local turn /
-    // history 渲染通道。但非交互（管道/脚本）模式下没有 composer 重绘问题，
-    // 预览对脚本用户有价值（确认图片被检测到），因此仅当（非 chat）或
-    // （非交互时 chat）才 emit。exit 走下方独立分支，不在此 emit。
-    const shouldEmit = result.action?.type !== "chat" || !interactive;
-    if (shouldEmit) emitCommandOutput(result.output, interactive ? line.trim() : "");
+    emitCommandOutput(
+      result.output,
+      interactive && !isChatAction ? line.trim() : "",
+    );
   }
 
   if (host.state.agentKey !== previousAgentKey) {
@@ -229,6 +248,8 @@ export async function runSubmittedSlashLine(
       }
     }
     clearCollapsedPasteStore(pasteStore);
+    // /clear 清掉对话与草稿态：作废在途的异步粘贴结果。
+    bumpDraftEpoch();
     // Clear removes the persisted messages and clears the dialog identity
     // (like /new), so the next turn starts a fresh dialog instead of
     // continuing the cleared one.
@@ -535,6 +556,11 @@ export async function runSubmittedSlashLine(
     }
   }
 
+  if (result.action?.type === "paste-clipboard") {
+    // `/paste` 是显式请求，复用与 Ctrl+V 完全相同的读取流程（读取逻辑不重复实现）。
+    await readAndApplyClipboard("slash");
+  }
+
   if (result.action?.type === "pick-dialog") {
     const interactivePicker = isInteractiveInput(input);
     try {
@@ -580,6 +606,8 @@ export async function runSubmittedSlashLine(
         // 的消费由每轮本地累加叠加在它上面。
         seedDialogCreditsBase(pickResult.dialog.id, pickResult.dialog.dbKey);
         clearCollapsedPasteStore(pasteStore);
+        // 切对话：草稿与附件都换了上下文，在途粘贴结果必须作废。
+        bumpDraftEpoch();
         emitCommandOutput(
           `${t("resumedDialogPrefix")}: ${pickResult.dialog.title} (${pickResult.dialog.id})`,
         );

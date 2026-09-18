@@ -21,6 +21,8 @@ import {
   type ProcessTaskEventLogOptions,
   type ProcessTaskStatus,
 } from "./processTask";
+import type { ProcessTaskResultCapsule } from "./processTaskResult";
+import type { ProcessOwner } from "./processOwnership";
 
 export type RegisteredProcess = {
   /** Stable handle across grace-GC / timeout-detach promotion. */
@@ -47,6 +49,25 @@ export type RegisteredProcess = {
    * truth) and can still see transient envelopes.
    */
   transient: boolean;
+  /**
+   * Ownership captured at launch / detach time (see processOwnership.ts):
+   * which dialog (and which turn) asked for this task. `null` means the
+   * envelope has no parent conversation — its terminal notice may only be
+   * surfaced as a summary, never used to wake a conversation.
+   *
+   * Invariant: written once at registration and read as-is afterwards. The
+   * terminal path must NOT re-derive ownership from "the dialog that happens
+   * to be open right now" (the task may outlive the turn that launched it).
+   */
+  owner: ProcessOwner | null;
+  /**
+   * Bounded stdout/stderr capsule of the terminal transition. Set only for
+   * promoted execShell tasks whose detach path drained the pipes before
+   * markExited (see workspaceShell); launchProcess (ambient) tasks have none,
+   * and the lifecycle event log stays started/promoted/exited/killed only —
+   * the capsule lives here, not in the event stream.
+   */
+  resultCapsule?: ProcessTaskResultCapsule;
 };
 
 export type RegisteredProcessInput = {
@@ -55,6 +76,8 @@ export type RegisteredProcessInput = {
   command: string;
   label: string;
   persist?: boolean;
+  /** True once the envelope has been promoted to a background task (execShell detach). */
+  promoted?: boolean;
   /**
    * Mark the envelope as a transient foreground grace-period tracker. Only the
    * workspaceShell pre-registration sets this; omit it (false) for real
@@ -63,6 +86,11 @@ export type RegisteredProcessInput = {
   transient?: boolean;
   /** Pre-generated taskId; a fresh one is minted when omitted. */
   taskId?: string;
+  /**
+   * Parent dialog/turn captured at launch or detach time. Omit (or null) for
+   * tasks that belong to no conversation; see processOwnership.readProcessOwner.
+   */
+  owner?: ProcessOwner | null;
 };
 
 let taskIdCounter = 0;
@@ -82,6 +110,17 @@ export type ProcessTerminalNotice = {
   /** Registry status axis value at the terminal transition. */
   status: "stopped" | "exited" | "failed";
   exitCode?: number;
+  /**
+   * True once the envelope has been promoted to a background task (execShell detach).
+   * Ambient processes (launchProcess) have promoted === false and are notice-only.
+   */
+  promoted?: boolean;
+  /**
+   * Bounded stdout/stderr result captured at the terminal transition. Present
+   * only for promoted execShell detach exits (the close path builds it before
+   * markExited fires); absent for ambient launchProcess tasks and user kills.
+   */
+  resultCapsule?: ProcessTaskResultCapsule;
 };
 
 export type ProcessTerminalListener = (notice: ProcessTerminalNotice) => void;
@@ -141,8 +180,9 @@ export class ProcessRegistry {
       startedAt: Date.now(),
       status: "running",
       persist: proc.persist ?? false,
-      promoted: false,
+      promoted: proc.promoted ?? false,
       transient: proc.transient ?? false,
+      owner: proc.owner ?? null,
     };
     this.processes.set(proc.pid, record);
     this.byTaskId.set(record.taskId, proc.pid);
@@ -256,6 +296,7 @@ export class ProcessRegistry {
         label: item.label,
         command: item.command,
         status: "stopped",
+        promoted: item.promoted,
       });
       return true;
     }
@@ -295,12 +336,13 @@ export class ProcessRegistry {
           label: item.label,
           command: item.command,
           status: "stopped",
+          promoted: item.promoted,
         });
       }
     }
   }
 
-  markExited(pid: number, exitCode: number): void {
+  markExited(pid: number, exitCode: number, resultCapsule?: ProcessTaskResultCapsule): void {
     const item = this.processes.get(pid);
     if (item && item.status === "running") {
       // Only record natural exit while still running. If the user already
@@ -308,6 +350,7 @@ export class ProcessRegistry {
       // overwrite that — "stopped" means "user-initiated", which is distinct
       // from a natural "exited"/"failed" and /procs relies on the difference.
       item.exitCode = exitCode;
+      if (resultCapsule) item.resultCapsule = resultCapsule;
       item.status = exitCode === 0 ? "exited" : "failed";
       this.eventLog.append({
         taskId: item.taskId,
@@ -317,7 +360,8 @@ export class ProcessRegistry {
       });
       // Same-instant terminal emission as the event-log append (see
       // onProcessTerminal). Guarded by the "running" check above, so each
-      // task notifies at most once.
+      // task notifies at most once. The capsule (when provided) rides on the
+      // notice so the wake carries the result directly.
       this.emitTerminal({
         taskId: item.taskId,
         pid,
@@ -325,6 +369,8 @@ export class ProcessRegistry {
         command: item.command,
         status: item.status,
         exitCode,
+        promoted: item.promoted,
+        ...(item.resultCapsule ? { resultCapsule: item.resultCapsule } : {}),
       });
     }
   }

@@ -6,25 +6,56 @@
 //    （sessionRender 的 "⚙ N finished"）共用同一文案来源。
 //
 // 与 run 终态唤醒（runCompletionWatcher → child-run-completed）刻意分开：
-// 进程任务没有 run 记录、没有 dialog 归属、没有可恢复的输出（taskLogs 已是
-// 独立工具），所以通知是纯摘要 + 提示行，不走 child-run-completed 事件轴。
+// 进程任务没有 run 记录、没有子 dialog；promoted execShell 的可恢复输出由
+// result capsule 直接随 terminal notice 携带，taskLogs 只保留 lifecycle 事实。
 
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
+import type { ProcessTaskResultCapsule } from "../../agent-runtime/processTaskResult";
+import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEvent";
 
 /**
  * 送进模型的通知全文（一条任务一段）。与 run wake 的 ContextualFragment
  * 标记不同：进程终态是轻量事实，不携带日志游标等结构，直接用稳定标记，
  * 供模型识别这是系统事件而非用户发言。
+ *
+ * promoted execShell 的终态会携带 result capsule（bounded stdout/stderr
+ * tail，大输出/任何 inline 截断时附 full-output spill 指引）。没有 capsule 的
+ * 通知只说明 terminal 事实；taskLogs 只能查看 lifecycle，不能拿 stdout/stderr。
  */
 export function formatProcessTerminalWakeMessage(
   notices: ProcessTerminalNotice[],
 ): string {
+  const missingCapsule = notices.some((notice) => !notice.resultCapsule);
   return [
     `<background_task_completion count="${notices.length}">`,
-    ...notices.map(formatProcessTerminalNoticeLine),
-    `需要输出/详情时: taskLogs(taskId) 或 tasks`,
+    ...notices.flatMap((notice) => [
+      formatProcessTerminalNoticeLine(notice),
+      ...(notice.resultCapsule
+        ? formatProcessResultCapsuleLines(notice.resultCapsule)
+        : []),
+    ]),
+    ...(missingCapsule ? ["生命周期详情可用 taskLogs(taskId)"] : []),
     `</background_task_completion>`,
   ].join("\n");
+}
+
+/** capsule → 通知块里的多行正文（bounded tail + 可选 spill 指引）。 */
+export function formatProcessResultCapsuleLines(
+  capsule: ProcessTaskResultCapsule,
+): string[] {
+  const meta: string[] = [];
+  if (capsule.durationMs !== undefined) meta.push(`duration=${capsule.durationMs}ms`);
+  meta.push(capsule.truncated ? "tail-only" : "full");
+  const stream = (name: string, value: string) => [
+    `--- ${name} ---`,
+    ...(value.trim() ? value.replace(/\n+$/, "").split("\n") : ["(empty)"]),
+  ];
+  return [
+    `result capsule (${meta.join(", ")})${capsule.spill ? `, full output: ${capsule.spill.displayPath} (${capsule.spill.totalChars} chars, ${capsule.spill.totalLines} lines)` : ""}:`,
+    ...(capsule.captureError ? [`capture error: ${capsule.captureError}`] : []),
+    ...stream("stdout", capsule.stdout),
+    ...stream("stderr", capsule.stderr),
+  ];
 }
 
 /** 单行摘要（注入块与屏幕显示共用的最小事实）。 */
@@ -51,15 +82,57 @@ export function buildProcessTerminalTurnMessage(
 }
 
 /**
+ * 终态通知 → 内部 turn 事件（自动续跑用）。
+ *
+ * 与 child-run-completed 同形：`text` 是给模型的完整事实——promoted execShell
+ * 的通知在这里直接携带 result capsule（bounded stdout/stderr），不再指向
+ * taskLogs 查输出；`displayText` 是屏幕上的紧凑单行，永远不含 capsule 正文。
+ * 进程任务没有 run 记录可查询，所以 status / exitCode 直接进事件载荷，不借道
+ * run 轴。
+ */
+export function buildProcessTaskCompletedTurnEvent(
+  notice: ProcessTerminalNotice,
+): BackgroundTaskCompletedTurnEvent {
+  return {
+    kind: "background-task-completed",
+    taskId: notice.taskId,
+    status: notice.status,
+    ...(notice.exitCode !== undefined ? { exitCode: notice.exitCode } : {}),
+    text: buildProcessTerminalTurnMessage([notice]),
+    displayText: formatProcessTerminalNoticeLine(notice),
+  };
+}
+
+/**
  * 把 pendingProcessNotices 里存的格式化单行解析回结构化通知。
  *
  * state 里存的是已格式化的单行（订阅侧不保留结构对象，避免 TuiState 挂
  * 引用类型）：注入时把每行还原成 Notice 再进同一 formatter，保证「存的
  * 行」与「注入的行」永远一致。行格式见 formatProcessTerminalNoticeLine。
  */
+const PENDING_NOTICE_PREFIX = "process-notice-v1:";
+
+/** Persist the full model payload only when a capsule exists; legacy notices
+ * keep their compact line representation for backwards compatibility. */
+export function serializePendingProcessNotice(notice: ProcessTerminalNotice): string {
+  return notice.resultCapsule
+    ? `${PENDING_NOTICE_PREFIX}${JSON.stringify(notice)}`
+    : formatProcessTerminalNoticeLine(notice);
+}
+
 export function parsePendingProcessNoticeLine(
   line: string,
 ): ProcessTerminalNotice {
+  if (line.startsWith(PENDING_NOTICE_PREFIX)) {
+    try {
+      const parsed = JSON.parse(line.slice(PENDING_NOTICE_PREFIX.length)) as ProcessTerminalNotice;
+      if (parsed && typeof parsed.taskId === "string" && parsed.resultCapsule) {
+        return parsed;
+      }
+    } catch {
+      // Fall through to the legacy line parser.
+    }
+  }
   const taskMatch = line.match(
     /^\[Background task ([^ \]]+?)(?:\s+\(label: "((?:[^"\\]|\\.)*)"\))? finished: status=(\w+)(?: exitCode=(-?\d+))?\]$/,
   );
