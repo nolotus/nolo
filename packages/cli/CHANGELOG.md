@@ -1,4 +1,14 @@
 
+## 0.80.0-alpha.1
+
+## 0.80.0-alpha.1 (2026-09-18)
+
+### Features
+
+* **memory:** adopt user-world relevance contract ([1a731c6](https://github.com/nolotus/bun-nolo/commit/1a731c67164a53ebea9dcb99766efd2be7a98c42))
+* **memory:** require user-world relevance for third-party facts ([636fa5f](https://github.com/nolotus/bun-nolo/commit/636fa5f3282f7d37ed2b494c75a4e5b862a4f620))
+
+
 ## 0.79.0-alpha.2
 
 ## 0.79.0-alpha.2 (2026-09-18)

@@ -22,6 +22,13 @@ Concept-specific rule:
 - A one-off question such as "when was Kant born?" should normally create no long-lived Concept or Person Entity. Repeated discussion about Kant, freedom, and the user's own values may justify them.
 `.trim();
 
+export const MEMORY_VNEXT_THIRD_PARTY_RELEVANCE_CONTRACT = `
+Third-party relevance test:
+- A fact about another person is durable only when it concerns the user's own world. Observation-only third-party facts — someone's appearance, news, habits, or the doings of a person the user merely encounters — stay Evidence, no matter how often they recur.
+- Closeness of that person, and repeated mentions across independent dialogs, do not by themselves make such an observation durable: never invent a user-world consequence to justify promotion (for example "the user keeps watching this person").
+- Matters that are part of the user's own shared life — household or family arrangements the user takes part in, a family member's health, or what the user relies on someone for — do belong to the user's world: state the user-world side (caregiving, changed time, changed plans, a sustained constraint) instead of a chronicle of the other person's doings.
+`.trim();
+
 export const MEMORY_VNEXT_RECONCILIATION_CONTRACT = `
 When durable understanding changes, choose the smallest correct reconciliation:
 - no_op: no durable change.
@@ -45,6 +52,7 @@ export const buildMemoryVNextInterpreterPrompt = (): string =>
     "External dialogs/files/web facts remain authoritative outside memory.",
     "Prefer a small stable set of Entities and updateable States over an ever-growing bag of facts.",
     MEMORY_VNEXT_ENTITY_CREATION_CONTRACT,
+    MEMORY_VNEXT_THIRD_PARTY_RELEVANCE_CONTRACT,
     MEMORY_VNEXT_RECONCILIATION_CONTRACT,
     buildMemoryInterpreterWireContract(),
   ].join("\n\n");
