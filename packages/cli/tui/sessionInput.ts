@@ -379,6 +379,7 @@ export const SLASH_COMMANDS = [
   "/resume",
   "/lang",
   "/copy",
+  "/paste",
   "/mouse",
   "/math",
   "/doc",

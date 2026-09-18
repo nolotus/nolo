@@ -48,9 +48,17 @@ import {
 import {
   ClipboardImageError,
   getDefaultClipboardTempDir,
+  isRemoteSession,
   readClipboardImage,
   sweepStaleClipboardFiles,
 } from "./clipboardImage";
+import {
+  isTextFallbackEligibleCode,
+  resolveClipboardPaste,
+  shouldApplyPastedResult,
+  type ClipboardPasteOutcome,
+  type ClipboardPasteSource,
+} from "./pasteFlow";
 import { writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
@@ -90,9 +98,11 @@ import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
 import {
+  buildProcessTaskCompletedTurnEvent,
   formatProcessTerminalNoticeLine,
 } from "./processTerminalNotice";
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
+import { createProcessTerminalAutoResumer } from "../../agent-runtime/processTerminalResume";
 // S3 迁移：turn 执行与队列 drain（runOneAgentTurn / ensureChatQueueBinding /
 // preemptAndAbortForDrain / AgentTurnContext）及前奏区函数（runAgentChat /
 // waitForActionGate / waitForRawActionGate / readAgentsMdLayer）已迁至
@@ -456,10 +466,8 @@ const WELCOME_ANIM_INTERVAL_MS = 70;
 /**
  * 判断剪贴板图像读取错误是否可回退到系统文本读取。
  *
- * 仅当错误明确表示剪贴板无图片（empty-clipboard）或图片读取能力不可用
- * （binary-missing / unsupported-platform）时允许文本回退；
- * 远程会话（remote-session）、图片过大（too-large）、解析/超时失败（read-failed）
- * 等非 empty/read-unavailable 真错误绝不伪装成文本。
+ * 真值在 pasteFlow.isTextFallbackEligibleCode（唯一的共享剪贴板流程），
+ * 这里保留旧导出名以免既有调用点/测试漂移。
  */
 export function isClipboardImageFallbackEligible(error: unknown): boolean {
   const code =
@@ -468,11 +476,7 @@ export function isClipboardImageFallbackEligible(error: unknown): boolean {
       : typeof error === "object" && error !== null && "code" in error
         ? String((error as { code?: unknown }).code)
         : undefined;
-  return (
-    code === "empty-clipboard" ||
-    code === "binary-missing" ||
-    code === "unsupported-platform"
-  );
+  return isTextFallbackEligibleCode(code);
 }
 
 async function runTuiWorkspace(options: WorkspaceOptions) {
@@ -506,7 +510,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             await clipboard.write(t);
           },
           output,
-          sendOsc52: isInteractiveInput(input),
+          // Local sessions have direct access to the user's OS clipboard and
+          // must not enqueue a redundant OSC 52 write behind it: that late
+          // terminal-side write can overwrite a newer browser copy. Over SSH,
+          // OSC 52 remains the only path to the client clipboard; a pipe/non-
+          // interactive remote session has no valid client clipboard channel.
+          transport: isRemoteSession(runtimeEnv)
+            ? isInteractiveInput(input)
+              ? "osc52"
+              : "unavailable"
+            : "system",
         });
   const readClipboardText =
     options.clipboardReader ??
@@ -679,7 +692,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     getCurrentDialogId: () => state.dialogId ?? null,
     onWake: (text) => runWakeHandler?.(text),
   });
-  // ── 进程任务终态通知（pendingProcessNotices）──
+  // ── 进程任务终态通知（pendingProcessNotices）+ 自动续跑 ──
   // 订阅进程 registry 的终态发射：launchProcess / 超时 detach 的 execShell
   // 进入终态（exited/failed/stopped）时，把单行摘要 push 进
   // state.pendingProcessNotices；下一个真实 turn 组装时作为 turn-scope
@@ -689,6 +702,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 渲染：状态栏在 ⚙ running chip 旁追加 "⚙ N finished"（见 renderStatusLine），
   // 到达即 scheduleRender 刷新；非 TTY（readline/管道）路径没有状态行，
   // 直接跳过（与 run 唤醒的 onWake 通道在非交互模式下的丢弃策略一致）。
+  //
+  // 有归属的任务（派发时 runtimeContext 里带 dialogId/turnId）额外走自动续跑：
+  // 判定在 processTerminalResume.ts（归属匹配 / turn 活跃度 / 链深上限），投递
+  // 本体是下方 deliverProcessTerminalNotice——它需要 turn 机器（busy / 收件箱 /
+  // runWakeHandler）就绪，所以订阅在这里装（registry 不补发，装得越早越不漏），
+  // 投递体在交互区里覆盖式安装。
   const pushPendingProcessNotice = (notice: ProcessTerminalNotice): void => {
     if (sessionEnded) return;
     const line = formatProcessTerminalNoticeLine(notice);
@@ -699,9 +718,12 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 与 gitStatus 异步回调同样的守卫与节流：会话退出后丢弃陈旧重绘。
     scheduleRender();
   };
-  const unsubscribeProcessTerminal = getProcessRegistry().onProcessTerminal(
-    pushPendingProcessNotice,
-  );
+  // 投递体尚未安装（工作区启动中）时的兜底：维持既有「只提示」语义。
+  let deliverProcessTerminalNotice: (notice: ProcessTerminalNotice) => void =
+    pushPendingProcessNotice;
+  const unsubscribeProcessTerminal = getProcessRegistry().onProcessTerminal((notice) => {
+    deliverProcessTerminalNotice(notice);
+  });
   const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
@@ -1046,6 +1068,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // question (fixed by routing through this hook instead).
   let composerDecoderDrain: (() => void) | null = null;
 
+  // 草稿世代（async 粘贴守卫）：每次草稿被提交/清空时自增。剪贴板读取是异步的，
+  // 读回来时若世代已变（用户已提交、已清空、已退出会话），迟到结果必须丢弃而不
+  // 是写进一个新草稿。
+  let draftEpoch = 0;
+  /**
+   * 作废在途的异步粘贴。草稿被提交/清空、或换了对话时调用：迟到的剪贴板结果
+   * 世代不匹配就被丢弃，不会写进下一个草稿。
+   */
+  const bumpDraftEpoch = () => {
+    draftEpoch += 1;
+  };
+
   const emitCommandOutput = (text: string, command = "") => {
     if (!text) return;
     if (!isInteractiveInput(input)) {
@@ -1058,6 +1092,79 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
   };
 
+  /**
+   * 唯一的「剪贴板内容 → 界面」应用器。`/paste`、Ctrl+V、空 bracketed-paste
+   * 三条入口都走这里，读取流程在 pasteFlow.resolveClipboardPaste 里共享。
+   *
+   * - image：并入待发附件（下一轮随消息发出）
+   * - text：以 PASTE token 插进草稿（保留原文空白与换行；超长自动折叠成 chip）
+   * - empty：打印图像读取的原始提示（含可执行下一步）
+   * - error：保留真实错误（远程会话 / 过大 / 读失败 / 文本读失败），绝不静默
+   */
+  const applyClipboardPasteResult = (
+    outcome: ClipboardPasteOutcome,
+    source: ClipboardPasteSource,
+  ): void => {
+    const colorEnabled = resolveCliColorEnabled();
+    if (outcome.kind === "image") {
+      state = {
+        ...state,
+        attachedImages: mergeAttachedImages(state.attachedImages, [outcome.image]),
+      };
+      emitCommandOutput(summarizeAttachment(outcome.image));
+      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      return;
+    }
+    if (outcome.kind === "text") {
+      const pasteResult = applyTuiInputKey(
+        buffer,
+        `${PASTE_TOKEN_PREFIX}${outcome.text}`,
+        {},
+        cursorPos,
+        { pasteStore, cwd: state.cwd },
+      );
+      buffer = pasteResult.buffer;
+      cursorPos = pasteResult.cursorPos ?? buffer.length;
+      if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+      // 显式 /paste 给出回执；Ctrl+V 与终端空括号兼容路径保持安静（用户看得见
+      // 草稿里出现的内容，不需要额外一行 chrome）。
+      if (source === "slash") {
+        emitCommandOutput(t("pasteTextInserted", String(outcome.text.length)));
+      }
+      return;
+    }
+    emitCommandOutput(
+      themeText(`[nolo] ${outcome.message}`, "warning", colorEnabled),
+    );
+    if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+  };
+
+  /**
+   * 读剪贴板并把结果应用到界面（共用流程 + async 世代守卫）。
+   * 返回 true 表示结果被应用，false 表示因草稿世代变化/会话结束被丢弃。
+   */
+  const readAndApplyClipboard = async (
+    source: ClipboardPasteSource,
+  ): Promise<boolean> => {
+    const snapshot = { epoch: draftEpoch, sessionEnded };
+    const outcome = await resolveClipboardPaste({
+      readImage: () => readImage({ env: options.env ?? process.env }),
+      readText: () => readClipboardText(),
+    });
+    if (
+      !shouldApplyPastedResult(snapshot, { epoch: draftEpoch, sessionEnded })
+    ) {
+      // 迟到的粘贴：期间用户已提交草稿 / 开了新对话。会话已结束时连提示都不写
+      // （output 可能已关闭，且退出后没人看）。
+      if (!sessionEnded) {
+        emitCommandOutput(t("pasteStaleDropped"));
+      }
+      return false;
+    }
+    applyClipboardPasteResult(outcome, source);
+    return true;
+  };
+
   // The TUI chat queue binding drives drain via runOneAgentTurn. It is created
   // on demand so the drain callback can capture history/state/fixedInput/runAgentChat.
   let chatQueueBinding: ChatQueueTuiBinding | null = null;
@@ -1065,6 +1172,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 当前进行中 turn 的注入收件箱（runOneAgentTurn 创建/清理）。busy 时后台 run
   // 终态唤醒直投这里注入正在跑的 loop，不再走 chat 队列。见 turnInjectionInbox.ts。
   let turnInjectionInbox: AgentTurnContext["turnInjectionInbox"] = null;
+
+  // 「用户自己发了一轮」的提示钩子（进程任务自动续跑的链深清零用）。实现在交互区
+  // 里（需要 processTerminalResumer），这里先占位，语义与 turnInjectionInbox 同：
+  // 外层可变绑定 + ctx 转发，保证 turn 侧读到的永远是最新那个。
+  let noteUserTurnHook: (() => void) | null = null;
 
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
   const turnCtx: AgentTurnContext = {
@@ -1084,6 +1196,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     set chatQueueBinding(v) { chatQueueBinding = v; },
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
+    noteUserTurn: () => noteUserTurnHook?.(),
 
     get sessionEnded() { return sessionEnded; },
     get buffer() { return buffer; },
@@ -1157,6 +1270,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     persistExplicitAgentSwitch,
     persistAgentSelection,
     writeClipboard,
+    readAndApplyClipboard,
+    bumpDraftEpoch,
     selfUpdater,
     spawnRunner,
     installAltScreenRestoreHandlers,
@@ -1377,11 +1492,25 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       };
       return { actionGateHandler, confirmDestructiveAction };
     };
+    // 进程任务终态自动续跑的决策器：归属来自 registry 记录（派发时刻写入），
+    // 当前 dialog / turn 活跃度取自 UI 事实。只有「有人能把对话接回来」
+    // （交互会话 + 已装上唤醒通道）时才允许续跑，否则退回只提示且不消耗
+    // once-only 名额。判定规则见 processTerminalResume.ts。
+    const processTerminalResumer = createProcessTerminalAutoResumer({
+      readOwner: (taskId) => getProcessRegistry().getByTaskId(taskId)?.owner ?? null,
+      getCurrentDialogId: () => state.dialogId ?? null,
+      isTurnActive: () => busy || fixedInput.isPaused(),
+      canDeliver: () => !sessionEnded && !done && runWakeHandler !== null,
+    });
+    noteUserTurnHook = () => processTerminalResumer.noteUserTurn();
     // 空闲时把一段文本作为新 turn 直接跑。两个调用方：Enter 键的空闲手动
     // drain（空 Enter / Ctrl+S 落到这里的队首）和 run 终态唤醒。busy 标志、
     // enterOutputMode、notifyTurnEnd、失败时 emitCommandOutput(turnFailed)
     // 与直接发送路径保持同一份实现，不复制漂移。调用方必须保证当前空闲。
     const runIdleTextTurn = async (inputMsg: TurnRequest | InternalTurnEvent | string): Promise<void> => {
+      // 「用户回来了」的链深清零不在这里做：runOneAgentTurn 才是所有 turn 的
+      // 唯一入口（busy 期间排队的用户消息由队列 drain 直接进那里），清零钩子
+      // 挂在 ctx.noteUserTurn 上，见 tuiTurnRunner。
       const req = createTurnRequest(inputMsg);
       const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
       const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
@@ -1418,6 +1547,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // `ctx.options.env ?? process.env`），别写进 effectiveEnv——那是 run 记录
     // 读取用的快照，构造得更早，也不流向工具表。
     (options.env ?? process.env)[RUN_WAKE_CHANNEL_ENV] = "1";
+    // 内部事件（后台 run / 进程任务终态唤醒）在 transcript 上的显示：紧凑单行 +
+    // 流式安全插入。run 唤醒的 busy 分支与进程任务续跑共用这一份实现，避免两处
+    // 漂移（appendStreamSafeNotice 的理由见 turnInjectionInbox.ts）。
+    const printInternalEventLine = (displayText: string): void => {
+      const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
+      if (!isInteractiveInput(input)) {
+        // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
+        output.write(`${noticeLine}\n`);
+        return;
+      }
+      history.followBottom = true;
+      appendStreamSafeNotice(history, noticeLine, {
+        appendLocalTurn,
+        startTurn,
+      });
+      renderHistoryToOutput();
+    };
     runWakeHandler = (event: InternalTurnEvent | string) => {
       if (done) return;
       if (busy || fixedInput.isPaused()) {
@@ -1437,26 +1583,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           // 不会把 currentRole 设回 assistant —— 注入发生在流式输出中途时，
           // 之后模型继续流出的文本会被静默吞掉（不保存也不渲染）。
           // appendStreamSafeNotice 会在插入状态行后重开 assistant 流式段。
+          // 显示文案优先用 displayText（系统事件的紧凑单行）；string 事件只有 text。
           const displayText =
-            typeof event !== "string" && event.kind === "child-run-completed"
-              ? (event.displayText ?? event.text)
-              : text;
-          const noticeLine = dimCliText(displayText, resolveCliColorEnabled());
-          if (!isInteractiveInput(input)) {
-            // 非交互模式本来就不碰 TurnHistory，直写即可（与 emitCommandOutput 一致）。
-            output.write(`${noticeLine}\n`);
-          } else {
-            history.followBottom = true;
-            appendStreamSafeNotice(history, noticeLine, {
-              appendLocalTurn,
-              startTurn,
-            });
-            renderHistoryToOutput();
-          }
+            typeof event === "string"
+              ? event
+              : event.kind === "user"
+                ? event.text
+                : (event.displayText ?? event.text);
+          printInternalEventLine(displayText);
         } else {
           const { actionGateHandler, confirmDestructiveAction } = buildInteractiveTurnHandlers();
           ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction)
             .enqueue(event);
+          // 这里刻意不补打印：inbox 不可用时的兜底与 run 终态唤醒共用本分支，
+          // 排队事实已经由 composer 的队列 UI 呈现；在此额外印 transcript 行会
+          // 让 run wake 的既有显示语义跟着变化，也会与队列 UI 重复。
         }
         if (fixedInput.active && !fixedInput.isPaused()) {
           fixedInput.repaint(buffer, cursorPos);
@@ -1468,6 +1609,29 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           `${t("turnFailed")}${err instanceof Error && err.message ? `\n${err.message}` : ""}`,
         );
       });
+    };
+    // 进程任务终态投递体（订阅在构造早期已装上，这里补上真正的投递）：
+    //   - notice-only：无归属 / dialog 不匹配 / 重复 / 链深触顶 / 无通道 →
+    //     维持既有 pending 行（下一轮 context block 让模型知情），不续跑；
+    //   - 续跑：同一事实不再进 pendingProcessNotices（投递本身已经到位：busy 直投
+    //     收件箱、空闲起 completion turn），否则模型会在 inbox 文本之外又从下一轮
+    //     context block 看到同一行。屏幕上仍留一行 dim 记录。
+    deliverProcessTerminalNotice = (notice: ProcessTerminalNotice) => {
+      if (done || sessionEnded) return;
+      const decision = processTerminalResumer.decide(notice);
+      if (decision.kind === "notice-only") {
+        pushPendingProcessNotice(notice);
+        return;
+      }
+      // 屏幕记录交给下游各投递路径，deliver 不再自己打印：无条件 print 会让
+      // 「busy 直投收件箱」与「空闲 completion turn」两条成功路径都出现连续
+      // 两行相同 dim 行（前者由 runWakeHandler 的 injected 分支印、后者由
+      // tuiTurnRunner 写 transcript）。inbox 不可用时的 enqueue 兜底同样不打印，
+      // 那与 run 终态唤醒共用分支、且队列 UI 已呈现排队事实（见 runWakeHandler）。
+      runWakeHandler?.(buildProcessTaskCompletedTurnEvent(notice));
+      if (fixedInput.active && !fixedInput.isPaused()) {
+        fixedInput.repaint(buffer, cursorPos);
+      }
     };
 
     let autoScrollDirection: "up" | "down" = "up";
@@ -1588,7 +1752,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         clearSelection();
       }
       if (buffer.length > 0) {
-        // 仅清空输入草稿。
+        // 仅清空输入草稿。世代自增：Ctrl+C 清草稿后在途粘贴结果不得再落进来。
+        bumpDraftEpoch();
         buffer = "";
         cursorPos = 0;
         if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
@@ -1615,12 +1780,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       busySlashCommand: string,
     ): Promise<void> => {
       releaseCollapsedPasteReferences(submittedText, pasteStore);
+      // 草稿被清空（命令回显不占草稿）：作废在途的异步粘贴结果。
+      bumpDraftEpoch();
       buffer = "";
       cursorPos = 0;
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
 
       const beforeAgentKey = state.agentKey;
       const res = handleTuiInput(submittedText, state);
+      if (res.action?.type === "paste-clipboard") {
+        // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
+        // （不触碰 history 状态机，不排队）。与空闲路径共用同一份读取流程。
+        await readAndApplyClipboard("slash");
+        return;
+      }
       if (res.action?.type === "theme-refresh") {
         state = res.nextState;
         const detected = await detectTerminalBackground({
@@ -1960,50 +2133,20 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         activeTurnAbort.abort();
         return;
       }
-      // 粘贴快捷键（Ctrl+V / \x16）或空 bracketed-paste 触发且 stdin 无有效文本时，主动向系统剪贴板索取图像
+      // 粘贴来源识别（三条入口，语义不同但共用下方同一个读取流程）：
+      // - Ctrl+V / \x16：显式快捷键；
+      // - `/paste`：显式命令（走 slash 分发，见 tuiSlashRouter）；
+      // - 空 bracketed paste（`\x1b[200~\x1b[201~`，payload 全为空白）：终端
+      //   在「粘贴图片」时只发空括号标记，属兼容信号而非用户命令。
+      // 非空 bracketed paste 一律只使用终端传来的文本（上一分支已把 payload 写进
+      // 草稿），绝不二次读系统剪贴板。
       const isPasteToken = sequence.startsWith(PASTE_TOKEN_PREFIX);
-      const isPasteShortcut =
-        sequence === "\x16" ||
-        (isPasteToken && sequence.slice(PASTE_TOKEN_PREFIX.length).trim() === "");
+      const isEmptyBracketedPaste =
+        isPasteToken && sequence.slice(PASTE_TOKEN_PREFIX.length).trim() === "";
+      const isPasteShortcut = sequence === "\x16" || isEmptyBracketedPaste;
 
       if (isPasteShortcut) {
-        try {
-          const image = await readImage({
-            env: options.env ?? process.env,
-          });
-          state = {
-            ...state,
-            attachedImages: mergeAttachedImages(state.attachedImages, [image]),
-          };
-          emitCommandOutput(summarizeAttachment(image));
-        } catch (error) {
-          if (isClipboardImageFallbackEligible(error)) {
-            let clipboardText = "";
-            try {
-              clipboardText = await readClipboardText();
-            } catch {
-              clipboardText = "";
-            }
-            if (clipboardText.length > 0) {
-              const pasteResult = applyTuiInputKey(
-                buffer,
-                `${PASTE_TOKEN_PREFIX}${clipboardText}`,
-                {},
-                cursorPos,
-                { pasteStore, cwd: state.cwd },
-              );
-              buffer = pasteResult.buffer;
-              cursorPos = pasteResult.cursorPos;
-              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-              return;
-            }
-          }
-          const msg = error instanceof Error ? error.message : String(error);
-          emitCommandOutput(
-            themeText(`[nolo] ${msg}`, "warning", resolveCliColorEnabled()),
-          );
-        }
-        if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+        await readAndApplyClipboard(isEmptyBracketedPaste ? "bracketed-empty" : "key");
         return;
       }
       // Backspace 撤销附件：空草稿 + 有附件时，逐个撤销（最新贴的先撤）。
@@ -2098,6 +2241,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/customize" ||
             busySlashCommand === "/login" ||
             busySlashCommand === "/profile" ||
+            busySlashCommand === "/paste" ||
             busySlashCommand === "/version";
           if (isBusyLocalSlash) {
             // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
@@ -2153,11 +2297,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             // turn 执行本体走共享的 runIdleTextTurn（与 run 终态唤醒同一份）。
             buffer = "";
             cursorPos = 0;
+            // 空 Enter 把队列头拉成新 turn：草稿换了世代，在途粘贴结果作废。
+            bumpDraftEpoch();
             await runIdleTextTurn(drainedText);
             return;
           }
         }
         busy = startsChatTurn;
+        // 提交即作废旧世代：在途的剪贴板读取回来时草稿已清，结果必须丢弃，
+        // 否则会把「上一行的粘贴」塞进新草稿。
+        bumpDraftEpoch();
         buffer = "";
         cursorPos = 0;
         // Note: we intentionally keep the `data` listener attached. During the

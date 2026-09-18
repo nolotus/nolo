@@ -10,6 +10,7 @@
 // 独立工具），所以通知是纯摘要 + 提示行，不走 child-run-completed 事件轴。
 
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
+import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEvent";
 
 /**
  * 送进模型的通知全文（一条任务一段）。与 run wake 的 ContextualFragment
@@ -48,6 +49,26 @@ export function buildProcessTerminalTurnMessage(
 ): string {
   if (notices.length === 0) return "";
   return formatProcessTerminalWakeMessage(notices);
+}
+
+/**
+ * 终态通知 → 内部 turn 事件（自动续跑用）。
+ *
+ * 与 child-run-completed 同形：`text` 是给模型的完整事实（含 taskLogs 指引），
+ * `displayText` 是屏幕上的紧凑单行；进程任务没有 run 记录可查询，所以 status /
+ * exitCode 直接进事件载荷，不借道 run 轴。
+ */
+export function buildProcessTaskCompletedTurnEvent(
+  notice: ProcessTerminalNotice,
+): BackgroundTaskCompletedTurnEvent {
+  return {
+    kind: "background-task-completed",
+    taskId: notice.taskId,
+    status: notice.status,
+    ...(notice.exitCode !== undefined ? { exitCode: notice.exitCode } : {}),
+    text: buildProcessTerminalTurnMessage([notice]),
+    displayText: formatProcessTerminalNoticeLine(notice),
+  };
 }
 
 /**

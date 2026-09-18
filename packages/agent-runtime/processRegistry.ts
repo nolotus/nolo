@@ -21,6 +21,7 @@ import {
   type ProcessTaskEventLogOptions,
   type ProcessTaskStatus,
 } from "./processTask";
+import type { ProcessOwner } from "./processOwnership";
 
 export type RegisteredProcess = {
   /** Stable handle across grace-GC / timeout-detach promotion. */
@@ -47,6 +48,17 @@ export type RegisteredProcess = {
    * truth) and can still see transient envelopes.
    */
   transient: boolean;
+  /**
+   * Ownership captured at launch / detach time (see processOwnership.ts):
+   * which dialog (and which turn) asked for this task. `null` means the
+   * envelope has no parent conversation — its terminal notice may only be
+   * surfaced as a summary, never used to wake a conversation.
+   *
+   * Invariant: written once at registration and read as-is afterwards. The
+   * terminal path must NOT re-derive ownership from "the dialog that happens
+   * to be open right now" (the task may outlive the turn that launched it).
+   */
+  owner: ProcessOwner | null;
 };
 
 export type RegisteredProcessInput = {
@@ -63,6 +75,11 @@ export type RegisteredProcessInput = {
   transient?: boolean;
   /** Pre-generated taskId; a fresh one is minted when omitted. */
   taskId?: string;
+  /**
+   * Parent dialog/turn captured at launch or detach time. Omit (or null) for
+   * tasks that belong to no conversation; see processOwnership.readProcessOwner.
+   */
+  owner?: ProcessOwner | null;
 };
 
 let taskIdCounter = 0;
@@ -143,6 +160,7 @@ export class ProcessRegistry {
       persist: proc.persist ?? false,
       promoted: false,
       transient: proc.transient ?? false,
+      owner: proc.owner ?? null,
     };
     this.processes.set(proc.pid, record);
     this.byTaskId.set(record.taskId, proc.pid);

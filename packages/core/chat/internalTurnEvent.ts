@@ -47,7 +47,28 @@ export type UserTurnEvent = {
   text: string;
 };
 
-export type InternalTurnEvent = UserTurnEvent | ChildRunCompletedTurnEvent;
+/**
+ * 后台进程任务（`launchProcess` / 自动 detach 的 `execShell`）终态事件。
+ *
+ * 与 `child-run-completed` 刻意分开：进程任务没有 run 记录、没有子 dialog，输出只在
+ * `taskLogs(taskId)` 里按需取，所以载荷就是 taskId + 状态；两条状态轴
+ * （ProcessTaskStatus vs AGENT_RUN_TERMINAL_STATUSES）不在这里合并。
+ */
+export type BackgroundTaskCompletedTurnEvent = {
+  kind: "background-task-completed";
+  taskId: string;
+  status: "stopped" | "exited" | "failed";
+  exitCode?: number;
+  /** 送进模型上下文的完整摘要（含 taskLogs 指引，不含 stdout/stderr）。 */
+  text: string;
+  /** 屏幕上要显示的紧凑单行（系统事件不套用户气泡）。 */
+  displayText?: string;
+};
+
+export type InternalTurnEvent =
+  | UserTurnEvent
+  | ChildRunCompletedTurnEvent
+  | BackgroundTaskCompletedTurnEvent;
 
 export type TurnRequest = {
   event: InternalTurnEvent;

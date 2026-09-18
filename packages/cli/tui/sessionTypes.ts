@@ -195,6 +195,13 @@ export type TuiAction =
       type: "pick-dialog";
     }
   | {
+      /**
+       * `/paste`：显式读系统剪贴板（图像优先，可降级文本），与 Ctrl+V 共用
+       * readlineWorkspace 的同一份剪贴板流程。fallback，不是原生粘贴的替代。
+       */
+      type: "paste-clipboard";
+    }
+  | {
       type: "set-locale";
       locale: "zh" | "en";
     }
