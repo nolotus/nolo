@@ -70,6 +70,56 @@ export type RegisteredProcess = {
   resultCapsule?: ProcessTaskResultCapsule;
 };
 
+/**
+ * Wire view of an envelope for the `listProcesses` tool surface. Deliberately
+ * an explicit projection instead of a record spread: the full record carries
+ * `resultCapsule` (bounded stdout/stderr per finished task), and letting it
+ * ride into every list call would re-send output the terminal wake already
+ * delivered and spend the tool-output budget on it. The capsule stays the
+ * *delivery* payload; this view exposes only the retrievable ref plus the
+ * timing facts.
+ *
+ * `tasks` (processTaskTools.runTasks) keeps its own narrower projection
+ * (taskId/pid/label/status/startedAt/persist) and does not use this view; both
+ * are payload-free, and neither is the source of truth for the other.
+ */
+export type ProcessTaskView = {
+  taskId: string;
+  pid: number;
+  pgid: number;
+  command: string;
+  label: string;
+  startedAt: number;
+  status: ProcessTaskStatus;
+  exitCode?: number;
+  persist: boolean;
+  promoted: boolean;
+  transient: boolean;
+  /** Wall time of the terminal transition; present only with a capsule. */
+  durationMs?: number;
+  /** Ref to the full output when the capsule's inline tails were lossy. */
+  outputRef?: string;
+};
+
+export function toProcessTaskView(record: RegisteredProcess): ProcessTaskView {
+  const capsule = record.resultCapsule;
+  return {
+    taskId: record.taskId,
+    pid: record.pid,
+    pgid: record.pgid,
+    command: record.command,
+    label: record.label,
+    startedAt: record.startedAt,
+    status: record.status,
+    ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+    persist: record.persist,
+    promoted: record.promoted,
+    transient: record.transient,
+    ...(capsule?.durationMs !== undefined ? { durationMs: capsule.durationMs } : {}),
+    ...(capsule?.spill ? { outputRef: capsule.spill.displayPath } : {}),
+  };
+}
+
 export type RegisteredProcessInput = {
   pid: number;
   pgid: number;

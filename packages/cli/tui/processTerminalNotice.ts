@@ -11,6 +11,7 @@
 
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
 import type { ProcessTaskResultCapsule } from "../../agent-runtime/processTaskResult";
+import { formatToolOverflowMarker } from "../../agent-runtime/toolSpillStore";
 import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEvent";
 
 /**
@@ -39,7 +40,7 @@ export function formatProcessTerminalWakeMessage(
   ].join("\n");
 }
 
-/** capsule → 通知块里的多行正文（bounded tail + 可选 spill 指引）。 */
+/** capsule → 通知块里的多行正文（bounded tail + 统一的 spill 指引）。 */
 export function formatProcessResultCapsuleLines(
   capsule: ProcessTaskResultCapsule,
 ): string[] {
@@ -50,11 +51,28 @@ export function formatProcessResultCapsuleLines(
     `--- ${name} ---`,
     ...(value.trim() ? value.replace(/\n+$/, "").split("\n") : ["(empty)"]),
   ];
+  const omittedChars = capsule.spill
+    ? Math.max(0, capsule.spill.totalChars - capsule.stdout.length - capsule.stderr.length)
+    : 0;
   return [
-    `result capsule (${meta.join(", ")})${capsule.spill ? `, full output: ${capsule.spill.displayPath} (${capsule.spill.totalChars} chars, ${capsule.spill.totalLines} lines)` : ""}:`,
+    `result capsule (${meta.join(", ")}):`,
     ...(capsule.captureError ? [`capture error: ${capsule.captureError}`] : []),
     ...stream("stdout", capsule.stdout),
     ...stream("stderr", capsule.stderr),
+    // Retrieval pointer reuses the tool-overflow convention: the model learns
+    // one marker for "the tail above is not the whole story, full text lives
+    // here", whether the truncation happened in a foreground tool result or in
+    // a detached task capsule.
+    ...(capsule.spill
+      ? [
+          formatToolOverflowMarker({
+            spillRef: capsule.spill.displayPath,
+            totalChars: capsule.spill.totalChars,
+            totalLines: capsule.spill.totalLines,
+            omittedChars,
+          }).trim(),
+        ]
+      : []),
   ];
 }
 

@@ -1,4 +1,13 @@
 
+## 0.103.0-alpha.5
+
+## 0.103.0-alpha.5 (2026-09-19)
+
+### Bug Fixes
+
+* **agent-runtime:** keep a retrievable ref for every lossy task capsule ([2aa19eb](https://github.com/nolotus/bun-nolo/commit/2aa19eb860dfc81cf598109d6deac0c1aea4ccfc))
+
+
 ## 0.103.0-alpha.4
 
 ## 0.103.0-alpha.4 (2026-09-18)

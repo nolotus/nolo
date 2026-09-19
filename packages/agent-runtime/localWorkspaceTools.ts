@@ -38,7 +38,7 @@ async function hasRootGitignore(workspaceRoot: string): Promise<boolean> {
 async function readRootGitignorePatterns(workspaceRoot: string): Promise<string[]> {
   return readRootGitignorePatternList(workspaceRoot);
 }
-import { getProcessRegistry } from "./processRegistry";
+import { getProcessRegistry, toProcessTaskView } from "./processRegistry";
 import { readProcessOwner } from "./processOwnership";
 import {
   formatTaskLogsContent,
@@ -1969,7 +1969,7 @@ async function launchProcessTool(args: {
 async function listProcessesTool(args: {
   call: AgentRuntimeToolCallInput;
 }): Promise<AgentRuntimeToolResult> {
-  const list = getProcessRegistry().list();
+  const list = getProcessRegistry().list().map(toProcessTaskView);
   return {
     content: JSON.stringify(list),
     metadata: {
