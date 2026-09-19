@@ -1,4 +1,13 @@
 
+## 0.103.0-alpha.6
+
+## 0.103.0-alpha.6 (2026-09-19)
+
+### Bug Fixes
+
+* **agent-runtime:** align host adapter context usage contract and explicit test notice types ([805cdbc](https://github.com/nolotus/bun-nolo/commit/805cdbcdee6257209f1f6b0977e01ea21f5a5740))
+
+
 ## 0.103.0-alpha.5
 
 ## 0.103.0-alpha.5 (2026-09-19)

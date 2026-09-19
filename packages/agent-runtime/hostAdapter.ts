@@ -1,5 +1,6 @@
 import type {
   AgentRuntimeChatMessage,
+  AgentRuntimeContextUsageRecord,
   AgentRuntimeHost,
   AgentRuntimeResult,
   AgentRuntimeToolPolicy,
@@ -242,6 +243,13 @@ export type AgentRuntimeHostAdapter = {
     sourceCount?: number;
     schemaVersion?: number;
   }): Promise<void>;
+  /**
+   * Optional: load last context token usage for local auto-compaction trigger.
+   * Missing method = host does not track context usage (falls back to estimate).
+   */
+  loadLastContextUsage?(
+    dialogId: string,
+  ): Promise<AgentRuntimeContextUsageRecord | null>;
 };
 
 export function createRuntimeHostDescriptor(adapter: AgentRuntimeHostAdapter) {
