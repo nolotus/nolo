@@ -1,4 +1,14 @@
 
+## 0.83.0-alpha.2
+
+## 0.83.0-alpha.2 (2026-09-19)
+
+### Bug Fixes
+
+* **devin:** fail closed on incomplete streams and preserve wire-order deltas ([d924ae1](https://github.com/nolotus/bun-nolo/commit/d924ae1155cba7bc7fde61ad22c15a46169ee6ee))
+* **devin:** reject frames after terminal ConnectRPC trailer ([f85d130](https://github.com/nolotus/bun-nolo/commit/f85d130978d8ce4bafe346716caa2fbc8b6795f8))
+
+
 ## 0.83.0-alpha.1
 
 ## 0.83.0-alpha.1 (2026-09-19)

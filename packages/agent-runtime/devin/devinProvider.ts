@@ -236,13 +236,31 @@ export type DevinDecodedDelta = {
   content: string;
   reasoning: string;
   finishReason: string | null;
+  events: Array<{ type: "content" | "reasoning"; text: string }>;
 };
+
+export function parseDevinConnectTrailer(payload: Buffer): Error | null {
+  const text = payload.toString("utf8").trim();
+  if (!text || text === "{}") return null;
+  try {
+    const parsed = JSON.parse(text) as { error?: { code?: unknown; message?: unknown } };
+    if (!parsed.error) {
+      return new Error(`Devin Connect invalid terminal trailer: ${text}`);
+    }
+    const code = typeof parsed.error.code === "string" ? parsed.error.code : "unknown";
+    const message = typeof parsed.error.message === "string" ? parsed.error.message : "Unknown error";
+    return new Error(`Devin Connect upstream error ${code}: ${message}`);
+  } catch {
+    return new Error(`Devin Connect invalid terminal trailer: ${text}`);
+  }
+}
 
 export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
   let offset = 0;
   let content = "";
   let reasoning = "";
   let finishReason: string | null = null;
+  const events: DevinDecodedDelta["events"] = [];
 
   while (offset < payload.length) {
     // Read tag varint
@@ -286,11 +304,13 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
       offset += len;
 
       if (fieldNum === 3) {
-        // Text content
-        content += valBytes.toString("utf8");
+        const text = valBytes.toString("utf8");
+        content += text;
+        events.push({ type: "content", text });
       } else if (fieldNum === 9) {
-        // Reasoning / Thinking
-        reasoning += valBytes.toString("utf8");
+        const text = valBytes.toString("utf8");
+        reasoning += text;
+        events.push({ type: "reasoning", text });
       }
     } else {
       // Unknown wire type, cannot safely skip without full schema parser
@@ -298,7 +318,7 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
     }
   }
 
-  return { content, reasoning, finishReason };
+  return { content, reasoning, finishReason, events };
 }
 
 // --- Provider Implementation ---
@@ -350,6 +370,7 @@ export function createDevinProvider(options: {
       let text = "";
       let reasoning = "";
       let buffer: Buffer = Buffer.alloc(0);
+      let sawTrailer = false;
 
       const reader = response.body.getReader();
 
@@ -363,24 +384,43 @@ export function createDevinProvider(options: {
           buffer = Buffer.from(remainder);
 
           for (const f of frames) {
+            if (sawTrailer) {
+              throw new Error("Devin Connect received a frame after the terminal trailer");
+            }
+
             // flags 0x02 indicates stream end/trailer
-            if (f.flags & 0x02) continue;
+            if (f.flags & 0x02) {
+              sawTrailer = true;
+              const trailerError = parseDevinConnectTrailer(f.payload);
+              if (trailerError) throw trailerError;
+              continue;
+            }
 
             const delta = decodeDevinResponsePayload(f.payload);
 
-            if (delta.reasoning) {
-              reasoning += delta.reasoning;
-              opts?.onReasoningDelta?.(delta.reasoning);
-            }
-
-            if (delta.content) {
-              text += delta.content;
-              opts?.onTextDelta?.(delta.content);
+            text += delta.content;
+            reasoning += delta.reasoning;
+            for (const event of delta.events) {
+              if (event.type === "reasoning") {
+                opts?.onReasoningDelta?.(event.text);
+              } else {
+                opts?.onTextDelta?.(event.text);
+              }
             }
           }
         }
       } finally {
         reader.releaseLock();
+      }
+
+      if (buffer.length > 0) {
+        throw new Error("Devin Connect upstream ended with an incomplete frame");
+      }
+      if (!sawTrailer) {
+        throw new Error("Devin Connect upstream ended before the terminal trailer");
+      }
+      if (!text && !reasoning) {
+        throw new Error("Devin Connect upstream completed without content");
       }
 
       return {
