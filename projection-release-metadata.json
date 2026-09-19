@@ -4,16 +4,16 @@
     "cli": {
       "version": "0.82.0-alpha.6",
       "channel": "alpha",
-      "releaseIntent": "release"
+      "releaseIntent": "none"
     },
     "desktop": {
       "version": "0.103.0-alpha.6",
       "channel": "alpha",
-      "releaseIntent": "release"
+      "releaseIntent": "none"
     }
   },
   "provenance": {
-    "sourceSha": "d1e36c6297d251d4e030e9a3f79c6bc0336d58ec",
+    "sourceSha": "da092cef75abdda7cf7dab4cffb46e4074253405",
     "sourceBranch": "alpha"
   }
 }

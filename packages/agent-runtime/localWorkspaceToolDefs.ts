@@ -28,7 +28,7 @@ export type { OpenAiCompatibleTool };
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
-  "taskWait", "taskLogs", "taskStop", "tasks",
+  "taskWait", "taskLogs", "taskStop",
   "openDesktopPreview",
 ] as const;
 
@@ -38,7 +38,7 @@ const WORKSPACE_TOOL_NAMES = [
 // UI action (no process handle) and stays with the workspace-level tools.
 const SHELL_TOOL_NAMES = [
   "execShell", "launchProcess", "listProcesses",
-  "taskWait", "taskLogs", "taskStop", "tasks",
+  "taskWait", "taskLogs", "taskStop",
 ] as const;
 
 const WORKSPACE_TOOL_NAME_SET = new Set<string>(WORKSPACE_TOOL_NAMES);
@@ -417,22 +417,6 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
   };
 }
 
-function buildTasksTool(): OpenAiCompatibleTool {
-  return {
-    type: "function",
-    function: {
-      name: "tasks",
-      description:
-        "List background tasks you can still wait on, read logs from, or stop. Returns {count, tasks: {taskId, pid, label, status, startedAt, persist}[]}. "
-        + "Use it to recover a taskId you lost track of; foreground commands still running inside execShell are not listed.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  };
-}
-
 export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "readFile") {
     return buildReadWorkspaceFileTool();
@@ -454,7 +438,6 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "taskWait") return buildTaskWaitTool();
   if (toolName === "taskLogs") return buildTaskLogsTool();
   if (toolName === "taskStop") return buildTaskStopTool();
-  if (toolName === "tasks") return buildTasksTool();
   return null;
 }
 

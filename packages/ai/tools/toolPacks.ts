@@ -52,7 +52,6 @@ export const TOOL_PACKS = {
     "taskWait",
     "taskLogs",
     "taskStop",
-    "tasks",
     // watchCompletion：push 后登记「业务终态订阅」，部署结束时服务端唤醒父对话
     // （等待期间 0 轮询 0 token）。与代码工作流同链路（push → CI → 通知），随
     // 「代码执行」能力包走。

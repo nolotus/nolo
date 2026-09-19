@@ -38,7 +38,6 @@ export const DEFAULT_LOCAL_TOOLS = new Set([
   "taskWait",
   "taskLogs",
   "taskStop",
-  "tasks",
   // Scheduling tools: forking/observing sub-agents is a declared capability
   // of capable agents, and the blast radius is strictly narrower than
   // execShell (already default-enabled). Requiring an env allowlist for these
