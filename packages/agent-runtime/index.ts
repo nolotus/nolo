@@ -416,3 +416,6 @@ export {
   BUILTIN_CAPABILITIES,
 } from "./capabilities";
 
+export { createDevinProvider } from "./devin/devinProvider";
+export { isDevinOAuthAgent } from "./devinOAuth";
+

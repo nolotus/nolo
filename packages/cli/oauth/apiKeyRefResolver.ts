@@ -27,7 +27,8 @@ function isOAuthProvider(value: string): value is OAuthProvider {
     value === "xai" ||
     value === "antigravity" ||
     value === "claude" ||
-    value === "cursor"
+    value === "cursor" ||
+    value === "devin"
   );
 }
 

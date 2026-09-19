@@ -21,7 +21,8 @@ export type OAuthProvider =
   | "antigravity"
   | "claude"
   | "cloudflare"
-  | "cursor";
+  | "cursor"
+  | "devin";
 
 export type OAuthCredential = {
   provider: OAuthProvider;

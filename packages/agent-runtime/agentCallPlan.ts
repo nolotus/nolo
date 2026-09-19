@@ -27,6 +27,9 @@ export const CODEX_RESPONSES_URL =
 /** Cursor AgentService — ConnectRPC over HTTP/2 (application/connect+proto). */
 export const CURSOR_AGENT_URL = "https://api2.cursor.sh/agent.v1.AgentService/Run";
 
+/** Devin Connect — ConnectRPC over HTTP/2 (application/connect+proto). */
+export const DEVIN_CONNECT_URL = "https://server.codeium.com/exa.api_server_pb.ApiServerService/GetChatMessage";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -34,7 +37,7 @@ export const CURSOR_AGENT_URL = "https://api2.cursor.sh/agent.v1.AgentService/Ru
 export type AuthMethod =
   | { kind: "platform-key" }
   | { kind: "custom-key" }
-  | { kind: "oauth"; ref: "chatgpt" | "xai" | "antigravity" | "claude" | "cursor" }
+  | { kind: "oauth"; ref: "chatgpt" | "xai" | "antigravity" | "claude" | "cursor" | "devin" }
   | { kind: "cli"; provider: string };
 
 export type WireFormat =
@@ -43,7 +46,8 @@ export type WireFormat =
   | "gemini-cca"
   | "anthropic-messages"
   | "cli"
-  | "cursor-connect";
+  | "cursor-connect"
+  | "devin-connect";
 
 export type Transport = "direct" | "server-proxy";
 
@@ -87,6 +91,7 @@ export function resolveClientWire(plan: AgentCallPlan): ClientWire {
   if (plan.upstreamWire === "gemini-cca") return "chat.completions";
   if (plan.upstreamWire === "anthropic-messages") return "chat.completions";
   if (plan.upstreamWire === "cursor-connect") return "chat.completions";
+  if (plan.upstreamWire === "devin-connect") return "chat.completions";
   if (
     plan.upstreamWire === "responses" &&
     plan.authMethod.kind === "oauth" &&
@@ -215,6 +220,18 @@ export function resolveAgentCallPlan(
         "x-ghost-mode",
       ],
       vendor: provider || "cursor",
+    };
+  }
+
+  // ── Devin (OAuth → ConnectRPC over HTTP/2, GetChatMessage) ──
+  if (apiKeyRef === "devin" || provider === "devin") {
+    return {
+      authMethod: { kind: "oauth", ref: "devin" },
+      transport: "server-proxy",
+      upstreamWire: "devin-connect",
+      endpoint: DEVIN_CONNECT_URL,
+      requiredHeaders: ["connect-protocol-version"],
+      vendor: provider || "devin",
     };
   }
 

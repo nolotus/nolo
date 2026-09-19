@@ -295,6 +295,27 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro", hasVision: true },
     ],
   },
+  {
+    kind: "oauth",
+    id: "devin-oauth",
+    label: "Devin Pro",
+    description: "Devin Subscription (Free SWE-2)",
+    apiKeyRef: "devin",
+    provider: "devin",
+    defaultModel: "swe-2-max",
+    defaultReasoningEffort: "high",
+    modelOptions: [
+      { id: "swe-2-max", label: "SWE-2 Max (Unlimited Free with $20 Pro)", hasVision: true, recommended: true },
+      { id: "swe-2-high", label: "SWE-2 High", hasVision: true },
+      { id: "swe-2-medium", label: "SWE-2 Medium", hasVision: true },
+      { id: "swe-2", label: "SWE-2", hasVision: true },
+      { id: "swe-1.7", label: "SWE-1.7", hasVision: true },
+      { id: "claude-3.7-sonnet", label: "Claude 3.7 Sonnet", hasVision: true },
+      { id: "claude-sonnet-4.6", label: "Claude Sonnet 4.6", hasVision: true },
+      { id: "gpt-5.2", label: "GPT-5.2", hasVision: true },
+      { id: "gpt-4o", label: "GPT-4o", hasVision: true },
+    ],
+  },
 ];
 
 // 直接调用 API key 的 provider 模板，归入「自定义」

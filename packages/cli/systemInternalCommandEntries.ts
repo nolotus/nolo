@@ -37,6 +37,10 @@ export function getSystemInternalCommandEntries(renderHelpText: () => string): C
       const { runAuthCursorCommand } = await import("./oauth/authCommand");
       return runAuthCursorCommand(args);
     }),
+    createArgsCommand(["auth", "devin"], "Authorize Devin OAuth (Free SWE-2)", async (args) => {
+      const { runAuthDevinCommand } = await import("./oauth/authCommand");
+      return runAuthDevinCommand(args);
+    }),
     createArgsCommand(["login"], "Log in to Nolo", async (args) => {
       const { runLoginCommand } = await import("./authCommands");
       return runLoginCommand(args);

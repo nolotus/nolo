@@ -6,6 +6,7 @@ import { runAntigravityOAuthLogin } from "./flows/antigravity";
 import { runXaiOAuthDeviceCode, runXaiOAuthLogin } from "./flows/xai";
 import { runAnthropicOAuthLogin } from "./flows/anthropic";
 import { runCursorOAuthLogin } from "./flows/cursor";
+import { runDevinOAuthLogin } from "./flows/devin";
 
 import { toErrorMessage } from "core/errorMessage";
 import type { CliRuntimeContext } from "../cliCommandTypes";
@@ -178,6 +179,27 @@ ${SYNC_HELP_LINE}
   --help, -h        Show this help and exit.
 `;
 
+const DEVIN_HELP_TEXT = `Authorize nolo-cli to call Devin models (including free SWE-2) via your Devin Pro subscription.
+
+This authorizes model API access only. It does NOT log you into the Nolo
+platform. To manage agents, docs, spaces, and other Nolo resources, run
+"nolo login" first.
+
+Usage: nolo auth devin [--no-browser] [--sync-to-server] [--help]
+
+The flow automatically checks for existing local Devin CLI credentials
+(~/.local/share/devin/credentials.toml). If not found, it opens the Devin
+login page in your browser and prompts for the session token or redirect URL.
+
+After approval, tokens are stored in $NOLO_HOME/credentials/devin.json (or ~/.nolo/credentials/devin.json when NOLO_HOME is unset).
+Agents can reference the stored token with apiKeyRef: "devin".
+
+Options:
+  --no-browser      Print the authorization URL without opening a browser.
+${SYNC_HELP_LINE}
+  --help, -h        Show this help and exit.
+`;
+
 const CLOUDFLARE_HELP_TEXT = `Authorize nolo-cli to manage Cloudflare resources on your behalf.
 
 This authorizes Cloudflare API access only. It does NOT log you into the Nolo platform.
@@ -227,6 +249,7 @@ const HELP_BY_PROVIDER: Record<OAuthProvider, string> = {
   claude: CLAUDE_HELP_TEXT,
   cloudflare: CLOUDFLARE_HELP_TEXT,
   cursor: CURSOR_HELP_TEXT,
+  devin: DEVIN_HELP_TEXT,
 };
 
 function isOAuthProvider(value: string): value is OAuthProvider {
@@ -236,7 +259,8 @@ function isOAuthProvider(value: string): value is OAuthProvider {
     value === "antigravity" ||
     value === "claude" ||
     value === "cloudflare" ||
-    value === "cursor"
+    value === "cursor" ||
+    value === "devin"
   );
 }
 
@@ -373,15 +397,11 @@ export async function runAuthProviderCommand(
   const syncConfigAvailable = !!(
     deps.resolveServerSyncConfig ?? resolveServerSyncConfig
   )();
-  const autoSyncDisabled =
-    args.includes("--no-sync-to-server") ||
-    process.env.NOLO_OAUTH_AUTO_SYNC === "0";
-  // Default: sync when server config is present. Opt out with --no-sync-to-server
-  // or NOLO_OAUTH_AUTO_SYNC=0. --sync-to-server / --sync-only still force sync.
-  const syncToServer =
+  const explicitSync =
     syncOnly ||
     args.includes("--sync-to-server") ||
-    (syncConfigAvailable && !autoSyncDisabled);
+    process.env.NOLO_OAUTH_AUTO_SYNC === "1";
+  const syncToServer = explicitSync;
   const generateToken = args.includes("--generate-token");
   const writeToEnvRaw = parseFlagWithOptionalValue(args, "--write-to-env");
   const writeToEnvPath =
@@ -449,6 +469,8 @@ export async function runAuthProviderCommand(
       credential = await runAnthropicOAuthLogin(flowDeps);
     } else if (provider === "cursor") {
       credential = await runCursorOAuthLogin(flowDeps);
+    } else if (provider === "devin") {
+      credential = await runDevinOAuthLogin(flowDeps);
     } else if (provider === "cloudflare") {
       credential = await runCloudflareOAuthLogin({
         ...flowDeps,
@@ -553,4 +575,12 @@ export async function runAuthCursorCommand(
   deps?: AuthProviderCommandDeps
 ): Promise<number> {
   return runAuthProviderCommand("cursor", args, ctx, deps);
+}
+
+export async function runAuthDevinCommand(
+  args: string[],
+  ctx?: CliRuntimeContext,
+  deps?: AuthProviderCommandDeps
+): Promise<number> {
+  return runAuthProviderCommand("devin", args, ctx, deps);
 }

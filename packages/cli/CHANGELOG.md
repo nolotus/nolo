@@ -1,4 +1,23 @@
 
+## 0.83.0-alpha.1
+
+## 0.83.0-alpha.1 (2026-09-19)
+
+### Features
+
+* **auth:** support Devin Pro subscription with native ConnectRPC and SWE-2 ([4236e6f](https://github.com/nolotus/bun-nolo/commit/4236e6f2c9eefc07a3cccce7ceab6e79ec8cdb59))
+* **devin:** promote swe-2-max as default model and refine auth flow ([73a8d98](https://github.com/nolotus/bun-nolo/commit/73a8d98e0990c1fe3cdcd3ae14f375220f1dbfdd))
+* **runtime:** wire devinProvider in desktop and CLI local runtime adapters ([d9da46e](https://github.com/nolotus/bun-nolo/commit/d9da46e376008ec6218d7465afe4b54f76e8f59a))
+
+### Bug Fixes
+
+* **auth:** point Devin auth URLs and token extraction directly to app.devin.ai ([f3310c4](https://github.com/nolotus/bun-nolo/commit/f3310c477bd1722f5c9e2b5ca3670682b34d3a15))
+* **devin:** calibrate GetChatMessage request schema with double-precision completion config ([20b435b](https://github.com/nolotus/bun-nolo/commit/20b435b118d896a6743e601cdbc7f79f7636eaee)), closes [#15](https://github.com/nolotus/bun-nolo/issues/15) [#21](https://github.com/nolotus/bun-nolo/issues/21)
+* **devin:** harden local transport tests and remove dead sync flag ([aded2f6](https://github.com/nolotus/bun-nolo/commit/aded2f666cbebf952febe2d4e8050ac9ec0c7db5))
+* **oauth:** allow devin provider in createOAuthApiKeyRefResolver ([a4179f5](https://github.com/nolotus/bun-nolo/commit/a4179f542bb9ffef28aa9dff75bbe78ec3c4814e))
+* **security:** do not auto-sync sensitive OAuth credentials to server by default ([408ea2e](https://github.com/nolotus/bun-nolo/commit/408ea2ec466c3dcb5357e3fc0bd8c11b667d65d6))
+
+
 ## 0.82.0-alpha.6
 
 ## 0.82.0-alpha.6 (2026-09-19)

@@ -23,6 +23,7 @@ import {
   resolvePlatformChatProviderConfig,
   resolveRuntimeToolSurfaceForAgent,
   shouldUsePlatformChatProvider,
+  createDevinProvider,
   type CredentialBroker,
 } from "agent-runtime";
 import { resolveAgentCallPlan } from "agent-runtime/agentCallPlan";
@@ -780,6 +781,22 @@ export async function resolveDesktopConfiguredProvider(args: {
         model,
         complete: async (messages, options) => {
           const result = await cursorProvider.complete(messages, options);
+          return result;
+        },
+      };
+    }
+
+    // Devin uses ConnectRPC + protobuf protocol (HTTP/2), not OpenAI-compatible REST.
+    if (ref === "devin") {
+      const devinProvider = createDevinProvider({
+        token: accessToken,
+        model,
+        fetchImpl,
+      });
+      return {
+        model,
+        complete: async (messages, options) => {
+          const result = await devinProvider.complete(messages, options);
           return result;
         },
       };

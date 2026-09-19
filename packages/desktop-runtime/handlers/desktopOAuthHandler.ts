@@ -14,6 +14,7 @@ const DESKTOP_OAUTH_PROVIDERS = new Set<OAuthProvider>([
   "antigravity",
   "claude",
   "cursor",
+  "devin",
 ]);
 const activeLogins = new Map<OAuthProvider, Promise<OAuthCredential>>();
 
@@ -90,6 +91,10 @@ async function defaultRunLogin(
   if (provider === "cursor") {
     const { runCursorOAuthLogin } = await import("../../cli/oauth/flows/cursor");
     return runCursorOAuthLogin(flowDeps);
+  }
+  if (provider === "devin") {
+    const { runDevinOAuthLogin } = await import("../../cli/oauth/flows/devin");
+    return runDevinOAuthLogin(flowDeps);
   }
   throw new Error("unsupported_desktop_oauth_provider");
 }

@@ -8,7 +8,8 @@ export type OAuthProvider =
   | "xai"
   | "antigravity"
   | "claude"
-  | "cloudflare";
+  | "cloudflare"
+  | "devin";
 
 export type OAuthCredential = {
   accessToken: string;

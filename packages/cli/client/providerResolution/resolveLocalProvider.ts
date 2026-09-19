@@ -22,6 +22,7 @@ import { resolveAntigravityTransport } from "./antigravityTransport";
 import { resolveCliProviderTransport } from "./cliProviderTransport";
 import { resolveCodexOAuthTransport } from "./codexOAuthTransport";
 import { resolveCursorTransport } from "./cursorTransport";
+import { resolveDevinTransport } from "./devinTransport";
 import { resolveDirectOpenAiCompatibleTransport } from "./directOpenAiCompatibleTransport";
 import { resolveGeminiNativeToolTransport } from "./geminiNativeToolTransport";
 import { resolvePlatformProxyTransport } from "./platformProxyTransport";
@@ -33,6 +34,7 @@ const TRANSPORTS: readonly ProviderResolver[] = [
   resolveAnthropicOAuthTransport,
   resolveCodexOAuthTransport,
   resolveCursorTransport,
+  resolveDevinTransport,
   resolveGeminiNativeToolTransport,
   resolvePlatformProxyTransport,
   // 兜底必须留在最后。
