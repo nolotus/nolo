@@ -108,6 +108,8 @@ export const PROVIDER_REASONING_EFFORT_VALUES: Record<string, ReasoningEffort[]>
   // CommandCode Provider API 透传 reasoning_effort（low/medium/high/xhigh/max），
   // 端点按各模型支持的子集自动 clamp（见 commandcode.ai/docs/provider-api）。
   commandcode: ["low", "medium", "high", "xhigh", "max"],
+  // 阶跃星辰（StepFun）推理模型（step-3.5-flash-2603 / step-3.7-flash 等）支持 low / medium / high
+  stepfun: ["none", "low", "medium", "high"],
 };
 
 /**

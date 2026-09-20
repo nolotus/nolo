@@ -1,4 +1,13 @@
 
+## 0.84.0-alpha.1
+
+## 0.84.0-alpha.1 (2026-09-20)
+
+### Features
+
+* **ai:** integrate StepFun Step Plan subscription and metered API providers ([f3b31f7](https://github.com/nolotus/bun-nolo/commit/f3b31f714f298a125b740bb8bfa035a6e012309e))
+
+
 ## 0.83.0-alpha.2
 
 ## 0.83.0-alpha.2 (2026-09-19)

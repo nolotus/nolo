@@ -5,6 +5,7 @@ import { moonshotModels, kimiCodeModels } from "../../integrations/moonshot/mode
 import { opencodeGoModels } from "../../integrations/opencode/models";
 import { commandCodeModels } from "../../integrations/commandcode/models";
 import { deepseekModels } from "../../integrations/deepseek/models";
+import { stepfunModels, stepfunStepPlanModels } from "../../integrations/stepfun/models";
 import type { ReasoningEffort } from "./createAgentSchema";
 // 统一维护 agent 创建时可选择的 provider：
 // - subscription OAuth 提供商（如 ChatGPT Plus/Pro、SuperGrok、Antigravity）
@@ -118,6 +119,38 @@ const DEEPSEEK_MODEL_OPTIONS: ReadonlyArray<{
   recommended?: boolean;
   hasVision?: boolean;
 }> = deepseekModels.map((m, i) => ({
+  id: m.name,
+  label: m.displayName ?? m.name,
+  hasVision: m.hasVision,
+  ...(i === 0 ? { recommended: true } : {}),
+}));
+
+/**
+ * 阶跃星辰（StepFun）开放平台（按量计费）可选模型，由 integrations/stepfun/models 派生。
+ * 第一项标记为推荐默认。
+ */
+const STEPFUN_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+}> = stepfunModels.map((m, i) => ({
+  id: m.name,
+  label: m.displayName ?? m.name,
+  hasVision: m.hasVision,
+  ...(i === 0 ? { recommended: true } : {}),
+}));
+
+/**
+ * 阶跃星辰 Step Plan 订阅支持的可选模型，由 stepfunStepPlanModels 派生。
+ * 与 STEPFUN_MODEL_OPTIONS 区分：Base URL 为 step_plan/v1，Credit 月池额度抵扣。
+ */
+const STEPFUN_STEP_PLAN_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+}> = stepfunStepPlanModels.map((m, i) => ({
   id: m.name,
   label: m.displayName ?? m.name,
   hasVision: m.hasVision,
@@ -376,6 +409,18 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
   },
   {
     kind: "api_key_template",
+    id: "step-plan",
+    label: "阶跃星辰 Step Plan",
+    description: "阶跃星辰 Step Plan 订阅（API Key + Base URL，月池 Credit 额度）",
+    provider: "stepfun",
+    baseUrl: "https://api.stepfun.com/step_plan/v1",
+    defaultModel: "step-3.7-flash",
+    modelOptions: STEPFUN_STEP_PLAN_MODEL_OPTIONS,
+    commercialKind: "subscription",
+    accessVariant: "token_plan_endpoint",
+  },
+  {
+    kind: "api_key_template",
     id: "kimi-code-key",
     label: "Kimi Code",
     description: "Kimi 会员订阅（Kimi Code 控制台 API Key，最多 5 个）",
@@ -510,6 +555,18 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     baseUrl: "https://api.moonshot.cn/v1",
     defaultModel: "kimi-k3",
     modelOptions: MOONSHOT_MODEL_OPTIONS,
+    commercialKind: "api",
+    accessVariant: "metered_key",
+  },
+  {
+    kind: "api_key_template",
+    id: "stepfun-api",
+    label: "阶跃星辰 API 用量计费",
+    description: "阶跃星辰开放平台（OpenAI 兼容，按量计费）",
+    provider: "stepfun",
+    baseUrl: "https://api.stepfun.com/v1",
+    defaultModel: "step-3.7-flash",
+    modelOptions: STEPFUN_MODEL_OPTIONS,
     commercialKind: "api",
     accessVariant: "metered_key",
   },

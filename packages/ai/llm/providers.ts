@@ -21,7 +21,14 @@ import { gmiModels, GMI_CHAT_COMPLETIONS_URL } from "./gmi";
 import { zaiModels } from "./zai";
 import { qwenModels, qwenTokenPlanModels } from "integrations/qwen/models";
 import { moonshotModels, kimiCodeModels } from "integrations/moonshot/models";
+import { stepfunModels, stepfunStepPlanModels } from "integrations/stepfun/models";
 import type { ModelPrice } from "./types";
+
+/**
+ * StepFun provider 统一模型表：开放平台按量模型 + Step Plan 订阅模型。
+ * 同属 stepfun provider，合并进 MODEL_MAP 以便 getModelConfig / 能力检测覆盖。
+ */
+const stepfunAllModels: Model[] = [...stepfunModels, ...stepfunStepPlanModels];
 
 /**
  * Moonshot provider 统一模型表：开放平台按量模型 + Kimi Code 会员订阅模型。
@@ -72,6 +79,7 @@ const MODEL_MAP = {
   zai: zaiModels,
   qwen: qwenAllModels,
   moonshot: moonshotAllModels,
+  stepfun: stepfunAllModels,
 } as const;
 
 export const MODEL_LOOKUP_MAP = {
@@ -274,6 +282,10 @@ const API_ENDPOINTS: Record<string, ProviderEndpointMap> = {
   moonshot: {
     // Moonshot AI（月之暗面）开放平台 OpenAI 兼容模式（按量计费）
     default: "https://api.moonshot.cn/v1/chat/completions",
+  },
+  stepfun: {
+    // 阶跃星辰（StepFun）开放平台 OpenAI 兼容模式
+    default: "https://api.stepfun.com/v1/chat/completions",
   },
 } as const;
 
