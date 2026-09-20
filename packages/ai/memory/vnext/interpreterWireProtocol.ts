@@ -38,7 +38,11 @@ export interface MemoryInterpreterWireState {
   facet: string;
   value: unknown;
   text: string;
-  /** Evidence keys emitted in this same response. Existing provenance is retained by runtime. */
+  /**
+   * Evidence keys emitted in this same response, or an existing Evidence id the
+   * caller explicitly supplied as referenceable. Existing provenance is retained
+   * by runtime.
+   */
   evidenceRefs: string[];
 }
 
@@ -169,6 +173,7 @@ Return ONLY one JSON object:
 
 Do not generate persistent ids, owner ids, timestamps or storage keys. Runtime owns identity and time.
 Use short local keys only to connect records created in the SAME response. Every local key must be unique across evidence/entities.
+State evidenceRefs may reference Evidence emitted in this response. Evidence ids marked referenceable in the supplied memory context may be referenced directly. Do not reference any other prior Evidence id.
 When updating an existing State, reuse its exact stateId, exact entityRef and exact facet. Runtime preserves that State's original entity/facet/createdAt and appends new Evidence provenance.
 When creating a new State, omit stateId.
 For supersede: emit the replacing statement as a NEW State (omit stateId) and set supersedes to the exact id of the replaced current State. Runtime retires the replaced State — it stays recoverable as history but is no longer current, and the new State becomes the only current one for that facet. Never update or supersede an already retired State.
@@ -191,6 +196,17 @@ export const materializeMemoryInterpreterMutation = (input: {
   wire: MemoryInterpreterWireMutation;
   existingStates?: MemoryStateVNext[];
   existingEntityIds?: string[];
+  /**
+   * Opt-in capability: existing (already persisted) Evidence ids this response
+   * may reference in `evidenceRefs`.
+   *
+   * Default off. Callers that omit it keep the original behavior — only local
+   * keys emitted in this same response are referenceable — so no existing
+   * Evidence becomes referenceable merely because it exists. A caller that
+   * needs a deterministic imported Evidence id (migration) names exactly that
+   * id; anything else still throws `unknown evidence ref`.
+   */
+  referenceableEvidenceIds?: readonly string[];
   now?: string;
   nextId?: () => string;
 }): MemoryInterpreterMutation => {
@@ -243,10 +259,15 @@ export const materializeMemoryInterpreterMutation = (input: {
 
   const supersededStateIds: string[] = [];
 
+  const referenceableEvidenceIds = new Set(input.referenceableEvidenceIds ?? []);
+
   const resolveEvidenceRef = (ref: string): string => {
+    // Local keys win: they are the response's own Evidence, and a caller-supplied
+    // existing id never shadows a key emitted in this response.
     const created = evidenceRefs.get(ref);
-    if (!created) throw new Error(`unknown evidence ref: ${ref}`);
-    return created;
+    if (created) return created;
+    if (referenceableEvidenceIds.has(ref)) return ref;
+    throw new Error(`unknown evidence ref: ${ref}`);
   };
 
   const states = (input.wire.states ?? []).map((item) => {
