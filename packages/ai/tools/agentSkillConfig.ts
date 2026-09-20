@@ -66,6 +66,8 @@ const MODES: readonly AgentSkillMode[] = [
  */
 export const DEFAULT_RECOMMENDED_SKILL_SLUGS: readonly string[] = [
   "worktree-isolation",
+  "systematic-investigation",
+  "show-me",
 ];
 
 const asMode = (value: unknown): AgentSkillMode | null =>

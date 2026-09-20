@@ -76,6 +76,34 @@ import {
   buildWorktreeSkillId,
   buildWorktreeSkillPageKey,
 } from "./worktreeSkill";
+import {
+  SYSTEMATIC_INVESTIGATION_SKILL_SLUGS,
+  buildSystematicinvestigationSkillConfig,
+  buildSystematicinvestigationSkillContentBySlug,
+  buildSystematicinvestigationSkillId,
+  buildSystematicinvestigationSkillPageKey,
+} from "./systematicInvestigationSkill";
+import {
+  SHOW_ME_SKILL_SLUGS,
+  buildShowmeSkillConfig,
+  buildShowmeSkillContentBySlug,
+  buildShowmeSkillId,
+  buildShowmeSkillPageKey,
+} from "./showMeSkill";
+import {
+  CAVEMAN_SKILL_SLUGS,
+  buildCavemanSkillConfig,
+  buildCavemanSkillContentBySlug,
+  buildCavemanSkillId,
+  buildCavemanSkillPageKey,
+} from "./cavemanSkill";
+import {
+  SKILL_CREATOR_SKILL_SLUGS,
+  buildSkillCreatorSkillConfig,
+  buildSkillCreatorSkillContentBySlug,
+  buildSkillCreatorSkillId,
+  buildSkillCreatorSkillPageKey,
+} from "./skillCreatorSkill";
 
 export type BuiltinSkillEntry = {
   slug: string;
@@ -176,6 +204,34 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildWorktreeSkillPageKey,
     buildConfig: buildWorktreeSkillConfig,
     buildContent: buildWorktreeSkillContentBySlug,
+  },
+  {
+    slugs: SYSTEMATIC_INVESTIGATION_SKILL_SLUGS,
+    buildSkillId: buildSystematicinvestigationSkillId,
+    buildPageKey: buildSystematicinvestigationSkillPageKey,
+    buildConfig: buildSystematicinvestigationSkillConfig,
+    buildContent: buildSystematicinvestigationSkillContentBySlug,
+  },
+  {
+    slugs: SHOW_ME_SKILL_SLUGS,
+    buildSkillId: buildShowmeSkillId,
+    buildPageKey: buildShowmeSkillPageKey,
+    buildConfig: buildShowmeSkillConfig,
+    buildContent: buildShowmeSkillContentBySlug,
+  },
+  {
+    slugs: CAVEMAN_SKILL_SLUGS,
+    buildSkillId: buildCavemanSkillId,
+    buildPageKey: buildCavemanSkillPageKey,
+    buildConfig: buildCavemanSkillConfig,
+    buildContent: buildCavemanSkillContentBySlug,
+  },
+  {
+    slugs: SKILL_CREATOR_SKILL_SLUGS,
+    buildSkillId: buildSkillCreatorSkillId,
+    buildPageKey: buildSkillCreatorSkillPageKey,
+    buildConfig: buildSkillCreatorSkillConfig,
+    buildContent: buildSkillCreatorSkillContentBySlug,
   },
 ];
 

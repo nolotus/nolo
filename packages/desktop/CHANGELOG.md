@@ -1,4 +1,13 @@
 
+## 0.108.0-alpha.1
+
+## 0.108.0-alpha.1 (2026-09-20)
+
+### Features
+
+* **ai:** promote 4 generic skills to builtin registry and drop repo copies ([46ac415](https://github.com/nolotus/bun-nolo/commit/46ac415b428f2246566c752129d53960d549e278))
+
+
 ## 0.107.0-alpha.1
 
 ## 0.107.0-alpha.1 (2026-09-20)
