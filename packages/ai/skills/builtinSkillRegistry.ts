@@ -69,6 +69,13 @@ import {
   buildSearchSpaceSkillId,
   buildSearchSpaceSkillPageKey,
 } from "./searchSpaceSkill";
+import {
+  WORKTREE_SKILL_SLUGS,
+  buildWorktreeSkillConfig,
+  buildWorktreeSkillContentBySlug,
+  buildWorktreeSkillId,
+  buildWorktreeSkillPageKey,
+} from "./worktreeSkill";
 
 export type BuiltinSkillEntry = {
   slug: string;
@@ -162,6 +169,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildSearchSpaceSkillPageKey,
     buildConfig: buildSearchSpaceSkillConfig,
     buildContent: buildSearchSpaceSkillContentBySlug,
+  },
+  {
+    slugs: WORKTREE_SKILL_SLUGS,
+    buildSkillId: buildWorktreeSkillId,
+    buildPageKey: buildWorktreeSkillPageKey,
+    buildConfig: buildWorktreeSkillConfig,
+    buildContent: buildWorktreeSkillContentBySlug,
   },
 ];
 

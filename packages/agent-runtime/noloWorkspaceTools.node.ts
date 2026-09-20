@@ -245,18 +245,31 @@ export function buildLoadSkillExecutor(args: { cwd: string }) {
     const { resolveSkillByName } = await import("./skillDiscovery");
     const resolved = resolveSkillByName(args.cwd, name);
     if (!resolved) {
-      // 系统内置 coding skill 回退：本地 skill 目录找不到时，检查是否是系统
-      // 内置 coding skill（coding / coding-review / coding-review-*）。CLI 无
-      // DB 访问，直接返回内置内容，保证 agent 在对话中始终能 loadSkill("coding")
-      // 自主载入写代码能力。
-      const { resolveCodingBuiltinSlug, buildCodingSkillContentBySlug } =
-        await import("ai/skills/codingSkills");
-      const builtinSlug = resolveCodingBuiltinSlug(name);
-      if (builtinSlug) {
-        const body = buildCodingSkillContentBySlug(builtinSlug);
+      // 系统内置 skill 回退：本地 skill 目录找不到时，按名字查内置注册表
+      // （coding / specialist / code-planner / search-* / worktree-isolation …）。
+      // fs 型宿主（CLI、desktop-runtime）无 DB 访问，注册表是内存真值，直接
+      // 返回内置内容。否则终态用户自建项目（没有 .agents/skills）里，模型按
+      // 「相关技能」提示去 loadSkill 内置 skill，只会得到 not found——提示行
+      // 挂着一个打不开的名字，比不提示更糟。
+      const { resolveBuiltinSkillByName } = await import(
+        "ai/skills/builtinSkillRegistry"
+      );
+      const builtin = resolveBuiltinSkillByName(name);
+      if (builtin) {
         return {
-          content: `Skill "${name}" loaded inline. Follow its instructions.\n\n${body}`,
-          metadata: { loadSkill: true, resolved: true, name, requestedName: name, builtin: true },
+          content: `Skill "${name}" loaded inline. Follow its instructions.\n\n${builtin.content}`,
+          // toolNames 进 metadata：回退面已扩到全注册表，其中授工具型 skill
+          // （search-* 等）的工具在本宿主未必接线，宿主可据此降级提示。
+          metadata: {
+            loadSkill: true,
+            resolved: true,
+            name,
+            requestedName: name,
+            builtin: true,
+            ...(builtin.config.toolNames?.length
+              ? { toolNames: [...builtin.config.toolNames] }
+              : {}),
+          },
         };
       }
       return {

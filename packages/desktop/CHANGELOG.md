@@ -1,4 +1,13 @@
 
+## 0.107.0-alpha.1
+
+## 0.107.0-alpha.1 (2026-09-20)
+
+### Features
+
+* **ai:** ship worktree-isolation builtin skill with default recommended hint ([397f17d](https://github.com/nolotus/bun-nolo/commit/397f17d2f8b042ca2e5c28848c27e329d033e63f))
+
+
 ## 0.106.0-alpha.1
 
 ## 0.106.0-alpha.1 (2026-09-20)

@@ -21,6 +21,11 @@
  * `recommended`），这样 agent 侧的配置和 skill 自身的声明说的是同一种话。
  * `triggerMode` 的第三个值 `explicit` 不出现在这里——它描述的是「skill 自己
  * 默认怎么被发现」，属于 skill 定义，不是某个 agent 的选择。
+ *
+ * 【默认提示】`DEFAULT_RECOMMENDED_SKILL_SLUGS` 里的 slug 即使 agent 从没
+ * 配置过，也进「相关技能」一行（见 resolveAgentRecommendedSkillNames）——那是
+ * 可发现性默认值，只加提示、不放宽权限：这些 slug 不授予工具，且 loadSkill 对
+ * 缺席 slug 本来就是允许的（既有行为）。显式配置（含 `disabled`）永远优先。
  */
 
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
@@ -46,6 +51,21 @@ const MODES: readonly AgentSkillMode[] = [
   "required",
   "recommended",
   "disabled",
+];
+
+/**
+ * 平台默认「相关技能」提示名单：这些内置 slug 在 agent **未显式配置**时，
+ * 也进「相关技能」一行（可按需 loadSkill，工具不常驻）。
+ *
+ * 刻意不在 `resolveAgentSkillConfig` 里合并——那会改变配置域语义（「缺席」
+ * 是带回归测试的所有权边界，见该函数测试），而默认只需要可发现性：名单里的
+ * slug 都是纯方法论文档、不授予工具，loadSkill 对缺席 slug 本就允许。
+ *
+ * 显式配置永远优先：任何 mode（含 `disabled`）都压制默认提示。
+ * 新增默认提示技能时改这里，并在 builtinSkillRegistry 注册对应 slug。
+ */
+export const DEFAULT_RECOMMENDED_SKILL_SLUGS: readonly string[] = [
+  "worktree-isolation",
 ];
 
 const asMode = (value: unknown): AgentSkillMode | null =>
@@ -231,12 +251,31 @@ export const resolveAgentRecommendedSkillNames = (
 ): string[] => {
   const config = resolveAgentSkillConfig(source);
   const resolve = lookup ?? defaultSkillTitleLookup;
+  const seen = new Set<string>();
   const out: string[] = [];
+  const push = (slug: string): void => {
+    const title = resolve(slug)?.title || slug;
+    // 按展示名去重（不是按 slug）：注入 lookup 把不同 slug 解析成同一个名字时，
+    // 提示行里出现两行同名没有意义。解析不出名字时退回 slug——宁可给个粗糙的
+    // 名字，也好过让这一档静默消失。
+    // 注意作用范围：去重键是 title，因此两个不同 slug 展示名相同时，后一个
+    // 也会被合并掉（配置条目与默认条目一视同仁）——只影响可发现性提示行，
+    // 不影响授权面（工具挂载看 config，不看这里）。
+    if (seen.has(title)) return;
+    seen.add(title);
+    out.push(title);
+  };
   for (const slug of Object.keys(config)) {
     if (config[slug] !== "recommended") continue;
-    const title = resolve(slug)?.title;
-    // 解析不出名字时退回 slug——宁可给个粗糙的名字，也好过让这一档静默消失。
-    out.push(title || slug);
+    push(slug);
+  }
+  // 平台默认提示：未显式配置过的默认 slug 也进提示行。显式配置（任何 mode，
+  // 含 disabled）都已在上面表达意图，不被默认值覆盖。
+  // Object.hasOwn 而非 `in`：config 是普通对象字面量，"constructor" in config
+  // 恒为 true，用 `in` 会让与 Object.prototype 同名的默认 slug 被静默压制。
+  for (const slug of DEFAULT_RECOMMENDED_SKILL_SLUGS) {
+    if (Object.hasOwn(config, slug)) continue;
+    push(slug);
   }
   return out;
 };
