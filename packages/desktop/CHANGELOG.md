@@ -1,4 +1,13 @@
 
+## 0.109.0-alpha.2
+
+## 0.109.0-alpha.2 (2026-09-21)
+
+### Bug Fixes
+
+* **agent:** stop naming taskWait in the tool-round-economy prompt ([431eaf2](https://github.com/nolotus/bun-nolo/commit/431eaf269004b5b86b0f8b3f56144d6b83d44a76))
+
+
 ## 0.109.0-alpha.1
 
 ## 0.109.0-alpha.1 (2026-09-21)
