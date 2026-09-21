@@ -99,6 +99,16 @@ export function buildOpenAiTools(args: {
 }) {
   const toolset = buildLocalWorkspaceToolsetForEnv(args);
   const workspaceToolNames = toolset.toolNames;
+  // Interactive TUI sessions have a terminal wake channel: promoted execShell
+  // tasks resume the conversation automatically with terminal facts + result
+  // capsule, so exposing taskWait only invites an expensive polling round-trip.
+  // Keep the schema on non-wake/headless hosts as the explicit fallback; the
+  // executor/runtime capability itself remains available in both cases.
+  const modelWorkspaceToolNames = (
+    args.effectiveToolNames ?? workspaceToolNames
+  ).filter((toolName) =>
+    toolName !== "taskWait" || !hasRunWakeChannel(args.env)
+  );
   const toolNameSet = new Set(args.toolNames ?? []);
   const uiAskChoiceTools = toolNameSet.has("ask_user")
     ? prepareTools(["ask_user"])
@@ -149,7 +159,7 @@ export function buildOpenAiTools(args: {
     ...uiAskChoiceTools,
     ...readPastedTextTools,
     ...buildLocalWorkspaceOpenAiTools({
-      toolNames: args.effectiveToolNames ?? workspaceToolNames,
+      toolNames: modelWorkspaceToolNames,
       exposeShellTools: toolset.exposeShellTools,
     }),
     ...buildCliChromeConnectorOpenAiTools({ toolNames: args.toolNames }),
