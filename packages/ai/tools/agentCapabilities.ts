@@ -29,7 +29,7 @@ export const SYSTEM_AGENT_CAPABILITIES = [
     description:
       "在普通联网搜索之外，用 Firecrawl 做结构化搜索与整页抓取，适合需要完整正文、文档站点或站内检索的场景。",
     tools: ["firecrawl_search", "firecrawl_scrape"],
-    defaultEnabled: true,
+    defaultEnabled: false,
     icon: "🕸️",
   },
   {

@@ -21,6 +21,9 @@ export const TOOL_PACKS = {
   // queryModelUsage / queryUserGrowthReport：server-only 工具（web/CLI executor
   // 直接返回 serverOnlyResult），不随 CORE 常驻——server 端由 agent 显式
   // tools 配置按需挂载（utilityServerTools 执行器），web 端不再挂死 schema。
+  // setTodoList 已移至「conversation-todo」系统能力包（defaultEnabled:true）
+  // 作为唯一 owner——single source of truth：普通 agent 默认仍有 setTodoList，
+  // 但关闭「对话 Todo」开关即可真正摘掉它（CORE 常驻时该开关形同虚设）。
   CORE: [
     "read",
     "createDoc",
@@ -30,7 +33,6 @@ export const TOOL_PACKS = {
     "ask_user",
     "createAgentAutomation",
     "notifyUser",
-    "setTodoList",
   ],
   // L2 - 联网搜索：与 CAPABILITY_PACKS「web-search」对齐。
   // 社交读工具属于「social-reader」包，不得因 exa_search 被旁路注入。
@@ -374,8 +376,17 @@ export const SYSTEM_BUILTIN_SKILL_PACK_IDS = SYSTEM_AGENT_CAPABILITY_IDS;
  * `web-search` is deliberately NOT here: its tools stay opt-in via
  * `enabledPacks` / LIGHT_WEB injection to preserve web capability boundaries
  * (the global toggle only filters tools that are already present).
+ *
+ * `conversation-todo` is here for the same reason `agent-orchestration` is:
+ * `setTodoList` used to be CORE-resident, which made the global "对话 Todo"
+ * off-switch a no-op (CORE bypassed `applySystemBuiltinSkillFilter`). Moving
+ * it to this default-mount list makes the pack the single owner — default-on
+ * for every interactive agent, and the settings toggle actually removes it.
  */
-const DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS = ["agent-orchestration"] as const;
+const DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS = [
+  "agent-orchestration",
+  "conversation-todo",
+] as const;
 
 /** Tools of default-mounted system capability packs (dedup-free flat list). */
 export function getDefaultSystemCapabilityTools(): string[] {
