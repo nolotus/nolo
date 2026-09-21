@@ -9,10 +9,17 @@ import {
   isDevinOAuthAgent,
 } from "../../../agent-runtime";
 import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
+import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveDevinTransport: ProviderResolver = async (ctx) => {
-  const { agentConfig, apiKeyRefResolver } = ctx;
+  const {
+    agentConfig,
+    apiKeyRefResolver,
+    deps,
+    buildProviderOpenAiTools,
+    additionalToolNames,
+  } = ctx;
 
   if (isDevinOAuthAgent(agentConfig)) {
     const accessToken = await apiKeyRefResolver("devin");
@@ -23,6 +30,25 @@ export const resolveDevinTransport: ProviderResolver = async (ctx) => {
     }
 
     const model = agentConfig.model || "swe-2-max";
+    const { requestedToolNames, tools } = resolveProviderOpenAiToolBundle(
+      agentConfig,
+      deps.env,
+      buildProviderOpenAiTools,
+      additionalToolNames,
+    );
+
+    const devinProvider = createDevinProvider({
+      token: accessToken,
+      model,
+      fetchImpl: ctx.fetchImpl,
+      tools,
+      // agentConfig.temperature reaches every transport except the Devin one;
+      // forward it so the agent form's sampling knob stops being a no-op here.
+      // Left undefined it keeps the upstream-calibrated default.
+      temperature: typeof agentConfig.temperature === "number"
+        ? agentConfig.temperature
+        : undefined,
+    });
 
     logLocalRuntimeDiagnostic("provider.selected", {
       agentKey: agentConfig.key,
@@ -30,12 +56,11 @@ export const resolveDevinTransport: ProviderResolver = async (ctx) => {
       provider: "devin",
       model,
       hasApiKey: true,
-    });
-
-    const devinProvider = createDevinProvider({
-      token: accessToken,
-      model,
-      fetchImpl: ctx.fetchImpl,
+      toolCount: tools.length,
+      requestedToolNames,
+      temperature: typeof agentConfig.temperature === "number"
+        ? agentConfig.temperature
+        : null,
     });
 
     return {

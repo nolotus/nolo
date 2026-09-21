@@ -3,7 +3,9 @@ import { DEVIN_CONNECT_URL } from "../devinOAuth";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeResult,
+  AgentRuntimeToolCall,
 } from "../types";
+import type { OpenAiCompatibleTool } from "../capabilities/capability";
 import type {
   AgentRuntimeCompleteOptions,
   AgentRuntimeProvider,
@@ -87,15 +89,40 @@ export function encodeDevinClientMetadata(token: string): Buffer {
 }
 
 export function encodeDevinChatMessage(msg: {
-  role: "system" | "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   text: string;
+  toolCallId?: string;
+  toolCalls?: AgentRuntimeToolCall[];
 }): Buffer {
-  // source: 1 = USER, 2 = ASSISTANT
-  const source = msg.role === "assistant" ? 2 : 1;
+  // source: 1 = USER, 2 = ASSISTANT, 4 = TOOL_RESULT
+  const source = msg.role === "assistant" ? 2 : msg.role === "tool" ? 4 : 1;
   return Buffer.concat([
     writeStringField(1, randomUUID()),
     writeVarint(2, source),
     writeStringField(3, msg.text),
+    ...(msg.toolCalls ?? []).map((toolCall) =>
+      writeMessageField(
+        6,
+        Buffer.concat([
+          writeStringField(1, toolCall.id),
+          writeStringField(2, toolCall.function.name),
+          writeStringField(3, toolCall.function.arguments),
+        ]),
+      ),
+    ),
+    ...(msg.toolCallId ? [writeStringField(7, msg.toolCallId)] : []),
+  ]);
+}
+
+export function encodeDevinToolDefinition(tool: OpenAiCompatibleTool): Buffer {
+  const fn = tool.function ?? {};
+  const name = typeof fn.name === "string" ? fn.name : "";
+  const description = typeof fn.description === "string" ? fn.description : "";
+  const parameters = fn.parameters ?? {};
+  return Buffer.concat([
+    writeStringField(1, name),
+    writeStringField(2, description.length > 6_998 ? `${description.slice(0, 6_995)}...` : description),
+    writeStringField(3, JSON.stringify(parameters)),
   ]);
 }
 
@@ -115,16 +142,23 @@ export function writeFixed64Field(fieldNum: number, val: number): Buffer {
 
 export function buildCompletionConfig(params?: {
   maxTokens?: number;
+  maxNewlines?: number;
   temperature?: number;
   topP?: number;
 }): Buffer {
-  const maxTokens = params?.maxTokens ?? 4096;
+  // Field order mirrors the upstream client: 1 num_completions,
+  // 2 max_tokens, 3 max_newlines, 5 temperature, 7 top_k, 8 top_p.
+  // max_tokens used to default to 4096 while 128000 sat in max_newlines,
+  // which silently capped every answer at ~4k tokens (observed: a review
+  // report cut off mid-sentence with "输出达到长度上限被截断").
+  const maxTokens = params?.maxTokens ?? 128_000;
+  const maxNewlines = params?.maxNewlines ?? 400;
   const temp = params?.temperature ?? 0.4;
   const topP = params?.topP ?? 0.95;
   return Buffer.concat([
     writeVarint(1, 1),
     writeVarint(2, maxTokens),
-    writeVarint(3, 128000),
+    writeVarint(3, maxNewlines),
     writeFixed64Field(5, temp),
     writeVarint(7, 40),
     writeFixed64Field(8, topP),
@@ -135,13 +169,20 @@ export function buildGetChatMessageRequest(params: {
   token: string;
   messages: AgentRuntimeChatMessage[];
   model: string;
+  tools?: OpenAiCompatibleTool[];
+  temperature?: number;
 }): Buffer {
-  const { token, messages, model } = params;
+  const { token, messages, model, tools = [], temperature } = params;
 
   const metadata = encodeDevinClientMetadata(token);
 
   let systemPrompt = "";
-  const filteredMessages: Array<{ role: "user" | "assistant"; text: string }> = [];
+  const filteredMessages: Array<{
+    role: "user" | "assistant" | "tool";
+    text: string;
+    toolCallId?: string;
+    toolCalls?: AgentRuntimeToolCall[];
+  }> = [];
 
   for (const m of messages) {
     const text =
@@ -156,16 +197,28 @@ export function buildGetChatMessageRequest(params: {
 
     if (m.role === "system") {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${text}` : text;
-    } else if (m.role === "user" || m.role === "assistant") {
-      filteredMessages.push({ role: m.role, text });
+    } else if (m.role === "user" || m.role === "assistant" || m.role === "tool") {
+      filteredMessages.push({
+        role: m.role,
+        text,
+        ...(m.tool_call_id ? { toolCallId: m.tool_call_id } : {}),
+        ...(m.tool_calls?.length ? { toolCalls: m.tool_calls } : {}),
+      });
     }
   }
 
-  // Coalesce consecutive same-role messages to avoid upstream validation error
-  const coalesced: Array<{ role: "user" | "assistant"; text: string }> = [];
+  // Only plain adjacent user/assistant text can be coalesced. Tool boundaries
+  // and assistant tool-call messages carry protocol identity and must survive.
+  const coalesced: typeof filteredMessages = [];
   for (const item of filteredMessages) {
     const last = coalesced[coalesced.length - 1];
-    if (last && last.role === item.role) {
+    if (
+      last &&
+      last.role === item.role &&
+      item.role !== "tool" &&
+      !last.toolCalls?.length &&
+      !item.toolCalls?.length
+    ) {
       last.text = `${last.text}\n\n${item.text}`;
     } else {
       coalesced.push({ ...item });
@@ -174,7 +227,7 @@ export function buildGetChatMessageRequest(params: {
 
   const chatMessageBuffers = coalesced.map((m) => encodeDevinChatMessage(m));
 
-  const completionConfig = buildCompletionConfig();
+  const completionConfig = buildCompletionConfig({ temperature });
 
   const modelConfig = Buffer.concat([
     writeStringField(1, randomUUID()),
@@ -188,6 +241,7 @@ export function buildGetChatMessageRequest(params: {
     ...chatMessageBuffers.map((b) => writeMessageField(3, b)),
     writeVarint(7, 5),
     writeMessageField(8, completionConfig),
+    ...tools.map((tool) => writeMessageField(10, encodeDevinToolDefinition(tool))),
     writeMessageField(15, modelConfig),
     writeStringField(16, randomUUID()),
     writeVarint(20, 1),
@@ -232,11 +286,17 @@ export function parseDevinConnectFrames(buffer: Buffer): {
 
 // --- Response Parser ---
 
+export type DevinDecodedEvent =
+  | { type: "content"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "tool-call-start"; id: string; name: string }
+  | { type: "tool-call-args"; argsDelta: string; id?: string };
+
 export type DevinDecodedDelta = {
   content: string;
   reasoning: string;
   finishReason: string | null;
-  events: Array<{ type: "content" | "reasoning"; text: string }>;
+  events: DevinDecodedEvent[];
 };
 
 export function parseDevinConnectTrailer(payload: Buffer): Error | null {
@@ -287,7 +347,7 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
         s += 7;
       }
       if (fieldNum === 5) {
-        finishReason = val === 2 ? "stop" : "length";
+        finishReason = val === 10 ? "tool_calls" : val === 1 || val === 3 ? "length" : "stop";
       }
     } else if (wireType === 2) {
       // Length-delimited
@@ -311,6 +371,49 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
         const text = valBytes.toString("utf8");
         reasoning += text;
         events.push({ type: "reasoning", text });
+      } else if (fieldNum === 6) {
+        // Upstream splits a tool call across frames: a start frame carrying
+        // id + name, then one or more arg frames carrying only an args delta
+        // (optionally re-tagged with the id). Emitting a complete call here
+        // would drop every delta that arrives in its own frame, which is what
+        // turned real calls into `bash: {}`.
+        let nestedOffset = 0;
+        let id: string | undefined;
+        let name: string | undefined;
+        let argsDelta: string | undefined;
+        while (nestedOffset < valBytes.length) {
+          let nestedTag = 0;
+          let nestedShift = 0;
+          while (nestedOffset < valBytes.length) {
+            const b = valBytes[nestedOffset++];
+            nestedTag |= (b & 0x7f) << nestedShift;
+            if (!(b & 0x80)) break;
+            nestedShift += 7;
+          }
+          const nestedField = nestedTag >>> 3;
+          const nestedWire = nestedTag & 0x07;
+          if (nestedWire !== 2) break;
+          let nestedLength = 0;
+          let lengthShift = 0;
+          while (nestedOffset < valBytes.length) {
+            const b = valBytes[nestedOffset++];
+            nestedLength |= (b & 0x7f) << lengthShift;
+            if (!(b & 0x80)) break;
+            lengthShift += 7;
+          }
+          const nestedValue = valBytes.subarray(nestedOffset, nestedOffset + nestedLength);
+          nestedOffset += nestedLength;
+          const text = nestedValue.toString("utf8");
+          if (nestedField === 1) id = text;
+          else if (nestedField === 2) name = text;
+          else if (nestedField === 3) argsDelta = (argsDelta ?? "") + text;
+        }
+        if (id !== undefined && name !== undefined) {
+          events.push({ type: "tool-call-start", id, name });
+        }
+        if (argsDelta !== undefined) {
+          events.push({ type: "tool-call-args", argsDelta, ...(id ? { id } : {}) });
+        }
       }
     } else {
       // Unknown wire type, cannot safely skip without full schema parser
@@ -326,9 +429,11 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
 export function createDevinProvider(options: {
   token: string;
   model?: string;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  tools?: OpenAiCompatibleTool[];
+  temperature?: number;
 }): AgentRuntimeProvider {
-  const { token, model = "swe-2", fetchImpl = fetch } = options;
+  const { token, model = "swe-2", fetchImpl = fetch, tools = [], temperature } = options;
 
   return {
     model,
@@ -341,6 +446,8 @@ export function createDevinProvider(options: {
         token,
         messages,
         model: selectedModel,
+        tools,
+        temperature,
       });
 
       const frame = buildDevinConnectFrame(requestPayload);
@@ -369,6 +476,12 @@ export function createDevinProvider(options: {
 
       let text = "";
       let reasoning = "";
+      let finishReason: string | null = null;
+      // Tool calls arrive as a start frame plus separate arg-delta frames, so
+      // they must be assembled across frames in wire order.
+      const toolCallOrder: string[] = [];
+      const toolCallById = new Map<string, { id: string; name: string; argumentsText: string }>();
+      let currentToolCallId: string | null = null;
       let buffer: Buffer = Buffer.alloc(0);
       let sawTrailer = false;
 
@@ -400,11 +513,31 @@ export function createDevinProvider(options: {
 
             text += delta.content;
             reasoning += delta.reasoning;
+            if (delta.finishReason) finishReason = delta.finishReason;
             for (const event of delta.events) {
               if (event.type === "reasoning") {
                 opts?.onReasoningDelta?.(event.text);
-              } else {
+              } else if (event.type === "content") {
                 opts?.onTextDelta?.(event.text);
+              } else if (event.type === "tool-call-start") {
+                const existing = toolCallById.get(event.id);
+                if (existing) {
+                  existing.name = event.name;
+                } else {
+                  toolCallOrder.push(event.id);
+                  toolCallById.set(event.id, {
+                    id: event.id,
+                    name: event.name,
+                    argumentsText: "",
+                  });
+                }
+                currentToolCallId = event.id;
+              } else {
+                // Arg frames may omit the id; they then extend the most
+                // recently started call, mirroring the upstream client.
+                const targetId = event.id ?? currentToolCallId;
+                const target = targetId ? toolCallById.get(targetId) : undefined;
+                if (target) target.argumentsText += event.argsDelta;
               }
             }
           }
@@ -419,15 +552,37 @@ export function createDevinProvider(options: {
       if (!sawTrailer) {
         throw new Error("Devin Connect upstream ended before the terminal trailer");
       }
-      if (!text && !reasoning) {
-        throw new Error("Devin Connect upstream completed without content");
+
+      const toolCalls: AgentRuntimeToolCall[] = toolCallOrder.map((id) => {
+        const call = toolCallById.get(id)!;
+        return {
+          id: call.id,
+          type: "function",
+          function: {
+            name: call.name,
+            arguments: call.argumentsText || "{}",
+          },
+        };
+      });
+
+      if (!text && !reasoning && toolCalls.length === 0) {
+        throw new Error("Devin Connect upstream completed without content or tool calls");
       }
 
       return {
         content: text,
         model: selectedModel,
         provider: "devin",
-        reasoning_content: reasoning || undefined,
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+        // The upstream finish event wins whenever it is present. A tool call
+        // cut off by the length limit has to stay "length" instead of being
+        // relabelled "tool_calls", so probes/telemetry and any downstream
+        // consumer of the final finish_reason no longer see a truncated turn
+        // mislabelled as a normal one. localLoop keeps its own truncation
+        // gates and excludes tool-bearing turns from them.
+        finish_reason: finishReason ?? (toolCalls.length > 0 ? "tool_calls" : "stop"),
+        stream_complete: true,
       };
     },
   };

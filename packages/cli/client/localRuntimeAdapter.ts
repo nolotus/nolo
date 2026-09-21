@@ -687,8 +687,21 @@ export function createCliLocalRuntimeAdapter(
       // model can actually call. The CLI drops declared names it has no
       // executor for (read/createDoc/...), and prompt blocks keyed off the
       // declared list would advertise tools that never reach the schema.
+      //
+      // `toolSurface.finalToolNames` is the canonical checkpoint record, so it
+      // must record the same post-expansion list. The surface resolved from the
+      // agent record predates pack expansion (the `code` fallback plus
+      // `readPastedText` for large pastes), and leaving it untouched made the
+      // checkpoint claim the model only had workspace metadata tools.
       const exposedAgentConfig = agentConfig
-        ? { ...agentConfig, exposedToolNames: activeAgentToolNames }
+        ? {
+            ...agentConfig,
+            exposedToolNames: activeAgentToolNames,
+            toolSurface: {
+              ...((agentConfig as any).toolSurface ?? {}),
+              finalToolNames: activeAgentToolNames,
+            },
+          }
         : agentConfig;
       if (exposedAgentConfig && !deps.pastedTextStore) {
         preparedAgentRuntimeCache.set(cacheKey, {

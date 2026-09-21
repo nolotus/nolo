@@ -1,4 +1,16 @@
 
+## 0.87.0-alpha.2
+
+## 0.87.0-alpha.2 (2026-09-21)
+
+### Bug Fixes
+
+* **cli:** record the post-expansion tool list in the runtime checkpoint ([5cdd277](https://github.com/nolotus/bun-nolo/commit/5cdd277dc1e76c1786c9f2ea315433bfbec4780d))
+* **devin:** hand the host tool bundle and temperature to the Connect wire ([d5300f1](https://github.com/nolotus/bun-nolo/commit/d5300f11307063073c2e675c6eee36f0431b4356))
+* **devin:** keep the upstream finish reason on tool-call turns ([512caac](https://github.com/nolotus/bun-nolo/commit/512caac988d2acd3f93401cace90e396001b8320))
+* **devin:** speak the tool-calling protocol on the Connect wire ([513d0d5](https://github.com/nolotus/bun-nolo/commit/513d0d520cd22997005096c8c15eb9f2cc33ab89))
+
+
 ## 0.87.0-alpha.1
 
 ## 0.87.0-alpha.1 (2026-09-20)

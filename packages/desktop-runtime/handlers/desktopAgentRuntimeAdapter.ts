@@ -792,6 +792,12 @@ export async function resolveDesktopConfiguredProvider(args: {
         token: accessToken,
         model,
         fetchImpl,
+        // Same bundle the Cursor branch above advertises. Without it the wire
+        // carries no field-10 tool definitions and the model cannot call tools.
+        ...(tools.length > 0 ? { tools: tools as any } : {}),
+        ...(typeof args.agentConfig.temperature === "number"
+          ? { temperature: args.agentConfig.temperature }
+          : {}),
       });
       return {
         model,
