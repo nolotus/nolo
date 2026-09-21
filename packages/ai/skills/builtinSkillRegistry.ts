@@ -104,6 +104,13 @@ import {
   buildSkillCreatorSkillId,
   buildSkillCreatorSkillPageKey,
 } from "./skillCreatorSkill";
+import {
+  AGENT_PROVIDER_SETUP_SKILL_SLUGS,
+  buildAgentProviderSetupSkillConfig,
+  buildAgentProviderSetupSkillContentBySlug,
+  buildAgentProviderSetupSkillId,
+  buildAgentProviderSetupSkillPageKey,
+} from "./agentProviderSetupSkill";
 
 export type BuiltinSkillEntry = {
   slug: string;
@@ -232,6 +239,13 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildSkillCreatorSkillPageKey,
     buildConfig: buildSkillCreatorSkillConfig,
     buildContent: buildSkillCreatorSkillContentBySlug,
+  },
+  {
+    slugs: AGENT_PROVIDER_SETUP_SKILL_SLUGS,
+    buildSkillId: buildAgentProviderSetupSkillId,
+    buildPageKey: buildAgentProviderSetupSkillPageKey,
+    buildConfig: buildAgentProviderSetupSkillConfig,
+    buildContent: buildAgentProviderSetupSkillContentBySlug,
   },
 ];
 

@@ -98,10 +98,10 @@ export const clampLegacyConfidence = (value: unknown): number => {
 /**
  * Deterministic imported Evidence for a legacy record.
  *
- * `ownerId` is the legacy principal identity (`user:<id>` / `space:<id>` /
- * `system:<id>`), not a production vNext ownerId: slices 1–2 never write to a
- * production owner space, and carrying the principal here is what keeps a
- * `space` migration from inheriting a `user` space.
+ * `ownerId` is the opaque vNext memory-principal identity derived from the
+ * legacy `(ownerType, ownerId)` pair. Callers must not strip the owner type or
+ * replace it with the raw legacy owner id: `user:<id>` / `space:<id>` /
+ * `system:<id>` are intentionally separate vNext owner namespaces.
  */
 export const buildLegacyMemoryEvidence = (item: LegacyMemoryRecord): MemoryEvidenceVNext => {
   const { principalId } = resolveLegacyMemoryPrincipal(item);

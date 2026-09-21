@@ -38,7 +38,8 @@ export const stepfunModels: Model[] = [
     name: "step-5-preview",
     displayName: "Step 5 Preview",
     hasVision: true,
-    contextWindow: 262_144,
+    // 官方规格：1M context window / 64k max output（600B 总参 / 27B 激活 MoE）
+    contextWindow: 1_000_000,
     maxOutputTokens: 65_536,
     jsonOutput: true,
     fnCall: true,
@@ -51,7 +52,7 @@ export const stepfunModels: Model[] = [
       inputCacheHit: toCnyCredits(0.35),
     },
     provider: "stepfun",
-    description: "阶跃星辰新一代旗舰多模态推理模型，支持复杂逻辑分解与长程规划。",
+    description: "阶跃星辰新一代旗舰多模态推理模型，1M 上下文，支持复杂逻辑分解与长程规划。",
   },
 
   // ── 旗舰语言推理 ──
@@ -226,6 +227,21 @@ export const stepfunModels: Model[] = [
  */
 export const stepfunStepPlanModels: Model[] = [
   {
+    name: "step-5-preview",
+    displayName: "Step 5 Preview",
+    hasVision: true,
+    // Step Plan 订阅端同样开放 1M context（见 Step Plan / Claude Code 接入文档）
+    contextWindow: 1_000_000,
+    maxOutputTokens: 65_536,
+    jsonOutput: true,
+    fnCall: true,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    price: { input: 0, output: 0 },
+    provider: "stepfun",
+    description: "阶跃星辰新一代旗舰多模态推理模型，1M 上下文，擅长复杂任务分解与多步计划。",
+  },
+  {
     name: "step-3.7-flash",
     displayName: "Step 3.7 Flash",
     hasVision: true,
@@ -238,20 +254,6 @@ export const stepfunStepPlanModels: Model[] = [
     price: { input: 0, output: 0 },
     provider: "stepfun",
     description: "阶跃星辰旗舰多模态推理模型，256K 上下文，高速推理 + 原生多模态 + 工具调用，Agent 深度适配。",
-  },
-  {
-    name: "step-5-preview",
-    displayName: "Step 5 Preview",
-    hasVision: true,
-    contextWindow: 262_144,
-    maxOutputTokens: 65_536,
-    jsonOutput: true,
-    fnCall: true,
-    supportsTool: true,
-    supportsReasoningEffort: true,
-    price: { input: 0, output: 0 },
-    provider: "stepfun",
-    description: "阶跃星辰新一代旗舰多模态推理模型，擅长复杂任务分解与多步计划。",
   },
   {
     name: "step-3.5-flash",
@@ -304,5 +306,19 @@ export const stepfunStepPlanModels: Model[] = [
     supportsTool: true,
     price: { input: 0, output: 0 },
     provider: "stepfun",
+  },
+  {
+    name: "step-router-v1",
+    displayName: "Step Router V1",
+    hasVision: false,
+    contextWindow: 262_144,
+    maxOutputTokens: 65_536,
+    jsonOutput: true,
+    fnCall: true,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+    price: { input: 0, output: 0 },
+    provider: "stepfun",
+    description: "智能路由模型，自动在 Step 系列模型间调度，订阅可用。",
   },
 ];

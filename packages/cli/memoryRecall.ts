@@ -9,6 +9,7 @@
  * 全部失败时返回 null——不阻塞对话，只省略记忆层。
  */
 import { resolveMemoryRuntime } from "../ai/memory/runtime";
+import { isMemoryVNextShadowReadEnabled } from "../ai/memory/vnext/shadowRead";
 import { getDefaultCliLocalRuntimeDb } from "./localRuntimeDb";
 import { resolveMachineId } from "../connector-experimental/machineInfo";
 
@@ -75,12 +76,18 @@ const queryLocalMemory = async (
 ): Promise<string | null> => {
   const localDb = await getDefaultCliLocalRuntimeDb({ env });
   const machineId = resolveMachineId();
+  // Slice 5: CLI local fallback has no RunInfra credentials — provider stays
+  // undefined, so the flag alone cannot start shadow LLM calls here. Remote
+  // queries already run shadow server-side.
   const resolution = await resolveMemoryRuntime({
     db: localDb,
     userId: machineId,
     agentKey,
     userInput,
     ...(spaceId ? { spaceId } : {}),
+    ...(isMemoryVNextShadowReadEnabled(env)
+      ? { vNextShadowProvider: undefined }
+      : {}),
   });
   return resolution.promptBlock;
 };

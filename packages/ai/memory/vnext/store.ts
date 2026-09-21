@@ -1,3 +1,4 @@
+import { isLevelNotFoundError } from "database/levelNotFoundError";
 import type {
   MemoryEntityVNext,
   MemoryEvidenceVNext,
@@ -98,10 +99,8 @@ export const putMemoryStateVNext = async (db: any, state: MemoryStateVNext): Pro
       );
     }
   }
-  const key = stateKey(state.ownerId, state.id);
   const batch = db.batch();
-  batch.put(key, state);
-  batch.put(stateEntityIndexKey(state.ownerId, state.entityId, state.id), { key });
+  _appendStateBatch(batch, state);
   await batch.write();
 };
 
@@ -153,6 +152,25 @@ export const getMemoryEvidenceVNext = async (
 ): Promise<MemoryEvidenceVNext | null> =>
   db.get(evidenceKey(ownerId, evidenceId)).catch(() => null);
 
+/**
+ * Strict Evidence read for write paths that must distinguish a missing key from
+ * an infrastructure failure. Existing read/recall callers keep the historical
+ * null-on-error helper above; migration apply uses this one so a broken store
+ * can never be mistaken for "Evidence absent" and overwritten.
+ */
+export const getMemoryEvidenceVNextStrict = async (
+  db: any,
+  ownerId: string,
+  evidenceId: string
+): Promise<MemoryEvidenceVNext | null> => {
+  try {
+    return await db.get(evidenceKey(ownerId, evidenceId));
+  } catch (error) {
+    if (isLevelNotFoundError(error)) return null;
+    throw error;
+  }
+};
+
 export const putMemoryRelationVNext = async (
   db: any,
   relation: MemoryRelationVNext
@@ -174,11 +192,8 @@ export const putMemoryRelationVNext = async (
       );
     }
   }
-  const key = relationKey(relation.ownerId, relation.id);
   const batch = db.batch();
-  batch.put(key, relation);
-  batch.put(relationFromIndexKey(relation.ownerId, relation.from, relation.id), { key });
-  batch.put(relationToIndexKey(relation.ownerId, relation.to, relation.id), { key });
+  _appendRelationBatch(batch, relation);
   await batch.write();
 };
 
@@ -201,4 +216,40 @@ export const __test__ = {
   stateKey,
   evidenceKey,
   relationKey,
+};
+
+// ── Internal batch append helpers ─────────────────────────────────────────
+// These append operations to an existing batch WITHOUT calling write().
+// Used by applyMutation.ts to build a single atomic batch across a whole
+// MemoryInterpreterMutation. The public put* functions above remain the
+// single-record write path and call these same helpers internally.
+
+/** @internal Append an entity put to an existing batch. */
+export const _appendEntityBatch = (batch: any, entity: MemoryEntityVNext): void => {
+  batch.put(entityKey(entity.ownerId, entity.id), entity);
+};
+
+/** @internal Append an evidence put to an existing batch. */
+export const _appendEvidenceBatch = (batch: any, evidence: MemoryEvidenceVNext): void => {
+  batch.put(evidenceKey(evidence.ownerId, evidence.id), evidence);
+};
+
+/** @internal Append a state put + entity index entry to an existing batch. */
+export const _appendStateBatch = (batch: any, state: MemoryStateVNext): void => {
+  const key = stateKey(state.ownerId, state.id);
+  batch.put(key, state);
+  batch.put(stateEntityIndexKey(state.ownerId, state.entityId, state.id), { key });
+};
+
+/** @internal Append a retired-state overwrite to an existing batch. */
+export const _appendRetiredStateBatch = (batch: any, state: MemoryStateVNext): void => {
+  batch.put(stateKey(state.ownerId, state.id), state);
+};
+
+/** @internal Append a relation put + from/to index entries to an existing batch. */
+export const _appendRelationBatch = (batch: any, relation: MemoryRelationVNext): void => {
+  const key = relationKey(relation.ownerId, relation.id);
+  batch.put(key, relation);
+  batch.put(relationFromIndexKey(relation.ownerId, relation.from, relation.id), { key });
+  batch.put(relationToIndexKey(relation.ownerId, relation.to, relation.id), { key });
 };

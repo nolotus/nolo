@@ -1,4 +1,16 @@
 
+## 0.110.0-alpha.1
+
+## 0.110.0-alpha.1 (2026-09-21)
+
+### Features
+
+* **cli:** data-driven provider preset onboarding for custom/subscription agents ([cbd221d](https://github.com/nolotus/bun-nolo/commit/cbd221d66395b4169ac782a8c273b18655fb5957))
+* **memory:** add atomic applyMemoryInterpreterMutation for vNext store ([3508b22](https://github.com/nolotus/bun-nolo/commit/3508b22c0595c0c5d32f0c8b3c65a74d6ddd7dde))
+* **memory:** add controlled legacy Evidence apply seam ([4c07efd](https://github.com/nolotus/bun-nolo/commit/4c07efd311b91a3870daf4ddca4be42ed53e97e1))
+* **memory:** add vNext shadow read with minimal comparison telemetry ([c7fae57](https://github.com/nolotus/bun-nolo/commit/c7fae573833087d3ff43b719be66ef2f4e64ace0))
+
+
 ## 0.109.0-alpha.2
 
 ## 0.109.0-alpha.2 (2026-09-21)

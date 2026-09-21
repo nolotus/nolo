@@ -179,7 +179,8 @@ export async function runAgentCreateCommand(
   }
   if (!parsed) {
     output.write(
-      "Usage: nolo agent create <agent> [--model <id>] [--cli-provider <provider>] [--api-source <source>] [--max-concurrent <n>] [--expires-at <iso>] [--prompt <text> | --prompt-file <path> | --prompt-doc <pageKey>] [--tools <json>] [--copy-provider-from <agent>] [--name <name>] [--custom-provider-url <url>] [--api-key <key>|--provider-api-key <key>] [--verify] [--field key=value]\n"
+      "Usage: nolo agent create <agent> [--preset <id>] [--model <id>] [--cli-provider <provider>] [--api-source <source>] [--max-concurrent <n>] [--expires-at <iso>] [--prompt <text> | --prompt-file <path> | --prompt-doc <pageKey>] [--tools <json>] [--copy-provider-from <agent>] [--name <name>] [--custom-provider-url <url>] [--api-key <key>|--provider-api-key <key>] [--verify] [--field key=value]\n" +
+        "  --preset <id> resolves a `nolo agent providers` preset (e.g. step-plan) into provider/baseUrl/model; explicit flags override it.\n"
         .replace("[--field key=value]", "[--handle <name>] [--field key=value]")
     );
     return args[0] ? 0 : 1;

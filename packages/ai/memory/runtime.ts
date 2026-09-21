@@ -5,6 +5,11 @@ import { chooseMemoryOwners, loadMemoryCandidatesFromDb } from "./queryShared";
 import { buildMemorySubjectsForAgent, resolveAgentMemoryPolicy } from "./policy";
 import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
 import type { MemoryRuntimeResolution } from "./types";
+import {
+  isMemoryVNextShadowReadEnabled,
+  runMemoryVNextShadowRead,
+  type MemoryVNextShadowProvider,
+} from "./vnext/shadowRead";
 
 /** Below this confidence a memory is frozen out of retrieval entirely. */
 export const COLD_STORAGE_CONFIDENCE = 0.3;
@@ -210,6 +215,13 @@ export const resolveMemoryRuntime = async (input: {
    * 传 0 可关闭（测试用）。
    */
   corroboratedProceduralReserve?: number;
+  /**
+   * Slice 5 shadow read: when set AND `NOLO_MEMORY_VNEXT_SHADOW_READ` is on,
+   * run a vNext recall alongside the legacy recall and emit one comparison
+   * observation. Shadow output never enters `selectedItems` / `promptBlock`;
+   * a shadow failure is recorded, not thrown. Omit to disable entirely.
+   */
+  vNextShadowProvider?: MemoryVNextShadowProvider;
 }): Promise<MemoryRuntimeResolution> => {
   const owners = chooseMemoryOwners({
     userId: input.userId,
@@ -220,6 +232,7 @@ export const resolveMemoryRuntime = async (input: {
   }
 
   const policy = resolveAgentMemoryPolicy({ agentKey: input.agentKey });
+  const legacyStartedAt = performance.now();
   const candidates = await loadMemoryCandidatesFromDb(input.db, {
     owners,
     subjects: buildMemorySubjectsForAgent({
@@ -264,6 +277,36 @@ export const resolveMemoryRuntime = async (input: {
     input.userInput
   );
   const selected = [...residentItems, ...ranked];
+  const legacyLatencyMs = Math.round((performance.now() - legacyStartedAt) * 10) / 10;
+  const promptBlock =
+    selected.length === 0
+      ? null
+      : buildMemoryOverlay(selected, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET });
+
+  // Slice 5 shadow read: parallel vNext recall, observation-only. The shadow
+  // result never enters `selected`/`promptBlock`; a shadow failure is recorded
+  // in telemetry, never thrown. Double gate: flag + injected provider.
+  const shadowEnabled =
+    input.vNextShadowProvider != null && isMemoryVNextShadowReadEnabled();
+  if (shadowEnabled) {
+    // Fire-and-forget relative to the return value: the caller must not wait
+    // on the shadow before using the legacy resolution. We still await it
+    // inside this promise so the observation is emitted on the same turn and
+    // so a synchronous catalog error is captured — but `runMemoryVNextShadowRead`
+    // itself never throws, so the await cannot reject.
+    await runMemoryVNextShadowRead({
+      ctx: {
+        db: input.db,
+        owners,
+        query: input.userInput,
+        provider: input.vNextShadowProvider!,
+      },
+      legacyItems: selected,
+      legacyLatencyMs,
+      legacyContextChars: promptBlock?.length ?? 0,
+    });
+  }
+
   if (selected.length === 0) {
     return { selectedItems: [], promptBlock: null };
   }
@@ -274,6 +317,6 @@ export const resolveMemoryRuntime = async (input: {
   await touchMemoryItemsInDb(input.db, selected);
   return {
     selectedItems: selected,
-    promptBlock: buildMemoryOverlay(selected, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET }),
+    promptBlock,
   };
 };

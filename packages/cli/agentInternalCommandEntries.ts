@@ -32,6 +32,10 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runAgentModelsCommand } = await import("./agentProviderCommands");
       return runAgentModelsCommand(args, deps);
     }),
+    createEnvCommand(["agent", "providers"], "List agent-creation provider presets (subscription / metered / oauth)", async (args, deps) => {
+      const { runAgentProvidersCommand } = await import("./agentProviderCommands");
+      return runAgentProvidersCommand(args, deps);
+    }),
     createEnvCommand(["agent", "pull"], "Cache an agent for local runs", async (args, deps) => {
       const { runAgentPullCommand } = await import("./agentPullCommand");
       return runAgentPullCommand(args, deps);

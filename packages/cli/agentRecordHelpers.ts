@@ -576,6 +576,9 @@ export function parseAgentUpdateArgs(args: string[]) {
   // Accept both --api-key (works) and the help-text alias --provider-api-key so
   // the key is never silently dropped when a user copies the documented flag.
   const apiKey = readOption(args, "--api-key") ?? readOption(args, "--provider-api-key");
+  // --preset <id> resolves a providerRegistry preset (subscription token-plan or
+  // metered API) into provider/baseUrl/model; explicit flags override it below.
+  const presetId = readOption(args, "--preset") ?? readOption(args, "--provider-preset");
   const verify = args.includes("--verify");
   const verifyPrompt = readOption(args, "--verify-prompt");
   const maxConcurrent = parsePositiveIntegerOption(
@@ -620,7 +623,7 @@ export function parseAgentUpdateArgs(args: string[]) {
     }
   }
 
-  return { agentInput, updates, promptDoc, copyProviderFrom, verify, verifyPrompt };
+  return { agentInput, updates, promptDoc, copyProviderFrom, verify, verifyPrompt, presetId };
 }
 
 export async function buildCreatedAgentRecord(args: {
@@ -638,6 +641,40 @@ export async function buildCreatedAgentRecord(args: {
   const agentKey = resolvedAgentInput.startsWith("agent-")
     ? resolvedAgentInput
     : createAgentKey.private(userId || "local", resolvedAgentInput);
+
+  // --preset <id>: resolve a providerRegistry preset into provider/baseUrl/model
+  // defaults. Explicit flags (--model / --custom-provider-url / --provider) were
+  // already merged into updates by parseAgentUpdateArgs; preset fills only the
+  // fields the user did not pass, so explicit flags win.
+  if (args.parsed.presetId) {
+    const { resolveProviderPresetFields } = await import(
+      "ai/agent/providerPresetApply"
+    );
+    const fields = resolveProviderPresetFields(args.parsed.presetId);
+    if (fields.kind === "manual") {
+      throw new Error(
+        `unknown --preset "${args.parsed.presetId}". Run \`nolo agent providers\` to list preset ids.`
+      );
+    }
+    if (fields.kind === "oauth" || fields.requiresDesktopOAuth) {
+      throw new Error(
+        `--preset "${args.parsed.presetId}" is an OAuth subscription; create it in Nolo Desktop (OAuth login required).`
+      );
+    }
+    const u = args.parsed.updates;
+    u.apiSource = "custom";
+    u.provider = u.provider ?? fields.provider;
+    if (fields.customProviderUrl && !u.customProviderUrl) {
+      u.customProviderUrl = fields.customProviderUrl;
+    }
+    if (fields.apiKeyHeader && !u.apiKeyHeader) {
+      u.apiKeyHeader = fields.apiKeyHeader;
+    }
+    if (!u.model && fields.model) u.model = fields.model;
+    if (fields.defaultReasoningEffort && u.reasoning_effort == null) {
+      u.reasoning_effort = fields.defaultReasoningEffort;
+    }
+  }
 
   if (args.parsed.copyProviderFrom) {
     const providerSource = await resolveAgentRecordFromHybridStore({

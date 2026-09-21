@@ -163,3 +163,106 @@ export async function verifyCustomProvider(options: {
     return { ok: false, providerUrl: provider, model, reason: toErrorMessage(error) };
   }
 }
+
+/**
+ * `nolo agent providers` — list the agent-creation provider presets from the
+ * shared providerRegistry (subscription token-plans + metered APIs + OAuth
+ * brands). Data-driven off the registry so newly-added providers surface here
+ * automatically; `--json` for agent/skill consumption.
+ */
+export async function runAgentProvidersCommand(
+  args: string[],
+  deps: AgentCommandDeps = {}
+): Promise<number> {
+  const output = deps.output ?? process.stdout;
+  const wantJson = args.includes("--json");
+  const kindFilter = (readOption(args, "--kind") ?? "").trim().toLowerCase();
+
+  try {
+    const {
+      CUSTOM_API_KEY_TEMPLATES,
+      SUBSCRIPTION_OAUTH_PROVIDERS,
+    } = await import("ai/agent/providerRegistry");
+
+    const keyTemplates = CUSTOM_API_KEY_TEMPLATES.map((p) => ({
+      id: p.id,
+      label: p.label,
+      description: p.description,
+      group: p.commercialKind === "subscription" ? "subscription" : "metered_api",
+      commercialKind: p.commercialKind,
+      accessVariant: p.accessVariant,
+      provider: p.provider,
+      baseUrl: p.baseUrl,
+      defaultModel: p.defaultModel,
+      keyFormatHint: p.keyFormatHint,
+      models: (p.modelOptions ?? []).map((m) => ({
+        id: m.id,
+        label: m.label,
+        recommended: m.recommended,
+      })),
+    }));
+
+    const oauthProviders = SUBSCRIPTION_OAUTH_PROVIDERS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      description: p.description,
+      group: "subscription_oauth",
+      commercialKind: "subscription",
+      // OAuthProviderConfig has no accessVariant; surface a stable literal.
+      accessVariant: "oauth",
+      provider: p.provider,
+      apiKeyRef: p.apiKeyRef,
+      defaultModel: p.defaultModel,
+      requiresDesktopOAuth: true,
+      models: (p.modelOptions ?? []).map((m) => ({
+        id: m.id,
+        label: m.label,
+        recommended: m.recommended,
+      })),
+    }));
+
+    const all = [...oauthProviders, ...keyTemplates];
+    const filtered = kindFilter
+      ? all.filter(
+          (p) =>
+            p.group === kindFilter ||
+            p.commercialKind === kindFilter ||
+            p.accessVariant === kindFilter
+        )
+      : all;
+
+    if (wantJson) {
+      output.write(JSON.stringify({ ok: true, providers: filtered }, null, 2) + "\n");
+      return 0;
+    }
+
+    if (!filtered.length) {
+      output.write(`[nolo] agent providers: no presets matching "${kindFilter}"\n`);
+      return 1;
+    }
+
+    const byGroup = new Map<string, typeof filtered>();
+    for (const p of filtered) {
+      const list = byGroup.get(p.group) ?? [];
+      list.push(p);
+      byGroup.set(p.group, list);
+    }
+    for (const [group, items] of byGroup) {
+      output.write(`\n[${group}]\n`);
+      for (const p of items) {
+        const url = "baseUrl" in p && p.baseUrl ? `  ${p.baseUrl}` : "";
+        const def = p.defaultModel ? `  default=${p.defaultModel}` : "";
+        output.write(`  ${p.id}  ${p.label}${url}${def}\n`);
+        // keyFormatHint only exists on api_key_template items — guard the union.
+        if ("keyFormatHint" in p && p.keyFormatHint) {
+          output.write(`      key: ${p.keyFormatHint}\n`);
+        }
+      }
+    }
+    output.write("\n");
+    return 0;
+  } catch (error) {
+    output.write(`[nolo] agent providers failed: ${toErrorMessage(error)}\n`);
+    return 1;
+  }
+}
