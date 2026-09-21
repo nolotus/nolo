@@ -1,4 +1,29 @@
 
+## 0.78.0
+
+## 0.78.0 (2026-09-21)
+
+### Features
+
+* **ai:** promote 4 generic skills to builtin registry and drop repo copies ([46ac415](https://github.com/nolotus/bun-nolo/commit/46ac415b428f2246566c752129d53960d549e278))
+* **ai:** ship worktree-isolation builtin skill with default recommended hint ([397f17d](https://github.com/nolotus/bun-nolo/commit/397f17d2f8b042ca2e5c28848c27e329d033e63f))
+* **cli:** data-driven provider preset onboarding for custom/subscription agents ([cbd221d](https://github.com/nolotus/bun-nolo/commit/cbd221d66395b4169ac782a8c273b18655fb5957))
+* **memory:** add atomic applyMemoryInterpreterMutation for vNext store ([3508b22](https://github.com/nolotus/bun-nolo/commit/3508b22c0595c0c5d32f0c8b3c65a74d6ddd7dde))
+* **memory:** add controlled legacy Evidence apply seam ([4c07efd](https://github.com/nolotus/bun-nolo/commit/4c07efd311b91a3870daf4ddca4be42ed53e97e1))
+* **memory:** add vNext shadow read with minimal comparison telemetry ([c7fae57](https://github.com/nolotus/bun-nolo/commit/c7fae573833087d3ff43b719be66ef2f4e64ace0))
+* **memory:** migrate legacy records through vNext shadow path ([ba13b05](https://github.com/nolotus/bun-nolo/commit/ba13b05f54cfc6c8649a232dedfd4897738a10cf))
+* **trust:** expose auditable desktop release provenance ([25960f5](https://github.com/nolotus/bun-nolo/commit/25960f551333e4cd42ce9548495789f26a136958))
+
+### Bug Fixes
+
+* **agent:** stop naming taskWait in the tool-round-economy prompt ([431eaf2](https://github.com/nolotus/bun-nolo/commit/431eaf269004b5b86b0f8b3f56144d6b83d44a76))
+* **cli:** record the post-expansion tool list in the runtime checkpoint ([5cdd277](https://github.com/nolotus/bun-nolo/commit/5cdd277dc1e76c1786c9f2ea315433bfbec4780d))
+* **devin:** align the temperature default with the upstream client ([c01ec6c](https://github.com/nolotus/bun-nolo/commit/c01ec6c42b81cbf76428e513a5ea7974eec87518))
+* **devin:** hand the host tool bundle and temperature to the Connect wire ([d5300f1](https://github.com/nolotus/bun-nolo/commit/d5300f11307063073c2e675c6eee36f0431b4356))
+* **devin:** keep the upstream finish reason on tool-call turns ([512caac](https://github.com/nolotus/bun-nolo/commit/512caac988d2acd3f93401cace90e396001b8320))
+* **devin:** speak the tool-calling protocol on the Connect wire ([513d0d5](https://github.com/nolotus/bun-nolo/commit/513d0d520cd22997005096c8c15eb9f2cc33ab89))
+
+
 ## 0.77.0
 
 ## 0.77.0 (2026-09-20)
