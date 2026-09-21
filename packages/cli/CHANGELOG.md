@@ -1,232 +1,42 @@
 
-## 0.89.0-alpha.1
+## 0.75.0
 
-## 0.89.0-alpha.1 (2026-09-21)
+## 0.75.0 (2026-09-21)
 
 ### Features
 
+* **ai:** promote 4 generic skills to builtin registry and drop repo copies ([46ac415](https://github.com/nolotus/bun-nolo/commit/46ac415b428f2246566c752129d53960d549e278))
+* **ai:** ship worktree-isolation builtin skill with default recommended hint ([397f17d](https://github.com/nolotus/bun-nolo/commit/397f17d2f8b042ca2e5c28848c27e329d033e63f))
 * **cli:** data-driven provider preset onboarding for custom/subscription agents ([cbd221d](https://github.com/nolotus/bun-nolo/commit/cbd221d66395b4169ac782a8c273b18655fb5957))
 * **memory:** add atomic applyMemoryInterpreterMutation for vNext store ([3508b22](https://github.com/nolotus/bun-nolo/commit/3508b22c0595c0c5d32f0c8b3c65a74d6ddd7dde))
 * **memory:** add controlled legacy Evidence apply seam ([4c07efd](https://github.com/nolotus/bun-nolo/commit/4c07efd311b91a3870daf4ddca4be42ed53e97e1))
 * **memory:** add vNext shadow read with minimal comparison telemetry ([c7fae57](https://github.com/nolotus/bun-nolo/commit/c7fae573833087d3ff43b719be66ef2f4e64ace0))
-
-
-## 0.88.0-alpha.2
-
-## 0.88.0-alpha.2 (2026-09-21)
+* **memory:** migrate legacy records through vNext shadow path ([ba13b05](https://github.com/nolotus/bun-nolo/commit/ba13b05f54cfc6c8649a232dedfd4897738a10cf))
+* **trust:** expose auditable desktop release provenance ([25960f5](https://github.com/nolotus/bun-nolo/commit/25960f551333e4cd42ce9548495789f26a136958))
 
 ### Bug Fixes
 
 * **agent:** stop naming taskWait in the tool-round-economy prompt ([431eaf2](https://github.com/nolotus/bun-nolo/commit/431eaf269004b5b86b0f8b3f56144d6b83d44a76))
-
-
-## 0.88.0-alpha.1
-
-## 0.88.0-alpha.1 (2026-09-21)
-
-### Features
-
-* **trust:** expose auditable desktop release provenance ([25960f5](https://github.com/nolotus/bun-nolo/commit/25960f551333e4cd42ce9548495789f26a136958))
-
-
-## 0.87.0-alpha.3
-
-## 0.87.0-alpha.3 (2026-09-21)
-
-### Bug Fixes
-
-* **devin:** align the temperature default with the upstream client ([c01ec6c](https://github.com/nolotus/bun-nolo/commit/c01ec6c42b81cbf76428e513a5ea7974eec87518))
-
-
-## 0.87.0-alpha.2
-
-## 0.87.0-alpha.2 (2026-09-21)
-
-### Bug Fixes
-
 * **cli:** record the post-expansion tool list in the runtime checkpoint ([5cdd277](https://github.com/nolotus/bun-nolo/commit/5cdd277dc1e76c1786c9f2ea315433bfbec4780d))
+* **devin:** align the temperature default with the upstream client ([c01ec6c](https://github.com/nolotus/bun-nolo/commit/c01ec6c42b81cbf76428e513a5ea7974eec87518))
 * **devin:** hand the host tool bundle and temperature to the Connect wire ([d5300f1](https://github.com/nolotus/bun-nolo/commit/d5300f11307063073c2e675c6eee36f0431b4356))
 * **devin:** keep the upstream finish reason on tool-call turns ([512caac](https://github.com/nolotus/bun-nolo/commit/512caac988d2acd3f93401cace90e396001b8320))
 * **devin:** speak the tool-calling protocol on the Connect wire ([513d0d5](https://github.com/nolotus/bun-nolo/commit/513d0d520cd22997005096c8c15eb9f2cc33ab89))
 
 
-## 0.87.0-alpha.1
+## 0.74.0
 
-## 0.87.0-alpha.1 (2026-09-20)
-
-### Features
-
-* **ai:** promote 4 generic skills to builtin registry and drop repo copies ([46ac415](https://github.com/nolotus/bun-nolo/commit/46ac415b428f2246566c752129d53960d549e278))
-
-
-## 0.86.0-alpha.1
-
-## 0.86.0-alpha.1 (2026-09-20)
-
-### Features
-
-* **ai:** ship worktree-isolation builtin skill with default recommended hint ([397f17d](https://github.com/nolotus/bun-nolo/commit/397f17d2f8b042ca2e5c28848c27e329d033e63f))
-
-
-## 0.85.0-alpha.1
-
-## 0.85.0-alpha.1 (2026-09-20)
-
-### Features
-
-* **memory:** migrate legacy records through vNext shadow path ([ba13b05](https://github.com/nolotus/bun-nolo/commit/ba13b05f54cfc6c8649a232dedfd4897738a10cf))
-
-
-## 0.84.0-alpha.1
-
-## 0.84.0-alpha.1 (2026-09-20)
-
-### Features
-
-* **ai:** integrate StepFun Step Plan subscription and metered API providers ([f3b31f7](https://github.com/nolotus/bun-nolo/commit/f3b31f714f298a125b740bb8bfa035a6e012309e))
-
-
-## 0.83.0-alpha.2
-
-## 0.83.0-alpha.2 (2026-09-19)
-
-### Bug Fixes
-
-* **devin:** fail closed on incomplete streams and preserve wire-order deltas ([d924ae1](https://github.com/nolotus/bun-nolo/commit/d924ae1155cba7bc7fde61ad22c15a46169ee6ee))
-* **devin:** reject frames after terminal ConnectRPC trailer ([f85d130](https://github.com/nolotus/bun-nolo/commit/f85d130978d8ce4bafe346716caa2fbc8b6795f8))
-
-
-## 0.83.0-alpha.1
-
-## 0.83.0-alpha.1 (2026-09-19)
-
-### Features
-
-* **auth:** support Devin Pro subscription with native ConnectRPC and SWE-2 ([4236e6f](https://github.com/nolotus/bun-nolo/commit/4236e6f2c9eefc07a3cccce7ceab6e79ec8cdb59))
-* **devin:** promote swe-2-max as default model and refine auth flow ([73a8d98](https://github.com/nolotus/bun-nolo/commit/73a8d98e0990c1fe3cdcd3ae14f375220f1dbfdd))
-* **runtime:** wire devinProvider in desktop and CLI local runtime adapters ([d9da46e](https://github.com/nolotus/bun-nolo/commit/d9da46e376008ec6218d7465afe4b54f76e8f59a))
-
-### Bug Fixes
-
-* **auth:** point Devin auth URLs and token extraction directly to app.devin.ai ([f3310c4](https://github.com/nolotus/bun-nolo/commit/f3310c477bd1722f5c9e2b5ca3670682b34d3a15))
-* **devin:** calibrate GetChatMessage request schema with double-precision completion config ([20b435b](https://github.com/nolotus/bun-nolo/commit/20b435b118d896a6743e601cdbc7f79f7636eaee)), closes [#15](https://github.com/nolotus/bun-nolo/issues/15) [#21](https://github.com/nolotus/bun-nolo/issues/21)
-* **devin:** harden local transport tests and remove dead sync flag ([aded2f6](https://github.com/nolotus/bun-nolo/commit/aded2f666cbebf952febe2d4e8050ac9ec0c7db5))
-* **oauth:** allow devin provider in createOAuthApiKeyRefResolver ([a4179f5](https://github.com/nolotus/bun-nolo/commit/a4179f542bb9ffef28aa9dff75bbe78ec3c4814e))
-* **security:** do not auto-sync sensitive OAuth credentials to server by default ([408ea2e](https://github.com/nolotus/bun-nolo/commit/408ea2ec466c3dcb5357e3fc0bd8c11b667d65d6))
-
-
-## 0.82.0-alpha.6
-
-## 0.82.0-alpha.6 (2026-09-19)
-
-### Bug Fixes
-
-* **agent-runtime:** align host adapter context usage contract and explicit test notice types ([805cdbc](https://github.com/nolotus/bun-nolo/commit/805cdbcdee6257209f1f6b0977e01ea21f5a5740))
-
-
-## 0.82.0-alpha.5
-
-## 0.82.0-alpha.5 (2026-09-19)
-
-### Bug Fixes
-
-* **agent-runtime:** keep a retrievable ref for every lossy task capsule ([2aa19eb](https://github.com/nolotus/bun-nolo/commit/2aa19eb860dfc81cf598109d6deac0c1aea4ccfc))
-
-
-## 0.82.0-alpha.4
-
-## 0.82.0-alpha.4 (2026-09-18)
-
-### Bug Fixes
-
-* **home:** put the remaining visible icons back on the 16/20/24 grid ([0b45d01](https://github.com/nolotus/bun-nolo/commit/0b45d014260ed17d04b1e2b05f4ceb6edc0c5434))
-
-
-## 0.82.0-alpha.3
-
-## 0.82.0-alpha.3 (2026-09-18)
-
-### Bug Fixes
-
-* **agent:** keep accent chips at AA contrast in every theme ([85c8845](https://github.com/nolotus/bun-nolo/commit/85c8845402d15185da644e794e1b517e65bb0605))
-* **home:** normalize diagram icons, bind z-index tiers and drop dead CSS ([5cce984](https://github.com/nolotus/bun-nolo/commit/5cce984b95aaa3bc43163ddf13babf5d878c476d))
-* **i18n:** gloss the zh Terms of Service entry like its siblings ([6a63f62](https://github.com/nolotus/bun-nolo/commit/6a63f628f463ba2e0a34aa762ade3445e2e7c3a5))
-
-
-## 0.82.0-alpha.2
-
-## 0.82.0-alpha.2 (2026-09-18)
-
-### Bug Fixes
-
-* **home:** align landing-page spacing scale, surface radii and copy ([5ba9383](https://github.com/nolotus/bun-nolo/commit/5ba93835a8e34fe03b8b7d579a705e47632b4c3e))
-* **home:** close residual reduced-motion and contrast gaps ([042f104](https://github.com/nolotus/bun-nolo/commit/042f104d8078290674511adfadd052172b9e89e4))
-* **home:** repair landing-page a11y, SSR hydration and copy issues ([2e46dbe](https://github.com/nolotus/bun-nolo/commit/2e46dbe7f56c12859e2dcfdd296a53c7ca1d9bd3))
-
-
-## 0.82.0-alpha.1
-
-## 0.82.0-alpha.1 (2026-09-18)
+## 0.74.0 (2026-09-20)
 
 ### Features
 
 * **agent-runtime:** attach bounded result capsule to promoted execShell terminals ([4d6b00a](https://github.com/nolotus/bun-nolo/commit/4d6b00ada6fd80e3932add701bf11481e27dd14c))
-
-### Bug Fixes
-
-* **agent-runtime:** spill whenever result capsule truncates inline output ([28a5575](https://github.com/nolotus/bun-nolo/commit/28a55759859db4599692fcfc748a80434e79b4a4))
-* **tui:** describe taskLogs as lifecycle-only in process notices ([c92e01f](https://github.com/nolotus/bun-nolo/commit/c92e01ff7c23fe4df82efaa7dbdf4ecc64a1ddff))
-
-
-## 0.81.0-alpha.1
-
-## 0.81.0-alpha.1 (2026-09-18)
-
-### Features
-
-* **render:** rebuild the site footer as a layered riverbank camping scene ([15083f9](https://github.com/nolotus/bun-nolo/commit/15083f907a7beacd90b7bbcfb67d8dbe8478ad16)), closes [#8482AD](https://github.com/nolotus/bun-nolo/issues/8482AD) [#d5eed2](https://github.com/nolotus/bun-nolo/issues/d5eed2) [#a5cba5](https://github.com/nolotus/bun-nolo/issues/a5cba5)
-
-### Bug Fixes
-
-* **agent:** classify owner subscription channels ([f27320d](https://github.com/nolotus/bun-nolo/commit/f27320d1b5160ea831dcace3f8f2afa8ae83903e))
-* **agent:** preserve shared agent keys ([2936fce](https://github.com/nolotus/bun-nolo/commit/2936fce4b9ba8f6ee90ab29a4708d9882600c7f5))
-* **render:** correct footer river geometry ([ca700c5](https://github.com/nolotus/bun-nolo/commit/ca700c57c17a75345942f1d7728947ab51c6e067))
-
-
-## 0.80.0-alpha.2
-
-## 0.80.0-alpha.2 (2026-09-18)
-
-### Bug Fixes
-
-* **agent-runtime:** restrict process terminal auto-resume to promoted execShell tasks ([c651395](https://github.com/nolotus/bun-nolo/commit/c65139521785c625007a08e44da989705efc490f))
-
-
-## 0.80.0-alpha.1
-
-## 0.80.0-alpha.1 (2026-09-18)
-
-### Features
-
-* **memory:** adopt user-world relevance contract ([1a731c6](https://github.com/nolotus/bun-nolo/commit/1a731c67164a53ebea9dcb99766efd2be7a98c42))
-* **memory:** require user-world relevance for third-party facts ([636fa5f](https://github.com/nolotus/bun-nolo/commit/636fa5f3282f7d37ed2b494c75a4e5b862a4f620))
-
-
-## 0.79.0-alpha.2
-
-## 0.79.0-alpha.2 (2026-09-18)
-
-### Bug Fixes
-
-* **cli:** color user message text and fix invisible light-mode bubble ([28ba1a9](https://github.com/nolotus/bun-nolo/commit/28ba1a9818320da07ddf32ec2c5cbbbcec35ad9f)), closes [#F2F2F3](https://github.com/nolotus/bun-nolo/issues/F2F2F3) [#DDEAFA](https://github.com/nolotus/bun-nolo/issues/DDEAFA)
-
-
-## 0.79.0-alpha.1
-
-## 0.79.0-alpha.1 (2026-09-17)
-
-### Features
-
+* **agent:** add DeepSeek official API preset and brand logos in provider pickers ([1760676](https://github.com/nolotus/bun-nolo/commit/1760676d2fda8a7387289124de5d409614248fde))
+* **ai:** integrate StepFun Step Plan subscription and metered API providers ([f3b31f7](https://github.com/nolotus/bun-nolo/commit/f3b31f714f298a125b740bb8bfa035a6e012309e))
+* **app:** surface cost routing on the landing page and localize the OG card ([412a6ca](https://github.com/nolotus/bun-nolo/commit/412a6ca87417f413a05259cd5b0193ca19f36766))
+* **auth:** support Devin Pro subscription with native ConnectRPC and SWE-2 ([4236e6f](https://github.com/nolotus/bun-nolo/commit/4236e6f2c9eefc07a3cccce7ceab6e79ec8cdb59))
+* **cli:** auto-resume agent when owned background process reaches terminal state ([7804cd6](https://github.com/nolotus/bun-nolo/commit/7804cd6fd41b217571d98341d1141c11e2fcbb32))
+* **devin:** promote swe-2-max as default model and refine auth flow ([73a8d98](https://github.com/nolotus/bun-nolo/commit/73a8d98e0990c1fe3cdcd3ae14f375220f1dbfdd))
 * **memory:** add adaptive recall context ([8cc022b](https://github.com/nolotus/bun-nolo/commit/8cc022b699f500c83bcc4b98870a95f8f42567fd))
 * **memory:** add lifetime benchmark runner protocol ([6ed8a4f](https://github.com/nolotus/bun-nolo/commit/6ed8a4fba55b3b4c22dcc09c23b7b6b492e244b5))
 * **memory:** add lifetime benchmark scale generator ([2c5ab5c](https://github.com/nolotus/bun-nolo/commit/2c5ab5c0e9f1e9d2c5dc76da656254709f911e59))
@@ -240,6 +50,7 @@
 * **memory:** add vnext interpreter entity contract ([000952d](https://github.com/nolotus/bun-nolo/commit/000952dec41da71e6b3c633c8a68dfc62a177443))
 * **memory:** add vnext shadow store ([59a24d4](https://github.com/nolotus/bun-nolo/commit/59a24d41d6eef23a82240461c6ef479aeb7eb245))
 * **memory:** add vNext state recall ([3fe0737](https://github.com/nolotus/bun-nolo/commit/3fe07376f61843e4948a196075d8dd0ceb7da912))
+* **memory:** adopt user-world relevance contract ([1a731c6](https://github.com/nolotus/bun-nolo/commit/1a731c67164a53ebea9dcb99766efd2be7a98c42))
 * **memory:** allow adaptive checkpoint context ([c589aeb](https://github.com/nolotus/bun-nolo/commit/c589aebe4c53b7c8582ecf797d03fe65c44ce215))
 * **memory:** define lifetime benchmark judge contract ([bdcc8cf](https://github.com/nolotus/bun-nolo/commit/bdcc8cff21e7dbd8b6e37d4e8104f830ccd5f64c))
 * **memory:** expose benchmark checkpoint artifacts ([5b4bb01](https://github.com/nolotus/bun-nolo/commit/5b4bb01661b95b52980cd9c35940d80aec432c9e))
@@ -247,205 +58,130 @@
 * **memory:** expose benchmark provider usage ([3a7e973](https://github.com/nolotus/bun-nolo/commit/3a7e973e3b0776dea194359f0b689d2c08d705ef))
 * **memory:** include strict interpreter output contract ([c0649b4](https://github.com/nolotus/bun-nolo/commit/c0649b4c4ff4d3f63df831a8c6f0f5dcff4c3241))
 * **memory:** meter benchmark provider calls ([b435538](https://github.com/nolotus/bun-nolo/commit/b435538204a907fd6f38868f72db0c794207d432))
+* **memory:** require user-world relevance for third-party facts ([636fa5f](https://github.com/nolotus/bun-nolo/commit/636fa5f3282f7d37ed2b494c75a4e5b862a4f620))
 * **memory:** retain checkpoint debug artifacts ([0648e91](https://github.com/nolotus/bun-nolo/commit/0648e918a7deb08ce6ab2ff340550c22d824385f))
 * **memory:** summarize lifetime benchmark metrics ([63fbe35](https://github.com/nolotus/bun-nolo/commit/63fbe3568e41fcf8db322a16638ad3e593588ad3))
+* **render:** rebuild the site footer as a layered riverbank camping scene ([15083f9](https://github.com/nolotus/bun-nolo/commit/15083f907a7beacd90b7bbcfb67d8dbe8478ad16)), closes [#8482AD](https://github.com/nolotus/bun-nolo/issues/8482AD) [#d5eed2](https://github.com/nolotus/bun-nolo/issues/d5eed2) [#a5cba5](https://github.com/nolotus/bun-nolo/issues/a5cba5)
+* **runtime:** wire devinProvider in desktop and CLI local runtime adapters ([d9da46e](https://github.com/nolotus/bun-nolo/commit/d9da46e376008ec6218d7465afe4b54f76e8f59a))
 
 ### Bug Fixes
 
+* **agent-runtime:** align host adapter context usage contract and explicit test notice types ([805cdbc](https://github.com/nolotus/bun-nolo/commit/805cdbcdee6257209f1f6b0977e01ea21f5a5740))
+* **agent-runtime:** keep a retrievable ref for every lossy task capsule ([2aa19eb](https://github.com/nolotus/bun-nolo/commit/2aa19eb860dfc81cf598109d6deac0c1aea4ccfc))
+* **agent-runtime:** restrict process terminal auto-resume to promoted execShell tasks ([c651395](https://github.com/nolotus/bun-nolo/commit/c65139521785c625007a08e44da989705efc490f))
+* **agent-runtime:** spill whenever result capsule truncates inline output ([28a5575](https://github.com/nolotus/bun-nolo/commit/28a55759859db4599692fcfc748a80434e79b4a4))
+* **agent:** classify owner subscription channels ([f27320d](https://github.com/nolotus/bun-nolo/commit/f27320d1b5160ea831dcace3f8f2afa8ae83903e))
+* **agent:** keep accent chips at AA contrast in every theme ([85c8845](https://github.com/nolotus/bun-nolo/commit/85c8845402d15185da644e794e1b517e65bb0605))
+* **agent:** preserve shared agent keys ([2936fce](https://github.com/nolotus/bun-nolo/commit/2936fce4b9ba8f6ee90ab29a4708d9882600c7f5))
+* **auth:** point Devin auth URLs and token extraction directly to app.devin.ai ([f3310c4](https://github.com/nolotus/bun-nolo/commit/f3310c477bd1722f5c9e2b5ca3670682b34d3a15))
+* **cli:** color user message text and fix invisible light-mode bubble ([28ba1a9](https://github.com/nolotus/bun-nolo/commit/28ba1a9818320da07ddf32ec2c5cbbbcec35ad9f)), closes [#F2F2F3](https://github.com/nolotus/bun-nolo/issues/F2F2F3) [#DDEAFA](https://github.com/nolotus/bun-nolo/issues/DDEAFA)
+* **cli:** read auth tokens from the modern profile.tokens[] shape ([3137aa0](https://github.com/nolotus/bun-nolo/commit/3137aa08d177f87b2e7446f3fe19d2151e8ffffb))
+* **devin:** calibrate GetChatMessage request schema with double-precision completion config ([20b435b](https://github.com/nolotus/bun-nolo/commit/20b435b118d896a6743e601cdbc7f79f7636eaee)), closes [#15](https://github.com/nolotus/bun-nolo/issues/15) [#21](https://github.com/nolotus/bun-nolo/issues/21)
+* **devin:** fail closed on incomplete streams and preserve wire-order deltas ([d924ae1](https://github.com/nolotus/bun-nolo/commit/d924ae1155cba7bc7fde61ad22c15a46169ee6ee))
+* **devin:** harden local transport tests and remove dead sync flag ([aded2f6](https://github.com/nolotus/bun-nolo/commit/aded2f666cbebf952febe2d4e8050ac9ec0c7db5))
+* **devin:** reject frames after terminal ConnectRPC trailer ([f85d130](https://github.com/nolotus/bun-nolo/commit/f85d130978d8ce4bafe346716caa2fbc8b6795f8))
+* **home:** align landing-page spacing scale, surface radii and copy ([5ba9383](https://github.com/nolotus/bun-nolo/commit/5ba93835a8e34fe03b8b7d579a705e47632b4c3e))
+* **home:** close residual reduced-motion and contrast gaps ([042f104](https://github.com/nolotus/bun-nolo/commit/042f104d8078290674511adfadd052172b9e89e4))
+* **home:** normalize diagram icons, bind z-index tiers and drop dead CSS ([5cce984](https://github.com/nolotus/bun-nolo/commit/5cce984b95aaa3bc43163ddf13babf5d878c476d))
+* **home:** put the remaining visible icons back on the 16/20/24 grid ([0b45d01](https://github.com/nolotus/bun-nolo/commit/0b45d014260ed17d04b1e2b05f4ceb6edc0c5434))
+* **home:** repair landing-page a11y, SSR hydration and copy issues ([2e46dbe](https://github.com/nolotus/bun-nolo/commit/2e46dbe7f56c12859e2dcfdd296a53c7ca1d9bd3))
+* **i18n:** gloss the zh Terms of Service entry like its siblings ([6a63f62](https://github.com/nolotus/bun-nolo/commit/6a63f628f463ba2e0a34aa762ade3445e2e7c3a5))
 * **memory:** close the first-round review findings in memory vNext ([d1c7ba0](https://github.com/nolotus/bun-nolo/commit/d1c7ba0a8c5a8ad49399ceed6bdea8f29da3838e))
 * **memory:** harden vNext mutation references ([9485160](https://github.com/nolotus/bun-nolo/commit/948516053fee9eee12cd1afda15e855fb39810cf))
 * **memory:** preserve state provenance during materialization ([24df7b0](https://github.com/nolotus/bun-nolo/commit/24df7b0603de8a2414bee0939e2b3f01efc6ef21))
 * **memory:** refuse to update or supersede an already retired State ([3bf77d6](https://github.com/nolotus/bun-nolo/commit/3bf77d65391d06417b4d22d74f40c39b0dd57eee))
 * **memory:** retain prior state evidence in LLM adapter ([4ef5a1e](https://github.com/nolotus/bun-nolo/commit/4ef5a1ece1657329ee4c0681dd6f8de3d2d82f26))
-
-
-## 0.78.0-alpha.1
-
-## 0.78.0-alpha.1 (2026-09-17)
-
-### Features
-
-* **app:** surface cost routing on the landing page and localize the OG card ([412a6ca](https://github.com/nolotus/bun-nolo/commit/412a6ca87417f413a05259cd5b0193ca19f36766))
-
-### Bug Fixes
-
+* **oauth:** allow devin provider in createOAuthApiKeyRefResolver ([a4179f5](https://github.com/nolotus/bun-nolo/commit/a4179f542bb9ffef28aa9dff75bbe78ec3c4814e))
+* **render:** correct footer river geometry ([ca700c5](https://github.com/nolotus/bun-nolo/commit/ca700c57c17a75345942f1d7728947ab51c6e067))
+* **security:** do not auto-sync sensitive OAuth credentials to server by default ([408ea2e](https://github.com/nolotus/bun-nolo/commit/408ea2ec466c3dcb5357e3fc0bd8c11b667d65d6))
+* **tui:** describe taskLogs as lifecycle-only in process notices ([c92e01f](https://github.com/nolotus/bun-nolo/commit/c92e01ff7c23fe4df82efaa7dbdf4ecc64a1ddff))
+* **tui:** make paste and drag intuitive across terminals ([a09a546](https://github.com/nolotus/bun-nolo/commit/a09a5464c9a7e09b128483df1fc8a6d3674424b0))
+* **tui:** preserve user message contrast ([f958013](https://github.com/nolotus/bun-nolo/commit/f9580138ccc8964105dbaa96f7cb939f7501d72e))
 * **tui:** stop a duplicate OSC 52 write from restoring stale clipboard content ([76cb5aa](https://github.com/nolotus/bun-nolo/commit/76cb5aae5018185ddce4c414df1ed2e34e396927))
 
 
-## 0.77.0-alpha.1
+## 0.73.0
 
-## 0.77.0-alpha.1 (2026-09-17)
-
-### Features
-
-* **agent:** add DeepSeek official API preset and brand logos in provider pickers ([1760676](https://github.com/nolotus/bun-nolo/commit/1760676d2fda8a7387289124de5d409614248fde))
-
-
-## 0.76.0-alpha.1
-
-## 0.76.0-alpha.1 (2026-09-17)
+## 0.73.0 (2026-09-18)
 
 ### Features
 
-* **cli:** auto-resume agent when owned background process reaches terminal state ([7804cd6](https://github.com/nolotus/bun-nolo/commit/7804cd6fd41b217571d98341d1141c11e2fcbb32))
-
-
-## 0.75.0-alpha.7
-
-## 0.75.0-alpha.7 (2026-09-17)
+* **render:** rebuild the site footer as a layered riverbank camping scene ([1e4e648](https://github.com/nolotus/bun-nolo/commit/1e4e648300bfaf8a766531ecaa2a56af89b98729)), closes [#8482AD](https://github.com/nolotus/bun-nolo/issues/8482AD) [#d5eed2](https://github.com/nolotus/bun-nolo/issues/d5eed2) [#a5cba5](https://github.com/nolotus/bun-nolo/issues/a5cba5)
 
 ### Bug Fixes
 
-* **cli:** read auth tokens from the modern profile.tokens[] shape ([3137aa0](https://github.com/nolotus/bun-nolo/commit/3137aa08d177f87b2e7446f3fe19d2151e8ffffb))
+* **agent:** classify owner subscription channels ([db7f497](https://github.com/nolotus/bun-nolo/commit/db7f497d5925cd0096615441195099ea8d205572))
+* **agent:** preserve shared agent keys ([c36a945](https://github.com/nolotus/bun-nolo/commit/c36a9455b0311794fd56f5dec966fae0b97ce34e))
+* **render:** correct footer river geometry ([e4e32fb](https://github.com/nolotus/bun-nolo/commit/e4e32fba76446f5091a6f99c9bcc039683c6d770))
 
 
-## 0.75.0-alpha.6
+## 0.72.0
 
-## 0.75.0-alpha.6 (2026-09-17)
-
-### Bug Fixes
-
-* **tui:** preserve user message contrast ([f958013](https://github.com/nolotus/bun-nolo/commit/f9580138ccc8964105dbaa96f7cb939f7501d72e))
-
-
-## 0.75.0-alpha.5
-
-## 0.75.0-alpha.5 (2026-09-17)
-
-### Bug Fixes
-
-* **tui:** make paste and drag intuitive across terminals ([a09a546](https://github.com/nolotus/bun-nolo/commit/a09a5464c9a7e09b128483df1fc8a6d3674424b0))
-
-
-## 0.75.0-alpha.4
-
-## 0.75.0-alpha.4 (2026-09-17)
-
-### Bug Fixes
-
-* **tui:** reduce wheel scrolling backlog with adaptive catch-up ([bba6016](https://github.com/nolotus/bun-nolo/commit/bba601658622dba14169705901da0d259569532c))
-
-
-## 0.75.0-alpha.3
-
-## 0.75.0-alpha.3 (2026-09-17)
-
-### Bug Fixes
-
-* **agent-runtime:** 工具参数尾截断可无损补全时直接执行，不再白跑一轮重试 ([da894d4](https://github.com/nolotus/bun-nolo/commit/da894d4decb97beeaad476f3796faf093637dc4a))
-
-
-## 0.75.0-alpha.2
-
-## 0.75.0-alpha.2 (2026-09-17)
-
-### Bug Fixes
-
-* **table:** 修正重命名列显示名/重命名表的命令参数名 ([9cfc459](https://github.com/nolotus/bun-nolo/commit/9cfc4595cc08eeaffcf36d9840c70ce85e1ecb67))
-* **table:** 去掉 setTableFocusContext 的 dispatch 包装，修复表格页渲染崩溃 ([8586fa9](https://github.com/nolotus/bun-nolo/commit/8586fa99a0017f50952c1319fb66cb62fe7347af)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7)
-* **table:** 给 listTableRows 的服务器读取加 5s 超时，修复表格加载可卡 60s+ ([66afa8a](https://github.com/nolotus/bun-nolo/commit/66afa8a883833abe1e1e9b547a52455a88b9b659))
-
-
-## 0.75.0-alpha.1
-
-## 0.75.0-alpha.1 (2026-09-16)
-
-### Features
-
-* **cli:** let the TUI drive the user's Chrome through the Nolo connector ([9ada25d](https://github.com/nolotus/bun-nolo/commit/9ada25dcb536022ae09132e0f295785b95d440b6))
-* **cli:** nolo chrome 组补充操作子命令（读页面/点击/输入等 11 个） ([d44444e](https://github.com/nolotus/bun-nolo/commit/d44444e772b95984842d80c18093838b5ed82ac0))
-
-### Bug Fixes
-
-* **desktop:** Linux 官方安装器发布到 R2 并作为推荐下载 ([f24a7e9](https://github.com/nolotus/bun-nolo/commit/f24a7e9a36fba0431cebdb1a7a36f54a50546c33))
-
-
-## 0.74.0-alpha.2
-
-## 0.74.0-alpha.2 (2026-09-16)
-
-### Bug Fixes
-
-* **cli:** fuse runGit with a timeout and tidy post-incident leftovers ([4d9e245](https://github.com/nolotus/bun-nolo/commit/4d9e245539c6eb5d11f80c5cee05b1c7e6b49b41))
-* **desktop:** 更新面板文案人话化（保留原文可查） ([38164e4](https://github.com/nolotus/bun-nolo/commit/38164e4129eae98cb4b44b25d091d81f38a26f5b))
-* **desktop:** 非受管理安装不再给必然失败的「下载更新」按钮 ([caceedc](https://github.com/nolotus/bun-nolo/commit/caceedc9020a0523e6c6d33ca738b2ecec8d3a93))
-
-
-## 0.74.0-alpha.1
-
-## 0.74.0-alpha.1 (2026-09-16)
+## 0.72.0 (2026-09-18)
 
 ### Features
 
 * **agent-runtime:** guide agents to render mermaid for structured explanations ([87d0fd4](https://github.com/nolotus/bun-nolo/commit/87d0fd4b676f8358b1a5af697cf1a36f80147281))
+* **app:** surface cost routing on the landing page and localize the OG card ([09c0207](https://github.com/nolotus/bun-nolo/commit/09c0207d8d3cf8cfa8fffb2b43888791bd1fa82e))
+* **cli:** let the TUI drive the user's Chrome through the Nolo connector ([9ada25d](https://github.com/nolotus/bun-nolo/commit/9ada25dcb536022ae09132e0f295785b95d440b6))
+* **cli:** nolo chrome 组补充操作子命令（读页面/点击/输入等 11 个） ([d44444e](https://github.com/nolotus/bun-nolo/commit/d44444e772b95984842d80c18093838b5ed82ac0))
 * **cli:** render mermaid diagrams via lovely-mermaid ([249d944](https://github.com/nolotus/bun-nolo/commit/249d9440b0dc8a7ac8be17d572fa05bffd0835b5))
+* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
+* **desktop:** add compact Chrome observation protocol ([dae7f9d](https://github.com/nolotus/bun-nolo/commit/dae7f9d8b8b5fca28fdecbb845b4f16625ffd9da))
+* **desktop:** add the Chrome Web Store publishing kit ([00315ea](https://github.com/nolotus/bun-nolo/commit/00315ea16e33920b463e403a02887e26718b4aa6))
+* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
 
 ### Bug Fixes
 
+* **agent-runtime:** 工具参数尾截断可无损补全时直接执行，不再白跑一轮重试 ([da894d4](https://github.com/nolotus/bun-nolo/commit/da894d4decb97beeaad476f3796faf093637dc4a))
+* **ask-user:** reduce choice interaction steps ([1c7b631](https://github.com/nolotus/bun-nolo/commit/1c7b6316ab0f9c955055e599f71610bdae31cddd))
 * **cli:** consume git stderr in connector runGit to avoid hang ([f0d1b28](https://github.com/nolotus/bun-nolo/commit/f0d1b2839efe025deb531d0092c033bba39ff6fe))
+* **cli:** fuse runGit with a timeout and tidy post-incident leftovers ([4d9e245](https://github.com/nolotus/bun-nolo/commit/4d9e245539c6eb5d11f80c5cee05b1c7e6b49b41))
+* **desktop:** Linux 官方安装器发布到 R2 并作为推荐下载 ([f24a7e9](https://github.com/nolotus/bun-nolo/commit/f24a7e9a36fba0431cebdb1a7a36f54a50546c33))
+* **desktop:** 更新面板文案人话化（保留原文可查） ([38164e4](https://github.com/nolotus/bun-nolo/commit/38164e4129eae98cb4b44b25d091d81f38a26f5b))
+* **desktop:** 非受管理安装不再给必然失败的「下载更新」按钮 ([caceedc](https://github.com/nolotus/bun-nolo/commit/caceedc9020a0523e6c6d33ca738b2ecec8d3a93))
+* **table:** 修正重命名列显示名/重命名表的命令参数名 ([9cfc459](https://github.com/nolotus/bun-nolo/commit/9cfc4595cc08eeaffcf36d9840c70ce85e1ecb67))
+* **table:** 去掉 setTableFocusContext 的 dispatch 包装，修复表格页渲染崩溃 ([8586fa9](https://github.com/nolotus/bun-nolo/commit/8586fa99a0017f50952c1319fb66cb62fe7347af)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7)
+* **table:** 给 listTableRows 的服务器读取加 5s 超时，修复表格加载可卡 60s+ ([66afa8a](https://github.com/nolotus/bun-nolo/commit/66afa8a883833abe1e1e9b547a52455a88b9b659))
+* **tui:** reduce wheel scrolling backlog with adaptive catch-up ([bba6016](https://github.com/nolotus/bun-nolo/commit/bba601658622dba14169705901da0d259569532c))
+* **tui:** soften user messages on light backgrounds ([50d80c3](https://github.com/nolotus/bun-nolo/commit/50d80c3d0a8f7cc602861b3d0bea8325d806f482))
 
 ### Performance Improvements
 
 * **cli:** avoid pathological Bun JSON.stringify on cyclic delegation payloads ([aea5535](https://github.com/nolotus/bun-nolo/commit/aea553559629a2397fb48e6659a48fa2f0d6ad09))
 
 
-## 0.73.0-alpha.1
+## 0.71.0
 
-## 0.73.0-alpha.1 (2026-09-16)
-
-### Features
-
-* **desktop:** add the Chrome Web Store publishing kit ([00315ea](https://github.com/nolotus/bun-nolo/commit/00315ea16e33920b463e403a02887e26718b4aa6))
-
-
-## 0.72.0-alpha.1
-
-## 0.72.0-alpha.1 (2026-09-16)
-
-### Features
-
-* **desktop:** add Chrome connector tab lifecycle and debugger release ([f601aae](https://github.com/nolotus/bun-nolo/commit/f601aae7a9de84b30225e0716a3002f3a7d4d6e1))
-* **desktop:** refuse irreversible Chrome actions before acting ([e12f159](https://github.com/nolotus/bun-nolo/commit/e12f1595be0030fcd8892e8148534706711e5ff3))
-
-
-## 0.71.0-alpha.1
-
-## 0.71.0-alpha.1 (2026-09-16)
-
-### Features
-
-* **desktop:** add compact Chrome observation protocol ([dae7f9d](https://github.com/nolotus/bun-nolo/commit/dae7f9d8b8b5fca28fdecbb845b4f16625ffd9da))
-
-### Bug Fixes
-
-* **ask-user:** reduce choice interaction steps ([1c7b631](https://github.com/nolotus/bun-nolo/commit/1c7b6316ab0f9c955055e599f71610bdae31cddd))
-
-
-## 0.70.0-alpha.2
-
-## 0.70.0-alpha.2 (2026-09-16)
-
-### Bug Fixes
-
-* **tui:** soften user messages on light backgrounds ([50d80c3](https://github.com/nolotus/bun-nolo/commit/50d80c3d0a8f7cc602861b3d0bea8325d806f482))
-
-
-## 0.70.0-alpha.1
-
-## 0.70.0-alpha.1 (2026-09-15)
+## 0.71.0 (2026-09-15)
 
 ### Features
 
 * **server:** add watchCompletion — business-task terminal subscription with parent-dialog wake ([321a930](https://github.com/nolotus/bun-nolo/commit/321a93048ecbb6d0c7d6d39cb855f34fa3bbd163))
 
 
-## 0.69.0-alpha.3
+## 0.70.1
 
-## 0.69.0-alpha.3 (2026-09-15)
+## 0.70.1 (2026-09-15)
 
 ### Bug Fixes
 
 * **llm:** replace dead crof upstream with baseten; restore real Claude & add GPT-5.6/6 hosted models ([4e28ad6](https://github.com/nolotus/bun-nolo/commit/4e28ad6ccedb33989f15ebd020c894f5bbc903f6))
+
+
+## 0.70.0
+
+## 0.70.0 (2026-09-15)
+
+### Features
+
+* **ai:** 会商模式注入提示词补齐实战决策纪律 ([3031da4](https://github.com/nolotus/bun-nolo/commit/3031da4f85d0e27c8f8e6e75b35e22584afdeea4))
+* **memory:** 常驻偏好集——跨话题用户偏好无条件进入注入层 ([43ead3a](https://github.com/nolotus/bun-nolo/commit/43ead3ad18c930f3c756f11c796a7dbdb7cb109a))
+
+### Bug Fixes
+
+* **ask-user:** unify explicit multi-question interaction ([3afbef9](https://github.com/nolotus/bun-nolo/commit/3afbef9361b51b705b0f6ddca050ec93ffea9162))
+* **tui:** distinguish user messages from AI output ([8dac8fc](https://github.com/nolotus/bun-nolo/commit/8dac8fc8dc774782d20b1e1497ef87deacd56473))
 
 
 ## 0.69.0-alpha.2
@@ -946,6 +682,7 @@
 * **life:** show cache savings from real billing records (US-3.4) ([7850f75](https://github.com/nolotus/bun-nolo/commit/7850f75ecc728164b149b472adf8fe8b67d00c6b))
 * **life:** switch usage dashboard and records to server-authoritative API ([f7a793f](https://github.com/nolotus/bun-nolo/commit/f7a793f6808db5059bfc726415953a98dee408a9))
 * **life:** switch usage dashboard and records to server-authoritative API ([a4288e0](https://github.com/nolotus/bun-nolo/commit/a4288e0aec0e4fefad73e038f3500281b5ac3188))
+* **llm:** switch GLM 5.3/5.2 hosted upstream from OpenRouter to crof ([467bde9](https://github.com/nolotus/bun-nolo/commit/467bde9307aed37c36551566248ec0e270605523))
 * **memory:** add contentKey for cross-instance deduplication ([38712b0](https://github.com/nolotus/bun-nolo/commit/38712b075059031e8df6ef2e65106d371be1d26c))
 * **memory:** add token budget to memory overlay injection ([5ccaf6f](https://github.com/nolotus/bun-nolo/commit/5ccaf6f75b51f4327404df08df581e2591efd3c2))
 * **memory:** support user-scoped memory deletion with two-stage confirmation ([83d59cd](https://github.com/nolotus/bun-nolo/commit/83d59cd7a9cf369a2d1d569937972f560a04e0a6))
@@ -1285,6 +1022,7 @@
 
 ### Features
 
+* **llm:** switch GLM 5.3/5.2 hosted upstream from OpenRouter to crof ([467bde9](https://github.com/nolotus/bun-nolo/commit/467bde9307aed37c36551566248ec0e270605523))
 
 
 ## 0.41.0-alpha.1
