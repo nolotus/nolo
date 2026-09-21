@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   LuArrowDownToLine,
   LuCheck,
+  LuExternalLink,
   LuLoaderCircle,
   LuRefreshCw,
   LuRocket,
@@ -20,6 +21,8 @@ import type {
   DesktopUpdaterSnapshot,
   DesktopUpdaterSummaryPhase,
 } from "core/desktop/desktopUpdaterState";
+
+const PUBLIC_SOURCE_COMMIT_BASE = "https://github.com/nolotus/nolo/commit";
 
 const SettingSection: React.FC<{
   title: string;
@@ -86,6 +89,8 @@ const PRIMARY_ACTION_ICONS: Record<Exclude<DesktopUpdaterOperation, "check">, Re
 };
 
 const shortHash = (hash?: string | null) => hash?.slice(0, 12) || "--";
+const isPublicCommitSha = (hash?: string | null): hash is string =>
+  typeof hash === "string" && /^[0-9a-f]{40}$/i.test(hash);
 
 const DesktopUpdates: React.FC = () => {
   const { t } = useTranslation();
@@ -152,6 +157,10 @@ const DesktopUpdates: React.FC = () => {
   const statusDescription =
     describeDesktopUpdaterText(rawStatusDescription) ?? PHASE_DESCRIPTION_BY_PHASE[phase];
   const primaryActionLabel = primaryAction ? PRIMARY_ACTION_LABELS[primaryAction] : null;
+  const localBuildHash = snapshot?.localInfo.hash;
+  const publicSourceUrl = isPublicCommitSha(localBuildHash)
+    ? `${PUBLIC_SOURCE_COMMIT_BASE}/${localBuildHash}`
+    : null;
 
   if (!isDesktopApp) {
     return <div className="desktop-updates-page"><h1 className="page-title">客户端更新</h1><div className="desktop-update-card desktop-update-card--empty">此页面仅适用于桌面客户端。</div></div>;
@@ -171,7 +180,18 @@ const DesktopUpdates: React.FC = () => {
             <div className="desktop-update-card__badge">{statusBadgeLabel}</div>
           </div>
           <div className="desktop-update-card__meta">
-            <span>当前构建：{shortHash(snapshot?.localInfo.hash)}</span>
+            <span>当前构建：{shortHash(localBuildHash)}</span>
+            {publicSourceUrl ? (
+              <a
+                className="desktop-update-actions__link"
+                href={publicSourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`在公开源码仓库查看 commit ${localBuildHash}`}
+              >
+                查看对应公开源码 <LuExternalLink size={13} aria-hidden="true" />
+              </a>
+            ) : null}
             <span>最新构建：{shortHash(updateInfo?.hash)}</span>
             {updateInfo?.version ? <span>最新版本：{updateInfo.version}</span> : null}
           </div>

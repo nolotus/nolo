@@ -1,4 +1,13 @@
 
+## 0.109.0-alpha.1
+
+## 0.109.0-alpha.1 (2026-09-21)
+
+### Features
+
+* **trust:** expose auditable desktop release provenance ([25960f5](https://github.com/nolotus/bun-nolo/commit/25960f551333e4cd42ce9548495789f26a136958))
+
+
 ## 0.108.0-alpha.3
 
 ## 0.108.0-alpha.3 (2026-09-21)

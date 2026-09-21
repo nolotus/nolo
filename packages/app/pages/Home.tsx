@@ -11,6 +11,7 @@ import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
 import WelcomeSection from "./WelcomeSection";
+import OpenAuditableSection from "./OpenAuditableSection";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
 import HomePaneSkeleton from "./HomePaneSkeleton";
 import { Tabs, TabList, Tab } from "render/web/ui/Tabs";
@@ -285,6 +286,7 @@ const Home = () => {
           ) : (
             <>
               {!isDesktopApp && <WelcomeSection />}
+              {!isDesktopApp && <OpenAuditableSection />}
 
               <section id="ai-plaza-section" {...stylex.props(homeStyles.homeContentSection)}>
                 <div {...stylex.props(homeStyles.homePlazaBridge)}>

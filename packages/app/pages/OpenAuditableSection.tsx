@@ -1,0 +1,176 @@
+import { useTranslation } from "react-i18next";
+import { LuExternalLink, LuFileCheck2, LuGitCommitHorizontal, LuShieldCheck } from "react-icons/lu";
+import * as stylex from "@stylexjs/stylex";
+
+const PUBLIC_SOURCE_URL = "https://github.com/nolotus/nolo";
+const RELEASE_MANIFEST_URL = "/public/downloads/desktop-release-manifest.json";
+
+const styles = stylex.create({
+  section: {
+    width: "100%",
+    maxWidth: "1120px",
+    margin: "20px auto 56px",
+    padding: "0 24px",
+  },
+  shell: {
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "color-mix(in srgb, var(--primary, #1677ff) 22%, var(--border-color, #d0d7de))",
+    borderRadius: 18,
+    padding: "24px",
+    backgroundColor: "color-mix(in srgb, var(--primary, #1677ff) 4%, var(--background-color, #fff))",
+    boxShadow: "0 12px 36px color-mix(in srgb, var(--primary, #1677ff) 7%, transparent)",
+  },
+  header: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 20,
+    flexWrap: "wrap",
+  },
+  kicker: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "var(--primary, #1677ff)",
+  },
+  title: {
+    margin: "8px 0 6px",
+    fontSize: "clamp(1.35rem, 2vw, 1.8rem)",
+    lineHeight: 1.25,
+    color: "var(--text-color, inherit)",
+  },
+  description: {
+    margin: 0,
+    maxWidth: 720,
+    lineHeight: 1.65,
+    color: "var(--text-secondary, #57606a)",
+  },
+  links: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  link: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    minHeight: 38,
+    padding: "8px 12px",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--border-color, #d0d7de)",
+    textDecoration: "none",
+    fontWeight: 600,
+    color: "var(--text-color, inherit)",
+    backgroundColor: "var(--background-color, #fff)",
+  },
+  proofs: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: 12,
+    marginTop: 20,
+  },
+  proof: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: "12px 14px",
+    borderRadius: 12,
+    backgroundColor: "color-mix(in srgb, var(--background-color, #fff) 82%, transparent)",
+  },
+  proofIcon: {
+    flexShrink: 0,
+    marginTop: 2,
+    color: "var(--primary, #1677ff)",
+  },
+  proofTitle: {
+    display: "block",
+    fontSize: 14,
+    fontWeight: 700,
+    color: "var(--text-color, inherit)",
+  },
+  proofText: {
+    display: "block",
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 1.5,
+    color: "var(--text-secondary, #57606a)",
+  },
+});
+
+const OpenAuditableSection = () => {
+  const { t } = useTranslation();
+
+  return (
+    <section {...stylex.props(styles.section)} aria-labelledby="open-auditable-title">
+      <div {...stylex.props(styles.shell)}>
+        <div {...stylex.props(styles.header)}>
+          <div>
+            <div {...stylex.props(styles.kicker)}>
+              <LuShieldCheck size={17} aria-hidden="true" />
+              {t("openAuditable.kicker", "Open & Auditable")}
+            </div>
+            <h2 id="open-auditable-title" {...stylex.props(styles.title)}>
+              {t("openAuditable.title", "Don’t trust the binary. Verify it.")}
+            </h2>
+            <p {...stylex.props(styles.description)}>
+              {t(
+                "openAuditable.description",
+                "Nolo’s client source is public. Official desktop release metadata records the exact public repository commit used for the build and the SHA-256 of each artifact.",
+              )}
+            </p>
+          </div>
+
+          <div {...stylex.props(styles.links)}>
+            <a href={PUBLIC_SOURCE_URL} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
+              {t("openAuditable.viewSource", "View source")}
+              <LuExternalLink size={15} aria-hidden="true" />
+            </a>
+            <a href={RELEASE_MANIFEST_URL} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
+              {t("openAuditable.verifyRelease", "Verify current release")}
+              <LuExternalLink size={15} aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+
+        <div {...stylex.props(styles.proofs)}>
+          <div {...stylex.props(styles.proof)}>
+            <LuGitCommitHorizontal size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+            <div>
+              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.publicCommitTitle", "Exact public commit")}</span>
+              <span {...stylex.props(styles.proofText)}>
+                {t("openAuditable.publicCommitText", "Release metadata records the exact public projection SHA used for the build.")}
+              </span>
+            </div>
+          </div>
+          <div {...stylex.props(styles.proof)}>
+            <LuFileCheck2 size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+            <div>
+              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.hashTitle", "Artifact checksum")}</span>
+              <span {...stylex.props(styles.proofText)}>
+                {t("openAuditable.hashText", "The public manifest records SHA-256 for each downloadable desktop artifact.")}
+              </span>
+            </div>
+          </div>
+          <div {...stylex.props(styles.proof)}>
+            <LuShieldCheck size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+            <div>
+              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.auditTitle", "Auditable client")}</span>
+              <span {...stylex.props(styles.proofText)}>
+                {t("openAuditable.auditText", "Inspect how the client reads files, invokes tools, and talks to model providers.")}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+export default OpenAuditableSection;
