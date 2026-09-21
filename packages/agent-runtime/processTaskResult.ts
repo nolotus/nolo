@@ -5,7 +5,8 @@
 // available on the stdio pipes — this module turns it into a small, self
 // contained capsule that rides on the registry envelope and the terminal
 // notice, so the wake can carry the actual result instead of pointing the
-// model at taskLogs (the lifecycle event log deliberately stays
+// model at a lifecycle debug tool (ProcessTask lifecycle history remains
+// runtime-internal; the event log deliberately stays
 // started/promoted/exited/killed only — no output event, §1.2).
 //
 // Boundaries:

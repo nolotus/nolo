@@ -55,8 +55,8 @@ export type UserTurnEvent = {
  *
  * `text` 对 promoted execShell 终态直接携带 result capsule（bounded
  * stdout/stderr tail）；launchProcess ambient / 用户 kill 的终态没有
- * capsule，text 回落到摘要行 + taskLogs 指引。`displayText` 始终是单行摘要，
- * 不含 capsule 正文。
+ * capsule，text 回落到摘要行（taskId / status / exitCode）。`displayText`
+ * 始终是单行摘要，不含 capsule 正文。
  */
 export type BackgroundTaskCompletedTurnEvent = {
   kind: "background-task-completed";

@@ -32,11 +32,12 @@ export const DEFAULT_LOCAL_TOOLS = new Set([
   "execShell",
   "launchProcess",
   "listProcesses",
-  // ProcessTask follow-up tools (Phase 1). Same tier as listProcesses: they
-  // observe/stop tasks the agent itself already spawned, so their blast radius
-  // is strictly narrower than launchProcess (which is default-enabled).
+  // ProcessTask follow-up tools. Same tier as listProcesses: they observe/stop
+  // tasks the agent itself already spawned, so their blast radius is strictly
+  // narrower than launchProcess (which is default-enabled). Model-facing
+  // follow-ups are taskWait/taskStop only — lifecycle history (taskLogs) stays
+  // runtime-internal.
   "taskWait",
-  "taskLogs",
   "taskStop",
   // Scheduling tools: forking/observing sub-agents is a declared capability
   // of capable agents, and the blast radius is strictly narrower than

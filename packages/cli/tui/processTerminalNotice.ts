@@ -7,7 +7,8 @@
 //
 // 与 run 终态唤醒（runCompletionWatcher → child-run-completed）刻意分开：
 // 进程任务没有 run 记录、没有子 dialog；promoted execShell 的可恢复输出由
-// result capsule 直接随 terminal notice 携带，taskLogs 只保留 lifecycle 事实。
+// result capsule 直接随 terminal notice 携带。ProcessTask lifecycle history
+// remains runtime-internal; model wake carries terminal facts directly.
 
 import type { ProcessTerminalNotice } from "../../agent-runtime/processRegistry";
 import type { ProcessTaskResultCapsule } from "../../agent-runtime/processTaskResult";
@@ -21,12 +22,12 @@ import type { BackgroundTaskCompletedTurnEvent } from "core/chat/internalTurnEve
  *
  * promoted execShell 的终态会携带 result capsule（bounded stdout/stderr
  * tail，大输出/任何 inline 截断时附 full-output spill 指引）。没有 capsule 的
- * 通知只说明 terminal 事实；taskLogs 只能查看 lifecycle，不能拿 stdout/stderr。
+ * 通知只说明 terminal 事实（taskId / status / exitCode），不引导模型调用任何
+ * lifecycle debug 工具。
  */
 export function formatProcessTerminalWakeMessage(
   notices: ProcessTerminalNotice[],
 ): string {
-  const missingCapsule = notices.some((notice) => !notice.resultCapsule);
   return [
     `<background_task_completion count="${notices.length}">`,
     ...notices.flatMap((notice) => [
@@ -35,7 +36,6 @@ export function formatProcessTerminalWakeMessage(
         ? formatProcessResultCapsuleLines(notice.resultCapsule)
         : []),
     ]),
-    ...(missingCapsule ? ["生命周期详情可用 taskLogs(taskId)"] : []),
     `</background_task_completion>`,
   ].join("\n");
 }

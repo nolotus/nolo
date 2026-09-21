@@ -165,7 +165,7 @@ function summarizeBackgroundRunCompletion(text: string): ContextualFragmentSumma
 /**
  * 新格式 <background_task_completion> 的状态行。
  *
- * 进程任务没有子 dialog / 没有 run 记录（输出在 taskLogs 里按需取），所以摘要
+ * 进程任务没有子 dialog / 没有 run 记录（终态事实随通知直接携带），所以摘要
  * 只报「几条 + 首条 taskId + 状态」。`exited` 之外（failed / stopped）都算失败态。
  */
 function summarizeBackgroundTaskCompletion(text: string): ContextualFragmentSummary {

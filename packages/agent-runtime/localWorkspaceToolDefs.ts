@@ -28,7 +28,7 @@ export type { OpenAiCompatibleTool };
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "writeFile", "editFile", "globFiles", "captureVisualState",
   "execShell", "launchProcess", "listProcesses",
-  "taskWait", "taskLogs", "taskStop",
+  "taskWait", "taskStop",
   "openDesktopPreview",
 ] as const;
 
@@ -38,7 +38,7 @@ const WORKSPACE_TOOL_NAMES = [
 // UI action (no process handle) and stays with the workspace-level tools.
 const SHELL_TOOL_NAMES = [
   "execShell", "launchProcess", "listProcesses",
-  "taskWait", "taskLogs", "taskStop",
+  "taskWait", "taskStop",
 ] as const;
 
 const WORKSPACE_TOOL_NAME_SET = new Set<string>(WORKSPACE_TOOL_NAMES);
@@ -342,8 +342,8 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
         + "outcome \"timeout\" with status \"running\" when it outlived the whole budget, "
         + "outcome \"not-found\" for an unknown taskId, or outcome \"evicted\" when the event trail aged out (never wait again in that case). "
         + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer than that — go do other work and come back, rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
-        + "For a cheap liveness peek use taskLogs (non-blocking) or pass a small timeoutMs. "
-        + "`cursor` is the highest event seq covered by this response — pass it to taskLogs to read only newer events.",
+        + "Pass a small timeoutMs for a cheap liveness peek instead of the full result. "
+        + "`cursor` is the highest event seq covered by this response.",
       parameters: {
         type: "object",
         properties: {
@@ -356,35 +356,6 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
             type: "number",
             description:
               "Wait budget in milliseconds. Defaults to the 300000 maximum (one call covers the whole budget and returns early the moment the task ends); values above 300000 are clamped. Pass a small value only when you want a quick liveness check instead of the result.",
-          },
-        },
-        required: ["taskId"],
-      },
-    },
-  };
-}
-
-function buildTaskLogsTool(): OpenAiCompatibleTool {
-  return {
-    type: "function",
-    function: {
-      name: "taskLogs",
-      description:
-        "Read a background task's lifecycle events incrementally. Returns {outcome, status, cursor, events} where events are the started|promoted|exited|killed records with seq greater than the cursor you passed, "
-        + "and the returned `cursor` is the new high-water mark to pass next time (omit cursor to read from the beginning; repeating the same cursor is idempotent). "
-        + "Oversized output is spilled to a file and reported as `logRef`, which you can open with readFile.",
-      parameters: {
-        type: "object",
-        properties: {
-          taskId: {
-            type: "string",
-            minLength: 1,
-            description: "Task id returned by launchProcess or by a detached execShell result.",
-          },
-          cursor: {
-            type: "number",
-            description:
-              "Last event seq you already consumed; only events with a higher seq are returned. Defaults to 0 (all retained events).",
           },
         },
         required: ["taskId"],
@@ -436,7 +407,6 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "openDesktopPreview") return buildOpenDesktopPreviewTool();
   if (toolName === "listProcesses") return buildListProcessesTool();
   if (toolName === "taskWait") return buildTaskWaitTool();
-  if (toolName === "taskLogs") return buildTaskLogsTool();
   if (toolName === "taskStop") return buildTaskStopTool();
   return null;
 }
