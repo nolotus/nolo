@@ -1,4 +1,13 @@
 
+## 0.87.0-alpha.3
+
+## 0.87.0-alpha.3 (2026-09-21)
+
+### Bug Fixes
+
+* **devin:** align the temperature default with the upstream client ([c01ec6c](https://github.com/nolotus/bun-nolo/commit/c01ec6c42b81cbf76428e513a5ea7974eec87518))
+
+
 ## 0.87.0-alpha.2
 
 ## 0.87.0-alpha.2 (2026-09-21)

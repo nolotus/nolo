@@ -151,9 +151,13 @@ export function buildCompletionConfig(params?: {
   // max_tokens used to default to 4096 while 128000 sat in max_newlines,
   // which silently capped every answer at ~4k tokens (observed: a review
   // report cut off mid-sentence with "输出达到长度上限被截断").
+  // temperature matches the upstream client's 1.0. SWE-2 has no public API
+  // and Cognition documents no sampling value (its knob is the effort
+  // level), so the same-service agent client is the only reference; our old
+  // 0.4 was an unverified local guess that could dampen effort behaviour.
   const maxTokens = params?.maxTokens ?? 128_000;
   const maxNewlines = params?.maxNewlines ?? 400;
-  const temp = params?.temperature ?? 0.4;
+  const temp = params?.temperature ?? 1.0;
   const topP = params?.topP ?? 0.95;
   return Buffer.concat([
     writeVarint(1, 1),

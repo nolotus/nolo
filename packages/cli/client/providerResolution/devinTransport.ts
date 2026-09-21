@@ -44,7 +44,7 @@ export const resolveDevinTransport: ProviderResolver = async (ctx) => {
       tools,
       // agentConfig.temperature reaches every transport except the Devin one;
       // forward it so the agent form's sampling knob stops being a no-op here.
-      // Left undefined it keeps the upstream-calibrated default.
+      // Left undefined it keeps the upstream client's value.
       temperature: typeof agentConfig.temperature === "number"
         ? agentConfig.temperature
         : undefined,
