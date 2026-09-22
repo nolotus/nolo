@@ -287,7 +287,7 @@ const Home = () => {
           ) : (
             <>
               {!isDesktopApp && <WelcomeBrandLanding />}
-              {!isDesktopApp && <WelcomeSection />}
+              {!isDesktopApp && <WelcomeSection showBrandFraming={false} />}
               {!isDesktopApp && <OpenAuditableSection />}
 
               <section id="ai-plaza-section" {...stylex.props(homeStyles.homeContentSection)}>
