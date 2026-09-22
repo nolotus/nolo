@@ -10,6 +10,11 @@ import {
   runMemoryVNextShadowRead,
   type MemoryVNextShadowProvider,
 } from "./vnext/shadowRead";
+import {
+  isMemoryVNextLazyPromotionEnabled,
+  runMemoryVNextLazyPromotion,
+  type MemoryVNextLazyPromotionObservation,
+} from "./vnext/lazyPromotion";
 
 /** Below this confidence a memory is frozen out of retrieval entirely. */
 export const COLD_STORAGE_CONFIDENCE = 0.3;
@@ -220,8 +225,17 @@ export const resolveMemoryRuntime = async (input: {
    * run a vNext recall alongside the legacy recall and emit one comparison
    * observation. Shadow output never enters `selectedItems` / `promptBlock`;
    * a shadow failure is recorded, not thrown. Omit to disable entirely.
+   * Slice 6 reuses the same provider behind its own independent lazy-promotion
+   * kill switch; no additional server/provider wiring is required.
    */
   vNextShadowProvider?: MemoryVNextShadowProvider;
+  /**
+   * Slice 6 lazy promotion: optional observation sink, forwarded to
+   * `runMemoryVNextLazyPromotion`'s `emit`. Defaults to `console.info` inside
+   * the helper. Promotion is detached best-effort work — it never enters
+   * `selectedItems`/`promptBlock` and this callback must not throw.
+   */
+  lazyPromotionEmit?: (observation: MemoryVNextLazyPromotionObservation) => void;
 }): Promise<MemoryRuntimeResolution> => {
   const owners = chooseMemoryOwners({
     userId: input.userId,
@@ -305,6 +319,25 @@ export const resolveMemoryRuntime = async (input: {
       legacyLatencyMs,
       legacyContextChars: promptBlock?.length ?? 0,
     });
+  }
+
+  // Slice 6 lazy promotion: promote at most one record per runtime turn, using
+  // the already-ranked legacy selection as the usefulness signal. Detached
+  // best-effort work never changes the current legacy-authority answer. A
+  // separate flag lets operators stop writes without disabling Slice 5 shadow.
+  const promotionCandidate = selected[0];
+  const lazyPromotionEnabled =
+    input.vNextShadowProvider != null && isMemoryVNextLazyPromotionEnabled();
+  if (lazyPromotionEnabled && promotionCandidate) {
+    // Defensive `.catch`: the helper is designed never to throw, but it is
+    // detached via `void` — a stray rejection here must not surface as an
+    // unhandled promise rejection in the host process.
+    void runMemoryVNextLazyPromotion({
+      db: input.db,
+      item: promotionCandidate,
+      provider: input.vNextShadowProvider!,
+      ...(input.lazyPromotionEmit ? { emit: input.lazyPromotionEmit } : {}),
+    }).catch(() => {});
   }
 
   if (selected.length === 0) {
