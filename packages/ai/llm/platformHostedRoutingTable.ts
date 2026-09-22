@@ -38,6 +38,16 @@ export const PLATFORM_HOSTED_GEMINI_FLASH_IMAGE_MODEL = "gemini-3.1-flash-image-
 export const PLATFORM_HOSTED_GEMINI_PRO_IMAGE_MODEL = "gemini-3-pro-image-preview";
 export const PLATFORM_HOSTED_GEMINI_FLASH_LITE_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 export const PLATFORM_HOSTED_OPENAI_IMAGE_MODEL = "gpt-image-2";
+/**
+ * MiMo V2.6 系（小米官方按量计费 API）：模型 id 与上游一致（直传，不 remap）。
+ * 上游为 OpenAI 兼容 chat.completions，鉴权头是 `api-key`（见
+ * agent-runtime/providerResolution.ts 的 endpoint→header 推断）。
+ */
+export const PLATFORM_HOSTED_MIMO_FLASH_MODEL = "mimo-v2.6-flash";
+export const PLATFORM_HOSTED_MIMO_PRO_MODEL = "mimo-v2.6-pro";
+export const PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_MODEL =
+  "mimo-v2.6-pro-ultraspeed";
+
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL = "deepseek-flash";
 /** @deprecated use PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL */
 export const PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL = "deepseek-v4-flash-vision-exp";
@@ -57,7 +67,8 @@ export type PlatformHostedUpstreamId =
   | "baseten"
   | "google"
   | "openai"
-  | "deepseek";
+  | "deepseek"
+  | "mimo";
 
 /**
  * Kimi K3 的最低客户端版本。
@@ -307,6 +318,39 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     keyName: "xai",
     wire: "chat.completions",
     agentRunHosted: false,
+  },
+  // MiMo V2.6 系 -> 小米官方按量计费 API（api.xiaomimimo.com，key 用 MIMO_API_KEY）。
+  // 模型 id 与上游一致，无 upstreamModelId（直传，不做 remap）；
+  // wire 是 chat.completions（不是 responses 特例，走通用 hostedRoute 分支）。
+  //
+  // 上游事实（mimo.mi.com 官方文档 /api/chat/openai-api，2026-09-20 版）：
+  // - `thinking.type` 默认 enabled；平台未显式开启思考时补 {type:"disabled"}
+  //   （判据同时认 provider=mimo / xiaomimimo.com 端点与下面的托管模型 id）；
+  // - 同时兼容 `max_tokens` 与 `max_completion_tokens`（实测 200 OK）；文档
+  //   未提及 `stream_options` / `include_usage`——平台因此不请求
+  //   include_usage，usage 由响应体自带（含 prompt_tokens_details.cached_tokens，
+  //   缓存命中按 inputCacheHit 价计入积分）；
+  // - 1M 上下文 / 128K 最大输出 / 文本+图+音视频输入（全模态理解）。
+  [PLATFORM_HOSTED_MIMO_FLASH_MODEL]: {
+    endpoint: "https://api.xiaomimimo.com/v1/chat/completions",
+    usageProvider: "mimo",
+    keyName: "mimo",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_MIMO_PRO_MODEL]: {
+    endpoint: "https://api.xiaomimimo.com/v1/chat/completions",
+    usageProvider: "mimo",
+    keyName: "mimo",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_MODEL]: {
+    endpoint: "https://api.xiaomimimo.com/v1/chat/completions",
+    usageProvider: "mimo",
+    keyName: "mimo",
+    wire: "chat.completions",
+    agentRunHosted: true,
   },
   // OpenAI Image -> OpenAI Responses API
   [PLATFORM_HOSTED_OPENAI_IMAGE_MODEL]: {

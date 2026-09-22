@@ -2,7 +2,7 @@
 
 import type { RootState } from "app/store";
 import { runLlm } from "ai/agent/agentSlice";
-import { BUILTIN_SUMMARY_LLM_CONFIG } from "./builtinDialogLlm";
+import { BUILTIN_DIALOG_LLM_FALLBACK_MODEL, BUILTIN_SUMMARY_LLM_CONFIG } from "./builtinDialogLlm";
 import { patch, selectById } from "database/dbSlice";
 import { DialogConfig, Agent } from "app/types";
 import { getModelContextWindow, DEFAULT_CONTEXT_WINDOW } from "ai/llm/getModelContextWindow";
@@ -141,16 +141,44 @@ export const updateDialogSummaryAction = async (
 
         try {
             // 调用内置 Summary LLM，用统一的 system prompt 覆盖原 BUILTIN_SUMMARY_LLM_CONFIG.prompt
-            const newSummary = await dispatch(
-                runLlm({
-                    llmConfig: {
-                        ...BUILTIN_SUMMARY_LLM_CONFIG,
-                        prompt: COMPACTION_SUMMARY_SYSTEM_PROMPT,
-                    },
-                    content: promptContent,
-                    billingDialogKey: dialogKey,
-                })
-            ).unwrap();
+            const runSummaryLlm = (model?: string) =>
+                dispatch(
+                    runLlm({
+                        llmConfig: {
+                            ...BUILTIN_SUMMARY_LLM_CONFIG,
+                            ...(model ? { model } : {}),
+                            prompt: COMPACTION_SUMMARY_SYSTEM_PROMPT,
+                        },
+                        content: promptContent,
+                        billingDialogKey: dialogKey,
+                    })
+                ).unwrap();
+
+            const isUsableSummary = (value: unknown): value is string =>
+                typeof value === "string" && value.trim().length > 0;
+
+            // 主模型 mimo-v2.6-flash；请求失败（网络异常 / 非 2xx / 空结果）时用
+            // 同一份 content 换 deepseek-flash 重试一次（web 请求经 resolveClientWire
+            // 按模型选 wire，deepseek-flash 的 Responses 线可原样复用）。
+            // 两次都失败再抛错 → 外层 catch 走既有失败兜底（不更新摘要 + 失败通知）。
+            let newSummary: unknown = "";
+            let primaryError: unknown;
+            try {
+                newSummary = await runSummaryLlm();
+            } catch (error) {
+                primaryError = error;
+            }
+            if (!isUsableSummary(newSummary)) {
+                try {
+                    newSummary = await runSummaryLlm(BUILTIN_DIALOG_LLM_FALLBACK_MODEL);
+                } catch (fallbackError) {
+                    throw primaryError ?? fallbackError;
+                }
+                if (!isUsableSummary(newSummary) && primaryError) {
+                    // 回退返回空结果且主模型曾经抛错 → 仍按失败处理，保留失败通知语义。
+                    throw primaryError;
+                }
+            }
 
             if (newSummary && typeof newSummary === "string" && newSummary.trim()) {
                 const currentCount = dialogConfig.compressionCount || 0;
