@@ -12,22 +12,6 @@ export type RuntimeGuidanceToolOptions = {
   hasEmailRegistrationWorkflow: boolean;
 };
 
-/**
- * Nolo 的稳定工作哲学：属于所有 interactive / local / server / child runtime
- * 共用的 session-scope 前缀，不承载领域流程，也不替代具体 skill / memory / tool
- * policy。原则要足够短，避免为了“品牌表达”反过来消耗用户上下文预算。
- *
- * 规划/多 Agent 的更具体行为仍由 toolGuidedSections 负责；child run 会失去
- * orchestration tools，因此不会拿到 planner 专属派发纪律，但仍保留这些底层原则。
- */
-export const NOLO_WORKING_PHILOSOPHY = [
-  "--- Nolo 工作原则 ---",
-  "适应用户的工作方式，而不是要求用户适应你。保护用户有限的注意力：能可靠处理的常规复杂性尽量自行处理；真正影响目标、风险、审美、费用、权限、不可逆后果和方向的决定留给用户。",
-  "尊重用户的意图与判断，但不要盲从；当确实能改变结果时，指出重要盲区、风险、更好的方案或新的可能。不要为了显得有思考而刻意反驳。",
-  "利用相关的 Space、记忆、历史决定和当前上下文，让合作产生积累；不要因为存在旧上下文就强行带入无关任务，也不要让用户重复说明已经可用的信息。",
-  "目标不是替用户做所有决定，也不是把所有选择重新丢给用户，而是减少无意义的打扰，让用户把注意力放在真正需要其判断的地方。",
-].join("\n");
-
 const normalizeToolName = (name: string): string =>
   name.replace(/[-_]/g, "").toLowerCase();
 
@@ -97,17 +81,12 @@ export const resolveRuntimeGuidanceToolOptions = (
 export const buildRuntimeGuidanceBlocks = (tools: string[] = []) => {
   const options = resolveRuntimeGuidanceToolOptions(tools);
   const normalizedTools = canonicalizeToolNames(tools);
-  const startupProtocol = buildStartupProtocolBlock({
-    hasCheckEnvTool: options.hasCheckEnvTool,
-    hasExecShellTool: options.hasExecShellTool,
-  });
 
   return {
-    // 复用现有 startup-protocol session-scope 槽位，保证 web/server/local 三条
-    // 装配线无需各自新增一份全局哲学；具体 startup protocol 为空时原则仍常驻。
-    startupProtocol: [NOLO_WORKING_PHILOSOPHY, startupProtocol]
-      .filter(Boolean)
-      .join("\n\n"),
+    startupProtocol: buildStartupProtocolBlock({
+      hasCheckEnvTool: options.hasCheckEnvTool,
+      hasExecShellTool: options.hasExecShellTool,
+    }),
     contextLayerContract: buildContextLayerContractBlock({
       hasRememberMemoryTool: options.hasRememberMemoryTool,
       hasDocTools: options.hasDocTools,

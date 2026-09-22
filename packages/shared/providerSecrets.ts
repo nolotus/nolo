@@ -13,8 +13,6 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "xai-api",
   "deepseek-api",
   "qwen-api",
-  // MiMo 官方按量计费 API（与 token-plan 订阅 Key 不同通道）。
-  "mimo-api",
   "kimi-api",
   "stepfun-api",
   "step-plan",

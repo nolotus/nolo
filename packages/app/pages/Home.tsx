@@ -10,7 +10,6 @@ import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
-import WelcomeBrandLanding from "./WelcomeBrandLanding";
 import WelcomeSection from "./WelcomeSection";
 import OpenAuditableSection from "./OpenAuditableSection";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
@@ -286,8 +285,7 @@ const Home = () => {
             </>
           ) : (
             <>
-              {!isDesktopApp && <WelcomeBrandLanding />}
-              {!isDesktopApp && <WelcomeSection showBrandFraming={false} />}
+              {!isDesktopApp && <WelcomeSection />}
               {!isDesktopApp && <OpenAuditableSection />}
 
               <section id="ai-plaza-section" {...stylex.props(homeStyles.homeContentSection)}>

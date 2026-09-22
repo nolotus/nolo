@@ -8,7 +8,6 @@ import {
   isFireworksKimiModel,
   resolveFireworksKimiModel,
 } from "ai/llm/kimi";
-import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { Contexts } from "ai/types";
 import { generatePrompt, buildSystemPromptContext } from "ai/agent/generatePrompt";
 import { isLoopbackUrl } from "core/localOrigins";
@@ -96,22 +95,12 @@ const shouldInjectLlamaCppThinkingToggle = (agentConfig: Agent): boolean => {
   return /qwen/i.test(agentConfig.model ?? "");
 };
 
-const shouldDisableMiMoThinking = (
-  agentConfig: Agent,
-  resolvedModel: string,
-): boolean => {
+const shouldDisableMiMoThinking = (agentConfig: Agent): boolean => {
   if (agentConfig.enableThinking === true) return false;
-  if (
+  return (
     /xiaomimimo\.com/i.test(agentConfig.customProviderUrl ?? "") ||
     (agentConfig.provider ?? "").toLowerCase() === "mimo"
-  ) {
-    return true;
-  }
-  // 平台托管 MiMo（provider=nolo + mimo-v2.6-*）：记录里 provider 不是 "mimo"、
-  // 也没有 customProviderUrl，只认上面两条会让上游默认开启的 thinking 漏掉整条
-  // 平台托管路径（上游 `thinking.type` 默认 enabled，见 mimo.mi.com
-  // /docs/api/chat/openai-api）。
-  return isPlatformMimoProviderModel(agentConfig.provider, resolvedModel);
+  );
 };
 
 const shouldDisableKimiThinking = (
@@ -277,7 +266,7 @@ export const generateOpenAIRequestBody = (
     };
   }
 
-  if (shouldDisableMiMoThinking(agentConfig, resolvedModel)) {
+  if (shouldDisableMiMoThinking(agentConfig)) {
     requestBody.thinking = { type: "disabled" };
   }
 

@@ -80,12 +80,7 @@ export function compareAgentSelection<T extends AgentSelectionCandidate>(left: T
 }
 
 /**
- * 注入给 Agent System Prompt 的统一选人规则说明。
- *
- * 本常量只承载「选中谁」的排序规则，插入 toolGuidedSections 的「选人」段。
- * 「要不要派」的判断（派发价值 / 三杠杆 / 反约束）不属于选人——它由
- * AGENT_COLLABORATION_INSTRUCTIONS 顶部的「派发价值」小节单独承载并前置，
- * 保证“先判断值不值得派”先于分档与选人被读到。
+ * 注入给 Agent System Prompt 的统一选人规则说明
  */
 export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约：两阶段发现与选人契约（listAgents 默认 scope="preferred"）：
      1. 首轮发现：默认调用 listAgents()（即 scope="preferred"），仅发现用户已有关系的 preferred Agent（收藏、自有、OAuth 订阅、自定义 API、本地 Agent）。

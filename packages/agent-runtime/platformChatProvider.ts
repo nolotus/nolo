@@ -1,5 +1,4 @@
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
-import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
 import {
   createProviderCallTimingTracker,
@@ -170,12 +169,7 @@ type PlatformChatTool = Record<string, unknown>;
 function shouldDisableThinking(providerConfig: PlatformChatProviderConfig) {
   return (
     providerConfig.provider.toLowerCase() === "mimo" ||
-    /xiaomimimo\.com/i.test(providerConfig.endpoint) ||
-    // 平台托管 MiMo（provider=nolo + mimo-v2.6-*）：endpoint 通常已解析成
-    // api.xiaomimimo.com/...（上面的正则已命中），但 transport=direct 时
-    // endpoint 是 nolo 服务器地址——模型 id 判据保证两跳都关掉 thinking
-    // （上游 thinking 默认 enabled）。
-    isPlatformMimoProviderModel(providerConfig.provider, providerConfig.model)
+    /xiaomimimo\.com/i.test(providerConfig.endpoint)
   );
 }
 

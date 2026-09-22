@@ -8,7 +8,7 @@
  * Degrades gracefully to fallback title on any error or missing auth/config.
  */
 
-import { BUILTIN_DIALOG_LLM_CHAT_FALLBACK_MODEL, BUILTIN_TITLE_LLM_CONFIG } from "../chat/dialog/actions/builtinDialogLlm";
+import { BUILTIN_TITLE_LLM_CONFIG } from "../chat/dialog/actions/builtinDialogLlm";
 import { normalizeDialogTitle } from "../chat/dialog/dialogTitle";
 import type { AgentRuntimeChatMessage } from "./types";
 
@@ -99,29 +99,16 @@ export async function generateLocalDialogTitle(
     return { title: fallbackTitle, source: "fallback" };
   }
 
-  // 1. Try platform chat proxy if available.
-  // 主模型为 mimo-v2.6-flash；请求失败（网络异常 / 非 2xx / 解析不出标题）时用同一份
-  // messages 换回退模型重试一次，之后才落到 direct provider / fallback title。
+  // 1. Try platform chat proxy if available
   if (input.resolveProviderConfig && input.buildRequest && input.parseResponse) {
-    const resolveProviderConfig = input.resolveProviderConfig;
-    const buildRequest = input.buildRequest;
-    const parseResponse = input.parseResponse;
+    try {
+      const providerConfig = await input.resolveProviderConfig({
+        agentConfig: { ...BUILTIN_TITLE_LLM_CONFIG, key: BUILTIN_TITLE_LLM_CONFIG.id },
+        env,
+      });
 
-    // 单次平台请求；任何失败点（解析 provider / 网络 / 非 2xx / 空标题）都返回 null，
-    // 由外层决定是否换回退模型重试。
-    const attemptPlatformTitle = async (model?: string): Promise<string | null> => {
-      try {
-        const agentConfig = model
-          ? { ...BUILTIN_TITLE_LLM_CONFIG, model }
-          : BUILTIN_TITLE_LLM_CONFIG;
-        const providerConfig = await resolveProviderConfig({
-          agentConfig: { ...agentConfig, key: agentConfig.id },
-          env,
-        });
-
-        if (!providerConfig?.authToken) return null;
-
-        const request = buildRequest({
+      if (providerConfig?.authToken) {
+        const request = input.buildRequest({
           providerConfig,
           messages: [
             {
@@ -156,33 +143,22 @@ export async function generateLocalDialogTitle(
           signal: AbortSignal.timeout(timeoutMs),
         });
 
-        if (!res.ok) return null;
-
-        const raw = await res.text().catch(() => "");
-        const data = safeParseJson(raw);
-        if (!data) return null;
-
-        const parsed = parseResponse({ providerConfig, data });
-        const generated = normalizeDialogTitle(
-          extractTitleFromLlmContent(parsed.content),
-        );
-        return generated || null;
-      } catch {
-        return null;
+        if (res.ok) {
+          const raw = await res.text().catch(() => "");
+          const data = safeParseJson(raw);
+          if (data) {
+            const parsed = input.parseResponse({ providerConfig, data });
+            const generated = normalizeDialogTitle(
+              extractTitleFromLlmContent(parsed.content),
+            );
+            if (generated) {
+              return { title: generated, source: "llm" };
+            }
+          }
+        }
       }
-    };
-
-    const primaryTitle = await attemptPlatformTitle();
-    if (primaryTitle) return { title: primaryTitle, source: "llm" };
-
-    // 回退固定走 chat.completions 的 glm-5-3-flash：标题请求带 response_format
-    // json mode（chat.completions 专属）且靠它跳过 thinking，deepseek-flash 的
-    // Responses wire 无法原样复用这一请求结构（详见 builtinDialogLlm.ts 注释）。
-    const fallbackModelTitle = await attemptPlatformTitle(
-      BUILTIN_DIALOG_LLM_CHAT_FALLBACK_MODEL,
-    );
-    if (fallbackModelTitle) {
-      return { title: fallbackModelTitle, source: "llm" };
+    } catch {
+      // Platform proxy failed; proceed to direct provider fallback if provided.
     }
   }
 

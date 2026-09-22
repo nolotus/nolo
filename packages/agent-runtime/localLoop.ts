@@ -75,7 +75,6 @@ import { spillToolOutput } from "./toolSpillStore";
 import { planContextUsage } from "../ai/context/retention";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
-import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
 import { maybeAutoCompactLocalHistory } from "./localAutoCompaction";
 import {
   resolveCompressionTriggerRatio,
@@ -767,12 +766,11 @@ const TOOL_METADATA_KEYS = [
 export function trimHistoryToContextBudget(
   history: AgentRuntimeChatMessage[],
   model: string | undefined,
-  contextWindowOverride?: number,
 ): { history: AgentRuntimeChatMessage[]; droppedCount: number } {
   if (history.length === 0) return { history, droppedCount: 0 };
 
   const { rawMessageBudget } = planContextUsage({
-    contextWindow: contextWindowOverride ?? getModelContextWindow(model ?? ""),
+    contextWindow: getModelContextWindow(model ?? ""),
     summaryTokens: 0,
     // localLoop 没有 web 端的负载分档器；medium 是中性默认值，
     // 不为了省几个 token 在这里复制一份分类逻辑。
@@ -1577,7 +1575,7 @@ export async function runLocalAgentTurn(
   // adapter.loadLastContextUsage 读回（单 key O(1)，headless/CLI 均可靠）。
   // 记录缺失（旧对话）安全落到估算兜底。取「最后一次调用」而非累加值，
   // 精准反映真实上下文占用。主防线是轮内检查（maybeCompactInLoop）。
-  const contextWindow = resolveAgentContextWindow(agentConfig);
+  const contextWindow = getModelContextWindow(agentConfig.model ?? "");
   // 压缩触发线：随窗口留足「单轮工具灌水」余量（见 toolOutputCap.ts）。
   // 轮开始与轮内 round 之间共用同一条线。
   const compressionTriggerRatio = resolveCompressionTriggerRatio(contextWindow);
@@ -1660,7 +1658,6 @@ export async function runLocalAgentTurn(
       history,
       model: agentConfig.model,
       resolveProvider: resolveProviderOnce,
-      contextWindow,
       realContextUsagePercent,
     });
     history = compacted.history;
@@ -1672,7 +1669,7 @@ export async function runLocalAgentTurn(
   loopTimingMark("maybeAutoCompactLocalHistory", 0);
 
   // 上下文预算兜底：必须在消息组装之前裁，否则投影与原始消息错位。
-  const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model, contextWindow);
+  const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model);
   if (trimmedHistory.droppedCount > 0) {
     history = trimmedHistory.history;
   }
@@ -1804,7 +1801,6 @@ export async function runLocalAgentTurn(
         ],
         model: agentConfig.model,
         resolveProvider: resolveProviderOnce,
-        contextWindow,
         realContextUsagePercent: ratio,
       });
       if (compacted.usage) {

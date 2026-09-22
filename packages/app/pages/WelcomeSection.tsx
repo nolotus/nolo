@@ -13,7 +13,7 @@ import "./WelcomeSection.css";
 import "./WelcomeSection.hero.css";
 import "./WelcomeSection.orchestration.css";
 
-const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolean }) => {
+const WelcomeSection = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orchestrationTabsId = useId();
@@ -148,10 +148,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
   return (
     <section className="ws-page">
       <div className="ws-container">
-        {/* On Home, WelcomeBrandLanding owns the hero / orchestration proof /
-            final CTA; render them only when this section stands alone. */}
-        {showBrandFraming && (
-          <>
         <div className="ws-hero">
           <div className="ws-hero-mountain-art" aria-hidden="true">
             {/* Day Celestial: Sun (Standalone HTML 1:1 CSS Square Viewport - 100% Round Circle in all Browsers) */}
@@ -319,8 +315,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
             </div>
           </div>
         </div>
-          </>
-        )}
 
         <div className={`ws-builder-bridge ws-section--editorial ${orchestrationReveal.className}`}>
           <div className="ws-builder-bridge-lead">
@@ -372,7 +366,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
           <WelcomeFaqAccordion items={faqItems} />
         </section>
 
-        {showBrandFraming && (
         <div
           ref={finalCtaReveal.ref}
           className={`ws-bottom-cta ws-final-cta ${finalCtaReveal.className}`}
@@ -392,7 +385,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
             </div>
           </div>
         </div>
-        )}
       </div>
     </section>
   );
