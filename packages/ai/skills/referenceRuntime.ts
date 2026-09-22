@@ -89,6 +89,9 @@ export const buildSkillGuidancePromptBlock = (options: {
     recommendedSkillHints.length > 0
       ? `以下技能与当前任务更相关，可优先考虑：${recommendedSkillHints.join("、")}`
       : "",
+    recommendedSkillHints.length > 0
+      ? "这些推荐技能是按需加载的说明书，不是装饰性标签：当当前任务明显命中某项技能的名称或职责时，先用 loadSkill 读取对应技能，再按其方法执行；不命中时不要为了‘用 Skill’而加载。若没有 loadSkill 工具，则按现有上下文继续，不要假装已读取技能正文。"
+      : "",
     ...skillPromptPatches,
   ]
     .filter(Boolean)

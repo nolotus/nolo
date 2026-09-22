@@ -1,15 +1,17 @@
+import { NavLink } from "app/routing";
 import { useTranslation } from "react-i18next";
-import { LuExternalLink, LuFileCheck2, LuGitCommitHorizontal, LuShieldCheck } from "react-icons/lu";
+import { LuDownload, LuExternalLink, LuFileCheck2, LuGitCommitHorizontal, LuShieldCheck } from "react-icons/lu";
 import * as stylex from "@stylexjs/stylex";
 
 const PUBLIC_SOURCE_URL = "https://github.com/nolotus/nolo";
 const RELEASE_MANIFEST_URL = "/public/downloads/desktop-release-manifest.json";
+const BRAND_NS = "welcomeSection.brandLanding";
 
 const styles = stylex.create({
   section: {
     width: "100%",
     maxWidth: "1120px",
-    margin: "20px auto 56px",
+    margin: "20px auto 72px",
     padding: "0 24px",
   },
   shell: {
@@ -102,10 +104,81 @@ const styles = stylex.create({
     lineHeight: 1.5,
     color: "var(--text-secondary, #57606a)",
   },
+  closing: {
+    maxWidth: 880,
+    margin: "64px auto 0",
+    paddingTop: 56,
+    borderTop: "1px solid var(--border-color, #e5e7eb)",
+    textAlign: "center",
+  },
+  closingLead: {
+    margin: 0,
+    color: "var(--text-secondary, #57606a)",
+    fontSize: 16,
+    lineHeight: 1.7,
+  },
+  closingLines: {
+    display: "flex",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: "8px 22px",
+    margin: "22px 0 0",
+    color: "var(--text-color, inherit)",
+    fontSize: "clamp(1.55rem, 3.4vw, 2.55rem)",
+    fontWeight: 760,
+    lineHeight: 1.18,
+    letterSpacing: "-0.035em",
+  },
+  closingEnd: {
+    display: "block",
+    marginTop: 14,
+    color: "var(--primary, #1677ff)",
+    fontSize: "clamp(1.7rem, 3.8vw, 2.8rem)",
+    fontWeight: 800,
+    letterSpacing: "-0.04em",
+  },
+  closingActions: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 12,
+    marginTop: 30,
+    flexWrap: "wrap",
+  },
+  primaryAction: {
+    minHeight: 46,
+    padding: "0 21px",
+    borderRadius: 11,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    textDecoration: "none",
+    fontWeight: 680,
+    color: "#fff",
+    backgroundColor: "var(--primary, #1677ff)",
+    boxShadow: "0 8px 24px color-mix(in srgb, var(--primary, #1677ff) 18%, transparent)",
+  },
+  secondaryAction: {
+    minHeight: 46,
+    padding: "0 21px",
+    borderRadius: 11,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    textDecoration: "none",
+    fontWeight: 680,
+    color: "var(--text-color, inherit)",
+    backgroundColor: "var(--background-color, #fff)",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "color-mix(in srgb, var(--primary, #1677ff) 20%, var(--border-color, #d0d7de))",
+  },
 });
 
 const OpenAuditableSection = () => {
   const { t } = useTranslation();
+  const closingLines = t(`${BRAND_NS}.closingLines`, { returnObjects: true }) as string[];
 
   return (
     <section {...stylex.props(styles.section)} aria-labelledby="open-auditable-title">
@@ -167,6 +240,25 @@ const OpenAuditableSection = () => {
               </span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div {...stylex.props(styles.closing)}>
+        <p {...stylex.props(styles.closingLead)}>{t(`${BRAND_NS}.closingLead`)}</p>
+        <p {...stylex.props(styles.closingLines)}>
+          {closingLines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </p>
+        <strong {...stylex.props(styles.closingEnd)}>{t(`${BRAND_NS}.closingEnd`)}</strong>
+        <div {...stylex.props(styles.closingActions)}>
+          <NavLink to="/signup" {...stylex.props(styles.primaryAction)}>
+            {t(`${BRAND_NS}.primaryCta`)}
+          </NavLink>
+          <NavLink to="/downloads" {...stylex.props(styles.secondaryAction)}>
+            <LuDownload size={16} aria-hidden="true" />
+            <span>{t(`${BRAND_NS}.secondaryCta`)}</span>
+          </NavLink>
         </div>
       </div>
     </section>

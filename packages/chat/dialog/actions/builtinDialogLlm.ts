@@ -3,12 +3,32 @@ const BASE_BUILTIN_DIALOG_LLM_CONFIG = {
   useServerProxy: true,
 };
 
+/**
+ * 主模型（mimo-v2.6-flash）请求失败时的默认回退模型。
+ *
+ * deepseek-flash 走 Responses wire：只有请求经 wire 感知层构建的路径能直接换名
+ * 重放（web `runLlm` 经 resolveClientWire 选线、TUI summary 经
+ * buildPlatformChatCompletionRequest、server 平台代理）。裸 fetch
+ * chat.completions 的路径不要用它，改用 BUILTIN_DIALOG_LLM_CHAT_FALLBACK_MODEL。
+ */
+export const BUILTIN_DIALOG_LLM_FALLBACK_MODEL = "deepseek-flash";
+
+/**
+ * chat.completions wire 专属回退模型（glm-5-3-flash）：与主模型同 wire，可原样复用
+ * 请求结构。用于两类路径：
+ * 1) 直连 RunInfra chat.completions 的 server 路径（标题 / dialog learning / shadow read），
+ *    deepseek-flash 不挂 RunInfra；
+ * 2) 依赖 json mode（response_format: json_object）的标题请求（CLI 标题路径），
+ *    Responses wire 不吃 response_format，不开 json mode 时 thinking 会吃掉输出预算。
+ */
+export const BUILTIN_DIALOG_LLM_CHAT_FALLBACK_MODEL = "glm-5-3-flash";
+
 export const BUILTIN_TITLE_LLM_CONFIG = {
   ...BASE_BUILTIN_DIALOG_LLM_CONFIG,
   provider: "nolo" as const,
   id: "builtin-dialog-title-llm",
   name: "Builtin Dialog Title LLM",
-  model: "glm-5-3-flash",
+  model: "mimo-v2.6-flash",
   prompt:
     "You are a title generator for chat history. 你只做一件事：根据对话内容输出最终标题。硬性规则：1) 只输出标题这一行；严禁输出推理、分析、步骤、解释、前言、后记、翻译、致歉或任何额外说明。2) 不要回答用户请求，不要写摘要，只给标题结果。3) 标题尽量短：通常 2-5 个词，英文不超过 6 个词。4) 使用对话主语言；混合语言时优先用户主要语言。5) 优先复用对话中的具体主题词，避免 issue、help、discussion、analysis、update 这类空泛词。6) 忽略 tool JSON、函数名、branch label、agent 名、系统指令和编排痕迹（如 GPT、Claude、Gemini）；标题要落在用户真正讨论的对象或决策上。7) 更偏好“对象 + 动作/判断”的短标题，例如“AI 邮件助手取舍”“东京四日慢旅行”“重复扣费退款”。8) 纯文本，不要项目符号、编号、markdown、emoji。最终只返回标题文本。 Output only the title text.",
 };
@@ -18,7 +38,7 @@ export const BUILTIN_SUMMARY_LLM_CONFIG = {
   provider: "nolo" as const,
   id: "builtin-dialog-summary-llm",
   name: "Builtin Dialog Summary LLM",
-  model: "glm-5-3-flash",
+  model: "mimo-v2.6-flash",
   // @deprecated 用 COMPACTION_SUMMARY_SYSTEM_PROMPT（packages/ai/context/compactionShared.ts）。
   // 生产代码已全部迁移；此旧两段式 prompt 仅被 scripts/probes/dialog 探针脚本使用，待探针迁移后删除。
   prompt:

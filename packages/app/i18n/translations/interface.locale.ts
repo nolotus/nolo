@@ -686,6 +686,52 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
+        brandLanding: {
+          kicker: "Nolo · Agent Harness",
+          title: "Let AI adapt to the way you work",
+          description:
+            "Nolo gives agents persistent context and routes each task to the model and tools that fit its quality, capability, speed, and cost requirements.",
+          continuity: "Models change. Your way of working should not have to start over.",
+          primaryCta: "Start free",
+          secondaryCta: "Download Nolo",
+          contrasts: [
+            "Not another chat box",
+            "Not an AI that decides everything for you",
+          ],
+          contrastsLabel: "What Nolo is not",
+          proofKicker: "Nolo in action",
+          balanceKicker: "Human judgment",
+          principles: [
+            {
+              title: "Good collaboration compounds",
+              proof: "Memory · Space · Context",
+              description:
+                "Real work has history, rules, files, and lessons learned. Agents keep useful long-term context, so working together gets smoother over time.",
+            },
+            {
+              title: "Use the right intelligence for the right work",
+              proof: "Routing · Delegation",
+              description:
+                "No model is best at everything. Use stronger models for important judgment, faster and cheaper agents for routine execution, and adopt new models as they improve.",
+            },
+            {
+              title: "Respect your judgment. Challenge your blind spots.",
+              proof: "Divergence · Review",
+              description:
+                "Nolo does more than execute. It respects your intent and choices while surfacing alternatives, risks, and possibilities worth considering.",
+            },
+          ],
+          balanceTitle: "Automate what should be automated. Keep the choices that matter.",
+          balanceDescription:
+            "Attention is finite. Nolo keeps routine complexity in the background and asks for your judgment only where it truly matters.",
+          systemLabel: "Nolo handles",
+          systemItems: ["Model selection", "Agent orchestration", "Context management", "Cost and speed", "Repeatable execution"],
+          youLabel: "You decide",
+          youItems: ["Goals", "Which risks are worth taking", "Taste", "Direction", "What you truly want to create"],
+          closingLead: "AI can research, execute, compare, verify, and move in parallel.",
+          closingLines: ["Why you do it.", "What good looks like.", "What you truly want to create."],
+          closingEnd: "That remains yours.",
+        },
         heroTitle: "Let your strongest model plan. Let lower-cost agents execute.",
         heroDescription: "Nolo orchestrates your coding agents across models — so premium capacity handles the hard decisions, not every routine step.",
         ctaButton: "Start free",
@@ -1983,6 +2029,52 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
+        brandLanding: {
+          kicker: "Nolo · Agent Harness",
+          title: "让 AI 适应你的工作方式",
+          description:
+            "Nolo 让 Agent 记住你的工作，在任务之间延续上下文，并根据能力、质量、速度和价格，把工作交给更合适的模型和工具。",
+          continuity: "模型会变。你的工作方式不必重来。",
+          primaryCta: "免费开始",
+          secondaryCta: "下载 Nolo",
+          contrasts: [
+            "不是另一个聊天框",
+            "不是替你包办一切",
+          ],
+          contrastsLabel: "Nolo 的定位边界",
+          proofKicker: "产品实况",
+          balanceKicker: "人的判断",
+          principles: [
+            {
+              title: "好的合作会积累",
+              proof: "记忆 · 空间 · 上下文",
+              description:
+                "真正的工作有历史、有规则、有文件，也有踩过的坑。Agent 会保留长期记忆和有价值的上下文，合作越久，越顺手。",
+            },
+            {
+              title: "合适的智能，做合适的工作",
+              proof: "路由 · 派发",
+              description:
+                "没有一个模型适合所有任务。重要判断用更强的模型，常规执行用更快、更便宜的 Agent；新的模型出现，也可以随时成为新的能力。",
+            },
+            {
+              title: "尊重你的判断，也挑战你的盲区",
+              proof: "发散 · 复核",
+              description:
+                "Nolo 不只埋头执行。它尊重你的创意和选择，也会在值得的时候提出不同方案、指出风险、补充你没有看到的可能性。",
+            },
+          ],
+          balanceTitle: "该自动的自动，该选择的由你选择",
+          balanceDescription:
+            "注意力是有限的。Nolo 尽量把可以被系统判断的复杂性放到背后，只在真正需要你的判断时打扰你。",
+          systemLabel: "Nolo 尽量处理",
+          systemItems: ["模型选择", "Agent 调度", "上下文整理", "成本与速度", "重复执行"],
+          youLabel: "留给你决定",
+          youItems: ["目标", "愿意承担什么风险", "审美", "方向", "真正想创造什么"],
+          closingLead: "AI 可以研究、执行、比较、检查和并行推进。",
+          closingLines: ["你为什么做。", "什么是好的。", "你真正想创造什么。"],
+          closingEnd: "始终是你。",
+        },
         heroTitle: "让最强的模型规划，让更低成本的 Agent 执行。",
         heroDescription: "Nolo 跨模型编排你的编码 Agent——让高价值算力专注核心决策，而不是消耗在每个常规步骤上。",
         ctaButton: "免费开始",
@@ -3277,6 +3369,52 @@ export default {
 
       // === Combined Welcome Section ===
       welcomeSection: {
+        brandLanding: {
+          kicker: "Nolo · Agent Harness",
+          title: "讓 AI 適應你的工作方式",
+          description:
+            "Nolo 讓 Agent 記住你的工作，在任務之間延續上下文，並根據能力、品質、速度和價格，把工作交給更合適的模型和工具。",
+          continuity: "模型會變。你的工作方式不必重來。",
+          primaryCta: "免費開始",
+          secondaryCta: "下載 Nolo",
+          contrasts: [
+            "不是另一個聊天框",
+            "不是替你包辦一切",
+          ],
+          contrastsLabel: "Nolo 的定位邊界",
+          proofKicker: "產品實況",
+          balanceKicker: "人的判斷",
+          principles: [
+            {
+              title: "好的合作會累積",
+              proof: "記憶 · 空間 · 上下文",
+              description:
+                "真正的工作有歷史、有規則、有文件，也有踩過的坑。Agent 會保留長期記憶和有價值的上下文，合作越久，越順手。",
+            },
+            {
+              title: "合適的智能，做合適的工作",
+              proof: "路由 · 委派",
+              description:
+                "沒有一個模型適合所有任務。重要判斷用更強的模型，常規執行用更快、更便宜的 Agent；新的模型出現，也可以隨時成為新的能力。",
+            },
+            {
+              title: "尊重你的判斷，也挑戰你的盲區",
+              proof: "發散 · 複核",
+              description:
+                "Nolo 不只埋頭執行。它尊重你的創意和選擇，也會在值得的時候提出不同方案、指出風險、補充你沒有看到的可能性。",
+            },
+          ],
+          balanceTitle: "該自動的自動，該選擇的由你選擇",
+          balanceDescription:
+            "注意力是有限的。Nolo 盡量把可以被系統判斷的複雜性放到背後，只在真正需要你的判斷時打擾你。",
+          systemLabel: "Nolo 盡量處理",
+          systemItems: ["模型選擇", "Agent 調度", "上下文整理", "成本與速度", "重複執行"],
+          youLabel: "留給你決定",
+          youItems: ["目標", "願意承擔什麼風險", "審美", "方向", "真正想創造什麼"],
+          closingLead: "AI 可以研究、執行、比較、檢查和並行推進。",
+          closingLines: ["你為什麼做。", "什麼是好的。", "你真正想創造什麼。"],
+          closingEnd: "始終是你。",
+        },
         heroTitle: "讓最強模型規劃，讓更低成本的 Agent 執行。",
         heroDescription: "Nolo 跨模型編排您的編碼 Agent——讓高價值算力專注核心決策，而不是消耗在每個常規步驟上。",
         ctaButton: "免費開始",
@@ -4509,6 +4647,52 @@ quickChat: {
 
       // === Combined Welcome Section ===
       welcomeSection: {
+        brandLanding: {
+          kicker: "Nolo · Agent Harness",
+          title: "AI をあなたの働き方に合わせる",
+          description:
+            "Nolo はエージェントに永続的なコンテキストを持たせ、品質・能力・速度・コストの要件に合うモデルとツールへ各タスクを振り分けます。",
+          continuity: "モデルは変わる。あなたの働き方はやり直す必要がない。",
+          primaryCta: "無料で始める",
+          secondaryCta: "Nolo をダウンロード",
+          contrasts: [
+            "もう一つのチャットボックスではない",
+            "すべてを代行する AI ではない",
+          ],
+          contrastsLabel: "Nolo の位置づけ",
+          proofKicker: "製品の実際",
+          balanceKicker: "人の判断",
+          principles: [
+            {
+              title: "良い協働は蓄積される",
+              proof: "メモリ · スペース · コンテキスト",
+              description:
+                "実際の仕事には履歴、ルール、ファイル、そして学んだ教訓がある。エージェントは有用な長期コンテキストを保持するので、協働は続けるほど滑らかになる。",
+            },
+            {
+              title: "適切な知能を、適切な仕事に",
+              proof: "ルーティング · 委譲",
+              description:
+                "あらゆる面で最強のモデルは存在しない。重要な判断には強いモデルを、定型処理には速くて安いエージェントを。新しいモデルが出れば、いつでも新しい能力として取り込める。",
+            },
+            {
+              title: "あなたの判断を尊重し、盲点に挑む",
+              proof: "発散 · レビュー",
+              description:
+                "Nolo は実行するだけではない。あなたの意図と選択を尊重しながら、検討に値する代替案、リスク、可能性を提示する。",
+            },
+          ],
+          balanceTitle: "自動化すべきことは自動化し、重要な選択はあなたに残す",
+          balanceDescription:
+            "注意力は有限だ。Nolo は定型の複雑さを背後に隠し、本当に必要なところでだけあなたの判断を求める。",
+          systemLabel: "Nolo が処理する",
+          systemItems: ["モデル選択", "エージェント統括", "コンテキスト管理", "コストと速度", "反復実行"],
+          youLabel: "あなたが決める",
+          youItems: ["目標", "どのリスクを引き受けるか", "審美", "方向", "本当に作りたいもの"],
+          closingLead: "AI は調査し、実行し、比較し、検証し、並行して進められる。",
+          closingLines: ["なぜやるのか。", "何が良いのか。", "本当に作りたいものは何か。"],
+          closingEnd: "それは、あなたのものだ。",
+        },
         heroTitle: "最も強いモデルが計画し、より低コストなエージェントが実行する。",
         heroDescription: "Nolo はモデルを横断してコーディングエージェントを統括し、プレミアムな容量を定型作業ではなく重要な意思決定に集中させます。",
         ctaButton: "無料で始める",

@@ -51,7 +51,7 @@ import {
 } from "ai/agent/getFullChatContextKeys";
 import type { Agent, DialogConfig } from "app/types";
 import { isResponseAPIModel } from "ai/llm/isResponseAPIModel";
-import { getModelContextWindow } from "ai/llm/getModelContextWindow";
+import { resolveAgentContextWindow } from "../../agent-runtime/devin/devinChannelWindows";
 import { resolveAgentImageInputSupport } from "ai/llm/agentCapabilities";
 import { resolveBuiltinPlatformAgentRecord } from "../../agent-runtime/builtinPlatformAgentConfigs";
 import {
@@ -2148,7 +2148,7 @@ export const streamAgentChatTurnHandler = async (
 
                 const cleanedMessages = filterAndCleanMessages(visibleMessages);
                 const ctxWindow =
-                    getModelContextWindow(agentConfigForCall.model) || 128000;
+                    resolveAgentContextWindow(agentConfigForCall);
                 const summaryTokenCount = contexts.dialogSummary
                     ? estimateTokenCount(contexts.dialogSummary)
                     : 0;
@@ -2456,7 +2456,7 @@ export const streamAgentChatTurnHandler = async (
 
             const cleanedMessages = filterAndCleanMessages(visibleMessages);
             const ctxWindow =
-                getModelContextWindow(agentConfigForCall.model) || 128000;
+                resolveAgentContextWindow(agentConfigForCall);
             const summaryTokenCount = contexts.dialogSummary
                 ? estimateTokenCount(contexts.dialogSummary)
                 : 0;

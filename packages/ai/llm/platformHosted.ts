@@ -7,6 +7,7 @@ export * from "./platformHostedClientVersionGate";
 export { isPlatformManagedProvider } from "./kimi";
 
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { isPlatformManagedProvider } from "./kimi";
 import type { Model } from "./types";
 import type { ImageSizeKey } from "./imagePricing";
 import {
@@ -37,6 +38,9 @@ import {
   PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_FLASH_VISION_EXP_MODEL,
   PLATFORM_HOSTED_DEEPSEEK_PRO_MODEL,
+  PLATFORM_HOSTED_MIMO_FLASH_MODEL,
+  PLATFORM_HOSTED_MIMO_PRO_MODEL,
+  PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_MODEL,
   PLATFORM_HOSTED_KIMI_K3_MIN_CLIENT_VERSION,
   PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
 } from "./platformHostedRoutingTable";
@@ -70,11 +74,11 @@ export const toPlatformCredits = (usdPerMillion: number): number =>
  * 人民币计价上游（DeepSeek / Qwen 等国内服务）的加价系数。
  *
  * 人民币上游若按官方价原样计入积分（¥1 → 1 积分），毛利恰好为 0——连退款与
- * 坏账都覆盖不了。这里统一乘 1.2 把毛利拉到 ~16.7%，与美元档对齐。
+ * 坏账都覆盖不了。这里统一乘 1.1 把缓冲拉到 ~9.1%。
  *
  * 注意：人民币上游不受美元汇率影响（收 ¥ 付 ¥），这个系数不需要随汇率调整。
  */
-export const CNY_UPSTREAM_MULTIPLIER = 1.2;
+export const CNY_UPSTREAM_MULTIPLIER = 1.1;
 export const toCnyCredits = (cnyPerMillion: number): number =>
   Number((cnyPerMillion * CNY_UPSTREAM_MULTIPLIER).toFixed(6));
 
@@ -331,6 +335,61 @@ const createPlatformHostedGeminiImageModel = ({
   imageGenerationProfiles,
   supportsTool: false,
 });
+
+/**
+ * MiMo V2.6 系（平台托管语义）：记录侧 provider=nolo，实际上游是小米官方按量计费
+ * API（api.xiaomimimo.com，OpenAI 兼容 chat.completions，key 用 MIMO_API_KEY）。
+ * 模型 id 与上游一致，直传不做 remap。
+ *
+ * 7.14 汇率下逐项一致），经 toCnyCredits（×1.1）计入积分：
+ *   flash       ¥1.00 / ¥2.00   / 缓存命中 ¥0.02
+ *   pro         ¥3.00 / ¥6.00   / 缓存命中 ¥0.025
+ *   ultraspeed  ¥30.00 / ¥60.00 / 缓存命中 ¥0.25
+ * 缓存命中价不是笔误：pro / ultraspeed 的命中价是 input 的 0.83%（与官方 Token
+ * Plan 的 Credits 折算比 2.5:300 一致），flash 是 2%（Token Plan 2:100）。
+ */
+export const PLATFORM_HOSTED_MIMO_MODELS = [
+  PLATFORM_HOSTED_MIMO_FLASH_MODEL,
+  PLATFORM_HOSTED_MIMO_PRO_MODEL,
+  PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_MODEL,
+] as const;
+
+export const isPlatformHostedMimoModel = (model?: string | null): boolean => {
+  const m = asTrimmedLowercaseString(model);
+  return PLATFORM_HOSTED_MIMO_MODELS.includes(m as any);
+};
+
+/**
+ * 平台托管（nolo / legacy ollama-cloud / deepseek）路径上的 MiMo 模型判定。
+ *
+ * MiMo 的 `thinking` 在上游默认 enabled，平台在未显式开启思考时要补
+ * `{type:"disabled"}`；这个 quirk 原先只看 provider=mimo / xiaomimimo.com 端点，
+ * 平台托管路径的记录 provider 是 "nolo"、也没有 customProviderUrl，会整条漏掉。
+ * 三条出口（server loop / 本地 runtime / 本地 proxy body）共用这一份判据。
+ */
+export const isPlatformMimoProviderModel = (
+  provider?: string | null,
+  model?: string | null,
+): boolean =>
+  isPlatformManagedProvider(provider) && isPlatformHostedMimoModel(model);
+
+export const PLATFORM_HOSTED_MIMO_FLASH_PRICE = {
+  input: toCnyCredits(1), // ¥1.00
+  inputCacheHit: toCnyCredits(0.02), // ¥0.02
+  output: toCnyCredits(2), // ¥2.00
+} as const;
+
+export const PLATFORM_HOSTED_MIMO_PRO_PRICE = {
+  input: toCnyCredits(3), // ¥3.00
+  inputCacheHit: toCnyCredits(0.025), // ¥0.025
+  output: toCnyCredits(6), // ¥6.00
+} as const;
+
+export const PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_PRICE = {
+  input: toCnyCredits(30), // ¥30.00
+  inputCacheHit: toCnyCredits(0.25), // ¥0.25
+  output: toCnyCredits(60), // ¥60.00
+} as const;
 
 /**
  * DeepSeek V4 peak/off-peak pricing.
@@ -595,6 +654,40 @@ export const platformHostedModels = [
     supportsTool: true,
     supportsReasoningEffort: true,
     minClientVersion: PLATFORM_HOSTED_GLM_53_FLASH_MIN_CLIENT_VERSION,
+  },
+  // MiMo V2.6 系（小米官方按量计费 API，key 用 MIMO_API_KEY）：1M 上下文、
+  // 最大输出 128K、原生多模态输入（文本/图/音/视频）、函数调用与深度思考。
+  // 能力值来源：mimo.mi.com 模型列表页 + 官方模型目录（max_output_length
+  // 131072、context 1048576、input_modalities 含 image/audio/video），2026-09-21。
+  {
+    name: PLATFORM_HOSTED_MIMO_FLASH_MODEL,
+    displayName: "MiMo V2.6 Flash",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_MIMO_FLASH_PRICE },
+    maxOutputTokens: 131_072,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_MIMO_PRO_MODEL,
+    displayName: "MiMo V2.6 Pro",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_MIMO_PRO_PRICE },
+    maxOutputTokens: 131_072,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    name: PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_MODEL,
+    displayName: "MiMo V2.6 Pro Ultraspeed",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_MIMO_PRO_ULTRASPEED_PRICE },
+    maxOutputTokens: 131_072,
+    contextWindow: 1_048_576,
+    supportsTool: true,
+    supportsReasoningEffort: true,
   },
   // Claude 系（真实 DeepInfra 模型，官方 id 与平台 id 同名）：无缓存价，
   // 计费按 input 全价（见 calculatePrice 的 deepinfra 分支）。

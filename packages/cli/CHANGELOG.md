@@ -1,17 +1,4 @@
 
-## 0.76.0
-
-## 0.76.0 (2026-09-22)
-
-### Features
-
-* **memory:** add best-effort vNext lazy promotion ([e1671a8](https://github.com/nolotus/bun-nolo/commit/e1671a8d9beec0c0929206a06ec92a5ad3d46550))
-
-### Bug Fixes
-
-* **memory:** harden vNext lazy promotion ([93003f6](https://github.com/nolotus/bun-nolo/commit/93003f6c064eb6a2654c43e53e768519c8392c82))
-
-
 ## 0.75.0
 
 ## 0.75.0 (2026-09-21)

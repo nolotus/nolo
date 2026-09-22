@@ -142,6 +142,30 @@ const STEPFUN_MODEL_OPTIONS: ReadonlyArray<{
 }));
 
 /**
+ * 小米 MiMo 官方按量计费 API（api.xiaomimimo.com，OpenAI 兼容）可选模型。
+ *
+ * 与「MiMo Token Plan」订阅模板（token-plan-cn.xiaomimimo.com）区分：Base URL、
+ * key 类型（按量计费 Key 与订阅 Key 不通用）都不同。v2.5 系 2026-10-21 下线，
+ * 只列 v2.6 三档（官方模型列表页：1M 上下文 / 128K 输出 / 全模态理解）。
+ * 模型 id 与平台托管目录同名同 id（托管路由直传，不做 remap）。
+ * 注意：这里是用户自带 Key 的 metered 通道，平台不承担成本、不扣积分。
+ */
+const MIMO_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+}> = [
+  { id: "mimo-v2.6-flash", label: "MiMo V2.6 Flash", hasVision: true, recommended: true },
+  { id: "mimo-v2.6-pro", label: "MiMo V2.6 Pro", hasVision: true },
+  {
+    id: "mimo-v2.6-pro-ultraspeed",
+    label: "MiMo V2.6 Pro Ultraspeed",
+    hasVision: true,
+  },
+];
+
+/**
  * 阶跃星辰 Step Plan 订阅支持的可选模型，由 stepfunStepPlanModels 派生。
  * 与 STEPFUN_MODEL_OPTIONS 区分：Base URL 为 step_plan/v1，Credit 月池额度抵扣。
  */
@@ -332,21 +356,36 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     kind: "oauth",
     id: "devin-oauth",
     label: "Devin Pro",
-    description: "Devin Subscription (Free SWE-2)",
+    description: "Devin Pro $20/月：日/周 quota 覆盖 sessions/CLI/Desktop，超额按 API 价购 credits；SWE-2 限时免费至 2026-10-10",
     apiKeyRef: "devin",
     provider: "devin",
     defaultModel: "swe-2-max",
     defaultReasoningEffort: "high",
     modelOptions: [
-      { id: "swe-2-max", label: "SWE-2 Max (Unlimited Free with $20 Pro)", hasVision: true, recommended: true },
+      // selector 全部来自上游 live catalog（GetCliModelConfigs）并逐個实测可调。
+      // 旧列表 9 个选项里 6 个是上游不存在的死 id（swe-2 / swe-1.7 /
+      // claude-3.7-sonnet / gpt-5.2 / gpt-4o / claude-sonnet-4.6 均
+      // permission_denied），已替换。注意 catalog selector 是连字符写法，
+      // 点号/裸写法上游不接受。
+      { id: "swe-2-max", label: "SWE-2 Max", hasVision: true, recommended: true },
       { id: "swe-2-high", label: "SWE-2 High", hasVision: true },
       { id: "swe-2-medium", label: "SWE-2 Medium", hasVision: true },
-      { id: "swe-2", label: "SWE-2", hasVision: true },
-      { id: "swe-1.7", label: "SWE-1.7", hasVision: true },
-      { id: "claude-3.7-sonnet", label: "Claude 3.7 Sonnet", hasVision: true },
-      { id: "claude-sonnet-4.6", label: "Claude Sonnet 4.6", hasVision: true },
-      { id: "gpt-5.2", label: "GPT-5.2", hasVision: true },
-      { id: "gpt-4o", label: "GPT-4o", hasVision: true },
+      { id: "swe-1-7", label: "SWE-1.7 Max", hasVision: true },
+      { id: "swe-1-7-lightning", label: "SWE-1.7 Lightning Max", hasVision: true },
+      { id: "swe-1-6-fast", label: "SWE-1.6 Fast", hasVision: true },
+      { id: "claude-opus-5-medium", label: "Claude Opus 5 Medium", hasVision: true },
+      { id: "claude-fable-5-1-medium", label: "Claude Fable 5.1 Medium", hasVision: true },
+      { id: "claude-sonnet-5-medium", label: "Claude Sonnet 5 Medium", hasVision: true },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", hasVision: true },
+      { id: "gpt-6-astra-medium", label: "GPT-6 Astra Medium", hasVision: true },
+      { id: "gpt-5-6-sol-medium", label: "GPT-5.6 Sol Medium", hasVision: true },
+      { id: "gpt-5-6-luna-medium", label: "GPT-5.6 Luna Medium", hasVision: true },
+      { id: "MODEL_GPT_5_2_MEDIUM", label: "GPT-5.2 Medium", hasVision: true },
+      { id: "gemini-3-8-flash-medium", label: "Gemini 3.8 Flash Medium", hasVision: true },
+      { id: "gemini-3-1-pro-high", label: "Gemini 3.1 Pro High", hasVision: true },
+      { id: "kimi-k3-high", label: "Kimi K3 High", hasVision: true },
+      { id: "glm-5-3-high", label: "GLM-5.3 High", hasVision: false },
+      { id: "glm-5-3-flash-high", label: "GLM-5.3 Flash High", hasVision: true },
     ],
   },
 ];
@@ -544,6 +583,21 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen3-max",
     modelOptions: QWEN_MODEL_OPTIONS,
+    commercialKind: "api",
+    accessVariant: "metered_key",
+  },
+  // 小米 MiMo 官方按量计费 API（api.xiaomimimo.com）：与上面的「MiMo Token Plan」
+  // 订阅模板是两条不同的通道（key 不通用）；本条是用户自带 Key 的 metered 通道，
+  // 与平台托管（provider=nolo + mimo-v2.6-*，平台积分计费）并存、互不影响。
+  {
+    kind: "api_key_template",
+    id: "mimo-api",
+    label: "MiMo API 用量计费",
+    description: "小米 MiMo 官方 API（OpenAI 兼容，按量计费；Key 须为按量计费 Key，非 Token Plan 订阅 Key）",
+    provider: "mimo",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    defaultModel: "mimo-v2.6-flash",
+    modelOptions: MIMO_MODEL_OPTIONS,
     commercialKind: "api",
     accessVariant: "metered_key",
   },

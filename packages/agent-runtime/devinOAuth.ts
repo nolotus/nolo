@@ -140,11 +140,5 @@ export function buildDevinOAuthCredential(
   };
 }
 
-export function isDevinOAuthAgent(agent: {
-  apiKeyRef?: string | null;
-  provider?: string | null;
-}): boolean {
-  const ref = agent.apiKeyRef?.trim().toLowerCase();
-  const prov = agent.provider?.trim().toLowerCase();
-  return ref === "devin" || prov === "devin";
-}
+import { isDevinOAuthAgent } from "./devinOAuthPure";
+export { isDevinOAuthAgent };

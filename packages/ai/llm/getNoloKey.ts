@@ -12,7 +12,8 @@ export const getNoloKey = (
     | "anthropic"
     | "ollama-cloud"
     | "runinfra"
-    | "baseten",
+    | "baseten"
+    | "mimo",
   env: Record<string, string | undefined> = process.env
 ) => {
   switch (provider) {
@@ -40,6 +41,11 @@ export const getNoloKey = (
       return env.RUNINFRA_API_KEY;
     case "baseten":
       return env.BASETEN_API_KEY;
+    // 小米 MiMo 官方按量计费 API（api.xiaomimimo.com，鉴权头 api-key）。
+    // 平台托管 MiMo V2.6 系走这条；用户自带 key 的 Token Plan / 按量计费
+    // agent（provider=mimo + customProviderUrl）用记录里的 apiKey，不经过这里。
+    case "mimo":
+      return env.MIMO_API_KEY;
     // provider "nolo" / "ollama-cloud" 没有自己的 key。
     //
     // google / xai / deepinfra / baseten …），key 由那一侧的 case 提供。这里曾经

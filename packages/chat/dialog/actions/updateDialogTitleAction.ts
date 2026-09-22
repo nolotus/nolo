@@ -15,6 +15,7 @@ import { selectAllMsgs } from "../../messages/messageSlice";
 import { serializeMessageContent } from "../../messages/messageContent";
 import { isAssistantToolStub } from "../../messages/web/assistantReplyPendingState";
 import {
+  BUILTIN_DIALOG_LLM_FALLBACK_MODEL,
   BUILTIN_TITLE_LLM_CONFIG,
 } from "./builtinDialogLlm";
 import {
@@ -172,14 +173,38 @@ export const updateDialogTitleActionWithDeps = async (
     const content = JSON.stringify(
       messageContext.map((msg) => ({ role: msg.role, content: msg.content }))
     );
-    generatedTitle = await (dispatch as any)(
-      runLlmAction({
-        llmConfig: BUILTIN_TITLE_LLM_CONFIG,
-        content,
-        billingDialogKey: dialogKey,
-        systemPromptOverride: BUILTIN_TITLE_LLM_CONFIG.prompt,
-      })
-    ).unwrap();
+    const runTitleLlm = (llmConfig: Parameters<typeof runLlm>[0]["llmConfig"]) =>
+      (dispatch as any)(
+        runLlmAction({
+          llmConfig,
+          content,
+          billingDialogKey: dialogKey,
+          systemPromptOverride: (llmConfig as any).prompt,
+        })
+      ).unwrap();
+
+    const hasUsableTitle = (value: unknown): value is string =>
+      typeof value === "string" && value.trim().length > 0;
+
+    // 主模型 mimo-v2.6-flash；请求失败（网络异常 / 非 2xx / 空结果）时用同一份
+    // content/prompt 换 deepseek-flash 重试一次。web 路径的请求构造经
+    // resolveClientWire 按模型选 wire，deepseek-flash 的 Responses 线可原样复用。
+    // 两次都失败保持 generatedTitle 为空 → resolveDialogTitle 落到 fallbackTitle。
+    try {
+      generatedTitle = await runTitleLlm(BUILTIN_TITLE_LLM_CONFIG);
+    } catch {
+      generatedTitle = "";
+    }
+    if (!hasUsableTitle(generatedTitle)) {
+      try {
+        generatedTitle = await runTitleLlm({
+          ...BUILTIN_TITLE_LLM_CONFIG,
+          model: BUILTIN_DIALOG_LLM_FALLBACK_MODEL,
+        });
+      } catch {
+        generatedTitle = "";
+      }
+    }
   }
 
   const title = resolveDialogTitle(generatedTitle, fallbackTitle);

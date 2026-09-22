@@ -15,6 +15,7 @@ import termsLocale from "./translations/terms.locale";
 import aupLocale from "./translations/aup.locale";
 import footerLocale from "./translations/footer.locale";
 import localFirstLocale from "./translations/localFirst.locale";
+import openAuditableLocale from "./translations/openAuditable.locale";
 
 export const resources = {
   [Language.EN]: {
@@ -29,6 +30,7 @@ export const resources = {
       ...aupLocale[Language.EN].translation,
       ...footerLocale[Language.EN].translation,
       ...localFirstLocale[Language.EN].translation,
+      ...openAuditableLocale[Language.EN].translation,
       seo: seoLocale[Language.EN],
     },
     space: spaceLocale[Language.EN].translation,
@@ -47,6 +49,7 @@ export const resources = {
       ...aupLocale[Language.ZH_CN].translation,
       ...footerLocale[Language.ZH_CN].translation,
       ...localFirstLocale[Language.ZH_CN].translation,
+      ...openAuditableLocale[Language.ZH_CN].translation,
       seo: seoLocale[Language.ZH_CN],
     },
     space: spaceLocale[Language.ZH_CN].translation,
@@ -65,6 +68,7 @@ export const resources = {
       ...aupLocale[Language.ZH_HANT].translation,
       ...footerLocale[Language.ZH_HANT].translation,
       ...localFirstLocale[Language.ZH_HANT].translation,
+      ...openAuditableLocale[Language.ZH_HANT].translation,
       seo: seoLocale[Language.ZH_HANT],
     },
     space: spaceLocale[Language.ZH_HANT].translation,
@@ -83,6 +87,7 @@ export const resources = {
       ...aupLocale[Language.JA].translation,
       ...footerLocale[Language.JA].translation,
       ...localFirstLocale[Language.JA].translation,
+      ...openAuditableLocale[Language.JA].translation,
       seo: seoLocale[Language.JA],
     },
     space: spaceLocale[Language.JA].translation,
@@ -101,6 +106,7 @@ export const resources = {
       ...((aupLocale as any)[Language.KO]?.translation ?? aupLocale[Language.EN].translation),
       ...((footerLocale as any)[Language.KO]?.translation ?? footerLocale[Language.EN].translation),
       ...((localFirstLocale as any)[Language.KO]?.translation ?? localFirstLocale[Language.EN].translation),
+      ...((openAuditableLocale as any)[Language.KO]?.translation ?? openAuditableLocale[Language.EN].translation),
       seo: seoLocale[Language.KO],
     },
     space: (spaceLocale as any)[Language.KO]?.translation ?? spaceLocale[Language.EN].translation,
