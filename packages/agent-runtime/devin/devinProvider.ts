@@ -296,11 +296,100 @@ export type DevinDecodedEvent =
   | { type: "tool-call-start"; id: string; name: string }
   | { type: "tool-call-args"; argsDelta: string; id?: string };
 
+/**
+ * 响应 metadata 子消息（top-level field #7）里的真实 token 计数。
+ *
+ * Wire tag calibration（与 Windsurf/Devin 桌面客户端同一个上游服务
+ * `server.codeium.com/…GetChatMessage`，社区逆向校准值）：
+ *   #7.2 = prompt tokens（fresh input）
+ *   #7.3 = completion tokens —— **只骑在收尾帧上**，中间帧没有
+ *   #7.4 = cache write tokens
+ *   #7.5 = cache read tokens
+ *
+ * proto3 不编码零值标量：字段没出现即 0 / 未观测。别把中间帧的
+ * prompt 运行值当成终值——只有带 completion 的那一帧才是完整配对。
+ */
+export type DevinFrameUsage = {
+  prompt: number;
+  /** 仅收尾帧出现；缺失表示这一帧不是终帧。 */
+  completion?: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+/**
+ * 解析 #7 metadata 子消息中的 token 计数字段。
+ * 只读已知 tag 的 varint，其他字段（如 #7.9 actual model）原样跳过；
+ * 子消息解析失败（坏 protobuf）返回 null，调用方按「无 usage」处理，
+ * 不往热路径上抛异常。
+ */
+export function parseDevinMetadataUsage(metaBytes: Buffer): DevinFrameUsage | null {
+  let prompt = 0;
+  let completion: number | undefined;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let sawAny = false;
+  let offset = 0;
+
+  while (offset < metaBytes.length) {
+    let tag = 0;
+    let shift = 0;
+    while (offset < metaBytes.length) {
+      const b = metaBytes[offset++];
+      tag |= (b & 0x7f) << shift;
+      if (!(b & 0x80)) break;
+      shift += 7;
+    }
+
+    const fieldNum = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    if (wireType === 0) {
+      let val = 0;
+      let s = 0;
+      while (offset < metaBytes.length) {
+        const b = metaBytes[offset++];
+        val |= (b & 0x7f) << s;
+        if (!(b & 0x80)) break;
+        s += 7;
+      }
+      if (fieldNum === 2) {
+        prompt = val;
+        sawAny = true;
+      } else if (fieldNum === 3) {
+        completion = val;
+        sawAny = true;
+      } else if (fieldNum === 4) {
+        cacheWrite = val;
+        sawAny = true;
+      } else if (fieldNum === 5) {
+        cacheRead = val;
+        sawAny = true;
+      }
+    } else if (wireType === 2) {
+      let len = 0;
+      let s = 0;
+      while (offset < metaBytes.length) {
+        const b = metaBytes[offset++];
+        len |= (b & 0x7f) << s;
+        if (!(b & 0x80)) break;
+        s += 7;
+      }
+      offset += len;
+    } else {
+      break;
+    }
+  }
+
+  return sawAny ? { prompt, completion, cacheRead, cacheWrite } : null;
+}
+
 export type DevinDecodedDelta = {
   content: string;
   reasoning: string;
   finishReason: string | null;
   events: DevinDecodedEvent[];
+  usage?: DevinFrameUsage | null;
 };
 
 export function parseDevinConnectTrailer(payload: Buffer): Error | null {
@@ -324,6 +413,7 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
   let content = "";
   let reasoning = "";
   let finishReason: string | null = null;
+  let usage: DevinFrameUsage | null = null;
   const events: DevinDecodedDelta["events"] = [];
 
   while (offset < payload.length) {
@@ -418,6 +508,12 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
         if (argsDelta !== undefined) {
           events.push({ type: "tool-call-args", argsDelta, ...(id ? { id } : {}) });
         }
+      } else if (fieldNum === 7) {
+        // Metadata trailer: the only place real token counts ride the wire.
+        // Skipping it (as we once did) left every devin turn with zero usage —
+        // context usage fell back to estimation and real-usage compaction
+        // triggers never saw a number.
+        usage = parseDevinMetadataUsage(valBytes);
       }
     } else {
       // Unknown wire type, cannot safely skip without full schema parser
@@ -425,7 +521,7 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
     }
   }
 
-  return { content, reasoning, finishReason, events };
+  return { content, reasoning, finishReason, events, usage };
 }
 
 // --- Provider Implementation ---
@@ -481,6 +577,10 @@ export function createDevinProvider(options: {
       let text = "";
       let reasoning = "";
       let finishReason: string | null = null;
+      // Upstream token counts from the #7 metadata trailer. Completion rides
+      // only the final frame, so the last frame carrying a completion count is
+      // the terminal pair (intermediate frames may carry running prompt totals).
+      let frameUsage: DevinFrameUsage | null = null;
       // Tool calls arrive as a start frame plus separate arg-delta frames, so
       // they must be assembled across frames in wire order.
       const toolCallOrder: string[] = [];
@@ -514,6 +614,13 @@ export function createDevinProvider(options: {
             }
 
             const delta = decodeDevinResponsePayload(f.payload);
+
+            // Only a frame that carries the completion count is terminal; the
+            // completion riding the final metadata frame is what makes the
+            // prompt/completion pair a real usage snapshot.
+            if (delta.usage?.completion !== undefined) {
+              frameUsage = delta.usage;
+            }
 
             text += delta.content;
             reasoning += delta.reasoning;
@@ -573,10 +680,33 @@ export function createDevinProvider(options: {
         throw new Error("Devin Connect upstream completed without content or tool calls");
       }
 
+      // OpenAI-shaped usage so normalizeUsage / usageRecords / context-usage
+      // consumers treat devin like any other provider:
+      //   prompt_tokens = fresh input + cache_read (cached is a subset detail)
+      //   total_tokens includes cache_write (real billable cost)
+      const usage = frameUsage
+        ? {
+            prompt_tokens: frameUsage.prompt + frameUsage.cacheRead,
+            completion_tokens: frameUsage.completion ?? 0,
+            total_tokens:
+              frameUsage.prompt +
+              frameUsage.cacheRead +
+              (frameUsage.completion ?? 0) +
+              frameUsage.cacheWrite,
+            ...(frameUsage.cacheRead > 0
+              ? { prompt_tokens_details: { cached_tokens: frameUsage.cacheRead } }
+              : {}),
+            ...(frameUsage.cacheWrite > 0
+              ? { cache_creation_input_tokens: frameUsage.cacheWrite }
+              : {}),
+          }
+        : undefined;
+
       return {
         content: text,
         model: selectedModel,
         provider: "devin",
+        ...(usage ? { usage } : {}),
         ...(reasoning ? { reasoning_content: reasoning } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         // The upstream finish event wins whenever it is present. A tool call

@@ -48,6 +48,29 @@ const moonshotAllModels: Model[] = [...moonshotModels, ...kimiCodeModels];
  * 两份清单模型 ID 不重名，合并不会产生计费错配。
  */
 const qwenAllModels: Model[] = [...qwenModels, ...qwenTokenPlanModels];
+
+/**
+ * Devin（Cognition）OAuth 订阅通道独占的 SWE 系列模型表。
+ *
+ * 只挂 contextWindow：该通道走用户/owner 订阅，不经平台 Credits 计价，
+ * price 按订阅表惯例留 0。128K 的出处不是拍脑袋——上游服务的真实客户端
+ * （Devin Desktop / Windsurf，同一个 GetChatMessage ConnectRPC）请求里的
+ * CompletionConfig 携带的 context window 默认值就是 128000；补表之前
+ * swe-* 全部落 DEFAULT_CONTEXT_WINDOW(256K)，context 用量百分比按双倍
+ * 分母计算、本地循环内基于真实占用的压缩触发线也永远等不到真正的
+ * 溢出点（0.78 × 256K 之后请求早就撞上游限制了）。
+ *
+ * 经 devin 通道转售的厂商模型 id（claude 系、gpt 系）故意不加进来：它们与
+ * anthropic/openai 表里的同名条目共用 flat lookup 名键，会让两个 provider
+ * 互相覆盖；那批 id 继续用厂商自身表的窗口值。
+ */
+const devinModels: Model[] = [
+  { name: "swe-2-max", displayName: "SWE-2 Max", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+  { name: "swe-2-high", displayName: "SWE-2 High", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+  { name: "swe-2-medium", displayName: "SWE-2 Medium", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+  { name: "swe-2", displayName: "SWE-2", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+  { name: "swe-1.7", displayName: "SWE-1.7", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+];
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
   PLATFORM_HOSTED_KIMI_PROVIDER,
@@ -84,6 +107,7 @@ const MODEL_MAP = {
 
 export const MODEL_LOOKUP_MAP = {
   anthropic: [...anthropicModels, ...anthropicOAuthModels],
+  devin: devinModels,
   xai: xaiModels,
   "opencode-go": opencodeGoModels,
   opencode: opencodeGoModels,
