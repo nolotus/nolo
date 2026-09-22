@@ -1,7 +1,7 @@
 // agent-runtime/devin/devinChannelWindows.ts
 
 import { getModelContextWindow } from "../../ai/llm/getModelContextWindow";
-import { isDevinOAuthAgent } from "../devinOAuth";
+import { isDevinOAuthAgent } from "../devinOAuthPure";
 
 /**
  * Devin OAuth 通道的 context window 真值。
