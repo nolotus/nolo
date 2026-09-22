@@ -10,7 +10,6 @@ import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
-import WelcomeBrandLanding from "./WelcomeBrandLanding";
 import WelcomeSection from "./WelcomeSection";
 import OpenAuditableSection from "./OpenAuditableSection";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
@@ -286,7 +285,6 @@ const Home = () => {
             </>
           ) : (
             <>
-              {!isDesktopApp && <WelcomeBrandLanding />}
               {!isDesktopApp && <WelcomeSection />}
               {!isDesktopApp && <OpenAuditableSection />}
 
