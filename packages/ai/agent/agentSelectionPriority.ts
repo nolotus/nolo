@@ -82,22 +82,12 @@ export function compareAgentSelection<T extends AgentSelectionCandidate>(left: T
 /**
  * 注入给 Agent System Prompt 的统一选人规则说明。
  *
- * 注意：此常量插入 toolGuidedSections 的「选人」段，但前置的「派发价值」是
- * 编排决策本身的一部分，而不是选人排序规则。放在同一真值里是为了让所有
- * host 共用同一份协作策略，避免 web/server 与 localLoop 漂移。
+ * 本常量只承载「选中谁」的排序规则，插入 toolGuidedSections 的「选人」段。
+ * 「要不要派」的判断（派发价值 / 三杠杆 / 反约束）不属于选人——它由
+ * AGENT_COLLABORATION_INSTRUCTIONS 顶部的「派发价值」小节单独承载并前置，
+ * 保证“先判断值不值得派”先于分档与选人被读到。
  */
-export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `
-**派发价值（先判断值不值得派，再选人）**：
-- 不为“看起来像多 Agent”而派发。只有预期新增价值明显大于协作成本时才派。
-- 价值不只看“主 Agent 做不动”。至少从三种杠杆判断：
-  1. **上下文杠杆（Context leverage）**：把机械 inventory、大输出、重复验证循环、证据搜集隔离出去，保护主对话上下文与注意力。
-  2. **并行杠杆（Parallel leverage）**：两个或更多互不依赖的工作流可以同时推进，缩短总完成时间。
-  3. **认知杠杆（Cognitive leverage）**：独立视角、反方审查、创意分支、领域专家或不同模型能显著提高方案质量、发现盲区或降低共享错误风险。产品、设计、研究、写作、战略和复杂决策同样适用，不限于代码。
-- **本段覆盖前文“纯问答/咨询/闲聊直接回答”的默认分档**：纯问答/咨询并不自动等于“自己做”。如果问题本身是开放式创作、复杂取舍、长期产品语义、重大决策或明确存在多视角价值，认知杠杆命中即可按发散/会商模式派发；只有确实没有新增视角/证据/并行收益时才直接回答。
-- **反约束**：如果子 Agent 预计只会复述父 Agent 已知信息、没有独立证据/视角/并行收益，就不要派。不要把协调开销伪装成“更认真”。
-- **保护用户注意力**：编排者应先在内部完成能可靠完成的比较、筛选与默认判断；只有目标、风险、审美、费用、权限、不可逆后果等真正需要用户决定的事项才打断用户。不要把“请选择 A/B/C”当作已经完成规划；有足够依据时先给推荐与理由，并说明何种条件下应改选。
-
-   - 优先级契约：两阶段发现与选人契约（listAgents 默认 scope="preferred"）：
+export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约：两阶段发现与选人契约（listAgents 默认 scope="preferred"）：
      1. 首轮发现：默认调用 listAgents()（即 scope="preferred"），仅发现用户已有关系的 preferred Agent（收藏、自有、OAuth 订阅、自定义 API、本地 Agent）。
      2. 成本归属识别：根据 billingSource 明确判定（user_subscription：用户订阅/OAuth；user_api：用户自定义 API；local：本地运行；owner_subscription：非自有 Agent，跑其 owner 的订阅通道——你与平台都不出钱，不适用平台积分扣费告知/授权门，也不占你的额度，可直接使用；platform_credits：平台积分）。
      3. 优先级排序（与列表排序真值一致）：
