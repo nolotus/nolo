@@ -10,14 +10,14 @@ import { isDevinOAuthAgent } from "../devinOAuth";
  *
  * 1. **上游 live catalog**（`GetCliModelConfigs`，ConnectRPC 只读元数据）：
  *    每个 ClientModelConfig 自带 context window 字段（#18）。对账号 token
- *    实拉过 213 个模型，SWE 家族实测值：
+ *    实拉过 213 个模型，SWE 家族实测值（均为 catalog 连字符 selector）：
  *      swe-2-max / swe-2-high / swe-2-medium = 262000
- *      swe-1.7 / swe-1.7-medium             = 262000
- *      swe-1.7-lightning(-medium)           = 202752
- *      swe-1.6(-fast)                       = 200000（免费档默认）
+ *      swe-1-7 / swe-1-7-medium             = 262000
+ *      swe-1-7-lightning                     = 202752
+ *      swe-1-6 / swe-1-6-fast                = 200000（免费档默认）
  *    同目录里经此通道转售的厂商模型与厂商原生值可以不同：
- *      gpt-5.2（MODEL_GPT_5_2_*）           = 384000（OpenAI 原生表是 1047576）
- *      claude-sonnet-4.6                    = 200000（与 anthropic 表一致）
+ *      MODEL_GPT_5_2_*                 = 384000（OpenAI 原生表 1047576）
+ *      claude-sonnet-4-6               = 200000（与 anthropic 表一致）
  *
  * 2. **实证探针**（swe-2-max，本机 token，unlimited-free 档）：
  *    250K token 请求完整返回（`prompt_tokens=250493`，新解码的 #7 usage
@@ -31,18 +31,23 @@ import { isDevinOAuthAgent } from "../devinOAuth";
  * 本文件不追求覆盖 213 个上游模型。
  */
 const DEVIN_CHANNEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // SWE-2 家族（含 providerRegistry 里的 swe-2 裸选项，上游无该 selector，
-  // 与同族同窗）。
+  // SWE-2 家族（catalog 无裸 swe-2 selector；旧点号/裸写法如 swe-2、
+  // swe-1.7 实测均 permission_denied，已不是可用 selector）。
   "swe-2-max": 262_000,
   "swe-2-high": 262_000,
   "swe-2-medium": 262_000,
-  "swe-2": 262_000,
   // SWE-1.7 家族。
-  "swe-1.7": 262_000,
-  "swe-1.7-medium": 262_000,
-  "swe-1.7-lightning": 202_752,
-  // 经 devin 通道转售、且与厂商原生窗口不同的模型。
-  "gpt-5.2": 384_000,
+  "swe-1-7": 262_000,
+  "swe-1-7-medium": 262_000,
+  "swe-1-7-lightning": 202_752,
+  // SWE-1.6 家族（免费档默认）。
+  "swe-1-6": 200_000,
+  "swe-1-6-fast": 200_000,
+  // 经 devin 通道转售、且与厂商原生窗口不同的模型（catalog 枚举型 selector）。
+  "MODEL_GPT_5_2_LOW": 384_000,
+  "MODEL_GPT_5_2_MEDIUM": 384_000,
+  "MODEL_GPT_5_2_HIGH": 384_000,
+  "MODEL_GPT_5_2_XHIGH": 384_000,
 };
 
 /** agent 配置里识别 devin 通道所需的最小字段。 */

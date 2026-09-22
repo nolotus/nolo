@@ -533,7 +533,7 @@ export function createDevinProvider(options: {
   tools?: OpenAiCompatibleTool[];
   temperature?: number;
 }): AgentRuntimeProvider {
-  const { token, model = "swe-2", fetchImpl = fetch, tools = [], temperature } = options;
+  const { token, model = "swe-2-max", fetchImpl = fetch, tools = [], temperature } = options;
 
   return {
     model,

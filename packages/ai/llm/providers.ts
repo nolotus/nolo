@@ -68,8 +68,9 @@ const devinModels: Model[] = [
   { name: "swe-2-max", displayName: "SWE-2 Max", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
   { name: "swe-2-high", displayName: "SWE-2 High", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
   { name: "swe-2-medium", displayName: "SWE-2 Medium", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
-  { name: "swe-2", displayName: "SWE-2", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
-  { name: "swe-1.7", displayName: "SWE-1.7", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-1-7", displayName: "SWE-1.7 Max", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-1-7-lightning", displayName: "SWE-1.7 Lightning Max", hasVision: true, contextWindow: 202_752, price: { input: 0, output: 0 } },
+  { name: "swe-1-6-fast", displayName: "SWE-1.6 Fast", hasVision: true, contextWindow: 200_000, price: { input: 0, output: 0 } },
 ];
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
