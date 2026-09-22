@@ -53,23 +53,23 @@ const qwenAllModels: Model[] = [...qwenModels, ...qwenTokenPlanModels];
  * Devin（Cognition）OAuth 订阅通道独占的 SWE 系列模型表。
  *
  * 只挂 contextWindow：该通道走用户/owner 订阅，不经平台 Credits 计价，
- * price 按订阅表惯例留 0。128K 的出处不是拍脑袋——上游服务的真实客户端
- * （Devin Desktop / Windsurf，同一个 GetChatMessage ConnectRPC）请求里的
- * CompletionConfig 携带的 context window 默认值就是 128000；补表之前
- * swe-* 全部落 DEFAULT_CONTEXT_WINDOW(256K)，context 用量百分比按双倍
- * 分母计算、本地循环内基于真实占用的压缩触发线也永远等不到真正的
- * 溢出点（0.78 × 256K 之后请求早就撞上游限制了）。
+ * price 按订阅表惯例留 0。262000 的出处是上游 live catalog
+ * （GetCliModelConfigs）里每个模型自带的 context window 字段（#18）实测值，
+ * 并用本机 token 实证校对过：swe-2-max 250K token 请求完整返回、275K 被
+ * 上游拒。注意别把请求侧 CompletionConfig 的默认 context window（128000）
+ * 当模型能力——那只是客户端 hint，按它填表会把窗口砍掉一半还多。
  *
  * 经 devin 通道转售的厂商模型 id（claude 系、gpt 系）故意不加进来：它们与
  * anthropic/openai 表里的同名条目共用 flat lookup 名键，会让两个 provider
- * 互相覆盖；那批 id 继续用厂商自身表的窗口值。
+ * 互相覆盖。通道内窗口由 devinChannelWindows 的通道真值表在解析处处理
+ * （如 gpt-5.2 经此通道是 384000，OpenAI 原生表是 1047576）。
  */
 const devinModels: Model[] = [
-  { name: "swe-2-max", displayName: "SWE-2 Max", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
-  { name: "swe-2-high", displayName: "SWE-2 High", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
-  { name: "swe-2-medium", displayName: "SWE-2 Medium", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
-  { name: "swe-2", displayName: "SWE-2", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
-  { name: "swe-1.7", displayName: "SWE-1.7", hasVision: true, contextWindow: 128_000, price: { input: 0, output: 0 } },
+  { name: "swe-2-max", displayName: "SWE-2 Max", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-2-high", displayName: "SWE-2 High", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-2-medium", displayName: "SWE-2 Medium", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-2", displayName: "SWE-2", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
+  { name: "swe-1.7", displayName: "SWE-1.7", hasVision: true, contextWindow: 262_000, price: { input: 0, output: 0 } },
 ];
 import {
   PLATFORM_HOSTED_KIMI_K26_MODEL,
