@@ -765,12 +765,20 @@ export type RunActivityTracker = {
 export function createRunActivityTracker(
   runId: string,
   deps: AgentRunControlDeps = {},
-  options: { minWriteIntervalMs?: number } = {}
+  options: { minWriteIntervalMs?: number; keepAlive?: boolean } = {}
 ): RunActivityTracker {
   const fs = deps.fs ?? nodeFs;
   const now = deps.now ?? (() => new Date());
   const minWriteIntervalMs =
     options.minWriteIntervalMs ?? DEFAULT_ACTIVITY_WRITE_INTERVAL_MS;
+  // 默认自续：进程活着就持续落心跳，覆盖「首个 loop event 之前」与
+  // 「两个事件之间的静默段」——这两段此前没有任何 activity，宽限失效。
+  const keepAlive = options.keepAlive ?? true;
+  // dispose() 是终止态：此前只 clearTimeout 当前句柄，迟到的 onLoopEvent /
+  // flush() 会经 doWrite 重新武装自续链，queue-drain 每轮 clearWatchdogs 后
+  // 下一轮又把同一 tracker 拉活（agentRunCommand.ts 的 runner 闭包长期持有
+  // onLoopEvent 引用）。
+  let disposed = false;
 
   let lastEventAt = now().toISOString();
   let inFlight: InFlightState | null = null;
@@ -796,11 +804,13 @@ export function createRunActivityTracker(
   }
 
   function doWrite() {
+    if (disposed) return;
     writeTimer = undefined;
     // 读-改-写包记录锁（strict：锁被占用就丢弃这次心跳，2s 后下一跳重写，
     // 无害）。此前心跳不参与锁仲裁，会与 backfillRunRecordParentDialog /
     // finalizeRunRecord 的带锁写交错，把旧快照整体写回吞掉对方字段（丢失
     // 更新）。tmp+rename 只防撕裂读，不防 RMW 丢更新。
+    const attemptAt = now().getTime();
     withRunRecordLock(
       runId,
       deps,
@@ -813,7 +823,19 @@ export function createRunActivityTracker(
       },
       { strict: true },
     );
+    // 节流时钟必须在锁外无条件推进：记录读不到（被并发写撕裂 / 已归档）时
+    // 若停在旧值，scheduleWrite 会判 elapsed >= interval → delay 0 → 退化成
+    // 1ms 紧循环（实测 200ms 写 188 次，且每次都抢记录锁）。
+    if (lastWriteAt < attemptAt) lastWriteAt = attemptAt;
+    // 自续必须放在 lastWriteAt 刷新之后：放在函数开头会用上一轮的时间戳算
+    // elapsed（正好等于 interval）→ delay 0 → 每轮双写（实测 50ms 间隔写出
+    // 25ms  cadence）。
+    if (keepAlive) scheduleWrite();
   }
+
+  // 创建即武装第一条心跳（delay 0）。没有 registry 记录时 doWrite 直接 no-op，
+  // 因此前台/合成 runId 也不会写文件。
+  scheduleWrite();
 
   function scheduleWrite() {
     if (writeTimer !== undefined) return;
@@ -823,6 +845,7 @@ export function createRunActivityTracker(
   }
 
   function onLoopEvent(event: LocalAgentLoopEvent) {
+    if (disposed) return;
     lastEventAt = new Date(event.atMs).toISOString();
     switch (event.kind) {
       case "llm-start":
@@ -860,6 +883,7 @@ export function createRunActivityTracker(
   }
 
   function dispose() {
+    disposed = true;
     if (writeTimer !== undefined) {
       clearTimeout(writeTimer);
       writeTimer = undefined;
@@ -1433,12 +1457,18 @@ export async function spawnLocalBackgroundRun(
   proc.unref();
 
   if (typeof proc.pid === "number") {
-    record.pid = proc.pid;
     const processStartedAt = (deps.getProcessStartTime ?? defaultGetProcessStartTime)(proc.pid);
-    if (processStartedAt) record.processStartedAt = processStartedAt.toISOString();
-    // Atomic: the child is already running and a poller may read this record
-    // concurrently, so this publish must not be observable half-written.
-    writeRunRecord(record, deps);
+    // 必须持锁并在锁内重读：子进程此刻已经在跑，它的创建即心跳（keepAlive）
+    // 随时可能落盘。无锁的读-改-写会把 pid/processStartedAt 整段丢掉的旧快照
+    // rename 回去——pid 一丢，stop 直接拒绝、checkStaleRun 永远提前返回，
+    // 真死的子进程会留下永远 running 的幽灵记录；反向交错则抹掉 activity，
+    // 重新开出本批要修的那个「无心跳窗口」。
+    withRunRecordLock(runId, deps, () => {
+      const latest = readRunRecord(runId, deps) ?? record;
+      latest.pid = proc.pid;
+      if (processStartedAt) latest.processStartedAt = processStartedAt.toISOString();
+      writeRunRecord(latest, deps);
+    });
   }
 
   return { runId, pid: proc.pid, logPath, queuePath, batchId };
@@ -1825,6 +1855,13 @@ const MAX_PERSISTED_PROCESS_START_TIME_DIFF_MS = 2_000;
  * than this window proves the process was alive far more recently than any
  * `ps`/`kill` inference, so the inference is treated as a transient probe
  * failure rather than evidence of death.
+ *
+ * 取证事故（2026-09-16 三连 orphaned，run 记录 activity 为 null）：心跳此前
+ * **只在首个 loop event 后才开始写**（scheduleWrite 仅由 onLoopEvent 触发），
+ * 而 provider 解析 / 鉴权 / connector 握手可以轻易吃掉前 10+s——这段窗口里
+ * 记录完全没有 activity，10s 宽限 therefore 形同虚设，一次瞬时的
+ * `kill(pid,0)` / `ps` 误判就把活着的 run 盖成 orphaned。因此 tracker 现在
+ * 从创建时刻就自续心跳（keepAlive），不再等第一个事件。
  *
  * Deliberately several multiples of the write interval: a genuinely dead
  * process stops writing and is still reclaimed a few seconds later, while a
