@@ -373,11 +373,23 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
       { id: "swe-1-7", label: "SWE-1.7 Max", hasVision: true },
       { id: "swe-1-7-lightning", label: "SWE-1.7 Lightning Max", hasVision: true },
       { id: "swe-1-6-fast", label: "SWE-1.6 Fast", hasVision: true },
+      // Opus 5.5 全档位于 2026-09-22 随上游 catalog 上线，逐档实测可调。
+      { id: "claude-opus-5-5-medium", label: "Claude Opus 5.5 Medium", hasVision: true },
+      { id: "claude-opus-5-5-high", label: "Claude Opus 5.5 High", hasVision: true },
+      { id: "claude-opus-5-5-low", label: "Claude Opus 5.5 Low", hasVision: true },
+      { id: "claude-opus-5-5-xhigh", label: "Claude Opus 5.5 XHigh", hasVision: true },
       { id: "claude-opus-5-medium", label: "Claude Opus 5 Medium", hasVision: true },
       { id: "claude-fable-5-1-medium", label: "Claude Fable 5.1 Medium", hasVision: true },
       { id: "claude-sonnet-5-medium", label: "Claude Sonnet 5 Medium", hasVision: true },
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", hasVision: true },
       { id: "gpt-6-astra-medium", label: "GPT-6 Astra Medium", hasVision: true },
+      { id: "gpt-6-astra-high", label: "GPT-6 Astra High", hasVision: true },
+      // GPT-6 Sol/Luna 已随上游上线（medium/high 档实测可调）；chatgpt OAuth
+      // 的 Codex 后端目前只放出 gpt-6-astra，Sol/Luna 在该通道仍 400。
+      { id: "gpt-6-sol-medium", label: "GPT-6 Sol Medium", hasVision: true },
+      { id: "gpt-6-sol-high", label: "GPT-6 Sol High", hasVision: true },
+      { id: "gpt-6-luna-medium", label: "GPT-6 Luna Medium", hasVision: true },
+      { id: "gpt-6-luna-high", label: "GPT-6 Luna High", hasVision: true },
       { id: "gpt-5-6-sol-medium", label: "GPT-5.6 Sol Medium", hasVision: true },
       { id: "gpt-5-6-luna-medium", label: "GPT-5.6 Luna Medium", hasVision: true },
       { id: "MODEL_GPT_5_2_MEDIUM", label: "GPT-5.2 Medium", hasVision: true },
