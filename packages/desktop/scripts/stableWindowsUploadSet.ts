@@ -1,5 +1,6 @@
 import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { asOptionalTrimmedString } from "core/optionalString";
 
 /**
  * Stable Windows upload-set discovery + normalisation (Electrobun v2).
@@ -392,18 +393,43 @@ export function buildStableWindowsUpdateJson(args: { version: string; hash: stri
 export function stageStableWindowsUploadSet(args: {
   upstream: StableWindowsUpstreamSet;
   artifactDir: string;
+  /**
+   * 正式 stable 安装器（由可运行 app 载荷编译出的 Inno .exe）。提供时用它生成
+   * canonical installer + 版本化副本；缺省回落到上游 `Nolo Desktop-Setup.exe`
+   * stub 拷贝（recovery 兼容路径——那条路仍只能交出 stub）。
+   *
+   * **必填**。缺省回落 stub 会让「发布了一个不能装的 stable」重新发生（1.6MB
+   * 自解压壳没有邻接 `.installer/` 载荷装不起来），而那正是本次修复要消灭的
+   * 形态；唯一兜底（size gate）在发布期才响，代价是一次完整的失败发布。
+   * 传空视为调用方缺陷，直接抛错而不是静默降级。
+   */
+  installerSourcePath: string;
 }): StableWindowsUploadSet {
   const { upstream, artifactDir } = args;
+  const source = asOptionalTrimmedString(args.installerSourcePath);
+  if (!source) {
+    throw new Error(
+      "stageStableWindowsUploadSet requires installerSourcePath: the stable channel ships an Inno installer, never the upstream self-extracting stub.",
+    );
+  }
   mkdirSync(artifactDir, { recursive: true });
 
+  const installerSourcePath = source;
   const installerPath = join(artifactDir, STABLE_WINDOWS_UPLOAD_NAMES.installer);
-  cpSync(upstream.installerPath, installerPath);
+  // 同路径自拷贝在 Node/Bun 都抛 ERR_FS_CP_EINVAL。调用方（build-stable 快乐
+  // 路径）把编译产物放在独立目录，正常不会撞上；这里仍显式短路，防止任何未来
+  // 调用方把产物直接写进 artifactDir 又把同一路径当 source 传进来。
+  if (resolve(installerSourcePath) !== resolve(installerPath)) {
+    cpSync(installerSourcePath, installerPath);
+  }
 
   const versionedInstallerPath = join(
     artifactDir,
     STABLE_WINDOWS_UPLOAD_NAMES.installer.replace(/\.exe$/i, `-${upstream.version}.exe`),
   );
-  cpSync(upstream.installerPath, versionedInstallerPath);
+  if (resolve(installerSourcePath) !== resolve(versionedInstallerPath)) {
+    cpSync(installerSourcePath, versionedInstallerPath);
+  }
 
   const updateBundlePath = join(artifactDir, STABLE_WINDOWS_UPLOAD_NAMES.updateBundle);
   cpSync(upstream.updateBundlePath, updateBundlePath);
@@ -454,6 +480,8 @@ export function discoverAndStageStableWindowsUploadSet(args: {
   runStartedAtMs: number;
   fallbackVersion?: string;
   fallbackHash?: string;
+  /** 同 stageStableWindowsUploadSet：必填，stable 只发 Inno 安装器。 */
+  installerSourcePath: string;
 }): StableWindowsUploadSet {
   const upstream = discoverStableWindowsUpstreamSet({
     buildDir: args.buildDir,
@@ -461,5 +489,9 @@ export function discoverAndStageStableWindowsUploadSet(args: {
     fallbackVersion: args.fallbackVersion,
     fallbackHash: args.fallbackHash,
   });
-  return stageStableWindowsUploadSet({ upstream, artifactDir: args.artifactDir });
+  return stageStableWindowsUploadSet({
+    upstream,
+    artifactDir: args.artifactDir,
+    installerSourcePath: args.installerSourcePath,
+  });
 }

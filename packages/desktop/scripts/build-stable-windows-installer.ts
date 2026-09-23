@@ -406,6 +406,8 @@ function renderWindowsInstallerScript(args: {
 async function compileWindowsInstaller(args: {
   appId?: string;
   appName?: string;
+  /** 安装落点 channel 段（%LOCALAPPDATA%\<identifier>\<channel>\app），默认 stable。 */
+  appChannel?: string;
   launchScriptDestName?: string;
   launchScriptPath: string;
   outputBaseFilename?: string;
@@ -629,8 +631,10 @@ function findSingleInnerStubArchive(dir: string): string | null {
 async function resolveSmokeRunnablePayloadDir(args: {
   payloadTarballPath: string;
   tempDir: string;
+  /** 解压子目录名：同一次运行里 stable 与 smoke 各解一份，避免互相覆盖。 */
+  workSubDir?: string;
 }): Promise<string> {
-  const outerTempDir = join(args.tempDir, "runnable-payload");
+  const outerTempDir = join(args.tempDir, args.workSubDir ?? "runnable-payload");
   mkdirSync(outerTempDir, { recursive: true });
   const payloadDir = await extractWindowsTarball(args.payloadTarballPath, outerTempDir);
   if (hasSmokeRunnableMarker(payloadDir)) {
@@ -645,7 +649,7 @@ async function resolveSmokeRunnablePayloadDir(args: {
     );
   }
   log(`smoke payload tarball carried a wrapper stub; descending into ${basename(innerArchive)}`);
-  const innerTempDir = join(args.tempDir, "runnable-inner");
+  const innerTempDir = join(args.tempDir, `${args.workSubDir ?? "runnable-payload"}-inner`);
   mkdirSync(innerTempDir, { recursive: true });
   const innerDir = await extractWindowsTarball(innerArchive, innerTempDir);
   if (!hasSmokeRunnableMarker(innerDir)) {
@@ -686,6 +690,56 @@ async function compileSmokeInstallerFromRunnablePayload(args: {
   });
 }
 
+/**
+ * 正式 stable 安装器：与发布 update bundle 同源同版本的可运行 app 载荷编译。
+ *
+ * 此前 stable 的「安装器」其实是上游 `Nolo Desktop-Setup.exe` 自解压 stub
+ * （见 resolveSmokeRunnablePayloadDir 的事故背景），双击无法完成安装。这里改为
+ * 用与 smoke 相同的可运行载荷（`upstream.updateBundlePath` 解出的真实 app）编译
+ * 一份正式 Inno 安装器：真实 AppId/AppName、`DefaultDirName` 指向
+ * `%LOCALAPPDATA%\<identifier>\stable\app` 受管理更新目录、channel 显式 stable、
+ * WebView2 bootstrapper 随包携带。应用内自更新（stable-win-x64-update.json +
+ * tar.zst bundle）不受影响——两者本就是同一份 payload。
+ */
+async function compileStableInstallerFromRunnablePayload(args: {
+  payloadTarballPath: string;
+  version: string;
+  tempDir: string;
+}) {
+  const launchScriptPath = join(args.tempDir, "Nolo Desktop.vbs");
+  const webView2BootstrapperPath = join(args.tempDir, "MicrosoftEdgeWebview2Setup-stable.exe");
+  const scriptPath = join(args.tempDir, "windows-stable-installer.iss");
+  // 编译产物必须落在一个**独立**目录：staging 的 canonical/versioned 最终名就在
+  // artifactDir 下，若把 outputDir 直接设成 artifactDir，产物与 staging 的拷贝
+  // 目标是同一路径 → cpSync 自拷贝抛 ERR_FS_CP_EINVAL（Node/Bun 均复现），
+  // stable Windows 构建在真实 CI 上必红。命名权统一收在 staging。
+  const outputDir = join(args.tempDir, "stable-installer-out");
+  mkdirSync(outputDir, { recursive: true });
+
+  writeFileSync(launchScriptPath, readFileSync(windowsLauncherTemplatePath, "utf8"), "utf8");
+  await downloadWebView2Bootstrapper(webView2BootstrapperPath);
+
+  const payloadDir = await resolveSmokeRunnablePayloadDir({
+    payloadTarballPath: args.payloadTarballPath,
+    tempDir: args.tempDir,
+    workSubDir: "stable-runnable-payload",
+  });
+  await applyWindowsExecutableIcon(join(payloadDir, "bin", "bun.exe"));
+  await applyWindowsExecutableIcon(join(payloadDir, "bin", "launcher.exe"));
+
+  const compiled = await compileWindowsInstaller({
+    appChannel: "stable",
+    launchScriptPath,
+    outputBaseFilename: outputBaseFilename,
+    outputDir,
+    payloadDir,
+    scriptPath,
+    version: args.version,
+    webView2BootstrapperPath,
+  });
+  return compiled;
+}
+
 rmSync(smokeArtifactDir, { recursive: true, force: true });
 
 const scriptStartedAtMs = Date.now();
@@ -708,7 +762,19 @@ if (exitCode === 0) {
       fallbackVersion: readDesktopPackageVersion(),
       fallbackHash: process.env.NOLO_BUILD_SHA?.trim() || process.env.GITHUB_SHA?.trim(),
     });
-    const stagedUploadSet = stageStableWindowsUploadSet({ upstream, artifactDir });
+    // 先用与发布 bundle 同源的可运行载荷编译正式 stable 安装器；其产物路径作为
+    // canonical installer 的真实来源交给 staging（取代旧的「拷贝上游 stub」）。
+    // 编译失败属于发布形态错误——沿 IO 语义抛出，不进 recovery。
+    const stableInstallerPath = await compileStableInstallerFromRunnablePayload({
+      payloadTarballPath: upstream.updateBundlePath,
+      version: upstream.version,
+      tempDir: uploadSetTempDir,
+    });
+    const stagedUploadSet = stageStableWindowsUploadSet({
+      upstream,
+      artifactDir,
+      installerSourcePath: stableInstallerPath,
+    });
     const smokeInstallerPath = await compileSmokeInstallerFromRunnablePayload({
       payloadTarballPath: upstream.updateBundlePath,
       version: upstream.version,

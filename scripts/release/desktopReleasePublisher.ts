@@ -66,7 +66,11 @@ export type PublishedUrlVerificationOptions = {
 };
 
 const LEGACY_MANIFEST_NAME = basename(DESKTOP_RELEASE_MANIFEST_PUBLIC_PATH);
-const DEFAULT_MIN_WIN_INSTALLER_BYTES = 50000000;
+// 主件是 Inno Setup 单文件安装器（实测 ~48.6 MB）。旧值 50 MB 是按 zip 主件
+// （≥50 MB）标定的，换成 .exe 后会把完全正确的产物以 "too small" 拦死；1.6 MB
+// 的自解压 stub 仍远低于本阈值，stub 冒充 primary 的 fail-loud 语义不受影响。
+// 生产 workflow 另传 MIN_WIN_INSTALLER_BYTES=47000000 收紧。
+const DEFAULT_MIN_WIN_INSTALLER_BYTES = 40000000;
 const ALPHA_MACOS_APP_TARBALL_NAME = "canary-macos-arm64-NoloDesktop-canary.app.tar.zst";
 
 export async function verifyPublishedUrl(
@@ -144,7 +148,7 @@ const PLATFORM_PRIMARY_NAMES: Record<
     macos: "canary-macos-arm64-NoloDesktop-canary.dmg",
   },
   stable: {
-    windows: "stable-win-x64-NoloDesktop-Setup.zip",
+    windows: "stable-win-x64-NoloDesktop-Setup.exe",
     linux: "stable-linux-x64-NoloDesktop.tar.zst",
     macos: "stable-macos-arm64-NoloDesktop.dmg",
   },
@@ -247,7 +251,7 @@ function findDesktopPrimarySource(args: {
       const name = basename(file);
       return args.channel === "alpha"
         ? /^canary-win-x64-NoloDesktop-Setup-canary(?:-[0-9][^/]*)?\.exe$/i.test(name)
-        : /^stable-win-x64-NoloDesktop-Setup(?:-[0-9][^/]*)?\.zip$/i.test(name);
+        : /^stable-win-x64-NoloDesktop-Setup(?:-[0-9][^/]*)?\.exe$/i.test(name);
     });
   }
 
