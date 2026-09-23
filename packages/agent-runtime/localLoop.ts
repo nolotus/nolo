@@ -45,6 +45,7 @@ import type {
 import { sanitizeToolCallPairing } from "./toolCallPairing";
 import { downgradeUnparsableToolCalls, hasParsableObjectArguments, repairTruncatedToolArguments } from "./outboundHistorySanitize";
 import { summarizeToolArguments } from "./summarizeToolArguments";
+import { buildToolArgumentsFingerprint } from "./toolArgumentsFingerprint";
 import { buildIdentityBlock } from "./identityBlock";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
@@ -2167,6 +2168,14 @@ export async function runLocalAgentTurn(
         const startedAt = Date.now();
         loopTimingMark("toolCallStart", round);
         const argumentsPreview = summarizeToolArguments(toolName, toolCall.function.arguments);
+        // Identity of the arguments AS EMITTED by the model. Deliberately
+        // computed before the truncated-argument repair below rewrites
+        // `toolCall.function.arguments`: the fingerprint means "the same payload
+        // was emitted again", which is the repeat we care about detecting.
+        // The one consequence is that the same logical call emitted once intact
+        // and once truncated gets two identities — a missed repeat, never a
+        // false one.
+        const argumentsFingerprint = buildToolArgumentsFingerprint(toolCall.function.arguments);
         // 唯一 canonical 出口：emitLoopEvent 发 tool-start，并桥接投影给 legacy onToolEvent。
         emitLoopEvent(
           observationBoundary,
@@ -2177,6 +2186,7 @@ export async function runLocalAgentTurn(
             toolName,
             atMs: startedAt,
             ...(argumentsPreview ? { argumentsPreview } : {}),
+            ...(argumentsFingerprint ? { argumentsFingerprint } : {}),
           },
           {
             type: "tool-call",

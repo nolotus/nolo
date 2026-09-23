@@ -72,7 +72,18 @@ export type AgentExecutionObservationEvent =
       toolCallId: string;
       toolName: string;
       atMs: number;
+      /**
+       * Human-readable lossy projection of arguments (summarizeToolArguments).
+       * NOT safe for equality checks — two different argument sets can share
+       * the same preview.
+       */
       argumentsPreview?: string;
+      /**
+       * Deterministic machine identity of the full arguments
+       * (buildToolArgumentsFingerprint). Safe for repeated-call detection.
+       * Omitted when the emitter does not have the raw arguments.
+       */
+      argumentsFingerprint?: string;
     }
   | {
       kind: "tool-end";
