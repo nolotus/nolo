@@ -20,7 +20,7 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 控制/诊断。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
-1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由。是否允许阻塞等待由工具表回答，不用猜环境：controlAgentRun 有 wait action 就用它阻塞到终态（不要自己循环 wait——那是伪装成等待的轮询）；没有就按工具描述处理，不要推断一定存在 terminal wake。
+1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由。等待方式按环境分三种：① controlAgentRun 有 wait action → 用它阻塞到终态（仅限预计 <100s 且马上要用结果的场景，或用户明确要求同步等待）；② 无 wait action 但宿主有 terminal wake → 派发后直接结束本轮回复，run 到终态时宿主自动把父对话接回来，不需要任何主动等待；③ 无 wait action 且无 terminal wake → 派发后同样结束本轮回复，run 结束时不会被自动接回来，这是宿主限制，应在回复中如实告知用户「run 已在后台运行，结果需手动查询」，而不是用 execShell sleep 轮询绕过。**execShell sleep 永远不是等待 agent run 的正确方式**：命令超 5s 会被自动 detach 成后台任务，每个完成都产生一条通知，形成噪音且完全无效。
 2. 禁止轮询、禁空转、别复述 status；语义以工具描述为准。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看摘要）；它不是 stop 前的 preflight。并行：无文件交集、无真实数据依赖的独立子任务默认并发派发；不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork，实例间无上下文共享），只有真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
 4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/已终态/运行中由控制平面自行处理（已终态原样返回、不会被覆盖）。`;
