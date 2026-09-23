@@ -2,6 +2,8 @@ import React, { lazy, memo, Suspense, useMemo } from "react";
 import { StreamingMessageText } from "./StreamingMessageText";
 import { StreamingStructuredMarkdown } from "./StreamingStructuredMarkdown";
 import { buildStreamingMarkdownModel } from "./streamingMarkdownModel";
+import { messageLayoutStyles } from "./messageLayoutStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import type { StreamingReactArtifact } from "./inlineReactArtifactParser";
 
 const IframeArtifactBlock = lazy(() => import("render/web/elements/IframeArtifactBlock"));
@@ -42,7 +44,11 @@ export const InlineArtifactVisibleText = memo(
         />
       );
     }
-    return <div className="simple-text">{visibleText}</div>;
+    return (
+      <div {...withLiteralClass("simple-text", messageLayoutStyles.simpleText)}>
+        {visibleText}
+      </div>
+    );
   }
 );
 

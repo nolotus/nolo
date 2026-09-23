@@ -299,8 +299,16 @@ export const messageLayoutStyles = stylex.create({
     whiteSpace: "pre-wrap",
   },
   simpleText: {
+    // 与 streamingMessageText 对齐：流式结束切换到 .simple-text 时字号/行高/
+    // 断词规则不再跳变。字距差异由 messagesStylexEscapeHatch.css 的
+    // .simple-text { letter-spacing } 规则补齐（StyleX 原子类无法覆盖到
+    // ReadOnlyMarkdownContent 内部深层文本节点，统一走 CSS）。
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+    overflowWrap: "anywhere",
+    fontSize: "var(--fontSize-base, 14px)",
+    lineHeight: "var(--leading-relaxed, 1.6)",
+    color: "currentColor",
   },
   msgCollapsed: {
     display: "none",

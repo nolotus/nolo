@@ -219,6 +219,16 @@
   letter-spacing: 0.01em;
 }
 
+/* 与 streaming 态对齐字距：流式期间 structured 分支的文本节点包在
+ * .streaming-markdown-body（上一条规则的 0.01em）下，plain-text 分支的
+ * .streaming-message-text 与 settled 态 .simple-text 需要同样字距，
+ * 否则结束瞬间发生排版跳变。只作用于真实文本容器，不用通配符——
+ * code/pre/.inline-code 等需保持 normal 的元素不受影响。 */
+[data-hook~="messages-esc-msg-body"] .simple-text,
+[data-hook~="messages-esc-msg-body"] .streaming-message-text {
+  letter-spacing: 0.01em;
+}
+
 [data-hook~="messages-esc-msg-body"] .text-paragraph {
   margin: 0.65em 0;
   line-height: inherit;

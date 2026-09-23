@@ -1,5 +1,7 @@
 import React, { memo, useMemo } from "react";
 import { StreamingInlineReactArtifact, InlineArtifactVisibleText } from "./StreamingInlineReactArtifact";
+import { messageLayoutStyles } from "./messageLayoutStyles";
+import { withLiteralClass } from "./toolMessageShared";
 import { extractStreamingInlineReactArtifact } from "./inlineReactArtifactParser";
 
 export function normalizeMessageMarkdownLinks(content: string): string {
@@ -33,7 +35,9 @@ export const MessageText = memo(
     if (role === "self") {
       return (
         <div className="message-text">
-          <div className="simple-text">{content}</div>
+          <div {...withLiteralClass("simple-text", messageLayoutStyles.simpleText)}>
+            {content}
+          </div>
         </div>
       );
     }

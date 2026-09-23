@@ -1,37 +1,4 @@
 
-## 0.77.0
-
-## 0.77.0 (2026-09-22)
-
-### Features
-
-* **agent:** add cognitive delegation value policy ([51fcb59](https://github.com/nolotus/bun-nolo/commit/51fcb5936be4cbeab7008b7a81397752288a90ae))
-* **agent:** add shared human-centered working philosophy ([7bf20f8](https://github.com/nolotus/bun-nolo/commit/7bf20f87250bfb88d00737b90e82ec179f3a5066))
-* **agent:** support platform-hosted MiMo models and switch builtin dialog LLM ([8438721](https://github.com/nolotus/bun-nolo/commit/8438721398668321a67d11090552371f150bc73c))
-* **home:** add human-centered Nolo brand landing ([b929f33](https://github.com/nolotus/bun-nolo/commit/b929f33f0990939485787717b65e424261423fc4))
-* **home:** end the homepage on human agency after open proof ([a15694e](https://github.com/nolotus/bun-nolo/commit/a15694eb70295df6d87239632fce76afba53e47d)), closes [#64](https://github.com/nolotus/bun-nolo/issues/64)
-* **home:** lead with Nolo human-centered brand story ([9478816](https://github.com/nolotus/bun-nolo/commit/9478816e8743bc3315bd478d7862059434ae0465))
-* **home:** put product proof directly under brand hero ([2584353](https://github.com/nolotus/bun-nolo/commit/2584353c88fc7aa1610f08aa14a33488a97282a7)), closes [#64](https://github.com/nolotus/bun-nolo/issues/64)
-* **memory:** add best-effort vNext lazy promotion ([8e25b2f](https://github.com/nolotus/bun-nolo/commit/8e25b2f1be125f9f14c189b6989d6d001dc6f2e5))
-* **skills:** make recommended skills actionable discovery ([d117215](https://github.com/nolotus/bun-nolo/commit/d1172156b3ba25e8d6a39dece4784c79c0e3d257))
-
-### Bug Fixes
-
-* **agent:** correct devin context windows to the live-catalog values ([8282ebe](https://github.com/nolotus/bun-nolo/commit/8282ebe83663280552125aabcbaf01e785eb66ed)), closes [#18](https://github.com/nolotus/bun-nolo/issues/18) [#7](https://github.com/nolotus/bun-nolo/issues/7)
-* **agent:** decode Devin usage tokens and correct SWE context window ([a33694c](https://github.com/nolotus/bun-nolo/commit/a33694c142fd9c55cb3f3cbda073a6ed1322b687)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7) [#7](https://github.com/nolotus/bun-nolo/issues/7)
-* **agent:** hoist delegation-value policy ahead of tiering, add executor escalation gate ([c17eeec](https://github.com/nolotus/bun-nolo/commit/c17eeec9d3995c9e7ead72f7a83e013df4e228a0)), closes [#63](https://github.com/nolotus/bun-nolo/issues/63)
-* **agent:** isolate pure devin oauth predicate from node builtins ([c2fc3df](https://github.com/nolotus/bun-nolo/commit/c2fc3dfe67579d8b88186b019dba9f7066c312b0))
-* **agent:** make cognitive delegation override explicit ([ebbfcb6](https://github.com/nolotus/bun-nolo/commit/ebbfcb68f057479d5a07d8aa3679365fed4a768f))
-* **agent:** sync devin registry with the live catalog and drop dead selectors ([9ab3f2a](https://github.com/nolotus/bun-nolo/commit/9ab3f2a9ca5313ae3435db8dd10e02e32f68f2db))
-* **home:** carry orchestration motion tokens with brand host ([9c2bcf5](https://github.com/nolotus/bun-nolo/commit/9c2bcf52f216f8234bf1524ed219e3d1812d60de))
-* **home:** hide legacy hero after brand intro ([f5dbcb8](https://github.com/nolotus/bun-nolo/commit/f5dbcb84c0153228edc4b08a5fda4acb4e470c5b))
-* **home:** land brand proof page without i18n hacks or duplicate mounts ([fd17d82](https://github.com/nolotus/bun-nolo/commit/fd17d82b0ded95145a956e742ba3e0f99ab66fef))
-* **home:** restore orchestration svg theme variables ([cacafe7](https://github.com/nolotus/bun-nolo/commit/cacafe7659457c107371e61b1e47f182c3f5c95e))
-* **i18n:** add open auditable homepage translations ([eca5af3](https://github.com/nolotus/bun-nolo/commit/eca5af310f485e5da1d6bc0820afc8b01af20fc6))
-* **i18n:** register open auditable translations ([3f7fc02](https://github.com/nolotus/bun-nolo/commit/3f7fc02f933429b888f982c8b35b82046abb479c))
-* **memory:** harden vNext lazy promotion ([d52429e](https://github.com/nolotus/bun-nolo/commit/d52429efc956974faa7bd5f8241250a2924eddfd))
-
-
 ## 0.76.0
 
 ## 0.76.0 (2026-09-22)
