@@ -166,7 +166,14 @@ type RawCatalogData = {
 let agentCatalogCache: AgentCatalogCacheEntry | null = null;
 let agentCatalogRefreshInFlight: Promise<void> | null = null;
 /** 首次加载的 in-flight Promise（原始数据层，不含 currentKey 排序）。 */
-let agentCatalogRawLoadInFlight: Promise<RawCatalogData> | null = null;
+/**
+ * 按 deadlineKind 分槽：前台调用只复用前台 in-flight，不能加入启动预热的
+ * background 请求（8s 预算），否则 /switch 会失去 2.5s 前台上限。
+ */
+const agentCatalogRawLoadInFlight = new Map<
+  "foreground" | "background",
+  Promise<RawCatalogData>
+>();
 
 /** 缓存「新鲜」窗口：窗口内重复打开 /agent 不再触发后台刷新。 */
 const AGENT_CATALOG_FRESH_MS = 15_000;
@@ -233,6 +240,14 @@ export function filterHealthyServers(serverUrls: string[]): string[] {
   });
   // 全部都在冷却时放行全量（宁可慢也不能一个服务器都不打）。
   return healthy.length > 0 ? healthy : serverUrls;
+}
+
+/**
+ * 主站永不被前台熔断：它是收藏/自有 agent 的权威来源，偶发压线超时就被跳过
+ * 5 分钟，会让 /switch 只显示备用服务器的残缺列表。熔断只用来跳过备用服务器。
+ */
+function keepPrimaryServer(serverUrls: string[], primary: string): string[] {
+  return serverUrls.includes(primary) ? serverUrls : [primary, ...serverUrls];
 }
 
 function recordServerFailures(failures: Array<{ serverUrl: string }>) {
@@ -316,7 +331,7 @@ export function withFetchDeadline(
 /** 清空目录缓存（测试与显式刷新用）。 */
 export function invalidateAgentCatalogCache() {
   agentCatalogCache = null;
-  agentCatalogRawLoadInFlight = null;
+  agentCatalogRawLoadInFlight.clear();
 }
 
 /**
@@ -332,6 +347,8 @@ export async function loadAgentCatalog(args: {
   fallbackFetchImpl?: CliFetchImpl;
   /** 测试注入：替代 getReadableCliDb 的本地 DB 降级通道。生产中 undefined。 */
   getDb?: () => Promise<unknown>;
+  /** 启动预热用 background：用户没在等，给慢主站足够预算，避免误触熔断。 */
+  deadlineKind?: "foreground" | "background";
 }): Promise<AgentCatalogEntry[]> {
   const env = args.env ?? process.env;
   const authToken = resolveAuthToken([], env);
@@ -350,18 +367,20 @@ export async function loadAgentCatalog(args: {
   // 复用已有的原始数据请求（prefetch 触发后用户很快 /switch 时命中），
   // 然后用调用方自己的 currentKey 做排序合并——避免 prefetch 的空 key 影响排序。
   let rawData: RawCatalogData;
-  if (agentCatalogRawLoadInFlight) {
-    rawData = await agentCatalogRawLoadInFlight;
+  const deadlineKind = args.deadlineKind ?? "foreground";
+  const inFlight = agentCatalogRawLoadInFlight.get(deadlineKind);
+  if (inFlight) {
+    rawData = await inFlight;
   } else {
-    const promise = fetchRawCatalogData(args, env);
-    agentCatalogRawLoadInFlight = promise;
+    const promise = fetchRawCatalogData({ ...args, deadlineKind }, env);
+    agentCatalogRawLoadInFlight.set(deadlineKind, promise);
     try {
       rawData = await promise;
-    } catch (error) {
-      agentCatalogRawLoadInFlight = null;
-      throw error;
+    } finally {
+      if (agentCatalogRawLoadInFlight.get(deadlineKind) === promise) {
+        agentCatalogRawLoadInFlight.delete(deadlineKind);
+      }
     }
-    agentCatalogRawLoadInFlight = null;
   }
 
   const entries = mergeCatalogEntries(
@@ -428,8 +447,10 @@ export function prefetchAgentCatalog(args: {
   void (async () => {
     // 收藏元数据必须来自服务器；本地缓存不能作为 favorites-only 列表来源。
     await prefillCatalogFromLocalDb({ env: args.env, getDb: args.getDb }).catch(() => {});
-    // 后台网络请求刷新收藏目录缓存（SWR，后台失败静默）
-    void loadAgentCatalog({ ...args, currentKey: "" }).catch(() => {});
+    // 后台网络请求刷新收藏目录缓存（SWR，后台失败静默）。
+    // 用 background 截止时间：主站实测 1.5~2.5s，压线 2.5s 前台预算时会被
+    // 记为失败并熔断 5 分钟，导致此后 /switch 只拿到备用服务器的残缺列表。
+    void loadAgentCatalog({ ...args, currentKey: "", deadlineKind: "background" }).catch(() => {});
   })();
 }
 
@@ -466,7 +487,7 @@ async function fetchRawCatalogData(
   // 后台刷新不熔断（探活恢复）；前台跳过冷却中的慢/挂死服务器。
   const serverUrls =
     (args.deadlineKind ?? "foreground") === "foreground"
-      ? filterHealthyServers(allServerUrls)
+      ? keepPrimaryServer(filterHealthyServers(allServerUrls), serverUrl)
       : allServerUrls;
   const fetchStartedAt = performance.now();
   // 保留原始 ListedAgent[]，供 orphan hydrate 做三键（privateKey/publicKey/id）去重，
@@ -507,10 +528,31 @@ async function fetchRawCatalogData(
     recordServerFailures(remoteResult.failures);
   } catch {
     try {
-      const db = args.getDb
-        ? (await args.getDb() as CliKvDb)
-        : await getReadableCliDb({ write: () => {} });
-      listedAgents = await listLocalCachedAgents({ db, userId });
+      // 本地降级同样受截止时间约束（至少留 500ms）：本地库慢/被锁时不能让
+      // /switch 无限停在「正在加载」，超时继续走单服务器重试或空目录。
+      const localBudgetMs = Math.max(
+        500,
+        deadlineMs - (performance.now() - fetchStartedAt),
+      );
+      let localTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        listedAgents = await Promise.race([
+          (async () => {
+            const db = args.getDb
+              ? (await args.getDb() as CliKvDb)
+              : await getReadableCliDb({ write: () => {} });
+            return listLocalCachedAgents({ db, userId });
+          })(),
+          new Promise<never>((_, reject) => {
+            localTimer = setTimeout(
+              () => reject(new Error("local catalog deadline exceeded")),
+              localBudgetMs,
+            );
+          }),
+        ]);
+      } finally {
+        if (localTimer) clearTimeout(localTimer);
+      }
     } catch {
       try {
         listedAgents = await listRemoteAgents({

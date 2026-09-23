@@ -25,6 +25,7 @@ import { agentRecordHasConfiguredCredential } from "./agentRecordHelpers";
 import {
   isOwnedAgentKey,
   ownedAgentKey,
+  ownedAgentKeyPrefix,
   parseOwnedAgentId,
   publicAgentKey,
   PUBLIC_AGENT_KEY_PREFIX,
@@ -200,14 +201,19 @@ export async function listLocalCachedAgents(args: {
 }) {
   const privateRecords = new Map<string, any>();
   const publicKeys = new Set<string>();
-  for await (const [key, value] of args.db.iterator({ gte: "", lte: "\uffff" })) {
-    if (typeof key !== "string" || !value || typeof value !== "object") continue;
-    if (isOwnedAgentKey(key, args.userId)) {
-      privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
-      continue;
-    }
-    if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
-      publicKeys.add(key);
+  // 只扫两个前缀区间，不做全库扫描：本地库含大量 dialog/message 记录，
+  // 实测全库迭代 30s 仅扫 2800 条，会让 /switch 永远停在「正在加载」。
+  const ownedPrefix = ownedAgentKeyPrefix(args.userId);
+  for (const prefix of [ownedPrefix, PUBLIC_AGENT_KEY_PREFIX]) {
+    for await (const [key, value] of args.db.iterator({ gte: prefix, lte: `${prefix}\uffff` })) {
+      if (typeof key !== "string" || !value || typeof value !== "object") continue;
+      if (isOwnedAgentKey(key, args.userId)) {
+        privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
+        continue;
+      }
+      if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
+        publicKeys.add(key);
+      }
     }
   }
 
