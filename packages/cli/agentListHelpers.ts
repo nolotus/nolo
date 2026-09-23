@@ -58,6 +58,18 @@ export type ListedAgent = {
   cliProvider?: string;
   /** Epoch ms when the provider is expected to become available again. */
   nextAvailableAt?: number;
+  /**
+   * 仅收藏水化分支设置：非自有 agent 的属主 userId。toSafeAgentSummary →
+   * resolveBillingSource 靠它识别 owner_subscription（缺失会被封顶成
+   * platform_credits，误导编排者去索取平台积分授权）。
+   */
+  ownerId?: string;
+  /**
+   * 仅收藏水化分支设置：本次用调用者凭据读成功的那把 key（证明可解析）。
+   * 空间共享 / grant 的他人 agent 既非自有也无 public 记录，没有它
+   * agentKey 会被整个省略，列表里表现为「不可派发」。
+   */
+  verifiedAgentKey?: string;
 };
 
 function parseAgentRecordId(privateKey: string, explicitId?: string) {

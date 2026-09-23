@@ -249,7 +249,7 @@ export async function resolveApiKeyRefFromStore(args: {
   const credential = await store.read(userId, oauthProvider);
   if (!credential) {
     throw new Error(
-      `OAuth credential for "${provider}" not found. Run \`nolo auth ${provider}\` (auto-syncs when server is configured) or \`nolo auth ${provider} --sync-to-server\`.`
+      `OAuth credential for "${provider}" not found. If authorized locally, run \`nolo auth ${provider} --sync-only\`; otherwise run \`nolo auth ${provider}\` (choose sync on login). If using a shared agent, the owner must sync their credential.`
     );
   }
 

@@ -21,6 +21,8 @@ export type NoloProfile = {
   agentName?: string;
   /** TUI interface language saved by /lang; surfaces as NOLO_LANG. */
   locale?: "zh" | "en";
+  /** Remembered OAuth sync preferences per provider. */
+  oauthSync?: Record<string, boolean>;
 };
 
 export type NoloProfileConfig = {
@@ -427,3 +429,33 @@ export function saveProfileAgentSelection(
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return config;
 }
+
+export function getProfileOAuthSync(
+  provider: string,
+  path = getDefaultProfileConfigPath()
+): boolean | undefined {
+  const config = loadProfileConfig(path);
+  if (!config) return undefined;
+  const profile = config.profiles[config.currentProfile];
+  return profile?.oauthSync?.[provider];
+}
+
+export function saveProfileOAuthSync(
+  provider: string,
+  sync: boolean,
+  path = getDefaultProfileConfigPath()
+): NoloProfileConfig | null {
+  if (isProtectedHomeProfileWrite(path)) return null;
+  const config = loadProfileConfig(path);
+  if (!config) return null;
+  const profile = config.profiles[config.currentProfile];
+  if (!profile) return null;
+  profile.oauthSync = {
+    ...(profile.oauthSync ?? {}),
+    [provider]: sync,
+  };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  return config;
+}
+

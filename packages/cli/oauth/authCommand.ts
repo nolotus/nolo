@@ -25,6 +25,8 @@ import {
 import {
   loadProfileConfig,
   buildEnvFromProfile,
+  getProfileOAuthSync,
+  saveProfileOAuthSync,
 } from "../client/profileConfig";
 import { parseFlagWithOptionalValue, upsertEnvVariable } from "./envFile";
 
@@ -54,11 +56,25 @@ export type AuthProviderCommandDeps = OAuthFlowDeps & {
    * which poisons Bun's shared module registry across files.
    */
   resolveServerSyncConfig?: () => ServerSyncConfig | null;
+  /**
+   * Optional hooks for reading and writing OAuth sync preferences.
+   * Injected for testing to avoid touching profile config on disk.
+   */
+  getOAuthSyncPreference?: (provider: OAuthProvider) => boolean | undefined;
+  setOAuthSyncPreference?: (provider: OAuthProvider, sync: boolean) => void;
+  /**
+   * Optional hook for prompting user whether to sync credentials.
+   * Resolves to true (sync) or false (don't sync).
+   */
+  promptOAuthSync?: (question: string) => Promise<boolean>;
+  /**
+   * Optional hook or value to determine whether standard input/output is a TTY.
+   */
+  isTTY?: boolean | (() => boolean);
 };
 
-const SYNC_HELP_LINE = `  --sync-to-server     After local save, push the credential to your nolo server
-                       (default when NOLO_SERVER + AUTH_TOKEN / profile are set).
-  --no-sync-to-server  Skip server sync even when server config is available.
+const SYNC_HELP_LINE = `  --sync-to-server     After local save, push the credential to your nolo server and remember this choice.
+  --no-sync-to-server  Skip server sync and remember this choice (keeps credentials local only).
   --sync-only          Push $NOLO_HOME/credentials/<provider>.json (or ~/.nolo/credentials when NOLO_HOME is unset) to the server without re-login.`;
 
 const CHATGPT_HELP_TEXT = `Authorize nolo-cli to call the OpenAI Codex / ChatGPT Plus API on your behalf.
@@ -346,6 +362,7 @@ async function syncCredentialToServer(
 
     if (res.ok) {
       output.log(`[nolo] Synced to ${serverOrigin}`);
+      output.log(`[nolo] 网页端现在可以使用该订阅了。`);
     } else {
       let errorDetail = "";
       try {
@@ -394,14 +411,6 @@ export async function runAuthProviderCommand(
   const useBrowser = args.includes("--browser");
   const noBrowser = args.includes("--no-browser") || deps.noBrowserByDefault;
   const syncOnly = args.includes("--sync-only");
-  const syncConfigAvailable = !!(
-    deps.resolveServerSyncConfig ?? resolveServerSyncConfig
-  )();
-  const explicitSync =
-    syncOnly ||
-    args.includes("--sync-to-server") ||
-    process.env.NOLO_OAUTH_AUTO_SYNC === "1";
-  const syncToServer = explicitSync;
   const generateToken = args.includes("--generate-token");
   const writeToEnvRaw = parseFlagWithOptionalValue(args, "--write-to-env");
   const writeToEnvPath =
@@ -516,7 +525,87 @@ export async function runAuthProviderCommand(
         `.`
     );
 
-    if (syncToServer) {
+    const hasExplicitNoSync = args.includes("--no-sync-to-server");
+    const hasExplicitSync = args.includes("--sync-to-server");
+    const envAutoSync = process.env.NOLO_OAUTH_AUTO_SYNC;
+
+    const getOAuthSync =
+      deps.getOAuthSyncPreference ?? ((p: OAuthProvider) => getProfileOAuthSync(p));
+    const setOAuthSync =
+      deps.setOAuthSyncPreference ??
+      ((p: OAuthProvider, s: boolean) => {
+        saveProfileOAuthSync(p, s);
+      });
+
+    let shouldSync = false;
+
+    if (hasExplicitNoSync || envAutoSync === "0") {
+      if (hasExplicitNoSync) {
+        setOAuthSync(provider, false);
+      }
+      shouldSync = false;
+    } else if (hasExplicitSync || envAutoSync === "1") {
+      if (hasExplicitSync) {
+        setOAuthSync(provider, true);
+      }
+      shouldSync = true;
+    } else {
+      const remembered = getOAuthSync(provider);
+      if (remembered !== undefined) {
+        shouldSync = remembered;
+      } else {
+        const syncConfig = (
+          deps.resolveServerSyncConfig ?? resolveServerSyncConfig
+        )();
+        if (!syncConfig) {
+          shouldSync = false;
+          output.log(
+            `[nolo] 未配置服务器。如需在网页端使用，请先运行 nolo login，再运行 nolo auth ${provider} --sync-only`
+          );
+        } else {
+          const isTTY =
+            typeof deps.isTTY === "function"
+              ? deps.isTTY()
+              : (deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
+
+          if (isTTY) {
+            const question = `同步到 ${syncConfig.serverOrigin}，让网页端也能使用这个 ${provider} 订阅？凭证加密存储，可随时 nolo auth ${provider} --no-sync-to-server 关闭 [Y/n] `;
+            let answer: boolean;
+            if (deps.promptOAuthSync) {
+              answer = await deps.promptOAuthSync(question);
+            } else if (deps.readLine) {
+              const raw = await deps.readLine(question);
+              const trimmed = raw.trim().toLowerCase();
+              answer = trimmed === "" || trimmed === "y" || trimmed === "yes";
+            } else {
+              const readline = await import("node:readline");
+              const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout,
+              });
+              const raw = await new Promise<string>((resolve) => {
+                rl.question(question, (ans) => {
+                  rl.close();
+                  resolve(ans);
+                });
+              });
+              const trimmed = raw.trim().toLowerCase();
+              answer = trimmed === "" || trimmed === "y" || trimmed === "yes";
+            }
+
+            setOAuthSync(provider, answer);
+            shouldSync = answer;
+          } else {
+            shouldSync = false;
+            output.log(
+              `[nolo] 未同步凭据到服务器。如需网页端使用，请运行: nolo auth ${provider} --sync-to-server（或 --sync-only）`
+            );
+          }
+        }
+      }
+    }
+
+    if (shouldSync) {
       await syncCredentialToServer(provider, credential, deps);
     }
 

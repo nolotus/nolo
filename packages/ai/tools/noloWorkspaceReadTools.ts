@@ -691,6 +691,10 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
         if (favKey.startsWith("agent-pub-")) {
           favRecord.publicRecordExists = true;
           favRecord.publicKey = favKey;
+        } else {
+          // 与 server 端同步：空间共享 / grant 的他人 agent 同样钉回已验证 key，
+          // 否则 toSafeAgentSummary 省略 agentKey，列表里表现为「不可派发」。
+          favRecord.verifiedAgentKey = favKey;
         }
         const key = favRecord?.dbKey || favRecord?.id || favKey;
         recordsMap.set(key, favRecord);

@@ -210,6 +210,15 @@ export async function runAgentListCommand(
             continue;
           }
           if (norm) {
+            // 与 server 端 noloWorkspaceServerTools 收藏水化同一证明标准：读成功
+            // 即证明 favKey 可解析。public 形态由 decorateAgentsWithPublicStatus
+            // 负责，这里只钉非 public 的他人 agent（空间共享 / grant）。
+            if (!favKey.startsWith("agent-pub-")) {
+              norm.verifiedAgentKey = favKey;
+              if (typeof record.userId === "string" && record.userId) {
+                norm.ownerId = record.userId;
+              }
+            }
             agents.push(norm);
             hydratedFavoriteAgents.push(norm);
             existingKeys.add(norm.privateKey);

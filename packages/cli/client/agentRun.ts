@@ -81,6 +81,7 @@ import {
   mergeAvailabilityDeadline,
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
+import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
 import { t } from "../tui/i18n";
 
 /** Local loop is heavy; load only when a local turn actually runs. */
@@ -556,13 +557,80 @@ type LocalRunErrorClass =
         | "upstream";
       transport: ProviderTransport;
       status: number;
+      /**
+       * 无 `<label> provider failed: HTTP <status>` 主形态、仅凭报文文本命中时
+       * 置 true：status 是语义等价码（如 429），文案不得声称上游真的返回了该
+       * HTTP 状态。
+       */
+      statusInferred?: true;
+      /**
+       * rate-limit 细分：true = 配额/余额耗尽（insufficient_quota、quota
+       * reached…），重试要等配额窗口复位；缺省 = 短时限流，稍后重试即可。
+       * 两类都不是本地凭证问题。
+       */
+      quotaExhausted?: true;
     };
+
+/**
+ * 无状态码时的限流/配额文案兜底（词表 + 否决 + 细分）。
+ *
+ * 背景：Devin Connect 等运行时的限流报错不带 `<label> provider failed: HTTP
+ * <status>` 主形态（trailer 是 gRPC 风格 `Devin Connect upstream error
+ * resource_exhausted: Reached free model rate limit...`），此前一路落进 generic
+ * 分支，被误导性地提示「Fix the local credential/config」。
+ *
+ * 词表分两层：
+ * - QUOTA_ERROR_PATTERNS（共享层单一事实来源，与 agentRunCommand 的配额熔断
+ *   同一份）：429 / quota / insufficient_quota / access_terminated_error /
+ *   weekly usage limit / rate limit / too many requests / 额度 / 上限 / 用尽 …
+ * - 本文件补充 shared 未覆盖的形态：resource_exhausted、max_concurrent_reached、
+ *   rate_limit / rate-limited（下划线/连字符变体）。
+ */
+const EXTRA_RATE_LIMIT_TEXT_RE =
+  /\brate[\s_-]?limit(?:ed|ing|s)?\b|\bresource[_\s-]?exhausted\b|\bmax_concurrent_reached\b/i;
+
+function looksLikeRateLimitedText(message: string): boolean {
+  return (
+    EXTRA_RATE_LIMIT_TEXT_RE.test(message) ||
+    QUOTA_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+  );
+}
+
+/**
+ * 认证信号（无状态码时用于否决限流判定，防止把带 credential/unauthorized/401
+ * 字样的认证错误误报成限流）。刻意只认**键上**认证短语：裸 "credential" 一词
+ * 不足以否决——限流文案里也可能顺带提到 credentials。
+ */
+const AUTH_TEXT_SIGNAL_RE =
+  /\b401\b|unauthori[sz]ed|invalid[_\s-]?(?:api[_\s-]?key|token|credential)s?|(?:api[_\s-]?key|token|credential)s?[_\s-](?:invalid|expired|rejected|missing|not[_\s-]?found)|authentication[_\s-]?(?:error|failed|required)/i;
+
+/**
+ * 「配额/余额耗尽」细分判据（区别于短时限流）：insufficient_quota /
+ * insufficient balance|credits / 余额不足，加上 403 配额判定的既有词表
+ * （quota reached/exhausted、weekly usage limit、access_terminated_error、
+ * quota reset at…，复用 isQuotaLimited403Body，避免再维护第三份）。
+ */
+const QUOTA_EXHAUSTED_EXTRA_RE =
+  /insufficient[_\s-]?(?:quota|balance|credits?)|余额不足|额度已?用尽/i;
+
+function looksLikeQuotaExhaustedText(message: string): boolean {
+  return isQuotaLimited403Body(message) || QUOTA_EXHAUSTED_EXTRA_RE.test(message);
+}
+
+/**
+ * 兜底提取无主形态文案里的明确上游 5xx（如 Devin Connect 的
+ * `Devin Connect upstream returned error 503: ...`、`status: 502`）：服务端/网关
+ * 抖动不该被引导成「修本地凭证」，按 transient 语义给准确提示。
+ */
+const BARE_UPSTREAM_5XX_RE =
+  /\bHTTP[:\s]+(5\d\d)\b|\bstatus[:\s=]+(5\d\d)\b|\breturned error\s+(5\d\d)\b/i;
 
 /**
  * Classify a provider HTTP failure into a user-facing category.
  *
  * Status → kind mapping (applies to both local and platform transports):
- *   401 / 403          → auth            (credential/permission — legit "fix local credential")
+ *   401 / 403          → auth            (credential/permission — legit "fix local credential";
+ *                                         403 with explicit quota text → rate-limit)
  *   400 / 422          → rejected-payload (upstream rejected the *request body*; NOT a credential
  *                                         issue — e.g. `invalid tool call arguments` when a dialog
  *                                         history contains tool_calls from a different model after
@@ -570,34 +638,73 @@ type LocalRunErrorClass =
  *   429                → rate-limit      (provider throttling — retry)
  *   500–599            → transient       (gateway/upstream hiccup — retry)
  *   other 4xx          → upstream        (provider-side rejection, not local config)
- *   no HTTP match      → generic         (genuinely local config/runtime — "fix local credential")
+ *   no `HTTP <status>` → auth / rate-limit / transient by message text (statusInferred),
+ *                        covered then only: 401/unauthorized… wording, rate-limit/quota
+ *                        wording (`resource_exhausted`, `rate limit`, `insufficient_quota`,
+ *                        `429`…), bare 5xx wording — generic otherwise
+ *                        (genuinely local config/runtime — "fix local credential")
  */
 export function classifyLocalRunError(message: string): LocalRunErrorClass {
   const m = message.match(PROVIDER_HTTP_FAILED_RE);
-  if (!m) return { kind: "generic" };
-  const status = Number(m[2]);
+  if (m) {
+    const status = Number(m[2]);
+    const transport: ProviderTransport = PLATFORM_TRANSPORT_RE.test(message)
+      ? "platform"
+      : "local";
+    const quotaExhausted = looksLikeQuotaExhaustedText(message);
+
+    if (status === 401) {
+      return { kind: "auth", transport, status };
+    }
+    if (status === 403) {
+      return quotaExhausted
+        ? { kind: "rate-limit", transport, status, quotaExhausted: true }
+        : { kind: "auth", transport, status };
+    }
+    if (status === 400 || status === 422) {
+      return { kind: "rejected-payload", transport, status };
+    }
+    if (status === 429) {
+      return {
+        kind: "rate-limit",
+        transport,
+        status,
+        ...(quotaExhausted ? { quotaExhausted: true } : {}),
+      };
+    }
+    if (status >= 500 && status <= 599) {
+      return { kind: "transient", transport, status };
+    }
+    return { kind: "upstream", transport, status };
+  }
+
+  // No `<label> provider failed: HTTP <status>` shape. Several runtimes still
+  // report upstream failures in their own words (Devin Connect emits gRPC-style
+  // trailers), so classify what we can recognize from the text alone. Order
+  // matters: auth signals first — a credential error must never be reported as
+  // throttling, even when the wording mentions `credential`/`unauthorized`/401.
   const transport: ProviderTransport = PLATFORM_TRANSPORT_RE.test(message)
     ? "platform"
     : "local";
-
-  if (status === 401) {
-    return { kind: "auth", transport, status };
+  if (AUTH_TEXT_SIGNAL_RE.test(message)) return { kind: "generic" };
+  if (looksLikeRateLimitedText(message)) {
+    const quotaExhausted = looksLikeQuotaExhaustedText(message);
+    // 429 是语义等价码：文本命中的限流与 HTTP 429 同处置（冷却落盘 + 文案），
+    // statusInferred 让文案不谎称上游真的返回了 HTTP 429。
+    return {
+      kind: "rate-limit",
+      transport,
+      status: 429,
+      statusInferred: true,
+      ...(quotaExhausted ? { quotaExhausted: true } : {}),
+    };
   }
-  if (status === 403) {
-    return isQuotaLimited403Body(message)
-      ? { kind: "rate-limit", transport, status }
-      : { kind: "auth", transport, status };
-  }
-  if (status === 400 || status === 422) {
-    return { kind: "rejected-payload", transport, status };
-  }
-  if (status === 429) {
-    return { kind: "rate-limit", transport, status };
-  }
-  if (status >= 500 && status <= 599) {
+  const bare5xx = message.match(BARE_UPSTREAM_5XX_RE);
+  if (bare5xx) {
+    const status = Number(bare5xx[1] ?? bare5xx[2] ?? bare5xx[3]);
     return { kind: "transient", transport, status };
   }
-  return { kind: "upstream", transport, status };
+  return { kind: "generic" };
 }
 
 /**
@@ -643,6 +750,10 @@ type FailureCtx = {
   /** Human-readable transport label: "server chat proxy" or "local provider". */
   where: "server chat proxy" | "local provider";
   status: number;
+  /** 见 LocalRunErrorClass.statusInferred：文案不得声称上游真的返回了该状态码。 */
+  statusInferred?: true;
+  /** 见 LocalRunErrorClass.quotaExhausted：配额耗尽 vs 短时限流的文案细分。 */
+  quotaExhausted?: true;
   /**
    * 启动期 429 兜底落盘后的冷却截止（ISO）。由 rawError.cooldownUntil 传入
    * （markStartupRateLimitCooldown 把它挂在错误对象上，沿用 localLoop 把
@@ -704,6 +815,18 @@ function buildRejectedPayloadFailure(ctx: FailureCtx): string {
   );
 }
 
+/**
+ * 从限流/配额报文里摘出上游给出的 retry-after / 复位时间**原文**（只做展示，
+ * 不做解析换算；复位时刻的权威解析在 agentAvailabilityShared）。
+ */
+const RATE_LIMIT_RESET_HINT_RE =
+  /retry[-_\s]?after\s*[:=]?\s*\d[\w:-]*|resets?\s+(?:in|at)\s+\d[\w:-]*(?:[ T]\d[\w:-]*)?/i;
+
+function extractRateLimitResetHint(message: string): string | undefined {
+  const match = message.match(RATE_LIMIT_RESET_HINT_RE);
+  return match ? match[0].trim() : undefined;
+}
+
 function buildRateLimitFailure(ctx: FailureCtx): string {
   // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
   // 文案必须带上「已标记冷却至 <ISO>」：用户不再只看到一次限流报错，还能知道
@@ -711,9 +834,23 @@ function buildRateLimitFailure(ctx: FailureCtx): string {
   const cooldownNote = ctx.cooldownUntil
     ? ` 已标记冷却至 ${ctx.cooldownUntil}，到期前派发会被冷却门控拦截（到期自动 probe 恢复）。`
     : "";
+  // 仅凭文本命中的限流（statusInferred）不能声称 "returned HTTP 429"——上游
+  // 只是报文里说限流/配额；status 是语义等价码。
+  const headline = ctx.statusInferred
+    ? `${ctx.where} hit an upstream rate-limit/quota error`
+    : `${ctx.where} returned HTTP ${ctx.status}, rate limited`;
+  // 配额耗尽与短时限流的下一步不同：前者要等配额窗口复位，后者稍后重试即可；
+  // 两者都明确「不是本地凭证问题」，并给出换 agent 的出口。
+  const cause = ctx.quotaExhausted
+    ? "The upstream quota/balance for this agent is exhausted — NOT a local credential/config issue"
+    : "This agent is being throttled by the upstream provider — NOT a local credential/config issue";
+  const reset = extractRateLimitResetHint(ctx.message);
+  const advice = ctx.quotaExhausted
+    ? `Retry after the upstream quota resets${reset ? ` (${reset})` : ""}`
+    : `Retry shortly${reset ? ` (${reset})` : ""}`;
   return (
-    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, rate limited). Detail: ${ctx.message} ` +
-    `${NO_FALLBACK} Retry shortly, ${SERVER_FALLBACK_HINT}.${cooldownNote}\n`
+    `${RUN_UNAVAILABLE_PREFIX} (${headline}). Detail: ${ctx.message} ` +
+    `${NO_FALLBACK} ${cause}. ${advice}, switch to another agent (\`nolo agent list\`), ${SERVER_FALLBACK_HINT}${cooldownNote}\n`
   );
 }
 
@@ -912,6 +1049,8 @@ export function describeLocalRunFailure(
     message,
     where: cls.transport === "platform" ? "server chat proxy" : "local provider",
     status: cls.status,
+    ...(cls.statusInferred ? { statusInferred: true } : {}),
+    ...(cls.quotaExhausted ? { quotaExhausted: true } : {}),
     ...(cooldownUntil ? { cooldownUntil } : {}),
   };
   return FAILURE_BUILDERS[cls.kind](ctx);

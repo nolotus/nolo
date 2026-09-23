@@ -254,6 +254,10 @@ const STRINGS = {
     en: "✓ Copied the selection to the clipboard.",
     zh: "✓ 已复制选区到剪贴板。",
   },
+  copiedSelectionBusy: {
+    en: "✓ Copied the selection to the clipboard. Press Esc to stop generating.",
+    zh: "✓ 已复制选区到剪贴板。按 Esc 停止生成。",
+  },
   copiedAllHistory: {
     en: "✓ Copied the full conversation to the clipboard.",
     zh: "✓ 已复制完整对话到剪贴板。",

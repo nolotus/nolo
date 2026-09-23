@@ -1702,14 +1702,54 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 原内联于 handleInputToken 的 `if (sequence === "\u0003")` 整块，职责清晰
     // （防误退键盘语义），搬到这里保持纯搬移：不改逻辑、不改输出字节序列。
     // 依赖（busyLock 之外的闭包变量）在交互块作用域内全部可及。
+    // 非空鼠标选区判定（idle/busy 两条 Ctrl+C 分支共用）。
+    const hasNonEmptySelection = () =>
+      selectionState.anchor !== null &&
+      selectionState.head !== null &&
+      !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
+
+    // 提取选区文本写入剪贴板、清除高亮并重绘。busy 变体改用带 Esc 提示的
+    // 成功文案（生成仍在继续，Ctrl+C 已不承担停止语义，告诉用户正确的停止键）。
+    const copySelectionToClipboard = async (
+      feedbackKey: "copiedSelection" | "copiedSelectionBusy",
+    ): Promise<void> => {
+      const tty = output as { rows?: number; columns?: number };
+      const columns = tty.columns ?? 80;
+      const contentWidth = Math.max(1, columns - 1);
+      const textToCopy = extractSelectedText(
+        history,
+        selectionState.anchor!,
+        selectionState.head!,
+        contentWidth,
+      );
+      clearSelection();
+      if (textToCopy.length > 0) {
+        try {
+          await writeClipboard(textToCopy);
+          emitCommandOutput(t(feedbackKey));
+        } catch (error) {
+          emitCommandOutput(
+            `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
+          );
+        }
+      }
+      paintFrame(buffer);
+    };
+
     const handleCtrlCKey = async (busyLock: boolean): Promise<void> => {
       // Ctrl+C（\u0003）：防误退。必须放在 generic clearSelection() 之前，
       // 否则会先清掉鼠标选区，导致"Ctrl+C 提取选区"失效。
-      // - Busy：中止当前 Turn（保持原有 abort 语义），绝不退出。
+      // - Busy + 有鼠标选区：只复制选区（用户生成中拖选按 Ctrl+C 的意图是
+      //   复制而非中止），提示按 Esc 停止生成。
+      // - Busy + 无选区：中止当前 Turn（保持原有 abort 语义），绝不退出。
       // - Idle + 有鼠标选区：提取选区文本写入剪贴板，清除高亮，绝不退出。
       // - Idle + 输入草稿非空：仅清空草稿（同 Bash/Zsh），绝不退出。
       // - Idle + 草稿空且无选区：第一次记录时间戳 + 提示；1000ms 内第二次才退出。
       if (busyLock && activeTurnAbort) {
+        if (hasNonEmptySelection()) {
+          await copySelectionToClipboard("copiedSelectionBusy");
+          return;
+        }
         // 中止当前 Turn（保持原有行为）：与 Esc 的协作停止一致。
         const stopBinding = chatQueueBinding;
         if (stopBinding && stopBinding.queueLength() > 0) {
@@ -1721,33 +1761,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
       // Idle 分支。
       const now = Date.now();
-      const hasSelection =
-        selectionState.anchor !== null &&
-        selectionState.head !== null &&
-        !areSelectionPointsEqual(selectionState.anchor, selectionState.head);
-      if (hasSelection) {
-        // 提取选区文本写入剪贴板，清除选区高亮。
-        const tty = output as { rows?: number; columns?: number };
-        const columns = tty.columns ?? 80;
-        const contentWidth = Math.max(1, columns - 1);
-        const textToCopy = extractSelectedText(
-          history,
-          selectionState.anchor!,
-          selectionState.head!,
-          contentWidth,
-        );
-        clearSelection();
-        if (textToCopy.length > 0) {
-          try {
-            await writeClipboard(textToCopy);
-            emitCommandOutput(t("copiedSelection"));
-          } catch (error) {
-            emitCommandOutput(
-              `[nolo] ${t("copyFailed")}: ${toErrorMessage(error)}`,
-            );
-          }
-        }
-        paintFrame(buffer);
+      if (hasNonEmptySelection()) {
+        await copySelectionToClipboard("copiedSelection");
         return;
       }
       if (selectionState.anchor) {

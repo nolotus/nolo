@@ -62,8 +62,15 @@ const RETRYABLE_HTTP_STATUSES = new Set([429, 503]);
  */
 export function isTransientFetchError(error: unknown) {
   const message = toErrorMessage(error);
-  return /certificate|handshake|network|socket|timed out|timeout|ECONNRESET/i.test(
-    message,
+  return (
+    /certificate|handshake|network|socket|timed out|timeout|ECONNRESET|UND_ERR_SOCKET|other side closed/i.test(
+      message,
+    ) ||
+    // undici（Node fetch）连接中途被断开时抛 `TypeError: terminated`，message
+    // 就是裸的 "terminated"（真实 cause 是 UND_ERR_SOCKET）。只认「整条就是
+    // terminated」或「前缀: terminated」这种形态，避免把 access_terminated_error
+    // （配额封禁）或 "process was terminated by signal" 误判成可重试的网络抖动。
+    /(?:^|:\s*)terminated$/i.test(message.trim())
   );
 }
 
