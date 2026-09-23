@@ -68,10 +68,29 @@ const stagedNodeModuleNames = [
   "node-gyp-build",
 ] as const;
 const stagedWorkspacePackages = [
-  { name: "desktop-chrome-connector", destName: "desktop-chrome-connector" },
+  {
+    name: "desktop-chrome-connector",
+    destName: "desktop-chrome-connector",
+    // Chrome Web Store 上架素材（store/listing.md、store/screenshots/*.png、
+    // promo/）只用于人工提审，不属于运行时载荷。打包前缀
+    // `NoloDesktop-canary/Resources/app/integrations/connector/` 下
+    // `store/screenshots/02-bounded-output-1280x800.png` 是 104 字符——
+    // 会让 GNU tar 写出 'L' 记录、触发自解压器 TarUnsupportedFileType
+    // （2026-09-21 alpha Linux leg 因此 fail-closed 10 次，mac/win 白跑）。
+    // 在 staged 副本里剪掉 store/**，仓库源目录不动。
+    exclude: ["store"],
+  },
   { name: "integrations/x-reader", destName: "x-reader" },
   { name: "integrations/xhs-reader", destName: "xhs-reader" },
 ] as const;
+
+/**
+ * 打包前从 staged node_modules 里剪掉的测试目录。`abstract-level/test/` 下
+ * `iterator-explicit-snapshot-test.js` 在 canary 前缀下正好 100 字符、贴边
+ * 界；依赖一升级就会越界。测试代码本就不该进运行时载荷。
+ */
+const STAGED_NODE_MODULES_PRUNE_DIRS = ["test", "tests"] as const;
+const STAGED_NODE_MODULES_PRUNE_PACKAGES = ["abstract-level"] as const;
 
 const stageRuntimeTrees = async () => {
   if (process.env.NOLO_DESKTOP_SKIP_VENDOR_STAGE === "1") {
@@ -99,10 +118,27 @@ const stageRuntimeTrees = async () => {
   if (pruned.removed.length > 0) {
     console.log(`[pre-build] pruned classic-level payload entries: ${pruned.removed.join(", ")}`);
   }
-  for (const { name, destName } of stagedWorkspacePackages) {
+  // 剪掉 node_modules 里打包后会越界的测试目录（见 STAGED_NODE_MODULES_PRUNE_DIRS）。
+  for (const pkg of STAGED_NODE_MODULES_PRUNE_PACKAGES) {
+    for (const dir of STAGED_NODE_MODULES_PRUNE_DIRS) {
+      const target = join(vendorDir, "node_modules", pkg, dir);
+      if (existsSync(target)) {
+        await rm(target, { recursive: true, force: true });
+        console.log(`[pre-build] pruned staged node_modules: ${pkg}/${dir}`);
+      }
+    }
+  }
+  for (const { name, destName, exclude } of stagedWorkspacePackages) {
     const source = join(repoRoot, "packages", name);
     const target = join(vendorDir, "packages", destName);
     await cp(source, target, { recursive: true });
+    for (const excludedDir of exclude ?? []) {
+      const excludedTarget = join(target, excludedDir);
+      if (existsSync(excludedTarget)) {
+        await rm(excludedTarget, { recursive: true, force: true });
+        console.log(`[pre-build] excluded staged payload: ${destName}/${excludedDir}`);
+      }
+    }
   }
 };
 

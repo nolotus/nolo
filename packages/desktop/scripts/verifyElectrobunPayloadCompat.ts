@@ -169,7 +169,23 @@ export const scanTarFileForCompat = (
       const type = typeRaw === 0 ? "0" : String.fromCharCode(typeRaw);
 
       if (type === "L" || type === "K") {
-        violations.push({ kind: "longname", entry: name || "(gnu longlink record)" });
+        // GNU longname 记录的真实路径在 data 区（NUL 结尾的字符串），不是 header
+        // name 字段（那里永远是 `././@LongLink` 字面量）。读出来才有调试价值：
+        // 2026-09-21 alpha Linux leg 只剩 2 个违规时，字面量完全看不出是
+        // `integrations/connector/store/screenshots/*.png`。
+        const dataOffset = offset + TAR_HEADER_BYTES;
+        // 防御：损坏的 tar 可能在 header 写巨大 size（>4GiB），Buffer.alloc 会
+        // RangeError；文件系统路径上限 ~4KB，截断读取足够诊断。
+        const readSize = Math.min(entrySize, 4096);
+        const dataBuffer = Buffer.alloc(readSize);
+        const dataRead = readSync(fd, dataBuffer, 0, readSize, dataOffset);
+        const realPath = dataRead > 0
+          ? dataBuffer.subarray(0, dataRead).toString("utf8").replace(/\0.*$/s, "")
+          : "";
+        violations.push({
+          kind: "longname",
+          entry: realPath || name || "(gnu longlink record)",
+        });
       } else if (type === "1") {
         violations.push({ kind: "hardlink", entry: name });
       } else if (!SUPPORTED_TAR_TYPES.has(type)) {
