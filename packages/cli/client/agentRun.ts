@@ -1862,7 +1862,13 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   }
 
   const httpResult = await runHttpAgentTurn(options, authToken);
-  if (httpResult.exitCode === 0 && localAvailability?.credentialKey) {
+  // 流中断（exitCode 0 + streamInterrupted，见 runHttpAgentTurn 内 abort 分支）
+  // 不代表 HTTP 派发成功，不能据此清冷却。
+  if (
+    httpResult.exitCode === 0 &&
+    !httpResult.streamInterrupted &&
+    localAvailability?.credentialKey
+  ) {
     await clearCredentialAvailability(
       localAvailability.credentialKey,
       options.env as NodeJS.ProcessEnv,

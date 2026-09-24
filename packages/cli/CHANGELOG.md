@@ -1,4 +1,13 @@
 
+## 0.95.0-alpha.6
+
+## 0.95.0-alpha.6 (2026-09-24)
+
+### Bug Fixes
+
+* **ai:** guard reset-time parsing against trace-id noise; review followups ([c0d20a4](https://github.com/nolotus/bun-nolo/commit/c0d20a49825f9873cc10c92b4c99d493dbffa5b0))
+
+
 ## 0.95.0-alpha.5
 
 ## 0.95.0-alpha.5 (2026-09-24)

@@ -220,6 +220,13 @@ function extractStatus(error: unknown): number | undefined {
  */
 export function parseResetsInMs(text: string): number | undefined {
   if (!text) return undefined;
+  // Sanitize：先剔除 trace-id 段与长 hex 串。实证 bug：Devin 429 文案尾部
+  // "(trace ID: 830c72b29db8bb930c05edb0fce87fc8)" 里的 "29d" 会被下方
+  // 「数字+单位」扫描误读成 29 天，把上游说的 5 分钟放大成 24h 顶格冷却。
+  // 保守替换为空格，不影响正常时长文案。
+  const sanitized = text
+    .replace(/\btrace[\s_-]?id\b[^)\n]*/gi, " ")
+    .replace(/\b[0-9a-f]{16,}\b/gi, " ");
   const unitMs = (n: number, unit: string): number => {
     if (/^d/.test(unit)) return n * 24 * 3600 * 1000;
     if (/^h/.test(unit)) return n * 3600 * 1000;
@@ -230,12 +237,16 @@ export function parseResetsInMs(text: string): number | undefined {
   // 匹配 "<数字><单位>" 序列，单位支持 day/day(s)/hr/hour(s)/min/minute(s)/sec/second(s)
   const re =
     /(\d+)\s*(d(?:ay|ays)?|h(?:r|rs|our|ours)?|m(?:in|ins|inute|inutes)?|s(?:ec|ecs|econd|econds)?)/gi;
+  // 单条匹配超过 7 天视为标识符噪音（request id、时间戳等残留数字串），
+  // skip 该条而非计入：周/月级周期性额度由上层 matchesPeriodicUsageLimitText
+  // 先判（见 agentAvailabilityShared.ts），不该从散文本里抓。
+  const MAX_SINGLE_MATCH_MS = 7 * 24 * 3600 * 1000;
   let totalMs = 0;
   let matched = false;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = re.exec(sanitized)) !== null) {
     const ms = unitMs(Number(m[1]), m[2]);
-    if (!Number.isFinite(ms)) continue;
+    if (!Number.isFinite(ms) || ms > MAX_SINGLE_MATCH_MS) continue;
     totalMs += ms;
     matched = true;
   }
