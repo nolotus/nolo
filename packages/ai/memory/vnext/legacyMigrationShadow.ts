@@ -3,6 +3,7 @@ import { buildMemoryVNextInterpreterPrompt } from "./interpreterPrompt";
 import {
   materializeMemoryInterpreterMutation,
   parseMemoryInterpreterWireMutation,
+  type MemoryInterpreterWireMutation,
 } from "./interpreterWireProtocol";
 import {
   buildLegacyMemoryEvidence,
@@ -12,7 +13,6 @@ import {
 import type {
   MemoryEvidenceVNext,
   MemoryInterpreterMutation,
-  MemoryInterpreterWireMutation,
   MemoryReconciliationAction,
   MemoryStateVNext,
 } from "./types";

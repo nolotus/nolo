@@ -1,4 +1,13 @@
 
+## 0.95.0-alpha.4
+
+## 0.95.0-alpha.4 (2026-09-24)
+
+### Bug Fixes
+
+* **cli:** clear local credential cooldown after successful HTTP dispatch ([ca74be8](https://github.com/nolotus/bun-nolo/commit/ca74be869d02d7ae0dc834a38c563e7e210fd055))
+
+
 ## 0.95.0-alpha.3
 
 ## 0.95.0-alpha.3 (2026-09-24)

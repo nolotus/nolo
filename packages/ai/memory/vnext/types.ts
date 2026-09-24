@@ -60,6 +60,18 @@ export interface MemoryEvidenceVNext {
   createdAt: string;
 }
 
+/**
+ * Evidence materialized from a legacy record.
+ *
+ * `sourceRef` is **always** present here: the legacy record it was built from is the
+ * pointer, so there is no "Evidence without provenance" case on this path. That is a
+ * real invariant, not an annotation convenience — Interpreter-produced Evidence keeps
+ * the optional field above, while legacy import consumers may rely on the id being
+ * absolute. Keeping them as one optional-field type is what let the shadow path's
+ * assertion (`expect(prompt).toContain(imported.sourceRef)`) drift into a type error.
+ */
+export type LegacyMemoryEvidenceVNext = MemoryEvidenceVNext & { sourceRef: string };
+
 export interface MemoryRelationVNext {
   id: string;
   ownerId: string;

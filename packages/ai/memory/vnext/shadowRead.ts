@@ -67,6 +67,16 @@ export interface MemoryShadowReadObservation {
   vnextError?: string;
 }
 
+/**
+ * Structured log payload for the shadow read, as emitted by the default sink:
+ * the observation plus the `event` discriminator operators filter logs by.
+ * `event` belongs to the log line — `MemoryShadowReadObservation` itself is also
+ * handed to pure in-memory sinks via `emit`, which have no use for it.
+ */
+export type MemoryShadowReadLogPayload = MemoryShadowReadObservation & {
+  event: "memory_vnext_shadow_read";
+};
+
 const SHADOW_TIMEOUT_MS = 20_000;
 const ERROR_MESSAGE_MAX = 120;
 
@@ -136,13 +146,14 @@ export const runMemoryVNextShadowRead = async (input: {
   emit?: (observation: MemoryShadowReadObservation) => void;
 }): Promise<MemoryShadowReadObservation> => {
   const now = input.ctx.now ?? (() => performance.now());
-  const emit =
-    input.emit ??
-    ((observation) =>
-      console.info("[memory] vnext shadow read", {
-        event: "memory_vnext_shadow_read",
-        ...observation,
-      }));
+  const defaultEmit = (observation: MemoryShadowReadObservation): void => {
+    const payload: MemoryShadowReadLogPayload = {
+      event: "memory_vnext_shadow_read",
+      ...observation,
+    };
+    console.info("[memory] vnext shadow read", payload);
+  };
+  const emit = input.emit ?? defaultEmit;
 
   const legacyKeys = new Set(
     input.legacyItems.flatMap((item) => legacyItemKeys(item)),

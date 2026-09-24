@@ -72,6 +72,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
 import { toErrorMessage } from "core/errorMessage";
 import {
+  clearCredentialAvailability,
   readCredentialEntry,
   recordCredentialProbe,
   resolveCredentialKeyWithFallback,
@@ -1671,7 +1672,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode: 1 } | null> {
+): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -1708,7 +1709,9 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
     typeof agentLevelAt === "number" && Number.isFinite(agentLevelAt)
       ? agentLevelAt
       : undefined;
-  if (!credentialKey && agentLevelNextAvailableAt === undefined) return null;
+  if (!credentialKey && agentLevelNextAvailableAt === undefined) {
+    return { credentialKey };
+  }
   const env = options.env as NodeJS.ProcessEnv;
   const now = Date.now();
   const entry = credentialKey
@@ -1719,7 +1722,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
     typeof entryAt === "number"
       ? mergeAvailabilityDeadline(agentLevelNextAvailableAt, entryAt)
       : agentLevelNextAvailableAt;
-  if (typeof effectiveNextAvailableAt !== "number") return null;
+  if (typeof effectiveNextAvailableAt !== "number") return { credentialKey };
   const gateDecision = resolveCooldownGate(
     { nextAvailableAt: effectiveNextAvailableAt, lastProbeAt: entry?.lastProbeAt },
     now,
@@ -1727,9 +1730,9 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
   if (gateDecision === "probe" && credentialKey) {
     // 与执行期 gate 同语义：放行本次真实请求前记录探测时间，避免间隔内反复重试。
     await recordCredentialProbe(credentialKey, env, now).catch(() => undefined);
-    return null;
+    return { credentialKey };
   }
-  if (gateDecision !== "blocked") return null;
+  if (gateDecision !== "blocked") return { credentialKey };
   options.output.write(
     `[nolo] Agent ${options.agentName || options.agentKey} is temporarily unavailable (429 cooldown) until ${new Date(Number(effectiveNextAvailableAt)).toISOString()}.\n` +
       "Dispatch aborted before reaching the server. Pick another agent via listAgents, or retry after the cooldown.\n",
@@ -1853,10 +1856,17 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
   // 无需在此警告"仅 local 生效"——那是修复前的过时语义。
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
-  const localBlock = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localBlock) {
-    return { exitCode: localBlock.exitCode };
+  const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
+  if (localAvailability?.exitCode) {
+    return { exitCode: localAvailability.exitCode };
   }
 
-  return runHttpAgentTurn(options, authToken);
+  const httpResult = await runHttpAgentTurn(options, authToken);
+  if (httpResult.exitCode === 0 && localAvailability?.credentialKey) {
+    await clearCredentialAvailability(
+      localAvailability.credentialKey,
+      options.env as NodeJS.ProcessEnv,
+    ).catch(() => undefined);
+  }
+  return httpResult;
 }

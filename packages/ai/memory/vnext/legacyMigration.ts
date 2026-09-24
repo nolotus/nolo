@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import type { MemoryItem, MemoryOwnerType } from "../types";
-import type { MemoryEvidenceVNext } from "./types";
+import type { LegacyMemoryEvidenceVNext } from "./types";
 
 /**
  * Migration Slice 1: legacy `MemoryItem` -> vNext identity adapter.
@@ -103,7 +103,7 @@ export const clampLegacyConfidence = (value: unknown): number => {
  * replace it with the raw legacy owner id: `user:<id>` / `space:<id>` /
  * `system:<id>` are intentionally separate vNext owner namespaces.
  */
-export const buildLegacyMemoryEvidence = (item: LegacyMemoryRecord): MemoryEvidenceVNext => {
+export const buildLegacyMemoryEvidence = (item: LegacyMemoryRecord): LegacyMemoryEvidenceVNext => {
   const { principalId } = resolveLegacyMemoryPrincipal(item);
   return {
     id: buildLegacyEvidenceId(item),
