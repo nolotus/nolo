@@ -49,6 +49,7 @@ export const CONNECTOR_FEATURES = Object.freeze([
   "compact_observation_v2",
   "action_gate",
   "browser_debug",
+  "file_upload",
 ]);
 
 const FEATURE_BY_ACTION = Object.freeze({
@@ -64,6 +65,7 @@ const FEATURE_BY_ACTION = Object.freeze({
   read_console: ["browser_debug"],
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
+  set_files: ["compact_observation_v2", "file_upload"],
 });
 
 /**
@@ -366,7 +368,13 @@ export function getBlockedTargetCode(action, element) {
  * `selector`. Ref resolution fails closed with a structured code instead of retrying anything.
  */
 export function resolveActionTarget(payload = {}, registry, context = {}) {
-  const elementRef = typeof payload?.elementRef === "string" ? payload.elementRef.trim() : "";
+  const rawRef =
+    typeof payload?.elementRef === "string"
+      ? payload.elementRef
+      : typeof payload?.ref === "string"
+        ? payload.ref
+        : "";
+  const elementRef = rawRef.trim();
   const selector = typeof payload?.selector === "string" ? payload.selector.trim() : "";
 
   if (elementRef) {

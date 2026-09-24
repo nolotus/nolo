@@ -52,6 +52,19 @@ function readTrimmedOption(args: string[], flag: string): string {
   return (readOption(args, flag) ?? "").trim();
 }
 
+function readAllOptions(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === flag && i + 1 < args.length) {
+      const val = args[i + 1].trim();
+      if (val && !val.startsWith("--")) {
+        values.push(val);
+      }
+    }
+  }
+  return values;
+}
+
 function readIntOption(args: string[], flag: string, usage: string): number | undefined {
   const raw = readOption(args, flag);
   if (raw === undefined) return undefined;
@@ -145,6 +158,25 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
         ...requireTarget(args, usage),
         text,
         ...(args.includes("--append") ? { clearFirst: false } : {}),
+      };
+    },
+  },
+  upload: {
+    action: "set_files",
+    usage:
+      "nolo chrome upload --tab <id> (--ref <elementRef> | --selector <css>) --file <path> [--file <path>...]",
+    payload: (args, usage) => {
+      const files = readAllOptions(args, "--file");
+      if (files.length === 0) {
+        throw new Error(`Missing required --file <path>. Usage: ${usage}`);
+      }
+      const target = requireTarget(args, usage);
+      const tabId = requireTabId(args, usage);
+      return {
+        tabId,
+        ...target,
+        ...(target.elementRef ? { ref: target.elementRef } : {}),
+        files,
       };
     },
   },

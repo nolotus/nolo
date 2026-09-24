@@ -7,6 +7,11 @@ import { resolve } from "node:path";
 
 import { toErrorMessage } from "core/errorMessage";
 import { isRecord } from "core/isRecord";
+import {
+  UploadSecurityError,
+  logUploadAudit,
+  validateUploadFiles,
+} from "./uploadSecurity";
 
 export type ChromeConnectorRequestPayload = Record<string, unknown>;
 
@@ -69,6 +74,9 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_screenshot: "screenshot",
   chrome_read_console: "read_console",
   chrome_read_network: "read_network",
+  chrome_set_files: "set_files",
+  chrome_upload_file: "set_files",
+  chrome_upload: "set_files",
 };
 
 function createConnectorError(code: string, message: string, details?: unknown): ChromeConnectorError {
@@ -125,11 +133,11 @@ export function createNativeHostRouter(deps: NativeHostRouterDeps): ChromeConnec
   };
 }
 
-const TARGET_REQUIRED_ACTIONS = new Set(["click", "type"]);
-const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach"]);
+const TARGET_REQUIRED_ACTIONS = new Set(["click", "type", "set_files"]);
+const TAB_ID_REQUIRED_ACTIONS = new Set(["close_tab", "detach", "set_files"]);
 
 /**
- * Deterministic, connector-side guard for the two action styles. The extension re-checks the same
+ * Deterministic, connector-side guard for the action styles. The extension re-checks the same
  * rule, so a model call never reaches the RPC endpoint (or the page) without a resolvable target.
  */
 export function validateChromeConnectorPayload(
@@ -149,16 +157,47 @@ export function validateChromeConnectorPayload(
         `Provide the tabId from chrome_list_tabs before calling ${action}.`,
       );
     }
-    return;
+    if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
   }
   if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
-  const elementRef = typeof payload.elementRef === "string" ? payload.elementRef.trim() : "";
+  const rawRef =
+    typeof payload.elementRef === "string"
+      ? payload.elementRef
+      : typeof payload.ref === "string"
+        ? payload.ref
+        : "";
+  const elementRef = rawRef.trim();
   const selector = typeof payload.selector === "string" ? payload.selector.trim() : "";
-  if (elementRef || selector) return;
-  throw createConnectorError(
-    "ELEMENT_TARGET_REQUIRED",
-    "Provide elementRef from chrome_read_page or a CSS selector.",
-  );
+  if (!elementRef && !selector) {
+    throw createConnectorError(
+      "ELEMENT_TARGET_REQUIRED",
+      "Provide elementRef from chrome_read_page or a CSS selector.",
+    );
+  }
+  if (action === "set_files") {
+    if (!Array.isArray(payload.files) || payload.files.length === 0) {
+      throw createConnectorError(
+        "no_files",
+        "Provide at least one file path in files array.",
+      );
+    }
+    try {
+      const validated = validateUploadFiles({
+        files: payload.files as string[],
+        env: process.env,
+      });
+      payload.files = validated.files;
+      const targetStr = elementRef ? `ref:${elementRef}` : `selector:${selector}`;
+      logUploadAudit({
+        tabId: String(payload.tabId),
+        target: targetStr,
+        files: validated.fileStats,
+      });
+    } catch (err) {
+      const code = (err as UploadSecurityError)?.code ?? "path_not_allowed";
+      throw createConnectorError(code, toErrorMessage(err));
+    }
+  }
 }
 
 export function createChromeConnectorClient(args?: {
@@ -181,6 +220,7 @@ export function createChromeConnectorClient(args?: {
   const token = args?.token ?? readConnectorToken(args?.tokenPath);
   return {
     async request(action, payload) {
+      validateChromeConnectorPayload(action, payload);
       let response: Response;
       try {
         response = await fetchImpl(endpoint, {
@@ -235,6 +275,7 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   read_console: ["browser_debug"],
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
+  set_files: ["compact_observation_v2", "file_upload"],
 };
 
 /** Features the runtime requires for an action; empty when the action needs none. */

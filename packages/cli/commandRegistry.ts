@@ -59,6 +59,7 @@ export function renderHelpText() {
     "  nolo machine status",
     "  nolo chrome install",
     "  nolo chrome status",
+    '  nolo chrome upload --tab 1 --selector "#upload" --file ./photo.jpg',
     "  nolo doctor",
     "  nolo doctor runtime",
     "  nolo update",

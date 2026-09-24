@@ -11,7 +11,7 @@ import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import { useAppSelector } from "app/store";
 import { selectShowThinking } from "app/settings/settingSlice";
 import { markdownToSlate } from "create/editor/transforms/markdownToSlate";
-import Editor from "create/editor/Editor";
+import { StreamingStructuredMarkdown } from "./StreamingStructuredMarkdown";
 import { useThinkingVisibility } from "../../hooks/useThinkingVisibility";
 import { hasVisibleAssistantContentValue } from "../assistantMessageFacts";
 import { OrbActivityIndicator } from "./OrbActivityIndicator";
@@ -162,9 +162,10 @@ export const ThinkingSection = memo(
                     data-hook="messages-esc-thinking-editor-wrapper"
                     {...withLiteralClass("thinking-editor-wrapper", styles.editorWrapper)}
                   >
-                    <Editor
-                      initialValue={slate}
-                      readOnly
+                    <StreamingStructuredMarkdown
+                      nodes={slate}
+                      renderText={(text) => text}
+                      cursor={null}
                     />
                   </div>
                 </div>

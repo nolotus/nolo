@@ -379,7 +379,7 @@ if (isDesktopShell) {
           if (json.length > MAX_ARG_CHARS) {
             return json.slice(0, MAX_ARG_CHARS) + "…[truncated]";
           }
-          return JSON.parse(json);
+          return json;
         } catch {
           return String(arg).slice(0, MAX_ARG_CHARS);
         }
@@ -407,14 +407,19 @@ if (isDesktopShell) {
       if (flushScheduled) return;
       flushScheduled = true;
       // Flush on next macrotask so many console calls within one tick coalesce.
-      setTimeout(flush, 0);
+      setTimeout(flush, 50);
     };
     const wrapConsole = (level: string) => {
       return (...args: any[]) => {
         (originalConsole as any)[level].apply(console, args);
+        if (level === "debug" && localStorage.getItem("debugDesktopConsole") !== "1") {
+          return;
+        }
         try {
-          pending.push({ level, args: args.map(serializeArg) });
-          scheduleFlush();
+          if (pending.length < 50) {
+            pending.push({ level, args: args.map(serializeArg) });
+            scheduleFlush();
+          }
         } catch {
           // ignore
         }

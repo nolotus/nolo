@@ -35,7 +35,8 @@ export function useMyContentItems(
   const hasUser = userId.trim().length > 0;
   const shouldDebugLog =
     typeof window !== "undefined" &&
-    /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+    /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) &&
+    (!(window as any).__NOLO_DESKTOP__ || localStorage.getItem("debugMyContent") === "1");
   const memberSpaces = useAllMemberSpaces();
 
   // 按类型过滤拉取：传 filterTypes 时只拉对应类型；不传时拉全部类型。

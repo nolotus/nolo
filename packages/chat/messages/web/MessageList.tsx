@@ -453,6 +453,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
 
     const scroller = getScroller();
     if (!scroller) return;
+    if (scroller.scrollHeight <= scroller.clientHeight + 20) return;
 
     const prevScrollHeight = scroller.scrollHeight;
     const prevScrollTop = scroller.scrollTop;
@@ -486,7 +487,8 @@ const MessagesList: React.FC<MessagesListProps> = ({
     const scroller = stateRef.current.scrollContainer;
     if (!scroller) return;
 
-    if (scroller.scrollTop < LOAD_THRESHOLD) {
+    const isScrollable = scroller.scrollHeight > scroller.clientHeight + 20;
+    if (isScrollable && scroller.scrollTop < LOAD_THRESHOLD) {
       handleLoadOlder();
     }
 

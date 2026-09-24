@@ -140,7 +140,7 @@ export const resolveMyContentTab = (
   return "file";
 };
 
-const toTimestamp = (value: string | number) =>
+export const toTimestamp = (value: string | number) =>
   typeof value === "number" ? value : Date.parse(value) || 0;
 
 const normalizeSpaceId = (spaceId: unknown): string | null => {

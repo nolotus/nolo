@@ -3,6 +3,10 @@ import { createEnvCommand } from "./cliCommandFactories";
 
 export function getDialogInternalCommandEntries(): CommandEntry[] {
   return [
+    createEnvCommand(["dialog", "search"], "Search dialog messages across dialogs", async (args, deps) => {
+      const { runDialogSearchCommand } = await import("./dialogCommands");
+      return runDialogSearchCommand(args, deps);
+    }),
     createEnvCommand(["dialog", "list"], "List dialogs (default --limit 50; --all/--limit 0 full; --jsonl streams)", async (args, deps) => {
       const { runDialogListCommand } = await import("./dialogCommands");
       return runDialogListCommand(args, deps);

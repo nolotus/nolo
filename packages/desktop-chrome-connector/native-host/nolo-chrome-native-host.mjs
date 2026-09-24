@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { logUploadAudit, validateUploadFiles } from "../uploadSecurity.mjs";
 
 const port = Number(process.env.NOLO_CHROME_CONNECTOR_PORT || 38947);
 const connectorToken = process.env.NOLO_CHROME_CONNECTOR_TOKEN || "";
@@ -126,6 +127,35 @@ server = createServer(async (req, res) => {
   }
   try {
     const body = await readJsonBody(req);
+    if (body.action === "set_files") {
+      try {
+        const validated = validateUploadFiles({
+          files: body.payload?.files,
+          env: process.env,
+        });
+        body.payload.files = validated.files;
+        const targetStr = body.payload?.ref
+          ? `ref:${body.payload.ref}`
+          : `selector:${body.payload?.selector || ""}`;
+        logUploadAudit({
+          tabId: String(body.payload?.tabId ?? ""),
+          target: targetStr,
+          files: validated.fileStats,
+        });
+      } catch (err) {
+        res.statusCode = 400;
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: {
+              code: err.code || "path_not_allowed",
+              message: err.message,
+            },
+          }),
+        );
+        return;
+      }
+    }
     const response = await extensionRequest(body.action, body.payload || {});
     res.statusCode = response.ok ? 200 : 502;
     res.end(JSON.stringify(response));

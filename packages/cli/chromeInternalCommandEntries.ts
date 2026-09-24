@@ -22,6 +22,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
     name: "type",
     summary: "Type text into an element (--tab <id> --ref|--selector --text <text>)",
   },
+  {
+    name: "upload",
+    summary:
+      "Upload files to a file input element (--tab <id> --ref|--selector --file <path>)",
+  },
   { name: "press", summary: "Press a keyboard key (--tab <id> --key <key>)" },
   { name: "scroll", summary: "Scroll a tab (--tab <id> [--delta-x N] [--delta-y N])" },
   { name: "screenshot", summary: "Capture a screenshot (--tab <id> [--out <path>])" },

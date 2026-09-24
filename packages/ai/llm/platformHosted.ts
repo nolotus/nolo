@@ -19,6 +19,8 @@ import {
   PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL,
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+  PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
+  PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
   PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
@@ -162,6 +164,21 @@ export const PLATFORM_HOSTED_CLAUDE_SONNET_5_PRICE = {
 export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE = {
   input: toPlatformCredits(1), // 8 credits
   output: toPlatformCredits(5), // 40 credits
+} as const;
+
+/**
+ * Claude Opus 5.5 / Fable 5.1（2026-09 新一代，DeepInfra 上游），价格依据：
+ *   × 8 = 32 / 160 credits。缓存读价官方未确认——不猜，暂不设 inputCacheHit；
+ *   计费侧按 input 全价计（不会漏账），待官方价目确认后在此补。
+ */
+export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_PRICE = {
+  input: toPlatformCredits(4), // 32 credits
+  output: toPlatformCredits(20), // 160 credits
+} as const;
+export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE = {
+  input: toPlatformCredits(10), // 80 credits
+  inputCacheHit: toPlatformCredits(2.5), // 20 credits（官方缓存读 = 输入 1/4）
+  output: toPlatformCredits(50), // 400 credits
 } as const;
 
 /**
@@ -700,8 +717,8 @@ export const platformHostedModels = [
     supportsTool: true,
     supportsReasoningEffort: true,
   },
-  // Claude 系（真实 DeepInfra 模型，官方 id 与平台 id 同名）：无缓存价，
-  // 计费按 input 全价（见 calculatePrice 的 deepinfra 分支）。
+  // Claude 系（真实 DeepInfra 模型，官方 id 与平台 id 同名）：旧批无缓存价，
+  // 计费按 input 全价（见 calculatePrice）；Fable 5.1 带官方缓存读价。
   {
     name: PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL,
     displayName: "Claude Sonnet 5",
@@ -736,6 +753,26 @@ export const platformHostedModels = [
     price: { ...PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE },
     maxOutputTokens: 4092,
     contextWindow: 200_000,
+    supportsTool: false,
+  },
+  {
+    // Claude Opus 5.5（2026-09-22 发布）：官方 1M 上下文 / 128K 输出。
+    name: PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
+    displayName: "Claude Opus 5.5",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_OPUS_5_5_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_000_000,
+    supportsTool: false,
+  },
+  {
+    // Claude Fable 5.1：输出上限未获官方数据，沿用 Fable 5 条目口径（4092）。
+    name: PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
+    displayName: "Claude Fable 5.1",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_CLAUDE_FABLE_5_1_PRICE },
+    maxOutputTokens: 4092,
+    contextWindow: 1_000_000,
     supportsTool: false,
   },
   // GPT-6 / GPT-5.6 系：OpenAI 官方 chat.completions，平台价按短上下文价目。

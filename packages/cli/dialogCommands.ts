@@ -89,6 +89,7 @@ const VALUE_FLAGS = new Set([
   "--machine-key",
   "--user",
   "--max-response-chars",
+  "--per-dialog",
 ]);
 
 type ResultLimit = {
@@ -2216,3 +2217,140 @@ export async function runDialogDeleteCommand(
 
   return hasErrors ? 1 : 0;
 }
+
+function printSearchUsage(output: { write(chunk: string): unknown }) {
+  output.write(`Usage:
+  nolo dialog search <query> [--limit <n>] [--per-dialog <n>] [--json]
+
+Options:
+  --limit <n>       Max dialogs to return (default 20, max 50).
+  --per-dialog <n>  Max match snippets per dialog (default 3, max 10).
+  --json            Print machine-readable JSON.
+  --server <url>    Override NOLO_SERVER/BASE_URL.
+  --token <jwt>     Override AUTH_TOKEN.
+
+Searches messages across the current user's dialogs via the server endpoint.
+Server requires NOLO_DIALOG_SEARCH=1 to be enabled.
+`);
+}
+
+export async function runDialogSearchCommand(
+  args: string[],
+  deps: AgentCommandDeps = {}
+) {
+  const env = deps.env ?? process.env;
+  const output = deps.output ?? process.stdout;
+  if (hasFlag(args, "--help") || hasFlag(args, "-h")) {
+    printSearchUsage(output);
+    return 0;
+  }
+
+  const query = readFirstPositional(args);
+  if (!query) {
+    output.write("[nolo] dialog search requires a search query.\n\n");
+    printSearchUsage(output);
+    return 1;
+  }
+
+  const authToken = resolveAuthToken(args, env);
+  if (!authToken) {
+    output.write("[nolo] dialog search requires an auth token. Run `nolo login` or set AUTH_TOKEN.\n");
+    return 1;
+  }
+
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const serverUrl = resolveServerUrl(args, env);
+  const serverUrls = resolveServerCandidates(args, env, serverUrl);
+
+  const limitRaw = readOption(args, "--limit");
+  const perDialogRaw = readOption(args, "--per-dialog");
+
+  const queryParams = new URLSearchParams({ q: query });
+  if (limitRaw) queryParams.set("limit", limitRaw);
+  if (perDialogRaw) queryParams.set("perDialog", perDialogRaw);
+
+  const isJson = hasFlag(args, "--json");
+
+  let lastError: Error | null = null;
+  let lastStatus: number | null = null;
+  let searchResult: any = null;
+
+  for (const candidateBase of serverUrls) {
+    const trimmedBase = candidateBase.replace(/\/+$/, "");
+    const targetUrl = `${trimmedBase}/api/dialog-search?${queryParams.toString()}`;
+    try {
+      const res = await fetchImpl(targetUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      lastStatus = res.status;
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 403) {
+          const hint = errorData?.hint ? ` (${errorData.hint})` : "";
+          const msg = errorData?.message ? `: ${errorData.message}` : "";
+          throw new Error(`Server returned 403 Forbidden${hint}${msg}. Please ensure NOLO_DIALOG_SEARCH=1 is enabled on the server.`);
+        }
+        if (res.status === 401) {
+          throw new Error(`Server returned 401 Unauthorized. Please check your AUTH_TOKEN.`);
+        }
+        throw new Error(`HTTP ${res.status}: ${JSON.stringify(errorData)}`);
+      }
+
+      searchResult = await res.json();
+      break;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  if (!searchResult) {
+    const errorMsg = lastError ? toErrorMessage(lastError) : "Failed to connect to candidate servers";
+    if (isJson) {
+      output.write(JSON.stringify({ error: errorMsg, status: lastStatus }, null, 2) + "\n");
+    } else {
+      output.write(`[nolo] dialog search failed: ${errorMsg}\n`);
+    }
+    return 1;
+  }
+
+  if (isJson) {
+    output.write(JSON.stringify(searchResult, null, 2) + "\n");
+    return 0;
+  }
+
+  const { dialogs, totalMatches, scannedDialogs, scannedMessages, elapsedMs, truncated } = searchResult;
+  output.write(`query: ${query}\n`);
+  output.write(`scanned: ${scannedDialogs} dialogs, ${scannedMessages} messages (${elapsedMs}ms)\n`);
+  output.write(`matches: ${totalMatches} total match(es) across ${dialogs?.length ?? 0} dialog(s)`);
+  if (truncated) {
+    output.write(" [truncated]");
+  }
+  output.write("\n");
+
+  if (!Array.isArray(dialogs) || dialogs.length === 0) {
+    output.write("\nNo matching dialog messages found.\n");
+    return 0;
+  }
+
+  for (const d of dialogs) {
+    output.write(`\n${d.title}\n`);
+    output.write(`id=${d.dialogId}\n`);
+    output.write(`updatedAt=${d.updatedAt ?? "-"}\n`);
+    output.write(`matches=${d.matchCount}\n`);
+    if (Array.isArray(d.matches) && d.matches.length > 0) {
+      for (const m of d.matches) {
+        const role = m.role ? `[${m.role}]` : "";
+        const snippet = String(m.snippet ?? "").replace(/\r?\n/g, " ");
+        output.write(`  - ${role} ${snippet}\n`);
+      }
+    }
+  }
+
+  return 0;
+}
+

@@ -340,8 +340,45 @@ export const GLM_5_3_FLASH_DEF = defineAgentSeed({
   tags: ["nolo", "glm", "flash"],
 });
 
-// Claude Sonnet/Opus/Fable 5 seeds 已移除（2026-09-01 平台停止维护 Claude 系，
-// 广场下架；存量空间记录由 modelUpgradeTable 迁移到 glm-5-3-flash）。
+// Claude 系 2026-09-24 广场重新上架：只上架最新一代（Fable 5.1 / Opus 5.5，
+// 真实 DeepInfra 上游、nolo 命名空间）。旧代 Sonnet 5 / Fable 5 不再有 seed——
+// 它们的广场入口以 catalog internal + retired 兼容条目收编，存量空间记录
+// （若还有）由 modelUpgradeTable / overlay 处理。
+export const CLAUDE_FABLE_5_1_DEF = defineAgentSeed({
+  id: deterministicId("01CLDFBL51PB", "shared-space-anthropic-claude-fable-5-1"),
+  presetKey: "claude-fable-5-1",
+  name: "Claude Fable 5.1",
+  provider: "nolo",
+  model: "anthropic/claude-fable-5-1",
+  isPublic: true,
+  hasVision: true,
+  introduction:
+    "Claude Fable 5.1 公开助手，适合复杂问答、长文分析、代码和图片理解。",
+  greeting:
+    "你好，我是 Claude Fable 5.1。适合复杂问题、长文分析、代码和图片理解。",
+  prompt:
+    "面对复杂任务先厘清目标和约束，再给出可靠、可执行、可复核的结果。",
+  tools: [],
+  tags: ["anthropic", "claude", "fable"],
+});
+
+export const CLAUDE_OPUS_5_5_DEF = defineAgentSeed({
+  id: deterministicId("01CLDOPU55PB", "shared-space-anthropic-claude-opus-5-5"),
+  presetKey: "claude-opus-5-5",
+  name: "Claude Opus 5.5",
+  provider: "nolo",
+  model: "anthropic/claude-opus-5-5",
+  isPublic: true,
+  hasVision: true,
+  introduction:
+    "Claude Opus 5.5 公开助手，适合高难推理、长链路分析和图片理解。",
+  greeting:
+    "你好，我是 Claude Opus 5.5。适合高难推理、复杂分析和图片理解。",
+  prompt:
+    "先确认问题目标、证据和风险，再给出结构清楚、结论明确的回答。",
+  tools: [],
+  tags: ["anthropic", "claude", "opus"],
+});
 
 export const GROK_4_6_DEF = defineAgentSeed({
   id: deterministicId("01GROK46PLAZ", "shared-space-xai-grok-4-6"),
@@ -524,6 +561,8 @@ export const PUBLIC_AGENT_DEFS = [
   DEEPSEEK_V4_PRO_DEF,
   GLM_5_3_DEF,
   GLM_5_3_FLASH_DEF,
+  CLAUDE_FABLE_5_1_DEF,
+  CLAUDE_OPUS_5_5_DEF,
   GROK_4_6_DEF,
   GEMINI_3_8_FLASH_DEF,
   GPT_IMAGE_2_GENERATOR_DEF,

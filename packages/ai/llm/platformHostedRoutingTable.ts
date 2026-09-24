@@ -21,6 +21,10 @@ export const PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL = "anthropic/claude-sonnet-5"
 export const PLATFORM_HOSTED_CLAUDE_OPUS_5_MODEL = "anthropic/claude-opus-5";
 export const PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL = "anthropic/claude-fable-5";
 export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5";
+// 2026-09 新一代 Claude（广场只上架最新一代）：DeepInfra 官方模型名与平台
+// 模型名同名（anthropic/claude-* 前缀是 DeepInfra 的官方 id 形态）。
+export const PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL = "anthropic/claude-opus-5-5";
+export const PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL = "anthropic/claude-fable-5-1";
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
 export const PLATFORM_HOSTED_GPT_6_LUNA_MODEL = "gpt-6-luna";
@@ -248,8 +252,10 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     agentRunHosted: true,
   },
   // Claude 系（真实模型）：DeepInfra 官方 id 与平台 id 同名，无需重映射。
-  // DeepInfra 这批模型无缓存价（rate_per_input_token_cached=null），计费侧对
-  // 无 inputCacheHit 的 deepinfra 模型按 input 全价计（见 calculatePrice）。
+  // 旧批模型无缓存价（rate_per_input_token_cached=null），计费侧对无
+  // inputCacheHit 的模型按 input 全价计（见 calculatePrice）；Fable 5.1 起
+  // 官方给出缓存读价（输入 1/4），在 platformHosted.ts 的 price 里带
+  // inputCacheHit。
   [PLATFORM_HOSTED_CLAUDE_SONNET_5_MODEL]: {
     endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
     usageProvider: "deepinfra",
@@ -279,6 +285,23 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
     usageProvider: "deepinfra",
     keyName: "deepinfra",
     upstreamModelId: PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // 新一代 Claude（2026-09-24 收进广场）：同 DeepInfra 通道、官方 id 直传。
+  [PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL]: {
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_OPUS_5_5_MODEL,
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  [PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL]: {
+    endpoint: "https://api.deepinfra.com/v1/openai/chat/completions",
+    usageProvider: "deepinfra",
+    keyName: "deepinfra",
+    upstreamModelId: PLATFORM_HOSTED_CLAUDE_FABLE_5_1_MODEL,
     wire: "chat.completions",
     agentRunHosted: true,
   },

@@ -613,6 +613,95 @@ function pageOperation(payload) {
     };
   }
 
+  if (op === "prepare_set_files") {
+    let target = null;
+    let signature = "";
+    if (payload.selector) {
+      let bySelector = null;
+      try {
+        bySelector = document.querySelector(payload.selector);
+      } catch (error) {
+        return {
+          ok: false,
+          code: "INVALID_SELECTOR",
+          message: `Invalid selector '${payload.selector}': ${
+            error && error.message ? error.message : String(error)
+          }`,
+        };
+      }
+      if (!bySelector) {
+        return { ok: false, code: "ELEMENT_NOT_FOUND", message: `Element not found: ${payload.selector}` };
+      }
+      target = bySelector;
+    } else {
+      const found = candidates(region);
+      if (!found) {
+        return {
+          ok: false,
+          code: "REGION_NOT_FOUND",
+          message: `Region selector matched no element: ${region}`,
+        };
+      }
+      if (payload.expectedUrl && payload.expectedUrl !== String(location.href)) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The tab navigated to a different document; call chrome_read_page again.",
+        };
+      }
+      if (payload.expectedSignature && signatureOf(found) !== payload.expectedSignature) {
+        return {
+          ok: false,
+          code: "STALE_PAGE_REVISION",
+          message: "The page revision changed since the elementRef was issued; call chrome_read_page again.",
+        };
+      }
+      const resolved = resolveElement(found, payload);
+      if (!resolved.element) {
+        return { ok: false, code: resolved.code, message: resolved.message, signature: signatureOf(found) };
+      }
+      target = resolved.element;
+      signature = signatureOf(found);
+    }
+
+    if (target.disabled) {
+      return {
+        ok: false,
+        code: "ELEMENT_DISABLED",
+        message: "The target element is disabled; files were not set.",
+      };
+    }
+
+    const tag = String(target.tagName || "").toLowerCase();
+    const inputType = tag === "input" ? String(target.type || "").toLowerCase() : "";
+    if (tag !== "input" || inputType !== "file") {
+      return {
+        ok: false,
+        code: "NOT_FILE_INPUT",
+        message: `Target element is <${tag}${inputType ? ` type="${inputType}"` : ""}>, not an <input type="file">. File upload requires an <input type="file"> element.`,
+      };
+    }
+
+    const marker = "nolo_upload_" + Math.random().toString(36).slice(2, 11);
+    target.setAttribute("data-nolo-upload-id", marker);
+    return {
+      ok: true,
+      selector: `[data-nolo-upload-id="${marker}"]`,
+      marker,
+      signature,
+      url: String(location.href),
+    };
+  }
+
+  if (op === "cleanup_marker") {
+    const marker = String((payload && payload.marker) || "");
+    if (marker) {
+      const el = document.querySelector(`[data-nolo-upload-id="${marker}"]`);
+      if (el) el.removeAttribute("data-nolo-upload-id");
+    }
+    return { ok: true };
+  }
+
   return { ok: false, code: "UNSUPPORTED_PAGE_OP", message: `Unsupported page operation: ${op}` };
 }
 
@@ -749,6 +838,172 @@ async function runTargetedAction(action, payload) {
   });
 }
 
+async function handleSetFiles(payload = {}) {
+  const tabId = String(payload.tabId ?? "");
+  if (!tabId) {
+    return verdictEnvelope("set_files", {
+      status: "failed",
+      signal: "TAB_ID_REQUIRED",
+      message: "Provide the tabId before calling set_files.",
+    });
+  }
+
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  if (files.length === 0) {
+    return verdictEnvelope("set_files", {
+      status: "failed",
+      signal: "NO_FILES",
+      message: "Provide at least one file to upload.",
+    });
+  }
+
+  const target = resolveActionTarget(payload, refRegistry, { tabId, action: "set_files" });
+  if (!target.ok) {
+    return verdictEnvelope("set_files", {
+      status: "failed",
+      signal: target.code,
+      message: target.message,
+    });
+  }
+
+  const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
+
+  const pageArgs = { op: "prepare_set_files" };
+  if (target.kind === "ref") {
+    pageArgs.region = target.expect.region || "";
+    pageArgs.expectedUrl = target.expect.url;
+    pageArgs.expectedSignature = target.expect.signature;
+    pageArgs.index = target.expect.index;
+    pageArgs.expectedTag = target.expect.tag;
+    pageArgs.expectedName = target.expect.name;
+  } else {
+    pageArgs.selector = target.selector;
+  }
+
+  let prep;
+  try {
+    prep = await executeInTab(tabId, pageOperation, [pageArgs]);
+  } catch (error) {
+    if (error?.code === PROTECTED_PAGE_CODE) {
+      return verdictEnvelope(
+        "set_files",
+        {
+          status: "failed",
+          signal: PROTECTED_PAGE_CODE,
+          message: toMessage(error),
+        },
+        resolveExtra,
+      );
+    }
+    refRegistry.invalidate(tabId);
+    return verdictEnvelope(
+      "set_files",
+      {
+        status: "uncertain",
+        signal: "page_context_destroyed",
+        message: `The page navigated or its frame was replaced while set_files ran (${toMessage(
+          error,
+        )}). Re-read the page before acting again.`,
+      },
+      resolveExtra,
+    );
+  }
+
+  if (!prep || prep.ok !== true) {
+    return verdictEnvelope(
+      "set_files",
+      {
+        status: "failed",
+        signal: prep?.code || "TARGET_RESOLUTION_FAILED",
+        message: prep?.message || "The target element could not be prepared for file upload.",
+      },
+      resolveExtra,
+    );
+  }
+
+  const cdpSelector = prep.selector;
+  const marker = prep.marker;
+  const targetObj = tabTarget(tabId);
+
+  try {
+    await ensureDebugger(tabId);
+    const doc = await chrome.debugger.sendCommand(targetObj, "DOM.getDocument");
+    const rootNodeId = doc?.root?.nodeId;
+    if (!rootNodeId) {
+      return verdictEnvelope(
+        "set_files",
+        {
+          status: "failed",
+          signal: "CDP_DOC_FAILED",
+          message: "Failed to get document root from Chrome debugger.",
+        },
+        resolveExtra,
+      );
+    }
+
+    const queryResult = await chrome.debugger.sendCommand(targetObj, "DOM.querySelector", {
+      nodeId: rootNodeId,
+      selector: cdpSelector,
+    });
+    const nodeId = queryResult?.nodeId;
+    if (!nodeId || nodeId === 0) {
+      return verdictEnvelope(
+        "set_files",
+        {
+          status: "failed",
+          signal: "ELEMENT_NOT_FOUND",
+          message: `DOM.querySelector found no node for target: ${
+            target.kind === "ref" ? target.ref : target.selector
+          }.`,
+        },
+        resolveExtra,
+      );
+    }
+
+    await chrome.debugger.sendCommand(targetObj, "DOM.setFileInputFiles", {
+      nodeId,
+      files,
+    });
+
+    if (prep.signature) {
+      refRegistry.notePageChanged({ tabId, signature: prep.signature, url: prep.url });
+    }
+
+    return verdictEnvelope(
+      "set_files",
+      {
+        status: "verified",
+        signal: "files_set",
+      },
+      {
+        files,
+        count: files.length,
+        ...resolveExtra,
+        ...(prep.signature ? { pageRevision: buildPageRevision(prep.signature) } : {}),
+      },
+    );
+  } catch (error) {
+    const msg = toMessage(error);
+    const isNotFileInput = msg.includes("Node is not a file input element");
+    return verdictEnvelope(
+      "set_files",
+      {
+        status: "failed",
+        signal: isNotFileInput ? "NOT_FILE_INPUT" : "SET_FILES_FAILED",
+        message: isNotFileInput
+          ? `Target element is not an <input type="file">: ${msg}`
+          : `DOM.setFileInputFiles failed: ${msg}`,
+      },
+      resolveExtra,
+    );
+  } finally {
+    scheduleDetach(tabId);
+    if (marker) {
+      void executeInTab(tabId, pageOperation, [{ op: "cleanup_marker", marker }]).catch(() => {});
+    }
+  }
+}
+
 async function handleAction(action, payload = {}) {
   switch (action) {
     case "connector_info": {
@@ -808,6 +1063,8 @@ async function handleAction(action, payload = {}) {
       return await runTargetedAction("click", payload);
     case "type":
       return await runTargetedAction("type", payload);
+    case "set_files":
+      return await handleSetFiles(payload);
     case "press": {
       const pressedKey = String(payload.key || "");
       let expectedActiveName = "";

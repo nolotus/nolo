@@ -212,11 +212,62 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     provider: "openai",
     model: "gpt-5.5-pro",
   },
-  // Claude Sonnet/Opus/Fable 5 广场入口 2026-09-01 下架；平台托管通道已于
-  // 2026-09-15 恢复真实 DeepInfra 模型（nolo 目录重新上架）。广场重新上架另行决策。
+  {
+    id: "01CLSO50DIPB00000000A1DVVU",
+    // 旧代 Claude 广场入口（2026-09-01 下架时随条目删除，只剩线上孤儿记录，
+    // 2026-09-24 重新收编）：internal + retired 保留运行时兼容，广场由 overlay
+    // 按 retiredCatalogIds 过滤其存量 agent-pub-* 记录（退场 ≠ 删除——Space
+    // contentKey / dialog primaryAgentKey 硬引用不断链）。model 沿用 2026-09-15
+    // 恢复的真实 DeepInfra 官方名（与平台模型名同名）。
+    group: "internal",
+    lifecycle: "retired",
+    name: "Claude Sonnet 5（兼容）",
+    provider: "nolo",
+    model: "anthropic/claude-sonnet-5",
+  },
+  {
+    id: "01FABLE5DIPB00000001VJBKM4",
+    // 同 Sonnet 5：旧代 Claude 广场入口转 internal + retired 兼容条目。
+    group: "internal",
+    lifecycle: "retired",
+    name: "Claude Fable 5（兼容）",
+    provider: "nolo",
+    model: "anthropic/claude-fable-5",
+  },
+  {
+    id: "01CLOP48DIPB0000000001OI1W",
+    // 同 Sonnet 5 / Fable 5。这条尤其重要：线上同时存在
+    // agent-system-01CLOP48DIPB...（userId=system）与 owner 副本。catalog 若无该
+    // 条目，overlay 的「DB 有、catalog 无 → 用户自建」规则会把 system 名下记录当成
+    // 用户自建保留——正是 2026-09-24 设计会商点名的「事故复活通道」实例。
+    group: "internal",
+    lifecycle: "retired",
+    name: "Claude Opus 5（兼容）",
+    provider: "nolo",
+    model: "anthropic/claude-opus-5",
+  },
+  // Claude 系 2026-09-24 广场重新上架：只上架最新一代（Fable 5.1 / Opus 5.5）。
+  // 平台托管通道 2026-09-15 起已是真实 DeepInfra 模型（nolo 目录），provider
+  // 收敛到 nolo 命名空间；旧代 Sonnet 5 / Fable 5 只保留上面的 retired 兼容条目。
   // Gemini 文本档只上架最新一代：旧版留在广场只会分散选择、拉长列表，而
   // 用户想要的是「最新的那个 Gemini」。旧版模型仍可保留用于兼容历史请求，
   // （modelAbility / 定价表照旧），下架的只是广场入口。
+  {
+    id: "01CLDFBL51PB000000013N70D7",
+    group: "public",
+    lifecycle: "active",
+    name: "Claude Fable 5.1",
+    provider: "nolo",
+    model: "anthropic/claude-fable-5-1",
+  },
+  {
+    id: "01CLDOPU55PB00000001MQHSW0",
+    group: "public",
+    lifecycle: "active",
+    name: "Claude Opus 5.5",
+    provider: "nolo",
+    model: "anthropic/claude-opus-5-5",
+  },
   {
     id: "01GEM37FLPB00000000FJCRNC",
     group: "public",

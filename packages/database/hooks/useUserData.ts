@@ -728,6 +728,7 @@ export function useUserData(
       return;
     }
 
+    let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const refresh = (event: Event) => {
       // 乐观移除：删除事件携带 deletedDbKey 时，立即从当前 data 中剔除该记录，
       // 不等 loadData 远端往返完成。loadData(forceRefresh) 在后台收敛权威状态。
@@ -743,12 +744,21 @@ export function useUserData(
           };
         });
       }
-      clearCache();
-      void loadData({ forceRefresh: true });
+      if (refreshDebounceTimer) {
+        clearTimeout(refreshDebounceTimer);
+      }
+      refreshDebounceTimer = setTimeout(() => {
+        refreshDebounceTimer = null;
+        clearCache();
+        void loadData({ forceRefresh: true });
+      }, 150);
     };
 
     window.addEventListener("nolo-user-data-updated", refresh);
     return () => {
+      if (refreshDebounceTimer) {
+        clearTimeout(refreshDebounceTimer);
+      }
       window.removeEventListener("nolo-user-data-updated", refresh);
     };
   }, [clearCache, loadData]);
