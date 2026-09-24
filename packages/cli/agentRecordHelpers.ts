@@ -368,11 +368,19 @@ export async function resolveAgentRecordFromHybridStore(args: {
             });
             if (fresh) {
               try {
-                await args.db.put(key, { ...fresh, dbKey: key, cachedAt: Date.now() });
+                // serverOrigin 是本地缓存元数据（记录来自哪台服务器），远端响应
+                // 不会携带——覆盖缓存时必须保留，否则后续 resolve 失去刷新来源，
+                // agent update 的 serverUrl 也会错误回落到默认服务器。
+                await args.db.put(key, {
+                  ...fresh,
+                  dbKey: key,
+                  serverOrigin: record.serverOrigin,
+                  cachedAt: Date.now(),
+                });
               } catch {}
               return {
                 agentKey: key,
-                record: fresh,
+                record: { ...fresh, serverOrigin: record.serverOrigin },
                 source: record?.serverOrigin ? "remote-cache" : "local-cache",
                 cacheHit: false,
               } as const;

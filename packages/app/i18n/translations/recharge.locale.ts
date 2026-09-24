@@ -10,7 +10,7 @@ export default {
       recharge_page: {
         title: "Recharge",
         viewPricing: "View pricing",
-        channel: { online: "Online payment", transfer: "QR transfer" },
+        channel: { online: "Online payment", transfer: "Manual payment" },
         loading: "Loading available payment methods...",
         noOnlineChannel:
           "No online payment method is available right now. Please pay by WeChat / Alipay QR transfer.",
@@ -90,7 +90,7 @@ export default {
       recharge_page: {
         title: "充值",
         viewPricing: "查看价格",
-        channel: { online: "在线支付", transfer: "扫码转账" },
+        channel: { online: "在线支付", transfer: "人工收款" },
         loading: "正在加载可用的支付方式...",
         noOnlineChannel:
           "当前没有可用的在线支付方式，请使用微信 / 支付宝扫码转账。",
@@ -165,7 +165,7 @@ export default {
       recharge_page: {
         title: "儲值",
         viewPricing: "查看價格",
-        channel: { online: "線上支付", transfer: "掃碼轉帳" },
+        channel: { online: "線上支付", transfer: "人工收款" },
         loading: "正在載入可用的支付方式...",
         noOnlineChannel:
           "目前沒有可用的線上支付方式，請使用微信 / 支付寶掃碼轉帳。",
@@ -240,7 +240,7 @@ export default {
       recharge_page: {
         title: "チャージ",
         viewPricing: "料金を見る",
-        channel: { online: "オンライン決済", transfer: "QR送金" },
+        channel: { online: "オンライン決済", transfer: "手動入金" },
         loading: "利用可能な決済方法を読み込んでいます...",
         noOnlineChannel:
           "現在利用できるオンライン決済がありません。WeChat / Alipay のQR送金をご利用ください。",

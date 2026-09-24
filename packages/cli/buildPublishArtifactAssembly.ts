@@ -618,9 +618,13 @@ function shouldInlineWorkspaceFile(relativeFilePath: string): boolean {
   // .css must travel with its .tsx importer: reachable UI modules (e.g.
   // render/web/ui/Toast.tsx) import sibling stylesheets, and dropping them
   // leaves the assembled dist with unresolvable "./X.css" imports.
+  // .mjs 同理：.ts 可以直接 import 同目录的 .mjs（如
+  // desktop-chrome-connector/uploadSecurity.ts → ./uploadSecurity.mjs），
+  // 不随行会让 dist 里的 import 解析失败。
   return (
     (relativeFilePath.endsWith(".ts") ||
       relativeFilePath.endsWith(".tsx") ||
+      relativeFilePath.endsWith(".mjs") ||
       relativeFilePath.endsWith(".css")) &&
     !relativeFilePath.includes("node_modules/") &&
     !relativeFilePath.endsWith(".test.ts") &&
