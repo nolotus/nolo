@@ -1,4 +1,80 @@
 
+## 0.78.1
+
+## 0.78.1 (2026-09-24)
+
+### Bug Fixes
+
+* **cli:** keep background runs provably alive before their first loop event ([fcfcdd1](https://github.com/nolotus/bun-nolo/commit/fcfcdd1ad792b7537e3e8f11e98c6d887aa1df79))
+* **desktop:** ship a real Inno installer as the stable Windows download ([776bf66](https://github.com/nolotus/bun-nolo/commit/776bf663940c280f1cdce5971c19b94803727dc5))
+
+
+## 0.78.0
+
+## 0.78.0 (2026-09-23)
+
+### Features
+
+* **agent-runtime:** add execution observation collector ([3697221](https://github.com/nolotus/bun-nolo/commit/3697221e11fa19debc0a178a0e37f2ed997602cf))
+* **cli:** ask once on login whether to sync OAuth credential, remember per provider ([b67e71e](https://github.com/nolotus/bun-nolo/commit/b67e71e982166674faf75966184430f8dd9afeb1))
+* **evolution:** add all-run baseline sink ([59660d5](https://github.com/nolotus/bun-nolo/commit/59660d5a63a3b55bcf913b6b8bfbfc510b5c9c6f))
+* **evolution:** add all-run baseline writer ([5f6bef1](https://github.com/nolotus/bun-nolo/commit/5f6bef1bf996a52789560b178f676283d26341da))
+* **evolution:** add bounded historical baseline reader + resolver ([6896cd8](https://github.com/nolotus/bun-nolo/commit/6896cd8f2d00b425109fa1a01850ba8e63756853))
+* **evolution:** add bounded investigation queue + claim/complete lifecycle ([e02794a](https://github.com/nolotus/bun-nolo/commit/e02794aaac40dfa7c6fd166b8361fe902191661f))
+* **evolution:** add candidate writer ([bacf33c](https://github.com/nolotus/bun-nolo/commit/bacf33c0410a91026aa7931870ce125770f0ba84))
+* **evolution:** add case writer ([bd1ab6b](https://github.com/nolotus/bun-nolo/commit/bd1ab6b0f23fe5e2efe07bdbb4581a611f7cfead))
+* **evolution:** add compact all-run baseline record ([5cdea5f](https://github.com/nolotus/bun-nolo/commit/5cdea5ffaea5a17bf120e3eaa37960684220edae))
+* **evolution:** add compact candidate record ([ed77cc9](https://github.com/nolotus/bun-nolo/commit/ed77cc90b0922b2478449908380a4a13309686b8))
+* **evolution:** add deterministic comparable run baseline ([7a48ad8](https://github.com/nolotus/bun-nolo/commit/7a48ad87af64952e236eb6a33a77272df8db4885))
+* **evolution:** add ephemeral case materialization ([fb674ef](https://github.com/nolotus/bun-nolo/commit/fb674efbbc6c245306b73ea9594e484e43df46e3))
+* **evolution:** add host-provided Jev configuration ([738f495](https://github.com/nolotus/bun-nolo/commit/738f495b2f416ff3ee80202300ba96535279b817))
+* **evolution:** add interesting candidate sink ([44c1ae0](https://github.com/nolotus/bun-nolo/commit/44c1ae0786e02205079e76b04f16b479b1104396))
+* **evolution:** add Jev triage decision adapter ([f3b8edc](https://github.com/nolotus/bun-nolo/commit/f3b8edc2ce0714ced02e387f6f589dde4ac0c5d4))
+* **evolution:** add minimal case record ([1d6e0c2](https://github.com/nolotus/bun-nolo/commit/1d6e0c2b149834e3ec68c0ac8bd63af815b300b2))
+* **evolution:** add run snapshot and signal contracts ([3340424](https://github.com/nolotus/bun-nolo/commit/33404245a737c6281f542af1e3613ff2fb1984b6))
+* **evolution:** add runtime-neutral completion seam ([a9142f9](https://github.com/nolotus/bun-nolo/commit/a9142f9d0023f968a8a3cf6bc94ef081c8eb03fe))
+* **evolution:** add structural trajectory projection ([7bfbff9](https://github.com/nolotus/bun-nolo/commit/7bfbff9781962c7eacf52b8229cfef134cc1698d))
+* **evolution:** add transition-based first divergence ([e401079](https://github.com/nolotus/bun-nolo/commit/e4010792bc2fa73b1991ec7a7628039e8862778e))
+* **evolution:** add triage decision contracts ([f8af647](https://github.com/nolotus/bun-nolo/commit/f8af6470f2022284f18d6afc6d6c73e3b737f196))
+* **evolution:** add triage policy gate ([49a69f2](https://github.com/nolotus/bun-nolo/commit/49a69f273d134baf00e581f20db5f9888e93fe8f))
+* **evolution:** derive snapshots from runtime observations ([af32b63](https://github.com/nolotus/bun-nolo/commit/af32b631d35ad4ece1998ceaef1679a3b38555cc))
+* **evolution:** detect deterministic run signals ([1e68fda](https://github.com/nolotus/bun-nolo/commit/1e68fda21721490a335e5804ff9efdfb6a97c0a8))
+* **evolution:** export all-run baseline pipeline ([ebf98f0](https://github.com/nolotus/bun-nolo/commit/ebf98f085465807aeb4bfae1a97e879365f21979))
+* **evolution:** export candidate pipeline ([4ff86bd](https://github.com/nolotus/bun-nolo/commit/4ff86bded684b10e44e916103010f4ae3c7a2773))
+* **evolution:** export case materialization ([b97b503](https://github.com/nolotus/bun-nolo/commit/b97b503149101e2b8f3c52ba9431bc5ea0db416e))
+* **evolution:** export case pipeline ([b9b665b](https://github.com/nolotus/bun-nolo/commit/b9b665ba32a28351072aa80695baf039367f441b))
+* **evolution:** export comparable runs ([de5d466](https://github.com/nolotus/bun-nolo/commit/de5d466409def8f8e6f2a682202783033a03ab10))
+* **evolution:** export completion analysis seam ([087c543](https://github.com/nolotus/bun-nolo/commit/087c54318276ed952fa0d2f1f0d9f21a5f3d66d7))
+* **evolution:** export decision layer ([b73ae9f](https://github.com/nolotus/bun-nolo/commit/b73ae9f75ba700ddfc1013fc4e952bff31d624de))
+* **evolution:** export decision layer ([876f578](https://github.com/nolotus/bun-nolo/commit/876f578ea885a6de9d0c231b746f20f1462cca8e))
+* **evolution:** export observation primitives ([d334f62](https://github.com/nolotus/bun-nolo/commit/d334f62f1a4449ffd560974855c69c905a1892d7))
+* **evolution:** export trajectory divergence primitives ([8ef91ee](https://github.com/nolotus/bun-nolo/commit/8ef91ee2ea644c4a1054fa8898b0175fbc806bcb))
+* **evolution:** harden tool identity and triage evidence ([ab308e1](https://github.com/nolotus/bun-nolo/commit/ab308e1ed593bd5e44161ed0f4e6b7006c907efd))
+* **evolution:** merge observation, triage, and investigation queue into alpha ([0914bc5](https://github.com/nolotus/bun-nolo/commit/0914bc5285cef4510d1ed8253e49bf10283b60e8))
+* **evolution:** persist compact interesting candidates ([dff36c2](https://github.com/nolotus/bun-nolo/commit/dff36c2a7a16419e45ebc6f135ae7188a5c5db83))
+* **pricing:** expand FAQ, add tier bestFor tags and header trust badges ([e23bf06](https://github.com/nolotus/bun-nolo/commit/e23bf06484dde5da5f67dd60eb09865706299a84))
+* **providers:** add Opus 5.5 and GPT-6 Sol/Luna selectors to devin-oauth catalog ([5f81a48](https://github.com/nolotus/bun-nolo/commit/5f81a483460593655df1ecf7051bafeafbfb27b9))
+
+### Bug Fixes
+
+* **chat:** align settled message typography with streaming state ([324d009](https://github.com/nolotus/bun-nolo/commit/324d00964ce894caeed741e9a81ff52c448cf270))
+* **cli:** classify upstream rate-limit/quota errors without HTTP status ([453c0f5](https://github.com/nolotus/bun-nolo/commit/453c0f57c1135ecf59493cd9d43826b439727faf))
+* **cli:** Ctrl+C while generating copies selection instead of aborting ([ccfdeac](https://github.com/nolotus/bun-nolo/commit/ccfdeacd7d4ce52db3d894b940e9a3748623402f))
+* **cli:** stop /switch hanging on "loading agents" ([00d0c78](https://github.com/nolotus/bun-nolo/commit/00d0c78996b777cce26b737088d894a29b6558e7))
+* **cli:** treat undici `terminated` as transient; expose shared favorite agentKey ([5b68ed1](https://github.com/nolotus/bun-nolo/commit/5b68ed1089904a07855db84c18575133e3894aa9))
+* **evolution:** bound materialized trajectory to selected task ([0579918](https://github.com/nolotus/bun-nolo/commit/0579918a9f4eda6f3f9d1bc47aa716c4872096cc))
+* **evolution:** correct baseline import path + add writer tests ([e009437](https://github.com/nolotus/bun-nolo/commit/e00943705c4c79fcf50adea868d4f8fcab6ed5f6))
+* **evolution:** dedupe optional distribution calls + float-safe p95 assert ([52a53d4](https://github.com/nolotus/bun-nolo/commit/52a53d45cbfe5241c0df68600d0a0ae9416cb86b))
+* **evolution:** include run failures in triage evidence ([431b9ff](https://github.com/nolotus/bun-nolo/commit/431b9ff2d3fed3269d37c8c37b978ebebaee33c0))
+* **evolution:** keep hard failures in candidate funnel ([9aa4762](https://github.com/nolotus/bun-nolo/commit/9aa4762158e39867ab689bea6ff549c572b8a649))
+* **evolution:** keep partial observations from undercounting aggregates ([8de6d45](https://github.com/nolotus/bun-nolo/commit/8de6d45a37045e59c53a172db2a6d5a0293757c5))
+* **evolution:** merge trace and observation tool evidence ([06d06ff](https://github.com/nolotus/bun-nolo/commit/06d06ff8f85a31661bbd4af106d48a4b4c73508d))
+* **evolution:** prefer runtime identity in run snapshot precedence ([1d0aad5](https://github.com/nolotus/bun-nolo/commit/1d0aad5ba9af6c17a3e734bb07761058125d8a39))
+* **evolution:** surface hard run failures as signals ([edfaea3](https://github.com/nolotus/bun-nolo/commit/edfaea343d9f2d9f2bb84e71cb530ac8166651c8))
+* **prompt:** rewrite agent-run wait rules into three explicit environment cases ([287e4fa](https://github.com/nolotus/bun-nolo/commit/287e4fa4f42f9278de23f073fdd3d5347f5b96da))
+* **prompt:** rewrite agent-run wait rules into three explicit environment cases ([8cd3f6f](https://github.com/nolotus/bun-nolo/commit/8cd3f6ff1cfdc13194132939c6a3c622e4324bc8))
+
+
 ## 0.77.0
 
 ## 0.77.0 (2026-09-22)
