@@ -23,6 +23,27 @@ export const MIN_COMPRESS_COUNT = 5;
 export const ACTIVE_SUMMARY_TAIL_KEEP_COUNT = 2;
 
 /**
+ * 压缩后历史保留上限相对于触发线的安全余量比例（占窗口的 18%）。
+ *
+ * 为什么需要余量：
+ * 压缩触发线 triggerRatio 为上限防爆线（例如 256k/1M 下为 0.78）。
+ * 若压缩后保留的历史仍贴近或超过 triggerRatio（此前 1M 下 rawMessageBudget 达 0.94，
+ * 256k 下达 0.79），刚压缩完下一轮甚至立即再次过线，形成 0.768↔0.878 锯齿，
+ * 每 1~2 轮就调用一次摘要 LLM，彻底打爆 provider 的前缀缓存（KV cache）。
+ *
+ * 余量选择理由：
+ * 单轮工具最大灌水 + 轮次开销约占 20%（headroom）。
+ * 将余量设为 0.18（回撤到 ~60% 窗口，或 triggerRatio - 0.18）：
+ * 1) 一次压缩后真实占用落回 ≤60% 窗口，与 78% 触发线保持 18% 窗口（256k 下 46k tokens，
+ *    1M 下 180k tokens）的安全距离；
+ * 2) 该余量在极端工具 flood 下可支撑多轮缓冲，在常规会话中可支撑数十轮交互无需再压缩，
+ *    彻底消除「触发即贴线、贴线又触发」的抖动与缓存失效；
+ * 3) 保留了 60% 窗口的最近历史，在大窗口模型（如 1M 达 60 万 tokens）上依然完整保留
+ *    丰富的近期上下文与代码细节，兼顾了 cache-first 与上下文完整性。
+ */
+export const COMPACTION_RETENTION_CUSHION_RATIO = 0.18;
+
+/**
  * manual / cold_resume 的实际触发门槛：折叠数（pending - 保留尾部）还要过
  * MIN_COMPRESS_COUNT，所以 pending 至少要 5 + 2 = 7 条才不会空转。
  */
@@ -286,19 +307,70 @@ function calculateCompressCount(
 }
 
 /**
+ * 计算压缩后的历史总保留预算上限与原始消息预算上限。
+ *
+ * 保证压缩后的保留上限严格位于压缩触发线以下，留足多轮安全余量（防抖 / 消除锯齿 / 保护前缀缓存）。
+ */
+export function resolveEffectiveCompactionBudgets(args: {
+  contextWindow: number;
+  triggerRatio: number;
+  historyBudget: number;
+  rawMessageBudget: number;
+  summaryTokens: number;
+  cushionRatio?: number;
+}): {
+  effectiveHistoryBudget: number;
+  effectiveRawMessageBudget: number;
+  maxRetainedRatio: number;
+} {
+  const {
+    contextWindow,
+    triggerRatio,
+    historyBudget,
+    rawMessageBudget,
+    summaryTokens,
+    cushionRatio = COMPACTION_RETENTION_CUSHION_RATIO,
+  } = args;
+
+  // 保留比例严格钳制在触发线下方，至少留出 cushionRatio；下限保护 0.20
+  const maxRetainedRatio = Math.max(
+    0.2,
+    Number((triggerRatio - cushionRatio).toFixed(4)),
+  );
+  const maxRetainedHistoryBudget = Math.floor(contextWindow * maxRetainedRatio);
+  const effectiveHistoryBudget = Math.min(historyBudget, maxRetainedHistoryBudget);
+  const effectiveRawMessageBudget = Math.min(
+    rawMessageBudget,
+    Math.max(0, effectiveHistoryBudget - summaryTokens),
+  );
+
+  return {
+    effectiveHistoryBudget,
+    effectiveRawMessageBudget,
+    maxRetainedRatio,
+  };
+}
+
+/**
  * 保护 tool chain 边界：不切断 assistant(tool_calls) → tool(result) 配对。
+ *
+ * 若切点落在 tool 消息上，将 tool 消息向后推进压缩集，使整组 tool chain
+ * 在压缩集内闭环归档，同时防止向前倒退导致保留尾部超出预算、再次打爆触发线。
  */
 function guardToolChainBoundary(pendingMsgs: Message[], compressCount: number): number {
   let count = compressCount;
-  // 不让保留的第一条是 tool（它的 assistant 被压缩了就是孤儿）
-  while (count > 0 && count < pendingMsgs.length && pendingMsgs[count].role === "tool") {
-    count--;
+  // 不让保留的第一条是 tool（它的 assistant 已被压缩，若留在保留集会成孤儿 tool 报 400；
+  // 将其一并纳入压缩集，既配对又保证保留集不超预算）
+  while (count < pendingMsgs.length && pendingMsgs[count].role === "tool") {
+    count++;
   }
-  // 最后一条被压缩的不能是带 tool_calls 的 assistant（output 还没来）
-  if (count > 0) {
-    const lastCompressed = pendingMsgs[count - 1];
-    if (hasOpenEndedToolCall(lastCompressed)) {
+  // 最后一条被压缩的不能是带 tool_calls 的 assistant（若其 tool 结果还在保留集，则将 tool 结果也推进压缩集）
+  while (count > 0 && hasOpenEndedToolCall(pendingMsgs[count - 1])) {
+    if (count < pendingMsgs.length && pendingMsgs[count].role === "tool") {
+      count++;
+    } else {
       count--;
+      break;
     }
   }
   return count;
@@ -373,11 +445,26 @@ export function planCompression(input: CompressionInput): CompressionPlan {
   // 4. 算压缩条数 + 保护 tool chain
   // 主动路径（手动 / 真实占用超线 / 冷恢复）折叠到只留尾部原文；
   // 估算兜底路径按预算从后往前保留。
-  let compressCount = calculateCompressCount(pendingMsgs, rawMessageBudget, {
-    keepTailCount:
-      shouldRunActiveSummary || triggeredByRealUsage || triggeredByColdResume,
-    totalUsed, historyBudget,
-  });
+  // 注意：保留上限必须钳制到触发线以下（留足 cushion 距离），
+  // 消除「触发即贴线、贴线又触发」的锯齿与前缀缓存打爆。
+  const { effectiveHistoryBudget, effectiveRawMessageBudget } =
+    resolveEffectiveCompactionBudgets({
+      contextWindow,
+      triggerRatio,
+      historyBudget,
+      rawMessageBudget,
+      summaryTokens,
+    });
+  let compressCount = calculateCompressCount(
+    pendingMsgs,
+    effectiveRawMessageBudget,
+    {
+      keepTailCount:
+        shouldRunActiveSummary || triggeredByRealUsage || triggeredByColdResume,
+      totalUsed,
+      historyBudget: effectiveHistoryBudget,
+    },
+  );
   compressCount = guardToolChainBoundary(pendingMsgs, compressCount);
 
   // 5. 太少不值得压缩

@@ -58,6 +58,18 @@ export function waitForRunTerminal<S, T = unknown>(
     // 宏任务饿死 → timeoutOption 永远不调 → 98% CPU 死循环（worker 收尾时
     // 表现为套件冻结）。循环内自查 deadline 不依赖宏任务调度，保证必收敛。
     const deadline = Date.now() + args.timeoutMs;
+    // 迭代硬上限（时钟无关的第二道保险）：全量 bun test --parallel=6 实测
+    // （cliAgentRunToolExecutors 的 600ms timeout 用例，5/5 复现）该 worker
+    // 内 macrotask 定时器整体失效——同一个 worker 里 readlineWorkspace 的
+    // 5.6s 用例超过 --timeout=5000 仍 pass、bun 的 per-test 超时也不触发，
+    // 表现为 99% CPU 的微任务热循环（三次 eu-stack 采样栈完全一致）。此时
+    // 连 Date.now() 推进都不可信，循环内 deadline 自查会失效。按
+    // timeoutMs/pollIntervalMs 给出与时间语义等价的迭代上限：生产路径
+    // （真实 sleep）下迭代速率本身受 pollInterval 限速，上限不会提前触发；
+    // 时钟/timer 任一退化下也必然收敛，不会拖垮整个 worker。
+    const maxIterations =
+      Math.ceil(args.timeoutMs / Math.max(1, args.pollIntervalMs)) + 1;
+    let iterations = 0;
     while (true) {
       const state = yield* readEffect(args.read);
       lastState = state;
@@ -65,7 +77,8 @@ export function waitForRunTerminal<S, T = unknown>(
         if (args.claim) { args.claim.commit(token); committed = true; }
         return { kind: "terminal", state } as const;
       }
-      if (Date.now() >= deadline) {
+      iterations += 1;
+      if (Date.now() >= deadline || iterations >= maxIterations) {
         return { kind: "timeout", waitedMs: args.timeoutMs, lastState } as const;
       }
       // v4 raceFirst 类型推断让 sleep 分支的 void 占主导，但 abort 桥胜出时

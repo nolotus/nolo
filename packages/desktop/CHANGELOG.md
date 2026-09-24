@@ -1,4 +1,14 @@
 
+## 0.119.0-alpha.2
+
+## 0.119.0-alpha.2 (2026-09-24)
+
+### Bug Fixes
+
+* **agent-runtime:** cap waitForRunTerminal iterations when worker timers degrade ([8185a08](https://github.com/nolotus/bun-nolo/commit/8185a08f07c1111ab96f247be5268b13b33e9c56))
+* **ai:** clamp the post-compression retention below the trigger line ([4976860](https://github.com/nolotus/bun-nolo/commit/49768605d20bb83184601fac72b1913a57b05450))
+
+
 ## 0.119.0-alpha.1
 
 ## 0.119.0-alpha.1 (2026-09-24)
