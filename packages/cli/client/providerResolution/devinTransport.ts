@@ -7,6 +7,7 @@
 import {
   createDevinProvider,
   isDevinOAuthAgent,
+  readDevinUpstreamFailure,
 } from "../../../agent-runtime";
 import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
@@ -19,6 +20,7 @@ export const resolveDevinTransport: ProviderResolver = async (ctx) => {
     deps,
     buildProviderOpenAiTools,
     additionalToolNames,
+    recordLocalAvailability,
   } = ctx;
 
   if (isDevinOAuthAgent(agentConfig)) {
@@ -66,7 +68,22 @@ export const resolveDevinTransport: ProviderResolver = async (ctx) => {
     return {
       model,
       complete: async (messages, options) => {
-        return devinProvider.complete(messages, options);
+        try {
+          const result = await devinProvider.complete(messages, options);
+          // 成功响应 = 上游可用：清掉该凭证的 429 冷却。此前本通道没有接
+          // recordLocalAvailability，被标记的冷却"只进不出"——连探测成功
+          // 都不会清除，agent 会一直被门控拦到冷却上限时刻。
+          await recordLocalAvailability(200);
+          return result;
+        } catch (error) {
+          // Devin Connect 的上游失败以 Error 抛出；HTTP 非 2xx 与
+          // resource_exhausted trailer 会把可用性信号附在错误上。
+          const failure = readDevinUpstreamFailure(error);
+          if (failure) {
+            await recordLocalAvailability(failure.status, failure.body);
+          }
+          throw error;
+        }
       },
     };
   }

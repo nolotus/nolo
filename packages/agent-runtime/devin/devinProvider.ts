@@ -392,6 +392,47 @@ export type DevinDecodedDelta = {
   usage?: DevinFrameUsage | null;
 };
 
+/**
+ * Devin Connect 上游失败的可用性信号。
+ *
+ * HTTP 非 2xx 与限流类 trailer 会把结论附到抛出的 Error 上，供本地 runtime 的
+ * transport 落 429 冷却（`recordLocalAvailability`）——此前 Devin 通道没有这条
+ * 接线，被标记的冷却"只进不出"：撞限流后即使上游恢复（含探测成功）也不会被清除。
+ */
+export type DevinUpstreamFailure = {
+  /** 与 HTTP status 语义对齐（429 = 限流/配额耗尽）。 */
+  status: number;
+  /** 原始失败载荷：HTTP 响应文本，或 trailer 的 error 对象。 */
+  body?: unknown;
+};
+
+type DevinUpstreamFailureCarrier = Error & {
+  devinUpstreamFailure?: DevinUpstreamFailure;
+};
+
+function attachDevinUpstreamFailure<T extends Error>(
+  error: T,
+  failure: DevinUpstreamFailure | undefined,
+): T {
+  if (failure) {
+    (error as DevinUpstreamFailureCarrier).devinUpstreamFailure = failure;
+  }
+  return error;
+}
+
+/** 读取错误上附带的可用性信号；无信号（含非 Devin 错误）返回 undefined。 */
+export function readDevinUpstreamFailure(
+  error: unknown,
+): DevinUpstreamFailure | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const failure = (error as DevinUpstreamFailureCarrier).devinUpstreamFailure;
+  if (!failure || typeof failure !== "object") return undefined;
+  if (typeof failure.status !== "number" || !Number.isFinite(failure.status)) {
+    return undefined;
+  }
+  return failure;
+}
+
 export function parseDevinConnectTrailer(payload: Buffer): Error | null {
   const text = payload.toString("utf8").trim();
   if (!text || text === "{}") return null;
@@ -402,7 +443,13 @@ export function parseDevinConnectTrailer(payload: Buffer): Error | null {
     }
     const code = typeof parsed.error.code === "string" ? parsed.error.code : "unknown";
     const message = typeof parsed.error.message === "string" ? parsed.error.message : "Unknown error";
-    return new Error(`Devin Connect upstream error ${code}: ${message}`);
+    return attachDevinUpstreamFailure(
+      new Error(`Devin Connect upstream error ${code}: ${message}`),
+      // Connect/gRPC 的 resource_exhausted 与 HTTP 429 同义（限流/配额耗尽）。
+      code === "resource_exhausted"
+        ? { status: 429, body: parsed.error }
+        : undefined,
+    );
   } catch {
     return new Error(`Devin Connect invalid terminal trailer: ${text}`);
   }
@@ -565,8 +612,11 @@ export function createDevinProvider(options: {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        throw new Error(
-          `Devin Connect upstream returned error ${response.status}: ${errText}`
+        throw attachDevinUpstreamFailure(
+          new Error(
+            `Devin Connect upstream returned error ${response.status}: ${errText}`
+          ),
+          { status: response.status, body: errText },
         );
       }
 

@@ -417,5 +417,6 @@ export {
 } from "./capabilities";
 
 export { createDevinProvider } from "./devin/devinProvider";
+export { readDevinUpstreamFailure, type DevinUpstreamFailure } from "./devin/devinProvider";
 export { isDevinOAuthAgent } from "./devinOAuth";
 
