@@ -12,6 +12,7 @@ import {
   applyBuiltinAgentRuntimeOverride,
   resolveBuiltinPlatformAgentConfig,
 } from "../../agent-runtime/builtinPlatformAgentConfigs";
+import { applyPublicAgentCatalogOverride } from "../../agent-runtime/publicAgentCatalogOverride";
 import type { HybridRecordStore } from "./hybridRecordStore";
 import { buildLocalAgentLookupKeys } from "./localAgentRecords";
 import { dialogMessageRange } from "../../database/keys";
@@ -78,14 +79,21 @@ export async function readAgentFromStore(args: {
   for (const key of buildLocalAgentLookupKeys(args)) {
     const record = await args.store.read(key);
     if (!record || typeof record !== "object") continue;
-    // 内置 agent 的 provider/model 由 catalog 托管，命中记录也要盖一层：
-    // 服务端那道 override（agentRun/agentLookup）管不到本地 runtime，而本地
-    // 缓存里存的可能正是过期记录（hybrid store 会把远端读到的原始记录缓存下来，
-    // 客户端升级并不会重写它）。不盖的话本地模式又会回到「状态行显示 catalog
-    // 模型的窗口、实际却跑记录里的旧模型」——正是这次要消灭的分叉。
+    // 平台 agent 的字段真值在代码里，命中记录也要盖一层：
+    // builtin 6 个的 provider/model 由 catalog 托管；public catalog 条目
+    // （Luna/GLM/图片档/quick-chat 档位…）连内容字段一并以 catalog+seed 为准。
+    // 服务端那两道 override（agentRun/agentLookup、chatHandler/
+    // chatCallPlan）管不到本地 runtime，而本地缓存里存的可能正是过期记录
+    // （hybrid store 会把远端读到的原始记录缓存下来，客户端升级并不会重写
+    // 它）。不盖的话本地模式又会回到「状态行显示 catalog 模型的窗口、实际却
+    // 跑记录里的旧模型/旧 prompt」——正是这次要消灭的分叉。
+    // 用户自建 agent 与 retired 兼容条目引用相等原样返回，不受影响。
     return applyBuiltinAgentRuntimeOverride(
       args.agentRef,
-      resolveAgentRuntimeConfigFromRecord(key, record),
+      resolveAgentRuntimeConfigFromRecord(
+        key,
+        applyPublicAgentCatalogOverride(record),
+      ),
     );
   }
   // Last-chance fallback: known built-in platform agent keys (quick-chat

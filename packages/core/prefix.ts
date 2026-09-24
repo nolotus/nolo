@@ -57,6 +57,18 @@ export const parsePublicAgentId = (key: string): string | null =>
     : null;
 
 /**
+ * 从平台 system agent key 解析出 id；非 agent-system-* 返回 null。
+ *
+ * 与 parsePublicAgentId 对称，供「这条记录是否平台自身副本」判定使用。
+ * 刻意不为 `agent-{userId}-{id}` 提供解析：那需要 userId 才能判定归属
+ * （见 ownedAgentKeyPrefix 的歧义说明），而调用方往往只有 key。
+ */
+export const parseSystemAgentId = (key: string): string | null =>
+  key.startsWith(SYSTEM_AGENT_KEY_PREFIX)
+    ? key.slice(SYSTEM_AGENT_KEY_PREFIX.length)
+    : null;
+
+/**
  * 某用户自建 agent 的 key 前缀：`agent-{userId}-`。
  *
  * 必须整体比较该前缀，不能按 "-" 分段解析——userId 本身可能含连字符

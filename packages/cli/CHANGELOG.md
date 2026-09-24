@@ -1,4 +1,13 @@
 
+## 0.94.0-alpha.1
+
+## 0.94.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **agent:** make catalog+seed the single truth for platform agent presets ([e6ba2c6](https://github.com/nolotus/bun-nolo/commit/e6ba2c65e0dfe3b1e0ab4c715ffb576da7e4158c))
+
+
 ## 0.93.0-alpha.1
 
 ## 0.93.0-alpha.1 (2026-09-24)
