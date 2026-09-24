@@ -1,4 +1,14 @@
 
+## 0.98.0-alpha.3
+
+## 0.98.0-alpha.3 (2026-09-24)
+
+### Bug Fixes
+
+* **cli:** bound terminateRunProcess waits by iteration count ([b29fc5c](https://github.com/nolotus/bun-nolo/commit/b29fc5c34e16de77aafb608167b53ac805be13b5))
+* **recharge:** render online payment entries and fix i18n key prefixes ([5fc298a](https://github.com/nolotus/bun-nolo/commit/5fc298aeeb01836a61da14adb8e86ec462d47a76))
+
+
 ## 0.98.0-alpha.2
 
 ## 0.98.0-alpha.2 (2026-09-24)

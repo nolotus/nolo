@@ -2427,7 +2427,14 @@ export async function terminateRunProcess(
   signalGroup(initialSignal);
   if (initialSignal === "SIGTERM") {
     const deadline = nowMs() + TERMINATE_GRACE_MS;
-    while (!isPidGone(pid, deps) && nowMs() < deadline) {
+    // The injected clock/sleep used by tests (and occasionally a degraded
+    // worker scheduler) can make both the deadline and timer callback stop
+    // advancing. Keep the synchronous deadline check for normal operation,
+    // but also cap polling iterations so termination always converges.
+    const maxIterations = Math.ceil(TERMINATE_GRACE_MS / TERMINATE_POLL_MS) + 1;
+    let iterations = 0;
+    while (!isPidGone(pid, deps) && nowMs() < deadline && iterations < maxIterations) {
+      iterations += 1;
       await sleep(TERMINATE_POLL_MS);
     }
   }
@@ -2435,7 +2442,10 @@ export async function terminateRunProcess(
   if (!isPidGone(pid, deps)) {
     signalGroup("SIGKILL");
     const killDeadline = nowMs() + TERMINATE_KILL_GRACE_MS;
-    while (!isPidGone(pid, deps) && nowMs() < killDeadline) {
+    const maxIterations = Math.ceil(TERMINATE_KILL_GRACE_MS / TERMINATE_POLL_MS) + 1;
+    let iterations = 0;
+    while (!isPidGone(pid, deps) && nowMs() < killDeadline && iterations < maxIterations) {
+      iterations += 1;
       await sleep(TERMINATE_POLL_MS);
     }
   }
