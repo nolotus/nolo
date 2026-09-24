@@ -1,4 +1,13 @@
 
+## 0.96.0-alpha.1
+
+## 0.96.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **security:** add AIGC output moderation, blocklist and audit retention ([a554683](https://github.com/nolotus/bun-nolo/commit/a5546839906e892eed45e1986daf26f4ed34948f))
+
+
 ## 0.95.0-alpha.6
 
 ## 0.95.0-alpha.6 (2026-09-24)

@@ -3,11 +3,12 @@
 import path from "path";
 import { mkdir } from "node:fs/promises";
 import { ulid } from "ulid";
+import { Mutex } from "async-mutex";
 import { asOptionalTrimmedString } from "core/optionalString";
 import serverDb from "./db";
 import { blobKey, fileKey, fileIdIndexKey, fileStatKey } from "database/keys";
 import { isLevelNotFoundError } from "database/levelNotFoundError";
-import { isTombstoneRecord } from "database/tombstones";
+import { buildTombstoneRecord, isTombstoneRecord } from "database/tombstones";
 import { DataType } from "create/types";
 
 const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
@@ -412,6 +413,58 @@ export const hasFileTombstoneById = async (fileId: string): Promise<boolean> => 
     const mainKey = resolved.mainKey || fileKey.single(resolved.tenantId, resolved.fileId);
     const metadata = await dbGetOrNull<FileMetadata>(mainKey);
     return Boolean(metadata && isTombstoneRecord(metadata));
+};
+
+/**
+ * tombstoneFileById 的进程内串行锁：防止并发调用同时观察到"活文件"、
+ * 各自写 tombstone 并各减一次 blob refCount，导致共享 blob 被提前删除。
+ * 生产为单实例部署（PM2 fork），进程内锁即可覆盖；多实例场景下仍以
+ * refCount 单调递减语义兜底（最坏多减，需人工修复 blob）。
+ */
+const tombstoneLocks = new Map<string, Mutex>();
+const tombstoneLock = (key: string): Mutex => {
+    let lock = tombstoneLocks.get(key);
+    if (!lock) {
+        lock = new Mutex();
+        tombstoneLocks.set(key, lock);
+    }
+    return lock;
+};
+
+/**
+ * 按 fileId 将文件标记为已删除（tombstone）。
+ *
+ * 用途：内容审核拦截已落盘文件时使用（例如生图机先上传、服务端审核后
+ * 判定违规的图片）。写 tombstone 后 getFileMetadataById / getFileContentById
+ * 均返回 null，文件不再可读；blob 引用计数减一，归零时物理清除。
+ *
+ * 只做"不可访问"语义，不删除 fileId 索引（保留审计线索，与仓库既有
+ * tombstone 语义一致）。返回 false 表示文件不存在或已是 tombstone。
+ * 并发调用按 fileId 串行化，保证只有首个成功者释放 blob 引用。
+ */
+export const tombstoneFileById = async (fileId: string): Promise<boolean> => {
+    if (!fileId?.trim()) return false;
+    return tombstoneLock(fileId).runExclusive(async () => {
+        const resolved = fileId.startsWith("file-")
+            ? { tenantId: null, fileId, mainKey: fileId }
+            : await resolveTenantAndFileId(fileId);
+        if (!resolved) return false;
+
+        const mainKey =
+            resolved.mainKey ||
+            (resolved.tenantId ? fileKey.single(resolved.tenantId, resolved.fileId) : null);
+        if (!mainKey) return false;
+
+        const metadata = await dbGetOrNull<FileMetadata>(mainKey);
+        if (!metadata || isTombstoneRecord(metadata)) return false;
+
+        const nowIso = new Date().toISOString();
+        await serverDb.put(mainKey, buildTombstoneRecord(metadata as any, nowIso));
+        if (metadata.sha256) {
+            await decrementBlobRefCount(metadata.sha256);
+        }
+        return true;
+    });
 };
 
 /**
