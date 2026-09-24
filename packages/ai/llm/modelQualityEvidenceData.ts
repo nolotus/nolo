@@ -24,6 +24,9 @@
 //   Intelligence Index for Muse Spark 1.3 (not a domain-specific quality
 //   benchmark — Muse Spark 1.3 does have a confirmed Creative Writing v3 row
 //   below), pre-4.0 Terminal-Bench snapshots;
+//   AA 的域无关智商/速度/延迟/成本快照不住这里，住 ai/llm/modelAbility.ts 的
+//   aaSnapshot（展示/软选型参考）；AA 的*域级*评测分（如 Terminal-Bench 4.0）
+//   可以进本文件，与 launch 页口径分行共存、各自带 sourceUrl；
 // - runtime speed is observed separately as providerCallTiming facts
 //   (firstOutputMs / callDurationMs) and is not a quality dimension here.
 
@@ -48,6 +51,16 @@ const GPT6_ASTRA_LAUNCH_URL = "https://openai.com/index/gpt-6-astra/";
 /** Agents on Rails update covering Claude Fable 5.1 and GLM 5.3 Flash. */
 const RAILS_FABLE_GLM_URL =
   "https://rubyonrails.org/2026/9/2/agents-on-rails-claude-fable-5-1-and-glm-5-3-flash";
+/** Artificial Analysis Terminal-Bench 4.0 leaderboard (independent measurement). */
+const AA_TERMINAL_BENCH_4_URL =
+  "https://artificialanalysis.ai/evaluations/terminalbench-4-0";
+/** AA 长上下文/科学推理各榜（2026-09-24 快照，headless 渲染读取）。 */
+const AA_LCR_URL = "https://artificialanalysis.ai/evaluations/artificial-analysis-long-context-reasoning";
+const AA_GDP_PDF_URL = "https://artificialanalysis.ai/evaluations/gdp-pdf";
+const AA_GPQA_URL = "https://artificialanalysis.ai/evaluations/gpqa-diamond";
+const AA_HLE_URL = "https://artificialanalysis.ai/evaluations/humanitys-last-exam";
+const AA_CRITPT_URL = "https://artificialanalysis.ai/evaluations/critpt";
+const AA_SCICODE_URL = "https://artificialanalysis.ai/evaluations/scicode";
 
 /**
  * coding.* evidence. Single dimension (task_success), percent scores stay
@@ -58,6 +71,19 @@ const CODING_EVIDENCE: readonly ModelQualityEvidence[] = [
   { model: "gpt-6-astra", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 57.9, direction: "higher_better", sourceUrl: GPT6_ASTRA_LAUNCH_URL },
   { model: "claude-fable-5-1", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 55.8, direction: "higher_better", sourceUrl: GPT6_ASTRA_LAUNCH_URL },
   { model: "gemini-3.8-flash", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 19.1, direction: "higher_better", sourceUrl: GPT6_ASTRA_LAUNCH_URL },
+  // coding.terminal — Terminal-Bench 4.0，AA 独立实测（2026-09-24 快照）。
+  // 与上面三行同 benchmark 不同来源：上面是 OpenAI 发布页口径，这里是 AA 自测；
+  // 每个 model 只有一行，resolver 按 priority 取首个存在行，不会混。
+  // 已有 launch 页口径的 model（gpt-6-astra / gemini-3.8-flash）不重复记。
+  // AA 对同型号列多个 effort 档，取最高分；fable-5 在 AA 该榜只有 5.1 数据，不借值。
+  { model: "claude-opus-5-5", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 59.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "claude-opus-5", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 49.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "glm-5.3", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 41.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "gpt-5.6-sol", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 39.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "mimo-v2.6-pro", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 34.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "muse-spark-1.3", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 33.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "step-5-preview", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 33.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
+  { model: "grok-4.6", domain: "coding.terminal", dimension: "task_success", benchmark: "terminal-bench-4", benchmarkVersion: "4.0", score: 21.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_TERMINAL_BENCH_4_URL },
 
   // coding.repo — DeepSWE 1.1 (percent, same source).
   { model: "gpt-6-astra", domain: "coding.repo", dimension: "task_success", benchmark: "deepswe-1.1", benchmarkVersion: "1.1", score: 74.1, direction: "higher_better", sourceUrl: GPT6_ASTRA_LAUNCH_URL },
@@ -185,8 +211,98 @@ function expandColumnarSnapshot(
  * Curated current evidence. Only human-confirmed values from the source pages
  * above; scores stay benchmark-native, never normalized into a shared scale.
  */
+// --- AA 长上下文/长文档 & 科学推理（2026-09-24 快照）-----------------------
+//
+// 来源：Artificial Analysis 各评测榜（headless Chrome 渲染后读取，URL 与
+// modelAbility 的 AA_EVAL_URLS 同源）。写论文（读文献/综述）与写小说
+// （长篇一致性）用户需要 long_context；科研问答/推导/论文写作用户需要 science。
+// qwen3.8-max 按 canonical-id 规则不进本文件（见下方测试），只留在
+// modelAbility 的 aaEvals 参考面。
+const LONG_CONTEXT_EVIDENCE: readonly ModelQualityEvidence[] = [
+  // long_context — AA-LCR v1.1（10k-100k 文档多步推理，主榜）。
+  { model: "kimi-k3", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 88.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "step-5-preview", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 88.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "mimo-v2.6-pro", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 86.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "claude-opus-5-5", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 84.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "gpt-5.5", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 84.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "gpt-5.6-sol", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 84.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "gpt-5.6-luna", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 83.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "gpt-6-luna", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 83.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "muse-spark-1.3", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 83.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  { model: "gemini-3.8-flash", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 81.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
+  // long_context — GDP.pdf（长文档 all-pass，难度高得多，次级参考）。
+  { model: "gpt-6-astra", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 32.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "claude-opus-5-5", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 28.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gpt-5.6-sol", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 27.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "muse-spark-1.3", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 26.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gpt-5.6-luna", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 24.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "kimi-k3", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 22.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "claude-opus-5", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 21.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gemini-3.8-flash", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 21.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gpt-6-luna", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 20.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "mimo-v2.6-pro", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 19.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "grok-4.6", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 17.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+];
+
+const SCIENCE_EVIDENCE: readonly ModelQualityEvidence[] = [
+  // science — GPQA Diamond（研究生级科学推理，主榜）。
+  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 96.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gemini-3.8-flash", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 95.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "grok-4.6", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gemini-3.7-flash", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gpt-5.6-sol", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "kimi-k3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 93.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 93.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "glm-5.3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 91.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gpt-5.6-luna", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 91.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  // science — Humanity's Last Exam。
+  { model: "claude-opus-5-5", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 61.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "claude-fable-5", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 55.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 54.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 54.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "gpt-5.6-sol", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 49.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "mimo-v2.6-pro", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 49.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 48.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "gemini-3.8-flash", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 47.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "kimi-k3", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 46.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "step-5-preview", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 46.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "grok-4.6", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 42.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  { model: "glm-5.3", domain: "science", dimension: "task_success", benchmark: "humanitys-last-exam", score: 42.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_HLE_URL },
+  // science — CritPt（研究级物理推理）。
+  { model: "gpt-5.6-sol", domain: "science", dimension: "task_success", benchmark: "critpt", score: 32.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "claude-opus-5-5", domain: "science", dimension: "task_success", benchmark: "critpt", score: 31.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "critpt", score: 31.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "critpt", score: 29.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "mimo-v2.6-pro", domain: "science", dimension: "task_success", benchmark: "critpt", score: 26.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "critpt", score: 24.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "kimi-k3", domain: "science", dimension: "task_success", benchmark: "critpt", score: 23.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "step-5-preview", domain: "science", dimension: "task_success", benchmark: "critpt", score: 20.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "gpt-5.6-luna", domain: "science", dimension: "task_success", benchmark: "critpt", score: 20.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "gpt-6-luna", domain: "science", dimension: "task_success", benchmark: "critpt", score: 19.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "glm-5.3", domain: "science", dimension: "task_success", benchmark: "critpt", score: 19.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  { model: "gemini-3.8-flash", domain: "science", dimension: "task_success", benchmark: "critpt", score: 18.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_CRITPT_URL },
+  // science — SciCode（科学编码）。
+  { model: "claude-opus-5-5", domain: "science", dimension: "task_success", benchmark: "scicode", score: 66.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "claude-fable-5", domain: "science", dimension: "task_success", benchmark: "scicode", score: 61.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "mimo-v2.6-pro", domain: "science", dimension: "task_success", benchmark: "scicode", score: 60.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "gemini-3.7-flash", domain: "science", dimension: "task_success", benchmark: "scicode", score: 59.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "kimi-k3", domain: "science", dimension: "task_success", benchmark: "scicode", score: 59.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "glm-5.3", domain: "science", dimension: "task_success", benchmark: "scicode", score: 59.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "step-5-preview", domain: "science", dimension: "task_success", benchmark: "scicode", score: 58.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "scicode", score: 58.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "gpt-5.6-sol", domain: "science", dimension: "task_success", benchmark: "scicode", score: 57.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "gemini-3.8-flash", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "grok-4.6", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+  { model: "gpt-6-luna", domain: "science", dimension: "task_success", benchmark: "scicode", score: 54.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+];
+
 export const MODEL_QUALITY_EVIDENCE: readonly ModelQualityEvidence[] = [
   ...CODING_EVIDENCE,
+  ...LONG_CONTEXT_EVIDENCE,
+  ...SCIENCE_EVIDENCE,
   ...expandColumnarSnapshot("writing.creative", CREATIVE_WRITING_V3_COLUMNS, CREATIVE_WRITING_V3_SCORES, {
     sourceUrl: CREATIVE_WRITING_V3_URL,
     benchmarkVersion: CREATIVE_WRITING_V3_VERSION,

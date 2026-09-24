@@ -1,4 +1,14 @@
 
+## 0.93.0-alpha.1
+
+## 0.93.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **llm:** add Artificial Analysis snapshot to modelAbility ([6fb5234](https://github.com/nolotus/bun-nolo/commit/6fb52346c5500af4267eddbbb49efe3b8c36145d))
+* **llm:** add long_context and science quality domains from AA ([fee9312](https://github.com/nolotus/bun-nolo/commit/fee931236eb7560e7424d3a47b5124d9d2c35613))
+
+
 ## 0.92.0-alpha.1
 
 ## 0.92.0-alpha.1 (2026-09-24)

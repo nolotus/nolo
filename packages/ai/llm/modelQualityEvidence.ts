@@ -38,7 +38,9 @@ export type ModelQualityDomain =
   | "coding.terminal"
   | "coding.rails"
   | "design.website"
-  | "writing.creative";
+  | "writing.creative"
+  | "long_context"
+  | "science";
 
 /**
  * Independent quality dimensions.
@@ -132,6 +134,15 @@ export const DOMAIN_DIMENSION_BENCHMARK_PRIORITY: DomainDimensionBenchmarkPriori
   },
   "coding.repo": {
     task_success: ["deepswe-1.1"],
+  },
+  // 长上下文/长文档推理：AA-LCR v1.1 是主榜（10k-100k 文档多步推理），
+  // GDP.pdf 是长文档任务满足率（all-pass，难度高得多，只作次级参考）。
+  "long_context": {
+    task_success: ["aa-lcr-v1.1", "gdp-pdf"],
+  },
+  // 科学/数理推理：GPQA Diamond 研究生级主榜；HLE/CritPt/SciCode 依次次级。
+  "science": {
+    task_success: ["gpqa-diamond", "humanitys-last-exam", "critpt", "scicode"],
   },
   "design.website": {
     // Declared but deliberately empty this round: no reviewed value is stable

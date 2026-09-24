@@ -61,6 +61,34 @@ const RAILS_SIGNALS: readonly RegExp[] = [
   /\brails[ -](?:controller|model|migration|app|project|route|view)\b/i,
 ];
 
+/**
+ * 长上下文/长文档推理信号：读长材料、跨段综合（读文献写综述、长篇一致性）。
+ * 位于 creative 之后：含文学体裁的创作永远算 creative，"写一篇物理论文"
+ * 这类非文学写作不属于 creative，也不会被这里的阅读动词误吞。
+ */
+const LONG_CONTEXT_SIGNALS: readonly RegExp[] = [
+  /\blong[\s-]?context\b/i,
+  /\b(?:long[\s-]?document|multi[\s-]?document|cross[\s-]?document)\b/i,
+  /长上下文|长文档|长文本|超长上下文/,
+  /(?:读|阅读|分析|总结|梳理|理解|综述)[^。！？\n]{0,18}(?:文献|论文|报告|合同|这本书|整本书|全书|上百页|几百页|\d+\s?页|\d+\s?[kK]\s?(?:tokens?|字|词))/,
+  /\b(?:read|analyze|summari[sz]e|review)\b[^.!?\n]{0,35}\b(?:\d{2,}\s?k|\d{3,}\s?(?:pages?|tokens?|words?)|whole book|entire (?:book|paper|report|document))\b/i,
+  /(?:跨|多)文档/,
+];
+
+/**
+ * 科学/数理推理信号：科研问答、公式推导、论文写作（science 域）。
+ * 与 long_context 的分工：读长材料 → long_context；学科知识/推导/论文写作 → science。
+ * 复用 creative 的 code-work 否决：在代码工作语境里提到的学科词不算 science。
+ */
+const SCIENCE_SIGNALS: readonly RegExp[] = [
+  /\b(?:physics|chemistry|biology|neuroscience|materials science)\b/i,
+  /\b(?:scientific|research) (?:paper|question|reasoning|problem)\b/i,
+  /\b(?:derivation|theorem|proof|formula|equation)\b/i,
+  /(?:物理|化学|生物|神经科学|材料科学)/,
+  /(?:论文|文献)[^。！？\n]{0,12}(?:写作|撰写|审稿|回复|修改|润色|改写|大纲)/,
+  /(?:公式|定理|证明|推导|实验设计)/,
+];
+
 /** Design signals must express a visual outcome, not merely name a UI surface. */
 const DESIGN_GOAL_SIGNALS: readonly RegExp[] = [
   /\bredesign(?:ing)?\b/i,
@@ -265,6 +293,10 @@ const TASK_SIGNAL_RULES: ReadonlyArray<{
 }> = [
   { domain: "coding.rails", patterns: RAILS_SIGNALS },
   { domain: "writing.creative", patterns: CREATIVE_WRITING_SIGNALS, vetoes: CREATIVE_WRITING_VETOES },
+  // 长上下文阅读在学科推理之前："读这份 100 页的论文" 是 long_context；
+  // "写一篇物理论文" 匹配不到阅读动词，落到 science。
+  { domain: "long_context", patterns: LONG_CONTEXT_SIGNALS, vetoes: CREATIVE_WRITING_VETOES },
+  { domain: "science", patterns: SCIENCE_SIGNALS, vetoes: CREATIVE_WRITING_VETOES },
   { domain: "design.website", patterns: DESIGN_GOAL_SIGNALS },
   {
     // coding.repo is the default coding domain: code modification outcomes.
