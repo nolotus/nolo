@@ -1,4 +1,13 @@
 
+## 0.119.0-alpha.1
+
+## 0.119.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **payments:** support dual-channel Waffo checkout (USD card + CNY WeChat) ([03f2712](https://github.com/nolotus/bun-nolo/commit/03f27126daf8de95e3c16e87dfa01a5660bef9d8)), closes [PKCS#8](https://github.com/nolotus/PKCS/issues/8) [PKCS#1](https://github.com/nolotus/PKCS/issues/1)
+
+
 ## 0.118.0-alpha.3
 
 ## 0.118.0-alpha.3 (2026-09-24)

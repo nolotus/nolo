@@ -72,6 +72,8 @@ export default {
           serverUnavailable: "The server is unavailable. Please try again later.",
           createOrder: "Failed to create the payment order",
           createAddress: "Failed to get the {{token}} address",
+          methodUnavailable:
+            "This payment method is currently unavailable. Please pick another one.",
         },
         notesTitle: "Notes",
         notes: [
@@ -146,6 +148,7 @@ export default {
           serverUnavailable: "当前服务器不可用，请稍后重试",
           createOrder: "创建支付订单失败",
           createAddress: "创建 {{token}} 地址失败",
+          methodUnavailable: "该支付方式当前不可用，请选择其他方式。",
         },
         notesTitle: "提示",
         notes: [
@@ -220,6 +223,7 @@ export default {
           serverUnavailable: "目前伺服器無法使用，請稍後重試",
           createOrder: "建立支付訂單失敗",
           createAddress: "建立 {{token}} 地址失敗",
+          methodUnavailable: "該支付方式目前不可用，請選擇其他方式。",
         },
         notesTitle: "提示",
         notes: [
@@ -297,6 +301,7 @@ export default {
             "サーバーが利用できません。しばらくしてからお試しください",
           createOrder: "決済注文の作成に失敗しました",
           createAddress: "{{token}} アドレスの取得に失敗しました",
+          methodUnavailable: "この支払い方法は現在ご利用いただけません。別の方法を選択してください。",
         },
         notesTitle: "ご案内",
         notes: [
