@@ -1,6 +1,7 @@
 // /integrations/openai/generateResponseRequestBody.ts
 import { Agent, Message } from "app/types";
 import { generatePrompt } from "ai/agent/generatePrompt";
+import { detectDispatchIntentFromMessages } from "ai/agent/dispatchIntent";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
 import { Contexts } from "ai/types";
 import { convertMessagesToResponsesInput } from "./responsesHelpers";
@@ -85,6 +86,8 @@ export function generateResponseRequestBody(
       agentConfig,
       language,
       contexts,
+      // 按当前用户输入检测派发意图：无意图只注入最小派发协议（安全硬门常在）。
+      dispatchIntent: detectDispatchIntentFromMessages(msgs),
     });
     body.instructions = promptContent;
   }

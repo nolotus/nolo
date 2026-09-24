@@ -167,6 +167,8 @@ export const buildSystemPrompt = (options: {
   agentConfig: AgentRuntimeConfig;
   language?: string;
   contexts?: Contexts;
+  /** 本轮是否检测到派发意图（detectDispatchIntent）；缺省注入最小派发协议。 */
+  dispatchIntent?: boolean;
   viewport?: { width: number; height: number };
   mobileBreakpoint?: number;
   now?: Date;
@@ -177,6 +179,8 @@ export const buildSystemPromptContext = (options: {
   agentConfig: AgentRuntimeConfig;
   language?: string;
   contexts?: Contexts;
+  /** 本轮是否检测到派发意图（detectDispatchIntent）；缺省注入最小派发协议。 */
+  dispatchIntent?: boolean;
   viewport?: { width: number; height: number };
   mobileBreakpoint?: number;
   now?: Date;
@@ -211,8 +215,12 @@ export const buildSystemPromptContext = (options: {
   // 有 ask_user 工具时澄清模式不被自定义 prompt 门控（澄清与用户自带 prompt 可共存）
   const hasAskTool = agentTools.includes("ask_user");
 
-  // 按工具能力条件注入各指令块（表驱动，见 TOOL_GUIDED_SECTIONS）
-  const toolSections = resolveToolGuidedSections(agentTools);
+  // 按工具能力条件注入各指令块（表驱动，见 TOOL_GUIDED_SECTIONS）。
+  // dispatchIntent 由调用方按当前用户输入检测（detectDispatchIntent）：
+  // 有派发意图才注入完整编排协议，否则只注入最小协议（安全硬门常在）。
+  const toolSections = resolveToolGuidedSections(agentTools, {
+    dispatchIntent: options.dispatchIntent === true,
+  });
 
   const {
     startupProtocol,

@@ -13,6 +13,10 @@ import * as nodeFs from "node:fs";
 import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from "node:child_process";
 import { isCompiledBinary, resolveCliEntrypointPath } from "./cliEnvHelpers";
 import { isAgentRunTerminalStatus as sharedIsAgentRunTerminalStatus } from "../ai/tools/agent/agentRunDisplayHelpers";
+import {
+  classifyRunFailure,
+  type RunFailureClass,
+} from "../ai/tools/agent/runFailureClass";
 
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
@@ -52,6 +56,19 @@ export type RunRecord = {
   endedAt?: string;
   /** High-level typed failure cause on terminal failure / stall / cancel. */
   failureReason?: RunFailureReason;
+  /**
+   * 结构化失败分类（rate_limited / provider_error / stalled / tool_error /
+   * unknown），终态写入时由 classifyRunFailure 推导；编排者据此决定换通道 /
+   * 冷却重试 / 调整 brief，不再肉读 logTail。取消类终态（killed）无此字段。
+   */
+  failureClass?: RunFailureClass;
+  /** 盲目重试（不改 brief/不换通道）是否有意义；与 failureClass 同次写入。 */
+  retryable?: boolean;
+  /**
+   * 本 run 所属凭证组（spawn 时由父进程解析 agent 配置写入）。
+   * 缺失 = 凭证归属**未知**（不是「独立」），并发扇出守卫按未知处理。
+   */
+  credentialGroup?: string;
   /** Number of tool calls executed before the run failed/stalled/ended. */
   toolCallCount?: number;
   /** Truncated last assistant text produced before failure/stall. */
@@ -1345,6 +1362,8 @@ export async function spawnLocalBackgroundRun(
     parentDialogId?: string;
     dodCommands?: string[];
     ephemeral?: boolean;
+    /** 父进程解析出的凭证组（写进 run 记录，供并发扇出守卫判定）。 */
+    credentialGroup?: string;
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
@@ -1416,6 +1435,9 @@ export async function spawnLocalBackgroundRun(
     logPath,
     queuePath,
     batchId,
+    ...(typeof input.credentialGroup === "string" && input.credentialGroup.trim()
+      ? { credentialGroup: input.credentialGroup.trim() }
+      : {}),
     ...(typeof input.parentDialogId === "string" && input.parentDialogId.trim()
       ? { parentDialogId: input.parentDialogId.trim() }
       : {}),
@@ -1662,6 +1684,18 @@ export function transitionRunToTerminal(
       record.failureReason = update.failureReason;
     } else if (update.status === "killed") {
       record.failureReason = "cancelled";
+    }
+    // 结构化失败分类与终态同一次写入：编排者按 failureClass/retryable 决策，
+    // 不再肉读 logTail。取消类终态（killed）classifyRunFailure 返回 undefined，
+    // 不写分类字段。
+    const classification = classifyRunFailure({
+      status: update.status,
+      failureReason: record.failureReason,
+      errorMessage: update.note ?? record.note,
+    });
+    if (classification) {
+      record.failureClass = classification.failureClass;
+      record.retryable = classification.retryable;
     }
     const resolvedToolCount =
       typeof update.toolCallCount === "number"
@@ -1969,6 +2003,16 @@ export function checkStaleRun(
     latest.note = pidReused
       ? "orphaned: process gone (pid reused by another process)"
       : "orphaned: process gone without writing terminal status";
+    // orphaned 与 transitionRunToTerminal 同口径的结构化分类（unknown/不可重试）。
+    const orphanClassification = classifyRunFailure({
+      status: "orphaned",
+      failureReason: latest.failureReason,
+      errorMessage: latest.note,
+    });
+    if (orphanClassification) {
+      latest.failureClass = orphanClassification.failureClass;
+      latest.retryable = orphanClassification.retryable;
+    }
     latest.endedAt = at;
     latest.reconciledAt = at;
     // Clear pid: once dead, it can be reused by the OS for an unrelated
@@ -2206,6 +2250,15 @@ function printStatusOnce(record: RunRecord, deps: AgentRunControlDeps & { output
     deps.output.write(`dialog:   ${record.dialogId}\n`);
   }
   if (record.note) deps.output.write(`note:     ${record.note}\n`);
+  if (record.failureReason) deps.output.write(`failure:  ${record.failureReason}\n`);
+  if (record.failureClass) {
+    deps.output.write(
+      `class:    ${record.failureClass}${typeof record.retryable === "boolean" ? ` (retryable=${record.retryable})` : ""}\n`
+    );
+  }
+  if (record.credentialGroup) {
+    deps.output.write(`credGroup: ${record.credentialGroup}\n`);
+  }
   const activitySummary = formatActivitySummary(record.activity);
   if (activitySummary) deps.output.write(`${activitySummary}\n`);
   deps.output.write(`log:      ${record.logPath}\n`);

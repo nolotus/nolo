@@ -146,6 +146,13 @@ export interface SafeAgentSummary {
   credentialGroup?: string;
   /** Credential kind: oauth or api-key. */
   credentialKind?: CredentialKind;
+  /**
+   * 显式凭证归属标记：true = credentialGroup 可解析（已归属某个确定凭证组）；
+   * false = 无凭据引用可归属——这是「**未知**」而不是「**独立**」：并发扇出
+   * 守卫必须把 credentialed:false 的 agent 视为可能与任何其他 run 共用上游
+   * key（见 ai/tools/agent/credentialFanoutGuard）。
+   */
+  credentialed: boolean;
   updatedAt: string | number | null;
 }
 
@@ -422,6 +429,9 @@ export function toSafeAgentSummary(
     ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
     ...(credentialGroup !== undefined ? { credentialGroup } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
+    // 「未知 ≠ 独立」：无 credentialGroup 时显式 credentialed:false，调用方
+    // 不得把缺失解读成独立凭证（并发扇出守卫依赖这个区分）。
+    credentialed: credentialGroup !== undefined,
     updatedAt,
   };
 }
@@ -460,6 +470,7 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "nextAvailableAt",
   "credentialGroup",
   "credentialKind",
+  "credentialed",
 ] as const;
 
 export type CompactSafeAgentSummary = Pick<

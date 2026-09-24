@@ -1,4 +1,17 @@
 
+## 0.118.0-alpha.1
+
+## 0.118.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **agent:** harden the dispatch discipline with guards, failure classes and latching ([6544163](https://github.com/nolotus/bun-nolo/commit/65441636189cb9a253282a280e4b7e688b79b868))
+
+### Bug Fixes
+
+* **ai:** fix circular-payload serialization cost and refresh stale pricing assertions ([6735c5c](https://github.com/nolotus/bun-nolo/commit/6735c5c40a9a014222e8918b9773e6cd868a0b49))
+
+
 ## 0.117.0-alpha.1
 
 ## 0.117.0-alpha.1 (2026-09-24)

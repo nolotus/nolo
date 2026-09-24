@@ -29,6 +29,43 @@ import {
 } from "./agentRunDisplayHelpers";
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
+import { checkCredentialFanout } from "./credentialFanoutGuard";
+
+// ── 并发扇出凭证隔离（web/server 路径的进程内批次注册表）─────────────────
+//
+// CLI 本地路径的守卫以 ~/.nolo/runs 磁盘注册表为活跃集（见
+// cliAgentRunToolExecutors.assertCredentialFanoutAllowed）；web/server 路径的
+// run 在服务端，客户端拿不到实时活跃集，这里用进程内注册表记录本进程派出的
+// run。作用域限定**显式 batchId**：未显式分批的派发每次生成新批次 id，互不
+// 干扰；显式同批 = 调用方在组织并发扇出，必须过凭证隔离检查。
+//
+// 条目按批次超时口径（30 分钟）过期：超过批次生命周期的记录不再占用凭证
+// 预算（顺序复用同一凭证永远合法）。
+
+type BatchFanoutEntry = {
+  runId: string;
+  agentKey: string;
+  credentialGroup?: string;
+  startedAtMs: number;
+};
+
+const BATCH_FANOUT_ENTRY_TTL_MS = 30 * 60 * 1000;
+const batchFanoutRegistry = new Map<string, BatchFanoutEntry[]>();
+
+function pruneBatchFanoutRegistry(nowMs: number): void {
+  for (const [batchId, entries] of batchFanoutRegistry) {
+    const alive = entries.filter(
+      (e) => nowMs - e.startedAtMs < BATCH_FANOUT_ENTRY_TTL_MS
+    );
+    if (alive.length === 0) batchFanoutRegistry.delete(batchId);
+    else batchFanoutRegistry.set(batchId, alive);
+  }
+}
+
+/** 仅测试用：清空批次注册表。 */
+export function __resetBatchFanoutRegistryForTests(): void {
+  batchFanoutRegistry.clear();
+}
 
 /**
  * 按宿主能力裁剪后的 startAgentRun schema。
@@ -84,7 +121,21 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description:
                     "可选。批次 id，用于把多个并行 run 归为一组，便于后续 controlAgentRun(list, batchId=...) 按批查询。" +
-                    "未传时自动生成一个并在返回值中带回，调用方无需先创建。",
+                    "未传时自动生成一个并在返回值中带回，调用方无需先创建。" +
+                    "同一 batchId 内的并发派发会做凭证组隔离检查：credentialGroup 相同或未知的并发 run 会被拒绝。",
+            },
+            credentialGroup: {
+                type: "string",
+                description:
+                    "可选。照抄 listAgents 返回的 credentialGroup 字段，用于同批次并发扇出的凭证隔离校验。" +
+                    "缺省/空值视为「未知」（不是「独立」）：与同 batch 内任何其他 run 并发都会被拒绝。",
+            },
+            allowUnknownCredential: {
+                type: "boolean",
+                description:
+                    "可选。显式确认「凭证归属未知」的并发风险后强制放行（等同于 CLI 的 --force-unknown-credential）。" +
+                    "仅在已自行确认两侧不共用上游凭证时使用；默认 false，未知凭证并发一律拒绝。",
+                default: false,
             },
             trackTodo: {
                 type: "boolean",
@@ -129,6 +180,10 @@ interface StartAgentRunArgs {
     input?: any;
     agentName?: string;
     batchId?: string;
+    /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
+    credentialGroup?: string;
+    /** 显式确认未知凭证并发风险后强制放行；默认 false。 */
+    allowUnknownCredential?: boolean;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
@@ -159,16 +214,32 @@ export async function startAgentRunFunc(
     // server path (runAgentBackground, which does not currently carry batchId)
     // still gives the caller a stable handle to filter on later via list.
     // The CLI local path receives the same id and persists it on the run record.
+    const explicitBatchId =
+        typeof batchId === "string" && batchId.trim() ? batchId.trim() : undefined;
     const effectiveBatchId =
-        typeof batchId === "string" && batchId.trim()
-            ? batchId.trim()
-            : `batch-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
+        explicitBatchId ??
+        `batch-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (!agentKey) {
         throw new Error("startAgentRun: 缺少 agentKey 参数。");
     }
     if (!task || typeof task !== "string") {
         throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
+    }
+
+    // 并发扇出凭证隔离：仅对**显式 batchId**（调用方在组织并发扇出）生效；
+    // 未显式分批的派发各自持有新批次 id，互不干扰。credentialGroup 缺省视为
+    // 未知——未知与任何条目并发都拒绝，不静默放行。
+    if (explicitBatchId) {
+        const nowMs = Date.now();
+        pruneBatchFanoutRegistry(nowMs);
+        const active = batchFanoutRegistry.get(explicitBatchId) ?? [];
+        const verdict = checkCredentialFanout({
+            active,
+            candidate: { agentKey, credentialGroup: args.credentialGroup },
+            allowUnknownCredential: args.allowUnknownCredential === true,
+        });
+        if (!verdict.allowed) throw new Error(verdict.message);
     }
 
     const content = buildDelegatedTaskContent(task, input);
@@ -218,6 +289,19 @@ export async function startAgentRunFunc(
         }
 
         const runId = bgResult.dialogId;
+        // 异步派发成功后登记进批次注册表，供同批后续并发派发的凭证隔离判定。
+        if (explicitBatchId) {
+            const entries = batchFanoutRegistry.get(explicitBatchId) ?? [];
+            entries.push({
+                runId,
+                agentKey,
+                ...(typeof args.credentialGroup === "string" && args.credentialGroup.trim()
+                    ? { credentialGroup: args.credentialGroup.trim() }
+                    : {}),
+                startedAtMs: Date.now(),
+            });
+            batchFanoutRegistry.set(explicitBatchId, entries);
+        }
         const status = bgResult.status ?? "pending";
         // rawData carries only real identity fields; the display fallback chain
         // lives in resolveRunLabel so a key never masquerades as a name.

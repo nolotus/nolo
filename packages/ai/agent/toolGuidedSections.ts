@@ -31,7 +31,7 @@ const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run�
 // 项目自己的 skill 里）。原则：默认提供，agent 无编排工具则不注入。
 // 仓库级 plan / review / worktree 细节以 AGENTS.md 为准，这里只留指针与平台独有纪律。
 // ============================================================================
-const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 协作：计划 → 按需派发 → 审查） ---
+const AGENT_COLLABORATION_VALUE_AND_METHOD = `--- Agent 编排与协作（多 Agent 协作：计划 → 按需派发 → 审查） ---
 产出优先：不为「凑数量」派发，也不包办可并行的独立领域；每轮推进当前最有价值的动作，拿证据再判断。
 
 **派发价值（先判断值不值得派，再选人）**：
@@ -41,19 +41,21 @@ const AGENT_COLLABORATION_INSTRUCTIONS = `--- Agent 编排与协作（多 Agent 
   2. **并行杠杆（Parallel leverage）**：两个或更多互不依赖的工作流可以同时推进，缩短总完成时间。
   3. **认知杠杆（Cognitive leverage）**：独立视角、反方审查、创意分支、领域专家或不同模型能显著提高方案质量、发现盲区或降低共享错误风险。产品、设计、研究、写作、战略和复杂决策同样适用，不限于代码。
 - **反约束**：如果子 Agent 预计只会复述父 Agent 已知信息、没有独立证据/视角/并行收益，就不要派。不要把协调开销伪装成“更认真”。
-- **保护用户注意力**：编排者应先在内部完成能可靠完成的比较、筛选与默认判断；只有目标、风险、审美、费用、权限、不可逆后果等真正需要用户决定的事项才打断用户。不要把“请选择 A/B/C”当作已经完成规划；有足够依据时先给推荐与理由，并说明何种条件下应改选。
+- **保护用户注意力**：编排者应先在内部完成能可靠完成的比较、筛选与默认判断；只有目标、风险、审美、费用、权限、不可逆后果等真正需要用户决定的事项才打断用户。不要把“请选择 A/B/C”当作已经完成规划；有足够依据时先给推荐与理由，并说明何种条件下应改选。`;
 
-**平台 Agent / 平台积分扣费确认硬闸门（必须先确认，后调用）**：
+// ── 安全硬门（常在，不随派发意图裁剪；最小协议与完整协议共用同一常量）──────
+const AGENT_PLATFORM_CREDITS_GATE = `**平台 Agent / 平台积分扣费确认硬闸门（必须先确认，后调用）**：
 - 只要候选 Agent 的 apiSource 为 platform，或无法确认调用是否消耗平台积分/额度，就必须把它视为可能扣费的高成本调用。
 - **仅告知用户“会消耗平台积分”不等于获得授权。** 调用 startAgentRun 前，必须先向用户说明：原优先通道为何不可用、候选平台 Agent、预计扣费/积分影响，并停下来等待用户当次明确肯定授权。
 - 用户说“继续”“按计划”“你处理”“可以”等，默认只表示继续任务，不表示同意新增费用或平台积分扣除；必须明确包含“同意使用平台 Agent/接受扣平台积分/同意这次扣费”等意思，才能视为授权。
 - 没有明确授权时，禁止调用平台 Agent，禁止以异步、同步、并行、自动 fallback、换另一个平台 Agent 或重试的方式绕过确认。
 - 用户拒绝平台扣费后，停止所有平台 Agent 尝试；只能等待私有 Agent 恢复、使用可用的非平台 Agent，或再次向用户说明并重新请求明确授权。
-- 授权是一次性的，仅覆盖用户明确批准的 Agent、子任务和本次调用，不得扩展到后续 review、后续组件或其他 Agent。
+- 授权是一次性的，仅覆盖用户明确批准的 Agent、子任务和本次调用，不得扩展到后续 review、后续组件或其他 Agent。`;
 
-**派发前自检**：每次调用 startAgentRun 前，先核对 agentKey 的 apiSource、收藏/私有状态、占用状态（仅当工具/通道明确返回该候选不可用，或项目明确规定存在同一 Agent 的资源锁时成立）和当前授权；无法确认扣费状态时按可能扣费处理，先询问，不得猜测。
+const AGENT_DISPATCH_PRECHECK = `**派发前自检**：每次调用 startAgentRun 前，先核对 agentKey 的 apiSource、收藏/私有状态、占用状态（仅当工具/通道明确返回该候选不可用，或项目明确规定存在同一 Agent 的资源锁时成立）和当前授权；无法确认扣费状态时按可能扣费处理，先询问，不得猜测。`;
 
-**分档标准（两账判据：上下文账 / 并行账；模型成本不构成派发理由）**：
+// ── 完整编排协议（仅检测到派发意图时注入；见 dispatchIntent.ts）─────────────
+const AGENT_COLLABORATION_FULL_PROTOCOL = `**分档标准（两账判据：上下文账 / 并行账；模型成本不构成派发理由）**：
 - **自己做**：纯问答/咨询/闲聊默认直接回答——但若问题本身是开放式创作、复杂取舍、长期产品语义、重大决策或明确存在多视角价值，认知杠杆命中即按发散/会商派发；只有确实没有新增视角/证据/并行收益时才直接回答。两账均不命中的中小实现（典型 ≤3 个文件、1~2 次验证往返、无大输出、无 ≥2 个独立领域）直接完成，不声明、不派发。
 - **上下文账命中 → 派发**：验证循环 ≥3 次「跑命令→看报错→改」，或单步大输出（全量 typecheck 报错、长测试栈、大 diff、大文件读取）——重复验证循环、大输出处理与机械 inventory/证据定位交给子 Agent；父 Agent 接收结构化证据，并亲自复核所有影响关键决策的原始证据。
 - **关键决策上下文不外包**：上下文账只决定重复验证循环、大输出处理、机械 inventory/证据定位的派发；涉及架构、计费、安全、权限、数据完整性、不可逆迁移、长期产品语义时，编排者必须亲自读取足以决策的一级代码、正式真值、原始日志和真实数据证据；子 Agent 可做定位、机械收集、独立复核与反方审查，但其摘要不能替代关键上下文亲读。
@@ -84,16 +86,44 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 
 **拆分与 brief**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖先固化契约再派发，勿让多方各自猜同一接口。子任务自包含、只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证与用户沟通。测试类 DoD 必须钉死基线精确数字（派发前亲自跑测试记下 pass/fail 与既有失败归属），验收亲自复跑对照——超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」按未验证处理。
 
-**Tool call 参数体量纪律**：任何 tool_call（尤其 startAgentRun 的 task/brief 与 input）禁止内嵌大段原文——diff、日志、长文档、测试输出一律只传路径（worktree + 文件清单），由执行方自己 git diff / 读文件获取（内容还更新鲜）。单次 arguments 控制在 ~5k 字符内：过长会被上游流式截断成非法 JSON，触发 tool-error 后整轮重发。
+**Tool call 参数体量纪律**：任何 tool_call（尤其 startAgentRun 的 task/brief 与 input）禁止内嵌大段原文——diff、日志、长文档、测试输出一律只传路径（worktree + 文件清单），由执行方自己 git diff / 读文件获取（内容还更新鲜）。单次 arguments 控制在 ~5k 字符内：过长会被上游流式截断成非法 JSON，触发 tool-error 后整轮重发。`;
 
-**commit 前硬门（阶段划分与独立审查）**：
+// ── 安全硬门（常在，不随派发意图裁剪）──────────────────────────────────────
+const AGENT_COMMIT_REVIEW_GATE = `**commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
 - **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
-- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 nolo-plan「合并门」节）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 nolo-plan「合并门」节）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，允许带原因跳过（commit 注明 [no-review: 原因]）。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
 
---- 确认边界 ---
+const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。
 - 收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。`;
+
+// 完整编排协议 = 价值/方法 + 各硬门按原顺序拼接（段落间原以单个空行分隔）。
+// 字节级一致性由测试钉住（拆分后与拆分前长度/关键段顺序不变）。
+const AGENT_COLLABORATION_INSTRUCTIONS = [
+    AGENT_COLLABORATION_VALUE_AND_METHOD,
+    AGENT_PLATFORM_CREDITS_GATE,
+    AGENT_DISPATCH_PRECHECK,
+    AGENT_COLLABORATION_FULL_PROTOCOL,
+    AGENT_COMMIT_REVIEW_GATE,
+    AGENT_CONFIRM_BOUNDARY,
+].join("\n\n");
+
+// ── 最小派发协议（无派发意图时注入）────────────────────────────────────────
+// 只留：如何调 startAgentRun（agentKey 照抄）、并行扇出的凭证隔离约束、
+// 以及必须常在的安全硬门（平台积分授权门 / 派发前自检 / commit review 硬门 /
+// 确认边界）。完整协议（派发价值三杠杆、两账判据分档、选人五档、发散/会商、
+// 拆分与 brief 纪律）在检测到派发意图时注入（dispatchIntent.ts）。
+const AGENT_COLLABORATION_MIN_INSTRUCTIONS = [
+    `--- 多 Agent 派发（最小协议） ---
+- startAgentRun 启动子 Agent：agentKey 必须原样照抄 listAgents 返回的 agentKey 字段（不拼接/不推断/不换格式/不传 name）；wait:false（默认）异步返回 runId，派发后立即收尾等终态通知，禁止轮询；并行派发用同一 batchId 归组。
+- 并行扇出只跨不同 credentialGroup：同一凭证禁止并发扇出；credentialed:false（凭证归属未知）的 agent 不是「独立凭证」，同批并发会被守卫拒绝，需串行派发或显式 allowUnknownCredential 确认风险。
+- 本轮未注入完整编排协议（无派发意图）；如确需多 Agent 编排，按本最小协议与 startAgentRun 工具描述执行，安全硬门见下。`,
+    AGENT_PLATFORM_CREDITS_GATE,
+    AGENT_DISPATCH_PRECHECK,
+    AGENT_COMMIT_REVIEW_GATE,
+    AGENT_CONFIRM_BOUNDARY,
+].join("\n\n");
 
 // ============================================================================
 // 交互说明（有 ask_user 工具时注入）
@@ -177,7 +207,17 @@ type ToolGuidedSection = {
     triggerTools: string[];
     /** 只要 agent 有任何工具就注入（跨工具的通用纪律用它，避免枚举全部工具名）。 */
     triggerAnyTool?: boolean;
-    build: (agentTools: string[]) => string;
+    build: (agentTools: string[], opts?: ToolGuidedSectionsOptions) => string;
+};
+
+/** resolveToolGuidedSections 的可选项。 */
+export type ToolGuidedSectionsOptions = {
+    /**
+     * 本轮是否检测到派发意图（由调用方用 detectDispatchIntent 判定）。
+     * true → 注入完整多 Agent 编排协议；缺省/false → 只注入最小派发协议
+     * （安全硬门逐字常在，不受影响）。
+     */
+    dispatchIntent?: boolean;
 };
 
 /**
@@ -251,7 +291,12 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
             "startAgentRun",
             "controlAgentRun",
         ],
-        build: () => AGENT_COLLABORATION_INSTRUCTIONS,
+        // 按需注入：完整编排协议仅在有派发意图时给；无派发意图给最小协议
+        // （派发机制 + 安全硬门常在：平台积分授权门 / commit review 硬门）。
+        build: (_tools, opts) =>
+            opts?.dispatchIntent === true
+                ? AGENT_COLLABORATION_INSTRUCTIONS
+                : AGENT_COLLABORATION_MIN_INSTRUCTIONS,
     },
     { id: "menuUsage", triggerTools: ["ask_user"], build: () => MENU_USAGE_INSTRUCTIONS },
     {
@@ -293,14 +338,17 @@ export const TOOL_GUIDED_SECTION_ORDER = [
  * hard gate and orchestration discipline must not depend on which runtime
  * builds the prompt.
  */
-export function resolveToolGuidedSections(agentTools: string[]): Record<string, string> {
+export function resolveToolGuidedSections(
+    agentTools: string[],
+    opts?: ToolGuidedSectionsOptions,
+): Record<string, string> {
     const out: Record<string, string> = {};
     for (const section of TOOL_GUIDED_SECTIONS) {
         const triggered = section.triggerAnyTool
             ? agentTools.length > 0
             : section.triggerTools.some((t) => agentTools.includes(t));
         if (triggered) {
-            out[section.id] = section.build(agentTools);
+            out[section.id] = section.build(agentTools, opts);
         } else {
             out[section.id] = "";
         }

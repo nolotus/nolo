@@ -48,6 +48,7 @@ import {
   queryRunRecords,
   spawnLocalBackgroundRun,
   terminateRunProcess,
+  isRunTerminalStatus,
 } from "../agentRunControl";
 import { readTimestamp } from "./agentRunSnapshot";
 import { agentRunCardLabels } from "../tui/i18n";
@@ -55,6 +56,7 @@ import {
   aggregateBatch,
   type BatchRunSummary,
 } from "../../ai/tools/agent/batchAggregation";
+import { checkCredentialFanout } from "../../ai/tools/agent/credentialFanoutGuard";
 import {
   deriveAgentRunTodoStatus,
   type AgentRunTodoRecord,
@@ -84,6 +86,11 @@ export type CliAgentRunToolExecutorDeps = {
   /** 时钟（epoch ms）；缺省 Date.now()。共享层禁止取，适配层允许。 */
   nowMs?: () => number;
   terminateRunProcess?: typeof terminateRunProcess;
+  /**
+   * 解析候选 agent 的 credentialGroup（父进程侧，供并发扇出守卫判定）。
+   * 缺省或返回 undefined = 凭证归属**未知**（守卫按未知处理，不是「独立」）。
+   */
+  resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
 } & AgentRunControlDeps;
 
 const noopOutput: OutputLike = { write: () => {} };
@@ -194,6 +201,14 @@ function buildRunStatusPayload(
       endedAt: reconciled.endedAt ?? null,
       exitCode: reconciled.exitCode ?? null,
       ...(reconciled.failureReason ? { failureReason: reconciled.failureReason } : {}),
+      // 结构化失败分类 + 可重试性：编排者据此决策，不再肉读 logTail。
+      ...(reconciled.failureClass ? { failureClass: reconciled.failureClass } : {}),
+      ...(typeof reconciled.retryable === "boolean"
+        ? { retryable: reconciled.retryable }
+        : {}),
+      // 日志落盘路径始终暴露：stalled/failed 且 dialogId 缺失（如 ephemeral）
+      // 时 logTail 只能靠它读，不能只留在进程内存。
+      ...(reconciled.logPath ? { logPath: reconciled.logPath } : {}),
       ...(typeof reconciled.toolCallCount === "number"
         ? { toolCallCount: reconciled.toolCallCount }
         : {}),
@@ -240,6 +255,73 @@ function buildRunStatusPayload(
 }
 
 /** startAgentRun：本地 --bg 启动一个后台 run，返回 runId。 */
+/**
+ * 并发扇出凭证隔离守卫（CLI 本地路径）。
+ *
+ * 同一 batch（显式 batchId）或同一父对话并发派发时，用 ~/.nolo/runs 注册表
+ * 里**仍未终态**的 run 做凭证组冲突检测：
+ * - 候选或任一活跃 run 的 credentialGroup 未知 → 拒绝（未知 ≠ 独立，
+ *   无法证明不共用上游 key），除非显式 allowUnknownCredential:true；
+ * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝；
+ * - 已知且不同 → 放行。
+ *
+ * 返回值是解析出的候选 credentialGroup（可能 undefined），由调用方写进
+ * 新 run 记录，供后续并发判定使用。无 batchId 且无 parentDialogId 的孤立
+ * 派发无关联维度可比，跳过守卫。
+ */
+async function assertCredentialFanoutAllowed(
+  deps: CliAgentRunToolExecutorDeps,
+  args: {
+    agentKey: string;
+    batchId?: string;
+    parentDialogId?: string;
+    /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
+    credentialGroup?: string;
+    allowUnknownCredential?: boolean;
+  }
+): Promise<string | undefined> {
+  // 凭证组解析优先显式解析器（读本地 agent 记录，最可靠），模型透传值兜底；
+  // 都拿不到 = 凭证归属未知（守卫按未知处理，不静默放行）。
+  let candidateGroup: string | undefined;
+  if (deps.resolveAgentCredentialGroup) {
+    try {
+      candidateGroup = await deps.resolveAgentCredentialGroup(args.agentKey);
+    } catch {
+      candidateGroup = undefined;
+    }
+  }
+  if (!candidateGroup && typeof args.credentialGroup === "string" && args.credentialGroup.trim()) {
+    candidateGroup = args.credentialGroup.trim();
+  }
+
+  const { batchId, parentDialogId } = args;
+  if (!batchId && !parentDialogId) return candidateGroup;
+
+  const active = queryRunRecords({ limit: 500 }, deps)
+    .runs.filter((record) => {
+      if (isRunTerminalStatus(record.status)) return false;
+      // batchId 与 parentDialogId 任一命中即纳入：同父对话里先前未带
+      // batchId 的活跃 run 也要算进防线，不能只偏向 batchId。
+      if (batchId && record.batchId === batchId) return true;
+      if (parentDialogId && record.parentDialogId === parentDialogId) return true;
+      return false;
+    })
+    .map((record) => ({
+      runId: record.runId,
+      agentKey: record.agentKey,
+      credentialGroup: record.credentialGroup,
+    }));
+  if (active.length === 0) return candidateGroup;
+
+  const verdict = checkCredentialFanout({
+    active,
+    candidate: { agentKey: args.agentKey, credentialGroup: candidateGroup },
+    allowUnknownCredential: args.allowUnknownCredential === true,
+  });
+  if (!verdict.allowed) throw new Error(verdict.message);
+  return candidateGroup;
+}
+
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
@@ -277,6 +359,22 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? args.batchId.trim()
         : undefined;
 
+    // 并发扇出凭证隔离：同 batch / 同父对话并发时，未知凭证组与同凭证组冲突
+    // 一律拒绝（除非显式 allowUnknownCredential）。解析结果写进 run 记录。
+    const parentDialogId =
+      typeof args.parentDialogId === "string" && args.parentDialogId.trim()
+        ? args.parentDialogId.trim()
+        : undefined;
+    const credentialGroup = await assertCredentialFanoutAllowed(deps, {
+      agentKey,
+      ...(batchId ? { batchId } : {}),
+      ...(parentDialogId ? { parentDialogId } : {}),
+      ...(typeof args.credentialGroup === "string" && args.credentialGroup.trim()
+        ? { credentialGroup: args.credentialGroup.trim() }
+        : {}),
+      allowUnknownCredential: args.allowUnknownCredential === true,
+    });
+
     const dodCommands = Array.isArray(args.dodCommands)
       ? args.dodCommands
           .filter((c: unknown): c is string => typeof c === "string" && c.trim().length > 0)
@@ -297,9 +395,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         agentKey,
         ...(agentName ? { agentName } : {}),
         ...(batchId ? { batchId } : {}),
-        ...(typeof args.parentDialogId === "string" && args.parentDialogId.trim()
-          ? { parentDialogId: args.parentDialogId.trim() }
-          : {}),
+        ...(credentialGroup ? { credentialGroup } : {}),
+        ...(parentDialogId ? { parentDialogId } : {}),
         ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
         cwd: deps.cwd ?? process.cwd(),
         message,
@@ -412,6 +509,8 @@ async function spawnContinuationRun(
       ...(agentName ? { agentName } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
+      // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
+      ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),
       cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
       message: userInput,
       ...(reconciled.ephemeral ? { ephemeral: true } : {}),

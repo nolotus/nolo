@@ -239,6 +239,11 @@ export function buildLocalToolExecutors(args: {
   pastedTextStore?: CollapsedPasteStore;
   /** CLI entrypoint path (for re-launching workspace tools). */
   cliEntrypoint?: string;
+  /**
+   * 解析候选 agent 的 credentialGroup（并发扇出守卫用，见
+   * cliAgentRunToolExecutors.assertCredentialFanoutAllowed）。
+   */
+  resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
   /** Current executing agent key; used for memory policy. */
   agentKey?: string | null;
   /**
@@ -412,6 +417,9 @@ export function buildLocalToolExecutors(args: {
       env: args.env,
       cliEntrypoint: args.cliEntrypoint,
       cwd: args.workspaceRoot,
+      ...(args.resolveAgentCredentialGroup
+        ? { resolveAgentCredentialGroup: args.resolveAgentCredentialGroup }
+        : {}),
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
       env: args.env,

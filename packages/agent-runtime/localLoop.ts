@@ -53,6 +53,7 @@ import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages, stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
 import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
+import { detectDispatchIntent, detectDispatchIntentFromMessages } from "../ai/agent/dispatchIntent";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import {
   estimateContextTokens,
@@ -1528,7 +1529,16 @@ export async function runLocalAgentTurn(
   // resolveToolGuidedSections。本地运行时此前只拼 runtime guidance 块，review
   // 硬门因此只在服务端路径生效——“本地会话不走第三方 review”事故的根因。
   // menuUsage 已并入该表，不再单独注入。
-  const toolGuidedSections = resolveToolGuidedSections(agentTools);
+  const toolGuidedSections = resolveToolGuidedSections(agentTools, {
+    // 单调锁定：历史里任一 user 消息命中派发关键词、或已出现过
+    // startAgentRun/controlAgentRun 的 tool_calls，后续每轮都保持 true，
+    // 防止 session-scope 的 agentCollaboration 段逐轮翻转击穿前缀缓存。
+    dispatchIntent:
+      detectDispatchIntentFromMessages(history) ||
+      detectDispatchIntent(
+        typeof input.input === "string" ? input.input : undefined
+      ),
+  });
   const guidanceScopes: ContextBlockScope[] =
     [
       ...(input.userLanguage?.trim()

@@ -11,6 +11,7 @@ import {
 import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
 import { Contexts } from "ai/types";
 import { generatePrompt, buildSystemPromptContext } from "ai/agent/generatePrompt";
+import { detectDispatchIntentFromMessages } from "ai/agent/dispatchIntent";
 import { isLoopbackUrl } from "core/localOrigins";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeChatCompletionsBodyForProvider } from "./providerBodyCompatibility";
@@ -52,12 +53,17 @@ const prependPromptMessage = (
   if (!prependSystemPrompt) return messages;
   if (!contexts && !agentConfig.prompt) return messages;
 
+  // 按当前用户输入检测派发意图：有派发意图才注入完整多 Agent 编排协议，
+  // 否则只注入最小协议（安全硬门常在）。逐轮判定，意图翻转只影响
+  // session-scope 的 agentCollaboration 段。
+  const dispatchIntent = detectDispatchIntentFromMessages(messages);
+
   // For Claude models, use the structured CompiledContext to split the
   // system prompt into a stable prefix (cache_control: ephemeral) and a
   // dynamic suffix (no cache_control).  Summary changes won't invalidate
   // the prefix cache.
   if (isClaudeModel(resolvedModel)) {
-    const compiled = buildSystemPromptContext({ agentConfig, language, contexts });
+    const compiled = buildSystemPromptContext({ agentConfig, language, contexts, dispatchIntent });
     if (!compiled.content.trim()) return messages;
     const content = applyClaudeCache(
       compiled.stablePrefixContent,
@@ -71,7 +77,7 @@ const prependPromptMessage = (
   // system message.  Their prefix cache is automatic and prefix-based —
   // as long as the stable prefix text is identical between turns, the
   // cache hits regardless of what follows.
-  const promptContent = generatePrompt({ agentConfig, language, contexts });
+  const promptContent = generatePrompt({ agentConfig, language, contexts, dispatchIntent });
   if (!promptContent.trim()) return messages;
   const systemMessage: Message = { role: "system", content: promptContent };
   return [systemMessage, ...messages];

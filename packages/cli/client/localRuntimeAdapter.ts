@@ -241,6 +241,7 @@ import {
   resolveAvailabilityAction,
   resolveCooldownGate,
 } from "ai/agent/agentAvailabilityShared";
+import { deriveCredentialGroup } from "ai/agent/safeAgentSummary";
 import {
   clearCredentialAvailability,
   markCredentialUnavailable,
@@ -538,6 +539,37 @@ export function createCliLocalRuntimeAdapter(
   const buildProviderOpenAiTools =
     deps.buildProviderOpenAiTools ?? buildOpenAiTools;
   const additionalToolNames = deps.pastedTextStore ? ["readPastedText"] : [];
+  // 并发扇出守卫的凭证组解析：轻量读 agent 记录（不走 loadAgentConfig——
+  // 它会改 prepared-runtime 缓存与父 run 的工具面状态）。记录上已有
+  // credentialGroup 就直接用；否则从 apiKeyRef/credentialRef 派生。
+  // 解析失败/无凭据引用返回 undefined = 凭证归属未知，守卫按未知保守拦截。
+  const resolveAgentCredentialGroup = async (
+    agentRef: string,
+  ): Promise<string | undefined> => {
+    try {
+      const record = await readAgentFromStore({
+        agentRef,
+        store: await getOrCreateSharedStore(deps),
+        userId,
+      });
+      if (!record || typeof record !== "object") return undefined;
+      const rec = record as Record<string, unknown>;
+      const existing =
+        typeof rec.credentialGroup === "string" && rec.credentialGroup.trim()
+          ? rec.credentialGroup.trim()
+          : undefined;
+      if (existing) return existing;
+      const ref =
+        typeof rec.apiKeyRef === "string" && rec.apiKeyRef.trim()
+          ? rec.apiKeyRef
+          : typeof rec.credentialRef === "string" && rec.credentialRef.trim()
+            ? rec.credentialRef
+            : undefined;
+      return deriveCredentialGroup(ref)?.credentialGroup;
+    } catch {
+      return undefined;
+    }
+  };
   let activeAgentToolNames: string[] = [];
   const workspaceRoot = deps.cwd ?? process.cwd();
   let runtimeToolExecutionLimits: ReturnType<
@@ -559,6 +591,7 @@ export function createCliLocalRuntimeAdapter(
     readXPost: deps.readXPost,
     readXhsProfile: deps.readXhsProfile,
     cliEntrypoint: CLI_ENTRYPOINT,
+    resolveAgentCredentialGroup,
     ...(deps.confirmDestructiveAction
       ? { confirmDestructiveAction: deps.confirmDestructiveAction }
       : {}),
@@ -671,6 +704,7 @@ export function createCliLocalRuntimeAdapter(
         readXPost: deps.readXPost,
         readXhsProfile: deps.readXhsProfile,
         cliEntrypoint: CLI_ENTRYPOINT,
+        resolveAgentCredentialGroup,
         ...(deps.confirmDestructiveAction
           ? { confirmDestructiveAction: deps.confirmDestructiveAction }
           : {}),

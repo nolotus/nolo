@@ -26,6 +26,10 @@ export function buildDelegatedTaskContent(task: string, input?: any): string {
   }
   let jsonStr: string;
   try {
+    // 先用无缩进序列化探测：Bun 的 pretty-print(indent) 路径在遇到循环引用时
+    // 会先做完昂贵的缩进展开才抛错（实测单对象 ~950ms，compact ~2ms）。
+    // 循环/不可序列化输入让 compact 快速抛错，避免 5s 超时内多次 pretty 调用叠加。
+    JSON.stringify(input);
     const serialized = JSON.stringify(input, null, 2);
     if (serialized === undefined) {
       return task;
@@ -57,6 +61,8 @@ export function calculateDelegatedPayloadMetrics(
       serializedInputForTokens = input;
     } else {
       try {
+        // 同上：先 compact 探测，避免 Bun indent 路径在循环引用上的昂贵展开。
+        JSON.stringify(input);
         const serialized = JSON.stringify(input, null, 2);
         if (serialized !== undefined) {
           inputChars = serialized.length;
