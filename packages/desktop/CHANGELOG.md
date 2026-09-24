@@ -1,4 +1,13 @@
 
+## 0.118.0-alpha.2
+
+## 0.118.0-alpha.2 (2026-09-24)
+
+### Bug Fixes
+
+* **dx:** map nested non-workspace packages into the pre-push scope gate ([c6621a9](https://github.com/nolotus/bun-nolo/commit/c6621a930ee57f19eb9d6ca1e4b1b616227d8cba))
+
+
 ## 0.118.0-alpha.1
 
 ## 0.118.0-alpha.1 (2026-09-24)
