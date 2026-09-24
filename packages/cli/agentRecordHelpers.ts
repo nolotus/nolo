@@ -326,6 +326,8 @@ export async function resolveAgentRecordFromHybridStore(args: {
   db: CliKvDb;
   fetchImpl: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
+  /** 跳过本地缓存，强制走一次权威远端读取（排障用）。 */
+  fresh?: boolean;
 }) {
   const agentKey = resolveCliAgentKeyInput(args.agentInput);
   const authToken = args.cliArgs
@@ -346,17 +348,35 @@ export async function resolveAgentRecordFromHybridStore(args: {
         // 如果缓存来自远程且过期，校验远程是否已 tombstone
         const cacheAge = Date.now() - (Number(record?.cachedAt) || 0);
         const STALE_CACHE_MS = 60_000;
-        if (record?.serverOrigin && shouldReadAgentKeyRemotely(key) && cacheAge > STALE_CACHE_MS) {
+        if (
+          record?.serverOrigin &&
+          shouldReadAgentKeyRemotely(key) &&
+          (args.fresh === true || cacheAge > STALE_CACHE_MS)
+        ) {
           try {
-            await readAgentRecord({
+            // 必须用远端返回的**完整记录**覆盖缓存：早先这里只调 readAgentRecord
+            // 而丢掉返回值，再把旧缓存重新 put 回去只刷新 cachedAt——后果是缓存里
+            // 一旦存过被投影裁过（字段子集）的记录，就永远是裁过的，读取方无从
+            // 得知自己看到的是不完整视图。2026-09-24 实证：`nolo agent read` 对
+            // 一个公开 agent 只返回 8 字段，而权威 db/read 有 26 字段。
+            const fresh = await readAgentRecord({
               agentKey: key,
               authToken,
               fallbackFetchImpl: args.fallbackFetchImpl,
               fetchImpl: args.fetchImpl,
               serverUrl: record.serverOrigin,
             });
-            // 远程记录仍然活跃，刷新缓存时间
-            try { await args.db.put(key, { ...record, cachedAt: Date.now() }); } catch {}
+            if (fresh) {
+              try {
+                await args.db.put(key, { ...fresh, dbKey: key, cachedAt: Date.now() });
+              } catch {}
+              return {
+                agentKey: key,
+                record: fresh,
+                source: record?.serverOrigin ? "remote-cache" : "local-cache",
+                cacheHit: false,
+              } as const;
+            }
           } catch (err: unknown) {
             // 只在远程确认 404（记录已删除/tombstone）时清缓存
             // 暂态 500/网络错误不清缓存，保持可用性
@@ -372,6 +392,9 @@ export async function resolveAgentRecordFromHybridStore(args: {
           agentKey: key,
           record,
           source: record?.serverOrigin ? "remote-cache" : "local-cache",
+          // 明确告知调用方「这是缓存视图」——缓存可能持有字段子集，也可能已过期。
+          // 调用方据此决定是否用 fresh 重读，而不是把不完整视图当成真值。
+          cacheHit: true,
         } as const;
       }
     } catch {

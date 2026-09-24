@@ -1,4 +1,13 @@
 
+## 0.116.0-alpha.2
+
+## 0.116.0-alpha.2 (2026-09-24)
+
+### Bug Fixes
+
+* **scripts:** repair three operator-tooling papercuts that misled debugging ([0da1f2e](https://github.com/nolotus/bun-nolo/commit/0da1f2ef56aae4502550ee03e98b8d39874c81f7))
+
+
 ## 0.116.0-alpha.1
 
 ## 0.116.0-alpha.1 (2026-09-24)

@@ -1,15 +1,7 @@
 # Nolo
 
-**Make all your AI models and subscriptions work together.**
-
-Nolo is an open-source, local-first agent workspace for using multiple AI providers, subscriptions, and runtimes in one place — so different tasks can use the model that fits them best for quality, speed, and cost.
-
-## Why Nolo?
-
-- **One model isn't best at everything.** Use stronger models where quality matters and lighter models where they are enough.
-- **Use the subscriptions and APIs you already have.** Bring multiple AI resources into one workflow instead of treating each product as an isolated silo.
-- **Start with coding, not limited to coding.** Coding is the first high-frequency workflow; the same orchestration model can extend to research, consensus, visual work, creative workflows, and other agent use cases.
-- **Open source, local-first, and auditable.** Your local workflow does not have to depend on a closed cloud-only stack.
+**Nolo** is an AI-native, local-first cross-platform workspace.
+It deeply integrates AI agents into your daily workflow with local-first data and privacy.
 
 ## 🌟 Core Principles
 
