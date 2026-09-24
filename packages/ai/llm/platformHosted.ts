@@ -21,6 +21,7 @@ import {
   PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL,
   PLATFORM_HOSTED_GROK_4_6_MODEL,
   PLATFORM_HOSTED_GPT_6_ASTRA_MODEL,
+  PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
   PLATFORM_HOSTED_GPT_56_SOL_MODEL,
   PLATFORM_HOSTED_GPT_56_TERRA_MODEL,
   PLATFORM_HOSTED_GPT_56_LUNA_MODEL,
@@ -165,7 +166,6 @@ export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_PRICE = {
 
 /**
  * GPT-6 / GPT-5.6 系（平台托管语义，OpenAI 官方 chat.completions）。
- * 价目，平台价不随档位浮动。
  */
 export const PLATFORM_HOSTED_GPT_6_ASTRA_PRICE = {
   input: toPlatformCredits(10), // 80 credits
@@ -186,6 +186,17 @@ export const PLATFORM_HOSTED_GPT_56_LUNA_PRICE = {
   input: toPlatformCredits(0.2), // 1.6 credits
   inputCacheHit: toPlatformCredits(0.02), // 0.16 credits
   output: toPlatformCredits(1.2), // 9.6 credits
+} as const;
+
+/**
+ * GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线；官方模型页
+ * developers.openai.com/api/docs/models/gpt-6-luna，2026-09-23 核对）：
+ * （>272K 官方 2x input/cache、1.5x output 由平台吸收），× 8 = 0.8 / 0.08 / 4.0 credits。
+ */
+export const PLATFORM_HOSTED_GPT_6_LUNA_PRICE = {
+  input: toPlatformCredits(0.1), // 0.8 credits
+  inputCacheHit: toPlatformCredits(0.01), // 0.08 credits
+  output: toPlatformCredits(0.5), // 4.0 credits
 } as const;
 
 /**
@@ -733,6 +744,19 @@ export const platformHostedModels = [
     displayName: "GPT-6 Astra",
     hasVision: true,
     price: { ...PLATFORM_HOSTED_GPT_6_ASTRA_PRICE },
+    maxOutputTokens: 128_000,
+    contextWindow: 1_050_000,
+    supportsTool: true,
+    supportsReasoningEffort: true,
+  },
+  {
+    // GPT-6 Luna：官方 1.05M 上下文 / 128k 输出 / 文本+图像输入、文本输出 /
+    // reasoning effort none-max（默认 medium）；官方 Chat Completions 端点在
+    // reasoning_effort=none 时支持 function calling（与 astra 同线）。
+    name: PLATFORM_HOSTED_GPT_6_LUNA_MODEL,
+    displayName: "GPT-6 Luna",
+    hasVision: true,
+    price: { ...PLATFORM_HOSTED_GPT_6_LUNA_PRICE },
     maxOutputTokens: 128_000,
     contextWindow: 1_050_000,
     supportsTool: true,

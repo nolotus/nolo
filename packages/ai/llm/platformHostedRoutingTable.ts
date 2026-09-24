@@ -23,6 +23,7 @@ export const PLATFORM_HOSTED_CLAUDE_FABLE_5_MODEL = "anthropic/claude-fable-5";
 export const PLATFORM_HOSTED_CLAUDE_HAIKU_45_MODEL = "anthropic/claude-haiku-4-5";
 export const PLATFORM_HOSTED_GROK_4_6_MODEL = "grok-4.6";
 export const PLATFORM_HOSTED_GPT_6_ASTRA_MODEL = "gpt-6-astra";
+export const PLATFORM_HOSTED_GPT_6_LUNA_MODEL = "gpt-6-luna";
 export const PLATFORM_HOSTED_GPT_56_SOL_MODEL = "gpt-5.6-sol";
 export const PLATFORM_HOSTED_GPT_56_TERRA_MODEL = "gpt-5.6-terra";
 export const PLATFORM_HOSTED_GPT_56_LUNA_MODEL = "gpt-5.6-luna";
@@ -284,6 +285,17 @@ export const PLATFORM_HOSTED_ROUTING_TABLE: Readonly<
   // GPT-6 / GPT-5.6 系（OpenAI 官方 chat.completions）：
   // 平台价按短上下文价目定（长上下文档差价由平台吸收），见 platformHosted.ts。
   [PLATFORM_HOSTED_GPT_6_ASTRA_MODEL]: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    usageProvider: "openai",
+    keyName: "openai",
+    wire: "chat.completions",
+    agentRunHosted: true,
+  },
+  // GPT-6 Luna（2026-09-22 随 GPT-6 Sol/Luna 上线；官方模型页
+  // developers.openai.com/api/docs/models/gpt-6-luna，2026-09-23 核对）：
+  // 官方 id 即 `gpt-6-luna`，Chat Completions 与 Responses 端点均可用；
+  // 平台托管沿用 GPT-6 系既有 chat.completions 分流（与 astra 同线同源）。
+  [PLATFORM_HOSTED_GPT_6_LUNA_MODEL]: {
     endpoint: "https://api.openai.com/v1/chat/completions",
     usageProvider: "openai",
     keyName: "openai",

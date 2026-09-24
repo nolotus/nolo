@@ -248,16 +248,23 @@ export {
   PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
 };
 
-export const GPT_5_6_LUNA_DEF = defineAgentSeed({
+export const GPT_6_LUNA_DEF = defineAgentSeed({
+  // salt 冻结为历史值 "shared-space-openai-gpt-5-6-luna"：deterministicId 由
+  // prefix+salt 哈希得出，改 salt 会换 ID——2026-09-23 Luna 原地换代
+  // （GPT-5.6 Luna → GPT-6 Luna）必须保留稳定 ID，用户收藏/别名/Space
+  // 内容键才不失效。
   id: deterministicId("01GPT56LUNPB", "shared-space-openai-gpt-5-6-luna"),
-  presetKey: "gpt-5.6-luna",
-  name: "GPT-5.6 Luna",
-  provider: "openai",
-  model: "gpt-5.6-luna",
+  presetKey: "gpt-6-luna",
+  name: "GPT-6 Luna",
+  // provider 用平台托管命名空间 "nolo"（平台 agent 统一收敛方向）：平台价只注册在
+  // nolo 下，agent-run 的托管路由门也只认 nolo。写上游名 "openai" 会让计费落零价
+  // 虚拟模型并绕过 hosted routing（2026-09-24 review CRITICAL）。
+  provider: "nolo",
+  model: "gpt-6-luna",
   isPublic: true,
   platformAudit: true,
-  introduction: "OpenAI GPT-5.6 Luna 公开助手（轻量档），适合高吞吐、低成本、速度敏感任务。",
-  greeting: "你好，我是 GPT-5.6 Luna。轻量档位，适合快速、低成本任务。",
+  introduction: "OpenAI GPT-6 Luna 公开助手（轻量档），适合高吞吐、低成本、速度敏感任务。",
+  greeting: "你好，我是 GPT-6 Luna。轻量档位，适合快速、低成本任务。",
   prompt:
     "优先快速完成任务；保持回答直接、结论明确。",
   tools: [],
@@ -357,7 +364,7 @@ export const GEMINI_3_8_FLASH_DEF = defineAgentSeed({
   id: deterministicId("01GEM37FLPB", "shared-space-google-gemini-3-7-flash"),
   presetKey: "gemini-3.8-flash",
   name: "Gemini 3.8 Flash",
-  provider: "google",
+  provider: "nolo",
   model: "gemini-3.8-flash",
   isPublic: true,
   introduction: "Gemini 3.8 Flash 公开助手，适合快速前沿问答、代码、多模态和长上下文任务。",
@@ -372,8 +379,8 @@ export const GPT_IMAGE_2_GENERATOR_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_GENERATOR_AGENT_ID,
   presetKey: "gpt-image-2-generator",
   name: "GPT Image 2 图片生成器",
-  provider: "openai",
-  model: "gpt-5.6-luna",
+  provider: "nolo",
+  model: "gpt-6-luna",
   imageModel: "gpt-image-2",
   isPublic: true,
   hasImageOutput: true,
@@ -406,8 +413,8 @@ export const GPT_IMAGE_2_EDITOR_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_EDITOR_AGENT_ID,
   presetKey: "gpt-image-2-editor",
   name: "GPT Image 2 图片编辑器",
-  provider: "openai",
-  model: "gpt-5.6-luna",
+  provider: "nolo",
+  model: "gpt-6-luna",
   imageModel: "gpt-image-2",
   isPublic: true,
   hasImageOutput: true,
@@ -443,8 +450,8 @@ export const GPT_IMAGE_2_CONTINUOUS_DEF = defineAgentSeed({
   id: PUBLIC_GPT_IMAGE_2_CONTINUOUS_AGENT_ID,
   presetKey: "gpt-image-2-continuous",
   name: "GPT Image 2 连续创作助手",
-  provider: "openai",
-  model: "gpt-5.6-luna",
+  provider: "nolo",
+  model: "gpt-6-luna",
   imageModel: "gpt-image-2",
   isPublic: true,
   hasImageOutput: true,
@@ -481,7 +488,7 @@ export const NANO_BANANA_2_LITE_GENERATOR_DEF = defineAgentSeed({
   id: PUBLIC_NANO_BANANA_2_LITE_AGENT_ID,
   presetKey: "nano-banana-2-lite-generator",
   name: "Nano Banana 2 Lite 文生图",
-  provider: "google",
+  provider: "nolo",
   model: "gemini-3.1-flash-lite-image",
   isPublic: true,
   hasImageOutput: true,
@@ -512,7 +519,7 @@ export const NANO_BANANA_2_LITE_GENERATOR_DEF = defineAgentSeed({
 });
 
 export const PUBLIC_AGENT_DEFS = [
-  GPT_5_6_LUNA_DEF,
+  GPT_6_LUNA_DEF,
   DEEPSEEK_V4_FLASH_DEF,
   DEEPSEEK_V4_PRO_DEF,
   GLM_5_3_DEF,

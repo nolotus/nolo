@@ -88,6 +88,17 @@ export interface CostBreakdown {
 const resolveModelPrice = (model: Model, usage: Usage): ModelPrice => {
   let activePrice = { ...model.price };
 
+  // 缓存价字段归一：Gemini / Anthropic / Fireworks 系用 cachingRead（+cachingWrite），
+  // DeepSeek 系用 inputCacheHit，两者描述同一件事（缓存命中单价）。缺
+  // inputCacheHit 而有 cachingRead 时，以 cachingRead 兜底——
+  // 否则 nolo / deepinfra 分支会退到 calculateSimpleCost，把缓存 token 按
+  // **全价**计费：Gemini 3.8 Flash 迁到 nolo provider 后，缓存读取从 0.6 变 6
+  // （多收 10 倍），2026-09-24 实测 + 独立复审 CRITICAL。
+  // 只做「缺则补」，不覆盖已显式声明的 inputCacheHit（DeepSeek 语义优先）。
+  if (typeof activePrice.inputCacheHit !== "number" && typeof activePrice.cachingRead === "number") {
+    activePrice = { ...activePrice, inputCacheHit: activePrice.cachingRead };
+  }
+
   if (model.pricingStrategy?.type === "tiered_context") {
     const contextSize = usage.input_tokens || 0;
     const tiers = model.pricingStrategy.tiers || [];
@@ -663,8 +674,16 @@ export const calculatePrice = ({
     billingServiceTier,
     nowMs,
   );
+  // 按张加价必须按「模型名」判定，不能按 provider。
+  // 2026-09-24 修复：原实现是 `provider === "openai" ? surcharge : 0`，而图片档
+  // agent 的 provider 已收敛到 nolo（平台命名空间统一），加价随之归零——
+  // 实测同一张图 openai/gpt-image-2 收 0.46384、nolo/gpt-image-2 只收 0.04
+  // （少收约 11.6 倍）。这里改成「openai 或平台托管图片模型」都给加价，
+  // 既修复漏收，也保留 BYOK openai 图片模型的原有行为。
   const openAIImageSurcharge =
-    provider === "openai" ? resolveOpenAIBuiltInImageSurcharge(model, usage) : 0;
+    provider === "openai" || isPlatformHostedOpenAIImageModel(modelName)
+      ? resolveOpenAIBuiltInImageSurcharge(model, usage)
+      : 0;
   const adjustedCosts =
     openAIImageSurcharge > 0
       ? {

@@ -24,16 +24,19 @@ const GPT_5_5_PRO_LONG_CONTEXT_PRICE: ModelPrice = {
   output: 2160,
   inputCacheHit: 0,
 };
+// >272K 输入按 2x 输入 / 1.5x 输出计（整笔请求）。平台价 = 官方价 × 8。
+// 修复前本条目仍是旧价 5/0.5/30 → 40/4/240，比官方多收 25% 输入、50% 输出；
+// 而同模型的 nolo 平台常量（PLATFORM_HOSTED_GPT_56_SOL_PRICE）本就是正确值。
 const GPT_5_6_SOL_STANDARD_PRICE: ModelPrice = {
-  input: 40,
-  output: 240,
-  inputCacheHit: 4,
+  input: 32,
+  output: 160,
+  inputCacheHit: 3.2,
 };
 
 const GPT_5_6_SOL_LONG_CONTEXT_PRICE: ModelPrice = {
-  input: 80,
-  output: 360,
-  inputCacheHit: 8,
+  input: 64,
+  output: 240,
+  inputCacheHit: 6.4,
 };
 
 const GPT_5_6_TERRA_STANDARD_PRICE: ModelPrice = {
@@ -127,6 +130,9 @@ export const openAIModels: Model[] = [
   {
     name: "gpt-5.6-luna",
     displayName: "GPT-5.6 Luna (Fast)",
+    // 已知缺口（2026-09-24 官网核对）：官方对 >272K 输入有 2x/1.5x 规则，本条目
+    // 未建模档位；平台托管侧又明确「价不随档位浮动」。是否给 BYO 档位属于计费
+    // 策略决定，留待 owner 决策，不在此顺手改。
     endpointKey: "responses",
     hasVision: true,
     contextWindow: 1_050_000,

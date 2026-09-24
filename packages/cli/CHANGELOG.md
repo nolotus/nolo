@@ -1,4 +1,17 @@
 
+## 0.91.0-alpha.1
+
+## 0.91.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **agent:** converge platform agent lifecycle onto stable ids and the nolo provider ([d1946eb](https://github.com/nolotus/bun-nolo/commit/d1946eba4841ffd27b144ee205d08833dc2b237f))
+
+### Bug Fixes
+
+* **billing:** correct three platform pricing defects found by official-price audit ([b399e93](https://github.com/nolotus/bun-nolo/commit/b399e9390226427699efa48af2883a9423ea2030))
+
+
 ## 0.90.0-alpha.1
 
 ## 0.90.0-alpha.1 (2026-09-24)

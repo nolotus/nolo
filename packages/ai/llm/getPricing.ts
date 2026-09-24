@@ -45,12 +45,18 @@ export const getModelPricingForModel = (
 ): ModelPricing | null => {
   if (!model.price) return null;
 
+  // 缓存命中价有两个字段名：Gemini/Anthropic/Fireworks 用 cachingRead，
+  // DeepSeek 系用 inputCacheHit。只读后者会把前者的缓存价显示成 0——
+  // 2026-09-24 实测因此误判过「Gemini 缓存漏账」（真实计费路径 calculatePrice
+  // 是正确处理 cachingRead 的，错的是这个展示/探针口径）。
+  const rawCacheHit =
+    typeof (model.price as { inputCacheHit?: number }).inputCacheHit === "number"
+      ? (model.price as { inputCacheHit?: number }).inputCacheHit
+      : (model.price as { cachingRead?: number }).cachingRead;
+
   return {
     inputPrice: model.price.input,
-    inputCacheHitPrice:
-      typeof model.price.inputCacheHit === "number"
-        ? model.price.inputCacheHit
-        : 0,
+    inputCacheHitPrice: typeof rawCacheHit === "number" ? rawCacheHit : 0,
     outputPrice: model.price.output,
   };
 };

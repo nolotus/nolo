@@ -20,11 +20,13 @@
  * （scripts/createSpaceAgents.ts）的 provider/model 需同步改，一致性测试会
  * 提示（见 createSpaceAgents.source.test.ts）。
  *
- * 两个维度：`group` 表达「builtin 平台内置 6 个 / public 广场公开（需 seed）/
- * internal 内部管线基础设施（不上架、不需 seed）」，`runtimeFallback` 表达
- * 「运行时兜底需要与否」——正交，可独立取值（如 @nolo 是 builtin 组但需要
- * 兜底；Qwen 预处理器是 internal 组但同样需要兜底）。agent key 前缀构造/解析统一走
- * `core/prefix.ts`（publicAgentKey / parsePublicAgentId）。
+ * 三个维度：`group` 表达「builtin 平台内置 6 个 / public 广场公开（需 seed）/
+ * internal 内部管线基础设施（不上架、不需 seed）」，`lifecycle` 表达
+ * 「active 在架 / retired 已退场」（internal 兼容条目一律 retired：只保留运行时
+ * 路由，广场列表必须过滤其存量 DB 记录，否则 /explore 会泄漏已下架 agent），
+ * `runtimeFallback` 表达「运行时兜底需要与否」——正交，可独立取值（如 @nolo 是
+ * builtin 组但需要兜底）。agent key 前缀构造/解析统一走 `core/prefix.ts`
+ * （publicAgentKey / parsePublicAgentId）。
  */
 
 export type BuiltinAgentCatalogEntry = {
@@ -42,6 +44,17 @@ export type BuiltinAgentCatalogEntry = {
    * 仍走平台托管路由并照常按用量计费，只是不作为独立广场商品定价/售卖。
    */
   group: "builtin" | "public" | "internal";
+  /**
+   * active = 在架（缺省）；retired = 已退场。retired 条目只保留条目本身
+   * （运行时路由 / 存量记录兼容），广场列表（fetchPublicAgents 的 DB+catalog
+   * overlay）必须过滤同 ID 的存量 DB 记录、也不得合成上架——否则已下架的
+   * agent 会以 DB 旧记录的形式继续出现在 /explore（2026-09-23 GPT-5.5 Pro
+   * 线上泄漏即此形态）。internal 兼容条目一律 retired。
+   * 注意：换代只改model（id 稳定）不算 retired——retired 是「商品退场」，
+   * 该 ID 不再作为广场商品存在（如 GLM 5.2 的 ID 已原地换代为 GLM 5.3，
+   * 那条是 active）。
+   */
+  lifecycle?: "active" | "retired";
   /**
    * true = 需要运行时兜底（@nolo 引导 / quick-chat 档位 / Kimi K2.6 兼容）。
    * 记录在本地/远端缺失时，runtime 用目录合成配置，保证进站即用。
@@ -77,7 +90,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     group: "builtin",
     name: "电商商品参数助手",
     provider: "openai",
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
   },
   {
     id: "01NOLOAGENTCRT000000000001",
@@ -140,6 +153,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01KIMIK26OLLAMA0000000001",
     // 已下架的公共入口：保留 internal catalog entry 仅用于旧 Agent 记录的运行时兼容。
     group: "internal",
+    lifecycle: "retired",
     name: "Kimi K2.6（兼容）",
     provider: "nolo",
     model: "kimi-k2.6",
@@ -155,6 +169,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     // 已从广场/预设退场（2026-09-10）：保留 internal 兼容条目，仅为存量 agent
     // 记录提供运行时路由；不再出现在广场与 createSpaceAgents 播种清单。
     group: "internal",
+    lifecycle: "retired",
     name: "GPT-5.6 Sol（兼容）",
     provider: "openai",
     model: "gpt-5.6-sol",
@@ -163,21 +178,36 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GPT56TERPB00000001UX7RKW",
     // 已从广场/预设退场（2026-09-10）：同 Sol，internal 兼容。
     group: "internal",
+    lifecycle: "retired",
     name: "GPT-5.6 Terra（兼容）",
     provider: "openai",
     model: "gpt-5.6-terra",
   },
   {
     id: "01GPT56LUNPB00000001VVVZHS",
+    // 2026-09-23 换代：同一稳定 ID（用户收藏 / 别名 / Space 内容键不失效）升级为
+    // 平台托管 GPT-6 Luna。注意与 retired 的区别：Luna 是在架商品原地换代，
+    // 存量记录由 scripts/updatePlazaModels.ts 收敛到 catalog 当前 model。
+    //
+    // provider 必须是 "nolo"（平台托管命名空间），不能写上游名 "openai"：
+    // ① 计费按 calculatePrice(provider, model) 查价，平台价只注册在 nolo 下，
+    //    写 openai 会落零价虚拟模型（2026-09-24 实测 openai/gpt-6-luna → cost 0）；
+    // ② agent-run 的托管路由门 isPlatformManagedProvider 只认 nolo/deepseek/
+    //    kimi 系，provider 非 nolo 时读不到 hosted routing table，直连 key 也拿不到。
+    // 平台 agent 统一收敛到 nolo provider 是既定方向（见 modelUpgradeTable 的
+    // 「尽量迁移到 nolo 平台托管」原则），其余上游名 provider 逐步退场。
     group: "public",
-    name: "GPT-5.6 Luna",
-    provider: "openai",
-    model: "gpt-5.6-luna",
+    lifecycle: "active",
+    name: "GPT-6 Luna",
+    provider: "nolo",
+    model: "gpt-6-luna",
   },
   {
     id: "01GPT55PROPUB00000000IV47M",
-    // 已从广场/预设退场（2026-09-10）：internal 兼容，理由同 Sol。
+    // 已从广场/预设退场（2026-09-10 retired，2026-09-23 起 overlay 强制过滤
+    // 存量 DB 记录）：internal 兼容，理由同 Sol。
     group: "internal",
+    lifecycle: "retired",
     name: "GPT-5.5 Pro（兼容）",
     provider: "openai",
     model: "gpt-5.5-pro",
@@ -191,7 +221,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GEM37FLPB00000000FJCRNC",
     group: "public",
     name: "Gemini 3.8 Flash",
-    provider: "google",
+    provider: "nolo",
     model: "gemini-3.8-flash",
   },
   {
@@ -205,8 +235,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GPTIMG2GEN00000000SSEBOS",
     group: "public",
     name: "GPT Image 2 图片生成器",
-    provider: "openai",
-    model: "gpt-5.6-luna",
+    provider: "nolo",
+    model: "gpt-6-luna",
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "generate",
@@ -216,8 +246,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GPTIMG2EDT00000001R4R4H4",
     group: "public",
     name: "GPT Image 2 图片编辑器",
-    provider: "openai",
-    model: "gpt-5.6-luna",
+    provider: "nolo",
+    model: "gpt-6-luna",
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "edit",
@@ -227,8 +257,8 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GPTIMG2CNT00000000USKZFO",
     group: "public",
     name: "GPT Image 2 连续创作助手",
-    provider: "openai",
-    model: "gpt-5.6-luna",
+    provider: "nolo",
+    model: "gpt-6-luna",
     hasImageOutput: true,
     imageModel: "gpt-image-2",
     imageWorkflow: "continuous",
@@ -238,7 +268,7 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01NB2LITEGEN00000001XE1MNO",
     group: "public",
     name: "Nano Banana 2 Lite 文生图",
-    provider: "google",
+    provider: "nolo",
     model: "gemini-3.1-flash-lite-image",
     hasImageOutput: true,
   },
@@ -261,4 +291,22 @@ export function builtinRuntimeFallbackEntries(): BuiltinAgentCatalogEntry[] {
 /** 平台内置 6 个（BUILTIN_PLATFORM_AGENT_KEYS 的真相源） */
 export function builtinPlatformEntries(): BuiltinAgentCatalogEntry[] {
   return BUILTIN_AGENT_CATALOG.filter((e) => e.group === "builtin");
+}
+
+/** 条目是否已退场（retired = 不上面板/广场，仅保留运行时兼容） */
+export function isRetiredCatalogEntry(
+  entry: BuiltinAgentCatalogEntry | undefined | null,
+): boolean {
+  return entry?.lifecycle === "retired";
+}
+
+/**
+ * 全部 retired catalog ID（广场 overlay 的 stale DB 过滤集）。
+ * 这些 ID 的存量 DB 记录不得再出现在 /explore；内部兼容与运行时路由不受影响
+ * （chatHandler 直读 DB，不走 overlay）。
+ */
+export function retiredCatalogIds(): readonly string[] {
+  return BUILTIN_AGENT_CATALOG.filter((e) => isRetiredCatalogEntry(e)).map(
+    (e) => e.id,
+  );
 }
