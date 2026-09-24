@@ -1,4 +1,13 @@
 
+## 0.100.0-alpha.1
+
+## 0.100.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **recharge:** preset tiers from pricing entries and guard expired checkout sessions ([50b6dc7](https://github.com/nolotus/bun-nolo/commit/50b6dc72ea415534c6a4c17827e7158ce5788cd0))
+
+
 ## 0.99.0-alpha.1
 
 ## 0.99.0-alpha.1 (2026-09-24)

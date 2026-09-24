@@ -19,6 +19,7 @@ import { useAccountProfileRefresh } from "app/hooks/useAccountProfileRefresh";
 import { useCurrentUser, useUserId } from "identity";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { GPT_PRO_BLOCKED_MESSAGE, shouldBlockForGptPro } from "core/gptProTier";
+import { pickRechargeTier } from "core/rechargePreset";
 import { buildNoloDefaultAgentOption } from "./noloDefaultAgentOption";
 import { toast } from "app/utils/toast";
 import { setPrimaryDialogAgent } from "../dialog/dialogSlice";
@@ -220,14 +221,33 @@ const MessageInputContainer = forwardRef<
   }
 
   if (!sendPermission.allowed) {
+    // E6：余额不足拦截——文案补「还差 N 积分」，跳转带上 ≥N 的最小预设档位，
+    // 充值页读取后预选；没有档位够得着（超出最大档）时回落裸 /recharge。
+    const pricing = sendPermission.pricing;
+    const shortfall =
+      sendPermission.reason === "INSUFFICIENT_BALANCE" && pricing
+        ? Math.ceil(pricing.pricePerMessage - (balance ?? 0))
+        : 0;
+    const presetTier = shortfall > 0 ? pickRechargeTier(shortfall) : null;
+    const baseMessage = getErrorMessage(
+      sendPermission.reason,
+      sendPermission.pricing
+    );
     return (
       <ErrorMessage
-        message={getErrorMessage(
-          sendPermission.reason,
-          sendPermission.pricing
-        )}
+        message={
+          shortfall > 0
+            ? `${baseMessage} ${t("insufficientBalanceShortfall", { shortfall })}`
+            : baseMessage
+        }
         showRecharge={sendPermission.reason === "INSUFFICIENT_BALANCE"}
-        onRecharge={() => navigate("/recharge")}
+        onRecharge={() =>
+          navigate(
+            presetTier != null
+              ? `/recharge?credits=${presetTier}`
+              : "/recharge"
+          )
+        }
         agentPicker={resolvedAgentPicker}
       />
     );

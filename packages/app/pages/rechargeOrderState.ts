@@ -31,6 +31,12 @@ export interface RechargeOrderSnapshot {
   /** 下单时刻（ms epoch）；confirming 轮询以此为起点 */
   createdAt: number;
   checkoutUrl?: string;
+  /**
+   * 收银台会话过期时间（ms epoch，来自 Waffo create-session 的 expiresAt）。
+   * 过期后必须重新下单：直接重开旧链接会被 Waffo「自愈」成匿名会话，
+   * metadata 丢失 → 这笔钱无法自动入账。
+   */
+  checkoutExpiresAt?: number;
   /** 跳回确认前的余额基线；命中「余额 > baseline」即判定 credited */
   balanceBaseline?: number;
 }
@@ -40,6 +46,63 @@ export const RECHARGE_ORDER_STORAGE_KEY = "rechargeOrder.v1";
 /** confirming 轮询：3s × 13 ≈ 40s */
 export const CONFIRM_POLL_INTERVAL_MS = 3_000;
 export const CONFIRM_POLL_MAX_ATTEMPTS = 13;
+
+/** Waffo 收银台会话默认有效期（SDK 默认 45 分钟，可通过 expiresInSeconds 调整） */
+export const CHECKOUT_SESSION_TTL_MS = 45 * 60 * 1000;
+
+/** create-session 允许的最大会话有效期（文档：expiresInSeconds 上限 7 天） */
+export const CHECKOUT_SESSION_MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 解析 Waffo 返回的 ISO 8601 会话过期时间 → ms；缺失/非法返回 undefined。 */
+export function parseCheckoutExpiresAt(value: unknown): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * 收银台会话是否已过期（纯函数）。
+ *
+ * 为什么重要：会话过期/被消费后，Waffo 收银台会「自愈」回产品页并新建**匿名**
+ * 会话，那条路径会丢掉我们下单时带的 metadata（含 paymentRequestId），
+ * 结果就是「钱收了、我们认不出来、没入账」（2026-09-24 真实事故）。
+ * 因此过期后必须重新下单，而不是重开旧链接。
+ *
+ * 缺少明确的 checkoutExpiresAt（历史快照）时，用 createdAt + 默认 TTL 兜底。
+ */
+export function isCheckoutSessionExpired(
+  snapshot: Pick<
+    RechargeOrderSnapshot,
+    "checkoutExpiresAt" | "createdAt"
+  >,
+  now = Date.now(),
+  ttlMs = CHECKOUT_SESSION_TTL_MS
+): boolean {
+  const expiresAt = snapshot.checkoutExpiresAt;
+  // 只有「有限且不超过 7 天上限」的 expiresAt 才可信：离谱的未来值通常是
+  // 快照损坏或时间单位错误，按不可信用处理（回落 createdAt 判断）更安全
+  const expiresAtUsable =
+    typeof expiresAt === "number" &&
+    Number.isFinite(expiresAt) &&
+    expiresAt <= now + CHECKOUT_SESSION_MAX_TTL_MS;
+  if (expiresAtUsable) return now >= expiresAt;
+
+  const createdAt = snapshot.createdAt;
+  // 不可用或**未来**的 createdAt（时钟异常/快照损坏）一律按过期处理：
+  // 方向是「宁可重新下单，也不要重开可能已经死掉的链接」
+  if (
+    typeof createdAt !== "number" ||
+    !Number.isFinite(createdAt) ||
+    createdAt > now
+  ) {
+    return true;
+  }
+  const effectiveTtl =
+    typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0
+      ? ttlMs
+      : CHECKOUT_SESSION_TTL_MS;
+  return now - createdAt >= effectiveTtl;
+}
 
 // ---------- 纯函数 ----------
 
@@ -58,6 +121,7 @@ export function createOrderSnapshot(input: {
   credits: number;
   method: string;
   checkoutUrl?: string;
+  checkoutExpiresAt?: number;
   balanceBaseline?: number;
   now?: number;
 }): RechargeOrderSnapshot {
@@ -67,6 +131,7 @@ export function createOrderSnapshot(input: {
     method: input.method,
     createdAt: input.now ?? Date.now(),
     checkoutUrl: input.checkoutUrl,
+    checkoutExpiresAt: input.checkoutExpiresAt,
     balanceBaseline: input.balanceBaseline,
   };
 }
@@ -228,6 +293,13 @@ export const isValidOrderSnapshot = (
     return false;
   }
   if (s.checkoutUrl !== undefined && typeof s.checkoutUrl !== "string") {
+    return false;
+  }
+  if (
+    s.checkoutExpiresAt !== undefined &&
+    (typeof s.checkoutExpiresAt !== "number" ||
+      !Number.isFinite(s.checkoutExpiresAt))
+  ) {
     return false;
   }
   if (

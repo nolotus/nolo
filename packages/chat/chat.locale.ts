@@ -107,6 +107,7 @@ export default {
       insufficientBalanceDetailed:
         "Insufficient balance. Model: {{modelName}}, max cost per message: {{pricePerMessage}} credits. Balance: {{balance}} credits.",
       insufficientBalance: "Insufficient balance",
+      insufficientBalanceShortfall: "You need {{shortfall}} more credits.",
       agentConfigMissing: "Agent configuration missing",
       agentConfigLoadFailed:
         "Failed to load agent configuration. Please try again.",
@@ -529,6 +530,7 @@ export default {
       insufficientBalanceDetailed:
         "余额不足。当前模型：{{modelName}}，单次最多消耗：{{pricePerMessage}}积分。余额：{{balance}}积分。",
       insufficientBalance: "余额不足",
+      insufficientBalanceShortfall: "还差 {{shortfall}} 积分。",
       agentConfigMissing: "智能体配置缺失",
       agentConfigLoadFailed: "智能体配置加载失败，请重试。",
       modelPricingMissing: "模型定价信息缺失",
@@ -944,6 +946,7 @@ export default {
       insufficientBalanceDetailed:
         "餘額不足。當前模型：{{modelName}}，單次最多消耗：{{pricePerMessage}}積分。餘額：{{balance}}積分。",
       insufficientBalance: "餘額不足",
+      insufficientBalanceShortfall: "還差 {{shortfall}} 積分。",
       agentConfigMissing: "智能體配置缺失",
       agentConfigLoadFailed: "智能體配置載入失敗，請再試一次。",
       modelPricingMissing: "模型定價信息缺失",
@@ -1294,6 +1297,7 @@ export default {
       insufficientBalanceDetailed:
         "残高不足。モデル：{{modelName}}、1回の最大コスト：{{pricePerMessage}}ポイント。残高：{{balance}}ポイント。",
       insufficientBalance: "残高不足",
+      insufficientBalanceShortfall: "あと {{shortfall}} ポイント不足しています。",
       agentConfigMissing: "エージェントの設定が見つかりません",
       agentConfigLoadFailed:
         "エージェント設定の読み込みに失敗しました。再試行してください。",
