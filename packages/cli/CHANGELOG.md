@@ -1,4 +1,13 @@
 
+## 0.102.0-alpha.1
+
+## 0.102.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **payments:** support partial refunds with proportional clawback and refund quotes ([0cbcf8e](https://github.com/nolotus/bun-nolo/commit/0cbcf8e943fee0cd5e1d3d4596a4876dede11e77))
+
+
 ## 0.101.0-alpha.1
 
 ## 0.101.0-alpha.1 (2026-09-24)
