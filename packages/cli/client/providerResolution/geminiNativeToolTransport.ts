@@ -14,7 +14,7 @@ import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) => {
-  const { agentConfig, deps, fetchImpl, additionalToolNames, buildProviderOpenAiTools, apiKeyRefResolver, credentialBroker, syncFetcher } = ctx;
+  const { agentConfig, deps, fetchImpl, additionalToolNames, buildProviderOpenAiTools, apiKeyRefResolver, credentialBroker, syncFetcher, recordLocalAvailability } = ctx;
   // Gemini 3 系列 + tools → 走 native generateContent 以支持 thought_signature
   // Platform proxy 的 OpenAI-compatible 路径无法传递 thought_signature
   if (
@@ -101,6 +101,9 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
               status: res.status,
               error: errText.slice(0, 200),
             });
+            // 把上游 HTTP 结论落进可用性记录：429 → 冷却该凭证；其他错误
+            // status 也照实记录，由 recordLocalAvailability 内部决定语义。
+            await recordLocalAvailability(res.status, errText);
             throw new Error(
               `gemini native tool provider failed: HTTP ${res.status} ${errText.slice(0, 500)}`,
             );
@@ -129,6 +132,8 @@ export const resolveGeminiNativeToolTransport: ProviderResolver = async (ctx) =>
             contentChars: text.length,
             toolCallCount: toolCalls.length,
           });
+          // 成功响应 = 上游可用：清掉该凭证的 429 冷却（对齐 devinTransport）。
+          await recordLocalAvailability(200);
           return result;
         },
       };

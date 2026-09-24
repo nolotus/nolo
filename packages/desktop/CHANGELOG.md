@@ -1,4 +1,13 @@
 
+## 0.116.0-alpha.5
+
+## 0.116.0-alpha.5 (2026-09-24)
+
+### Bug Fixes
+
+* **agent:** close availability wiring for gemini-native and cursor transports ([0cd6d2d](https://github.com/nolotus/bun-nolo/commit/0cd6d2d034268e58271f2d6fa43d9f5162a27f8a))
+
+
 ## 0.116.0-alpha.4
 
 ## 0.116.0-alpha.4 (2026-09-24)

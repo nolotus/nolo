@@ -8,6 +8,7 @@ import type { AgentRuntimeResult, AgentRuntimeToolCallInput } from "../../../age
 import {
   createCursorProvider,
   isCursorOAuthAgent,
+  readCursorUpstreamFailure,
   type CursorSearchWorkspaceArgs,
   type CursorListWorkspaceEntriesArgs,
 } from "../../../agent-runtime/cursor/cursorProvider";
@@ -22,7 +23,7 @@ import { executeLocalToolWithPolicy } from "../localToolPolicy";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveCursorTransport: ProviderResolver = async (ctx) => {
-  const { agentConfig, deps, workspaceRoot, additionalToolNames, buildProviderOpenAiTools, apiKeyRefResolver, activeAgentToolNames, localToolExecutors } = ctx;
+  const { agentConfig, deps, workspaceRoot, additionalToolNames, buildProviderOpenAiTools, apiKeyRefResolver, activeAgentToolNames, localToolExecutors, recordLocalAvailability } = ctx;
   // Cursor OAuth uses a bespoke ConnectRPC + protobuf wire (HTTP/2 to
   // api2.cursor.sh), not OpenAI-compatible chat.completions. Route through
   // the dedicated cursorProvider which translates nolo messages to the
@@ -112,15 +113,27 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
           toolCount: tools.length,
           requestedToolNames,
         });
-        const result = await cursorProvider.complete(messages, options);
-        logLocalRuntimeDiagnostic("provider.request.result", {
-          agentKey: agentConfig.key,
-          transport: "cursor-connect",
-          ok: true,
-          contentChars: (result.content ?? "").length,
-          toolCallCount: result.tool_calls?.length ?? 0,
-        });
-        return result;
+        try {
+          const result = await cursorProvider.complete(messages, options);
+          // 成功响应 = 上游可用：清掉该凭证的 429 冷却（对齐 devinTransport）。
+          await recordLocalAvailability(200);
+          logLocalRuntimeDiagnostic("provider.request.result", {
+            agentKey: agentConfig.key,
+            transport: "cursor-connect",
+            ok: true,
+            contentChars: (result.content ?? "").length,
+            toolCallCount: result.tool_calls?.length ?? 0,
+          });
+          return result;
+        } catch (error) {
+          // Cursor Connect 的限流类 trailer 会把可用性信号附在 Error 上
+          // （cursorProvider.buildCursorGrpcTrailerError）；读出来落冷却。
+          const failure = readCursorUpstreamFailure(error);
+          if (failure) {
+            await recordLocalAvailability(failure.status, failure.body);
+          }
+          throw error;
+        }
       },
     };
   }

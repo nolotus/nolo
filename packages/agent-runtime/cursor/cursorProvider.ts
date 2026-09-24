@@ -784,6 +784,75 @@ export type CursorListWorkspaceEntriesArgs = {
 };
 
 /**
+ * Cursor Connect 上游失败的可用性信号（对齐 devinProvider 的
+ * DevinUpstreamFailure 模式）：h2 trailers 里的限流类失败会把结论附到抛出的
+ * Error 上，供本地 runtime 的 transport 落 429 冷却（`recordLocalAvailability`）。
+ */
+export type CursorUpstreamFailure = {
+  /** 与 HTTP status 语义对齐（429 = 限流/配额耗尽）。 */
+  status: number;
+  /** 原始失败载荷：trailer 的 code/message。 */
+  body?: unknown;
+};
+
+type CursorUpstreamFailureCarrier = Error & {
+  cursorUpstreamFailure?: CursorUpstreamFailure;
+};
+
+function attachCursorUpstreamFailure<T extends Error>(
+  error: T,
+  failure: CursorUpstreamFailure | undefined,
+): T {
+  if (failure) {
+    (error as CursorUpstreamFailureCarrier).cursorUpstreamFailure = failure;
+  }
+  return error;
+}
+
+/** 读取错误上附带的可用性信号；无信号（含非 Cursor 错误）返回 undefined。 */
+export function readCursorUpstreamFailure(
+  error: unknown,
+): CursorUpstreamFailure | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const failure = (error as CursorUpstreamFailureCarrier).cursorUpstreamFailure;
+  if (!failure || typeof failure !== "object") return undefined;
+  if (typeof failure.status !== "number" || !Number.isFinite(failure.status)) {
+    return undefined;
+  }
+  return failure;
+}
+
+/**
+ * 把 h2 trailers 翻译成 Error；grpc-status 缺失或为 "0" 返回 null。
+ *
+ * gRPC status 8 = RESOURCE_EXHAUSTED（部分代理直接写 "resource_exhausted"），
+ * 与 HTTP 429 同义（限流/配额耗尽），附 429 可用性信号；其他 code 不附。
+ */
+export function buildCursorGrpcTrailerError(trailers: {
+  "grpc-status"?: unknown;
+  "grpc-message"?: unknown;
+}): Error | null {
+  const status = trailers["grpc-status"];
+  if (!status || String(status) === "0") return null;
+  const rawMessage = String(trailers["grpc-message"] || "");
+  let message: string;
+  try {
+    message = decodeURIComponent(rawMessage);
+  } catch {
+    // 畸形 percent-encoding（上游/中间层脏数据）不能让 trailers 回调抛
+    // URIError 逃逸；退回原始文本。
+    message = rawMessage;
+  }
+  const statusText = String(status);
+  return attachCursorUpstreamFailure(
+    new Error(`Cursor gRPC error ${statusText}: ${message}`),
+    statusText === "8" || statusText.toLowerCase() === "resource_exhausted"
+      ? { status: 429, body: { code: "resource_exhausted", message } }
+      : undefined,
+  );
+}
+
+/**
  * Open an HTTP/2 ConnectRPC stream to Cursor's AgentService and resolve with
  * the full assistant text once `turnEnded` arrives.
  *
@@ -918,14 +987,9 @@ export async function streamCursorChat(
     });
 
     h2Request.on("trailers", (trailers) => {
-      const status = trailers["grpc-status"];
-      const msg = trailers["grpc-message"];
-      if (status && status !== "0") {
-        h2Completion.reject(
-          new Error(
-            `Cursor gRPC error ${status}: ${decodeURIComponent(String(msg || ""))}`,
-          ),
-        );
+      const error = buildCursorGrpcTrailerError(trailers);
+      if (error) {
+        h2Completion.reject(error);
       }
     });
 
