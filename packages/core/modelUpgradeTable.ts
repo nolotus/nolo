@@ -15,8 +15,9 @@
  * - **兜底规则**：显式条目未命中时，无兼容替代的已下架模型（DELISTED_MODELS）
  *   一律迁移到 nolo DeepSeek V4 Flash，保证存量记录不因模型下线而对话失败。
  *
- * 与 `scripts/updatePlazaModels.ts` 的关系：后者是 plaza 专用的一次性批量迁移
- * （改 model 字段）；本表是长期领域知识，覆盖所有 agent 记录（公开 + 私有）。
+ * 本表只管**用户自建** agent 引用的已下线模型（运行时按表改 provider/model）。
+ * 平台预设不走本表：其身份真值是 catalog，由 publicAgentCatalogOverride 在读取时
+ * 覆写，改 catalog 一行即换代，无需迁移数据。
  */
 
 export type ModelUpgradeKind = "migrate" | "upgrade";

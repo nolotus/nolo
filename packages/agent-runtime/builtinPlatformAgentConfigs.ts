@@ -112,7 +112,8 @@ export function resolveBuiltinPlatformAgentRecord(
  * 仍然以记录为准（内容归数据，运行时归代码）。
  *
  * 为什么需要它：catalog 原本只在「记录缺失」时兜底，记录存在就完全让位给 DB。
- * 于是改了 catalog 的模型却没跑 `scripts/updatePlazaModels.ts` 时，代码和线上会
+ * public catalog 条目另有对称机制（publicAgentCatalogOverride）覆写身份与内容，
+ * 同样不依赖 DB 记录的 model 字段。于是改了 catalog 的模型却没同步时，代码和线上会
  * 静默分叉——2026-08 就发生过：catalog 已声明 nolo 用 deepseek-v4-flash-vision-exp，
  * 而线上记录仍是 kimi-k2.6（再被 platformHosted 转发到 qwen），用户看到的
  * context window 和实际模型都对不上。

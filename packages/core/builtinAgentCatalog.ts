@@ -8,17 +8,18 @@
  * - `packages/core/builtinAgents.ts` 的 key/id 常量 → 从本目录派生
  * - `packages/agent-runtime/builtinPlatformAgentConfigs.ts` 的运行时兜底表 → 从
  *   `runtimeFallback: true` 条目派生（2026-09-10 兜底最小化后仅 nolo + quick-chat 档位 + Kimi K2.6 兼容，记录缺失时合成配置）
- * - `scripts/updatePlazaModels.ts` 的 TARGETS → 从本目录派生
  *
  * 内容字段（introduction / greeting / prompt / tools / tags / 价格）留在
  * `scripts/createSpaceAgents.ts` 的 seed 定义（写库用，运行时不需要）；
  * seed 与目录的一致性由 `createSpaceAgents.source.test.ts` 的断言锁住。
  *
- * 模型换代流程（如 GLM 5.2 → 5.3）：只改本目录对应条目的 `model`（id 保持
- * 稳定，用户收藏不失效）→ 兜底表 / 常量 / sync TARGETS 自动跟随 → 跑
- * `bun scripts/updatePlazaModels.ts` 批量升级生产记录。注意 seed 内容层
- * （scripts/createSpaceAgents.ts）的 provider/model 需同步改，一致性测试会
- * 提示（见 createSpaceAgents.source.test.ts）。
+ * 模型换代流程：只改本目录对应条目的 `model`/`name`（id 保持稳定，用户收藏不
+ * 失效）→ 兜底表 / 常量自动跟随。seed 内容层（packages/core/publicAgentSeeds.ts）
+ * 的 provider/model 需同步改，一致性测试会提示。
+ *
+ * **不需要跑任何数据迁移脚本**：平台条目的字段真值由
+ * `packages/agent-runtime/publicAgentCatalogOverride.ts` 在读取时从本目录 + seed
+ * 覆写，DB 记录只决定「这个 key 是否还存在」（供硬 key 引用解析）。
  *
  * 三个维度：`group` 表达「builtin 平台内置 6 个 / public 广场公开（需 seed）/
  * internal 内部管线基础设施（不上架、不需 seed）」，`lifecycle` 表达
@@ -187,7 +188,6 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
     id: "01GPT56LUNPB00000001VVVZHS",
     // 2026-09-23 换代：同一稳定 ID（用户收藏 / 别名 / Space 内容键不失效）升级为
     // 平台托管 GPT-6 Luna。注意与 retired 的区别：Luna 是在架商品原地换代，
-    // 存量记录由 scripts/updatePlazaModels.ts 收敛到 catalog 当前 model。
     //
     // provider 必须是 "nolo"（平台托管命名空间），不能写上游名 "openai"：
     // ① 计费按 calculatePrice(provider, model) 查价，平台价只注册在 nolo 下，
