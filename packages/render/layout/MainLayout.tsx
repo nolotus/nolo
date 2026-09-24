@@ -39,6 +39,7 @@ import {
 } from "./rightSidebarGeometry";
 import { pointerXToNavigationWidth } from "./navigationGeometry";
 import { useIsMobile } from "app/hooks/useIsMobile";
+import { RechargeCreditWatcher } from "app/pages/RechargeCreditWatcher";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { shouldRenderChatSidebar } from "./mainLayoutSidebar";
 import { shouldRenderSiteFooter } from "./siteFooterRoutes";
@@ -576,6 +577,8 @@ const MainLayout: React.FC = () => {
 
         {/* 移动端悬浮客户端下载提示条 */}
         <MobileDownloadBanner />
+        {/* E2：到账反馈全局化——支付后回到任意页面都能收到「+N 积分已到账」 */}
+        <RechargeCreditWatcher />
         </div>
       </RightSidebarContext.Provider>
     </MainSidebarContext.Provider>

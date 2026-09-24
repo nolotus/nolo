@@ -1,4 +1,13 @@
 
+## 0.99.0-alpha.1
+
+## 0.99.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **recharge:** make the recharge flow stateful, recoverable and global ([c83b1a8](https://github.com/nolotus/bun-nolo/commit/c83b1a8ec8faa717361861d5fabd507a3b26e319))
+
+
 ## 0.98.0-alpha.4
 
 ## 0.98.0-alpha.4 (2026-09-24)

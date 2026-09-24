@@ -26,6 +26,15 @@ export default {
         unlockPro: "{{n}} more points unlocks Pro — real-time web search and batch file analysis.",
         bestValue: "Best value",
         customAmountHint: "Principal CNY {{principalCny}}; payment fee about USD {{feeUsd}}; total USD {{totalUsd}}. FX is the configured checkout rate: CNY {{cnyPerUsd}} per USD. Tax and bank FX may be added at checkout.",
+        receipt: {
+          principal: "Principal",
+          fee: "Processing fee",
+          total: "Total",
+          cnyTotal: "Total ¥{{totalCny}} (includes 3.9% fee ¥{{feeCny}})",
+          usdTotal: "Principal ¥{{principalCny}} + fee ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "Fee includes a $0.50 fixed part — larger top-ups are more cost-effective.",
+        },
+        tierMinHint: "Card payment minimum is {{min}} points (includes $0.50 fixed fee)",
         waffoTrust:
           "Payments are processed by Waffo Pancake under PCI-DSS. Points are credited automatically once the payment is confirmed.",
         methodLabel: "Payment method",
@@ -45,6 +54,7 @@ export default {
         account: "Points go to your current account ({{username}})",
         accountWithBalance:
           "Points go to your current account ({{username}}) · balance {{balance}} points",
+        balanceBadge: "Balance: {{balance}} points",
         notLoggedIn: "not signed in",
         cryptoHint:
           "Official {{token}} on {{network}} only. Points are converted from the amount actually received: 1 {{token}} = {{rate}} points, minimum {{min}} points for automatic crediting{{confirmations}}. The address is bound to your account and can be reused.",
@@ -65,6 +75,29 @@ export default {
           failed: "Payment was not completed. Please try again.",
           cancel: "This payment was cancelled.",
         },
+        orderState: {
+          awaitingPayment:
+            "Checkout opened in a new window · this page will update once payment completes",
+          reopenCheckout: "Didn't open? Reopen checkout",
+          confirming: "Payment received — confirming your balance…",
+          credited: "+{{delta}} points credited · balance {{balance}}",
+          delayed:
+            "Payment confirmation is delayed — points usually arrive within 1 minute",
+          refreshBalance: "Refresh balance",
+          failedTitle: "Payment not completed",
+          retry: "Retry",
+          switchToManual: "Use manual payment instead (no fee)",
+          cancelTitle: "Payment cancelled",
+          contactSupport: "Contact support",
+          viewUsage: "View usage",
+        },
+        copyUsername: "Copy username",
+        copiedUsername: "Copied — paste it as the transfer note",
+        transferDone: "I've completed the transfer",
+        transferWaiting:
+          "Noted — usually credited in 1–30 min (may take longer on holidays). Balance updates automatically; no need to stay on this page.",
+        transferWaitingExpired: "Still not credited after 30 min?",
+        suggestAmount: "Suggest ¥{{amount}}",
         errors: {
           invalidAmount:
             "Enter a whole number between {{min}} and {{max}} points",
@@ -105,6 +138,15 @@ export default {
         unlockPro: "再充 {{n}} 积分即可解锁专业版：实时联网搜索、批量文件分析。",
         bestValue: "最划算",
         customAmountHint: "本金人民币 {{principalCny}}；支付手续费约 USD {{feeUsd}}；合计 USD {{totalUsd}}。汇率为结账配置汇率：1 USD = {{cnyPerUsd}} 元。税费和银行汇率可能在结账时另计。",
+        receipt: {
+          principal: "本金",
+          fee: "支付手续费",
+          total: "合计",
+          cnyTotal: "合计 ¥{{totalCny}}（含 3.9% 手续费 ¥{{feeCny}}）",
+          usdTotal: "本金 ¥{{principalCny}} + 手续费 ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "手续费含 $0.50 固定部分，充越多单笔越划算。",
+        },
+        tierMinHint: "卡支付最低 {{min}} 积分（含 $0.50 固定手续费）",
         waffoTrust:
           "支付由 Waffo Pancake 处理并符合 PCI-DSS 国际安全标准，回调确认后积分自动到账。",
         methodLabel: "支付方式",
@@ -124,6 +166,7 @@ export default {
         account: "积分将充入当前帐户（{{username}}）",
         accountWithBalance:
           "积分将充入当前帐户（{{username}}），当前余额 {{balance}} 积分",
+        balanceBadge: "余额 {{balance}} 积分",
         notLoggedIn: "未登录",
         cryptoHint:
           "只支持 {{network}} 网络官方 {{token}}，按实际到账金额折算：1 {{token}} = {{rate}} 积分，最低自动入账 {{min}} 积分{{confirmations}}。地址与你的账户绑定，可重复使用。",
@@ -142,6 +185,27 @@ export default {
           failed: "支付未完成，请重新发起支付。",
           cancel: "已取消本次支付。",
         },
+        orderState: {
+          awaitingPayment: "收银台已在新窗口打开 · 完成支付后此页会自动更新",
+          reopenCheckout: "没打开？点此重新打开",
+          confirming: "支付成功，正在确认到账…",
+          credited: "+{{delta}} 积分已到账，当前余额 {{balance}}",
+          delayed: "支付平台确认稍有延迟，积分一般 1 分钟内到账",
+          refreshBalance: "刷新余额",
+          failedTitle: "支付未完成",
+          retry: "重试",
+          switchToManual: "改用人工收款（无手续费）",
+          cancelTitle: "已取消本次支付",
+          contactSupport: "联系客服",
+          viewUsage: "查看使用统计",
+        },
+        copyUsername: "复制用户名",
+        copiedUsername: "已复制，请粘贴为转账备注",
+        transferDone: "我已完成转账",
+        transferWaiting:
+          "已记录，通常 1-30 分钟到账（节假日顺延），到账后余额自动更新，无需留在本页。",
+        transferWaitingExpired: "超过 30 分钟仍未到账？",
+        suggestAmount: "建议转账 ¥{{amount}}",
         errors: {
           invalidAmount: "请输入 {{min}}-{{max}} 之间的整数积分",
           loginRequired: "请先登录后再充值",
@@ -180,6 +244,15 @@ export default {
         unlockPro: "再儲值 {{n}} 積分即可解鎖專業版：即時聯網搜尋、批次檔案分析。",
         bestValue: "最划算",
         customAmountHint: "本金人民幣 {{principalCny}}；支付手續費約 USD {{feeUsd}}；合計 USD {{totalUsd}}。匯率為結帳配置匯率：1 USD = {{cnyPerUsd}} 元。稅費和銀行匯率可能在結帳時另計。",
+        receipt: {
+          principal: "本金",
+          fee: "支付手續費",
+          total: "合計",
+          cnyTotal: "合計 ¥{{totalCny}}（含 3.9% 手續費 ¥{{feeCny}}）",
+          usdTotal: "本金 ¥{{principalCny}} + 手續費 ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "手續費含 $0.50 固定部分，充越多單筆越划算。",
+        },
+        tierMinHint: "卡支付最低 {{min}} 積分（含 $0.50 固定手續費）",
         waffoTrust:
           "支付由 Waffo Pancake 處理並符合 PCI-DSS 國際安全標準，回呼確認後積分自動入帳。",
         methodLabel: "支付方式",
@@ -199,6 +272,7 @@ export default {
         account: "積分將存入目前帳戶（{{username}}）",
         accountWithBalance:
           "積分將存入目前帳戶（{{username}}），目前餘額 {{balance}} 積分",
+        balanceBadge: "餘額 {{balance}} 積分",
         notLoggedIn: "未登入",
         cryptoHint:
           "僅支援 {{network}} 網路官方 {{token}}，依實際到帳金額折算：1 {{token}} = {{rate}} 積分，最低自動入帳 {{min}} 積分{{confirmations}}。地址與你的帳戶綁定，可重複使用。",
@@ -217,6 +291,27 @@ export default {
           failed: "支付未完成，請重新發起支付。",
           cancel: "已取消本次支付。",
         },
+        orderState: {
+          awaitingPayment: "收銀台已在新視窗開啟 · 完成支付後此頁會自動更新",
+          reopenCheckout: "沒有開啟？點此重新開啟",
+          confirming: "支付成功，正在確認到帳…",
+          credited: "+{{delta}} 積分已到帳，目前餘額 {{balance}}",
+          delayed: "支付平台確認稍有延遲，積分一般 1 分鐘內到帳",
+          refreshBalance: "重新整理餘額",
+          failedTitle: "支付未完成",
+          retry: "重試",
+          switchToManual: "改用人工收款（免手續費）",
+          cancelTitle: "已取消本次支付",
+          contactSupport: "聯絡客服",
+          viewUsage: "查看使用統計",
+        },
+        copyUsername: "複製使用者名稱",
+        copiedUsername: "已複製，請貼上為轉帳備註",
+        transferDone: "我已完成轉帳",
+        transferWaiting:
+          "已記錄，通常 1-30 分鐘到帳（節假日順延），到帳後餘額自動更新，無需留在本頁。",
+        transferWaitingExpired: "超過 30 分鐘仍未到帳？",
+        suggestAmount: "建議轉帳 ¥{{amount}}",
         errors: {
           invalidAmount: "請輸入 {{min}}-{{max}} 之間的整數積分",
           loginRequired: "請先登入後再儲值",
@@ -255,6 +350,15 @@ export default {
         unlockPro: "あと {{n}} ポイントでプロ版（リアルタイム検索・一括ファイル分析）が解放されます。",
         bestValue: "最もお得",
         customAmountHint: "元本は人民元 {{principalCny}}、決済手数料は約 USD {{feeUsd}}、合計は USD {{totalUsd}} です。為替は設定済みの決済換算レート（1 USD = {{cnyPerUsd}} 元）です。税・銀行の為替差は決済時に加わる場合があります。",
+        receipt: {
+          principal: "元本",
+          fee: "決済手数料",
+          total: "合計",
+          cnyTotal: "合計 ¥{{totalCny}}（3.9% 手数料 ¥{{feeCny}} 込み）",
+          usdTotal: "元本 ¥{{principalCny}} + 手数料 ≈${{feeUsd}} = ${{totalUsd}}",
+          fixedFeeNote: "手数料には $0.50 の固定分が含まれます。まとめて入金するほどお得です。",
+        },
+        tierMinHint: "カード決済は最低 {{min}} ポイントから（$0.50 の固定手数料込み）",
         waffoTrust:
           "決済は Waffo Pancake が PCI-DSS 準拠で処理します。確認後、ポイントは自動的に反映されます。",
         methodLabel: "決済方法",
@@ -274,6 +378,7 @@ export default {
         account: "ポイントは現在のアカウント（{{username}}）に反映されます",
         accountWithBalance:
           "ポイントは現在のアカウント（{{username}}）に反映されます・残高 {{balance}} ポイント",
+        balanceBadge: "残高 {{balance}} ポイント",
         notLoggedIn: "未ログイン",
         cryptoHint:
           "{{network}} ネットワークの公式 {{token}} のみ対応。実際の着金額から換算されます：1 {{token}} = {{rate}} ポイント、自動反映は最低 {{min}} ポイントから{{confirmations}}。アドレスはアカウントに紐づき、繰り返し利用できます。",
@@ -294,6 +399,27 @@ export default {
           failed: "支払いが完了しませんでした。もう一度お試しください。",
           cancel: "今回の支払いはキャンセルされました。",
         },
+        orderState: {
+          awaitingPayment: "決済画面を新しいウィンドウで開きました · 完了後このページは自動で更新されます",
+          reopenCheckout: "開かない場合はこちらをクリック",
+          confirming: "支払い成功 — 入金を確認しています…",
+          credited: "+{{delta}} ポイントが反映されました · 残高 {{balance}}",
+          delayed: "決済確認に少し遅れが出ています — 通常 1 分以内に反映されます",
+          refreshBalance: "残高を更新",
+          failedTitle: "支払いが完了しませんでした",
+          retry: "再試行",
+          switchToManual: "手動入金に切り替える（手数料無料）",
+          cancelTitle: "支払いをキャンセルしました",
+          contactSupport: "サポートへ連絡",
+          viewUsage: "使用状況を見る",
+        },
+        copyUsername: "ユーザー名をコピー",
+        copiedUsername: "コピーしました — 送金メモに貼り付けてください",
+        transferDone: "送金を完了しました",
+        transferWaiting:
+          "記録しました。通常 1〜30 分で反映されます（休日は遅れる場合あり）。残高は自動更新されるので、このページを開いたままにする必要はありません。",
+        transferWaitingExpired: "30 分経っても反映されませんか？",
+        suggestAmount: "¥{{amount}} の送金を推奨",
         errors: {
           invalidAmount: "{{min}}〜{{max}} の整数ポイントを入力してください",
           loginRequired: "チャージの前にログインしてください",
