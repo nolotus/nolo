@@ -1,15 +1,30 @@
 
-## 0.90.0-alpha.1
+## 0.78.2
 
-## 0.90.0-alpha.1 (2026-09-24)
+## 0.78.2 (2026-09-24)
+
+### Bug Fixes
+
+* **release:** audit main in maintenance and realign alpha version files ([0f41848](https://github.com/nolotus/bun-nolo/commit/0f41848e49d34ba723457678fbc6ecafbbaffda7))
+
+
+## 0.78.1
+
+## 0.78.1 (2026-09-24)
+
+### Bug Fixes
+
+* **cli:** keep background runs provably alive before their first loop event ([fcfcdd1](https://github.com/nolotus/bun-nolo/commit/fcfcdd1ad792b7537e3e8f11e98c6d887aa1df79))
+* **desktop:** ship a real Inno installer as the stable Windows download ([776bf66](https://github.com/nolotus/bun-nolo/commit/776bf663940c280f1cdce5971c19b94803727dc5))
+
+
+## 0.78.0
+
+## 0.78.0 (2026-09-23)
 
 ### Features
 
 * **agent-runtime:** add execution observation collector ([3697221](https://github.com/nolotus/bun-nolo/commit/3697221e11fa19debc0a178a0e37f2ed997602cf))
-* **agent:** add cognitive delegation value policy ([51fcb59](https://github.com/nolotus/bun-nolo/commit/51fcb5936be4cbeab7008b7a81397752288a90ae))
-* **agent:** add shared human-centered working philosophy ([7bf20f8](https://github.com/nolotus/bun-nolo/commit/7bf20f87250bfb88d00737b90e82ec179f3a5066))
-* **agent:** support platform-hosted MiMo models and switch builtin dialog LLM ([8438721](https://github.com/nolotus/bun-nolo/commit/8438721398668321a67d11090552371f150bc73c))
-* **app:** surface cost routing on the landing page and localize the OG card ([09c0207](https://github.com/nolotus/bun-nolo/commit/09c0207d8d3cf8cfa8fffb2b43888791bd1fa82e))
 * **cli:** ask once on login whether to sync OAuth credential, remember per provider ([b67e71e](https://github.com/nolotus/bun-nolo/commit/b67e71e982166674faf75966184430f8dd9afeb1))
 * **evolution:** add all-run baseline sink ([59660d5](https://github.com/nolotus/bun-nolo/commit/59660d5a63a3b55bcf913b6b8bfbfc510b5c9c6f))
 * **evolution:** add all-run baseline writer ([5f6bef1](https://github.com/nolotus/bun-nolo/commit/5f6bef1bf996a52789560b178f676283d26341da))
@@ -46,34 +61,16 @@
 * **evolution:** harden tool identity and triage evidence ([ab308e1](https://github.com/nolotus/bun-nolo/commit/ab308e1ed593bd5e44161ed0f4e6b7006c907efd))
 * **evolution:** merge observation, triage, and investigation queue into alpha ([0914bc5](https://github.com/nolotus/bun-nolo/commit/0914bc5285cef4510d1ed8253e49bf10283b60e8))
 * **evolution:** persist compact interesting candidates ([dff36c2](https://github.com/nolotus/bun-nolo/commit/dff36c2a7a16419e45ebc6f135ae7188a5c5db83))
-* **home:** add human-centered Nolo brand landing ([b929f33](https://github.com/nolotus/bun-nolo/commit/b929f33f0990939485787717b65e424261423fc4))
-* **home:** end the homepage on human agency after open proof ([a15694e](https://github.com/nolotus/bun-nolo/commit/a15694eb70295df6d87239632fce76afba53e47d)), closes [#64](https://github.com/nolotus/bun-nolo/issues/64)
-* **home:** lead with Nolo human-centered brand story ([9478816](https://github.com/nolotus/bun-nolo/commit/9478816e8743bc3315bd478d7862059434ae0465))
-* **home:** put product proof directly under brand hero ([2584353](https://github.com/nolotus/bun-nolo/commit/2584353c88fc7aa1610f08aa14a33488a97282a7)), closes [#64](https://github.com/nolotus/bun-nolo/issues/64)
-* **memory:** add best-effort vNext lazy promotion ([8e25b2f](https://github.com/nolotus/bun-nolo/commit/8e25b2f1be125f9f14c189b6989d6d001dc6f2e5))
-* **memory:** add best-effort vNext lazy promotion ([e1671a8](https://github.com/nolotus/bun-nolo/commit/e1671a8d9beec0c0929206a06ec92a5ad3d46550))
 * **pricing:** expand FAQ, add tier bestFor tags and header trust badges ([e23bf06](https://github.com/nolotus/bun-nolo/commit/e23bf06484dde5da5f67dd60eb09865706299a84))
 * **providers:** add Opus 5.5 and GPT-6 Sol/Luna selectors to devin-oauth catalog ([5f81a48](https://github.com/nolotus/bun-nolo/commit/5f81a483460593655df1ecf7051bafeafbfb27b9))
-* **render:** rebuild the site footer as a layered riverbank camping scene ([1e4e648](https://github.com/nolotus/bun-nolo/commit/1e4e648300bfaf8a766531ecaa2a56af89b98729)), closes [#8482AD](https://github.com/nolotus/bun-nolo/issues/8482AD) [#d5eed2](https://github.com/nolotus/bun-nolo/issues/d5eed2) [#a5cba5](https://github.com/nolotus/bun-nolo/issues/a5cba5)
-* **skills:** make recommended skills actionable discovery ([d117215](https://github.com/nolotus/bun-nolo/commit/d1172156b3ba25e8d6a39dece4784c79c0e3d257))
 
 ### Bug Fixes
 
-* **agent:** classify owner subscription channels ([db7f497](https://github.com/nolotus/bun-nolo/commit/db7f497d5925cd0096615441195099ea8d205572))
-* **agent:** correct devin context windows to the live-catalog values ([8282ebe](https://github.com/nolotus/bun-nolo/commit/8282ebe83663280552125aabcbaf01e785eb66ed)), closes [#18](https://github.com/nolotus/bun-nolo/issues/18) [#7](https://github.com/nolotus/bun-nolo/issues/7)
-* **agent:** decode Devin usage tokens and correct SWE context window ([a33694c](https://github.com/nolotus/bun-nolo/commit/a33694c142fd9c55cb3f3cbda073a6ed1322b687)), closes [#7](https://github.com/nolotus/bun-nolo/issues/7) [#7](https://github.com/nolotus/bun-nolo/issues/7)
-* **agent:** hoist delegation-value policy ahead of tiering, add executor escalation gate ([c17eeec](https://github.com/nolotus/bun-nolo/commit/c17eeec9d3995c9e7ead72f7a83e013df4e228a0)), closes [#63](https://github.com/nolotus/bun-nolo/issues/63)
-* **agent:** isolate pure devin oauth predicate from node builtins ([c2fc3df](https://github.com/nolotus/bun-nolo/commit/c2fc3dfe67579d8b88186b019dba9f7066c312b0))
-* **agent:** make cognitive delegation override explicit ([ebbfcb6](https://github.com/nolotus/bun-nolo/commit/ebbfcb68f057479d5a07d8aa3679365fed4a768f))
-* **agent:** preserve shared agent keys ([c36a945](https://github.com/nolotus/bun-nolo/commit/c36a9455b0311794fd56f5dec966fae0b97ce34e))
-* **agent:** sync devin registry with the live catalog and drop dead selectors ([9ab3f2a](https://github.com/nolotus/bun-nolo/commit/9ab3f2a9ca5313ae3435db8dd10e02e32f68f2db))
 * **chat:** align settled message typography with streaming state ([324d009](https://github.com/nolotus/bun-nolo/commit/324d00964ce894caeed741e9a81ff52c448cf270))
 * **cli:** classify upstream rate-limit/quota errors without HTTP status ([453c0f5](https://github.com/nolotus/bun-nolo/commit/453c0f57c1135ecf59493cd9d43826b439727faf))
 * **cli:** Ctrl+C while generating copies selection instead of aborting ([ccfdeac](https://github.com/nolotus/bun-nolo/commit/ccfdeacd7d4ce52db3d894b940e9a3748623402f))
-* **cli:** keep background runs provably alive before their first loop event ([fcfcdd1](https://github.com/nolotus/bun-nolo/commit/fcfcdd1ad792b7537e3e8f11e98c6d887aa1df79))
 * **cli:** stop /switch hanging on "loading agents" ([00d0c78](https://github.com/nolotus/bun-nolo/commit/00d0c78996b777cce26b737088d894a29b6558e7))
 * **cli:** treat undici `terminated` as transient; expose shared favorite agentKey ([5b68ed1](https://github.com/nolotus/bun-nolo/commit/5b68ed1089904a07855db84c18575133e3894aa9))
-* **desktop:** ship a real Inno installer as the stable Windows download ([776bf66](https://github.com/nolotus/bun-nolo/commit/776bf663940c280f1cdce5971c19b94803727dc5))
 * **evolution:** bound materialized trajectory to selected task ([0579918](https://github.com/nolotus/bun-nolo/commit/0579918a9f4eda6f3f9d1bc47aa716c4872096cc))
 * **evolution:** correct baseline import path + add writer tests ([e009437](https://github.com/nolotus/bun-nolo/commit/e00943705c4c79fcf50adea868d4f8fcab6ed5f6))
 * **evolution:** dedupe optional distribution calls + float-safe p95 assert ([52a53d4](https://github.com/nolotus/bun-nolo/commit/52a53d45cbfe5241c0df68600d0a0ae9416cb86b))
@@ -83,18 +80,8 @@
 * **evolution:** merge trace and observation tool evidence ([06d06ff](https://github.com/nolotus/bun-nolo/commit/06d06ff8f85a31661bbd4af106d48a4b4c73508d))
 * **evolution:** prefer runtime identity in run snapshot precedence ([1d0aad5](https://github.com/nolotus/bun-nolo/commit/1d0aad5ba9af6c17a3e734bb07761058125d8a39))
 * **evolution:** surface hard run failures as signals ([edfaea3](https://github.com/nolotus/bun-nolo/commit/edfaea343d9f2d9f2bb84e71cb530ac8166651c8))
-* **home:** carry orchestration motion tokens with brand host ([9c2bcf5](https://github.com/nolotus/bun-nolo/commit/9c2bcf52f216f8234bf1524ed219e3d1812d60de))
-* **home:** hide legacy hero after brand intro ([f5dbcb8](https://github.com/nolotus/bun-nolo/commit/f5dbcb84c0153228edc4b08a5fda4acb4e470c5b))
-* **home:** land brand proof page without i18n hacks or duplicate mounts ([fd17d82](https://github.com/nolotus/bun-nolo/commit/fd17d82b0ded95145a956e742ba3e0f99ab66fef))
-* **home:** restore orchestration svg theme variables ([cacafe7](https://github.com/nolotus/bun-nolo/commit/cacafe7659457c107371e61b1e47f182c3f5c95e))
-* **i18n:** add open auditable homepage translations ([eca5af3](https://github.com/nolotus/bun-nolo/commit/eca5af310f485e5da1d6bc0820afc8b01af20fc6))
-* **i18n:** register open auditable translations ([3f7fc02](https://github.com/nolotus/bun-nolo/commit/3f7fc02f933429b888f982c8b35b82046abb479c))
-* **memory:** harden vNext lazy promotion ([d52429e](https://github.com/nolotus/bun-nolo/commit/d52429efc956974faa7bd5f8241250a2924eddfd))
-* **memory:** harden vNext lazy promotion ([93003f6](https://github.com/nolotus/bun-nolo/commit/93003f6c064eb6a2654c43e53e768519c8392c82))
 * **prompt:** rewrite agent-run wait rules into three explicit environment cases ([287e4fa](https://github.com/nolotus/bun-nolo/commit/287e4fa4f42f9278de23f073fdd3d5347f5b96da))
 * **prompt:** rewrite agent-run wait rules into three explicit environment cases ([8cd3f6f](https://github.com/nolotus/bun-nolo/commit/8cd3f6ff1cfdc13194132939c6a3c622e4324bc8))
-* **release:** audit main in maintenance and realign alpha version files ([0f41848](https://github.com/nolotus/bun-nolo/commit/0f41848e49d34ba723457678fbc6ecafbbaffda7))
-* **render:** correct footer river geometry ([e4e32fb](https://github.com/nolotus/bun-nolo/commit/e4e32fba76446f5091a6f99c9bcc039683c6d770))
 
 
 ## 0.77.0
