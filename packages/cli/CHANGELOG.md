@@ -1,4 +1,14 @@
 
+## 0.101.0-alpha.1
+
+## 0.101.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **admin:** group the life sidebar, add breadcrumbs and localize the admin area ([2dac7f4](https://github.com/nolotus/bun-nolo/commit/2dac7f4b36af8fa7b0a92c88d1fa5dfbd7abea87))
+* **recharge:** disclose the refund policy on the checkout page ([2e820bb](https://github.com/nolotus/bun-nolo/commit/2e820bb5093a188c776170ae3a59ad9c6e5be0a0))
+
+
 ## 0.100.0-alpha.1
 
 ## 0.100.0-alpha.1 (2026-09-24)

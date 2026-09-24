@@ -100,7 +100,7 @@ export default {
           },
           {
             q: "Can I get a refund after recharging?",
-            a: "Yes, but only for points you purchased yourself; bonus or gifted points are non-refundable. Refunds cover the unused portion of purchased points—consumed and gifted points are not returned."
+            a: "Yes, but only for points you purchased yourself; bonus or gifted points are non-refundable. Refunds cover the unused portion of purchased points—consumed and gifted points are not returned. Digital goods: consumed credits are not refundable, and any refund is net of the channel fee already incurred plus a $1.00 refund processing fee."
           },
           {
             q: `Does Pro expire if my balance drops below ${ADVANCED_FEATURE_MIN_BALANCE} points?`,
@@ -214,7 +214,7 @@ export default {
           },
           {
             q: "充值后能退款吗？",
-            a: "支持，但仅限你自己充值的积分；活动或注册赠送的积分不可退。退款按充值积分的未消耗部分返还，已消耗与赠送部分不退。"
+            a: "支持，但仅限你自己充值的积分；活动或注册赠送的积分不可退。退款按充值积分的未消耗部分返还，已消耗与赠送部分不退。数字商品：交付后已消耗部分不支持退款；可退款部分需扣除已发生的通道手续费与 $1.00 退款处理费。"
           },
           {
             q: `余额降到 ${ADVANCED_FEATURE_MIN_BALANCE} 积分以下，专业版会失效吗？`,
@@ -327,7 +327,7 @@ export default {
           },
           {
             q: "充值後能退款嗎？",
-            a: "支援，但僅限您自行充值的積分；活動或註冊贈送的積分不可退。退款按充值積分的未消耗部分返還，已消耗與贈送部分不退。"
+            a: "支援，但僅限您自行充值的積分；活動或註冊贈送的積分不可退。退款按充值積分的未消耗部分返還，已消耗與贈送部分不退。數位商品：交付後已消耗部分不支援退款；可退款部分需扣除已發生的通道手續費與 $1.00 退款處理費。"
           },
           {
             q: `餘額降到 ${ADVANCED_FEATURE_MIN_BALANCE} 積分以下，專業版會失效嗎？`,
@@ -440,7 +440,7 @@ export default {
           },
           {
             q: "チャージ後に返金できますか？",
-            a: "はい。ただしご自身でチャージしたポイントのみ対象で、キャンペーンや登録時に付与されたポイントは返金できません。返金はチャージ分の未使用部分のみで、消費済み・付与分は含まれません。"
+            a: "はい。ただしご自身でチャージしたポイントのみ対象で、キャンペーンや登録時に付与されたポイントは返金できません。返金はチャージ分の未使用部分のみで、消費済み・付与分は含まれません。デジタル商品：納品後に消費された分は返金できません。返金対象分は、既に発生した決済手数料と $1.00 の返金処理手数料を差し引いた額となります。"
           },
           {
             q: `残高が${ADVANCED_FEATURE_MIN_BALANCE}ポイントを下回ると Pro は失効しますか？`,

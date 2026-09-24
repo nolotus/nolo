@@ -10,6 +10,7 @@ import seoLocale from "./translations/seo.locale";
 import appBuilderLocale from "./translations/appBuilder.locale";
 import pricingLocale from "./translations/pricing.locale";
 import rechargeLocale from "./translations/recharge.locale";
+import adminLocale from "./translations/admin.locale";
 import privacyLocale from "./translations/privacy.locale";
 import termsLocale from "./translations/terms.locale";
 import aupLocale from "./translations/aup.locale";
@@ -25,6 +26,7 @@ export const resources = {
       ...appBuilderLocale[Language.EN].translation,
       ...pricingLocale[Language.EN].translation,
       ...rechargeLocale[Language.EN].translation,
+      ...adminLocale[Language.EN].translation,
       ...privacyLocale[Language.EN].translation,
       ...termsLocale[Language.EN].translation,
       ...aupLocale[Language.EN].translation,
@@ -44,6 +46,7 @@ export const resources = {
       ...appBuilderLocale[Language.ZH_CN].translation,
       ...pricingLocale[Language.ZH_CN].translation,
       ...rechargeLocale[Language.ZH_CN].translation,
+      ...adminLocale[Language.ZH_CN].translation,
       ...privacyLocale[Language.ZH_CN].translation,
       ...termsLocale[Language.ZH_CN].translation,
       ...aupLocale[Language.ZH_CN].translation,
@@ -63,6 +66,7 @@ export const resources = {
       ...appBuilderLocale[Language.ZH_HANT].translation,
       ...pricingLocale[Language.ZH_HANT].translation,
       ...rechargeLocale[Language.ZH_HANT].translation,
+      ...adminLocale[Language.ZH_HANT].translation,
       ...privacyLocale[Language.ZH_HANT].translation,
       ...termsLocale[Language.ZH_HANT].translation,
       ...aupLocale[Language.ZH_HANT].translation,
@@ -82,6 +86,7 @@ export const resources = {
       ...appBuilderLocale[Language.JA].translation,
       ...pricingLocale[Language.JA].translation,
       ...rechargeLocale[Language.JA].translation,
+      ...adminLocale[Language.JA].translation,
       ...privacyLocale[Language.JA].translation,
       ...termsLocale[Language.JA].translation,
       ...aupLocale[Language.JA].translation,
@@ -101,6 +106,7 @@ export const resources = {
       ...((appBuilderLocale as any)[Language.KO]?.translation ?? appBuilderLocale[Language.EN].translation),
       ...((pricingLocale as any)[Language.KO]?.translation ?? pricingLocale[Language.EN].translation),
       ...((rechargeLocale as any)[Language.KO]?.translation ?? rechargeLocale[Language.EN].translation),
+      ...((adminLocale as any)[Language.KO]?.translation ?? adminLocale[Language.EN].translation),
       ...((privacyLocale as any)[Language.KO]?.translation ?? privacyLocale[Language.EN].translation),
       ...((termsLocale as any)[Language.KO]?.translation ?? termsLocale[Language.EN].translation),
       ...((aupLocale as any)[Language.KO]?.translation ?? aupLocale[Language.EN].translation),

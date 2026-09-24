@@ -37,6 +37,10 @@ export default {
         tierMinHint: "Card payment minimum is {{min}} points (includes $0.50 fixed fee)",
         waffoTrust:
           "Payments are processed by Waffo Pancake under PCI-DSS. Points are credited automatically once the payment is confirmed.",
+        refundNotice:
+          "Digital goods: consumed credits are not refundable, and any refund is net of the channel fee already incurred plus a $1.00 refund processing fee.",
+        transferRefundNotice:
+          "Manual top-ups can be fully refunded while the credits remain unused.",
         methodLabel: "Payment method",
         methods: {
           waffo: { name: "Global payment", desc: "Visa / MasterCard / Apple Pay" },
@@ -149,6 +153,9 @@ export default {
         tierMinHint: "卡支付最低 {{min}} 积分（含 $0.50 固定手续费）",
         waffoTrust:
           "支付由 Waffo Pancake 处理并符合 PCI-DSS 国际安全标准，回调确认后积分自动到账。",
+        refundNotice:
+          "数字商品：交付后已消耗部分不支持退款；可退款部分需扣除已发生的通道手续费与 $1.00 退款处理费。",
+        transferRefundNotice: "人工充值在积分未消耗时可全额退款。",
         methodLabel: "支付方式",
         methods: {
           waffo: { name: "全球支付", desc: "Visa / MasterCard / Apple Pay" },
@@ -255,6 +262,9 @@ export default {
         tierMinHint: "卡支付最低 {{min}} 積分（含 $0.50 固定手續費）",
         waffoTrust:
           "支付由 Waffo Pancake 處理並符合 PCI-DSS 國際安全標準，回呼確認後積分自動入帳。",
+        refundNotice:
+          "數位商品：交付後已消耗部分不支援退款；可退款部分需扣除已發生的通道手續費與 $1.00 退款處理費。",
+        transferRefundNotice: "人工儲值在積分未消耗時可全額退款。",
         methodLabel: "支付方式",
         methods: {
           waffo: { name: "全球支付", desc: "Visa / MasterCard / Apple Pay" },
@@ -361,6 +371,10 @@ export default {
         tierMinHint: "カード決済は最低 {{min}} ポイントから（$0.50 の固定手数料込み）",
         waffoTrust:
           "決済は Waffo Pancake が PCI-DSS 準拠で処理します。確認後、ポイントは自動的に反映されます。",
+        refundNotice:
+          "デジタル商品：納品後に消費された分は返金できません。返金対象分は、既に発生した決済手数料と $1.00 の返金処理手数料を差し引いた額となります。",
+        transferRefundNotice:
+          "手動入金は、ポイントが未使用の間は全額返金できます。",
         methodLabel: "決済方法",
         methods: {
           waffo: { name: "グローバル決済", desc: "Visa / MasterCard / Apple Pay" },
