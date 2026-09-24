@@ -53,12 +53,20 @@ export function waitForRunTerminal<S, T = unknown>(
   };
   const loop = Effect.gen(function* () {
     token = args.claim?.acquire() ?? null;
+    // 真实时钟兜底：Effect.timeoutOption 的超时是一个宏任务定时器，注入的
+    // sleep stub 若同步 resolve（测试里常见），while 每轮只跑微任务，会把
+    // 宏任务饿死 → timeoutOption 永远不调 → 98% CPU 死循环（worker 收尾时
+    // 表现为套件冻结）。循环内自查 deadline 不依赖宏任务调度，保证必收敛。
+    const deadline = Date.now() + args.timeoutMs;
     while (true) {
       const state = yield* readEffect(args.read);
       lastState = state;
       if (args.isTerminal(state)) {
         if (args.claim) { args.claim.commit(token); committed = true; }
         return { kind: "terminal", state } as const;
+      }
+      if (Date.now() >= deadline) {
+        return { kind: "timeout", waitedMs: args.timeoutMs, lastState } as const;
       }
       // v4 raceFirst 类型推断让 sleep 分支的 void 占主导，但 abort 桥胜出时
       // 运行时值就是 "aborted"（见 abort 用例）——这里收紧为真实联合类型。

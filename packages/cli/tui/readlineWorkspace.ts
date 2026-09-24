@@ -2465,6 +2465,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 标记 session 结束，让迟到的异步回调（如更新检查）不再触发渲染写入
     // 已关闭的 stdout/pipe。
     sessionEnded = true;
+    // 与 interactive 的 finish() 对齐：停靠区/轮询器/活动行的 setInterval 都是
+    // ref'd 计时器且非交互路径不走 finish()。缺了这组 dispose，turn 里
+    // beginHold()/updateAgentRun() 起的轮询 interval 会一直挂在事件循环上，
+    // 让 bun test worker 在文件收尾阶段 98% CPU 空转不退出。
+    runRegistryPoller.dispose();
+    runCompletionWatcher.dispose();
+    activityIndicator.dispose();
     rl.close();
   }
 } finally {

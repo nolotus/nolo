@@ -58,6 +58,19 @@ export function formatCompactionSummaryLine(
     const reason = event.detail ? `：${event.detail}` : "";
     return `${STYLE.dim}自动上下文压缩失败${reason}，本轮以未压缩上下文继续。若反复出现可手动 /compact。${STYLE.reset}\n`;
   }
+  // 跳过事件：只渲染「保护缺口」类原因（adapter 缺方法 / 摘要读取失败），
+  // below-trigger 等常规未触发不进 TUI（留在观测事件流里供排查）。
+  if (event.skipped) {
+    if (
+      event.skipReason === "adapter-missing-summary-methods" ||
+      event.skipReason === "load-summary-failed"
+    ) {
+      return `${STYLE.dim}自动上下文压缩不可用（${event.skipReason}），本轮不压缩。${STYLE.reset}\n`;
+    }
+    return "";
+  }
+  // 复用已持久化摘要的投影是每轮例行行为，不渲染；只渲染「新生成摘要」。
+  if (!event.summaryGenerated) return "";
   let detail = "生成历史摘要";
   const saved =
     typeof event.savedTokens === "number"
@@ -323,11 +336,20 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       markThinkingDelta(chunk);
     },
     handleToolEvent,
-    /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。 */
+    /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。
+     *  一轮内可能来多条（轮开始 + 每个 round），按显著性保留最高者：
+     *  失败 > 新生成摘要 > 投影复用 > 跳过，避免末尾的例行跳过事件
+     *  覆盖掉中途真正发生的压缩。 */
     recordCompaction(
       event: Extract<AgentExecutionObservationEvent, { kind: "compaction" }>,
     ) {
-      compactionEvent = event;
+      const significance = (
+        e: Extract<AgentExecutionObservationEvent, { kind: "compaction" }>,
+      ): number =>
+        e.failed ? 4 : e.summaryGenerated ? 3 : e.compressed ? 2 : 1;
+      if (!compactionEvent || significance(event) >= significance(compactionEvent)) {
+        compactionEvent = event;
+      }
     },
     showWorking(label?: string) {
       const activeLabel = label ?? workingLabel;

@@ -1631,37 +1631,71 @@ export async function runLocalAgentTurn(
   // 否则只出现在 provider 账单上、我们自己的 token 记账看不到。
   let compactionUsage: Record<string, unknown> | undefined;
 
-  // 压缩观测事件：compressed / summaryGenerated / 失败 任一发生才发射；
-  // 无压缩不发射。失败也要发射——「该压没压」必须用户可见。
+  // 压缩观测事件：压缩 / 失败 / 跳过 都发射——「为什么没压缩」必须与
+  // 「压缩了什么」同样可见（跳过原因 + 估算 vs 预算 + 真实占用快照）。
+  // 渲染侧按显著性取舍（失败 > 生成摘要 > 投影复用 > 跳过），事件流全量保留。
   // 轮开始与轮内 round 之间共用同一发射口（emitLoopEvent 本身已 fail-open）。
+  //
+  // 跳过事件的发射门控（降噪）：例行跳过不进事件流——
+  // - no-dialog-id / empty-history / no-pending / below-min-compress-count：
+  //   结构性常态（首轮已有轮内 ephemeral 兜底，不再是保护缺口）；
+  // - below-trigger 且估算 < 50% 历史预算：离线还远，纯噪音。
+  // 发射的是：保护缺口（adapter 缺方法 / 摘要读取失败，任何规模）与
+  // 「接近预算线」的 below-trigger（估算 ≥ 50% 预算——正是排查
+  // 「为什么没压缩」需要的那一段轨迹）。
   const emitCompactionObservation = (
     compacted: Awaited<ReturnType<typeof maybeAutoCompactLocalHistory>>,
   ) => {
-    if (
-      compacted.compressed ||
-      compacted.summaryGenerated ||
-      compacted.failureMessage
-    ) {
-      emitLoopEvent(observationBoundary, {
-        kind: "compaction",
-        atMs: Date.now(),
-        reason: compacted.reason ?? "context_budget",
-        summaryGenerated: compacted.summaryGenerated,
-        compressed: compacted.compressed,
-        ...(compacted.failureMessage
-          ? { failed: true, detail: compacted.failureMessage }
-          : {}),
-        ...(compacted.beforeTokens !== undefined
-          ? { beforeTokens: compacted.beforeTokens }
-          : {}),
-        ...(compacted.afterTokens !== undefined
-          ? { afterTokens: compacted.afterTokens }
-          : {}),
-        ...(compacted.savedTokens !== undefined
-          ? { savedTokens: compacted.savedTokens }
-          : {}),
-      });
+    const decision = compacted.decision;
+    if (decision?.outcome === "skipped") {
+      const isProtectionGap =
+        decision.skipReason === "adapter-missing-summary-methods" ||
+        decision.skipReason === "load-summary-failed";
+      const approachingBudget =
+        decision.skipReason === "below-trigger" &&
+        typeof decision.estimatedTokens === "number" &&
+        typeof decision.historyBudget === "number" &&
+        decision.historyBudget > 0 &&
+        decision.estimatedTokens >= decision.historyBudget * 0.5;
+      if (!isProtectionGap && !approachingBudget) return;
     }
+    emitLoopEvent(observationBoundary, {
+      kind: "compaction",
+      atMs: Date.now(),
+      ...(compacted.reason ? { reason: compacted.reason } : {}),
+      summaryGenerated: compacted.summaryGenerated,
+      compressed: compacted.compressed,
+      ...(compacted.failureMessage
+        ? { failed: true, detail: compacted.failureMessage }
+        : {}),
+      ...(decision?.outcome === "skipped"
+        ? { skipped: true, skipReason: decision.skipReason }
+        : {}),
+      ...(decision && "trigger" in decision && decision.trigger
+        ? { trigger: decision.trigger }
+        : {}),
+      ...(decision && "estimatedTokens" in decision && decision.estimatedTokens !== undefined
+        ? { estimatedTokens: decision.estimatedTokens }
+        : {}),
+      ...(decision && "historyBudget" in decision && decision.historyBudget !== undefined
+        ? { historyBudget: decision.historyBudget }
+        : {}),
+      ...(decision && "realUsageRatio" in decision && decision.realUsageRatio !== undefined
+        ? { realUsageRatio: decision.realUsageRatio }
+        : {}),
+      ...(decision && "triggerRatio" in decision && decision.triggerRatio !== undefined
+        ? { triggerRatio: decision.triggerRatio }
+        : {}),
+      ...(compacted.beforeTokens !== undefined
+        ? { beforeTokens: compacted.beforeTokens }
+        : {}),
+      ...(compacted.afterTokens !== undefined
+        ? { afterTokens: compacted.afterTokens }
+        : {}),
+      ...(compacted.savedTokens !== undefined
+        ? { savedTokens: compacted.savedTokens }
+        : {}),
+    });
   };
 
   try {
@@ -1790,17 +1824,52 @@ export async function runLocalAgentTurn(
   // （canonical 坐标）跑压缩管线，持久化新摘要/锚点，然后把发送视图换成
   // 投影。rawTurnMessages 不参与替换——持久化始终落原始消息，与锚点坐标系
   // 天然对齐。失败 fail-open（仅警告 + 观测事件），绝不带走本轮。
+  // 轮内压缩的摘要持久化目标。
+  //
+  // 断点修复 1（首轮零保护窗口）：新对话首轮 dialogId 尚未分配（saveTurn
+  // 在循环结束后才创建记录），旧实现 `if (!continueDialogId) return;` 让
+  // 整条压缩管线在最长、最容易灌水失控的首轮完全缺位。现在用 turn 级
+  // 内存摘要存储包装 adapter，跑同一条压缩管线：摘要只活在本轮内、不落盘，
+  // 本轮 prompt 有界；下一轮拿到真 dialogId 后由轮开始检查重新生成并持久化。
+  // 代价仅是首轮可能多一次摘要调用，远低于首轮上下文失控的代价。
+  let ephemeralSummary: Awaited<
+    ReturnType<NonNullable<AgentRuntimeHostAdapter["loadDialogSummary"]>>
+  > = null;
+  const ephemeralDialogId = `ephemeral-${crypto.randomUUID()}`;
+  const compactionAdapter: AgentRuntimeHostAdapter = input.continueDialogId
+    ? input.adapter
+    : {
+        ...input.adapter,
+        loadDialogSummary: async () => ephemeralSummary,
+        saveDialogSummary: async (summaryInput) => {
+          ephemeralSummary = summaryInput;
+        },
+      };
+  const compactionDialogId = input.continueDialogId ?? ephemeralDialogId;
+
   const maybeCompactInLoop = async (): Promise<void> => {
-    if (!input.continueDialogId) return;
-    if (!contextUsage) return;
-    const inputTokens = normalizeUsage(contextUsage as any).input_tokens;
-    if (!inputTokens || inputTokens <= 0) return;
-    const ratio = Math.min(1, inputTokens / contextWindow);
-    if (ratio < compressionTriggerRatio) return;
+    // 断点修复 2（遥测缺失即零保护）：旧实现 `if (!contextUsage) return;`
+    // 与 `if (ratio < trigger) return;` 让「provider 不报 usage」的会话在
+    // 轮内完全没有压缩检查——而估算兜底路径只在轮开始评估一次，轮内灌水
+    // （工具结果恰恰是大头）完全无界，直到 provider 400。现在每轮都让
+    // 决策层跑完整判定：真实占用在手时照旧按触发线强制；缺失时走估算兜底
+    // （与轮开始同一条路径、同一套阈值，语义不变）。
+    const inputTokens = contextUsage
+      ? normalizeUsage(contextUsage as any).input_tokens
+      : 0;
+    const ratio =
+      inputTokens > 0 ? Math.min(1, inputTokens / contextWindow) : undefined;
+    // 廉价门控：真实占用在手且距触发线还有余量（单轮最大灌水 = 工具输出上限
+    // + 回合开销，见 toolOutputCap；0.85 余量保证过线那一轮必然落到评估分支）
+    // 时跳过本轮评估——真实遥测是最准信号，健康路径不为估算付 O(历史) 成本。
+    // 遥测缺失（ratio undefined）必须每轮评估：估算兜底是唯一防线。
+    if (ratio !== undefined && ratio < compressionTriggerRatio * 0.85) {
+      return;
+    }
     try {
       const compacted = await maybeAutoCompactLocalHistory({
-        adapter: input.adapter,
-        dialogId: input.continueDialogId,
+        adapter: compactionAdapter,
+        dialogId: compactionDialogId,
         // canonical 坐标：store 全量历史 + 本轮消息的「持久化形态」
         // （applyPersistedTurnInput 会把首条 user 消息换成 paste 展开形态）。
         // 锚点与 sourceHash 都必须按持久化形态计算——否则下轮从 store
@@ -1816,7 +1885,7 @@ export async function runLocalAgentTurn(
         model: agentConfig.model,
         resolveProvider: resolveProviderOnce,
         contextWindow,
-        realContextUsagePercent: ratio,
+        ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
       });
       if (compacted.usage) {
         compactionUsage = addOutOfBandUsage(compactionUsage, compacted.usage);
@@ -2447,8 +2516,8 @@ export async function runLocalAgentTurn(
         break;
       }
       // 轮内压缩主防线：工具结果灌水之后、下一轮 provider 调用之前。
-      // contextUsage 是刚完成的 provider 调用的真实遥测（手里就有，
-      // 不依赖持久化/估算）。触发线与轮开始共用同一条（compressionTriggerRatio）。
+      // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——
+      // 「不报 usage 的上游」与「新对话首轮（无 dialogId）」都不再有零保护窗口。
       await maybeCompactInLoop();
       loopTimingMark("roundEnd", round);
       round += 1;

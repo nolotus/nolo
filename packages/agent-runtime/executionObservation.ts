@@ -109,8 +109,8 @@ export type AgentExecutionObservationEvent =
   | {
       kind: "compaction";
       atMs: number;
-      /** 与 CompactionMetrics.reason 口径一致。 */
-      reason: "context_budget" | "cold_resume" | "invalid_summary";
+      /** 与 CompactionMetrics.reason 口径一致。跳过事件无此字段。 */
+      reason?: "context_budget" | "cold_resume" | "invalid_summary";
       summaryGenerated: boolean;
       compressed: boolean;
       /** 压缩前估算 token（无对应估算口径则省略）。 */
@@ -127,4 +127,18 @@ export type AgentExecutionObservationEvent =
        */
       failed?: boolean;
       detail?: string;
+      /**
+       * 决策可观测：本次检查未压缩（skipped）时的结构化原因。
+       * 例如 no-dialog-id（新对话首轮零保护窗口）、
+       * adapter-missing-summary-methods、below-trigger（估算/真实占用均未过线）。
+       */
+      skipped?: boolean;
+      skipReason?: string;
+      /** 判定输入快照：估算 token / 历史预算 / 真实占用 / 触发线。 */
+      estimatedTokens?: number;
+      historyBudget?: number;
+      realUsageRatio?: number;
+      triggerRatio?: number;
+      /** 触发依据（compressed 时给出）。 */
+      trigger?: string;
     };

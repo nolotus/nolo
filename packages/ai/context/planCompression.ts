@@ -66,6 +66,32 @@ export interface CompressionPlan {
   newSummarizedBeforeId?: string;
   /** 本次决策相对于 allMsgs 的起点（summarizedBeforeId 之后第一条的下标）。 */
   startIndex: number;
+  /** 决策可观测诊断（可选）：不触发时说明「为什么没压」，触发时记录判定输入快照。 */
+  diagnostics?: CompressionPlanDiagnostics;
+}
+
+/**
+ * 压缩决策的诊断快照。纯观测字段，不参与判定。
+ * emptyReason 取值：
+ * - no-pending：锚点之后没有待处理消息；
+ * - not-triggered：真实占用与估算均未过线（附估算/预算/触发线）；
+ * - below-min-compress-count：已触发但可压缩条数 < MIN_COMPRESS_COUNT。
+ */
+export interface CompressionPlanDiagnostics {
+  pendingMsgCount: number;
+  /** 估算口径：已有摘要 + 待处理消息的总 token。 */
+  totalUsed: number;
+  historyBudget: number;
+  triggerRatio: number;
+  /** 归一化后的真实占用（0..1）；遥测缺失时为 undefined。 */
+  realUsageRatio?: number;
+  triggeredByRealUsage: boolean;
+  triggeredByEstimate: boolean;
+  triggeredByColdResume: boolean;
+  shouldRunActiveSummary: boolean;
+  /** 触发后实际算出的可压缩条数（未触发时为 undefined）。 */
+  compressCount?: number;
+  emptyReason?: "no-pending" | "not-triggered" | "below-min-compress-count";
 }
 
 // --- 辅助函数（纯函数） ---
@@ -146,13 +172,17 @@ const normalizeContextUsageRatio = (value: number | undefined): number | undefin
   return ratio >= 0 && ratio <= 1 ? ratio : undefined;
 };
 
-const emptyPlan = (startIndex: number): CompressionPlan => ({
+const emptyPlan = (
+  startIndex: number,
+  diagnostics?: CompressionPlanDiagnostics,
+): CompressionPlan => ({
   shouldCompress: false,
   compressCount: 0,
   msgsToCompress: [],
   msgsToKeep: [],
   newSummarizedBeforeId: undefined,
   startIndex,
+  ...(diagnostics ? { diagnostics } : {}),
 });
 
 // --- 决策核心 ---
@@ -282,7 +312,20 @@ export function planCompression(input: CompressionInput): CompressionPlan {
 
   // 1. 找待处理消息
   const { pendingMsgs, startIndex } = findPendingMessages(allMsgs, summarizedBeforeId);
-  if (pendingMsgs.length === 0) return emptyPlan(startIndex);
+  if (pendingMsgs.length === 0) {
+    return emptyPlan(startIndex, {
+      pendingMsgCount: 0,
+      totalUsed: estimateTokenCount(summary || ""),
+      historyBudget: 0,
+      triggerRatio: resolveCompressionTriggerRatio(contextWindow),
+      realUsageRatio: normalizeContextUsageRatio(realContextUsagePercent),
+      triggeredByRealUsage: false,
+      triggeredByEstimate: false,
+      triggeredByColdResume: false,
+      shouldRunActiveSummary: false,
+      emptyReason: "no-pending",
+    });
+  }
 
   // 2. 算 token 开销 + 预算
   const summaryTokens = estimateTokenCount(summary || "");
@@ -307,7 +350,25 @@ export function planCompression(input: CompressionInput): CompressionPlan {
     force, reason, realContextUsagePercent, coldResume,
     lastMsg: pendingMsgs[pendingMsgs.length - 1],
   });
-  if (!trigger) return emptyPlan(startIndex);
+  const diagnostics: CompressionPlanDiagnostics = {
+    pendingMsgCount: pendingMsgs.length,
+    totalUsed,
+    historyBudget,
+    triggerRatio,
+    realUsageRatio: normalizeContextUsageRatio(realContextUsagePercent),
+    triggeredByRealUsage,
+    triggeredByEstimate:
+      normalizeContextUsageRatio(realContextUsagePercent) === undefined &&
+      totalUsed >= historyBudget,
+    triggeredByColdResume,
+    shouldRunActiveSummary,
+  };
+  if (!trigger) {
+    return emptyPlan(startIndex, {
+      ...diagnostics,
+      emptyReason: "not-triggered",
+    });
+  }
 
   // 4. 算压缩条数 + 保护 tool chain
   // 主动路径（手动 / 真实占用超线 / 冷恢复）折叠到只留尾部原文；
@@ -320,7 +381,13 @@ export function planCompression(input: CompressionInput): CompressionPlan {
   compressCount = guardToolChainBoundary(pendingMsgs, compressCount);
 
   // 5. 太少不值得压缩
-  if (compressCount < MIN_COMPRESS_COUNT) return emptyPlan(startIndex);
+  if (compressCount < MIN_COMPRESS_COUNT) {
+    return emptyPlan(startIndex, {
+      ...diagnostics,
+      compressCount,
+      emptyReason: "below-min-compress-count",
+    });
+  }
 
   const msgsToCompress = pendingMsgs.slice(0, compressCount);
   const msgsToKeep = pendingMsgs.slice(compressCount);
@@ -333,5 +400,6 @@ export function planCompression(input: CompressionInput): CompressionPlan {
     msgsToKeep,
     newSummarizedBeforeId,
     startIndex,
+    diagnostics: { ...diagnostics, compressCount },
   };
 }

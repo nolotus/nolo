@@ -229,7 +229,59 @@ export type LocalAutoCompactionResult = {
    * 否则用户侧表现为「超限了也没压缩」且无任何线索。
    */
   failureMessage?: string;
+  /**
+   * 决策可观测：本次调用的判定结果与「为什么没压缩」。
+   * 每个返回路径都必须填充（unchanged / projectExisting / compressed / failed），
+   * 调用方据此发结构化跳过/触发观测——否则「该压没压」只有症状没有原因。
+   */
+  decision: LocalCompactionDecision;
 };
+
+/** 自动压缩未生成新摘要的结构化原因。 */
+export type LocalCompactionSkipReason =
+  /** 无 dialogId（新对话首轮）：持久化锚点不存在，压缩管线整体跳过。 */
+  | "no-dialog-id"
+  /** 历史为空，无可压缩内容。 */
+  | "empty-history"
+  /** host adapter 未实现 loadDialogSummary/saveDialogSummary。 */
+  | "adapter-missing-summary-methods"
+  /** 读取已持久化摘要抛错。 */
+  | "load-summary-failed"
+  /** 决策层判定未过线：真实占用与估算都在预算内（附估算/预算/触发线快照）。 */
+  | "below-trigger"
+  /** 已触发但可压缩条数低于 MIN_COMPRESS_COUNT，不值得压。 */
+  | "below-min-compress-count"
+  /** 锚点之后没有待处理消息。 */
+  | "no-pending"
+  /** 触发且调用了摘要模型，但返回空摘要。 */
+  | "summary-empty";
+
+export type LocalCompactionDecision =
+  | {
+      outcome: "compressed";
+      /** 触发依据：real-usage / estimate / cold-resume / invalid-summary / existing-summary（复用已持久化摘要投影）。 */
+      trigger:
+        | "real-usage"
+        | "estimate"
+        | "cold-resume"
+        | "invalid-summary"
+        | "existing-summary";
+      estimatedTokens?: number;
+      historyBudget?: number;
+      realUsageRatio?: number;
+      triggerRatio?: number;
+    }
+  | {
+      outcome: "skipped";
+      skipReason: LocalCompactionSkipReason;
+      estimatedTokens?: number;
+      historyBudget?: number;
+      realUsageRatio?: number;
+      triggerRatio?: number;
+      pendingMsgCount?: number;
+      compressCount?: number;
+    }
+  | { outcome: "failed"; detail: string };
 
 export async function maybeAutoCompactLocalHistory(args: {
   adapter: AgentRuntimeHostAdapter;
@@ -249,19 +301,31 @@ export async function maybeAutoCompactLocalHistory(args: {
   realContextUsagePercent?: number;
 }): Promise<LocalAutoCompactionResult> {
   const { adapter, dialogId, history } = args;
-  const unchanged = (): LocalAutoCompactionResult => ({
+  const unchanged = (
+    decision: LocalCompactionDecision,
+  ): LocalAutoCompactionResult => ({
     history,
     compressed: false,
     summaryGenerated: false,
+    decision,
   });
 
+  if (!dialogId) {
+    // 新对话首轮：dialogId 尚未分配，持久化锚点不存在，整条压缩管线跳过。
+    // 这是长首轮（多轮工具循环灌水）零保护窗口，必须以观测事件透出。
+    return unchanged({ outcome: "skipped", skipReason: "no-dialog-id" });
+  }
+  if (history.length === 0) {
+    return unchanged({ outcome: "skipped", skipReason: "empty-history" });
+  }
   if (
-    !dialogId ||
-    history.length === 0 ||
     typeof adapter.loadDialogSummary !== "function" ||
     typeof adapter.saveDialogSummary !== "function"
   ) {
-    return unchanged();
+    return unchanged({
+      outcome: "skipped",
+      skipReason: "adapter-missing-summary-methods",
+    });
   }
 
   let stored: {
@@ -275,7 +339,10 @@ export async function maybeAutoCompactLocalHistory(args: {
     stored = await adapter.loadDialogSummary(dialogId);
   } catch (error) {
     console.warn("[localLoop] loadDialogSummary failed:", error);
-    return unchanged();
+    return unchanged({
+      outcome: "skipped",
+      skipReason: "load-summary-failed",
+    });
   }
 
   // 摘要锚点内容寻址校验：sourceHash 存在时，若历史被 fork/编辑/裁剪导致
@@ -353,8 +420,33 @@ export async function maybeAutoCompactLocalHistory(args: {
   });
 
   const projectExisting = (): LocalAutoCompactionResult => {
+    const diag = plan.diagnostics;
+    const diagSnapshot = diag
+      ? {
+          estimatedTokens: diag.totalUsed,
+          historyBudget: diag.historyBudget,
+          triggerRatio: diag.triggerRatio,
+          ...(diag.realUsageRatio !== undefined
+            ? { realUsageRatio: diag.realUsageRatio }
+            : {}),
+        }
+      : {};
+    const skippedDecision: LocalCompactionDecision = {
+      outcome: "skipped",
+      skipReason:
+        diag?.emptyReason === "no-pending"
+          ? "no-pending"
+          : diag?.emptyReason === "below-min-compress-count"
+            ? "below-min-compress-count"
+            : "below-trigger",
+      ...diagSnapshot,
+      ...(diag ? { pendingMsgCount: diag.pendingMsgCount } : {}),
+      ...(diag?.compressCount !== undefined
+        ? { compressCount: diag.compressCount }
+        : {}),
+    };
     // 有已持久化摘要时统一走投影；无摘要保持原样。
-    if (!existingSummary.trim()) return unchanged();
+    if (!existingSummary.trim()) return unchanged(skippedDecision);
     return {
       history: projectHistoryWithSummary({
         history,
@@ -363,6 +455,11 @@ export async function maybeAutoCompactLocalHistory(args: {
       }),
       compressed: true,
       summaryGenerated: false,
+      decision: {
+        outcome: "compressed",
+        trigger: "existing-summary",
+        ...diagSnapshot,
+      },
     };
   };
 
@@ -398,6 +495,10 @@ export async function maybeAutoCompactLocalHistory(args: {
       return {
         ...projectExisting(),
         failureMessage: "summary model returned empty content",
+        decision: {
+          outcome: "failed",
+          detail: "summary model returned empty content",
+        },
       };
     }
 
@@ -447,6 +548,26 @@ export async function maybeAutoCompactLocalHistory(args: {
       afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
       ...(result.usage ? { usage: result.usage as Record<string, unknown> } : {}),
       metrics,
+      decision: {
+        outcome: "compressed",
+        trigger: invalidSummary
+          ? "invalid-summary"
+          : coldResume
+            ? "cold-resume"
+            : plan.diagnostics?.triggeredByRealUsage
+              ? "real-usage"
+              : "estimate",
+        ...(plan.diagnostics
+          ? {
+              estimatedTokens: plan.diagnostics.totalUsed,
+              historyBudget: plan.diagnostics.historyBudget,
+              triggerRatio: plan.diagnostics.triggerRatio,
+              ...(plan.diagnostics.realUsageRatio !== undefined
+                ? { realUsageRatio: plan.diagnostics.realUsageRatio }
+                : {}),
+            }
+          : {}),
+      },
     };
   } catch (error) {
     // 观测/优化功能：摘要失败绝不能让本轮对话失败。
@@ -455,6 +576,10 @@ export async function maybeAutoCompactLocalHistory(args: {
       error instanceof Error && error.message
         ? error.message.slice(0, 200)
         : String(error).slice(0, 200);
-    return { ...projectExisting(), failureMessage };
+    return {
+      ...projectExisting(),
+      failureMessage,
+      decision: { outcome: "failed", detail: failureMessage },
+    };
   }
 }
