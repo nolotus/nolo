@@ -1,4 +1,13 @@
 
+## 0.116.0-alpha.1
+
+## 0.116.0-alpha.1 (2026-09-24)
+
+### Features
+
+* **home:** reposition brand landing around subscriptions + APIs as one workspace ([043e3cf](https://github.com/nolotus/bun-nolo/commit/043e3cfda03ae2ccb426b8291616f5dd7f25392b))
+
+
 ## 0.115.0-alpha.1
 
 ## 0.115.0-alpha.1 (2026-09-24)

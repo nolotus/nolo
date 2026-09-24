@@ -688,17 +688,18 @@ export default {
       welcomeSection: {
         brandLanding: {
           kicker: "Nolo · Agent Harness",
-          title: "Let AI adapt to the way you work",
+          title: "You already use multiple AIs. Nolo makes them work as one.",
           description:
-            "Nolo gives agents persistent context and routes each task to the model and tools that fit its quality, capability, speed, and cost requirements.",
+            "Use subscriptions and APIs together. Put the right model on each task for quality, speed, and cost — across coding, research, visual work, and more.",
           continuity: "Models change. Your way of working should not have to start over.",
           primaryCta: "Start free",
           secondaryCta: "Download Nolo",
           contrasts: [
-            "Not another chat box",
-            "Not an AI that decides everything for you",
+            "Use the subscriptions you already pay for",
+            "Choose the best model for each task",
+            "Open source and auditable",
           ],
-          contrastsLabel: "What Nolo is not",
+          contrastsLabel: "Why Nolo",
           proofKicker: "Nolo in action",
           balanceKicker: "Human judgment",
           principles: [
@@ -815,7 +816,7 @@ export default {
           exampleLabel: "Example · coding delivery",
           badge: "Example orchestration",
           title: "Coding tasks: from split work to shipped result",
-          desc: "One common pattern—coordinate, build in parallel, review, iterate, and release. Not the only way to run a multi-agent team.",
+          desc: "A common pattern—a strong model plans and coordinates, faster and cheaper models build in parallel, and a specialist model reviews before release. Not the only way to run a multi-agent team.",
           input: "Input",
           dispatch: "Dispatch",
           submit: "Submit",
@@ -835,16 +836,16 @@ export default {
               desc: "Start in chat or on the task board with what you want done.",
             },
             {
-              title: "Work gets routed",
-              desc: "A coordinator agent assigns the right roles to the task.",
+              title: "Plan with a strong model",
+              desc: "A strong model plans the work and assigns each role to the right agent.",
             },
             {
               title: "Build in parallel",
-              desc: "UI, logic, and data can move forward at the same time.",
+              desc: "Faster, cheaper models handle UI, logic, and data at the same time.",
             },
             {
               title: "Review and iterate",
-              desc: "If it is not good enough yet, agents send it back and improve it.",
+              desc: "A specialist model checks quality and sends work back until it passes.",
             },
             {
               title: "Ship the result",
@@ -2031,17 +2032,18 @@ export default {
       welcomeSection: {
         brandLanding: {
           kicker: "Nolo · Agent Harness",
-          title: "让 AI 适应你的工作方式",
+          title: "你已经在用不止一个 AI。让 Nolo 把它们真正组合起来。",
           description:
-            "Nolo 让 Agent 记住你的工作，在任务之间延续上下文，并根据能力、质量、速度和价格，把工作交给更合适的模型和工具。",
+            "把订阅和 API 放进同一个工作流，根据质量、速度和成本，把不同任务交给更合适的模型——从编码、研究到视觉与创作。",
           continuity: "模型会变。你的工作方式不必重来。",
           primaryCta: "免费开始",
           secondaryCta: "下载 Nolo",
           contrasts: [
-            "不是另一个聊天框",
-            "不是替你包办一切",
+            "优先利用你已经购买的订阅",
+            "不同任务使用更合适的模型",
+            "开源，可审计",
           ],
-          contrastsLabel: "Nolo 的定位边界",
+          contrastsLabel: "为什么是 Nolo",
           proofKicker: "产品实况",
           balanceKicker: "人的判断",
           principles: [
@@ -2157,7 +2159,7 @@ export default {
           exampleLabel: "示例 · 编码交付",
           badge: "编排示例",
           title: "编码任务：从分工到交付",
-          desc: "这是一种常见的多 Agent 编排——协调、并行实现、质量检查、自动返工，直到可上线。不是唯一的组队方式。",
+          desc: "一种常见模式——更强的模型规划和协调，更快、更便宜的模型并行开发，发布前再由专门的模型把关。不是唯一的组队方式。",
           input: "输入",
           dispatch: "分发",
           submit: "提交",
@@ -2177,16 +2179,16 @@ export default {
               desc: "在对话或任务看板里描述你想完成的事。",
             },
             {
-              title: "自动分工",
-              desc: "协调 Agent 把任务分给合适的角色并行推进。",
+              title: "强模型规划",
+              desc: "更强的模型规划工作，把任务分给合适的角色。",
             },
             {
-              title: "并行实现",
-              desc: "界面、逻辑、数据可以同时往前推进。",
+              title: "并行开发",
+              desc: "更快、更便宜的模型同时推进界面、逻辑和数据。",
             },
             {
-              title: "检查与返工",
-              desc: "质量不过关会自动打回优化，直到达标。",
+              title: "专门评审",
+              desc: "专门的模型检查质量，不达标就退回优化。",
             },
             {
               title: "交付上线",
@@ -3371,17 +3373,18 @@ export default {
       welcomeSection: {
         brandLanding: {
           kicker: "Nolo · Agent Harness",
-          title: "讓 AI 適應你的工作方式",
+          title: "你已經在不只用一個 AI。讓 Nolo 把它們真正組合起來。",
           description:
-            "Nolo 讓 Agent 記住你的工作，在任務之間延續上下文，並根據能力、品質、速度和價格，把工作交給更合適的模型和工具。",
+            "把訂閱和 API 放進同一個工作流，根據品質、速度和成本，把不同任務交給更合適的模型——從編碼、研究到視覺與創作。",
           continuity: "模型會變。你的工作方式不必重來。",
           primaryCta: "免費開始",
           secondaryCta: "下載 Nolo",
           contrasts: [
-            "不是另一個聊天框",
-            "不是替你包辦一切",
+            "優先利用你已經購買的訂閱",
+            "不同任務使用更合適的模型",
+            "開源，可審計",
           ],
-          contrastsLabel: "Nolo 的定位邊界",
+          contrastsLabel: "為什麼是 Nolo",
           proofKicker: "產品實況",
           balanceKicker: "人的判斷",
           principles: [
@@ -3497,7 +3500,7 @@ export default {
           exampleLabel: "示例 · 編碼交付",
           badge: "編排示例",
           title: "編碼任務：從分工到交付",
-          desc: "這是一種常見的多 Agent 編排——協調、並行實現、品質檢查、自動返工，直到可上線。不是唯一的組隊方式。",
+          desc: "一種常見模式——更強的模型規劃和協調，更快、更便宜的模型並行開發，發布前再由專門的模型把關。不是唯一的組隊方式。",
           input: "輸入",
           dispatch: "分發",
           submit: "提交",
@@ -3517,16 +3520,16 @@ export default {
               desc: "在對話或任務看板裡描述您想完成的事。",
             },
             {
-              title: "自動分工",
-              desc: "協調 Agent 把任務分給合適的角色並行推進。",
+              title: "強模型規劃",
+              desc: "更強的模型規劃工作，把任務分給合適的角色。",
             },
             {
-              title: "並行實現",
-              desc: "介面、邏輯、資料可以同時往前推進。",
+              title: "並行開發",
+              desc: "更快、更便宜的模型同時推進介面、邏輯和資料。",
             },
             {
-              title: "檢查與返工",
-              desc: "品質不過關會自動打回優化，直到達標。",
+              title: "專門評審",
+              desc: "專門的模型檢查品質，不達標就退回優化。",
             },
             {
               title: "交付上線",
@@ -4649,17 +4652,18 @@ quickChat: {
       welcomeSection: {
         brandLanding: {
           kicker: "Nolo · Agent Harness",
-          title: "AI をあなたの働き方に合わせる",
+          title: "すでに複数の AI を使っています。Nolo はそれらを一つのチームにします。",
           description:
-            "Nolo はエージェントに永続的なコンテキストを持たせ、品質・能力・速度・コストの要件に合うモデルとツールへ各タスクを振り分けます。",
+            "サブスクリプションと API を一つのワークフローに。品質・速度・コストを見ながら、タスクごとに適したモデルを使い分ける——コーディング、リサーチ、ビジュアル制作などにも。",
           continuity: "モデルは変わる。あなたの働き方はやり直す必要がない。",
           primaryCta: "無料で始める",
           secondaryCta: "Nolo をダウンロード",
           contrasts: [
-            "もう一つのチャットボックスではない",
-            "すべてを代行する AI ではない",
+            "すでに払っているサブスクリプションを活かす",
+            "タスクごとに最適なモデルを選ぶ",
+            "オープンソースで監査できる",
           ],
-          contrastsLabel: "Nolo の位置づけ",
+          contrastsLabel: "なぜ Nolo か",
           proofKicker: "製品の実際",
           balanceKicker: "人の判断",
           principles: [
@@ -4776,7 +4780,7 @@ quickChat: {
           exampleLabel: "例 · コーディング納品",
           badge: "オーケストレーション例",
           title: "コーディングタスク：分担から納品まで",
-          desc: "よくある複数 Agent パターンの一つ——調整、並行実装、レビュー、改善、リリース。唯一の組み方ではありません。",
+          desc: "よくあるパターンの一つ——強いモデルが計画と調整を担い、より速く安いモデルが並行して実装し、専門のモデルが公開前にレビューする。唯一の組み方ではありません。",
           input: "入力",
           dispatch: "振り分け",
           submit: "送信",
@@ -4796,16 +4800,16 @@ quickChat: {
               desc: "チャットやタスクボードで、やりたいことをそのまま書きます。",
             },
             {
-              title: "自動で分担",
-              desc: "調整 Agent が、適切な役割へタスクを振り分けます。",
+              title: "強いモデルが計画",
+              desc: "強いモデルが作業を計画し、各エージェントに適した役割を割り当てます。",
             },
             {
               title: "並行して実装",
-              desc: "UI、ロジック、データを同時に前に進められます。",
+              desc: "より速く安いモデルが、UI・ロジック・データを同時に進めます。",
             },
             {
-              title: "確認と改善",
-              desc: "基準に届かなければ戻して、改善を繰り返します。",
+              title: "専門レビュー",
+              desc: "専門のモデルが品質を確認し、基準を満たすまで差し戻します。",
             },
             {
               title: "納品・公開",
