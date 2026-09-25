@@ -177,7 +177,10 @@ export async function runSubmittedSlashLine(
     spawnRunner,
     installAltScreenRestoreHandlers,
   } = host;
-  const result = handleTuiInput(line, host.state);
+  // history is forwarded so /links can read the transcript: it lives in the
+  // workspace-scoped TurnHistory rather than in TuiState, and copying it into
+  // state would put transcript data in front of every command's inputs.
+  const result = handleTuiInput(line, host.state, host.history.turns);
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;
 

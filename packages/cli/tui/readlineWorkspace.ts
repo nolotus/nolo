@@ -1804,7 +1804,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
 
       const beforeAgentKey = state.agentKey;
-      const res = handleTuiInput(submittedText, state);
+      const res = handleTuiInput(submittedText, state, history.turns);
       if (res.action?.type === "paste-clipboard") {
         // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
         // （不触碰 history 状态机，不排队）。与空闲路径共用同一份读取流程。
@@ -2259,7 +2259,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/login" ||
             busySlashCommand === "/profile" ||
             busySlashCommand === "/paste" ||
-            busySlashCommand === "/version";
+            busySlashCommand === "/version" ||
+            busySlashCommand === "/links";
           if (isBusyLocalSlash) {
             // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
             // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。

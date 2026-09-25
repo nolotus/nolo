@@ -1,4 +1,13 @@
 
+## 0.127.0-alpha.2
+
+## 0.127.0-alpha.2 (2026-09-25)
+
+### Bug Fixes
+
+* **cli:** forward the transcript to /links on both paths ([5ac3712](https://github.com/nolotus/bun-nolo/commit/5ac371222b7d21b84179048928ce4666a531e8b9))
+
+
 ## 0.127.0-alpha.1
 
 ## 0.127.0-alpha.1 (2026-09-25)

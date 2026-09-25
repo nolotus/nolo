@@ -369,6 +369,7 @@ export const SLASH_COMMANDS = [
   "/context",
   "/ctx",
   "/credits",
+  "/links",
   "/cd",
   "/runtime",
   "/auto",

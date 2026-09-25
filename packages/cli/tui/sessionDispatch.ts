@@ -1,5 +1,6 @@
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { extractConversationLinks, renderConversationLinks } from "./conversationLinks";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -152,7 +153,17 @@ function formatAttachedSkillLine(skillRef: string): string {
   return `${bullet} ${label} ${name}`;
 }
 
-export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
+/**
+ * `historyTurns` is optional and only /links reads it. It exists because the
+ * transcript lives in the workspace-scoped TurnHistory rather than in TuiState,
+ * and copying it into state would put transcript data in front of every
+ * command. Callers that have a history pass it; the rest are unaffected.
+ */
+export function handleTuiInput(
+  input: string,
+  state: TuiState,
+  historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+): TuiInputResult {
   const trimmed = input.trim();
   if (!trimmed) {
     return { nextState: state, output: "" };
@@ -332,6 +343,17 @@ export function handleTuiInput(input: string, state: TuiState): TuiInputResult {
     case "/context":
     case "/ctx":
       return { nextState: state, output: renderContextPanel(state) };
+    case "/links": {
+      // Output goes through the normal slash channel: the router renders it as
+      // a local turn (history) in interactive mode and writes it straight out
+      // in pipe mode. Returning it here — rather than writing to the stream in
+      // the workspace — is what makes /links work while idle.
+      const extracted = extractConversationLinks(historyTurns ?? []);
+      return {
+        nextState: state,
+        output: `${renderConversationLinks(extracted, t as never)}\n`,
+      };
+    }
     case "/credits":
       // 积分链路诊断：断在哪一环一眼可见（见 renderCreditsDebug 注释）。
       return { nextState: state, output: renderCreditsDebug(state) };

@@ -712,6 +712,18 @@ const STRINGS = {
     en: "Unknown command: {0}\n\n",
     zh: "未知命令：{0}\n\n",
   },
+  noConversationLinks: {
+    en: "No links in this conversation yet.",
+    zh: "本会话还没有出现链接。",
+  },
+  conversationLinksCopyHint: {
+    en: "Open one by copying its URL (Cmd/Ctrl + click, or select and copy).",
+    zh: "复制对应 URL 即可打开（Cmd/Ctrl + 点击，或选中复制）。",
+  },
+  conversationLinksShowing: {
+    en: "Links in this conversation (showing first {0} of {1}):",
+    zh: "本会话出现的链接（显示前 {0} 个，共 {1} 个）：",
+  },
   runtimeUsage: { en: "Usage: /runtime <auto|local|server>", zh: "用法：/runtime <auto|local|server>" },
   runtimeSet: { en: "Runtime: {0}", zh: "运行模式：{0}" },
   displayFixedHint: {
