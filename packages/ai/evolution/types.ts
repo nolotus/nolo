@@ -28,6 +28,18 @@ export type EvolutionToolCallEvidence = {
 };
 
 export type EvolutionRunSnapshot = {
+  /**
+   * Canonical run identity = the dialogId of the run's owning dialog
+   * (continueDialogId ?? the pending dialog created for a fresh sync run;
+   * background/subtask runs create their own dialog before running).
+   *
+   * One dialog turn may produce multiple runs on a continue dialog, so
+   * runId is shared across turns of the same dialog — self-exclusion in
+   * baseline comparisons is therefore dialog-grained, which is the more
+   * conservative choice (same-conversation runs are not independent
+   * samples). Per-turn disambiguation uses `candidate.createdAt` as the
+   * run boundary, not runId.
+   */
   runId?: string;
   dialogId?: string;
   runKind?: EvolutionRunKind;

@@ -1,4 +1,13 @@
 
+## 0.127.0-alpha.1
+
+## 0.127.0-alpha.1 (2026-09-25)
+
+### Features
+
+* **evolution:** add Deep Review evidence loader and agent v0 with claim release ([ef265c9](https://github.com/nolotus/bun-nolo/commit/ef265c996f75161fe6742f69f766614a8427cced))
+
+
 ## 0.126.0-alpha.2
 
 ## 0.126.0-alpha.2 (2026-09-25)

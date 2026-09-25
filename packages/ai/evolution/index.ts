@@ -14,4 +14,7 @@ export * from "./runBaselineWriter";
 export * from "./runBaselineSink";
 export * from "./historicalBaseline";
 export * from "./queue";
+export * from "./conversationTurn";
+export * from "./evidence";
+export * from "./deepReview";
 export * from "./decision";

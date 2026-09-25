@@ -373,6 +373,48 @@ export const claimEvolutionCandidates = async ({
 export type EvolutionCandidateReviewOutcome = "resolved" | "dismissed" | "promoted";
 
 /**
+ * Release a claim: flip `accepted` back to `open` so the candidate can be
+ * re-claimed later. Used by Deep Review when the reviewer/model fails before
+ * producing a verdict — the candidate must not stay stuck in `accepted`.
+ *
+ * Runs under the same in-process claim lock as claim/complete so a release
+ * cannot interleave with another claim's read-modify-write. Only
+ * `accepted` → `open` is permitted; anything else throws (a `resolved`
+ * candidate is a terminal record, not a retryable one).
+ */
+export const releaseEvolutionCandidateClaim = async ({
+  store,
+  candidateId,
+}: {
+  store: EvolutionQueueStore;
+  candidateId: string;
+}): Promise<EvolutionCandidate> =>
+  withClaimLock(async () => {
+    const key = buildEvolutionCandidateKey(candidateId);
+    let existing: unknown;
+    try {
+      existing = await store.get(key);
+    } catch (error) {
+      if (isLevelNotFoundError(error)) {
+        throw new Error(`evolution candidate not found: ${candidateId}`);
+      }
+      throw error;
+    }
+    if (!isCandidateRecord(existing)) {
+      throw new Error(`evolution candidate not found: ${candidateId}`);
+    }
+    if (existing.status !== "accepted") {
+      throw new Error(
+        `evolution candidate ${candidateId} cannot release claim from status "${existing.status}" (requires "accepted")`,
+      );
+    }
+    const updated: EvolutionCandidate = { ...existing, status: "open" };
+    await store.batchWrite([{ type: "put", key, value: updated }]);
+    return updated;
+  });
+
+
+/**
  * Map the review outcome onto the persisted status enum. We deliberately keep
  * the legacy enum (`open|accepted|rejected|resolved`) to avoid a migration —
  * `dismissed`/`promoted` are review outcomes, stored as the closest existing
