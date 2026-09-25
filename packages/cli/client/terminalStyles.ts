@@ -88,3 +88,62 @@ export function composeCliStyledText(
     .map((part) => (part.style ? styleCliText(part.text, part.style, true) : part.text))
     .join("");
 }
+
+const OSC8_OPEN = "\x1b]8;;";
+const OSC8_CLOSE = "\x1b\\";
+
+/**
+ * Strip C0/DEL controls (ESC included) from a hyperlink label.
+ *
+ * Both ends of an OSC 8 hyperlink are terminated by ST (`ESC \`), so a stray
+ * ESC inside the label would close the link and let the remainder run as an
+ * unrelated escape sequence. The label is frequently provider-controlled (e.g.
+ * Google's `validation_url_link_text`), so sanitize here rather than trusting
+ * each caller.
+ */
+function sanitizeHyperlinkLabel(label: string): string {
+  // eslint-disable-next-line no-control-regex
+  return label.replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
+/**
+ * Whether terminal hyperlinks (OSC 8) may be emitted.
+ *
+ * Deliberately NOT gated on color: `NO_COLOR` says "do not paint my terminal",
+ * not "do not make my links clickable" — a user who disabled color in a TTY
+ * still has no other way to open a link once mouse reporting is on. Pipes are
+ * still excluded automatically (no TTY ⇒ nothing to click).
+ */
+export function resolveCliHyperlinkEnabled(
+  env: Record<string, string | undefined> = process.env,
+  isTTY: boolean = Boolean(process.stdout.isTTY)
+) {
+  const setting = asTrimmedLowercaseString(env.NOLO_CLI_HYPERLINKS);
+  if (setting === "0" || setting === "false" || setting === "off") return false;
+  if (setting === "1" || setting === "true" || setting === "on") return true;
+  return isTTY;
+}
+
+/**
+ * Render `label` as a clickable OSC 8 hyperlink pointing at `url`.
+ *
+ * When hyperlinks are unavailable the url is emitted as plain text after the
+ * label, so the line still carries a copy-pasteable / Cmd-clickable target —
+ * that fallback is what non-TTY output (pipes, CI logs) gets, and it is the
+ * only case where the raw url must survive.
+ *
+ * Only ever called with urls that already passed a `new URL()` check: the
+ * sequence is emitted straight into a terminal, so a stray ESC inside `url`
+ * would terminate the hyperlink and inject an unrelated escape.
+ */
+export function formatCliHyperlink(
+  url: string,
+  label: string,
+  enabled = resolveCliHyperlinkEnabled()
+) {
+  if (!url) return label;
+  const safeLabel = sanitizeHyperlinkLabel(label);
+  if (!enabled) return `${safeLabel} (${url})`;
+  if (!safeLabel) return url;
+  return `${OSC8_OPEN}${url}${OSC8_CLOSE}${safeLabel}${OSC8_OPEN}${OSC8_CLOSE}`;
+}

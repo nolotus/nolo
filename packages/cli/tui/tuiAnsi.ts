@@ -10,8 +10,29 @@ import stringWidth from "string-width";
 
 export const ANSI_ESCAPE_REGEX =
   /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
+/**
+ * OSC 8 hyperlink wrappers: `ESC ] 8 ; ; <url> ESC \` (open) and
+ * `ESC ] 8 ; ; ESC \` (close). Matched including the ST terminator so both the
+ * open — url and all — and the close collapse away, leaving the visible label.
+ */
+// eslint-disable-next-line no-control-regex
+const OSC8_HYPERLINK_REGEX = /\x1b\]8;;[^\x1b]*\x1b\\/g;
 const ALL_ANSI_ESCAPE_REGEX = ansiRegex();
 const FIRST_ANSI_ESCAPE_REGEX = ansiRegex({ onlyFirst: true });
+
+/**
+ * Drop OSC 8 hyperlink wrappers, keeping the visible label.
+ *
+ * Defence in depth: our own producers emit hyperlinks only on fixed lines that
+ * never reach truncateAnsi/countPhysicalLines (see terminalStyles), so this is
+ * not on the hot path. If a wrap ever leaks into a transcript, these two width
+ * functions would otherwise count the 200-char url hidden inside the sequence
+ * and mis-truncate the line — strip it instead. A full OSC 8-aware truncator
+ * (pairing sequences across a cut) is deliberately not worth it.
+ */
+function stripOsc8Hyperlinks(text: string): string {
+  return text.replace(OSC8_HYPERLINK_REGEX, "");
+}
 
 export function stripAnsi(text: string): string {
   // Keep our broad ECMA-48 CSI matcher first: ansi-regex intentionally treats
@@ -307,6 +328,9 @@ export function visibleWidth(str: string): number {
  */
 export function truncateAnsi(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return "";
+  // OSC 8 wrappers are invisible; drop them before measuring so a hidden url
+  // cannot shift the cut. Labels survive, hyperlinks do not (fixed lines only).
+  text = stripOsc8Hyperlinks(text);
   if (visibleWidth(text) <= maxWidth) return text;
   let width = 0;
   let out = "";
@@ -351,7 +375,8 @@ export function countPhysicalLines(text: string, columns: number): number {
   const lines = text.split("\n");
   let total = 0;
   for (const line of lines) {
-    const width = displayWidth(line);
+    // Same defence as truncateAnsi: measure the visible label, not the hidden url.
+    const width = visibleWidth(stripOsc8Hyperlinks(line));
     total += Math.max(1, Math.ceil(width / columns));
   }
   return Math.max(total, 1);

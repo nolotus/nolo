@@ -1,6 +1,7 @@
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { resolveCliAgentKeyInput } from "../agentAliases";
 import type { CliFetchImpl } from "../cliFetch";
+import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import {
   findAgentCatalogEntry,
   formatAgentSourceLabel,
@@ -18,11 +19,16 @@ export type AgentPickerItem = SelectDialogItem & {
 };
 
 export function toAgentPickerItems(entries: AgentCatalogEntry[]): AgentPickerItem[] {
-  return entries.map((entry) => ({
-    label: entry.name,
-    detail: `${entry.favoritedAt ? "★ " : ""}${entry.model}  ${formatAgentSourceLabel(entry)}`,
-    entry,
-  }));
+  return entries.map((entry) => {
+    // compact：picker 行宽敏感（超 80 列物理换行会破坏 anchored 帧的按行清屏），
+    // 只显示容量段；完整窗口与重置时间在 `nolo agent list` / catalog 列表里看。
+    const quota = formatQuotaSummary(entry.quota, Date.now(), { compact: true });
+    return {
+      label: entry.name,
+      detail: `${entry.favoritedAt ? "★ " : ""}${entry.model}  ${formatAgentSourceLabel(entry)}${quota ? `  [${quota}]` : ""}`,
+      entry,
+    };
+  });
 }
 
 export function formatAgentSwitchMessage(args: {

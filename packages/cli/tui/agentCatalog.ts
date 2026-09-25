@@ -6,6 +6,7 @@ import {
   normalizeListedAgent,
   type ListedAgent,
 } from "../agentListHelpers";
+import { formatQuotaSummary, type AgentQuota } from "ai/agent/quotaSnapshot";
 import { getReadableCliDb } from "../agentCommandSupport";
 import type { CliKvDb } from "../client/hybridRecordStore";
 import { queryUserRecords, readDbRecord } from "../agentRecordHelpers";
@@ -44,6 +45,8 @@ export type AgentCatalogEntry = {
   apiSource?: string;
   /** apiSource=cli 时的具体 CLI（copilot/codex/claude 等）。 */
   cliProvider?: string;
+  /** 上游最近一次上报的配额窗口快照（无则不显示额度）。 */
+  quota?: AgentQuota;
 };
 
 /**
@@ -99,6 +102,7 @@ function listedAgentToCatalogEntry(agent: ListedAgent): AgentCatalogEntry {
     updatedAt: toUpdatedAt(agent.updatedAt),
     ...(agent.apiSource ? { apiSource: agent.apiSource } : {}),
     ...(agent.cliProvider ? { cliProvider: agent.cliProvider } : {}),
+    ...(agent.quota ? { quota: agent.quota } : {}),
   };
 }
 
@@ -658,8 +662,12 @@ export function renderAgentCatalogList(entries: AgentCatalogEntry[], currentKey:
     const current = entry.key === currentKey ? " (current)" : "";
     const favorite = entry.favoritedAt ? " ★" : "";
     const detail = entry.description ? ` — ${entry.description}` : "";
+    // 额度和 description 互斥：有额度时额度信息优先（更能影响选人决策），
+    // 否则回退平台条目的 description（nolo 默认条目没有 quota）。
+    const quota = formatQuotaSummary(entry.quota);
+    const trailing = quota ? ` [${quota}]` : detail;
     lines.push(
-      `  ${String(index + 1).padStart(2)}  ${entry.name.padEnd(18)} ${entry.model.padEnd(14)} ${formatAgentSourceLabel(entry)}${favorite}${detail}${current}`
+      `  ${String(index + 1).padStart(2)}  ${entry.name.padEnd(18)} ${entry.model.padEnd(14)} ${formatAgentSourceLabel(entry)}${favorite}${trailing}${current}`
     );
   });
   lines.push("");

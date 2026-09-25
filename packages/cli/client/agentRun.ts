@@ -63,7 +63,9 @@ import {
   resolveServerPlatformToolNames,
 } from "./agentRunPlatformTools";
 import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
+import { formatCliHyperlink, resolveCliHyperlinkEnabled } from "./terminalStyles";
 import { NOLO_CLIENT_VERSION_HEADER } from "core/clientVersionGate";
+import { extractGoogleValidationLink } from "core/chat/validationUrl";
 import { resolveClientVersion } from "../../agent-runtime/providerResolution";
 import { expandCollapsedPastes } from "../../core/collapsedPaste";
 
@@ -778,8 +780,41 @@ function buildAuthFailure(ctx: FailureCtx): string {
     : ctx.where === "server chat proxy"
       ? `Check the agent's provider/api-key settings on nolo.chat`
       : `Fix the local credential/config and retry`;
+
+  // Google Antigravity / Cloud Code Assist periodically gates calls behind a
+  // one-time account verification (VALIDATION_REQUIRED → HTTP 403): the OAuth
+  // token is still valid, the user just needs to open validation_url in a
+  // browser signed into that account. Surface it on its own line so the TUI
+  // does not bury the link inside the clipped Detail blob — this exact case
+  // left a user with no discoverable way to verify.
+  //
+  // The url is a 200+ char query string: printed verbatim it wraps over three
+  // rows and a Cmd/Ctrl-click can only ever grab one of them. Render it as an
+  // OSC 8 hyperlink behind a short label instead — the mouse-reporting that our
+  // dialogs enable already stops terminals from resolving plain-text urls on
+  // their own, so a real hyperlink is the only clickable form left. Non-TTY
+  // output falls back to `label (url)` so pipes and CI logs stay copyable.
+  const { url: validationUrl, text: validationText } =
+    extractGoogleValidationLink(ctx.message);
+  const validationLabel = validationText || "Verify your account";
+  const validationHint = validationUrl
+    ? `\n  ⓘ This provider requires a one-time account verification. Open this link in a browser signed into that account, then retry:\n    ${formatCliHyperlink(
+        validationUrl,
+        validationLabel,
+      )}` +
+      // A 200-char Google url wraps on a narrow terminal, and a wrapped link
+      // loses its hit area in several terminals — so even when the clickable
+      // form is available, the raw url still gets its own copyable line. (In
+      // the disabled path `label (url)` already carries it.)
+      (resolveCliHyperlinkEnabled() ? `\n    或复制此链接: ${validationUrl}` : "")
+    : "";
+
   return (
-    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected). Detail: ${ctx.message} ` +
+    `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected).` +
+    // 只有真带验证链接时才让 Detail 换行——否则普通 401/403 的输出格式
+    // 会凭空多一行，任何依赖既有排版的断言/文档都要跟着改。
+    `${validationHint ? `${validationHint}\n  ` : " "}` +
+    `Detail: ${ctx.message} ` +
     `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
   );
 }

@@ -12,6 +12,7 @@
 // - 未明确映射 HTTP 状态（如 404/408/409/413/422）仅命中 providerMatch 不误判 auth，回退 unknown 且保持可重试。
 
 import type { SendErrorKind, SendErrorStage } from "../../messages/types";
+import { scanValidationDetails } from "core/chat/validationUrl";
 
 export type { SendErrorKind, SendErrorStage };
 
@@ -57,23 +58,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** 仅放行安全的 http/https URL scheme，丢弃 javascript: 等不安全链接 */
-export function sanitizeSafeUrl(rawUrl: unknown): string | undefined {
-  if (typeof rawUrl !== "string") return undefined;
-  const trimmed = rawUrl.trim();
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        return trimmed;
-      }
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
 /** 展开包含 cause 链的完整错误文本 */
 export function extractFullErrorText(error: unknown): string {
   if (!error) return "Unknown error";
@@ -100,41 +84,9 @@ export function extractFullErrorText(error: unknown): string {
   return (error as any)?.message || (error as any)?.error || String(error);
 }
 
-/** 从 Google ErrorInfo details[].metadata 里收集验证链接 */
-function collectValidationFromDetails(
-  details: unknown
-): { url?: string; text?: string; learnMoreUrl?: string } {
-  if (!Array.isArray(details)) return {};
-  let url: string | undefined;
-  let text: string | undefined;
-  let learnMoreUrl: string | undefined;
-  for (const detail of details) {
-    const rec = asRecord(detail);
-    if (!rec) continue;
-    const metadata = asRecord(rec.metadata);
-    if (metadata) {
-      url = url ?? sanitizeSafeUrl(metadata.validation_url);
-      text = text ?? asString(metadata.validation_url_link_text);
-      learnMoreUrl = learnMoreUrl ?? sanitizeSafeUrl(metadata.validation_learn_more_url);
-    }
-    const help = asRecord(rec) as Record<string, unknown> & { links?: unknown };
-    if (Array.isArray(help.links)) {
-      for (const link of help.links) {
-        const linkRec = asRecord(link);
-        if (!linkRec) continue;
-        const linkUrl = sanitizeSafeUrl(linkRec.url);
-        if (!linkUrl) continue;
-        const desc = asString(linkRec.description);
-        if (!url && desc && /verify|continue/i.test(desc)) {
-          url = linkUrl;
-          text = desc;
-        } else if (!learnMoreUrl && /learn more/i.test(desc ?? "")) {
-          learnMoreUrl = linkUrl;
-        }
-      }
-    }
-  }
-  return { url, text, learnMoreUrl };
+/** 从 Google ErrorInfo details[].metadata 里收集验证链接（与 CLI/TUI 共用同一份解析） */
+function collectValidationFromDetails(details: unknown): { url?: string; text?: string; learnMoreUrl?: string } {
+  return scanValidationDetails(details);
 }
 
 /** 判定故障发生阶段（stage） */

@@ -1,4 +1,19 @@
 
+## 0.104.0-alpha.1
+
+## 0.104.0-alpha.1 (2026-09-25)
+
+### Features
+
+* **cli:** make TUI links clickable via OSC 8 with plain-text fallbacks ([dd52ed2](https://github.com/nolotus/bun-nolo/commit/dd52ed2fda79664c4065ac02397a51f3d53506e3))
+
+### Bug Fixes
+
+* **cli:** surface Google account-verification link in local run auth failures ([2d8383d](https://github.com/nolotus/bun-nolo/commit/2d8383d84d9e4db7651a4145f92a1315337fccf3))
+* **cli:** surface quota in TUI agent catalog/picker and drop husk-only summaries ([77f872f](https://github.com/nolotus/bun-nolo/commit/77f872f7561a6612848b9b3e3e087a7bd68bba51))
+* **core:** normalize validation URLs and keep auth Detail on one line ([610a14a](https://github.com/nolotus/bun-nolo/commit/610a14a65887b3b59c8cf15d3e03ba4ffd53f854))
+
+
 ## 0.103.0-alpha.2
 
 ## 0.103.0-alpha.2 (2026-09-25)

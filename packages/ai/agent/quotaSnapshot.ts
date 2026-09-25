@@ -463,13 +463,19 @@ export function findTightestQuotaWindow(
 /**
  * 格式化简要配额文案供 CLI / UI 展示（如 "73%已用 · 5h · 2.5h后重置"）。
  * 无数据返回 undefined（展示端可显示 "-"）。
+ *
+ * `compact` 只保留容量段（"73%已用" / "45000/50000 tokens"），去掉窗口名与
+ * 重置时间——供行宽敏感的窄容器（如 TUI picker 的 detail）使用，避免把一行
+ * 撑到终端物理换行、破坏按 logical line 清屏的 anchored 帧。
  */
 export function formatQuotaSummary(
   quota: AgentQuota | undefined,
   now = Date.now(),
+  options?: { compact?: boolean },
 ): string | undefined {
   const tightest = findTightestQuotaWindow(quota, now);
   if (!tightest) return undefined;
+  const compact = options?.compact === true;
 
   const parts: string[] = [];
 
@@ -484,6 +490,7 @@ export function formatQuotaSummary(
       parts.push(`余${tightest.remaining}${tightest.unit ? ` ${tightest.unit}` : ""}`);
     }
   }
+  if (compact) return parts.length > 0 ? parts[0] : undefined;
 
   // 2. 窗口范围（若与 unit 相同，如 tokens，不重复拼接）
   if (
@@ -511,7 +518,12 @@ export function formatQuotaSummary(
     }
   }
 
-  return parts.length > 0 ? parts.join(" · ") : undefined;
+  // 4. 收尾：只剩 scope（如上游只发了 resetAt 且已过期的窗口）时不返回——
+  //    那样的 `5h` 没有任何信息量，还会把展示端本可显示的 description 挤掉。
+  //    与 formatQuotaTooltip 的空壳跳过口径保持一致。
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1 && parts[0] === tightest.scope) return undefined;
+  return parts.join(" · ");
 }
 
 /**
