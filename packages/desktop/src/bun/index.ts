@@ -490,12 +490,6 @@ if (process.env.NOLO_XHS_READER_CHILD_REQUEST) {
 // once there is more than one concrete provider bridge to dispatch.
 
 import { resolveDesktopRuntimeEntrypoint, DESKTOP_ENTRYPOINT_ENV_VAR } from "../../../../packages/agent-runtime/desktopRuntimeEntrypoint";
-import {
-  DESKTOP_NAVIGATION_CHROME_CSS,
-  DESKTOP_WINDOW_CONTROLS_HTML,
-  DESKTOP_NAVIGATION_CHROME_HTML,
-  DESKTOP_NAVIGATION_CHROME_SCRIPT,
-} from "./desktopNavigationChromeTemplates";
 
 // Set the desktop entrypoint for tool executors that need to spawn CLI subcommands.
 // This must be set before any server/runtime code runs.
@@ -701,20 +695,6 @@ const navigateDesktopHistory = (
   mainWindow.webview.executeJavascript(scriptByDirection[direction]);
 };
 
-const installDesktopNavigationChrome = (mainWindow: DesktopBrowserWindow) => {
-  mainWindow.webview.executeJavascript(DESKTOP_NAVIGATION_CHROME_SCRIPT);
-};
-
-const syncDesktopWindowState = (mainWindow: DesktopBrowserWindow) => {
-  const state = JSON.stringify({
-    alwaysOnTop: mainWindow.isAlwaysOnTop(),
-    visibleOnAllWorkspaces: mainWindow.isVisibleOnAllWorkspaces(),
-  });
-  mainWindow.webview.executeJavascript(
-    `globalThis.__noloDesktopApplyWindowState?.(${state});`
-  );
-};
-
 const setupDesktopNavigationMenu = (mainWindow: DesktopBrowserWindow) => {
   if (process.platform === "win32") {
     ApplicationMenu.setApplicationMenu([]);
@@ -787,12 +767,10 @@ const setupDesktopNavigationMenu = (mainWindow: DesktopBrowserWindow) => {
     }
     if (action === DESKTOP_NAVIGATION_ACTIONS.toggleAlwaysOnTop) {
       mainWindow.setAlwaysOnTop(!mainWindow.isAlwaysOnTop());
-      syncDesktopWindowState(mainWindow);
       return;
     }
     if (action === DESKTOP_NAVIGATION_ACTIONS.toggleVisibleOnAllWorkspaces) {
       mainWindow.setVisibleOnAllWorkspaces(!mainWindow.isVisibleOnAllWorkspaces());
-      syncDesktopWindowState(mainWindow);
     }
   });
 };
@@ -804,81 +782,15 @@ type DesktopWindowFrame = {
   height: number;
 };
 
-const framesEqual = (left: DesktopWindowFrame, right: DesktopWindowFrame) =>
-  left.x === right.x &&
-  left.y === right.y &&
-  left.width === right.width &&
-  left.height === right.height;
-
-const isValidWorkArea = (workArea: DesktopWindowFrame) =>
-  Number.isFinite(workArea.x) &&
-  Number.isFinite(workArea.y) &&
-  Number.isFinite(workArea.width) &&
-  Number.isFinite(workArea.height) &&
-  workArea.width > 0 &&
-  workArea.height > 0;
-
-const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
-  // Linux uses native window decoration, so maximize/restore is delegated to
-  // the window manager. Windows (hiddenInset, frameless) has no native chrome
-  // and needs manual workArea math to keep a maximized window on its monitor.
-  let restoredFrame: DesktopWindowFrame | null = null;
-  let appliedMaximizedFrame: DesktopWindowFrame | null = null;
-
-  const maximizeDesktopWindow = () => {
-    if (process.platform !== "win32") {
-      if (mainWindow.isMaximized()) return;
-      mainWindow.maximize();
-      return;
-    }
-    if (mainWindow.isMaximized()) return;
-    const currentFrame = mainWindow.getFrame();
-    const displays = Screen.getAllDisplays();
-    const centerX = currentFrame.x + currentFrame.width / 2;
-    const centerY = currentFrame.y + currentFrame.height / 2;
-    const display =
-      displays.find(
-        (candidate) =>
-          centerX >= candidate.bounds.x &&
-          centerX < candidate.bounds.x + candidate.bounds.width &&
-          centerY >= candidate.bounds.y &&
-          centerY < candidate.bounds.y + candidate.bounds.height,
-      ) ?? Screen.getPrimaryDisplay();
-    const workArea = display.workArea;
-    if (!isValidWorkArea(workArea)) {
-      console.warn("[desktop] cannot maximize: display work area is invalid", workArea);
-      return;
-    }
-    restoredFrame = currentFrame;
-    appliedMaximizedFrame = { ...workArea };
-    mainWindow.setFrame(workArea.x, workArea.y, workArea.width, workArea.height);
-  };
-
-  const restoreDesktopWindow = () => {
-    if (process.platform !== "win32") {
-      if (!mainWindow.isMaximized()) return;
-      mainWindow.unmaximize();
-      return;
-    }
-    const currentFrame = mainWindow.getFrame();
-    if (!restoredFrame || !appliedMaximizedFrame) {
-      if (mainWindow.isMaximized()) {
-        mainWindow.unmaximize();
-      }
-      return;
-    }
-    if (!framesEqual(currentFrame, appliedMaximizedFrame)) {
-      restoredFrame = null;
-      appliedMaximizedFrame = null;
-      maximizeDesktopWindow();
-      return;
-    }
-    const frame = restoredFrame;
-    restoredFrame = null;
-    appliedMaximizedFrame = null;
-    mainWindow.setFrame(frame.x, frame.y, frame.width, frame.height);
-  };
-
+// Desktop webview → Bun host bridge.
+// Carries untrusted webview messages that need host privileges: opening
+// allowlisted external URLs, killing agent child processes, and forwarding
+// console/diagnostics. Window chrome (minimize/maximize/close/borders) is
+// owned by the native titlebar on every platform, so there is deliberately
+// no window-action handling here.
+const attachDesktopHostMessageBridge = (
+  mainWindow: DesktopBrowserWindow,
+) => {
   mainWindow.webview.on("host-message", async (event) => {
     const detail = (event as { data?: { detail?: unknown } }).data?.detail;
     if (!detail || typeof detail !== "object") {
@@ -909,14 +821,19 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
       } else if (review.kind === "open-default-browser") {
         openDesktopBrowser();
       } else if (review.kind === "reject") {
-        console.warn(`[host-message] nolo-desktop-browser-action rejected: ${review.reason}`);
+        console.warn(
+          `[host-message] nolo-desktop-browser-action rejected: ${review.reason}`,
+        );
       }
       return;
     }
 
     if ((detail as any).type === "nolo-desktop-console") {
       const { level, args } = detail as any;
-      console.log(`[webview ${level}]`, ...(Array.isArray(args) ? args : [args]));
+      console.log(
+        `[webview ${level}]`,
+        ...(Array.isArray(args) ? args : [args]),
+      );
       return;
     }
 
@@ -925,7 +842,10 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
       if (Array.isArray(messages)) {
         for (const m of messages) {
           if (m && typeof m.level === "string") {
-            console.log(`[webview ${m.level}]`, ...(Array.isArray(m.args) ? m.args : [m.args]));
+            console.log(
+              `[webview ${m.level}]`,
+              ...(Array.isArray(m.args) ? m.args : [m.args]),
+            );
           }
         }
       }
@@ -952,70 +872,16 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
           // tasks only. Transient foreground envelopes stay owned by their
           // foreground runner; the process-exit fallback (plain stopAll())
           // still kills everything.
-          registry.stopAll(undefined, { includePersist: true, backgroundOnly: true });
+          registry.stopAll(undefined, {
+            includePersist: true,
+            backgroundOnly: true,
+          });
         }
       } catch (err) {
         console.error("[nolo-desktop-process-control] failed:", err);
       }
       return;
     }
-
-    if (
-      (detail as { type?: unknown }).type !== "nolo-desktop-window-action"
-    ) {
-      return;
-    }
-
-    const action = (detail as { action?: unknown }).action;
-    if (action === "window-minimize") {
-      mainWindow.minimize();
-      return;
-    }
-    if (action === "window-maximize") {
-      if (mainWindow.isMaximized() || restoredFrame) {
-        restoreDesktopWindow();
-      } else {
-        maximizeDesktopWindow();
-      }
-      return;
-    }
-    if (action === "window-close") {
-      mainWindow.close();
-      return;
-    }
-    if (action === "window-get-frame") {
-      const frame = mainWindow.getFrame();
-      mainWindow.webview.executeJavascript(
-        `globalThis.__noloDesktopWindowFrame = ${JSON.stringify(frame)};`,
-      );
-      return;
-    }
-    if (action === "window-toggle-always-on-top") {
-      mainWindow.setAlwaysOnTop(!mainWindow.isAlwaysOnTop());
-      syncDesktopWindowState(mainWindow);
-      return;
-    }
-    if (action === "window-toggle-visible-on-all-workspaces") {
-      mainWindow.setVisibleOnAllWorkspaces(!mainWindow.isVisibleOnAllWorkspaces());
-      syncDesktopWindowState(mainWindow);
-      return;
-    }
-  });
-};
-
-const setupDesktopNavigationChrome = (mainWindow: DesktopBrowserWindow) => {
-  installDesktopNavigationChrome(mainWindow);
-  mainWindow.webview.on("dom-ready", () => {
-    installDesktopNavigationChrome(mainWindow);
-    syncDesktopWindowState(mainWindow);
-  });
-  mainWindow.webview.on("did-navigate", () => {
-    installDesktopNavigationChrome(mainWindow);
-    syncDesktopWindowState(mainWindow);
-  });
-  mainWindow.webview.on("did-navigate-in-page", () => {
-    installDesktopNavigationChrome(mainWindow);
-    syncDesktopWindowState(mainWindow);
   });
 };
 
@@ -1269,7 +1135,6 @@ const initialFrame = resolveInitialWindowFrame({
   screen: Screen,
 });
 // Linux uses native window decoration and borders; Windows/macOS retain injected shell chrome.
-const shouldInstallInjectedDesktopChrome = process.platform !== "linux";
 
 // Generic probe hook: optional initial path for Desktop E2E (production-off; unset in normal use).
 // Example: NOLO_DESKTOP_E2E_INITIAL_PATH=/create/local-agent
@@ -1277,9 +1142,9 @@ const e2eInitialPathRaw = process.env.NOLO_DESKTOP_E2E_INITIAL_PATH?.trim() || "
 const e2eInitialPath = e2eInitialPathRaw.startsWith("/")
   ? e2eInitialPathRaw
   : `/${e2eInitialPathRaw}`;
-// On Linux, use "native" so the native GTK titlebar handles window controls/borders/drag,
-// and the web TopBar renders history controls without duplicating window buttons.
-const desktopShellQuery = `noloDesktop=1&noloDesktopTitlebar=${process.platform === "linux" ? "native" : "shell"}`;
+// Native titlebar on every platform: the window manager owns window controls,
+// borders and resize. The web TopBar only adds history controls.
+const desktopShellQuery = `noloDesktop=1&noloDesktopTitlebar=native`;
 const initialWindowUrl = `${serverUrl}${e2eInitialPath}${
   e2eInitialPath.includes("?") ? "&" : "?"
 }${desktopShellQuery}`;
@@ -1298,9 +1163,9 @@ const mainWindow = (() => {
       title: "Nolo Desktop",
       url: initialWindowUrl,
       frame: initialFrame,
-      // Use a default titlebar on Linux so the window gets a native resize
-      // border — "hidden" borderless windows have no GTK resize drag handle.
-      titleBarStyle: process.platform === "linux" ? "default" : "hiddenInset",
+      // Native decoration everywhere: no injected shell, and the compositor
+      // owns resize borders (a frameless window has no GTK resize handle).
+      titleBarStyle: "default",
     });
     console.log("[desktop] BrowserWindow created");
     desktopDiag("window:create", "BrowserWindow created", {
@@ -1322,10 +1187,7 @@ if (isSmokeProbe) {
   console.log("[desktop] smoke probe mode enabled");
 }
 setupDesktopNavigationMenu(mainWindow as any);
-setupDesktopWindowControls(mainWindow as any);
-if (shouldInstallInjectedDesktopChrome) {
-  setupDesktopNavigationChrome(mainWindow as any);
-}
+attachDesktopHostMessageBridge(mainWindow as any);
 installDesktopApiRequestBridge(mainWindow as any);
 
 openDesktopBrowser = (targetUrl?: string) => {
@@ -1559,15 +1421,6 @@ if (desktopE2eScriptPath) {
   });
 }
 
-const notifyDesktopUpdateChrome = () => {
-  try {
-    mainWindow.webview.executeJavascript("globalThis.__noloDesktopRefreshUpdateButton?.();");
-  } catch (error) {
-    // quit 阶段 webview 可能已销毁：明确记录而不是裸 catch 吞掉。
-    console.warn("[desktop] failed to notify update chrome", error);
-  }
-};
-
 const scheduleInitialUpdateCheck = () => {
   // 检查可以自动进行；下载与安装始终由用户在设置页或工具栏显式触发。
   const delayMs = Number(process.env.NOLO_DESKTOP_UPDATE_CHECK_DELAY_MS ?? 12000);
@@ -1577,8 +1430,6 @@ const scheduleInitialUpdateCheck = () => {
       await Updater.checkForUpdate();
     } catch (error) {
       console.error("[desktop] initial update check failed", error);
-    } finally {
-      notifyDesktopUpdateChrome();
     }
   }, Math.max(0, delayMs));
 };

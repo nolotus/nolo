@@ -162,8 +162,8 @@ export const MessageInputActivityPanel = memo(
  * 两路合并去重（按 pid），取 status === "running" 的条目。
  *
  * 「停止」按钮通过 Electrobun host-message 通道（globalThis.__electrobunSendToHost）
- * 向 bun 侧发送 nolo-desktop-process-control 消息，由 setupDesktopWindowControls 调
- * getProcessRegistry().kill(pid)。非 desktop 环境（web alpha）该全局函数不存在，
+ * 向 bun 侧发送 nolo-desktop-process-control 消息，由 attachDesktopHostMessageBridge
+ * 调 getProcessRegistry().kill(pid)。非 desktop 环境（web alpha）该全局函数不存在，
  * 按钮优雅降级为 disabled。停止后乐观更新本地 Redux 状态（若有 toolRunId），
  * 面板该行立即消失。
  */

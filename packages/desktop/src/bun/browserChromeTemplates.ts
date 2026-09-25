@@ -3,8 +3,8 @@
 // 浏览器窗口的独立地址栏 chrome。注入到非 sandbox 的 BrowserWindow，
 // 提供地址栏、后退、前进、刷新，通过 host-message 与主进程通信。
 //
-// 视觉与交互对齐主窗口的 desktop shellbar（desktopNavigationChromeTemplates）：
-// 同为 34px 浅色玻璃条、28px 控件、同一套 hover/active 反馈。地址栏带站点图标与
+// 视觉与交互对齐主窗口的原生标题栏高度区：同为 34px 浅色玻璃条、28px 控件、
+// 同一套 hover/active 反馈。地址栏带站点图标与
 // https 提示；注入后给 <html> 顶部补 padding，避免固定条遮住站点头部。
 // （2026-09-16 调整：此前条带悬在 top:28px——窗口用原生标题栏时顶部会露出约
 // 28px 的页面内容——且不做内容让位，会盖住站点头部。）
