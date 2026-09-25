@@ -1,4 +1,5 @@
 import { toErrorMessage } from "core/errorMessage";
+import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, summarizeCredentialGroups, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
@@ -341,6 +342,8 @@ export async function runAgentListCommand(
         typeof agent.nextAvailableAt === "number" && agent.nextAvailableAt > Date.now()
           ? `nextAvailableAt=${new Date(agent.nextAvailableAt).toISOString()}`
           : "nextAvailableAt=now";
+      const quotaSummary = formatQuotaSummary(agent.quota);
+      const quotaLine = `quota=${quotaSummary ?? "-"}`;
       output.write(
         [
           `\n[${status}] ${agent.name}`,
@@ -356,6 +359,7 @@ export async function runAgentListCommand(
           `tools=${agent.tools.join(", ") || "-"}`,
           credentialLine,
           availabilityLine,
+          quotaLine,
         ].join("\n")
       );
       output.write("\n");

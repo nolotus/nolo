@@ -247,6 +247,20 @@
           color: color-mix(in srgb, var(--primary) 62%, white);
         }
 
+        /* 配额徽章：中性数据展示，用次级文字色 + 交互面底色（与 .agent__cli 同族） */
+        .agent__quota {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          color: var(--textSecondary);
+          background: var(--surfaceInteractive, var(--backgroundTertiary));
+          border-color: transparent;
+          /* 长配额文案不顶爆卡片：超出截断，完整内容在 title tooltip */
+          max-width: 220px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
         .agent__tag--more {
           color: var(--textTertiary);
         }

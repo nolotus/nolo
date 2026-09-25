@@ -4,6 +4,11 @@ import {
   shouldShowAgentTokenCost,
   toNonEmptyString,
 } from "./agentDisplayUtils";
+import {
+  formatQuotaSummary,
+  formatQuotaTooltip,
+  type AgentQuota,
+} from "../quotaSnapshot";
 
 /** Loose agent shape for badge resolution (Agent index signature fields vary). */
 export type AgentBadgeSource = {
@@ -18,6 +23,7 @@ export type AgentBadgeSource = {
   provider?: string;
   imageConfig?: Agent["imageConfig"];
   imageWorkflow?: Agent["imageWorkflow"];
+  quota?: AgentQuota;
 } | null | undefined;
 
 export type AgentBadgeMeta = {
@@ -35,6 +41,10 @@ export type AgentBadgeMeta = {
   runtimeMachineId: string | undefined;
   /** AgentPage-style: only 127.0.0.1 substring (existing behavior). */
   isPageLocalCustomRuntime: boolean;
+  /** 配额快照简短摘要（如 "73%已用 · 5h · 2.5h后重置"）。 */
+  quotaText?: string;
+  /** 配额快照全量详情提示（多行文本）。 */
+  quotaTooltip?: string;
 };
 
 /**
@@ -72,6 +82,9 @@ export function resolveAgentBadgeMeta(agent: AgentBadgeSource): AgentBadgeMeta {
   const showCliBadge = isCliAgent;
   const showVisionBadge = !!agent?.hasVision;
   const showRuntimeBadge = isCliAgent || isMachineBoundLocalCustomAgent;
+  const rawQuota = agent?.quota;
+  const quotaText = formatQuotaSummary(rawQuota);
+  const quotaTooltip = formatQuotaTooltip(rawQuota);
 
   return {
     isCliAgent,
@@ -85,5 +98,7 @@ export function resolveAgentBadgeMeta(agent: AgentBadgeSource): AgentBadgeMeta {
     runtimeLabel,
     runtimeMachineId,
     isPageLocalCustomRuntime,
+    quotaText,
+    quotaTooltip,
   };
 }

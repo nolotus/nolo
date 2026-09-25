@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { LuEye, LuImage, LuTerminal, LuLaptop } from "react-icons/lu";
+import { LuEye, LuImage, LuTerminal, LuLaptop, LuGauge } from "react-icons/lu";
 import type { Agent } from "app/types";
 import { formatPriceAmount } from "ai/llm/getPricing";
 import { formatAgentOutputPrice } from "./agentDisplayUtils";
@@ -25,6 +25,8 @@ const AgentCardMeta = ({ item }: AgentCardMetaProps) => {
     showRuntimeBadge,
     runtimeLabel,
     runtimeMachineId,
+    quotaText,
+    quotaTooltip,
   } = badgeMeta;
 
   return (
@@ -79,6 +81,15 @@ const AgentCardMeta = ({ item }: AgentCardMetaProps) => {
         <span className="agent__tag agent__vision">
           <LuEye size={12} aria-hidden="true" />
           <span>{t("vision")}</span>
+        </span>
+      )}
+      {quotaText && (
+        <span
+          className="agent__tag agent__quota"
+          title={quotaTooltip || quotaText}
+        >
+          <LuGauge size={12} aria-hidden="true" />
+          <span>{quotaText}</span>
         </span>
       )}
     </div>

@@ -14,6 +14,7 @@ import {
 } from "./agentBilling";
 import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
 import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
+import type { AgentQuota } from "./quotaSnapshot";
 
 export {
   resolveAgentSelectionPriority,
@@ -142,6 +143,12 @@ export interface SafeAgentSummary {
   isOAuth: boolean;
   /** Epoch ms at which a provider quota/rate-limit is expected to recover. */
   nextAvailableAt?: number;
+  /**
+   * 最近一次上游响应上报的配额窗口快照（x-ratelimit-* / anthropic-unified /
+   * x-goog-quota-* / body quota 等）。只在「上游真给过数据」的 agent 上存在；
+   * 窗口按 scope 合并保留全部（不只最紧张的）。
+   */
+  quota?: AgentQuota;
   /** Stable non-secret identifier grouping agents that share the same credential. */
   credentialGroup?: string;
   /** Credential kind: oauth or api-key. */
@@ -329,6 +336,16 @@ export function toSafeAgentSummary(
     typeof record?.nextAvailableAt === "number" && Number.isFinite(record.nextAvailableAt)
       ? record.nextAvailableAt
       : undefined;
+  // 配额快照透传：只在校验为合法形状（windows 数组 + 数值 observedAt）时带出，
+  // 坏数据静默丢弃（与 nextAvailableAt 同一口径——上游写的脏数据不进摘要）。
+  const rawQuota = record?.quota;
+  const quota: AgentQuota | undefined =
+    rawQuota && typeof rawQuota === "object" &&
+    Array.isArray((rawQuota as AgentQuota).windows) &&
+    typeof (rawQuota as AgentQuota).observedAt === "number" &&
+    Number.isFinite((rawQuota as AgentQuota).observedAt)
+      ? (rawQuota as AgentQuota)
+      : undefined;
 
   // 自建判断：record.userId / ownerId 任一等于当前用户，或 dbKey 以完整前缀
   // `agent-<currentUserId>-` 开头（不解析分段——userId 本身可能含连字符，
@@ -427,6 +444,7 @@ export function toSafeAgentSummary(
     isOwned,
     isOAuth,
     ...(nextAvailableAt !== undefined ? { nextAvailableAt } : {}),
+    ...(quota !== undefined ? { quota } : {}),
     ...(credentialGroup !== undefined ? { credentialGroup } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
     // 「未知 ≠ 独立」：无 credentialGroup 时显式 credentialed:false，调用方
@@ -468,6 +486,8 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   // 决策信息（CLI --show-unavailable 场景）；默认列表已把这类 agent 过滤掉，
   // 所以通常根本不占字节。
   "nextAvailableAt",
+  // 额度快照：只有上游真上报过窗口的 agent 才带（通常是小对象）。
+  "quota",
   "credentialGroup",
   "credentialKind",
   "credentialed",
@@ -521,6 +541,7 @@ export const UNAVAILABLE_AGENT_SUMMARY_FIELDS = [
   "isOAuth",
   "isOwned",
   "nextAvailableAt",
+  "quota",
   "favoritedAt",
   "updatedAt",
 ] as const;
@@ -535,6 +556,7 @@ export type UnavailableAgentSummary = {
   isOAuth: boolean;
   isOwned: boolean;
   nextAvailableAt?: number;
+  quota?: AgentQuota;
   favoritedAt?: number | string;
   updatedAt?: number | string;
 };

@@ -31,6 +31,8 @@ import {
   PUBLIC_AGENT_KEY_PREFIX,
 } from "core/prefix";
 
+import type { AgentQuota } from "ai/agent/quotaSnapshot";
+
 export type ListedAgent = {
   id: string;
   privateKey: string;
@@ -58,6 +60,8 @@ export type ListedAgent = {
   cliProvider?: string;
   /** Epoch ms when the provider is expected to become available again. */
   nextAvailableAt?: number;
+  /** 上游最近一次上报的配额快照。 */
+  quota?: AgentQuota;
   /**
    * 仅收藏水化分支设置：非自有 agent 的属主 userId。toSafeAgentSummary →
    * resolveBillingSource 靠它识别 owner_subscription（缺失会被封顶成
@@ -152,6 +156,9 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
       : {}),
     ...(typeof record?.nextAvailableAt === "number" && Number.isFinite(record.nextAvailableAt)
       ? { nextAvailableAt: record.nextAvailableAt }
+      : {}),
+    ...(record?.quota && typeof record.quota === "object" && Array.isArray(record.quota.windows)
+      ? { quota: record.quota }
       : {}),
   };
 }
