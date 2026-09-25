@@ -5,6 +5,7 @@ import type {
 import type { PermissionRequest } from "./actionGate";
 import { canonicalizeToolName } from "../ai/tools/toolNameAliases";
 import { evaluateExecShellDestructiveGuard } from "./capabilities/capabilityPolicy";
+import { validateToolArguments } from "./toolArgumentGate";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -175,6 +176,16 @@ export async function executeLocalToolWithPolicy(args: {
    * 必然让另一种出问题——实测就是 desktop 侧破坏性命令直接执行。
    */
   blockDestructiveWithoutConfirmation?: boolean;
+  /**
+   * 分发前参数闸门（可选）：tool 名 → 该工具的原始 parameters schema。
+   * 提供时，在 executor 接手前做必填存在性 + 基础类型检查，失败抛出可纠正
+   * 的 tool 错误（local-tools 宿主会转成模型可见的 error 回执）。
+   * 缺省 / 查不到 schema 时跳过——渐进采纳，不改变未接入宿主的行为。
+   * 索引由 host 侧提供：getAgentRuntimeToolParametersIndex() 覆盖 workspace
+   * 与 nolo workspace 工具族，即闸门 v1 的全部范围；ai/tools registry 工具
+   * 刻意不接（前置 guard 契约原因，见 toolArgumentGate.ts 文件头「范围」）。
+   */
+  toolParametersIndex?: ReadonlyMap<string, unknown>;
 }): Promise<AgentRuntimeToolResult> {
   if (args.runToolNames !== undefined && !args.runToolNames.includes(normalizeLocalToolName(args.call.name))) {
     throw new Error(`${args.call.name} is outside the final run tool surface.`);
@@ -189,6 +200,18 @@ export async function executeLocalToolWithPolicy(args: {
   const executor = args.executors?.[decision.toolName];
   if (!executor) {
     throw new Error(`${decision.toolName} is allowed by policy but no local executor is registered.`);
+  }
+
+  // 参数闸门：在 executor 之前拦下缺必填/类型错的调用，错误经既有 tool-error
+  // 路径回执给模型自纠（local-tools 宿主），避免结构错误 args 被静默默认化。
+  const parametersSchema = args.toolParametersIndex?.get(decision.toolName);
+  if (parametersSchema !== undefined) {
+    const gate = validateToolArguments({
+      toolName: decision.toolName,
+      rawArguments: args.call.arguments,
+      parameters: parametersSchema,
+    });
+    if (!gate.ok) throw new Error(gate.message);
   }
   const opts: Record<string, unknown> = {
     ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),

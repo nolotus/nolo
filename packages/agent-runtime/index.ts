@@ -247,6 +247,12 @@ export {
   resolveLocalToolPolicy,
 } from "./localToolPolicy";
 export {
+  buildToolParametersIndex,
+  getAgentRuntimeToolParametersIndex,
+  validateToolArguments,
+  type ToolArgumentGateResult,
+} from "./toolArgumentGate";
+export {
   evaluateShellCommandPolicy,
   isDestructiveShellCommand,
 } from "./shellCommandPolicy";

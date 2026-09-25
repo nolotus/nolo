@@ -804,7 +804,14 @@ export function buildGeminiGenerateContentRequest(args: {
   const toolsResult = convertOpenAiToolsToGemini(args.tools);
   if (toolsResult) {
     request.tools = toolsResult;
-    request.toolConfig = { functionCallingConfig: { mode: "VALIDATED" } };
+    // AUTO 而非 VALIDATED：Gemini Schema proto 是 JSON Schema 严格子集
+    // （oneOf/anyOf/const/type 数组在线格式无法表达），sanitizeGeminiSchemaNode
+    // 必然有损。VALIDATED 用这份失真 schema 校验模型 args 会偶发误拒 →
+    // MALFORMED_FUNCTION_CALL 502 且 retryable=false（整条 run 崩）。
+    // AUTO 放弃上游 schema 校验；host 侧当前保留 JSON 合法性、工具 allowlist、
+    // policy/actionGate 与工具实现自身的参数检查，统一的原始-schema 校验待补
+    // （chatHandler 路径的 executeToolCall 不做 schema 校验）。
+    request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
   }
 
   const generationConfig: Record<string, unknown> = {};

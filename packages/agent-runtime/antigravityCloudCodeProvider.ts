@@ -177,7 +177,10 @@ function buildCloudCodeAssistPayload(args: AntigravityCloudCodeCallArgs) {
   );
   if (tools) {
     request.tools = tools;
-    request.toolConfig = { functionCallingConfig: { mode: "VALIDATED" } };
+    // AUTO：与 geminiNativeShared.ts 同理——净化后 schema 失真时 VALIDATED 会
+    // 误拒模型生成的合法 call（MALFORMED_FUNCTION_CALL 502）。host 侧当前保留
+    // JSON/allowlist/policy/工具级检查，统一 schema 校验待补。
+    request.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
   }
 
   const generationConfig: Record<string, unknown> = {};

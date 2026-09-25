@@ -1,4 +1,15 @@
 
+## 0.104.0-alpha.2
+
+## 0.104.0-alpha.2 (2026-09-25)
+
+### Bug Fixes
+
+* **agent-runtime:** add pre-dispatch tool argument gate for local tool surface ([24d9131](https://github.com/nolotus/bun-nolo/commit/24d913149d30e07d30119ea2de5181c67e85ee6f))
+* **agent-runtime:** switch Gemini functionCallingConfig from VALIDATED to AUTO ([1c1a2ad](https://github.com/nolotus/bun-nolo/commit/1c1a2ad6cf63aad440c77eeef9e3828c52aa7f63))
+* **chat:** prefer process-task label over opaque taskId in status line ([dde746e](https://github.com/nolotus/bun-nolo/commit/dde746e2a8abe0a5a193f129e7e690589a08827d))
+
+
 ## 0.104.0-alpha.1
 
 ## 0.104.0-alpha.1 (2026-09-25)

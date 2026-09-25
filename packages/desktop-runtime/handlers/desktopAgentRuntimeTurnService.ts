@@ -19,6 +19,7 @@ import {
   buildNoloWorkspaceOpenAiTools,
   createHybridRecordStore,
   executeLocalToolWithPolicy,
+  getAgentRuntimeToolParametersIndex,
   filterNoloWorkspaceToolNames,
   NOLO_WORKSPACE_TOOL_NAMES,
   parseSyncServersEnv,
@@ -1070,6 +1071,9 @@ export function createDesktopAgentRuntimeActions(args: {
           runToolNames: activeAgentToolNames,
           call,
           executors,
+          // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
+          // workspace）；registry 工具有各自的前置 guard 语义，不在此拦截。
+          toolParametersIndex: getAgentRuntimeToolParametersIndex(),
         }),
       });
     },
@@ -1081,6 +1085,8 @@ export function createDesktopAgentRuntimeActions(args: {
       runToolNames: activeAgentToolNames,
       call,
       executors,
+      // 分发前参数闸门：只覆盖 agent-runtime 工具族（见上处注释）。
+      toolParametersIndex: getAgentRuntimeToolParametersIndex(),
     }),
   });
 }

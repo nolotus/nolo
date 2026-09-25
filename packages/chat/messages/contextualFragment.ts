@@ -169,17 +169,30 @@ function summarizeBackgroundRunCompletion(text: string): ContextualFragmentSumma
  * 只报「几条 + 首条 taskId + 状态」。`exited` 之外（failed / stopped）都算失败态。
  */
 function summarizeBackgroundTaskCompletion(text: string): ContextualFragmentSummary {
-  const taskIds = [...text.matchAll(/\[Background task ([^ \]]+)/g)].map((m) => m[1]);
-  const statuses = [...text.matchAll(/status=(\w+)/g)].map((m) => m[1]);
+  // 按 task 行成对提取 taskId/label/status：label 锚定在本行括号内，避免
+  // (a) 首条无 label 时错拿后续任务的 label；(b) result capsule 正文里的
+  // `(label: "x")` 注入（stdout/stderr 原文随唤醒块携带）。
+  const tasks = [
+    ...text.matchAll(
+      /\[Background task ([^ \]]+?)(?:\s+\(label: "((?:[^"\\]|\\.)*)"\))? finished: status=(\w+)/g,
+    ),
+  ].map((m) => ({
+    taskId: m[1],
+    label: m[2] ? m[2].replace(/\\(["\\])/g, "$1") : "",
+    status: m[3],
+  }));
+  const statuses = tasks.map((t) => t.status);
   const failed = statuses.some((status) => status !== "exited");
   const icon = failed ? "✗" : "✓";
   const firstStatus = statuses[0] ?? "terminal";
-  const firstTaskId = taskIds[0] ?? "";
+  // label 是 launchProcess 时用户/agent 给的语义名（如「语法正确」），比
+  // ptask-xxx 这种无意义 id 更值得进状态行；没有 label 时退回 id。
+  const firstName = tasks[0]?.label || tasks[0]?.taskId || "";
   const statusLine =
-    taskIds.length > 1
-      ? `${icon} ${taskIds.length} 条后台进程任务已结束 · 首条 ${clipLabel(firstTaskId, 16)} ${firstStatus}`
+    tasks.length > 1
+      ? `${icon} ${tasks.length} 条后台进程任务已结束 · 首条 ${clipLabel(firstName, 20)} ${firstStatus}`
       : `${icon} 后台进程任务 ${firstStatus}${
-          firstTaskId ? ` · ${clipLabel(firstTaskId, 16)}` : ""
+          firstName ? ` · ${clipLabel(firstName, 20)}` : ""
         }`;
   return { kind: "background_task_completion", statusLine, failed, fullText: text };
 }

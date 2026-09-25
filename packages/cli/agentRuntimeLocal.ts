@@ -27,6 +27,8 @@ export {
   resolveRuntimeToolSurfaceForAgent,
   evaluateShellCommandPolicy,
   isDestructiveShellCommand,
+  buildToolParametersIndex,
+  getAgentRuntimeToolParametersIndex,
   shouldUsePlatformChatProvider,
   shouldCacheHybridRemoteRecord,
   shouldFetchAgentRuntimeRecordRemotely,

@@ -20,6 +20,7 @@ import { resolveExecShellDetachMs } from "../cliLocalToolBudget";
 import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
 import { executeLocalToolWithPolicy } from "../localToolPolicy";
+import { getAgentRuntimeToolParametersIndex } from "../../agentRuntimeLocal";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveCursorTransport: ProviderResolver = async (ctx) => {
@@ -58,6 +59,8 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
         agentToolNames: activeAgentToolNames,
         call,
         executors: localToolExecutors,
+        // 分发前参数闸门：与 host adapter 的 executeTool 同口径。
+        toolParametersIndex: getAgentRuntimeToolParametersIndex(),
         detachMs: resolveExecShellDetachMs(deps.env),
         ...(deps.confirmDestructiveAction
           ? { confirmDestructiveAction: deps.confirmDestructiveAction }

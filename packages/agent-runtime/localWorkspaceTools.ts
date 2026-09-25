@@ -334,8 +334,10 @@ function isPathInsideWorkspace(args: {
  * path preflight, which must extract the exact path the executor will open.
  */
 export const PATH_FIELD_ALIASES = ["path", "file_path", "filePath", "filename", "file", "target_file", "targetFile", "file_to_read", "fileToRead", "target_path", "read_path", "path_to_read", "pathToRead"] as const;
-const OLD_TEXT_FIELD_ALIASES = ["oldText", "old_string", "oldString", "search", "search_string", "find", "match"] as const;
-const NEW_TEXT_FIELD_ALIASES = ["newText", "new_string", "newString", "replacement", "replace"] as const;
+// OLD/NEW_TEXT 别名表同时被 toolArgumentGate.ts 的必填检查容忍表引用
+// （别名提供即视为已提供），改动这里两端同时生效。
+export const OLD_TEXT_FIELD_ALIASES = ["oldText", "old_string", "oldString", "search", "search_string", "find", "match"] as const;
+export const NEW_TEXT_FIELD_ALIASES = ["newText", "new_string", "newString", "replacement", "replace"] as const;
 const SEARCH_QUERY_FIELD_ALIASES = ["query", "search_query", "searchQuery", "q", "pattern", "search"] as const;
 
 /** Pick the first matching non-empty string value from args by trying a list of field names.

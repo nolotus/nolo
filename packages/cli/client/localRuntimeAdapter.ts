@@ -273,6 +273,7 @@ import {
 import { buildLocalAgentLookupKeys } from "./localAgentRecords";
 import { createCliHybridRecordStore } from "./hybridRecordStore";
 import { executeLocalToolWithPolicy } from "./localToolPolicy";
+import { getAgentRuntimeToolParametersIndex } from "../agentRuntimeLocal";
 import { inferCaptureIntent } from "../../ai/policy/runtimePolicy";
 import {
   TOOL_PACKS,
@@ -996,6 +997,11 @@ export function createCliLocalRuntimeAdapter(
         runToolNames: activeAgentToolNames,
         call: injectedCall,
         executors: localToolExecutors,
+        // 分发前参数闸门：只覆盖 agent-runtime 工具族（workspace + nolo
+        // workspace）。ai/tools registry 的工具不接——它们有各自的前置 policy
+        // guard 与结构化结果契约（例：createTable 的 capture 确认守卫），
+        // 闸门抢先拦截会覆盖这些语义（见 toolArgumentGate.ts 的范围说明）。
+        toolParametersIndex: getAgentRuntimeToolParametersIndex(),
         abortSignal: opts?.abortSignal,
         detachMs: resolveExecShellDetachMs(deps.env),
         ...(deps.confirmDestructiveAction
