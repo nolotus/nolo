@@ -18,8 +18,8 @@ export const DESKTOP_NAVIGATION_CHROME_CSS = `
   background: rgba(248, 250, 252, 0.94);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  app-region: drag;
-  -webkit-app-region: drag;
+  app-region: ${process.platform === "linux" ? "no-drag" : "drag"};
+  -webkit-app-region: ${process.platform === "linux" ? "no-drag" : "drag"};
 }
 #nolo-desktop-shellbar[data-platform="darwin"] {
   padding-left: 88px;
@@ -174,13 +174,13 @@ export const DESKTOP_WINDOW_CONTROLS_HTML = `
 export const DESKTOP_NAVIGATION_CHROME_HTML = `
 <div class="desktop-shellbar__brand" aria-hidden="true">Nolo Desktop<span class="desktop-shellbar__version" data-version></span></div>
 <div class="desktop-shellbar__nav">
-  <button class="electrobun-webkit-app-region-no-drag" type="button" data-action="download" aria-label="Downloads" title="Downloads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></button>
+
   <button class="electrobun-webkit-app-region-no-drag" type="button" data-action="back" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
   <button class="electrobun-webkit-app-region-no-drag" type="button" data-action="forward" aria-label="Forward" title="Forward"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
-  <button class="electrobun-webkit-app-region-no-drag" type="button" data-action="open-browser" aria-label="Open browser" title="Open browser"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18"></path><path d="M12 3a14 14 0 0 0 0 18"></path></svg></button>
+
   <button class="desktop-shellbar__updates electrobun-webkit-app-region-no-drag" type="button" data-action="updates" aria-label="Updates" title="Updates" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7 10 5 5 5-5"></path><path d="M5 20h14"></path></svg></button>
 </div>
-${process.platform === "darwin" ? "" : DESKTOP_WINDOW_CONTROLS_HTML}
+${process.platform === "darwin" || process.platform === "linux" ? "" : DESKTOP_WINDOW_CONTROLS_HTML}
 `;
 export const DESKTOP_NAVIGATION_CHROME_SCRIPT = `
 (() => {
@@ -340,7 +340,7 @@ export const DESKTOP_NAVIGATION_CHROME_SCRIPT = `
     if (target instanceof HTMLButtonElement && target.disabled) return;
     if (action === "back") globalThis.history?.back?.();
     if (action === "forward") globalThis.history?.forward?.();
-    if (action === "download") globalThis.location?.assign?.("/downloads");
+    // download button removed per user request
     if (action === "open-browser") {
       globalThis.__electrobunSendToHost?.({ type: "nolo-desktop-browser-action", action: "open" });
     }

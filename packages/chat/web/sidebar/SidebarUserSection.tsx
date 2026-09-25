@@ -64,6 +64,7 @@ const InviteRewards = cloudLazy<{ isOpen: boolean; onClose: () => void }>(
 import * as stylex from "@stylexjs/stylex";
 import { sidebarStyles } from "../sidebarStyles";
 import { withLiteralClass } from "../withLiteralClass";
+import { SidebarUpdateButton } from "./SidebarUpdateButton";
 import "../chatStylexEscapeHatch.css";
 
 const getNotificationIcon = (item: AppNotification) => {
@@ -513,6 +514,8 @@ export const SidebarUserSection: React.FC = () => {
       <div
         {...stylex.props(sidebarStyles.sidebarUserSectionActions)}
       >
+        {/* 更新（desktop only） */}
+        <SidebarUpdateButton />
         {/* 设置 */}
         <Tooltip content={t("settings.title", "设置")} placement="top" disabled={isMobile}>
           <button

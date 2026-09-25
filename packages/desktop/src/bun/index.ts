@@ -819,60 +819,64 @@ const isValidWorkArea = (workArea: DesktopWindowFrame) =>
   workArea.height > 0;
 
 const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
+  // Linux uses native window decoration, so maximize/restore is delegated to
+  // the window manager. Windows (hiddenInset, frameless) has no native chrome
+  // and needs manual workArea math to keep a maximized window on its monitor.
   let restoredFrame: DesktopWindowFrame | null = null;
   let appliedMaximizedFrame: DesktopWindowFrame | null = null;
 
   const maximizeDesktopWindow = () => {
-    if (mainWindow.isMaximized()) return;
-    if (process.platform === "win32") {
-      const currentFrame = mainWindow.getFrame();
-      const displays = Screen.getAllDisplays();
-      const centerX = currentFrame.x + currentFrame.width / 2;
-      const centerY = currentFrame.y + currentFrame.height / 2;
-      const display =
-        displays.find(
-          (candidate) =>
-            centerX >= candidate.bounds.x &&
-            centerX < candidate.bounds.x + candidate.bounds.width &&
-            centerY >= candidate.bounds.y &&
-            centerY < candidate.bounds.y + candidate.bounds.height,
-        ) ?? Screen.getPrimaryDisplay();
-      const workArea = display.workArea;
-      if (!isValidWorkArea(workArea)) {
-        console.warn("[desktop] cannot maximize: display work area is invalid", workArea);
-        return;
-      }
-      restoredFrame = currentFrame;
-      appliedMaximizedFrame = { ...workArea };
-      mainWindow.setFrame(workArea.x, workArea.y, workArea.width, workArea.height);
+    if (process.platform !== "win32") {
+      if (mainWindow.isMaximized()) return;
+      mainWindow.maximize();
       return;
     }
-    mainWindow.maximize();
+    if (mainWindow.isMaximized()) return;
+    const currentFrame = mainWindow.getFrame();
+    const displays = Screen.getAllDisplays();
+    const centerX = currentFrame.x + currentFrame.width / 2;
+    const centerY = currentFrame.y + currentFrame.height / 2;
+    const display =
+      displays.find(
+        (candidate) =>
+          centerX >= candidate.bounds.x &&
+          centerX < candidate.bounds.x + candidate.bounds.width &&
+          centerY >= candidate.bounds.y &&
+          centerY < candidate.bounds.y + candidate.bounds.height,
+      ) ?? Screen.getPrimaryDisplay();
+    const workArea = display.workArea;
+    if (!isValidWorkArea(workArea)) {
+      console.warn("[desktop] cannot maximize: display work area is invalid", workArea);
+      return;
+    }
+    restoredFrame = currentFrame;
+    appliedMaximizedFrame = { ...workArea };
+    mainWindow.setFrame(workArea.x, workArea.y, workArea.width, workArea.height);
   };
 
   const restoreDesktopWindow = () => {
-    if (process.platform === "win32") {
-      const currentFrame = mainWindow.getFrame();
-      if (!restoredFrame || !appliedMaximizedFrame) {
-        if (mainWindow.isMaximized()) {
-          mainWindow.unmaximize();
-        }
-        return;
-      }
-      if (!framesEqual(currentFrame, appliedMaximizedFrame)) {
-        restoredFrame = null;
-        appliedMaximizedFrame = null;
-        maximizeDesktopWindow();
-        return;
-      }
-      const frame = restoredFrame;
-      restoredFrame = null;
-      appliedMaximizedFrame = null;
-      mainWindow.setFrame(frame.x, frame.y, frame.width, frame.height);
+    if (process.platform !== "win32") {
+      if (!mainWindow.isMaximized()) return;
+      mainWindow.unmaximize();
       return;
     }
-    if (!mainWindow.isMaximized()) return;
-    mainWindow.unmaximize();
+    const currentFrame = mainWindow.getFrame();
+    if (!restoredFrame || !appliedMaximizedFrame) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      }
+      return;
+    }
+    if (!framesEqual(currentFrame, appliedMaximizedFrame)) {
+      restoredFrame = null;
+      appliedMaximizedFrame = null;
+      maximizeDesktopWindow();
+      return;
+    }
+    const frame = restoredFrame;
+    restoredFrame = null;
+    appliedMaximizedFrame = null;
+    mainWindow.setFrame(frame.x, frame.y, frame.width, frame.height);
   };
 
   mainWindow.webview.on("host-message", async (event) => {
@@ -979,6 +983,13 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
       mainWindow.close();
       return;
     }
+    if (action === "window-get-frame") {
+      const frame = mainWindow.getFrame();
+      mainWindow.webview.executeJavascript(
+        `globalThis.__noloDesktopWindowFrame = ${JSON.stringify(frame)};`,
+      );
+      return;
+    }
     if (action === "window-toggle-always-on-top") {
       mainWindow.setAlwaysOnTop(!mainWindow.isAlwaysOnTop());
       syncDesktopWindowState(mainWindow);
@@ -987,12 +998,12 @@ const setupDesktopWindowControls = (mainWindow: DesktopBrowserWindow) => {
     if (action === "window-toggle-visible-on-all-workspaces") {
       mainWindow.setVisibleOnAllWorkspaces(!mainWindow.isVisibleOnAllWorkspaces());
       syncDesktopWindowState(mainWindow);
+      return;
     }
   });
 };
 
 const setupDesktopNavigationChrome = (mainWindow: DesktopBrowserWindow) => {
-  setupDesktopWindowControls(mainWindow);
   installDesktopNavigationChrome(mainWindow);
   mainWindow.webview.on("dom-ready", () => {
     installDesktopNavigationChrome(mainWindow);
@@ -1257,7 +1268,8 @@ const initialFrame = resolveInitialWindowFrame({
   channelDir: desktopChannelDir,
   screen: Screen,
 });
-const shouldInstallInjectedDesktopChrome = true;
+// Linux uses native window decoration and borders; Windows/macOS retain injected shell chrome.
+const shouldInstallInjectedDesktopChrome = process.platform !== "linux";
 
 // Generic probe hook: optional initial path for Desktop E2E (production-off; unset in normal use).
 // Example: NOLO_DESKTOP_E2E_INITIAL_PATH=/create/local-agent
@@ -1265,9 +1277,9 @@ const e2eInitialPathRaw = process.env.NOLO_DESKTOP_E2E_INITIAL_PATH?.trim() || "
 const e2eInitialPath = e2eInitialPathRaw.startsWith("/")
   ? e2eInitialPathRaw
   : `/${e2eInitialPathRaw}`;
-const desktopShellQuery = `noloDesktop=1&noloDesktopTitlebar=${
-  shouldInstallInjectedDesktopChrome ? "shell" : "native"
-}`;
+// On Linux, use "native" so the native GTK titlebar handles window controls/borders/drag,
+// and the web TopBar renders history controls without duplicating window buttons.
+const desktopShellQuery = `noloDesktop=1&noloDesktopTitlebar=${process.platform === "linux" ? "native" : "shell"}`;
 const initialWindowUrl = `${serverUrl}${e2eInitialPath}${
   e2eInitialPath.includes("?") ? "&" : "?"
 }${desktopShellQuery}`;
@@ -1286,10 +1298,9 @@ const mainWindow = (() => {
       title: "Nolo Desktop",
       url: initialWindowUrl,
       frame: initialFrame,
-      // Linux has no inset native controls; hiddenInset leaves the compositor's
-      // titlebar above our injected shell. Use a borderless window there so the
-      // custom shell is the single titlebar.
-      titleBarStyle: process.platform === "linux" ? "hidden" : "hiddenInset",
+      // Use a default titlebar on Linux so the window gets a native resize
+      // border — "hidden" borderless windows have no GTK resize drag handle.
+      titleBarStyle: process.platform === "linux" ? "default" : "hiddenInset",
     });
     console.log("[desktop] BrowserWindow created");
     desktopDiag("window:create", "BrowserWindow created", {
@@ -1311,6 +1322,7 @@ if (isSmokeProbe) {
   console.log("[desktop] smoke probe mode enabled");
 }
 setupDesktopNavigationMenu(mainWindow as any);
+setupDesktopWindowControls(mainWindow as any);
 if (shouldInstallInjectedDesktopChrome) {
   setupDesktopNavigationChrome(mainWindow as any);
 }

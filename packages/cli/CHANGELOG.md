@@ -1,4 +1,13 @@
 
+## 0.103.0-alpha.2
+
+## 0.103.0-alpha.2 (2026-09-25)
+
+### Bug Fixes
+
+* **desktop:** use native window decoration on Linux for reliable resize and maximize ([a050c30](https://github.com/nolotus/bun-nolo/commit/a050c303ba47dc133a045e4e9e28f4c62adf855f))
+
+
 ## 0.103.0-alpha.1
 
 ## 0.103.0-alpha.1 (2026-09-25)
