@@ -1,4 +1,13 @@
 
+## 0.105.0-alpha.3
+
+## 0.105.0-alpha.3 (2026-09-25)
+
+### Bug Fixes
+
+* **cli:** include the in-flight turn when /links reads the transcript ([9aded37](https://github.com/nolotus/bun-nolo/commit/9aded37765a8c85f4c96df60e05a99d18e2a7b06))
+
+
 ## 0.105.0-alpha.2
 
 ## 0.105.0-alpha.2 (2026-09-25)

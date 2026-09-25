@@ -57,6 +57,34 @@ function trimUrl(raw: string): string {
 }
 
 /**
+ * Turns to scan, including the one still in progress.
+ *
+ * `history.turns` holds only finalized turns; the message just submitted (or
+ * the reply currently streaming) lives in currentRole/currentContent until the
+ * next turn starts. Found live in a TUI session: submitting a message with a
+ * URL and immediately running /links reported "no links yet" even though the
+ * URL was on screen, because the turn carrying it had not been finalized.
+ */
+export function collectConversationTurns(history: {
+  turns: ReadonlyArray<{ role?: string; content?: string }>;
+  currentRole?: string | null;
+  currentContent?: string;
+}): Array<{ role?: string; content?: string }> {
+  const turns = [...history.turns];
+  // Both conditions, matching the six other readers in this module: the
+  // invariant is that role and content are set/cleared in one synchronous
+  // step, so a content-bearing turn always has a role. Guarding on both keeps
+  // that assumption explicit rather than relying on it.
+  if (history.currentRole != null && history.currentContent) {
+    turns.push({
+      role: history.currentRole ?? undefined,
+      content: history.currentContent,
+    });
+  }
+  return turns;
+}
+
+/**
  * Collect distinct URLs across the conversation, in first-appearance order.
  * Duplicates keep their first index so re-numbering never shifts.
  */

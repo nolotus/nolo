@@ -94,6 +94,7 @@ import {
   replaceCollapsedPastesWithReferences,
 } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
+import { collectConversationTurns } from "./conversationLinks";
 import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
@@ -1804,7 +1805,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
 
       const beforeAgentKey = state.agentKey;
-      const res = handleTuiInput(submittedText, state, history.turns);
+      const res = handleTuiInput(submittedText, state, collectConversationTurns(history));
       if (res.action?.type === "paste-clipboard") {
         // turn 运行中也能 /paste：草稿本来就在 busy 期间保持可编辑，写入草稿安全
         // （不触碰 history 状态机，不排队）。与空闲路径共用同一份读取流程。
