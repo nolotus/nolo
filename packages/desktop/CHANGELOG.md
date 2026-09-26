@@ -1,4 +1,13 @@
 
+## 0.130.0-alpha.2
+
+## 0.130.0-alpha.2 (2026-09-26)
+
+### Bug Fixes
+
+* **cli:** guide users through the Google one-time verification instead of a dead end ([d5dd2bb](https://github.com/nolotus/bun-nolo/commit/d5dd2bbf93324ee89821efd88c35296a4e868971))
+
+
 ## 0.130.0-alpha.1
 
 ## 0.130.0-alpha.1 (2026-09-26)

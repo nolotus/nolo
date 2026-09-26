@@ -11,7 +11,7 @@ import { runDevinOAuthLogin } from "./flows/devin";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliRuntimeContext } from "../cliCommandTypes";
 import { defaultOpenBrowser } from "../authCommands";
-import type { OAuthFlowDeps, OAuthProvider } from "./types";
+import type { OAuthFlowDeps, OAuthProvider, OAuthRefreshFn } from "./types";
 import type {
   OAuthCredential,
   OAuthTokenStore,
@@ -29,6 +29,10 @@ import {
   saveProfileOAuthSync,
 } from "../client/profileConfig";
 import { parseFlagWithOptionalValue, upsertEnvVariable } from "./envFile";
+import { fetchAntigravityCloudCodeCompletion } from "../../agent-runtime/antigravityCloudCodeProvider";
+import { extractGoogleValidationLink } from "core/chat/validationUrl";
+import { refreshAntigravityOAuthToken } from "./flows/antigravity";
+import { resolveFreshAccessToken } from "../../agent-runtime/oauthTokenStore";
 
 export type ServerSyncConfig = {
   serverOrigin: string;
@@ -37,6 +41,12 @@ export type ServerSyncConfig = {
 
 export type AuthProviderCommandDeps = OAuthFlowDeps & {
   noBrowserByDefault?: boolean;
+  /**
+   * `--verify` 探测前刷新过期 antigravity token 用的实现；production 用真实
+   * refresh，测试注入 stub 以覆盖 refresh 成功/暂时失败/invalid_grant 分支
+   * （module mock 拦不到直接 import 的符号，依赖注入是这里唯一可靠的接缝）。
+   */
+  refreshAntigravityToken?: OAuthRefreshFn;
   /**
    * Optional store; production defaults to createOAuthTokenStore() with legacy
    * credential migration enabled explicitly (same composition as the local
@@ -132,7 +142,7 @@ This authorizes model API access only. It does NOT log you into the Nolo platfor
 To manage agents, docs, spaces, and other Nolo resources, run "nolo login" first.
 
 Usage:
-  nolo auth antigravity [--browser] [--no-browser] [--sync-to-server] [--help]
+  nolo auth antigravity [--browser] [--no-browser] [--verify] [--sync-to-server] [--help]
 
 Opens a browser to https://accounts.google.com (OIDC PKCE loopback on 127.0.0.1:51121).
 After approval, the flow provisions a Cloud Code Assist project and stores the
@@ -144,6 +154,8 @@ oh-my-pi; Google does not publish a public Cloud Code Assist client registration
 Options:
   --browser         Use the browser PKCE flow (default for antigravity).
   --no-browser      Print the authorization URL only.
+  --verify          Check the current Google one-time verification challenge
+                    and open the validation link in a browser (no re-auth).
 ${SYNC_HELP_LINE}
   --help, -h        Show this help and exit.
 
@@ -411,6 +423,7 @@ export async function runAuthProviderCommand(
   const useBrowser = args.includes("--browser");
   const noBrowser = args.includes("--no-browser") || deps.noBrowserByDefault;
   const syncOnly = args.includes("--sync-only");
+  const verify = args.includes("--verify");
   const generateToken = args.includes("--generate-token");
   const writeToEnvRaw = parseFlagWithOptionalValue(args, "--write-to-env");
   const writeToEnvPath =
@@ -431,6 +444,115 @@ export async function runAuthProviderCommand(
     }
     await syncCredentialToServer(provider, credential, deps);
     return 0;
+  }
+
+  // `nolo auth antigravity --verify` — 一次性账号验证引导。
+  //
+  // Google Cloud Code Assist 周期性用 HTTP 403 + VALIDATION_REQUIRED 拦调用，
+  // 链接在 `error.details[].metadata.validation_url`；用户拿到的报错只能
+  // 「看见」链接，点不了/复制不便。这里读本地凭证打一发最小调用拿到当前
+  // 有效的 validation_url，直接拉浏览器（等价于用户手动复制那行 URL）；
+  // 非 403 / 无链接时如实告知当前状态，不假装有事发生。
+  //
+  // 仅限 antigravity：其它 provider 的 403 语义不同，不套这个分支。
+  if (verify) {
+    if (provider !== "antigravity") {
+      error.error(`[nolo] --verify is only supported for "nolo auth antigravity".`);
+      return 1;
+    }
+    const credential = tokenStore.read(provider);
+    if (!credential?.accessToken) {
+      error.error(
+        `[nolo] No local antigravity credential. Run: nolo auth antigravity`
+      );
+      return 1;
+    }
+    output.log(
+      `[nolo] Checking the current verification challenge (one lightweight request)...`
+    );
+    // 走与 agent transport 相同的 fresh-token 语义：过期 token 先 refresh 再
+    // 打上游，否则旧 token 拿 401 会误导用户去重新登录而拿不到验证链接。
+    let accessToken: string | null = null;
+    let refreshError: string | undefined;
+    try {
+      accessToken = await resolveFreshAccessToken({
+        provider,
+        store: tokenStore,
+        refresh: deps.refreshAntigravityToken ?? refreshAntigravityOAuthToken,
+      });
+    } catch (err) {
+      refreshError = toErrorMessage(err);
+      // 永久性 OAuth 失败（refresh token 被撤销/无效/过期）没救：旧 token
+      // 只会拿到 401，直接把恢复动作说清，不再浪费一次上游请求。
+      // 判据覆盖 OAuth 标准错误码与常见自然语言措辞（error_description 可能是
+      // "refresh token has expired" 这类，光看 token 字样会漏）。
+      if (
+        /invalid_grant|unauthorized_client|revoked|invalid_token|refresh[_ ]token[^.]*(expired|invalid|revoked)|expired[^.]*refresh/i.test(
+          refreshError,
+        )
+      ) {
+        error.error(
+          `[nolo] The antigravity refresh token is no longer valid (${refreshError}). Re-run \`nolo auth antigravity\` to re-authorize this account.`
+        );
+        return 1;
+      }
+      // 其余（网络/超时/5xx）回退本地 token 试一发——refresh 失败不代表上游
+      // 就没有验证挑战；旧 token 真 401 时再带 refresh 上下文一起报。
+    }
+    let result;
+    try {
+      result = await fetchAntigravityCloudCodeCompletion({
+        agentConfig: { model: "gemini-3.1-pro" } as never,
+        accessToken: accessToken ?? credential.accessToken,
+        metadata: (credential.metadata as Record<string, unknown>) ?? null,
+        openAiBody: { messages: [{ role: "user", content: "hi" }] },
+        fetchImpl: deps.fetchImpl ?? fetch,
+      });
+    } catch (err) {
+      // 区分本地结构错（缺 projectId 等，fetch 前就抛）和网络错（fetch 内抛）：
+      // 前者是凭证不完整要 re-auth，后者才是"够不到上游"。
+      const msg = toErrorMessage(err);
+      if (/projectId|metadata\.projectId|Re-run `nolo auth/i.test(msg)) {
+        error.error(
+          `[nolo] The stored antigravity credential is incomplete (${msg}). Re-run \`nolo auth antigravity\` to re-authorize.`
+        );
+      } else {
+        error.error(
+          `[nolo] Could not reach the antigravity provider: ${msg}. Check your network and retry.`
+        );
+      }
+      return 1;
+    }
+    if (result.status >= 200 && result.status < 300) {
+      output.log(
+        `[nolo] ✓ The credential is working — no verification is required right now. You can retry your agent.`
+      );
+      return 0;
+    }
+    const { url: validationUrl } = extractGoogleValidationLink(
+      JSON.stringify(result.body ?? {})
+    );
+    if (result.status === 403 && validationUrl) {
+      output.log(
+        `[nolo] Google requires a one-time account verification for ${credential.accountId ?? "this account"}.`
+      );
+      output.log(`[nolo]   ${validationUrl}`);
+      // --no-browser 与其它 auth 子命令语义一致：只打印链接不自动拉起。
+      const opener = noBrowser ? undefined : (deps.openBrowser ?? defaultOpenBrowser);
+      const opened = opener ? await opener(validationUrl) : false;
+      output.log(
+        opened
+          ? `[nolo] ✓ Opened it in your browser — complete the verification there (sign in with the same Google account), then retry your agent.`
+          : `[nolo] Copy the URL above into a browser signed into ${credential.accountId ?? "that account"}, complete the verification, then retry your agent.`
+      );
+      return 0;
+    }
+    error.error(
+      `[nolo] The provider returned HTTP ${result.status} without a verification link — this is not the one-time-verification case --verify handles.` +
+        (refreshError ? ` (token refresh also failed earlier: ${refreshError})` : "") +
+        ` Response detail: ${JSON.stringify(result.body ?? {}).slice(0, 400)}`
+    );
+    return 1;
   }
 
   const flowDeps: OAuthFlowDeps = {

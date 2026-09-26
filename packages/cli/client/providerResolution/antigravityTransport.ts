@@ -95,8 +95,12 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
         // 401/403 一次 refresh-retry（仅 credential 实际变化才重试）。
         // credential source 保持 local（resolveLocalAntigravityCredential）。
         // transport retry（fetchWithTransientRetry）与 stream retry 维持现状。
-        const resolveLocalCredential = async ({ forceRefresh }: { forceRefresh: boolean }) =>
-          resolveLocalAntigravityCredential({
+        // 记录最近一次实际用于请求的 credential：VALIDATION_REQUIRED 引导文案
+        // 要指名 Google 账号邮箱（"signed into <email>"），refresh-retry 后可能
+        // 已不是 initialCredential。
+        let lastUsedCredential = initialCredential;
+        const resolveLocalCredential = async ({ forceRefresh }: { forceRefresh: boolean }) => {
+          const resolved = await resolveLocalAntigravityCredential({
             credentialOwnerUserId,
             apiKeyRefResolver,
             apiKeyRef: agentConfig.apiKeyRef,
@@ -104,6 +108,9 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
             migration: legacyCredentialMigration,
             forceRefresh,
           });
+          lastUsedCredential = resolved;
+          return resolved;
+        };
 
         let result;
         try {
@@ -183,9 +190,17 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
               : typeof upstreamError?.message === "string"
                 ? upstreamError.message
                 : JSON.stringify(result.body);
-          throw new Error(
+          const failure = new Error(
             `local antigravity provider failed: HTTP ${result.status} ${errMsg}`,
           );
+          // VALIDATION_REQUIRED 引导文案要指名 Google 账号（"signed into <email>"），
+          // 账号在凭证里不在报错文本里——挂到 Error 上让 describeLocalRunFailure 读，
+          // 沿用 cooldownUntil/dialogId 挂错误的既有模式。
+          if (lastUsedCredential?.accountId) {
+            (failure as Error & { credentialAccountId?: string }).credentialAccountId =
+              lastUsedCredential.accountId;
+          }
+          throw failure;
         }
         // AntigravitySemanticResult is the primary source of truth;
         // legacy result.body serves as a compatibility / assertion fallback.

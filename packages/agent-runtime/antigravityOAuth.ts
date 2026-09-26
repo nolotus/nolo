@@ -222,12 +222,27 @@ export async function refreshAntigravityToken(
   }
 
   if (!response.ok) {
-    const detail =
-      typeof payload.error_description === "string" && payload.error_description.trim()
+    // OAuth 错误码（`invalid_grant` 等）是分类「永久失败需重新授权 vs 暂时
+    // 失败可重试」的唯一权威依据；`error_description` 常是泛化的 "Bad Request"。
+    // 两者都保留，只取其一会把永久失效误判成可重试。
+    // 实证：Google 返回 {"error":"invalid_grant","error_description":"Bad Request"}，
+    // 旧实现只留下 "Bad Request"，调用方无法识别 refresh token 已失效。
+    const errorCode =
+      typeof payload.error === "string" && payload.error.trim()
+        ? payload.error.trim()
+        : undefined;
+    const errorDescription =
+      typeof payload.error_description === "string" &&
+      payload.error_description.trim()
         ? payload.error_description.trim()
-        : typeof payload.error === "string" && payload.error.trim()
-          ? payload.error.trim()
-          : rawBodyText.trim() || `HTTP ${response.status}`;
+        : undefined;
+    // 注意用 `||` 收口：空 body 时 rawBodyText.trim() 是空字符串（非 nullish），
+    // `??` 不会跳过它，会把 "HTTP <status>" 兜底吃掉。
+    const detail =
+      (errorCode && errorDescription && errorDescription !== errorCode
+        ? `${errorCode}: ${errorDescription}`
+        : errorCode ?? errorDescription ?? rawBodyText.trim()) ||
+      `HTTP ${response.status}`;
     throw new Error(`Antigravity token refresh failed: ${detail}`);
   }
 

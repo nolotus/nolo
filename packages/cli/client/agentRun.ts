@@ -763,6 +763,12 @@ type FailureCtx = {
    * dialogId 挂错误上的既有模式）；undefined = 未命中 rate-limit 或落盘跳过。
    */
   cooldownUntil?: string;
+  /**
+   * VALIDATION_REQUIRED 引导要指名 Google 账号邮箱：transport 把凭证里的
+   * accountId 挂到 Error.credentialAccountId 上（refresh-retry 后可能换号，
+   * 故取最后实际使用的那份）。undefined = 非 antigravity 或凭证无账号信息。
+   */
+  credentialAccountId?: string;
 };
 
 function buildAuthFailure(ctx: FailureCtx): string {
@@ -797,24 +803,30 @@ function buildAuthFailure(ctx: FailureCtx): string {
   const { url: validationUrl, text: validationText } =
     extractGoogleValidationLink(ctx.message);
   const validationLabel = validationText || "Verify your account";
-  const validationHint = validationUrl
-    ? `\n  ⓘ This provider requires a one-time account verification. Open this link in a browser signed into that account, then retry:\n    ${formatCliHyperlink(
-        validationUrl,
-        validationLabel,
-      )}` +
-      // A 200-char Google url wraps on a narrow terminal, and a wrapped link
-      // loses its hit area in several terminals — so even when the clickable
-      // form is available, the raw url still gets its own copyable line. (In
-      // the disabled path `label (url)` already carries it.)
-      (resolveCliHyperlinkEnabled() ? `\n    或复制此链接: ${validationUrl}` : "")
-    : "";
+
+  // 一次性账号验证是完全不同的一条恢复路径：凭证没坏（OAuth token 仍有效），
+  // 用户缺的是「去 Google 点一下验证」。继续报 "auth rejected / Fix the local
+  // credential" 会把人引向重登录这个错误动作——2026-09-26 实证：用户看到
+  // credential 字眼以为 token 过期，实际只需浏览器里点一下。
+  if (validationUrl) {
+    const linkLine = `\n    ${formatCliHyperlink(validationUrl, validationLabel)}`;
+    const rawLine = resolveCliHyperlinkEnabled()
+      ? `\n    点不了就复制这行: ${validationUrl}`
+      : "";
+    const verifyHint = `\n  ⓘ 想一键打开？跑 \`nolo auth antigravity --verify\` —— 它会用本地凭证拿到当前验证链接并直接拉起浏览器。`;
+    const retryLine = `\n  验证完成后直接重试刚才的命令即可，token 不用重新登录。`;
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}: Google requires a one-time account verification — your credential is fine).` +
+      `\n  Open this link in a browser signed into ${ctx.credentialAccountId ? `\`${ctx.credentialAccountId}\`` : "the Google account behind this credential"}:` +
+      `${linkLine}${rawLine}${verifyHint}${retryLine}` +
+      `\n  Detail: ${ctx.message} ` +
+      `${NO_FALLBACK} Use --server to run on the server explicitly.\n`
+    );
+  }
 
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, auth rejected).` +
-    // 只有真带验证链接时才让 Detail 换行——否则普通 401/403 的输出格式
-    // 会凭空多一行，任何依赖既有排版的断言/文档都要跟着改。
-    `${validationHint ? `${validationHint}\n  ` : " "}` +
-    `Detail: ${ctx.message} ` +
+    ` Detail: ${ctx.message} ` +
     `${NO_FALLBACK} ${fix}, ${SERVER_FALLBACK_HINT}.\n`
   );
 }
@@ -930,6 +942,14 @@ export function describeLocalRunFailure(
   message: string,
   rawError?: unknown,
 ): string {
+  const credentialAccountId =
+    rawError &&
+    typeof rawError === "object" &&
+    typeof (rawError as { credentialAccountId?: unknown }).credentialAccountId ===
+      "string"
+      ? ((rawError as { credentialAccountId: string }).credentialAccountId.trim() ||
+        undefined)
+      : undefined;
   if (
     rawError &&
     typeof rawError === "object" &&
@@ -1088,6 +1108,7 @@ export function describeLocalRunFailure(
     ...(cls.statusInferred ? { statusInferred: true } : {}),
     ...(cls.quotaExhausted ? { quotaExhausted: true } : {}),
     ...(cooldownUntil ? { cooldownUntil } : {}),
+    ...(credentialAccountId ? { credentialAccountId } : {}),
   };
   return FAILURE_BUILDERS[cls.kind](ctx);
 }
