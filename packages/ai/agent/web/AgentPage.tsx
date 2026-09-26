@@ -83,6 +83,8 @@ import {
   LuLock,
   LuBrain,
   LuCopy,
+  LuPlay,
+  LuPause,
 } from "react-icons/lu";
 import { formatPriceAmount } from "ai/llm/getPricing";
 import {
@@ -98,9 +100,12 @@ import {
   resolveAgentCreatorSummary,
   toNonEmptyString,
   toTimestamp,
+  automationTriggerHasSchedule,
+  describeAutomationTrigger,
   type AgentDialogHistoryEntry,
   type AgentEmailBindingSummary,
   type ClientAgentThreadsResponse,
+  type ClientAutomationTrigger,
   type AgentThreadOverviewEntry,
 } from "./agentDisplayUtils";
 import { resolveAgentBadgeMeta } from "./agentBadges";
@@ -165,13 +170,10 @@ interface ClientAgentAutomation {
     runStatus: "idle" | "running" | "done" | "failed" | "never";
     lastErrorMessage?: string;
   };
-  trigger: {
-    type: "cron";
-    expression: string;
-    timezone?: string;
-    nextWakeAt: number;
-  };
+  trigger: ClientAutomationTrigger;
+  instruction?: string;
   spaceId?: string;
+  createdAt?: string;
   updatedAt: string;
   lastRunAt?: number;
   lastRunError?: string;
@@ -750,6 +752,67 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
       cancelled = true;
     };
   }, [currentKey, currentToken, server, activityRefreshCounter]);
+
+  const [automationMutationPendingKey, setAutomationMutationPendingKey] =
+    useState<string | null>(null);
+
+  /**
+   * PATCH (edit/pause/resume) or DELETE one automation, then refresh the
+   * list. Keeps the server-side ownership/validation rules authoritative —
+   * the UI only decides *which* fields to send.
+   */
+  const mutateAutomation = useCallback(
+    async (
+      automationKey: string,
+      init:
+        | { method: "PATCH"; body: Record<string, unknown> }
+        | { method: "DELETE" },
+    ): Promise<boolean> => {
+      if (!currentToken || !server) return false;
+      const serverOrigin = String(server).replace(/\/+$/, "");
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${currentToken}`,
+      };
+      let url = `${serverOrigin}/api/agent/automations`;
+      let requestInit: RequestInit;
+      if (init.method === "DELETE") {
+        url += `?automationKey=${encodeURIComponent(automationKey)}`;
+        requestInit = { method: "DELETE", headers };
+      } else {
+        headers["Content-Type"] = "application/json";
+        requestInit = {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ ...init.body, automationKey }),
+        };
+      }
+      setAutomationMutationPendingKey(automationKey);
+      try {
+        const res = await fetch(url, requestInit);
+        const payload = (await res.json().catch(() => null)) as
+          | { ok?: boolean; error?: { message?: string } }
+          | null;
+        if (!res.ok || payload?.ok === false) {
+          toast.error(
+            payload?.error?.message ||
+              t("agentAutomationMutationFailed", "操作失败"),
+          );
+          return false;
+        }
+        setActivityRefreshCounter((n) => n + 1);
+        return true;
+      } catch {
+        toast.error(t("agentAutomationMutationFailed", "操作失败"));
+        return false;
+      } finally {
+        setAutomationMutationPendingKey(null);
+      }
+    },
+    [currentToken, server, t],
+  );
+
+  const [pendingAutomationDeleteKey, setPendingAutomationDeleteKey] =
+    useState<string | null>(null);
 
   const historySpaceNameById = useMemo(
     () =>
@@ -1555,6 +1618,25 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                             const lastError =
                               automation.summary?.lastErrorMessage ??
                               automation.lastRunError;
+                            const triggerDescription =
+                              describeAutomationTrigger(automation.trigger);
+                            const hasSchedule = automationTriggerHasSchedule(
+                              automation.trigger,
+                            );
+                            // Email triggers have no nextWakeAt — only
+                            // render the "next run" segment for schedulers.
+                            const nextWakeAt = hasSchedule
+                              ? (automation.summary?.nextWakeAt ??
+                                (automation.trigger as { nextWakeAt?: number })
+                                  .nextWakeAt)
+                              : undefined;
+                            const isPaused = automation.status === "paused";
+                            const mutationPending =
+                              automationMutationPendingKey ===
+                              automation.automationKey;
+                            const toggleLabel = isPaused
+                              ? t("agentAutomationResume", "启用")
+                              : t("agentAutomationPause", "暂停");
 
                             return (
                               <div
@@ -1562,39 +1644,109 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                                 {...stylex.props(styles.threadItem)}
                                 data-hook="thread-item"
                               >
-                                <span
-                                  {...stylex.props(styles.threadTitle)}
-                                  data-hook="thread-title"
-                                >
-                                  {automation.title ||
-                                    t(
-                                      "agentAutomationUntitled",
-                                      "未命名自动化",
-                                    )}
-                                </span>
-                                <span {...stylex.props(styles.threadMeta)}>
-                                  {lifecycleLabel} · {runStatusLabel}
-                                  {" · "}
-                                  {t("agentAutomationNextRun", "下一次运行")}：
-                                  {formatDateValue(
-                                    automation.summary?.nextWakeAt ??
-                                      automation.trigger?.nextWakeAt,
-                                    "yyyy-MM-dd HH:mm",
-                                  )}
-                                  {" · "}
-                                  {t("agentAutomationLastRun", "上次运行")}：
-                                  {(automation.summary?.lastRunAt ??
-                                  automation.lastRunAt)
-                                    ? formatDateValue(
-                                        automation.summary?.lastRunAt ??
-                                          automation.lastRunAt,
-                                        "yyyy-MM-dd HH:mm",
-                                      )
-                                    : t("agentAutomationNeverRun", "从未运行")}
-                                  {lastError
-                                    ? ` · ${t("agentAutomationError", "错误")}：${lastError}`
-                                    : ""}
-                                </span>
+                                <div {...stylex.props(styles.threadRow)}>
+                                  <div {...stylex.props(styles.threadTextCol)}>
+                                    <span
+                                      {...stylex.props(styles.threadTitle)}
+                                      data-hook="thread-title"
+                                    >
+                                      {automation.title ||
+                                        t(
+                                          "agentAutomationUntitled",
+                                          "未命名自动化",
+                                        )}
+                                    </span>
+                                    <span {...stylex.props(styles.threadMeta)}>
+                                      {lifecycleLabel} · {runStatusLabel}
+                                      {" · "}
+                                      {triggerDescription}
+                                      {nextWakeAt !== undefined
+                                        ? ` · ${t("agentAutomationNextRun", "下一次运行")}：${formatDateValue(nextWakeAt, "yyyy-MM-dd HH:mm")}`
+                                        : ""}
+                                      {" · "}
+                                      {t("agentAutomationLastRun", "上次运行")}：
+                                      {(automation.summary?.lastRunAt ??
+                                      automation.lastRunAt)
+                                        ? formatDateValue(
+                                            automation.summary?.lastRunAt ??
+                                              automation.lastRunAt,
+                                            "yyyy-MM-dd HH:mm",
+                                          )
+                                        : t("agentAutomationNeverRun", "从未运行")}
+                                      {lastError
+                                        ? ` · ${t("agentAutomationError", "错误")}：${lastError}`
+                                        : ""}
+                                    </span>
+                                  </div>
+                                  {canEdit ? (
+                                    <span
+                                      {...stylex.props(styles.threadActions)}
+                                    >
+                                      <button
+                                        type="button"
+                                        {...stylex.props(
+                                          styles.threadActionBtn,
+                                        )}
+                                        data-hook="automation-toggle-btn"
+                                        disabled={mutationPending}
+                                        onClick={() =>
+                                          void mutateAutomation(
+                                            automation.automationKey,
+                                            {
+                                              method: "PATCH",
+                                              body: {
+                                                status: isPaused
+                                                  ? "active"
+                                                  : "paused",
+                                              },
+                                            },
+                                          )
+                                        }
+                                        title={toggleLabel}
+                                        aria-label={toggleLabel}
+                                      >
+                                        {isPaused ? (
+                                          <LuPlay
+                                            size={14}
+                                            aria-hidden="true"
+                                          />
+                                        ) : (
+                                          <LuPause
+                                            size={14}
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        {...stylex.props(
+                                          styles.threadActionBtn,
+                                          styles.threadActionBtnDanger,
+                                        )}
+                                        data-hook="automation-delete-btn"
+                                        disabled={mutationPending}
+                                        onClick={() =>
+                                          setPendingAutomationDeleteKey(
+                                            automation.automationKey,
+                                          )
+                                        }
+                                        title={t(
+                                          "agentAutomationDelete",
+                                          "删除自动化",
+                                        )}
+                                        aria-label={t(
+                                          "agentAutomationDelete",
+                                          "删除自动化",
+                                        )}
+                                      >
+                                        <LuTrash2
+                                          size={14}
+                                          aria-hidden="true"
+                                        />
+                                      </button>
+                                    </span>
+                                  ) : null}
+                                </div>
                               </div>
                             );
                           })}
@@ -1742,6 +1894,27 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
         confirmText={t("delete", "删除")}
         cancelText={t("cancel", "取消")}
         loading={isDeletingDialog}
+      />
+      <ConfirmModal
+        isOpen={pendingAutomationDeleteKey !== null}
+        onClose={() => setPendingAutomationDeleteKey(null)}
+        onConfirm={() => {
+          const key = pendingAutomationDeleteKey;
+          setPendingAutomationDeleteKey(null);
+          if (key) void mutateAutomation(key, { method: "DELETE" });
+        }}
+        title={t("agentAutomationDelete", "删除自动化")}
+        message={t(
+          "agentAutomationDeleteConfirmation",
+          "确定要删除这个自动化吗？删除后不会再触发新的运行，此操作不可撤销。",
+        )}
+        type="error"
+        confirmText={t("delete", "删除")}
+        cancelText={t("cancel", "取消")}
+        loading={
+          pendingAutomationDeleteKey !== null &&
+          automationMutationPendingKey === pendingAutomationDeleteKey
+        }
       />
       <Dialog
         isOpen={isManageModalOpen}

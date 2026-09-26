@@ -1,4 +1,13 @@
 
+## 0.131.0-alpha.1
+
+## 0.131.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **agent:** email automation acceptAll filters, update/delete tools, and web management ([dc813b8](https://github.com/nolotus/bun-nolo/commit/dc813b82bf71b6ae1efcc6a27feb1fcf49181e23))
+
+
 ## 0.130.0-alpha.2
 
 ## 0.130.0-alpha.2 (2026-09-26)

@@ -10,6 +10,8 @@ const HIDDEN_ORCHESTRATOR_TOOL_NAMES: Record<string, true> = {};
 const HIDDEN_SERVER_ONLY_BROWSER_TOOL_NAMES: Record<string, true> = {
   queryModelUsage: true,
   createAgentAutomation: true,
+  updateAgentAutomation: true,
+  deleteAgentAutomation: true,
   notifyUser: true,
 };
 

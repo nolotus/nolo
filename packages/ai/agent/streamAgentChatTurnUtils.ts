@@ -74,6 +74,8 @@ import { resolveToolBaseUrl } from "ai/tools/toolApiClient";
 
 const BROWSER_UNAVAILABLE_CORE_TOOLS: Record<string, true> = {
     createAgentAutomation: true,
+    updateAgentAutomation: true,
+    deleteAgentAutomation: true,
     notifyUser: true,
 };
 

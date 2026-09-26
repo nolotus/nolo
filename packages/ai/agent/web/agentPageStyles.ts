@@ -926,6 +926,51 @@ export const agentPageStyles = stylex.create({
     fontWeight: 400,
     color: "var(--textTertiary)",
   },
+  threadRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-2)",
+    minWidth: 0,
+  },
+  threadTextCol: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    minWidth: 0,
+    flex: 1,
+  },
+  threadActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-1)",
+    flexShrink: 0,
+  },
+  threadActionBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "var(--backgroundHover)",
+    },
+    borderWidth: 0,
+    color: {
+      default: "var(--textTertiary)",
+      ":hover": "var(--text)",
+    },
+    padding: "var(--space-1)",
+    borderRadius: "var(--radius-sm, 6px)",
+    cursor: "pointer",
+    transitionProperty: "color, background",
+    transitionDuration: "0.15s",
+    transitionTimingFunction: "ease",
+  },
+  threadActionBtnDanger: {
+    color: {
+      default: "var(--textTertiary)",
+      ":hover": "var(--danger, #ef4444)",
+    },
+  },
   stateIndicator: {
     minHeight: "min(50vh, 360px)",
     alignItems: "center",

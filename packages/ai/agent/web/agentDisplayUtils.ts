@@ -520,3 +520,63 @@ export const buildAgentEmailBindingSummary = (
     identities,
   };
 };
+
+/**
+ * Client-side automation trigger shape. Mirrors the server contract in
+ * `ai/tools/agentAutomationTypes.ts` — kept as a local structural type so
+ * the web bundle doesn't import the server-side tool registry. Runtime
+ * values come from `/api/agent/automations` and are narrowed defensively
+ * in `describeAutomationTrigger`.
+ */
+export type ClientAutomationTrigger =
+  | {
+      type: "cron";
+      expression: string;
+      timezone?: string;
+      nextWakeAt?: number;
+    }
+  | {
+      type: "email";
+      acceptAll?: boolean;
+      fromContains?: string;
+      subjectContains?: string;
+      fromContainsAny?: string[];
+      subjectContainsAny?: string[];
+    };
+
+const quoteList = (values: string[]) =>
+  values.map((v) => `"${v}"`).join(" / ");
+
+/**
+ * Human-readable one-liner describing when an automation fires.
+ * Accepts `unknown` because the payload crosses the network boundary —
+ * a malformed trigger should render as "邮件" rather than crash the page.
+ */
+export const describeAutomationTrigger = (raw: unknown): string => {
+  const trigger = asRecordOrEmpty(raw);
+  const type = toNonEmptyString(trigger.type);
+  if (type === "cron") {
+    const expression = toNonEmptyString(trigger.expression) ?? "";
+    const timezone = toNonEmptyString(trigger.timezone);
+    return timezone ? `定时 ${expression} (${timezone})` : `定时 ${expression}`;
+  }
+  if (type !== "email") return "邮件";
+
+  if (trigger.acceptAll === true) return "所有收到的邮件";
+
+  const parts: string[] = [];
+  const fromContains = toNonEmptyString(trigger.fromContains);
+  if (fromContains) parts.push(`发件人包含 "${fromContains}"`);
+  const subjectContains = toNonEmptyString(trigger.subjectContains);
+  if (subjectContains) parts.push(`主题包含 "${subjectContains}"`);
+  const fromAny = asNonEmptyStringArray(trigger.fromContainsAny);
+  if (fromAny.length > 0) parts.push(`发件人包含 ${quoteList(fromAny)} 之一`);
+  const subjectAny = asNonEmptyStringArray(trigger.subjectContainsAny);
+  if (subjectAny.length > 0) parts.push(`主题包含 ${quoteList(subjectAny)} 之一`);
+
+  return parts.length > 0 ? parts.join(" 且 ") : "邮件（未设置条件）";
+};
+
+/** Trigger kinds that schedule themselves (have a `nextWakeAt`). */
+export const automationTriggerHasSchedule = (raw: unknown): boolean =>
+  toNonEmptyString(asRecordOrEmpty(raw).type) === "cron";

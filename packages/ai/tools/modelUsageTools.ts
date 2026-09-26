@@ -142,7 +142,7 @@ export const queryUserGrowthReportFunctionSchema = {
 export const createAgentAutomationFunctionSchema = {
   name: "createAgentAutomation",
   description:
-    "创建长期 agent automation。支持 cron 定时触发，以及按发件人/主题预过滤的新邮件事件触发。email 触发只在代码过滤命中后启动后台 Agent run。",
+    "创建长期 agent automation。支持 cron 定时触发，以及新邮件事件触发（可设 acceptAll 接收全部邮件，或按发件人/主题过滤；*Any 数组字段内部 OR、字段之间 AND）。email 触发只在代码过滤命中后启动后台 Agent run。",
   parameters: {
     type: "object",
     properties: {
@@ -186,6 +186,64 @@ export const createAgentAutomationFunctionSchema = {
       },
     },
     required: ["instruction", "trigger"],
+  },
+};
+
+export const updateAgentAutomationFunctionSchema = {
+  name: "updateAgentAutomation",
+  description:
+    "部分更新一个 agent automation。只允许 owner user（automation 创建者）且 owner agent（automation 的 ownerAgentKey）调用。" +
+    "可更新字段：title、instruction、status（active/paused）、trigger（email trigger 会被重新归一化）、spaceId、subjectRefs。" +
+    "不可更新：id、dbKey、ownerAgentKey、createdBy、createdAt、runStatus。",
+  parameters: {
+    type: "object",
+    properties: {
+      automationKey: {
+        type: "string",
+        description: "automation 的 dbKey（agent-automation-{userId}-{id}）。",
+      },
+      title: { type: "string", description: "新标题。" },
+      instruction: { type: "string", description: "新 instruction。" },
+      status: {
+        type: "string",
+        enum: ["active", "paused"],
+        description: "automation 状态。paused 时 dispatcher 不再触发 run。",
+      },
+      trigger: agentAutomationTriggerSchema,
+      spaceId: { type: "string", description: "新的 spaceId；传空字符串清除。" },
+      subjectRefs: {
+        type: "array",
+        description: "新的 subjectRefs；传空数组清除。",
+        items: {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            id: { type: "string" },
+            role: { type: "string" },
+          },
+          required: ["kind", "id"],
+          additionalProperties: true,
+        },
+      },
+    },
+    required: ["automationKey"],
+  },
+};
+
+export const deleteAgentAutomationFunctionSchema = {
+  name: "deleteAgentAutomation",
+  description:
+    "删除一个 agent automation（含 owner index）。只允许 owner user（automation 创建者）且 owner agent 调用。" +
+    "重复删除已不存在的 automation 返回 deleted:false, reason:not_found —— 是幂等 no-op。",
+  parameters: {
+    type: "object",
+    properties: {
+      automationKey: {
+        type: "string",
+        description: "automation 的 dbKey（agent-automation-{userId}-{id}）。",
+      },
+    },
+    required: ["automationKey"],
   },
 };
 
@@ -234,4 +292,6 @@ const serverOnlyResult = (toolName: string) => ({
 export const queryModelUsageFunc = async () => serverOnlyResult("queryModelUsage");
 export const queryUserGrowthReportFunc = async () => serverOnlyResult("queryUserGrowthReport");
 export const createAgentAutomationFunc = async () => serverOnlyResult("createAgentAutomation");
+export const updateAgentAutomationFunc = async () => serverOnlyResult("updateAgentAutomation");
+export const deleteAgentAutomationFunc = async () => serverOnlyResult("deleteAgentAutomation");
 export const notifyUserFunc = async () => serverOnlyResult("notifyUser");

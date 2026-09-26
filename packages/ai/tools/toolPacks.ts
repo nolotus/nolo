@@ -32,6 +32,8 @@ export const TOOL_PACKS = {
     "updateSelf",
     "ask_user",
     "createAgentAutomation",
+    "updateAgentAutomation",
+    "deleteAgentAutomation",
     "notifyUser",
   ],
   // L2 - 联网搜索：与 CAPABILITY_PACKS「web-search」对齐。
