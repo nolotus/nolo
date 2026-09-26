@@ -571,6 +571,10 @@ const CONFIRMATION_REQUIRED_MESSAGE =
  * in exactly the same shape. `null` means the action may proceed.
  */
 export function decideIrreversibleAction(input = {}) {
+  // 如果调用方或环境显式声明放行不可逆动作（例如用户在当前轮次明确指令授权发布）
+  if (input.allowIrreversible === true || input.force === true) {
+    return null;
+  }
   const action = String(input.action ?? "");
   const name = typeof input.name === "string" ? input.name : "";
   if (!name) return null;

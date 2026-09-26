@@ -1,4 +1,13 @@
 
+## 0.134.0-alpha.1
+
+## 0.134.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **skills:** add xhs-publisher skill and upgrade chrome-connector & x-publisher ([bf54b12](https://github.com/nolotus/bun-nolo/commit/bf54b12db4f364253b158b8d4edc870611424272))
+
+
 ## 0.133.0-alpha.1
 
 ## 0.133.0-alpha.1 (2026-09-26)

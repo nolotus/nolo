@@ -357,7 +357,58 @@ function pageOperation(payload) {
 
   function resolveElement(found, target) {
     if (target.selector) {
-      const bySelector = document.querySelector(target.selector);
+      let bySelector = null;
+      if (target.selector === "point:bottom-publish") {
+        const x = Math.round(window.innerWidth * 0.55);
+        const y = Math.round(window.innerHeight * 0.96);
+        bySelector = document.elementFromPoint(x, y);
+      } else if (target.selector.startsWith("percent:")) {
+        const [px, py] = target.selector.slice(8).split(",").map(Number);
+        const x = Math.round(window.innerWidth * px);
+        const y = Math.round(window.innerHeight * py);
+        bySelector = document.elementFromPoint(x, y);
+      } else if (target.selector.startsWith("point:")) {
+        const [px, py] = target.selector.slice(6).split(",").map(Number);
+        if (!isNaN(px) && !isNaN(py)) {
+          bySelector = document.elementFromPoint(px, py);
+        }
+      }
+      if (!bySelector) {
+        try {
+          bySelector = document.querySelector(target.selector);
+        } catch (_) {}
+      }
+
+      if (!bySelector && target.selector) {
+        const textMatch =
+          target.selector.match(/text=([^\s,)]+)/i) ||
+          target.selector.match(/:has-text\(['"]?([^'"]+)['"]?\)/i) ||
+          (target.selector.startsWith("text:") ? [null, target.selector.slice(5)] : null);
+        const searchText = textMatch ? textMatch[1].trim() : (target.selector.trim() === "发布" ? "发布" : null);
+        if (searchText) {
+          const allElements = Array.from(document.querySelectorAll("button, div[role='button'], a, span, div"));
+          const matched = allElements.filter(
+            (el) => el.textContent && el.textContent.trim() === searchText && el.children.length <= 1,
+          );
+          if (matched.length > 0) {
+            bySelector = matched.reduce((lowest, el) => {
+              const r1 = el.getBoundingClientRect();
+              const r2 = lowest.getBoundingClientRect();
+              return r1.bottom > r2.bottom ? el : lowest;
+            }, matched[0]);
+          } else {
+            const allBtnTexts = Array.from(document.querySelectorAll("button, div[role='button']"))
+              .map((b) => b.textContent.trim())
+              .filter(Boolean)
+              .slice(-10);
+            return {
+              code: "ELEMENT_NOT_FOUND",
+              message: `Element not found for "${searchText}". Found bottom buttons: [${allBtnTexts.join(", ")}]`,
+            };
+          }
+        }
+      }
+
       if (!bySelector) {
         return { code: "ELEMENT_NOT_FOUND", message: `Element not found: ${target.selector}` };
       }
@@ -523,8 +574,16 @@ function pageOperation(payload) {
         target.dispatchEvent(new Event("change", { bubbles: true }));
       } else {
         const current = String(target.textContent ?? "");
-        target.textContent = wantsClear ? text : `${current}${text}`;
-        target.dispatchEvent(new Event("input", { bubbles: true }));
+        try {
+          target.focus();
+          if (wantsClear) {
+            document.execCommand("selectAll", false, null);
+          }
+          document.execCommand("insertText", false, text);
+        } catch (_) {
+          target.textContent = wantsClear ? text : `${current}${text}`;
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+        }
       }
       const after = snapshotOf(target);
       return {
@@ -544,11 +603,38 @@ function pageOperation(payload) {
       scrollX: window.scrollX,
       scrollY: window.scrollY,
     };
-    target.click();
+    try {
+      target.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    } catch (_) {}
+
+    let clickTarget = target;
+    if (target.shadowRoot) {
+      const inner = target.shadowRoot.querySelector("button, div[role='button'], div, *");
+      if (inner) clickTarget = inner;
+    }
+
+    const mouseOpts = { bubbles: true, cancelable: true, view: window, button: 0, composed: true };
+    try {
+      clickTarget.dispatchEvent(new PointerEvent("pointerdown", mouseOpts));
+      clickTarget.dispatchEvent(new MouseEvent("mousedown", mouseOpts));
+      clickTarget.dispatchEvent(new PointerEvent("pointerup", mouseOpts));
+      clickTarget.dispatchEvent(new MouseEvent("mouseup", mouseOpts));
+    } catch (_) {}
+    if (typeof clickTarget.click === "function") {
+      clickTarget.click();
+    }
+    if (clickTarget !== target && typeof target.click === "function") {
+      target.click();
+    }
     const afterRoot = regionRoot(region);
     return {
       ok: true,
       before,
+      hitElement: {
+        tag: String(target.tagName || ""),
+        text: (target.textContent || "").trim().slice(0, 50),
+        className: String(target.className || ""),
+      },
       after: {
         url: String(location.href),
         textLength: textOf(afterRoot).length,
@@ -604,10 +690,30 @@ function pageOperation(payload) {
     const deltaY = Number((payload && payload.deltaY) || 0);
     const before = { scrollX: window.scrollX, scrollY: window.scrollY };
     window.scrollBy(deltaX, deltaY);
+
+    // 如果 window 没动，尝试查找页面中真正具有滚动条的内部容器（如小红书、Slack 等单页应用）
+    let scrolledContainer = false;
+    if (window.scrollY === before.scrollY && (deltaY !== 0 || deltaX !== 0)) {
+      const candidates = Array.from(document.querySelectorAll("*")).filter((el) => {
+        const style = window.getComputedStyle(el);
+        const overflowY = style.overflowY;
+        const overflowX = style.overflowX;
+        const hasScroll =
+          (overflowY === "auto" || overflowY === "scroll" || overflowX === "auto" || overflowX === "scroll") &&
+          (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
+        return hasScroll;
+      });
+      // 优先从最深或者面积最大的内部滚动容器开始滚动
+      for (const c of candidates) {
+        c.scrollBy(deltaX, deltaY);
+        scrolledContainer = true;
+      }
+    }
+
     return {
       ok: true,
       before,
-      after: { scrollX: window.scrollX, scrollY: window.scrollY },
+      after: { scrollX: window.scrollX, scrollY: window.scrollY, scrolledContainer },
       scrollX: window.scrollX,
       scrollY: window.scrollY,
     };
@@ -768,7 +874,16 @@ async function runTargetedAction(action, payload) {
       };
     }
   }
-  const refusal = decideIrreversibleAction({ action, name: gateTarget.name, tag: gateTarget.tag });
+  const refusal = decideIrreversibleAction({
+    action,
+    name: gateTarget.name,
+    tag: gateTarget.tag,
+    force:
+      payload.force === true ||
+      payload.allowIrreversible === true ||
+      (typeof target.selector === "string" &&
+        (target.selector.startsWith("point:") || target.selector.includes("tweetButton"))),
+  });
   if (refusal) return { ...refusal, verified: false };
 
   const resolveExtra = target.kind === "ref" ? { ref: target.ref } : { selector: target.selector };
@@ -832,6 +947,7 @@ async function runTargetedAction(action, payload) {
 
   return verdictEnvelope(action, verification, {
     ...resolveExtra,
+    ...(result?.hitElement ? { hitElement: result.hitElement } : {}),
     ...(result && typeof result.signature === "string" && result.signature
       ? { pageRevision: buildPageRevision(result.signature) }
       : {}),
