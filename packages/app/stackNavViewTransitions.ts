@@ -13,11 +13,10 @@ import { enableNextRouteViewTransition, prefersReducedMotion } from "./viewTrans
  * whose path pair satisfies `stackNavDirectionForPaths` — mirroring the
  * plaza↔detail `shouldAutoRouteViewTransition` precedent. Callers that
  * navigate programmatically may also opt in explicitly via
- * `enableNextStackNavViewTransition`.
- *
- * Direction is published on <html> as `data-nolo-stack-nav="push|pop"` so
- * the CSS in chat/web/stackNavViewTransition.css can pick the animation
- * pair. The router clears both attributes on transition.finished.
+ * `enableNextStackNavViewTransition`, which arms the route-VT flag only;
+ * the direction stamp is always written by the router after it resolves
+ * the from/to pair, so a stale direction can never survive a navigation
+ * that is not a stack-nav edge (e.g. detail→detail).
  *
  * Degradation: reduced motion, missing document, or no startViewTransition
  * all no-op here (the underlying flag setter already guards), and browsers
@@ -90,18 +89,16 @@ export const setStackNavDirection = (dir: StackNavDirection | null): void => {
 export const clearStackNavDirection = (): void => setStackNavDirection(null);
 
 /**
- * Explicit opt-in for the next navigation: arms the route-VT flag AND stamps
- * the direction. Equivalent to the router's auto-detect, use it for
- * programmatic navigate() calls when you already know the intent.
+ * Explicit opt-in for the next navigation: arms the route-VT flag ONLY.
+ * The direction stamp (`data-nolo-stack-nav`) is the router's job — it is
+ * written by the history subscriber after `stackNavDirectionForPaths`
+ * resolves the real from/to pair, and cleared for any navigation that is
+ * not a stack-nav edge. Keeping direction out of this helper means callers
+ * can never leave a stale "push" behind on a detail→detail hop.
  * Safe no-op under SSR / reduced motion / missing VT API.
  */
-export const enableNextStackNavViewTransition = (
-  dir: StackNavDirection,
-): void => {
+export const enableNextStackNavViewTransition = (): void => {
   if (typeof document === "undefined") return;
   if (prefersReducedMotion()) return;
   enableNextRouteViewTransition();
-  if (document.documentElement.dataset.noloRouteViewTransition === "1") {
-    setStackNavDirection(dir);
-  }
 };

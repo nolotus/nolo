@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -36,6 +37,13 @@ import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
 import { localFirstLog } from "app/localFirst/localFirstLog";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedString } from "core/trimmedString";
+import {
+  quickCreateBackTarget,
+  quickCreateStepDirection,
+  quickCreateStepForState,
+  runQuickCreateStepTransition,
+  type QuickCreateStep,
+} from "./quickCreateStepViewTransitions";
 import "./LocalQuickCreateAgent.css";
 
 /** Top-level user intent — plain language, not provider taxonomy. */
@@ -159,14 +167,14 @@ const LocalQuickCreateAgent = () => {
   const [error, setError] = useState<string | null>(null);
   const [installedClis, setInstalledClis] = useState<CliProvider[]>([]);
   const [cliScanBusy, setCliScanBusy] = useState(false);
+  /** The wizard's step surface — the element that slides on a step change. */
+  const stepPanelRef = useRef<HTMLDivElement | null>(null);
 
-  const step: "path" | "membership" | "source" | "form" = !path
-    ? "path"
-    : path === "membership" && !membershipAccess
-      ? "membership"
-      : !sourceKey
-        ? "source"
-        : "form";
+  const step: QuickCreateStep = quickCreateStepForState({
+    path,
+    membershipAccess,
+    sourceKey,
+  });
 
   const candidates = useMemo(() => {
     if (!path) return [];
@@ -218,54 +226,109 @@ const LocalQuickCreateAgent = () => {
     [sourceKey],
   );
 
-  const pickSource = useCallback((key: string) => {
-    const d = getAgentSourceDescriptor(key);
-    setSourceKey(key);
-    setError(null);
-    setShowEndpointFields(false);
-    if (!d) return;
-    setModel(d.form.model ?? "");
-    setBaseUrl(d.form.customProviderUrl ?? "");
-    if (!d.requiresApiKey) setApiKey("");
-  }, []);
+  /**
+   * Every step move goes through here: the runner slides the step surface in
+   * the direction of travel (forward → in from the right, back → in from the
+   * left) and degrades to an instant switch under reduced motion / SSR /
+   * browsers without the View Transitions API.
+   */
+  const goToStep = useCallback(
+    (target: QuickCreateStep, update: () => void) => {
+      runQuickCreateStepTransition({
+        direction: quickCreateStepDirection(step, target),
+        panel: stepPanelRef.current,
+        update,
+      });
+    },
+    [step],
+  );
 
-  const choosePath = useCallback((next: LocalCreatePath) => {
-    setPath(next);
-    setMembershipAccess(null);
-    setSourceKey(null);
-    setApiKey("");
-    setError(null);
-    setShowEndpointFields(false);
-    localFirstLog("quickCreate.path", { path: next });
-  }, []);
+  const pickSource = useCallback(
+    (key: string) => {
+      const d = getAgentSourceDescriptor(key);
+      goToStep(
+        quickCreateStepForState({ path, membershipAccess, sourceKey: key }),
+        () => {
+          setSourceKey(key);
+          setError(null);
+          setShowEndpointFields(false);
+          if (!d) return;
+          setModel(d.form.model ?? "");
+          setBaseUrl(d.form.customProviderUrl ?? "");
+          if (!d.requiresApiKey) setApiKey("");
+        },
+      );
+    },
+    [membershipAccess, path, goToStep],
+  );
 
-  const chooseMembershipAccess = useCallback((access: MembershipAccess) => {
-    setMembershipAccess(access);
-    setSourceKey(null);
-    setApiKey("");
-    setError(null);
-    setShowEndpointFields(false);
-    localFirstLog("quickCreate.membershipAccess", { access });
-  }, []);
+  const choosePath = useCallback(
+    (next: LocalCreatePath) => {
+      goToStep(
+        quickCreateStepForState({
+          path: next,
+          membershipAccess: null,
+          sourceKey: null,
+        }),
+        () => {
+          setPath(next);
+          setMembershipAccess(null);
+          setSourceKey(null);
+          setApiKey("");
+          setError(null);
+          setShowEndpointFields(false);
+        },
+      );
+      localFirstLog("quickCreate.path", { path: next });
+    },
+    [goToStep],
+  );
+
+  const chooseMembershipAccess = useCallback(
+    (access: MembershipAccess) => {
+      goToStep(
+        quickCreateStepForState({
+          path,
+          membershipAccess: access,
+          sourceKey: null,
+        }),
+        () => {
+          setMembershipAccess(access);
+          setSourceKey(null);
+          setApiKey("");
+          setError(null);
+          setShowEndpointFields(false);
+        },
+      );
+      localFirstLog("quickCreate.membershipAccess", { access });
+    },
+    [path, goToStep],
+  );
 
   const goBack = useCallback(() => {
-    setError(null);
-    if (step === "form") {
-      setSourceKey(null);
-      return;
-    }
-    if (step === "source") {
-      if (path === "membership") {
-        setMembershipAccess(null);
-      } else {
+    // Boundary: the first step has nothing behind it, so nothing moves.
+    const target = quickCreateBackTarget(step, path);
+    if (!target) return;
+
+    goToStep(target, () => {
+      setError(null);
+      if (step === "form") {
+        setSourceKey(null);
+        return;
+      }
+      if (step === "source") {
+        if (path === "membership") {
+          setMembershipAccess(null);
+        } else {
+          setPath(null);
+        }
+        return;
+      }
+      if (step === "membership") {
         setPath(null);
       }
-      return;
-    }
-    if (step === "membership") {
-      setPath(null);
-    }
-  }, [step, path]);
+    });
+  }, [goToStep, step, path]);
 
   const displayName = useMemo(() => {
     const trimmed = name.trim();
@@ -368,7 +431,11 @@ const LocalQuickCreateAgent = () => {
 
   return (
     <div className="local-quick-create" data-testid="local-quick-create">
-      <div className="local-quick-create__card">
+      <div
+        className="local-quick-create__card"
+        data-quick-create-step-panel
+        ref={stepPanelRef}
+      >
         <header className="local-quick-create__header">
           {step !== "path" ? (
             <button

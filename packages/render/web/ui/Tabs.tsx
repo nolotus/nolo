@@ -63,7 +63,14 @@ export function findPanelElement(
   panelId?: string,
   panelSelector?: string
 ): HTMLElement | null {
-  if (registeredPanelEl && registeredPanelEl.isConnected) {
+  // Exclude panels that are mid-exit ([data-exiting]) from the fast path too —
+  // a quick A→B→A reversal inside react-aria's ~400ms exit window would
+  // otherwise re-name a panel that is still animating out.
+  if (
+    registeredPanelEl &&
+    registeredPanelEl.isConnected &&
+    !registeredPanelEl.hasAttribute('data-exiting')
+  ) {
     return registeredPanelEl;
   }
   if (panelId) {

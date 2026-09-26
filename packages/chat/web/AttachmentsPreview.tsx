@@ -8,6 +8,10 @@ import type { PendingFile } from "../dialog/dialogSlice";
 import { removePendingFile } from "../dialog/dialogSlice";
 import DocxPreviewDialog from "render/web/ui/modal/DocxPreviewDialog";
 import TablePreviewDialog from "render/web/ui/modal/TablePreviewDialog";
+import {
+  ATTACHMENT_ITEM_KEY_ATTRIBUTE,
+  runAttachmentViewTransition,
+} from "./attachmentViewTransitions";
 
 
 export interface PendingImagePreview {
@@ -213,6 +217,41 @@ const ATTACHMENTS_PREVIEW_STYLES = `
     opacity: 0.6;
     pointer-events: none;
   }
+
+  :root[data-nolo-attachment-transition="1"]::view-transition-group(*) {
+    animation-duration: 280ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  :root[data-nolo-attachment-transition="1"]::view-transition-old(*) {
+    animation: attachment-thumb-shrink-away 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  :root[data-nolo-attachment-transition="1"]::view-transition-new(*) {
+    animation: attachment-thumb-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes attachment-thumb-pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.65);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes attachment-thumb-shrink-away {
+    0% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+  }
 `;
 
 /**
@@ -236,6 +275,7 @@ const ImageItem: React.FC<ImageItemProps> = memo(
     return (
       <div
         className={`attachment-item image-item ${isMobile ? "mobile" : ""}`}
+        {...{ [ATTACHMENT_ITEM_KEY_ATTRIBUTE]: `img-${image.id}` }}
         role="group"
         aria-label={`图片附件 ${index + 1}`}
       >
@@ -288,7 +328,9 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
 
   const handleRemoveFile = useCallback(
     (id: string) => {
-      dispatch(removePendingFile(id));
+      runAttachmentViewTransition(() => {
+        dispatch(removePendingFile(id));
+      });
     },
     [dispatch]
   );
@@ -356,6 +398,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
             <div
               key={file.id}
               className={itemClassName}
+              {...{ [ATTACHMENT_ITEM_KEY_ATTRIBUTE]: `file-${file.id}` }}
               role="group"
               aria-label={`文件附件 ${file.name}`}
             >

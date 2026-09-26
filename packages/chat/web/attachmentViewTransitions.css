@@ -1,0 +1,57 @@
+/* packages/chat/web/attachmentViewTransitions.css
+ * Attachment thumbnail morph animations (Pop in / Shrink away / FLIP)
+ * Reference: Morph UI (https://morph-ui.anmol16.workers.dev/)
+ */
+
+:root[data-nolo-attachment-transition="1"]::view-transition-group(*) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-nolo-attachment-transition="1"]::view-transition-old(*) {
+  animation: attachment-thumb-shrink-away 200ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+:root[data-nolo-attachment-transition="1"]::view-transition-new(*) {
+  animation: attachment-thumb-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Exclude the whole-page root snapshot so each attachment transition does not
+   shrink/fade the entire view. MUST come after the old/new(*) wildcard rules:
+   same specificity, later declaration wins — declared earlier the wildcard
+   animation overrides it and the root snapshot still shrinks away. */
+:root[data-nolo-attachment-transition="1"]::view-transition-group(root),
+:root[data-nolo-attachment-transition="1"]::view-transition-old(root),
+:root[data-nolo-attachment-transition="1"]::view-transition-new(root) {
+  animation: none;
+}
+
+@keyframes attachment-thumb-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes attachment-thumb-shrink-away {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-nolo-attachment-transition="1"]::view-transition-group(*),
+  :root[data-nolo-attachment-transition="1"]::view-transition-old(*),
+  :root[data-nolo-attachment-transition="1"]::view-transition-new(*) {
+    animation: none !important;
+  }
+}

@@ -336,9 +336,11 @@ export function RouterProvider({
         if ((autoPlazaDetailVt || stackNavDir !== null) && doc?.documentElement) {
           doc.documentElement.dataset.noloRouteViewTransition = "1";
         }
-        if (stackNavDir) {
-          setStackNavDirection(stackNavDir);
-        }
+        // The router is the single source of truth for the direction stamp:
+        // resolve it from the from/to pair for every VT'd navigation and
+        // clear it when the pair is not a stack-nav edge, so a stale
+        // direction can never leak into a detail→detail or unrelated hop.
+        setStackNavDirection(stackNavDir);
         const transition = doc.startViewTransition(() => {
           flushSync(() => {
             setLocation({ ...h.currentLocation });
@@ -358,6 +360,9 @@ export function RouterProvider({
             clearStackNavDirection();
           });
       } else {
+        // Non-transition navigations must never observe a leftover direction
+        // stamp (REPLACE hops, VT-less browsers, non-opted-in PUSH pairs).
+        clearStackNavDirection();
         setLocation({ ...h.currentLocation });
         setNavType(h.type);
       }

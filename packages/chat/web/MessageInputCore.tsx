@@ -53,6 +53,7 @@ import { useAutoResizeTextarea } from "app/hooks/useAutoResizeTextarea";
 import { useElementSizeVar } from "app/hooks/useElementSizeVar";
 import { shouldDeferEnterForIme } from "app/utils/ime";
 import { viewTransitionStyle, QUICK_CHAT_COMPOSER_VT_NAME } from "app/viewTransitions";
+import { runAttachmentViewTransition } from "./attachmentViewTransitions";
 import type { Agent } from "app/types";
 import { getApproxPricePerImage, type ImageSizeKey } from "ai/llm/imagePricing";
 import { useFavoriteAgentIds } from "app/favorite/favoriteStore";
@@ -232,10 +233,35 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
 
   const [pastedBlocks, setPastedBlocks] = useState<CollapsedPasteBlock[]>([]);
 
+  const processImagesWithTransition = useCallback(
+    (files: File[]) => {
+      runAttachmentViewTransition(() => {
+        hookProcessImages(files);
+      });
+    },
+    [hookProcessImages]
+  );
+
+  const removeImageWithTransition = useCallback(
+    (id: string) => {
+      runAttachmentViewTransition(() => {
+        hookRemoveImage(id);
+      });
+    },
+    [hookRemoveImage]
+  );
+
   const clearInput = useCallback(() => {
-    clearInputBase();
-    setPastedBlocks([]);
-  }, [clearInputBase]);
+    if (imgPreviews.length > 0 || pendingFiles.length > 0) {
+      runAttachmentViewTransition(() => {
+        clearInputBase();
+        setPastedBlocks([]);
+      });
+    } else {
+      clearInputBase();
+      setPastedBlocks([]);
+    }
+  }, [clearInputBase, imgPreviews.length, pendingFiles.length]);
 
   const textRef = useRef(text);
   useEffect(() => {
@@ -265,7 +291,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     pendingFilesWithStatus,
     processFiles,
     clearFileStatus,
-  } = useMessageInputFiles(hookProcessImages, {
+  } = useMessageInputFiles(processImagesWithTransition, {
     dispatch,
     t,
     ocrModel,
@@ -1005,7 +1031,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         <MessageInputAttachmentsPanel
           imagePreviews={imgPreviews as PendingImagePreview[]}
           pendingFiles={pendingFilesWithStatus}
-          onRemoveImage={hookRemoveImage}
+          onRemoveImage={removeImageWithTransition}
           processingFiles={processingFileIds}
           isMobile={isMobile}
         />
@@ -1027,7 +1053,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     [
       imgPreviews,
       pendingFilesWithStatus,
-      hookRemoveImage,
+      removeImageWithTransition,
       processingFileIds,
       isMobile,
       resolvedImageUiConfig,

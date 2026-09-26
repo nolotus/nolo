@@ -22,7 +22,7 @@ import {
   ListLayout,
 } from "react-aria-components/Virtualizer";
 import { SidebarFluidHoverLayer } from "./SidebarFluidHoverLayer";
-import { sidebarRowViewTransitionName } from "./sidebarViewTransitions";
+import { SIDEBAR_ROW_CONTENT_KEY_ATTRIBUTE } from "./sidebarViewTransitions";
 import "./sidebarViewTransitions.css";
 
 /**
@@ -164,13 +164,15 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
           <ListBoxItem
             id={item.contentKey}
             textValue={item.title}
+            // Row lookup key for runSidebarViewTransition: it tags/clears
+            // view-transition-name per mounted row only for the duration of a
+            // sidebar transition (avoids permanent names inflating every
+            // document-level VT snapshot; see sidebarViewTransitions.ts).
+            {...{ [SIDEBAR_ROW_CONTENT_KEY_ATTRIBUTE]: item.contentKey }}
             style={{
               height: rowSize,
               minHeight: 0,
               boxSizing: "border-box",
-              ...(sidebarRowViewTransitionName(item.contentKey)
-                ? { viewTransitionName: sidebarRowViewTransitionName(item.contentKey) }
-                : {}),
             }}
             onContextMenu={(event) => {
               // 只处理事件本身就发生在 ListBoxItem 上的情况 —— 即键盘 Shift+F10 /

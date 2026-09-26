@@ -1,0 +1,121 @@
+/* packages/render/web/ui/NumberFlip.css
+ *
+ * Number Flip：数值变化时只滚动发生变化的数位（参考 Morph UI Number Flip）。
+ * 颜色 / 字体 / 字号全部继承调用方，这里只负责布局与滚动动画。
+ *
+ * 结构
+ *   .nf-root    行内盒子：与前后文字同基线排布
+ *   .nf-col     单个数字的视口（高 = 一行，用 clip-path 裁剪）
+ *   .nf-sizer   隐藏的「0」：提供列宽与行盒基线（轨道绝对定位，不参与布局）
+ *   .nf-track   0-9 纵向轨道，translateY 滚到目标数字
+ *
+ * 为什么是 clip-path 而不是 overflow: hidden：
+ *   overflow 非 visible 会把盒子的基线改成「底边」，数字会比周围文字高出一截；
+ *   clip-path 不参与基线计算，同时一样裁掉视口外的数字。
+ */
+
+.nf-root {
+  --nf-line: 1.25em; /* 视口高度 = 一行 */
+  --nf-duration: 480ms; /* 滚动时长，由 duration prop 覆盖 */
+  --nf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  line-height: var(--nf-line);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  color: inherit;
+}
+
+.nf-col {
+  position: relative;
+  display: block;
+  flex: none;
+  height: var(--nf-line);
+  clip-path: inset(0);
+}
+
+/* 行盒度量统一：隐藏的 sizer、静态分隔符、轨道单元同一行高，
+ * 三者的基线才会落在同一位置。 */
+.nf-sizer,
+.nf-static,
+.nf-cell {
+  line-height: var(--nf-line);
+}
+
+.nf-sizer {
+  visibility: hidden; /* 占位但不可见（保留行盒与基线） */
+}
+
+.nf-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  text-align: center;
+  /* 百分比相对轨道自身高度（10 格）→ 每格 10%，正好滚一个数字 */
+  transform: translateY(calc(var(--nf-digit, 0) * -10%));
+  transition: transform var(--nf-duration) var(--nf-ease);
+  transition-delay: var(--nf-delay, 0ms);
+  will-change: transform;
+}
+
+.nf-cell {
+  display: block;
+  height: var(--nf-line);
+}
+
+.nf-static {
+  flex: none;
+  white-space: pre; /* 保留 locale 分隔符里的空格 / 窄不换行空格 */
+  text-align: center;
+}
+
+/* 新增数位（位数变化，如 9.99 → 12.50）从上方落入 */
+@keyframes nf-col-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.45em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nf-col[data-new="true"] {
+  animation: nf-col-enter 280ms var(--nf-ease) both;
+}
+
+/* 无障碍：整串数字给读屏（视觉数位已 aria-hidden） */
+.nf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* prefers-reduced-motion：即时跳变（CSS 兜底，覆盖系统偏好在运行中切换的场景） */
+.nf-root[data-reduced-motion="true"] .nf-track {
+  transition: none;
+}
+
+.nf-root[data-reduced-motion="true"] .nf-col[data-new="true"] {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nf-root .nf-track {
+    transition: none;
+  }
+
+  .nf-root .nf-col[data-new="true"] {
+    animation: none;
+  }
+}

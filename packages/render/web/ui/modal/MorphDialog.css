@@ -1,0 +1,47 @@
+.morph-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 42%);
+}
+
+.morph-dialog__content {
+  width: min(720px, 100%);
+  max-height: min(800px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid var(--borderLight, #e5e7eb);
+  border-radius: var(--radius-xl, 20px);
+  background: var(--background, #fff);
+  box-shadow: 0 28px 80px rgb(0 0 0 / 28%);
+}
+
+.morph-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 12px;
+}
+
+.morph-dialog__header h2 { margin: 0; font-size: var(--fontSize-lg, 1.125rem); }
+.morph-dialog__close { border: 0; background: transparent; cursor: pointer; font-size: 24px; line-height: 1; }
+.morph-dialog__body { padding: 12px 24px 24px; }
+
+@keyframes morph-dialog-in {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* The shared element's generated pseudo-elements inherit the browser's
+   default cross-fade; the dynamic name is intentionally not hard-coded here. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .morph-dialog__content { animation: morph-dialog-in 180ms ease-out; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .morph-dialog, .morph-dialog__content { animation: none !important; transition: none !important; }
+}

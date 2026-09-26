@@ -131,7 +131,7 @@ const CategorySection: React.FC<CategorySectionProps> = ({
         userId: currentUserId ?? undefined,
         spaceId: currentSpaceId ?? undefined,
       });
-      if (isDialogDetailPath(to)) enableNextStackNavViewTransition("push");
+      if (isDialogDetailPath(to)) enableNextStackNavViewTransition();
       navigate(to);
     },
     [items, navigate, currentUserId, currentSpaceId]

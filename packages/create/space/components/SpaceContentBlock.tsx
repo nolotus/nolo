@@ -18,7 +18,6 @@ import { useTranslation } from "react-i18next";
 import Button from "render/web/ui/Button";
 import { getCompactFileMetaLabel } from "app/utils/fileUtils";
 import { getSpaceContentTypeLabel } from "create/space/contentLabels";
-import { cardViewTransitionStyles } from "app/viewTransitions";
 import { isSpaceContentImage } from "./spaceContentMedia";
 import { useContentImageSrc } from "./useContentImageSrc";
 
@@ -153,16 +152,10 @@ const SpaceContentBlockComponent: React.FC<SpaceContentBlockProps> = ({
     }
   };
 
-  // Shared with SpaceContentList / AgentBlock / AgentPage via app/viewTransitions.
-  // Unique per contentKey avoids cross-card name collisions; selection mode
-  // clears names so multi-select does not reserve shared-element slots.
-  const cardVt = cardViewTransitionStyles(item.contentKey, {
-    enabled: !isSelectionMode,
-  });
-
   return (
     <div
       className={`content-block ${typeClass} ${isSelected ? "selected" : ""} ${isSelectionMode ? "selection-mode" : ""}${isFileDropTarget ? " file-drop-active" : ""}`}
+      data-space-content-key={item.contentKey}
       onClick={handleClick}
       {...fileDropProps}
     >
@@ -180,7 +173,7 @@ const SpaceContentBlockComponent: React.FC<SpaceContentBlockProps> = ({
       </button>
 
       <div className="content-block__content">
-        <div style={cardVt.icon}>
+        <div>
           {getIcon()}
         </div>
 
@@ -188,7 +181,6 @@ const SpaceContentBlockComponent: React.FC<SpaceContentBlockProps> = ({
           <h3
             className="content-block__title"
             title={item.title}
-            style={cardVt.title}
           >
             {item.title || t("unnamed")}
           </h3>

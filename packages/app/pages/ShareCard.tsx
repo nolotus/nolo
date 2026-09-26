@@ -1,5 +1,7 @@
 import "./ShareCard.css";
+import { useRef, useState } from "react";
 import { NavLink, useNavigate } from "app/routing";
+import { useTranslation } from "react-i18next";
 import { toTrimmedString } from "core/toTrimmedString";
 import { LuArrowRight, LuBot, LuClock3, LuFileText, LuLayoutDashboard, LuMessagesSquare, LuTable } from "react-icons/lu";
 import Avatar from "render/web/ui/Avatar";
@@ -7,6 +9,8 @@ import type { ShareSummary } from "share/types";
 import { formatShareTime, normalizeAuthorName } from "share/helpers";
 import { getShareTypeLabel } from "share/types";
 import { DataType } from "create/types";
+import MorphDialog, { runMorphDialogTransition } from "render/web/ui/modal/MorphDialog";
+import { cardSurfaceViewTransitionName } from "app/viewTransitions";
 
 export interface ShareCardItem extends ShareSummary {
   dbKey: string;
@@ -21,7 +25,10 @@ interface ShareCardProps {
 }
 
 export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) => {
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
   const navigate = useNavigate();
+  const articleRef = useRef<HTMLElement>(null);
+  const { t } = useTranslation();
   const isPage = share.type === DataType.DOC;
   const isApp = share.type === DataType.APP;
   const isTable = share.type === DataType.TABLE;
@@ -31,13 +38,50 @@ export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) =
   const shouldShowAgent = Boolean(share.agentKey || displayAgentName);
   const coverImage = share.coverImage || share.coverImageUrl;
 
-  const openShareDetail = () => {
-    if (isApp && share.url) {
-      window.open(share.url, "_blank", "noopener,noreferrer");
-    } else {
-      navigate(share.path);
+  // Surface names only exist during the morph lifecycle, and each snapshot
+  // phase must hold the shared name on at most ONE element — a duplicate pair
+  // in one snapshot makes the browser skip the morph entirely:
+  //   open  — before the old snapshot the card holds the name; once the
+  //           dialog is flushed in, the card drops it so the new snapshot
+  //           only sees the dialog.
+  //   close — the old snapshot only sees the dialog (card is nameless); once
+  //           the dialog is flushed out, the card picks the name up so the
+  //           new snapshot only sees the card.
+  // finished clears the card name either way — resting cards carry no names.
+  const stampSurfaceName = () => {
+    const node = articleRef.current;
+    if (node) {
+      node.style.viewTransitionName = cardSurfaceViewTransitionName(share.dbKey);
     }
   };
+  const clearSurfaceName = () => {
+    const node = articleRef.current;
+    if (
+      node &&
+      node.style.viewTransitionName.startsWith("card-surface-")
+    ) {
+      node.style.viewTransitionName = "";
+    }
+  };
+
+  const openShareDetail = () => {
+    // Non-APP shares keep the original behaviour: navigate straight to the
+    // share detail page (product only approved the preview modal for APP).
+    if (!isApp) {
+      navigate(share.path);
+      return;
+    }
+    runMorphDialogTransition(() => setPreviewOpen(true), {
+      onBeforeUpdate: stampSurfaceName,
+      onAfterUpdate: clearSurfaceName,
+      onAfterFinished: clearSurfaceName,
+    });
+  };
+  const closePreview = () =>
+    runMorphDialogTransition(() => setPreviewOpen(false), {
+      onAfterUpdate: stampSurfaceName,
+      onAfterFinished: clearSurfaceName,
+    });
 
   const iconClass = isPage
     ? "ShareCard__icon--page"
@@ -57,6 +101,7 @@ export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) =
 
   return (
     <article
+      ref={articleRef}
       role="link"
       tabIndex={0}
       className={`ShareCard ${className}`}
@@ -163,6 +208,29 @@ export const ShareCard: React.FC<ShareCardProps> = ({ share, className = "" }) =
           <LuArrowRight size={16} aria-hidden="true" />
         </span>
       </div>
+      <MorphDialog
+        isOpen={isPreviewOpen}
+        onClose={closePreview}
+        morphKey={share.dbKey}
+        title={share.title}
+      >
+        {coverImage && <img src={coverImage} alt="" className="ShareCard__previewImage" />}
+        {share.description && <p>{share.description}</p>}
+        <p>{getShareTypeLabel(share.type)}</p>
+        {isApp && (
+          <p>
+            <button
+              type="button"
+              className="ShareCard__openShare"
+              onClick={() =>
+                window.open(share.url ?? share.path, "_blank", "noopener,noreferrer")
+              }
+            >
+              {t("open", "打开")}
+            </button>
+          </p>
+        )}
+      </MorphDialog>
     </article>
   );
 };

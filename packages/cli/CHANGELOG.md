@@ -1,4 +1,13 @@
 
+## 0.113.0-alpha.1
+
+## 0.113.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **chat:** add five more view transition patterns and harden wave-1 leftovers ([9ccc240](https://github.com/nolotus/bun-nolo/commit/9ccc240d31b621ee8a9dc52edee7f9a6d343a664))
+
+
 ## 0.112.0-alpha.2
 
 ## 0.112.0-alpha.2 (2026-09-26)

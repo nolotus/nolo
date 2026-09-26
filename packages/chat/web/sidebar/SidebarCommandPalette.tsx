@@ -270,7 +270,7 @@ export function SidebarCommandPalette({
         type: entry.contentType,
         userId: currentUserId ?? undefined,
       });
-      if (isDialogDetailPath(to)) enableNextStackNavViewTransition("push");
+      if (isDialogDetailPath(to)) enableNextStackNavViewTransition();
       navigate(to);
       handleOpenChange(false);
     },

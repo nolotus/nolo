@@ -24,7 +24,6 @@ import { useTranslation } from "react-i18next";
 import type { SidebarVisibleType } from "create/space/sidebarVisibleTypes";
 import { useAppSelector } from "app/store";
 import { selectRuntimeCurrentServer } from "app/stateViews/runtime";
-import { cardViewTransitionStyles } from "app/viewTransitions";
 import { stageFilesForDialog } from "chat/web/stagedDialogFiles";
 import {
   buildSpaceContentImageUrl,
@@ -215,6 +214,7 @@ const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
               return (
                 <div
                   key={item.contentKey}
+                  data-space-content-key={item.contentKey}
                   className={`agent-block-wrapper ${isSelected ? "selected" : ""}`}
                   onClickCapture={(e) => {
                     if (isSelectionMode) {
@@ -271,17 +271,11 @@ const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
         // List View
         const isImage = isSpaceContentImage(item);
         const imageUrl = buildSpaceContentImageUrl(currentServer, item);
-        // Same name rule as SpaceContentBlock / AgentBlock / AgentPage:
-        // card-icon|title-${contentKey}. Skip in selection mode so bulk
-        // select does not reserve shared-element names.
-        const listVt = cardViewTransitionStyles(item.contentKey, {
-          enabled: !isSelectionMode,
-        });
-
         return (
           <div
             key={item.contentKey}
             className={`content-list-item ${isSelected ? "selected" : ""} ${isSelectionMode ? "selection-mode" : ""}${fileDropDialogKey === item.contentKey ? " file-drop-active" : ""}`}
+            data-space-content-key={item.contentKey}
             onClick={() =>
               isSelectionMode ? onSelectItem(item.contentKey) : onOpen(item)
             }
@@ -296,7 +290,6 @@ const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
                   onSelectItem(item.contentKey);
                 }}
                 style={{
-                  ...listVt.icon,
                   margin: 0,
                   padding: 0,
                   border: "none",
@@ -338,7 +331,6 @@ const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
                 <span
                   className="item-title"
                   title={item.title}
-                  style={listVt.title}
                 >
                   {item.title}
                 </span>

@@ -18,6 +18,19 @@ import { uploadAndAddFileToSpace } from "../content/contentThunks";
 import { useSpaceData } from "../hooks/useSpaceData";
 import { useAgentFetcher } from "../hooks/useAgentFetcher";
 import SpaceContentList from "../components/SpaceContentList";
+import {
+  captureSpaceContentNode,
+  cssEscapeKey,
+  runSpaceContentViewTransition,
+  SPACE_CONTENT_KEY_ATTRIBUTE,
+  stampSpaceContentCardMorphNames,
+} from "../content/spaceContentViewTransitions";
+import { enableNextRouteViewTransition } from "app/viewTransitions";
+import {
+  runSpaceBatchDelete,
+  runSpaceDelete,
+  runSpaceUploads,
+} from "../content/spaceContentMutations";
 import Button from "render/web/ui/Button";
 import SearchInput from "render/web/ui/SearchInput";
 import { ContentType, SpaceContent as SpaceContentType } from "app/types";
@@ -305,19 +318,21 @@ const SpaceContent: React.FC = () => {
 
   const applyVisibleTypes = useCallback(
     (nextTypes: readonly SidebarVisibleType[], defaultTypes: readonly SidebarVisibleType[]) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        const serialized = serializeSidebarVisibleTypesSearchParam(nextTypes);
-        if (
-          !serialized ||
-          areSidebarVisibleTypesEqual(nextTypes, defaultTypes)
-        ) {
-          next.delete(SIDEBAR_VISIBLE_TYPES_SEARCH_PARAM);
-        } else {
-          next.set(SIDEBAR_VISIBLE_TYPES_SEARCH_PARAM, serialized);
-        }
-        return next;
-      }, { replace: true });
+      runSpaceContentViewTransition(() => {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          const serialized = serializeSidebarVisibleTypesSearchParam(nextTypes);
+          if (
+            !serialized ||
+            areSidebarVisibleTypesEqual(nextTypes, defaultTypes)
+          ) {
+            next.delete(SIDEBAR_VISIBLE_TYPES_SEARCH_PARAM);
+          } else {
+            next.set(SIDEBAR_VISIBLE_TYPES_SEARCH_PARAM, serialized);
+          }
+          return next;
+        }, { replace: true });
+      });
     },
     [setSearchParams]
   );
@@ -557,6 +572,10 @@ const SpaceContent: React.FC = () => {
         isAppContent(item) ||
         isTaskContent(item)
       ) {
+        // Stamp card-icon/card-title names only for this real route morph;
+        // they self-clear when the route VT finishes (idle stays nameless).
+        stampSpaceContentCardMorphNames(item.contentKey);
+        enableNextRouteViewTransition();
         navigate(buildContentRoute(item));
         return;
       }
@@ -574,6 +593,8 @@ const SpaceContent: React.FC = () => {
       }
 
       if (isDialogContent(item) || isAgentContent(item) || isAppContent(item) || isTaskContent(item)) {
+        stampSpaceContentCardMorphNames(item.contentKey);
+        enableNextRouteViewTransition();
         navigate(buildContentRoute(item));
         return;
       }
@@ -613,49 +634,69 @@ const SpaceContent: React.FC = () => {
 
       setIsDeleting(true);
       try {
+        // 异步工作在转场外先发起拿真实 promise；转场只负责同步状态提交，
+        // await/toast/进度/取消都在回调外拿到真实 promise。
+        const captureKeyNode = (contentKey: string) => () =>
+          captureSpaceContentNode(
+            document.querySelector<HTMLElement>(
+              `[${SPACE_CONTENT_KEY_ATTRIBUTE}="${cssEscapeKey(contentKey)}"]`
+            )
+          );
+        const toastAdapter = {
+          success: (msg: string) => toast.success(msg),
+          error: (msg: string) => toast.error(msg),
+          info: (msg: string) => {
+            toast.info(msg);
+          },
+        };
+        const failureMessage = (err: unknown) => {
+          const message = getDeleteErrorMessage(err, t("deleteFailed"));
+          return message === t("deleteFailed")
+            ? message
+            : `${t("deleteFailed")}: ${message}`;
+        };
         if (type === "multiple") {
           const keys = Array.from(selectedKeys);
           deleteCancelRef.current = false;
           setDeleteProgress({ done: 0, total: keys.length });
-          const queue = [...keys];
-          const workers = Array.from(
-            { length: Math.min(DELETE_BATCH_CONCURRENCY, queue.length) },
-            async () => {
-              while (queue.length > 0) {
-                if (deleteCancelRef.current) return;
-                const nextKey = queue.shift();
-                if (!nextKey) continue;
-                await (dispatch as any)(deleteDbKey(nextKey, spaceId));
-                setDeleteProgress((prev) =>
-                  prev ? { ...prev, done: prev.done + 1 } : prev
-                );
-              }
-            }
-          );
-          await Promise.all(workers);
-          if (deleteCancelRef.current) {
-            toast(t("batchDeleteCancelled", "Batch delete cancelled"));
-          } else {
-            toast.success(
+          await runSpaceBatchDelete({
+            keys,
+            spaceId,
+            concurrency: DELETE_BATCH_CONCURRENCY,
+            deleteKey: (k) => (dispatch as any)(deleteDbKey(k, spaceId)),
+            runTransition: runSpaceContentViewTransition,
+            commitStarted: () => keys.forEach((k) => captureKeyNode(k)()),
+            toast: toastAdapter,
+            failureMessage,
+            isCancelled: () => deleteCancelRef.current,
+            onProgress: (done, total) =>
+              setDeleteProgress({ done, total }),
+            batchSuccessMessage: (count) =>
               t("deleteMovedToTrashBatch", "{{count}} items moved to Recycle Bin", {
-                count: selectedKeys.size,
-              })
-            );
+                count,
+              }),
+            cancelledMessage: () =>
+              t("batchDeleteCancelled", "Batch delete cancelled"),
+          });
+          if (!deleteCancelRef.current) {
             setSelectedKeys(new Set());
           }
         } else {
           const deletedItem = baseItems.find((it) => it.contentKey === key);
           const safeTitle = deletedItem?.title || key;
-          await (dispatch as any)(deleteDbKey(key!, spaceId));
-          toast.success(
-            t("deleteMovedToTrash", {
-              title: safeTitle,
-            })
-          );
+          await runSpaceDelete({
+            key: key!,
+            spaceId,
+            deleteKey: (k) => (dispatch as any)(deleteDbKey(k, spaceId)),
+            runTransition: runSpaceContentViewTransition,
+            commitStarted: captureKeyNode(key!),
+            toast: toastAdapter,
+            failureMessage,
+            resolveTitle: () => safeTitle ?? key!,
+            singleSuccessMessage: (title) =>
+              t("deleteMovedToTrash", { title }),
+          });
         }
-      } catch (err) {
-        const message = getDeleteErrorMessage(err, t("deleteFailed"));
-        toast.error(message === t("deleteFailed") ? message : `${t("deleteFailed")}: ${message}`);
       } finally {
         deleteCancelRef.current = false;
         setDeleteProgress(null);
@@ -687,14 +728,16 @@ const SpaceContent: React.FC = () => {
       // Note:
       // Large files (for example oversized PDFs) should move to a dedicated async ingestion
       // pipeline in the future instead of blocking this immediate upload path.
-      const results = await Promise.allSettled(
-        files.map((file) =>
-          (dispatch as any)(uploadAndAddFileToSpace({ spaceId, file }))
-        )
-      );
-      const failedFiles = files.filter(
-        (_, index) => results[index].status === "rejected"
-      );
+      // 上传 promise 在转场回调外创建并真实 await，失败不会被误标；
+      // 转场只包裹同步状态提交。
+      const { failed: failedFiles } = await runSpaceUploads({
+        files,
+        startUpload: (file) =>
+          // createAsyncThunk 的 dispatch promise 永远 resolve（rejected action），
+          // 必须 unwrap 才能让真实失败进入 failedFiles 并提供重试入口。
+          (dispatch as any)(uploadAndAddFileToSpace({ spaceId, file })).unwrap(),
+        runTransition: runSpaceContentViewTransition,
+      });
       if (failedFiles.length === 0) {
         toast.success(t("uploadSuccess"));
       } else {

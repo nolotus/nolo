@@ -19,6 +19,7 @@ import { getUserDataLoadDecision } from "../userDataLoadDecision";
 import { fetchUserDataThunk } from "../actions/fetchUserData";
 import { cacheMergedUserDataThunk } from "../actions/cacheMergedUserData";
 import { noloQueryRequest } from "../client/queryRequest";
+import { applyPendingPinnedOverrides } from "../pendingPinnedOverrides";
 
 interface BaseItem {
   id?: string;
@@ -510,7 +511,10 @@ export function useUserData(
         const sortedLocalData = [...localData]
           .filter((item) => !isTombstoneRecord(item))
           .sort(byTimestampThenKey);
-        const limitedLocalData = applyPerTypeLimit(sortedLocalData, limit, typeArray);
+        const limitedLocalData = applyPendingPinnedOverrides(
+          applyPerTypeLimit(sortedLocalData, limit, typeArray),
+          getItemKey,
+        );
 
         setState({
           loading: false,
@@ -524,7 +528,12 @@ export function useUserData(
       const sortedInitialLocalData = [...localData]
         .filter((item) => !isTombstoneRecord(item))
         .sort(byTimestampThenKey);
-      const limitedInitialLocalData = applyPerTypeLimit(sortedInitialLocalData, limit, typeArray);
+      // 重放 in-flight 乐观 pinned（防抖刷新先于远端 patch 往返完成时，
+      // 防止条目在 pin 区/普通区之间抖回）。
+      const limitedInitialLocalData = applyPendingPinnedOverrides(
+        applyPerTypeLimit(sortedInitialLocalData, limit, typeArray),
+        getItemKey,
+      );
 
       if (
         shouldUsePartialLocalData({
@@ -561,7 +570,10 @@ export function useUserData(
           ? mergedDataWithDeleted.filter((item) => isTombstoneRecord(item))
           : mergedDataWithDeleted.filter((item) => !isTombstoneRecord(item));
         const sortedData = [...mergedData].sort(byTimestampThenKey);
-        const limitedData = applyPerTypeLimit(sortedData, limit, typeArray);
+        const limitedData = applyPendingPinnedOverrides(
+          applyPerTypeLimit(sortedData, limit, typeArray),
+          getItemKey,
+        );
         setState({
           loading: true,
           error: null,
@@ -605,7 +617,10 @@ export function useUserData(
         ? mergedDataWithDeleted.filter((item) => isTombstoneRecord(item))
         : mergedDataWithDeleted.filter((item) => !isTombstoneRecord(item));
       const sortedData = [...mergedData].sort(byTimestampThenKey);
-      const limitedData = applyPerTypeLimit(sortedData, limit, typeArray);
+      const limitedData = applyPendingPinnedOverrides(
+        applyPerTypeLimit(sortedData, limit, typeArray),
+        getItemKey,
+      );
       debugUserData("merged", {
         userId: effectiveUserId,
         mergedCount: mergedData.length,

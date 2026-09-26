@@ -360,3 +360,94 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Directional step transitions (Morph UI step-wizard pattern) ───────────
+   Driven by quickCreateStepViewTransitions.ts: while a step change runs, <html>
+   carries data-quick-create-step-vt="forward|back" and the step surface (the
+   card) carries the view-transition-name quick-create-step-panel. Both are
+   removed when the slide ends, so idle DOM never holds a VT name.
+
+   forward — next step: the new panel slides in from the right while the old
+             one leaves to the left, i.e. in the direction of travel.
+   back    — previous step: the exact mirror.
+
+   Only the panel moves: the root and group geometry animations stay off so the
+   page behind the card (gallery gradient) does not cross-fade along with it. */
+@keyframes quick-create-step-slide-in-right {
+  from {
+    transform: translate3d(100%, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes quick-create-step-slide-out-left {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+
+@keyframes quick-create-step-slide-in-left {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes quick-create-step-slide-out-right {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+html[data-quick-create-step-vt]::view-transition-group(quick-create-step-panel),
+html[data-quick-create-step-vt]::view-transition-old(root),
+html[data-quick-create-step-vt]::view-transition-new(root) {
+  animation: none;
+}
+
+html[data-quick-create-step-vt]::view-transition-old(quick-create-step-panel),
+html[data-quick-create-step-vt]::view-transition-new(quick-create-step-panel) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  animation-fill-mode: both;
+  /* Steps differ in height: keep each snapshot's own shape instead of
+     stretching it into the other step's box while it slides. */
+  object-fit: contain;
+  object-position: center;
+  mix-blend-mode: normal;
+}
+
+html[data-quick-create-step-vt="forward"]::view-transition-old(quick-create-step-panel) {
+  animation-name: quick-create-step-slide-out-left;
+}
+
+html[data-quick-create-step-vt="forward"]::view-transition-new(quick-create-step-panel) {
+  animation-name: quick-create-step-slide-in-right;
+}
+
+html[data-quick-create-step-vt="back"]::view-transition-old(quick-create-step-panel) {
+  animation-name: quick-create-step-slide-out-right;
+}
+
+html[data-quick-create-step-vt="back"]::view-transition-new(quick-create-step-panel) {
+  animation-name: quick-create-step-slide-in-left;
+}
+
+/* Belt and braces: the runner already skips the transition under reduced
+   motion; this keeps the slide inert should the CSS ever run on its own. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-quick-create-step-vt]::view-transition-old(quick-create-step-panel),
+  html[data-quick-create-step-vt]::view-transition-new(quick-create-step-panel) {
+    animation-duration: 1ms;
+  }
+}

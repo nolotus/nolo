@@ -483,7 +483,7 @@ const AllViewSidebar: React.FC<{
       type: item.type,
       userId: currentUserId ?? undefined,
     });
-    if (isDialogContentPath(to)) enableNextStackNavViewTransition("push");
+    if (isDialogContentPath(to)) enableNextStackNavViewTransition();
     navigate(to);
   }, [stableRecentItems, navigate, currentUserId]);
 
@@ -495,7 +495,7 @@ const AllViewSidebar: React.FC<{
       type: item.type,
       userId: currentUserId ?? undefined,
     });
-    if (isDialogContentPath(to)) enableNextStackNavViewTransition("push");
+    if (isDialogContentPath(to)) enableNextStackNavViewTransition();
     navigate(to);
   }, [searchedRecentItems, navigate, currentUserId]);
 
