@@ -14,6 +14,21 @@ export type EmailParticipant = {
   name?: string;
 };
 
+/**
+ * Durable reference to an inbound email attachment.
+ * Binary bytes live in the shared file/blob store; EmailRecord keeps only
+ * metadata required to discover and fetch the file.
+ */
+export type EmailAttachmentRef = {
+  fileId: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  disposition?: "attachment" | "inline";
+  contentId?: string;
+  sha256?: string;
+};
+
 export type EmailRecord = {
   dbKey: string;
   type: DataType.EMAIL;
@@ -31,6 +46,7 @@ export type EmailRecord = {
   subject: string;
   text?: string;
   html?: string;
+  attachments?: EmailAttachmentRef[];
   messageId?: string;
   threadId?: string;
   inReplyTo?: string;

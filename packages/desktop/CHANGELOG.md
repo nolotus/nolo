@@ -1,4 +1,17 @@
 
+## 0.129.0-alpha.1
+
+## 0.129.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **email:** rebuild attachment ingress on latest alpha ([3a71cb9](https://github.com/nolotus/bun-nolo/commit/3a71cb9ba53e98c622dd75824d66b8dab3c24a60))
+
+### Bug Fixes
+
+* **email:** tombstone saved attachments on partial persist failure ([79cbbda](https://github.com/nolotus/bun-nolo/commit/79cbbdac78fe691d6a65bb0141010fba92ea75b5))
+
+
 ## 0.128.0-alpha.1
 
 ## 0.128.0-alpha.1 (2026-09-26)

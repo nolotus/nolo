@@ -3,6 +3,7 @@ import { compactWhitespace } from "core/compactWhitespace";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
+import { readFileContentAction } from "database/actions/fileContent";
 
 import { callToolApi } from "./toolApiClient";
 
@@ -16,6 +17,8 @@ type EmailSearchArgs = {
 
 type EmailKeyArgs = {
   dbKey: string;
+  attachmentFileId?: string;
+  maxChars?: number;
 };
 
 type EmailUpdateTagsArgs = EmailKeyArgs & {
@@ -80,6 +83,30 @@ const emailText = (email: any): string =>
     .filter((value) => typeof value === "string")
     .join("\n");
 
+const emailAttachments = (email: any): any[] =>
+  Array.isArray(email?.attachments) ? email.attachments : [];
+
+const attachmentPreview = (attachment: any): string => {
+  const name = asOptionalTrimmedString(attachment?.filename) ?? "attachment";
+  const contentType =
+    asOptionalTrimmedString(attachment?.contentType) ?? "application/octet-stream";
+  const fileId = asOptionalTrimmedString(attachment?.fileId) ?? "unknown-file";
+  const size = Number.isFinite(Number(attachment?.size))
+    ? ` | ${Number(attachment.size)} bytes`
+    : "";
+  return `- ${name} | ${contentType}${size} | fileId: ${fileId}`;
+};
+
+const attachmentListPreview = (email: any): string => {
+  const attachments = emailAttachments(email);
+  if (attachments.length === 0) return "";
+  return [
+    `附件（${attachments.length}）：`,
+    ...attachments.map(attachmentPreview),
+    "读取附件：再次调用 email_read，传入当前 dbKey 和 attachmentFileId。",
+  ].join("\n");
+};
+
 const matchesWaitFilters = (email: any, args: EmailWaitForArgs): boolean => {
   const subjectContains = normalizeContains(args.subjectContains);
   const fromContains = normalizeContains(args.fromContains);
@@ -126,6 +153,85 @@ const stripHtml = (html?: string): string =>
 
 const cleanUrl = (url: string): string =>
   url.replace(/[),.;\]}>]+$/g, "");
+
+export const extractPdfText = async (blob: Blob): Promise<string> => {
+  const pdfjsLib = await import("pdfjs-dist");
+  if (
+    typeof window !== "undefined" &&
+    pdfjsLib.GlobalWorkerOptions &&
+    !pdfjsLib.GlobalWorkerOptions.workerSrc
+  ) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/public/assets/pdf.worker.mjs";
+  }
+  const data = await blob.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const text = (textContent.items as any[])
+      .map((item) => (typeof item?.str === "string" ? item.str : ""))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (text) pages.push(`--- page ${pageNumber} ---\n${text}`);
+  }
+  return pages.join("\n\n").trim();
+};
+
+const readEmailAttachment = async (
+  email: any,
+  fileId: string,
+  maxChars: number,
+  thunkApi: any
+) => {
+  const attachment = emailAttachments(email).find(
+    (item) => asOptionalTrimmedString(item?.fileId) === fileId
+  );
+  if (!attachment) {
+    throw new Error(`附件 ${fileId} 不属于邮件 ${email?.dbKey || "unknown"}`);
+  }
+
+  const result = await readFileContentAction({ fileId }, thunkApi);
+  const blob = result.blob;
+  const contentType = (
+    asOptionalTrimmedString(attachment?.contentType) ||
+    asOptionalTrimmedString(blob.type) ||
+    "application/octet-stream"
+  ).toLowerCase();
+  const filename = asOptionalTrimmedString(attachment?.filename) ?? fileId;
+
+  let content: string;
+  if (contentType === "application/pdf" || filename.toLowerCase().endsWith(".pdf")) {
+    content = await extractPdfText(blob);
+    if (!content) {
+      throw new Error(
+        `PDF 附件 ${filename} 没有可提取的文字层，可能是扫描版；请改用 OCR 能力处理该 fileId。`
+      );
+    }
+  } else if (
+    contentType.startsWith("text/") ||
+    contentType.includes("json") ||
+    contentType.includes("csv") ||
+    contentType.includes("xml") ||
+    /\.(txt|md|csv|json|xml|html?|log)$/i.test(filename)
+  ) {
+    content = await blob.text();
+  } else {
+    throw new Error(
+      `附件 ${filename} (${contentType}) 暂不支持直接转文本；fileId=${fileId} 仍可交给对应的文件/媒体处理能力。`
+    );
+  }
+
+  const truncated = content.length > maxChars;
+  return {
+    attachment,
+    content: truncated ? content.slice(0, maxChars) : content,
+    totalChars: content.length,
+    truncated,
+    source: result.source,
+  };
+};
 
 export const extractEmailVerificationArtifacts = ({
   text,
@@ -199,13 +305,25 @@ export const emailSearchFunctionSchema = {
 
 export const emailReadFunctionSchema = {
   name: "email_read",
-  description: "读取一封邮件的完整内容。需要 email:read 权限。",
+  description: [
+    "读取一封邮件的完整内容。需要 email:read 权限。",
+    "邮件有附件时会列出附件 fileId。要读取 PDF/文本/CSV/JSON 附件，再传 attachmentFileId；工具会先校验该文件确实属于这封邮件。",
+    "PDF 优先直接提取文字层；扫描版 PDF 会提示改用 OCR。",
+  ].join("\n"),
   parameters: {
     type: "object",
     properties: {
       dbKey: {
         type: "string",
         description: "邮件记录的 dbKey，例如 email-userId-emailId。",
+      },
+      attachmentFileId: {
+        type: "string",
+        description: "可选。当前邮件 attachments[] 中的 fileId；提供后读取该附件文本。",
+      },
+      maxChars: {
+        type: "number",
+        description: "读取附件时最多返回多少字符，默认 12000，范围 1000-50000。",
       },
     },
     required: ["dbKey"],
@@ -507,16 +625,56 @@ export async function emailExtractVerificationFunc(
 }
 
 export async function emailReadFunc(args: EmailKeyArgs, thunkApi: any) {
-  const email = await callToolApi<any>(thunkApi, "/rpc/getEmail", args, {
+  const email = await callToolApi<any>(thunkApi, "/rpc/getEmail", { dbKey: args.dbKey }, {
     withAuth: true,
   });
+
+  const attachmentFileId = asOptionalTrimmedString(args.attachmentFileId);
+  if (attachmentFileId) {
+    const maxChars = clampInteger(args.maxChars, 12000, 1000, 50000);
+    const attachmentResult = await readEmailAttachment(
+      email,
+      attachmentFileId,
+      maxChars,
+      thunkApi
+    );
+    const filename =
+      asOptionalTrimmedString(attachmentResult.attachment?.filename) ?? attachmentFileId;
+    return {
+      rawData: {
+        emailDbKey: email?.dbKey,
+        attachment: attachmentResult.attachment,
+        content: attachmentResult.content,
+        totalChars: attachmentResult.totalChars,
+        truncated: attachmentResult.truncated,
+        source: attachmentResult.source,
+      },
+      displayData: [
+        `附件：${filename} | fileId: ${attachmentFileId}`,
+        attachmentResult.truncated
+          ? `内容已截断：返回 ${attachmentResult.content.length}/${attachmentResult.totalChars} 字符。`
+          : `内容字符数：${attachmentResult.totalChars}`,
+        "",
+        attachmentResult.content,
+      ].join("\n"),
+    };
+  }
+
   const body =
     asOptionalTrimmedString(email?.text) ??
     asOptionalTrimmedString(email?.html) ??
     "";
+  const attachments = attachmentListPreview(email);
   return {
     rawData: email,
-    displayData: `${emailPreview(email)}\n\n${body.slice(0, 4000)}`,
+    displayData: [
+      emailPreview(email),
+      "",
+      body.slice(0, 4000),
+      attachments ? `\n${attachments}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
