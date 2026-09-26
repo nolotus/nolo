@@ -1,4 +1,13 @@
 
+## 0.129.0-alpha.4
+
+## 0.129.0-alpha.4 (2026-09-26)
+
+### Bug Fixes
+
+* **cli:** keep upstream error.details in antigravity failure message so the Google validation link reaches the TUI ([f09021b](https://github.com/nolotus/bun-nolo/commit/f09021b7dfb8944e64b03ecd148c761297c991f8))
+
+
 ## 0.129.0-alpha.3
 
 ## 0.129.0-alpha.3 (2026-09-26)

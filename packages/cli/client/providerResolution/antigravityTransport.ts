@@ -160,14 +160,29 @@ export const resolveAntigravityTransport: ProviderResolver = async (ctx) => {
           };
         }
         if (result.status < 200 || result.status >= 300) {
-          const errMsg =
+          const upstreamError =
             result.body &&
             typeof result.body === "object" &&
             result.body.error &&
-            typeof (result.body.error as { message?: unknown }).message ===
-              "string"
-              ? (result.body.error as { message: string }).message
-              : JSON.stringify(result.body);
+            typeof result.body.error === "object"
+              ? (result.body.error as Record<string, unknown>)
+              : undefined;
+          const errMsg =
+            // Google Cloud Code Assist gates calls behind a one-time account
+            // verification and answers HTTP 403 with the validation link in
+            // `error.details[].metadata.validation_url` — NOT in
+            // `error.message`. Extracting only `error.message` here drops the
+            // link before agentRun's extractGoogleValidationLink can recover
+            // it, so when details are present we append them after the clean
+            // message; the extractor scans raw text for validation_url so a
+            // `details=[...]` suffix is enough, and the Detail line keeps its
+            // readable `HTTP 403 <message>` headline. Plain-message errors
+            // keep the old shape so existing output stays unchanged.
+            upstreamError && Array.isArray(upstreamError.details)
+              ? `${typeof upstreamError.message === "string" ? upstreamError.message : ""} details=${JSON.stringify(upstreamError.details)}`.trim()
+              : typeof upstreamError?.message === "string"
+                ? upstreamError.message
+                : JSON.stringify(result.body);
           throw new Error(
             `local antigravity provider failed: HTTP ${result.status} ${errMsg}`,
           );
