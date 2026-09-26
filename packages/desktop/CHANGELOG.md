@@ -1,4 +1,13 @@
 
+## 0.131.0-alpha.3
+
+## 0.131.0-alpha.3 (2026-09-26)
+
+### Bug Fixes
+
+* **agent:** write back email automation run terminal state to the automation record ([b5bca63](https://github.com/nolotus/bun-nolo/commit/b5bca63403140958005298a186d9d0217fe36945))
+
+
 ## 0.131.0-alpha.2
 
 ## 0.131.0-alpha.2 (2026-09-26)
