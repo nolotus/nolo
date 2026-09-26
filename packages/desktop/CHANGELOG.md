@@ -1,4 +1,13 @@
 
+## 0.131.0-alpha.2
+
+## 0.131.0-alpha.2 (2026-09-26)
+
+### Bug Fixes
+
+* **agent:** write back email-automation run state and tag its run dialogs ([4fb8cd4](https://github.com/nolotus/bun-nolo/commit/4fb8cd46c664ca0313aa469044280b18ab22cc29))
+
+
 ## 0.131.0-alpha.1
 
 ## 0.131.0-alpha.1 (2026-09-26)

@@ -1593,14 +1593,24 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                                         "agentAutomationStatusCompleted",
                                         "已完成",
                                       );
+                            // Email-triggered automations record `done` as
+                            // soon as the dispatch is *accepted* — the agent
+                            // run itself continues in the background and may
+                            // still fail in its dialog. Label it "上次触发"
+                            // rather than claiming success; cron runs only
+                            // reach `done` after the whole turn completes.
+                            const isEmailTriggered =
+                              automation.trigger?.type === "email";
                             const runStatusLabel =
                               runStatus === "running"
                                 ? t("agentAutomationRunStatusRunning", "运行中")
                                 : runStatus === "done"
-                                  ? t(
-                                      "agentAutomationRunStatusDone",
-                                      "上次成功",
-                                    )
+                                  ? isEmailTriggered
+                                    ? t("agentAutomationRunStatusTriggered", "上次触发")
+                                    : t(
+                                        "agentAutomationRunStatusDone",
+                                        "上次成功",
+                                      )
                                   : runStatus === "failed"
                                     ? t(
                                         "agentAutomationRunStatusFailed",
