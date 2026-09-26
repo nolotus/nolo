@@ -1,3 +1,5 @@
+import { agentAutomationTriggerSchema } from "./agentAutomationSchemas";
+
 export const queryModelUsageFunctionSchema = {
   name: "queryModelUsage",
   description:
@@ -140,7 +142,7 @@ export const queryUserGrowthReportFunctionSchema = {
 export const createAgentAutomationFunctionSchema = {
   name: "createAgentAutomation",
   description:
-    "创建一个长期 agent automation 规则。适合让 agent 按 cron 定时检查用量、生成报告或执行提醒；可选择创建后立刻试运行一次。",
+    "创建长期 agent automation。支持 cron 定时触发，以及按发件人/主题预过滤的新邮件事件触发。email 触发只在代码过滤命中后启动后台 Agent run。",
   parameters: {
     type: "object",
     properties: {
@@ -151,29 +153,9 @@ export const createAgentAutomationFunctionSchema = {
       instruction: {
         type: "string",
         description:
-          "automation 每次执行时交给 agent 的完整任务描述，应包含检查条件和通知方式。",
+          "automation 每次执行时交给 agent 的完整任务描述，应包含处理目标和必要的通知方式。",
       },
-      trigger: {
-        type: "object",
-        description: "触发规则。v0 只支持 cron。",
-        properties: {
-          type: {
-            type: "string",
-            enum: ["cron"],
-            description: "触发类型。v0 只支持 cron。",
-          },
-          expression: {
-            type: "string",
-            description: "cron 表达式，例如每天 09:00 执行为 0 9 * * *。",
-          },
-          timezone: {
-            type: "string",
-            description: "可选时区，例如 Asia/Shanghai。",
-          },
-        },
-        required: ["type", "expression"],
-        additionalProperties: false,
-      },
+      trigger: agentAutomationTriggerSchema,
       ownerAgentKey: {
         type: "string",
         description: "执行该 automation 的 agentKey。默认使用当前 agent。",
@@ -198,7 +180,8 @@ export const createAgentAutomationFunctionSchema = {
       },
       runOnceNow: {
         type: "boolean",
-        description: "创建后是否立即执行一次，用来验证 automation 会产生什么结果。",
+        description:
+          "cron 创建后可立即试运行；email trigger 不支持，因为创建时没有触发邮件上下文。",
         default: false,
       },
     },

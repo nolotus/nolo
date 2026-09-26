@@ -9,7 +9,9 @@
 
 ### Bug Fixes
 
+* **automation:** require at least one email filter in schema ([b9b12d0](https://github.com/nolotus/bun-nolo/commit/b9b12d0bdf0b73feaa1ceba38ea6b6fec849e24c))
 * **email:** tombstone saved attachments on partial persist failure ([79cbbda](https://github.com/nolotus/bun-nolo/commit/79cbbdac78fe691d6a65bb0141010fba92ea75b5))
+* **server:** run email_read/email_search and dispatch types in agent mode ([203cf03](https://github.com/nolotus/bun-nolo/commit/203cf03ebb1b94c3662524d3eca1d9969844fbc0))
 
 
 ## 0.106.0-alpha.1
