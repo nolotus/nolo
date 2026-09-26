@@ -906,7 +906,7 @@
 
   .ws-orchestration-tabs button,
   .ws-orchestration-tabs .tab-item {
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
     line-height: 1.2;
     padding: 4px 4px;
     white-space: normal;

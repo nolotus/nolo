@@ -420,7 +420,7 @@
 
   .wbl-kicker {
     margin-bottom: 12px;
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
   }
 
   .wbl-title {
@@ -518,7 +518,7 @@
   .wbl-mobile-proof-task > span {
     display: block;
     color: var(--primary, #1677ff);
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
     font-weight: 750;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -557,7 +557,7 @@
   .wbl-mobile-proof-step span {
     display: block;
     color: var(--wbl-muted);
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
     font-variant-numeric: tabular-nums;
   }
 

@@ -286,12 +286,12 @@
   }
 
   .wbl-receipt-item span {
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
   }
 
   .wbl-receipt-note {
     margin-top: 10px;
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
   }
 
   .wbl-why {

@@ -86,7 +86,7 @@
 
 .mobile-download-banner__subtitle {
   color: var(--textSecondary);
-  font-size: 12px;
+  font-size: var(--fontSize-min-readable, 12px);
   font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;

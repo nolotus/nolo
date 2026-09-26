@@ -704,7 +704,7 @@
   }
 
   .ws-trust-local {
-    font-size: 12px;
+    font-size: var(--fontSize-min-readable, 12px);
   }
 
   .ws-hero-mountain-art {

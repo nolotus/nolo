@@ -1,4 +1,14 @@
 
+## 0.107.0-alpha.3
+
+## 0.107.0-alpha.3 (2026-09-26)
+
+### Bug Fixes
+
+* **ai:** 广场卡片价格标签标点收敛进 locale，消除中英标点混排 ([8371a1c](https://github.com/nolotus/bun-nolo/commit/8371a1cf0b5528d07302fe084ebaabafafd026b7))
+* **web:** 可读性字号 token 化与断点收敛 ([9546623](https://github.com/nolotus/bun-nolo/commit/954662330f7dfc8025c6931459f9502a639363b7))
+
+
 ## 0.107.0-alpha.2
 
 ## 0.107.0-alpha.2 (2026-09-26)

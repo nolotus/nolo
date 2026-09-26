@@ -347,6 +347,13 @@
   /* 移动端最小触达目标（WCAG/Apple HIG），勿在各组件硬编码 44px */
   --tap-target-min: 44px;
 
+  /* 注意：--fontSize-xs 等字号 token 由 template.ts 内联 bootstrap 按密度模式
+     在运行时生成（默认密度为 compact=11px，spacious=12px），禁止在此静态定义，
+     否则与密度系统打架。移动端可读性下限（不随密度变化）用下面的 token： */
+
+  /* 移动端可读性下限：不随密度模式收缩（density 是布局密度偏好，不是视力测试） */
+  --fontSize-min-readable: 12px;
+
   --expo-out: linear(
     0 0%, 0.1684 2.66%, 0.3165 5.49%,
     0.446 8.52%, 0.5581 11.78%,

@@ -34,10 +34,10 @@ const AgentCardMeta = ({ item }: AgentCardMetaProps) => {
       {shouldShowTokenCost && (
         <div
           className="agent__model-cost"
-          aria-label={`${t("price", "价格")} (${t("modelCost", "模型成本")})：${t("outputCostPerMillionTokens", "输出")} ${formatAgentOutputPrice(item.outputPrice, t("credits", "Credits"))}`}
+          aria-label={`${t("price", "价格")} (${t("modelCost", "模型成本")}) ${t("outputCostPerMillionTokens", "输出：")} ${formatAgentOutputPrice(item.outputPrice, t("credits", "Credits"))}`}
         >
           <span>
-            {t("outputCostPerMillionTokens", "输出")}：
+            {t("outputCostPerMillionTokens", "输出：")}
             <strong>{formatAgentOutputPrice(item.outputPrice, t("credits", "Credits"))}</strong>
           </span>
         </div>

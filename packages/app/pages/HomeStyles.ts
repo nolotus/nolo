@@ -298,7 +298,7 @@ export const homeStyles = stylex.create({
       backgroundColor: "var(--surfaceInteractiveHover, var(--backgroundHover))",
       borderColor: "var(--primaryBorder, var(--primary))",
     },
-    "@media (max-width: 640px)": {
+    "@media (max-width: 768px)": {
       alignSelf: "flex-end",
       fontSize: "var(--fontSize-sm)",
       minHeight: "var(--tap-target-min)",

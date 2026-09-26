@@ -42,7 +42,7 @@ const NavListItem: React.FC<NavListItemProps> = ({
             text-align: left;
           }
 
-          @media (max-width: 640px) {
+          @media (max-width: 768px) {
             .nav-list-item {
               height: var(--tap-target-min);
             }
