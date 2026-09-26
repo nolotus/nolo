@@ -4,6 +4,8 @@ import {
   resolveTuiBrightness,
   type TuiBrightness,
 } from "../tui/theme";
+import { toolLabelVariants } from "../tui/i18n";
+import { stripAnsi } from "../tui/tuiAnsi";
 import { renderMermaidBlock } from "./mermaid";
 import {
   isTableRow,
@@ -282,16 +284,111 @@ function normalizeListLine(line: string): string {
   return line;
 }
 
+const TOOL_TREE_HEADER_RE = /^•\s+(.+?)\s+\((\d+)\)$/;
+const TOOL_TREE_LEAF_RE = /^([├└]──\s+)(.*?)\s{2}(✓|✗|!)(?:\s+(.*))?$/;
+const TOOL_SINGLE_RE = /^▸\s+(.+?)(?:\s+·\s+(.*?))?(?:\s{2}(✓|✗|!)(?:\s+(.*))?)$/;
+
+function plainToolLine(line: string) {
+  return stripAnsi(line);
+}
+
+/**
+ * Tree group labels are matched in EVERY locale, not just the active one.
+ * A tree row carries the spelling it was rendered with, so recognizing it by
+ * the current locale alone made `/lang` switches (and the repaint that follows)
+ * silently demote existing tool groups to ordinary bullets — losing both the
+ * group label weight and the inter-group breathing row. The set is closed:
+ * toolOutput's treeKind only ever emits these four labels.
+ */
+const TOOL_TREE_GROUP_LABELS = new Set(
+  ["execShell", "readFile", "fetchWebpage", "exa_search"].flatMap(toolLabelVariants),
+);
+
+function isKnownToolGroupLabel(label: string): boolean {
+  return TOOL_TREE_GROUP_LABELS.has(label);
+}
+
+function toolTreeHeaderMatch(line: string): RegExpMatchArray | null {
+  const match = plainToolLine(line).match(TOOL_TREE_HEADER_RE);
+  return match && isKnownToolGroupLabel(match[1]) ? match : null;
+}
+
+function isToolTreeHeaderLine(line: string): boolean {
+  return toolTreeHeaderMatch(line) !== null;
+}
+
+function isToolTreeLeafLine(line: string): boolean {
+  return TOOL_TREE_LEAF_RE.test(plainToolLine(line));
+}
+
+function isToolSingleLine(line: string): boolean {
+  return TOOL_SINGLE_RE.test(plainToolLine(line));
+}
+
+function isToolGroupBoundary(cur: string, next: string): boolean {
+  return isToolTreeLeafLine(cur) && isToolTreeHeaderLine(next);
+}
+
+function statusColorSeq(marker: string, brightness: TuiBrightness): string {
+  if (marker === "✓") return colorSeq("success", brightness);
+  if (marker === "✗") return colorSeq("danger", brightness);
+  return colorSeq("warning", brightness);
+}
+
+/**
+ * Tool activity is lower-priority than assistant prose, but its own hierarchy
+ * still needs to be scannable. The renderer uses distance for grouping and
+ * brightness for depth: group label > leaf/detail > metadata; only failures
+ * and warnings are allowed to demand attention with status color.
+ */
+function styleTuiToolLine(line: string, brightness: TuiBrightness): string | null {
+  const plain = plainToolLine(line);
+  const chrome = colorSeq("chrome", brightness);
+  const muted = colorSeq("muted", brightness);
+
+  const header = toolTreeHeaderMatch(plain);
+  if (header) {
+    return `${chrome}•${STYLE.reset} ${STYLE.bold}${muted}${header[1]}${STYLE.reset} ${chrome}${STYLE.dim}(${header[2]})${STYLE.reset}`;
+  }
+
+  const leaf = plain.match(TOOL_TREE_LEAF_RE);
+  if (leaf) {
+    const [, connector, detail, marker, statusDetail] = leaf;
+    let rendered = `${chrome}${connector}${STYLE.reset}${chrome}${detail}${STYLE.reset}`;
+    rendered += `  ${statusColorSeq(marker, brightness)}${marker}${STYLE.reset}`;
+    if (statusDetail) {
+      const metaSeq = marker === "✓" ? chrome : statusColorSeq(marker, brightness);
+      rendered += ` ${metaSeq}${STYLE.dim}${statusDetail}${STYLE.reset}`;
+    }
+    return rendered;
+  }
+
+  const single = plain.match(TOOL_SINGLE_RE);
+  if (single) {
+    const [, label, detail, marker, statusDetail] = single;
+    let rendered = `${chrome}▸${STYLE.reset} ${STYLE.bold}${muted}${label}${STYLE.reset}`;
+    if (detail) rendered += ` ${chrome}· ${detail}${STYLE.reset}`;
+    rendered += `  ${statusColorSeq(marker, brightness)}${marker}${STYLE.reset}`;
+    if (statusDetail) {
+      const metaSeq = marker === "✓" ? chrome : statusColorSeq(marker, brightness);
+      rendered += ` ${metaSeq}${STYLE.dim}${statusDetail}${STYLE.reset}`;
+    }
+    return rendered;
+  }
+
+  return null;
+}
+
 /**
  * polishAssistantStructure 的列表↔prose 呼吸空行判定（H1 splice 守卫用）。
  * 判定必须作用在 convertMarkdownTablesForTerminal 的行归一化之后
  * （"- item" 会先被改写成 "• item" 才参与 LIST_LIKE 匹配）。
  */
 export function isPolishListLikeLine(line: string): boolean {
-  return LIST_LIKE_RE_FOR_GUARD.test(normalizeListLine(line));
+  return LIST_LIKE_RE_FOR_GUARD.test(normalizeListLine(plainToolLine(line)));
 }
 
-const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s/;
+const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s|^\s*▸\s/;
 
 /**
  * polish 呼吸规则：cur/next 相邻两行之间是否会插入空行。
@@ -299,6 +396,7 @@ const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|
  */
 export function polishBreathInsertsBlankBetween(cur: string, next: string): boolean {
   if (cur === "" || next === "") return false;
+  if (isToolGroupBoundary(cur, next)) return true;
   return isPolishListLikeLine(cur) !== isPolishListLikeLine(next);
 }
 
@@ -408,24 +506,18 @@ export function polishAssistantStructure(
     .replace(/^(#{1,3} .+)\n(?!\n)/gm, "$1\n\n")
     .replace(/\n{4,}/g, "\n\n\n");
 
-  // List ↔ prose breathing: insert a single blank line between a list-like
-  // line and an adjacent non-list, non-empty line (both directions). Long
-  // replies lean on `1.`/`•`/`☐`/`☑` lists, and without a gap the list block
-  // runs into the next paragraph (or the prose into the list) so nothing is
-  // scannable. Consecutive list items keep their tight grouping — no blank
-  // between siblings. Fence interiors are already masked to `\x00F<n>\x00`
-  // sentinels (not list-like), so code that happens to look like a list is
-  // never touched.
-  const LIST_LIKE = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s/;
+  // List/prose and tool/prose breathing: outside a work block, distance carries
+  // hierarchy. Sibling leaves stay dense; a completed tree followed by another
+  // tool group gets one separating row; tool work and assistant prose also get
+  // one row so the final answer cannot visually merge into the activity log.
   const headingLines = afterHeading.split("\n");
   const breathed: string[] = [];
   for (let i = 0; i < headingLines.length; i++) {
     breathed.push(headingLines[i]);
     const cur = headingLines[i];
     const next = headingLines[i + 1];
-    if (cur === "" || next === undefined || next === "") continue;
-    if (LIST_LIKE.test(cur) === LIST_LIKE.test(next)) continue;
-    breathed.push("");
+    if (next === undefined) continue;
+    if (polishBreathInsertsBlankBetween(cur, next)) breathed.push("");
   }
   const polishedMasked = breathed.join("\n");
 
@@ -441,6 +533,9 @@ export function polishAssistantStructure(
 }
 
 function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
+  const toolLine = styleTuiToolLine(line, brightness);
+  if (toolLine !== null) return toolLine;
+
   const heading = line.match(/^(#{1,3})\s+(.+)$/);
   if (heading) {
     const level = heading[1].length;
@@ -654,21 +749,37 @@ function emitFormattedAssistantBlock(
  * so it must remember the previous kind and inject the same blank line the
  * polish step would have inserted.
  */
-type StreamLineKind = "list" | "prose" | "blank" | "other";
+type StreamLineKind = "list" | "prose" | "blank" | "other" | "tool-header" | "tool-leaf" | "tool";
 
 function classifyStreamLine(line: string): StreamLineKind {
   if (line === "") return "blank";
+  const plain = plainToolLine(line);
+  if (isToolTreeHeaderLine(plain)) return "tool-header";
+  if (isToolTreeLeafLine(plain)) return "tool-leaf";
+  if (isToolSingleLine(plain)) return "tool";
   // Raw markdown forms (stream input) plus already-normalized markers.
   if (
-    TASK_LIST_RE.test(line) ||
-    UNORDERED_LIST_RE.test(line) ||
-    ORDERED_LIST_RE.test(line) ||
-    /^\s*(?:•|☐|☑)\s/.test(line) ||
-    /^\s*[\u2460-\u2473]/.test(line)
+    TASK_LIST_RE.test(plain) ||
+    UNORDERED_LIST_RE.test(plain) ||
+    ORDERED_LIST_RE.test(plain) ||
+    /^\s*(?:•|☐|☑)\s/.test(plain) ||
+    /^\s*[\u2460-\u2473]/.test(plain)
   ) {
     return "list";
   }
+  // Anything else that the polish pass treats as list-shaped must breathe the
+  // same way here, or the finalized render inserts a row the live stream never
+  // showed. Two shapes reach this point: prose that merely starts with the
+  // activity marker (`▸ note`), and box-drawing tree children without a status
+  // marker (`├── docs`). Both are list-shaped for polishAssistantStructure
+  // (isPolishListLikeLine) — single source of truth on purpose, so the two
+  // paths cannot drift apart again.
+  if (isPolishListLikeLine(plain)) return "list";
   return "prose";
+}
+
+function isStreamListLike(kind: StreamLineKind): boolean {
+  return kind === "list" || kind === "tool-header" || kind === "tool-leaf" || kind === "tool";
 }
 
 function needsListProseBreath(
@@ -676,10 +787,10 @@ function needsListProseBreath(
   next: StreamLineKind
 ): boolean {
   if (prev === null || prev === "blank" || next === "blank") return false;
-  const prevList = prev === "list";
-  const nextList = next === "list";
-  // prose↔list and other↔list both breathe; prose↔other does not.
-  return prevList !== nextList;
+  if (prev === "tool-leaf" && next === "tool-header") return true;
+  // Tool work behaves like a structured list for spacing: dense inside the
+  // group, one blank row when entering/leaving prose.
+  return isStreamListLike(prev) !== isStreamListLike(next);
 }
 
 export function createRenderAwareStreamWriter(args: {

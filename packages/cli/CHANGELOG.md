@@ -1,4 +1,18 @@
 
+## 0.115.0-alpha.1
+
+## 0.115.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **tui:** add visual hierarchy for tool activity ([d7903fa](https://github.com/nolotus/bun-nolo/commit/d7903fa693f75c1f6e98fb254c83553a07aa9f41))
+
+### Bug Fixes
+
+* **tui:** keep tool hierarchy locale-independent and stream-parity exact ([1d41138](https://github.com/nolotus/bun-nolo/commit/1d4113819007d41f6db10567b71857bbe3048256))
+* **tui:** scope activity styling to real tool rows ([748d7b8](https://github.com/nolotus/bun-nolo/commit/748d7b8ae207286a6174e2d9c1f84ef8b64f99fd))
+
+
 ## 0.114.0-alpha.1
 
 ## 0.114.0-alpha.1 (2026-09-26)

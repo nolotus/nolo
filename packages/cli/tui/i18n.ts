@@ -1046,6 +1046,21 @@ export function toolLabel(name: string): string {
   return TOOL_LABELS[name]?.[currentLocale] ?? name;
 }
 
+/**
+ * Every localized spelling of a tool label.
+ *
+ * Readers that RECOGNIZE a tool row in existing text must not depend on the
+ * locale that happens to be active at paint time: a transcript row keeps the
+ * spelling it was written with, and `/lang` can switch mid-session (the
+ * transcript is then repainted under the new locale). Matching the current
+ * locale only would silently demote those rows to ordinary prose.
+ */
+export function toolLabelVariants(name: string): string[] {
+  const entry = TOOL_LABELS[name];
+  if (!entry) return [name];
+  return [...new Set(Object.values(entry))];
+}
+
 /** Labels injected into `packages/ai` agent-run card helpers (no cli→ai reverse dep). */
 export function agentRunCardLabels(): {
   runStatus: string;
