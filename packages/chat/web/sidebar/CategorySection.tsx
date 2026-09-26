@@ -19,6 +19,10 @@ import {
 import { useIsCategoryCollapsed } from "create/space/spaceUiStore";
 import { UNCATEGORIZED_ID } from "create/space/constants";
 import { useUserId } from "identity";
+import {
+  enableNextStackNavViewTransition,
+  isDialogDetailPath,
+} from "app/stackNavViewTransitions";
 import CategoryHeader from "create/space/category/CategoryHeader";
 import {
   isRoutableContentActive,
@@ -121,14 +125,14 @@ const CategorySection: React.FC<CategorySectionProps> = ({
     (key: React.Key) => {
       const item = items.find((i) => i.contentKey === key);
       if (!item) return;
-      navigate(
-        buildRoutableContentPath({
-          contentKey: item.contentKey,
-          type: item.type,
-          userId: currentUserId ?? undefined,
-          spaceId: currentSpaceId ?? undefined,
-        })
-      );
+      const to = buildRoutableContentPath({
+        contentKey: item.contentKey,
+        type: item.type,
+        userId: currentUserId ?? undefined,
+        spaceId: currentSpaceId ?? undefined,
+      });
+      if (isDialogDetailPath(to)) enableNextStackNavViewTransition("push");
+      navigate(to);
     },
     [items, navigate, currentUserId, currentSpaceId]
   );

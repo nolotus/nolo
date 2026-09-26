@@ -11,6 +11,12 @@ import { flushSync } from "react-dom";
 
 import { matchRoutes, type RouteObject as NativeRouteObject } from "./matchRoutes";
 import { shouldAutoRouteViewTransition } from "app/viewTransitions";
+import {
+  clearStackNavDirection,
+  setStackNavDirection,
+  stackNavDirectionForPaths,
+  type StackNavDirection,
+} from "app/stackNavViewTransitions";
 
 // Types
 
@@ -309,17 +315,29 @@ export function RouterProvider({
         h.type === "POP" &&
         shouldAutoRouteViewTransition(lastPathname, nextPathname);
 
+      // Stack Navigator (list ⇄ dialog): PUSH into a dialog detail slides the
+      // new page in from the right; POP back out of one slides it off to the
+      // right. The pair check keeps dialog→dialog and unrelated routes out.
+      const stackNavDir: StackNavDirection | null =
+        h.type === "PUSH" || h.type === "POP"
+          ? stackNavDirectionForPaths(lastPathname, nextPathname)
+          : null;
+
       const useTransition =
         h.type !== "REPLACE" &&
         !!doc?.startViewTransition &&
         (doc?.documentElement?.dataset?.noloRouteViewTransition === "1" ||
-          autoPlazaDetailVt);
+          autoPlazaDetailVt ||
+          stackNavDir !== null);
 
       lastPathname = nextPathname;
 
       if (useTransition) {
-        if (autoPlazaDetailVt && doc?.documentElement) {
+        if ((autoPlazaDetailVt || stackNavDir !== null) && doc?.documentElement) {
           doc.documentElement.dataset.noloRouteViewTransition = "1";
+        }
+        if (stackNavDir) {
+          setStackNavDirection(stackNavDir);
         }
         const transition = doc.startViewTransition(() => {
           flushSync(() => {
@@ -337,6 +355,7 @@ export function RouterProvider({
             } catch {
               // ignore
             }
+            clearStackNavDirection();
           });
       } else {
         setLocation({ ...h.currentLocation });

@@ -60,6 +60,7 @@ import { SidebarItemMoreMenu } from "create/space/SidebarItemMoreMenu";
 import {
   updateContentPinned,
 } from "create/space/content/contentThunks";
+import { runPinnedToggleWithTransition } from "create/space/content/optimisticPinnedUpdate";
 import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
 import { SidebarPinnedBlock } from "./SidebarPinnedBlock";
 import { SidebarVirtualizedList } from "./SidebarVirtualizedList";
@@ -74,6 +75,12 @@ import {
   type SidebarTypeFilterId,
 } from "./SidebarTypeFilter";
 import { isRecentlyCreated } from "./recentlyCreatedStore";
+import { runSidebarViewTransition } from "./sidebarViewTransitions";
+import "../stackNavViewTransition.css";
+import {
+  enableNextStackNavViewTransition,
+  isDialogDetailPath as isDialogContentPath,
+} from "app/stackNavViewTransitions";
 
 const RECENT_FILTER_STORAGE_KEY = "allview-recent-type-filter";
 
@@ -277,15 +284,26 @@ const RecentVirtualList: React.FC<{
             }
             pinAction={{
               pinned: Boolean(activeItem.pinned),
-              onToggle: () =>
-                (dispatch as any)(
-                  (updateContentPinned as any)({
-                    spaceId: activeItem.spaceId ?? null,
-                    contentKey: activeItem.contentKey,
-                    pinned: !activeItem.pinned,
-                    sourceServerOrigin: activeItem.serverOrigin,
-                  })
-                ),
+              onToggle: () => {
+                runPinnedToggleWithTransition({
+                  pinned: !activeItem.pinned,
+                  contentKey: activeItem.contentKey,
+                  // 同步乐观落地放进转场 update：flushSync 提交时新快照已带
+                  // pinned 差异，FLIP 才有内容可动。
+                  runTransition: runSidebarViewTransition,
+                  // 异步服务端同步在转场 update 之外执行；失败时编排函数内部
+                  // 回滚本地乐观 pinned。
+                  syncRemote: () =>
+                    (dispatch as any)(
+                      (updateContentPinned as any)({
+                        spaceId: activeItem.spaceId ?? null,
+                        contentKey: activeItem.contentKey,
+                        pinned: !activeItem.pinned,
+                        sourceServerOrigin: activeItem.serverOrigin,
+                      })
+                    ),
+                });
+              },
             }}
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {
@@ -460,21 +478,25 @@ const AllViewSidebar: React.FC<{
   const handleRecentItemAction = useCallback((key: React.Key) => {
     const item = stableRecentItems.find((i) => i.contentKey === key);
     if (!item) return;
-    navigate(buildRoutableContentPath({
+    const to = buildRoutableContentPath({
       contentKey: item.contentKey,
       type: item.type,
       userId: currentUserId ?? undefined,
-    }));
+    });
+    if (isDialogContentPath(to)) enableNextStackNavViewTransition("push");
+    navigate(to);
   }, [stableRecentItems, navigate, currentUserId]);
 
   const handleSearchRecentItemAction = useCallback((key: React.Key) => {
     const item = searchedRecentItems.find((i) => i.contentKey === key);
     if (!item) return;
-    navigate(buildRoutableContentPath({
+    const to = buildRoutableContentPath({
       contentKey: item.contentKey,
       type: item.type,
       userId: currentUserId ?? undefined,
-    }));
+    });
+    if (isDialogContentPath(to)) enableNextStackNavViewTransition("push");
+    navigate(to);
   }, [searchedRecentItems, navigate, currentUserId]);
 
   if (normalizedSearchQuery) {

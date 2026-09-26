@@ -1,7 +1,9 @@
 // "render/web/ui/TabsNav";
 import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
+import { prefersReducedMotion, sanitizeViewTransitionKey } from "app/viewTransitions";
 import { tabsNavStyles } from "./tabsNav.styles";
 
 export interface Tab {
@@ -40,10 +42,79 @@ const TabsNav: React.FC<TabsNavProps> = ({
   const rawIndex = tabs.findIndex((tab) => tab.id === activeTab);
   const activeIndex = rawIndex < 0 ? 0 : rawIndex;
 
+  const instanceId = sanitizeViewTransitionKey(panelId || id || "tabs-nav") || "tabs-nav";
+  const panelVtName = `tab-panel-${instanceId}`;
+
   const [slider, setSlider] = useState<{ left: number; width: number }>({
     left: 0,
     width: 0,
   });
+
+  const handleTabSelect = useCallback(
+    (nextTabId: number | string) => {
+      if (nextTabId === activeTab) return;
+
+      const prevIndex = tabs.findIndex((tab) => tab.id === activeTab);
+      const nextIndex = tabs.findIndex((tab) => tab.id === nextTabId);
+      const direction: "forward" | "backward" =
+        nextIndex >= prevIndex ? "forward" : "backward";
+
+      const shouldAnimate =
+        typeof document !== "undefined" &&
+        typeof (document as any).startViewTransition === "function" &&
+        !prefersReducedMotion();
+
+      if (!shouldAnimate) {
+        onChange(nextTabId);
+        return;
+      }
+
+      const getPanel = () => {
+        if (panelId) {
+          return document.getElementById(panelId);
+        }
+        return navRef.current
+          ?.closest("section, main, article, form, [data-tabs-container]")
+          ?.querySelector<HTMLElement>('[role="tabpanel"]');
+      };
+
+      const oldPanel = getPanel();
+      if (oldPanel) {
+        oldPanel.style.viewTransitionName = panelVtName;
+      }
+      document.documentElement.dataset.tabsDirection = direction;
+
+      try {
+        const transition = (document as any).startViewTransition(() => {
+          flushSync(() => {
+            onChange(nextTabId);
+          });
+          const newPanel = getPanel();
+          if (newPanel) {
+            newPanel.style.viewTransitionName = panelVtName;
+          }
+        });
+
+        Promise.resolve(transition?.finished)
+          .catch(() => undefined)
+          .finally(() => {
+            try {
+              const currentPanel = getPanel();
+              if (currentPanel && currentPanel.style.viewTransitionName === panelVtName) {
+                currentPanel.style.viewTransitionName = "";
+              }
+              delete document.documentElement.dataset.tabsDirection;
+            } catch {
+              // ignore
+            }
+          });
+      } catch {
+        onChange(nextTabId);
+        delete document.documentElement.dataset.tabsDirection;
+      }
+    },
+    [activeTab, onChange, panelId, panelVtName, tabs],
+  );
 
   const focusTabAt = useCallback(
     (index: number) => {
@@ -77,10 +148,10 @@ const TabsNav: React.FC<TabsNavProps> = ({
       const nextIndex =
         (currentEnabledIndex + direction + enabledTabs.length) % enabledTabs.length;
       const nextTab = enabledTabs[nextIndex];
-      onChange(nextTab.tab.id);
+      handleTabSelect(nextTab.tab.id);
       focusTabAt(nextTab.tabIndex);
     },
-    [activeTab, focusTabAt, onChange, tabs],
+    [activeTab, focusTabAt, handleTabSelect, tabs],
   );
 
   // 根据当前激活的 tab 动态计算滑块的位置与宽度
@@ -100,7 +171,7 @@ const TabsNav: React.FC<TabsNavProps> = ({
 
     // 自动滚动：让当前 tab 尽量出现在中间
     const navEl = navRef.current;
-    if (navEl) {
+    if (navEl && typeof navEl.scrollTo === "function") {
       const navWidth = navEl.clientWidth;
       const targetScrollLeft = left - navWidth / 2 + width / 2;
       navEl.scrollTo({
@@ -135,14 +206,14 @@ const TabsNav: React.FC<TabsNavProps> = ({
         case " ":
           event.preventDefault();
           if (!tabs[index]?.disabled) {
-            onChange(tabs[index].id);
+            handleTabSelect(tabs[index].id);
           }
           break;
         default:
           break;
       }
     },
-    [activateRelativeTab, focusTabAt, onChange, tabs],
+    [activateRelativeTab, focusTabAt, handleTabSelect, tabs],
   );
 
   // 把 slider 的 left / width 用 CSS 变量传给样式层
@@ -163,6 +234,27 @@ const TabsNav: React.FC<TabsNavProps> = ({
       onFocus={() => setHasFocusWithin(true)}
       onBlur={() => setHasFocusWithin(false)}
     >
+      <style>{`
+        ::view-transition-group(${panelVtName}) {
+          animation-duration: 0.28s;
+          animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        ::view-transition-old(${panelVtName}) {
+          animation: 0.2s cubic-bezier(0.33, 1, 0.68, 1) both vt-tab-fade-out,
+                     0.28s cubic-bezier(0.32, 0.72, 0, 1) both vt-tab-slide-out;
+        }
+        ::view-transition-new(${panelVtName}) {
+          animation: 0.24s cubic-bezier(0.33, 1, 0.68, 1) both vt-tab-fade-in,
+                     0.28s cubic-bezier(0.32, 0.72, 0, 1) both vt-tab-slide-in;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          ::view-transition-group(${panelVtName}),
+          ::view-transition-old(${panelVtName}),
+          ::view-transition-new(${panelVtName}) {
+            animation: none !important;
+          }
+        }
+      `}</style>
       <div
         className={[stylex.props(tabsNavStyles.tabs).className, "tabs"]
           .filter(Boolean)
@@ -202,7 +294,7 @@ const TabsNav: React.FC<TabsNavProps> = ({
               role="tab"
               type="button"
               disabled={tab.disabled}
-              onClick={() => !tab.disabled && onChange(tab.id)}
+              onClick={() => !tab.disabled && handleTabSelect(tab.id)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
               data-active={isActive}
               aria-selected={isActive}

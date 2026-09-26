@@ -62,9 +62,12 @@ export const tabsNavStyles = stylex.create({
     boxShadow:
       "0 1px 2px var(--shadowLight), 0 8px 18px -20px var(--shadowMedium)",
     transform: "translateX(var(--sliderLeft, 0px))",
-    transition: `transform ${tabsSpeed}s ${tabsEase}, width ${tabsSpeed} ${tabsEase}`,
+    transition: `transform ${tabsSpeed}s ${tabsEase}, width ${tabsSpeed}s ${tabsEase}`,
     willChange: "transform, width",
     zIndex: 0,
+    "@media (prefers-reduced-motion: reduce)": {
+      transition: "none",
+    },
   },
   // .tabs:focus-within::after（键盘 focus 描边，由 React focus 态挂载）
   sliderFocusOutline: {

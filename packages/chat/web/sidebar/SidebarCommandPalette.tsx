@@ -3,6 +3,10 @@ import { useTranslation } from "react-i18next";
 import type { Key } from "react-aria-components";
 import { LuBoxes, LuBot, LuLoaderCircle, LuStar } from "react-icons/lu";
 import { useNavigate } from "app/routing";
+import {
+  enableNextStackNavViewTransition,
+  isDialogDetailPath,
+} from "app/stackNavViewTransitions";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useUserId } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
@@ -261,13 +265,13 @@ export function SidebarCommandPalette({
         return;
       }
 
-      navigate(
-        buildRoutableContentPath({
-          contentKey: entry.contentKey,
-          type: entry.contentType,
-          userId: currentUserId ?? undefined,
-        }),
-      );
+      const to = buildRoutableContentPath({
+        contentKey: entry.contentKey,
+        type: entry.contentType,
+        userId: currentUserId ?? undefined,
+      });
+      if (isDialogDetailPath(to)) enableNextStackNavViewTransition("push");
+      navigate(to);
       handleOpenChange(false);
     },
     [entryById, dispatch, navigate, currentUserId, handleOpenChange],

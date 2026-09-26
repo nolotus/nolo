@@ -1,0 +1,10 @@
+/* The root flag scopes native View Transition pseudo-elements to sidebar mutations. */
+:root[data-nolo-sidebar-list-transition="1"]::view-transition-group(*) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-nolo-sidebar-list-transition="1"]::view-transition-old(*),
+:root[data-nolo-sidebar-list-transition="1"]::view-transition-new(*) {
+  animation-duration: 220ms;
+}

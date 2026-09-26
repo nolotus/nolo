@@ -1,4 +1,13 @@
 
+## 0.135.0-alpha.1
+
+## 0.135.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **chat:** add view transition morph patterns for dialog nav, tabs and sidebar lists ([394c078](https://github.com/nolotus/bun-nolo/commit/394c07885b0c52224b5d0584579f64dbf004b795))
+
+
 ## 0.134.0-alpha.1
 
 ## 0.134.0-alpha.1 (2026-09-26)

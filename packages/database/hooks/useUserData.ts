@@ -732,7 +732,11 @@ export function useUserData(
     const refresh = (event: Event) => {
       // 乐观移除：删除事件携带 deletedDbKey 时，立即从当前 data 中剔除该记录，
       // 不等 loadData 远端往返完成。loadData(forceRefresh) 在后台收敛权威状态。
-      const deletedDbKey = (event as CustomEvent<{ deletedDbKey?: string }>).detail?.deletedDbKey;
+      const detail = (event as CustomEvent<{
+        deletedDbKey?: string;
+        patchedRecord?: { dbKey?: string; changes?: Record<string, unknown> };
+      }>).detail;
+      const deletedDbKey = detail?.deletedDbKey;
       if (typeof deletedDbKey === "string" && deletedDbKey.trim().length > 0) {
         setState((prev) => {
           if (!prev.data.some((item) => getItemKey(item) === deletedDbKey)) {
@@ -742,6 +746,26 @@ export function useUserData(
             ...prev,
             data: prev.data.filter((item) => getItemKey(item) !== deletedDbKey),
           };
+        });
+      }
+      // 乐观字段更新：事件携带 patchedRecord 时，立即把 changes 合并进命中
+      // 记录（用于 pin 置顶等需要同步反映到 FLIP/排序的场景），不等待远端
+      // patch 往返。失败回滚由调用方再发一次携带旧值的事件完成。
+      const patched = detail?.patchedRecord;
+      const patchedKey =
+        patched && typeof patched.dbKey === "string" && patched.dbKey.trim().length > 0
+          ? patched.dbKey
+          : null;
+      if (patchedKey && patched?.changes && typeof patched.changes === "object") {
+        const changes = patched.changes;
+        setState((prev) => {
+          let touched = false;
+          const nextData = prev.data.map((item) => {
+            if (getItemKey(item) !== patchedKey) return item;
+            touched = true;
+            return { ...item, ...changes };
+          });
+          return touched ? { ...prev, data: nextData } : prev;
         });
       }
       if (refreshDebounceTimer) {

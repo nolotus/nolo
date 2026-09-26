@@ -22,6 +22,8 @@ import {
   ListLayout,
 } from "react-aria-components/Virtualizer";
 import { SidebarFluidHoverLayer } from "./SidebarFluidHoverLayer";
+import { sidebarRowViewTransitionName } from "./sidebarViewTransitions";
+import "./sidebarViewTransitions.css";
 
 /**
  * Fixed row pitch used by All View recent + category lists (px).
@@ -162,7 +164,14 @@ export function SidebarVirtualizedList<T extends SidebarItemShape>({
           <ListBoxItem
             id={item.contentKey}
             textValue={item.title}
-            style={{ height: rowSize, minHeight: 0, boxSizing: "border-box" }}
+            style={{
+              height: rowSize,
+              minHeight: 0,
+              boxSizing: "border-box",
+              ...(sidebarRowViewTransitionName(item.contentKey)
+                ? { viewTransitionName: sidebarRowViewTransitionName(item.contentKey) }
+                : {}),
+            }}
             onContextMenu={(event) => {
               // 只处理事件本身就发生在 ListBoxItem 上的情况 —— 即键盘 Shift+F10 /
               // ContextMenu 键(焦点在 ListBoxItem)。从行内冒泡上来的鼠标右键已经被
