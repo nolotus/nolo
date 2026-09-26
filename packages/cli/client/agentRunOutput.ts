@@ -12,6 +12,7 @@ import { Spinner, formatElapsed, truncateThinkingHint } from "./agentRunSpinner"
 import type { RunAgentTurnOptions } from "./agentRunTypes";
 import { dimCliText } from "./terminalStyles";
 import { t } from "../tui/i18n";
+import { stripAnsi } from "../tui/tuiAnsi";
 
 /**
  * 把一条 compaction 观测事件折叠成一行 dim 摘要（无压缩事件返回空串）。
@@ -29,6 +30,7 @@ import { t } from "../tui/i18n";
 const IDENTITY_LABEL_SEPARATOR = " > ";
 
 export const THINKING_PREVIEW_BUFFER_LIMIT = 512;
+const TUI_PROGRESS_BUFFER_LIMIT = 320;
 
 /**
  * Append a chunk of reasoning to the rolling preview buffer, keeping at most
@@ -52,14 +54,10 @@ export function formatCompactionSummaryLine(
   > | null,
 ): string {
   if (!event) return "";
-  // 失败优先渲染：自动压缩尝试失败时明确告诉用户本轮是未压缩继续的，
-  // 避免「该压没压」无线索（此前仅 console.warn，TUI 重绘下不可见）。
   if (event.failed) {
     const reason = event.detail ? `：${event.detail}` : "";
     return `${STYLE.dim}自动上下文压缩失败${reason}，本轮以未压缩上下文继续。若反复出现可手动 /compact。${STYLE.reset}\n`;
   }
-  // 跳过事件：只渲染「保护缺口」类原因（adapter 缺方法 / 摘要读取失败），
-  // below-trigger 等常规未触发不进 TUI（留在观测事件流里供排查）。
   if (event.skipped) {
     if (
       event.skipReason === "adapter-missing-summary-methods" ||
@@ -69,7 +67,6 @@ export function formatCompactionSummaryLine(
     }
     return "";
   }
-  // 复用已持久化摘要的投影是每轮例行行为，不渲染；只渲染「新生成摘要」。
   if (!event.summaryGenerated) return "";
   let detail = "生成历史摘要";
   const saved =
@@ -125,6 +122,17 @@ function formatToolJsonEvent(event: LocalAgentToolEvent) {
   })}\n`;
 }
 
+function shouldPromoteTuiNarration(text: string): boolean {
+  if (text.length >= TUI_PROGRESS_BUFFER_LIMIT) return true;
+  if (/\n\s*\n/.test(text)) return true;
+  return /(^|\n)\s*(?:#{1,3}\s|```|[-*+]\s|\d+[.)]\s)/.test(text);
+}
+
+function narrationActivityLabel(text: string): string {
+  const oneLine = stripAnsi(text).replace(/[`*_#>]/g, "").replace(/\s+/g, " ").trim();
+  return truncateThinkingHint(oneLine, 60);
+}
+
 /**
  * CLI turn output coordinator: owns the spinner, streaming text writer,
  * thinking sink, and tool-event formatter for one agent turn. Both the local
@@ -142,22 +150,20 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     tuiTrees: options.output.tuiTrees === true,
   });
   const eventMode = resolveAgentEventMode(options);
-  const showThinking = options.showThinking !== false;
+  const assistantLabelManaged = options.output.assistantLabelManaged === true;
+  // TUI intentionally exposes no reasoning text or duration trace. Bare CLI
+  // keeps the legacy explicit showThinking contract for compatibility.
+  const showThinking = !assistantLabelManaged && options.showThinking !== false;
 
   let streamedAssistantText = false;
   let everStreamedAnyText = false;
   let printedAssistantLabel = false;
   let thinkState = createThinkParserState();
-  // thinking 痕迹计时：当前 phase 首末打点跨度（思考流结束后，在 transcript
-  // 留一行 dim「✻ 思考 Xs」。showThinking=false 时不打点，痕迹自然零输出，
-  // 与 NOLO_CLI_THINKING=hide 全隐契约一致；痕迹只进 TUI 显示层，不进持久化消息。
   let thinkingFirstAt: number | null = null;
   let thinkingPreview = "";
 
   const markThinkingDelta = (chunk: string) => {
     if (!showThinking) return;
-    // 在同一个尚未发生 tool/新 phase 转换的正文流式段内，迟到的 stray reasoning
-    // 不应抢回 activity，避免正文流式输出时闪烁。
     if (streamedAssistantText) return;
 
     if (thinkingFirstAt === null) {
@@ -185,18 +191,16 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     thinkingPreview = "";
     spinner.stop();
     options.activityReporter?.(null);
-    // 0 秒的思考没有信息量，不打点：零内容行只会打断「工具组 → 正文」的节奏。
     if (seconds >= 1) {
       options.output.write(`${dimCliText(t("thinkingTraceLine", formatElapsed(seconds)))}\n`);
     }
   };
-  // 压缩观测事件：一个 turn 至多渲染一行摘要。记录最后一条 compaction 事件，
-  // 在 finish() 统一输出（保持与既有逐字节输出行为一致，无压缩事件零输出）。
+
   let compactionEvent: Extract<
     AgentExecutionObservationEvent,
     { kind: "compaction" }
   > | null = null;
-  const assistantLabelManaged = options.output.assistantLabelManaged === true;
+
   const writeToolOutput = (chunk: string) => {
     if (!chunk) return;
     if (typeof options.output.writeToolBlock === "function") {
@@ -210,11 +214,32 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
     write: (chunk) => options.output.write(chunk),
   });
 
+  // TUI-only narration gate. Short prose that is immediately followed by a
+  // tool call is operational progress, not durable transcript content. It is
+  // shown in the dock while current, then discarded when a tool starts. Final
+  // prose and structured/long prose are promoted to normal transcript output.
+  let pendingTuiNarration = "";
+  let tuiNarrationPromoted = false;
+
+  const flushPendingTuiNarration = () => {
+    if (!pendingTuiNarration) return;
+    formatToolEvent.reset?.();
+    renderWriter.push(pendingTuiNarration);
+    pendingTuiNarration = "";
+    tuiNarrationPromoted = true;
+    streamedAssistantText = true;
+    options.activityReporter?.(null);
+  };
+
+  const dropPendingTuiProgress = () => {
+    pendingTuiNarration = "";
+    tuiNarrationPromoted = false;
+    options.activityReporter?.(null);
+  };
+
   const writeVisibleAssistantChunk = (chunk: string) => {
     if (!chunk) return;
-    formatToolEvent.reset?.();
-    // Strip inline think tags from streaming content (some models emit
-    // thinking inline in content instead of as separate thinking events).
+    if (!assistantLabelManaged) formatToolEvent.reset?.();
     const parsed = processThinkChunk(chunk, thinkState);
     thinkState = parsed.state;
     if (!parsed.content && !parsed.reasoning) return;
@@ -229,8 +254,25 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       }
       printedAssistantLabel = true;
     }
-    streamedAssistantText = true;
     everStreamedAnyText = true;
+
+    if (assistantLabelManaged) {
+      if (tuiNarrationPromoted) {
+        renderWriter.push(parsed.content);
+        streamedAssistantText = true;
+        return;
+      }
+      pendingTuiNarration += parsed.content;
+      if (shouldPromoteTuiNarration(pendingTuiNarration)) {
+        flushPendingTuiNarration();
+      } else {
+        const label = narrationActivityLabel(pendingTuiNarration);
+        if (label) options.activityReporter?.(label);
+      }
+      return;
+    }
+
+    streamedAssistantText = true;
     renderWriter.push(parsed.content);
   };
 
@@ -247,74 +289,39 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       return;
     }
 
-    // A tool-call interrupts assistant text streaming. Flush any buffered
-    // render text so it appears before the tool chrome. This must
-    // happen before we stop the spinner for the tool chunk, because
-    // writeVisibleAssistantChunk (called by the flush) manages its own
-    // spinner stop + label writing. Tool-result events don't interrupt
-    // text (it was already flushed by the preceding tool-call).
     if (event.type === "tool-call") {
+      if (assistantLabelManaged && pendingTuiNarration) {
+        dropPendingTuiProgress();
+      }
       renderWriter.flush();
       formatToolEvent(event);
       endThinkingPhase();
 
-      // Mid-stream tool-calls interrupt assistant text. Break onto a new
-      // line when assistant text was just flushed in this same event
-      // (streamedAssistantText is set by writeVisibleAssistantChunk via
-      // renderWriter.flush, and reset right after the newline). This
-      // ensures exactly ONE separator between a text segment and the first
-      // tool that follows it. Subsequent buffered tool-calls (chunk="")
-      // do not re-trigger the newline because streamedAssistantText is
-      // already false — that was the source of the ~19 stray blank lines.
-      // Note: `printedAssistantLabel` is intentionally excluded: it stays
-      // true for the entire turn and would re-trigger "\n" on every call.
       if (streamedAssistantText) {
         options.output.write("\n");
         streamedAssistantText = false;
       }
+      if (assistantLabelManaged) tuiNarrationPromoted = false;
 
-      // ── Post-write: start spinner for in-flight tool-calls ──────────
-      // The activity label carries the verb only, never the argument preview:
-      // for shell-running tools the preview is the command line itself
-      // (cwd/echo/pipeline), which must not surface anywhere — including the
-      // composer activity line.
       const activeLabel = formatConservativeActiveToolLabel(event);
       spinner.show(activeLabel);
       options.activityReporter?.(activeLabel);
       return;
     }
 
-    // ── Tool Result / Tool Error (Text presentation path) ───────────
-    // Feed the docked run panel. `controlAgentRun` matters as much as
-    // `startAgentRun` here: subscribing to the fork alone pinned the panel to
-    // the run's first status, so it kept showing `running` for the rest of the
-    // turn no matter what the polls reported.
-    //
-    // A `gone` run is forwarded as its `not_found` snapshot rather than as
-    // `null`: the dock holds several runs at once now, so "the server has never
-    // heard of run X" has to name X. Sending null would have wiped the panel —
-    // including the sibling runs that are still very much alive.
     const parsedRunEvent = parseAgentRunEvent(event);
     if (options.onAgentRunStatus && parsedRunEvent) {
       options.onAgentRunStatus(parsedRunEvent.snapshot);
     }
 
-    // ── Stop spinner before writing tool content ───────────────────
-    // The spinner's \r clear must hit the spinner's own line, not a line
-    // we are about to emit. Stopping unconditionally here also makes stop()
-    // a no-op when no spinner is active (see agentRunSpinner.ts).
     spinner.stop();
     options.activityReporter?.(null);
 
-    // Route-before-render: live running observations update the dock only
-    // and do not enter the text transcript.
     if (isLiveAgentRunObservation(event, parsedRunEvent)) {
       formatToolEvent.consume?.(event);
       return;
     }
 
-    // Write tool content. The single-mode formatter renders a full line per
-    // tool-result immediately; there is no internal buffering left.
     const chunk = formatToolEvent(event);
     if (chunk) {
       writeToolOutput(chunk);
@@ -324,22 +331,35 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   return {
     spinner,
     eventMode,
+    /**
+     * Terminal cleanup for abort/error paths that never reach `finish()`.
+     *
+     * A user abort discards the transient TUI progress buffer: the user stopped
+     * on purpose and the dock already showed that text as activity. A genuine
+     * failure must not swallow prose that never got the chance to be *proven*
+     * durable (only a following tool call proves "progress"), so it promotes the
+     * pending buffer and flushes what was already promoted — otherwise a short
+     * final answer followed by a transport error disappears from the transcript.
+     */
+    cancel(cleanup?: { preservePendingNarration?: boolean }) {
+      if (assistantLabelManaged && cleanup?.preservePendingNarration) {
+        flushPendingTuiNarration();
+        if (streamedAssistantText) {
+          renderWriter.flush();
+          // Terminate the line like a normal turn end so the failure notice does
+          // not run into the prose that was just rescued.
+          options.output.write("\n");
+        }
+      }
+      dropPendingTuiProgress();
+    },
     pushText(chunk: string) {
-      // The single-mode tool formatter emits each tool line immediately;
-      // there is no pending tool output to flush before a text delta.
       writeVisibleAssistantChunk(chunk);
     },
     pushThinking(chunk: string) {
-      // Thinking content scrolls live on the spinner line instead of
-      // being written as separate output. The spinner shows a truncated
-      // hint of what the model is currently reasoning about.
       markThinkingDelta(chunk);
     },
     handleToolEvent,
-    /** 记录一条 compaction 观测事件（TUI 在 turn 结束时渲染一行 dim 摘要）。
-     *  一轮内可能来多条（轮开始 + 每个 round），按显著性保留最高者：
-     *  失败 > 新生成摘要 > 投影复用 > 跳过，避免末尾的例行跳过事件
-     *  覆盖掉中途真正发生的压缩。 */
     recordCompaction(
       event: Extract<AgentExecutionObservationEvent, { kind: "compaction" }>,
     ) {
@@ -357,12 +377,12 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       options.activityReporter?.(activeLabel);
     },
     finish(fallbackContent?: string) {
-      // Flush any residual think-tag buffer.
       const flushedThink = flushThinkParser(thinkState);
       thinkState = flushedThink.state;
       if (flushedThink.content) {
         writeVisibleAssistantChunk(flushedThink.content);
       }
+      if (assistantLabelManaged) flushPendingTuiNarration();
       endThinkingPhase();
       spinner.stop();
       options.activityReporter?.(null);
@@ -370,9 +390,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
         renderWriter.flush();
         options.output.write("\n");
       } else if (everStreamedAnyText) {
-        // Text was streamed earlier but reset by a tool-call event; the last
-        // segment (if any) was already flushed. Don't re-render the full
-        // result.content — that would duplicate the streamed output.
         options.output.write("\n");
       } else {
         const content = fallbackContent
@@ -392,7 +409,6 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
           );
         }
       }
-      // 压缩摘要行（dim，一行折叠展示）。无压缩事件 → 零输出。
       const compactionLine = formatCompactionSummaryLine(compactionEvent);
       if (compactionLine) {
         options.output.write(compactionLine);

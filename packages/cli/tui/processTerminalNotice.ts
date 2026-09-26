@@ -31,7 +31,7 @@ export function formatProcessTerminalWakeMessage(
   return [
     `<background_task_completion count="${notices.length}">`,
     ...notices.flatMap((notice) => [
-      formatProcessTerminalNoticeLine(notice),
+      formatProcessTerminalWakeLine(notice),
       ...(notice.resultCapsule
         ? formatProcessResultCapsuleLines(notice.resultCapsule)
         : []),
@@ -76,12 +76,13 @@ export function formatProcessResultCapsuleLines(
   ];
 }
 
-/** 单行摘要（注入块与屏幕显示共用的最小事实）。 */
-export function formatProcessTerminalNoticeLine(
+/**
+ * Model/persistence wire line. Keep the verbose legacy shape stable because it
+ * is parsed back into structured notices and injected into the next turn.
+ */
+export function formatProcessTerminalWakeLine(
   notice: ProcessTerminalNotice,
 ): string {
-  // label 只在它有信息量（不同于 command/缺省）时出现；内嵌引号/反斜杠
-  // 转义，保证 parsePendingProcessNoticeLine 能无损还原。
   const informative =
     notice.label && notice.label.trim() !== "" && notice.label !== notice.command;
   const label = informative
@@ -89,6 +90,24 @@ export function formatProcessTerminalNoticeLine(
     : "";
   const exit = notice.exitCode !== undefined ? ` exitCode=${notice.exitCode}` : "";
   return `[Background task ${notice.taskId}${label} finished: status=${notice.status}${exit}]`;
+}
+
+/**
+ * Screen-only line. Internal ids/status protocol stay out of the transcript;
+ * users only need the outcome and a useful label. The full task facts still go
+ * to the model through formatProcessTerminalWakeLine above.
+ */
+export function formatProcessTerminalNoticeLine(
+  notice: ProcessTerminalNotice,
+): string {
+  const informative =
+    notice.label && notice.label.trim() !== "" && notice.label !== notice.command;
+  const label = informative ? notice.label.trim() : "background task";
+  const ok = notice.status === "exited" && (notice.exitCode === undefined || notice.exitCode === 0);
+  if (ok) return `✓ ${label}`;
+  if (notice.status === "stopped") return `■ ${label} · stopped`;
+  const exit = notice.exitCode !== undefined ? ` · exit ${notice.exitCode}` : "";
+  return `✗ ${label}${exit}`;
 }
 
 /** 下一轮 turn 的注入文本（多条合并为一条事件消息）。 */
@@ -124,18 +143,17 @@ export function buildProcessTaskCompletedTurnEvent(
 /**
  * 把 pendingProcessNotices 里存的格式化单行解析回结构化通知。
  *
- * state 里存的是已格式化的单行（订阅侧不保留结构对象，避免 TuiState 挂
- * 引用类型）：注入时把每行还原成 Notice 再进同一 formatter，保证「存的
- * 行」与「注入的行」永远一致。行格式见 formatProcessTerminalNoticeLine。
+ * state 里存的是模型/持久化专用的 legacy wire line；屏幕 displayText 与它
+ * 已解耦，避免内部 taskId / exit protocol 泄到一级 transcript。
  */
 const PENDING_NOTICE_PREFIX = "process-notice-v1:";
 
 /** Persist the full model payload only when a capsule exists; legacy notices
- * keep their compact line representation for backwards compatibility. */
+ * keep their compact wire representation for backwards compatibility. */
 export function serializePendingProcessNotice(notice: ProcessTerminalNotice): string {
   return notice.resultCapsule
     ? `${PENDING_NOTICE_PREFIX}${JSON.stringify(notice)}`
-    : formatProcessTerminalNoticeLine(notice);
+    : formatProcessTerminalWakeLine(notice);
 }
 
 export function parsePendingProcessNoticeLine(
@@ -155,7 +173,7 @@ export function parsePendingProcessNoticeLine(
     /^\[Background task ([^ \]]+?)(?:\s+\(label: "((?:[^"\\]|\\.)*)"\))? finished: status=(\w+)(?: exitCode=(-?\d+))?\]$/,
   );
   if (!taskMatch) {
-    // 不认识的行（理论上不可能：行只由 formatProcessTerminalNoticeLine
+    // 不认识的行（理论上不可能：行只由 formatProcessTerminalWakeLine
     // 产生）原样透传为 command，让模型至少能看到原始事实。
     return {
       taskId: line,

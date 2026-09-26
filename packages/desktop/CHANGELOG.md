@@ -1,4 +1,17 @@
 
+## 0.132.0-alpha.1
+
+## 0.132.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **tui:** reduce transcript noise and sharpen activity hierarchy ([17667b0](https://github.com/nolotus/bun-nolo/commit/17667b00f1c99d06d161cadd8c092cf6f70f6e70))
+
+### Bug Fixes
+
+* **tui:** separate abort from failure and stop leaking generated identities ([2a1092d](https://github.com/nolotus/bun-nolo/commit/2a1092d1b3be099a2895929b365d1b8f15f50470))
+
+
 ## 0.131.0-alpha.3
 
 ## 0.131.0-alpha.3 (2026-09-26)

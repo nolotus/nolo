@@ -1652,6 +1652,14 @@ async function runLocalAgentTurnForCli(
     };
   } catch (error) {
     turnOutput.spinner.stop();
+    // Abort/error bypasses finish() (it lives on the success path). A user stop
+    // drops the transient TUI progress buffer; a genuine failure preserves the
+    // prose that arrived, since it may be the answer.
+    turnOutput.cancel({
+      preservePendingNarration:
+        (error as { code?: string })?.code !== LOCAL_TURN_ABORTED_CODE &&
+        !options.abortSignal?.aborted,
+    });
     // localLoop saveTurn()s on failure/abort and hangs dialogId on the error
     // so TUI can keep state.dialogId and the next message --continues instead
     // of opening a fresh dialog (402 / provider errors used to "amnesia").

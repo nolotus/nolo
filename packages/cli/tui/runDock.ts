@@ -26,7 +26,7 @@ import {
   isAgentRunTerminalStatus,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
-import { formatAgentRunPanelLines } from "./agentRunPanelLines";
+import { displayAgentName, formatAgentRunPanelLines } from "./agentRunPanelLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone, sanitizeRunSnapshotForNormal } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
@@ -328,7 +328,7 @@ function formatRunDockRow(
   colorEnabled: boolean,
   now: number
 ): string {
-  const name = snapshot.agentName || "sub-agent";
+  const name = displayAgentName(snapshot);
   const short = shortRunId(snapshot.runId);
   const icon = getAgentRunStatusIcon(snapshot.status);
   const terminal = isAgentRunTerminalStatus(snapshot.status);

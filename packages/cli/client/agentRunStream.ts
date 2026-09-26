@@ -60,6 +60,9 @@ export async function readStreamingAgentRun(
   let content = "";
   let dialogId: string | undefined;
   let usage: any;
+  // The server's `done` frame is the protocol terminator: once it lands the
+  // answer is complete, so a late abort must not be read as "discard in flight".
+  let sawDone = false;
 
   const handlePayload = (payload: any) => {
     if (typeof payload?.dialogId === "string" && payload.dialogId.trim()) {
@@ -77,6 +80,7 @@ export async function readStreamingAgentRun(
     }
     if (payload?.type === "done") {
       usage = payload.usage;
+      sawDone = true;
       return;
     }
     if (payload?.type === "dialog" || payload?.type === "status") {
@@ -151,6 +155,12 @@ export async function readStreamingAgentRun(
     }
   } catch (error) {
     turnOutput.spinner.stop();
+    // Abort/transport failure bypasses finish(). A user stop drops the transient
+    // TUI progress buffer; a real failure preserves whatever prose arrived, since
+    // it may be the answer the user never got to see.
+    turnOutput.cancel({
+      preservePendingNarration: !options.abortSignal?.aborted,
+    });
     if (options.abortSignal?.aborted) {
       // User-initiated stop; the server may still finish the dialog.
       return {
@@ -178,6 +188,21 @@ export async function readStreamingAgentRun(
     }
     options.output.write(`\n[nolo] Agent stream failed: ${message}\n`);
     return { exitCode: 1 };
+  }
+
+  // Esc-to-stop cancels the reader, and a Web stream resolves the *pending*
+  // read as EOF instead of throwing — so the loop above exits "normally" for a
+  // user stop. Settling through finish() here would promote the transient TUI
+  // progress text a stop is supposed to drop, so a stop takes the same exit as
+  // the throwing abort branch in the catch above.
+  if (options.abortSignal?.aborted && !sawDone) {
+    turnOutput.spinner.stop();
+    turnOutput.cancel();
+    return {
+      exitCode: 0,
+      ...(dialogId ? { dialogId } : {}),
+      streamInterrupted: true,
+    };
   }
 
   turnOutput.finish(content);
