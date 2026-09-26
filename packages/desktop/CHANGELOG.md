@@ -1,4 +1,13 @@
 
+## 0.138.0-alpha.1
+
+## 0.138.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **agent-runtime:** inject delete-safety red line at the top of every system prompt ([57589d2](https://github.com/nolotus/bun-nolo/commit/57589d250e5e8ec52355fe7dba929bf88f7b7de5))
+
+
 ## 0.137.0-alpha.1
 
 ## 0.137.0-alpha.1 (2026-09-26)

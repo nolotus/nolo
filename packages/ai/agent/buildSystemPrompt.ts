@@ -12,6 +12,7 @@ import { wrapHistoricalSummaryWithReplayGuard } from "ai/context/staleReplayGuar
 // 必须带同一份指引，两处各存一份迟早漂移。
 import { MEMORY_USE_GUIDANCE } from "agent-runtime/memoryUseGuidance";
 import { buildIdentityBlock } from "agent-runtime/identityBlock";
+import { DELETE_SAFETY_RED_LINE } from "agent-runtime/deleteSafety";
 import { buildResponseGuidelines } from "agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "agent-runtime/userResponseLanguage";
 // 工具驱动指令表（编排/协作 review 硬门等）独立成模块，localLoop 复用同一份。
@@ -272,6 +273,14 @@ export const buildSystemPromptContext = (options: {
     : "";
 
   return compileContextLayers([
+    // 删除安全红线：系统层最高优先级约束，位于所有层之前（含身份信息），
+    // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
+    {
+      id: "delete-safety-red-line",
+      owner: "platform",
+      cacheScope: "static",
+      content: DELETE_SAFETY_RED_LINE,
+    },
     { id: "identity", owner: "platform", cacheScope: "session", content: identitySection },
     { id: "user-response-language", owner: "platform", cacheScope: "session", content: buildUserResponseLanguageContext({ language: safeLanguage }) },
     { id: "startup-protocol", owner: "platform", cacheScope: "static", content: startupProtocol },

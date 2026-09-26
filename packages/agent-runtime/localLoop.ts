@@ -47,6 +47,7 @@ import { downgradeUnparsableToolCalls, hasParsableObjectArguments, repairTruncat
 import { summarizeToolArguments } from "./summarizeToolArguments";
 import { buildToolArgumentsFingerprint } from "./toolArgumentsFingerprint";
 import { buildIdentityBlock } from "./identityBlock";
+import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -1565,6 +1566,9 @@ export async function runLocalAgentTurn(
     input.contextBlockScopes,
   );
   const mergedContextBlockScopes: ContextBlockScope[] = [
+    // 删除安全红线：系统层最高优先级约束，位于所有块之前（含身份信息块），
+    // owner 要求常驻「根本提示词」的最顶部（2026-09-26 批量误删事故）。
+    { content: DELETE_SAFETY_RED_LINE, cacheScope: "session" as const },
     { content: identityBlock, cacheScope: "session" as const },
     ...guidanceScopes,
     ...callerScopes,
