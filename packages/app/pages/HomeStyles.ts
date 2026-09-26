@@ -301,6 +301,9 @@ export const homeStyles = stylex.create({
     "@media (max-width: 640px)": {
       alignSelf: "flex-end",
       fontSize: "var(--fontSize-sm)",
+      minHeight: "var(--tap-target-min)",
+      paddingTop: 10,
+      paddingBottom: 10,
     },
   },
   homeContentBody: {

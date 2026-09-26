@@ -41,6 +41,23 @@
           transform: scale(0.92);
         }
 
+        /* 移动端触达目标 ≥44px：盒模型真实 44px（可度量），
+           负 margin 保持布局占位不变；触屏无 hover，
+           去掉背景圆反馈避免 44px 圆溢出 24px 容器盖住标题。
+           必须放在上面的 hover/--active 规则之后（同级 !important 按源码序决胜） */
+        @media (max-width: 640px) {
+          .agent__more {
+            width: var(--tap-target-min);
+            height: var(--tap-target-min);
+            margin: -10px;
+          }
+          .agent__more:hover,
+          .agent__more--active {
+            background: transparent !important;
+            border-color: transparent !important;
+          }
+        }
+
         .agent__actions-menu {
           position: absolute;
           top: calc(100% + 6px);

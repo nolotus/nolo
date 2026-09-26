@@ -71,6 +71,7 @@ const renderDesktopShellHtml = (): string => {
 <head>
   <meta charset="UTF-8" />
   <title>Nolo</title>
+  <!-- 桌面壳层有意锁定缩放：WebView 内按原生应用对待，禁止页面级缩放；Web 端见 template.ts 已解禁 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" href="/public/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="${assets.css}" />

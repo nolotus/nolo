@@ -17,6 +17,7 @@ const styles = stylex.create({
     maxWidth: "1120px",
     margin: "20px auto 72px",
     padding: "0 24px",
+    boxSizing: "border-box",
   },
   shell: {
     borderWidth: 1,

@@ -900,19 +900,20 @@
     grid-auto-columns: unset;
     grid-auto-flow: unset;
     height: auto;
-    min-height: 44px;
+    min-height: var(--tap-target-min);
     padding: 2px;
   }
 
   .ws-orchestration-tabs button,
   .ws-orchestration-tabs .tab-item {
-    font-size: 0.72rem;
+    font-size: 12px;
     line-height: 1.2;
     padding: 4px 4px;
     white-space: normal;
     word-break: break-word;
     text-align: center;
     min-width: 0;
+    min-height: var(--tap-target-min);
   }
 
   .ws-final-cta-actions {

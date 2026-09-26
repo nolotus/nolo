@@ -1,4 +1,14 @@
 
+## 0.129.0-alpha.2
+
+## 0.129.0-alpha.2 (2026-09-26)
+
+### Bug Fixes
+
+* **web:** 修复移动端可访问性与显示问题 ([d6f1e20](https://github.com/nolotus/bun-nolo/commit/d6f1e203a6e690d0f90ac61a1d6fff670d26fd56))
+* **web:** 统一品牌口号并修复多语言文案缺陷 ([8656104](https://github.com/nolotus/bun-nolo/commit/8656104f34178ea731424d4a49eec5cbdf3e28c1))
+
+
 ## 0.129.0-alpha.1
 
 ## 0.129.0-alpha.1 (2026-09-26)

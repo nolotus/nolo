@@ -27,7 +27,7 @@ export default {
         review: "Review",
         result: "Result",
         resultValue: "Ready to deliver",
-        note: "When real run metrics are available, this card can show the actual agents, models, duration, and cost instead of invented demo numbers.",
+        note: "Demo data is shown here until real run metrics are available for the agents, models, duration, and cost.",
       },
       homeLandingFaq: {
         kicker: "FAQ",
@@ -62,7 +62,7 @@ export default {
         review: "检查",
         result: "结果",
         resultValue: "准备交付",
-        note: "等真实运行指标接入后，这里展示真实 Agent、模型、耗时和成本，不用编造演示数字。",
+        note: "以下 Agent、模型、耗时和成本为演示数据，接入真实运行指标后替换。",
       },
       homeLandingFaq: {
         kicker: "常见问题",
@@ -97,7 +97,7 @@ export default {
         review: "檢查",
         result: "結果",
         resultValue: "準備交付",
-        note: "等真實運行指標接入後，這裡展示真實 Agent、模型、耗時和成本，不用編造演示數字。",
+        note: "以下 Agent、模型、耗時和成本為演示資料，接入真實運行指標後替換。",
       },
       homeLandingFaq: {
         kicker: "常見問題",
@@ -132,7 +132,7 @@ export default {
         review: "確認",
         result: "結果",
         resultValue: "納品準備完了",
-        note: "実際の実行メトリクスを接続したら、架空のデモ数値ではなく Agent、モデル、時間、コストの実測値を表示できます。",
+        note: "実際の実行メトリクスを取得できるまでは、Agent・モデル・時間・コストのデモデータを表示しています。",
       },
       homeLandingFaq: {
         kicker: "FAQ",

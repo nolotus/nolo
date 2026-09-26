@@ -42,6 +42,12 @@ const NavListItem: React.FC<NavListItemProps> = ({
             text-align: left;
           }
 
+          @media (max-width: 640px) {
+            .nav-list-item {
+              height: var(--tap-target-min);
+            }
+          }
+
           .nav-list-icon {
             display: flex;
             align-items: center;

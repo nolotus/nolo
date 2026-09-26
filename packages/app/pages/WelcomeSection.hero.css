@@ -703,6 +703,10 @@
     font-size: 0.82rem;
   }
 
+  .ws-trust-local {
+    font-size: 12px;
+  }
+
   .ws-hero-mountain-art {
     inset: 0 0 auto 0;
     height: 260px;

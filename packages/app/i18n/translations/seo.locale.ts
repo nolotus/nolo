@@ -32,11 +32,11 @@ export interface SeoLocaleEntry {
 
 const seoLocale: Record<Language, SeoLocaleEntry> = {
   [Language.EN]: {
-    title: "Nolo.Chat | Not Just a Chatbot — Your Private AI Team",
+    title: "Nolo — One goal. Multiple AIs. Get it done together.",
     description:
       "While others chat, Nolo.Chat works. Orchestrate multiple AI agents that remember your rules, collaborate on complex tasks, and keep running overnight — delivering real results by morning.",
     home: {
-      title: "Nolo — Let your strongest model plan. Let lower-cost agents execute.",
+      title: "Nolo — One goal. Multiple AIs. Get it done together.",
       description:
         "Work with GPT, Claude, DeepSeek and more in one AI workspace. Nolo remembers your context, lets multiple agents debate and collaborate, and turns ideas into docs, images, apps, and deliverables.",
     },
@@ -67,11 +67,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_CN]: {
-    title: "Nolo — 让最强的模型规划，让更低成本的 Agent 执行。",
+    title: "Nolo — 一个目标，多个 AI，一起把它做完。",
     description:
       "别人是一个 AI 帮你聊，我们是多个 Agent 帮你做完。记住你的规则、多模型协作、夜间自动执行——今晚委托，明早交付网页、图片、文档。",
     home: {
-      title: "Nolo — 让最强的模型规划，让更低成本的 Agent 执行。",
+      title: "Nolo — 一个目标，多个 AI，一起把它做完。",
       description:
         "把 GPT、Claude、DeepSeek 放进同一个 AI 工作台。Nolo 能记住你的上下文，让多个 Agent 协作或辩论，并直接产出文档、图片、网页和可交付结果。",
     },
@@ -102,11 +102,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_HANT]: {
-    title: "Nolo — 讓最強模型規劃，讓更低成本的 Agent 執行。",
+    title: "Nolo — 一個目標，多個 AI，一起把它做完。",
     description:
       "別人是一個 AI 幫你聊，我們是多個 Agent 幫你做完。記住你的規則、多模型協作、夜間自動執行——今晚委託，明早交付網頁、圖片、文件。",
     home: {
-      title: "Nolo — 讓最強模型規劃，讓更低成本的 Agent 執行。",
+      title: "Nolo — 一個目標，多個 AI，一起把它做完。",
       description:
         "把 GPT、Claude、DeepSeek 放進同一個 AI 工作台。Nolo 能記住你的上下文，讓多個 Agent 協作或辯論，並直接產出文件、圖片、網頁和可交付結果。",
     },
@@ -137,11 +137,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.JA]: {
-    title: "Nolo — 最も強いモデルが計画し、より低コストなエージェントが実行する。",
+    title: "Nolo — 一つの目標を、複数の AI で最後までやり切る。",
     description:
       "他社が「一対一の会話」なら、Nolo.Chat は「複数 Agent が協力して仕事を完遂」。ルールを記憶し、夜間も自動実行。朝には成果物が届きます。",
     home: {
-      title: "Nolo.Chat | 文脈を覚えて、仕事を仕上げる AI ワークスペース",
+      title: "Nolo — 一つの目標を、複数の AI で最後までやり切る。",
       description:
         "GPT、Claude、DeepSeek などを 1 つの AI ワークスペースで活用。Nolo は文脈を覚え、複数 Agent の協調や議論を通じて、文書・画像・Web・成果物まで形にします。",
     },
@@ -172,11 +172,11 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.KO]: {
-    title: "Nolo.Chat | 단순 챗봇을 넘어선 나만의 프라이빗 AI 팀",
+    title: "Nolo — 하나의 목표, 여러 AI와 함께 끝까지 완수",
     description:
       "단순한 대화를 넘어, 여러 AI 에이전트가 협력하여 업무를 완수합니다. 규칙을 기억하고 밤새 실행하여 아침에 실제 결과물을 제공합니다.",
     home: {
-      title: "Nolo.Chat | 당신을 기억하고 업무를 완수하는 AI 워크스페이스",
+      title: "Nolo — 하나의 목표, 여러 AI와 함께 끝까지 완수",
       description:
         "GPT, Claude, DeepSeek 등을 하나의 AI 작업 공간에서 활용하세요. Nolo는 문맥을 기억하고, 여러 에이전트의 협업과 토론을 통해 문서, 이미지, 웹, 최종 결과물을 만듭니다.",
     },

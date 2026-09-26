@@ -1064,22 +1064,18 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
   .topbar__history-btn { display: none; }
   .topbar__button--sidechat,
   .topbar__button--fileinfo { display: none; }
+  .topbar__button {
+    width: var(--tap-target-min);
+    height: var(--tap-target-min);
+  }
+  .TopBar__home {
+    width: var(--tap-target-min);
+    height: var(--tap-target-min);
+  }
 }
 
 @media (max-width: 480px) {
   .topbar__section--left { max-width: 80px; }
-  .topbar__button {
-    width: var(--space-7);
-    height: var(--space-7);
-  }
-  .TopBar__home {
-    width: var(--space-7);
-    height: var(--space-7);
-  }
-  .create-menu__button--topbar {
-    width: var(--space-7);
-    height: var(--space-7);
-  }
 }
 
 /* =============================================================================
@@ -1717,9 +1713,9 @@ html[data-nolo-desktop="1"] .MainLayout__sidebarContent::-webkit-scrollbar {
     width: 100%;
     justify-content: center;
   }
-  .topbar-user-menu__avatar-button { width: 28px; height: var(--control-sm); }
+  .topbar-user-menu__avatar-button { width: var(--tap-target-min); height: var(--tap-target-min); }
   .topbar-user-menu__toggle,
-  .create-menu__button--topbar { width: var(--space-7); height: var(--space-7); }
+  .create-menu__button--topbar { width: var(--tap-target-min); height: var(--tap-target-min); }
   .topbar-user-menu__item { height: 46px; } /* 移动端增大点击量 */
   .topbar-user-menu__header { padding: 13px 14px 14px; }
   .topbar-user-menu__balance-row { gap: 10px; }

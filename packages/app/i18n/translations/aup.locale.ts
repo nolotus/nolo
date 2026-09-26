@@ -44,7 +44,7 @@ export default {
   [Language.ZH_CN]: {
     translation: {
       aup: {
-        title: "AIGC 可接受使用规范 (AUP)",
+        title: "AIGC 可接受使用规范",
         lastUpdated: "最后更新日期：2026年8月24日",
         intro:
           "欢迎使用 Nolo。本规范（AUP）旨在明确使用本平台 AI 生成服务时的内容标准、违规分类与处置规则，保障健康、安全、负责任的 AI 使用环境。",
@@ -84,7 +84,7 @@ export default {
   [Language.ZH_HANT]: {
     translation: {
       aup: {
-        title: "AIGC 可接受使用規範 (AUP)",
+        title: "AIGC 可接受使用規範",
         lastUpdated: "最後更新日期：2026年8月24日",
         intro:
           "歡迎使用 Nolo。本規範（AUP）旨在明確使用本平台 AI 生成服務時的內容標準、違規分類與處置規則，保障健康、安全、負責任的 AI 使用環境。",
@@ -124,7 +124,7 @@ export default {
   [Language.JA]: {
     translation: {
       aup: {
-        title: "AIGC 利用規約 (AUP)",
+        title: "AIGC 利用規約",
         lastUpdated: "最終更新日：2026年8月24日",
         intro: "Nolo AIGC 利用規約。安全で責任ある AI 利用環境を維持するための禁止事項とモデレーション基準。",
         section1: {

@@ -42,6 +42,10 @@ export const langSwitcherStyles = stylex.create({
     padding: 0,
     gap: 0,
     justifyContent: "center",
+    "@media (max-width: 768px)": {
+      width: "var(--tap-target-min)",
+      height: "var(--tap-target-min)",
+    },
   },
   // .lang-icon
   icon: {

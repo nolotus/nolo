@@ -54,7 +54,7 @@ export default {
   [Language.ZH_CN]: {
     translation: {
       privacy: {
-        title: "隐私政策 (Privacy Policy)",
+        title: "隐私政策",
         lastUpdated: "最后更新日期：2026年9月16日",
         intro: "欢迎使用 Nolo（以下简称“我们”）。我们高度重视您的隐私与个人信息安全。本隐私政策说明我们在您使用本服务时如何处理与保护您的信息。",
         section1: {
@@ -104,7 +104,7 @@ export default {
   [Language.ZH_HANT]: {
     translation: {
       privacy: {
-        title: "隱私權政策 (Privacy Policy)",
+        title: "隱私權政策",
         lastUpdated: "最後更新日期：2026年9月16日",
         intro: "歡迎使用 Nolo（以下簡稱“我們”）。我們高度重視您的隱私與個人資訊安全。本隱私權政策說明我們在您使用本服務時如何處理與保護您的資訊。",
         section1: {

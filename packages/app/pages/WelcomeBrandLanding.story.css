@@ -285,9 +285,13 @@
     font-size: 12px;
   }
 
+  .wbl-receipt-item span {
+    font-size: 12px;
+  }
+
   .wbl-receipt-note {
     margin-top: 10px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .wbl-why {
