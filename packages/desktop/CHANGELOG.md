@@ -1,4 +1,13 @@
 
+## 0.135.0-alpha.2
+
+## 0.135.0-alpha.2 (2026-09-26)
+
+### Bug Fixes
+
+* **tui:** keep blank-line narration transient until next event ([1761ae8](https://github.com/nolotus/bun-nolo/commit/1761ae8530dd9951f30e3064c9f208c31155176e))
+
+
 ## 0.135.0-alpha.1
 
 ## 0.135.0-alpha.1 (2026-09-26)

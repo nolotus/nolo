@@ -30,7 +30,11 @@ import { stripAnsi } from "../tui/tuiAnsi";
 const IDENTITY_LABEL_SEPARATOR = " > ";
 
 export const THINKING_PREVIEW_BUFFER_LIMIT = 512;
-const TUI_PROGRESS_BUFFER_LIMIT = 320;
+// Progress narration is intentionally allowed to be fairly long. Agent models
+// often explain a plan in several sentences before the very next tool call;
+// promoting that prose too early fragments the tool tree and recreates the
+// noisy "text / tool / text / tool" stripe the TUI is trying to avoid.
+const TUI_PROGRESS_BUFFER_LIMIT = 1200;
 
 /**
  * Append a chunk of reasoning to the rolling preview buffer, keeping at most
@@ -124,7 +128,10 @@ function formatToolJsonEvent(event: LocalAgentToolEvent) {
 
 function shouldPromoteTuiNarration(text: string): boolean {
   if (text.length >= TUI_PROGRESS_BUFFER_LIMIT) return true;
-  if (/\n\s*\n/.test(text)) return true;
+  // Blank lines alone are not a durability signal. Agent models commonly emit
+  // "I'll inspect this:\n\n" immediately before a tool call. Waiting for the
+  // next event lets the tool call prove that segment was progress; finish()
+  // still preserves it when it was actually the final answer.
   return /(^|\n)\s*(?:#{1,3}\s|```|[-*+]\s|\d+[.)]\s)/.test(text);
 }
 
@@ -217,7 +224,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   // TUI-only narration gate. Short prose that is immediately followed by a
   // tool call is operational progress, not durable transcript content. It is
   // shown in the dock while current, then discarded when a tool starts. Final
-  // prose and structured/long prose are promoted to normal transcript output.
+  // prose and strongly structured/very long prose are promoted to transcript.
   let pendingTuiNarration = "";
   let tuiNarrationPromoted = false;
 
