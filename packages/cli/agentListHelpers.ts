@@ -205,6 +205,7 @@ export function parseAgentListArgs(args: string[]) {
     publicOnly: args.includes("--public-only"),
     idsOnly: args.includes("--ids-only"),
     scope: readArgValue(args, "--scope"),
+    query: readArgValue(args, "--query"),
     showUnavailable: args.includes("--show-unavailable"),
     // --safe 默认输出精简投影（与 server listAgents 一致，防大列表被截断）；
     // --verbose 拿回完整字段集排障。

@@ -1,4 +1,13 @@
 
+## 0.133.0-alpha.1
+
+## 0.133.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **agent:** support query filter in listAgents and allow credential concurrency ([b7d9999](https://github.com/nolotus/bun-nolo/commit/b7d9999110316b93eee828c28127e9f4df4c38f9))
+
+
 ## 0.132.0-alpha.2
 
 ## 0.132.0-alpha.2 (2026-09-26)

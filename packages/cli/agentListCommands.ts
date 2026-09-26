@@ -1,6 +1,7 @@
 import { toErrorMessage } from "core/errorMessage";
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, summarizeCredentialGroups, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
+import { matchesAgentQuery } from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -39,7 +40,7 @@ export async function runAgentListCommand(
 ) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose } = parseAgentListArgs(args);
+  const { wantJson, wantSafe, publicOnly, scope: requestedScope, idsOnly, showUnavailable, verbose, query } = parseAgentListArgs(args);
   if (requestedScope && !["preferred", "public", "all"].includes(requestedScope)) {
     throw new Error(`Invalid scope '${requestedScope}'`);
   }
@@ -164,9 +165,12 @@ export async function runAgentListCommand(
     // 打不了的 agent。--show-unavailable 可见全量（脚本/排障需要）。
     // 在 space/publicOnly 过滤之后计算总数，避免把无关排除的 agent 计入。
     const unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
-    const agentsForOutput = showUnavailable
+    let agentsForOutput = showUnavailable
       ? agents
       : agents.filter((agent) => !isAgentUnavailableNow(agent));
+    if (query && typeof query === "string" && query.trim()) {
+      agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
+    }
 
     if (idsOnly) {
       output.write(`${agentsForOutput.map((agent) => agent.id).join("\n")}\n`);
@@ -255,6 +259,9 @@ export async function runAgentListCommand(
       ];
       if (publicOnly) {
         safeCandidates = safeCandidates.filter((agent) => agent.isPublic);
+      }
+      if (query && typeof query === "string" && query.trim()) {
+        safeCandidates = safeCandidates.filter((agent) => matchesAgentQuery(agent as any, query));
       }
       const safeUnavailableList = safeCandidates.filter((agent) =>
         isAgentUnavailableNow(agent as any)

@@ -103,6 +103,7 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     },
   }, ["query"]);
   add("listAgents", "List agents for delegation. Default scope='preferred' returns the user's favorites, owned, OAuth, custom API, and local agents only; scope='public' discovers shared/marketplace agents; scope='all' returns their deduplicated union. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'. Rate-limited agents are hidden unless showUnavailable is true.", {
+    query: stringToolParam("Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey."),
     scope: { type: "string", enum: ["preferred", "public", "all"], description: "Discovery scope; preferred is the default and does not load the public marketplace." },
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
     showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
@@ -531,6 +532,8 @@ export function buildNoloWorkspaceCommandArgs(call: { name: string; arguments: s
     }
     case "listAgents": {
       const cliArgs = ["agent", "list"];
+      const query = noloStringArg(args.query);
+      if (query) cliArgs.push("--query", query);
       const space = noloStringArg(args.space);
       if (space) cliArgs.push("--space", space);
       const scope = noloStringArg(args.scope);

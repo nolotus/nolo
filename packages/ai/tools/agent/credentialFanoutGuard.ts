@@ -66,6 +66,8 @@ export function checkCredentialFanout(args: {
   active: CredentialFanoutEntry[];
   candidate: CredentialFanoutEntry;
   allowUnknownCredential?: boolean;
+  /** 显式允许同一 credentialGroup 的并发扇出（如用户授权或多任务并发）。 */
+  allowCredentialConcurrency?: boolean;
 }): CredentialFanoutVerdict {
   const candidateGroup = normalizeCredentialGroupValue(
     args.candidate.credentialGroup
@@ -104,6 +106,9 @@ export function checkCredentialFanout(args: {
     }
 
     if (candidateGroup === entryGroup) {
+      if (args.allowCredentialConcurrency === true) {
+        continue;
+      }
       return {
         allowed: false,
         reason: "credential_group_conflict",
@@ -111,7 +116,7 @@ export function checkCredentialFanout(args: {
         message:
           `拒绝并发派发：候选 agent ${describeEntry(args.candidate)} 与已活跃 run ` +
           `${describeEntry(entry)} 同属 credentialGroup "${candidateGroup}"，` +
-          `同一凭证上禁止并发扇出。请串行派发或改用其他 credentialGroup 的 agent。`,
+          `同一凭证上禁止并发扇出。请串行派发、换用其他 credentialGroup 的 agent，或传 allowCredentialConcurrency: true 允许并发。`,
       };
     }
   }

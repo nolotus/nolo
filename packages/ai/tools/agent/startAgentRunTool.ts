@@ -137,6 +137,12 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "仅在已自行确认两侧不共用上游凭证时使用；默认 false，未知凭证并发一律拒绝。",
                 default: false,
             },
+            allowCredentialConcurrency: {
+                type: "boolean",
+                description:
+                    "可选。显式允许同一凭证组并发派发。默认 false。在用户授权同一凭据多任务并发或确认上游支持并发时使用。",
+                default: false,
+            },
             trackTodo: {
                 type: "boolean",
                 description:
@@ -184,6 +190,8 @@ interface StartAgentRunArgs {
     credentialGroup?: string;
     /** 显式确认未知凭证并发风险后强制放行；默认 false。 */
     allowUnknownCredential?: boolean;
+    /** 显式允许同一凭据组并发派发；默认 false。 */
+    allowCredentialConcurrency?: boolean;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
@@ -238,6 +246,7 @@ export async function startAgentRunFunc(
             active,
             candidate: { agentKey, credentialGroup: args.credentialGroup },
             allowUnknownCredential: args.allowUnknownCredential === true,
+            allowCredentialConcurrency: args.allowCredentialConcurrency === true,
         });
         if (!verdict.allowed) throw new Error(verdict.message);
     }

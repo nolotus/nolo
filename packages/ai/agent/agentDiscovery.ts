@@ -134,10 +134,29 @@ export function filterAgentsByScope<T extends SafeAgentSummary>(
 export interface BuildAgentDiscoveryResultOptions<T extends SafeAgentSummary> {
   agents: T[];
   scope?: DiscoveryScope | string;
+  query?: string;
   publicOnly?: boolean;
   showUnavailable?: boolean;
   verbose?: boolean;
   now?: number;
+}
+
+export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): boolean {
+  if (!query || typeof query !== "string") return true;
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  const candidates = [
+    agent.name,
+    agent.model,
+    agent.provider,
+    agent.handle,
+    agent.agentKey,
+    agent.publicKey,
+    agent.id,
+  ];
+
+  return candidates.some((text) => typeof text === "string" && text.toLowerCase().includes(q));
 }
 
 export interface AgentDiscoveryResult {
@@ -166,6 +185,10 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
   const now = options.now ?? Date.now();
 
   let scopedAgents = filterAgentsByScope(options.agents, scope);
+
+  if (options.query && typeof options.query === "string" && options.query.trim()) {
+    scopedAgents = scopedAgents.filter((a) => matchesAgentQuery(a, options.query));
+  }
 
   const unavailableList = scopedAgents.filter((a) => isAgentUnavailableNow(a, now));
   const unavailableCount = unavailableList.length;

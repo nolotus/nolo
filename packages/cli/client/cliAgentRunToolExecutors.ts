@@ -278,6 +278,7 @@ async function assertCredentialFanoutAllowed(
     /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
     credentialGroup?: string;
     allowUnknownCredential?: boolean;
+    allowCredentialConcurrency?: boolean;
   }
 ): Promise<string | undefined> {
   // 凭证组解析优先显式解析器（读本地 agent 记录，最可靠），模型透传值兜底；
@@ -317,6 +318,7 @@ async function assertCredentialFanoutAllowed(
     active,
     candidate: { agentKey: args.agentKey, credentialGroup: candidateGroup },
     allowUnknownCredential: args.allowUnknownCredential === true,
+    allowCredentialConcurrency: args.allowCredentialConcurrency === true,
   });
   if (!verdict.allowed) throw new Error(verdict.message);
   return candidateGroup;

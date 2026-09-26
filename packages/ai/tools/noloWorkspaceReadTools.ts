@@ -644,6 +644,11 @@ export const listAgentsFunctionSchema = {
       },
       publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },
       showUnavailable: { type: "boolean", description: "Include agents currently rate-limited (429). Default false." },
+      query: {
+        type: "string",
+        description:
+          "Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey. Use to locate specific candidates like 'opus', 'devin', or 'claude'.",
+      },
       verbose: { type: "boolean", description: "Return the full safe-summary field set (prices, introduction, modelAbility, timestamps) for troubleshooting. Default false returns the compact agent-selection projection." },
     },
   },
@@ -722,6 +727,7 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   const discovery = buildAgentDiscoveryResult({
     agents,
     scope: args?.scope,
+    query: args?.query,
     publicOnly: args?.publicOnly,
     showUnavailable: args?.showUnavailable,
     verbose: args?.verbose,
