@@ -9,11 +9,11 @@
     "desktop": {
       "version": "0.132.0-alpha.2",
       "channel": "alpha",
-      "releaseIntent": "release"
+      "releaseIntent": "none"
     }
   },
   "provenance": {
-    "sourceSha": "5b4b402f7ecde8df09075f15da0260ddb749761c",
+    "sourceSha": "de04bc29319713bbcbd8e82c8b426386434d808f",
     "sourceBranch": "alpha"
   }
 }
