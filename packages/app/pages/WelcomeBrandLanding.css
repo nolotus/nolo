@@ -218,6 +218,10 @@
   padding-bottom: 36px;
 }
 
+.wbl-mobile-proof {
+  display: none;
+}
+
 .wbl-principles {
   padding: 22px 0 72px;
 }
@@ -400,81 +404,255 @@
 
 @media (max-width: 560px) {
   .wbl-shell {
-    width: min(100% - 28px, 1120px);
+    width: min(100% - 24px, 1120px);
   }
 
   .wbl-hero {
-    padding: 40px 0 56px;
+    min-height: calc(100svh - 64px);
+    padding: 32px 0 34px;
+    display: flex;
+    align-items: center;
+  }
+
+  .wbl-hero::after {
+    width: calc(100% - 48px);
+  }
+
+  .wbl-kicker {
+    margin-bottom: 12px;
+    font-size: 11px;
   }
 
   .wbl-title {
-    font-size: 43px;
+    max-width: 12ch;
+    font-size: clamp(37px, 11.5vw, 48px);
+    line-height: 1.03;
+    letter-spacing: -0.055em;
   }
 
   .wbl-description {
+    max-width: 34rem;
+    margin-top: 16px;
     font-size: 16px;
-    line-height: 1.7;
+    line-height: 1.62;
   }
 
-  .wbl-continuity {
-    font-size: 15px;
-  }
-
+  .wbl-continuity,
+  .wbl-btn-secondary,
   .wbl-contrasts {
-    gap: 10px 16px;
-    margin-top: 24px;
+    display: none;
+  }
+
+  .wbl-actions {
+    margin-top: 22px;
+  }
+
+  .wbl-btn-primary {
+    width: min(100%, 360px);
+    min-height: 50px;
+    border-radius: 13px;
   }
 
   .wbl-product-proof {
-    margin-top: -32px;
-    padding-bottom: 52px;
+    margin-top: 0;
+    padding: 44px 0 48px;
   }
 
   .wbl-product-proof-head {
-    margin-bottom: 20px;
+    margin: 0 2px 18px;
+    text-align: left;
+  }
+
+  .wbl-product-proof-head h2 {
+    max-width: 12ch;
+    margin: 8px 0 0;
+    font-size: 30px;
+    line-height: 1.08;
+  }
+
+  .wbl-product-proof-head p {
+    margin: 10px 0 0;
+    font-size: 15px;
+    line-height: 1.55;
   }
 
   .wbl-orchestration-shell {
     border-radius: 18px;
+    box-shadow: 0 18px 42px color-mix(in srgb, var(--text, #111827) 7%, transparent);
   }
 
   .wbl-orchestration-shell .ws-orchestration-tabs {
-    padding-inline: 10px;
+    margin-top: 8px;
+    padding-inline: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .wbl-orchestration-shell .ws-orchestration-tab-body {
-    padding-inline: 16px;
-    padding-bottom: 24px;
+    padding: 8px 14px 14px;
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-example-label,
+  .wbl-orchestration-shell .ws-workflow-desc--lead,
+  .wbl-orchestration-shell .ws-orchestration-stage,
+  .wbl-orchestration-shell .wf-mobile-steps {
+    display: none;
+  }
+
+  .wbl-mobile-proof {
+    display: block;
+    padding: 8px 0 2px;
+  }
+
+  .wbl-mobile-proof-task {
+    padding: 18px;
+    border: 1px solid var(--wbl-line);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background, #fff) 96%, var(--primary, #1677ff));
+  }
+
+  .wbl-mobile-proof-task > span {
+    display: block;
+    color: var(--primary, #1677ff);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .wbl-mobile-proof-task h3 {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1.18;
+    letter-spacing: -0.028em;
+  }
+
+  .wbl-mobile-proof-task p {
+    margin: 9px 0 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .wbl-mobile-proof-route {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 9px;
+  }
+
+  .wbl-mobile-proof-step {
+    min-width: 0;
+    padding: 10px 9px;
+    border: 1px solid var(--wbl-line);
+    border-radius: 11px;
+    background: var(--background, #fff);
+  }
+
+  .wbl-mobile-proof-step span {
+    display: block;
+    color: var(--wbl-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wbl-mobile-proof-step strong {
+    display: block;
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
   }
 
   .wbl-principles {
-    padding-bottom: 52px;
+    padding: 8px 0 38px;
+  }
+
+  .wbl-principles-grid {
+    border-bottom: 0;
   }
 
   .wbl-principle {
-    padding: 20px 4px 22px;
+    padding: 18px 2px;
+  }
+
+  .wbl-principle-index {
+    display: none;
+  }
+
+  .wbl-principle-proof {
+    margin-top: 0;
+  }
+
+  .wbl-principle h2 {
+    margin-top: 8px;
+    font-size: 22px;
+  }
+
+  .wbl-principle p {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.58;
   }
 
   .wbl-balance {
-    padding-bottom: 56px;
+    padding-bottom: 42px;
   }
 
   .wbl-balance-layout {
-    padding: 26px 0;
+    gap: 18px;
+    padding: 24px 0 0;
+    border-bottom: 0;
+  }
+
+  .wbl-balance-copy h2 {
+    margin-top: 8px;
+    font-size: 30px;
+  }
+
+  .wbl-balance-copy p {
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.58;
   }
 
   .wbl-balance-columns {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 14px;
   }
 
   .wbl-balance-column {
-    padding: 18px 0 8px;
+    padding: 12px;
+    border: 1px solid var(--wbl-line);
+    border-radius: 12px;
   }
 
   .wbl-balance-column + .wbl-balance-column {
-    border-left: 0;
+    margin-top: 0;
+    padding-top: 12px;
     border-top: 1px solid var(--wbl-line);
-    margin-top: 14px;
-    padding-top: 26px;
+    border-left: 1px solid var(--wbl-line);
+  }
+
+  .wbl-balance-column h3 {
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+
+  .wbl-balance-column ul {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .wbl-balance-column li {
+    padding: 6px 0;
   }
 }

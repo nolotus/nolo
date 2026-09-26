@@ -2,10 +2,14 @@ import { NavLink } from "app/routing";
 import { useTranslation } from "react-i18next";
 import { LuDownload, LuExternalLink, LuFileCheck2, LuGitCommitHorizontal, LuShieldCheck } from "react-icons/lu";
 import * as stylex from "@stylexjs/stylex";
+import WelcomeFaqAccordion from "./WelcomeFaqAccordion";
+import { withLiteralClass } from "./share/withLiteralClass";
+import "./OpenAuditableSection.css";
 
 const PUBLIC_SOURCE_URL = "https://github.com/nolotus/nolo";
 const RELEASE_MANIFEST_URL = "/public/downloads/desktop-release-manifest.json";
 const BRAND_NS = "welcomeSection.brandLanding";
+const FAQ_NS = "homeLandingFaq";
 
 const styles = stylex.create({
   section: {
@@ -179,86 +183,125 @@ const styles = stylex.create({
 const OpenAuditableSection = () => {
   const { t } = useTranslation();
   const closingLines = t(`${BRAND_NS}.closingLines`, { returnObjects: true }) as string[];
+  const faqItems = [
+    {
+      question: t("welcomeSection.faq.context.question"),
+      answer: t("welcomeSection.faq.context.answer"),
+    },
+    {
+      question: t("welcomeSection.faq.output.question"),
+      answer: t("welcomeSection.faq.output.answer"),
+    },
+    {
+      question: t("welcomeSection.faq.orchestration.question"),
+      answer: t("welcomeSection.faq.orchestration.answer"),
+    },
+  ];
 
   return (
     <section {...stylex.props(styles.section)} aria-labelledby="open-auditable-title">
-      <div {...stylex.props(styles.shell)}>
-        <div {...stylex.props(styles.header)}>
-          <div>
-            <div {...stylex.props(styles.kicker)}>
-              <LuShieldCheck size={17} aria-hidden="true" />
-              {t("openAuditable.kicker", "Open & Auditable")}
+      <div className="home-compact-faq" aria-labelledby="home-compact-faq-title">
+        <header className="home-compact-faq-head">
+          <div className="home-compact-faq-kicker">{t(`${FAQ_NS}.kicker`)}</div>
+          <h2 id="home-compact-faq-title">{t(`${FAQ_NS}.title`)}</h2>
+          <p>{t(`${FAQ_NS}.description`)}</p>
+        </header>
+        <WelcomeFaqAccordion items={faqItems} />
+      </div>
+
+      <div className="open-auditable-shell-mobile">
+        <div {...stylex.props(styles.shell)}>
+          <div {...stylex.props(styles.header)}>
+            <div>
+              <div {...stylex.props(styles.kicker)}>
+                <LuShieldCheck size={17} aria-hidden="true" />
+                {t("openAuditable.kicker", "Open & Auditable")}
+              </div>
+              <h2 id="open-auditable-title" {...stylex.props(styles.title)}>
+                {t("openAuditable.title", "Don’t trust the binary. Verify it.")}
+              </h2>
+              <p {...stylex.props(styles.description)}>
+                {t(
+                  "openAuditable.description",
+                  "Nolo’s client source is public. Official desktop release metadata records the exact public repository commit used for the build and the SHA-256 of each artifact.",
+                )}
+              </p>
             </div>
-            <h2 id="open-auditable-title" {...stylex.props(styles.title)}>
-              {t("openAuditable.title", "Don’t trust the binary. Verify it.")}
-            </h2>
-            <p {...stylex.props(styles.description)}>
-              {t(
-                "openAuditable.description",
-                "Nolo’s client source is public. Official desktop release metadata records the exact public repository commit used for the build and the SHA-256 of each artifact.",
-              )}
-            </p>
+
+            <div className="open-auditable-links">
+              <div {...stylex.props(styles.links)}>
+                <a href={PUBLIC_SOURCE_URL} target="_blank" rel="noreferrer" {...withLiteralClass("open-auditable-view-source", styles.link)}>
+                  {t("openAuditable.viewSource", "View source")}
+                  <LuExternalLink size={15} aria-hidden="true" />
+                </a>
+                <a href={RELEASE_MANIFEST_URL} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
+                  {t("openAuditable.verifyRelease", "Verify current release")}
+                  <LuExternalLink size={15} aria-hidden="true" />
+                </a>
+              </div>
+            </div>
           </div>
 
-          <div {...stylex.props(styles.links)}>
-            <a href={PUBLIC_SOURCE_URL} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
-              {t("openAuditable.viewSource", "View source")}
-              <LuExternalLink size={15} aria-hidden="true" />
-            </a>
-            <a href={RELEASE_MANIFEST_URL} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
-              {t("openAuditable.verifyRelease", "Verify current release")}
-              <LuExternalLink size={15} aria-hidden="true" />
-            </a>
-          </div>
-        </div>
-
-        <div {...stylex.props(styles.proofs)}>
-          <div {...stylex.props(styles.proof)}>
-            <LuGitCommitHorizontal size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
-            <div>
-              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.publicCommitTitle", "Exact public commit")}</span>
-              <span {...stylex.props(styles.proofText)}>
-                {t("openAuditable.publicCommitText", "Release metadata records the exact public projection SHA used for the build.")}
-              </span>
+          <div {...stylex.props(styles.proofs)}>
+            <div className="open-auditable-proof open-auditable-proof-commit">
+              <div {...stylex.props(styles.proof)}>
+                <LuGitCommitHorizontal size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+                <div>
+                  <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.publicCommitTitle", "Exact public commit")}</span>
+                  <span {...stylex.props(styles.proofText)}>
+                    {t("openAuditable.publicCommitText", "Release metadata records the exact public projection SHA used for the build.")}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-          <div {...stylex.props(styles.proof)}>
-            <LuFileCheck2 size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
-            <div>
-              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.hashTitle", "Artifact checksum")}</span>
-              <span {...stylex.props(styles.proofText)}>
-                {t("openAuditable.hashText", "The public manifest records SHA-256 for each downloadable desktop artifact.")}
-              </span>
+            <div className="open-auditable-proof open-auditable-proof-hash">
+              <div {...stylex.props(styles.proof)}>
+                <LuFileCheck2 size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+                <div>
+                  <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.hashTitle", "Artifact checksum")}</span>
+                  <span {...stylex.props(styles.proofText)}>
+                    {t("openAuditable.hashText", "The public manifest records SHA-256 for each downloadable desktop artifact.")}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-          <div {...stylex.props(styles.proof)}>
-            <LuShieldCheck size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
-            <div>
-              <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.auditTitle", "Auditable client")}</span>
-              <span {...stylex.props(styles.proofText)}>
-                {t("openAuditable.auditText", "Inspect how the client reads files, invokes tools, and talks to model providers.")}
-              </span>
+            <div className="open-auditable-proof open-auditable-proof-audit">
+              <div {...stylex.props(styles.proof)}>
+                <LuShieldCheck size={18} aria-hidden="true" {...stylex.props(styles.proofIcon)} />
+                <div>
+                  <span {...stylex.props(styles.proofTitle)}>{t("openAuditable.auditTitle", "Auditable client")}</span>
+                  <span {...stylex.props(styles.proofText)}>
+                    {t("openAuditable.auditText", "Inspect how the client reads files, invokes tools, and talks to model providers.")}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div {...stylex.props(styles.closing)}>
-        <p {...stylex.props(styles.closingLead)}>{t(`${BRAND_NS}.closingLead`)}</p>
-        <p {...stylex.props(styles.closingLines)}>
-          {closingLines.map((line) => (
-            <span key={line}>{line}</span>
-          ))}
-        </p>
-        <strong {...stylex.props(styles.closingEnd)}>{t(`${BRAND_NS}.closingEnd`)}</strong>
-        <div {...stylex.props(styles.closingActions)}>
-          <NavLink to="/signup" {...stylex.props(styles.primaryAction)}>
-            {t(`${BRAND_NS}.primaryCta`)}
-          </NavLink>
-          <NavLink to="/downloads" {...stylex.props(styles.secondaryAction)}>
-            <LuDownload size={16} aria-hidden="true" />
-            <span>{t(`${BRAND_NS}.secondaryCta`)}</span>
-          </NavLink>
+      <div className="open-auditable-closing-mobile">
+        <div {...stylex.props(styles.closing)}>
+          <div className="open-auditable-closing-copy">
+            <p {...stylex.props(styles.closingLead)}>{t(`${BRAND_NS}.closingLead`)}</p>
+            <p {...stylex.props(styles.closingLines)}>
+              {closingLines.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </p>
+          </div>
+          <strong {...stylex.props(styles.closingEnd)}>{t(`${BRAND_NS}.closingEnd`)}</strong>
+          <div {...stylex.props(styles.closingActions)}>
+            <NavLink to="/signup" {...stylex.props(styles.primaryAction)}>
+              {t("homeLandingHero.primaryCta")}
+            </NavLink>
+            <div className="open-auditable-closing-download">
+              <NavLink to="/downloads" {...stylex.props(styles.secondaryAction)}>
+                <LuDownload size={16} aria-hidden="true" />
+                <span>{t(`${BRAND_NS}.secondaryCta`)}</span>
+              </NavLink>
+            </div>
+          </div>
         </div>
       </div>
     </section>

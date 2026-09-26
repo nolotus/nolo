@@ -1,6 +1,6 @@
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { NavLink, useSearchParams } from "app/routing";
-import { LuDownload } from "react-icons/lu";
+import { LuCheck, LuDownload, LuMinus } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import TabsNav from "render/web/ui/TabsNav";
 import WelcomeOrchestrationDiagramLazy from "./WelcomeOrchestrationDiagram.lazy";
@@ -8,12 +8,15 @@ import type { OrchestrationDiagramTab } from "./WelcomeOrchestrationDiagram";
 import { readOrchestrationTabFromSearch } from "./welcomeOrchestrationTabState";
 
 import "./WelcomeBrandLanding.css";
+import "./WelcomeBrandLanding.mobile.css";
+import "./WelcomeBrandLanding.story.css";
 import "./WelcomeSection.css";
 import "./WelcomeSection.orchestration.css";
 
-type Principle = { title: string; description: string; proof: string };
-
 const NS = "welcomeSection.brandLanding";
+const HERO_NS = "homeLandingHero";
+const WHY_NS = "homeLandingWhy";
+const RECEIPT_NS = "homeLandingReceipt";
 
 const WelcomeBrandLanding = () => {
   const { t } = useTranslation();
@@ -22,10 +25,9 @@ const WelcomeBrandLanding = () => {
   const orchestrationPanelId = useId();
   const panelTitleRef = useRef<HTMLHeadingElement | null>(null);
 
-  const principles = t(`${NS}.principles`, { returnObjects: true }) as Principle[];
   const contrasts = t(`${NS}.contrasts`, { returnObjects: true }) as string[];
-  const systemItems = t(`${NS}.systemItems`, { returnObjects: true }) as string[];
-  const youItems = t(`${NS}.youItems`, { returnObjects: true }) as string[];
+  const singleAiItems = t(`${WHY_NS}.singleItems`, { returnObjects: true }) as string[];
+  const noloItems = t(`${WHY_NS}.noloItems`, { returnObjects: true }) as string[];
 
   const [orchestrationTab, setOrchestrationTab] = useState<OrchestrationDiagramTab>(() => {
     if (typeof window === "undefined") return "coding";
@@ -101,6 +103,14 @@ const WelcomeBrandLanding = () => {
           ? t("welcomeSection.showcaseConsensus.desc")
           : t("welcomeSection.showcaseVideo.desc");
 
+  const mobileProofSteps = activeMobileSteps.filter((_, index, steps) => {
+    if (steps.length <= 3) return true;
+    const middle = Math.floor((steps.length - 1) / 2);
+    return index === 0 || index === middle || index === steps.length - 1;
+  });
+  const executionSummary = mobileProofSteps.slice(0, 2).map((step) => step.title).join(" · ");
+  const reviewSummary = mobileProofSteps.at(-1)?.title ?? t(`${RECEIPT_NS}.review`);
+
   const handleOrchestrationTabChange = useCallback(
     (tabId: string | number) => {
       const nextTab = tabId as OrchestrationDiagramTab;
@@ -124,14 +134,14 @@ const WelcomeBrandLanding = () => {
         <div className="wbl-shell">
           <div className="wbl-kicker">{t(`${NS}.kicker`)}</div>
           <h1 id="wbl-title" className="wbl-title">
-            {t(`${NS}.title`)}
+            {t(`${HERO_NS}.title`)}
           </h1>
-          <p className="wbl-description">{t(`${NS}.description`)}</p>
+          <p className="wbl-description">{t(`${HERO_NS}.description`)}</p>
           <p className="wbl-continuity">{t(`${NS}.continuity`)}</p>
 
           <div className="wbl-actions">
             <NavLink to="/signup" className="wbl-btn wbl-btn-primary">
-              {t(`${NS}.primaryCta`)}
+              {t(`${HERO_NS}.primaryCta`)}
             </NavLink>
             <NavLink to="/downloads" className="wbl-btn wbl-btn-secondary">
               <LuDownload size={16} aria-hidden="true" />
@@ -190,62 +200,87 @@ const WelcomeBrandLanding = () => {
                   />
                 </div>
 
-                <ol className="wf-mobile-steps" aria-label={activeExampleTitle}>
-                  {activeMobileSteps.map((step, index) => (
-                    <li key={`${orchestrationTab}-${step.title}`} className="wf-mobile-step">
-                      <span className="wf-mobile-step-index">{index + 1}</span>
-                      <div className="wf-mobile-step-copy">
-                        <h3>{step.title}</h3>
-                        <p>{step.desc}</p>
+                <div className="wbl-mobile-proof" aria-label={activeExampleTitle}>
+                  <div className="wbl-mobile-proof-task">
+                    <span>{activeExampleLabel}</span>
+                    <h3>{activeExampleTitle}</h3>
+                    <p>{activeExampleDesc}</p>
+                  </div>
+                  <div className="wbl-mobile-proof-route">
+                    {mobileProofSteps.map((step, index) => (
+                      <div key={`${orchestrationTab}-${step.title}`} className="wbl-mobile-proof-step">
+                        <span>{index + 1}</span>
+                        <strong>{step.title}</strong>
                       </div>
-                    </li>
-                  ))}
-                </ol>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="wbl-principles" aria-label="How Nolo works with you">
-        <div className="wbl-shell">
-          <div className="wbl-principles-grid">
-            {principles.map((principle, index) => (
-              <article key={principle.title} className="wbl-principle">
-                <span className="wbl-principle-index">0{index + 1}</span>
-                <div className="wbl-principle-proof">{principle.proof}</div>
-                <h2>{principle.title}</h2>
-                <p>{principle.description}</p>
-              </article>
-            ))}
+      <section className="wbl-receipt" aria-labelledby="wbl-receipt-title">
+        <div className="wbl-shell wbl-receipt-shell">
+          <header className="wbl-receipt-head">
+            <div className="wbl-section-kicker">{t(`${RECEIPT_NS}.kicker`)}</div>
+            <h2 id="wbl-receipt-title">{t(`${RECEIPT_NS}.title`)}</h2>
+          </header>
+          <div className="wbl-receipt-grid">
+            <div className="wbl-receipt-item">
+              <span>{t(`${RECEIPT_NS}.goal`)}</span>
+              <strong>{activeExampleTitle}</strong>
+            </div>
+            <div className="wbl-receipt-item">
+              <span>{t(`${RECEIPT_NS}.execution`)}</span>
+              <strong>{executionSummary}</strong>
+            </div>
+            <div className="wbl-receipt-item">
+              <span>{t(`${RECEIPT_NS}.review`)}</span>
+              <strong>{reviewSummary}</strong>
+            </div>
+            <div className="wbl-receipt-item wbl-receipt-result">
+              <span>{t(`${RECEIPT_NS}.result`)}</span>
+              <strong>{t(`${RECEIPT_NS}.resultValue`)}</strong>
+            </div>
           </div>
+          <p className="wbl-receipt-note">{t(`${RECEIPT_NS}.note`)}</p>
         </div>
       </section>
 
-      <section className="wbl-balance">
-        <div className="wbl-shell wbl-balance-layout">
-          <div className="wbl-balance-copy">
-            <div className="wbl-section-kicker">{t(`${NS}.balanceKicker`)}</div>
-            <h2>{t(`${NS}.balanceTitle`)}</h2>
-            <p>{t(`${NS}.balanceDescription`)}</p>
-          </div>
-          <div className="wbl-balance-columns">
-            <div className="wbl-balance-column">
-              <h3>{t(`${NS}.systemLabel`)}</h3>
+      <section className="wbl-why" aria-labelledby="wbl-why-title">
+        <div className="wbl-shell wbl-why-layout">
+          <header className="wbl-why-copy">
+            <div className="wbl-section-kicker">{t(`${WHY_NS}.kicker`)}</div>
+            <h2 id="wbl-why-title">{t(`${WHY_NS}.title`)}</h2>
+            <p>{t(`${WHY_NS}.description`)}</p>
+          </header>
+
+          <div className="wbl-compare" aria-label={t(`${WHY_NS}.title`)}>
+            <article className="wbl-compare-card wbl-compare-card-single">
+              <div className="wbl-compare-label">{t(`${WHY_NS}.singleLabel`)}</div>
               <ul>
-                {systemItems.map((item) => (
-                  <li key={item}>{item}</li>
+                {singleAiItems.map((item) => (
+                  <li key={item}>
+                    <LuMinus size={15} aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
                 ))}
               </ul>
-            </div>
-            <div className="wbl-balance-column wbl-balance-column-human">
-              <h3>{t(`${NS}.youLabel`)}</h3>
+            </article>
+
+            <article className="wbl-compare-card wbl-compare-card-nolo">
+              <div className="wbl-compare-label">{t(`${WHY_NS}.noloLabel`)}</div>
               <ul>
-                {youItems.map((item) => (
-                  <li key={item}>{item}</li>
+                {noloItems.map((item) => (
+                  <li key={item}>
+                    <LuCheck size={15} aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
                 ))}
               </ul>
-            </div>
+            </article>
           </div>
         </div>
       </section>

@@ -1,4 +1,34 @@
 
+## 0.128.0-alpha.1
+
+## 0.128.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **home:** add compact FAQ and mobile audit hierarchy ([683f46b](https://github.com/nolotus/bun-nolo/commit/683f46b6fdb19c613566985a28bd677740f31ca5))
+* **home:** add compact FAQ and receipt copy ([41f01d4](https://github.com/nolotus/bun-nolo/commit/41f01d460143c7df9a526c7d94fce8bed5e806e1))
+* **home:** add outcome-first landing hero copy ([4e1b123](https://github.com/nolotus/bun-nolo/commit/4e1b123de1132f731d8c5c6974b1577e5baac457))
+* **home:** add single-ai comparison copy ([a909496](https://github.com/nolotus/bun-nolo/commit/a9094966bbcd9c3c5391ee77e9b90cd095842603))
+* **home:** add visual single-ai comparison ([717808a](https://github.com/nolotus/bun-nolo/commit/717808a3c9e1ef9256ec93ccc57fe5eb9f0af773))
+* **home:** align hero CTA with task outcome ([7edf4d2](https://github.com/nolotus/bun-nolo/commit/7edf4d2e6a8e55429d9ddb4410949bcc3918a950))
+* **home:** compact FAQ and audit proof on mobile ([7834d73](https://github.com/nolotus/bun-nolo/commit/7834d739078a09d426fff955c9291842035a562c))
+* **home:** make landing hero outcome-first ([bcbb4c3](https://github.com/nolotus/bun-nolo/commit/bcbb4c3c1e29755596555d26f2a289e1f45dcca4))
+* **home:** register landing hero locale ([b5a2b15](https://github.com/nolotus/bun-nolo/commit/b5a2b15b52d07b4a065fd62c48232c1277471b30))
+* **home:** shape comparison and outcome sections ([d71a2dd](https://github.com/nolotus/bun-nolo/commit/d71a2dd65a1767055f6c7d7fb3c18ee7aba0b2ba))
+* **home:** style task receipt and compact home narrative ([2e1bce1](https://github.com/nolotus/bun-nolo/commit/2e1bce1f555143a7bb158f952fd4aed27860c1ba))
+* **home:** wire story styles and task evidence receipt ([daa9b15](https://github.com/nolotus/bun-nolo/commit/daa9b154d5d16c6b2a2ba360f3838208e86cb04b))
+
+### Bug Fixes
+
+* **home:** avoid overstating automatic model routing ([1ed9fc2](https://github.com/nolotus/bun-nolo/commit/1ed9fc29e9e39053a8b58a0f6af9fce0dc5f3926))
+* **home:** compress mobile landing layout ([b73927f](https://github.com/nolotus/bun-nolo/commit/b73927fdc6fb9a9b6f0e1f64f76e720e1785e3e5))
+* **home:** hide source link reliably on mobile ([efaee97](https://github.com/nolotus/bun-nolo/commit/efaee971045aeb492a060af111079274ca27f574))
+* **home:** keep mobile audit source link hidden under StyleX ([28067b6](https://github.com/nolotus/bun-nolo/commit/28067b63582fc1193f45a802eb5c73f25108cca7))
+* **home:** make mobile landing outcome-first ([aceeb43](https://github.com/nolotus/bun-nolo/commit/aceeb433ab2d680af19911681a8abd0ebb516ae9))
+* **home:** override mobile audit source link display ([755358c](https://github.com/nolotus/bun-nolo/commit/755358ccfb010fe2b677adc2522ec0f055afd916))
+* **home:** remove technical kicker from mobile hero ([3f34ede](https://github.com/nolotus/bun-nolo/commit/3f34ede888bcdc78ba7fd77c4716b58202ef5cb4))
+
+
 ## 0.127.0-alpha.3
 
 ## 0.127.0-alpha.3 (2026-09-25)
