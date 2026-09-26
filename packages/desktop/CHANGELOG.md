@@ -1,4 +1,13 @@
 
+## 0.132.0-alpha.2
+
+## 0.132.0-alpha.2 (2026-09-26)
+
+### Bug Fixes
+
+* **dx:** guard the worktree index after the pre-push gates run ([89dc341](https://github.com/nolotus/bun-nolo/commit/89dc341498ce99f3cd35d20e21c60c1e2992335e))
+
+
 ## 0.132.0-alpha.1
 
 ## 0.132.0-alpha.1 (2026-09-26)
