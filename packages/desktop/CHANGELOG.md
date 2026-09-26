@@ -1,4 +1,13 @@
 
+## 0.136.0-alpha.1
+
+## 0.136.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **connector:** douyin publish/delete automation + douyin-publisher skill ([e957af9](https://github.com/nolotus/bun-nolo/commit/e957af9ea66051561f27b64ec2e807c02e1a9edf))
+
+
 ## 0.135.0-alpha.2
 
 ## 0.135.0-alpha.2 (2026-09-26)

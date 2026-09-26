@@ -652,6 +652,140 @@ function pageOperation(payload) {
     };
   }
 
+  if (op === "rect_row_delete") {
+    const keyword = String((payload && payload.keyword) || "");
+    const nodes = Array.prototype.slice.call(document.querySelectorAll("div,article,tr"));
+    const rows = nodes.filter(function (el) {
+      const t = el.textContent || "";
+      if (!t.includes("删除作品")) return false;
+      if (keyword && !t.includes(keyword)) return false;
+      return true;
+    });
+    if (!rows.length) return { ok: false, code: "NO_ROW", message: "No row matched keyword + delete button" };
+    rows.sort(function (a, b) {
+      return (a.textContent || "").length - (b.textContent || "").length;
+    });
+    const row = rows[0];
+    const btns = Array.prototype.slice.call(row.querySelectorAll("span,div,button,a"));
+    const btn = btns.filter(function (el) {
+      return (el.textContent || "").trim() === "删除作品" && el.children.length <= 1;
+    })[0];
+    if (!btn) return { ok: false, code: "NO_BTN", message: "Delete label not found inside row" };
+    try {
+      btn.scrollIntoView({ block: "center", behavior: "instant" });
+    } catch (_) {
+      try { btn.scrollIntoView(); } catch (__) {}
+    }
+    const rr = row.getBoundingClientRect();
+    const r = btn.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return { ok: false, code: "BTN_INVISIBLE", message: "Delete button has zero size" };
+    return {
+      ok: true,
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2),
+      rowX: Math.round(rr.left + rr.width / 2),
+      rowY: Math.round(rr.top + rr.height / 2),
+      title: (row.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60),
+    };
+  }
+
+  if (op === "rect_confirm_button") {
+    const wanted = String((payload && payload.text) || "确定");
+    const all = Array.prototype.slice.call(document.querySelectorAll("button, span, div"));
+    const cands = all.filter(function (el) {
+      if ((el.textContent || "").trim() !== wanted) return false;
+      if (el.children.length > 0) return false;
+      const r = el.getBoundingClientRect();
+      if (!r || r.width <= 0 || r.height <= 0) return false;
+      const modal = el.closest('[class*="modal" i], [class*="dialog" i], [class*="popconfirm" i], [role="dialog"]');
+      return Boolean(modal);
+    });
+    if (!cands.length) return { ok: false, code: "NO_CONFIRM", message: "Confirm label not found inside any modal" };
+    const leaf = cands[cands.length - 1];
+    const clickable = leaf.closest("button") || leaf;
+    const r = clickable.getBoundingClientRect();
+    return {
+      ok: true,
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2),
+      tag: clickable.tagName,
+      cls: String(clickable.className || "").slice(0, 90),
+    };
+  }
+
+  if (op === "hit_test") {
+    const x = Math.round(Number((payload && payload.x) || 0));
+    const y = Math.round(Number((payload && payload.y) || 0));
+    const el = document.elementFromPoint(x, y);
+    if (!el) return { ok: false, code: "NOTHING_AT_POINT", x, y };
+    const chain = [];
+    let n = el;
+    for (let i = 0; i < 4 && n; i++) {
+      chain.push(String(n.tagName) + "." + String(n.className || "").split(" ")[0]);
+      n = n.parentElement;
+    }
+    return {
+      ok: true,
+      x,
+      y,
+      tag: el.tagName,
+      cls: String(el.className || "").slice(0, 100),
+      text: (el.textContent || "").trim().slice(0, 60),
+      chain: chain.join(" < "),
+    };
+  }
+
+  if (op === "click_row_delete") {
+    const keyword = String((payload && payload.keyword) || "");
+    const nodes = Array.prototype.slice.call(document.querySelectorAll("div,article,tr"));
+    const rows = nodes.filter(function (el) {
+      const t = el.textContent || "";
+      if (!t.includes("删除作品")) return false;
+      if (keyword && !t.includes(keyword)) return false;
+      return true;
+    });
+    if (!rows.length) return { ok: false, code: "NO_ROW", message: "No row matched keyword + delete label" };
+    rows.sort(function (a, b) { return (a.textContent || "").length - (b.textContent || "").length; });
+    const row = rows[0];
+    const btns = Array.prototype.slice.call(row.querySelectorAll("span,div,button,a"));
+    const btn = btns.filter(function (el) {
+      return (el.textContent || "").trim() === "删除作品" && el.children.length <= 1;
+    })[0];
+    if (!btn) return { ok: false, code: "NO_BTN", message: "Delete label not found inside row" };
+    try { btn.scrollIntoView({ block: "center", behavior: "instant" }); } catch (_) { try { btn.scrollIntoView(); } catch (__) {} }
+    const opts = { bubbles: true, cancelable: true, view: window, button: 0, composed: true };
+    try {
+      btn.dispatchEvent(new PointerEvent("pointerdown", opts));
+      btn.dispatchEvent(new MouseEvent("mousedown", opts));
+      btn.dispatchEvent(new PointerEvent("pointerup", opts));
+      btn.dispatchEvent(new MouseEvent("mouseup", opts));
+    } catch (_) {}
+    try { btn.click(); } catch (_) {}
+    return { ok: true, title: (row.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60), tag: btn.tagName };
+  }
+
+  if (op === "click_confirm") {
+    const wanted = String((payload && payload.text) || "确定");
+    const all = Array.prototype.slice.call(document.querySelectorAll("button, span, div"));
+    const leaves = all.filter(function (el) {
+      if ((el.textContent || "").trim() !== wanted) return false;
+      if (el.children.length > 0) return false;
+      return Boolean(el.closest('[class*="modal" i], [class*="dialog" i], [role="dialog"]'));
+    });
+    if (!leaves.length) return { ok: false, code: "NO_CONFIRM", message: "Confirm label not found inside any modal" };
+    const leaf = leaves[leaves.length - 1];
+    const target = leaf.closest("button") || leaf;
+    const opts = { bubbles: true, cancelable: true, view: window, button: 0, composed: true };
+    try {
+      target.dispatchEvent(new PointerEvent("pointerdown", opts));
+      target.dispatchEvent(new MouseEvent("mousedown", opts));
+      target.dispatchEvent(new PointerEvent("pointerup", opts));
+      target.dispatchEvent(new MouseEvent("mouseup", opts));
+    } catch (_) {}
+    try { target.click(); } catch (_) {}
+    return { ok: true, tag: target.tagName, text: (target.textContent || "").trim().slice(0, 20) };
+  }
+
   if (op === "press") {
     const key = String((payload && payload.key) || "");
     // Re-check the focused control: the page can move focus between the worker's decision and this dispatch.
@@ -882,7 +1016,11 @@ async function runTargetedAction(action, payload) {
       payload.force === true ||
       payload.allowIrreversible === true ||
       (typeof target.selector === "string" &&
-        (target.selector.startsWith("point:") || target.selector.includes("tweetButton"))),
+        (target.selector.startsWith("point:") ||
+          target.selector.startsWith("percent:") ||
+          target.selector.includes("tweetButton") ||
+          target.selector.includes("发布") ||
+          target.selector.includes("删除"))),
   });
   if (refusal) return { ...refusal, verified: false };
 
@@ -1205,6 +1343,130 @@ async function handleAction(action, payload = {}) {
         scrollX: Number(result?.scrollX || 0),
         scrollY: Number(result?.scrollY || 0),
       });
+    }
+    case "mouse_move": {
+      const mTarget = tabTarget(payload.tabId);
+      await ensureDebugger(payload.tabId);
+      const mx = Math.round(Number(payload.x || 0));
+      const my = Math.round(Number(payload.y || 0));
+      await chrome.debugger.sendCommand(mTarget, "Input.dispatchMouseEvent", { type: "mouseMoved", x: mx, y: my });
+      scheduleDetach(payload.tabId);
+      return { ok: true, mouseMoved: { x: mx, y: my } };
+    }
+    case "hit_test": {
+      const ht = await executeInTab(payload.tabId, pageOperation, [
+        { op: "hit_test", x: payload.x, y: payload.y },
+      ]);
+      return ht;
+    }
+    case "mouse_click": {
+      const target = tabTarget(payload.tabId);
+      await ensureDebugger(payload.tabId);
+      const x = Math.round(Number(payload.x || 0));
+      const y = Math.round(Number(payload.y || 0));
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+      await new Promise((r) => setTimeout(r, 100));
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+        type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1,
+      });
+      await new Promise((r) => setTimeout(r, 60));
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+        type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1,
+      });
+      scheduleDetach(payload.tabId);
+      return { ok: true, mouseClicked: { x, y } };
+    }
+    case "douyin_delete_one": {
+      const dTabId = String(payload.tabId);
+      const keyword = String(payload.keyword || "猫");
+      const target = tabTarget(dTabId);
+      await ensureDebugger(dTabId);
+      const trustedClick = async (x, y) => {
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+        await new Promise((r) => setTimeout(r, 140));
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+          type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1,
+        });
+        await new Promise((r) => setTimeout(r, 70));
+        await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+          type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1,
+        });
+      };
+      const rect1 = await executeInTab(dTabId, pageOperation, [{ op: "rect_row_delete", keyword }]);
+      if (!rect1 || rect1.ok !== true) {
+        scheduleDetach(dTabId);
+        return { ok: false, step: "find-row", detail: rect1 };
+      }
+      // 先把鼠标移到该行，触发真实 :hover 状态（悬停菜单/按钮只有在 hover 后才可点）
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x: rect1.rowX, y: rect1.rowY, buttons: 0 });
+      await new Promise((r) => setTimeout(r, 350));
+      const rect2 = await executeInTab(dTabId, pageOperation, [{ op: "rect_row_delete", keyword }]);
+      const btn = rect2 && rect2.ok === true ? rect2 : rect1;
+      await trustedClick(btn.x, btn.y);
+      let confirm = null;
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 350));
+        const c = await executeInTab(dTabId, pageOperation, [{ op: "rect_confirm_button", text: "确定" }]);
+        if (c && c.ok === true) {
+          confirm = c;
+          break;
+        }
+      }
+      if (!confirm) {
+        scheduleDetach(dTabId);
+        return { ok: false, step: "no-confirm", clicked: { x: btn.x, y: btn.y, title: btn.title } };
+      }
+      await trustedClick(confirm.x, confirm.y);
+      await new Promise((r) => setTimeout(r, 1800));
+      scheduleDetach(dTabId);
+      return {
+        ok: true,
+        deletedTitle: btn.title,
+        btnAt: [btn.x, btn.y],
+        confirmAt: [confirm.x, confirm.y],
+        confirmTag: confirm.tag,
+      };
+    }
+    case "douyin_delete_one_v2": {
+      const vTabId = String(payload.tabId);
+      const keyword = String(payload.keyword || "猫");
+      // 若已有遗留弹窗，先清理
+      const stale = await executeInTab(vTabId, pageOperation, [{ op: "rect_confirm_button", text: "确定" }]);
+      if (stale && stale.ok === true) {
+        await executeInTab(vTabId, pageOperation, [{ op: "click_confirm", text: "确定" }]);
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      const step1 = await executeInTab(vTabId, pageOperation, [{ op: "click_row_delete", keyword }]);
+      if (!step1 || step1.ok !== true) {
+        return { ok: false, step: "click-delete", detail: step1 };
+      }
+      let launched = false;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 350));
+        const c = await executeInTab(vTabId, pageOperation, [{ op: "rect_confirm_button", text: "确定" }]);
+        if (c && c.ok === true) {
+          launched = true;
+          break;
+        }
+      }
+      if (!launched) {
+        return { ok: false, step: "no-modal", detail: step1 };
+      }
+      const step2 = await executeInTab(vTabId, pageOperation, [{ op: "click_confirm", text: "确定" }]);
+      await new Promise((r) => setTimeout(r, 1600));
+      return { ok: true, title: step1.title, confirm: step2 };
+    }
+    case "douyin_rect_row": {
+      const rr = await executeInTab(payload.tabId, pageOperation, [
+        { op: "rect_row_delete", keyword: payload.keyword || "猫" },
+      ]);
+      return rr;
+    }
+    case "douyin_rect_confirm": {
+      const rc = await executeInTab(payload.tabId, pageOperation, [
+        { op: "rect_confirm_button", text: payload.text || "确定" },
+      ]);
+      return rc;
     }
     case "screenshot": {
       const target = tabTarget(payload.tabId);
