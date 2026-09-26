@@ -1,4 +1,17 @@
 
+## 0.130.0-alpha.1
+
+## 0.130.0-alpha.1 (2026-09-26)
+
+### Features
+
+* **i18n:** 语言包加固——lint 漏检口修复、繁/日缺键补全 ([9bb17b9](https://github.com/nolotus/bun-nolo/commit/9bb17b9cdd09251585abd88e5d419b54b6a5e98f))
+
+### Bug Fixes
+
+* **web:** 广场卡片价格字号移动端不随 compact 密度缩到 11px ([b800394](https://github.com/nolotus/bun-nolo/commit/b800394d9121fe116c81444606878549b6571a6f))
+
+
 ## 0.129.0-alpha.4
 
 ## 0.129.0-alpha.4 (2026-09-26)

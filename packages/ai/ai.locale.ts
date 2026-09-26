@@ -65,7 +65,8 @@ export default {
       price: "Price",
       credits: "Credits",
       modelCost: "Model cost",
-      inputCostPerMillionTokens: "Input",
+      // Both cost labels include the trailing colon; do not add another when concatenating.
+      inputCostPerMillionTokens: "Input:",
       outputCostPerMillionTokens: "Output:",
       referencePricePerTurn: "Per-turn reference price",
       defaultImageProfileEstimate: "Default profile estimate",
@@ -487,7 +488,8 @@ export default {
       price: "价格",
       credits: "积分",
       modelCost: "模型成本",
-      inputCostPerMillionTokens: "输入",
+      // 两个成本标签均含尾随冒号，拼接展示时不要再补冒号。
+      inputCostPerMillionTokens: "输入：",
       outputCostPerMillionTokens: "输出：",
       referencePricePerTurn: "按次参考价",
       defaultImageProfileEstimate: "默认档参考价",
@@ -903,7 +905,8 @@ export default {
       price: "價格",
       credits: "積分",
       modelCost: "模型成本",
-      inputCostPerMillionTokens: "輸入",
+      // 兩個成本標籤均含尾隨冒號，拼接顯示時不要再補冒號。
+      inputCostPerMillionTokens: "輸入：",
       outputCostPerMillionTokens: "輸出：",
       referencePricePerTurn: "按次參考價",
       defaultImageProfileEstimate: "預設檔參考價",
@@ -1177,6 +1180,84 @@ export default {
         manualToolsCollapsed: "目前已選擇 {{count}} 個手動工具。展開後可繼續編輯完整工具列表。",
         noToolsSelected: "尚未選擇任何工具。",
       },
+      tools: {
+        createAgent: {
+          description: "根據給定設定建立一個新的 Agent（智慧助理 / 應用程式），並返回完整的 Agent 資訊。",
+          params: {
+            name: "Agent 的名稱，例如：'會議紀錄助理'。",
+            model: "預設使用 'nolo/deepseek-flash'。複雜任務: 'openai/gpt-5.6-sol'。省成本但複雜: 'openai/gpt-5.5'。追求美觀/創意: 'gemini-3.8-flash'。低成本摘要/推理: 'nolo/deepseek-flash'。生成圖片: 貴/高品質選 'gemini-3-pro-image-preview'，一般選 'gemini-3.1-flash-image-preview'，最快最便宜選 'gemini-3.1-flash-lite-image'。",
+            provider: "模型提供方的識別碼，必須與所選模型相符，例如 'openrouter'、'nolo'、'fireworks'、'mistral' 等。",
+            prompt: "系統提示詞 / 指令，描述這個 Agent 的角色、語氣和使用方式。",
+            introduction: "在應用市場或清單中展示的簡介，面向終端使用者的說明文案。",
+            greeting: {
+              desc: "Agent 的歡迎設定：可以是簡單歡迎語字串，也可以是包含歡迎語 + 問候選單的物件。",
+              stringDesc: "純文字歡迎語，在新對話開始時展示給使用者。",
+              objectDesc: "結構化歡迎設定，可同時包含歡迎語和若干快捷選單項目。",
+              texts: {
+                text: "歡迎語文字，例如：'你好，我是你的週報助理。'",
+              },
+              menu: {
+                desc: "問候選單項目陣列，對應 UI 中的一組按鈕。",
+                id: "選單項目的唯一識別碼，用於持久化和渲染 key。",
+                label: "按鈕顯示文字，例如：'生成本週週報'。",
+                userMessage: "等價的使用者請求文字，點擊按鈕時會傳送給 Agent。"
+              }
+            },
+            isPublic: "是否公開到應用市場。true 表示公開，false 表示僅自己可見。",
+            allowFork: "是否允許其他使用者把這個 AI 複製一份到自己的空間（可與是否公開獨立設定）。",
+            tags: "給 Agent 貼上的標籤陣列，例如 ['總結', '寫作']。",
+            tools: "允許此 Agent 呼叫的工具名稱陣列，例如 ['fetchWebpage', 'startAgentRun']。",
+            linkedSpaces: "關聯的其他 Space ID 或名稱清單。Agent 可以存取這些 Space 的目錄結構作為粗略上下文。你必須先呼叫 'listUserSpaces' 工具取得有效的 Space ID 或名稱。",
+            references: {
+              desc: "每次呼叫時注入 Agent system prompt 的知識引用。支援：page(PAGE-xxx)、dialog(dialog-xxx)、agent(agent-xxx)、table(table-xxx)。內容會完整展開並作為上下文前置——引用越精準，Agent 越智慧。大多數情況用 'knowledge' 類型即可。",
+              dbKey: "引用項目的資料庫鍵，例如 PAGE-xxx、dialog-xxx、agent-xxx。",
+              title: "該引用在 UI 中顯示的標題。",
+              type: "引用類型：'knowledge'（預設，內容作為上下文注入）、'instruction'（作為高優先級指令注入）、'page'（作為頁面內容注入）。"
+            },
+            temperature: "取樣溫度，0~2 之間，數值越大越有創意。",
+            top_p: "nucleus sampling 參數，0~1 之間，控制多樣性。",
+            frequency_penalty: "重複懲罰係數，-2~2。",
+            presence_penalty: "新話題激勵係數，-2~2。",
+            max_tokens: "單次回答的最大 token 數。建議：除非有特殊需求（如強制控制回覆極短），否則不要設定此項。",
+            reasoning_effort: "推理強度，數值越高越慢但更嚴謹。"
+          }
+        },
+        checkEnv: {
+          description: "執行環境檢查並返回結構化結果。check='context' 可查看目前平台、工作目錄與可用的 shell；check='build' 可快速驗證是否可編譯。",
+          params: {
+            check: "檢查項：context 返回目前執行環境；build 執行建置檢查。",
+            key: "選填：探測某個本機工具，不執行 build。常用值如 gemini、node、npm、bun、python、git、shell。"
+          }
+        },
+        deleteSpaces: {
+          description: "按名稱或 ID 查找並刪除目前使用者擁有的 Space。這是危險操作：第一次呼叫會返回待刪除清單並等待使用者確認；確認後才執行刪除。",
+          params: {
+            query: "要刪除的 Space 篩選詞，例如 rn_owner_verify_0504，或搭配 matchMode=spaceId 傳入 space id。",
+            matchMode: "比對方式。prefix=名稱前綴，exact=名稱完全相符，contains=名稱包含，spaceId=依 Space ID 比對。預設 prefix。",
+            confirmedSpaceIds: "確認階段要刪除的 Space ID 清單。不傳時，使用者點擊確認會刪除預覽清單中的全部可刪除項目。"
+          }
+        },
+        listUserSpaces: {
+          description: "列出目前使用者擁有或加入的所有 Space，返回 Space 名稱、ID、成員角色等資訊。",
+          params: {
+            brief: "是否返回精簡資訊。若為 true，只包含基本中繼資料，可節省上下文 Token。"
+          }
+        },
+        read: {
+          description: "根據資料庫 Key 讀取任意類型的資料記錄（頁面內容、對話歷史、表格設定等）。",
+          params: {
+            dbKey: "要讀取的記錄 Key，例如 PAGE-xxx, dialog-xxx, table-xxx。",
+            waitRemote: "是否等待從遠端同步最新資料後返回。預設 false。"
+          }
+        },
+        rememberMemory: {
+          description: "將值得長期保留的使用者偏好或空間共識寫入一則 episodic memory 記憶，供後續對話長期檢索。",
+          params: {
+            content: "具體的記憶內容，例如：'使用者更偏好使用 TypeScript 進行程式開發。'",
+            tags: "給這則記憶標註的標籤陣列，用於日後的分類與檢索。"
+          }
+        }
+      },
     },
   },
   ja: {
@@ -1246,7 +1327,8 @@ export default {
       price: "価格",
       credits: "クレジット",
       modelCost: "モデルコスト",
-      inputCostPerMillionTokens: "入力",
+      // どちらのコストラベルも末尾にコロンを含みます。連結時に追加しないでください。
+      inputCostPerMillionTokens: "入力：",
       outputCostPerMillionTokens: "出力：",
       referencePricePerTurn: "回ごとの参考価格",
       defaultImageProfileEstimate: "デフォルト構成の参考価格",
@@ -1534,6 +1616,84 @@ export default {
         manualToolsCollapsed:
           "{{count}} 個の手動ツールを選択中です。展開すると全ツール一覧を編集できます。",
         noToolsSelected: "まだツールは選択されていません。",
+      },
+      tools: {
+        createAgent: {
+          description: "指定された構成に基づいて新しい Agent（インテリジェントアシスタント / アプリ）を作成し、完全な Agent 情報を返します。",
+          params: {
+            name: "Agent の名前（例：'議事録アシスタント'）。",
+            model: "既定では 'nolo/deepseek-flash' を使用。複雑なタスク: 'openai/gpt-5.6-sol'。コストを抑えたい複雑な処理: 'openai/gpt-5.5'。美しさ/創造性重視: 'gemini-3.8-flash'。低コストの要約/推論: 'nolo/deepseek-flash'。画像生成: 高価でも高品質なら 'gemini-3-pro-image-preview'、標準なら 'gemini-3.1-flash-image-preview'、最速・最安なら 'gemini-3.1-flash-lite-image'。",
+            provider: "モデルプロバイダーの識別子。選択したモデルに対応している必要があります（例：'openrouter'、'nolo'、'fireworks'、'mistral' など）。",
+            prompt: "この Agent の役割、口調、使い方を記述するシステムプロンプト / 指示。",
+            introduction: "アプリマーケットや一覧に表示される紹介文。エンドユーザー向けの説明テキスト。",
+            greeting: {
+              desc: "Agent の挨拶設定。単純な挨拶文字列、または挨拶文 + 挨拶メニューを含むオブジェクトを指定できます。",
+              stringDesc: "新しい会話の開始時にユーザーへ表示されるプレーンテキストの挨拶文。",
+              objectDesc: "構造化された挨拶設定。挨拶文と複数のショートカットメニュー項目を同時に含められます。",
+              texts: {
+                text: "挨拶文のテキスト（例：'こんにちは、週報アシスタントです。'）。",
+              },
+              menu: {
+                desc: "挨拶メニュー項目の配列。UI 上のボタングループに対応します。",
+                id: "メニュー項目の一意な識別子。永続化とレンダリングの key に使用されます。",
+                label: "ボタンに表示するラベル（例：'今週の週報を生成'）。",
+                userMessage: "ボタンクリック時に Agent へ送信される、等価なユーザーリクエストのテキスト。"
+              }
+            },
+            isPublic: "公開マーケットへ公開するかどうか。true で公開、false で自分のみ表示。",
+            allowFork: "他のユーザーがこの AI を自分のスペースに複製できるかどうか（公開設定とは独立して設定できます）。",
+            tags: "Agent に付けるタグの配列（例：['要約', 'ライティング']）。",
+            tools: "この Agent が呼び出せるツール名の配列（例：['fetchWebpage', 'startAgentRun']）。",
+            linkedSpaces: "関連付ける他の Space ID または名前の一覧。Agent はこれらの Space のディレクトリ構造を大まかなコンテキストとして参照できます。有効な Space ID または名前を取得するには、先に 'listUserSpaces' ツールを呼び出す必要があります。",
+            references: {
+              desc: "呼び出しごとに Agent の system prompt へ注入される知識参照。対応形式：page(PAGE-xxx)、dialog(dialog-xxx)、agent(agent-xxx)、table(table-xxx)。内容は完全に展開されてコンテキストの先頭に付加されます。参照が的確なほど Agent が賢くなります。ほとんどの場合は 'knowledge' タイプで十分です。",
+              dbKey: "参照エントリのデータベースキー（例：PAGE-xxx、dialog-xxx、agent-xxx）。",
+              title: "UI に表示される参照のタイトル。",
+              type: "参照タイプ：'knowledge'（既定。内容をコンテキストとして注入）、'instruction'（優先度の高い指示として注入）、'page'（ページ内容として注入）。"
+            },
+            temperature: "サンプリング温度。0〜2 の範囲で、数値が大きいほど創造的になります。",
+            top_p: "nucleus sampling パラメータ。0〜1 の範囲で多様性を調整します。",
+            frequency_penalty: "繰り返しペナルティ係数。-2〜2。",
+            presence_penalty: "新トピック奨励係数。-2〜2。",
+            max_tokens: "1 回の回答における最大トークン数。推奨：特別な事情（回答を極端に短く強制したい場合など）がない限り、設定しないでください。",
+            reasoning_effort: "推論の強度。数値が高いほど遅くなりますが、より厳密になります。"
+          }
+        },
+        checkEnv: {
+          description: "実行環境のチェックを実行し、構造化された結果を返します。check='context' で現在のプラットフォーム、作業ディレクトリ、利用可能な shell を確認できます。check='build' でコンパイル可否を素早く検証できます。",
+          params: {
+            check: "チェック項目：context は現在の実行環境を返し、build はビルドチェックを実行します。",
+            key: "任意：ローカルツールの検出のみ行い、build は実行しません。よく使う値：gemini、node、npm、bun、python、git、shell。"
+          }
+        },
+        deleteSpaces: {
+          description: "現在のユーザーが所有する Space を名前または ID で検索して削除します。危険な操作です：最初の呼び出しでは削除対象の一覧を返してユーザーの確認を待ち、確認後にのみ削除を実行します。",
+          params: {
+            query: "削除する Space の絞り込み語（例：rn_owner_verify_0504）。matchMode=spaceId と組み合わせる場合は space id を渡します。",
+            matchMode: "マッチ方式。prefix=名前の前方一致、exact=完全一致、contains=部分一致、spaceId=Space ID でマッチ。既定は prefix。",
+            confirmedSpaceIds: "確認段階で削除する Space ID のリスト。省略した場合、ユーザーが確認をクリックするとプレビュー一覧内の削除可能な全項目が削除されます。"
+          }
+        },
+        listUserSpaces: {
+          description: "現在のユーザーが所有または参加しているすべての Space を一覧表示し、Space 名、ID、メンバーでの役割などを返します。",
+          params: {
+            brief: "簡潔な情報のみを返すかどうか。true の場合、基本メタデータのみを含み、コンテキストの Token を節約できます。"
+          }
+        },
+        read: {
+          description: "データベースキーを指定して任意の種類のデータレコード（ページ内容、会話履歴、テーブル設定など）を読み取ります。",
+          params: {
+            dbKey: "読み取るレコードの Key（例：PAGE-xxx, dialog-xxx, table-xxx）。",
+            waitRemote: "リモートから最新データを同期してから返すかどうか。既定は false。"
+          }
+        },
+        rememberMemory: {
+          description: "長期的に保持する価値のあるユーザー設定やスペース内の合意事項を episodic memory に書き込み、以降の会話で長期的に検索できるようにします。",
+          params: {
+            content: "具体的な記憶内容（例：'ユーザーは TypeScript でのコーディングを好みます。'）。",
+            tags: "この記憶に付けるタグの配列。将来の分類と検索に使用します。"
+          }
+        }
       },
     },
   },

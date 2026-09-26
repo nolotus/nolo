@@ -879,6 +879,13 @@ export default {
       pinUpdated: "置頂狀態已更新",
       pinUpdateFailed: "置頂狀態更新失敗",
       moveToSpace: "移動到空間",
+      add_content: "新增...",
+      create_space_desc: "建立獨立的工作空間",
+      create_new_category: "建立新分類",
+      create_category_desc: "在目前空間下整理內容",
+      select_space_first: "請先選擇空間",
+      addCategorySuccess: "分類建立成功",
+      addCategoryFailed: "分類建立失敗",
       // 新增翻译键
       joinConversation: "加入對話",
       addedToConversation: "已加入對話",
@@ -1075,6 +1082,7 @@ export default {
       delete: "削除",
       save: "保存",
       edit: "編集",
+      clear: "クリア",
 
       // === フォーム関連 ===
       name_required: "スペース名は必須です",
@@ -1103,6 +1111,7 @@ export default {
       select_space: "スペースを選択",
       no_spaces: "スペースがありません",
       no_spaces_yet: "まだスペースが作成されていません",
+      space_list_failed: "スペース一覧の読み込みに失敗しました。タップして再試行",
       space_list: "スペース一覧",
       space_dropdown: "スペースメニューを開く",
       current_space: "現在のスペース",
@@ -1231,6 +1240,13 @@ export default {
       pinUpdated: "ピン留めの状態を更新しました",
       pinUpdateFailed: "ピン留めの状態の更新に失敗しました",
       moveToSpace: "スペースに移動",
+      add_content: "追加...",
+      create_space_desc: "独立したワークスペースを作成",
+      create_new_category: "新しいカテゴリを作成",
+      create_category_desc: "現在のスペース内でコンテンツを整理",
+      select_space_first: "先にスペースを選択してください",
+      addCategorySuccess: "カテゴリを追加しました",
+      addCategoryFailed: "カテゴリの追加に失敗しました",
       // 新增翻译键
       joinConversation: "会話に参加",
       addedToConversation: "会話に追加しました",
@@ -1366,6 +1382,8 @@ export default {
       delete_space_with_owned_desc:
         "このスペース内で現在のユーザーが所有するコンテンツを削除し、スペース自体も削除します。",
       delete_space_cancel_desc: "今回は削除せず、設定ページに戻ります。",
+      manage: "管理",
+      finish: "完了",
       ocrAddToChat: "OCR チャットへ追加",
       newTable: "新しいテーブル",
       // 既存アカウント Space のローカル Agent 突合（完全な Space クラウド同期ではない）

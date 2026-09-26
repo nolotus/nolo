@@ -192,7 +192,6 @@ export default {
           vision: "视觉识别"
         },
         cacheNote: "缓存命中：相同前缀的重复输入按更低的缓存价计费；「—」表示该模型暂无缓存价。",
-        searchBoxPlaceholder: "按模型名搜索...",
         faqTitle: "常见问题",
         faqSubtitle: "有疑问？先看这里",
         faq: [

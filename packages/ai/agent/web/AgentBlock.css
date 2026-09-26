@@ -461,4 +461,9 @@
   .agent__model-cost span {
     white-space: normal;
   }
+
+  /* 移动端可读性下限：价格元信息不随 compact 密度缩到 11px */
+  .agent__price {
+    font-size: var(--fontSize-min-readable, 12px);
+  }
 }
