@@ -35,6 +35,13 @@ export type EnvLike = Record<string, string | undefined>;
  */
 export type OutputLike = {
   write: (chunk: string) => void;
+  /**
+   * Optional error stream for non-interactive runs (batch 3). Failure lines
+   * (deadline / actionable errors) are routed here when present so stdout
+   * stays parseable for pipes/scripts; interactive TUI outputs and
+   * test-injected outputs omit it and keep the single-stream behavior.
+   */
+  writeErr?: (chunk: string) => void;
   isTTY?: boolean;
   /** TUI history owns the assistant identity marker; bare CLI output does not. */
   assistantLabelManaged?: boolean;

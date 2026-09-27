@@ -50,6 +50,8 @@ export {
   clearActiveControllers,
   tokenUsageLiveUpdate,
   setLoopStopReason,
+  setDialogTurnPhase,
+  clearDialogTurnPhase,
   enqueueUserInput,
   dequeueUserInput,
   clearPendingUserInputQueue,
@@ -65,6 +67,7 @@ export {
   useActiveControllers,
   usePendingUserInputQueue,
   useLoopStopReason,
+  useDialogTurnPhase,
   useDialogRuntimeTokens,
 } from "./dialogRuntimeStore";
 

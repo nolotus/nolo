@@ -101,6 +101,12 @@ type EnvLike = Record<string, string | undefined>;
 
 type OutputLike = {
   write(chunk: string): unknown;
+  /**
+   * Optional error stream for non-interactive runs (batch 3). When present,
+   * deadline / actionable failure lines are routed here instead of stdout.
+   * Mirrors `OutputLike.writeErr` in client/agentRunTypes.
+   */
+  writeErr?(chunk: string): unknown;
 };
 
 export type AgentRunCommandDeps = {
@@ -229,7 +235,14 @@ async function resolveAgentRunAgentKey(args: {
 
 export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDeps) {
   const env = deps.env ?? process.env;
-  const output = deps.output ?? process.stdout;
+  // 非交互一次性运行（无注入 output）：失败行（deadline 等可操作错误）走
+  // stderr，stdout 只承载回合输出，管道/脚本可安全解析（batch 3）。
+  // 注入 output（TUI / 测试）保持单流行为——runLocalAgentTurnForCli 在
+  // writeErr 缺失时回退 output.write。
+  const output: OutputLike = deps.output ?? {
+    write: (chunk: string) => process.stdout.write(chunk),
+    writeErr: (chunk: string) => process.stderr.write(chunk),
+  };
   if (args.includes("--help") || args.includes("-h")) {
     writeUsage(output, deps.commandPath);
     return 0;

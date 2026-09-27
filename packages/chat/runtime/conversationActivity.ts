@@ -7,10 +7,14 @@ import {
 } from "chat/messages/assistantMessageFacts";
 
 import { isHiddenOrchestratorToolMessage } from "chat/messages/toolPresentation";
+import type { DialogTurnPhase } from "chat/dialog/dialogRuntimeTypes";
 
 export type ConversationActivity =
   | { kind: "idle" }
   | { kind: "starting" }
+  | { kind: "validating" }
+  | { kind: "compacting" }
+  | { kind: "waiting-provider" }
   | { kind: "thinking" }
   | { kind: "tool"; toolName: string }
   | { kind: "answering" }
@@ -35,6 +39,13 @@ export interface ConversationActivityInput {
   waitingForUser: boolean;
   /** 同步中。当前无真实事实源，恒为 falsy；出现事实后再接线。 */
   syncing?: boolean;
+  /**
+   * Pre-delta turn phase from the dialog-scoped runtime store
+   * (validating / compacting / waiting-provider). Only surfaces while running
+   * with no visible content yet; real content (tool / thinking / answering)
+   * keeps priority so two working signals never overlap.
+   */
+  turnPhase?: DialogTurnPhase | null;
 }
 
 /** 无事发生时的稳定引用（消费方可直接判 kind）。 */
@@ -56,6 +67,13 @@ export function projectConversationActivity(
   if (input.isThinkingLive) return { kind: "thinking" };
   if (input.hasStreamingMessage && input.hasVisibleAssistantText) {
     return { kind: "answering" };
+  }
+  // Pre-delta turn phase (validating / compacting / waiting-provider): shown
+  // only while running with no visible content yet, so the user gets live
+  // feedback during the pre-delta window (context check → compaction → wait).
+  // Tool / thinking / answering above keep priority; content always wins.
+  if (input.isRunning && input.turnPhase && !input.hasVisibleAssistantText) {
+    return { kind: input.turnPhase };
   }
   if (input.isRunning || input.hasStreamingMessage) return { kind: "starting" };
   return IDLE_ACTIVITY;
@@ -161,6 +179,8 @@ export interface DeriveConversationActivityInput {
   toolRuns: readonly ToolRunFactLike[];
   /** 同步中。当前无真实事实源，恒为 falsy；出现事实后再接线。 */
   syncing?: boolean;
+  /** Pre-delta turn phase，透传给 projectConversationActivity。见 ConversationActivityInput。 */
+  turnPhase?: DialogTurnPhase | null;
 }
 
 /**
@@ -187,5 +207,6 @@ export function deriveConversationActivity(
     activeToolNames: toolFacts.activeToolNames,
     waitingForUser: toolFacts.waitingForUser,
     syncing: input.syncing,
+    turnPhase: input.turnPhase,
   });
 }

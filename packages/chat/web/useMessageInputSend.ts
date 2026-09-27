@@ -48,6 +48,31 @@ export type EditingSession = {
   originalContent: any;
 };
 
+/**
+ * Turn lease — the single observable record for an in-flight composer send.
+ * Replaces the silent `sendingGuardRef` boolean: every repeated press now goes
+ * through resolveChatSendDecision, which turns a genuinely running turn into a
+ * queue (text) / explicit block (attachments), and a lease that outlived its
+ * turn into `stale-send` (recovered once — never auto-resent).
+ */
+export type TurnLeasePhase = "idle" | "sending";
+
+export type TurnLease = {
+  turnId: string;
+  dialogKey: string | null | undefined;
+  startedAt: number;
+  phase: TurnLeasePhase;
+};
+
+/**
+ * How long a held lease with no observable runtime activity may be treated as a
+ * dispatch still setting up (message persisting before the loop controller /
+ * stream exists) before it is considered genuinely stale. Only a lease older
+ * than this with no stream / controller / uploads is recovered — never one that
+ * may still have a real request behind it (§3.4 / §8.1).
+ */
+export const STALE_LEASE_GRACE_MS = 4000;
+
 export type UseMessageInputSendArgs = {
   text: string;
   textRef: MutableRefObject<string>;
@@ -117,8 +142,14 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
   const [pendingSendImageCount, setPendingSendImageCount] = useState(0);
   const [startFreshOnNextSend, setStartFreshOnNextSend] = useState(false);
 
-  // 同步防重入守卫：避免 React state 异步批处理导致 sendMessage 被调用两次
-  const sendingGuardRef = useRef(false);
+  // Turn lease — the single source of truth for "a send is in flight".
+  // The old `sendingGuardRef` boolean silently dropped every repeated press
+  // when a turn never settled (ctx-overflow feedback bug). The lease carries
+  // turnId/dialogKey/startedAt/phase so the composer and the queue decisions
+  // read one observable record instead of two drifting flags.
+  const turnLeaseRef = useRef<TurnLease | null>(null);
+  // Monotonic sequence so turnId is unique even for two sends in the same ms.
+  const leaseSeqRef = useRef(0);
   // Mirror startFresh flag in a ref so sendMessage can read it without depending
   // on state (keeps callback identity stable for memoized controls / keydown).
   const startFreshOnNextSendRef = useRef(false);
@@ -134,6 +165,34 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
     latestRef.current = args;
     latestRef.current.text = text;
   });
+
+  // Lease-scoped release: never clear a lease that a newer send has acquired
+  // since (protects against a late finally from an abandoned turn wiping a
+  // fresh lease and re-opening the silent double-send window).
+  const releaseTurnLease = useCallback((token: TurnLease | null) => {
+    if (token !== null && turnLeaseRef.current !== token) return;
+    turnLeaseRef.current = null;
+    setIsSending(false);
+    setPendingSendImageCount(0);
+  }, []);
+
+  const acquireTurnLease = useCallback(
+    (dialogKey: string | null | undefined, pendingImageCount: number): TurnLease => {
+      const lease: TurnLease = {
+        turnId: `${dialogKey ?? "pending-dialog"}::${Date.now()}::${
+          leaseSeqRef.current++
+        }`,
+        dialogKey,
+        startedAt: Date.now(),
+        phase: "sending",
+      };
+      turnLeaseRef.current = lease;
+      setPendingSendImageCount(pendingImageCount);
+      setIsSending(true);
+      return lease;
+    },
+    []
+  );
 
   const markStartFreshOnNextSend = useCallback((next: boolean) => {
     startFreshOnNextSendRef.current = next;
@@ -187,6 +246,9 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
   const isSendPending = isSending && !hasStreamingMessage && !isLoopRunning;
   const isSendBlocked = processingCount > 0 || isSendPending;
   const fileUploadDisabled = processingCount > 0 || isSendPending;
+  // Turn-lease phase surfaced to the composer so its indicator / disabled state
+  // read the same lease sendMessage gates on (single source of truth).
+  const turnPhase: "idle" | "sending" = isSending ? "sending" : "idle";
 
   const sendViaFreshDialog = useCallback(
     async ({
@@ -236,20 +298,33 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
   );
 
   const sendMessage = useCallback(async (overrideText?: string) => {
-    if (sendingGuardRef.current) return;
-
     const snap = latestRef.current;
     const liveText = overrideText ?? snap.textRef.current ?? snap.text;
     const liveImgPreviews = snap.imgPreviews;
     const livePendingFiles = snap.pendingFiles;
-    // Use sendingGuardRef (synced with isSending) so sendMessage identity does
-    // not churn when the pending flag flips — memoized controls keep stable onClick.
+
+    // Every press now flows through the decision resolver — the old top-level
+    // `if (sendingGuardRef.current) return;` silently swallowed repeats when a
+    // turn never settled. The turn lease (turnId/dialogKey/startedAt/phase) is
+    // the single observable record shared by the resolver and the composer.
+    const lease = turnLeaseRef.current;
+    const leaseActive = lease !== null;
     const decisionIsSendPending =
-      sendingGuardRef.current &&
-      !snap.hasStreamingMessage &&
-      !snap.isLoopRunning;
+      leaseActive && !snap.hasStreamingMessage && !snap.isLoopRunning;
     const decisionIsSendBlocked =
       snap.processingCount > 0 || decisionIsSendPending;
+    // Real runtime activity behind the lease (stream, loop controller, or
+    // in-flight attachment processing).
+    const observableActivity =
+      snap.hasStreamingMessage ||
+      snap.isLoopRunning ||
+      snap.processingCount > 0;
+    // A lease younger than the grace window is almost certainly a dispatch
+    // whose controller/stream hasn't been created yet — treat it as live so we
+    // never re-dispatch while a real request may still be in flight (§3.4).
+    const leaseIsFresh =
+      lease !== null && Date.now() - lease.startedAt < STALE_LEASE_GRACE_MS;
+    const hasActiveTurn = observableActivity || leaseIsFresh;
 
     const decision = resolveMessageInputSendDecision({
       text: liveText,
@@ -259,6 +334,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
       canMultiImg: snap.canMultiImg,
       isLoopRunning: snap.isLoopRunning,
       isSendPending: decisionIsSendPending,
+      hasActiveTurn,
       isFreshDialogSlashCommand,
       isCompactDialogSlashCommand,
     });
@@ -275,6 +351,33 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
       case "compact-dialog":
         break;
       case "noop":
+        // noop now carries a reason: empty-input stays silent; blocked is
+        // already reflected by the disabled button + upload indicator; a
+        // genuinely running turn/lease surfaces sendAlreadyRunning instead of
+        // silently dropping the press.
+        switch (decision.reason) {
+          case "empty-input":
+            return;
+          case "blocked":
+            return;
+          case "already-sending":
+            toast.info(
+              t(
+                "sendAlreadyRunning",
+                "这条消息仍在处理中。你可以停止当前请求，或将纯文本消息加入队列。"
+              )
+            );
+            return;
+        }
+        return;
+      case "stale-send":
+        // A lease outlived its turn with no runtime activity behind it (the old
+        // silent guard leak). Release it once so the composer is usable again,
+        // and ask the user to send again — never auto-resend.
+        releaseTurnLease(lease);
+        toast.info(
+          t("sendStateRecovered", "检测到已失效的发送状态，现已恢复。请重新发送。")
+        );
         return;
       case "multi-image-blocked":
         toast.error(
@@ -293,7 +396,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
         );
         clearState();
         toast.success(
-          t("messageQueued", "消息已排队，将在当前轮次结束后发送"),
+          t("queuedText", "消息已排队，将在当前轮次结束后发送。"),
           {
             duration: 2000,
           }
@@ -302,8 +405,8 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
       case "queue-blocked":
         toast.error(
           t(
-            "cannotSendFileDuringLoop",
-            "Agent 运行中，含附件消息请等待完成后再发送"
+            "queuedAttachmentBlocked",
+            "当前轮次仍在运行。含附件或多图的消息不会排队，请等待完成后再发送。"
           )
         );
         return;
@@ -365,9 +468,10 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
     if (snap.canvasEditSelection) {
       markPendingCanvasEditSelection(snap.canvasEditSelection);
     }
-    setPendingSendImageCount(currentImageFiles.length);
-    sendingGuardRef.current = true;
-    setIsSending(true);
+    const myLease = acquireTurnLease(
+      snap.currentDialogKey,
+      currentImageFiles.length
+    );
     if (!snap.editingSession) {
       clearState();
     }
@@ -456,16 +560,16 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
       const msg = rawMsg === "Rejected" ? t("sendFailMessage") : rawMsg;
       toast.error(msg);
     } finally {
-      sendingGuardRef.current = false;
-      setIsSending(false);
-      setPendingSendImageCount(0);
+      releaseTurnLease(myLease);
     }
   }, [
+    acquireTurnLease,
     armFreshDialogSend,
     cancelEditingSession,
     clearState,
     dispatch,
     markStartFreshOnNextSend,
+    releaseTurnLease,
     runCompactDialog,
     sendViaFreshDialog,
     t,
@@ -483,6 +587,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
     // Prefer the ref-synced setter so external callers cannot desync the flag.
     setStartFreshOnNextSend: markStartFreshOnNextSend,
     isSendPending,
+    turnPhase,
     isSendBlocked,
     fileUploadDisabled,
     clearState,

@@ -2322,6 +2322,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             return;
           }
         }
+        // Stale-running recovery (batch 3): the workspace is idle (busy ===
+        // false) but the queue binding can still report a running turn when a
+        // turn-end notification was lost (an exception path skipped
+        // notifyTurnEnd). Recover before starting the new turn so this message
+        // cannot be routed into a phantom queue and the residual queue stays
+        // drainable. Idempotent no-op when the binding agrees we're idle.
+        chatQueueBinding?.recoverStaleRunning();
         busy = startsChatTurn;
         // 提交即作废旧世代：在途的剪贴板读取回来时草稿已清，结果必须丢弃，
         // 否则会把「上一行的粘贴」塞进新草稿。

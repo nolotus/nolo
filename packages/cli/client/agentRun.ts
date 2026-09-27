@@ -58,7 +58,7 @@ import {
 } from "./agentRunTypes";
 
 export type { RunAgentTurnOptions, RunAgentTurnResult, TaskEvidenceInput };
-import { Spinner } from "./agentRunSpinner";
+import { Spinner, formatElapsed } from "./agentRunSpinner";
 import {
   resolveServerPlatformToolNames,
 } from "./agentRunPlatformTools";
@@ -923,6 +923,29 @@ function buildUpstreamFailure(ctx: FailureCtx): string {
 }
 
 /**
+ * 本地 turn 失败行（ctx-overflow-feedback batch 3）。
+ *
+ * localLoop 主请求 deadline（DEFAULT_LLM_REQUEST_TIMEOUT_MS 兜底或调用方
+ * timeoutMs）到达时抛 code=LLM_REQUEST_TIMEOUT：请求已经发出、上游没有
+ * 响应。此时一行 "Local agent run failed: LLM request timed out after
+ * 600000ms (round 0)" 既不可操作（用户不知道该重试、切换还是压缩），也让
+ * 「消息已保留」这个关键事实不可见。映射为单条可操作文案（带 deadline 换算
+ * 与三个出口）；其余错误保持原有行不变。
+ */
+export function formatLocalTurnFailureLine(error: unknown): string {
+  const message = toErrorMessage(error);
+  if ((error as { code?: unknown })?.code === "LLM_REQUEST_TIMEOUT") {
+    const msMatch = /after (\d+)ms/.exec(message);
+    const deadline =
+      msMatch && Number.isFinite(Number(msMatch[1]))
+        ? formatElapsed(Math.round(Number(msMatch[1]) / 1000))
+        : "the configured window";
+    return `[nolo] ${t("llmRequestTimedOut", deadline)}\n`;
+  }
+  return `[nolo] Local agent run failed: ${message}\n`;
+}
+
+/**
  * Map each classified kind to its message builder. Keys mirror the `kind`
  * union in LocalRunErrorClass. `auth`/`upstream` branch on transport inside
  * their builder, so the table is a flat lookup.
@@ -1602,6 +1625,26 @@ async function runLocalAgentTurnForCli(
         if (event.kind === "llm-start") {
           turnOutput.showWorking();
         }
+        // Pre-delta 阶段投影（batch 3）：localLoop 在首个 provider delta 前
+        // 依次发出 validating-context → compacting → waiting-provider。此前
+        // 只有 llm-start 才切到明确 working 文案，压缩期间 spinner/活动行停
+        // 在通用 label 上——用户无法区分「卡在检查上下文 / 压缩 / 等模型」，
+        // 正是本批次要消灭的静默空窗。compacting 行自带 Esc/Ctrl+C 取消提示。
+        if (event.kind === "turn-phase") {
+          turnOutput.showPhase(event.phase);
+        }
+        if (event.kind === "compaction-start") {
+          turnOutput.showPhase("compacting");
+        }
+        if (
+          event.kind === "compaction-end" ||
+          // 压缩失败（timeout/provider-error）时 localLoop 按失败原子性语义
+          // 带着裁剪后的历史继续本轮，切回等待模型文案；aborted 时 turn 随即
+          // 结束，不再切文案（终态由 abort 路径收尾）。
+          (event.kind === "compaction-failed" && event.reason !== "aborted")
+        ) {
+          turnOutput.showPhase("waiting-provider");
+        }
         if (event.kind === "image-downgraded") {
           // 第 4 级降级提示：模型不支持图片，已用占位文本替代；给用户 escape hatch。
           // 不阻断当前轮——agent 拿到的是 [Image content omitted...] 占位文本，能继续跑。
@@ -1702,9 +1745,16 @@ async function runLocalAgentTurnForCli(
       (error as { cooldownUntil?: string }).cooldownUntil = cooldownUntil;
     }
     if (settings.reportFailure) {
-      options.output.write(
-        `[nolo] Local agent run failed: ${toErrorMessage(error)}\n`,
-      );
+      // 单条可操作错误（batch 3）：deadline 类错误走 formatLocalTurnFailureLine
+      // 的可操作映射（含「消息已保留 + 重试/切换/compact」出口），其余错误保留
+      // 原始 failed 行。非交互模式（stdout 可能是管道/脚本）把失败行写 stderr，
+      // 让 stdout 只承载回合输出；TUI/测试注入的 output 无 writeErr 时回退 write。
+      const failureLine = formatLocalTurnFailureLine(error);
+      if (typeof options.output.writeErr === "function") {
+        options.output.writeErr(failureLine);
+      } else {
+        options.output.write(failureLine);
+      }
       if (cooldownUntil) {
         options.output.write(
           `[nolo] 已标记冷却至 ${cooldownUntil}，到期前派发该 agent 会被冷却门控拦截。\n`,

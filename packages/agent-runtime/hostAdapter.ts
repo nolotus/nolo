@@ -68,6 +68,7 @@ export type AgentRuntimeAgentConfig = {
 };
 
 export type AgentRuntimeCompleteOptions = {
+  /** Provider deadline; implementations should enforce it at transport level. */
   timeoutMs?: number;
   /**
    * 本轮的取消信号（用户按 Esc / stop）。localLoop 把 input.abortSignal

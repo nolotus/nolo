@@ -7,6 +7,7 @@ import {
   parseDesktopAgentRuntimeAgentConfigSnapshot,
   parseDesktopAgentRuntimeDialogHistorySnapshot,
 } from "agent-runtime";
+import type { LocalAgentLoopEvent } from "agent-runtime/localLoop";
 import { parseToken } from "core/authToken";
 const WEB_AUTH_TOKEN_COOKIE = "nolo_auth_token";
 import { isRecord } from "core/isRecord";
@@ -222,51 +223,104 @@ export async function handleDesktopAgentRuntimeTurnPost(
   });
   const runTurn = deps.runTurn ?? runDesktopAgentRuntimeTurn;
 
+  // Turn-scoped abort: a client disconnect (webview stop / torn-down SSE) must
+  // cancel the runtime turn (compaction + provider call), not merely close the
+  // response. Wired to both the request signal and the stream `cancel` below.
+  const turnAbort = new AbortController();
+  const onRequestAbort = () => turnAbort.abort(req.signal.reason);
+  if (req.signal) {
+    if (req.signal.aborted) turnAbort.abort(req.signal.reason);
+    else req.signal.addEventListener("abort", onRequestAbort, { once: true });
+  }
+
   const encoder = new TextEncoder();
+  let streamClosed = false;
   const stream = new ReadableStream({
-    async start(controller) {
+    start(controller) {
       const enqueueEvent = (dataObj: object) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(dataObj)}\n\n`));
+        if (streamClosed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(dataObj)}\n\n`));
+        } catch {
+          // Stream cancelled/closed mid-write — a late phase frame after the
+          // client disconnected must not crash the producer.
+        }
+      };
+      const closeStream = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       };
 
-      try {
-        const result = await runTurn({
-          env,
-          store,
-          agentRef: body.agentRef,
-          input: body.input,
-          runtimeContext: body.runtimeContext,
-          continueDialogId: body.continueDialogId,
-          dialogKey: body.dialogKey,
-          cwd: body.cwd,
-          restrictShellToWorkspace: body.restrictShellToWorkspace,
-          workspaceToolsHint: body.workspaceToolsHint,
-          agentConfigSnapshot: body.agentConfigSnapshot,
-          dialogHistorySnapshot: body.dialogHistorySnapshot,
-          fetchImpl: deps.fetchImpl,
-          onTextDelta: (chunk) => {
-            enqueueEvent({ type: "delta", text: chunk });
-          },
-          onToolEvent: (event) => {
-            enqueueEvent({ type: "tool", event });
-          },
-          onReasoningDelta: (chunk) => {
-            // 与 agentRun SSE 约定对齐（见 cli/client/agentRun.ts:1155 消费方式）：
-            // 单独的 thinking 事件承载 reasoning 增量，不和文本 delta 混在一起，
-            // 客户端可独立接到现有 thinkContent 渲染路径。
-            enqueueEvent({ type: "thinking", content: chunk });
-          },
-        });
+      void (async () => {
+        try {
+          const result = await runTurn({
+            env,
+            store,
+            agentRef: body.agentRef,
+            input: body.input,
+            runtimeContext: body.runtimeContext,
+            continueDialogId: body.continueDialogId,
+            dialogKey: body.dialogKey,
+            cwd: body.cwd,
+            restrictShellToWorkspace: body.restrictShellToWorkspace,
+            workspaceToolsHint: body.workspaceToolsHint,
+            agentConfigSnapshot: body.agentConfigSnapshot,
+            dialogHistorySnapshot: body.dialogHistorySnapshot,
+            fetchImpl: deps.fetchImpl,
+            signal: turnAbort.signal,
+            onTextDelta: (chunk) => {
+              enqueueEvent({ type: "delta", text: chunk });
+            },
+            onToolEvent: (event) => {
+              enqueueEvent({ type: "tool", event });
+            },
+            onReasoningDelta: (chunk) => {
+              // 与 agentRun SSE 约定对齐（见 cli/client/agentRun.ts:1155 消费方式）：
+              // 单独的 thinking 事件承载 reasoning 增量，不和文本 delta 混在一起，
+              // 客户端可独立接到现有 thinkContent 渲染路径。
+              enqueueEvent({ type: "thinking", content: chunk });
+            },
+            onLoopEvent: (event: LocalAgentLoopEvent) => {
+              // Surface the pre-delta turn phase over SSE so the desktop UI
+              // shows validating / compacting / waiting-provider before the
+              // first delta — the silent-no-feedback window this fix targets.
+              // A runtime `turn-phase` observation maps 1:1 onto the status
+              // frame's phase + scope; other observation kinds stay on the
+              // runtime trace and are not forwarded.
+              if (event.kind === "turn-phase") {
+                enqueueEvent({
+                  type: "status",
+                  phase: event.phase,
+                  scope: event.compactionScope ?? "in-loop",
+                });
+              }
+            },
+          });
 
-        enqueueEvent({ type: "done", result });
-        controller.close();
-      } catch (error) {
-        enqueueEvent({
-          type: "error",
-          error: normalizeDesktopAgentRuntimeTurnError(error),
-        });
-        controller.close();
+          enqueueEvent({ type: "done", result });
+          closeStream();
+        } catch (error) {
+          enqueueEvent({
+            type: "error",
+            error: normalizeDesktopAgentRuntimeTurnError(error),
+          });
+          closeStream();
+        }
+      })();
+    },
+    cancel() {
+      // Consumer cancelled (client disconnected): stop the runtime turn and
+      // detach the request-abort listener.
+      if (!streamClosed) {
+        streamClosed = true;
+        turnAbort.abort();
       }
+      if (req.signal) req.signal.removeEventListener("abort", onRequestAbort);
     },
   });
 

@@ -197,6 +197,14 @@ export function isColdResume(
   return false;
 }
 
+export type LocalAutoCompactionFailureReason = "timeout" | "aborted" | "provider-error";
+export type LocalAutoCompactionPhase =
+  | { kind: "validating-context" }
+  | { kind: "compaction-start" }
+  | { kind: "waiting-provider" }
+  | { kind: "compaction-end" }
+  | { kind: "compaction-failed"; reason: LocalAutoCompactionFailureReason };
+
 export type LocalAutoCompactionResult = {
   history: AgentRuntimeChatMessage[];
   /** True when history was projected through a (new or existing) summary. */
@@ -229,6 +237,8 @@ export type LocalAutoCompactionResult = {
    * 否则用户侧表现为「超限了也没压缩」且无任何线索。
    */
   failureMessage?: string;
+  /** Stable machine-readable failure classification. */
+  failureReason?: LocalAutoCompactionFailureReason;
   /**
    * 决策可观测：本次调用的判定结果与「为什么没压缩」。
    * 每个返回路径都必须填充（unchanged / projectExisting / compressed / failed），
@@ -281,7 +291,7 @@ export type LocalCompactionDecision =
       pendingMsgCount?: number;
       compressCount?: number;
     }
-  | { outcome: "failed"; detail: string };
+  | { outcome: "failed"; reason: LocalAutoCompactionFailureReason; detail: string };
 
 export async function maybeAutoCompactLocalHistory(args: {
   adapter: AgentRuntimeHostAdapter;
@@ -299,8 +309,17 @@ export async function maybeAutoCompactLocalHistory(args: {
    * planCompression 据此在真实占用 ≥0.78 时强制触发，绕过本地启发式历史估算偏低导致的 400 溢出。
    */
   realContextUsagePercent?: number;
+  /** Omitted preserves historical behavior for direct callers. */
+  timeoutMs?: number;
+  abortSignal?: AbortSignal;
+  /** Lifecycle only: no prompt, summary, or message content is exposed. */
+  onPhase?: (phase: LocalAutoCompactionPhase) => void;
 }): Promise<LocalAutoCompactionResult> {
   const { adapter, dialogId, history } = args;
+  const emitPhase = (phase: LocalAutoCompactionPhase) => {
+    try { args.onPhase?.(phase); } catch { /* observation is fail-open */ }
+  };
+  emitPhase({ kind: "validating-context" });
   const unchanged = (
     decision: LocalCompactionDecision,
   ): LocalAutoCompactionResult => ({
@@ -467,8 +486,17 @@ export async function maybeAutoCompactLocalHistory(args: {
     return projectExisting();
   }
 
+  emitPhase({ kind: "compaction-start" });
   try {
+    if (args.abortSignal?.aborted) {
+      throw Object.assign(new Error("auto-compaction aborted"), { compactionReason: "aborted" as const });
+    }
     const provider = await args.resolveProvider();
+    // 审计修复：abort 若发生在 resolveProvider 的 await 窗口内，listener 尚未注册，
+    // 会被漏掉；这里补一次检查，收盘「pre-check → listener 注册」之间的竞态窗口。
+    if (args.abortSignal?.aborted) {
+      throw Object.assign(new Error("auto-compaction aborted"), { compactionReason: "aborted" as const });
+    }
     const msgsToCompress =
       plan.msgsToCompress as PlanCompressionBridgeMessage[];
     // 用共享模块的截断版格式化，避免大工具结果撑爆摘要请求（P0-2）。
@@ -482,21 +510,50 @@ export async function maybeAutoCompactLocalHistory(args: {
       messagesText,
       fileOpsText,
     });
-    const result = await provider.complete([
-      { role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT },
-      { role: "user", content: promptContent },
-    ]);
+    emitPhase({ kind: "waiting-provider" });
+    const timeoutMs = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0 ? args.timeoutMs : undefined;
+    const requestController = new AbortController();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let abortListener: (() => void) | undefined;
+    const request = provider.complete(
+      [{ role: "system", content: COMPACTION_SUMMARY_SYSTEM_PROMPT }, { role: "user", content: promptContent }],
+      { signal: requestController.signal, ...(timeoutMs ? { timeoutMs } : {}) },
+    ).then(
+      (value) => ({ kind: "done" as const, value }),
+      (error) => ({ kind: "provider-error" as const, error }),
+    );
+    const guards: Array<Promise<{ kind: "timeout" } | { kind: "aborted" }>> = [];
+    if (timeoutMs) guards.push(new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => { requestController.abort(); resolve({ kind: "timeout" }); }, timeoutMs);
+    }));
+    if (args.abortSignal) guards.push(new Promise((resolve) => {
+      abortListener = () => { requestController.abort(args.abortSignal?.reason); resolve({ kind: "aborted" }); };
+      args.abortSignal?.addEventListener("abort", abortListener, { once: true });
+    }));
+    const outcome = guards.length ? await Promise.race([request, ...guards]) : await request;
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (abortListener) args.abortSignal?.removeEventListener("abort", abortListener);
+    if (outcome.kind !== "done") {
+      const reason: LocalAutoCompactionFailureReason = outcome.kind === "timeout" ? "timeout" : outcome.kind === "aborted" ? "aborted" : "provider-error";
+      const detail = outcome.kind === "provider-error" ? (outcome.error instanceof Error ? outcome.error.message : String(outcome.error)) : reason === "timeout" ? `auto-compaction timed out after ${timeoutMs}ms` : "auto-compaction aborted";
+      throw Object.assign(new Error(detail), { compactionReason: reason });
+    }
+    const result = outcome.value;
     const newSummary =
       typeof result.content === "string" ? result.content.trim() : "";
     if (!newSummary) {
       console.warn(
         "[localLoop] auto-compaction produced empty summary; keeping prior projection",
       );
+      const failureReason = "provider-error" as const;
+      emitPhase({ kind: "compaction-failed", reason: failureReason });
       return {
         ...projectExisting(),
         failureMessage: "summary model returned empty content",
+        failureReason,
         decision: {
           outcome: "failed",
+          reason: failureReason,
           detail: "summary model returned empty content",
         },
       };
@@ -534,6 +591,7 @@ export async function maybeAutoCompactLocalHistory(args: {
     });
     console.log(formatCompactionMetricsLog(metrics));
 
+    emitPhase({ kind: "compaction-end" });
     return {
       history: projectHistoryWithSummary({
         history,
@@ -576,10 +634,16 @@ export async function maybeAutoCompactLocalHistory(args: {
       error instanceof Error && error.message
         ? error.message.slice(0, 200)
         : String(error).slice(0, 200);
+    const failureReason: LocalAutoCompactionFailureReason =
+      error instanceof Error && "compactionReason" in error
+        ? (error as Error & { compactionReason: LocalAutoCompactionFailureReason }).compactionReason
+        : "provider-error";
+    emitPhase({ kind: "compaction-failed", reason: failureReason });
     return {
       ...projectExisting(),
       failureMessage,
-      decision: { outcome: "failed", detail: failureMessage },
+      failureReason,
+      decision: { outcome: "failed", reason: failureReason, detail: failureMessage },
     };
   }
 }

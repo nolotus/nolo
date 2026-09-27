@@ -61,3 +61,13 @@ export type LoopStopReason =
   | "pending"
   | "timeout"
   | "error";
+
+/**
+ * Pre-delta turn phase surfaced while the agent runtime is working but has not
+ * yet produced any visible content. Written by streamTurn when the desktop SSE
+ * delivers a `{type:"status"}` frame; consumed by the message list to render
+ * validating / compacting / waiting-provider labels. Dialog-scoped (see
+ * dialogRuntimeStore) — never a global "is streaming" boolean, so one dialog's
+ * long compaction never mislabels another.
+ */
+export type DialogTurnPhase = "validating" | "compacting" | "waiting-provider";

@@ -30,7 +30,7 @@ import { useCurrentDialogConfig } from "../dialog/useCurrentDialogConfig";
 import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
 import { useFetchData } from "app/hooks";
 import { applyBuiltinAgentRuntimeOverride } from "agent-runtime/builtinPlatformAgentConfigs";
-import { getModelContextWindow } from "ai/llm/getModelContextWindow";
+import { resolveAgentContextWindow } from "agent-runtime/devin/devinChannelWindows";
 import {
   getContextWindowUsagePercent,
   getDialogTokenTotal,
@@ -660,6 +660,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   const {
     pendingSendImageCount,
     isSendPending,
+    turnPhase,
     isSendBlocked,
     fileUploadDisabled,
     cancelEditingSession,
@@ -906,7 +907,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     void sendMessage(composeOutgoingText());
   }, [composeOutgoingText, sendMessage]);
 
-  const showIndicator = processingCount > 0 || isSendPending;
+  // Indicator + disabled state read the SAME turn lease/phase that sendMessage
+  // gates on (single source of truth — no drifting guard vs UI flags).
+  const sendInFlight = turnPhase === "sending" || isSendPending;
+  const showIndicator = processingCount > 0 || sendInFlight;
   const indicatorText = processingCount
     ? t("processingFiles", { count: processingCount })
     : pendingSendImageCount > 0
@@ -977,7 +981,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     activeAgent && activeAgentId
       ? applyBuiltinAgentRuntimeOverride(activeAgentId, activeAgent)
       : activeAgent;
-  const contextWindow = getModelContextWindow(resolvedAgent?.model || "");
+  // Channel-aware context window: devin channel table (fallback global map) so
+  // a switch to a smaller-window model reflects the real capacity, not the
+  // stale global default.
+  const contextWindow = resolveAgentContextWindow(resolvedAgent ?? {});
   const totalTokens = getDialogTokenTotal(
     tokenStats?.inputTokens ?? 0,
     tokenStats?.outputTokens ?? 0
@@ -1067,6 +1074,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     ]
   );
 
+  // sendDisabled reads the lease-derived isSendBlocked (uploads / held lease) —
+  // the same turn lease the indicator uses, so button + spinner never disagree.
   const sendDisabled =
     !hasContent ||
     isSendBlocked ||

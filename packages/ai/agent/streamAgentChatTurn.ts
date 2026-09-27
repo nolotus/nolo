@@ -32,6 +32,7 @@ import {
     selectActiveControllers,
     updateTokens,
 } from "chat/dialog/dialogSlice";
+import { setDialogTurnPhase, clearDialogTurnPhase, claimDialogTurnPhase } from "chat/dialog/dialogRuntimeStore";
 import { runChatQueueTurnEnd } from "chat/queue/chatQueueLifecycleActions";
 import {
     finalizeTransientMessageOnError,
@@ -63,11 +64,9 @@ import {
     updateResponsesConversationState,
 } from "../../agent-runtime/responsesConversationState";
 
-import {
-    sendOpenAICompletionsRequest,
-    type CompletionMeta,
-} from "../chat/sendOpenAICompletionsRequest";
+import { sendOpenAICompletionsRequest, type CompletionMeta } from "../chat/sendOpenAICompletionsRequest";
 import { sendOpenAIResponseRequest } from "../chat/sendOpenAIResponseRequest";
+import { isContextOverflowText } from "../chat/parseApiError";
 
 import type { AgentRuntimeOptions } from "./types";
 import { buildAgentViewMessages } from "./cleanAgentMessages";
@@ -156,6 +155,71 @@ import {
 function hasInlineExecutedToolCalls(result: { output?: unknown } | null | undefined): boolean {
   const output = (result as { output?: Array<{ type?: string; result?: unknown }> } | null | undefined)?.output;
   return Array.isArray(output) && output.some((b) => b?.type === "toolCall" && b?.result != null);
+}
+
+/**
+ * Structured classification of a local/desktop turn stream error so the error
+ * card can offer the right actions instead of a generic badge. Context overflow
+ * → compact-and-retry / new-dialog / switch-model; compaction timeout → retry /
+ * new-dialog (never auto-retry a paid provider request — a fresh turn id only).
+ * Everything else is a plain generic failure (empty summary/hint → no card
+ * enrichment). Pure + exported for unit tests. Kept text-based (not exception
+ * class based) because provider/runtime errors arrive here as strings.
+ */
+export type LocalTurnErrorKind = "context_overflow" | "compaction_timeout" | "generic";
+
+export interface LocalTurnErrorInfo {
+  kind: LocalTurnErrorKind;
+  retryable: boolean;
+  /** One-line summary for the error card title/badge. */
+  summary: string;
+  /** Actionable hint appended to the persisted/rejected error text. */
+  actionHint: string;
+}
+
+const COMPACTION_TIMEOUT_PATTERN =
+  /compaction[^\n]{0,40}(timed\s*out|timeout|deadline)|(timed\s*out|timeout|deadline)[^\n]{0,40}compaction|summary[^\n]{0,30}(timed\s*out|timeout)/i;
+
+/**
+ * SSE 传输层 no-event watchdog（review 修复 4）。
+ *
+ * 主路径由 runtime 内部 deadline 覆盖（compaction 60s / LLM idle 10min，均在
+ * agent-runtime/localLoop），但这个兜底覆盖 runtime **没有** deadline 的挂起点：
+ * resolveProvider、adapter 初始化、SSE 管道本身。那些位置一旦挂住，desktop
+ * 端就是无限静默——正是 ctx-overflow-feedback 要消灭的现象的残余面。
+ *
+ * 量级取 2×LLM idle 窗（20 分钟）：必须大于 runtime 自己的 idle 窗，否则一个
+ * 健康的慢思考轮次（连续几分钟一个新 delta 都没有）会被客户端提前判死，用户
+ * 拿到未分类的 "stream stalled"，而不是 runtime 的 LLM_REQUEST_TIMEOUT 可操作
+ * 文案。写死字面量而不从 localLoop 引，是为了避免
+ * ai/agent ↔ agent-runtime/localLoop 的循环依赖（量级一致即可）。
+ */
+const DESKTOP_SSE_NO_EVENT_WATCHDOG_MS = 20 * 60 * 1000;
+
+export function classifyLocalTurnStreamError(errorText: string): LocalTurnErrorInfo {
+  const text = typeof errorText === "string" ? errorText : "";
+  if (COMPACTION_TIMEOUT_PATTERN.test(text)) {
+    return {
+      kind: "compaction_timeout",
+      retryable: true,
+      summary: "历史压缩超时",
+      actionHint:
+        "历史压缩未能在时限内完成，本回合已停止。你的消息与附件均已保留；可重试、开启新对话，或切换到更大窗口的模型。（超时后不会自动重试同一付费请求。）",
+    };
+  }
+  // 上下文超窗判定走共享真相源（review 修复 3）：本文件不再持私有正则——
+  // 两份正则必然漂移，漂移的代价是错误卡静默退化成 generic，用户失去
+  // 「压缩并重试 / 开新对话 / 切换模型」三个出口。
+  if (isContextOverflowText(text)) {
+    return {
+      kind: "context_overflow",
+      retryable: true,
+      summary: "上下文过长",
+      actionHint:
+        "当前上下文超出模型窗口。可自动压缩并重试、开启新对话，或切换到更大窗口的模型。",
+    };
+  }
+  return { kind: "generic", retryable: true, summary: "", actionHint: "" };
 }
 
 /**
@@ -376,6 +440,10 @@ export const streamAgentChatTurnHandler = async (
     thunkApi.signal.addEventListener("abort", onAbort);
     let loopKey: string | null = null;
     let runtimeDialogKey: string | null = explicitDialogKey ?? null;
+    // Turn-scoped owner token for the pre-delta turn phase (review 修复 5).
+    // Minted in the desktop-runtime branch; carried into `finally` so cleanup is
+    // turn-scoped too. `null` for paths that never project a turn phase.
+    let turnPhaseTurnId: string | null = null;
     let remoteTransientMessageId: string | null = null;
     let remoteTransientMessageFinalized = false;
     let modelRequestStarted = false;
@@ -1053,6 +1121,16 @@ export const streamAgentChatTurnHandler = async (
             loopKey = `loop:${dialogId}`;
             dispatch(addActiveController({ messageId: loopKey, controller: loopController, dialogKey }));
 
+            // Turn-scoped token for pre-delta turn phase (review 修复 5)：本 turn
+            // 拥有的 phase 由它背书。先 claim 接管 ownership（上一 turn 若没来得及
+            // 清理，claim 会把残留相位清掉），之后迟到的旧 turn status 帧与旧 turn
+            // 的 finally 都会被 store 拒绝，既不会污染新 turn 的相位，也不会把新
+            // turn 的相位清掉。
+            turnPhaseTurnId = `turn-phase:${dialogId}:${Date.now().toString(36)}:${Math.random()
+              .toString(36)
+              .slice(2, 8)}`;
+            claimDialogTurnPhase({ dialogKey, turnId: turnPhaseTurnId });
+
             let currentContent = "";
             // List of all assistant text messages created during this turn.
             // Each entry records the segment's finalized content + ids. The last
@@ -1157,6 +1235,17 @@ export const streamAgentChatTurnHandler = async (
                     agentConfigSnapshot: agentConfig as Record<string, unknown>,
                     dialogMessages: selectAllMsgs(getState() as RootState, dialogId),
                     signal: loopController.signal,
+                    // SSE 传输层兜底（review 修复 4）：此前本调用方从不传
+                    // noEventWatchdogMs，watchdog 永远关闭——「已有安全网」只是
+                    // 错觉，挂起点若在 provider.complete 之外（resolveProvider /
+                    // adapter 内部，runtime 没有任何 deadline）就会无限静默。
+                    // 量级必须大于 runtime 自己的 idle 窗（默认 10 分钟无新输出
+                    // 才放弃，见 localLoop.DEFAULT_LLM_REQUEST_TIMEOUT_MS），
+                    // 否则一个健康的慢思考轮次会被客户端提前判死，用户拿到的是
+                    // 未分类的 "stream stalled" 而不是 runtime 的
+                    // LLM_REQUEST_TIMEOUT 可操作文案。取 2× = 20 分钟：
+                    // 只兜「runtime 完全没 deadline」的真悬挂。
+                    noEventWatchdogMs: DESKTOP_SSE_NO_EVENT_WATCHDOG_MS,
                 });
 
                 for await (const event of eventStream) {
@@ -1244,6 +1333,15 @@ export const streamAgentChatTurnHandler = async (
                                 dispatch(messageStreaming(toolResultMsg));
                             }
                         }
+                    } else if (event.type === "status") {
+                        // Desktop SSE pre-delta turn phase → dialog-scoped turn
+                        // state so the message list can show validating /
+                        // compacting / waiting-provider before the first delta
+                        // (the silent-no-feedback window). Runtime phase
+                        // "validating-context" maps to render phase "validating".
+                        const phase =
+                            event.phase === "validating-context" ? "validating" : event.phase;
+                        setDialogTurnPhase({ phase, dialogKey, turnId: turnPhaseTurnId ?? undefined });
                     } else if (event.type === "done") {
                         streamResult = event.result;
                     } else if (event.type === "error") {
@@ -1452,8 +1550,13 @@ export const streamAgentChatTurnHandler = async (
             };
 
             if (streamError) {
-                await finalizeDesktopTurnOnError(streamError);
-                return rejectWithValue(streamError);
+                // Structured metadata: context overflow / compaction timeout get
+                // an actionable hint so the error card isn't a generic badge.
+                // Generic errors pass through unchanged (no enrichment).
+                const info = classifyLocalTurnStreamError(streamError);
+                const finalError = info.actionHint ? `${streamError}\n\n${info.actionHint}` : streamError;
+                await finalizeDesktopTurnOnError(finalError);
+                return rejectWithValue(finalError);
             }
 
             if (!streamResult) {
@@ -2636,6 +2739,7 @@ export const streamAgentChatTurnHandler = async (
             "An unexpected error occurred in streamAgentChatTurn.",
         );
     } finally {
+        clearDialogTurnPhase({ dialogKey: runtimeDialogKey ?? undefined, turnId: turnPhaseTurnId ?? undefined });
         if (loopKey && runtimeDialogKey) {
             dispatch(removeActiveController({ messageId: loopKey, dialogKey: runtimeDialogKey }));
         } else if (loopKey) {

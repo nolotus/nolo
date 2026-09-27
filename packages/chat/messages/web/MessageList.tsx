@@ -41,7 +41,7 @@ import {
   selectShowScrollToBottomButton,
 } from "app/settings/settingSlice";
 
-import { useActiveControllers } from "chat/dialog/dialogSlice";
+import { useActiveControllers, useDialogTurnPhase } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { createDialog } from "chat/dialog/dialogSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
@@ -216,6 +216,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
       ? currentDialogConfig.dbKey
       : undefined;
   const activeControllers = useActiveControllers(activeDialogKey);
+  const dialogTurnPhase = useDialogTurnPhase(activeDialogKey);
   const isRunning =
     !!activeDialogKey && Object.keys(activeControllers).length > 0;
   const loopStopReason = useLoopStopReason(isRunning);
@@ -576,8 +577,9 @@ const MessagesList: React.FC<MessagesListProps> = ({
         hasStreamingMessage,
         isRunning,
         toolRuns: allToolRuns,
+        turnPhase: dialogTurnPhase,
       }),
-    [messages, hasStreamingMessage, isRunning, allToolRuns],
+    [messages, hasStreamingMessage, isRunning, allToolRuns, dialogTurnPhase],
   );
 
   // Styles live in messagesStyles.ts (avoid rebuilding a large unused style string each stream tick).
@@ -713,7 +715,12 @@ const MessagesList: React.FC<MessagesListProps> = ({
           );
         })}
 
-        {conversationActivity.kind === "starting" && (
+        {(
+          conversationActivity.kind === "starting" ||
+          conversationActivity.kind === "validating" ||
+          conversationActivity.kind === "compacting" ||
+          conversationActivity.kind === "waiting-provider"
+        ) && (
           <div className="chat-messages__item-wrapper chat-messages__item-wrapper--pending">
             <AssistantReplyPending activity={conversationActivity} />
           </div>

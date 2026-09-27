@@ -13,13 +13,14 @@ import { useSyncExternalStore } from "react";
 
 import {
   GLOBAL_DIALOG_RUNTIME_KEY,
+  type DialogTurnPhase,
   type LoopStopReason,
   type PendingFile,
   type PendingRawData,
   type TokenStats,
 } from "./dialogRuntimeTypes";
 
-export type { LoopStopReason, PendingFile, PendingRawData, TokenStats };
+export type { DialogTurnPhase, LoopStopReason, PendingFile, PendingRawData, TokenStats };
 export { GLOBAL_DIALOG_RUNTIME_KEY };
 
 export interface DialogRuntimeState {
@@ -28,6 +29,13 @@ export interface DialogRuntimeState {
   activeControllers: Record<string, AbortController>;
   pendingRawData: Record<string, PendingRawData>;
   loopStopReason: LoopStopReason | null;
+  turnPhase: DialogTurnPhase | null;
+  /**
+   * turn-scoped owner of `turnPhase` (review 修复 5). A late status frame from
+   * an older turn (or that turn's `finally` cleanup) must not overwrite the
+   * phase of the turn that owns the dialog now.
+   */
+  turnPhaseTurnId: string | null;
   pendingUserInputQueue: string[];
 }
 
@@ -50,6 +58,8 @@ const createEmptyDialogRuntimeState = (): DialogRuntimeState => ({
   activeControllers: {},
   pendingRawData: {},
   loopStopReason: null,
+  turnPhase: null,
+  turnPhaseTurnId: null,
   pendingUserInputQueue: [],
 });
 
@@ -129,6 +139,8 @@ export function resetDialogRuntimeSessionState(dialogKey?: string | null): void 
   const runtime = ensureDialogRuntimeState(dialogKey);
   runtime.tokens = createEmptyTokenStats();
   runtime.loopStopReason = null;
+  runtime.turnPhase = null;
+  runtime.turnPhaseTurnId = null;
   runtime.pendingUserInputQueue = [];
   notify();
 }
@@ -187,6 +199,56 @@ export function setLoopStopReason(payload: {
   runtime.loopStopReason = payload.reason;
   notify();
   return action("dialogRuntime/setLoopStopReason", payload);
+}
+
+/**
+ * Claim ownership of the dialog's pre-delta turn phase for a new turn
+ * (review 修复 5). Unconditional on purpose: a new turn must evict a stale
+ * owner (e.g. the previous turn died before its `finally`), otherwise its own
+ * status frames would be rejected forever and the dialog would lose pre-delta
+ * feedback. After claiming, only this turn's writes/clears are accepted.
+ */
+export function claimDialogTurnPhase(payload: { dialogKey?: string; turnId: string }) {
+  const runtime = ensureDialogRuntimeState(payload.dialogKey);
+  runtime.turnPhaseTurnId = payload.turnId;
+  // 上一 turn 残留的相位标签不留：新 turn 会立刻推自己的 status 帧。
+  runtime.turnPhase = null;
+  notify();
+  return action("dialogRuntime/claimDialogTurnPhase", payload);
+}
+
+/**
+ * Pre-delta turn phase (validating / compacting / waiting-provider). Written by
+ * streamTurn from the desktop SSE `status` frame. Passing `null` clears it.
+ *
+ * Turn-scoped (review 修复 5)：调用方带 `turnId`（turn 级 token），store 只接受
+ * 当前 owner turn 的写入。迟到的旧 turn status 帧不能覆盖新 turn 的 phase，
+ * 旧 turn 的 finally 清理也不能把新 turn 的 phase 清掉。不带 turnId 时保持旧的
+ * 宽松行为（向后兼容现有调用方）。
+ */
+export function setDialogTurnPhase(payload: {
+  phase: DialogTurnPhase | null;
+  dialogKey?: string;
+  turnId?: string;
+}) {
+  const runtime = ensureDialogRuntimeState(payload.dialogKey);
+  if (
+    typeof payload.turnId === "string" &&
+    runtime.turnPhaseTurnId !== null &&
+    runtime.turnPhaseTurnId !== payload.turnId
+  ) {
+    // 跨 turn 写入：拒绝（不 notify——没有状态变化，UI 不该重渲染）。
+    return action("dialogRuntime/setDialogTurnPhase:rejected", payload);
+  }
+  runtime.turnPhase = payload.phase;
+  runtime.turnPhaseTurnId = payload.phase === null ? null : payload.turnId ?? null;
+  notify();
+  return action("dialogRuntime/setDialogTurnPhase", payload);
+}
+
+/** Convenience: clear the current dialog's turn phase (turn end / pre-start). */
+export function clearDialogTurnPhase(payload: { dialogKey?: string; turnId?: string } = {}) {
+  return setDialogTurnPhase({ phase: null, dialogKey: payload.dialogKey, turnId: payload.turnId });
 }
 
 export function clearDialogRuntimeState(payload: { dialogKey: string }) {
@@ -408,6 +470,12 @@ export function getLoopStopReason(
   return getDialogRuntimeState(dialogKey).loopStopReason;
 }
 
+export function getDialogTurnPhase(
+  dialogKey?: string | null
+): DialogTurnPhase | null {
+  return getDialogRuntimeState(dialogKey).turnPhase;
+}
+
 /** @deprecated Prefer getters/hooks; kept for stream/non-React call sites. */
 export const selectDialogRuntimeByKey = (
   _state: any,
@@ -478,6 +546,13 @@ export function useLoopStopReason(
 ): LoopStopReason | null {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return getLoopStopReason(dialogKey);
+}
+
+export function useDialogTurnPhase(
+  dialogKey?: string | null
+): DialogTurnPhase | null {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return getDialogTurnPhase(dialogKey);
 }
 
 export function useDialogRuntimeTokens(

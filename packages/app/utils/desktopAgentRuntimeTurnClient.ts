@@ -55,6 +55,12 @@ type RunDesktopAgentRuntimeTurnArgs = {
   dialogMessages?: unknown[];
   /** User stop / dialog abort. Cancels fetch + body reader when the webview stalls. */
   signal?: AbortSignal;
+  /**
+   * Client-side no-event watchdog (safety net; the runtime compaction/LLM
+   * deadline stays primary). When set, a stream idle gap longer than this
+   * surfaces as an `error` event instead of hanging forever. Off by default.
+   */
+  noEventWatchdogMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -117,9 +123,18 @@ function normalizeDesktopAgentRuntimeTurnError(data: any) {
     : "Failed to run desktop agent runtime turn";
 }
 
+/**
+ * Pre-delta turn phase carried by a desktop SSE `status` frame. Mirrors the
+ * runtime `turn-phase` observation (see agent-runtime/executionObservation.ts).
+ * `scope` traces whether the phase belongs to the initial (pre-first-LLM) or
+ * in-loop compaction pass.
+ */
+export type DesktopTurnPhase = "validating-context" | "compacting" | "waiting-provider";
+
 export type DesktopStreamEvent =
   | { type: "delta"; text: string }
   | { type: "thinking"; content: string }
+  | { type: "status"; phase: DesktopTurnPhase; scope?: "initial" | "in-loop" }
   | { type: "tool"; event: LocalAgentToolEvent }
   | { type: "done"; result: LocalAgentTurnResult }
   | { type: "error"; error: string };
@@ -127,6 +142,7 @@ export type DesktopStreamEvent =
 export async function* runDesktopAgentRuntimeTurnStream({
   fetchImpl = fetch,
   signal,
+  noEventWatchdogMs,
   ...args
 }: RunDesktopAgentRuntimeTurnArgs): AsyncGenerator<DesktopStreamEvent, void, unknown> {
   try {
@@ -191,7 +207,15 @@ export async function* runDesktopAgentRuntimeTurnStream({
           yield { type: "error", error: "The operation was aborted." };
           return;
         }
-        const { done, value } = await readStreamChunk(reader, { signal });
+        const { done, value } = await readStreamChunk(reader, {
+          signal,
+          ...(noEventWatchdogMs && noEventWatchdogMs > 0
+            ? {
+                timeoutMs: noEventWatchdogMs,
+                timeoutErrorMessage: `Desktop turn stream stalled: no event within ${noEventWatchdogMs}ms`,
+              }
+            : {}),
+        });
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });

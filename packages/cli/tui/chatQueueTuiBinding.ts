@@ -92,6 +92,18 @@ export type ChatQueueTuiBinding = {
   snapshotAndClearQueue(): string | null;
   /** Clear the queue (e.g. on /new). */
   clear(): void;
+  /**
+   * Recover a stale running state (batch 3). The caller believed a turn was
+   * running (`busy`) but the turn-end notification was lost — an exception
+   * path skipped `notifyTurnEnd`, leaving the queue core stuck in `running`
+   * so every later submit silently routed into a phantom queue that could
+   * never drain. Resets the core out of `running` via a *clean* turn-end:
+   * the queue is preserved (nothing dropped, nothing resent) with no
+   * `lastDrainError` (a lost notification is not a failed turn — the phantom
+   * turn may well have completed), so draining is not paused. Idempotent:
+   * returns false when the binding is already idle.
+   */
+  recoverStaleRunning(): boolean;
   /** Current UI status snapshot. */
   getStatus(): ChatQueueStatus;
   /** Number of queued items (convenience for the status line). */
@@ -270,6 +282,15 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     runtime.send({ type: "clear" });
   };
 
+  const recoverStaleRunning = (): boolean => {
+    if (!runtime.getState().running) return false;
+    // Clean turn-end (ok: true): exits `running`, keeps the queue, and leaves
+    // lastDrainError unset so the residual queue stays drainable. See the
+    // type doc: a lost notification must not be recorded as a failed turn.
+    runtime.send({ type: "turn-end", ok: true, aborted: false });
+    return true;
+  };
+
   const getStatus = () => projectChatQueueStatus({ state: runtime.getState() });
 
   const queueLength = () => runtime.getState().queue.length;
@@ -289,6 +310,7 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     preemptForStop,
     snapshotAndClearQueue,
     clear,
+    recoverStaleRunning,
     getStatus,
     queueLength,
     dispose,

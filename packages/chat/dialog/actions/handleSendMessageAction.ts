@@ -184,6 +184,11 @@ const finalizeSendFailureInDialog = async (
         stage: parsed.stage,
         summary: parsed.summary,
         actionHint: parsed.actionHint,
+        // 上下文超窗 / 内容过大时带上结构化动作（review 修复 2）：
+        // 没有这个字段，SendErrorCard 的 compact-and-retry / new-dialog /
+        // switch-model 三枚按钮永远不会出现，用户只剩一行文本提示。
+        // 其余 kind 不设 → 卡片只渲染重试。
+        ...(parsed.actions ? { actions: parsed.actions } : {}),
         validationUrl: parsed.validationUrl,
         validationLinkText: parsed.validationLinkText,
         extraLinks: parsed.extraLinks,

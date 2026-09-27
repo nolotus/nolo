@@ -22,6 +22,9 @@ export default {
       sendErrorCard: {
         title: "Send Failed",
         retry: "Retry",
+        compactAndRetry: "Compact & retry",
+        newDialog: "New conversation",
+        switchModel: "Switch model",
         viewDetails: "Technical details",
         hideDetails: "Hide details",
         suggestion: "Suggestion",
@@ -150,6 +153,32 @@ export default {
       stopBeforeDelete: "Stop generation before deleting",
       messageQueued: "Message queued; will be sent after the current turn",
       cannotSendFileDuringLoop: "Agent is running. Please wait before sending attachments.",
+      contextChecking: "Checking this model's context window…",
+      contextCompacting: "This conversation is long. Compacting history…",
+      waitingForModel: "Context is ready. Waiting for the model…",
+      modelWindowReduced:
+        "Switched to a smaller-context model ({{window}}). This conversation is estimated at {{percent}}%; the next message may require compaction.",
+      contextWillCompactOnSend:
+        "This conversation exceeds the new model's recommended range. History will be compacted before sending.",
+      currentMessageTooLarge:
+        "This message or its attachments exceed the model's context window. Shorten it, remove attachments, or choose a larger-context model.",
+      compactionTimedOut:
+        "History compaction timed out; your message was not submitted to the model. Retry, start a new chat, or choose a larger-context model.",
+      compactionFailedFallback:
+        "Compaction failed. Continuing with older history trimmed; some earlier context may be unavailable.",
+      contextRejected:
+        "The model can't accept the current context. Compact the chat, start a new chat, or choose a larger-context model.",
+      sendAlreadyRunning:
+        "This message is still being processed. Stop the current request or queue a text-only message.",
+      sendStateRecovered:
+        "A stale send state was detected and cleared. Please send again.",
+      agentUnavailable:
+        "No assistant is available for this chat. Select one and retry; your message has been kept.",
+      queuedText: "Message queued and will be sent after the current turn",
+      queuedAttachmentBlocked:
+        "A turn is still running. Messages with attachments or multiple images can't be queued; send them after it finishes.",
+      contextUsageEstimate: "est.",
+      contextUsagePercentEstimate: "Estimated context usage {{percent}}%",
       assistantReplyStarting: "Working…",
       queueBadgeLabel: "Queued messages",
       queueBadgeQueued: "queued",
@@ -448,6 +477,9 @@ export default {
       sendErrorCard: {
         title: "发送失败",
         retry: "重试",
+        compactAndRetry: "压缩并重试",
+        newDialog: "开新对话",
+        switchModel: "切换模型",
         viewDetails: "查看详情",
         hideDetails: "收起详情",
         suggestion: "建议",
@@ -572,6 +604,25 @@ export default {
       stopBeforeDelete: "请等待生成停止后再删除",
       messageQueued: "消息已排队，将在当前轮次结束后发送",
       cannotSendFileDuringLoop: "Agent 运行中，含附件消息请等待完成后再发送",
+      contextChecking: "正在检查当前模型的上下文窗口…",
+      contextCompacting: "对话较长，正在压缩历史记录…",
+      waitingForModel: "上下文已准备好，正在等待模型响应…",
+      modelWindowReduced:
+        "已切换到窗口较小的模型（{{window}}）。当前对话预计使用 {{percent}}%，下一条消息可能需要压缩。",
+      contextWillCompactOnSend: "当前对话超出新模型的建议范围。发送时将先压缩历史记录。",
+      currentMessageTooLarge:
+        "当前消息或附件本身超过模型窗口。请缩短内容、减少附件，或切换到更大窗口的模型。",
+      compactionTimedOut:
+        "压缩历史记录超时，消息尚未提交给模型。你可以重试、开启新对话，或切换到更大窗口的模型。",
+      compactionFailedFallback: "压缩失败，已缩短较早的历史记录后继续。本轮可能缺少部分早期上下文。",
+      contextRejected: "模型无法接收当前上下文。请先压缩对话、开启新对话，或选择更大窗口的模型。",
+      sendAlreadyRunning: "这条消息仍在处理中。你可以停止当前请求，或将纯文本消息加入队列。",
+      sendStateRecovered: "检测到已失效的发送状态，现已恢复。请重新发送。",
+      agentUnavailable: "当前对话没有可用的助手。请选择一个助手后重试；你的消息已保留。",
+      queuedText: "消息已排队，将在当前轮次结束后发送。",
+      queuedAttachmentBlocked: "当前轮次仍在运行。含附件或多图的消息不会排队，请等待完成后再发送。",
+      contextUsageEstimate: "估算",
+      contextUsagePercentEstimate: "估算上下文用量 {{percent}}%",
       assistantReplyStarting: "正在处理…",
       queueBadgeLabel: "排队消息",
       queueBadgeQueued: "排队中",
@@ -864,6 +915,9 @@ export default {
       sendErrorCard: {
         title: "發送失敗",
         retry: "重試",
+        compactAndRetry: "壓縮並重試",
+        newDialog: "開新對話",
+        switchModel: "切換模型",
         viewDetails: "查看詳情",
         hideDetails: "收起詳情",
         suggestion: "建議",
@@ -988,6 +1042,25 @@ export default {
       stopBeforeDelete: "請等待生成停止後再刪除",
       messageQueued: "訊息已排隊，將在當前輪次結束後發送",
       cannotSendFileDuringLoop: "Agent 運行中，含附件訊息請等待完成後再發送",
+      contextChecking: "正在檢查目前模型的上下文視窗…",
+      contextCompacting: "對話較長，正在壓縮歷史記錄…",
+      waitingForModel: "上下文已準備好，正在等待模型回應…",
+      modelWindowReduced:
+        "已切換到視窗較小的模型（{{window}}）。目前對話預計使用 {{percent}}%，下一則訊息可能需要壓縮。",
+      contextWillCompactOnSend: "目前對話超出新模型的建議範圍。傳送時會先壓縮歷史記錄。",
+      currentMessageTooLarge:
+        "目前訊息或附件本身超過模型視窗。請縮短內容、移除附件，或切換到更大視窗的模型。",
+      compactionTimedOut:
+        "壓縮歷史記錄逾時，訊息尚未提交給模型。你可以重試、開啟新對話，或切換到更大視窗的模型。",
+      compactionFailedFallback: "壓縮失敗，已縮短較早的歷史記錄後繼續。本輪可能缺少部分早期上下文。",
+      contextRejected: "模型無法接收目前上下文。請先壓縮對話、開啟新對話，或選擇更大視窗的模型。",
+      sendAlreadyRunning: "這則訊息仍在處理中。你可以停止目前請求，或將純文字訊息加入佇列。",
+      sendStateRecovered: "偵測到已失效的傳送狀態，已自動恢復。請重新傳送。",
+      agentUnavailable: "目前對話沒有可用的助手。請選擇一個助手後重試；你的訊息已保留。",
+      queuedText: "訊息已加入佇列，將在目前輪次結束後傳送。",
+      queuedAttachmentBlocked: "目前輪次仍在執行。含附件或多圖的訊息不會排入佇列，請等待完成後再傳送。",
+      contextUsageEstimate: "估算",
+      contextUsagePercentEstimate: "估算上下文用量 {{percent}}%",
       assistantReplyStarting: "正在處理…",
       queueBadgeLabel: "排隊訊息",
       queueBadgeQueued: "排隊中",
@@ -1280,6 +1353,9 @@ export default {
       sendErrorCard: {
         title: "送信失敗",
         retry: "再試行",
+        compactAndRetry: "圧縮して再試行",
+        newDialog: "新しい会話",
+        switchModel: "モデルを切り替え",
         viewDetails: "詳細を表示",
         hideDetails: "詳細を折りたたむ",
         suggestion: "提案",
@@ -1411,6 +1487,25 @@ export default {
       stopBeforeDelete: "生成が停止するまでお待ちください",
       messageQueued: "メッセージをキューに入れました。現在のターン後に送信されます",
       cannotSendFileDuringLoop: "Agent 実行中です。添付メッセージは完了後にお送りください",
+      contextChecking: "現在のモデルのコンテキストウィンドウを確認しています…",
+      contextCompacting: "会話が長いため、履歴を圧縮しています…",
+      waitingForModel: "コンテキストの準備が完了し、モデルの応答を待っています…",
+      modelWindowReduced:
+        "ウィンドウが小さいモデル（{{window}}）に切り替えました。この会話の使用量は約 {{percent}}% で、次のメッセージは圧縮が必要になる場合があります。",
+      contextWillCompactOnSend: "この会話は新しいモデルの推奨範囲を超えています。送信前に履歴を圧縮します。",
+      currentMessageTooLarge:
+        "このメッセージまたは添付ファイル自体がモデルのウィンドウを超えています。内容を短縮する、添付を減らす、またはより大きいウィンドウのモデルを選択してください。",
+      compactionTimedOut:
+        "履歴の圧縮がタイムアウトし、メッセージはモデルに送信されていません。再試行、新しいチャットの開始、またはより大きいウィンドウのモデルへの切り替えができます。",
+      compactionFailedFallback: "圧縮に失敗しました。古い履歴を縮小して続行します。今回のラウンドでは一部の古いコンテキストが欠落する場合があります。",
+      contextRejected: "モデルは現在のコンテキストを受け付けられません。チャットを圧縮する、新しいチャットを開始する、またはより大きいウィンドウのモデルを選択してください。",
+      sendAlreadyRunning: "このメッセージはまだ処理中です。現在のリクエストを停止するか、テキストのみのメッセージをキューに追加できます。",
+      sendStateRecovered: "無効な送信状態を検出し、復旧しました。もう一度送信してください。",
+      agentUnavailable: "このチャットに利用できるアシスタントがありません。選択して再試行してください。メッセージは保持されています。",
+      queuedText: "メッセージをキューに入れました。現在のターン後に送信されます",
+      queuedAttachmentBlocked: "現在のターンはまだ実行中です。添付ファイルや複数画像を含むメッセージはキューに入りません。完了後に送信してください。",
+      contextUsageEstimate: "推定",
+      contextUsagePercentEstimate: "コンテキスト使用量の推定 {{percent}}%",
       assistantReplyStarting: "処理中…",
       queueBadgeLabel: "キュー中メッセージ",
       queueBadgeQueued: "キュー中",

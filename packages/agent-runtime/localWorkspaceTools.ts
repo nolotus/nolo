@@ -39,6 +39,7 @@ async function readRootGitignorePatterns(workspaceRoot: string): Promise<string[
   return readRootGitignorePatternList(workspaceRoot);
 }
 import { getProcessRegistry, toProcessTaskView } from "./processRegistry";
+import { buildProcessTaskResultCapsule, type ProcessTaskResultCapsule } from "./processTaskResult";
 import { readProcessOwner } from "./processOwnership";
 import {
   formatTaskLogsContent,
@@ -1866,6 +1867,94 @@ async function execShellTool(args: {
   );
 }
 
+/**
+ * P1 wake-safety backpressure fix: per-stream capture for the launchProcess
+ * drain. Spawn attaches continuous data handlers, so a chatty child (dev
+ * server, test run) can never fill the 64KB OS pipe buffer and wedge itself.
+ * The capture keeps TWO things at once:
+ *   (a) a bounded tail ring whose text becomes the capsule's inline
+ *       stdout/stderr (the recent state of the log); and
+ *   (b) from the first ring eviction on, the stream's FULL output (bounded,
+ *       head-preserving) — so the close-time spill via
+ *       buildProcessTaskResultCapsule is the actual process output, not
+ *       just the surviving 64KB tail that a plain ring would leave behind.
+ * Real char/line totals are counted from the original stream as chunks
+ * arrive, so capsule.truncated and the spill metadata stay truthful even
+ * when (b) hits its bound.
+ */
+const LAUNCH_PROCESS_STREAM_RING_CHARS = 65_536;
+const LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS = 4_000_000;
+
+type LaunchProcessStreamCapture = {
+  push(chunk: string | Buffer): void;
+  /** SPILL source — the full captured text while it fit, else the bounded
+   *  head-preserving prefix once the capture bound was reached. Equals the
+   *  ring text when nothing evicted. NOT the inline-tail source: once the
+   *  capture bound is hit this no longer ends at the process's real tail. */
+  text(): string;
+  /** INLINE-TAIL source — the live ring's current text (the process's actual
+   *  last LAUNCH_PROCESS_STREAM_RING_CHARS bytes), always current. */
+  tailText(): string;
+  /** True when the tail ring evicted earlier data (stream > ring size). */
+  evicted(): boolean;
+  /** Chars in the original stream (never capped by the capture). */
+  totalChars(): number;
+  /** Lines in the original stream (`countLines` convention, never capped). */
+  totalLines(): number;
+};
+
+function createLaunchProcessStreamCapture(): LaunchProcessStreamCapture {
+  let ring = "";
+  // Activated on the first ring eviction; holds the full output from the
+  // snapshot onward, bounded by LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS.
+  let full: string[] | null = null;
+  let capturedChars = 0;
+  let totalChars = 0;
+  let totalNewlines = 0;
+  return {
+    push(chunk: string | Buffer): void {
+      const str = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (!str) return;
+      totalChars += str.length;
+      for (let i = 0; i < str.length; i += 1) {
+        if (str.charCodeAt(i) === 10) totalNewlines += 1;
+      }
+      const combined = ring + str;
+      if (combined.length <= LAUNCH_PROCESS_STREAM_RING_CHARS) {
+        ring = combined;
+        return;
+      }
+      if (full === null) {
+        // First eviction: the ring still holds the complete stream so far,
+        // so snapshot it (plus this chunk) as the base of the full capture.
+        full = [combined];
+        capturedChars = combined.length;
+      } else if (capturedChars < LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS) {
+        const room = LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS - capturedChars;
+        const slice = str.length <= room ? str : str.slice(0, room);
+        full.push(slice);
+        capturedChars += slice.length;
+      }
+      ring = combined.slice(-LAUNCH_PROCESS_STREAM_RING_CHARS);
+    },
+    text(): string {
+      return full === null ? ring : full.join("");
+    },
+    tailText(): string {
+      return ring;
+    },
+    evicted(): boolean {
+      return full !== null;
+    },
+    totalChars(): number {
+      return totalChars;
+    },
+    totalLines(): number {
+      return totalChars > 0 ? totalNewlines + 1 : 0;
+    },
+  };
+}
+
 async function launchProcessTool(args: {
   call: AgentRuntimeToolCallInput;
   workspaceRoot: string;
@@ -1902,6 +1991,20 @@ async function launchProcessTool(args: {
     stdio: ["ignore", "pipe", "pipe"],
     detached,
   });
+
+  // P1 wake-safety backpressure fix: drain both pipes continuously from spawn
+  // into bounded captures. Without this, a chatty process (test run, dev
+  // server banner storm) fills the ~64KB OS pipe buffer, blocks on write,
+  // never exits — and the terminal notice would carry no output at all.
+  // Each capture keeps a tail ring for the inline capsule AND the full
+  // output (bounded) for the close-time spill, so an evicted stream stays
+  // recoverable instead of silently losing its head.
+  const stdoutCapture = createLaunchProcessStreamCapture();
+  const stderrCapture = createLaunchProcessStreamCapture();
+  proc.stdout?.on("data", (chunk: string | Buffer) => stdoutCapture.push(chunk));
+  proc.stderr?.on("data", (chunk: string | Buffer) => stderrCapture.push(chunk));
+  proc.stdout?.on("error", () => {});
+  proc.stderr?.on("error", () => {});
 
   const pid = proc.pid;
   if (typeof pid !== "number") {
@@ -1948,7 +2051,45 @@ async function launchProcessTool(args: {
       (process as any).removeListener("SIGTERM", cleanupChildOnHostSignal);
       (process as any).removeListener("SIGINT", cleanupChildOnHostSignal);
     }
-    registry.markExited(pid, code ?? 1);
+    const exitCode = code ?? 1;
+    // P1: bounded result capsule from the drained captures (exitCode,
+    // duration, stdout/stderr tail, spill ref with the full output when
+    // truncated). Natural exits only — a
+    // user stop already terminaled the record as "stopped" (no capsule), and
+    // markExited is a no-op for non-running statuses, so this never rewrites
+    // a user kill. Wake semantics stay unchanged (notice-only, not-promoted).
+    let capsule: ProcessTaskResultCapsule | undefined;
+    try {
+      capsule = buildProcessTaskResultCapsule({
+        // The full captured output (bounded prefix when the process was
+        // extremely chatty): the module tails it for the inline capsule and
+        // spills it for recovery. Provenance carries the live original-stream
+        // counters so truncated/spill metadata never derives from the ring.
+        stdout: stdoutCapture.text(),
+        stderr: stderrCapture.text(),
+        stdoutTail: stdoutCapture.tailText(),
+        stderrTail: stderrCapture.tailText(),
+        exitCode,
+        // Duration measured from the registry envelope's startedAt (spawn).
+        startedAt: envelope.startedAt,
+        workspaceRoot: args.workspaceRoot,
+        streamProvenance: {
+          stdout: {
+            evicted: stdoutCapture.evicted(),
+            totalChars: stdoutCapture.totalChars(),
+            totalLines: stdoutCapture.totalLines(),
+          },
+          stderr: {
+            evicted: stderrCapture.evicted(),
+            totalChars: stderrCapture.totalChars(),
+            totalLines: stderrCapture.totalLines(),
+          },
+        },
+      });
+    } catch {
+      // Fail-open: a missing capsule must not swallow the terminal event.
+    }
+    registry.markExited(pid, exitCode, capsule);
   });
 
   const activity = extractActivity(parsed);
@@ -1962,6 +2103,13 @@ async function launchProcessTool(args: {
       label,
       status: "running",
       taskId: envelope.taskId,
+      // P0 machine-readable execution state (consistent with the real wake
+      // contract): a real background task from birth, but ambient — its
+      // terminal result rides the next real turn's notice, not an automatic
+      // completion turn.
+      executionState: "background",
+      trackedBackgroundTask: true,
+      completionNotification: "next-turn-notice",
       processLaunch: resultData,
       ...(activity ? { activity } : {}),
     },

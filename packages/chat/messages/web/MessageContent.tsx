@@ -15,7 +15,7 @@ import {
   extractCanvasSnapshotText,
   parseCanvasSnapshotMessage,
 } from "render/canvas/canvasSnapshotParser";
-import type { CompletionFinishReason, MessageErrorMeta } from "../types";
+import type { CompletionFinishReason, MessageErrorMeta, SendErrorAction } from "../types";
 import * as stylex from "@stylexjs/stylex";
 import { messageContentFinishReasonStyles } from "./messageContentFinishReasonStyles";
 import CanvasSnapshotMessage from "render/canvas/CanvasSnapshotMessage";
@@ -37,6 +37,11 @@ type MessageContentProps = {
   errorMeta?: MessageErrorMeta;
   /** 手动重试回调 */
   onRetry?: () => void;
+  /**
+   * 结构化错误卡动作回调（compact-and-retry / new-dialog / switch-model）。
+   * 不传时错误卡按钮渲染为 disabled——调用方（MessageItem）负责实现三个动作。
+   */
+  onAction?: (action: SendErrorAction) => void;
   /** 自动重试进度（UI 展示「自动重试 N/M · Xs」）。 */
   retryProgress?: {
     attempt: number;
@@ -59,6 +64,7 @@ function areMessageContentPropsEqual(
     prev.finishReason === next.finishReason &&
     prev.errorMeta === next.errorMeta &&
     prev.onRetry === next.onRetry &&
+    prev.onAction === next.onAction &&
     prev.retryProgress === next.retryProgress
   );
 }
@@ -74,6 +80,7 @@ export const MessageContent = memo(
     finishReason,
     errorMeta,
     onRetry,
+    onAction,
     retryProgress,
   }: MessageContentProps) => {
     const { t } = useTranslation("chat");
@@ -276,7 +283,7 @@ export const MessageContent = memo(
             </div>
           )}
           {errorMeta ? (
-            <SendErrorCard errorMeta={errorMeta} onRetry={onRetry} />
+            <SendErrorCard errorMeta={errorMeta} onRetry={onRetry} onAction={onAction} />
           ) : (
             renderContent
           )}

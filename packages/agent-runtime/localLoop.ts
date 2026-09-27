@@ -79,7 +79,7 @@ import { planContextUsage } from "../ai/context/retention";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
-import { maybeAutoCompactLocalHistory } from "./localAutoCompaction";
+import { maybeAutoCompactLocalHistory, type LocalAutoCompactionPhase } from "./localAutoCompaction";
 import {
   resolveCompressionTriggerRatio,
   truncateToolOutputForContext,
@@ -202,10 +202,15 @@ export type LocalAgentTurnInput = {
    */
   observationBoundary?: LocalLoopObservationBoundary;
   /**
-   * 单次 provider.complete 的可选硬超时。
-   * 未设置时：若本回合传了 timeoutMs 则继承之；否则不限时（coding loop 常跑很久，禁止默认 120s 杀请求）。
+   * 单次 provider.complete 的可选空闲超时（idle 语义：距上一次 delta/事件
+   * 的最长静默期，不是整请求总时长）。未设置时：若本回合传了 timeoutMs 则继承
+   * 之；否则取运行层默认 `DEFAULT_LLM_REQUEST_TIMEOUT_MS`（10 分钟静默无输出
+   * 即放弃，兜底“请求挂起、用户无反馈”）。持续吐字的长流式生成不会被误杀；
+   * 确需更宽/关闭时限的调用方请显式传入本字段（当前未提供“不限时”语义）。
    */
   llmRequestTimeoutMs?: number;
+  /** Summary-provider deadline; runtime default is 60 seconds. */
+  compactionTimeoutMs?: number;
   /**
    * 协作式停止（用户按 Esc 等）。在轮次边界和每个工具执行前检查，并与
    * provider.complete race。provider 没有取消契约，在途请求会被放弃而不是
@@ -405,6 +410,15 @@ function emitLoopEvent(
 }
 
 const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
+/**
+ * 默认空闲超时（idle 语义）：单次 provider.complete 连续 10 分钟没有任何
+ * delta / 工具事件才放弃。语义是「静默期」不是「总时长」——长流式生成只要
+ * 还在输出就会不断重置计时（见 abortableKernel 的 idleWatchdog），因此不会
+ * 被 10 分钟一刀切掉。历史事故：用户看到「模型在 10 分钟内没有响应」而实际
+ * 是在生成，导致重复发送付费请求。
+ */
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
 
 export const LOCAL_TURN_ABORTED_CODE = "LOCAL_TURN_ABORTED";
 
@@ -442,10 +456,13 @@ async function runAbortableToolTask<T>(
   throw buildAbortedError();
 }
 
-function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number | undefined {
+function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number {
   const raw = input.llmRequestTimeoutMs ?? input.timeoutMs;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
-  return raw;
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+}
+function resolveCompactionTimeoutMs(input: LocalAgentTurnInput): number {
+  const raw = input.compactionTimeoutMs;
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_COMPACTION_TIMEOUT_MS;
 }
 
 async function runCompleteWithTimeout(args: {
@@ -454,6 +471,12 @@ async function runCompleteWithTimeout(args: {
   options: Record<string, unknown>;
   /** 未设置 = 不硬超时，等 provider 自然结束。 */
   timeoutMs?: number;
+  /**
+   * idle 计时源（见 abortableKernel.RunAbortableArgs.activityVersion）：每次
+   * delta / 工具事件到达时 +1，把 timeoutMs 从「整请求总时长」变成「距上一
+   * 次输出的最长静默期」。不传 = 旧的总时长语义。
+   */
+  activityVersion?: () => number;
   round: number;
   input: LocalAgentTurnInput;
   boundary: LocalLoopObservationBoundary;
@@ -487,6 +510,7 @@ async function runCompleteWithTimeout(args: {
       const outcome = await runAbortableWithTimeout({
         task: complete,
         timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
+        activityVersion: args.activityVersion,
         abortSignal: input.abortSignal,
         runtime: input.effectRuntime,
       });
@@ -499,7 +523,7 @@ async function runCompleteWithTimeout(args: {
         // provider.complete has no cancellation contract. Retrying here would leave
         // the timed-out CLI process alive and start a duplicate invocation.
         const timeoutError = new Error(
-          `LLM request timed out after ${timeoutMs}ms (round ${round})`,
+          `LLM request timed out after ${timeoutMs}ms without new output (idle window, round ${round})`,
         ) as Error & { code?: string };
         timeoutError.code = LLM_REQUEST_TIMEOUT;
         throw timeoutError;
@@ -1647,6 +1671,17 @@ export async function runLocalAgentTurn(
   // 发射的是：保护缺口（adapter 缺方法 / 摘要读取失败，任何规模）与
   // 「接近预算线」的 below-trigger（估算 ≥ 50% 预算——正是排查
   // 「为什么没压缩」需要的那一段轨迹）。
+  const emitCompactionPhase = (phase: LocalAutoCompactionPhase, scope: "initial" | "in-loop") => {
+    const atMs = Date.now();
+    if (phase.kind === "validating-context") emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "validating-context", atMs, compactionScope: scope });
+    else if (phase.kind === "compaction-start") {
+      emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "compacting", atMs, compactionScope: scope });
+      emitLoopEvent(observationBoundary, { kind: "compaction-start", atMs, scope });
+    } else if (phase.kind === "waiting-provider") emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "waiting-provider", atMs, compactionScope: scope });
+    else if (phase.kind === "compaction-end") emitLoopEvent(observationBoundary, { kind: "compaction-end", atMs, scope });
+    else emitLoopEvent(observationBoundary, { kind: "compaction-failed", atMs, scope, reason: phase.reason });
+  };
+
   const emitCompactionObservation = (
     compacted: Awaited<ReturnType<typeof maybeAutoCompactLocalHistory>>,
   ) => {
@@ -1711,6 +1746,9 @@ export async function runLocalAgentTurn(
       resolveProvider: resolveProviderOnce,
       contextWindow,
       realContextUsagePercent,
+      abortSignal: input.abortSignal,
+      timeoutMs: resolveCompactionTimeoutMs(input),
+      onPhase: (phase) => emitCompactionPhase(phase, "initial"),
     });
     history = compacted.history;
     compactionUsage = compacted.usage;
@@ -1890,6 +1928,9 @@ export async function runLocalAgentTurn(
         resolveProvider: resolveProviderOnce,
         contextWindow,
         ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
+        abortSignal: input.abortSignal,
+        timeoutMs: resolveCompactionTimeoutMs(input),
+        onPhase: (phase) => emitCompactionPhase(phase, "in-loop"),
       });
       if (compacted.usage) {
         compactionUsage = addOutOfBandUsage(compactionUsage, compacted.usage);
@@ -1984,12 +2025,18 @@ export async function runLocalAgentTurn(
       const shouldPassToolEvents = Boolean(
         input.onToolEvent || input.onObservationEvent || input.observationBoundary,
       );
+      // idle 计时源（ctx-overflow-feedback review 修复 1）：本轮 provider 调用
+      // 期间每个 delta / 工具事件到达即 +1，kernel 据此把 llmRequestTimeoutMs
+      // 判成「距上一次输出的最长静默期」而非「整请求总时长」——长流式生成
+      // 只要还在吐字就不会被误杀。只在本来就透传回调（会 streaming）时生效，
+      // 否则 provider 不会回调，读数恒 0，退化为旧的总时长语义。
+      let llmStreamActivity = 0;
 
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
         options: {
-          ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
+          timeoutMs: resolveLlmRequestTimeoutMs(input),
           // 用户取消信号穿进 provider options：providerStreamRetry 据此在
           // 取消后跳过重试，provider 分支（如 antigravity/openai-compatible）
           // 也可把 fetch 绑定到同一信号，实现真正的传输层取消。
@@ -1998,6 +2045,7 @@ export async function runLocalAgentTurn(
           // 归到具体对话而不是 chat-proxy 兜底桶。新对话首轮 id 尚未分配。
           ...(input.continueDialogId ? { dialogId: input.continueDialogId } : {}),
           ...(shouldStreamDeltas ? { onTextDelta: (chunk: string) => {
+            llmStreamActivity += 1;
             partialContent += chunk;
             observationBoundary.emit({
               kind: "text-delta",
@@ -2007,6 +2055,7 @@ export async function runLocalAgentTurn(
             });
           } } : {}),
           ...(shouldStreamReasoning ? { onReasoningDelta: (chunk: string) => {
+            llmStreamActivity += 1;
             observationBoundary.emit({
               kind: "reasoning-delta",
               chunk,
@@ -2015,6 +2064,7 @@ export async function runLocalAgentTurn(
             });
           } } : {}),
           ...(shouldPassToolEvents ? { onToolEvent: (event: LocalAgentToolEvent) => {
+            llmStreamActivity += 1;
             observationBoundary.emit({
               kind: "tool-event",
               event,
@@ -2025,6 +2075,7 @@ export async function runLocalAgentTurn(
           ...(shouldPassToolEvents ? { toolEventRound: round } : {}),
         },
         timeoutMs: resolveLlmRequestTimeoutMs(input),
+        activityVersion: () => llmStreamActivity,
         round,
         input,
         boundary: observationBoundary,

@@ -24,6 +24,9 @@ import { matchContextualFragment } from "../contextualFragment";
 import { extractTextFromContent } from "../extractTextFromContent";
 import ContextualStatusRow from "./ContextualStatusRow";
 import { handleSendMessage } from "../../dialog/dialogSlice";
+import { compactDialogAndRetryAction } from "../../dialog/actions/compactDialogAndRetryAction";
+import { useCreateDialog } from "../../dialog/useCreateDialog";
+import type { SendErrorAction } from "../types";
 
 export type MessageItemProps = {
   message: any;
@@ -108,6 +111,8 @@ export const MessageItem = memo(
     const dispatch = useAppDispatch();
     const currentUserId = useUserId();
     const currentServer = useAppSelector(selectRuntimeCurrentServer);
+    // 「开新对话」错误卡动作：复用 composer 同一条创建+跳转路径。
+    const { createNewDialog } = useCreateDialog();
 
     const {
       content,
@@ -176,6 +181,63 @@ export const MessageItem = memo(
     const handleCloseAgentDialog = useCallback(() => {
       setAgentDialogOpen(false);
     }, []);
+
+    /**
+     * 结构化错误卡动作（ctx-overflow-feedback review 修复 2）。
+     *
+     * 此前 SendErrorCard 渲染出的三枚按钮是端到端死代码：没有任何调用方传
+     * onAction，按钮恒 disabled，errorMeta.actions 也从无生产方设置。现在三个
+     * 动作都落在既有、可复用的路径上，不引入新的后端：
+     *  - compact-and-retry：一个 thunk 完成「就地压缩历史 → 重发失败消息」，
+     *    上下文压回窗口内且不丢用户输入（与文案「压缩并重试」一致）。
+     *  - new-dialog：用同一 agent 开新对话并跳过去（干净上下文，旧对话留档），
+     *    复用 composer 同一条 createDialog + navigate 路径。
+     *  - switch-model：打开 agent 编辑面板（AgentForm）换更大窗口的模型。
+     */
+    const handleErrorAction = useCallback(
+      (action: SendErrorAction) => {
+        if (action === "new-dialog") {
+          void createNewDialog({
+            ...(messageAgentKey ? { agents: [messageAgentKey] } : {}),
+          }).catch((error) => {
+            console.warn("[MessageItem] new-dialog action failed:", error);
+          });
+          return;
+        }
+        if (action === "switch-model") {
+          if (isRobot && robotData) setAgentDialogOpen(true);
+          return;
+        }
+        if (action === "compact-and-retry") {
+          const dialogKey =
+            message?.dialogKey ||
+            (message?.dialogId ? `dialog-${message.dialogId}` : undefined);
+          if (!dialogKey) return;
+          void dispatch(
+            compactDialogAndRetryAction({
+              dialogKey,
+              ...(message?.id ? { retryMessageId: message.id } : {}),
+              ...(messageAgentKey ? { targetAgentKey: messageAgentKey } : {}),
+            })
+          ).catch((error) => {
+            console.warn("[MessageItem] compact-and-retry action failed:", error);
+          });
+          return;
+        }
+        // "retry" 由卡片自带的重试按钮承载（onRetry），这里不需要重复实现。
+      },
+      [
+        createNewDialog,
+        dispatch,
+        isRobot,
+        message?.dialogId,
+        message?.dialogKey,
+        message?.id,
+        messageAgentKey,
+        robotData,
+        setAgentDialogOpen,
+      ]
+    );
 
     const {
       isTouch,
@@ -253,6 +315,7 @@ export const MessageItem = memo(
               retryProgress={message?.retryProgress}
               errorMeta={errorMeta}
               onRetry={errorMeta?.retryable ? handleRetry : undefined}
+              onAction={errorMeta?.actions?.length ? handleErrorAction : undefined}
             />
           }
           actions={actionsNode}

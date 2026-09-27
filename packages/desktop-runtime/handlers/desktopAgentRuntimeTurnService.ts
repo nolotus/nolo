@@ -8,7 +8,7 @@ import type {
   AgentRuntimeToolResult,
   LocalAgentTurnResult,
 } from "agent-runtime";
-import type { LocalAgentToolEvent } from "agent-runtime/localLoop";
+import type { LocalAgentLoopEvent, LocalAgentToolEvent } from "agent-runtime/localLoop";
 import {
   CHROME_CONNECTOR_TOOL_NAMES,
   type ChromeConnectorToolName,
@@ -200,6 +200,22 @@ type DesktopAgentRuntimeBaseTurnInput = {
    * result.reasoning_content 以供客户端持久化为 thinkContent。
    */
   onReasoningDelta?: (chunk: string) => void;
+  /**
+   * Runtime loop observation callback (turn-phase + compaction start/end).
+   * Forwarded to runLocalAgentTurn; the handler maps these to SSE
+   * `{type:"status"}` frames so the desktop UI shows validating / compacting /
+   * waiting-provider before the first delta — the pre-delta no-feedback window
+   * this fix targets (see executionObservation.ts turn-phase events).
+   */
+  onLoopEvent?: (event: LocalAgentLoopEvent) => void;
+  /**
+   * User stop / dialog disconnect abort. Forwarded to runLocalAgentTurn as
+   * `abortSignal` so an unbounded compaction/LLM wait is cancellable — Stop
+   * must reach the compaction provider call, not only the main request.
+   */
+  signal?: AbortSignal;
+  /** Summary-provider deadline forwarded to runLocalAgentTurn (runtime default is 60s, never infinite). */
+  compactionTimeoutMs?: number;
   /**
    * Internal lineage marker for child dialogs created by agent tools such as
    * startAgentRun. Not exposed through the public HTTP turn handler.
@@ -1134,6 +1150,9 @@ export async function runDesktopTextOnlyAgentRuntimeTurn(
     onTextDelta: input.onTextDelta,
     onToolEvent: input.onToolEvent,
     onReasoningDelta: input.onReasoningDelta,
+    onLoopEvent: input.onLoopEvent,
+    abortSignal: input.signal,
+    compactionTimeoutMs: input.compactionTimeoutMs,
   });
 }
 /**
@@ -1434,6 +1453,9 @@ export async function runDesktopAgentRuntimeTurn(
     onTextDelta: input.onTextDelta,
     onToolEvent: input.onToolEvent,
     onReasoningDelta,
+    onLoopEvent: input.onLoopEvent,
+    abortSignal: input.signal,
+    compactionTimeoutMs: input.compactionTimeoutMs,
   });
 
   // 多轮循环下 provider 末轮的 reasoning_content 可能不全；用累计值补齐。

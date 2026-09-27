@@ -262,7 +262,11 @@ function buildLaunchProcessTool(): OpenAiCompatibleTool {
     function: {
       name: "launchProcess",
       description:
-        "Start a long-running background process (dev server, watcher, REPL) and return immediately with {pid, label, status}. Use listProcesses to inspect or stop it.",
+        "Start a long-running ambient background process (dev server, watcher, REPL) and return immediately with {pid, label, taskId, status}. " +
+        "Real boundaries: this registers a tracked background task, but completion does NOT automatically start a new turn — the process is intentionally notice-only " +
+        "(an exited dev server must not silently burn a model turn). When it reaches a terminal state the bounded result (exitCode, duration, stdout/stderr tail) is recorded and " +
+        "surfaced as a notice injected only on your next real turn in the same conversation. Use listProcesses to inspect, taskWait to block for its terminal state, or taskStop to stop it. " +
+        "For a finite job (tests, builds, batch) whose result must resume the conversation automatically, use execShell with background: true instead.",
       parameters: {
         type: "object",
         properties: {

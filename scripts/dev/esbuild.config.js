@@ -23,6 +23,10 @@ const oauthTokenStoreBrowserStub = join(
   configDir,
   "../../packages/agent-runtime/oauthTokenStore.browser.stub.ts",
 );
+const scopedOAuthTokenStoreBrowserStub = join(
+  configDir,
+  "../../packages/agent-runtime/scopedOAuthTokenStore.browser.stub.ts",
+);
 const clipHeadAndTailBrowserStub = join(
   configDir,
   "../../packages/core/clipHeadAndTail.browser.stub.ts",
@@ -94,6 +98,11 @@ const agentRuntimeBrowserCompatPlugin = {
       if (args.kind === "entry-point") return;
       if (args.path.includes("oauthTokenStore.browser.stub")) return;
       return { path: oauthTokenStoreBrowserStub };
+    });
+    build.onResolve({ filter: /scopedOAuthTokenStore(\.ts)?$/ }, (args) => {
+      if (args.kind === "entry-point") return;
+      if (args.path.includes("scopedOAuthTokenStore.browser.stub")) return;
+      return { path: scopedOAuthTokenStoreBrowserStub };
     });
     // clipHeadAndTail 用 node:fs/path/os 落盘临时日志，不能进 web 构建；
     // 重定向到浏览器 stub（裁剪语义一致，仅去掉临时落盘）。

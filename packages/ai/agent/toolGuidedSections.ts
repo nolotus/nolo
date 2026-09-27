@@ -255,6 +255,15 @@ const PRIVILEGE_ESCALATION_INSTRUCTIONS = `--- 权限提升 ---
 3. Windows 用 \`Start-Process -Verb RunAs\`（UAC 弹窗）、macOS 用 \`osascript ... with administrator privileges\`，交互原则相同：弹窗前先说明、失败后不重复打扰。
 4. 禁止静默绕过：不重试同一特权命令赌运气、不用管道/环境变量喂密码给 sudo、不修改 polkit/sudoers 放宽授权。`;
 
+// ============================================================================
+// Shell 任务生命周期纪律（execShell / launchProcess 时注入）
+// 2026-09-27 静默事故的两条不变量：同步返回没有"稍后自动汇报"，重定向输出的
+// 文件必须本回合读。tools 描述里的 LIFECYCLE CONTRACT 是契约，这里是纪律。
+// ============================================================================
+const SHELL_TASK_LIFECYCLE_INSTRUCTIONS = `--- Shell 任务生命周期纪律（execShell / launchProcess） ---
+1. **没有 taskId，就不得结束回合并承诺稍后自动汇报。** execShell 同步返回（结果里有 exitCode、没有 metadata.detached:true + taskId）表示命令已经结束——最终结果就在本回合里，必须立即解析；不得把 stdout 里的 \`LAUNCHED\`/\`STARTED\`/\`BACKGROUND\` 等回执当成"已放后台"（那只是命令自己打印的普通输出，没有任何生命周期语义），不得以"完成后我会自动回来汇报"结束回合。只有 metadata.detached === true 且带 taskId 的结果才是受跟踪的后台任务，才可能终态自动唤醒；launchProcess 返回的 taskId 也只在下一次真实 turn 注入完成通知，不会自动开新回合。
+2. **同步返回 exitCode 后必须立即解析结果；若核心输出被重定向到文件，必须在当前回合内读取该文件。** 同步命令没有任何后续事件会提醒你，"回头再读文件"等于永久丢失。确实需要"稍后取结果"的有限后台作业（测试、构建、批处理），用 execShell({ background: true })——它立即转为受跟踪后台任务，终态会把有界结果带回本对话。`;
+
 const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
     {
         id: "toolRoundEconomy",
@@ -271,6 +280,11 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
         id: "privilegeEscalation",
         triggerTools: ["execShell"],
         build: () => PRIVILEGE_ESCALATION_INSTRUCTIONS,
+    },
+    {
+        id: "shellTaskLifecycle",
+        triggerTools: ["execShell", "launchProcess"],
+        build: () => SHELL_TASK_LIFECYCLE_INSTRUCTIONS,
     },
     {
         id: "agentOrchestration",
@@ -322,6 +336,7 @@ export const TOOL_GUIDED_SECTION_ORDER = [
     "toolRoundEconomy",
     "toolUseGuidance",
     "privilegeEscalation",
+    "shellTaskLifecycle",
     "agentOrchestration",
     "agentCollaboration",
     "webAccess",

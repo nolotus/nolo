@@ -383,6 +383,26 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
       spinner.show(activeLabel);
       options.activityReporter?.(activeLabel);
     },
+    /**
+     * Pre-delta turn phase label (ctx-overflow-feedback batch 3).
+     *
+     * localLoop 在首个 provider delta 之前依次发出 turn-phase 事件
+     * （validating-context → compacting → waiting-provider）；此前 CLI 只有
+     * llm-start 才进入明确 working 状态，压缩期间 spinner 停在通用
+     * working 文案上，用户无法区分「卡在检查上下文 / 压缩 / 等模型」。
+     * 两个显示面（bare CLI 的 spinner 与 TUI 的 dock activityReporter）与
+     * showWorking 走同一条投影，保证两端文案不漂移。
+     */
+    showPhase(phase: "validating-context" | "compacting" | "waiting-provider") {
+      const label =
+        phase === "validating-context"
+          ? t("contextChecking")
+          : phase === "compacting"
+            ? t("contextCompacting")
+            : t("waitingForModel");
+      spinner.show(label);
+      options.activityReporter?.(label);
+    },
     finish(fallbackContent?: string) {
       const flushedThink = flushThinkParser(thinkState);
       thinkState = flushedThink.state;

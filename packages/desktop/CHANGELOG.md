@@ -1,4 +1,18 @@
 
+## 0.140.0-alpha.1
+
+## 0.140.0-alpha.1 (2026-09-27)
+
+### Features
+
+* **agent-runtime:** add OAuth credential account-scoping slice 1 (protocol + pure store) ([b4e30c3](https://github.com/nolotus/bun-nolo/commit/b4e30c3795e89205d4b86d7a489f88f61eb5c3d9))
+* **agent-runtime:** add shell task lifecycle contract, reliable background execShell, and launchProcess output capture ([8a75f94](https://github.com/nolotus/bun-nolo/commit/8a75f94ea099a6fc49aec4d682d1a042e19559c1))
+
+### Bug Fixes
+
+* **chat:** surface context-overflow failures with bounded compaction and recovery actions ([4e25d1f](https://github.com/nolotus/bun-nolo/commit/4e25d1fa0b281cd9d5d0610744350232cb565059))
+
+
 ## 0.139.0-alpha.1
 
 ## 0.139.0-alpha.1 (2026-09-26)

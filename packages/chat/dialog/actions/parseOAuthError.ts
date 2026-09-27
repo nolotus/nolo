@@ -11,16 +11,28 @@
 // - URL scheme 安全白名单：仅放行 http/https，过滤危险 scheme。
 // - 未明确映射 HTTP 状态（如 404/408/409/413/422）仅命中 providerMatch 不误判 auth，回退 unknown 且保持可重试。
 
-import type { SendErrorKind, SendErrorStage } from "../../messages/types";
+import type { SendErrorAction, SendErrorKind, SendErrorStage } from "../../messages/types";
 import { scanValidationDetails } from "core/chat/validationUrl";
+import {
+  CONTEXT_OVERFLOW_ACTIONS,
+  CONTEXT_TOO_LARGE_ACTIONS,
+  isContextOverflowText,
+} from "../../../ai/chat/parseApiError";
 
-export type { SendErrorKind, SendErrorStage };
+export type { SendErrorAction, SendErrorKind, SendErrorStage };
 
 export type ParsedSendError = {
   /** 错误分类 */
   kind: SendErrorKind;
   /** 是否可手动/自动重试 */
   retryable: boolean;
+  /**
+   * 错误卡应渲染的结构化动作（ctx-overflow-feedback review 修复 2）。
+   * 上下文超窗 / 内容过大时才非空；此前没有任何生产方设置该字段，导致
+   * SendErrorCard 的 compact-and-retry / new-dialog / switch-model 三枚按钮
+   * 是端到端死代码。分类与动作表都在 ai/chat/parseApiError（单一真相源）。
+   */
+  actions?: SendErrorAction[];
   /** 发生故障的调用环节（若能判定） */
   stage?: SendErrorStage | string;
   /** 建议用户采取的动作提示 */
@@ -194,9 +206,26 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
       fullErrorText
     );
 
-  if (statusCode === 429) {
+  // 上下文超窗 / 内容过大（review 修复 2）：这两个 kind 必须有结构化 actions
+  // 才会渲染出错误卡按钮——纯文本 actionHint 在窄屏 / 分享场景下不够用。
+  // 判定走共享的 isContextOverflowText（与 ai/chat/parseApiError、local turn
+  // 流分类同一份真相源），fullErrorText 已包含 HTTP body，无需再解析 payload。
+  const isContextOverflow = isContextOverflowText(fullErrorText);
+  let contextActions: SendErrorAction[] | undefined;
+
+  // 上下文分类放在链路最前：超窗错误常带 HTTP 400/413/500 状态码，若让状态码
+  // 先行就会被判成 generic/server，用户失去三个结构化出口。
+  if (isContextOverflow) {
+    kind = "context_overflow";
+    retryable = true;
+    contextActions = [...CONTEXT_OVERFLOW_ACTIONS];
+  } else if (statusCode === 429) {
     kind = "rate_limit";
     retryable = true;
+  } else if (statusCode === 413) {
+    kind = "context_too_large";
+    retryable = true;
+    contextActions = [...CONTEXT_TOO_LARGE_ACTIONS];
   } else if (statusCode === 401 || statusCode === 403 || hasExplicitAuthKeywords) {
     kind = "auth";
     retryable = false;
@@ -270,6 +299,12 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
       case "server":
         parts.push(`服务暂时不可用${status ? ` (HTTP ${status})` : ""}`);
         break;
+      case "context_overflow":
+        parts.push(`上下文超出模型窗口${status ? ` (HTTP ${status})` : ""}`);
+        break;
+      case "context_too_large":
+        parts.push(`请求内容过大${status ? ` (HTTP ${status})` : ""}`);
+        break;
       default:
         parts.push(firstLine.length > 0 ? firstLine : "发送遇到异常");
         break;
@@ -311,6 +346,15 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
       case "rate_limit":
         actionHint = "已达到调用频率或配额限制，请稍候片刻后重试";
         break;
+      case "context_overflow":
+        // 既有文本提示保留（actionHint 不删）；结构化 actions 由 errorMeta.actions 承载。
+        actionHint =
+          "上下文超出模型窗口：可压缩历史后重试、开启新对话，或切换到更大窗口的模型。";
+        break;
+      case "context_too_large":
+        actionHint =
+          "单次请求内容过大：请减少发送的消息、文件或工具结果，或开启新对话、切换模型。";
+        break;
       case "auth":
         actionHint = "请检查账号登录状态或 API 密钥配置";
         break;
@@ -341,6 +385,7 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
       validationUrl: url,
       validationLinkText: text ?? "验证我的账号",
       extraLinks,
+      ...(contextActions ? { actions: contextActions } : {}),
     };
   }
 
@@ -359,6 +404,7 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
     summary,
     extraLinks,
     fallbackText,
+    ...(contextActions ? { actions: contextActions } : {}),
   };
 }
 

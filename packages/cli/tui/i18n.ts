@@ -354,6 +354,35 @@ const STRINGS = {
     en: "Thinking: {0}",
     zh: "思考中：{0}",
   },
+  // --- Pre-delta turn phase labels (ctx-overflow-feedback batch 3) ----------
+  // Rendered on the spinner / activity line while the local runtime checks the
+  // context window, compacts history, or waits for the first model delta —
+  // the previously silent pre-delta window (batch 1/2a 修好 runtime 与 SSE，
+  // 这里补齐 CLI/TUI 的状态行投影)。compacting 行附带可取消提示：Esc /
+  // Ctrl+C 即 abort，语义与 localLoop 的 abortSignal 一致。
+  contextChecking: {
+    en: "Checking this model's context window…",
+    zh: "正在检查当前模型的上下文窗口…",
+  },
+  contextCompacting: {
+    en: "Compacting history… (Esc/Ctrl+C to cancel)",
+    zh: "正在压缩历史记录…（Esc/Ctrl+C 取消）",
+  },
+  waitingForModel: {
+    en: "Waiting for the model…",
+    zh: "正在等待模型响应…",
+  },
+  // --- Local turn deadline failure (single actionable line) -----------------
+  // localLoop 主请求 idle deadline（DEFAULT_LLM_REQUEST_TIMEOUT_MS 兜底或调用方
+  // timeoutMs）到达后抛 code=LLM_REQUEST_TIMEOUT；generic 分支的「修本地
+  // 凭据」文案在这里是错误指引（请求已发出，问题在上游无响应）。
+  // 语义是 idle（静默窗）：{0} 内没有任何新输出才放弃，不是说模型「完全没
+  // 响应」——文案必须与这个语义一致，否则会把正在生成的用户推向重复发送
+  // （2026-10 ctx-overflow-feedback review 修复 1）。
+  llmRequestTimedOut: {
+    en: "No new model output for {0}, so this turn was stopped. Your message was kept. Retry in this conversation, switch to another model, or run /compact first.",
+    zh: "模型已 {0} 没有新输出，本轮已停止等待（可能仍在生成）。你的消息已保留。可在本对话重试、切换到其他模型，或先 /compact 压缩对话。",
+  },
   thinkingTraceLine: {
     en: "✻ Thought for {0}",
     zh: "✻ 思考 {0}",

@@ -40,7 +40,16 @@ export type SendErrorKind =
   | "auth"
   | "rate_limit"
   | "server"
+  | "context_overflow"
+  | "context_too_large"
   | "unknown";
+
+/**
+ * Send-error action affordances the card can render. Mirrors
+ * `ApiErrorAction` in ai/chat/parseApiError so a classified context-overflow
+ * error surfaces compress-and-retry / new-dialog / switch-model / retry.
+ */
+export type SendErrorAction = "compact-and-retry" | "new-dialog" | "switch-model" | "retry";
 
 export type SendErrorStage =
   | "desktop_local_runtime"
@@ -69,6 +78,12 @@ export interface MessageErrorMeta {
   fallbackText?: string;
   /** 原始错误文本 */
   rawError?: string;
+  /**
+   * Actionable affordances the card should render (context overflow /
+   * oversize): compress-and-retry, open a fresh dialog, switch to a
+   * larger-window model, or plain retry. See ai/chat/parseApiError.
+   */
+  actions?: SendErrorAction[];
 }
 
 // ========== Token Usage ==========

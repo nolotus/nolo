@@ -34,6 +34,10 @@ export type DelegatedPayloadMetrics = {
 };
 
 export type AgentExecutionObservationEvent =
+  | { kind: "turn-phase"; phase: "validating-context" | "compacting" | "waiting-provider"; atMs: number; compactionScope?: "initial" | "in-loop" }
+  | { kind: "compaction-start"; atMs: number; scope: "initial" | "in-loop" }
+  | { kind: "compaction-end"; atMs: number; scope: "initial" | "in-loop" }
+  | { kind: "compaction-failed"; atMs: number; scope: "initial" | "in-loop"; reason: "timeout" | "aborted" | "provider-error"; detail?: string }
   | {
       kind: "llm-start";
       round: number;

@@ -2311,6 +2311,7 @@ export function createCursorProvider(
         ...(config.executeTool ? { executeTool: config.executeTool } : {}),
         ...(config.searchWorkspace ? { searchWorkspace: config.searchWorkspace } : {}),
         ...(config.listWorkspaceEntries ? { listWorkspaceEntries: config.listWorkspaceEntries } : {}),
+        ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.onTextDelta ? { onTextDelta: options.onTextDelta } : {}),
         ...(options?.onReasoningDelta
           ? { onReasoningDelta: options.onReasoningDelta }

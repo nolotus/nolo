@@ -12,7 +12,7 @@ import {
   LuChevronUp,
   LuExternalLink,
 } from "react-icons/lu";
-import type { MessageErrorMeta, SendErrorKind } from "../types";
+import type { MessageErrorMeta, SendErrorAction, SendErrorKind } from "../types";
 import { sendErrorCardStyles as styles } from "./sendErrorCardStyles";
 import { withLiteralClass } from "../../web/withLiteralClass";
 
@@ -20,6 +20,8 @@ export interface SendErrorCardProps {
   errorMeta: MessageErrorMeta;
   onRetry?: () => void;
   isRetrying?: boolean;
+  /** Handler for structured context-overflow actions (compact-and-retry / new-dialog / switch-model). */
+  onAction?: (action: SendErrorAction) => void;
 }
 
 const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -28,6 +30,8 @@ const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; cla
   auth: LuShieldAlert,
   rate_limit: LuClock,
   server: LuServerOff,
+  context_overflow: LuCircleAlert,
+  context_too_large: LuCircleAlert,
   unknown: LuCircleAlert,
 };
 
@@ -37,10 +41,20 @@ const KIND_LABELS: Record<SendErrorKind, string> = {
   auth: "认证失败",
   rate_limit: "限流",
   server: "服务异常",
+  context_overflow: "上下文过长",
+  context_too_large: "内容过大",
   unknown: "错误",
 };
 
-export const SendErrorCard = memo(({ errorMeta, onRetry, isRetrying = false }: SendErrorCardProps) => {
+/** Label copy for each actionable affordance (locale keys under sendErrorCard.*). */
+const ACTION_LABELS: Record<SendErrorAction, { key: string; fallback: string }> = {
+  "compact-and-retry": { key: "sendErrorCard.compactAndRetry", fallback: "压缩并重试" },
+  "new-dialog": { key: "sendErrorCard.newDialog", fallback: "开新对话" },
+  "switch-model": { key: "sendErrorCard.switchModel", fallback: "切换模型" },
+  retry: { key: "sendErrorCard.retry", fallback: "重试" },
+};
+
+export const SendErrorCard = memo(({ errorMeta, onRetry, isRetrying = false, onAction }: SendErrorCardProps) => {
   const { t } = useTranslation("chat");
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
@@ -89,6 +103,24 @@ export const SendErrorCard = memo(({ errorMeta, onRetry, isRetrying = false }: S
       </div>
 
       <div {...withLiteralClass("send-error-card__actions", styles.actions)}>
+        {Array.isArray(errorMeta.actions) &&
+          errorMeta.actions
+            .filter((action) => action !== "retry")
+            .map((action) => (
+              <button
+                key={action}
+                type="button"
+                onClick={() => onAction?.(action)}
+                disabled={!onAction || isRetrying}
+                {...withLiteralClass(
+                  `send-error-card__action-btn send-error-card__action-btn--${action}`,
+                  styles.retryButton,
+                )}
+              >
+                {t(ACTION_LABELS[action].key, ACTION_LABELS[action].fallback)}
+              </button>
+            ))}
+
         {errorMeta.retryable && onRetry && (
           <button
             type="button"

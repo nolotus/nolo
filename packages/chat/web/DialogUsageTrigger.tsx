@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Popover } from "render/web/ui/Popover";
 import { useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
-import { getModelContextWindow } from "ai/llm/getModelContextWindow";
+import { resolveAgentContextWindow } from "agent-runtime/devin/devinChannelWindows";
 import { selectCurrentDialogTokens } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
@@ -29,7 +29,9 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
   // 直接拿它算窗口会显示一个和实际运行模型不符的容量。
   const resolvedAgent =
     agent && agentId ? applyBuiltinAgentRuntimeOverride(agentId, agent) : agent;
-  const contextWindow = getModelContextWindow(resolvedAgent?.model || "");
+  // 通道感知的 context window：devin 通道用通道真值表（未登记 id 回落全局表），
+  // 其余通道走全局 MODEL_LOOKUP_MAP。切换小窗口模型后这里会立即反映真实容量。
+  const contextWindow = resolveAgentContextWindow(resolvedAgent ?? {});
 
   const totalTokens = getDialogTokenTotal(
     tokenStats?.inputTokens ?? 0,
@@ -43,19 +45,23 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
         ? getContextWindowUsagePercent(totalTokens, contextWindow)
         : undefined;
 
+  // 百分比来自 token 估算，不是 provider 权威 prompt token，因此显式标注“估算/est.”。
+  const percentLabel = t(
+    "chat:contextUsagePercentEstimate",
+    "估算上下文用量 {{percent}}%",
+    { percent }
+  );
+  const percentEstimate = t("chat:contextUsageEstimate", "est.");
+
   if (typeof percent !== "number" || percent <= 0) return null;
 
   return (
     <DialogTrigger>
       <RACButton
         className="dialog-usage-trigger composer-drawer__mini-progress"
-        aria-label={t("chat:contextUsagePercent", "上下文用量 {{percent}}%", {
-          percent,
-        })}
+        aria-label={percentLabel}
         {...{
-          title: t("chat:contextUsagePercent", "上下文用量 {{percent}}%", {
-            percent,
-          }),
+          title: percentLabel,
         } as any}
       >
         <div className="composer-drawer__mini-progress-track">
@@ -64,7 +70,12 @@ export const DialogUsageTrigger: React.FC<{ usagePercentOverride?: number }> = (
             style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
           />
         </div>
-        <span className="composer-drawer__mini-progress-text">{percent}%</span>
+        <span className="composer-drawer__mini-progress-text">
+          {percent}%
+          <span className="composer-drawer__mini-progress-estimate">
+            {percentEstimate}
+          </span>
+        </span>
       </RACButton>
       <Popover
         placement="top end"
