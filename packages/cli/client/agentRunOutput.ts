@@ -1,5 +1,6 @@
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import type { AgentExecutionObservationEvent } from "../../agent-runtime/executionObservation";
+import { readActionGate } from "../../agent-runtime/actionGate";
 import { createRenderAwareStreamWriter, formatAssistantDisplay, formatAssistantTextForCli } from "./assistantOutput";
 import { STYLE } from "./inlineMarkdown";
 import { createThinkParserState, processThinkChunk, flushThinkParser } from "../../agent-runtime/thinkTagParser";
@@ -162,6 +163,22 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   // keeps the legacy explicit showThinking contract for compatibility.
   const showThinking = !assistantLabelManaged && options.showThinking !== false;
 
+  /**
+   * Attention-first TUI projection: successful editFile execution is machine
+   * work, not transcript content. The dock still shows the active "edit" label
+   * while it runs. Failures, timeouts, non-zero exits, and action gates stay
+   * visible so attention-worthy events never become silent. Bare CLI / jsonl
+   * keep their existing detailed trace contract.
+   */
+  const hidesRoutineTuiToolDetail = (event: LocalAgentToolEvent) => {
+    if (!assistantLabelManaged || event.toolName !== "editFile") return false;
+    if (event.type === "tool-error") return false;
+    if (readActionGate(event.metadata?.actionGate)) return false;
+    if (event.metadata?.timedOut || event.metadata?.failed || event.metadata?.error) return false;
+    if (typeof event.metadata?.exitCode === "number" && event.metadata.exitCode !== 0) return false;
+    return true;
+  };
+
   let streamedAssistantText = false;
   let everStreamedAnyText = false;
   let printedAssistantLabel = false;
@@ -318,7 +335,9 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
         dropPendingTuiProgress();
       }
       renderWriter.flush();
-      formatToolEvent(event);
+      if (!hidesRoutineTuiToolDetail(event)) {
+        formatToolEvent(event);
+      }
       endThinkingPhase();
 
       if (streamedAssistantText) {
@@ -340,6 +359,10 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
     spinner.stop();
     options.activityReporter?.(null);
+
+    if (hidesRoutineTuiToolDetail(event)) {
+      return;
+    }
 
     if (isLiveAgentRunObservation(event, parsedRunEvent)) {
       formatToolEvent.consume?.(event);

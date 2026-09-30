@@ -71,43 +71,25 @@ export type ToolGroupCollapseEntry =
   | { type: string; message?: any };
 
 /**
- * When to auto-collapse a tool group:
- * - Always when a **newer user turn** follows (historical), even if a later
- *   turn is still running — do not re-spin/re-open old batches.
- * - After a **completed** final assistant reply following this group.
- * - Stay open while the final answer after this group is still streaming.
- * - Stay open while this is still the active trailing batch
- *   (`isRunning` / streaming) and nothing after ends the turn.
- * - When the dialog is **idle** with no final reply after tools, collapse so
- *   the UI settles (avoids permanent "running" chrome on stuck turns).
+ * Attention-first presentation contract:
+ *
+ * Tool activity is machine work, not user work. Keep the group collapsed by
+ * default in both active and historical turns; the compact header continues to
+ * expose running / success / failure state and the user can explicitly drill
+ * into the full trajectory at any time.
+ *
+ * This deliberately replaces the old "watch the agent work" contract that kept
+ * the active tool batch expanded until a final assistant reply arrived. As
+ * agents become more autonomous and task volume grows, successful read/edit/
+ * shell activity must not consume attention merely because it is happening.
+ * Interactive approval/decision surfaces are not ordinary tool groups and keep
+ * their dedicated presentation paths.
  */
-export function shouldAutoCollapseToolGroup(args: {
+export function shouldAutoCollapseToolGroup(_args: {
   entries: ToolGroupCollapseEntry[];
   groupIndex: number;
   isRunning: boolean;
   hasStreamingMessage: boolean;
 }): boolean {
-  for (let j = args.groupIndex + 1; j < args.entries.length; j += 1) {
-    const entry = args.entries[j];
-    if (entry.type === "tool-group") {
-      // Later tool batch — keep scanning for a user turn or final reply after it.
-      continue;
-    }
-    if (entry.type !== "single" || !entry.message) continue;
-    const msg = entry.message;
-    if (msg.role === "user") {
-      // A newer user turn started; this group is historical.
-      return true;
-    }
-    if (!hasVisibleAssistantContent(msg)) continue;
-    // Final answer still streaming — keep tools open.
-    if (msg.isStreaming) return false;
-    return true;
-  }
-
-  // No user / completed final reply after this group yet.
-  if (args.isRunning || args.hasStreamingMessage) return false;
-
-  // Turn idle (or stuck without a final answer): fold so status chrome can settle.
   return true;
 }

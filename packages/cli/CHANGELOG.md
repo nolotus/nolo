@@ -1,4 +1,18 @@
 
+## 0.138.0-alpha.1
+
+## 0.138.0-alpha.1 (2026-09-30)
+
+### Features
+
+* **chat:** default tool activity to collapsed attention view ([53b9a6b](https://github.com/nolotus/bun-nolo/commit/53b9a6b24f573d6bc71f6a11d4918eb2e658434c))
+* **tui:** hide successful edit detail from transcript ([c86d97d](https://github.com/nolotus/bun-nolo/commit/c86d97df86dd6a609827d944a42d6f83ef187426))
+
+### Bug Fixes
+
+* **cli:** keep attention-worthy editFile failures and action gates visible ([5bfeb51](https://github.com/nolotus/bun-nolo/commit/5bfeb51215da5721131e17f1a093ca5fcf77ed9f))
+
+
 ## 0.137.0-alpha.4
 
 ## 0.137.0-alpha.4 (2026-09-30)
