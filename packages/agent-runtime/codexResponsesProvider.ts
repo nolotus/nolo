@@ -48,8 +48,16 @@ export { codexStreamFailureStatus, type CodexStreamFailure };
 export const CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
 
-/** Pinned Codex client version used by oh-my-pi / recent Codex CLI wire. */
-export const CODEX_CLIENT_VERSION = "0.154.0";
+/**
+ * Pinned Codex client version used by oh-my-pi / recent Codex CLI wire.
+ *
+ * Upstream gates the `/backend-api/codex/models` whitelist by this value
+ * (verified live 2026-09-30): <0.155 hides gpt-6-sol/gpt-6-luna, <0.159 hides
+ * gpt-6.1-sol — posting those models below the threshold fails with
+ * "model is not supported when using Codex with a ChatGPT account". 0.159.2 is
+ * the current codex-rs release, so bump this when upstream ships newer models.
+ */
+export const CODEX_CLIENT_VERSION = "0.159.2";
 
 /** Official Codex login/request originator (Nolo auth flow uses the same value). */
 export const CODEX_ORIGINATOR = "codex_cli_rs";

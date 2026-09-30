@@ -32,6 +32,7 @@ import {
   resolveQuickChatLaunchSpecialist,
   resolveQuickChatPlaceholderMeta,
   useQuickChatMode,
+  takePendingQuickChatDraft,
   type QuickChatMode,
 } from "./quickChatFlow";
 import { shouldDeferEnterForIme } from "app/utils/ime";
@@ -218,6 +219,11 @@ const QuickChat: React.FC<QuickChatProps> = ({
     [launch]
   );
   const hasLaunchedRef = useRef(false);
+  // 登录回跳后恢复草稿；放在 effect 而非 state 初始化，避免 StrictMode 双调用时读取即清除导致丢失。
+  useEffect(() => {
+    const pending = takePendingQuickChatDraft();
+    if (pending) setDraft(pending);
+  }, []);
   useEffect(() => {
     if (!launchSpecialist || hasLaunchedRef.current) return;
     hasLaunchedRef.current = true;
@@ -329,7 +335,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
     .filter(Boolean)
     .join(" ");
 
-  const showGreeting = !isCompact && surface !== "home-primary";
+  const showGreeting = !isCompact;
 
   if (isRuntimeActive) {
     return (

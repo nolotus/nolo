@@ -69,16 +69,11 @@ const ALL_WIDGETS: WidgetId[] = [
   "surf",
 ];
 
-// 新用户默认可见/排序的 widget。surf 属于“按需主动添加”的 widget：保留在
-// ALL_WIDGETS 里让编辑态 Catalog 仍能添加，但不进入默认布局，也不在 loadState
-// 里对旧 persisted state 自动补齐，避免已有用户无感出现 surf。
+// 新用户默认可见/排序的 widget。保持纯净专注的输入主入口，
+// 默认仅露出轻量的「用量统计」卡片；日历、笔记、表格等依然完整保留在 ALL_WIDGETS
+// 和编辑态 Catalog 中，用户可随时通过「修改」自由添加，老用户的持久化布局完全不受影响。
 const DEFAULT_VISIBLE_WIDGETS: WidgetId[] = [
-  "calendar",
-  "createNote",
-  "createTable",
   "usage",
-  "pricing",
-  "downloadClient",
 ];
 
 // 网格列数上限；对应 WidgetsSection.css 的 grid-template-columns: repeat(6, 1fr)

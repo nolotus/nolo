@@ -25,6 +25,21 @@ export type ChromeConnectorError = Error & {
 };
 
 export const NOLO_CHROME_CONNECTOR_EXTENSION_ID = "ahpdoopadkamnglhlacfjdfnonpjdplg";
+/**
+ * The Gecko id the Firefox (AMO) build reports in `connector_info.extensionId` — it is fixed by
+ * `browser_specific_settings.gecko.id` in the packaged manifest, not by the Chrome key, so it is a
+ * different wire value even though both builds are the same trusted connector. Kept in sync with
+ * `FIREFOX_EXTENSION_ID` in `nativeHostInstall.mjs` (a test asserts it).
+ */
+export const NOLO_FIREFOX_CONNECTOR_EXTENSION_ID = "nolo-browser-connector@nolo.chat";
+/**
+ * Extension ids the desktop client accepts during the handshake: the Chrome store id and the Firefox
+ * Gecko id. Either build is a first-class connector; matching any of them means "the Nolo connector".
+ */
+export const NOLO_CONNECTOR_EXTENSION_IDS: readonly string[] = [
+  NOLO_CHROME_CONNECTOR_EXTENSION_ID,
+  NOLO_FIREFOX_CONNECTOR_EXTENSION_ID,
+];
 export const NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION = "2";
 
 function defaultTokenPath() {
@@ -100,9 +115,19 @@ function parseArguments(raw: string): ChromeConnectorRequestPayload {
 }
 
 function errorPayload(error: unknown) {
+  const code = (error as ChromeConnectorError)?.code ?? "CHROME_CONNECTOR_ERROR";
   return {
-    code: (error as ChromeConnectorError)?.code ?? "CHROME_CONNECTOR_ERROR",
+    code,
     message: toErrorMessage(error),
+    ...(code === "CHROME_CONNECTOR_UNAVAILABLE"
+      ? {
+          hint:
+            "The Nolo Browser Connector is not reachable. It runs inside the user's own Chrome " +
+            "or Firefox — ask the user to open their browser with the Nolo Browser Connector " +
+            "extension enabled, or install it from https://nolo.chat/downloads (Firefox can " +
+            "install the signed .xpi directly), then retry.",
+        }
+      : {}),
     ...((error as ChromeConnectorError)?.details !== undefined
       ? { details: (error as ChromeConnectorError).details }
       : {}),
@@ -271,7 +296,10 @@ export const REQUIRED_CHROME_CONNECTOR_FEATURES: Record<string, string[]> = {
   type: ["compact_observation_v2", "action_gate"],
   press: ["compact_observation_v2", "action_gate"],
   scroll: ["compact_observation_v2"],
-  screenshot: ["browser_debug"],
+  // Both browsers advertise the dedicated `screenshot` feature: Chrome serves it through
+  // Page.captureScreenshot (browser_debug-adjacent) while Firefox falls back to
+  // tabs.captureVisibleTab, so gating on browser_debug would wrongly refuse Firefox.
+  screenshot: ["screenshot"],
   read_console: ["browser_debug"],
   read_network: ["browser_debug"],
   detach: ["browser_debug"],
@@ -290,23 +318,30 @@ export type VerifiedChromeConnectorClient = ChromeConnectorClient & {
 
 export function createVerifiedChromeConnectorClient(args?: {
   client?: ChromeConnectorClient;
+  /** Single-id override kept for older callers; prefer `expectedExtensionIds`. */
   expectedExtensionId?: string;
+  /** Ids the handshake accepts; defaults to every known Nolo connector build (Chrome + Firefox). */
+  expectedExtensionIds?: readonly string[];
 }): VerifiedChromeConnectorClient {
   const client = args?.client ?? createChromeConnectorClient();
-  const expectedExtensionId = args?.expectedExtensionId ?? NOLO_CHROME_CONNECTOR_EXTENSION_ID;
+  const expectedExtensionIds = new Set(
+    args?.expectedExtensionIds ??
+      (args?.expectedExtensionId ? [args.expectedExtensionId] : NOLO_CONNECTOR_EXTENSION_IDS),
+  );
   let verified: Promise<void> | null = null;
   let negotiatedFeatures: string[] = [];
 
   const verify = async () => {
     const connectorInfo = await client.request("connector_info", {});
     const receivedExtensionId = (connectorInfo as { extensionId?: unknown })?.extensionId;
-    if (receivedExtensionId !== expectedExtensionId) {
+    if (typeof receivedExtensionId !== "string" || !expectedExtensionIds.has(receivedExtensionId)) {
+      const expectedList = [...expectedExtensionIds].join(", ");
       throw createConnectorError(
         "CHROME_CONNECTOR_EXTENSION_MISMATCH",
-        `Chrome connector extension id mismatch: expected ${expectedExtensionId}, received ${
+        `Chrome connector extension id mismatch: expected one of ${expectedList}, received ${
           typeof receivedExtensionId === "string" ? receivedExtensionId : "unknown"
         }.`,
-        { expectedExtensionId, receivedExtensionId },
+        { expectedExtensionIds: [...expectedExtensionIds], receivedExtensionId },
       );
     }
     const receivedProtocolVersion = (connectorInfo as { protocolVersion?: unknown })?.protocolVersion;

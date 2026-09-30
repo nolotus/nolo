@@ -49,6 +49,7 @@ export const CONNECTOR_FEATURES = Object.freeze([
   "compact_observation_v2",
   "action_gate",
   "browser_debug",
+  "screenshot",
   "file_upload",
 ]);
 
@@ -61,7 +62,10 @@ const FEATURE_BY_ACTION = Object.freeze({
   type: ["compact_observation_v2"],
   press: ["compact_observation_v2"],
   scroll: ["compact_observation_v2"],
-  screenshot: ["browser_debug"],
+  // screenshot is its own feature because Firefox can capture the visible tab via
+  // tabs.captureVisibleTab even though it has no chrome.debugger. Requiring browser_debug
+  // here would make the desktop refuse screenshot on Firefox before the call is even tried.
+  screenshot: ["screenshot"],
   read_console: ["browser_debug"],
   read_network: ["browser_debug"],
   detach: ["browser_debug"],

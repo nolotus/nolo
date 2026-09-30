@@ -1,6 +1,7 @@
 // 文件路径: packages/chat/messages/web/MessageList.tsx
 
 import * as stylex from "@stylexjs/stylex";
+import { useTranslation } from "react-i18next";
 import React, {
   useRef,
   useLayoutEffect,
@@ -64,9 +65,14 @@ import {
 import { extractCustomId } from "core/prefix";
 import { useAllToolRuns } from "ai/tools/toolRunStore";
 import { LuBrain } from "react-icons/lu";
+import { getSavedMemories } from "../savedMemories";
 import { AssistantReplyPending } from "./AssistantReplyPending";
 import { deriveConversationActivity } from "../../runtime/conversationActivity";
 import { IntermediateNarrationRow } from "./IntermediateNarrationRow";
+import { messageRowSpacing } from "./messageRowSpacing";
+
+/** The pending indicator stands in for the assistant reply that is about to arrive. */
+const PENDING_ASSISTANT_ENTRY = { type: "single", message: { role: "assistant" } };
 import TodoCard from "./TodoCard";
 import { selectLatestConversationTodo } from "../todoState";
 import { selectSystemBuiltinSkills } from "app/settings/settingSlice";
@@ -611,7 +617,10 @@ const MessagesList: React.FC<MessagesListProps> = ({
             // 后台 run 终态系统行：紧凑单行，非用户气泡、非 assistant 消息。
             return (
               <React.Fragment key={entry.key}>
-                <div className="chat-messages__item-wrapper">
+                <div
+                  className="chat-messages__item-wrapper"
+                  data-spacing={messageRowSpacing(renderEntries, entryIndex) ?? undefined}
+                >
                   <MessageRowErrorBoundary>
                     <ChildRunEventRow event={entry.event} />
                   </MessageRowErrorBoundary>
@@ -647,7 +656,10 @@ const MessagesList: React.FC<MessagesListProps> = ({
                 : entry.messages;
             return (
               <React.Fragment key={entry.key}>
-                <div className="chat-messages__item-wrapper">
+                <div
+                  className="chat-messages__item-wrapper"
+                  data-spacing={messageRowSpacing(renderEntries, entryIndex) ?? undefined}
+                >
                   <MessageRowErrorBoundary>
                     <ToolMessageGroup
                       messages={settledMessages}
@@ -690,6 +702,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                     ? "chat-messages__item-wrapper chat-messages__item-wrapper--narration"
                     : "chat-messages__item-wrapper"
                 }
+                data-spacing={messageRowSpacing(renderEntries, entryIndex) ?? undefined}
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
@@ -721,7 +734,17 @@ const MessagesList: React.FC<MessagesListProps> = ({
           conversationActivity.kind === "compacting" ||
           conversationActivity.kind === "waiting-provider"
         ) && (
-          <div className="chat-messages__item-wrapper chat-messages__item-wrapper--pending">
+          <div
+            className="chat-messages__item-wrapper chat-messages__item-wrapper--pending"
+            data-spacing={
+              renderEntries.length > 0
+                ? messageRowSpacing(
+                    [renderEntries[renderEntries.length - 1]!, PENDING_ASSISTANT_ENTRY],
+                    1,
+                  ) ?? undefined
+                : undefined
+            }
+          >
             <AssistantReplyPending activity={conversationActivity} />
           </div>
         )}
@@ -762,115 +785,57 @@ const MessagesList: React.FC<MessagesListProps> = ({
 
 // ========== Memory Saved Indicator Components & Utilities ==========
 
-export interface SavedMemoryItem {
-  content: string;
-  sourceKind: "explicit-user-directive" | "agent-tool" | "inferred-understanding";
-  visibility?: "private" | "shared" | "public";
-  id?: string;
-  dbKey?: string;
-}
-
-const isSavedMemorySourceKind = (value: unknown): value is SavedMemoryItem["sourceKind"] =>
-  value === "explicit-user-directive" ||
-  value === "agent-tool" ||
-  value === "inferred-understanding" ||
-  value === "dialog-learning";
-
-export function getSavedMemories(dialogConfig: any): SavedMemoryItem[] {
-  if (!dialogConfig) return [];
-  const list: any[] = [];
-  
-  const collect = (arr: any, fromSavedMemories = false) => {
-    if (Array.isArray(arr)) {
-      if (fromSavedMemories) {
-        list.push(...arr.map((item) => {
-          if (item && typeof item === "object") {
-            return { ...item, type: item.type || "memory.saved" };
-          }
-          return item;
-        }));
-      } else {
-        list.push(...arr);
-      }
-    }
-  };
-
-  collect(dialogConfig.memoryEvents);
-  collect(dialogConfig.artifacts);
-  collect(dialogConfig.savedMemories, true);
-
-  const checkpoint = dialogConfig.runtimeCheckpoint;
-  if (checkpoint && typeof checkpoint === "object") {
-    collect(checkpoint.memoryEvents);
-    collect(checkpoint.artifacts);
-    collect(checkpoint.savedMemories, true);
-  }
-
-  const result: SavedMemoryItem[] = [];
-  const seenContent = new Set<string>();
-
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-
-    if (item.type !== "memory.saved") continue;
-
-    if (typeof item.content !== "string") continue;
-    const content = item.content.trim();
-    if (!content) continue;
-
-    const sourceKind = item.sourceKind;
-    if (typeof sourceKind !== "string") continue;
-
-    const lowerSourceKind = sourceKind.toLowerCase();
-
-    if (
-      lowerSourceKind.includes("inferred") || 
-      lowerSourceKind.includes("understanding") || 
-      lowerSourceKind === "inferred-understanding"
-    ) {
-      continue;
-    }
-    
-    if (lowerSourceKind !== "explicit-user-directive" && lowerSourceKind !== "agent-tool") {
-      continue;
-    }
-
-    const normalized = content.toLowerCase().replace(/[\s\p{P}]/gu, "");
-    if (!seenContent.has(normalized)) {
-      seenContent.add(normalized);
-      result.push({
-        content,
-        sourceKind: lowerSourceKind as SavedMemoryItem["sourceKind"],
-        visibility: item.visibility || "private",
-        ...(typeof item.id === "string" && item.id ? { id: item.id } : {}),
-        ...(typeof item.dbKey === "string" && item.dbKey
-          ? { dbKey: item.dbKey }
-          : {}),
-      });
-    }
-  }
-
-  return result;
-}
+const MEMORY_COLLAPSED_LIMIT = 3;
 
 export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogConfig }) => {
+  const { t } = useTranslation("chat");
+  const [expanded, setExpanded] = useState(false);
   const memories = getSavedMemories(dialogConfig);
   if (memories.length === 0) return null;
+
+  const kindLabels: Record<string, string> = {
+    procedural: t("memoryKindProcedural", "流程"),
+    episodic: t("memoryKindEpisodic", "事件"),
+    semantic: t("memoryKindSemantic", "事实"),
+  };
+  const visibilityLabels: Record<string, string> = {
+    shared: t("memoryVisibilityShared", "共享"),
+    public: t("memoryVisibilityPublic", "公开"),
+  };
+
+  const collapsible = memories.length > MEMORY_COLLAPSED_LIMIT;
+  const visible =
+    collapsible && !expanded ? memories.slice(-MEMORY_COLLAPSED_LIMIT) : memories;
+  const lastIndex = visible.length - 1;
 
   return (
     <div
       {...withLiteralClass("memory-saved-container", styles.memorySavedContainer)}
       data-testid="memory-saved-container"
     >
-      {memories.map((mem) => {
+      {visible.map((mem, index) => {
         const isExplicit = mem.sourceKind === "explicit-user-directive";
-        const prefix = isExplicit ? "已保存记忆" : "助手已保存记忆";
+        const prefix = isExplicit
+          ? t("memorySaved", "Memory saved")
+          : t("memorySavedByAssistant", "Memory saved by assistant");
         // Content is unique after getSavedMemories dedupe; prefer explicit id if present.
         const memoryKey = mem.id ?? mem.dbKey ?? `${mem.sourceKind}:${mem.content}`;
+        const tags: string[] = [];
+        const kindLabel = mem.kind ? kindLabels[mem.kind] : undefined;
+        if (kindLabel) tags.push(kindLabel);
+        const visLabel =
+          mem.visibility && mem.visibility !== "private"
+            ? visibilityLabels[mem.visibility]
+            : undefined;
+        if (visLabel) tags.push(visLabel);
         return (
           <div
             key={memoryKey}
-            {...withLiteralClass("memory-saved-item", styles.memorySavedItem)}
+            {...withLiteralClass(
+              "memory-saved-item",
+              styles.memorySavedItem,
+              index === lastIndex && styles.memorySavedItemNew,
+            )}
             data-testid="memory-saved-item"
           >
             <span
@@ -890,9 +855,36 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
             >
               {mem.content}
             </span>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                {...withLiteralClass("memory-saved-tag", styles.memorySavedTag)}
+                data-testid="memory-saved-tag"
+              >
+                {tag}
+              </span>
+            ))}
           </div>
         );
       })}
+      {collapsible && (
+        <button
+          type="button"
+          {...withLiteralClass("memory-saved-toggle", styles.memorySavedToggle)}
+          data-testid="memory-saved-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t("memoryCollapse", "收起")
+            : String(
+                t("memoryShowAll", {
+                  defaultValue: "查看全部 {{count}} 条记忆",
+                  count: memories.length,
+                }),
+              ).replace("{{count}}", String(memories.length))}
+        </button>
+      )}
     </div>
   );
 };

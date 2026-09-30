@@ -166,6 +166,7 @@ export const ThinkingSection = memo(
                       nodes={slate}
                       renderText={(text) => text}
                       cursor={null}
+                      isStreaming={thinkingLive}
                     />
                   </div>
                 </div>

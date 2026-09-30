@@ -41,7 +41,12 @@ const oauthModel = ({ name, displayName, contextWindow, thinkingMode, maxOutputT
 });
 
 export const anthropicOAuthModels: Model[] = [
-  // 5 代（1M + Adaptive thinking always-on；官方 max output 128k）
+  // 5 代与 5.5 代（1M + Adaptive thinking always-on；官方 max output 128k）
+  oauthModel({ name: "claude-opus-5-5", displayName: "Claude Opus 5.5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
+  // Claude Sonnet 5.5（2026-09-28 发布）：官方规格 1M + Adaptive thinking + max output 128k。
+  // 注意该模型对非默认 temperature/top_p/top_k 直接 400——nolo 的 anthropicAdapter
+  // 不传采样参数，不受影响。
+  oauthModel({ name: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-fable-5", displayName: "Claude Fable 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-opus-5", displayName: "Claude Opus 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-sonnet-5", displayName: "Claude Sonnet 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
@@ -56,6 +61,13 @@ export const anthropicOAuthModels: Model[] = [
   // haiku-4-5（官方明确 context=200k + Extended thinking）
   oauthModel({ name: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", contextWindow: 200_000, thinkingMode: "extended" }),
 ];
+
+/** Published max output for a table model; undefined when not published (4.x). */
+export function anthropicOAuthModelMaxOutputTokens(model: string | undefined): number | undefined {
+  if (!model) return undefined;
+  const found = anthropicOAuthModels.find((m) => m.name === model);
+  return typeof found?.maxOutputTokens === "number" ? found.maxOutputTokens : undefined;
+}
 
 const OAUTH_MODEL_THINKING_MODE = new Map(
   anthropicOAuthModels.map((m) => [m.name, m.thinkingMode]),

@@ -4,6 +4,7 @@ import { read } from "database/dbSlice";
 import { AppDispatch } from "app/store";
 import { slateToText } from "create/editor/transforms/slateToText";
 import { slateToSimplifiedMarkdown } from "create/editor/transforms/slateToSimplifiedMarkdown";
+import { resolvePageReadMarkdown } from "ai/tools/readDocTool";
 import { extractCategorizedMentions } from "create/editor/utils/slateUtils";
 import { DialogConfig } from "app/types";
 import { DataType } from "create/types";
@@ -330,7 +331,15 @@ const fetchSlateReference = async (
   dispatch: AppDispatch,
   options: FetchOptions
 ): Promise<string | null> => {
-  if (!refContent?.slateData) return null;
+  const hasSlate =
+    Array.isArray(refContent?.slateData) && refContent.slateData.length > 0;
+  // Legacy content-only documents (pre-slateData) must not vanish from
+  // references. Same boundary as the read tools: slate wins when present,
+  // content is only a compatibility fallback (see resolvePageReadMarkdown).
+  const legacyContent = hasSlate
+    ? null
+    : resolvePageReadMarkdown(refContent).trim() || null;
+  if (!hasSlate && !legacyContent) return null;
 
   const title = refContent.title || `Untitled (${dbKey})`;
   let contentString: string;
@@ -338,7 +347,10 @@ const fetchSlateReference = async (
   const inlineMentionMeta =
     options.inlineMentionMeta ?? options.format === "simplified_markdown";
 
-  switch (options.format) {
+  if (legacyContent) {
+    contentType = "Markdown (legacy content)";
+    contentString = legacyContent;
+  } else switch (options.format) {
     case "text":
       contentType = "Plain Text";
       contentString = slateToText(refContent.slateData);

@@ -18,7 +18,7 @@ import {
   checkForCliUpdate,
   runSelfUpdateDetailed,
 } from "../updateCommands";
-import { spawnProcess } from "../processSpawn";
+import { resolveDefaultSpawn, spawnProcess } from "../processSpawn";
 import { runConfirmDialog } from "./confirmDialog";
 import { type SelectDialogItem } from "./selectDialog";
 import { createDialogHost } from "./dialogHost";
@@ -238,6 +238,8 @@ import {
   leaveAltScreen,
   type FixedInputController,
 } from "./tuiRawInput";
+import { isRendererSuspended } from "./suspendedRenderer";
+import { createRendererSink } from "./rendererSink";
 
 /**
  * Alternate-screen restore for non-normal exit paths.
@@ -531,10 +533,30 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     });
   const readImage = options.clipboardImageReader ?? readClipboardImage;
   const selfUpdater: SelfUpdater =
-    options.selfUpdater ?? ((target) => runSelfUpdateDetailed({
-      output: target,
-      env: options.env ?? process.env,
-    }));
+    options.selfUpdater ?? (async () => {
+      // Route update output through the renderer channel, not the raw TTY:
+      // the passed-in `output` IS process.stdout, and writing to it directly
+      // smears across the composer on the next repaint. The sink buffers to
+      // line boundaries and emits via emitCommandOutput (history + repaint).
+      // `emitCommandOutput` is declared below but only invoked at call time.
+      const sink = createRendererSink((line) => emitCommandOutput(line));
+      try {
+        return await runSelfUpdateDetailed({
+          output: sink,
+          env: options.env ?? process.env,
+          // Spawn seam for tests: production keeps resolveDefaultSpawn()
+          // (Bun.spawn); readlineWorkspace's own spawnRunner is a different
+          // shape and deliberately not reused here.
+          spawn: options.selfUpdateSpawn ?? resolveDefaultSpawn(),
+        });
+      } finally {
+        // runSelfUpdateDetailed never ends caller-supplied streams, so the
+        // sink's final() hook (which flushes any tail line lacking "\n" into
+        // emitCommandOutput) would never run without this. We own the sink,
+        // so ending it here is safe on every path, including throws.
+        sink.end?.();
+      }
+    });
 
   if ((output as { isTTY?: boolean }).isTTY) {
     // Enter the alternate screen first so the TUI owns a private buffer.
@@ -666,7 +688,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 在憋 tool_call」「tool-result 到下一轮」这些此前全黑的空窗。
   const activityIndicator = createActivityIndicator({
     isTurnActive: () => activeTurnAbort !== null,
-    fallbackLabel: () => `${state.agentName} -> working`,
+    fallbackLabel: () => t("workingFallback"),
     stoppingLabel: () => t("turnStopping"),
     onRepaint: () => {
       if (fixedInput.active && !fixedInput.isPaused()) {
@@ -773,6 +795,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     },
     inputPolicy: { wheel: "modal", pageKeys: "transcript" },
     renderUnderlay: () => {
+      // While a handoff subprocess owns the terminal (withSuspendedRenderer),
+      // a resize lands here via dialogHost.repaint — painting the underlay
+      // would inject TUI bytes into the child's screen. Drop it; the resume
+      // path repaints in full.
+      if (isRendererSuspended(output)) return;
       renderHistoryUnderDialog();
       fixedInput.repaint(buffer, cursorPos);
     },
@@ -2247,8 +2274,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/switch" ||
             busySlashCommand === "/theme" ||
             busySlashCommand === "/runtime" ||
-            busySlashCommand === "/tools" ||
-            busySlashCommand === "/thinking" ||
+            busySlashCommand === "/logs" ||
             busySlashCommand === "/auto" ||
             busySlashCommand === "/tasks" ||
             busySlashCommand === "/jobs" ||

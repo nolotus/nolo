@@ -7,7 +7,6 @@
           --ws-text: var(--text, #000);
           --ws-text-sub: var(--textSecondary, #666);
           --ws-border: var(--border, #e5e5e5);
-          --ws-radius: 24px;
 
           padding: 56px 0 80px;
           max-width: var(--home-content-max-width, 1040px);
@@ -76,7 +75,7 @@
   display: inline-flex;
   margin-bottom: 12px;
   color: var(--primary, #1677ff);
-  font-size: 0.75rem;
+  font-size: var(--type-micro);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -85,7 +84,7 @@
 .ws-section-title {
   margin: 0 0 12px;
   color: var(--ws-text);
-  font-size: 1.9rem;
+  font-size: var(--type-h2);
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.03em;
@@ -94,7 +93,7 @@
 .ws-section-desc {
   margin: 0;
   color: var(--ws-text-sub);
-  font-size: 1.05rem;
+  font-size: var(--type-lead);
   line-height: 1.65;
 }
 
@@ -109,11 +108,11 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ws-faq-item {
-  border-radius: var(--ws-radius, 24px);
+  border-radius: var(--radius-md);
   border: 1px solid var(--borderLight, #e5e5e5);
   background: var(--background);
   box-shadow: 0 10px 24px -22px var(--shadowMedium);
@@ -136,15 +135,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 22px;
+  padding: 20px 24px;
   border: 0;
   background: transparent;
   cursor: pointer;
   text-align: left;
   color: var(--ws-text);
   font: inherit;
-  font-size: 1.05rem;
-  font-weight: 650;
+  font-size: var(--type-lead);
+  font-weight: 600;
   line-height: 1.4;
   letter-spacing: -0.01em;
 }
@@ -179,10 +178,10 @@
 }
 
 .ws-faq-panel p {
-  padding: 0 22px 20px;
+  padding: 0 24px 20px;
   margin: 0;
   color: var(--ws-text-sub);
-  font-size: 0.95rem;
+  font-size: var(--type-body);
   line-height: 1.65;
 }
 
@@ -214,7 +213,7 @@
         /* === Generic Card Styles === */
         .ws-card {
           background: var(--ws-bg-sub);
-          border-radius: var(--ws-radius);
+          border-radius: var(--radius-md);
           padding: 8px; /* Inner padding for the "frame" look */
           transition: transform 0.4s ease, box-shadow 0.4s ease;
           border: 1px solid transparent;
@@ -230,7 +229,7 @@
 
         .ws-card-visual {
           background: var(--ws-bg);
-          border-radius: 18px;
+          border-radius: var(--radius-sm);
           height: 280px;
           width: 100%;
           position: relative;
@@ -249,8 +248,8 @@
         }
 
 .ws-card-text { padding: 0 24px 24px; text-align: left; }
-.ws-card-text h3 { font-size: 1.4rem; margin: 0 0 8px; color: var(--textHeading, var(--ws-text)); letter-spacing: -0.02em; }
-.ws-card-text p { font-size: 1rem; margin: 0; color: var(--ws-text-sub); line-height: 1.5; }
+.ws-card-text h3 { font-size: var(--type-h3); margin: 0 0 8px; color: var(--textHeading, var(--ws-text)); letter-spacing: -0.02em; }
+.ws-card-text p { font-size: var(--type-body); margin: 0; color: var(--ws-text-sub); line-height: 1.5; }
 
 /* === Card 1: Context Pipeline === */
 .ws-flow-pipeline {
@@ -259,8 +258,8 @@
         .ws-input-zone { display: flex; align-items: center; gap: 8px; z-index: 2; }
         .ws-file-pill {
           background: var(--ws-bg); border: 1px solid var(--ws-border);
-          padding: 6px 12px; border-radius: 8px; font-size: 0.8125rem;
-          display: flex; gap: 6px; align-items: center; color: var(--ws-text-sub);
+          padding: 4px 12px; border-radius: var(--radius-xs); font-size: var(--type-caption);
+          display: flex; gap: 8px; align-items: center; color: var(--ws-text-sub);
           box-shadow: 0 4px 12px rgba(0,0,0,0.05);
         }
         .ws-file-pill-rule {
@@ -280,18 +279,18 @@
 
         .ws-output-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; z-index: 2; width: 200px; }
         .ws-ai-badge {
-           color: #06b6d4; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+           color: #06b6d4; font-size: var(--type-micro); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
            display: flex; align-items: center; gap: 4px;
         }
         .ws-chat-bubble {
-          background: #ecfeff; color: #164e63; padding: 12px; border-radius: var(--radius-lg);
-          font-size: var(--fontSize-base); width: 100%; border: 1px solid #cffafe;
+          background: #ecfeff; color: #164e63; padding: 12px; border-radius: var(--radius-md);
+          font-size: var(--type-small); width: 100%; border: 1px solid #cffafe;
           opacity: 0; animation: ws-pop-in 0.5s forwards 1s;
         }
         .ws-memory-replay {
-          margin-top: 2px;
+          margin-top: 4px;
           display: flex;
-          gap: 6px;
+          gap: 8px;
         }
         .ws-memory-step {
           width: 20px;
@@ -300,7 +299,7 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 0.62rem;
+          font-size: var(--type-micro);
           font-weight: 700;
           color: var(--ws-text);
           background: var(--ws-bg);
@@ -343,18 +342,18 @@
           box-shadow: 0 4px 10px rgba(0,0,0,0.15);
         }
         .ws-avatar-name {
-          font-size: 0.58rem; font-weight: 600; color: var(--ws-text-sub);
+          font-size: var(--type-micro); font-weight: 600; color: var(--ws-text-sub);
           line-height: 1; white-space: nowrap;
         }
         /* Pentagon centered via calc — r=55px, visual height 240px, center_y=120px
            All avatars use translateX(-50%) so left = horizontal center of icon.
            Icon center coords: GPT(0,-55) Gemini(+52,-17) Claude(+32,+45) DeepSeek(-32,+45) Kimi(-52,-17)
            top = center_y + dy - 16px (half of 32px icon height) */
-        .pos-gpt      { top: 49px;  left: 50%;             transform: translateX(-50%); animation: ws-float   4s   ease-in-out infinite; }
-        .pos-gemini   { top: 87px;  left: calc(50% + 52px); transform: translateX(-50%); animation: ws-float-b 4.5s ease-in-out infinite 0.3s; }
-        .pos-claude   { top: 149px; left: calc(50% + 32px); transform: translateX(-50%); animation: ws-float-b 5s   ease-in-out infinite 0.8s; }
-        .pos-deepseek { top: 149px; left: calc(50% - 32px); transform: translateX(-50%); animation: ws-float-b 6s   ease-in-out infinite 1.2s; }
-        .pos-kimi     { top: 87px;  left: calc(50% - 52px); transform: translateX(-50%); animation: ws-float-b 5.5s ease-in-out infinite 1.8s; }
+        .pos-gpt      { top: 48px;  left: 50%;             transform: translateX(-50%); animation: ws-float   4s   ease-in-out infinite; }
+        .pos-gemini   { top: 88px;  left: calc(50% + 52px); transform: translateX(-50%); animation: ws-float-b 4.5s ease-in-out infinite 0.3s; }
+        .pos-claude   { top: 148px; left: calc(50% + 32px); transform: translateX(-50%); animation: ws-float-b 5s   ease-in-out infinite 0.8s; }
+        .pos-deepseek { top: 148px; left: calc(50% - 32px); transform: translateX(-50%); animation: ws-float-b 6s   ease-in-out infinite 1.2s; }
+        .pos-kimi     { top: 88px;  left: calc(50% - 52px); transform: translateX(-50%); animation: ws-float-b 5.5s ease-in-out infinite 1.8s; }
 
         .ws-success-dot { width: 16px; height: 16px; background: #10b981; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 
@@ -374,28 +373,28 @@
         .ws-card-create:hover .ws-beam { opacity: 0.3; stroke-dashoffset: -10; }
 
         .ws-bloom-item {
-           position: absolute; display: flex; flex-direction: column; align-items: center; gap: 6px;
+           position: absolute; display: flex; flex-direction: column; align-items: center; gap: 8px;
            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
            opacity: 0.5; transform: scale(0.8);
         }
-        .item-doc { top: 18px; left: calc(50% - 20px); }
-        .item-3d { top: 46px; left: 34px; }
-        .item-web { top: 46px; right: 34px; }
-        .item-image { bottom: 34px; left: 42px; }
-        .item-video { bottom: 34px; right: 42px; }
+        .item-doc { top: 20px; left: calc(50% - 20px); }
+        .item-3d { top: 48px; left: 32px; }
+        .item-web { top: 48px; right: 32px; }
+        .item-image { bottom: 32px; left: 40px; }
+        .item-video { bottom: 32px; right: 40px; }
 
-        .ws-card-create:hover .item-doc { top: 10px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-doc { top: 12px; opacity: 1; transform: scale(1); }
         .ws-card-create:hover .item-3d { top: 36px; left: 24px; opacity: 1; transform: scale(1); }
         .ws-card-create:hover .item-web { top: 36px; right: 24px; opacity: 1; transform: scale(1); }
-        .ws-card-create:hover .item-image { bottom: 24px; left: 30px; opacity: 1; transform: scale(1); }
-        .ws-card-create:hover .item-video { bottom: 24px; right: 30px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-image { bottom: 24px; left: 32px; opacity: 1; transform: scale(1); }
+        .ws-card-create:hover .item-video { bottom: 24px; right: 32px; opacity: 1; transform: scale(1); }
 
         .ws-icon-box {
            width: 40px; height: 40px; background: var(--ws-bg); border: 1px solid var(--ws-border);
-           border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center;
+           border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;
            box-shadow: 0 4px 12px rgba(0,0,0,0.1); color: var(--ws-text);
         }
-        .ws-label-tiny { font-size: 0.75rem; font-weight: 600; color: var(--ws-text-sub); }
+        .ws-label-tiny { font-size: var(--type-micro); font-weight: 600; color: var(--ws-text-sub); }
 
         /* === Card 4: Night Workflow === */
         .ws-visual-night { display: flex; flex-direction: column; justify-content: center; position: relative; }
@@ -403,7 +402,13 @@
         .ws-moon { position: absolute; top: 20px; right: 20px; color: #fefce8; opacity: 0.8; }
         .ws-star { position: absolute; background: white; border-radius: 50%; opacity: 0; animation: ws-twinkle 3s infinite; }
         .s1 { width: 2px; height: 2px; top: 40%; left: 20%; animation-delay: 0s; }
-        .s2 { width: 3px; height: 3px; top: 20%; left: 50%; animation-delay: 1s; }
+        .s2 {
+  width: 3px;
+  height: 3px;
+  top: 20%;
+  left: 50%;
+  animation-delay: 1s;
+}
         .s3 { width: 1px; height: 1px; bottom: 30%; right: 30%; animation-delay: 2s; }
         .ws-dawn-glow {
            position: absolute;
@@ -418,7 +423,7 @@
 
         .ws-workflow-dock {
            display: flex; align-items: center; gap: 8px; z-index: 2;
-           background: rgba(255,255,255,0.05); padding: 16px 24px; border-radius: var(--radius-xl);
+           background: rgba(255,255,255,0.05); padding: 16px 24px; border-radius: var(--radius-md);
            border: 1px solid rgba(255,255,255,0.1);
            backdrop-filter: blur(4px);
         }
@@ -446,7 +451,8 @@
 
         .ws-sleep-badge {
            margin-top: 20px; z-index: 2; display: flex; align-items: center; gap: 8px;
-           color: #94a3b8; font-size: 0.8125rem; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 999px;
+           color: #94a3b8; font-size: var(--type-caption); background: rgba(0,0,0,0.3); padding: 8px 12px;
+           border-radius: 999px;
         }
 
         /* === Animations === */
@@ -502,7 +508,7 @@
   align-items: flex-start;
   gap: 48px;
   padding: 40px 32px;
-  border-radius: var(--ws-radius, 24px);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--primary) 4%, var(--ws-bg));
 }
 
@@ -511,110 +517,50 @@
 }
 
 .ws-builder-bridge-title {
-  font-size: 1.5rem;
+  font-size: var(--type-h2);
   font-weight: 600;
   margin: 8px 0 12px;
   color: var(--ws-text);
 }
 
 .ws-builder-bridge-desc {
-  font-size: 0.9rem;
+  font-size: var(--type-small);
   color: var(--ws-text-sub);
   margin: 0 0 20px;
   line-height: 1.6;
 }
 
 .ws-builder-bridge-cta {
-  font-size: 0.85rem;
-  padding: 10px 22px;
+  font-size: var(--type-small);
+  padding: 12px 24px;
 }
 
 .ws-builder-bridge-caps {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  gap: 16px;
   flex: 1;
 }
 
 .ws-builder-bridge-cap {
-  padding: 18px;
-  border-radius: var(--ws-radius, 24px);
+  padding: 16px;
+  border-radius: var(--radius-md);
   background: var(--ws-bg-sub);
   border: 1px solid var(--ws-border);
 }
 
 .ws-builder-bridge-cap h3 {
-  font-size: 0.92rem;
+  font-size: var(--type-small);
   font-weight: 600;
   margin: 0 0 8px;
   color: var(--ws-text);
 }
 
 .ws-builder-bridge-cap p {
-  font-size: 0.8rem;
+  font-size: var(--type-caption);
   color: var(--ws-text-sub);
   margin: 0;
   line-height: 1.55;
-}
-
-/* === Deliverables (多模态产出) === */
-.ws-deliverables {
-  padding: 32px 0 64px;
-}
-
-.ws-deliverables-head {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.ws-deliverables-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 8px 0 12px;
-  color: var(--ws-text);
-}
-
-.ws-deliverables-desc {
-  font-size: 0.9rem;
-  color: var(--ws-text-sub);
-  margin: 0;
-}
-
-.ws-deliverables-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-}
-
-.ws-deliverable-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 24px 16px;
-  border-radius: var(--ws-radius, 24px);
-  background: var(--ws-bg-sub);
-  border: 1px solid var(--ws-border);
-  transition: transform var(--home-motion-duration) var(--home-motion-ease),
-              border-color var(--home-motion-duration) var(--home-motion-ease);
-}
-
-.ws-deliverable-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--ws-primary);
-}
-
-.ws-deliverable-label {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--ws-text);
-  margin-bottom: 6px;
-}
-
-.ws-deliverable-example {
-  font-size: 0.75rem;
-  color: var(--ws-text-sub);
-  opacity: 0.7;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -625,7 +571,7 @@
 
 /* === 移动端 ===
    必须留在文件末尾：同权重下后写的赢，之前这段放在中间，
-   .ws-builder-bridge / .ws-deliverables-grid 等后定义的规则会把它整段吃掉。
+   .ws-builder-bridge 等后定义的规则会把它整段吃掉。
    hero 相关覆写在 WelcomeSection.hero.css 末尾，orchestration 的在
    WelcomeSection.orchestration.css 末尾（各自文件 import 更晚）。 */
 @media (max-width: 768px) {
@@ -635,14 +581,13 @@
     max-width: 640px;
   }
   .ws-cards-section { margin-bottom: 64px; }
-  .ws-faq-trigger { padding: 18px 16px; }
-  .ws-faq-panel { padding: 0 16px 18px; }
-  .ws-section-title { font-size: 1.55rem; }
+  .ws-faq-trigger { padding: 16px 16px; }
+  .ws-faq-panel { padding: 0 16px 16px; }
+  .ws-section-title { font-size: var(--type-h2); }
   .ws-section--editorial { text-align: center; }
   .ws-section--editorial .ws-faq-head { text-align: center; }
   .ws-section--editorial .ws-builder-cta { align-self: center; }
   .ws-builder-bridge { flex-direction: column; gap: 32px; padding: 32px 0 24px; }
   .ws-builder-bridge-caps { grid-template-columns: 1fr; }
-  .ws-deliverables-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .ws-container { padding: 24px 0 48px; }
 }

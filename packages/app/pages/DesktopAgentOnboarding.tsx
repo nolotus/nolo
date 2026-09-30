@@ -34,7 +34,11 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
           ? { surface: "desktop" }
           : { surface: "desktop", cta: reason },
       );
-      onDismiss();
+      // 只有用户主动点击「暂时跳过」才关闭引导；
+      // 点击具体连接路径不关闭，等待用户真正接入完成，避免中途退出永久丢失入口。
+      if (reason === "skip") {
+        onDismiss();
+      }
     },
     [onDismiss],
   );
@@ -73,52 +77,12 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
 
         <div className="desktop-agent-onboarding__group">
           <p className="desktop-agent-onboarding__group-label">
-            {t("localFirst.onboarding.group.nolo", "用 Nolo · 最快开始")}
-          </p>
-          <div className="desktop-agent-onboarding__options desktop-agent-onboarding__options--nolo">
-            <Link
-              to="/signup"
-              className="desktop-agent-onboarding__option desktop-agent-onboarding__option--primary"
-              data-testid="desktop-onboarding-signup"
-              onClick={() => dismiss("signup")}
-            >
-              <span className="desktop-agent-onboarding__option-body">
-                <span className="desktop-agent-onboarding__option-title">
-                  {t("localFirst.onboarding.path.signup", "注册即用")}
-                </span>
-                <span className="desktop-agent-onboarding__option-hint">
-                  {t("localFirst.onboarding.path.signupHint", "新账号有免费额度，无需配置模型")}
-                </span>
-              </span>
-              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
-            </Link>
-            <Link
-              to="/login"
-              className="desktop-agent-onboarding__option"
-              data-testid="desktop-onboarding-login"
-              onClick={() => dismiss("login")}
-            >
-              <span className="desktop-agent-onboarding__option-body">
-                <span className="desktop-agent-onboarding__option-title">
-                  {t("localFirst.onboarding.path.login", "已有账号，登录 Nolo")}
-                </span>
-                <span className="desktop-agent-onboarding__option-hint">
-                  {t("localFirst.onboarding.path.loginHint", "同步已有助手和额度")}
-                </span>
-              </span>
-              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
-            </Link>
-          </div>
-        </div>
-
-        <div className="desktop-agent-onboarding__group">
-          <p className="desktop-agent-onboarding__group-label">
             {t("localFirst.onboarding.group.byo", "连接我已有的 AI · 本地使用")}
           </p>
           <div className="desktop-agent-onboarding__options desktop-agent-onboarding__options--sources">
             <Link
               to={`${LOCAL_CREATE}?path=membership&access=cli`}
-              className="desktop-agent-onboarding__option"
+              className="desktop-agent-onboarding__option desktop-agent-onboarding__option--primary"
               data-testid="desktop-onboarding-path-cli"
               onClick={() => dismiss("path-cli")}
             >
@@ -160,6 +124,46 @@ const DesktopAgentOnboarding = ({ onDismiss }: DesktopAgentOnboardingProps) => {
                 </span>
                 <span className="desktop-agent-onboarding__option-hint">
                   {t("localFirst.onboarding.path.byoHint", "OpenAI、Ollama、LM Studio、兼容端点")}
+                </span>
+              </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
+            </Link>
+          </div>
+        </div>
+
+        <div className="desktop-agent-onboarding__group">
+          <p className="desktop-agent-onboarding__group-label">
+            {t("localFirst.onboarding.group.nolo", "用 Nolo · 最快开始")}
+          </p>
+          <div className="desktop-agent-onboarding__options desktop-agent-onboarding__options--nolo">
+            <Link
+              to="/signup"
+              className="desktop-agent-onboarding__option"
+              data-testid="desktop-onboarding-signup"
+              onClick={() => dismiss("signup")}
+            >
+              <span className="desktop-agent-onboarding__option-body">
+                <span className="desktop-agent-onboarding__option-title">
+                  {t("localFirst.onboarding.path.signup", "注册即用")}
+                </span>
+                <span className="desktop-agent-onboarding__option-hint">
+                  {t("localFirst.onboarding.path.signupHint", "新账号有免费额度，无需配置模型")}
+                </span>
+              </span>
+              <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>
+            </Link>
+            <Link
+              to="/login"
+              className="desktop-agent-onboarding__option"
+              data-testid="desktop-onboarding-login"
+              onClick={() => dismiss("login")}
+            >
+              <span className="desktop-agent-onboarding__option-body">
+                <span className="desktop-agent-onboarding__option-title">
+                  {t("localFirst.onboarding.path.login", "已有账号，登录 Nolo")}
+                </span>
+                <span className="desktop-agent-onboarding__option-hint">
+                  {t("localFirst.onboarding.path.loginHint", "同步已有助手和额度")}
                 </span>
               </span>
               <span className="desktop-agent-onboarding__arrow" aria-hidden="true">›</span>

@@ -16,6 +16,7 @@ import {
   buildPatch,
   buildRawDataWithUpdateInfo,
   buildUpdateThunkPreviousAgent,
+  calibrateReasoningEffortInPatch,
   extractAgentId,
   fetchAgentByDbKey,
   formatUpdatedAgentOutput,
@@ -81,12 +82,15 @@ export async function updateSelfToolFunc(
   });
 
   const previousAgentForUpdate = buildUpdateThunkPreviousAgent(previousAgent, userId!);
+  const formData = buildPatch(args);
+  // 按模型级真实推理能力校准 effort（不支持则移除，档位不符则吸附）
+  const effortNote = calibrateReasoningEffortInPatch(formData, previousAgent);
   const agent = await thunkApi
     .dispatch(
       updateAgent({
         userId: userId!,
         agentId: extractAgentId(currentAgentKey),
-        formData: buildPatch(args),
+        formData,
         previousAgent: previousAgentForUpdate,
       }),
     )
@@ -103,6 +107,6 @@ export async function updateSelfToolFunc(
       previousAgentForUpdate,
       requestedFields,
     ) as any,
-    displayData: formatUpdatedAgentOutput(agent),
+    displayData: formatUpdatedAgentOutput(agent) + (effortNote ? `\n${effortNote}` : ""),
   };
 }

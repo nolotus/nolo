@@ -6,14 +6,14 @@ import "../chatStylexEscapeHatch.css";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "render/web/ui/Tooltip";
 import {
-  LuLayoutGrid,
-  LuMessageSquare,
-  LuBot,
-  LuFileText,
-  LuTable,
-  LuPaperclip,
-  LuAppWindow,
-} from "react-icons/lu";
+  PiSquaresFour, PiSquaresFourFill,
+  PiChatCircle, PiChatCircleFill,
+  PiRobot, PiRobotFill,
+  PiFileText, PiFileTextFill,
+  PiTable, PiTableFill,
+  PiPaperclip, PiPaperclipFill,
+  PiAppWindow, PiAppWindowFill,
+} from "react-icons/pi";
 import type { IconType } from "react-icons";
 import type { SidebarVisibleType } from "create/space/sidebarVisibleTypes";
 import {
@@ -95,14 +95,15 @@ export const SidebarTypeFilter: React.FC<{
     id: SidebarTypeFilterId;
     label: string;
     Icon: IconType;
+    ActiveIcon: IconType;
   }> = [
-    { id: "all", label: t("all", "全部"), Icon: LuLayoutGrid },
-    { id: "dialog", label: t("sidebarTypes.dialog", "对话"), Icon: LuMessageSquare },
-    { id: "agent", label: t("sidebarTypes.agent", "AI"), Icon: LuBot },
-    { id: "page", label: t("sidebarTypes.page", "页面"), Icon: LuFileText },
-    { id: "table", label: t("sidebarTypes.table", "表格"), Icon: LuTable },
-    { id: "attachment", label: t("attachments_toggle", "附件"), Icon: LuPaperclip },
-    { id: "app", label: t("sidebarTypes.app", "应用"), Icon: LuAppWindow },
+    { id: "all", label: t("all", "全部"), Icon: PiSquaresFour, ActiveIcon: PiSquaresFourFill },
+    { id: "dialog", label: t("sidebarTypes.dialog", "对话"), Icon: PiChatCircle, ActiveIcon: PiChatCircleFill },
+    { id: "agent", label: t("sidebarTypes.agent", "AI"), Icon: PiRobot, ActiveIcon: PiRobotFill },
+    { id: "page", label: t("sidebarTypes.page", "页面"), Icon: PiFileText, ActiveIcon: PiFileTextFill },
+    { id: "table", label: t("sidebarTypes.table", "表格"), Icon: PiTable, ActiveIcon: PiTableFill },
+    { id: "attachment", label: t("attachments_toggle", "附件"), Icon: PiPaperclip, ActiveIcon: PiPaperclipFill },
+    { id: "app", label: t("sidebarTypes.app", "应用"), Icon: PiAppWindow, ActiveIcon: PiAppWindowFill },
   ];
 
   return (
@@ -116,8 +117,9 @@ export const SidebarTypeFilter: React.FC<{
         disabled && sidebarStyles.sidebarTypeFilterDisabled
       )}
     >
-      {items.map(({ id, label, Icon }) => {
+      {items.map(({ id, label, Icon, ActiveIcon }) => {
         const isActive = activeFilter === id;
+        const StateIcon = isActive ? ActiveIcon : Icon;
         return (
           <Tooltip key={id} content={label} placement="top">
             <button
@@ -136,7 +138,7 @@ export const SidebarTypeFilter: React.FC<{
                 isActive && sidebarStyles.sidebarTypeFilterButtonActive
               )}
             >
-              <Icon size={14} aria-hidden="true" />
+              <StateIcon size={15} aria-hidden="true" />
             </button>
           </Tooltip>
         );

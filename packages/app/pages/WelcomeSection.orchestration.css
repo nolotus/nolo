@@ -38,16 +38,25 @@
 .ws-orchestration-tabs button,
 .ws-orchestration-tabs .tab-item {
   min-width: 0;
-  padding: 0 10px;
-  font-size: 0.86rem;
+  padding: 0 12px;
+  font-size: var(--type-small);
   font-weight: 600;
   color: var(--ws-text-sub);
 }
 
 .ws-orchestration-tabs button[data-active="true"],
 .ws-orchestration-tabs .tab-item[data-active="true"] {
-  color: var(--ws-text);
-  font-weight: 650;
+  /* stylex tab styles carry :not(#\#) guards (ID-level specificity) — only
+     !important can outrank them from this stylesheet. Light mode: the active
+     label used the primary blue on the fog-gray track (4.37:1); the dark
+     track keeps the primary color where it clears contrast. */
+  color: var(--ws-text) !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="dark"] .ws-orchestration-tabs button[data-active="true"],
+[data-theme="dark"] .ws-orchestration-tabs .tab-item[data-active="true"] {
+  color: var(--primary) !important;
 }
 
 [data-theme="dark"] .ws-orchestration-tabs .tabs {
@@ -82,7 +91,7 @@
 
 .ws-orchestration-example-label {
   text-align: center;
-  font-size: 0.75rem;
+  font-size: var(--type-micro);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -91,7 +100,7 @@
 }
 
 .ws-orchestration-panel-title {
-  font-size: 1.5rem;
+  font-size: var(--type-h3);
   font-weight: 700;
   color: var(--ws-text);
   margin: 0 0 12px;
@@ -102,7 +111,7 @@
   max-width: 640px;
   margin: 20px auto 0;
   text-align: center;
-  font-size: 0.88rem;
+  font-size: var(--type-small);
   color: var(--ws-text-sub);
   opacity: 0.75;
   line-height: 1.55;
@@ -116,7 +125,7 @@
   position: relative;
   padding: 16px 20px 0;
   border: 1px solid var(--ws-border);
-  border-radius: 24px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--primary) 3%, var(--ws-bg));
 }
 
@@ -163,13 +172,13 @@
 
 .ws-orchestration-brief {
   position: absolute;
-  top: 18px;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
   z-index: 12;
   max-width: calc(100% - 40px);
-  font-size: 0.95rem;
+  font-size: var(--type-small);
   font-weight: 600;
   color: var(--ws-text);
   line-height: 1.45;
@@ -180,7 +189,7 @@
 .wf-stage-tech--consensus .wf-node-label,
 .wf-stage-tech--video .wf-node-label {
   max-width: 76px;
-  font-size: var(--fontSize-sm);
+  font-size: var(--type-micro);
   line-height: 1.3;
   text-align: center;
 }
@@ -223,9 +232,9 @@
 }
 
 .wf-consensus-pill {
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: var(--type-micro);
   font-weight: 600;
   color: var(--ws-text-sub);
   background: var(--ws-bg);
@@ -272,8 +281,8 @@
 .wf-mobile-step {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px 0;
+  gap: 16px;
+  padding: 20px 0;
   border-bottom: 1px solid var(--borderLight, #e5e5e5);
 }
 
@@ -288,22 +297,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.82rem;
+  font-size: var(--type-caption);
   font-weight: 700;
   color: var(--primary, #1677ff);
   background: var(--primaryGhost, rgba(22, 119, 255, 0.1));
 }
 
 .wf-mobile-step-copy h3 {
-  margin: 0 0 6px;
-  font-size: 1rem;
+  margin: 0 0 8px;
+  font-size: var(--type-body);
   font-weight: 700;
   color: var(--ws-text);
 }
 
 .wf-mobile-step-copy p {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--type-small);
   line-height: 1.55;
   color: var(--ws-text-sub);
 }
@@ -541,7 +550,7 @@
 /* SVG Labels style */
 .wf-svg-text {
   font-family: var(--fontFamily, system-ui, -apple-system, sans-serif);
-  font-size: var(--fontSize-sm);
+  font-size: var(--type-micro);
   font-weight: 600;
   fill: var(--primaryDark, var(--ws-text-sub));
   opacity: 0.5;
@@ -613,8 +622,8 @@
 }
 
 .wf-node-label {
-  margin-top: 10px;
-  font-size: 12px;
+  margin-top: 12px;
+  font-size: var(--type-micro);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--ws-text);
@@ -732,11 +741,11 @@
   gap: 8px;
   background: var(--ws-bg-sub);
   border: 1px solid var(--ws-border);
-  padding: 7px 16px;
+  padding: 8px 16px;
   border-radius: 999px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
-  font-size: var(--fontSize-sm);
+  font-size: var(--type-micro);
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--ws-text);
@@ -744,7 +753,7 @@
 }
 
 .ws-workflow-desc-title {
-  font-size: 1.9rem;
+  font-size: var(--type-h2);
   font-weight: 700;
   color: var(--ws-text);
   margin-bottom: 16px;
@@ -752,7 +761,7 @@
 }
 
 .ws-workflow-desc-text {
-  font-size: 0.95rem;
+  font-size: var(--type-small);
   line-height: 1.65;
   color: var(--ws-text-sub);
   margin: 0;
@@ -764,7 +773,7 @@
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 16px;
   margin-top: 8px;
 }
 
@@ -793,8 +802,8 @@
 }
 
 .wf-node-tech--mobile .wf-node-label {
-  margin-top: 6px;
-  font-size: var(--fontSize-sm);
+  margin-top: 8px;
+  font-size: var(--type-micro);
   max-width: 72px;
   text-align: center;
   line-height: 1.25;
@@ -806,7 +815,7 @@
   height: auto;
   min-height: 240px;
   margin: 0 auto 24px;
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--backgroundSecondary) 72%, var(--background));
   border: 1px solid var(--borderFaint, var(--borderLight));
   padding: 28px 24px;
@@ -817,7 +826,7 @@
 
 .wf-diagram-skeleton__lines {
   height: 58%;
-  border-radius: 12px;
+  border-radius: var(--radius-xs);
   background: linear-gradient(
     90deg,
     var(--backgroundSecondary) 0%,
@@ -906,7 +915,7 @@
 
   .ws-orchestration-tabs button,
   .ws-orchestration-tabs .tab-item {
-    font-size: var(--fontSize-min-readable, 12px);
+    font-size: var(--type-micro);
     line-height: 1.2;
     padding: 4px 4px;
     white-space: normal;

@@ -207,24 +207,24 @@ const STRINGS = {
     zh: "本次回复出错。已排队的消息仍保留，按 Enter 可重新发送。",
   },
   quotaExhaustedHint: {
-    en: "[nolo] This agent seems to have hit a quota/rate limit (HTTP 429).\nUse /agent to switch to another agent and keep going — the dialog context is preserved.",
-    zh: "[nolo] 当前 agent 似乎额度/速率受限（429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
+    en: "This agent seems to have hit a quota/rate limit (HTTP 429).\nUse /agent to switch to another agent and keep going — the dialog context is preserved.",
+    zh: "当前 agent 似乎额度/速率受限（429）。\n可以用 /agent 切换到其他 agent 后继续，同一对话会保留上下文。",
   },
   balanceExhaustedHint: {
-    en: "[nolo] Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
-    zh: "[nolo] 你刚发的话已保存在当前对话里——充值后直接再说一句或说「继续」即可接着聊，不会丢上下文。",
+    en: "Your message is saved in this dialog — top up, then send again or say \"continue\" to pick up where you left off.",
+    zh: "你刚发的话已保存在当前对话里——充值后直接再说一句或说「继续」即可接着聊，不会丢上下文。",
   },
   balanceInsufficientReason: {
     en: "Insufficient balance: requires > {required}, current balance {current}.",
     zh: "余额不足：需要余额 > {required}，当前 {current}。",
   },
   dialogPreservedHint: {
-    en: "[nolo] This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",
-    zh: "[nolo] 本轮失败了，但对话已保留。直接再说一句（或说「继续」）即可在同一对话里接着聊。",
+    en: "This turn failed, but the dialog is kept. Send another message (or say \"continue\") to keep going in the same conversation.",
+    zh: "本轮失败了，但对话已保留。直接再说一句（或说「继续」）即可在同一对话里接着聊。",
   },
   dialogNotSavedHint: {
-    en: "[nolo] This turn did not create a dialog. Your next message will start a new conversation — restate what you need.",
-    zh: "[nolo] 本轮没有建成对话。下一句会是新对话——请把你想做的事再说一遍。",
+    en: "This turn did not create a dialog. Your next message will start a new conversation — restate what you need.",
+    zh: "本轮没有建成对话。下一句会是新对话——请把你想做的事再说一遍。",
   },
   copiedLastReply: {
     en: "Copied the last reply to the clipboard.",
@@ -346,6 +346,15 @@ const STRINGS = {
   // --- Tool trace copy ------------------------------------------------------
   // The compact trace shows only status, never timing or output size: a line
   // count told the user nothing actionable and the ms figure read as noise.
+  workingFallback: {
+    en: "Working…",
+    zh: "处理中…",
+  },
+  // 回合结束的淡色收尾行：耗时 · 输出 token · 积分（后两段可缺省）。
+  turnSummaryOutput: {
+    en: "{0} out",
+    zh: "输出 {0}",
+  },
   thinkingActive: {
     en: "Thinking…",
     zh: "思考中…",
@@ -639,8 +648,8 @@ const STRINGS = {
     zh: "已从剪贴板粘贴 {0} 个字符到草稿。",
   },
   pasteStaleDropped: {
-    en: "[nolo] Discarded a clipboard read that finished after the draft changed.",
-    zh: "[nolo] 剪贴板读取完成时草稿已变化，结果已丢弃。",
+    en: "Discarded a clipboard read that finished after the draft changed.",
+    zh: "剪贴板读取完成时草稿已变化，结果已丢弃。",
   },
   pasteFilePathHint: {
     en: "file reference (path only, content not read): {0}",
@@ -688,6 +697,7 @@ const STRINGS = {
       "  /profile              Show active profile",
       "  /update               Update the nolo CLI install",
       "  /version              Show version/update hint",
+      "  /logs                 Show recent diagnostics and the log file path",
       "  /exit                 Leave the workspace",
       "",
       "You can also type normally. nolo routes simple read/status requests to CLI commands and sends the rest to the current agent.",
@@ -729,6 +739,7 @@ const STRINGS = {
       "  /profile              查看当前配置环境",
       "  /update               更新 nolo CLI",
       "  /version              查看版本与更新提示",
+      "  /logs                 查看最近诊断记录与日志文件位置",
       "  /exit                 退出工作区",
       "",
       "也可以直接输入自然语言。简单的读取/状态请求会走 CLI 命令，其余交给当前 agent。",
@@ -755,9 +766,13 @@ const STRINGS = {
   },
   runtimeUsage: { en: "Usage: /runtime <auto|local|server>", zh: "用法：/runtime <auto|local|server>" },
   runtimeSet: { en: "Runtime: {0}", zh: "运行模式：{0}" },
-  displayFixedHint: {
-    en: "The TUI ships a single built-in tool display — no configuration needed. Thinking process visibility is still controlled independently via NOLO_CLI_THINKING=show|hide (applied on restart).",
-    zh: "TUI 只有一套内置工具显示，无需配置。思考过程仍可用 NOLO_CLI_THINKING=show|hide 独立控制（重启生效）。",
+  logsEmpty: {
+    en: "No diagnostics recorded in this session.",
+    zh: "本次会话还没有诊断记录。",
+  },
+  logsHeader: {
+    en: "Recent diagnostics ({0} of {1}) · full log: {2}",
+    zh: "最近诊断（{0}/{1} 条）· 完整日志：{2}",
   },
   tasksRunning: { en: "Running processes ({0}):", zh: "运行中的进程（{0}）：" },
   tasksStopped: { en: "Stopped/exited ({0}):", zh: "已停止/已退出（{0}）：" },
@@ -918,12 +933,12 @@ const STRINGS = {
     zh: "无法自动打开浏览器，请把上面的链接粘贴到浏览器里。",
   },
   loginWaiting: {
-    en: "[nolo] Waiting for browser authorization ({0} remaining)... (Ctrl+C to cancel)",
-    zh: "[nolo] 等待浏览器授权（剩余 {0}）……按 Ctrl+C 取消",
+    en: "Waiting for browser authorization ({0} remaining)... (Ctrl+C to cancel)",
+    zh: "等待浏览器授权（剩余 {0}）……按 Ctrl+C 取消",
   },
   loginStillWaiting: {
-    en: "[nolo] Still waiting... ({0} remaining)",
-    zh: "[nolo] 仍在等待……（剩余 {0}）",
+    en: "Still waiting... ({0} remaining)",
+    zh: "仍在等待……（剩余 {0}）",
   },
   loginSuccess: {
     en: "Logged in. Token saved to profile; this session now uses it immediately.",
@@ -984,6 +999,11 @@ const STRINGS = {
     en: "Complete it in the terminal, then nolo will continue.",
     zh: "在终端中完成操作后，nolo 将继续。",
   },
+  // Compact memory-tool trace
+  memoryDeleteRequestedCount: {
+    en: "requested deletion of {0}",
+    zh: "已请求删除 {0} 条",
+  },
   // Agent catalog sources
   agentSourcePlatform: {
     en: "Platform",
@@ -1031,6 +1051,10 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   execShell: { en: "Run", zh: "执行" },
   runCommand: { en: "Run", zh: "执行" },
   captureVisualState: { en: "Capture", zh: "截屏" },
+  // Memory tools
+  rememberMemory: { en: "Remember", zh: "记住" },
+  queryMemory: { en: "Recall", zh: "查记忆" },
+  deleteMemory: { en: "Forget", zh: "删记忆" },
   // Workspace / diagnostics
   searchWorkspace: { en: "Search workspace", zh: "搜索工作区" },
   // 同一工具在 web/server 工具面用 snake_case 命名（packages/ai/tools/index.ts）。

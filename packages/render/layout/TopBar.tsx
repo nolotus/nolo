@@ -13,6 +13,7 @@ import {
   LuInfo,
   LuStar,
   LuLink,
+  LuShare2,
   LuUsers,
   LuEllipsis,
   LuHistory,
@@ -47,6 +48,7 @@ import "./layout.css";
 // after the main bundle finally hydrates (that was the long top-right wait).
 const DialogMenu = lazy(() => import("./DialogMenu"));
 const TopbarSpaceSwitcher = lazy(() => import("./TopbarSpaceSwitcher"));
+const ShareModal = lazy(() => import("render/web/ui/modal/ShareModal"));
 
 const getCurrentBrowserHistoryIndex = () => {
   if (typeof window === "undefined") return null;
@@ -235,33 +237,18 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
             ) : null}
 
             {s.showShareButton && (
-              <>
-                <button
-                  type="button"
-                  className="topbar__more-item"
-                  onClick={() => {
-                    s.setIsMobileOverflowOpen(false);
-                    void s.handleShare("community");
-                  }}
-                  role="menuitem"
-                >
-                  <LuUsers size={16} aria-hidden="true" />
-                  <span>{t("publishCommunity", "社区分享")}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="topbar__more-item"
-                  onClick={() => {
-                    s.setIsMobileOverflowOpen(false);
-                    void s.handleShare("private");
-                  }}
-                  role="menuitem"
-                >
-                  <LuLink size={16} aria-hidden="true" />
-                  <span>{t("shareCurrent", "私人分享")}</span>
-                </button>
-              </>
+              <button
+                type="button"
+                className="topbar__more-item"
+                onClick={() => {
+                  s.setIsMobileOverflowOpen(false);
+                  void s.handleOpenShare();
+                }}
+                role="menuitem"
+              >
+                <LuShare2 size={16} aria-hidden="true" />
+                <span>{t("share", "分享")}</span>
+              </button>
             )}
 
             {s.deleteContext && s.deleteKey && (
@@ -437,12 +424,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                     showShareButton={s.showShareButton}
                     canDelete={!!(s.deleteContext && s.deleteKey)}
                     showFavorite={s.showContentFavoriteButton}
-                    onShareCommunity={() => {
-                      void s.handleShare("community");
-                    }}
-                    onSharePrivate={() => {
-                      void s.handleShare("private");
-                    }}
+                    onShare={s.handleOpenShare}
                     onDelete={s.handleOpenDeleteConfirm}
                   />
                 ) : (
@@ -579,6 +561,21 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
           entityId={s.pageKey}
           onClose={() => s.setShowVersionPanel(false)}
         />
+      )}
+
+      {s.isShareModalOpen && (
+        <Suspense fallback={null}>
+          <ShareModal
+            isOpen={s.isShareModalOpen}
+            onClose={() => s.setIsShareModalOpen(false)}
+            webLink={s.shareModalLink}
+            isLoading={s.isShareModalLoading}
+            isCommunity={s.shareModalVisibility === "community"}
+            initialCopied={s.shareModalCopied}
+            onPublishCommunity={s.handlePublishCommunity}
+            itemType={s.contentKeyType === "dialog" ? "dialog" : "page"}
+          />
+        </Suspense>
       )}
     </>
   );

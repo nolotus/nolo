@@ -41,6 +41,7 @@ export const InlineArtifactVisibleText = memo(
           nodes={staticModel.nodes}
           renderText={(text) => text}
           cursor={null}
+          isStreaming={false}
         />
       );
     }

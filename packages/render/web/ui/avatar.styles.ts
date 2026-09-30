@@ -31,7 +31,7 @@ export const avatarStyles = stylex.create({
   small: {
     width: "var(--control-sm)",
     height: "var(--control-sm)",
-    fontSize: "var(--fontSize-xs)",
+    fontSize: "var(--type-micro)",
   },
   // .avatar--medium
   medium: {

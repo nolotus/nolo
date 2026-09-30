@@ -339,7 +339,8 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
   if (!report.rpc.online) {
     return (
       `Load the unpacked extension from ${report.extension.path} in chrome://extensions ` +
-      "(Developer mode) or install it from the Chrome Web Store, then rerun `nolo chrome status`."
+      "(Developer mode), or install the Nolo Browser Connector from https://nolo.chat/downloads " +
+      "(Chrome or Firefox), then rerun `nolo chrome status`."
     );
   }
   if (report.rpc.extensionId && report.rpc.extensionId !== report.extension.expectedId) {
@@ -608,7 +609,8 @@ export async function runChromeInstallCommand(args: string[], deps: ChromeComman
         `  token    : ${result.tokenPath} (an existing token is kept, so reruns are idempotent)`,
         `  extension: ${result.extensionId}`,
         `Next step: load the unpacked extension from ${resolve(connectorRoot, "extension")} in ` +
-          "chrome://extensions (Developer mode) or install it from the Chrome Web Store, then run `nolo chrome status`.",
+          "chrome://extensions (Developer mode), or install the Nolo Browser Connector from " +
+          "https://nolo.chat/downloads (Chrome or Firefox), then run `nolo chrome status`.",
         "",
       ].join("\n"),
     );
@@ -638,8 +640,9 @@ export async function runChromeReloadCommand(args: string[], deps: ChromeCommand
     output.write(`[nolo] Chrome connector reload failed: ${code} ${toErrorMessage(error)}\n`);
     if (code === "CHROME_CONNECTOR_UNAVAILABLE") {
       output.write(
-        "The native host is not reachable: load the unpacked connector extension in chrome://extensions " +
-          "(or start Chrome), then rerun `nolo chrome reload`.\n",
+        "The native host is not reachable: open Chrome or Firefox with the Nolo Browser Connector " +
+          "extension enabled, or install it from https://nolo.chat/downloads (or load the unpacked " +
+          "connector extension in chrome://extensions), then rerun `nolo chrome reload`.\n",
       );
     }
     return 1;

@@ -190,7 +190,11 @@ export function useAgentCreateSourceState({
     return f.customProviderUrl;
   });
   const [subApiKey, setSubApiKey] = useState("");
-  const [credentialSynced, setCredentialSynced] = useState(false);
+  // Web 页面/登录状态下默认开启跨设备密钥同步（因为浏览器受 CORS 限制必须走 server-proxy 转发；
+  // 若未同步，Web 端发起的远程 API 调用将因缺少服务端凭据而报 401）。
+  const [credentialSynced, setCredentialSynced] = useState(() => {
+    return typeof window !== "undefined";
+  });
   const [providerKeyRemembered, setProviderKeyRemembered] = useState(false);
   // Track whether the user has manually toggled the "remember provider key"
   // checkbox. Once touched, auto-check (from detected existing key) is

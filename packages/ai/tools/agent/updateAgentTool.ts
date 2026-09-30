@@ -11,6 +11,7 @@ import {
     buildPatch,
     buildRawDataWithUpdateInfo,
     buildUpdateThunkPreviousAgent,
+    calibrateReasoningEffortInPatch,
     extractAgentId,
     fetchAgentByDbKey,
     formatUpdatedAgentOutput,
@@ -59,6 +60,8 @@ export async function updateAgentToolFunc(
 
     const agentId = extractAgentId(dbKey);
     const formData = buildPatch(args);
+    // 按模型级真实推理能力校准 effort（不支持则移除，档位不符则吸附）
+    const effortNote = calibrateReasoningEffortInPatch(formData, previousAgent);
     const requestedFields = listRequestedFields(args);
 
     assertAgentUpdateConfirmation({
@@ -91,6 +94,6 @@ export async function updateAgentToolFunc(
     // field-level auto-approval for updateAgent. For now this tool stays confirmation-first.
     return {
         rawData: rawDataWithUpdateInfo as any,
-        displayData: formatUpdatedAgentOutput(agent),
+        displayData: formatUpdatedAgentOutput(agent) + (effortNote ? `\n${effortNote}` : ""),
     };
 }

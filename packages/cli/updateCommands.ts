@@ -294,7 +294,11 @@ async function runShellScript(
   const proc: SpawnedProcess = spawn({
     cmd: ["sh", "-c", script],
     cwd,
-    stdin: "inherit",
+    // Capture mode (TUI sink): ignore stdin — the TUI's own decoder is
+    // reading the tty, and a child that reads stdin would race it for keys.
+    // The inherit branch is unreachable inside the TUI (useCustomSink is
+    // always true there) and stays the correct choice for `nolo update`.
+    stdin: useCustomSink ? "ignore" : "inherit",
     stdout: useCustomSink ? "pipe" : "inherit",
     stderr: useCustomSink ? "pipe" : "inherit",
     env,
@@ -595,7 +599,8 @@ export async function runSelfUpdateDetailed(
   const useCustomSink = options.output !== undefined;
   const proc: SpawnedProcess = spawn({
     cmd: command,
-    stdin: "inherit",
+    // Capture mode (TUI sink): ignore stdin — see runShellScript.
+    stdin: useCustomSink ? "ignore" : "inherit",
     stdout: useCustomSink ? "pipe" : "inherit",
     stderr: useCustomSink ? "pipe" : "inherit",
     env,

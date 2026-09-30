@@ -3,6 +3,7 @@
    动画只在 prefers-reduced-motion: no-preference 下启用。 */
 
 .SiteFooter {
+  position: relative;
   /* 浅色（默认）：河畔白昼。所有场景色用 color-mix 融入 var(--primary)，
      随站点主题色（zinc / github / linear 等）自动呼应。 */
   --camp-mountain-far: color-mix(in srgb, var(--primary) 12%, #85b882);
@@ -41,6 +42,20 @@
 
   flex-shrink: 0;
   margin-top: auto;
+}
+
+/* 滚动容器（.MainLayout__main）用 scrollbar-gutter: stable 预留 10px，
+   页脚在其中会比视口窄一条，右侧露出白缝。用与链接区同色的背景带盖住这条缝
+   （会被容器 overflow 裁掉，不会产生横向滚动）。 */
+.SiteFooter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 16px;
+  background: var(--camp-ground);
+  pointer-events: none;
 }
 
 [data-theme="dark"] .SiteFooter {
@@ -224,11 +239,11 @@
 
 .SiteFooter__inner {
   background: var(--camp-ground);
-  padding: var(--space-5) var(--space-6) var(--space-6);
+  padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
+  gap: 12px;
   text-align: center;
 }
 
@@ -236,14 +251,21 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: var(--space-2) var(--space-5);
+  align-items: center;
+  gap: 8px 24px;
 }
 
+/* 行内文本链接：桌面纵向热区 ≥24px（标准 §7），用 32px 行高留出呼吸感 */
 .SiteFooter__link {
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: var(--type-small);
+  line-height: 1.4;
   color: var(--camp-link);
   text-decoration: none;
   transition: color 0.16s ease;
+  border-radius: var(--radius-xs);
 }
 
 .SiteFooter__link:hover {
@@ -253,20 +275,21 @@
 
 .SiteFooter__copyright {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--type-micro);
+  line-height: 1.5;
   color: var(--camp-copy);
 }
 
 @media (max-width: 768px) {
   .SiteFooter__inner {
-    padding: var(--space-4) var(--space-4) var(--space-5);
+    padding: 16px 16px 24px;
   }
   .SiteFooter__links {
-    gap: var(--space-2) var(--space-4);
+    gap: 4px 12px;
   }
+  /* 移动端触达 ≥44×44（--tap-target-min） */
   .SiteFooter__link {
-    display: inline-flex;
-    align-items: center;
     min-height: var(--tap-target-min);
+    padding: 0 8px;
   }
 }

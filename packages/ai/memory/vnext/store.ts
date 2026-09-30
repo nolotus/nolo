@@ -78,6 +78,22 @@ export const listMemoryEntitiesVNext = async (
   return rows;
 };
 
+/**
+ * One owner's full vNext catalog (all Entities and their States, current and
+ * retired), loaded with one entity scan plus parallel per-entity State scans.
+ * The single loader shared by recall, lazy promotion and primary read.
+ */
+export const loadMemoryVNextCatalog = async (
+  db: any,
+  ownerId: string
+): Promise<{ entities: MemoryEntityVNext[]; states: MemoryStateVNext[] }> => {
+  const entities = await listMemoryEntitiesVNext(db, ownerId);
+  const states = (
+    await Promise.all(entities.map((entity) => listMemoryStatesForEntityVNext(db, ownerId, entity.id)))
+  ).flat();
+  return { entities, states };
+};
+
 export const putMemoryStateVNext = async (db: any, state: MemoryStateVNext): Promise<void> => {
   // Referential integrity: a State pointing at a missing Entity could only ever
   // be read back by id — it would be unreachable from recall/inspect with no

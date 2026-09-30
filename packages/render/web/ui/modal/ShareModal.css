@@ -1,0 +1,187 @@
+/* ShareModal — 轻量分享弹窗样式 */
+
+.share-modal {
+  max-width: 480px;
+  width: 100%;
+}
+
+.share-modal__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  padding: var(--space-1, 4px) 0;
+}
+
+/* 权限说明横幅 */
+.share-modal__permission-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background-color: var(--backgroundTertiary, rgba(0, 0, 0, 0.03));
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--borderLight, rgba(0, 0, 0, 0.06));
+}
+
+.share-modal__permission-icon {
+  color: var(--primary, #0969da);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.share-modal__permission-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fontSize-sm, 13px);
+  line-height: var(--leading-normal, 1.4);
+}
+
+.share-modal__permission-title {
+  font-weight: 600;
+  color: var(--text, #1f2328);
+}
+
+.share-modal__permission-desc {
+  color: var(--textSecondary, #656d76);
+  font-size: 12px;
+}
+
+/* 链接输入与复制行 */
+.share-modal__link-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.share-modal__link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+.share-modal__input {
+  flex: 1;
+  height: 38px;
+  padding: 0 var(--space-3, 12px);
+  font-size: var(--fontSize-sm, 13px);
+  color: var(--text, #1f2328);
+  background: var(--background, #ffffff);
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: var(--radius-md, 6px);
+  outline: none;
+  font-family: var(--fontFamily-mono, monospace);
+  user-select: all;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.share-modal__input:focus {
+  border-color: var(--primary, #0969da);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+.share-modal__copy-btn {
+  white-space: nowrap;
+  min-width: 96px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.share-modal__copy-btn--copied {
+  color: var(--success, #1a7f37) !important;
+  border-color: var(--success, #1a7f37) !important;
+}
+
+/* 社区分享卡片 */
+.share-modal__community-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--borderLight, rgba(0, 0, 0, 0.06));
+  background-color: var(--backgroundGhost, transparent);
+  transition: background-color 0.15s ease;
+}
+
+.share-modal__community-card:hover {
+  background-color: var(--backgroundTertiary, rgba(0, 0, 0, 0.02));
+}
+
+.share-modal__community-info {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+}
+
+.share-modal__community-icon {
+  color: var(--textSecondary, #656d76);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.share-modal__community-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-modal__community-title {
+  font-size: var(--fontSize-sm, 13px);
+  font-weight: 500;
+  color: var(--text, #1f2328);
+}
+
+.share-modal__community-desc {
+  font-size: 12px;
+  color: var(--textTertiary, #8c959f);
+}
+
+.share-modal__community-card--published {
+  background-color: var(--backgroundSuccessGhost, rgba(26, 127, 55, 0.05));
+  border-color: color-mix(in srgb, var(--success, #1a7f37) 25%, transparent);
+}
+
+.share-modal__community-icon--success {
+  color: var(--success, #1a7f37) !important;
+}
+
+.share-modal__community-action {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.share-modal__community-error {
+  font-size: 12px;
+  color: var(--error, #cf222e);
+  margin-top: 2px;
+}
+
+/* 底部操作 */
+.share-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.share-modal__manage-link {
+  font-size: var(--fontSize-xs, 12px);
+  color: var(--textSecondary, #656d76);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s ease;
+}
+
+.share-modal__manage-link:hover {
+  color: var(--primary, #0969da);
+  text-decoration: underline;
+}

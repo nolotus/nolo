@@ -6,6 +6,7 @@ import { toErrorMessage } from "core/errorMessage";
 import {
   createChromeConnectorClient,
   NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
+  NOLO_CONNECTOR_EXTENSION_IDS,
   type ChromeConnectorClient,
 } from "../../desktop-chrome-connector/chromeConnector";
 import {
@@ -161,9 +162,9 @@ export async function buildDesktopChromeConnectorStatus(args: {
   try {
     const requestChrome = args.requestChrome ?? createChromeConnectorClient().request;
     const connectorInfo = await requestChrome("connector_info", {});
-    if ((connectorInfo as { extensionId?: string })?.extensionId !== extensionId) {
+    if (!NOLO_CONNECTOR_EXTENSION_IDS.includes((connectorInfo as { extensionId?: string })?.extensionId ?? "")) {
       throw new Error(
-        `Chrome connector extension id mismatch: expected ${extensionId}, received ${
+        `Chrome connector extension id mismatch: expected one of ${NOLO_CONNECTOR_EXTENSION_IDS.join(", ")}, received ${
           (connectorInfo as { extensionId?: string })?.extensionId ?? "unknown"
         }.`,
       );

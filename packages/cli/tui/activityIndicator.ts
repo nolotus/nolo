@@ -110,6 +110,10 @@ export function createActivityIndicator(
   // 第二次 Esc 据此判定强制停止。stop() 必须清掉它，否则下一轮 turn 一开始
   // 就显示"停止中"。
   let stopping = false;
+  // 本轮起点：首个 report 时记下，stop() 清零。活动行显示的是整轮累计耗时，
+  // 而不是「当前这一段标签」的耗时——后者每次工具切换都归零，用户看不出
+  // 这一轮到底跑了多久。
+  let turnStartedAt = 0;
 
   const elapsedSecFrom = (startedAt: number) =>
     startedAt > 0 ? Math.max(0, Math.floor((now() - startedAt) / 1000)) : 0;
@@ -145,6 +149,7 @@ export function createActivityIndicator(
 
   const report = (label: string | null) => {
     lastActivityAt = now();
+    if (turnStartedAt === 0) turnStartedAt = lastActivityAt;
     if (label !== null) {
       explicitLabel = label;
       if (explicitStartedAt === 0) explicitStartedAt = lastActivityAt;
@@ -188,14 +193,14 @@ export function createActivityIndicator(
       return {
         frame,
         label: explicitLabel,
-        elapsedSec: elapsedSecFrom(explicitStartedAt),
+        elapsedSec: elapsedSecFrom(turnStartedAt || explicitStartedAt),
       };
     }
     if (fallbackActive) {
       return {
         frame,
         label: deps.fallbackLabel(),
-        elapsedSec: elapsedSecFrom(fallbackStartedAt),
+        elapsedSec: elapsedSecFrom(turnStartedAt || fallbackStartedAt),
       };
     }
     return null;
@@ -225,7 +230,15 @@ export function createActivityIndicator(
   const getActivityLines = (colorEnabled = resolveCliColorEnabled()): string[] | null => {
     const lines: string[] = [];
     const baseView = getView();
-    if (baseView) {
+    if (baseView && stopping) {
+      // 停止中只显示停止文案本身：它已经告诉用户「再按一次 Esc 强制停止」，
+      // 再拼 `(0s) · Esc 停止回复` 就是两句互相矛盾的提示。
+      lines.push(
+        colorEnabled
+          ? themeText(baseView.frame, "accent") + " " + themeText(baseView.label, "muted")
+          : `${baseView.frame} ${baseView.label}`,
+      );
+    } else if (baseView) {
       const elapsed = Math.max(0, baseView.elapsedSec);
       const elapsedStr = `${elapsed}s`;
       const stopHint = t("stopHint");
@@ -257,6 +270,7 @@ export function createActivityIndicator(
     fallbackActive = false;
     fallbackStartedAt = 0;
     lastActivityAt = 0;
+    turnStartedAt = 0;
     stopping = false;
     // runDock 不清：后台 run 不随 turn 结束而结束。
   };

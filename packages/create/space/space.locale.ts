@@ -360,6 +360,16 @@ export default {
       myShares: {
         title: "My Shares",
       },
+      agent: {
+        create_agent_manual: "Create AI",
+      },
+      createFailed: "Failed to create the table",
+      filter_by_type: "Filter by type",
+      no_items_found: "No items of this type found",
+      userNotFound: "User info not found; can't create the table",
+      table: {
+        newTable: "New Table",
+      },
     },
   },
 
@@ -713,6 +723,16 @@ export default {
       myShares: {
         title: "我的分享",
       },
+      agent: {
+        create_agent_manual: "创建AI",
+      },
+      createFailed: "创建表格失败",
+      filter_by_type: "按类型过滤",
+      no_items_found: "没有找到该类型的内容",
+      userNotFound: "未找到用户信息，无法创建表格",
+      table: {
+        newTable: "新建表格",
+      },
     },
   },
 
@@ -1064,6 +1084,16 @@ export default {
       syncLocalAgentsType_unknown: "未知",
       myShares: {
         title: "我的分享",
+      },
+      agent: {
+        create_agent_manual: "建立 AI",
+      },
+      createFailed: "創建表格失敗",
+      filter_by_type: "按類型過濾",
+      no_items_found: "沒有找到該類型的內容",
+      userNotFound: "未找到用戶資訊，無法創建表格",
+      table: {
+        newTable: "新增表格",
       },
     },
   },
@@ -1434,6 +1464,16 @@ export default {
       syncLocalAgentsType_unknown: "不明",
       myShares: {
         title: "マイ共有",
+      },
+      agent: {
+        create_agent_manual: "AI を作成",
+      },
+      createFailed: "テーブルの作成に失敗しました",
+      filter_by_type: "タイプで絞り込み",
+      no_items_found: "このタイプのコンテンツは見つかりませんでした",
+      userNotFound: "ユーザー情報が見つからないため、テーブルを作成できません",
+      table: {
+        newTable: "新しいテーブル",
       },
     },
   },

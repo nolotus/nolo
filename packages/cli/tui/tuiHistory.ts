@@ -744,7 +744,7 @@ function isSuspiciousAppend(newTail: string, fenceParityEven: boolean): boolean 
   if (newTail.includes("$$") || newTail.includes("\\[") || newTail.includes("\\]")) {
     return true; // 多行数学块开/闭
   }
-  if (/\n{4,}/.test(newTail)) return true; // polish 的 \n{4,} 压缩
+  if (/\n{3,}/.test(newTail)) return true; // polish 的空白压缩（最多 1 个空行）
   if (newTail.includes("\x00")) return true; // polish 哨兵字符（convertMarkdownTables 遮罩冲突）
   return hasPipeRowLine(newTail);
 }
@@ -1037,6 +1037,26 @@ export type TurnOffsets = {
 };
 
 /**
+ * 轮间垂直间距的唯一判定点。终端只能以整行为单位，所以返回「这一轮上方
+ * 插入几行空行」而不是布尔值。规则：
+ * - 第一轮上方 0 行；
+ * - user 轮上方 1 行（与上一轮的任何内容隔开）；
+ * - assistant 紧跟在 user / local 之后 1 行（不与带背景色的用户气泡糊在一起）；
+ * - local 轮（slash 回显 / 系统提示）上方有任何轮时 1 行，自成一段；
+ * - 其余（assistant 续写、assistant 接 assistant）0 行。
+ * 行数统计（buildTurnOffsets）、滚动度量（computeScrollMetrics）与可视窗口
+ * 渲染（renderHistory 的 sepRow）必须全部走这里，否则统计与绘制会错行。
+ */
+export function turnSeparatorRows(prevRole: TurnRole | null, role: TurnRole): number {
+  if (prevRole === null) return 0;
+  if (role === "user" || role === "local") return 1;
+  if (role === "assistant") {
+    return prevRole === "user" || prevRole === "local" ? 1 : 0;
+  }
+  return 0;
+}
+
+/**
  * Scan TurnHistory → index of turn → start row. O(n) but reads only the line-count
  * cache — no markdown re-rendering; on a miss the count comes from the cheap
  * countTurnLines pass and is recorded for later frames. Turn separators
@@ -1050,7 +1070,10 @@ export function buildTurnOffsets(
   let offset = 0;
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    const separatorAbove = i > 0 && turn.role === "user" ? 1 : 0;
+    const separatorAbove = turnSeparatorRows(
+      i > 0 ? history.turns[i - 1]!.role : null,
+      turn.role,
+    );
     offset += separatorAbove;
     const cacheMap = turnLineCountCache.get(turn);
     let lineCount: number;
@@ -1112,7 +1135,10 @@ export function getAllTurnEntries(
 
 /** Row index of the blank separator above the current streaming turn, if any. */
 function currentTurnSeparator(history: TurnHistory): number {
-  return history.turns.length > 0 && history.currentRole === "user" ? 1 : 0;
+  const role = history.currentRole;
+  if (role === null) return 0;
+  const previous = history.turns.at(-1);
+  return turnSeparatorRows(previous ? previous.role : null, role);
 }
 
 export function buildHistoryLines(history: TurnHistory, contentWidth: number): string[] {
@@ -1122,7 +1148,7 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
 
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    if (i > 0 && turn.role === "user") {
+    for (let s = turnSeparatorRows(i > 0 ? history.turns[i - 1]!.role : null, turn.role); s > 0; s--) {
       wrapped.push("");
     }
     const layoutRows = getTurnLayoutRows(
@@ -1137,7 +1163,7 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
   // Streaming turn mutates per chunk — incremental prefix cache.
   if (history.currentRole !== null && history.currentContent) {
     const i = history.turns.length;
-    if (i > 0 && history.currentRole === "user") {
+    for (let s = currentTurnSeparator(history); s > 0; s--) {
       wrapped.push("");
     }
     const streamingLines = getStreamingTurnLines(
@@ -1175,7 +1201,7 @@ export function buildHistoryLayoutRows(
 
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
-    if (i > 0 && turn.role === "user") {
+    for (let s = turnSeparatorRows(i > 0 ? history.turns[i - 1]!.role : null, turn.role); s > 0; s--) {
       rows.push(separatorRow());
     }
     rows.push(...getTurnLayoutRows(
@@ -1188,7 +1214,7 @@ export function buildHistoryLayoutRows(
 
   if (history.currentRole !== null && history.currentContent) {
     const i = history.turns.length;
-    if (i > 0 && history.currentRole === "user") {
+    for (let s = currentTurnSeparator(history); s > 0; s--) {
       rows.push(separatorRow());
     }
     rows.push(
@@ -1268,8 +1294,8 @@ export function renderHistory(
   // Paint ONLY the turns overlapping the visible window.
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i]!;
-    if (entry.separatorAbove > 0) {
-      const sepRow = entry.startRow - 1;
+    for (let s = entry.separatorAbove; s > 0; s--) {
+      const sepRow = entry.startRow - s;
       if (sepRow >= winStart && sepRow < winEnd) {
         visibleLines[sepRow - winStart] = "";
       }
@@ -1307,8 +1333,8 @@ export function renderHistory(
   }
   if (currentStart >= 0) {
     const separatorAbove = currentTurnSeparator(history);
-    if (separatorAbove > 0) {
-      const sepRow = currentStart - 1;
+    for (let s = separatorAbove; s > 0; s--) {
+      const sepRow = currentStart - s;
       if (sepRow >= winStart && sepRow < winEnd) {
         visibleLines[sepRow - winStart] = "";
       }

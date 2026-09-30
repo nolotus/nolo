@@ -26,6 +26,7 @@ import { isRecord } from "core/isRecord";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { asTrimmedString } from "core/trimmedString";
+import { clipCompactText } from "core/clipCompactText";
 import { redactAgentRecordForWorkspaceTool } from "../../agent-runtime/runtimeToolSurface";
 import { buildAgentRuntimeAgentLookupKeys } from "../../agent-runtime/agentRecordKeys";
 import {
@@ -762,6 +763,41 @@ export const readAgentFunctionSchema = {
   },
 } as const;
 
+export function formatReadAgentCard(
+  agentKey: string,
+  record: unknown,
+): string {
+  if (!isRecord(record)) {
+    return jsonPreview({ agentKey, record });
+  }
+
+  const name = asTrimmedString(record.name) || "(未命名 Agent)";
+  const model = asTrimmedString(record.model) || "—";
+  const provider = asTrimmedString(record.provider) || asTrimmedString(record.apiSource) || "—";
+  const apiSource = asTrimmedString(record.apiSource) || "—";
+  const isPublic = record.isPublic === true ? "公开" : "私有";
+  const tools = Array.isArray(record.tools) && record.tools.length > 0
+    ? record.tools.map((t) => String(t)).join(", ")
+    : "无自定义工具 (默认基础工作区能力)";
+
+  const lines = [
+    `🤖 Agent: ${name} (${agentKey})`,
+    `• 模型: ${model} (${provider})`,
+    `• 来源: ${apiSource} · ${isPublic}`,
+    `• 工具: ${tools}`,
+  ];
+
+  if (typeof record.customProviderUrl === "string" && record.customProviderUrl.trim()) {
+    lines.push(`• 端点: ${record.customProviderUrl.trim()}`);
+  }
+
+  if (typeof record.prompt === "string" && record.prompt.trim()) {
+    lines.push(`• 提示词: ${clipCompactText(record.prompt.trim(), 200)}`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function readAgentFunc(args: any, thunkApi: any): Promise<ToolResult> {
   const runtime = getRuntime(thunkApi);
   const userId = runtime?.currentUserId;
@@ -778,16 +814,14 @@ export async function readAgentFunc(args: any, thunkApi: any): Promise<ToolResul
   for (const candidate of candidates) {
     const record = await readBestRecord(thunkApi, candidate, true);
     if (record) {
+      const redacted = redactAgentRecordForWorkspaceTool(record);
       return {
         rawData: {
           success: true,
           agentKey: candidate,
-          record: redactAgentRecordForWorkspaceTool(record),
+          record: redacted,
         },
-        displayData: jsonPreview({
-          agentKey: candidate,
-          record: redactAgentRecordForWorkspaceTool(record),
-        }),
+        displayData: formatReadAgentCard(candidate, redacted),
       };
     }
   }

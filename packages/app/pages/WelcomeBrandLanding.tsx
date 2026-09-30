@@ -16,7 +16,6 @@ import "./WelcomeSection.orchestration.css";
 const NS = "welcomeSection.brandLanding";
 const HERO_NS = "homeLandingHero";
 const WHY_NS = "homeLandingWhy";
-const RECEIPT_NS = "homeLandingReceipt";
 
 const WelcomeBrandLanding = () => {
   const { t } = useTranslation();
@@ -31,7 +30,8 @@ const WelcomeBrandLanding = () => {
 
   const [orchestrationTab, setOrchestrationTab] = useState<OrchestrationDiagramTab>(() => {
     if (typeof window === "undefined") return "coding";
-    return readOrchestrationTabFromSearch(window.location.search) ?? "coding";
+    const fromUrl = readOrchestrationTabFromSearch(window.location.search);
+    return fromUrl && fromUrl !== "video" ? fromUrl : "coding";
   });
 
   const orchestrationTabs = useMemo(
@@ -39,7 +39,6 @@ const WelcomeBrandLanding = () => {
       { id: "coding" as const, label: t("welcomeSection.orchestration.tabs.coding") },
       { id: "brainstorm" as const, label: t("welcomeSection.orchestration.tabs.brainstorm") },
       { id: "consensus" as const, label: t("welcomeSection.orchestration.tabs.consensus") },
-      { id: "video" as const, label: t("welcomeSection.orchestration.tabs.video") },
     ],
     [t],
   );
@@ -108,8 +107,6 @@ const WelcomeBrandLanding = () => {
     const middle = Math.floor((steps.length - 1) / 2);
     return index === 0 || index === middle || index === steps.length - 1;
   });
-  const executionSummary = mobileProofSteps.slice(0, 2).map((step) => step.title).join(" · ");
-  const reviewSummary = mobileProofSteps.at(-1)?.title ?? t(`${RECEIPT_NS}.review`);
 
   const handleOrchestrationTabChange = useCallback(
     (tabId: string | number) => {
@@ -218,34 +215,6 @@ const WelcomeBrandLanding = () => {
               </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="wbl-receipt" aria-labelledby="wbl-receipt-title">
-        <div className="wbl-shell wbl-receipt-shell">
-          <header className="wbl-receipt-head">
-            <div className="wbl-section-kicker">{t(`${RECEIPT_NS}.kicker`)}</div>
-            <h2 id="wbl-receipt-title">{t(`${RECEIPT_NS}.title`)}</h2>
-          </header>
-          <div className="wbl-receipt-grid">
-            <div className="wbl-receipt-item">
-              <span>{t(`${RECEIPT_NS}.goal`)}</span>
-              <strong>{activeExampleTitle}</strong>
-            </div>
-            <div className="wbl-receipt-item">
-              <span>{t(`${RECEIPT_NS}.execution`)}</span>
-              <strong>{executionSummary}</strong>
-            </div>
-            <div className="wbl-receipt-item">
-              <span>{t(`${RECEIPT_NS}.review`)}</span>
-              <strong>{reviewSummary}</strong>
-            </div>
-            <div className="wbl-receipt-item wbl-receipt-result">
-              <span>{t(`${RECEIPT_NS}.result`)}</span>
-              <strong>{t(`${RECEIPT_NS}.resultValue`)}</strong>
-            </div>
-          </div>
-          <p className="wbl-receipt-note">{t(`${RECEIPT_NS}.note`)}</p>
         </div>
       </section>
 

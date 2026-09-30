@@ -6,6 +6,8 @@ import {
 } from "ai/policy/selfUpdateFields";
 import { ToolResultError } from "ai/tools/toolResultError";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
+import { clampReasoningEffort } from "ai/llm/reasoningModels";
+import { resolveModelReasoningCapabilityWithCache } from "ai/agent/modelReasoningCapability";
 
 type ReasoningEffort = "low" | "medium" | "high";
 
@@ -216,6 +218,43 @@ export const buildPatch = (args: AgentUpdateArgsShape): AgentPatch => {
   if (reasoning_effort !== undefined) patch.reasoning_effort = reasoning_effort;
 
   return patch;
+};
+
+/**
+ * 按模型级真实能力校准 patch 里的 reasoning_effort：
+ * - 模型级真值命中且不支持推理强度 → 移除字段（不写入，走上游默认行为）；
+ * - 档位不在真实支持集合 → 吸附到最近可用档；
+ * - 无模型级证据 → 维持 provider 级 clamp 行为（见 clampReasoningEffort）。
+ * 有效 provider/model = patch 覆盖值优先，否则取现有 agent 的值。
+ */
+/**
+ * 按模型级真实推理能力校准 patch 里的 reasoning_effort。
+ * 模型不支持 → 移除字段；档位不符 → 吸附到最近真实档位。
+ * 无模型级证据（仅 provider 级映射、anthropic/google 的 Thinking 机制等）时原样保留——
+ * 这些通道在运行时会自行解释该字段，不能在这里删除。
+ * 返回校准说明（未介入或无变化时为 undefined），调用方应并入工具输出告知模型。
+ */
+export const calibrateReasoningEffortInPatch = (
+  patch: Record<string, unknown>,
+  previousAgent: { provider?: string | null; model?: string | null },
+): string | undefined => {
+  if (patch.reasoning_effort === undefined) return undefined;
+  const provider =
+    (patch.provider as string | undefined) ?? previousAgent.provider ?? undefined;
+  const model =
+    (patch.model as string | undefined) ?? previousAgent.model ?? undefined;
+  const cap = resolveModelReasoningCapabilityWithCache(provider, model);
+  if (!cap.found) return undefined;
+
+  const requested = String(patch.reasoning_effort);
+  const calibrated = clampReasoningEffort(requested, provider ?? null, model ?? null);
+  if (!calibrated) {
+    delete patch.reasoning_effort;
+    return `⚠️ 模型 ${model ?? "当前模型"} 不支持推理强度设置，已忽略 reasoning_effort=${requested}。`;
+  }
+  patch.reasoning_effort = calibrated;
+  if (calibrated === requested) return undefined;
+  return `ℹ️ reasoning_effort 已按 ${model ?? "当前模型"} 的真实档位从 "${requested}" 吸附为 "${calibrated}"。`;
 };
 
 const AGENT_UPDATE_FIELD_NAME_SET = new Set<string>(AGENT_UPDATE_FIELD_NAMES);

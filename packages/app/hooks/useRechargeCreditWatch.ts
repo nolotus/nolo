@@ -13,8 +13,8 @@
 import { useEffect, useRef } from "react";
 
 import { fetchAccountProfile } from "identity/accountProfile";
-import { useAccountSessionService, useAppSelector } from "app/store";
-import { selectRemoteServer } from "app/settings/settingSlice";
+import { useAccountSessionService } from "app/store";
+import { useSessionSnapshot } from "app/sessionSnapshot";
 import { useUserId } from "identity";
 
 export interface CreditWatchOptions {
@@ -39,9 +39,12 @@ export const useRechargeCreditWatch = (options: CreditWatchOptions): void => {
     onCredited,
     onTimeout,
   } = options;
+  // 会话 Core（非 Redux 读端）：service.getSnapshot()/updateAccountProfile 都直接
+  // 委托给它，这里读 activeToken、到账后写回 profile 与旧 service 路径等价。
   const accountSession = useAccountSessionService();
   const userId = useUserId();
-  const serverUrl = useAppSelector(selectRemoteServer);
+  // 远端服务器改走会话快照桥（server = selectRemoteServer 输出），不经 Redux。
+  const serverUrl = useSessionSnapshot().server;
   // 回调用 ref 持有，避免父组件每次渲染重建导致轮询重启
   const callbacksRef = useRef({ onCredited, onTimeout });
   callbacksRef.current = { onCredited, onTimeout };

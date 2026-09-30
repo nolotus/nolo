@@ -188,6 +188,18 @@ export default {
       bundleCEF: true,
       defaultRenderer: "cef",
       icon: "assets/icon.png",
+      // 固化 GPU 加速：electrobun 默认给 Linux CEF 加 --disable-gpu-compositing /
+      // disable-accelerated-video-*，在独显机器上把整个 UI 拖到软件光栅化
+      // （实测 RX 7900 XT + Mesa 下滚动/动画明显掉帧）。chromiumFlags 的
+      // false 值表示跳过对应默认开关（electrobun chromium_flags.h 契约）。
+      // 安全边界不变：X11 下 GPU 合成照常走，no-sandbox 等其余默认不动。
+      chromiumFlags: {
+        "disable-gpu-compositing": false,
+        "disable-accelerated-video-decode": false,
+        "disable-accelerated-video-encode": false,
+        "ignore-gpu-blocklist": true,
+        "enable-gpu-rasterization": true,
+      },
     },
     win: {
       // The public installer provisions WebView2 before first launch. Keeping

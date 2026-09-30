@@ -19,6 +19,8 @@ export default {
             meta: "Free upon Signup",
             bestFor: "Just exploring",
             price: "Free",
+            priceValue: "Free",
+            priceDetail: "No recharge needed",
             features: [
               "Standard LLM models",
               "Multi-agent collaboration",
@@ -31,6 +33,8 @@ export default {
             meta: `Balance at ${ADVANCED_FEATURE_MIN_BALANCE} Points`,
             bestFor: "Daily driver",
             price: `Unlock at ${ADVANCED_FEATURE_MIN_BALANCE} Points`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "Points balance to unlock",
             features: [
               "Batch file analysis",
               "Real-time web search",
@@ -43,6 +47,8 @@ export default {
             meta: `Single recharge ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} Points`,
             bestFor: "Heavy lifting",
             price: `Unlock with a ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}-Point recharge`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "Point recharge to unlock",
             features: [
               "Advanced reasoning models",
               "Claude Opus access",
@@ -132,6 +138,8 @@ export default {
             meta: "注册即可使用",
             bestFor: "先试试水",
             price: "免费",
+            priceValue: "免费",
+            priceDetail: "无需充值",
             features: [
               "标准 LLM 模型",
               "多 Agent 协作",
@@ -144,6 +152,8 @@ export default {
             meta: `余额达到 ${ADVANCED_FEATURE_MIN_BALANCE} 积分`,
             bestFor: "日常主力",
             price: `余额满 ${ADVANCED_FEATURE_MIN_BALANCE} 积分解锁`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "积分余额解锁",
             features: [
               "批量文件分析",
               "实时联网搜索",
@@ -156,6 +166,8 @@ export default {
             meta: `单笔充值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分`,
             bestFor: "重载任务",
             price: `充值 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分解锁`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "积分充值解锁",
             features: [
               "GPT Pro 系列模型",
               "Claude Opus 模型",
@@ -245,6 +257,8 @@ export default {
             meta: "註冊即可使用",
             bestFor: "先試試水",
             price: "免費",
+            priceValue: "免費",
+            priceDetail: "無需儲值",
             features: [
               "標準 LLM 模型",
               "多 Agent 協作",
@@ -257,6 +271,8 @@ export default {
             meta: `餘額達到 ${ADVANCED_FEATURE_MIN_BALANCE} 積分`,
             bestFor: "日常主力",
             price: `餘額滿 ${ADVANCED_FEATURE_MIN_BALANCE} 積分解鎖`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "積分餘額解鎖",
             features: [
               "批次檔案分析",
               "即時聯網搜尋",
@@ -269,6 +285,8 @@ export default {
             meta: `單筆充值 ≥ ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 積分`,
             bestFor: "重載任務",
             price: `充值 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 積分解鎖`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "積分儲值解鎖",
             features: [
               "GPT Pro 系列模型",
               "Claude Opus 模型",
@@ -358,6 +376,8 @@ export default {
             meta: "登録ですぐに使用可能",
             bestFor: "まず試す",
             price: "無料",
+            priceValue: "無料",
+            priceDetail: "チャージ不要",
             features: [
               "標準的なLLMモデル",
               "マルチエージェント協調",
@@ -370,6 +390,8 @@ export default {
             meta: `残高${ADVANCED_FEATURE_MIN_BALANCE}ポイント到達`,
             bestFor: "日常の主力",
             price: `${ADVANCED_FEATURE_MIN_BALANCE}ポイントでアンロック`,
+            priceValue: `${ADVANCED_FEATURE_MIN_BALANCE}`,
+            priceDetail: "ポイント残高でアンロック",
             features: [
               "複数ファイル分析",
               "リアルタイムWeb検索",
@@ -382,6 +404,8 @@ export default {
             meta: `1回のチャージが${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}ポイント以上`,
             bestFor: "重いタスク",
             price: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}ポイントのチャージでアンロック`,
+            priceValue: `${GPT_PRO_REQUIRED_RECHARGE_AMOUNT}`,
+            priceDetail: "ポイントチャージでアンロック",
             features: [
               "GPT Pro 系列モデル",
               "Claude Opus へのアクセス",

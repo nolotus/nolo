@@ -87,6 +87,7 @@ export const StreamingMessageText = memo(
       nodes={model.nodes}
       renderText={(text) => <StreamingTextSpan content={text} />}
       cursor={cursorElement}
+      isStreaming={isStreaming}
     />
   );
 });

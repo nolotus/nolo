@@ -23,6 +23,19 @@ import {
 } from "./compactObservation.js";
 
 const HOST_NAME = "com.nolo.chrome_connector";
+
+/**
+ * Runtime capability probe. Firefox does not implement `chrome.debugger` (Mozilla bug 1316741),
+ * and the Firefox build also drops the permission from the manifest. Every `chrome.debugger.*`
+ * call site must sit behind this flag; CDP-only actions answer an explicit
+ * `UNSUPPORTED_ON_FIREFOX` verdict instead of throwing a bare TypeError.
+ */
+const HAS_DEBUGGER = typeof chrome !== "undefined" && Boolean(chrome?.debugger);
+const DEBUGGER_UNSUPPORTED_SIGNAL = "UNSUPPORTED_ON_FIREFOX";
+const DEBUGGER_UNSUPPORTED_MESSAGE =
+  "This action needs the chrome.debugger API, which Firefox does not implement. " +
+  "Use the Firefox build's remaining actions (read_page, click, type, press, scroll, tabs) instead.";
+
 const consoleByTab = new Map();
 const networkByTab = new Map();
 const refRegistry = createElementRefRegistry();
@@ -114,6 +127,7 @@ function connectorError(code, message) {
  * released, so a failed detach must never fail the action that triggered it.
  */
 async function detachTab(tabId) {
+  if (!HAS_DEBUGGER) return false;
   const id = normalizeTabId(tabId);
   if (!id) return false;
   const timer = detachTimers.get(id);
@@ -174,6 +188,9 @@ async function persistOpenedTabs() {
 }
 
 async function ensureDebugger(tabId) {
+  if (!HAS_DEBUGGER) {
+    throw connectorError(DEBUGGER_UNSUPPORTED_SIGNAL, DEBUGGER_UNSUPPORTED_MESSAGE);
+  }
   const target = tabTarget(tabId);
   try {
     await chrome.debugger.attach(target, "1.3");
@@ -194,6 +211,7 @@ async function ensureDebugger(tabId) {
  * not attach itself. Detaching a target another debugger owns simply fails and is swallowed.
  */
 async function reconcileDebuggerAttachments() {
+  if (!HAS_DEBUGGER) return;
   try {
     const targets = await chrome.debugger.getTargets();
     for (const target of targets) {
@@ -211,6 +229,7 @@ async function reconcileDebuggerAttachments() {
   }
 }
 
+if (HAS_DEBUGGER) {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const tabId = String(source.tabId || "");
   if (!tabId) return;
@@ -245,6 +264,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     }, COMPACT_BUDGET.network.rawCap);
   }
 });
+} // HAS_DEBUGGER — Firefox never reaches this listener; console/network read paths degrade below.
 
 /** A removed tab has no attachment and no per-tab state worth keeping. */
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -1266,7 +1286,15 @@ async function handleAction(action, payload = {}) {
         version: chrome.runtime.getManifest().version,
         hostName: HOST_NAME,
         protocolVersion: CONNECTOR_PROTOCOL_VERSION,
-        features: [...CONNECTOR_FEATURES],
+        // Advertise only what this browser can actually run: without chrome.debugger the
+        // debugger-backed features are filtered out so the desktop client refuses those tools
+        // up front instead of discovering the gap mid-task. `file_upload` is CDP-backed
+        // (DOM.setFileInputFiles) — the set_files handler is gated on HAS_DEBUGGER, so the
+        // advertised features must drop it too or the desktop would believe uploads work.
+        features: CONNECTOR_FEATURES.filter(
+          (feature) =>
+            HAS_DEBUGGER || (feature !== "browser_debug" && feature !== "file_upload"),
+        ),
       };
     }
     case "list_tabs": {
@@ -1317,8 +1345,16 @@ async function handleAction(action, payload = {}) {
       return await runTargetedAction("click", payload);
     case "type":
       return await runTargetedAction("type", payload);
-    case "set_files":
+    case "set_files": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("set_files", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       return await handleSetFiles(payload);
+    }
     case "press": {
       const pressedKey = String(payload.key || "");
       let expectedActiveName = "";
@@ -1345,6 +1381,13 @@ async function handleAction(action, payload = {}) {
       });
     }
     case "mouse_move": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("mouse_move", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const mTarget = tabTarget(payload.tabId);
       await ensureDebugger(payload.tabId);
       const mx = Math.round(Number(payload.x || 0));
@@ -1360,6 +1403,13 @@ async function handleAction(action, payload = {}) {
       return ht;
     }
     case "mouse_click": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("mouse_click", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const target = tabTarget(payload.tabId);
       await ensureDebugger(payload.tabId);
       const x = Math.round(Number(payload.x || 0));
@@ -1377,6 +1427,13 @@ async function handleAction(action, payload = {}) {
       return { ok: true, mouseClicked: { x, y } };
     }
     case "douyin_delete_one": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("douyin_delete_one", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const dTabId = String(payload.tabId);
       const keyword = String(payload.keyword || "猫");
       const target = tabTarget(dTabId);
@@ -1428,6 +1485,13 @@ async function handleAction(action, payload = {}) {
       };
     }
     case "douyin_delete_one_v2": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("douyin_delete_one_v2", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const vTabId = String(payload.tabId);
       const keyword = String(payload.keyword || "猫");
       // 若已有遗留弹窗，先清理
@@ -1457,34 +1521,95 @@ async function handleAction(action, payload = {}) {
       return { ok: true, title: step1.title, confirm: step2 };
     }
     case "douyin_rect_row": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("douyin_rect_row", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const rr = await executeInTab(payload.tabId, pageOperation, [
         { op: "rect_row_delete", keyword: payload.keyword || "猫" },
       ]);
       return rr;
     }
     case "douyin_rect_confirm": {
+      if (!HAS_DEBUGGER) {
+        return verdictEnvelope("douyin_rect_confirm", {
+          status: "failed",
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message: DEBUGGER_UNSUPPORTED_MESSAGE,
+        });
+      }
       const rc = await executeInTab(payload.tabId, pageOperation, [
         { op: "rect_confirm_button", text: payload.text || "确定" },
       ]);
       return rc;
     }
     case "screenshot": {
-      const target = tabTarget(payload.tabId);
-      await ensureDebugger(payload.tabId);
-      const result = await chrome.debugger.sendCommand(target, "Page.captureScreenshot", {
-        captureBeyondViewport: Boolean(payload.fullPage),
-        format: "png",
-      });
-      scheduleDetach(payload.tabId);
-      return { dataUrl: `data:image/png;base64,${result.data}` };
+      if (HAS_DEBUGGER) {
+        const target = tabTarget(payload.tabId);
+        await ensureDebugger(payload.tabId);
+        const result = await chrome.debugger.sendCommand(target, "Page.captureScreenshot", {
+          captureBeyondViewport: Boolean(payload.fullPage),
+          format: "png",
+        });
+        scheduleDetach(payload.tabId);
+        return { dataUrl: `data:image/png;base64,${result.data}` };
+      }
+      /**
+       * Firefox fallback: tabs.captureVisibleTab covers the *viewport* only, so a requested
+       * full-page capture is reported honestly rather than silently truncated. It returns a
+       * data URL directly; PNG output stays in the same `dataUrl` field.
+       */
+      const tab = await chrome.tabs.get(Number(payload.tabId));
+      if (!tab || tab.active !== true) {
+        return verdictEnvelope("screenshot", {
+          status: "failed",
+          signal: "TAB_NOT_VISIBLE",
+          message:
+            "Firefox can only capture the visible tab (tabs.captureVisibleTab). " +
+            "Activate the tab, or run the screenshot on Chrome for off-screen captures.",
+        });
+      }
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      return {
+        dataUrl,
+        signal: payload.fullPage ? "screenshot_viewport_only" : "screenshot",
+        capture: "visible_tab",
+      };
     }
     case "read_console": {
+      if (!HAS_DEBUGGER) {
+        /**
+         * Low-fidelity fallback: the CDP Runtime domain has no Firefox equivalent, and MAIN-world
+         * console hooks are not reliably supported, so instead of inventing a half-capture the
+         * connector returns whatever was buffered (nothing in practice) plus an explicit signal.
+         */
+        return {
+          ...summarizeConsoleEntries([], { limit: payload.limit }),
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message:
+            "read_console relies on chrome.debugger (Runtime.* events), which Firefox does not implement.",
+        };
+      }
       await ensureDebugger(payload.tabId);
       const entries = consoleByTab.get(String(payload.tabId)) || [];
       scheduleDetach(payload.tabId);
       return summarizeConsoleEntries(entries, { limit: payload.limit });
     }
     case "read_network": {
+      if (!HAS_DEBUGGER) {
+        return {
+          ...summarizeNetworkEntries([], {
+            limit: payload.limit,
+            includeLowValue: payload.includeAssets === true,
+          }),
+          signal: DEBUGGER_UNSUPPORTED_SIGNAL,
+          message:
+            "read_network relies on chrome.debugger (Network.* events), which Firefox does not implement.",
+        };
+      }
       await ensureDebugger(payload.tabId);
       const entries = networkByTab.get(String(payload.tabId)) || [];
       scheduleDetach(payload.tabId);
@@ -1541,7 +1666,12 @@ async function handleAction(action, payload = {}) {
     case "detach": {
       // Internal action: not model-visible, and never fatal when nothing is attached.
       const detached = await detachTab(payload.tabId);
-      return { ok: true, detached, tabId: normalizeTabId(payload.tabId) };
+      return {
+        ok: true,
+        detached,
+        tabId: normalizeTabId(payload.tabId),
+        ...(HAS_DEBUGGER ? {} : { signal: DEBUGGER_UNSUPPORTED_SIGNAL }),
+      };
     }
     default:
       throw new Error(`Unknown Chrome connector action: ${action}`);

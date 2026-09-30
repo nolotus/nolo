@@ -166,6 +166,7 @@ export function createCliAuthorityBrokerSocketInvoker(options: {
       const timeout = setTimeout(() => {
         finish(() => {
           socket.destroy();
+          socket.unref?.();
           reject(new CliAuthorityBrokerTimeoutError(options.endpoint, timeoutMs));
         });
       }, timeoutMs);

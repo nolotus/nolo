@@ -26,12 +26,13 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
 
   const [orchestrationTab, setOrchestrationTab] = useState<OrchestrationDiagramTab>(() => {
     if (typeof window === "undefined") return "coding";
-    return readOrchestrationTabFromSearch(window.location.search) ?? "coding";
+    const fromUrl = readOrchestrationTabFromSearch(window.location.search);
+    return fromUrl && fromUrl !== "video" ? fromUrl : "coding";
   });
 
   useEffect(() => {
     const tabFromUrl = readOrchestrationTabFromSearch(searchParams.toString());
-    if (tabFromUrl) {
+    if (tabFromUrl && tabFromUrl !== "video") {
       setOrchestrationTab(tabFromUrl);
     }
   }, [searchParams]);
@@ -41,7 +42,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
       { id: "coding" as const, label: t("welcomeSection.orchestration.tabs.coding") },
       { id: "brainstorm" as const, label: t("welcomeSection.orchestration.tabs.brainstorm") },
       { id: "consensus" as const, label: t("welcomeSection.orchestration.tabs.consensus") },
-      { id: "video" as const, label: t("welcomeSection.orchestration.tabs.video") },
     ],
     [t],
   );
@@ -336,22 +336,6 @@ const WelcomeSection = ({ showBrandFraming = true }: { showBrandFraming?: boolea
               <div key={cap.title} className="ws-builder-bridge-cap">
                 <h3>{cap.title}</h3>
                 <p>{cap.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className={`ws-deliverables ws-section--editorial ${orchestrationReveal.className}`}>
-          <div className="ws-deliverables-head">
-            <div className="ws-section-kicker">{t("welcomeSection.output.badge")}</div>
-            <h2 className="ws-deliverables-title">{t("welcomeSection.output.title")}</h2>
-            <p className="ws-deliverables-desc">{t("welcomeSection.output.desc")}</p>
-          </div>
-          <div className="ws-deliverables-grid">
-            {(t("welcomeSection.output.types", { returnObjects: true }) as Array<{ label: string; example: string }>).map((type) => (
-              <div key={type.label} className="ws-deliverable-card">
-                <span className="ws-deliverable-label">{type.label}</span>
-                <span className="ws-deliverable-example">{type.example}</span>
               </div>
             ))}
           </div>

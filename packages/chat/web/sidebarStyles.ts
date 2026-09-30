@@ -45,7 +45,7 @@ export const sidebarStyles = stylex.create({
     padding: "0 var(--sidebar-row-pad)",
   },
   topExploreMenuIcon: {
-    backgroundImage: "linear-gradient(135deg, hsl(262 60% 55%), hsl(210 70% 52%))",
+    backgroundImage: "linear-gradient(135deg, #3FA8EE, #0052AD)",
     color: "#fff",
     width: "var(--sidebar-icon-size)",
     height: "var(--sidebar-icon-size)",

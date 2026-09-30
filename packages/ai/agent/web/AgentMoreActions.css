@@ -2,8 +2,8 @@
           position: relative;
           z-index: 10;
           flex-shrink: 0;
-          width: 24px;
-          height: var(--control-sm);
+          width: var(--control-md);
+          height: var(--control-md);
         }
 
         .agent__more {
@@ -11,8 +11,8 @@
           border: 1px solid transparent;
           color: var(--textSubtle, var(--textTertiary));
           padding: 0;
-          width: 24px;
-          height: 24px;
+          width: var(--control-md);
+          height: var(--control-md);
           border-radius: 50%;
           transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
           cursor: pointer;
@@ -42,14 +42,14 @@
         }
 
         /* 移动端触达目标 ≥44px：盒模型真实 44px（可度量），
-           负 margin 保持布局占位不变；触屏无 hover，
-           去掉背景圆反馈避免 44px 圆溢出 24px 容器盖住标题。
+           负 margin（token 算式，无裸 px）保持布局占位不变；触屏无 hover，
+           去掉背景圆反馈避免大圆盖住标题。
            必须放在上面的 hover/--active 规则之后（同级 !important 按源码序决胜） */
         @media (max-width: 768px) {
           .agent__more {
             width: var(--tap-target-min);
             height: var(--tap-target-min);
-            margin: -10px;
+            margin: calc((var(--control-md) - var(--tap-target-min)) / 2);
           }
           .agent__more:hover,
           .agent__more--active {
@@ -60,11 +60,11 @@
 
         .agent__actions-menu {
           position: absolute;
-          top: calc(100% + 6px);
+          top: calc(100% + var(--space-1));
           right: 0;
           background: var(--surfaceRaised, var(--backgroundSecondary));
           border: 1px solid var(--borderMuted, var(--borderLight));
-          border-radius: var(--radius-lg, 12px);
+          border-radius: var(--radius-lg);
           z-index: 20;
           overflow: hidden;
           min-width: 148px;
@@ -79,7 +79,7 @@
 
         .agent__action-item {
           width: 100%;
-          padding: 9px 12px;
+          padding: var(--space-2) var(--space-3);
           border: none;
           background: none;
           display: flex;

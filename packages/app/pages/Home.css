@@ -19,8 +19,8 @@
  * 及下方 motion 规则通过 var() 继承消费；stylex.create 无法声明自定义属性。
  * hook 类名 home-main 由 Home.tsx 经 stylex.props(styles.homeMain, "home-main") 保留。 */
 .home-main {
-  --home-content-max-width: 980px;
   /* 对应 Home.tsx 的 HOME_PANE_MIN_HEIGHT，改值需两边同步 */
+  --home-content-max-width: 980px;
   --home-pane-min-height: 340px;
   width: 100%;
   box-sizing: border-box;
@@ -52,28 +52,6 @@
   }
 }
 
-/* .activity-pane：动画 + reduced-motion 重置需同源级联，整体留在 CSS。
- * hook 类名 activity-pane 由 Home.tsx 保留。 */
-.activity-pane {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-  position: static;
-  animation: home-activity-pane-in var(--home-motion-duration)
-    var(--home-motion-ease) var(--home-motion-delay) both;
-}
-
-@keyframes home-activity-pane-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 /* .home-pane-skeleton__shimmer：shimmer 渐变 + 动画（骨架其余静态样式在
  * HomeStyles.ts）。hook 类名由 HomePaneSkeleton.tsx 保留。 */
 .home-pane-skeleton__shimmer {
@@ -96,56 +74,14 @@
   }
 }
 
-/* ── 第三方 React Aria Tabs 内部节点 ──
- * 保留原因：.react-aria-* 为第三方内部类，Tabs 组件只走 className 字符串
- * 通道；home-content-tabs 同时被子选择器引用。参考 React Aria Tabs：
- * 底部轨道 + 选中滑动下划线。这套构建不解析 Tabs.css 顶层
- * --border-color/--highlight-background，故直接用项目 token 上色。 */
-.home-content-tabs {
-  max-width: 420px;
-}
-
-.home-content-header > .home-content-tabs {
-  flex: 1;
-  min-width: 0;
-}
-
-.home-content-tabs .react-aria-TabList {
-  border-bottom: 1px solid var(--border);
-}
-
-.home-content-tabs .react-aria-Tab[data-selected] {
-  color: var(--textHeading, var(--text));
-}
-
-.home-content-tabs .react-aria-Tab[data-hovered] {
-  color: var(--textHeading, var(--text));
-}
-
-.home-content-tabs .react-aria-Tab[data-selected] .react-aria-SelectionIndicator {
-  background: var(--primary);
-}
-
-/* ── motion 变量过渡（.home-content-body）──
- * 保留原因：transition shorthand 引用 --home-motion-* 变量；
- * min-height 过渡需与 HomeStyles 的静态 min-height 协同。 */
-.home-content-body {
-  transition: min-height var(--home-motion-duration) var(--home-motion-ease);
-}
-
 /* ── prefers-reduced-motion：统一关闭上述 CSS 动画/过渡 ──
  * 保留原因：需按选择器整体覆盖上方 animation/transition 声明，
  * StyleX 原子类与本文件的覆盖存在源码顺序竞争，同文件内最稳。 */
 @media (prefers-reduced-motion: reduce) {
-  .home-primary-chat,
-  .activity-pane {
+  .home-primary-chat {
     animation: none;
     transform: none;
     opacity: 1;
-  }
-
-  .home-content-body {
-    transition: none;
   }
 
   .home-pane-skeleton__shimmer {

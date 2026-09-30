@@ -16,6 +16,7 @@ import {
 import { resolveAgentSwitchTarget } from "./agentPicker";
 import { detectFileReferences, detectImagePaths, summarizeAttachment } from "./pasteImage";
 import { parseCliLocale, setCliLocale, t } from "./i18n";
+import { renderRecentDiagnostics } from "./recentDiagnostics";
 import {
   getActiveThemeName,
   setActiveThemeName,
@@ -331,15 +332,8 @@ export function handleTuiInput(
         action: { type: "cwd-refresh", switchMessage },
       };
     }
-    case "/density":
-    case "/tools":
-    case "/thinking":
-      // 三套显示选择已收敛为唯一内置默认体验，命令保留识别但不切换任何状态；
-      // 专业细节走环境变量兜底（重启生效）。
-      return {
-        nextState: state,
-        output: t("displayFixedHint"),
-      };
+    case "/logs":
+      return { nextState: state, output: renderRecentDiagnostics(process.env) };
     case "/context":
     case "/ctx":
       return { nextState: state, output: renderContextPanel(state) };

@@ -3,7 +3,6 @@
 import { toErrorMessage } from "core/errorMessage";
 import { readAction } from "database/actions/read";
 import { readAndWaitAction } from "database/actions/readAndWait";
-import { slateToSimplifiedMarkdown } from "create/editor/transforms/slateToSimplifiedMarkdown";
 import type { PageData } from "render/page/types";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { isTableMetaKey, rowKey, isAgentKey } from "database/keys";
@@ -11,6 +10,7 @@ import { DataType } from "create/types";
 import { TableMeta } from "render/table/types";
 import { fetchAndSerializeTable } from "render/table/utils/tableSerialization";
 import { readFileFunc } from "./readFileTool";
+import { resolvePageReadMarkdown } from "./readDocTool";
 
 // ---- Types ----
 
@@ -116,10 +116,12 @@ export async function readFunc(
       throw new Error(`未找到 dbKey 为 ${dbKey} 的数据。`);
     }
 
-    // 智能化处理：如果是页面，自动转 Markdown
+    // 智能化处理：如果是页面，自动转 Markdown。
+    // Current documents read from slateData; legacy content-only documents
+    // intentionally fall back to content through the shared resolver.
     if (dbKey.startsWith("PAGE-") || (result as any).type === DataType.DOC) {
       const pageData = result as PageData;
-      const markdownContent = slateToSimplifiedMarkdown(pageData.slateData || []);
+      const markdownContent = resolvePageReadMarkdown(pageData);
 
       return {
         rawData: {

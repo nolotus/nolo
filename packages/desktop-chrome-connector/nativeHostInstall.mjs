@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_CONNECTOR_ROOT = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Fixed Gecko id for the Firefox build (docs/plans/2026-09-28-firefox-amo-port.md). It is also the
+ * only entry in the Firefox native host manifest's `allowed_extensions`.
+ */
+export const FIREFOX_EXTENSION_ID = "nolo-browser-connector@nolo.chat";
+
 export function extensionIdFromPublicKey(publicKeyBase64) {
   const digest = createHash("sha256").update(Buffer.from(publicKeyBase64, "base64")).digest();
   return Array.from(digest.subarray(0, 16), (byte) =>
@@ -32,7 +38,23 @@ function resolveNodePath() {
 export function nativeMessagingHostsDir({
   home = process.env.HOME || "",
   platform = process.platform,
+  browser = "chrome",
 } = {}) {
+  if (browser === "firefox") {
+    if (platform === "darwin") {
+      return resolve(home, "Library/Application Support/Mozilla/NativeMessagingHosts");
+    }
+    if (platform === "linux") {
+      return resolve(home, ".mozilla/native-messaging-hosts");
+    }
+    throw new Error(
+      `Firefox native host installation is not implemented for platform "${platform}". Windows needs a ` +
+        "registry value under HKCU\\Software\\Mozilla\\NativeMessagingHosts pointing at the manifest file.",
+    );
+  }
+  if (browser !== "chrome") {
+    throw new Error(`Unknown native messaging browser target: "${browser}".`);
+  }
   if (platform === "darwin") {
     return resolve(home, "Library/Application Support/Google/Chrome/NativeMessagingHosts");
   }
@@ -50,17 +72,19 @@ export function resolveNativeHostInstallPaths({
   home = process.env.HOME || "",
   connectorRoot = DEFAULT_CONNECTOR_ROOT,
   platform = process.platform,
+  browser = "chrome",
 } = {}) {
   // Deliberately the same directory on every platform: the desktop app resolves its connector token
   // from this path (packages/desktop-chrome-connector/chromeConnector.ts) and the two must not drift.
   const supportDir = resolve(home, "Library/Application Support/Nolo/ChromeConnector");
   return {
     connectorRoot,
+    browser,
     extensionManifestPath: resolve(connectorRoot, "extension", "manifest.json"),
     hostPath: resolve(connectorRoot, "native-host", "nolo-chrome-native-host.mjs"),
     templatePath: resolve(connectorRoot, "native-host", "com.nolo.chrome_connector.json"),
     nativeManifestPath: resolve(
-      nativeMessagingHostsDir({ home, platform }),
+      nativeMessagingHostsDir({ home, platform, browser }),
       "com.nolo.chrome_connector.json",
     ),
     supportDir,
@@ -75,11 +99,14 @@ export function installNativeHostManifest({
   platform = process.platform,
   extensionId,
   nodePath,
+  browser = "chrome",
 } = {}) {
-  const paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform });
+  const paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform, browser });
   const manifest = JSON.parse(readFileSync(paths.templatePath, "utf8"));
   const extensionManifest = JSON.parse(readFileSync(paths.extensionManifestPath, "utf8"));
-  const resolvedExtensionId = extensionId || extensionIdFromPublicKey(extensionManifest.key);
+  const resolvedExtensionId =
+    extensionId ||
+    (browser === "firefox" ? FIREFOX_EXTENSION_ID : extensionIdFromPublicKey(extensionManifest.key));
   const resolvedNodePath = nodePath || resolveNodePath();
 
   mkdirSync(paths.supportDir, { recursive: true });
@@ -95,13 +122,25 @@ export function installNativeHostManifest({
   chmodSync(paths.wrapperPath, 0o755);
 
   manifest.path = paths.wrapperPath;
-  manifest.allowed_origins = [`chrome-extension://${resolvedExtensionId}/`];
+  // Measured on Firefox 156: a native host manifest containing `allowed_origins` makes
+  // `runtime.connectNative` drop the port immediately (onDisconnect fires with an empty
+  // lastError, the host never starts, and the extension's 1s retry loop spins forever).
+  // Firefox must get only name/description/path/type + `allowed_extensions` keyed on the
+  // Gecko id — no `allowed_origins`, and no fake `chrome-extension://<gecko-id>/` origin.
+  // Chrome ignores `allowed_extensions` and still needs `allowed_origins`.
+  if (browser === "firefox") {
+    delete manifest.allowed_origins;
+    manifest.allowed_extensions = [FIREFOX_EXTENSION_ID];
+  } else {
+    manifest.allowed_origins = [`chrome-extension://${resolvedExtensionId}/`];
+  }
 
   mkdirSync(dirname(paths.nativeManifestPath), { recursive: true });
   writeFileSync(paths.nativeManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   return {
     extensionId: resolvedExtensionId,
+    browser,
     nodePath: resolvedNodePath,
     tokenPath: paths.tokenPath,
     ...paths,

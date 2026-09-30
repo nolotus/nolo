@@ -15,17 +15,18 @@
         }
 
         .quick-chat-greeting {
-          font-size: clamp(20px, 2.4vw, 28px);
+          font-size: var(--type-h2);
           font-weight: 600;
           color: var(--text);
-          margin-bottom: clamp(10px, 1.5vw, 16px);
+          margin-bottom: var(--space-3);
           text-align: center;
           letter-spacing: 0;
         }
 
-        /* 登录首页作为吸底 Shell 时，隐藏其内部的 Greeting，防止浮动文字盖在 Widget 卡片正中间 */
+        /* 登录首页主输入框居中时，展示自然居中的问候语 */
         .quick-chat-wrapper[data-surface="home-primary"] .quick-chat-greeting {
-          display: none !important;
+          margin-bottom: var(--space-4);
+          font-size: var(--type-h3);
         }
 
         .quick-chat-container {
@@ -35,10 +36,10 @@
         }
 
         .quick-chat-workspace-indicator {
-          margin: 0 0 6px;
+          margin: 0 0 var(--space-1);
           overflow: hidden;
           color: var(--textSecondary, var(--text));
-          font-size: 12px;
+          font-size: var(--fontSize-sm, 12px);
           line-height: 1.4;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -75,8 +76,8 @@
 .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           /* Home primary keeps the shell clean; focus supplies the affordance. */
           min-height: 66px;
-          padding: 8px 14px;
-          border-radius: 20px;
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-md);
           /* Premium soft glow background with a hint of brand tint to solve white-on-white contrast issues */
           background: linear-gradient(
             135deg,
@@ -101,8 +102,8 @@
         /* Space Home: denser entry above the data section (no hero). */
         .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           min-height: 72px;
-          padding: 10px 14px;
-          border-radius: 22px;
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-md);
         }
 
         /*
@@ -115,10 +116,10 @@
           .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
             flex-direction: row;
             align-items: center;
-            gap: 10px;
+            gap: var(--space-2);
             min-height: 72px;
             /* 12 vertical + 36 control + 12 ≈ 60–76 with borders/min-height */
-            padding: 12px 14px;
+            padding: var(--space-3) var(--space-4);
           }
 
           .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea-wrap {
@@ -129,7 +130,7 @@
 
           .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea {
             min-height: 36px;
-            padding: 6px 0;
+            padding: var(--space-1) 0;
             line-height: 1.35;
           }
 
@@ -232,7 +233,7 @@
 
         .quick-chat-container[data-surface="home-primary"] .message-input__textarea {
           min-height: 30px;
-          padding: 6px 0;
+          padding: var(--space-1, 4px) 0;
           font-size: var(--fontSize-lg);
         }
 
@@ -273,8 +274,8 @@
           }
           .quick-chat-container[data-surface="home-primary"] .quick-chat-box:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
             min-height: 72px;
-            padding: 10px 12px;
-            border-radius: 22px;
+            padding: var(--space-2) var(--space-3);
+            border-radius: var(--radius-md);
           }
           .quick-chat-container[data-surface="home-primary"] .message-input__textarea {
             min-height: 38px;
@@ -282,8 +283,8 @@
           }
           .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
             min-height: 68px;
-            padding: 8px 12px;
-            border-radius: 20px;
+            padding: var(--space-2) var(--space-3);
+            border-radius: var(--radius-md);
           }
           .quick-chat-container[data-surface="space-home-compact"] .message-input__textarea {
             min-height: 34px;
@@ -331,12 +332,14 @@
           background: transparent;
           border: none;
           color: var(--textSecondary);
-          padding: 6px 10px;
-          border-radius: var(--radius-full);
+          padding: var(--space-1, 4px) var(--space-2, 8px);
+          border-radius: 999px;
           font-size: var(--fontSize-sm, 14px);
           cursor: pointer;
           transition: all 0.2s ease;
           margin-right: 4px; /* Space between personalization and send */
+          /* 透明底文本钮：盒高 ≥ control-md（桌面热区下限），视觉只剩文字 */
+          min-height: var(--control-md, 36px);
         }
 
         .personalization-button:hover {
@@ -360,24 +363,26 @@
           flex-wrap: wrap;
           gap: 8px;
           justify-content: center;
-          margin-top: clamp(6px, 1.2vw, 12px);
+          margin-top: var(--space-3, 12px);
           max-width: 800px;
         }
 
         .quick-chat-chip {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
+          gap: var(--space-1, 4px);
           background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
           border: 1px solid var(--borderLight);
-          border-radius: var(--radius-full, 9999px);
-          padding: 4px 12px;
-          font-size: var(--fontSize-xs, 12px);
+          border-radius: 999px;
+          padding: var(--space-2, 8px) var(--space-3, 12px);
+          font-size: var(--fontSize-min-readable, 12px);
           font-weight: 500;
           color: var(--textSecondary);
           cursor: pointer;
           transition: all 0.2s ease;
           box-shadow: 0 1px 2px var(--shadowLight);
+          /* 12px 下限 + 桌面热区 ≥32px；移动端在 ≤640 媒体查询里升到 44px */
+          min-height: var(--control-md, 36px);
         }
 
         .quick-chat-chip:hover {
@@ -398,10 +403,45 @@
 .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           font-size: var(--fontSize-base, 14px);
           max-width: 220px;
-          padding: 7px 12px;
+          padding: var(--space-2, 8px) var(--space-3, 12px);
+          /* 透明底触发器：盒高 ≥ control-md，视觉只剩文字 */
+          min-height: var(--control-md, 36px);
         }
 
         .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger-label:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           max-width: 160px;
+        }
+
+        /* ── 移动端热区 ≥44px（≤640px）────────────────────────────
+           放在所有 base 规则之后：同特异性按源码序决胜，媒体查询里的
+           声明必须后于 base 才能生效。
+           透明底控件只撑盒不改视觉：文字/图标尺寸不变，命中区域变大。 */
+        @media (max-width: 640px) {
+          .quick-chat-container[data-surface="home-primary"] .upload-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="home-primary"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .upload-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-box .upload-button,
+          .quick-chat-box .send-button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+            --button-size: var(--tap-target-min, 44px);
+          }
+          .quick-chat-container[data-surface="home-primary"] .voice-btn-in-send,
+          .quick-chat-container[data-surface="space-home-compact"] .voice-btn-in-send,
+          .quick-chat-box .voice-btn-in-send {
+            width: var(--tap-target-min, 44px);
+            height: var(--tap-target-min, 44px);
+          }
+          .quick-chat-container[data-surface="home-primary"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
+          .quick-chat-container[data-surface="space-home-compact"] .agent-picker__trigger:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+            min-height: var(--tap-target-min, 44px);
+          }
+          .personalization-button {
+            min-height: var(--tap-target-min, 44px);
+            min-width: var(--tap-target-min, 44px);
+            justify-content: center;
+          }
+          .quick-chat-chip {
+            min-height: var(--tap-target-min, 44px);
+          }
         }

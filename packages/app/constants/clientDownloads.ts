@@ -56,6 +56,15 @@ export const getClientDownloadUrls = (
 
 export type ClientDownloadPlatform = keyof typeof STABLE_CLIENT_DOWNLOAD_URLS;
 
+/**
+ * Stable URL for the signed Firefox add-on. The file lives in public/downloads/ and is
+ * uploaded by the release pipeline (same mechanism as install-nolo.sh and the CLI
+ * tarballs). Keeping a version-stable name means this link never goes stale across
+ * connector releases — the file on the server is always the latest signed build.
+ */
+export const CONNECTOR_DOWNLOAD_URL =
+  "/public/downloads/nolo-browser-connector.xpi";
+
 export const CLIENT_DOWNLOAD_META: Record<ClientDownloadPlatform, string> = {
   android: "APK · Android 8+",
   windows: "EXE · x64 · Win 10+",
@@ -65,3 +74,5 @@ export const CLIENT_DOWNLOAD_META: Record<ClientDownloadPlatform, string> = {
   linuxRpm: "RPM · Fedora/RHEL · 由包管理器更新",
   macos: "DMG · Apple Silicon",
 };
+
+export const CONNECTOR_DOWNLOAD_META = "XPI · Firefox 140+";

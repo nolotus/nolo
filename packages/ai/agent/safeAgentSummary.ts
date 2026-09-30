@@ -54,6 +54,27 @@ export function deriveCredentialGroup(ref?: string | null): {
   };
 }
 
+/**
+ * 自定义 API agent（apiSource=custom）无 apiKeyRef/credentialRef 时的凭证组兜底：
+ * 用 userId + customProviderUrl 派生稳定组。同一 URL 视为同组（保守方向：
+ * 同 URL 不同 key 的极端情况会被当成同凭证而拒绝并发，安全）；不同 provider
+ * URL 则允许并发。2026-09-28：无 ref 的 custom agent（如自建 Kimi）此前解析为
+ * 「未知」，其活跃 run 会把同父对话后续所有并发派发全部拦下。
+ */
+export function deriveCustomProviderCredentialGroup(
+  userId: string | undefined,
+  customProviderUrl?: string | null,
+): { credentialGroup: string; credentialKind: CredentialKind } | undefined {
+  if (typeof customProviderUrl !== "string" || !customProviderUrl.trim()) {
+    return undefined;
+  }
+  const basis = `${userId ?? ""}|${customProviderUrl.trim().toLowerCase()}`;
+  return {
+    credentialGroup: `custom-${fnv1a32Hex(basis)}`,
+    credentialKind: "api-key",
+  };
+}
+
 export function summarizeCredentialGroups(
   agents: Array<{
     credentialGroup?: string;

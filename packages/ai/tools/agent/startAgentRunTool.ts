@@ -143,6 +143,14 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "可选。显式允许同一凭证组并发派发。默认 false。在用户授权同一凭据多任务并发或确认上游支持并发时使用。",
                 default: false,
             },
+            readOnly: {
+                type: "boolean",
+                description:
+                    "可选。为 true 时移除专用写/改/删工具（writeFile/editFile/deleteMemory 等），" +
+                    "保留读文件、搜索与 shell，适合 reviewer/审计/探测。注意：shell 仍可写文件，" +
+                    "这不是沙箱，brief 里仍需写明只读要求。默认 false；只由此参数显式声明，不从 task 文本推断。",
+                default: false,
+            },
             trackTodo: {
                 type: "boolean",
                 description:
@@ -192,6 +200,8 @@ interface StartAgentRunArgs {
     allowUnknownCredential?: boolean;
     /** 显式允许同一凭据组并发派发；默认 false。 */
     allowCredentialConcurrency?: boolean;
+    /** 只读子任务：移除写/改/删类工具，保留读与 shell；默认 false。 */
+    readOnly?: boolean;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
@@ -276,6 +286,7 @@ export async function startAgentRunFunc(
                 // undefined 会误入同步等待分支。
                 waitForCompletion: wait === true,
                 runKind: "subtask",
+                ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
             })
         ).unwrap();

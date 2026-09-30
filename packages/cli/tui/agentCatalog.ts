@@ -27,6 +27,7 @@ import {
 } from "core/builtinAgents";
 import { builtinAgentCatalogEntryById } from "core/builtinAgentCatalog";
 import { parsePublicAgentId } from "core/prefix";
+import { refreshCatalogSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 
 // The TUI default is Nolo itself. App Builder is a separate platform agent and
 // must never become the implicit fallback when profile/env resolution is absent.
@@ -393,6 +394,12 @@ export async function loadAgentCatalog(args: {
     rawData.privateAgents,
     rawData.favoritedAtByKey,
   );
+  // 订阅制套餐（Kimi/GLM Coding）额度懒刷新：3s 预算内合并新快照，失败静默。
+  await refreshCatalogSubscriptionQuotas({
+    entries,
+    env,
+    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+  });
   agentCatalogCache = { cacheKey, at: Date.now(), entries };
   return entries;
 }
@@ -412,13 +419,18 @@ function refreshAgentCatalogInBackground(
     { ...args, deadlineKind: "background" },
     env,
   )
-    .then((rawData) => {
+    .then(async (rawData) => {
       const entries = mergeCatalogEntries(
         args.currentKey,
         resolveCatalogPlatformAgents(env),
         rawData.privateAgents,
         rawData.favoritedAtByKey,
       );
+      await refreshCatalogSubscriptionQuotas({
+        entries,
+        env,
+        ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+      });
       agentCatalogCache = { cacheKey, at: Date.now(), entries };
     })
     .catch(() => {

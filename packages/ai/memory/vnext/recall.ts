@@ -1,8 +1,5 @@
 import type { MemoryBenchmarkTextProvider } from "./benchmark/provider";
-import {
-  listMemoryEntitiesVNext,
-  listMemoryStatesForEntityVNext,
-} from "./store";
+import { loadMemoryVNextCatalog } from "./store";
 import type { MemoryEntityVNext, MemoryStateVNext } from "./types";
 
 const MAX_RECALL_REFS = 6;
@@ -56,14 +53,6 @@ const parseSelection = (raw: string): { refs: string[]; reason: string } => {
 // entity/state counts, see the benchmark --scale modes). Truncation or
 // prioritization needs its own design round and is intentionally not hacked in
 // here.
-const buildCatalog = async (db: any, ownerId: string) => {
-  const entities = await listMemoryEntitiesVNext(db, ownerId);
-  const states: MemoryStateVNext[] = [];
-  for (const entity of entities) {
-    states.push(...(await listMemoryStatesForEntityVNext(db, ownerId, entity.id)));
-  }
-  return { entities, states };
-};
 
 const catalogText = (entities: MemoryEntityVNext[], states: MemoryStateVNext[]): string =>
   JSON.stringify(
@@ -98,7 +87,7 @@ export const createMemoryVNextRecall = (input: {
 }) =>
   async (query: string): Promise<MemoryRecallResult> => {
     const startedAt = performance.now();
-    const { entities, states } = await buildCatalog(input.db, input.ownerId);
+    const { entities, states } = await loadMemoryVNextCatalog(input.db, input.ownerId);
     if (entities.length === 0 && states.length === 0) {
       return {
         query,

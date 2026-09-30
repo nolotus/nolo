@@ -78,6 +78,11 @@
           .ReadOnlyMarkdownContent__body table {
             margin: var(--space-4) 0;
           }
+          /* 引导句贴近它引出的列表；列表之后的段落仍保持完整段距 */
+          .ReadOnlyMarkdownContent__body p + ul,
+          .ReadOnlyMarkdownContent__body p + ol {
+            margin-top: var(--space-2);
+          }
           .ReadOnlyMarkdownContent__body ul,
           .ReadOnlyMarkdownContent__body ol {
             padding-left: var(--space-4);

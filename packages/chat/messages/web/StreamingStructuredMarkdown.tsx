@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import { List } from "render/web/elements/List";
+import CodeBlock from "render/web/elements/CodeBlock";
 import {
   SafeLink,
   TextBlockRenderer,
@@ -9,6 +10,7 @@ type StreamingStructuredMarkdownProps = {
   nodes: any[];
   renderText: (content: string) => React.ReactNode;
   cursor: React.ReactNode;
+  isStreaming?: boolean;
 };
 
 function isTextNode(node: any): node is { text: string } {
@@ -64,10 +66,11 @@ function renderTextLeaf(
 function renderNodes(
   nodes: any[],
   path: string,
-  renderText: (content: string) => React.ReactNode
+  renderText: (content: string) => React.ReactNode,
+  isStreaming = false
 ): React.ReactNode[] {
   return nodes.map((node, index) =>
-    renderNode(node, `${path}-${index}`, renderText)
+    renderNode(node, `${path}-${index}`, renderText, isStreaming)
   );
 }
 
@@ -112,15 +115,21 @@ function renderListItem(
   );
 }
 
-function renderCodeBlock(node: any, key: string) {
-  const language = node.language || "plaintext";
+function renderCodeBlock(node: any, key: string, isStreaming: boolean) {
   const content = getNodeText(node.children || []).replace(/\n$/, "");
-  const languageClass = `language-${language}`;
 
+  // 复用 render 包的完整 CodeBlock：复制按钮、折叠、全屏、mermaid 预览。
+  // 流式期间只展示源码（CodeBlock 内部按 isStreaming 延迟预览），
+  // 流式结束后 mermaid 块自动检测并渲染成图。
   return (
-    <pre key={key} className={`streaming-markdown-code ${languageClass}`}>
-      <code className={languageClass}>{content}</code>
-    </pre>
+    <CodeBlock
+      key={key}
+      attributes={{}}
+      element={node}
+      isStreaming={isStreaming}
+    >
+      {content}
+    </CodeBlock>
   );
 }
 
@@ -177,7 +186,8 @@ function renderTable(
 function renderNode(
   node: any,
   key: string,
-  renderText: (content: string) => React.ReactNode
+  renderText: (content: string) => React.ReactNode,
+  isStreaming = false
 ): React.ReactNode {
   if (isTextNode(node)) {
     return renderTextLeaf(node, key, renderText);
@@ -226,7 +236,7 @@ function renderNode(
       return renderListItem(node, key, renderText);
 
     case "code-block":
-      return renderCodeBlock(node, key);
+      return renderCodeBlock(node, key, isStreaming);
 
     case "table":
       return renderTable(node, key, renderText);
@@ -250,9 +260,9 @@ function renderNode(
 }
 
 export const StreamingStructuredMarkdown = memo(
-  ({ nodes, renderText, cursor }: StreamingStructuredMarkdownProps) => (
+  ({ nodes, renderText, cursor, isStreaming = false }: StreamingStructuredMarkdownProps) => (
     <div className="streaming-markdown-body ReadOnlyMarkdownContent__body">
-      {renderNodes(nodes, "root", renderText)}
+      {renderNodes(nodes, "root", renderText, isStreaming)}
       {cursor}
     </div>
   )

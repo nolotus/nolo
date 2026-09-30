@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LuWaves } from "react-icons/lu";
 import type { ShareSummary } from "share/types";
 import { DataType } from "create/types";
 import { createWebSharePath, shareApi } from "share/link";
@@ -200,7 +201,13 @@ const ShareCommunityPage: React.FC = () => {
         <div className="ShareCommunityPage__status is-error">{error}</div>
       ) : null}
       {!loading && !error && filteredShares.length === 0 ? (
-        <div className="ShareCommunityPage__empty">{t("community_empty")}</div>
+        <div className="ShareCommunityPage__empty">
+          <LuWaves size={40} className="ShareCommunityPage__emptyIcon" aria-hidden="true" />
+          <span>{t("community_empty")}</span>
+          <p className="ShareCommunityPage__emptyHint">
+            {t("community_empty_hint", "换个分类看看，或稍后再来。")}
+          </p>
+        </div>
       ) : null}
 
       {filteredShares.length > 0 ? (

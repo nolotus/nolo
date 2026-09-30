@@ -5,8 +5,8 @@
   flex-direction: column;
   background: var(--surfaceRaised, var(--backgroundTertiary));
   border: 1px solid color-mix(in srgb, var(--borderSubtle) 64%, transparent);
-  border-radius: var(--radius-xl);
-  padding: 18px;
+  border-radius: var(--radius-md);
+  padding: 20px;
   text-decoration: none;
   color: inherit;
   transition: all 0.2s ease;
@@ -36,7 +36,7 @@
 .ShareCard__identity {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -50,6 +50,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* 行内文本链接：桌面纵向热区 ≥24px，移动端 ≥40px */
+  min-height: 24px;
   text-decoration: none;
   color: inherit;
 }
@@ -61,9 +63,9 @@
 .ShareCard__agentInfo {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: var(--fontSize-base);
-  color: var(--textTertiary);
+  color: var(--textSecondary);
   max-width: 100%;
 }
 
@@ -82,10 +84,14 @@
   font-weight: 500;
 }
 
+.ShareCard__userAvatar .avatar-text {
+  font-size: var(--type-micro);
+}
+
 .ShareCard__icon {
   width: 40px;
   height: 40px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xs);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -124,14 +130,14 @@
 
 .ShareCard__badges {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   padding-top: 2px;
 }
 
 .ShareCard__badge {
   font-size: var(--fontSize-sm);
   padding: 2px 8px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--backgroundTertiary);
   color: var(--textSecondary);
   font-weight: 600;
@@ -147,8 +153,8 @@
 
 .ShareCard__cover {
   width: 100%;
-  height: 140px;
-  border-radius: var(--radius-lg);
+  height: 160px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   background: var(--backgroundTertiary);
   margin-bottom: 4px;
@@ -173,7 +179,7 @@
 
 .ShareCard__title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--type-lead);
   font-weight: 700;
   line-height: var(--leading-normal);
   color: var(--text);
@@ -182,7 +188,7 @@
 
 .ShareCard__desc {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--type-small);
   line-height: var(--leading-relaxed);
   color: var(--textSecondary);
   display: -webkit-box;
@@ -218,4 +224,35 @@
 .ShareCard:hover .ShareCard__arrow {
   opacity: 1;
   transform: translateX(0);
+}
+
+.ShareCard__previewImage {
+  width: 100%;
+  border-radius: var(--radius-xs);
+  display: block;
+}
+
+.ShareCard__openShare {
+  min-height: 32px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
+  font-size: var(--type-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .ShareCard {
+    padding: 16px;
+  }
+  .ShareCard__identityLink {
+    min-height: 40px;
+  }
+  .ShareCard__openShare {
+    min-height: 44px;
+    padding: 12px 20px;
+  }
 }

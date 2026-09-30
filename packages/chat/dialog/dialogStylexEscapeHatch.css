@@ -224,7 +224,13 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   padding-left: 12px;
   padding-right: 12px;
   padding-top: var(--space-4);
-  gap: var(--space-4);
+  /* 行间距由 item-wrapper[data-spacing] 分档（messageRowSpacing.ts） */
+}
+
+/* 消息行由 data-spacing 分档；摘要分隔、置顶 todo、压缩提示等非消息行保留原来的 16px */
+.page-assistant-panel__chat-messages .chat-messages__list > :not(.chat-messages__item-wrapper) + *,
+.page-assistant-panel__chat-messages .chat-messages__list > * + :not(.chat-messages__item-wrapper) {
+  margin-top: var(--space-4);
 }
 
 /* .page-assistant-panel__chat-messages .avatar-area */

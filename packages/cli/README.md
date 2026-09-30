@@ -233,7 +233,7 @@ nolo table add-column --table meta-<userId>-<tableId> --schema-write-ok --name "
 
 
 在当前 TUI 中，支持的斜杠命令包括：
-`/agent`、`/agents`、`/altscreen`（`<on|off>`）、`/clear`、`/compact`、`/context`（别名 `/ctx`）、`/copy`、`/customize`、`/density`、`/doc`、`/exit`、`/help`、`/history`、`/jobs`、`/lang`、`/login`、`/mouse`、`/new`、`/procs`、`/profile`、`/quit`、`/resume`、`/runtime`、`/skill`、`/stop`、`/switch`、`/tasks`、`/theme`、`/thinking`、`/tools`、`/update`（映射到 `nolo update`）、`/version`。
+`/agent`、`/agents`、`/altscreen`（`<on|off>`）、`/clear`、`/compact`、`/context`（别名 `/ctx`）、`/copy`、`/customize`、`/doc`、`/exit`、`/help`、`/logs`、`/history`、`/jobs`、`/lang`、`/login`、`/mouse`、`/new`、`/procs`、`/profile`、`/quit`、`/resume`、`/runtime`、`/skill`、`/stop`、`/switch`、`/tasks`、`/theme`、`/update`（映射到 `nolo update`）、`/version`。
 
 以下为规划中的产品方向示例（尚未在 TUI 中实现）：
 

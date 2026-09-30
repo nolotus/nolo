@@ -390,6 +390,7 @@ export const SLASH_COMMANDS = [
   "/profile",
   "/update",
   "/version",
+  "/logs",
   "/tasks",
   "/jobs",
   "/procs",

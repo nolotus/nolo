@@ -649,7 +649,7 @@ export function parseAgentUpdateArgs(args: string[]) {
   }
 
   if (Object.keys(updates).length === 0) {
-    if (!promptDoc && !copyProviderFrom) {
+    if (!promptDoc && !copyProviderFrom && !presetId) {
       throw new Error("No updates provided. Use --model / --cli-provider / --api-source / --field key=value.");
     }
   }
@@ -687,14 +687,12 @@ export async function buildCreatedAgentRecord(args: {
         `unknown --preset "${args.parsed.presetId}". Run \`nolo agent providers\` to list preset ids.`
       );
     }
-    if (fields.kind === "oauth" || fields.requiresDesktopOAuth) {
-      throw new Error(
-        `--preset "${args.parsed.presetId}" is an OAuth subscription; create it in Nolo Desktop (OAuth login required).`
-      );
-    }
     const u = args.parsed.updates;
     u.apiSource = "custom";
     u.provider = u.provider ?? fields.provider;
+    if (fields.apiKeyRef && !u.apiKeyRef) {
+      u.apiKeyRef = fields.apiKeyRef;
+    }
     if (fields.customProviderUrl && !u.customProviderUrl) {
       u.customProviderUrl = fields.customProviderUrl;
     }

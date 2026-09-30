@@ -424,6 +424,7 @@ export default {
           }
         }
       },
+      agentSquare: "Plaza",
     },
   },
   "zh-CN": {
@@ -841,6 +842,7 @@ export default {
           }
         }
       },
+      agentSquare: "广场",
     },
   },
   "zh-Hant": {
@@ -1258,6 +1260,7 @@ export default {
           }
         }
       },
+      agentSquare: "廣場",
     },
   },
   ja: {
@@ -1695,6 +1698,7 @@ export default {
           }
         }
       },
+      agentSquare: "広場",
     },
   },
 };

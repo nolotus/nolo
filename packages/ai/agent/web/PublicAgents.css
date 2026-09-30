@@ -1,7 +1,5 @@
         :root {
           --public-agents-control-height: 40px;
-          --public-agents-radius: 12px;
-          --public-agents-pill-radius: 21px;
         }
 
         .public-agents {
@@ -26,7 +24,7 @@
           display: flex;
           align-items: center;
           flex-wrap: nowrap;
-          gap: 10px;
+          gap: var(--space-2);
         }
 
         .public-agents__search {
@@ -42,7 +40,7 @@
 
         :global(.public-agents__search-input .search-input) {
           height: var(--public-agents-control-height);
-          border-radius: var(--public-agents-pill-radius);
+          border-radius: 999px;
           border: none;
           background: var(--surfaceInteractive, var(--backgroundSecondary));
           box-shadow: inset 0 0 0 1px var(--borderMuted, var(--borderLight));
@@ -55,9 +53,43 @@
           box-shadow: 0 0 0 3px var(--focusRing);
         }
 
+        /* 清空搜索按钮：视觉圆底保持 20px（::before 绘制），真实盒 44px 触区；
+           隐藏态包裹层带 scale(0.8)，撤掉以免度量缩水（不可见，无视觉影响）。
+           注意1：本文件历史 :global(...) 写法在当前管线不会 unwrap（浏览器视为
+           非法选择器整条丢弃），这里用普通后代选择器确保生效。
+           注意2：stylex 编译产物自带 :not(#\#)×3 提权，覆盖同样需要 5× 提权。 */
+        .public-agents__search-input [aria-hidden="true"]:has(> button.search-input-clear):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+          transform: scale(1);
+        }
+
+        .public-agents__search-input button.search-input-clear:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+          position: relative;
+          width: var(--tap-target-min, 44px);
+          height: var(--tap-target-min, 44px);
+          background-color: transparent;
+          border-radius: 50%;
+        }
+
+        .public-agents__search-input button.search-input-clear::before {
+          content: "";
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 20px;
+          height: 20px;
+          transform: translate(-50%, -50%);
+          background-color: var(--backgroundSecondary);
+          border-radius: 50%;
+          transition: background-color 0.2s ease;
+        }
+
+        .public-agents__search-input button.search-input-clear:hover::before {
+          background-color: var(--textTertiary);
+        }
+
         .public-agents__filter-chip {
           height: var(--public-agents-control-height);
-          border-radius: var(--public-agents-pill-radius);
+          border-radius: 999px;
           border: 1px solid var(--borderMuted, var(--borderLight));
           background: var(--surfaceInteractive, var(--backgroundSecondary));
           color: var(--textSecondary);
@@ -95,17 +127,17 @@
           gap: 2px;
           align-self: flex-end;
           background: var(--surfaceInteractive, var(--backgroundSecondary));
-          padding: 2px 3px;
-          border-radius: var(--public-agents-pill-radius);
+          padding: 2px 4px;
+          border-radius: 999px;
           height: var(--public-agents-control-height);
           border: 1px solid var(--borderMuted, var(--borderLight));
         }
 
         .public-agents__sort-label {
-          font-size: var(--fontSize-xs);
-          color: var(--textSubtle, var(--textTertiary));
-          margin-left: 10px;
-          margin-right: 6px;
+          font-size: var(--fontSize-min-readable, 12px);
+          color: var(--textSecondary);
+          margin-left: var(--space-2);
+          margin-right: var(--space-1);
           font-weight: 600;
           letter-spacing: 0.02em;
         }
@@ -113,10 +145,10 @@
         .public-agents__sort-pill {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: var(--space-1);
           height: 100%;
           padding: 0 12px;
-          border-radius: calc(var(--public-agents-pill-radius) - 3px);
+          border-radius: var(--radius-sm);
           border: none;
           background: transparent;
           color: var(--textMuted, var(--textSecondary));
@@ -194,7 +226,7 @@
             order: 3;
             justify-content: space-between;
             width: 100%;
-            height: 38px;
+            height: var(--tap-target-min, 44px);
             align-self: stretch;
           }
 

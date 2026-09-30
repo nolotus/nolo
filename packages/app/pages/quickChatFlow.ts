@@ -311,3 +311,28 @@ export function useQuickChatMode(): [QuickChatMode, (mode: QuickChatMode) => voi
 
   return [mode, handleChange];
 }
+
+export const QUICK_CHAT_PENDING_DRAFT_KEY = "quickChatPendingDraft";
+
+/** 未登录发送时暂存输入，登录回到 /chat 后恢复。 */
+export function savePendingQuickChatDraft(text: string): void {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(QUICK_CHAT_PENDING_DRAFT_KEY, text);
+    }
+  } catch {
+    // 存储不可用时忽略
+  }
+}
+
+/** 读取并清除暂存草稿；无则返回空串。 */
+export function takePendingQuickChatDraft(): string {
+  try {
+    if (typeof sessionStorage === "undefined") return "";
+    const value = sessionStorage.getItem(QUICK_CHAT_PENDING_DRAFT_KEY) ?? "";
+    if (value) sessionStorage.removeItem(QUICK_CHAT_PENDING_DRAFT_KEY);
+    return value;
+  } catch {
+    return "";
+  }
+}

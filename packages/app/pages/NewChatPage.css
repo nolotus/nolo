@@ -4,6 +4,9 @@
   width: 100%;
   min-height: 100%;
   padding: 32px 20px 48px;
+  /* 390px 视口下 width:100% + content-box 会把右边界顶到 420px（右侧 10px 被裁）。
+     App 无全局 border-box reset，页面壳自行声明。 */
+  box-sizing: border-box;
 }
 
 .new-chat-page__content {

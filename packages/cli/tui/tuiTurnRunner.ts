@@ -48,7 +48,7 @@ import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import { backfillRunRecordParentDialog } from "../agentRunControl";
 import type { SelfUpdateExecution } from "../updateCommands";
-import type { spawnProcess } from "../processSpawn";
+import type { SpawnFn, spawnProcess } from "../processSpawn";
 import type { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import type { saveProfileAgentSelection } from "../client/profileConfig";
 import { runAskChoiceDialog } from "./askChoiceDialog";
@@ -86,6 +86,7 @@ import {
   emitTerminalAttention,
   runWithInputRequiredAttention,
   shouldEmitTerminalBell,
+  TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
 } from "./terminalNotification";
 import {
   createHistoryOutputStream,
@@ -95,6 +96,7 @@ import {
   type TurnHistory,
 } from "./tuiHistory";
 import type { FixedInputController } from "./tuiRawInput";
+import { withSuspendedRenderer } from "./suspendedRenderer";
 
 /** Max bytes of AGENTS.md/CLAUDE.md to inject — prevents context window overflow. */
 // AGENTS.md 读取已收敛到 agent-runtime/agentsMd 的 readAgentsMdLayerFromDisk
@@ -119,6 +121,12 @@ export type WorkspaceOptions = {
   dialogPickerRunner?: typeof runDialogPicker;
   dialogHistoryLoader?: typeof loadDialogHistoryForDisplay;
   selfUpdater?: SelfUpdater;
+  /**
+   * Spawn seam for the default selfUpdater's `runSelfUpdateDetailed` call
+   * (test-only; production falls back to `resolveDefaultSpawn()`).
+   * Not forwarded to `spawnRunner` — that one drives TUI gates/watchers.
+   */
+  selfUpdateSpawn?: SpawnFn;
   spawnRunner?: typeof spawnProcess;
   /** Injected summary LLM caller for /compact compression. Wired by localRuntimeAdapter. */
   summaryLlmCaller?: (content: string) => Promise<string | null>;
@@ -562,13 +570,18 @@ export function waitForActionGate(
       let exitCode = 1;
       let errorMessage = "";
       try {
-        const proc = spawnRunner({
-          cmd: commandPayload.command,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
+        // The subprocess inherits our stdio — yield the alt screen for its
+        // duration so its bytes land on the main screen instead of the TUI's
+        // private buffer. This path owns no composer, so no repaint callback.
+        exitCode = await withSuspendedRenderer(output, async () => {
+          const proc = spawnRunner({
+            cmd: commandPayload.command,
+            stdin: "inherit",
+            stdout: "inherit",
+            stderr: "inherit",
+          });
+          return await proc.exited;
         });
-        exitCode = await proc.exited;
       } catch (error) {
         errorMessage = toErrorMessage(error);
       } finally {
@@ -649,17 +662,22 @@ export function waitForRawActionGate(
       let exitCode = 1;
       let errorMessage = "";
       try {
-        const proc = spawnRunner({
-          cmd: commandPayload.command,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        exitCode = await proc.exited;
+        // Hand the terminal to the subprocess: leaveAltScreen yields the
+        // private buffer, the suspended flag blocks resize→repaint writes,
+        // and onResume (afterSubprocess → resumeFromSubprocess) repaints on
+        // the way back in. See suspendedRenderer.ts.
+        exitCode = await withSuspendedRenderer(output, async () => {
+          const proc = spawnRunner({
+            cmd: commandPayload.command,
+            stdin: "inherit",
+            stdout: "inherit",
+            stderr: "inherit",
+          });
+          return await proc.exited;
+        }, { onResume: () => hooks?.afterSubprocess?.() });
       } catch (error) {
         errorMessage = toErrorMessage(error);
       } finally {
-        hooks?.afterSubprocess?.();
         if (wasRaw) rawInput.setRawMode?.(true);
       }
       finish({

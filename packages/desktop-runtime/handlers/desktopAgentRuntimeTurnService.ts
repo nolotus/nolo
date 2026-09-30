@@ -125,6 +125,8 @@ import {
   buildDesktopServerPlatformOpenAiTools,
   buildDesktopOpenAiTools,
   addDesktopDefaultWebTools,
+  addDesktopDefaultLocalTools,
+  DESKTOP_DEFAULT_LOCAL_TOOL_NAMES,
   buildDesktopLocalWorkspaceToolset,
   buildDesktopLocalPolicyToolNames,
   filterDesktopChromeConnectorToolNames,
@@ -635,13 +637,19 @@ function buildDesktopLocalToolExecutors(args: {
   runChildDesktopTurn?: DesktopStartAgentRunChildRunner;
 }) {
   const allowedNames = args.toolNames ? new Set(args.toolNames) : null;
+  // 本地工作区执行器恒注册、不参与 toolNames 过滤：executeLocalToolWithPolicy
+  // 是分发前的唯一闸门（policy 不允许的调用根本到不了 executor）。若按
+  // requestedToolNames 过滤工作区执行器，policy 层（非 declared-only 时放行
+  // 全部 SHELL_TOOL_NAMES）会比 executor 层宽，模型凭先验调用时就会出现
+  // 「allowed by policy but no local executor is registered」的空转错误。
+  const workspaceExecutors = createLocalWorkspaceToolExecutors({
+    workspaceRoot: args.workspaceRoot,
+    commandTimeoutMs: args.commandTimeoutMs,
+    commandOutputLimit: args.commandOutputLimit,
+    restrictShellToWorkspace: args.restrictShellToWorkspace,
+  });
   const executors = {
-    ...createLocalWorkspaceToolExecutors({
-      workspaceRoot: args.workspaceRoot,
-      commandTimeoutMs: args.commandTimeoutMs,
-      commandOutputLimit: args.commandOutputLimit,
-      restrictShellToWorkspace: args.restrictShellToWorkspace,
-    }),
+    ...workspaceExecutors,
     ...buildDesktopChromeConnectorToolExecutors(),
     ...buildDesktopServerPlatformToolExecutors({
       env: args.env,
@@ -713,7 +721,14 @@ function buildDesktopLocalToolExecutors(args: {
     },
   };
   return allowedNames
-    ? Object.fromEntries(Object.entries(executors).filter(([name]) => allowedNames.has(name)))
+    ? {
+        ...workspaceExecutors,
+        ...Object.fromEntries(
+          Object.entries(executors).filter(
+            ([name]) => allowedNames.has(name) && !(name in workspaceExecutors),
+          ),
+        ),
+      }
     : executors;
 }
 
@@ -958,10 +973,13 @@ export function createDesktopAgentRuntimeActions(args: {
         // declared-only 工具面不动，其余交互 agent 无条件补齐。放在
         // narrow 之前，纯浏览器操作意图的轮次仍收窄到 chrome-only；
         // 用户的全局「联网搜索」开关与 disabledTools 在下游仍会生效。
-        toolNames: addDesktopDefaultWebTools(
-          expandEnabledPacks(
-            effectiveEnabledPacks,
-            resolveRequestedRuntimeToolNames({ agentConfig }),
+        toolNames: addDesktopDefaultLocalTools(
+          addDesktopDefaultWebTools(
+            expandEnabledPacks(
+              effectiveEnabledPacks,
+              resolveRequestedRuntimeToolNames({ agentConfig }),
+            ),
+            { skip: isDefaultAgent },
           ),
           { skip: isDefaultAgent },
         ),
@@ -980,8 +998,11 @@ export function createDesktopAgentRuntimeActions(args: {
           ];
           useDeclaredToolNamesOnly = true;
         } else {
-          // 无 hint：通用档不带任何工作区工具。
-          requestedToolNames = [];
+          // 无 hint：挂载宿主机默认本地工具（shell 族）。桌面端即用户本机，
+          // 「打开就能执行」是默认预期；空工具面只会让模型凭先验调用后撞上
+          // executor 缺失空转。读写等工作区工具仍需 workspaceToolsHint 或
+          // 绑定文件夹授权。
+          requestedToolNames = [...DESKTOP_DEFAULT_LOCAL_TOOL_NAMES];
           useDeclaredToolNamesOnly = true;
         }
       } else {

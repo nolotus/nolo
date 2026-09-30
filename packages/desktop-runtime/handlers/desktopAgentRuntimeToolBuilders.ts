@@ -12,6 +12,7 @@ import type { DesktopAgentRuntimeEnv } from "./desktopAgentRuntimeHostFacts";
 import { CHROME_CONNECTOR_TOOL_NAMES, type ChromeConnectorToolName } from "ai/tools/chromeConnectorTools";
 import { buildCodeWorkSkillPrompt, CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS } from "ai/skills/codePlannerSkills";
 import { buildLocalWorkspaceToolset, buildLocalWorkspacePolicyToolNames, buildLocalWorkspaceOpenAiTools } from "agent-runtime/localWorkspaceTools";
+import { SHELL_TOOL_NAMES } from "agent-runtime/localWorkspaceToolDefs";
 import { buildExternalOpenAiTools, filterExternalToolNames } from "agent-runtime/externalTools";
 import { buildNoloWorkspaceOpenAiTools, filterNoloWorkspaceToolNames } from "agent-runtime/noloWorkspaceTools";
 import { TOOL_PACKS, FORCED_TOOLS, applyDisabledTools, expandEnabledPacks, addDefaultLightWebToolsForConfiguredAgents } from "ai/tools/toolPacks";
@@ -52,6 +53,25 @@ export const DESKTOP_SERVER_WEB_TOOL_NAME_SET = new Set<string>(DESKTOP_SERVER_W
  * "联网搜索" switch and per-agent disables still win.
  */
 export const DESKTOP_DEFAULT_WEB_TOOL_NAMES = ["exa_search", "fetchWebpage"] as const;
+
+/**
+ * Host-level default local tools (shell 工具族)。产品决策（2026-09）：桌面端
+ * 即用户本机，打开就应能默认执行本地命令——否则公共 agent（如内置 nolo
+ * agent）凭 prompt 先验调用 execShell 时会撞上「policy 放行但 executor
+ * 未注册」的空转。与 DESKTOP_DEFAULT_WEB_TOOL_NAMES 同一注入点：narrow 之前
+ * （纯浏览器意图轮次仍收窄到 chrome-only）、applySystemBuiltinSkillFilter /
+ * disabledTools 之前（用户开关仍然优先）。破坏性命令由
+ * blockDestructiveWithoutConfirmation 闸门兜底。
+ */
+export const DESKTOP_DEFAULT_LOCAL_TOOL_NAMES = SHELL_TOOL_NAMES;
+
+export function addDesktopDefaultLocalTools(
+  toolNames: string[],
+  args?: { skip?: boolean },
+): string[] {
+  if (args?.skip) return toolNames;
+  return [...new Set([...toolNames, ...DESKTOP_DEFAULT_LOCAL_TOOL_NAMES])];
+}
 
 export function addDesktopDefaultWebTools(
   toolNames: string[],

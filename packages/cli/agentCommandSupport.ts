@@ -42,6 +42,7 @@ export type LocalRuntimeProbeResult = {
 export type AgentCommandDeps = {
   env?: EnvLike;
   output?: OutputLike;
+  error?: OutputLike;
   db?: CliKvDb;
   fetchImpl?: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;

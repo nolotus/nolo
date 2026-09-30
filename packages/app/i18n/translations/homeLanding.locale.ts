@@ -4,30 +4,20 @@ export default {
   [Language.EN]: {
     translation: {
       homeLandingHero: {
-        title: "One goal. Multiple AIs. Get it done together.",
+        title: "Let Claude, GPT and DeepSeek work as your own AI team.",
         description:
-          "Tell Nolo what you want to achieve. It can assign the work, use different models, run tasks in parallel, check the results, and keep the context moving.",
+          "Bring the subscriptions and API keys you already pay for. Nolo splits the work, runs agents in parallel, and has them discuss and review each other — on your own computer.",
         primaryCta: "Start a task",
       },
       homeLandingWhy: {
         kicker: "Why Nolo",
-        title: "One chat window is useful. A coordinated team can finish more of the job.",
+        title: "You can already juggle several AIs by hand. Nolo makes them one team.",
         description:
-          "Keep the simplicity of one request, while Nolo handles the parts that usually force you to jump between models, tools, and conversations.",
-        singleLabel: "Single AI chat",
-        singleItems: ["One model at a time", "You move context manually", "You decide every handoff", "You check and retry yourself"],
+          "The work you do today across tabs — copying context, asking another model to check, starting over when quota runs out — becomes one conversation with agents you define.",
+        singleLabel: "Juggling several AI windows",
+        singleItems: ["Copy context between tabs by hand", "Paste output into another model to check it", "Start over when a subscription hits its limit", "Conclusions scattered across chat logs"],
         noloLabel: "Nolo",
-        noloItems: ["Different models can take different roles", "Context stays with the task", "Work can run in parallel", "Results can be checked before delivery"],
-      },
-      homeLandingReceipt: {
-        kicker: "Task evidence",
-        title: "See the work, not just the promise.",
-        goal: "Goal",
-        execution: "Execution",
-        review: "Review",
-        result: "Result",
-        resultValue: "Ready to deliver",
-        note: "Demo data is shown here until real run metrics are available for the agents, models, duration, and cost.",
+        noloItems: ["Agents keep fixed roles, prompts and models", "Independent agents review each other", "Switch agents mid-conversation; history carries over", "Conclusions land in pages and docs"],
       },
       homeLandingFaq: {
         kicker: "FAQ",
@@ -39,30 +29,20 @@ export default {
   [Language.ZH_CN]: {
     translation: {
       homeLandingHero: {
-        title: "一个目标，多个 AI，一起把它做完。",
+        title: "让 Claude、GPT、DeepSeek，组成你自己的 AI 团队。",
         description:
-          "你只需要说清目标。Nolo 可以分任务、调用不同模型、并行执行、检查结果，并把上下文接着用下去。",
+          "用你已经付费的订阅和 key，装上就能用。它们会拆任务、并行干活、互相讨论和 review，全程跑在你自己的电脑上。",
         primaryCta: "开始一个任务",
       },
       homeLandingWhy: {
         kicker: "为什么是 Nolo",
-        title: "一个聊天窗口很好用，但一支会协作的 AI 团队能把更多事情直接做完。",
+        title: "你已经在手动拼好几个 AI 了。Nolo 让它们成为一支团队。",
         description:
-          "你仍然只需要说一次目标。原本要在多个模型、工具和对话之间来回搬运的复杂性，交给 Nolo 处理。",
-        singleLabel: "单个 AI 对话",
-        singleItems: ["一次主要依赖一个模型", "上下文靠你手动搬", "每次交接都要你安排", "结果自己检查、自己返工"],
+          "你今天在多个窗口间做的事——搬上下文、贴给另一个模型挑错、额度用完重开——变成一段对话里、由你定义的 Agent 协作完成。",
+        singleLabel: "自己开几个 AI 窗口拼",
+        singleItems: ["在窗口之间手动搬上下文", "把结果复制给另一个模型挑错", "订阅额度用完就得重开对话", "结论散落在各个聊天记录里"],
         noloLabel: "Nolo",
-        noloItems: ["不同模型可以承担不同角色", "上下文跟着任务继续走", "多个环节可以并行推进", "交付前可以继续检查和返工"],
-      },
-      homeLandingReceipt: {
-        kicker: "任务证据",
-        title: "别只告诉我能做，给我看它怎么做完。",
-        goal: "目标",
-        execution: "执行",
-        review: "检查",
-        result: "结果",
-        resultValue: "准备交付",
-        note: "以下 Agent、模型、耗时和成本为演示数据，接入真实运行指标后替换。",
+        noloItems: ["Agent 有固定的角色、提示词和模型，长期保留", "独立的 Agent 单独 review", "同一段对话里换 Agent，历史接着用", "结论沉淀成页面和文档"],
       },
       homeLandingFaq: {
         kicker: "常见问题",
@@ -74,30 +54,20 @@ export default {
   [Language.ZH_HANT]: {
     translation: {
       homeLandingHero: {
-        title: "一個目標，多個 AI，一起把它做完。",
+        title: "讓 Claude、GPT、DeepSeek，組成你自己的 AI 團隊。",
         description:
-          "你只需要說清目標。Nolo 可以分任務、調用不同模型、並行執行、檢查結果，並把上下文接著用下去。",
+          "用你已經付費的訂閱和 key，裝上就能用。它們會拆任務、並行幹活、互相討論和 review，全程跑在你自己的電腦上。",
         primaryCta: "開始一個任務",
       },
       homeLandingWhy: {
         kicker: "為什麼是 Nolo",
-        title: "一個聊天視窗很好用，但一支會協作的 AI 團隊能把更多事情直接做完。",
+        title: "你已經在手動拼好幾個 AI 了。Nolo 讓它們成為一支團隊。",
         description:
-          "你仍然只需要說一次目標。原本要在多個模型、工具和對話之間來回搬運的複雜性，交給 Nolo 處理。",
-        singleLabel: "單個 AI 對話",
-        singleItems: ["一次主要依賴一個模型", "上下文靠你手動搬", "每次交接都要你安排", "結果自己檢查、自己返工"],
+          "你今天在多個視窗間做的事——搬上下文、貼給另一個模型挑錯、額度用完重開——變成一段對話裡、由你定義的 Agent 協作完成。",
+        singleLabel: "自己開幾個 AI 視窗拼",
+        singleItems: ["在視窗之間手動搬上下文", "把結果複製給另一個模型挑錯", "訂閱額度用完就得重開對話", "結論散落在各個聊天紀錄裡"],
         noloLabel: "Nolo",
-        noloItems: ["不同模型可以承擔不同角色", "上下文跟著任務繼續走", "多個環節可以並行推進", "交付前可以繼續檢查和返工"],
-      },
-      homeLandingReceipt: {
-        kicker: "任務證據",
-        title: "別只告訴我能做，給我看它怎麼做完。",
-        goal: "目標",
-        execution: "執行",
-        review: "檢查",
-        result: "結果",
-        resultValue: "準備交付",
-        note: "以下 Agent、模型、耗時和成本為演示資料，接入真實運行指標後替換。",
+        noloItems: ["Agent 有固定的角色、提示詞和模型，長期保留", "獨立的 Agent 單獨 review", "同一段對話裡換 Agent，歷史接著用", "結論沉澱成頁面和文件"],
       },
       homeLandingFaq: {
         kicker: "常見問題",
@@ -109,30 +79,20 @@ export default {
   [Language.JA]: {
     translation: {
       homeLandingHero: {
-        title: "一つの目標を、複数の AI で最後までやり切る。",
+        title: "Claude、GPT、DeepSeek を、あなた専用の AI チームに。",
         description:
-          "やりたいことを伝えるだけ。Nolo は作業を分け、複数のモデルを使い、並行して進め、結果を確認しながらコンテキストを引き継げます。",
+          "すでに払っているサブスクリプションや API キーをそのまま使えます。タスクを分け、並行で進め、互いに議論とレビューを行う——すべてあなたのコンピューター上で。",
         primaryCta: "タスクを始める",
       },
       homeLandingWhy: {
         kicker: "Why Nolo",
-        title: "一つのチャットは便利。でも、協力する AI チームなら仕事のもっと先まで進められる。",
+        title: "複数の AI を手作業でつないでいるなら、Nolo で一つのチームに。",
         description:
-          "目標は一度伝えるだけ。モデルやツール、会話の間を行き来していた複雑さを Nolo が引き受けます。",
-        singleLabel: "単体の AI チャット",
-        singleItems: ["基本は一度に一つのモデル", "文脈は自分で移す", "引き継ぎを毎回指示する", "確認とやり直しも自分で行う"],
+          "タブ間で文脈をコピーし、別のモデルに確認させ、上限に達したらやり直す——その作業が、あなたが定義した Agent との一つの会話になります。",
+        singleLabel: "複数の AI ウィンドウを手作業で",
+        singleItems: ["タブ間で文脈を手でコピー", "出力を別のモデルに貼って確認", "上限に達したら会話をやり直し", "結論がチャット履歴に散らばる"],
         noloLabel: "Nolo",
-        noloItems: ["役割ごとに異なるモデルを使える", "文脈がタスクについてくる", "複数の工程を並行して進められる", "納品前に確認と修正を続けられる"],
-      },
-      homeLandingReceipt: {
-        kicker: "Task evidence",
-        title: "できると言うだけでなく、どう完了するかを見せる。",
-        goal: "目標",
-        execution: "実行",
-        review: "確認",
-        result: "結果",
-        resultValue: "納品準備完了",
-        note: "実際の実行メトリクスを取得できるまでは、Agent・モデル・時間・コストのデモデータを表示しています。",
+        noloItems: ["Agent は役割・プロンプト・モデルを保持", "独立した Agent が個別にレビュー", "会話の途中で Agent を切り替えても履歴はそのまま", "結論はページとドキュメントに残る"],
       },
       homeLandingFaq: {
         kicker: "FAQ",

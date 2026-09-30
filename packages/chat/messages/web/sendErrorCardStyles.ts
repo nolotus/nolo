@@ -145,8 +145,9 @@ export const sendErrorCardStyles = stylex.create({
     },
   },
   detailsToggle: {
-    background: "none",
-    border: "none",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderStyle: "none",
     padding: 0,
     fontSize: "var(--fontSize-xs, 12px)",
     color: "var(--textTertiary, #94a3b8)",

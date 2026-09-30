@@ -44,57 +44,57 @@ export const buildQuickStartGuideContent = (
   title: t("quickStartGuide.title", "Quick Start Guide"),
   description: t(
     "quickStartGuide.description",
-    "Use these three checks to get oriented quickly when you open nolo."
+    "Tell nolo one goal. Multiple AI agents split the work, execute it, and hand back a result you can verify."
   ),
   sections: [
     {
-      title: t("quickStartGuide.setupTitle", "1. Confirm your current environment"),
+      title: t("quickStartGuide.setupTitle", "1. State one compound goal"),
       items: [
         t(
           "quickStartGuide.setupItem1",
-          "The login target is always the current server and language shown on the auth screen."
+          "Open a new chat and describe a complete goal in one sentence, e.g. \"Compare three laptops and draft the purchase summary\"."
         ),
         t(
           "quickStartGuide.setupItem2",
-          "If an account was created on another server or locale, switch first before signing in."
+          "Include what \"done\" looks like: the format you want, the constraints, and the deadline if it matters."
         ),
         t(
           "quickStartGuide.setupItem3",
-          "For RN smoke checks, verify the environment before testing content fetches or chat writes."
+          "A concrete, multi-part goal works better than a vague one — the agents need something to divide."
         ),
       ],
     },
     {
-      title: t("quickStartGuide.shortcutsTitle", "2. Start from the three fastest entry points"),
+      title: t("quickStartGuide.shortcutsTitle", "2. Watch multiple AI agents split and run the work"),
       items: [
         t(
           "quickStartGuide.shortcutsItem1",
-          "Quick Note captures an idea immediately and saves it as a page."
+          "Nolo breaks your goal into subtasks and assigns them to specialized agents automatically."
         ),
         t(
           "quickStartGuide.shortcutsItem2",
-          "New Chat creates a fresh dialog with the default assistant."
+          "You can watch each agent's progress in the same conversation — research, writing, and checks run in parallel."
         ),
         t(
           "quickStartGuide.shortcutsItem3",
-          "Create AI is the fastest way to customize a dedicated assistant."
+          "Jump in anytime to correct a direction or add context; the agents adapt without starting over."
         ),
       ],
     },
     {
-      title: t("quickStartGuide.nextStepsTitle", "3. When something looks off"),
+      title: t("quickStartGuide.nextStepsTitle", "3. Review and take the result"),
       items: [
         t(
           "quickStartGuide.nextStepsItem1",
-          "If login fails, re-check that the server and locale match the original registration."
+          "When the run finishes, check the delivered result against the goal you stated in step 1."
         ),
         t(
           "quickStartGuide.nextStepsItem2",
-          "If recent content looks stale, give sync a moment and then reopen the target page."
+          "Not quite right? Reply with what to fix — the agents iterate on the same context."
         ),
         t(
           "quickStartGuide.nextStepsItem3",
-          "Use Feedback to report missing data or confusing behavior directly from the home screen."
+          "Once it looks good, the result stays in your workspace as a page you can edit, share, or build on."
         ),
       ],
     },

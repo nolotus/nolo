@@ -13,6 +13,27 @@ export interface ReadPageToolArgs {
 }
 
 /**
+ * Resolve the text an AI read should see for a document.
+ *
+ * slateData is the document source of truth for current records. Older records
+ * can legitimately be content-only, though, and read-only UI already treats
+ * `content` as the legacy bridge. Keeping the same fallback here prevents a
+ * durable legacy document from being projected as an empty document merely
+ * because it predates slateData.
+ *
+ * Important: a present, non-empty slate document wins over the legacy cache;
+ * content is only a compatibility fallback when slateData has no nodes.
+ */
+export const resolvePageReadMarkdown = (pageData: PageData): string => {
+    const slateData = pageData.slateData;
+    if (Array.isArray(slateData) && slateData.length > 0) {
+        return slateToSimplifiedMarkdown(slateData);
+    }
+
+    return typeof pageData.content === "string" ? pageData.content : "";
+};
+
+/**
  * [Schema] 定义了 'readDoc' 工具的结构。
  */
 export const readDocFunctionSchema = {
@@ -41,7 +62,7 @@ export const readPageFunctionSchema = {
 export const buildReadDocResult = (
     pageData: PageData
 ): { rawData: unknown; displayData: string } => {
-    const markdownContent = slateToSimplifiedMarkdown(pageData.slateData || []);
+    const markdownContent = resolvePageReadMarkdown(pageData);
 
     const rawData = {
         success: true,

@@ -338,6 +338,11 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
 
     // --msg-file 占位会被 spawnLocalBackgroundRun 的 rewriteMsgFileArg 改写为
     // runs 目录里的内容快照（~/.nolo/runs/<runId>.msg.md）；--bg 会被子进程剥离。
+    // Read-only is declared by the caller, never guessed from task wording:
+    // a keyword heuristic silently flipped reviewers between "no tools" and
+    // "write access" depending on phrasing.
+    const isReadOnlyTask = args.readOnly === true;
+
     const rawArgs = [
       "--agent",
       agentKey,
@@ -347,6 +352,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
+      // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
+      ...(isReadOnlyTask ? ["--read-only"] : []),
     ];
 
     const agentName =

@@ -16,7 +16,6 @@
     color: var(--text);
     margin: 0;
     padding-bottom: var(--space-3);
-    border-bottom: 1px solid var(--border);
   }
 
   /* 通用 SettingSection 布局（与 EditorConfig 对齐） */
@@ -26,10 +25,6 @@
     gap: var(--space-4);
     align-items: start;
     padding: var(--space-3) 0;
-  }
-
-  .setting-section:not(:last-child) {
-    border-bottom: 1px solid var(--borderLight);
   }
 
   .section-header {
@@ -137,7 +132,6 @@
 
     .section-header {
       padding-bottom: var(--space-2);
-      border-bottom: 1px solid var(--borderLight);
     }
   }
 
@@ -1687,11 +1681,6 @@
         gap: var(--space-4);
         align-items: start;
         padding: var(--space-3) 0;
-        border-bottom: 1px solid var(--borderLight);
-      }
-
-      .ChatConfigSettingSection:last-of-type {
-        border-bottom: none;
       }
 
       .ChatConfigSettingSection__header {
@@ -1750,7 +1739,6 @@
             color: var(--text);
             margin: 0;
             padding-bottom: var(--space-3);
-            border-bottom: 1px solid var(--border);
           }
 
           @media (max-width: 640px) {
@@ -1776,7 +1764,6 @@
             color: var(--text);
             margin: 0 0 var(--space-2) 0;
             padding-bottom: var(--space-4);
-            border-bottom: 1px solid var(--borderLight);
           }
           
           .setting-section {
@@ -1784,12 +1771,7 @@
             grid-template-columns: 240px 1fr;
             gap: var(--space-4);
             padding: var(--space-4) 0;
-            border-bottom: 1px solid var(--borderFaint);
             align-items: start;
-          }
-          
-          .setting-section:last-child {
-            border-bottom: none;
           }
 
           @media (max-width: 1024px) {
@@ -1922,7 +1904,6 @@
             color: var(--text);
             margin: 0;
             padding-bottom: var(--space-3);
-            border-bottom: 1px solid var(--border);
           }
 
           .setting-section {
@@ -1931,10 +1912,6 @@
             gap: var(--space-4);
             align-items: start;
             padding: var(--space-3) 0;
-          }
-
-          .setting-section:not(:last-child) {
-            border-bottom: 1px solid var(--borderLight);
           }
 
           .section-header {
@@ -2105,7 +2082,6 @@
 
             .section-header {
               padding-bottom: var(--space-2);
-              border-bottom: 1px solid var(--borderLight);
             }
           }
 

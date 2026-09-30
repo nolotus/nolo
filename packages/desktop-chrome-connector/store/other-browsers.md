@@ -68,12 +68,23 @@ Consequences per feature:
 - Listed add-ons go through AMO review; self-distributed ("unlisted") add-ons are signed without a
   listing but still validated.
 - Source code must be provided if the submitted code is minified or obfuscated (ours is not).
-- **Manifest work**: Firefox MV3 does not use a `service_worker` background the way Chromium does; our
-  module service worker would need an event-page form. **待核实**: exact `background` shape and whether
-  `"type": "module"` is honoured for `background.scripts` on current Firefox.
-- **Feature work**: replace the debugger-backed console/network reads with Firefox equivalents;
-  screenshot switches to `tabs.captureTab`.
-- Verdict: medium effort, and it degrades two features. Do it only if Firefox users are a real segment.
+- **Status 2026-09-28: core port implemented** in `feat/firefox-port` (see
+  `docs/plans/2026-09-28-firefox-amo-port.md`). Single codebase; `buildStorePackage.mjs --browser
+  firefox` rewrites the manifest at pack time (gecko id `nolo-browser-connector@nolo.chat`, no `key`,
+  event-page `background.scripts` + `type: "module"`, no `debugger` permission) and `web-ext lint`
+  passes with zero errors.
+- **Capability split at runtime** (`HAS_DEBUGGER` = `typeof chrome.debugger`): read_page / click /
+  type / press / scroll / open·list·close_tab / hit_test work unchanged via `scripting`; screenshot
+  degrades to `tabs.captureVisibleTab` (visible tab only, honest `TAB_NOT_VISIBLE` /
+  `screenshot_viewport_only` signals); set_files, mouse_move, mouse_click and the douyin_* CDP flows
+  return `UNSUPPORTED_ON_FIREFOX` verdicts; read_console / read_network return the same signal with
+  empty buffers (no MAIN-world hook shipped — fidelity would not match the CDP contract).
+- Native host: `installNativeHostManifest.mjs --browser=firefox` writes the same host manifest under
+  Mozilla's `NativeMessagingHosts` dir (`~/.mozilla/native-messaging-hosts` on Linux,
+  `~/Library/Application Support/Mozilla/NativeMessagingHosts` on macOS) with `allowed_extensions`
+  set to the gecko id.
+- Verdict: medium effort spent; remaining work is AMO submission (account + API credentials) and a
+  real-device smoke pass.
 
 ### Safari (App Store / macOS)
 
@@ -93,8 +104,8 @@ Consequences per feature:
 2. **Edge** — *deferred by owner decision* (see the readiness report §8). It is **not** "the same package
    plus a listing": Edge keeps its own native-messaging locations/registry keys per OS, and the
    installer currently registers Chrome on macOS and Linux only. Revisit when Edge is actually wanted.
-3. **Firefox** — only with a capability seam (browser adapter) so console/network degrade gracefully
-   instead of being forked.
+3. **Firefox** — core port **done** (2026-09-28): the capability seam landed inside `background.js`
+   (`HAS_DEBUGGER`), not as a fork. Remaining: AMO submission and manual QA on real Firefox.
 4. **Safari** — last; requires the native bridge rewrite and a Mac build/CI path.
 
 ## Design implication to keep in mind (do not build yet)

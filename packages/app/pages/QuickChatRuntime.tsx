@@ -39,7 +39,7 @@ import {
   selectSpaceById,
 } from "create/space/spaceCurrentSelectors";
 import { selectIdentityUserBalance } from "identity/selectors";
-import { useUserId } from "identity";
+import { useIdentity, useUserId } from "identity";
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { selectOcrModel } from "app/settings/settingSlice";
 import AttachmentsPreview from "chat/web/AttachmentsPreview";
@@ -59,6 +59,7 @@ import {
   resolveQuickChatAgentKey,
   QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY,
   allowsQuickChatModelOverride,
+  savePendingQuickChatDraft,
 } from "./quickChatFlow";
 import { buildQuickChatModelOverride } from "ai/agent/quickChatModelOverride";
 import type { AgentRuntimeOptions } from "ai/agent/types";
@@ -165,6 +166,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     agent?.name || (currentModeAgentId === noloAgentId ? "nolo" : t("unknown"));
   const pendingFiles = usePendingFiles() as PendingFile[];
   const currentUserId = useUserId();
+  const { isInitialized: isIdentityInitialized } = useIdentity();
   const currentUserBalance = useAppSelector(selectIdentityUserBalance);
   const { currentServer, currentToken: token } =
     useAppSelector(selectRuntimeSnapshot);
@@ -350,6 +352,14 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       (!trimmedText && !imageFiles.size && !pendingFiles.length)
     )
       return;
+
+    // 未登录（有会话服务但无用户）：不发请求，保存草稿并跳登录，登录后回 /chat。
+    // 会话初始化期间 currentUserId 暂为空，此时不能把已登录用户误判为未登录。
+    if (accountSession && isIdentityInitialized && !currentUserId) {
+      savePendingQuickChatDraft(trimmedText);
+      navigate("/login?returnTo=%2Fchat");
+      return;
+    }
 
     isStartingRef.current = true;
     setIsSending(true);
@@ -578,6 +588,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     notifyStartupError,
     quickChatMode,
     autoOverrideAgent,
+    accountSession,
+    currentUserId,
+    isIdentityInitialized,
   ]);
   useEffect(() => {
     startQuickChatRef.current = startQuickChat;

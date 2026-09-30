@@ -32,13 +32,13 @@ export interface SeoLocaleEntry {
 
 const seoLocale: Record<Language, SeoLocaleEntry> = {
   [Language.EN]: {
-    title: "Nolo — One goal. Multiple AIs. Get it done together.",
+    title: "Nolo — Let Claude, GPT and DeepSeek work as your own AI team",
     description:
-      "While others chat, Nolo.Chat works. Orchestrate multiple AI agents that remember your rules, collaborate on complex tasks, and keep running overnight — delivering real results by morning.",
+      "Nolo turns the AI subscriptions and API keys you already pay for into one team of agents you define. They split tasks, work in parallel, and discuss and review each other — on your own computer. Open-source client.",
     home: {
-      title: "Nolo — One goal. Multiple AIs. Get it done together.",
+      title: "Nolo — Let Claude, GPT and DeepSeek work as your own AI team",
       description:
-        "Work with GPT, Claude, DeepSeek and more in one AI workspace. Nolo remembers your context, lets multiple agents debate and collaborate, and turns ideas into docs, images, apps, and deliverables.",
+        "Bring Claude, GPT, DeepSeek and more into one workspace. Define each agent’s role and model, let them work in parallel and review each other, and keep conclusions as pages and docs. The client is open source and runs locally.",
     },
     pricing: {
       title: "Pricing | Pay for What You Use with Nolo Credits",
@@ -67,13 +67,13 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_CN]: {
-    title: "Nolo — 一个目标，多个 AI，一起把它做完。",
+    title: "Nolo — 让 Claude、GPT、DeepSeek 组成你自己的 AI 团队",
     description:
-      "别人是一个 AI 帮你聊，我们是多个 Agent 帮你做完。记住你的规则、多模型协作、夜间自动执行——今晚委托，明早交付网页、图片、文档。",
+      "用你已经付费的 AI 订阅和 API key，组成一支由你定义的 Agent 团队：拆任务、并行干活、互相讨论和 review，全程跑在你自己的电脑上。客户端开源。",
     home: {
-      title: "Nolo — 一个目标，多个 AI，一起把它做完。",
+      title: "Nolo — 让 Claude、GPT、DeepSeek 组成你自己的 AI 团队",
       description:
-        "把 GPT、Claude、DeepSeek 放进同一个 AI 工作台。Nolo 能记住你的上下文，让多个 Agent 协作或辩论，并直接产出文档、图片、网页和可交付结果。",
+        "把 Claude、GPT、DeepSeek 等放进同一个工作台。定好每个 Agent 的角色和模型，让它们并行干活、互相 review，结论沉淀成页面和文档。客户端开源，本地运行。",
     },
     pricing: {
       title: "Nolo 定价 | 用多少，付多少",
@@ -102,13 +102,13 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_HANT]: {
-    title: "Nolo — 一個目標，多個 AI，一起把它做完。",
+    title: "Nolo — 讓 Claude、GPT、DeepSeek 組成你自己的 AI 團隊",
     description:
-      "別人是一個 AI 幫你聊，我們是多個 Agent 幫你做完。記住你的規則、多模型協作、夜間自動執行——今晚委託，明早交付網頁、圖片、文件。",
+      "用你已經付費的 AI 訂閱和 API key，組成一支由你定義的 Agent 團隊：拆任務、並行幹活、互相討論和 review，全程跑在你自己的電腦上。用戶端開源。",
     home: {
-      title: "Nolo — 一個目標，多個 AI，一起把它做完。",
+      title: "Nolo — 讓 Claude、GPT、DeepSeek 組成你自己的 AI 團隊",
       description:
-        "把 GPT、Claude、DeepSeek 放進同一個 AI 工作台。Nolo 能記住你的上下文，讓多個 Agent 協作或辯論，並直接產出文件、圖片、網頁和可交付結果。",
+        "把 Claude、GPT、DeepSeek 等放進同一個工作台。定好每個 Agent 的角色和模型，讓它們並行幹活、互相 review，結論沉澱成頁面和文件。用戶端開源，本機執行。",
     },
     pricing: {
       title: "Nolo 定價 | 用多少，付多少",
@@ -137,13 +137,13 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.JA]: {
-    title: "Nolo — 一つの目標を、複数の AI で最後までやり切る。",
+    title: "Nolo — Claude、GPT、DeepSeek をあなた専用の AI チームに",
     description:
-      "他社が「一対一の会話」なら、Nolo.Chat は「複数 Agent が協力して仕事を完遂」。ルールを記憶し、夜間も自動実行。朝には成果物が届きます。",
+      "すでに払っている AI サブスクリプションや API キーで、あなたが定義する Agent チームを。タスクを分け、並行で進め、互いに議論とレビューを行う——すべてあなたのコンピューター上で。クライアントはオープンソース。",
     home: {
-      title: "Nolo — 一つの目標を、複数の AI で最後までやり切る。",
+      title: "Nolo — Claude、GPT、DeepSeek をあなた専用の AI チームに",
       description:
-        "GPT、Claude、DeepSeek などを 1 つの AI ワークスペースで活用。Nolo は文脈を覚え、複数 Agent の協調や議論を通じて、文書・画像・Web・成果物まで形にします。",
+        "Claude、GPT、DeepSeek などを一つのワークスペースに。各 Agent の役割とモデルを決め、並行作業と相互レビューを行い、結論をページやドキュメントに残せます。クライアントはオープンソースでローカル実行。",
     },
     pricing: {
       title: "Nolo 料金 | 使った分だけ支払うクレジット制",
@@ -172,13 +172,13 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.KO]: {
-    title: "Nolo — 하나의 목표, 여러 AI와 함께 끝까지 완수",
+    title: "Nolo — Claude, GPT, DeepSeek를 나만의 AI 팀으로",
     description:
-      "단순한 대화를 넘어, 여러 AI 에이전트가 협력하여 업무를 완수합니다. 규칙을 기억하고 밤새 실행하여 아침에 실제 결과물을 제공합니다.",
+      "이미 결제한 AI 구독과 API 키로, 직접 정의한 에이전트 팀을 꾸리세요. 작업을 나누고, 병렬로 진행하고, 서로 토론하고 리뷰합니다 — 모두 내 컴퓨터에서. 클라이언트는 오픈 소스입니다.",
     home: {
-      title: "Nolo — 하나의 목표, 여러 AI와 함께 끝까지 완수",
+      title: "Nolo — Claude, GPT, DeepSeek를 나만의 AI 팀으로",
       description:
-        "GPT, Claude, DeepSeek 등을 하나의 AI 작업 공간에서 활용하세요. Nolo는 문맥을 기억하고, 여러 에이전트의 협업과 토론을 통해 문서, 이미지, 웹, 최종 결과물을 만듭니다.",
+        "Claude, GPT, DeepSeek 등을 하나의 작업 공간에. 에이전트마다 역할과 모델을 정하고, 병렬 작업과 상호 리뷰를 거쳐 결론을 페이지와 문서로 남기세요. 클라이언트는 오픈 소스이며 로컬에서 실행됩니다.",
     },
     pricing: {
       title: "Nolo 요금제 | 사용한 만큼만 결제하는 크레딧 시스템",

@@ -31,6 +31,7 @@ import {
 import { scanInstalledClis } from "ai/agent/cliChatClient";
 import type { CliProvider } from "ai/agent/cliProviders";
 import { getIsDesktopApp } from "app/utils/env";
+import { writeLocalFirstOnboardingDismissed } from "app/localFirst/onboardingDismissed";
 import { createAgentKey } from "database/keys";
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
@@ -398,6 +399,10 @@ const LocalQuickCreateAgent = () => {
           key: agentDbKey,
           sourceKey,
         });
+        // 本地 Agent 真实创建成功：持久化 onboarding 完成标记，避免回首页时引导反复弹出。
+        if (getIsDesktopApp() && typeof window !== "undefined") {
+          writeLocalFirstOnboardingDismissed(window.localStorage, true);
+        }
         // Web create path: flash agent row in sidebar (dialog marked in useCreateDialog).
         markRecentlyCreated(agentDbKey);
         await createNewDialog({ agents: [agentDbKey] });

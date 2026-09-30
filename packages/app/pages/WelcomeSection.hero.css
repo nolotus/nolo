@@ -11,7 +11,7 @@
 
 .ws-hero-mountain-art {
   position: absolute;
-  inset: 0 -10% auto -10%;
+  inset: 0 0 auto 0;
   height: 420px;
   pointer-events: none;
   z-index: -1;
@@ -64,7 +64,7 @@
 
 .ws-hero-moon {
   position: absolute;
-  top: 50px;
+  top: 48px;
   left: 68%;
   width: 50px;
   height: 50px;
@@ -92,10 +92,10 @@
 }
 
 .ws-hero-title {
-  font-size: 4.8rem;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.0;
+  font-size: var(--type-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
   margin-bottom: 32px;
   color: var(--ws-text);
 }
@@ -117,7 +117,7 @@
 }
 
 .ws-hero-desc {
-  font-size: 1.05rem;
+  font-size: var(--type-body);
   color: var(--ws-text-sub);
   max-width: 560px;
   margin: 0 auto;
@@ -139,10 +139,10 @@
 @media (min-width: 1400px) {
   .ws-hero-mountain-art {
     height: 480px;
-    inset: 0 -16% auto -16%;
+    inset: 0 0 auto 0;
   }
   .ws-hero-title {
-    font-size: 5.4rem;
+    font-size: var(--type-display);
   }
   .ws-hero-highlights {
     margin-top: 56px;
@@ -153,7 +153,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.88rem;
+  font-size: var(--type-small);
   color: var(--ws-text-sub);
   line-height: 1.4;
   opacity: 1;
@@ -174,9 +174,9 @@
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 14px;
+          gap: 16px;
           flex-wrap: wrap;
-          margin-top: 26px;
+          margin-top: 24px;
           margin-bottom: 0;
           opacity: 1;
         }
@@ -187,11 +187,11 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
+          gap: 8px;
           min-height: 44px;
-          padding: 8px 22px;
+          padding: 8px 24px;
           border-radius: 999px;
-          font-size: 0.88rem;
+          font-size: var(--type-small);
           font-weight: 600;
           text-decoration: none;
           transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -229,15 +229,15 @@
 /* === A. Trust Micro-copy === */
 .ws-trust-micro {
   margin: 24px 0 0;
-  font-size: 0.8rem;
+  font-size: var(--type-micro);
   color: var(--ws-text-sub);
   letter-spacing: 0.015em;
   opacity: 1;
 }
 
 .ws-trust-local {
-  margin: 6px 0 0;
-  font-size: 0.72rem;
+  margin: 8px 0 0;
+  font-size: var(--type-micro);
   color: var(--ws-text-sub);
   letter-spacing: 0.02em;
   opacity: 0.5;
@@ -248,7 +248,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 16px;
   margin-top: 36px;
   margin-bottom: 64px;
   position: relative;
@@ -315,7 +315,7 @@
 }
 
 .ws-proof-platforms {
-  font-size: 0.78rem;
+  font-size: var(--type-micro);
   color: var(--ws-text-sub);
   opacity: 0.55;
   letter-spacing: 0.02em;
@@ -358,7 +358,7 @@
 }
 
 .ws-card-create .ws-card-text h2 {
-  font-size: 1.4rem;
+  font-size: var(--type-h3);
   margin: 0 0 8px;
   color: var(--textHeading, var(--ws-text));
   letter-spacing: -0.02em;
@@ -367,12 +367,12 @@
 .ws-card-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
+  gap: 12px 16px;
   margin-top: 16px;
 }
 
 .ws-card-link {
-  font-size: 0.88rem;
+  font-size: var(--type-small);
   font-weight: 600;
   color: var(--primary, #1677ff);
   text-decoration: none;
@@ -390,7 +390,7 @@
   z-index: 2;
   margin-top: 80px;
   padding: 56px 32px 52px;
-  border-radius: var(--ws-radius);
+  border-radius: var(--radius-md);
   background: var(--background);
   border: 1px solid var(--borderLight, #e5e5e5);
   box-shadow: 0 16px 40px -28px var(--shadowMedium);
@@ -408,7 +408,7 @@
 
 .ws-bottom-cta-title {
   margin: 0;
-  font-size: 2.1rem;
+  font-size: var(--type-h2);
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.03em;
@@ -418,7 +418,7 @@
 
 .ws-bottom-cta-desc {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--type-body);
   color: var(--ws-text-sub);
   line-height: 1.65;
   max-width: 420px;
@@ -450,9 +450,9 @@
   gap: 8px;
   background: var(--surfaceInteractive, var(--backgroundSecondary));
   border: 1px solid var(--borderMuted, var(--borderLight));
-  padding: 6px 14px;
+  padding: 8px 16px;
   border-radius: 999px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   box-shadow: none;
 }
 
@@ -462,7 +462,7 @@
 }
 
 .ws-builder-badge span {
-  font-size: 0.78rem;
+  font-size: var(--type-micro);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--ws-text-sub);
@@ -470,7 +470,7 @@
 }
 
 .ws-builder-title {
-  font-size: 1.9rem;
+  font-size: var(--type-h2);
   font-weight: 700;
   color: var(--ws-text);
   margin: 0 0 12px;
@@ -478,7 +478,7 @@
 }
 
 .ws-builder-desc {
-  font-size: 1rem;
+  font-size: var(--type-body);
   line-height: 1.7;
   color: var(--ws-text-sub);
   margin: 0 auto 44px;
@@ -493,7 +493,7 @@
 
 .ws-builder-step {
   display: flex;
-  gap: 18px;
+  gap: 20px;
   position: relative;
   opacity: 0;
   transform: translateY(12px);
@@ -552,7 +552,7 @@
 }
 
 .ws-builder-content h3 {
-  font-size: 1.05rem;
+  font-size: var(--type-body);
   font-weight: 600;
   color: var(--ws-text);
   margin: 0 0 4px;
@@ -560,7 +560,7 @@
 }
 
 .ws-builder-content p {
-  font-size: 0.9rem;
+  font-size: var(--type-small);
   line-height: 1.55;
   color: var(--ws-text-sub);
   margin: 0;
@@ -579,10 +579,10 @@
 }
 
 .ws-builder-capability {
-  padding: 26px 24px;
+  padding: 24px 24px;
   background: var(--surfaceRaised, var(--background));
   border: 1px solid var(--borderMuted, var(--borderLight));
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
   position: relative;
 }
@@ -604,15 +604,15 @@
 }
 
 .ws-builder-capability h3 {
-  font-size: 1.05rem;
+  font-size: var(--type-body);
   font-weight: 600;
   color: var(--ws-text);
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   letter-spacing: -0.01em;
 }
 
 .ws-builder-capability p {
-  font-size: 0.88rem;
+  font-size: var(--type-small);
   line-height: 1.6;
   color: var(--ws-text-sub);
   margin: 0;
@@ -633,7 +633,7 @@
   padding: 24px;
   background: var(--ws-bg-sub);
   border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius);
+  border-radius: var(--radius-md);
   text-align: left;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
@@ -649,7 +649,7 @@
   flex-shrink: 0;
   width: 120px;
   height: 120px;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--ws-bg);
   border: 1px solid rgba(0, 0, 0, 0.04);
   display: flex;
@@ -685,26 +685,26 @@
   }
 
   .ws-hero-title {
-    font-size: 2.1rem;
+    font-size: var(--type-display);
     line-height: 1.15;
     margin-bottom: 20px;
   }
 
   .ws-hero-desc {
-    font-size: 1.02rem;
+    font-size: var(--type-body);
   }
 
   .ws-hero-highlights {
-    gap: 8px 14px;
-    margin-top: 22px;
+    gap: 8px 16px;
+    margin-top: 24px;
   }
 
   .ws-hero-highlights li {
-    font-size: 0.82rem;
+    font-size: var(--type-caption);
   }
 
   .ws-trust-local {
-    font-size: var(--fontSize-min-readable, 12px);
+    font-size: var(--type-micro);
   }
 
   .ws-hero-mountain-art {
@@ -724,7 +724,7 @@
   .ws-cta-main {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
     max-width: 320px;
     margin-left: auto;
@@ -738,23 +738,23 @@
 
   .ws-proof-bar {
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
     margin-bottom: 40px;
   }
 
   .ws-bottom-cta {
-    padding: 40px 18px;
+    padding: 40px 20px;
     margin-top: 44px;
   }
 
   .ws-bottom-cta-title {
-    font-size: 1.5rem;
+    font-size: var(--type-h2);
   }
 
   .ws-builder-memory {
     flex-direction: column;
     gap: 16px;
-    padding: 18px;
+    padding: 20px;
   }
 
   .ws-builder-memory-visual {

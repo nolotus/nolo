@@ -1,40 +1,49 @@
         .ShareCommunityPage {
-          max-width: 1200px;
+          /* MainLayout__main 是 column flex：只写 max-width + margin:auto 会被 shrink-to-fit
+             压成内容宽度（1440 画布实测只有 390px）。width:100% 才能撑到 max-width。
+             border-box：否则 content-box 下 100% 只算内容宽，移动端会 380+32=412 → 右侧被裁。 */
+          box-sizing: border-box;
+          width: 100%;
+          max-width: min(960px, 100%);
           margin: 0 auto;
-          padding: 32px 24px 60px;
+          padding: 32px 24px 40px;
         }
         .ShareCommunityPage__header {
-          margin-bottom: 28px;
-          padding-left: 4px;
+          margin-bottom: 32px;
         }
         .ShareCommunityPage__title {
-          margin: 0 0 6px;
-          font-size: 2rem;
-          font-weight: 800;
+          margin: 0 0 8px;
+          font-size: var(--type-h2);
+          font-weight: 700;
+          line-height: 1.2;
+          letter-spacing: -0.02em;
           color: var(--text);
         }
         .ShareCommunityPage__subtitle {
           margin: 0;
-          font-size: 0.95rem;
+          max-width: 720px;
+          font-size: var(--type-body);
+          line-height: 1.6;
           color: var(--textSecondary);
         }
         /* ── tabs ── */
         .ShareCommunityPage__tabs {
           display: flex;
-          gap: 6px;
-          margin-bottom: 28px;
+          gap: 12px;
+          margin-bottom: 32px;
           flex-wrap: wrap;
         }
         .ShareCommunityPage__tab {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 16px;
-          border-radius: 20px;
+          gap: 8px;
+          min-height: 40px;
+          padding: 8px 16px;
+          border-radius: 999px;
           border: 1px solid var(--border);
           background: var(--backgroundSecondary);
           color: var(--textSecondary);
-          font-size: 0.85rem;
+          font-size: var(--type-small);
           font-weight: 500;
           cursor: pointer;
           transition: all 0.18s;
@@ -53,29 +62,46 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 18px;
-          height: 18px;
-          padding: 0 5px;
-          border-radius: 9px;
-          font-size: var(--fontSize-sm);
+          min-width: 20px;
+          height: 20px;
+          padding: 0 8px;
+          border-radius: 999px;
+          font-size: var(--type-micro);
           font-weight: 700;
-          background: rgba(255,255,255,0.25);
+          background: color-mix(in srgb, var(--text) 12%, transparent);
           color: inherit;
         }
         .ShareCommunityPage__tab:not(.is-active) .ShareCommunityPage__tab-count {
           background: var(--backgroundTertiary);
-          color: var(--textTertiary);
+          color: var(--textSecondary);
         }
         /* ── states ── */
         .ShareCommunityPage__status,
         .ShareCommunityPage__empty {
-          border: 1px dashed var(--border);
-          border-radius: var(--radius-lg);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          /* 全局没有 border-box：不显式声明时 min-height 会被 32px 内边距顶到 322px */
+          box-sizing: border-box;
+          min-height: 200px;
+          border: 1px solid var(--borderSubtle);
+          border-radius: var(--radius-md);
           background: var(--backgroundSecondary);
           color: var(--textSecondary);
-          padding: 40px 24px;
+          padding: 32px 24px;
           text-align: center;
-          font-size: var(--fontSize-base);
+          font-size: var(--type-body);
+          line-height: 1.6;
+        }
+        .ShareCommunityPage__emptyIcon {
+          color: var(--textTertiary);
+        }
+        .ShareCommunityPage__emptyHint {
+          margin: 0;
+          font-size: var(--type-small);
+          color: var(--textSecondary);
         }
         .ShareCommunityPage__status.is-error {
           border-color: #f87171;
@@ -96,12 +122,13 @@
           margin-top: 32px;
         }
         .ShareCommunityPage__loadMoreBtn {
-          padding: 10px 32px;
-          border-radius: var(--radius-lg);
+          min-height: 40px;
+          padding: 8px 32px;
+          border-radius: var(--radius-xs);
           border: 1px solid var(--border);
           background: var(--backgroundSecondary);
           color: var(--text);
-          font-size: var(--fontSize-base);
+          font-size: var(--type-small);
           font-weight: 600;
           cursor: pointer;
           transition: all 0.2s;
@@ -119,8 +146,12 @@
           .ShareCommunityPage__masonry { column-count: 2; }
         }
         @media (max-width: 640px) {
-          .ShareCommunityPage { padding: 20px 16px 40px; }
+          .ShareCommunityPage { padding: 24px 16px 40px; }
           .ShareCommunityPage__masonry { column-count: 1; }
-          .ShareCommunityPage__title { font-size: 1.5rem; }
+          /* 移动端 5 个胶囊本来就快占满一行，间距回 8px 免得被挤到换行 */
+          .ShareCommunityPage__tabs { gap: 8px; }
+          .ShareCommunityPage__tab { min-height: 44px; padding: 8px 16px; }
+          .ShareCommunityPage__status,
+          .ShareCommunityPage__empty { min-height: 200px; }
         }
       

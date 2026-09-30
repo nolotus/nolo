@@ -56,7 +56,35 @@ export type ScrollAnimatorDeps = {
   env?: Record<string, string | undefined>;
   /** 定时器来源（默认 setInterval）。 */
   tickTimer?: ScrollTickTimer;
+  /** 时钟（默认 performance.now）；测试注入以驱动速度增益。 */
+  now?: () => number;
 };
+
+/**
+ * 速度增益（油门）：默认模式下每条报告的距离不再固定 5 行，而是看「最近
+ * VELOCITY_WINDOW_MS 内同方向来了多少条报告」。
+ *
+ * 为什么：终端对一格滚轮通常连发多条报告（Ghostty discrete 倍率默认 3，
+ * 触控板轻碰也是一串），固定 5 行/条 → 轻滚一格就走 15 行。油门语义是
+ * 「轻踩走一点、踩深才加速」：
+ *
+ *   n ≤ VELOCITY_SLOW_COUNT        → 1 行/条（一格 ≈ 3 行，与 less/vim 同感）
+ *   n 更大（持续快滑 / 用力甩）     → 线性加到 VELOCITY_MAX_GAIN 行/条
+ *
+ * 小数增益用累加器结转，总距离不因取整丢失。反向立即清空窗口与累加器。
+ */
+export const VELOCITY_WINDOW_MS = 120;
+export const VELOCITY_SLOW_COUNT = 3;
+export const VELOCITY_GAIN_PER_REPORT = 0.35;
+export const VELOCITY_MAX_GAIN = 6;
+
+export function velocityGain(recentCount: number): number {
+  if (recentCount <= VELOCITY_SLOW_COUNT) return 1;
+  return Math.min(
+    VELOCITY_MAX_GAIN,
+    1 + (recentCount - VELOCITY_SLOW_COUNT) * VELOCITY_GAIN_PER_REPORT,
+  );
+}
 
 const SCROLL_ANIMATION_TICK_MS = 16;
 
@@ -88,13 +116,21 @@ function readPositiveInt(
  */
 export function resolveScrollTuning(
   env: Record<string, string | undefined> = process.env,
-): { wheelLines: number; maxLinesPerTick: number; adaptiveStep: boolean } {
+): {
+  wheelLines: number;
+  maxLinesPerTick: number;
+  adaptiveStep: boolean;
+  /** 未显式给 NOLO_TUI_WHEEL_LINES 时按速度增益；显式给值 = 每条固定行数。 */
+  velocityGain: boolean;
+} {
   const rawStep = env.NOLO_TUI_SCROLL_MAX_STEP;
   const explicit = parseExplicitStep(rawStep);
+  const explicitWheel = parseExplicitStep(env.NOLO_TUI_WHEEL_LINES);
   return {
     wheelLines: readPositiveInt(env.NOLO_TUI_WHEEL_LINES, WHEEL_SCROLL_LINES, 50),
     maxLinesPerTick: explicit ?? DEFAULT_SCROLL_MAX_LINES_PER_TICK,
     adaptiveStep: explicit === null,
+    velocityGain: explicitWheel === null,
   };
 }
 
@@ -120,9 +156,30 @@ const defaultTickTimer: ScrollTickTimer = {
  * 创建推进器。返回的 wheel/cancel 在主线程同步调用（键盘与鼠标事件路径）。
  */
 export function createScrollAnimator(deps: ScrollAnimatorDeps) {
-  const { wheelLines, maxLinesPerTick, adaptiveStep } = resolveScrollTuning(
-    deps.env ?? process.env,
-  );
+  const { wheelLines, maxLinesPerTick, adaptiveStep, velocityGain: useVelocity } =
+    resolveScrollTuning(deps.env ?? process.env);
+  const now = deps.now ?? (() => performance.now());
+  /** 最近同方向报告的时间戳（仅速度模式用）。 */
+  let recentReports: number[] = [];
+  let recentDirection: ScrollWheelDirection | null = null;
+  /** 小数增益结转，保证总距离不因取整丢失。 */
+  let fractionalLines = 0;
+
+  const linesForReport = (direction: ScrollWheelDirection): number => {
+    if (!useVelocity) return wheelLines;
+    const t = now();
+    if (recentDirection !== direction) {
+      recentReports = [];
+      fractionalLines = 0;
+      recentDirection = direction;
+    }
+    recentReports = recentReports.filter((ts) => t - ts < VELOCITY_WINDOW_MS);
+    recentReports.push(t);
+    fractionalLines += velocityGain(recentReports.length);
+    const whole = Math.floor(fractionalLines);
+    fractionalLines -= whole;
+    return whole;
+  };
   // 追赶模式的单帧上限：至少 20，且不低于单条报告的 wheelLines（否则单报告
   // 一帧结不清）。显式步长时只用用户给的固定上限。
   const stepCap = adaptiveStep
@@ -212,8 +269,10 @@ export function createScrollAnimator(deps: ScrollAnimatorDeps) {
       // 反向打断（滚动进行中反向滚）：从当前可见位置重新起算，而不是从
       // 尚未到达的旧目标——否则要先滑完旧目标才回头，体感是"按了没反应"。
       const isOpposing = intent !== null && intent !== direction;
+      const lines = linesForReport(direction);
+      if (lines === 0) return;
       const base = isOpposing ? history.scrollTop : (goal ?? history.scrollTop);
-      const next = direction === "up" ? base - wheelLines : base + wheelLines;
+      const next = direction === "up" ? base - lines : base + lines;
       goal = Math.max(0, next);
       intent = direction;
       if (goal === history.scrollTop) {

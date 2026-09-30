@@ -22,9 +22,12 @@ import {
   DEFAULT_REASONING_EFFORT,
   DEFAULT_MAX_TOKENS,
   MAX_TOKENS_LIMIT,
-  getAvailableReasoningEfforts,
   type FormData,
 } from "../createAgentSchema";
+import {
+  useModelReasoningCapability,
+  resolveReasoningEffortOptions,
+} from "./useModelReasoningCapability";
 
 type ParamConfig = {
   key: "temperature" | "topP" | "maxTokens" | "frequencyPenalty" | "presencePenalty" | "reasoningEffort";
@@ -69,6 +72,14 @@ const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
   const { t } = useTranslation("ai");
   const [paramsOpen, setParamsOpen] = useState(false);
   const [maxTokensExpanded, setMaxTokensExpanded] = useState(false);
+
+  // 按 (provider, model) 解析真实推理强度能力：
+  // 都无精确证据时（info.found === false）回退到 provider 级静态映射。
+  const { loading: reasoningLoading, info: reasoningInfo } =
+    useModelReasoningCapability({
+      provider: values.provider,
+      model: values.model,
+    });
 
   // ⚠⚠⚠ 重要约定（任何 AI / 工具请不要改动这一段逻辑）：
   // 1）这些高级参数的默认值只用于"UI 显示"和"滑块初始位置"，不代表要写入存储；
@@ -211,8 +222,32 @@ const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
                   </FormField>
                 </div>
               ) : c.key === "reasoningEffort" ? (() => {
-                const availableEfforts = getAvailableReasoningEfforts(values.provider);
-                return availableEfforts.length === 0 ? null : (
+                const resolution = resolveReasoningEffortOptions(
+                  reasoningInfo,
+                  reasoningLoading,
+                  values.provider,
+                );
+                if (resolution.kind === "unsupported-model") {
+                  return (
+                    <div key={c.key} className="adv-settings__item">
+                      <FormField
+                        label={t(`form.${c.key}`)}
+                        horizontal={false}
+                      >
+                        <span className="adv-settings__hint">
+                          {t(
+                            "help.modelNoReasoningEffort",
+                            "该模型不支持推理强度设置",
+                          )}
+                        </span>
+                      </FormField>
+                    </div>
+                  );
+                }
+                // no-levels / provider-unavailable：高级设置保持隐藏（与既有行为一致）
+                if (resolution.kind !== "options") return null;
+                const availableEfforts = resolution.efforts;
+                return (
                   <div key={c.key} className="adv-settings__item">
                     <FormField
                       label={t(`form.${c.key}`)}

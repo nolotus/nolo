@@ -121,7 +121,9 @@ import { summarizeToolArguments } from "../summarizeToolArguments";
 // ---------------------------------------------------------------------------
 
 export const CURSOR_API_URL = "https://api2.cursor.sh";
-export const CURSOR_CLIENT_VERSION = "cli-2026.01.09-231024f";
+// 官方 cursor-agent 构建号（格式 cli-<date>-<hash>；`cursor-agent --version` 可核对；
+// 逆向来源 github.com/0xlane/reverse-cursor-agent docs/06-request-headers.md；2026-09-30 对齐 2026.09.18-9a7762b）。
+export const CURSOR_CLIENT_VERSION = "cli-2026.09.18-9a7762b";
 const CURSOR_REQUEST_PATH = "/agent.v1.AgentService/Run";
 const CONNECT_END_STREAM_FLAG = 0b00000010;
 const HEARTBEAT_INTERVAL_MS = 5_000;

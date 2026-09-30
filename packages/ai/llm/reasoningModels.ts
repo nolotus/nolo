@@ -1,4 +1,8 @@
 import { PROVIDER_REASONING_EFFORT_VALUES, type ReasoningEffort } from "../agent/createAgentSchema";
+import {
+  resolveModelReasoningCapabilityWithCache,
+  THINKING_MECHANISM_PROVIDERS,
+} from "../agent/modelReasoningCapability";
 
 /**
  * 支持 reasoning_effort 参数的模型名集合。
@@ -20,6 +24,8 @@ const REASONING_MODEL_NAMES = new Set([
   "gemini-3.1-pro-preview",
   "gpt-5.5-pro",
   "gpt-6-astra",
+  "gpt-6.1-sol",
+  "gpt-6-sol",
   "gpt-6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
@@ -41,8 +47,15 @@ const REASONING_MODEL_NAMES = new Set([
   "zai-org/GLM-5.2-FP8",
 ]);
 
-export const isModelSupportReasoningEffort = (model: string): boolean =>
-  REASONING_MODEL_NAMES.has(model);
+export const isModelSupportReasoningEffort = (
+  model: string,
+  provider?: string,
+): boolean => {
+  if (provider && provider.toLowerCase() === "openrouter") {
+    return true;
+  }
+  return REASONING_MODEL_NAMES.has(model);
+};
 
 export const supportedReasoningModels = Array.from(REASONING_MODEL_NAMES);
 
@@ -99,6 +112,7 @@ function nearestSupportedEffort(
 export function clampReasoningEffort(
   effort: string | null | undefined,
   provider: string | null | undefined,
+  model?: string | null,
 ): string | undefined {
   if (!effort) return undefined;
 
@@ -106,8 +120,20 @@ export function clampReasoningEffort(
   const normalized = effort === "off" ? "none" : effort;
 
   const providerLower = (provider ?? "").toLowerCase();
-  if (providerLower === "anthropic" || providerLower === "google") {
+  if (THINKING_MECHANISM_PROVIDERS.has(providerLower)) {
     return undefined;
+  }
+
+  // 模型不支持推理强度则不下发该字段。
+  if (model) {
+    const cap = resolveModelReasoningCapabilityWithCache(provider, model);
+    if (cap.found) {
+      if (!cap.supportsReasoning || cap.efforts.length === 0) {
+        return undefined;
+      }
+      if ((cap.efforts as string[]).includes(normalized)) return normalized;
+      return nearestSupportedEffort(normalized, cap.efforts);
+    }
   }
 
   const supported = PROVIDER_REASONING_EFFORT_VALUES[providerLower];

@@ -16,7 +16,7 @@
 
 import { Effect, Queue, Stream, type Cause } from "effect";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
-import type { LocalAgentToolEvent } from "./localLoop";
+import type { LocalAgentToolEvent } from "./localLoopContract";
 
 export type LocalLoopObservationEvent =
   | (AgentExecutionObservationEvent & { bridge?: never })

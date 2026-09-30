@@ -176,6 +176,10 @@ const SearchInput: React.FC<SearchInputProps> = ({
               type="button"
               onClick={handleClear}
               {...stylex.props(searchInputStyles.clearButton)}
+              className={[
+                stylex.props(searchInputStyles.clearButton).className,
+                "search-input-clear",
+              ].join(" ")}
               title={clearAriaLabel}
               aria-label={clearAriaLabel}
               tabIndex={!showClearControl || disabled ? -1 : 0}

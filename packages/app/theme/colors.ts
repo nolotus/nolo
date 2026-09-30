@@ -51,13 +51,13 @@ export const neutral = {
   },
 };
 
-// ─── 2. Ocean — GitHub 风格深蓝，干净可信 ─────────────────────────────────
+// ─── 2. Ocean — 海蓝，干净可信 ─────────────────────────────────
 export const ocean = {
   light: {
-    primary: "#0969DA", primaryLight: "#218BFF", primaryDark: "#0550AE",
-    primaryGradient: "linear-gradient(135deg, #0969DA, #218BFF)",
-    primaryGhost: "rgba(9,105,218,0.08)", primaryHover: "rgba(9,105,218,0.10)",
-    borderAccent: "#54AEFF", ...semantic.light,
+    primary: "#006EDC", primaryLight: "#0874DC", primaryDark: "#0052AD",
+    primaryGradient: "linear-gradient(135deg, #006EDC, #0874DC)",
+    primaryGhost: "rgba(0,110,220,0.08)", primaryHover: "rgba(0,110,220,0.10)",
+    borderAccent: "#73BEFF", ...semantic.light,
     ...mkLight("#FFFFFF", "#F6F8FA", "#EBF0F4", "#1C2128", "#57606A", "#6E7781", "#D0D7DE", "#F6F8FA"),
   },
   dark: {
@@ -500,23 +500,23 @@ export const mono = {
 //   Mocha 修正被工厂碾平的层级（surface0 上浮做 tertiary/hover，crust 下沉做 code）。
 //   accent 用 blue/lavender/sky 三层拉开，语义色用官方 palette，阴影带主题自身色调。
 export const catppuccin = {
-  // 保留 catppuccin 的柔和圆角 + 弹性缓动；色值换成 Ghostty "GitHub Light/Dark Default"
-  // 官方 palette，获得通透高对比的观感。合成后名字/位次不变，DEFAULT_THEME_NAME 不动。
+  // 保留 catppuccin 的柔和圆角 + 弹性缓动；light surface 沿用 GitHub Light palette，
+  // light accent 为品牌海蓝（非 GitHub 蓝），dark 为 Catppuccin Mocha。合成后名字/位次不变，DEFAULT_THEME_NAME 不动。
   // Reviewer 改进：dark textTertiary/quaternary 提亮达 WCAG AA；light warning 改琥珀色；
   // light backgroundElevated 拉开与画布的层级，大圆角浮层不再粘连。
   meta: { radiusBoost: 2, motionEase: "cubic-bezier(0.22, 1, 0.36, 1)" },
   light: {
-    // Ghostty GitHub Light Default — 纯白 canvas + blue-500 accent
-    primary: "#0969DA",
-    primaryLight: "#218BFF",
-    primaryDark: "#0550AE",
-    primaryGradient: "linear-gradient(135deg, #0969DA, #218BFF)",
-    primaryGhost: "rgba(9,105,218,0.08)",
-    primaryHover: "rgba(9,105,218,0.10)",
-    borderAccent: "#54AEFF",
+    // 纯白 canvas + 海蓝 accent（#006EDC：白字 4.93:1，#F6F8FA 上 4.63:1；品牌见 docs/brand-outdoor-aesthetic.md）
+    primary: "#006EDC",
+    primaryLight: "#0874DC",
+    primaryDark: "#0052AD",
+    primaryGradient: "linear-gradient(135deg, #006EDC, #0874DC)",
+    primaryGhost: "rgba(0,110,220,0.08)",
+    primaryHover: "rgba(0,110,220,0.10)",
+    borderAccent: "#73BEFF",
     success: "#116329",
     warning: "#9A6700",
-    info: "#0969DA",
+    info: "#006EDC",
     error: "#CF222E",
     background:          "#FFFFFF",
     backgroundSecondary: "#F6F8FA",

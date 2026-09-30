@@ -73,6 +73,11 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
           ? message.tool_calls
           : undefined;
         if (content && options?.onTextDelta) options.onTextDelta(content);
+        const rawChoice = (choice ?? {}) as {
+          anthropic_stop_reason?: unknown;
+          anthropic_content_block_types?: unknown;
+        };
+        const usage = result.body?.usage as Record<string, unknown> | undefined;
         logLocalRuntimeDiagnostic("provider.request.result", {
           agentKey: agentConfig.key,
           transport: "anthropic-messages",
@@ -80,6 +85,10 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
           contentChars: content.length,
           toolCallCount: tool_calls?.length ?? 0,
           requestedToolNames,
+          stopReason: rawChoice.anthropic_stop_reason ?? null,
+          contentBlockTypes: rawChoice.anthropic_content_block_types ?? [],
+          outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : null,
+          ...(result.body?.id ? { messageId: result.body.id } : {}),
         });
         return {
           content,

@@ -5,6 +5,7 @@ import { createBrandedMacosDmg } from "./macos-dmg-installer";
 import { createWindowsInstallerArtifact } from "./post-package-windows";
 import { createLinuxRpmArtifact, createLinuxDebArtifact } from "./post-package-linux";
 import { applyLinuxLauncherPreflight } from "./linuxLauncherPreflight";
+import { trimLinuxPayloadArtifacts } from "./trim-linux-payload";
 // 载荷兼容闸门必须与打包链同目录、static import：它随 packages/desktop 进公开投影，
 // 而 scripts/verify/** 不进投影（2026-09-16 公开仓构建 HookFailed 的根因）。
 import { verifyLinuxPayloadArtifacts } from "./verifyElectrobunPayloadCompat";
@@ -24,19 +25,6 @@ if (buildEnv === "dev") {
 
 if (!existsSync(artifactDir)) {
   process.exit(0);
-}
-
-// Linux 载荷闸门（fail closed，2026-09-16 事故）：electrobun 自解压器不支持 GNU
-// longname（'L'）/硬链接 tar 记录——任何 >100 字符路径都会让 Setup 安装器与
-// in-app 更新在解包阶段以 TarUnsupportedFileType 中止。发布前扫描 Linux 产物，
-// 发现不兼容直接失败。详见同目录 verifyElectrobunPayloadCompat.ts。
-if (process.platform === "linux") {
-  const reports = await verifyLinuxPayloadArtifacts(artifactDir);
-  for (const report of reports) {
-    console.log(
-      `[desktop] payload extractor-compat ok: ${report.artifactPath} (${report.entries} entries)`,
-    );
-  }
 }
 
 const buildRootDir = resolve(import.meta.dir, "../build");
@@ -123,11 +111,42 @@ await syncMacArtifactTarballsFromWrapper();
 await createWindowsInstallerArtifact({ artifactDir, buildEnv });
 await createBrandedMacosDmgArtifacts();
 
+// Linux 载荷裁剪：CEF 双份资源去重（软链）、locales 裁到产品支持语言、
+// 移除 Linux 未使用的 updater 工具与死资源（名画）。必须在
+// applyLinuxLauncherPreflight 之前执行——preflight 会改写归档内 bin/launcher
+// 为 wrapper 脚本，而裁剪要动同一归档，先裁后包。
+// 放在 DEB/RPM 派生之前，让两个下游产物自动继承瘦身结果。
+// fail closed：裁剪失败中止发布（去重错误的包不能发出去）。
+if (process.platform === "linux") {
+  const trimReports = await trimLinuxPayloadArtifacts(artifactDir);
+  for (const r of trimReports) {
+    console.log(
+      `[desktop] trimmed ${r.artifact}: cefDedup=${r.cefDedup.length} localesRemoved=${r.localesRemoved} toolsRemoved=${r.toolsRemoved.length} artRemoved=${r.publicArtRemoved.length} (${(r.bytesBefore / 1024 / 1024).toFixed(0)}MB → ${(r.bytesAfter / 1024 / 1024).toFixed(0)}MB)`,
+    );
+  }
+}
+
 // Linux tar.zst is what the updater installs, and DEB/RPM are derived from it below —
 // wrap bin/launcher with the stale cross-host CEF lock preflight first so no shipped
 // Linux artifact can start CEF without it. Hard failure: a build that cannot wrap the
 // launcher must not publish (see scripts/linuxLauncherPreflight.ts).
 await applyLinuxLauncherPreflight({ artifactDir });
+
+// Linux 载荷闸门（fail closed，2026-09-16 事故）：electrobun 自解压器不支持 GNU
+// longname（'L'）/硬链接 tar 记录——任何 >100 字符路径都会让 Setup 安装器与
+// in-app 更新在解包阶段以 TarUnsupportedFileType 中止。发布前扫描 Linux 产物，
+// 发现不兼容直接失败。详见同目录 verifyElectrobunPayloadCompat.ts。
+//
+// 必须放在所有归档改写步骤（trim repack、launcher preflight）之后：扫描的
+// 必须是最终发布字节，否则 trim/preflight 重打包引入的不兼容条目会漏检。
+if (process.platform === "linux") {
+  const reports = await verifyLinuxPayloadArtifacts(artifactDir);
+  for (const report of reports) {
+    console.log(
+      `[desktop] payload extractor-compat ok: ${report.artifactPath} (${report.entries} entries)`,
+    );
+  }
+}
 
 try {
   await createLinuxRpmArtifact({ artifactDir, buildEnv });

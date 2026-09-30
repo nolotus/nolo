@@ -14,7 +14,8 @@ import type {
 export { DEVIN_CONNECT_URL };
 
 const CLIENT_NAME = "chisel";
-const CLIENT_VERSION = "2026.8.18";
+// 官方 CLI manifest 版本（https://static.devin.ai/cli/current/manifest.json，2026-09-30: 3000.11.3）。
+const CLIENT_VERSION = "3000.11.3";
 
 // --- Minimal Protobuf Wire Helpers ---
 

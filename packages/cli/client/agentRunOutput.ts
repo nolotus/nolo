@@ -169,7 +169,23 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   let thinkingFirstAt: number | null = null;
   let thinkingPreview = "";
 
+  // TUI 不展示推理内容，但静默思考 30s 时用户需要知道「它在想，不是卡了」：
+  // 只上报一个不带内容的「思考中…」标签，活动行负责计时。transcript 不写任何东西。
+  let tuiThinkingReported = false;
+  const clearTuiThinkingLabel = () => {
+    if (!tuiThinkingReported) return;
+    tuiThinkingReported = false;
+    options.activityReporter?.(null);
+  };
+
   const markThinkingDelta = (chunk: string) => {
+    if (assistantLabelManaged) {
+      if (!tuiThinkingReported && !streamedAssistantText) {
+        tuiThinkingReported = true;
+        options.activityReporter?.(t("thinkingActive"));
+      }
+      return;
+    }
     if (!showThinking) return;
     if (streamedAssistantText) return;
 
@@ -192,6 +208,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
   };
 
   const endThinkingPhase = () => {
+    clearTuiThinkingLabel();
     if (thinkingFirstAt === null) return;
     const seconds = Math.max(0, Math.round((Date.now() - thinkingFirstAt) / 1000));
     thinkingFirstAt = null;

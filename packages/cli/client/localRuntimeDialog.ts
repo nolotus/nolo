@@ -43,6 +43,14 @@ import { resolveCliOpenAiProviderConfig } from "./localProviderResolver";
 import { buildDialogFallbackTitleFromUserInput } from "../../chat/dialog/dialogTitle";
 import { toErrorMessage } from "core/errorMessage";
 import type { CliFetchImpl } from "../cliFetch";
+import { getLogger } from "../diagnostics";
+
+// TUI 模式下诊断只进 ring buffer / 日志文件（/logs 可见）；非 TUI 仍到 stderr。
+// 调用时再取：模块加载可能早于 initializeDiagnostics，提前取会拿到直写 stderr 的降级 logger。
+const diagLog = {
+  warn: (msg: string) => getLogger("cli.localRuntimeDialog").warn(msg),
+  info: (msg: string) => getLogger("cli.localRuntimeDialog").info(msg),
+};
 
 const RAW_USAGE_SCALARS = [
   "prompt_tokens",
@@ -216,7 +224,7 @@ export function createLocalDialogTitleGenerator(
       const now = Date.now();
       if (now - lastTitleWarnAtMs >= TITLE_WARN_THROTTLE_MS) {
         lastTitleWarnAtMs = now;
-        process.stderr.write("[nolo] Dialog title LLM unavailable; using fallback title.\n");
+        diagLog.warn("Dialog title LLM unavailable; using fallback title.");
       }
       return null;
     }
@@ -391,7 +399,7 @@ export async function writeDialog(args: {
   }
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
-    process.stderr.write(`[nolo-perf] writeDialog A:read-dialog: ${ms}ms\n`);
+    diagLog.info(`perf writeDialog A:read-dialog: ${ms}ms`);
   }
 
   const nowMs = args.now();
@@ -477,7 +485,7 @@ export async function writeDialog(args: {
   await args.store.batch(plan.ops);
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
-    process.stderr.write(`[nolo-perf] writeDialog C:store-batch (cumulative): ${ms}ms\n`);
+    diagLog.info(`perf writeDialog C:store-batch (cumulative): ${ms}ms`);
   }
 
   let tokenOps: Array<{ type: "put"; key: string; value: any }> = [];
@@ -498,7 +506,7 @@ export async function writeDialog(args: {
   }
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
-    process.stderr.write(`[nolo-perf] writeDialog D:token-record (cumulative): ${ms}ms\n`);
+    diagLog.info(`perf writeDialog D:token-record (cumulative): ${ms}ms`);
   }
 
   const hasSubjectRefs = localTurnHasSubjectRefs(args.input);
@@ -585,7 +593,7 @@ export async function writeDialog(args: {
 
   if (__perfEnabled) {
     const ms = (performance.now() - __perfT0).toFixed(1);
-    process.stderr.write(`[nolo-perf] writeDialog total (blocking): ${ms}ms\n`);
+    diagLog.info(`perf writeDialog total (blocking): ${ms}ms`);
   }
   return { dialogId: plan.dialogId, title: plan.title, titlePatchPromise, remoteSyncPromise };
 }

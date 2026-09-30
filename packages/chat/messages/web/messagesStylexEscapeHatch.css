@@ -22,6 +22,15 @@
   margin-left: var(--chat-assistant-content-offset, calc(32px + var(--space-4)));
 }
 
+/* Row rhythm (see messageRowSpacing.ts): distance carries hierarchy.
+ * 保留原因：data 属性选择器按关系分档，StyleX 需逐行传 props，此处更短。
+ * user/final-reply rows already end with the 28px actions row, so "reply"
+ * stays small; steps inside one assistant turn stay tight. */
+.chat-messages__item-wrapper[data-spacing="turn"] { margin-top: var(--space-6, 24px); }
+.chat-messages__item-wrapper[data-spacing="reply"] { margin-top: var(--space-2, 8px); }
+.chat-messages__item-wrapper[data-spacing="step"] { margin-top: var(--space-2, 8px); }
+.chat-messages__item-wrapper[data-spacing="default"] { margin-top: var(--space-4, 16px); }
+
 /* ═══ 自 MessageToolConfirmBar.css 迁出（MessageToolConfirmBar.tsx）═══ */
 
 /* ── 状态与变体竞争规则（hover / disabled）──

@@ -13,7 +13,6 @@ import {
   type LedgerEntry,
 } from "core/readRangeLedger";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
-import { asOptionalPositiveFiniteNumber } from "core/optionalPositiveNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asRecordOrEmpty } from "core/recordOrEmpty";
 import { asTrimmedNonEmptyStringArray } from "core/stringArray";
@@ -1280,6 +1279,96 @@ async function writeFileTool(args: {
   };
 }
 
+function extractSnippetWords(text: string): string[] {
+  const tokens: string[] = [];
+  const latinWords = text.match(/[A-Za-z0-9_]{2,}/g);
+  if (latinWords) {
+    for (const w of latinWords) tokens.push(w.toLowerCase());
+  }
+  const cjkChars = text.match(/\p{Script=Han}/gu);
+  if (cjkChars) {
+    for (let i = 0; i < cjkChars.length - 1; i++) {
+      tokens.push(cjkChars[i] + cjkChars[i + 1]);
+    }
+    if (cjkChars.length === 1) tokens.push(cjkChars[0]);
+  }
+  return tokens;
+}
+
+function calculateEditLineSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  if (a.includes(b) || b.includes(a)) return 0.8;
+  const wordsA = extractSnippetWords(a);
+  const wordsB = extractSnippetWords(b);
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+  const setB = new Set(wordsB);
+  let matches = 0;
+  for (const w of wordsA) {
+    if (setB.has(w)) matches++;
+  }
+  return (2 * matches) / (wordsA.length + wordsB.length);
+}
+
+function findClosestEditSnippet(content: string, oldText: string): string | null {
+  const contentLines = content.split(/\r?\n/);
+  const oldLinesRaw = oldText.split(/\r?\n/);
+  const oldTrimmedLines = oldLinesRaw.map((l) => l.trim()).filter(Boolean);
+  if (contentLines.length === 0 || oldTrimmedLines.length === 0) return null;
+
+  // 1. 优先尝试多行忽略空白/缩进滑动匹配
+  if (oldTrimmedLines.length > 0 && contentLines.length >= oldTrimmedLines.length) {
+    for (let i = 0; i <= contentLines.length - oldTrimmedLines.length; i++) {
+      let allMatch = true;
+      for (let j = 0; j < oldTrimmedLines.length; j++) {
+        if (contentLines[i + j].trim() !== oldTrimmedLines[j]) {
+          allMatch = false;
+          break;
+        }
+      }
+      if (allMatch) {
+        const startLine = i + 1;
+        const endLine = i + oldTrimmedLines.length;
+        const snippetLines: string[] = [];
+        for (let k = i; k < i + oldTrimmedLines.length; k++) {
+          snippetLines.push(`> ${k + 1}: ${contentLines[k]}`);
+        }
+        return `Exact match found with different indentation/whitespace (lines ${startLine}-${endLine}):\n${snippetLines.join("\n")}`;
+      }
+    }
+  }
+
+  // 2. 相似度兜底：找具有足够信息量（长度 >= 4）的特征行
+  const candidateTargetLines = oldTrimmedLines.filter((l) => l.length >= 4);
+  const targetLine = candidateTargetLines[0] || oldTrimmedLines[0];
+  if (!targetLine || targetLine.length < 3) return null;
+
+  let bestIndex = -1;
+  let bestScore = 0;
+
+  for (let i = 0; i < contentLines.length; i++) {
+    const line = contentLines[i].trim();
+    if (!line || line.length < 3) continue;
+    const score = calculateEditLineSimilarity(line, targetLine);
+    if (score > bestScore && score >= 0.45) {
+      bestScore = score;
+      bestIndex = i;
+      if (score === 1) break;
+    }
+  }
+
+  if (bestIndex === -1) return null;
+
+  const startLine = Math.max(0, bestIndex - 2);
+  const endLine = Math.min(contentLines.length - 1, bestIndex + 2);
+  const snippetLines: string[] = [];
+  for (let i = startLine; i <= endLine; i++) {
+    const prefix = i === bestIndex ? "> " : "  ";
+    snippetLines.push(`${prefix}${i + 1}: ${contentLines[i]}`);
+  }
+  return `Closest match near line ${bestIndex + 1}:\n${snippetLines.join("\n")}`;
+}
+
 async function editFileTool(args: {
   call: AgentRuntimeToolCallInput;
   workspaceRoot: string;
@@ -1308,10 +1397,12 @@ async function editFileTool(args: {
     newText,
   });
   if (replacementCount !== expectedReplacements) {
+    const hint = replacementCount === 0 ? findClosestEditSnippet(content, oldText) : null;
     throw new Error(
       `editFile expected ${expectedReplacements} ${pluralizeReplacement(expectedReplacements)} ` +
         `but found ${replacementCount} in ${requestedPath} ` +
-        `(matched after EOL normalization; verify the exact text).`
+        `(matched after EOL normalization; verify the exact text).` +
+        (hint ? `\n\n${hint}` : "")
     );
   }
   await writeFile(absolutePath, nextContent, "utf8");
@@ -2244,7 +2335,7 @@ async function openDesktopPreviewTool(args: {
   call: AgentRuntimeToolCallInput;
 }): Promise<AgentRuntimeToolResult> {
   const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
-  const url = typeof parsed.url === "string" ? parsed.url.trim() : "";
+  const url = asTrimmedString(parsed.url);
   if (!url) {
     return {
       content: JSON.stringify({ error: "openDesktopPreview requires a non-empty url." }),

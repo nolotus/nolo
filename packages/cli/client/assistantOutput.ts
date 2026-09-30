@@ -265,7 +265,19 @@ const UNORDERED_LIST_RE = /^(\s*)([-*+])\s+(.+)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+)\.\s+(.+)$/;
 const TASK_LIST_RE = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.+)$/;
 
+/**
+ * CommonMark thematic break pattern: at least 3 matching characters (---, ***, ___)
+ * optionally separated by horizontal whitespace. Characters may not be mixed.
+ * CommonMark spec: up to 3 leading spaces are permitted (4+ spaces is an indented code block).
+ */
+const THEMATIC_BREAK_PATTERN = "(?:(-[ \\t]*){3,}|(\\*[ \\t]*){3,}|(_[ \\t]*){3,})";
+const THEMATIC_BREAK_RE = new RegExp(`^[ ]{0,3}${THEMATIC_BREAK_PATTERN}$`);
+
 function normalizeListLine(line: string): string {
+  // CommonMark: Thematic break has higher precedence than list item marker.
+  if (THEMATIC_BREAK_RE.test(line)) {
+    return line;
+  }
   // Task list: "- [ ] item" / "- [x] item" → "☐ item" / "☑ item"
   const task = line.match(TASK_LIST_RE);
   if (task) {
@@ -388,14 +400,57 @@ export function isPolishListLikeLine(line: string): boolean {
   return LIST_LIKE_RE_FOR_GUARD.test(normalizeListLine(plainToolLine(line)));
 }
 
-const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s|^\s*▸\s/;
+const LIST_LIKE_RE_FOR_GUARD = /^\s*(?:•|◦|☐|☑|\d+\.)\s|^\s*[\u2460-\u2473]|^\s*[├└]──\s|^\s*▸\s/;
+
+/**
+ * 围栏内部的行在 polish 里被遮罩成 \x00F<n>\x00 哨兵。
+ * 呼吸判定必须整块跳过：哨兵与围栏标记相邻时若当成普通 prose，
+ * 会在代码块内部（最后一行代码与闭围栏之间）插进一个空行。
+ */
+function isPolishFenceInteriorLine(line: string): boolean {
+  return /^\x00F\d+\x00$/.test(line);
+}
+
+/** 标题层级（1-6）；非标题返回 null。剥掉 ANSI 后判定。 */
+export function polishHeadingLevel(line: string): number | null {
+  const match = stripAnsi(line).match(/^(#{1,6})\s/);
+  return match ? match[1]!.length : null;
+}
+
+export function isPolishHeadingLine(line: string): boolean {
+  return polishHeadingLevel(line) !== null;
+}
+
+/**
+ * 引导句：以全角/半角冒号结尾的 prose 行（"实现要点："）。
+ * 它直接引出紧随其后的列表，所以两者之间不插呼吸空行。
+ */
+export function isPolishIntroLine(line: string): boolean {
+  const plain = stripAnsi(line).trimEnd();
+  return plain.endsWith("：") || plain.endsWith(":");
+}
 
 /**
  * polish 呼吸规则：cur/next 相邻两行之间是否会插入空行。
- * 与 polishAssistantStructure 的逐对判定严格对齐（blank 两侧不插）。
+ * 与 polishAssistantStructure 的逐对判定严格对齐（blank 两侧不插），
+ * 也是流式路径 needsListProseBreath 的单一事实来源。
+ *
+ * 层级由距离表达：围栏进出、工具组、列表↔prose 各 1 行；
+ * 引导句→列表、标题→自己的正文（H1/H2 由标题规则单独补行）为 0 行。
  */
 export function polishBreathInsertsBlankBetween(cur: string, next: string): boolean {
   if (cur === "" || next === "") return false;
+  // 围栏内部（遮罩行）不参与呼吸。
+  if (isPolishFenceInteriorLine(cur) || isPolishFenceInteriorLine(next)) {
+    return false;
+  }
+  // 引导句直接引出列表：贴紧。
+  if (isPolishIntroLine(cur) && isPolishListLikeLine(next)) return false;
+  // 标题空行由标题正则单独负责：标题贴紧自己的正文；
+  // 标题上方那 1 行也只由正则补，避免这里再插一行。
+  if (isPolishHeadingLine(cur) || isPolishHeadingLine(next)) return false;
+  // 代码/mermaid 围栏进出各 1 行（空围栏的两个标记之间不插）。
+  if (isCodeFenceLine(cur) !== isCodeFenceLine(next)) return true;
   if (isToolGroupBoundary(cur, next)) return true;
   return isPolishListLikeLine(cur) !== isPolishListLikeLine(next);
 }
@@ -502,9 +557,18 @@ export function polishAssistantStructure(
     // existed, so a heading sat flush against its own body text and sections
     // ran together — the breathing room is what makes the structure scannable
     // once the heading itself is just colored text with no "###" marker left.
-    .replace(/([^\n])\n(#{1,3} )/g, "$1\n\n$2")
-    .replace(/^(#{1,3} .+)\n(?!\n)/gm, "$1\n\n")
-    .replace(/\n{4,}/g, "\n\n\n");
+    // Level hierarchy: H1/H2 are document sections and keep a row on both
+    // sides; H3-H6 are labels for the block they introduce, so they keep the
+    // row above and stay glued to their own body instead of pushing it away.
+    .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
+    .replace(/^(#{1,2} .+)\n(?!\n)/gm, "$1\n\n")
+    // 分割线前后保证有干净的空行呼吸（仅匹配最多 3 空格缩进的合法分割线）
+    .replace(new RegExp(`([^\\n])\\n([ ]{0,3}${THEMATIC_BREAK_PATTERN})$`, "gm"), "$1\n\n$2")
+    .replace(new RegExp(`^([ ]{0,3}${THEMATIC_BREAK_PATTERN})\\n(?!\\n)`, "gm"), "$1\n\n")
+    // Paragraph rhythm: one blank row is a paragraph break; a second blank row
+    // carries no extra meaning on a terminal and only pushes content apart.
+    // Fence interiors are masked above, so their blank lines are untouched.
+    .replace(/\n{3,}/g, "\n\n");
 
   // List/prose and tool/prose breathing: outside a work block, distance carries
   // hierarchy. Sibling leaves stay dense; a completed tree followed by another
@@ -536,25 +600,26 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
   const toolLine = styleTuiToolLine(line, brightness);
   if (toolLine !== null) return toolLine;
 
-  const heading = line.match(/^(#{1,3})\s+(.+)$/);
+  const heading = line.match(/^(#{1,6})\s+(.+)$/);
   if (heading) {
     const level = heading[1].length;
     const title = heading[2];
-    // Three-tier heading hierarchy for scannable structure:
-    //   H1 → accent + bold + underline (strongest visual anchor, section breaks)
+    const styledTitle = styleInlineMarkdown(title, brightness);
+    // Monotonically decreasing visual weight:
+    //   H1 → accent + bold (strongest visual anchor)
     //   H2 → warning + bold (warm amber, subsection headers)
     //   H3 → info + bold (lighter, paragraph-level labels)
-    // The old "all warning" approach made every heading look identical; the
-    // even older "h3 = info, h1/h2 = bold-only" inverted hierarchy by giving
-    // the deepest level the most color. This ordering is monotonically
-    // decreasing in visual weight: accent > warning > info.
+    //   H4+ → muted + bold (sub-labels)
     if (level === 1) {
-      return `${STYLE.bold}\x1b[4m${colorSeq("accent", brightness)}${title}${STYLE.reset}`;
+      return `${STYLE.bold}${colorSeq("accent", brightness)}${styledTitle}${STYLE.reset}`;
     }
     if (level === 2) {
-      return `${STYLE.bold}${colorSeq("warning", brightness)}${title}${STYLE.reset}`;
+      return `${STYLE.bold}${colorSeq("warning", brightness)}${styledTitle}${STYLE.reset}`;
     }
-    return `${STYLE.bold}${colorSeq("info", brightness)}${title}${STYLE.reset}`;
+    if (level === 3) {
+      return `${STYLE.bold}${colorSeq("info", brightness)}${styledTitle}${STYLE.reset}`;
+    }
+    return `${STYLE.bold}${colorSeq("muted", brightness)}${styledTitle}${STYLE.reset}`;
   }
   // 状态行弱化：repo 规范强制每条回复首句是"进入 nolo-plan…"，连续多条
   // 回复堆叠时视觉噪声大。把它降级成 chrome + dim 的弱化行，和正文拉开
@@ -563,24 +628,30 @@ function styleRichMarkdownLine(line: string, brightness: TuiBrightness) {
   if (line.startsWith("进入 nolo-plan")) {
     return `${colorSeq("chrome", brightness)}${STYLE.dim}${line}${STYLE.reset}`;
   }
-  // Blockquote: "> text" → chrome left border + dimmed content, visually
-  // distinct from body text without competing with headings or code.
+  // Blockquote: "> text" → chrome left border + dimmed styled content
   const blockquote = line.match(/^>\s?(.*)$/);
   if (blockquote) {
     const border = colorSeq("chrome", brightness);
     const content = blockquote[1];
-    return `${border}│${STYLE.reset} ${STYLE.dim}${content}${STYLE.reset}`;
+    const styled = styleInlineMarkdown(content, brightness);
+    return `${border}│${STYLE.reset} ${STYLE.dim}${styled}${STYLE.reset}`;
   }
-  // Horizontal rule: use chrome-colored line instead of barely-visible dim.
-  if (/^---+$/.test(line.trim())) {
-    return `${colorSeq("chrome", brightness)}${"─".repeat(Math.min(line.trim().length, 40))}${STYLE.reset}`;
+  // Horizontal rule: elegant 36-char divider line with subtle chrome styling.
+  if (THEMATIC_BREAK_RE.test(line)) {
+    return `${colorSeq("chrome", brightness)}${STYLE.dim}${"─".repeat(36)}${STYLE.reset}`;
   }
-  // List bullets: color the marker for visual rhythm without coloring the
-  // entire line (which would fight inline markdown highlighting).
+  // List bullets: primary level uses accent '•', nested lists (indent >= 2)
+  // use elegant open circle '◦' in chrome for rhythmic visual depth.
   const bullet = line.match(/^(\s*)(•)\s(.+)$/);
   if (bullet) {
+    const indent = bullet[1];
     const styled = styleInlineMarkdown(bullet[3], brightness);
-    return `${bullet[1]}${colorSeq("accent", brightness)}•${STYLE.reset} ${styled}`;
+    const marker = indent.length >= 2 ? "◦" : "•";
+    const markerColor =
+      indent.length >= 2
+        ? colorSeq("chrome", brightness)
+        : colorSeq("accent", brightness);
+    return `${indent}${markerColor}${marker}${STYLE.reset} ${styled}`;
   }
   // Ordered list markers (`1.`, `2.` …): chrome, not accent. The number is
   // structural chrome — accent made it compete with the body text it labels,
@@ -749,7 +820,16 @@ function emitFormattedAssistantBlock(
  * so it must remember the previous kind and inject the same blank line the
  * polish step would have inserted.
  */
-type StreamLineKind = "list" | "prose" | "blank" | "other" | "tool-header" | "tool-leaf" | "tool";
+type StreamLineKind =
+  | "list"
+  | "prose"
+  | "blank"
+  | "other"
+  | "heading"
+  | "fence"
+  | "tool-header"
+  | "tool-leaf"
+  | "tool";
 
 function classifyStreamLine(line: string): StreamLineKind {
   if (line === "") return "blank";
@@ -762,7 +842,7 @@ function classifyStreamLine(line: string): StreamLineKind {
     TASK_LIST_RE.test(plain) ||
     UNORDERED_LIST_RE.test(plain) ||
     ORDERED_LIST_RE.test(plain) ||
-    /^\s*(?:•|☐|☑)\s/.test(plain) ||
+    /^\s*(?:•|◦|☐|☑)\s/.test(plain) ||
     /^\s*[\u2460-\u2473]/.test(plain)
   ) {
     return "list";
@@ -775,6 +855,10 @@ function classifyStreamLine(line: string): StreamLineKind {
   // (isPolishListLikeLine) — single source of truth on purpose, so the two
   // paths cannot drift apart again.
   if (isPolishListLikeLine(plain)) return "list";
+  // Headings are their own rhythm class: the row above them, and (H1/H2 only)
+  // the row below them, come from the same rule polishAssistantStructure
+  // applies to raw markdown.
+  if (polishHeadingLevel(plain) !== null) return "heading";
   return "prose";
 }
 
@@ -784,9 +868,18 @@ function isStreamListLike(kind: StreamLineKind): boolean {
 
 function needsListProseBreath(
   prev: StreamLineKind | null,
-  next: StreamLineKind
+  next: StreamLineKind,
+  prevLine = "",
 ): boolean {
   if (prev === null || prev === "blank" || next === "blank") return false;
+  // 标题：上方 1 行；H1/H2 下方再补 1 行，H3-H6 贴紧自己的正文。
+  if (next === "heading") return true;
+  if (prev === "heading") return (polishHeadingLevel(prevLine) ?? 7) <= 2;
+  // 代码/mermaid 围栏进出各 1 行；围栏内部行也归为 fence，
+  // 这样闭围栏不会和最后一行代码之间多出一个空行。
+  if ((prev === "fence") !== (next === "fence")) return true;
+  // 引导句（"…："）直接引出列表：贴紧，不插呼吸空行。
+  if (isStreamListLike(next) && isPolishIntroLine(prevLine)) return false;
   if (prev === "tool-leaf" && next === "tool-header") return true;
   // Tool work behaves like a structured list for spacing: dense inside the
   // group, one blank row when entering/leaving prose.
@@ -810,13 +903,28 @@ export function createRenderAwareStreamWriter(args: {
   // Last emitted line kind outside (and across) fences — drives stream-path
   // list↔prose breathing so live TUI matches whole-message polish.
   let lastKind: StreamLineKind | null = null;
+  // Raw text of the last emitted line. The intro-colon splice and the H1/H2
+  // vs H3-H6 after-heading row need the line itself, not only its kind.
+  let lastLine = "";
+  // Blank line seen in the source but not written yet. Writing it eagerly would
+  // add a leading/trailing row that polishAssistantStructure trims away; writing
+  // every blank line would keep runs the polish pass collapses to one row.
+  // Deferring it to the next real line reproduces the polish rhythm exactly:
+  // one row between paragraphs, nothing at the edges.
+  let pendingBlankRow = false;
   // Keep the live transcript moving even when a provider sends a long prose
   // line without a newline. Complete lines still take the structured path
   // below; this is only a safe, whitespace-boundary fallback for prose.
   const PARTIAL_FLUSH_THRESHOLD = 48;
 
   const emitBreathIfNeeded = (nextKind: StreamLineKind) => {
-    if (needsListProseBreath(lastKind, nextKind)) args.write("\n");
+    if (pendingBlankRow) {
+      args.write("\n");
+      pendingBlankRow = false;
+      // The row is already there: the pair rules must not add a second one.
+      lastKind = "blank";
+    }
+    if (needsListProseBreath(lastKind, nextKind, lastLine)) args.write("\n");
   };
 
   const flushPartialProse = () => {
@@ -851,6 +959,7 @@ export function createRenderAwareStreamWriter(args: {
     emitBreathIfNeeded("prose");
     emitFormattedAssistantBlock(args.write, prefix, false);
     lastKind = "prose";
+    lastLine = prefix;
     buffer = prefix.length === buffer.length
       ? ""
       : buffer.slice(prefix.length);
@@ -871,9 +980,10 @@ export function createRenderAwareStreamWriter(args: {
           inMermaid = false;
           inFence = false;
           fenceLang = "unknown";
-          emitBreathIfNeeded("other");
+          emitBreathIfNeeded("fence");
           args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
-          lastKind = "other";
+          lastKind = "fence";
+          lastLine = firstLine;
           buffer = lines.slice(1).join("\n");
           continue;
         }
@@ -889,11 +999,13 @@ export function createRenderAwareStreamWriter(args: {
           }
           inFence = true;
         }
-        // Fence markers count as non-list ("other") so a list run flush against
-        // ``` still gets the same blank polishAssistantStructure would insert.
-        emitBreathIfNeeded("other");
+        // Fence markers are their own kind ("fence"), so a prose line or list
+        // run flush against ``` gets the same blank row polishAssistantStructure
+        // inserts, while the code interior (also "fence") never breathes.
+        emitBreathIfNeeded("fence");
         args.write(`${STYLE.dim}${firstLine}${STYLE.reset}\n`);
-        lastKind = "other";
+        lastKind = "fence";
+        lastLine = firstLine;
         buffer = lines.slice(1).join("\n");
         continue;
       }
@@ -906,7 +1018,9 @@ export function createRenderAwareStreamWriter(args: {
         // Line-local highlighting, matching formatAssistantDisplay. No trim,
         // no table conversion inside fences. Interior never breathes as lists.
         args.write(`${highlightCodeLine(firstLine, fenceLang, brightness)}\n`);
-        lastKind = "other";
+        // 围栏内部保持 fence：闭围栏贴紧最后一行代码，不在块内插空行。
+        lastKind = "fence";
+        lastLine = firstLine;
         buffer = lines.slice(1).join("\n");
         continue;
       }
@@ -926,6 +1040,7 @@ export function createRenderAwareStreamWriter(args: {
           const inner = trimmedFirst.slice(2, trimmedFirst.length - 2);
           args.write(renderMathBlock(inner) + "\n");
           lastKind = "other";
+          lastLine = trimmedFirst;
           buffer = lines.slice(1).join("\n");
           continue;
         }
@@ -960,6 +1075,7 @@ export function createRenderAwareStreamWriter(args: {
 
         args.write(renderMathBlock(innerParts.join("\n")) + "\n");
         lastKind = "other";
+        lastLine = trimmedFirst;
         buffer = lines.slice(closeIndex + 1).join("\n");
         continue;
       }
@@ -992,15 +1108,26 @@ export function createRenderAwareStreamWriter(args: {
             true
           );
           lastKind = "list";
+          lastLine = lines[end - 1] ?? firstLine;
           buffer = lines.slice(end).join("\n");
           continue;
         }
       }
 
       const kind = classifyStreamLine(firstLine);
+      if (kind === "blank") {
+        // 围栏外的连续空行折叠为最多 1 行（与 polish 的空白压缩一致），
+        // 而且只在后面还有内容时才写：收尾的 polish 会 trim 掉边缘空白。
+        if (lastKind !== null && lastKind !== "blank") pendingBlankRow = true;
+        lastKind = "blank";
+        lastLine = "";
+        buffer = lines.slice(1).join("\n");
+        continue;
+      }
       emitBreathIfNeeded(kind);
       emitFormattedAssistantBlock(args.write, firstLine, true);
       lastKind = kind;
+      lastLine = firstLine;
       buffer = lines.slice(1).join("\n");
     }
   };

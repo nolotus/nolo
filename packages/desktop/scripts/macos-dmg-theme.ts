@@ -1,6 +1,6 @@
 /**
  * Visual tokens for the macOS drag-to-install DMG window.
- * Aligned with the web default theme (Catppuccin × GitHub — Ghostty GitHub Light Default) and /downloads page surfaces.
+ * Aligned with the web default theme (catppuccin light: GitHub Light surfaces + brand ocean-blue accent) and /downloads page surfaces.
  */
 import type { MacosDmgInstallerCopy } from "./macos-dmg-i18n";
 
@@ -23,7 +23,7 @@ const MACOS_DMG_INSTALLER_VISUAL = {
   height: 400,
   background: "#F5F5F7",
   backgroundSecondary: "#F5F5F7",
-  primary: "#0969DA",
+  primary: "#006EDC",
   primaryGhost: "transparent",
   text: "#3C3C43",
   textSecondary: "#8E8E93",

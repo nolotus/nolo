@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { isAdaptiveThinkingModelId } from "integrations/anthropic/anthropicOAuthModels";
+import {
+  anthropicOAuthModelMaxOutputTokens,
+  isAdaptiveThinkingModelId,
+} from "integrations/anthropic/anthropicOAuthModels";
 import {
   createProviderCallTimingTracker,
   finalizeProviderCallTiming,
@@ -16,8 +19,24 @@ export const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
  * Live-validated 2026-08-04: UA/betas alone still 429 Sonnet/Opus; identity
  * system block is required. Billing header / cch / Stainless / tool prefixes
  * are intentionally out of scope for this pass.
+ *
+ * 2026-09-29 实测门禁：Opus 5.5 上线后 Anthropic 上游硬门禁抛出：
+ * "HTTP 400 Claude Code 2.1.220 does not support this model; version 2.1.280 or newer is required."
+ * 因此默认版本升至实测通过的 2.1.290，并提供 NOLO_CLAUDE_CODE_VERSION 动态覆盖。
  */
-export const CLAUDE_CODE_VERSION = "2.1.220";
+function resolveClaudeCodeVersion(rawEnv?: string): string {
+  const DEFAULT_VERSION = "2.1.290";
+  if (!rawEnv) return DEFAULT_VERSION;
+  const trimmed = rawEnv.trim();
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+  return DEFAULT_VERSION;
+}
+
+export const CLAUDE_CODE_VERSION = resolveClaudeCodeVersion(
+  process.env.NOLO_CLAUDE_CODE_VERSION || process.env.CLAUDE_CODE_VERSION
+);
 export const CLAUDE_CODE_USER_AGENT =
   `claude-cli/${CLAUDE_CODE_VERSION} (external, local-agent, agent-sdk/0.1.0)`;
 export const ANTHROPIC_OAUTH_BETA_HEADER =
@@ -58,6 +77,15 @@ function resolveThinkingBudget(effort: string | undefined): number | undefined {
 const DEFAULT_THINKING_EFFORT = "medium";
 /** enabled 分支 effort 缺省时的默认 budget（medium=8192）。 */
 const DEFAULT_ENABLED_BUDGET = 8192;
+/** max_tokens when neither the caller nor the model table gives one. */
+const DEFAULT_MAX_TOKENS = 8192;
+/**
+ * Ceiling for a default max_tokens on a non-streaming request. Same bound the
+ * official SDKs enforce before refusing non-streaming calls (expected
+ * generation must fit the ~10 min request window: 600s × 128k / 3600s).
+ * Explicit agent max_tokens is never clamped.
+ */
+export const NON_STREAMING_MAX_TOKENS = 21_333;
 /** enableThinking=true 但未给 thinkingBudget 时的历史默认值（保留旧行为，与 8192 不一致是有意的）。 */
 const DEFAULT_ENABLE_THINKING_BUDGET = 8000;
 
@@ -148,7 +176,8 @@ export function resolveThinkingSpec(input: ThinkingSpecInput): ThinkingSpec {
     const thinkingBudget = effortBudget ?? fallbackBudget;
     if (thinkingBudget !== undefined) {
       thinkingBlock = { type: "enabled", budget_tokens: thinkingBudget };
-      // 硬约束：默认 max_tokens=8192 与 medium budget 相等，必须提升。
+      // 硬约束：max_tokens 必须大于 budget（extended 模型缺省 max_tokens 为
+      // DEFAULT_MAX_TOKENS=8192，与 medium budget 相等），不够就提升。
       finalMaxTokens = Math.max(maxTokens, thinkingBudget + 1);
       finalTemperature = 1;
     }
@@ -222,10 +251,43 @@ function pushMessage(
   if (content.length === 0) return;
   const previous = messages.at(-1);
   if (previous?.role === role && Array.isArray(previous.content)) {
-    (previous.content as JsonRecord[]).push(...content);
+    const previousBlocks = previous.content as JsonRecord[];
+    if (role === "user" && foldIntoTrailingToolResult(previousBlocks, content)) return;
+    previousBlocks.push(...content);
     return;
   }
   messages.push({ role, content });
+}
+
+/**
+ * 工具结果后紧跟的 user text/image（回合内注入、后台 run 完成通知、空轮修复
+ * 提示等）折进最后一个 tool_result 的 content，而不是作为独立 text 块跟在
+ * tool_result 后面。
+ *
+ * Anthropic 官方「Empty responses with end_turn」：在 tool_result 后直接追加
+ * text 块，会让 Claude 学到「工具结果之后用户总会插话」，从而直接以 end_turn
+ * 返回 2–3 token 的空回复。localLoop 的空轮修复提示本身也是一条紧跟工具结果
+ * 的 user 消息，旧实现下它恰好复现了这个反模式，所以重试同样为空。
+ *
+ * 折叠后 user 消息始终以 tool_result 结尾；tool_result.content 支持 text 与
+ * image 块。纯函数、输入相同则输出字节相同，不影响前缀缓存稳定性。
+ */
+function foldIntoTrailingToolResult(
+  blocks: JsonRecord[],
+  extra: JsonRecord[],
+): boolean {
+  const last = blocks.at(-1);
+  if (!last || last.type !== "tool_result") return false;
+  if (!extra.every((block) => block.type === "text" || block.type === "image")) {
+    return false;
+  }
+  const existing: JsonRecord[] = typeof last.content === "string"
+    ? (last.content.length > 0 ? [{ type: "text", text: last.content }] : [])
+    : Array.isArray(last.content)
+      ? (last.content as JsonRecord[])
+      : [];
+  last.content = [...existing, ...extra];
+  return true;
 }
 
 function hasClaudeCodeIdentity(system: JsonRecord[]): boolean {
@@ -237,6 +299,12 @@ function hasClaudeCodeIdentity(system: JsonRecord[]): boolean {
         CLAUDE_CODE_IDENTITY_PATTERNS.some((pattern) => text.includes(pattern)),
     );
   });
+}
+
+function normalizeAnthropicWireModel(model: string): string {
+  if (model === "claude-opus-5.5") return "claude-opus-5-5";
+  if (model === "claude-sonnet-5.5") return "claude-sonnet-5-5";
+  return model;
 }
 
 export function buildAnthropicMessagesBody(args: {
@@ -356,10 +424,18 @@ export function buildAnthropicMessagesBody(args: {
     args.openAiBody.max_completion_tokens ??
     args.openAiBody.max_tokens ??
     args.agentConfig.max_tokens;
+  // Anthropic requires max_tokens. Without an explicit value, use the model's
+  // published output limit capped at what a NON-streaming request can safely
+  // produce (this path sends stream:false). A flat 8192 made adaptive-thinking
+  // turns hit finish_reason=length once thinking + answer passed 8k, which the
+  // loop surfaces as "output truncated / context exceeded".
   const maxTokens =
     typeof maxTokensRaw === "number" && Number.isFinite(maxTokensRaw)
       ? Math.max(1, Math.floor(maxTokensRaw))
-      : 8192;
+      : Math.min(
+          anthropicOAuthModelMaxOutputTokens(model) ?? DEFAULT_MAX_TOKENS,
+          NON_STREAMING_MAX_TOKENS,
+        );
 
   // 推理强度：openAiBody（客户端）优先，fallback agentConfig；分流逻辑见
   // resolveThinkingSpec（adaptive/enabled 按模型代际，effort 默认 medium）。
@@ -401,7 +477,7 @@ export function buildAnthropicMessagesBody(args: {
   }
 
   return {
-    model,
+    model: normalizeAnthropicWireModel(model),
     messages,
     max_tokens: finalMaxTokens,
     stream: false,
@@ -412,6 +488,27 @@ export function buildAnthropicMessagesBody(args: {
     ...(typeof finalTemperature === "number" ? { temperature: finalTemperature } : {}),
     ...(typeof args.openAiBody.top_p === "number" ? { top_p: args.openAiBody.top_p } : {}),
   };
+}
+
+/**
+ * Anthropic stop_reason → OpenAI finish_reason。
+ * - 有信息量的异常终止映射到客户端契约内的对应值：
+ *   max_tokens / model_context_window_exceeded → length，refusal → content_filter；
+ * - 其余（pause_turn、未知、缺失）收敛为 "stop"：客户端 finish_reason 是封闭
+ *   联合（packages/chat/messages/types.ts CompletionFinishReason），越界值会被
+ *   拼成「[流结束原因: …]」写进正文并落库。原始值由 choice 上的
+ *   anthropic_stop_reason 诊断字段承载，不靠 finish_reason 区分。
+ */
+export type AnthropicMappedFinishReason = "stop" | "tool_calls" | "length" | "content_filter";
+
+export function mapAnthropicStopReason(
+  stopReason: string,
+  hasToolCalls: boolean,
+): AnthropicMappedFinishReason {
+  if (hasToolCalls || stopReason === "tool_use") return "tool_calls";
+  if (stopReason === "max_tokens" || stopReason === "model_context_window_exceeded") return "length";
+  if (stopReason === "refusal") return "content_filter";
+  return "stop";
 }
 
 export function mapAnthropicMessageToOpenAi(payload: JsonRecord): JsonRecord {
@@ -442,10 +539,15 @@ export function mapAnthropicMessageToOpenAi(payload: JsonRecord): JsonRecord {
   const cacheReadInputTokens =
     typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : 0;
   const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
-  const stopReason = String(payload.stop_reason ?? "");
+  const stopReason = stringValue(payload.stop_reason) ?? "";
   const message: JsonRecord = { role: "assistant", content: text || null };
   if (reasoning) message.reasoning_content = reasoning;
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
+  const contentBlockTypes = content.flatMap((raw) =>
+    raw && typeof raw === "object" && typeof (raw as JsonRecord).type === "string"
+      ? [String((raw as JsonRecord).type)]
+      : [],
+  );
   return {
     id: stringValue(payload.id) ?? `chatcmpl_${randomUUID()}`,
     object: "chat.completion",
@@ -453,12 +555,11 @@ export function mapAnthropicMessageToOpenAi(payload: JsonRecord): JsonRecord {
     choices: [{
       index: 0,
       message,
-      finish_reason:
-        toolCalls.length > 0 || stopReason === "tool_use"
-          ? "tool_calls"
-          : stopReason === "max_tokens"
-            ? "length"
-            : "stop",
+      finish_reason: mapAnthropicStopReason(stopReason, toolCalls.length > 0),
+      // 原始 Anthropic 终止原因与内容块类型，仅供诊断空回复/异常终止；
+      // 不进入模型可见内容。
+      anthropic_stop_reason: stopReason || null,
+      anthropic_content_block_types: contentBlockTypes,
     }],
     usage: {
       // prompt_tokens/input_tokens are total input, including cache read/write.

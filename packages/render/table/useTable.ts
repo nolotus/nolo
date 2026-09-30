@@ -1,14 +1,12 @@
 // packages/render/table/useTable.ts
 
 import { useEffect, useMemo } from "react";
-import { useAppDispatch } from "app/store";
-import type { ThunkDispatch, UnknownAction } from "@reduxjs/toolkit";
-import type { AppExtra, RootState } from "app/store";
 import {
     initTable,
     loadTableRows,
     useTableField,
 } from "./tableStore";
+import { useTableDispatch } from "./useTableShareActions";
 import { SEPARATOR } from "database/keys";
 import { useToken, useUserId } from "identity";
 
@@ -18,13 +16,13 @@ export interface UseTableOptions {
 
 export const useTable = (tableKey: string | undefined, options: UseTableOptions = {}) => {
     const { enabled = true } = options;
-    // 表格域只允许 dispatch 真命令/真 thunk：把暴露给调用方的 dispatch 收窄成严格
-    // ThunkDispatch —— 形如 `dispatch(某模块 store setter(...))`（返回 void）的误用
-    // 会直接编译失败。这是 2026-09-17 事故（dispatch(undefined) → Redux #7，页面被
-    // 错误边界兜底）的类型层防线，见 docs/incidents/2026-09-17-table-page-focus-
-    // context-dispatch-crash.md。
-    const dispatch: ThunkDispatch<RootState, AppExtra, UnknownAction> =
-        useAppDispatch() as ThunkDispatch<RootState, AppExtra, UnknownAction>;
+    // 表格域只允许 dispatch 真命令/真 thunk。dispatch 经 useTableShareActions 的
+    // useTableDispatch 域 seam 注入（useTable 自身不再 import app/store / RTK 类型，
+    // 守 redux 冻结边界）。类型仍收窄成严格 TableDispatch —— 形如
+    // `dispatch(某模块 store setter(...))`（返回 void）的误用会直接编译失败。
+    // 这是 2026-09-17 事故（dispatch(undefined) → Redux #7，页面被错误边界兜底）
+    // 的类型层防线，见 docs/incidents/2026-09-17-table-page-focus-context-dispatch-crash.md。
+    const dispatch = useTableDispatch();
     const currentToken = useToken();
     const currentUserId = useUserId();
 

@@ -7,10 +7,21 @@ import { installNativeHostManifest } from "../nativeHostInstall.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const connectorRoot = resolve(__dirname, "..");
-const extensionId = process.argv[2];
+const args = process.argv.slice(2);
+const positional = args.filter((arg) => !arg.startsWith("--"));
+const extensionId = positional[0];
+// Optional flag: `--browser=firefox` (or `--browser firefox`) registers under Mozilla's
+// native-messaging dir with `allowed_extensions`; default keeps the Chrome behavior unchanged.
+const browserArg = args.find((arg) => arg.startsWith("--browser="));
+const browserFlagIndex = args.indexOf("--browser");
+const browser =
+  browserArg?.slice("--browser=".length) ??
+  (browserFlagIndex >= 0 ? args[browserFlagIndex + 1] : "chrome") ??
+  "chrome";
 
 const result = installNativeHostManifest({
   connectorRoot,
+  browser,
   ...(extensionId ? { extensionId } : {}),
 });
 

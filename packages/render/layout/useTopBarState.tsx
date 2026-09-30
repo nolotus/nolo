@@ -93,6 +93,11 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
     ? buildAppEditorPath(routeAppKey, routeSpaceId, routeAppServerOrigin)
     : "";
   const [showVersionPanel, setShowVersionPanel] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareModalLink, setShareModalLink] = useState("");
+  const [shareModalVisibility, setShareModalVisibility] = useState<"private" | "community">("private");
+  const [isShareModalLoading, setIsShareModalLoading] = useState(false);
+  const [shareModalCopied, setShareModalCopied] = useState(false);
 
   // doc state now lives in the standalone docStore (peeled out of Redux).
   const page = useDocState();
@@ -471,24 +476,31 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
           );
         }
 
+        setShareModalLink(webLink);
+        setShareModalVisibility(visibility);
+
         try {
           await copyTextToClipboard(webLink);
+          setShareModalCopied(true);
           toast.success(
             visibility === "community"
               ? t("sharePublished", "已分享到社区，链接已复制")
               : t("shareLinkCopied", "分享链接已复制"),
           );
         } catch (copyError) {
+          setShareModalCopied(false);
           console.warn("Failed to copy share link:", copyError);
           toast.success(
             `${t("shareCopyFailed", "复制链接失败，请手动复制")}: ${webLink}`,
             { duration: 8000 },
           );
         }
+        return webLink;
       } catch (e: any) {
         toast.error(
           `${t("shareFailed", "分享失败")}${e?.message ? `: ${e.message}` : ""}`,
         );
+        throw e;
       }
     },
     [
@@ -503,6 +515,27 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
       t,
     ],
   );
+
+  const handleOpenShare = useCallback(async () => {
+    setIsShareModalOpen(true);
+    setIsShareModalLoading(true);
+    try {
+      await handleShare("private");
+    } catch {
+      // 错误已由 handleShare 弹出 toast
+    } finally {
+      setIsShareModalLoading(false);
+    }
+  }, [handleShare]);
+
+  const handlePublishCommunity = useCallback(async () => {
+    setIsShareModalLoading(true);
+    try {
+      await handleShare("community");
+    } finally {
+      setIsShareModalLoading(false);
+    }
+  }, [handleShare]);
 
   const handleToggleObjectAssistant = useCallback(() => {
     if (!objectAssistantKind) return;
@@ -702,6 +735,14 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     handleToggleEdit,
     handleSave,
     handleShare,
+    isShareModalOpen,
+    setIsShareModalOpen,
+    shareModalLink,
+    shareModalVisibility,
+    shareModalCopied,
+    isShareModalLoading,
+    handleOpenShare,
+    handlePublishCommunity,
     handleToggleObjectAssistant,
     handleToggleFileDetails,
     handleOpenDeleteConfirm,

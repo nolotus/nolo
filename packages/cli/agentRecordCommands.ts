@@ -247,6 +247,19 @@ export async function runAgentCreateCommand(
       });
     }
 
+    const apiKeyRef = String(built.updates?.apiKeyRef || "").trim();
+    let authHint: string | undefined;
+    const OAUTH_REFS = new Set(["claude", "chatgpt", "xai", "antigravity", "cloudflare"]);
+    if (apiKeyRef && OAUTH_REFS.has(apiKeyRef)) {
+      try {
+        const { createOAuthTokenStore } = await import("agent-runtime/oauthTokenStore");
+        const store = createOAuthTokenStore();
+        if (!store.read(apiKeyRef as any)) {
+          authHint = `Subscription "${apiKeyRef}" is not authorized yet. Run \`nolo auth ${apiKeyRef}\` to log in.`;
+        }
+      } catch {}
+    }
+
     output.write(JSON.stringify({
       ok: true,
       agentKey: built.agentKey,
@@ -254,8 +267,14 @@ export async function runAgentCreateCommand(
       updates: sanitizeAgentRecordForCliOutput(built.updates),
       record: sanitizeAgentRecordForCliOutput(built.nextRecord),
       ...(verifyResult ? { verify: verifyResult } : {}),
+      ...(authHint ? { hint: authHint } : {}),
     }, null, 2));
     output.write("\n");
+
+    if (authHint) {
+      const errorOutput = deps.error ?? process.stderr;
+      errorOutput.write(`[nolo] Hint: ${authHint}\n`);
+    }
     return 0;
   } catch (error) {
     output.write(

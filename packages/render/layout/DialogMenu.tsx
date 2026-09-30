@@ -16,6 +16,7 @@ import {
   LuClipboard,
   LuEllipsis,
   LuLink,
+  LuShare2,
   LuStar,
   LuTrash2,
   LuUsers,
@@ -44,16 +45,14 @@ const DialogMenu = ({
   showShareButton = false,
   canDelete = false,
   showFavorite = false,
-  onShareCommunity,
-  onSharePrivate,
+  onShare,
   onDelete,
 }: {
   currentDialog: any;
   showShareButton?: boolean;
   canDelete?: boolean;
   showFavorite?: boolean;
-  onShareCommunity?: () => void;
-  onSharePrivate?: () => void;
+  onShare?: () => void;
   onDelete?: () => void;
 }) => {
   const { t } = useTranslation(["common", "chat"]);
@@ -100,10 +99,8 @@ const DialogMenu = ({
     (key: Key) => {
       if (key === "favorite") {
         toggleFavorite();
-      } else if (key === "share-community") {
-        onShareCommunity?.();
-      } else if (key === "share-private") {
-        onSharePrivate?.();
+      } else if (key === "share") {
+        onShare?.();
       } else if (key === "copy-diagnostics") {
         handleCopyDiagnostics();
       } else if (key === "delete") {
@@ -111,8 +108,7 @@ const DialogMenu = ({
       }
     },
     [
-      onShareCommunity,
-      onSharePrivate,
+      onShare,
       onDelete,
       handleCopyDiagnostics,
       toggleFavorite,
@@ -165,22 +161,13 @@ const DialogMenu = ({
                   </MenuItem>
                 )}
                 {showShareButton && (
-                  <>
-                    <MenuItem
-                      id="share-community"
-                      textValue={t("publishCommunity", "社区分享")}
-                    >
-                      <LuUsers size={ICON_SIZE} aria-hidden="true" />
-                      <span slot="label">{t("publishCommunity", "社区分享")}</span>
-                    </MenuItem>
-                    <MenuItem
-                      id="share-private"
-                      textValue={t("shareCurrent", "私人分享")}
-                    >
-                      <LuLink size={ICON_SIZE} aria-hidden="true" />
-                      <span slot="label">{t("shareCurrent", "私人分享")}</span>
-                    </MenuItem>
-                  </>
+                  <MenuItem
+                    id="share"
+                    textValue={t("share", "分享")}
+                  >
+                    <LuShare2 size={ICON_SIZE} aria-hidden="true" />
+                    <span slot="label">{t("share", "分享")}</span>
+                  </MenuItem>
                 )}
                 {showCopyDiagnostics && (
                   <MenuItem

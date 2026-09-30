@@ -16,7 +16,7 @@ import i18n from "app/i18n";
 import { toTrimmedString } from "core/toTrimmedString";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
 import type { ToolExecutorContext } from "ai/tools";
-import { fetchAgentByDbKey } from "./agentUpdateShared";
+import { calibrateReasoningEffortInPatch, fetchAgentByDbKey } from "./agentUpdateShared";
 import {
     assertForkedAgentProviderConfig,
     buildForkAgentFormData,
@@ -546,6 +546,8 @@ export async function createAgentToolFunc(
         formData = await buildPlatformFormDataFromArgs(args);
         formData.linkedSpaces = resolvedLinkedSpaces;
     }
+    // 按模型级真实推理能力校准 effort（fork 继承与新建两条路径统一处理）
+    const effortNote = calibrateReasoningEffortInPatch(formData, formData);
     const expectedProviderConfig = getForkedAgentProviderExpectation(formData as any);
 
     try {
@@ -600,6 +602,9 @@ export async function createAgentToolFunc(
         }
         if (typeof currentBalance === "number") {
             lines.push(`- 当前余额: ${currentBalance}`);
+        }
+        if (effortNote) {
+            lines.push(effortNote);
         }
 
         return {

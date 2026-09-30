@@ -4,7 +4,7 @@ import { rankMemoryCandidates, type MemoryRankContext } from "./rank";
 import { chooseMemoryOwners, loadMemoryCandidatesFromDb } from "./queryShared";
 import { buildMemorySubjectsForAgent, resolveAgentMemoryPolicy } from "./policy";
 import { EXPLICIT_REMEMBER_PREFIX_REGEX } from "./constants";
-import type { MemoryRuntimeResolution } from "./types";
+import type { MemoryItem, MemoryRuntimeResolution } from "./types";
 import {
   isMemoryVNextShadowReadEnabled,
   runMemoryVNextShadowRead,
@@ -12,9 +12,18 @@ import {
 } from "./vnext/shadowRead";
 import {
   isMemoryVNextLazyPromotionEnabled,
+  pickFirstUncoveredLazyPromotionItem,
   runMemoryVNextLazyPromotion,
   type MemoryVNextLazyPromotionObservation,
 } from "./vnext/lazyPromotion";
+import { isMemoryVNextPureReadEnabled } from "./vnext/pureReadGate";
+import { resolvePureVNextRuntime } from "./vnext/pureVNextRuntime";
+import {
+  isMemoryVNextPrimaryReadEnabled,
+  MEMORY_VNEXT_PRIMARY_READ_TIMEOUT_MS,
+  resolveMemoryVNextM4Selection,
+  type MemoryVNextPrimaryReadObservation,
+} from "./vnext/primaryRead";
 
 /** Below this confidence a memory is frozen out of retrieval entirely. */
 export const COLD_STORAGE_CONFIDENCE = 0.3;
@@ -236,6 +245,11 @@ export const resolveMemoryRuntime = async (input: {
    * `selectedItems`/`promptBlock` and this callback must not throw.
    */
   lazyPromotionEmit?: (observation: MemoryVNextLazyPromotionObservation) => void;
+  /**
+   * Slice 7 primary read: observation sink (defaults to `console.info`). Only
+   * called when `NOLO_MEMORY_VNEXT_PRIMARY_READ` is on; must not throw.
+   */
+  primaryReadEmit?: (observation: MemoryVNextPrimaryReadObservation) => void;
 }): Promise<MemoryRuntimeResolution> => {
   const owners = chooseMemoryOwners({
     userId: input.userId,
@@ -243,6 +257,22 @@ export const resolveMemoryRuntime = async (input: {
   });
   if (owners.length === 0) {
     return { selectedItems: [], promptBlock: null };
+  }
+
+  // M5-R Pure vNext Read (flag-gated by NOLO_MEMORY_VNEXT_PURE_READ=1)
+  // When enabled, completely skips legacy candidate loading, ranking, decaying,
+  // touch writes and promotion, running 100% on vNext State recall.
+  if (isMemoryVNextPureReadEnabled()) {
+    const pure = await resolvePureVNextRuntime({
+      db: input.db,
+      owners,
+      userInput: input.userInput,
+      maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET,
+    });
+    return {
+      selectedItems: pure.selectedItems,
+      promptBlock: pure.promptBlock,
+    };
   }
 
   const policy = resolveAgentMemoryPolicy({ agentKey: input.agentKey });
@@ -292,23 +322,84 @@ export const resolveMemoryRuntime = async (input: {
   );
   const selected = [...residentItems, ...ranked];
   const legacyLatencyMs = Math.round((performance.now() - legacyStartedAt) * 10) / 10;
-  const promptBlock =
-    selected.length === 0
-      ? null
-      : buildMemoryOverlay(selected, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET });
+  const renderOverlay = (items: MemoryItem[]) =>
+    items.length === 0 ? null : buildMemoryOverlay(items, { maxTokens: MEMORY_OVERLAY_TOKEN_BUDGET });
+  let promptBlock = renderOverlay(selected);
+
+  // Slice 7 primary read (flag-gated, default OFF → behavior unchanged).
+  // Retrieval is still the cheap local ranker above. Authority is per item:
+  // a selected item covered by a current State is rendered from that State,
+  // everything else keeps its legacy text — nothing the ranker chose is lost.
+  const primaryRead = isMemoryVNextPrimaryReadEnabled();
+  let allCoveredByVNext = false;
+  if (primaryRead) {
+    const emitPrimary = (observation: MemoryVNextPrimaryReadObservation) => {
+      try {
+        (input.primaryReadEmit ??
+          ((o) => console.info("[memory] vnext primary read", { event: "memory_vnext_primary_read", ...o })))(observation);
+      } catch {
+        /* best-effort telemetry */
+      }
+    };
+    const base = { legacyHitCount: selected.length, legacyLatencyMs };
+    const vnextStartedAt = performance.now();
+    const vnextLatency = () => Math.round((performance.now() - vnextStartedAt) * 10) / 10;
+    if (selected.length === 0) {
+      emitPrimary({ ...base, source: "none" });
+    } else {
+      try {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const m4 = await Promise.race([
+          resolveMemoryVNextM4Selection({ db: input.db, owners, query: input.userInput, selected }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })),
+              MEMORY_VNEXT_PRIMARY_READ_TIMEOUT_MS
+            );
+          }),
+        ]).finally(() => clearTimeout(timer));
+        promptBlock = renderOverlay(m4.renderItems);
+        allCoveredByVNext = m4.uncoveredLegacyCount === 0 && m4.recalledStateCount > 0;
+        const source = m4.recalledStateCount > 0
+          ? (m4.uncoveredLegacyCount === 0 ? "vnext" : "hybrid")
+          : (m4.uncoveredLegacyCount > 0 ? "legacy_fallback" : "none");
+        emitPrimary({
+          ...base,
+          source,
+          uncoveredLegacyCount: m4.uncoveredLegacyCount,
+          coveredSuppressedCount: m4.coveredSuppressedCount,
+          recalledStateCount: m4.recalledStateCount,
+          vnextLatencyMs: vnextLatency(),
+          contextChars: promptBlock?.length ?? 0,
+          ...(source === "legacy_fallback" ? { fallbackReason: "no_vnext_context" as const } : {}),
+        });
+      } catch (error) {
+        emitPrimary({
+          ...base,
+          source: "legacy_fallback",
+          vnextLatencyMs: vnextLatency(),
+          contextChars: promptBlock?.length ?? 0,
+          fallbackReason: "vnext_error",
+          error: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    }
+  }
 
   // Slice 5 shadow read: parallel vNext recall, observation-only. The shadow
   // result never enters `selected`/`promptBlock`; a shadow failure is recorded
   // in telemetry, never thrown. Double gate: flag + injected provider.
+  // Under primary read the shadow's comparison role is superseded; skip it so
+  // a turn never pays for a second vNext recall.
   const shadowEnabled =
-    input.vNextShadowProvider != null && isMemoryVNextShadowReadEnabled();
+    !primaryRead && input.vNextShadowProvider != null && isMemoryVNextShadowReadEnabled();
   if (shadowEnabled) {
-    // Fire-and-forget relative to the return value: the caller must not wait
-    // on the shadow before using the legacy resolution. We still await it
-    // inside this promise so the observation is emitted on the same turn and
-    // so a synchronous catalog error is captured — but `runMemoryVNextShadowRead`
-    // itself never throws, so the await cannot reject.
-    await runMemoryVNextShadowRead({
+    // Fully detached from the legacy answer path: the caller's return value
+    // and latency must not wait on the shadow (Slice 6.1 measured a ~1-2s
+    // DeepSeek round-trip inflating every runtime call). The helper already
+    // never throws, but keep a defensive `.catch` because `void` would turn
+    // a stray rejection into an unhandled rejection.
+    void runMemoryVNextShadowRead({
       ctx: {
         db: input.db,
         owners,
@@ -318,26 +409,44 @@ export const resolveMemoryRuntime = async (input: {
       legacyItems: selected,
       legacyLatencyMs,
       legacyContextChars: promptBlock?.length ?? 0,
-    });
+    }).catch(() => {});
   }
 
   // Slice 6 lazy promotion: promote at most one record per runtime turn, using
-  // the already-ranked legacy selection as the usefulness signal. Detached
-  // best-effort work never changes the current legacy-authority answer. A
-  // separate flag lets operators stop writes without disabling Slice 5 shadow.
-  const promotionCandidate = selected[0];
+  // the already-ranked legacy selection as the usefulness signal. Slice 6.1:
+  // instead of always promoting `selected[0]` (which starves the tail when the
+  // head is already covered — e.g. explicit-user-directive pins the newest
+  // covered item at index 0), pick the first still-uncovered item in the same
+  // order. Evidence-only items count as uncovered so failed/no_op promotions
+  // stay retryable. The coverage snapshot is memoized per owner (no N+1).
+  // Slice 6.2: an item the Interpreter judged no_op is also skipped while the
+  // owner's State context is unchanged (process-local, bounded, no TTL), so a
+  // no_op item cannot pin the head either.
+  //
+  // Candidate selection and promotion are BOTH fully detached from the legacy
+  // return path: any failure or DB read latency in `pickFirstUncovered...`
+  // stays entirely backgrounded and can never degrade or fail legacy answers.
   const lazyPromotionEnabled =
     input.vNextShadowProvider != null && isMemoryVNextLazyPromotionEnabled();
-  if (lazyPromotionEnabled && promotionCandidate) {
-    // Defensive `.catch`: the helper is designed never to throw, but it is
-    // detached via `void` — a stray rejection here must not surface as an
-    // unhandled promise rejection in the host process.
-    void runMemoryVNextLazyPromotion({
-      db: input.db,
-      item: promotionCandidate,
-      provider: input.vNextShadowProvider!,
-      ...(input.lazyPromotionEmit ? { emit: input.lazyPromotionEmit } : {}),
-    }).catch(() => {});
+  // Fully vNext-rendered turns have nothing left to promote; skip the read.
+  if (lazyPromotionEnabled && selected.length > 0 && !allCoveredByVNext) {
+    void (async () => {
+      const promotionPick = await pickFirstUncoveredLazyPromotionItem(
+        input.db,
+        selected
+      );
+      if (promotionPick) {
+        await runMemoryVNextLazyPromotion({
+          db: input.db,
+          item: promotionPick.item,
+          selectedIndex: promotionPick.selectedIndex,
+          skippedCoveredCount: promotionPick.skippedCoveredCount,
+          skippedNoOpCount: promotionPick.skippedNoOpCount,
+          provider: input.vNextShadowProvider!,
+          ...(input.lazyPromotionEmit ? { emit: input.lazyPromotionEmit } : {}),
+        });
+      }
+    })().catch(() => {});
   }
 
   if (selected.length === 0) {
@@ -346,7 +455,10 @@ export const resolveMemoryRuntime = async (input: {
 
   // 标记 retrieval：只能证明这些记忆被注入 overlay，不代表模型使用了它们
   // （retrieved ≠ used ≠ useful）。resident 同样被注入，同样按 retrieval 记账。
-  // 见 storeShared.ts 的字段语义说明。
+  // 见 storeShared.ts 的字段语义说明。Slice 7：由 vNext State 渲染的条目同样
+  // 记 retrieval——它确实被检索并注入了（只是换了文本），而 rank 的未检索
+  // 衰减与 correction 的"近期检索"判断都依赖这个信号；不记会让已覆盖条目
+  // 逐渐掉出排序，反而让 vNext 失去接管的对象。
   await touchMemoryItemsInDb(input.db, selected);
   return {
     selectedItems: selected,

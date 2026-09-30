@@ -127,6 +127,8 @@ type ModelLookupCandidate = Model & {
 };
 
 const ANTHROPIC_MODEL_ALIASES: Record<string, string> = {
+  "claude-opus-5.5": "claude-opus-5-5",
+  "claude-sonnet-5.5": "claude-sonnet-5-5",
   "claude-sonnet-4.6": "claude-3-7-sonnet-latest",
   "claude-sonnet-4.5": "claude-3-5-sonnet-latest",
 };

@@ -2,7 +2,7 @@
           --agent-card-height: 220px;
           background: var(--surfaceRaised, var(--backgroundTertiary));
           border-radius: var(--radius-md);
-          padding: 18px;
+          padding: var(--space-4);
           border: none;
           transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
           cursor: pointer;
@@ -74,7 +74,7 @@
         .agent__header {
           display: flex;
           align-items: flex-start;
-          gap: 10px;
+          gap: var(--space-2);
         }
 
         .agent__avatar {
@@ -112,7 +112,7 @@
 
         .agent__title {
           font-size: var(--fontSize-md);
-          font-weight: 650;
+          font-weight: 600;
           margin: 0;
           color: var(--text);
           line-height: var(--leading-tight);
@@ -127,7 +127,8 @@
         }
 
         .agent__price {
-          font-size: var(--fontSize-xs);
+          /* 12px 下限：不随 compact 密度缩到 11px（--fontSize-xs 在 compact=11） */
+          font-size: var(--fontSize-min-readable, 12px);
           color: var(--textMuted, var(--textSecondary));
           font-weight: 600;
           display: flex;
@@ -163,7 +164,7 @@
           display: flex;
           align-items: center;
           flex-wrap: wrap;
-          gap: 6px;
+          gap: var(--space-1);
           margin-top: 4px;
           min-height: 22px;
         }
@@ -171,26 +172,26 @@
         .agent__model-cost span {
           display: inline-flex;
           align-items: baseline;
-          gap: 3px;
+          gap: var(--space-1);
           min-width: 0;
           border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--borderLight));
           border-radius: 999px;
           background: color-mix(in srgb, var(--primary) 6%, var(--surfaceRaised, var(--backgroundTertiary)));
-          color: var(--textMuted, var(--textSecondary));
-          padding: 2px 7px;
-          font-size: var(--fontSize-sm);
+          color: var(--textSecondary);
+          padding: 2px var(--space-2);
+          font-size: var(--type-caption);
           line-height: 1.35;
           white-space: nowrap;
         }
 
         .agent__model-cost strong {
           color: var(--text);
-          font-weight: 650;
+          font-weight: 600;
         }
 
         .agent__tags {
           display: flex;
-          gap: 6px;
+          gap: var(--space-1);
           flex-wrap: nowrap;
           margin-top: 4px;
           overflow: hidden;
@@ -199,7 +200,7 @@
 
         .agent__tag {
           font-size: var(--fontSize-sm);
-          padding: 3px 8px;
+          padding: var(--space-1) var(--space-2);
           background: var(--surfaceInteractive, var(--backgroundTertiary));
           border-radius: 999px;
           color: var(--textSubtle, var(--textTertiary));
@@ -265,19 +266,19 @@
           color: var(--textTertiary);
         }
 
-        /* 顶部操作区：固定 28px 宽度占位 */
+        /* 顶部操作区：与 more 按钮同宽（--control-md），保证桌面热区 ≥32px */
         .agent__actions-top {
           flex-shrink: 0;
-          width: 24px;
-          height: var(--control-sm);
+          width: var(--control-md);
+          height: var(--control-md);
           display: flex;
           align-items: flex-start;
           justify-content: flex-end;
         }
 
         .agent__more-placeholder {
-          width: 24px;
-          height: var(--control-sm);
+          width: var(--control-md);
+          height: var(--control-md);
         }
 
         .agent__desc {
@@ -428,7 +429,7 @@
 }
 
 .agent__cover {
-  margin: -18px -18px 0;   /* 溢出到卡片内边距外，贴边显示 */
+  margin: calc(-1 * var(--space-4)) calc(-1 * var(--space-4)) 0;   /* 溢出到卡片内边距外，贴边显示 */
   border-radius: var(--radius-md) var(--radius-xl) 0 0;
   overflow: hidden;
   background: var(--backgroundTertiary);
@@ -462,8 +463,11 @@
     white-space: normal;
   }
 
-  /* 移动端可读性下限：价格元信息不随 compact 密度缩到 11px */
+  /* 移动端可读性下限 + 防顶爆：nowrap 价格行会把卡片 min-content 顶到 ~400px，
+     在 1fr 网格里变成整页横向溢出（explore 移动端首当其冲）。
+     允许换行后 min-content 回到视口内。 */
   .agent__price {
-    font-size: var(--fontSize-min-readable, 12px);
+    white-space: normal;
+    flex-wrap: wrap;
   }
 }

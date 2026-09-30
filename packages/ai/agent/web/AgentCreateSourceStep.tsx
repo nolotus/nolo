@@ -3,6 +3,7 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useNavigate } from "app/routing";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
@@ -22,7 +23,13 @@ import {
 import type { SubscriptionOAuthConnection } from "./useSubscriptionOAuthConnection";
 import { useIsLoggedIn, useUserId } from "identity";
 import type { ReasoningEffort } from "../createAgentSchema";
-import { getAvailableReasoningEfforts } from "../createAgentSchema";
+import {
+  useModelReasoningCapability,
+  useReasoningEffortCalibration,
+  resolveReasoningEffortOptions,
+  getReasoningEffortProviderHint,
+  type UseModelReasoningCapabilityResult,
+} from "./useModelReasoningCapability";
 import * as stylex from "@stylexjs/stylex";
 import { agentFormStyles as afs } from "./agentFormStyles";
 import { withLiteralClass } from "./withLiteralClass";
@@ -110,6 +117,58 @@ function getReasoningEffortSelectOptions(
     { id: "xhigh", label: t(`${prefix}xhigh`) },
     { id: "max", label: t(`${prefix}max`) },
   ];
+}
+
+/**
+ * 推理强度选择字段：创建面板三处来源（自定义 / 订阅 OAuth / 订阅 Key）共用。
+ * 按模型级真实能力渲染：不支持提示 / 无档位提示 / provider 不可用提示 / 过滤后的下拉。
+ */
+function ReasoningEffortSelectField({
+  t,
+  reasoning,
+  provider,
+  value,
+  onChange,
+  busy,
+}: {
+  t: TFunction;
+  reasoning: UseModelReasoningCapabilityResult;
+  provider: string | null | undefined;
+  value: ReasoningEffort;
+  onChange: (v: ReasoningEffort) => void;
+  busy: boolean;
+}) {
+  const resolution = resolveReasoningEffortOptions(
+    reasoning.info,
+    reasoning.loading,
+    provider,
+  );
+  if (resolution.kind === "unsupported-model") {
+    return <span>{t("help.modelNoReasoningEffort", "该模型不支持推理强度设置")}</span>;
+  }
+  if (resolution.kind === "no-levels") {
+    return <span>{t("help.modelNoReasoningLevels", "该模型支持推理，但无独立强度档位可调")}</span>;
+  }
+  if (resolution.kind === "provider-unavailable") {
+    return <span>{getReasoningEffortProviderHint(provider)}</span>;
+  }
+  return (
+    <Select
+      className="agent-create-esc-source-select"
+      label={t("createAgent.quickCreate.reasoningEffort", "推理强度")}
+      selectedKey={value}
+      isDisabled={busy}
+      onSelectionChange={(key) => onChange(String(key ?? "medium") as ReasoningEffort)}
+    >
+      {getReasoningEffortSelectOptions(t)
+        .filter((o) => (resolution.efforts as string[]).includes(o.id))
+        .map((o) => (
+          <SelectItem key={o.id} id={o.id} textValue={o.label}>
+            {o.label}
+          </SelectItem>
+        ))}
+    </Select>
+  );
 }
 
 
@@ -378,6 +437,14 @@ const AgentCreateApiPanel: React.FC<{
   onCreate,
 }) => {
   const { t } = useTranslation("ai");
+
+  const modelReasoning = useModelReasoningCapability({
+    provider: activePresetFields.provider,
+    model,
+  });
+
+  useReasoningEffortCalibration(modelReasoning.info, reasoningEffort, setReasoningEffort);
+
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="api">
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
@@ -476,37 +543,20 @@ const AgentCreateApiPanel: React.FC<{
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
+          {modelReasoning.loading ? (
+            <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.65, fontWeight: "normal" }}>
+              (正在探测模型推理支持...)
+            </span>
+          ) : null}
         </span>
-        {(() => {
-          const available = getAvailableReasoningEfforts(activePresetFields.provider);
-          if (available.length === 0) {
-            return (
-              <span>
-                {activePresetFields.provider === "anthropic" || activePresetFields.provider === "google" || activePresetFields.provider === "qwen"
-                  ? "此服务商使用 Thinking 机制，无需设置推理强度"
-                  : activePresetFields.provider === "cursor" ? "Cursor 推理强度由模型名称后缀决定（如 -high）" : "此服务商不支持推理强度设置"}
-              </span>
-            );
-          }
-          return (
-            <Select
-              className="agent-create-esc-source-select"
-              label={t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-              selectedKey={reasoningEffort}
-              isDisabled={busy}
-              onSelectionChange={(key) => {
-                const v = String(key ?? "medium");
-                setReasoningEffort(v as ReasoningEffort);
-              }}
-            >
-              {getReasoningEffortSelectOptions(t).filter((o) => (available as string[]).includes(o.id)).map((o) => (
-                <SelectItem key={o.id} id={o.id} textValue={o.label}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </Select>
-          );
-        })()}
+        <ReasoningEffortSelectField
+          t={t}
+          reasoning={modelReasoning}
+          provider={activePresetFields.provider}
+          value={reasoningEffort}
+          onChange={setReasoningEffort}
+          busy={busy}
+        />
       </label>
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
@@ -609,6 +659,26 @@ const AgentCreateSubscriptionPanel: React.FC<{
   onCreate,
 }) => {
   const { t } = useTranslation("ai");
+
+  // 订阅面板同样按 (provider, model) 解析真实推理能力：
+  // 命中模型级 override（如 grok-3-mini 仅 low/high）时过滤档位并自动校准。
+  const subReasoning = useModelReasoningCapability({
+    provider: activePresetFields.provider,
+    model: subModel,
+  });
+  useReasoningEffortCalibration(subReasoning.info, reasoningEffort, setReasoningEffort);
+
+  const effortField = (
+    <ReasoningEffortSelectField
+      t={t}
+      reasoning={subReasoning}
+      provider={activePresetFields.provider}
+      value={reasoningEffort}
+      onChange={setReasoningEffort}
+      busy={busy}
+    />
+  );
+
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="subscription">
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
@@ -699,36 +769,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
                 <span {...stylex.props(afs.createSourceFieldLabel)}>
                   {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
                 </span>
-                {(() => {
-                  const available = getAvailableReasoningEfforts(activePresetFields.provider);
-                  if (available.length === 0) {
-                    return (
-                      <span>
-                        {activePresetFields.provider === "anthropic" || activePresetFields.provider === "google" || activePresetFields.provider === "qwen"
-                          ? "此服务商使用 Thinking 机制，无需设置推理强度"
-                          : activePresetFields.provider === "cursor" ? "Cursor 推理强度由模型名称后缀决定（如 -high）" : "此服务商不支持推理强度设置"}
-                      </span>
-                    );
-                  }
-                  return (
-                    <Select
-                      className="agent-create-esc-source-select"
-                      label={t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-                      selectedKey={reasoningEffort}
-                      isDisabled={busy}
-                      onSelectionChange={(key) => {
-                        const v = String(key ?? "medium");
-                        setReasoningEffort(v as ReasoningEffort);
-                      }}
-                    >
-                      {getReasoningEffortSelectOptions(t).filter((o) => (available as string[]).includes(o.id)).map((o) => (
-                        <SelectItem key={o.id} id={o.id} textValue={o.label}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </Select>
-                  );
-                })()}
+                {effortField}
               </label>
               <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
                 <span {...stylex.props(afs.createSourceFieldLabel)}>
@@ -867,36 +908,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
             </span>
-            {(() => {
-              const availableEfforts = getAvailableReasoningEfforts(activePresetFields.provider);
-              if (availableEfforts.length === 0) {
-                return (
-                  <span>
-                    {activePresetFields.provider === "anthropic" || activePresetFields.provider === "google" || activePresetFields.provider === "qwen"
-                      ? "此服务商使用 Thinking 机制，无需设置推理强度"
-                      : activePresetFields.provider === "cursor" ? "Cursor 推理强度由模型名称后缀决定（如 -high）" : "此服务商不支持推理强度设置"}
-                  </span>
-                );
-              }
-              return (
-                <Select
-                  className="agent-create-esc-source-select"
-                  label={t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-                  selectedKey={reasoningEffort}
-                  isDisabled={busy}
-                  onSelectionChange={(key) => {
-                    const v = String(key ?? "medium");
-                    setReasoningEffort(v as ReasoningEffort);
-                  }}
-                >
-                  {getReasoningEffortSelectOptions(t).filter((o) => (availableEfforts as string[]).includes(o.id)).map((o) => (
-                    <SelectItem key={o.id} id={o.id} textValue={o.label}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </Select>
-              );
-            })()}
+            {effortField}
           </label>
           <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>

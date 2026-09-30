@@ -354,6 +354,18 @@
   /* 移动端可读性下限：不随密度模式收缩（density 是布局密度偏好，不是视力测试） */
   --fontSize-min-readable: 12px;
 
+  /* 营销/展示字号尺度（不随密度变化）。真值：docs/design/ui-polish-standard.md §1
+     营销页与 SiteFooter/TopBar 只许用这些或 --fontSize-*，禁止裸 px/rem 字号。 */
+  --type-display: clamp(40px, 5.6vw, 64px);
+  --type-h1: clamp(32px, 4vw, 48px);
+  --type-h2: clamp(24px, 3vw, 32px);
+  --type-h3: 20px;
+  --type-lead: 18px;
+  --type-body: 16px;
+  --type-small: 14px;
+  --type-caption: 13px;
+  --type-micro: 12px;
+
   --expo-out: linear(
     0 0%, 0.1684 2.66%, 0.3165 5.49%,
     0.446 8.52%, 0.5581 11.78%,

@@ -7,7 +7,6 @@
  * 2. 【显式模型怪癖矩阵（Explicit Quirks Matrix）】：将各厂商在 Wire 格式、Header 身份、
  *    历史消息校验、采样参数限制等方面的特殊需求收拢在适配层处理：
  *    - Wire 协议选择：`resolveOpenAiCompatibleWire`（`responses` vs `chat.completions`）
- *    - 身份伪装与指纹：`kimiIdentityHeaders`（Kimi Coding 官方 UA）
  *    - 严格 Gateway 历史清洗：`sanitizeForOutbound`（Ollama/vLLM 拒绝历史废弃 tool_call）
  *    - 思考链字段过滤：`shouldStripReasoningContentForOutbound`（DeepSeek/Claude 历史回传）
  *    - 采样与参数修正：`normalizeChatCompletionsBodyForProvider`（如 max_completion_tokens）
@@ -37,7 +36,6 @@ import {
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
 import { buildProviderAuthHeaders } from "./providerResolution";
-import { kimiIdentityHeaders } from "./kimiUserAgent";
 import { parseSseDataLineJson } from "./sseDataLine";
 import { readSseFrames } from "./sseFrames";
 import { extractThinkContent, createThinkParserState } from "./thinkTagParser";
@@ -161,7 +159,6 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
       apiKey: args.providerConfig.apiKey,
       apiKeyHeader: args.providerConfig.apiKeyHeader,
     }),
-    ...kimiIdentityHeaders(endpoint),
   };
 
   return {

@@ -7,6 +7,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
   writeFileSync,
 } from "node:fs";
@@ -26,6 +27,21 @@ export type WindowsUpdateState = {
   message?: string;
   updateId?: string;
   lockPath?: string;
+  /**
+   * Backwards-compatible phase diagnostics. Older helpers never wrote these,
+   * so every reader must treat them as optional. `phase` names the helper step
+   * in progress; `phaseDeadline` is the bounded wall-clock ISO time after which
+   * that phase is considered hung.
+   */
+  phase?: string;
+  phaseStartedAt?: string;
+  phaseDeadline?: string;
+  /**
+   * Separate notification acknowledgement. Terminal results are retained on
+   * disk for `nolo update status` diagnostics; this field records that the
+   * one-shot startup notice was already shown so it is not repeated.
+   */
+  noticeAcknowledgedAt?: string;
 };
 
 export type WindowsUpdateLaunchOptions = {
@@ -50,6 +66,16 @@ export type WindowsUpdateLaunchOptions = {
 
 const UPDATE_STATE_FILE = "update-result.json";
 const UPDATE_STALE_MS = 15 * 60 * 1000;
+/**
+ * Hard ceiling for a pending record that cannot be aged from `startedAt`
+ * (corrupt/missing/future timestamp). When `startedAt` is unusable we fall
+ * back to the state file's own mtime — which the helper rewrites on every
+ * phase transition — and additionally never let an un-ageable record outlive
+ * this absolute bound. This is deliberately larger than UPDATE_STALE_MS so a
+ * merely-slow healthy helper is never raced, while still guaranteeing a
+ * permanently-corrupt record cannot block startup forever.
+ */
+const UPDATE_CORRUPT_MAX_AGE_MS = 30 * 60 * 1000;
 const UPDATE_LOCK_FILE = "update.lock";
 
 function resolveNoloHome(env: NodeJS.ProcessEnv, homeDir = homedir()): string {
@@ -147,8 +173,105 @@ export type WindowsUpdateStartupNotice = {
 };
 
 /**
- * Read the detached updater's durable result. Terminal results are consumed
- * once; a fresh pending result blocks a second CLI process from racing npm.
+ * How a pending record is classified for blocking purposes. Both the startup
+ * guard and `nolo update status` must use this same classification so they can
+ * never disagree about whether a second CLI process may proceed.
+ */
+export type WindowsUpdatePendingClassification =
+  | "active"
+  | "stale"
+  | "corrupt-unageable";
+
+export type WindowsUpdatePendingAssessment = {
+  classification: WindowsUpdatePendingClassification;
+  /** Milliseconds elapsed using the best available timestamp; NaN when none. */
+  ageMs: number;
+  /** Whether `startedAt` itself was usable (vs. mtime fallback). */
+  startedAtUsable: boolean;
+  /**
+   * True only when the record should be treated as still potentially live and
+   * therefore block a concurrent updater. Never read as a confirmation that
+   * the helper is actually running — it is "not yet provably dead".
+   */
+  blocksStartup: boolean;
+};
+
+/**
+ * Classify a pending update record without ever blocking forever and without
+ * ever racing a possibly-live helper. Reads the state file's mtime as a
+ * fallback age source only — it never mutates `startedAt` (a pure read; the
+ * helper keeps re-writing the file on each phase so mtime is a liveness hint,
+ * not a field we reset).
+ *
+ * Rules:
+ * - Usable `startedAt` → age from it; stale iff age >= UPDATE_STALE_MS.
+ * - Future `startedAt` (age < 0) is treated as just-written → active.
+ * - Unusable `startedAt` → fall back to the file's mtime. If mtime is also
+ *   unusable, or younger than UPDATE_CORRUPT_MAX_AGE_MS, we conservatively
+ *   treat the record as still-live (`corrupt-unageable` but blocking) to avoid
+ *   racing a live helper; once it outlives the hard bound it is `stale`.
+ * - We never "reclaim" purely because a phase deadline passed: a stage may
+ *   legitimately exceed its soft deadline while the helper is still working.
+ *   Only the total age bounds decide.
+ */
+export function assessWindowsUpdatePending(
+  state: WindowsUpdateState,
+  now: number,
+  statePath: string,
+): WindowsUpdatePendingAssessment {
+  const startedAtMs = Date.parse(state.startedAt);
+  // Mild clock skew (e.g. up to 5 min in the future) is tolerated and blocks;
+  // an impossibly far-future timestamp (corrupted date) must not block forever.
+  const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+  if (Number.isFinite(startedAtMs) && (startedAtMs - now) <= MAX_CLOCK_SKEW_MS) {
+    const ageMs = now - startedAtMs;
+    // A future or just-written timestamp must not mark the record stale.
+    const stale = ageMs >= UPDATE_STALE_MS;
+    return {
+      classification: stale ? "stale" : "active",
+      ageMs,
+      startedAtUsable: true,
+      blocksStartup: !stale,
+    };
+  }
+
+  // startedAt is unusable (missing/corrupt). Fall back to the file's mtime,
+  // which the helper refreshes on each phase write.
+  let mtimeAge = Number.NaN;
+  try {
+    mtimeAge = now - statSync(statePath).mtimeMs;
+  } catch {
+    // Cannot stat → cannot age at all; handled below as still-live.
+  }
+  if (!Number.isFinite(mtimeAge) || mtimeAge < UPDATE_CORRUPT_MAX_AGE_MS) {
+    return {
+      classification: "corrupt-unageable",
+      ageMs: mtimeAge,
+      startedAtUsable: false,
+      blocksStartup: true,
+    };
+  }
+  return {
+    classification: "stale",
+    ageMs: mtimeAge,
+    startedAtUsable: false,
+    blocksStartup: false,
+  };
+}
+
+/**
+ * Read the detached updater's durable result. A fresh pending result blocks a
+ * second CLI process from racing npm; terminal results are shown once then
+ * retained on disk for `nolo update status` diagnostics.
+ *
+ * Blocking rules (never block forever on bad data):
+ * - The update owner itself (matching `ownerUpdateId`) is never blocked.
+ * - A pending record is classified by `assessWindowsUpdatePending` — corrupt
+ *   `startedAt` degrades to a hard-bounded block via file mtime, never a
+ *   permanent lock-out.
+ * - A pending record that outlives its bound is reported stopped; the stale
+ *   *lock* is removed (ownership-safe) but the failed record itself is
+ *   retained for diagnostics rather than deleted.
  */
 export function consumeWindowsUpdateStartupNotice(
   env: NodeJS.ProcessEnv = process.env,
@@ -167,27 +290,45 @@ export function consumeWindowsUpdateStartupNotice(
     ) {
       return null;
     }
-    const startedAt = Date.parse(state.startedAt);
-    const age = (options.now ?? Date.now()) - startedAt;
-    // Every helper phase has a hard deadline; the total is bounded below this
-    // stale threshold. Do not trust a reusable Windows PID as ownership proof.
-    if (!Number.isFinite(age) || age < UPDATE_STALE_MS) {
+    const now = options.now ?? Date.now();
+    const assessment = assessWindowsUpdatePending(state, now, statePath);
+    if (assessment.blocksStartup) {
       return {
         blocking: true,
-        text: `Nolo update is still running. Try again shortly.\nLog: ${state.logPath}`,
+        text:
+          `A Nolo update may still be in progress (${describeUpdatePhase(state)}). ` +
+          `Run "nolo update status" for details, or retry shortly.\n` +
+          `Log: ${state.logPath}`,
       };
     }
+    // The pending record outlived its bound: the helper is presumed dead. Free
+    // the ownership lock so a future update can proceed, but keep the record
+    // itself on disk so `nolo update status` can diagnose the abandoned run.
+    // We never delete a record we did not write.
     if (state.lockPath && state.updateId) {
       removeOwnedLock(state.lockPath, state.updateId);
     }
-    rmSync(statePath, { force: true });
     return {
       blocking: false,
-      text: `The previous Nolo update helper stopped unexpectedly. Verify with "nolo -v"; a manual npm repair may be required.\nLog: ${state.logPath}`,
+      text: `The previous Nolo update helper stopped unexpectedly and its lock was released. Verify with "nolo -v" / "nolo update status"; a manual npm repair may be required.\nLog: ${state.logPath}`,
     };
   }
 
-  rmSync(statePath, { force: true });
+  // Terminal results are kept on disk so `nolo update status` can still
+  // diagnose them. Show the one-shot notice only until acknowledged.
+  if (state.noticeAcknowledgedAt) {
+    return null;
+  }
+  const acknowledged = {
+    ...state,
+    noticeAcknowledgedAt: new Date().toISOString(),
+  };
+  try {
+    writeJsonAtomic(statePath, acknowledged);
+  } catch {
+    // A read-only home dir must not swallow the notice; fall through and show
+    // it even though it may repeat on the next launch.
+  }
   if (state.status === "success") {
     return {
       blocking: false,
@@ -198,6 +339,127 @@ export function consumeWindowsUpdateStartupNotice(
     blocking: false,
     text: `Nolo update failed. Verify with "nolo -v"; npm may require a manual repair.${state.message ? `\n${state.message}` : ""}\nLog: ${state.logPath}`,
   };
+}
+
+function describeUpdatePhase(state: WindowsUpdateState): string {
+  if (state.phase) {
+    return `phase: ${state.phase}`;
+  }
+  return "helper running";
+}
+
+export type WindowsUpdateStatusReport = {
+  status: "none" | "pending" | "success" | "failed";
+  /**
+   * Whether the pending record still blocks a concurrent updater — i.e. it
+   * has not yet provably outlived its bound. This is unverified evidence, not
+   * a confirmation the helper process is actually running.
+   */
+  alive: boolean;
+  /** Pending classification detail, present only when status === "pending". */
+  pendingClassification?: WindowsUpdatePendingClassification;
+  text: string;
+};
+
+/**
+ * Lightweight diagnostic for `nolo update status`. Reads only the update state
+ * file and the package version — it must stay free of application/DB imports
+ * so it can answer even while an update blocks normal startup.
+ */
+export function getWindowsUpdateStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  options: {
+    homeDir?: string;
+    now?: number;
+    currentVersion?: string;
+  } = {},
+): WindowsUpdateStatusReport {
+  const homeDir = options.homeDir ?? homedir();
+  const state = readWindowsUpdateState(env, homeDir);
+  const now = options.now ?? Date.now();
+  const version = options.currentVersion ?? "unknown";
+
+  if (!state) {
+    return {
+      status: "none",
+      alive: false,
+      text:
+        `No recorded Nolo update.\n` +
+        `Installed version: ${version}`,
+    };
+  }
+
+  const lines: string[] = [];
+  lines.push(`Update status: ${state.status}`);
+  lines.push(`Installed version: ${version}`);
+  lines.push(`Channel: ${state.channel}`);
+  lines.push(`From version: ${state.currentVersion}`);
+  if (state.targetVersion) lines.push(`Target version: ${state.targetVersion}`);
+  if (state.phase) lines.push(`Phase: ${state.phase}`);
+  lines.push(`Started: ${state.startedAt}`);
+  if (state.phaseStartedAt) lines.push(`Phase started: ${state.phaseStartedAt}`);
+  if (state.phaseDeadline) lines.push(`Phase deadline: ${state.phaseDeadline}`);
+  if (state.finishedAt) lines.push(`Finished: ${state.finishedAt}`);
+  if (state.helperPid) lines.push(`Helper pid: ${state.helperPid}`);
+  if (state.message) lines.push(`Message: ${state.message}`);
+  lines.push(`Log: ${state.logPath}`);
+
+  if (state.status === "pending") {
+    const statePath = resolveWindowsUpdateStatePath(env, homeDir);
+    const assessment = assessWindowsUpdatePending(state, now, statePath);
+    // Surface phase-deadline evidence without claiming the helper is dead: a
+    // phase may legitimately overrun its soft deadline while still running.
+    const deadline = state.phaseDeadline ? Date.parse(state.phaseDeadline) : NaN;
+    const pastDeadline = Number.isFinite(deadline) && now > deadline;
+    if (pastDeadline) {
+      lines.push(
+        `Phase deadline elapsed: the recorded phase has run past its soft ` +
+          `ceiling. This can be a hung helper, but it can also be a slow ` +
+          `install — the lock is NOT auto-released on this evidence alone.`,
+      );
+    }
+    switch (assessment.classification) {
+      case "active":
+        lines.push(
+          `Diagnosis: update record is fresh (${describeUpdatePhase(state)}). ` +
+            `The helper process has not been verified alive; the record simply ` +
+            `has not outlived its bound, so startup is still blocked.`,
+        );
+        break;
+      case "corrupt-unageable":
+        lines.push(
+          `Diagnosis: update record has an unreadable start time and cannot be ` +
+            `aged reliably. Startup stays conservatively blocked until the ` +
+            `record outlives its hard bound; inspect the log to tell a hung ` +
+            `helper from a live one.`,
+        );
+        break;
+      case "stale":
+        lines.push(
+          `Diagnosis: update record has outlived its bound; the helper is ` +
+            `presumed stopped. The startup guard releases the stale lock on ` +
+            `next start, then this record remains here for diagnosis.`,
+        );
+        break;
+    }
+    return {
+      status: "pending",
+      alive: assessment.blocksStartup,
+      pendingClassification: assessment.classification,
+      text: lines.join("\n"),
+    };
+  }
+
+  if (state.status === "success") {
+    lines.push(
+      state.noticeAcknowledgedAt
+        ? `Diagnosis: update applied and already acknowledged.`
+        : `Diagnosis: update applied; notice pending on next start.`,
+    );
+  } else {
+    lines.push(`Diagnosis: update failed; see the log above.`);
+  }
+  return { status: state.status, alive: false, text: lines.join("\n") };
 }
 
 export function defaultLaunchWindowsUpdateHelper(input: {
@@ -238,6 +500,19 @@ const writeState = (next) => {
   const temp = payload.statePath + "." + payload.updateId + ".tmp";
   writeFileSync(temp, JSON.stringify(next, null, 2) + "\n", "utf8");
   renameSync(temp, payload.statePath);
+};
+// Record the current helper step with a bounded wall-clock deadline so the
+// startup guard can tell a live phase from a hung one. Deadline is a soft
+// ceiling: a phase that overruns it is reported stale, not killed.
+const setPhase = (base, phase, budgetMs) => {
+  const phaseStartedAt = new Date().toISOString();
+  const phaseDeadline = new Date(Date.now() + budgetMs).toISOString();
+  try {
+    writeState({ ...base, status: "pending", phase, phaseStartedAt, phaseDeadline });
+  } catch (error) {
+    log("Could not persist phase " + phase + ": " + (error && error.message ? error.message : String(error)));
+  }
+  return { ...base, status: "pending", phase, phaseStartedAt, phaseDeadline };
 };
 const runNpm = (args) => {
   const command = [payload.nodePath, payload.npmCliPath, ...args].join(" ");
@@ -363,7 +638,9 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     updateId: payload.updateId,
     lockPath: payload.lockPath,
   };
+  let progress = base;
   try {
+    progress = setPhase(base, "wait-parent-exit", 480 * 250 + 60 * 1000);
     log("Waiting for parent process " + payload.parentPid + " to exit");
     let parentExited = false;
     for (let waited = 0; waited < 480; waited++) {
@@ -373,6 +650,7 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     if (!parentExited) throw new Error("Timed out waiting for the current Nolo process to exit");
     await delay(250);
 
+    progress = setPhase(progress, "wait-other-windows", 120 * 1000 + 30 * 1000);
     const otherProcessDeadline = Date.now() + 120 * 1000;
     let otherPids = listOtherNoloPids();
     let checks = 0;
@@ -386,6 +664,7 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       throw new Error("Other Nolo processes are still running: " + otherPids.join(", "));
     }
 
+    progress = setPhase(progress, "resolve-prefix", 30 * 1000);
     const prefixResult = runNpm(["prefix", "-g"]);
     if (prefixResult.code !== 0 || !prefixResult.stdout) throw new Error("Could not resolve npm global prefix");
     const prefix = prefixResult.stdout.split(/\r?\n/).at(-1).trim();
@@ -396,6 +675,7 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       throw new Error("Refusing to update a different npm prefix. Current entrypoint: " + payload.entrypointPath + "; npm prefix: " + prefix);
     }
 
+    progress = setPhase(progress, "resolve-target-version", 30 * 1000);
     const targetResult = runNpm(["view", "nolo-cli@" + payload.channel, "version"]);
     if (targetResult.code !== 0 || !parseVersion(targetResult.stdout)) {
       throw new Error("Could not resolve nolo-cli@" + payload.channel + " target version");
@@ -406,10 +686,13 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     }
 
     if (compare(targetVersion, payload.currentVersion) > 0) {
+      progress = setPhase(progress, "install-target", 5 * 60 * 1000 + 30 * 1000);
       const versionPrefix = join(payload.managedRoot, targetVersion + "-" + payload.updateId);
       uncommittedVersionPrefix = versionPrefix;
       mkdirSync(versionPrefix, { recursive: true });
-      const install = runNpm(["install", "-g", "--prefix", versionPrefix, "nolo-cli@" + payload.channel, "--force", "--progress"]);
+      // Install the exact version resolved from the dist-tag above — never the
+      // floating channel tag — so the staged package is the verified one.
+      const install = runNpm(["install", "-g", "--prefix", versionPrefix, "nolo-cli@" + targetVersion, "--force", "--progress"]);
       if (install.code !== 0) throw new Error("npm install exited with code " + install.code);
       const stagedPackagePath = join(versionPrefix, "node_modules", "nolo-cli", "package.json");
       const staged = JSON.parse(readFileSync(stagedPackagePath, "utf8"));
@@ -418,6 +701,7 @@ const switchWindowsShims = (shimDir, entrypoint) => {
       }
       const stagedEntrypoint = join(versionPrefix, "node_modules", "nolo-cli", "index.js");
       if (!existsSync(stagedEntrypoint)) throw new Error("Staged nolo entrypoint is missing");
+      progress = setPhase(progress, "switch-shims", 60 * 1000);
       const switchedShims = switchWindowsShims(prefix, stagedEntrypoint);
       const verify = spawnSync(payload.nodePath, [stagedEntrypoint, "-v"], {
         encoding: "utf8",
@@ -442,14 +726,14 @@ const switchWindowsShims = (shimDir, entrypoint) => {
     } else {
       log("Already current at " + targetVersion);
     }
-    writeState({ ...base, status: "success", targetVersion, finishedAt: new Date().toISOString() });
+    writeState({ ...progress, status: "success", phase: "done", targetVersion, finishedAt: new Date().toISOString() });
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     log("ERROR: " + message);
     if (uncommittedVersionPrefix) {
       try { rmSync(uncommittedVersionPrefix, { recursive: true, force: true }); } catch {}
     }
-    writeState({ ...base, status: "failed", finishedAt: new Date().toISOString(), message });
+    writeState({ ...progress, status: "failed", finishedAt: new Date().toISOString(), message });
     process.exitCode = 1;
   } finally {
     try {

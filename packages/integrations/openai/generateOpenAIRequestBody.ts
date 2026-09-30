@@ -182,8 +182,21 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
   Object.assign(bodyData, usageRequestOptions);
 
   // 推理强度（仅部分模型支持，且按 provider 做 clamp）
-  if (reasoning_effort && isModelSupportReasoningEffort(model)) {
-    const clamped = clampReasoningEffort(reasoning_effort, providerName);
+  const effectiveProviderForReasoning =
+    providerName?.toLowerCase() === "openrouter" ||
+    customProviderUrl?.toLowerCase().includes("openrouter.ai")
+      ? "openrouter"
+      : providerName;
+
+  if (
+    reasoning_effort &&
+    isModelSupportReasoningEffort(model, effectiveProviderForReasoning)
+  ) {
+    const clamped = clampReasoningEffort(
+      reasoning_effort,
+      effectiveProviderForReasoning,
+      model,
+    );
     if (clamped) {
       bodyData.reasoning_effort = clamped;
     }

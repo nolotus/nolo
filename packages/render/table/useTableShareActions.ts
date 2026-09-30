@@ -16,6 +16,32 @@ import { selectCurrentServer, selectRemoteServers } from "app/settings/settingSl
 import type { TableMeta } from "./types";
 import { getTableShareErrorMessage } from "./tableShareError";
 
+/**
+ * Table 域 dispatch seam（2026-09-17 事故的类型层防线）。
+ *
+ * useTable 本不该再直接 import `app/store`（redux 冻结边界），但表格命令仍要
+ * 真 dispatch 才能驱动 dbSlice 的 readAndWait/patch。这里在已白名单的本文件里
+ * 集中提供 dispatch，useTable 通过它消费，自身不再漏 Redux import。
+ *
+ * 类型保持「严格」收窄：命令必须是返回 Promise 的 thunk（`command(args)` 的
+ * 返回值形态 `(dispatch,getState,extra)=>Promise`），把「dispatch 模块 store 的
+ * void setter」这类误用继续挡在编译期，且不依赖 @reduxjs/toolkit 的类型 import。
+ */
+type TableThunk<T = unknown> = (
+  dispatch: TableDispatch,
+  getState: () => unknown,
+  extra: unknown
+) => Promise<T> | T;
+
+export interface TableDispatch {
+  <R>(thunk: TableThunk<R>): Promise<R> & { unwrap(): Promise<R> };
+  <A extends { type: string }>(action: A): A;
+}
+
+export function useTableDispatch(): TableDispatch {
+  return useAppDispatch() as unknown as TableDispatch;
+}
+
 type UseTableShareActionsArgs = {
   tableMeta: TableMeta | null | undefined;
   tableKey: string;
