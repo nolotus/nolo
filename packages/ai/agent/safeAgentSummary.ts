@@ -294,6 +294,37 @@ export function resolveFavoriteStatus(
   return { isFavorite: false, favoritedAt: null };
 }
 
+/**
+ * 「这条 agent 记录是否属于当前用户」的唯一判据。
+ *
+ * 两个消费方共用本函数，禁止各自再实现一份：
+ * - `toSafeAgentSummary` 派生 `isOwned`（选人优先自建 agent 省钱）；
+ * - `summarizeCredentialGroups` 依赖摘要上的 `isOwned` 剔除「别人共享给你的同名
+ *   provider」，避免把调用者自己的 429 冷却算进别人的 agent。
+ *
+ * 判据：record.userId / ownerId 任一等于当前用户，或 dbKey / privateKey 以完整
+ * 前缀 `agent-<currentUserId>-` 开头（不解析分段——userId 本身可能含连字符，
+ * 如 user-1，解析首个连字符会误判为非自建）。
+ *
+ * `userId` 缺失（未登录 / 读不到会话）时一律返回 false：宁可不套冷却，也不要把
+ * 本机冷却误伤到不属于当前用户的记录上。
+ */
+export function isOwnedAgentRecord(
+  record: any,
+  userId: string | undefined,
+): boolean {
+  if (!userId) return false;
+  if (
+    (typeof record?.userId === "string" && record.userId === userId) ||
+    (typeof record?.ownerId === "string" && record.ownerId === userId)
+  ) {
+    return true;
+  }
+  return [record?.dbKey, record?.privateKey].some((key) =>
+    isOwnedAgentKey(key, userId)
+  );
+}
+
 export function toSafeAgentSummary(
   record: any,
   options?: SafeAgentSummaryOptions
@@ -368,25 +399,15 @@ export function toSafeAgentSummary(
       ? (rawQuota as AgentQuota)
       : undefined;
 
-  // 自建判断：record.userId / ownerId 任一等于当前用户，或 dbKey 以完整前缀
-  // `agent-<currentUserId>-` 开头（不解析分段——userId 本身可能含连字符，
-  // 如 user-1，解析首个连字符会误判为非自建）。
-  // 自建 agent 若用自己的 API（apiSource "custom"）或本地 OAuth，派发走用户自己的
-  // 配额，不消耗平台 credits——选人时优先它们能省钱。
   const currentUserId = options?.userId;
-  const isOwnedByRecord =
-    Boolean(currentUserId) &&
-    ((typeof record?.userId === "string" && record.userId === currentUserId) ||
-      (typeof record?.ownerId === "string" && record.ownerId === currentUserId));
   // dbKey 与 privateKey 是同一个 agent-<userId>-<id> 键的两种字段名（CLI/TUI
-  // 传 ListedAgent，只有 privateKey；web 传原始 record，带 dbKey），两者都要
-  // 认——否则 CLI `agent list --safe` 会把自建 agent 全判成非自建、省略 agentKey。
+  // 传 ListedAgent，只有 privateKey；web 传原始 record，带 dbKey）。
   const ownedKey = currentUserId
     ? [record?.dbKey, record?.privateKey].find((key) =>
         isOwnedAgentKey(key, currentUserId)
       )
     : undefined;
-  const isOwned = isOwnedByRecord || Boolean(ownedKey);
+  const isOwned = isOwnedAgentRecord(record, currentUserId);
   const isOAuth = isOAuthApiKeyRef(record?.apiKeyRef);
   const billingSource = resolveBillingSource({
     ...record,

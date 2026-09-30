@@ -1,20 +1,10 @@
 import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { DataType } from "create/types";
 import {
-  toSafeAgentSummary,
-  sortSafeAgentSummaries,
-  toCompactAgentSummary,
-  toUnavailableAgentSummary,
-  omitNullishAgentSummaryFields,
-  type SafeAgentSummary,
-} from "../agent/safeAgentSummary";
-import {
-  buildAgentDiscoveryResult,
+  assembleAgentDiscoveryResult,
   resolveDiscoveryScope,
-  type DiscoveryScope,
 } from "../agent/agentDiscovery";
 import { fetchPublicAgentsForDiscovery } from "../agent/publicAgentDiscovery";
-import { isAgentUnavailableNow } from "../agent/agentAvailabilityShared";
 import { createSpaceKey } from "create/space/spaceKeys";
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -717,16 +707,13 @@ export async function listAgentsFunc(args: any, thunkApi: any): Promise<ToolResu
   // that verified favKey is pinned as publicKey there. Per the safe-summary
   // contract: omit publicKey rather than emit one that cannot resolve. Explicit
   // record.publicKey (if present) is still trusted by toSafeAgentSummary.
-  const agents = [...Array.from(recordsMap.values()), ...publicRecords].map((record) =>
-    toSafeAgentSummary(record, {
+  const discovery = assembleAgentDiscoveryResult({
+    records: [...Array.from(recordsMap.values()), ...publicRecords],
+    summaryOptions: (record) => ({
       favoritesMap,
       userId,
       publicRecordExists: publicRecords.includes(record) ? true : undefined,
-    })
-  );
-
-  const discovery = buildAgentDiscoveryResult({
-    agents,
+    }),
     scope: args?.scope,
     query: args?.query,
     publicOnly: args?.publicOnly,

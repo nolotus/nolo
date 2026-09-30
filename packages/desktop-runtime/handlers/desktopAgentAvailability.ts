@@ -2,7 +2,12 @@ import serverDb from "database-engine/db";
 import {
   mergeAvailabilityDeadline,
   resolveAvailabilityAction,
+  resolveCredentialKeyWithFallback,
 } from "ai/agent/agentAvailabilityShared";
+import {
+  clearCredentialAvailability,
+  markCredentialUnavailable,
+} from "agent-runtime/credentialAvailability";
 
 type AgentRecord = Record<string, unknown> | null | undefined;
 
@@ -12,6 +17,11 @@ export type AgentAvailabilityResponse = {
   body?: unknown;
   headers?: Headers | Record<string, string> | null;
   now?: number;
+  /**
+   * 冷却文件（`~/.nolo/credential-availability.json`）解析用的环境变量。
+   * 缺省 `process.env`；测试注入 `NOLO_HOME` 指向临时目录。
+   */
+  env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -25,6 +35,13 @@ export type AgentAvailabilityResponse = {
  * store — never on the private `server` package, which is excluded from the
  * open-source mirror projection. Persistence is the desktop runtime's own
  * responsibility; decision logic stays in the shared layer.
+ *
+ * 与 CLI `recordLocalAvailabilityForAgent` 对齐的 credential 级落盘：429 mark /
+ * 2xx clear 时，用同一把 key（`resolveCredentialKeyWithFallback`）把冷却写进
+ * `~/.nolo/credential-availability.json`（读写实现在
+ * `agent-runtime/credentialAvailability`，desktop / CLI 共用）。没有这一步，
+ * 桌面宿主撞出的 429 只留在本机 agent 记录上，共用同一凭证的兄弟 agent 与
+ * CLI 列表 / 派发 gate 都看不到，会继续逐个撞墙。
  */
 export async function recordAgentAvailabilityFromResponse({
   agent,
@@ -32,8 +49,30 @@ export async function recordAgentAvailabilityFromResponse({
   body,
   headers,
   now = Date.now(),
+  env = process.env,
 }: AgentAvailabilityResponse): Promise<void> {
   const action = resolveAvailabilityAction(status, body, now, headers);
+  if (action.kind === "noop") return;
+
+  // Credential 层优先（与 CLI recordLocalAvailabilityForAgent 同语义）：限流是
+  // provider 凭证的属性，不是 agent 的属性。写盘失败不阻断派发结果——冷却文件
+  // 读不到最多退化为旧行为，不能让一次成功/失败响应因为落盘问题而抛错。
+  const credentialKey = resolveCredentialKeyWithFallback(agent);
+  if (credentialKey) {
+    if (action.kind === "mark") {
+      await markCredentialUnavailable(
+        credentialKey,
+        action.nextAvailableAt,
+        env,
+        now,
+      ).catch(() => undefined);
+    } else {
+      await clearCredentialAvailability(credentialKey, env, now).catch(
+        () => undefined,
+      );
+    }
+  }
+
   if (action.kind === "clear") {
     await clearAgentTemporarilyUnavailable(agent);
   } else if (action.kind === "mark") {

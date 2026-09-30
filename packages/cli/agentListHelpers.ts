@@ -1,7 +1,6 @@
 import type { CliKvDb } from "./client/hybridRecordStore";
 import type { CliFetchImpl } from "./cliFetch";
 import {
-  toSafeAgentSummary,
   deriveCredentialGroup,
   summarizeCredentialGroups,
   type CredentialKind,
@@ -9,6 +8,7 @@ import {
   type SafeAgentSummary,
   type SafeAgentSummaryOptions,
 } from "ai/agent/safeAgentSummary";
+import { toDiscoverySafeAgentSummary } from "ai/agent/agentDiscovery";
 import { isAgentUnavailableNow } from "ai/agent/agentAvailabilityShared";
 export {
   isAgentUnavailableNow,
@@ -164,23 +164,16 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
 }
 
 /**
- * `--safe` 输出用的 agent 摘要：在 toSafeAgentSummary 基础上，对私有 agent
- * （publicRecordExists === false）省略 publicKey 字段。
- *
- * 私有 agent 的公开记录（agent-pub-<id>）在库里并不存在，但 toSafeAgentSummary
- * 会从 id 反推出一个 agent-pub-<id> 写进 publicKey。模型读到这个字段会拿它去
- * readAgent，必然失败。省略整个字段（而非输出 null）才能让模型不去用它。
- * publicRecordExists 为 true 或未知时保持 toSafeAgentSummary 的原有行为。
+ * `--safe` 输出用的 agent 摘要：统一走 agentDiscovery 的
+ * `toDiscoverySafeAgentSummary`。ListedAgent.publicRecordExists === false
+ * 会通过 record 字段传导给 toSafeAgentSummary，省略不可解析的 publicKey
+ * （行为与旧实现一致，投影逻辑不再重复维护）。
  */
 export function toSafeListedAgentSummary(
   agent: ListedAgent,
   options?: SafeAgentSummaryOptions
 ): SafeAgentSummary {
-  const summary = toSafeAgentSummary(agent, options);
-  if (agent.publicRecordExists === false) {
-    delete (summary as { publicKey?: unknown }).publicKey;
-  }
-  return summary;
+  return toDiscoverySafeAgentSummary(agent, options);
 }
 
 export function sortListedAgents(agents: ListedAgent[]) {

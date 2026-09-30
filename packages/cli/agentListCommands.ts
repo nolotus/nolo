@@ -1,7 +1,11 @@
 import { toErrorMessage } from "core/errorMessage";
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
-import { toSafeAgentSummary, sortSafeAgentSummaries, toCompactAgentSummary, omitNullishAgentSummaryFields, toUnavailableAgentSummary, summarizeCredentialGroups, type SafeAgentSummary } from "ai/agent/safeAgentSummary";
-import { matchesAgentQuery } from "ai/agent/agentDiscovery";
+import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
+import {
+  buildAgentDiscoveryResult,
+  matchesAgentQuery,
+  toDiscoverySafeAgentSummary,
+} from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -13,7 +17,6 @@ import {
   normalizeListedAgent,
   parseAgentListArgs,
   isAgentUnavailableNow,
-  toSafeListedAgentSummary,
   type ListedAgent,
 } from "./agentListHelpers";
 import {
@@ -248,54 +251,29 @@ export async function runAgentListCommand(
         });
       }
 
-      // 从完整补入后的集合（agents 已含 favkey hydration 的 norm）构建候选，
-      // 先做 publicOnly 维度过滤并计算 unavailableCount（与最终 list 同口径），
-      // 再统一执行 429 过滤。favorite-only（extraFavoriteRecords）同口径纳入。
-      let safeCandidates = [
-        ...agents.map((agent) => toSafeListedAgentSummary(agent, { favoritesMap, userId })),
-        ...extraFavoriteRecords.map((record) =>
-          toSafeAgentSummary(record, { favoritesMap, userId })
-        ),
-      ];
-      if (publicOnly) {
-        safeCandidates = safeCandidates.filter((agent) => agent.isPublic);
-      }
-      if (query && typeof query === "string" && query.trim()) {
-        safeCandidates = safeCandidates.filter((agent) => matchesAgentQuery(agent as any, query));
-      }
-      const safeUnavailableList = safeCandidates.filter((agent) =>
-        isAgentUnavailableNow(agent as any)
-      );
-      const safeUnavailableCount = safeUnavailableList.length;
-      // 与 server listAgents（ai 包 listAgentsFunction）同构：即使主列表默认
-      // 过滤掉 429 agent，也始终返回摘要，让编排契约「知情权」有数据可用
-      // （哪个 agent 限流、何时恢复）。showUnavailable 只影响 agents 主列表。
-      const safeUnavailableSummaries = safeUnavailableList as unknown as SafeAgentSummary[];
-      const safeUnavailableAgents = sortSafeAgentSummaries(
-        safeUnavailableSummaries
-      ).map(toUnavailableAgentSummary);
-      const safeAgents = showUnavailable
-        ? safeCandidates
-        : safeCandidates.filter((agent) => !isAgentUnavailableNow(agent as any));
-      const sortedSafeAgents = sortSafeAgentSummaries(safeAgents);
-      // 默认精简投影（与 server listAgents 一致）：只保留选人决策所需字段，
-      // 防止大列表被 host 按字节截断后模型照抄别的条目格式猜 agentKey；
-      // --verbose 拿回完整字段集（同样省略 null 值键）排障。
-      const safeOutputAgents = verbose
-        ? sortedSafeAgents.map(omitNullishAgentSummaryFields)
-        : sortedSafeAgents.map(toCompactAgentSummary);
-
-      const credentialGroups = summarizeCredentialGroups(safeCandidates);
+      // --safe 是选人投影而非 scope 重过滤：本地 publicOnly 预过滤保留
+      // companion-proof 语义（对 favorites-hydration 补入的 extraFavoriteRecords
+      // 同样生效），discovery 侧只做 query + 429 + 投影，不再二次 scope 过滤。
+      const safeRecords = [...agents, ...extraFavoriteRecords]
+        .map((record) => toDiscoverySafeAgentSummary(record, { favoritesMap, userId }))
+        .filter((agent) => (publicOnly ? agent.isPublic === true : true));
+      const discovery = buildAgentDiscoveryResult({
+        agents: safeRecords,
+        scope: "all",
+        query,
+        showUnavailable,
+        verbose,
+      });
 
       output.write(JSON.stringify({
         success: true,
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
-        total: sortedSafeAgents.length,
-        unavailableCount: safeUnavailableCount,
-        unavailableAgents: safeUnavailableAgents,
-        credentialGroups,
-        agents: safeOutputAgents,
+        total: discovery.total,
+        unavailableCount: discovery.unavailableCount,
+        unavailableAgents: discovery.unavailableAgents,
+        credentialGroups: discovery.credentialGroups,
+        agents: discovery.agents,
       }, null, 2));
       output.write("\n");
       return 0;

@@ -1,4 +1,13 @@
 
+## 0.137.0-alpha.4
+
+## 0.137.0-alpha.4 (2026-09-30)
+
+### Bug Fixes
+
+* **agent:** link desktop 429 cooldowns to credential availability ([a613700](https://github.com/nolotus/bun-nolo/commit/a613700092aa7cfe77c6f9eb23658bafbc4013e3))
+
+
 ## 0.137.0-alpha.3
 
 ## 0.137.0-alpha.3 (2026-09-30)

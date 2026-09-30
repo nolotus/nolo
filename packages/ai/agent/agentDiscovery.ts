@@ -8,10 +8,12 @@ import type {
   CompactSafeAgentSummary,
   UnavailableAgentSummary,
   CredentialGroupSummary,
+  SafeAgentSummaryOptions,
 } from "./safeAgentSummary";
 import {
   sortSafeAgentSummaries,
   toCompactAgentSummary,
+  toSafeAgentSummary,
   toUnavailableAgentSummary,
   omitNullishAgentSummaryFields,
   summarizeCredentialGroups,
@@ -212,4 +214,56 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     credentialGroups,
     agents: projectedAgents,
   };
+}
+
+/**
+ * Record → safe-summary normalization shared by all three listAgents callers.
+ * `toSafeAgentSummary` already trusts an explicit `record.publicRecordExists
+ * === false` to suppress the derived publicKey, so one projector covers raw
+ * records (server / client) and pre-normalized ListedAgent-shaped records
+ * (CLI) alike. `publicRecordExists === true` additionally forwards as an
+ * option so raw favorites-hydrated records keep the confirmed publicKey even
+ * when the shape would otherwise drop it.
+ */
+export function toDiscoverySafeAgentSummary(
+  record: any,
+  options?: SafeAgentSummaryOptions
+): SafeAgentSummary {
+  const mergedOptions: SafeAgentSummaryOptions | undefined =
+    record?.publicRecordExists === true
+      ? { ...options, publicRecordExists: true }
+      : options;
+  return toSafeAgentSummary(record, mergedOptions);
+}
+
+export interface AssembleAgentDiscoveryOptions<TRecord = any>
+  extends Omit<BuildAgentDiscoveryResultOptions<SafeAgentSummary>, "agents"> {
+  records: TRecord[];
+  /**
+   * Options forwarded to toSafeAgentSummary per record (favoritesMap, userId).
+   * May also be a function for per-record options (e.g. publicRecordExists).
+   */
+  summaryOptions?:
+    | SafeAgentSummaryOptions
+    | ((record: TRecord) => SafeAgentSummaryOptions | undefined);
+}
+
+/**
+ * 三端（server listAgents / client listAgentsFunc / CLI --safe）共用的唯一装配
+ * 契约：record 集合 → toSafeAgentSummary → buildAgentDiscoveryResult（scope、
+ * query、429 过滤、credentialGroups 归纳、compact/verbose 投影）。禁止任何一端
+ * 再手写 matchesAgentQuery / isAgentUnavailableNow / sortSafeAgentSummaries /
+ * toUnavailableAgentSummary / summarizeCredentialGroups 样板。
+ */
+export function assembleAgentDiscoveryResult<TRecord = any>(
+  options: AssembleAgentDiscoveryOptions<TRecord>
+): AgentDiscoveryResult {
+  const { records, summaryOptions, ...discoveryOptions } = options;
+  const agents = records.map((record) =>
+    toDiscoverySafeAgentSummary(
+      record,
+      typeof summaryOptions === "function" ? summaryOptions(record) : summaryOptions
+    )
+  );
+  return buildAgentDiscoveryResult({ ...discoveryOptions, agents });
 }

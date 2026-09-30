@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "components": {
     "cli": {
-      "version": "0.137.0-alpha.3",
+      "version": "0.137.0-alpha.4",
       "channel": "alpha",
       "releaseIntent": "release"
     },
@@ -13,7 +13,7 @@
     }
   },
   "provenance": {
-    "sourceSha": "accc956e85ca866e6c0daef6c4df761e43557e26",
+    "sourceSha": "3d4b06ed7afdae8314ffb97388a1a0503cee32b3",
     "sourceBranch": "alpha"
   }
 }
