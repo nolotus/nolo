@@ -94,7 +94,7 @@
     "string-width": "8.2.2",
     "date-fns-tz": "2.0.1",
     "@react-navigation/native": "latest",
-    "js-yaml": "4.3.1"
+    "js-yaml": "4.3.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
