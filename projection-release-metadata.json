@@ -4,7 +4,7 @@
     "cli": {
       "version": "0.141.0-alpha.1",
       "channel": "alpha",
-      "releaseIntent": "release"
+      "releaseIntent": "none"
     },
     "desktop": {
       "version": "0.157.0-alpha.4",
@@ -13,7 +13,7 @@
     }
   },
   "provenance": {
-    "sourceSha": "e21eca07323af920514abbdb2622b391c9a54eab",
+    "sourceSha": "5cd224f7495c0e01eff41d558a4a94498162b67d",
     "sourceBranch": "alpha"
   }
 }
