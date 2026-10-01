@@ -1,3 +1,15 @@
+# 真正的顶层 preload：必须写在第一个 [table] 之前，否则 TOML 会把它归入 [install]，
+# Bun 不会读（M4 子进程测试实测：放在 [install] 下 GIT_DIR 不被清掉）。
+# neutralizeGitHookEnv 说明见下方；stylex 那行历史上就写在 [install] 之下，未改动。
+#
+# ⚠️ 限制（已实测）：preload 只清「当前进程」的 process.env。Bun.spawn / Bun.spawnSync /
+# node:child_process 不带 env 时继承的是进程【启动时的环境快照】，preload 里删键影响不到子进程：
+#   GIT_DIR=/x bun -e 'console.log(process.env.GIT_DIR ?? "unset"); console.log(Bun.spawnSync(["printenv","GIT_DIR"]).stdout.toString())'
+#   → 先 unset，子进程却是 /x
+# 因此：进程启动前的清理只能靠 hook 里的 `unset`；任何 spawn git 的位置必须显式传
+# `env: stripGitRepositoryEnv(process.env)`（scripts/test/gitHookEnv.ts）。
+preload = ["./scripts/test/neutralizeGitHookEnv.ts"]
+
 [install]
 registry = "https://registry.npmjs.org"
 linker = "hoisted"
@@ -11,4 +23,15 @@ conditions = ["nolo-cloud", "default"]
 # 全局 StyleX 静态 API 编译通道（2026-09-02 提为顶层）：
 # 任何裸 bun 进程（dev server SSR、CLI、agent run worker）import 到
 # *Styles.ts（含 stylex.keyframes/firstThatWorks）都需要这条编译通道，
-preload = ["./scripts/public-build/stylexBunPlugin.ts"]
+#
+# neutralizeGitHookEnv 也挂顶层：git 钩子会给钩子进程导出 GIT_DIR /
+# GIT_INDEX_FILE 等仓库绑定变量，pre-push 里跑的 `bun scripts/...` 不经过
+# [test] preload，必须在这里清掉；且共享 .git/hooks/pre-push 可能被旧分支
+# 降级丢掉自己的 unset 行（2026-10-02 事故），清理不能再依赖 hook 版本。
+# 注意（L2）：顶层剥离同样会清掉 GIT_CONFIG_*（含 GIT_CONFIG_PARAMETERS）。这是有意的
+# 取舍——它们同属「把子进程 git 绑到调用方配置」的变量；代价是 bun 脚本里 spawn 的 git
+# 看不到调用方经 `git -c` 传入的临时配置。当前 bun 脚本无依赖这类配置者。
+# 进程不生效（与 stylexBunPlugin 两处都挂同理）。
+preload = [
+  "./scripts/public-build/stylexBunPlugin.ts",
+]

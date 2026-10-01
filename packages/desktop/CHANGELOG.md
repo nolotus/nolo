@@ -1,4 +1,13 @@
 
+## 0.96.2
+
+## 0.96.2 (2026-10-01)
+
+### Bug Fixes
+
+* **test:** keep git hook env from rewriting the real repository ([739db60](https://github.com/nolotus/bun-nolo/commit/739db60e28f726f3f2df76e6936e73cc758b3617))
+
+
 ## 0.96.1
 
 ## 0.96.1 (2026-10-01)
