@@ -1,4 +1,13 @@
 
+## 0.92.1
+
+## 0.92.1 (2026-10-01)
+
+### Bug Fixes
+
+* **deps:** upgrade xlsx to 0.20.3 via SheetJS CDN and echarts to 6.1.0 ([9799191](https://github.com/nolotus/bun-nolo/commit/9799191a4bf411b0b96cc023531ae30599350fc7))
+
+
 ## 0.92.0
 
 ## 0.92.0 (2026-10-01)
