@@ -27,7 +27,7 @@ import {
 } from "core/builtinAgents";
 import { builtinAgentCatalogEntryById } from "core/builtinAgentCatalog";
 import { parsePublicAgentId } from "core/prefix";
-import { refreshSubscriptionQuotas } from "../subscriptionQuotaRefresh";
+import { refreshCatalogSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 
 // The TUI default is Nolo itself. App Builder is a separate platform agent and
 // must never become the implicit fallback when profile/env resolution is absent.
@@ -395,29 +395,13 @@ export async function loadAgentCatalog(args: {
     rawData.favoritedAtByKey,
   );
   // 订阅制套餐（Kimi/GLM Coding）额度懒刷新：3s 预算内合并新快照，失败静默。
-  await mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl });
-  agentCatalogCache = { cacheKey, at: Date.now(), entries };
-  return entries;
-}
-
-/** 按需探测额度并就地合并进目录条目（平台条目永远没有 quota，不探测）。 */
-async function mergeCatalogQuotas(
-  entries: AgentCatalogEntry[],
-  args: { env?: EnvLike; fetchImpl?: CliFetchImpl },
-): Promise<void> {
-  const fresh = await refreshSubscriptionQuotas({
-    entries: entries.map((entry) => ({
-      key: entry.key,
-      ...(entry.quota ? { quota: entry.quota } : {}),
-      probeable: entry.kind === "private",
-    })),
-    ...(args.env ? { env: args.env } : {}),
+  await refreshCatalogSubscriptionQuotas({
+    entries,
+    env,
     ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
   });
-  for (const entry of entries) {
-    const quota = fresh[entry.key];
-    if (quota) entry.quota = quota;
-  }
+  agentCatalogCache = { cacheKey, at: Date.now(), entries };
+  return entries;
 }
 
 function refreshAgentCatalogInBackground(
@@ -442,7 +426,11 @@ function refreshAgentCatalogInBackground(
         rawData.privateAgents,
         rawData.favoritedAtByKey,
       );
-      await mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl });
+      await refreshCatalogSubscriptionQuotas({
+        entries,
+        env,
+        ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+      });
       agentCatalogCache = { cacheKey, at: Date.now(), entries };
     })
     .catch(() => {

@@ -11,7 +11,6 @@
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
-import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
 import { existsSync, readFileSync } from "node:fs";
@@ -263,8 +262,7 @@ function buildRunStatusPayload(
  * 里**仍未终态**的 run 做凭证组冲突检测：
  * - 候选或任一活跃 run 的 credentialGroup 未知 → 拒绝（未知 ≠ 独立，
  *   无法证明不共用上游 key），除非显式 allowUnknownCredential:true；
- * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝，除非显式
- *   allowCredentialConcurrency:true（调用方确认该凭证支持并发）；
+ * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝；
  * - 已知且不同 → 放行。
  *
  * 返回值是解析出的候选 credentialGroup（可能 undefined），由调用方写进
@@ -340,11 +338,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
 
     // --msg-file 占位会被 spawnLocalBackgroundRun 的 rewriteMsgFileArg 改写为
     // runs 目录里的内容快照（~/.nolo/runs/<runId>.msg.md）；--bg 会被子进程剥离。
-    // Read-only is declared by the caller, never guessed from task wording:
-    // a keyword heuristic silently flipped reviewers between "no tools" and
-    // "write access" depending on phrasing.
-    const isReadOnlyTask = args.readOnly === true;
-
     const rawArgs = [
       "--agent",
       agentKey,
@@ -354,8 +347,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
-      // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
-      ...(isReadOnlyTask ? ["--read-only"] : []),
     ];
 
     const agentName =
@@ -371,8 +362,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         : undefined;
 
     // 并发扇出凭证隔离：同 batch / 同父对话并发时，未知凭证组与同凭证组冲突
-    // 一律拒绝（除非显式 allowUnknownCredential / allowCredentialConcurrency）。
-    // 解析结果写进 run 记录。
+    // 一律拒绝（除非显式 allowUnknownCredential）。解析结果写进 run 记录。
     const parentDialogId =
       typeof args.parentDialogId === "string" && args.parentDialogId.trim()
         ? args.parentDialogId.trim()
@@ -385,7 +375,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? { credentialGroup: args.credentialGroup.trim() }
         : {}),
       allowUnknownCredential: args.allowUnknownCredential === true,
-      allowCredentialConcurrency: args.allowCredentialConcurrency === true,
     });
 
     const dodCommands = Array.isArray(args.dodCommands)
@@ -400,7 +389,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
-    const runTitle = normalizeRunTitle(args.title);
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
         rawArgs,
@@ -408,7 +396,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         cliEntrypointPath: deps.cliEntrypoint,
         agentKey,
         ...(agentName ? { agentName } : {}),
-        ...(runTitle ? { title: runTitle } : {}),
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
@@ -473,7 +460,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         batchId: resolvedBatchId,
         ...(agentName ? { agentName } : {}),
         ...(taskPreview ? { taskPreview } : {}),
-        ...(runTitle ? { title: runTitle } : {}),
         payloadMetrics,
       }),
       metadata: {

@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  anthropicOAuthModelMaxOutputTokens,
-  isAdaptiveThinkingModelId,
-} from "integrations/anthropic/anthropicOAuthModels";
+import { isAdaptiveThinkingModelId } from "integrations/anthropic/anthropicOAuthModels";
 import {
   createProviderCallTimingTracker,
   finalizeProviderCallTiming,
@@ -77,15 +74,6 @@ function resolveThinkingBudget(effort: string | undefined): number | undefined {
 const DEFAULT_THINKING_EFFORT = "medium";
 /** enabled 分支 effort 缺省时的默认 budget（medium=8192）。 */
 const DEFAULT_ENABLED_BUDGET = 8192;
-/** max_tokens when neither the caller nor the model table gives one. */
-const DEFAULT_MAX_TOKENS = 8192;
-/**
- * Ceiling for a default max_tokens on a non-streaming request. Same bound the
- * official SDKs enforce before refusing non-streaming calls (expected
- * generation must fit the ~10 min request window: 600s × 128k / 3600s).
- * Explicit agent max_tokens is never clamped.
- */
-export const NON_STREAMING_MAX_TOKENS = 21_333;
 /** enableThinking=true 但未给 thinkingBudget 时的历史默认值（保留旧行为，与 8192 不一致是有意的）。 */
 const DEFAULT_ENABLE_THINKING_BUDGET = 8000;
 
@@ -176,8 +164,7 @@ export function resolveThinkingSpec(input: ThinkingSpecInput): ThinkingSpec {
     const thinkingBudget = effortBudget ?? fallbackBudget;
     if (thinkingBudget !== undefined) {
       thinkingBlock = { type: "enabled", budget_tokens: thinkingBudget };
-      // 硬约束：max_tokens 必须大于 budget（extended 模型缺省 max_tokens 为
-      // DEFAULT_MAX_TOKENS=8192，与 medium budget 相等），不够就提升。
+      // 硬约束：默认 max_tokens=8192 与 medium budget 相等，必须提升。
       finalMaxTokens = Math.max(maxTokens, thinkingBudget + 1);
       finalTemperature = 1;
     }
@@ -424,18 +411,10 @@ export function buildAnthropicMessagesBody(args: {
     args.openAiBody.max_completion_tokens ??
     args.openAiBody.max_tokens ??
     args.agentConfig.max_tokens;
-  // Anthropic requires max_tokens. Without an explicit value, use the model's
-  // published output limit capped at what a NON-streaming request can safely
-  // produce (this path sends stream:false). A flat 8192 made adaptive-thinking
-  // turns hit finish_reason=length once thinking + answer passed 8k, which the
-  // loop surfaces as "output truncated / context exceeded".
   const maxTokens =
     typeof maxTokensRaw === "number" && Number.isFinite(maxTokensRaw)
       ? Math.max(1, Math.floor(maxTokensRaw))
-      : Math.min(
-          anthropicOAuthModelMaxOutputTokens(model) ?? DEFAULT_MAX_TOKENS,
-          NON_STREAMING_MAX_TOKENS,
-        );
+      : 8192;
 
   // 推理强度：openAiBody（客户端）优先，fallback agentConfig；分流逻辑见
   // resolveThinkingSpec（adaptive/enabled 按模型代际，effort 默认 medium）。

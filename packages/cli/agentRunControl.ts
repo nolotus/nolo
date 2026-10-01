@@ -5,7 +5,6 @@
 // simple (one json file + one log file per run) so it can be inspected
 // with ordinary shell tools.
 
-import { normalizeRunTitle } from "../ai/tools/agent/runTitle";
 import { homedir as nodeHomedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -48,8 +47,6 @@ export type RunRecord = {
   pid?: number;
   agentKey: string;
   agentName?: string;
-  /** 派发时调用方给的短标题（展示用）；缺省 = 没有，绝不从任务正文猜。 */
-  title?: string;
   cwd?: string;
   msgFile?: string;
   startedAt: string;
@@ -1347,8 +1344,6 @@ export async function spawnLocalBackgroundRun(
     cliEntrypointPath?: string;
     agentKey: string;
     agentName?: string;
-    /** 短标题（展示用）；写进 run 记录前会归一化。 */
-    title?: string;
     cwd?: string;
     msgFile?: string;
     /** 已解析的任务内容；提供时会快照进 runs 目录并让子进程读快照而非原始文件。 */
@@ -1428,12 +1423,10 @@ export async function spawnLocalBackgroundRun(
     // git rev-parse 失败留空
   }
 
-  const title = normalizeRunTitle(input.title);
   const record: RunRecord = {
     runId,
     agentKey: input.agentKey,
     ...(typeof input.agentName === "string" && input.agentName.trim() ? { agentName: input.agentName.trim() } : {}),
-    ...(title ? { title } : {}),
     cwd: input.cwd,
     ...(messagePath ? { msgFile: messagePath } : input.msgFile ? { msgFile: input.msgFile } : {}),
     startedAt: now().toISOString(),

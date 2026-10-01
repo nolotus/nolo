@@ -1,19 +1,11 @@
+import { toErrorMessage } from "core/errorMessage";
 
 import type { OAuthCredential, OAuthRefreshFn, OAuthProvider } from "./oauthTokenStore";
 import {
   DEFAULT_REFRESH_SKEW_MS,
   isTokenExpired,
 } from "./oauthTokenStore";
-import {
-  OAuthRefreshRateLimitedError,
-  assertOAuthRefreshAllowed,
-} from "./oauthRefreshRateLimit";
-import {
-  buildRefreshFailure,
-  shouldSkipRefresh,
-  toOAuthRefreshError,
-  type OAuthRefreshFailure,
-} from "./oauthRefreshError";
+import { assertOAuthRefreshAllowed } from "./oauthRefreshRateLimit";
 
 // --- OpenAI Codex (ChatGPT Plus/Pro/Team) refresh ---
 import {
@@ -185,30 +177,13 @@ export type AsyncOAuthCredentialStore = {
   read(
     userId: string,
     provider: string
-  ): Promise<
-    | (OAuthCredential & {
-        syncedAt?: number;
-        lastRefreshedAt?: number;
-        refreshError?: OAuthRefreshFailure;
-      })
-    | null
-  >;
+  ): Promise<OAuthCredential | null>;
   write(
     userId: string,
     provider: string,
     credential: OAuthCredential
   ): Promise<void>;
   remove(userId: string, provider: string): Promise<void>;
-  /**
-   * 可选：记录刷新失败（仅服务端 store 实现）。版本（syncedAt+lastRefreshedAt）
-   * 已变时返回 false 且不写。本地文件 store 不实现 → 行为与此前完全一致。
-   */
-  markRefreshFailed?(
-    userId: string,
-    provider: string,
-    expected: { syncedAt?: number; lastRefreshedAt?: number },
-    failure: OAuthRefreshFailure
-  ): Promise<boolean>;
 };
 
 /**
@@ -290,13 +265,6 @@ export async function resolveApiKeyRefFromStore(args: {
     return packResolved(credential.accessToken, credential);
   }
 
-  // 已落库的刷新失败：永久类（需重新授权）直到重新 sync 都不再请求上游；
-  // 临时类在冷却期内不请求。force 也不例外，避免 401 重试形成刷新风暴。
-  // 本地文件 store 没有 refreshError，此分支恒为 false。
-  if (shouldSkipRefresh(credential.refreshError, nowMs)) {
-    return packResolved(credential.accessToken, credential);
-  }
-
   const inflightKey = `${userId}:${provider}`;
   const existing = inflightOAuthRefreshes.get(inflightKey);
   if (existing) {
@@ -304,7 +272,6 @@ export async function resolveApiKeyRefFromStore(args: {
   }
 
   const refreshPromise = (async () => {
-    let refreshUsed: typeof credential | undefined;
     try {
       // Re-read under the coalesced lock: a peer may have already written a
       // fresher token while we were waiting to start.
@@ -323,39 +290,18 @@ export async function resolveApiKeyRefFromStore(args: {
 
       assertOAuthRefreshAllowed(inflightKey, provider);
 
-      // 固定「这次刷新实际使用的凭据版本」：失败标记必须落在它身上。若在失败
-      // 后才重读版本，刷新期间重新 sync 的新凭据会被误标成永久失败（锁死）。
-      refreshUsed = latest ?? credential;
-      const refreshed = await refreshFn(refreshUsed);
+      const refreshed = await refreshFn(latest ?? credential);
       await store.write(userId, oauthProvider, {
         ...refreshed,
         obtainedAt: refreshed.obtainedAt ?? Date.now(),
       });
       return packResolved(refreshed.accessToken, refreshed);
     } catch (err: unknown) {
-      const refreshErr = toOAuthRefreshError(err);
-      // 日志只含分类 code（固定文案），不含上游文本。
+      const message = toErrorMessage(err);
       console.warn(
-        `[oauth] Token refresh failed for ${provider}: ${refreshErr.code}. Using existing token.`
+        `[oauth] Token refresh failed for ${provider}: ${message}. Using existing token.`
       );
       const fallback = (await store.read(userId, oauthProvider)) ?? credential;
-      // 本进程限流不是上游失败，不落库。
-      if (!(err instanceof OAuthRefreshRateLimitedError) && store.markRefreshFailed) {
-        const failedAt = now?.() ?? Date.now();
-        // 没走到 refreshFn（限流/读取阶段出错）时退回读到的凭据。
-        const failedWith = refreshUsed ?? credential;
-        await store
-          .markRefreshFailed(
-            userId,
-            oauthProvider,
-            {
-              syncedAt: failedWith.syncedAt,
-              lastRefreshedAt: failedWith.lastRefreshedAt,
-            },
-            buildRefreshFailure(refreshErr, failedWith.refreshError, failedAt)
-          )
-          .catch(() => false);
-      }
       return packResolved(fallback.accessToken, fallback);
     } finally {
       inflightOAuthRefreshes.delete(inflightKey);
