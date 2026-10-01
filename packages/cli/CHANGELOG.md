@@ -1,4 +1,26 @@
 
+## 0.139.0-alpha.1
+
+## 0.139.0-alpha.1 (2026-10-01)
+
+### Features
+
+* **agent-runtime:** add bounded queue capacity and backpressure metrics to observation stream ([179e51a](https://github.com/nolotus/bun-nolo/commit/179e51a55954ed8d6953129a6003848127cd1fea))
+* **chat:** add server-owned Web foreground runner ([ab9c75f](https://github.com/nolotus/bun-nolo/commit/ab9c75f901bc164258ee7e61c095d58b3d7e2945))
+* **chat:** define server-owned Web foreground eligibility ([7c880cd](https://github.com/nolotus/bun-nolo/commit/7c880cd1567743443f5ac20c100bb694f3b75b7c))
+* **chat:** route eligible Web turns to server-owned foreground ([848fcf8](https://github.com/nolotus/bun-nolo/commit/848fcf8b373e17f1769a90c115c34e6afdfd3351))
+
+### Bug Fixes
+
+* **chat:** always clear server-owned transient projection ([92fffb2](https://github.com/nolotus/bun-nolo/commit/92fffb2d6a9949c3535d1d4d55a053b558534e3a))
+* **chat:** keep all configured tool surfaces on legacy Web path ([822b382](https://github.com/nolotus/bun-nolo/commit/822b38292797454ffc461fed14e4c277cc7189d9))
+* **chat:** keep durable user text separate from browser context ([8c7286a](https://github.com/nolotus/bun-nolo/commit/8c7286ad315fbd5e3b696660d424ccc089d84664))
+* **chat:** keep specialized runtime options on legacy path ([f9c515e](https://github.com/nolotus/bun-nolo/commit/f9c515e0207dad80eafdd8f63db68f0dc61bba4c))
+* **chat:** keep tool agents on legacy foreground path ([da3171a](https://github.com/nolotus/bun-nolo/commit/da3171a1af31fe6bde43818978721bc3017fbfb3))
+* **chat:** pass runtimeContext in foreground stream and clear streaming id on transient remove ([91f9216](https://github.com/nolotus/bun-nolo/commit/91f92168257c0949aaff4150148a47e604cd1523))
+* **chat:** use exported message actions in server-owned runner ([0c7075e](https://github.com/nolotus/bun-nolo/commit/0c7075ec4c31c7f082a6605b43459d51fbe3497a))
+
+
 ## 0.138.0-alpha.1
 
 ## 0.138.0-alpha.1 (2026-09-30)

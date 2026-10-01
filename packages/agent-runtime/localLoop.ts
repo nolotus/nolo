@@ -21,8 +21,10 @@ import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
 import type { ManagedRuntime } from "effect";
 import {
   createLocalLoopObservationBoundary,
+  DEFAULT_OBSERVATION_QUEUE_CAPACITY,
   type LocalLoopObservationBoundary,
   type LocalLoopObservationEvent,
+  type LocalLoopObservationBoundaryOptions,
 } from "./observationStream";
 import { createLoopTiming } from "./loopTiming";
 import {
@@ -241,8 +243,15 @@ export type LocalAgentContextMetrics = AgentExecutionContextMetrics;
  */
 export type LocalAgentLoopEvent = AgentExecutionObservationEvent;
 
-export type { LocalLoopObservationBoundary, LocalLoopObservationEvent };
-export { createLocalLoopObservationBoundary };
+export type {
+  LocalLoopObservationBoundary,
+  LocalLoopObservationEvent,
+  LocalLoopObservationBoundaryOptions,
+};
+export {
+  createLocalLoopObservationBoundary,
+  DEFAULT_OBSERVATION_QUEUE_CAPACITY,
+};
 
 // 兼容 re-export：投影实现已下沉到 ./providerMessageProjection（纯函数层），
 // 既有消费方（historyContextBudget.test、__bench__、外部 caller）从 ./localLoop
