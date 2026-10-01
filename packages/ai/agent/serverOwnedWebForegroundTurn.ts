@@ -20,6 +20,7 @@ import { buildForegroundTurnAdmissionFetchInit } from "./foregroundTurnAdmission
 import { consumeAgentRunStream } from "./streamTurnStreamConsumer";
 import type { AgentRuntimeOptions } from "./types";
 import { shouldUseServerOwnedWebForegroundTurn } from "./serverOwnedWebForegroundEligibility";
+import { createServerOwnedAskUserProjection } from "./serverOwnedAskUserProjection";
 
 export type ServerOwnedWebForegroundTurnArgs = {
   agentKey: string;
@@ -100,11 +101,22 @@ export async function runServerOwnedWebForegroundTurn(
     throw new Error("Server-owned foreground turn requires text input");
   }
 
+  const userId = selectIdentityUserId(thunk.getState() as never);
   const { key: transientKey, messageId: transientId } =
     createDialogMessageKeyAndId(dialogId);
   const controller = new AbortController();
   const loopKey = `server-owned:${dialogId}:${transientId}`;
   let accumulated = "";
+
+  const askUserProjection = createServerOwnedAskUserProjection({
+    dialogId,
+    dispatch: thunk.dispatch,
+    messageMetadata: {
+      cybotKey: args.agentKey,
+      agentKey: args.agentKey,
+      userId,
+    },
+  });
 
   thunk.dispatch(
     addActiveController({
@@ -122,7 +134,7 @@ export async function runServerOwnedWebForegroundTurn(
       content: "",
       cybotKey: args.agentKey,
       agentKey: args.agentKey,
-      userId: selectIdentityUserId(thunk.getState() as never),
+      userId,
     }),
   );
 
@@ -142,6 +154,7 @@ export async function runServerOwnedWebForegroundTurn(
         "dialog-ui",
         "durable-foreground",
         "client-user-prepersisted",
+        "ask-user-tool-card",
       ],
       ...(args.dialogConfig.agentMode === "auto"
         ? { dialogAgentMode: "auto" as const }
@@ -214,6 +227,12 @@ export async function runServerOwnedWebForegroundTurn(
           // authoritative server terminal rather than a client transport error.
           return { reject: payload.message || "Agent execution failed" };
         }
+
+        // Project ask_user while the server executes, but keep that transient row
+        // read-only. The durable row loaded after `done` is the only interactive
+        // copy, avoiding persistence races on a browser-generated dbKey.
+        askUserProjection.handlePayload(payload);
+
         if (payload?.type === "text" && typeof payload.content === "string") {
           accumulated += payload.content;
           thunk.dispatch(
@@ -225,7 +244,7 @@ export async function runServerOwnedWebForegroundTurn(
               content: accumulated,
               cybotKey: args.agentKey,
               agentKey: args.agentKey,
-              userId: selectIdentityUserId(thunk.getState() as never),
+              userId,
             }),
           );
         }
@@ -244,8 +263,12 @@ export async function runServerOwnedWebForegroundTurn(
       return { serverOwned: true, detached: true };
     }
 
-    // Server persistence is authoritative. Replace the transient projection
-    // with the durable assistant/tool trace produced by /api/agent/run.
+    // Server persistence is authoritative. Drop every transient projection and
+    // reload the durable trace in one go: cleanup → remove → initMsgs is
+    // deliberate, because loading canonical rows first would show two cards at
+    // once (transient + canonical) for one round trip. A sub-second gap is the
+    // lesser artifact; the finally block below keeps the cleanup idempotent.
+    askUserProjection.cleanup();
     thunk.dispatch(removeTransientMessage({ id: transientId, dialogId }));
     await thunk.dispatch(initMsgs({ dialogId })).unwrap();
     return { serverOwned: true };
@@ -256,6 +279,7 @@ export async function runServerOwnedWebForegroundTurn(
         dialogKey,
       }),
     );
+    askUserProjection.cleanup();
     // The projection is never authoritative. Success reloads canonical server
     // rows above; abort/detach/non-2xx must not leave an empty or stale assistant
     // row behind while recovery or the incomplete-turn fallback takes over.

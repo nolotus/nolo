@@ -1,4 +1,19 @@
 
+## 0.140.0-alpha.1
+
+## 0.140.0-alpha.1 (2026-10-01)
+
+### Features
+
+* **chat:** admit ask_user on durable Web foreground ([755ffa5](https://github.com/nolotus/bun-nolo/commit/755ffa5785fcbe51de3ff0cff80e13e9084aab8f))
+* **chat:** project durable ask_user tool cards ([abe4695](https://github.com/nolotus/bun-nolo/commit/abe46958e41ce28d54e8fb450fcad6942e2cfbe9))
+* **chat:** render server-owned ask_user projection ([6060d9e](https://github.com/nolotus/bun-nolo/commit/6060d9e30261871abc3e60636edf98a00a68b687))
+
+### Bug Fixes
+
+* **chat:** repair ask_user durable-slice regressions found in local acceptance ([5ec68b8](https://github.com/nolotus/bun-nolo/commit/5ec68b87b65c8323028c52fefccb459a4b572edf))
+
+
 ## 0.139.0-alpha.1
 
 ## 0.139.0-alpha.1 (2026-10-01)
