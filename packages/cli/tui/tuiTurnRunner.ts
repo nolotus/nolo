@@ -88,6 +88,7 @@ import {
   shouldEmitTerminalBell,
   TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
 } from "./terminalNotification";
+import { formatTurnSummaryLine } from "./turnSummary";
 import {
   createHistoryOutputStream,
   startTurn,
@@ -1198,6 +1199,20 @@ export async function runOneAgentTurn(
       ctx.flushPendingRender();
       ctx.renderHistoryToOutput();
       if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
+    }
+    if (
+      !wasAborted &&
+      !runResult.streamInterrupted &&
+      runResult.exitCode === 0 &&
+      isInteractiveInput(ctx.input)
+    ) {
+      const summary = formatTurnSummaryLine({
+        durationMs: Date.now() - turnStartedAtMs,
+        outputTokens: runResult.turnTokens?.output,
+        credits: runResult.turnCredits,
+        minDurationMs: TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
+      });
+      if (summary) ctx.emitCommandOutput(summary);
     }
     if (wasAborted) {
       if (runResult.pendingToolName) {

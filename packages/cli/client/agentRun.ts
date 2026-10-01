@@ -19,6 +19,8 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
+import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
+import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import {
   buildTurnTokenUsage,
   formatUsage,
@@ -115,10 +117,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: string;
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: string;
+  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -1711,7 +1713,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: Parameters<typeof sumPlatformCredits>[0] }
+      error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1971,7 +1973,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability?.exitCode) {
+  if (localAvailability && "exitCode" in localAvailability) {
     return { exitCode: localAvailability.exitCode };
   }
 
