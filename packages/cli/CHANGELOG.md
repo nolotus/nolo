@@ -1,4 +1,17 @@
 
+## 0.143.0-alpha.1
+
+## 0.143.0-alpha.1 (2026-10-01)
+
+### Features
+
+* **chat:** improve entry transition, recovery UX and default nolo fallback ([9db0357](https://github.com/nolotus/bun-nolo/commit/9db0357e8cf4650d35aa3b799029e32282a10e31))
+
+### Bug Fixes
+
+* **cli:** import readCredentialAvailability and align builtin nolo test ([06ee129](https://github.com/nolotus/bun-nolo/commit/06ee129dda708f04147645850f7545aa89f4445e))
+
+
 ## 0.142.0-alpha.1
 
 ## 0.142.0-alpha.1 (2026-10-01)

@@ -55,11 +55,10 @@ const ChatAreaComponent: React.FC<ChatAreaProps> = ({
             scrollContainerSelector={scrollContainerSelector}
           />
         </ChatErrorBoundary>
+        <ChatErrorBoundary fallbackMessage="运行状态恢复失败">
+          <ForegroundTurnRecovery dialogId={dialogId} />
+        </ChatErrorBoundary>
       </div>
-
-      <ChatErrorBoundary fallbackMessage="运行状态恢复失败">
-        <ForegroundTurnRecovery dialogId={dialogId} />
-      </ChatErrorBoundary>
 
       <ChatErrorBoundary fallbackMessage="未完成回复状态加载失败">
         <IncompleteBrowserTurnNotice dialogId={dialogId} />

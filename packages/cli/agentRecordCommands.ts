@@ -12,6 +12,7 @@ import {
   writeAgentRecord,
 } from "./agentRecordHelpers";
 import { parseUserIdFromAuthToken, resolveAuthToken } from "./cliEnvHelpers";
+import { readCredentialAvailability } from "agent-runtime/credentialAvailability";
 import { clearCliLocalRuntimePreparedAgentCache } from "./client/localRuntimeAdapter";
 import { toErrorMessage } from "core/errorMessage";
 
@@ -82,8 +83,21 @@ export async function runAgentReadCommand(
         })
       : {};
     const quota = fresh[result.agentKey] ?? recordQuota;
+    const rawRecordObj = result.record as Record<string, unknown> | null;
+    const credAvail = await readCredentialAvailability(env).catch(() => ({}));
+    const credGroup = typeof rawRecordObj?.apiKeyRef === "string" ? rawRecordObj.apiKeyRef : undefined;
+    const credDeadline = credGroup ? credAvail[credGroup] : undefined;
+    const recordDeadline = typeof rawRecordObj?.nextAvailableAt === "number" ? rawRecordObj.nextAvailableAt : undefined;
+    const effectiveNextAvailableAt = Math.max(recordDeadline ?? 0, credDeadline ?? 0) || undefined;
+    const isRateLimited = typeof effectiveNextAvailableAt === "number" && effectiveNextAvailableAt > Date.now();
+
     output.write(JSON.stringify({
       ...normalizeAgentRecordForOutput(result.agentKey, authToken, result.record),
+      ...(isRateLimited ? {
+        rateLimited: true,
+        cooldownRemainingSeconds: Math.ceil((effectiveNextAvailableAt - Date.now()) / 1000),
+        nextAvailableAt: new Date(effectiveNextAvailableAt).toISOString(),
+      } : {}),
       ...(quota ? { quota } : {}),
       source: result.source,
     }, null, 2));

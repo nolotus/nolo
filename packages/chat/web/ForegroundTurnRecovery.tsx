@@ -1,7 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { createSSEParser } from "ai/chat/parseMultilineSSE";
 import {
   clearForegroundExecutionClientState,
   observeForegroundExecutionPayload,
@@ -14,12 +13,20 @@ import {
   useRecoveredForegroundTurn,
 } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
-import { initMsgs } from "chat/messages/messageSlice";
+import { initMsgs, selectAllMsgs } from "chat/messages/messageSlice";
 import { useToken } from "identity";
+import {
+  deriveRecoveryDisplayPhase,
+  FOREGROUND_ATTACH_HINT_DELAY_MS,
+  type RecoveryDisplayPhase,
+} from "./foregroundTurnRecoveryDisplay";
+import { observeForegroundTurnRecovery } from "./foregroundTurnRecoveryObserver";
 
-const FOREGROUND_STATUS_EVENT = "foreground_turn_status";
-const FOREGROUND_TERMINAL_EVENT = "foreground_turn_terminal";
-const FOREGROUND_DISCOVERY_TIMEOUT_MS = 1_500;
+const RECOVERY_DISPLAY_DEFAULTS: Record<RecoveryDisplayPhase, string> = {
+  attaching: "正在接回回复…",
+  running: "服务器仍在生成…",
+  interrupted: "连接中断，回复状态未知。",
+};
 
 /**
  * Recovery observer for a server-owned current-dialog turn.
@@ -34,7 +41,9 @@ const FOREGROUND_DISCOVERY_TIMEOUT_MS = 1_500;
  * - show that the detached turn is still alive;
  * - retain the server executionId so Stop targets this exact turn;
  * - when it reaches a terminal event, reload persisted dialog messages;
- * - idle dialogs do not keep a permanent recovery SSE connection open.
+ * - idle dialogs do not keep a permanent recovery SSE connection open;
+ * - a transport drop is not an execution failure and must not be rendered as
+ *   one; the reply-area hint distinguishes attaching / running / interrupted.
  */
 export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
   dialogId,
@@ -48,8 +57,24 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
   const activeControllers = useActiveControllers(runtimeDialogKey);
   const recoveredForegroundTurn = useRecoveredForegroundTurn(runtimeDialogKey);
   const hasLocalForegroundOwner = Object.keys(activeControllers).length > 0;
+  const messages = useAppSelector((state) => selectAllMsgs(state, dialogId));
+
+  // Display-only local state for the reply-area hint. The durable store keeps
+  // its single `recoveredForegroundTurn` fact; everything here is derived
+  // per-attach and cleared by cleanup / terminal / idle discovery.
+  const [attachHintElapsed, setAttachHintElapsed] = useState(false);
+  const [sawForegroundLifecycle, setSawForegroundLifecycle] = useState(false);
+  const [streamDropped, setStreamDropped] = useState(false);
+  const [attachSettled, setAttachSettled] = useState(false);
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const replyMaybePending = lastMessage?.role === "user";
 
   useEffect(() => {
+    setAttachHintElapsed(false);
+    setSawForegroundLifecycle(false);
+    setStreamDropped(false);
+    setAttachSettled(false);
+
     if (!dialogId || !token || !server || hasLocalForegroundOwner) {
       setRecoveredForegroundTurn({
         dialogKey: runtimeDialogKey,
@@ -59,24 +84,16 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
     }
 
     const controller = new AbortController();
-    const parseSSE = createSSEParser();
     let settled = false;
-    let sawForegroundLifecycle = false;
-
-    const discoveryTimer = setTimeout(() => {
-      if (!sawForegroundLifecycle && !settled) {
-        setRecoveredForegroundTurn({
-          dialogKey: runtimeDialogKey,
-          status: null,
-        });
-        clearForegroundExecutionClientState(dialogId);
-        controller.abort("foreground-recovery-idle");
-      }
-    }, FOREGROUND_DISCOVERY_TIMEOUT_MS);
+    const attachHintTimer = setTimeout(
+      () => setAttachHintElapsed(true),
+      FOREGROUND_ATTACH_HINT_DELAY_MS,
+    );
 
     const refreshPersistedMessages = async () => {
       if (settled) return;
       settled = true;
+      setAttachSettled(true);
       setRecoveredForegroundTurn({
         dialogKey: runtimeDialogKey,
         status: null,
@@ -88,90 +105,75 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
       }
     };
 
-    const observe = async () => {
-      try {
-        const origin = String(server).replace(/\/+$/, "");
-        const response = await fetch(
-          `${origin}/api/events/dialog-${encodeURIComponent(dialogId)}`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "text/event-stream",
-              Authorization: `Bearer ${token}`,
-            },
-            signal: controller.signal,
-          },
-        );
-        if (!response.ok || !response.body) return;
+    void observeForegroundTurnRecovery({
+      controller,
+      origin: String(server),
+      dialogId,
+      token,
+      callbacks: {
+        onForegroundEvent: (event) => observeForegroundExecutionPayload(event),
+        onLifecycle: () => setSawForegroundLifecycle(true),
+        onRunning: () =>
+          setRecoveredForegroundTurn({
+            dialogKey: runtimeDialogKey,
+            status: "running",
+          }),
+        onTerminal: refreshPersistedMessages,
+        onIdle: () => {
+          setAttachSettled(true);
+          setRecoveredForegroundTurn({
+            dialogKey: runtimeDialogKey,
+            status: null,
+          });
+          clearForegroundExecutionClientState(dialogId);
+        },
+        onDropped: () => setStreamDropped(true),
+      },
+    });
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            for (const event of parseSSE(chunk)) {
-              if (!event || typeof event !== "object") continue;
-
-              // Live and recovery streams feed one execution-id cache. This
-              // keeps a recovered Stop scoped to the turn the user actually
-              // observed without making the cache execution authority.
-              observeForegroundExecutionPayload(event);
-
-              const type = typeof event.type === "string" ? event.type : "";
-              if (type === FOREGROUND_TERMINAL_EVENT) {
-                sawForegroundLifecycle = true;
-                clearTimeout(discoveryTimer);
-                await refreshPersistedMessages();
-                return;
-              }
-              if (
-                type === FOREGROUND_STATUS_EVENT &&
-                event.status === "running"
-              ) {
-                sawForegroundLifecycle = true;
-                clearTimeout(discoveryTimer);
-                setRecoveredForegroundTurn({
-                  dialogKey: runtimeDialogKey,
-                  status: "running",
-                });
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        console.warn("[chat] foreground turn recovery observer disconnected", {
-          dialogId,
-          error,
-        });
-      }
-    };
-
-    void observe();
     return () => {
-      clearTimeout(discoveryTimer);
+      clearTimeout(attachHintTimer);
       controller.abort();
       setRecoveredForegroundTurn({
         dialogKey: runtimeDialogKey,
         status: null,
       });
+      setAttachHintElapsed(false);
+      setSawForegroundLifecycle(false);
+      setStreamDropped(false);
+      setAttachSettled(false);
       // Do NOT clear the execution-id cache here. This cleanup also runs when a
       // recovered observer hands ownership back to a local live controller;
       // clearing here could erase the live stream's freshly observed identity.
       // Terminal events and idle discovery own cache cleanup instead.
     };
-  }, [dialogId, dispatch, hasLocalForegroundOwner, runtimeDialogKey, server, token]);
+  }, [
+    dialogId,
+    dispatch,
+    hasLocalForegroundOwner,
+    runtimeDialogKey,
+    server,
+    token,
+  ]);
 
-  if (recoveredForegroundTurn !== "running") return null;
+  const displayPhase = deriveRecoveryDisplayPhase({
+    hasLocalForegroundOwner,
+    recoveredForegroundTurn,
+    sawForegroundLifecycle,
+    streamDropped,
+    attachSettled,
+    attachHintElapsed,
+    replyMaybePending,
+  });
+
+  if (!displayPhase) return null;
 
   return (
     <div
       role="status"
       aria-live="polite"
+      data-testid="foreground-turn-recovery"
+      data-phase={displayPhase}
       style={{
         padding: "6px 12px",
         fontSize: 12,
@@ -179,8 +181,8 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
         textAlign: "center",
       }}
     >
-      {t("foregroundTurnRecovery.running", {
-        defaultValue: "AI is still running…",
+      {t(`foregroundTurnRecovery.${displayPhase}`, {
+        defaultValue: RECOVERY_DISPLAY_DEFAULTS[displayPhase],
       })}
     </div>
   );

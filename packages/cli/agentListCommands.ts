@@ -329,6 +329,13 @@ export async function runAgentListCommand(
     output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
     if (unavailableCount > 0 && !showUnavailable) {
       output.write(`⛔ ${unavailableCount} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n`);
+      const unavailableList = agents.filter((agent) => isAgentUnavailableNow(agent));
+      for (const unavail of unavailableList) {
+        const remainingSec = Math.max(0, Math.ceil(((unavail.nextAvailableAt ?? 0) - Date.now()) / 1000));
+        const quotaSummary = formatQuotaSummary(unavail.quota);
+        const quotaText = quotaSummary ? ` (${quotaSummary})` : "";
+        output.write(`   - [429 限流] ${unavail.name} (id: ${unavail.id}) 预计 ${remainingSec} 秒后恢复${quotaText}\n`);
+      }
     }
     output.write(`source: ${source}\n`);
     if (agentsForOutput.length === 0) {
