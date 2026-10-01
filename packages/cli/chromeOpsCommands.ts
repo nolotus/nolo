@@ -236,8 +236,8 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
 
 export function renderChromeOpsHelp(): string {
   const lines = [
-    "Operate the user's Chrome through the Nolo Chrome connector (the desktop bridge;",
-    "the same RPC the chrome_* agent tools use).",
+    "Operate the user's browser (Chrome or Firefox) through the Nolo Browser Connector",
+    "(the desktop bridge; the same RPC the browser_* agent tools use — legacy `chrome_*` names still work).",
     "",
     "Usage:",
     "  nolo chrome <subcommand> [flags]",
@@ -252,6 +252,7 @@ export function renderChromeOpsHelp(): string {
     "    preferred over --selector); --selector takes a CSS selector.",
     "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
     "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
+    "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",
     "  Every subcommand prints the connector's raw JSON result; failures exit 1.",
     "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or http://127.0.0.1:38947/rpc.",
   ];

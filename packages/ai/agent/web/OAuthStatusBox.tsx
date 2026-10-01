@@ -19,7 +19,14 @@ import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
 export type OAuthConnectionState =
   | { kind: "loading" }
   | { kind: "not_connected" }
-  | { kind: "connected"; email?: string; accountId?: string; expiresAt?: number }
+  | {
+      kind: "connected";
+      email?: string;
+      accountId?: string;
+      expiresAt?: number;
+      needsReauth?: boolean;
+      refreshErrorMessage?: string;
+    }
   | { kind: "error"; message: string };
 
 export type OAuthStatusBoxProps = {
@@ -82,6 +89,8 @@ export const OAuthStatusBox = ({
           email?: string;
           accountId?: string;
           expiresAt?: number;
+          needsReauth?: boolean;
+          refreshError?: { message?: string } | null;
         };
         if (data.connected) {
           setState({
@@ -89,6 +98,10 @@ export const OAuthStatusBox = ({
             email: data.email,
             accountId: data.accountId,
             expiresAt: data.expiresAt,
+            needsReauth: data.needsReauth === true,
+            ...(data.refreshError?.message
+              ? { refreshErrorMessage: data.refreshError.message }
+              : {}),
           });
         } else {
           setState({ kind: "not_connected" });
@@ -205,7 +218,11 @@ export const OAuthStatusBox = ({
     return (
       <div {...stylex.props(modelStyles.cliInfoBox)}>
         <p {...stylex.props(modelStyles.cliInfoBoxTitle)}>Signed in as {label}</p>
-        {expiresIn !== undefined && (
+        {state.needsReauth ? (
+          <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
+            ⚠️ {state.refreshErrorMessage || "服务端无法自动续期"}（运行 nolo auth {providerId} --sync-to-server）
+          </p>
+        ) : expiresIn !== undefined && (
           <p {...stylex.props(modelStyles.cliInfoBoxHint)}>
             {expiringSoon
               ? `⚠️ Token expires in ${expiresIn} min — re-authorize to refresh.`

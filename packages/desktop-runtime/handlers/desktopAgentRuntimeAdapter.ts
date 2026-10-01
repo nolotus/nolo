@@ -46,7 +46,7 @@ import {
   describeDesktopAgentRuntimeHostFacts,
   type DesktopAgentRuntimeEnv,
 } from "./desktopAgentRuntimeHostFacts";
-import { CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
+import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES, CHROME_CONNECTOR_TOOL_NAMES } from "ai/tools/chromeConnectorTools";
 import { appendEnabledPackPromptPatches } from "ai/tools/toolPacks";
 import { createTokenKey, createTokenStatsKey, createUserKey, dialogMessageRange } from "database/keys";
 import { prepareTokenUsageData } from "ai/token/prepareTokenUsageData";
@@ -72,7 +72,7 @@ export function resolveDesktopAgentRuntimeUserId(env: DesktopAgentRuntimeEnv) {
   return env.NOLO_LOCAL_USER_ID || env.NOLO_USER_ID || "local";
 }
 
-const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_TOOL_NAMES);
+const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES);
 
 /**
  * Built-in public platform agents are now defined in the shared module
@@ -90,10 +90,10 @@ export function resolveBuiltinPlatformAgentConfig(
 }
 
 const DESKTOP_CHROME_CONNECTOR_AGENT_PROMPT = [
-  "Nolo Desktop Chrome connector instructions:",
-  "- Chrome Connector 是一个全局桌面能力包。只有用户在设置页打开 Enable Chrome Connector for agents 后，desktop local agents 才能使用 chrome_* 工具。",
-  "- 用户要求访问、读取、点击、输入、截图或调试 Chrome 页面时，优先使用 chrome_* 工具；不要为了网页操作改用 shell/curl，除非 Chrome connector 不可用。",
-  "- chrome_* 工具操作的是用户当前 Chrome。可以利用用户已登录状态读取当前页面，但不要读取 cookies、密码库、profile 数据库或导出 session secret。",
+  "Nolo Browser Connector instructions:",
+  "- Nolo Browser Connector 是一个全局桌面能力包。只有用户在设置页打开 Enable Chrome Connector for agents 后，desktop local agents 才能使用 browser_* 工具。",
+  "- 用户要求访问、读取、点击、输入、截图或调试浏览器页面时，优先使用 browser_* 工具（Nolo Browser Connector；Chrome 或 Firefox）；不要为了网页操作改用 shell/curl，除非 Browser Connector 不可用。",
+  "- browser_* 工具操作的是用户当前浏览器（Chrome 或 Firefox）。可以利用用户已登录状态读取当前页面，但不要读取 cookies、密码库、profile 数据库或导出 session secret。",
   "- 提交表单、发消息、上传文件、删除、付款、改权限、改密码最终提交等外部副作用动作，必须在执行前让用户确认。",
   "- 不绕过 CAPTCHA、paywall、安全 interstitial，也不要代替用户完成改密码最终提交。",
 ].join("\n");
@@ -887,6 +887,15 @@ export function createDesktopAgentRuntimeAdapter(args: {
   return {
     host: "desktop",
     capabilities: [...new Set([...facts.capabilities, ...(args.capabilities ?? [])])],
+    /**
+     * 已接线的凭据保管库。
+     *
+     * localLoop 用 adapter.credentialBroker 做输入隔离（明文 → `$nolo_cred:`
+     * 引用）与执行边界解包。此前只有 provider 解析那条路拿 broker，这个字段一
+     * 直是空的，隔离路径因此恒不激活——用户粘贴的密钥只会被正则脱敏成不可用的
+     * `[REDACTED:…]` 标记，而不是模型能安全消费的引用。
+     */
+    credentialBroker: createDesktopHostCredentialBroker(),
     loadAgentConfig: (agentRef) => loadDesktopAgentRuntimeAgentConfig({
       actions: args.actions,
       agentRef,

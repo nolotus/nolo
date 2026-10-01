@@ -2,7 +2,7 @@ import { createArgsCommand, createEnvCommand } from "./cliCommandFactories";
 import type { CommandEntry } from "./cliCommandTypes";
 
 /**
- * `nolo chrome ...` — machine-local Nolo Chrome connector commands, in two halves:
+ * `nolo chrome ...` — machine-local Nolo Browser Connector commands, in two halves:
  *
  * - setup (status / install / reload): run once per machine, outside any agent run;
  *   implementation in chromeCommands.ts.
@@ -34,11 +34,11 @@ const CHROME_OPS_SUBCOMMANDS: Array<{ name: string; summary: string }> = [
   { name: "read-network", summary: "Read recent network entries (--tab <id>)" },
 ];
 
-export function getChromeInternalCommandEntries(): CommandEntry[] {
+function getChromeFamilyEntries(): CommandEntry[] {
   return [
     createEnvCommand(
       ["chrome", "status"],
-      "Show Nolo Chrome connector status (native host manifest, token, live connection)",
+      "Show Nolo Browser Connector status (native host manifest, token, live connection)",
       async (args, deps) => {
         const { runChromeStatusCommand } = await import("./chromeCommands");
         return runChromeStatusCommand(args, deps);
@@ -46,7 +46,7 @@ export function getChromeInternalCommandEntries(): CommandEntry[] {
     ),
     createEnvCommand(
       ["chrome", "install"],
-      "Install the Chrome native messaging host manifest for this user",
+      "Install the native messaging host manifest for this user (--browser chrome|firefox)",
       async (args, deps) => {
         const { runChromeInstallCommand } = await import("./chromeCommands");
         return runChromeInstallCommand(args, deps);
@@ -67,4 +67,18 @@ export function getChromeInternalCommandEntries(): CommandEntry[] {
       }),
     ),
   ];
+}
+
+/**
+ * `nolo chrome ...` plus its full-equivalent alias `nolo browser ...`. The alias entries reuse the
+ * very same handler function objects as their chrome counterparts (one implementation).
+ */
+export function getChromeInternalCommandEntries(): CommandEntry[] {
+  const chromeEntries = getChromeFamilyEntries();
+  const browserEntries: CommandEntry[] = chromeEntries.map((entry) => ({
+    ...entry,
+    path: ["browser", ...entry.path.slice(1)],
+    description: `${entry.description} (Alias of \`nolo chrome ${entry.path.slice(1).join(" ")}\`)`,
+  }));
+  return [...chromeEntries, ...browserEntries];
 }

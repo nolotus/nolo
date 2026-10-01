@@ -21,6 +21,8 @@ import {
   createChromeConnectorClient,
   NOLO_CHROME_CONNECTOR_EXTENSION_ID,
   NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
+  NOLO_CONNECTOR_EXTENSION_IDS,
+  NOLO_FIREFOX_CONNECTOR_EXTENSION_ID,
   REQUIRED_CHROME_CONNECTOR_FEATURES,
   type ChromeConnectorClient,
 } from "../desktop-chrome-connector/chromeConnector";
@@ -40,6 +42,8 @@ type InstallOptions = {
   platform?: string;
   extensionId?: string;
   nodePath?: string;
+  /** Which browser's native messaging manifest to write; defaults to Chrome. */
+  browser?: "chrome" | "firefox";
 };
 
 type InstallResult = {
@@ -88,6 +92,37 @@ export const FULL_SUPPORT_CHROME_FEATURES = [
   ...new Set(Object.values(REQUIRED_CHROME_CONNECTOR_FEATURES).flat()),
 ].sort();
 
+/** Connector builds whose id the handshake accepts as first-class (see NOLO_CONNECTOR_EXTENSION_IDS). */
+export type ConnectorBrowser = "chrome" | "firefox";
+
+/**
+ * Features the Firefox build of the same connector cannot advertise: no `chrome.debugger`
+ * (console/network reads) and no CDP file-input path (`set_files` is refused there).
+ * Everything else — tabs, compact observation, action gate, screenshot — is supported.
+ */
+export const FIREFOX_UNAVAILABLE_FEATURES = ["browser_debug", "file_upload"] as const;
+
+/** Map a connected `connector_info.extensionId` back to its build, or null when unrecognized. */
+export function resolveConnectorBrowser(extensionId: string | null): ConnectorBrowser | null {
+  if (!extensionId) return null;
+  if (extensionId === NOLO_FIREFOX_CONNECTOR_EXTENSION_ID) return "firefox";
+  if (NOLO_CONNECTOR_EXTENSION_IDS.includes(extensionId)) return "chrome";
+  return null;
+}
+
+/** Features a connected build is expected to advertise — the Firefox build drops the debugger-gated ones. */
+export function expectedFeaturesForBrowser(browser: ConnectorBrowser | null): string[] {
+  return browser === "firefox"
+    ? FULL_SUPPORT_CHROME_FEATURES.filter(
+        (feature) => !(FIREFOX_UNAVAILABLE_FEATURES as readonly string[]).includes(feature),
+      )
+    : FULL_SUPPORT_CHROME_FEATURES;
+}
+
+function browserLabel(browser: ConnectorBrowser | null): string {
+  return browser === "firefox" ? "Firefox" : browser === "chrome" ? "Chrome" : "browser";
+}
+
 export type ChromeConnectorStatusReport = {
   ok: boolean;
   connectorRoot: string | null;
@@ -109,6 +144,8 @@ export type ChromeConnectorStatusReport = {
     installedWrapperPath: string | null;
     wrapperPathMatches: boolean;
     allowedOriginMatches: boolean;
+    /** Which build's manifest these checks describe: the connected build, else the one that exists. */
+    browser: ConnectorBrowser | null;
   };
   token: {
     path: string | null;
@@ -119,6 +156,8 @@ export type ChromeConnectorStatusReport = {
     extensionId: string | null;
     protocolVersion: string | null;
     features: string[];
+    /** Which known build is connected; null when offline or the id is unrecognized. */
+    browser: ConnectorBrowser | null;
     missingFeatures: string[];
     expectedProtocolVersion: string;
     error?: { code: string; message: string };
@@ -292,10 +331,19 @@ async function probeConnectorRpc(requestChrome: RequestChrome) {
 }
 
 function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
+  // Advice follows the manifest that was actually checked (connected build, else the one that
+  // exists) so an offline Firefox-only setup is not told to install a Chrome manifest.
+  const targetBrowser = report.rpc.browser ?? report.nativeHost.browser;
+  const installCmd =
+    targetBrowser === "firefox"
+      ? "nolo chrome install --browser firefox"
+      : "nolo chrome install";
+  const connectedLabel = browserLabel(targetBrowser);
+  const browserText = connectedLabel === "browser" ? "the browser" : connectedLabel;
   if (!report.connectorRoot) {
     if (report.rpc.online && report.rpc.protocolVersion === report.rpc.expectedProtocolVersion) {
       return (
-        "Chrome connector is online, but this CLI cannot see a connector checkout, so `nolo chrome " +
+        "The Nolo Browser Connector is online, but this CLI cannot see a connector checkout, so `nolo chrome " +
         "install` / manifest checks are unavailable here. Set NOLO_CHROME_CONNECTOR_ROOT (or run the " +
         "CLI from a repo checkout) to enable them."
       );
@@ -312,7 +360,7 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
     );
   }
   if (!report.nativeHost.installed || !report.token.present) {
-    return "nolo chrome install";
+    return installCmd;
   }
   if (!report.nativeHost.wrapperPathMatches || !report.nativeHost.allowedOriginMatches) {
     const installedWrapperPath = report.nativeHost.installedWrapperPath;
@@ -328,25 +376,26 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
       return (
         `Native host is installed for a different checkout (${installedWrapperPath}); this CLI is ` +
         `looking at ${report.connectorRoot}. Run \`nolo chrome status\` from the checkout that ` +
-        "installed it, or run `nolo chrome install` from here only if Chrome should switch to this one."
+        `installed it, or run \`${installCmd}\` from here only if ${browserText} should switch to this one.`
       );
     }
     return (
-      "nolo chrome install (the installed manifest does not point at this checkout's wrapper / " +
-      "extension id, which Chrome silently ignores)"
+      `${installCmd} (the installed manifest does not point at this checkout's wrapper / ` +
+      `extension id, which ${browserText} silently ignores)`
     );
   }
   if (!report.rpc.online) {
     return (
-      `Load the unpacked extension from ${report.extension.path} in chrome://extensions ` +
-      "(Developer mode), or install the Nolo Browser Connector from https://nolo.chat/downloads " +
-      "(Chrome or Firefox), then rerun `nolo chrome status`."
+      `Load the unpacked extension from ${report.extension.path} in chrome://extensions (Chrome) ` +
+      "or about:debugging#/runtime/this-firefox (Firefox), or install the Nolo Browser Connector " +
+      "from https://nolo.chat/downloads, then rerun `nolo chrome status`."
     );
   }
-  if (report.rpc.extensionId && report.rpc.extensionId !== report.extension.expectedId) {
+  if (report.rpc.extensionId && report.rpc.browser === null) {
     return (
-      `The connected extension (${report.rpc.extensionId}) is not the connector at ` +
-      `${report.extension.path}; remove the other copy and rerun \`nolo chrome status\`.`
+      `The connected extension (${report.rpc.extensionId}) is not a recognized Nolo Browser ` +
+      "Connector build; reload it (`nolo chrome reload`) or remove the other copy, then rerun " +
+      "`nolo chrome status`."
     );
   }
   if (report.rpc.protocolVersion !== report.rpc.expectedProtocolVersion) {
@@ -361,7 +410,7 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
       "if that persists, the checkout's extension is older than the CLI expects."
     );
   }
-  return "Chrome connector is online: chrome_* tools execute against this Chrome profile.";
+  return `The Nolo Browser Connector is online (${connectedLabel}): connector tools execute against this ${connectedLabel} profile.`;
 }
 
 export async function buildChromeConnectorStatus(
@@ -402,6 +451,7 @@ export async function buildChromeConnectorStatus(
       installedWrapperPath: null,
       wrapperPathMatches: false,
       allowedOriginMatches: false,
+      browser: null,
     },
     token: { path: null, present: false },
     rpc: {
@@ -409,6 +459,7 @@ export async function buildChromeConnectorStatus(
       extensionId: null,
       protocolVersion: null,
       features: [],
+      browser: null,
       missingFeatures: [...FULL_SUPPORT_CHROME_FEATURES],
       expectedProtocolVersion: NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION,
     },
@@ -423,25 +474,63 @@ export async function buildChromeConnectorStatus(
   report.rpc.extensionId = probe.extensionId;
   report.rpc.protocolVersion = probe.protocolVersion;
   report.rpc.features = probe.features;
-  report.rpc.missingFeatures = FULL_SUPPORT_CHROME_FEATURES.filter(
+  report.rpc.browser = probe.online
+    ? (resolveConnectorBrowser(probe.extensionId) ??
+       (probe.extensionId === expectedId ? "chrome" : null))
+    : null;
+  report.rpc.missingFeatures = expectedFeaturesForBrowser(report.rpc.browser).filter(
     (feature) => !probe.features.includes(feature),
   );
   if (!probe.online) report.rpc.error = probe.error;
 
   if (!connectorRoot) {
     if (rootError) report.connectorRootError = rootError;
+    report.nativeHost.browser = report.rpc.browser;
     report.ok =
       report.rpc.online &&
-      probe.extensionId === expectedId &&
+      report.rpc.browser !== null &&
       probe.protocolVersion === NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION &&
       report.rpc.missingFeatures.length === 0;
     report.nextStep = resolveStatusNextStep(report);
     return report;
   }
 
+  // Follow the connected build: a live Firefox session is checked against the Mozilla manifest
+  // (its `allowed_extensions` gecko id). With nothing connected, prefer whichever manifest exists
+  // so a Firefox-only setup is not told to install a Chrome manifest it does not need.
+  let manifestBrowser: ConnectorBrowser =
+    report.rpc.browser === "firefox" ? "firefox" : "chrome";
+  if (!report.rpc.browser) {
+    try {
+      const chromeManifestPath = resolveNativeHostInstallPaths({
+        home,
+        connectorRoot,
+        platform,
+        browser: "chrome",
+      }).nativeManifestPath;
+      const firefoxManifestPath = resolveNativeHostInstallPaths({
+        home,
+        connectorRoot,
+        platform,
+        browser: "firefox",
+      }).nativeManifestPath;
+      if (!existsSync(chromeManifestPath) && existsSync(firefoxManifestPath)) {
+        manifestBrowser = "firefox";
+      }
+    } catch {
+      // Unsupported platform: keep the Chrome default; the paths resolution below reports it.
+    }
+  }
+  report.nativeHost.browser = manifestBrowser;
+
   let paths: ReturnType<typeof resolveNativeHostInstallPaths> | null = null;
   try {
-    paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform });
+    paths = resolveNativeHostInstallPaths({
+      home,
+      connectorRoot,
+      platform,
+      browser: manifestBrowser,
+    });
   } catch (error) {
     // An unsupported platform must produce a status answer, not a crash.
     report.nativeHost.supported = false;
@@ -462,10 +551,12 @@ export async function buildChromeConnectorStatus(
     typeof installedManifest?.path === "string" ? installedManifest.path : null;
   report.nativeHost.wrapperPathMatches =
     report.nativeHost.installedWrapperPath === paths.wrapperPath;
-  const expectedOrigin = `chrome-extension://${expectedId}/`;
   report.nativeHost.allowedOriginMatches =
-    Array.isArray(installedManifest?.allowed_origins) &&
-    installedManifest.allowed_origins.includes(expectedOrigin);
+    manifestBrowser === "firefox"
+      ? Array.isArray(installedManifest?.allowed_extensions) &&
+        installedManifest.allowed_extensions.includes(NOLO_FIREFOX_CONNECTOR_EXTENSION_ID)
+      : Array.isArray(installedManifest?.allowed_origins) &&
+        installedManifest.allowed_origins.includes(`chrome-extension://${expectedId}/`);
 
   if (existsSync(paths.tokenPath)) {
     try {
@@ -482,7 +573,7 @@ export async function buildChromeConnectorStatus(
     report.nativeHost.allowedOriginMatches &&
     report.token.present &&
     probe.online &&
-    probe.extensionId === expectedId &&
+    report.rpc.browser !== null &&
     probe.protocolVersion === NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION &&
     report.rpc.missingFeatures.length === 0;
   report.nextStep = resolveStatusNextStep(report);
@@ -494,7 +585,7 @@ function yesNo(value: boolean) {
 }
 
 export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport) {
-  const lines: string[] = ["Nolo Chrome connector"];
+  const lines: string[] = ["Nolo Browser Connector"];
   lines.push(
     `  connector source : ${report.connectorRoot ?? "(not found)"}`,
   );
@@ -522,7 +613,9 @@ export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport)
   const rpc = report.rpc;
   if (rpc.online) {
     lines.push(
-      `  RPC              : online  extension ${rpc.extensionId ?? "unknown"}  ` +
+      `  RPC              : online  browser ${rpc.browser ?? "unrecognized"}  extension ${
+        rpc.extensionId ?? "unknown"
+      }  ` +
         `protocolVersion ${rpc.protocolVersion ?? "unknown"}  features ${
           rpc.features.length > 0 ? rpc.features.join(", ") : "(none)"
         }`,
@@ -556,9 +649,32 @@ export async function runChromeStatusCommand(
   return report.ok ? 0 : 1;
 }
 
+/** `--browser chrome|firefox`（同时接受 `--browser=firefox` 写法）；默认 Chrome，非法值返回 null。 */
+function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
+  const equalsForm = args.find((arg) => arg.startsWith("--browser="));
+  const index = args.indexOf("--browser");
+  const raw =
+    equalsForm !== undefined
+      ? equalsForm.slice("--browser=".length)
+      : index >= 0
+        ? args[index + 1]
+        : undefined;
+  if (raw === undefined) return "chrome";
+  const value = raw.trim();
+  if (value === "chrome" || value === "firefox") return value;
+  return null;
+}
+
 export async function runChromeInstallCommand(args: string[], deps: ChromeCommandDeps = {}) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write(
+      '[nolo] Chrome native host install failed: --browser must be "chrome" or "firefox".\n',
+    );
+    return 1;
+  }
   const install = deps.installNativeHost ??
     (installNativeHostManifest as (options?: InstallOptions) => InstallResult);
 
@@ -590,6 +706,7 @@ export async function runChromeInstallCommand(args: string[], deps: ChromeComman
     result = install({
       home: deps.home ?? env.HOME ?? "",
       connectorRoot,
+      browser,
       ...(deps.platform ? { platform: deps.platform } : {}),
       ...(deps.nodePath ? { nodePath: deps.nodePath } : {}),
     });
@@ -603,14 +720,17 @@ export async function runChromeInstallCommand(args: string[], deps: ChromeComman
   } else {
     output.write(
       [
-        "Nolo Chrome connector native host installed.",
+        `Nolo Browser Connector native host installed (${browser}).`,
         `  manifest : ${result.nativeManifestPath}`,
         `  wrapper  : ${result.wrapperPath} -> ${result.nodePath}`,
         `  token    : ${result.tokenPath} (an existing token is kept, so reruns are idempotent)`,
         `  extension: ${result.extensionId}`,
         `Next step: load the unpacked extension from ${resolve(connectorRoot, "extension")} in ` +
-          "chrome://extensions (Developer mode), or install the Nolo Browser Connector from " +
-          "https://nolo.chat/downloads (Chrome or Firefox), then run `nolo chrome status`.",
+          (browser === "firefox"
+            ? "about:debugging#/runtime/this-firefox, or install the signed Nolo Browser Connector " +
+              "add-on from https://nolo.chat/downloads, then run `nolo chrome status`."
+            : "chrome://extensions (Developer mode), or install the Nolo Browser Connector from " +
+              "https://nolo.chat/downloads (Chrome or Firefox), then run `nolo chrome status`."),
         "",
       ].join("\n"),
     );

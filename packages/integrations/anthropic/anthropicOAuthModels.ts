@@ -62,6 +62,13 @@ export const anthropicOAuthModels: Model[] = [
   oauthModel({ name: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", contextWindow: 200_000, thinkingMode: "extended" }),
 ];
 
+/** Published max output for a table model; undefined when not published (4.x). */
+export function anthropicOAuthModelMaxOutputTokens(model: string | undefined): number | undefined {
+  if (!model) return undefined;
+  const found = anthropicOAuthModels.find((m) => m.name === model);
+  return typeof found?.maxOutputTokens === "number" ? found.maxOutputTokens : undefined;
+}
+
 const OAUTH_MODEL_THINKING_MODE = new Map(
   anthropicOAuthModels.map((m) => [m.name, m.thinkingMode]),
 );

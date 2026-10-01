@@ -21,16 +21,19 @@ export const EMPTY_ASSISTANT_FALLBACK_MESSAGE =
   "模型连续返回空消息，当前任务未完成。请重试当前步骤，或给出更具体的修改范围。";
 
 /**
- * length 截断兜底文案。与服务端 loopMessageExtract.LENGTH_TRUNCATED_FALLBACK_MESSAGE 逐字一致：
- * 模型因输出长度上限被截断（finish_reason === "length"）时，不再重试，直接以此文案结束，
- * 给用户一个明确诊断，而不是空串。
+ * length 截断兜底文案。服务端 loop 经 agent-runtime 复用本常量（loopMessageExtract.ts）：
+ * finish_reason === "length" 时不再重试，直接以此文案结束，给用户一个明确诊断，而不是空串。
+ *
+ * "length" 有两种上游成因，文案必须同时覆盖：输出撞 max_tokens，以及输入上下文
+ * 超出模型窗口（Anthropic model_context_window_exceeded 也映射为 length）。
+ * 只提「提高输出上限」会把上下文超窗的排查方向带偏。
  */
 export const LENGTH_TRUNCATED_FALLBACK_MESSAGE =
-  "输出达到长度上限被截断，建议缩短任务或提高输出上限。";
+  "输出达到长度上限被截断，或上下文已超出模型窗口。建议缩短任务、压缩或新开对话，或提高输出上限。";
 
 /**
- * 上游流被中途切断（而不是模型真的没话说）时的文案。与服务端
- * loopMessageExtract.STREAM_TRUNCATED_FALLBACK_MESSAGE 逐字一致。
+ * 上游流被中途切断（而不是模型真的没话说）时的文案。服务端 loop 经
+ * agent-runtime 复用本常量（loopMessageExtract.ts）。
  *
  * 判据是「完全没有 finish_reason」：健康的 OpenAI 兼容流最后一个 chunk 必带它，
  * 拿不到就说明流在收尾前就断了。实测过两种成因：代理侧把整个 fetch 连同正在

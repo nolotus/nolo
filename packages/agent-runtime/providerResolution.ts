@@ -298,16 +298,49 @@ export function resolveProviderAuthHeaderName(args: {
   return "Authorization";
 }
 
+const OPENCODE_GO_ENDPOINT_RE = /^https?:\/\/opencode\.ai\/zen\/go\//i;
+export const OPENCODE_SESSION_HEADER = "x-opencode-session";
+export const OPENCODE_USER_AGENT = "nolo-agent/1.0";
+// Last-resort stable id (per process) when the caller has no dialog/agent id.
+// Never derived from the apiKey.
+const PROCESS_FALLBACK_SESSION_ID = `nolo-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+
+export function isOpenCodeGoEndpoint(endpoint: string | undefined | null): boolean {
+  return typeof endpoint === "string" && OPENCODE_GO_ENDPOINT_RE.test(endpoint.trim());
+}
+
+/**
+ * OpenCode Go requires a stable `x-opencode-session` header (400 MissingSessionID
+ * otherwise) and a non-generic User-Agent. Returns {} for every other endpoint.
+ * `sessionId` should be the most stable conversation id (dialogId, else agent key).
+ */
+export function buildProviderSessionHeaders(args: {
+  endpoint: string;
+  sessionId?: string | null;
+}): Record<string, string> {
+  if (!isOpenCodeGoEndpoint(args.endpoint)) return {};
+  return {
+    [OPENCODE_SESSION_HEADER]: args.sessionId?.trim() || PROCESS_FALLBACK_SESSION_ID,
+    "User-Agent": OPENCODE_USER_AGENT,
+  };
+}
+
 export function buildProviderAuthHeaders(args: {
   endpoint: string;
   apiKey: string;
   apiKeyHeader?: string;
+  /** Stable conversation id; only used by endpoints that require it (OpenCode Go). */
+  sessionId?: string | null;
 }): Record<string, string> {
-  if (!args.apiKey) return {};
+  const sessionHeaders = buildProviderSessionHeaders(args);
+  if (!args.apiKey) return sessionHeaders;
   const headerName = resolveProviderAuthHeaderName(args);
-  return headerName.toLowerCase() === "authorization"
-    ? { Authorization: `Bearer ${args.apiKey}` }
-    : { [headerName]: args.apiKey };
+  return {
+    ...sessionHeaders,
+    ...(headerName.toLowerCase() === "authorization"
+      ? { Authorization: `Bearer ${args.apiKey}` }
+      : { [headerName]: args.apiKey }),
+  };
 }
 
 export async function buildProviderExecutionPlan(args: {

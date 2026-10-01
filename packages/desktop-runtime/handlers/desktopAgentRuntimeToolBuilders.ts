@@ -9,7 +9,12 @@ import { parseNoloWorkspaceToolArguments } from "agent-runtime/noloWorkspaceTool
 import type { LocalAgentTurnResult } from "agent-runtime/localLoop";
 import type { DesktopAgentRuntimeTurnInput } from "./desktopAgentRuntimeTurnService";
 import type { DesktopAgentRuntimeEnv } from "./desktopAgentRuntimeHostFacts";
-import { CHROME_CONNECTOR_TOOL_NAMES, type ChromeConnectorToolName } from "ai/tools/chromeConnectorTools";
+import {
+  CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES,
+  canonicalizeChromeConnectorToolNames,
+  type ChromeConnectorToolName,
+  type ChromeConnectorLegacyToolName,
+} from "ai/tools/chromeConnectorTools";
 import { buildCodeWorkSkillPrompt, CODE_PLANNER_COMPILED_EFFECTIVE_TOOLS } from "ai/skills/codePlannerSkills";
 import { buildLocalWorkspaceToolset, buildLocalWorkspacePolicyToolNames, buildLocalWorkspaceOpenAiTools } from "agent-runtime/localWorkspaceTools";
 import { SHELL_TOOL_NAMES } from "agent-runtime/localWorkspaceToolDefs";
@@ -81,7 +86,7 @@ export function addDesktopDefaultWebTools(
   return [...new Set([...toolNames, ...DESKTOP_DEFAULT_WEB_TOOL_NAMES])];
 }
 export const DESKTOP_SERVER_START_AGENT_RUN_TOOL_NAME = "startAgentRun" as const;
-export const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_TOOL_NAMES);
+export const DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES);
 export const BUILTIN_NOLO_AGENT_ID = "01NOLOAPPBLD000000019KCKT0";
 export const QUICK_CHAT_DEFAULT_AGENT_KEYS = new Set<string>([PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY]);
 
@@ -385,9 +390,8 @@ export function buildDesktopLocalPolicyToolNames(args: {
 }
 
 export function filterDesktopChromeConnectorToolNames(toolNames?: string[]) {
-  return (toolNames ?? []).filter((name): name is ChromeConnectorToolName =>
-    DESKTOP_CHROME_CONNECTOR_TOOL_NAME_SET.has(name)
-  );
+  // Declared legacy `chrome_*` names project to canonical `browser_*`.
+  return canonicalizeChromeConnectorToolNames(toolNames);
 }
 
 export function buildDesktopChromeConnectorOpenAiTools(args: {
@@ -429,14 +433,14 @@ export function buildDesktopChromeConnectorToolExecutors(args?: {
     client: args?.client ?? createChromeConnectorClient(),
   });
   return Object.fromEntries(
-    CHROME_CONNECTOR_TOOL_NAMES.map((toolName) => [
+    CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.map((toolName) => [
       toolName,
       (call: AgentRuntimeToolCallInput) => executeChromeConnectorTool({
         client,
         call,
       }),
     ]),
-  ) as Record<ChromeConnectorToolName, (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>>;
+  ) as Record<ChromeConnectorToolName | ChromeConnectorLegacyToolName, (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>>;
 }
 
 export type DesktopServerPlatformToolContext = {

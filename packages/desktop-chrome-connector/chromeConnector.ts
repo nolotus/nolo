@@ -78,6 +78,18 @@ type NativeHostRouterDeps = {
 };
 
 const CHROME_TOOL_ACTIONS: Record<string, string> = {
+  browser_list_tabs: "list_tabs",
+  browser_open_tab: "open_tab",
+  browser_close_tab: "close_tab",
+  browser_read_page: "read_page",
+  browser_click_element: "click",
+  browser_type: "type",
+  browser_press: "press",
+  browser_scroll: "scroll",
+  browser_screenshot: "screenshot",
+  browser_read_console: "read_console",
+  browser_read_network: "read_network",
+  // Legacy aliases (kept for existing agents/tests).
   chrome_list_tabs: "list_tabs",
   chrome_open_tab: "open_tab",
   chrome_close_tab: "close_tab",
@@ -93,6 +105,15 @@ const CHROME_TOOL_ACTIONS: Record<string, string> = {
   chrome_upload_file: "set_files",
   chrome_upload: "set_files",
 };
+
+// Mirror the upload trio (outside the 11 exposed tool names) into the browser_ family from its
+// legacy entries, so the two halves cannot drift.
+for (const legacyName of ["chrome_set_files", "chrome_upload_file", "chrome_upload"]) {
+  const action = CHROME_TOOL_ACTIONS[legacyName];
+  if (action) {
+    CHROME_TOOL_ACTIONS[`browser_${legacyName.slice("chrome_".length)}`] = action;
+  }
+}
 
 function createConnectorError(code: string, message: string, details?: unknown): ChromeConnectorError {
   const error = new Error(message) as ChromeConnectorError;
@@ -179,7 +200,7 @@ export function validateChromeConnectorPayload(
     if (!tabId) {
       throw createConnectorError(
         "TAB_ID_REQUIRED",
-        `Provide the tabId from chrome_list_tabs before calling ${action}.`,
+        `Provide the tabId from browser_list_tabs before calling ${action}.`,
       );
     }
     if (!TARGET_REQUIRED_ACTIONS.has(action)) return;
@@ -196,7 +217,7 @@ export function validateChromeConnectorPayload(
   if (!elementRef && !selector) {
     throw createConnectorError(
       "ELEMENT_TARGET_REQUIRED",
-      "Provide elementRef from chrome_read_page or a CSS selector.",
+      "Provide elementRef from browser_read_page or a CSS selector.",
     );
   }
   if (action === "set_files") {
@@ -413,7 +434,9 @@ export async function executeChromeConnectorTool(args: {
   }
 
   try {
-    const payload = parseArguments(args.call.arguments);
+    // `target` is reserved for future multi-provider targeting; ignored today.
+    const { target: _ignoredTarget, ...payload } = parseArguments(args.call.arguments) as Record<string, unknown>;
+    void _ignoredTarget;
     validateChromeConnectorPayload(action, payload);
     const result = await (args.client ?? createChromeConnectorClient()).request(action, payload);
     return {

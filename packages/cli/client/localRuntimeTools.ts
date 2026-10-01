@@ -29,8 +29,8 @@ import {
 import { resolveAgentRequiredPackIds } from "../../ai/tools/agentSkillConfig";
 import { prepareTools } from "../../ai/tools/prepareTools";
 import {
-  CHROME_CONNECTOR_TOOL_NAMES,
-  type ChromeConnectorToolName,
+  CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES,
+  canonicalizeChromeConnectorToolNames,
 } from "../../ai/tools/chromeConnectorTools";
 import {
   filterToolNamesForRunKind,
@@ -58,14 +58,13 @@ import {
 import { resolveRequestedRuntimeToolNames } from "../agentRuntimeLocal";
 
 const CLI_CHROME_CONNECTOR_TOOL_NAME_SET = new Set<string>(
-  CHROME_CONNECTOR_TOOL_NAMES,
+  CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES,
 );
 
 /** Declared `chrome_*` names (agent manifest / run surface), order-preserving. */
 export function filterCliChromeConnectorToolNames(toolNames?: string[]) {
-  return (toolNames ?? []).filter((name): name is ChromeConnectorToolName =>
-    CLI_CHROME_CONNECTOR_TOOL_NAME_SET.has(name),
-  );
+  // Declared legacy `chrome_*` names project to canonical `browser_*`.
+  return canonicalizeChromeConnectorToolNames(toolNames);
 }
 
 /**

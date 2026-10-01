@@ -68,7 +68,7 @@ const buildProxyPayload = (
 };
 
 const fetchDirectly = async (params: FetchParams): Promise<Response> => {
-  const { api, agentConfig, bodyData, signal, currentServer, token } = params;
+  const { api, agentConfig, bodyData, signal, currentServer, token, dialogId } = params;
   try {
     const apiKey = await resolveDirectRequestApiKey(agentConfig, {
       syncFetcher: currentServer && token
@@ -91,6 +91,7 @@ const fetchDirectly = async (params: FetchParams): Promise<Response> => {
       endpoint: api,
       apiKey: apiKey ?? "",
       apiKeyHeader: (agentConfig as any).apiKeyHeader,
+      sessionId: dialogId || (agentConfig as any).dbKey || (agentConfig as any).key,
     });
     return await fetch(api, {
       method: "POST",

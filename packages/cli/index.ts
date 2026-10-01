@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { initializeDiagnostics, detectMode } from "./diagnostics";
 import { isCompiledBinary } from "./cliEnvHelpers";
 import { readPackageInfo } from "./updateCommands";
-import { consumeWindowsUpdateStartupNotice } from "./windowsSelfUpdate";
+import {
+  consumeWindowsUpdateStartupNotice,
+  getWindowsUpdateStatus,
+} from "./windowsSelfUpdate";
 
 // —— 阶段 0 / Slice 1：诊断先行 ——
 // 在任何应用模块顶层代码可能缓存 console 引用之前，完成模式判定 + console bridge。
@@ -14,6 +17,26 @@ const diagnostics = initializeDiagnostics(detectMode(cliArgs, process.env), proc
 const logger = diagnostics.logger;
 
 if (process.platform === "win32") {
+  // `nolo update status` is a lightweight diagnostic that must answer even
+  // while an update is blocking normal startup. Resolve it before the startup
+  // guard and without importing any application/DB modules.
+  if (cliArgs[0] === "update" && cliArgs[1] === "status") {
+    const report = getWindowsUpdateStatus(process.env, {
+      currentVersion: readPackageInfo().version,
+    });
+    process.stdout.write(`${report.text}\n`);
+    process.exit(0);
+  }
+
+  // `nolo -v` / `nolo --version` are the primary way to verify an update's
+  // result. They must answer even while an update blocks normal startup, so
+  // resolve them before the guard with the same output the dispatcher prints.
+  if (cliArgs.length === 1 && (cliArgs[0] === "-v" || cliArgs[0] === "--version")) {
+    const info = readPackageInfo();
+    process.stdout.write(`${info.name} ${info.version}\n`);
+    process.exit(0);
+  }
+
   const updateNotice = consumeWindowsUpdateStartupNotice(process.env, {
     ownerUpdateId: process.env.NOLO_UPDATE_OWNER_ID,
   });

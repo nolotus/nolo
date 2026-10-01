@@ -7,10 +7,19 @@ import {
 } from "agent-runtime/emptyAssistantRepair";
 import type { Message } from "./types";
 
+/**
+ * 已落盘的旧版 length 兜底文案（2026-07-27 起写入，2026-09-29 改为同时提示
+ * 上下文超窗）。历史消息是逐字匹配的，文案变更后必须保留旧字面量，否则存量
+ * 截断轮的思考内容不再被归一化展示。
+ */
+const LEGACY_LENGTH_TRUNCATED_FALLBACK_MESSAGE =
+  "输出达到长度上限被截断，建议缩短任务或提高输出上限。";
+
 export const HISTORICAL_REASONING_FALLBACK_MESSAGES: ReadonlySet<string> =
   new Set([
     EMPTY_ASSISTANT_FALLBACK_MESSAGE,
     LENGTH_TRUNCATED_FALLBACK_MESSAGE,
+    LEGACY_LENGTH_TRUNCATED_FALLBACK_MESSAGE,
     STREAM_TRUNCATED_FALLBACK_MESSAGE,
     REPETITION_LOOP_FALLBACK_MESSAGE,
     STAGNANT_TOOL_CALLS_FALLBACK_MESSAGE,

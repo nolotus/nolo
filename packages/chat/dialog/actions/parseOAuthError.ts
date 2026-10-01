@@ -18,6 +18,7 @@ import {
   CONTEXT_TOO_LARGE_ACTIONS,
   isContextOverflowText,
 } from "../../../ai/chat/parseApiError";
+import { PLATFORM_LLM_BUSY_USER_MESSAGE } from "../../../ai/llm/kimi";
 
 export type { SendErrorAction, SendErrorKind, SendErrorStage };
 
@@ -193,6 +194,19 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
 
   const stage = resolveErrorStage(fullErrorText);
 
+  // 平台繁忙（provider=nolo 容量/传输故障的用户面文案）。判定必须放在链路最前：
+  // detail 里常带 "nolo TimeoutError" / "nolo HTTP 503" 字样，若让 timeout /
+  // network 分支先命中，用户看到的就是「请求超时」而不是平台算力紧张，重试
+  // 预期也被带偏。web 前台 turn 拿到的错误往往只剩文案本体（code/detail 在
+  // SSE 持久化链路上被剥掉），所以文案与 code 两者都认。
+  const isPlatformBusy =
+    fullErrorText.includes(PLATFORM_LLM_BUSY_USER_MESSAGE) ||
+    /PLATFORM_LLM_BUSY/i.test(fullErrorText);
+  // 上游根因片段（CLI/TUI 路径会带）："… (PLATFORM_LLM_BUSY): nolo HTTP 503"。
+  const busyUpstreamDetail = fullErrorText.match(
+    /nolo\s+(?:HTTP\s*\d{3}|[A-Za-z]+Error)/,
+  )?.[0];
+
   // 判断错误分类 (kind) 与可重试属性 (retryable)
   let kind: SendErrorKind = "unknown";
   let retryable = true; // 默认允许重试（未知网络/普通错误给用户手动重试路径）
@@ -219,6 +233,10 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
     kind = "context_overflow";
     retryable = true;
     contextActions = [...CONTEXT_OVERFLOW_ACTIONS];
+  } else if (isPlatformBusy) {
+    // 平台繁忙归 server（可重试）：瞬时容量问题，不是用户网络、也不是认证。
+    kind = "server";
+    retryable = true;
   } else if (statusCode === 429) {
     kind = "rate_limit";
     retryable = true;
@@ -297,7 +315,11 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
         parts.push(`认证或权限校验失败${status ? ` (HTTP ${status})` : ""}`);
         break;
       case "server":
-        parts.push(`服务暂时不可用${status ? ` (HTTP ${status})` : ""}`);
+        parts.push(
+          isPlatformBusy
+            ? `平台服务繁忙${busyUpstreamDetail ? `（上游 ${busyUpstreamDetail}）` : ""}`
+            : `服务暂时不可用${status ? ` (HTTP ${status})` : ""}`,
+        );
         break;
       case "context_overflow":
         parts.push(`上下文超出模型窗口${status ? ` (HTTP ${status})` : ""}`);
@@ -359,7 +381,9 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
         actionHint = "请检查账号登录状态或 API 密钥配置";
         break;
       case "server":
-        actionHint = "服务端发生瞬时异常，点击重试通常可恢复";
+        actionHint = isPlatformBusy
+          ? "平台算力暂时紧张，稍候点击重试通常可恢复"
+          : "服务端发生瞬时异常，点击重试通常可恢复";
         break;
       case "unknown":
       default:

@@ -1,4 +1,8 @@
+import { CHROME_CONNECTOR_LEGACY_TOOL_ALIASES } from "../ai/tools/chromeConnectorTools";
+
 const LEGACY_TOOL_NAME_ALIASES: Record<string, string> = {
+  // Nolo Browser Connector: legacy chrome_* → canonical browser_*
+  ...CHROME_CONNECTOR_LEGACY_TOOL_ALIASES,
   createPage: "createDoc",
   updatePage: "updateDoc",
   update_page: "updateDoc",

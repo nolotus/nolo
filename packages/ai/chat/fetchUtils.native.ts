@@ -136,6 +136,7 @@ export const performSSEFetchRequest = (params: SSEFetchParams): (() => void) => 
                         endpoint: api,
                         apiKey: directApiKey ?? "",
                         apiKeyHeader: (agentConfig as any).apiKeyHeader,
+                        sessionId: dialogId || (agentConfig as any).dbKey || (agentConfig as any).key,
                     }),
                 );
                 requestBody = bodyData;
@@ -233,6 +234,7 @@ const fetchDirectly = async ({
     agentConfig,
     bodyData,
     signal,
+    dialogId,
 }: Omit<FetchParams, "currentServer" | "token">): Promise<Response> => {
     try {
         const apiKey = await resolveDirectRequestApiKey(agentConfig);
@@ -240,6 +242,7 @@ const fetchDirectly = async ({
             endpoint: api,
             apiKey: apiKey ?? "",
             apiKeyHeader: (agentConfig as any).apiKeyHeader,
+            sessionId: dialogId || (agentConfig as any).dbKey || (agentConfig as any).key,
         });
         return await fetch(api, {
             method: "POST",

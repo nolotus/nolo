@@ -3,6 +3,7 @@ import {
   SYSTEM_AGENT_CAPABILITY_IDS,
 } from "./agentCapabilities";
 import { buildCodeWorkDiscipline } from "./codeWorkDiscipline";
+import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES } from "./chromeConnectorTools";
 
 /**
  * 能力分级定义 (Capability Tiers)
@@ -561,7 +562,8 @@ function isWebSearchTool(name: string): boolean {
 }
 
 function isBrowserTool(name: string): boolean {
-  return name.startsWith("browser_");
+  // Connector tools (browser_list_tabs, ...) share the prefix but are not Playwright session tools.
+  return name.startsWith("browser_") && !CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.includes(name);
 }
 
 /**

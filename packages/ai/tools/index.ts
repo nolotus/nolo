@@ -226,6 +226,7 @@ import {
 } from "./browserTools/readContent";
 import {
   chromeConnectorToolSchemas,
+  CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES,
   chromeConnectorUnavailableFunc,
   getChromeConnectorToolBehavior,
   getChromeConnectorToolDefaultConsent,
@@ -1885,7 +1886,7 @@ const baseToolDefinitions: ToolDefinition[] = [
       behavior: getChromeConnectorToolBehavior(name),
       capability: "browser_automation",
       riskLevel:
-        name === "chrome_click" || name === "chrome_type" ? "medium" : "low",
+        name === "browser_click_element" || name === "browser_type" ? "medium" : "low",
       costLevel: "low",
       defaultConsent: getChromeConnectorToolDefaultConsent(name),
       cancelable: true,
@@ -2352,7 +2353,8 @@ const ALL_TOOL_FUNCTION_NAMES: string[] = toolDefinitions
 const AGENT_AVAILABLE_TOOL_NAMES = ALL_TOOL_FUNCTION_NAMES.filter(
   (name) =>
     name !== "toolquery" &&
-    !name.startsWith("browser_") &&
+    (!name.startsWith("browser_") ||
+      (CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES as readonly string[]).includes(name)) &&
     name !== "exa_search"
 );
 

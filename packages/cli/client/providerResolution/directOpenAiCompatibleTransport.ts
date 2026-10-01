@@ -111,6 +111,9 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
             loopbackRequest,
           }),
         stream,
+        sessionId:
+          asOptionalTrimmedString(options?.dialogId) ??
+          asOptionalTrimmedString(agentConfig.key),
         onTextDelta: options?.onTextDelta,
         onReasoningDelta: options?.onReasoningDelta,
         onHttpResult: ({ status, body }) =>

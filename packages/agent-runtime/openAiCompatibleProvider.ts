@@ -98,6 +98,8 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   messages: AgentRuntimeChatMessage[];
   tools?: OpenAiCompatibleTool[];
   stream?: boolean;
+  /** Stable conversation id (dialogId, else agent key); sent as x-opencode-session to OpenCode Go only. */
+  sessionId?: string;
 }) {
   const isResponses = resolveOpenAiCompatibleWire(args.providerConfig) === "responses";
   const shouldStripReasoning = shouldStripReasoningContentForOutbound(
@@ -158,6 +160,7 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
       endpoint,
       apiKey: args.providerConfig.apiKey,
       apiKeyHeader: args.providerConfig.apiKeyHeader,
+      sessionId: args.sessionId,
     }),
   };
 
@@ -313,6 +316,8 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
   signal?: AbortSignal;
+  /** Stable conversation id (dialogId, else agent key) for endpoints requiring a session header. */
+  sessionId?: string;
   /**
    * 每次请求前解析 bearer。OAuth provider 的 access token 可能短于
    * 一次工具循环的时长，不能复用 provider 创建时捕获的 token。
@@ -343,6 +348,7 @@ export async function executeOpenAiCompatibleChatCompletion(args: {
       messages: args.messages,
       tools: args.tools,
       stream: args.stream,
+      sessionId: args.sessionId,
     });
     return args.fetchImpl(request.url, {
       ...request.init,

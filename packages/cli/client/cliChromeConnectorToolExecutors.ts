@@ -16,8 +16,9 @@ import type {
   AgentRuntimeToolResult,
 } from "../../agent-runtime";
 import {
-  CHROME_CONNECTOR_TOOL_NAMES,
+  CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES,
   type ChromeConnectorToolName,
+  type ChromeConnectorLegacyToolName,
 } from "../../ai/tools/chromeConnectorTools";
 import {
   createChromeConnectorClient,
@@ -40,13 +41,13 @@ export function buildCliChromeConnectorToolExecutors(args?: {
     client: args?.client ?? createChromeConnectorClient(),
   });
   return Object.fromEntries(
-    CHROME_CONNECTOR_TOOL_NAMES.map((toolName) => [
+    CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.map((toolName) => [
       toolName,
       (call: AgentRuntimeToolCallInput) =>
         executeChromeConnectorTool({ client, call }),
     ]),
   ) as Record<
-    ChromeConnectorToolName,
+    ChromeConnectorToolName | ChromeConnectorLegacyToolName,
     (call: AgentRuntimeToolCallInput) => Promise<AgentRuntimeToolResult>
   >;
 }
