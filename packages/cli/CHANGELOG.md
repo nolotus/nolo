@@ -1,4 +1,13 @@
 
+## 0.141.0-alpha.2
+
+## 0.141.0-alpha.2 (2026-10-01)
+
+### Bug Fixes
+
+* **oauth:** treat OpenAI's invalid_refresh_token as a permanent refresh failure ([5cb63b1](https://github.com/nolotus/bun-nolo/commit/5cb63b104dfe55ab0d1249110bfc7ab47ccb2bdc))
+
+
 ## 0.141.0-alpha.1
 
 ## 0.141.0-alpha.1 (2026-10-01)

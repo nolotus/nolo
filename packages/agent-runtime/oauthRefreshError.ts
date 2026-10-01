@@ -8,6 +8,7 @@
 
 export type OAuthRefreshErrorCode =
   | "invalid_grant"
+  | "invalid_refresh_token"
   | "refresh_token_reused"
   | "invalid_client"
   | "unauthorized"
@@ -19,10 +20,20 @@ export type OAuthRefreshErrorCode =
 
 /** 永久失败：重试没有意义，必须重新授权（重新 sync 会清掉标记）。 */
 export const PERMANENT_REFRESH_CODES: ReadonlySet<OAuthRefreshErrorCode> =
-  new Set(["invalid_grant", "refresh_token_reused", "invalid_client"]);
+  new Set([
+    "invalid_grant",
+    // OpenAI 令牌端点对失效/不存在的 refresh token 返回 401
+    // {"error":{"code":"invalid_refresh_token",...}}（2026-10-01 用必然无效的
+    // token 实测）。线上 chatgpt 凭据正是因为没认出它，被当成临时的
+    // "unauthorized"、每 15 分钟重试一次且永远不提示重新授权。
+    "invalid_refresh_token",
+    "refresh_token_reused",
+    "invalid_client",
+  ]);
 
 const SAFE_MESSAGES: Record<OAuthRefreshErrorCode, string> = {
   invalid_grant: "refresh token 已失效，请重新授权",
+  invalid_refresh_token: "refresh token 已失效，请重新授权",
   refresh_token_reused: "refresh token 已被其他副本使用，请重新授权",
   invalid_client: "OAuth 客户端被拒绝，请重新授权",
   unauthorized: "上游拒绝了刷新请求（401/403）",
@@ -73,6 +84,9 @@ export function classifyOAuthRefreshHttpFailure(
 ): OAuthRefreshError {
   const raw = readErrorCode(payload)?.toLowerCase();
   if (raw === "invalid_grant") return new OAuthRefreshError("invalid_grant", { status });
+  if (raw === "invalid_refresh_token") {
+    return new OAuthRefreshError("invalid_refresh_token", { status });
+  }
   if (raw === "refresh_token_reused") {
     return new OAuthRefreshError("refresh_token_reused", { status });
   }
