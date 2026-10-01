@@ -7,6 +7,7 @@ import {
   toDiscoverySafeAgentSummary,
 } from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
+import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
   listFavoriteAgentIdsAcrossServers,
@@ -173,6 +174,25 @@ export async function runAgentListCommand(
       : agents.filter((agent) => !isAgentUnavailableNow(agent));
     if (query && typeof query === "string" && query.trim()) {
       agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
+    }
+
+    // 额度按需刷新：只在真要展示完整列表时探测（--ids 等脚本场景不付这个代价），
+    // 只探测订阅类 agent（有凭据的私有 agent）。失败静默，沿用缓存里的快照。
+    if (!idsOnly) {
+      const fresh = await refreshSubscriptionQuotas({
+        entries: agentsForOutput.map((agent) => ({
+          key: agent.privateKey,
+          ...(agent.quota ? { quota: agent.quota } : {}),
+          probeable: agent.credentialConfigured === true,
+        })),
+        env,
+        cliArgs: args,
+        fetchImpl,
+      });
+      for (const agent of agentsForOutput) {
+        const quota = fresh[agent.privateKey];
+        if (quota) agent.quota = quota;
+      }
     }
 
     if (idsOnly) {

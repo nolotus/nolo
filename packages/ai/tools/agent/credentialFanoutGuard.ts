@@ -11,9 +11,12 @@
 //   - 两个已知且相同的 credentialGroup → 同一凭证，禁止并发扇出；
 //   - 两个已知且不同的 credentialGroup → 允许并发。
 //
-// 冲突时的唯一放行口是调用方显式 allowUnknownCredential=true（工具参数
-// allowUnknownCredential / CLI --force-unknown-credential），表示调用方已
-// 自行确认风险。绝不静默放行。
+// 冲突时的放行口都必须由调用方显式给出，绝不静默放行：
+//   - allowUnknownCredential=true（未知凭证；工具参数 allowUnknownCredential /
+//     CLI --force-unknown-credential）：调用方已自行确认两侧不共用上游 key；
+//   - allowCredentialConcurrency=true（已知且相同的凭证组）：调用方确认该
+//     凭证支持并发。
+// 两个字段在每个调用链路上都必须透传（漏传 = 放行口失效，参见 CLI 执行器）。
 //
 // 本模块只做判定；活跃 run 集合的来源由各端自己提供
 // （CLI 读 ~/.nolo/runs，web 端用进程内批次注册表）。

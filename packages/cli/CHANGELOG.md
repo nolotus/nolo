@@ -1,4 +1,19 @@
 
+## 0.141.0-alpha.1
+
+## 0.141.0-alpha.1 (2026-10-01)
+
+### Features
+
+* **agent:** show 5h/weekly subscription quota in the agent page, list and read ([e586091](https://github.com/nolotus/bun-nolo/commit/e58609184f83fc9a3709e04f44bc385b05b3b721))
+* **tui:** optional run title for subagents; drop the queue count from the status line ([c20ba05](https://github.com/nolotus/bun-nolo/commit/c20ba053ddf1db4f7a0450911c3ee1127e109888))
+
+### Bug Fixes
+
+* **cli:** pass allowCredentialConcurrency through the CLI startAgentRun executor ([0115f3f](https://github.com/nolotus/bun-nolo/commit/0115f3f9da34609ad46721157c904e4a11df3701))
+* **oauth:** surface server-side token refresh failures and stop retrying dead credentials ([a4a5ce1](https://github.com/nolotus/bun-nolo/commit/a4a5ce1031539be8d45640642b579a377c498b89))
+
+
 ## 0.140.0-alpha.2
 
 ## 0.140.0-alpha.2 (2026-10-01)

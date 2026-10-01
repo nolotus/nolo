@@ -1,7 +1,7 @@
-import { toErrorMessage } from "core/errorMessage";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 
 import type { OAuthCredential, OAuthRefreshFn } from "./oauthTokenStore";
+import { OAuthRefreshError, classifyOAuthRefreshHttpFailure } from "./oauthRefreshError";
 
 export const OPENAI_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const OPENAI_CODEX_SCOPES = [
@@ -187,27 +187,20 @@ export async function refreshOpenAiCodexToken(
       signal: AbortSignal.timeout(OPENAI_CODEX_TOKEN_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new Error(
-      `OpenAI Codex token refresh failed: ${toErrorMessage(error)}`
-    );
+    void error; // 上游/网络错误文本不进 message（见 oauthRefreshError.ts 安全纪律）
+    throw new OAuthRefreshError("network");
   }
 
   const payload = (await response.json().catch(() => ({}))) as OpenAiTokenPayload;
   if (!response.ok) {
-    const detail =
-      typeof payload.error_description === "string" && payload.error_description
-        ? payload.error_description
-        : typeof payload.error === "string" && payload.error
-          ? payload.error
-          : `HTTP ${response.status}`;
-    throw new Error(`OpenAI Codex token refresh failed: ${detail}`);
+    throw classifyOAuthRefreshHttpFailure(response.status, payload, response.headers);
   }
 
   if (
     typeof payload.access_token !== "string" ||
     !payload.access_token.trim()
   ) {
-    throw new Error("OpenAI Codex token refresh response missing access_token");
+    throw new OAuthRefreshError("bad_response");
   }
 
   const now = deps.now?.() ?? Date.now();

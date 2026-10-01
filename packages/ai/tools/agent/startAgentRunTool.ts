@@ -18,6 +18,7 @@
 //   - Otherwise (web/RN/desktop/CLI --server): dispatches runAgentBackground
 //     with waitForCompletion:false, which posts to /api/agent/run {background:true}
 
+import { RUN_TITLE_MAX, normalizeRunTitle } from "./runTitle";
 import { runAgentBackground } from "ai/agent/runAgentBackground";
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -112,6 +113,13 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description: "可选。由 listAgents/readAgent 得到的可读 Agent 名称，用于 TUI 运行卡片展示。",
             },
+            title: {
+                type: "string",
+                description:
+                    `可选。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
+                    "本地 TUI 的运行区用它标识这个 run（服务端 Web 路径只在返回值里回显，不持久化）。同一个 agent 并发多个 run 时名字完全相同、" +
+                    "brief 开头又常是同样的套话，强烈建议填写；不填则不显示标题，不会自动从任务正文生成。",
+            },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
             // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
@@ -193,6 +201,8 @@ interface StartAgentRunArgs {
     task: string;
     input?: any;
     agentName?: string;
+    /** 短标题（展示用，归一化后落进 run 记录）。 */
+    title?: string;
     batchId?: string;
     /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
     credentialGroup?: string;
@@ -332,6 +342,7 @@ export async function startAgentRunFunc(
         // on screen — same card, same status, different work. Clipped rather than
         // full: this is display text, and the caller already holds the original.
         const taskPreview = task.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
+        const title = normalizeRunTitle(args.title);
 
         return {
             rawData: {
@@ -345,6 +356,7 @@ export async function startAgentRunFunc(
                 batchId: effectiveBatchId,
                 ...(resolvedName ? { agentName: resolvedName } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
+                ...(title ? { title } : {}),
                 payloadMetrics,
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {

@@ -1,6 +1,7 @@
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 
 import type { OAuthCredential, OAuthRefreshFn } from "./oauthTokenStore";
+import { OAuthRefreshError, classifyOAuthRefreshHttpFailure } from "./oauthRefreshError";
 
 export const ANTHROPIC_OAUTH_CLIENT_ID =
   "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -125,16 +126,10 @@ export async function refreshAnthropicToken(
   });
   const payload = (await response.json().catch(() => ({}))) as AnthropicTokenPayload;
   if (!response.ok) {
-    const detail =
-      typeof payload.error_description === "string"
-        ? payload.error_description
-        : typeof payload.error === "string"
-          ? payload.error
-          : `HTTP ${response.status}`;
-    throw new Error(`Claude token refresh failed: ${detail}`);
+    throw classifyOAuthRefreshHttpFailure(response.status, payload, response.headers);
   }
   if (typeof payload.access_token !== "string" || !payload.access_token.trim()) {
-    throw new Error("Claude token refresh response missing access_token");
+    throw new OAuthRefreshError("bad_response");
   }
   const now = deps.now?.() ?? Date.now();
   return normalizeAnthropicTokenPayload({

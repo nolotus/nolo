@@ -174,10 +174,6 @@ const STRINGS = {
     en: "Esc to stop",
     zh: "Esc 停止回复",
   },
-  queuedHint: {
-    en: "queued",
-    zh: "排队",
-  },
   flushQueuedIdleHint: {
     en: "Flushed {0} queued messages as one.",
     zh: "已把 {0} 条排队消息合并发送。",
