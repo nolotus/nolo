@@ -1,4 +1,13 @@
 
+## 0.140.0-alpha.2
+
+## 0.140.0-alpha.2 (2026-10-01)
+
+### Bug Fixes
+
+* **chat:** classify platform busy stream errors as retryable server errors ([ea48f96](https://github.com/nolotus/bun-nolo/commit/ea48f96b2c0c457f57e29fe5371442914e15bbed))
+
+
 ## 0.140.0-alpha.1
 
 ## 0.140.0-alpha.1 (2026-10-01)
