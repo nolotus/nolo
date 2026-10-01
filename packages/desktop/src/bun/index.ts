@@ -923,6 +923,7 @@ const isDev = channel === "dev";
 if (!isDev) ensureLinuxDesktopEntry({ resourcesDir: PACKAGED_RESOURCES_DIR });
 const isHeadlessProbe = process.env.NOLO_DESKTOP_HEADLESS === "1";
 const isSmokeProbe = process.env.NOLO_DESKTOP_SMOKE_PROBE === "1";
+const smokeProbeAckFile = process.env.NOLO_DESKTOP_SMOKE_PROBE_ACK_FILE?.trim() || undefined;
 const smokeProbeExitDelayMs = Math.max(
   0,
   Number(process.env.NOLO_DESKTOP_SMOKE_PROBE_EXIT_DELAY_MS ?? 1500),
@@ -1372,13 +1373,10 @@ if (isSmokeProbe) {
   // installed app once. Let the runtime exit itself after dom-ready instead of
   // forcing the external PowerShell harness to kill a GUI process tree.
   let smokeProbeFinished = false;
-  const finishSmokeProbe = (outcome: "dom-ready" | "timeout", exitCode: number) => {
+  const finishSmokeProbe = (outcome: "dom-ready" | "timeout" | "ack-timeout", exitCode: number) => {
     if (smokeProbeFinished) return;
     smokeProbeFinished = true;
     void (async () => {
-      if (outcome === "dom-ready" && smokeProbeExitDelayMs > 0) {
-        await Bun.sleep(smokeProbeExitDelayMs);
-      }
       console.log(`[desktop] smoke probe completed: ${outcome}`);
       await shutdownDesktop(`desktop-smoke-probe-${outcome}`);
       try {
@@ -1392,10 +1390,40 @@ if (isSmokeProbe) {
     1000,
     Number(process.env.NOLO_DESKTOP_SMOKE_PROBE_TIMEOUT_MS ?? 20000),
   );
-  setTimeout(() => finishSmokeProbe("timeout", 2), smokeProbeTimeoutMs);
+  const probeTimeoutTimer = setTimeout(() => finishSmokeProbe("timeout", 2), smokeProbeTimeoutMs);
+
   mainWindow.webview.on("dom-ready", () => {
+    console.log("[desktop] smoke probe ready: dom-ready");
     console.log("[desktop] smoke probe dom-ready");
-    finishSmokeProbe("dom-ready", 0);
+
+    if (smokeProbeAckFile) {
+      console.log(`[desktop] smoke probe waiting for ack file: ${smokeProbeAckFile}`);
+      void (async () => {
+        const start = Date.now();
+        const maxWaitMs = smokeProbeTimeoutMs;
+        while (Date.now() - start < maxWaitMs) {
+          if (existsSync(smokeProbeAckFile)) {
+            clearTimeout(probeTimeoutTimer);
+            console.log("[desktop] smoke probe ack received; initiating clean shutdown");
+            if (smokeProbeExitDelayMs > 0) {
+              await Bun.sleep(smokeProbeExitDelayMs);
+            }
+            finishSmokeProbe("dom-ready", 0);
+            return;
+          }
+          await Bun.sleep(200);
+        }
+        console.error(`[desktop] smoke probe timed out waiting for ack file after ${maxWaitMs}ms`);
+        finishSmokeProbe("ack-timeout", 2);
+      })();
+    } else {
+      void (async () => {
+        if (smokeProbeExitDelayMs > 0) {
+          await Bun.sleep(smokeProbeExitDelayMs);
+        }
+        finishSmokeProbe("dom-ready", 0);
+      })();
+    }
   });
 }
 

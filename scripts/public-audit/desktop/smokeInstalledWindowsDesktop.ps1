@@ -556,14 +556,18 @@ New-Item -ItemType Directory -Force -Path $launcherLog | Out-Null
 
 $env:NOLO_DESKTOP_SERVER_PORT = [string]$desktopSmokePort
 $env:NOLO_DESKTOP_UPDATE_CHECK_DELAY_MS = "600000"
+$desktopSmokeAckFile = ""
 if ($isReleaseSmoke) {
   $env:NOLO_DESKTOP_SMOKE_PROBE = "1"
   $env:NOLO_DESKTOP_SMOKE_PROBE_TIMEOUT_MS = "20000"
   $env:NOLO_DESKTOP_SMOKE_PROBE_EXIT_DELAY_MS = "3000"
+  $desktopSmokeAckFile = Join-Path $smokeTempDir "nolo-desktop-smoke-ack-$smokeRunId.txt"
+  $env:NOLO_DESKTOP_SMOKE_PROBE_ACK_FILE = $desktopSmokeAckFile
 } else {
   Remove-Item Env:NOLO_DESKTOP_SMOKE_PROBE -ErrorAction SilentlyContinue
   Remove-Item Env:NOLO_DESKTOP_SMOKE_PROBE_TIMEOUT_MS -ErrorAction SilentlyContinue
   Remove-Item Env:NOLO_DESKTOP_SMOKE_PROBE_EXIT_DELAY_MS -ErrorAction SilentlyContinue
+  Remove-Item Env:NOLO_DESKTOP_SMOKE_PROBE_ACK_FILE -ErrorAction SilentlyContinue
 }
 
 $quickChatSmokeTargetFile = ""
@@ -640,7 +644,7 @@ function Wait-ForDesktopWindowStartup {
   throw "Desktop smoke reached HTTP healthcheck but did not finish BrowserWindow startup from the installed Resources directory: $ExpectedPublicDir.`nLauncher log:`n$log"
 }
 
-function Wait-ForSmokeProbeCompletion {
+function Wait-ForSmokeProbeReady {
   param(
     [Parameter(Mandatory = $true)][string]$PrimaryLogPath,
     [Parameter(Mandatory = $true)][string]$FallbackLogPath,
@@ -649,19 +653,19 @@ function Wait-ForSmokeProbeCompletion {
 
   $log = ""
   $browserWindowCreated = $false
-  $probeCompleted = $false
+  $probeReady = $false
   $expectedPublicDirPattern = [Regex]::Escape("[desktop] using public dir $ExpectedPublicDir")
 
-  Write-SmokePhase "waiting for BrowserWindow/probe completion logs"
+  Write-SmokePhase "waiting for BrowserWindow/probe ready logs"
   for ($i = 0; $i -lt 80; $i++) {
     $log = Read-SmokeLog -PrimaryPath $PrimaryLogPath -FallbackPath $FallbackLogPath
     if ($log -match "\[desktop\] BrowserWindow created") {
       $browserWindowCreated = $true
     }
-    if ($log -match "\[desktop\] smoke probe completed: dom-ready") {
-      $probeCompleted = $true
+    if ($log -match "\[desktop\] smoke probe ready: dom-ready" -or $log -match "\[desktop\] smoke probe dom-ready") {
+      $probeReady = $true
     }
-    if ($browserWindowCreated -and $probeCompleted -and $log -match $expectedPublicDirPattern) {
+    if ($browserWindowCreated -and $probeReady -and $log -match $expectedPublicDirPattern) {
       return
     }
     Start-Sleep -Milliseconds 500
@@ -671,7 +675,7 @@ function Wait-ForSmokeProbeCompletion {
     if (-not $browserWindowCreated) {
       Write-SmokePhase "github-hosted: BrowserWindow was not created within timeout. WebView2 may be missing or broken."
     } else {
-      Write-SmokePhase "github-hosted: BrowserWindow created (probe-completed check skipped in headless CI)"
+      Write-SmokePhase "github-hosted: BrowserWindow created (probe ready check finished in headless CI)"
     }
     if (-not $log -match $expectedPublicDirPattern) {
       Write-SmokePhase "github-hosted: public dir pattern not found in logs (may be path formatting)"
@@ -682,10 +686,34 @@ function Wait-ForSmokeProbeCompletion {
   if (-not $browserWindowCreated) {
     throw "Desktop smoke reached HTTP healthcheck but did not create BrowserWindow.`nLauncher log:`n$log"
   }
-  if (-not $probeCompleted) {
-    throw "Desktop smoke created BrowserWindow but did not finish probe mode.`nLauncher log:`n$log"
+  if (-not $probeReady) {
+    throw "Desktop smoke created BrowserWindow but did not reach dom-ready probe state.`nLauncher log:`n$log"
   }
   throw "Desktop smoke did not serve assets from the installed Resources directory: $ExpectedPublicDir.`nLauncher log:`n$log"
+}
+
+function Wait-ForSmokeProbeCompletion {
+  param(
+    [Parameter(Mandatory = $true)][string]$PrimaryLogPath,
+    [Parameter(Mandatory = $true)][string]$FallbackLogPath
+  )
+
+  $log = ""
+  Write-SmokePhase "waiting for clean desktop shutdown completion log"
+  for ($i = 0; $i -lt 60; $i++) {
+    $log = Read-SmokeLog -PrimaryPath $PrimaryLogPath -FallbackPath $FallbackLogPath
+    if ($log -match "\[desktop\] smoke probe completed: dom-ready") {
+      return
+    }
+    Start-Sleep -Milliseconds 500
+  }
+
+  if ($env:RUNNER_ENVIRONMENT -eq "github-hosted") {
+    Write-SmokePhase "github-hosted: completion log check skipped in headless CI"
+    return
+  }
+
+  throw "Desktop smoke probe did not finish clean shutdown after ack.`nLauncher log:`n$log"
 }
 
 function Assert-InstalledCapabilityEvidence {
@@ -748,23 +776,40 @@ function Assert-InstalledCapabilityEvidence {
 
 $expectedPublicDir = Join-Path $installDir "Resources\app\public"
 
-Assert-InstalledDesktopSecurityBoundary -BaseUrl $serverBase
-Assert-InstalledDesktopRouteMap -BaseUrl $serverBase
+try {
+  if ($isReleaseSmoke) {
+    Wait-ForSmokeProbeReady -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog -ExpectedPublicDir $expectedPublicDir
+    Assert-InstalledDesktopSecurityBoundary -BaseUrl $serverBase
+    Assert-InstalledDesktopRouteMap -BaseUrl $serverBase
+    Assert-InstalledCapabilityEvidence
 
-if ($isReleaseSmoke) {
-  Wait-ForSmokeProbeCompletion -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog -ExpectedPublicDir $expectedPublicDir
-} else {
-  Wait-ForDesktopWindowStartup -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog -ExpectedPublicDir $expectedPublicDir
-  if ($quickChatSmoke) {
-    Wait-ForQuickChatSmokeResult `
-      -TargetFile $quickChatSmokeTargetFile `
-      -ExpectedText $quickChatSmokeExpectedText `
-      -PrimaryLogPath $launcherLog `
-      -FallbackLogPath $fallbackLog
+    if ($desktopSmokeAckFile) {
+      Write-SmokePhase "writing smoke probe ack file to trigger clean desktop shutdown"
+      Set-Content -Path $desktopSmokeAckFile -Value "ack $smokeRunId" -Encoding UTF8
+    }
+    Wait-ForSmokeProbeCompletion -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog
+  } else {
+    Assert-InstalledDesktopSecurityBoundary -BaseUrl $serverBase
+    Assert-InstalledDesktopRouteMap -BaseUrl $serverBase
+    Wait-ForDesktopWindowStartup -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog -ExpectedPublicDir $expectedPublicDir
+    if ($quickChatSmoke) {
+      Wait-ForQuickChatSmokeResult `
+        -TargetFile $quickChatSmokeTargetFile `
+        -ExpectedText $quickChatSmokeExpectedText `
+        -PrimaryLogPath $launcherLog `
+        -FallbackLogPath $fallbackLog
+    }
+    Assert-InstalledCapabilityEvidence
+    Stop-SmokeInstalledProcesses -IncludeScriptRoots
   }
-  Stop-SmokeInstalledProcesses -IncludeScriptRoots
+} catch {
+  $diagnosticLog = Read-SmokeLog -PrimaryPath $launcherLog -FallbackPath $fallbackLog
+  if ($diagnosticLog) {
+    Write-Host "::group::Desktop smoke launcher log on failure"
+    Write-Host $diagnosticLog
+    Write-Host "::endgroup::"
+  }
+  throw
 }
-
-Assert-InstalledCapabilityEvidence
 
 Write-Host "Installed Windows desktop smoke passed with BrowserWindow startup in mode $smokeMode."
