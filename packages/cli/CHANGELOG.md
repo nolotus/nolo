@@ -1,4 +1,14 @@
 
+## 0.146.0-alpha.1
+
+## 0.146.0-alpha.1 (2026-10-02)
+
+### Features
+
+* **chat:** show a sub-agent run zone above the composer ([b2af4f8](https://github.com/nolotus/bun-nolo/commit/b2af4f8df53efa8b7b9d2efad693b53db725ebfd))
+* **tui:** show agent runs in a dedicated run zone with title and elapsed time ([be835d3](https://github.com/nolotus/bun-nolo/commit/be835d31510df26a02bc9cdac355165949bf27ba))
+
+
 ## 0.145.0-alpha.1
 
 ## 0.145.0-alpha.1 (2026-10-02)

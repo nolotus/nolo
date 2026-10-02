@@ -1334,8 +1334,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
         return renderStatusLine(state, maxWidth);
       },
-      getActivityLines: () =>
-        activityIndicator.getActivityLines(resolveCliColorEnabled()),
+      getActivityLines: (layout) =>
+        activityIndicator.getActivityLines(resolveCliColorEnabled(), layout),
       getQueueLines: () => {
         if (!chatQueueBinding || chatQueueBinding.queueLength() === 0) return [];
         const colorEnabled = resolveCliColorEnabled();

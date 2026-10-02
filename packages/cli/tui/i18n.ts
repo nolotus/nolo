@@ -439,6 +439,24 @@ const STRINGS = {
     en: "Runs ({0})",
     zh: "运行 ({0})",
   },
+  // --- Fixed run zone (top of composer, replaces the ⚙ running status chip) --
+  // Each active run renders as `⚙ <title> · <agent> · <elapsed> · N tools`.
+  // runZoneFor is the elapsed-time fact for a *running* run (`for 1m23s` /
+  // `已运行 1m23s`); terminal runs print `<status> <age>` instead and don't use it.
+  runZoneFor: {
+    en: "for {0}",
+    zh: "已运行 {0}",
+  },
+  // Terminal linger line: `✓ <run> · done · took 12m03s`.
+  runZoneDone: { en: "done", zh: "完成" },
+  runZoneFailed: { en: "failed", zh: "失败" },
+  runZoneCancelled: { en: "cancelled", zh: "已取消" },
+  runZoneTook: { en: "took {0}", zh: "用时 {0}" },
+  // Overflow marker when more runs are active than the zone shows at once.
+  runZoneMore: {
+    en: "+{0} more",
+    zh: "还有 {0} 个",
+  },
   // --- Dialog (picker / confirm) copy --------------------------------------
   // Key-hint wording is unified across select / multi-select / confirm so the
   // three dialogs read as one family: "<Label>  <↑↓ move · Enter choose ·

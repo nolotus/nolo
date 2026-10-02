@@ -17,7 +17,7 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppSelector, useAppDispatch } from "app/store";
-import { selectIdentityUserBalance } from "identity/selectors";
+import { selectIdentityUserBalance, selectIdentityUserId } from "identity/selectors";
 import { toast } from "app/utils/toast";
 import {
   abortAllMessages,
@@ -173,6 +173,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   );
   const allToolRuns = useAllToolRuns();
   const balance = useAppSelector(selectIdentityUserBalance) ?? 0;
+  const currentUserId = useAppSelector(selectIdentityUserId);
   const canMultiImg = balance >= 19;
 
   const { currentServer, currentToken: token } =
@@ -1124,6 +1125,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
           <MessageInputActivityPanel
             messages={currentMessages}
             isActive={isLoopRunning || hasStreamingMessage}
+            agentRunScope={currentUserId && currentDialogId ? { userId: currentUserId, dialogId: currentDialogId } : undefined}
           />
 
           <RunningProcessesPanel messages={currentMessages} />

@@ -18,6 +18,7 @@
  * 文本重复指示。
  */
 
+import type { RunZoneLayout } from "./runZoneLines";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import type { AgentRunSnapshot } from "../client/agentRunSnapshot";
 import { createRunDock, type RunDock } from "./runDock";
@@ -71,7 +72,7 @@ export type ActivityIndicator = {
   /** 当前应渲染的活动行数据；explicit 优先，其次 fallback，都没有返回 null。 */
   getView(): ActivityIndicatorView | null;
   /** 获取全套活动 Panel 渲染行（含基础活动行及贴在输入区上方的 Agent Run 状态面板）。 */
-  getActivityLines(colorEnabled?: boolean): string[] | null;
+  getActivityLines(colorEnabled?: boolean, layout?: RunZoneLayout): string[] | null;
   /** Esc 即时反馈：把活动行切到「停止中」文案，frame 冻结不再动。 */
   markStopping(): void;
   /** 是否已处于停止中状态（第二次 Esc 判定用）。 */
@@ -227,7 +228,10 @@ export function createActivityIndicator(
 
   const getAgentRuns = () => runDock.getRuns();
 
-  const getActivityLines = (colorEnabled = resolveCliColorEnabled()): string[] | null => {
+  const getActivityLines = (
+    colorEnabled = resolveCliColorEnabled(),
+    layout?: RunZoneLayout,
+  ): string[] | null => {
     const lines: string[] = [];
     const baseView = getView();
     if (baseView && stopping) {
@@ -255,7 +259,9 @@ export function createActivityIndicator(
       }
     }
 
-    lines.push(...runDock.getLines(colorEnabled));
+    // 运行区在 spinner 下面、紧贴分隔线：composer 自底向上长，越靠下的行越不被
+    // spinner 出现/消失推动；后台 run 活得比前台 turn 久，不该被 turn 挤上挤下。
+    lines.push(...runDock.getLines(colorEnabled, layout));
 
     return lines.length > 0 ? lines : null;
   };
