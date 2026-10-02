@@ -1,4 +1,17 @@
 
+## 0.159.0-alpha.1
+
+## 0.159.0-alpha.1 (2026-10-02)
+
+### Features
+
+* **agent:** publish sub-agent run lifecycle events for the run panel ([958ee65](https://github.com/nolotus/bun-nolo/commit/958ee6556c726b3a4a6e79d1523e5506bd6c9e96))
+
+### Bug Fixes
+
+* **cli:** stop dumping the platform JSON for the not-logged-in 401 ([c450d13](https://github.com/nolotus/bun-nolo/commit/c450d13e2620272889caa1425f72dc69e839e64d))
+
+
 ## 0.158.0-alpha.1
 
 ## 0.158.0-alpha.1 (2026-10-02)

@@ -797,10 +797,14 @@ function buildAuthFailure(ctx: FailureCtx): string {
       `\n    · Use the Nolo platform: /login (or run \`nolo login\` after exiting the TUI)` +
       `\n    · Use your own subscription: nolo auth antigravity | claude | chatgpt | xai` +
       `\n    · No login at all: nolo run "<task>" (runs on local Codex)`;
+    // 这一支专指 AUTH_NO_TOKEN：错误体是固定的平台 JSON（字段名用户看不懂，也没有
+    // 可行动信息），上面三行引导已经把该说的说完了。默认只留一行人类可读摘要，
+    // 不再把整块 JSON 喷给用户；排查时用 NOLO_DEBUG=1 / NOLO_CLI_DEBUG_DETAIL=1
+    // 看完整 Detail（与 stripDebugNoise 的既有开关一致）。
     const detail =
       process.env.NOLO_DEBUG === "1" || process.env.NOLO_CLI_DEBUG_DETAIL === "1"
         ? `\n  Detail: ${ctx.message}`
-        : `\n  Detail: ${stripDebugNoise(ctx.message)}`;
+        : `\n  Detail: platform returned AUTH_NO_TOKEN (no authentication token provided)`;
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no token was sent).` +
       `${guidance}${detail} ` +

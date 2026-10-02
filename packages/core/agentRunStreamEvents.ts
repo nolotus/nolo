@@ -170,6 +170,36 @@ export interface AgentRunStreamTurnWarningEvent {
   providerCallId?: string;
 }
 
+/** sub-agent run 生命周期阶段 */
+export type AgentRunLifecyclePhase = "started" | "updated" | "finished";
+
+/** sub-agent run 快照（Web/桌面运行区的数据源） */
+export interface AgentRunLifecycleRun {
+  runId: string;
+  title?: string;
+  agentName?: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  /** epoch ms */
+  startedAt: number;
+  finishedAt?: number;
+  toolCallCount?: number;
+  lastToolNames?: string[];
+  /** 此刻在执行什么（拿不到就不填） */
+  inFlight?: string;
+}
+
+/**
+ * sub-agent run 生命周期事件。仅发往 run 归属 user 的 scope.dialogId 事件通道
+ * （dialog-<dialogId>，订阅端经 canUserAccessDialogEventChannel 校验归属）。
+ * 终态 `finished` 之后不再发 `updated`。
+ */
+export interface AgentRunStreamAgentRunEvent {
+  type: "agent_run";
+  phase: AgentRunLifecyclePhase;
+  scope: { userId: string; dialogId?: string; workspaceId?: string };
+  run: AgentRunLifecycleRun;
+}
+
 /** SSE 事件 discriminated union */
 export type AgentRunStreamEvent =
   | AgentRunStreamTextEvent
@@ -185,7 +215,8 @@ export type AgentRunStreamEvent =
   | AgentRunStreamDocCreatedEvent
   | AgentRunStreamDialogEvent
   | AgentRunStreamStatusEvent
-  | AgentRunStreamTurnWarningEvent;
+  | AgentRunStreamTurnWarningEvent
+  | AgentRunStreamAgentRunEvent;
 
 /** 窄化 helper：判断事件是否为指定 type */
 export function isAgentRunStreamEvent<T extends AgentRunStreamEvent["type"]>(
