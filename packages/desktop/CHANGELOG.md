@@ -1,4 +1,14 @@
 
+## 0.160.0-alpha.4
+
+## 0.160.0-alpha.4 (2026-10-02)
+
+### Bug Fixes
+
+* **ai:** 压缩摘要保留「原始目标」——压缩后不再只剩待办清单 ([38ba919](https://github.com/nolotus/bun-nolo/commit/38ba919e83e889b06654dacca39ab28d89194d05))
+* **desktop:** 桌面开发入口接上已存在的编排器 + 修两个环境相关的既有红灯 ([ea91001](https://github.com/nolotus/bun-nolo/commit/ea91001cc39d1bb4c3410d5ab7e1df710892786b))
+
+
 ## 0.160.0-alpha.3
 
 ## 0.160.0-alpha.3 (2026-10-02)

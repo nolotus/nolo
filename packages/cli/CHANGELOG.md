@@ -1,4 +1,13 @@
 
+## 0.146.0-alpha.2
+
+## 0.146.0-alpha.2 (2026-10-02)
+
+### Bug Fixes
+
+* **ai:** 压缩摘要保留「原始目标」——压缩后不再只剩待办清单 ([38ba919](https://github.com/nolotus/bun-nolo/commit/38ba919e83e889b06654dacca39ab28d89194d05))
+
+
 ## 0.146.0-alpha.1
 
 ## 0.146.0-alpha.1 (2026-10-02)
