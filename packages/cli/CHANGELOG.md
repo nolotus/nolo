@@ -1,4 +1,13 @@
 
+## 0.146.0-alpha.5
+
+## 0.146.0-alpha.5 (2026-10-02)
+
+### Bug Fixes
+
+* **chat:** gate durable foreground by real Web runtime ([b32392e](https://github.com/nolotus/bun-nolo/commit/b32392e925c43965c8365cb604c204a87272b16e))
+
+
 ## 0.146.0-alpha.4
 
 ## 0.146.0-alpha.4 (2026-10-02)

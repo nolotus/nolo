@@ -42,6 +42,15 @@ type ThunkLike = {
   getState: () => RootState;
 };
 
+function detectServerOwnedCandidateSurface(): "web" | "non-web" {
+  // This path is allowed only from a real DOM Web runtime. React Native and TUI
+  // must never qualify merely because they have a token/currentServer. Desktop
+  // WebViews do have a DOM, but are independently rejected by isDesktopApp.
+  return typeof window !== "undefined" && typeof document !== "undefined"
+    ? "web"
+    : "non-web";
+}
+
 export async function canRunServerOwnedWebForegroundTurn(
   args: ServerOwnedWebForegroundTurnArgs,
   thunk: ThunkLike,
@@ -76,7 +85,7 @@ export async function canRunServerOwnedWebForegroundTurn(
 
     return {
       eligible: shouldUseServerOwnedWebForegroundTurn({
-        surface: "web",
+        surface: detectServerOwnedCandidateSurface(),
         agentConfig: agentConfig as any,
         userInput: args.userInput,
         runtimeOptions: args.runtimeOptions,
@@ -301,8 +310,8 @@ export async function runServerOwnedWebForegroundTurn(
     // Do not delete the visible transient before canonical history is actually
     // present. initMsgs is local-first: unwrap() may resolve from local rows while
     // remote revalidation is still running. Wait for that revalidation to project
-    // a genuinely new canonical assistant, then remove the transient. This turns
-    // the old delete -> blank -> reload sequence into visible -> canonical -> delete.
+    // this turn's canonical assistant, then remove the transient. This turns the
+    // old delete -> blank -> reload sequence into visible -> canonical -> delete.
     let canonicalVisible = false;
     try {
       await thunk.dispatch(initMsgs({ dialogId })).unwrap();
@@ -311,6 +320,7 @@ export async function runServerOwnedWebForegroundTurn(
           selectAllMsgs(thunk.getState() as any, dialogId) as any[],
         initialMessageIds,
         transientId,
+        expectedText: accumulated,
       }));
     } catch (error) {
       console.warn("[chat] server-owned canonical handoff refresh failed", {
@@ -324,9 +334,10 @@ export async function runServerOwnedWebForegroundTurn(
       thunk.dispatch(removeTransientMessage({ id: transientId, dialogId }));
     } else {
       // The server has already declared done, so deleting the only visible answer
-      // would recreate the reported bug. Preserve the projection as a terminal UI
-      // fallback. A later normal history reload can reconcile it with canonical
-      // server state; it is never persisted from this browser path.
+      // would recreate the reported bug. Preserve the assistant projection as a
+      // terminal UI fallback. Transient ask_user cards are safe to discard here:
+      // without canonical history they must not remain interactive or appear live.
+      askUserProjection.cleanup();
       const transient = (selectAllMsgs(thunk.getState() as any, dialogId) as any[])
         .find((message) => message?.id === transientId);
       if (transient) {
