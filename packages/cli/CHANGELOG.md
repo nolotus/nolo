@@ -1,4 +1,13 @@
 
+## 0.147.0-alpha.2
+
+## 0.147.0-alpha.2 (2026-10-02)
+
+### Bug Fixes
+
+* **billing:** exclude non-billable and failed records from displayed usage costs ([e51a1c6](https://github.com/nolotus/bun-nolo/commit/e51a1c6c404028517b6f3f30d828062a344a5455))
+
+
 ## 0.147.0-alpha.1
 
 ## 0.147.0-alpha.1 (2026-10-02)

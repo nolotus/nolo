@@ -6,6 +6,7 @@ import { NavLink } from "app/routing";
 import { LuWallet, LuChevronRight } from "react-icons/lu";
 import { useSessionSnapshot } from "app/sessionSnapshot";
 import { useRecords } from "ai/token/hooks/useRecords";
+import { sumPlatformBillableCost } from "ai/token/platformBillable";
 import { formatCredits } from "app/utils/credits";
 import { utcToZonedTime } from "date-fns-tz";
 import "./UsageWidget.css";
@@ -45,10 +46,10 @@ const UsageWidget: React.FC<UsageWidgetProps> = ({ isEditing }) => {
   }, []);
   const { records, loading } = useRecords(recordsFilter, { all: true });
 
-  const todayCost = useMemo(
-    () => records.reduce((sum, r) => sum + (r.cost ?? 0), 0),
-    [records]
-  );
+  // 今日消耗 = 平台消费口径：排除 billable=false（OAuth/CLI/自有 API，只统计
+  // 不计费）与 status=failed（失败调用未向用户计费）的记录；旧记录缺 billable
+  // 按可计费兼容。判据与后台报表共用 ai/token/platformBillable 纯函数。
+  const todayCost = useMemo(() => sumPlatformBillableCost(records), [records]);
 
   const content = (
     <>

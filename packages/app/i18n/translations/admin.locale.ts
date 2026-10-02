@@ -171,8 +171,11 @@ export default {
             day: "Daily",
           },
           summary: {
-            totalCost: "Total cost",
+            totalCost: "All-call estimate",
             totalCostUnit: "credits",
+            platformUsageCost: "Platform spend",
+            scopeNote:
+              "All-call estimate is catalog-rated and includes failed and non-billable calls; platform spend counts billable successful calls only. Actual deductions follow the ledger.",
             recordCount: "Records",
             recordCountUnit: "items",
             inputTokens: "Input tokens",
@@ -183,7 +186,8 @@ export default {
           totalItems: "{{value}} items",
           table: {
             requests: "Requests",
-            cost: "Cost",
+            cost: "Estimate",
+            platformCost: "Platform spend",
             share: "Share",
             inputTokens: "Input tokens",
             outputTokens: "Output tokens",
@@ -650,8 +654,11 @@ export default {
             day: "每日",
           },
           summary: {
-            totalCost: "总消耗",
+            totalCost: "全部调用估值",
             totalCostUnit: "积分",
+            platformUsageCost: "平台消费",
+            scopeNote:
+              "全部调用估值为目录价，含失败与免单调用；平台消费仅含可计费且成功的调用；实际扣款以账本为准。",
             recordCount: "记录数",
             recordCountUnit: "条",
             inputTokens: "输入 Token",
@@ -662,7 +669,8 @@ export default {
           totalItems: "共 {{value}} 项",
           table: {
             requests: "请求数",
-            cost: "消耗",
+            cost: "调用估值",
+            platformCost: "平台消费",
             share: "占比",
             inputTokens: "输入 Token",
             outputTokens: "输出 Token",
@@ -1110,8 +1118,11 @@ export default {
             day: "每日",
           },
           summary: {
-            totalCost: "總消耗",
+            totalCost: "全部調用估值",
             totalCostUnit: "積分",
+            platformUsageCost: "平台消費",
+            scopeNote:
+              "全部調用估值為目錄價，含失敗與免單調用；平台消費僅含可計費且成功的調用；實際扣款以賬本為準。",
             recordCount: "記錄數",
             recordCountUnit: "條",
             inputTokens: "輸入 Token",
@@ -1122,7 +1133,8 @@ export default {
           totalItems: "共 {{value}} 項",
           table: {
             requests: "請求數",
-            cost: "消耗",
+            cost: "調用估值",
+            platformCost: "平台消費",
             share: "佔比",
             inputTokens: "輸入 Token",
             outputTokens: "輸出 Token",
@@ -1572,8 +1584,11 @@ export default {
             day: "日別",
           },
           summary: {
-            totalCost: "総消費",
+            totalCost: "全コール推定",
             totalCostUnit: "ポイント",
+            platformUsageCost: "プラットフォーム消費",
+            scopeNote:
+              "全コール推定はカタログ価格ベースで、失敗・無料コールを含みます。プラットフォーム消費は課金対象で成功したコールのみです。実際の請求は台帳に従います。",
             recordCount: "レコード数",
             recordCountUnit: "件",
             inputTokens: "入力トークン",
@@ -1584,7 +1599,8 @@ export default {
           totalItems: "合計 {{value}} 件",
           table: {
             requests: "リクエスト数",
-            cost: "消費",
+            cost: "推定値",
+            platformCost: "プラットフォーム消費",
             share: "割合",
             inputTokens: "入力トークン",
             outputTokens: "出力トークン",
