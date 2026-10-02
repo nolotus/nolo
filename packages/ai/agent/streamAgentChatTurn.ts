@@ -105,7 +105,6 @@ import { updateTotalUsage } from "../chat/updateTotalUsage";
 import { estimateMissingUsage } from "ai/token/missingUsageEstimate";
 import { createSSEParser } from "../chat/parseMultilineSSE";
 import { performServerProxyFetchWithRetry } from "../chat/serverProxyRetry";
-import { buildForegroundTurnAdmissionFetchInit } from "./foregroundTurnAdmissionFetch";
 import { normalizeServerOrigin } from "./serverOrigin";
 import { getIsDesktopApp } from "app/utils/env";
 import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeTurnClient";
@@ -1822,22 +1821,18 @@ export const streamAgentChatTurnHandler = async (
                     ...(currentDialog?.spaceId ? { spaceId: currentDialog.spaceId } : {}),
                 });
                 const remoteRunUrl = `${explicitServerBase.replace(/\/+$/, "")}/api/agent/run`;
-                const remoteRunInit = buildForegroundTurnAdmissionFetchInit({
-                    body: remoteRequestBody,
-                    headers: {
-                        "Content-Type": "application/json",
-                        Accept: "text/event-stream",
-                        ...(authHeader ? { Authorization: authHeader } : {}),
-                    },
-                    signal: loopController.signal,
-                });
                 const remoteResponse = await performServerProxyFetchWithRetry({
-                    execute: () => fetch(remoteRunUrl, remoteRunInit),
+                    execute: () => fetch(remoteRunUrl, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Accept: "text/event-stream",
+                            ...(authHeader ? { Authorization: authHeader } : {}),
+                        },
+                        body: remoteRequestBody,
+                        signal: loopController.signal,
+                    }),
                     signal: loopController.signal,
-                    // A keepalive POST may already have reached the server when
-                    // the connection error surfaces; /api/agent/run stream turns
-                    // are not idempotent, so never silently re-submit it.
-                    retryNetworkErrors: remoteRunInit.keepalive !== true,
                     logPrefix: "[streamAgentChatTurn.remoteRun]",
                 });
 

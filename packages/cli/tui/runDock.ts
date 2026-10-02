@@ -310,17 +310,8 @@ export function formatRunDockLines(
   lines.push(colorEnabled ? themeText(header, "muted", true) : header);
 
   const shown = snapshots.slice(0, Math.max(1, maxRows));
-  // 标题只在「唯一」时才能替代短 id 去区分 run：同一面板里重复的标题保留短 id。
-  const titleCounts = new Map<string, number>();
   for (const snapshot of shown) {
-    const title = snapshot.title?.trim();
-    if (title) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
-  const duplicateTitles = new Set(
-    [...titleCounts].filter(([, count]) => count > 1).map(([title]) => title)
-  );
-  for (const snapshot of shown) {
-    lines.push(formatRunDockRow(snapshot, colorEnabled, now, duplicateTitles));
+    lines.push(formatRunDockRow(snapshot, colorEnabled, now));
   }
 
   const hidden = snapshots.length - shown.length;
@@ -331,13 +322,11 @@ export function formatRunDockLines(
   return lines;
 }
 
-/** `  ⏳ 复审额度 diff · AGY Flash · 6m12s · …`；标题重复时 `复审 #26f2ye · AGY Flash`；无标题 `AGY Flash #26f2ye · …` */
+/** `  ⏳ AGY Flash #26f2ye · 6m12s · 24 tools · Edit 3s` */
 function formatRunDockRow(
   snapshot: AgentRunSnapshot,
   colorEnabled: boolean,
-  now: number,
-  /** 当前面板里重复出现的标题；它们的短 id 不能省，否则两行长得一模一样。 */
-  duplicateTitles: ReadonlySet<string> = new Set()
+  now: number
 ): string {
   const name = displayAgentName(snapshot);
   const short = shortRunId(snapshot.runId);
@@ -372,13 +361,7 @@ function formatRunDockRow(
   }
   if (snapshot.errorMessage) facts.push(clipText(snapshot.errorMessage, 40));
 
-  // 有标题时标题在前、agent 名退为次要信息，并省掉短 id：标题已经承担了区分
-  // 并发 run 的职责。没有标题时短 id 是唯一的区分手段，必须保留（旧行为不变）。
-  const title = snapshot.title?.trim();
-  const idSuffix = short ? ` #${short}` : "";
-  const label = title
-    ? `${title}${duplicateTitles.has(title) ? idSuffix : ""} · ${name}`
-    : `${name}${idSuffix}`;
+  const label = `${name}${short ? ` #${short}` : ""}`;
   const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
   if (!colorEnabled) return `  ${icon} ${label}${factsPart}`;
 
