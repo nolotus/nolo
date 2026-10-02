@@ -66,6 +66,22 @@ export interface AgentRunStreamErrorEvent {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * 取消信号（显式 Stop）：server-owned foreground execution 的 AbortSignal
+ * 被控制面 abort 后，loop 在退出前发出的终态帧。
+ *
+ * 消费契约：
+ * - 持久化包装层（index.ts 的 foreground SSE wrapper）据此把已收集的部分
+ *   输出按 cancelled 落盘（与客户端断线的 cancel-hook 同语义）；
+ * - durable mirror（response.ts）把 cancelled 归类为终态，在流 EOF 后发布
+ *   foreground_turn_terminal { status: "cancelled" }；
+ * - 不得把该帧当成 error 处理（cancelled ≠ failed）。
+ */
+export interface AgentRunStreamCancelledEvent {
+  type: "cancelled";
+  reason?: string;
+}
+
 /** assistant 工具调用声明 */
 export interface AgentRunStreamAssistantToolCallsEvent {
   type: "assistant_tool_calls";
@@ -154,12 +170,43 @@ export interface AgentRunStreamTurnWarningEvent {
   providerCallId?: string;
 }
 
+/** sub-agent run 生命周期阶段 */
+export type AgentRunLifecyclePhase = "started" | "updated" | "finished";
+
+/** sub-agent run 快照（Web/桌面运行区的数据源） */
+export interface AgentRunLifecycleRun {
+  runId: string;
+  title?: string;
+  agentName?: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  /** epoch ms */
+  startedAt: number;
+  finishedAt?: number;
+  toolCallCount?: number;
+  lastToolNames?: string[];
+  /** 此刻在执行什么（拿不到就不填） */
+  inFlight?: string;
+}
+
+/**
+ * sub-agent run 生命周期事件。仅发往 run 归属 user 的 scope.dialogId 事件通道
+ * （dialog-<dialogId>，订阅端经 canUserAccessDialogEventChannel 校验归属）。
+ * 终态 `finished` 之后不再发 `updated`。
+ */
+export interface AgentRunStreamAgentRunEvent {
+  type: "agent_run";
+  phase: AgentRunLifecyclePhase;
+  scope: { userId: string; dialogId?: string; workspaceId?: string };
+  run: AgentRunLifecycleRun;
+}
+
 /** SSE 事件 discriminated union */
 export type AgentRunStreamEvent =
   | AgentRunStreamTextEvent
   | AgentRunStreamThinkingEvent
   | AgentRunStreamDoneEvent
   | AgentRunStreamErrorEvent
+  | AgentRunStreamCancelledEvent
   | AgentRunStreamAssistantToolCallsEvent
   | AgentRunStreamToolStartEvent
   | AgentRunStreamToolResultEvent
@@ -168,7 +215,8 @@ export type AgentRunStreamEvent =
   | AgentRunStreamDocCreatedEvent
   | AgentRunStreamDialogEvent
   | AgentRunStreamStatusEvent
-  | AgentRunStreamTurnWarningEvent;
+  | AgentRunStreamTurnWarningEvent
+  | AgentRunStreamAgentRunEvent;
 
 /** 窄化 helper：判断事件是否为指定 type */
 export function isAgentRunStreamEvent<T extends AgentRunStreamEvent["type"]>(
