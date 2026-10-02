@@ -1,4 +1,13 @@
 
+## 0.146.0-alpha.4
+
+## 0.146.0-alpha.4 (2026-10-02)
+
+### Bug Fixes
+
+* **chat:** add server-owned canonical handoff guard ([28785c6](https://github.com/nolotus/bun-nolo/commit/28785c6d3f3b849ec3ea9d9c9f05a0c1bcc62573))
+
+
 ## 0.146.0-alpha.3
 
 ## 0.146.0-alpha.3 (2026-10-02)
