@@ -174,10 +174,6 @@ const STRINGS = {
     en: "Esc to stop",
     zh: "Esc 停止回复",
   },
-  queuedHint: {
-    en: "queued",
-    zh: "排队",
-  },
   flushQueuedIdleHint: {
     en: "Flushed {0} queued messages as one.",
     zh: "已把 {0} 条排队消息合并发送。",
@@ -655,6 +651,10 @@ const STRINGS = {
     en: "file reference (path only, content not read): {0}",
     zh: "文件引用（仅路径，未读取内容）：{0}",
   },
+  busyAttachmentsBlocked: {
+    en: "can't queue a message with {0} clipboard image(s) while a turn is running — draft kept. Send again after this turn ends, or press Backspace to drop the attachment and send text only.",
+    zh: "忙碌中无法排队带 {0} 张剪贴板图片的消息，草稿已保留；等本轮结束后再按 Enter 发送，或 Backspace 撤销附件后改发纯文字。",
+  },
   agentsTip: {
     en: "Tip: run /switch for the full picker, or /switch list for your private agents too.",
     zh: "提示：用 /switch 打开完整选择器，或 /switch list 连你的私有智能体一起列出。",
@@ -912,13 +912,15 @@ const STRINGS = {
     en: "Tell nolo what to change, for example: /customize make my default agent more concise.",
     zh: "告诉 nolo 你想改什么，例如：/customize make my default agent more concise。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginHint: {
     en: "MVP login uses profile/env auth. Set AUTH_TOKEN, NOLO_SERVER, or NOLO_PROFILE before starting nolo.",
     zh: "MVP 登录走 profile/环境变量认证。启动 nolo 前请设置 AUTH_TOKEN、NOLO_SERVER 或 NOLO_PROFILE。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginTuiStart: {
-    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL).",
-    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接）。",
+    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL), or exit and run `nolo login`.",
+    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接），或退出后运行 `nolo login`。",
   },
   loginUsage: {
     en: "Usage: /login [--server <url>]. Unsupported flags: {0}",
@@ -955,6 +957,10 @@ const STRINGS = {
   loginCancelled: {
     en: "Login cancelled.",
     zh: "已取消登录。",
+  },
+  welcomeAuthGuidance: {
+    en: "Not logged in to Nolo — three ways to get going:\n  · Run a task on local Codex: nolo run \"<task>\" (no login needed)\n  · Bind your own model subscription: nolo auth antigravity | claude | chatgpt | xai\n  · Use the Nolo platform: type /login (gives you a browser authorization link)",
+    zh: "未登录 Nolo —— 三条路都能用：\n  · 用本地 Codex 跑任务：nolo run \"<任务>\"（不需要登录）\n  · 绑定你自己的模型订阅：nolo auth antigravity | claude | chatgpt | xai\n  · 用 Nolo 平台：直接输入 /login（会给出浏览器授权链接）",
   },
   versionInfo: {
     en: "nolo {0}\nUpdate this install with: nolo update\nIf repo-local output differs, publish/install the latest npm package first.",
@@ -998,6 +1004,11 @@ const STRINGS = {
   actionGateInteractiveBody: {
     en: "Complete it in the terminal, then nolo will continue.",
     zh: "在终端中完成操作后，nolo 将继续。",
+  },
+  // Compact memory-tool trace
+  memoryDeleteRequestedCount: {
+    en: "requested deletion of {0}",
+    zh: "已请求删除 {0} 条",
   },
   // Agent catalog sources
   agentSourcePlatform: {
@@ -1046,6 +1057,10 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   execShell: { en: "Run", zh: "执行" },
   runCommand: { en: "Run", zh: "执行" },
   captureVisualState: { en: "Capture", zh: "截屏" },
+  // Memory tools
+  rememberMemory: { en: "Remember", zh: "记住" },
+  queryMemory: { en: "Recall", zh: "查记忆" },
+  deleteMemory: { en: "Forget", zh: "删记忆" },
   // Workspace / diagnostics
   searchWorkspace: { en: "Search workspace", zh: "搜索工作区" },
   // 同一工具在 web/server 工具面用 snake_case 命名（packages/ai/tools/index.ts）。

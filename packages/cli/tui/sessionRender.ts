@@ -245,31 +245,6 @@ export function renderStatusLine(state: TuiState, maxWidth?: number) {
   return `${surface} ${body} \x1b[49m`;
 }
 
-/**
- * Compose the composer status line plus the optional queued-input badge under
- * one width budget.
- *
- * Required state (auto-confirm / running / dirty) owns the budget. The queue
- * badge is optional chrome: its width is reserved from the degradation budget
- * only while the degraded status can still fit beside it, and when the badge
- * alone would overflow `maxWidth` it is dropped entirely — terminal
- * end-clipping must never be the thing that hides auto-confirm, running or
- * dirty.
- */
-export function composeStatusLineWithQueue(
-  state: TuiState,
-  queueSuffix: string,
-  maxWidth?: number
-): string {
-  const hasBudget = typeof maxWidth === "number" && maxWidth > 0;
-  const queueWidth = queueSuffix ? visibleWidth(queueSuffix) : 0;
-  const budget = hasBudget ? Math.max(1, maxWidth! - queueWidth) : undefined;
-  const base = renderStatusLine(state, budget);
-  if (!queueSuffix) return base;
-  if (!hasBudget) return base + queueSuffix;
-  return visibleWidth(base) + queueWidth <= maxWidth! ? base + queueSuffix : base;
-}
-
 // ─── Welcome & prompt ───────────────────────────────────────────────────────
 
 // ── Scene builders for the welcome screen ──────────────────────────────────────────────
@@ -407,9 +382,15 @@ export function renderWelcome(
       )
     : null;
 
+  // Unauthenticated users see a short block naming the three working paths
+  // (local Codex / own subscription / platform login). The flag was resolved
+  // once from real auth sources at session start — this pure renderer never
+  // re-probes credentials, so resize repaints stay consistent.
+  const authGuidanceLine = state.showAuthGuidance ? t("welcomeAuthGuidance") : null;
+
   const body = sceneArt
-    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""]
-    : [versionLine, ...(updateLine ? [updateLine] : []), dailyWelcomeTip(), ""];
+    ? [sceneArt, versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""]
+    : [versionLine, ...(updateLine ? [updateLine] : []), ...(authGuidanceLine ? [authGuidanceLine] : []), dailyWelcomeTip(), ""];
   return body.join("\n");
 }
 
