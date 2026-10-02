@@ -1,4 +1,13 @@
 
+## 0.160.0-alpha.2
+
+## 0.160.0-alpha.2 (2026-10-02)
+
+### Bug Fixes
+
+* **desktop:** let the Windows smoke relaunch once instead of failing the whole release ([c3de435](https://github.com/nolotus/bun-nolo/commit/c3de435c5bea203805c4afabd49577d3775983e9))
+
+
 ## 0.160.0-alpha.1
 
 ## 0.160.0-alpha.1 (2026-10-02)

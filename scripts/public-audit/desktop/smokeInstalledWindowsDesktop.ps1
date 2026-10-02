@@ -585,13 +585,45 @@ if ($quickChatSmoke) {
 }
 
 $wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
-Write-SmokePhase "launching installed VBS entry"
-$launch = Start-Process -FilePath $wscript -ArgumentList @("""$launcher""") -WindowStyle Hidden -PassThru
-$launch.WaitForExit(10000) | Out-Null
-
 $serverBase = "http://127.0.0.1:$desktopSmokePort"
 $fallbackLog = Join-Path $env:TEMP "Nolo Desktop launcher.log"
-Wait-ForDesktopHealth -BaseUrl $serverBase -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog
+
+# 启动有界重试（2026-10-02）：Windows runner 上观测到已安装应用在 window:create 阶段以
+# "Failed to start websocket server: Unexpected" 直接退出，随后本步骤因拿不到健康检查而失败
+# （同一配置在 09-27 发布成功过，更像运行器瞬时状态而非稳定 bug）。允许一次重试：
+# 重试成功即继续取证据；两次都失败仍然抛错（fail closed，不掩盖稳定缺陷）。
+# 需要严格单次行为时设 NOLO_DESKTOP_SMOKE_LAUNCH_ATTEMPTS=1。
+$launchAttempts = if ($env:NOLO_DESKTOP_SMOKE_LAUNCH_ATTEMPTS) { [int]$env:NOLO_DESKTOP_SMOKE_LAUNCH_ATTEMPTS } else { 2 }
+if ($launchAttempts -lt 1) { $launchAttempts = 1 }
+$healthReached = $false
+$lastHealthFailure = $null
+for ($launchAttempt = 1; $launchAttempt -le $launchAttempts; $launchAttempt++) {
+  Write-SmokePhase "launching installed VBS entry (attempt $launchAttempt/$launchAttempts)"
+  $launch = Start-Process -FilePath $wscript -ArgumentList @("""$launcher""") -WindowStyle Hidden -PassThru
+  $launch.WaitForExit(10000) | Out-Null
+  try {
+    Wait-ForDesktopHealth -BaseUrl $serverBase -PrimaryLogPath $launcherLog -FallbackLogPath $fallbackLog
+    $healthReached = $true
+    break
+  } catch {
+    $lastHealthFailure = $_
+    # 保留首次失败的现场：Wait-ForDesktopHealth 抛出的异常带着 launcher 日志尾部，只写一行 phase
+    # 会让瞬时故障被吸收后无法判断"偶发"还是"越来越频繁"（review 发现 1）。
+    Write-Host "[smoke] attempt $launchAttempt failure: $_"
+    Write-SmokePhase "desktop health wait failed on attempt $launchAttempt/$launchAttempts"
+    if ($launchAttempt -lt $launchAttempts) {
+      # 应用"卡死"而不是"退出"时，残留进程会占着 single-instance lock 与内嵌端口，第二次尝试必然
+      # 白试；这里只清理安装在 $installDir 下的 bun/launcher 进程（Stop-SmokeInstalledProcesses 的
+      # 默认范围），与 release 模式特意跳过的"含 script roots 的首轮清理"不同（review 发现 2）。
+      # 清理本身失败（进程恰好在这之间退出）不能吃掉这次重试机会：记一行，继续重试。
+      try { Stop-SmokeInstalledProcesses } catch { Write-Host "[smoke] cleanup before retry failed: $_" }
+      Start-Sleep -Seconds 5
+    }
+  }
+}
+if (-not $healthReached) {
+  throw "installed desktop never became healthy after $launchAttempts attempt(s); last failure: $lastHealthFailure"
+}
 
 function Convert-SmokeResponseContent {
   param($Content)
