@@ -70,7 +70,6 @@ import {
   formatElapsedSeconds,
   isBackspaceSequence,
   renderPrompt,
-  composeStatusLineWithQueue,
   renderStatusLine,
   renderWelcome,
   DEFAULT_TUI_AGENT_KEY,
@@ -1330,21 +1329,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // path still read the inner buffer, so input "worked" but was invisible).
     const baseFixedInput = createFixedInput(output, {
       getStatusLine: (maxWidth) => {
-        // Show the queued-input count while a turn is running so the user can
-        // see their follow-ups are staged, not lost. Mirrors the Web/RN
-        // queue badge via the shared projectChatQueueStatus contract.
-        // composeStatusLineWithQueue treats the badge as optional chrome: it
-        // reserves the badge width only while the degraded status (auto
-        // confirm / running / dirty) still fits beside it, and drops the
-        // badge entirely when it alone would overflow the budget.
-        const queueSuffix =
-          chatQueueBinding && chatQueueBinding.queueLength() > 0
-            ? dimCliText(
-                ` · ${chatQueueBinding.queueLength()} ${t("queuedHint")}`,
-                resolveCliColorEnabled(),
-              )
-            : "";
-        return composeStatusLineWithQueue(state, queueSuffix, maxWidth);
+        // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
+        // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
+        return renderStatusLine(state, maxWidth);
       },
       getActivityLines: () =>
         activityIndicator.getActivityLines(resolveCliColorEnabled()),

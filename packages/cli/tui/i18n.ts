@@ -174,10 +174,6 @@ const STRINGS = {
     en: "Esc to stop",
     zh: "Esc 停止回复",
   },
-  queuedHint: {
-    en: "queued",
-    zh: "排队",
-  },
   flushQueuedIdleHint: {
     en: "Flushed {0} queued messages as one.",
     zh: "已把 {0} 条排队消息合并发送。",
@@ -999,6 +995,11 @@ const STRINGS = {
     en: "Complete it in the terminal, then nolo will continue.",
     zh: "在终端中完成操作后，nolo 将继续。",
   },
+  // Compact memory-tool trace
+  memoryDeleteRequestedCount: {
+    en: "requested deletion of {0}",
+    zh: "已请求删除 {0} 条",
+  },
   // Agent catalog sources
   agentSourcePlatform: {
     en: "Platform",
@@ -1046,6 +1047,10 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   execShell: { en: "Run", zh: "执行" },
   runCommand: { en: "Run", zh: "执行" },
   captureVisualState: { en: "Capture", zh: "截屏" },
+  // Memory tools
+  rememberMemory: { en: "Remember", zh: "记住" },
+  queryMemory: { en: "Recall", zh: "查记忆" },
+  deleteMemory: { en: "Forget", zh: "删记忆" },
   // Workspace / diagnostics
   searchWorkspace: { en: "Search workspace", zh: "搜索工作区" },
   // 同一工具在 web/server 工具面用 snake_case 命名（packages/ai/tools/index.ts）。
