@@ -9,10 +9,6 @@ import {
 } from "chat/messages/messageSlice";
 import type { MessageErrorMeta } from "chat/messages/types";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
-import {
-    canRunServerOwnedWebForegroundTurn,
-    runServerOwnedWebForegroundTurn,
-} from "ai/agent/serverOwnedWebForegroundTurn";
 import { readAndWait, selectById } from "database/dbSlice";
 import type { DialogConfig } from "app/types";
 import { createDialogMessageKeyAndId } from "database/keys";
@@ -330,49 +326,11 @@ export const handleSendMessageAction = async (
         const browseContextPrefix = isDesktopContext
             ? await resolveBrowseContextPrefix(userInputText)
             : "";
-
-        // 普通同服务器 Web turn 迁到 /api/agent/run server-owned execution plane。
-        // 用户行仍先按旧契约落库，保证点击发送后立刻刷新也不会丢输入；server
-        // continuation 会识别该 durable tail user，只负责一次 execution + assistant/tool
-        // 终态持久化。direct-browser BYOK / CLI / machine / 富编辑输入继续走旧路径。
-        const serverOwnedCandidate = await canRunServerOwnedWebForegroundTurn(
-            {
-                agentKey: agentKeyToUse,
-                agentConfig: agentConfigToUse,
-                userInput: effectiveRawUserInput,
-                dialogConfig,
-                runtimeOptions: effectiveRuntimeOptions,
-                contextBlocks: browseContextPrefix ? [browseContextPrefix] : undefined,
-            },
-            { dispatch, getState },
-        );
-        if (serverOwnedCandidate.eligible && serverOwnedCandidate.agentConfig) {
-            const serverOwnedResult = await runServerOwnedWebForegroundTurn(
-                {
-                    agentKey: agentKeyToUse,
-                    agentConfig: serverOwnedCandidate.agentConfig,
-                    userInput: effectiveRawUserInput,
-                    dialogConfig,
-                    runtimeOptions: effectiveRuntimeOptions,
-                    contextBlocks: browseContextPrefix ? [browseContextPrefix] : undefined,
-                },
-                { dispatch, getState },
-            );
-            // detached means the browser lost transport after an at-most-once admission;
-            // ForegroundTurnRecovery owns discovery. Never re-POST from here.
-            if (serverOwnedResult.aborted || serverOwnedResult.detached) return;
-            logQuickChatPerfStage(args.quickChatPerfStartedAt, "handle-send-message-server-owned-finished", {
-                dialogKey: dialogConfig.dbKey,
-                agentKey: agentKeyToUse,
-            });
-            return;
-        }
-
         const effectiveUserInput = browseContextPrefix
             ? `${browseContextPrefix}\n\n${userInputText}`
             : (effectiveRawUserInput ?? "");
 
-        // Legacy client-owned fallback：启动阶段对瞬态网络/超时错误自动退避重试 1 次。
+        // 步骤 3: 触发 Agent 的回合（启动阶段对瞬态网络/超时错误自动退避重试 1 次）
         let streamResult: any;
         const maxStartupAttempts = 2;
 
