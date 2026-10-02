@@ -1,21 +1,28 @@
+export const FIREFOX_EXTENSION_ID: string;
+
 export function extensionIdFromPublicKey(publicKeyBase64: string): string;
 
-export type NativeHostBrowser = "chrome" | "firefox";
-
+/**
+ * `browser` is typed as `string` on purpose: the implementation validates it at
+ * runtime (only "chrome" and "firefox" are supported, anything else throws), so
+ * narrowing to a union here would make callers that assert the throw stop
+ * type-checking. See nativeHostInstall.mjs nativeMessagingHostsDir().
+ */
 export function nativeMessagingHostsDir(options?: {
   home?: string;
   platform?: string;
-  browser?: NativeHostBrowser;
+  browser?: string;
 }): string;
 
+/** The resolved `browser` is echoed back in the returned paths. */
 export function resolveNativeHostInstallPaths(options?: {
   home?: string;
   connectorRoot?: string;
   platform?: string;
-  browser?: NativeHostBrowser;
+  browser?: string;
 }): {
   connectorRoot: string;
-  browser: NativeHostBrowser;
+  browser: string;
   extensionManifestPath: string;
   hostPath: string;
   templatePath: string;
@@ -31,13 +38,13 @@ export function installNativeHostManifest(options?: {
   platform?: string;
   extensionId?: string;
   nodePath?: string;
-  browser?: NativeHostBrowser;
+  browser?: string;
 }): {
   extensionId: string;
+  browser: string;
   nodePath: string;
   tokenPath: string;
   connectorRoot: string;
-  browser: NativeHostBrowser;
   extensionManifestPath: string;
   hostPath: string;
   templatePath: string;
