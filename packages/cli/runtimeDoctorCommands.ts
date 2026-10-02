@@ -16,7 +16,6 @@ import {
   type EnvLike,
 } from "./cliEnvHelpers";
 import { probeCliAuthorityBrokerHealth } from "./cliAuthorityBrokerHealth";
-import { resolveAuthGuidanceState } from "./client/authGuidance";
 
 function detectLocalAgentConfig(env: EnvLike) {
   return Boolean(readLocalAgentKey(env) || env.NOLO_AGENT_CACHE_READY);
@@ -217,41 +216,7 @@ export async function runDoctorRuntimeCommand(
   }
   output.write(`Provider: ${hasLocalProvider ? "available" : "missing"} (${detectProviderLabel(env)})\n`);
   output.write("Persistence: LevelDB local store\n");
-  // Probe the local-store stack the way the runtime loads it: levelLazyShim
-  // resolves "level" via createRequire, and `level` pulls classic-level, whose
-  // module top level eagerly loads its .node via node-gyp-build. Probing
-  // "level" matches the shipped dependency tree exactly — a flat bundled
-  // layout where "level" loads but a transitive dep like classic-level is not
-  // directly resolvable cannot produce a false negative. Resolution is rooted
-  // at this file's own URL so the published artifact checks the dependencies
-  // shipped inside its bundle, not a CWD-relative install.
-  try {
-    const { createRequire } = await import("node:module");
-    const requireFromHere = createRequire(import.meta.url);
-    requireFromHere("level");
-    output.write("Native binding (level): ok\n");
-  } catch (nativeError) {
-    output.write(
-      `Native binding (level): failed (${toErrorMessage(nativeError)}). ` +
-        `The bundled level dependency did not load. Reinstall with ` +
-        `\`npm install -g nolo-cli\`; if it still fails, run \`nolo doctor\` ` +
-        `and report this output.\n`
-    );
-  }
   output.write(`Sync: ${authToken ? "available" : "unavailable"}${authToken ? "" : " (not authenticated)"}\n`);
-  // Auth surface for the guidance feature: distinguish "platform login" (a
-  // bearer resolvePlatformAuthToken reads) from "local credentials" (the
-  // $NOLO_HOME/credentials/<provider>.json files `nolo auth`/`nolo run` use).
-  // Both come from resolveAuthGuidanceState so doctor and the welcome block
-  // never disagree about whether the user has a working path.
-  // `authToken` (already resolved above, includes --token) also counts as a
-  // platform login so this line agrees with the Sync line.
-  const authState = resolveAuthGuidanceState(env);
-  output.write(
-    `auth     platform login: ${authState.platformLoggedIn || Boolean(authToken) ? "yes" : "none"} · local credentials: ${
-      authState.localProviders.length > 0 ? authState.localProviders.join(", ") : "none"
-    }\n`
-  );
   output.write(`Server fallback: ${decision.runnable && decision.mode === "server" ? serverUrl : authToken || env.NOLO_SERVER || env.BASE_URL ? serverUrl : "unavailable"}\n`);
   if (decision.missingLocalCapabilities.length > 0) {
     output.write("Missing local capabilities:\n");
