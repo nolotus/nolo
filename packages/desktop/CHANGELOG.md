@@ -1,4 +1,13 @@
 
+## 0.96.4
+
+## 0.96.4 (2026-10-02)
+
+### Bug Fixes
+
+* **server:** 沙箱后端改 fail-closed（缺声明即拒绝执行，不再默认 worker） ([dfbda3e](https://github.com/nolotus/bun-nolo/commit/dfbda3e50d2cc75c60707a153ada2effc98667b0))
+
+
 ## 0.96.3
 
 ## 0.96.3 (2026-10-02)
