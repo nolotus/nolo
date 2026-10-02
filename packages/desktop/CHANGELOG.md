@@ -1,4 +1,13 @@
 
+## 0.161.0-alpha.1
+
+## 0.161.0-alpha.1 (2026-10-02)
+
+### Features
+
+* **tools:** add effective tool surface contract ([42bdfd1](https://github.com/nolotus/bun-nolo/commit/42bdfd1526e338c301afa21e0c818302d00ff285))
+
+
 ## 0.160.0-alpha.7
 
 ## 0.160.0-alpha.7 (2026-10-02)
