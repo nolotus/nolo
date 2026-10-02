@@ -6,16 +6,14 @@ export interface WaffoRechargePricing {
 
 export interface WaffoRechargeQuote {
   credits: number;
-  currency: "USD" | "CNY";
-  cnyPerUsd: number;
-  // USD 支线字段（currency === "USD" 时有值）
+  principalCny: number;
   principalUsd: string;
   feeUsd: string;
   totalUsd: string;
-  // CNY 支线字段（currency === "CNY" 时有值）
-  principalCny: string;
   feeCny: string;
   totalCny: string;
+  currency: "USD" | "CNY";
+  cnyPerUsd: number;
 }
 
 const MAX_CENTS = Number.MAX_SAFE_INTEGER;
@@ -54,7 +52,7 @@ export const quoteWaffoRecharge = (
     throw new Error("invalid Waffo recharge pricing");
   }
 
-  const creditsAmount = credits;
+  const principalCny = credits;
   if (currency === "CNY") {
     const principalCnyCents = credits * 100;
     // 直接在 fen 上取整；centsCeil 接收元单位会再 ×100，这里不能复用。
@@ -62,23 +60,20 @@ export const quoteWaffoRecharge = (
     const totalCnyCents = principalCnyCents + feeCnyCents;
     if (totalCnyCents > MAX_CENTS) throw new Error("Waffo recharge amount exceeds safe monetary precision");
     return {
-      credits: creditsAmount, currency, cnyPerUsd: pricing.cnyPerUsd,
-      principalUsd: "0.00", feeUsd: "0.00", totalUsd: "0.00",
-      principalCny: money(principalCnyCents), feeCny: money(feeCnyCents), totalCny: money(totalCnyCents),
+      credits, principalCny, principalUsd: "0.00", feeUsd: "0.00", totalUsd: "0.00",
+      feeCny: money(feeCnyCents), totalCny: money(totalCnyCents), currency, cnyPerUsd: pricing.cnyPerUsd,
     };
   }
-  // USD card: gross-up processor fees. Principal is credits converted via cnyPerUsd.
-  const principalUsdCents = centsRound(creditsAmount / pricing.cnyPerUsd);
+  // USD card: gross-up processor fees while keeping the CNY principal explicit.
+  const principalUsdCents = centsRound(principalCny / pricing.cnyPerUsd);
   const fixedCents = centsCeil(pricing.processorFixed);
   const grossCents = (principalUsdCents + fixedCents) / (1 - pricing.processorPercent);
   const totalUsdCents = centsCeil(grossCents / 100);
   if (totalUsdCents < principalUsdCents || totalUsdCents > MAX_CENTS) throw new Error("Waffo recharge amount exceeds safe monetary precision");
   const feeUsdCents = totalUsdCents - principalUsdCents;
   return {
-    credits: creditsAmount, currency, cnyPerUsd: pricing.cnyPerUsd,
-    principalUsd: money(principalUsdCents), feeUsd: money(feeUsdCents), totalUsd: money(totalUsdCents),
-    principalCny: (principalUsdCents * pricing.cnyPerUsd / 100).toFixed(2),
+    credits, principalCny, principalUsd: money(principalUsdCents), feeUsd: money(feeUsdCents), totalUsd: money(totalUsdCents),
     feeCny: (feeUsdCents * pricing.cnyPerUsd / 100).toFixed(2),
-    totalCny: (totalUsdCents * pricing.cnyPerUsd / 100).toFixed(2),
+    totalCny: (totalUsdCents * pricing.cnyPerUsd / 100).toFixed(2), currency, cnyPerUsd: pricing.cnyPerUsd,
   };
 };

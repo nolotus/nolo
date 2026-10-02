@@ -1,4 +1,0 @@
-# [test] preload 不生效，测试会读到开发者 shell 的真实 AUTH_TOKEN / NOLO_HOME。
-# 这里复用根目录同一份隔离（单一真值，勿在 cli 内另写一套）。
-# 只挂与 cli 相关的两项：PM2 env 中和 + NOLO_HOME/env 隔离；
-# StyleX 编译通道与 DOM globals 是 web 包的需求，cli 测试不需要。

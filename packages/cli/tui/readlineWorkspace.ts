@@ -41,7 +41,6 @@ import { checkStaleRun, listRunRecords, readRunRecord } from "../agentRunControl
 import { prefetchAgentCatalog } from "./agentCatalog";
 import {
   formatComposerAttachmentLine,
-  detectSubmittedImagePaths,
   mergeAttachedImages,
   popLastAttachedImage,
   summarizeAttachment,
@@ -71,6 +70,7 @@ import {
   formatElapsedSeconds,
   isBackspaceSequence,
   renderPrompt,
+  composeStatusLineWithQueue,
   renderStatusLine,
   renderWelcome,
   DEFAULT_TUI_AGENT_KEY,
@@ -1330,12 +1330,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // path still read the inner buffer, so input "worked" but was invisible).
     const baseFixedInput = createFixedInput(output, {
       getStatusLine: (maxWidth) => {
-        // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
-        // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
-        return renderStatusLine(state, maxWidth);
+        // Show the queued-input count while a turn is running so the user can
+        // see their follow-ups are staged, not lost. Mirrors the Web/RN
+        // queue badge via the shared projectChatQueueStatus contract.
+        // composeStatusLineWithQueue treats the badge as optional chrome: it
+        // reserves the badge width only while the degraded status (auto
+        // confirm / running / dirty) still fits beside it, and drops the
+        // badge entirely when it alone would overflow the budget.
+        const queueSuffix =
+          chatQueueBinding && chatQueueBinding.queueLength() > 0
+            ? dimCliText(
+                ` · ${chatQueueBinding.queueLength()} ${t("queuedHint")}`,
+                resolveCliColorEnabled(),
+              )
+            : "";
+        return composeStatusLineWithQueue(state, queueSuffix, maxWidth);
       },
-      getActivityLines: (layout) =>
-        activityIndicator.getActivityLines(resolveCliColorEnabled(), layout),
+      getActivityLines: () =>
+        activityIndicator.getActivityLines(resolveCliColorEnabled()),
       getQueueLines: () => {
         if (!chatQueueBinding || chatQueueBinding.queueLength() === 0) return [];
         const colorEnabled = resolveCliColorEnabled();
@@ -1871,7 +1883,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         });
         if (outcome.status === "success") {
           env.AUTH_TOKEN = outcome.token;
-          state = { ...state, showAuthGuidance: false };
         }
       } else if (res.action) {
         // `/switch` with no target (interactive picker) and `/switch
@@ -1955,24 +1966,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           return;
         }
         const flushCount = chatQueueBinding.queueLength();
-        const flushed = chatQueueBinding.snapshotAndClearQueueWithImages();
-        if (!flushed) return;
-        const merged = flushed.text;
+        const merged = chatQueueBinding.snapshotAndClearQueue();
+        if (!merged) return;
         // Idle: fold the composer draft into the merge so "Ctrl+S = send
         // everything pending right now" holds even when the user is mid-type.
         // Busy keeps the draft (the turn owns the screen; the draft is
         // preserved and editable once the turn ends).
         const draftIncluded = !busy && buffer.trim() !== "";
         const fullText = draftIncluded ? `${buffer}\n${merged}` : merged;
-        chatQueueBinding.enqueue(
-          flushed.imagePaths.length > 0
-            ? {
-                event: { kind: "user", text: fullText },
-                text: fullText,
-                imagePaths: flushed.imagePaths,
-              }
-            : fullText,
-        );
+        chatQueueBinding.enqueue(fullText);
         // Use a busy-aware message so the busy path does not contradict the
         // subsequent "Stopped this reply." line (review finding: two
         // contradictory toasts). The idle path is plain "flushed N as one".
@@ -2295,38 +2297,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const { actionGateHandler, confirmDestructiveAction } =
             buildInteractiveTurnHandlers();
           const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
-          // 附件诚实上报：文本内联的可读图片路径随队列携带（TurnRequest.imagePaths，
-          // drain 时才读成 dataURL）；剪贴板暂存图（state.attachedImages）队列带不了，
-          // 作为 attachmentCount 交给共享决议器 → queue-blocked（保留草稿 + 提示）。
-          const busyImages = detectSubmittedImagePaths(submittedText, state.cwd);
           const decision = binding.resolveSubmit({
             text: submittedText,
             isRunning: true,
-            attachmentCount: state.attachedImages.length,
           });
           if (decision.kind === "queue-text") {
-            if (busyImages.imagePaths.length > 0) {
-              const message = busyImages.message.trim();
-              binding.enqueue({
-                event: { kind: "user", text: message },
-                text: message,
-                imagePaths: busyImages.imagePaths,
-              });
-            } else {
-              binding.enqueue(decision.text);
-            }
+            binding.enqueue(decision.text);
             buffer = "";
             cursorPos = 0;
             fixedInput.repaint(buffer, cursorPos);
           } else if (decision.kind === "queue-blocked") {
-            // 带剪贴板附件的草稿队列带不了；保留草稿（不销毁），并明确提示，
-            // 绝不静默丢图。
-            if (state.attachedImages.length > 0) {
-              emitCommandOutput(
-                `[nolo] ${t("busyAttachmentsBlocked", String(state.attachedImages.length))}`,
-              );
-              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-            }
+            // Attachments / mentions can't be queued yet; keep the draft so
+            // the user can resend after the turn. No destructive action.
           } else if (
             decision.kind === "noop" &&
             !submittedText.trim() &&

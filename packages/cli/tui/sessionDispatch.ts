@@ -14,7 +14,7 @@ import {
   resolveCatalogPlatformAgents,
 } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
-import { detectFileReferences, detectSubmittedImagePaths, summarizeAttachment } from "./pasteImage";
+import { detectFileReferences, detectImagePaths, summarizeAttachment } from "./pasteImage";
 import { parseCliLocale, setCliLocale, t } from "./i18n";
 import { renderRecentDiagnostics } from "./recentDiagnostics";
 import {
@@ -34,7 +34,6 @@ import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
-import { resolveAuthGuidanceState } from "../client/authGuidance";
 import type { TuiState, TuiInputResult, ThinkingDisplayMode } from "./sessionTypes";
 
 export { DEFAULT_TUI_AGENT_KEY };
@@ -87,7 +86,6 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
     dialogOwnerId,
     dialogLabel: dialogEnvValue ?? "new",
     profileName: asOptionalTrimmedString(env.NOLO_PROFILE) ?? "local",
-    showAuthGuidance: resolveAuthGuidanceState(env).guidanceNeeded,
     serverUrl: (env.NOLO_SERVER || env.BASE_URL || DEFAULT_TUI_SERVER_URL).replace(
       /\/+$/,
       ""
@@ -185,9 +183,15 @@ export function handleTuiInput(
   }
 
   if (!isLikelySlashCommand(trimmed)) {
-    const detected = detectSubmittedImagePaths(trimmed, state.cwd);
-    const { hints, unreadableHints, imagePaths } = detected;
-    const finalMessage = detected.message;
+    const hints = detectImagePaths(trimmed, state.cwd);
+    // 只 strip 可读路径：unreadable token（文件不存在 / 被沙盒拦）必须保留在
+    // 原文里——用户打字提到尚不存在的 .png 不应被静默删字，路径文本本身是
+    // 兜底失败时的唯一线索。
+    const readableHints = hints.filter((hint) => !hint.unreadable);
+    const unreadableHints = hints.filter((hint) => hint.unreadable);
+    const stripped = stripImageTokens(trimmed, readableHints);
+    const finalMessage = stripped.length > 0 ? stripped : trimmed;
+    const imagePaths = readableHints.map((hint) => hint.resolvedPath);
     // 轻量文件引用：只做本地存在性确认，**不读内容、不上传**。路径文本原样留在
     // message 里（模型看到的是路径字符串，不是文件内容），我们只回一行明确提示，
     // 避免用户误以为模型已经看过文件。图片已由上面单独处理，这里排除它们。
@@ -737,11 +741,14 @@ export function handleTuiInput(
         output: t("customizeHint"),
       };
     case "/login": {
-      // `/login` (with or without args) now always launches the in-TUI
-      // device-code browser flow. No-arg resolves to DEFAULT_NOLO_SERVER_URL
-      // inside runTuiLogin/parseTuiLoginArgs, so bare `/login` is the intended
-      // "just log me in" path — the old MVP "set AUTH_TOKEN" hint is retired
-      // (env auth still works, it's just documented in `nolo login --help`).
+      // `/login` 无参数：仍输出 MVP 提示（老用户肌肉记忆），但补一句新能力；
+      // `/login --server <url>` 等带参形式直接发起 TUI 内登录流。
+      if (!argText) {
+        return {
+          nextState: state,
+          output: `${t("loginHint")}\n${t("loginTuiStart")}`,
+        };
+      }
       return {
         nextState: state,
         output: "",

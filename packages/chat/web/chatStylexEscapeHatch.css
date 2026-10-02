@@ -16,62 +16,6 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-/* ═══ AgentRunsPanel：运行区窄宽布局与语义色阶（普通 CSS 负责截断/响应式）═══ */
-.agent-runs-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1, 4px);
-  min-width: 0;
-  padding: var(--space-2, 8px) var(--space-3, 12px);
-  color: var(--textSecondary, #52525b);
-  font-size: var(--fontSize-sm, 13px);
-}
-
-.agent-runs-panel__row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1, 4px);
-  min-width: 0;
-  min-height: 28px;
-  padding: 4px 8px;
-  overflow: hidden;
-  border: 1px solid var(--borderSubtle, color-mix(in srgb, var(--border, #e4e4e7) 70%, transparent));
-  border-radius: 999px;
-  background: var(--surfaceRaised, color-mix(in srgb, var(--background, #fff) 94%, var(--textPrimary, #18181b)));
-  line-height: 20px;
-}
-
-.agent-runs-panel__name,
-.agent-runs-panel__detail,
-.agent-runs-panel__elapsed {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-runs-panel__name {
-  color: var(--textPrimary, #18181b);
-  font-weight: 600;
-}
-
-.agent-runs-panel__elapsed {
-  flex: 0 0 auto;
-  color: var(--textSecondary, #52525b);
-}
-
-.agent-runs-panel__more {
-  align-self: flex-start;
-  color: var(--textTertiary, #71717a);
-  font-size: var(--fontSize-xs, 12px);
-}
-
-@media (max-width: 420px) {
-  .agent-runs-panel__detail {
-    display: none;
-  }
-}
-
 /* ═══ 自 queue-badge.css 迁出（已全部迁入 queueBadgeStyles.ts StyleX）═══ */
 
 /* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
