@@ -14,6 +14,8 @@ import {
 } from "app/constants/mySections";
 import { legacySettingRoutes, settingRoutes } from "app/settings/routes";
 import ShareImportPage from "app/pages/ShareImportPage";
+import NewChatPage from "app/pages/NewChatPage";
+import PageLoader from "render/page/PageLoader";
 
 import PageLoading from "render/web/ui/PageLoading";
 import { getIsDesktopApp } from "app/utils/env";
@@ -23,7 +25,6 @@ const Lab = lazy(() => import("app/pages/Lab"));
 // Cloud-only pages: 用 cloudLazy 包装，local 模式返回 null 组件。
 const PricePage = cloudLazy("app/pages/Pricing/Price", () => null);
 const RechargePage = cloudLazy("app/pages/Recharge", () => null);
-const NewChatPage = lazy(() => import("app/pages/NewChatPage"));
 const AgentExplore = lazy(() => import("ai/agent/web/AgentExplore"));
 const GuidedAgentCreatePage = lazy(() => import("ai/agent/web/GuidedAgentCreatePage"));
 const LocalQuickCreateAgent = lazy(() => import("app/pages/LocalQuickCreateAgent"));
@@ -39,8 +40,6 @@ const TermsOfServicePage = lazy(() => import("app/pages/TermsOfServicePage"));
 const AUPPage = lazy(() => import("app/pages/AUPPage"));
 const AboutPage = lazy(() => import("app/pages/AboutPage"));
 const ContactPage = lazy(() => import("app/pages/ContactPage"));
-// Dialog and other content keys: keep dynamic so space/routes cannot force DialogPage into the shell graph.
-const PageLoader = lazy(() => import("render/page/PageLoader"));
 const BrowserPage = lazy(() => import("app/pages/browser-workbench/BrowserPage"));
 const BrowserFixturePage = lazy(
   () => import("app/pages/browser-workbench/BrowserFixturePage"),

@@ -6,6 +6,7 @@ import { toErrorMessage } from "core/errorMessage";
 import { compressImage } from "./compressImage";
 import { themeText } from "./theme";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
+import { stripImageTokens } from "./sessionInput";
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 export type ImageExtension = (typeof IMAGE_EXTENSIONS)[number];
@@ -723,4 +724,37 @@ export async function resolveAttachmentImageUrls({
     imageUrls = readResult.images.map((img) => img.dataUrl);
   }
   return { imageUrls };
+}
+export type SubmittedImagePaths = {
+  /** 全部命中的图片 token（含读不到的）。 */
+  hints: DetectedImageToken[];
+  /** 可读图片路径（resolved），将作为附件。 */
+  imagePaths: string[];
+  /** 读不到的图片 token（保留在原文里，不剥）。 */
+  unreadableHints: DetectedImageToken[];
+  /** 剥掉可读路径 token 后的消息；剥空则回退原文（与 direct 路径一致）。 */
+  message: string;
+};
+
+/**
+ * 从提交文本里检测可读图片路径。direct（sessionDispatch）与 busy 入队两条路径
+ * 共用，保证"哪些路径算附件、怎么剥 token"只有一份实现。
+ */
+export function detectSubmittedImagePaths(
+  text: string,
+  cwd: string,
+  opts: { wsl?: boolean } = {},
+): SubmittedImagePaths {
+  const trimmed = text.trim();
+  const hints = detectImagePaths(trimmed, cwd, opts);
+  // 只 strip 可读路径：unreadable token 必须保留在原文里（路径文本是兜底线索）。
+  const readableHints = hints.filter((hint) => !hint.unreadable);
+  const unreadableHints = hints.filter((hint) => hint.unreadable);
+  const stripped = stripImageTokens(trimmed, readableHints);
+  return {
+    hints,
+    imagePaths: readableHints.map((hint) => hint.resolvedPath),
+    unreadableHints,
+    message: stripped.length > 0 ? stripped : trimmed,
+  };
 }
