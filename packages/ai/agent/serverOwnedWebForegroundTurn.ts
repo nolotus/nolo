@@ -42,31 +42,48 @@ export async function canRunServerOwnedWebForegroundTurn(
   args: ServerOwnedWebForegroundTurnArgs,
   thunk: ThunkLike,
 ): Promise<{ eligible: boolean; agentConfig?: Agent }> {
-  let agentConfig = args.agentConfig ?? undefined;
-  if (!agentConfig) {
+  // 准入试探是**发送路径上的前置检查**，必须 fail-safe：凭据缺失、状态不完整或判定抛错
+  // 都只能静默降级回客户端路径，绝不该把「发送」本身打断（2026-10-02 review 指出的缺陷：
+  // 原实现先派发 readAndWait 再校凭据，且未保护会抛的选择器）。
+  try {
+    let currentServer: string | undefined;
+    let token: string | undefined;
     try {
-      const { readAndWait } = await import("database/dbSlice");
-      agentConfig = await thunk.dispatch(readAndWait(args.agentKey)).unwrap();
+      const state = thunk.getState();
+      currentServer = selectCurrentServer(state);
+      token = selectIdentityToken(state as never);
     } catch {
-      // If the config is not locally resolvable, keep the established client path.
+      // 部分初始化上下文（微前端 / 单测 / 早期挂载）里 settings 可能还没挂载，选择器会抛。
       return { eligible: false };
     }
-  }
+    // 凭据优先：没有服务器或令牌时不必去读 agent config（也避免多一次 DB 派发）。
+    if (!currentServer?.trim() || !token?.trim()) return { eligible: false };
 
-  const state = thunk.getState();
-  const currentServer = selectCurrentServer(state);
-  const token = selectIdentityToken(state as never);
-  return {
-    eligible: shouldUseServerOwnedWebForegroundTurn({
-      agentConfig: agentConfig as any,
-      userInput: args.userInput,
-      runtimeOptions: args.runtimeOptions,
-      currentServer,
-      token,
-      isDesktopApp: getIsDesktopApp(),
-    }),
-    agentConfig,
-  };
+    let agentConfig = args.agentConfig ?? undefined;
+    if (!agentConfig) {
+      try {
+        const { readAndWait } = await import("database/dbSlice");
+        agentConfig = await thunk.dispatch(readAndWait(args.agentKey)).unwrap();
+      } catch {
+        // If the config is not locally resolvable, keep the established client path.
+        return { eligible: false };
+      }
+    }
+
+    return {
+      eligible: shouldUseServerOwnedWebForegroundTurn({
+        agentConfig: agentConfig as any,
+        userInput: args.userInput,
+        runtimeOptions: args.runtimeOptions,
+        currentServer,
+        token,
+        isDesktopApp: getIsDesktopApp(),
+      }),
+      agentConfig,
+    };
+  } catch {
+    return { eligible: false };
+  }
 }
 
 /**

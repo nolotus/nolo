@@ -1,4 +1,13 @@
 
+## 0.160.0-alpha.5
+
+## 0.160.0-alpha.5 (2026-10-02)
+
+### Bug Fixes
+
+* **chat:** 准入判定改凭据优先 + fail-safe（修 alpha 上 5 个红用例的真因） ([8de7a95](https://github.com/nolotus/bun-nolo/commit/8de7a95aab0027be574b18dca34c70c988e184ea))
+
+
 ## 0.160.0-alpha.4
 
 ## 0.160.0-alpha.4 (2026-10-02)
