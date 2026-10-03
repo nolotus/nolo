@@ -16,7 +16,11 @@ import {
   selectAllMsgs,
   setMessages,
 } from "chat/messages/messageSlice";
-import { setStreamingMessageId } from "chat/messages/messageSessionStore";
+import {
+  protectTransientForCanonicalHandoff,
+  releaseTransientCanonicalHandoff,
+  setStreamingMessageId,
+} from "chat/messages/messageSessionStore";
 import { createSSEParser } from "ai/chat/parseMultilineSSE";
 import { performServerProxyFetchWithRetry } from "ai/chat/serverProxyRetry";
 import { canonicalizeToolName } from "ai/tools/toolNameAliases";
@@ -51,6 +55,14 @@ type ThunkLike = {
   dispatch: any;
   getState: () => RootState;
 };
+
+/**
+ * How long a finished transient stays shielded from initMsgs "replace" while
+ * waiting for its canonical DB row. Covers the synchronous handoff window
+ * (350ms) plus the 60s late reconciler, with margin. The reconciler releases
+ * the guard earlier once canonical is confirmed or reconciliation settles.
+ */
+export const SERVER_OWNED_CANONICAL_HANDOFF_PROTECT_MS = 65_000;
 
 /**
  * Convert the exact post-filter Web model surface into the authoritative
@@ -269,6 +281,11 @@ export async function runServerOwnedWebForegroundTurn(
     }).catch(() => {
       // Best-effort late reconciliation only. A later full history reload still
       // has enough canonical information to recover without re-running the turn.
+    }).finally(() => {
+      // Stop shielding the transient from initMsgs replace once reconciliation
+      // settled — either the canonical row is in (transient removed above) or
+      // the protection TTL is the only remaining backstop against a stuck guard.
+      releaseTransientCanonicalHandoff(dialogId, transientId);
     });
   };
 
@@ -379,6 +396,18 @@ export async function runServerOwnedWebForegroundTurn(
 
     sawDone = true;
 
+    // Shield the finished transient BEFORE stopping the stream cursor:
+    // initMsgs.fulfilled resolves writeMode="replace" whenever the dialog has
+    // no streaming rows, and a lagging DB snapshot would wipe this transient
+    // off screen before its canonical row is visible (2026-10-03 flicker).
+    // TTL covers the 350ms sync window + the 60s late reconciler with margin;
+    // the reconciler releases the guard explicitly when it settles.
+    protectTransientForCanonicalHandoff(
+      dialogId,
+      transientId,
+      SERVER_OWNED_CANONICAL_HANDOFF_PROTECT_MS,
+    );
+
     // `done` is authoritative for the live browser projection, so stop the
     // cursor immediately. Keep the active controller registered through the
     // short canonical-handoff window: it remains the send/Stop ownership gate
@@ -410,6 +439,7 @@ export async function runServerOwnedWebForegroundTurn(
     }
 
     if (canonicalVisible) {
+      releaseTransientCanonicalHandoff(dialogId, transientId);
       toolProjection.cleanup();
       thunk.dispatch(removeTransientMessage({ id: transientId, dialogId }));
     } else {
@@ -428,6 +458,7 @@ export async function runServerOwnedWebForegroundTurn(
   } finally {
     releaseClientController();
     if (!sawDone) {
+      releaseTransientCanonicalHandoff(dialogId, transientId);
       toolProjection.cleanup();
       thunk.dispatch(removeTransientMessage({ id: transientId, dialogId }));
     }

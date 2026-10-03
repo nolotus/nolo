@@ -76,18 +76,13 @@
 
 /* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
 
-/* .chat-input-card:focus-within —— 与基础 background/border-color/box-shadow
- * 及暗色 token 阴影同名竞争，原级联按源码顺序让本规则胜出；
- * 下沉 unlayered 保持聚焦态覆盖（含暗色下聚焦仍走本规则）。
+/* .chat-input-card:focus-within —— 已收编入 StyleX（chatInputCardStyles.card
+ * 的 ":focus-within" 条件值，2026-10-03）。同时升级为更醒目的物理描边
+ * （primary 70%）+ 实色聚焦光环（0 0 0 2px var(--primary)）+ 浮起阴影。
  * 暗色 `[data-theme="dark"]` box-shadow 覆盖不走本文件，
- * 已收编入 token agentThemeTokens.chatInputCardShadow。 */
-[data-hook~="chat-esc-chat-input-card"]:focus-within {
-  background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
-  border-color: color-mix(in srgb, var(--primary, #6366f1) 60%, var(--border, #e4e4e7));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--primary, #6366f1) 20%, transparent),
-    0 4px 12px -8px var(--shadowMedium);
-}
+ * 已收编入 token agentThemeTokens.chatInputCardShadow。
+ * QuickChat 的 home-primary / space-home-compact 表面仍在 QuickChat.css
+ * 里有自己的 :focus-within 覆盖（高特异性 :not(#\#) 链），保持不变。 */
 
 /* ═══ 自 LiveVoicePanel.css 迁出（LiveVoicePanel.tsx）═══ */
 
