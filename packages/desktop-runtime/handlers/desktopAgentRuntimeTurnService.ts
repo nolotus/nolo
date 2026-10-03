@@ -360,7 +360,12 @@ function buildDesktopStartAgentRunToolExecutor(args: {
 
   return async (call: AgentRuntimeToolCallInput) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
-    const agentKey = asTrimmedString(parsed.agentKey);
+    const rawAgentKey = asTrimmedString(parsed.agentKey);
+    const currentAgentKey = asTrimmedString(args.parentAgentRef);
+    const agentKey =
+      (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
+        ? (currentAgentKey || rawAgentKey)
+        : rawAgentKey;
     const task = asTrimmedString(parsed.task);
 
     if (!agentKey) {

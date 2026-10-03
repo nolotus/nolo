@@ -79,7 +79,7 @@ const AGENT_COLLABORATION_FULL_PROTOCOL = `**分档标准（两账判据：上�
 - 停止条件：不设固定轮数，不设「首轮一致即跳过」目标——一致可能来自共享盲点。低风险任务首轮一致且经核验可提前收；高风险任务即使一致也必须独立反证或外部核验。按质量条件与预算停止。
 - 防谄媚：交叉轮隐藏参与者身份（不隐藏证据来源），发言顺序随机化；多 agent 增加的是发现错误的机会，不是正确性担保，不能替代测试与实测。
 
-**选人**：只认 listAgents 返回的记录（默认优先从 preferred 发现），agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key。
+**选人**：用户若有多个专长 Agent，优先按专长分工（只认 listAgents 返回的记录，agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key）；若用户只有一个 Agent 或无专门候选，可直接省略 agentKey（或传 'self'）派发自身作为 Subagent 执行细分子任务。派发自身时拥有独立 runId 与上下文，无冲突面默认并发 fork，有依赖则串行。
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
    - 模型分档：中文写稿/长文/低 AI 味优先 \`gemini-3.8-flash\`（行文自然、高性价比）或 \`kimi-k3\`。顶档模型（Opus 5、GPT-5.6 Sol 及同级）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级；深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败；普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
    - 通道排除：只排除「本次改动作者」与「有当次错误证据的坏通道」（配额耗尽/余额不足/限流）。与执行者不同实例即为合法 reviewer（flash 档 review 成本可忽略）。不凭名字编造能力，不索取 prompt/密钥/数据库 key；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
@@ -92,7 +92,7 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 const AGENT_COMMIT_REVIEW_GATE = `**commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
 - **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。
-- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 nolo-plan「合并门」节）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，**不得凭 [no-review: …] 跳过**——该写法任何判据都解析不了（写了照样被拦）。自有闸门认 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING）；pre-push / pre-merge 另认一条 owner-only 豁免（正文 No-Review: <原因> 加 author email 命中 NO_REVIEW_OWNER_EMAILS 白名单，见 packages/nolo-ci/core/src/mapping.ts），agent 身份不适用。被卡住就如实报告卡点，由 owner 决定。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 docs/workflow.md「Review context contract」）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，**不得凭 [no-review: …] 跳过**——该写法任何判据都解析不了（写了照样被拦）。自有闸门认 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING）；pre-push / pre-merge 另认一条 owner-only 豁免（正文 No-Review: <原因> 加 author email 命中 NO_REVIEW_OWNER_EMAILS 白名单，见 packages/nolo-ci/core/src/mapping.ts），agent 身份不适用。被卡住就如实报告卡点，由 owner 决定。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
 
 const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。
@@ -116,7 +116,7 @@ const AGENT_COLLABORATION_INSTRUCTIONS = [
 // 拆分与 brief 纪律）在检测到派发意图时注入（dispatchIntent.ts）。
 const AGENT_COLLABORATION_MIN_INSTRUCTIONS = [
     `--- 多 Agent 派发（最小协议） ---
-- startAgentRun 启动子 Agent：agentKey 必须原样照抄 listAgents 返回的 agentKey 字段（不拼接/不推断/不换格式/不传 name）；wait:false（默认）异步返回 runId，派发后立即收尾等终态通知，禁止轮询；并行派发用同一 batchId 归组。
+- startAgentRun 启动子 Agent：省略 agentKey（或传 'self'）自动派发自身执行细分子任务；派其他 Agent 时 agentKey 必须原样照抄 listAgents 返回的 agentKey 字段（不拼接/不推断/不换格式/不传 name）；wait:false（默认）异步返回 runId，派发后立即收尾等终态通知，禁止轮询；并行派发用同一 batchId 归组。
 - 并行扇出只跨不同 credentialGroup：同一凭证禁止并发扇出；credentialed:false（凭证归属未知）的 agent 不是「独立凭证」，同批并发会被守卫拒绝，需串行派发或显式 allowUnknownCredential 确认风险。
 - 本轮未注入完整编排协议（无派发意图）；如确需多 Agent 编排，按本最小协议与 startAgentRun 工具描述执行，安全硬门见下。`,
     AGENT_PLATFORM_CREDITS_GATE,

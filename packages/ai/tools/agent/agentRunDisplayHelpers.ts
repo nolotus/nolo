@@ -134,6 +134,16 @@ export type AgentRunDisplayLabels = {
   logTail?: string;
   /** Header for list cards, e.g. `Runs (3)` / `运行 (3)`. */
   runs?: (count: number) => string;
+  /** Tool-count fact, e.g. `12 tools` / `12 个工具`. Defaults to English. */
+  toolCount?: (count: number) => string;
+  /** Status word in card bodies, e.g. `done` / `完成`. Defaults to the raw store status. */
+  statusWord?: (status: string) => string;
+  /**
+   * Row labels for card bodies (display labels only — raw log lines and
+   * protocol values are never translated). Values carry their own padding so
+   * the default English layout stays byte-identical.
+   */
+  rows?: Partial<Record<"agent" | "status" | "tools" | "note" | "error" | "task", string>>;
 };
 
 const DEFAULT_LABELS = {
@@ -143,6 +153,16 @@ const DEFAULT_LABELS = {
   runFinished: "Run finished",
   logTail: "Log tail:",
   runs: (count: number) => `Runs (${count})`,
+  toolCount: (count: number) => `${count} tools`,
+  statusWord: (status: string) => status,
+  rows: {
+    agent: "agent   ",
+    status: "status  ",
+    tools: "tools   ",
+    note: "note    ",
+    error: "error   ",
+    task: "task    ",
+  },
 } as const;
 
 function resolveLabels(labels?: AgentRunDisplayLabels) {
@@ -153,6 +173,9 @@ function resolveLabels(labels?: AgentRunDisplayLabels) {
     runFinished: labels?.runFinished ?? DEFAULT_LABELS.runFinished,
     logTail: labels?.logTail ?? DEFAULT_LABELS.logTail,
     runs: labels?.runs ?? DEFAULT_LABELS.runs,
+    toolCount: labels?.toolCount ?? DEFAULT_LABELS.toolCount,
+    statusWord: labels?.statusWord ?? DEFAULT_LABELS.statusWord,
+    rows: { ...DEFAULT_LABELS.rows, ...(labels?.rows ?? {}) },
   };
 }
 
@@ -285,12 +308,12 @@ export function formatStartRunCard(
   const lines = [L.runStarted];
   const identity = formatIdentityRow(agentName, opts?.runId);
   if (identity) {
-    lines.push(`  agent   ${identity}`);
+    lines.push(`  ${L.rows.agent}${identity}`);
   }
-  lines.push(`  status  ${icon} ${status}`);
+  lines.push(`  ${L.rows.status}${icon} ${L.statusWord(status)}`);
   const task = opts?.task?.trim();
   if (task) {
-    lines.push(`  task    ${clipText(task, TASK_PREVIEW_MAX)}`);
+    lines.push(`  ${L.rows.task}${clipText(task, TASK_PREVIEW_MAX)}`);
   }
   return lines.join("\n");
 }
@@ -311,11 +334,12 @@ const NOTE_PREVIEW_MAX = 72;
  */
 function formatProgressRow(
   toolCallCount?: number,
-  lastToolNames?: string[]
+  lastToolNames?: string[],
+  labels: { toolCount: (count: number) => string } = DEFAULT_LABELS
 ): string {
   const parts: string[] = [];
   if (typeof toolCallCount === "number" && Number.isFinite(toolCallCount)) {
-    parts.push(`${toolCallCount} tools`);
+    parts.push(labels.toolCount(toolCallCount));
   }
   if (lastToolNames && lastToolNames.length > 0) {
     parts.push(lastToolNames.join(", "));
@@ -346,22 +370,22 @@ export function formatStatusRunCard(
   const age = formatRunAge(opts?.timing, opts?.now);
   // Age sits on the status line rather than in its own row: "how long has this
   // been going" is read together with "is it still going", not separately.
-  const lines = [L.runStatus, `  ${icon} ${status}${age ? `   ${age}` : ""}`];
+  const lines = [L.runStatus, `  ${icon} ${L.statusWord(status)}${age ? `   ${age}` : ""}`];
   // Never render `agent   agent` — skip the row when there is no identity.
   const identity = formatIdentityRow(agentName, opts?.runId);
   if (identity) {
-    lines.push(`  agent   ${identity}`);
+    lines.push(`  ${L.rows.agent}${identity}`);
   }
-  const progress = formatProgressRow(opts?.toolCallCount, opts?.lastToolNames);
+  const progress = formatProgressRow(opts?.toolCallCount, opts?.lastToolNames, L);
   if (progress) {
-    lines.push(`  tools   ${progress}`);
+    lines.push(`  ${L.rows.tools}${progress}`);
   }
   const note = opts?.lastAssistantText?.trim();
   if (note) {
-    lines.push(`  note    ${clipText(note, NOTE_PREVIEW_MAX)}`);
+    lines.push(`  ${L.rows.note}${clipText(note, NOTE_PREVIEW_MAX)}`);
   }
   if (opts?.errorMessage?.trim()) {
-    lines.push(`  error   ${opts.errorMessage.trim()}`);
+    lines.push(`  ${L.rows.error}${opts.errorMessage.trim()}`);
   }
   if (shouldShowLogTail(status, opts?.includeLogTail, opts?.logLines)) {
     lines.push("", L.logTail, ...opts!.logLines!.map((l) => `  ${l}`));
@@ -421,13 +445,13 @@ export function formatFinishedRunCard(
   const L = resolveLabels(opts?.labels);
   const icon = getAgentRunStatusIcon(status);
   const age = formatRunAge(opts?.timing, opts?.now);
-  const summary = [status, age, formatProgressRow(opts?.toolCallCount, opts?.lastToolNames)]
+  const summary = [L.statusWord(status), age, formatProgressRow(opts?.toolCallCount, opts?.lastToolNames, L)]
     .filter(Boolean)
     .join(" · ");
   const lines = [L.runFinished, `  ${icon} ${summary}`];
   const identity = formatIdentityRow(agentName, opts?.runId);
   if (identity) {
-    lines.push(`  agent   ${identity}`);
+    lines.push(`  ${L.rows.agent}${identity}`);
   }
   const note = opts?.lastAssistantText?.trim();
   if (note) {
@@ -448,7 +472,7 @@ export function formatStopRunCard(
 ): string {
   const L = resolveLabels(labels);
   const icon = getAgentRunStatusIcon(status);
-  return `${L.runStopped}\n  ${icon} ${status}`;
+  return `${L.runStopped}\n  ${icon} ${L.statusWord(status)}`;
 }
 
 export function formatListRunsCard(
@@ -469,7 +493,7 @@ export function formatListRunsCard(
 
 export function formatNotFoundRunCard(labels?: AgentRunDisplayLabels): string {
   const L = resolveLabels(labels);
-  return `${L.runStatus}\n  ? not_found`;
+  return `${L.runStatus}\n  ? ${L.statusWord("not_found")}`;
 }
 
 /** Not exported: `isAgentRunTerminalStatus` is the only intended entry point. */

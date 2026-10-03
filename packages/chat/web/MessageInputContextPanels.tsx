@@ -11,6 +11,8 @@ import {
 import type { PendingImagePreview } from "./AttachmentsPreview";
 import type { ImageUiConfig } from "./messageInputAgentUi";
 import ActivityProgressPanel from "./ActivityProgressPanel";
+import AgentRunsPanel from "./AgentRunsPanel";
+import type { AgentRunScope } from "./agentRunStore";
 import {
   MessageInputConfirmBar,
   type MessageInputConfirmBarProps,
@@ -138,15 +140,20 @@ export const MessageInputChip = memo(function MessageInputChip({
 export type MessageInputActivityPanelProps = {
   messages: any[];
   isActive: boolean;
+  agentRunScope?: AgentRunScope;
 };
 
 export const MessageInputActivityPanel = memo(
   function MessageInputActivityPanel({
     messages,
     isActive,
+    agentRunScope,
   }: MessageInputActivityPanelProps) {
     return (
-      <ActivityProgressPanel messages={messages} isActive={isActive} />
+      <>
+        {agentRunScope && <AgentRunsPanel scope={agentRunScope} />}
+        <ActivityProgressPanel messages={messages} isActive={isActive} />
+      </>
     );
   }
 );
