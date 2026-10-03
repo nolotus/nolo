@@ -1157,6 +1157,11 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   exa_search: { en: "Web search", zh: "联网搜索" },
   // Skill loading
   loadSkill: { en: "Used Skill", zh: "使用技能" },
+  // Agent orchestration
+  listAgents: { en: "List agents", zh: "列出智能体" },
+  readAgent: { en: "Read agent", zh: "读取智能体" },
+  startAgentRun: { en: "Start agent", zh: "启动智能体" },
+  controlAgentRun: { en: "Control agent", zh: "控制智能体" },
 };
 
 /** Localized action label for a tool, falling back to the raw tool name. */

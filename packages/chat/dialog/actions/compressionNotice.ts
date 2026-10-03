@@ -9,7 +9,7 @@
  */
 
 import { toast } from "app/utils/toast";
-import i18n from "app/i18n";
+import i18n from "app/i18n/runtime";
 
 export function notifyCompressionSuccess(): void {
   try {

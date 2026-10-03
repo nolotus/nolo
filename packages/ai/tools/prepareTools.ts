@@ -1,4 +1,4 @@
-import i18n from "app/i18n";
+import i18n from "app/i18n/runtime";
 import { toolRegistry } from ".";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import { sanitizeToolForProvider } from "./toolSchemaCompatibility";

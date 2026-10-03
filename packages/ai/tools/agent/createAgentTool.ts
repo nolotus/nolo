@@ -12,7 +12,7 @@ import type { FormData as AgentFormData } from "ai/agent/createAgentSchema";
 import { selectIdentityUserBalance } from "identity/selectors";
 import { selectIdentityUserId } from "identity/selectors";
 import type { ModelWithProvider } from "ai/llm/models";
-import i18n from "app/i18n";
+import i18n from "app/i18n/runtime";
 import { toTrimmedString } from "core/toTrimmedString";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
 import type { ToolExecutorContext } from "ai/tools";

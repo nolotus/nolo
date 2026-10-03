@@ -21,7 +21,6 @@ import { create, fromBinary, toBinary, toJson, fromJson } from "@bufbuild/protob
 import type { JsonValue } from "@bufbuild/protobuf";
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
 
-import type { AgentRuntimeAgentConfig } from "../hostAdapter";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeOutputBlock,
@@ -2328,12 +2327,4 @@ export function createCursorProvider(
   };
 }
 
-/**
- * Detect cursor OAuth agents (apiKeyRef === "cursor").
- * Mirrors isAnthropicOAuthAgent / isAntigravityOAuthAgent.
- */
-export function isCursorOAuthAgent(
-  agent: Pick<AgentRuntimeAgentConfig, "apiKeyRef">,
-): boolean {
-  return agent.apiKeyRef?.trim().toLowerCase() === "cursor";
-}
+export { isCursorOAuthAgent } from "./isCursorOAuthAgent";

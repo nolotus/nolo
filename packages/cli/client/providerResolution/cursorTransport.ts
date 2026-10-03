@@ -5,13 +5,13 @@
  * 未命中本通道返回 null，交给 resolveLocalProvider 链上的下一条。
  */
 import type { AgentRuntimeResult, AgentRuntimeToolCallInput } from "../../../agent-runtime";
-import {
-  createCursorProvider,
-  isCursorOAuthAgent,
-  readCursorUpstreamFailure,
-  type CursorSearchWorkspaceArgs,
-  type CursorListWorkspaceEntriesArgs,
+// cursorProvider（含 @bufbuild/protobuf 与生成的 agent_pb）常驻约 40 MB，
+// 只有 Cursor OAuth agent 才需要：类型静态导入（编译期擦除），实现按需动态加载。
+import type {
+  CursorSearchWorkspaceArgs,
+  CursorListWorkspaceEntriesArgs,
 } from "../../../agent-runtime/cursor/cursorProvider";
+import { isCursorOAuthAgent } from "../../../agent-runtime/cursor/isCursorOAuthAgent";
 import {
   internalSearchWorkspace,
   internalListWorkspaceEntries,
@@ -30,6 +30,9 @@ export const resolveCursorTransport: ProviderResolver = async (ctx) => {
   // the dedicated cursorProvider which translates nolo messages to the
   // AgentRunRequest protobuf and streams AgentServerMessage frames.
   if (isCursorOAuthAgent(agentConfig)) {
+    const { createCursorProvider, readCursorUpstreamFailure } = await import(
+      "../../../agent-runtime/cursor/cursorProvider"
+    );
     const accessToken = await apiKeyRefResolver("cursor");
     if (!accessToken) {
       throw new Error(

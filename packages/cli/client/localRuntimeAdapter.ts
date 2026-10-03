@@ -251,10 +251,6 @@ import {
   resolveCredentialKeyWithFallback,
 } from "../credentialAvailability";
 import {
-  createCursorProvider,
-  isCursorOAuthAgent,
-} from "../../agent-runtime/cursor/cursorProvider";
-import {
   fetchCodexResponsesCompletion,
   isCodexOAuthAgent,
 } from "../../agent-runtime/codexResponsesProvider";
