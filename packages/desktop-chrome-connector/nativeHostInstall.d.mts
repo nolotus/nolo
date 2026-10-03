@@ -1,44 +1,5 @@
 export const FIREFOX_EXTENSION_ID: string;
 
-/** Browsers this installer can register a native messaging host for. */
-export const NATIVE_HOST_BROWSERS: string[];
-
-/** Platforms where a user-level native messaging manifest actually works (no Windows yet). */
-export const NATIVE_HOST_SUPPORTED_PLATFORMS: string[];
-
-/** Browsers that look installed on this machine (profile-directory check only, no profile is read). */
-export function detectInstalledBrowsers(options?: { home?: string; platform?: string }): string[];
-
-/**
- * Which browsers to register for: an explicit `browser` wins ("all" = every supported browser),
- * otherwise Chrome plus every other detected browser.
- */
-export function resolveNativeHostInstallTargets(options?: {
-  home?: string;
-  platform?: string;
-  browser?: string;
-}): string[];
-
-/** Registers several browsers at once, collecting per-browser failures instead of throwing. */
-export function installNativeHostManifests(options?: {
-  home?: string;
-  connectorRoot?: string;
-  platform?: string;
-  extensionId?: string;
-  nodePath?: string;
-  browser?: string;
-}): {
-  installs: Array<{ browser: string } & Record<string, unknown>>;
-  errors: Array<{ browser: string; message: string }>;
-};
-
-/**
- * Returns the throwaway-checkout root wrapping this path (a linked git worktree, or a path inside
- * `<checkout>/.worktrees/<name>`), or null when the path is stable enough to embed absolute paths in
- * a native messaging wrapper.
- */
-export function isThrowawayCheckout(root: string): string | null;
-
 export function extensionIdFromPublicKey(publicKeyBase64: string): string;
 
 /**

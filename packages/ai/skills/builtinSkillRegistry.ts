@@ -70,13 +70,6 @@ import {
   buildSearchSpaceSkillPageKey,
 } from "./searchSpaceSkill";
 import {
-  AUTO_REVIEW_SKILL_SLUGS,
-  buildAutoReviewSkillConfig,
-  buildAutoReviewSkillContentBySlug,
-  buildAutoReviewSkillId,
-  buildAutoReviewSkillPageKey,
-} from "./autoReviewSkill";
-import {
   WORKTREE_SKILL_SLUGS,
   buildWorktreeSkillConfig,
   buildWorktreeSkillContentBySlug,
@@ -211,13 +204,6 @@ const SOURCES: BuiltinSkillSource[] = [
     buildPageKey: buildSearchSpaceSkillPageKey,
     buildConfig: buildSearchSpaceSkillConfig,
     buildContent: buildSearchSpaceSkillContentBySlug,
-  },
-  {
-    slugs: AUTO_REVIEW_SKILL_SLUGS,
-    buildSkillId: buildAutoReviewSkillId,
-    buildPageKey: buildAutoReviewSkillPageKey,
-    buildConfig: buildAutoReviewSkillConfig,
-    buildContent: buildAutoReviewSkillContentBySlug,
   },
   {
     slugs: WORKTREE_SKILL_SLUGS,

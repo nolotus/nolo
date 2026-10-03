@@ -1,9 +1,9 @@
 /**
- * Web renderer for the isomorphic `ask_user` state machine.
+ * Web (HTML/CSS) renderer for the isomorphic `ask_user` state machine.
  *
- * Layout and per-state styling live in StyleX (`askChoicePanelStyles.ts`); the
- * component still mirrors the RN AskChoicePanel and shares the same reducer
- * from `ai/tools/askChoiceState`.
+ * Mirrors the RN AskChoicePanel but uses plain DOM elements + the literal
+ * `.ui-choice-*` classes restored in messagesStylexEscapeHatch.css. Shares the
+ * same reducer from `ai/tools/askChoiceState`.
  *
  * Contract (docs/plans/2026-09-15-ask-user-unified-interaction.md):
  * - A single-select answer is one step: picking (click / Enter / number key)
@@ -21,7 +21,6 @@
  *   single-select question (advance/send); on multi-select it only blurs.
  */
 
-import * as stylex from "@stylexjs/stylex";
 import React, {
   useCallback,
   useEffect,
@@ -55,7 +54,6 @@ import {
   type AskChoiceSubmitCommand,
   createAskChoiceSubmitCommand,
 } from "../askChoiceSubmitCommand";
-import { askChoicePanelStyles as styles } from "./askChoicePanelStyles";
 
 interface AskChoicePanelWebProps {
   rawData: any;
@@ -66,8 +64,10 @@ interface AskChoicePanelWebProps {
   /** tool-message id，宿主持久化用；面板自身不落库。 */
   messageId?: string;
   /**
-   * Persist the submitted answers before the panel sends the next user turn.
-   * The panel awaits this Promise: persist 失败时绝不发送，面板保持 active 可重试。
+   * Persist the submitted answers before the panel sends the next user turn
+   * (host: await write(dbKey).unwrap() + updateToolMessage). The panel awaits
+   * the returned Promise: persist 失败时绝不发送，面板保持 active 可重试。
+   * Absent (legacy hosts) → send only.
    */
   onResolve?: (resolution: AskChoiceResolution) => void | Promise<void>;
 }
@@ -86,25 +86,19 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   void dbKey;
   void messageId;
 
-  // Merge rawData + toolPayload.input for robustness：运行中的 tool 行只有 args
-  // （server-owned transient 投影、streaming 快照），还没有 tool_result 内容；
-  // 单问题 question+choices 也走这条兜底。
+  // Merge rawData + toolPayload.input for robustness
   const merged = {
     ...rawData,
-    ...(rawData?.questions
-      ? {}
-      : toolPayload?.input?.questions
-        ? { questions: toolPayload.input.questions }
-        : {}),
+    ...(rawData?.questions ? {} : toolPayload?.input?.questions ? { questions: toolPayload.input.questions } : {}),
   };
   const normalized = normalizeAskChoiceArgs(merged);
   const questions = normalized.questions;
 
   // Restore persisted answers: a resolved form comes back read-only and
   // navigable instead of resetting to an empty active form after reload.
-  // 统一 resolved 谓词：`answers: []` 等旧 payload 不再误判为已解决。
   const savedAnswers = useMemo(() => {
     if (rawData?.cancelled) return { phase: "cancelled" as const };
+    // 统一 resolved 谓词：`answers: []` 等旧 payload 不再误判为已解决。
     if (isAskChoiceResolved(rawData)) {
       return {
         answers: rawData.answers,
@@ -125,6 +119,7 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   // Local view index for resolved (read-only) forms — the shared reducer is
   // frozen once submitted, so review navigation is a pure view concern.
   const [reviewIndex, setReviewIndex] = useState(0);
+
   // Latest-ref：宿主 onResolve 闭包随渲染更新（rawData/toolPayload 最新值），
   // 提交 command 只创建一次，始终调用最新 onResolve。
   const onResolveRef = useRef(onResolve);
@@ -146,14 +141,23 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
   const otherInputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  // Reconcile questionStates when questions array grows after mount.
+  // useReducer's lazy init (createInitialAskChoiceState) only runs once; if
+  // rawData streams in and questions grow from N→M, the initial questionStates
+  // stays length N. Dispatch HYDRATE_QUESTIONS to append empty states for the
+  // new questions so tab switches don't read undefined.
   useEffect(() => {
     if (questions.length !== state.questionStates.length) {
       dispatchAction({ type: "HYDRATE_QUESTIONS", questions });
     }
   }, [questions, state.questionStates.length, dispatchAction]);
 
+  // Read-only gate：宿主声明非交互（streaming 快照）或 reducer 已 submitted/cancelled。
+  // 先于 hooks 计算供依赖数组使用；restored "submitted" 面板绝不重发。
   const isResolved = !interactive || state.phase !== "active";
 
+  // 校验后焦点：无效提交把焦点移到当前题（reducer 已跳到第一个未答题）的
+  // 第一个可交互控件，键盘用户无需重新 Tab 查找。
   useEffect(() => {
     if (isResolved || !state.validationAttempted) return;
     const q = questions[state.activeIndex];
@@ -169,25 +173,26 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
 
   if (questions.length === 0) return null;
 
+  // Guard against state/questions length mismatch while streaming (see above).
   const clampedReview = Math.min(reviewIndex, questions.length - 1);
   const clampedActiveIndex = Math.min(
     isResolved ? clampedReview : state.activeIndex,
     questions.length - 1,
   );
   const activeQ: AskChoiceQuestion | undefined = questions[clampedActiveIndex];
-  const activeQs: QuestionUiState | undefined =
-    state.questionStates[clampedActiveIndex];
+  const activeQs: QuestionUiState | undefined = state.questionStates[clampedActiveIndex];
 
   if (!activeQ || !activeQs) return null;
 
   const formCanSubmit = canSubmit(state);
+  // 是否阻止自动完成：仍仅由 multi-select 决定（多选无法推断“选完”）。
   const needsExplicitSubmit = formRequiresExplicitSubmit(questions);
+  // 是否显示显式动作（完成/跳过）：多选题表单，或当前是可跳过（optional 且未答）的题。
   const activeCanSkip =
     state.phase === "active" &&
     !activeQ.required &&
     !questionHasAnswer(activeQ, activeQs);
-  const showAction =
-    needsExplicitSubmit || activeCanSkip || persistFailed || submitting;
+  const showAction = needsExplicitSubmit || activeCanSkip || persistFailed || submitting;
   const actionLabel = persistFailed
     ? "重试"
     : activeCanSkip
@@ -210,18 +215,24 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
 
   const goPrev = () => {
     if (state.phase === "active") dispatchAction({ type: "PREV_TAB" });
-    else setReviewIndex((value) => Math.max(0, value - 1));
+    else setReviewIndex((v) => Math.max(0, v - 1));
   };
 
   const goNext = () => {
     if (state.phase === "active") dispatchAction({ type: "NEXT_TAB" });
-    else setReviewIndex((value) => Math.min(questions.length - 1, value + 1));
+    else setReviewIndex((v) => Math.min(questions.length - 1, v + 1));
   };
 
+  // 唯一的显式提交入口：
+  // - 无效表单 → 仅校验反馈（reducer 保持 active，跳第一个未答必答题）；
+  // - 有效表单 → async submit command：await 持久化成功后才发送，
+  //   然后冻结为只读 submitted；持久化失败 → 不发送、展示错误、可重试；
+  // - in-flight 期间重复点击被 command 去重（双击只算一次）。
   const handleExplicitSubmit = useCallback(() => {
     if (isResolved || state.phase !== "active") return;
     const command = submitCommandRef.current!;
     if (command.isSubmitting()) return;
+    // 预演 SUBMIT：无效时 reducer 保持 active（只置校验态/跳题），不进入 submitted。
     const next = askChoiceReducer(state, { type: "SUBMIT" });
     if (next.phase !== "submitted") {
       setReviewIndex(state.activeIndex);
@@ -239,13 +250,17 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
       .then((outcome) => {
         setSubmitting(false);
         if (outcome.status === "sent") {
+          // 持久化成功且已发送：现在才冻结为只读 submitted。
           dispatchAction({ type: "SUBMIT" });
         } else if (outcome.status === "persist-failed") {
+          // 保持 active，面板可交互，展示「保存失败，请重试」。
           setPersistFailed(true);
         }
       });
   }, [isResolved, state, questions, dispatchAction]);
 
+  // 动作按钮：当前可跳过的 optional 题 → SKIP_CURRENT（reducer 只输出信号，
+  // effect 负责前进/发送）；其余（多选表单的「完成」/ 失败重试）→ 事务式提交。
   const handleAction = useCallback(() => {
     if (activeCanSkip && !persistFailed) {
       dispatchAction({ type: "SKIP_CURRENT" });
@@ -254,6 +269,10 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
     handleExplicitSubmit();
   }, [activeCanSkip, persistFailed, dispatchAction, handleExplicitSubmit]);
 
+  // 单选「一步完成」信号消费：reducer 只输出信号，副作用在这里发生。
+  // - advance：自动跳到下一未答题后，把焦点移到该题的第一个控件；
+  // - complete：整表已答完 → 走与显式提交相同的事务式 command（persist → send）。
+  // 用对象身份去重：同一信号只处理一次（重渲染不会重发）。
   const handledSignalRef = useRef<AskChoiceAnswerSignal | null>(null);
   useEffect(() => {
     const signal = state.answerSignal ?? null;
@@ -272,33 +291,25 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
     handleExplicitSubmit();
   }, [state.answerSignal, questions, handleExplicitSubmit]);
 
-  const handleListKeyDown = (event: React.KeyboardEvent) => {
-    if (
-      isResolved ||
-      (event.key !== "ArrowDown" && event.key !== "ArrowUp")
-    ) {
-      return;
-    }
-    event.preventDefault();
-    const delta = event.key === "ArrowDown" ? 1 : -1;
-    const maxIndex = activeQ.allowOther
-      ? activeQ.choices.length
-      : activeQ.choices.length - 1;
-    const next = Math.max(
-      0,
-      Math.min(maxIndex, activeQs.cursorIndex + delta),
-    );
+  // Arrow keys move the cursor across choice rows (and the Other row), giving
+  // the panel practical keyboard behavior on top of native tab/enter focus.
+  const handleListKeyDown = (e: React.KeyboardEvent) => {
+    if (isResolved || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+    e.preventDefault();
+    const delta = e.key === "ArrowDown" ? 1 : -1;
+    const maxIndex = activeQ.allowOther ? activeQ.choices.length : activeQ.choices.length - 1;
+    const next = Math.max(0, Math.min(maxIndex, activeQs.cursorIndex + delta));
     dispatchAction({ type: "MOVE_CURSOR", delta });
     if (next >= activeQ.choices.length) otherInputRef.current?.focus();
     else rowRefs.current[next]?.focus();
   };
 
   return (
-    <div {...stylex.props(styles.wrap)}>
+    <div className="ui-choice-wrap ui-choice-panel">
       {onDelete && (
         <button
           type="button"
-          {...stylex.props(styles.deleteButton)}
+          className="ui-choice-delete"
           onClick={onDelete}
           title="删除"
           aria-label="删除"
@@ -307,38 +318,28 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         </button>
       )}
 
+      {/* Tab bar：当前 / 已完成 / 未完成（校验后标红）状态可见；resolved 仍可切题回看 */}
       {questions.length > 1 && (
-        <div {...stylex.props(styles.tabs)} role="tablist">
-          {questions.map((question, index) => {
-            const answered = isQuestionAnswered(
-              question,
-              state.questionStates[index],
-            );
-            const hasError =
-              !answered && state.validationAttempted && !isResolved;
+        <div className="ui-choice-tabs" role="tablist">
+          {questions.map((q, i) => {
+            const answered = isQuestionAnswered(q, state.questionStates[i]);
+            const hasError = !answered && state.validationAttempted && !isResolved;
             return (
               <button
-                key={question.id}
+                key={q.id}
                 type="button"
                 role="tab"
-                aria-selected={index === clampedActiveIndex}
-                {...stylex.props(
-                  styles.tab,
-                  index === clampedActiveIndex && styles.tabActive,
-                  answered && styles.tabAnswered,
-                  hasError && styles.tabError,
-                )}
-                onClick={() => goToTab(index)}
+                aria-selected={i === clampedActiveIndex}
+                className={`ui-choice-tab ${i === clampedActiveIndex ? "active" : ""} ${
+                  answered ? "answered" : ""
+                } ${hasError ? "has-error" : ""}`}
+                onClick={() => goToTab(i)}
               >
-                {question.header || `Q${index + 1}`}
+                {q.header || `Q${i + 1}`}
                 {answered ? (
-                  <LuCheck
-                    size={11}
-                    {...stylex.props(styles.tabFlag)}
-                    aria-hidden="true"
-                  />
+                  <LuCheck size={11} className="ui-choice-tab-flag" aria-hidden="true" />
                 ) : hasError ? (
-                  <span {...stylex.props(styles.tabFlag)}>!</span>
+                  <span className="ui-choice-tab-flag ui-choice-tab-error-flag">!</span>
                 ) : null}
               </button>
             );
@@ -346,40 +347,38 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         </div>
       )}
 
-      <div {...stylex.props(styles.questionRow)}>
+      {/* Question */}
+      <div className="ui-choice-question">
         {activeQ.question}
         {activeQ.required && !isResolved && (
-          <span {...stylex.props(styles.required)} aria-hidden="true">
+          <span className="ui-choice-required" aria-hidden="true">
             *
           </span>
         )}
         {questions.length > 1 && (
-          <span {...stylex.props(styles.progress)}>
+          <span className="ui-choice-progress">
             {clampedActiveIndex + 1}/{questions.length}
           </span>
         )}
       </div>
 
-      {activeQ.multiSelect && (
-        <div {...stylex.props(styles.hint)}>可多选，选完后点“完成”</div>
-      )}
-      {state.phase === "cancelled" && (
-        <div {...stylex.props(styles.hint)}>已取消</div>
-      )}
+      {activeQ.multiSelect && <div className="ui-choice-hint">可多选，选完后点“完成”</div>}
+      {state.phase === "cancelled" && <div className="ui-choice-hint">已取消</div>}
 
       {showActiveError && (
-        <div {...stylex.props(styles.error)} role="alert">
+        <div className="ui-choice-error" role="alert">
           此题为必答，请先作答再提交
         </div>
       )}
 
+      {/* Choices */}
       <div
-        {...stylex.props(styles.list)}
+        className="ui-choice-list"
         role={activeQ.multiSelect ? "group" : "radiogroup"}
         aria-label={activeQ.question}
         onKeyDown={handleListKeyDown}
       >
-        {activeQ.choices.map((choice, index) => {
+        {activeQ.choices.map((choice, i) => {
           const isSelected = activeQ.multiSelect
             ? activeQs.selectedIds.includes(choice.id)
             : activeQs.pickedId === choice.id;
@@ -387,85 +386,66 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
             <button
               key={choice.id}
               type="button"
-              ref={(element) => {
-                rowRefs.current[index] = element;
+              ref={(el) => {
+                rowRefs.current[i] = el;
               }}
-              {...stylex.props(styles.row, isSelected && styles.rowSelected)}
-              onClick={() =>
-                dispatchAction({
-                  type: "SELECT_CHOICE",
-                  choiceId: choice.id,
-                })
-              }
+              className={`ui-choice-row ${isSelected ? "selected" : ""}`}
+              onClick={() => dispatchAction({ type: "SELECT_CHOICE", choiceId: choice.id })}
               disabled={isResolved || submitting}
               role={activeQ.multiSelect ? "checkbox" : "radio"}
               aria-checked={isSelected}
             >
-              <span {...stylex.props(styles.rowLeft)}>
+              <span className="ui-choice-row-left">
                 {activeQ.multiSelect ? (
                   isSelected ? (
-                    <LuCheck size={16} {...stylex.props(styles.check)} />
+                    <LuCheck size={16} className="ui-choice-check" />
                   ) : (
-                    <LuSquare size={16} {...stylex.props(styles.uncheck)} />
+                    <LuSquare size={16} className="ui-choice-uncheck" />
                   )
                 ) : (
-                  <span
-                    {...stylex.props(
-                      styles.radio,
-                      isSelected && styles.radioChecked,
-                    )}
-                  >
-                    {isSelected && (
-                      <span {...stylex.props(styles.radioInner)} />
-                    )}
+                  <span className={`ui-choice-radio ${isSelected ? "checked" : ""}`}>
+                    {isSelected && <span className="ui-choice-radio-inner" />}
                   </span>
                 )}
-                <span {...stylex.props(styles.rowText)}>
-                  <span {...stylex.props(styles.rowLabel)}>{choice.label}</span>
+                <span className="ui-choice-row-text">
+                  <span className="ui-choice-row-label">{choice.label}</span>
                   {choice.detail && (
-                    <span {...stylex.props(styles.rowDetail)}>
-                      {choice.detail}
-                    </span>
+                    <span className="ui-choice-row-detail">{choice.detail}</span>
                   )}
                 </span>
               </span>
               {!activeQ.multiSelect && (
-                <LuArrowRight
-                  size={14}
-                  {...stylex.props(styles.arrow)}
-                  aria-hidden="true"
-                />
+                <LuArrowRight size={14} className="ui-chip-icon" aria-hidden="true" />
               )}
             </button>
           );
         })}
 
+        {/* Other row */}
         {activeQ.allowOther && (
-          <div {...stylex.props(styles.other)}>
-            <label {...stylex.props(styles.otherLabel)}>其他：</label>
+          <div className="ui-choice-other">
+            <label className="ui-choice-other-label">其他：</label>
             <input
               type="text"
               ref={otherInputRef}
-              {...stylex.props(styles.otherInput)}
+              className="ui-choice-other-input"
               value={activeQs.otherText}
-              onChange={(event) =>
-                dispatchAction({
-                  type: "SET_OTHER_TEXT",
-                  text: event.target.value,
-                })
+              onChange={(e) =>
+                dispatchAction({ type: "SET_OTHER_TEXT", text: e.target.value })
               }
               onFocus={() => dispatchAction({ type: "FOCUS_OTHER" })}
               onBlur={() => dispatchAction({ type: "BLUR_OTHER" })}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                const native = event.nativeEvent as KeyboardEvent & {
-                  isComposing?: boolean;
-                };
-                if (native.isComposing || event.keyCode === 229) return;
-                event.preventDefault();
-                const commits =
-                  !activeQ.multiSelect && activeQs.otherText.trim();
-                event.currentTarget.blur();
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                // IME 组合中的 Enter（确认候选词）只属于输入法合成：
+                // 不失焦、不触发任何确认/提交语义（keyCode 229 为组合期兼容信号）。
+                const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean };
+                if (native.isComposing || e.keyCode === 229) return;
+                // 非 IME 的 Enter：单选题与点选同一语义（确认并前进/发送）；
+                // 多选题保持显式提交（Enter 只失焦保存）。
+                e.preventDefault();
+                const commits = !activeQ.multiSelect && activeQs.otherText.trim();
+                e.currentTarget.blur();
                 if (commits) dispatchAction({ type: "COMMIT_OTHER" });
               }}
               placeholder="输入自定义回答…"
@@ -475,11 +455,12 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         )}
       </div>
 
+      {/* Explicit navigation (never auto-submits) */}
       {questions.length > 1 && (
-        <div {...stylex.props(styles.nav)}>
+        <div className="ui-choice-nav">
           <button
             type="button"
-            {...stylex.props(styles.navButton)}
+            className="ui-choice-nav-btn"
             onClick={goPrev}
             disabled={clampedActiveIndex === 0}
           >
@@ -487,7 +468,7 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
           </button>
           <button
             type="button"
-            {...stylex.props(styles.navButton)}
+            className="ui-choice-nav-btn"
             onClick={goNext}
             disabled={clampedActiveIndex === questions.length - 1}
           >
@@ -496,19 +477,19 @@ const AskChoicePanelWeb: React.FC<AskChoicePanelWebProps> = ({
         </div>
       )}
 
+      {/* 持久化失败：不发送、面板保持可交互，可点击提交重试 */}
       {persistFailed && !isResolved && (
-        <div {...stylex.props(styles.error)} role="alert">
+        <div className="ui-choice-error" role="alert">
           保存失败，请重试
         </div>
       )}
 
+      {/* 动作按钮：多选/混合表单的「完成」，当前 optional 可跳过题的「跳过」，
+          以及持久化失败的重试入口。纯必答单选表单靠选择一步发送，不渲染按钮。 */}
       {!isResolved && showAction && (
         <button
           type="button"
-          {...stylex.props(
-            styles.submit,
-            formCanSubmit && styles.submitEnabled,
-          )}
+          className={`ui-choice-submit ${formCanSubmit ? "enabled" : ""}`}
           onClick={handleAction}
           disabled={submitting}
         >
