@@ -97,6 +97,7 @@ import {
   type TurnHistory,
 } from "./tuiHistory";
 import type { FixedInputController } from "./tuiRawInput";
+import type { IdleHeapReleaser } from "./idleHeapRelease";
 import { withSuspendedRenderer } from "./suspendedRenderer";
 
 /** Max bytes of AGENTS.md/CLAUDE.md to inject — prevents context window overflow. */
@@ -889,6 +890,8 @@ export interface AgentTurnContext {
   readonly activityIndicator: ActivityIndicator;
   readonly activityReporter: (label: string | null) => void;
   readonly runRegistryPoller: RunRegistryPoller;
+  /** 轮末空闲时把释放的 JS 堆页还给 OS（见 idleHeapRelease.ts）。 */
+  readonly idleHeapReleaser: IdleHeapReleaser;
   readonly runCompletionWatcher: RunCompletionWatcher;
   readonly pasteStore: CollapsedPasteStore;
   readonly dialogHost: DialogHost | null;
@@ -1064,6 +1067,7 @@ export async function runOneAgentTurn(
           );
         }
       : undefined;
+  ctx.idleHeapReleaser.cancel();
   ctx.runRegistryPoller.beginHold();
   // 本轮的注入收件箱：runWakeHandler 在 busy 时把后台 run 终态唤醒直投这里，
   // 由 local loop 的 drainInjections 在轮边界取走注入当前 loop。
@@ -1271,6 +1275,7 @@ export async function runOneAgentTurn(
     return { ok: !wasAborted, aborted: wasAborted };
   } finally {
     ctx.runRegistryPoller.endHold();
+    ctx.idleHeapReleaser.schedule();
     ctx.activityIndicator.stop();
     ctx.activeTurnAbort = null;
     // 生命周期红线（与 pendingCwdNotice 的无条件清空同款）：turn 的任何

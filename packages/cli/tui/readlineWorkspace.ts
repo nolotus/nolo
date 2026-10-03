@@ -30,6 +30,7 @@ import {
   createActivityIndicator,
 } from "./activityIndicator";
 import { createRunRegistryPoller } from "./runRegistryPoller";
+import { createIdleHeapReleaser } from "./idleHeapRelease";
 import { createRunCompletionWatcher } from "./runCompletionWatcher";
 import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
 import {
@@ -749,6 +750,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     deliverProcessTerminalNotice(notice);
   });
   const effectiveEnv = options.env ? { ...process.env, ...options.env } : process.env;
+  const idleHeapReleaser = createIdleHeapReleaser({ env: effectiveEnv });
   const runRegistryPoller = createRunRegistryPoller({
     getDockedRuns: () => activityIndicator.getAgentRuns(),
     update: (snapshot) => activityIndicator.updateAgentRun(snapshot),
@@ -1239,6 +1241,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     activityIndicator,
     activityReporter,
     runRegistryPoller,
+    idleHeapReleaser,
     runCompletionWatcher,
     pasteStore,
     dialogHost,
@@ -1437,6 +1440,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // run 停靠区的 timer 跨 turn 存活，只有会话退出才该停——否则 /exit 之后
       // 它还在往一个已经不归自己管的终端上重绘。
       runRegistryPoller.dispose();
+      idleHeapReleaser.cancel();
       runCompletionWatcher.dispose();
       activityIndicator.dispose();
       resolveDone?.();
@@ -2523,6 +2527,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // beginHold()/updateAgentRun() 起的轮询 interval 会一直挂在事件循环上，
     // 让 bun test worker 在文件收尾阶段 98% CPU 空转不退出。
     runRegistryPoller.dispose();
+    idleHeapReleaser.cancel();
     runCompletionWatcher.dispose();
     activityIndicator.dispose();
     rl.close();
