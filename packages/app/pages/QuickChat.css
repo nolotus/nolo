@@ -185,12 +185,8 @@
 .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           background: var(--surfaceRaised, var(--background));
           transform: translateY(-1px);
-          /* 聚焦时物理描边提亮到 primary 70%，光环改为实色 2px + 浮起阴影，
-             亮/暗主题下聚焦反馈都清晰可见（2026-10-03 视觉修复）。 */
-          border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
           box-shadow:
-            0 0 0 2px var(--primary),
-            0 8px 24px -4px color-mix(in srgb, var(--primary) 28%, transparent),
+            0 0 0 3px var(--focusRing),
             0 12px 32px -16px color-mix(in srgb, var(--shadowMedium) 18%, transparent);
         }
         .quick-chat-box.drag-over {

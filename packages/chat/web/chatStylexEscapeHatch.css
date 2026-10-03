@@ -16,73 +16,22 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-/* ═══ AgentRunsPanel：运行区窄宽布局与语义色阶（普通 CSS 负责截断/响应式）═══ */
-.agent-runs-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1, 4px);
-  min-width: 0;
-  padding: var(--space-2, 8px) var(--space-3, 12px);
-  color: var(--textSecondary, #52525b);
-  font-size: var(--fontSize-sm, 13px);
-}
-
-.agent-runs-panel__row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1, 4px);
-  min-width: 0;
-  min-height: 28px;
-  padding: 4px 8px;
-  overflow: hidden;
-  border: 1px solid var(--borderSubtle, color-mix(in srgb, var(--border, #e4e4e7) 70%, transparent));
-  border-radius: 999px;
-  background: var(--surfaceRaised, color-mix(in srgb, var(--background, #fff) 94%, var(--textPrimary, #18181b)));
-  line-height: 20px;
-}
-
-.agent-runs-panel__name,
-.agent-runs-panel__detail,
-.agent-runs-panel__elapsed {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-runs-panel__name {
-  color: var(--textPrimary, #18181b);
-  font-weight: 600;
-}
-
-.agent-runs-panel__elapsed {
-  flex: 0 0 auto;
-  color: var(--textSecondary, #52525b);
-}
-
-.agent-runs-panel__more {
-  align-self: flex-start;
-  color: var(--textTertiary, #71717a);
-  font-size: var(--fontSize-xs, 12px);
-}
-
-@media (max-width: 420px) {
-  .agent-runs-panel__detail {
-    display: none;
-  }
-}
-
 /* ═══ 自 queue-badge.css 迁出（已全部迁入 queueBadgeStyles.ts StyleX）═══ */
 
 /* ═══ 自 chatInputCard.css 迁出（MessageInputCore.tsx / QuickChat.tsx）═══ */
 
-/* .chat-input-card:focus-within —— 已收编入 StyleX（chatInputCardStyles.card
- * 的 ":focus-within" 条件值，2026-10-03）。同时升级为更醒目的物理描边
- * （primary 70%）+ 实色聚焦光环（0 0 0 2px var(--primary)）+ 浮起阴影。
+/* .chat-input-card:focus-within —— 与基础 background/border-color/box-shadow
+ * 及暗色 token 阴影同名竞争，原级联按源码顺序让本规则胜出；
+ * 下沉 unlayered 保持聚焦态覆盖（含暗色下聚焦仍走本规则）。
  * 暗色 `[data-theme="dark"]` box-shadow 覆盖不走本文件，
- * 已收编入 token agentThemeTokens.chatInputCardShadow。
- * QuickChat 的 home-primary / space-home-compact 表面仍在 QuickChat.css
- * 里有自己的 :focus-within 覆盖（高特异性 :not(#\#) 链），保持不变。 */
+ * 已收编入 token agentThemeTokens.chatInputCardShadow。 */
+[data-hook~="chat-esc-chat-input-card"]:focus-within {
+  background: var(--surfaceInset, var(--surfaceRaised, var(--background)));
+  border-color: color-mix(in srgb, var(--primary, #6366f1) 60%, var(--border, #e4e4e7));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--primary, #6366f1) 20%, transparent),
+    0 4px 12px -8px var(--shadowMedium);
+}
 
 /* ═══ 自 LiveVoicePanel.css 迁出（LiveVoicePanel.tsx）═══ */
 
