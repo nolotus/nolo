@@ -37,6 +37,7 @@ export interface DialogRuntimeState {
    */
   turnPhaseTurnId: string | null;
   pendingUserInputQueue: string[];
+  recoveredForegroundTurn: "running" | null;
 }
 
 type LiveTokenUsagePayload = {
@@ -61,6 +62,7 @@ const createEmptyDialogRuntimeState = (): DialogRuntimeState => ({
   turnPhase: null,
   turnPhaseTurnId: null,
   pendingUserInputQueue: [],
+  recoveredForegroundTurn: null,
 });
 
 let activeDialogKey: string | null = null;
@@ -199,6 +201,16 @@ export function setLoopStopReason(payload: {
   runtime.loopStopReason = payload.reason;
   notify();
   return action("dialogRuntime/setLoopStopReason", payload);
+}
+
+export function setRecoveredForegroundTurn(payload: {
+  dialogKey?: string | null;
+  status: "running" | null;
+}) {
+  const runtime = ensureDialogRuntimeState(payload.dialogKey);
+  runtime.recoveredForegroundTurn = payload.status;
+  notify();
+  return action("dialogRuntime/setRecoveredForegroundTurn", payload);
 }
 
 /**
@@ -476,6 +488,12 @@ export function getDialogTurnPhase(
   return getDialogRuntimeState(dialogKey).turnPhase;
 }
 
+export function getRecoveredForegroundTurn(
+  dialogKey?: string | null
+): "running" | null {
+  return getDialogRuntimeState(dialogKey).recoveredForegroundTurn;
+}
+
 /** @deprecated Prefer getters/hooks; kept for stream/non-React call sites. */
 export const selectDialogRuntimeByKey = (
   _state: any,
@@ -553,6 +571,13 @@ export function useDialogTurnPhase(
 ): DialogTurnPhase | null {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return getDialogTurnPhase(dialogKey);
+}
+
+export function useRecoveredForegroundTurn(
+  dialogKey?: string | null
+): "running" | null {
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return getRecoveredForegroundTurn(dialogKey);
 }
 
 export function useDialogRuntimeTokens(

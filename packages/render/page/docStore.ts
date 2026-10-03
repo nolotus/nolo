@@ -22,7 +22,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { formatISO } from "date-fns";
+import formatISO from "date-fns/formatISO";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { toErrorMessage } from "core/errorMessage";
 import { readAndWait, patch } from "database/dbSlice";

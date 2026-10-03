@@ -2,7 +2,7 @@ import "../page.css";
 import React, { useEffect, useState, useCallback } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { read, readFileContent } from "database/dbSlice";
-import { format } from "date-fns";
+import format from "date-fns/format";
 import { LuDownload, LuFileText, LuInfo, LuCalendar, LuTag, LuType, LuUser, LuHardDrive, LuTrash2, LuInbox } from "react-icons/lu";
 import PageLoading from "render/web/ui/PageLoading";
 import { deleteDbKey, getDeleteErrorMessage } from "app/hooks/deleteDbKey";

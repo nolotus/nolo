@@ -307,7 +307,13 @@ function recoverOrchestrationCard(
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
-      return formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      // The shared card body stays as-is (raw rows are never rewritten); only
+      // its header (`Agents (2)`) is a display label this process owns, so it
+      // is relabeled under the active locale.
+      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      const lines = card.split("\n");
+      lines[0] = t("agentsListLabel", String(agents.length));
+      return lines.join("\n");
     } catch {
       return null;
     }
@@ -736,6 +742,48 @@ function buildHighlightedEditLine(
  * 名词」；2026-09-02 owner 反转 Run 行——命令改全量安全投影（redactSecrets
  * 脱敏 + 终端宽度截断），其余工具 gist 维持最小可感知名词不变。
  */
+/**
+ * 2026-09-26 memory 三工具的紧凑行统一形态：ASCII 记号标语义——
+ * `+` 存入（rememberMemory）、`?` 查询（queryMemory）、`-` 删除
+ * （deleteMemory）。记号各 1 列 + 1 空格，任何 locale / 终端列宽下都
+ * 对齐；全角符号与中文短前缀占 2 列且随字体漂移，emoji 对齐更差，均弃用。
+ * 正文取 executor 写入的 runtime metadata 投影：remember→content、
+ * query→query、delete→reason 优先，其次 contentKeyword，最后按
+ * idsCount 用 TUI i18n 报删除请求数量。正文沿用 normal 工具 gist 的 64 列
+ * 预算（搜索 query 也是该预算；Read 的 52 列是路径专用预算）并经
+ * redactSecrets 脱敏，出口仍有 withholdIfSecretLike 兜底。工具 label 也走
+ * toolLabel 的本地化动作词。gist 不再叠加「已保存记忆」前缀，避免与 label
+ * 重复语义并挤占正文。
+ */
+const MEMORY_TOOL_GIST_MAX = 64;
+
+function memoryToolGist(
+  toolName: string,
+  metadata: Record<string, unknown>,
+): string {
+  const body = (value: unknown): string => {
+    if (typeof value !== "string" || !value) return "";
+    return clipCompactText(redactSecrets(value), MEMORY_TOOL_GIST_MAX, "…");
+  };
+  if (toolName === "rememberMemory") {
+    const content = body(metadata.content);
+    return content ? `+ ${content}` : "";
+  }
+  if (toolName === "queryMemory") {
+    const query = body(metadata.query);
+    return query ? `? ${query}` : "";
+  }
+  if (toolName === "deleteMemory") {
+    const reason = body(metadata.reason);
+    if (reason) return `- ${reason}`;
+    const keyword = body(metadata.contentKeyword);
+    if (keyword) return `- ${keyword}`;
+    const idsCount = typeof metadata.idsCount === "number" ? metadata.idsCount : 0;
+    if (idsCount > 0) return `- ${t("memoryDeleteRequestedCount", String(idsCount))}`;
+  }
+  return "";
+}
+
 function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
   const toolName = event.toolName || "";
@@ -770,16 +818,19 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
     }
   }
 
+  // Memory 三工具（remember/query/delete）走统一记号 gist，必须排在通用
+  // query/path 回退之前：queryMemory 的 metadata.query 否则会被通用 query
+  // 分支吃掉（失去「?」记号），deleteMemory 的 reason/contentKeyword/
+  // idsCount 则完全落在回退链之外（2026-09-26）。
+  const memoryGist = memoryToolGist(toolName, metadata);
+  if (memoryGist) return memoryGist;
+
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
   if (command) return commandFullGist(command, normalRunGistMaxWidth());
   const query = typeof metadata.query === "string" ? metadata.query : "";
   if (query) return clipCompactText(query, 64, "…");
-  const remembered = event.toolName === "rememberMemory" && typeof metadata.content === "string"
-    ? metadata.content
-    : "";
-  if (remembered) return clipCompactText(redactSecrets(remembered), 64, "…");
   return "";
 }
 

@@ -64,10 +64,17 @@ export const performServerProxyFetchWithRetry = async ({
   signal,
   logPrefix = "[fetchWithServerProxy]",
   onRetry,
+  retryNetworkErrors = true,
 }: {
   execute: () => Promise<Response>;
   signal?: AbortSignal;
   logPrefix?: string;
+  /**
+   * false = a network error is thrown instead of re-issuing the request.
+   * Needed for non-idempotent submissions whose first attempt may already have
+   * reached the server (e.g. keepalive foreground turn admission).
+   */
+  retryNetworkErrors?: boolean;
   /** 每次决定重试前回调，供 UI 展示「自动重试 N/M · 剩余 Xs」。 */
   onRetry?: (info: {
     attempt: number;
@@ -118,6 +125,7 @@ export const performServerProxyFetchWithRetry = async ({
       return response;
     } catch (error: any) {
       if (
+        retryNetworkErrors &&
         networkRetries < MAX_SERVER_PROXY_RETRIES &&
         isRetryableServerProxyFetchError(error)
       ) {

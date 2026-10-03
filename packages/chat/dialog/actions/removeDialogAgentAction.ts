@@ -1,5 +1,5 @@
 import { patch, selectById } from "database/dbSlice";
-import { formatISO } from "date-fns";
+import formatISO from "date-fns/formatISO";
 import type { RootState } from "app/store";
 import type { DialogConfig } from "app/types";
 import {

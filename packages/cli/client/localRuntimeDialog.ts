@@ -28,7 +28,7 @@ import { normalizeUsage } from "../../ai/token/normalizeUsage";
 import { applyTokenUsageToDayStats } from "../../ai/token/applyTokenUsageToDayStats";
 import { createTokenKey, createTokenStatsKey } from "../../database/keys";
 import { runKeyed } from "core/keyedTaskQueue";
-import { format } from "date-fns";
+import format from "date-fns/format";
 import { appendFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";

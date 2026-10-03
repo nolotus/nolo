@@ -1,4 +1,4 @@
-import { differenceInMinutes } from "date-fns";
+import differenceInMinutes from "date-fns/differenceInMinutes";
 
 export const TITLE_UPDATE_INTERVAL_MINUTES = 30;
 

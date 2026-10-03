@@ -16,7 +16,8 @@ import {
   write,
 } from "database/dbSlice";
 import { createDialogKey } from "database/keys";
-import { format, formatISO } from "date-fns";
+import format from "date-fns/format";
+import formatISO from "date-fns/formatISO";
 import { prepareAndPersistMessage } from "chat/messages/messageSlice";
 import {
   alignBuiltinObjectAssistantRecord,

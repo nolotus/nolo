@@ -10,7 +10,7 @@ import { normalizeSpaceId } from "create/space/spaceKeys";
 import { patch, selectById } from "database/dbSlice";
 import { extractCustomId } from "core/prefix";
 import { asTrimmedString } from "core/trimmedString";
-import { format } from "date-fns";
+import format from "date-fns/format";
 import { selectAllMsgs } from "../../messages/messageSlice";
 import { serializeMessageContent } from "../../messages/messageContent";
 import { isAssistantToolStub } from "../../messages/web/assistantReplyPendingState";

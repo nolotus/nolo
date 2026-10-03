@@ -3,7 +3,7 @@
 import "../page.css";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { format } from "date-fns";
+import format from "date-fns/format";
 import { useAppDispatch } from "app/store";
 import { read } from "database/dbSlice";
 import {

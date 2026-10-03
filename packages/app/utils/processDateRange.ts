@@ -1,4 +1,6 @@
-import { format, subDays, eachDayOfInterval } from "date-fns";
+import format from "date-fns/format";
+import subDays from "date-fns/subDays";
+import eachDayOfInterval from "date-fns/eachDayOfInterval";
 import { utcToZonedTime, zonedTimeToUtc } from "date-fns-tz";
 
 export type TimeRange = "7days" | "30days" | "90days";

@@ -7,7 +7,7 @@
 //   - pure domain commands for mutations without Redux slice dependency
 
 import { useSyncExternalStore } from "react";
-import { formatISO } from "date-fns";
+import formatISO from "date-fns/formatISO";
 import { ulid } from "ulid";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import {

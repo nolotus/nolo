@@ -1,5 +1,5 @@
 import type { WeatherParam, WeatherQueryParams } from "./weatherTypes";
-import { set } from "date-fns";
+import set from "date-fns/set";
 function getTodayAtFiveAM(): number {
   const now = new Date();
   const todayAtFiveAM = set(now, {

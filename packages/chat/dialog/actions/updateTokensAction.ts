@@ -2,7 +2,7 @@ import { TokenUsageData } from "ai/token/types";
 import { DataType } from "create/types";
 import { createTokenKey, createTokenStatsKey } from "database/keys";
 import { ulid } from "ulid";
-import { format } from "date-fns";
+import format from "date-fns/format";
 import { patch, read, selectById, write } from "database/dbSlice";
 import { toast } from "app/utils/toast";
 import {

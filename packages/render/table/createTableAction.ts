@@ -1,6 +1,6 @@
 // 文件: render/table/createTableAction.ts
 
-import { formatISO } from "date-fns";
+import formatISO from "date-fns/formatISO";
 import { ulid } from "ulid";
 import i18n from "app/i18n/client";
 

@@ -1,9 +1,24 @@
-import YahooFinance from "yahoo-finance2";
-const yahooFinance = new YahooFinance();
+// yahoo-finance2 常驻约 13MB（84 个模块），而服务端/桌面端在启动时只为拿下面的
+// tool schema 就会加载本文件。客户端改为首次调用时才动态加载，schema 保持静态。
+let yahooFinancePromise: Promise<any> | null = null;
+function getYahooFinanceClient(): Promise<any> {
+  if (!yahooFinancePromise) {
+    const pending = import("yahoo-finance2").then(
+      ({ default: YahooFinance }) => new YahooFinance(),
+    );
+    yahooFinancePromise = pending;
+    // 加载失败不缓存，下次调用可重试；按身份清除，不误清后来的重试。
+    pending.catch(() => {
+      if (yahooFinancePromise === pending) yahooFinancePromise = null;
+    });
+  }
+  return yahooFinancePromise;
+}
 
 // 1. 获取股票实时报价 (Quote)
 export async function getYahooFinanceQuote(symbol: string) {
   try {
+    const yahooFinance = await getYahooFinanceClient();
     const quote = await yahooFinance.quote(symbol);
     return quote;
   } catch (error: any) {
@@ -22,6 +37,7 @@ export async function getYahooFinanceHistorical(
     if (period2) {
       queryOptions.period2 = period2;
     }
+    const yahooFinance = await getYahooFinanceClient();
     const result = await yahooFinance.historical(symbol, queryOptions);
     return result;
   } catch (error: any) {
