@@ -473,7 +473,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         routeState,
       });
       // replace: drop the empty /chat shell so Back does not return to a blank composer.
-      enableNextRouteViewTransition();
+      // Home first-send morph; route chunks are static in the main route table,
+      // and the send request below never waits on the animation.
+      if (surface === "home-primary") enableNextRouteViewTransition();
       navigate(dialogUrl, {
         replace: true,
         state: routeState,
@@ -574,6 +576,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [
     isSending,
+    surface,
     text,
     imageFiles,
     pendingFiles,

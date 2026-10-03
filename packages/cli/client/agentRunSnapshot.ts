@@ -12,6 +12,7 @@
  * looking at without re-sniffing fields.
  */
 
+import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import {
   resolveRunLabel,
@@ -42,6 +43,8 @@ export type AgentRunSnapshot = {
   agentName?: string;
   /** Task the run was delegated, clipped by the producer. */
   taskPreview?: string;
+  /** Caller-supplied short title (display only); absent = none, never inferred. */
+  title?: string;
   /**
    * 本次 run 实际消耗的平台积分（本地 registry 收尾自报）。缺省 = 没有平台
    * 计费（自有 API / 订阅制），面板不显示积分段。
@@ -128,6 +131,7 @@ function buildSnapshot(
   });
   const logLines = readLogLines(parsed);
   const taskPreview = readString(parsed.taskPreview);
+  const title = normalizeRunTitle(parsed.title);
   const lastToolNames = readToolNames(parsed.lastToolNames);
   const lastAssistantText = readString(parsed.lastAssistantText);
   const errorMessage = readString(parsed.errorMessage);
@@ -142,6 +146,7 @@ function buildSnapshot(
     // site: an unnamed run should render no name row, not the word "agent".
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),
     ...(taskPreview ? { taskPreview } : {}),
+    ...(title ? { title } : {}),
     ...(typeof parsed.toolCallCount === "number" && Number.isFinite(parsed.toolCallCount)
       ? { toolCallCount: parsed.toolCallCount }
       : {}),

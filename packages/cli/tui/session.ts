@@ -24,7 +24,6 @@ export type {
 export {
   renderStatusLine,
   renderCreditsDebug,
-  composeStatusLineWithQueue,
   renderWelcome,
   renderPrompt,
   renderTuiHelp,

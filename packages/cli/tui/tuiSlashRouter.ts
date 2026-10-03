@@ -704,6 +704,7 @@ export async function runSubmittedSlashLine(
     );
     if (outcome.status === "success") {
       env.AUTH_TOKEN = outcome.token;
+      host.state = { ...host.state, showAuthGuidance: false };
     }
   }
 

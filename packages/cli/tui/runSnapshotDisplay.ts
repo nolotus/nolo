@@ -85,6 +85,7 @@ export function sanitizeRunSnapshotForNormal(snapshot: AgentRunSnapshot): AgentR
     ...snapshot,
     agentName: snapshot.agentName ? clean(snapshot.agentName) : snapshot.agentName,
     taskPreview: snapshot.taskPreview ? clean(snapshot.taskPreview) : snapshot.taskPreview,
+    title: snapshot.title ? clean(snapshot.title) : snapshot.title,
     lastAssistantText: snapshot.lastAssistantText ? clean(snapshot.lastAssistantText) : snapshot.lastAssistantText,
     lastToolNames: snapshot.lastToolNames?.map(clean).filter(Boolean),
     errorMessage,

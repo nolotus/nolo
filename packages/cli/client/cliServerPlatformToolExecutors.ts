@@ -267,6 +267,14 @@ export function buildServerPlatformToolExecutors(args: {
         metadata: { serverPlatformTool: true, memoryDelete: false },
       };
     }
+    // 删除条件的可读投影（trim 后取首个非空分支；与 body 的 contentSubstring
+    // 同源），只进 metadata 供 TUI 紧凑行显示摘要，不改请求体本身。
+    const contentKeyword =
+      typeof parsed.contentKeyword === "string" && parsed.contentKeyword.trim()
+        ? parsed.contentKeyword.trim()
+        : typeof parsed.query === "string" && parsed.query.trim()
+          ? parsed.query.trim()
+          : undefined;
     const body: Record<string, unknown> = {
       ids: parsed.ids,
       contentSubstring: parsed.contentKeyword ?? parsed.query,
@@ -280,9 +288,18 @@ export function buildServerPlatformToolExecutors(args: {
     const raw = await postServer("/api/memory/delete", body, {
       retryTransient: true,
     });
+    // 2026-09-26: deleteMemory 原来只回 memoryDelete flag，TUI gist 无料可
+    // 显示；补 reason / contentKeyword / idsCount 三个投影（消费方见
+    // toolOutput.ts 的 memoryToolGist "-" 分支）。
     return {
       content: raw,
-      metadata: { serverPlatformTool: true, memoryDelete: true },
+      metadata: {
+        serverPlatformTool: true,
+        memoryDelete: true,
+        reason,
+        contentKeyword,
+        idsCount: Array.isArray(parsed.ids) ? parsed.ids.length : undefined,
+      },
     };
   };
 

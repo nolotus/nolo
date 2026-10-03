@@ -2878,6 +2878,11 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(*) {
   animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Home first-send composer only: center -> bottom in 280ms (global groups stay 340ms). */
+html[data-nolo-route-view-transition="1"]::view-transition-group(quick-chat-composer) {
+  animation-duration: 280ms;
+}
+
 html[data-nolo-route-view-transition="1"]::view-transition-group(main-content) {
   animation-duration: 280ms;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
