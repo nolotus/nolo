@@ -439,6 +439,47 @@ const STRINGS = {
     en: "Runs ({0})",
     zh: "运行 ({0})",
   },
+  // Tool-count fact on run rows/cards/panel (`12 tools` / `12 个工具`).
+  runToolsCount: {
+    en: "{0} tools",
+    zh: "{0} 个工具",
+  },
+  // Card-body status words / row labels. Display labels only: raw log lines,
+  // protocol params and tool ids stay untranslated.
+  runStatusNotFound: { en: "not_found", zh: "未找到" },
+  runRowAgent: { en: "agent", zh: "执行者" },
+  runRowStatus: { en: "status", zh: "状态" },
+  runRowTools: { en: "tools", zh: "工具" },
+  runRowNote: { en: "note", zh: "备注" },
+  runRowError: { en: "error", zh: "错误" },
+  runRowTask: { en: "task", zh: "任务" },
+  // listAgents card header (`Agents (3)` / `智能体 (3)`). The shared ai
+  // renderer keeps the English default; the CLI relabels the header line.
+  agentsListLabel: { en: "Agents ({0})", zh: "智能体 ({0})" },
+  // Fallback identity for auto-generated agent ids (run zone / dock / panel).
+  subAgentName: {
+    en: "Sub-agent",
+    zh: "子智能体",
+  },
+  // Status vocabulary the fixed run zone does not label (running shows only its
+  // elapsed time there). `en` must stay equal to the raw store status so a
+  // switch of locale never changes what an English reader already understood.
+  runZoneRunning: { en: "running", zh: "运行中" },
+  runZonePending: { en: "pending", zh: "等待中" },
+  runZoneCancelling: { en: "cancelling", zh: "正在取消" },
+  // controlAgentRun displayData: wait timeout and stop-not-confirmed outcomes.
+  agentRunWaitTimeout: {
+    en: "⏳ wait timed out after {0}s — the run is still running: wait again later, or use status/stop",
+    zh: "⏳ wait 超时（{0}s），run 仍在运行：可稍后再 wait，或改用 status/stop",
+  },
+  agentRunStopFailedAlive: {
+    en: "stop failed: process {0} still alive after SIGKILL",
+    zh: "停止失败：进程 {0} 在 SIGKILL 后仍然存活",
+  },
+  agentRunPendingReconcile: {
+    en: "{0} (pending reconcile)",
+    zh: "{0}（待对账）",
+  },
   // --- Fixed run zone (top of composer, replaces the ⚙ running status chip) --
   // Each active run renders as `⚙ <title> · <agent> · <elapsed> · N tools`.
   // runZoneFor is the elapsed-time fact for a *running* run (`for 1m23s` /
@@ -1138,6 +1179,38 @@ export function toolLabelVariants(name: string): string[] {
   return [...new Set(Object.values(entry))];
 }
 
+/**
+ * Localized short status word for a run row (panel / dock).
+ *
+ * Terminal mapping mirrors the fixed run zone (`timeout`/`orphaned` read as
+ * failure, `killed`/`cancelled` read as cancelled) so every run surface says
+ * the same thing about the same state. Unknown future statuses fall through
+ * verbatim: an unfamiliar word beats a blank.
+ */
+export function agentRunStatusWord(status: string): string {
+  switch (status) {
+    case "running":
+      return t("runZoneRunning");
+    case "pending":
+      return t("runZonePending");
+    case "cancelling":
+      return t("runZoneCancelling");
+    case "done":
+      return t("runZoneDone");
+    case "killed":
+    case "cancelled":
+      return t("runZoneCancelled");
+    case "failed":
+    case "timeout":
+    case "orphaned":
+      return t("runZoneFailed");
+    case "not_found":
+      return t("runStatusNotFound");
+    default:
+      return status;
+  }
+}
+
 /** Labels injected into `packages/ai` agent-run card helpers (no cli→ai reverse dep). */
 export function agentRunCardLabels(): {
   runStatus: string;
@@ -1146,6 +1219,16 @@ export function agentRunCardLabels(): {
   runFinished: string;
   logTail: string;
   runs: (count: number) => string;
+  toolCount: (count: number) => string;
+  statusWord: (status: string) => string;
+  rows: {
+    agent: string;
+    status: string;
+    tools: string;
+    note: string;
+    error: string;
+    task: string;
+  };
 } {
   return {
     runStatus: t("runStatusLabel"),
@@ -1154,5 +1237,16 @@ export function agentRunCardLabels(): {
     runFinished: t("runFinishedLabel"),
     logTail: t("runLogTailLabel"),
     runs: (count: number) => t("runsListLabel", String(count)),
+    toolCount: (count: number) => t("runToolsCount", String(count)),
+    statusWord: agentRunStatusWord,
+    // Padding rides on the value so the default English layout is unchanged.
+    rows: {
+      agent: `${t("runRowAgent")}   `,
+      status: `${t("runRowStatus")}  `,
+      tools: `${t("runRowTools")}   `,
+      note: `${t("runRowNote")}    `,
+      error: `${t("runRowError")}   `,
+      task: `${t("runRowTask")}    `,
+    },
   };
 }

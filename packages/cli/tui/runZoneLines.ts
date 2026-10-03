@@ -128,7 +128,7 @@ function runZoneFacts(
   if (unassigned) facts.push(unassigned);
 
   if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    facts.push(`${snapshot.toolCallCount} tools`);
+    facts.push(t("runToolsCount", String(snapshot.toolCallCount)));
   }
   if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
     facts.push(formatCreditsChip(snapshot.credits, { compact: true }));

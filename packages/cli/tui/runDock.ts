@@ -27,6 +27,7 @@ import {
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import { displayAgentName } from "./agentRunPanelLines";
+import { t } from "./i18n";
 import { formatRunZoneLines, type RunZoneLayout } from "./runZoneLines";
 import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
@@ -353,7 +354,7 @@ function formatRunDockRow(
   const unassigned = formatUnassignedFact(snapshot);
   if (unassigned) facts.push(unassigned);
   if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    facts.push(`${snapshot.toolCallCount} tools`);
+    facts.push(t("runToolsCount", String(snapshot.toolCallCount)));
   }
   // 平台积分（收尾自报）。多 run 行宽有限，用紧凑形式「⚡0.04」。
   if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {

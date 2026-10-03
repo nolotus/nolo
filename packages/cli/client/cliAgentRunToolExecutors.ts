@@ -52,7 +52,7 @@ import {
   isRunTerminalStatus,
 } from "../agentRunControl";
 import { readTimestamp } from "./agentRunSnapshot";
-import { agentRunCardLabels } from "../tui/i18n";
+import { agentRunCardLabels, t } from "../tui/i18n";
 import {
   aggregateBatch,
   type BatchRunSummary,
@@ -877,7 +877,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       if (result.kind === "timeout") {
         const reconciled = result.lastState ?? record;
         const nowMs = resolveNowMs(deps);
-        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: `⏳ wait 超时（${Math.round(result.waitedMs / 1000)}s），run 仍在运行：可稍后再 wait，或改用 status/stop` } };
+        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: t("agentRunWaitTimeout", String(Math.round(result.waitedMs / 1000))) } };
       }
       return buildRunStatusPayload(result.state, deps);
     }
@@ -909,7 +909,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             stopConfirmed: false,
           }),
           metadata: {
-            displayData: `stop failed: process ${record.pid} still alive after SIGKILL`,
+            displayData: t("agentRunStopFailedAlive", String(record.pid)),
           },
         };
       }
@@ -931,7 +931,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       metadata: {
         displayData:
           transition.kind === "contended"
-            ? `${formatStopRunCard(finalRecord.status, labels)} (pending reconcile)`
+            ? t("agentRunPendingReconcile", formatStopRunCard(finalRecord.status, labels))
             : formatStopRunCard(finalRecord.status, labels),
       },
     };

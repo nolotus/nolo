@@ -307,7 +307,13 @@ function recoverOrchestrationCard(
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
-      return formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      // The shared card body stays as-is (raw rows are never rewritten); only
+      // its header (`Agents (2)`) is a display label this process owns, so it
+      // is relabeled under the active locale.
+      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
+      const lines = card.split("\n");
+      lines[0] = t("agentsListLabel", String(agents.length));
+      return lines.join("\n");
     } catch {
       return null;
     }
