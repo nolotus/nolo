@@ -46,7 +46,7 @@ English (primary), 中文（简体）(secondary)
 ```text
 Your Nolo desktop agent works in the browser you already have open — no second browser, no MCP server, no cookie export.
 
-This extension connects Chrome to the Nolo connector on the same computer. The agent can then:
+This extension connects Chrome to the Nolo Desktop app on the same computer. The agent can then:
 
 • Read a compact view of a page — visible text, interactive elements and a page revision — instead of dumping raw HTML
 • Click and type through short-lived element references, so it does not guess CSS selectors
@@ -62,7 +62,7 @@ It is built to stay out of your way:
 
 Requirements
 
-The Nolo connector must be set up for Chrome on this computer before the extension can work, and a Nolo agent — the desktop app or the CLI — is what drives it. The extension has no standalone features — it exists to serve your local agent.
+Nolo Desktop must be installed and running on the same computer, and the connector must be enabled in its settings. The extension has no standalone features — it exists to serve your local agent.
 
 Privacy
 
@@ -74,7 +74,7 @@ Page content that your agent reads is sent to the Nolo Desktop app on 127.0.0.1,
 ```text
 让本机的 Nolo 智能体直接工作在你已经打开的浏览器里——不需要第二个浏览器，不需要 MCP 服务，也不需要交出 Cookie。
 
-这个扩展把 Chrome 连接到同一台电脑上的 Nolo 连接器。连接后，智能体可以：
+这个扩展把 Chrome 连接到同一台电脑上的 Nolo Desktop 应用。连接后，智能体可以：
 
 • 读取页面的紧凑视图（可见文本、可交互元素、页面版本号），而不是把整页 HTML 塞进上下文
 • 通过短期有效的元素引用点击和输入，不需要猜 CSS 选择器
@@ -90,7 +90,7 @@ Page content that your agent reads is sent to the Nolo Desktop app on 127.0.0.1,
 
 使用前提
 
-使用前需要先在本机为 Chrome 装好 Nolo 连接器，再由 Nolo 智能体（桌面端或 CLI）驱动它。扩展本身没有独立功能。
+同一台电脑上必须安装并运行 Nolo Desktop，并在设置中启用连接器。扩展本身没有独立功能。
 
 隐私
 

@@ -30,16 +30,6 @@ const TOOL_DISPLAY_NAME_DEFAULTS: Record<string, string> = {
   listAgents: "列出助手",
   readAgent: "读取助手",
   startAgentRun: "启动子任务",
-  controlAgentRun: "控制子任务",
-  createAgent: "创建助手",
-  updateAgent: "更新助手",
-  prepareAgentDraft: "整理助手草稿",
-  createSkillAgent: "创建技能助手",
-  queryDialogsBySubjectRef: "检索对话记录",
-  deleteDialogs: "删除对话记录",
-  readDialog: "读取对话",
-  listDialogs: "列出对话",
-  setTodoList: "待办计划",
   exa_search: "搜索",
   firecrawl_scrape: "网页抓取",
   firecrawl_search: "网页搜索",
@@ -317,59 +307,11 @@ export function formatToolRowHeaderSummary(args: {
       detail = asOptionalTrimmedString(toolArgs?.name);
       break;
     case "listAgents":
-      detail = asOptionalTrimmedString(toolArgs?.query);
-      break;
     case "readAgent":
+    case "startAgentRun":
       detail =
         asOptionalTrimmedString(toolArgs?.name) ??
-        asOptionalTrimmedString(toolArgs?.agent) ??
         asOptionalTrimmedString(toolArgs?.agentKey);
-      break;
-    case "startAgentRun": {
-      const title = asOptionalTrimmedString(toolArgs?.title);
-      const agentLabel =
-        asOptionalTrimmedString(toolArgs?.agentName) ??
-        asOptionalTrimmedString(toolArgs?.name) ??
-        asOptionalTrimmedString(toolArgs?.agentKey);
-      if (title && agentLabel) {
-        detail = `${title} (${agentLabel})`;
-      } else {
-        detail = title ?? agentLabel ?? asOptionalTrimmedString(toolArgs?.task);
-      }
-      break;
-    }
-    case "controlAgentRun": {
-      const action = asOptionalTrimmedString(toolArgs?.action);
-      const runId = asOptionalTrimmedString(toolArgs?.runId);
-      const batchId = asOptionalTrimmedString(toolArgs?.batchId);
-      const targetId = runId || batchId;
-      const ACTION_FALLBACKS: Record<string, string> = {
-        status: "状态诊断",
-        stop: "停止任务",
-        append: "追加指令",
-        todo: "待办清单",
-        list: "任务列表",
-        wait: "等待完成",
-      };
-      const fallback = action ? (ACTION_FALLBACKS[action] || action) : undefined;
-      const actionLabel = action && fallback
-        ? translate(`controlActions.${action}`, fallback)
-        : undefined;
-      if (actionLabel && targetId) {
-        detail = `${actionLabel} · ${targetId}`;
-      } else {
-        detail = actionLabel ?? targetId;
-      }
-      break;
-    }
-    case "queryDialogsBySubjectRef":
-      detail =
-        asOptionalTrimmedString(toolArgs?.subjectId) ??
-        asOptionalTrimmedString(toolArgs?.rowDbKey) ??
-        asOptionalTrimmedString(toolArgs?.subjectKind);
-      break;
-    case "deleteDialogs":
-      detail = asOptionalTrimmedString(toolArgs?.query);
       break;
     default:
       detail = undefined;
@@ -633,32 +575,6 @@ export function buildFallbackActivity(
       if (!command) return undefined;
       const label = classifyShellCommand(command);
       return { title: label, detail: command.length <= 120 ? command : `${command.slice(0, 117)}...` };
-    }
-    case "startAgentRun": {
-      const title = asOptionalTrimmedString(args.title);
-      const agentLabel =
-        asOptionalTrimmedString(args.agentName) ??
-        asOptionalTrimmedString(args.name);
-      return {
-        title: title ? `执行子任务：${title}` : "启动子任务",
-        detail: agentLabel ?? asOptionalTrimmedString(args.agentKey),
-      };
-    }
-    case "controlAgentRun": {
-      const action = asOptionalTrimmedString(args.action);
-      const ACTION_TITLES: Record<string, string> = {
-        status: "检查任务状态",
-        stop: "停止子任务",
-        append: "追加任务指令",
-        todo: "查询待办清单",
-        list: "列出子任务",
-      };
-      return {
-        title: action && ACTION_TITLES[action] ? ACTION_TITLES[action] : "控制子任务",
-        detail:
-          asOptionalTrimmedString(args.runId) ??
-          asOptionalTrimmedString(args.batchId),
-      };
     }
     default:
       return undefined;

@@ -159,6 +159,7 @@ const CATALOG_SUMMARY_FIELDS = new Set([
   "imageWorkflow",
   "pricing",
   "metrics",
+  "runtimeBinding",
   "runtimeServerBase",
   "spaceId",
   "isPublic",

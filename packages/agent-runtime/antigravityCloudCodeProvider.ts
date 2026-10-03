@@ -109,7 +109,15 @@ type AntigravityCloudCodeCallArgs = {
     tools?: unknown[];
   };
   signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
+  /**
+   * 结构化的调用签名而非 `typeof fetch`：Bun 的 `fetch` 类型要求 `preconnect`
+   * 字段，CLI 注入的 `CliFetchImpl`（普通函数）与测试 stub 都不带它，但运行时
+   * 只把 fetchImpl 当函数调用，签名一致即可。
+   */
+  fetchImpl?: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>;
   onTextDelta?: (chunk: string) => void;
   onReasoningDelta?: (chunk: string) => void;
 };

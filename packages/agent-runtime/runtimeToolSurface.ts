@@ -52,32 +52,6 @@ export type ToolSurfaceConstraints = {
   blockedToolNames?: readonly string[] | null;
 };
 
-/**
- * 具有潜在系统破坏性或写入副作用的高风险工具。
- * 用于只读审计（Reviewer）、规划（Planner）、探测（Probe）等子任务的最小权限收敛。
- */
-export const HIGH_RISK_MUTATION_TOOL_NAMES = [
-  "writeFile",
-  "editFile",
-  "deleteDialogs",
-  "deleteMemory",
-  "taskStop",
-] as const;
-
-/**
- * 生成只读安全约束：自动剔除所有高危修改/写操作和删除操作工具。
- */
-export function resolveReadOnlyToolConstraints(
-  additionalBlockedTools?: readonly string[],
-): ToolSurfaceConstraints {
-  return {
-    blockedToolNames: [
-      ...HIGH_RISK_MUTATION_TOOL_NAMES,
-      ...(additionalBlockedTools ?? []),
-    ],
-  };
-}
-
 /** Apply only run-scoped narrowing; runtime policy and hard isolation are upstream. */
 export function applyToolSurfaceConstraints<T extends RuntimeToolSurfaceNames>(
   surface: T,

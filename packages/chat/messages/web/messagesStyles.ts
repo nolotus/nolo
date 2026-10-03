@@ -10,11 +10,6 @@ const pulse = stylex.keyframes({
   "50%": { opacity: 1 },
 });
 
-const memoryFadeIn = stylex.keyframes({
-  from: { opacity: 0 },
-  to: { opacity: 1 },
-});
-
 /**
  * messages 共享样式 —— StyleX 迁移
  * （自原 messages.css 1:1 迁出）
@@ -351,35 +346,6 @@ export const messagesStyles = stylex.create({
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-  },
-
-  memorySavedItemNew: {
-    animationName: memoryFadeIn,
-    animationDuration: "300ms",
-    animationTimingFunction: "ease-out",
-  },
-  memorySavedTag: {
-    flexShrink: 0,
-    alignSelf: "flex-start",
-    fontSize: "var(--fontSize-xs)",
-    lineHeight: "1.2em",
-    padding: "1px 6px",
-    borderRadius: 4,
-    color: "var(--textTertiary)",
-    backgroundColor: "var(--backgroundHover)",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--border)",
-  },
-  memorySavedToggle: {
-    alignSelf: "flex-start",
-    padding: 0,
-    border: "none",
-    background: "none",
-    cursor: "pointer",
-    fontSize: "var(--fontSize-xs)",
-    color: "var(--textTertiary)",
-    textDecoration: { default: "none", ":hover": "underline" },
   },
 
   // ─── ChildRunEventRow（后台 run 终态事件系统行）──────────

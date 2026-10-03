@@ -47,9 +47,7 @@ import AgentPublishDialog, {
 } from "./AgentPublishDialog";
 import AgentMemoryTab from "./AgentMemoryTab";
 import AgentGrantPanel from "./AgentGrantPanel";
-import type { AgentQuota } from "ai/agent/quotaSnapshot";
 import { OAuthStatusBox } from "./OAuthStatusBox";
-import AgentQuotaPanel from "./AgentQuotaPanel";
 import { resolveAgentEditIdentity } from "../hooks/useAgentFormValidation";
 
 // UI Components & Icons
@@ -1781,12 +1779,6 @@ const AgentPage = ({ agentKey }: AgentPageProps) => {
                       providerId={item.apiKeyRef.trim().toLowerCase()}
                       serverOrigin={String(server).replace(/\/+$/, "")}
                       authToken={currentToken}
-                    />
-                    <AgentQuotaPanel
-                      agentKey={currentKey}
-                      serverOrigin={String(server).replace(/\/+$/, "")}
-                      authToken={currentToken}
-                      initialQuota={(item as { quota?: AgentQuota }).quota}
                     />
                   </section>
                 ) : null}

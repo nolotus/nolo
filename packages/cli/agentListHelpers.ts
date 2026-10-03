@@ -23,7 +23,6 @@ import {
 } from "./globalRecordOperations";
 import { agentRecordHasConfiguredCredential } from "./agentRecordHelpers";
 import {
-  isOwnedAgentKey,
   ownedAgentKey,
   ownedAgentKeyPrefix,
   parseOwnedAgentId,
@@ -220,7 +219,11 @@ export async function listLocalCachedAgents(args: {
   for (const prefix of [ownedPrefix, PUBLIC_AGENT_KEY_PREFIX]) {
     for await (const [key, value] of args.db.iterator({ gte: prefix, lte: `${prefix}\uffff` })) {
       if (typeof key !== "string" || !value || typeof value !== "object") continue;
-      if (isOwnedAgentKey(key, args.userId)) {
+      // key 在此已是 string（上一步 typeof 收窄）。isOwnedAgentKey 是
+      // `key is string` 类型谓词，用于控制流/别名条件时会把 else 分支的
+      // key 收窄成 never——这里对已经是 string 的 key 走等价的前缀判断，
+      // 既保留同一判据，又不触发谓词收窄。
+      if (key.startsWith(ownedPrefix)) {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;
       }
@@ -284,7 +287,7 @@ export async function listRemotePublicAgents(args: {
     .filter((record: any) => record?.isPublic === true)
     .map((record: any) => normalizeListedAgent({ ...record, userId: record?.userId || "system" }))
     .filter((agent: ListedAgent | null): agent is ListedAgent => agent != null)
-    .map((agent) => ({ ...agent, publicRecordExists: true }));
+    .map((agent: ListedAgent) => ({ ...agent, publicRecordExists: true }));
 }
 
 export async function listRemoteAgents(args: {
