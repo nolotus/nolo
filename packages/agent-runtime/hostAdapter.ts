@@ -218,6 +218,8 @@ export type AgentRuntimeHostAdapter = {
     titlePatchPromise?: Promise<string | null>;
   }>;
   resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
+  /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
+  credentialBroker?: import("./credentialBroker").CredentialBroker;
   executeTool(
     call: AgentRuntimeToolCallInput,
     opts?: {

@@ -1,6 +1,7 @@
 // 文件路径: packages/chat/messages/web/MessageList.tsx
 
 import * as stylex from "@stylexjs/stylex";
+import { useTranslation } from "react-i18next";
 import React, {
   useRef,
   useLayoutEffect,
@@ -64,6 +65,7 @@ import {
 import { extractCustomId } from "core/prefix";
 import { useAllToolRuns } from "ai/tools/toolRunStore";
 import { LuBrain } from "react-icons/lu";
+import { getSavedMemories } from "../savedMemories";
 import { AssistantReplyPending } from "./AssistantReplyPending";
 import { deriveConversationActivity } from "../../runtime/conversationActivity";
 import { IntermediateNarrationRow } from "./IntermediateNarrationRow";
@@ -71,9 +73,6 @@ import { messageRowSpacing } from "./messageRowSpacing";
 
 /** The pending indicator stands in for the assistant reply that is about to arrive. */
 const PENDING_ASSISTANT_ENTRY = { type: "single", message: { role: "assistant" } };
-import TodoCard from "./TodoCard";
-import { selectLatestConversationTodo } from "../todoState";
-import { selectSystemBuiltinSkills } from "app/settings/settingSlice";
 
 const LOAD_THRESHOLD = 50;
 const DEFAULT_SCROLL_CONTAINER_SELECTOR = ".MainLayout__main";
@@ -181,12 +180,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
   // 任一 user 消息）自动撤下，避免"先看到 AI，我的消息才补上"的错序闪烁。
   const quickChatFirstMessageText = getQuickChatFirstMessageText(
     location.state as QuickChatRouteState,
-  );
-  const systemBuiltinSkills = useAppSelector(selectSystemBuiltinSkills);
-  const conversationTodoEnabled = systemBuiltinSkills["conversation-todo"] !== false;
-  const currentTodo = useMemo(
-    () => selectLatestConversationTodo(messages),
-    [messages],
   );
   const displayMessages = useMemo(() => {
     if (!quickChatFirstMessageText) return messages;
@@ -549,13 +542,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
     scroller.scrollTo({ top: 0, behavior: "smooth" });
   }, [getScroller]);
 
-  // The pinned current snapshot replaces its source tool row. Older snapshots
-  // remain in history for replay, while the latest one is shown exactly once.
-  const renderMessages = useMemo(() => {
-    const sourceId = currentTodo?.sourceMessageId;
-    if (!conversationTodoEnabled || !sourceId) return displayMessages;
-    return displayMessages.filter((message: any) => message?.id !== sourceId);
-  }, [conversationTodoEnabled, currentTodo?.sourceMessageId, displayMessages]);
+  const renderMessages = displayMessages;
 
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
   // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
@@ -601,12 +588,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
         {!hasMoreOlder && currentDialogConfig?.summarizedBeforeId && (
           <div className="summary-divider">
             <span>已归档到摘要</span>
-          </div>
-        )}
-
-        {conversationTodoEnabled && currentTodo && (
-          <div className="chat-messages__todo-current" data-testid="current-conversation-todo">
-            <TodoCard rawData={{ todos: currentTodo.todos }} />
           </div>
         )}
 
@@ -663,7 +644,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       messages={settledMessages}
                       activityMessages={entry.activityMessages}
                       canCollapse={canCollapse}
-                      conversationTodoEnabled={conversationTodoEnabled}
                     />
                   </MessageRowErrorBoundary>
                 </div>
@@ -704,7 +684,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
-                    <ToolMessageItem message={msg} conversationTodoEnabled={conversationTodoEnabled} />
+                    <ToolMessageItem message={msg} />
                   ) : isIntermediateNarration ? (
                     <IntermediateNarrationRow message={msg} />
                   ) : (
@@ -783,115 +763,57 @@ const MessagesList: React.FC<MessagesListProps> = ({
 
 // ========== Memory Saved Indicator Components & Utilities ==========
 
-export interface SavedMemoryItem {
-  content: string;
-  sourceKind: "explicit-user-directive" | "agent-tool" | "inferred-understanding";
-  visibility?: "private" | "shared" | "public";
-  id?: string;
-  dbKey?: string;
-}
-
-const isSavedMemorySourceKind = (value: unknown): value is SavedMemoryItem["sourceKind"] =>
-  value === "explicit-user-directive" ||
-  value === "agent-tool" ||
-  value === "inferred-understanding" ||
-  value === "dialog-learning";
-
-export function getSavedMemories(dialogConfig: any): SavedMemoryItem[] {
-  if (!dialogConfig) return [];
-  const list: any[] = [];
-  
-  const collect = (arr: any, fromSavedMemories = false) => {
-    if (Array.isArray(arr)) {
-      if (fromSavedMemories) {
-        list.push(...arr.map((item) => {
-          if (item && typeof item === "object") {
-            return { ...item, type: item.type || "memory.saved" };
-          }
-          return item;
-        }));
-      } else {
-        list.push(...arr);
-      }
-    }
-  };
-
-  collect(dialogConfig.memoryEvents);
-  collect(dialogConfig.artifacts);
-  collect(dialogConfig.savedMemories, true);
-
-  const checkpoint = dialogConfig.runtimeCheckpoint;
-  if (checkpoint && typeof checkpoint === "object") {
-    collect(checkpoint.memoryEvents);
-    collect(checkpoint.artifacts);
-    collect(checkpoint.savedMemories, true);
-  }
-
-  const result: SavedMemoryItem[] = [];
-  const seenContent = new Set<string>();
-
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-
-    if (item.type !== "memory.saved") continue;
-
-    if (typeof item.content !== "string") continue;
-    const content = item.content.trim();
-    if (!content) continue;
-
-    const sourceKind = item.sourceKind;
-    if (typeof sourceKind !== "string") continue;
-
-    const lowerSourceKind = sourceKind.toLowerCase();
-
-    if (
-      lowerSourceKind.includes("inferred") || 
-      lowerSourceKind.includes("understanding") || 
-      lowerSourceKind === "inferred-understanding"
-    ) {
-      continue;
-    }
-    
-    if (lowerSourceKind !== "explicit-user-directive" && lowerSourceKind !== "agent-tool") {
-      continue;
-    }
-
-    const normalized = content.toLowerCase().replace(/[\s\p{P}]/gu, "");
-    if (!seenContent.has(normalized)) {
-      seenContent.add(normalized);
-      result.push({
-        content,
-        sourceKind: lowerSourceKind as SavedMemoryItem["sourceKind"],
-        visibility: item.visibility || "private",
-        ...(typeof item.id === "string" && item.id ? { id: item.id } : {}),
-        ...(typeof item.dbKey === "string" && item.dbKey
-          ? { dbKey: item.dbKey }
-          : {}),
-      });
-    }
-  }
-
-  return result;
-}
+const MEMORY_COLLAPSED_LIMIT = 3;
 
 export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogConfig }) => {
+  const { t } = useTranslation("chat");
+  const [expanded, setExpanded] = useState(false);
   const memories = getSavedMemories(dialogConfig);
   if (memories.length === 0) return null;
+
+  const kindLabels: Record<string, string> = {
+    procedural: t("memoryKindProcedural", "流程"),
+    episodic: t("memoryKindEpisodic", "事件"),
+    semantic: t("memoryKindSemantic", "事实"),
+  };
+  const visibilityLabels: Record<string, string> = {
+    shared: t("memoryVisibilityShared", "共享"),
+    public: t("memoryVisibilityPublic", "公开"),
+  };
+
+  const collapsible = memories.length > MEMORY_COLLAPSED_LIMIT;
+  const visible =
+    collapsible && !expanded ? memories.slice(-MEMORY_COLLAPSED_LIMIT) : memories;
+  const lastIndex = visible.length - 1;
 
   return (
     <div
       {...withLiteralClass("memory-saved-container", styles.memorySavedContainer)}
       data-testid="memory-saved-container"
     >
-      {memories.map((mem) => {
+      {visible.map((mem, index) => {
         const isExplicit = mem.sourceKind === "explicit-user-directive";
-        const prefix = isExplicit ? "已保存记忆" : "助手已保存记忆";
+        const prefix = isExplicit
+          ? t("memorySaved", "Memory saved")
+          : t("memorySavedByAssistant", "Memory saved by assistant");
         // Content is unique after getSavedMemories dedupe; prefer explicit id if present.
         const memoryKey = mem.id ?? mem.dbKey ?? `${mem.sourceKind}:${mem.content}`;
+        const tags: string[] = [];
+        const kindLabel = mem.kind ? kindLabels[mem.kind] : undefined;
+        if (kindLabel) tags.push(kindLabel);
+        const visLabel =
+          mem.visibility && mem.visibility !== "private"
+            ? visibilityLabels[mem.visibility]
+            : undefined;
+        if (visLabel) tags.push(visLabel);
         return (
           <div
             key={memoryKey}
-            {...withLiteralClass("memory-saved-item", styles.memorySavedItem)}
+            {...withLiteralClass(
+              "memory-saved-item",
+              styles.memorySavedItem,
+              index === lastIndex && styles.memorySavedItemNew,
+            )}
             data-testid="memory-saved-item"
           >
             <span
@@ -911,9 +833,36 @@ export const MemorySavedIndicator: React.FC<{ dialogConfig: any }> = ({ dialogCo
             >
               {mem.content}
             </span>
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                {...withLiteralClass("memory-saved-tag", styles.memorySavedTag)}
+                data-testid="memory-saved-tag"
+              >
+                {tag}
+              </span>
+            ))}
           </div>
         );
       })}
+      {collapsible && (
+        <button
+          type="button"
+          {...withLiteralClass("memory-saved-toggle", styles.memorySavedToggle)}
+          data-testid="memory-saved-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t("memoryCollapse", "收起")
+            : String(
+                t("memoryShowAll", {
+                  defaultValue: "查看全部 {{count}} 条记忆",
+                  count: memories.length,
+                }),
+              ).replace("{{count}}", String(memories.length))}
+        </button>
+      )}
     </div>
   );
 };

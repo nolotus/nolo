@@ -67,10 +67,255 @@ function formatStructuredSummary(
   return compactPairs.join(" · ");
 }
 
+// ─── Agent-run tool presentation (startAgentRun / controlAgentRun / listAgents) ───
+
+/** UI-facing labels for the agent-run tool family. Technical keys (agentKey,
+ * runId, action verbs) stay verbatim; labels are presentation-only and never
+ * serialized back into model messages. */
+export type AgentRunToolTranslate = (key: string, fallback: string) => string;
+
+export type AgentRunPresentation = {
+  /** One-line header: "启动子任务 · 前端实现员" — never raw JSON. */
+  titleText: string;
+  /** Localized run status label for the detail body. */
+  statusLabel: string;
+  /** Localized detail rows (agent / run / count). */
+  agentLabel: string;
+  runLabel: string;
+  countLabel?: string;
+  agentText?: string;
+  runText?: string;
+  countText?: string;
+};
+
+const AGENT_RUN_STATUS_I18N: Record<string, { key: string; fallback: string }> = {
+  pending: { key: "agentRun.statusPending", fallback: "等待中" },
+  queued: { key: "agentRun.statusPending", fallback: "等待中" },
+  running: { key: "agentRun.statusRunning", fallback: "运行中" },
+  done: { key: "agentRun.statusDone", fallback: "已完成" },
+  completed: { key: "agentRun.statusDone", fallback: "已完成" },
+  failed: { key: "agentRun.statusFailed", fallback: "失败" },
+  timeout: { key: "agentRun.statusFailed", fallback: "失败" },
+  killed: { key: "agentRun.statusCancelled", fallback: "已停止" },
+  cancelled: { key: "agentRun.statusCancelled", fallback: "已停止" },
+  cancelling: { key: "agentRun.statusCancelled", fallback: "已停止" },
+  orphaned: { key: "agentRun.statusOrphaned", fallback: "已失联" },
+  not_found: { key: "agentRun.statusUnknown", fallback: "未知" },
+  unknown: { key: "agentRun.statusUnknown", fallback: "未知" },
+};
+
+export function resolveAgentRunStatusLabel(
+  status: string | undefined,
+  translate?: AgentRunToolTranslate,
+): string {
+  const entry = AGENT_RUN_STATUS_I18N[asTrimmedString(status)] ?? AGENT_RUN_STATUS_I18N.unknown;
+  const t = translate ?? ((_k, fb) => fb);
+  const value = asOptionalTrimmedString(t(entry.key, entry.fallback));
+  return value && value !== entry.key ? value : entry.fallback;
+}
+
+const AGENT_RUN_ACTION_I18N: Record<string, { key: string; fallback: string }> = {
+  list: { key: "controlActions.list", fallback: "列出运行" },
+  status: { key: "controlActions.status", fallback: "查看运行状态" },
+  stop: { key: "controlActions.stop", fallback: "停止运行" },
+  append: { key: "controlActions.append", fallback: "追加指令" },
+  wait: { key: "controlActions.wait", fallback: "等待运行" },
+};
+
+/** Readable UI-only label for a controlAgentRun action; raw verbs like
+ * `stop` never render in the user-facing summary. */
+export function resolveAgentRunActionLabel(
+  action: string | undefined,
+  translate?: AgentRunToolTranslate,
+): string {
+  const raw = asTrimmedString(action);
+  const entry = raw ? AGENT_RUN_ACTION_I18N[raw] : undefined;
+  if (!entry) return raw;
+  const t = translate ?? ((_k, fb) => fb);
+  const value = asOptionalTrimmedString(t(entry.key, entry.fallback));
+  return value && value !== entry.key ? value : entry.fallback;
+}
+
+function pickAgentRunAgent(
+  raw: Record<string, unknown>,
+  input: Record<string, unknown>,
+): string {
+  return readString(
+    raw.agentName,
+    raw.name,
+    input.agentName,
+    input.name,
+    raw.agentKey,
+    input.agentKey,
+  );
+}
+
+/** Runs list summary for controlAgentRun with action=list / listAgents results.
+ * Reads real payload fields only (runs[]/agents[] length or explicit total) —
+ * never guesses; returns undefined when no count evidence exists. */
+export function extractAgentRunCount(raw: Record<string, unknown>): number | undefined {
+  // `total` is the true total; `count` is the page count when paginated —
+  // prefer total so a list of 200 doesn't read as "20 条运行".
+  const direct = asOptionalFiniteNumber(raw.total) ?? asOptionalFiniteNumber(raw.count);
+  if (typeof direct === "number" && direct >= 0) return direct;
+  if (Array.isArray(raw.runs)) return raw.runs.length;
+  if (Array.isArray(raw.agents)) return raw.agents.length;
+  return undefined;
+}
+
+function interpolateTemplate(template: string, count: number): string {
+  return template.replace("{{count}}", String(count));
+}
+
+/**
+ * One shared presenter for the agent-run tool family (startAgentRun,
+ * controlAgentRun, listAgents). Produces the localized first-line summary
+ * plus detail labels so web/RN rows never dump the full JSON blob as the
+ * primary summary. `translate` is optional — omitting it keeps the zh
+ * defaults so tests / SSR / legacy callers stay readable.
+ */
+export function buildAgentRunPresentation(args: {
+  toolName?: string;
+  rawData?: unknown;
+  toolPayload?: unknown;
+  inputArgs?: unknown;
+  status?: string;
+  isStreaming?: boolean;
+  isError?: boolean;
+  translate?: AgentRunToolTranslate;
+}): AgentRunPresentation {
+  const t = args.translate ?? ((_k, fb) => fb);
+  const raw = asRecordOrEmpty(args.rawData);
+  const payload = asRecordOrEmpty(args.toolPayload);
+  const input = asRecordOrEmpty(
+    isRecord(payload.input) ? payload.input : args.inputArgs,
+  );
+
+  const toolKey = asTrimmedString(args.toolName);
+  const toolLabel = asOptionalTrimmedString(
+    t(`toolNames.${toolKey}`, ""),
+  );
+  const verbLabel = asOptionalTrimmedString(
+    t(`toolVerbs.${toolKey}`, ""),
+  );
+  const nameFallback =
+    toolKey === "controlAgentRun"
+      ? "控制运行"
+      : toolKey === "listAgents"
+        ? "列出助手"
+        : "启动子任务";
+  const toolText =
+    (verbLabel && verbLabel !== `toolVerbs.${toolKey}` && verbLabel) ||
+    (toolLabel && toolLabel !== `toolNames.${toolKey}` && toolLabel) ||
+    nameFallback;
+
+  // Run status comes from the run payload (raw.status → run lifecycle), NOT
+  // the tool-execution status (payload.status = tool succeeded/failed — a
+  // successful startAgentRun dispatch does not mean the child run finished).
+  // args.status is honored only when it is a real run status, never a
+  // tool-completion verb like "succeeded".
+  const TOOL_COMPLETION_STATUSES = new Set(["succeeded", "ok", "success"]);
+  const argStatus = asTrimmedString(args.status);
+  const status: string = args.isStreaming
+    ? "running"
+    : args.isError
+      ? "failed"
+      : argStatus && !TOOL_COMPLETION_STATUSES.has(argStatus)
+        ? argStatus
+        : readString(raw.status, payload.status);
+  const statusLabel = resolveAgentRunStatusLabel(status, t);
+
+  const agentText = pickAgentRunAgent(raw, input) || undefined;
+  const runId = readString(raw.runId, payload.runId, input.runId);
+  const runText = runId ? runId : undefined;
+  const count = extractAgentRunCount(raw);
+
+  const action = readString(input.action, raw.action, payload.action);
+  const actionLabel = resolveAgentRunActionLabel(action, t);
+
+  // Runs vs agents: listAgents counts assistants, controlAgentRun list
+  // counts runs — same count semantics, different nouns per locale.
+  const countKey =
+    toolKey === "listAgents" ? "agentRun.agentCountLabel" : "agentRun.countLabel";
+  const countFallback =
+    toolKey === "listAgents" ? "{{count}} 个助手" : "{{count}} 条运行";
+  const countLabel = asOptionalTrimmedString(t(countKey, countFallback));
+  const countLabelValue =
+    count !== undefined
+      ? interpolateTemplate(
+          countLabel && countLabel !== countKey ? countLabel : countFallback,
+          count,
+        )
+      : undefined;
+
+  // Run title (user-supplied) or clipped taskPreview disambiguates parallel
+  // runs of the same agent — without it two "前端实现员" rows look identical.
+  const taskText = readString(
+    raw.title,
+    input.title,
+    raw.taskPreview,
+    input.taskPreview,
+  );
+  const runTitle = taskText ? clipCompactText(taskText, 60, "…") : "";
+
+  // First line: "启动子任务 · <agent> · <task>" / "控制运行 · 停止运行" /
+  // "列出助手 · 3 个助手" — a readable summary, never a JSON blob.
+  const titleParts = [toolText];
+  if (agentText) titleParts.push(agentText);
+  if (runTitle) titleParts.push(runTitle);
+  else if (
+    toolKey === "controlAgentRun" &&
+    actionLabel &&
+    actionLabel !== action &&
+    // list already conveys "runs" via the count; repeating 列出运行·N 条运行
+    // reads redundant on narrow screens.
+    !(count !== undefined && action === "list")
+  )
+    titleParts.push(actionLabel);
+  if (countLabelValue) titleParts.push(countLabelValue);
+  const titleText = titleParts.filter(Boolean).join(" · ");
+
+  const agentLabel = asOptionalTrimmedString(t("agentRun.agentLabel", "助手"));
+  const runLabel = asOptionalTrimmedString(t("agentRun.runLabel", "运行"));
+
+  return {
+    titleText,
+    statusLabel,
+    agentLabel:
+      agentLabel && agentLabel !== "agentRun.agentLabel" ? agentLabel : "助手",
+    runLabel:
+      runLabel && runLabel !== "agentRun.runLabel" ? runLabel : "运行",
+    ...(countLabelValue ? { countLabel: countLabelValue } : {}),
+    ...(agentText ? { agentText } : {}),
+    ...(runText ? { runText } : {}),
+    ...(countLabelValue ? { countText: countLabelValue } : {}),
+  };
+}
+
 export function normalizeToolDisplaySummary(
   summary: unknown,
   toolName?: string
 ): string {
+  if (isRecord(summary)) {
+    if (toolName === "startAgentRun") {
+      const title = asOptionalTrimmedString(summary.title);
+      const agent =
+        asOptionalTrimmedString(summary.agentName) ??
+        asOptionalTrimmedString(summary.name) ??
+        asOptionalTrimmedString(summary.agentKey);
+      if (title && agent) return `${title} (${agent})`;
+      if (title) return title;
+      if (agent) return agent;
+    }
+    if (toolName === "controlAgentRun") {
+      const action = asOptionalTrimmedString(summary.action);
+      const runId = asOptionalTrimmedString(summary.runId) ?? asOptionalTrimmedString(summary.batchId);
+      if (action && runId) return `${action} · ${runId}`;
+      if (action) return action;
+      if (runId) return runId;
+    }
+  }
+
   if (typeof summary === "string") {
     const cleaned = cleanSummaryText(summary);
     if (cleaned) return cleaned;
@@ -269,13 +514,22 @@ function compactText(value: unknown, fallback = ""): string {
 
 function resolveStatusLabel(
   toolPayload: Record<string, unknown> | null | undefined,
-  status: HandoffStatus
+  status: HandoffStatus,
+  translate?: AgentRunToolTranslate
 ): string {
+  const t = translate ?? ((_k, fb) => fb);
+  const resolve = (key: string, fallback: string): string => {
+    const value = asOptionalTrimmedString(t(key, fallback));
+    return value && value !== key ? value : fallback;
+  };
   const payloadStatus = readString(toolPayload?.status);
-  if (status === "running" || payloadStatus === "running") return "处理中";
-  if (status === "failed" || payloadStatus === "failed") return "交接失败";
-  if (payloadStatus === "pending") return "等待中";
-  return "已交接";
+  if (status === "running" || payloadStatus === "running")
+    return resolve("agentRun.handoffRunning", "处理中");
+  if (status === "failed" || payloadStatus === "failed")
+    return resolve("agentRun.handoffFailed", "交接失败");
+  if (payloadStatus === "pending")
+    return resolve("agentRun.statusPending", "等待中");
+  return resolve("agentRun.handoffDone", "已交接");
 }
 
 export function buildRunStreamingAgentHandoffPresentation(args: {
@@ -283,7 +537,10 @@ export function buildRunStreamingAgentHandoffPresentation(args: {
   toolPayload?: unknown;
   isStreaming?: boolean;
   isError?: boolean;
+  /** Optional UI translate — when omitted, zh defaults keep tests readable. */
+  translate?: AgentRunToolTranslate;
 }): RunStreamingAgentHandoffPresentation {
+  const t = args.translate ?? ((_k, fb) => fb);
   const raw = asRecordOrEmpty(args.rawData);
   const payload = asRecordOrEmpty(args.toolPayload);
   const input = asRecordOrEmpty(payload.input);
@@ -299,13 +556,29 @@ export function buildRunStreamingAgentHandoffPresentation(args: {
       ? "failed"
       : "success";
 
+  const summaryTemplate = asOptionalTrimmedString(
+    t("agentRun.handoffSummary", "已交给 {{agent}} 处理"),
+  );
+  const summary =
+    summaryTemplate && summaryTemplate !== "agentRun.handoffSummary"
+      ? summaryTemplate.replace("{{agent}}", targetLabel)
+      : `已交给 ${targetLabel} 处理`;
+  const inputFallback = asOptionalTrimmedString(
+    t("agentRun.noInputSummary", "未记录输入摘要"),
+  );
+
   return {
-    summary: `已交给 ${targetLabel} 处理`,
+    summary,
     inline,
     targetLabel,
     agentKey,
-    inputSummary: compactText(userInput, "未记录输入摘要"),
-    statusLabel: resolveStatusLabel(payload, status),
+    inputSummary: compactText(
+      userInput,
+      inputFallback && inputFallback !== "agentRun.noInputSummary"
+        ? inputFallback
+        : "未记录输入摘要",
+    ),
+    statusLabel: resolveStatusLabel(payload, status, args.translate),
     targetDialogKey: readString(
       raw.dialogKey,
       raw.subDialogKey,

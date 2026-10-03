@@ -236,10 +236,19 @@ const removeEmptyAssetDirs = async (dir = ASSET_OUTPUT_DIR) => {
   );
 };
 
+// 默认保留最近 N 次构建的 hash 产物。2026-10-03 事故：默认 2 在 deploy 后立即
+// 清掉旧 chunk，存量会话请求旧 hash 得到 Caddy/Cloudflare 404（实测单次 ~7.89s），
+// QuickChat 动态 import 失败、提交卡死。放宽到 10 次构建窗口以覆盖一次部署后
+// 还在前台/后台标签页里停留的会话。可用 NOLO_WEB_KEEP_ASSET_BUILDS 覆盖。
+const DEFAULT_ASSET_BUILDS_TO_KEEP = 10;
+
 const keepRecentAssetBuilds = async (outputs) => {
   const keepCount = Math.max(
     1,
-    Number.parseInt(process.env.NOLO_WEB_KEEP_ASSET_BUILDS ?? "2", 10) || 2
+    Number.parseInt(
+      process.env.NOLO_WEB_KEEP_ASSET_BUILDS ?? String(DEFAULT_ASSET_BUILDS_TO_KEEP),
+      10
+    ) || DEFAULT_ASSET_BUILDS_TO_KEEP
   );
   await writeAssetBuildManifest(outputs);
 
