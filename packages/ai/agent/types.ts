@@ -3,6 +3,8 @@
 import type { QuickChatModelOverride } from "./quickChatModelOverride";
 
 export interface AgentRuntimeOptions {
+    /** Per-send execution location; dialog selection is the stable default for continuation turns. */
+    runtimeTarget?: { kind: "server" | "machine"; machineId?: string };
     /**
      * 在本次调用中额外开放给 LLM 的工具名称。
      * 会与 Agent 本身的 tools 数组合并后再传给 LLM。

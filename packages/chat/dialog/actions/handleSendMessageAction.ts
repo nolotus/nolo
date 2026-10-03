@@ -307,10 +307,16 @@ export const handleSendMessageAction = async (
         }
 
         // 步骤 2: 计算本轮要实际调用的 agentKey
+        const selectedRuntimeTarget = dialogConfig.runtimeBinding?.target;
         const resolvedContext = resolveHandleSendMessageContext({
             dialogConfig,
             targetAgentKey: args.targetAgentKey,
-            runtimeOptions: args.runtimeOptions,
+            runtimeOptions: {
+                ...args.runtimeOptions,
+                ...(selectedRuntimeTarget && (selectedRuntimeTarget.kind === "server" || selectedRuntimeTarget.kind === "machine")
+                    ? { runtimeTarget: selectedRuntimeTarget }
+                    : {}),
+            },
         });
         agentKeyToUse = resolvedContext.agentKeyToUse;
         const agentConfigToUse = resolvedContext.agentConfigToUse;

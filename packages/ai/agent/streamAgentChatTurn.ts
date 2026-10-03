@@ -583,13 +583,24 @@ export const streamAgentChatTurnHandler = async (
         const configuredBoundMachineId = asTrimmedString(
             (agentConfig as any).runtimeBinding?.machineId,
         );
-        const boundMachineId = resolveRemoteBoundMachineId(configuredBoundMachineId);
+        const currentDialog =
+            selectDialogConfigByKey(state, explicitDialogKey) ??
+            selectCurrentDialogConfig(state);
+        const explicitTarget =
+            runtimeOptions?.runtimeTarget ??
+            ((currentDialog as any)?.runtimeBinding?.target?.kind === "server" ||
+             (currentDialog as any)?.runtimeBinding?.target?.kind === "machine"
+                ? (currentDialog as any).runtimeBinding.target
+                : undefined);
+        const boundMachineId = explicitTarget
+            ? explicitTarget.kind === "machine" ? asTrimmedString(explicitTarget.machineId) : null
+            : resolveRemoteBoundMachineId(configuredBoundMachineId);
 
         // ── Remote runtime route ─────────────────────────────────────────────
         // runtimeBinding selects the bound machine. Without it, custom provider
         // requests stay on the normal OpenAI-compatible path, where
         // useServerProxy decides server proxy vs current-client direct fetch.
-        if (agentConfig.apiSource === "cli" || (boundMachineId && !getIsDesktopApp())) {
+        if ((agentConfig.apiSource === "cli" && !explicitTarget) || (boundMachineId && !getIsDesktopApp())) {
             console.info("[streamAgentChatTurn] Triggered CLI/machine route. apiSource:", agentConfig.apiSource, "boundMachineId:", boundMachineId, "agentKey:", agentKey);
             const currentState = getState() as RootState;
             const w =
@@ -689,6 +700,7 @@ export const streamAgentChatTurnHandler = async (
                         stream: true,
                         persistDialog: false,
                         clientDialogId: dialogId,
+                        ...(explicitTarget ? { runtimeTarget: explicitTarget } : {}),
                         runtimeContext: {
                             surface: "web",
                             host: "browser",
@@ -1098,9 +1110,6 @@ export const streamAgentChatTurnHandler = async (
         }
         // ─────────────────────────────────────────────────────────────────────
 
-        const currentDialog =
-            selectDialogConfigByKey(state, explicitDialogKey) ??
-            selectCurrentDialogConfig(state);
         const activeDialogKey = currentDialog?.dbKey;
         const dialogKey = explicitDialogKey || activeDialogKey;
 
@@ -1805,6 +1814,7 @@ export const streamAgentChatTurnHandler = async (
                     stream: true,
                     persistDialog: false,
                     clientDialogId: dialogId,
+                    ...(explicitTarget ? { runtimeTarget: explicitTarget } : {}),
                     runtimeContext: {
                         surface: "web",
                         host: "browser",

@@ -23,6 +23,13 @@ export interface DialogNotificationPolicy {
   channels?: Array<"ui" | "email">;
 }
 
+export interface DialogRuntimeTargetSelection {
+  kind: "local" | "server" | "machine";
+  machineId?: string;
+  source: "user";
+  selectedAt: number;
+}
+
 export interface DialogRuntimeBinding {
   version: 1;
   /** 当前 product runtime 的 tenant 边界；本地模型 watchdog 不属于这里。 */
@@ -34,6 +41,8 @@ export interface DialogRuntimeBinding {
   triggerType?: "user" | "api" | "localhost" | "scheduled_run" | "automation_run";
   executionMode?: "foreground" | "background";
   runtimeProfile?: DialogRuntimeProfile;
+  /** 用户在该对话里选的执行位置（最高优先级）。见 agentRun/runtimeTarget.ts。 */
+  target?: DialogRuntimeTargetSelection;
   spaceId?: string;
   category?: string;
   /** Effective runtime/tool policy snapshot for this dialog run. */
