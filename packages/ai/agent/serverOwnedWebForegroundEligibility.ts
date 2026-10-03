@@ -1,5 +1,12 @@
 import type { EffectiveToolSurface } from "ai/tools/effectiveToolSurface";
 import { resolveEffectiveToolSurface } from "ai/tools/effectiveToolSurface";
+import {
+  DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_TOOL_NAMES,
+  hasProvenDurableWebForegroundSemantics,
+  hasProvenServerReadOnlySemantics,
+} from "ai/tools/toolExecutionSemantics";
 import { canonicalizeToolName } from "ai/tools/toolNameAliases";
 import type { AgentRuntimeOptions } from "./types";
 import type { TurnToolContext } from "./turnToolContext";
@@ -22,55 +29,14 @@ export type ServerOwnedWebForegroundEligibilityInput = {
   isDesktopApp?: boolean;
 };
 
-/**
- * Human-interaction boundary with proven durable semantics. blocking ask_user
- * intentionally ends the current execution and resumes in a new execution
- * after the user chooses.
- */
-export const DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES = new Set([
-  "ask_user",
-]);
-
-/**
- * Canonical side-effect-free tools with proven server-hosted execution. These
- * may finish inside the current execution, project a completed transient card,
- * and then let the model continue.
- *
- * Keep aliases out of this set. For example `readPage` canonicalizes to
- * `readDoc`; effective-surface resolution and tool projection both use the
- * shared canonicalizer before consulting this contract. `read`/`readFile` are
- * intentionally excluded because their execution-location semantics can
- * resolve to filesystem reads.
- */
-export const DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES = new Set([
-  // Network read-only tools.
-  "exa_search",
-  "fetchWebpage",
-  // Dialog search backed by the server workspace executor.
-  "searchDialogMessages",
-  // Nolo workspace read/query tools.
-  "listDialogs",
-  "readDialog",
-  "queryDialogsBySubjectRef",
-  "listAgents",
-  "readAgent",
-  "listSpaces",
-  "readSpace",
-  "readDoc",
-  "readSkillDoc",
-  "listTables",
-  "queryTableRows",
-]);
-
-/**
- * Requested tools with proven durable Web foreground parity. Adding a tool here
- * means its live projection, refresh recovery, persistence and side-effect
- * semantics have been verified.
- */
-export const DURABLE_WEB_FOREGROUND_TOOL_NAMES = new Set([
-  ...DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
-  ...DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
-]);
+// Re-export contract-derived sets from the historic import location for callers
+// that only need product admission names. There is no second durable name list
+// in this module; add/remove durable tools in toolExecutionSemantics.ts.
+export {
+  DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES,
+  DURABLE_WEB_FOREGROUND_TOOL_NAMES,
+};
 
 /**
  * Historical Web host defaults already present when P0.1 server-owned foreground
@@ -108,8 +74,18 @@ export const AUDITED_WEB_FOREGROUND_HOST_BASELINE_TOOL_NAMES = new Set([
 ]);
 
 function isDurableRequestedToolName(name: unknown): boolean {
-  return typeof name === "string" &&
-    DURABLE_WEB_FOREGROUND_TOOL_NAMES.has(canonicalizeToolName(name));
+  if (typeof name !== "string") return false;
+  return hasProvenDurableWebForegroundSemantics(canonicalizeToolName(name));
+}
+
+export function hasConsistentDurableWebForegroundSemantics(): boolean {
+  for (const name of DURABLE_WEB_FOREGROUND_READ_ONLY_TOOL_NAMES) {
+    if (!hasProvenServerReadOnlySemantics(name)) return false;
+  }
+  for (const name of DURABLE_WEB_FOREGROUND_INTERACTIVE_TOOL_NAMES) {
+    if (!hasProvenDurableWebForegroundSemantics(name)) return false;
+  }
+  return true;
 }
 
 function hasSupportedDurableToolSurface(
