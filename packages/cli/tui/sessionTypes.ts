@@ -29,15 +29,6 @@ export type TuiState = {
    */
   updateAvailable?: CliUpdateInfo;
   /**
-   * Whether the welcome screen should print the unauthenticated guidance block.
-   * Computed once at session start (createInitialTuiState) from the real auth
-   * sources — platform token resolvable AND no local credentials — so the pure
-   * renderWelcome path stays env-free and resize repaints don't re-probe the
-   * credential dir. True only when BOTH platform login and local creds are
-   * absent; a user with either already has a working path and isn't nagged.
-   */
-  showAuthGuidance?: boolean;
-  /**
    * 用于解析 paste 行里的相对路径。workspace 启动时从 process.cwd() 取。
    * 保留在 state 里是为了让 handleTuiInput 这种纯函数也能做路径解析。
    */

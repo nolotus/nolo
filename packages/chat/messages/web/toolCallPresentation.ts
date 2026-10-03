@@ -169,11 +169,6 @@ const TOOL_VERBS: Record<string, string> = {
   listAgents: "列出助手",
   readAgent: "读取助手",
   startAgentRun: "启动子任务",
-  controlAgentRun: "控制任务",
-  createAgent: "创建助手",
-  updateAgent: "更新助手",
-  queryDialogsBySubjectRef: "检索对话",
-  deleteDialogs: "删除对话",
   startPreview: "启动预览",
   getPreviewStatus: "预览状态",
   stopPreview: "停止预览",
@@ -433,49 +428,12 @@ export function buildToolCallTarget(
       target = asOptionalTrimmedString(args.name) ?? "";
       break;
     case "listAgents":
-      target = asOptionalTrimmedString(args.query) ?? "";
-      break;
     case "readAgent":
+    case "startAgentRun":
       target =
         asOptionalTrimmedString(args.name) ??
-        asOptionalTrimmedString(args.agent) ??
         asOptionalTrimmedString(args.agentKey) ??
         "";
-      break;
-    case "startAgentRun": {
-      const title = asOptionalTrimmedString(args.title);
-      const agentLabel =
-        asOptionalTrimmedString(args.agentName) ??
-        asOptionalTrimmedString(args.name) ??
-        asOptionalTrimmedString(args.agentKey);
-      if (title && agentLabel) {
-        target = `${title} (${agentLabel})`;
-      } else {
-        target = title ?? agentLabel ?? asOptionalTrimmedString(args.task) ?? "";
-      }
-      break;
-    }
-    case "controlAgentRun": {
-      const action = asOptionalTrimmedString(args.action);
-      const runId = asOptionalTrimmedString(args.runId);
-      const batchId = asOptionalTrimmedString(args.batchId);
-      const targetId = runId || batchId;
-      if (action && targetId) {
-        target = `${action} ${targetId}`;
-      } else {
-        target = action ?? targetId ?? "";
-      }
-      break;
-    }
-    case "queryDialogsBySubjectRef":
-      target =
-        asOptionalTrimmedString(args.subjectId) ??
-        asOptionalTrimmedString(args.rowDbKey) ??
-        asOptionalTrimmedString(args.subjectKind) ??
-        "";
-      break;
-    case "deleteDialogs":
-      target = asOptionalTrimmedString(args.query) ?? "";
       break;
     default:
       return undefined;
