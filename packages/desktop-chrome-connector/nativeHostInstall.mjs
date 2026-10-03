@@ -77,6 +77,11 @@ export function resolveNativeHostInstallPaths({
   // Deliberately the same directory on every platform: the desktop app resolves its connector token
   // from this path (packages/desktop-chrome-connector/chromeConnector.ts) and the two must not drift.
   const supportDir = resolve(home, "Library/Application Support/Nolo/ChromeConnector");
+  // Per-browser wrapper: each manifest must launch a host tagged with its own browser identity (and
+  // port) so a Firefox host never lands on Chrome's endpoint. Chrome keeps the historical name —
+  // the desktop and older installs already point at it.
+  const wrapperName =
+    browser === "firefox" ? "nolo-firefox-native-host" : "nolo-chrome-native-host";
   return {
     connectorRoot,
     browser,
@@ -89,8 +94,24 @@ export function resolveNativeHostInstallPaths({
     ),
     supportDir,
     tokenPath: resolve(supportDir, "token"),
-    wrapperPath: resolve(supportDir, "nolo-chrome-native-host"),
+    wrapperPath: resolve(supportDir, wrapperName),
   };
+}
+
+/**
+ * The RPC port a browser's native host listens on. Chrome retains 38947 (the desktop endpoint's
+ * long-standing contract); Firefox gets 38948 so both can listen simultaneously.
+ *
+ * Override semantics mirror `connectorEndpointForBrowser` in chromeConnector.ts:
+ * `NOLO_CHROME_CONNECTOR_PORT` overrides the Chrome port only; it is deliberately *not* a fallback
+ * for Firefox — setting the Chrome override must not reroute the Firefox host onto Chrome's port.
+ * Firefox honours only `NOLO_FIREFOX_CONNECTOR_PORT`, then its default.
+ */
+export function connectorPortForBrowser({ browser = "chrome", env = process.env } = {}) {
+  if (browser === "firefox") {
+    return Number(env.NOLO_FIREFOX_CONNECTOR_PORT || 38948);
+  }
+  return Number(env.NOLO_CHROME_CONNECTOR_PORT || 38947);
 }
 
 export function installNativeHostManifest({
@@ -115,9 +136,15 @@ export function installNativeHostManifest({
     : "";
   const token = existingToken || randomBytes(32).toString("hex");
   writeFileSync(paths.tokenPath, `${token}\n`, { mode: 0o600 });
+  // Each wrapper pins the host's browser identity + port so the two builds never share an endpoint.
+  const port = connectorPortForBrowser({ browser });
   writeFileSync(
     paths.wrapperPath,
-    `#!/bin/sh\nNOLO_CHROME_CONNECTOR_TOKEN=${JSON.stringify(token)} exec ${JSON.stringify(resolvedNodePath)} ${JSON.stringify(paths.hostPath)}\n`,
+    `#!/bin/sh\n` +
+      `NOLO_CHROME_CONNECTOR_BROWSER=${JSON.stringify(browser)} ` +
+      `NOLO_CHROME_CONNECTOR_TOKEN=${JSON.stringify(token)} ` +
+      `${browser === "firefox" ? `NOLO_FIREFOX_CONNECTOR_PORT=${JSON.stringify(String(port))} ` : ""}` +
+      `exec ${JSON.stringify(resolvedNodePath)} ${JSON.stringify(paths.hostPath)}\n`,
   );
   chmodSync(paths.wrapperPath, 0o755);
 

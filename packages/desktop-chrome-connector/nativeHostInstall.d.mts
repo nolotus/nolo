@@ -42,6 +42,17 @@ export function isThrowawayCheckout(root: string): string | null;
 export function extensionIdFromPublicKey(publicKeyBase64: string): string;
 
 /**
+ * The RPC port a browser's native host listens on: Chrome retains 38947, Firefox 38948.
+ * `NOLO_CHROME_CONNECTOR_PORT` overrides Chrome only; `NOLO_FIREFOX_CONNECTOR_PORT` overrides
+ * Firefox. The Chrome var is deliberately not a Firefox fallback — a Chrome-only override must not
+ * make the Firefox host collide on Chrome's port (same rule as the runtime endpoint resolver).
+ */
+export function connectorPortForBrowser(options?: {
+  browser?: string;
+  env?: Record<string, string | undefined>;
+}): number;
+
+/**
  * `browser` is typed as `string` on purpose: the implementation validates it at
  * runtime (only "chrome" and "firefox" are supported, anything else throws), so
  * narrowing to a union here would make callers that assert the throw stop
