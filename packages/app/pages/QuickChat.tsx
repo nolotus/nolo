@@ -41,50 +41,8 @@ import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
 import "./QuickChat.css";
 
-// 动态 import 必须包一层可重试加载器：React.lazy 会把第一个 rejected promise
-// 钉死在组件实例上，chunk 404（部署后旧 hash 被清理）一旦发生就永久失败。
-// 失败时重建 lazy 组件并重新发 import()，才能拿到恢复机会（见 QuickChat 内的
-// runtimeComponent / QuickChatChunkErrorBoundary 与 preload 的 reject 处理）。
-export const isQuickChatChunkLoadError = (error: unknown): boolean => {
-  if (!error) return false;
-  const name = (error as { name?: unknown })?.name;
-  const message = (error as { message?: unknown })?.message;
-  const text = `${typeof name === "string" ? name : ""} ${typeof message === "string" ? message : ""}`;
-  return (
-    /ChunkLoadError/i.test(text) ||
-    /dynamically imported module/i.test(text) ||
-    /Failed to fetch/i.test(text) ||
-    /Importing a module script failed/i.test(text) ||
-    /import\(\)/i.test(text) && /failed/i.test(text)
-  );
-};
-
 const quickChatRuntimeImport = () => import("./QuickChatRuntime");
-const createQuickChatRuntimeComponent = () => lazy(quickChatRuntimeImport);
-const QUICK_CHAT_CHUNK_RELOAD_KEY = "nolo.quickchat.chunkReloadAt";
-const QUICK_CHAT_CHUNK_RELOAD_COOLDOWN_MS = 60_000;
-
-/**
- * Stale-deploy chunk 404 的终极恢复：整页刷新让 index.html 换成新 hash 清单。
- * 用 sessionStorage 冷却窗防 reload 死循环（部署彻底缺失时最多刷一次）。
- */
-export const shouldReloadForQuickChatChunk = (
-  storage: Pick<Storage, "getItem" | "setItem"> | null =
-    typeof sessionStorage !== "undefined" ? sessionStorage : null,
-  now: number = Date.now(),
-): boolean => {
-  if (!storage) return false;
-  try {
-    const last = Number.parseInt(storage.getItem(QUICK_CHAT_CHUNK_RELOAD_KEY) ?? "", 10);
-    if (Number.isFinite(last) && now - last < QUICK_CHAT_CHUNK_RELOAD_COOLDOWN_MS) {
-      return false;
-    }
-    storage.setItem(QUICK_CHAT_CHUNK_RELOAD_KEY, String(now));
-    return true;
-  } catch {
-    return false;
-  }
-};
+const QuickChatRuntime = lazy(quickChatRuntimeImport);
 const QUICK_CHAT_IDLE_PRELOAD_TIMEOUT_MS = 500;
 const QUICK_CHAT_FALLBACK_PRELOAD_DELAY_MS = 250;
 const QUICK_CHAT_PERF_PREFIX = "[QuickChatPerf]";
@@ -117,28 +75,10 @@ export const preloadQuickChatRuntimeDependencies = () => {
       import("ai/agent/streamAgentChatTurn"),
     ]);
     void quickChatPreloadPromise.then((results) => {
-      const rejectedCount = results.filter(
-        (result: PromiseSettledResult<unknown>) => result.status === "rejected"
-      ).length;
-      const runtimeRejected = results[0]?.status === "rejected";
-      // Runtime chunk 挂了（典型：deploy 后旧 hash 被清理 → 404）时不发 ready
-      // 回调 —— ready 回调唯一作用是 setRuntimeActive(true)，此刻激活只会让
-      // lazy 立刻抛出同一个 rejection。同时释放缓存的 promise 让下次 preload
-      // 重新 import（失败的动态 import 不会进模块缓存，重试能真实重新拉取）。
-      if (runtimeRejected) {
-        quickChatPreloadPromise = null;
-        logQuickChatPreloadStage("quick-chat-preload-rejected", {
-          rejectedCount,
-          reason:
-            results[0]?.status === "rejected"
-              ? String((results[0] as PromiseRejectedResult).reason)
-              : undefined,
-        });
-        return;
-      }
       quickChatPreloadSettled = true;
       logQuickChatPreloadStage("quick-chat-preload-settled", {
-        rejectedCount,
+        rejectedCount: results.filter((result: PromiseSettledResult<unknown>) => result.status === "rejected")
+          .length,
       });
       for (const callback of quickChatRuntimeReadyCallbacks) {
         callback();
@@ -202,95 +142,6 @@ const scheduleQuickChatRuntimeDependencyPreload = (trigger: string) => {
 
 scheduleQuickChatRuntimeDependencyPreload("module");
 
-interface QuickChatChunkErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback: React.ReactNode;
-  onRetry: () => void;
-  retryLabel: string;
-}
-
-interface QuickChatChunkErrorBoundaryState {
-  hasError: boolean;
-  retriedOnce: boolean;
-}
-
-/**
- * QuickChatRuntime chunk 加载失败边界。典型触发：deploy 把旧 hash chunk 清掉，
- * 存量会话 lazy import 404（React.lazy 会把该 rejection 钉死在组件上）。
- * 处理顺序：先静默重试一次（可能 recoverable 的瞬时网络抖动）；再失败则
- * 若允许就整页 reload（index.html 已指向新 hash 清单）；reload 冷却期内
- * 兜底回退到 shell + 显式重试按钮，绝不让输入框永久转圈。
- */
-class QuickChatChunkErrorBoundary extends React.Component<
-  QuickChatChunkErrorBoundaryProps,
-  QuickChatChunkErrorBoundaryState
-> {
-  state: QuickChatChunkErrorBoundaryState = { hasError: false, retriedOnce: false };
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-  static getDerivedStateFromError(): Partial<QuickChatChunkErrorBoundaryState> {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    const chunkError = isQuickChatChunkLoadError(error);
-    logQuickChatPreloadStage("quick-chat-runtime-chunk-error", {
-      message: error?.message,
-      chunkError,
-      retriedOnce: this.state.retriedOnce,
-    });
-    if (!chunkError) return; // Non-chunk render errors: keep manual retry UI only.
-    if (!this.state.retriedOnce) {
-      // First failure: retry the chunk fetch once before escalating to reload.
-      this.retryTimer = setTimeout(() => this.handleRetry(), 600);
-      return;
-    }
-    // Second failure on a stale deploy: reload picks up the fresh index.html /
-    // asset manifest. Cooldown prevents a reload loop when the deploy itself
-    // is broken — in that case the manual retry fallback stays reachable.
-    if (shouldReloadForQuickChatChunk() && typeof window !== "undefined") {
-      window.location.reload();
-    }
-  }
-
-  componentWillUnmount() {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-  }
-
-  handleRetry = () => {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-    }
-    this.setState(
-      () => ({ hasError: false, retriedOnce: true }),
-      () => this.props.onRetry(),
-    );
-  };
-
-  render() {
-    if (this.state.hasError) {
-      if (!this.state.retriedOnce) {
-        // Auto-retry in flight: keep showing the shell (no dead spinner).
-        return this.props.fallback;
-      }
-      return (
-        <div data-testid="quick-chat-chunk-error" className="quick-chat-chunk-error">
-          {this.props.fallback}
-          <button
-            type="button"
-            data-testid="quick-chat-chunk-retry"
-            onClick={() => this.handleRetry()}
-          >
-            {this.props.retryLabel}
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 export type QuickChatSurface = "default" | "home-primary" | "space-home-compact";
 
 interface QuickChatProps {
@@ -318,20 +169,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
   const [draft, setDraft] = useState("");
   const [autoSend, setAutoSend] = useState(false);
   const [initialAgentId, setInitialAgentId] = useState<string | null>(null);
-  // React.lazy 缓存首个 rejected import promise：chunk 404 后必须换一个新的
-  // lazy 组件实例重试，否则同一组件永远重抛同一个 rejection。
-  const [runtimeComponent, setRuntimeComponent] = useState(
-    createQuickChatRuntimeComponent
-  );
-
-  const retryRuntimeChunk = useCallback(() => {
-    // 释放被拒的 preload 缓存，让 import() 真正重新拉取 chunk；
-    // 然后换一个全新 lazy 实例，绕开 React.lazy 的 rejection 钉死。
-    quickChatPreloadPromise = null;
-    quickChatPreloadSettled = false;
-    setRuntimeComponent(createQuickChatRuntimeComponent());
-    void preloadQuickChatRuntimeDependencies();
-  }, []);
 
   const [quickChatMode, handleModeChange] = useQuickChatMode();
   const isCompact = surface === "space-home-compact";
@@ -501,7 +338,6 @@ const QuickChat: React.FC<QuickChatProps> = ({
   const showGreeting = !isCompact;
 
   if (isRuntimeActive) {
-    const RuntimeComponent = runtimeComponent;
     return (
       <div className={wrapperClassName} data-surface={surface}>
         {showGreeting && (
@@ -509,45 +345,29 @@ const QuickChat: React.FC<QuickChatProps> = ({
             {t("quickChat.greeting", "今天一起做什么？")}
           </h1>
         )}
-        <QuickChatChunkErrorBoundary
-          onRetry={retryRuntimeChunk}
-          retryLabel={t("quickChat.retryLoad", "重试加载")}
-          fallback={
-            <QuickChatShell
-              draft={draft}
-              placeholder={placeholder}
-              disabled
-              isEmptyState={isEmptyState}
-              surface={surface}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          }
-        >
-          <Suspense fallback={
-            <QuickChatShell
-              draft={draft}
-              placeholder={placeholder}
-              disabled
-              isEmptyState={isEmptyState}
-              surface={surface}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          }>
-            <RuntimeComponent
-              initialText={draft}
-              initialAgentId={initialAgentId}
-              surface={surface}
-              spaceId={spaceId}
-              autoSend={autoSend}
-              isEmptyState={isEmptyState}
-              onPersonalizationClick={isCompact ? undefined : startPersonalization}
-              quickChatMode={quickChatMode}
-              onModeChange={handleModeChange}
-            />
-          </Suspense>
-        </QuickChatChunkErrorBoundary>
+        <Suspense fallback={
+          <QuickChatShell
+            draft={draft}
+            placeholder={placeholder}
+            disabled
+            isEmptyState={isEmptyState}
+            surface={surface}
+            quickChatMode={quickChatMode}
+            onModeChange={handleModeChange}
+          />
+        }>
+          <QuickChatRuntime
+            initialText={draft}
+            initialAgentId={initialAgentId}
+            surface={surface}
+            spaceId={spaceId}
+            autoSend={autoSend}
+            isEmptyState={isEmptyState}
+            onPersonalizationClick={isCompact ? undefined : startPersonalization}
+            quickChatMode={quickChatMode}
+            onModeChange={handleModeChange}
+          />
+        </Suspense>
         {!isCompact && <QuickChatChips onChipClick={handleChipClick} />}
       </div>
     );

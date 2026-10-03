@@ -178,92 +178,73 @@ export const buttonStyles = stylex.create({
       "inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 6px 18px -14px color-mix(in srgb, var(--error) 38%, transparent)",
   },
   // .btn-primary:hover:not(.btn-disabled)
-  // ⚠️ hover/active 的所有声明必须挂在 ":hover"/":active" 伪类下。
-  // 扁平顶层属性会被 StyleX 编译成静态样式、按钮常态就生效（2026-10-03 事故：
-  // hoverPrimary 的 filter/boxShadow/transform 平铺 → 按钮一直带着 hover 视觉）。
   hoverPrimary: {
-    ":hover": {
-      transform: {
-        default: "translateY(-1px)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      boxShadow:
-        "inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 4px 12px color-mix(in srgb, var(--primary) 35%, transparent)",
-      filter: "brightness(1.04)",
+    transform: {
+      default: "translateY(-1px)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    boxShadow:
+      "inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 4px 12px color-mix(in srgb, var(--primary) 35%, transparent)",
+    filter: "brightness(1.04)",
   },
   // .btn-secondary:hover:not(.btn-disabled)
   hoverSecondary: {
-    ":hover": {
-      backgroundColor: "var(--backgroundHover)",
-      borderColor: "var(--borderHover)",
-      transform: {
-        default: "translateY(-1px)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      boxShadow: "0 3px 8px rgba(0,0,0,0.08)",
+    backgroundColor: "var(--backgroundHover)",
+    borderColor: "var(--borderHover)",
+    transform: {
+      default: "translateY(-1px)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    boxShadow: "0 3px 8px rgba(0,0,0,0.08)",
   },
   // .btn-ghost:hover:not(.btn-disabled)
   hoverGhost: {
-    ":hover": {
-      backgroundColor: "var(--backgroundHover)",
-      color: "var(--text)",
-    },
+    backgroundColor: "var(--backgroundHover)",
+    color: "var(--text)",
   },
   // .btn-danger:hover:not(.btn-disabled)
   hoverDanger: {
-    ":hover": {
-      transform: {
-        default: "translateY(-1px)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      boxShadow:
-        "inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 10px 24px -14px color-mix(in srgb, var(--error) 46%, transparent)",
-      filter: "brightness(1.03)",
+    transform: {
+      default: "translateY(-1px)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    boxShadow:
+      "inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 10px 24px -14px color-mix(in srgb, var(--error) 46%, transparent)",
+    filter: "brightness(1.03)",
   },
   // .btn-primary:active:not(.btn-disabled)
   activePrimary: {
-    ":active": {
-      transform: {
-        default: "translateY(1px) scale(0.97)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      boxShadow: "inset 0 2px 4px rgba(0,0,0,0.15)",
-      backgroundImage: "none",
+    transform: {
+      default: "translateY(1px) scale(0.97)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    boxShadow: "inset 0 2px 4px rgba(0,0,0,0.15)",
+    backgroundImage: "none",
   },
   // .btn-secondary:active:not(.btn-disabled)
   activeSecondary: {
-    ":active": {
-      transform: {
-        default: "translateY(1px) scale(0.97)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      backgroundColor: "var(--backgroundTertiary)",
-      boxShadow: "none",
+    transform: {
+      default: "translateY(1px) scale(0.97)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    backgroundColor: "var(--backgroundTertiary)",
+    boxShadow: "none",
   },
   // .btn-ghost:active:not(.btn-disabled)
   activeGhost: {
-    ":active": {
-      backgroundColor: "var(--backgroundSecondary)",
-      transform: {
-        default: "scale(0.97)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
+    backgroundColor: "var(--backgroundSecondary)",
+    transform: {
+      default: "scale(0.97)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
   },
   // .btn-danger:active:not(.btn-disabled)
   activeDanger: {
-    ":active": {
-      transform: {
-        default: "translateY(1px) scale(0.97)",
-        "@media (prefers-reduced-motion: reduce)": "none",
-      },
-      boxShadow: "inset 0 2px 4px rgba(0,0,0,0.14)",
+    transform: {
+      default: "translateY(1px) scale(0.97)",
+      "@media (prefers-reduced-motion: reduce)": "none",
     },
+    boxShadow: "inset 0 2px 4px rgba(0,0,0,0.14)",
   },
   // .btn:disabled / .btn[aria-disabled="true"] / .btn-disabled
   disabled: {
