@@ -181,6 +181,31 @@ const STEPFUN_STEP_PLAN_MODEL_OPTIONS: ReadonlyArray<{
   ...(i === 0 ? { recommended: true } : {}),
 }));
 
+/**
+ * Together AI 平台（OpenAI 兼容，按量计费，用户自带 API Key）可选模型。
+ *
+ * 模型 ID 用官方要求的 namespaced 全 ID（org/model 直传，不做 remap；短名会被上游
+ * 拒掉）。ID 取 Together 官方文档 OpenAI 兼容页与 serverless 模型页在案的稳定值，
+ * 第一项标记为推荐默认。base_url = https://api.together.ai/v1。
+ * 注意：这是用户自带 Key 的 metered 通道，平台不承担成本、不扣积分。
+ */
+const TOGETHER_MODEL_OPTIONS: ReadonlyArray<{
+  id: string;
+  label: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+}> = [
+  {
+    id: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    label: "Llama 3.3 70B Instruct Turbo",
+    recommended: true,
+  },
+  { id: "deepseek-ai/DeepSeek-V4-Pro-0813", label: "DeepSeek V4 Pro" },
+  { id: "Qwen/Qwen3.6-Plus", label: "Qwen3.6 Plus" },
+  { id: "zai-org/GLM-5.2", label: "GLM-5.2" },
+  { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
+];
+
 export type OAuthProviderConfig = {
   kind: "oauth";
   id: string;
@@ -667,6 +692,21 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
     provider: "minimax",
     baseUrl: "https://api.minimaxi.com/v1",
     defaultModel: "MiniMax-Text-01",
+    commercialKind: "api",
+    accessVariant: "metered_key",
+  },
+  // Together AI 平台：用户自带 Key 的 metered 通道（复用 OpenAI-compatible 通道，
+  // apiSource:"custom"，不扣平台积分）。模型 ID 为 namespaced 全 ID，直传不 remap；
+  // OpenAI 兼容 base_url = https://api.together.ai/v1（官方兼容文档在案）。
+  {
+    kind: "api_key_template",
+    id: "together-api",
+    label: "Together AI API 用量计费",
+    description: "Together AI（OpenAI 兼容，按量计费）",
+    provider: "together",
+    baseUrl: "https://api.together.ai/v1",
+    defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    modelOptions: TOGETHER_MODEL_OPTIONS,
     commercialKind: "api",
     accessVariant: "metered_key",
   },

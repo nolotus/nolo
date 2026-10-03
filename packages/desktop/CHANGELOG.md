@@ -1,4 +1,14 @@
 
+## 0.162.0-alpha.1
+
+## 0.162.0-alpha.1 (2026-10-03)
+
+### Features
+
+* **agent:** add Together AI metered API preset ([f63cb2f](https://github.com/nolotus/bun-nolo/commit/f63cb2fe5a8096e009a7ba4e6b58f4b3fa8f2c47))
+* **agent:** merge Together AI metered API support into alpha ([5ee4ecc](https://github.com/nolotus/bun-nolo/commit/5ee4ecc5d187c1889b5421fd0e1990fcce1107e3))
+
+
 ## 0.161.0-alpha.2
 
 ## 0.161.0-alpha.2 (2026-10-02)

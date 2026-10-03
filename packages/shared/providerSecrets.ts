@@ -8,6 +8,7 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "zai-coding-plan",
   "bigmodel-coding-plan",
   "openai-api",
+  "together-api",
   "anthropic-api",
   "gemini-api",
   "xai-api",
