@@ -62,10 +62,8 @@ import {
   deleteMessageSession,
   ensureMessageSession,
   getActiveMessageDialogId,
-  getCanonicalHandoffTransientId,
   getHasStreamingMessage,
   getMessageSession,
-  getStreamingMessageId,
   markMessageSessionAbort,
   markMessageStreamActivity,
   patchMessageSession,
@@ -437,9 +435,6 @@ export const messageSlice = createSliceWithThunks({
           payload.dialogId ?? findDialogIdByMessageId(state, payload.id);
         const dialogState = ensureMessageDialogState(state, dialogId);
         removeOneMessage(dialogState, payload.id);
-        if (dialogId && getStreamingMessageId(dialogId) === payload.id) {
-          setStreamingMessageId(dialogId, null);
-        }
       }
     ),
 
@@ -732,20 +727,14 @@ export const messageSlice = createSliceWithThunks({
           });
           // Write mode policy: messageInitMsgsPolicy (Wave16). Streaming /
           // isNew → upsert so DB snapshot cannot wipe a live reply ("从0").
-          // Wave17: a finished server-owned transient awaiting its canonical row
-          // is also protected — a lagging snapshot must upsert, not replace
-          // (2026-10-03 flicker/disappear: transient wiped before canonical row).
           const hasLocalStreaming =
             getHasStreamingMessage(dialogId) ||
             Object.values(dialogState.msgs.entities).some(
               (message) => message?.isStreaming
             );
-          const hasProtectedTransient =
-            getCanonicalHandoffTransientId(dialogId) !== null;
           const writeMode = resolveInitMsgsFulfilledWriteMode({
             isNew: action.meta.arg.isNew,
             hasLocalStreaming,
-            hasProtectedTransient,
           });
           if (writeMode === "upsert") {
             upsertManyMessages(dialogState, action.payload);

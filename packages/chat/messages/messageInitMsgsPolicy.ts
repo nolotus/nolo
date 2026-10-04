@@ -10,19 +10,13 @@ export type InitMsgsWriteMode = "upsert" | "replace";
  *
  * - New dialogs: merge so optimistic/stream rows already in memory are kept.
  * - Re-enter while streaming: merge so DB snapshot cannot wipe the live turn.
- * - Canonical-handoff transient present (server-owned foreground done, canonical
- *   row not yet visible): merge so a lagging DB snapshot cannot wipe the
- *   finished transient. (2026-10-03: ~350ms persistence race wiped the reply.)
  * - Otherwise: replace from authoritative fetch.
  */
 export function resolveInitMsgsFulfilledWriteMode(input: {
   isNew?: boolean;
   hasLocalStreaming: boolean;
-  hasProtectedTransient?: boolean;
 }): InitMsgsWriteMode {
-  if (input.isNew || input.hasLocalStreaming || input.hasProtectedTransient) {
-    return "upsert";
-  }
+  if (input.isNew || input.hasLocalStreaming) return "upsert";
   return "replace";
 }
 

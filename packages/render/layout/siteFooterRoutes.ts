@@ -17,6 +17,8 @@ const FOOTER_EXACT_PATHS = new Set([
   "/terms",
   "/privacy",
   "/aup",
+  "/about",
+  "/contact",
   "/guide",
   "/downloads",
   "/lab",

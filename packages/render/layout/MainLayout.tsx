@@ -175,8 +175,6 @@ const MainLayout: React.FC = () => {
   const renderSiteFooter = shouldRenderSiteFooter(location.pathname, {
     isLoggedIn,
   });
-  // Guest home landing owns its own look (topbar over the sky, quiet footer).
-  const isGuestHome = !isLoggedIn && location.pathname === "/" && !getIsDesktopApp();
   const renderChatSidebar = shouldRenderChatSidebar({
     isLoggedIn,
     hasMounted,
@@ -468,7 +466,7 @@ const MainLayout: React.FC = () => {
       >
         <div
           ref={mainLayoutRef}
-          className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""} ${isGuestHome ? "MainLayout--guest-home" : ""}`.trim()}
+          className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""}`.trim()}
         >
         {/* 左侧常驻侧边栏 */}
         {hasSidebar && (

@@ -231,9 +231,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const detail = (event as CustomEvent<{ text?: unknown }>).detail;
       const nextText = asTrimmedString(detail?.text);
       if (!nextText) return;
-      void startQuickChatRef.current(nextText)?.catch?.((error) => {
-        console.error("[QuickChat] e2e start failed", error);
-      });
+      void startQuickChatRef.current(nextText);
     };
     window.addEventListener("nolo-desktop-e2e-quick-chat", handleDesktopE2eQuickChat);
     return () => {
@@ -256,12 +254,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       !isSending
     ) {
       autoSendStartedRef.current = true;
-      // 防御：startQuickChat 内部已 try/finally 复位 isSending，这里只吞掉
-      // 预期外 rejection 避免 unhandled rejection 噪音（例如 sendFirstMessage
-      // dispatch 同步抛错）。
-      void startQuickChatRef.current()?.catch?.((error) => {
-        console.error("[QuickChat] autoSend start failed", error);
-      });
+      void startQuickChatRef.current();
     }
   }, [autoSend, text, isSending]);
 
@@ -480,9 +473,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         routeState,
       });
       // replace: drop the empty /chat shell so Back does not return to a blank composer.
-      // Home first-send morph; route chunks are static in the main route table,
-      // and the send request below never waits on the animation.
-      if (surface === "home-primary") enableNextRouteViewTransition();
+      enableNextRouteViewTransition();
       navigate(dialogUrl, {
         replace: true,
         state: routeState,
@@ -583,7 +574,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [
     isSending,
-    surface,
     text,
     imageFiles,
     pendingFiles,

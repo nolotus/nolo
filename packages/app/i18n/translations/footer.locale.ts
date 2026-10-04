@@ -7,6 +7,8 @@ export default {
     translation: {
       footer: {
         legal: "Legal",
+        about: "About us",
+        contact: "Contact us",
         rights: "All rights reserved.",
       },
     },
@@ -15,6 +17,8 @@ export default {
     translation: {
       footer: {
         legal: "法律条款",
+        about: "关于我们",
+        contact: "联系我们",
         rights: "保留所有权利。",
       },
     },
@@ -23,6 +27,8 @@ export default {
     translation: {
       footer: {
         legal: "法律條款",
+        about: "關於我們",
+        contact: "聯絡我們",
         rights: "保留所有權利。",
       },
     },
@@ -31,6 +37,8 @@ export default {
     translation: {
       footer: {
         legal: "法的事項",
+        about: "会社概要",
+        contact: "お問い合わせ",
         rights: "All rights reserved.",
       },
     },

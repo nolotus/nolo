@@ -39,8 +39,6 @@ import NavListItem from "render/layout/blocks/NavListItem";
 import TopbarNotificationBell from "./TopbarNotificationBell";
 import TopbarUserMenu from "./TopbarUserMenu";
 import { DevReloadBadge } from "./DevReloadBadge";
-import NoloHeadMark from "render/web/ui/NoloHeadMark";
-import { useGuestHomeTopbarTone } from "./guestHomeTone";
 import CreateMenuButton from "./CreateMenuButtonContainer";
 import TopbarLocalPreviewToggle from "./TopbarLocalPreviewToggle";
 import "./layout.css";
@@ -92,10 +90,6 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
   const showDesktopTitlebarNavigation = !isDesktopShell;
   // Always fixed in the topbar so every route (life, recharge, no-sidebar) can go home.
   const showTopbarHome = true;
-  // Guest home: the topbar dissolves into the landing's sky and carries the
-  // brand instead of a bare house icon (2026-10-04 home redesign).
-  const isGuestHome = !s.isLoggedIn && location.pathname === "/" && !isDesktopShell;
-  const guestHomeTone = useGuestHomeTopbarTone(isGuestHome);
   const currentHistoryIndex = useMemo(
     () => getCurrentBrowserHistoryIndex(),
     [location.key]
@@ -287,10 +281,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
 
   return (
     <>
-      <div
-        className={`topbar ${s.isScrolled ? "topbar--scrolled" : ""} ${isGuestHome ? "topbar--guest-home" : ""}`.trim()}
-        style={guestHomeTone ? { background: guestHomeTone } : undefined}
-      >
+      <div className={`topbar ${s.isScrolled ? "topbar--scrolled" : ""}`}>
         {/* 左侧：侧边栏开关 + Home */}
         <div className="topbar__section topbar__section--left">
           {toggleSidebar && (
@@ -360,14 +351,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                 title={t("home", "首页")}
                 aria-label={t("home", "首页")}
               >
-                {isGuestHome ? (
-                  <>
-                    <NoloHeadMark size={26} />
-                    <span className="TopBar__brand-name">Nolo</span>
-                  </>
-                ) : (
-                  <LuHouse size={16} aria-hidden="true" />
-                )}
+                <LuHouse size={16} aria-hidden="true" />
               </NavLink>
               <DevReloadBadge />
             </span>

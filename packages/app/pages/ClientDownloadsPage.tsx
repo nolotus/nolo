@@ -17,7 +17,6 @@ import {
 import { useAppSelector } from "app/store";
 import { selectById } from "database/dbSlice";
 import type { IconType } from "react-icons";
-import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import "./ClientDownloadsPage.css";
 
 type LinuxPackageLinks = {
@@ -289,13 +288,8 @@ const ClientDownloadsPage: React.FC = () => {
 
   return (
     <main className="client-downloads-page">
-      <div className="client-downloads-page__container">
-        <section className="client-downloads-page__hero">
+      <section className="client-downloads-page__hero">
         <div className="client-downloads-page__hero-content">
-          <div className="client-downloads-page__eyebrow">
-            <NoloHeadMark size={20} />
-            <span>{t("clientDownloads.eyebrow", "客户端开源 · 跑在你自己的电脑上")}</span>
-          </div>
           <h1 className="client-downloads-page__title">
             {t("clientDownloads.title")}
           </h1>
@@ -500,13 +494,6 @@ const ClientDownloadsPage: React.FC = () => {
           </span>
         </div>
       )}
-
-      <footer className="client-downloads-page__trust-footer">
-        <p className="client-downloads-page__trust-line">
-          {t("clientDownloads.tagline", "客户端开源 · 发布版本可对应源码 · 用你的订阅或自带 Key")}
-        </p>
-      </footer>
-      </div>
     </main>
   );
 };

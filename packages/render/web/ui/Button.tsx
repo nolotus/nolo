@@ -96,11 +96,7 @@ const Button = ({
     // 显式设置 aria-label 和 title
     "aria-label": finalAriaLabel,
     title: title,
-    // type 始终透传给渲染元素：submit 按钮必须让原生 <button type="submit">
-    // 收到该属性，点击才会触发所在 <form> 的原生 submit（走 form.onSubmit）。
-    // 放在 ...restProps 之后展开，确保外部调用方传的 type 不会被丢弃。
-    type,
-    ...(isNativeButton ? { disabled: isDisabled } : {}),
+    ...(isNativeButton ? { disabled: isDisabled, type } : {}),
     ...(isLink ? { to: to || "#" } : {}),
   };
 
