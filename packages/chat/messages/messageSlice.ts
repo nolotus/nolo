@@ -65,6 +65,7 @@ import {
   getCanonicalHandoffTransientId,
   getHasStreamingMessage,
   getMessageSession,
+  getStreamingMessageId,
   markMessageSessionAbort,
   markMessageStreamActivity,
   patchMessageSession,
@@ -436,6 +437,9 @@ export const messageSlice = createSliceWithThunks({
           payload.dialogId ?? findDialogIdByMessageId(state, payload.id);
         const dialogState = ensureMessageDialogState(state, dialogId);
         removeOneMessage(dialogState, payload.id);
+        if (dialogId && getStreamingMessageId(dialogId) === payload.id) {
+          setStreamingMessageId(dialogId, null);
+        }
       }
     ),
 

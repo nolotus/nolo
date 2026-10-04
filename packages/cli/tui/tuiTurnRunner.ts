@@ -24,6 +24,7 @@ import {
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
@@ -77,6 +78,7 @@ import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+import { resolveAttachmentImageUrls } from "./pasteImage";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
   buildProcessTerminalTurnMessage,
@@ -88,7 +90,6 @@ import {
   shouldEmitTerminalBell,
   TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
 } from "./terminalNotification";
-import { formatTurnSummaryLine } from "./turnSummary";
 import {
   createHistoryOutputStream,
   startTurn,
@@ -246,6 +247,8 @@ async function runAgentChat(
     // index layer so the model knows what skills exist and can readFile them
     // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
     buildSkillDiscoveryContextLayer(state.cwd),
+    // 宿主环境层（session-scope 稳定前缀）：快速注入当前系统发行版、架构与桌面环境
+    buildHostEnvironmentLayer(),
   ];
 
   // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
@@ -1204,20 +1207,6 @@ export async function runOneAgentTurn(
       ctx.renderHistoryToOutput();
       if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
     }
-    if (
-      !wasAborted &&
-      !runResult.streamInterrupted &&
-      runResult.exitCode === 0 &&
-      isInteractiveInput(ctx.input)
-    ) {
-      const summary = formatTurnSummaryLine({
-        durationMs: Date.now() - turnStartedAtMs,
-        outputTokens: runResult.turnTokens?.output,
-        credits: runResult.turnCredits,
-        minDurationMs: TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
-      });
-      if (summary) ctx.emitCommandOutput(summary);
-    }
     if (wasAborted) {
       if (runResult.pendingToolName) {
         // 协作式中止时工具仍在跑：localLoop 放弃等待但工具可能已在后台
@@ -1326,6 +1315,38 @@ export async function runOneAgentTurn(
 }
 
 /**
+ * drain 一条排队请求：若携带 imagePaths，在**此刻**才读成 dataURL（入队时不读：
+ * 排队期间文件可能变，且不让大 base64 挂在队列里）。读不到的路径只打一行
+ * `image skipped:`（与 direct 路径同语义）并继续执行该轮，绝不抛错。
+ */
+export async function runDrainedQueueTurn(
+  ctx: AgentTurnContext,
+  req: TurnRequest,
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /** 测试注入点：缺省即 runOneAgentTurn。 */
+  runTurn: typeof runOneAgentTurn = runOneAgentTurn,
+): Promise<{ ok: boolean; aborted: boolean }> {
+  let imageUrls: string[] = [];
+  if (req.imagePaths && req.imagePaths.length > 0) {
+    try {
+      ({ imageUrls } = await resolveAttachmentImageUrls({
+        actionImagePaths: req.imagePaths,
+        attachedImages: [],
+        onFailure: (_path, err) =>
+          ctx.output.write(`[nolo] image skipped: ${err.message}\n`),
+      }));
+    } catch (err) {
+      ctx.output.write(
+        `[nolo] image skipped: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      imageUrls = [];
+    }
+  }
+  return runTurn(ctx, req, imageUrls, actionGateHandler, confirmDestructiveAction);
+}
+
+/**
  * S2: 文件级 ensureChatQueueBinding 函数
  *
  * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
@@ -1336,8 +1357,8 @@ export function ensureChatQueueBinding(
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
 ): ChatQueueTuiBinding {
   if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
-  ctx.chatQueueBinding = createChatQueueTuiBinding(async (text) => {
-    return runOneAgentTurn(ctx, text, [], actionGateHandler, confirmDestructiveAction);
+  ctx.chatQueueBinding = createChatQueueTuiBinding(async (req) => {
+    return runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction);
   });
   return ctx.chatQueueBinding;
 }
