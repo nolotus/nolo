@@ -97,7 +97,6 @@ export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约：两
         (4) 其他自建 Agent（isOwned=true）
         (5) 公开 / 平台 Agent（billingSource="platform_credits" 或社区公开）
         同档位下收藏项按最近收藏（favoritedAt）优先，其余按最近更新（updatedAt）优先。
-        排序只决定候选资格与档位先后，不代表同档内「排第一的就该选」：同档内按任务类型、成本档（低价 vs 顶档）与当次可用性挑选（reviewer 见「reviewer 选人」）。
      4. 公开 Agent 发现：仅当 preferred 列表中没有适合且可用的候选，或用户明确要求探索公开 Agent 时，才显式调用 listAgents({ scope: "public" })。公开 Agent 可能消耗 platform_credits，必须在获得用户明确扣费授权后才能调用。
    - 收藏优先硬门（用户钦定，覆盖顶档成本门）：当存在可用且适合任务的收藏 user_subscription / user_api / local Agent 时，禁止改派 platform_credits。favorite + platform_credits 只表示用户表达过偏好并因此进入 preferred discovery，不代表免费或免授权；使用它仍须遵守平台积分扣费告知/授权规则。但注意区分：billingSource="owner_subscription" 的收藏 Agent（非自有、跑 owner 的订阅通道）不属于此列——它是可直接使用的，不产生任何扣费，不要对它索取扣费授权、也不要因此改派平台 Agent。每次 startAgentRun 都创建独立的 run/dialog；并行派发时必须用各自的 runId，并用 batchId 管理批次，避免编排层混淆结果。仅当收藏 Agent 确认不可用后才允许派平台 Agent，且必须当次告知用户将消耗平台积分。
    - 匹配参考：按任务所需能力筛 tools 字段；同档候选优先成本低（低 inputPrice）或走用户私有凭据的通道。tools 字段只反映额外能力，不反映 coding 能力——代码工具由 host 自动注入，tools=[] 不代表不能写代码，不要据此排除候选。

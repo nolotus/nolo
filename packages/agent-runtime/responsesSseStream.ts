@@ -160,35 +160,8 @@ export function createResponsesStreamCollector(callbacks?: {
 
   const finalize = (): ResponsesStreamAggregation => {
     let finalToolCalls = finalizeResponsesToolCalls(toolCallsAcc);
-    if (completedResponse) {
-      const completedToolCalls = extractToolCallsFromResponseOutput(completedResponse) as AgentRuntimeToolCall[];
-      const completedById = new Map(completedToolCalls.map((call) => [call.id, call]));
-      finalToolCalls = finalToolCalls.map((call) => {
-        const completed = completedById.get(call.id);
-        if (!completed) return call;
-        let accumulatedParses = false;
-        let completedParses = false;
-        try {
-          JSON.parse(call.function.arguments);
-          accumulatedParses = true;
-        } catch {
-          // The completed response may contain the authoritative full value.
-        }
-        try {
-          JSON.parse(completed.function.arguments);
-          completedParses = true;
-        } catch {
-          return call;
-        }
-        if (
-          completedParses &&
-          (!accumulatedParses || completed.function.arguments.startsWith(call.function.arguments))
-        ) {
-          return { ...call, function: { ...call.function, arguments: completed.function.arguments } };
-        }
-        return call;
-      });
-      if (finalToolCalls.length === 0) finalToolCalls = completedToolCalls;
+    if (finalToolCalls.length === 0 && completedResponse) {
+      finalToolCalls = extractToolCallsFromResponseOutput(completedResponse) as AgentRuntimeToolCall[];
     }
     if (!content && completedResponse) {
       content = extractTextFromResponseOutput(completedResponse);

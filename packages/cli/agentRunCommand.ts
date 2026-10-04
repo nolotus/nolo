@@ -14,7 +14,6 @@ import {
 } from "../agent-runtime/modelLayerOverride";
 import type { ContextBlockScope } from "../agent-runtime/contextBlockScope";
 import { buildSkillDiscoveryContextLayer } from "../agent-runtime/skillDiscovery";
-import { buildHostEnvironmentLayer } from "../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../agent-runtime/agentsMd";
 import { CliProviderQuotaError } from "ai/agent/cliExecutor";
 import type { AgentRuntimeHostAdapter } from "./agentRuntimeLocal";
@@ -619,7 +618,6 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // nolo-commit/nolo-cli are invisible to CLI agents even though their SKILL.md
   // files exist in the workspace.
   scopedLayers.push(buildSkillDiscoveryContextLayer(cliCwd));
-  scopedLayers.push(buildHostEnvironmentLayer());
 
   // T3456 — Memory injection route (CLI analogue of desktop T14).
   // Remote-first recall with local fallback. See memoryRecall.ts for details.

@@ -95,12 +95,15 @@ const TR_HEADER_TOGGLE_STYLE: React.CSSProperties = {
 };
 
 export const ToolMessageItem = memo(
-  ({ message, readOnly = false }: { message: any; readOnly?: boolean }) => {
+  ({ message, readOnly = false, conversationTodoEnabled = true }: { message: any; readOnly?: boolean; conversationTodoEnabled?: boolean }) => {
     const { t } = useTranslation("chat");
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
 
     const { content, toolName, isStreaming, toolPayload, dbKey } = message;
+    // The host passes this flag explicitly so this renderer does not add a new
+    // Redux dependency while the state layer is being retired.
+    const todoEnabled = conversationTodoEnabled;
     const rawData = useMemo(() => safeParse(content), [content]);
 
     const isRepairableFailure =
@@ -336,6 +339,13 @@ export const ToolMessageItem = memo(
         );
       }
     };
+
+    // --- conversation Todo ---
+    // Keep all hooks above unconditional so toggling the setting cannot change
+    // hook order for an already-mounted tool row.
+    if (toolName === "setTodoList" && !todoEnabled) {
+      return null;
+    }
 
     // --- ask_user ---
     if (toolName === "ask_user" || rawData?.type === "ask_user") {
@@ -678,6 +688,7 @@ export const ToolMessageItem = memo(
                 openPreview={(id, name) => setPreview({ id, name })}
                 navigateToPage={(id) => navigate(`/${id}`)}
                 toolArgs={extractToolCallArgs(toolPayload)}
+                conversationTodoEnabled={todoEnabled}
               />
             </div>
           )}

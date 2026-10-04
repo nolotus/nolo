@@ -30,7 +30,6 @@ export interface TurnContextLayer {
   id:
     | "space-context"
     | "workspace-context"
-    | "host-environment"
     | "skill-discovery"
     | "agents-md"
     | "skill-content"

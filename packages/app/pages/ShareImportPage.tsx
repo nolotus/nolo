@@ -182,6 +182,8 @@ const ShareImportPage: React.FC = () => {
   const { token } = useParams<"token">();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const systemBuiltinSkills = useAppSelector((state) => (state as any).settings?.systemBuiltinSkills);
+  const conversationTodoEnabled = systemBuiltinSkills?.["conversation-todo"] !== false;
   const currentToken = useToken();
   const currentUserId = useUserId();
   const { currentServer, syncServers, localRuntimeOrigin } =
@@ -609,7 +611,7 @@ const ShareImportPage: React.FC = () => {
       ) : shared.type === DataType.DIALOG ? (
         canUseRichDialog ? (
           <Suspense fallback={<ShareDialogPreview messages={dialogMessages} />}>
-            <ShareDialogRichView messages={dialogMessages} />
+            <ShareDialogRichView messages={dialogMessages} conversationTodoEnabled={conversationTodoEnabled} />
           </Suspense>
         ) : (
           <ShareDialogPreview messages={dialogMessages} />
