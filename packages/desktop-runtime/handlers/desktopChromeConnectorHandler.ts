@@ -10,10 +10,14 @@ import {
   type ChromeConnectorClient,
 } from "../../desktop-chrome-connector/chromeConnector";
 import {
+  FIREFOX_EXTENSION_ID,
+  NATIVE_HOST_BROWSERS,
+  detectInstalledBrowsers,
   extensionIdFromPublicKey,
-  installNativeHostManifest,
+  installNativeHostManifests,
   resolveNativeHostInstallPaths,
 } from "./desktopChromeNativeHost";
+import { connectorRootFromHere } from "./desktopConnectorRoot";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -37,6 +41,12 @@ export type DesktopChromeConnectorStatus = {
     allowedOriginMatches: boolean;
     wrapperPathMatches: boolean;
   };
+  /**
+   * Per-browser registration state. `nativeHost` above stays Chrome-shaped for existing callers, but
+   * the question a Firefox user has ("is the host registered for the browser I use?") can only be
+   * answered per browser: the two manifests live in different directories and validate differently.
+   */
+  browsers: Record<string, DesktopChromeConnectorBrowserStatus>;
   rpc: {
     online: boolean;
     tabCount: number | null;
@@ -49,45 +59,14 @@ type SmokePageServer = {
   close(): Promise<void> | void;
 };
 
-/**
- * Connector 树在不同布局下的相对位置（相对 bundler 产物的 `import.meta.dir`）：
- * - dev / 单仓：`packages/desktop-runtime/handlers` → `../../desktop-chrome-connector`
- *   即 `packages/desktop-chrome-connector`；
- * - 打包（v1 parity）：`Resources/app/bun` → `../../desktop-chrome-connector`
- *   即 `Resources/desktop-chrome-connector`；
- * - 打包（flat Linux）：`Resources/app/bun` 下的 `../integrations/connector`
- *   即 `Resources/app/integrations/connector`；mac 经 post-wrap 后为
- *   `Resources/integrations/connector`。
- * 逐项探测并选取第一个含 `extension/manifest.json` 的目录；全部落空时抛出带完整
- * 候选列表的错误（2026-09-16 修复：此前只探测第一项，flat Linux 安装下连接器
- * 功能因 ENOENT 直接不可用）。
- */
-export const CONNECTOR_ROOT_CANDIDATES = [
-  "../../desktop-chrome-connector",
-  "../integrations/connector",
-  "../../integrations/connector",
-  "../integrations/desktop-chrome-connector",
-  "../../integrations/desktop-chrome-connector",
-] as const;
-
-/** 选取第一个含连接器清单的候选目录；用于测试与诊断。 */
-export function pickConnectorRoot(candidates: readonly string[]): string | null {
-  for (const dir of candidates) {
-    if (existsSync(join(dir, "extension", "manifest.json"))) return dir;
-  }
-  return null;
-}
-
-function connectorRootFromHere() {
-  const candidates = CONNECTOR_ROOT_CANDIDATES.map((rel) => resolve(import.meta.dir, rel));
-  const found = pickConnectorRoot(candidates);
-  if (!found) {
-    throw new Error(
-      `desktop chrome connector root not found; probed: ${candidates.join(", ")}`,
-    );
-  }
-  return found;
-}
+// 候选目录与 root 探测搬到了 ./desktopConnectorRoot：桌面启动时的自动安装必须用同一份探测，
+// 否则打包版会退化成 dirname(import.meta.url)（那是 bundle 目录，不含 connector）；留 re-export
+// 是为了既有读取方与测试不用改。
+export {
+  CONNECTOR_ROOT_CANDIDATES,
+  connectorRootFromHere,
+  pickConnectorRoot,
+} from "./desktopConnectorRoot";
 
 function desktopOnly(env: Record<string, string | undefined>) {
   return env.NOLO_DESKTOP === "1";
@@ -115,6 +94,83 @@ function readNativeManifest(path: string) {
   }
 }
 
+export type DesktopChromeConnectorBrowserStatus = {
+  /** The browser looks installed on this machine (its profile directory exists). */
+  detected: boolean;
+  /** A native messaging host manifest exists for this browser. */
+  installed: boolean;
+  /** Manifest exists, authorizes the right extension id and points at Nolo's wrapper. */
+  registered: boolean;
+  manifestPath: string;
+  matchesExtension: boolean;
+  lastError?: string;
+};
+
+function describeNativeHostForBrowser({
+  browser,
+  home,
+  connectorRoot,
+  platform,
+}: {
+  browser: string;
+  home: string;
+  connectorRoot: string;
+  platform?: string;
+}): Omit<DesktopChromeConnectorBrowserStatus, "detected"> {
+  try {
+    const paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform, browser });
+    const manifest = readNativeManifest(paths.nativeManifestPath);
+    const extensionId =
+      browser === "firefox"
+        ? FIREFOX_EXTENSION_ID
+        : extensionIdFromPublicKey(
+            String(
+              (JSON.parse(readFileSync(paths.extensionManifestPath, "utf8")) as { key?: string }).key ?? "",
+            ),
+          );
+    const expectedEntry = browser === "firefox" ? extensionId : `chrome-extension://${extensionId}/`;
+    const allowedEntries = browser === "firefox" ? manifest?.allowed_extensions : manifest?.allowed_origins;
+    const matchesExtension = Array.isArray(allowedEntries) && allowedEntries.includes(expectedEntry);
+    return {
+      installed: Boolean(manifest),
+      registered: Boolean(manifest) && matchesExtension && manifest?.path === paths.wrapperPath,
+      manifestPath: paths.nativeManifestPath,
+      matchesExtension,
+    };
+  } catch (error) {
+    // Unsupported platform (Windows today) or an unreadable manifest: report it, never fail status.
+    return {
+      installed: false,
+      registered: false,
+      manifestPath: "",
+      matchesExtension: false,
+      lastError: toErrorMessage(error),
+    };
+  }
+}
+
+function describeNativeHostBrowsers({
+  env,
+  connectorRoot,
+  platform,
+}: {
+  env: Record<string, string | undefined>;
+  connectorRoot: string;
+  platform?: string;
+}): Record<string, DesktopChromeConnectorBrowserStatus> {
+  const home = env.HOME || process.env.HOME || "";
+  const detected = detectInstalledBrowsers({ home, platform });
+  return Object.fromEntries(
+    NATIVE_HOST_BROWSERS.map((browser) => [
+      browser,
+      {
+        detected: detected.includes(browser),
+        ...describeNativeHostForBrowser({ browser, home, connectorRoot, platform }),
+      },
+    ]),
+  );
+}
+
 export async function buildDesktopChromeConnectorStatus(args: {
   env?: Record<string, string | undefined>;
   connectorRoot?: string;
@@ -124,6 +180,7 @@ export async function buildDesktopChromeConnectorStatus(args: {
   const env = args.env ?? process.env;
   const connectorRoot = args.connectorRoot ?? connectorRootFromHere();
   const home = env.HOME || process.env.HOME || "";
+  const browsers = describeNativeHostBrowsers({ env, connectorRoot, platform: args.platform });
   let paths: ReturnType<typeof resolveNativeHostInstallPaths>;
   try {
     paths = resolveNativeHostInstallPaths({ home, connectorRoot, platform: args.platform });
@@ -142,6 +199,7 @@ export async function buildDesktopChromeConnectorStatus(args: {
         wrapperPathMatches: false,
       },
       rpc: { online: false, tabCount: null },
+      browsers,
       lastError: toErrorMessage(error),
     };
   }
@@ -209,6 +267,7 @@ export async function buildDesktopChromeConnectorStatus(args: {
       allowedOriginMatches,
       wrapperPathMatches,
     },
+    browsers,
     rpc,
     ...(lastErrors.length ? { lastError: lastErrors.join(" ") } : {}),
   };
@@ -231,8 +290,23 @@ export async function handleDesktopChromeConnectorStatusGet(
   }
 }
 
+/**
+ * Optional request body `{ "browser": "chrome" | "firefox" | "all" }`. Absent (or unparseable) means
+ * "Chrome plus whatever else is detected here", which is what the desktop start-up path asks for.
+ */
+async function readRequestedBrowser(req: Request): Promise<string | undefined> {
+  if (!(req.headers.get("content-type") || "").toLowerCase().includes("application/json")) return undefined;
+  try {
+    const body = (await req.json()) as { browser?: unknown };
+    const browser = typeof body?.browser === "string" ? body.browser.trim() : "";
+    return browser || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function handleDesktopChromeConnectorInstallNativeHostPost(
-  _req: Request,
+  req: Request,
   deps: {
     env?: Record<string, string | undefined>;
     connectorRoot?: string;
@@ -241,11 +315,29 @@ export async function handleDesktopChromeConnectorInstallNativeHostPost(
   const env = deps.env ?? process.env;
   if (!desktopOnly(env)) return jsonResponse({ error: "Desktop runtime only" }, 404);
   try {
-    const install = installNativeHostManifest({
+    const requested = await readRequestedBrowser(req);
+    const { installs, errors } = installNativeHostManifests({
       home: env.HOME || process.env.HOME || "",
       connectorRoot: deps.connectorRoot ?? connectorRootFromHere(),
+      browser: requested,
     });
-    return jsonResponse({ ok: true, install });
+    if (installs.length === 0) {
+      return jsonResponse(
+        {
+          ok: false,
+          error:
+            errors.map((failure) => `${failure.browser}: ${failure.message}`).join("; ") ||
+            "No native host target could be installed.",
+          install: null,
+          installs,
+          errors,
+        },
+        500,
+      );
+    }
+    // `install` keeps the single-result shape existing callers read; `installs` is the full list.
+    const install = installs.find((entry) => entry.browser === "chrome") ?? installs[0];
+    return jsonResponse({ ok: true, install, installs, errors });
   } catch (error) {
     return jsonResponse({ ok: false, error: toErrorMessage(error) }, 500);
   }

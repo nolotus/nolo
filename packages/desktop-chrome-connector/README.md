@@ -41,6 +41,33 @@ That manifest points to a generated wrapper under:
 
 The wrapper uses an absolute Node executable path before launching the repository's open-source native host script. This avoids relying on Chrome's stripped-down native host `PATH`.
 
+## Desktop start-up install (Chrome and Firefox)
+
+The desktop runtime registers the native host at start-up for Chrome plus every browser it detects on
+the machine (`detectInstalledBrowsers`: profile-directory check only — no profile is ever read). The
+two browsers need different manifests, which is why a Chrome-only install left Firefox users with
+nothing to connect to:
+
+```text
+Chrome:  allowed_origins: ["chrome-extension://<id from manifest.key>/"]
+Firefox: allowed_extensions: ["nolo-browser-connector@nolo.chat"], and no allowed_origins
+         (a Firefox host manifest carrying allowed_origins makes connectNative drop the port)
+```
+
+Both share one wrapper and one token, so running it again never rotates the token a live host uses.
+`NOLO_DESKTOP_DISABLE_NATIVE_HOST_AUTOINSTALL=1` turns the start-up install off.
+
+Every install writes that same wrapper, and start-up rewrites its host path, so when two channels are in
+use (packaged app plus a development checkout, or two checkouts) the last one to start decides which host
+script the browsers launch. A connector tree inside a git worktree is refused outright — the wrapper
+embeds absolute paths, so it would die with the worktree (`nolo chrome install` refuses those roots too).
+
+`POST /api/desktop/chrome-connector/install-native-host` takes an optional JSON body
+`{ "browser": "chrome" | "firefox" | "all" }`; without a body it keeps the historical Chrome default and
+adds any other detected browser. The response carries `installs[]` (one entry per browser) plus `errors[]`,
+and the status endpoint reports a `browsers` map (per-browser `detected` / `installed` / `registered`) next
+to the Chrome-shaped `nativeHost` fields older callers read.
+
 ## TUI Quick Start (nolo CLI)
 
 The TUI drives the user's Chrome through the same verified client and executors as Nolo Desktop — no
@@ -88,8 +115,8 @@ When Chrome reloads or stops the extension service worker, the native host exits
 ## Status Popup
 
 The toolbar icon opens `extension/popup.html`, which asks the service worker (`connector_status`) whether
-Chrome is connected to the Nolo Desktop app and which protocol version is in play. It is the only
-user-facing surface in the extension and reads no page data.
+the extension's native host pipe to the local connector is alive and which protocol version is in play. It
+is the only user-facing surface in the extension and reads no page data.
 
 ## Chrome Web Store Package
 

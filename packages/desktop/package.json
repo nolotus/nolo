@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.98.2",
+  "version": "0.157.0-alpha.3",
   "type": "module",
   "scripts": {
     "prepare:web": "cd ../.. && NODE_ENV=production bun ./scripts/dev/esBuild.js",
@@ -17,7 +17,7 @@
     "build:stable:windows-installer": "bun ./scripts/build-stable-windows-installer.ts"
   },
   "dependencies": {
-    "electrobun": "^2.0.2",
+    "electrobun": "^2.0.1",
     "rcedit": "^5.0.2"
   }
 }

@@ -572,8 +572,8 @@
 /* === 移动端 ===
    必须留在文件末尾：同权重下后写的赢，之前这段放在中间，
    .ws-builder-bridge 等后定义的规则会把它整段吃掉。
-   hero 相关覆写在 WelcomeSection.hero.css 末尾，orchestration 的在
-   WelcomeSection.orchestration.css 末尾（各自文件 import 更晚）。 */
+   orchestration 相关覆写在
+   WelcomeSection.orchestration.css 末尾（import 更晚）。 */
 @media (max-width: 768px) {
   .ws-grid { grid-template-columns: 1fr; }
   .ws-cards-section .ws-grid {

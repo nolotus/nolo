@@ -17,6 +17,7 @@
  * 一条流，合并、linger、退休、渲染全都复用。
  */
 
+import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import { type AgentRunSnapshot, readTimestamp } from "../client/agentRunSnapshot";
 import { listRunRecords, type RunRecord } from "../agentRunControl";
 import {
@@ -116,11 +117,13 @@ export function snapshotFromRunRecord(
     inFlight = { kind: raw.kind, name: raw.name, startedAt: usable };
   }
 
+  const title = normalizeRunTitle(record.title);
   return {
     runId: record.runId,
     status: record.status,
     ...(!record.parentDialogId ? { unassigned: true } : {}),
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),
+    ...(title ? { title } : {}),
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
     ...(typeof counters?.toolCalls === "number" ? { toolCallCount: counters.toolCalls } : {}),
@@ -147,6 +150,7 @@ function fingerprint(snapshot: AgentRunSnapshot): string {
   return JSON.stringify([
     snapshot.status,
     snapshot.agentName ?? "",
+    snapshot.title ?? "",
     (snapshot as any).unassigned ?? false,
     snapshot.toolCallCount ?? -1,
     snapshot.errorMessage ?? "",

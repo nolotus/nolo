@@ -7,6 +7,9 @@ import { serve, file as bunFile } from "bun";
 import { join, resolve, sep } from "node:path";
 import { readFileSync } from "node:fs";
 import { desktopRuntimeRoutes, prewarmDesktopRuntimeRoutes } from "./desktopRuntimeRoutes";
+// 桌面启动时的 native host 自动安装由桌面主进程调用（packages/desktop/src/bun/index.ts），
+// 不放在 bootstrapServer 里：测试与工具链会 import 本文件，而它写的是用户真实的浏览器配置。
+export { ensureNativeHostForDetectedBrowsers } from "./handlers/desktopChromeNativeHostEnsure";
 
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? 80);
 const HTTP_HOST = process.env.PLATFORM_SERVER_HOST ?? "127.0.0.1";
