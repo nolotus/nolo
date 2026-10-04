@@ -2956,19 +2956,22 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   font-weight: 600;
 }
 
-/* ── Guest home (2026-10-04 redesign) ─────────────────────
- * The topbar should feel like the top edge of the landing's evening sky,
+/* ── Guest nature pages (home 2026-10-04; auth pages joined) ──
+ * Applies to the guest home and the guest auth pages (/login, /signup,
+ * /cli/authorize) — see guestNaturePages.ts. The topbar should feel like the top edge of the landing's evening sky,
  * not a separate app bar: same sky color, no border, brand mark instead of
  * a bare house icon, nav links in the landing's ink. */
-/* Background is set inline from guestHomeTone.ts and follows the band of
- * the landing currently under the topbar (sky → paper → evening light).
+/* On the home the background is set inline from guestHomeTone.ts and follows
+ * the band of the landing currently under the topbar (sky → paper → evening
+ * light). Auth pages have no bands: they keep var(--hl-sky-top), which is the
+ * first stop of --hl-sky-auth, so topbar and page meet without an edge.
  * Colors are tokens from naturePalette.css (day + night). */
-.MainLayout--guest-home .MainLayout__center {
+.MainLayout--guest-nature .MainLayout__center {
   background: var(--hl-paper);
 }
 
-.topbar--guest-home,
-.topbar--guest-home.topbar--scrolled {
+.topbar--guest-nature,
+.topbar--guest-nature.topbar--scrolled {
   border-bottom-color: transparent;
   box-shadow: none;
   backdrop-filter: none;
@@ -2978,7 +2981,7 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   transition: background-color 240ms ease;
 }
 
-.topbar--guest-home .TopBar__home {
+.topbar--guest-nature .TopBar__home {
   width: auto;
   height: auto;
   gap: 8px;
@@ -2987,38 +2990,69 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   background: transparent;
 }
 
-.topbar--guest-home .TopBar__home.is-active,
-.topbar--guest-home .TopBar__home:hover {
+.topbar--guest-nature .TopBar__home.is-active,
+.topbar--guest-nature .TopBar__home:hover {
   color: var(--hl-blue);
   background: transparent;
 }
 
-.topbar--guest-home .TopBar__brand-name {
+.topbar--guest-nature .TopBar__brand-name {
   color: var(--hl-ink);
   font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
   font-weight: 700;
   font-size: 20px;
 }
 
-.topbar--guest-home .topbar__nav-link,
-.topbar--guest-home .topbar__nav-link--download-cta {
+.topbar--guest-nature .topbar__nav-link,
+.topbar--guest-nature .topbar__nav-link--download-cta {
   color: var(--hl-nav);
   background: transparent;
   border-color: transparent;
   font-weight: 500;
 }
 
-.topbar--guest-home .topbar__nav-link:hover {
+.topbar--guest-nature .topbar__nav-link:hover {
   color: var(--hl-ink);
   background: var(--hl-ghost);
 }
 
-.topbar--guest-home .topbar__nav-icon {
+.topbar--guest-nature .topbar__nav-icon {
   display: none;
 }
 
+/* Login link: NavListItem's active state is the app's primary blue (that
+ * was the lone bright pill on /login). On guest nature pages it reads like
+ * the other nav links in landing ink; the current page gets only a quiet
+ * ghost wash. !important is needed because StyleX boosts its atomic rules
+ * with :not(#\#) x3 — scoped to this one hook, nothing else. */
+.topbar__guest-login {
+  display: contents;
+}
+
+.topbar--guest-nature .topbar__guest-login > a {
+  color: var(--hl-nav) !important;
+  background: transparent !important;
+  border-radius: 999px !important;
+  font-weight: 500 !important;
+}
+
+.topbar--guest-nature .topbar__guest-login > a > span {
+  color: var(--hl-nav) !important;
+}
+
+.topbar--guest-nature .topbar__guest-login > a:hover,
+.topbar--guest-nature .topbar__guest-login.is-current > a {
+  color: var(--hl-ink) !important;
+  background: var(--hl-ghost) !important;
+}
+
+.topbar--guest-nature .topbar__guest-login > a:hover > span,
+.topbar--guest-nature .topbar__guest-login.is-current > a > span {
+  color: var(--hl-ink) !important;
+}
+
 /* Under the landing the scroll area shows paper, not the app canvas color. */
-.MainLayout--guest-home .MainLayout__main {
+.MainLayout--guest-nature .MainLayout__main {
   background: var(--hl-paper);
 }
 

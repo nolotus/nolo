@@ -7,7 +7,7 @@
  * night sky over warm ink paper — same story, after dark.
  * Rule: pages in scope never hardcode a color; add a token here instead. */
 
-.MainLayout--guest-home,
+.MainLayout--guest-nature,
 .home-landing,
 .SiteFooter,
 .client-downloads-page,
@@ -35,17 +35,27 @@
   --hl-sky-top: #d3dfeb;
   --hl-faint: #57606c;
   --hl-warm: #f3e3d0;
-  --hl-input: #ffffff;
+  /* Auth inputs sit straight on the sky: warm surface at 60% so the field
+   * reads as paper laid on the gradient, not a white tile cut out of it.
+   * The ink hairline is what marks the field: 55% ink = ~3.2:1 on the sky. */
+  --hl-input: rgba(255, 253, 248, 0.6);
+  --hl-input-focus: rgba(255, 253, 248, 0.92);
+  --hl-input-line: color-mix(in srgb, var(--hl-ink) 55%, transparent);
+  --hl-input-line-hover: color-mix(in srgb, var(--hl-ink) 75%, transparent);
   --hl-danger: #c93b2b;
   --hl-green-ink: #2f6b36;
   --hl-shadow-base: #1f2733;
   /* Static sky for hero cards and the auth backdrop. */
   --hl-sky-panel: linear-gradient(180deg, #d3dfeb 0%, #e9e4df 48%, #f1d2b4 82%, #eebf98 100%);
-  --hl-sky-auth: linear-gradient(180deg, #d3dfeb 0%, #e9e4df 38%, #f7f3ec 75%);
+  /* Auth backdrop: the home's sky → paper → sunset story, paled. Top stop is
+   * --hl-sky-top (meets the topbar seamlessly); it ends on the home closing
+   * band's evening tint (#f3e3d0) and a soft peach halfway between that and
+   * the home hero's #f1d2b4 — sunset, but lighter than the home's. */
+  --hl-sky-auth: linear-gradient(180deg, #d3dfeb 0%, #e9e4df 34%, #f7f3ec 60%, #f3e3d0 86%, #f1d9be 100%);
 }
 
 [data-theme="dark"] :is(
-  .MainLayout--guest-home,
+  .MainLayout--guest-nature,
   .home-landing,
   .SiteFooter,
   .client-downloads-page,
@@ -73,10 +83,15 @@
   --hl-sky-top: #0f1626;
   --hl-faint: #9d978d;
   --hl-warm: #262338;
-  --hl-input: #1c1b20;
+  /* Night: --hl-surface at 55%; 38% ink hairline = ~3.2:1 on the night sky. */
+  --hl-input: rgba(37, 36, 42, 0.55);
+  --hl-input-focus: rgba(37, 36, 42, 0.9);
+  --hl-input-line: color-mix(in srgb, var(--hl-ink) 38%, transparent);
+  --hl-input-line-hover: color-mix(in srgb, var(--hl-ink) 58%, transparent);
   --hl-danger: #f08a7a;
   --hl-green-ink: #8fd09b;
   --hl-shadow-base: #000000;
   --hl-sky-panel: linear-gradient(180deg, #101829 0%, #1b2339 48%, #2a2536 82%, #322a3b 100%);
-  --hl-sky-auth: linear-gradient(180deg, #0f1626 0%, #1a2238 38%, #1c1b20 75%);
+  /* Night: indigo sky → warm ink paper → the home's faint pre-dawn plum. */
+  --hl-sky-auth: linear-gradient(180deg, #0f1626 0%, #1a2238 34%, #1c1b20 60%, #262338 86%, #2a2536 100%);
 }

@@ -41,6 +41,7 @@ import TopbarUserMenu from "./TopbarUserMenu";
 import { DevReloadBadge } from "./DevReloadBadge";
 import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import { useGuestHomeTopbarTone } from "./guestHomeTone";
+import { getGuestNaturePage } from "./guestNaturePages";
 import ThemeToggleButton from "app/theme/web/ThemeToggleButton";
 import { useIsDark } from "app/theme";
 import CreateMenuButton from "./CreateMenuButtonContainer";
@@ -97,7 +98,15 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
   const showTopbarHome = true;
   // Guest home: the topbar dissolves into the landing's sky and carries the
   // brand instead of a bare house icon (2026-10-04 home redesign).
-  const isGuestHome = !s.isLoggedIn && location.pathname === "/" && !isDesktopShell;
+  // Guest nature pages (home + login/signup/cli-authorize) share that look;
+  // only the home samples its scrolling bands — auth pages have no hero, so
+  // they keep the CSS fallback var(--hl-sky-top), the top of their gradient.
+  const guestNaturePage = getGuestNaturePage(location.pathname, {
+    isLoggedIn: s.isLoggedIn,
+    isDesktop: isDesktopShell,
+  });
+  const isGuestNature = guestNaturePage !== null;
+  const isGuestHome = guestNaturePage === "home";
   const isDark = useIsDark();
   const guestHomeTone = useGuestHomeTopbarTone(isGuestHome, isDark);
   const currentHistoryIndex = useMemo(
@@ -292,8 +301,8 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
   return (
     <>
       <div
-        className={`topbar ${s.isScrolled ? "topbar--scrolled" : ""} ${isGuestHome ? "topbar--guest-home" : ""}`.trim()}
-        style={guestHomeTone ? { background: guestHomeTone } : undefined}
+        className={`topbar ${s.isScrolled ? "topbar--scrolled" : ""} ${isGuestNature ? "topbar--guest-nature" : ""}`.trim()}
+        style={isGuestHome && guestHomeTone ? { background: guestHomeTone } : undefined}
       >
         {/* 左侧：侧边栏开关 + Home */}
         <div className="topbar__section topbar__section--left">
@@ -364,7 +373,7 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
                 title={t("home", "首页")}
                 aria-label={t("home", "首页")}
               >
-                {isGuestHome ? (
+                {isGuestNature ? (
                   <>
                     <NoloHeadMark size={26} />
                     <span className="TopBar__brand-name">Nolo</span>
@@ -555,11 +564,17 @@ const TopBar: React.FC<TopBarProps> = ({ toggleSidebar, isSidebarOpen }) => {
               {/* Guests have no settings menu; logged-in users switch in the user menu. */}
               <ThemeToggleButton className="topbar__theme-toggle" />
               <LanguageSwitcher iconOnly />
-              <NavListItem
-                label={t("login")}
-                icon={<LuLogIn size={16} aria-hidden="true" />}
-                path={AppRoutePaths.LOGIN}
-              />
+              {/* display:contents hook so guest nature pages can quiet the
+                  NavListItem's primary-blue active state (it is active on /login). */}
+              <span
+                className={`topbar__guest-login ${location.pathname === AppRoutePaths.LOGIN ? "is-current" : ""}`.trim()}
+              >
+                <NavListItem
+                  label={t("login")}
+                  icon={<LuLogIn size={16} aria-hidden="true" />}
+                  path={AppRoutePaths.LOGIN}
+                />
+              </span>
             </>
           )}
         </div>

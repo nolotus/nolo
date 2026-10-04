@@ -661,7 +661,12 @@ export async function initFavorites(deps: FavoriteDeps): Promise<unknown> {
             const { token, servers } = deps;
 
             if (!token) {
-                throw new Error("未登录，无法加载收藏列表");
+                replaceFavorites({
+                    agentIds: [],
+                    contentIds: [],
+                    favoritedAtById: {},
+                });
+                return;
             }
 
             const snapshotResults = await Promise.allSettled(

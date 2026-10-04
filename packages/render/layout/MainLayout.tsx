@@ -50,6 +50,7 @@ import {
 } from "./mainLayoutViewMode";
 import { MobileDownloadBanner } from "./MobileDownloadBanner";
 import { getIsDesktopApp } from "app/utils/env";
+import { getGuestNaturePage } from "./guestNaturePages";
 import "./layout.css";
 
 const TopBar = lazy(() => import("./TopBar"));
@@ -175,8 +176,12 @@ const MainLayout: React.FC = () => {
   const renderSiteFooter = shouldRenderSiteFooter(location.pathname, {
     isLoggedIn,
   });
-  // Guest home landing owns its own look (topbar over the sky, quiet footer).
-  const isGuestHome = !isLoggedIn && location.pathname === "/" && !getIsDesktopApp();
+  // Guest nature pages (home landing + auth entry pages) own their look:
+  // topbar over the sky, nature palette, no app-canvas white.
+  const guestNaturePage = getGuestNaturePage(location.pathname, {
+    isLoggedIn,
+    isDesktop: isDesktopApp,
+  });
   const renderChatSidebar = shouldRenderChatSidebar({
     isLoggedIn,
     hasMounted,
@@ -468,7 +473,7 @@ const MainLayout: React.FC = () => {
       >
         <div
           ref={mainLayoutRef}
-          className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""} ${isGuestHome ? "MainLayout--guest-home" : ""}`.trim()}
+          className={`MainLayout ${placementClass} ${isResizing ? "is-resizing" : ""} ${guestNaturePage ? `MainLayout--guest-nature MainLayout--guest-${guestNaturePage}` : ""}`.trim()}
         >
         {/* 左侧常驻侧边栏 */}
         {hasSidebar && (
