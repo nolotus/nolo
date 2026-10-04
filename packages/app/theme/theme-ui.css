@@ -379,28 +379,25 @@
 
 /* ── Theme transition (View Transitions API) ────────────────── */
 
-::view-transition-group(root) {
-  animation-timing-function: var(--expo-out);
-}
-
+/* Circular reveal from the click point (--theme-vt-x/y, set by
+ * useThemeModeControl). clip-path is GPU-composited; the old blurred SVG
+ * mask + animated mask-size re-rasterized the full screen every frame
+ * (~1s of long frames on a 1280x900 page, measured 2026-10-05). */
 ::view-transition-new(root) {
-  mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><defs><filter id="blur"><feGaussianBlur stdDeviation="2"/></filter></defs><circle cx="0" cy="0" r="18" fill="white" filter="url(%23blur)"/></svg>') top left / 0 no-repeat;
-  mask-origin: content-box;
-  animation: theme-reveal 1s;
-  animation-fill-mode: both;
-  transform-origin: top left;
+  animation: theme-reveal 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 ::view-transition-old(root) {
-  animation: theme-reveal 1s;
-  animation-fill-mode: both;
-  transform-origin: top left;
+  animation: none;
   z-index: -1;
 }
 
 @keyframes theme-reveal {
+  from {
+    clip-path: circle(0 at var(--theme-vt-x, 100%) var(--theme-vt-y, 0));
+  }
   to {
-    mask-size: 350vmax;
+    clip-path: circle(150vmax at var(--theme-vt-x, 100%) var(--theme-vt-y, 0));
   }
 }
 

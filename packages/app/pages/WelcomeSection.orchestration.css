@@ -880,11 +880,12 @@
     animation: none !important;
   }
 
-  /* 数据包流动画是装饰性无限循环，reduce 下一律停止。
-     用结构选择器而非枚举 p-* 类名，才能覆盖全部标签页
-     （coding / brainstorm / consensus / video 各自有独立 packet 类）。 */
+  /* reduce 下去掉「位移」，保留「顺序」：去掉虚线后 dashoffset 扫动不再产生
+     可见运动，只剩每条连线按原节奏依次亮起再熄灭——不晃动，但仍能看出
+     谁先做、交给谁、谁审查。（系统关闭动画的用户以前看到的是一张静止图，
+     看不出编排。）用结构选择器覆盖全部标签页的 packet 类。 */
   .wf-packets path {
-    animation: none !important;
+    stroke-dasharray: none !important;
   }
 }
 

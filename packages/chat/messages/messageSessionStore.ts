@@ -25,6 +25,13 @@ export interface MessageSessionState {
   // useHasStreamingMessage (useSyncExternalStore) instead of scanning Redux
   // msgs so streaming tokens don't re-render the whole list / title.
   streamingMessageId: string | null;
+  // Wave17: server-owned foreground canonical handoff guard. Holds a finished
+  // (non-streaming) transient message id that is waiting for its canonical DB
+  // row to become visible. While set (and not expired), initMsgs.fulfilled must
+  // treat the dialog as "local rows to preserve" and upsert instead of replace —
+  // otherwise a lagging DB snapshot wipes the finished transient off screen
+  // (2026-10-03 flicker/disappear incident, ~350ms persistence race).
+  canonicalHandoffTransient: { id: string; expiresAt: number } | null;
   // Wave12: last stream-clear timestamp for this dialog — written in the same
   // reducer pass as clearAllStreaming (user abort or logout all:true system
   // clear; see messageSlice clearAllStreaming). Memory-only, so async message
@@ -43,6 +50,7 @@ const createEmptyMessageSessionState = (): MessageSessionState => ({
   currentInitMsgsRequestId: undefined,
   currentLoadOlderRequestId: undefined,
   streamingMessageId: null,
+  canonicalHandoffTransient: null,
   lastAbortTimestamp: 0,
 });
 
@@ -184,6 +192,48 @@ export function getStreamingMessageId(
 export function getHasStreamingMessage(dialogId?: string | null): boolean {
   if (dialogId === null) return false;
   return !!getMessageSession(dialogId).streamingMessageId;
+}
+
+// ===== Wave17: canonical handoff transient guard =====
+// A finished transient stays in Redux while waiting for its canonical row.
+// Until the canonical row is confirmed (or the guard expires), a lagging
+// initMsgs snapshot must not be allowed to replace the local bucket.
+
+export function protectTransientForCanonicalHandoff(
+  dialogId: string | null | undefined,
+  messageId: string,
+  ttlMs: number
+): void {
+  const session = ensureMessageSession(dialogId);
+  session.canonicalHandoffTransient = {
+    id: messageId,
+    expiresAt: Date.now() + Math.max(0, ttlMs),
+  };
+  notify();
+}
+
+export function releaseTransientCanonicalHandoff(
+  dialogId: string | null | undefined,
+  messageId?: string
+): void {
+  const session = ensureMessageSession(dialogId);
+  const current = session.canonicalHandoffTransient;
+  if (!current) return;
+  // Guard release is id-scoped: a stale late reconciler must not clear the
+  // protection of a newer overlapping handoff.
+  if (messageId !== undefined && current.id !== messageId) return;
+  session.canonicalHandoffTransient = null;
+  notify();
+}
+
+export function getCanonicalHandoffTransientId(
+  dialogId?: string | null
+): string | null {
+  if (dialogId === null) return null;
+  const guard = getMessageSession(dialogId).canonicalHandoffTransient;
+  if (!guard) return null;
+  if (Date.now() >= guard.expiresAt) return null;
+  return guard.id;
 }
 
 // ===== getters / select* wrappers (ignore Redux state) =====

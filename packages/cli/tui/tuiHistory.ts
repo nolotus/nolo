@@ -421,13 +421,23 @@ function styleAssistantTurn(content: string, colorEnabled: boolean): string {
     : stripAnsi(formatAssistantDisplay(content, { trimEdges: false }));
   const rawLines = highlighted.split("\n");
   let anchored = false;
+  let inToolBlock = false;
   const styledLines = rawLines.map((line) => {
-    if (!anchored && line.trim().length > 0 && !line.startsWith("[nolo]")) {
-      anchored = true;
-      const anchorPrefix = colorEnabled
-        ? `${themeColorSequence("chrome")}◈\x1b[39m `
-        : "◈ ";
-      return `${anchorPrefix}${line}`;
+    const plain = stripAnsi(line);
+    if (!anchored && plain.trim().length > 0 && !plain.startsWith("[nolo]")) {
+      // 工具顶层行（●/▸/✦/✗）进入工具块，卡片续行与树分支属于工具块；正文首行退出工具块并挂载 ◈ 锚点
+      if (/^[●▸✦✗]/.test(plain)) {
+        inToolBlock = true;
+      } else if (inToolBlock && /^(?:\s+|├──|└──)/.test(plain)) {
+        // 工具卡片缩进详情或树形分支连线，保持在工具块中
+      } else {
+        inToolBlock = false;
+        anchored = true;
+        const anchorPrefix = colorEnabled
+          ? `${themeColorSequence("chrome")}◈\x1b[39m `
+          : "◈ ";
+        return `${anchorPrefix}${line}`;
+      }
     }
     return line.startsWith("[nolo]") && colorEnabled
       ? themeText(line, "chrome", true)
@@ -583,20 +593,12 @@ export function layoutTurnRows(
   let rawOffset = 0;
   const rows: TurnLayoutRow[] = [];
 
-  // styleAssistantTurn anchored the first non-empty non-[nolo] line; mirror
-  // that choice here so the ◈ wrap bookkeeping (prefixWidth) lands on the
-  // same row, and a leading blank/[nolo] line never owns the anchor column.
+  // styleAssistantTurn anchored the first assistant prose line (skipping [nolo]
+  // and tool blocks); match the exact line that received the ◈ prefix so the
+  // wrap bookkeeping (prefixWidth) never drifts.
   let anchored = false;
   for (let i = 0; i < styledLines.length; i++) {
     const styledLine = styledLines[i]!;
-    const isFirstLine =
-      !anchored && styledLine.trim().length > 0 && !styledLine.startsWith("[nolo]");
-    if (isFirstLine) anchored = true;
-    const anchorPrefix = isFirstLine
-      ? (colorEnabled ? `${themeColorSequence("chrome")}◈\x1b[39m ` : "◈ ")
-      : "";
-    const prefixWidth = isFirstLine ? 2 : 0;
-    const prefixCharCount = anchorPrefix.length;
 
     // Check if this styled line is an inserted blank line (not in raw source)
     if (styledLine === "" && rawIdx < rawLines.length && rawLines[rawIdx] !== "") {
@@ -610,6 +612,15 @@ export function layoutTurnRows(
     }
 
     const rawLine = rawIdx < rawLines.length ? rawLines[rawIdx]! : "";
+    const isFirstLine =
+      !anchored &&
+      (styledLine.startsWith("◈ ") || stripAnsi(styledLine).startsWith("◈ "));
+    if (isFirstLine) anchored = true;
+    const anchorPrefix = isFirstLine
+      ? (colorEnabled ? `${themeColorSequence("chrome")}◈\x1b[39m ` : "◈ ")
+      : "";
+    const prefixWidth = isFirstLine ? 2 : 0;
+    const prefixCharCount = anchorPrefix.length;
     const rawLineLen = rawLine.length;
     const sourceMapping = buildSourceMapping(rawLine, styledLine, prefixCharCount);
     const lineRows = wrapTranscriptLineWithLayout(

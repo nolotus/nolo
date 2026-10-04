@@ -607,6 +607,14 @@ export function createCliLocalRuntimeAdapter(
     ...runtimeToolExecutionLimits,
   });
 
+  // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
+  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
+  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
+  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
+  const credentialBroker = createFileCredentialBroker({
+    migration: { enableLegacyMigration: true },
+  });
+
   const adapterBase = {
     host: "cli",
     capabilities: [
@@ -615,6 +623,7 @@ export function createCliLocalRuntimeAdapter(
       "leveldb-persistence",
       "local-tools",
     ],
+    credentialBroker,
     loadAgentConfig: async (agentRef) => {
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
@@ -801,9 +810,7 @@ export function createCliLocalRuntimeAdapter(
           apiKeyRefResolver: createOAuthApiKeyRefResolver({
             migration: { enableLegacyMigration: true },
           }),
-          credentialBroker: createFileCredentialBroker({
-            migration: { enableLegacyMigration: true },
-          }),
+          credentialBroker,
           loopbackRequest,
         }),
       }),
@@ -891,9 +898,6 @@ export function createCliLocalRuntimeAdapter(
         enableLegacyMigration: true,
       } as const;
       const apiKeyRefResolver = createOAuthApiKeyRefResolver({
-        migration: legacyCredentialMigration,
-      });
-      const credentialBroker = createFileCredentialBroker({
         migration: legacyCredentialMigration,
       });
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";

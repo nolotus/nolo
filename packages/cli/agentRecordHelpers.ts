@@ -619,7 +619,9 @@ export function parseAgentUpdateArgs(args: string[]) {
   const expiresAt = parseIsoTimestampOption(readOption(args, "--expires-at"), "--expires-at");
   const handle = readOption(args, "--handle")?.trim();
 
-  const promptSources = [prompt, promptFile, promptDoc].filter(Boolean);
+  // `--prompt ""` is an explicit request to clear the prompt, so presence
+  // (not truthiness) decides whether the flag was passed.
+  const promptSources = [prompt, promptFile, promptDoc].filter((value) => value !== undefined);
   if (promptSources.length > 1) {
     throw new Error("--prompt / --prompt-file / --prompt-doc are mutually exclusive.");
   }
@@ -628,7 +630,7 @@ export function parseAgentUpdateArgs(args: string[]) {
   if (cliProvider) updates.cliProvider = cliProvider;
   if (apiSource) updates.apiSource = apiSource;
   if (provider) updates.provider = provider;
-  if (prompt) updates.prompt = prompt;
+  if (prompt !== undefined) updates.prompt = prompt;
   if (promptFile) updates.prompt = readFileSync(promptFile, "utf8");
   if (tools) updates.tools = parseJsonishValue(tools);
   if (name) updates.name = name;

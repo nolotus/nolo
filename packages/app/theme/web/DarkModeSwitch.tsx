@@ -1,17 +1,8 @@
 import "../theme-ui.css";
 import React, { useLayoutEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { useAppDispatch, useAppSelector } from "app/store";
-import {
-  setThemeMode,
-  selectThemeMode,
-  selectIsDark,
-} from "app/settings/settingSlice";
-import {
-  resolveThemeModeIsDark,
-  SYSTEM_DARK_MEDIA_QUERY,
-} from "app/theme/themeModeBootstrap";
+import type { ThemeMode } from "app/theme/themeModeBootstrap";
+import { useThemeModeControl } from "app/theme";
 import { LuSun, LuMoon, LuMonitor } from "react-icons/lu";
 
 type DarkModeSwitchProps = {
@@ -21,9 +12,7 @@ type DarkModeSwitchProps = {
 
 export const DarkModeSwitch: React.FC<DarkModeSwitchProps> = ({ compact = false, className }) => {
   const { t } = useTranslation();
-  const dispatch = useAppDispatch();
-  const active = useAppSelector(selectThemeMode);
-  const isDark = useAppSelector(selectIsDark);
+  const { themeMode: active, applyThemeMode } = useThemeModeControl();
   const containerRef = useRef<HTMLDivElement>(null);
   const [slider, setSlider] = useState({ left: 0, width: 0 });
 
@@ -34,34 +23,8 @@ export const DarkModeSwitch: React.FC<DarkModeSwitchProps> = ({ compact = false,
     }
   }, [active]);
 
-  const handleSelect = (v: string) => {
-    const mode = v as "system" | "light" | "dark";
-    if (mode === active) return;
-
-    const systemPrefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia(SYSTEM_DARK_MEDIA_QUERY).matches;
-    const nextIsDark = resolveThemeModeIsDark(mode, systemPrefersDark);
-
-    const motionAllowed =
-      typeof window === "undefined" ||
-      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (
-      !motionAllowed ||
-      nextIsDark === isDark ||
-      typeof document === "undefined" ||
-      !document.startViewTransition
-    ) {
-      dispatch(setThemeMode(mode));
-      return;
-    }
-
-    document.startViewTransition(() => {
-      flushSync(() => {
-        dispatch(setThemeMode(mode));
-      });
-    });
+  const handleSelect = (v: string, origin: Element) => {
+    applyThemeMode(v as ThemeMode, origin);
   };
 
   const options = [
@@ -89,7 +52,7 @@ export const DarkModeSwitch: React.FC<DarkModeSwitchProps> = ({ compact = false,
           key={opt.v}
           className="mode-tab-item"
           data-active={active === opt.v}
-          onClick={() => handleSelect(opt.v)}
+          onClick={(e) => handleSelect(opt.v, e.currentTarget)}
           aria-label={opt.l}
         >
           {opt.i}
