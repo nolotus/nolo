@@ -1226,6 +1226,8 @@ export function agentRunCardLabels(): {
   runs: (count: number) => string;
   toolCount: (count: number) => string;
   statusWord: (status: string) => string;
+  /** Placeholder shown when a run's only name is a machine key (agent-pub-…). */
+  unnamedAgent: string;
   rows: {
     agent: string;
     status: string;
@@ -1244,6 +1246,9 @@ export function agentRunCardLabels(): {
     runs: (count: number) => t("runsListLabel", String(count)),
     toolCount: (count: number) => t("runToolsCount", String(count)),
     statusWord: agentRunStatusWord,
+    // Same folding rule as the run zone/panel: an unnamed run's machine key
+    // collapses to the kind-of-actor word, never the key itself.
+    unnamedAgent: t("subAgentName"),
     // Padding rides on the value so the default English layout is unchanged.
     rows: {
       agent: `${t("runRowAgent")}   `,

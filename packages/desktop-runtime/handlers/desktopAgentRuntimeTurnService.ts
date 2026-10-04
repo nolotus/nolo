@@ -96,6 +96,7 @@ import {
   spaceRecordKey,
 } from "agent-runtime/turnContext";
 import { discoverSkills } from "agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "agent-runtime/agentsMd";
 import {
   createChromeConnectorClient,
@@ -1414,6 +1415,7 @@ export async function runDesktopAgentRuntimeTurn(
       spaceContextLayer,
       memoryUseGuidanceLayer,
       workspaceContextLayer,
+      buildHostEnvironmentLayer(),
       skillDiscoveryLayer,
       memoryOverlayLayer,
       dialogSummaryLayer,

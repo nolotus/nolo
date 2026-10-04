@@ -394,9 +394,17 @@ export async function loadAgentCatalog(args: {
     rawData.privateAgents,
     rawData.favoritedAtByKey,
   );
-  // 订阅制套餐（Kimi/GLM Coding）额度懒刷新：3s 预算内合并新快照，失败静默。
-  await mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl });
+  // 先落缓存让 picker 立即出列表：订阅额度探测（一次 /api/agents/quota/refresh
+  // 往返，正常 ~300ms、慢时吃满 2s 预算）不再占用 /switch 冷加载关键路径。
   agentCatalogCache = { cacheKey, at: Date.now(), entries };
+  // 额度只是行尾 [quota] 的展示增强——fire-and-forget：探测在后台跑，
+  // mergeCatalogQuotas resolve 后就地写 entry.quota（mutate-in-place），
+  // 若此刻 agentCatalogCache?.entries 仍是这批 entries，缓存条目自动获得
+  // quota，下次 /switch（fresh 窗口内返回同一份缓存）即可见；若缓存已被
+  // 后台 SWR 刷新或失效覆盖，结果随这批 entries 一起丢弃——两种情形都
+  // 无需额外动作，也绝不能重建/重设 agentCatalogCache.at，否则配额探测
+  // 会白送缓存新鲜窗口、延长缓存寿命。探测本身失败静默。
+  void mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl }).catch(() => {});
   return entries;
 }
 

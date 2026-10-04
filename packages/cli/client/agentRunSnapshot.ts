@@ -123,7 +123,9 @@ function buildSnapshot(
     "";
   // runId is deliberately left out of the label chain: it is carried as its own
   // field and rendered as a `#abc12345` suffix, so resolving the label to it
-  // would print the same id twice.
+  // would print the same id twice. `title` stays out too — it already renders
+  // as the snapshot's own `title` field (`title · name`); resolving the label
+  // to it would double-print the same string as the agent name.
   const label = resolveRunLabel({
     agentName: parsed.agentName,
     name: parsed.name,

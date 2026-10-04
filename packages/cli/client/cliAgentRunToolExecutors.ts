@@ -200,6 +200,9 @@ function buildRunStatusPayload(
       pid: reconciled.pid ?? null,
       agentKey: reconciled.agentKey,
       ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+      // Title rides along so transcript re-render (toolOutput) and the run
+      // panel can show the caller's own words instead of a key/name guess.
+      ...(reconciled.title ? { title: reconciled.title } : {}),
       startedAt: reconciled.startedAt,
       endedAt: reconciled.endedAt ?? null,
       exitCode: reconciled.exitCode ?? null,
@@ -243,6 +246,7 @@ function buildRunStatusPayload(
     metadata: {
       displayData: formatStatusRunCard(name, reconciled.status, {
         runId: reconciled.runId,
+        title: normalizeRunTitle(reconciled.title),
         timing: {
           startedAt: readTimestamp(reconciled.startedAt),
           finishedAt: readTimestamp(reconciled.endedAt),
@@ -431,6 +435,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       deps,
     );
 
+    // title 走卡片自己的参数，不进 label：它是显示行不是名字，进了 label 会
+    // 把 key 顶掉、又让 identity 行与 title 行重复。
     const displayName = resolveRunLabel({ agentName, agentKey, runId });
     const labels = agentRunCardLabels();
     // Same reason as the server-side executor: without the task text two
@@ -491,6 +497,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         displayData: formatStartRunCard(displayName, "running", {
           task: taskPreview,
           runId,
+          ...(runTitle ? { title: runTitle } : {}),
           labels,
         }),
         payloadMetrics,
@@ -527,6 +534,11 @@ async function spawnContinuationRun(
     ...(reconciled.ephemeral ? ["--ephemeral"] : []),
   ];
 
+  // 续跑不新派 title——延续原 run 的标题。必须在 spawn 前算好：
+  // spawnLocalBackgroundRun 的 input.title 会被写进新 run 的注册记录
+  // （agentRunControl.ts record.title），没有它注册表/poller/completion 卡
+  // 全部掉回 key。
+  const continuedTitle = normalizeRunTitle(reconciled.title);
   const { runId: newRunId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
     {
       rawArgs,
@@ -534,6 +546,7 @@ async function spawnContinuationRun(
       cliEntrypointPath: deps.cliEntrypoint,
       agentKey,
       ...(agentName ? { agentName } : {}),
+      ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
@@ -546,7 +559,13 @@ async function spawnContinuationRun(
     deps,
   );
 
-  const displayName = resolveRunLabel({ agentName, agentKey, runId: newRunId });
+  // title 走卡片自己的参数，不进 label：label 只吃名字字段，title 顶掉
+  // key 反而丢执行者信息。
+  const displayName = resolveRunLabel({
+    agentName,
+    agentKey,
+    runId: newRunId,
+  });
   const labels = agentRunCardLabels();
   const taskPreview = userInput.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
 
@@ -562,12 +581,15 @@ async function spawnContinuationRun(
       status: "running",
       ...(agentName ? { agentName } : {}),
       ...(resolvedBatchId ? { batchId: resolvedBatchId } : {}),
+      // 续跑的 title 继承自原 run——随 content 透出，TUI 重建卡时才不会丢。
+      ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(taskPreview ? { taskPreview } : {}),
     }),
     metadata: {
       displayData: formatStartRunCard(displayName, "running", {
         task: taskPreview,
         runId: newRunId,
+        ...(continuedTitle ? { title: continuedTitle } : {}),
         labels,
       }),
     },
@@ -741,6 +763,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
         const queuePath = reconciled.queuePath;
         const { queuedCount, entryId } = await appendRunQueue(queuePath, userInput, deps);
 
+        const enqueuedTitle = normalizeRunTitle(reconciled.title);
         const displayName = resolveRunLabel({
           agentName: reconciled.agentName,
           agentKey: reconciled.agentKey,
@@ -779,12 +802,14 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
                 consumed: true,
                 status: afterCheck.status,
                 ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+                ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
               }),
               metadata: {
                 displayData: formatStartRunCard(displayName, afterCheck.status, {
                   task: `[consumed] ${taskPreview}`,
                   runId: reconciled.runId,
+                  ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
                   labels,
                 }),
               },
@@ -809,12 +834,14 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             queued: queuedCount,
             status: "running",
             ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}),
+            ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
             ...(taskPreview ? { taskPreview } : {}),
           }),
           metadata: {
             displayData: formatStartRunCard(displayName, "running", {
               task: `[enqueued ${queuedCount}] ${taskPreview}`,
               runId: reconciled.runId,
+              ...(enqueuedTitle ? { title: enqueuedTitle } : {}),
               labels,
             }),
           },

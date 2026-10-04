@@ -93,7 +93,14 @@ export function snapshotFromRunRecord(
   record: RunRecord,
   now: number
 ): AgentRunSnapshot {
-  const label = resolveRunLabel(record);
+  // `title` stays out of the label chain even though RunRecord carries it:
+  // it already renders as snapshot.title (`title · name`); letting it win
+  // the label too would print the same string twice in that slot. runId is
+  // likewise out — it renders as the `#abc12345` suffix, not the name.
+  const label = resolveRunLabel({
+    agentName: record.agentName,
+    agentKey: record.agentKey,
+  });
   // 时间戳的「什么算有效」只有一份判定（readTimestamp：有限且 > 0），面板、
   // 卡片和这里共用，免得同一条记录在两个界面上一个显示年龄一个不显示。
   const startedAt = readTimestamp(record.startedAt);

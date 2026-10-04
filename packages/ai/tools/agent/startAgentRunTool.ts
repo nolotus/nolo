@@ -366,13 +366,16 @@ export async function startAgentRunFunc(
         // rawData carries only real identity fields; the display fallback chain
         // lives in resolveRunLabel so a key never masquerades as a name.
         const resolvedName = agentName?.trim() || bgResult.agentName || bgResult.name;
+        const title = normalizeRunTitle(args.title);
+        // The label is the NAME layer only — the title rides its own row on
+        // the card, so letting it win here would leave the identity row empty
+        // (and the same holds for any machine-side use of the same function).
         const identity = { agentName: resolvedName, agentKey: effectiveAgentKey, runId };
         // A clipped copy of the task rides along so every renderer can say what
         // this run is *for*. Without it two concurrent runs are indistinguishable
         // on screen — same card, same status, different work. Clipped rather than
         // full: this is display text, and the caller already holds the original.
         const taskPreview = task.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
-        const title = normalizeRunTitle(args.title);
 
         return {
             rawData: {
@@ -392,6 +395,7 @@ export async function startAgentRunFunc(
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
                 task: taskPreview,
                 runId,
+                ...(title ? { title } : {}),
             }),
             metadata: {
                 payloadMetrics,

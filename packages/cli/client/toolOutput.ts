@@ -239,6 +239,7 @@ function renderRunCard(
         ...snapshot,
         agentName: snapshot.agentName ? cleanUserText(snapshot.agentName) : snapshot.agentName,
         taskPreview: snapshot.taskPreview ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview,
+        title: snapshot.title ? cleanUserText(snapshot.title) : snapshot.title,
         lastAssistantText: snapshot.lastAssistantText
           ? cleanUserText(snapshot.lastAssistantText)
           : snapshot.lastAssistantText,
@@ -259,6 +260,7 @@ function renderRunCard(
   const body = isAgentRunTerminalStatus(snapshot.status)
     ? formatFinishedRunCard(name, snapshot.status, {
         runId: snapshot.runId,
+        ...(snapshot.title ? { title: snapshot.title } : {}),
         toolCallCount: source.toolCallCount,
         lastToolNames: source.lastToolNames,
         lastAssistantText: source.lastAssistantText,
@@ -269,6 +271,7 @@ function renderRunCard(
       })
     : formatStatusRunCard(name, snapshot.status, {
         runId: snapshot.runId,
+        ...(snapshot.title ? { title: snapshot.title } : {}),
         toolCallCount: source.toolCallCount,
         lastToolNames: source.lastToolNames,
         lastAssistantText: source.lastAssistantText,
@@ -341,12 +344,14 @@ function recoverOrchestrationCard(
 
   if (kind === "start") {
     // safe（normal）投影：与 renderRunCard 同规则清洗 provider 可控文本
-    // （agentName/taskPreview 剥 ANSI/OSC、折叠换行）。
+    // （agentName/taskPreview/title 剥 ANSI/OSC、折叠换行）。
     const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
     const task = snapshot.taskPreview ? (safe ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview) : snapshot.taskPreview;
+    const title = snapshot.title ? (safe ? cleanUserText(snapshot.title) : snapshot.title) : snapshot.title;
     return formatStartRunCard(name, snapshot.status, {
       task,
       runId: snapshot.runId,
+      ...(title ? { title } : {}),
       labels,
     });
   }

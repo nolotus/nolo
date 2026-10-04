@@ -24,6 +24,7 @@ import {
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
@@ -246,6 +247,8 @@ async function runAgentChat(
     // index layer so the model knows what skills exist and can readFile them
     // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
     buildSkillDiscoveryContextLayer(state.cwd),
+    // 宿主环境层（session-scope 稳定前缀）：快速注入当前系统发行版、架构与桌面环境
+    buildHostEnvironmentLayer(),
   ];
 
   // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
