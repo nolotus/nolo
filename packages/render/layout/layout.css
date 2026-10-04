@@ -2951,3 +2951,66 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   background: rgba(248, 113, 113, 0.16);
   font-weight: 600;
 }
+
+/* ── Guest home (2026-10-04 redesign) ─────────────────────
+ * The topbar should feel like the top edge of the landing's evening sky,
+ * not a separate app bar: same sky color, no border, brand mark instead of
+ * a bare house icon, nav links in the landing's ink. */
+/* Background is set inline from guestHomeTone.ts and follows the band of
+ * the landing currently under the topbar (sky → paper → evening light). */
+.MainLayout--guest-home .MainLayout__center {
+  background: #f7f3ec;
+}
+
+.topbar--guest-home,
+.topbar--guest-home.topbar--scrolled {
+  border-bottom-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: background-color 240ms ease;
+}
+
+.topbar--guest-home .TopBar__home {
+  width: auto;
+  height: auto;
+  gap: 8px;
+  padding: 4px 8px 4px 4px;
+  color: #2879cd;
+  background: transparent;
+}
+
+.topbar--guest-home .TopBar__home.is-active,
+.topbar--guest-home .TopBar__home:hover {
+  color: #2879cd;
+  background: transparent;
+}
+
+.topbar--guest-home .TopBar__brand-name {
+  color: #1f2733;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.topbar--guest-home .topbar__nav-link,
+.topbar--guest-home .topbar__nav-link--download-cta {
+  color: #3a4350;
+  background: transparent;
+  border-color: transparent;
+  font-weight: 500;
+}
+
+.topbar--guest-home .topbar__nav-link:hover {
+  color: #1f2733;
+  background: rgba(255, 254, 250, 0.45);
+}
+
+.topbar--guest-home .topbar__nav-icon {
+  display: none;
+}
+
+/* Under the landing the scroll area shows paper, not the app canvas color. */
+.MainLayout--guest-home .MainLayout__main {
+  background: #f7f3ec;
+}

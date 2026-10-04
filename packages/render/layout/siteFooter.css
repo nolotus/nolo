@@ -293,3 +293,24 @@
     padding: 0 8px;
   }
 }
+
+/* ── Quiet variant: guest home only ──────────────────────
+ * Continues the landing's evening light (HomeLanding.css closing section)
+ * instead of a separate illustrated scene, so page and footer read as one. */
+.SiteFooter--quiet .SiteFooter__inner {
+  background: #f3e3d0;
+  border-top: 1px solid rgba(31, 39, 51, 0.1);
+  padding: 24px 24px 28px;
+}
+
+.SiteFooter--quiet .SiteFooter__link {
+  color: #5b6472;
+}
+
+.SiteFooter--quiet .SiteFooter__link:hover {
+  color: #1f2733;
+}
+
+.SiteFooter--quiet .SiteFooter__copyright {
+  color: #7a828e;
+}

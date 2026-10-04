@@ -1,0 +1,538 @@
+/* Guest home. Nature over tech (owner, 2026-10-04):
+ * - hero is one evening sky; the rest is warm paper, never a dark screen;
+ * - serif headings read like a field journal;
+ * - brand blue only as an accent; each relay step has its own "jacket" color;
+ * - green is reserved for the single "done" signal. */
+
+.home-landing {
+  --hl-ink: #1f2733;
+  --hl-muted: #5b6472;
+  --hl-paper: #f7f3ec;
+  --hl-line: rgba(31, 39, 51, 0.12);
+  --hl-blue: #2879cd;
+  --hl-coral: #e0855a;
+  --hl-sand: #c99a4e;
+  --hl-green: #3f7a4c;
+  /* --hl-sky and --hl-closing are set inline from render/layout/guestHomeTone.ts. */
+  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+
+  color: var(--hl-ink);
+  background: var(--hl-paper);
+}
+
+.hl-shell {
+  width: min(1080px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+.hl-shell-narrow {
+  width: min(760px, calc(100% - 48px));
+}
+
+/* ── Hero ─────────────────────────────────────────────── */
+
+.hl-hero {
+  background: var(--hl-sky);
+  padding: 40px 0 72px;
+}
+
+.hl-kicker {
+  margin: 0;
+  font-size: 14px;
+  color: var(--hl-muted);
+}
+
+.hl-title {
+  margin: 72px 0 0;
+  font-family: var(--hl-serif);
+  font-weight: 700;
+  font-size: clamp(32px, 5.4vw, 60px);
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  white-space: pre-line;
+  text-wrap: balance;
+}
+
+.hl-lead {
+  margin: 20px 0 0;
+  font-size: clamp(17px, 2vw, 22px);
+  line-height: 1.6;
+  color: var(--hl-muted);
+  max-width: 34em;
+  white-space: pre-line;
+  text-wrap: pretty;
+}
+
+.hl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.hl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 48px;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.hl-btn-primary {
+  background: var(--hl-ink);
+  color: #fffefa;
+}
+
+.hl-btn-primary:hover {
+  background: #2f3a48;
+}
+
+.hl-btn-secondary {
+  color: var(--hl-ink);
+  border: 1px solid rgba(31, 39, 51, 0.25);
+  background: rgba(255, 254, 250, 0.5);
+}
+
+.hl-btn-secondary:hover {
+  border-color: rgba(31, 39, 51, 0.5);
+}
+
+.hl-btn:focus-visible {
+  outline: 2px solid var(--hl-blue);
+  outline-offset: 3px;
+}
+
+/* Relay: three dots light up one after another, then the done signal. */
+.hl-relay {
+  list-style: none;
+  margin: 72px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 28px;
+  font-size: 17px;
+}
+
+.hl-relay-step,
+.hl-relay-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  animation: hl-arrive 520ms ease forwards;
+  animation-delay: calc(400ms + var(--i) * 650ms);
+}
+
+.hl-relay-step + .hl-relay-step::before,
+.hl-relay-step + .hl-relay-done::before {
+  content: "";
+  width: 28px;
+  margin-right: 8px;
+  border-top: 1.5px dashed rgba(31, 39, 51, 0.35);
+}
+
+.hl-relay-where {
+  color: var(--hl-muted);
+}
+
+.hl-relay-done {
+  color: var(--hl-green);
+  font-weight: 700;
+}
+
+.hl-relay-note {
+  margin: 14px 0 0;
+  font-size: 14px;
+  color: var(--hl-muted);
+}
+
+.hl-dot {
+  display: inline-block;
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.hl-dot-0 { background: var(--hl-coral); }
+.hl-dot-1 { background: var(--hl-blue); }
+.hl-dot-2 { background: var(--hl-sand); }
+
+@keyframes hl-arrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Sections ─────────────────────────────────────────── */
+
+.hl-section {
+  padding: 96px 0 0;
+}
+
+.hl-h2 {
+  margin: 0;
+  font-family: var(--hl-serif);
+  font-weight: 700;
+  font-size: clamp(28px, 3.4vw, 38px);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.hl-section-lead {
+  margin: 14px 0 0;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--hl-muted);
+  max-width: 40em;
+  text-wrap: pretty;
+}
+
+.hl-pillars {
+  margin-top: 40px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 40px;
+}
+
+.hl-pillar h3 {
+  margin: 16px 0 0;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.hl-pillar p {
+  margin: 10px 0 0;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--hl-muted);
+}
+
+.hl-pillar .hl-pillar-example {
+  margin-top: 14px;
+  padding-left: 14px;
+  border-left: 2px solid var(--hl-line);
+  font-size: 15px;
+}
+
+/* Orchestration showcase: the existing animated diagrams, re-skinned for paper.
+ * The diagram reads its colors from --ws-* (see WelcomeSection.orchestration.css). */
+.hl-orch {
+  --ws-primary: var(--hl-blue);
+  --primary: var(--hl-blue);
+  --ws-bg: #fffdf8;
+  --ws-bg-sub: #efe8dc;
+  --ws-text: var(--hl-ink);
+  --ws-text-sub: var(--hl-muted);
+  --ws-border: transparent;
+  --home-motion-duration: 0.36s;
+  --home-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --home-motion-delay: 0.05s;
+  margin-top: 28px;
+}
+
+/* The diagram is centered, so this section is centered as a whole:
+ * heading, lead, tabs and the example caption share one axis. */
+.hl-section-center {
+  text-align: center;
+}
+
+.hl-section-center .hl-section-lead {
+  margin-inline: auto;
+}
+
+/* Tabs: a quiet paper track instead of the app's gray pill. */
+.hl-orch .ws-orchestration-tabs {
+  justify-content: center;
+  margin: 0 auto 12px;
+  max-width: 520px;
+}
+
+.hl-orch .ws-orchestration-tabs .tabs {
+  background: #efe8dc;
+  border-color: transparent;
+}
+
+.hl-orch .orch-showcase-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin-top: 0;
+}
+
+.hl-orch .ws-orchestration-tab-body {
+  padding: 0;
+}
+
+.hl-orch .ws-orchestration-example-label {
+  color: var(--hl-coral);
+}
+
+.hl-orch .ws-workflow-desc--lead {
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+.hl-orch .ws-orchestration-panel-title {
+  font-family: var(--hl-serif);
+}
+
+/* The stage is a soft lift of light, not a framed box. */
+.hl-orch .ws-orchestration-stage {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 28px;
+  background: radial-gradient(120% 90% at 50% 40%, #fffdf8 0%, rgba(255, 253, 248, 0) 70%);
+}
+
+/* Make the motion readable on paper: thicker, glowing packets over faint tracks. */
+.hl-orch .wf-tracks path {
+  opacity: 0.2;
+}
+
+.hl-orch .wf-packets path {
+  stroke-width: 4px;
+  /* Longer packets, same 200 period as the keyframes' dashoffset sweep. */
+  stroke-dasharray: 46 154;
+  filter: drop-shadow(0 0 6px rgba(40, 121, 205, 0.6));
+}
+
+.hl-orch .wf-icon-core {
+  background: #fffdf8;
+  /* Static radial halo replaces per-node box-shadow rasterization. */
+  box-shadow: none;
+  position: relative;
+  isolation: isolate;
+}
+
+.hl-orch .wf-icon-core::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(120, 90, 60, 0.12) 0%, rgba(120, 90, 60, 0) 72%);
+  pointer-events: none;
+}
+
+/* Diagram layers stack in one grid cell and cross-fade. Each layer is its own
+ * composited layer (will-change: opacity) and stays painted, so a switch is a
+ * pure compositor opacity change — no re-raster. Inactive layers pause their
+ * animations, so they cost nothing while hidden. (Toggling visibility forced a
+ * full raster of the incoming diagram: ~100ms hitch per switch.) */
+.orch-showcase-stack {
+  display: grid;
+}
+
+.orch-showcase-layer {
+  grid-area: 1 / 1;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+  transition: opacity 280ms ease;
+}
+
+.orch-showcase-layer:not(.is-active) * {
+  animation-play-state: paused !important;
+}
+
+.orch-showcase-layer.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 280ms ease 60ms;
+}
+
+/* Only the caption slides in; the diagram fades. */
+.hl-orch .ws-orchestration-tab-body {
+  animation: none;
+}
+
+.orch-showcase-copy-stack {
+  display: grid;
+}
+
+.orch-showcase-copy {
+  grid-area: 1 / 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.orch-showcase-copy.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 220ms ease 80ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orch-showcase-layer,
+  .orch-showcase-layer.is-active { transition: none; }
+  .orch-showcase-copy,
+  .orch-showcase-copy.is-active { transition: none; }
+}
+
+.orch-showcase-route {
+  display: none;
+}
+
+/* Hand-juggling vs Nolo */
+.hl-compare {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.hl-compare-card {
+  border-radius: 20px;
+  padding: 26px 28px;
+}
+
+.hl-compare-card h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--hl-muted);
+}
+
+.hl-compare-card ul {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.hl-compare-card li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--hl-muted);
+}
+
+.hl-compare-card li svg {
+  flex: none;
+  margin-top: 4px;
+}
+
+.hl-compare-card-nolo {
+  background: #fffdf8;
+  box-shadow: 0 14px 40px rgba(120, 90, 60, 0.08);
+}
+
+.hl-compare-card-nolo h3 {
+  color: var(--hl-blue);
+  font-family: var(--hl-serif);
+}
+
+.hl-compare-card-nolo li {
+  color: var(--hl-ink);
+}
+
+.hl-compare-card-nolo li svg {
+  color: var(--hl-green);
+}
+
+.hl-faq {
+  margin-top: 28px;
+  gap: 0;
+}
+
+.hl-faq .ws-faq-item,
+.hl-faq .ws-faq-item[data-expanded] {
+  border: 0;
+  border-bottom: 1px solid var(--hl-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ── Closing ──────────────────────────────────────────── */
+
+.hl-closing {
+  margin-top: 112px;
+  padding: 88px 0 72px;
+  background: var(--hl-closing);
+}
+
+.hl-closing-lead,
+.hl-closing-end {
+  margin: 0;
+  font-size: 18px;
+  color: var(--hl-muted);
+}
+
+.hl-closing-lines {
+  margin: 18px 0;
+  font-family: var(--hl-serif);
+  font-weight: 700;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.5;
+}
+
+.hl-closing-lines span {
+  display: block;
+}
+
+.hl-trust {
+  margin: 36px 0 0;
+  font-size: 14px;
+  color: var(--hl-muted);
+}
+
+.hl-trust a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+/* ── Small screens ────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  .hl-hero { padding: 24px 0 48px; }
+  .hl-title { margin-top: 56px; }
+  .hl-relay { flex-direction: column; align-items: flex-start; margin-top: 48px; }
+  .hl-relay-step + .hl-relay-step::before,
+  .hl-relay-step + .hl-relay-done::before { display: none; }
+  .hl-section { padding-top: 64px; }
+  .hl-btn { padding-inline: 18px; }
+  .hl-pillars { grid-template-columns: 1fr; gap: 32px; }
+  .hl-orch .ws-orchestration-example-label,
+  .hl-orch .ws-orchestration-stage { display: none; }
+  .orch-showcase-route {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .orch-showcase-route li {
+    padding: 12px 10px;
+    border-radius: 12px;
+    background: #fffdf8;
+  }
+  .orch-showcase-route span { display: block; font-size: 12px; color: var(--hl-muted); }
+  .orch-showcase-route strong { display: block; margin-top: 4px; font-size: 13px; line-height: 1.3; }
+  .hl-compare { grid-template-columns: 1fr; }
+  .hl-compare-card { padding: 22px 20px; }
+  .hl-closing { margin-top: 80px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hl-relay-step,
+  .hl-relay-done {
+    animation: none;
+    opacity: 1;
+  }
+  .hl-btn { transition: none; }
+}

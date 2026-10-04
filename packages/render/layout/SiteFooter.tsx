@@ -20,12 +20,23 @@ const SUPPORT_EMAIL = "s@nolotus.com";
  * - 桌面端：全幅开阔画卷，左侧水湾停泊独木舟，空中掠过飞鸟，右侧扎营立挺大帐篷、青帐篷与温暖篝火；
  * - 移动端：专注营地黄金视域，饱满生动，元素比例舒适不局促。
  */
-const SiteFooter: React.FC = () => {
+type SiteFooterProps = {
+  /**
+   * quiet: guest home only (2026-10-04 redesign). Same legal links, no camp
+   * scene; it continues the landing's evening light so page and footer read
+   * as one piece.
+   */
+  variant?: "scene" | "quiet";
+};
+
+const SiteFooter: React.FC<SiteFooterProps> = ({ variant = "scene" }) => {
   const { t } = useTranslation();
   const year = new Date().getFullYear();
+  const quiet = variant === "quiet";
 
   return (
-    <footer className="SiteFooter">
+    <footer className={quiet ? "SiteFooter SiteFooter--quiet" : "SiteFooter"}>
+      {!quiet && (
       <div className="SiteFooter__scene" aria-hidden="true">
         {/* 桌面与平板端全景画卷：高度舒展开阔，等比 slice 杜绝横向形变 */}
         <svg
@@ -310,6 +321,7 @@ const SiteFooter: React.FC = () => {
           </g>
         </svg>
       </div>
+      )}
 
       <div className="SiteFooter__inner">
         <nav className="SiteFooter__links" aria-label={t("footer.legal", "法律条款")}>

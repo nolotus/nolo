@@ -50,6 +50,14 @@ export const homeStyles = stylex.create({
     rowGap: "clamp(12px, 1.5vh, 20px)",
     columnGap: "clamp(12px, 1.5vh, 20px)",
   },
+  // 访客首页落地页需要通栏（天色与纸色铺满两侧），释放 1080px 居中列与内边距。
+  homeMainGuestLanding: {
+    maxWidth: "none",
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+  },
   // 原 .home-layout--authed .home-main（后代选择器改为条件应用）。
   homeMainAuthed: {
     flexGrow: 1,
