@@ -1,0 +1,7 @@
+@import "./WelcomeBrandLanding.story.css";
+
+@media (max-width: 560px) {
+  .wbl-kicker {
+    display: none;
+  }
+}

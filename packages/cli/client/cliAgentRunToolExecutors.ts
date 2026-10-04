@@ -11,7 +11,6 @@
 // 返回格式与 web 端 executor 一致：{ content: JSON(rawData), metadata.displayData }，
 // 由 localToolExecutors 分发（host adapter executeTool）。
 
-import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import * as nodeFs from "node:fs";
 import { waitForRunTerminal } from "../../agent-runtime/waitForRunTerminal";
 import { existsSync, readFileSync } from "node:fs";
@@ -52,7 +51,7 @@ import {
   isRunTerminalStatus,
 } from "../agentRunControl";
 import { readTimestamp } from "./agentRunSnapshot";
-import { agentRunCardLabels, t } from "../tui/i18n";
+import { agentRunCardLabels } from "../tui/i18n";
 import {
   aggregateBatch,
   type BatchRunSummary,
@@ -92,8 +91,6 @@ export type CliAgentRunToolExecutorDeps = {
    * 缺省或返回 undefined = 凭证归属**未知**（守卫按未知处理，不是「独立」）。
    */
   resolveAgentCredentialGroup?: (agentKey: string) => Promise<string | undefined>;
-  /** 当前主进程运行的 agentKey（供 startAgentRun 缺省回填自身派发用）。 */
-  currentAgentKey?: string | null;
 } & AgentRunControlDeps;
 
 const noopOutput: OutputLike = { write: () => {} };
@@ -265,8 +262,8 @@ function buildRunStatusPayload(
  * 里**仍未终态**的 run 做凭证组冲突检测：
  * - 候选或任一活跃 run 的 credentialGroup 未知 → 拒绝（未知 ≠ 独立，
  *   无法证明不共用上游 key），除非显式 allowUnknownCredential:true；
- * - 两侧 credentialGroup 已知且相同 → 同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），除非显式
- *   allowCredentialConcurrency:false（调用方显式收紧禁止并发）；
+ * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝，除非显式
+ *   allowCredentialConcurrency:true（调用方确认该凭证支持并发）；
  * - 已知且不同 → 放行。
  *
  * 返回值是解析出的候选 credentialGroup（可能 undefined），由调用方写进
@@ -282,7 +279,6 @@ async function assertCredentialFanoutAllowed(
     /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
     credentialGroup?: string;
     allowUnknownCredential?: boolean;
-    /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
     allowCredentialConcurrency?: boolean;
   }
 ): Promise<string | undefined> {
@@ -323,7 +319,7 @@ async function assertCredentialFanoutAllowed(
     active,
     candidate: { agentKey: args.agentKey, credentialGroup: candidateGroup },
     allowUnknownCredential: args.allowUnknownCredential === true,
-    allowCredentialConcurrency: args.allowCredentialConcurrency,
+    allowCredentialConcurrency: args.allowCredentialConcurrency === true,
   });
   if (!verdict.allowed) throw new Error(verdict.message);
   return candidateGroup;
@@ -332,29 +328,17 @@ async function assertCredentialFanoutAllowed(
 export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps = {}) {
   return async (call: any): Promise<{ content: string; metadata?: Record<string, unknown> }> => {
     const args = parseCallArgs(call);
-    const rawAgentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
-    const agentKey =
-      (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
-        ? (deps.currentAgentKey ?? rawAgentKey)
-        : rawAgentKey;
+    const agentKey = typeof args.agentKey === "string" ? args.agentKey.trim() : "";
     const task = typeof args.task === "string" ? args.task.trim() : "";
-    if (!agentKey) throw new Error("startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。");
+    if (!agentKey) throw new Error("startAgentRun: 缺少 agentKey 参数。");
     if (!task) throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     const nowMs = resolveNowMs(deps);
-
-    const effectiveAllowCredentialConcurrency =
-      args.allowCredentialConcurrency ?? true;
 
     const message = buildDelegatedTaskContent(task, args.input);
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, args.input, message);
 
     // --msg-file 占位会被 spawnLocalBackgroundRun 的 rewriteMsgFileArg 改写为
     // runs 目录里的内容快照（~/.nolo/runs/<runId>.msg.md）；--bg 会被子进程剥离。
-    // Read-only is declared by the caller, never guessed from task wording:
-    // a keyword heuristic silently flipped reviewers between "no tools" and
-    // "write access" depending on phrasing.
-    const isReadOnlyTask = args.readOnly === true;
-
     const rawArgs = [
       "--agent",
       agentKey,
@@ -364,8 +348,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       // 非持久化派发（review 等一次性任务）：透传 --ephemeral，run 完成后不留
       // dialog 记录。与 web 端 runAgentBackground 的 ephemeral: true 对齐。
       ...(args.ephemeral === true ? ["--ephemeral"] : []),
-      // 只读角色安全收敛：审查类任务物理剥离写/改/删工具，遵循最小特权原则。
-      ...(isReadOnlyTask ? ["--read-only"] : []),
     ];
 
     const agentName =
@@ -380,8 +362,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? args.batchId.trim()
         : undefined;
 
-    // 并发扇出凭证隔离：同 batch / 同父对话并发时，同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），
-    // 除非显式 allowCredentialConcurrency: false 收紧；未知凭证组冲突一律拒绝（除非显式 allowUnknownCredential）。
+    // 并发扇出凭证隔离：同 batch / 同父对话并发时，未知凭证组与同凭证组冲突
+    // 一律拒绝（除非显式 allowUnknownCredential / allowCredentialConcurrency）。
     // 解析结果写进 run 记录。
     const parentDialogId =
       typeof args.parentDialogId === "string" && args.parentDialogId.trim()
@@ -395,7 +377,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? { credentialGroup: args.credentialGroup.trim() }
         : {}),
       allowUnknownCredential: args.allowUnknownCredential === true,
-      allowCredentialConcurrency: effectiveAllowCredentialConcurrency,
+      allowCredentialConcurrency: args.allowCredentialConcurrency === true,
     });
 
     const dodCommands = Array.isArray(args.dodCommands)
@@ -410,7 +392,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
               .map((c: string) => c.trim())
           : undefined;
 
-    const runTitle = normalizeRunTitle(args.title);
     const { runId, batchId: resolvedBatchId } = await spawnLocalBackgroundRun(
       {
         rawArgs,
@@ -418,7 +399,6 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         cliEntrypointPath: deps.cliEntrypoint,
         agentKey,
         ...(agentName ? { agentName } : {}),
-        ...(runTitle ? { title: runTitle } : {}),
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
         ...(parentDialogId ? { parentDialogId } : {}),
@@ -477,14 +457,12 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     return {
       content: JSON.stringify({
         runId,
-        agentKey,
         status: "running",
         // batchId is always returned so the caller can later filter by it —
         // even when the caller didn't supply one, a fresh id was generated.
         batchId: resolvedBatchId,
         ...(agentName ? { agentName } : {}),
         ...(taskPreview ? { taskPreview } : {}),
-        ...(runTitle ? { title: runTitle } : {}),
         payloadMetrics,
       }),
       metadata: {
@@ -888,7 +866,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       if (result.kind === "timeout") {
         const reconciled = result.lastState ?? record;
         const nowMs = resolveNowMs(deps);
-        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: t("agentRunWaitTimeout", String(Math.round(result.waitedMs / 1000))) } };
+        return { content: JSON.stringify({ runId: reconciled.runId, found: true, status: "timeout", runStatus: reconciled.status, pid: reconciled.pid ?? null, agentKey: reconciled.agentKey, ...(reconciled.agentName ? { agentName: reconciled.agentName } : {}), startedAt: reconciled.startedAt, waitedMs: result.waitedMs, timeoutMs, ...buildProgressField(reconciled, nowMs) }), metadata: { displayData: `⏳ wait 超时（${Math.round(result.waitedMs / 1000)}s），run 仍在运行：可稍后再 wait，或改用 status/stop` } };
       }
       return buildRunStatusPayload(result.state, deps);
     }
@@ -920,7 +898,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
             stopConfirmed: false,
           }),
           metadata: {
-            displayData: t("agentRunStopFailedAlive", String(record.pid)),
+            displayData: `stop failed: process ${record.pid} still alive after SIGKILL`,
           },
         };
       }
@@ -942,7 +920,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       metadata: {
         displayData:
           transition.kind === "contended"
-            ? t("agentRunPendingReconcile", formatStopRunCard(finalRecord.status, labels))
+            ? `${formatStopRunCard(finalRecord.status, labels)} (pending reconcile)`
             : formatStopRunCard(finalRecord.status, labels),
       },
     };

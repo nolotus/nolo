@@ -8,7 +8,9 @@ import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
 import { useMyContentItems } from "app/hooks/useMyContentItems";
 
-import HomeLanding from "./HomeLanding";
+import WelcomeBrandLanding from "./WelcomeBrandLanding";
+import WelcomeSection from "./WelcomeSection";
+import OpenAuditableSection from "./OpenAuditableSection";
 import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
 import HomePaneSkeleton from "./HomePaneSkeleton";
 import QuickChat from "./QuickChat";
@@ -91,8 +93,7 @@ const Home = () => {
           {...withLiteralClass(
             "home-main",
             homeStyles.homeMain,
-            showAuthedHome && homeStyles.homeMainAuthed,
-            !showDesktopOnboarding && !showAuthedHome && !isDesktopApp && homeStyles.homeMainGuestLanding
+            showAuthedHome && homeStyles.homeMainAuthed
           )}
         >
           {showDesktopOnboarding ? (
@@ -151,7 +152,9 @@ const Home = () => {
             </>
           ) : (
             <>
-              {!isDesktopApp && <HomeLanding />}
+              {!isDesktopApp && <WelcomeBrandLanding />}
+              {!isDesktopApp && <WelcomeSection showBrandFraming={false} />}
+              {!isDesktopApp && <OpenAuditableSection />}
 
             </>
           )}

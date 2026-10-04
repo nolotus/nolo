@@ -23,6 +23,7 @@ export const ROUTE_STYLE_FILES = [
     [
       "packages/app/pages/home-motion.css",
       "packages/app/pages/WelcomeSection.css",
+      "packages/app/pages/WelcomeSection.hero.css",
       "packages/app/pages/WelcomeSection.orchestration.css",
       "packages/app/pages/Home.css",
     ],

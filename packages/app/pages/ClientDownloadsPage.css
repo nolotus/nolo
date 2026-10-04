@@ -1,80 +1,59 @@
-/* ─── Client Downloads Page ──────────────────────────────
- * Natural tone matching guest home redesign (2026-10-04):
- * - Evening sky gradient on hero; warm paper background;
- * - Serif headings like a field journal;
- * - Solid ink rounded capsule buttons;
- * - Green reserved for completion / copied state;
- * - Borderless cards (owner, 2026-10-05): surfaces separate by tone and a
- *   soft shadow; only inputs/buttons keep an outline.
- ────────────────────────────────────────────────────────── */
-
+/* ─── Page wrapper ──────────────────────────────────── */
 .client-downloads-page {
-  /* Colors: render/layout/naturePalette.css (day + night). */
-  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
-  --primary: var(--hl-ink);
-  --primaryText: var(--hl-on-ink);
-  --textOnPrimary: var(--hl-on-ink);
-
+  /* border-box：否则 width:100% + 左右 padding 会在移动端把页面撑出横向滚动 */
   box-sizing: border-box;
   width: 100%;
-  min-height: 100%;
-  flex-shrink: 0;
-  background: var(--hl-paper);
-  color: var(--hl-ink);
-}
-
-.client-downloads-page__container {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 1080px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: clamp(20px, 3.5vw, 40px) 24px 64px;
+  padding: clamp(16px, 3vw, 32px) var(--space-4) var(--space-12);
 }
 
 /* ─── Hero ──────────────────────────────────────────── */
 .client-downloads-page__hero {
   position: relative;
-  padding: clamp(36px, 5vw, 56px) clamp(24px, 4vw, 48px);
+  overflow: hidden;
+  padding: clamp(20px, 3.5vw, 32px) clamp(24px, 4vw, 40px);
   border-radius: var(--radius-md);
-  background: var(--hl-sky-panel);
-  box-shadow: 0 12px 32px -20px color-mix(in srgb, var(--hl-shadow-base) 10%, transparent);
+  background:
+    radial-gradient(
+      circle at top left,
+      color-mix(in srgb, var(--primary) 14%, transparent) 0%,
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at right center,
+      color-mix(in srgb, var(--secondary, var(--primary)) 10%, transparent) 0%,
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surfaceRaised, var(--background)) 92%, var(--primaryGhost) 8%) 0%,
+      var(--surfaceInset, var(--backgroundSecondary)) 100%
+    );
+  border: 1px solid color-mix(in srgb, var(--primaryBorder, var(--primary)) 30%, var(--borderSubtle) 70%);
+  box-shadow: 0 16px 40px -32px var(--shadowMedium);
 }
 
+/* Hero content sits in normal flow */
 .client-downloads-page__hero-content {
   position: relative;
-  max-width: 720px;
-}
-
-.client-downloads-page__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 20px;
-  font-size: var(--type-caption);
-  font-weight: 500;
-  color: var(--hl-muted);
-  letter-spacing: 0.02em;
-}
-
-.client-downloads-page__eyebrow svg {
-  color: var(--hl-ink);
 }
 
 .client-downloads-page__title {
   margin: 0;
-  font-family: var(--hl-serif);
-  font-size: var(--type-h1);
-  font-weight: 700;
-  color: var(--hl-ink);
-  line-height: 1.22;
-  letter-spacing: -0.01em;
+  color: var(--text);
+  font-size: var(--type-h2);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 
 .client-downloads-page__subtitle {
-  margin: 16px 0 0;
+  max-width: 640px;
+  margin: var(--space-2) 0 0;
+  color: var(--textSecondary);
   font-size: var(--type-body);
   line-height: 1.6;
-  color: var(--hl-muted);
+  /* 副标题末行只落到一个「CLI。」算寡行：让浏览器把两行配平 */
   text-wrap: balance;
 }
 
@@ -82,8 +61,9 @@
 .client-downloads-page__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px 16px;
-  margin-top: 32px;
+  /* 行距 24：平台卡与整行 Linux 区不是同一层级；列距保持 16 */
+  gap: 24px 16px;
+  margin-top: var(--space-8);
 }
 
 /* ─── Card ──────────────────────────────────────────── */
@@ -91,21 +71,48 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 24px;
+  padding: 20px;
   border-radius: var(--radius-md);
-  background: var(--hl-surface);
-  box-shadow: 0 4px 16px -8px color-mix(in srgb, var(--hl-shadow-base) 6%, transparent);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  background: var(--surfaceCard, var(--background));
+  border: 1px solid var(--borderSubtle);
+  box-shadow: 0 1px 3px var(--shadowLight);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
+}
+
+/* 悬停时露出的品牌色顶部高亮线 */
+.client-download-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  border-radius: 0;
+  background: var(--primary);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.client-download-card:hover::before {
+  opacity: 0.7;
 }
 
 .client-download-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -12px color-mix(in srgb, var(--hl-shadow-base) 12%, transparent);
+  transform: translateY(-3px);
+  border-color: var(--borderStrong);
+  box-shadow: 0 8px 28px -12px var(--shadowMedium), 0 1px 3px var(--shadowLight);
 }
 
 .client-download-card--primary {
-  background: var(--hl-surface);
-  box-shadow: 0 8px 24px -10px color-mix(in srgb, var(--hl-shadow-base) 8%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--borderSubtle));
+  background:
+    radial-gradient(
+      circle at top right,
+      color-mix(in srgb, var(--primary) 8%, transparent) 0%,
+      transparent 60%
+    ),
+    var(--surfaceCard, var(--background));
 }
 
 .client-download-card__primary-badge {
@@ -117,9 +124,10 @@
   padding: 4px 8px;
   font-size: var(--type-micro);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--hl-ink);
-  background: color-mix(in srgb, var(--hl-ink) 6%, transparent);
+  line-height: 1;
+  color: var(--primary);
+  background: var(--primaryGhost);
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
   border-radius: 999px;
 }
 
@@ -131,14 +139,16 @@
   margin-bottom: 16px;
 }
 
+/* 平台图标统一走品牌 token，不再给四个平台各配一套自绘色 */
 .client-download-card__icon {
   width: 44px;
   height: 44px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-xs);
-  background: var(--hl-paper);
-  color: var(--hl-ink);
+  background: var(--primaryGhost);
+  color: var(--primary);
+  border: 1px solid var(--border);
 }
 
 /* Card body */
@@ -146,159 +156,200 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   margin-bottom: 20px;
 }
 
 .client-download-card__title {
   margin: 0;
-  color: var(--hl-ink);
-  font-family: var(--hl-serif);
+  color: var(--text);
   font-size: var(--type-h3);
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
 }
 
 .client-download-card__meta {
   margin: 0;
-  color: var(--hl-muted);
+  color: var(--textSecondary);
   font-size: var(--type-micro);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.5;
+  /* 规格行（TAR.GZ / TAR.ZST / DEB / RPM · X64 · v0.88.0）在窄卡里会折成三行，
+     压成一整行省略，把纵向空间留给操作。 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .client-download-card__desc {
-  margin: 4px 0 0;
-  color: var(--hl-muted);
-  font-size: var(--type-caption);
+  margin: var(--space-1) 0 0;
+  color: var(--textSecondary);
+  font-size: var(--type-small);
   line-height: 1.6;
 }
 
-.client-download-card__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-sizing: border-box;
-  min-height: 44px;
-  padding: 8px 20px;
-  border-radius: 999px;
-  background: var(--hl-ink);
-  color: var(--hl-on-ink);
-  text-decoration: none;
-  font-size: var(--type-small);
-  font-weight: 600;
-  border: 1px solid transparent;
-  transition: background-color 0.16s ease, transform 0.16s ease;
-}
-
-.client-download-card__action:hover {
-  color: var(--hl-on-ink);
-  background: var(--hl-ink-hover);
-  transform: translateY(-1px);
-}
-
-.client-download-card__hint {
-  margin: 8px 0 0;
-  font-size: var(--type-micro);
-  color: var(--hl-muted);
-  line-height: 1.45;
-  text-align: center;
-}
-
-/* ─── Linux package options ──────────────────────────── */
-.client-download-card[data-platform="linux"] {
-  grid-column: 1 / -1;
-}
-
+/* Linux 规格行（TAR.GZ / TAR.ZST / DEB / RPM · x64 · v0.88.0）在窄列里会被省略号吃掉
+   版本号：允许换行 + 配平行长，宁可两行也不截断。 */
 .client-download-card[data-platform="linux"] .client-download-card__meta {
   white-space: normal;
   overflow: visible;
+  text-overflow: clip;
+  text-wrap: balance;
 }
 
+/* Action button — full-width, pinned to card bottom */
+.client-download-card__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* 全局没有 border-box：min-height 只算内容高，加上 8px 上下内边距会算出 56px 的胖按钮 */
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 8px 0;
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
+  text-decoration: none;
+  font-size: var(--type-small);
+  font-weight: 700;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.client-download-card__action svg {
+  color: inherit;
+}
+
+.client-download-card__action:hover {
+  background: color-mix(in srgb, var(--primary) 88%, #ffffff 12%);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.client-download-card__action:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.client-download-card__hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--type-micro);
+  color: var(--textSecondary);
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* ─── Linux package format options ─── */
+/* 桌面端 Linux 卡占满一整行，四种包格式排成 2×2，避免 1/4 宽度把说明和命令挤成碎行 */
 .client-download-card__linux-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 16px;
+  margin-top: var(--space-3);
 }
 
 .client-download-card__linux-option {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  border-radius: var(--radius-sm);
-  background: var(--hl-paper);
-  color: var(--hl-ink);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--radius-xs);
+  background: var(--surfaceInset, var(--backgroundSecondary));
+  border: 1px solid var(--borderSubtle);
+  color: var(--text);
   text-decoration: none;
-  transition: background 0.16s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
 .client-download-card__linux-option:hover {
-  background: var(--hl-surface-sub);
+  background: var(--primaryGhost);
+  border-color: var(--border);
+  transform: translateY(-1px);
 }
 
+/* 格式标签与说明同一行：标签不再单独占一列把说明挤到下一行 */
 .client-download-card__linux-format {
-  display: inline-block;
+  flex-shrink: 0;
   font-size: var(--type-micro);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--hl-ink);
+  letter-spacing: 0.06em;
+  color: var(--primary);
 }
 
 .client-download-card__linux-option__desc {
-  font-size: var(--type-micro);
-  color: var(--hl-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--type-small);
+  color: var(--textSecondary);
   line-height: 1.4;
 }
 
+/* 命令行给一个可横向滚动的框，不做硬折行。
+   order:1 把整行宽的提示框排到下载图标之后，否则图标会被 100% 宽的行挤到第三行。 */
 .client-download-card__linux-option__hint {
-  font-size: var(--type-micro);
-  color: var(--hl-muted);
-  margin-top: 2px;
-}
-
-.client-download-card__linux-option code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  background: color-mix(in srgb, var(--hl-ink) 5%, transparent);
-  padding: 2px 4px;
+  order: 1;
+  width: 100%;
+  padding: 4px 8px;
   border-radius: var(--radius-xs);
+  background: var(--background);
+  border: 1px solid var(--borderSubtle);
+  color: var(--textSecondary);
+  font-size: var(--type-micro);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
-/* ─── CLI Card ──────────────────────────────────────── */
+.client-download-card__linux-option__hint code {
+  /* 覆盖 theme-ui 全局 code 的 em 内边距（会算出 1.2px/4.2px 这类散值） */
+  padding: 0;
+  background: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--type-micro);
+  white-space: nowrap;
+}
+
+.client-download-card__linux-option > svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+/* ─── CLI Card (Full Width) ─────────────────────────── */
 .client-download-cli-card {
+  position: relative;
   display: flex;
-  flex-direction: row;
   align-items: center;
-  justify-content: space-between;
   gap: 24px;
-  padding: 24px 28px;
-  margin-top: 20px;
+  margin-top: 16px;
+  padding: 24px;
   border-radius: var(--radius-md);
-  background: var(--hl-surface);
-  box-shadow: 0 4px 16px -8px color-mix(in srgb, var(--hl-shadow-base) 6%, transparent);
+  background: var(--surfaceCard, var(--background));
+  border: 1px solid var(--borderSubtle);
+  box-shadow: 0 1px 3px var(--shadowLight);
 }
 
 .client-download-cli-card__head {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
+  width: 120px;
 }
 
 .client-download-cli-card__icon {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-xs);
-  background: var(--hl-paper);
-  color: var(--hl-ink);
+  background: var(--primaryGhost);
+  color: var(--primary);
+  border: 1px solid var(--border);
 }
 
 .client-download-cli-card__badges {
@@ -309,32 +360,37 @@
 }
 
 .client-download-cli-card__badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderSubtle);
+  color: var(--textSecondary);
   font-size: var(--type-micro);
-  font-weight: 600;
-  color: var(--hl-muted);
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--hl-ink) 4%, transparent);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .client-download-cli-card__body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
 .client-download-cli-card__title {
   margin: 0;
-  font-family: var(--hl-serif);
-  font-size: var(--type-lead);
+  color: var(--text);
+  font-size: var(--type-h3);
   font-weight: 700;
-  color: var(--hl-ink);
+  line-height: 1.25;
 }
 
 .client-download-cli-card__desc {
-  margin: 8px 0 16px;
-  font-size: var(--type-caption);
-  line-height: 1.55;
-  color: var(--hl-muted);
+  margin: 4px 0 16px;
+  color: var(--textSecondary);
+  font-size: var(--type-small);
+  line-height: 1.6;
 }
 
 .client-download-cli-card__command-box {
@@ -342,21 +398,26 @@
   align-items: center;
   gap: 12px;
   padding: 8px 8px 8px 16px;
-  background: var(--hl-paper);
-  border-radius: var(--radius-sm);
+  background: var(--surfaceInset, var(--backgroundSecondary));
+  border: 1px solid var(--borderSubtle);
+  border-radius: var(--radius-xs);
 }
 
 .client-download-cli-card__command-box code {
   flex: 1;
-  color: var(--hl-ink);
+  /* 覆盖 theme-ui 全局 code 的 em 内边距（会算出 1.2px / 4.2px 这类散值） */
+  padding: 0;
+  background: none;
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: var(--type-caption);
+  font-size: var(--type-micro);
   white-space: nowrap;
   overflow-x: auto;
 }
 
 .command-prompt {
-  color: var(--hl-muted);
+  /* --textTertiary 在这个浅底上是 4.27:1，达不到 4.5 → 用 textSecondary */
+  color: var(--textSecondary);
   margin-right: 8px;
   user-select: none;
 }
@@ -367,25 +428,33 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  min-height: 36px;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background: var(--hl-ink);
-  color: var(--hl-on-ink);
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
   border: none;
-  font-size: var(--type-caption);
-  font-weight: 600;
+  font-size: var(--type-micro);
+  font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.16s ease, transform 0.16s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .client-download-cli-card__copy:hover {
-  background: var(--hl-ink-hover);
+  background: color-mix(in srgb, var(--primary) 88%, #ffffff 12%);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+.client-download-cli-card__copy:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .client-download-cli-card__copy.copied {
-  background: var(--hl-green);
-  color: var(--hl-on-ink);
+  background: var(--primaryGhost);
+  color: var(--primary);
 }
 
 .client-download-cli-card__footer {
@@ -393,71 +462,91 @@
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
   padding-left: 20px;
+  border-left: 1px solid var(--borderSubtle);
 }
 
 .client-download-cli-card__requirement {
+  color: var(--textSecondary);
   font-size: var(--type-micro);
-  color: var(--hl-muted);
+  line-height: 1.5;
 }
 
 .client-download-cli-card__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--primary);
+  text-decoration: none;
   font-size: var(--type-caption);
-  font-weight: 600;
-  color: var(--hl-ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  transition: color 0.16s ease;
+  font-weight: 700;
+  transition: opacity 0.2s ease;
 }
 
 .client-download-cli-card__link:hover {
-  color: var(--hl-blue-text);
+  opacity: 0.8;
 }
 
 /* ─── Browser connector card ────────────────────────── */
+/* 复用 cli-card 骨架（icon | body | footer），下载按钮走左对齐 inline-flex，
+   不撑满整行：connector 只有一个产物，没有 CLI 命令框那种需要满宽输入区的元素。 */
 .client-download-connector-card__action {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 8px;
   box-sizing: border-box;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 20px;
-  border-radius: 999px;
-  background: var(--hl-ink);
-  color: var(--hl-on-ink);
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: var(--textOnPrimary, var(--primaryText, #ffffff));
   text-decoration: none;
-  font-size: var(--type-caption);
-  font-weight: 600;
-  transition: background-color 0.16s ease, transform 0.16s ease;
+  font-size: var(--type-small);
+  font-weight: 700;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.client-download-connector-card__action svg {
+  color: inherit;
 }
 
 .client-download-connector-card__action:hover {
-  color: var(--hl-on-ink);
-  background: var(--hl-ink-hover);
+  background: color-mix(in srgb, var(--primary) 88%, #ffffff 12%);
+  color: #ffffff;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
-/* ─── iOS coming soon ───────────────────────────────── */
+.client-download-connector-card__action:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ─── iOS coming-soon strip ─────────────────────────── */
 .client-downloads-page__soon {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-top: 20px;
-  padding: 16px 24px;
-  border-radius: var(--radius-md);
-  background: var(--hl-paper);
+  margin-top: 16px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--surfaceInset, var(--backgroundSecondary));
+  border: 1px solid var(--borderSubtle);
 }
 
 .client-soon__icon {
+  flex-shrink: 0;
   width: 36px;
   height: 36px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--hl-ink) 5%, transparent);
-  color: var(--hl-muted);
+  background: color-mix(in srgb, var(--textTertiary, #888) 10%, transparent);
+  color: var(--textSecondary);
+  border: 1px solid var(--borderSubtle);
 }
 
 .client-soon__body {
@@ -465,67 +554,211 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .client-soon__title {
+  color: var(--text);
   font-size: var(--type-small);
-  font-weight: 600;
-  color: var(--hl-ink);
+  font-weight: 700;
 }
 
 .client-soon__desc {
-  font-size: var(--type-micro);
-  color: var(--hl-muted);
+  color: var(--textSecondary);
+  font-size: var(--type-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .client-soon__badge {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: 8px;
+  padding: 8px 12px;
   border-radius: 999px;
-  background: var(--hl-surface);
+  background: var(--backgroundTertiary);
+  border: 1px solid var(--borderSubtle);
+  color: var(--textSecondary);
   font-size: var(--type-micro);
-  color: var(--hl-muted);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-/* ─── Page Trust Footer ─────────────────────────────── */
-.client-downloads-page__trust-footer {
-  margin-top: 48px;
-  text-align: center;
+/* ─── Responsive ────────────────────────────────────── */
+@media (min-width: 961px) {
+  /* Linux 有 4 种包格式，桌面端单独占满一整行（1/4 宽度放不下） */
+  .client-download-card[data-platform="linux"] {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 16px;
+  }
+
+  /* 整行宽的卡里把图标 + 标题 + 规格 + 说明压成一行头部：
+     否则标题区块只占左上角，右侧会空出 700px 的无效留白 */
+  .client-download-card[data-platform="linux"] .client-download-card__head {
+    grid-column: 1;
+    grid-row: 1;
+    margin-bottom: 0;
+  }
+
+  .client-download-card[data-platform="linux"] .client-download-card__body {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin-bottom: 0;
+  }
+
+  /* 标题独占首行（与左侧图标同一顶线），规格 + 说明落到第二行：
+     既填满整行宽度，又不把标题/规格/说明混成一行。 */
+  .client-download-card[data-platform="linux"] .client-download-card__title {
+    flex: 0 0 100%;
+  }
+
+  .client-download-card[data-platform="linux"] .client-download-card__desc {
+    margin-top: 0;
+  }
+
+  .client-download-card[data-platform="linux"] .client-download-card__linux-options {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-top: var(--space-4);
+  }
 }
 
-.client-downloads-page__trust-line {
-  margin: 0;
-  font-size: var(--type-caption);
-  color: var(--hl-muted);
-  letter-spacing: 0.02em;
+@media (max-width: 960px) {
+  .client-downloads-page__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  /* 两列/单列时包格式回到单列，避免说明被挤成碎行。
+     minmax(0,1fr) 而不是 1fr：1fr 的最小值是 auto，移动端会被选项内容顶宽 40px 后被卡片裁掉。 */
+  .client-download-card__linux-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-/* ─── Small screens ─────────────────────────────────── */
-@media (max-width: 840px) {
-  .client-download-card__linux-options { grid-template-columns: minmax(0, 1fr); }
-  .client-download-card__linux-option code { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .client-downloads-page {
+    padding-bottom: var(--space-10);
+  }
 
   .client-downloads-page__grid {
     grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .client-downloads-page__soon {
+    flex-wrap: wrap;
   }
 
   .client-download-cli-card {
     flex-direction: column;
     align-items: flex-start;
     padding: 20px;
+    gap: 16px;
   }
 
   .client-download-cli-card__head {
-    flex-direction: row;
     width: 100%;
-    justify-content: space-between;
+    flex-direction: row;
   }
 
+  .client-download-cli-card__badges {
+    flex-direction: row;
+  }
+
+  /* 竖排后 body 是 shrink-to-fit：不给 width/min-width 的话，
+     命令行 code 的 nowrap 会把整卡片撑出屏幕。 */
   .client-download-cli-card__body {
     width: 100%;
+    min-width: 0;
   }
+
+  .client-download-cli-card__command-box {
+    min-width: 0;
+    padding: 8px 8px 8px 12px;
+  }
+
+  .client-download-cli-card__command-box code {
+    min-width: 0;
+  }
+
+  /* ── 卡片紧凑化：图标与标题同排，减少每张卡的高度 ──
+     用 grid 把 head（图标）放左列、body 放右列，按钮跨整行，
+     省掉图标独占一行带来的高度。 */
+  .client-download-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 12px;
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .client-download-card__head {
+    grid-column: 1;
+    margin-bottom: 0;
+  }
+
+  .client-download-card__body {
+    grid-column: 2;
+  }
+
+  /* 按钮、Linux 包列表和提示信息都要跨整行，否则会落进左侧 auto 列并把它撑宽 */
+  .client-download-card__action,
+  .client-download-card__linux-options,
+  .client-download-card__hint {
+    grid-column: 1 / -1;
+  }
+
+  .client-download-card__primary-badge {
+    top: 12px;
+    right: 12px;
+  }
+
+  .client-download-card__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-xs);
+  }
+
+  .client-download-card__body {
+    gap: 2px;
+    margin-bottom: 12px;
+  }
+
+  .client-download-card__desc {
+    margin-top: 2px;
+    font-size: var(--type-small);
+    line-height: 1.5;
+  }
+
+  /* 移动端主操作 ≥44px 热区（标准 §7） */
+  .client-download-card__action {
+    min-height: 44px;
+    padding: 12px 0;
+  }
+
+  .client-download-cli-card__copy {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  .client-download-cli-card__link {
+    min-height: 44px;
+  }
+
+  .client-downloads-page__hero {
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+  }
+
 
   .client-download-cli-card__footer {
     width: 100%;
@@ -534,6 +767,17 @@
     justify-content: space-between;
     padding-left: 0;
     padding-top: 16px;
+    border-left: none;
+    border-top: 1px solid var(--borderSubtle);
+  }
 
+  .client-soon__desc {
+    white-space: normal;
+  }
+
+  .client-soon__badge {
+    margin-left: auto;
   }
 }
+
+

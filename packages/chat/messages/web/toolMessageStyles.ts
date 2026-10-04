@@ -118,16 +118,8 @@ export const toolMessageStyles = stylex.create({
     fontWeight: 500,
     color: "var(--textMuted, var(--textSecondary))",
     flex: 1,
-    minWidth: 0,
     opacity: 0.9,
     transition: "color 0.18s ease, opacity 0.18s ease",
-    // Narrow screens: long agent names / titles wrap instead of clipping —
-    // the row must never overflow horizontally (see rowContext media rules).
-    "@media (max-width: 640px)": {
-      whiteSpace: "normal",
-      overflowWrap: "anywhere",
-      lineHeight: 1.35,
-    },
   },
   chevron: {
     color: "var(--textQuaternary)",

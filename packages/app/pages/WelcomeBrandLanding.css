@@ -1,0 +1,654 @@
+.welcome-brand-landing {
+  --wbl-border: color-mix(in srgb, var(--primary, #1677ff) 24%, transparent);
+  --wbl-line: color-mix(in srgb, var(--text, #111827) 10%, transparent);
+  --wbl-soft: color-mix(in srgb, var(--primary, #1677ff) 6%, transparent);
+  --wbl-muted: color-mix(in srgb, var(--text-secondary, #667085) 82%, transparent);
+  /* The orchestration diagram was originally hosted inside .ws-container,
+   * where these shared theme variables live. BrandLanding now owns that proof,
+   * so re-establish the same contract here instead of relying on DOM ancestry. */
+  --ws-primary: var(--primary, #1677ff);
+  --ws-bg: var(--background, #ffffff);
+  --ws-bg-sub: var(--backgroundSecondary, #f5f5f5);
+  --ws-text: var(--text, #000);
+  --ws-text-sub: var(--textSecondary, #666);
+  --ws-border: var(--border, #e5e5e5);
+  /* Keep the reused tab transition self-contained too. Home currently inherits
+   * these from .home-layout, but BrandLanding should not depend on that ancestry. */
+  --home-motion-duration: 0.36s;
+  --home-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --home-motion-delay: 0.05s;
+  overflow-x: clip;
+}
+
+.wbl-shell {
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.wbl-hero {
+  position: relative;
+  padding: 56px 0 48px;
+  text-align: center;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% -18%, color-mix(in srgb, var(--primary, #1677ff) 9%, transparent), transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--primary, #1677ff) 3.5%, transparent), transparent 52%, color-mix(in srgb, var(--primary, #1677ff) 1.5%, transparent));
+}
+
+.wbl-kicker,
+.wbl-section-kicker {
+  color: var(--primary, #1677ff);
+  font-size: var(--type-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.wbl-kicker {
+  margin-bottom: 16px;
+}
+
+.wbl-title {
+  max-width: 860px;
+  margin: 0 auto;
+  font-size: var(--type-display);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+.wbl-description {
+  max-width: 840px;
+  margin: 24px auto 0;
+  color: var(--text-secondary);
+  font-size: var(--type-lead);
+  line-height: 1.72;
+  text-wrap: pretty;
+}
+
+.wbl-continuity {
+  margin: 12px auto 0;
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 700;
+}
+
+.wbl-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+
+.wbl-btn {
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  transition: transform 160ms ease, opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.wbl-btn:hover {
+  transform: translateY(-1px);
+}
+
+.wbl-btn-primary {
+  color: #fff;
+  background: var(--primary, #1677ff);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--primary, #1677ff) 18%, transparent);
+}
+
+.wbl-btn-secondary {
+  color: var(--text);
+  border: 1px solid var(--wbl-border);
+  background: color-mix(in srgb, var(--background, #fff) 94%, transparent);
+}
+
+.wbl-contrasts {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px;
+  margin: 28px auto 0;
+  padding: 0;
+  max-width: 760px;
+  color: var(--text-secondary);
+  font-size: var(--type-small);
+}
+
+.wbl-contrasts li {
+  position: relative;
+  padding-left: 16px;
+}
+
+.wbl-contrasts li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.63em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary, #1677ff);
+  opacity: 0.7;
+}
+
+.wbl-product-proof {
+  position: relative;
+  z-index: 2;
+  /* 不再用负 margin 叠进 hero：hero::after 的分隔线会穿过本节标题（基线即存在的 P0） */
+  margin-top: 0;
+  padding: 40px 0 72px;
+}
+
+.wbl-product-proof-head {
+  max-width: 760px;
+  margin: 0 auto 20px;
+  text-align: center;
+}
+
+.wbl-product-proof-head h2 {
+  margin: 12px auto 0;
+  color: var(--text);
+  font-size: var(--type-h2);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.wbl-product-proof-head p {
+  max-width: 720px;
+  margin: 12px auto 0;
+  color: var(--text-secondary);
+  font-size: var(--type-body);
+  line-height: 1.7;
+}
+
+.wbl-orchestration-shell {
+  position: relative;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--wbl-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--background, #fff) 98%, transparent), color-mix(in srgb, var(--primary, #1677ff) 2%, var(--background, #fff))),
+    var(--background, #fff);
+  box-shadow: 0 28px 70px color-mix(in srgb, var(--text, #111827) 8%, transparent);
+  overflow: hidden;
+}
+
+.wbl-orchestration-shell::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 4%, color-mix(in srgb, var(--primary, #1677ff) 76%, transparent), transparent 96%);
+}
+
+.wbl-orchestration-shell .ws-orchestration-tabs {
+  margin-top: 12px;
+  padding-inline: 24px;
+}
+
+.wbl-orchestration-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin-top: 0;
+}
+
+.wbl-orchestration-shell .ws-orchestration-tab-body {
+  padding-inline: clamp(24px, 4vw, 48px);
+  padding-bottom: 36px;
+}
+
+.wbl-mobile-proof {
+  display: none;
+}
+
+.wbl-principles {
+  padding: 24px 0 72px;
+}
+
+.wbl-principles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--wbl-line);
+  border-bottom: 1px solid var(--wbl-line);
+}
+
+.wbl-principle {
+  position: relative;
+  min-height: 300px;
+  padding: 32px 32px 32px;
+}
+
+.wbl-principle + .wbl-principle {
+  border-left: 1px solid var(--wbl-line);
+}
+
+.wbl-principle-index {
+  display: block;
+  color: var(--wbl-muted);
+  font-size: var(--type-micro);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+}
+
+.wbl-principle-proof {
+  display: inline-block;
+  margin-top: 40px;
+  color: var(--primary, #1677ff);
+  font-size: var(--type-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.wbl-principle h2 {
+  margin: 12px 0 0;
+  color: var(--text);
+  font-size: var(--type-h2);
+  line-height: 1.2;
+  letter-spacing: -0.028em;
+}
+
+.wbl-principle p {
+  margin: 16px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small);
+  line-height: 1.78;
+}
+
+.wbl-balance {
+  padding: 0 0 80px;
+}
+
+.wbl-balance-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  gap: 52px;
+  align-items: stretch;
+  padding: clamp(32px, 4vw, 44px) 0;
+  border-top: 1px solid var(--wbl-line);
+  border-bottom: 1px solid var(--wbl-line);
+}
+
+.wbl-balance-copy {
+  align-self: center;
+}
+
+.wbl-balance-copy h2 {
+  margin: 12px 0 0;
+  color: var(--text);
+  font-size: var(--type-h2);
+  line-height: 1.12;
+  letter-spacing: -0.038em;
+  text-wrap: balance;
+}
+
+.wbl-balance-copy p {
+  margin: 20px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--type-body);
+  line-height: 1.75;
+}
+
+.wbl-balance-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  min-width: 0;
+  border-left: 1px solid var(--wbl-line);
+}
+
+.wbl-balance-column {
+  min-width: 0;
+  padding: 16px 28px 12px;
+}
+
+.wbl-balance-column + .wbl-balance-column {
+  border-left: 1px solid var(--wbl-line);
+}
+
+.wbl-balance-column h3 {
+  margin: 0 0 20px;
+  color: var(--text);
+  font-size: var(--type-caption);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.wbl-balance-column-human h3 {
+  color: var(--primary, #1677ff);
+}
+
+.wbl-balance-column-human li {
+  color: var(--text);
+  font-weight: var(--fontWeight-medium, 500);
+}
+
+.wbl-balance-column ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-small);
+  line-height: 1.55;
+}
+
+.wbl-balance-column li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wbl-line);
+}
+
+.wbl-balance-column li:last-child {
+  border-bottom: 0;
+}
+
+/* The brand layer owns the hero and primary orchestration proof; WelcomeSection
+ * renders without its brand framing on Home (showBrandFraming={false}), so only
+ * the container spacing needs to be neutralized here. */
+.welcome-brand-landing + .ws-page {
+  padding-top: 0;
+}
+
+.welcome-brand-landing + .ws-page .ws-container {
+  padding-top: 0;
+}
+
+@media (max-width: 900px) {
+  .wbl-principles-grid,
+  .wbl-balance-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .wbl-principle {
+    min-height: 0;
+  }
+
+  .wbl-principle + .wbl-principle {
+    border-left: 0;
+    border-top: 1px solid var(--wbl-line);
+  }
+
+  .wbl-principle-proof {
+    margin-top: 16px;
+  }
+
+  .wbl-balance-layout {
+    gap: 28px;
+  }
+
+  .wbl-balance-columns {
+    border-left: 0;
+    border-top: 1px solid var(--wbl-line);
+    padding-top: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .wbl-shell {
+    width: min(100% - 24px, 1120px);
+  }
+
+  .wbl-hero {
+    padding: 40px 0 40px;
+    display: flex;
+    align-items: center;
+  }
+
+  .wbl-hero::after {
+    width: calc(100% - 48px);
+  }
+
+  .wbl-kicker {
+    margin-bottom: 12px;
+    font-size: var(--type-micro);
+  }
+
+  .wbl-title {
+    /* 324px 容不下「一个目标，多个 AI，」整行（约 338px），浏览器只能三行折行
+       并把「多个」拆开；标题比正文列宽 16px（两侧仍留 ≥20px），换行落回语义点。 */
+    max-width: calc(100% + 16px);
+    margin-inline: -8px;
+    font-size: var(--type-display);
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+    /* balance 会把两行内容匀成三行；移动端要语义断行（第一行收在「AI，」），
+       pretty 不允许末行孤词且不强行匀行 */
+    text-wrap: pretty;
+  }
+
+  .wbl-description {
+    max-width: 34rem;
+    margin-top: 16px;
+    font-size: var(--type-body);
+    line-height: 1.62;
+  }
+
+  .wbl-continuity,
+  .wbl-btn-secondary,
+  .wbl-contrasts {
+    display: none;
+  }
+
+  .wbl-actions {
+    margin-top: 24px;
+  }
+
+  .wbl-btn-primary {
+    width: min(100%, 360px);
+    min-height: 52px;
+    border-radius: var(--radius-xs);
+  }
+
+  .wbl-product-proof {
+    margin-top: 0;
+    padding: 44px 0 48px;
+  }
+
+  .wbl-product-proof-head {
+    margin: 0 2px 20px;
+    text-align: left;
+  }
+
+  .wbl-product-proof-head h2 {
+    max-width: 12ch;
+    margin: 8px 0 0;
+    font-size: var(--type-h2);
+    line-height: 1.08;
+  }
+
+  .wbl-product-proof-head p {
+    margin: 12px 0 0;
+    font-size: var(--type-small);
+    line-height: 1.55;
+  }
+
+  .wbl-orchestration-shell {
+    border: 0;
+    border-radius: var(--radius-md);
+    box-shadow: 0 18px 42px color-mix(in srgb, var(--text, #111827) 7%, transparent);
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-tabs {
+    margin-top: 8px;
+    padding-inline: 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-tab-body {
+    padding: 8px 16px 16px;
+  }
+
+  .wbl-orchestration-shell .ws-orchestration-example-label,
+  .wbl-orchestration-shell .ws-workflow-desc--lead,
+  .wbl-orchestration-shell .ws-orchestration-stage,
+  .wbl-orchestration-shell .wf-mobile-steps {
+    display: none;
+  }
+
+  .wbl-mobile-proof {
+    display: block;
+    padding: 8px 0 2px;
+  }
+
+  .wbl-mobile-proof-task {
+    padding: 20px;
+    border: 1px solid var(--wbl-line);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--background, #fff) 96%, var(--primary, #1677ff));
+  }
+
+  .wbl-mobile-proof-task > span {
+    display: block;
+    color: var(--primary, #1677ff);
+    font-size: var(--type-micro);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .wbl-mobile-proof-task h3 {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: var(--type-h3);
+    line-height: 1.18;
+    letter-spacing: -0.028em;
+  }
+
+  .wbl-mobile-proof-task p {
+    margin: 8px 0 0;
+    color: var(--text-secondary);
+    font-size: var(--type-small);
+    line-height: 1.55;
+  }
+
+  .wbl-mobile-proof-route {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .wbl-mobile-proof-step {
+    min-width: 0;
+    padding: 12px 8px;
+    border: 1px solid var(--wbl-line);
+    border-radius: var(--radius-xs);
+    background: var(--background, #fff);
+  }
+
+  .wbl-mobile-proof-step span {
+    display: block;
+    color: var(--wbl-muted);
+    font-size: var(--type-micro);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wbl-mobile-proof-step strong {
+    display: block;
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--type-micro);
+    line-height: 1.25;
+    text-overflow: ellipsis;
+  }
+
+  .wbl-principles {
+    padding: 8px 0 40px;
+  }
+
+  .wbl-principles-grid {
+    border-bottom: 0;
+  }
+
+  .wbl-principle {
+    padding: 20px 2px;
+  }
+
+  .wbl-principle-index {
+    display: none;
+  }
+
+  .wbl-principle-proof {
+    margin-top: 0;
+  }
+
+  .wbl-principle h2 {
+    margin-top: 8px;
+    font-size: var(--type-h3);
+  }
+
+  .wbl-principle p {
+    margin-top: 8px;
+    font-size: var(--type-small);
+    line-height: 1.58;
+  }
+
+  .wbl-balance {
+    padding-bottom: 40px;
+  }
+
+  .wbl-balance-layout {
+    gap: 20px;
+    padding: 24px 0 0;
+    border-bottom: 0;
+  }
+
+  .wbl-balance-copy h2 {
+    margin-top: 8px;
+    font-size: var(--type-h2);
+  }
+
+  .wbl-balance-copy p {
+    margin-top: 12px;
+    font-size: var(--type-small);
+    line-height: 1.58;
+  }
+
+  .wbl-balance-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 16px;
+  }
+
+  .wbl-balance-column {
+    padding: 12px;
+    border: 1px solid var(--wbl-line);
+    border-radius: var(--radius-xs);
+  }
+
+  .wbl-balance-column + .wbl-balance-column {
+    margin-top: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--wbl-line);
+    border-left: 1px solid var(--wbl-line);
+  }
+
+  .wbl-balance-column h3 {
+    margin-bottom: 8px;
+    font-size: var(--type-micro);
+  }
+
+  .wbl-balance-column ul {
+    font-size: var(--type-micro);
+    line-height: 1.35;
+  }
+
+  .wbl-balance-column li {
+    padding: 8px 0;
+  }
+}

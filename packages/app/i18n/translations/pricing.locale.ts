@@ -101,6 +101,10 @@ export default {
             a: "No. Recharged points stay valid permanently."
           },
           {
+            q: "Is it more cost-effective than subscriptions?",
+            a: "Usually yes. Nolo uses transparent pay-as-you-go pricing based on actual token usage, with no subscription lock-in."
+          },
+          {
             q: "Can I get a refund after recharging?",
             a: "Yes, but only for points you purchased yourself; bonus or gifted points are non-refundable. Refunds cover the unused portion of purchased points—consumed and gifted points are not returned. Digital goods: consumed credits are not refundable, and any refund is net of the channel fee already incurred plus a $1.00 refund processing fee."
           },
@@ -214,6 +218,10 @@ export default {
           {
             q: "积分会过期吗？",
             a: "不会。充值的积分长期有效，永不过期。"
+          },
+          {
+            q: "比包月订阅更划算吗？",
+            a: "通常更划算。Nolo 按实际 Token 消耗透明计费，无订阅绑定，只为实际用量付费。"
           },
           {
             q: "充值后能退款吗？",
@@ -331,6 +339,10 @@ export default {
             a: "不會。充值的積分長期有效，永不過期。"
           },
           {
+            q: "比包月訂閱更划算嗎？",
+            a: "通常更划算。Nolo 按實際 API 成本透明計費，沒有訂閱溢價，只為實際消耗付費。"
+          },
+          {
             q: "充值後能退款嗎？",
             a: "支援，但僅限您自行充值的積分；活動或註冊贈送的積分不可退。退款按充值積分的未消耗部分返還，已消耗與贈送部分不退。數位商品：交付後已消耗部分不支援退款；可退款部分需扣除已發生的通道手續費與 $1.00 退款處理費。"
           },
@@ -444,6 +456,10 @@ export default {
           {
             q: "ポイントに有効期限はありますか？",
             a: "いいえ。チャージされたポイントは長期的に有効で、期限はありません。"
+          },
+          {
+            q: "月額サブスクリプションよりお得ですか？",
+            a: "通常はお得です。Nolo は実際の API コストに基づいて透明性の高い課金を行い、実際の消費分だけを支払います。"
           },
           {
             q: "チャージ後に返金できますか？",

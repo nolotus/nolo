@@ -25,7 +25,6 @@ import { isProduction } from "app/utils/env";
 import { isCloudEdition } from "identity";
 import { toast } from "app/utils/toast";
 import { registerDatabaseActionToast } from "database/actions/actionToast";
-import { installLinkPreviewInterceptor } from "app/layout/linkPreviewInterceptor";
 
 registerDatabaseActionToast({
   success: (message) => toast.success(message),
@@ -250,8 +249,33 @@ if (isDesktopShell) {
 
   // Desktop "click-to-preview": clicking any cross-origin http(s) link opens it
   // in the LocalPreviewSplit iframe instead of navigating away or launching an
-  // external browser.
-  installLinkPreviewInterceptor();
+  // external browser. The agent just replies with a URL — no tool, no skill
+  // needed. Same-origin links keep SPA routing; Cmd/Ctrl+click (and middle
+  // click) keep the external-browser escape hatch.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute("href") ?? "";
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
+      if (url.origin === window.location.origin) return; // SPA router handles these
+      event.preventDefault();
+      void import("app/appInspector/appInspectorStore").then((m) => {
+        m.setPreview(true, url.toString());
+      });
+    },
+    true
+  );
 
   // 劫持 console 桥接到 Electrobun 主进程
   const sendToHost = (window as any).__electrobunSendToHost;

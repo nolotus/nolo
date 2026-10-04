@@ -182,22 +182,12 @@
         }
 
         .quick-chat-container[data-surface="home-primary"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
-.quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+.quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
           background: var(--surfaceRaised, var(--background));
           transform: translateY(-1px);
-          /* 聚焦时物理描边提亮到 primary 70%，光环改为实色 2px + 浮起阴影，
-             亮/暗主题下聚焦反馈都清晰可见（2026-10-03 视觉修复）。
-
-             第三分支是裸 .quick-chat-box 兜底：message-input__box / 无
-             data-surface 容器也共享这张卡，默认表面聚焦同样需要强反馈。
-             7 层 :not(#\#) 把特异性抬到 (0,10,0)——StyleX 伪态类（注入在
-             entry.css 末尾）同属性竞争里，同级即被源码顺序反杀，必须严格
-             高于对手才能稳定生效（见 stylexEscapeHatchCascade 闸门）。 */
-          border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
           box-shadow:
-            0 0 0 2px var(--primary),
-            0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent);
+            0 0 0 3px var(--focusRing),
+            0 12px 32px -16px color-mix(in srgb, var(--shadowMedium) 18%, transparent);
         }
         .quick-chat-box.drag-over {
           border-color: var(--primaryBorder, var(--primary));

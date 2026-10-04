@@ -38,7 +38,6 @@ import {
 } from "../askChoicePersistence";
 import { safeParse, StatusIcon, withLiteralClass, formatToolDuration } from "./toolMessageShared";
 import {
-  buildAgentRunPresentation,
   buildRunStreamingAgentHandoffPresentation,
   normalizeToolDisplaySummary,
 } from "../toolPresentation";
@@ -54,14 +53,6 @@ import {
   formatToolRowHeaderSummary,
 } from "./toolDisplayName";
 import { isQuietDetailTool } from "./toolCallPresentation";
-
-/** Agent-run family: dedicated localized summary/detail rows instead of the
- * generic JSON-blob body (results stay expandable in the row body). */
-const AGENT_RUN_TOOL_NAMES = new Set([
-  "startAgentRun",
-  "controlAgentRun",
-  "listAgents",
-]);
 
 const normalizeParallelPreview = (value: unknown) => {
   const text = asTrimmedString(value);
@@ -95,12 +86,15 @@ const TR_HEADER_TOGGLE_STYLE: React.CSSProperties = {
 };
 
 export const ToolMessageItem = memo(
-  ({ message, readOnly = false }: { message: any; readOnly?: boolean }) => {
+  ({ message, readOnly = false, conversationTodoEnabled = true }: { message: any; readOnly?: boolean; conversationTodoEnabled?: boolean }) => {
     const { t } = useTranslation("chat");
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
 
     const { content, toolName, isStreaming, toolPayload, dbKey } = message;
+    // The host passes this flag explicitly so this renderer does not add a new
+    // Redux dependency while the state layer is being retired.
+    const todoEnabled = conversationTodoEnabled;
     const rawData = useMemo(() => safeParse(content), [content]);
 
     const isRepairableFailure =
@@ -146,48 +140,15 @@ export const ToolMessageItem = memo(
         rawData?.summary ||
         toolName ||
         "";
-      const translate = createToolNameTranslator((key, options) =>
-        String(t(key, options as any)),
-      );
-      // Agent-run family: never fall through to the raw-JSON content blob —
-      // build a localized first-line summary from real payload fields only.
-      if (AGENT_RUN_TOOL_NAMES.has(toolName || "")) {
-        const agentRun = buildAgentRunPresentation({
-          toolName,
-          rawData,
-          toolPayload,
-          inputArgs: extractToolCallArgs(toolPayload),
-          isStreaming,
-          isError,
-          translate,
-        });
-        return agentRun.titleText;
-      }
       return formatToolRowHeaderSummary({
         toolName,
         toolArgs: extractToolCallArgs(toolPayload),
         existingSummary: normalizeToolDisplaySummary(summarySource, toolName),
-        translate,
-      });
-    }, [isRepairableFailure, rawData, activeRun, toolPayload, toolName, t, isStreaming, isError]);
-
-    // Localized detail rows for the agent-run family (agent / run id / count /
-    // action + status). Rendered above the expandable raw output — never
-    // serialized back into model messages.
-    const agentRun = useMemo(() => {
-      if (!AGENT_RUN_TOOL_NAMES.has(toolName || "")) return undefined;
-      return buildAgentRunPresentation({
-        toolName,
-        rawData,
-        toolPayload,
-        inputArgs: extractToolCallArgs(toolPayload),
-        isStreaming,
-        isError,
         translate: createToolNameTranslator((key, options) =>
           String(t(key, options as any)),
         ),
       });
-    }, [toolName, rawData, toolPayload, isStreaming, isError, t]);
+    }, [isRepairableFailure, rawData, activeRun, toolPayload, toolName, t]);
 
     const renderRunProgress = () => {
       if (!activeRun || activeRun.toolName !== "appDeploy") return null;
@@ -337,6 +298,13 @@ export const ToolMessageItem = memo(
       }
     };
 
+    // --- conversation Todo ---
+    // Keep all hooks above unconditional so toggling the setting cannot change
+    // hook order for an already-mounted tool row.
+    if (toolName === "setTodoList" && !todoEnabled) {
+      return null;
+    }
+
     // --- ask_user ---
     if (toolName === "ask_user" || rawData?.type === "ask_user") {
       if (readOnly) return null; // 只读模式不显示交互选择框
@@ -391,9 +359,6 @@ export const ToolMessageItem = memo(
         toolPayload,
         isStreaming,
         isError,
-        translate: createToolNameTranslator((key, options) =>
-          String(t(key, options as any)),
-        ),
       });
 
       return (
@@ -437,7 +402,7 @@ export const ToolMessageItem = memo(
               <div  {...withLiteralClass("tr-body handoff-tool__body", toolStyles.body, toolStyles.handoffBody, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.body)} data-hook="messages-esc-tr-body">
                 {!handoff.inline && (
                   <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                    <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.childDialogLabel", "子 dialog")}</span>
+                    <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>子 dialog</span>
                     {handoff.targetDialogKey ? (
                       <button
                         type="button"
@@ -456,12 +421,12 @@ export const ToolMessageItem = memo(
                         <LuArrowRight size={14} aria-hidden="true" />
                       </button>
                     ) : (
-                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{t("agentRun.noSeparateDialog", "未单独创建")}</span>
+                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>未单独创建</span>
                     )}
                   </div>
                 )}
                 <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.targetAgentLabel", "目标 Agent")}</span>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>目标 Agent</span>
                   <span
                     {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}
                     title={handoff.agentKey || undefined}
@@ -470,13 +435,13 @@ export const ToolMessageItem = memo(
                   </span>
                 </div>
                 <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.inputSummaryLabel", "输入摘要")}</span>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>输入摘要</span>
                   <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>
                     {handoff.inputSummary}
                   </span>
                 </div>
                 <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.statusLabel", "状态")}</span>
+                  <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>状态</span>
                   <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>
                     {handoff.statusLabel}
                   </span>
@@ -580,32 +545,6 @@ export const ToolMessageItem = memo(
 
           {!collapsed && (
             <div data-hook="messages-esc-tr-body" {...withLiteralClass("tr-body", toolStyles.body, toolName === "appDeploy" && toolStyles.bodyAppDeploy, toolMessageStatusStyles[statusStr as keyof typeof toolMessageStatusStyles]?.body)}>
-              {agentRun && (
-                <div {...withLiteralClass("agent-run-detail", toolStyles.handoffBody)} data-hook="messages-esc-agent-run-detail">
-                  {agentRun.agentText ? (
-                    <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                      <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{agentRun.agentLabel}</span>
-                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{agentRun.agentText}</span>
-                    </div>
-                  ) : null}
-                  {agentRun.runText ? (
-                    <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                      <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{agentRun.runLabel}</span>
-                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{agentRun.runText}</span>
-                    </div>
-                  ) : null}
-                  {agentRun.countText ? (
-                    <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                      <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.resultLabel", "结果")}</span>
-                      <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{agentRun.countText}</span>
-                    </div>
-                  ) : null}
-                  <div {...withLiteralClass("handoff-tool__detail-row", toolStyles.handoffDetailRow)}>
-                    <span {...withLiteralClass("handoff-tool__label", toolStyles.handoffLabel)}>{t("agentRun.statusLabel", "状态")}</span>
-                    <span {...withLiteralClass("handoff-tool__value", toolStyles.handoffValue)}>{agentRun.statusLabel}</span>
-                  </div>
-                </div>
-              )}
               {showConfirmBanner && activeRun && (
                 <div  {...withLiteralClass("confirm-banner", toolStyles.confirmBanner)}>
                   <div  {...withLiteralClass("cb-text", toolStyles.confirmText)}>
@@ -678,6 +617,7 @@ export const ToolMessageItem = memo(
                 openPreview={(id, name) => setPreview({ id, name })}
                 navigateToPage={(id) => navigate(`/${id}`)}
                 toolArgs={extractToolCallArgs(toolPayload)}
+                conversationTodoEnabled={todoEnabled}
               />
             </div>
           )}
