@@ -35,7 +35,6 @@ import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
 import UpdateAgentToolCard from "./UpdateAgentToolCard";
 import AppDeployCard from "./AppDeployCard";
-import TodoCard from "./TodoCard";
 import ApplyLineEditsPreviewViewer from "./ApplyLineEditsPreviewViewer";
 import { DiffViewer } from "./DiffViewer";
 import { ToolProps, guessLanguageFromPath } from "./ToolMessageTypes";
@@ -1853,7 +1852,6 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   execShell: (props) => <ExecShellViewer {...props} />,
   fetchWebpage: (props) => <FetchViewer {...props} />,
   fetch_webpage: (props) => <FetchViewer {...props} />,
-  setTodoList: (props) => <TodoCard {...props} />,
 };
 
 type ToolName = keyof typeof RENDERERS;
@@ -1886,15 +1884,12 @@ const LazyJsonDump: React.FC<{ data: unknown }> = ({ data }) => {
 };
 
 const ToolMessageContent: React.FC<ToolMessageContentProps> = (props) => {
-  const conversationTodoEnabled = props.conversationTodoEnabled !== false;
   const Component = props.toolName ? RENDERERS[props.toolName] : null;
   // Only normalize once; skip JSON.stringify when a specialized renderer exists.
   const normalizedRawData = useMemo(
     () => parseToolRawData(props.rawData),
     [props.rawData]
   );
-
-  if (props.toolName === "setTodoList" && !conversationTodoEnabled) return null;
 
   return (
     <div  {...withLiteralClass("t-content-root", contentStyles.contentRoot)}>

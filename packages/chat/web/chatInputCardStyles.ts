@@ -12,15 +12,24 @@ import { agentThemeTokens } from "app/theme/agentTheme.stylex";
  *（agentTheme.stylex.ts，light/dark 值与原两条声明逐一相等，值内
  * var(--shadowLight) 等仍消费 GlobalThemeController 的 :root 变量）。
  *
- * 逃生舱（chatStylexEscapeHatch.css，hook: chat-esc-chat-input-card）：
- * - `:focus-within` 与基础/card shadow 存在 background/border-color/
- *   box-shadow 同名属性竞争，按源码顺序下沉 unlayered 保持级联。
+ * `:focus-within` 已收进 StyleX（2026-10-03）：原先靠
+ * chatStylexEscapeHatch.css 的 unlayered 规则承载，因果链不直观且
+ * 与同名属性靠源码顺序决胜；现改为 `:focus-within` 伪类直接挂在
+ * card 上，并升级为「更突出的物理描边 + 双段聚焦光环」：
+ * - borderColor 提到 var(--primary) 70% 混入（原 60%），亮暗主题都更醒目；
+ * - boxShadow 第一段 0 0 0 2px var(--primary) 实色光环（原 20% 透明
+ *   3px 晕），第二段浮起阴影 0 8px 24px -4px，聚焦即有明确视觉反馈。
  */
 export const chatInputCardStyles = stylex.create({
   card: {
     display: "flex",
     flexDirection: "column",
-    backgroundColor: "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
+    backgroundColor: {
+      default:
+        "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
+      ":focus-within":
+        "var(--surfaceInset, var(--surfaceRaised, var(--background)))",
+    },
     borderRadius: "var(--radius-lg, var(--radius-md, 12px))",
     padding: "var(--space-2) var(--space-4)",
     position: "relative",
@@ -28,8 +37,16 @@ export const chatInputCardStyles = stylex.create({
       "border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease",
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--borderMuted, var(--borderLight))",
-    boxShadow: agentThemeTokens.chatInputCardShadow,
+    borderColor: {
+      default: "var(--borderMuted, var(--borderLight))",
+      ":focus-within":
+        "color-mix(in srgb, var(--primary) 70%, var(--border, #e4e4e7))",
+    },
+    boxShadow: {
+      default: agentThemeTokens.chatInputCardShadow,
+      ":focus-within":
+        "0 0 0 2px var(--primary), 0 8px 24px -4px color-mix(in srgb, var(--primary) 28%, transparent), 0 4px 12px -6px var(--shadowMedium)",
+    },
     overflow: "hidden",
     width: "100%",
     boxSizing: "border-box",

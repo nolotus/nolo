@@ -40,10 +40,6 @@ import {
     controlAgentRunFunctionSchema,
     controlAgentRunFunc,
 } from "./controlAgentRunTool";
-import {
-    setTodoListFunctionSchema,
-    setTodoListFunc,
-} from "./setTodoListTool";
 
 import type { ToolDefinition } from "../index";
 
@@ -201,22 +197,6 @@ export const agentToolDefinitions: ToolDefinition[] = [
         behavior: "data",
         uiGroup: "agent",
         riskLevel: "medium",
-        costLevel: "low",
-        defaultConsent: "auto",
-    },
-    {
-        id: "setTodoList",
-        schema: setTodoListFunctionSchema,
-        executor: setTodoListFunc,
-        description: {
-            name: "setTodoList",
-            description:
-                "设置/整体更新当前对话的任务列表（Kimi 式 Todo 列表）。用于多步骤任务进度追踪与展示。",
-            category: "计划与编排",
-        },
-        behavior: "data",
-        uiGroup: "agent",
-        riskLevel: "low",
         costLevel: "low",
         defaultConsent: "auto",
     },

@@ -67,10 +67,20 @@ export const INTERACTION_REQUIRED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "ask_user",
 ]);
 
-/** All tool names a subtask must NOT receive (orchestration + interaction). */
+/**
+ * 自身突变工具 — 仅限主交互会话使用。子任务必须剥离：
+ * - 防止自身作为 subagent 派发时，并发修改同一份 Agent 配置（updateSelf / updateAgent）。
+ */
+export const SELF_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "updateSelf",
+  "updateAgent",
+]);
+
+/** All tool names a subtask must NOT receive (orchestration + interaction + self-mutation). */
 export const SUBTASK_REMOVED_TOOL_NAMES: ReadonlySet<string> = new Set([
   ...ORCHESTRATION_TOOL_NAMES,
   ...INTERACTION_REQUIRED_TOOL_NAMES,
+  ...SELF_MUTATION_TOOL_NAMES,
 ]);
 
 /**

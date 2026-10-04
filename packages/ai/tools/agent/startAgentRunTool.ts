@@ -18,6 +18,7 @@
 //   - Otherwise (web/RN/desktop/CLI --server): dispatches runAgentBackground
 //     with waitForCompletion:false, which posts to /api/agent/run {background:true}
 
+import { RUN_TITLE_MAX, normalizeRunTitle } from "./runTitle";
 import { runAgentBackground } from "ai/agent/runAgentBackground";
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -30,6 +31,8 @@ import {
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
 import { checkCredentialFanout } from "./credentialFanoutGuard";
+import { asTrimmedNonEmptyStringArray } from "core/stringArray";
+import { selectById } from "database/dbSlice";
 
 // ── 并发扇出凭证隔离（web/server 路径的进程内批次注册表）─────────────────
 //
@@ -97,7 +100,9 @@ export function buildStartAgentRunFunctionSchema(opts?: {
         properties: {
             agentKey: {
                 type: "string",
-                description: "要启动的 Agent 的可运行 dbKey，必须是 listAgents 返回的 agentKey 字段（owned: agent-<userId>-<id>；public: agent-pub-<id>）或 readAgent 返回的 agentKey。只接受精确 dbKey，不接受 name/handle/bare id。",
+                description:
+                    "要启动的 Agent 的可运行 dbKey，必须是 listAgents 返回的 agentKey 字段（owned: agent-<userId>-<id>；public: agent-pub-<id>）或 readAgent 返回的 agentKey。" +
+                    "只接受精确 dbKey，不接受 name/handle/bare id。可选；省略或传 'self' 时自动使用当前 AgentKey（派发自身执行细分子任务）。",
             },
             task: {
                 type: "string",
@@ -111,6 +116,13 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             agentName: {
                 type: "string",
                 description: "可选。由 listAgents/readAgent 得到的可读 Agent 名称，用于 TUI 运行卡片展示。",
+            },
+            title: {
+                type: "string",
+                description:
+                    `可选。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
+                    "本地 TUI 的运行区用它标识这个 run（服务端 Web 路径只在返回值里回显，不持久化）。同一个 agent 并发多个 run 时名字完全相同、" +
+                    "brief 开头又常是同样的套话，强烈建议填写；不填则不显示标题，不会自动从任务正文生成。",
             },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
@@ -143,6 +155,14 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                     "可选。显式允许同一凭证组并发派发。默认 false。在用户授权同一凭据多任务并发或确认上游支持并发时使用。",
                 default: false,
             },
+            readOnly: {
+                type: "boolean",
+                description:
+                    "可选。为 true 时移除专用写/改/删工具（writeFile/editFile/deleteMemory 等），" +
+                    "保留读文件、搜索与 shell，适合 reviewer/审计/探测。注意：shell 仍可写文件，" +
+                    "这不是沙箱，brief 里仍需写明只读要求。默认 false；只由此参数显式声明，不从 task 文本推断。",
+                default: false,
+            },
             trackTodo: {
                 type: "boolean",
                 description:
@@ -172,7 +192,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
             },
         },
-        required: ["agentKey", "task"],
+        required: ["task"],
     },
     };
 }
@@ -181,10 +201,12 @@ export function buildStartAgentRunFunctionSchema(opts?: {
 export const startAgentRunFunctionSchema = buildStartAgentRunFunctionSchema();
 
 interface StartAgentRunArgs {
-    agentKey: string;
+    agentKey?: string;
     task: string;
     input?: any;
     agentName?: string;
+    /** 短标题（展示用，归一化后落进 run 记录）。 */
+    title?: string;
     batchId?: string;
     /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
     credentialGroup?: string;
@@ -192,10 +214,27 @@ interface StartAgentRunArgs {
     allowUnknownCredential?: boolean;
     /** 显式允许同一凭据组并发派发；默认 false。 */
     allowCredentialConcurrency?: boolean;
+    /** 只读子任务：移除写/改/删类工具，保留读与 shell；默认 false。 */
+    readOnly?: boolean;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
     parentDialogId?: string;
+}
+
+export function resolveCurrentAgentKeyForStartRun(
+    thunkApi: any,
+): string | undefined {
+    try {
+        const state = thunkApi?.getState?.();
+        if (!state) return undefined;
+        const currentDialogKey = getActiveDialogKey();
+        if (!currentDialogKey) return undefined;
+        const dialogConfig = selectById(state, currentDialogKey) as any;
+        return asTrimmedNonEmptyStringArray(dialogConfig?.cybots)[0];
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -228,12 +267,23 @@ export async function startAgentRunFunc(
         explicitBatchId ??
         `batch-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
 
-    if (!agentKey) {
-        throw new Error("startAgentRun: 缺少 agentKey 参数。");
+    const rawAgentKey = typeof agentKey === "string" ? agentKey.trim() : "";
+    const currentAgentKey = resolveCurrentAgentKeyForStartRun(thunkApi);
+    const effectiveAgentKey =
+        (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
+            ? (currentAgentKey ?? rawAgentKey)
+            : rawAgentKey;
+
+    if (!effectiveAgentKey) {
+        throw new Error("startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。");
     }
     if (!task || typeof task !== "string") {
         throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     }
+
+    const isSelfDispatch = !!currentAgentKey && effectiveAgentKey === currentAgentKey;
+    const effectiveAllowCredentialConcurrency =
+        args.allowCredentialConcurrency ?? (isSelfDispatch ? true : false);
 
     // 并发扇出凭证隔离：仅对**显式 batchId**（调用方在组织并发扇出）生效；
     // 未显式分批的派发各自持有新批次 id，互不干扰。credentialGroup 缺省视为
@@ -244,9 +294,9 @@ export async function startAgentRunFunc(
         const active = batchFanoutRegistry.get(explicitBatchId) ?? [];
         const verdict = checkCredentialFanout({
             active,
-            candidate: { agentKey, credentialGroup: args.credentialGroup },
+            candidate: { agentKey: effectiveAgentKey, credentialGroup: args.credentialGroup },
             allowUnknownCredential: args.allowUnknownCredential === true,
-            allowCredentialConcurrency: args.allowCredentialConcurrency === true,
+            allowCredentialConcurrency: effectiveAllowCredentialConcurrency,
         });
         if (!verdict.allowed) throw new Error(verdict.message);
     }
@@ -269,13 +319,14 @@ export async function startAgentRunFunc(
     try {
         const bgResult = await dispatch(
             runAgentBackground({
-                agentKey,
+                agentKey: effectiveAgentKey,
                 userInput: content,
                 // wait 缺省必须归一为 false：runAgentBackground 只对
                 // waitForCompletion === false 走「拿到 dialogId 立即返回」快路径，
                 // undefined 会误入同步等待分支。
                 waitForCompletion: wait === true,
                 runKind: "subtask",
+                ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
             })
         ).unwrap();
@@ -303,7 +354,7 @@ export async function startAgentRunFunc(
             const entries = batchFanoutRegistry.get(explicitBatchId) ?? [];
             entries.push({
                 runId,
-                agentKey,
+                agentKey: effectiveAgentKey,
                 ...(typeof args.credentialGroup === "string" && args.credentialGroup.trim()
                     ? { credentialGroup: args.credentialGroup.trim() }
                     : {}),
@@ -315,12 +366,13 @@ export async function startAgentRunFunc(
         // rawData carries only real identity fields; the display fallback chain
         // lives in resolveRunLabel so a key never masquerades as a name.
         const resolvedName = agentName?.trim() || bgResult.agentName || bgResult.name;
-        const identity = { agentName: resolvedName, agentKey, runId };
+        const identity = { agentName: resolvedName, agentKey: effectiveAgentKey, runId };
         // A clipped copy of the task rides along so every renderer can say what
         // this run is *for*. Without it two concurrent runs are indistinguishable
         // on screen — same card, same status, different work. Clipped rather than
         // full: this is display text, and the caller already holds the original.
         const taskPreview = task.replace(/\s+/g, " ").trim().slice(0, TASK_PREVIEW_MAX);
+        const title = normalizeRunTitle(args.title);
 
         return {
             rawData: {
@@ -334,6 +386,7 @@ export async function startAgentRunFunc(
                 batchId: effectiveBatchId,
                 ...(resolvedName ? { agentName: resolvedName } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
+                ...(title ? { title } : {}),
                 payloadMetrics,
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
