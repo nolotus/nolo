@@ -265,8 +265,8 @@ function buildRunStatusPayload(
  * 里**仍未终态**的 run 做凭证组冲突检测：
  * - 候选或任一活跃 run 的 credentialGroup 未知 → 拒绝（未知 ≠ 独立，
  *   无法证明不共用上游 key），除非显式 allowUnknownCredential:true；
- * - 两侧 credentialGroup 已知且相同 → 同一凭证并发扇出，拒绝，除非显式
- *   allowCredentialConcurrency:true（调用方确认该凭证支持并发）；
+ * - 两侧 credentialGroup 已知且相同 → 同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），除非显式
+ *   allowCredentialConcurrency:false（调用方显式收紧禁止并发）；
  * - 已知且不同 → 放行。
  *
  * 返回值是解析出的候选 credentialGroup（可能 undefined），由调用方写进
@@ -282,6 +282,7 @@ async function assertCredentialFanoutAllowed(
     /** 调用方（模型）照抄 listAgents 的 credentialGroup；解析器失败时的兜底。 */
     credentialGroup?: string;
     allowUnknownCredential?: boolean;
+    /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
     allowCredentialConcurrency?: boolean;
   }
 ): Promise<string | undefined> {
@@ -322,7 +323,7 @@ async function assertCredentialFanoutAllowed(
     active,
     candidate: { agentKey: args.agentKey, credentialGroup: candidateGroup },
     allowUnknownCredential: args.allowUnknownCredential === true,
-    allowCredentialConcurrency: args.allowCredentialConcurrency === true,
+    allowCredentialConcurrency: args.allowCredentialConcurrency,
   });
   if (!verdict.allowed) throw new Error(verdict.message);
   return candidateGroup;
@@ -341,9 +342,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
     if (!task) throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     const nowMs = resolveNowMs(deps);
 
-    const isSelfDispatch = !!deps.currentAgentKey && agentKey === deps.currentAgentKey;
     const effectiveAllowCredentialConcurrency =
-      args.allowCredentialConcurrency ?? (isSelfDispatch ? true : false);
+      args.allowCredentialConcurrency ?? true;
 
     const message = buildDelegatedTaskContent(task, args.input);
     const payloadMetrics = calculateDelegatedPayloadMetrics(task, args.input, message);
@@ -380,8 +380,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? args.batchId.trim()
         : undefined;
 
-    // 并发扇出凭证隔离：同 batch / 同父对话并发时，未知凭证组与同凭证组冲突
-    // 一律拒绝（除非显式 allowUnknownCredential / allowCredentialConcurrency）。
+    // 并发扇出凭证隔离：同 batch / 同父对话并发时，同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），
+    // 除非显式 allowCredentialConcurrency: false 收紧；未知凭证组冲突一律拒绝（除非显式 allowUnknownCredential）。
     // 解析结果写进 run 记录。
     const parentDialogId =
       typeof args.parentDialogId === "string" && args.parentDialogId.trim()

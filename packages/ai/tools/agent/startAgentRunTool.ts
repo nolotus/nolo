@@ -88,7 +88,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
     name: "startAgentRun",
     description:
         "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，派发后直接收尾等终态通知，禁止轮询；controlAgentRun 用于控制（叫停/追加指令）与异常诊断。" +
-        "【派发纪律】通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；严禁在同一凭证上并发扇出，仅跨不同 credentialGroup 扇出；最强私有通道留给审查，执行优先使用低成本通道。" +
+        "【派发纪律】通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），未知凭证需串行或显式确认风险；最强私有通道留给审查，执行优先使用低成本通道。" +
         (supportsWait
             ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
               "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
@@ -134,7 +134,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 description:
                     "可选。批次 id，用于把多个并行 run 归为一组，便于后续 controlAgentRun(list, batchId=...) 按批查询。" +
                     "未传时自动生成一个并在返回值中带回，调用方无需先创建。" +
-                    "同一 batchId 内的并发派发会做凭证组隔离检查：credentialGroup 相同或未知的并发 run 会被拒绝。",
+                    "同一 batchId 内的并发派发会做凭证组隔离检查：同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）；未知凭证的并发 run 会被拒绝。",
             },
             credentialGroup: {
                 type: "string",
@@ -152,8 +152,8 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             allowCredentialConcurrency: {
                 type: "boolean",
                 description:
-                    "可选。显式允许同一凭证组并发派发。默认 false。在用户授权同一凭据多任务并发或确认上游支持并发时使用。",
-                default: false,
+                    "可选。同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），传 false 显式收紧为禁止同凭证并发。默认 true。",
+                default: true,
             },
             readOnly: {
                 type: "boolean",
@@ -212,7 +212,7 @@ interface StartAgentRunArgs {
     credentialGroup?: string;
     /** 显式确认未知凭证并发风险后强制放行；默认 false。 */
     allowUnknownCredential?: boolean;
-    /** 显式允许同一凭据组并发派发；默认 false。 */
+    /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
     allowCredentialConcurrency?: boolean;
     /** 只读子任务：移除写/改/删类工具，保留读与 shell；默认 false。 */
     readOnly?: boolean;
@@ -281,13 +281,13 @@ export async function startAgentRunFunc(
         throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     }
 
-    const isSelfDispatch = !!currentAgentKey && effectiveAgentKey === currentAgentKey;
     const effectiveAllowCredentialConcurrency =
-        args.allowCredentialConcurrency ?? (isSelfDispatch ? true : false);
+        args.allowCredentialConcurrency ?? true;
 
     // 并发扇出凭证隔离：仅对**显式 batchId**（调用方在组织并发扇出）生效；
     // 未显式分批的派发各自持有新批次 id，互不干扰。credentialGroup 缺省视为
-    // 未知——未知与任何条目并发都拒绝，不静默放行。
+    // 未知——未知与任何条目并发都拒绝，不静默放行；
+    // 相同已知 credentialGroup 默认允许并发，仅显式 allowCredentialConcurrency: false 收紧拒绝。
     if (explicitBatchId) {
         const nowMs = Date.now();
         pruneBatchFanoutRegistry(nowMs);
