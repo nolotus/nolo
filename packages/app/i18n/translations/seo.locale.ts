@@ -32,13 +32,13 @@ export interface SeoLocaleEntry {
 
 const seoLocale: Record<Language, SeoLocaleEntry> = {
   [Language.EN]: {
-    title: "Nolo — Let Claude, GPT and DeepSeek work as your own AI team",
+    title: "Nolo — Your AI team hands off the work",
     description:
-      "Nolo turns the AI subscriptions and API keys you already pay for into one team of agents you define. They split tasks, work in parallel, and discuss and review each other — on your own computer. Open-source client.",
+      "Define persistent agents once, then let them plan, build, review and hand off to each other automatically. You choose the model for every step and which of your connected computers runs it. Your subscriptions or BYOK. Open-source client.",
     home: {
-      title: "Nolo — Let Claude, GPT and DeepSeek work as your own AI team",
+      title: "Nolo — Your AI team hands off the work",
       description:
-        "Bring Claude, GPT, DeepSeek and more into one workspace. Define each agent’s role and model, let them work in parallel and review each other, and keep conclusions as pages and docs. The client is open source and runs locally.",
+        "Agents you define keep their role, model and memory. When one finishes, the next wakes up automatically: plan, build, independent review, ship. Pick the model for each step and run it on a Mac, Linux box or server you have connected with nolo connect; machine-local models need to be signed in on that machine. Your subscriptions or BYOK. Open-source client.",
     },
     pricing: {
       title: "Pricing | Pay for What You Use with Nolo Credits",
@@ -67,13 +67,13 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     },
   },
   [Language.ZH_CN]: {
-    title: "Nolo — 让 Claude、GPT、DeepSeek 组成你自己的 AI 团队",
+    title: "Nolo — 你的 AI 团队，自己接力把活干完",
     description:
-      "用你已经付费的 AI 订阅和 API key，组成一支由你定义的 Agent 团队：拆任务、并行干活、互相讨论和 review，全程跑在你自己的电脑上。客户端开源。",
+      "Agent 定义一次就长期保留角色、模型和记忆。做完一棒自动唤醒下一棒：规划、实现、独立审查、交付。每一棒用哪个模型、在你连上的哪台电脑上跑，由你来定。用你的订阅或 BYOK，客户端开源。",
     home: {
-      title: "Nolo — 让 Claude、GPT、DeepSeek 组成你自己的 AI 团队",
+      title: "Nolo — 你的 AI 团队，自己接力把活干完",
       description:
-        "把 Claude、GPT、DeepSeek 等放进同一个工作台。定好每个 Agent 的角色和模型，让它们并行干活、互相 review，结论沉淀成页面和文档。客户端开源，本地运行。",
+        "你的 Agent 有固定角色和持久记忆，做完自动交给下一个，另一家模型负责审查。可以指定在已通过 nolo connect 连上的 Mac、Linux 或服务器上执行，本地登录的模型需在那台机器上授权有效。用你的订阅或 BYOK，客户端开源。",
     },
     pricing: {
       title: "Nolo 定价 | 用多少，付多少",

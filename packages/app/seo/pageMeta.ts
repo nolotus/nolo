@@ -1,8 +1,8 @@
 import { canonicalizeNoloServerUrl } from "core/noloServerUrl";
 
 export const DEFAULT_SITE_ORIGIN = "https://nolo.chat";
-export const DEFAULT_OG_IMAGE_PATH_EN = "/public/nolo-og-card-en.jpg";
-export const DEFAULT_OG_IMAGE_PATH_ZH = "/public/nolo-og-card-zh.jpg";
+export const DEFAULT_OG_IMAGE_PATH_EN = "/public/nolo-og-card-v2-en.jpg";
+export const DEFAULT_OG_IMAGE_PATH_ZH = "/public/nolo-og-card-v2-zh.jpg";
 export const DEFAULT_OG_IMAGE_PATH = DEFAULT_OG_IMAGE_PATH_EN;
 export const DEFAULT_PAGE_ROBOTS = "index, follow";
 
