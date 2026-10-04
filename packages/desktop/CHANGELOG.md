@@ -1,4 +1,13 @@
 
+## 0.98.2
+
+## 0.98.2 (2026-10-04)
+
+### Bug Fixes
+
+* **desktop:** document electrobun >= 2.0.2 minimum version requirement ([8601d5f](https://github.com/nolotus/bun-nolo/commit/8601d5f4a025e41bf66e04e31e1ee2f24ebb8e1d))
+
+
 ## 0.98.1
 
 ## 0.98.1 (2026-10-04)
