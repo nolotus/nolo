@@ -521,7 +521,7 @@ const MainLayout: React.FC = () => {
               </PageContentErrorBoundary>
               {renderSiteFooter && (
                 <Suspense fallback={null}>
-                  <SiteFooter variant={isGuestHome ? "quiet" : "scene"} />
+                  <SiteFooter />
                 </Suspense>
               )}
             </main>

@@ -20,14 +20,6 @@ export interface SeoLocaleEntry {
     title: string;
     description: string;
   };
-  about: {
-    title: string;
-    description: string;
-  };
-  contact: {
-    title: string;
-    description: string;
-  };
 }
 
 const seoLocale: Record<Language, SeoLocaleEntry> = {
@@ -38,15 +30,15 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
     home: {
       title: "Nolo — Your AI team hands off the work",
       description:
-        "Agents you define keep their role, model and memory. When one finishes, the next wakes up automatically: plan, build, independent review, ship. Pick the model for each step and run it on a Mac, Linux box or server you have connected with nolo connect; machine-local models need to be signed in on that machine. Your subscriptions or BYOK. Open-source client.",
+        "Define persistent agents once, then let them plan, build, review and hand off to each other automatically. You choose the model for every step and which of your connected computers runs it. Your subscriptions or BYOK. Open-source client.",
     },
     pricing: {
-      title: "Pricing | Pay for What You Use with Nolo Credits",
+      title: "Nolo Pricing | Pay as You Go, No Subscriptions",
       description:
-        "Start free, then top up credits only when you need more. Compare model costs, understand how credits work, and unlock advanced features without being locked into a subscription.",
+        "Start free upon signup. Points are billed transparently by actual model token usage. Compare model costs and recharge anytime with no subscription lock-in.",
     },
     explore: {
-      title: "AI Plaza | Explore Public AI Agents on Nolo.Chat",
+      title: "Nolo AI Plaza | Discover Public AI Agents and Workflows",
       description:
         "Browse public AI agents, compare their specialties, and discover real workflows built by the Nolo community before starting your own workspace.",
     },
@@ -54,16 +46,6 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "Community Shares | See What People Build with Nolo.Chat",
       description:
         "Explore public chats, docs, apps, and shared outputs from the Nolo community to see how people use AI agents for real work.",
-    },
-    about: {
-      title: "About Nolo.Chat | Autonomous Multi-Agent Workspace & AI Platform",
-      description:
-        "Learn about Nolo.Chat's mission to transform how humans work with AI through local-first autonomous multi-agent orchestration, persistent memory, and multi-model collaboration.",
-    },
-    contact: {
-      title: "Contact Us | Nolo.Chat Support, Feedback & Community",
-      description:
-        "Get in touch with the Nolo.Chat team for technical support, partnerships, bug reports, and feedback. Connect via email, community, and social channels.",
     },
   },
   [Language.ZH_CN]: {
@@ -90,16 +72,6 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       description:
         "浏览社区公开分享的对话、文档、应用与成果，了解真实用户如何用 Nolo 完成研究、写作、开发与自动化任务。",
     },
-    about: {
-      title: "关于 Nolo.Chat | 自主多 Agent 协作 AI 工作台",
-      description:
-        "了解 Nolo.Chat 的使命与技术愿景：通过本地优先架构、自主多 Agent 协作网络、持久长期记忆与多模型协同，打造真正替你把事做完的 AI 团队。",
-    },
-    contact: {
-      title: "联系我们 | Nolo.Chat 官方支持与社区反馈",
-      description:
-        "获取 Nolo.Chat 官方技术支持、商务合作、问题反馈与社区交流入口。欢迎通过邮件与官方社区随时与我们联系。",
-    },
   },
   [Language.ZH_HANT]: {
     title: "Nolo — 讓 Claude、GPT、DeepSeek 組成你自己的 AI 團隊",
@@ -124,16 +96,6 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "Nolo 社群分享 | 看別人如何用 AI 把事做完",
       description:
         "瀏覽社群公開分享的對話、文件、應用與成果，了解真實使用者如何用 Nolo 完成研究、寫作、開發與自動化任務。",
-    },
-    about: {
-      title: "關於 Nolo.Chat | 自主多 Agent 協作 AI 工作台",
-      description:
-        "了解 Nolo.Chat 的使命與技術願景：透過本地優先架構、自主多 Agent 協作網絡、持久長期記憶與多模型協同，打造真正替你把事做完的 AI 團隊。",
-    },
-    contact: {
-      title: "聯絡我們 | Nolo.Chat 官方支援與社群反饋",
-      description:
-        "獲取 Nolo.Chat 官方技術支援、商務合作、問題反饋與社群交流入口。歡迎透過郵件與官方社群隨時與我們聯絡。",
     },
   },
   [Language.JA]: {
@@ -160,16 +122,6 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       description:
         "コミュニティが公開した対話、文書、アプリ、成果物を見ながら、Nolo が実務でどう使われているかを確認できます。",
     },
-    about: {
-      title: "Nolo.Chat について | 自律型マルチエージェント AI ワークスペース",
-      description:
-        "Nolo.Chat のビジョンと技術：ローカルファースト設計、複数 Agent の自律協調、長期記憶、マルチモデル連携を通じて、仕事を実際に仕上げる AI チームを提供します。",
-    },
-    contact: {
-      title: "お問い合わせ | Nolo.Chat 公式サポート＆コミュニティ",
-      description:
-        "Nolo.Chat の公式テクニカルサポート、提携、フィードバック窓口。メールや公式コミュニティからお気軽にお問い合わせください。",
-    },
   },
   [Language.KO]: {
     title: "Nolo — Claude, GPT, DeepSeek를 나만의 AI 팀으로",
@@ -194,16 +146,6 @@ const seoLocale: Record<Language, SeoLocaleEntry> = {
       title: "커뮤니티 공유 | Nolo.Chat으로 완성된 실제 작업 사례",
       description:
         "Nolo 커뮤니티에서 공개 공유한 대화, 문서, 앱, 작업 결과물을 둘러보고 실제 업무에 AI를 활용하는 방법을 확인하세요.",
-    },
-    about: {
-      title: "Nolo.Chat 소개 | 자율형 멀티 에이전트 AI 워크스페이스",
-      description:
-        "Nolo.Chat의 미션과 비전: 로컬 우선 아키텍처, 자율적인 멀티 에이전트 협업, 지속적인 장기 기억, 다중 모델 조율을 통해 실제 업무를 완수하는 AI 팀을 구축합니다.",
-    },
-    contact: {
-      title: "문의하기 | Nolo.Chat 공식 지원 및 커뮤니티",
-      description:
-        "Nolo.Chat 기술 지원, 제휴, 피드백 및 커뮤니티 채널 안내. 이메일 및 공식 채널을 통해 언제든지 문의해 주세요.",
     },
   },
 };

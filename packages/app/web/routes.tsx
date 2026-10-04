@@ -38,8 +38,6 @@ const QuickStartGuidePage = lazy(() => import("app/pages/QuickStartGuidePage"));
 const PrivacyPolicyPage = lazy(() => import("app/pages/PrivacyPolicyPage"));
 const TermsOfServicePage = lazy(() => import("app/pages/TermsOfServicePage"));
 const AUPPage = lazy(() => import("app/pages/AUPPage"));
-const AboutPage = lazy(() => import("app/pages/AboutPage"));
-const ContactPage = lazy(() => import("app/pages/ContactPage"));
 const BrowserPage = lazy(() => import("app/pages/browser-workbench/BrowserPage"));
 const BrowserFixturePage = lazy(
   () => import("app/pages/browser-workbench/BrowserFixturePage"),
@@ -165,14 +163,6 @@ export const routes = () => [
       {
         path: "aup",
         element: withSuspense(<AUPPage />, "AIGC使用规范"),
-      },
-      {
-        path: "about",
-        element: withSuspense(<AboutPage />, "关于我们"),
-      },
-      {
-        path: "contact",
-        element: withSuspense(<ContactPage />, "联系我们"),
       },
       {
         path: AppRoutePaths.CLIENT_DOWNLOADS.slice(1),

@@ -1,66 +1,153 @@
+/* ─── Quick Start Guide Page ─────────────────────────────
+ * Natural tone matching guest home redesign (2026-10-04):
+ * - Evening sky gradient on hero; warm paper background;
+ * - Serif headings like a field journal;
+ * - Quiet cards on warm white (#fffdf8) with soft shadow;
+ * - Solid ink capsule primary button, thin bordered secondary.
+ ────────────────────────────────────────────────────────── */
+
 .QuickStartGuidePage {
-  max-width: 880px;
+  --hl-ink: #1f2733;
+  --hl-muted: #5b6472;
+  --hl-paper: #f7f3ec;
+  --hl-warm: #f3e3d0;
+  --hl-line: rgba(31, 39, 51, 0.1);
+  --hl-blue: #2879cd;
+  --hl-green: #3f7a4c;
+  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  flex-shrink: 0;
+  background: #f7f3ec;
+  color: #1f2733;
+}
+
+.QuickStartGuidePage__container {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 32px 20px 96px;
+  padding: clamp(20px, 3.5vw, 40px) 24px 80px;
 }
 
 .QuickStartGuidePage__hero {
-  margin-bottom: 28px;
+  position: relative;
+  padding: clamp(36px, 5vw, 52px) clamp(24px, 4vw, 44px);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #d3dfeb 0%, #e9e4df 48%, #f1d2b4 82%, #eebf98 100%);
+  box-shadow: 0 12px 32px -20px rgba(31, 39, 51, 0.1);
+  margin-bottom: 32px;
 }
 
 .QuickStartGuidePage__eyebrow {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--textSecondary);
+  letter-spacing: 0.04em;
+  color: #5b6472;
 }
 
 .QuickStartGuidePage__title {
-  margin: 0 0 12px;
-  font-size: clamp(32px, 4vw, 44px);
-  line-height: 1.05;
-  color: var(--text);
+  margin: 0 0 14px;
+  font-family: var(--hl-serif);
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  color: #1f2733;
 }
 
 .QuickStartGuidePage__description {
-  max-width: 720px;
+  max-width: 680px;
   margin: 0;
-  font-size: 17px;
-  line-height: 1.7;
-  color: var(--textSecondary);
+  font-size: clamp(15px, 1.8vw, 17px);
+  line-height: 1.65;
+  color: #5b6472;
+  text-wrap: balance;
 }
 
 .QuickStartGuidePage__sections {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .QuickStartGuidePage__section {
-  padding: 22px 24px;
-  border-radius: 18px;
-  background: var(--backgroundSecondary);
-  box-shadow: 0 12px 28px var(--shadowLight);
+  padding: clamp(22px, 3vw, 28px) clamp(22px, 3.5vw, 32px);
+  border-radius: 20px;
+  background: #fffdf8;
+  border: 1px solid rgba(31, 39, 51, 0.08);
+  box-shadow: 0 4px 16px -8px rgba(31, 39, 51, 0.06);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.QuickStartGuidePage__section:hover {
+  border-color: rgba(31, 39, 51, 0.18);
+  box-shadow: 0 10px 24px -10px rgba(31, 39, 51, 0.1);
 }
 
 .QuickStartGuidePage__sectionTitle {
   margin: 0 0 14px;
+  font-family: var(--hl-serif);
   font-size: 20px;
-  color: var(--text);
+  font-weight: 700;
+  color: #1f2733;
+  letter-spacing: -0.01em;
 }
 
 .QuickStartGuidePage__list {
   margin: 0;
-  padding-left: 20px;
-  color: var(--textSecondary);
+  padding-left: 22px;
+  color: #5b6472;
 }
 
 .QuickStartGuidePage__listItem {
   margin-bottom: 10px;
   line-height: 1.7;
+  font-size: 15px;
 }
 
 .QuickStartGuidePage__listItem:last-child {
   margin-bottom: 0;
+}
+
+.QuickStartGuidePage__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 36px;
+  justify-content: center;
+}
+
+.QuickStartGuidePage__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.QuickStartGuidePage__btnPrimary {
+  background: #1f2733;
+  color: #fffefa;
+}
+
+.QuickStartGuidePage__btnPrimary:hover {
+  background: #2f3a48;
+}
+
+.QuickStartGuidePage__btnSecondary {
+  color: #1f2733;
+  border: 1px solid rgba(31, 39, 51, 0.25);
+  background: rgba(255, 254, 250, 0.5);
+}
+
+.QuickStartGuidePage__btnSecondary:hover {
+  background: #fffdf8;
+  border-color: rgba(31, 39, 51, 0.5);
 }
