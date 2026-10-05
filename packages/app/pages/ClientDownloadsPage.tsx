@@ -20,6 +20,7 @@ import type { IconType } from "react-icons";
 import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import "./ClientDownloadsPage.css";
 import "render/layout/naturePalette.css";
+import "render/layout/noloSerifFont.css";
 
 type LinuxPackageLinks = {
   installer: string;
