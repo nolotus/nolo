@@ -439,6 +439,14 @@ const browserStore = createAppStore({
   tokenManager: webTokenManager,
   preloadedState,
 });
+// Cloud web only: local/desktop bootstrap adapters return null. These tokens
+// restore UI identity, not trust/permissions; server validation is unchanged.
+// React hydration still reads Core.getServerSnapshot(), the logged-out SSR view.
+if (bootstrappedAuthState) {
+  browserStore.accountSessionRuntime?.core.initializeFromTokens(
+    bootstrappedAuthState.tokens
+  );
+}
 delete window.__PRELOADED_STATE__;
 
 const domNode = document.getElementById("root") as HTMLElement;
