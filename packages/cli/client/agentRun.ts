@@ -115,10 +115,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: string;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: string;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -1741,7 +1741,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: Parameters<typeof sumPlatformCredits>[0] }
+      error as { usageRecords?: RunAgentTurnResult["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1816,7 +1816,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
+): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;

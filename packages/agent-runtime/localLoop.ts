@@ -82,6 +82,7 @@ import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
 import { createTurnCompactionController } from "./localAutoCompaction";
 import { isolateInboundContent } from "./inboundCredentialVault";
 import { scrubSecrets } from "./secretScrubber";
+import { buildRequestTelemetry, shortHash, type ProviderCallTelemetry } from "./providerCallTelemetry";
 import {
   resolveCompressionTriggerRatio,
   truncateToolOutputForContext,
@@ -461,6 +462,39 @@ function extractUserInputText(content: AgentRuntimeMessageContent): string {
     .flatMap((part) => (part?.type === "text" && part.text ? [part.text] : []))
     .join("\n")
     .trim();
+}
+
+function safeToolNamesHash(names: string[]): string | undefined {
+  try {
+    return names.length ? shortHash([...names].sort().join(",")) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function finalizeCallTelemetry(
+  base: Partial<ProviderCallTelemetry> | undefined,
+  result: AgentRuntimeResult,
+  round: number,
+  startedAt: number,
+): ProviderCallTelemetry | undefined {
+  try {
+    const endTs = Date.now();
+    const toolCalls = (result.tool_calls ?? [])
+      .map((call: any) => call?.function?.name ?? call?.name)
+      .filter((name: unknown): name is string => typeof name === "string");
+    const providerToolsHash = result.toolsHash;
+    return {
+      ...base,
+      ...(typeof providerToolsHash === "string" ? { toolsHash: providerToolsHash } : {}),
+      round,
+      endTs,
+      durationMs: endTs - startedAt,
+      ...(toolCalls.length ? { toolCalls } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function attachDialogIdToError(error: unknown, dialogId: string | undefined) {
@@ -956,6 +990,7 @@ export async function runLocalAgentTurn(
       }
       return injected;
     };
+    const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
     while (true) {
       partialContent = "";
       throwIfAborted(input);
@@ -1001,6 +1036,14 @@ export async function runLocalAgentTurn(
       // 否则 provider 不会回调，读数恒 0，退化为旧的总时长语义。
       let llmStreamActivity = 0;
 
+      // 缓存遥测（fail-open）：请求侧数字/哈希在调用前计算一次，O(消息数)。
+      const callStartedAt = Date.now();
+      const requestTelemetry = buildRequestTelemetry({
+        // 无 dialogId 的新对话用本 turn 唯一键，避免不同新对话共用一个槽误报漂移。
+        dialogKey: input.continueDialogId || newDialogTelemetryKey,
+        messages: requestMessages,
+        toolsHash: safeToolNamesHash(agentTools),
+      });
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1057,6 +1100,7 @@ export async function runLocalAgentTurn(
         usage: result.usage,
         model: result.model,
         provider: result.provider,
+        telemetry: finalizeCallTelemetry(requestTelemetry, result, round, callStartedAt),
       });
       // 熔断保护：检查模型是否陷入重复复读输出/工具调用死循环
       const assistantGuardVerdict = progressGuard.observeAssistantResponse(result);

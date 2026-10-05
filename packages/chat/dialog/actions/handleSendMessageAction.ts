@@ -314,7 +314,7 @@ export const handleSendMessageAction = async (
             runtimeOptions: {
                 ...args.runtimeOptions,
                 ...(selectedRuntimeTarget && (selectedRuntimeTarget.kind === "server" || selectedRuntimeTarget.kind === "machine")
-                    ? { runtimeTarget: selectedRuntimeTarget }
+                    ? { runtimeTarget: selectedRuntimeTarget as { kind: "server" | "machine"; machineId?: string } }
                     : {}),
             },
         });

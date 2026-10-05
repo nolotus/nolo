@@ -84,7 +84,7 @@ export async function runAgentReadCommand(
       : {};
     const quota = fresh[result.agentKey] ?? recordQuota;
     const rawRecordObj = result.record as Record<string, unknown> | null;
-    const credAvail = await readCredentialAvailability(env).catch(() => ({}));
+    const credAvail = await readCredentialAvailability(env).catch(() => ({} as Record<string, number>));
     const credGroup = typeof rawRecordObj?.apiKeyRef === "string" ? rawRecordObj.apiKeyRef : undefined;
     const credDeadline = credGroup ? credAvail[credGroup] : undefined;
     const recordDeadline = typeof rawRecordObj?.nextAvailableAt === "number" ? rawRecordObj.nextAvailableAt : undefined;

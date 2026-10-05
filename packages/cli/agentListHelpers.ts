@@ -224,7 +224,7 @@ export async function listLocalCachedAgents(args: {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;
       }
-      if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
+      if ((key as string).startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
         publicKeys.add(key);
       }
     }
@@ -284,7 +284,7 @@ export async function listRemotePublicAgents(args: {
     .filter((record: any) => record?.isPublic === true)
     .map((record: any) => normalizeListedAgent({ ...record, userId: record?.userId || "system" }))
     .filter((agent: ListedAgent | null): agent is ListedAgent => agent != null)
-    .map((agent) => ({ ...agent, publicRecordExists: true }));
+    .map((agent: ListedAgent) => ({ ...agent, publicRecordExists: true }));
 }
 
 export async function listRemoteAgents(args: {

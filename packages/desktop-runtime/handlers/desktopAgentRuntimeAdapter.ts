@@ -1,3 +1,4 @@
+import { resolveSessionKey } from "../../agent-runtime/sessionIdentity";
 import { isSystemBuiltinTrustedAgentKey } from "core/builtinAgents";
 import type {
   AgentRuntimeAgentConfig,
@@ -708,6 +709,7 @@ export async function resolveDesktopConfiguredProvider(args: {
             accessToken,
             accountId: credential?.accountId,
             openAiBody: openAiBody(messages),
+            sessionKey: resolveSessionKey({ dialogId: options?.dialogId }),
             fetchImpl,
           });
           if (result.status !== 200) {

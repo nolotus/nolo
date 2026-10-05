@@ -95,6 +95,7 @@ export type TurnUsageLedger = {
     usage?: Record<string, unknown>;
     model?: string;
     provider?: string;
+    telemetry?: import("./providerCallTelemetry").ProviderCallTelemetry;
   }): void;
   /** 带外摘要调用用量入账（undefined 为 no-op）。 */
   addCompaction(usage: Record<string, unknown> | undefined): void;
@@ -120,7 +121,7 @@ export function createTurnUsageLedger(args: {
   let compactionUsage: Record<string, unknown> | undefined;
   const providerRecords: UsageRecord[] = [];
   return {
-    recordProviderCall: ({ usage, model, provider }) => {
+    recordProviderCall: ({ usage, model, provider, telemetry }) => {
       turnUsage = mergeTurnUsage(turnUsage, usage);
       lastContextUsage = usage;
       if (usage && Object.keys(usage).length > 0) {
@@ -131,6 +132,7 @@ export function createTurnUsageLedger(args: {
           ...(provider || args.provider
             ? { provider: provider || args.provider }
             : {}),
+          ...(telemetry && Object.keys(telemetry).length > 0 ? { telemetry } : {}),
           ...(args.stablePrefixHash
             ? {
                 stablePrefixHash: args.stablePrefixHash,
