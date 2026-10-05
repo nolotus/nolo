@@ -21,6 +21,7 @@ import { detectSite, loadRoutes, type SiteId } from "app/web/siteRoutes";
 import i18n from "app/i18n/client";
 import { loadClientLanguage } from "app/i18n/clientResources";
 import { isProduction } from "app/utils/env";
+import { resolveClientHydrateServer } from "app/settings/serverBootstrap";
 import { isCloudEdition } from "identity";
 import { toast } from "app/utils/toast";
 import { registerDatabaseActionToast } from "database/actions/actionToast";
@@ -185,11 +186,23 @@ applyAgentThemeToElement(
   themeModePreload.isDark
 );
 
+// 只有 SSR 白名单正式站点（nolo.chat / us.nolo.chat）才在 hydrate 前把
+// currentServer 覆盖为运行时 origin —— 与 SSR render.tsx 的注入闸门共用同一真值
+// （serverBootstrap.resolveClientHydrateServer），保证 hydrate 帧与 SSR HTML
+// 逐字节一致。
+// 非白名单 host（localhost 开发 / 局域网 / 自建域名）保持 SSR 下发的默认值，
+// 与改动前一致；运行时 origin 由 App.tsx 的 mount effect 在挂载后经
+// dispatch(addHostToCurrentServer(runtimeOrigin)) 纠正。
+const cloudBootstrapServer = resolveClientHydrateServer({
+  hostname: window.location.hostname,
+  origin: window.location.origin,
+});
 const preloadedState = {
   ...serverPreloadedWithoutShare,
   settings: {
     ...serverPreloadedWithoutShare.settings,
     ...themeModePreload,
+    ...(cloudBootstrapServer ? { currentServer: cloudBootstrapServer } : {}),
     ...devLoginSettings,
     ...(storedThemeName ? { themeName: storedThemeName } : {}),
     ...(storedThemeDensity ? { density: storedThemeDensity } : {}),
