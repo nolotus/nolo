@@ -14,9 +14,16 @@ export const fetchConvMsgs = async (
   const { signal: externalSignal } = options;
 
   const controller = new AbortController();
+  // The 5s budget covers the whole exchange — request start through the body
+  // being fully parsed. It is only released in `finally`, never on headers.
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   const onExternalAbort = () => controller.abort();
   externalSignal?.addEventListener("abort", onExternalAbort);
+  // Covers a signal that was already aborted, plus an abort that lands between
+  // the `aborted` read and the listener registration.
+  if (externalSignal?.aborted) {
+    controller.abort();
+  }
 
   try {
     const response = await fetch(`${server}/rpc/getConvMsgs`, {
@@ -33,8 +40,6 @@ export const fetchConvMsgs = async (
       }),
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
-    externalSignal?.removeEventListener("abort", onExternalAbort);
 
     if (!response.ok) {
       console.error(`fetchConvMsgs: Failed ${response.status} from ${server}`);
@@ -44,13 +49,14 @@ export const fetchConvMsgs = async (
     const data = await response.json();
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    clearTimeout(timeoutId);
-    externalSignal?.removeEventListener("abort", onExternalAbort);
     // Only re-throw when external signal was aborted (user navigated away)
     if (externalSignal?.aborted) {
       throw error;
     }
     console.error(`fetchConvMsgs: Error fetching from ${server}:`, error);
     return [];
+  } finally {
+    clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 };
