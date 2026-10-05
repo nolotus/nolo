@@ -15,7 +15,10 @@ import {
 import { legacySettingRoutes, settingRoutes } from "app/settings/routes";
 import ShareImportPage from "app/pages/ShareImportPage";
 import NewChatPage from "app/pages/NewChatPage";
-import PageLoader from "render/page/PageLoader";
+// Keep the dialog/editor/tool graph off unrelated URLs. The existing route
+// Suspense boundary is also used by streaming SSR, so matched pages still render
+// fully; Home and NewChatPage remain eager rather than delaying their first paint.
+const PageLoader = lazy(() => import("render/page/PageLoader"));
 
 import PageLoading from "render/web/ui/PageLoading";
 import { getIsDesktopApp } from "app/utils/env";
