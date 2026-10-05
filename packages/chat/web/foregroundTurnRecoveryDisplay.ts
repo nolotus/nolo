@@ -27,7 +27,7 @@ export type RecoveryDisplayInput = {
   sawForegroundLifecycle: boolean;
   /** The observer stream ended or errored (transport-level, not execution). */
   streamDropped: boolean;
-  /** Terminal event or idle discovery settled this attach. */
+  /** Terminal refresh or bounded-window exhaustion settled this attach. */
   attachSettled: boolean;
   /** The subtle attach hint delay elapsed while still attaching. */
   attachHintElapsed: boolean;

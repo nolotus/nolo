@@ -20,7 +20,7 @@ import {
   FOREGROUND_ATTACH_HINT_DELAY_MS,
   type RecoveryDisplayPhase,
 } from "./foregroundTurnRecoveryDisplay";
-import { observeForegroundTurnRecovery } from "./foregroundTurnRecoveryObserver";
+import { observeForegroundTurnRecoveryWithRetry, shouldStartForegroundTurnRecovery } from "./foregroundTurnRecoveryObserver";
 
 const RECOVERY_DISPLAY_DEFAULTS: Record<RecoveryDisplayPhase, string> = {
   attaching: "正在接回回复…",
@@ -43,7 +43,11 @@ const RECOVERY_DISPLAY_DEFAULTS: Record<RecoveryDisplayPhase, string> = {
  * - when it reaches a terminal event, reload persisted dialog messages;
  * - idle dialogs do not keep a permanent recovery SSE connection open;
  * - a transport drop is not an execution failure and must not be rendered as
- *   one; the reply-area hint distinguishes attaching / running / interrupted.
+ *   one; the reply-area hint distinguishes attaching / running / interrupted;
+ * - starts only while the last persisted row is still the user's and no local
+ *   controller owns the turn; a no-evidence attach is retried a bounded number
+ *   of times (re-reading persisted history between attempts), then the turn
+ *   state is left unknown instead of staying silently stale forever.
  */
 export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
   dialogId,
@@ -61,7 +65,7 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
 
   // Display-only local state for the reply-area hint. The durable store keeps
   // its single `recoveredForegroundTurn` fact; everything here is derived
-  // per-attach and cleared by cleanup / terminal / idle discovery.
+  // per-attempt and cleared by cleanup / terminal / window exhaustion.
   const [attachHintElapsed, setAttachHintElapsed] = useState(false);
   const [sawForegroundLifecycle, setSawForegroundLifecycle] = useState(false);
   const [streamDropped, setStreamDropped] = useState(false);
@@ -75,7 +79,20 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
     setStreamDropped(false);
     setAttachSettled(false);
 
-    if (!dialogId || !token || !server || hasLocalForegroundOwner) {
+    // The predicate is the single semantic gate; the plain checks after it
+    // only narrow dialogId/token/server for the typed session call below.
+    if (
+      !shouldStartForegroundTurnRecovery({
+        dialogId,
+        token,
+        server,
+        hasLocalForegroundOwner,
+        replyMaybePending,
+      }) ||
+      !dialogId ||
+      !token ||
+      !server
+    ) {
       setRecoveredForegroundTurn({
         dialogKey: runtimeDialogKey,
         status: null,
@@ -84,15 +101,15 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
     }
 
     const controller = new AbortController();
-    let settled = false;
+    let refreshSettled = false;
     const attachHintTimer = setTimeout(
       () => setAttachHintElapsed(true),
       FOREGROUND_ATTACH_HINT_DELAY_MS,
     );
 
     const refreshPersistedMessages = async () => {
-      if (settled) return;
-      settled = true;
+      if (refreshSettled) return;
+      refreshSettled = true;
       setAttachSettled(true);
       setRecoveredForegroundTurn({
         dialogKey: runtimeDialogKey,
@@ -105,7 +122,16 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
       }
     };
 
-    void observeForegroundTurnRecovery({
+    // Between bounded re-attaches, re-read persisted history: a reply that was
+    // persisted while the durable channel gave us no frame must still land in
+    // the store instead of leaving the page on the stale user row.
+    const rereadPersistedMessages = () => {
+      void dispatch(initMsgs({ dialogId }))
+        .unwrap()
+        .catch(() => {});
+    };
+
+    void observeForegroundTurnRecoveryWithRetry({
       controller,
       origin: String(server),
       dialogId,
@@ -119,7 +145,21 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
             status: "running",
           }),
         onTerminal: refreshPersistedMessages,
-        onIdle: () => {
+        onAttemptStart: () => {
+          // Per-attempt facts: a previous attempt's silence/drop must not leak
+          // into the new attempt's display state.
+          setStreamDropped(false);
+          setSawForegroundLifecycle(false);
+        },
+        onRetryScheduled: () => {
+          setStreamDropped(false);
+          setSawForegroundLifecycle(false);
+          rereadPersistedMessages();
+        },
+        onDropped: () => setStreamDropped(true),
+        onExhausted: () => {
+          // Bounded window ended with zero lifecycle evidence: the turn state
+          // is unknown. Stop quietly — never claim a failure that was not seen.
           setAttachSettled(true);
           setRecoveredForegroundTurn({
             dialogKey: runtimeDialogKey,
@@ -127,7 +167,6 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
           });
           clearForegroundExecutionClientState(dialogId);
         },
-        onDropped: () => setStreamDropped(true),
       },
     });
 
@@ -145,12 +184,13 @@ export const ForegroundTurnRecovery: React.FC<{ dialogId: string }> = ({
       // Do NOT clear the execution-id cache here. This cleanup also runs when a
       // recovered observer hands ownership back to a local live controller;
       // clearing here could erase the live stream's freshly observed identity.
-      // Terminal events and idle discovery own cache cleanup instead.
+      // Terminal events and exhausted windows own cache cleanup instead.
     };
   }, [
     dialogId,
     dispatch,
     hasLocalForegroundOwner,
+    replyMaybePending,
     runtimeDialogKey,
     server,
     token,
