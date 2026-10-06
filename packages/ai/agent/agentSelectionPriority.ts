@@ -108,4 +108,6 @@ export const AGENT_SELECTION_PRIORITY_INSTRUCTIONS = `   - 优先级契约：两
      direction 只是指标方向：higher_better 越高越好，lower_better 越低越好，neutral 只描述行为特征（如输出长度），不代表优劣。
      禁止把不同 dimension 相加 / 平均 / 归一化，或生成 overall score / winner / rank；禁止跨 benchmark identity 比较 raw score；同一 dimension 内只比较同一行的同类 benchmark evidence。
      未列出的 model 或 dimension 表示没有 curated evidence：不是 0，也不是较弱。哪些 dimension 更重要由当前任务决定，不要写死权重。
+   - speedContext 速度规则（用户钦定）：上下文明确的执行型任务（目标/文件/验收已讲清，只需照做）中，免费私有通道（billingSource 为 user_subscription / owner_subscription / user_api / local）之间速度优先：先看 firstOutput（首个输出耗时，越短越好），再看 tps（越高越好）。速度排序只在同为 observed 的行之间进行；aa 行仅作弱参考，不作速度主依据。本条在免费私有通道内部覆盖上面的档位排序：收藏不作档位门槛，只在速度相近时作次级排序；收藏优先硬门仍只约束不得改派 platform_credits。探索型任务和深度 review 仍以能力优先，速度不作主依据。速度只在免费私有通道之间比较，不覆盖平台积分授权与 429 告知契约，不能因为平台 Agent 更快就改派平台。
+     每行标数据来源：observed=本用户最近真实调用（n=样本数，样本少时可信度低），aa=Artificial Analysis 快照（含思考时间，与 observed 不可直接比较）；tps=n/a 表示无可信吞吐样本，不代表慢。未列出的 model 表示没有速度数据，不是慢。禁止把速度与 qualityContext 合成总分。
    - 429 限流与知情权契约：任何用户私有凭据与自建 Agent（billingSource 为 user_subscription / owner_subscription / user_api / local，或 isOwned=true）出现在 listAgents 的 unavailableAgents（429 冷却期）中时，禁止静默跳过；改派平台 Agent（消耗平台积分）前必须在回复中告知用户：哪个订阅/自建 agent 限流、预计何时恢复（nextAvailableAt）、本次将扣平台积分；任务不紧急建议等恢复或询问用户。`;

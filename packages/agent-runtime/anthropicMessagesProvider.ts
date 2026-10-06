@@ -7,7 +7,10 @@ import {
 import {
   createProviderCallTimingTracker,
   finalizeProviderCallTiming,
+  observeMeaningfulProviderResponse,
+  withProviderCallTimingFields,
 } from "ai/token/providerCallTiming";
+import { aggregateAnthropicMessageStream } from "./anthropicMessagesStream";
 import type { AgentRuntimeAgentConfig } from "./hostAdapter";
 
 export const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -80,10 +83,12 @@ const DEFAULT_ENABLED_BUDGET = 8192;
 /** max_tokens when neither the caller nor the model table gives one. */
 const DEFAULT_MAX_TOKENS = 8192;
 /**
- * Ceiling for a default max_tokens on a non-streaming request. Same bound the
- * official SDKs enforce before refusing non-streaming calls (expected
- * generation must fit the ~10 min request window: 600s × 128k / 3600s).
- * Explicit agent max_tokens is never clamped.
+ * Ceiling for a default max_tokens (no explicit agent value). Originally the
+ * bound the official SDKs enforce for non-streaming calls (~10 min request
+ * window: 600s × 128k / 3600s). Upstream now streams by default, which has no
+ * such window, but the cap is intentionally kept for both modes so that the
+ * NOLO_ANTHROPIC_STREAM=0 fallback stays safe and default output budgets do
+ * not change with the transport. Explicit agent max_tokens is never clamped.
  */
 export const NON_STREAMING_MAX_TOKENS = 21_333;
 /** enableThinking=true 但未给 thinkingBudget 时的历史默认值（保留旧行为，与 8192 不一致是有意的）。 */
@@ -480,8 +485,9 @@ export function buildAnthropicMessagesBody(args: {
     args.openAiBody.max_tokens ??
     args.agentConfig.max_tokens;
   // Anthropic requires max_tokens. Without an explicit value, use the model's
-  // published output limit capped at what a NON-streaming request can safely
-  // produce (this path sends stream:false). A flat 8192 made adaptive-thinking
+  // published output limit capped at NON_STREAMING_MAX_TOKENS. Upstream streams
+  // by default; the cap is intentionally kept for both modes (see the constant)
+  // so the non-streaming fallback stays safe. A flat 8192 made adaptive-thinking
   // turns hit finish_reason=length once thinking + answer passed 8k, which the
   // loop surfaces as "output truncated / context exceeded".
   const maxTokens =
@@ -637,43 +643,90 @@ export function mapAnthropicMessageToOpenAi(payload: JsonRecord): JsonRecord {
   };
 }
 
+/**
+ * Claude OAuth 上游是否走 Messages SSE（stream:true）。只有流式才能按
+ * providerCallTiming 契约观测 firstOutputMs；流被就地聚合回一次性 message，
+ * 下游（mapAnthropicMessageToOpenAi 及所有调用方）形状不变。
+ * 默认开启（2026-10-06 OAuth 门禁线上实测：opus/sonnet × 纯文本/tool_use 流式均 200，
+ * 内容/工具调用/usage 与非流式一致）。`NOLO_ANTHROPIC_STREAM=0|false|off|no` 回退非流式。
+ */
+export function resolveAnthropicUpstreamStream(rawEnv: string | undefined): boolean {
+  const value = rawEnv?.trim().toLowerCase();
+  return !(value === "0" || value === "false" || value === "off" || value === "no");
+}
+
 export async function fetchAnthropicMessagesCompletion(args: {
   agentConfig: AgentRuntimeAgentConfig;
   accessToken: string;
   openAiBody: JsonRecord;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** 覆盖上游是否流式；缺省按 NOLO_ANTHROPIC_STREAM（默认流式）。 */
+  upstreamStream?: boolean;
 }): Promise<{ status: number; body: JsonRecord; headers?: Headers }> {
-  // Observed Nolo logical invocation timing。非流式（一次性 JSON body）没有
-  // first-output 语义，不伪造 firstOutputMs，只落 callDurationMs
-  // （见 ai/token/providerCallTiming）。
+  // Observed Nolo logical invocation timing（见 ai/token/providerCallTiming）：
+  // 锚点在上游 fetch 发出前（含 fetchImpl 内的 transient retry/backoff）。
+  // 流式：首个有效输出（text/thinking/tool_use）记 firstOutputMs；非流式
+  // （一次性 JSON body）没有 first-output 语义，不伪造，只落 callDurationMs。
   const timingTracker = createProviderCallTimingTracker();
+  const upstreamStream =
+    args.upstreamStream ?? resolveAnthropicUpstreamStream(process.env.NOLO_ANTHROPIC_STREAM);
+  const requestBody = buildAnthropicMessagesBody(args);
+  if (upstreamStream) requestBody.stream = true;
   const response = await (args.fetchImpl ?? fetch)(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${args.accessToken}`,
       "Content-Type": "application/json",
-      Accept: "application/json",
+      Accept: upstreamStream ? "text/event-stream" : "application/json",
       "anthropic-version": ANTHROPIC_API_VERSION,
       "anthropic-beta": ANTHROPIC_OAUTH_BETA_HEADER,
       "User-Agent": CLAUDE_CODE_USER_AGENT,
       "x-app": "cli",
     },
-    body: JSON.stringify(buildAnthropicMessagesBody(args)),
+    body: JSON.stringify(requestBody),
     signal: args.signal,
   });
-  const payload = (await response.json().catch(async () => ({
-    error: { message: await response.text().catch(() => response.statusText) },
-  }))) as JsonRecord;
-  if (!response.ok) return { status: response.status, body: payload, headers: response.headers };
+  let payload: JsonRecord;
+  if (upstreamStream && response.ok) {
+    // We asked for stream:true, so a 2xx body is aggregated as SSE regardless of
+    // content-type (intermediaries may drop/rewrite the header). A body that is
+    // not a complete SSE message (missing / JSON / truncated) yields an explicit
+    // error from the aggregator — never a 200 with an empty reply.
+    if (!response.body) {
+      return {
+        status: 502,
+        body: {
+          type: "error",
+          error: {
+            type: "stream_truncated",
+            message: "Anthropic stream response had no body",
+          },
+        },
+        headers: response.headers,
+      };
+    }
+    const aggregated = await aggregateAnthropicMessageStream(response.body, () =>
+      observeMeaningfulProviderResponse(timingTracker),
+    );
+    if (!aggregated.ok) {
+      return { status: aggregated.status, body: aggregated.body, headers: response.headers };
+    }
+    payload = aggregated.payload;
+  } else {
+    payload = (await response.json().catch(async () => ({
+      error: { message: await response.text().catch(() => response.statusText) },
+    }))) as JsonRecord;
+    if (!response.ok) return { status: response.status, body: payload, headers: response.headers };
+  }
   const mapped = mapAnthropicMessageToOpenAi(payload);
   const timing = finalizeProviderCallTiming(timingTracker);
   const usage = (mapped as { usage?: Record<string, unknown> }).usage;
-  if (usage && typeof usage === "object" && timing.callDurationMs !== undefined) {
-    (mapped as { usage: Record<string, unknown> }).usage = {
-      ...usage,
-      callDurationMs: timing.callDurationMs,
-    };
+  if (usage && typeof usage === "object") {
+    (mapped as { usage: Record<string, unknown> }).usage = withProviderCallTimingFields(
+      usage,
+      timing,
+    ) as Record<string, unknown>;
   }
   return { status: 200, body: mapped };
 }
