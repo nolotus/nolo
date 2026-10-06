@@ -20,6 +20,14 @@
 import { createTokenKey, createKey } from "database/keys";
 import { getModelAbility } from "../llm/modelAbility";
 import {
+  readSpeedSamplesCache,
+  writeSpeedSamplesCache,
+  SPEED_SAMPLE_CACHE_VERSION,
+  SPEED_SAMPLE_DISK_CACHE_TTL_MS,
+  SPEED_SAMPLE_SCAN_BUDGET_MS,
+  type SpeedSampleDiskCacheOptions,
+} from "./speedSampleCache";
+import {
   resolveObservedSpeed,
   type ObservedSpeedRecordInput,
 } from "../token/observedSpeedResolver";
@@ -70,10 +78,25 @@ export function normalizeSpeedModelName(raw: string): string {
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
-function resolveOne(
+/**
+ * Reasoning-tier suffixes a candidate name may carry on top of the name the
+ * samples / AA snapshot are recorded under (`claude-opus-5-5-medium` →
+ * `claude-opus-5-5`). `max` is deliberately absent: `swe-2-max` is a model name,
+ * not a reasoning tier, and stripping it would invent a different model.
+ */
+export const REASONING_EFFORT_SUFFIXES = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const REASONING_EFFORT_SUFFIX_RE = new RegExp(`-(?:${REASONING_EFFORT_SUFFIXES.join("|")})$`);
+
+/** Base name with the trailing reasoning tier removed; `null` when there is none. */
+export function stripReasoningEffortSuffix(model: string): string | null {
+  const base = model.replace(REASONING_EFFORT_SUFFIX_RE, "");
+  return base && base !== model ? base : null;
+}
+
+function resolveOneBare(
   model: string,
   samplesByModel: SpeedSamplesByModel,
-): CandidateSpeedFact | null {
+): Omit<CandidateSpeedFact, "model"> | null {
   const observed = resolveObservedSpeed(samplesByModel.get(model) ?? [], {
     limit: OBSERVED_SPEED_WINDOW,
   });
@@ -82,7 +105,6 @@ function resolveOne(
     observed.medianFirstOutputMs !== undefined
   ) {
     return {
-      model,
       source: "observed",
       firstOutputMs: observed.medianFirstOutputMs,
       ...(observed.medianOutputTokensPerSecond !== undefined
@@ -104,12 +126,28 @@ function resolveOne(
     return null;
   }
   return {
-    model,
     source: "aa",
     ...(firstAnswerTokenS !== undefined ? { firstAnswerTokenS } : {}),
     ...(isFiniteNumber(aa.outputSpeedTps) ? { outputTps: aa.outputSpeedTps } : {}),
     measuredAt: aa.measuredAt,
   };
+}
+
+/**
+ * One fact per candidate model: exact name first, then the same lookup with a
+ * trailing reasoning tier removed. The fact keeps the candidate's own
+ * (normalized) name, so every line maps back to a candidate the caller listed.
+ */
+function resolveOne(
+  model: string,
+  samplesByModel: SpeedSamplesByModel,
+): CandidateSpeedFact | null {
+  const direct = resolveOneBare(model, samplesByModel);
+  if (direct) return { model, ...direct };
+  const base = stripReasoningEffortSuffix(model);
+  if (!base) return null;
+  const stripped = resolveOneBare(base, samplesByModel);
+  return stripped ? { model, ...stripped } : null;
 }
 
 /** Resolve one fact per unique (normalized) candidate model; models with no data are dropped. */
@@ -160,9 +198,41 @@ export function buildCandidateSpeedContext(
 
 // ── Token record loading ──────────────────────────────────────────────────
 
+/** Keys fetched per iterator page. An unpaged scan of the CLI's broker-backed db
+ *  costs ~2ms per record (98k records > 3 min); 2000-key pages finish the same
+ *  scan in ~4.3s. */
+export const SPEED_SAMPLE_PAGE_SIZE = 2000;
+
+/**
+ * Iterator options this module uses. `gt` resumes a page past the last accepted
+ * key; stores that ignore it stay correct because the scan itself drops every
+ * key <= lastKey it has already seen (see collectRecentSpeedSamples).
+ */
+export type SpeedSampleIteratorOptions = {
+  gte?: string;
+  lte?: string;
+  gt?: string;
+  limit?: number;
+};
+
 export interface SpeedSampleDb {
-  iterator(options: Record<string, unknown>): AsyncIterable<[string, unknown]>;
+  iterator(options: SpeedSampleIteratorOptions): AsyncIterable<[string, unknown]>;
 }
+
+export type SpeedSampleLoadOptions = {
+  /** Keys per page (default SPEED_SAMPLE_PAGE_SIZE). */
+  pageSize?: number;
+  /** Wall-clock budget for the whole scan. When exceeded, scanning stops and
+   *  `budgetExhausted` is reported — the partial result is an arbitrary
+   *  key-ordered subset, so a caller that needs a trustworthy median must treat
+   *  it as "no data". Defaults to no budget. */
+  budgetMs?: number;
+};
+
+export type SpeedSampleLoadResult = {
+  samples: Map<string, SpeedSample[]>;
+  budgetExhausted: boolean;
+};
 
 const eventTime = (value: Record<string, unknown>): number => {
   if (isFiniteNumber(value.timestamp)) return value.timestamp;
@@ -176,30 +246,27 @@ const eventTime = (value: Record<string, unknown>): number => {
  * (not time-sortable), so this is a full user-prefix scan sorted by timestamp.
  * Failed-call audit records are skipped.
  */
-export async function loadRecentSpeedSamples(
-  db: SpeedSampleDb,
-  userId: string,
-): Promise<Map<string, SpeedSample[]>> {
-  const { start, end } = createTokenKey.rangeOfUser(userId);
-  const failedPrefix = createKey("token", userId, "failed-call", "");
-  const collected = new Map<string, Array<SpeedSample & { t: number }>>();
-  for await (const [key, raw] of db.iterator({ gte: start, lte: end })) {
-    if (typeof key === "string" && key.startsWith(failedPrefix)) continue;
-    if (!raw || typeof raw !== "object") continue;
-    const value = raw as Record<string, unknown>;
-    if (typeof value.model !== "string") continue;
-    if (!isFiniteNumber(value.firstOutputMs) && !isFiniteNumber(value.callDurationMs)) continue;
-    const model = normalizeSpeedModelName(value.model);
-    if (!model) continue;
-    const list = collected.get(model) ?? [];
-    list.push({
-      t: eventTime(value),
-      firstOutputMs: value.firstOutputMs as number | undefined,
-      callDurationMs: value.callDurationMs as number | undefined,
-      output_tokens: value.output_tokens as number | undefined,
-    });
-    collected.set(model, list);
-  }
+function collectSample(
+  collected: Map<string, Array<SpeedSample & { t: number }>>,
+  value: Record<string, unknown>,
+): void {
+  if (typeof value.model !== "string") return;
+  if (!isFiniteNumber(value.firstOutputMs) && !isFiniteNumber(value.callDurationMs)) return;
+  const model = normalizeSpeedModelName(value.model);
+  if (!model) return;
+  const list = collected.get(model) ?? [];
+  list.push({
+    t: eventTime(value),
+    firstOutputMs: value.firstOutputMs as number | undefined,
+    callDurationMs: value.callDurationMs as number | undefined,
+    output_tokens: value.output_tokens as number | undefined,
+  });
+  collected.set(model, list);
+}
+
+function finalizeSamples(
+  collected: Map<string, Array<SpeedSample & { t: number }>>,
+): Map<string, SpeedSample[]> {
   const result = new Map<string, SpeedSample[]>();
   for (const [model, list] of collected) {
     list.sort((a, b) => b.t - a.t);
@@ -209,6 +276,110 @@ export async function loadRecentSpeedSamples(
     );
   }
   return result;
+}
+
+/**
+ * Scan this user's token records and keep, per normalized model, the newest
+ * OBSERVED_SPEED_WINDOW records that carry timing. Token keys are call-id based
+ * (not time-sortable), so this is a full user-prefix scan sorted by timestamp.
+ * Failed-call audit records are skipped.
+ *
+ * Paged on purpose (see SPEED_SAMPLE_PAGE_SIZE). Each page resumes exclusively
+ * after the last accepted key, and every key <= that last key is dropped, so a
+ * store that ignores `gt`/`limit` can neither double count nor spin forever:
+ * a page that accepts nothing ends the scan.
+ */
+export async function collectRecentSpeedSamples(
+  db: SpeedSampleDb,
+  userId: string,
+  options: SpeedSampleLoadOptions = {},
+): Promise<SpeedSampleLoadResult> {
+  const pageSize =
+    isFiniteNumber(options.pageSize) && options.pageSize > 0
+      ? Math.floor(options.pageSize)
+      : SPEED_SAMPLE_PAGE_SIZE;
+  const budgetMs = isFiniteNumber(options.budgetMs)
+    ? options.budgetMs
+    : Number.POSITIVE_INFINITY;
+  const { start, end } = createTokenKey.rangeOfUser(userId);
+  const failedPrefix = createKey("token", userId, "failed-call", "");
+  const collected = new Map<string, Array<SpeedSample & { t: number }>>();
+  const startedAt = Date.now();
+  let lastKey: string | undefined;
+  let budgetExhausted = false;
+
+  while (true) {
+    if (Date.now() - startedAt >= budgetMs) {
+      budgetExhausted = true;
+      break;
+    }
+    const pageOptions: SpeedSampleIteratorOptions = {
+      ...(lastKey === undefined ? { gte: start } : { gt: lastKey }),
+      lte: end,
+      limit: pageSize,
+    };
+    let accepted = 0;
+    let newestKey = lastKey;
+    for await (const [key, raw] of db.iterator(pageOptions)) {
+      if (typeof key !== "string") continue;
+      if (lastKey !== undefined && key <= lastKey) continue;
+      accepted += 1;
+      newestKey = key;
+      if (key.startsWith(failedPrefix)) continue;
+      if (!raw || typeof raw !== "object") continue;
+      collectSample(collected, raw as Record<string, unknown>);
+    }
+    if (accepted === 0 || accepted < pageSize) break;
+    lastKey = newestKey;
+  }
+
+  return { samples: finalizeSamples(collected), budgetExhausted };
+}
+
+/**
+ * Paged scan without budget reporting: the samples only. Callers that must not
+ * act on a partial scan use `collectRecentSpeedSamples` directly.
+ */
+export async function loadRecentSpeedSamples(
+  db: SpeedSampleDb,
+  userId: string,
+  options: SpeedSampleLoadOptions = {},
+): Promise<Map<string, SpeedSample[]>> {
+  const { samples } = await collectRecentSpeedSamples(db, userId, options);
+  return samples;
+}
+
+/**
+ * Cold-scan-with-budget behind a per-user disk cache, for short-lived processes
+ * (the CLI). A fresh cache entry short-circuits the scan entirely; a cold scan
+ * gets `budgetMs` and is discarded (→ empty map → AA-only) if it runs over.
+ * Never throws.
+ */
+export async function loadSpeedSamplesWithDiskCache(
+  db: SpeedSampleDb,
+  userId: string,
+  now: number,
+  cache: SpeedSampleDiskCacheOptions,
+): Promise<Map<string, SpeedSample[]>> {
+  try {
+    const ttlMs = isFiniteNumber(cache.ttlMs) ? cache.ttlMs : SPEED_SAMPLE_DISK_CACHE_TTL_MS;
+    const cached = await readSpeedSamplesCache(cache.cachePath, { userId, now, ttlMs });
+    if (cached) return cached;
+    const { samples, budgetExhausted } = await collectRecentSpeedSamples(db, userId, {
+      pageSize: cache.pageSize,
+      budgetMs: isFiniteNumber(cache.budgetMs) ? cache.budgetMs : SPEED_SAMPLE_SCAN_BUDGET_MS,
+    });
+    if (budgetExhausted) return new Map();
+    await writeSpeedSamplesCache(cache.cachePath, {
+      version: SPEED_SAMPLE_CACHE_VERSION,
+      userId,
+      at: now,
+      samples: Object.fromEntries(samples),
+    });
+    return samples;
+  } catch {
+    return new Map();
+  }
 }
 
 // Module-level, per-user cache. Each miss costs a full token-prefix scan of the
@@ -264,6 +435,12 @@ export interface InjectSpeedContextOptions {
   db?: SpeedSampleDb | null;
   userId?: string | null;
   now?: number;
+  /**
+   * Short-lived callers (the CLI) pass this to read/write the observed samples
+   * through `<NOLO_HOME>/cache/speed-samples-<userId>.json` with a scan budget,
+   * instead of the module-level in-process cache. Omitted → current behaviour.
+   */
+  diskCache?: SpeedSampleDiskCacheOptions | null;
 }
 
 /**
@@ -288,11 +465,14 @@ export async function injectSpeedContextIntoListAgentsResult(
       .filter((model: unknown): model is string => typeof model === "string");
     if (models.length === 0) return result;
 
+    const now = options.now ?? Date.now();
     let samples: SpeedSamplesByModel = new Map();
     const userId = typeof options.userId === "string" ? options.userId.trim() : "";
     if (options.db && userId) {
       try {
-        samples = await loadCachedSpeedSamples(options.db, userId, options.now ?? Date.now());
+        samples = options.diskCache
+          ? await loadSpeedSamplesWithDiskCache(options.db, userId, now, options.diskCache)
+          : await loadCachedSpeedSamples(options.db, userId, now);
       } catch {
         samples = new Map();
       }

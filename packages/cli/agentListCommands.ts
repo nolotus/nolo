@@ -1,12 +1,15 @@
 import { toErrorMessage } from "core/errorMessage";
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
+import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
+import path from "node:path";
+import { resolveNoloHome } from "../database-engine/dbPath";
 import {
   buildAgentDiscoveryResult,
   matchesAgentQuery,
   toDiscoverySafeAgentSummary,
 } from "ai/agent/agentDiscovery";
-import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
+import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
 import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
@@ -35,8 +38,30 @@ import {
   resolveAuthToken,
   resolveServerCandidates,
   resolveServerUrl,
+  type EnvLike,
 } from "./cliEnvHelpers";
 import { readLiveDbRecordAfterTombstoneMerge } from "./globalRecordOperations";
+
+/**
+ * Diagnostics sink for the optional speed-sample read: `--json` output must stay
+ * parseable, and a local db that cannot be opened simply means AA-only speed
+ * data rather than a failed command.
+ */
+const discardOutput: OutputLike = { write: () => undefined };
+
+/**
+ * Disk cache for the observed speed samples: every `nolo agent list` is a fresh
+ * process, so the in-process samples cache in ai/agent/candidateSpeedContext
+ * never survives a call. Layout: `<NOLO_HOME>/cache/speed-samples-<userId>.json`.
+ */
+export function resolveSpeedSamplesCachePath(env: EnvLike, userId: string): string {
+  const safeUserId = userId.replace(/[^A-Za-z0-9._-]/g, "_");
+  // NOLO_HOME is read from the process environment as well: callers pass a
+  // partial deps.env (tests), and a cache path that silently fell back to the
+  // developer's real ~/.nolo would defeat that isolation.
+  const mergedEnv = { ...process.env, ...env };
+  return path.join(resolveNoloHome({ env: mergedEnv }), "cache", `speed-samples-${safeUserId}.json`);
+}
 
 export async function runAgentListCommand(
   args: string[],
@@ -285,7 +310,7 @@ export async function runAgentListCommand(
         verbose,
       });
 
-      output.write(JSON.stringify({
+      const listResult = JSON.stringify({
         success: true,
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
@@ -294,7 +319,16 @@ export async function runAgentListCommand(
         unavailableAgents: discovery.unavailableAgents,
         credentialGroups: discovery.credentialGroups,
         agents: discovery.agents,
-      }, null, 2));
+      }, null, 2);
+      // Observed speed data needs the local db; the call is disk-cached with a
+      // scan budget and degrades to AA-only on any failure (it never throws), so
+      // `agent list` cannot fail because of speed context.
+      const withSpeedContext = await injectSpeedContextIntoListAgentsResult(listResult, {
+        db: deps.db ?? await getReadableCliDb(discardOutput),
+        userId,
+        diskCache: { cachePath: resolveSpeedSamplesCachePath(env, userId) },
+      });
+      output.write(withSpeedContext);
       output.write("\n");
       return 0;
     }
