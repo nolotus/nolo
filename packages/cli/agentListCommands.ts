@@ -1,16 +1,12 @@
 import { toErrorMessage } from "core/errorMessage";
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
-import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
-import path from "node:path";
-import { resolveNoloHome } from "../database-engine/dbPath";
 import {
   buildAgentDiscoveryResult,
   matchesAgentQuery,
   toDiscoverySafeAgentSummary,
 } from "ai/agent/agentDiscovery";
-import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
-import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
+import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
   listFavoriteAgentIdsAcrossServers,
@@ -38,30 +34,8 @@ import {
   resolveAuthToken,
   resolveServerCandidates,
   resolveServerUrl,
-  type EnvLike,
 } from "./cliEnvHelpers";
 import { readLiveDbRecordAfterTombstoneMerge } from "./globalRecordOperations";
-
-/**
- * Diagnostics sink for the optional speed-sample read: `--json` output must stay
- * parseable, and a local db that cannot be opened simply means AA-only speed
- * data rather than a failed command.
- */
-const discardOutput: OutputLike = { write: () => undefined };
-
-/**
- * Disk cache for the observed speed samples: every `nolo agent list` is a fresh
- * process, so the in-process samples cache in ai/agent/candidateSpeedContext
- * never survives a call. Layout: `<NOLO_HOME>/cache/speed-samples-<userId>.json`.
- */
-export function resolveSpeedSamplesCachePath(env: EnvLike, userId: string): string {
-  const safeUserId = userId.replace(/[^A-Za-z0-9._-]/g, "_");
-  // NOLO_HOME is read from the process environment as well: callers pass a
-  // partial deps.env (tests), and a cache path that silently fell back to the
-  // developer's real ~/.nolo would defeat that isolation.
-  const mergedEnv = { ...process.env, ...env };
-  return path.join(resolveNoloHome({ env: mergedEnv }), "cache", `speed-samples-${safeUserId}.json`);
-}
 
 export async function runAgentListCommand(
   args: string[],
@@ -201,25 +175,6 @@ export async function runAgentListCommand(
       agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
     }
 
-    // 额度按需刷新：只在真要展示完整列表时探测（--ids 等脚本场景不付这个代价），
-    // 只探测订阅类 agent（有凭据的私有 agent）。失败静默，沿用缓存里的快照。
-    if (!idsOnly) {
-      const fresh = await refreshSubscriptionQuotas({
-        entries: agentsForOutput.map((agent) => ({
-          key: agent.privateKey,
-          ...(agent.quota ? { quota: agent.quota } : {}),
-          probeable: agent.credentialConfigured === true,
-        })),
-        env,
-        cliArgs: args,
-        fetchImpl,
-      });
-      for (const agent of agentsForOutput) {
-        const quota = fresh[agent.privateKey];
-        if (quota) agent.quota = quota;
-      }
-    }
-
     if (idsOnly) {
       output.write(`${agentsForOutput.map((agent) => agent.id).join("\n")}\n`);
       return 0;
@@ -310,7 +265,7 @@ export async function runAgentListCommand(
         verbose,
       });
 
-      const listResult = JSON.stringify({
+      output.write(JSON.stringify({
         success: true,
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
@@ -319,16 +274,7 @@ export async function runAgentListCommand(
         unavailableAgents: discovery.unavailableAgents,
         credentialGroups: discovery.credentialGroups,
         agents: discovery.agents,
-      }, null, 2);
-      // Observed speed data needs the local db; the call is disk-cached with a
-      // scan budget and degrades to AA-only on any failure (it never throws), so
-      // `agent list` cannot fail because of speed context.
-      const withSpeedContext = await injectSpeedContextIntoListAgentsResult(listResult, {
-        db: deps.db ?? await getReadableCliDb(discardOutput),
-        userId,
-        diskCache: { cachePath: resolveSpeedSamplesCachePath(env, userId) },
-      });
-      output.write(withSpeedContext);
+      }, null, 2));
       output.write("\n");
       return 0;
     }
@@ -363,13 +309,6 @@ export async function runAgentListCommand(
     output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
     if (unavailableCount > 0 && !showUnavailable) {
       output.write(`⛔ ${unavailableCount} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n`);
-      const unavailableList = agents.filter((agent) => isAgentUnavailableNow(agent));
-      for (const unavail of unavailableList) {
-        const remainingSec = Math.max(0, Math.ceil(((unavail.nextAvailableAt ?? 0) - Date.now()) / 1000));
-        const quotaSummary = formatQuotaSummary(unavail.quota);
-        const quotaText = quotaSummary ? ` (${quotaSummary})` : "";
-        output.write(`   - [429 限流] ${unavail.name} (id: ${unavail.id}) 预计 ${remainingSec} 秒后恢复${quotaText}\n`);
-      }
     }
     output.write(`source: ${source}\n`);
     if (agentsForOutput.length === 0) {

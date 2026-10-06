@@ -7,7 +7,6 @@ import { commandCodeModels } from "../../integrations/commandcode/models";
 import { deepseekModels } from "../../integrations/deepseek/models";
 import { stepfunModels, stepfunStepPlanModels } from "../../integrations/stepfun/models";
 import type { ReasoningEffort } from "./createAgentSchema";
-import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 // 统一维护 agent 创建时可选择的 provider：
 // - subscription OAuth 提供商（如 ChatGPT Plus/Pro、SuperGrok、Antigravity）
 // - 自定义 API-key 模板（如 OpenCode Go、OpenAI API、Anthropic、Gemini API 等）
@@ -730,47 +729,4 @@ export function isSubscriptionOAuthProvider(id?: string | null): boolean {
 export function isCustomApiKeyTemplate(id?: string | null): boolean {
   if (!id) return false;
   return CUSTOM_API_KEY_TEMPLATES.some((p) => p.id === id);
-}
-
-/**
- * customProviderUrl 规范化：小写、去首尾空白、去末尾 `/`。只用于端点归类判定，
- * 不用于实际请求；registry 里的 baseUrl 用同一套规则对比，大小写与末尾斜杠
- * 差异不算「不同端点」。
- */
-function normalizeEndpointUrl(url: string): string {
-  return asTrimmedLowercaseString(url).replace(/\/+$/, "");
-}
-
-const SUBSCRIPTION_ENDPOINT_URLS: ReadonlySet<string> = new Set(
-  CUSTOM_API_KEY_TEMPLATES.filter((t) => t.commercialKind === "subscription").map((t) =>
-    normalizeEndpointUrl(t.baseUrl),
-  ),
-);
-
-const SUBSCRIPTION_OAUTH_APIKEY_REFS: ReadonlySet<string> = new Set(
-  SUBSCRIPTION_OAUTH_PROVIDERS.map((p) => asTrimmedLowercaseString(p.apiKeyRef)),
-);
-
-/**
- * 该 custom endpoint 是否为「订阅」端点（Step Plan / OpenCode Go / Kimi Code /
- * 别处不要再复制一份 URL 名单；commercialKind==="api" 的模板（如 StepFun 开放
- * 平台按量端点）不算订阅。
- */
-export function isSubscriptionEndpoint(customProviderUrl?: string | null): boolean {
-  if (typeof customProviderUrl !== "string") return false;
-  const normalized = normalizeEndpointUrl(customProviderUrl);
-  return normalized.length > 0 && SUBSCRIPTION_ENDPOINT_URLS.has(normalized);
-}
-
-/**
- * apiKeyRef 是否指向某个订阅 OAuth 提供商的凭据。覆盖 apiKeyRef 不在
- * OAUTH_APIKEY_REFS（代理路由集合）里、但确实是订阅的情况——如 devin。
- *
- * 只认 apiKeyRef，刻意不看 provider：provider 对 API-key 模板只是自由标识，
- * 与 OAuth apiKeyRef 命名空间会撞（xai-api 按量模板 provider 就叫 "xai"，
- * 与 xai OAuth 订阅同名），按 provider 匹配会把按量 agent 误报成订阅。
- */
-export function isSubscriptionOAuthCredential(apiKeyRef?: string | null): boolean {
-  const ref = asTrimmedLowercaseString(apiKeyRef ?? "");
-  return ref.length > 0 && SUBSCRIPTION_OAUTH_APIKEY_REFS.has(ref);
 }

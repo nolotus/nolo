@@ -23,7 +23,6 @@ import {
 } from "./globalRecordOperations";
 import { agentRecordHasConfiguredCredential } from "./agentRecordHelpers";
 import {
-  isOwnedAgentKey,
   ownedAgentKey,
   ownedAgentKeyPrefix,
   parseOwnedAgentId,
@@ -42,8 +41,6 @@ export type ListedAgent = {
   handle?: string;
   introduction?: string;
   provider?: string;
-  /** Custom endpoint；只用于计费归类（订阅端点识别），不进 safe 输出。 */
-  customProviderUrl?: string;
   inputPrice?: number;
   outputPrice?: number;
   updatedAt: string | number | null;
@@ -125,11 +122,6 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
         ? { introduction: record.description }
         : {}),
     ...(typeof record?.provider === "string" && record.provider ? { provider: record.provider } : {}),
-    // 仅供 resolveBillingSource 判定订阅端点（Step Plan / OpenCode Go 等），
-    // safe 投影不输出它。缺了它本地 agent list 会把订阅端点全报成 user_api。
-    ...(typeof record?.customProviderUrl === "string" && record.customProviderUrl
-      ? { customProviderUrl: record.customProviderUrl }
-      : {}),
     ...(typeof record?.inputPrice === "number" && Number.isFinite(record.inputPrice)
       ? { inputPrice: record.inputPrice }
       : {}),
@@ -227,11 +219,15 @@ export async function listLocalCachedAgents(args: {
   for (const prefix of [ownedPrefix, PUBLIC_AGENT_KEY_PREFIX]) {
     for await (const [key, value] of args.db.iterator({ gte: prefix, lte: `${prefix}\uffff` })) {
       if (typeof key !== "string" || !value || typeof value !== "object") continue;
-      if (isOwnedAgentKey(key, args.userId)) {
+      // key 在此已是 string（上一步 typeof 收窄）。isOwnedAgentKey 是
+      // `key is string` 类型谓词，用于控制流/别名条件时会把 else 分支的
+      // key 收窄成 never——这里对已经是 string 的 key 走等价的前缀判断，
+      // 既保留同一判据，又不触发谓词收窄。
+      if (key.startsWith(ownedPrefix)) {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;
       }
-      if ((key as string).startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
+      if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
         publicKeys.add(key);
       }
     }

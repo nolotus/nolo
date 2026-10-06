@@ -22,6 +22,9 @@ export const TOOL_PACKS = {
   // queryModelUsage / queryUserGrowthReport：server-only 工具（web/CLI executor
   // 直接返回 serverOnlyResult），不随 CORE 常驻——server 端由 agent 显式
   // tools 配置按需挂载（utilityServerTools 执行器），web 端不再挂死 schema。
+  // setTodoList 已移至「conversation-todo」系统能力包（defaultEnabled:true）
+  // 作为唯一 owner——single source of truth：普通 agent 默认仍有 setTodoList，
+  // 但关闭「对话 Todo」开关即可真正摘掉它（CORE 常驻时该开关形同虚设）。
   CORE: [
     "read",
     "createDoc",
@@ -253,7 +256,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
     id: "video-transcription",
     label: "视频转写",
     description:
-      "贴视频链接即可转写为带标点文本与 SRT。支持 B 站分 P（默认全部处理）、YouTube 等；支持抖音分享文案/短链，把分享文字里的链接传给 url。",
+      "贴视频链接即可转写为带标点文本与 SRT。支持 B 站分 P（默认全部处理）、YouTube 等；抖音请在桌面端浏览器使用。",
     tools: ["transcribeVideo"],
     defaultEnabled: false,
     icon: "🎬",
@@ -263,7 +266,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
 - 用户贴上视频链接时，直接调用 \`transcribeVideo({ url })\`，不要先问要不要转写。
 - B 站分 P / 合集：缺省处理全部；若用户指定「只要第 3、4 集」则传 \`p: [3, 4]\`。
 - 返回里的 \`processedParts\` / \`availableParts\` 必须向用户说清楚，避免静默丢分 P。
-- 支持抖音分享文案/短链，把分享文字里的链接传给 url。
+- 抖音若报「该平台需要登录态，请在桌面端浏览器中使用」，提示用户改走桌面端浏览能力，不要尝试传 cookie。
 `,
   },
 ];
@@ -376,9 +379,16 @@ export const SYSTEM_BUILTIN_SKILL_PACK_IDS = SYSTEM_AGENT_CAPABILITY_IDS;
  * `web-search` is deliberately NOT here: its tools stay opt-in via
  * `enabledPacks` / LIGHT_WEB injection to preserve web capability boundaries
  * (the global toggle only filters tools that are already present).
+ *
+ * `conversation-todo` is here for the same reason `agent-orchestration` is:
+ * `setTodoList` used to be CORE-resident, which made the global "对话 Todo"
+ * off-switch a no-op (CORE bypassed `applySystemBuiltinSkillFilter`). Moving
+ * it to this default-mount list makes the pack the single owner — default-on
+ * for every interactive agent, and the settings toggle actually removes it.
  */
 const DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS = [
   "agent-orchestration",
+  "conversation-todo",
 ] as const;
 
 /** Tools of default-mounted system capability packs (dedup-free flat list). */

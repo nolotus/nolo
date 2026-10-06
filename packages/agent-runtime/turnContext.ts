@@ -30,7 +30,6 @@ export interface TurnContextLayer {
   id:
     | "space-context"
     | "workspace-context"
-    | "host-environment"
     | "skill-discovery"
     | "agents-md"
     | "skill-content"
@@ -264,10 +263,10 @@ export const buildSkillDiscoveryLayer = (
   if (skills.length === 0) return null;
   const lines = [
     "--- 可用技能（Skills）---",
-    `工作区中发现了 ${skills.length} 个技能（SKILL.md），模型可按需用 loadSkill 按名加载或 readFile 直接读取（路径规则 .agents/skills/<name>/SKILL.md）：`,
+    `工作区中发现了 ${skills.length} 个技能（SKILL.md），模型可按需用 loadSkill 按名加载或 readFile 直接读取：`,
     ...skills.map(
       (s) =>
-        `- ${s.name}: ${s.description}`,
+        `- ${s.name}: ${s.description} (path: ${s.relativePath})`,
     ),
   ];
   return makeLayer("skill-discovery", lines.join("\n"), "session");

@@ -20,7 +20,6 @@ import type { IconType } from "react-icons";
 import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import "./ClientDownloadsPage.css";
 import "render/layout/naturePalette.css";
-import "render/layout/noloSerifFont.css";
 
 type LinuxPackageLinks = {
   installer: string;
@@ -227,9 +226,7 @@ export function buildDownloadCards(options: {
 }
 
 const ClientDownloadsPage: React.FC = () => {
-  const { t: i18nT } = useTranslation();
-  // i18next 运行时把第二个字符串参数当 defaultValue；这里收窄成页面统一使用的 (key, fallback) 签名。
-  const t = i18nT as unknown as (key: string, fallback?: string) => string;
+  const { t } = useTranslation();
   const [copiedCli, setCopiedCli] = React.useState(false);
   const [detectedPlatform, setDetectedPlatform] = React.useState<DetectedPlatform>("unknown");
   const [isMac, setIsMac] = React.useState(false);

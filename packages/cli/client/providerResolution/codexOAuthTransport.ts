@@ -4,7 +4,6 @@
  * 由 localRuntimeAdapter 原先 940 行的 resolveProviderBase 拆出，逻辑逐字保留。
  * 未命中本通道返回 null，交给 resolveLocalProvider 链上的下一条。
  */
-import { resolveSessionKey } from "../../../agent-runtime/sessionIdentity";
 import type { AgentRuntimeResult } from "../../../agent-runtime";
 import { fetchCodexResponsesCompletion, isCodexOAuthAgent } from "../../../agent-runtime/codexResponsesProvider";
 import { readOAuthCredential } from "../../../agent-runtime/oauthTokenStore";
@@ -54,7 +53,6 @@ export const resolveCodexOAuthTransport: ProviderResolver = async (ctx) => {
             stream: false,
             ...(tools.length > 0 ? { tools } : {}),
           },
-          sessionKey: resolveSessionKey({ dialogId: options?.dialogId }),
           fetchImpl: ((url: string | URL | Request, init?: RequestInit) =>
             fetchWithTransientRetry(fetchImpl, url, init, {
               sleep: deps.sleep,
