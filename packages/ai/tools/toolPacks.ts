@@ -253,7 +253,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
     id: "video-transcription",
     label: "视频转写",
     description:
-      "贴视频链接即可转写为带标点文本与 SRT。支持 B 站分 P（默认全部处理）、YouTube 等；抖音请在桌面端浏览器使用。",
+      "贴视频链接即可转写为带标点文本与 SRT。支持 B 站分 P（默认全部处理）、YouTube 等；支持抖音分享文案/短链，把分享文字里的链接传给 url。",
     tools: ["transcribeVideo"],
     defaultEnabled: false,
     icon: "🎬",
@@ -263,7 +263,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
 - 用户贴上视频链接时，直接调用 \`transcribeVideo({ url })\`，不要先问要不要转写。
 - B 站分 P / 合集：缺省处理全部；若用户指定「只要第 3、4 集」则传 \`p: [3, 4]\`。
 - 返回里的 \`processedParts\` / \`availableParts\` 必须向用户说清楚，避免静默丢分 P。
-- 抖音若报「该平台需要登录态，请在桌面端浏览器中使用」，提示用户改走桌面端浏览能力，不要尝试传 cookie。
+- 支持抖音分享文案/短链，把分享文字里的链接传给 url。
 `,
   },
 ];
