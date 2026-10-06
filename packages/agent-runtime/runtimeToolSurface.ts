@@ -62,6 +62,26 @@ export const HIGH_RISK_MUTATION_TOOL_NAMES = [
   "deleteDialogs",
   "deleteMemory",
   "taskStop",
+  // 能力包（loadSkill 授予）里的写/删/部署/记忆写入/进程启动类工具：
+  // 只读 run 的授予通道会过同一份 blockedToolNames，名单缺项即可被绕过。
+  // 契约测试（runtimeToolSurface.test.ts）按名字关键字钉住 CAPABILITY_PACKS 的分类。
+  "applyEdit",
+  "applyLineEdits",
+  "launchProcess",
+  "rememberMemory",
+  "appFileWrite",
+  "appFileReplace",
+  "appDeploy",
+  "appDelete",
+  "createTable",
+  "addTableRow",
+  "addTableRows",
+  "updateTableRow",
+  "deleteTableRow",
+  // 编排副作用：startAgentRun 会另起一次 run（子 run 的只读与否由调用方参数决定），
+  // controlAgentRun 能追加指令/停止它；只读 run 不应拿到这两个（review A-1）。
+  "startAgentRun",
+  "controlAgentRun",
 ] as const;
 
 /**
