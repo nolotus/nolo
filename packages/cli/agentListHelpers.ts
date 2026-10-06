@@ -41,6 +41,8 @@ export type ListedAgent = {
   handle?: string;
   introduction?: string;
   provider?: string;
+  /** Custom endpoint；只用于计费归类（订阅端点识别），不进 safe 输出。 */
+  customProviderUrl?: string;
   inputPrice?: number;
   outputPrice?: number;
   updatedAt: string | number | null;
@@ -122,6 +124,11 @@ export function normalizeListedAgent(record: any): ListedAgent | null {
         ? { introduction: record.description }
         : {}),
     ...(typeof record?.provider === "string" && record.provider ? { provider: record.provider } : {}),
+    // 仅供 resolveBillingSource 判定订阅端点（Step Plan / OpenCode Go 等），
+    // safe 投影不输出它。缺了它本地 agent list 会把订阅端点全报成 user_api。
+    ...(typeof record?.customProviderUrl === "string" && record.customProviderUrl
+      ? { customProviderUrl: record.customProviderUrl }
+      : {}),
     ...(typeof record?.inputPrice === "number" && Number.isFinite(record.inputPrice)
       ? { inputPrice: record.inputPrice }
       : {}),

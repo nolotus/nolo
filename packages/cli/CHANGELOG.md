@@ -1,4 +1,13 @@
 
+## 0.95.2
+
+## 0.95.2 (2026-10-06)
+
+### Bug Fixes
+
+* **agent:** classify subscription endpoints as user_subscription ([ee78a22](https://github.com/nolotus/bun-nolo/commit/ee78a22e0b9e6725b16a33cd04e671777c0eb5d5))
+
+
 ## 0.95.1
 
 ## 0.95.1 (2026-10-06)

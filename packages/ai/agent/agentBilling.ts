@@ -1,5 +1,6 @@
 import { isAntigravityOAuthAgent } from "agent-runtime/antigravityOAuth";
 import { isOAuthApiKeyRef } from "agent-runtime/serverProxyPolicy";
+import { isSubscriptionEndpoint, isSubscriptionOAuthCredential } from "./providerRegistry";
 
 export type BillingSource =
   | "user_subscription"
@@ -79,6 +80,17 @@ export function resolveBillingSource(candidate: AgentBillingCandidate): BillingS
     candidate?.apiSource === "oauth" || isOAuthApiKeyRef(candidate?.apiKeyRef)
   ) return "user_subscription";
   if (candidate?.apiSource === "custom" || candidate?.billingSource === "user_api") {
+    // 自有 + custom 不必然是按量：端点归类以 providerRegistry 为唯一真值——
+    // commercialKind==="subscription" 的模板（Step Plan / OpenCode Go / Kimi Code /
+    // OAuth 凭据（如 devin）的同样是订阅。两者都如实报 user_subscription；未命中
+    // 的 custom 仍按量（user_api）。不要按 provider 字段判订阅：它与 OAuth
+    // apiKeyRef 不在同一命名空间（xai-api 按量模板的 provider 就叫 "xai"）。
+    if (
+      isSubscriptionEndpoint(candidate?.customProviderUrl) ||
+      isSubscriptionOAuthCredential(candidate?.apiKeyRef)
+    ) {
+      return "user_subscription";
+    }
     return "user_api";
   }
   return "platform_credits";
