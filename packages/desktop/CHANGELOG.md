@@ -1,4 +1,14 @@
 
+## 0.100.0
+
+## 0.100.0 (2026-10-06)
+
+### Features
+
+* **agent-run:** let loadSkill grant capability-pack tools to the current run ([d89225e](https://github.com/nolotus/bun-nolo/commit/d89225ebb7dd96c5f609c4edc27c00a9d6923d34))
+* **transcribe:** resolve Douyin links over plain HTTP without desktop browser ([bf95023](https://github.com/nolotus/bun-nolo/commit/bf9502353b97bf5a0868194f1ca7674563f9c1d4))
+
+
 ## 0.99.2
 
 ## 0.99.2 (2026-10-06)
