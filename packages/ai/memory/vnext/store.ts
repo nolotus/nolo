@@ -257,7 +257,21 @@ export const _appendStateBatch = (batch: any, state: MemoryStateVNext): void => 
   batch.put(stateEntityIndexKey(state.ownerId, state.entityId, state.id), { key });
 };
 
-/** @internal Append a retired-state overwrite to an existing batch. */
+/**
+ * @internal Append a retired-state overwrite to an existing batch.
+ *
+ * Unlike `retireMemoryStateVNext` (which fails loudly when the target state is
+ * missing), this is an unconditional `put` — no existence check, no read-back.
+ * Callers MUST therefore guarantee both of:
+ *   1. the state was just read from the catalog in this same request (so the
+ *      id is known to exist and the record is not stale), and
+ *   2. vNext states have no physical-delete path — nothing may `del` a state
+ *      key between that catalog read and this batch's `write()`.
+ * If either is broken, a batch write can resurrect a deleted record as a
+ * "retired" state that recall then ignores but audit/inspect still surfaces.
+ * Today neither can happen (grep: no `del(stateKey(...))` anywhere), which is
+ * why this stays a plain put instead of a guarded read-modify-write.
+ */
 export const _appendRetiredStateBatch = (batch: any, state: MemoryStateVNext): void => {
   batch.put(stateKey(state.ownerId, state.id), state);
 };

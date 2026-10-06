@@ -13,6 +13,72 @@ import type {
   MemoryOwnerRef,
   MemorySubjectType,
 } from "./types";
+import { _appendRetiredStateBatch, loadMemoryVNextCatalog } from "./vnext/store";
+import type { MemoryStateVNext } from "./vnext/types";
+
+/**
+ * Public id shape for a vNext current state, as projected by queryMemory.
+ * Delete paths must recognize this prefix to bridge recall → deletion.
+ */
+const VNEXT_STATE_ID_PREFIX = "vnext-state-";
+
+/**
+ * Project a vNext State into the same MemoryItem shape queryMemory returns,
+ * so preview/confirm surfaces and deletionToken treat both datasets uniformly.
+ */
+const toVNextMemoryItem = (
+  state: MemoryStateVNext,
+  owner: MemoryOwnerRef
+): MemoryItem => ({
+  id: `${VNEXT_STATE_ID_PREFIX}${state.id}`,
+  ownerType: owner.ownerType,
+  ownerId: owner.ownerId,
+  visibility: "private",
+  subjectType: "user",
+  subjectId: owner.ownerId,
+  kind: "semantic",
+  content: state.text.trim(),
+  createdAt: state.createdAt,
+  lastActivatedAt: state.createdAt,
+  activationCount: 1,
+  importance: 0.9,
+  confidence: 0.9,
+  resident: state.facet === "preference" || state.facet === "style",
+});
+
+/**
+ * vNext states are NOT matched by a legacy-shaped filter set. The caller
+ * (`canMatchVNext` in deleteMemoriesForOwnerFromDb) already skips the whole
+ * vNext section when any scoping filter other than ids / contentSubstring is
+ * present, so this matcher only ever sees those two filters — and it combines
+ * them exactly like the legacy `matchesFilters` does, i.e. with AND:
+ *   - when an id list is present, `vnext-state-<id>` must be IN it;
+ *   - when contentSubstring is present, state.text must CONTAIN it;
+ *   - when neither is present, nothing matches.
+ *
+ * The AND semantics are what keep `{ ids: [<legacy id>], contentSubstring }`
+ * safe: the id list pins the match set to the ids the caller explicitly named,
+ * so a vNext state that is NOT in that list must not be retired merely because
+ * its text contains the keyword. With OR, a keyword-scoped delete would retire
+ * every current state containing that word even though the caller only asked
+ * for one specific (legacy) id — a silent recall deletion with no UI recovery
+ * path. A legacy-shaped filter combination can therefore never retire a state
+ * that the same combination could not have matched on the legacy side.
+ */
+const matchesVNextFilters = (
+  state: MemoryStateVNext,
+  idSet: Set<string> | null,
+  contentSub: string
+): boolean => {
+  // No scoping signal at all: there is nothing to match on, so match nothing
+  // (never "match all", which would retire unrelated current states).
+  if (!idSet && !contentSub) return false;
+  // AND, mirroring matchesFilters: every filter that is present must be
+  // satisfied.
+  if (idSet && !idSet.has(`${VNEXT_STATE_ID_PREFIX}${state.id}`)) return false;
+  if (contentSub && !state.text.toLowerCase().includes(contentSub)) return false;
+  return true;
+};
 
 interface DeleteMemoryFilters {
   ids?: string[];
@@ -32,6 +98,16 @@ interface DeleteMemoryFilters {
 export interface DeleteMemoryResult {
   deletedCount: number;
   deletedIds: string[];
+  /**
+   * Ids (in the public `vnext-state-<id>` shape) of vNext states that were
+   * retired in place rather than physically deleted: the record, text and
+   * provenance are preserved for audit, only recall of them stops.
+   *
+   * `deletedCount` / `deletedIds` keep their COMBINED semantics (physical
+   * deletes + retires) for backward compatibility with callers that treat
+   * "gone from recall" uniformly; use this field to tell the two apart.
+   */
+  retiredIds: string[];
   matchedItems: MemoryItem[];
   deletionToken?: string;
 }
@@ -160,8 +236,52 @@ export const deleteMemoriesForOwnerFromDb = async (
     if (matchedItems.length >= limit) break;
   }
 
+  // vNext current states live in a separate key space (`mem2-s-…`) and are not
+  // covered by the legacy owner scan above. Match them here so deleting a
+  // recalled memory by id or content actually works.
+  const idSet = normalizeSet(filters.ids);
+  const contentSub = asTrimmedString(filters.contentSubstring).toLowerCase();
+  const vnextStateIdsToRetire: string[] = [];
+  const vnextStatesToRetire: MemoryStateVNext[] = [];
+  const vnextMatchedItems: MemoryItem[] = [];
+  let vnextPrincipalId: string | null = null;
+  // Scoping-filters guard: any filter other than ids / contentSubstring makes
+  // the whole vNext section non-matching (see the note on matchesVNextFilters).
+  // A request like deleteMemory({ contentKeyword, kinds: [...] }) must not retire
+  // a current state that the kinds filter could never have matched.
+  const hasScopingFilters = Boolean(
+    normalizeSet(filters.kinds) ||
+      normalizeSet(filters.facets) ||
+      normalizeSet(filters.tags) ||
+      asTrimmedString(filters.subjectType) ||
+      asTrimmedString(filters.subjectId) ||
+      asTrimmedString(filters.patternKeyPrefix) ||
+      asTrimmedString(filters.sourceDialogId)
+  );
+  const canMatchVNext =
+    !hasScopingFilters &&
+    (contentSub.length > 0 ||
+      (idSet !== null &&
+        [...idSet].some((id) => id.startsWith(VNEXT_STATE_ID_PREFIX))));
+  if (canMatchVNext) {
+    vnextPrincipalId = `${owner.ownerType}:${encodeURIComponent(owner.ownerId)}`;
+    const catalog = await loadMemoryVNextCatalog(db, vnextPrincipalId);
+    for (const state of catalog.states) {
+      // Check the budget BEFORE pushing, so the legacy scan's limit is also the
+      // ceiling for the combined (legacy + vNext) match set.
+      if (matchedItems.length >= limit) break;
+      if (state.retiredAt) continue;
+      if (!matchesVNextFilters(state, idSet, contentSub)) continue;
+      vnextStateIdsToRetire.push(state.id);
+      vnextStatesToRetire.push(state);
+      const projected = toVNextMemoryItem(state, owner);
+      vnextMatchedItems.push(projected);
+      matchedItems.push(projected);
+    }
+  }
+
   if (matchedItems.length === 0) {
-    return { deletedCount: 0, deletedIds: [], matchedItems: [] };
+    return { deletedCount: 0, deletedIds: [], retiredIds: [], matchedItems: [] };
   }
 
   const token = generateMemoryDeletionToken(
@@ -173,6 +293,7 @@ export const deleteMemoriesForOwnerFromDb = async (
     return {
       deletedCount: 0,
       deletedIds: [],
+      retiredIds: [],
       matchedItems,
       deletionToken: token,
     };
@@ -184,15 +305,45 @@ export const deleteMemoriesForOwnerFromDb = async (
     );
   }
 
-  const batch = db.batch();
-  for (const item of matchedItems) {
-    deleteMemoryItemWithIndexesInBatch(batch, item);
+  // Split legacy records from vNext states by membership in the vNext retire
+  // set (NOT by id-prefix sniffing): a legacy id that happened to start with
+  // "vnext-state-" must not be reported as deleted while actually left behind.
+  // vnextStateIdsToRetire and vnextMatchedItems are filled in lockstep above.
+  const vnextMatchedIdSet = new Set(
+    vnextStateIdsToRetire.map((stateId) => `${VNEXT_STATE_ID_PREFIX}${stateId}`)
+  );
+  const legacyItems = matchedItems.filter((item) => !vnextMatchedIdSet.has(item.id));
+
+  // Single atomic commit for BOTH sides. vNext retires are appended to the same
+  // batch (and the same `write()`) as the legacy index deletions, so a failure
+  // can never leave "legacy rows deleted + half the states retired" behind.
+  // vNext keeps the supersede-primitive semantics of retireMemoryStateVNext —
+  // the record, text and provenance stay readable for audit — but the write is
+  // issued through _appendRetiredStateBatch so it shares this batch.
+  // `vnextStatesToRetire` can only be filled inside the single `canMatchVNext`
+  // block above, which also sets `vnextPrincipalId` before the first push — so
+  // a non-empty retire list already implies the catalog was loaded from a real
+  // principal. (Earlier revisions also tested `!!vnextPrincipalId` here, which
+  // could never be false when the list is non-empty.)
+  const shouldRetireVNext = vnextStatesToRetire.length > 0;
+  if (legacyItems.length > 0 || shouldRetireVNext) {
+    const batch = db.batch();
+    for (const item of legacyItems) {
+      deleteMemoryItemWithIndexesInBatch(batch, item);
+    }
+    if (shouldRetireVNext) {
+      const nowIso = new Date().toISOString();
+      for (const state of vnextStatesToRetire) {
+        _appendRetiredStateBatch(batch, { ...state, retiredAt: nowIso });
+      }
+    }
+    await batch.write();
   }
-  await batch.write();
 
   return {
     deletedCount: matchedItems.length,
     deletedIds: matchedItems.map((item) => item.id),
+    retiredIds: vnextMatchedItems.map((item) => item.id),
     matchedItems,
     deletionToken: token,
   };
