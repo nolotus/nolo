@@ -1,4 +1,14 @@
 
+## 0.101.0
+
+## 0.101.0 (2026-10-06)
+
+### Features
+
+* **agent:** speed-aware agent selection with observed Claude timing ([cbe52b5](https://github.com/nolotus/bun-nolo/commit/cbe52b5c38189777ef3f1fbdf51f779947f36b20))
+* **cli:** speed context in local agent list ([c8122b5](https://github.com/nolotus/bun-nolo/commit/c8122b541730770e52ce18bdcedba5d025749b6f))
+
+
 ## 0.100.0
 
 ## 0.100.0 (2026-10-06)

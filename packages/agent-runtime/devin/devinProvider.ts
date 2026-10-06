@@ -10,6 +10,12 @@ import type {
   AgentRuntimeCompleteOptions,
   AgentRuntimeProvider,
 } from "../hostAdapter";
+import {
+  createProviderCallTimingTracker,
+  finalizeProviderCallTiming,
+  observeMeaningfulProviderResponse,
+  withProviderCallTimingFields,
+} from "ai/token/providerCallTiming";
 
 export { DEVIN_CONNECT_URL };
 
@@ -574,6 +580,13 @@ export function decodeDevinResponsePayload(payload: Buffer): DevinDecodedDelta {
 
 // --- Provider Implementation ---
 
+/** Devin Connect 帧事件是否携带真实模型输出（providerCallTiming「首个有效输出」判据）。 */
+export function isMeaningfulDevinEvent(event: DevinDecodedEvent): boolean {
+  if (event.type === "reasoning" || event.type === "content") return event.text.length > 0;
+  if (event.type === "tool-call-start") return !!event.name;
+  return event.argsDelta.length > 0;
+}
+
 export function createDevinProvider(options: {
   token: string;
   model?: string;
@@ -599,6 +612,11 @@ export function createDevinProvider(options: {
       });
 
       const frame = buildDevinConnectFrame(requestPayload);
+
+      // Observed Nolo logical invocation timing（见 ai/token/providerCallTiming）：
+      // 锚点在上游 fetch 发出前；Connect 流里首个有效输出（非空 reasoning /
+      // content、带名 tool-call-start、非空 tool args delta）记 firstOutputMs。
+      const timingTracker = createProviderCallTimingTracker();
 
       const response = await fetchImpl(DEVIN_CONNECT_URL, {
         method: "POST",
@@ -677,6 +695,7 @@ export function createDevinProvider(options: {
             reasoning += delta.reasoning;
             if (delta.finishReason) finishReason = delta.finishReason;
             for (const event of delta.events) {
+              if (isMeaningfulDevinEvent(event)) observeMeaningfulProviderResponse(timingTracker);
               if (event.type === "reasoning") {
                 opts?.onReasoningDelta?.(event.text);
               } else if (event.type === "content") {
@@ -735,8 +754,9 @@ export function createDevinProvider(options: {
       // consumers treat devin like any other provider:
       //   prompt_tokens = fresh input + cache_read (cached is a subset detail)
       //   total_tokens includes cache_write (real billable cost)
+      const timing = finalizeProviderCallTiming(timingTracker);
       const usage = frameUsage
-        ? {
+        ? withProviderCallTimingFields({
             prompt_tokens: frameUsage.prompt + frameUsage.cacheRead,
             completion_tokens: frameUsage.completion ?? 0,
             total_tokens:
@@ -750,7 +770,7 @@ export function createDevinProvider(options: {
             ...(frameUsage.cacheWrite > 0
               ? { cache_creation_input_tokens: frameUsage.cacheWrite }
               : {}),
-          }
+          }, timing) as Record<string, any>
         : undefined;
 
       return {
