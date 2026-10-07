@@ -144,6 +144,13 @@ export type AgentRunDisplayLabels = {
    * the default English layout stays byte-identical.
    */
   rows?: Partial<Record<"agent" | "status" | "tools" | "note" | "error" | "task", string>>;
+  /**
+   * Placeholder shown when a run's only name is a machine key
+   * (`agent-pub-…`): it names the *kind* of actor, not the instance, so a
+   * reader sees "sub-agent dispatched" instead of an opaque id. English
+   * default "agent"; the CLI injects the localized sub-agent copy.
+   */
+  unnamedAgent?: string;
 };
 
 const DEFAULT_LABELS = {
@@ -155,6 +162,7 @@ const DEFAULT_LABELS = {
   runs: (count: number) => `Runs (${count})`,
   toolCount: (count: number) => `${count} tools`,
   statusWord: (status: string) => status,
+  unnamedAgent: "agent",
   rows: {
     agent: "agent   ",
     status: "status  ",
@@ -175,6 +183,7 @@ function resolveLabels(labels?: AgentRunDisplayLabels) {
     runs: labels?.runs ?? DEFAULT_LABELS.runs,
     toolCount: labels?.toolCount ?? DEFAULT_LABELS.toolCount,
     statusWord: labels?.statusWord ?? DEFAULT_LABELS.statusWord,
+    unnamedAgent: labels?.unnamedAgent ?? DEFAULT_LABELS.unnamedAgent,
     rows: { ...DEFAULT_LABELS.rows, ...(labels?.rows ?? {}) },
   };
 }
@@ -244,14 +253,89 @@ export function formatRunAge(timing: RunTiming | undefined, now: number = Date.n
 }
 
 /**
+ * Machine-generated agent ids (see `core/prefix.ts` — the mint shapes):
+ *
+ * *  - `agent-<accountId>-<id|slug>` — owned key (`ownedAgentKeyPrefix`); the
+ *    account id is the hex slice produced by `generateUserIdV1` (10 chars,
+ *    matched as ≥8 for slack), so a first segment that is not hex is a
+ *    human name (`agent-writer`).
+ *  - `agent-pub-<id>` — public key (`publicAgentKey`); ULID-ish ids run
+ *    ≥10 lowercase-alnum chars.
+ *  - `agent-system-<id>` — platform system copy (`systemAgentKey`).
+ *  - `run-<ISO>-<rand>` — run ids, which `resolveRunLabel` can hand back
+ *    when a record carries no name at all.
+ *
+ * A bare key is a lookup handle, not a display name. Judging by *structure*
+ * rather than the `agent-` prefix keeps genuinely human names —
+ * `agent-writer`, `Agent-review-team` — on the card. (Same shape table as
+ * agentRunPanelLines' AUTO_IDENTITY_PATTERNS, duplicated because the panel
+ * module lives in the TUI layer this file cannot import.)
+ */
+const AGENT_KEY_NAME_PATTERNS: readonly RegExp[] = [
+  /^agent-[0-9a-f]{6,}-[a-z0-9]/i,
+  /^agent-pub-[a-z0-9]+/i,
+  /^agent-system-[a-z0-9]+/i,
+  /^run-\d{4}-\d{2}-\d{2}T[\d-]+Z-[a-z0-9]+$/i,
+];
+
+function isAgentKeyShapedName(agentName: string): boolean {
+  const trimmed = agentName.trim();
+  return AGENT_KEY_NAME_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/**
  * `agent   <name>  #<runId>` — the row that lets a reader tell two concurrent
  * runs apart. Either half may be missing; an empty result means the run
  * carries no identity at all and the row is dropped by the callers.
+ *
+ * `title` takes over the row (`<title> · <name>  #<id>`), matching the
+ * run-zone convention: the title names the run in the caller's own words,
+ * the agent name stays on as secondary info. The `#id` suffix always stays
+ * — it demotes to a trailing detail rather than disappearing, because the
+ * moment two runs share a title it is the only way to tell them apart
+ * (runZoneLines reaches the same conclusion by re-adding the id on
+ * duplicate titles; keeping it unconditionally is simpler and never wrong).
+ * `titleOnOwnLine` is for cards that print the title as its own first line
+ * (formatStartRunCard): the row keeps `name  #id` rather than composing
+ * `title · name` again.
  */
-function formatIdentityRow(agentName: string, runId?: string): string {
-  const parts: string[] = [];
-  if (!isAgentNameFallback(agentName)) parts.push(agentName);
+function formatIdentityRow(
+  agentName: string,
+  runId?: string,
+  opts?: { title?: string; titleOnOwnLine?: boolean; unnamedAgent?: string }
+): string {
+  const trimmed = typeof agentName === "string" ? agentName.trim() : "";
+  const title = opts?.title?.trim();
+  // Resolve the display name once: real name > kind-of-actor placeholder for
+  // machine keys > nothing for the literal fallback.
+  let displayName = "";
+  if (!isAgentNameFallback(trimmed)) {
+    if (isAgentKeyShapedName(trimmed)) {
+      // A machine key reaches the card only as resolveRunLabel's last resort:
+      // swap it for the placeholder rather than printing the key itself.
+      displayName = opts?.unnamedAgent?.trim() ?? "";
+    } else {
+      displayName = trimmed;
+    }
+  }
+  // resolveRunLabel may have picked the title itself as the label (name
+  // fields all empty); the title is never the agent's name, so it yields.
+  if (displayName === title) displayName = "";
   const short = shortRunId(runId);
+  const idSuffix = short ? `  #${short}` : "";
+  if (title) {
+    if (opts?.titleOnOwnLine) {
+      // Start card: the title rides its own line above — the identity row
+      // keeps `name  #id`; the id is demoted, not dropped.
+      return displayName ? `${displayName}${idSuffix}` : short ? `#${short}` : "";
+    }
+    // `title · name  #id` — single-space separator after the title, matching
+    // the run-zone form; the row label already supplies the visual padding.
+    if (displayName) return `${title} · ${displayName}${idSuffix}`;
+    return `${title}${idSuffix}`;
+  }
+  const parts: string[] = [];
+  if (displayName) parts.push(displayName);
   if (short) parts.push(`#${short}`);
   return parts.join("  ");
 }
@@ -266,6 +350,7 @@ export function isAgentNameFallback(agentName: string | undefined | null): boole
 export type RunLabelFields = {
   agentName?: unknown;
   name?: unknown;
+  title?: unknown;
   agentKey?: unknown;
   runId?: unknown;
 };
@@ -275,8 +360,10 @@ export type RunLabelFields = {
  *
  * `agentName` is optional everywhere (startAgentRun only requires `agentKey`),
  * so anything rendered off `agentName` alone degrades to a screen of identical
- * `agent` rows. `agentKey` is present on every run record and `runId` is
- * unique, so both are strictly better fallbacks than the literal.
+ * `agent` rows. `title` outranks `agentKey`: it is the caller's own words for
+ * what the run is, where a key only says which agent. `agentKey` is present on
+ * every run record and `runId` is unique, so both are strictly better
+ * fallbacks than the literal.
  *
  * Returns the literal `"agent"` only when a run carries no identity at all —
  * that keeps `isAgentNameFallback(resolveRunLabel(run))` true, which is how the
@@ -285,7 +372,7 @@ export type RunLabelFields = {
  * Fields are typed `unknown` because callers hand over raw parsed JSON.
  */
 export function resolveRunLabel(run: RunLabelFields): string {
-  for (const candidate of [run.agentName, run.name, run.agentKey, run.runId]) {
+  for (const candidate of [run.agentName, run.name, run.title, run.agentKey, run.runId]) {
     if (typeof candidate === "string" && !isAgentNameFallback(candidate)) {
       return candidate.trim();
     }
@@ -299,6 +386,8 @@ export function formatStartRunCard(
   opts?: {
     /** Delegated task text — the only thing that tells two runs apart on sight. */
     task?: string;
+    /** Caller-supplied short title; when present it replaces the task preview row. */
+    title?: string;
     runId?: string;
     labels?: AgentRunDisplayLabels;
   }
@@ -306,13 +395,28 @@ export function formatStartRunCard(
   const L = resolveLabels(opts?.labels);
   const icon = getAgentRunStatusIcon(status);
   const lines = [L.runStarted];
-  const identity = formatIdentityRow(agentName, opts?.runId);
+  // Title wins over taskPreview: the caller wrote it to name this run, where
+  // the preview is just the first sentence of the brief (often boilerplate).
+  // It renders unlabeled — it IS the card's subject, not a field of it.
+  const title = opts?.title?.trim();
+  if (title) {
+    lines.push(`  ${title}`);
+  }
+  // The title rides its own line above, so the identity row must NOT compose
+  // `title · name` again — `titleOnOwnLine` keeps `name  #id` (the id stays
+  // as a trailing detail: two runs can share a title); `title` is also
+  // passed so a label that IS the title dedupes to just `#id`.
+  const identity = formatIdentityRow(agentName, opts?.runId, {
+    title,
+    titleOnOwnLine: true,
+    unnamedAgent: L.unnamedAgent,
+  });
   if (identity) {
     lines.push(`  ${L.rows.agent}${identity}`);
   }
   lines.push(`  ${L.rows.status}${icon} ${L.statusWord(status)}`);
   const task = opts?.task?.trim();
-  if (task) {
+  if (task && !title) {
     lines.push(`  ${L.rows.task}${clipText(task, TASK_PREVIEW_MAX)}`);
   }
   return lines.join("\n");
@@ -358,6 +462,8 @@ export function formatStatusRunCard(
     errorMessage?: string;
     logLines?: string[];
     runId?: string;
+    /** Caller-supplied short title; shown instead of `name  #id` when present. */
+    title?: string;
     timing?: RunTiming;
     /** When false, omit the Log tail section (unchanged since last emit). */
     includeLogTail?: boolean;
@@ -372,7 +478,13 @@ export function formatStatusRunCard(
   // been going" is read together with "is it still going", not separately.
   const lines = [L.runStatus, `  ${icon} ${L.statusWord(status)}${age ? `   ${age}` : ""}`];
   // Never render `agent   agent` — skip the row when there is no identity.
-  const identity = formatIdentityRow(agentName, opts?.runId);
+  // With a title the row becomes `agent   <title> · <name>  #<id>` (run-zone
+  // form): the title names the run, the name says which agent, and the `#id`
+  // stays as a trailing detail — two concurrent runs can share one title.
+  const identity = formatIdentityRow(agentName, opts?.runId, {
+    title: opts?.title,
+    unnamedAgent: L.unnamedAgent,
+  });
   if (identity) {
     lines.push(`  ${L.rows.agent}${identity}`);
   }
@@ -430,6 +542,8 @@ export function formatFinishedRunCard(
   status: string,
   opts?: {
     runId?: string;
+    /** Caller-supplied short title; shown instead of `name  #id` when present. */
+    title?: string;
     toolCallCount?: number;
     lastToolNames?: string[];
     lastAssistantText?: string;
@@ -449,7 +563,10 @@ export function formatFinishedRunCard(
     .filter(Boolean)
     .join(" · ");
   const lines = [L.runFinished, `  ${icon} ${summary}`];
-  const identity = formatIdentityRow(agentName, opts?.runId);
+  const identity = formatIdentityRow(agentName, opts?.runId, {
+    title: opts?.title,
+    unnamedAgent: L.unnamedAgent,
+  });
   if (identity) {
     lines.push(`  ${L.rows.agent}${identity}`);
   }

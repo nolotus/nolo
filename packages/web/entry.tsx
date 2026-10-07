@@ -2,7 +2,6 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 import React from "react";
-import type { RouteObject } from "app/routing";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import { RouterProvider } from "app/routing";
@@ -22,9 +21,11 @@ import { detectSite, loadRoutes, type SiteId } from "app/web/siteRoutes";
 import i18n from "app/i18n/client";
 import { loadClientLanguage } from "app/i18n/clientResources";
 import { isProduction } from "app/utils/env";
+import { resolveClientHydrateServer } from "app/settings/serverBootstrap";
 import { isCloudEdition } from "identity";
 import { toast } from "app/utils/toast";
 import { registerDatabaseActionToast } from "database/actions/actionToast";
+import { installLinkPreviewInterceptor } from "app/layout/linkPreviewInterceptor";
 
 registerDatabaseActionToast({
   success: (message) => toast.success(message),
@@ -185,11 +186,23 @@ applyAgentThemeToElement(
   themeModePreload.isDark
 );
 
+// 只有 SSR 白名单正式站点（nolo.chat / us.nolo.chat）才在 hydrate 前把
+// currentServer 覆盖为运行时 origin —— 与 SSR render.tsx 的注入闸门共用同一真值
+// （serverBootstrap.resolveClientHydrateServer），保证 hydrate 帧与 SSR HTML
+// 逐字节一致。
+// 非白名单 host（localhost 开发 / 局域网 / 自建域名）保持 SSR 下发的默认值，
+// 与改动前一致；运行时 origin 由 App.tsx 的 mount effect 在挂载后经
+// dispatch(addHostToCurrentServer(runtimeOrigin)) 纠正。
+const cloudBootstrapServer = resolveClientHydrateServer({
+  hostname: window.location.hostname,
+  origin: window.location.origin,
+});
 const preloadedState = {
   ...serverPreloadedWithoutShare,
   settings: {
     ...serverPreloadedWithoutShare.settings,
     ...themeModePreload,
+    ...(cloudBootstrapServer ? { currentServer: cloudBootstrapServer } : {}),
     ...devLoginSettings,
     ...(storedThemeName ? { themeName: storedThemeName } : {}),
     ...(storedThemeDensity ? { density: storedThemeDensity } : {}),
@@ -249,33 +262,8 @@ if (isDesktopShell) {
 
   // Desktop "click-to-preview": clicking any cross-origin http(s) link opens it
   // in the LocalPreviewSplit iframe instead of navigating away or launching an
-  // external browser. The agent just replies with a URL — no tool, no skill
-  // needed. Same-origin links keep SPA routing; Cmd/Ctrl+click (and middle
-  // click) keep the external-browser escape hatch.
-  document.addEventListener(
-    "click",
-    (event) => {
-      if (event.defaultPrevented) return;
-      if (event.metaKey || event.ctrlKey || event.button !== 0) return;
-      const target = event.target as HTMLElement | null;
-      const anchor = target?.closest?.("a[href]") as HTMLAnchorElement | null;
-      if (!anchor) return;
-      const href = anchor.getAttribute("href") ?? "";
-      let url: URL;
-      try {
-        url = new URL(href, window.location.href);
-      } catch {
-        return;
-      }
-      if (url.protocol !== "http:" && url.protocol !== "https:") return;
-      if (url.origin === window.location.origin) return; // SPA router handles these
-      event.preventDefault();
-      void import("app/appInspector/appInspectorStore").then((m) => {
-        m.setPreview(true, url.toString());
-      });
-    },
-    true
-  );
+  // external browser.
+  installLinkPreviewInterceptor();
 
   // 劫持 console 桥接到 Electrobun 主进程
   const sendToHost = (window as any).__electrobunSendToHost;
@@ -463,18 +451,30 @@ const browserStore = createAppStore({
   tokenManager: webTokenManager,
   preloadedState,
 });
+// Cloud web only: local/desktop bootstrap adapters return null. These tokens
+// restore UI identity, not trust/permissions; server validation is unchanged.
+// React hydration still reads Core.getServerSnapshot(), the logged-out SSR view.
+if (bootstrappedAuthState) {
+  browserStore.accountSessionRuntime?.core.initializeFromTokens(
+    bootstrappedAuthState.tokens
+  );
+}
 delete window.__PRELOADED_STATE__;
 
 const domNode = document.getElementById("root") as HTMLElement;
 
 (async () => {
-  const lng = await loadClientLanguage(i18n, requestedLng);
-
   // 与 SSR 保持一致：优先使用服务端注入的 siteId；没有则自行判定
   const siteId: SiteId = window.__SITE_ID__ || detectSite(hostname);
 
-  // hydrate 前预加载对应站点的路由，确保与 SSR 一致 -> 不闪烁
-  const initialRoutes: RouteObject[] = await loadRoutes(siteId, undefined);
+  // locale 与路由并行加载：两条线同时开始，且必须二者全部完成后才 hydrate
+  //（Promise.all 是完成屏障）。lng 取 loadClientLanguage 的最终返回值——请求语言
+  // 加载失败时它已回退到 zh-CN 并返回该语言；任一 promise reject 都会让整条
+  // 启动链 reject → 不 hydrate（错误传播，不用半完成状态渲染，避免 mismatch）。
+  const [lng, initialRoutes] = await Promise.all([
+    loadClientLanguage(i18n, requestedLng),
+    loadRoutes(siteId, undefined),
+  ]);
 
   const AppRoot = () => (
     <React.StrictMode>

@@ -19,8 +19,6 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
-import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
-import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import {
   buildTurnTokenUsage,
   formatUsage,
@@ -117,10 +115,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -783,9 +781,39 @@ function buildAuthFailure(ctx: FailureCtx): string {
   // used by the non-interactive no-token path below.
   const platformNoToken =
     ctx.where === "server chat proxy" && isAuthNoTokenBody(ctx.message);
-  const fix = platformNoToken
-    ? `This install is not logged in — run \`nolo login\`, or set AUTH_TOKEN / NOLO_SERVER`
-    : ctx.where === "server chat proxy"
+
+  // True no-token 401 on the platform transport: this install has neither a
+  // platform login nor a usable local model credential. Replace the single
+  // "run nolo login" nudge with the three working paths so a user who never
+  // intends to log in still sees `nolo run` / `nolo auth`.
+  //
+  // The raw provider echo (`raw="{...}"` / `headers=[...]`) is debug noise: by
+  // default it is stripped via stripDebugNoise, and the raw detail is only
+  // re-appended when `NOLO_DEBUG=1` — the same env switch localRuntime* files
+  // already use — or the more targeted `NOLO_CLI_DEBUG_DETAIL=1`.
+  if (platformNoToken) {
+    const guidance =
+      `\n  This turn did not run: you are not logged in to Nolo and no local model credential is available.` +
+      `\n    · Use the Nolo platform: /login (or run \`nolo login\` after exiting the TUI)` +
+      `\n    · Use your own subscription: nolo auth antigravity | claude | chatgpt | xai` +
+      `\n    · No login at all: nolo run "<task>" (runs on local Codex)`;
+    // 这一支专指 AUTH_NO_TOKEN：错误体是固定的平台 JSON（字段名用户看不懂，也没有
+    // 可行动信息），上面三行引导已经把该说的说完了。默认只留一行人类可读摘要，
+    // 不再把整块 JSON 喷给用户；排查时用 NOLO_DEBUG=1 / NOLO_CLI_DEBUG_DETAIL=1
+    // 看完整 Detail（与 stripDebugNoise 的既有开关一致）。
+    const detail =
+      process.env.NOLO_DEBUG === "1" || process.env.NOLO_CLI_DEBUG_DETAIL === "1"
+        ? `\n  Detail: ${ctx.message}`
+        : `\n  Detail: platform returned AUTH_NO_TOKEN (no authentication token provided)`;
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no token was sent).` +
+      `${guidance}${detail} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
+  const fix =
+    ctx.where === "server chat proxy"
       ? `Check the agent's provider/api-key settings on nolo.chat`
       : `Fix the local credential/config and retry`;
 
@@ -1713,7 +1741,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }
+      error as { usageRecords?: RunAgentTurnResult["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1788,7 +1816,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
+): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -1973,7 +2001,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability && "exitCode" in localAvailability) {
+  if (localAvailability?.exitCode) {
     return { exitCode: localAvailability.exitCode };
   }
 

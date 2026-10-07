@@ -18,6 +18,7 @@ import type {
 } from "../../agent-runtime/oauthTokenStore";
 import type { CredentialMigrationOptions } from "../../agent-runtime/credentialLocationMigration";
 import { createOAuthTokenStore } from "./token-store";
+import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 import {
   runOpenAiCodexBrowserPkce,
   runOpenAiCodexDeviceCode,
@@ -34,10 +35,14 @@ import { extractGoogleValidationLink } from "core/chat/validationUrl";
 import { refreshAntigravityOAuthToken } from "./flows/antigravity";
 import { resolveFreshAccessToken } from "../../agent-runtime/oauthTokenStore";
 
-export type ServerSyncConfig = {
-  serverOrigin: string;
-  authToken: string;
-};
+import {
+  resolveServerSyncConfig,
+  type ServerSyncConfig,
+} from "./serverSyncConfig";
+
+// 保持既有导入方（含测试）不破：这两个符号原来就由本模块导出。
+export { resolveServerSyncConfig };
+export type { ServerSyncConfig };
 
 export type AuthProviderCommandDeps = OAuthFlowDeps & {
   noBrowserByDefault?: boolean;
@@ -295,50 +300,53 @@ function isOAuthProvider(value: string): value is OAuthProvider {
 // ── Server sync ───────────────────────────────────────────────────────────────
 
 /**
- * Resolve the nolo server origin and auth token for --sync-to-server.
- * Priority: env vars (NOLO_SERVER, AUTH_TOKEN) → profile config.
+ * 同步成功后把本地那份改成「服务端托管」：
+ * - 删掉本地 refreshToken —— 服务端是唯一刷新者。本地再刷新会把服务端那条
+ *   上游授权作废（2026-10-01 用户确认：一处刷新另一处就失效）。
+ * - 记下 origin/userId 标记，之后本地过期时只向这台服务器取 access token。
+ * 只改本地文件，不重新上传；失败时保留原状（宁可本地还能用，也不要写坏）。
  */
-export function resolveServerSyncConfig(): ServerSyncConfig | null {
-  const envServer =
-    process.env.NOLO_SERVER?.trim() ||
-    process.env.NOLO_SERVER_URL?.trim() ||
-    process.env.BASE_URL?.trim() ||
-    "";
-  const envToken =
-    process.env.AUTH_TOKEN?.trim() || process.env.NOLO_AUTH_TOKEN?.trim() || "";
-
-  if (envServer && envToken) {
-    return { serverOrigin: envServer.replace(/\/+$/, ""), authToken: envToken };
-  }
-
-  let profileServer = "";
-  let profileToken = "";
+function markCredentialServerManaged(
+  provider: OAuthProvider,
+  credential: OAuthCredential,
+  syncConfig: ServerSyncConfig,
+  deps: AuthProviderCommandDeps,
+): boolean {
+  const output = deps.output ?? console;
+  const userId = parseUserIdFromAuthToken(syncConfig.authToken) || "local-user";
   try {
-    const config = loadProfileConfig();
-    const profileEnv = buildEnvFromProfile(config) as Record<
-      string,
-      string | undefined
-    >;
-    profileServer = profileEnv.NOLO_SERVER?.trim() || "";
-    profileToken = profileEnv.AUTH_TOKEN?.trim() || "";
-  } catch {
-    // Profile config not available
+    const { refreshToken: _dropped, ...rest } = credential;
+    const tokenStore = deps.tokenStore
+      ?? createOAuthTokenStore(
+        undefined,
+        deps.credentialMigration ?? { enableLegacyMigration: true },
+      );
+    tokenStore.write(provider, {
+      ...rest,
+      obtainedAt: credential.obtainedAt ?? Date.now(),
+      serverManaged: {
+        origin: syncConfig.serverOrigin,
+        userId,
+        syncedAt: Date.now(),
+      },
+    });
+    output.log(
+      `[nolo] 本地不再保存 refresh token：${provider} 由 ${syncConfig.serverOrigin} 统一刷新（用完即取）。`,
+    );
+    return true;
+  } catch (err) {
+    output.log(
+      `[nolo] Warning: 本地凭据状态更新失败（${toErrorMessage(err)}）。`,
+    );
+    return false;
   }
-
-  const serverOrigin = (envServer || profileServer).replace(/\/+$/, "");
-  const authToken = envToken || profileToken;
-  if (serverOrigin && authToken) {
-    return { serverOrigin, authToken };
-  }
-
-  return null;
 }
 
 async function syncCredentialToServer(
   provider: OAuthProvider,
   credential: OAuthCredential,
   deps: AuthProviderCommandDeps
-): Promise<void> {
+): Promise<"ok" | "sync_failed" | "mark_failed"> {
   const output = deps.output ?? console;
   const fetchImpl = deps.fetchImpl ?? fetch;
 
@@ -347,7 +355,7 @@ async function syncCredentialToServer(
     output.log(
       `[nolo] Warning: server sync requires NOLO_SERVER and AUTH_TOKEN env vars, or a configured profile. Skipping server sync.`
     );
-    return;
+    return "sync_failed";
   }
 
   const { serverOrigin, authToken } = syncConfig;
@@ -373,8 +381,13 @@ async function syncCredentialToServer(
     });
 
     if (res.ok) {
-      output.log(`[nolo] Synced to ${serverOrigin}`);
-      output.log(`[nolo] 网页端现在可以使用该订阅了。`);
+      const marked = markCredentialServerManaged(provider, credential, syncConfig, deps);
+      if (marked) {
+        output.log(`[nolo] Synced to ${serverOrigin}`);
+        output.log(`[nolo] 网页端现在可以使用该订阅了。`);
+        return "ok";
+      }
+      return "mark_failed";
     } else {
       let errorDetail = "";
       try {
@@ -386,11 +399,13 @@ async function syncCredentialToServer(
       output.log(
         `[nolo] Warning: server sync failed (${res.status}${errorDetail ? `: ${errorDetail}` : ""}). Token saved locally.`
       );
+      return "sync_failed";
     }
   } catch (err: any) {
     output.log(
       `[nolo] Warning: server sync failed (${err?.message ?? "network error"}). Token saved locally.`
     );
+    return "sync_failed";
   }
 }
 
@@ -442,8 +457,15 @@ export async function runAuthProviderCommand(
       );
       return 1;
     }
-    await syncCredentialToServer(provider, credential, deps);
-    return 0;
+    if (credential.serverManaged) {
+      error.error(
+        `[nolo] ${provider} 凭据已由 ${credential.serverManaged.origin} 服务端托管（本地无 refreshToken）。\n` +
+          `如需重新同步，请运行: nolo auth ${provider} --sync-to-server`
+      );
+      return 1;
+    }
+    const synced = await syncCredentialToServer(provider, credential, deps);
+    return synced === "ok" ? 0 : 1;
   }
 
   // `nolo auth antigravity --verify` — 一次性账号验证引导。
@@ -506,7 +528,7 @@ export async function runAuthProviderCommand(
         accessToken: accessToken ?? credential.accessToken,
         metadata: (credential.metadata as Record<string, unknown>) ?? null,
         openAiBody: { messages: [{ role: "user", content: "hi" }] },
-        fetchImpl: deps.fetchImpl ?? fetch,
+        fetchImpl: (deps.fetchImpl ?? fetch) as typeof fetch,
       });
     } catch (err) {
       // 区分本地结构错（缺 projectId 等，fetch 前就抛）和网络错（fetch 内抛）：
@@ -728,7 +750,11 @@ export async function runAuthProviderCommand(
     }
 
     if (shouldSync) {
-      await syncCredentialToServer(provider, credential, deps);
+      const syncResult = await syncCredentialToServer(provider, credential, deps);
+      if (syncResult === "mark_failed") {
+        error.error(`[nolo] 凭据已成功上传服务器，但本地打上托管标记失败。为防双方竞态刷新导致失效，请重新授权。`);
+        return 1;
+      }
     }
 
     return 0;

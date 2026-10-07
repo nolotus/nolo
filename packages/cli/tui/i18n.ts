@@ -174,10 +174,6 @@ const STRINGS = {
     en: "Esc to stop",
     zh: "Esc 停止回复",
   },
-  queuedHint: {
-    en: "queued",
-    zh: "排队",
-  },
   flushQueuedIdleHint: {
     en: "Flushed {0} queued messages as one.",
     zh: "已把 {0} 条排队消息合并发送。",
@@ -443,6 +439,65 @@ const STRINGS = {
     en: "Runs ({0})",
     zh: "运行 ({0})",
   },
+  // Tool-count fact on run rows/cards/panel (`12 tools` / `12 个工具`).
+  runToolsCount: {
+    en: "{0} tools",
+    zh: "{0} 个工具",
+  },
+  // Card-body status words / row labels. Display labels only: raw log lines,
+  // protocol params and tool ids stay untranslated.
+  runStatusNotFound: { en: "not_found", zh: "未找到" },
+  runRowAgent: { en: "agent", zh: "执行者" },
+  runRowStatus: { en: "status", zh: "状态" },
+  runRowTools: { en: "tools", zh: "工具" },
+  runRowNote: { en: "note", zh: "备注" },
+  runRowError: { en: "error", zh: "错误" },
+  runRowTask: { en: "task", zh: "任务" },
+  // listAgents card header (`Agents (3)` / `智能体 (3)`). The shared ai
+  // renderer keeps the English default; the CLI relabels the header line.
+  agentsListLabel: { en: "Agents ({0})", zh: "智能体 ({0})" },
+  // Fallback identity for auto-generated agent ids (run zone / dock / panel).
+  subAgentName: {
+    en: "Sub-agent",
+    zh: "子智能体",
+  },
+  // Status vocabulary the fixed run zone does not label (running shows only its
+  // elapsed time there). `en` must stay equal to the raw store status so a
+  // switch of locale never changes what an English reader already understood.
+  runZoneRunning: { en: "running", zh: "运行中" },
+  runZonePending: { en: "pending", zh: "等待中" },
+  runZoneCancelling: { en: "cancelling", zh: "正在取消" },
+  // controlAgentRun displayData: wait timeout and stop-not-confirmed outcomes.
+  agentRunWaitTimeout: {
+    en: "⏳ wait timed out after {0}s — the run is still running: wait again later, or use status/stop",
+    zh: "⏳ wait 超时（{0}s），run 仍在运行：可稍后再 wait，或改用 status/stop",
+  },
+  agentRunStopFailedAlive: {
+    en: "stop failed: process {0} still alive after SIGKILL",
+    zh: "停止失败：进程 {0} 在 SIGKILL 后仍然存活",
+  },
+  agentRunPendingReconcile: {
+    en: "{0} (pending reconcile)",
+    zh: "{0}（待对账）",
+  },
+  // --- Fixed run zone (top of composer, replaces the ⚙ running status chip) --
+  // Each active run renders as `⚙ <title> · <agent> · <elapsed> · N tools`.
+  // runZoneFor is the elapsed-time fact for a *running* run (`for 1m23s` /
+  // `已运行 1m23s`); terminal runs print `<status> <age>` instead and don't use it.
+  runZoneFor: {
+    en: "for {0}",
+    zh: "已运行 {0}",
+  },
+  // Terminal linger line: `✓ <run> · done · took 12m03s`.
+  runZoneDone: { en: "done", zh: "完成" },
+  runZoneFailed: { en: "failed", zh: "失败" },
+  runZoneCancelled: { en: "cancelled", zh: "已取消" },
+  runZoneTook: { en: "took {0}", zh: "用时 {0}" },
+  // Overflow marker when more runs are active than the zone shows at once.
+  runZoneMore: {
+    en: "+{0} more",
+    zh: "还有 {0} 个",
+  },
   // --- Dialog (picker / confirm) copy --------------------------------------
   // Key-hint wording is unified across select / multi-select / confirm so the
   // three dialogs read as one family: "<Label>  <↑↓ move · Enter choose ·
@@ -655,6 +710,10 @@ const STRINGS = {
     en: "file reference (path only, content not read): {0}",
     zh: "文件引用（仅路径，未读取内容）：{0}",
   },
+  busyAttachmentsBlocked: {
+    en: "can't queue a message with {0} clipboard image(s) while a turn is running — draft kept. Send again after this turn ends, or press Backspace to drop the attachment and send text only.",
+    zh: "忙碌中无法排队带 {0} 张剪贴板图片的消息，草稿已保留；等本轮结束后再按 Enter 发送，或 Backspace 撤销附件后改发纯文字。",
+  },
   agentsTip: {
     en: "Tip: run /switch for the full picker, or /switch list for your private agents too.",
     zh: "提示：用 /switch 打开完整选择器，或 /switch list 连你的私有智能体一起列出。",
@@ -698,6 +757,7 @@ const STRINGS = {
       "  /update               Update the nolo CLI install",
       "  /version              Show version/update hint",
       "  /logs                 Show recent diagnostics and the log file path",
+      "  /learn                Review this dialog for reusable tool/prompt improvements",
       "  /exit                 Leave the workspace",
       "",
       "You can also type normally. nolo routes simple read/status requests to CLI commands and sends the rest to the current agent.",
@@ -740,6 +800,7 @@ const STRINGS = {
       "  /update               更新 nolo CLI",
       "  /version              查看版本与更新提示",
       "  /logs                 查看最近诊断记录与日志文件位置",
+      "  /learn                从当前对话复盘可复用的工具/提示词改进",
       "  /exit                 退出工作区",
       "",
       "也可以直接输入自然语言。简单的读取/状态请求会走 CLI 命令，其余交给当前 agent。",
@@ -912,13 +973,15 @@ const STRINGS = {
     en: "Tell nolo what to change, for example: /customize make my default agent more concise.",
     zh: "告诉 nolo 你想改什么，例如：/customize make my default agent more concise。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginHint: {
     en: "MVP login uses profile/env auth. Set AUTH_TOKEN, NOLO_SERVER, or NOLO_PROFILE before starting nolo.",
     zh: "MVP 登录走 profile/环境变量认证。启动 nolo 前请设置 AUTH_TOKEN、NOLO_SERVER 或 NOLO_PROFILE。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginTuiStart: {
-    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL).",
-    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接）。",
+    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL), or exit and run `nolo login`.",
+    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接），或退出后运行 `nolo login`。",
   },
   loginUsage: {
     en: "Usage: /login [--server <url>]. Unsupported flags: {0}",
@@ -955,6 +1018,10 @@ const STRINGS = {
   loginCancelled: {
     en: "Login cancelled.",
     zh: "已取消登录。",
+  },
+  welcomeAuthGuidance: {
+    en: "Not logged in to Nolo — three ways to get going:\n  · Run a task on local Codex: nolo run \"<task>\" (no login needed)\n  · Bind your own model subscription: nolo auth antigravity | claude | chatgpt | xai\n  · Use the Nolo platform: type /login (gives you a browser authorization link)",
+    zh: "未登录 Nolo —— 三条路都能用：\n  · 用本地 Codex 跑任务：nolo run \"<任务>\"（不需要登录）\n  · 绑定你自己的模型订阅：nolo auth antigravity | claude | chatgpt | xai\n  · 用 Nolo 平台：直接输入 /login（会给出浏览器授权链接）",
   },
   versionInfo: {
     en: "nolo {0}\nUpdate this install with: nolo update\nIf repo-local output differs, publish/install the latest npm package first.",
@@ -998,6 +1065,11 @@ const STRINGS = {
   actionGateInteractiveBody: {
     en: "Complete it in the terminal, then nolo will continue.",
     zh: "在终端中完成操作后，nolo 将继续。",
+  },
+  // Compact memory-tool trace
+  memoryDeleteRequestedCount: {
+    en: "requested deletion of {0}",
+    zh: "已请求删除 {0} 条",
   },
   // Agent catalog sources
   agentSourcePlatform: {
@@ -1046,6 +1118,10 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   execShell: { en: "Run", zh: "执行" },
   runCommand: { en: "Run", zh: "执行" },
   captureVisualState: { en: "Capture", zh: "截屏" },
+  // Memory tools
+  rememberMemory: { en: "Remember", zh: "记住" },
+  queryMemory: { en: "Recall", zh: "查记忆" },
+  deleteMemory: { en: "Forget", zh: "删记忆" },
   // Workspace / diagnostics
   searchWorkspace: { en: "Search workspace", zh: "搜索工作区" },
   // 同一工具在 web/server 工具面用 snake_case 命名（packages/ai/tools/index.ts）。
@@ -1083,6 +1159,11 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   exa_search: { en: "Web search", zh: "联网搜索" },
   // Skill loading
   loadSkill: { en: "Used Skill", zh: "使用技能" },
+  // Agent orchestration
+  listAgents: { en: "List agents", zh: "列出智能体" },
+  readAgent: { en: "Read agent", zh: "读取智能体" },
+  startAgentRun: { en: "Start agent", zh: "启动智能体" },
+  controlAgentRun: { en: "Control agent", zh: "控制智能体" },
 };
 
 /** Localized action label for a tool, falling back to the raw tool name. */
@@ -1105,6 +1186,38 @@ export function toolLabelVariants(name: string): string[] {
   return [...new Set(Object.values(entry))];
 }
 
+/**
+ * Localized short status word for a run row (panel / dock).
+ *
+ * Terminal mapping mirrors the fixed run zone (`timeout`/`orphaned` read as
+ * failure, `killed`/`cancelled` read as cancelled) so every run surface says
+ * the same thing about the same state. Unknown future statuses fall through
+ * verbatim: an unfamiliar word beats a blank.
+ */
+export function agentRunStatusWord(status: string): string {
+  switch (status) {
+    case "running":
+      return t("runZoneRunning");
+    case "pending":
+      return t("runZonePending");
+    case "cancelling":
+      return t("runZoneCancelling");
+    case "done":
+      return t("runZoneDone");
+    case "killed":
+    case "cancelled":
+      return t("runZoneCancelled");
+    case "failed":
+    case "timeout":
+    case "orphaned":
+      return t("runZoneFailed");
+    case "not_found":
+      return t("runStatusNotFound");
+    default:
+      return status;
+  }
+}
+
 /** Labels injected into `packages/ai` agent-run card helpers (no cli→ai reverse dep). */
 export function agentRunCardLabels(): {
   runStatus: string;
@@ -1113,6 +1226,18 @@ export function agentRunCardLabels(): {
   runFinished: string;
   logTail: string;
   runs: (count: number) => string;
+  toolCount: (count: number) => string;
+  statusWord: (status: string) => string;
+  /** Placeholder shown when a run's only name is a machine key (agent-pub-…). */
+  unnamedAgent: string;
+  rows: {
+    agent: string;
+    status: string;
+    tools: string;
+    note: string;
+    error: string;
+    task: string;
+  };
 } {
   return {
     runStatus: t("runStatusLabel"),
@@ -1121,5 +1246,19 @@ export function agentRunCardLabels(): {
     runFinished: t("runFinishedLabel"),
     logTail: t("runLogTailLabel"),
     runs: (count: number) => t("runsListLabel", String(count)),
+    toolCount: (count: number) => t("runToolsCount", String(count)),
+    statusWord: agentRunStatusWord,
+    // Same folding rule as the run zone/panel: an unnamed run's machine key
+    // collapses to the kind-of-actor word, never the key itself.
+    unnamedAgent: t("subAgentName"),
+    // Padding rides on the value so the default English layout is unchanged.
+    rows: {
+      agent: `${t("runRowAgent")}   `,
+      status: `${t("runRowStatus")}  `,
+      tools: `${t("runRowTools")}   `,
+      note: `${t("runRowNote")}    `,
+      error: `${t("runRowError")}   `,
+      task: `${t("runRowTask")}    `,
+    },
   };
 }

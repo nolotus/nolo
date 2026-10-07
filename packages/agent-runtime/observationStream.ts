@@ -16,7 +16,7 @@
 
 import { Effect, Queue, Stream, type Cause } from "effect";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
-import type { LocalAgentToolEvent } from "./localLoop";
+import type { LocalAgentToolEvent } from "./localLoopContract";
 
 export type LocalLoopObservationEvent =
   | (AgentExecutionObservationEvent & { bridge?: never })
@@ -56,6 +56,23 @@ export type LegacyObservationCallbacks = {
   onObservationEvent?: (event: LocalLoopObservationEvent) => void;
 };
 
+export const DEFAULT_OBSERVATION_QUEUE_CAPACITY = 1024;
+
+export interface LocalLoopObservationBoundaryOptions {
+  /**
+   * 队列最大容量限制。默认 1024（对单回合的正常突发完全足够，同时杜绝慢消费者的无限内存泄露）。
+   */
+  readonly capacity?: number;
+  /**
+   * 队列溢出策略：
+   * - "sliding": 丢弃最老事件（保留最新事件，适合实时 UI 观测流）
+   * - "dropping": 丢弃最新到达事件
+   * - "unbounded": 无界（仅供特定全量排障调试）
+   * 默认 "sliding"
+   */
+  readonly strategy?: "sliding" | "dropping" | "unbounded";
+}
+
 export interface LocalLoopObservationBoundary {
   readonly queue: Queue.Queue<LocalLoopObservationEvent, Cause.Done<void>>;
   readonly stream: Stream.Stream<LocalLoopObservationEvent, Cause.Done<void>>;
@@ -68,14 +85,35 @@ export interface LocalLoopObservationBoundary {
   readonly isQueueActive: () => boolean;
   /** 获取当前 queue 积压大小（未初始化时为 0） */
   readonly queueSize: () => number;
+  /** 获取因为队列容量限制而被淘汰/丢弃的事件总数 */
+  readonly droppedCount: () => number;
+  /** 观察流容量与统计指标 */
+  readonly getMetrics: () => {
+    readonly totalEmitted: number;
+    readonly droppedCount: number;
+    readonly peakSize: number;
+    readonly capacity: number;
+    readonly strategy: "sliding" | "dropping" | "unbounded";
+  };
 }
 
 export function createLocalLoopObservationBoundary(
   initialCallbacks?: LegacyObservationCallbacks,
+  options?: LocalLoopObservationBoundaryOptions,
 ): LocalLoopObservationBoundary {
+  const rawCapacity = options?.capacity;
+  const capacity =
+    typeof rawCapacity === "number" && Number.isFinite(rawCapacity) && rawCapacity >= 1
+      ? Math.floor(rawCapacity)
+      : DEFAULT_OBSERVATION_QUEUE_CAPACITY;
+  const strategy = options?.strategy ?? "sliding";
+
   let queue: Queue.Queue<LocalLoopObservationEvent, Cause.Done<void>> | undefined;
   let cachedStream: Stream.Stream<LocalLoopObservationEvent, Cause.Done<void>> | undefined;
   let closed = false;
+  let totalEmitted = 0;
+  let dropped = 0;
+  let peakSize = 0;
 
   const callbackList: LegacyObservationCallbacks[] = [];
   if (initialCallbacks) {
@@ -84,15 +122,28 @@ export function createLocalLoopObservationBoundary(
 
   const getOrCreateQueue = () => {
     if (!queue) {
-      queue = Effect.runSync(
-        Queue.unbounded<LocalLoopObservationEvent, Cause.Done<void>>(),
-      );
+      if (strategy === "unbounded") {
+        queue = Effect.runSync(
+          Queue.unbounded<LocalLoopObservationEvent, Cause.Done<void>>(),
+        );
+      } else if (strategy === "dropping") {
+        queue = Effect.runSync(
+          Queue.dropping<LocalLoopObservationEvent, Cause.Done<void>>(capacity),
+        );
+      } else {
+        // default "sliding"
+        queue = Effect.runSync(
+          Queue.sliding<LocalLoopObservationEvent, Cause.Done<void>>(capacity),
+        );
+      }
     }
     return queue;
   };
 
   const emit = (envelopeOrEvent: LocalLoopEmitEnvelope | LocalLoopObservationEvent) => {
     if (closed) return;
+
+    totalEmitted++;
 
     const envelope: LocalLoopEmitEnvelope =
       "event" in envelopeOrEvent &&
@@ -106,7 +157,19 @@ export function createLocalLoopObservationBoundary(
 
     // 1. 仅在 queue 已创建（有 stream 消费者）时入队，默认 legacy-only 零积压
     if (queue) {
-      Queue.offerUnsafe(queue, event);
+      const preSize = Queue.sizeUnsafe(queue) ?? 0;
+      const offered = Queue.offerUnsafe(queue, event);
+
+      if (strategy === "dropping" && !offered) {
+        dropped++;
+      } else if (strategy === "sliding" && preSize >= capacity && offered) {
+        dropped++;
+      }
+
+      const postSize = Queue.sizeUnsafe(queue) ?? 0;
+      if (postSize > peakSize) {
+        peakSize = postSize;
+      }
     }
 
     // 2. 派发给所有注册的 callbacks（fail-open 隔离，抛错绝不影响主循环）
@@ -156,6 +219,11 @@ export function createLocalLoopObservationBoundary(
   const close = () => {
     if (closed) return;
     closed = true;
+    if (dropped > 0) {
+      console.warn(
+        `[observationStream] stream buffer overflow: dropped ${dropped}/${totalEmitted} events (strategy=${strategy}, capacity=${capacity})`,
+      );
+    }
     if (queue) {
       Queue.endUnsafe(queue);
     }
@@ -175,6 +243,16 @@ export function createLocalLoopObservationBoundary(
     return Queue.sizeUnsafe(queue) ?? 0;
   };
 
+  const droppedCount = () => dropped;
+
+  const getMetrics = () => ({
+    totalEmitted,
+    droppedCount: dropped,
+    peakSize,
+    capacity,
+    strategy,
+  });
+
   return {
     get queue() {
       return getOrCreateQueue();
@@ -191,5 +269,7 @@ export function createLocalLoopObservationBoundary(
     attachCallbacks,
     isQueueActive,
     queueSize,
+    droppedCount,
+    getMetrics,
   };
 }

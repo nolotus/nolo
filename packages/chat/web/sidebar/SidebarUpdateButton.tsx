@@ -64,7 +64,7 @@ const phaseLabel = (phase?: string): string => {
 export const SidebarUpdateButton: React.FC = () => {
   const [snapshot, setSnapshot] = useState<DesktopUpdaterSnapshot | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const s = await fetchSnapshot();

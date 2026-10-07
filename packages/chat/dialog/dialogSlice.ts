@@ -50,11 +50,13 @@ export {
   clearActiveControllers,
   tokenUsageLiveUpdate,
   setLoopStopReason,
+  setRecoveredForegroundTurn,
   setDialogTurnPhase,
   clearDialogTurnPhase,
   enqueueUserInput,
   dequeueUserInput,
   clearPendingUserInputQueue,
+  getRecoveredForegroundTurn,
   selectDialogRuntimeByKey,
   selectPendingFiles,
   selectActiveControllers,
@@ -68,6 +70,7 @@ export {
   usePendingUserInputQueue,
   useLoopStopReason,
   useDialogTurnPhase,
+  useRecoveredForegroundTurn,
   useDialogRuntimeTokens,
 } from "./dialogRuntimeStore";
 

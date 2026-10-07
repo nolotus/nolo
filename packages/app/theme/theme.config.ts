@@ -5,6 +5,7 @@ import {
   rose,
   mono,
   catppuccin,
+  nature,
   // legacy theme objects kept for alias references
   neutral, ocean, forest,
   // backward compat aliases
@@ -35,9 +36,9 @@ export const SPACE = {
   24: "96px",
 };
 
-// 2. 主题色系（6 个核心 — 每个覆盖一个画像，无冗余）
+// 2. 主题色系（7 个核心 — 每个覆盖一个画像，无冗余；nature 为默认，与游客页同色）
 export const THEME_COLORS = {
-  catppuccin, trail, wave, iris, rose, mono,
+  nature, catppuccin, trail, wave, iris, rose, mono,
 };
 
 // 3. 旧主题名 → 保留主题的映射（DB 中可能存了旧 key）
@@ -58,5 +59,5 @@ export const THEME_NAME_ALIASES = {
   mocha: "catppuccin",
 } as const;
 
-export const DEFAULT_THEME_NAME = "catppuccin" as const;
+export const DEFAULT_THEME_NAME = "nature" as const;
 

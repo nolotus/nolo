@@ -20,6 +20,7 @@ import { selectIdentityUserId } from "identity/selectors";
 import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { formatListRunsCard, formatNotFoundRunCard, formatStatusRunCard, formatStopRunCard, resolveRunLabel } from "./agentRunDisplayHelpers";
+import { normalizeRunTitle } from "./runTitle";
 
 /**
  * 可用 action 的全集。`actions` 描述能力面；`wakeEnabled` 独立描述宿主
@@ -347,6 +348,7 @@ async function handleStatus(
             rawData: { found: true, ...run, ...(logLines ? { logLines } : {}) },
             displayData: formatStatusRunCard(name, run.status, {
                 runId: opts.runId,
+                title: normalizeRunTitle(run.title),
                 lastToolNames: run.lastToolNames,
                 toolCallCount: run.toolCallCount,
                 lastAssistantText: run.lastAssistantText,
@@ -466,6 +468,7 @@ async function handleWait(
                 rawData: { runId: opts.runId, status: initialRun.status, content: initialRun.lastAssistantText, found: true, ...initialRun },
                 displayData: formatStatusRunCard(name, initialRun.status, {
                     runId: opts.runId,
+                    title: normalizeRunTitle(initialRun.title),
                     lastToolNames: initialRun.lastToolNames,
                     toolCallCount: initialRun.toolCallCount,
                     lastAssistantText: initialRun.lastAssistantText,
@@ -520,6 +523,7 @@ async function handleWait(
                     },
                     displayData: formatStatusRunCard(name, "failed", {
                         runId: opts.runId,
+                        title: normalizeRunTitle(initialRun.title),
                         errorMessage: errMsg,
                     }),
                 };
@@ -564,6 +568,7 @@ async function handleWait(
             rawData,
             displayData: formatStatusRunCard(name, status, {
                 runId: opts.runId,
+                title: normalizeRunTitle(initialRun.title),
                 lastAssistantText: res?.content,
                 errorMessage: res?.errorMessage,
             }),
