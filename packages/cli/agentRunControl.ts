@@ -77,6 +77,11 @@ export type RunRecord = {
   /** Truncated last assistant text produced before failure/stall. */
   lastAssistantText?: string;
   /**
+   * 完整最终报告落盘路径（`<runsDir>/<runId>.result.md`）。lastAssistantText
+   * 只留 2000 字摘要；长报告读这个文件，不要解析带 ANSI 的 .log。
+   */
+  resultFile?: string;
+  /**
    * 本次 run 实际消耗的平台积分（本地进程收尾时自报，sumPlatformCredits 口径，
    * 只含 billing_unit === "credits" 的平台计费轮）。缺省 = 该 run 没有平台计费
    * （自有 API / 订阅制）。dock 行显示「⚡ x.xx」用。
@@ -1180,6 +1185,8 @@ export async function gcRunRecords(
     const runsDirForLegacy = resolveRunsDir(deps.env, deps.homedir);
     tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.md`));
     tryUnlinkFile(fs, join(runsDirForLegacy, `${record.runId}.report.json`));
+    // 终态完整报告（finalize 写入；摘要在 record.lastAssistantText），随 run 一起回收。
+    tryUnlinkFile(fs, record.resultFile ?? join(runsDirForLegacy, `${record.runId}.result.md`));
 
     // 2. If any auxiliary file failed to delete, KEEP the .json index file
     // so future GC passes can discover and retry sweeping this run.
@@ -1711,17 +1718,18 @@ export function transitionRunToTerminal(
     if (typeof resolvedToolCount === "number") {
       record.toolCallCount = resolvedToolCount;
     }
+    // 注意：不再用 msgFile（派发给子 run 的任务 brief）回填 lastAssistantText——
+    // 那是输入不是输出，回填会让编排者把自己的 brief 当成子 run 的结论。
     if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
       record.lastAssistantText = update.lastAssistantText.slice(0, 2000);
-    } else if (!record.lastAssistantText && record.msgFile) {
+      // 完整正文落文件：摘要会截断，长报告不能只活在 .log 里。
       try {
         const fs = deps.fs ?? nodeFs;
-        if (fs.existsSync(record.msgFile)) {
-          const content = fs.readFileSync(record.msgFile, "utf8");
-          if (content) record.lastAssistantText = content.slice(0, 2000);
-        }
+        const resultFile = join(resolveRunsDir(deps.env, deps.homedir), `${runId}.result.md`);
+        fs.writeFileSync(resultFile, update.lastAssistantText, "utf8");
+        record.resultFile = resultFile;
       } catch {
-        // ignore
+        // 落盘失败不阻断终态结算；摘要仍在 record 上。
       }
     }
     record.endedAt = now().toISOString();

@@ -66,7 +66,7 @@ const BODY = [
   "2. **派 reviewer**：与作者不同的 agent 实例，只读审 diff，只传 worktree 路径与文件清单，不内嵌 diff。brief 要求最终文本含 Verdict（APPROVE / WARNING / BLOCK）与带行号的 finding。",
   "3. **判定**：",
   "   - 最终文本含明确 APPROVE 且无 CRITICAL/HIGH → 继续；",
-  "   - BLOCK → 修复后复审，循环直到 APPROVE；",
+  "   - BLOCK → 修复后复审，循环直到 APPROVE；**APPROVE 只覆盖被审的那一版**——此后任何改动（含只采纳 nit、含只动注释 / 文档）都要重新过一轮 review，作者自评不构成复核。",
   "   - WARNING（有 HIGH）→ 停下，把 finding 报给用户决定，不自动合并；",
   "   - 空回复、超时、只说「我先检查」都不是审查证据：最多重试一次，仍无结论就报告 `review incomplete`，交用户处理。",
   "4. **提交**：按项目的提交规范写 message；如实记录谁审的、结论是什么。无 review 不提交（≤2 步零逻辑风险的机械改动除外，须在 message 注明原因）。",

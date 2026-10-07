@@ -215,6 +215,11 @@ function buildRunStatusPayload(
       // 日志落盘路径始终暴露：stalled/failed 且 dialogId 缺失（如 ephemeral）
       // 时 logTail 只能靠它读，不能只留在进程内存。
       ...(reconciled.logPath ? { logPath: reconciled.logPath } : {}),
+      // 完整报告文件必须紧挨 logPath 排在载荷前段：宿主对长工具结果做「保留
+      // 首尾、省略中段」，而调用方一带 tailLines 就会把 logTail 顶到末尾——
+      // 排在 2000 字 lastAssistantText 之后的键会被整段省略，模型连路径都看
+      // 不到。挂在头部才能保证「结论在哪」永远可见。
+      ...(reconciled.resultFile ? { resultFile: reconciled.resultFile } : {}),
       ...(typeof reconciled.toolCallCount === "number"
         ? { toolCallCount: reconciled.toolCallCount }
         : {}),

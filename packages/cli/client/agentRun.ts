@@ -1415,6 +1415,10 @@ async function runHttpAgentTurn(
   } catch (error) {
     spinner.stop();
     if (options.abortSignal?.aborted) {
+      // 用户 Esc 中断（不是失败）：本分支不带 finalText，结算点也就不会写
+      // `.result.md`/resultFile——已生成的部分正文只留在 .log 与 dialog 里。
+      // 读端看到「无 resultFile + streamInterrupted」应读作「被中断」，不是
+      // 「工具坏了 / 结论丢了」。
       return { exitCode: 0, streamInterrupted: true };
     }
     options.output.write(buildTransportErrorHint(options.serverUrl, error));
@@ -1507,6 +1511,10 @@ async function runHttpAgentTurn(
     ...(typeof data?.dialogId === "string" && data.dialogId
       ? { dialogId: data.dialogId }
       : {}),
+    // 结论载体与 local 路径同契约（server 模式 / 本地配置缺失时的兜底通道）：
+    // 结算点只认 result.finalText，HTTP 派发不给就等于这批 run 没有结论载体，
+    // status 里既无 lastAssistantText 也无 resultFile。content 已在上面算好。
+    ...(content ? { finalText: content } : {}),
     turnTokens: buildTurnTokenUsage(
       data?.usage,
       typeof data?.model === "string" ? data.model : options.agentKey,
@@ -1712,6 +1720,9 @@ async function runLocalAgentTurnForCli(
     return {
       exitCode: 0,
       dialogId: result.dialogId,
+      ...(typeof result.content === "string" && result.content.trim()
+        ? { finalText: result.content }
+        : {}),
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
       ...pickEmptyAssistantFlags(result),
@@ -1752,6 +1763,12 @@ async function runLocalAgentTurnForCli(
       // If a tool was still running when the stop landed, localLoop attaches
       // its name (error.pendingToolName) so the caller can tell the user the
       // tool may still finish in the background.
+      //
+      // 载体约定（owner 2026-10-07 决定，保持现行为）：被 Esc 中断的 run 不把
+      // 「用户叫停」当正常结论——本分支不产出 finalText，结算点因此不写
+      // `.result.md`，已生成的部分正文只留在 .log / dialog 里。读端看到
+      // status 无 resultFile 且 streamInterrupted 时应读作「被中断」，而不是
+      // 「工具坏了 / 结论丢了」（同语义也写进 controlAgentRun 的 status 描述）。
       const pendingToolName = (error as { pendingToolName?: string })
         ?.pendingToolName;
       return {
@@ -1924,6 +1941,12 @@ export function foldLocalResultForTui(
     ...(localResult.pendingToolName
       ? { pendingToolName: localResult.pendingToolName }
       : {}),
+    // 结论正文必须随行：auto→local 是本函数的唯一出口（runAgentTurn 的两处
+    // 成功分支都 return foldLocalResultForTui(...)），漏掉它 = 默认派发路径
+    // 上 finalText 永远到不了结算点 → agentRunCommand 的 settleRunTerminal-
+    // Authoritatively 拿不到 lastAssistantText → `.result.md` 不写、status 无
+    // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
+    ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
   };
 }
 

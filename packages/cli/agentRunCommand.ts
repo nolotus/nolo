@@ -954,6 +954,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
       ...(failureReason ? { failureReason } : {}),
       ...(toolCallCount !== undefined ? { toolCallCount } : {}),
+      ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
       ...truncationNote,
     },
     {
