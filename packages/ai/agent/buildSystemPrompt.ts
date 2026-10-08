@@ -288,7 +288,6 @@ export const buildSystemPromptContext = (options: {
     { id: "tool-round-economy", owner: "platform", cacheScope: "session", content: toolSections.toolRoundEconomy },
     { id: "tool-use-guidance", owner: "platform", cacheScope: "session", content: toolSections.toolUseGuidance },
     { id: "privilege-escalation", owner: "platform", cacheScope: "session", content: toolSections.privilegeEscalation },
-    { id: "shell-task-lifecycle", owner: "platform", cacheScope: "session", content: toolSections.shellTaskLifecycle },
     { id: "agent-orchestration", owner: "platform", cacheScope: "session", content: toolSections.agentOrchestration },
     { id: "agent-collaboration", owner: "platform", cacheScope: "session", content: toolSections.agentCollaboration },
     { id: "web-access", owner: "platform", cacheScope: "session", content: toolSections.webAccess },

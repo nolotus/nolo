@@ -99,8 +99,12 @@ export class AccountSessionService {
    * Load stored tokens, purge invalid entries from the store, and commit the
    * surviving session into the Core. tokens[0] stays the active account.
    */
-  async initialize(): Promise<SessionInitializeResult> {
-    this.deps.core.beginTransition("initializing");
+  async initialize(options: { preserveInitialized?: boolean } = {}): Promise<SessionInitializeResult> {
+    // A synchronously restored session stays usable while storage is refreshed.
+    // Still read/purge tokens below; skipping initialization would miss changes.
+    if (!options.preserveInitialized || !this.deps.core.getSnapshot().initialized) {
+      this.deps.core.beginTransition("initializing");
+    }
     try {
       const tokens = await this.deps.tokenManager.initTokens();
       const entries = parseStoredTokenEntries(tokens ?? []);

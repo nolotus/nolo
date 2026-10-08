@@ -866,9 +866,11 @@ export default {
           reviewer: "Quality check",
           release: "Release",
           website: "Live result",
+          // 这三条 title 里的 U+00A0 是刻意的英文断行防拆（NBSP 的正确用法：不拆
+          // "the goal" 这类词组）。它们走 sans-serif，不进字体子集；CJK 文案一律不用 NBSP。
           mobileSteps: [
             {
-              title: "Describe the goal",
+              title: "Describe the goal",
               desc: "Start in chat or on the task board with what you want done.",
             },
             {
@@ -876,7 +878,7 @@ export default {
               desc: "A strong model plans the work and assigns each role to the right agent.",
             },
             {
-              title: "Build in parallel",
+              title: "Build in parallel",
               desc: "Other agents handle UI, logic, and data at the same time.",
             },
             {
@@ -884,7 +886,7 @@ export default {
               desc: "An independent agent reviews the work and sends it back until it passes.",
             },
             {
-              title: "Ship the result",
+              title: "Ship the result",
               desc: "Once it passes review, the result is ready to use.",
             },
           ],

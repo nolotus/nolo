@@ -15,6 +15,8 @@ export const getDevEntryAssetManifest = () => {
     css: `${publicPath}entry.css?v=${ts}`,
     artifactRuntimeJs: `${publicPath}artifactRuntime.js?v=${ts}`,
     artifactRuntimePreloads: [],
+    // dev 产物无 hash / 无 splitting 闭包信息：给空数组，SSR 退回只预加载 entry
+    entryPreloads: [],
     timestamp: "dev",
     buildTime: new Date().toISOString(),
     buildSha: null,

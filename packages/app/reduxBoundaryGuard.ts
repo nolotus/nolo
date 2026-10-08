@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
+import { parse as babelParse } from "@babel/parser";
 
 /**
  * Redux Deprecation Boundary Guard (Phase 1).
@@ -70,10 +71,13 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/ai/agent/referenceUtils.ts",
   "packages/ai/agent/runAgentBackground.ts",
   "packages/ai/agent/runAgentClientLoop.ts",
+  "packages/ai/agent/serverOwnedWebEffectiveToolSurface.ts",
+  "packages/ai/agent/serverOwnedWebForegroundTurn.ts",
   "packages/ai/agent/streamAgentChatTurn.ts",
   "packages/ai/agent/streamAgentChatTurnUtils.ts",
   "packages/ai/agent/streamTurnMessageBuild.ts",
   "packages/ai/agent/streamTurnQuickChat.ts",
+  "packages/ai/agent/turnToolContext.ts",
   "packages/ai/agent/web/AgentAvatar.tsx",
   "packages/ai/agent/web/AgentBlock.tsx",
   "packages/ai/agent/web/AgentCard.tsx",
@@ -227,10 +231,10 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/chat/web/ChatSidebar.tsx",
   "packages/chat/web/CreateTaskModal.tsx",
   "packages/chat/web/DialogUsageTrigger.tsx",
+  "packages/chat/web/ForegroundTurnRecovery.tsx",
+  "packages/chat/web/IncompleteBrowserTurnNotice.tsx",
   "packages/chat/web/MessageInputContainer.tsx",
   "packages/chat/web/MessageInputCore.tsx",
-  "packages/chat/web/SendButton.tsx",
-  "packages/chat/web/StopGenerationButton.tsx",
   "packages/chat/web/VoiceInputButton.tsx",
   "packages/chat/web/fileProcessor.ts",
   "packages/chat/web/sidebar/AllViewSidebar.tsx",
@@ -242,6 +246,7 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/chat/web/useMessageInputDeleteConfirm.ts",
   "packages/chat/web/useMessageInputFiles.ts",
   "packages/chat/web/useMessageInputSend.ts",
+  "packages/chat/web/useStopCurrentForegroundTurn.ts",
   "packages/create/editor/Editor.tsx",
   "packages/create/editor/EditorToolbar.tsx",
   "packages/create/editor/LinkEditorPopover.tsx",
@@ -348,6 +353,12 @@ const GUARD_OWN_FILES = [
 export type ReduxBoundaryViolation = {
   file: string;
   reason: string;
+  /**
+   * Peeled-store dispatch scan only. `undetermined` = a dispatch() argument
+   * references a peeled-store binding in a form the guard cannot resolve
+   * statically; it is REPORTED (fail-closed), never treated as clean.
+   */
+  kind?: "void-setter-dispatch" | "undetermined";
 };
 
 const REDUX_APP_STORE_API_NAMES = [
@@ -485,70 +496,361 @@ export function scanReduxBoundary(root: string): ReduxBoundaryViolation[] {
 export type PeeledStoreModule = {
   /** Store module path relative to the repo root. */
   module: string;
-  /** Alias import path without the packages/ prefix and extension. */
-  aliasKey: string;
-  /** Import-specifier suffix (e.g. "/tableStore") for relative imports. */
-  importSuffix: string;
   /** Exported mutators annotated `: void` (must never be dispatched). */
   voidSetters: string[];
+  /** Barrels only: exported setter name → "<defining store module>#<setter>". */
+  origin?: Record<string, string>;
+  /** Barrels only: `export * as ns` / re-exported namespace name → store module. */
+  namespaces?: Record<string, string>;
 };
 
 const PEELED_STORE_FILE_RE = /(?:^|\/)[A-Za-z0-9_-]*[Ss]tore\.tsx?$/;
 const MODULE_STORE_MARKER = "useSyncExternalStore";
 
-/** `export function name(...): void` / `export const name = (...): void =>` */
-export function extractVoidSetterNames(source: string): string[] {
-  const code = stripComments(source);
-  const names = new Set<string>();
-  for (const match of code.matchAll(
-    /export\s+(?:async\s+)?function\s+(\w+)\s*\([\s\S]*?\)\s*:\s*void\b/g
-  )) {
-    names.add(match[1]);
+type AstNode = { type: string; [key: string]: any };
+
+/** Parse TS/TSX with @babel/parser. A parse failure THROWS (never skipped). */
+function parseModule(source: string, filename: string): { body: AstNode[] } {
+  const isJsx = /\.[jt]sx$/.test(filename);
+  try {
+    return babelParse(source, {
+      sourceType: "module",
+      plugins: isJsx ? ["typescript", "jsx"] : ["typescript"],
+    }).program as unknown as { body: AstNode[] };
+  } catch (error) {
+    throw new Error(
+      `reduxBoundaryGuard: failed to parse ${filename}: ${(error as Error).message}`
+    );
   }
-  for (const match of code.matchAll(
-    /export\s+const\s+(\w+)\s*=\s*\([\s\S]*?\)\s*:\s*void\s*=>/g
-  )) {
-    names.add(match[1]);
+}
+
+function hasVoidReturn(fn: AstNode | null | undefined): boolean {
+  return fn?.returnType?.typeAnnotation?.type === "TSVoidKeyword";
+}
+
+function isFunctionNode(node: AstNode | null | undefined): boolean {
+  return (
+    node?.type === "FunctionDeclaration" ||
+    node?.type === "TSDeclareFunction" ||
+    node?.type === "FunctionExpression" ||
+    node?.type === "ArrowFunctionExpression"
+  );
+}
+
+/**
+ * Exported functions whose EXPLICIT return annotation is `void`, read from the
+ * Babel AST (not regex / char scanning): covers `export function f(): void`,
+ * overload signatures, `export const f = (...): void => ...` /
+ * `= function (): void {}`, and local declarations re-exported via
+ * `export { f }`. Generics, string defaults containing parens, comments and
+ * multi-line annotations are handled by the parser itself.
+ *
+ * Earlier versions misattributed across functions (lazy `[\s\S]*?` regex) or
+ * missed `f(x = ")"): void` / `f<T>(x: T): void` (paren counting). A parse
+ * failure THROWS — a silently skipped store would be a new blind spot.
+ *
+ * Parser: `typescript@7` is the native (Go) build with no in-process
+ * `createSourceFile` API, so this uses `@babel/parser` (pure JS, declared in
+ * the root package.json).
+ */
+export function extractVoidSetterNames(
+  source: string,
+  filename = "source.ts"
+): string[] {
+  const program = parseModule(source, filename);
+
+  // Local (possibly un-exported) void functions, for `export { f }` forms.
+  const localVoid = new Set<string>();
+  const collectDecl = (decl: AstNode | null | undefined, out: Set<string>) => {
+    if (!decl) return;
+    if (
+      (decl.type === "FunctionDeclaration" || decl.type === "TSDeclareFunction") &&
+      decl.id?.name &&
+      hasVoidReturn(decl)
+    ) {
+      out.add(decl.id.name);
+    } else if (decl.type === "VariableDeclaration") {
+      for (const d of decl.declarations ?? []) {
+        if (d.id?.type === "Identifier" && isFunctionNode(d.init) && hasVoidReturn(d.init)) {
+          out.add(d.id.name);
+        }
+      }
+    }
+  };
+
+  const names = new Set<string>();
+  for (const stmt of program.body) collectDecl(stmt, localVoid);
+  for (const stmt of program.body) {
+    if (stmt.type !== "ExportNamedDeclaration") continue;
+    if (stmt.declaration) {
+      collectDecl(stmt.declaration, names);
+    } else if (!stmt.source) {
+      for (const spec of stmt.specifiers ?? []) {
+        const local = spec.local?.name;
+        const exported = spec.exported?.name ?? spec.exported?.value;
+        if (local && exported && localVoid.has(local)) names.add(exported);
+      }
+    }
   }
   return [...names];
 }
 
-export function collectPeeledStoreModules(root: string): PeeledStoreModule[] {
-  const modules: PeeledStoreModule[] = [];
-  for (const { rel, source } of collectProductionFiles(root)) {
-    if (!PEELED_STORE_FILE_RE.test(rel)) continue;
-    if (!source.includes(MODULE_STORE_MARKER)) continue;
-    const voidSetters = extractVoidSetterNames(source);
-    if (voidSetters.length === 0) continue;
-    const aliasKey = rel.replace(/^packages\//, "").replace(/\.tsx?$/, "");
-    modules.push({
-      module: rel,
-      aliasKey,
-      importSuffix: `/${aliasKey.split("/").pop()}`,
-      voidSetters,
-    });
-  }
-  return modules;
+const SOURCE_EXT_RE = /\.(?:tsx?|jsx?)$/;
+
+/**
+ * Resolve an import specifier to a repo-relative module path WITHOUT extension
+ * (e.g. "packages/render/table/tableStore"). Relative specifiers resolve
+ * against the importer; bare specifiers map to `packages/<spec>` (workspace
+ * packages are symlinked as top-level modules). Callers compare the result
+ * against known store/barrel modules, so unknown targets simply never match.
+ */
+function resolveSpecifier(importerRel: string, spec: string): string {
+  const raw = spec.startsWith(".")
+    ? posix.join(posix.dirname(importerRel), spec)
+    : `packages/${spec}`;
+  return posix.normalize(raw).replace(SOURCE_EXT_RE, "");
 }
 
-function importedNamesFromStore(code: string, store: PeeledStoreModule): string[] {
-  const imported: string[] = [];
-  const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s*["']([^"']+)["']/g;
-  for (const match of code.matchAll(importRe)) {
-    const spec = match[2];
-    if (!spec.endsWith(store.importSuffix) && !spec.endsWith(store.aliasKey)) {
+function moduleKey(rel: string): string {
+  return rel.replace(SOURCE_EXT_RE, "");
+}
+
+type ModuleIndex = Map<string, PeeledStoreModule>;
+
+function indexModules(modules: readonly PeeledStoreModule[]): ModuleIndex {
+  const index: ModuleIndex = new Map();
+  for (const m of modules) {
+    const key = moduleKey(m.module);
+    index.set(key, m);
+    if (key.endsWith("/index")) index.set(key.slice(0, -"/index".length), m);
+  }
+  return index;
+}
+
+/**
+ * Specifier basenames a source must mention to possibly import one of
+ * `modules` — a pure prefilter that skips parsing unrelated files. It cannot
+ * hide a real import: every resolvable specifier ends in one of these tokens.
+ */
+function mentionsAnyModule(source: string, modules: Iterable<PeeledStoreModule>): boolean {
+  for (const m of modules) {
+    const parts = moduleKey(m.module).split("/");
+    const base = parts[parts.length - 1] === "index" ? parts[parts.length - 2] : parts[parts.length - 1];
+    if (base && source.includes(base)) return true;
+  }
+  return false;
+}
+
+function lookupModule(index: ModuleIndex, importerRel: string, spec: string) {
+  return index.get(resolveSpecifier(importerRel, spec));
+}
+
+function exportedName(node: AstNode | null | undefined): string | undefined {
+  return node?.type === "StringLiteral" ? node.value : node?.name;
+}
+
+/** Store module that ultimately defines exported setter `name` of `m`. */
+function setterOrigin(m: PeeledStoreModule, name: string): { module: string; setter: string } {
+  const origin = m.origin?.[name];
+  if (!origin) return { module: m.module, setter: name };
+  const hash = origin.lastIndexOf("#");
+  return { module: origin.slice(0, hash), setter: origin.slice(hash + 1) };
+}
+
+/**
+ * Barrels re-exporting peeled-store setters (`export { a as b } from`,
+ * `export * from`, `export * as ns from`, `import { a } ...; export { a }`)
+ * become module entries too, so imports through them still resolve. Iterates
+ * to a fixpoint for barrel-of-barrel chains.
+ */
+function collectBarrels(
+  files: ReadonlyArray<{ rel: string; source: string }>,
+  stores: PeeledStoreModule[]
+): PeeledStoreModule[] {
+  const candidates = files.filter(
+    ({ rel, source }) => /\bexport\s*(?:\*|\{)/.test(source) && !stores.some((s) => s.module === rel)
+  );
+  const parsed = new Map<string, AstNode[]>();
+  const barrels = new Map<string, PeeledStoreModule>();
+  for (let round = 0; round < 8; round++) {
+    const index = indexModules([...stores, ...barrels.values()]);
+    let changed = false;
+    for (const { rel, source } of candidates) {
+      if (!mentionsAnyModule(source, index.values())) continue;
+      let body = parsed.get(rel);
+      if (!body) {
+        body = parseModule(source, rel).body;
+        parsed.set(rel, body);
+      }
+      const voidSetters = new Set<string>();
+      const origin: Record<string, string> = {};
+      const namespaces: Record<string, string> = {};
+      const addSetter = (from: PeeledStoreModule, name: string, as: string) => {
+        const o = setterOrigin(from, name);
+        voidSetters.add(as);
+        origin[as] = `${o.module}#${o.setter}`;
+      };
+      const importedSetters = new Map<string, { from: PeeledStoreModule; name: string }>();
+      const importedNs = new Map<string, PeeledStoreModule>();
+      for (const stmt of body) {
+        if (stmt.type === "ImportDeclaration") {
+          const from = lookupModule(index, rel, stmt.source.value);
+          if (!from) continue;
+          for (const spec of stmt.specifiers ?? []) {
+            if (spec.type === "ImportNamespaceSpecifier") importedNs.set(spec.local.name, from);
+            const name = exportedName(spec.imported);
+            if (spec.type === "ImportSpecifier" && name && from.voidSetters.includes(name)) {
+              importedSetters.set(spec.local.name, { from, name });
+            }
+          }
+        }
+      }
+      for (const stmt of body) {
+        if (stmt.type === "ExportAllDeclaration") {
+          const from = lookupModule(index, rel, stmt.source.value);
+          if (from) for (const name of from.voidSetters) addSetter(from, name, name);
+        } else if (stmt.type === "ExportNamedDeclaration") {
+          const from = stmt.source ? lookupModule(index, rel, stmt.source.value) : undefined;
+          for (const spec of stmt.specifiers ?? []) {
+            const as = exportedName(spec.exported);
+            if (!as) continue;
+            if (spec.type === "ExportNamespaceSpecifier") {
+              if (from) namespaces[as] = from.module;
+              continue;
+            }
+            const local = exportedName(spec.local);
+            if (!local) continue;
+            if (from) {
+              if (from.voidSetters.includes(local)) addSetter(from, local, as);
+            } else if (importedSetters.has(local)) {
+              const hit = importedSetters.get(local)!;
+              addSetter(hit.from, hit.name, as);
+            } else if (importedNs.has(local)) {
+              namespaces[as] = importedNs.get(local)!.module;
+            }
+          }
+        }
+      }
+      if (voidSetters.size === 0 && Object.keys(namespaces).length === 0) continue;
+      const next: PeeledStoreModule = { module: rel, voidSetters: [...voidSetters].sort(), origin, namespaces };
+      if (JSON.stringify(barrels.get(rel)) !== JSON.stringify(next)) {
+        barrels.set(rel, next);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return [...barrels.values()];
+}
+
+export function collectPeeledStoreModules(root: string): PeeledStoreModule[] {
+  const files = collectProductionFiles(root);
+  const stores: PeeledStoreModule[] = [];
+  for (const { rel, source } of files) {
+    if (!PEELED_STORE_FILE_RE.test(rel)) continue;
+    if (!source.includes(MODULE_STORE_MARKER)) continue;
+    const voidSetters = extractVoidSetterNames(source, rel);
+    if (voidSetters.length === 0) continue;
+    stores.push({ module: rel, voidSetters });
+  }
+  return [...stores, ...collectBarrels(files, stores)];
+}
+
+/* ---------------- call-site resolution (AST, binding-aware) ---------------- */
+
+type Binding =
+  | { kind: "setter"; module: string; setter: string }
+  | { kind: "namespace"; store: PeeledStoreModule }
+  | { kind: "opaque"; module: string; why: string };
+
+type Target = Binding | { kind: "other" };
+
+const DISPATCH_NAME_RE = /^(?:dispatch|\w+Dispatch)$/;
+const TYPE_ONLY_KEYS = new Set([
+  "typeAnnotation",
+  "typeParameters",
+  "typeArguments",
+  "returnType",
+  "superTypeParameters",
+]);
+const FUNCTION_TYPES = new Set([
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "FunctionDeclaration",
+  "ObjectMethod",
+  "ClassMethod",
+]);
+
+/** Strip parens/TS wrappers that do not change the runtime value. */
+function unwrap(node: AstNode): AstNode {
+  let cur = node;
+  while (
+    cur.type === "ParenthesizedExpression" ||
+    cur.type === "TSAsExpression" ||
+    cur.type === "TSSatisfiesExpression" ||
+    cur.type === "TSNonNullExpression" ||
+    cur.type === "TSTypeAssertion" ||
+    cur.type === "TSInstantiationExpression"
+  ) {
+    cur = cur.expression;
+  }
+  return cur;
+}
+
+function isDispatchCallee(callee: AstNode): boolean {
+  const c = unwrap(callee);
+  if (c.type === "Identifier") return DISPATCH_NAME_RE.test(c.name);
+  if (c.type === "MemberExpression" || c.type === "OptionalMemberExpression") {
+    return !c.computed && c.property.type === "Identifier" && DISPATCH_NAME_RE.test(c.property.name);
+  }
+  return false;
+}
+
+function isCall(node: AstNode): boolean {
+  return node.type === "CallExpression" || node.type === "OptionalCallExpression";
+}
+
+function childNodes(node: AstNode): AstNode[] {
+  const out: AstNode[] = [];
+  for (const key of Object.keys(node)) {
+    if (
+      key === "loc" ||
+      key === "extra" ||
+      key === "leadingComments" ||
+      key === "trailingComments" ||
+      key === "innerComments" ||
+      TYPE_ONLY_KEYS.has(key)
+    ) {
       continue;
     }
-    for (const raw of match[1].split(",")) {
-      const name = raw
-        .trim()
-        .replace(/^type\s+/, "")
-        .split(/\s+as\s+/)[0]
-        .trim();
-      if (name) imported.push(name);
+    // Non-computed property keys are names, not references.
+    if (key === "key" && !node.computed && !node.shorthand) continue;
+    if (key === "property" && !node.computed) continue;
+    const value = node[key];
+    if (Array.isArray(value)) {
+      for (const v of value) if (v && typeof v.type === "string") out.push(v);
+    } else if (value && typeof value.type === "string") {
+      out.push(value);
     }
   }
-  return imported;
+  return out;
+}
+
+function walk(node: AstNode, visit: (n: AstNode) => void): void {
+  visit(node);
+  for (const child of childNodes(node)) walk(child, visit);
+}
+
+/** Expressions whose value becomes the dispatched value (dispatch's argument). */
+function resultPositions(node: AstNode): AstNode[] {
+  const n = unwrap(node);
+  if (n.type === "ConditionalExpression") {
+    return [...resultPositions(n.consequent), ...resultPositions(n.alternate)];
+  }
+  if (n.type === "LogicalExpression") return [...resultPositions(n.left), ...resultPositions(n.right)];
+  if (n.type === "SequenceExpression") return resultPositions(n.expressions[n.expressions.length - 1]);
+  if (n.type === "AwaitExpression") return resultPositions(n.argument);
+  return [n];
 }
 
 export function scanPeeledStoreDispatch(
@@ -556,22 +858,142 @@ export function scanPeeledStoreDispatch(
   source: string,
   modules: readonly PeeledStoreModule[]
 ): ReduxBoundaryViolation[] {
-  if (modules.length === 0) return [];
-  const code = stripComments(source);
-  const violations: ReduxBoundaryViolation[] = [];
-  for (const store of modules) {
-    const dispatched = importedNamesFromStore(code, store).filter(
-      (name) =>
-        store.voidSetters.includes(name) &&
-        new RegExp(`\\bdispatch\\s*\\(\\s*${name}\\s*\\(`).test(code)
-    );
-    for (const name of new Set(dispatched)) {
-      violations.push({
-        file: rel,
-        reason: `dispatch() wraps void setter ${name}() from ${store.module} — dispatch(undefined) throws Redux error #7 at runtime; call the module-store setter directly.`,
-      });
+  if (modules.length === 0 || !/dispatch/i.test(source) || !mentionsAnyModule(source, modules)) {
+    return [];
+  }
+  const index = indexModules(modules);
+  const program = parseModule(source, rel);
+
+  // 1) Bindings that point into peeled stores / barrels.
+  const bindings = new Map<string, Binding>();
+  for (const stmt of program.body) {
+    if (stmt.type !== "ImportDeclaration" || stmt.importKind === "type") continue;
+    const from = lookupModule(index, rel, stmt.source.value);
+    if (!from) continue;
+    for (const spec of stmt.specifiers ?? []) {
+      if (spec.importKind === "type") continue;
+      const local = spec.local.name;
+      if (spec.type === "ImportNamespaceSpecifier") {
+        bindings.set(local, { kind: "namespace", store: from });
+      } else if (spec.type === "ImportDefaultSpecifier") {
+        bindings.set(local, { kind: "opaque", module: from.module, why: "default import" });
+      } else {
+        const name = exportedName(spec.imported)!;
+        const nsModule = from.namespaces?.[name];
+        const nsStore = nsModule ? modules.find((m) => m.module === nsModule) : undefined;
+        if (from.voidSetters.includes(name)) {
+          const o = setterOrigin(from, name);
+          bindings.set(local, { kind: "setter", module: o.module, setter: o.setter });
+        } else if (nsStore) {
+          bindings.set(local, { kind: "namespace", store: nsStore });
+        }
+      }
     }
   }
+
+  const resolve = (expr: AstNode): Target | undefined => {
+    const n = unwrap(expr);
+    if (n.type === "Identifier") return bindings.get(n.name);
+    if (n.type === "MemberExpression" || n.type === "OptionalMemberExpression") {
+      const obj = resolve(n.object);
+      if (!obj) return undefined;
+      if (obj.kind === "other") return obj;
+      if (obj.kind !== "namespace") return { kind: "opaque", module: obj.module, why: "member access on a store binding" };
+      const prop = n.computed ? (n.property.type === "StringLiteral" ? n.property.value : undefined) : n.property.name;
+      if (prop === undefined) return { kind: "opaque", module: obj.store.module, why: "computed namespace member" };
+      if (obj.store.voidSetters.includes(prop)) {
+        const o = setterOrigin(obj.store, prop);
+        return { kind: "setter", module: o.module, setter: o.setter };
+      }
+      const nsModule = obj.store.namespaces?.[prop];
+      const nsStore = nsModule ? modules.find((m) => m.module === nsModule) : undefined;
+      return nsStore ? { kind: "namespace", store: nsStore } : { kind: "other" };
+    }
+    return undefined;
+  };
+
+  // 2) Simple local aliases: `const f = setX`, `const f = ns.setX`,
+  //    `const { setX: f } = ns` (scope-insensitive, two passes for chains).
+  for (let pass = 0; pass < 2; pass++) {
+    walk(program as unknown as AstNode, (n) => {
+      if (n.type !== "VariableDeclarator" || !n.init) return;
+      const target = resolve(n.init);
+      if (!target || target.kind === "other") return;
+      if (n.id.type === "Identifier") {
+        bindings.set(n.id.name, target);
+      } else if (n.id.type === "ObjectPattern" && target.kind === "namespace") {
+        for (const p of n.id.properties) {
+          const key = p.type === "ObjectProperty" && !p.computed ? exportedName(p.key) : undefined;
+          const value = p.type === "ObjectProperty" ? p.value : undefined;
+          if (!key || value?.type !== "Identifier") continue;
+          if (target.store.voidSetters.includes(key)) {
+            const o = setterOrigin(target.store, key);
+            bindings.set(value.name, { kind: "setter", module: o.module, setter: o.setter });
+          }
+        }
+      }
+    });
+  }
+  if (bindings.size === 0) return [];
+
+  // 3) dispatch(...) call sites.
+  const violations: ReduxBoundaryViolation[] = [];
+  const seen = new Set<string>();
+  const report = (v: ReduxBoundaryViolation) => {
+    const key = `${v.kind}|${v.reason}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      violations.push(v);
+    }
+  };
+  const line = (n: AstNode) => n.loc?.start?.line ?? 0;
+
+  walk(program as unknown as AstNode, (call) => {
+    if (!isCall(call) || !isDispatchCallee(call.callee)) return;
+    const arg = call.arguments?.[0];
+    if (!arg) return;
+    const accounted = new Set<AstNode>();
+    for (const result of resultPositions(arg)) {
+      if (!isCall(result)) continue;
+      const target = resolve(result.callee);
+      accounted.add(unwrap(result.callee));
+      if (target?.kind === "setter") {
+        const callee = unwrap(result.callee);
+        const shown = callee.type === "Identifier" && callee.name !== target.setter
+          ? `${callee.name} (= ${target.setter})`
+          : target.setter;
+        report({
+          file: rel,
+          kind: "void-setter-dispatch",
+          reason: `dispatch() wraps void setter ${shown}() from ${target.module} (line ${line(call)}) — dispatch(undefined) throws Redux error #7 at runtime; call the module-store setter directly.`,
+        });
+      } else if (target?.kind === "opaque" || target?.kind === "namespace") {
+        report({
+          file: rel,
+          kind: "undetermined",
+          reason: `undetermined: dispatch() argument at line ${line(call)} calls a ${target.kind === "opaque" ? target.why : "store namespace"} from ${target.kind === "opaque" ? target.module : target.store.module}; cannot prove it is not a void setter — rewrite as a direct named/namespace call.`,
+        });
+      }
+    }
+    // Any other store reference inside the argument, outside nested functions,
+    // whose value flows somewhere the guard cannot follow → fail closed.
+    const inspect = (node: AstNode): void => {
+      if (FUNCTION_TYPES.has(node.type)) return; // thunk bodies may call setters directly
+      if (accounted.has(node)) return;
+      const target = node.type === "Identifier" || node.type.endsWith("MemberExpression") ? resolve(node) : undefined;
+      if (target) {
+        if (target.kind === "other") return;
+        report({
+          file: rel,
+          kind: "undetermined",
+          reason: `undetermined: dispatch() argument at line ${line(call)} references ${target.kind === "setter" ? `void setter ${target.setter}() from ${target.module}` : target.kind === "namespace" ? `store namespace ${target.store.module}` : `${target.why} from ${target.module}`} in a position the guard cannot follow.`,
+        });
+        return;
+      }
+      for (const child of childNodes(node)) inspect(child);
+    };
+    inspect(arg);
+  });
   return violations;
 }
 

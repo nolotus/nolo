@@ -2,6 +2,15 @@ export default {
   en: {
     translation: {
       AddAgent: "Add Agent",
+      mediaJob: {
+        auto: "Auto",
+        none: "None",
+        languageLine: "Language: {{source}} → {{target}}",
+        sourceLanguage: "Source language",
+        targetLanguage: "Target language",
+        autoDetect: "Detect automatically",
+        noTranslate: "Do not translate",
+      },
       selectedAgentsCount: "Selected {{count}} Agents",
       addSelectedAgents: "Add selected",
       clearSelection: "Clear",
@@ -17,7 +26,8 @@ export default {
       compressingImages: "Compressing images...",
       copyContent: "Copy Content",
       copyDiagnostics: "Copy diagnostics",
-      finishReasonLengthNotice: "Response was cut off at the model's output limit",
+      finishReasonLengthNotice:
+        "Response was cut off at the model's output limit",
       retryProgress: "Auto-retrying {{attempt}}/{{maxAttempts}} · {{seconds}}s",
       sendErrorCard: {
         title: "Send Failed",
@@ -31,7 +41,8 @@ export default {
         verifyAccount: "Verify account",
       },
       copyFailed: "Copy failed",
-      contextAutoCompressed: "Context auto-compressed to stay within the model window",
+      contextAutoCompressed:
+        "Context auto-compressed to stay within the model window",
       contextAutoCompressFailed: "Auto context compression failed",
       copySuccess: "Copied successfully",
       createDialog: "Create Dialog",
@@ -118,7 +129,8 @@ export default {
       chooseAnotherModelContinue: "Choose another model to continue",
       chooseAnotherModelDialogTitle: "Choose another model",
       useThisModelContinue: "Continue with this model",
-      switchModelContinueSuccess: "Switched model and continued this conversation",
+      switchModelContinueSuccess:
+        "Switched model and continued this conversation",
       contextReprocessingNotice:
         "The system may need to reread part of this conversation after switching models or editing an earlier message.",
       switchModelContinueFailed: "Failed to switch model. Please try again.",
@@ -152,7 +164,8 @@ export default {
       branchFailed: "Failed to create branch chat",
       stopBeforeDelete: "Stop generation before deleting",
       messageQueued: "Message queued; will be sent after the current turn",
-      cannotSendFileDuringLoop: "Agent is running. Please wait before sending attachments.",
+      cannotSendFileDuringLoop:
+        "Agent is running. Please wait before sending attachments.",
       contextChecking: "Checking this model's context window…",
       contextCompacting: "This conversation is long. Compacting history…",
       waitingForModel: "Context is ready. Waiting for the model…",
@@ -200,7 +213,8 @@ export default {
       MaxContext: "Max Context",
       Compression: "Context Compression",
       CompressionTimes: "{{count}} times",
-      inheritedContextNotice: "This chat inherits context from a previous conversation",
+      inheritedContextNotice:
+        "This chat inherits context from a previous conversation",
       inheritedContextNoticeWithTitle:
         'This chat inherits context from "{{title}}"',
       openSourceDialog: "Open source chat",
@@ -218,6 +232,7 @@ export default {
       imagePickerError: "Image picker error: {{error}}",
       shareAttachmentWarning: "Attachments ignored for share command",
       uploading: "Uploading...",
+      mediaFileTooLarge: "Audio/video files must be 120 MB or smaller",
       uploadSuccess: "Upload success",
       uploadFailed: "Upload failed",
       deleteMessageTitle: "Delete Message",
@@ -225,7 +240,8 @@ export default {
       delConfirmMessage: "Delete this message?",
       bash: {
         blockedTitle: "Dangerous Command Blocked",
-        blockedDesc: "This command was detected as high-risk and was not executed. If necessary, please confirm the risk and continue.",
+        blockedDesc:
+          "This command was detected as high-risk and was not executed. If necessary, please confirm the risk and continue.",
         runUnsafe: "Run anyway (unsafe)",
         exitCode: "exit: {{code}}",
         noOutput: "(No output)",
@@ -234,16 +250,20 @@ export default {
         viewFinal: "Final Result",
         viewDiff: "Diff Preview",
         conflictTitle: "Write Conflict: File Exists",
-        conflictMsg: "The target file already exists and this call did not allow overwriting, so no changes were made.",
+        conflictMsg:
+          "The target file already exists and this call did not allow overwriting, so no changes were made.",
         overwrite: "Overwrite",
-        confirmOverwritePrompt: "A previous attempt to write to {{path}} failed because it exists and overwrite was not permitted. Please confirm if you want to overwrite it with the latest content.",
+        confirmOverwritePrompt:
+          "A previous attempt to write to {{path}} failed because it exists and overwrite was not permitted. Please confirm if you want to overwrite it with the latest content.",
       },
       tool: {
         failed: "Execution failed",
         executing: "Executing...",
         requiresApproval: "Requires Approval",
-        resumePrompt: "Please continue with your previous plan based on the tool execution results; if the task is complete, summarize it concisely.",
-        preflightRepairing: "Preflight found {{count}} issue(s), auto-repairing…",
+        resumePrompt:
+          "Please continue with your previous plan based on the tool execution results; if the task is complete, summarize it concisely.",
+        preflightRepairing:
+          "Preflight found {{count}} issue(s), auto-repairing…",
         moreSteps: "{{count}} more steps…",
       },
       toolConfirm: {
@@ -334,7 +354,6 @@ export default {
         releasePreview: "Release preview",
         captureVisualState: "Screenshot",
         appDeploy: "Deploy app",
-        setTodoList: "Update plan",
         ask_user: "Ask",
         runStreamingAgent: "Handoff",
       },
@@ -454,13 +473,16 @@ export default {
             greeting: "Greeting",
             greetingDesc: "Adjust the opener copy or quick menu.",
             introduction: "Introduction",
-            introductionDesc: "Update the public introduction shown for this Agent.",
+            introductionDesc:
+              "Update the public introduction shown for this Agent.",
             tags: "Tags",
             tagsDesc: "Update tags and lightweight categorization info.",
             prompt: "System prompt",
-            promptDesc: "High-impact field — recommended to keep asking by default.",
+            promptDesc:
+              "High-impact field — recommended to keep asking by default.",
             references: "Knowledge references",
-            referencesDesc: "Changes which docs and pages the Agent references by default.",
+            referencesDesc:
+              "Changes which docs and pages the Agent references by default.",
             tools: "Tools",
             toolsDesc: "Changes which tool capabilities the Agent can call.",
             model: "Model",
@@ -510,8 +532,10 @@ export default {
       },
       appAssistantLoadFailed: "Failed to load the app context",
       appAssistantLoading: "Loading app context…",
-      appAssistantNeedsRecovery: "This version of the app isn't ready for small direct edits yet. I can first turn the current page into an editable version, then keep helping you modify it.",
-      createSideDialogFailed: "Failed to create the chat. Please try again later.",
+      appAssistantNeedsRecovery:
+        "This version of the app isn't ready for small direct edits yet. I can first turn the current page into an editable version, then keep helping you modify it.",
+      createSideDialogFailed:
+        "Failed to create the chat. Please try again later.",
       favoriteAssistants: "Frequent assistants",
       goExplore: "Explore the AI Plaza",
       goLogin: "Sign in",
@@ -583,6 +607,7 @@ export default {
       excelParseError: "解析 Excel 文件失败",
       FailedToLoadAgents: "加载智能体失败",
       fileReadError: "读取文件内容失败",
+      mediaFileTooLarge: "音视频文件不能超过 120 MB",
       First: "首个",
       Info: "信息",
       LoadingAgents: "正在加载智能体...",
@@ -679,18 +704,24 @@ export default {
       waitingForModel: "上下文已准备好，正在等待模型响应…",
       modelWindowReduced:
         "已切换到窗口较小的模型（{{window}}）。当前对话预计使用 {{percent}}%，下一条消息可能需要压缩。",
-      contextWillCompactOnSend: "当前对话超出新模型的建议范围。发送时将先压缩历史记录。",
+      contextWillCompactOnSend:
+        "当前对话超出新模型的建议范围。发送时将先压缩历史记录。",
       currentMessageTooLarge:
         "当前消息或附件本身超过模型窗口。请缩短内容、减少附件，或切换到更大窗口的模型。",
       compactionTimedOut:
         "压缩历史记录超时，消息尚未提交给模型。你可以重试、开启新对话，或切换到更大窗口的模型。",
-      compactionFailedFallback: "压缩失败，已缩短较早的历史记录后继续。本轮可能缺少部分早期上下文。",
-      contextRejected: "模型无法接收当前上下文。请先压缩对话、开启新对话，或选择更大窗口的模型。",
-      sendAlreadyRunning: "这条消息仍在处理中。你可以停止当前请求，或将纯文本消息加入队列。",
+      compactionFailedFallback:
+        "压缩失败，已缩短较早的历史记录后继续。本轮可能缺少部分早期上下文。",
+      contextRejected:
+        "模型无法接收当前上下文。请先压缩对话、开启新对话，或选择更大窗口的模型。",
+      sendAlreadyRunning:
+        "这条消息仍在处理中。你可以停止当前请求，或将纯文本消息加入队列。",
       sendStateRecovered: "检测到已失效的发送状态，现已恢复。请重新发送。",
-      agentUnavailable: "当前对话没有可用的助手。请选择一个助手后重试；你的消息已保留。",
+      agentUnavailable:
+        "当前对话没有可用的助手。请选择一个助手后重试；你的消息已保留。",
       queuedText: "消息已排队，将在当前轮次结束后发送。",
-      queuedAttachmentBlocked: "当前轮次仍在运行。含附件或多图的消息不会排队，请等待完成后再发送。",
+      queuedAttachmentBlocked:
+        "当前轮次仍在运行。含附件或多图的消息不会排队，请等待完成后再发送。",
       contextUsageEstimate: "估算",
       contextUsagePercentEstimate: "估算上下文用量 {{percent}}%",
       assistantReplyStarting: "正在处理…",
@@ -715,7 +746,7 @@ export default {
       Compression: "上下文压缩",
       CompressionTimes: "{{count}} 次",
       inheritedContextNotice: "此对话继承自上一段对话的上下文",
-      inheritedContextNoticeWithTitle: '此对话继承自“{{title}}”的上下文',
+      inheritedContextNoticeWithTitle: "此对话继承自“{{title}}”的上下文",
       openSourceDialog: "查看原对话",
       loadError: "加载出错，部分消息可能不完整",
       selectADialog: "请选择一个对话",
@@ -732,7 +763,8 @@ export default {
       delConfirmMessage: "删除此消息？",
       bash: {
         blockedTitle: "危险命令已被拦截",
-        blockedDesc: "该命令被检测为高危操作，默认未执行。如确有必要，请确认风险后继续。",
+        blockedDesc:
+          "该命令被检测为高危操作，默认未执行。如确有必要，请确认风险后继续。",
         runUnsafe: "仍要执行（unsafe）",
         exitCode: "退出码: {{code}}",
         noOutput: "(无输出)",
@@ -743,13 +775,15 @@ export default {
         conflictTitle: "写入冲突：文件已存在",
         conflictMsg: "目标文件已存在，且本次调用未允许覆盖，因此没有进行写入。",
         overwrite: "覆盖写入",
-        confirmOverwritePrompt: "刚才尝试写入文件 {{path}} 时发现文件已存在，且未覆盖。请确认覆盖该文件，并使用你刚才生成的最新内容。",
+        confirmOverwritePrompt:
+          "刚才尝试写入文件 {{path}} 时发现文件已存在，且未覆盖。请确认覆盖该文件，并使用你刚才生成的最新内容。",
       },
       tool: {
         failed: "执行失败",
         executing: "正在执行...",
         requiresApproval: "等待确认",
-        resumePrompt: "请基于刚才工具执行的结果继续完成你之前的计划；如果任务已经完成，请用简洁的方式总结结果。",
+        resumePrompt:
+          "请基于刚才工具执行的结果继续完成你之前的计划；如果任务已经完成，请用简洁的方式总结结果。",
         preflightRepairing: "预检发现 {{count}} 个问题，正在自动修复…",
         moreSteps: "还有 {{count}} 步…",
       },
@@ -842,7 +876,6 @@ export default {
         releasePreview: "释放预览",
         captureVisualState: "截图检查",
         appDeploy: "部署应用",
-        setTodoList: "更新计划",
         ask_user: "提问",
         runStreamingAgent: "转交",
       },
@@ -1018,7 +1051,8 @@ export default {
       },
       appAssistantLoadFailed: "加载应用上下文失败",
       appAssistantLoading: "正在加载应用上下文…",
-      appAssistantNeedsRecovery: "这版应用目前还不适合直接做小范围修改。我可以先按当前页面整理成可继续编辑的版本，再继续帮你改。",
+      appAssistantNeedsRecovery:
+        "这版应用目前还不适合直接做小范围修改。我可以先按当前页面整理成可继续编辑的版本，再继续帮你改。",
       createSideDialogFailed: "创建对话失败，请稍后重试",
       favoriteAssistants: "常用助手",
       goExplore: "去 AI 广场逛逛",
@@ -1091,6 +1125,7 @@ export default {
       excelParseError: "解析 Excel 檔案失敗",
       FailedToLoadAgents: "載入智能體失敗",
       fileReadError: "讀取檔案內容失敗",
+      mediaFileTooLarge: "音視頻檔案不能超過 120 MB",
       First: "首個",
       Info: "資訊",
       LoadingAgents: "正在載入智能體...",
@@ -1187,18 +1222,24 @@ export default {
       waitingForModel: "上下文已準備好，正在等待模型回應…",
       modelWindowReduced:
         "已切換到視窗較小的模型（{{window}}）。目前對話預計使用 {{percent}}%，下一則訊息可能需要壓縮。",
-      contextWillCompactOnSend: "目前對話超出新模型的建議範圍。傳送時會先壓縮歷史記錄。",
+      contextWillCompactOnSend:
+        "目前對話超出新模型的建議範圍。傳送時會先壓縮歷史記錄。",
       currentMessageTooLarge:
         "目前訊息或附件本身超過模型視窗。請縮短內容、移除附件，或切換到更大視窗的模型。",
       compactionTimedOut:
         "壓縮歷史記錄逾時，訊息尚未提交給模型。你可以重試、開啟新對話，或切換到更大視窗的模型。",
-      compactionFailedFallback: "壓縮失敗，已縮短較早的歷史記錄後繼續。本輪可能缺少部分早期上下文。",
-      contextRejected: "模型無法接收目前上下文。請先壓縮對話、開啟新對話，或選擇更大視窗的模型。",
-      sendAlreadyRunning: "這則訊息仍在處理中。你可以停止目前請求，或將純文字訊息加入佇列。",
+      compactionFailedFallback:
+        "壓縮失敗，已縮短較早的歷史記錄後繼續。本輪可能缺少部分早期上下文。",
+      contextRejected:
+        "模型無法接收目前上下文。請先壓縮對話、開啟新對話，或選擇更大視窗的模型。",
+      sendAlreadyRunning:
+        "這則訊息仍在處理中。你可以停止目前請求，或將純文字訊息加入佇列。",
       sendStateRecovered: "偵測到已失效的傳送狀態，已自動恢復。請重新傳送。",
-      agentUnavailable: "目前對話沒有可用的助手。請選擇一個助手後重試；你的訊息已保留。",
+      agentUnavailable:
+        "目前對話沒有可用的助手。請選擇一個助手後重試；你的訊息已保留。",
       queuedText: "訊息已加入佇列，將在目前輪次結束後傳送。",
-      queuedAttachmentBlocked: "目前輪次仍在執行。含附件或多圖的訊息不會排入佇列，請等待完成後再傳送。",
+      queuedAttachmentBlocked:
+        "目前輪次仍在執行。含附件或多圖的訊息不會排入佇列，請等待完成後再傳送。",
       contextUsageEstimate: "估算",
       contextUsagePercentEstimate: "估算上下文用量 {{percent}}%",
       assistantReplyStarting: "正在處理…",
@@ -1240,7 +1281,8 @@ export default {
       delConfirmMessage: "刪除此訊息？",
       bash: {
         blockedTitle: "危險命令已被攔截",
-        blockedDesc: "該命令被檢測為高危操作，預設未執行。如確有必要，請確認風險後繼續。",
+        blockedDesc:
+          "該命令被檢測為高危操作，預設未執行。如確有必要，請確認風險後繼續。",
         runUnsafe: "仍要執行（unsafe）",
         exitCode: "退出碼: {{code}}",
         noOutput: "(無輸出)",
@@ -1251,13 +1293,15 @@ export default {
         conflictTitle: "寫入衝突：檔案已存在",
         conflictMsg: "目標檔案已存在，且本次調用未允許覆蓋，因此沒有進行寫入。",
         overwrite: "覆蓋寫入",
-        confirmOverwritePrompt: "剛才嘗試寫入檔案 {{path}} 時發現檔案已存在，且未覆蓋。請確認覆蓋該檔案，並使用你剛才生成的最新內容。",
+        confirmOverwritePrompt:
+          "剛才嘗試寫入檔案 {{path}} 時發現檔案已存在，且未覆蓋。請確認覆蓋該檔案，並使用你剛才生成的最新內容。",
       },
       tool: {
         failed: "執行失敗",
         executing: "正在執行...",
         requiresApproval: "等待確認",
-        resumePrompt: "請基於剛才工具執行的結果繼續完成你之前的計劃；如果任務已經完成，請用簡潔的方式總結結果。",
+        resumePrompt:
+          "請基於剛才工具執行的結果繼續完成你之前的計劃；如果任務已經完成，請用簡潔的方式總結結果。",
         preflightRepairing: "預檢發現 {{count}} 個問題，正在自動修復…",
         moreSteps: "還有 {{count}} 步…",
       },
@@ -1350,7 +1394,6 @@ export default {
         releasePreview: "釋放預覽",
         captureVisualState: "截圖檢查",
         appDeploy: "部署應用",
-        setTodoList: "更新計畫",
         ask_user: "提問",
         runStreamingAgent: "轉交",
       },
@@ -1526,7 +1569,8 @@ export default {
       },
       appAssistantLoadFailed: "載入應用上下文失敗",
       appAssistantLoading: "正在載入應用上下文…",
-      appAssistantNeedsRecovery: "這版應用目前還不適合直接做小範圍修改。我可以先按當前頁面整理成可繼續編輯的版本，再繼續幫你改。",
+      appAssistantNeedsRecovery:
+        "這版應用目前還不適合直接做小範圍修改。我可以先按當前頁面整理成可繼續編輯的版本，再繼續幫你改。",
       createSideDialogFailed: "創建對話失敗，請稍後重試",
       favoriteAssistants: "常用助手",
       goExplore: "去 AI 廣場逛逛",
@@ -1558,7 +1602,8 @@ export default {
       compressingImages: "画像を圧縮中...",
       copyContent: "コンテンツをコピー",
       copyDiagnostics: "診断情報をコピー",
-      finishReasonLengthNotice: "モデルの出力上限に達したため、回答が途中で終了しました",
+      finishReasonLengthNotice:
+        "モデルの出力上限に達したため、回答が途中で終了しました",
       retryProgress: "自動リトライ {{attempt}}/{{maxAttempts}} · {{seconds}}s",
       sendErrorCard: {
         title: "送信失敗",
@@ -1572,7 +1617,8 @@ export default {
         verifyAccount: "アカウントを確認",
       },
       copyFailed: "コピーに失敗しました",
-      contextAutoCompressed: "モデルウィンドウ内に収まるようコンテキストを自動圧縮しました",
+      contextAutoCompressed:
+        "モデルウィンドウ内に収まるようコンテキストを自動圧縮しました",
       contextAutoCompressFailed: "コンテキストの自動圧縮に失敗しました",
       copySuccess: "コピーに成功しました",
       createDialog: "対話を作成",
@@ -1588,7 +1634,7 @@ export default {
       delete: "削除",
       deleteContentConfirmation:
         "このコンテンツを削除しますか？この操作は元に戻せません。",
-      deleteContentTitle: '「{{title}}」を削除',
+      deleteContentTitle: "「{{title}}」を削除",
       deleteMovedToTrash: '"{{title}}" をゴミ箱に移動しました',
       deleteFailed: "削除に失敗しました",
       deleteMessage: "メッセージを削除",
@@ -1600,6 +1646,7 @@ export default {
       excelParseError: "Excelファイルの解析に失敗しました",
       FailedToLoadAgents: "エージェントの読み込みに失敗しました",
       fileReadError: "ファイルの読み込みに失敗しました",
+      mediaFileTooLarge: "音声・動画ファイルは 120 MB 以下にしてください",
       First: "最初",
       Info: "情報",
       LoadingAgents: "エージェントを読み込み中...",
@@ -1654,7 +1701,8 @@ export default {
       insufficientBalanceDetailed:
         "残高不足。モデル：{{modelName}}、1回の最大コスト：{{pricePerMessage}}ポイント。残高：{{balance}}ポイント。",
       insufficientBalance: "残高不足",
-      insufficientBalanceShortfall: "あと {{shortfall}} ポイント不足しています。",
+      insufficientBalanceShortfall:
+        "あと {{shortfall}} ポイント不足しています。",
       agentConfigMissing: "エージェントの設定が見つかりません",
       agentConfigLoadFailed:
         "エージェント設定の読み込みに失敗しました。再試行してください。",
@@ -1667,7 +1715,8 @@ export default {
         "モデルの切り替えや過去のメッセージの編集後は、会話の一部を再読み込みする場合があります。",
       editingMessageNotice:
         "過去のメッセージを編集中です。送信すると、それ以降のメッセージは破棄されます。会話の一部を再読み込みする場合があります。",
-      switchModelContinueFailed: "モデルの切り替えに失敗しました。再試行してください。",
+      switchModelContinueFailed:
+        "モデルの切り替えに失敗しました。再試行してください。",
       noAlternativeModels: "利用可能な他のモデルがありません",
       noAvailableAgentMessage: "利用可能なエージェントメッセージがありません",
       creditsUnit: "ポイント",
@@ -1695,25 +1744,36 @@ export default {
       branchCreated: "ブランチ会話を作成しました",
       branchFailed: "ブランチ会話の作成に失敗しました",
       stopBeforeDelete: "生成が停止するまでお待ちください",
-      messageQueued: "メッセージをキューに入れました。現在のターン後に送信されます",
-      cannotSendFileDuringLoop: "Agent 実行中です。添付メッセージは完了後にお送りください",
+      messageQueued:
+        "メッセージをキューに入れました。現在のターン後に送信されます",
+      cannotSendFileDuringLoop:
+        "Agent 実行中です。添付メッセージは完了後にお送りください",
       contextChecking: "現在のモデルのコンテキストウィンドウを確認しています…",
       contextCompacting: "会話が長いため、履歴を圧縮しています…",
-      waitingForModel: "コンテキストの準備が完了し、モデルの応答を待っています…",
+      waitingForModel:
+        "コンテキストの準備が完了し、モデルの応答を待っています…",
       modelWindowReduced:
         "ウィンドウが小さいモデル（{{window}}）に切り替えました。この会話の使用量は約 {{percent}}% で、次のメッセージは圧縮が必要になる場合があります。",
-      contextWillCompactOnSend: "この会話は新しいモデルの推奨範囲を超えています。送信前に履歴を圧縮します。",
+      contextWillCompactOnSend:
+        "この会話は新しいモデルの推奨範囲を超えています。送信前に履歴を圧縮します。",
       currentMessageTooLarge:
         "このメッセージまたは添付ファイル自体がモデルのウィンドウを超えています。内容を短縮する、添付を減らす、またはより大きいウィンドウのモデルを選択してください。",
       compactionTimedOut:
         "履歴の圧縮がタイムアウトし、メッセージはモデルに送信されていません。再試行、新しいチャットの開始、またはより大きいウィンドウのモデルへの切り替えができます。",
-      compactionFailedFallback: "圧縮に失敗しました。古い履歴を縮小して続行します。今回のラウンドでは一部の古いコンテキストが欠落する場合があります。",
-      contextRejected: "モデルは現在のコンテキストを受け付けられません。チャットを圧縮する、新しいチャットを開始する、またはより大きいウィンドウのモデルを選択してください。",
-      sendAlreadyRunning: "このメッセージはまだ処理中です。現在のリクエストを停止するか、テキストのみのメッセージをキューに追加できます。",
-      sendStateRecovered: "無効な送信状態を検出し、復旧しました。もう一度送信してください。",
-      agentUnavailable: "このチャットに利用できるアシスタントがありません。選択して再試行してください。メッセージは保持されています。",
-      queuedText: "メッセージをキューに入れました。現在のターン後に送信されます",
-      queuedAttachmentBlocked: "現在のターンはまだ実行中です。添付ファイルや複数画像を含むメッセージはキューに入りません。完了後に送信してください。",
+      compactionFailedFallback:
+        "圧縮に失敗しました。古い履歴を縮小して続行します。今回のラウンドでは一部の古いコンテキストが欠落する場合があります。",
+      contextRejected:
+        "モデルは現在のコンテキストを受け付けられません。チャットを圧縮する、新しいチャットを開始する、またはより大きいウィンドウのモデルを選択してください。",
+      sendAlreadyRunning:
+        "このメッセージはまだ処理中です。現在のリクエストを停止するか、テキストのみのメッセージをキューに追加できます。",
+      sendStateRecovered:
+        "無効な送信状態を検出し、復旧しました。もう一度送信してください。",
+      agentUnavailable:
+        "このチャットに利用できるアシスタントがありません。選択して再試行してください。メッセージは保持されています。",
+      queuedText:
+        "メッセージをキューに入れました。現在のターン後に送信されます",
+      queuedAttachmentBlocked:
+        "現在のターンはまだ実行中です。添付ファイルや複数画像を含むメッセージはキューに入りません。完了後に送信してください。",
       contextUsageEstimate: "推定",
       contextUsagePercentEstimate: "コンテキスト使用量の推定 {{percent}}%",
       assistantReplyStarting: "処理中…",
@@ -1737,10 +1797,13 @@ export default {
       MaxContext: "最大コンテキスト",
       Compression: "コンテキスト圧縮",
       CompressionTimes: "{{count}} 回",
-      inheritedContextNotice: "この会話は前の会話のコンテキストを引き継いでいます",
-      inheritedContextNoticeWithTitle: "この会話は「{{title}}」のコンテキストを引き継いでいます",
+      inheritedContextNotice:
+        "この会話は前の会話のコンテキストを引き継いでいます",
+      inheritedContextNoticeWithTitle:
+        "この会話は「{{title}}」のコンテキストを引き継いでいます",
       openSourceDialog: "元のチャットを開く",
-      loadError: "読み込みに失敗しました。一部のメッセージが不完全な可能性があります",
+      loadError:
+        "読み込みに失敗しました。一部のメッセージが不完全な可能性があります",
       selectADialog: "ダイアログを選択してください",
       privateDialogGuestTitle: "これは非公開ダイアログリンクです",
       privateDialogGuestHint:
@@ -1761,7 +1824,8 @@ export default {
       delConfirmMessage: "このメッセージを削除しますか？",
       bash: {
         blockedTitle: "危険なコマンドをブロックしました",
-        blockedDesc: "このコマンドは高リスクとして検出され、実行されませんでした。必要に応じてリスクを確認し、続行してください。",
+        blockedDesc:
+          "このコマンドは高リスクとして検出され、実行されませんでした。必要に応じてリスクを確認し、続行してください。",
         runUnsafe: "そのまま実行（アンセーフ）",
         exitCode: "終了コード: {{code}}",
         noOutput: "(出力なし)",
@@ -1770,16 +1834,20 @@ export default {
         viewFinal: "最終結果",
         viewDiff: "差分プレビュー",
         conflictTitle: "書き込み競合：ファイルが既に存在します",
-        conflictMsg: "対象ファイルが既に存在し、上書きが許可されていないため、変更は行われませんでした。",
+        conflictMsg:
+          "対象ファイルが既に存在し、上書きが許可されていないため、変更は行われませんでした。",
         overwrite: "上書き",
-        confirmOverwritePrompt: "{{path}}への書き込み試行は、ファイルが存在し上書きが許可されていなかったため失敗しました。最新のコンテンツで上書きするか確認してください。",
+        confirmOverwritePrompt:
+          "{{path}}への書き込み試行は、ファイルが存在し上書きが許可されていなかったため失敗しました。最新のコンテンツで上書きするか確認してください。",
       },
       tool: {
         failed: "実行失敗",
         executing: "実行中...",
         requiresApproval: "承認が必要",
-        resumePrompt: "ツールの実行結果に基づいて、前の計画を続行してください。タスクが完了した場合は、簡潔にまとめてください。",
-        preflightRepairing: "プリフライトで {{count}} 件の問題を検出、自動修復中…",
+        resumePrompt:
+          "ツールの実行結果に基づいて、前の計画を続行してください。タスクが完了した場合は、簡潔にまとめてください。",
+        preflightRepairing:
+          "プリフライトで {{count}} 件の問題を検出、自動修復中…",
         moreSteps: "他 {{count}} ステップ…",
       },
       toolConfirm: {
@@ -1871,7 +1939,6 @@ export default {
         releasePreview: "プレビュー解放",
         captureVisualState: "スクリーンショット",
         appDeploy: "アプリデプロイ",
-        setTodoList: "計画を更新",
         ask_user: "質問",
         runStreamingAgent: "引き継ぎ",
       },
@@ -1946,7 +2013,8 @@ export default {
         appendInstructionPlaceholder: "実行中のタスクに指示を追加…",
         appendInstructionButton: "追加",
         appendInstructionSending: "送信中…",
-        appendInstructionSuccess: "キューに追加されました。次のターンで処理されます",
+        appendInstructionSuccess:
+          "キューに追加されました。次のターンで処理されます",
         appendInstructionFailed: "指示の送信に失敗しました",
         continueTaskTitle: "タスクを継続",
         continueTaskPlaceholder: "タスクを継続する指示を入力…",
@@ -1995,9 +2063,11 @@ export default {
             tags: "タグ",
             tagsDesc: "タグと軽量な分類情報を更新します。",
             prompt: "システムプロンプト",
-            promptDesc: "影響の大きいフィールドのため、既定では確認を維持することを推奨します。",
+            promptDesc:
+              "影響の大きいフィールドのため、既定では確認を維持することを推奨します。",
             references: "知識参照",
-            referencesDesc: "Agent が既定で参照するドキュメントやページを変更します。",
+            referencesDesc:
+              "Agent が既定で参照するドキュメントやページを変更します。",
             tools: "ツール",
             toolsDesc: "Agent が呼び出せるツール能力を変更します。",
             model: "モデル",
@@ -2047,18 +2117,23 @@ export default {
       },
       appAssistantLoadFailed: "アプリのコンテキストの読み込みに失敗しました",
       appAssistantLoading: "アプリのコンテキストを読み込んでいます…",
-      appAssistantNeedsRecovery: "このバージョンのアプリは、まだ小さな直接編集には向いていません。まず現在のページを編集可能なバージョンに整えてから、引き続き変更をお手伝いします。",
-      createSideDialogFailed: "チャットの作成に失敗しました。しばらくしてからもう一度お試しください。",
+      appAssistantNeedsRecovery:
+        "このバージョンのアプリは、まだ小さな直接編集には向いていません。まず現在のページを編集可能なバージョンに整えてから、引き続き変更をお手伝いします。",
+      createSideDialogFailed:
+        "チャットの作成に失敗しました。しばらくしてからもう一度お試しください。",
       favoriteAssistants: "よく使うアシスタント",
       goExplore: "AI 広場を見てみる",
       goLogin: "ログインする",
-      loadSideDialogError: "チャットの読み込みに失敗しました。しばらくしてからもう一度お試しください。",
-      loginToUseAssistants: "ページアシスタントを利用するにはログインが必要です",
+      loadSideDialogError:
+        "チャットの読み込みに失敗しました。しばらくしてからもう一度お試しください。",
+      loginToUseAssistants:
+        "ページアシスタントを利用するにはログインが必要です",
       noAvailableAgents: "利用可能な Agent がありません",
       pageAssistant: "ページアシスタント",
       selectAssistant: "アシスタントを選択",
       switchAssistant: "アシスタントを切り替え",
-      switchAssistantFailed: "アシスタントの切り替えに失敗しました。もう一度お試しください。",
+      switchAssistantFailed:
+        "アシスタントの切り替えに失敗しました。もう一度お試しください。",
     },
   },
 };
