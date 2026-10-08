@@ -26,6 +26,9 @@ export type TurnBillingAuditUsageRecord = {
   usage?: Record<string, unknown> | null;
   model?: string;
   provider?: string;
+  stablePrefixHash?: string;
+  stablePrefixEstimatedTokens?: number;
+  telemetry?: Record<string, unknown>;
 };
 
 export type TurnBillingAuditInput = {
@@ -62,7 +65,47 @@ export function projectUsageForAudit(
   ) {
     projected.provider_call_id = usage.provider_call_id.trim();
   }
+  const creation = (usage as { cache_creation?: unknown }).cache_creation;
+  if (creation && typeof creation === "object") {
+    const c = creation as Record<string, unknown>;
+    const n5 = c.ephemeral_5m_input_tokens;
+    const n1 = c.ephemeral_1h_input_tokens;
+    if (typeof n5 === "number" && Number.isFinite(n5)) projected.cacheCreation5m = n5;
+    if (typeof n1 === "number" && Number.isFinite(n1)) projected.cacheCreation1h = n1;
+  }
   return projected;
+}
+
+const TELEMETRY_NUMERIC_KEYS = [
+  "round", "endTs", "durationMs", "msgCount", "contentChars",
+  "toolResultChars", "toolResultCount", "prevMsgCount",
+] as const;
+
+/** 逐次调用遥测投影：白名单，只放行数字、哈希与工具名。 */
+export function projectTelemetryForAudit(
+  record?: TurnBillingAuditUsageRecord | null
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!record) return out;
+  if (typeof record.stablePrefixHash === "string") out.stablePrefixHash = record.stablePrefixHash.slice(0, 12);
+  if (typeof record.stablePrefixEstimatedTokens === "number") {
+    out.stablePrefixEstimatedTokens = record.stablePrefixEstimatedTokens;
+  }
+  const t = record.telemetry;
+  if (t && typeof t === "object") {
+    for (const key of TELEMETRY_NUMERIC_KEYS) {
+      const v = t[key];
+      if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
+    }
+    if (typeof t.toolsHash === "string") out.toolsHash = t.toolsHash.slice(0, 16);
+    if (t.divergeAt === null || (typeof t.divergeAt === "number" && Number.isFinite(t.divergeAt))) {
+      out.divergeAt = t.divergeAt;
+    }
+    if (Array.isArray(t.toolCalls)) {
+      out.toolCalls = t.toolCalls.filter((n): n is string => typeof n === "string").slice(0, 50);
+    }
+  }
+  return out;
 }
 
 export function resolveTurnBillingAuditLogPath(
@@ -88,9 +131,10 @@ export function appendTurnBillingAudit(input: TurnBillingAuditInput): void {
           ...(record?.model ? { model: record.model } : {}),
           ...(record?.provider ? { provider: record.provider } : {}),
           ...usage,
+          ...projectTelemetryForAudit(record),
         };
       })
-      .filter((call): call is Record<string, number | string> => call !== null);
+      .filter((call): call is Record<string, unknown> => call !== null);
     if (calls.length === 0 && (input.turnCredits === undefined || input.turnCredits === null)) {
       return;
     }

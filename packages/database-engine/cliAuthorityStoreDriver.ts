@@ -58,7 +58,9 @@ export function resolveCliAuthorityBrokerPort(
     ...options,
     env: options.env ?? {},
   });
-  return 47000 + (hashString(noloHome) % 2000);
+  // Keep the stable per-home endpoint below common ephemeral TCP port ranges,
+  // where unrelated outbound connections can otherwise prevent broker binding.
+  return 24000 + (hashString(noloHome) % 2000);
 }
 
 export function resolveCliAuthorityStoreDriver(

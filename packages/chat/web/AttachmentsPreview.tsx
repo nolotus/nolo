@@ -1,5 +1,6 @@
 // AttachmentsPreview.tsx
 import React, { useState, useCallback, useMemo, memo, MouseEvent } from "react";
+import { MediaJobAttachment } from "./MediaJobAttachment";
 import { LuX, LuTrash2 } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
 import ImagePreviewModal from "render/web/ui/modal/ImagePreviewModal";
@@ -13,7 +14,6 @@ import {
   runAttachmentViewTransition,
 } from "./attachmentViewTransitions";
 
-
 export interface PendingImagePreview {
   id: string;
   url: string;
@@ -25,6 +25,12 @@ interface AttachmentsPreviewProps {
   onRemoveImage: (id: string) => void;
   processingFiles?: Set<string>;
   isMobile?: boolean;
+  mediaJobSourceText?: string;
+  mediaJobDrafts?: Record<string, import("./MediaJobAttachment").MediaJobDraft>;
+  onMediaJobDraftChange?: (
+    id: string,
+    draft: import("./MediaJobAttachment").MediaJobDraft,
+  ) => void;
 }
 
 interface ImageItemProps {
@@ -269,7 +275,7 @@ const ImageItem: React.FC<ImageItemProps> = memo(
           event.stopPropagation();
           onRemove(image.id);
         },
-        [image.id, onRemove]
+        [image.id, onRemove],
       );
 
     return (
@@ -301,11 +307,15 @@ const ImageItem: React.FC<ImageItemProps> = memo(
           aria-label={`删除图片 ${index + 1}`}
           title={`删除图片 ${index + 1}`}
         >
-          {isMobile ? <LuTrash2 size={16} aria-hidden="true" /> : <LuX size={14} aria-hidden="true" />}
+          {isMobile ? (
+            <LuTrash2 size={16} aria-hidden="true" />
+          ) : (
+            <LuX size={14} aria-hidden="true" />
+          )}
         </button>
       </div>
     );
-  }
+  },
 );
 
 ImageItem.displayName = "ImageItem";
@@ -316,6 +326,9 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
   onRemoveImage,
   processingFiles = new Set(),
   isMobile = false,
+  mediaJobSourceText = "",
+  mediaJobDrafts = {},
+  onMediaJobDraftChange,
 }) => {
   const dispatch = useAppDispatch();
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -323,7 +336,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
 
   const hasAttachments = useMemo(
     () => imagePreviews.length > 0 || pendingFiles.length > 0,
-    [imagePreviews.length, pendingFiles.length]
+    [imagePreviews.length, pendingFiles.length],
   );
 
   const handleRemoveFile = useCallback(
@@ -332,7 +345,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
         dispatch(removePendingFile(id));
       });
     },
-    [dispatch]
+    [dispatch],
   );
 
   const handlePreviewImage = useCallback((url: string) => {
@@ -394,6 +407,27 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
             .filter(Boolean)
             .join(" ");
 
+          if (file.type === "media_job") {
+            const dropCard = () => {
+              // 与点删除按钮同一条路径：store + localStorage 引用一起清掉。
+              dispatch(removePendingFile(file.id));
+            };
+            return (
+              <MediaJobAttachment
+                key={file.id}
+                jobId={file.id}
+                fileName={file.name}
+                sourceText={mediaJobSourceText}
+                draft={mediaJobDrafts[file.id]}
+                onDraftChange={(draft) =>
+                  onMediaJobDraftChange?.(file.id, draft)
+                }
+                onJobMissing={dropCard}
+                onJobDiscard={dropCard}
+              />
+            );
+          }
+
           return (
             <div
               key={file.id}
@@ -412,7 +446,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
                   file.type === "dialog"
                     ? undefined
                     : () =>
-                      !isProcessing && !file.error && handlePreviewFile(file)
+                        !isProcessing && !file.error && handlePreviewFile(file)
                 }
               />
 
@@ -424,7 +458,11 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
                 aria-label={`删除文件 ${file.name}`}
                 title={`删除文件 ${file.name}`}
               >
-                {isMobile ? <LuTrash2 size={16} aria-hidden="true" /> : <LuX size={14} aria-hidden="true" />}
+                {isMobile ? (
+                  <LuTrash2 size={16} aria-hidden="true" />
+                ) : (
+                  <LuX size={14} aria-hidden="true" />
+                )}
               </button>
             </div>
           );

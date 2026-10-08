@@ -26,7 +26,8 @@ export interface PendingFile {
     | "file"
     | "agent"
     | "app"
-    | "ocr_text";
+    | "ocr_text"
+    | "media_job";
   groupId?: string;
   ocrText?: string;
   /** 关联到文件处理状态（如 useMessageInputFiles 的 fileStatus）的跟踪 id。 */

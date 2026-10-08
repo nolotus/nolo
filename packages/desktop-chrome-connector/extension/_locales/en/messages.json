@@ -1,26 +1,26 @@
 {
   "extName": {
     "message": "Nolo Browser Connector",
-    "description": "Extension name shown in Chrome."
+    "description": "Extension name shown in the browser."
   },
   "extDescription": {
-    "message": "Connects Nolo Desktop local agents to the user's Chrome tabs.",
-    "description": "Extension description shown in Chrome and on the store listing."
+    "message": "Lets your local Nolo agent work in the browser tabs you ask about.",
+    "description": "Extension description shown in the browser and on the store listing."
   },
   "popupChecking": {
     "message": "Checking…"
   },
   "popupConnected": {
-    "message": "Connected to Nolo Desktop"
+    "message": "Connected to the local connector"
   },
   "popupConnectedHint": {
-    "message": "Your desktop agent can work in the tabs you ask about."
+    "message": "Your local agent can work in the tabs you ask about."
   },
   "popupDisconnected": {
     "message": "Not connected"
   },
   "popupDisconnectedHint": {
-    "message": "Open Nolo Desktop on this computer and enable the Chrome connector, then reopen this popup."
+    "message": "Install Nolo on this computer and enable its connector, then reopen this popup."
   },
   "popupStatusError": {
     "message": "Could not read connector status: $DETAIL$",
@@ -30,8 +30,8 @@
       }
     }
   },
-  "popupDesktopApp": {
-    "message": "Desktop app"
+  "popupLocalConnector": {
+    "message": "Local connector"
   },
   "popupProtocol": {
     "message": "Protocol"
@@ -40,6 +40,6 @@
     "message": "Extension"
   },
   "popupPrivacy": {
-    "message": "Page reads and actions run through Nolo Desktop. Cookies, passwords and profile databases are never read."
+    "message": "Page reads and actions run through the Nolo app on this computer. Cookies, passwords and profile databases are never read."
   }
 }

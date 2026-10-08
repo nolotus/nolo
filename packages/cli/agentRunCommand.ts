@@ -8,12 +8,14 @@
 import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
 import * as nodeFs from "node:fs";
 import { CLI_AUTO_ROUTE_AGENT_KEY } from "./client/autoModelRouter";
+import { t } from "./tui/i18n";
 import {
   buildModelLayerOverride,
   type ModelLayerOverride,
 } from "../agent-runtime/modelLayerOverride";
 import type { ContextBlockScope } from "../agent-runtime/contextBlockScope";
 import { buildSkillDiscoveryContextLayer } from "../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../agent-runtime/agentsMd";
 import { CliProviderQuotaError } from "ai/agent/cliExecutor";
 import type { AgentRuntimeHostAdapter } from "./agentRuntimeLocal";
@@ -474,14 +476,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
     if (hasExplicitAgent && !modelOverride) {
       output.write(
-        "[nolo] auto-route: 覆盖源 agent 读取失败，按原样直跑所选 agent。\n",
+        t("agentRun.autoRouteOverrideFailed"),
       );
     } else {
       effectiveAgentKey = CLI_AUTO_ROUTE_AGENT_KEY;
       // 自动路由只剩默认档一个目标，不再打印档位提示；显式 --agent 的 model
       // 层覆盖仍值得提示（否则用户会疑惑跑的模型为何不是所选 agent 的）。
       if (modelOverride) {
-        output.write(`[nolo] auto-route: model 层覆盖为 ${agentKey}\n`);
+        output.write(t("agentRun.autoRouteModelOverride", agentKey));
       }
     }
   }
@@ -618,6 +620,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
   // nolo-commit/nolo-cli are invisible to CLI agents even though their SKILL.md
   // files exist in the workspace.
   scopedLayers.push(buildSkillDiscoveryContextLayer(cliCwd));
+  scopedLayers.push(buildHostEnvironmentLayer());
 
   // T3456 — Memory injection route (CLI analogue of desktop T14).
   // Remote-first recall with local fallback. See memoryRecall.ts for details.
@@ -952,6 +955,7 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ...(runCreditsTotal !== undefined ? { credits: runCreditsTotal } : {}),
       ...(failureReason ? { failureReason } : {}),
       ...(toolCallCount !== undefined ? { toolCallCount } : {}),
+      ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
       ...truncationNote,
     },
     {

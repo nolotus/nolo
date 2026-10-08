@@ -169,7 +169,15 @@ export async function connectCliAuthorityBroker(args: {
           throw retryError;
         }
       }
-      throw new Error(`CLI authority broker could not attach or take ownership for ${args.endpoint}`, {
+      const lastMessage = toErrorMessage(lastError);
+      const portInUse = (
+        lastError !== null && typeof lastError === "object" &&
+        "code" in lastError && lastError.code === "EADDRINUSE"
+      ) || /EADDRINUSE/i.test(lastMessage);
+      const detail = portInUse
+        ? `: EADDRINUSE (${lastMessage}). The broker endpoint is already in use; check the process using it or set NOLO_CLI_AUTHORITY_BROKER_PORT to a free port for all local CLI processes`
+        : "";
+      throw new Error(`CLI authority broker could not attach or take ownership for ${args.endpoint}${detail}`, {
         cause: lastError,
       });
     }
