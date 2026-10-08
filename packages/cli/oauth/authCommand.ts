@@ -39,6 +39,7 @@ import {
   resolveServerSyncConfig,
   type ServerSyncConfig,
 } from "./serverSyncConfig";
+import { t } from "../tui/i18n";
 
 // 保持既有导入方（含测试）不破：这两个符号原来就由本模块导出。
 export { resolveServerSyncConfig };
@@ -331,12 +332,12 @@ function markCredentialServerManaged(
       },
     });
     output.log(
-      `[nolo] 本地不再保存 refresh token：${provider} 由 ${syncConfig.serverOrigin} 统一刷新（用完即取）。`,
+      t("auth.localRefreshTokenDropped", provider, syncConfig.serverOrigin),
     );
     return true;
   } catch (err) {
     output.log(
-      `[nolo] Warning: 本地凭据状态更新失败（${toErrorMessage(err)}）。`,
+      t("auth.localStateUpdateFailed", toErrorMessage(err)),
     );
     return false;
   }
@@ -353,7 +354,7 @@ async function syncCredentialToServer(
   const syncConfig = (deps.resolveServerSyncConfig ?? resolveServerSyncConfig)();
   if (!syncConfig) {
     output.log(
-      `[nolo] Warning: server sync requires NOLO_SERVER and AUTH_TOKEN env vars, or a configured profile. Skipping server sync.`
+      t("auth.syncMissingConfig")
     );
     return "sync_failed";
   }
@@ -383,8 +384,8 @@ async function syncCredentialToServer(
     if (res.ok) {
       const marked = markCredentialServerManaged(provider, credential, syncConfig, deps);
       if (marked) {
-        output.log(`[nolo] Synced to ${serverOrigin}`);
-        output.log(`[nolo] 网页端现在可以使用该订阅了。`);
+        output.log(t("auth.syncedTo", serverOrigin));
+        output.log(t("auth.syncDoneWebUsable"));
         return "ok";
       }
       return "mark_failed";
@@ -397,13 +398,13 @@ async function syncCredentialToServer(
         // ignore
       }
       output.log(
-        `[nolo] Warning: server sync failed (${res.status}${errorDetail ? `: ${errorDetail}` : ""}). Token saved locally.`
+        t("auth.syncFailed", `${res.status}${errorDetail ? `: ${errorDetail}` : ""}`)
       );
       return "sync_failed";
     }
   } catch (err: any) {
     output.log(
-      `[nolo] Warning: server sync failed (${err?.message ?? "network error"}). Token saved locally.`
+      t("auth.syncFailed", err?.message ?? "network error")
     );
     return "sync_failed";
   }
@@ -453,14 +454,17 @@ export async function runAuthProviderCommand(
     const credential = tokenStore.read(provider);
     if (!credential) {
       error.error(
-        `[nolo] No local ${provider} credential. Run: nolo auth ${provider}`
+        t("auth.noLocalCredential", provider)
       );
       return 1;
     }
     if (credential.serverManaged) {
       error.error(
-        `[nolo] ${provider} 凭据已由 ${credential.serverManaged.origin} 服务端托管（本地无 refreshToken）。\n` +
-          `如需重新同步，请运行: nolo auth ${provider} --sync-to-server`
+        t(
+          "auth.credentialServerManaged",
+          provider,
+          credential.serverManaged.origin,
+        )
       );
       return 1;
     }
@@ -479,18 +483,16 @@ export async function runAuthProviderCommand(
   // 仅限 antigravity：其它 provider 的 403 语义不同，不套这个分支。
   if (verify) {
     if (provider !== "antigravity") {
-      error.error(`[nolo] --verify is only supported for "nolo auth antigravity".`);
+      error.error(t("auth.verifyUnsupported"));
       return 1;
     }
     const credential = tokenStore.read(provider);
     if (!credential?.accessToken) {
-      error.error(
-        `[nolo] No local antigravity credential. Run: nolo auth antigravity`
-      );
+      error.error(t("auth.noLocalCredential", provider));
       return 1;
     }
     output.log(
-      `[nolo] Checking the current verification challenge (one lightweight request)...`
+      t("auth.checkingVerificationChallenge")
     );
     // 走与 agent transport 相同的 fresh-token 语义：过期 token 先 refresh 再
     // 打上游，否则旧 token 拿 401 会误导用户去重新登录而拿不到验证链接。
@@ -514,7 +516,7 @@ export async function runAuthProviderCommand(
         )
       ) {
         error.error(
-          `[nolo] The antigravity refresh token is no longer valid (${refreshError}). Re-run \`nolo auth antigravity\` to re-authorize this account.`
+          t("auth.refreshTokenInvalid", refreshError)
         );
         return 1;
       }
@@ -536,18 +538,18 @@ export async function runAuthProviderCommand(
       const msg = toErrorMessage(err);
       if (/projectId|metadata\.projectId|Re-run `nolo auth/i.test(msg)) {
         error.error(
-          `[nolo] The stored antigravity credential is incomplete (${msg}). Re-run \`nolo auth antigravity\` to re-authorize.`
+          t("auth.credentialIncomplete", msg)
         );
       } else {
         error.error(
-          `[nolo] Could not reach the antigravity provider: ${msg}. Check your network and retry.`
+          t("auth.providerUnreachable", msg)
         );
       }
       return 1;
     }
     if (result.status >= 200 && result.status < 300) {
       output.log(
-        `[nolo] ✓ The credential is working — no verification is required right now. You can retry your agent.`
+        t("auth.credentialWorking")
       );
       return 0;
     }
@@ -556,7 +558,7 @@ export async function runAuthProviderCommand(
     );
     if (result.status === 403 && validationUrl) {
       output.log(
-        `[nolo] Google requires a one-time account verification for ${credential.accountId ?? "this account"}.`
+        t("auth.googleVerificationRequired", credential.accountId ?? "this account")
       );
       output.log(`[nolo]   ${validationUrl}`);
       // --no-browser 与其它 auth 子命令语义一致：只打印链接不自动拉起。
@@ -564,15 +566,21 @@ export async function runAuthProviderCommand(
       const opened = opener ? await opener(validationUrl) : false;
       output.log(
         opened
-          ? `[nolo] ✓ Opened it in your browser — complete the verification there (sign in with the same Google account), then retry your agent.`
-          : `[nolo] Copy the URL above into a browser signed into ${credential.accountId ?? "that account"}, complete the verification, then retry your agent.`
+          ? t("auth.verificationOpened")
+          : t("auth.verificationCopyUrl", credential.accountId ?? "that account")
       );
       return 0;
     }
+    const refreshSuffix = refreshError
+      ? t("auth.httpWithoutVerificationLink.refreshSuffix", refreshError)
+      : "";
     error.error(
-      `[nolo] The provider returned HTTP ${result.status} without a verification link — this is not the one-time-verification case --verify handles.` +
-        (refreshError ? ` (token refresh also failed earlier: ${refreshError})` : "") +
-        ` Response detail: ${JSON.stringify(result.body ?? {}).slice(0, 400)}`
+      t(
+        "auth.httpWithoutVerificationLink",
+        String(result.status),
+        refreshSuffix,
+        JSON.stringify(result.body ?? {}).slice(0, 400),
+      )
     );
     return 1;
   }
@@ -641,7 +649,12 @@ export async function runAuthProviderCommand(
           fetchImpl: deps.fetchImpl ?? fetch,
         });
         output.log(
-          `[nolo] Generated Cloudflare API token for zone ${zoneName} (${zoneId}).\nStore it as CLOUDFLARE_EMAIL_ROUTING_API_TOKEN:\n  ${token}\n`
+          t(
+            "auth.cloudflareTokenGenerated",
+            zoneName,
+            zoneId,
+            token,
+          )
         );
 
         if (writeToEnvPath) {
@@ -651,7 +664,7 @@ export async function runAuthProviderCommand(
             token
           );
           output.log(
-            `[nolo] Updated ${writeToEnvPath} with CLOUDFLARE_EMAIL_ROUTING_API_TOKEN.`
+            t("auth.envUpdated", writeToEnvPath)
           );
         }
       }
@@ -664,9 +677,11 @@ export async function runAuthProviderCommand(
       credential.accountId ??
       "";
     output.log(
-      `[nolo] ${provider} authorization saved` +
-        (accountLabel ? ` for ${accountLabel}` : "") +
-        `.`
+      t(
+        "auth.authorizationSaved",
+        provider,
+        accountLabel ? t("auth.authorizationSavedForAccount", accountLabel) : "",
+      )
     );
 
     const hasExplicitNoSync = args.includes("--no-sync-to-server");
@@ -704,7 +719,7 @@ export async function runAuthProviderCommand(
         if (!syncConfig) {
           shouldSync = false;
           output.log(
-            `[nolo] 未配置服务器。如需在网页端使用，请先运行 nolo login，再运行 nolo auth ${provider} --sync-only`
+            t("auth.noServerConfigured", provider)
           );
         } else {
           const isTTY =
@@ -713,7 +728,11 @@ export async function runAuthProviderCommand(
               : (deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
 
           if (isTTY) {
-            const question = `同步到 ${syncConfig.serverOrigin}，让网页端也能使用这个 ${provider} 订阅？凭证加密存储，可随时 nolo auth ${provider} --no-sync-to-server 关闭 [Y/n] `;
+            const question = t(
+              "auth.syncPrompt",
+              syncConfig.serverOrigin,
+              provider,
+            );
             let answer: boolean;
             if (deps.promptOAuthSync) {
               answer = await deps.promptOAuthSync(question);
@@ -742,7 +761,7 @@ export async function runAuthProviderCommand(
           } else {
             shouldSync = false;
             output.log(
-              `[nolo] 未同步凭据到服务器。如需网页端使用，请运行: nolo auth ${provider} --sync-to-server（或 --sync-only）`
+              t("auth.notSyncedToServer", provider)
             );
           }
         }
@@ -752,7 +771,7 @@ export async function runAuthProviderCommand(
     if (shouldSync) {
       const syncResult = await syncCredentialToServer(provider, credential, deps);
       if (syncResult === "mark_failed") {
-        error.error(`[nolo] 凭据已成功上传服务器，但本地打上托管标记失败。为防双方竞态刷新导致失效，请重新授权。`);
+        error.error(t("auth.markFailed"));
         return 1;
       }
     }
@@ -760,7 +779,7 @@ export async function runAuthProviderCommand(
     return 0;
   } catch (err) {
     error.error(
-      `nolo auth ${provider} failed: ${toErrorMessage(err)}`
+      t("auth.commandFailed", provider, toErrorMessage(err))
     );
     return 1;
   }

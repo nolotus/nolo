@@ -347,8 +347,8 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         ? (deps.currentAgentKey ?? rawAgentKey)
         : rawAgentKey;
     const task = typeof args.task === "string" ? args.task.trim() : "";
-    if (!agentKey) throw new Error("startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。");
-    if (!task) throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
+    if (!agentKey) throw new Error(t("agentRunTool.missingAgentKey"));
+    if (!task) throw new Error(t("agentRunTool.missingTask"));
     const nowMs = resolveNowMs(deps);
 
     const effectiveAllowCredentialConcurrency =
@@ -519,7 +519,7 @@ async function spawnContinuationRun(
   // ephemeral run 只有合成的 eph-* dialogId（不落盘、永远读不到）：不再用
   // dialogId 做 guard，否则 ephemeral 续跑会直接抛错；非 ephemeral 的保护不变。
   if (!reconciled.ephemeral && !reconciled.dialogId) {
-    throw new Error("该 run 无关联 dialog，无法续跑。");
+    throw new Error(t("agentRunTool.noDialogToContinue"));
   }
 
   const agentKey = reconciled.agentKey;
@@ -743,9 +743,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action === "append") {
-      if (!args.runId) throw new Error(`controlAgentRun(action:"append"): 缺少 runId。`);
+      if (!args.runId) throw new Error(t("agentRunTool.appendMissingRunId"));
       const userInput = typeof args.userInput === "string" ? args.userInput.trim() : "";
-      if (!userInput) throw new Error(`controlAgentRun(action:"append"): 缺少有效的 userInput 文本。`);
+      if (!userInput) throw new Error(t("agentRunTool.appendMissingUserInput"));
 
       const record = findRunRecord(String(args.runId), deps);
       if (!record) {
@@ -762,7 +762,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
       let reconciled = checkStaleRun(record.runId, deps) ?? record;
       if (!isAgentRunTerminalStatus(reconciled.status)) {
         if (!reconciled.queuePath) {
-          throw new Error("该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append");
+          throw new Error(t("agentRunTool.appendQueueUnsupported"));
         }
 
         const queuePath = reconciled.queuePath;
@@ -857,9 +857,9 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
     }
 
     if (action !== "status" && action !== "stop" && action !== "wait") {
-      throw new Error(`controlAgentRun: 未知 action "${action}"。`);
+      throw new Error(t("agentRunTool.unknownAction", String(action)));
     }
-    if (!args.runId) throw new Error(`controlAgentRun(action:"${action}"): 缺少 runId。`);
+    if (!args.runId) throw new Error(t("agentRunTool.missingRunId", String(action)));
 
     const record = findRunRecord(String(args.runId), deps);
     if (!record) {
@@ -915,7 +915,7 @@ export function createCliControlAgentRunExecutor(deps: CliAgentRunToolExecutorDe
           release: (token) => { if (token) releaseRunRecordAck(record.runId, token, deps); },
         },
       });
-      if (result.kind === "aborted") throw new Error("controlAgentRun(wait) 已被中止。");
+      if (result.kind === "aborted") throw new Error(t("agentRunTool.waitAborted"));
       if (result.kind === "failed") throw result.error;
       if (result.kind === "timeout") {
         const reconciled = result.lastState ?? record;

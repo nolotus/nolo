@@ -25,10 +25,10 @@ export const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
  *
  * 2026-09-29 实测门禁：Opus 5.5 上线后 Anthropic 上游硬门禁抛出：
  * "HTTP 400 Claude Code 2.1.220 does not support this model; version 2.1.280 or newer is required."
- * 因此默认版本升至实测通过的 2.1.290，并提供 NOLO_CLAUDE_CODE_VERSION 动态覆盖。
+ * 2026-10-08 对齐官方 Claude Code 最新发布版本 2.1.294（支持 Claude Haiku 5.5），并提供 NOLO_CLAUDE_CODE_VERSION 动态覆盖。
  */
 function resolveClaudeCodeVersion(rawEnv?: string): string {
-  const DEFAULT_VERSION = "2.1.290";
+  const DEFAULT_VERSION = "2.1.294";
   if (!rawEnv) return DEFAULT_VERSION;
   const trimmed = rawEnv.trim();
   if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(trimmed)) {
@@ -363,6 +363,7 @@ function hasClaudeCodeIdentity(system: JsonRecord[]): boolean {
 function normalizeAnthropicWireModel(model: string): string {
   if (model === "claude-opus-5.5") return "claude-opus-5-5";
   if (model === "claude-sonnet-5.5") return "claude-sonnet-5-5";
+  if (model === "claude-haiku-5.5") return "claude-haiku-5-5";
   return model;
 }
 

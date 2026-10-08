@@ -62,6 +62,7 @@ import {
   type FixedInputController,
 } from "./tuiRawInput";
 import type { DialogHost } from "./dialogHost";
+import { clearCliLocalRuntimePreparedAgentCache } from "../client/localRuntimeAdapter";
 
 /**
  * slash 分发的宿主依赖。`state` 在 runTuiWorkspace 作用域内是可变 let 绑定
@@ -182,8 +183,14 @@ export async function runSubmittedSlashLine(
   // workspace-scoped TurnHistory rather than in TuiState, and copying it into
   // state would put transcript data in front of every command's inputs.
   const result = handleTuiInput(line, host.state, collectConversationTurns(host.history));
+  const previousState = host.state;
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;
+  const command = line.trim().split(/\s+/)[0];
+  if ((command === "/agent" || command === "/switch") && result.nextState !== previousState) {
+    // Successful explicit selection may refresh the same agent's model.
+    clearCliLocalRuntimePreparedAgentCache();
+  }
 
   // In interactive mode the transcript pane is owned by renderHistory; a raw
   // output.write lands inside the scroll region and is wiped by the next
@@ -444,6 +451,7 @@ export async function runSubmittedSlashLine(
       if (pickResult.kind === "list") {
         output.write(`${pickResult.output}\n`);
       } else if (pickResult.kind === "selected") {
+        clearCliLocalRuntimePreparedAgentCache();
         host.state = {
           ...host.state,
           agentName: pickResult.name,

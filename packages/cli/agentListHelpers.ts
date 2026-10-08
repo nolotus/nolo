@@ -22,6 +22,7 @@ import {
   readLiveDbRecordAfterTombstoneMerge,
 } from "./globalRecordOperations";
 import { agentRecordHasConfiguredCredential } from "./agentRecordHelpers";
+import { isTombstoneRecord } from "../database/tombstones";
 import {
   isOwnedAgentKey,
   ownedAgentKey,
@@ -92,6 +93,7 @@ function buildCompanionKeys(rawId: string, userId: string) {
 }
 
 export function normalizeListedAgent(record: any): ListedAgent | null {
+  if (isTombstoneRecord(record)) return null;
   const privateKey = typeof record?.dbKey === "string" ? record.dbKey : "";
   const explicitId = typeof record?.id === "string" && record.id ? record.id : undefined;
   const ownerUserId = typeof record?.userId === "string" ? record.userId : "";
@@ -227,6 +229,7 @@ export async function listLocalCachedAgents(args: {
   for (const prefix of [ownedPrefix, PUBLIC_AGENT_KEY_PREFIX]) {
     for await (const [key, value] of args.db.iterator({ gte: prefix, lte: `${prefix}\uffff` })) {
       if (typeof key !== "string" || !value || typeof value !== "object") continue;
+      if (isTombstoneRecord(value)) continue;
       if (isOwnedAgentKey(key, args.userId)) {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;

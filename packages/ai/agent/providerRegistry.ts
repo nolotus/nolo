@@ -369,6 +369,7 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     modelOptions: [
       { id: "claude-opus-5-5", label: "Claude Opus 5.5", hasVision: true, recommended: true },
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", hasVision: true },
+      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
       { id: "claude-opus-5", label: "Claude Opus 5", hasVision: true },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8", hasVision: true },

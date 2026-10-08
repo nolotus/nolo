@@ -8,6 +8,7 @@
 import { runAgentTurn, type RunAgentTurnOptions, type RunAgentTurnResult } from "./client/agentRun";
 import * as nodeFs from "node:fs";
 import { CLI_AUTO_ROUTE_AGENT_KEY } from "./client/autoModelRouter";
+import { t } from "./tui/i18n";
 import {
   buildModelLayerOverride,
   type ModelLayerOverride,
@@ -475,14 +476,14 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
     }
     if (hasExplicitAgent && !modelOverride) {
       output.write(
-        "[nolo] auto-route: 覆盖源 agent 读取失败，按原样直跑所选 agent。\n",
+        t("agentRun.autoRouteOverrideFailed"),
       );
     } else {
       effectiveAgentKey = CLI_AUTO_ROUTE_AGENT_KEY;
       // 自动路由只剩默认档一个目标，不再打印档位提示；显式 --agent 的 model
       // 层覆盖仍值得提示（否则用户会疑惑跑的模型为何不是所选 agent 的）。
       if (modelOverride) {
-        output.write(`[nolo] auto-route: model 层覆盖为 ${agentKey}\n`);
+        output.write(t("agentRun.autoRouteModelOverride", agentKey));
       }
     }
   }

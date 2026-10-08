@@ -1879,6 +1879,13 @@ export function defaultGetProcessStartTime(pid: number): Date | null {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1000,
+      // `ps -o lstart` 的日期串随系统 locale 变化：
+      //   LANG=en_US.UTF-8 → "Thu Oct  8 08:54:18 2026"（new Date 可解析）
+      //   LANG=zh_CN.UTF-8 → "四 10月  8 08:54:18 2026"（new Date → NaN → null）
+      // 这会让 isPidReused 的结论依赖调用者环境：同一条 run 记录在英文
+      // locale 下被判 pid reused → orphaned，中文 locale 下不判。强制 C
+      // locale 让输出恒为可解析的英文格式，结果与 locale 无关。
+      env: { ...process.env, LC_ALL: "C", LANG: "C" },
     }).trim();
     if (!output) return null;
     const d = new Date(output);

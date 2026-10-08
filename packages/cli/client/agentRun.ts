@@ -718,13 +718,27 @@ export function classifyLocalRunError(message: string): LocalRunErrorClass {
  * into the error string.
  *
  * Keep this narrow: only fire the history-replay hint when the body explicitly
- * mentions `tool_call` arguments or an `invalid_request_error` type. A bare
- * `invalid arguments` (e.g. Google's INVALID_ARGUMENT for a bad request field)
- * is NOT necessarily a history-replay problem and should not trigger the
- * "/switch history" lecture.
+ * mentions `tool_call` arguments. A bare `invalid arguments` (e.g. Google's
+ * INVALID_ARGUMENT for a bad request field) and a bare `invalid_request_error`
+ * type string are NOT necessarily history-replay problems: `invalid_request_error`
+ * is the generic type DeepSeek/OpenAI attach to every 400 (context overflow,
+ * bad params, reasoning-replay contract…), so matching it mis-attributed
+ * unrelated rejections to "/switch history". The reasoning-replay contract
+ * case has its own dedicated regex + copy below.
  */
-const HISTORY_REPLAY_REJECTION_RE =
-  /invalid_request_error|invalid\s+tool\s+call\s+arguments?/i;
+const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
+
+/**
+ * Detect the DeepSeek-style thinking-mode replay contract rejection:
+ * `The reasoning_content in the thinking mode must be passed back to the API.`
+ * Upstream thinking models require every replayed assistant tool-call turn to
+ * carry `reasoning_content`; Nolo can persist one without it when the gateway
+ * omits reasoning on that round or the history came from a different model.
+ * This must be checked BEFORE HISTORY_REPLAY_REJECTION_RE — its real body
+ * carries `invalid_request_error`-shaped text that used to fall into the
+ * generic history-replay hint and mis-attribute the cause.
+ */
+const REASONING_REPLAY_CONTRACT_RE = /reasoning_content[^.]*must be passed back/i;
 
 /**
  * Shared framing for the five non-402 local-run failure builders below.
@@ -883,10 +897,22 @@ function buildRejectedPayloadFailure(ctx: FailureCtx): string {
   // (e.g. after `/switch`), which the new provider's gateway validates more
   // strictly and rejects with `invalid tool call arguments` /
   // `invalid_request_error`.
-  const looksLikeHistoryReplay = HISTORY_REPLAY_REJECTION_RE.test(ctx.message);
-  const cause = looksLikeHistoryReplay
-    ? ` This usually happens when the dialog history contains tool_calls or reasoning produced by a different model/provider (e.g. after /switch); the new provider rejects that history. Start a fresh dialog, or clean the offending history.`
-    : "";
+  //
+  // The reasoning-replay contract branch runs FIRST: DeepSeek thinking models
+  // (e.g. via opencode-go) require every replayed assistant tool-call turn to
+  // carry `reasoning_content` back to the API. One turn can lack it when the
+  // upstream returned no reasoning for that round, or when the history was
+  // produced by a different model. Its body is also `invalid_request_error`
+  // shaped, so without this dedicated check it would be mis-attributed to the
+  // generic history-replay cause.
+  const looksLikeReasoningReplay = REASONING_REPLAY_CONTRACT_RE.test(ctx.message);
+  const looksLikeHistoryReplay =
+    !looksLikeReasoningReplay && HISTORY_REPLAY_REJECTION_RE.test(ctx.message);
+  const cause = looksLikeReasoningReplay
+    ? ` This is a thinking-mode replay contract violation: the history contains an assistant tool-call turn without reasoning_content, but this model requires every such turn to pass reasoning back to the API. The upstream may not have returned reasoning for that turn, or the history came from a different model.`
+    : looksLikeHistoryReplay
+      ? ` This usually happens when the dialog history contains tool_calls or reasoning produced by a different model/provider (e.g. after /switch); the new provider rejects that history. Start a fresh dialog, or clean the offending history.`
+      : "";
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the provider rejected the request body — this is NOT a local credential/config issue). Detail: ${ctx.message}${cause} ` +
     `${NO_FALLBACK} Use --server to run on the server explicitly, or start a fresh dialog.\n`
@@ -1102,6 +1128,9 @@ export function describeLocalRunFailure(
 
   if (/CLI authority broker could not attach or take ownership/i.test(message)) {
     const cleaned = stripDebugNoise(message);
+    if (/EADDRINUSE/i.test(message)) {
+      return `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} Use --server to run on the server explicitly.\n`;
+    }
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
       `The local runtime could not attach to an existing broker or take database ownership. Check running broker processes holding the local authority store or retry, ${SERVER_FALLBACK_HINT}.\n`

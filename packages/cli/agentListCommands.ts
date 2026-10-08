@@ -1,4 +1,6 @@
 import { toErrorMessage } from "core/errorMessage";
+import { t } from "./tui/i18n";
+
 import { formatQuotaSummary } from "ai/agent/quotaSnapshot";
 import { summarizeCredentialGroups } from "ai/agent/safeAgentSummary";
 import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedContext";
@@ -362,13 +364,15 @@ export async function runAgentListCommand(
     output.write(`total agents: ${agentsForOutput.length}\n`);
     output.write(`public agents: ${agentsForOutput.filter((agent) => agent.publicRecordExists).length}\n`);
     if (unavailableCount > 0 && !showUnavailable) {
-      output.write(`⛔ ${unavailableCount} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n`);
+      output.write(t("agent.unavailableHidden", String(unavailableCount)));
       const unavailableList = agents.filter((agent) => isAgentUnavailableNow(agent));
       for (const unavail of unavailableList) {
         const remainingSec = Math.max(0, Math.ceil(((unavail.nextAvailableAt ?? 0) - Date.now()) / 1000));
         const quotaSummary = formatQuotaSummary(unavail.quota);
         const quotaText = quotaSummary ? ` (${quotaSummary})` : "";
-        output.write(`   - [429 限流] ${unavail.name} (id: ${unavail.id}) 预计 ${remainingSec} 秒后恢复${quotaText}\n`);
+        output.write(
+          t("agent.rateLimitedRecovery", unavail.name, unavail.id, String(remainingSec), quotaText),
+        );
       }
     }
     output.write(`source: ${source}\n`);

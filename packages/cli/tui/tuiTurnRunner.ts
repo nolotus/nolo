@@ -198,6 +198,21 @@ async function runAgentChat(
   let effectiveMessage = message;
   let skillAllowedTools: string[] | undefined;
   let skillContextBlocks: string[] | undefined;
+  // 记忆召回只依赖此刻已固定的 agent 与用户输入（`effectiveMessage` 之后不再
+  // 改写），而 attached-skill 解析是与之相互独立的等待；因此在这里就发起召回，
+  // 让两条 I/O 重叠，再在首次模型请求前 await 同一个 promise。远端优先 /
+  // 本地 fallback / 5000ms 超时语义完全不变（仍走 resolveCliMemory）。
+  // 异常在此处立即收敛为 null：否则 skill 等待期间会产生未处理的 rejection。
+  const memoryPromptPromise =
+    state.cachedMemoryOverlay === undefined
+      ? resolveCliMemory({
+          serverUrl: state.serverUrl,
+          authToken: resolvePlatformAuthToken(env),
+          agentKey: effectiveAgentKey,
+          userInput: effectiveMessage,
+          env,
+        }).catch(() => null)
+      : null;
   if (state.attachedSkills.length > 0) {
     const authToken = resolvePlatformAuthToken(env);
     const resolvedSkills = [];
@@ -263,14 +278,9 @@ async function runAgentChat(
   // the current one (the model already has the context from the conversation).
   // /new or dialog switch clears cachedMemoryOverlay so the next dialog reloads.
   let memoryPromptBlock = state.cachedMemoryOverlay;
-  if (memoryPromptBlock === undefined) {
-    memoryPromptBlock = await resolveCliMemory({
-      serverUrl: state.serverUrl,
-      authToken: resolvePlatformAuthToken(env),
-      agentKey: effectiveAgentKey,
-      userInput: effectiveMessage,
-      env,
-    }).catch(() => null);
+  if (memoryPromptBlock === undefined && memoryPromptPromise) {
+    // 等待已提前启动的召回；首次模型请求仍须拿到这个结果。
+    memoryPromptBlock = await memoryPromptPromise;
     // Cache will be propagated to TUI state by the caller via runResult.cachedMemoryOverlay.
   }
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
@@ -382,7 +392,7 @@ async function runAgentChat(
         ...(options.requestUserChoice
           ? { requestUserChoice: options.requestUserChoice }
           : {}),
-        ...(options.pastedTextStore
+        ...(options.pastedTextStore?.items.size
           ? { pastedTextStore: options.pastedTextStore }
           : {}),
         // Stamp spawned background runs with the current TUI dialog so the

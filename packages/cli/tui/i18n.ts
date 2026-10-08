@@ -1084,6 +1084,402 @@ const STRINGS = {
     en: "API",
     zh: "API",
   },
+  // ── Non-TUI CLI output: shared command-group help ─────────────────────────
+  // `nolo <group> --help` renders from the command registry; the frame lines
+  // are localized here while per-command copy lives in cliCommandDescription().
+  "cli.groupCommandsTitle": {
+    en: "nolo {0} commands",
+    zh: "nolo {0} 命令",
+  },
+  "cli.usageLabel": {
+    en: "Usage:",
+    zh: "用法：",
+  },
+  // ── Non-TUI CLI output: nolo auth ─────────────────────────────────────────
+  // User-visible copy of `nolo auth <provider>`. Params follow each en string:
+  // {0}=provider, {1}=server origin / saved account / raw detail,
+  // {2}=zone or HTTP status, {3}=optional trailing fragment.
+  "auth.authorizationSaved": {
+    en: "[nolo] {0} authorization saved{1}.",
+    zh: "[nolo] 已保存 {0} 授权{1}。",
+  },
+  // Optional account suffix for authorizationSaved (empty when the provider
+  // reports no account label).
+  "auth.authorizationSavedForAccount": {
+    en: " for {0}",
+    zh: "（账号 {0}）",
+  },
+  "auth.noLocalCredential": {
+    en: "[nolo] No local {0} credential. Run: nolo auth {0}",
+    zh: "[nolo] 本地没有 {0} 凭据。请运行：nolo auth {0}",
+  },
+  "auth.credentialServerManaged": {
+    en:
+      "[nolo] The {0} credential is already server-managed by {1} (no local refresh token).\n" +
+      "To sync it again, run: nolo auth {0} --sync-to-server",
+    zh:
+      "[nolo] {0} 凭据已由 {1} 服务端托管（本地无 refreshToken）。\n" +
+      "如需重新同步，请运行: nolo auth {0} --sync-to-server",
+  },
+  "auth.verifyUnsupported": {
+    en: '[nolo] --verify is only supported for "nolo auth antigravity".',
+    zh: '[nolo] --verify 仅支持 "nolo auth antigravity"。',
+  },
+  "auth.checkingVerificationChallenge": {
+    en: "[nolo] Checking the current verification challenge (one lightweight request)...",
+    zh: "[nolo] 正在检查当前验证挑战（一次轻量请求）…",
+  },
+  "auth.refreshTokenInvalid": {
+    en:
+      "[nolo] The antigravity refresh token is no longer valid ({0}). " +
+      "Re-run `nolo auth antigravity` to re-authorize this account.",
+    zh:
+      "[nolo] antigravity 的 refresh token 已失效（{0}）。" +
+      "请重新运行 `nolo auth antigravity` 重新授权该账号。",
+  },
+  "auth.credentialIncomplete": {
+    en:
+      "[nolo] The stored antigravity credential is incomplete ({0}). " +
+      "Re-run `nolo auth antigravity` to re-authorize.",
+    zh:
+      "[nolo] 本地保存的 antigravity 凭据不完整（{0}）。" +
+      "请重新运行 `nolo auth antigravity` 重新授权。",
+  },
+  "auth.providerUnreachable": {
+    en: "[nolo] Could not reach the antigravity provider: {0}. Check your network and retry.",
+    zh: "[nolo] 无法访问 antigravity provider：{0}。请检查网络后重试。",
+  },
+  "auth.credentialWorking": {
+    en:
+      "[nolo] ✓ The credential is working — no verification is required right now. " +
+      "You can retry your agent.",
+    zh: "[nolo] ✓ 凭据可用——当前无需验证。可以重试你的 agent。",
+  },
+  "auth.googleVerificationRequired": {
+    en: "[nolo] Google requires a one-time account verification for {0}.",
+    zh: "[nolo] Google 需要对 {0} 做一次性账号验证。",
+  },
+  "auth.verificationOpened": {
+    en:
+      "[nolo] ✓ Opened it in your browser — complete the verification there " +
+      "(sign in with the same Google account), then retry your agent.",
+    zh:
+      "[nolo] ✓ 已在浏览器中打开——请在那里完成验证" +
+      "（用同一个 Google 账号登录），然后重试你的 agent。",
+  },
+  "auth.verificationCopyUrl": {
+    en:
+      "[nolo] Copy the URL above into a browser signed into {0}, " +
+      "complete the verification, then retry your agent.",
+    zh:
+      "[nolo] 请把上面的 URL 复制到已登录 {0} 的浏览器中，" +
+      "完成验证后重试你的 agent。",
+  },
+  "auth.httpWithoutVerificationLink": {
+    en:
+      "[nolo] The provider returned HTTP {0} without a verification link — " +
+      "this is not the one-time-verification case --verify handles.{1}" +
+      " Response detail: {2}",
+    zh:
+      "[nolo] provider 返回 HTTP {0}，但没有任何验证链接——" +
+      "这不属于 --verify 处理的一次性验证场景。{1}响应详情：{2}",
+  },
+  // Optional trailing fragment spliced into httpWithoutVerificationLink when a
+  // token refresh also failed earlier. English keeps the leading space.
+  "auth.httpWithoutVerificationLink.refreshSuffix": {
+    en: " (token refresh also failed earlier: {0})",
+    zh: "（此前 token 刷新也失败：{0}）",
+  },
+  "auth.localRefreshTokenDropped": {
+    en: "[nolo] No local refresh token is kept: {0} is refreshed by {1} (fetched on demand).",
+    zh: "[nolo] 本地不再保存 refresh token：{0} 由 {1} 统一刷新（用完即取）。",
+  },
+  "auth.localStateUpdateFailed": {
+    en: "[nolo] Warning: failed to update the local credential state ({0}).",
+    zh: "[nolo] Warning: 本地凭据状态更新失败（{0}）。",
+  },
+  "auth.syncMissingConfig": {
+    en:
+      "[nolo] Warning: server sync needs NOLO_SERVER and AUTH_TOKEN env vars, " +
+      "or a configured profile. Skipping server sync.",
+    zh:
+      "[nolo] 警告：服务端同步需要 NOLO_SERVER 和 AUTH_TOKEN 环境变量，" +
+      "或已配置的 profile。已跳过同步。",
+  },
+  "auth.syncedTo": {
+    en: "[nolo] Synced to {0}",
+    zh: "[nolo] 已同步到 {0}",
+  },
+  "auth.syncDoneWebUsable": {
+    en: "[nolo] The web app can now use this subscription.",
+    zh: "[nolo] 网页端现在可以使用该订阅了。",
+  },
+  "auth.syncFailed": {
+    en: "[nolo] Warning: server sync failed ({0}). Token saved locally.",
+    zh: "[nolo] 警告：服务端同步失败（{0}）。Token 已保存在本地。",
+  },
+  "auth.noServerConfigured": {
+    en:
+      "[nolo] No server configured. To use this on the web, run nolo login first, " +
+      "then nolo auth {0} --sync-only",
+    zh:
+      "[nolo] 未配置服务器。如需在网页端使用，请先运行 nolo login，" +
+      "再运行 nolo auth {0} --sync-only",
+  },
+  // {1} is the provider name again so the --no-sync-to-server hint names the
+  // exact command the user would run; keep [Y/n] as the literal answer hint.
+  "auth.syncPrompt": {
+    en:
+      "Sync to {0} so the web app can also use this {1} subscription? " +
+      "The credential is stored encrypted; run nolo auth {1} --no-sync-to-server " +
+      "to turn it off later. [Y/n] ",
+    zh:
+      "同步到 {0}，让网页端也能使用这个 {1} 订阅？" +
+      "凭证加密存储，可随时 nolo auth {1} --no-sync-to-server 关闭 [Y/n] ",
+  },
+  "auth.notSyncedToServer": {
+    en:
+      "[nolo] Not synced to the server. For web use, run: " +
+      "nolo auth {0} --sync-to-server (or --sync-only)",
+    zh:
+      "[nolo] 未同步凭据到服务器。如需网页端使用，请运行: " +
+      "nolo auth {0} --sync-to-server（或 --sync-only）",
+  },
+  "auth.markFailed": {
+    en:
+      "[nolo] The credential was uploaded to the server, but marking it " +
+      "server-managed locally failed. Re-authorize so both sides cannot race " +
+      "each other's refresh.",
+    zh:
+      "[nolo] 凭据已成功上传服务器，但本地打上托管标记失败。" +
+      "为防双方竞态刷新导致失效，请重新授权。",
+  },
+  "auth.commandFailed": {
+    en: "nolo auth {0} failed: {1}",
+    zh: "nolo auth {0} 失败：{1}",
+  },
+  "auth.cloudflareTokenGenerated": {
+    en:
+      "[nolo] Generated Cloudflare API token for zone {0} ({1}).\n" +
+      "Store it as CLOUDFLARE_EMAIL_ROUTING_API_TOKEN:\n  {2}\n",
+    zh:
+      "[nolo] 已为 zone {0}（{1}）生成 Cloudflare API token。\n" +
+      "请保存为 CLOUDFLARE_EMAIL_ROUTING_API_TOKEN：\n  {2}\n",
+  },
+  "auth.envUpdated": {
+    en: "[nolo] Updated {0} with CLOUDFLARE_EMAIL_ROUTING_API_TOKEN.",
+    zh: "[nolo] 已更新 {0} 里的 CLOUDFLARE_EMAIL_ROUTING_API_TOKEN。",
+  },
+  // ── Non-TUI CLI output: nolo app ──────────────────────────────────────────
+  "app.noApps": {
+    en: "No apps\n",
+    zh: "没有应用\n",
+  },
+  "app.listTitle": {
+    en: "App list ({0})\n\n",
+    zh: "应用列表 ({0})\n\n",
+  },
+  "app.unnamed": {
+    en: "(unnamed)",
+    zh: "(未命名)",
+  },
+  "app.detailsTitle": {
+    en: "App details\n\n",
+    zh: "应用详情\n\n",
+  },
+  "app.errorNameRequired": {
+    en: "\nError: provide one of --name / --app-id / --app-key\n",
+    zh: "\n错误: 必须提供 --name / --app-id / --app-key 之一\n",
+  },
+  "app.errorJobIdRequired": {
+    en: "\nError: --job-id is required\n",
+    zh: "\n错误: 必须提供 --job-id\n",
+  },
+  "app.errorNameOrAppId": {
+    en: "\nError: provide --name or --app-id\n",
+    zh: "\n错误: 必须提供 --name 或 --app-id\n",
+  },
+  "app.errorWithDetail": {
+    en: "\nError: {0}\n",
+    zh: "\n错误: {0}\n",
+  },
+  "app.deploySucceeded": {
+    en: "Deploy succeeded\n",
+    zh: "部署成功\n",
+  },
+  "app.deployStatusTitle": {
+    en: "Deploy status\n\n",
+    zh: "部署状态\n\n",
+  },
+  "app.deleteConfirm": {
+    en: "About to delete app ({0}) — this cannot be undone. Confirm? [y/N] ",
+    zh: "即将删除应用 ({0})，此操作不可撤销。确认？[y/N] ",
+  },
+  "app.deleteCancelled": {
+    en: "Cancelled\n",
+    zh: "已取消\n",
+  },
+  "app.deleteDone": {
+    en: "Deleted app ({0})\n",
+    zh: "已删除应用 ({0})\n",
+  },
+  "app.deploy.error.nameOrAppIdRequired": {
+    en: "provide --name or --app-id",
+    zh: "必须提供 --name 或 --app-id",
+  },
+  "app.deploy.error.codeFileUnreadable": {
+    en: "cannot read --code-file: {0}",
+    zh: "无法读取 --code-file: {0}",
+  },
+  "app.deploy.error.filesMustBeArray": {
+    en: "--files must be a JSON array",
+    zh: "--files 必须是 JSON 数组",
+  },
+  "app.deploy.error.filesParseFailed": {
+    en: "--files parse failed: {0}",
+    zh: "--files 解析失败: {0}",
+  },
+  "app.deploy.error.codeRequired": {
+    en: "provide one of --code / --code-file / --files",
+    zh: "必须提供 --code / --code-file / --files 之一",
+  },
+  // ── Non-TUI CLI output: nolo agent / nolo run ─────────────────────────────
+  "agent.unavailableHidden": {
+    en: "⛔ {0} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n",
+    zh: "⛔ 已隐藏 {0} 个暂时不可用的 agent（429）。用 --show-unavailable 列出它们。\n",
+  },
+  "agent.rateLimitedRecovery": {
+    en: "   - [429 rate-limited] {0} (id: {1}) recovers in {2}s{3}\n",
+    zh: "   - [429 限流] {0} (id: {1}) 预计 {2} 秒后恢复{3}\n",
+  },
+  "agentRun.autoRouteOverrideFailed": {
+    en: "[nolo] auto-route: could not read the source agent, running the selected agent as-is.\n",
+    zh: "[nolo] auto-route: 覆盖源 agent 读取失败，按原样直跑所选 agent。\n",
+  },
+  "agentRun.autoRouteModelOverride": {
+    en: "[nolo] auto-route: model override is now {0}\n",
+    zh: "[nolo] auto-route: model 层覆盖为 {0}\n",
+  },
+  // ── Non-TUI CLI output: nolo agent delete ─────────────────────────────────
+  // Flag descriptions for `nolo agent delete --help`; the Chinese copy is the
+  // original wording, kept verbatim so existing users lose no information.
+  "agentDelete.description": {
+    en:
+      "Deletes an agent's private record (agent-{userId}-{id}) and public record (agent-pub-{id}).\n",
+    zh:
+      "删除一个 agent 的私有记录 (agent-{userId}-{id}) 与公开记录 (agent-pub-{id})。\n",
+  },
+  "agentDelete.tombstoneNote": {
+    en: "The server side is a tombstone soft delete: read after DELETE returns 404.\n",
+    zh: "服务器端为 tombstone 软删除，DELETE 后再次 read 会返回 404。\n",
+  },
+  "agentDelete.flagYes": {
+    en: "  --yes            Actually delete; without it only the dry-run target summary is printed.\n",
+    zh: "  --yes            真正执行删除；缺省时仅 dry-run 输出目标摘要。\n",
+  },
+  "agentDelete.flagJson": {
+    en: "  --json           Print the JSON result.\n",
+    zh: "  --json           输出 JSON 结果。\n",
+  },
+  "agentDelete.flagId": {
+    en: "  --id <agent>     Same as the positional argument: alias / dbKey / URL / 26-char id.\n",
+    zh: "  --id <agent>     与位置参数等价，传入 alias / dbKey / URL / 26-char id。\n",
+  },
+  "agentDelete.flagServer": {
+    en: "  --server / --server-url  Delete only on the given server (replicas outside the fan-out are kept).\n",
+    zh: "  --server / --server-url  仅删除指定服务器（仍保留集群 fan-out 之外的副本）。\n",
+  },
+  "agentDelete.flagUser": {
+    en: "  --user <userId>  Explicitly override userId (errors when it differs from AUTH_TOKEN).\n",
+    zh: "  --user <userId>  显式覆盖 userId（与 AUTH_TOKEN 不一致则报错）。\n",
+  },
+  "agentDelete.flagToken": {
+    en: "  --token / --machine-key  Temporarily override AUTH_TOKEN.\n",
+    zh: "  --token / --machine-key  临时覆盖 AUTH_TOKEN。\n",
+  },
+  // ── Non-TUI CLI output: shared API error printing ─────────────────────────
+  "api.requestFailed": {
+    en: "Request failed: {0}",
+    zh: "请求失败: {0}",
+  },
+  "api.requestFailedHttp": {
+    en: "Request failed (HTTP {0})",
+    zh: "请求失败 (HTTP {0})",
+  },
+  "api.nonJsonResponse": {
+    en: "Server returned a non-JSON response (HTTP {0})",
+    zh: "服务端返回非 JSON 响应 (HTTP {0})",
+  },
+  "api.errorWithCode": {
+    en: "Error [{0}]: {1}",
+    zh: "错误 [{0}]: {1}",
+  },
+  "api.error": {
+    en: "Error: {0}",
+    zh: "错误: {0}",
+  },
+  // ── Non-TUI CLI output: local ChatGPT web image job ───────────────────────
+  "chatgptWebImage.jobInProgress": {
+    en: "A ChatGPT web image job is already running, try again later (lock file held).",
+    zh: "ChatGPT 网页生图任务正在进行中，请稍后再试（锁文件占用）",
+  },
+  "chatgptWebImage.noOutputFile": {
+    en: "ChatGPT web image generation produced no file: {0}",
+    zh: "ChatGPT 网页生图未产出文件：{0}",
+  },
+  "chatgptWebImage.outputFileInvalid": {
+    en: "ChatGPT web image file is invalid or empty: {0}",
+    zh: "ChatGPT 网页生图文件无效或为空：{0}",
+  },
+  "chatgptWebImage.uploadFailed": {
+    en: "Uploading the generated image to Nolo FS failed: {0}",
+    zh: "上传生图结果到 Nolo FS 失败：{0}",
+  },
+  "chatgptWebImage.missingUploadFileId": {
+    en: "Upload succeeded but the response has no fileId",
+    zh: "上传生图结果成功但响应缺少 fileId",
+  },
+  "chatgptWebImage.missingPrompt": {
+    en: "Missing image prompt (payload.meta.prompt is required)",
+    zh: "缺少生图 prompt（payload.meta.prompt 必填）",
+  },
+  // ── Non-TUI CLI output: agent-run orchestration tool errors ───────────────
+  "agentRunTool.missingAgentKey": {
+    en: "startAgentRun: missing agentKey, and the current agent cannot be identified.",
+    zh: "startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。",
+  },
+  "agentRunTool.missingTask": {
+    en: "startAgentRun: missing a valid task description.",
+    zh: "startAgentRun: 缺少有效的 task 文本描述。",
+  },
+  "agentRunTool.noDialogToContinue": {
+    en: "This run has no linked dialog and cannot be continued.",
+    zh: "该 run 无关联 dialog，无法续跑。",
+  },
+  "agentRunTool.appendMissingRunId": {
+    en: 'controlAgentRun(action:"append"): missing runId.',
+    zh: 'controlAgentRun(action:"append"): 缺少 runId。',
+  },
+  "agentRunTool.appendMissingUserInput": {
+    en: 'controlAgentRun(action:"append"): missing a valid userInput text.',
+    zh: 'controlAgentRun(action:"append"): 缺少有效的 userInput 文本。',
+  },
+  "agentRunTool.appendQueueUnsupported": {
+    en: "This run did not start with a queue channel; append while running is not supported. Wait for a terminal state first.",
+    zh: "该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append",
+  },
+  "agentRunTool.unknownAction": {
+    en: 'controlAgentRun: unknown action "{0}".',
+    zh: 'controlAgentRun: 未知 action "{0}"。',
+  },
+  "agentRunTool.missingRunId": {
+    en: 'controlAgentRun(action:"{0}"): missing runId.',
+    zh: 'controlAgentRun(action:"{0}"): 缺少 runId。',
+  },
+  "agentRunTool.waitAborted": {
+    en: "controlAgentRun(wait) was aborted.",
+    zh: "controlAgentRun(wait) 已被中止。",
+  },
 } as const;
 
 export type CliStringKey = keyof typeof STRINGS;
@@ -1169,6 +1565,51 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
 /** Localized action label for a tool, falling back to the raw tool name. */
 export function toolLabel(name: string): string {
   return TOOL_LABELS[name]?.[currentLocale] ?? name;
+}
+
+/**
+ * Localized one-line description for a registered CLI subcommand, keyed by
+ * `path.join(" ")` (e.g. "auth chatgpt"). Returns null when no localized copy
+ * exists so `nolo <group> --help` falls back to the registry's English
+ * description instead of inventing one.
+ */
+export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
+  "auth cooldown": {
+    en: "List / clear credential availability cooldowns",
+    zh: "列出 / 清除凭证可用性冷却",
+  },
+  "auth cloudflare": {
+    en: "Authorize Cloudflare OAuth",
+    zh: "授权 Cloudflare OAuth",
+  },
+  "auth chatgpt": {
+    en: "Authorize ChatGPT / OpenAI Codex OAuth",
+    zh: "授权 ChatGPT / OpenAI Codex OAuth",
+  },
+  "auth xai": {
+    en: "Authorize xAI Grok OAuth (SuperGrok subscription)",
+    zh: "授权 xAI Grok OAuth（SuperGrok 订阅）",
+  },
+  "auth antigravity": {
+    en: "Authorize Google Antigravity OAuth",
+    zh: "授权 Google Antigravity OAuth",
+  },
+  "auth claude": {
+    en: "Authorize Claude Pro/Max OAuth",
+    zh: "授权 Claude Pro/Max OAuth",
+  },
+  "auth cursor": {
+    en: "Authorize Cursor Pro OAuth",
+    zh: "授权 Cursor Pro OAuth",
+  },
+  "auth devin": {
+    en: "Authorize Devin OAuth (Free SWE-2)",
+    zh: "授权 Devin OAuth（免费 SWE-2）",
+  },
+};
+
+export function cliCommandDescription(commandPath: string): string | null {
+  return COMMAND_DESCRIPTIONS[commandPath]?.[currentLocale] ?? null;
 }
 
 /**

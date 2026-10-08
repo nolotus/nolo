@@ -170,6 +170,8 @@ type RawCatalogData = {
 
 let agentCatalogCache: AgentCatalogCacheEntry | null = null;
 let agentCatalogRefreshInFlight: Promise<void> | null = null;
+// Explicit picker refreshes supersede older startup/SWR cache writes.
+let agentCatalogGeneration = 0;
 /** 首次加载的 in-flight Promise（原始数据层，不含 currentKey 排序）。 */
 /**
  * 按 deadlineKind 分槽：前台调用只复用前台 in-flight，不能加入启动预热的
@@ -335,6 +337,7 @@ export function withFetchDeadline(
 
 /** 清空目录缓存（测试与显式刷新用）。 */
 export function invalidateAgentCatalogCache() {
+  agentCatalogGeneration++;
   agentCatalogCache = null;
   agentCatalogRawLoadInFlight.clear();
 }
@@ -354,6 +357,8 @@ export async function loadAgentCatalog(args: {
   getDb?: () => Promise<unknown>;
   /** 启动预热用 background：用户没在等，给慢主站足够预算，避免误触熔断。 */
   deadlineKind?: "foreground" | "background";
+  /** Revalidate before opening a picker instead of serving the SWR snapshot. */
+  fresh?: boolean;
 }): Promise<AgentCatalogEntry[]> {
   const env = args.env ?? process.env;
   const authToken = resolveAuthToken([], env);
@@ -362,7 +367,7 @@ export async function loadAgentCatalog(args: {
   const cached =
     agentCatalogCache?.cacheKey === cacheKey ? agentCatalogCache : null;
 
-  if (cached) {
+  if (cached && !args.fresh) {
     if (Date.now() - cached.at >= AGENT_CATALOG_FRESH_MS) {
       refreshAgentCatalogInBackground(args, env, cacheKey);
     }
@@ -372,7 +377,8 @@ export async function loadAgentCatalog(args: {
   // 复用已有的原始数据请求（prefetch 触发后用户很快 /switch 时命中），
   // 然后用调用方自己的 currentKey 做排序合并——避免 prefetch 的空 key 影响排序。
   let rawData: RawCatalogData;
-  const deadlineKind = args.deadlineKind ?? "foreground";
+  const generation = args.fresh ? ++agentCatalogGeneration : agentCatalogGeneration;
+  const deadlineKind = args.fresh ? "foreground" : args.deadlineKind ?? "foreground";
   const inFlight = agentCatalogRawLoadInFlight.get(deadlineKind);
   if (inFlight) {
     rawData = await inFlight;
@@ -396,7 +402,9 @@ export async function loadAgentCatalog(args: {
   );
   // 先落缓存让 picker 立即出列表：订阅额度探测（一次 /api/agents/quota/refresh
   // 往返，正常 ~300ms、慢时吃满 2s 预算）不再占用 /switch 冷加载关键路径。
-  agentCatalogCache = { cacheKey, at: Date.now(), entries };
+  if (generation === agentCatalogGeneration) {
+    agentCatalogCache = { cacheKey, at: Date.now(), entries };
+  }
   // 额度只是行尾 [quota] 的展示增强——fire-and-forget：探测在后台跑，
   // mergeCatalogQuotas resolve 后就地写 entry.quota（mutate-in-place），
   // 若此刻 agentCatalogCache?.entries 仍是这批 entries，缓存条目自动获得
@@ -439,6 +447,7 @@ function refreshAgentCatalogInBackground(
   cacheKey: string,
 ) {
   if (agentCatalogRefreshInFlight) return;
+  const generation = agentCatalogGeneration;
   agentCatalogRefreshInFlight = fetchRawCatalogData(
     { ...args, deadlineKind: "background" },
     env,
@@ -451,7 +460,9 @@ function refreshAgentCatalogInBackground(
         rawData.favoritedAtByKey,
       );
       await mergeCatalogQuotas(entries, { env, fetchImpl: args.fetchImpl });
-      agentCatalogCache = { cacheKey, at: Date.now(), entries };
+      if (generation === agentCatalogGeneration) {
+        agentCatalogCache = { cacheKey, at: Date.now(), entries };
+      }
     })
     .catch(() => {
       // 后台刷新失败：保留旧缓存，下次打开再试。
@@ -545,19 +556,9 @@ async function fetchRawCatalogData(
       userId,
     });
     listedAgents = remoteResult.agents;
-    // 截止时间把「最慢服务器拖死整个目录」转成了 per-server 失败；
-    // listUserRecordsFromServers 会吞掉失败返回空列表，这里识别「一台都没拿到」
-    // 的情形，转投既有降级链（本地 DB → 单服务器重试），而不是给用户一个空目录。
-    if (listedAgents.length === 0) {
-      // 记账要在转投降级链之前：全失败（如全部超时）也应让慢服务器进入熔断冷却，
-      // 否则每次前台加载都重新陪所有慢服务器吃满截止时间。
-      recordServerFailures(remoteResult.failures);
-      throw new Error(
-        remoteResult.failures.length
-          ? remoteResult.failures.map((f) => `${f.serverUrl}: ${f.error}`).join("; ")
-          : "no agents returned by any server",
-      );
-    }
+    // A successful empty result is authoritative, including after tombstone
+    // merge. All-server failure already throws in listUserRecordsFromServers;
+    // falling back on emptiness would revive historical local agents.
     recordServerSuccesses(serverUrls.filter((url) =>
       !remoteResult.failures.some((f) => f.serverUrl === url)
     ));
