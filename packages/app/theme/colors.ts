@@ -1,5 +1,5 @@
 // app/theme/colors.ts
-// 10 个主题（含 nature 默认主题），每个都有完整 surface 覆盖，切换主题"气质全变"。
+// 9 个主题，每个都有完整 surface 覆盖，切换主题"气质全变"。
 
 // ─── 公共语义色 ─────────────────────────────────────────────────────────────
 const semantic = {
@@ -501,7 +501,7 @@ export const mono = {
 //   accent 用 blue/lavender/sky 三层拉开，语义色用官方 palette，阴影带主题自身色调。
 export const catppuccin = {
   // 保留 catppuccin 的柔和圆角 + 弹性缓动；light surface 沿用 GitHub Light palette，
-  // light accent 为品牌海蓝（非 GitHub 蓝），dark 为 Catppuccin Mocha。合成后名字/位次不变；默认主题已改为 nature（2026-10）。
+  // light accent 为品牌海蓝（非 GitHub 蓝），dark 为 Catppuccin Mocha。合成后名字/位次不变，DEFAULT_THEME_NAME 不动。
   // Reviewer 改进：dark textTertiary/quaternary 提亮达 WCAG AA；light warning 改琥珀色；
   // light backgroundElevated 拉开与画布的层级，大圆角浮层不再粘连。
   meta: { radiusBoost: 2, motionEase: "cubic-bezier(0.22, 1, 0.36, 1)" },
@@ -577,94 +577,6 @@ export const catppuccin = {
     shadowHeavy:         "rgba(17,17,27,0.52)",
     textHeading:         "#CDD6F4",
     textOnPrimary:       "#1E1E2E",
-  },
-};
-
-// ─── 9. Nature — 与新版首页/登录页同一张「暖纸 + 墨 + 海蓝」（默认主题） ───────
-//   颜色来源：packages/render/layout/naturePalette.css 的 --hl-*（日间 / [data-theme="dark"] 夜间）。
-//   两边必须同步：改 naturePalette.css 时同步这里，反之亦然；
-//   natureTheme.palette.test.ts 会读 CSS 文本比对关键色，防漂移。
-//   层级：paper(background) → surface-sub(secondary) → 更深一档(tertiary/hover/selected)；
-//   surface 作为上浮面(elevated)与代码块底，在纸色上显出「一张更白的纸」。
-//   边框 = ink 12%（--hl-line）在 paper 上的不透明等效值；alphaColor 只吃 hex，故写死。
-//   主色：日间用 --hl-blue-text 同色相再压一档 #1a5fa4——app 里 primary 会落在
-//   「surface-sub + 10% primary」选中底（侧栏选中项）和 tertiary 分段控件上，#1f6bb8 只有 3.95/4.16:1，
-//   #1a5fa4 为 4.66/4.98:1（paper 5.90:1，白字 6.47:1）。品牌蓝 #2879cd（--hl-blue）作 primaryLight。
-//   夜间 #6aa8ea（= --hl-blue，surface 6.16:1）。
-//   语义色沿用 green/sand/danger 调性；日间 warning/error 在 --hl-sand/--hl-danger 基础上压暗以过 AA。
-export const nature = {
-  meta: { radiusBoost: 2, motionEase: "cubic-bezier(0.22, 1, 0.36, 1)" },
-  light: {
-    primary: "#1A5FA4",
-    primaryLight: "#2879CD", // --hl-blue
-    primaryDark: "#154F8A",
-    primaryGradient: "linear-gradient(135deg, #1A5FA4, #2879CD)",
-    primaryGhost: "rgba(40,121,205,0.08)",
-    primaryHover: "rgba(40,121,205,0.12)",
-    borderAccent: "#8DB8E4",
-    success: "#2F6B36", // --hl-green-ink（paper 5.79:1）
-    warning: "#8A6320", // --hl-sand 压暗（paper 4.89:1）
-    info: "#1A5FA4",
-    error: "#B3361F", // --hl-danger 压暗（paper 5.48:1，surface-sub 4.98:1）
-    background:          "#F7F3EC", // --hl-paper
-    backgroundSecondary: "#EFE8DC", // --hl-surface-sub
-    backgroundTertiary:  "#E8E0D1",
-    backgroundGhost:     "rgba(247,243,236,0.94)",
-    backgroundHover:     "#E8E0D1",
-    backgroundSelected:  "#E3D9C8",
-    backgroundElevated:  "#FFFDF8", // --hl-surface
-    text:                "#1F2733", // --hl-ink
-    textSecondary:       "#5B6472", // --hl-muted
-    textTertiary:        "#5F6773", // paper 5.17:1 / surface-sub 4.69:1（侧栏 11px 分组标题落在 surface-sub 上，需过 AA）
-    textQuaternary:      "#8A8F96",
-    textLight:           "#DDDBD6",
-    placeholder:         "#5F6773",
-    border:              "#DDDBD6", // --hl-line：ink 12% on paper
-    borderHover:         "#C7C6C3", // ink 22% on paper
-    borderLight:         "#E8E5DF", // ink 7% on paper
-    messageBackground:   "#EFE8DC",
-    codeBackground:      "#FFFDF8",
-    shadowLight:         "rgba(120,90,60,0.06)", // --hl-shadow 调性
-    shadowMedium:        "rgba(120,90,60,0.10)",
-    shadowHeavy:         "rgba(120,90,60,0.16)",
-    textHeading:         "#1F2733",
-    textOnPrimary:       "#FFFEFA", // --hl-on-ink
-  },
-  dark: {
-    primary: "#6AA8EA", // --hl-blue（夜）
-    primaryLight: "#8FBEF0",
-    primaryDark: "#4F93DC",
-    primaryGradient: "linear-gradient(135deg, #6AA8EA, #8FBEF0)",
-    primaryGhost: "rgba(106,168,234,0.12)",
-    primaryHover: "rgba(106,168,234,0.16)",
-    borderAccent: "#6AA8EA",
-    success: "#8FD09B", // --hl-green-ink（夜）
-    warning: "#D9B26A", // --hl-sand（夜）
-    info: "#6AA8EA",
-    error: "#F08A7A", // --hl-danger（夜）
-    background:          "#1C1B20", // --hl-paper（夜）
-    backgroundSecondary: "#25242A", // --hl-surface（夜）
-    backgroundTertiary:  "#2E2C34", // --hl-surface-sub（夜）
-    backgroundGhost:     "rgba(28,27,32,0.94)",
-    backgroundHover:     "#2E2C34",
-    backgroundSelected:  "#38363F",
-    backgroundElevated:  "#25242A",
-    text:                "#ECE6DC", // --hl-ink（夜）
-    textSecondary:       "#C9C2B6", // --hl-nav（夜）
-    textTertiary:        "#A7A197", // --hl-muted（夜）
-    textQuaternary:      "#8F8A82",
-    textLight:           "#38363F",
-    placeholder:         "#8F8A82",
-    border:              "#353337", // ink 12% on paper（夜）
-    borderHover:         "#4A4849",
-    borderLight:         "#2B292D",
-    messageBackground:   "#25242A",
-    codeBackground:      "#16151A",
-    shadowLight:         "rgba(0,0,0,0.22)",
-    shadowMedium:        "rgba(0,0,0,0.36)",
-    shadowHeavy:         "rgba(0,0,0,0.52)",
-    textHeading:         "#ECE6DC",
-    textOnPrimary:       "#1C1B20", // --hl-on-ink（夜）
   },
 };
 

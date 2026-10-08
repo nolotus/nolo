@@ -13,7 +13,6 @@ import { config, timestamp, publicPath, webEdition } from "./esbuild.config";
 import { shouldPrecompressWebAssets } from "./webBuildPolicy";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
 import { copyRouteStyles } from "./routeStyles.js";
-import { collectStaticImportClosure, toPublicUrl } from "./staticImportClosure.js";
 import { resources as i18nResources } from "../../packages/app/i18n/i18n.config";
 
 const require = createRequire(import.meta.url);
@@ -60,6 +59,11 @@ const measureTime = async (label, action) => {
  * - public/assets/entry-xxx.js
  * - public/assets/entry-xxx.css
  */
+const toPublicUrl = (path) => {
+  if (path.startsWith("/")) return path;
+  if (path.startsWith("public/")) return `/${path}`;
+  return `/public/${path.replace(/^\/+/, "")}`;
+};
 
 const getEntryFiles = (metafile) => {
   const entryFiles = {
@@ -67,8 +71,6 @@ const getEntryFiles = (metafile) => {
     css: "",
     artifactRuntimeJs: "",
     artifactRuntimePreloads: [],
-    // entry 的静态 import 传递闭包（含 entry 自身，不含 dynamic import），供 SSR 输出 modulepreload
-    entryPreloads: [],
   };
 
   if (!metafile || !metafile.outputs) {
@@ -97,7 +99,6 @@ const getEntryFiles = (metafile) => {
     if (path.endsWith(".js")) {
       // 示例：public/assets/entry-xxx.js → /public/assets/entry-xxx.js
       entryFiles.js = "/" + path;
-      entryFiles.entryPreloads = collectStaticImportClosure(metafile.outputs, path);
     } else if (path.endsWith(".css")) {
       entryFiles.css = "/" + path;
     }
@@ -117,7 +118,6 @@ const getDevEntryFiles = () => ({
   css: "/public/assets/entry.css",
   artifactRuntimeJs: "/public/assets/artifactRuntime.js",
   artifactRuntimePreloads: [],
-  entryPreloads: [],
 });
 
 const resolveEntryFilesFromOutputDir = async () => {
@@ -126,8 +126,6 @@ const resolveEntryFilesFromOutputDir = async () => {
     css: "",
     artifactRuntimeJs: "",
     artifactRuntimePreloads: [],
-    // entry 的静态 import 传递闭包（含 entry 自身，不含 dynamic import），供 SSR 输出 modulepreload
-    entryPreloads: [],
   };
 
   const entries = await readdir(ASSET_OUTPUT_DIR, { withFileTypes: true });
@@ -376,8 +374,6 @@ export const runMetaBuild = async () => {
     css: assets.css, // 例: "/public/assets/entry-def456.css"
     artifactRuntimeJs: assets.artifactRuntimeJs,
     artifactRuntimePreloads: assets.artifactRuntimePreloads,
-    // 可选字段：缺失时 SSR 退回只预加载 entry 本身
-    entryPreloads: assets.entryPreloads || [],
 
     // 版本 / 构建信息
     timestamp,

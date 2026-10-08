@@ -5,7 +5,6 @@ export {
   runResolvedCommand,
 } from "./cliCommandDispatch";
 import type { CommandEntry } from "./cliCommandTypes";
-import { t, cliCommandDescription } from "./tui/i18n";
 import { getInternalCommandEntries } from "./internalCommandEntries";
 import { getScriptCommandEntries } from "./scriptCommandEntries";
 
@@ -115,13 +114,10 @@ export function renderCommandGroupHelpText(group: string) {
   const commands = COMMANDS.filter((entry) => entry.path[0] === group);
   if (commands.length === 0) return "";
   return [
-    t("cli.groupCommandsTitle", group),
+    `nolo ${group} commands`,
     "",
-    t("cli.usageLabel"),
-    ...commands.map(
-      (entry) =>
-        `  nolo ${entry.path.join(" ")}  ${cliCommandDescription(entry.path.join(" ")) ?? entry.description}`,
-    ),
+    "Usage:",
+    ...commands.map((entry) => `  nolo ${entry.path.join(" ")}  ${entry.description}`),
     "",
   ].join("\n");
 }

@@ -1,4 +1,3 @@
-import { deriveStableUuid, isStableSessionIdentityEnabled, resolveSessionKey } from "../sessionIdentity";
 import { randomBytes, randomUUID } from "node:crypto";
 import { DEVIN_CONNECT_URL } from "../devinOAuth";
 import type {
@@ -96,24 +95,16 @@ export function encodeDevinClientMetadata(token: string): Buffer {
   ]);
 }
 
-export type DevinIdentity = { sessionKey?: string };
-
-function devinId(id: DevinIdentity | undefined, purpose: string): string {
-  return id?.sessionKey && isStableSessionIdentityEnabled()
-    ? deriveStableUuid(id.sessionKey, purpose)
-    : randomUUID();
-}
-
 export function encodeDevinChatMessage(msg: {
   role: "user" | "assistant" | "tool";
   text: string;
   toolCallId?: string;
   toolCalls?: AgentRuntimeToolCall[];
-}, identity?: DevinIdentity, index = 0): Buffer {
+}): Buffer {
   // source: 1 = USER, 2 = ASSISTANT, 4 = TOOL_RESULT
   const source = msg.role === "assistant" ? 2 : msg.role === "tool" ? 4 : 1;
   return Buffer.concat([
-    writeStringField(1, devinId(identity, `msg:${index}:${msg.role}`)),
+    writeStringField(1, randomUUID()),
     writeVarint(2, source),
     writeStringField(3, msg.text),
     ...(msg.toolCalls ?? []).map((toolCall) =>
@@ -191,10 +182,8 @@ export function buildGetChatMessageRequest(params: {
   model: string;
   tools?: OpenAiCompatibleTool[];
   temperature?: number;
-  sessionKey?: string;
 }): Buffer {
   const { token, messages, model, tools = [], temperature } = params;
-  const identity: DevinIdentity = { sessionKey: params.sessionKey };
 
   const metadata = encodeDevinClientMetadata(token);
 
@@ -247,7 +236,7 @@ export function buildGetChatMessageRequest(params: {
     }
   }
 
-  const chatMessageBuffers = coalesced.map((m, i) => encodeDevinChatMessage(m, identity, i));
+  const chatMessageBuffers = coalesced.map((m) => encodeDevinChatMessage(m));
 
   const completionConfig = buildCompletionConfig({ temperature });
 
@@ -620,7 +609,6 @@ export function createDevinProvider(options: {
         model: selectedModel,
         tools,
         temperature,
-        sessionKey: resolveSessionKey({ dialogId: opts?.dialogId }),
       });
 
       const frame = buildDevinConnectFrame(requestPayload);

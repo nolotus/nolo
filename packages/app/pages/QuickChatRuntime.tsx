@@ -15,7 +15,7 @@ import {
   useAppSelector,
 } from "app/store";
 import {
-  createDialog, type PendingFile, clearPendingAttachments, usePendingFiles, GLOBAL_DIALOG_RUNTIME_KEY, } from "chat/dialog/dialogSlice";
+  createDialog, type PendingFile, clearPendingAttachments, usePendingFiles, } from "chat/dialog/dialogSlice";
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
 import { sendFirstMessage } from "chat/messages/sendFirstMessage";
@@ -164,11 +164,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const currentSpace = useAppSelector((state) => selectSpaceById(state, currentSpaceId));
   const agentName =
     agent?.name || (currentModeAgentId === noloAgentId ? "nolo" : t("unknown"));
-  // quick chat 无 dialogKey：附件的写入（useMessageInputFiles 的
-  // effectiveDialogKey）与读取都显式用 GLOBAL bucket，不依赖
-  // activeDialogKey 的隐式回退——刷新后两者必须同源，否则恢复的卡片
-  // 会落进另一个 runtime 而渲染不出来。
-  const pendingFiles = usePendingFiles(GLOBAL_DIALOG_RUNTIME_KEY) as PendingFile[];
+  const pendingFiles = usePendingFiles() as PendingFile[];
   const currentUserId = useUserId();
   const { isInitialized: isIdentityInitialized } = useIdentity();
   const currentUserBalance = useAppSelector(selectIdentityUserBalance);
@@ -484,9 +480,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         routeState,
       });
       // replace: drop the empty /chat shell so Back does not return to a blank composer.
-      // Home first-send morph; route chunks are static in the main route table,
-      // and the send request below never waits on the animation.
-      if (surface === "home-primary") enableNextRouteViewTransition();
+      enableNextRouteViewTransition();
       navigate(dialogUrl, {
         replace: true,
         state: routeState,
@@ -557,8 +551,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
 
       clearInput();
       clearFileStatus();
-      // 与 quick chat 的 GLOBAL bucket 读写保持一致，同样不依赖 activeDialogKey。
-      dispatch(clearPendingAttachments({ dialogKey: GLOBAL_DIALOG_RUNTIME_KEY }));
+      dispatch(clearPendingAttachments());
       QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] cleared local imageFiles and pendingFiles");
       QUICK_CHAT_DEBUG && console.groupEnd();
 
@@ -588,7 +581,6 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [
     isSending,
-    surface,
     text,
     imageFiles,
     pendingFiles,

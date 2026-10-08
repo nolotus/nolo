@@ -372,7 +372,6 @@ const OAUTH_PROVIDER_KEYS = new Set<string>([
   "antigravity",
   "claude",
   "cursor",
-  "devin",
 ]);
 
 function parseOAuthProviderKey(provider: string): OAuthProvider {

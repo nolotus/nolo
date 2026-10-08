@@ -73,6 +73,9 @@ import { messageRowSpacing } from "./messageRowSpacing";
 
 /** The pending indicator stands in for the assistant reply that is about to arrive. */
 const PENDING_ASSISTANT_ENTRY = { type: "single", message: { role: "assistant" } };
+import TodoCard from "./TodoCard";
+import { selectLatestConversationTodo } from "../todoState";
+import { selectSystemBuiltinSkills } from "app/settings/settingSlice";
 
 const LOAD_THRESHOLD = 50;
 const DEFAULT_SCROLL_CONTAINER_SELECTOR = ".MainLayout__main";
@@ -180,6 +183,12 @@ const MessagesList: React.FC<MessagesListProps> = ({
   // 任一 user 消息）自动撤下，避免"先看到 AI，我的消息才补上"的错序闪烁。
   const quickChatFirstMessageText = getQuickChatFirstMessageText(
     location.state as QuickChatRouteState,
+  );
+  const systemBuiltinSkills = useAppSelector(selectSystemBuiltinSkills);
+  const conversationTodoEnabled = systemBuiltinSkills["conversation-todo"] !== false;
+  const currentTodo = useMemo(
+    () => selectLatestConversationTodo(messages),
+    [messages],
   );
   const displayMessages = useMemo(() => {
     if (!quickChatFirstMessageText) return messages;
@@ -542,7 +551,13 @@ const MessagesList: React.FC<MessagesListProps> = ({
     scroller.scrollTo({ top: 0, behavior: "smooth" });
   }, [getScroller]);
 
-  const renderMessages = displayMessages;
+  // The pinned current snapshot replaces its source tool row. Older snapshots
+  // remain in history for replay, while the latest one is shown exactly once.
+  const renderMessages = useMemo(() => {
+    const sourceId = currentTodo?.sourceMessageId;
+    if (!conversationTodoEnabled || !sourceId) return displayMessages;
+    return displayMessages.filter((message: any) => message?.id !== sourceId);
+  }, [conversationTodoEnabled, currentTodo?.sourceMessageId, displayMessages]);
 
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
   // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
@@ -588,6 +603,12 @@ const MessagesList: React.FC<MessagesListProps> = ({
         {!hasMoreOlder && currentDialogConfig?.summarizedBeforeId && (
           <div className="summary-divider">
             <span>已归档到摘要</span>
+          </div>
+        )}
+
+        {conversationTodoEnabled && currentTodo && (
+          <div className="chat-messages__todo-current" data-testid="current-conversation-todo">
+            <TodoCard rawData={{ todos: currentTodo.todos }} />
           </div>
         )}
 
@@ -644,6 +665,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       messages={settledMessages}
                       activityMessages={entry.activityMessages}
                       canCollapse={canCollapse}
+                      conversationTodoEnabled={conversationTodoEnabled}
                     />
                   </MessageRowErrorBoundary>
                 </div>
@@ -684,7 +706,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
-                    <ToolMessageItem message={msg} />
+                    <ToolMessageItem message={msg} conversationTodoEnabled={conversationTodoEnabled} />
                   ) : isIntermediateNarration ? (
                     <IntermediateNarrationRow message={msg} />
                   ) : (

@@ -21,7 +21,6 @@ import { toErrorMessage } from "core/errorMessage";
 
 import {
   createChromeConnectorClient,
-  createVerifiedChromeConnectorClient,
   type ChromeConnectorClient,
   type ChromeConnectorRequestPayload,
 } from "../desktop-chrome-connector/chromeConnector";
@@ -51,19 +50,6 @@ function wantsHelp(args: string[]) {
 
 function readTrimmedOption(args: string[], flag: string): string {
   return (readOption(args, flag) ?? "").trim();
-}
-
-/** `--browser chrome|firefox`（`--browser=firefox` 亦可）；未给返回 undefined，非法值返回 null。 */
-function readBrowserFlag(args: string[]): "chrome" | "firefox" | null | undefined {
-  const equalsForm = args.find((arg) => arg.startsWith("--browser="));
-  const raw =
-    equalsForm !== undefined
-      ? equalsForm.slice("--browser=".length)
-      : readOption(args, "--browser");
-  if (raw === undefined) return undefined;
-  const value = raw.trim();
-  if (value === "chrome" || value === "firefox") return value;
-  return null;
 }
 
 function readAllOptions(args: string[], flag: string): string[] {
@@ -267,11 +253,8 @@ export function renderChromeOpsHelp(): string {
     "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
     "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
     "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",
-    "  --browser chrome|firefox selects which connector endpoint serves the call (default",
-    "    chrome = 127.0.0.1:38947, firefox = 127.0.0.1:38948); the wrong browser is refused.",
     "  Every subcommand prints the connector's raw JSON result; failures exit 1.",
-    "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or per-browser NOLO_CHROME_CONNECTOR_PORT /",
-    "    NOLO_FIREFOX_CONNECTOR_PORT (default http://127.0.0.1:38947/rpc).",
+    "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or http://127.0.0.1:38947/rpc.",
   ];
   return lines.join("\n");
 }
@@ -299,14 +282,6 @@ export async function runChromeOpsCommand(
     return 0;
   }
 
-  const browserFlag = readBrowserFlag(args);
-  if (browserFlag === null) {
-    io.stderr(
-      `Invalid --browser value: expected "chrome" or "firefox". Usage: ${spec.usage}`,
-    );
-    return 1;
-  }
-
   let payload: ChromeConnectorRequestPayload;
   try {
     payload = spec.payload(args, spec.usage);
@@ -317,16 +292,7 @@ export async function runChromeOpsCommand(
 
   let result: unknown;
   try {
-    // An explicit --browser is routed through the verified client so a host answering for the
-    // *other* browser (e.g. a stale shared-port install) is rejected before the action runs.
-    const client =
-      deps.client ??
-      (browserFlag
-        ? createVerifiedChromeConnectorClient({
-            client: createChromeConnectorClient({ browser: browserFlag }),
-            expectedBrowser: browserFlag,
-          })
-        : createChromeConnectorClient());
+    const client = deps.client ?? createChromeConnectorClient();
     result = await client.request(spec.action, payload);
   } catch (error) {
     const code =

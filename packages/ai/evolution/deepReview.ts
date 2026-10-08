@@ -4,7 +4,6 @@ import {
   claimEvolutionCandidates,
   completeEvolutionCandidateReview,
   releaseEvolutionCandidateClaim,
-  type EvolutionQueueOrder,
   type EvolutionQueueStore,
 } from "./queue";
 
@@ -151,11 +150,6 @@ const asString = (value: unknown): string | undefined =>
  * Fault-tolerant parse of the model's JSON output. Unknown/missing fields are
  * dropped; an unparseable body becomes insufficient_evidence so the caller
  * keeps the candidate accepted instead of resolving on garbage.
- *
- * An `actionable` verdict has two mandatory pieces of proof: a concrete
- * proposedChange and at least one evidence pointer. If either is missing, the
- * output is structurally incomplete and is downgraded to insufficient_evidence
- * rather than consuming the candidate as resolved.
  */
 export const parseEvolutionDeepReviewResult = (
   raw: string,
@@ -175,9 +169,8 @@ export const parseEvolutionDeepReviewResult = (
       evidence: ["model output was not a JSON object"],
     };
   }
-
   const record = parsed as Record<string, unknown>;
-  const rawVerdict = VERDICTS.includes(record.verdict as EvolutionDeepReviewVerdict)
+  const verdict = VERDICTS.includes(record.verdict as EvolutionDeepReviewVerdict)
     ? (record.verdict as EvolutionDeepReviewVerdict)
     : "insufficient_evidence";
   const surface = SURFACES.includes(record.surface as EvolutionDeepReviewSurface)
@@ -186,11 +179,6 @@ export const parseEvolutionDeepReviewResult = (
   const evidenceList = Array.isArray(record.evidence)
     ? record.evidence.filter((e): e is string => typeof e === "string" && !!e.trim())
     : [];
-  const proposedChange = asString(record.proposedChange);
-  const verdict =
-    rawVerdict === "actionable" && (!proposedChange || evidenceList.length === 0)
-      ? "insufficient_evidence"
-      : rawVerdict;
 
   return {
     verdict,
@@ -199,7 +187,9 @@ export const parseEvolutionDeepReviewResult = (
       ? { likelyRootCause: asString(record.likelyRootCause) }
       : {}),
     ...(surface ? { surface } : {}),
-    ...(proposedChange ? { proposedChange } : {}),
+    ...(asString(record.proposedChange)
+      ? { proposedChange: asString(record.proposedChange) }
+      : {}),
     ...(asString(record.expectedBenefit)
       ? { expectedBenefit: asString(record.expectedBenefit) }
       : {}),
@@ -237,11 +227,6 @@ export type EvolutionDeepReviewOutcome = {
 export type ReviewNextEvolutionCandidatesInput = {
   store: EvolutionQueueStore;
   limit?: number;
-  /**
-   * Deep Review spends the expensive budget, so priority is the default.
-   * Operators may still request newest explicitly for recency inspection.
-   */
-  order?: EvolutionQueueOrder;
   /** Load bounded evidence for a claimed candidate. */
   loadEvidence: (
     candidate: EvolutionCandidate,
@@ -282,11 +267,10 @@ const emptyEvolutionReviewEvidence = (
 export const reviewNextEvolutionCandidates = async ({
   store,
   limit = 1,
-  order = "priority",
   loadEvidence,
   runReview,
 }: ReviewNextEvolutionCandidatesInput): Promise<EvolutionDeepReviewOutcome[]> => {
-  const claimed = await claimEvolutionCandidates({ store, limit, order });
+  const claimed = await claimEvolutionCandidates({ store, limit });
   const outcomes: EvolutionDeepReviewOutcome[] = [];
 
   for (const candidate of claimed) {
