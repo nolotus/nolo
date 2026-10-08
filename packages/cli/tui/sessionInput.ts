@@ -397,7 +397,6 @@ export const SLASH_COMMANDS = [
   "/stop",
   "/exit",
   "/quit",
-  "/learn",
 ] as const;
 
 /**

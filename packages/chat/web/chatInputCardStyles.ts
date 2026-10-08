@@ -44,10 +44,8 @@ export const chatInputCardStyles = stylex.create({
     },
     boxShadow: {
       default: agentThemeTokens.chatInputCardShadow,
-      // 强实色聚焦光环：0 0 0 2px var(--primary) 提供高对比描边，
-      // 0 8px 24px -4px 提供 primary 染色的浮起阴影。亮/暗主题均醒目。
       ":focus-within":
-        "0 0 0 2px var(--primary), 0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent)",
+        "0 0 0 2px var(--primary), 0 8px 24px -4px color-mix(in srgb, var(--primary) 28%, transparent), 0 4px 12px -6px var(--shadowMedium)",
     },
     overflow: "hidden",
     width: "100%",

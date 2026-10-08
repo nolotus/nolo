@@ -274,7 +274,7 @@ export function initializeDiagnostics(
       passthrough: mode !== "tui",
     });
   } catch {
-    bridge = { uninstall() { /* */ }, installed: false, reentrantDropped: 0 };
+    bridge = { uninstall() { /* */ }, installed: false };
   }
 
   const logger = new DiagLogger(diagSink, "cli");

@@ -22,9 +22,7 @@ import {
   readLiveDbRecordAfterTombstoneMerge,
 } from "./globalRecordOperations";
 import { agentRecordHasConfiguredCredential } from "./agentRecordHelpers";
-import { isTombstoneRecord } from "../database/tombstones";
 import {
-  isOwnedAgentKey,
   ownedAgentKey,
   ownedAgentKeyPrefix,
   parseOwnedAgentId,
@@ -93,7 +91,6 @@ function buildCompanionKeys(rawId: string, userId: string) {
 }
 
 export function normalizeListedAgent(record: any): ListedAgent | null {
-  if (isTombstoneRecord(record)) return null;
   const privateKey = typeof record?.dbKey === "string" ? record.dbKey : "";
   const explicitId = typeof record?.id === "string" && record.id ? record.id : undefined;
   const ownerUserId = typeof record?.userId === "string" ? record.userId : "";
@@ -229,12 +226,15 @@ export async function listLocalCachedAgents(args: {
   for (const prefix of [ownedPrefix, PUBLIC_AGENT_KEY_PREFIX]) {
     for await (const [key, value] of args.db.iterator({ gte: prefix, lte: `${prefix}\uffff` })) {
       if (typeof key !== "string" || !value || typeof value !== "object") continue;
-      if (isTombstoneRecord(value)) continue;
-      if (isOwnedAgentKey(key, args.userId)) {
+      // key 在此已是 string（上一步 typeof 收窄）。isOwnedAgentKey 是
+      // `key is string` 类型谓词，用于控制流/别名条件时会把 else 分支的
+      // key 收窄成 never——这里对已经是 string 的 key 走等价的前缀判断，
+      // 既保留同一判据，又不触发谓词收窄。
+      if (key.startsWith(ownedPrefix)) {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;
       }
-      if ((key as string).startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
+      if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
         publicKeys.add(key);
       }
     }

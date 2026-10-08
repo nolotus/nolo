@@ -68,13 +68,7 @@ export function describeRun(
 ): string[] {
   const lines = [
     `runId: ${record.runId}`,
-    // Machine label, not a display name: title stays out so the key keeps its
-    // correlation value — the model greps agentKey across logs and tool args.
-    `agent: ${resolveRunLabel({
-      agentName: (record as any).agentName,
-      agentKey: (record as any).agentKey,
-      runId: record.runId,
-    })}`,
+    `agent: ${resolveRunLabel(record as any)}`,
     `status: ${record.status}`,
   ];
   // 正常完成的 run 不报 exitCode / 活动计数：那是诊断信息，成功时模型要
@@ -177,15 +171,7 @@ function buildRunElement(
 ): string {
   const attrs = [
     `runId="${escapeXmlAttribute(String(record.runId))}"`,
-    // Same rule as describeRun: this attribute is parsed by the model, so the
-    // label keeps the agentKey correlation — title never substitutes for it.
-    `agent="${escapeXmlAttribute(
-      resolveRunLabel({
-        agentName: (record as any).agentName,
-        agentKey: (record as any).agentKey,
-        runId: record.runId,
-      })
-    )}"`,
+    `agent="${escapeXmlAttribute(resolveRunLabel(record as any))}"`,
     `status="${escapeXmlAttribute(String(record.status))}"`,
   ];
   const verbose = isFailureStatus(record.status);

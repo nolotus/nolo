@@ -215,9 +215,6 @@ export async function readStreamingAgentRun(
   return {
     exitCode: 0,
     ...(dialogId ? { dialogId } : {}),
-    // 结论载体与 local / 非流式 HTTP 路径同契约：流式分支已经把 assistant
-    // 正文累加在 content 里，不随行则 server 流式 run 的结算也拿不到结论。
-    ...(content ? { finalText: content } : {}),
     turnTokens: buildTurnTokenUsage(usage, options.agentKey),
     ...(turnCredits !== undefined ? { turnCredits } : {}),
   };
