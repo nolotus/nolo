@@ -36,6 +36,7 @@ import {
 } from "../ai/agent/contextCompiler";
 import type { ContextBlockScope } from "./contextBlockScope";
 import { scrubObjectSecrets, scrubSecrets } from "./secretScrubber";
+import { projectUserPartForModel } from "../ai/attachments/projectUserPart";
 
 /**
  * 纯观测字段：只随 tool_result_metadata 持久化，不进入模型可见内容。
@@ -531,9 +532,53 @@ export function filterImagePartsFromMessages(
 }
 
 /**
+ * Provider 发送边界的 user-part 投影（durable 消息可以比 provider 视图携带更多内容）。
+ *
+ * durable 消息（跨轮持久化历史 + 本轮 persistedInput/persistedInputReference）可以带
+ * `attachment` / `media_job` part —— 例如 TUI 本机原件 = `local-file` source，含
+ * `path` / `machineId` / `workspaceRoot` 定位信息。这些**定位信息绝不允许进入 provider
+ * 请求**，故发送视图中把这两类 part 投影为模型侧安全文本卡（复用
+ * `projectUserPartForModel` → `describeAttachmentForModel`，只含 name/mime/size/kind）。
+ *
+ * 边界（刻意收窄，不是全量过滤）：
+ * - 只改写 `attachment` / `media_job` 两类 part；未知 part type、`page` 引用、
+ *   `context_reference`、tool / assistant 消息一律原样保留（未知类型不降级、不丢字段）。
+ * - 非数组 content（纯文本 user 消息）与非 user 角色逐字节不变。
+ * - 纯函数且幂等：投影结果只含 text / image_url，重复投影逐字节相同（前缀缓存稳定）。
+ * - 不 mutate 入参：未投影的 part 保持原对象引用，只在本轮投影出的新数组里重排。
+ */
+const MODEL_PROJECTED_USER_PART_TYPES = new Set(["attachment", "media_job"]);
+
+const isModelProjectedUserPart = (part: unknown): boolean =>
+  typeof part === "object" &&
+  part !== null &&
+  MODEL_PROJECTED_USER_PART_TYPES.has(
+    (part as { type?: unknown }).type as string,
+  );
+
+function projectUserMessageForProvider(
+  message: AgentRuntimeChatMessage,
+): AgentRuntimeChatMessage {
+  if (message.role !== "user" || !Array.isArray(message.content)) return message;
+  let projected = false;
+  const nextContent: unknown[] = [];
+  for (const part of message.content) {
+    if (isModelProjectedUserPart(part)) {
+      nextContent.push(...projectUserPartForModel(part));
+      projected = true;
+    } else {
+      nextContent.push(part);
+    }
+  }
+  return projected
+    ? { ...message, content: nextContent as AgentRuntimeMessageContent }
+    : message;
+}
+
+/**
  * 发送视图组装的唯一管线：prefix（system）+ 投影后的历史 + suffix（本轮 user），
  * 再做毒丸 tool_call 降级。首轮 buildMessages 与轮内压缩后重建共用本函数，
- * 两处 context_reference 恢复、工具输出投影与毒丸降级因此不会漂移。
+ * 两处 context_reference 恢复、工具输出投影、user-part 投影与毒丸降级因此不会漂移。
  *
  * 降级必须作用于拼好的完整数组：downgradeUnparsableToolCalls 为无 id 调用派生
  * 的稳定 id 依赖数组下标，和旧实现保持同一坐标。持久化历史不被改写。
@@ -545,9 +590,12 @@ export function composeProviderMessages(args: {
   contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean;
 }): { messages: AgentRuntimeChatMessage[]; downgraded: number } {
   return downgradeUnparsableToolCalls([
-    ...args.prefix,
-    ...prepareHistoryForNextTurn(args.history, args.contextReferenceResolver),
-    ...(args.suffix ?? []),
+    ...args.prefix.map(projectUserMessageForProvider),
+    ...prepareHistoryForNextTurn(
+      args.history,
+      args.contextReferenceResolver,
+    ).map(projectUserMessageForProvider),
+    ...(args.suffix ?? []).map(projectUserMessageForProvider),
   ]);
 }
 

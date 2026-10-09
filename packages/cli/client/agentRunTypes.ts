@@ -240,6 +240,13 @@ export type RunAgentTurnOptions = {
   taskEvidence?: TaskEvidenceInput;
   fetchImpl?: CliFetchImpl;
   currentMachineIdResolver?: (env: EnvLike) => Promise<string | undefined>;
+  /**
+   * TUI 已检测到的本机原件路径（图片 / 音视频）。只用来产出**给模型的安全附件卡**
+   * （name/mimeType/size/kind，走共享 `describeAttachmentForModel`）——
+   * **绝不把 path / machineId 上行**。本机原件 part 的落库需要先有 provider 边界的
+   * user-part 投影（见 packages/cli/tui/localAttachmentParts.ts 文件头与设计 §5）。
+   */
+  localAttachmentPaths?: readonly string[];
   actionGateHandler?: (
     gate: LocalAgentActionGate,
   ) => Promise<AgentRuntimeToolResult | void>;

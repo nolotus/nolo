@@ -19,6 +19,8 @@ import {
 import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { markRecentlyCreated } from "chat/web/sidebar/recentlyCreatedStore";
 import { sendFirstMessage } from "chat/messages/sendFirstMessage";
+import { preparePendingAttachmentParts } from "chat/messages/preparePendingAttachmentParts";
+import { resolveBrowserModelImageUrl } from "chat/messages/browserImageUrl";
 import { selectDefaultAgentId } from "app/settings/settingSlice";
 import { useFetchData } from "app/hooks";
 import { isAbortError } from "core/abortError";
@@ -504,7 +506,18 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         imageCount: imageFiles.size,
         pendingFileCount: pendingFiles.length,
       });
-      const extraParts = buildQuickChatExtraParts(pendingFiles);
+      let extraParts;
+      try {
+        const preparedParts = await preparePendingAttachmentParts(pendingFiles, {
+          currentServer,
+          currentUserId,
+          resolveImageUrl: (url) => resolveBrowserModelImageUrl(url, { authToken: token }),
+        });
+        extraParts = preparedParts;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "媒体附件不可用");
+        return;
+      }
       QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] prepare sendFirstMessage", {
         dialogKey,
         textLength: trimmedText.length,

@@ -13,6 +13,7 @@ import { upload } from "database/dbSlice";
 import { withMapItemProcessing } from "app/utils/asyncMapStatus";
 import { isMediaFileWithinLimit, splitFiles } from "app/utils/fileUtils";
 import { createMediaJob } from "./mediaJobs";
+import { ENABLE_REMOTE_ATTACHMENT_PART_WRITES } from "chat/messages/attachmentWriteRollout";
 import { toErrorMessage } from "core/errorMessage";
 import {
   GLOBAL_DIALOG_RUNTIME_KEY,
@@ -270,6 +271,12 @@ export const useMessageInputFiles = (
                   id: job.id,
                   name: file.name,
                   type: "media_job",
+                  fileKey: ENABLE_REMOTE_ATTACHMENT_PART_WRITES && uploadedFile.dbKey
+                    ? String(uploadedFile.dbKey)
+                    : undefined,
+                  mimeType: file.type,
+                  size: file.size,
+                  durationSec: job.durationSec,
                   trackingId: job.id,
                   dialogKey: effectiveDialogKey,
                 }),

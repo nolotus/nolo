@@ -173,6 +173,10 @@ export function addPendingFile(payload: PendingFile) {
       upsertMediaJobPendingEntry({
         id: payload.id,
         name: payload.name,
+        fileKey: payload.fileKey,
+        mimeType: payload.mimeType,
+        size: payload.size,
+        durationSec: payload.durationSec,
         // 与写入侧 bucket 推导严格同源：`dialogKey || GLOBAL_DIALOG_RUNTIME_KEY`
         // （useMessageInputFiles 的 effectiveDialogKey 同规则）。不依赖
         // activeDialogKey 隐式回退，保证恢复时读到的就是当初写入的 bucket。
@@ -341,6 +345,10 @@ export function restoreMediaJobPendingFiles(dialogKey?: string | null): number {
       id: entry.id,
       name: entry.name,
       type: "media_job",
+      fileKey: entry.fileKey,
+      mimeType: entry.mimeType,
+      size: entry.size,
+      durationSec: entry.durationSec,
       trackingId: entry.id,
       dialogKey: runtimeKey,
     });

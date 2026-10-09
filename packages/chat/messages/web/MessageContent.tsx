@@ -8,6 +8,7 @@ const ImagePreviewModal = React.lazy(() => import("render/web/ui/modal/ImagePrev
 
 import { MessageText } from "./MessageText";
 import { ImagePreview } from "./ImagePreview";
+import { AttachmentChip } from "./AttachmentChip";
 import { FileItem } from "./FileItem";
 import { ThinkingSection } from "./ThinkingSection";
 import { ImageGenerationCard } from "./ImageGenerationCard";
@@ -226,6 +227,16 @@ export const MessageContent = memo(
                 content={it.text}
                 role={role}
                 isStreaming={isStreaming}
+              />
+            );
+          }
+          if (it.type === "attachment" || it.type === "media_job") {
+            // 附件卡（新 `attachment` part 与旧 `media_job` part 都不能静默消失）。
+            // 旧实现只认 `pageKey`，附件 part 直接落到 return null。
+            return (
+              <AttachmentChip
+                key={`attachment-${i}-${idx}-${typeof it.name === "string" ? it.name : ""}`}
+                part={it}
               />
             );
           }

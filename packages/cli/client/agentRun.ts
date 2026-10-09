@@ -9,6 +9,13 @@ import {
 } from "../../agent-runtime/modelLayerOverride";
 import type { AgentRuntimeHostAdapter } from "../agentRuntimeLocal";
 import {
+  appendAttachmentCard,
+  buildLocalAttachments,
+} from "../tui/localAttachmentParts";
+import type { AttachmentPart } from "../../ai/attachments/attachmentPart";
+import { ENABLE_REMOTE_ATTACHMENT_PART_WRITES } from "../../chat/messages/attachmentWriteRollout";
+import type { AgentRuntimeMessageContent } from "../../agent-runtime/types";
+import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
@@ -453,15 +460,29 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   return true;
 }
 
-function buildUserInputContent(message: string, imageUrls: string[] = []) {
-  if (imageUrls.length === 0) return message;
+/**
+ * 组装 user content：文本 + 图片像素 + durable 附件结构化 part。
+ *
+ * durable 消息（持久化 content）可以比 provider 发送视图多携带 `attachment`
+ * part —— TUI 本机原件 = `local-file` source，含 path / machineId / workspaceRoot。
+ * `AgentRuntimeMessageContent` 目前只声明 text / image_url，故此处窄化断言：运行时
+ * 由 provider 边界（`composeProviderMessages` → `projectUserPartForModel`）投影成
+ * 安全文本卡，定位信息永不进 provider 请求（见 providerMessageProjection.ts）。
+ */
+function buildUserInputContent(
+  message: string,
+  imageUrls: string[] = [],
+  attachmentParts: readonly AttachmentPart[] = [],
+): AgentRuntimeMessageContent {
+  if (imageUrls.length === 0 && attachmentParts.length === 0) return message;
   return [
     ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
     ...imageUrls.map((url) => ({
       type: "image_url" as const,
       image_url: { url },
     })),
-  ];
+    ...attachmentParts,
+  ] as unknown as AgentRuntimeMessageContent;
 }
 
 function buildSubjectRefs(options: RunAgentTurnOptions) {
@@ -1642,22 +1663,47 @@ async function runLocalAgentTurnForCli(
   });
   turnOutput.spinner.start();
   try {
+    // TUI 本机原件路径 → 安全附件卡（共享 describeAttachmentForModel，永不含 path/machineId）。
+    // 机器 id 复用 currentMachineIdResolver / detectCurrentMachineId；取不到就不出卡（显式降级）。
+    // 模型本轮 input 始终是安全卡；durable 落库形态由唯一 rollout 门控（复用
+    // ENABLE_REMOTE_ATTACHMENT_PART_WRITES，默认关闭）：开启时改落结构化 local-file part
+    // （持久化 content 携带 path/machineId），由 provider 边界投影回同一张安全卡。
+    const { cardText: localAttachmentCard, parts: localAttachmentParts } = buildLocalAttachments({
+      paths: options.localAttachmentPaths ?? [],
+      machineId: await resolveCurrentMachineId(options),
+      ...(options.localRuntimeCwd ? { workspaceRoot: options.localRuntimeCwd } : {}),
+    });
+    const messageForLocal = appendAttachmentCard(options.message, localAttachmentCard);
+    // 唯一 rollout 门（不造第二开关）：关闭时 durable 形态逐字节保持旧行为（只带安全卡文本）。
+    const durableAttachmentParts = ENABLE_REMOTE_ATTACHMENT_PART_WRITES
+      ? localAttachmentParts
+      : [];
+    const hasDurableAttachments = durableAttachmentParts.length > 0;
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
     const result = await runLocalAgentTurn({
       adapter,
       agentRef: options.agentKey,
       userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
-      input: buildUserInputContent(options.message, options.imageUrls),
-      ...(expandedMessage !== options.message
+      input: buildUserInputContent(messageForLocal, options.imageUrls),
+      ...(expandedMessage !== options.message || localAttachmentCard !== ""
         ? {
-            persistedInput: buildUserInputContent(
-              expandedMessage,
-              options.imageUrls,
-            ),
-            persistedInputReference: buildUserInputContent(
-              options.message,
-              options.imageUrls,
-            ),
+            persistedInput: hasDurableAttachments
+              ? buildUserInputContent(
+                  expandedMessage,
+                  options.imageUrls,
+                  durableAttachmentParts,
+                )
+              : buildUserInputContent(
+                  appendAttachmentCard(expandedMessage, localAttachmentCard),
+                  options.imageUrls,
+                ),
+            persistedInputReference: hasDurableAttachments
+              ? buildUserInputContent(
+                  options.message,
+                  options.imageUrls,
+                  durableAttachmentParts,
+                )
+              : buildUserInputContent(messageForLocal, options.imageUrls),
           }
         : {}),
       ...(options.pastedTextStore

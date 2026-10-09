@@ -30,6 +30,12 @@ export interface PendingFile {
     | "media_job";
   groupId?: string;
   ocrText?: string;
+  /** 音视频上传原件不可变数据库 file key；media_job 的 id 仍然是 jobId。 */
+  /** Optional rollout gate. Defaults off until attachment readers are deployed. */
+  fileKey?: string;
+  mimeType?: string;
+  size?: number;
+  durationSec?: number;
   /** 关联到文件处理状态（如 useMessageInputFiles 的 fileStatus）的跟踪 id。 */
   trackingId?: string;
 }

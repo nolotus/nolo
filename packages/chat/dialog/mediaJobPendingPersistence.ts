@@ -35,6 +35,10 @@ export interface MediaJobPendingEntry {
   /** jobId，同时用作 PendingFile.id。 */
   id: string;
   name: string;
+  fileKey?: string;
+  mimeType?: string;
+  size?: number;
+  durationSec?: number;
   /** 上传时所在 dialog 的 runtime key（undefined 归一成 GLOBAL_DIALOG_RUNTIME_KEY）。 */
   dialogKey?: string;
   /** LRU 时间戳（毫秒）。 */
@@ -102,6 +106,10 @@ export function readMediaJobPendingMap(): MediaJobPendingMap {
     const valid = entries.filter(isEntry).map((entry) => ({
       id: entry.id,
       name: entry.name,
+      fileKey: typeof entry.fileKey === "string" ? entry.fileKey : undefined,
+      mimeType: typeof entry.mimeType === "string" ? entry.mimeType : undefined,
+      size: typeof entry.size === "number" ? entry.size : undefined,
+      durationSec: typeof entry.durationSec === "number" ? entry.durationSec : undefined,
       savedAt:
         typeof entry.savedAt === "number" && Number.isFinite(entry.savedAt)
           ? entry.savedAt

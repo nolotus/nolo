@@ -909,6 +909,13 @@ export async function runSubmittedSlashLine(
       onFailure: (_path, err) =>
         output.write(`[nolo] image skipped: ${err.message}\n`),
     });
+    // 本机原件路径（图片 / 音视频）→ client 侧安全附件卡（只含 name/mime/size/kind）。
+    // 必须在下面清空 attachedImages 之前取 sourcePath；排队路径的同类路径随 TurnRequest 带。
+    const localAttachmentPaths = [
+      ...(result.action.imagePaths ?? []),
+      ...host.state.attachedImages.map((img) => img.sourcePath),
+      ...(result.action.mediaPaths ?? []),
+    ];
     // 本轮待发送暂存区：发送即消费。imageUrls 已在上面确定，这里立即清空，
     // 避免纯文字轮把上一轮附件残留重读重发给上游（累积至 ~9 轮撞 8 张
     // 上限报 UPSTREAM_400）。必须在异步 turn 开始前同步清空：若等 turn 成功
@@ -933,6 +940,7 @@ export async function runSubmittedSlashLine(
         imageUrls,
         actionGateHandler,
         confirmDestructiveAction,
+        localAttachmentPaths,
       );
       await binding.notifyTurnEnd(outcome);
     } catch (err) {

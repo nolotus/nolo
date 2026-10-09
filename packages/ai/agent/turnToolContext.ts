@@ -16,6 +16,10 @@ import {
 } from "./getFullChatContextKeys";
 import { extractCategorizedMentions } from "create/editor/utils/slateUtils";
 import { asTrimmedString } from "core/trimmedString";
+import {
+  attachmentKindsInContent,
+  toolsForAttachmentKinds,
+} from "ai/attachments/toolsForAttachments";
 
 /**
  * Audit result of turn-level late-bound tools and references.
@@ -23,6 +27,12 @@ import { asTrimmedString } from "core/trimmedString";
 export type TurnToolContext = {
   /** Canonical tool names derived from references and context pages for this turn. */
   referencedToolNames: string[];
+  /**
+   * 附件推导出的工具名（当前输入 + 已加载历史附件的 kind → 工具），同样并入
+   * `referencedToolNames`（server-owned 工具面按现有 referencedToolNames 保持一致）。
+   * 只是「能力提示」：不授予执行/计费，mediaJobTool 自己的报价确认门仍在。
+   */
+  attachmentToolNames?: string[];
   /** Canonical tool names derived from explicit mentions in userInput. */
   mentionedToolNames: string[];
   /** Whether the resolution was completely and confidently determined. */
@@ -199,6 +209,12 @@ export async function resolveTurnToolContext(
     }
   }
 
+  // 附件能力提示（当前输入 + 已加载历史附件）：附件 kind 没有持久字段，只能从内存里的
+  // 消息现推。刻意不读 pendingFiles —— 待发附件在消息落库后就是消息 content 的一部分，
+  // 后续轮次（例如用户选「第二档」）照样要看得见 mediaJobTool。
+  let attachmentKinds: readonly string[] = attachmentKindsInContent(input.userInput);
+  let attachmentKindsIncomplete = false;
+
   // 3. Turn context pages (from history keys and current input keys)
   let contextToolsResult: ResolvedContentTools = {
     tools: [],
@@ -232,6 +248,11 @@ export async function resolveTurnToolContext(
         (input.dialogConfig as DialogConfig) ?? undefined,
       );
 
+      // 附件 kind 不是引用 key：单独取出，不混进 keys（下面对 keys 做优先级去重）。
+      // 压缩掉且已不在内存的旧历史 → incomplete（待发现），不再扫数据库。
+      attachmentKinds = [...(keySets.attachmentKinds ?? [])];
+      attachmentKindsIncomplete = keySets.attachmentKindsIncomplete === true;
+
       // Add mentioned page keys to currentInputContext
       for (const pk of mentionResult.mentionedPageKeys) {
         keySets.currentInputKeys.add(pk);
@@ -262,9 +283,19 @@ export async function resolveTurnToolContext(
     unresolvedReasons.push("cannot inspect mentioned pages without store dispatch");
   }
 
+  if (attachmentKindsIncomplete) {
+    // 旧历史（被压缩且已不在内存的附件）无法判定：报 incomplete 待发现，不扫数据库。
+    isComplete = false;
+    unresolvedReasons.push(
+      "attachment kinds before summarization are not in memory (pending discovery)",
+    );
+  }
+  const attachmentToolNames = toolsForAttachmentKinds(attachmentKinds);
+
   const allReferencedTools = [
     ...(refAssets.referencedTools ?? []),
     ...(contextToolsResult.tools ?? []),
+    ...attachmentToolNames,
   ];
   const referencedToolNames = canonicalizeToolNames(allReferencedTools);
 
@@ -283,6 +314,7 @@ export async function resolveTurnToolContext(
 
   return {
     referencedToolNames,
+    attachmentToolNames,
     mentionedToolNames,
     complete: isComplete,
     ...(unresolvedReasons.length > 0 ? { unresolvedReasons } : {}),

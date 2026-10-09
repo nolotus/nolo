@@ -158,6 +158,11 @@ async function runAgentChat(
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
     imageUrls?: string[];
+    /**
+     * 本机原件路径（图片 / 音视频）→ 只产出给模型的安全附件卡（name/mime/size/kind），
+     * 绝不把 path / machineId 上行（见 packages/cli/tui/localAttachmentParts.ts）。
+     */
+    localAttachmentPaths?: readonly string[];
     actionGateHandler?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
     confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
     requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
@@ -363,6 +368,9 @@ async function runAgentChat(
     showThinking: state.thinkingDisplay === "show",
     ...(options.imageUrls && options.imageUrls.length > 0
       ? { imageUrls: options.imageUrls }
+      : {}),
+    ...(options.localAttachmentPaths && options.localAttachmentPaths.length > 0
+      ? { localAttachmentPaths: options.localAttachmentPaths }
       : {}),
     ...(options.actionGateHandler ? { actionGateHandler: options.actionGateHandler } : {}),
     ...(options.confirmDestructiveAction
@@ -937,6 +945,11 @@ export async function runOneAgentTurn(
   imageUrls: string[],
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /**
+   * 本机原件路径（图片 / 音视频）：client 侧转成安全附件卡（只含 name/mime/size/kind），
+   * 不把 path / machineId 发给 provider。缺省 = 无附件卡（行为不变）。
+   */
+  localAttachmentPaths?: readonly string[],
 ): Promise<{ ok: boolean; aborted: boolean }> {
   // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
   // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
@@ -1116,6 +1129,9 @@ export async function runOneAgentTurn(
       ctx.options.agentRunner,
       {
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        ...(localAttachmentPaths && localAttachmentPaths.length > 0
+          ? { localAttachmentPaths }
+          : {}),
         actionGateHandler,
         ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
         ...(requestUserChoice ? { requestUserChoice } : {}),
@@ -1410,7 +1426,14 @@ export async function runDrainedQueueTurn(
       req = { ...req, text: mergedText, event: { kind: "user", text: mergedText } };
     }
   }
-  return runTurn(ctx, req, imageUrls, actionGateHandler, confirmDestructiveAction);
+  return runTurn(
+    ctx,
+    req,
+    imageUrls,
+    actionGateHandler,
+    confirmDestructiveAction,
+    [...(req.imagePaths ?? []), ...(req.mediaPaths ?? [])],
+  );
 }
 
 /**

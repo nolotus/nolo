@@ -689,6 +689,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     currentDialogKey,
     currentDialogConfig,
     currentServer,
+    currentUserId,
     token,
     runtimeOptions,
     imageUiConfig,
