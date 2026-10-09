@@ -26,16 +26,14 @@ import {
   isAgentRunTerminalStatus,
   shortRunId,
 } from "../../ai/tools/agent/agentRunDisplayHelpers";
-import { displayAgentName } from "./agentRunPanelLines";
-import { t } from "./i18n";
-import { formatRunZoneLines, type RunZoneLayout } from "./runZoneLines";
-import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone } from "./runSnapshotDisplay";
+import { displayAgentName, formatAgentRunPanelLines } from "./agentRunPanelLines";
+import { activeInFlight, formatInFlightFact, formatTerminalRunAge, formatUnassignedFact, runStatusTone, sanitizeRunSnapshotForNormal } from "./runSnapshotDisplay";
 import { themeText } from "./theme";
 
 /** 年龄每秒走一格；比 150ms 的活动帧慢，因为这里没有动画只有秒数。 */
 export const RUN_DOCK_TICK_INTERVAL_MS = 1000;
 /** 终态 run 在面板上多留一会，让用户看到「结束」这一帧而不是凭空消失。 */
-export const RUN_DOCK_LINGER_MS = 5_000;
+export const RUN_DOCK_LINGER_MS = 8_000;
 /**
  * 超过这个时长没收到任何更新就把 run 摘掉。没有它，一个我们已经失去跟踪的
  * run（模型不再轮询、进程静默死亡）会让 dock 永远转下去并一直显示 running。
@@ -69,7 +67,7 @@ export type RunDock = {
   /** 当前面板上的 run，活跃在前、同组按首次出现顺序。 */
   getRuns(): AgentRunSnapshot[];
   /** 渲染行；空面板返回 []。 */
-  getLines(colorEnabled: boolean, layout?: RunZoneLayout): string[];
+  getLines(colorEnabled: boolean): string[];
   /** 会话结束时调用：停 timer 并清空。 */
   dispose(): void;
 };
@@ -237,23 +235,25 @@ export function createRunDock(deps: RunDockDeps): RunDock {
 
   const getRuns = () => orderedEntries().map((entry) => entry.snapshot);
 
-  const getLines = (colorEnabled: boolean, layout?: RunZoneLayout): string[] => {
+  const getLines = (colorEnabled: boolean): string[] => {
     // 读也顺手 prune：终端可能在两次 tick 之间就要重绘（比如按键），
     // 这时不该把一条已经该消失的 run 再画一帧。
     prune();
     const ordered = orderedEntries();
     if (ordered.length === 0) return [];
     const at = now();
-    // 固定运行区（顶部，每条一行 `⚙ title · agent · 已耗时 · tools`）。单/多
-    // run 走同一个格式化器——运行区就是一张可扫的列表，不是「单条细看 / 多条
-    // 汇总」两种形态。normal 模式剥 ANSI/OSC、隐 raw error/log 的 safe 投影
-    // 由 formatRunZoneLines 内部兜底完成。
-    return formatRunZoneLines(
-      ordered.map((entry) => entry.snapshot),
+    // 单条 run 保持原来的两行形态（含 `└ detail`）：绝大多数会话只有一个
+    // 执行者，没必要为了多 run 的表头牺牲它的信息量。
+    // 唯一显示模式：面板恒用 safe 投影（剥 ANSI/OSC、隐 raw error/log）。
+    const displaySnapshots = ordered.map((entry) => sanitizeRunSnapshotForNormal(entry.snapshot));
+    if (displaySnapshots.length === 1) {
+      return formatAgentRunPanelLines(displaySnapshots[0]!, colorEnabled, at);
+    }
+    return formatRunDockLines(
+      displaySnapshots,
       colorEnabled,
       at,
-      maxRows,
-      layout
+      maxRows
     );
   };
 
@@ -310,17 +310,8 @@ export function formatRunDockLines(
   lines.push(colorEnabled ? themeText(header, "muted", true) : header);
 
   const shown = snapshots.slice(0, Math.max(1, maxRows));
-  // 标题只在「唯一」时才能替代短 id 去区分 run：同一面板里重复的标题保留短 id。
-  const titleCounts = new Map<string, number>();
   for (const snapshot of shown) {
-    const title = snapshot.title?.trim();
-    if (title) titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
-  const duplicateTitles = new Set(
-    [...titleCounts].filter(([, count]) => count > 1).map(([title]) => title)
-  );
-  for (const snapshot of shown) {
-    lines.push(formatRunDockRow(snapshot, colorEnabled, now, duplicateTitles));
+    lines.push(formatRunDockRow(snapshot, colorEnabled, now));
   }
 
   const hidden = snapshots.length - shown.length;
@@ -331,13 +322,11 @@ export function formatRunDockLines(
   return lines;
 }
 
-/** `  ⏳ 复审额度 diff · AGY Flash · 6m12s · …`；标题重复时 `复审 #26f2ye · AGY Flash`；无标题 `AGY Flash #26f2ye · …` */
+/** `  ⏳ AGY Flash #26f2ye · 6m12s · 24 tools · Edit 3s` */
 function formatRunDockRow(
   snapshot: AgentRunSnapshot,
   colorEnabled: boolean,
-  now: number,
-  /** 当前面板里重复出现的标题；它们的短 id 不能省，否则两行长得一模一样。 */
-  duplicateTitles: ReadonlySet<string> = new Set()
+  now: number
 ): string {
   const name = displayAgentName(snapshot);
   const short = shortRunId(snapshot.runId);
@@ -354,7 +343,7 @@ function formatRunDockRow(
   const unassigned = formatUnassignedFact(snapshot);
   if (unassigned) facts.push(unassigned);
   if (typeof snapshot.toolCallCount === "number" && Number.isFinite(snapshot.toolCallCount)) {
-    facts.push(t("runToolsCount", String(snapshot.toolCallCount)));
+    facts.push(`${snapshot.toolCallCount} tools`);
   }
   // 平台积分（收尾自报）。多 run 行宽有限，用紧凑形式「⚡0.04」。
   if (typeof snapshot.credits === "number" && Number.isFinite(snapshot.credits)) {
@@ -372,13 +361,7 @@ function formatRunDockRow(
   }
   if (snapshot.errorMessage) facts.push(clipText(snapshot.errorMessage, 40));
 
-  // 有标题时标题在前、agent 名退为次要信息，并省掉短 id：标题已经承担了区分
-  // 并发 run 的职责。没有标题时短 id 是唯一的区分手段，必须保留（旧行为不变）。
-  const title = snapshot.title?.trim();
-  const idSuffix = short ? ` #${short}` : "";
-  const label = title
-    ? `${title}${duplicateTitles.has(title) ? idSuffix : ""} · ${name}`
-    : `${name}${idSuffix}`;
+  const label = `${name}${short ? ` #${short}` : ""}`;
   const factsPart = facts.length > 0 ? ` · ${facts.join(" · ")}` : "";
   if (!colorEnabled) return `  ${icon} ${label}${factsPart}`;
 

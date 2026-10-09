@@ -22,6 +22,9 @@ export const TOOL_PACKS = {
   // queryModelUsage / queryUserGrowthReport：server-only 工具（web/CLI executor
   // 直接返回 serverOnlyResult），不随 CORE 常驻——server 端由 agent 显式
   // tools 配置按需挂载（utilityServerTools 执行器），web 端不再挂死 schema。
+  // setTodoList 已移至「conversation-todo」系统能力包（defaultEnabled:true）
+  // 作为唯一 owner——single source of truth：普通 agent 默认仍有 setTodoList，
+  // 但关闭「对话 Todo」开关即可真正摘掉它（CORE 常驻时该开关形同虚设）。
   CORE: [
     "read",
     "createDoc",
@@ -126,8 +129,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
   {
     id: "long-term-memory",
     label: "长期记忆",
-    description:
-      "对话前自动载入高相关记忆，并允许 agent 按需查询、写入或在用户强制要求下删除长期记忆。",
+    description: "对话前自动载入高相关记忆，并允许 agent 按需查询、写入或在用户强制要求下删除长期记忆。",
     tools: ["queryMemory", "rememberMemory", "deleteMemory"],
     defaultEnabled: true,
     icon: "🧠",
@@ -251,15 +253,6 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
 这个应用可以帮你 [一句话功能描述]。想要修改或添加功能，直接告诉我就行！"`,
   },
   {
-    id: "media-jobs",
-    label: "长音视频处理",
-    description: "对已上传的长音频/视频估价、启动处理并查询进度或结果。",
-    tools: ["mediaJobTool"],
-    defaultEnabled: false,
-    icon: "🎞️",
-    promptPatch: `# 长音视频处理\n\n- 对已上传媒体使用 mediaJobTool：先用 action=quote 估价，再用 action=start 启动；记录返回的 job.id，后续用 action=status 和 jobId 查询进度及结果。\n- 用户可指定 fromSec/toSec 秒范围、depth（outline、translate、full）和 targetLang。\n`,
-  },
-  {
     id: "video-transcription",
     label: "视频转写",
     description:
@@ -313,7 +306,10 @@ export const DEFAULT_ENABLED_PACKS = CAPABILITY_PACKS.filter(
  * out to the CLI; web's non-empty branch omitted `skills` for the same reason.
  * Add a host-wide default here and all three runtimes pick it up at once.
  */
-export const ALWAYS_ON_PACK_IDS = ["long-term-memory", "skills"] as const;
+export const ALWAYS_ON_PACK_IDS = [
+  "long-term-memory",
+  "skills",
+] as const;
 
 /**
  * Resolve an agent's declared `enabledPacks` into the effective pack list for
@@ -383,15 +379,23 @@ export const SYSTEM_BUILTIN_SKILL_PACK_IDS = SYSTEM_AGENT_CAPABILITY_IDS;
  * `web-search` is deliberately NOT here: its tools stay opt-in via
  * `enabledPacks` / LIGHT_WEB injection to preserve web capability boundaries
  * (the global toggle only filters tools that are already present).
+ *
+ * `conversation-todo` is here for the same reason `agent-orchestration` is:
+ * `setTodoList` used to be CORE-resident, which made the global "对话 Todo"
+ * off-switch a no-op (CORE bypassed `applySystemBuiltinSkillFilter`). Moving
+ * it to this default-mount list makes the pack the single owner — default-on
+ * for every interactive agent, and the settings toggle actually removes it.
  */
-const DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS = ["agent-orchestration"] as const;
+const DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS = [
+  "agent-orchestration",
+  "conversation-todo",
+] as const;
 
 /** Tools of default-mounted system capability packs (dedup-free flat list). */
 export function getDefaultSystemCapabilityTools(): string[] {
   const ids: readonly string[] = DEFAULT_MOUNT_SYSTEM_CAPABILITY_IDS;
-  return SYSTEM_AGENT_CAPABILITY_PACKS.filter((pack) =>
-    ids.includes(pack.id),
-  ).flatMap((pack) => [...pack.tools]);
+  return SYSTEM_AGENT_CAPABILITY_PACKS.filter((pack) => ids.includes(pack.id))
+    .flatMap((pack) => [...pack.tools]);
 }
 
 /**
@@ -484,9 +488,7 @@ export function expandEnabledPackPromptPatches(
   // 否则拆分后 app-builder 会丢掉部署纪律那一段。
   return collectPackIdsWithIncludes(enabledPacks)
     .map((id) => CAPABILITY_PACK_BY_ID[id]?.promptPatch)
-    .filter(
-      (patch): patch is string => typeof patch === "string" && patch.length > 0,
-    );
+    .filter((patch): patch is string => typeof patch === "string" && patch.length > 0);
 }
 
 /**
@@ -561,10 +563,7 @@ function isWebSearchTool(name: string): boolean {
 
 function isBrowserTool(name: string): boolean {
   // Connector tools (browser_list_tabs, ...) share the prefix but are not Playwright session tools.
-  return (
-    name.startsWith("browser_") &&
-    !CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.includes(name)
-  );
+  return name.startsWith("browser_") && !CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.includes(name);
 }
 
 /**

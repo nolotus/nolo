@@ -17,7 +17,6 @@ import {
 } from "app/theme/themeModeBootstrap";
 
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
-import { resolveCloudBootstrapServer } from "./serverBootstrap";
 
 /**
  * Resolve themeMode + isDark from localStorage + system preference at load time,
@@ -35,26 +34,9 @@ const _preloadedTheme =
       })
     : { themeMode: "system" as const, isDark: false };
 
-// Web 首帧 currentServer 用运行时 origin（见 serverBootstrap.ts，判定与旧
-// App.tsx mount effect 等价：date/crm/desktop 除外，其余 host 都指回自己）。
-// SSR 端 window 为 undefined → 这里返回 undefined，服务端 store 落到默认
-// MAIN/US；有 SSR 时该 module-load 值会被序列化下来的 preloadedState 覆盖
-// （白名单站点由 render.tsx 注入运行时 origin，非白名单站点保持默认；客户端
-// entry.tsx 走同一闸门 resolveClientHydrateServer），因此 hydrate 帧与 SSR 一致。
-// 本模块的浏览器取值只对「无 SSR HTML 的纯 CSR 启动」生效；非白名单 host 的挂载后
-// 纠正仍由 App.tsx 的 mount effect（dispatch(addHostToCurrentServer)）负责。
-const _runtimeBootstrapServer =
-  typeof window !== "undefined"
-    ? resolveCloudBootstrapServer({
-        hostname: window.location?.hostname,
-        origin: window.location?.origin,
-      })
-    : undefined;
-
 export const initialState: SettingState = {
   isAutoSync: false,
-  currentServer:
-    _runtimeBootstrapServer ?? (isProduction ? SERVERS.MAIN : SERVERS.US),
+  currentServer: isProduction ? SERVERS.MAIN : SERVERS.US,
   syncServers: Object.values(SERVERS),
   showThinking: true,
   preferredAnimationSet: 0,

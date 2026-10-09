@@ -36,6 +36,7 @@ export interface ToolCallRowProps {
   /** Original tool message; feeds the groupDetail renderer when expanded. */
   message: any;
   t: (key: string, options?: any) => string;
+  conversationTodoEnabled?: boolean;
   /** Called only for explicit user disclosure changes, not status auto-open. */
   onUserDisclosureChange?: (expanded: boolean) => void;
 }
@@ -45,6 +46,7 @@ export const ToolCallRow = memo(
     presentation,
     message,
     t,
+    conversationTodoEnabled = true,
     onUserDisclosureChange,
   }: ToolCallRowProps) => {
     const detailId = `tool-call-row-detail-${useId()}`;
@@ -170,6 +172,7 @@ export const ToolCallRow = memo(
               openPreview={() => {}}
               navigateToPage={() => {}}
               presentation="groupDetail"
+              conversationTodoEnabled={conversationTodoEnabled}
             />
           </div>
         )}

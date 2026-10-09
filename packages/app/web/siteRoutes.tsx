@@ -1,12 +1,17 @@
 // app/web/siteRoutes.ts
 import type { RouteObject } from "app/routing";
-import { type SiteId } from "./siteConstants";
 
-export {
-  type SiteId,
-  detectSite,
-  NON_API_SITE_HOSTNAMES,
-} from "./siteConstants";
+
+export type SiteId = "date" | "crm" | "default";
+
+const hostToSite: Record<string, SiteId> = {
+  "nolotus.local": "crm",
+  "date.nolo.chat": "date",
+  "crm.nolo.chat": "crm",
+};
+
+export const detectSite = (hostname: string): SiteId =>
+  hostToSite[hostname] ?? "default";
 
 export async function loadRoutes(
   site: SiteId,

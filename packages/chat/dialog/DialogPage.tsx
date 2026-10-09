@@ -22,7 +22,6 @@ import {
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
 import { ChatArea } from "chat/web/ChatArea";
 import { LiveVoicePanel } from "chat/web/LiveVoicePanel";
-import { useMediaJobContextInjection } from "../web/mediaJobContextInjection";
 import { isLiveAudioOnlyAgent } from "ai/agent/isLiveAudioOnlyAgent";
 import type { Agent } from "app/types";
 import {
@@ -147,20 +146,6 @@ const DialogPage = ({
   );
   const currentDialogKey = useCurrentDialogKey();
   const configError = useDialogConfigError();
-  // W15：?mediaJobId=… 把对应媒体笔记以「引用」形式挂入当前对话，供首条消息追问。
-  // 取 /result 200（当前账号有权）才挂；403/404/异常静默忽略、不崩。
-  const mediaJobIdParam =
-    typeof location?.search === "string"
-      ? new URLSearchParams(location.search).get("mediaJobId")
-      : null;
-  useMediaJobContextInjection({
-    mediaJobId: mediaJobIdParam,
-    dialogKey: currentDialogKey,
-    onNotice: (status) => {
-      if (status !== "attached")
-        console.info(`[mediaJobContext] 笔记未能挂入对话（${status}），已忽略`);
-    },
-  });
   const currentDialogConfig = useCurrentDialogConfig();
   const isDeviceLocalDialog = useMemo(() => {
     const config = currentDialogConfig as

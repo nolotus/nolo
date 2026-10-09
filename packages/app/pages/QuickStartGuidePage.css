@@ -14,7 +14,7 @@
   --hl-line: rgba(31, 39, 51, 0.1);
   --hl-blue: #2879cd;
   --hl-green: #3f7a4c;
-  --hl-serif: var(--nolo-serif, "Nolo Serif Latin"), "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
 
   box-sizing: border-box;
   width: 100%;
