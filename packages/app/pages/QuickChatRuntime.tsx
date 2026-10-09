@@ -210,6 +210,7 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     pendingFilesWithStatus,
     processFiles,
     clearFileStatus,
+    hasInFlightMediaUpload,
   } = useMessageInputFiles(processImages, {
     dispatch,
     t,
@@ -360,6 +361,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     if (
       isStartingRef.current ||
       isSending ||
+      // 媒体上传/建任务中：此时发送会丢掉还没生成的任务卡。
+      processingFileIds.size > 0 ||
+      hasInFlightMediaUpload() ||
       (!trimmedText && !imageFiles.size && !pendingFiles.length)
     )
       return;
@@ -588,6 +592,8 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     }
   }, [
     isSending,
+    processingFileIds,
+    hasInFlightMediaUpload,
     surface,
     text,
     imageFiles,
@@ -619,9 +625,18 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const isSendDisabled = useMemo(() => {
     if (isLiveAudioOnly) return true;
     return (
-      (!text.trim() && !imageFiles.size && !pendingFiles.length) || isSending
+      (!text.trim() && !imageFiles.size && !pendingFiles.length) ||
+      isSending ||
+      processingFileIds.size > 0
     );
-  }, [text, imageFiles.size, pendingFiles.length, isSending, isLiveAudioOnly]);
+  }, [
+    text,
+    imageFiles.size,
+    pendingFiles.length,
+    isSending,
+    isLiveAudioOnly,
+    processingFileIds.size,
+  ]);
   const showVoiceInput = useMemo(
     () => !text.trim() && !imageFiles.size && !pendingFiles.length && !isSending,
     [text, imageFiles.size, pendingFiles.length, isSending]
