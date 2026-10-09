@@ -10,7 +10,7 @@ export type SttResult = {
 
 export async function transcribeWithGrok(opts: {
   apiKey: string; filePath: string; mimeType: string; language?: string;
-  keyterms?: string[]; vadThreshold?: number; fetchImpl?: typeof fetch;
+  keyterms?: string[]; vadThreshold?: number; fetchImpl?: (input: URL | RequestInfo, init?: BunFetchRequestInit | RequestInit) => Promise<Response>;
 }): Promise<SttResult> {
   const data = await readFile(opts.filePath);
   const request = async (vadThreshold?: number): Promise<SttResult> => {
