@@ -6,78 +6,29 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 export const ADVANCED_FEATURE_MIN_BALANCE = 19;
 export const GPT_PRO_REQUIRED_RECHARGE_AMOUNT = 199;
 
-export type PremiumModelFamily =
-  | "claude-opus"
-  | "claude-fable"
-  | "gpt-pro"
-  | "gpt-sol"
-  | "kimi-k3";
-
-/**
- * 平台付费通道白名单：仅对平台垫付/托管的 provider 实施 199 充值档位门槛。
- * 用户自有凭证/BYOK 通道（如 anthropic / google 等）不由此门槛限制。
- */
-export const SUPPORTED_TIER_PROVIDERS: ReadonlySet<string> = new Set([
-  "nolo",
-  "openai",
-  "deepinfra",
-]);
-
-// Claude 高阶家族（Opus / Fable）：必须为完整段，支持合法命名空间 anthropic/
-const CLAUDE_PREMIUM_RE =
-  /^(?:anthropic\/)?claude-(opus|fable)(?:-\d+(?:[.-]\d+)*(?:-[a-z0-9]+)*)?$/i;
-
-// GPT Pro 家族：必须为包含 -pro 的独立段（如 gpt-5.5-pro, gpt-5.6-sol-pro, gpt-5.5-pro-32k），支持 openai/
-const GPT_PRO_RE =
-  /^(?:openai\/)?gpt-[a-z0-9.-]+-pro(?:-[a-z0-9]+(?:[.-][a-z0-9]+)*)?$/i;
-
-// GPT Sol 家族：必须为独立段（如 gpt-5.6-sol, gpt-6.1-sol），支持 openai/
-const GPT_SOL_RE =
-  /^(?:openai\/)?gpt-\d+(?:\.\d+)*-sol(?:-[a-z0-9]+(?:[.-][a-z0-9]+)*)?$/i;
-
-// Kimi K3 家族：精确匹配，支持上游 moonshotai/ 前缀
-const KIMI_K3_MODELS: ReadonlySet<string> = new Set([
-  "kimi-k3",
-  "moonshotai/kimi-k3",
-]);
-
-/**
- * 统一高阶模型身份判定：不依赖 provider 分支，精确识别模型家族。
- */
-export function classifyPremiumModel(
-  model: unknown,
-): PremiumModelFamily | undefined {
-  const normalizedModel = asTrimmedLowercaseString(model);
-  if (!normalizedModel) return undefined;
-
-  const claudeMatch = CLAUDE_PREMIUM_RE.exec(normalizedModel);
-  if (claudeMatch) {
-    return claudeMatch[1].toLowerCase() === "opus"
-      ? "claude-opus"
-      : "claude-fable";
-  }
-
-  if (GPT_PRO_RE.test(normalizedModel)) {
-    return "gpt-pro";
-  }
-
-  if (GPT_SOL_RE.test(normalizedModel)) {
-    return "gpt-sol";
-  }
-
-  if (KIMI_K3_MODELS.has(normalizedModel)) {
-    return "kimi-k3";
-  }
-
-  return undefined;
-}
-
 export function isGptProModel(provider: unknown, model: unknown): boolean {
   const normalizedProvider = asTrimmedLowercaseString(provider);
-  if (!SUPPORTED_TIER_PROVIDERS.has(normalizedProvider)) {
-    return false;
+  const normalizedModel = asTrimmedLowercaseString(model);
+  if (normalizedProvider === "openai") {
+    // 字符类含 "-"：允许 pro 前有内部连字符段（如 gpt-5.6-sol-pro），
+    // (?:-|$) 仍保证 -pro 后必须是段边界，prologue/proximity 类不会误伤。
+    return /^gpt-[a-z0-9.-]+-pro(?:-|$)/.test(normalizedModel);
   }
-  return classifyPremiumModel(model) !== undefined;
+  if (normalizedProvider === "deepinfra") {
+    // fable 系列与 opus 同属 199 积分档位（补漏：claude-fable-5 此前被遗漏）。
+    return (
+      normalizedModel.includes("claude") &&
+      (normalizedModel.includes("opus") || normalizedModel.includes("fable"))
+    );
+  }
+  if (normalizedProvider === "nolo") {
+    // 平台托管 Kimi K3 与 GPT Pro / Claude Opus 同门槛（199 积分档位）。
+    // core 包不得反向依赖 ai 包，这里用字面量精确匹配，
+    // 对应 ai 侧 PLATFORM_HOSTED_KIMI_K3_MODEL（"kimi-k3"）。
+    // nolo 下 glm-5.3 / glm-5-3-flash / kimi-k2.6 等廉价模型不在档位内，必须精确等于，禁止前缀匹配。
+    return normalizedModel === "kimi-k3";
+  }
+  return false;
 }
 
 export const GPT_PRO_BLOCKED_MESSAGE = `GPT Pro / Kimi K3 等高级模型需要先开通 ${GPT_PRO_REQUIRED_RECHARGE_AMOUNT} 积分档位。`;

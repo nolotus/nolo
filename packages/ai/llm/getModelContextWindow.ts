@@ -127,49 +127,6 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   if (normalizedName.includes("qwen3.6") || normalizedName.includes("qwen3p6")) return QWEN_3_6_CONTEXT_WINDOW;
   if (normalizedName.includes("qwen3.7") || normalizedName.includes("qwen3p7")) return 262_144;
   if (normalizedName.includes("minimax-m2") || normalizedName.includes("minimax_m2")) return 262_144;
-  // Mistral 现任家族（依据：GET api.mistral.ai/v1/models 的 max_context_length，
-  // 2026-10-07 实测全量读取）。必须置于下方通用 "mistral" → 32k 规则之前；
-  // 历史小模型（mistral:7b / mistral-nemo）不在此列，仍落 32k / 128k 档。
-  // 带传输前缀的 id（如 mistralai/mistral-medium-3）按最后一段比较。
-  const bareModelName = (
-    normalizedName.includes("/")
-      ? normalizedName.slice(normalizedName.lastIndexOf("/") + 1)
-      : normalizedName
-  ).replace(/:.*$/, "");
-  if (normalizedName.includes("mistral-large-4")) {
-    // mistral-large-4 / mistral-large-4-0 = 524288；要求 token 边界，避免命中假想的 -40b 之类。
-    // 边界字符刻意不含 "."：mistral-large-4.1 这类尚未存在的版本宁可落通用兜底（同"表外不扩"口径）。
-    const rest = normalizedName.slice(
-      normalizedName.indexOf("mistral-large-4") + "mistral-large-4".length,
-    );
-    if (rest === "" || /^[-:_@/\s]/.test(rest)) return 524_288;
-  }
-  if (
-    normalizedName.includes("mistral-vibe-cli") ||
-    normalizedName.includes("mistral-medium-3.5") ||
-    normalizedName.includes("mistral-medium-3-5") ||
-    normalizedName.includes("mistral-medium-latest") ||
-    normalizedName.includes("mistral-medium-2604") ||
-    normalizedName.includes("mistral-large-latest") ||
-    normalizedName.includes("mistral-large-2512") ||
-    normalizedName.includes("mistral-small-latest") ||
-    normalizedName.includes("mistral-small-2603") ||
-    normalizedName.includes("magistral-medium-latest") ||
-    normalizedName.includes("magistral-small-latest") ||
-    // 展示名（TUI 传 displayName 的路径；Mistral 不在 MODEL_LOOKUP_MAP，无法走精确表）：
-    normalizedName.includes("mistral vibe cli") ||
-    normalizedName.includes("mistral medium 3.5") ||
-    normalizedName.includes("mistral large (latest)")
-  ) {
-    return 262_144;
-  }
-  // 裸 id（刻意不写 includes("mistral-medium-3")，避免误伤 -3.1 / -2508 等历史档）
-  if (bareModelName === "mistral-medium" || bareModelName === "mistral-medium-3") return 262_144;
-  // 非 chat 家族与 code 家族：家族级外推（非逐 id 实测），取该家族共同的实测窗口
-  if (normalizedName.includes("mistral-embed") || normalizedName.includes("codestral-embed")) return 8_192;
-  if (normalizedName.includes("mistral-ocr")) return 16_384;
-  if (normalizedName.includes("mistral-moderation")) return 131_072;
-  if (normalizedName.includes("codestral") || normalizedName.includes("mistral-code")) return 256_000;
   // 200k 档
   if (normalizedName.includes("claude")) return 200_000;
   // 128k 档 (常见开源与 Ollama 本地模型)

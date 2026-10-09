@@ -15,6 +15,8 @@ export interface ToolProps {
    * 工具调用参数，供需要从 args 取值的 renderer 用（如 fetchWebpage 的 url）。
    */
   toolArgs?: Record<string, unknown>;
+  /** Whether conversation Todo UI is enabled for this host/dialog. */
+  conversationTodoEnabled?: boolean;
 }
 
 /* --- 工具函数：根据路径猜测语言，高亮用 --- */

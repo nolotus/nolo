@@ -1,9 +1,9 @@
 import * as stylex from "@stylexjs/stylex";
-import { DEFAULT_THEME_NAME, THEME_NAME_ALIASES } from "./theme.config";
+import { THEME_NAME_ALIASES } from "./theme.config";
 
 /**
  * Agent 创建/编辑流 StyleX 主题变量体系（defineVars + createTheme）。
- * 静态 CSS 产物中包含 :root 初始变量（neutral light）及 10 主题 × light/dark 全部 20 个主题类。
+ * 静态 CSS 产物中包含 :root 初始变量（neutral light）及 9 主题 × light/dark 全部 18 个主题类。
  * 切换主题仅需在 <html> 上同步对应的 theme class。
  */
 export const agentThemeTokens = stylex.defineVars({
@@ -519,60 +519,6 @@ export const catppuccinDark = stylex.createTheme(agentThemeTokens, {
   "chatInputCardShadow": "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px var(--shadowLight), 0 16px 32px -20px var(--shadowHeavy)"
 });
 
-export const natureLight = stylex.createTheme(agentThemeTokens, {
-  "surfaceGlassHeader": "color-mix(in srgb, #F7F3EC 95%, transparent)",
-  "borderGlassHeader": "#E8E5DF",
-  "surfaceGlassFooter": "color-mix(in srgb, #F7F3EC 85%, transparent)",
-  "borderGlassFooter": "#E8E5DF",
-  "shadowFooterUpward": "0 -4px 20px rgba(120, 90, 60, 0.05)",
-  "surfaceGroup": "#EFE8DC",
-  "shadowCardRaised": "0 4px 20px rgba(120, 90, 60, 0.08)",
-  "surfaceOverlayHairline": "#E8E0D1",
-  "borderOverlayHairline": "#E8E5DF",
-  "surfaceBadgeSubtle": "color-mix(in srgb, #FFFDF8 70%, transparent)",
-  "surfaceCardItem": "#FFFDF8",
-  "shadowCardItem": "0 2px 8px rgba(120, 90, 60, 0.06)",
-  "surfaceCardEmpty": "color-mix(in srgb, #FFFDF8 60%, #F7F3EC)",
-  "shadowCardEmpty": "none",
-  "surfaceOverlayFaint": "#E8E0D1",
-  "surfaceOverlayNote": "#FFFDF8",
-  "borderOverlayNote": "#C7C6C3",
-  "surfaceOverlaySoft": "#EFE8DC",
-  "borderOverlaySoft": "#E8E5DF",
-  "surfaceOverlaySkill": "#FFFDF8",
-  "surfaceOverlayStrong": "#E8E0D1",
-  "borderOverlayStrong": "#E8E5DF",
-  "chipText": "#5B6472",
-  "chatInputCardShadow": "0 10px 24px -22px var(--shadowMedium), 0 1px 2px var(--shadowLight)"
-});
-
-export const natureDark = stylex.createTheme(agentThemeTokens, {
-  "surfaceGlassHeader": "color-mix(in srgb, #1C1B20 92%, transparent)",
-  "borderGlassHeader": "rgba(255, 255, 255, 0.08)",
-  "surfaceGlassFooter": "color-mix(in srgb, #1C1B20 80%, transparent)",
-  "borderGlassFooter": "rgba(255, 255, 255, 0.1)",
-  "shadowFooterUpward": "0 -4px 20px rgba(0, 0, 0, 0.2)",
-  "surfaceGroup": "#2E2C34",
-  "shadowCardRaised": "0 4px 24px rgba(0, 0, 0, 0.4)",
-  "surfaceOverlayHairline": "rgba(255, 255, 255, 0.02)",
-  "borderOverlayHairline": "rgba(255, 255, 255, 0.08)",
-  "surfaceBadgeSubtle": "rgba(255, 255, 255, 0.05)",
-  "surfaceCardItem": "color-mix(in srgb, #1C1B20 95%, white 2%)",
-  "shadowCardItem": "0 4px 20px rgba(0, 0, 0, 0.2)",
-  "surfaceCardEmpty": "color-mix(in srgb, #1C1B20 95%, white 2%)",
-  "shadowCardEmpty": "0 4px 20px rgba(0, 0, 0, 0.2)",
-  "surfaceOverlayFaint": "color-mix(in srgb, #25242A 40%, transparent)",
-  "surfaceOverlayNote": "color-mix(in srgb, #25242A 50%, transparent)",
-  "borderOverlayNote": "color-mix(in srgb, #353337 55%, transparent)",
-  "surfaceOverlaySoft": "color-mix(in srgb, #25242A 60%, transparent)",
-  "borderOverlaySoft": "color-mix(in srgb, #353337 50%, transparent)",
-  "surfaceOverlaySkill": "color-mix(in srgb, #25242A 70%, transparent)",
-  "surfaceOverlayStrong": "color-mix(in srgb, #25242A 80%, transparent)",
-  "borderOverlayStrong": "color-mix(in srgb, #353337 60%, transparent)",
-  "chipText": "#ECE6DC",
-  "chatInputCardShadow": "inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px var(--shadowLight), 0 16px 32px -20px var(--shadowHeavy)"
-});
-
 export const AGENT_THEMES: Record<string, { light: any; dark: any }> = {
   neutral: { light: neutralLight, dark: neutralDark },
   ocean: { light: oceanLight, dark: oceanDark },
@@ -583,10 +529,9 @@ export const AGENT_THEMES: Record<string, { light: any; dark: any }> = {
   rose: { light: roseLight, dark: roseDark },
   mono: { light: monoLight, dark: monoDark },
   catppuccin: { light: catppuccinLight, dark: catppuccinDark },
-  nature: { light: natureLight, dark: natureDark },
 };
 
-/** 提取全部 20 个主题生成的 class 名称，用于类名清理 */
+/** 提取全部 18 个主题生成的 class 名称，用于类名清理 */
 export const ALL_AGENT_THEME_CLASS_NAMES: readonly string[] = Object.values(
   AGENT_THEMES
 ).flatMap((pair) => [
@@ -609,7 +554,7 @@ export function getAgentThemeClass(
       : themeName;
   const pair =
     (normalized && AGENT_THEMES[normalized]) ||
-    AGENT_THEMES[DEFAULT_THEME_NAME] ||
+    AGENT_THEMES.catppuccin ||
     AGENT_THEMES.neutral;
   const theme = isDark ? pair.dark : pair.light;
   if (!theme || typeof theme !== "object") return "";

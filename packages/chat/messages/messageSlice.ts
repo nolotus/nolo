@@ -29,11 +29,6 @@ import {
   resolveInitMsgsHasMoreOlder,
 } from "./messageInitMsgsPolicy";
 import { isValidMessage } from "./messageValidation";
-import {
-  getRecordTimestamp,
-  getTombstoneTimestamp,
-  shouldReplaceWithNextRecord,
-} from "database/tombstones";
 import { selectIdentityUserId } from "identity/selectors";
 import { fetchAndCacheMessages, fetchAndCacheMessagesLocalFirst } from "./fetchAndCacheMessages";
 import { toErrorMessage } from "core/errorMessage";
@@ -70,7 +65,6 @@ import {
   getCanonicalHandoffTransientId,
   getHasStreamingMessage,
   getMessageSession,
-  getStreamingMessageId,
   markMessageSessionAbort,
   markMessageStreamActivity,
   patchMessageSession,
@@ -442,9 +436,6 @@ export const messageSlice = createSliceWithThunks({
           payload.dialogId ?? findDialogIdByMessageId(state, payload.id);
         const dialogState = ensureMessageDialogState(state, dialogId);
         removeOneMessage(dialogState, payload.id);
-        if (dialogId && getStreamingMessageId(dialogId) === payload.id) {
-          setStreamingMessageId(dialogId, null);
-        }
       }
     ),
 
@@ -636,33 +627,12 @@ export const messageSlice = createSliceWithThunks({
         const { db } = (thunkApi.extra as { db: any });
         const { getState, signal, dispatch } = thunkApi;
 
-        // This invocation's init identity, fixed BEFORE any await: a newer
-        // init's pending overwrites the dialog session field, so reading it
-        // after an await could return the newer init's requestId.
-        const myInitRequestId = thunkApi.requestId;
-        // The pending reducer records the owner for store dispatch; direct
-        // thunk invocation has no pending, so backfill it here (idempotent
-        // when pending already ran).
-        if (
-          getMessageSession(dialogId).currentInitMsgsRequestId !==
-          myInitRequestId
-        ) {
-          patchMessageSession(dialogId, {
-            currentInitMsgsRequestId: myInitRequestId,
-          });
-        }
-
         const state = getState() as any;
         const { currentToken: token, remoteServers } =
           getRuntimeServerContext(state);
 
-        const {
-          localMessages,
-          remotePromise,
-          partialPromise,
-          finalTombstonesById,
-          earlyReturned,
-        } = await fetchAndCacheMessagesLocalFirst({
+        const { localMessages, remotePromise, earlyReturned } =
+          await fetchAndCacheMessagesLocalFirst({
             db,
             dialogId,
             dialogKey,
@@ -683,121 +653,14 @@ export const messageSlice = createSliceWithThunks({
             })
           );
 
-          // Rows this init published to the visible bucket. Background
-          // reconciles may only remove what this flow itself published —
-          // and only with real tombstone evidence (never from absence).
-          const publishedIds = new Set(
-            validLocalMessages.map((message) => message.id)
-          );
-
-          // Background writes must not apply after a newer init for the same
-          // dialog has started — even one that already fulfilled. Ownership
-          // is this invocation's `requestId` (fixed before the await), and
-          // the per-dialog session field is monotonic: pending (or the
-          // pre-await backfill above) sets it, while fulfilled/rejected NEVER
-          // clear it. Strict equality is required — treating a cleared owner
-          // as "no owner" is what let stale inits write after the newer init
-          // finished. `signal.aborted` only proves an explicit thunk abort;
-          // route unmount alone does not abort this thunk, so it is one guard
-          // here — not an unmount-safety guarantee on its own.
-          const backgroundAllowed = () => {
-            if (signal?.aborted) return false;
-            return (
-              getMessageSession(dialogId).currentInitMsgsRequestId ===
-              myInitRequestId
-            );
-          };
-
-          // Set once the full reconcile applied its view; a late partial must
-          // never roll the visible list back to the earlier snapshot.
-          let reconcileApplied = false;
-
-          const currentEntities = (): Record<string, Message> => {
-            const rootState = getState() as any;
-            const sliceState = rootState?.message ?? rootState;
-            try {
-              return (
-                getMessageDialogState(sliceState, dialogId)?.msgs?.entities ?? {}
-              );
-            } catch {
-              return {};
-            }
-          };
-
-          // Current-source-first view: show the first source's messages as
-          // soon as it settles instead of waiting for slower peers. This view
-          // only ADDS rows the dialog is not already showing: existing rows
-          // keep their (possibly newer) Redux state, so a stale snapshot can
-          // not overwrite a newer local tombstone/restore/stream-end update.
-          // Peers still reconcile through the full merge below.
-          if (partialPromise) {
-            partialPromise
-              .then((partialMessages) => {
-                if (reconcileApplied || !backgroundAllowed()) return;
-                const validPartial = partialMessages.filter(isValidMessage);
-                if (validPartial.length === 0) return;
-                const entities = currentEntities();
-                const additions = validPartial.filter(
-                  (message) => !entities[message.id]
-                );
-                if (additions.length === 0) return;
-                additions.forEach((message) => publishedIds.add(message.id));
-                dispatch(
-                  messageActions.setMessages({
-                    dialogId,
-                    messages: additions,
-                  })
-                );
-              })
-              .catch((err) => {
-                console.error("[initMsgs] early source view failed:", err);
-              });
-          }
-
           // Remote revalidation continues in the background. Do not block
           // bootstrap completion; the UI already shows local messages.
           remotePromise
             .then((finalMessages) => {
-              if (!backgroundAllowed()) return;
-              reconcileApplied = true;
-              const validFinalMessages = finalMessages.filter(isValidMessage);
-              const finalIds = new Set(
-                validFinalMessages.map((message) => message.id)
-              );
-              // Late tombstones win, but only with real evidence: an id this
-              // init published that the merge no longer shows AND whose
-              // winning record is a tombstone (absence alone is not proof).
-              // Never delete over a newer local restore/update.
-              const entities = currentEntities();
-              const removedIds = [...publishedIds].filter((id) => {
-                if (finalIds.has(id)) return false;
-                const tombstone = finalTombstonesById?.get?.(id);
-                if (!tombstone) return false;
-                const current = entities[id];
-                // No current row: removal would be a no-op, so skip it.
-                if (!current) return false;
-                // Delete only when the merge's winning tombstone beats the
-                // current record. If `current` is itself a tombstone it loses
-                // unless strictly newer, and a restored/updated row wins — so
-                // a local restore is never clobbered by a stale tombstone.
-                return (
-                  shouldReplaceWithNextRecord(tombstone, current) &&
-                  getTombstoneTimestamp(tombstone) >=
-                    getRecordTimestamp(current)
-                );
-              });
-              if (removedIds.length > 0) {
-                dispatch(
-                  messageActions.removeMessagesByIds({
-                    dialogId,
-                    ids: removedIds,
-                  })
-                );
-              }
               dispatch(
                 messageActions.setMessages({
                   dialogId,
-                  messages: validFinalMessages,
+                  messages: finalMessages.filter(isValidMessage),
                 })
               );
             })
@@ -855,11 +718,8 @@ export const messageSlice = createSliceWithThunks({
           }
 
           const limit = action.meta.arg.limit;
-          // Ownership is intentionally kept (never cleared on settle): this
-          // init's own late background writes stay allowed (strict equality
-          // in backgroundAllowed), while the next init's pending overwrites
-          // it and therefore keeps every older init blocked for good.
           patchMessageSession(dialogId, {
+            currentInitMsgsRequestId: undefined,
             isLoadingInitial: false,
             hasMoreOlder: resolveInitMsgsHasMoreOlder({
               limit,
@@ -899,15 +759,14 @@ export const messageSlice = createSliceWithThunks({
 
           if (action.meta?.aborted) {
             patchMessageSession(dialogId, {
+              currentInitMsgsRequestId: undefined,
               isLoadingInitial: false,
             });
             return;
           }
 
-          // Same as fulfilled: the owner id stays recorded so a late
-          // background callback from this init can never re-open behind a
-          // newer init.
           patchMessageSession(dialogId, {
+            currentInitMsgsRequestId: undefined,
             isLoadingInitial: false,
             error:
               action.error instanceof Error

@@ -138,8 +138,8 @@ export const stampSpaceContentCardMorphNames = (
     });
   }
   timer = setTimeout(cleanup, CARD_MORPH_MAX_MS);
-  if (typeof timer === "object" && typeof (timer as { unref?: () => void }).unref === "function") {
-    (timer as { unref?: () => void }).unref?.();
+  if (typeof timer === "object" && typeof timer.unref === "function") {
+    timer.unref();
   }
   return cleanup;
 };

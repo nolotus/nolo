@@ -1,7 +1,6 @@
 import { resolveServerUrl } from "./cliEnvHelpers";
 import { requireTokenUser } from "./docCommandShared";
 import type { EnvLike } from "./cliEnvHelpers";
-import { t } from "./tui/i18n";
 
 /**
  * 通用 CLI→server JSON API 请求工具。
@@ -54,7 +53,7 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
   try {
     response = await fetch(url, init);
   } catch (error) {
-    throw new CliApiError(t("api.requestFailed", (error as Error).message), "NETWORK_ERROR", 0);
+    throw new CliApiError(`请求失败: ${(error as Error).message}`, "NETWORK_ERROR", 0);
   }
 
   let data: Record<string, unknown>;
@@ -62,7 +61,7 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
     data = (await response.json()) as Record<string, unknown>;
   } catch {
     throw new CliApiError(
-      t("api.nonJsonResponse", String(response.status)),
+      `服务端返回非 JSON 响应 (HTTP ${response.status})`,
       "INVALID_RESPONSE",
       response.status,
     );
@@ -73,7 +72,7 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
     const message =
       (errorObj.message as string) ||
       (data.message as string) ||
-      t("api.requestFailedHttp", String(response.status));
+      `请求失败 (HTTP ${response.status})`;
     const code = (errorObj.code as string) || `HTTP_${response.status}`;
     throw new CliApiError(message, code, response.status);
   }
@@ -86,11 +85,11 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
  */
 export function printCliError(error: unknown): void {
   if (error instanceof CliApiError) {
-    process.stderr.write(`${t("api.errorWithCode", error.code, error.message)}\n`);
+    process.stderr.write(`错误 [${error.code}]: ${error.message}\n`);
   } else if (error instanceof Error) {
-    process.stderr.write(`${t("api.error", error.message)}\n`);
+    process.stderr.write(`错误: ${error.message}\n`);
   } else {
-    process.stderr.write(`${t("api.error", String(error))}\n`);
+    process.stderr.write(`错误: ${String(error)}\n`);
   }
 }
 

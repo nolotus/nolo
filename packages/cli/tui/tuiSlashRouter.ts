@@ -51,8 +51,6 @@ import { formatAgentSwitchMessage, runAgentPicker } from "./agentPicker";
 import { runTuiLogin } from "./tuiLogin";
 import { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
 import { mergeAttachedImages, resolveAttachmentImageUrls } from "./pasteImage";
-import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } from "./mediaAttachment";
-import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
 import { readClipboardImage } from "./clipboardImage";
 import type { ClipboardPasteSource } from "./pasteFlow";
 import { themeText, applyDetectedBackground } from "./theme";
@@ -64,7 +62,6 @@ import {
   type FixedInputController,
 } from "./tuiRawInput";
 import type { DialogHost } from "./dialogHost";
-import { clearCliLocalRuntimePreparedAgentCache } from "../client/localRuntimeAdapter";
 
 /**
  * slash 分发的宿主依赖。`state` 在 runTuiWorkspace 作用域内是可变 let 绑定
@@ -185,14 +182,8 @@ export async function runSubmittedSlashLine(
   // workspace-scoped TurnHistory rather than in TuiState, and copying it into
   // state would put transcript data in front of every command's inputs.
   const result = handleTuiInput(line, host.state, collectConversationTurns(host.history));
-  const previousState = host.state;
   const previousAgentKey = host.state.agentKey;
   host.state = result.nextState;
-  const command = line.trim().split(/\s+/)[0];
-  if ((command === "/agent" || command === "/switch") && result.nextState !== previousState) {
-    // Successful explicit selection may refresh the same agent's model.
-    clearCliLocalRuntimePreparedAgentCache();
-  }
 
   // In interactive mode the transcript pane is owned by renderHistory; a raw
   // output.write lands inside the scroll region and is wiped by the next
@@ -303,46 +294,6 @@ export async function runSubmittedSlashLine(
     ].join("\n");
     emitCommandOutput(themeText(sparkle, "chrome", resolveCliColorEnabled()));
   }
-  if (result.action?.type === "learn-history") {
-    const token = resolvePlatformAuthToken(options.env ?? {});
-    try {
-      const response = await fetchImpl(new URL("/api/agent/runs/control", host.state.serverUrl), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ action: "learn", limit: result.action.limit }),
-        signal: AbortSignal.timeout(150_000),
-      });
-      const payload = await response.json() as any;
-      if (!response.ok || !payload?.ok) throw new Error(payload?.error?.message || `HTTP ${response.status}`);
-      const picked = payload.data?.picked;
-      if (!picked) {
-        emitCommandOutput("No Evolution candidates yet. Enable the candidate sink and run some real tasks first.");
-      } else {
-        const t = picked.triage;
-        const review = picked.deepReview;
-        emitCommandOutput([
-          `Learned from recent ${result.action.limit} candidates`,
-          `Jev: ${payload.data.triaged}/${payload.data.eligible} triaged, ${payload.data.failed} failed, ${payload.data.notAttempted} not attempted`,
-          `Jev picked: ${picked.candidateId}`,
-          `- worth investigating: ${t.worthInvestigating}`,
-          `- external failure: ${t.likelyExternalFailure}`,
-          `- behavioral waste: ${t.likelyBehavioralWaste}`,
-          `- expected impact: ${t.expectedImpact}`,
-          `- surface: ${t.suspectedSurface?.surface ?? "unknown"}`,
-          `Deep Review verdict: ${review.verdict ?? "unknown"}`,
-          "Deep Review:",
-          `- symptom: ${review.symptom ?? ""}`,
-          `- likely cause: ${review.likelyRootCause ?? ""}`,
-          `- proposed change: ${review.proposedChange ?? ""}`,
-          `- evidence: ${(review.evidence ?? []).join(", ")}`,
-          `- validation: ${review.validationPlan ?? ""}`,
-        ].join("\n"));
-      }
-    } catch (error) {
-      emitCommandOutput(`Historical review failed: ${toErrorMessage(error)}`);
-    }
-  }
-
   if (result.action?.type === "compact") {
     const runner = options.compactRunner ?? compactDialog;
     const authToken = resolvePlatformAuthToken(options.env ?? {});
@@ -493,7 +444,6 @@ export async function runSubmittedSlashLine(
       if (pickResult.kind === "list") {
         output.write(`${pickResult.output}\n`);
       } else if (pickResult.kind === "selected") {
-        clearCliLocalRuntimePreparedAgentCache();
         host.state = {
           ...host.state,
           agentName: pickResult.name,
@@ -741,61 +691,6 @@ export async function runSubmittedSlashLine(
     }
   }
 
-  if (result.action?.type === "transcribe") {
-    const base = result.action.path.split(/[/\\]/).pop() ?? result.action.path;
-    try {
-      const authToken = resolvePlatformAuthToken(options.env ?? {});
-      // T5：转写前做尾部静音检查。显式给的 --from/--to 直接透传（不打扰）；
-      // 否则检出「尾部 ≥3 分钟基本无人声」时提示并让用户选「全部 / 按建议」，
-      // 选择结果决定上传与预处理范围。无法交互时只提示、不擅自裁。
-      const trim = await resolveTranscribeTrim({
-        path: result.action.path,
-        fromSec: result.action.fromSec,
-        toSec: result.action.toSec,
-        onNotice: emitCommandOutput,
-        onScanStart: (p) =>
-          emitCommandOutput(t("mediaSilenceTrimScanning", p.split(/[/\\]/).pop() ?? p)),
-        requestChoice: createTrimRequester({ dialogHost, input, output }),
-      });
-      emitCommandOutput(t("mediaPreprocessStart", base));
-      const transcript = await transcribeMediaFile({
-        path: result.action.path,
-        serverUrl: host.state.serverUrl,
-        authToken,
-        language: result.action.lang,
-        fromSec: trim.fromSec,
-        toSec: trim.toSec,
-        denoise: result.action.denoise,
-        dialogId: host.state.dialogId,
-        fetchImpl,
-        onProgress: (info) => {
-          const label = info.message ?? info.stage ?? "";
-          if (label) emitCommandOutput(t("mediaTranscribeProgress", base, label));
-        },
-      });
-      const block = formatTranscriptForModel(transcript, result.action.path);
-      host.state = {
-        ...host.state,
-        pendingTranscripts: [
-          ...(host.state.pendingTranscripts ?? []),
-          block,
-        ],
-      };
-      emitCommandOutput(
-        t("mediaTranscribeDoneAttach", base, transcript.txtPath, transcript.srtPath),
-      );
-    } catch (err) {
-      const msg = describeMediaError(err).message;
-      emitCommandOutput(
-        themeText(
-          `[nolo] ${t("mediaTranscribeFailed", base, msg)}`,
-          "warning",
-          resolveCliColorEnabled(),
-        ),
-      );
-    }
-  }
-
   if (result.action?.type === "login") {
     // /login 的 TUI 内登录流（空闲路径）。busy 路径走
     // readlineWorkspace.handleBusyLocalSlash 的同名分支，两处共用
@@ -809,69 +704,10 @@ export async function runSubmittedSlashLine(
     );
     if (outcome.status === "success") {
       env.AUTH_TOKEN = outcome.token;
-      host.state = { ...host.state, showAuthGuidance: false };
     }
   }
 
   if (result.action?.type === "chat") {
-    // ── 音视频转写（turn 前处理，同图片的延迟思路）──
-    // 提交文本里的可读媒体路径已被 dispatch 剥离放进 action.mediaPaths；
-    // 此刻跑 ffmpeg 预处理 + /api/transcribe-media，把带时间戳的 transcript
-    // 块 prepend 进发给模型的 message。失败不阻塞消息（输出错误行 + 附说明）。
-    let messageForModel = result.action.message;
-    const mediaPaths = result.action.mediaPaths ?? [];
-    if (mediaPaths.length > 0) {
-      const authToken = resolvePlatformAuthToken(options.env ?? {});
-      for (const mediaPath of mediaPaths) {
-        const base = mediaPath.split(/[/\\]/).pop() ?? mediaPath;
-        try {
-          // T5：提交里带的媒体也先过尾部静音检查（同一交互口径）。
-          const trim = await resolveTranscribeTrim({
-            path: mediaPath,
-            onNotice: emitCommandOutput,
-            onScanStart: (p) =>
-              emitCommandOutput(t("mediaSilenceTrimScanning", p.split(/[/\\]/).pop() ?? p)),
-            requestChoice: createTrimRequester({ dialogHost, input, output }),
-          });
-          emitCommandOutput(t("mediaPreprocessStart", base));
-          const transcript = await transcribeMediaFile({
-            path: mediaPath,
-            serverUrl: host.state.serverUrl,
-            authToken,
-            dialogId: host.state.dialogId,
-            fromSec: trim.fromSec,
-            toSec: trim.toSec,
-            fetchImpl,
-            onProgress: (info) => {
-              const label = info.message ?? info.stage ?? "";
-              if (label) emitCommandOutput(t("mediaTranscribeProgress", base, label));
-            },
-          });
-          emitCommandOutput(
-            t("mediaTranscribeDone", base, transcript.txtPath),
-          );
-          const block = formatTranscriptForModel(transcript, mediaPath);
-          messageForModel = messageForModel
-            ? `${block}\n\n${messageForModel}`
-            : block;
-        } catch (err) {
-          const msg = describeMediaError(err).message;
-          emitCommandOutput(
-            themeText(
-              `[nolo] ${t("mediaTranscribeFailed", base, msg)}`,
-              "warning",
-              resolveCliColorEnabled(),
-            ),
-          );
-          // 转写失败仍发送原消息，附一行说明让模型知情（路径已在消息里
-          // 被剥离，模型看到的说明解释了为什么拿不到内容）。
-          messageForModel = messageForModel
-            ? `${messageForModel}\n\n[media transcription failed for ${mediaPath}: ${msg}]`
-            : `[media transcription failed for ${mediaPath}: ${msg}]`;
-        }
-      }
-    }
-
     // 剪贴板兜底：macOS 截图拖入时文件落在截图 App 的临时沙盒目录
     // (/var/folders/.../TemporaryItems/NSIRD_screencaptureui_*)，stat 直接被
     // tccd 拒（EPERM）。但截图时图像同时进了系统剪贴板，读位图数据不经过
@@ -929,7 +765,7 @@ export async function runSubmittedSlashLine(
     try {
       const outcome = await runOneAgentTurn(
         turnCtx,
-        messageForModel,
+        result.action.message,
         imageUrls,
         actionGateHandler,
         confirmDestructiveAction,

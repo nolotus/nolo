@@ -33,6 +33,15 @@ export const SYSTEM_AGENT_CAPABILITIES = [
     icon: "🕸️",
   },
   {
+    id: "conversation-todo",
+    label: "对话 Todo",
+    description:
+      "在多步骤对话中显示和更新任务进度。关闭后，Agent 不会使用对话内 Todo 工具。",
+    tools: ["setTodoList"],
+    defaultEnabled: true,
+    icon: "☑️",
+  },
+  {
     id: "agent-orchestration",
     label: "多 agent 编排",
     description:

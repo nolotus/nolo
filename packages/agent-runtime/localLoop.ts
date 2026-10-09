@@ -15,29 +15,16 @@
  *    - 工具调用与执行结果必须严格成对记录（`sanitizeToolCallPairing`）；
  *    - 每一轮推进通过 `hostAdapter.saveTurn` 沉淀权威日志。
  */
+import { clipCompactText } from "core/clipCompactText";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
 import type { ManagedRuntime } from "effect";
 import {
   createLocalLoopObservationBoundary,
-  DEFAULT_OBSERVATION_QUEUE_CAPACITY,
   type LocalLoopObservationBoundary,
   type LocalLoopObservationEvent,
-  type LocalLoopObservationBoundaryOptions,
 } from "./observationStream";
-import { createLoopTiming } from "./loopTiming";
-import {
-  TOOL_DURATION_METADATA_KEY,
-  blocksToOpenAiMessages,
-  buildMessages,
-  contentCharCount,
-  filterImagePartsFromMessages,
-  formatToolMessageContent,
-  prepareMessagesForProviderCall,
-  trimHistoryToContextBudget,
-} from "./providerMessageProjection";
-import type { LocalAgentToolEvent } from "./localLoopContract";
 
 import type {
   AgentRuntimeHostAdapter,
@@ -46,53 +33,98 @@ import type {
   AgentRuntimeSaveTurnInput,
 } from "./hostAdapter";
 import type { ActionGate } from "./actionGate";
+import { readActionGate, readCommandActionGatePayload } from "./actionGate";
+import { evaluateFileWritePolicy } from "./fileWritePolicy";
 import type {
   AgentRuntimeChatMessage,
   AgentRuntimeMessageContent,
   AgentRuntimeOutputBlock,
   AgentRuntimeResult,
+  AgentRuntimeToolCall,
 } from "./types";
-import {
-  buildAbortedError,
-  emitLoopEvent,
-  executeToolCall,
-  throwIfAborted,
-} from "./toolCallTransaction";
-export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
-import { createTurnTranscript } from "./turnTranscript";
-import { createTurnUsageLedger } from "./turnUsageLedger";
-export { addOutOfBandUsage } from "./turnUsageLedger";
+import { sanitizeToolCallPairing } from "./toolCallPairing";
+import { downgradeUnparsableToolCalls, hasParsableObjectArguments, repairTruncatedToolArguments } from "./outboundHistorySanitize";
+import { summarizeToolArguments } from "./summarizeToolArguments";
+import { buildToolArgumentsFingerprint } from "./toolArgumentsFingerprint";
 import { buildIdentityBlock } from "./identityBlock";
 import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { LEAF_FINAL_HANDOFF_INSTRUCTIONS } from "./leafFinalHandoff";
 import { buildUserResponseLanguageContext } from "./userResponseLanguage";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
-import { hasImageInRuntimeMessages } from "../ai/agent/imagePreprocessing";
+import { hasImageInRuntimeMessages, stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
 import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
 import { detectDispatchIntent, detectDispatchIntentFromMessages } from "../ai/agent/dispatchIntent";
 import { canonicalizeToolNames } from "./toolNameAliases";
+import {
+  estimateContextTokens,
+  hashStablePrefixContent,
+} from "../ai/agent/contextCompiler";
 import type {
   AgentExecutionContextMetrics,
   AgentExecutionObservationEvent,
 } from "./executionObservation";
 import type { ContextBlockScope } from "./contextBlockScope";
 import { normalizeContextBlockScopes } from "./contextBlockScope";
+import {
+  clipToolText,
+  resolveToolOutputProfile,
+} from "../ai/agent/toolOutputPolicy";
+import {
+  readCacheCreationInputTokens,
+  readCacheReadInputTokens,
+} from "../ai/token/cacheTokenFields";
+import { spillToolOutput } from "./toolSpillStore";
+import { planContextUsage } from "../ai/context/retention";
+import { estimateTokenCount } from "../ai/context/tokenUtils";
+import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { resolveAgentContextWindow } from "./devin/devinChannelWindows";
-import { createTurnCompactionController } from "./localAutoCompaction";
-import { isolateInboundContent } from "./inboundCredentialVault";
-import { scrubSecrets } from "./secretScrubber";
-import { buildRequestTelemetry, shortHash, type ProviderCallTelemetry } from "./providerCallTelemetry";
+import { maybeAutoCompactLocalHistory, type LocalAutoCompactionPhase } from "./localAutoCompaction";
 import {
   resolveCompressionTriggerRatio,
   truncateToolOutputForContext,
 } from "../ai/context/toolOutputCap";
+import { normalizeUsage } from "../ai/token/normalizeUsage";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NOLO_LOOP_TIMING instrumentation lives in ./loopTiming (per-turn instance,
-// created inside runLocalAgentTurn — no module-level state, no cross-turn
-// pollution when turns run concurrently).
+// NOLO_LOOP_TIMING instrumentation — measurement-only, zero behavior change.
+// Gated by env var; when off, each call site costs a single boolean check.
+// Emits one JSONL row per phase: { phase, round, durationMs } to stderr or to
+// the file given by NOLO_LOOP_TIMING_FILE. Never touches persisted data.
 // ─────────────────────────────────────────────────────────────────────────────
+const LOOP_TIMING_ENABLED =
+  typeof process !== "undefined" && process.env?.NOLO_LOOP_TIMING === "1";
+const LOOP_TIMING_FILE =
+  typeof process !== "undefined" ? process.env?.NOLO_LOOP_TIMING_FILE : undefined;
+let loopTimingRows: Array<{ phase: string; round: number; durationMs: number }> = [];
+let loopTimingLastMark: number | undefined;
+
+function loopTimingMark(phase: string, round: number): void {
+  if (!LOOP_TIMING_ENABLED) return;
+  const now = performance.now();
+  if (loopTimingLastMark !== undefined) {
+    loopTimingRows.push({ phase, round, durationMs: now - loopTimingLastMark });
+  }
+  loopTimingLastMark = now;
+}
+
+async function loopTimingFlush(): Promise<void> {
+  if (!LOOP_TIMING_ENABLED) return;
+  const lines = loopTimingRows.map((row) => JSON.stringify(row)).join("\n");
+  loopTimingRows = [];
+  loopTimingLastMark = undefined;
+  if (!lines) return;
+  if (LOOP_TIMING_FILE) {
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync(LOOP_TIMING_FILE, lines + "\n");
+    } catch {
+      // measurement must never break the loop
+    }
+  } else {
+    process.stderr.write(lines + "\n");
+  }
+}
 
 export type LocalAgentTurnInput = {
   adapter: AgentRuntimeHostAdapter;
@@ -233,7 +265,19 @@ export type LocalAgentTurnResult = AgentRuntimeResult & {
   accountingUsage?: Record<string, unknown>;
 };
 
-export type { LocalAgentToolEvent } from "./localLoopContract";
+export type LocalAgentToolEvent = {
+  type: "tool-call" | "tool-result" | "tool-error";
+  round: number;
+  toolCallId: string;
+  toolName: string;
+  argumentsPreview?: string;
+  elapsedMs?: number;
+  summary?: string;
+  /** Full tool result text for UI expand (model path still uses turn messages). */
+  content?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
+};
 
 export type LocalAgentContextMetrics = AgentExecutionContextMetrics;
 
@@ -244,24 +288,8 @@ export type LocalAgentContextMetrics = AgentExecutionContextMetrics;
  */
 export type LocalAgentLoopEvent = AgentExecutionObservationEvent;
 
-export type {
-  LocalLoopObservationBoundary,
-  LocalLoopObservationEvent,
-  LocalLoopObservationBoundaryOptions,
-};
-export {
-  createLocalLoopObservationBoundary,
-  DEFAULT_OBSERVATION_QUEUE_CAPACITY,
-};
-
-// 兼容 re-export：投影实现已下沉到 ./providerMessageProjection（纯函数层），
-// 既有消费方（historyContextBudget.test、__bench__、外部 caller）从 ./localLoop
-// 导入的路径保持不变。
-export {
-  TOOL_DURATION_METADATA_KEY,
-  summarizeHistoricalToolContent,
-  trimHistoryToContextBudget,
-} from "./providerMessageProjection";
+export type { LocalLoopObservationBoundary, LocalLoopObservationEvent };
+export { createLocalLoopObservationBoundary };
 
 export type LocalAgentActionGate = ActionGate & {
   toolName: string;
@@ -327,6 +355,60 @@ export {
   type ProgressGuardVerdict,
 };
 
+function formatToolExecutionError(args: {
+  toolName: string;
+  error: unknown;
+}) {
+  const message = toErrorMessage(args.error);
+  return `${args.toolName} failed: ${message}`;
+}
+
+function formatStructuredToolExecutionError(args: {
+  toolName: string;
+  error: unknown;
+}) {
+  if (!args.error || typeof args.error !== "object") return null;
+  const error = args.error as {
+    code?: unknown;
+    message?: unknown;
+    policy?: unknown;
+    permissionRequest?: unknown;
+  };
+  if (typeof error.code !== "string") return null;
+  return JSON.stringify({
+    error: error.code,
+    message:
+      typeof error.message === "string"
+        ? error.message
+        : formatToolExecutionError(args),
+    ...(error.policy && typeof error.policy === "object"
+      ? { policy: error.policy }
+      : {}),
+    ...(error.permissionRequest && typeof error.permissionRequest === "object"
+      ? { permissionRequest: error.permissionRequest }
+      : {}),
+  });
+}
+
+function shouldReturnToolExecutionErrors(adapter: AgentRuntimeHostAdapter) {
+  return adapter.capabilities.includes("local-tools");
+}
+
+/**
+ * Canonical observation event 唯一出口（收敛经由 observationBoundary 发射）。
+ *
+ * - 发送给 Queue/Stream（当 Stream 被监听时）形成单一真相源。
+ * - 自动单向投影给 legacy 回调（onLoopEvent / onToolEvent 等，fail-open）。
+ * - 纯净分离：bridge 不再混入 canonical event 对象，杜绝 onLoopEvent payload 污染。
+ */
+function emitLoopEvent(
+  boundary: LocalLoopObservationBoundary,
+  event: LocalAgentLoopEvent,
+  bridge?: LocalAgentToolEvent,
+) {
+  boundary.emit(bridge ? { event, bridge } : { event });
+}
+
 const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
 /**
  * 默认空闲超时（idle 语义）：单次 provider.complete 连续 10 分钟没有任何
@@ -337,6 +419,42 @@ const LLM_REQUEST_TIMEOUT = "LLM_REQUEST_TIMEOUT";
  */
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
+
+export const LOCAL_TURN_ABORTED_CODE = "LOCAL_TURN_ABORTED";
+
+function buildAbortedError(): Error & { code?: string } {
+  const error = new Error("local agent turn aborted by user") as Error & {
+    code?: string;
+  };
+  error.code = LOCAL_TURN_ABORTED_CODE;
+  return error;
+}
+
+function throwIfAborted(input: LocalAgentTurnInput) {
+  if (input.abortSignal?.aborted) throw buildAbortedError();
+}
+
+async function runAbortableToolTask<T>(
+  input: LocalAgentTurnInput,
+  task: Promise<T>,
+  pendingToolName?: string,
+): Promise<T> {
+  if (!input.abortSignal) return task;
+  const outcome = await runAbortableWithTimeout({
+    task,
+    abortSignal: input.abortSignal,
+    runtime: input.effectRuntime,
+  });
+  if (outcome.kind === "done") return outcome.value;
+  if (outcome.kind === "failed") throw outcome.error;
+  if (outcome.kind === "aborted") {
+    const error = buildAbortedError() as Error & { pendingToolName?: string };
+    if (pendingToolName) error.pendingToolName = pendingToolName;
+    throw error;
+  }
+  // timeout outcome is impossible without timeoutMs
+  throw buildAbortedError();
+}
 
 function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number {
   const raw = input.llmRequestTimeoutMs ?? input.timeoutMs;
@@ -455,6 +573,706 @@ async function runCompleteWithTimeout(args: {
   }
 }
 
+function clip(value: string, max = 240) {
+  return clipCompactText(value, max);
+}
+
+/**
+ * 提取安全观测 metadata：只保留结构化标量（exitCode / command / path / lineCount 等），
+ * 并且对字符串字段做最大长度裁剪（<= 240 字符），绝不透传未经裁剪的原始 tool payload / 敏感 token / 内部对象。
+ */
+function projectSafeToolObservationMetadata(
+  metadata?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const safe: Record<string, unknown> = {};
+  if (typeof metadata.exitCode === "number") safe.exitCode = metadata.exitCode;
+  if (typeof metadata.actionGate === "string") safe.actionGate = clip(metadata.actionGate, 240);
+  if (typeof metadata.command === "string") safe.command = clip(metadata.command, 240);
+  if (typeof metadata.path === "string") safe.path = clip(metadata.path, 240);
+  if (typeof metadata.truncated === "boolean") safe.truncated = metadata.truncated;
+  if (typeof metadata.byteCount === "number") safe.byteCount = metadata.byteCount;
+  if (typeof metadata.lineCount === "number") safe.lineCount = metadata.lineCount;
+  return Object.keys(safe).length > 0 ? safe : undefined;
+}
+
+function summarizeToolResult(content: unknown, metadata?: Record<string, unknown>) {
+  const parts: string[] = [];
+  const exitCode = metadata?.exitCode;
+  if (typeof exitCode === "number") parts.push(`exit=${exitCode}`);
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    if (trimmed) {
+      const lines = trimmed.split(/\r?\n/).length;
+      parts.push(`${lines} line${lines === 1 ? "" : "s"}`);
+      parts.push(`${trimmed.length} chars`);
+      const tail = clip(trimmed.slice(-160), 160);
+      if (tail) parts.push(`tail="${tail}"`);
+    } else {
+      parts.push("empty");
+    }
+  }
+  return parts.join(" ");
+}
+
+/**
+ * 纯观测字段：只随 tool_result_metadata 持久化，不进入模型可见内容。
+ *
+ * 新增这类字段时有**三处**必须同时确认，漏一处就会出事：
+ *  1. 加进下面的 OBSERVATION_ONLY_METADATA_KEYS —— 否则 formatToolMessageContent
+ *     会把它拼进 globFiles/codeSearch/readFile 三个工具发给模型的 prompt 字节。
+ *  2. 确认它不在 compactToolMetadata 的 TOOL_METADATA_KEYS 允许清单里 ——
+ *     那条路（in-turn 投影与跨轮历史摘要共用）是白名单制，另一道独立闸门。
+ *  3. **不要**把它混进推给 progressGuard 的 executedToolResults ——
+ *     buildToolResultsSignature 对 metadata 整体做指纹，掺进任何逐次抖动的值
+ *     都会让 repetition_loop / stagnant_tool_calls 两条死循环熔断静默失效。
+ *     这一条被真实踩中过（见 executedToolResults.push 处的注释）。
+ */
+export const TOOL_DURATION_METADATA_KEY = "toolExecMs";
+const OBSERVATION_ONLY_METADATA_KEYS = new Set<string>([
+  TOOL_DURATION_METADATA_KEY,
+]);
+
+function formatToolMessageContent(args: {
+  toolName: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}) {
+  if (
+    (
+      args.toolName !== "globFiles" &&
+      args.toolName !== "codeSearch" &&
+      args.toolName !== "readFile"
+    ) ||
+    !args.metadata ||
+    Object.keys(args.metadata).length === 0
+  ) {
+    return args.content;
+  }
+  // 剔除纯观测字段后再判空：只带观测字段的 metadata 必须与「无 metadata」
+  // 走同一条路径，否则会凭空多出一个空的 [tool metadata] 块。
+  const visible: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args.metadata)) {
+    if (!OBSERVATION_ONLY_METADATA_KEYS.has(key)) visible[key] = value;
+  }
+  if (Object.keys(visible).length === 0) return args.content;
+  return `${args.content}\n\n[tool metadata]\n${JSON.stringify(visible)}`;
+}
+
+/**
+ * 把 provider 返回的有序 output blocks（text→toolCall→text）展开为 OpenAI 扁平消息：
+ * assistant(text_before | null, tool_calls[]) → tool(tool_call_id, content) → …
+ * 连续 toolCall 无中间 text → 合并进同一条 assistant 的 tool_calls[]。
+ * thinking → 折进该段 assistant 的 reasoning_content（不单独成 role）。
+ * 末尾 text → 追加一条无 tool_calls 的 assistant。
+ * 仅供 localLoop output 分支调用，不重跑工具（result 已由流内执行填充）。
+ */
+function blocksToOpenAiMessages(
+  blocks: AgentRuntimeOutputBlock[],
+): AgentRuntimeChatMessage[] {
+  const out: AgentRuntimeChatMessage[] = [];
+  let text = "";
+  let reasoning = "";
+  let pendingToolCalls: AgentRuntimeToolCall[] = [];
+  let pendingToolResults: { content: string; metadata?: Record<string, unknown> }[] = [];
+
+  const flushSegment = () => {
+    if (text === "" && pendingToolCalls.length === 0 && reasoning === "") return;
+    out.push({
+      role: "assistant",
+      content: text || null,
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
+      ...(pendingToolCalls.length > 0 ? { tool_calls: pendingToolCalls } : {}),
+    });
+    for (let i = 0; i < pendingToolCalls.length; i += 1) {
+      const tc = pendingToolCalls[i];
+      const res = pendingToolResults[i];
+      out.push({
+        role: "tool",
+        content: formatToolMessageContent({
+          toolName: tc.function.name,
+          content: res?.content ?? "",
+          ...(res?.metadata ? { metadata: res.metadata } : {}),
+        }),
+        tool_call_id: tc.id,
+        toolName: tc.function.name,
+        ...(res?.metadata ? { tool_result_metadata: res.metadata } : {}),
+      });
+    }
+    text = "";
+    reasoning = "";
+    pendingToolCalls = [];
+    pendingToolResults = [];
+  };
+
+  for (const block of blocks) {
+    if (block.type === "text") {
+      // toolCalls 已挂起 → 先 flush assistant+tools，再开新 text 段
+      if (pendingToolCalls.length > 0) {
+        flushSegment();
+      }
+      text += block.text;
+      continue;
+    }
+    if (block.type === "thinking") {
+      reasoning += block.thinking;
+      continue;
+    }
+    if (block.type === "toolCall") {
+      pendingToolCalls.push(block.toolCall);
+      pendingToolResults.push({
+        content: block.result?.content ?? "",
+        ...(block.result?.metadata ? { metadata: block.result.metadata } : {}),
+      });
+    }
+  }
+  flushSegment();
+  return out;
+}
+
+function buildActionGate(args: {
+  toolName: string;
+  toolCallId: string;
+  metadata?: Record<string, unknown>;
+}): LocalAgentActionGate | null {
+  const gate = readActionGate(args.metadata?.actionGate);
+  if (!gate) return null;
+  if (gate.kind === "handoff" && !readCommandActionGatePayload(gate.payload)) return null;
+  return {
+    ...gate,
+    toolName: args.toolName,
+    toolCallId: args.toolCallId,
+  };
+}
+
+const TOOL_METADATA_KEYS = [
+  "path",
+  "query",
+  "effectivePattern",
+  "startLine",
+  "endLine",
+  "totalLines",
+  "totalBytes",
+  "bytes",
+  "totalChars",
+  "count",
+  "matchCount",
+  "matchedFiles",
+  "truncated",
+  "limitedByMaxResults",
+  "limitedByMaxDepth",
+  "visitedEntries",
+  "maxResults",
+  "exitCode",
+  "status",
+  "timedOut",
+  "aborted",
+  "replacements",
+  "code",
+  "error",
+  "message",
+  "warnings",
+  "pasteId",
+  "source",
+] as const;
+
+/**
+ * 按模型上下文预算裁掉最老的历史消息。
+ *
+ * 为什么需要：localLoop 此前把完整历史无条件发给 provider，没有任何窗口或压缩。
+ * 实测本地对话里有末轮上下文达 10.2M token 的会话，而 deepseek-v4-flash 的窗口
+ * 是 100 万——这类请求要么失败，要么被 provider 静默截断（模型在缺失上下文的
+ * 情况下继续作答，且无人知晓）。
+ *
+ * 预算判定复用 web 端同一个纯函数 `planContextUsage`，不在 CLI 侧另造一套阈值。
+ * 该规划器是 cache-first 的：1M 窗口模型的历史预算约 94 万 token，所以本裁剪
+ * 只在接近撞窗口时才生效，正常会话完全不受影响、provider 前缀缓存不被破坏。
+ *
+ * 裁剪后必须过 `sanitizeToolCallPairing`：从头部丢消息可能丢掉声明 tool_calls 的
+ * assistant 却留下对应的 tool 结果，provider 会直接报错。
+ */
+export function trimHistoryToContextBudget(
+  history: AgentRuntimeChatMessage[],
+  model: string | undefined,
+  contextWindowOverride?: number,
+): { history: AgentRuntimeChatMessage[]; droppedCount: number } {
+  if (history.length === 0) return { history, droppedCount: 0 };
+
+  const { rawMessageBudget } = planContextUsage({
+    contextWindow: contextWindowOverride ?? getModelContextWindow(model ?? ""),
+    summaryTokens: 0,
+    // localLoop 没有 web 端的负载分档器；medium 是中性默认值，
+    // 不为了省几个 token 在这里复制一份分类逻辑。
+    recentLoad: "medium",
+  });
+
+  // 必须用 estimateTokenCount：它是中文感知的（中文 1.5 tok/字，其他 0.25 tok/字符）。
+  // 平铺 chars/4 对中文低估约 6 倍，会导致中文会话该裁不裁、照旧撞窗口。
+  const messageTokens = (message: AgentRuntimeChatMessage): number => {
+    const toolCalls = (message as any).tool_calls;
+    return (
+      estimateTokenCount(contentAsText(message.content)) +
+      (Array.isArray(toolCalls) ? estimateTokenCount(JSON.stringify(toolCalls)) : 0)
+    );
+  };
+
+  let used = 0;
+  let start = history.length;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const cost = messageTokens(history[i]);
+    // 至少保留最后一条，否则预算极小时会裁成空历史
+    if (used + cost > rawMessageBudget && start < history.length) break;
+    used += cost;
+    start = i;
+  }
+
+  if (start === 0) return { history, droppedCount: 0 };
+  return {
+    history: sanitizeToolCallPairing(history.slice(start)),
+    droppedCount: start,
+  };
+}
+
+/** 把结构化 content 摊平成文本，供中文感知的 estimateTokenCount 使用。 */
+function contentAsText(content: AgentRuntimeMessageContent): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (part?.type === "text") return part.text;
+      if (part?.type === "image_url") return part.image_url.url;
+      return "";
+    })
+    .join("\n");
+}
+
+function contentCharCount(content: AgentRuntimeMessageContent): number {
+  if (typeof content === "string") return content.length;
+  if (!Array.isArray(content)) return 0;
+  return content.reduce((total, part) => {
+    if (part?.type === "text") return total + part.text.length;
+    if (part?.type === "image_url") return total + part.image_url.url.length;
+    return total;
+  }, 0);
+}
+
+function compactToolMetadata(
+  metadata: Record<string, unknown> | undefined,
+): string {
+  if (!metadata) return "";
+  const selected: Record<string, unknown> = {};
+  for (const key of TOOL_METADATA_KEYS) {
+    const value = metadata[key];
+    if (value === undefined) continue;
+    if (typeof value === "string") {
+      selected[key] = clipCompactText(value, 240);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      selected[key] = value.slice(0, 20).map((item) =>
+        typeof item === "string"
+          ? clipCompactText(item, 180)
+          : clipCompactText(JSON.stringify(item), 180),
+      );
+      continue;
+    }
+    selected[key] = value;
+  }
+  return Object.keys(selected).length > 0
+    ? clipCompactText(JSON.stringify(selected), 1200)
+    : "";
+}
+
+function projectToolContentForProvider(args: {
+  content: AgentRuntimeMessageContent;
+  toolName?: string;
+  metadata?: Record<string, unknown>;
+  maxChars: number;
+  label: string;
+}): AgentRuntimeMessageContent {
+  const content = args.content;
+  if (typeof content !== "string") return content;
+  const metadataText = compactToolMetadata(args.metadata);
+  // Some tool formatters already append the full metadata JSON to the durable
+  // content. Remove that provider-side duplicate and re-add the bounded
+  // projection below so metadata cannot disappear in the clipped middle/tail.
+  const embeddedMetadataIndex = metadataText
+    ? content.indexOf("\n\n[tool metadata]\n")
+    : -1;
+  const contentForProjection = embeddedMetadataIndex >= 0
+    ? content.slice(0, embeddedMetadataIndex)
+    : content;
+  const metadataSuffix = metadataText
+    ? `\n\n[tool metadata]\n${metadataText}`
+    : "";
+  // Keep already-bounded durable tool messages byte-for-byte stable. This is
+  // important for short read/search results whose metadata is already part of
+  // the canonical message; projection is only needed once the provider bound
+  // would actually be exceeded.
+  if (embeddedMetadataIndex >= 0 && content.length <= args.maxChars) {
+    return content;
+  }
+  // Idempotence guard (stable-projection contract): buildMessages projects
+  // cross-turn history via summarizeHistoricalToolContent, then
+  // prepareMessagesForProviderCall projects the SAME message again in the same
+  // request. The second pass must be a no-op for already-projected content,
+  // otherwise the diagnostic suffix would be re-clipped (initialBudget =
+  // maxChars - 120 < projected length) and the bytes would drift between
+  // provider calls — exactly the cache-prefix break this policy exists to
+  // prevent. Only content that still fits the budget short-circuits; oversized
+  // raw output is always projected.
+  if (
+    content.length <= args.maxChars &&
+    content.includes(`\n\n[${args.label}; originalChars=`)
+  ) {
+    return content;
+  }
+  const headRatio = resolveToolOutputProfile(args.toolName).headRatio;
+  const initialBudget = Math.max(
+    1,
+    args.maxChars - metadataSuffix.length - 120,
+  );
+  let clipped = clipToolText(contentForProjection, initialBudget, headRatio);
+  const wasClipped = clipped.length < contentForProjection.trim().length;
+  const needsProjection = wasClipped || Boolean(metadataSuffix) || embeddedMetadataIndex >= 0;
+  if (!needsProjection) return args.content;
+
+  let spillNote = "";
+  if (wasClipped) {
+    try {
+      const spill = spillToolOutput({
+        content: contentForProjection,
+        toolName: args.toolName,
+      });
+      spillNote = `; spillFile=${spill.displayPath}; totalLines=${spill.totalLines}; hint=read full output via readFile`;
+    } catch {
+      // Ignore spill write failures to prevent breaking prompt generation
+    }
+  }
+
+  const diagnostic = (clippedLength: number) =>
+    `[${args.label}; originalChars=${content.length}; omittedChars=${Math.max(
+      0,
+      content.length - clippedLength,
+    )}${spillNote}]`;
+  const suffix = (clippedLength: number) =>
+    [diagnostic(clippedLength), metadataSuffix.trimStart()]
+      .filter(Boolean)
+      .join("\n\n");
+
+  let projected = wasClipped || metadataSuffix
+    ? `${clipped}\n\n${suffix(clipped.length)}`
+    : clipped;
+  // Tighten so maxChars is a real provider bound, including metadata and the truncation marker.
+  if (projected.length > args.maxChars) {
+    const boundedBudget = Math.max(
+      1,
+      args.maxChars - suffix(clipped.length).length - 2,
+    );
+    clipped = clipToolText(contentForProjection, boundedBudget, headRatio);
+    projected = `${clipped}\n\n${suffix(clipped.length)}`;
+  }
+  return projected.length <= args.maxChars
+    ? projected
+    : projected.slice(0, args.maxChars);
+}
+
+type PreparedProviderMessages = {
+  messages: AgentRuntimeChatMessage[];
+  metrics: LocalAgentContextMetrics;
+};
+
+// 单一稳定 label：同一条 tool 消息在 fresh、同 turn 更早轮、跨 turn 历史三个
+// 投影点必须携带完全相同的诊断后缀文本，否则跨 turn 后缀变化本身就是一次
+// byte 漂移（前缀缓存断裂）。沿用 in-turn 历史文本：desktop-runtime 的披露
+// 折叠按 `"\n\n[in-turn tool result"` 切分，改文案会破坏该解析。
+const TOOL_OUTPUT_PROJECTION_LABEL =
+  "in-turn tool result truncated/projected before next provider call";
+
+// Exported for the cross-turn retention regression test: the ledger gate in
+// the read executors and this projection must agree on the same cap, or the
+// dedup notice can claim "still in context" for content history already cut.
+export function summarizeHistoricalToolContent(
+  content: AgentRuntimeMessageContent,
+  toolName?: string,
+  metadata?: Record<string, unknown>,
+): AgentRuntimeMessageContent {
+  return projectToolContentForProvider({
+    content,
+    toolName,
+    metadata,
+    // Stable projection contract: the SAME per-tool profile budget and label
+    // as prepareMessagesForProviderCall, so the first provider-visible
+    // representation of a tool execution is byte-identical on every later
+    // round and across turns. Read-family profiles keep their ledger cap
+    // (4800); unprofiled tools use the default profile (4000) instead of the
+    // old flat 1600 — a historical rewrite below the fresh budget was itself
+    // a cache-prefix break (see docs/plans/2026-09-05-tool-output-cache-stability.md).
+    maxChars: resolveToolOutputProfile(toolName).maxChars,
+    label: TOOL_OUTPUT_PROJECTION_LABEL,
+  });
+}
+
+function prepareMessagesForProviderCall(
+  messages: AgentRuntimeChatMessage[],
+): PreparedProviderMessages {
+  // 发 provider 前的唯一咽喉点：先修掉 tool_calls/tool 配对违规（孤儿 tool、悬空 tool_calls），
+  // 再走原 map。脏历史不能原样发给 OpenAI 兼容接口。
+  const paired = sanitizeToolCallPairing(messages);
+  // Stable provider-visible projection：所有 in-turn tool 消息（含刚产出的 fresh
+  // 消息）使用与跨 turn 历史（summarizeHistoricalToolContent）完全相同的
+  // per-tool 预算与 label。投影因此是 (content, toolName, metadata) 的纯函数，
+  // 同一 tool execution 第一次进入 provider transcript 后每轮 byte-identical。
+  // 旧「fresh 32k 宽窗口 → 非 fresh 回压 profile → 跨 turn 1.6k」三档设计会在
+  // 每轮把上一轮的 tool 消息改写一次（实测 17,779 → 4,361 字符），前缀缓存
+  // 从该消息起整体失效（2026-08-25 事故同类根因）。超预算部分仍由
+  // projectToolContentForProvider 通过 spillToolOutput 完整落盘（内容寻址路径，
+  // (toolName, content) 纯函数），provider 看到 deterministic projection +
+  // spillFile 引用；durable 历史/UI 保留完整原文。fresh 窗口的质量代价由 spill
+  // 重读（readFile/grep spill 文件）覆盖，属于已拍板的产品决策
+  // （docs/plans/2026-09-05-tool-output-cache-stability.md，推翻
+  // 2026-09-02 perf sweep 中「仅性能收益不足」的否决——本次目标是 cache ROI）。
+  let toolMessageCount = 0;
+  let rawToolContentChars = 0;
+  let projectedToolContentChars = 0;
+  let truncatedToolResults = 0;
+  const projected = paired.map((message) => {
+    const { context_reference: _contextReference, ...providerMessage } = message;
+    const sanitizedContent =
+      providerMessage.content == null
+        ? ""
+        : typeof providerMessage.content === "string"
+          ? providerMessage.content
+          : providerMessage.content;
+
+    if (providerMessage.role !== "tool") {
+      return {
+        ...providerMessage,
+        content: sanitizedContent,
+      };
+    }
+    toolMessageCount += 1;
+    rawToolContentChars += contentCharCount(sanitizedContent);
+    const projectedContent = projectToolContentForProvider({
+      content: sanitizedContent,
+      toolName: providerMessage.toolName,
+      metadata: providerMessage.tool_result_metadata,
+      maxChars: resolveToolOutputProfile(providerMessage.toolName).maxChars,
+      label: TOOL_OUTPUT_PROJECTION_LABEL,
+    });
+    projectedToolContentChars += contentCharCount(projectedContent);
+    if (contentCharCount(projectedContent) < contentCharCount(sanitizedContent)) {
+      truncatedToolResults += 1;
+    }
+    return {
+      ...providerMessage,
+      content: projectedContent,
+    };
+  });
+  return {
+    messages: projected,
+    metrics: {
+      messageCount: projected.length,
+      contentChars: projected.reduce((total, message) => total + contentCharCount(message.content), 0),
+      toolMessageCount,
+      rawToolContentChars,
+      projectedToolContentChars,
+      truncatedToolResults,
+      stableContextChars: 0,
+      dynamicContextChars: 0,
+    },
+  };
+}
+
+function prepareHistoryForNextTurn(
+  history: AgentRuntimeChatMessage[],
+  contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean,
+): AgentRuntimeChatMessage[] {
+  return history.map((message) => {
+    if (
+      message.role === "user" &&
+      message.context_reference !== undefined &&
+      contextReferenceResolver?.(message.context_reference)
+    ) {
+      return { ...message, content: message.context_reference };
+    }
+    if (message.role !== "tool") return message;
+    return {
+      ...message,
+      content: summarizeHistoricalToolContent(
+        message.content,
+        message.toolName,
+        message.tool_result_metadata,
+      ),
+    };
+  });
+}
+
+/**
+ * 按 vision 能力过滤整条消息数组。supportsImages 为 true 时原样返回（catalog 默认）；
+ * 为 false 时逐条剥离 image_url parts，保留 text/tool_calls 等其他内容。
+ */
+function filterImagePartsFromMessages(
+  messages: AgentRuntimeChatMessage[],
+  supportsImages: boolean,
+): AgentRuntimeChatMessage[] {
+  if (supportsImages) return messages;
+  return stripImagePartsFromMessages(messages);
+}
+
+type BuiltMessages = {
+  messages: AgentRuntimeChatMessage[];
+  stableContextChars: number;
+  dynamicContextChars: number;
+  /** 稳定前缀内容指纹（与 contextCompiler 同一 FNV 算法），用于 token 记录的 prefix churn 观测。 */
+  stablePrefixHash?: string;
+  stablePrefixEstimatedTokens?: number;
+};
+
+function buildMessages(args: {
+  prompt?: string;
+  contextBlocks?: string[];
+  contextBlockScopes?: ContextBlockScope[];
+  history: AgentRuntimeChatMessage[];
+  input: AgentRuntimeMessageContent;
+  contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean;
+}): BuiltMessages {
+  // When contextBlockScopes is provided, split into stable (session) + dynamic (turn).
+  // The agent prompt is always part of the stable prefix.
+  if (args.contextBlockScopes?.length) {
+    const blocks = args.contextBlockScopes.filter((b) => b.content.trim());
+    const stableParts = [args.prompt?.trim(), ...blocks.filter((b) => b.cacheScope === "session").map((b) => b.content)]
+      .filter(Boolean);
+    const dynamicParts = blocks
+      .filter((b) => b.cacheScope === "turn")
+      .map((b) => b.content)
+      .map((block) => block.trim())
+      .filter(Boolean);
+    const stableContent = stableParts.join("\n\n");
+    const dynamicContent = dynamicParts.join("\n\n");
+    // 前缀缓存契约：turn-scope 动态块（当前时间等）绝不拼进 system 尾部。
+    // system 每轮在动态块处逐秒变化，会把其身后全部历史消息的前缀缓存命中
+    // 一起切断（RunInfra cached_tokens / Anthropic cache_control 都按 prompt
+    // 前缀匹配；实测 113k 上下文 A/B：拼尾部 cached=0 vs 移到末尾命中 49%、
+    // TTFT 5.4s→2.9s，见 packages/cli/__perf__/cachePrefixAbProbe.ts）。
+    // 动态块并入末尾 user 消息头部：system(stable) + history(append-only)
+    // 全程前缀稳定，每轮只有新增尾巴是天然 miss。
+    const userContent: AgentRuntimeMessageContent = dynamicContent
+      ? typeof args.input === "string"
+        ? `${dynamicContent}\n\n${args.input}`
+        : [
+            { type: "text", text: dynamicContent },
+            ...(Array.isArray(args.input) ? args.input : args.input ? [args.input] : []),
+          ]
+      : args.input;
+    return {
+      messages: [
+        ...(stableContent
+          ? [{
+              role: "system" as const,
+              content: stableContent,
+              ...(stableContent ? { stable_prefix_chars: stableContent.length } : {}),
+            }]
+          : []),
+        ...prepareHistoryForNextTurn(args.history, args.contextReferenceResolver),
+        { role: "user" as const, content: userContent },
+      ],
+      stableContextChars: stableContent.length,
+      dynamicContextChars: dynamicContent.length,
+      ...(stableContent
+        ? {
+            stablePrefixHash: hashStablePrefixContent(stableContent),
+            stablePrefixEstimatedTokens: estimateContextTokens(stableContent),
+          }
+        : {}),
+    };
+  }
+
+  // Fallback: plain contextBlocks (no scope split)
+  const blocks = (args.contextBlocks ?? [])
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const systemContent = [args.prompt?.trim(), ...blocks]
+    .filter(Boolean)
+    .join("\n\n");
+  return {
+    messages: [
+      ...(systemContent
+        ? [{ role: "system" as const, content: systemContent }]
+        : []),
+      ...prepareHistoryForNextTurn(args.history, args.contextReferenceResolver),
+      { role: "user" as const, content: args.input },
+    ],
+    stableContextChars: (args.prompt?.trim() ?? "").length,
+    dynamicContextChars: blocks.join("\n\n").length,
+    ...(systemContent
+      ? {
+          stablePrefixHash: hashStablePrefixContent(systemContent),
+          stablePrefixEstimatedTokens: estimateContextTokens(systemContent),
+        }
+      : {}),
+  };
+}
+
+function mergeTurnUsage(
+  current: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined
+) {
+  if (!next) return current;
+  // 缓存字段走共享别名表：OpenAI Responses / chat.completions 只在嵌套的
+  // *_tokens_details.cached_tokens 里给缓存命中，只认顶层字段会让本轮记账
+  // 显示 0 缓存，而同一次调用的 DB token 记录（走 normalizeUsage）却有值。
+  const read = (usage: Record<string, unknown>) => ({
+    input: Number(usage.input_tokens ?? usage.prompt_tokens ?? 0),
+    output: Number(usage.output_tokens ?? usage.completion_tokens ?? 0),
+    cacheHit: readCacheReadInputTokens(usage),
+    cacheMiss: readCacheCreationInputTokens(usage),
+  });
+  const right = read(next);
+  const left = current ? read(current) : { input: 0, output: 0, cacheHit: 0, cacheMiss: 0 };
+  return {
+    input_tokens: left.input + right.input,
+    output_tokens: left.output + right.output,
+    cache_read_input_tokens: left.cacheHit + right.cacheHit,
+    cache_creation_input_tokens: left.cacheMiss + right.cacheMiss,
+  };
+}
+
+/**
+ * 把一次带外 LLM 调用（目前只有自动压缩的摘要生成）的用量加进本轮记账 usage (accountingUsage)。
+ *
+ * 摘要是主工具循环之外的独立 provider call。这里保留独立 helper，让调用方
+ * 明确区分主循环累计与带外累计，并兼容旧的字段别名。注意：带外用量仅进入 accountingUsage
+ * 与 usageRecords 用于费用结算，不得进入 run 结果的 context usage 快照。
+ */
+export function addOutOfBandUsage(
+  turn: Record<string, unknown> | undefined,
+  extra: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!extra) return turn;
+  const num = (u: Record<string, unknown> | undefined, ...keys: string[]) => {
+    if (!u) return 0;
+    for (const k of keys) {
+      const v = Number(u[k]);
+      if (Number.isFinite(v) && v !== 0) return v;
+    }
+    return 0;
+  };
+  return {
+    ...(turn ?? {}),
+    input_tokens:
+      num(turn, "input_tokens", "prompt_tokens") +
+      num(extra, "input_tokens", "prompt_tokens"),
+    output_tokens:
+      num(turn, "output_tokens", "completion_tokens") +
+      num(extra, "output_tokens", "completion_tokens"),
+    cache_read_input_tokens:
+      readCacheReadInputTokens(turn) + readCacheReadInputTokens(extra),
+    cache_creation_input_tokens:
+      readCacheCreationInputTokens(turn) + readCacheCreationInputTokens(extra),
+  };
+}
+
 function extractUserInputText(content: AgentRuntimeMessageContent): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -462,39 +1280,6 @@ function extractUserInputText(content: AgentRuntimeMessageContent): string {
     .flatMap((part) => (part?.type === "text" && part.text ? [part.text] : []))
     .join("\n")
     .trim();
-}
-
-function safeToolNamesHash(names: string[]): string | undefined {
-  try {
-    return names.length ? shortHash([...names].sort().join(",")) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function finalizeCallTelemetry(
-  base: Partial<ProviderCallTelemetry> | undefined,
-  result: AgentRuntimeResult,
-  round: number,
-  startedAt: number,
-): ProviderCallTelemetry | undefined {
-  try {
-    const endTs = Date.now();
-    const toolCalls = (result.tool_calls ?? [])
-      .map((call: any) => call?.function?.name ?? call?.name)
-      .filter((name: unknown): name is string => typeof name === "string");
-    const providerToolsHash = result.toolsHash;
-    return {
-      ...base,
-      ...(typeof providerToolsHash === "string" ? { toolsHash: providerToolsHash } : {}),
-      round,
-      endTs,
-      durationMs: endTs - startedAt,
-      ...(toolCalls.length ? { toolCalls } : {}),
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 function attachDialogIdToError(error: unknown, dialogId: string | undefined) {
@@ -580,6 +1365,71 @@ async function persistFailedLocalTurn(args: {
     return args.input.continueDialogId;
   }
 }
+function applyPersistedTurnInput(
+  messages: AgentRuntimeChatMessage[],
+  persistedInput: AgentRuntimeMessageContent | undefined,
+  persistedInputReference: AgentRuntimeMessageContent | undefined,
+): AgentRuntimeChatMessage[] {
+  if (persistedInput === undefined && persistedInputReference === undefined) {
+    return messages;
+  }
+  let replaced = false;
+  return messages.map((message) => {
+    if (replaced || message.role !== "user") return message;
+    replaced = true;
+    return {
+      ...message,
+      ...(persistedInput !== undefined ? { content: persistedInput } : {}),
+      ...(persistedInputReference !== undefined
+        ? { context_reference: persistedInputReference }
+        : {}),
+    };
+  });
+}
+
+const fileWriteSessionApproval = new WeakMap<object, { approved: boolean }>();
+const fileWriteSessionKeys = new Map<string, object>();
+
+function getFileWriteSessionApproval(input: LocalAgentTurnInput): { approved: boolean } {
+  if (input.fileWriteSessionId) {
+    let key = fileWriteSessionKeys.get(input.fileWriteSessionId);
+    if (!key) {
+      key = {};
+      fileWriteSessionKeys.set(input.fileWriteSessionId, key);
+    }
+    const existing = fileWriteSessionApproval.get(key);
+    if (existing) return existing;
+    const created = { approved: false };
+    fileWriteSessionApproval.set(key, created);
+    return created;
+  }
+  const key = input.adapter as unknown as object;
+  const existing = fileWriteSessionApproval.get(key);
+  if (existing) return existing;
+  const created = { approved: false };
+  fileWriteSessionApproval.set(key, created);
+  return created;
+}
+
+function readToolPathForWriteGate(argumentsValue: string): string {
+  try {
+    const parsed = JSON.parse(argumentsValue) as Record<string, unknown>;
+    return typeof parsed.path === "string" && parsed.path.trim()
+      ? parsed.path.trim()
+      : "the requested file";
+  } catch {
+    return "the requested file";
+  }
+}
+
+function isCompletedActionGateResult(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { status?: unknown }).status === "completed",
+  );
+}
+
 export async function runLocalAgentTurn(
   input: LocalAgentTurnInput
 ): Promise<LocalAgentTurnResult> {
@@ -599,13 +1449,11 @@ export async function runLocalAgentTurn(
     observationBoundary.attachCallbacks(legacyCallbacks);
   }
 
-  // 计时探针（NOLO_LOOP_TIMING=1）：per-turn 实例，并发 turn 互不污染；
-  // 门控关闭时每个调用点仅一次布尔判断（见 ./loopTiming）。
-  const loopTiming = createLoopTiming();
-
   try {
-    // 入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
-    loopTiming.mark("turnStart", 0);
+    // 计时探针（NOLO_LOOP_TIMING=1）：入口先打点，覆盖 loadAgentConfig/loadDialogHistory 段。
+    // 注意：模块级计时状态为单 turn 设计，并发跑多个 turn 且开启门控时数据会交错
+    // （仅调试工具，不影响生产路径）。
+    loopTimingMark("turnStart", 0);
   let agentConfig = await input.adapter.loadAgentConfig(input.agentRef);
   if (!agentConfig) {
     const error = new Error(
@@ -628,12 +1476,7 @@ export async function runLocalAgentTurn(
       : undefined,
   };
   if (runConstraints.allowedToolNames !== undefined || runConstraints.blockedToolNames !== undefined) {
-    // Narrow the host's EFFECTIVE surface (exposedToolNames: after pack
-    // expansion, incl. the host-required `code` fallback), never the bare
-    // declared list. Narrowing the declared list turned `--read-only` on a
-    // zero-declared agent into "no tools at all" — reviewers lost shell/read.
-    const effective = agentConfig.exposedToolNames ?? agentConfig.toolNames;
-    const toolNames = Array.isArray(effective) ? effective : [];
+    const toolNames = Array.isArray(agentConfig.toolNames) ? agentConfig.toolNames : [];
     const constrainedSurface = applyToolSurfaceConstraints(
       { explicitToolNames: toolNames, injectedToolNames: [], finalToolNames: toolNames },
       runConstraints,
@@ -662,50 +1505,6 @@ export async function runLocalAgentTurn(
     ...(typeof rawBillingConfig.userId === "string" ? { userId: rawBillingConfig.userId } : {}),
   };
 
-  /**
-   * 入路隔离：把明文凭据换成本地 broker 的不透明引用；broker 不可用时降级到正则脱敏。
-   *
-   * 失败必须**降级**而不是把 turn 抛掉。接线前同一种输入本来就只走到 scrub，接线后
-   * 若因桌面 Keychain 锁定、存储不可写而直接让本轮失败，等于用一个安全层的故障
-   * 换掉整个回合的可用性——fail-closed 指的是「明文不外流」，不是「对话不能用」。
-   */
-  const sanitizeInbound = async (
-    content: AgentRuntimeMessageContent,
-  ): Promise<AgentRuntimeMessageContent> => {
-    if (input.adapter.credentialBroker) {
-      try {
-        const isolated = await isolateInboundContent(
-          content,
-          input.adapter.credentialBroker,
-        );
-        return isolated.safeContent;
-      } catch (error) {
-        console.warn(
-          "[localLoop] inbound credential isolation failed, falling back to scrub:",
-          error,
-        );
-      }
-    }
-    if (typeof content === "string") return scrubSecrets(content).cleaned;
-    if (Array.isArray(content)) {
-      return content.map((part) =>
-        part?.type === "text" && typeof part.text === "string"
-          ? { ...part, text: scrubSecrets(part.text).cleaned }
-          : part,
-      );
-    }
-    return content;
-  };
-
-  // 凭据入路隔离：支持纯文本与多模态 Parts 数组，防止明文进入历史、失败快照与 Provider
-  let sanitizedInput = await sanitizeInbound(input.input);
-
-  // [Security F2 修复]：对 TUI 粘贴展开路径 (persistedInput) 施加同一隔离与脱敏，防止展开内容落库时泄漏
-  let sanitizedPersistedInput: AgentRuntimeMessageContent | undefined =
-    input.persistedInput === undefined
-      ? undefined
-      : await sanitizeInbound(input.persistedInput);
-
   let history: AgentRuntimeChatMessage[] = [];
   try {
     history = input.continueDialogId
@@ -717,7 +1516,7 @@ export async function runLocalAgentTurn(
     const dialogId = await persistFailedLocalTurn({
       adapter: input.adapter,
       agentKey: agentConfig.key,
-      messages: [{ role: "user", content: sanitizedInput }],
+      messages: [{ role: "user", content: input.input }],
       error,
       model: agentConfig.model,
       input,
@@ -725,7 +1524,7 @@ export async function runLocalAgentTurn(
     attachDialogIdToError(error, dialogId);
     throw error;
   }
-  loopTiming.mark("loadDialogHistory", 0);
+  loopTimingMark("loadDialogHistory", 0);
   // 轮内压缩的 canonical 坐标底稿：store 全量历史（未投影）。
   // history 随后会被压缩投影/兜底裁剪整体替换（rebind，非原地改），
   // 该引用保持全量原始顺序不变，锚点坐标与 store 持久化历史对齐。
@@ -798,7 +1597,7 @@ export async function runLocalAgentTurn(
     ...guidanceScopes,
     ...callerScopes,
   ];
-  loopTiming.mark("buildContextBlocks", 0);
+  loopTimingMark("buildContextBlocks", 0);
 
   // Provider 惰性解析：自动压缩需要生成摘要时才 resolve；主循环复用同一实例。
   // resolve 失败由压缩路径吞掉（退回兜底裁剪），主循环再 resolve 时仍走原有 saveTurn 路径。
@@ -810,76 +1609,187 @@ export async function runLocalAgentTurn(
     return resolvedProvider;
   };
 
-  // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）：
-  // 轮开始兜底判定的真实遥测读取（loadLastContextUsage）已迁入 controller。
+  // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）。
+  // 来源实现说明：
+  // 轮开始兜底判定的真实遥测：saveTurn 时把最后一次 provider 调用的真实
+  // input tokens 持久化到本地 per-dialog 记录，turn 开始经
+  // adapter.loadLastContextUsage 读回（单 key O(1)，headless/CLI 均可靠）。
+  // 记录缺失（旧对话）安全落到估算兜底。取「最后一次调用」而非累加值，
+  // 精准反映真实上下文占用。主防线是轮内检查（maybeCompactInLoop）。
   const contextWindow = resolveAgentContextWindow(agentConfig);
   // 压缩触发线：随窗口留足「单轮工具灌水」余量（见 toolOutputCap.ts）。
   // 轮开始与轮内 round 之间共用同一条线。
   const compressionTriggerRatio = resolveCompressionTriggerRatio(contextWindow);
 
-  // 自动上下文压缩（turn 级 controller，initial / in-loop 两入口，实现见
-  // localAutoCompaction.ts）：先于预算兜底。摘要持久化，压缩点之间前缀稳定
-  // 以保住缓存。失败只记日志（fail-open），绝不阻断本轮对话。
+  let realContextUsagePercent: number | undefined;
+  if (
+    input.continueDialogId &&
+    typeof (input.adapter as any).loadLastContextUsage === "function"
+  ) {
+    try {
+      const usage = await (input.adapter as any).loadLastContextUsage(
+        input.continueDialogId,
+      );
+      const inputTokens = usage?.inputTokens;
+      // 守卫：数值合理（>0 且 ≤合理上界）才使用；归一化 clamp 到 [0, 1] 比例
+      // 归一化陷阱防范：planCompression.normalizeContextUsageRatio 将 >1 视为百分数且要求结果 ≤1。
+      // 如果直接传入 >1 的比例（如超限 1.04），会被二次除以 100 变成 1.04% 导致误判；
+      // 因此此处强制 clamp 至 [0, 1] 闭区间。
+      if (
+        typeof inputTokens === "number" &&
+        Number.isFinite(inputTokens) &&
+        inputTokens > 0 &&
+        typeof contextWindow === "number" &&
+        Number.isFinite(contextWindow) &&
+        contextWindow > 0
+      ) {
+        realContextUsagePercent = Math.min(
+          1,
+          Math.max(0, inputTokens / contextWindow),
+        );
+      }
+    } catch (err) {
+      console.warn("[localLoop] loadLastContextUsage failed:", err);
+    }
+  }
+
+  // 自动上下文压缩：先于预算兜底。摘要持久化，压缩点之间前缀稳定以保住缓存。
+  // 失败只记日志，绝不阻断本轮对话。
   // 摘要那次 LLM 调用是一次独立的计费调用，用量必须并入本轮 usage，
   // 否则只出现在 provider 账单上、我们自己的 token 记账看不到。
-  const compaction = createTurnCompactionController({
-    adapter: input.adapter,
-    continueDialogId: input.continueDialogId,
-    model: agentConfig.model,
-    resolveProvider: resolveProviderOnce,
-    contextWindow,
-    compressionTriggerRatio,
-    abortSignal: input.abortSignal,
-    timeoutMs: resolveCompactionTimeoutMs(input),
-    boundary: observationBoundary,
-    getContextUsage: () => usageLedger.lastContextUsage(),
-    getCanonicalCompactionHistory: () => [
-      ...canonicalHistory,
-      ...transcript.persisted(
-        sanitizedPersistedInput,
-        input.persistedInputReference,
-      ),
-    ],
-    getWorkingPrefix: () => transcript.working().slice(0, prefixCount),
-    replaceWorkingView: (next) => transcript.replaceWorkingHistory(next),
-    contextReferenceResolver:
-      input.adapter.host === "cli" ? input.contextReferenceResolver : undefined,
-    onUsage: (usage) => usageLedger.addCompaction(usage),
-  });
-  const initialCompaction = await compaction.runInitial(history);
-  history = initialCompaction.history;
-  // 首轮摘要用量先入暂存，账本（usageLedger）在 buildMessages 之后创建再入账。
-  const initialCompactionUsage = initialCompaction.usage;
-  loopTiming.mark("maybeAutoCompactLocalHistory", 0);
+  let compactionUsage: Record<string, unknown> | undefined;
+
+  // 压缩观测事件：压缩 / 失败 / 跳过 都发射——「为什么没压缩」必须与
+  // 「压缩了什么」同样可见（跳过原因 + 估算 vs 预算 + 真实占用快照）。
+  // 渲染侧按显著性取舍（失败 > 生成摘要 > 投影复用 > 跳过），事件流全量保留。
+  // 轮开始与轮内 round 之间共用同一发射口（emitLoopEvent 本身已 fail-open）。
+  //
+  // 跳过事件的发射门控（降噪）：例行跳过不进事件流——
+  // - no-dialog-id / empty-history / no-pending / below-min-compress-count：
+  //   结构性常态（首轮已有轮内 ephemeral 兜底，不再是保护缺口）；
+  // - below-trigger 且估算 < 50% 历史预算：离线还远，纯噪音。
+  // 发射的是：保护缺口（adapter 缺方法 / 摘要读取失败，任何规模）与
+  // 「接近预算线」的 below-trigger（估算 ≥ 50% 预算——正是排查
+  // 「为什么没压缩」需要的那一段轨迹）。
+  const emitCompactionPhase = (phase: LocalAutoCompactionPhase, scope: "initial" | "in-loop") => {
+    const atMs = Date.now();
+    if (phase.kind === "validating-context") emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "validating-context", atMs, compactionScope: scope });
+    else if (phase.kind === "compaction-start") {
+      emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "compacting", atMs, compactionScope: scope });
+      emitLoopEvent(observationBoundary, { kind: "compaction-start", atMs, scope });
+    } else if (phase.kind === "waiting-provider") emitLoopEvent(observationBoundary, { kind: "turn-phase", phase: "waiting-provider", atMs, compactionScope: scope });
+    else if (phase.kind === "compaction-end") emitLoopEvent(observationBoundary, { kind: "compaction-end", atMs, scope });
+    else emitLoopEvent(observationBoundary, { kind: "compaction-failed", atMs, scope, reason: phase.reason });
+  };
+
+  const emitCompactionObservation = (
+    compacted: Awaited<ReturnType<typeof maybeAutoCompactLocalHistory>>,
+  ) => {
+    const decision = compacted.decision;
+    if (decision?.outcome === "skipped") {
+      const isProtectionGap =
+        decision.skipReason === "adapter-missing-summary-methods" ||
+        decision.skipReason === "load-summary-failed";
+      const approachingBudget =
+        decision.skipReason === "below-trigger" &&
+        typeof decision.estimatedTokens === "number" &&
+        typeof decision.historyBudget === "number" &&
+        decision.historyBudget > 0 &&
+        decision.estimatedTokens >= decision.historyBudget * 0.5;
+      if (!isProtectionGap && !approachingBudget) return;
+    }
+    emitLoopEvent(observationBoundary, {
+      kind: "compaction",
+      atMs: Date.now(),
+      ...(compacted.reason ? { reason: compacted.reason } : {}),
+      summaryGenerated: compacted.summaryGenerated,
+      compressed: compacted.compressed,
+      ...(compacted.failureMessage
+        ? { failed: true, detail: compacted.failureMessage }
+        : {}),
+      ...(decision?.outcome === "skipped"
+        ? { skipped: true, skipReason: decision.skipReason }
+        : {}),
+      ...(decision && "trigger" in decision && decision.trigger
+        ? { trigger: decision.trigger }
+        : {}),
+      ...(decision && "estimatedTokens" in decision && decision.estimatedTokens !== undefined
+        ? { estimatedTokens: decision.estimatedTokens }
+        : {}),
+      ...(decision && "historyBudget" in decision && decision.historyBudget !== undefined
+        ? { historyBudget: decision.historyBudget }
+        : {}),
+      ...(decision && "realUsageRatio" in decision && decision.realUsageRatio !== undefined
+        ? { realUsageRatio: decision.realUsageRatio }
+        : {}),
+      ...(decision && "triggerRatio" in decision && decision.triggerRatio !== undefined
+        ? { triggerRatio: decision.triggerRatio }
+        : {}),
+      ...(compacted.beforeTokens !== undefined
+        ? { beforeTokens: compacted.beforeTokens }
+        : {}),
+      ...(compacted.afterTokens !== undefined
+        ? { afterTokens: compacted.afterTokens }
+        : {}),
+      ...(compacted.savedTokens !== undefined
+        ? { savedTokens: compacted.savedTokens }
+        : {}),
+    });
+  };
+
+  try {
+    const compacted = await maybeAutoCompactLocalHistory({
+      adapter: input.adapter,
+      dialogId: input.continueDialogId,
+      history,
+      model: agentConfig.model,
+      resolveProvider: resolveProviderOnce,
+      contextWindow,
+      realContextUsagePercent,
+      abortSignal: input.abortSignal,
+      timeoutMs: resolveCompactionTimeoutMs(input),
+      onPhase: (phase) => emitCompactionPhase(phase, "initial"),
+    });
+    history = compacted.history;
+    compactionUsage = compacted.usage;
+    emitCompactionObservation(compacted);
+  } catch (error) {
+    console.warn("[localLoop] auto-compaction unexpected error:", error);
+  }
+  loopTimingMark("maybeAutoCompactLocalHistory", 0);
 
   // 上下文预算兜底：必须在消息组装之前裁，否则投影与原始消息错位。
   const trimmedHistory = trimHistoryToContextBudget(history, agentConfig.model, contextWindow);
   if (trimmedHistory.droppedCount > 0) {
     history = trimmedHistory.history;
   }
-  loopTiming.mark("trimHistoryToContextBudget", 0);
+  loopTimingMark("trimHistoryToContextBudget", 0);
 
+  const hasContextBlocks =
+    callerScopes.some((block) => block.content.trim()) ||
+    mergedContextBlockScopes.some((block) => block.content.trim());
+  const promptMessageCount =
+    agentConfig.prompt?.trim() || hasContextBlocks ? 1 : 0;
   const builtMessages = buildMessages({
     prompt: agentConfig.prompt,
     contextBlockScopes: mergedContextBlockScopes,
     history,
-    input: sanitizedInput,
+    input: input.input,
     contextReferenceResolver:
       input.adapter.host === "cli" ? input.contextReferenceResolver : undefined,
   });
   let messages = builtMessages.messages;
-  // 相位说明：buildMessages 读数含发送视图的毒丸 tool_call 降级扫描
-  // （已并入 composeProviderMessages），与旧实现相比该成本从后一相位移入此处。
-  loopTiming.mark("buildMessages", 0);
+  loopTimingMark("buildMessages", 0);
   // 毒丸防御：历史中 arguments 非法 JSON 的 tool_call（典型成因：上游流式截断，
   // 如 GLM 并行 tool_call 丢结尾 `"}]}`）会让网关对整个请求 400（实测 UPSTREAM_400
   // messages[N].tool_calls[0].function.arguments invalid JSON string），而坏消息已
   // 在存储历史里，每轮重放每轮失败 → dialog 永久死锁（"继续"无效）。发送前就地
   // 降级为文本（存储不动、幂等），模型看到意图与 tool 结果文本后可重发调用 → 自愈。
-  // 降级已在 buildMessages → composeProviderMessages 内完成，这里只保留告警。
-  if (builtMessages.poisonDowngraded > 0) {
+  const poisonDowngrade = downgradeUnparsableToolCalls(messages);
+  if (poisonDowngrade.downgraded > 0) {
+    messages = poisonDowngrade.messages;
     console.warn(
-      `[nolo] downgraded ${builtMessages.poisonDowngraded} tool_call(s) with unparsable JSON arguments from outbound history (suspected upstream stream truncation); persisted history untouched`,
+      `[nolo] downgraded ${poisonDowngrade.downgraded} tool_call(s) with unparsable JSON arguments from outbound history (suspected upstream stream truncation); persisted history untouched`,
     );
   }
   // vision 能力检测：catalog 已知模型按 hasVision 判定，未知模型默认 true。
@@ -904,12 +1814,16 @@ export async function runLocalAgentTurn(
     });
   }
 
-  // 发送视图（messages）与持久化原文（raw）收成一本账：压缩只换发送视图，
-  // 持久化不跟投影走（否则丢本轮原始消息、且与持久化锚点的 canonical
-  // 坐标系错位）；注入边界的「预置 assistant 再撤回」两本账同步。
-  // 前缀条数用 buildMessages 实际发出的 prefixCount（旧实现按 prompt/
-  // contextBlocks 自行推算，prompt 为空但仅有 turn-scope 块时会多切一条）。
-  const prefixCount = builtMessages.prefixCount;
+  // 本轮产出消息的原始记录（持久化用）。轮内压缩会把工作视图 messages 换成
+  // 「摘要 + 保留尾部」投影；持久化不能跟投影走（否则丢本轮原始消息、且与
+  // 持久化锚点的 canonical 坐标系错位），所以从首轮起独立累计原始消息。
+  const rawTurnMessages: AgentRuntimeChatMessage[] = messages.slice(
+    promptMessageCount + history.length,
+  );
+  const pushMessage = (msg: AgentRuntimeChatMessage) => {
+    messages.push(msg);
+    rawTurnMessages.push(msg);
+  };
   // 单条工具输出硬上限：让「单轮最大灌水增量」有界，轮内压缩触发线的
   // 余量公式才成立（见 toolOutputCap.ts）。只截进入上下文/持久化的 content，
   // 结构化数组 content（图片等）不截。
@@ -922,31 +1836,15 @@ export async function runLocalAgentTurn(
           content: truncateToolOutputForContext(msg.content, contextWindow),
         }
       : msg;
-  const transcript = createTurnTranscript({
-    initialWorking: messages,
-    prefixCount,
-    historyCount: history.length,
-    capToolMessage,
-  });
 
   const userInputText = extractUserInputText(input.input);
   let toolCallCount = 0;
   // 兜底标记（emptyAssistantFallbackReason / emptyAssistantOutputUsable）已
   // 收敛到 AgentRuntimeResult 本体，这里不再需要本地类型放宽。
   let result: AgentRuntimeResult;
-  // 计费/用量账本：逐次调用证据（callId 优先 provider_call_id）+ 带外摘要
-  // 用量 + 结算口径；成功与失败两条路径共用同一出口。
-  const usageLedger = createTurnUsageLedger({
-    model: agentConfig.model,
-    provider: agentConfig.provider,
-    ...(builtMessages.stablePrefixHash
-      ? {
-          stablePrefixHash: builtMessages.stablePrefixHash,
-          stablePrefixEstimatedTokens: builtMessages.stablePrefixEstimatedTokens,
-        }
-      : {}),
-  });
-  if (initialCompactionUsage) usageLedger.addCompaction(initialCompactionUsage);
+  let turnUsage: Record<string, unknown> | undefined;
+  let contextUsage: Record<string, unknown> | undefined;
+  const usageRecords: NonNullable<AgentRuntimeSaveTurnInput["usageRecords"]> = [];
   let loopError: unknown;
   let round = 0;
   // 空轮修复状态（语义与 server loop 对齐）：
@@ -963,6 +1861,106 @@ export async function runLocalAgentTurn(
   // 供 loopError 分支在 saveTurn 时写入，避免中断时丢失已生成的部分回复。
   let partialContent = "";
   const progressGuard = createLocalLoopProgressGuard(input.progressGuardConfig);
+
+  // 轮内压缩：真实占用 ≥ 触发线时，对「store 全量历史 + 本轮原始消息」
+  // （canonical 坐标）跑压缩管线，持久化新摘要/锚点，然后把发送视图换成
+  // 投影。rawTurnMessages 不参与替换——持久化始终落原始消息，与锚点坐标系
+  // 天然对齐。失败 fail-open（仅警告 + 观测事件），绝不带走本轮。
+  // 轮内压缩的摘要持久化目标。
+  //
+  // 断点修复 1（首轮零保护窗口）：新对话首轮 dialogId 尚未分配（saveTurn
+  // 在循环结束后才创建记录），旧实现 `if (!continueDialogId) return;` 让
+  // 整条压缩管线在最长、最容易灌水失控的首轮完全缺位。现在用 turn 级
+  // 内存摘要存储包装 adapter，跑同一条压缩管线：摘要只活在本轮内、不落盘，
+  // 本轮 prompt 有界；下一轮拿到真 dialogId 后由轮开始检查重新生成并持久化。
+  // 代价仅是首轮可能多一次摘要调用，远低于首轮上下文失控的代价。
+  let ephemeralSummary: Awaited<
+    ReturnType<NonNullable<AgentRuntimeHostAdapter["loadDialogSummary"]>>
+  > = null;
+  const ephemeralDialogId = `ephemeral-${crypto.randomUUID()}`;
+  const compactionAdapter: AgentRuntimeHostAdapter = input.continueDialogId
+    ? input.adapter
+    : {
+        ...input.adapter,
+        loadDialogSummary: async () => ephemeralSummary,
+        saveDialogSummary: async (summaryInput) => {
+          ephemeralSummary = summaryInput;
+        },
+      };
+  const compactionDialogId = input.continueDialogId ?? ephemeralDialogId;
+
+  const maybeCompactInLoop = async (): Promise<void> => {
+    // 断点修复 2（遥测缺失即零保护）：旧实现 `if (!contextUsage) return;`
+    // 与 `if (ratio < trigger) return;` 让「provider 不报 usage」的会话在
+    // 轮内完全没有压缩检查——而估算兜底路径只在轮开始评估一次，轮内灌水
+    // （工具结果恰恰是大头）完全无界，直到 provider 400。现在每轮都让
+    // 决策层跑完整判定：真实占用在手时照旧按触发线强制；缺失时走估算兜底
+    // （与轮开始同一条路径、同一套阈值，语义不变）。
+    const inputTokens = contextUsage
+      ? normalizeUsage(contextUsage as any).input_tokens
+      : 0;
+    const ratio =
+      inputTokens > 0 ? Math.min(1, inputTokens / contextWindow) : undefined;
+    // 廉价门控：真实占用在手且距触发线还有余量（单轮最大灌水 = 工具输出上限
+    // + 回合开销，见 toolOutputCap；0.85 余量保证过线那一轮必然落到评估分支）
+    // 时跳过本轮评估——真实遥测是最准信号，健康路径不为估算付 O(历史) 成本。
+    // 遥测缺失（ratio undefined）必须每轮评估：估算兜底是唯一防线。
+    if (ratio !== undefined && ratio < compressionTriggerRatio * 0.85) {
+      return;
+    }
+    try {
+      const compacted = await maybeAutoCompactLocalHistory({
+        adapter: compactionAdapter,
+        dialogId: compactionDialogId,
+        // canonical 坐标：store 全量历史 + 本轮消息的「持久化形态」
+        // （applyPersistedTurnInput 会把首条 user 消息换成 paste 展开形态）。
+        // 锚点与 sourceHash 都必须按持久化形态计算——否则下轮从 store
+        // 重载后重算 hash 必不匹配，摘要被判无效、白付一次摘要调用。
+        history: [
+          ...canonicalHistory,
+          ...applyPersistedTurnInput(
+            rawTurnMessages,
+            input.persistedInput,
+            input.persistedInputReference,
+          ),
+        ],
+        model: agentConfig.model,
+        resolveProvider: resolveProviderOnce,
+        contextWindow,
+        ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
+        abortSignal: input.abortSignal,
+        timeoutMs: resolveCompactionTimeoutMs(input),
+        onPhase: (phase) => emitCompactionPhase(phase, "in-loop"),
+      });
+      if (compacted.usage) {
+        compactionUsage = addOutOfBandUsage(compactionUsage, compacted.usage);
+      }
+      if (compacted.compressed) {
+        // 发送视图换投影：prompt 前缀保留，历史部分整体替换。
+        // compacted.compressed=false 时 history 是原样返回的 canonical
+        // 全量，不能换（会把完整历史塞回发送视图）。
+        // 投影从 canonical/raw 重建，需重跑循环前的两条管线：
+        // 1. prepareHistoryForNextTurn：规划用持久化形态（paste 全文），
+        //    发送视图必须恢复 context_reference 紧凑引用——否则 collapsed
+        //    paste 的全文会被重新发回 provider，违反 TUI paste 契约；
+        // 2. 毒丸 tool_calls 降级（幂等纯函数）。
+        // 图片剥离不用重跑，发送 seam 每次 provider 调用都会做
+        // filterImagePartsFromMessages。
+        messages = downgradeUnparsableToolCalls([
+          ...messages.slice(0, promptMessageCount),
+          ...prepareHistoryForNextTurn(
+            compacted.history,
+            input.adapter.host === "cli"
+              ? input.contextReferenceResolver
+              : undefined,
+          ),
+        ]).messages;
+      }
+      emitCompactionObservation(compacted);
+    } catch (error) {
+      console.warn("[localLoop] in-loop auto-compaction failed:", error);
+    }
+  };
 
   try {
     // resolveProvider used to sit outside the try: credential / provider-init
@@ -984,23 +1982,21 @@ export async function runLocalAgentTurn(
       let injected = false;
       for (const text of pending) {
         if (typeof text !== "string" || !text.trim()) continue;
-        const safeText = scrubSecrets(text).cleaned;
-        transcript.push({ role: "user", content: safeText });
+        pushMessage({ role: "user", content: text });
         injected = true;
       }
       return injected;
     };
-    const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
     while (true) {
       partialContent = "";
       throwIfAborted(input);
-      loopTiming.mark("roundStart", round);
+      loopTimingMark("roundStart", round);
       // 注入放在 roundStart 标记之后：roundStart 记的是「上一相位结束到本轮开始」
       // 的边界耗时，注入的开销应计入随后的 prepareMessagesForProviderCall 相位，
       // 不污染边界读数。注入仍在构造请求消息之前，本轮 provider 调用即可见。
       applyPendingInjections();
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
-      const preparedMessages = prepareMessagesForProviderCall(transcript.working());
+      const preparedMessages = prepareMessagesForProviderCall(messages);
       const baseRequestMessages = filterImagePartsFromMessages(
         preparedMessages.messages,
         supportsImages,
@@ -1019,7 +2015,7 @@ export async function runLocalAgentTurn(
         dynamicContextChars: builtMessages.dynamicContextChars,
       };
       emptyAssistantRepairPending = false;
-      loopTiming.mark("prepareMessagesForProviderCall", round);
+      loopTimingMark("prepareMessagesForProviderCall", round);
       const shouldStreamDeltas = Boolean(
         input.onTextDelta || input.onObservationEvent || input.observationBoundary,
       );
@@ -1036,14 +2032,6 @@ export async function runLocalAgentTurn(
       // 否则 provider 不会回调，读数恒 0，退化为旧的总时长语义。
       let llmStreamActivity = 0;
 
-      // 缓存遥测（fail-open）：请求侧数字/哈希在调用前计算一次，O(消息数)。
-      const callStartedAt = Date.now();
-      const requestTelemetry = buildRequestTelemetry({
-        // 无 dialogId 的新对话用本 turn 唯一键，避免不同新对话共用一个槽误报漂移。
-        dialogKey: input.continueDialogId || newDialogTelemetryKey,
-        messages: requestMessages,
-        toolsHash: safeToolNamesHash(agentTools),
-      });
       result = await runCompleteWithTimeout({
         provider,
         messages: requestMessages,
@@ -1095,13 +2083,29 @@ export async function runLocalAgentTurn(
         providerName: agentConfig.provider,
         model: provider.model,
       });
-      loopTiming.mark("llmCall", round);
-      usageLedger.recordProviderCall({
-        usage: result.usage,
-        model: result.model,
-        provider: result.provider,
-        telemetry: finalizeCallTelemetry(requestTelemetry, result, round, callStartedAt),
-      });
+      loopTimingMark("llmCall", round);
+      turnUsage = mergeTurnUsage(turnUsage, result.usage);
+      contextUsage = result.usage;
+      if (result.usage && Object.keys(result.usage).length > 0) {
+        usageRecords.push({
+          callId:
+            typeof result.usage.provider_call_id === "string" &&
+            result.usage.provider_call_id.trim()
+              ? result.usage.provider_call_id.trim()
+              : crypto.randomUUID(),
+          usage: result.usage,
+          model: result.model || agentConfig.model || "unknown",
+          ...(result.provider || agentConfig.provider
+            ? { provider: result.provider || agentConfig.provider }
+            : {}),
+          ...(builtMessages.stablePrefixHash
+            ? {
+                stablePrefixHash: builtMessages.stablePrefixHash,
+                stablePrefixEstimatedTokens: builtMessages.stablePrefixEstimatedTokens,
+              }
+            : {}),
+        });
+      }
       // 熔断保护：检查模型是否陷入重复复读输出/工具调用死循环
       const assistantGuardVerdict = progressGuard.observeAssistantResponse(result);
       if (assistantGuardVerdict.action === "stall") {
@@ -1130,7 +2134,7 @@ export async function runLocalAgentTurn(
       }
       const toolCalls = result.tool_calls ?? [];
       const rawToolCallsCount = (result.tool_calls?.length ?? 0) || (Array.isArray((result as any).raw_tool_calls) ? (result as any).raw_tool_calls.length : 0);
-      loopTiming.mark("postLlmProcessing", round);
+      loopTimingMark("postLlmProcessing", round);
       if (toolCalls.length === 0 && rawToolCallsCount === 0) {
         // 空轮判定：无可见输出（文本/图片）且绝对无 tool_calls 意图即空轮。
         // reasoning_content 不算可见输出（见 hasAssistantVisibleOutput 注释），
@@ -1209,18 +2213,19 @@ export async function runLocalAgentTurn(
               ? { reasoning_content: result.reasoning_content }
               : {}),
           };
-          transcript.push(assistantMessage);
+          pushMessage(assistantMessage);
           if (applyPendingInjections()) {
             // 注入续跑也是一个完整回合的结束：补 roundEnd 标记，让 timing 探针
             // 的相位序列保持「每轮都有 roundEnd」的不变式（与工具调用路径一致），
             // 否则续跑轮在 JSONL 里会缺一行、相位配对错位。
-            loopTiming.mark("roundEnd", round);
+            loopTimingMark("roundEnd", round);
             round += 1;
             continue;
           }
-          // 无注入：撤回刚才的预置 assistant 消息（两本账同步撤回），交回统一
-          // 的最终追加路径（skipFinalAppend 语义与 thinkContent 附加都在那里处理）。
-          transcript.popLast();
+          // 无注入：撤回刚才的预置 assistant 消息，交回统一的最终追加路径
+          // （skipFinalAppend 语义与 thinkContent 附加都在那里处理）。
+          messages.pop();
+          rawTurnMessages.pop();
         }
         break;
       }
@@ -1258,7 +2263,7 @@ export async function runLocalAgentTurn(
           // Provider 流内已执行所有工具并推完文本（如 Cursor 流），
           // 消费完 outputBlocks 后直接 break 退出循环，单轮即终态，无多轮死循环风险。
           for (const blockMsg of blocksToOpenAiMessages(outputBlocks)) {
-            transcript.pushTool(blockMsg);
+            pushMessage(capToolMessage(blockMsg));
           }
           skipFinalAppend = true;
           break;
@@ -1267,7 +2272,7 @@ export async function runLocalAgentTurn(
         continue;
       }
       toolCallCount += toolCalls.length;
-      transcript.push({
+      pushMessage({
         role: "assistant",
         content: result.content || null,
         ...(result.reasoning_content ? { reasoning_content: result.reasoning_content } : {}),
@@ -1278,27 +2283,240 @@ export async function runLocalAgentTurn(
         content?: string | null;
         metadata?: Record<string, unknown>;
       }> = [];
-      loopTiming.mark("toolLoopStart", round);
+      loopTimingMark("toolLoopStart", round);
       for (const toolCall of toolCalls) {
+        throwIfAborted(input);
         const toolName = toolCall.function.name;
-        // 单工具事务（参数补全/毒丸诊断、写文件会话门、abort 级联、
-        // tool-start/tool-end 事件与 legacy 桥接、错误转工具结果）整体在
-        // toolCallTransaction.ts；循环侧只保留两本账推入、executedToolResults
-        // 累计与 progressGuard 熔断决策。
-        const { toolResult, toolExecMs } = await executeToolCall({
-          input,
-          toolCall,
-          round,
-          boundary: observationBoundary,
-          loopTiming,
-          userInputText,
-          runToolNames: (agentConfig as any).runScopedToolSurface?.finalToolNames,
-          diagnosticContext: {
-            ...(agentConfig.provider ? { provider: String(agentConfig.provider) } : {}),
-            ...(agentConfig.model ? { model: String(agentConfig.model) } : {}),
-            ...(result.finish_reason ? { finishReason: result.finish_reason } : {}),
+        let toolResult;
+        /**
+         * 工具本体执行耗时（ms）。只包住 adapter.executeTool 这一段，**不含**
+         * action gate 的人工确认等待——否则被门控的工具会记成用户的思考时间。
+         * 流内已执行（result 已填充）与被 gate 取消的分支不产生该值。
+         *
+         * 为什么要记：历史里 11.3% 的轮次带多个工具、总计约 20% 的工具调用本可
+         * 并行，但 tool metadata 从来没记过耗时，导致「轮内并行值不值得做」这个
+         * 决定一直是瞎的（快工具 15–45ms 的话只省 ~1.8s/300 次，慢命令则可能是
+         * 分钟级）。先把数据攒起来，再谈要不要并行。
+         */
+        let toolExecMs: number | undefined;
+        const startedAt = Date.now();
+        loopTimingMark("toolCallStart", round);
+        const argumentsPreview = summarizeToolArguments(toolName, toolCall.function.arguments);
+        // Identity of the arguments AS EMITTED by the model. Deliberately
+        // computed before the truncated-argument repair below rewrites
+        // `toolCall.function.arguments`: the fingerprint means "the same payload
+        // was emitted again", which is the repeat we care about detecting.
+        // The one consequence is that the same logical call emitted once intact
+        // and once truncated gets two identities — a missed repeat, never a
+        // false one.
+        const argumentsFingerprint = buildToolArgumentsFingerprint(toolCall.function.arguments);
+        // 唯一 canonical 出口：emitLoopEvent 发 tool-start，并桥接投影给 legacy onToolEvent。
+        emitLoopEvent(
+          observationBoundary,
+          {
+            kind: "tool-start",
+            round,
+            toolCallId: toolCall.id,
+            toolName,
+            atMs: startedAt,
+            ...(argumentsPreview ? { argumentsPreview } : {}),
+            ...(argumentsFingerprint ? { argumentsFingerprint } : {}),
           },
-        });
+          {
+            type: "tool-call",
+            round,
+            toolCallId: toolCall.id,
+            toolName,
+            ...(argumentsPreview ? { argumentsPreview } : {}),
+          },
+        );
+        try {
+          // 毒丸参数拦截（配合发送 seam 的 downgradeUnparsableToolCalls）：
+          // arguments 非空 string 但 JSON.parse 失败（典型成因：上游流式截断，
+          // 如 GLM 并行 tool_call 丢结尾 `"}]}`）时，执行器只能拿到空对象并
+          // 误报"缺少 xxx 参数"（参数明明生成了），模型无法自纠。这里提前抛出
+          // 明确诊断，走统一 tool-error 路径，tool result 直接指示重新调用。
+          const rawPoisonArguments = toolCall.function?.arguments;
+          if (
+            typeof rawPoisonArguments === "string" &&
+            rawPoisonArguments.trim() !== "" &&
+            !hasParsableObjectArguments(rawPoisonArguments)
+          ) {
+            // 先尝试「内容零损失」的尾补全（只补 `}`/`]`，见 repairTruncatedToolArguments）：
+            // 上游丢尾且截断点落在字符串外时无需再让模型重试一轮；补全不成立才走显式报错。
+            const repairedArguments =
+              repairTruncatedToolArguments(rawPoisonArguments);
+            if (repairedArguments) {
+              console.log(
+                `[tool-args-repair] ${toolName}: 补全被截断的 arguments（${rawPoisonArguments.length} → ${repairedArguments.length} 字符，内容零损失）`,
+              );
+              toolCall.function.arguments = repairedArguments;
+            } else {
+              throw new Error(
+                `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`,
+              );
+            }
+          }
+          const writeTool = toolName === "writeFile" || toolName === "editFile";
+          // Only interactive hosts can approve the session gate. Headless/background
+          // runs retain the pre-gate behavior and execute writes directly.
+          // `fileWriteGateEnabled === false` is the explicit escape hatch
+          // (NOLO_CLI_WRITE_GATE=off, resolved by the CLI); any other value,
+          // including undefined, keeps the gate active — fail-safe default.
+          if (writeTool && input.onActionGate && input.fileWriteGateEnabled !== false) {
+            const writeSession = getFileWriteSessionApproval(input);
+            const policy = evaluateFileWritePolicy({
+              tool: toolName,
+              path: readToolPathForWriteGate(toolCall.function.arguments),
+              sessionApproved: writeSession.approved,
+            });
+            if (policy.permissionDecision === "ask") {
+              const gate: LocalAgentActionGate = {
+                ...policy.permissionRequest,
+                id: `${policy.permissionRequest.id}-${toolCall.id}`,
+                kind: "confirm",
+                toolName,
+                toolCallId: toolCall.id,
+              };
+              const replacement = await runAbortableToolTask(
+                input,
+                input.onActionGate(gate),
+                `${toolName} confirmation`,
+              );
+              const gateResult = replacement?.metadata?.actionGateResult;
+              if (
+                replacement !== undefined &&
+                isCompletedActionGateResult(gateResult)
+              ) {
+                writeSession.approved = true;
+              } else {
+                toolResult = replacement ?? {
+                  content: `${toolName} cancelled: user declined file write confirmation.`,
+                  metadata: {
+                    cancelled: true,
+                    actionGateResult: { gateId: gate.id, status: "cancelled" },
+                  },
+                };
+              }
+            }
+          }
+          if (!toolResult) {
+            const executePromise = input.adapter.executeTool({
+              id: toolCall.id,
+              name: toolName,
+              arguments: toolCall.function.arguments,
+              ...(userInputText ? { userInput: userInputText } : {}),
+              ...(input.runtimeContext
+                ? { runtimeContext: input.runtimeContext }
+                : {}),
+              ...((agentConfig as any).runScopedToolSurface?.finalToolNames
+                ? { runToolNames: (agentConfig as any).runScopedToolSurface.finalToolNames }
+                : {}),
+              ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+            }, {
+              ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+              ...(input.runtimeContext
+                ? { runtimeContext: input.runtimeContext }
+                : {}),
+            });
+            const execStartedAtMs = Date.now();
+            toolResult = await runAbortableToolTask(input, executePromise, toolName);
+            toolExecMs = Date.now() - execStartedAtMs;
+          }
+          const actionGate = buildActionGate({
+            toolName,
+            toolCallId: toolCall.id,
+            metadata: toolResult.metadata,
+          });
+          if (actionGate && input.onActionGate) {
+            const replacement = await runAbortableToolTask(input, input.onActionGate(actionGate), `${toolName} action gate`);
+            if (replacement) {
+              toolResult = replacement;
+            }
+          }
+          const finishedAt = Date.now();
+          const summary = summarizeToolResult(toolResult.content, toolResult.metadata);
+          const safeMetadata = projectSafeToolObservationMetadata(toolResult.metadata);
+          loopTimingMark("toolExecute", round);
+          emitLoopEvent(
+            observationBoundary,
+            {
+              kind: "tool-end",
+              round,
+              toolCallId: toolCall.id,
+              toolName,
+              atMs: finishedAt,
+              ok: toolResult.metadata?.cancelled !== true &&
+                (toolResult.metadata?.actionGateResult as { status?: unknown } | undefined)?.status !== "cancelled" &&
+                (toolResult.metadata?.actionGateResult as { status?: unknown } | undefined)?.status !== "failed",
+              elapsedMs: Math.max(0, finishedAt - startedAt),
+              ...(summary ? { summary } : {}),
+              ...(safeMetadata ? { metadata: safeMetadata } : {}),
+            },
+            {
+              type: "tool-result",
+              round,
+              toolCallId: toolCall.id,
+              toolName,
+              elapsedMs: Math.max(0, finishedAt - startedAt),
+              ...(summary ? { summary } : {}),
+              ...(typeof toolResult.content === "string"
+                ? { content: toolResult.content }
+                : {}),
+              metadata: toolResult.metadata,
+            },
+          );
+        } catch (error) {
+          const finishedAt = Date.now();
+          emitLoopEvent(
+            observationBoundary,
+            {
+              kind: "tool-end",
+              round,
+              toolCallId: toolCall.id,
+              toolName,
+              atMs: finishedAt,
+              ok: false,
+              elapsedMs: Math.max(0, finishedAt - startedAt),
+              errorMessage: toErrorMessage(error),
+            },
+            {
+              type: "tool-error",
+              round,
+              toolCallId: toolCall.id,
+              toolName,
+              elapsedMs: Math.max(0, finishedAt - startedAt),
+              message: toErrorMessage(error),
+            },
+          );
+          // abort 优先：race 赢后必须原样上抛（error 上带 pendingToolName），
+          // 不能被 shouldReturnToolExecutionErrors 转成 tool result 吞掉。
+          if (
+            error &&
+            typeof error === "object" &&
+            (error as { code?: unknown }).code === LOCAL_TURN_ABORTED_CODE
+          ) {
+            throw error;
+          }
+          if (!shouldReturnToolExecutionErrors(input.adapter)) throw error;
+          toolResult = {
+            content:
+              formatStructuredToolExecutionError({ toolName, error }) ??
+              formatToolExecutionError({ toolName, error }),
+            metadata: {
+              error: true,
+              toolName,
+              message: toErrorMessage(error),
+              ...(
+                error &&
+                typeof error === "object" &&
+                typeof (error as { code?: unknown }).code === "string"
+                  ? { code: (error as { code: string }).code }
+                  : {}
+              ),
+            },
+          };
+        }
         // 观测字段合并到 metadata：随 tool_result_metadata 一并持久化，供后续
         // 从历史反推工具耗时分布。formatToolMessageContent 会把它剔除，
         // 模型可见内容逐字节不变（见该函数注释）。
@@ -1316,18 +2534,20 @@ export async function runLocalAgentTurn(
           content: toolResult.content,
           metadata: toolResult.metadata,
         });
-        loopTiming.mark("toolResultFormat", round);
-        transcript.pushTool({
-          role: "tool",
-          content: formatToolMessageContent({
+        loopTimingMark("toolResultFormat", round);
+        pushMessage(
+          capToolMessage({
+            role: "tool",
+            content: formatToolMessageContent({
+              toolName,
+              content: toolResult.content,
+              metadata: observedMetadata,
+            }),
+            tool_call_id: toolCall.id,
             toolName,
-            content: toolResult.content,
-            metadata: observedMetadata,
+            ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
           }),
-          tool_call_id: toolCall.id,
-          toolName,
-          ...(observedMetadata ? { tool_result_metadata: observedMetadata } : {}),
-        });
+        );
       }
       // 熔断保护：检查工具调用序列与返回结果是否陷入无进展停滞死循环
       const toolExecutionGuardVerdict = progressGuard.observeToolExecution(
@@ -1353,8 +2573,8 @@ export async function runLocalAgentTurn(
       // 轮内压缩主防线：工具结果灌水之后、下一轮 provider 调用之前。
       // contextUsage 在手时按真实遥测判定；缺失时每轮走估算兜底——
       // 「不报 usage 的上游」与「新对话首轮（无 dialogId）」都不再有零保护窗口。
-      await compaction.maybeCompactInLoop();
-      loopTiming.mark("roundEnd", round);
+      await maybeCompactInLoop();
+      loopTimingMark("roundEnd", round);
       round += 1;
     }
   } catch (error) {
@@ -1363,14 +2583,28 @@ export async function runLocalAgentTurn(
 
   // 即使 provider 循环失败（超时/额度/凭证等），也保存 dialog 以便续聊与复盘
   if (loopError) {
-    const turnMessages = transcript.persisted(
-      sanitizedPersistedInput,
+    const turnMessages = applyPersistedTurnInput(
+      rawTurnMessages,
+      input.persistedInput,
       input.persistedInputReference,
     );
-    // 本轮全部计费证据（带外的压缩摘要调用排在前面，与成功路径同一出口）。
-    // saveTurn 与「挂到错误上带给调用方」用的必须是同一批记录，否则状态行的
-    // 会话累计和落盘账目会对不上。
-    const failedTurnUsageRecords = usageLedger.records();
+    // 本轮全部计费证据（带外的压缩摘要调用排在前面）。saveTurn 与「挂到错误上
+    // 带给调用方」用的必须是同一批记录，否则状态行的会话累计和落盘账目会对不上。
+    const failedTurnUsageRecords = [
+      ...(compactionUsage
+        ? [{
+            callId:
+              typeof compactionUsage.provider_call_id === "string" &&
+              compactionUsage.provider_call_id.trim()
+                ? compactionUsage.provider_call_id.trim()
+                : crypto.randomUUID(),
+            usage: compactionUsage,
+            model: agentConfig.model || "unknown",
+            ...(agentConfig.provider ? { provider: agentConfig.provider } : {}),
+          }]
+        : []),
+      ...usageRecords,
+    ];
     const dialogId = await persistFailedLocalTurn({
       adapter: input.adapter,
       agentKey: agentConfig.key,
@@ -1379,8 +2613,8 @@ export async function runLocalAgentTurn(
       model: agentConfig.model,
       toolCallCount,
       partialContent,
-      usage: usageLedger.lastContextUsage(),
-      accountingUsage: usageLedger.accounting(),
+      usage: contextUsage,
+      accountingUsage: addOutOfBandUsage(turnUsage, compactionUsage),
       usageRecords: failedTurnUsageRecords,
       billingConfig,
       input,
@@ -1390,7 +2624,7 @@ export async function runLocalAgentTurn(
     // 计进会话累计。
     attachUsageRecordsToError(loopError, failedTurnUsageRecords);
     // 失败路径同样落盘计时数据，避免中断时丢失已收集的相位。
-    await loopTiming.flush();
+    await loopTimingFlush();
     throw loopError;
   }
 
@@ -1403,7 +2637,7 @@ export async function runLocalAgentTurn(
       result.emptyAssistantFallbackReason,
       result.reasoning_content,
     );
-    transcript.push({
+    pushMessage({
       role: "assistant",
       content: result.content,
       // 与中间轮(:561)一致带上 reasoning_content,让 saveTurn 持久化思维链,
@@ -1414,14 +2648,25 @@ export async function runLocalAgentTurn(
       ...(truncatedReasoningTailLog ? { thinkContent: truncatedReasoningTailLog } : {}),
     });
   }
-  const turnMessages = transcript.persisted(
-    sanitizedPersistedInput,
+  const turnMessages = applyPersistedTurnInput(
+    rawTurnMessages,
+    input.persistedInput,
     input.persistedInputReference,
   );
-  // 全部计费证据（压缩记录排首位，压缩记录仅在用量非空时入账）。
-  const usageRecords = usageLedger.records(result.model);
-  const accountingUsage = usageLedger.accounting();
-  loopTiming.mark("saveTurnStart", round);
+  if (compactionUsage && Object.keys(compactionUsage).length > 0) {
+    usageRecords.unshift({
+      callId:
+        typeof compactionUsage.provider_call_id === "string" &&
+        compactionUsage.provider_call_id.trim()
+          ? compactionUsage.provider_call_id.trim()
+          : crypto.randomUUID(),
+      usage: compactionUsage,
+      model: agentConfig.model || result.model || "unknown",
+      ...(agentConfig.provider ? { provider: agentConfig.provider } : {}),
+    });
+  }
+  const accountingUsage = addOutOfBandUsage(turnUsage, compactionUsage);
+  loopTimingMark("saveTurnStart", round);
   const saved = await input.adapter.saveTurn({
     agentKey: agentConfig.key,
     messages: turnMessages,
@@ -1440,8 +2685,8 @@ export async function runLocalAgentTurn(
     ...(input.inheritedFromDialogKey ? { inheritedFromDialogKey: input.inheritedFromDialogKey } : {}),
     ...(input.parentDialogId ? { parentDialogId: input.parentDialogId } : {}),
   });
-  loopTiming.mark("saveTurn", round);
-  await loopTiming.flush();
+  loopTimingMark("saveTurn", round);
+  await loopTimingFlush();
 
   return {
     ...result,

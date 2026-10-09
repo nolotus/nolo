@@ -148,8 +148,6 @@ export interface AgentRuntimeResult {
    * 收到收尾帧即证明流走完了，此时空轮应判为 empty_completion。
    */
   stream_complete?: boolean;
-  /** 本次请求工具定义（name+schema）短哈希，仅供缓存遥测。 */
-  toolsHash?: string;
   /**
    * Canonical 有序 block 输出序列（text/thinking/toolCall 交错）。
    * provider 有此序列时通过 output 返回，localLoop 按 block 消费。
