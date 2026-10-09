@@ -15,11 +15,17 @@ export async function mediaJobRequest<T>(
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
-  const body = await response.json();
+  // 网关/代理故障（如 502 HTML）时 body 不是 JSON，解析失败不能让原始 HTTP 错误被 SyntaxError 掩盖。
+  let body: any = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
   if (!response.ok) {
     const error = body?.error;
     throw Object.assign(
-      new Error(error?.message ?? "Media request failed"),
+      new Error(error?.message ?? `Media request failed (HTTP ${response.status})`),
       error,
     );
   }
