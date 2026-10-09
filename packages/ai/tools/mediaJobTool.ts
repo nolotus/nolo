@@ -12,7 +12,7 @@ const TIER_LABELS: Record<"outline" | "translate" | "full", string> = {
 export const mediaJobSchema = {
   name: "mediaJobTool",
   description:
-    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理），并指定目标语言。启动前建议先 quote。",
+    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理）。translate 档必须指定目标语言 targetLang（用户明确表达要翻译成的语言时才传，不要擅自猜语言），缺目标语言的 translate start 会被服务端拒绝。启动前建议先 quote。",
   parameters: {
     type: "object",
     properties: {
@@ -43,12 +43,12 @@ export const mediaJobSchema = {
         type: "string",
         enum: ["outline", "translate", "full"],
         description:
-          "处理深度：outline 仅大纲，translate 翻译，full 完整处理。action=start 时必须显式传用户已确认的档位（服务端按最贵档扣费，缺省会按 job 上已落库的最高档启动）。",
+          "处理深度：outline 仅大纲（无需目标语言）；translate 翻译（必须同时传 targetLang，否则 start 返回 400 missing_target_language）；full 完整处理（传 targetLang 才含翻译，不传则只做原文转写+大纲/重点，不含译文）。action=start 时必须显式传用户已确认的档位（服务端按最贵档扣费，缺省会按 job 上已落库的最高档启动）。",
       },
       targetLang: {
         type: "string",
         description:
-          "目标语言代码（如 zh、en、ja）；用于 translate/full 翻译。",
+          "目标语言代码（如 zh、en、ja）。depth=translate 时必填、depth=full 时传了才会翻译；不要替用户猜语言，只有用户明确表达了要翻译成的语言时才传。",
       },
     },
     required: ["action"],

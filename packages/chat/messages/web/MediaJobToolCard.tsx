@@ -111,6 +111,10 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     }
   }, [initialJob]);
 
+  // translate 档必须有目标语言（请求已持久到 job 或 job 原有）。缺失时置灰该档并给出提示，
+  // 避免展示一个「可启动」的廉价「原文+译文对照」价格（服务端 start 也会 400）。
+  const knownTargetLang = job?.targetLang ?? initialJob?.targetLang;
+
   // tiers 缺失时用单个 quote 渲染一档
   const tiers: MediaJobTier[] = useMemo(() => {
     if (Array.isArray(data.tiers) && data.tiers.length > 0) {
@@ -165,6 +169,10 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
 
   const handleStartTier = async (tier: MediaJobTier) => {
     if (readOnly || startingRef.current) return;
+    if (tier.depth === "translate" && !knownTargetLang) {
+      setStartError("请先指定译文语言（如中文、英文）后再启动翻译");
+      return;
+    }
     const targetId = jobId || job?.id;
     if (!targetId) {
       setStartError("缺少任务 ID");
@@ -389,6 +397,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
           >
             {tiers.map((tier) => {
               const quote = tier.quote;
+              const needsLang = tier.depth === "translate" && !knownTargetLang;
               const affordableToSec = quote?.affordableToSec;
               const balance = quote?.balanceCredits;
               const minCredits = quote?.totalCredits?.[0] ?? 0;
@@ -462,6 +471,19 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                       {insufficientText}
                     </div>
                   )}
+                  {needsLang && (
+                    <div
+                      data-testid="missing-target-lang-hint"
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--textMuted, #6b7280)",
+                        marginTop: 4,
+                        fontWeight: 500,
+                      }}
+                    >
+                      请先指定译文语言（如中文、英文）后再启动翻译
+                    </div>
+                  )}
                 </>
               );
 
@@ -495,7 +517,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                   key={tier.depth}
                   type="button"
                   data-testid={`tier-btn-${tier.depth}`}
-                  disabled={isInsufficient || starting}
+                  disabled={isInsufficient || starting || needsLang}
                   onClick={() => handleStartTier(tier)}
                   style={{
                     display: "flex",
@@ -508,8 +530,10 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     backgroundColor:
                       "var(--surfaceDefault, var(--background, #ffffff))",
                     cursor:
-                      isInsufficient || starting ? "not-allowed" : "pointer",
-                    opacity: isInsufficient ? 0.6 : 1,
+                      isInsufficient || starting || needsLang
+                        ? "not-allowed"
+                        : "pointer",
+                    opacity: isInsufficient || needsLang ? 0.6 : 1,
                     textAlign: "left",
                     width: "100%",
                     boxSizing: "border-box",
