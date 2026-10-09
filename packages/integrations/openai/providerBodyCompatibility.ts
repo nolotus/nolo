@@ -54,6 +54,41 @@ export const normalizeChatCompletionsBodyForProvider = ({
   const nextBody: Record<string, any> = { ...body, model };
   const normalizedProvider = asTrimmedLowercaseString(provider);
 
+  // Luna Chat Completions supports function calling only with reasoning off.
+  // Keep the selected model, endpoint and token/billing fields unchanged.
+  const isLuna = /(?:^|\/)gpt-6-luna(?:$|[-._].*)/i.test(asTrimmedLowercaseString(model));
+  if (isLuna &&
+      Array.isArray(nextBody.tools) &&
+      nextBody.tools.some((tool: any) => tool?.type === "function")) {
+    nextBody.reasoning_effort = "none";
+  }
+
+  if (Array.isArray(nextBody.messages)) {
+    const isGemini =
+      normalizedProvider === "google" ||
+      normalizedProvider === "google-antigravity" ||
+      normalizedProvider.startsWith("google-") ||
+      normalizedProvider.includes("gemini") ||
+      asTrimmedLowercaseString(model).includes("gemini") ||
+      (typeof endpoint === "string" && endpoint.includes("googleapis.com"));
+    if (!isGemini) {
+      nextBody.messages = nextBody.messages.map((msg: any) => {
+        if (msg?.role === "assistant" && Array.isArray(msg.tool_calls)) {
+          return {
+            ...msg,
+            tool_calls: msg.tool_calls.map((tc: any) => {
+              if (!tc || typeof tc !== "object") return tc;
+              const { id, type = "function", function: fn } = tc;
+              return { id, type, function: fn };
+            }),
+          };
+        }
+        return msg;
+      });
+    }
+  }
+
+
   if (normalizedProvider === "fireworks" && isFireworksKimiModel(model)) {
     delete nextBody.reasoning;
     delete nextBody.reasoning_effort;

@@ -183,6 +183,53 @@ export const registerRNUploadAdapter = (adapter: RNOverrideUploadHandler) => {
   rnUploadAdapter = adapter;
 };
 
+export type UploadProgressHandler = (loaded: number, total: number) => void;
+
+/**
+ * Web 上传进度通道：fetch 拿不到上传进度，有 onProgress 时改走 XHR。
+ * 头与 noloRequest 同源（只加 Authorization，不设 Content-Type 交给浏览器
+ * 生成 multipart boundary），返回值语义与 fetch 分支一致（response.ok）。
+ * 网络错误 / abort 以 reject 形式抛出，由调用方 catch 统一转成 false。
+ */
+const xhrUploadRequest = (
+  url: string,
+  formData: FormData,
+  state: any,
+  onProgress: UploadProgressHandler,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; status: number }> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Upload aborted", "AbortError"));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    const token = selectIdentityToken(state) ?? null;
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    const onAbortSignal = () => xhr.abort();
+    signal?.addEventListener("abort", onAbortSignal, { once: true });
+    const cleanup = () => signal?.removeEventListener("abort", onAbortSignal);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      cleanup();
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status });
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new Error("Network error during upload"));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      reject(new DOMException("Upload aborted", "AbortError"));
+    };
+    xhr.send(formData);
+  });
+
 export const noloUploadRequest = async (
   server: string,
   uploadConfig: {
@@ -192,7 +239,8 @@ export const noloUploadRequest = async (
     userId?: string;
   },
   state: any,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: UploadProgressHandler
 ): Promise<boolean> => {
   const { file, metadata, customKey, userId } = uploadConfig;
   try {
@@ -228,6 +276,22 @@ export const noloUploadRequest = async (
     formData.append("customKey", customKey); // 添加自定义键
     if (userId) {
       formData.append("userId", userId); // 添加用户ID（如果有）
+    }
+
+    if (onProgress && typeof XMLHttpRequest !== "undefined") {
+      const result = await xhrUploadRequest(
+        server + `${API_ENDPOINTS.DATABASE}/upload`,
+        formData,
+        state,
+        onProgress,
+        signal
+      );
+      if (!result.ok) {
+        console.error(
+          `Upload request failed for ${customKey} on ${server}: HTTP ${result.status}`
+        );
+      }
+      return result.ok;
     }
 
     const response = await noloRequest(

@@ -1,3 +1,32 @@
+export const ARTIFACT_MAX_MESSAGE_BYTES = 1_000_000;
+
+export function acceptArtifactMessage(
+  event: { source: unknown; data: unknown },
+  options: {
+    iframeWindow: unknown;
+    allowedEvents?: Record<string, (payload: unknown) => boolean>;
+    maxBytes?: number;
+    onEvent?: (event: { type: string; payload: unknown }) => void;
+  }
+): boolean {
+  if (event.source !== options.iframeWindow) return false;
+  const message = event.data as Record<string, unknown> | null;
+  if (!message || message.source !== "nolo-artifact-runtime") return false;
+  let bytes: number;
+  try {
+    bytes = new TextEncoder().encode(JSON.stringify(message)).byteLength;
+  } catch {
+    return false;
+  }
+  if (bytes > (options.maxBytes ?? ARTIFACT_MAX_MESSAGE_BYTES)) return false;
+  if (message.type !== "nolo-artifact-event") return true;
+  if (typeof message.eventType !== "string") return false;
+  const validator = options.allowedEvents?.[message.eventType];
+  if (!validator || !validator(message.payload)) return false;
+  options.onEvent?.({ type: message.eventType, payload: message.payload });
+  return true;
+}
+
 export type ArtifactPreviewBuildResult = {
   code: string | null;
   error: string | null;

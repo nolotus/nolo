@@ -291,6 +291,11 @@ export type RunAgentTurnResult = {
   exitCode: number;
   dialogId?: string;
   /**
+   * 本轮最终 assistant 正文（local 成功路径）。后台 run 结算据此把完整报告
+   * 落盘为 `<runId>.result.md`，编排者不必再解析带 ANSI 的 .log。
+   */
+  finalText?: string;
+  /**
    * 本轮以空 assistant 兜底（诊断文案收尾、不抛错）收尾时的成因
    * （length_truncated / stream_truncated / empty_completion）。
    * 由 localLoop 透传；交互侧继续按成功展示，后台 run 编排者据此

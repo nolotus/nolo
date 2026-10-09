@@ -267,6 +267,12 @@ export function buildPlatformChatCompletionRequest(args: {
   dialogId?: string;
   requestId?: string;
 }) {
+  if (!args.providerConfig.authToken?.trim()) {
+    throw Object.assign(
+      new Error("desktop platform provider failed: AUTH_NO_TOKEN"),
+      { code: "AUTH_NO_TOKEN", authCode: "AUTH_NO_TOKEN", stage: "provider" },
+    );
+  }
   const usesResponsesApi = isResponsesEndpoint(args.providerConfig.endpoint);
   const requestOptions = usesResponsesApi
     ? toResponsesRequestOptions(args.providerConfig.requestOptions)

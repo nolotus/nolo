@@ -414,11 +414,12 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
 }
 
 export async function buildChromeConnectorStatus(
-  args: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> = {},
+  args: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> & { browser?: ConnectorBrowser } = {},
 ): Promise<ChromeConnectorStatusReport> {
   const env = args.env ?? process.env;
   const home = args.home ?? env.HOME ?? "";
   const platform = args.platform ?? process.platform;
+  const browserTarget = args.browser;
 
   let connectorRoot: string | null = args.connectorRoot ?? null;
   let rootError: string | null = null;
@@ -468,7 +469,9 @@ export async function buildChromeConnectorStatus(
 
   // Token + 127.0.0.1 only, so the live probe runs even when no checkout was found: an installed CLI
   // pointing at a desktop-installed native host is a healthy state and must not read as "offline".
-  const requestChrome = args.requestChrome ?? createChromeConnectorClient().request;
+  // An explicit --browser routes the probe to that host's endpoint; default is the Chrome endpoint.
+  const requestChrome =
+    args.requestChrome ?? createChromeConnectorClient({ browser: browserTarget }).request;
   const probe = await probeConnectorRpc(requestChrome);
   report.rpc.online = probe.online;
   report.rpc.extensionId = probe.extensionId;
@@ -495,11 +498,12 @@ export async function buildChromeConnectorStatus(
     return report;
   }
 
-  // Follow the connected build: a live Firefox session is checked against the Mozilla manifest
-  // (its `allowed_extensions` gecko id). With nothing connected, prefer whichever manifest exists
-  // so a Firefox-only setup is not told to install a Chrome manifest it does not need.
+  // An explicit --browser pins which manifest to audit; otherwise follow the connected build (a
+  // live Firefox session is checked against the Mozilla manifest's `allowed_extensions` gecko id).
+  // With nothing connected, prefer whichever manifest exists so a Firefox-only setup is not told
+  // to install a Chrome manifest it does not need.
   let manifestBrowser: ConnectorBrowser =
-    report.rpc.browser === "firefox" ? "firefox" : "chrome";
+    browserTarget ?? (report.rpc.browser === "firefox" ? "firefox" : "chrome");
   if (!report.rpc.browser) {
     try {
       const chromeManifestPath = resolveNativeHostInstallPaths({
@@ -634,9 +638,14 @@ export async function runChromeStatusCommand(
   deps: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> = {},
 ) {
   const output = deps.output ?? process.stdout;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write('[nolo] Chrome connector status failed: --browser must be "chrome" or "firefox".\n');
+    return 1;
+  }
   let report: ChromeConnectorStatusReport;
   try {
-    report = await buildChromeConnectorStatus(deps);
+    report = await buildChromeConnectorStatus({ ...deps, browser });
   } catch (error) {
     output.write(`[nolo] Chrome connector status failed: ${toErrorMessage(error)}\n`);
     return 1;
@@ -649,8 +658,8 @@ export async function runChromeStatusCommand(
   return report.ok ? 0 : 1;
 }
 
-/** `--browser chrome|firefox`（同时接受 `--browser=firefox` 写法）；默认 Chrome，非法值返回 null。 */
-function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
+/** `--browser chrome|firefox`（同时接受 `--browser=firefox` 写法）；未给返回 undefined，非法值返回 null。 */
+function readBrowserOption(args: string[]): "chrome" | "firefox" | null | undefined {
   const equalsForm = args.find((arg) => arg.startsWith("--browser="));
   const index = args.indexOf("--browser");
   const raw =
@@ -659,7 +668,7 @@ function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
       : index >= 0
         ? args[index + 1]
         : undefined;
-  if (raw === undefined) return "chrome";
+  if (raw === undefined) return undefined;
   const value = raw.trim();
   if (value === "chrome" || value === "firefox") return value;
   return null;
@@ -668,13 +677,14 @@ function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
 export async function runChromeInstallCommand(args: string[], deps: ChromeCommandDeps = {}) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const browser = readBrowserOption(args);
-  if (browser === null) {
+  const parsed = readBrowserOption(args);
+  if (parsed === null) {
     output.write(
       '[nolo] Chrome native host install failed: --browser must be "chrome" or "firefox".\n',
     );
     return 1;
   }
+  const browser = parsed ?? "chrome";
   const install = deps.installNativeHost ??
     (installNativeHostManifest as (options?: InstallOptions) => InstallResult);
 
@@ -740,11 +750,48 @@ export async function runChromeInstallCommand(args: string[], deps: ChromeComman
 
 export async function runChromeReloadCommand(args: string[], deps: ChromeCommandDeps = {}) {
   const output = deps.output ?? process.stdout;
-  // Deliberately the *unverified* client: reload is the recovery path when the running extension is
-  // stale (older protocol / missing features), so requiring a protocol handshake first would turn the
-  // one fix that exists into a dead end.
-  const requestChrome = deps.requestChrome ?? createChromeConnectorClient().request;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write('[nolo] Chrome connector reload failed: --browser must be "chrome" or "firefox".\n');
+    return 1;
+  }
+  // Deliberately *not* the full verified client: reload is the recovery path when the running
+  // extension is stale (older protocol / missing features), so a protocol/features handshake would
+  // turn the one fix that exists into a dead end. --browser selects which host's extension to
+  // reload.
+  const requestChrome =
+    deps.requestChrome ?? createChromeConnectorClient({ browser }).request;
   try {
+    // But an *explicit* --browser still gets an identity check first: a wrong endpoint override (or
+    // a stale shared-port install where Firefox grabbed Chrome's port) must not reload the other
+    // browser. Identity only — a stale build of the *correct* browser still reloads, which is the
+    // whole point of the recovery path. Skipped when no --browser was given (ambient endpoint, same
+    // as before) and when the host is unreachable (let reload itself report that failure).
+    if (browser) {
+      try {
+        const info = (await requestChrome("connector_info", {})) as
+          | { extensionId?: unknown }
+          | undefined;
+        const connectedBrowser = resolveConnectorBrowser(
+          typeof info?.extensionId === "string" ? info.extensionId : null,
+        );
+        if (connectedBrowser !== null && connectedBrowser !== browser) {
+          const mismatch = new Error(
+            `the connector on this endpoint answers as ${browserLabel(connectedBrowser)}, ` +
+              `not ${browserLabel(browser)} — refusing to reload the wrong browser. ` +
+              "Check NOLO_CHROME_CONNECTOR_RPC_URL / the per-browser port overrides.",
+          ) as Error & { code?: string };
+          mismatch.code = "CHROME_CONNECTOR_EXTENSION_MISMATCH";
+          throw mismatch;
+        }
+      } catch (error) {
+        // Propagate only the identity refusal; a plain RPC failure here must not mask reload's own
+        // (better) error reporting below.
+        if ((error as { code?: string })?.code === "CHROME_CONNECTOR_EXTENSION_MISMATCH") {
+          throw error;
+        }
+      }
+    }
     const result = await requestChrome("reload_extension", {});
     if (args.includes("--json")) {
       output.write(`${JSON.stringify({ ok: true, result }, null, 2)}\n`);

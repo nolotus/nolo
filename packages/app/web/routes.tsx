@@ -14,6 +14,12 @@ import {
 } from "app/constants/mySections";
 import { legacySettingRoutes, settingRoutes } from "app/settings/routes";
 import ShareImportPage from "app/pages/ShareImportPage";
+import NewChatPage from "app/pages/NewChatPage";
+// Keep the dialog/editor/tool graph off unrelated URLs. The existing route
+// Suspense boundary is also used by streaming SSR, so matched pages still render
+// fully; Home and NewChatPage remain eager rather than delaying their first paint.
+const PageLoader = lazy(() => import("render/page/PageLoader"));
+const MediaLecturePage = lazy(() => import("app/pages/MediaLecturePage"));
 
 import PageLoading from "render/web/ui/PageLoading";
 import { getIsDesktopApp } from "app/utils/env";
@@ -23,7 +29,6 @@ const Lab = lazy(() => import("app/pages/Lab"));
 // Cloud-only pages: 用 cloudLazy 包装，local 模式返回 null 组件。
 const PricePage = cloudLazy("app/pages/Pricing/Price", () => null);
 const RechargePage = cloudLazy("app/pages/Recharge", () => null);
-const NewChatPage = lazy(() => import("app/pages/NewChatPage"));
 const AgentExplore = lazy(() => import("ai/agent/web/AgentExplore"));
 const GuidedAgentCreatePage = lazy(() => import("ai/agent/web/GuidedAgentCreatePage"));
 const LocalQuickCreateAgent = lazy(() => import("app/pages/LocalQuickCreateAgent"));
@@ -37,11 +42,12 @@ const QuickStartGuidePage = lazy(() => import("app/pages/QuickStartGuidePage"));
 const PrivacyPolicyPage = lazy(() => import("app/pages/PrivacyPolicyPage"));
 const TermsOfServicePage = lazy(() => import("app/pages/TermsOfServicePage"));
 const AUPPage = lazy(() => import("app/pages/AUPPage"));
-// Dialog and other content keys: keep dynamic so space/routes cannot force DialogPage into the shell graph.
-const PageLoader = lazy(() => import("render/page/PageLoader"));
 const BrowserPage = lazy(() => import("app/pages/browser-workbench/BrowserPage"));
 const BrowserFixturePage = lazy(
   () => import("app/pages/browser-workbench/BrowserFixturePage"),
+);
+const LectureOverviewFixturePage = lazy(
+  () => import("app/pages/lecture-overview-fixture/LectureOverviewFixturePage"),
 );
 const AgentEmailE2EPage = cloudLazy("app/email/AgentEmailE2EPage", () => null);
 const AgentInboxPage = lazy(() => import("ai/agent/web/AgentInboxPage"));
@@ -84,7 +90,10 @@ const renderMySectionRoute = (section: MySectionDefinition) => {
 
   return {
     path: section.path,
-    element: withSuspense(<MyContentPage sectionId={section.id} />, section.defaultTitle),
+    element: withSuspense(
+      <MyContentPage sectionId={section.id} />,
+      section.defaultTitle,
+    ),
   };
 };
 
@@ -101,9 +110,18 @@ const commonRoutes = [
   settingRoutes,
   legacySettingRoutes,
   ...MY_ROUTE_SECTIONS.map(renderMySectionRoute),
-  { path: "profile/:userId", element: withSuspense(<CreatorPage />, "个人主页") },
-  { path: "share/community", element: withSuspense(<ShareCommunityPage />, "社区分享") },
-  { path: "share/:token", element: withSuspense(<ShareImportPage />, "分享内容") },
+  {
+    path: "profile/:userId",
+    element: withSuspense(<CreatorPage />, "个人主页"),
+  },
+  {
+    path: "share/community",
+    element: withSuspense(<ShareCommunityPage />, "社区分享"),
+  },
+  {
+    path: "share/:token",
+    element: withSuspense(<ShareImportPage />, "分享内容"),
+  },
   {
     path: ":agentPageKey/inbox",
     element: withSuspense(<AgentInboxPage />, "Agent 收件箱"),
@@ -126,6 +144,13 @@ export const routes = () => [
           path: "/dev/browser-fixture",
           element: withSuspense(<BrowserFixturePage />, "Browser Fixture"),
         },
+        {
+          path: "/dev/lecture-overview",
+          element: withSuspense(
+            <LectureOverviewFixturePage />,
+            "Lecture Overview",
+          ),
+        },
       ]
     : []),
   {
@@ -134,6 +159,10 @@ export const routes = () => [
     children: [
       ...commonRoutes,
       { index: true, element: <Home /> },
+      {
+        path: "media-jobs/:id",
+        element: withSuspense(<MediaLecturePage />, "课程笔记"),
+      },
 
       // 按页面给出清晰的加载文案
       { path: "lab", element: withSuspense(<Lab />, "实验室页面") },
