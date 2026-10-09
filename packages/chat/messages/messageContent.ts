@@ -10,7 +10,7 @@
 import type { RootState } from "app/store";
 import { upload } from "database/dbSlice";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
-import { dataURLtoFile, waitForFileReady } from "app/utils/imageUtils";
+import { dataURLtoFile, waitForFileReady } from "core/file/dataUrl";
 import { buildMessageFileContentUrl } from "./fileUrl";
 
 import { ContentType } from "app/types";

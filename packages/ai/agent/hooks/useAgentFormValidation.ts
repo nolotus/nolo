@@ -8,7 +8,7 @@ import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import { createAgentKey } from "database/keys";
 import { useTranslation } from "react-i18next";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { addContentToSpace, updateContentTitle } from "create/space/content/contentThunks";
 import {
   getCreateAgentSchema,

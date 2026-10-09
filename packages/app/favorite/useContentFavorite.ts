@@ -6,8 +6,8 @@ import { toast } from "app/utils/toast"
 import {
   useIsContentFavorited,
   toggleContentFavorite,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 
 export function useContentFavorite(contentKey: string) {
   const { t } = useTranslation("ai");

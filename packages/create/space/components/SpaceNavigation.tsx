@@ -10,7 +10,7 @@ import { useAppSelector } from "app/store";
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { useSpaceLoading } from "../spaceMembershipStore";
 import TabsNav from "render/web/ui/TabsNav";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 
 const SpaceNavigation: React.FC = () => {
   const { spaceId } = useParams<"spaceId">();

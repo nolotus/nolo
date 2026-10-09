@@ -1,15 +1,19 @@
 // Redux/entity adapter for the Redux-free current-space store.
 // Kept separate from spaceCurrentStore.ts so the state container remains
 // statically analyzable and free of React/Redux import cycles.
+//
+// This file is a pure selector module: no React / no react-redux imports.
+// The React hook `useCurrentSpaceFromEntity` lives in
+// ./useCurrentSpaceFromEntity.ts (it needs react-redux), so consumers that only
+// need these selectors — including headless CLI/agent code paths — do not pull
+// React/Redux into their static module graph.
 
-import { useSelector } from "react-redux";
 import { selectEntities } from "database/dbSlice";
 import { createSpaceKey } from "./spaceKeys";
 import {
   getCurrentSpaceId,
   getCurrentSpaceRaw,
   getViewMode,
-  useStoreSnapshot,
 } from "./spaceCurrentStore";
 import type { SpaceData } from "app/types";
 
@@ -34,17 +38,6 @@ export function getCurrentSpace(
   return getSpaceUpdatedAt(entity) > getSpaceUpdatedAt(stored) ? entity : stored;
 }
 
-/**
- * Convenience hook: reads both module store (currentSpace state) and
- * Redux (db entities) to resolve current space with entity fallback.
- * Replaces useAppSelector(selectCurrentSpace) in consumers that don't
- * already subscribe to entities.
- */
-export function useCurrentSpaceFromEntity(): SpaceData | null {
-  useStoreSnapshot();
-  const entities = useSelector(selectEntities as (state: any) => Record<string, any>);
-  return getCurrentSpace(entities);
-}
 // ===== Wave E: 从已删除的 spaceSlice 迁入的过渡 selector =====
 // These are deliberately plain functions, not memoized selectors.
 // A memoized createSelector cannot observe module-store changes because

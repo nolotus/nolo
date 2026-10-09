@@ -2,7 +2,7 @@
 
 import formatISO from "date-fns/formatISO";
 import { ulid } from "ulid";
-import i18n from "app/i18n/client";
+import i18n from "app/i18n/runtime";
 
 import { selectIdentityUserId } from "identity/selectors";
 import { addContentToSpace } from "create/space/content/contentThunks";

@@ -18,6 +18,10 @@ import { normalizeServerOrigin } from "core/serverOrigin";
 import { asTrimmedString } from "core/trimmedString";
 import { clipCompactText } from "core/clipCompactText";
 import { redactAgentRecordForWorkspaceTool } from "../../agent-runtime/runtimeToolSurface";
+import {
+  formatAgentListCard,
+  type SafeAgentSummaryForCard,
+} from "./agent/agentRunDisplayHelpers";
 import { buildAgentRuntimeAgentLookupKeys } from "../../agent-runtime/agentRecordKeys";
 import {
   clampNoloPositiveInteger,
@@ -585,39 +589,12 @@ async function fetchUserFavoriteAgentMap(thunkApi: any): Promise<Record<string, 
   }
 }
 
-export interface SafeAgentSummaryForCard {
-  name?: string | null;
-  model?: string | null;
-  provider?: string | null;
-  apiSource?: string | null;
-  cliProvider?: string | null;
-  isFavorite?: boolean;
-  /** True when the agent belongs to the current user (self-owned). */
-  isOwned?: boolean;
-  /** Exact runnable key returned by listAgents. */
-  agentKey?: string | null;
-  publicKey?: string | null;
-  id?: string | null;
-}
-
-export function formatAgentListCard(agents: SafeAgentSummaryForCard[], maxDisplay = 8): string {
-  const total = agents.length;
-  const lines: string[] = [`Agents (${total})`];
-  const visible = agents.slice(0, maxDisplay);
-  for (const agent of visible) {
-    const star = agent.isFavorite ? "★" : " ";
-    const own = agent.isOwned ? "◎" : " ";
-    const name = agent.name || "(unnamed)";
-    const model = agent.model || "—";
-    const source = agent.apiSource || agent.provider || agent.cliProvider || "—";
-    const key = agent.agentKey || "(agentKey unavailable)";
-    lines.push(`${star}${own} ${name}  ${model}  ${source}  ${key}`);
-  }
-  if (total > maxDisplay) {
-    lines.push(`… +${total - maxDisplay} more`);
-  }
-  return lines.join("\n");
-}
+// formatAgentListCard / SafeAgentSummaryForCard 已移至
+// ./agent/agentRunDisplayHelpers.ts（纯展示 helper）。这里保留同名 re-export，
+// 既有调用方（含测试）import 路径不变；CLI 显示层改从新位置直接导入，
+// 避免把本模块（工具 schema + 运行时依赖）拖进 CLI 的静态模块图。
+export { formatAgentListCard };
+export type { SafeAgentSummaryForCard };
 
 export const listAgentsFunctionSchema = {
   name: "listAgents",

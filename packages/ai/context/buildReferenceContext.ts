@@ -1,7 +1,7 @@
 // ai/context/fetchReferenceContents.ts
 
 import { read } from "database/dbSlice";
-import { AppDispatch } from "app/store";
+import type { AppDispatch } from "app/store";
 import { slateToText } from "create/editor/transforms/slateToText";
 import { slateToSimplifiedMarkdown } from "create/editor/transforms/slateToSimplifiedMarkdown";
 import { resolvePageReadMarkdown } from "ai/tools/readDocTool";

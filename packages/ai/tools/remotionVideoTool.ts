@@ -3,7 +3,7 @@ import { addContentAction } from "create/space/content/addContentAction";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
 import { fileKey } from "database/keys";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { selectIdentityUserId } from "identity/selectors";
 import { callToolApi } from "./toolApiClient";
 

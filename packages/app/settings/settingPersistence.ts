@@ -31,7 +31,7 @@ import {
   omitKeys,
 } from "./settingNormalizers";
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
-import { DEFAULT_SYSTEM_BUILTIN_SKILLS } from "./settingInitialState";
+import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
 
 /**
  * Run every field-level normalizer that may apply to a `setSettings` payload.

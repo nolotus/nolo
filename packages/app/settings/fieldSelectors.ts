@@ -26,7 +26,7 @@ import {
   selectResolvedDefaultAgentId,
   normalizeSystemBuiltinSkills,
 } from "./settingNormalizers";
-import { DEFAULT_SYSTEM_BUILTIN_SKILLS } from "./settingInitialState";
+import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
 import type { SettingState } from "./settingTypes";
 
 // --- 通用 / 主题字段 ---

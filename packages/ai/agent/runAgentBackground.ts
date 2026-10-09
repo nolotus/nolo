@@ -14,7 +14,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { resolveReadOnlyToolConstraints } from "../../agent-runtime/runtimeToolSurface";
 import type { RootState } from "app/store";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { resolveRetryAfterMs } from "app/utils/retryAfter";
 import { selectIdentityToken } from "identity/selectors";
 import { isAbortError } from "core/abortError";

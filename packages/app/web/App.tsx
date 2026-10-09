@@ -36,8 +36,8 @@ import {
 import {
   initFavorites,
   useFavoritesInitialized,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 
 const RECENT_SHARE_FOREGROUND_SYNC_SKIP_MS = 4000;

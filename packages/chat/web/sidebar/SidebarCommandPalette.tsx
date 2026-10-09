@@ -14,8 +14,8 @@ import { useFavoriteSidebarItems } from "app/favorite/useFavoriteSidebarItems";
 import {
   initFavorites,
   useFavoritesInitialized,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { usePublicAgents } from "ai/agent/hooks/usePublicAgents";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { getSpaceContentTypeLabel } from "create/space/contentLabels";

@@ -1,6 +1,6 @@
 
 // packages/ai/agent/getFullChatContextKeys.ts
-import { RootState } from "app/store";
+import type { RootState } from "app/store";
 import { selectAllMsgs } from "chat/messages/messageSlice";
 import { extractReferenceKeysFromMessage } from "chat/dialog/actions/extractReferenceKeys";
 import type { Message } from "chat/messages/types";

@@ -43,8 +43,10 @@ import {
 import { persistToolMessages } from "chat/messages/persistToolMessage";
 import {
     selectMaxExecutionTime,
+} from "app/settings/fieldSelectors";
+import {
     selectCurrentServer,
-} from "app/settings/settingSlice";
+} from "app/settings/serverSelectors";
 import { filterAndCleanMessages } from "integrations/openai/filterAndCleanMessages";
 import {
     getFullChatContextKeys,

@@ -1,7 +1,7 @@
 import { callToolApi } from "./toolApiClient";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { selectIdentityUserId } from "identity/selectors";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { selectCurrentDialogConfig, selectCurrentDialogKey } from "chat/dialog/dialogSlice";
 import { addContentAction } from "create/space/content/addContentAction";
 import { ContentType } from "app/types";

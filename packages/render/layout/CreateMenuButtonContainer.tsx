@@ -35,7 +35,7 @@ import {
   shouldShowCreateMenuLabel,
 } from "./createMenuPolicy";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
 
 interface CreateMenuButtonContainerProps {

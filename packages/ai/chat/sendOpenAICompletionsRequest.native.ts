@@ -19,7 +19,7 @@ import { handleToolCalls } from "chat/messages/toolThunks";
 import { CompletionFinishReason, CompletionUsage, MessageContentPart, OpenAITextContent, Message } from "chat/messages/types";
 import { DataType } from "create/types";
 import { write } from "database/dbSlice";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getApiEndpoint } from "ai/llm/providers";
 import { createDialogMessageKeyAndId, dialogMessageKey } from "database/keys";
 import { selectIdentityToken } from "identity/selectors";

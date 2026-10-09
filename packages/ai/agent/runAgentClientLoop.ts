@@ -5,14 +5,14 @@
 // - 工具执行通过 executeToolCall 在客户端完成
 // - 每轮：调 LLM → 有 tool_calls → 执行工具 → 追加 tool 消息 → 继续
 
-import { RootState } from "app/store";
+import type { RootState } from "app/store";
 import { Message } from "app/types";
 import { read } from "database/dbSlice";
 import { fetchAgentContexts } from "ai/agent/fetchAgentContexts";
 import { generateRequestBody } from "ai/llm/generateRequestBody";
 import { mergeReferences } from "./referenceUtils";
 import { getApiEndpoint } from "ai/llm/providers";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { selectIdentityToken } from "identity/selectors";
 import { performFetchRequest } from "ai/chat/fetchUtils";
 import { sanitizeOutboundBody } from "ai/chat/toolCallArgumentGuard";

@@ -22,7 +22,7 @@ import {
     selectKnowledgeCaptureLevel,
     selectSpaceContextLevel,
     selectUserTonePreset,
-} from "app/settings/settingSlice";
+} from "app/settings/fieldSelectors";
 import {
     getFullChatContextKeys,
     deduplicateContextKeys,

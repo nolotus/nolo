@@ -45,7 +45,7 @@ import {
   COMMAND_PALETTE_SHORTCUT,
 } from "./sidebar/CommandPalette";
 import { SidebarCommandPalette } from "./sidebar/SidebarCommandPalette";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { useViewMode } from "create/space/spaceCurrentStore";
 
 const SIDEBAR_FILTER_STORAGE_KEY = "space-sidebar-type-filter";

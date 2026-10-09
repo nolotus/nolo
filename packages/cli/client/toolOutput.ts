@@ -4,7 +4,7 @@ export { clipHeadAndTail };
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import { readActionGate } from "../../agent-runtime/actionGate";
 import { parseUiAskChoiceContent } from "../../ai/tools/uiAskChoiceTool";
-import { formatAgentListCard } from "../../ai/tools/noloWorkspaceReadTools";
+import { formatAgentListCard } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
   formatListRunsCard,
   formatNotFoundRunCard,

@@ -9,8 +9,8 @@ import { shareResourceAction } from "share/action";
 import {
   toggleContentFavorite,
   useIsContentFavorited,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { DataType } from "create/types";
 import { toast } from "app/utils/toast"
 

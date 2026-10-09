@@ -7,7 +7,7 @@ import { createUserKey } from "database/keys";
 import { MemberRole, SpaceData } from "app/types";
 import { normalizeUserId } from "core/userId";
 import { fetchSpace } from "../spaceThunks";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 
 export interface Member {
   id: string;

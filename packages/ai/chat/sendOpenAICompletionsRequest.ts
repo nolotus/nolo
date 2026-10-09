@@ -32,7 +32,7 @@ import {
   type ToolCallTextParseState,
 } from "agent-runtime/toolCallTextParser";
 import { EMPTY_ASSISTANT_REPAIR_PROMPT } from "agent-runtime/emptyAssistantRepair";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { getApiEndpoint } from "ai/llm/providers";
 import { createDialogMessageKeyAndId, dialogMessageKey } from "database/keys";

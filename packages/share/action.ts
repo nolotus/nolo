@@ -3,7 +3,7 @@ import { selectIdentityUser, selectIdentityUserId } from "identity/selectors";
 import {
   selectCurrentServer,
   selectRemoteServers,
-} from "app/settings/settingSlice";
+} from "app/settings/serverSelectors";
 import { normalizeTimeFields } from "database/actions/common";
 import { createUserKey } from "database/keys";
 import { noloDeleteRequest, noloWriteRequest } from "database/requests";

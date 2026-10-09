@@ -159,7 +159,7 @@ export function useCurrentSpaceId(): string | null {
   return getCurrentSpaceId();
 }
 
-/** Internal hook for useCurrentSpaceFromEntity in spaceCurrentSelectors. */
+/** Internal hook for useCurrentSpaceFromEntity in useCurrentSpaceFromEntity.ts. */
 export function useStoreSnapshot(): void {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

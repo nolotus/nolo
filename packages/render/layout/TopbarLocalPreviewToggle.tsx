@@ -1,7 +1,7 @@
 import React from "react";
 import { LuMonitor } from "react-icons/lu";
 
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import {
   setPreviewOpen,
   useLocalPreviewOpen,

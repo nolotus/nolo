@@ -11,7 +11,7 @@ import type { AppDispatch, RootState } from "app/store";
 import {
   selectCurrentServer,
   selectSyncServers,
-} from "app/settings/settingSlice";
+} from "app/settings/serverSelectors";
 import { DataType } from "create/types";
 import { noloWriteRequest } from "database/requests";
 

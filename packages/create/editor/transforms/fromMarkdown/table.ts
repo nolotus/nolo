@@ -1,6 +1,6 @@
 // 路径：create/editor/transforms/table.ts
 
-import { Element as SlateElement } from "slate";
+import type { Element as SlateElement } from "slate";
 import { processInlineNodes } from "./inline";
 
 // MDAST 类型（简化）

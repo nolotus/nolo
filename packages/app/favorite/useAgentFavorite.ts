@@ -8,8 +8,8 @@ import { toast } from "app/utils/toast"
 import {
   useIsAgentFavorited,
   toggleFavorite,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 
 export function useAgentFavorite(agentKey: string) {
   const { t } = useTranslation("ai");

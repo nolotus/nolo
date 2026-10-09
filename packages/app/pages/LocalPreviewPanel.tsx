@@ -20,7 +20,7 @@ import {
   useLocalPreviewTarget,
   useLocalPreviewUrl,
 } from "app/appInspector/appInspectorStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 
 const MESSAGE_SOURCE = "nolo-inspector";
 

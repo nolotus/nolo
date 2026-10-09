@@ -14,7 +14,7 @@ async function dispatchSetSettings(thunkApi: any, changes: Record<string, unknow
   const setSettings =
     typeof injectedSetSettings === "function"
       ? injectedSetSettings
-      : (await import("app/settings/settingSlice")).setSettings;
+      : (await import("app/settings/settingThunks")).setSettings;
   await thunkApi.dispatch(setSettings(changes as any)).unwrap();
 }
 

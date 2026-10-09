@@ -14,7 +14,7 @@ import { getMyRoutePathForTab } from "app/constants/mySections";
 import { changeSpace } from "create/space/spaceThunks";
 import { fetchUserSpaceMemberships } from "create/space/member/memberThunks";
 import { setViewMode } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import {
   useAllMemberSpaces,
   useMemberSpacesLoaded,

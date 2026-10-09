@@ -1,6 +1,18 @@
 // 文件路径: utils/imageUtils.ts
 // browser-image-compression 仅在上传图片时需要，不应进入首屏同步 bundle。
 // 在实际调用处动态 import（见 compressImageFile / compressImage）。
+//
+// 与压缩无关的纯 data-URL 工具（dataURLtoFile / waitForFileReady 及其私有
+// helper）已下沉到 core/file/dataUrl.ts：非 UI 调用方（chat/messages/
+// messageContent.ts，可从 CLI/agent 静态图到达）不应把本模块（含
+// browser-image-compression 动态 import）拖进自己的静态模块图。
+// 这里保留同名 re-export，既有调用方 API 与语义不变。
+
+// 本地也要绑定 dataURLtoFile（compressImage 内部直接调用它）；
+// 仅 re-export 不会在模块作用域内引入该名字。
+import { dataURLtoFile } from "core/file/dataUrl";
+export { dataURLtoFile, waitForFileReady } from "core/file/dataUrl";
+export type { WaitForFileReadyOptions } from "core/file/dataUrl";
 
 /**
  * 前端图片压缩配置（只包含我们实际用到的字段）。
@@ -36,71 +48,6 @@ const DEFAULT_COMPRESSION_OPTIONS: Required<
 const BYTES_PER_MB = 1024 * 1024;
 
 const toMegabytes = (bytes: number): number => bytes / BYTES_PER_MB;
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * 解析 dataURL，提取 mime 和 base64 数据部分。
- */
-const parseDataUrl = (
-  dataUrl: string
-): { mime: string; base64: string } | null => {
-  const trimmed = dataUrl.trim();
-  const parts = trimmed.split(",");
-
-  if (parts.length < 2 || !parts[0] || !parts[1]) {
-    console.warn("[imageUtils] parseDataUrl: invalid data URL", {
-      hasHeader: !!parts[0],
-      hasBody: !!parts[1],
-    });
-    return null;
-  }
-
-  const header = parts[0];
-  const base64 = parts[1];
-
-  const mimeMatch = header.match(/:(.*?);/);
-  const mime = mimeMatch?.[1];
-
-  if (!mime) {
-    console.warn("[imageUtils] parseDataUrl: cannot extract mime from", header);
-    return null;
-  }
-
-  return { mime, base64 };
-};
-
-/**
- * 将 data URL 字符串转回 File 对象。
- * @param dataUrl 形如 "data:image/png;base64,..." 的字符串
- * @param filename 生成 File 时使用的文件名
- * @returns File 对象，失败时返回 null
- */
-export function dataURLtoFile(
-  dataUrl: string,
-  filename: string
-): File | null {
-  try {
-    const parsed = parseDataUrl(dataUrl);
-    if (!parsed) return null;
-
-    const { mime, base64 } = parsed;
-
-    const binaryString = atob(base64);
-    const length = binaryString.length;
-    const u8arr = new Uint8Array(length);
-
-    for (let i = 0; i < length; i++) {
-      u8arr[i] = binaryString.charCodeAt(i);
-    }
-
-    return new File([u8arr], filename, { type: mime });
-  } catch (error) {
-    console.error("[imageUtils] Error converting data URL to File:", error);
-    return null;
-  }
-}
 
 const normalizeCompressedFile = (sourceFile: File, compressed: Blob | File): File => {
   if (compressed instanceof File) {
@@ -238,68 +185,5 @@ export async function compressImage(
   }
 }
 
-/**
- * 等待 remote /file/content/:fileId 对应的图片 URL 可用。
- * 通过创建 <img> 去加载这个 URL，避免 CORS 问题。
- *
- * 成功：在 maxWaitMs 内，某次加载 onload 触发。
- * 失败：超时或每次都是 onerror。
- */
-export interface WaitForFileReadyOptions {
-  /** 最大等待时间（毫秒），默认 4000ms */
-  maxWaitMs?: number;
-  /** 每次重试之间的间隔时间（毫秒），默认 250ms */
-  intervalMs?: number;
-}
-
-const appendNoCacheQuery = (url: string): string => {
-  const stamp = `_t=${Date.now()}`;
-  return url.includes("?") ? `${url}&${stamp}` : `${url}?${stamp}`;
-};
-
-const tryLoadImage = (url: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    const img = new Image();
-
-    const cleanup = () => {
-      img.onload = null;
-      img.onerror = null;
-    };
-
-    img.onload = () => {
-      cleanup();
-      resolve(true);
-    };
-
-    img.onerror = () => {
-      cleanup();
-      resolve(false);
-    };
-
-    img.src = url;
-  });
-
-export const waitForFileReady = async (
-  url: string,
-  {
-    maxWaitMs = 4000,
-    intervalMs = 250,
-  }: WaitForFileReadyOptions = {}
-): Promise<boolean> => {
-  const start = Date.now();
-
-  while (Date.now() - start < maxWaitMs) {
-    const tryUrl = appendNoCacheQuery(url);
-    const ok = await tryLoadImage(tryUrl);
-
-    if (ok) {
-      console.debug("[imageUtils] waitForFileReady: image loaded for", url);
-      return true;
-    }
-
-    await sleep(intervalMs);
-  }
-
-  console.warn("[imageUtils] waitForFileReady: timeout for", url);
-  return false;
-};
+// dataURLtoFile / waitForFileReady 的实现已移至 core/file/dataUrl.ts（见文件头
+// re-export）。压缩相关逻辑（compressImageFile / compressImage）留在本模块。

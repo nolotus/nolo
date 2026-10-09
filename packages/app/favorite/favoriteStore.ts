@@ -8,10 +8,7 @@
 // toggleFavorite / toggleContentFavorite); favorite state reads/writes go
 // through mutators/getters, not Redux.
 
-import { useMemo, useSyncExternalStore } from "react";
-import { useAppSelector } from "app/store";
-import { selectIdentityToken } from "identity/selectors";
-import { selectRemoteServers } from "app/settings/settingSlice";
+import { useSyncExternalStore } from "react";
 import type {
     FavoriteTargetType,
     FavoriteListItem,
@@ -640,17 +637,19 @@ export function seedFavoriteStoreForTests(seed: {
 
 // ===== 依赖注入（Wave2 剥离：不再从 redux getState 取 token/servers）=====
 
+/**
+ * favorite API 的依赖契约：纯数据接口（token / servers），无任何运行时依赖。
+ *
+ * 定义留在 module store 一侧 —— 本文件属 headless CLI 静态图
+ * （cli → ai/tools → appTools → app/hooks/deleteDbKey），不得引入
+ * app/store（react-redux / settingSlice）等 Web 运行时依赖。
+ * 组件侧的 `useFavoriteDeps`（Web-only hook）在
+ * app/favorite/useFavoriteDeps.ts 实现，并从本文件 import 该类型。
+ */
 export interface FavoriteDeps {
     token: string;
     /** 与 selectRemoteServers 等价的同步目标服务器列表 */
     servers: string[];
-}
-
-/** 组件内获取 favorite API 依赖（settings/auth 尚未剥离 redux，仍走 selector）。 */
-export function useFavoriteDeps(): FavoriteDeps | null {
-    const token = useAppSelector(selectIdentityToken) ?? "";
-    const servers = useAppSelector(selectRemoteServers) ?? [];
-    return useMemo(() => ({ token, servers }), [token, servers]);
 }
 
 // ===== async 操作（纯 async 函数，不再 dispatchable）=====

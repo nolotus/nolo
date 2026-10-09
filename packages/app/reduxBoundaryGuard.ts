@@ -39,7 +39,7 @@ export const WHITELISTED_REACT_REDUX_FILES: readonly string[] = [
   "packages/auth/session/react.ts",
   "packages/chat/messages/web/MessageActions.tsx",
   "packages/chat/messages/web/ToolMessageContent.tsx",
-  "packages/create/space/spaceCurrentSelectors.ts",
+  "packages/create/space/useCurrentSpaceFromEntity.ts",
   // Desktop edition (2026-09 desktop account work) resolves the session Core
   // through the react-redux store context as its public boundary.
   "packages/identity/cloudRoutes.desktop.tsx",
@@ -120,7 +120,7 @@ export const WHITELISTED_APP_REDUX_CONSUMER_FILES: readonly string[] = [
   "packages/app/actions/syncAppRecord.ts",
   "packages/app/components/AppCard.tsx",
   "packages/app/email/AgentEmailE2EPage.tsx",
-  "packages/app/favorite/favoriteStore.ts",
+  "packages/app/favorite/useFavoriteDeps.ts",
   "packages/app/favorite/useFavoriteSidebarItems.ts",
   "packages/app/fetchOwnedApps.ts",
   "packages/app/hooks/deleteDbKey.ts",

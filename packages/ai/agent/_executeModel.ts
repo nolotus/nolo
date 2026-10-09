@@ -1,4 +1,4 @@
-import { RootState } from "app/store";
+import type { RootState } from "app/store";
 import { Agent, Message } from "app/types";
 import { selectCurrentDialogConfig } from "chat/dialog/dialogSlice";
 import { read } from "database/dbSlice";
@@ -8,7 +8,7 @@ import { selectAllMsgs } from "chat/messages/messageSlice";
 import { mergeReferences } from "./referenceUtils";
 import { generateRequestBody } from "ai/llm/generateRequestBody";
 import { getApiEndpoint } from "ai/llm/providers";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { selectIdentityToken } from "identity/selectors";
 import { applyChatCompletionsStreamMode } from "integrations/openai/chatCompletionStreamMode";
 

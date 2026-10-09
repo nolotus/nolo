@@ -23,8 +23,8 @@ import {
   useFavoriteAgentIds,
   useFavoriteFavoritedAtById,
   useFavoritesInitialized,
-  useFavoriteDeps,
 } from "app/favorite/favoriteStore";
+import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { usePublicAgents } from "ai/agent/hooks/usePublicAgents";
 import { useUserData } from "database/hooks/useUserData";
 import { DataType } from "create/types";

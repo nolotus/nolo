@@ -1,6 +1,6 @@
 import type { RootState } from "app/store";
 import type { Agent, DialogConfig } from "app/types";
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getIsDesktopApp } from "app/utils/env";
 import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
 import { extractCustomId } from "core/prefix";

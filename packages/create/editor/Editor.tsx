@@ -57,7 +57,7 @@ import { hasPlainCodeBlock } from "./utils/hasPlainCodeBlock";
 import { insertImageFromFile } from "./imageUpload";
 import { buildToolMentionOptions } from "./toolMentionOptions";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 
 // CustomEditor moved to utils/editorFactory
 // import type { CustomEditor } from "./utils/editorFactory";

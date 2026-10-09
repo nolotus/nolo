@@ -1,4 +1,4 @@
-import { selectCurrentServer } from "app/settings/settingSlice";
+import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getIsDesktopApp } from "app/utils/env";
 import { selectIdentityToken } from "identity/selectors";
 import type { RootState } from "app/store";

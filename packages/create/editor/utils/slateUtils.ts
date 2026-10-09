@@ -1,5 +1,14 @@
 import { asOptionalTrimmedString } from "core/optionalString";
-import { Node } from "slate";
+
+/**
+ * 等价于 Slate `Node.string` 的纯文本提取（拼接全部后代 Text 节点的 text）。
+ * 本地实现以避免静态依赖 slate 运行时：本模块被 CLI/agent 的静态模块图引用。
+ */
+const slateNodeToString = (node: any): string => {
+  if (typeof node?.text === "string") return node.text;
+  const children = Array.isArray(node?.children) ? node.children : [];
+  return children.map(slateNodeToString).join("");
+};
 
 // ================ 类型定义 ================
 export type EditorContent = Array<{
@@ -98,7 +107,7 @@ export const extractTitleFromSlate = (slateData: EditorContent): string => {
 
   if (titleNode) {
     // 使用 Slate 内置的 Node.string 工具，可靠地提取所有文本，即使标题中有格式
-    const text = Node.string(titleNode).trim();
+    const text = slateNodeToString(titleNode).trim();
     if (text) {
       return text;
     }
@@ -106,7 +115,7 @@ export const extractTitleFromSlate = (slateData: EditorContent): string => {
 
   // 回退到查找第一个包含非空文本的块元素
   for (const node of slateData) {
-    const text = Node.string(node).trim();
+    const text = slateNodeToString(node).trim();
     if (text) {
       return text.length > 30 ? `${text.substring(0, 30)}...` : text;
     }
@@ -126,11 +135,11 @@ export const splitSlateTitleAndBody = (
     ? explicitTitle.trim()
     : null;
   const firstNonEmptyText = content
-    .map((node) => Node.string(node).trim())
+    .map((node) => slateNodeToString(node).trim())
     .find(Boolean);
 
   if (firstNode?.type === "heading-one") {
-    const firstText = Node.string(firstNode).trim();
+    const firstText = slateNodeToString(firstNode).trim();
     const shouldTreatAsTitle =
       !!firstText &&
       (normalizedExplicitTitle == null || normalizedExplicitTitle === firstText);

@@ -22,7 +22,7 @@ import {
 } from "./referencePickerUtils";
 import { PUBLIC_CATALOG_SPACE_ID } from "create/space/publicCatalogSpace";
 import { useViewMode } from "create/space/spaceCurrentStore";
-import { useCurrentSpaceFromEntity } from "create/space/spaceCurrentSelectors";
+import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import * as stylex from "@stylexjs/stylex";
 import { referencesSelectorStyles as styles } from "./referencesSelectorStyles";
 import { withLiteralClass } from "./withLiteralClass";
