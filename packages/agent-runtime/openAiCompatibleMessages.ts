@@ -34,37 +34,7 @@ export type OpenAiCompatibleRequestMessage = {
  */
 export type PreserveAgentStateOptions = {
   stripReasoningContent?: boolean;
-  /**
-   * When set to a non-empty string, assistant messages that still carry a
-   * non-empty `tool_calls` array but no usable `reasoning_content` get the
-   * option's value injected as their `reasoning_content`. This satisfies the
-   * DeepSeek-family thinking-mode replay contract ("the reasoning_content in
-   * the thinking mode must be passed back to the API") for history turns
-   * where the upstream never returned reasoning.
-   *
-   * Default-off: when the option is absent the output is byte-identical to
-   * the old behavior. An empty/missing string is ignored so callers cannot
-   * accidentally inject a field the upstream would reject as empty.
-   * `stripReasoningContent` wins when both apply — a provider that rejects
-   * string reasoning_content would reject the placeholder too.
-   */
-  replayReasoningPlaceholder?: string;
-  targetProvider?: string;
-  targetModel?: string;
-  allowThoughtSignature?: boolean;
 };
-
-export function isGeminiCompatibleTarget(provider?: string, model?: string): boolean {
-  const p = (provider ?? "").trim().toLowerCase();
-  const m = (model ?? "").trim().toLowerCase();
-  return (
-    p === "google" ||
-    p === "google-antigravity" ||
-    p.startsWith("google-") ||
-    p.includes("gemini") ||
-    m.includes("gemini")
-  );
-}
 
 /**
  * Copy only provider-visible agent state. Keeping this in one seam prevents
@@ -85,38 +55,7 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
       mutableTarget.reasoning_content = source.reasoning_content;
     }
     if (Array.isArray(source.tool_calls)) {
-      const isExplicitTarget = Boolean(options?.targetProvider || options?.targetModel);
-      const allowSignature =
-        options?.allowThoughtSignature ??
-        (isExplicitTarget ? isGeminiCompatibleTarget(options?.targetProvider, options?.targetModel) : true);
-      mutableTarget.tool_calls = source.tool_calls.map((call: any) => {
-        if (!call || typeof call !== "object") return call;
-        const cleaned: Record<string, any> = {
-          id: call.id,
-          type: call.type ?? "function",
-          function: call.function,
-        };
-        if (allowSignature) {
-          if (call.extra_content !== undefined) cleaned.extra_content = call.extra_content;
-          if (call.thought_signature !== undefined) cleaned.thought_signature = call.thought_signature;
-        }
-        return cleaned;
-      });
-      const replayPlaceholder = options?.replayReasoningPlaceholder;
-      if (
-        typeof replayPlaceholder === "string" &&
-        replayPlaceholder.length > 0 &&
-        !options?.stripReasoningContent &&
-        source.tool_calls.length > 0 &&
-        !(
-          typeof mutableTarget.reasoning_content === "string" &&
-          mutableTarget.reasoning_content.length > 0
-        )
-      ) {
-        // Covers both a missing field and an unusable empty string — the
-        // upstream contract needs a non-empty reasoning_content back.
-        mutableTarget.reasoning_content = replayPlaceholder;
-      }
+      mutableTarget.tool_calls = source.tool_calls;
     }
   }
   if (source.role === "tool") {
@@ -208,37 +147,4 @@ export function shouldStripReasoningContentForOutbound(
       m === "deepseek-v4-pro";
   }
   return false;
-}
-
-/**
- * Determine whether the outbound (history replay) request should inject a
- * placeholder `reasoning_content` into assistant tool-call turns that lack
- * one — the inverse-side contract of `shouldStripReasoningContentForOutbound`.
- *
- * Evidence (2026-10-08): a local CLI run of agent
- * `agent-0e95801d90-opencode-deepseek-v4.1-flash` (provider `opencode-go`,
- * model `deepseek-v4.1-flash`, reasoning_effort medium) intermittently got
- * HTTP 400 `[invalid_request_error] The reasoning_content in the thinking
- * mode must be passed back to the API.` — the channel omits reasoning on some
- * tool-call rounds, Nolo persists an assistant message with tool_calls but no
- * reasoning_content, and replaying that history violates the contract.
- * External corroboration: `deepseek-ai/deepseek-harness` discussion #7050
- * (this exact failure), which suggests replaying a placeholder reasoning —
- * a NON-EMPTY one, in case the validator rejects empty strings.
- *
- * Covers catalog `deepseek-v4-flash`/`deepseek-v4-pro` and custom model ids
- * like `deepseek-v4.1-flash` (substring match on the lowercased model).
- *
- * Mutually exclusive with `shouldStripReasoningContentForOutbound` by
- * construction: the strip predicate only fires for provider `deepseek`/`nolo`,
- * this one only for `opencode-go`.
- */
-export function shouldReplayReasoningContentForOutbound(
-  provider?: string,
-  model?: string,
-): boolean {
-  const p = provider?.trim().toLowerCase();
-  const m = model?.trim().toLowerCase();
-  if (!p || !m) return false;
-  return p === "opencode-go" && m.includes("deepseek");
 }

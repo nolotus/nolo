@@ -35,10 +35,6 @@ export type CompletionFinishReason = "stop" | "tool_calls" | "length" | "content
 
 // ========== 发送错误与重试元信息 ==========
 export type SendErrorKind =
-  | "config_protocol"
-  | "empty"
-  | "policy"
-  | "transient"
   | "network"
   | "timeout"
   | "auth"
@@ -268,8 +264,6 @@ export interface Message {
 
   // assistant message 的 tool_calls（OpenAI 标准字段名）
   tool_calls?: Array<{
-    thought_signature?: string;
-    extra_content?: { google: { thought_signature: string } };
     id: string;
     type: "function";
     function: {

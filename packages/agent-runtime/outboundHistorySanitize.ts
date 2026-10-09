@@ -132,9 +132,6 @@ function normalizeToolCall(
     id,
     type: isString(c.type) && c.type ? (c.type as "function") : "function",
     function: { name: fn.name, arguments: jsonStringifyArguments(fn.arguments) },
-    ...(typeof c.extra_content?.google?.thought_signature === "string"
-      ? { extra_content: { google: { thought_signature: c.extra_content.google.thought_signature } } }
-      : {}),
     ...(typeof c.thought_signature === "string"
       ? { thought_signature: c.thought_signature }
       : {}),

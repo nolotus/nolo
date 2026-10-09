@@ -578,40 +578,33 @@ export function createCliLocalRuntimeAdapter(
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
-  // Executor closures belong to this adapter; only prepared metadata is shared.
-  const buildCurrentToolExecutors = (agentKey?: string | null) =>
-    buildLocalToolExecutors({
-      workspaceRoot,
-      env: deps.env,
-      fetchImpl,
-      ...(deps.chromeConnectorClient
-        ? { chromeConnectorClient: deps.chromeConnectorClient }
-        : {}),
-      localToolExecutors: deps.localToolExecutors,
-      readXPost: deps.readXPost,
-      readXhsProfile: deps.readXhsProfile,
-      cliEntrypoint: CLI_ENTRYPOINT,
-      resolveAgentCredentialGroup,
-      ...(deps.confirmDestructiveAction
-        ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-        : {}),
-      ...(deps.requestUserChoice
-        ? { requestUserChoice: deps.requestUserChoice }
-        : {}),
-      ...(deps.pastedTextStore
-        ? { pastedTextStore: deps.pastedTextStore }
-        : {}),
-      agentKey,
-      ...runtimeToolExecutionLimits,
-    });
-  let localToolExecutors = buildCurrentToolExecutors();
-
-  // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
-  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
-  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
-  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
-  const credentialBroker = createFileCredentialBroker({
-    migration: { enableLegacyMigration: true },
+  let localToolExecutors: Record<
+    string,
+    (
+      call: any,
+    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
+  > = buildLocalToolExecutors({
+    workspaceRoot,
+    env: deps.env,
+    fetchImpl,
+    ...(deps.chromeConnectorClient
+      ? { chromeConnectorClient: deps.chromeConnectorClient }
+      : {}),
+    localToolExecutors: deps.localToolExecutors,
+    readXPost: deps.readXPost,
+    readXhsProfile: deps.readXhsProfile,
+    cliEntrypoint: CLI_ENTRYPOINT,
+    resolveAgentCredentialGroup,
+    ...(deps.confirmDestructiveAction
+      ? { confirmDestructiveAction: deps.confirmDestructiveAction }
+      : {}),
+    ...(deps.requestUserChoice
+      ? { requestUserChoice: deps.requestUserChoice }
+      : {}),
+    ...(deps.pastedTextStore
+      ? { pastedTextStore: deps.pastedTextStore }
+      : {}),
+    ...runtimeToolExecutionLimits,
   });
 
   const adapterBase = {
@@ -622,7 +615,6 @@ export function createCliLocalRuntimeAdapter(
       "leveldb-persistence",
       "local-tools",
     ],
-    credentialBroker,
     loadAgentConfig: async (agentRef) => {
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
@@ -648,15 +640,16 @@ export function createCliLocalRuntimeAdapter(
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
       });
-      // Paste availability changes the prepared tool surface, so paste-aware
-      // runs remain isolated from the shared metadata cache.
+      // Paste executors close over the current TUI store. A prepared runtime
+      // cache hit would otherwise reuse an executor bound to an older paste
+      // store, so paste-aware runs are intentionally per-turn.
       const cached = deps.pastedTextStore
         ? undefined
         : preparedAgentRuntimeCache.get(cacheKey);
       if (cached) {
         activeAgentToolNames = cached.activeAgentToolNames;
         runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
-        localToolExecutors = buildCurrentToolExecutors(cached.agentConfig.key);
+        localToolExecutors = cached.localToolExecutors;
         return cached.agentConfig;
       }
 
@@ -703,7 +696,30 @@ export function createCliLocalRuntimeAdapter(
         resolveLocalWorkspaceExecutorOptionsFromPolicy(
           resolveCurrentRunRuntimeToolPolicy(agentConfig),
         );
-      localToolExecutors = buildCurrentToolExecutors(agentConfig?.key);
+      localToolExecutors = buildLocalToolExecutors({
+        workspaceRoot,
+        env: deps.env,
+        fetchImpl,
+        ...(deps.chromeConnectorClient
+          ? { chromeConnectorClient: deps.chromeConnectorClient }
+          : {}),
+        localToolExecutors: deps.localToolExecutors,
+        readXPost: deps.readXPost,
+        readXhsProfile: deps.readXhsProfile,
+        cliEntrypoint: CLI_ENTRYPOINT,
+        resolveAgentCredentialGroup,
+        ...(deps.confirmDestructiveAction
+          ? { confirmDestructiveAction: deps.confirmDestructiveAction }
+          : {}),
+        ...(deps.requestUserChoice
+          ? { requestUserChoice: deps.requestUserChoice }
+          : {}),
+        ...(deps.pastedTextStore
+          ? { pastedTextStore: deps.pastedTextStore }
+          : {}),
+        agentKey: agentConfig?.key,
+        ...runtimeToolExecutionLimits,
+      });
       // Report the post-filter tool list so runtime guidance describes what the
       // model can actually call. The CLI drops declared names it has no
       // executor for (read/createDoc/...), and prompt blocks keyed off the
@@ -729,6 +745,7 @@ export function createCliLocalRuntimeAdapter(
           agentConfig: exposedAgentConfig,
           activeAgentToolNames,
           runtimeToolExecutionLimits,
+          localToolExecutors,
         });
       }
       return exposedAgentConfig;
@@ -784,7 +801,9 @@ export function createCliLocalRuntimeAdapter(
           apiKeyRefResolver: createOAuthApiKeyRefResolver({
             migration: { enableLegacyMigration: true },
           }),
-          credentialBroker,
+          credentialBroker: createFileCredentialBroker({
+            migration: { enableLegacyMigration: true },
+          }),
           loopbackRequest,
         }),
       }),
@@ -872,6 +891,9 @@ export function createCliLocalRuntimeAdapter(
         enableLegacyMigration: true,
       } as const;
       const apiKeyRefResolver = createOAuthApiKeyRefResolver({
+        migration: legacyCredentialMigration,
+      });
+      const credentialBroker = createFileCredentialBroker({
         migration: legacyCredentialMigration,
       });
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";

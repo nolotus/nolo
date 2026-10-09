@@ -16,11 +16,7 @@ export const completionsAdapter: ChatWireAdapter = {
       Array.isArray(args.messages) ? args.messages : [],
       args.tools,
     );
-    const messages = toOpenAiCompatibleMessages(sanitized, {
-      stripReasoningContent,
-      targetProvider: provider,
-      targetModel: model,
-    });
+    const messages = toOpenAiCompatibleMessages(sanitized, { stripReasoningContent });
     const body: Record<string, unknown> = {
       model,
       messages,

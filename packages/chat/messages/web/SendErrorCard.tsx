@@ -25,10 +25,6 @@ export interface SendErrorCardProps {
 }
 
 const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; className?: string }>> = {
-  config_protocol: LuCircleAlert,
-  empty: LuCircleAlert,
-  policy: LuShieldAlert,
-  transient: LuServerOff,
   network: LuWifiOff,
   timeout: LuClock,
   auth: LuShieldAlert,
@@ -40,10 +36,6 @@ const KIND_ICONS: Record<SendErrorKind, React.ComponentType<{ size?: number; cla
 };
 
 const KIND_LABELS: Record<SendErrorKind, string> = {
-  config_protocol: "配置或通信错误",
-  empty: "模型空响应",
-  policy: "内容安全限制",
-  transient: "服务暂时不可用",
   network: "网络错误",
   timeout: "请求超时",
   auth: "认证失败",
@@ -60,15 +52,6 @@ const ACTION_LABELS: Record<SendErrorAction, { key: string; fallback: string }> 
   "new-dialog": { key: "sendErrorCard.newDialog", fallback: "开新对话" },
   "switch-model": { key: "sendErrorCard.switchModel", fallback: "切换模型" },
   retry: { key: "sendErrorCard.retry", fallback: "重试" },
-};
-
-const isSameOriginLink = (url: string): boolean => {
-  if (typeof window === "undefined") return false;
-  try {
-    return new URL(url, window.location.href).origin === window.location.origin;
-  } catch {
-    return false;
-  }
 };
 
 export const SendErrorCard = memo(({ errorMeta, onRetry, isRetrying = false, onAction }: SendErrorCardProps) => {
@@ -168,23 +151,17 @@ export const SendErrorCard = memo(({ errorMeta, onRetry, isRetrying = false, onA
         )}
 
         {hasExtraLinks &&
-          errorMeta.extraLinks!.map((link, idx) => {
-            // 站内链接（如 /login）在当前窗口导航：桌面端会进入已注册的
-            // 登录引导页（cloudRoutes.desktop），不在 webview 里另开未受控窗口；
-            // 外部链接仍在新窗口打开。按浏览器的实际解析结果判定同源，
-            // 不用字符串前缀——`/\evil.com`、`/\t/evil.com` 会被解析成外站。
-            const isInApp = isSameOriginLink(link.url);
-            return (
-              <a
-                key={`${link.url}-${idx}`}
-                href={link.url}
-                {...(isInApp ? {} : { target: "_blank", rel: "noreferrer noopener" })}
-                {...withLiteralClass("send-error-card__extra-link", styles.extraLink)}
-              >
-                {link.text}
-              </a>
-            );
-          })}
+          errorMeta.extraLinks!.map((link, idx) => (
+            <a
+              key={`${link.url}-${idx}`}
+              href={link.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              {...withLiteralClass("send-error-card__extra-link", styles.extraLink)}
+            >
+              {link.text}
+            </a>
+          ))}
 
         {showDetailsToggle && (
           <button

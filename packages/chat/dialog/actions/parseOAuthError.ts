@@ -194,34 +194,6 @@ export function parseSendError(errorInput: unknown): ParsedSendError {
 
   const stage = resolveErrorStage(fullErrorText);
 
-  // 平台登录缺失与 BYO 密钥/第三方账号验证不是同一种认证失败。
-  // 白名单判定：只有平台 auth 码（AUTH_*，由平台 provider 或 server 鉴权产生）
-  // 或「平台 provider」自己的 HTTP 401 才引导登录。其它 provider 的 401
-  // （BYO key、第三方 OAuth 过期等）一律保持原行为——它们的标签各异，
-  // 黑名单列不全（复审实测 openai/gemini/antigravity 等形态都曾被误判）。
-  const inputRecord = asRecord(errorInput);
-  const authCode = asString(inputRecord?.authCode) ?? asString(inputRecord?.code);
-  const hasPlatformAuthCode = /^AUTH_[A-Z0-9_]+$/.test(authCode ?? "") ||
-    /\bAUTH_[A-Z0-9_]+\b/.test(fullErrorText);
-  const isPlatformProviderFailure = /\bplatform provider failed\b/i.test(fullErrorText);
-  // 只有「无状态码」（本地早退，如 AUTH_NO_TOKEN）或 401 才是登录问题。
-  // 服务端在部署交接窗口返回 503 + AUTH_STORE_UNAVAILABLE（packages/auth/utils.ts），
-  // 必须保持可重试，不能被 AUTH_ 前缀误导成「需要登录」。
-  const isLoginStatus = statusCode === undefined || statusCode === 401;
-  const requiresLogin = isLoginStatus && !url &&
-    !/validation_required|api[_ -]?key/i.test(fullErrorText) &&
-    (hasPlatformAuthCode || (isPlatformProviderFailure && statusCode === 401));
-  if (requiresLogin) {
-    return {
-      kind: "auth",
-      retryable: false,
-      stage,
-      summary: "需要登录",
-      actionHint: "未检测到登录状态，请先登录",
-      extraLinks: [{ text: "去登录", url: "/login" }],
-    };
-  }
-
   // 平台繁忙（provider=nolo 容量/传输故障的用户面文案）。判定必须放在链路最前：
   // detail 里常带 "nolo TimeoutError" / "nolo HTTP 503" 字样，若让 timeout /
   // network 分支先命中，用户看到的就是「请求超时」而不是平台算力紧张，重试

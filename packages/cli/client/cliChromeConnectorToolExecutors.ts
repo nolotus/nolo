@@ -21,7 +21,7 @@ import {
   type ChromeConnectorLegacyToolName,
 } from "../../ai/tools/chromeConnectorTools";
 import {
-  createChromeConnectorClientResolver,
+  createChromeConnectorClient,
   createVerifiedChromeConnectorClient,
   executeChromeConnectorTool,
   type ChromeConnectorClient,
@@ -30,34 +30,21 @@ import {
 /**
  * Builds the `chrome_*` executor entries for the CLI local tool table.
  *
- * Routing is per call: the resolver holds one verified client per browser target (lazily created —
- * the `connector_info` handshake only happens on the first `chrome_*` call for that browser, never
- * at table-build time), so `{target: "firefox"}` really reaches the Firefox host instead of being
- * silently served by a pinned Chrome client.
- *
- * `client` is injectable so tests (and future TUI hosts that already hold a connection) can drive
- * target-less calls without reaching 127.0.0.1; it is wrapped in the same verified client as the
- * production default so the handshake/feature gate cannot drift. An explicit `target` still routes
- * to that browser's own endpoint — an injected client never swallows a routing request.
+ * `client` is injectable so tests (and future TUI hosts that already hold a connection) can drive the
+ * table without reaching 127.0.0.1. When absent, the verified client is created lazily — the
+ * `connector_info` handshake only happens on the first `chrome_*` call, never at table-build time.
  */
 export function buildCliChromeConnectorToolExecutors(args?: {
   client?: ChromeConnectorClient;
-  /** Per-target client overrides (tests); entries missing here get real per-browser endpoints. */
-  clients?: Partial<Record<"chrome" | "firefox", ChromeConnectorClient>>;
 }) {
-  const clientForTarget = createChromeConnectorClientResolver({
-    clients: {
-      ...(args?.clients ?? {}),
-      ...(args?.client
-        ? { default: createVerifiedChromeConnectorClient({ client: args.client }) }
-        : {}),
-    },
+  const client = createVerifiedChromeConnectorClient({
+    client: args?.client ?? createChromeConnectorClient(),
   });
   return Object.fromEntries(
     CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.map((toolName) => [
       toolName,
       (call: AgentRuntimeToolCallInput) =>
-        executeChromeConnectorTool({ clientForTarget, call }),
+        executeChromeConnectorTool({ client, call }),
     ]),
   ) as Record<
     ChromeConnectorToolName | ChromeConnectorLegacyToolName,

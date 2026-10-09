@@ -199,16 +199,10 @@
             0 0 0 2px var(--primary),
             0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent);
         }
-        /* 拖拽悬停反馈：surface 卡片规则带 5 层 :not(#\#)、聚焦兜底带 7 层，
-           原先裸 .quick-chat-box.drag-over 特异性远低于它们，border/背景/阴影
-           全被覆盖 → 拖进去毫无可见变化。这里抬到 8 层稳定压过 hover/focus。 */
-        .quick-chat-box.drag-over:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-          border-color: var(--primary);
-          border-style: dashed;
-          background: color-mix(in srgb, var(--primary) 8%, var(--surfaceRaised, var(--background)));
-          box-shadow:
-            0 0 0 3px color-mix(in srgb, var(--primary) 35%, transparent),
-            0 8px 24px -4px color-mix(in srgb, var(--primary) 25%, transparent);
+        .quick-chat-box.drag-over {
+          border-color: var(--primaryBorder, var(--primary));
+          background: var(--surfaceInteractive, var(--backgroundSecondary));
+          box-shadow: 0 0 0 3px var(--focusRing);
         }
 
         /* Base input layout — needed because MessageInputContainer styles aren't loaded on home page */

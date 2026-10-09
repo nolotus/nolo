@@ -32,7 +32,6 @@ import {
 } from "core/chat/bareImageUrlShape";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import {
-  shouldReplayReasoningContentForOutbound,
   shouldStripReasoningContentForOutbound,
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
@@ -82,17 +81,6 @@ export type OpenAiCompatibleProviderConfig = {
 
 type OpenAiCompatibleTool = Record<string, unknown>;
 
-/**
- * Placeholder injected for the DeepSeek thinking-mode replay contract
- * (shouldReplayReasoningContentForOutbound). Non-empty on purpose: whether
- * the upstream validator accepts an empty string is unverified, while every
- * normally accepted response on this channel has been observed to carry
- * non-empty reasoning — so matching that shape is the conservative choice
- * (evidence in openAiCompatibleMessages.ts).
- */
-const REASONING_REPLAY_PLACEHOLDER =
-  "(reasoning not captured for this turn)";
-
 export function isOpenAiResponsesEndpoint(endpoint: string): boolean {
   return endpoint.includes("/responses");
 }
@@ -118,35 +106,14 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
     args.providerConfig.provider,
     args.providerConfig.model,
   );
-  // DeepSeek thinking models behind opencode-go enforce the opposite contract:
-  // every replayed assistant tool-call turn MUST carry reasoning_content back,
-  // and the channel sometimes persists a turn without it (upstream returned no
-  // reasoning for that round). Inject a non-empty placeholder: whether the
-  // upstream accepts an empty string is unverified, and a non-empty value
-  // matches the shape already observed to be accepted on this channel, so it
-  // is the conservative choice.
-  // Mutually exclusive with shouldStripReasoning by construction (provider
-  // set disjoint); if both somehow matched, stripping wins — a provider that
-  // rejects string reasoning_content would reject the placeholder too.
-  const shouldReplayReasoning = shouldReplayReasoningContentForOutbound(
-    args.providerConfig.provider,
-    args.providerConfig.model,
-  );
   // Sanitize cross-wire history here so this builder is the single seam — any
   // caller (internal `send` or a future direct importer) is covered without
   // remembering to sanitize separately. Downgrades tool_calls not in the
   // current `tools` array to text and pairs tool_calls with results, so strict
   // gateways (ollama) accept the replayed history instead of 400-ing.
-  //
-  // Ordering note: sanitize runs BEFORE conversion, so the placeholder only
-  // fills turns that still carry tool_calls — turns already downgraded to
-  // plain text never get a spurious reasoning_content.
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
     stripReasoningContent: shouldStripReasoning,
-    ...(shouldReplayReasoning && !shouldStripReasoning
-      ? { replayReasoningPlaceholder: REASONING_REPLAY_PLACEHOLDER }
-      : {}),
   });
   const rawBody: Record<string, any> = {
     model: args.providerConfig.model,
