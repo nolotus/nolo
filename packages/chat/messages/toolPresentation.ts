@@ -348,6 +348,63 @@ export function shouldToolMessageStartCollapsed(toolName?: string | null): boole
   return !DEFAULT_EXPANDED_TOOL_NAMES[normalized];
 }
 
+/**
+ * 报价完成、等待用户选档的媒体工具卡必须默认可见。
+ *
+ * 这里把「有未决用户交互」表达成**数据条件**（job.status === "quoted" 且
+ * rawData 带有效 quote/tiers），而不是给 mediaJobTool 一刀切永远展开——
+ * 任务一旦 start / done / failed，条件不成立，行仍按既有策略折叠。
+ */
+export function shouldKeepToolRowExpanded(args: {
+  toolName?: string | null;
+  rawData?: unknown;
+  statusStr?: string | null;
+}): boolean {
+  if (asTrimmedString(args.toolName) !== "mediaJobTool") return false;
+  if (args.statusStr !== "success") return false;
+  const data = asRecordOrEmpty(args.rawData);
+  const inner = asRecordOrEmpty(data.rawData);
+  const job = asRecordOrEmpty(data.job ?? inner.job);
+  const tiers = Array.isArray(data.tiers)
+    ? data.tiers
+    : Array.isArray(inner.tiers)
+      ? inner.tiers
+      : [];
+  const hasQuotedTiers =
+    tiers.length > 0 &&
+    tiers.every((tier) => isRecord(tier) && isRecord((tier as any).quote));
+  const hasQuote =
+    isRecord(data.quote) || isRecord(inner.quote) || isRecord(job.quote);
+  return job.status === "quoted" && (hasQuotedTiers || hasQuote);
+}
+
+const parseJsonRecordOrNull = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+/**
+ * 同一条数据条件作用在**整条 tool message** 上（content 可能是 JSON 字符串），
+ * 供 group 折叠策略、ToolCallRow 默认展开、ToolMessageItem 共用，避免媒体特判。
+ */
+export function toolMessageNeedsDefaultExpansion(message: any): boolean {
+  if (!message || message.role !== "tool") return false;
+  const statusStr = message.isStreaming
+    ? "running"
+    : message?.toolPayload?.status === "failed" || message?.error
+      ? "failed"
+      : "success";
+  return shouldKeepToolRowExpanded({
+    toolName: message.toolName ?? message?.toolPayload?.toolName,
+    rawData: message.rawData ?? parseJsonRecordOrNull(message.content),
+    statusStr,
+  });
+}
+
 /** Char threshold: tool body text above this is previewed until user expands. */
 export const TOOL_OUTPUT_PREVIEW_CHARS = 4_000;
 /** Line threshold used with char limit for long dumps / shell / code. */

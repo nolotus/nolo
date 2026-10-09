@@ -147,6 +147,68 @@ export async function mediaJobFunc(
   } else {
     throw new Error("action 必须是 quote、start 或 status");
   }
+  const resolvedJobId: string | undefined = data?.job?.id ?? jobId;
+  const resolvedQuote: MediaQuote | undefined =
+    data?.quote ?? data?.job?.quote;
+  const balanceCredits =
+    resolvedQuote?.balanceCredits ?? data?.job?.quote?.balanceCredits;
+  const requestText = [
+    body.scope
+      ? `范围 ${(body.scope as any).fromSec ?? 0}~${(body.scope as any).toSec ?? "end"}s`
+      : "",
+    depth ? `档位 ${depth}` : "",
+    targetLang ? `目标语言 ${targetLang}` : "",
+  ]
+    .filter(Boolean)
+    .join("，");
+  // 模型可读的 bounded 上下文（走既有 toolPayload.llmContext → 上游
+  // filterAndCleanMessages 优先投影），替代 generic「执行完成」摘要。
+  // 只暴露 jobId / 状态 / 档位报价 / 请求范围；不带 userId、fileId 等内部字段。
+  const llmContext: string | undefined = (() => {
+    if (action === "quote" && tiers && resolvedJobId) {
+      return [
+        `媒体任务报价完成 jobId=${resolvedJobId}`,
+        requestText ? `请求：${requestText}` : "",
+        ...tiers.map(
+          (tier) =>
+            `${tier.label}（${tier.depth}）：${tier.quote?.totalCredits?.[0] ?? "?"} ~ ${tier.quote?.totalCredits?.[1] ?? "?"} 积分`,
+        ),
+        typeof balanceCredits === "number"
+          ? `当前余额 ${balanceCredits} 积分（低于档位报价不可启动）`
+          : "",
+        "等待用户选择档位后调用 action=start（带 depth）。",
+      ]
+        .filter(Boolean)
+        .join("；");
+    }
+    if (action === "start" && resolvedJobId) {
+      return [
+        `媒体任务已启动 jobId=${resolvedJobId}`,
+        data?.job?.status ? `状态 ${data.job.status}` : "",
+        requestText ? `请求：${requestText}` : "",
+        "可用 action=status 查询进度与产物。",
+      ]
+        .filter(Boolean)
+        .join("；");
+    }
+    if (action === "status" && resolvedJobId) {
+      const progress = data?.job?.progress;
+      return [
+        `媒体任务状态 jobId=${resolvedJobId}`,
+        data?.job?.status ? `状态 ${data.job.status}` : "",
+        progress && typeof progress.total === "number"
+          ? `进度 ${progress.done ?? 0}/${progress.total}`
+          : "",
+        Array.isArray(data?.job?.notes) && data.job.notes.length > 0
+          ? `已生成 ${data.job.notes.length} 项产物`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("；");
+    }
+    return undefined;
+  })();
+
   return {
     summary:
       action === "quote"
@@ -154,10 +216,19 @@ export async function mediaJobFunc(
         : action === "start"
           ? "媒体任务已启动"
           : "媒体任务状态已获取",
-    jobId: data?.job?.id ?? (action !== "status" ? undefined : jobId),
+    jobId: resolvedJobId,
     job: data?.job,
-    quote: data?.quote ?? data?.job?.quote,
+    quote: resolvedQuote,
     ...(tiers ? { tiers } : {}),
-    rawData: data,
+    ...(llmContext ? { llmContext } : {}),
+    // 持久化 / 卡片消费的载荷：并入 tiers 与 jobId，否则通用投影
+    // （toolThunks: toolResult.rawData ?? toolResult）只落最后一档原始响应，
+    // 卡片只能单档回退渲染。
+    rawData: {
+      jobId: resolvedJobId,
+      job: data?.job,
+      quote: resolvedQuote,
+      ...(tiers ? { tiers } : {}),
+    },
   };
 }

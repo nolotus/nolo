@@ -6,6 +6,7 @@ import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
 import { isQuietDetailTool } from "./toolCallPresentation";
+import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
@@ -53,10 +54,13 @@ export const ToolCallRow = memo(
     // Quiet-detail tools (execShell/readFile) stay folded even while running
     // (TUI parity) — long terminal output / file contents must not flood the
     // chat; one click opens the body. Other rows keep running auto-open.
+    // 未决交互卡（报价待选档）必须默认展开：它需要用户操作，藏起来等于阻塞流程。
+    // 用户手动 toggle 之后（userExpanded !== null）一律以用户为准。
     const expanded =
       userExpanded ??
-      (presentation.status === "running" &&
-        !isQuietDetailTool(message?.toolName));
+      (toolMessageNeedsDefaultExpansion(message) ||
+        (presentation.status === "running" &&
+          !isQuietDetailTool(message?.toolName)));
 
     const rawData = safeParse(message?.content);
     const isError =

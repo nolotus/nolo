@@ -56,6 +56,7 @@ import { AppRoutePaths } from "app/constants/routePaths";
 import { useLoopStopReason } from "./useLoopStopReason";
 import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
+import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 import {
   hasVisibleAssistantContent,
   isAssistantToolStub,
@@ -611,17 +612,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
             // Expand/collapse only — header status icons follow each group's tools.
             // Historical groups (user after) fold even while a later turn runs;
             // idle turns without a final reply also fold so chrome can settle.
+            // 未决交互卡（报价待选档）不能被 group 折叠吞掉：两路自动折叠都必须让位。
+            const hasPendingChoiceCard = entry.messages.some((message) =>
+              toolMessageNeedsDefaultExpansion(message),
+            );
             const canCollapse =
-              shouldAutoCollapseToolGroup({
+              !hasPendingChoiceCard &&
+              (shouldAutoCollapseToolGroup({
                 entries: renderEntries,
                 groupIndex: entryIndex,
                 isRunning,
                 hasStreamingMessage,
               }) ||
-              // A stale session-level running flag must not keep settled tool
-              // UI open. The row's own streaming flag is the reliable UI fact.
-              (!hasStreamingMessage &&
-                entry.messages.every((message) => !message?.isStreaming));
+                // A stale session-level running flag must not keep settled tool
+                // UI open. The row's own streaming flag is the reliable UI fact.
+                (!hasStreamingMessage &&
+                  entry.messages.every((message) => !message?.isStreaming)));
             const settledMessages =
               canCollapse && !hasStreamingMessage
                 ? entry.messages.map((message) =>

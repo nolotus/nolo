@@ -3,6 +3,7 @@ import {
   isAssistantToolStub,
 } from "../assistantMessageFacts";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
+import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 
 export {
   hasVisibleAssistantContent,
@@ -85,11 +86,19 @@ export type ToolGroupCollapseEntry =
  * Interactive approval/decision surfaces are not ordinary tool groups and keep
  * their dedicated presentation paths.
  */
-export function shouldAutoCollapseToolGroup(_args: {
+export function shouldAutoCollapseToolGroup(args: {
   entries: ToolGroupCollapseEntry[];
   groupIndex: number;
   isRunning: boolean;
   hasStreamingMessage: boolean;
 }): boolean {
+  // 未决交互卡（报价待选档等）需要用户操作，不能随历史 group 一起被折叠吞掉。
+  const entry = args.entries[args.groupIndex];
+  const groupMessages = Array.isArray((entry as any)?.messages)
+    ? ((entry as any).messages as any[])
+    : [];
+  if (groupMessages.some((message) => toolMessageNeedsDefaultExpansion(message))) {
+    return false;
+  }
   return true;
 }
