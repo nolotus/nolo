@@ -9,6 +9,8 @@ import React, {
 import { transform } from "sucrase";
 import { toErrorMessage } from "core/errorMessage";
 import {
+  acceptArtifactMessage,
+  ARTIFACT_MAX_MESSAGE_BYTES,
   sanitizeArtifactCode,
   type ArtifactPreviewBuildResult,
 } from "./artifactPreviewCode";
@@ -21,12 +23,16 @@ interface IframeArtifactBlockProps {
   rawCode: string;
   className?: string;
   fullscreen?: boolean;
+  data?: unknown;
+  onArtifactEvent?: (event: { type: string; payload: unknown }) => void;
+  allowedEvents?: Record<string, (payload: unknown) => boolean>;
 }
 
 const ARTIFACT_READY = "nolo-artifact-ready";
 const ARTIFACT_HEIGHT = "nolo-artifact-height";
 const ARTIFACT_ERROR = "nolo-artifact-error";
 const ARTIFACT_RUNTIME_LOADED = "nolo-artifact-runtime-loaded";
+const ARTIFACT_EVENT = "nolo-artifact-event";
 const INLINE_INITIAL_HEIGHT = 360;
 const INLINE_MIN_HEIGHT = 220;
 const INLINE_MAX_HEIGHT = 720;
@@ -135,8 +141,15 @@ function IframeArtifactBlock({
   rawCode,
   className,
   fullscreen = false,
+  data,
+  onArtifactEvent,
+  allowedEvents,
 }: IframeArtifactBlockProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const onArtifactEventRef = useRef(onArtifactEvent);
+  const allowedEventsRef = useRef(allowedEvents);
+  onArtifactEventRef.current = onArtifactEvent;
+  allowedEventsRef.current = allowedEvents;
   const [height, setHeight] = useState(
     fullscreen ? FULLSCREEN_INITIAL_HEIGHT : INLINE_INITIAL_HEIGHT
   );
@@ -155,18 +168,31 @@ function IframeArtifactBlock({
     return new URL("/artifact-runtime", window.location.origin).toString();
   }, []);
 
+  const postedRuntimeRef = useRef<Window | null>(null);
   const postRenderCode = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow || !buildResult.code) return;
+    postedRuntimeRef.current = iframe.contentWindow;
     iframe.contentWindow.postMessage(
       {
         source: "nolo-artifact-host",
         type: "render",
         code: `${buildResult.code}\n//# sourceURL=nolo-artifact.js`,
+        ...(data === undefined ? {} : { data }),
       },
       "*"
     );
-  }, [buildResult.code]);
+  }, [buildResult.code, data]);
+
+  useEffect(() => {
+    if (!ready || data === undefined) return;
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+    iframe.contentWindow.postMessage(
+      { source: "nolo-artifact-host", type: "data", data },
+      "*"
+    );
+  }, [data, ready]);
 
   useEffect(() => {
     setReady(false);
@@ -178,13 +204,29 @@ function IframeArtifactBlock({
     if (!iframe) return;
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.source !== iframe.contentWindow) return;
-      if (event.data?.source !== "nolo-artifact-runtime") return;
+      const message = event.data as Record<string, unknown> | null;
+      const isHandshake = message?.source === "nolo-artifact-runtime"
+        && (message.type === ARTIFACT_RUNTIME_LOADED || message.type === ARTIFACT_READY || message.type === ARTIFACT_HEIGHT || message.type === ARTIFACT_ERROR);
+      if (isHandshake) {
+        if (event.source !== iframe.contentWindow) return;
+      } else if (message?.source === "nolo-artifact-runtime" && message.type === "nolo-artifact-event") {
+        if (!acceptArtifactMessage(event, {
+          iframeWindow: iframe.contentWindow,
+          allowedEvents: allowedEventsRef.current,
+          maxBytes: ARTIFACT_MAX_MESSAGE_BYTES,
+          onEvent: event => onArtifactEventRef.current?.(event),
+        })) return;
+      } else {
+        return;
+      }
 
       if (event.data.type === ARTIFACT_READY) {
         setReady(true);
       }
       if (event.data.type === ARTIFACT_RUNTIME_LOADED) {
+        // runtime-loaded 是「监听器已就绪」的唯一可靠信号：iframe onLoad 时
+        // React runtime 可能还没挂上 message 监听，那次 render 会丢失，
+        // 所以这里必须无条件重发（runtime 只发一次 runtime-loaded）。
         postRenderCode();
       }
       if (event.data.type === ARTIFACT_HEIGHT) {
@@ -204,6 +246,12 @@ function IframeArtifactBlock({
     };
 
     window.addEventListener("message", handleMessage);
+    // SSR 页面里 iframe 可能在宿主 hydrate 之前就加载完并发出 runtime-loaded，
+    // 那条握手会丢失；挂上监听后主动 ping，让 runtime 补发一次握手。
+    iframe.contentWindow?.postMessage(
+      { source: "nolo-artifact-host", type: "ping" },
+      "*"
+    );
     return () => window.removeEventListener("message", handleMessage);
   }, [buildResult.code, fullscreen, postRenderCode]);
 

@@ -63,10 +63,15 @@ export function canonicalizeChromeConnectorToolNames(toolNames?: string[]): Chro
   return out;
 }
 
-/** Reserved for future multi-provider targeting; accepted and ignored. */
+/**
+ * Optional per-call browser routing: `"chrome"` or `"firefox"` picks which native host serves the
+ * action (each listens on its own port). Omit to use the default endpoint.
+ */
 export const CONNECTOR_TARGET_PROPERTY = {
   type: "string",
-  description: "Reserved and ignored for now; future multi-provider targeting.",
+  enum: ["chrome", "firefox"],
+  description:
+    "Which browser's connector serves this call: \"chrome\" or \"firefox\". Omit for the default endpoint.",
 };
 
 export const CHROME_CONNECTOR_READ_TOOL_NAMES = [

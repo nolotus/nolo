@@ -43,6 +43,23 @@ export type QuotaWindow = {
 export type AgentQuota = {
   windows: QuotaWindow[];
   observedAt: number;
+  /**
+   * 上游套餐身份（额度百分比之外的"我们买的是哪个档"）。
+   * 目前只有 Mistral 用：它的用量百分比藏在网页 BFF（会话 cookie），API key
+   * 拿不到，只能确认套餐档位（见 subscriptionQuotaProbe 的 mistral-plan）。
+   */
+  plan?: AgentPlan;
+};
+
+/**
+ * 上游套餐信息。只放"端点真的报了 / 官方价目表有据"的字段，不猜。
+ */
+export type AgentPlan = {
+  /** 套餐名（原样保留上游大小写，如 "FREE" / "PRO" / "EDUCATION"）。 */
+  name: string;
+  monthlyCreditsUsd?: number;
+  /** 观测来源（哪个端点出的），排障用。 */
+  source: string;
 };
 
 type HeaderBag = Record<string, string>;
@@ -473,9 +490,13 @@ export function formatQuotaSummary(
   now = Date.now(),
   options?: { compact?: boolean },
 ): string | undefined {
-  const tightest = findTightestQuotaWindow(quota, now);
-  if (!tightest) return undefined;
   const compact = options?.compact === true;
+  const planText = formatPlanLabel(quota?.plan);
+  const planName =
+    typeof quota?.plan?.name === "string" ? quota.plan.name.trim() : "";
+  const tightest = findTightestQuotaWindow(quota, now);
+  // 套餐身份可以单独成立（上游只报套餐、不报窗口时仍要显示，如 Mistral）。
+  if (!tightest) return compact ? planName || undefined : planText;
 
   const parts: string[] = [];
 
@@ -490,7 +511,10 @@ export function formatQuotaSummary(
       parts.push(`余${tightest.remaining}${tightest.unit ? ` ${tightest.unit}` : ""}`);
     }
   }
-  if (compact) return parts.length > 0 ? parts[0] : undefined;
+  if (compact) {
+    const head = parts.length > 0 ? parts[0] : undefined;
+    return [planName || undefined, head].filter(Boolean).join(" · ") || undefined;
+  }
 
   // 2. 窗口范围（若与 unit 相同，如 tokens，不重复拼接）
   if (
@@ -518,12 +542,28 @@ export function formatQuotaSummary(
     }
   }
 
-  // 4. 收尾：只剩 scope（如上游只发了 resetAt 且已过期的窗口）时不返回——
+  // 4. 收尾：只剩 scope（如上游只发了 resetAt 且已过期的窗口）时不返回窗口部分——
   //    那样的 `5h` 没有任何信息量，还会把展示端本可显示的 description 挤掉。
+  //    套餐身份是独立信息，即使没有窗口也要返回。
   //    与 formatQuotaTooltip 的空壳跳过口径保持一致。
-  if (parts.length === 0) return undefined;
-  if (parts.length === 1 && parts[0] === tightest.scope) return undefined;
-  return parts.join(" · ");
+  const onlyScope =
+    parts.length === 0 || (parts.length === 1 && parts[0] === tightest.scope);
+  if (onlyScope) return planText;
+  return [planText, ...parts].filter(Boolean).join(" · ");
+}
+
+/**
+ */
+export function formatPlanLabel(plan: AgentPlan | undefined): string | undefined {
+  const name = typeof plan?.name === "string" ? plan.name.trim() : "";
+  if (!name) return undefined;
+  const credits =
+    typeof plan?.monthlyCreditsUsd === "number" &&
+    Number.isFinite(plan.monthlyCreditsUsd) &&
+    plan.monthlyCreditsUsd > 0
+      ? `月度额度 $${plan.monthlyCreditsUsd}`
+      : undefined;
+  return [`${name} 套餐`, credits].filter(Boolean).join(" · ");
 }
 
 /**
@@ -533,10 +573,11 @@ export function formatQuotaTooltip(
   quota: AgentQuota | undefined,
   now = Date.now(),
 ): string | undefined {
+  const planText = formatPlanLabel(quota?.plan);
   if (!quota || !Array.isArray(quota.windows) || quota.windows.length === 0) {
-    return undefined;
+    return planText ? `套餐：${planText}` : undefined;
   }
-  const lines: string[] = [];
+  const lines: string[] = planText ? [`套餐：${planText}`] : [];
   for (const w of quota.windows) {
     const parts: string[] = [];
     if (typeof w.utilization === "number") {

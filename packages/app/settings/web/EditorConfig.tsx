@@ -275,7 +275,7 @@ const EditorConfig: React.FC = () => {
                 key={item.key}
                 icon={item.icon}
                 label={item.label}
-                enabled={shortcuts[item.key] ?? false}
+                enabled={(shortcuts as Record<string, boolean>)[item.key] ?? false}
                 onToggle={() => dispatch(toggleEditorShortcut(item.key))}
               />
             ))}

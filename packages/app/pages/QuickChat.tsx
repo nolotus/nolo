@@ -200,7 +200,9 @@ const scheduleQuickChatRuntimeDependencyPreload = (trigger: string) => {
   };
 };
 
-scheduleQuickChatRuntimeDependencyPreload("module");
+// Prewarm only when QuickChat is mounted (the effect below), not when an
+// unrelated route imports Home/NewChatPage while discovering the route table.
+// The shell is eager; mounted chat still preloads with the same idle deadline.
 
 interface QuickChatChunkErrorBoundaryProps {
   children: React.ReactNode;
