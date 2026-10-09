@@ -35,6 +35,7 @@ import CreateAgentToolCard from "./CreateAgentToolCard";
 import PrepareAgentDraftToolCard from "./PrepareAgentDraftToolCard";
 import UpdateAgentToolCard from "./UpdateAgentToolCard";
 import AppDeployCard from "./AppDeployCard";
+import MediaJobToolCard from "./MediaJobToolCard";
 import ApplyLineEditsPreviewViewer from "./ApplyLineEditsPreviewViewer";
 import { DiffViewer } from "./DiffViewer";
 import { ToolProps, guessLanguageFromPath } from "./ToolMessageTypes";
@@ -1762,6 +1763,7 @@ const RENDERERS: Record<string, React.FC<ToolProps>> = {
   openAIGptImageEdit: (props) => <GeminiGallery {...props} />,
   remotionRenderVideo: (props) => <RemotionVideoCard {...props} />,
   ziweiChart: (props) => <ZiweiChartCard {...props} />,
+  mediaJobTool: (props) => <MediaJobToolCard {...props} />,
   read_x_post: (props) => <ReadXPostCard {...props} />,
   read_xhs_profile: (props) => <ReadXhsProfileCard {...props} />,
   deleteSpaces: (props) => <DeleteSpacesCard {...props} />,

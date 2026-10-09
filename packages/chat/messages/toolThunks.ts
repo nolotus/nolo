@@ -19,6 +19,7 @@ import type { Message, ToolPayload, ToolErrorPayload } from "./types";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
+import { stripModelConfirmationFlags } from "ai/tools/stripModelConfirmationFlags";
 
 const TOOL_ARGS_SENTINELS = [
   "<|tool_calls_section_end|>",
@@ -107,11 +108,12 @@ const processToolData = createAsyncThunk(
       isRecord(toolArgs) && isRecord(toolArgs._activity)
         ? toolArgs._activity
         : undefined;
-    const executionToolArgs =
+    const withoutActivity =
       isRecord(toolArgs) &&
       Object.prototype.hasOwnProperty.call(toolArgs, "_activity")
         ? (({ _activity: _ignored, ...rest }) => rest)(toolArgs)
         : toolArgs;
+    const executionToolArgs = stripModelConfirmationFlags(withoutActivity);
 
     const inputSummary = JSON.stringify(executionToolArgs).slice(0, 400);
 
@@ -267,14 +269,19 @@ const processToolData = createAsyncThunk(
     } catch (e: any) {
       const errorMessage = toErrorMessage(e);
       const structured = getToolResultErrorData(e);
-      const requiresConfirmation =
-        structured?.code === "self_evolution_requires_confirmation" ||
-        structured?.code === "agent_update_requires_confirmation";
+      const confirmationKeys: Record<string, string> = {
+        self_evolution_requires_confirmation: "__confirmedSelfEvolution",
+        agent_update_requires_confirmation: "__confirmedSelfEvolution",
+        media_job_start_requires_confirmation: "__confirmedMediaJobStart",
+      };
+      const confirmationKey = structured?.code
+        ? confirmationKeys[structured.code]
+        : undefined;
 
-      if (requiresConfirmation) {
+      if (confirmationKey) {
         const confirmedInput = {
           ...(executionToolArgs ?? {}),
-          __confirmedSelfEvolution: true,
+          [confirmationKey]: true,
         };
         const summary =
           (typeof structured?.displayData === "string" &&

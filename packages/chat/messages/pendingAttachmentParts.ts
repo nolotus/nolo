@@ -2,11 +2,15 @@ import { buildMessageFileContentUrl } from "./fileUrl";
 
 export type PendingAttachmentLike = {
   type?: string;
+  /** media_job：即 jobId（见 useMessageInputFiles 的 addPendingFile）。 */
+  id?: string;
   name?: string;
   pageKey?: string;
   dialogKey?: string;
   sourceDialogKey?: string;
   ocrText?: string;
+  /** media_job：音视频任务时长（秒）；发送侧 hydrate，取不到则省略。 */
+  durationSec?: number;
 };
 
 export type PendingAttachmentMessagePart =
@@ -43,10 +47,34 @@ const buildImageContextText = (file: PendingAttachmentLike, pageKey: string): st
 export const isPendingVisualImage = (file: PendingAttachmentLike): boolean =>
   normalizeText(file.type) === "image";
 
+export const isPendingMediaJob = (file: PendingAttachmentLike): boolean =>
+  normalizeText(file.type) === "media_job";
+
+/**
+ * 音视频附件在模型上下文里的文本描述：`[媒体附件] jobId=<id> 文件=<name> 时长=<durationSec>s`。
+ * 时长由发送侧 hydrate（getMediaJob），纯函数本身只读字段，取不到就省略该段。
+ */
+const buildMediaJobText = (file: PendingAttachmentLike): string => {
+  const jobId = normalizeText(file.id);
+  const name = normalizeText(file.name);
+  const durationSec = Number(file.durationSec);
+  const tokens = ["[媒体附件]"];
+  if (jobId) tokens.push(`jobId=${jobId}`);
+  if (name) tokens.push(`文件=${name}`);
+  if (Number.isFinite(durationSec) && durationSec > 0) {
+    tokens.push(`时长=${Math.round(durationSec)}s`);
+  }
+  return tokens.join(" ");
+};
+
 export const pendingAttachmentToMessageParts = (
   file: PendingAttachmentLike,
   args: { currentServer?: string | null }
 ): PendingAttachmentMessagePart[] => {
+  if (isPendingMediaJob(file)) {
+    return [{ type: "text", text: buildMediaJobText(file) }];
+  }
+
   if (normalizeText(file.type) === "ocr_text" && normalizeText(file.ocrText)) {
     return [
       {

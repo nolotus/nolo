@@ -43,6 +43,7 @@ import {
   applyExternalDocUpdate,
   getDocState,
   getDocPageKey,
+  isDocStateForPage,
   getDocHasPendingChanges,
   useDocState,
   type DocState,
@@ -109,8 +110,13 @@ function useDocData(pageKey: string, editMode: boolean) {
   // Subscribe to the doc store so we re-render on doc state changes.
   useDocState();
   const doc = getDocState();
-  const isLoading = doc.isLoading;
-  const isInitialized = doc.isInitialized;
+  // 切换 pageKey 时 module store 里还留着上一页的 state（isInitialized=true +
+  // 旧 slateData/title）。只按 isInitialized 判断会在首帧按「已就绪」渲染上一篇
+  // 的正文，等 initDocState 重置后才消失——用户看到的就是「新建的页面里显示
+  // 上一篇文章的内容」。归属判据：store 记录的 pageKey 必须就是当前页。
+  const docBelongsToPage = isDocStateForPage(doc, pageKey);
+  const isLoading = doc.isLoading || !docBelongsToPage;
+  const isInitialized = doc.isInitialized && docBelongsToPage;
   const isReadOnly = doc.isReadOnly;
 
   // 初始化文档及监听外部更新
@@ -143,6 +149,21 @@ function useDocData(pageKey: string, editMode: boolean) {
       }
     };
   }, [dispatch, pageKey, editMode]);
+
+  // 兜底自愈：主 effect 的依赖没变、但 store 已经不在当前页时（在途 read 晚到把
+  // store 停在别的键、预览弹层关闭后 reset 等），页面会永久停在 loading，这里
+  // 重新装载当前页。判断必须读**实时** store，而不是本次渲染的快照：同一次 commit
+  // 里主 effect 已经同步把 store 标记成本页（pending），快照却还是上一页——用快照
+  // 判断会重复发起一次 initDocState。
+  useEffect(() => {
+    if (!pageKey) return;
+    const live = getDocState();
+    if (isDocStateForPage(live, pageKey)) return;
+    void initDocState(
+      { pageKey, isReadOnly: !editMode },
+      { dispatch, getState: () => ({ doc: getDocState() }) }
+    );
+  }, [doc, pageKey, editMode, dispatch]);
 
   // 离开时重置
   useEffect(() => {

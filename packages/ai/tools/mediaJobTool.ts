@@ -1,4 +1,13 @@
+import type { MediaQuote } from "ai/lecture/types";
 import { callToolApi } from "./toolApiClient";
+import { ToolResultError } from "./toolResultError";
+
+/** 档位文案单一真相源（quote 三档与后续渲染共用同一份措辞）。 */
+const TIER_LABELS: Record<"outline" | "translate" | "full", string> = {
+  outline: "只要大纲重点",
+  translate: "原文+译文对照",
+  full: "全套（对照+大纲+重点+术语，可导出文档）",
+};
 
 export const mediaJobSchema = {
   name: "mediaJobTool",
@@ -34,7 +43,7 @@ export const mediaJobSchema = {
         type: "string",
         enum: ["outline", "translate", "full"],
         description:
-          "处理深度：outline 仅大纲，translate 翻译，full 完整处理。",
+          "处理深度：outline 仅大纲，translate 翻译，full 完整处理。action=start 时必须显式传用户已确认的档位（服务端按最贵档扣费，缺省会按 job 上已落库的最高档启动）。",
       },
       targetLang: {
         type: "string",
@@ -62,6 +71,20 @@ export async function mediaJobFunc(
 ): Promise<any> {
   const { action, fileId, jobId, fromSec, toSec, depth, targetLang } =
     input ?? {};
+  if (
+    action === "start" &&
+    (input as any)?.__confirmedMediaJobStart !== true
+  ) {
+    throw new ToolResultError("启动媒体任务前需要用户确认所选处理档位。", {
+      code: "media_job_start_requires_confirmation",
+      displayData: "请先向用户说明并确认处理档位后再启动。",
+    });
+  }
+  if (action === "start" && !depth) {
+    throw new Error(
+      "start 必须指定 depth（outline/translate/full），对应用户确认的档位",
+    );
+  }
   const body: Record<string, unknown> = {};
   if (fromSec !== undefined || toSec !== undefined) {
     body.scope = {
@@ -74,6 +97,9 @@ export async function mediaJobFunc(
 
   let path: string;
   let data: any;
+  let tiers:
+    | Array<{ depth: "outline" | "translate" | "full"; label: string; quote: MediaQuote }>
+    | undefined;
   if (action === "status") {
     if (!jobId) throw new Error("status 操作必须提供 jobId");
     data = await callToolApi(
@@ -97,7 +123,27 @@ export async function mediaJobFunc(
       if (!id) throw new Error("创建媒体任务失败：服务端未返回 job id");
     }
     path = `/api/media-jobs/${encodeURIComponent(id)}/${action}`;
-    data = await callToolApi(thunkApi, path, body, { withAuth: true });
+    if (action === "quote") {
+      const requestedDepths: Array<"outline" | "translate" | "full"> = depth
+        ? [depth]
+        : (["outline", "translate", "full"] as const);
+      tiers = [];
+      for (const tierDepth of requestedDepths) {
+        data = await callToolApi(
+          thunkApi,
+          path,
+          { ...body, depth: tierDepth },
+          { withAuth: true },
+        );
+        tiers.push({
+          depth: tierDepth,
+          label: TIER_LABELS[tierDepth],
+          quote: data?.quote ?? data?.job?.quote,
+        });
+      }
+    } else {
+      data = await callToolApi(thunkApi, path, body, { withAuth: true });
+    }
   } else {
     throw new Error("action 必须是 quote、start 或 status");
   }
@@ -111,6 +157,7 @@ export async function mediaJobFunc(
     jobId: data?.job?.id ?? (action !== "status" ? undefined : jobId),
     job: data?.job,
     quote: data?.quote ?? data?.job?.quote,
+    ...(tiers ? { tiers } : {}),
     rawData: data,
   };
 }

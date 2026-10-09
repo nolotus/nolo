@@ -31,12 +31,6 @@ interface AttachmentsPreviewProps {
   onRemoveImage: (id: string) => void;
   processingFiles?: Set<string>;
   isMobile?: boolean;
-  mediaJobSourceText?: string;
-  mediaJobDrafts?: Record<string, import("./MediaJobAttachment").MediaJobDraft>;
-  onMediaJobDraftChange?: (
-    id: string,
-    draft: import("./MediaJobAttachment").MediaJobDraft,
-  ) => void;
 }
 
 interface ImageItemProps {
@@ -479,9 +473,6 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
   onRemoveImage,
   processingFiles = new Set(),
   isMobile = false,
-  mediaJobSourceText = "",
-  mediaJobDrafts = {},
-  onMediaJobDraftChange,
 }) => {
   const dispatch = useAppDispatch();
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -583,13 +574,9 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
                 key={file.id}
                 jobId={file.id}
                 fileName={file.name}
-                sourceText={mediaJobSourceText}
-                draft={mediaJobDrafts[file.id]}
-                onDraftChange={(draft) =>
-                  onMediaJobDraftChange?.(file.id, draft)
-                }
                 onJobMissing={dropCard}
                 onJobDiscard={dropCard}
+                onRemove={dropCard}
               />
             );
           }

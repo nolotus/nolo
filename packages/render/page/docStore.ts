@@ -123,6 +123,16 @@ let version = 0;
 
 let state: DocState = createInitialState();
 
+/**
+ * 最近一次 initDocState 请求的 pageKey（乱序保护）。
+ *
+ * 多个 initDocState 可能同时在途（快速切换页面、预览弹层用别的 dbKey 装载、
+ * 关闭预览时 reset）。只有最后一次请求有权写 store——否则旧请求后落地会把
+ * store 停在别的 pageKey 上，渲染层的 isDocStateForPage 会一直判为「不属于
+ * 当前页」，页面永久停在 loading。
+ */
+let latestInitRequestKey: string | null = null;
+
 const notify = (): void => {
   for (const listener of listeners) {
     try {
@@ -198,6 +208,22 @@ export function getDocPageKey(): string | null {
   return state.pageKey;
 }
 
+/**
+ * store 里的状态是否属于给定页面。
+ *
+ * 切换 pageKey 时 module store 会短暂保留上一页的状态（isInitialized=true +
+ * 旧 slateData/title），直到 initDocState 把新页面装载进来。渲染层若只按
+ * isInitialized 判断「已就绪」，首帧就会画出上一页的正文——用户看到的是
+ * 「新建的页面里显示上一篇文章的内容」（2026-10-09 报告，回归守护见
+ * `e2e/new-page-after-reading.spec.ts`）。
+ */
+export function isDocStateForPage(
+  state: DocState,
+  pageKey: string | null | undefined,
+): boolean {
+  return Boolean(pageKey) && state.pageKey === pageKey;
+}
+
 export function getDocIsInitialized(): boolean {
   return state.isInitialized;
 }
@@ -259,6 +285,9 @@ export function updateDocTags(tags: string[]): void {
 }
 
 export function resetDocState(): void {
+  // 关闭 / 离开当前文档：作废在途 initDocState 的结果，
+  // 避免它落地后把 store 写回别的 pageKey。
+  latestInitRequestKey = null;
   setState(createInitialState());
 }
 
@@ -348,6 +377,8 @@ export async function initDocState(
   { dispatch }: DocThunkApi,
 ): Promise<void> {
   const { pageKey, isReadOnly } = args;
+  // 本次请求成为最新请求；只有它（或更晚的请求）有权写 store。
+  latestInitRequestKey = pageKey;
   // pending
   setState((prev) => ({
     ...createInitialState(),
@@ -357,6 +388,9 @@ export async function initDocState(
   }));
   try {
     const readAction = await dispatch(readAndWait(pageKey));
+    // 等待期间可能有更新的 initDocState 或 resetDocState 落地：丢弃本次结果，
+    // 否则 store 会停在别的 pageKey 上，渲染层将永久停在 loading。
+    if (latestInitRequestKey !== pageKey) return;
     if (readAndWait.fulfilled.match(readAction) && readAction.payload) {
       const data = readAction.payload as PageData;
       if (data.type !== DataType.DOC) {
@@ -415,6 +449,7 @@ export async function initDocState(
       }));
     }
   } catch (e: any) {
+    if (latestInitRequestKey !== pageKey) return;
     setState((prev) => ({
       ...prev,
       isLoading: false,
@@ -620,5 +655,6 @@ export function useDocField<T>(selector: (s: DocState) => T): T {
 
 export function resetDocStoreForTests(): void {
   state = createInitialState();
+  latestInitRequestKey = null;
   bump();
 }

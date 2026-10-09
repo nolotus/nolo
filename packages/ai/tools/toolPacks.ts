@@ -257,7 +257,7 @@ export const CAPABILITY_PACKS: CapabilityPack[] = [
     tools: ["mediaJobTool"],
     defaultEnabled: false,
     icon: "🎞️",
-    promptPatch: `# 长音视频处理\n\n- 对已上传媒体使用 mediaJobTool：先用 action=quote 估价，再用 action=start 启动；记录返回的 job.id，后续用 action=status 和 jobId 查询进度及结果。\n- 用户可指定 fromSec/toSec 秒范围、depth（outline、translate、full）和 targetLang。\n`,
+    promptPatch: `# 长音视频处理\n\n- 对已上传媒体先调用 mediaJobTool action=quote；默认不要传 depth，以一次取得 outline、translate、full 三档报价。只用工具返回值中的价格，不得自行估价。\n- 用一句话说明报价，并逐档说明内容：只要大纲重点 / 原文+译文对照 / 全套（对照+大纲+重点+术语，可导出文档）。范围和目标语言从用户原话解析为 fromSec/toSec/targetLang；“中英”设 targetLang=zh 且保留原文对照。\n- 用户明确确认档位前绝不调用 action=start；确认后按所选档位调用 start，并传 jobId、depth、范围和语言；start 必须传 depth，且必须是用户所选档位（缺省会按最贵档启动扣费）。记录 job.id，后续用 action=status 和 jobId 查询进度及结果。\n`,
   },
   {
     id: "video-transcription",

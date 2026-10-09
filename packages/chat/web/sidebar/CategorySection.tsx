@@ -278,7 +278,6 @@ const CategorySection: React.FC<CategorySectionProps> = ({
                     contentKey={item.contentKey}
                     type={item.type}
                     title={item.title}
-                    fileCategory={item.fileCategory ?? null}
                     categoryId={item.categoryId ?? undefined}
                     isActive={isRoutableContentActive({
                       contentKey: item.contentKey,
@@ -293,6 +292,21 @@ const CategorySection: React.FC<CategorySectionProps> = ({
                     onMenuAnchorChange={handleMenuAnchorChange}
                     editSignal={editSignal?.key === item.contentKey ? editSignal.nonce : undefined}
                     pinned={Boolean(item.pinned)}
+                    pinAction={
+                      currentSpaceId
+                        ? {
+                            pinned: Boolean(item.pinned),
+                            onToggle: () =>
+                              (dispatch as any)(
+                                (updateContentPinned as any)({
+                                  spaceId: currentSpaceId,
+                                  contentKey: item.contentKey,
+                                  pinned: !item.pinned,
+                                })
+                              ),
+                          }
+                        : undefined
+                    }
                     childCount={(item as FlatRow).__childCount}
                     isChildCollapsed={!expandedParents.has(item.contentKey)}
                     onToggleChildCollapse={
@@ -338,21 +352,7 @@ const CategorySection: React.FC<CategorySectionProps> = ({
             showDownloadAction={
               activeItem.type === "file" || activeItem.type === "image"
             }
-            pinAction={
-              currentSpaceId
-                ? {
-                    pinned: Boolean(activeItem.pinned),
-                    onToggle: () =>
-                      (dispatch as any)(
-                        (updateContentPinned as any)({
-                          spaceId: currentSpaceId,
-                          contentKey: activeItem.contentKey,
-                          pinned: !activeItem.pinned,
-                        })
-                      ),
-                  }
-                : undefined
-            }
+            fileCategory={activeItem.fileCategory ?? null}
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {
               setEditSignal({ key: activeItem.contentKey, nonce: Date.now() });
