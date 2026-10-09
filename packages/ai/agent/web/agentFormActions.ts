@@ -274,7 +274,13 @@ export async function handleQuickCreate({
             useServerProxy: false,
             customProviderUrl: draft.customProviderUrl.trim(),
             apiKey: draft.apiKey.trim(),
-            apiKeyRef: draft.credentialSynced ? "" : (draft.apiKeyRef || ""),
+            // credentialSynced 只丢弃 provider-key: 指针（同步后由服务端凭据取代）；
+            // provider OAuth 通道引用（chatgpt/claude/xai/antigravity）必须保留，
+            // 否则同步到 CLI/TUI 的 agent 会拿不到订阅通道而 HTTP 401。
+            apiKeyRef:
+              draft.credentialSynced && (draft.apiKeyRef || "").startsWith("provider-key:")
+                ? ""
+                : (draft.apiKeyRef || ""),
             credentialRef: draft.credentialSynced ? undefined : ((draft.apiKeyRef ?? "").startsWith("provider-key:") ? draft.apiKeyRef : undefined),
             apiKeyHeader: draft.apiKeyHeader || "",
             credentialSynced: draft.credentialSynced,
