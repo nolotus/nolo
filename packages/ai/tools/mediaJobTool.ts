@@ -71,6 +71,11 @@ export async function mediaJobFunc(
 ): Promise<any> {
   const { action, fileId, jobId, fromSec, toSec, depth, targetLang } =
     input ?? {};
+  if (action === "start" && !depth) {
+    throw new Error(
+      "start 必须指定 depth（outline/translate/full），对应用户确认的档位",
+    );
+  }
   if (
     action === "start" &&
     (input as any)?.__confirmedMediaJobStart !== true
@@ -79,11 +84,6 @@ export async function mediaJobFunc(
       code: "media_job_start_requires_confirmation",
       displayData: "请先向用户说明并确认处理档位后再启动。",
     });
-  }
-  if (action === "start" && !depth) {
-    throw new Error(
-      "start 必须指定 depth（outline/translate/full），对应用户确认的档位",
-    );
   }
   const body: Record<string, unknown> = {};
   if (fromSec !== undefined || toSec !== undefined) {

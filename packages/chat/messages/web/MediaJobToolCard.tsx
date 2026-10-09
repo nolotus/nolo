@@ -6,7 +6,7 @@ import type {
   MediaQuote,
   MediaScope,
 } from "ai/lecture/types";
-import { getMediaJob, startMediaJob } from "chat/web/mediaJobs";
+import { getMediaJob, mediaJobAction, startMediaJob } from "chat/web/mediaJobs";
 import type { ToolProps } from "./ToolMessageTypes";
 
 export interface MediaJobTier {
@@ -55,6 +55,11 @@ function formatCredits(credits?: [number, number]): string {
   return `${Number(min.toFixed(2))} ~ ${Number(max.toFixed(2))} 积分`;
 }
 
+function formatSingleCredits(credits?: number): string {
+  const val = credits ?? 0;
+  return `${Number(val.toFixed(2))} 积分`;
+}
+
 function formatEta(etaSec?: [number, number]): string {
   if (!etaSec || !Array.isArray(etaSec) || etaSec.length < 2) return "";
   const [min, max] = etaSec;
@@ -96,6 +101,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   const [startError, setStartError] = useState<string | null>(null);
   // 同步互斥：React 的 starting state 是异步的，光看 state 挡不住双击
   const startingRef = useRef(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const actionBusyRef = useRef(false);
 
   useEffect(() => {
     if (initialJob) {
@@ -187,6 +195,94 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     }
   };
 
+  const handleConfirmOverrun = async (accept: boolean) => {
+    if (readOnly || actionBusyRef.current) return;
+    const targetId = jobId || job?.id;
+    if (!targetId) return;
+    actionBusyRef.current = true;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const res = await mediaJobAction(targetId, "confirm-overrun", { accept });
+      if (res?.job) {
+        setJob(res.job);
+      }
+    } catch (err: any) {
+      setActionError(err?.message || "操作失败，请稍后重试");
+    } finally {
+      actionBusyRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (readOnly || actionBusyRef.current) return;
+    const targetId = jobId || job?.id;
+    if (!targetId) return;
+    actionBusyRef.current = true;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const res = await mediaJobAction(targetId, "cancel");
+      if (res?.job) {
+        setJob(res.job);
+      }
+    } catch (err: any) {
+      setActionError(err?.message || "取消失败，请稍后重试");
+    } finally {
+      actionBusyRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
+  const handleExtendRemaining = async () => {
+    if (readOnly || actionBusyRef.current || !job) return;
+    const targetId = jobId || job.id;
+    if (!targetId) return;
+    actionBusyRef.current = true;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const from = job.scope?.toSec ?? 0;
+      const to = job.durationSec;
+      const res = await mediaJobAction(targetId, "extend", {
+        scope: { fromSec: from, toSec: to },
+        depth: job.depth,
+      });
+      if (res?.job) {
+        setJob(res.job);
+      }
+    } catch (err: any) {
+      setActionError(err?.message || "追加处理失败，请稍后重试");
+    } finally {
+      actionBusyRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (readOnly || actionBusyRef.current || !job) return;
+    const targetId = jobId || job.id;
+    if (!targetId) return;
+    actionBusyRef.current = true;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const res = await mediaJobAction(targetId, "extend", {
+        scope: job.scope,
+        depth: job.depth,
+      });
+      if (res?.job) {
+        setJob(res.job);
+      }
+    } catch (err: any) {
+      setActionError(err?.message || "继续处理失败，请稍后重试");
+    } finally {
+      actionBusyRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
   // 既无 job 也无 quote：没有任何可渲染信息，返回空（不渲染空卡）
   if (!isError && !initialJob && !initialQuote) {
     return null;
@@ -211,6 +307,27 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       </div>
     );
   }
+
+  const spentCredits = job
+    ? Object.values(job.spent ?? {}).reduce((a, b) => a + (b ?? 0), 0)
+    : 0;
+
+  const hasRemainingRange = Boolean(
+    job &&
+      job.status === "done" &&
+      typeof job.durationSec === "number" &&
+      job.durationSec > 0 &&
+      job.scope &&
+      job.scope.toSec < job.durationSec,
+  );
+
+  const hasArtifacts = Boolean(
+    job &&
+      ((job.spent &&
+        Object.values(job.spent).some((v) => typeof v === "number" && v > 0)) ||
+        (job.stageArtifacts &&
+          Object.values(job.stageArtifacts).some(Boolean))),
+  );
 
   return (
     <div
@@ -492,12 +609,18 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 ? "处理完成"
                 : job?.status === "failed"
                   ? "处理失败"
-                  : `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"} ${
-                      job?.progress?.done ?? 0
-                    }/${job?.progress?.total ?? 0}`}
+                  : job?.status === "cancelled"
+                    ? "已取消"
+                    : job?.status === "awaiting_confirmation"
+                      ? "等待超额确认"
+                      : `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"} ${
+                          job?.progress?.done ?? 0
+                        }/${job?.progress?.total ?? 0}`}
             </span>
             {job?.status !== "done" &&
               job?.status !== "failed" &&
+              job?.status !== "cancelled" &&
+              job?.status !== "awaiting_confirmation" &&
               (job?.progress?.total ?? 0) > 0 && (
                 <span
                   style={{
@@ -519,36 +642,148 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
           </div>
 
           {/* 自定义进度条 */}
-          {job?.status !== "done" && job?.status !== "failed" && (
+          {job?.status !== "done" &&
+            job?.status !== "failed" &&
+            job?.status !== "cancelled" &&
+            job?.status !== "awaiting_confirmation" && (
+              <div
+                style={{
+                  width: "100%",
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor:
+                    "var(--surfaceSecondary, var(--borderMuted, #e5e7eb))",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${
+                      (job?.progress?.total ?? 0) > 0
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              ((job?.progress?.done ?? 0) /
+                                (job?.progress?.total ?? 1)) *
+                                100,
+                            ),
+                          )
+                        : 0
+                    }%`,
+                    height: "100%",
+                    backgroundColor: "var(--primary, #2563eb)",
+                    transition: "width 0.3s ease",
+                  }}
+                />
+              </div>
+            )}
+
+          {/* 运行中显示「取消」 */}
+          {currentStatus === "running" && !readOnly && (
             <div
               style={{
-                width: "100%",
-                height: 6,
-                borderRadius: 3,
+                marginTop: 8,
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                type="button"
+                data-testid="job-cancel-btn"
+                disabled={actionBusy}
+                onClick={() => void handleCancel()}
+                style={{
+                  padding: "4px 10px",
+                  fontSize: "12px",
+                  borderRadius: "var(--radius-sm, 4px)",
+                  border: "1px solid var(--borderMuted, #d1d5db)",
+                  backgroundColor: "transparent",
+                  color: "var(--textMuted, #6b7280)",
+                  cursor: actionBusy ? "not-allowed" : "pointer",
+                }}
+              >
+                取消
+              </button>
+            </div>
+          )}
+
+          {/* 取消后显示「已扣 X 积分，已完成部分可查看」 */}
+          {job?.status === "cancelled" && (
+            <div
+              data-testid="job-cancelled-hint"
+              style={{
+                marginTop: 8,
+                fontSize: "12px",
+                color: "var(--textMuted, #6b7280)",
+              }}
+            >
+              已扣 {formatSingleCredits(spentCredits)}，已完成部分可查看
+            </div>
+          )}
+
+          {/* W8：awaiting_confirmation 时显示超出金额与「继续处理」「只要已完成部分」 */}
+          {job?.status === "awaiting_confirmation" && (
+            <div
+              data-testid="job-overrun-section"
+              style={{
+                marginTop: 8,
+                padding: "8px 12px",
+                borderRadius: "var(--radius-sm, 6px)",
                 backgroundColor:
-                  "var(--surfaceSecondary, var(--borderMuted, #e5e7eb))",
-                overflow: "hidden",
+                  "var(--surfaceSecondary, rgba(234, 179, 8, 0.08))",
+                border:
+                  "1px solid var(--borderWarning, rgba(234, 179, 8, 0.25))",
+                fontSize: "12px",
               }}
             >
               <div
+                data-testid="job-overrun-amount"
                 style={{
-                  width: `${
-                    (job?.progress?.total ?? 0) > 0
-                      ? Math.min(
-                          100,
-                          Math.round(
-                            ((job?.progress?.done ?? 0) /
-                              (job?.progress?.total ?? 1)) *
-                              100,
-                          ),
-                        )
-                      : 0
-                  }%`,
-                  height: "100%",
-                  backgroundColor: "var(--primary, #2563eb)",
-                  transition: "width 0.3s ease",
+                  color: "var(--textWarning, #b45309)",
+                  fontWeight: 500,
                 }}
-              />
+              >
+                超出金额：{formatSingleCredits(job?.overrunCredits)}
+              </div>
+              {!readOnly && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    data-testid="job-confirm-overrun-btn"
+                    disabled={actionBusy}
+                    onClick={() => void handleConfirmOverrun(true)}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      borderRadius: "var(--radius-sm, 4px)",
+                      backgroundColor: "var(--primary, #2563eb)",
+                      color: "#ffffff",
+                      border: "none",
+                      cursor: actionBusy ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    继续处理
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="job-reject-overrun-btn"
+                    disabled={actionBusy}
+                    onClick={() => void handleConfirmOverrun(false)}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      borderRadius: "var(--radius-sm, 4px)",
+                      backgroundColor: "transparent",
+                      border: "1px solid var(--borderMuted, #d1d5db)",
+                      color: "var(--text, #111827)",
+                      cursor: actionBusy ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    只要已完成部分
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -567,9 +802,85 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
             </div>
           )}
 
-          {/* done 时显示「打开笔记」链接到 /media-jobs/<jobId> */}
+          {/* cancelled / failed 状态下的操作区域 */}
+          {(job?.status === "failed" || job?.status === "cancelled") &&
+            (hasArtifacts || !readOnly) && (
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                {hasArtifacts && (
+                  <a
+                    data-testid="open-note-link"
+                    href={`/media-jobs/${jobId || job?.id}`}
+                    onClick={(e) => {
+                      if (navigateToPage && (jobId || job?.id)) {
+                        e.preventDefault();
+                        navigateToPage(`media-jobs/${jobId || job?.id}`);
+                      }
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#ffffff",
+                      backgroundColor: "var(--primary, #2563eb)",
+                      borderRadius: "var(--radius-md, 6px)",
+                      textDecoration: "none",
+                      cursor: "pointer",
+                      border: "none",
+                    }}
+                  >
+                    打开笔记
+                  </a>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    data-testid="job-resume-btn"
+                    disabled={actionBusy}
+                    onClick={() => void handleResume()}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "var(--text, #111827)",
+                      backgroundColor: "transparent",
+                      border: "1px solid var(--borderMuted, #d1d5db)",
+                      borderRadius: "var(--radius-md, 6px)",
+                      cursor: actionBusy ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    继续处理（已完成部分不重复计费）
+                  </button>
+                )}
+              </div>
+            )}
+
+          {/* done 时显示「打开笔记」链接到 /media-jobs/<jobId> 与「处理剩余部分」 */}
           {job?.status === "done" && (
-            <div style={{ marginTop: 12 }}>
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               {readOnly ? (
                 <span
                   style={{
@@ -583,34 +894,74 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                   处理完成
                 </span>
               ) : (
-                <a
-                  data-testid="open-note-link"
-                  href={`/media-jobs/${jobId || job?.id}`}
-                  onClick={(e) => {
-                    if (navigateToPage && (jobId || job?.id)) {
-                      e.preventDefault();
-                      navigateToPage(`media-jobs/${jobId || job?.id}`);
-                    }
-                  }}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: "6px 14px",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "#ffffff",
-                    backgroundColor: "var(--primary, #2563eb)",
-                    borderRadius: "var(--radius-md, 6px)",
-                    textDecoration: "none",
-                    cursor: "pointer",
-                    border: "none",
-                  }}
-                >
-                  打开笔记
-                </a>
+                <>
+                  <a
+                    data-testid="open-note-link"
+                    href={`/media-jobs/${jobId || job?.id}`}
+                    onClick={(e) => {
+                      if (navigateToPage && (jobId || job?.id)) {
+                        e.preventDefault();
+                        navigateToPage(`media-jobs/${jobId || job?.id}`);
+                      }
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#ffffff",
+                      backgroundColor: "var(--primary, #2563eb)",
+                      borderRadius: "var(--radius-md, 6px)",
+                      textDecoration: "none",
+                      cursor: "pointer",
+                      border: "none",
+                    }}
+                  >
+                    打开笔记
+                  </a>
+                  {hasRemainingRange && (
+                    <button
+                      type="button"
+                      data-testid="job-extend-btn"
+                      disabled={actionBusy}
+                      onClick={() => void handleExtendRemaining()}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        padding: "6px 14px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        color: "var(--text, #111827)",
+                        backgroundColor: "transparent",
+                        border: "1px solid var(--borderMuted, #d1d5db)",
+                        borderRadius: "var(--radius-md, 6px)",
+                        cursor: actionBusy ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      处理剩余部分
+                    </button>
+                  )}
+                </>
               )}
+            </div>
+          )}
+
+          {actionError && (
+            <div
+              role="alert"
+              data-testid="job-action-error"
+              style={{
+                marginTop: 8,
+                fontSize: "12px",
+                color: "var(--danger, #ef4444)",
+              }}
+            >
+              {userFacingError(actionError)}
             </div>
           )}
         </div>

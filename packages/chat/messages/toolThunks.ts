@@ -19,7 +19,10 @@ import type { Message, ToolPayload, ToolErrorPayload } from "./types";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
-import { stripModelConfirmationFlags } from "ai/tools/stripModelConfirmationFlags";
+import {
+  CONFIRMATION_INPUT_KEYS,
+  stripModelConfirmationFlags,
+} from "ai/tools/stripModelConfirmationFlags";
 
 const TOOL_ARGS_SENTINELS = [
   "<|tool_calls_section_end|>",
@@ -269,13 +272,8 @@ const processToolData = createAsyncThunk(
     } catch (e: any) {
       const errorMessage = toErrorMessage(e);
       const structured = getToolResultErrorData(e);
-      const confirmationKeys: Record<string, string> = {
-        self_evolution_requires_confirmation: "__confirmedSelfEvolution",
-        agent_update_requires_confirmation: "__confirmedSelfEvolution",
-        media_job_start_requires_confirmation: "__confirmedMediaJobStart",
-      };
       const confirmationKey = structured?.code
-        ? confirmationKeys[structured.code]
+        ? CONFIRMATION_INPUT_KEYS[structured.code]
         : undefined;
 
       if (confirmationKey) {
