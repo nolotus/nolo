@@ -264,7 +264,9 @@ export async function runChatgptWebImageLocalJob(
     assertOutputImage(outPath);
 
     const userAuthToken = input.userAuthToken?.trim() || "";
-    const userId = parseUserIdFromAuthToken(userAuthToken) || "default";
+    if (!userAuthToken) throw new Error("Cannot upload generated image without a user authentication token.");
+    const userId = parseUserIdFromAuthToken(userAuthToken);
+    if (!userId) throw new Error("Cannot determine authenticated user from the user authentication token.");
     const serverBase =
       (input.serverBase?.trim() || DEFAULT_NOLO_SERVER_URL).replace(/\/+$/, "");
 
