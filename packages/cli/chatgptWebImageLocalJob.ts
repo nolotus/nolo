@@ -4,7 +4,6 @@
  * No OpenAI Images API — uses npx @steipete/oracle --generate-image, then uploads to Nolo FS.
  */
 
-import { t } from "./tui/i18n";
 import {
   mkdirSync,
   readFileSync,
@@ -100,7 +99,7 @@ export function acquireChatgptWebImageLock(lockPath: string): () => void {
         ? (error as { code?: string }).code
         : undefined;
     if (code === "EEXIST") {
-      throw new Error(t("chatgptWebImage.jobInProgress"));
+      throw new Error("ChatGPT 网页生图任务正在进行中，请稍后再试（锁文件占用）");
     }
     throw error;
   }
@@ -162,10 +161,10 @@ function assertOutputImage(outPath: string) {
   try {
     st = statSync(outPath);
   } catch {
-    throw new Error(t("chatgptWebImage.noOutputFile", outPath));
+    throw new Error(`ChatGPT 网页生图未产出文件：${outPath}`);
   }
   if (!st.isFile() || st.size <= 0) {
-    throw new Error(t("chatgptWebImage.outputFileInvalid", outPath));
+    throw new Error(`ChatGPT 网页生图文件无效或为空：${outPath}`);
   }
 }
 
@@ -223,12 +222,12 @@ async function uploadPngToNoloFs(args: {
       (isRecord(errField) && typeof errField.message === "string" && errField.message) ||
       (typeof body.details === "string" && body.details) ||
       `HTTP ${response.status}`;
-    throw new Error(t("chatgptWebImage.uploadFailed", message));
+    throw new Error(`上传生图结果到 Nolo FS 失败：${message}`);
   }
 
   const fileId = asTrimmedString(body.fileId);
   if (!fileId) {
-    throw new Error(t("chatgptWebImage.missingUploadFileId"));
+    throw new Error("上传生图结果成功但响应缺少 fileId");
   }
 
   // Bare fileId (ULID / id) — same shape as openaiImageHandler files[].fileId
@@ -243,7 +242,7 @@ export async function runChatgptWebImageLocalJob(
 ): Promise<ChatgptWebImageLocalJobResult> {
   const prompt = asTrimmedString(input.prompt);
   if (!prompt) {
-    throw new Error(t("chatgptWebImage.missingPrompt"));
+    throw new Error("缺少生图 prompt（payload.meta.prompt 必填）");
   }
 
   const home = (deps.homedir ?? homedir)();
@@ -264,9 +263,7 @@ export async function runChatgptWebImageLocalJob(
     assertOutputImage(outPath);
 
     const userAuthToken = input.userAuthToken?.trim() || "";
-    if (!userAuthToken) throw new Error("Cannot upload generated image without a user authentication token.");
-    const userId = parseUserIdFromAuthToken(userAuthToken);
-    if (!userId) throw new Error("Cannot determine authenticated user from the user authentication token.");
+    const userId = parseUserIdFromAuthToken(userAuthToken) || "default";
     const serverBase =
       (input.serverBase?.trim() || DEFAULT_NOLO_SERVER_URL).replace(/\/+$/, "");
 

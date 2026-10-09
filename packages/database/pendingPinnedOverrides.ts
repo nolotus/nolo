@@ -44,8 +44,8 @@ const scheduleTimeoutClear = (contentKey: string, token: symbol): void => {
     }
   }, OVERRIDE_TIMEOUT_MS);
   // 防止计时器挂住 Node/bun 进程退出（测试/SSR 场景）。
-  if (typeof timer === "object" && typeof (timer as { unref?: () => void }).unref === "function") {
-    (timer as { unref?: () => void }).unref?.();
+  if (typeof timer === "object" && typeof timer.unref === "function") {
+    timer.unref();
   }
   pendingTimers.set(contentKey, timer);
 };

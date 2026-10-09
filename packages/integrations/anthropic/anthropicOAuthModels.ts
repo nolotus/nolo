@@ -47,8 +47,6 @@ export const anthropicOAuthModels: Model[] = [
   // 注意该模型对非默认 temperature/top_p/top_k 直接 400——nolo 的 anthropicAdapter
   // 不传采样参数，不受影响。
   oauthModel({ name: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
-  // Claude Haiku 5.5（2026-10-07 发布）：官方规格 1M + Adaptive thinking + max output 128k。
-  oauthModel({ name: "claude-haiku-5-5", displayName: "Claude Haiku 5.5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-fable-5", displayName: "Claude Fable 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-opus-5", displayName: "Claude Opus 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
   oauthModel({ name: "claude-sonnet-5", displayName: "Claude Sonnet 5", contextWindow: 1_000_000, thinkingMode: "adaptive", maxOutputTokens: 128_000 }),
@@ -90,7 +88,6 @@ export function isAdaptiveThinkingModelId(model: string | undefined): boolean {
     n.includes("fable-5") ||
     n.includes("opus-5") ||
     n.includes("sonnet-5") ||
-    n.includes("haiku-5") ||
     n.includes("opus-4-8") ||
     n.includes("opus-4-7") ||
     n.includes("sonnet-4-6") ||

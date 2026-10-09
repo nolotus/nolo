@@ -6,7 +6,6 @@ import { opencodeGoModels } from "../../integrations/opencode/models";
 import { commandCodeModels } from "../../integrations/commandcode/models";
 import { deepseekModels } from "../../integrations/deepseek/models";
 import { stepfunModels, stepfunStepPlanModels } from "../../integrations/stepfun/models";
-import { mistralModels } from "../../integrations/mistral/models";
 import type { ReasoningEffort } from "./createAgentSchema";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 // 统一维护 agent 创建时可选择的 provider：
@@ -184,23 +183,6 @@ const STEPFUN_STEP_PLAN_MODEL_OPTIONS: ReadonlyArray<{
 }));
 
 /**
- * 跨 Studio / API / Vibe Code 共享）可选模型，由 integrations/mistral/models 派生。
- * 与"自带 Key 的按量计费"区分：这里计的是订阅池，模板登记为 subscription +
- * token_plan_endpoint（同 Step Plan / Kimi Code 口径）。
- */
-const MISTRAL_MODEL_OPTIONS: ReadonlyArray<{
-  id: string;
-  label: string;
-  recommended?: boolean;
-  hasVision?: boolean;
-}> = mistralModels.map((m, i) => ({
-  id: m.name,
-  label: m.displayName ?? m.name,
-  hasVision: m.hasVision,
-  ...(i === 0 ? { recommended: true } : {}),
-}));
-
-/**
  * Together AI 平台（OpenAI 兼容，按量计费，用户自带 API Key）可选模型。
  *
  * 模型 ID 用官方要求的 namespaced 全 ID（org/model 直传，不做 remap；短名会被上游
@@ -369,7 +351,6 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     modelOptions: [
       { id: "claude-opus-5-5", label: "Claude Opus 5.5", hasVision: true, recommended: true },
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", hasVision: true },
-      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", hasVision: true },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", hasVision: true },
       { id: "claude-opus-5", label: "Claude Opus 5", hasVision: true },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8", hasVision: true },
@@ -577,21 +558,6 @@ export const CUSTOM_API_KEY_TEMPLATES: ApiKeyTemplateConfig[] = [
       { id: "glm-5-turbo", label: "GLM 5 Turbo" },
       { id: "glm-4.7", label: "GLM 4.7" },
     ],
-    commercialKind: "subscription",
-    accessVariant: "token_plan_endpoint",
-  },
-  {
-    kind: "api_key_template",
-    id: "mistral-plan",
-    label: "Mistral 订阅 (Vibe/Pro)",
-    description:
-      "Mistral 官方订阅（Free $10 / Pro $30 月度 API credits，跨 Studio/API/Vibe 共享；Key 从 chat.mistral.ai › Code › Extensions 生成）",
-    provider: "mistral",
-    baseUrl: "https://api.mistral.ai/v1",
-    defaultModel: "mistral-vibe-cli-latest",
-    modelOptions: MISTRAL_MODEL_OPTIONS,
-    keyFormatHint:
-      "在 chat.mistral.ai › Code › Extensions › Vibe API Key 生成（45 位，形如 xxxxx…nb3A）；也可用 Studio 的 API Key。两者都直接有效于 api.mistral.ai/v1。",
     commercialKind: "subscription",
     accessVariant: "token_plan_endpoint",
   },

@@ -81,9 +81,7 @@ export type AgentRuntimeCompleteOptions = {
    * 本轮所属对话 id。仅用于服务端计费归因：platform proxy 会把它写进
    * token 记录的 dialogId（缺省时 chatProxyBilling 兜底成 "chat-proxy"，
    * 所有 runtime 调用会塌成同一个桶），kimi 路径还会据此设 prompt_cache_key。
-   * 不会转发给上游 provider。
-   * 另用于派生会话稳定的上游请求身份（Codex session/prompt_cache_key、Devin 历史
-   * 消息 id；见 sessionIdentity.ts，NOLO_STABLE_SESSION_IDENTITY=0 关闭）。新建对话的首轮尚未分配 id，此时为 undefined。
+   * 不会转发给上游 provider。新建对话的首轮尚未分配 id，此时为 undefined。
    */
   dialogId?: string;
   onTextDelta?: (chunk: string) => void;
@@ -161,8 +159,6 @@ export type AgentRuntimeSaveTurnInput = {
     /** 本次请求稳定前缀指纹（contextCompiler 同一算法），用于 prefix churn 观测。 */
     stablePrefixHash?: string;
     stablePrefixEstimatedTokens?: number;
-    /** 每次调用的缓存/成本遥测（只含数字与哈希）。 */
-    telemetry?: import("./providerCallTelemetry").ProviderCallTelemetry;
   }>;
   /** Full token consumption across tool-loop and compaction provider calls. */
   accountingUsage?: Record<string, unknown>;
@@ -222,8 +218,6 @@ export type AgentRuntimeHostAdapter = {
     titlePatchPromise?: Promise<string | null>;
   }>;
   resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
-  /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
-  credentialBroker?: import("./credentialBroker").CredentialBroker;
   executeTool(
     call: AgentRuntimeToolCallInput,
     opts?: {

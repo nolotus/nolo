@@ -24,117 +24,113 @@ import { selectIdentityToken } from "identity/selectors";
 // ─────────────────────────────────────────────
 
 export interface RequestConfig {
-  currentServer: string;
-  token: string | null;
+    currentServer: string;
+    token: string | null;
 }
 
 export interface ToolRequestContext extends RequestConfig {
-  baseUrl: string;
+    baseUrl: string;
 }
 
 const MAIN_SERVER = "https://nolo.chat";
 
 const getIsDesktopApp = (): boolean =>
-  typeof window !== "undefined" && Boolean((window as any).__NOLO_DESKTOP__);
+    typeof window !== "undefined" && Boolean((window as any).__NOLO_DESKTOP__);
 
 const isLocalServerUrl = (value?: string | null): boolean => {
-  if (!value) return false;
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return (
-      hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
-    );
-  } catch {
-    return false;
-  }
+    if (!value) return false;
+    try {
+        const hostname = new URL(value).hostname.toLowerCase();
+        return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    } catch {
+        return false;
+    }
 };
 
 const resolveDesktopSafeServer = (value?: string | null): string => {
-  if (!getIsDesktopApp()) return value || MAIN_SERVER;
-  return isLocalServerUrl(value) ? MAIN_SERVER : value || MAIN_SERVER;
+    if (!getIsDesktopApp()) return value || MAIN_SERVER;
+    return isLocalServerUrl(value) ? MAIN_SERVER : value || MAIN_SERVER;
 };
 
 const selectCurrentServerFromState = (state: any): string =>
-  resolveDesktopSafeServer(state?.settings?.currentServer);
+    resolveDesktopSafeServer(state?.settings?.currentServer);
 
 const selectCurrentTokenFromState = (state: any): string | null => {
-  const token = selectIdentityToken(state);
-  return typeof token === "string" ? token : null;
+    const token = selectIdentityToken(state);
+    return typeof token === "string" ? token : null;
 };
 
 const selectCurrentDialogKeyFromState = (_state: any): string | null =>
-  getActiveDialogKey();
+    getActiveDialogKey();
 
 export const resolveToolBaseUrl = (currentServer?: string | null): string => {
-  const _window = (globalThis as any).window;
-  if (!_window) return (currentServer || "").replace(/\/+$/, "");
-  const fallbackLocal = _window.location.origin;
-  if (!currentServer) return fallbackLocal;
-  return currentServer.replace(/\/+$/, "");
+    const _window = (globalThis as any).window;
+    if (!_window) return (currentServer || "").replace(/\/+$/, "");
+    const fallbackLocal = _window.location.origin;
+    if (!currentServer) return fallbackLocal;
+    return currentServer.replace(/\/+$/, "");
 };
 
 const DESKTOP_LOCAL_TOOL_PATHS = new Set([
-  "/api/exec-shell",
-  "/api/check-env",
-  "/api/read-file",
-  "/api/write-file",
-  "/api/apply-edit",
-  "/api/apply-line-edits",
-  "/api/code-search",
-  "/api/desktop/files/roots",
-  "/api/desktop/files/roots/request",
-  "/api/desktop/files/list",
-  "/api/desktop/files/read",
-  "/api/desktop/files/plan",
-  "/api/desktop/files/approve",
-  "/api/desktop/files/execute",
-  "/api/desktop/files/undo",
-  "/api/desktop/files/history",
+    "/api/exec-shell",
+    "/api/check-env",
+    "/api/read-file",
+    "/api/write-file",
+    "/api/apply-edit",
+    "/api/apply-line-edits",
+    "/api/code-search",
+    "/api/desktop/files/roots",
+    "/api/desktop/files/roots/request",
+    "/api/desktop/files/list",
+    "/api/desktop/files/read",
+    "/api/desktop/files/plan",
+    "/api/desktop/files/approve",
+    "/api/desktop/files/execute",
+    "/api/desktop/files/undo",
+    "/api/desktop/files/history",
 ]);
 
 const getWindowOrigin = (): string | null => {
-  const _window = (globalThis as any).window;
-  const origin = _window?.location?.origin;
-  return typeof origin === "string" && origin
-    ? origin.replace(/\/+$/, "")
-    : null;
+    const _window = (globalThis as any).window;
+    const origin = _window?.location?.origin;
+    return typeof origin === "string" && origin ? origin.replace(/\/+$/, "") : null;
 };
 
 export const resolveToolApiBaseUrl = (
-  currentServer?: string | null,
-  path?: string,
+    currentServer?: string | null,
+    path?: string
 ): string => {
-  if (path && DESKTOP_LOCAL_TOOL_PATHS.has(path) && getIsDesktopApp()) {
-    const localOrigin = getWindowOrigin();
-    if (localOrigin) return localOrigin;
-  }
-  return resolveToolBaseUrl(currentServer);
+    if (path && DESKTOP_LOCAL_TOOL_PATHS.has(path) && getIsDesktopApp()) {
+        const localOrigin = getWindowOrigin();
+        if (localOrigin) return localOrigin;
+    }
+    return resolveToolBaseUrl(currentServer);
 };
 
 export const getRequestConfig = (thunkApi: any): RequestConfig => {
-  const state = thunkApi.getState();
-  const currentServer = selectCurrentServerFromState(state);
-  const token = selectCurrentTokenFromState(state);
-  if (!currentServer) throw new Error("无法获取当前服务器地址。");
-  return { currentServer, token };
+    const state = thunkApi.getState();
+    const currentServer = selectCurrentServerFromState(state);
+    const token = selectCurrentTokenFromState(state);
+    if (!currentServer) throw new Error("无法获取当前服务器地址。");
+    return { currentServer, token };
 };
 
 export const getToolBaseUrl = (thunkApi: any): string => {
-  const { currentServer } = getRequestConfig(thunkApi);
-  const baseUrl = resolveToolBaseUrl(currentServer);
-  if (!baseUrl) throw new Error("无法获取工具服务器地址。");
-  return baseUrl;
+    const { currentServer } = getRequestConfig(thunkApi);
+    const baseUrl = resolveToolBaseUrl(currentServer);
+    if (!baseUrl) throw new Error("无法获取工具服务器地址。");
+    return baseUrl;
 };
 
 export const getToolRequestContext = (thunkApi: any): ToolRequestContext => {
-  const { currentServer, token } = getRequestConfig(thunkApi);
-  const baseUrl = resolveToolBaseUrl(currentServer);
-  if (!baseUrl) throw new Error("无法获取工具服务器地址。");
-  return {
-    currentServer,
-    token,
-    baseUrl,
-  };
+    const { currentServer, token } = getRequestConfig(thunkApi);
+    const baseUrl = resolveToolBaseUrl(currentServer);
+    if (!baseUrl) throw new Error("无法获取工具服务器地址。");
+    return {
+        currentServer,
+        token,
+        baseUrl,
+    };
 };
 
 // ─────────────────────────────────────────────
@@ -142,76 +138,67 @@ export const getToolRequestContext = (thunkApi: any): ToolRequestContext => {
 // ─────────────────────────────────────────────
 
 export interface CallToolApiOptions {
-  /** 是否在请求头中附带 Authorization token，默认 false */
-  withAuth?: boolean;
-  /** 生产受控 devtool 路由需要知道是哪一个 agent 在调用。 */
-  agentKey?: string | null;
-  method?: "POST" | "GET";
+    /** 是否在请求头中附带 Authorization token，默认 false */
+    withAuth?: boolean;
+    /** 生产受控 devtool 路由需要知道是哪一个 agent 在调用。 */
+    agentKey?: string | null;
 }
 
 const maybeAttachDialogId = (thunkApi: any, body: object): object => {
-  if (!isRecord(body)) return body;
-  if ("dialogId" in body) return body;
+    if (!isRecord(body)) return body;
+    if ("dialogId" in body) return body;
 
-  const state = thunkApi.getState();
-  const currentDialogKey = selectCurrentDialogKeyFromState(state);
-  const dialogId = currentDialogKey ? extractCustomId(currentDialogKey) : null;
-  if (!dialogId) return body;
+    const state = thunkApi.getState();
+    const currentDialogKey = selectCurrentDialogKeyFromState(state);
+    const dialogId = currentDialogKey ? extractCustomId(currentDialogKey) : null;
+    if (!dialogId) return body;
 
-  return {
-    ...body,
-    dialogId,
-  };
+    return {
+        ...body,
+        dialogId,
+    };
 };
 
 export class ToolApiError extends Error {
-  status?: number;
-  code?: string;
-  details?: unknown;
+    status?: number;
+    code?: string;
+    details?: unknown;
 
-  constructor(
-    message: string,
-    options?: { status?: number; code?: string; details?: unknown },
-  ) {
-    super(message);
-    this.name = "ToolApiError";
-    this.status = options?.status;
-    this.code = options?.code;
-    this.details = options?.details;
-  }
+    constructor(message: string, options?: { status?: number; code?: string; details?: unknown }) {
+        super(message);
+        this.name = "ToolApiError";
+        this.status = options?.status;
+        this.code = options?.code;
+        this.details = options?.details;
+    }
 }
 
 export const buildToolRequestHeaders = (
-  thunkApi: any,
-  options: CallToolApiOptions = {},
+    thunkApi: any,
+    options: CallToolApiOptions = {}
 ): Record<string, string> => {
-  const { withAuth = false, agentKey } = options;
-  const { token } = getRequestConfig(thunkApi);
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (withAuth && token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  if (agentKey && typeof agentKey === "string" && agentKey.trim()) {
-    headers["X-Nolo-Agent-Key"] = agentKey.trim();
-  }
-  if (typeof window !== "undefined" && (window as any).__NOLO_DESKTOP__) {
-    headers["X-Nolo-Desktop-Tool"] = "1";
-  }
-  return headers;
+    const { withAuth = false, agentKey } = options;
+    const { token } = getRequestConfig(thunkApi);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (withAuth && token) {
+        headers["Authorization"] = `Bearer ${token}`;
+    }
+    if (agentKey && typeof agentKey === "string" && agentKey.trim()) {
+        headers["X-Nolo-Agent-Key"] = agentKey.trim();
+    }
+    if (typeof window !== "undefined" && (window as any).__NOLO_DESKTOP__) {
+        headers["X-Nolo-Desktop-Tool"] = "1";
+    }
+    return headers;
 };
 
 const buildResponsePreview = (text: string): string =>
-  compactWhitespace(text).slice(0, 240);
+    compactWhitespace(text).slice(0, 240);
 
-const looksLikeHtmlResponse = (
-  text: string,
-  contentType: string | null,
-): boolean => {
-  if (contentType?.toLowerCase().includes("text/html")) return true;
-  const trimmed = asTrimmedLowercaseString(text);
-  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+const looksLikeHtmlResponse = (text: string, contentType: string | null): boolean => {
+    if (contentType?.toLowerCase().includes("text/html")) return true;
+    const trimmed = asTrimmedLowercaseString(text);
+    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
 };
 
 /**
@@ -226,76 +213,70 @@ const looksLikeHtmlResponse = (
  * @returns         解析后的 JSON 数据
  */
 export async function callToolApi<T = any>(
-  thunkApi: any,
-  path: string,
-  body: object,
-  options: CallToolApiOptions = {},
+    thunkApi: any,
+    path: string,
+    body: object,
+    options: CallToolApiOptions = {}
 ): Promise<T> {
-  const { currentServer } = getRequestConfig(thunkApi);
+    const { currentServer } = getRequestConfig(thunkApi);
 
-  const baseUrl = resolveToolApiBaseUrl(currentServer, path);
-  if (!baseUrl) throw new Error("无法获取工具服务器地址。");
-  const url = `${baseUrl}${path}`;
-  const headers = buildToolRequestHeaders(thunkApi, options);
+    const baseUrl = resolveToolApiBaseUrl(currentServer, path);
+    if (!baseUrl) throw new Error("无法获取工具服务器地址。");
+    const url = `${baseUrl}${path}`;
+    const headers = buildToolRequestHeaders(thunkApi, options);
 
-  const method = options.method ?? "POST";
-  const response = await fetch(url, {
-    method,
-    headers,
-    ...(method === "GET"
-      ? {}
-      : { body: JSON.stringify(maybeAttachDialogId(thunkApi, body)) }),
-  });
+    const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(maybeAttachDialogId(thunkApi, body)),
+    });
 
-  const contentType = response.headers.get("content-type");
-  const responseText = await response.text();
+    const contentType = response.headers.get("content-type");
+    const responseText = await response.text();
 
-  if (!response.ok) {
-    let errorMessage = `API 请求失败，状态码: ${response.status}`;
-    let errorCode: string | undefined;
-    let errorDetails: unknown;
-    try {
-      const errorData = JSON.parse(responseText) as Record<string, any>;
-      const err = errorData?.error;
-      if (err) {
-        errorMessage += `: ${err.message ?? JSON.stringify(err)}`;
-        errorCode = typeof err.code === "string" ? err.code : undefined;
-        errorDetails = err.details;
-      }
-    } catch {
-      errorCode = looksLikeHtmlResponse(responseText, contentType)
-        ? "HTML_ERROR_RESPONSE"
-        : "NON_JSON_ERROR_RESPONSE";
-      errorDetails = {
-        contentType,
-        responsePreview: buildResponsePreview(responseText),
-      };
-      if (
-        typeof (errorDetails as any).responsePreview === "string" &&
-        (errorDetails as any).responsePreview
-      ) {
-        errorMessage += `: ${(errorDetails as any).responsePreview}`;
-      }
+    if (!response.ok) {
+        let errorMessage = `API 请求失败，状态码: ${response.status}`;
+        let errorCode: string | undefined;
+        let errorDetails: unknown;
+        try {
+            const errorData = JSON.parse(responseText) as Record<string, any>;
+            const err = errorData?.error;
+            if (err) {
+                errorMessage += `: ${err.message ?? JSON.stringify(err)}`;
+                errorCode = typeof err.code === "string" ? err.code : undefined;
+                errorDetails = err.details;
+            }
+        } catch {
+            errorCode = looksLikeHtmlResponse(responseText, contentType)
+                ? "HTML_ERROR_RESPONSE"
+                : "NON_JSON_ERROR_RESPONSE";
+            errorDetails = {
+                contentType,
+                responsePreview: buildResponsePreview(responseText),
+            };
+            if (typeof (errorDetails as any).responsePreview === "string" && (errorDetails as any).responsePreview) {
+                errorMessage += `: ${(errorDetails as any).responsePreview}`;
+            }
+        }
+        throw new ToolApiError(errorMessage, {
+            status: response.status,
+            code: errorCode,
+            details: errorDetails,
+        });
     }
-    throw new ToolApiError(errorMessage, {
-      status: response.status,
-      code: errorCode,
-      details: errorDetails,
-    });
-  }
 
-  try {
-    return JSON.parse(responseText) as T;
-  } catch {
-    throw new ToolApiError("服务端返回了无法解析的非 JSON 响应", {
-      status: response.status,
-      code: looksLikeHtmlResponse(responseText, contentType)
-        ? "HTML_RESPONSE"
-        : "INVALID_JSON_RESPONSE",
-      details: {
-        contentType,
-        responsePreview: buildResponsePreview(responseText),
-      },
-    });
-  }
+    try {
+        return JSON.parse(responseText) as T;
+    } catch {
+        throw new ToolApiError("服务端返回了无法解析的非 JSON 响应", {
+            status: response.status,
+            code: looksLikeHtmlResponse(responseText, contentType)
+                ? "HTML_RESPONSE"
+                : "INVALID_JSON_RESPONSE",
+            details: {
+                contentType,
+                responsePreview: buildResponsePreview(responseText),
+            },
+        });
+    }
 }

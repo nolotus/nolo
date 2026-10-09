@@ -14,12 +14,6 @@
 // 击穿 Claude ephemeral / OpenAI / DeepSeek / Gemini 前缀缓存，且会话后半程
 // 丢失发散/会商、预算纪律等高阶指导。
 //
-// 收窄说明（B1）：命中即锁定到会话结束，完整协议比最小版多约 5.5k token/轮。
-// 本仓库本身在开发编排系统，日常对话常出现歧义词，误报会把 +5.5k 锁到会话
-// 结束，故已从正则移除：编排、发散、分工、同时处理、代码审查、后台跑、后台执行、
-// batch、concurrent、review…diff/code。漏报代价低：最小协议保留全部安全门，
-// 且一旦出现 startAgentRun/controlAgentRun 调用即行为锁定。
-//
 // 误判方向不对称：
 // - 误报（无派发意图却注入完整协议）：只是 prompt 变长，无行为风险；
 // - 漏报（有派发意图却用了最小协议）：安全硬门（平台积分授权、review 硬门）
@@ -27,7 +21,7 @@
 //   因此漏报的代价是可接受的能力降级而非安全风险。
 
 const DISPATCH_INTENT_PATTERN =
-  /(派发|派单|派个|派一|派两|派几|派人|子任务|子\s*[aA]gent|多\s*[aA]gent|多个\s*[aA]gent|并行处理|并行派发|并发派发|并行执行|并发执行|分头|会商|独立\s*review|派.{0,4}review|dispatch|delegat|sub[\s-]?agent|sub[\s-]?task|fan[\s-]?out|orchestrat|in parallel|paralleliz|background run)/i;
+  /(派发|派单|派个|派一|派两|派几|派人|子任务|子\s*[aA]gent|多\s*[aA]gent|多个\s*[aA]gent|并行处理|并行派发|并发派发|并行执行|并发执行|分头|分工|同时处理|后台跑|后台执行|编排|会商|发散|代码审查|独立\s*review|派.{0,4}review|dispatch|delegat|sub[\s-]?agent|sub[\s-]?task|fan[\s-]?out|orchestrat|\bbatch\b|in parallel|concurrent|paralleliz|background run|review.{0,20}(diff|code|代码))/i;
 
 // 一旦历史里出现过这些派发/控制工具的调用，后续所有轮次都保持派发协议。
 const DISPATCH_TOOL_NAMES = new Set(["startAgentRun", "controlAgentRun"]);

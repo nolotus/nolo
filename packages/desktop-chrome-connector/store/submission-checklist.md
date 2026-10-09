@@ -83,8 +83,8 @@ the desktop app it only shows a status popup, which is why it looks inert in a s
 
 To see it work: (1) download and open Nolo Desktop — https://nolo.chat/downloads; (2) in its settings
 enable the Chrome Connector (the app installs the native messaging host for the current browser
-automatically); (3) click the Nolo Browser Connector toolbar icon — it reports "Connected to the local
-connector" with the negotiated protocol version. [OPTIONAL, only if available: a short unlisted demo
+automatically); (3) click the Nolo Browser Connector toolbar icon — it reports "Connected to Nolo
+Desktop" with the negotiated protocol version. [OPTIONAL, only if available: a short unlisted demo
 recording — <VIDEO_URL>.]
 
 What it does with data: for the tab a user asks about, it reads visible text and interactive elements

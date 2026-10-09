@@ -3,6 +3,17 @@ import { resolve } from "node:path";
 import { DESKTOP_APP_VERSION } from "./desktopVersion";
 
 /**
+ * Minimum supported electrobun: 2.0.2.
+ *
+ * electrobun's native websocket server binds TCP ports starting at 50000.
+ * Before 2.0.2 it failed to recognize the Windows "port already in use"
+ * error code, so when another Electrobun app already held 50000 the app
+ * crashed at window creation ("Failed to start websocket server"). 2.0.2
+ * carries the upstream fix that falls through to the next free port.
+ * Do not lower the "electrobun" dependency below 2.0.2.
+ */
+
+/**
  * Repo-root runtime dirs that must never trigger a desktop rebuild.
  *
  * IMPORTANT: electrobun's watcher matches watchIgnore globs against paths
