@@ -1,4 +1,4 @@
-// packages/chat/messages/messageContentSerialize.ts
+// packages/core/chat/messageContentSerialize.ts
 
 /**
  * 将 Message.content 归一化为纯文本:

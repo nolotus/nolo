@@ -33,6 +33,16 @@ interface PendingPinnedEntry {
 const pendingPinnedByKey = new Map<string, PendingPinnedEntry>();
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * 计时器不拖住 Node/bun 进程退出；web tsconfig 下 `setTimeout` 返回 number，
+ * 没有 unref，因此按结构判断而不是靠 typeof 收窄。
+ */
+const unrefIfPossible = (timer: unknown): void => {
+  if (typeof timer === "object" && timer !== null && "unref" in timer) {
+    (timer as { unref: () => void }).unref();
+  }
+};
+
 const scheduleTimeoutClear = (contentKey: string, token: symbol): void => {
   const existing = pendingTimers.get(contentKey);
   if (existing) clearTimeout(existing);
@@ -44,9 +54,7 @@ const scheduleTimeoutClear = (contentKey: string, token: symbol): void => {
     }
   }, OVERRIDE_TIMEOUT_MS);
   // 防止计时器挂住 Node/bun 进程退出（测试/SSR 场景）。
-  if (typeof timer === "object" && typeof timer.unref === "function") {
-    timer.unref();
-  }
+  unrefIfPossible(timer);
   pendingTimers.set(contentKey, timer);
 };
 

@@ -1,4 +1,15 @@
 
+## 0.101.8
+
+## 0.101.8 (2026-10-09)
+
+### Bug Fixes
+
+* **recharge:** activate the popular and best-value tier badges ([4d5ad61](https://github.com/nolotus/bun-nolo/commit/4d5ad61ef79565b3d1a9bcaa873b76a0c3b065da))
+* **shared:** register openrouter-api in the key preset allowlist ([d4b3794](https://github.com/nolotus/bun-nolo/commit/d4b3794460d3d115b700dd8a3c37aac06cef1896))
+* **types:** clear the pre-existing type errors on the main baseline ([ea8910d](https://github.com/nolotus/bun-nolo/commit/ea8910d7b6431a3d40844ea2ce0674455591a483))
+
+
 ## 0.101.7
 
 ## 0.101.7 (2026-10-09)

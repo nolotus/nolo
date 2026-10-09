@@ -310,7 +310,7 @@ export const handleSendMessageAction = async (
             runtimeOptions: {
                 ...args.runtimeOptions,
                 ...(selectedRuntimeTarget && (selectedRuntimeTarget.kind === "server" || selectedRuntimeTarget.kind === "machine")
-                    ? { runtimeTarget: selectedRuntimeTarget }
+                    ? { runtimeTarget: { ...selectedRuntimeTarget, kind: selectedRuntimeTarget.kind } }
                     : {}),
             },
         });
