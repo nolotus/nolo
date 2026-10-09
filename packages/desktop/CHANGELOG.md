@@ -1,4 +1,13 @@
 
+## 0.101.7
+
+## 0.101.7 (2026-10-09)
+
+### Bug Fixes
+
+* **ci:** support --emit tests in changedFileScope ([3bed6c2](https://github.com/nolotus/bun-nolo/commit/3bed6c222b8901ae0016d93ae7f0254721c34251))
+
+
 ## 0.101.6
 
 ## 0.101.6 (2026-10-09)
