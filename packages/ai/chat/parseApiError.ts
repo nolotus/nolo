@@ -216,3 +216,45 @@ export async function parseApiErrorInfo(response: Response): Promise<ApiErrorInf
 export async function parseApiError(response: Response): Promise<string> {
   return (await parseApiErrorInfo(response)).message;
 }
+
+
+export type GenerationErrorCategory = "config_protocol" | "empty" | "policy" | "transient";
+
+/** Conservative classification: a generic upstream rejection is NOT evidence
+ * of moderation or of a safely retryable failure. Never retain prompts, keys,
+ * URLs or the raw provider message in persisted diagnostics. */
+export function classifyGenerationError(data: any, status?: number) {
+  const error = data?.error ?? data;
+  const upstreamStatus = error?.status ?? data?.status;
+  if (status === undefined && typeof upstreamStatus === "number") status = upstreamStatus;
+  const rawCode = error?.code ?? data?.code;
+  const code = typeof rawCode === "string" && /^[a-zA-Z0-9_.:-]{1,80}$/.test(rawCode) &&
+    !/^(sk-|Bearer|AIza)/i.test(rawCode) ? rawCode : undefined;
+  const message = typeof error?.message === "string" ? error.message :
+    typeof error?.msg === "string" ? error.msg : typeof data === "string" ? data : "";
+  const evidence = `${code ?? ""} ${message}`;
+  let category: GenerationErrorCategory = "config_protocol";
+  if (/content[_ -]filter|content[_ -]policy|safety[_ -](?:violation|blocked)|policy[_ -]violation|prohibited[_ -]content/i.test(evidence)) {
+    category = "policy";
+  } else if (/thought_signature|reasoning_effort|not supported|invalid[_ -](?:request|argument)|authentication|api[_ -]key/i.test(evidence) || status === 401 || status === 403) {
+    category = "config_protocol";
+  } else if (code === "EMPTY_RESPONSE" || /空响应|empty response/i.test(message)) {
+    category = "empty";
+  } else if (status === 408 || status === 429 || (status !== undefined && status >= 500) ||
+    /timeout|timed out|秒内没有返回新内容|network|fetch failed|failed to fetch|ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|connection (?:reset|closed)|rate[_ -]limit|overloaded|temporarily unavailable|internal_server_error|service_unavailable/i.test(evidence)) {
+    category = "transient";
+  }
+  const messages = {
+    config_protocol: "模型配置或工具通信不兼容，请联系管理员检查配置；重复发送不会解决此问题。",
+    empty: "模型返回了空响应，请联系管理员检查服务响应。",
+    policy: "服务商的内容安全规则阻止了本次请求。请检查请求是否符合其规则；不会自动重试或改写内容。",
+    transient: "模型服务暂时不可用。你可以稍后手动重试同一模型（新请求可能产生费用）。",
+  };
+  return {
+    category,
+    message: messages[category],
+    retryable: category === "transient",
+    actions: category === "transient" ? ["retry" as const] : [],
+    diagnostic: { ...(code ? { code } : {}), ...(status ? { status } : {}) },
+  };
+}

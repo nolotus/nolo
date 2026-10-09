@@ -6,11 +6,25 @@ import { toErrorMessage } from "core/errorMessage";
 import { compressImage } from "./compressImage";
 import { themeText } from "./theme";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
+import { stripImageTokens } from "./sessionInput";
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
 export type ImageExtension = (typeof IMAGE_EXTENSIONS)[number];
 
 const IMAGE_EXTENSION_SET = new Set<string>(IMAGE_EXTENSIONS.map((ext) => ext.toLowerCase()));
+
+/**
+ * 音视频扩展名集合——detectFileReferences 要把它们排除在「仅路径」回执之外：
+ * 音视频走 transcribe 通道（mediaAttachment.ts），不能给用户「只发了路径」的错觉。
+ * 集合内容与 ai/transcription/mediaPreprocess.ts 的 MEDIA_*_EXTENSIONS 保持一致；
+ * 这里本地维护一份（不 import）以避免 pasteImage（paste 热路径）反向依赖 ai 包。
+ */
+const MEDIA_EXTENSION_SET = new Set<string>([
+  // audio
+  "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "wma", "amr", "aiff",
+  // video
+  "mp4", "mov", "mkv", "avi", "webm", "m4v", "flv", "3gp", "ts",
+]);
 
 const MIME_BY_EXTENSION: Record<ImageExtension, string> = {
   png: "image/png",
@@ -267,6 +281,8 @@ export function detectFileReferences(
     const ext = extnameOf(candidate);
     if (!/^[a-z0-9]{1,8}$/.test(ext)) continue;
     if (IMAGE_EXTENSION_SET.has(ext)) continue;
+    // 音视频不进「仅路径」通道：它们由 mediaAttachment 的转写管线处理。
+    if (MEDIA_EXTENSION_SET.has(ext)) continue;
     const resolved = resolveImageSource(candidate, cwd);
     if (excluded.has(resolved) || seen.has(resolved)) continue;
     if (!isReadableFilePath(resolved)) continue;
@@ -297,7 +313,7 @@ type Tokenized = { raw: string; decoded: string };
  * 原 input 上做 regex replace),`decoded` 是 escape 解析后的字面
  * 路径(用于 existsSync / readFile)。
  */
-function tokenizePasteLine(line: string): Tokenized[] {
+export function tokenizePasteLine(line: string): Tokenized[] {
   const tokens: Tokenized[] = [];
   let rawBuf = "";
   let decBuf = "";
@@ -723,4 +739,37 @@ export async function resolveAttachmentImageUrls({
     imageUrls = readResult.images.map((img) => img.dataUrl);
   }
   return { imageUrls };
+}
+export type SubmittedImagePaths = {
+  /** 全部命中的图片 token（含读不到的）。 */
+  hints: DetectedImageToken[];
+  /** 可读图片路径（resolved），将作为附件。 */
+  imagePaths: string[];
+  /** 读不到的图片 token（保留在原文里，不剥）。 */
+  unreadableHints: DetectedImageToken[];
+  /** 剥掉可读路径 token 后的消息；剥空则回退原文（与 direct 路径一致）。 */
+  message: string;
+};
+
+/**
+ * 从提交文本里检测可读图片路径。direct（sessionDispatch）与 busy 入队两条路径
+ * 共用，保证"哪些路径算附件、怎么剥 token"只有一份实现。
+ */
+export function detectSubmittedImagePaths(
+  text: string,
+  cwd: string,
+  opts: { wsl?: boolean } = {},
+): SubmittedImagePaths {
+  const trimmed = text.trim();
+  const hints = detectImagePaths(trimmed, cwd, opts);
+  // 只 strip 可读路径：unreadable token 必须保留在原文里（路径文本是兜底线索）。
+  const readableHints = hints.filter((hint) => !hint.unreadable);
+  const unreadableHints = hints.filter((hint) => hint.unreadable);
+  const stripped = stripImageTokens(trimmed, readableHints);
+  return {
+    hints,
+    imagePaths: readableHints.map((hint) => hint.resolvedPath),
+    unreadableHints,
+    message: stripped.length > 0 ? stripped : trimmed,
+  };
 }

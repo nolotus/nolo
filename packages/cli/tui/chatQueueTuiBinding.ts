@@ -35,6 +35,12 @@ export type ChatQueueTuiBinding = {
   resolveSubmit(input: {
     text: string;
     isRunning: boolean;
+    /**
+     * 队列无法携带的附件数（剪贴板暂存图 state.attachedImages 等）。忙时 >0 →
+     * queue-blocked（保留草稿，调用方需给出提示），而不是静默丢附件。
+     * 文本里内联的图片路径不算在内：它们随 TurnRequest.imagePaths 入队。
+     */
+    attachmentCount?: number;
   }): ChatSendDecision;
   /** Enqueue a queued text or structured event. Returns the updated status for status-line render. */
   enqueue(input: TurnRequest | InternalTurnEvent | string): ChatQueueStatus;
@@ -90,6 +96,12 @@ export type ChatQueueTuiBinding = {
    * Returns null when the queue is empty.
    */
   snapshotAndClearQueue(): string | null;
+  /**
+   * Same as `snapshotAndClearQueue` but also returns the (de-duplicated, in
+   * queue order) image paths carried by the merged items, so the flushed
+   * message does not lose its attachments.
+   */
+  snapshotAndClearQueueWithImages(): { text: string; imagePaths: string[]; mediaPaths?: string[] } | null;
   /** Clear the queue (e.g. on /new). */
   clear(): void;
   /**
@@ -132,10 +144,18 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
   type PreemptMode = "drain" | "stop";
   let preemptArmed: PreemptMode | null = null;
 
-  const resolveSubmit = ({ text, isRunning }: { text: string; isRunning: boolean }) => {
+  const resolveSubmit = ({
+    text,
+    isRunning,
+    attachmentCount = 0,
+  }: {
+    text: string;
+    isRunning: boolean;
+    attachmentCount?: number;
+  }) => {
     return resolveChatSendDecision({
       text,
-      imagePreviewCount: 0,
+      imagePreviewCount: attachmentCount,
       pendingFileCount: 0,
       isSendBlocked: false,
       canMultiImg: true,
@@ -270,13 +290,31 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     return true;
   };
 
-  const snapshotAndClearQueue = (): string | null => {
+  const snapshotAndClearQueueWithImages = (): {
+    text: string;
+    imagePaths: string[];
+    mediaPaths?: string[];
+  } | null => {
     const status = runtime.getState();
     if (status.queue.length === 0) return null;
     const merged = status.queue.map((req) => req.text).join("\n");
+    const imagePaths = [
+      ...new Set(status.queue.flatMap((req) => req.imagePaths ?? [])),
+    ];
+    const mediaPaths = [
+      ...new Set(status.queue.flatMap((req) => req.mediaPaths ?? [])),
+    ];
     runtime.send({ type: "clear" });
-    return merged;
+    return {
+      text: merged,
+      imagePaths,
+      // 空时省略字段：调用方用 `?? []`，但 toEqual 断言不希望多出键。
+      ...(mediaPaths.length > 0 ? { mediaPaths } : {}),
+    };
   };
+
+  const snapshotAndClearQueue = (): string | null =>
+    snapshotAndClearQueueWithImages()?.text ?? null;
 
   const clear = () => {
     runtime.send({ type: "clear" });
@@ -309,6 +347,7 @@ export function createChatQueueTuiBinding(runTurn: RunDrainedTurn): ChatQueueTui
     preemptForDrain,
     preemptForStop,
     snapshotAndClearQueue,
+    snapshotAndClearQueueWithImages,
     clear,
     recoverStaleRunning,
     getStatus,

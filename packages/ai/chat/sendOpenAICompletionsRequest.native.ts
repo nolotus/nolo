@@ -1,3 +1,6 @@
+import { EMPTY_ASSISTANT_REPAIR_PROMPT } from "agent-runtime/emptyAssistantRepair";
+import { classifyGenerationError } from "./parseApiError";
+import { normalizeChatCompletionsBodyForProvider } from "integrations/openai/providerBodyCompatibility";
 // 文件路径: chat/sendOpenAICompletionsRequest.native.ts
 // React Native 版 - 使用 react-native-sse 进行流式传输
 
@@ -142,6 +145,18 @@ function getChoiceFinishErrorMessage(data: any, choice: any): string | null {
     if (messageContent) return messageContent;
     return null;
 }
+
+function markGenerationFailure(ctx: FinalizeContext, classification: ReturnType<typeof classifyGenerationError>) {
+    ctx.messageMetadata = {
+        ...(ctx.messageMetadata ?? {}),
+        errorMeta: { kind: classification.category, summary: classification.message,
+            retryable: classification.retryable, actions: classification.actions },
+        metadata: { ...(ctx.messageMetadata?.metadata ?? {}), error: true,
+            message: classification.message,
+            providerError: { category: classification.category, ...classification.diagnostic } },
+    } as Partial<Message>;
+}
+
 type StreamState = {
     contentBuffer: MessageContentPart[];
     totalUsage: CompletionUsage | null;
@@ -165,6 +180,7 @@ type FinalizeContext = {
     dialogKey: string;
     messageId: string;
     agentConfig: any;
+    messageMetadata?: Partial<Message>;
 };
 
 type ToolCallsContext = {
@@ -275,11 +291,7 @@ function buildRequestBodyWithTools(
     const tools = prepareTools(rawTools, { provider: agentConfig.provider });
     if (!tools.length) return baseBody;
 
-    return {
-        ...baseBody,
-        tools,
-        tool_choice: baseBody.tool_choice ?? "auto",
-    };
+    return { ...baseBody, tools, tool_choice: baseBody.tool_choice ?? "auto" };
 }
 
 /**
@@ -301,6 +313,7 @@ async function finalizeStream(
             dialogKey: ctx.dialogKey,
             messageId: ctx.messageId,
             reasoningBuffer: state.reasoningBuffer,
+            messageMetadata: ctx.messageMetadata,
         toolCalls: state.assistantToolCalls,
         billingFailed: state.billingFailed,
         skipBilling: state.skipBilling,
@@ -354,6 +367,8 @@ export function applyDelta(
             ...next,
             accumulatedToolCalls: accumulated,
             assistantToolCalls: accumulated.map((call: AccumulatedToolCall) => ({
+                ...(call.thought_signature !== undefined ? { thought_signature: call.thought_signature } : {}),
+                ...(call.extra_content ? { extra_content: call.extra_content } : {}),
                 id: call.id,
                 type: "function",
                 function: {
@@ -699,11 +714,12 @@ async function handleStreamCompletion(
         (state.assistantToolCalls?.length ?? 0) === 0 &&
         !hasReportedTokenOrCostUsage(state.totalUsage);
     if (producedNothing && !state.hasHandedOff && !state.alreadyFinalized) {
+        markGenerationFailure(finalizeCtx, classifyGenerationError({ code: "EMPTY_RESPONSE" }));
         state = {
             ...state,
             contentBuffer: appendTextChunk(
                 state.contentBuffer,
-                "[错误: 模型返回了空响应，请重试或切换其他模型]"
+                "[错误: 模型返回了空响应，请联系管理员检查服务响应。]"
             ),
             billingFailed: true,
         };
@@ -731,36 +747,6 @@ export const sendOpenAICompletionsRequest = async ({
     parentMessageId?: string;
     disableToolsForThisRequest?: boolean;
 }): Promise<CompletionMeta> => {
-    const getStreamErrorMessage = (data: any): string => {
-        const message =
-            asOptionalTrimmedString(data?.error?.message) ??
-            asOptionalTrimmedString(data?.error?.msg) ??
-            asOptionalTrimmedString(data?.message);
-        if (message) return message;
-
-        const code =
-            asOptionalTrimmedString(data?.error?.code) ??
-            asOptionalTrimmedString(data?.code);
-        if (code) return code;
-
-        const type = asOptionalTrimmedString(data?.error?.type);
-        if (type) return type;
-
-        return "Unknown error";
-    };
-
-    const formatStreamErrorMessage = (data: any): string => {
-        const rawMessage = getStreamErrorMessage(data);
-        if (
-            /prohibited|violation|terms\s+of\s+service|content\s+policy|safety/i.test(
-                rawMessage
-            )
-        ) {
-            return "当前模型服务商拒绝了这次请求。你可以稍后重试，或切换到其他模型继续。";
-        }
-        return rawMessage;
-    };
-
     const { dispatch, getState, signal: thunkSignal } = thunkApi;
 
     const dialogId = extractCustomId(dialogKey);
@@ -783,14 +769,15 @@ export const sendOpenAICompletionsRequest = async ({
     dispatch(addActiveController({ messageId, controller, dialogKey }));
 
 
-    const requestBody = buildRequestBodyWithTools(
-        bodyData,
-        agentConfig,
-        disableToolsForThisRequest
-    );
+    let requestBody: any = normalizeChatCompletionsBodyForProvider({
+        body: buildRequestBodyWithTools(bodyData, agentConfig, disableToolsForThisRequest),
+        provider: agentConfig.provider ?? "",
+        model: agentConfig.model,
+    });
 
     let streamState: StreamState = createInitialStreamState();
-    const parseSSE = createSSEParser();
+    let parseSSE = createSSEParser();
+    let emptyCompletionRetryUsed = false;
     let cleanup: (() => void) | undefined;
 
     const finalizeCtx: FinalizeContext = {
@@ -859,7 +846,9 @@ export const sendOpenAICompletionsRequest = async ({
             if (isAbortError(error)) {
                 errorText = "\n[用户中断]";
             } else {
-                errorText = `\n[错误: ${toErrorMessage(error)}]`;
+                const classified = classifyGenerationError(toErrorMessage(error));
+                markGenerationFailure(finalizeCtx, classified);
+                errorText = `\n[错误: ${classified.message}]`;
             }
 
             console.error("[SSE Native] sendOpenAICompletionsRequest error:", error);
@@ -913,8 +902,30 @@ export const sendOpenAICompletionsRequest = async ({
                 }
             };
             const handleCompletion = async () => {
+                if (resolved || retryScheduled) return;
                 if (canRetryInitialStreamAttempt()) {
                     await scheduleRetry();
+                    return;
+                }
+                const producedNothing =
+                    streamState.contentBuffer.length === 0 &&
+                    !(streamState.reasoningBuffer || "").trim() &&
+                    !(streamState.assistantToolCalls?.length);
+                if (producedNothing && !emptyCompletionRetryUsed &&
+                    !streamState.hasHandedOff && !streamState.alreadyFinalized && !signal.aborted) {
+                    emptyCompletionRetryUsed = true;
+                    retryScheduled = true;
+                    cleanup?.();
+                    cleanup = undefined;
+                    resetStateForRetry();
+                    requestBody = {
+                        ...requestBody,
+                        messages: [...(requestBody.messages ?? []),
+                            { role: "user", content: EMPTY_ASSISTANT_REPAIR_PROMPT }],
+                    };
+                    streamState = createInitialStreamState();
+                    parseSSE = createSSEParser();
+                    startAttempt(attempt);
                     return;
                 }
                 const completion = await handleStreamCompletion(
@@ -961,14 +972,16 @@ export const sendOpenAICompletionsRequest = async ({
                                 }
 
                                 if (data.error) {
-                                    const errorMsg = `Error: ${formatStreamErrorMessage(data)}`;
+                                    const classified = classifyGenerationError(data);
+                                    const errorMsg = classified.message;
                                     if (
                                         canRetryInitialStreamAttempt() &&
-                                        isRetryableInitialStreamError(new Error(errorMsg))
+                                        classified.category === "transient"
                                     ) {
                                         void scheduleRetry();
                                         return;
                                     }
+                                    markGenerationFailure(finalizeCtx, classified);
                                     streamState = {
                                         ...streamState,
                                         contentBuffer: appendTextChunk(
@@ -1016,22 +1029,29 @@ export const sendOpenAICompletionsRequest = async ({
                                         // frame must still be able to mark the
                                         // round failed and suppress billing.
                                     } else if (finishReason !== "stop") {
-                                        const finishErrorMessage =
-                                            finishReason === "error"
-                                                ? getChoiceFinishErrorMessage(data, choice)
-                                                : null;
-                                        streamState = {
-                                            ...streamState,
-                                            contentBuffer: appendTextChunk(
-                                                streamState.contentBuffer,
-                                                finishErrorMessage
-                                                    ? `\n[API Error] Error: ${finishErrorMessage}`
-                                                    : finishReason === "error"
-                                                        ? "\n[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。"
-                                                        : `\n[流结束原因: ${finishReason}]`
-                                            ),
-                                            ...(finishReason === "error" ? { billingFailed: true } : {}),
-                                        };
+                                        if (finishReason === "error") {
+                                            const finishErrorMessage = getChoiceFinishErrorMessage(data, choice);
+                                            const errorText = finishErrorMessage
+                                                ? `[API Error] Error: ${finishErrorMessage}`
+                                                : "[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。";
+                                            const classified = classifyGenerationError(
+                                                choice.error ? choice : data.error ? data : { code: "UPSTREAM_FINISH_ERROR" }
+                                            );
+                                            markGenerationFailure(finalizeCtx, classified);
+                                            streamState = {
+                                                ...streamState,
+                                                contentBuffer: appendTextChunk(streamState.contentBuffer, `\n${errorText}`),
+                                                billingFailed: true,
+                                            };
+                                        } else {
+                                            streamState = {
+                                                ...streamState,
+                                                contentBuffer: appendTextChunk(
+                                                    streamState.contentBuffer,
+                                                    `\n[流结束原因: ${finishReason}]`
+                                                ),
+                                            };
+                                        }
                                     }
                                 }
                             }

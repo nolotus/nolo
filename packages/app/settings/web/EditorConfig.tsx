@@ -82,11 +82,7 @@ const EditorConfig: React.FC = () => {
     autoSaveInterval,
   } = useAppSelector(selectEditorConfig);
 
-  const shortcutItems: Array<{
-    key: keyof typeof shortcuts;
-    label: string;
-    icon: React.ReactNode;
-  }> = [
+  const shortcutItems = [
     {
       key: "heading",
       label: t("editor.shortcuts.heading", "标题"),
@@ -279,7 +275,7 @@ const EditorConfig: React.FC = () => {
                 key={item.key}
                 icon={item.icon}
                 label={item.label}
-                enabled={shortcuts[item.key] ?? false}
+                enabled={(shortcuts as Record<string, boolean>)[item.key] ?? false}
                 onToggle={() => dispatch(toggleEditorShortcut(item.key))}
               />
             ))}

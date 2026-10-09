@@ -10,6 +10,7 @@ import { isAbortError } from "core/abortError";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { clearAllStreaming } from "chat/messages/messageSlice";
 import { read, selectById } from "database/dbSlice";
+import { selectIdentityUserId } from "identity/selectors";
 
 import { updateTokensAction } from "./actions/updateTokensAction";
 
@@ -27,8 +28,10 @@ import {
   getActiveDialogKey,
   getDialogRuntimeTokens,
   resetDialogRuntimeSessionState,
+  restoreMediaJobPendingFiles,
   setActiveDialogKey,
   setDialogConfigError,
+  setMediaJobRuntimeActor,
 } from "./dialogRuntimeStore";
 
 // Re-export runtime mutators/selectors/types so existing import paths keep working.
@@ -45,16 +48,19 @@ export {
   removePendingFile,
   clearPendingAttachments,
   clearDialogRuntimeState,
+  restoreMediaJobPendingFiles,
   addActiveController,
   removeActiveController,
   clearActiveControllers,
   tokenUsageLiveUpdate,
   setLoopStopReason,
+  setRecoveredForegroundTurn,
   setDialogTurnPhase,
   clearDialogTurnPhase,
   enqueueUserInput,
   dequeueUserInput,
   clearPendingUserInputQueue,
+  getRecoveredForegroundTurn,
   selectDialogRuntimeByKey,
   selectPendingFiles,
   selectActiveControllers,
@@ -68,7 +74,12 @@ export {
   usePendingUserInputQueue,
   useLoopStopReason,
   useDialogTurnPhase,
+  useRecoveredForegroundTurn,
   useDialogRuntimeTokens,
+} from "./dialogRuntimeStore";
+export {
+  getMediaJobRuntimeActor,
+  setMediaJobRuntimeActor,
 } from "./dialogRuntimeStore";
 
 const runCreateDialogAction = async (args: any, thunkApi: any) => {
@@ -192,6 +203,12 @@ export const initDialog = createAsyncThunk(
     // Wave14: former pending reducer side effects — must run before await.
     setActiveDialogKey(id);
     resetDialogRuntimeSessionState(id);
+    // 先按当前登录账号固定 actor 分桶（账号切换时丢弃内存中旧账号的媒体引用），
+    // 再据此恢复——从根上隔离，不读出他人的课程任务引用。
+    setMediaJobRuntimeActor(selectIdentityUserId(getState() as any) ?? null);
+    // 刷新/重进对话后把 localStorage 里的媒体任务卡片引用恢复回 pendingFiles
+    // （resetDialogRuntimeSessionState 保留 pendingFiles，恢复在其后追加）。
+    restoreMediaJobPendingFiles(id);
     // Do not clearPendingAttachments here: drafts are per-dialogKey and must
     // survive leave/re-enter (resetDialogRuntimeSessionState already preserves
     // pendingFiles). Send / auth-reset / delete paths clear when appropriate.

@@ -8,6 +8,7 @@ import { fetchAnthropicMessagesCompletion, isAnthropicOAuthAgent } from "../../.
 import { logLocalRuntimeDiagnostic } from "../localRuntimeDiagnostics";
 import { fetchWithTransientRetry } from "../localRuntimeFetchRetry";
 import { resolveProviderOpenAiToolBundle } from "../localRuntimeTools";
+import { hashToolDefinitions } from "../../../agent-runtime/providerCallTelemetry";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
@@ -101,6 +102,7 @@ export const resolveAnthropicOAuthTransport: ProviderResolver = async (ctx) => {
           // 收尾轮无 finish_reason / stream_complete 时会误判成 stream_truncated（与 Antigravity 同理）。
           finish_reason: typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined,
           stream_complete: true,
+          ...(tools.length > 0 ? { toolsHash: hashToolDefinitions(tools) } : {}),
           usage: result.body?.usage as Record<string, any> | undefined,
           trace: messages,
         };

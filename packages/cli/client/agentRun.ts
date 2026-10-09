@@ -19,8 +19,6 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
-import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
-import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import {
   buildTurnTokenUsage,
   formatUsage,
@@ -117,10 +115,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -720,13 +718,27 @@ export function classifyLocalRunError(message: string): LocalRunErrorClass {
  * into the error string.
  *
  * Keep this narrow: only fire the history-replay hint when the body explicitly
- * mentions `tool_call` arguments or an `invalid_request_error` type. A bare
- * `invalid arguments` (e.g. Google's INVALID_ARGUMENT for a bad request field)
- * is NOT necessarily a history-replay problem and should not trigger the
- * "/switch history" lecture.
+ * mentions `tool_call` arguments. A bare `invalid arguments` (e.g. Google's
+ * INVALID_ARGUMENT for a bad request field) and a bare `invalid_request_error`
+ * type string are NOT necessarily history-replay problems: `invalid_request_error`
+ * is the generic type DeepSeek/OpenAI attach to every 400 (context overflow,
+ * bad params, reasoning-replay contract…), so matching it mis-attributed
+ * unrelated rejections to "/switch history". The reasoning-replay contract
+ * case has its own dedicated regex + copy below.
  */
-const HISTORY_REPLAY_REJECTION_RE =
-  /invalid_request_error|invalid\s+tool\s+call\s+arguments?/i;
+const HISTORY_REPLAY_REJECTION_RE = /invalid\s+tool\s+call\s+arguments?/i;
+
+/**
+ * Detect the DeepSeek-style thinking-mode replay contract rejection:
+ * `The reasoning_content in the thinking mode must be passed back to the API.`
+ * Upstream thinking models require every replayed assistant tool-call turn to
+ * carry `reasoning_content`; Nolo can persist one without it when the gateway
+ * omits reasoning on that round or the history came from a different model.
+ * This must be checked BEFORE HISTORY_REPLAY_REJECTION_RE — its real body
+ * carries `invalid_request_error`-shaped text that used to fall into the
+ * generic history-replay hint and mis-attribute the cause.
+ */
+const REASONING_REPLAY_CONTRACT_RE = /reasoning_content[^.]*must be passed back/i;
 
 /**
  * Shared framing for the five non-402 local-run failure builders below.
@@ -783,9 +795,39 @@ function buildAuthFailure(ctx: FailureCtx): string {
   // used by the non-interactive no-token path below.
   const platformNoToken =
     ctx.where === "server chat proxy" && isAuthNoTokenBody(ctx.message);
-  const fix = platformNoToken
-    ? `This install is not logged in — run \`nolo login\`, or set AUTH_TOKEN / NOLO_SERVER`
-    : ctx.where === "server chat proxy"
+
+  // True no-token 401 on the platform transport: this install has neither a
+  // platform login nor a usable local model credential. Replace the single
+  // "run nolo login" nudge with the three working paths so a user who never
+  // intends to log in still sees `nolo run` / `nolo auth`.
+  //
+  // The raw provider echo (`raw="{...}"` / `headers=[...]`) is debug noise: by
+  // default it is stripped via stripDebugNoise, and the raw detail is only
+  // re-appended when `NOLO_DEBUG=1` — the same env switch localRuntime* files
+  // already use — or the more targeted `NOLO_CLI_DEBUG_DETAIL=1`.
+  if (platformNoToken) {
+    const guidance =
+      `\n  This turn did not run: you are not logged in to Nolo and no local model credential is available.` +
+      `\n    · Use the Nolo platform: /login (or run \`nolo login\` after exiting the TUI)` +
+      `\n    · Use your own subscription: nolo auth antigravity | claude | chatgpt | xai` +
+      `\n    · No login at all: nolo run "<task>" (runs on local Codex)`;
+    // 这一支专指 AUTH_NO_TOKEN：错误体是固定的平台 JSON（字段名用户看不懂，也没有
+    // 可行动信息），上面三行引导已经把该说的说完了。默认只留一行人类可读摘要，
+    // 不再把整块 JSON 喷给用户；排查时用 NOLO_DEBUG=1 / NOLO_CLI_DEBUG_DETAIL=1
+    // 看完整 Detail（与 stripDebugNoise 的既有开关一致）。
+    const detail =
+      process.env.NOLO_DEBUG === "1" || process.env.NOLO_CLI_DEBUG_DETAIL === "1"
+        ? `\n  Detail: ${ctx.message}`
+        : `\n  Detail: platform returned AUTH_NO_TOKEN (no authentication token provided)`;
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no token was sent).` +
+      `${guidance}${detail} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
+  const fix =
+    ctx.where === "server chat proxy"
       ? `Check the agent's provider/api-key settings on nolo.chat`
       : `Fix the local credential/config and retry`;
 
@@ -855,10 +897,22 @@ function buildRejectedPayloadFailure(ctx: FailureCtx): string {
   // (e.g. after `/switch`), which the new provider's gateway validates more
   // strictly and rejects with `invalid tool call arguments` /
   // `invalid_request_error`.
-  const looksLikeHistoryReplay = HISTORY_REPLAY_REJECTION_RE.test(ctx.message);
-  const cause = looksLikeHistoryReplay
-    ? ` This usually happens when the dialog history contains tool_calls or reasoning produced by a different model/provider (e.g. after /switch); the new provider rejects that history. Start a fresh dialog, or clean the offending history.`
-    : "";
+  //
+  // The reasoning-replay contract branch runs FIRST: DeepSeek thinking models
+  // (e.g. via opencode-go) require every replayed assistant tool-call turn to
+  // carry `reasoning_content` back to the API. One turn can lack it when the
+  // upstream returned no reasoning for that round, or when the history was
+  // produced by a different model. Its body is also `invalid_request_error`
+  // shaped, so without this dedicated check it would be mis-attributed to the
+  // generic history-replay cause.
+  const looksLikeReasoningReplay = REASONING_REPLAY_CONTRACT_RE.test(ctx.message);
+  const looksLikeHistoryReplay =
+    !looksLikeReasoningReplay && HISTORY_REPLAY_REJECTION_RE.test(ctx.message);
+  const cause = looksLikeReasoningReplay
+    ? ` This is a thinking-mode replay contract violation: the history contains an assistant tool-call turn without reasoning_content, but this model requires every such turn to pass reasoning back to the API. The upstream may not have returned reasoning for that turn, or the history came from a different model.`
+    : looksLikeHistoryReplay
+      ? ` This usually happens when the dialog history contains tool_calls or reasoning produced by a different model/provider (e.g. after /switch); the new provider rejects that history. Start a fresh dialog, or clean the offending history.`
+      : "";
   return (
     `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, the provider rejected the request body — this is NOT a local credential/config issue). Detail: ${ctx.message}${cause} ` +
     `${NO_FALLBACK} Use --server to run on the server explicitly, or start a fresh dialog.\n`
@@ -1074,6 +1128,9 @@ export function describeLocalRunFailure(
 
   if (/CLI authority broker could not attach or take ownership/i.test(message)) {
     const cleaned = stripDebugNoise(message);
+    if (/EADDRINUSE/i.test(message)) {
+      return `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} Use --server to run on the server explicitly.\n`;
+    }
     return (
       `${RUN_UNAVAILABLE_PREFIX} (${cleaned}). ${NO_FALLBACK} ` +
       `The local runtime could not attach to an existing broker or take database ownership. Check running broker processes holding the local authority store or retry, ${SERVER_FALLBACK_HINT}.\n`
@@ -1387,6 +1444,10 @@ async function runHttpAgentTurn(
   } catch (error) {
     spinner.stop();
     if (options.abortSignal?.aborted) {
+      // 用户 Esc 中断（不是失败）：本分支不带 finalText，结算点也就不会写
+      // `.result.md`/resultFile——已生成的部分正文只留在 .log 与 dialog 里。
+      // 读端看到「无 resultFile + streamInterrupted」应读作「被中断」，不是
+      // 「工具坏了 / 结论丢了」。
       return { exitCode: 0, streamInterrupted: true };
     }
     options.output.write(buildTransportErrorHint(options.serverUrl, error));
@@ -1479,6 +1540,10 @@ async function runHttpAgentTurn(
     ...(typeof data?.dialogId === "string" && data.dialogId
       ? { dialogId: data.dialogId }
       : {}),
+    // 结论载体与 local 路径同契约（server 模式 / 本地配置缺失时的兜底通道）：
+    // 结算点只认 result.finalText，HTTP 派发不给就等于这批 run 没有结论载体，
+    // status 里既无 lastAssistantText 也无 resultFile。content 已在上面算好。
+    ...(content ? { finalText: content } : {}),
     turnTokens: buildTurnTokenUsage(
       data?.usage,
       typeof data?.model === "string" ? data.model : options.agentKey,
@@ -1684,6 +1749,9 @@ async function runLocalAgentTurnForCli(
     return {
       exitCode: 0,
       dialogId: result.dialogId,
+      ...(typeof result.content === "string" && result.content.trim()
+        ? { finalText: result.content }
+        : {}),
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
       ...pickEmptyAssistantFlags(result),
@@ -1713,7 +1781,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }
+      error as { usageRecords?: RunAgentTurnResult["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1724,6 +1792,12 @@ async function runLocalAgentTurnForCli(
       // If a tool was still running when the stop landed, localLoop attaches
       // its name (error.pendingToolName) so the caller can tell the user the
       // tool may still finish in the background.
+      //
+      // 载体约定（owner 2026-10-07 决定，保持现行为）：被 Esc 中断的 run 不把
+      // 「用户叫停」当正常结论——本分支不产出 finalText，结算点因此不写
+      // `.result.md`，已生成的部分正文只留在 .log / dialog 里。读端看到
+      // status 无 resultFile 且 streamInterrupted 时应读作「被中断」，而不是
+      // 「工具坏了 / 结论丢了」（同语义也写进 controlAgentRun 的 status 描述）。
       const pendingToolName = (error as { pendingToolName?: string })
         ?.pendingToolName;
       return {
@@ -1788,7 +1862,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
+): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -1896,6 +1970,12 @@ export function foldLocalResultForTui(
     ...(localResult.pendingToolName
       ? { pendingToolName: localResult.pendingToolName }
       : {}),
+    // 结论正文必须随行：auto→local 是本函数的唯一出口（runAgentTurn 的两处
+    // 成功分支都 return foldLocalResultForTui(...)），漏掉它 = 默认派发路径
+    // 上 finalText 永远到不了结算点 → agentRunCommand 的 settleRunTerminal-
+    // Authoritatively 拿不到 lastAssistantText → `.result.md` 不写、status 无
+    // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
+    ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
   };
 }
 
@@ -1973,7 +2053,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability && "exitCode" in localAvailability) {
+  if (localAvailability?.exitCode) {
     return { exitCode: localAvailability.exitCode };
   }
 

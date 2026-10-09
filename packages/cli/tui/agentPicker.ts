@@ -76,6 +76,7 @@ export async function runAgentPicker(args: {
       currentKey: args.currentKey,
       fetchImpl: args.fetchImpl,
       fallbackFetchImpl: args.fallbackFetchImpl,
+      fresh: true,
     });
   } finally {
     // 清除 loading 提示行（异常时也不残留）。

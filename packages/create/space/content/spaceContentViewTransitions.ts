@@ -13,16 +13,6 @@ type ViewTransitionDocument = Document & {
   startViewTransition?: (update: () => void) => ViewTransition | undefined;
 };
 
-/**
- * 计时器不拖住 Node/bun 进程退出；web tsconfig 下 `setTimeout` 返回 number，
- * 没有 unref，因此按结构判断而不是靠 typeof 收窄。
- */
-const unrefIfPossible = (timer: unknown): void => {
-  if (typeof timer === "object" && timer !== null && "unref" in timer) {
-    (timer as { unref: () => void }).unref();
-  }
-};
-
 export const spaceContentViewTransitionName = (key: string): string => {
   const safe = sanitizeViewTransitionKey(key);
   return safe ? `space-content-${safe}` : "";
@@ -148,7 +138,9 @@ export const stampSpaceContentCardMorphNames = (
     });
   }
   timer = setTimeout(cleanup, CARD_MORPH_MAX_MS);
-  unrefIfPossible(timer);
+  if (typeof timer === "object" && typeof (timer as { unref?: () => void }).unref === "function") {
+    (timer as { unref?: () => void }).unref?.();
+  }
   return cleanup;
 };
 
