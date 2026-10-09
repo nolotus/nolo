@@ -45,23 +45,41 @@ const isOllamaProviderOrEndpoint = (provider: string, endpoint?: string): boolea
   return isOllamaEndpoint(endpoint);
 };
 
+/**
+ * Luna Chat Completions supports function calling only with reasoning off.
+ * Keep the selected model, endpoint and token/billing fields unchanged.
+ */
+export const applyFunctionToolReasoningCompatibility = <T extends Record<string, any>>(
+  body: T,
+  model?: string,
+): T => {
+  const effectiveModel = model ?? body?.model;
+  const isLuna =
+    typeof effectiveModel === "string" &&
+    /(?:^|\/)gpt-6-luna(?:$|[-._].*)/i.test(asTrimmedLowercaseString(effectiveModel));
+  if (
+    isLuna &&
+    Array.isArray(body?.tools) &&
+    body.tools.some((tool: any) => tool?.type === "function")
+  ) {
+    return {
+      ...body,
+      reasoning_effort: "none",
+    };
+  }
+  return body;
+};
+
 export const normalizeChatCompletionsBodyForProvider = ({
   body,
   provider,
   model,
   endpoint,
 }: NormalizeChatCompletionsBodyArgs): Record<string, any> => {
-  const nextBody: Record<string, any> = { ...body, model };
+  let nextBody: Record<string, any> = { ...body, model };
   const normalizedProvider = asTrimmedLowercaseString(provider);
 
-  // Luna Chat Completions supports function calling only with reasoning off.
-  // Keep the selected model, endpoint and token/billing fields unchanged.
-  const isLuna = /(?:^|\/)gpt-6-luna(?:$|[-._].*)/i.test(asTrimmedLowercaseString(model));
-  if (isLuna &&
-      Array.isArray(nextBody.tools) &&
-      nextBody.tools.some((tool: any) => tool?.type === "function")) {
-    nextBody.reasoning_effort = "none";
-  }
+  nextBody = applyFunctionToolReasoningCompatibility(nextBody, model);
 
   if (Array.isArray(nextBody.messages)) {
     const isGemini =
