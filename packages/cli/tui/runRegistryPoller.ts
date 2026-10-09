@@ -17,6 +17,7 @@
  * 一条流，合并、linger、退休、渲染全都复用。
  */
 
+import { normalizeRunTitle } from "../../ai/tools/agent/runTitle";
 import { type AgentRunSnapshot, readTimestamp } from "../client/agentRunSnapshot";
 import { listRunRecords, type RunRecord } from "../agentRunControl";
 import {
@@ -92,7 +93,14 @@ export function snapshotFromRunRecord(
   record: RunRecord,
   now: number
 ): AgentRunSnapshot {
-  const label = resolveRunLabel(record);
+  // `title` stays out of the label chain even though RunRecord carries it:
+  // it already renders as snapshot.title (`title · name`); letting it win
+  // the label too would print the same string twice in that slot. runId is
+  // likewise out — it renders as the `#abc12345` suffix, not the name.
+  const label = resolveRunLabel({
+    agentName: record.agentName,
+    agentKey: record.agentKey,
+  });
   // 时间戳的「什么算有效」只有一份判定（readTimestamp：有限且 > 0），面板、
   // 卡片和这里共用，免得同一条记录在两个界面上一个显示年龄一个不显示。
   const startedAt = readTimestamp(record.startedAt);
@@ -116,11 +124,13 @@ export function snapshotFromRunRecord(
     inFlight = { kind: raw.kind, name: raw.name, startedAt: usable };
   }
 
+  const title = normalizeRunTitle(record.title);
   return {
     runId: record.runId,
     status: record.status,
     ...(!record.parentDialogId ? { unassigned: true } : {}),
     ...(isAgentNameFallback(label) ? {} : { agentName: label }),
+    ...(title ? { title } : {}),
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { finishedAt: endedAt } : {}),
     ...(typeof counters?.toolCalls === "number" ? { toolCallCount: counters.toolCalls } : {}),
@@ -147,6 +157,7 @@ function fingerprint(snapshot: AgentRunSnapshot): string {
   return JSON.stringify([
     snapshot.status,
     snapshot.agentName ?? "",
+    snapshot.title ?? "",
     (snapshot as any).unassigned ?? false,
     snapshot.toolCallCount ?? -1,
     snapshot.errorMessage ?? "",

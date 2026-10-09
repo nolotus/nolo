@@ -10,7 +10,7 @@
 
 .client-downloads-page {
   /* Colors: render/layout/naturePalette.css (day + night). */
-  --hl-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+  --hl-serif: var(--nolo-serif, "Nolo Serif Latin"), "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
   --primary: var(--hl-ink);
   --primaryText: var(--hl-on-ink);
   --textOnPrimary: var(--hl-on-ink);

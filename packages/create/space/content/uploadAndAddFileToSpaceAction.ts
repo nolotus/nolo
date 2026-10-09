@@ -27,13 +27,13 @@ export const uploadAndAddFileToSpaceAction = async (
     const userId = selectIdentityUserId(state);
 
     if (!userId) {
-        console.warn("[uploadAndAddFileToSpace] Warning: No userId found in state. Uploading as anonymous/unknown might cause issues.");
+        throw new Error("Cannot upload a file to a space without an authenticated user.");
     }
 
     try {
         // 生成一个确保唯一的 Key (file-userId-ulid)
         const id = ulid();
-        const dbKey = fileKey.single(userId || "unknown", id);
+        const dbKey = fileKey.single(userId, id);
         const contentType = ContentType.FILE;
         const fileCategory = resolveFileCategory({
             mimeType: file.type,

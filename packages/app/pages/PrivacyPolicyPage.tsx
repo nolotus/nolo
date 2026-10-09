@@ -33,6 +33,7 @@ const PrivacyPolicyPage: React.FC = () => {
             <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.section2.core")}</li>
             <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.section2.map")}</li>
             <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.section2.analysis")}</li>
+            <li {...stylex.props(policyPageStyles.listItem)}>{t("privacy.section2.attribution")}</li>
           </ul>
         </section>
 

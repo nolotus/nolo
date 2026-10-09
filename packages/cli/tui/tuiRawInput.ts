@@ -188,7 +188,7 @@ type FixedInputConfig = {
   /** turn 进行中的活动行；无活动时返回 null。 */
   getActivityLine?: () => string | null;
   /** 可选多行活动面板（如子 Agent 执行状态与日志行）。优先于 getActivityLine。 */
-  getActivityLines?: () => string[] | string | null;
+  getActivityLines?: (layout?: { columns: number; rows: number }) => string[] | string | null;
   /**
    * Optional extra lines rendered above the composer (below the status line),
    * e.g. a preview of queued follow-up messages. Each entry is one line.
@@ -298,7 +298,7 @@ export function createFixedInput(
     // scrollback stream area, keeping the composer chrome (status, queues, prompt)
     // cleanly bounded below the line.
     const rawActivity = config.getActivityLines
-      ? config.getActivityLines()
+      ? config.getActivityLines({ columns: cols, rows: getRows() })
       : config.getActivityLine
         ? config.getActivityLine()
         : null;

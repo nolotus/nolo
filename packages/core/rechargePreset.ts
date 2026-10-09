@@ -10,6 +10,7 @@
  * 与 packages/app/pages/Recharge.tsx 的 WAFFO_TIER_PACKAGES 及服务端
  * WAFFO_PRESET_TIER_MAP 保持一致：档位变动三处必须同步改。
  */
+export type RechargePresetTier = { id: string; credits: number; popular?: boolean; bestValue?: boolean };
 export const RECHARGE_TIER_CREDITS: readonly number[] = [1, 10, 50, 100];
 
 /** URL 参数名：/recharge?credits=50 */

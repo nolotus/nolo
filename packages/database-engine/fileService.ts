@@ -109,6 +109,9 @@ export interface SaveFileOptions {
      * 服务端则不再重新生成。
      */
     clientProvidedId?: string;
+
+    /** Explicit physical file record key; when provided, client metadata cannot override it. */
+    mainKeyOverride?: string;
 }
 
 /**
@@ -296,10 +299,10 @@ export const saveBufferAsFile = async (
     const clientMetaSanitized: JsonRecord = {
         ...(options.clientMetadata || {}),
     };
-
-    // 如果客户端提供了 dbKey，我们记录下来，但不一定要在 merged 里删除，
-    // 因为它是物理主键的蓝图。
-    const targetDbKey = options.ownerDbKey || clientMetaSanitized.dbKey;
+    const targetDbKey = options.mainKeyOverride ?? (options.ownerDbKey || clientMetaSanitized.dbKey);
+    for (const serverOwnedField of ["dbKey", "id", "tenantId", "uploadedBy", "filePath", "sha256"]) {
+        delete clientMetaSanitized[serverOwnedField];
+    }
 
     // 4) 组装 FileMetadata（以服务端字段覆盖 clientMetadata）
     const base: FileMetadata = {

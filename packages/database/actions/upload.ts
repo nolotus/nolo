@@ -11,7 +11,8 @@ import {
   uploadToCurrentServer,
 } from "./replication";
 import { DataType } from "create/types";
-import { resolveFileCategory } from "app/utils/fileUtils";
+import { isMediaFile, resolveFileCategory } from "app/utils/fileUtils";
+import type { UploadProgressHandler } from "../requests";
 
 /**
  * 辅助函数：保存文件元数据到客户端数据库
@@ -56,7 +57,15 @@ const saveToClientDb = async (
  * - 无需修改业务调用代码。
  */
 export const uploadFileAction = async (
-  uploadConfig: { file: File; customKey?: string; userId?: string },
+  uploadConfig: {
+    file: File;
+    customKey?: string;
+    userId?: string;
+    /** 可选：主副本上传进度（Web 走 XHR）。不传时维持原 fetch 路径。 */
+    onProgress?: UploadProgressHandler;
+    /** 可选：取消主副本上传（例如用户移除了上传中的卡片）。 */
+    signal?: AbortSignal;
+  },
   thunkApi: any
 ): Promise<any> => {
   const { db: clientDb } = thunkApi.extra;
@@ -64,7 +73,7 @@ export const uploadFileAction = async (
   const { currentServer, syncServers, currentUserId } =
     getRuntimeServerContext(state);
 
-  const { file, customKey } = uploadConfig;
+  const { file, customKey, onProgress, signal } = uploadConfig;
   const userId = uploadConfig.userId || currentUserId;
   // 1. 验证参数
   if (!file) {
@@ -114,13 +123,22 @@ export const uploadFileAction = async (
     // 4. 将原始文件存入 IndexedDB / Native Storage
     // 本地以 fileId 为 key 缓存内容（离线使用）
     // 在 RN 环境下，saveFileToIndexedDb 实际上是存储文件路径引用
-    try {
-      await saveFileToIndexedDb(fileId, file);
-    } catch (err) {
-      logger.warn(
-        { err, fileId },
-        "[uploadFileAction] Failed to cache file locally."
-      );
+    // 音视频大文件（几十 MB）整份写 IndexedDB 要数秒，不能挡在上传前面：
+    // 与主副本上传并行，上传完成后再等它收尾（保持「action 返回时本地已缓存」
+    // 的既有契约）。其它文件维持原先「先缓存再上传」的顺序。
+    const cacheLocally = async () => {
+      try {
+        await saveFileToIndexedDb(fileId, file);
+      } catch (err) {
+        logger.warn(
+          { err, fileId },
+          "[uploadFileAction] Failed to cache file locally."
+        );
+      }
+    };
+    const localCachePromise = isMediaFile(file) ? cacheLocally() : null;
+    if (!localCachePromise) {
+      await cacheLocally();
     }
 
     // 5. 基于用户 authority 选择 primary；无 authority 时退回 tenant placement。
@@ -146,7 +164,12 @@ export const uploadFileAction = async (
       currentServer: primaryUploadServer,
       uploadConfig: uploadReplicationConfig,
       state,
+      ...(onProgress ? { onProgress } : {}),
+      ...(signal ? { signal } : {}),
     });
+    if (localCachePromise) {
+      await localCachePromise;
+    }
     if (primaryUploadServer && !primaryUploadSucceeded) {
       throw new Error(`Primary upload failed on authority server ${primaryUploadServer}`);
     }

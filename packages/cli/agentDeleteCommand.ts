@@ -16,6 +16,8 @@
  */
 
 import { toErrorMessage } from "core/errorMessage";
+import { t } from "./tui/i18n";
+
 import { ownedAgentKey, publicAgentKey } from "core/prefix";
 import { resolveCliAgentKeyInput } from "./agentAliases";
 import { getReadableCliDb, type AgentCommandDeps } from "./agentCommandSupport";
@@ -83,16 +85,16 @@ function printUsage(output: { write(chunk: string): unknown }) {
     "       nolo agent delete --id <agentId|agentKey|agentUrl> [--yes] [--json]\n",
   );
   output.write("\n");
-  output.write("删除一个 agent 的私有记录 (agent-{userId}-{id}) 与公开记录 (agent-pub-{id})。\n");
-  output.write("服务器端为 tombstone 软删除，DELETE 后再次 read 会返回 404。\n");
+  output.write(t("agentDelete.description"));
+  output.write(t("agentDelete.tombstoneNote"));
   output.write("\n");
   output.write("Flags:\n");
-  output.write("  --yes            真正执行删除；缺省时仅 dry-run 输出目标摘要。\n");
-  output.write("  --json           输出 JSON 结果。\n");
-  output.write("  --id <agent>     与位置参数等价，传入 alias / dbKey / URL / 26-char id。\n");
-  output.write("  --server / --server-url  仅删除指定服务器（仍保留集群 fan-out 之外的副本）。\n");
-  output.write("  --user <userId>  显式覆盖 userId（与 AUTH_TOKEN 不一致则报错）。\n");
-  output.write("  --token / --machine-key  临时覆盖 AUTH_TOKEN。\n");
+  output.write(t("agentDelete.flagYes"));
+  output.write(t("agentDelete.flagJson"));
+  output.write(t("agentDelete.flagId"));
+  output.write(t("agentDelete.flagServer"));
+  output.write(t("agentDelete.flagUser"));
+  output.write(t("agentDelete.flagToken"));
   output.write("\n");
   output.write("Examples:\n");
   output.write("  nolo agent delete 01MIMOREALPLUS0608 --yes\n");
