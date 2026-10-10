@@ -13,6 +13,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import * as nodeFs from "node:fs";
 import { execFileSync as nodeExecFileSync, spawn as nodeSpawn } from "node:child_process";
 import { isCompiledBinary, resolveCliEntrypointPath } from "./cliEnvHelpers";
+import { buildResultFileContent } from "./agentRunResultFile";
 import { isAgentRunTerminalStatus as sharedIsAgentRunTerminalStatus } from "../ai/tools/agent/agentRunDisplayHelpers";
 import {
   classifyRunFailure,
@@ -76,6 +77,8 @@ export type RunRecord = {
   toolCallCount?: number;
   /** Truncated last assistant text produced before failure/stall. */
   lastAssistantText?: string;
+  /** append/continue 产生的新 run 所续接的原 runId（拿不到则缺省）。 */
+  continuedFrom?: string;
   /**
    * 完整最终报告落盘路径（`<runsDir>/<runId>.result.md`）。lastAssistantText
    * 只留 2000 字摘要；长报告读这个文件，不要解析带 ANSI 的 .log。
@@ -1376,6 +1379,8 @@ export async function spawnLocalBackgroundRun(
     ephemeral?: boolean;
     /** 父进程解析出的凭证组（写进 run 记录，供并发扇出守卫判定）。 */
     credentialGroup?: string;
+    /** 续跑时原 run 的 runId（写进新 run 记录与 .result.md 头）。 */
+    continuedFrom?: string;
     output: OutputLike;
   },
   deps: AgentRunControlDeps = {}
@@ -1458,6 +1463,9 @@ export async function spawnLocalBackgroundRun(
     ...(dodCommands && dodCommands.length > 0 ? { dodCommands } : {}),
     ...(spawnHead ? { spawnHead } : {}),
     ...(input.ephemeral ? { ephemeral: true } : {}),
+    ...(typeof input.continuedFrom === "string" && input.continuedFrom.trim()
+      ? { continuedFrom: input.continuedFrom.trim() }
+      : {}),
   };
   fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
 
@@ -1663,6 +1671,10 @@ export function transitionRunToTerminal(
     failureReason?: RunFailureReason;
     toolCallCount?: number;
     lastAssistantText?: string;
+    /** 结果头元数据（只写进 .result.md 的 front matter，不改 record）。 */
+    model?: string;
+    dialogServer?: string;
+    serverSync?: "awaited" | "best-effort" | "none";
   },
   deps: AgentRunControlDeps = {},
   options: { allowOverOrphaned?: boolean } = {},
@@ -1722,17 +1734,43 @@ export function transitionRunToTerminal(
     // 那是输入不是输出，回填会让编排者把自己的 brief 当成子 run 的结论。
     if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
       record.lastAssistantText = update.lastAssistantText.slice(0, 2000);
-      // 完整正文落文件：摘要会截断，长报告不能只活在 .log 里。
+    }
+    record.endedAt = now().toISOString();
+    // 完整正文落文件：摘要会截断，长报告不能只活在 .log 里。运行时自动加
+    // YAML 头（不依赖模型自觉）；正文原样跟在头后。必须在 endedAt/status
+    // 落定之后写，头里的状态/结束时间才与 record 一致。
+    if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
       try {
         const fs = deps.fs ?? nodeFs;
         const resultFile = join(resolveRunsDir(deps.env, deps.homedir), `${runId}.result.md`);
-        fs.writeFileSync(resultFile, update.lastAssistantText, "utf8");
+        const startedMs = Date.parse(record.startedAt);
+        const endedMs = Date.parse(record.endedAt);
+        const content = buildResultFileContent(
+          {
+            runId,
+            status: record.status,
+            agentName: record.agentName,
+            model: update.model,
+            startedAt: record.startedAt,
+            endedAt: record.endedAt,
+            ...(Number.isFinite(startedMs) && Number.isFinite(endedMs)
+              ? { durationMs: Math.max(0, endedMs - startedMs) }
+              : {}),
+            toolCallCount: record.toolCallCount,
+            dialogId: record.dialogId,
+            server: update.dialogServer ?? "local",
+            serverSync: update.serverSync,
+            cwd: record.cwd,
+            continuedFrom: record.continuedFrom,
+          },
+          update.lastAssistantText,
+        );
+        fs.writeFileSync(resultFile, content, "utf8");
         record.resultFile = resultFile;
       } catch {
         // 落盘失败不阻断终态结算；摘要仍在 record 上。
       }
     }
-    record.endedAt = now().toISOString();
     if (typeof update.note === "string" && update.note.trim()) {
       record.note = update.note.trim();
     }
@@ -1790,6 +1828,9 @@ export async function settleRunTerminalAuthoritatively(
     failureReason?: RunFailureReason;
     toolCallCount?: number;
     lastAssistantText?: string;
+    model?: string;
+    dialogServer?: string;
+    serverSync?: "awaited" | "best-effort" | "none";
   },
   deps: AgentRunControlDeps = {},
   transition: typeof transitionRunToTerminal = transitionRunToTerminal,
@@ -1843,6 +1884,9 @@ export function finalizeRunRecord(
     failureReason?: RunFailureReason;
     toolCallCount?: number;
     lastAssistantText?: string;
+    model?: string;
+    dialogServer?: string;
+    serverSync?: "awaited" | "best-effort" | "none";
   },
   deps: AgentRunControlDeps = {}
 ): void {

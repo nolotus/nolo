@@ -1,7 +1,9 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ReactReduxContext } from "react-redux";
 import { useNavigate } from "app/routing";
+import { downloadExport } from "app/pages/mediaLectureApi";
 import type {
+  ExportFormat,
   MediaJob,
   MediaJobDepth,
   MediaJobStage,
@@ -294,6 +296,108 @@ const OpenNoteLink: React.FC<{ jobId?: string }> = ({ jobId }) => {
     >
       打开笔记
     </a>
+  );
+};
+
+type ExportFormatKey = Exclude<ExportFormat, "vtt">;
+
+/** 卡片内导出格式（顺序即展示顺序；DOCX 为默认主按钮）。 */
+const EXPORT_FORMAT_OPTIONS: Array<{ format: ExportFormatKey; label: string }> = [
+  { format: "docx", label: "DOCX" },
+  { format: "md", label: "Markdown" },
+  { format: "srt", label: "SRT 字幕" },
+  { format: "txt", label: "TXT" },
+];
+
+const EXPORT_BTN_BASE: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "6px 14px",
+  fontSize: "13px",
+  fontWeight: 500,
+  borderRadius: "var(--radius-md, 6px)",
+  cursor: "pointer",
+};
+
+/**
+ * done 卡片内的导出格式选择：点击即下载，不跳转笔记页。
+ * lang 策略：docx/md 不传 lang，由服务端按是否真有译文决定（双语或原文）；srt/txt 显式传 src。
+ * 任一导出进行中禁用全部按钮，防止重复点击；失败或超时只显示错误文案并恢复按钮，不触发下载。
+ */
+const MediaJobExportMenu: React.FC<{ jobId: string }> = ({ jobId }) => {
+  const [busyFormat, setBusyFormat] = useState<ExportFormatKey | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+
+  const handleExport = async (format: ExportFormatKey) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyFormat(format);
+    setExportError(null);
+    try {
+      await downloadExport(jobId, format, format === "srt" || format === "txt" ? "src" : undefined);
+    } catch (e) {
+      setExportError(
+        e instanceof Error && e.message ? e.message : "导出失败，请重试",
+      );
+    } finally {
+      busyRef.current = false;
+      setBusyFormat(null);
+    }
+  };
+
+  return (
+    <div
+      data-testid="export-format-group"
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap",
+      }}
+    >
+      <span style={{ fontSize: "13px", color: "var(--textMuted, #6b7280)" }}>
+        导出：
+      </span>
+      {EXPORT_FORMAT_OPTIONS.map(({ format, label }) => {
+        const isPrimary = format === "docx";
+        const loading = busyFormat === format;
+        return (
+          <button
+            key={format}
+            type="button"
+            data-testid={`export-btn-${format}`}
+            data-variant={isPrimary ? "primary" : "secondary"}
+            disabled={busyFormat !== null}
+            onClick={() => void handleExport(format)}
+            style={{
+              ...EXPORT_BTN_BASE,
+              color: isPrimary ? "#ffffff" : "var(--text, #111827)",
+              backgroundColor: isPrimary
+                ? "var(--primary, #2563eb)"
+                : "transparent",
+              border: isPrimary
+                ? "none"
+                : "1px solid var(--borderMuted, #d1d5db)",
+              cursor: busyFormat !== null ? "not-allowed" : "pointer",
+              opacity: busyFormat !== null && !loading ? 0.6 : 1,
+            }}
+          >
+            {loading ? "导出中…" : label}
+          </button>
+        );
+      })}
+      {exportError && (
+        <span
+          role="alert"
+          data-testid="export-error"
+          style={{ fontSize: "13px", color: "var(--danger, #dc2626)" }}
+        >
+          {exportError}
+        </span>
+      )}
+    </div>
   );
 };
 
@@ -1880,7 +1984,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
               </div>
             )}
 
-          {/* done 时显示「打开笔记」链接到 /media-jobs/<jobId> 与「处理剩余部分」 */}
+          {/* done 时显示格式导出（点击即下载，不再跳转笔记页）与「处理剩余部分」 */}
           {job?.status === "done" && (
             <div
               style={{
@@ -1905,7 +2009,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 </span>
               ) : (
                 <>
-                  <OpenNoteLink jobId={jobId || job?.id} />
+                  {(jobId || job?.id) && (
+                    <MediaJobExportMenu jobId={(jobId || job?.id) as string} />
+                  )}
                   {hasRemainingRange && (
                     <button
                       type="button"

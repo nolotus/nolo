@@ -67,6 +67,12 @@ import {
 export type { RunAgentTurnOptions, RunAgentTurnResult, TaskEvidenceInput };
 import { Spinner, formatElapsed } from "./agentRunSpinner";
 import {
+  getRunResultHeaderMeta,
+  recordRunResultHeaderMeta,
+  resolveResultServerMeta,
+  serverOriginForDialog,
+} from "../agentRunResultFile";
+import {
   resolveServerPlatformToolNames,
 } from "./agentRunPlatformTools";
 import { isGatewayHttpStatus } from "core/gatewayHttpStatus";
@@ -1557,7 +1563,7 @@ async function runHttpAgentTurn(
   const turnCredits = platformCreditsFromUsage(
     data?.usage as Record<string, unknown> | undefined,
   );
-  return {
+  const serverResult: RunAgentTurnResult = {
     exitCode: 0,
     ...(typeof data?.dialogId === "string" && data.dialogId
       ? { dialogId: data.dialogId }
@@ -1572,6 +1578,13 @@ async function runHttpAgentTurn(
     ),
     ...(turnCredits !== undefined ? { turnCredits } : {}),
   };
+  // server 路径请求的就是 options.serverUrl（dialog 实际落点），origin 直接取它；
+  // 服务端自己持久化，不走 writeDialog 的远端同步，故不写 serverSync。
+  recordRunResultHeaderMeta(serverResult, {
+    model: typeof data?.model === "string" ? data.model : undefined,
+    dialogServer: serverOriginForDialog(options.serverUrl),
+  });
+  return serverResult;
 }
 
 async function runInjectedLocalAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {
@@ -1793,7 +1806,7 @@ async function runLocalAgentTurnForCli(
     });
     turnOutput.finish(result.content);
     const turnCredits = sumPlatformCredits(result.usageRecords);
-    return {
+    const turnResult: RunAgentTurnResult = {
       exitCode: 0,
       dialogId: result.dialogId,
       ...(typeof result.content === "string" && result.content.trim()
@@ -1810,6 +1823,19 @@ async function runLocalAgentTurnForCli(
       ...(turnCredits !== undefined ? { turnCredits } : {}),
       ...(result.usageRecords?.length ? { usageRecords: result.usageRecords } : {}),
     };
+    // 头元数据走旁路（不改结果对象形状）：见 agentRunResultFile.ts。
+    // server/serverSync 与 writeDialog 远端同步共用同一判定（见 resolveResultServerMeta）。
+    const serverMeta = resolveResultServerMeta({
+      env: options.env ?? {},
+      userId: resolveLocalUserId(options.env ?? {}),
+      hasSubjectRefs: (buildSubjectRefs(options)?.length ?? 0) > 0,
+    });
+    recordRunResultHeaderMeta(turnResult, {
+      model: result.model,
+      dialogServer: serverMeta.server,
+      serverSync: serverMeta.serverSync,
+    });
+    return turnResult;
   } catch (error) {
     turnOutput.spinner.stop();
     // Abort/error bypasses finish() (it lives on the success path). A user stop
@@ -1989,7 +2015,7 @@ async function checkLocalAvailabilityBeforeHttpDispatch(
 export function foldLocalResultForTui(
   localResult: RunAgentTurnResult,
 ): RunAgentTurnResult {
-  return {
+  const folded: RunAgentTurnResult = {
     exitCode: localResult.exitCode,
     ...(localResult.dialogId ? { dialogId: localResult.dialogId } : {}),
     title: localResult.title,
@@ -2024,6 +2050,10 @@ export function foldLocalResultForTui(
     // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
     ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
   };
+  // 头元数据旁路随行（见 agentRunResultFile.ts），否则 auto→local 的头会丢 model。
+  const headerMeta = getRunResultHeaderMeta(localResult);
+  recordRunResultHeaderMeta(folded, headerMeta);
+  return folded;
 }
 
 export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAgentTurnResult> {

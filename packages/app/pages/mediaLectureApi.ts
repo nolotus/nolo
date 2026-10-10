@@ -95,14 +95,16 @@ export function formatQuote(q: MediaQuote): string {
 }
 
 /** W14：格式与语言都进入导出参数。 */
-export function exportUrl(id: string, format: string, lang: ExportLang): string {
-  const q = new URLSearchParams({ format, lang });
+/** lang 省略时由服务端按任务是否真有译文决定（有译文 docx/md 默认双语，否则原文）。 */
+export function exportUrl(id: string, format: string, lang?: ExportLang): string {
+  const q = new URLSearchParams({ format });
+  if (lang) q.set("lang", lang);
   return `${BASE}/${encodeURIComponent(id)}/export?${q.toString()}`;
 }
 
 /** 导出：任何失败都抛错，只有成功拿到非空、非 JSON 错误体的文件才返回 blob（调用方据此才触发下载）。 */
-export async function fetchExport(id: string, format: string, lang: ExportLang, fetchImpl: typeof fetch = fetch): Promise<{ blob: Blob; filename: string }> {
-  const r = await request(fetchImpl, exportUrl(id, format, lang));
+export async function fetchExport(id: string, format: string, lang?: ExportLang, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+  const r = await request(fetchImpl, exportUrl(id, format, lang), signal ? { signal } : undefined);
   const blob = await r.blob();
   if (blob.size === 0 || (blob.type || r.headers.get("content-type") || "").includes("json")) {
     throw new ApiError("导出内容无效，请重试", r.status, "BAD_EXPORT");
@@ -110,6 +112,33 @@ export async function fetchExport(id: string, format: string, lang: ExportLang, 
   const cd = r.headers.get("content-disposition") ?? "";
   const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
   return { blob, filename: m ? decodeURIComponent(m[1]) : `lecture.${format}` };
+}
+
+/** 导出整段（含读 blob）的超时上限；超时即 abort，避免请求挂死让调用方按钮永久禁用。 */
+export const EXPORT_TIMEOUT_MS = 60_000;
+
+/** 导出并触发浏览器下载（笔记页与卡片共用）；失败或超时只抛错，不触发下载。 */
+export async function downloadExport(id: string, format: string, lang?: ExportLang, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, EXPORT_TIMEOUT_MS);
+  try {
+    const { blob, filename } = await fetchExport(id, format, lang, fetchImpl, controller.signal);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    if (timedOut) throw new ApiError("导出超时，请稍后重试", 0, "TIMEOUT");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 时间戳跳转：定位并 play()；被拒绝（自动播放策略等）时返回提示文案而非静默失败。 */

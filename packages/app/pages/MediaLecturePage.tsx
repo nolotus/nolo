@@ -8,7 +8,7 @@ import { LectureOverview } from "render/web/lecture/LectureOverview";
 import {
   ApiError,
   canOpenNotes,
-  fetchExport,
+  downloadExport,
   fetchJob,
   fetchResult,
   formatQuote,
@@ -94,13 +94,7 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
   const exportFile = async (format: string, lang: ExportLang = exportLang) => {
     setExportError("");
     try {
-      const { blob, filename } = await fetchExport(id, format, lang);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      await downloadExport(id, format, lang);
     } catch (e) {
       setExportError(errText(e));
     }

@@ -1,16 +1,18 @@
 import { isNoloHostedProvider } from "ai/llm/kimi";
 
-type ImageFetchResult = {
-  ok: boolean;
-  mimeType?: string;
-  bytes?: Uint8Array;
-  error?: string;
-};
+type ImageFetchResult = { ok: boolean; mimeType?: string; bytes?: Uint8Array; error?: string; skippedSize?: number };
+export const INLINE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+// Raw bytes: a 20 MiB budget is approximately 26.7 MiB after base64 encoding.
+export const INLINE_IMAGE_TOTAL_MAX_BYTES = 20 * 1024 * 1024;
 
 type InlineOptions = {
   shouldInline: boolean;
-  fetchImage?: (url: string) => Promise<ImageFetchResult>;
+  fetchImage?: (url: string, signal?: AbortSignal, maxBytes?: number) => Promise<ImageFetchResult>;
   isAllowedImageUrl?: (url: string) => boolean;
+  maxBytes?: number;
+  maxTotalBytes?: number;
+  signal?: AbortSignal;
+  onSkipTooLarge?: (url: string, size: number | undefined, reason: "per-image" | "total-budget") => void;
 };
 
 const FILE_CONTENT_PATH = "/api/v1/db/file/content/";
@@ -39,15 +41,15 @@ const isInlineCandidate = (url: string) =>
   /^https?:\/\//i.test(url) && url.includes(FILE_CONTENT_PATH);
 
 const bytesToBase64 = (bytes: Uint8Array) => {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(offset, offset + 0x8000))));
   }
-  return btoa(binary);
+  return btoa(chunks.join(""));
 };
 
-const defaultFetchImage = async (url: string): Promise<ImageFetchResult> => {
-  const response = await fetch(url);
+const defaultFetchImage = async (url: string, signal?: AbortSignal, _maxBytes?: number): Promise<ImageFetchResult> => {
+  const response = await fetch(url, { signal });
   if (!response.ok) {
     return {
       ok: false,
@@ -65,75 +67,63 @@ const defaultFetchImage = async (url: string): Promise<ImageFetchResult> => {
 
 const cloneImagePartWithDataUrl = async (
   part: any,
-  fetchImage: (url: string) => Promise<ImageFetchResult>,
-  isAllowedImageUrl?: (url: string) => boolean,
+  fetchImage: NonNullable<InlineOptions["fetchImage"]>,
+  options: InlineOptions,
+  usedBytes: { value: number },
 ) => {
   const url = part?.image_url?.url;
-  if (
-    typeof url !== "string" ||
-    !isInlineCandidate(url) ||
-    (isAllowedImageUrl && !isAllowedImageUrl(url))
-  ) {
+  if (typeof url !== "string" || !isInlineCandidate(url) || (options.isAllowedImageUrl && !options.isAllowedImageUrl(url))) return part;
+  if (options.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
+  const remaining = options.maxTotalBytes === undefined ? undefined : options.maxTotalBytes - usedBytes.value;
+  const fetchLimit = options.maxBytes === undefined ? remaining : remaining === undefined ? options.maxBytes : Math.min(options.maxBytes, remaining);
+  const result = await fetchImage(url, options.signal, fetchLimit);
+  if (options.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
+  if (result.skippedSize !== undefined) {
+    const reason = options.maxBytes !== undefined && result.skippedSize > options.maxBytes ? "per-image" : "total-budget";
+    options.onSkipTooLarge?.(url, result.skippedSize, reason);
     return part;
   }
-
-  const result = await fetchImage(url);
   if (!result.ok || !result.bytes) return part;
-
-  const mimeType = result.mimeType || "application/octet-stream";
-  return {
-    ...part,
-    image_url: {
-      ...part.image_url,
-      url: `data:${mimeType};base64,${bytesToBase64(result.bytes)}`,
-    },
-  };
+  if (options.maxBytes !== undefined && result.bytes.byteLength > options.maxBytes) {
+    options.onSkipTooLarge?.(url, result.bytes.byteLength, "per-image"); return part;
+  }
+  if (options.maxTotalBytes !== undefined && usedBytes.value + result.bytes.byteLength > options.maxTotalBytes) {
+    options.onSkipTooLarge?.(url, result.bytes.byteLength, "total-budget"); return part;
+  }
+  usedBytes.value += result.bytes.byteLength;
+  const mimeType = (result.mimeType || "application/octet-stream").split(";")[0].trim() || "application/octet-stream";
+  return { ...part, image_url: { ...part.image_url, url: `data:${mimeType};base64,${bytesToBase64(result.bytes)}` } };
 };
 
-export const inlineImageUrlsForCustomProvider = async <T>(
-  bodyData: T,
-  options: InlineOptions,
-): Promise<T> => {
+export const inlineImageUrlsForCustomProvider = async <T>(bodyData: T, options: InlineOptions): Promise<T> => {
   if (!options.shouldInline) return bodyData;
-
   const body: any = bodyData;
   if (!Array.isArray(body?.messages)) return bodyData;
-
   const fetchImage = options.fetchImage ?? defaultFetchImage;
-  let changed = false;
-  const messages = [];
-
-  for (const message of body.messages) {
-    if (!Array.isArray(message?.content)) {
-      messages.push(message);
-      continue;
-    }
-
-    const content = await Promise.all(
-      message.content.map(async (part: any) => {
-        if (part?.type !== "image_url") return part;
-        return cloneImagePartWithDataUrl(
-          part,
-          fetchImage,
-          options.isAllowedImageUrl,
-        );
-      }),
-    );
-    let messageChanged = false;
-    for (let i = 0; i < content.length; i++) {
-      if (content[i] !== message.content[i]) {
-        changed = true;
-        messageChanged = true;
-        break;
-      }
-    }
-
-    messages.push(messageChanged ? { ...message, content } : message);
-  }
-
-  if (!changed) return bodyData;
-  return {
-    ...body,
-    messages,
+  const fetched = new Map<string, Promise<ImageFetchResult>>();
+  const fetchOnce = (url: string, signal?: AbortSignal, maxBytes?: number) => {
+    let result = fetched.get(url);
+    if (!result) { result = fetchImage(url, signal, maxBytes); fetched.set(url, result); }
+    return result;
   };
+  const usedBytes = { value: 0 };
+  let changed = false;
+  const messages = [...body.messages];
+  for (let mi = messages.length - 1; mi >= 0; mi--) {
+    const message = messages[mi];
+    if (!Array.isArray(message?.content)) continue;
+    const content = [...message.content];
+    for (let pi = content.length - 1; pi >= 0; pi--) {
+      const part = content[pi];
+      if (part?.type !== "image_url") continue;
+      if (options.maxTotalBytes !== undefined && usedBytes.value >= options.maxTotalBytes) {
+        if (typeof part?.image_url?.url === "string" && isInlineCandidate(part.image_url.url)) options.onSkipTooLarge?.(part.image_url.url, undefined, "total-budget");
+        continue;
+      }
+      const cloned = await cloneImagePartWithDataUrl(part, fetchOnce, options, usedBytes);
+      if (cloned !== part) { content[pi] = cloned; changed = true; }
+    }
+    if (content.some((part: any, index: number) => part !== message.content[index])) messages[mi] = { ...message, content };
+  }
+  return changed ? { ...body, messages } : bodyData;
 };

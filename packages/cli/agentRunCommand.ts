@@ -51,6 +51,7 @@ import {
   type AgentRunControlDeps,
   type RunFailureReason,
 } from "./agentRunControl";
+import { getRunResultHeaderMeta } from "./agentRunResultFile";
 import { runDoDCommands, type DoDCommandResult } from "./agentRunDoD";
 import {
   normalizeCliImageInput,
@@ -981,6 +982,8 @@ export async function runAgentRunCommand(args: string[], deps: AgentRunCommandDe
       ...(failureReason ? { failureReason } : {}),
       ...(toolCallCount !== undefined ? { toolCallCount } : {}),
       ...(result.finalText ? { lastAssistantText: result.finalText } : {}),
+      // 仅用于 .result.md 头（front matter）：旁路读取，不改 result 形状。
+      ...getRunResultHeaderMeta(result),
       ...truncationNote,
     },
     {

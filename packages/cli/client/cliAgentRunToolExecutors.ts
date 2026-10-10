@@ -538,6 +538,8 @@ async function spawnContinuationRun(
     "--bg",
     ...(reconciled.ephemeral ? ["--ephemeral"] : []),
   ];
+  // 续跑产生的新 run 记录原 runId（写进 record 与 .result.md 头 continuedFrom）。
+  const continuedFrom = reconciled.runId;
 
   // 续跑不新派 title——延续原 run 的标题。必须在 spawn 前算好：
   // spawnLocalBackgroundRun 的 input.title 会被写进新 run 的注册记录
@@ -559,6 +561,7 @@ async function spawnContinuationRun(
       cwd: reconciled.cwd ?? deps.cwd ?? process.cwd(),
       message: userInput,
       ...(reconciled.ephemeral ? { ephemeral: true } : {}),
+      continuedFrom,
       output: noopOutput,
     },
     deps,

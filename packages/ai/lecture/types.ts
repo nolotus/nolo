@@ -131,6 +131,26 @@ export interface MediaJobCharge {
   at?: number;
 }
 
+/** 通知阶段；transcribe 仅预留，当前只投递 started / done。 */
+export type MediaJobNotificationStage = "started" | "transcribe" | "done";
+export type MediaJobNotificationKey = `${number}:${MediaJobNotificationStage}`;
+
+/** start 时固化；后续重新报价/扩展范围不得改写此快照。 */
+export interface MediaJobConfirmation {
+  depth: MediaJobDepth;
+  sourceLang?: string;
+  targetLang?: string;
+  totalCredits: [number, number];
+  confirmedAt: number;
+}
+
+export interface MediaJobNotification {
+  /** 同 revision:stage 固定此 id，未 delivered 时也使用此 id 重试。 */
+  messageId: string;
+  /** 未设置表示通知义务尚未完成；时间戳沿用 job 的毫秒时间。 */
+  deliveredAt?: number;
+}
+
 export interface MediaJob {
   id: string;
   userId: string;
@@ -152,6 +172,11 @@ export interface MediaJob {
   scope: MediaScope;
   depth: MediaJobDepth;
   quote: MediaQuote;
+  confirmation?: MediaJobConfirmation;
+  /** 每次成功 start / resume 递增；旧任务缺省视为 0。 */
+  executionRevision?: number;
+  /** 按 revision:stage 保留通知义务与投递凭据，不跨 revision 去重。 */
+  notifications?: Partial<Record<MediaJobNotificationKey, MediaJobNotification>>;
   trimSuggestions: TrimSuggestion[];
   /** 报价上限 × 1.1；超过则进入 awaiting_confirmation */
   budgetCeiling: number;
