@@ -19,6 +19,7 @@ import { DataType } from "create/types";
 import { getRuntimeServerContext } from "database/runtimeServerContext";
 import { remove, write, patch, selectById as selectDbRecordById } from "database/dbSlice";
 import { createDialogMessageKeyAndId } from "database/keys";
+import { inferMessageDialogIdFromDbKey } from "./messageDialogIdentity";
 import type { CompletionFinishReason, Message } from "./types";
 import { buildEditedMessageContent } from "./messageEditContent";
 import { planDeleteMessageCascade } from "./messageDeleteCascade";
@@ -244,14 +245,7 @@ const getMessageDialogState = (
   return createEmptyMessageDialogState();
 };
 
-const inferDialogIdFromDbKey = (dbKey?: string): string | null => {
-  if (!dbKey) return null;
-  const parts = dbKey.split("-");
-  if (parts.length >= 4 && parts[0] === DataType.DIALOG && parts[2] === "msg") {
-    return parts[1];
-  }
-  return null;
-};
+const inferDialogIdFromDbKey = inferMessageDialogIdFromDbKey;
 
 const inferDialogIdFromMessage = (
   message: Partial<Message> & { dialogId?: string }
