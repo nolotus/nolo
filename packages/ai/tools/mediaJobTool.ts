@@ -1,12 +1,12 @@
 import type { MediaQuote } from "ai/lecture/types";
+import {
+  TIER_LABELS,
+  MEDIA_JOB_QUOTE_TIMEOUT_MS,
+} from "ai/lecture/constants";
 import { callToolApi } from "./toolApiClient";
 import { ToolResultError } from "./toolResultError";
 
-/**
- * 闸门内报价（确认卡上的价格）的超时预算。报价只是给卡片补价格，
- * 不能让它把确认卡本身拖住：请求一直 pending 会让卡片永不出现、用户被卡住。
- */
-export const MEDIA_JOB_QUOTE_TIMEOUT_MS = 5_000;
+export { MEDIA_JOB_QUOTE_TIMEOUT_MS };
 
 /**
  * 外层兜底（withTimeout）相对 abort 预算的宽裕量（毫秒）。
@@ -71,13 +71,6 @@ const createQuoteAbort = (
     return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
   }
   return { signal: undefined, cleanup: () => {} };
-};
-
-/** 档位文案单一真相源（quote 三档与后续渲染共用同一份措辞）。 */
-const TIER_LABELS: Record<"outline" | "translate" | "full", string> = {
-  outline: "只要大纲重点",
-  translate: "原文+译文对照",
-  full: "全套（对照+大纲+重点+术语，可导出文档）",
 };
 
 export const mediaJobSchema = {
