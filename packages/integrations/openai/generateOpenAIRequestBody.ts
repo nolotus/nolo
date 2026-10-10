@@ -18,6 +18,7 @@ import { normalizeChatCompletionsBodyForProvider } from "./providerBodyCompatibi
 import {
   preserveAgentStateFields,
   resolveReasoningReplayOptions,
+  shouldStripReasoningContentForOutbound,
 } from "../../agent-runtime/openAiCompatibleMessages";
 
 // model 理论上不应为空（schema 已强制必填），但防御性处理 undefined
@@ -160,10 +161,25 @@ const sanitizeChatCompletionsMessage = (
   // thinking 要求的「历史工具轮必须回传 reasoning_content」只能在这一层补，
   // 与服务端 loop / 本地直连保持同一份判据（resolveReasoningReplayOptions，
   // 三个出站 seam 的唯一决策点）。
+  //
+  // strip 与 replay 两半都由这一层决定：body 逐字转发意味着服务端不会再
+  // 兜底丢弃 DeepSeek 系拒绝的字符串 `reasoning_content`（serde
+  // "expected a sequence"），所以这里也必须自己算 strip（与另两条 seam 同判据：
+  // shouldStripReasoningContentForOutbound + resolveReasoningReplayOptions 的
+  // 第三参，保证 strip 优先于注入）。
+  const shouldStripReasoning = shouldStripReasoningContentForOutbound(
+    options?.provider,
+    options?.model,
+  );
   return preserveAgentStateFields(message, sanitized, {
     targetProvider: options?.provider,
     targetModel: options?.model,
-    ...resolveReasoningReplayOptions(options?.provider, options?.model),
+    stripReasoningContent: shouldStripReasoning,
+    ...resolveReasoningReplayOptions(
+      options?.provider,
+      options?.model,
+      shouldStripReasoning,
+    ),
   });
 };
 
