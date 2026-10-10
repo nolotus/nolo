@@ -282,10 +282,13 @@ export function describeUnparsableToolArgs(
   breakdown: UnparsableToolArgsBreakdown,
 ): string {
   const { truncated, malformed } = breakdown;
+  // 只描述形状、不判原因（分类判不出「上游截断」还是「模型自己写错闭合符」）：
+  // truncated 类只说「尾部不完整（字符串/容器未闭合）」，malformed 类只说
+  // 「容器闭合但 token 非法（非闭合问题）」。
   if (truncated > 0 && malformed > 0) {
-    return `${truncated} suspected upstream stream truncation / ${malformed} malformed JSON arguments, not truncation`;
+    return `${truncated} with incomplete tail (unclosed string or container) / ${malformed} with balanced containers but invalid tokens (not unclosed)`;
   }
-  if (truncated > 0) return "suspected upstream stream truncation";
-  if (malformed > 0) return "malformed JSON arguments, not truncation";
+  if (truncated > 0) return "incomplete tail (unclosed string or container)";
+  if (malformed > 0) return "balanced containers but invalid tokens (not unclosed)";
   return "cause unclassified";
 }
