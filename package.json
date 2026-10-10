@@ -93,6 +93,7 @@
     "lovely-mermaid": "0.3.3",
     "ansi-regex": "6.3.0",
     "string-width": "8.2.2",
+    "frozen": "latest",
     "date-fns-tz": "2.0.1",
     "@react-navigation/native": "latest",
     "js-yaml": "4.3.1"

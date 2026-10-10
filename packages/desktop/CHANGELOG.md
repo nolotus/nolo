@@ -6,10 +6,18 @@
 ### Bug Fixes
 
 * **agent-runtime:** replay a reasoning placeholder for opencode-go deepseek ([caa4481](https://github.com/nolotus/bun-nolo/commit/caa448152984143aac738aaa91bba6dc6312f081))
+* **chat:** bound the history read by progress, not a fixed deadline ([95e51e7](https://github.com/nolotus/bun-nolo/commit/95e51e74c2ba0c6d563616f69bcaef2bf5690234))
+* **chat:** show chat history without waiting on stale sources ([77a0852](https://github.com/nolotus/bun-nolo/commit/77a0852681ec9d52b8e4c8a1b04a132ba7280943))
 * **chat:** 平台凭据缺失时引导登录而非显示原始 401 ([808137f](https://github.com/nolotus/bun-nolo/commit/808137f016231f3671480f2f0a96ae22be9f2dd3))
 * **cli:** avoid ephemeral port collisions for the local authority broker ([19df7b7](https://github.com/nolotus/bun-nolo/commit/19df7b792006a3f31323ddfc02627ce80acadc39))
 * **cli:** stop blaming /switch history for every invalid_request_error 400 ([ac7be79](https://github.com/nolotus/bun-nolo/commit/ac7be79c3b06696ecf645ecf03a180cfb059aa74))
+* **llm:** correct Mistral context windows from the live model list ([645274a](https://github.com/nolotus/bun-nolo/commit/645274a541267766a991a43d59c910873560242e))
 * **render:** 新建页面不再先渲染上一篇正文 ([0ecfd7c](https://github.com/nolotus/bun-nolo/commit/0ecfd7c8a28b880c0b5a8072ff2b6311d0ab60be))
+
+### Performance Improvements
+
+* **agent-runtime:** Anthropic prompt cache 回合边界 1h 断点 ([1b9a9b1](https://github.com/nolotus/bun-nolo/commit/1b9a9b14c9da1476d7e0beb05621da3468c5048e))
+* **agent-runtime:** Codex/Devin 请求身份按会话稳定，修回合内缓存路由失效 ([233c5e3](https://github.com/nolotus/bun-nolo/commit/233c5e35264d159a2706f92671e46ac5a73389a2))
 
 
 ## 0.101.8

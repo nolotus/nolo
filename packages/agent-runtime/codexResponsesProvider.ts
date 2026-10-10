@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { deriveStableUuid, isStableSessionIdentityEnabled } from "./sessionIdentity";
 import { parseUpstreamErrorBody } from "core/chat/upstreamErrorBody";
 import { randomUUID } from "node:crypto";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -97,6 +99,8 @@ export type CodexResponsesCallArgs = {
   fetchImpl?: typeof fetch;
   /** 流内 503（server_is_overloaded）的总尝试次数，默认 3（首次 + 2 次重试）。 */
   maxAttempts?: number;
+  /** 会话稳定键（dialogId 等）；提供时 session/thread/window/turn id 与 prompt_cache_key 会话内稳定。 */
+  sessionKey?: string;
   /** 注入退避等待，便于测试。 */
   sleep?: (ms: number) => Promise<unknown>;
   /** 注入 monotonic clock，便于验证 logical invocation timing。 */
@@ -112,13 +116,29 @@ type CodexRequestIdentity = {
   clientMetadata: Record<string, string>;
 };
 
+const turnStartedAtByTurn = new Map<string, number>();
+
 export function createCodexRequestIdentity(
   installationId: string = CODEX_INSTALLATION_ID,
+  stable?: { sessionKey?: string; turnToken?: string },
 ): CodexRequestIdentity {
-  const sessionId = randomUUID();
-  const threadId = randomUUID();
-  const windowId = randomUUID();
-  const turnId = randomUUID();
+  const key = stable?.sessionKey && isStableSessionIdentityEnabled() ? stable.sessionKey : undefined;
+  const sessionId = key ? deriveStableUuid(key, "session") : randomUUID();
+  const threadId = key ? sessionId : randomUUID();
+  const windowId = key ? deriveStableUuid(key, "window") : randomUUID();
+  const turnId = key ? deriveStableUuid(key, `turn:${stable?.turnToken ?? ""}`) : randomUUID();
+  let turnStartedAt = Date.now();
+  if (key) {
+    const tk = `${key}\0${stable?.turnToken ?? ""}`;
+    const prev = turnStartedAtByTurn.get(tk);
+    if (prev !== undefined) turnStartedAt = prev;
+    else {
+      if (turnStartedAtByTurn.size >= 500) {
+        turnStartedAtByTurn.delete(turnStartedAtByTurn.keys().next().value as string);
+      }
+      turnStartedAtByTurn.set(tk, turnStartedAt);
+    }
+  }
   const turnMetadata = {
     installation_id: installationId,
     session_id: sessionId,
@@ -126,7 +146,7 @@ export function createCodexRequestIdentity(
     turn_id: turnId,
     window_id: windowId,
     request_kind: "turn",
-    turn_started_at_unix_ms: Date.now(),
+    turn_started_at_unix_ms: turnStartedAt,
   };
   const turnMetadataJson = JSON.stringify(turnMetadata);
   return {
@@ -223,6 +243,7 @@ export function convertMessagesToCodexInput(
 export function buildCodexRequestBody(
   args: CodexResponsesCallArgs,
   identity: CodexRequestIdentity = createCodexRequestIdentity(),
+  sessionKey?: string,
 ): Record<string, unknown> {
   const rawMessages = Array.isArray(args.openAiBody.messages)
     ? (args.openAiBody.messages as unknown[])
@@ -250,7 +271,13 @@ export function buildCodexRequestBody(
     store: false,
     // Keep routing stable across turns and request UUIDs. Growing input/history
     // is intentionally excluded; only stable request-prefix material belongs.
-    prompt_cache_key: stablePromptCacheKey([model, stableInstructions, tools ?? []], "nolo-codex"),
+    // 真实 Codex CLI 用 session_id 作 prompt_cache_key（codex-rs/core/src/client.rs
+    // prompt_cache_key()）；OpenAI 文档：同 key 超过 ~15 req/min 会溢出到其他机器。
+    // 有会话键时按会话分片，无则回退到前缀派生键。
+    prompt_cache_key:
+      sessionKey && isStableSessionIdentityEnabled()
+        ? identity.sessionId
+        : stablePromptCacheKey([model, stableInstructions, tools ?? []], "nolo-codex"),
     client_metadata: identity.clientMetadata,
   };
   if (instructions) body.instructions = instructions;
@@ -286,8 +313,19 @@ async function callCodexResponsesOnce(
   timingTracker: ReturnType<typeof createProviderCallTimingTracker>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const fetchImpl = args.fetchImpl ?? fetch;
-  const identity = createCodexRequestIdentity();
-  const body = buildCodexRequestBody(args, identity);
+  const msgs = Array.isArray(args.openAiBody.messages) ? (args.openAiBody.messages as any[]) : [];
+  // 已知取舍：连续两回合 user 内容完全相同时 turnId 复用（仅影响 turn 级元数据，不影响缓存键）。
+  // 回合标识 = 本回合起始（最后一条 user）消息内容哈希：同回合多次调用稳定，不受历史压缩影响。
+  const lastUser = [...msgs].reverse().find((m) => m && m.role === "user");
+  const turnToken = createHash("sha256")
+    .update(JSON.stringify(lastUser?.content ?? ""))
+    .digest("hex")
+    .slice(0, 24);
+  const identity = createCodexRequestIdentity(
+    undefined,
+    args.sessionKey ? { sessionKey: args.sessionKey, turnToken } : undefined,
+  );
+  const body = buildCodexRequestBody(args, identity, args.sessionKey);
   const headers = buildCodexCompatibilityHeaders(identity, accountId);
   headers.Authorization = `Bearer ${args.accessToken}`;
   const response = await fetchImpl(CODEX_RESPONSES_URL, {
