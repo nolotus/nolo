@@ -20,6 +20,7 @@ import {
   resolveReasoningReplayOptions,
   shouldStripReasoningContentForOutbound,
 } from "../../agent-runtime/openAiCompatibleMessages";
+import type { RequestShapingCounts } from "../../agent-runtime/outboundRequestDiagnostics";
 
 // model 理论上不应为空（schema 已强制必填），但防御性处理 undefined
 const isClaudeModel = (model: string | undefined): boolean =>
@@ -98,6 +99,8 @@ interface BuildRequestBodyOptions {
   presence_penalty?: number;
   max_tokens?: number;
   reasoning_effort?: string;
+  /** 可选 shaping 计数出口（出站诊断）；缺省不统计，也不影响 body。 */
+  shapingCounts?: RequestShapingCounts;
 }
 
 const shouldInjectLlamaCppThinkingToggle = (agentConfig: Agent): boolean => {
@@ -145,7 +148,7 @@ const normalizeChatCompletionsContent = (
 
 const sanitizeChatCompletionsMessage = (
   message: Message & Record<string, any>,
-  options?: { provider?: string; model?: string },
+  options?: { provider?: string; model?: string; shapingCounts?: RequestShapingCounts },
 ) => {
   const sanitized: Record<string, any> = {
     role: message.role,
@@ -175,6 +178,7 @@ const sanitizeChatCompletionsMessage = (
     targetProvider: options?.provider,
     targetModel: options?.model,
     stripReasoningContent: shouldStripReasoning,
+    ...(options?.shapingCounts ? { shapingCounts: options.shapingCounts } : {}),
     ...resolveReasoningReplayOptions(
       options?.provider,
       options?.model,
@@ -195,6 +199,7 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
     presence_penalty,
     max_tokens,
     reasoning_effort,
+    shapingCounts,
   } = options;
 
   // 只保留上游协议允许的字段，避免 UI/runtime 元数据泄漏到 chat-completions 请求体。
@@ -202,6 +207,7 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
     sanitizeChatCompletionsMessage(message as Message & Record<string, any>, {
       provider: providerName,
       model,
+      ...(shapingCounts ? { shapingCounts } : {}),
     })
   );
 
@@ -257,7 +263,13 @@ export const generateOpenAIRequestBody = (
   messages: Message[],
   contexts?: Contexts,
   stableMessages: Message[] = [],
-  prependSystemPrompt = true
+  prependSystemPrompt = true,
+  /**
+   * 可选 shaping 计数出口（出站诊断）：把「本次实际注入的占位 / 剥离的 reasoning /
+   * 工具轮缺 reasoning」写进调用方给的收集器。**不进入 request body**，缺省时
+   * 输出与不传时逐字节相同。
+   */
+  shapingCounts?: RequestShapingCounts,
 ) => {
   // 0. 解析最终 model 名：统一用 model 字段，不再有 customModelName
   //    model 在 platform 和 custom 模式下都是同一个字段
@@ -322,6 +334,7 @@ export const generateOpenAIRequestBody = (
     presence_penalty: agentConfig.presence_penalty,
     max_tokens: agentConfig.max_tokens,
     reasoning_effort: agentConfig.reasoning_effort,
+    ...(shapingCounts ? { shapingCounts } : {}),
   });
 
   if (shouldInjectLlamaCppThinkingToggle(agentConfig)) {

@@ -6,6 +6,7 @@
  * tool_call_id / tool_calls / reasoning_content passthrough.
  */
 import type { AgentRuntimeChatMessage } from "./types";
+import type { RequestShapingCounts } from "./outboundRequestDiagnostics";
 
 type AgentStateMessageLike = {
   role?: unknown;
@@ -52,6 +53,13 @@ export type PreserveAgentStateOptions = {
   targetProvider?: string;
   targetModel?: string;
   allowThoughtSignature?: boolean;
+  /**
+   * 可选 shaping 计数收集器（出站诊断用；默认 undefined = 现状行为）。
+   * 由本函数**就地**累计「本次实际发生」的动作：是否真的注入了占位、是否真的
+   * strip 了 reasoning、工具轮是否本就缺 reasoning。纯数字、绝不携带内容，
+   * 也不进入 wire 消息，因此不影响投影行为与请求字节。
+   */
+  shapingCounts?: RequestShapingCounts;
 };
 
 export function isGeminiCompatibleTarget(provider?: string, model?: string): boolean {
@@ -85,6 +93,21 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
       mutableTarget.reasoning_content = source.reasoning_content;
     }
     if (Array.isArray(source.tool_calls)) {
+      const shapingCounts = options?.shapingCounts;
+      if (shapingCounts && source.tool_calls.length > 0) {
+        // 只有「带非空 tool_calls 的工具轮」参与统计；计数与实际动作同源。
+        shapingCounts.assistantToolTurns += 1;
+        const hadUsableReasoning =
+          typeof source.reasoning_content === "string" &&
+          source.reasoning_content.length > 0;
+        if (options?.stripReasoningContent) {
+          // strip 优先：有内容的 reasoning 被剥掉，没内容的本来就没有。
+          if (hadUsableReasoning) shapingCounts.reasoningStrippedTurns += 1;
+          else shapingCounts.missingReasoningTurns += 1;
+        } else if (!hadUsableReasoning) {
+          shapingCounts.missingReasoningTurns += 1;
+        }
+      }
       const isExplicitTarget = Boolean(options?.targetProvider || options?.targetModel);
       const allowSignature =
         options?.allowThoughtSignature ??
@@ -116,6 +139,7 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
         // Covers both a missing field and an unusable empty string — the
         // upstream contract needs a non-empty reasoning_content back.
         mutableTarget.reasoning_content = replayPlaceholder;
+        if (shapingCounts) shapingCounts.placeholderInjectedTurns += 1;
       }
     }
   }
