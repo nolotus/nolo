@@ -204,6 +204,80 @@ export function isColdResume(
 }
 
 export type LocalAutoCompactionFailureReason = "timeout" | "aborted" | "provider-error";
+
+/**
+ * 摘要 fallback 的形状（与 CLI `/compact` 的 `SummaryLlmCaller` 结构完全一致：
+ * `(content: string) => Promise<string | null>`，失败/无额度返回 null）。
+ *
+ * 就地声明而不 `import` CLI 类型：agent-runtime 不能反向依赖 cli 包。CLI 侧
+ * 直接把已有的 SummaryLlmCaller 实例按结构传进来即可，不需要适配层。
+ */
+export type LocalCompactionSummaryFallback = (
+  content: string,
+) => Promise<string | null>;
+
+/**
+ * 主通道失败后的一次性摘要 fallback 调用。
+ *
+ * 契约：整个压缩流程只调用 fallback 一次；任何异常/非字符串/空串都归为
+ * 「没拿到摘要」，由调用方继续走既有 fail-open 路径（绝不静默丢历史）。
+ */
+async function runSummaryFallback(
+  fallback: LocalCompactionSummaryFallback,
+  content: string,
+): Promise<string | null> {
+  try {
+    const text = await fallback(content);
+    if (typeof text !== "string") return null;
+    const trimmed = text.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch (error) {
+    console.warn("[localLoop] auto-compaction summary fallback failed:", error);
+    return null;
+  }
+}
+
+// Bounded per-dialog retry suppression.
+//
+// After a summary request fails (timeout / provider error) the same dialog must
+// not re-pay the whole deadline on every following round: that is what produced a
+// repeated 60s stall with no progress. Module scope is deliberate — the compaction
+// controller is rebuilt per turn, while the pain being fixed is exactly the
+// cross-turn repeat. Entries expire on read and the map is capped, so it cannot
+// grow without bound.
+//
+// The clock is always the caller's injected `now`, never `Date.now()`: mixing the
+// two made an injected-clock round read a wall-clock deadline and stay suppressed
+// forever.
+const COMPACTION_RETRY_BACKOFF_MS = 60_000;
+const COMPACTION_RETRY_BACKOFF_MAX_ENTRIES = 256;
+const compactionRetryBackoff = new Map<string, number>();
+
+function isCompactionBackedOff(dialogId: string, now: number): boolean {
+  for (const [key, until] of compactionRetryBackoff) {
+    if (until <= now) compactionRetryBackoff.delete(key);
+  }
+  const until = compactionRetryBackoff.get(dialogId);
+  return until !== undefined && until > now;
+}
+
+function recordCompactionFailure(dialogId: string, now: number): void {
+  compactionRetryBackoff.delete(dialogId);
+  while (compactionRetryBackoff.size >= COMPACTION_RETRY_BACKOFF_MAX_ENTRIES) {
+    const oldest = compactionRetryBackoff.keys().next().value;
+    if (oldest === undefined) break;
+    compactionRetryBackoff.delete(oldest);
+  }
+  compactionRetryBackoff.set(dialogId, now + COMPACTION_RETRY_BACKOFF_MS);
+}
+
+/**
+ * 测试专用：模块级退避状态必须能在用例之间归零。否则前一个用例的失败会静默压住
+ * 后一个用例（实测：一次超时用例让无关的 5c 用例不再触发压缩）。
+ */
+export function resetCompactionRetryBackoffForTests(): void {
+  compactionRetryBackoff.clear();
+}
 export type LocalAutoCompactionPhase =
   | { kind: "validating-context" }
   | { kind: "compaction-start" }
@@ -270,7 +344,9 @@ export type LocalCompactionSkipReason =
   /** 锚点之后没有待处理消息。 */
   | "no-pending"
   /** 触发且调用了摘要模型，但返回空摘要。 */
-  | "summary-empty";
+  | "summary-empty"
+  /** 上一次摘要失败后的退避窗口内，本轮不再重试摘要（没有发起请求，不是新失败）。 */
+  | "retry-backoff";
 
 export type LocalCompactionDecision =
   | {
@@ -318,6 +394,12 @@ export async function maybeAutoCompactLocalHistory(args: {
   /** Omitted preserves historical behavior for direct callers. */
   timeoutMs?: number;
   abortSignal?: AbortSignal;
+  /**
+   * 主通道（agent 自己的 provider）超时 / 失败时的摘要 fallback，最多调用一次。
+   * CLI 传平台摘要 caller（与 /compact 同一条通道，预算独立且有限）；desktop /
+   * 未注入 → 保持既有 fail-open 行为，不新建第二条摘要通道。
+   */
+  summaryFallback?: LocalCompactionSummaryFallback;
   /** Lifecycle only: no prompt, summary, or message content is exposed. */
   onPhase?: (phase: LocalAutoCompactionPhase) => void;
 }): Promise<LocalAutoCompactionResult> {
@@ -491,6 +573,31 @@ export async function maybeAutoCompactLocalHistory(args: {
   if (!plan.shouldCompress) {
     return projectExisting();
   }
+  const retryNow = args.now?.() ?? Date.now();
+  if (isCompactionBackedOff(dialogId, retryNow)) {
+    // 退避窗口内的一轮：历史仍按已持久化摘要投影，但**不**报新的失败——这一轮
+    // 没有发起任何请求，把它记成 provider 失败既是谎报，也让用户每轮都看到重复
+    // 的失败提示（退避要消除的正是这个噪音）。首次失败那一轮照旧如实上报。
+    const projected = projectExisting();
+    const diag = plan.diagnostics;
+    return {
+      ...projected,
+      decision: {
+        outcome: "skipped",
+        skipReason: "retry-backoff",
+        ...(diag
+          ? {
+              estimatedTokens: diag.totalUsed,
+              historyBudget: diag.historyBudget,
+              triggerRatio: diag.triggerRatio,
+              ...(diag.realUsageRatio !== undefined
+                ? { realUsageRatio: diag.realUsageRatio }
+                : {}),
+            }
+          : {}),
+      },
+    };
+  }
 
   emitPhase({ kind: "compaction-start" });
   try {
@@ -539,30 +646,76 @@ export async function maybeAutoCompactLocalHistory(args: {
     const outcome = guards.length ? await Promise.race([request, ...guards]) : await request;
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (abortListener) args.abortSignal?.removeEventListener("abort", abortListener);
-    if (outcome.kind !== "done") {
-      const reason: LocalAutoCompactionFailureReason = outcome.kind === "timeout" ? "timeout" : outcome.kind === "aborted" ? "aborted" : "provider-error";
-      const detail = outcome.kind === "provider-error" ? (outcome.error instanceof Error ? outcome.error.message : String(outcome.error)) : reason === "timeout" ? `auto-compaction timed out after ${timeoutMs}ms` : "auto-compaction aborted";
-      throw Object.assign(new Error(detail), { compactionReason: reason });
+    // 主通道结论：done + 非空内容 = 拿到摘要；其余都是「主通道没拿到摘要」
+    // （timeout / provider-error / done 但返回空内容）。aborted 单独一档，
+    // 绝不 fallback。
+    const result = outcome.kind === "done" ? outcome.value : undefined;
+    let newSummary =
+      typeof result?.content === "string" ? result.content.trim() : "";
+    const primaryFailure: LocalAutoCompactionFailureReason | null =
+      outcome.kind === "aborted"
+        ? "aborted"
+        : newSummary
+          ? null
+          : outcome.kind === "done"
+            ? "provider-error"
+            : outcome.kind;
+    if (primaryFailure === "aborted") {
+      throw Object.assign(new Error("auto-compaction aborted"), {
+        compactionReason: "aborted" as const,
+      });
     }
-    const result = outcome.value;
-    const newSummary =
-      typeof result.content === "string" ? result.content.trim() : "";
-    if (!newSummary) {
-      console.warn(
-        "[localLoop] auto-compaction produced empty summary; keeping prior projection",
+
+    // 主通道没拿到摘要 → 平台摘要 fallback（CLI 复用 /compact 那条通道；
+    // desktop/未注入 = 完全不进这里，行为与今天一致）。上限严格 1 次：整个
+    // 函数只有这一处调用点，且只有两条通道都失败才记 per-dialog 退避，所以
+    // 不可能与退避叠加成多次请求。fallback 拿到的摘要走下面同一条持久化 /
+    // 内容寻址锚点 / schema 版本路径。
+    const summaryFallback = args.summaryFallback;
+    if (primaryFailure && summaryFallback) {
+      const fallbackSummary = await runSummaryFallback(
+        summaryFallback,
+        promptContent,
       );
-      const failureReason = "provider-error" as const;
-      emitPhase({ kind: "compaction-failed", reason: failureReason });
-      return {
-        ...projectExisting(),
-        failureMessage: "summary model returned empty content",
-        failureReason,
-        decision: {
-          outcome: "failed",
-          reason: failureReason,
-          detail: "summary model returned empty content",
-        },
-      };
+      // 用户在 fallback 在途期间取消：既不能算 provider 失败（不该退避），
+      // 也绝不能落盘任何摘要。
+      if (args.abortSignal?.aborted) {
+        throw Object.assign(new Error("auto-compaction aborted"), {
+          compactionReason: "aborted" as const,
+        });
+      }
+      if (fallbackSummary) newSummary = fallbackSummary;
+    }
+
+    if (!newSummary) {
+      // 两条通道都没拿到摘要：这里才记一次退避（不与 fallback 叠加）。
+      recordCompactionFailure(dialogId, retryNow);
+      if (outcome.kind === "done") {
+        console.warn(
+          "[localLoop] auto-compaction produced empty summary; keeping prior projection",
+        );
+        const failureReason = "provider-error" as const;
+        emitPhase({ kind: "compaction-failed", reason: failureReason });
+        return {
+          ...projectExisting(),
+          failureMessage: "summary model returned empty content",
+          failureReason,
+          decision: {
+            outcome: "failed",
+            reason: failureReason,
+            detail: "summary model returned empty content",
+          },
+        };
+      }
+      const reason: LocalAutoCompactionFailureReason =
+        primaryFailure ?? "provider-error";
+      const detail =
+        outcome.kind === "provider-error"
+          ? outcome.error instanceof Error
+            ? outcome.error.message
+            : String(outcome.error)
+          : `auto-compaction timed out after ${timeoutMs}ms`;
+      throw Object.assign(new Error(detail), { compactionReason: reason });
     }
 
     await adapter.saveDialogSummary({
@@ -593,7 +746,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       previousSummary: existingSummary,
       plan,
       newSummary,
-      summaryUsage: result.usage as Record<string, unknown> | undefined,
+      summaryUsage: result?.usage as Record<string, unknown> | undefined,
     });
     console.log(formatCompactionMetricsLog(metrics));
 
@@ -610,7 +763,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       beforeTokens:
         metrics.previousSummaryTokens + metrics.compressedTokens,
       afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
-      ...(result.usage ? { usage: result.usage as Record<string, unknown> } : {}),
+      ...(result?.usage ? { usage: result.usage as Record<string, unknown> } : {}),
       metrics,
       decision: {
         outcome: "compressed",
@@ -644,6 +797,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       error instanceof Error && "compactionReason" in error
         ? (error as Error & { compactionReason: LocalAutoCompactionFailureReason }).compactionReason
         : "provider-error";
+    if (failureReason !== "aborted") recordCompactionFailure(dialogId, retryNow);
     emitPhase({ kind: "compaction-failed", reason: failureReason });
     return {
       ...projectExisting(),
@@ -759,6 +913,12 @@ export function createTurnCompactionController(args: {
   compressionTriggerRatio: number;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /**
+   * 摘要 fallback（形状 = CLI 的 SummaryLlmCaller）：主通道超时/失败时最多
+   * 调用一次。CLI 本地 runtime 由已登录的平台摘要 caller 注入；不透传 =
+   * 既有 fail-open 行为。
+   */
+  summaryFallback?: LocalCompactionSummaryFallback;
   boundary: LocalLoopObservationBoundary;
   /** 最后一次 provider 调用的原始 usage（真实遥测；缺失时走估算兜底）。 */
   getContextUsage: () => Record<string, unknown> | undefined;
@@ -853,6 +1013,7 @@ export function createTurnCompactionController(args: {
         realContextUsagePercent,
         abortSignal: args.abortSignal,
         timeoutMs: args.timeoutMs,
+        summaryFallback: args.summaryFallback,
         onPhase: (phase) => emitPhase(phase, "initial"),
       });
       emitObservation(compacted);
@@ -899,6 +1060,7 @@ export function createTurnCompactionController(args: {
         ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
         abortSignal: args.abortSignal,
         timeoutMs: args.timeoutMs,
+        summaryFallback: args.summaryFallback,
         onPhase: (phase) => emitPhase(phase, "in-loop"),
       });
       if (compacted.usage) {

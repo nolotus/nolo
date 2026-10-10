@@ -147,6 +147,12 @@ export interface CallToolApiOptions {
   /** 生产受控 devtool 路由需要知道是哪一个 agent 在调用。 */
   agentKey?: string | null;
   method?: "POST" | "GET";
+  /**
+   * 可选取消信号：原样透传给 fetch 的 init。abort 后请求真正被取消
+   * （连接中止），而不是让调用方单纯放弃等待、请求继续挂到服务端结束。
+   * 不传时行为与以前完全一致。
+   */
+  signal?: AbortSignal;
 }
 
 const maybeAttachDialogId = (thunkApi: any, body: object): object => {
@@ -222,7 +228,7 @@ const looksLikeHtmlResponse = (
  * @param thunkApi  Redux Thunk API
  * @param path      API 路径，如 "/api/exa-search"
  * @param body      请求体对象
- * @param options   选项：{ withAuth } 是否附带 token
+ * @param options   选项：{ withAuth } 是否附带 token，{ signal } 取消信号（透传 fetch）
  * @returns         解析后的 JSON 数据
  */
 export async function callToolApi<T = any>(
@@ -242,6 +248,7 @@ export async function callToolApi<T = any>(
   const response = await fetch(url, {
     method,
     headers,
+    ...(options.signal ? { signal: options.signal } : {}),
     ...(method === "GET"
       ? {}
       : { body: JSON.stringify(maybeAttachDialogId(thunkApi, body)) }),

@@ -180,6 +180,16 @@ export type LocalAgentTurnInput = {
   /** Summary-provider deadline; runtime default is 60 seconds. */
   compactionTimeoutMs?: number;
   /**
+   * 自动上下文压缩的摘要 fallback（形状 = CLI /compact 的 SummaryLlmCaller）。
+   *
+   * 常规由 host adapter 会话级注入（CLI：localRuntimeAdapter 的
+   * setCliAutoCompactionSummaryFallback ← index.ts 启动 TUI 时用
+   * createTuiSummaryLlmCaller 建好）；这里也允许直接透传，供测试与显式调用方
+   * 覆盖。未注入 / desktop 无平台通道 → undefined → 自动压缩保持既有
+   * fail-open 行为（不 fallback）。
+   */
+  compactionSummaryFallback?: (content: string) => Promise<string | null>;
+  /**
    * 协作式停止（用户按 Esc 等）。在轮次边界和每个工具执行前检查，并与
    * provider.complete race。provider 没有取消契约，在途请求会被放弃而不是
    * 真正撤销；中断的回合仍会 saveTurn 留档。
@@ -345,6 +355,26 @@ function resolveLlmRequestTimeoutMs(input: LocalAgentTurnInput): number {
 function resolveCompactionTimeoutMs(input: LocalAgentTurnInput): number {
   const raw = input.compactionTimeoutMs;
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_COMPACTION_TIMEOUT_MS;
+}
+
+/**
+ * Host adapter 侧会话级注入的自动压缩摘要 fallback。
+ *
+ * CLI 本地 adapter（localRuntimeAdapter.createCliLocalRuntimeAdapter）会带上
+ * `compactionSummaryFallback` 这个非接口成员字段（由 CLI 入口启动时注入已登录的
+ * 平台摘要 caller）；desktop / headless 不带 → undefined，即不 fallback。
+ * 刻意不在 AgentRuntimeHostAdapter 接口上扩字段：它是跨 host 契约，CLI 专有接线
+ * 不该让所有 host 都背上新成员。
+ */
+function readHostCompactionSummaryFallback(
+  adapter: AgentRuntimeHostAdapter,
+): ((content: string) => Promise<string | null>) | undefined {
+  const value = (
+    adapter as AgentRuntimeHostAdapter & { compactionSummaryFallback?: unknown }
+  ).compactionSummaryFallback;
+  return typeof value === "function"
+    ? (value as (content: string) => Promise<string | null>)
+    : undefined;
 }
 
 async function runCompleteWithTimeout(args: {
@@ -831,6 +861,12 @@ export async function runLocalAgentTurn(
     compressionTriggerRatio,
     abortSignal: input.abortSignal,
     timeoutMs: resolveCompactionTimeoutMs(input),
+    // 摘要 fallback：优先显式入参；否则读 host adapter 的会话级注入（CLI 本地
+    // adapter 专有字段，见 localRuntimeAdapter.setCliAutoCompactionSummaryFallback）。
+    // desktop/其他 host 不带该字段 → undefined → 自动压缩行为与注入前完全一致，
+    // 绝不在这里新建第二条摘要通道。
+    summaryFallback:
+      input.compactionSummaryFallback ?? readHostCompactionSummaryFallback(input.adapter),
     boundary: observationBoundary,
     getContextUsage: () => usageLedger.lastContextUsage(),
     getCanonicalCompactionHistory: () => [

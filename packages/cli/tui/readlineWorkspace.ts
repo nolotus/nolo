@@ -207,6 +207,11 @@ import {
   hitTestHistory,
   type TuiSelectionState,
 } from "./tuiSelection";
+// Ctrl+左键打开正文 http(s) URL：命中判定走 selection 同一套布局行，
+// opener 只用 argv 数组 spawn，不拼 shell、不注入 OSC 8。
+import { openVisibleUrlAtScreen } from "./tuiLinkHit";
+import { openExternalUrl } from "./tuiUrlOpener";
+import { getDiagnostics } from "../diagnostics";
 // S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
 // 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
@@ -1723,6 +1728,23 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 原内联于 handleInputToken 的 `if (sequence === "\u0003")` 整块，职责清晰
     // （防误退键盘语义），搬到这里保持纯搬移：不改逻辑、不改输出字节序列。
     // 依赖（busyLock 之外的闭包变量）在交互块作用域内全部可及。
+    // 选区复制/URL 打开的诊断计时：只在 diagnostics 已初始化时落日志
+    // （默认级别会滤掉 debug），绝不写 stderr、不改终端全局配置。
+    const reportTuiDiagnostic = (
+      component: string,
+      level: "debug" | "warn",
+      message: string,
+      fields: Record<string, unknown>,
+    ): void => {
+      try {
+        const logger = getDiagnostics()?.logger;
+        if (!logger) return;
+        logger.child({ component })[level](message, fields);
+      } catch {
+        /* 诊断路径永不抛出、永不影响交互 */
+      }
+    };
+
     // 非空鼠标选区判定（idle/busy 两条 Ctrl+C 分支共用）。
     const hasNonEmptySelection = () =>
       selectionState.anchor !== null &&
@@ -1737,16 +1759,22 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const tty = output as { rows?: number; columns?: number };
       const columns = tty.columns ?? 80;
       const contentWidth = Math.max(1, columns - 1);
+      // 诊断计时（选区复制卡顿定位用）：拆开「布局+提取」与「剪贴板写入」两段。
+      const extractStartedAt = Date.now();
       const textToCopy = extractSelectedText(
         history,
         selectionState.anchor!,
         selectionState.head!,
         contentWidth,
       );
+      const extractMs = Date.now() - extractStartedAt;
       clearSelection();
+      let writeMs = 0;
       if (textToCopy.length > 0) {
         try {
+          const writeStartedAt = Date.now();
           await writeClipboard(textToCopy);
+          writeMs = Date.now() - writeStartedAt;
           emitCommandOutput(t(feedbackKey));
         } catch (error) {
           emitCommandOutput(
@@ -1754,6 +1782,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           );
         }
       }
+      const totalMs = extractMs + writeMs;
+      reportTuiDiagnostic(
+        "tui-selection",
+        totalMs > 150 ? "warn" : "debug",
+        "selection copy timing",
+        { extractMs, writeMs, chars: textToCopy.length },
+      );
       paintFrame(buffer);
     };
 
@@ -2039,6 +2074,33 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           stopAutoScroll();
           // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
           scrollAnimator.cancel();
+          // Ctrl+左键：只有坐标精确落在这行**可见**的 http(s) URL 字符区间内才用
+          // 系统默认浏览器打开，并消费这次点击（不进入拖选）；未命中原样走下面的
+          // 选区逻辑，普通点击/拖选与 Ctrl+C 复制行为不变。
+          if (
+            mouseEvent.ctrl &&
+            screenRow < visibleHeight &&
+            screenCol < contentWidth &&
+            openVisibleUrlAtScreen(
+              history,
+              contentWidth,
+              history.scrollTop,
+              screenRow,
+              screenCol,
+              visibleHeight,
+              (url) =>
+                openExternalUrl(url, {
+                  onError: (message) =>
+                    reportTuiDiagnostic("tui-link", "warn", "ctrl-click open failed", {
+                      message,
+                    }),
+                }),
+            )
+          ) {
+            clearSelection();
+            paintFrame(buffer);
+            return;
+          }
           if (screenRow < visibleHeight && screenCol < contentWidth) {
             const hit = hitTestHistory(
               history,

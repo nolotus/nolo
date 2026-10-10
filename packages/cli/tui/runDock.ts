@@ -189,7 +189,10 @@ export function createRunDock(deps: RunDockDeps): RunDock {
     const runId = snapshot.runId;
     // 没有 runId 就无法合并也无法去重；这种事件对面板没有意义。
     if (!runId) return;
-    // 服务端已经不认识这个 run 了：摘掉，而不是挂一条 `? not_found` 在那。
+    // 「忘掉这条 run」的信号：服务端已经不认识它了，或者轮询器判定它不属于
+    // 当前对话（runRegistryPoller 的对话作用域裁剪借用了同一个信号）。摘掉，
+    // 而不是挂一条 `? not_found` 在那。只摘除、不留墓碑，所以它归属回来时
+    // 还能重新上板。
     if (snapshot.status === "not_found") {
       remove(runId);
       return;

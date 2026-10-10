@@ -185,6 +185,29 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
   const lastReconciledAt = new Map<string, number>();
   // Dock 退场后仍保留终态 tombstone，避免下一次 discovery 把它复活。
   const retiredRunIds = new Set<string>();
+  /**
+   * 已经上过板、但因为归属不是当前对话而被摘下面板的 runId。
+   *
+   * 摘掉不等于忘掉：用户切回原对话时下一 tick 就得能重新上板，而那时没有谁
+   * 会来把轮询器叫醒（模型不轮询、也没有新 run 上板），所以名单里这些 run
+   * 仍然占着读取名单，轮询器也就还转着。记录转终态或读不到记录后放开——
+   * 那时候没有「切回去该看到的活跃 run」可言了。
+   *
+   * 关于「缺归属的记录怎么处理」的取舍：这里和不 belongsToCurrentDialog 的
+   * discovered 走同一条判据，缺 parentDialogId 一样算「不属于当前对话」。代价
+   * 是明确的——确实属于本对话、但归属没盖上的 run 在对话号已知期间用户看不到
+   * （新会话首轮 spawn 后回填失败、记录写坏等）。选择隐藏而不是「没归属就先
+   * 留着」，是因为后者会把一条真属于别的对话的活跃 run 继续挂在面板上，那正是
+   * 这次要修的跨对话泄漏；而回填这一侧本来就有既有通道：tuiTurnRunner 在 turn
+   * 结束拿到 dialogId 后调 backfillRunRecordParentDialog 补盖章，接管走那次
+   * 回填的 run 下一 tick 就会重新上板（归属一变，判据就通过）。
+   *
+   * 轮询器自己不给缺归属的记录盖章：面板上挂着只说明「本会话曾把它上板」，
+   * 证明不了它属于此刻的对话（用户可能刚从这个 run 的对话切走），乱盖会把
+   * 终态唤醒的投递（processTerminalResume 依赖 owner.dialogId）指向错的对话，
+   * 比「暂时看不见」糟得多。
+   */
+  const scopedOut = new Set<string>();
 
   const stop = () => {
     if (timer !== null) {
@@ -219,12 +242,24 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       }
     }
     const discovered = discoveredRecords;
-    const currentDialogId = deps.getCurrentDialogId?.();
+    const currentDialogId = deps.getCurrentDialogId?.() ?? null;
+    /**
+     * 对话号已知时才做归属裁剪。
+     *
+     * 新会话首轮 state.dialogId 要等 turn 结束才生成，在那之前「不属于任何
+     * 对话」只是暂时的：此刻不该把面板上已有的 run 摘掉（它正是本会话刚要看
+     * 的），保持旧行为。
+     */
+    const scopeActive = Boolean(deps.getCurrentDialogId) && currentDialogId !== null;
+    // 对话号退回未知（宿主重置了会话）：没有归属可谈，观察名单跟着作废，
+    // 否则轮询器会被一份再也不会匹配的名单拖着空转，面板却一直空着。
+    if (!scopeActive) scopedOut.clear();
     // The dock is conversation-scoped: only records explicitly parented to the
-    // current dialog may enter or refresh it. In particular, an unassigned
-    // record is not a safe fallback here; P1 tool-results already provide the
-    // runs that the current conversation explicitly asked to show. Reading the
-    // getter on every poll also makes switching conversations take effect.
+    // current dialog may enter it, stay on it, or refresh it. In particular, an
+    // unassigned record is not a safe fallback here; P1 tool-results already
+    // provide the runs that the current conversation explicitly asked to show.
+    // Reading the getter on every poll also makes switching conversations take
+    // effect on the next tick.
     const belongsToCurrentDialog = (record: RunRecord) =>
       !deps.getCurrentDialogId ||
       (currentDialogId !== null && record.parentDialogId === currentDialogId);
@@ -252,7 +287,14 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
         retiredRunIds.add(record.runId);
       }
     }
-    const active = [...dockedActive, ...discoveredActive, ...discoveredTerminal.map((record) => ({ runId: record.runId, status: record.status } as AgentRunSnapshot))];
+    const active = [
+      ...dockedActive,
+      // 被摘下面板的 run 照样占着读取名单：一是切回原对话时下一 tick 就能重新
+      // 上板，二是它们还活着的时候不能让轮询器停表——停了就再没人盯着它们。
+      ...[...scopedOut].map((runId) => ({ runId, status: "running" }) as AgentRunSnapshot),
+      ...discoveredActive,
+      ...discoveredTerminal.map((record) => ({ runId: record.runId, status: record.status } as AgentRunSnapshot)),
+    ];
     if (active.length === 0 && holdCount === 0) {
       stop();
       return;
@@ -289,11 +331,40 @@ export function createRunRegistryPoller(deps: RunRegistryPollerDeps): RunRegistr
       }
       // 读不到记录不代表 run 没了：这条 run 可能跑在服务端、根本不在本地
       // registry 里。本地读不到就交给原来那条路（模型轮询），不动面板。
-      if (!record) continue;
+      // 读不到记录就无从判归属（可能跑在服务端、本地 registry 里根本没有，
+      // 或者记录还没落盘）：面板保持原样，不在这里摘——摘了会在记录落盘前
+      // 把刚上板的 run 闪掉，dock 的 stale 兜底会收拾真正失联的那些。
+      if (!record) {
+        // 已经摘下面板的 run 读不到记录了：没有「切回去该看到的活跃 run」，
+        // 放开观察，别让轮询器为它一直转。
+        scopedOut.delete(run.runId);
+        continue;
+      }
       // Discovery and polling use the same conversation scope. P1 tool-results
       // enter through update() directly and are intentionally not filtered here;
       // this guard only prevents the filesystem stream from crossing dialogs.
-      if (deps.getCurrentDialogId && !belongsToCurrentDialog(record)) continue;
+      if (deps.getCurrentDialogId && !belongsToCurrentDialog(record)) {
+        // 已经上过板但不属于当前对话的 run：此前这层裁剪只管「不再刷新」，
+        // 于是它一直占着面板直到终态 linger 结束。现在把它摘掉。
+        if (scopeActive) {
+          if (!scopedOut.has(run.runId)) {
+            scopedOut.add(run.runId);
+            // 去重表也得忘掉它：切回原对话时指纹多半和摘除前一样，留着的话
+            // 这一条就再也不会重新上板。
+            lastEmitted.delete(run.runId);
+            // `not_found` 是 dock 既有的「忘掉这条 run」信号（只摘除、不留
+            // 墓碑），切回去还能再上板。dock 侧没有任何对话概念，摘除与重新
+            // 上板都只能由这里驱动。
+            deps.update({ runId: run.runId, status: "not_found", logKey: "" });
+          }
+          // 终态了就没有「切回去该看到的活跃 run」，放开观察，让轮询器在
+          // 面板清空后照旧自己停表。
+          if (isAgentRunTerminalStatus(record.status)) scopedOut.delete(run.runId);
+        }
+        continue;
+      }
+      // 归属回到当前对话（切回来了，或归属事后被回填）：照常落下去重新上板。
+      scopedOut.delete(run.runId);
       polled.push(record);
 
       const snapshot = snapshotFromRunRecord(record, at);

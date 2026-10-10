@@ -31,6 +31,60 @@ const asRecord = (value: unknown): Record<string, any> | null =>
     ? (value as Record<string, any>)
     : null;
 
+/**
+ * pendingStart.quote（工具层随本次待确认一起传来的报价）→ 可展示的结构。
+ * 逐字段校验 + 重新拼装，绝不整包透传：一个字段没校验过就够渲染出垃圾文案
+ * （`etaSec:["a","b"]` → `formatEta` 出「NaN:NaN」，且卡片是计费面）。
+ * 两个数字对都不合法时返回 undefined，让调用方回退 job.quote / 兜底提示。
+ */
+const asQuote = (value: unknown): MediaQuote | undefined => {
+  const rec = asRecord(value);
+  if (!rec) return undefined;
+  const isPair = (input: unknown): input is [number, number] =>
+    Array.isArray(input) &&
+    input.length >= 2 &&
+    input.every((n) => typeof n === "number" && Number.isFinite(n));
+  const totalCredits = isPair(rec.totalCredits)
+    ? ([rec.totalCredits[0], rec.totalCredits[1]] as [number, number])
+    : undefined;
+  const etaSec = isPair(rec.etaSec)
+    ? ([rec.etaSec[0], rec.etaSec[1]] as [number, number])
+    : undefined;
+  if (!totalCredits && !etaSec) return undefined;
+  // 只搬运非数字对字段（balanceCredits 等），数字对一律用上面校验过的值覆盖，
+  // 非法值就地丢弃而不是原样带下去。
+  const safe: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(rec)) {
+    if (key === "totalCredits" || key === "etaSec") continue;
+    safe[key] = val;
+  }
+  if (totalCredits) safe.totalCredits = totalCredits;
+  if (etaSec) safe.etaSec = etaSec;
+  return safe as unknown as MediaQuote;
+};
+
+/**
+ * 回退展示 job.quote 前的一致性校验：depth 之外，scope 也必须与本次待确认的一致。
+ * 报价是计费面，范围不一致时那个旧数字与本次实际启动/计费无关（全片报价贴到
+ * 「范围 0:00–1:00」上），宁可不给数字，也不能展示一个看似精确的金额。
+ * 任一侧缺失（undefined / 缺 scope / NaN·Infinity）一律视为不一致。
+ */
+const sameScope = (a: unknown, b: unknown): boolean => {
+  const ra = asRecord(a);
+  const rb = asRecord(b);
+  if (!ra || !rb) return false;
+  const isFiniteNumber = (value: unknown): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+  return (
+    isFiniteNumber(ra.fromSec) &&
+    isFiniteNumber(rb.fromSec) &&
+    ra.fromSec === rb.fromSec &&
+    isFiniteNumber(ra.toSec) &&
+    isFiniteNumber(rb.toSec) &&
+    ra.toSec === rb.toSec
+  );
+};
+
 export interface MediaJobTier {
   depth: MediaJobDepth;
   label: string;
@@ -64,29 +118,72 @@ function fmtMinutes(sec: number): string {
   return Number.isInteger(mins) ? `${mins} 分钟` : `${mins.toFixed(1)} 分钟`;
 }
 
+// 秒数 → "m:ss"。非有限数（NaN/Infinity/undefined）绝不进文案：Math.floor(NaN / 60)
+// 会拼出「NaN:NaN」这种读起来像真实时间戳的垃圾。这里统一回落 "0:00"（= 媒体起点/
+// 未指定），调用方若需要别的语义应自行兜底——比渲染 NaN 要么更准确、要么至少明显恒等。
 function fmtClock(sec: number): string {
+  if (!Number.isFinite(sec)) return "0:00";
   const m = Math.floor(sec / 60);
   const s = String(Math.floor(sec % 60)).padStart(2, "0");
   return `${m}:${s}`;
 }
 
+/**
+ * 用户可见文案里的数字统一入口：NaN/Infinity/非 number 一律返回 undefined。
+ * 调用方据此「不给数字」（绝不拿 0 冒充一个看起来真实的读数），也不让它进任何算式
+ * （`Math.floor(NaN / 60)`、`NaN % 100` 这类算式的结果都会拼进文案）。
+ */
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * 截取建议的时间区间 → 可显示文案（含括号）。不可用即返回 undefined：非有限数/负数
+ * （不是「从头开始」，钳成 0 会把损坏数据伪装成真实区间）、倒挂与零长（倒挂区间
+ * `to - from < 1` 在服务端不可执行，渲染反向区间会让用户误判要截哪一段）。
+ */
+function formatRangePair(fromSec: unknown, toSec: unknown): string | undefined {
+  const from = finiteNumber(fromSec);
+  const to = finiteNumber(toSec);
+  if (from === undefined || to === undefined) return undefined;
+  if (from < 0 || to < 0) return undefined;
+  if (to - from < 1) return undefined;
+  return `（${fmtClock(from)} ~ ${fmtClock(to)}）`;
+}
+
 function formatCredits(credits?: [number, number]): string {
-  if (!credits || credits.length < 2) return "";
+  if (!credits || !Array.isArray(credits) || credits.length < 2) return "";
   const [min, max] = credits;
+  // 非有限数（NaN/Infinity/undefined）绝不进计费文案：宁可什么都不显示。
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return "";
+  // 负值（不存在「倒赚积分」的报价）与倒挂区间（min > max）同属坏数据：
+  // 渲染「-5 ~ 10 积分」「20 ~ 10 积分」会让用户照着一个不存在的价格预估花费。
+  if (min < 0 || max < 0 || min > max) return "";
   if (min === max) {
     return `${Number(min.toFixed(2))} 积分`;
   }
   return `${Number(min.toFixed(2))} ~ ${Number(max.toFixed(2))} 积分`;
 }
 
+// 单值积分（已扣 / 超出金额）。与 formatCredits/formatEta 同一守卫：非有限数
+// （NaN/Infinity/undefined）绝不进计费文案 —— `Number(NaN.toFixed(2))` 会拼出
+// 「NaN 积分」这种读起来像真实金额的垃圾，且这是计费面。非法值返回空串，
+// 调用方据此回退到不含数字的文案（绝不拿 0 冒充一个「真实」金额）。
+// 负数同样非法：「已扣 -5 积分」「超出金额：-5 积分」不存在，只会读成退款/返现。
 function formatSingleCredits(credits?: number): string {
-  const val = credits ?? 0;
-  return `${Number(val.toFixed(2))} 积分`;
+  if (typeof credits !== "number" || !Number.isFinite(credits)) return "";
+  if (credits < 0) return "";
+  return `${Number(credits.toFixed(2))} 积分`;
 }
 
 function formatEta(etaSec?: [number, number]): string {
   if (!etaSec || !Array.isArray(etaSec) || etaSec.length < 2) return "";
   const [min, max] = etaSec;
+  // 非有限数绝不进「预计耗时约 …」：Math.floor(NaN) 会渲染出「NaN:NaN」。
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return "";
+  // 负耗时与倒挂区间（「约 -10 秒」「约 2 分钟 ~ 1 分钟」）同样是坏数据，
+  // 会让用户按一个不存在的时长判断要不要等 / 要不要换档。
+  if (min < 0 || max < 0 || min > max) return "";
   if (min === max) {
     return `预计耗时约 ${fmtMinutes(min)}`;
   }
@@ -448,9 +545,11 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   /**
    * 确认已失效（页面刷新后 run 丢失）→ 滚到报价卡并聚焦其第一个档位按钮。
    * 同一对话可能有多个媒体任务，本卡只能定位自己那张报价卡：
-   * - pendingJobId 有值：只接受 data-job-id 的精确命中；匹配不到（旧 DOM / 缺 data-job-id /
-   *   选择器非法）直接提示 missing，绝不退回「最后一个」——否则会聚焦到别的媒体任务上。
-   * - pendingJobId 缺失（旧载荷）：没有可精确比对的目标，才退回「页面上最后一个报价卡」。
+   * - pendingJobId 有值（含空串等无效 id）：只接受 data-job-id 的精确命中；匹配不到
+   *   （空串 / 旧 DOM / 缺 data-job-id / 选择器非法）直接提示 missing，绝不退回
+   *   「最后一个」——否则会聚焦到别的媒体任务上。
+   * - pendingJobId 字段缺失（旧载荷，undefined）：没有可精确比对的目标，才退回
+   *   「页面上最后一个报价卡」。
    */
   const handleBackToQuote = () => {
     if (typeof document === "undefined") {
@@ -466,7 +565,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       return value.replace(/["\\]/g, "\\$&");
     };
     let target: HTMLElement | null = null;
-    if (pendingJobId) {
+    // 空串同样是「有 id」：它无从精确命中，只能走到下方的 missing 提示。
+    if (typeof pendingJobId === "string") {
       // 有 jobId 时只认精确命中：匹配不到就提示 missing，绝不退回「最后一个报价卡」。
       try {
         target = document.querySelector(
@@ -499,19 +599,70 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     const label =
       (typeof pendingStart?.label === "string" && pendingStart.label) ||
       (pendingDepth ? PENDING_TIER_LABELS[pendingDepth] : "所选档位");
-    // 积分/耗时取自 job 现有报价，仅当其档位与待启动档位一致时展示（多档报价后
-    // job.quote 停在最后一次报价的档位，档位不一致时不展示错误数字）。
+    // 积分/耗时优先取随本次待确认一起传来的 pendingStart.quote（就是这次要确认的报价），
+    // 它就是本次的报价，不受下面的一致性约束。
+    // 旧载荷没有它时，才回退 job.quote，但 depth 与 scope 必须同时一致：多档报价后
+    // job.quote 停在最后一次报价的档位；范围更致命 —— 全片报价（20 积分）贴到
+    // 「范围 0:00–1:00」上，用户看到的金额与实际计费完全脱节。任一字段缺失/不等都算
+    // 不一致，此时不给数字，只提示「以启动时服务端报价为准」。
     const pendingQuote: MediaQuote | undefined =
-      job?.quote && job.depth === pendingDepth ? job.quote : undefined;
-    const detail = [formatCredits(pendingQuote?.totalCredits), formatEta(pendingQuote?.etaSec)]
-      .filter(Boolean)
-      .join("，");
+      asQuote(pendingStart?.quote) ??
+      (job?.quote && job.depth === pendingDepth && sameScope(job.scope, pendingScope)
+        ? job.quote
+        : undefined);
+    const creditsText = formatCredits(pendingQuote?.totalCredits);
+    const etaText = formatEta(pendingQuote?.etaSec);
+    const detail = [creditsText, etaText].filter(Boolean).join("，");
+    // 兜底文案的判据是「有没有可显示的价格数字」，不是「pendingQuote 对象在不在」：
+    // 对象在、但 totalCredits 非法时 formatCredits 返回空串，金额位置会整块留白 ——
+    // 计费面上留白比明说「以服务端报价为准」危险得多（读起来像不花钱）。
+    const hasPrice = Boolean(creditsText);
     // 实际将发送的处理范围与译文语言：让用户在点按钮前看到 depth/scope/targetLang。
+    // 规则与后端 normalizeScope（packages/server/handlers/mediaJobs/ranges.ts）对齐，不自创判定：
+    //   · fromSec/toSec 先 Math.max(0, …) 截断（负值是服务端截断的输入，不是合法小区间，
+    //     也绝不能渲染出「范围 -1:-10–1:00」这种畸形时间戳）；
+    //   · 服务端 `to - from < 1` 返回 null → handler 回 400 INVALID_INPUT，因此倒挂与零长
+    //     都不可执行，绝不能包装成「范围 X 起」或某个正常区间去暗示能按它计费。
+    // 半合法/损坏 scope（一侧 NaN/Infinity/undefined）绝不渲染垃圾：缺失的一侧不兜 0，
+    // 否则会拼出「范围 1:00–0:00」这种反向读数。分档渲染：
+    //   可执行区间 → 「范围 X–Y」
+    //   to - from < 1（倒挂 / 零长 / 负值钳到 0 后不足 1 秒）→ 「范围异常（X–Y）」如实警示
+    //   仅起点有限 → 「范围 X 起」（终点未知，服务端补全片时长）
+    //   仅终点有限 → 「范围 至 Y」（起点未知：绝不脑补成 0:00，那会把「到 5:00 结束」
+    //     伪装成「从 0:00 处理到 5:00」的看似精确区间）
+    //   两端都非有限 → 「全片」
+    // 用 typeof + Number.isFinite（而非 as 断言）收窄，避免上一轮 TS2352 那类转换报错。
+    const rawScopeFrom = pendingScope?.fromSec;
+    const rawScopeTo = pendingScope?.toSec;
+    const scopeFromSec =
+      typeof rawScopeFrom === "number" && Number.isFinite(rawScopeFrom)
+        ? rawScopeFrom
+        : undefined;
+    const scopeToSec =
+      typeof rawScopeTo === "number" && Number.isFinite(rawScopeTo)
+        ? rawScopeTo
+        : undefined;
+    const shownFromSec =
+      scopeFromSec !== undefined ? Math.max(0, scopeFromSec) : undefined;
+    const shownToSec =
+      scopeToSec !== undefined ? Math.max(0, scopeToSec) : undefined;
+    // 服务端起点默认 0（normalizeScope 的 `r.fromSec ?? 0`）；终点未知时服务端补全片时长，
+    // 客户端无从判断，此时不做异常断言。
+    const execFromSec = shownFromSec ?? 0;
+    const invalidToSec =
+      shownToSec !== undefined && shownToSec - execFromSec < 1
+        ? shownToSec
+        : undefined;
     const scopeText =
-      pendingScope &&
-      (typeof pendingScope.fromSec === "number" || typeof pendingScope.toSec === "number")
-        ? `范围 ${fmtClock(pendingScope.fromSec ?? 0)}–${fmtClock(pendingScope.toSec ?? 0)}`
-        : "全片";
+      invalidToSec !== undefined
+        ? `范围异常（${fmtClock(execFromSec)}–${fmtClock(invalidToSec)}）`
+        : shownFromSec !== undefined && shownToSec !== undefined
+          ? `范围 ${fmtClock(shownFromSec)}–${fmtClock(shownToSec)}`
+          : shownFromSec !== undefined
+            ? `范围 ${fmtClock(shownFromSec)} 起`
+            : shownToSec !== undefined
+              ? `范围 至 ${fmtClock(shownToSec)}`
+              : "全片";
     const langText = pendingTargetLang ? `译文：${pendingTargetLang}` : "";
     const busy = starting || pendingRun?.status === "running";
     // run 仍在 store（含 running/succeeded）：保留按钮（点击刷新进度或推进同一个 run）。
@@ -519,6 +670,85 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     const runInStore = Boolean(pendingRun);
     // succeeded：确认已生效，按钮点了只会刷新，标签误导 → 不渲染按钮，只提示正在载入。
     const runSucceeded = pendingRun?.status === "succeeded";
+
+    // 确认已失效（页面刷新后 run 已不在 store）：整卡铺开的信息都没用了，收成一行
+    // 「确认已失效 · 档位名」+ 一条回报价卡的出口。绝不在这里渲染「确认启动」——
+    // 那会让持久化的 depth/scope/targetLang 绕过确认闸门直接计费。
+    if (!runInStore) {
+      return (
+        <div
+          data-testid="media-job-pending-start"
+          data-pending-confirm="true"
+          data-confirm-in-place={canConfirmInPlace ? "true" : "false"}
+          data-pending-invalid="true"
+          style={{
+            marginTop: 8,
+            marginBottom: 8,
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            border: "1px solid var(--borderWarning, rgba(234, 179, 8, 0.35))",
+            borderRadius: "var(--radius-md, 8px)",
+            backgroundColor: "var(--surfaceWarning, rgba(234, 179, 8, 0.08))",
+            padding: "8px 12px",
+            fontSize: "var(--fontSize-sm, 13px)",
+            color: "var(--text, #111827)",
+          }}
+        >
+          <span
+            data-testid="media-job-pending-start-invalid"
+            style={{ fontWeight: 600 }}
+          >
+            确认已失效 · {label}
+          </span>
+          {!readOnly && (
+            <button
+              type="button"
+              data-testid="media-job-back-to-quote"
+              onClick={handleBackToQuote}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "4px 12px",
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "var(--text, #111827)",
+                backgroundColor: "transparent",
+                border: "1px solid var(--borderMuted, #d1d5db)",
+                borderRadius: "var(--radius-md, 6px)",
+                cursor: "pointer",
+              }}
+            >
+              回到报价卡
+            </button>
+          )}
+          {readOnly && (
+            <span style={{ fontSize: "12px", color: "var(--textMuted, #6b7280)" }}>
+              等待确认启动
+            </span>
+          )}
+          {backToQuoteMissing && (
+            <span
+              data-testid="media-job-back-to-quote-missing"
+              style={{ fontSize: "12px", color: "var(--textMuted, #6b7280)" }}
+            >
+              请重新让助手估价
+            </span>
+          )}
+          {startError && (
+            <span
+              role="alert"
+              style={{ fontSize: "12px", color: "var(--danger, #ef4444)" }}
+            >
+              {startError}
+            </span>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div
         data-testid="media-job-pending-start"
@@ -549,7 +779,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
         >
           {langText ? `${scopeText} · ${langText}` : scopeText}
         </div>
-        {!pendingQuote && (
+        {!hasPrice && (
           <div
             style={{
               marginTop: 2,
@@ -571,11 +801,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
             ? "等待确认启动"
             : runSucceeded
               ? "已启动，正在载入进度…"
-              : runInStore
-                ? "确认后按该档位开始处理并计费"
-                : "确认已失效（页面刷新过），请在上方报价卡重新选择档位"}
+              : "确认后按该档位开始处理并计费"}
         </div>
-        {!readOnly && runInStore && !runSucceeded && (
+        {!readOnly && !runSucceeded && (
           <button
             type="button"
             data-testid="media-job-confirm-start"
@@ -598,29 +826,6 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
             }}
           >
             {busy ? "启动中…" : "确认启动"}
-          </button>
-        )}
-        {!readOnly && !runInStore && (
-          <button
-            type="button"
-            data-testid="media-job-back-to-quote"
-            onClick={handleBackToQuote}
-            style={{
-              marginTop: 10,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "6px 16px",
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--text, #111827)",
-              backgroundColor: "transparent",
-              border: "1px solid var(--borderMuted, #d1d5db)",
-              borderRadius: "var(--radius-md, 6px)",
-              cursor: "pointer",
-            }}
-          >
-            回到报价卡
           </button>
         )}
         {backToQuoteMissing && (
@@ -680,6 +885,23 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   const spentCredits = job
     ? Object.values(job.spent ?? {}).reduce((a, b) => a + (b ?? 0), 0)
     : 0;
+  // 非有限数（spent 里有 NaN/Infinity）绝不进文案：宁可只说「已取消」，也不输出
+  // 「已扣 NaN 积分」这种像真实金额的垃圾（计费面）。
+  const spentCreditsText = formatSingleCredits(spentCredits);
+  const overrunCreditsText = formatSingleCredits(job?.overrunCredits);
+
+  // 进度数字同样是用户可见文案：done/total 由外部写入，任一非有限数就会渲染出
+  // 「转写 NaN/10」「NaN%」这类读起来像真实进度的垃圾。集中在这里做一次有限数守卫。
+  const progressDone = finiteNumber(job?.progress?.done);
+  const progressTotal = finiteNumber(job?.progress?.total);
+  const progressPercent =
+    progressDone !== undefined && progressTotal !== undefined && progressTotal > 0
+      ? // 上下限都要钳：只钳 100 时，done < 0 会渲染「-10%」并把进度条宽度设成负值。
+        Math.max(
+          0,
+          Math.min(100, Math.round((progressDone / progressTotal) * 100)),
+        )
+      : undefined;
 
   const hasRemainingRange = Boolean(
     job &&
@@ -736,18 +958,23 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 lineHeight: 1.5,
               }}
             >
-              {job.trimSuggestions.map((suggestion, index) => (
-                <div key={index}>
-                  截取建议：{suggestion.reason}
-                  {suggestion.fromSec !== undefined &&
-                    suggestion.toSec !== undefined && (
-                      <span>
-                        （{fmtClock(suggestion.fromSec)} ~{" "}
-                        {fmtClock(suggestion.toSec)}）
-                      </span>
-                    )}
-                </div>
-              ))}
+              {job.trimSuggestions.map((suggestion, index) => {
+                // 截取建议的时间区间来自外部/模型产出，最容易损坏：`!== undefined` 这种守卫
+                // 会放行 { fromSec: NaN, toSec: 300 } → 兜到 0 后渲染成「（0:00 ~ 5:00）」，
+                // 把损坏数据伪装成「从头开始」，用户会据此误判计费区间。
+                // 因此收紧为「两端都是有限数」才渲染区间，否则整段括号不渲染（不用 0 兜底）。
+                const fromSec = suggestion.fromSec;
+                const toSec = suggestion.toSec;
+                // 区间文案统一走 formatRangePair（非有限数/负数/倒挂/零长一律不给括号），
+                // 与 pendingScope「不可执行的区间绝不展示成正常区间」同一口径。
+                const rangeText = formatRangePair(fromSec, toSec);
+                return (
+                  <div key={index}>
+                    截取建议：{suggestion.reason}
+                    {rangeText && <span>{rangeText}</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -782,11 +1009,21 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 affordableToSec !== undefined ||
                 (typeof balance === "number" && balance < minCredits);
 
+              // 只有「至少能跑满 1 分钟」（affordableToSec >= 60）才有可展示的时长：
+              // [0,59] 秒时 Math.floor(.../60) 得 0，会拼出「当前余额可处理前 0 分钟」，
+              // 负数则拼出「前 -1 分钟」—— 两者都读起来像可用时长，比「余额不足」更容易误判。
               const affordableMins =
-                affordableToSec !== undefined
+                typeof affordableToSec === "number" &&
+                Number.isFinite(affordableToSec) &&
+                affordableToSec >= 60
                   ? Math.floor(affordableToSec / 60)
-                  : 0;
-              const insufficientText = `当前余额可处理前 ${affordableMins} 分钟`;
+                  : undefined;
+              // 无有效可处理时长时绝不拼「当前余额可处理前 NaN 分钟/0 分钟」：
+              // 用不含数字的提示回落（余额不足的事实仍成立，只是时长未知）。
+              const insufficientText =
+                affordableMins !== undefined
+                  ? `当前余额可处理前 ${affordableMins} 分钟`
+                  : "当前余额不足";
               const creditsText = formatCredits(quote?.totalCredits);
               const etaText = formatEta(quote?.etaSec);
 
@@ -821,7 +1058,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                           : "var(--primary, #2563eb)",
                       }}
                     >
-                      {creditsText}
+                      {creditsText || "费用待服务端报价"}
                     </span>
                   </div>
                   {etaText && (
@@ -1031,30 +1268,30 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     ? "已取消"
                     : job?.status === "awaiting_confirmation"
                       ? "等待超额确认"
-                      : `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"} ${
-                          job?.progress?.done ?? 0
-                        }/${job?.progress?.total ?? 0}`}
+                      : `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"}${
+                          // 进度数字只有在「分母 > 0 且分子 >= 0 且两者都有限」时才拼：
+                          // `?? 0` 盲兜会把「还没上报进度」渲染成「预处理 0/0」，
+                          // total 为 0 时还会拼出「转写 3/0」这种分母为 0 的读数。
+                          progressDone !== undefined &&
+                          progressTotal !== undefined &&
+                          progressTotal > 0 &&
+                          progressDone >= 0
+                            ? ` ${progressDone}/${progressTotal}`
+                            : ""
+                        }`}
             </span>
             {job?.status !== "done" &&
               job?.status !== "failed" &&
               job?.status !== "cancelled" &&
               job?.status !== "awaiting_confirmation" &&
-              (job?.progress?.total ?? 0) > 0 && (
+              progressPercent !== undefined && (
                 <span
                   style={{
                     color: "var(--textMuted, #6b7280)",
                     fontSize: "12px",
                   }}
                 >
-                  {Math.min(
-                    100,
-                    Math.round(
-                      ((job?.progress?.done ?? 0) /
-                        (job?.progress?.total ?? 1)) *
-                        100,
-                    ),
-                  )}
-                  %
+                  {progressPercent}%
                 </span>
               )}
           </div>
@@ -1076,18 +1313,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
               >
                 <div
                   style={{
-                    width: `${
-                      (job?.progress?.total ?? 0) > 0
-                        ? Math.min(
-                            100,
-                            Math.round(
-                              ((job?.progress?.done ?? 0) /
-                                (job?.progress?.total ?? 1)) *
-                                100,
-                            ),
-                          )
-                        : 0
-                    }%`,
+                    width: `${progressPercent ?? 0}%`,
                     height: "100%",
                     backgroundColor: "var(--primary, #2563eb)",
                     transition: "width 0.3s ease",
@@ -1135,7 +1361,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 color: "var(--textMuted, #6b7280)",
               }}
             >
-              已扣 {formatSingleCredits(spentCredits)}，已完成部分可查看
+              {spentCreditsText
+                ? `已扣 ${spentCreditsText}，已完成部分可查看`
+                : "任务已取消，已完成部分可查看"}
             </div>
           )}
 
@@ -1161,7 +1389,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                   fontWeight: 500,
                 }}
               >
-                超出金额：{formatSingleCredits(job?.overrunCredits)}
+                {overrunCreditsText
+                  ? `超出金额：${overrunCreditsText}`
+                  : "超出金额待服务端确认"}
               </div>
               {!readOnly && (
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
