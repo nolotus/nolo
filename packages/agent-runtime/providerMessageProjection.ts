@@ -30,6 +30,10 @@ import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
 import { downgradeUnparsableToolCalls } from "./outboundHistorySanitize";
+import type {
+  DowngradeResult,
+  ToolArgsProjectionStats,
+} from "./outboundHistorySanitize";
 import {
   estimateContextTokens,
   hashStablePrefixContent,
@@ -588,7 +592,7 @@ export function composeProviderMessages(args: {
   history: AgentRuntimeChatMessage[];
   suffix?: AgentRuntimeChatMessage[];
   contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean;
-}): { messages: AgentRuntimeChatMessage[]; downgraded: number } {
+}): DowngradeResult {
   return downgradeUnparsableToolCalls([
     ...args.prefix.map(projectUserMessageForProvider),
     ...prepareHistoryForNextTurn(
@@ -613,8 +617,17 @@ export type BuiltMessages = {
   /** 稳定前缀内容指纹（与 contextCompiler 同一 FNV 算法），用于 token 记录的 prefix churn 观测。 */
   stablePrefixHash?: string;
   stablePrefixEstimatedTokens?: number;
-  /** 发送视图里被降级为文本的毒丸 tool_call 数（持久化历史不动）。 */
+  /**
+   * 发送视图里被降级为文本的毒丸 tool_call 数（持久化历史不动）。
+   * 兼容字段：恒等于 `poisonStats.rewrittenToolCalls`。
+   */
   poisonDowngraded: number;
+  /**
+   * 毒丸投影的分类统计（与实际降级同源；只走 metadata，不进请求体消息）：
+   * 坏参数 breakdown（truncated/malformed）与投影改写数（调用 / assistant 消息 /
+   * tool 结果消息）分开计数，二者允许不相等。
+   */
+  poisonStats: ToolArgsProjectionStats;
 };
 
 export function buildMessages(args: {
@@ -670,6 +683,7 @@ export function buildMessages(args: {
       messages: composed.messages,
       prefixCount: prefix.length,
       poisonDowngraded: composed.downgraded,
+      poisonStats: composed.stats,
       stableContextChars: stableContent.length,
       dynamicContextChars: dynamicContent.length,
       ...(stableContent
@@ -701,6 +715,7 @@ export function buildMessages(args: {
     messages: composed.messages,
     prefixCount: prefix.length,
     poisonDowngraded: composed.downgraded,
+    poisonStats: composed.stats,
     stableContextChars: (args.prompt?.trim() ?? "").length,
     dynamicContextChars: blocks.join("\n\n").length,
     ...(systemContent

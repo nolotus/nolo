@@ -33,10 +33,6 @@ import type { AgentRuntimeChatMessage } from "./types";
 import { normalizeUsage } from "../ai/token/normalizeUsage";
 import { composeProviderMessages } from "./providerMessageProjection";
 import { emitLoopEvent } from "./toolCallTransaction";
-import {
-  countUnparsableToolArgKinds,
-  describeUnparsableToolArgs,
-} from "./toolArgsTruncationPolicy";
 import type { LocalLoopObservationBoundary } from "./observationStream";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
 import type { AgentRuntimeMessageContent } from "./types";
@@ -1088,10 +1084,12 @@ export function createTurnCompactionController(args: {
           contextReferenceResolver: args.contextReferenceResolver,
         });
         if (rebuilt.downgraded > 0) {
-          // 告警只改归因措辞：类别来自压缩后 canonical 历史的纯统计（与降级判定
-          // 同源口径）；计数仍用 rebuilt.downgraded，降级动作与持久化历史不动。
+          // 单源统计：数字来自这次重建投影（composeProviderMessages →
+          // downgradeUnparsableToolCalls）的分类统计，不再旁路扫描
+          // compacted.history。降级动作与持久化历史一律不动。
+          const stats = rebuilt.stats;
           console.warn(
-            `[nolo] downgraded ${rebuilt.downgraded} tool_call(s) with unparsable JSON arguments from outbound history after compaction (${describeUnparsableToolArgs(countUnparsableToolArgKinds(compacted.history))}); persisted history untouched`,
+            `[nolo] rewrote ${stats.rewrittenToolCalls} tool calls in ${stats.rewrittenAssistantMessages} assistant messages and ${stats.rewrittenToolMessages} tool-result messages after compaction (bad arguments: truncated=${stats.badArguments.truncated}, malformed=${stats.badArguments.malformed}); persisted history untouched`,
           );
         }
         args.replaceWorkingView(rebuilt.messages);

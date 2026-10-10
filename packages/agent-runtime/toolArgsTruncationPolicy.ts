@@ -9,6 +9,17 @@
 
 import { createHash } from "node:crypto";
 import { hasParsableObjectArguments } from "./outboundHistorySanitize";
+import { classifyUnparsableToolArgs, scanTruncation } from "./toolArgsShape";
+import type { TruncationScan, UnparsableToolArgsKind } from "./toolArgsShape";
+
+// 形态扫描与分类判定（纯函数）都住在无依赖的 toolArgsShape；这里保持完全相同的
+// 公共接口 re-export，现有调用方不必改 import：
+// - 提取分类只为断开 outboundHistorySanitize → 本模块的反向依赖（投影统计也要用
+//   同一判定）；
+// - `scanTruncation` 的字符/转义/容器栈本体也移入 toolArgsShape（唯一状态机），
+//   本模块只做同义 re-export，不再持有第二份扫描实现。签名与返回语义一字未改。
+export { classifyUnparsableToolArgs, scanTruncation };
+export type { TruncationScan, UnparsableToolArgsKind };
 
 /**
  * 允许「丢弃未闭合尾部数组元素」降级的工具白名单（exact name）。
@@ -33,68 +44,6 @@ export const TRUNCATION_TAIL_DROP_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
 
 export function isTailDropRepairAllowed(toolName: unknown): boolean {
   return typeof toolName === "string" && TRUNCATION_TAIL_DROP_ALLOWED_TOOLS.has(toolName);
-}
-
-export type TruncationScan = {
-  /** EOF 是否落在字符串字面量内部。 */
-  inString: boolean;
-  /** 结构本身已坏（括号不匹配）。 */
-  malformed: boolean;
-  /**
-   * 仍处于打开状态的数组中、最深的一个「元素分隔逗号」位置及其闭合符。
-   * 该逗号之后的全部内容都属于同一个未闭合的尾部元素。
-   */
-  tailArrayComma: { index: number; closers: string } | null;
-};
-
-/** 单次扫描：跟踪字符串/转义与容器栈，定位最深的仍打开数组的元素逗号。 */
-export function scanTruncation(input: string): TruncationScan {
-  const stack: string[] = [];
-  // commaAtDepth[d] = 深度 d（栈长度 d）的容器里最后一个数组元素逗号；容器关闭即作废。
-  const commaAtDepth: Array<{ index: number; closers: string } | undefined> = [];
-  let inString = false;
-  let escaped = false;
-
-  const closersOf = () =>
-    stack
-      .slice()
-      .reverse()
-      .map((ch) => (ch === "{" ? "}" : "]"))
-      .join("");
-
-  for (let i = 0; i < input.length; i += 1) {
-    const ch = input[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === "{" || ch === "[") {
-      stack.push(ch);
-      commaAtDepth[stack.length] = undefined;
-    } else if (ch === "}" || ch === "]") {
-      const open = stack.pop();
-      if (open !== (ch === "}" ? "{" : "[")) {
-        return { inString, malformed: true, tailArrayComma: null };
-      }
-      commaAtDepth[stack.length + 1] = undefined;
-    } else if (ch === "," && stack[stack.length - 1] === "[") {
-      commaAtDepth[stack.length] = { index: i, closers: closersOf() };
-    }
-  }
-
-  let tailArrayComma: TruncationScan["tailArrayComma"] = null;
-  for (let d = stack.length; d >= 1; d -= 1) {
-    const c = commaAtDepth[d];
-    if (c && stack[d - 1] === "[") {
-      tailArrayComma = c;
-      break;
-    }
-  }
-  return { inString, malformed: false, tailArrayComma };
 }
 
 export type TailDropRepair = {
@@ -195,51 +144,9 @@ export function buildToolArgsDiagnosticLine(args: {
 // 修复/拒绝/重试判定。
 // ---------------------------------------------------------------------------
 
-export type UnparsableToolArgsKind = "truncated" | "malformed";
-
-/**
- * 与 {@link scanTruncation} 同一套字符串/转义规则的轻量扫描：只回答
- * 「容器是否全部正常闭合」（EOF 时仍有未闭合容器，或出现括号错配）。
- * 独立成函数而不复用 scanTruncation 的返回值，是为了不动后者的既有语义与
- * 字段（它是行为代码）。
- */
-function hasUnclosedOrMismatchedContainers(input: string): boolean {
-  const stack: string[] = [];
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < input.length; i += 1) {
-    const ch = input[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") stack.push(ch);
-    else if (ch === "}" || ch === "]") {
-      if (stack.pop() !== (ch === "}" ? "{" : "[")) return true;
-    }
-  }
-  return stack.length > 0;
-}
-
-/**
- * 纯判定：对「JSON.parse 失败的 raw 参数」归类。
- * - `truncated`：EOF 落在字符串字面量内，或括号不平衡 —— 上游流式丢尾的形态
- *   （`{"endLine": 700`、`{"command": "ls`、`{`、`{"a": [1, 2}`）；
- * - `malformed`：结构完整闭合、却仍不是合法 JSON —— 语法非法但没丢字节
- *   （`"lines": 300-400` 未加引号、字符串里未转义的控制字符）。
- * 非字符串（undefined/null/数字）不属于截断形态 → `malformed`。
- */
-export function classifyUnparsableToolArgs(
-  raw: unknown,
-): UnparsableToolArgsKind {
-  if (typeof raw !== "string") return "malformed";
-  // EOF 落在字符串内：复用既有扫描的字符串状态信号（语义与返回值不变）。
-  if (scanTruncation(raw).inString) return "truncated";
-  return hasUnclosedOrMismatchedContainers(raw) ? "truncated" : "malformed";
-}
+// 分类判定与形态扫描的实现都在上部 re-export 的 toolArgsShape（零依赖、唯一状态机）；
+// 本模块只保留「修复政策 / 白名单 / 丢尾修复 / 指纹日志 / 纯统计与文案」。
+// 注意：`scanTruncation` 同在该处定义，这里的 re-export 不改变其任何语义。
 
 export type UnparsableToolArgsBreakdown = {
   truncated: number;

@@ -30,6 +30,42 @@ import type {
   AgentRuntimeToolCall,
 } from "./types";
 import { extractDeclaredToolNames } from "./declaredToolNames";
+import { classifyUnparsableToolArgs } from "./toolArgsShape";
+
+/**
+ * 毒丸投影的分类统计（纯数字；绝不携带 raw 或预览，也绝不进入 wire 消息）。
+ *
+ * 两类计数口径不同、允许不相等：
+ * - `badArguments`：arguments 实际不可用的调用数（truncated + malformed），
+ *   在实际降级使用的分类 pass 里一次只计一个坏调用；
+ * - `rewritten*`：因坏参数或同 ID 连带降级而实际改写的调用/消息数。
+ *   例如同 ID 一坏一好：坏参数 1，改写调用 2。
+ */
+export type ToolArgsProjectionStats = {
+  badArguments: {
+    truncated: number;
+    malformed: number;
+  };
+  rewrittenToolCalls: number;
+  rewrittenAssistantMessages: number;
+  rewrittenToolMessages: number;
+};
+
+/** 降级结果：`downgraded` 保留兼容，恒等于 `stats.rewrittenToolCalls`。 */
+export type DowngradeResult = {
+  messages: AgentRuntimeChatMessage[];
+  downgraded: number;
+  stats: ToolArgsProjectionStats;
+};
+
+function emptyToolArgsProjectionStats(): ToolArgsProjectionStats {
+  return {
+    badArguments: { truncated: 0, malformed: 0 },
+    rewrittenToolCalls: 0,
+    rewrittenAssistantMessages: 0,
+    rewrittenToolMessages: 0,
+  };
+}
 
 export interface OutboundHistorySanitizeOptions {
   /**
@@ -584,12 +620,18 @@ export function repairTruncatedToolArguments(raw: unknown): string | null {
  * arguments are touched. When history contains no poison the input array is
  * returned by reference and nothing else changes (no declared-name filtering,
  * no dangling-call handling — those remain cross-provider replay concerns).
+ *
+ * The returned `stats` is derived from the SAME classification pass that drives
+ * the rewrites (bad-argument breakdown) plus the emit pass (actual rewrites),
+ * so log/diagnostic call sites never re-scan the raw history. It is metadata
+ * only: no diagnostic field is ever merged into the messages, so the wire body
+ * stays byte-identical to before.
  */
 export function downgradeUnparsableToolCalls(
   messages: AgentRuntimeChatMessage[],
-): { messages: AgentRuntimeChatMessage[]; downgraded: number } {
+): DowngradeResult {
   if (!Array.isArray(messages) || messages.length === 0) {
-    return { messages, downgraded: 0 };
+    return { messages, downgraded: 0, stats: emptyToolArgsProjectionStats() };
   }
 
   // Check if any assistant tool_call has unparsable arguments
@@ -606,7 +648,7 @@ export function downgradeUnparsableToolCalls(
     if (hasAnyPoison) break;
   }
 
-  if (!hasAnyPoison) return { messages, downgraded: 0 };
+  if (!hasAnyPoison) return { messages, downgraded: 0, stats: emptyToolArgsProjectionStats() };
 
   // Local block pairing: only pair bad call IDs within each contiguous assistant + tool block.
   // Avoid global poisonIds to prevent cross-turn contamination.
@@ -614,13 +656,23 @@ export function downgradeUnparsableToolCalls(
   // instances where any is poisoned, downgrade ALL calls sharing that ID to avoid hanging good calls!
   const poisonedCallsPerAssistant = new Map<number, Set<string>>();
   const poisonedToolIndices = new Set<number>();
+  // 坏参数数：与实际降级同源的分类 pass 里统计，对 unparsableIndices 的原始
+  // raw 参数逐个归类，一次只计一个坏调用（同 ID 的连带降级不计入这里）。
+  const badArguments: ToolArgsProjectionStats["badArguments"] = {
+    truncated: 0,
+    malformed: 0,
+  };
 
   let i = 0;
   while (i < messages.length) {
     const m = messages[i];
     if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
       const asstIdx = i;
-      const { unparsableIds } = classifyAssistantCalls(m.tool_calls, asstIdx);
+      const { unparsableIds, unparsableIndices } = classifyAssistantCalls(m.tool_calls, asstIdx);
+      for (const badIndex of unparsableIndices) {
+        const badCall = m.tool_calls[badIndex] as Record<string, any> | undefined;
+        badArguments[classifyUnparsableToolArgs(badCall?.function?.arguments)] += 1;
+      }
 
       let j = i + 1;
       while (j < messages.length && messages[j].role === "tool") {
@@ -642,6 +694,8 @@ export function downgradeUnparsableToolCalls(
   }
 
   let downgraded = 0;
+  let rewrittenAssistantMessages = 0;
+  let rewrittenToolMessages = 0;
   const out: AgentRuntimeChatMessage[] = [];
   let k = 0;
   while (k < messages.length) {
@@ -657,6 +711,8 @@ export function downgradeUnparsableToolCalls(
       const kept: AgentRuntimeToolCall[] = [];
       const lines: string[] = [];
       const { callIds } = classifyAssistantCalls(m.tool_calls, k);
+      // 这条 assistant 消息必然被改写（降级的调用正文 + / 或 tool_calls 变化）。
+      rewrittenAssistantMessages += 1;
 
       m.tool_calls.forEach((call, callIndex) => {
         const id = callIds[callIndex];
@@ -683,6 +739,7 @@ export function downgradeUnparsableToolCalls(
         while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
           if (poisonedToolIndices.has(nextIdx)) {
             out.push({ role: "assistant", content: renderToolResultAsText(messages[nextIdx]) });
+            rewrittenToolMessages += 1;
           } else {
             out.push(messages[nextIdx]);
           }
@@ -709,6 +766,7 @@ export function downgradeUnparsableToolCalls(
       while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
         if (poisonedToolIndices.has(nextIdx)) {
           deferredResultLines.push(renderToolResultAsText(messages[nextIdx]));
+          rewrittenToolMessages += 1;
         } else {
           out.push(messages[nextIdx]);
         }
@@ -730,6 +788,7 @@ export function downgradeUnparsableToolCalls(
     if (m.role === "tool") {
       if (poisonedToolIndices.has(k)) {
         out.push({ role: "assistant", content: renderToolResultAsText(m) });
+        rewrittenToolMessages += 1;
       } else {
         out.push(m);
       }
@@ -741,5 +800,16 @@ export function downgradeUnparsableToolCalls(
     k++;
   }
 
-  return { messages: out, downgraded };
+  return {
+    messages: out,
+    downgraded,
+    stats: {
+      badArguments,
+      // 投影改写数与坏参数数是两套口径：rewrittenToolCalls 含同 ID 连带降级的
+      // 调用，二者允许不相等（同 ID 一坏一好 → 坏参数 1、改写调用 2）。
+      rewrittenToolCalls: downgraded,
+      rewrittenAssistantMessages,
+      rewrittenToolMessages,
+    },
+  };
 }

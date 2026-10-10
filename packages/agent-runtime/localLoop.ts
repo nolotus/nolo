@@ -59,10 +59,6 @@ import {
   throwIfAborted,
 } from "./toolCallTransaction";
 export { LOCAL_TURN_ABORTED_CODE } from "./toolCallTransaction";
-import {
-  countUnparsableToolArgKinds,
-  describeUnparsableToolArgs,
-} from "./toolArgsTruncationPolicy";
 import { createTurnTranscript } from "./turnTranscript";
 import { createTurnUsageLedger } from "./turnUsageLedger";
 export { addOutOfBandUsage } from "./turnUsageLedger";
@@ -918,11 +914,12 @@ export async function runLocalAgentTurn(
   // 降级为文本（存储不动、幂等），模型看到意图与 tool 结果文本后可重发调用 → 自愈。
   // 降级已在 buildMessages → composeProviderMessages 内完成，这里只保留告警。
   if (builtMessages.poisonDowngraded > 0) {
-    // 告警只改归因措辞：类别来自同一批历史里不可解析 arguments 的纯统计
-    // （口径与降级判定同源）；计数仍用 poisonDowngraded（含被降级的 tool 结果），
-    // 降级动作与持久化历史一律不动。
+    // 单源统计：数字直接来自投影（composeProviderMessages →
+    // downgradeUnparsableToolCalls）的分类统计，与实际降级同源；
+    // 这里不再旁路扫描 history。降级动作与持久化历史一律不动。
+    const stats = builtMessages.poisonStats;
     console.warn(
-      `[nolo] downgraded ${builtMessages.poisonDowngraded} tool_call(s) with unparsable JSON arguments from outbound history (${describeUnparsableToolArgs(countUnparsableToolArgKinds(history))}); persisted history untouched`,
+      `[nolo] rewrote ${stats.rewrittenToolCalls} tool calls in ${stats.rewrittenAssistantMessages} assistant messages and ${stats.rewrittenToolMessages} tool-result messages (bad arguments: truncated=${stats.badArguments.truncated}, malformed=${stats.badArguments.malformed}); persisted history untouched`,
     );
   }
   // vision 能力检测：catalog 已知模型按 hasVision 判定，未知模型默认 true。
