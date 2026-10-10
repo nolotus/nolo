@@ -10,7 +10,7 @@ export interface ChatSidebarGroupedData {
   uncategorized: SpaceContent[];
   categorized: Record<string, SpaceContent[]>;
   /**
-   * 子对话（parentDialogId 非空且 !== 自身 id）按 parentDialogId 分组。
+   * 子对话（parentDialogId 非空）按 parentDialogId 分组。
    * key = parentDialogId，value = 该父对话下的子对话列表。
    * 侧边栏用这个把子对话折叠到父对话下。
    * 注意：parentDialogId 是 dialog id（不含 dialog-user- 前缀），

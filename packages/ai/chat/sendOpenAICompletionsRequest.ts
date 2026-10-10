@@ -44,8 +44,7 @@ import { extractCustomId } from "core/prefix";
 
 import { performFetchRequest } from "./fetchUtils";
 import { createSSEParser } from "./parseMultilineSSE";
-import { classifyApiError, classifyGenerationError } from "./parseApiError";
-import { normalizeChatCompletionsBodyForProvider } from "integrations/openai/providerBodyCompatibility";
+import { parseApiError } from "./parseApiError";
 import { updateTotalUsage } from "./updateTotalUsage";
 import { accumulateToolCallChunks } from "./accumulateToolCallChunks";
 import {
@@ -118,6 +117,9 @@ function getStreamErrorMessage(data: any): string {
     asOptionalTrimmedString(data?.code);
   if (code) return code;
 
+  const type = asOptionalTrimmedString(data?.error?.type);
+  if (type) return type;
+
   return "Unknown error";
 }
 
@@ -146,7 +148,6 @@ function getChoiceFinishErrorMessage(data: any, choice: any): string | null {
   if (messageContent) return messageContent;
   return null;
 }
-
 
 /** 单次流式请求过程中的全部中间状态（显式 state） */
 type StreamState = {
@@ -332,7 +333,11 @@ function buildRequestBodyWithTools(
   const tools = prepareTools(rawTools, { provider: agentConfig.provider });
   if (!tools.length) return baseBody;
 
-  return { ...baseBody, tools, tool_choice: baseBody.tool_choice ?? "auto" };
+  return {
+    ...baseBody,
+    tools,
+    tool_choice: baseBody.tool_choice ?? "auto",
+  };
 }
 
 /**
@@ -399,7 +404,7 @@ async function finalizeStream(
  * 写入明确的错误文案 + metadata.error 标记,让用户知道该重试。
  */
 const EMPTY_UPSTREAM_STREAM_MESSAGE =
-  "模型返回了空响应，请联系管理员检查服务响应。";
+  "模型返回了空响应，请重试或切换其他模型";
 
 function markEmptyCompletionAsError(
   state: StreamState,
@@ -436,7 +441,6 @@ function markEmptyCompletionAsError(
 function markStreamMessageAborted(
   ctx: FinalizeContext,
   errorMessage: string,
-  classification = classifyGenerationError(errorMessage),
 ): void {
   const base = ctx.messageMetadata ?? {};
   const previousMetadata =
@@ -445,15 +449,8 @@ function markStreamMessageAborted(
       : {};
   ctx.messageMetadata = {
     ...base,
-    errorMeta: {
-      kind: classification.category,
-      summary: classification.message,
-      retryable: classification.retryable,
-      actions: classification.actions,
-    },
     metadata: {
       ...previousMetadata,
-      providerError: { category: classification.category, ...classification.diagnostic },
       error: true,
       message: errorMessage,
     },
@@ -500,8 +497,6 @@ function applyDelta(
       ...next,
       accumulatedToolCalls: accumulated,
       assistantToolCalls: accumulated.map((call: any) => ({
-        ...(call.thought_signature !== undefined ? { thought_signature: call.thought_signature } : {}),
-        ...(call.extra_content ? { extra_content: call.extra_content } : {}),
         id: call.id,
         type: "function",
         function: {
@@ -736,8 +731,6 @@ function syncAssistantToolCallsAfterSanitize(
   const base = Array.isArray(state.assistantToolCalls)
     ? state.assistantToolCalls
     : state.accumulatedToolCalls.map((call: any) => ({
-        ...(call.thought_signature !== undefined ? { thought_signature: call.thought_signature } : {}),
-        ...(call.extra_content ? { extra_content: call.extra_content } : {}),
         id: call.id,
         type: "function",
         function: {
@@ -1037,12 +1030,12 @@ export const sendOpenAICompletionsRequest = async ({
 
   dispatch(addActiveController({ messageId, controller, dialogKey }));
 
-  const requestBody: any = await inlineImageUrlsForCustomProvider(
-    normalizeChatCompletionsBodyForProvider({
-      body: buildRequestBodyWithTools(bodyData, agentConfig, disableToolsForThisRequest),
-      provider: agentConfig.provider ?? "",
-      model: agentConfig.model,
-    }),
+  const requestBody = await inlineImageUrlsForCustomProvider(
+    buildRequestBodyWithTools(
+      bodyData,
+      agentConfig,
+      disableToolsForThisRequest
+    ),
     {
       shouldInline: shouldInlineImageUrlsForAgent(agentConfig),
     },
@@ -1068,7 +1061,6 @@ export const sendOpenAICompletionsRequest = async ({
   let lastFinishReason: string | null = null;
   let activeMessageMetadata = messageMetadata;
   // 空轮自动重试只放行一次(与 agent-runtime localLoop / server loop 语义对齐)。
-
   let emptyCompletionRetryUsed = false;
 
   const throttler = createStreamThrottler((latestState) => {
@@ -1176,50 +1168,7 @@ export const sendOpenAICompletionsRequest = async ({
     }
 
     if (!response.ok) {
-      const rawBody = await response.text();
-      let errorData: any;
-      try { errorData = JSON.parse(rawBody); } catch { errorData = { message: rawBody }; }
-      const errorJson = errorData?.error ?? errorData;
-      const apiErrorMessage =
-        errorJson?.message || errorJson?.msg || (typeof rawBody === "string" ? rawBody : "") || `状态码 ${response.status} ${response.statusText}`;
-      const apiErrorCode = errorJson?.code || `E${response.status}`;
-
-      const legacyClassified = classifyApiError({
-        status: response.status,
-        statusText: response.statusText,
-        message: apiErrorMessage,
-        body: rawBody,
-        code: apiErrorCode,
-      });
-
-      let classified: {
-        category: string;
-        message: string;
-        retryable: boolean;
-        actions: any[];
-        diagnostic: Record<string, any>;
-      };
-      if (
-        legacyClassified.kind === "context_overflow" ||
-        legacyClassified.kind === "context_too_large" ||
-        legacyClassified.kind === "auth" ||
-        legacyClassified.code === "MISSING_PROVIDER_API_KEY"
-      ) {
-        classified = {
-          category: legacyClassified.kind,
-          message: legacyClassified.message,
-          retryable: legacyClassified.retryable ?? false,
-          actions: (legacyClassified.actions as any[]) ?? [],
-          diagnostic: {
-            ...(legacyClassified.code ? { code: legacyClassified.code } : {}),
-            status: response.status,
-          },
-        };
-      } else {
-        classified = classifyGenerationError(errorData, response.status);
-      }
-      const errorMessage = classified.message;
-      markStreamMessageAborted(finalizeCtx, errorMessage, classified);
+      const errorMessage = await parseApiError(response);
       streamState = {
         ...streamState,
         contentBuffer: appendTextChunk(
@@ -1347,9 +1296,7 @@ export const sendOpenAICompletionsRequest = async ({
 
           if (data.error) {
             throttler.flush();
-            const classified = classifyGenerationError(data);
-            markStreamMessageAborted(finalizeCtx, classified.message, classified);
-            const errorMsg = classified.message;
+            const errorMsg = `Error: ${formatStreamErrorMessage(data)}`;
             streamState = {
               ...streamState,
               contentBuffer: appendTextChunk(
@@ -1400,32 +1347,22 @@ export const sendOpenAICompletionsRequest = async ({
               // so a later error frame can still mark this round failed.
               throttler.flush();
             } else if (finishReason !== "stop") {
-              if (finishReason === "error") {
-                const finishErrorMessage = getChoiceFinishErrorMessage(data, choice);
-                const errorText = finishErrorMessage
-                  ? `[API Error] Error: ${finishErrorMessage}`
-                  : "[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。";
-                const classified = classifyGenerationError(
-                  choice.error ? choice : data.error ? data : { code: "UPSTREAM_FINISH_ERROR" }
-                );
-                markStreamMessageAborted(finalizeCtx, errorText, classified);
-                streamState = {
-                  ...streamState,
-                  contentBuffer: appendTextChunk(
-                    streamState.contentBuffer,
-                    `\n${errorText}`
-                  ),
-                  billingFailed: true,
-                };
-              } else {
-                streamState = {
-                  ...streamState,
-                  contentBuffer: appendTextChunk(
-                    streamState.contentBuffer,
-                    `\n[流结束原因: ${finishReason}]`
-                  ),
-                };
-              }
+              const finishErrorMessage =
+                finishReason === "error"
+                  ? getChoiceFinishErrorMessage(data, choice)
+                  : null;
+              streamState = {
+                ...streamState,
+                contentBuffer: appendTextChunk(
+                  streamState.contentBuffer,
+                  finishErrorMessage
+                    ? `\n[API Error] Error: ${finishErrorMessage}`
+                    : finishReason === "error"
+                      ? "\n[API Error] Error: 模型响应以 error 结束，但上游未返回具体错误。请重试，或切换到其他支持图片输入的模型。"
+                    : `\n[流结束原因: ${finishReason}]`
+                ),
+                ...(finishReason === "error" ? { billingFailed: true } : {}),
+              };
             }
           }
         }
@@ -1439,7 +1376,7 @@ export const sendOpenAICompletionsRequest = async ({
     if (isAbort) {
       errorText = "\n[用户中断]";
     } else {
-      errorText = `\n[错误: ${classifyGenerationError(toErrorMessage(error)).message}]`;
+      errorText = `\n[错误: ${toErrorMessage(error)}]`;
     }
 
     console.error("[SSE] sendOpenAICompletionsRequest error:", error);
@@ -1457,8 +1394,7 @@ export const sendOpenAICompletionsRequest = async ({
     if (!isAbort) {
       markStreamMessageAborted(
         finalizeCtx,
-        classifyGenerationError(toErrorMessage(error)).message,
-        classifyGenerationError(toErrorMessage(error)),
+        toErrorMessage(error),
       );
     }
     streamState = await finalizeStream(streamState, finalizeCtx);

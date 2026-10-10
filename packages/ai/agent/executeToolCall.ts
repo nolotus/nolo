@@ -5,7 +5,6 @@
 
 import { findToolExecutor } from "ai/tools";
 import { getToolResultErrorData } from "ai/tools/toolResultError";
-import { stripModelConfirmationFlags } from "ai/tools/stripModelConfirmationFlags";
 
 interface ToolCall {
   id: string;
@@ -30,7 +29,7 @@ export async function executeToolCall(
   const toolName: string = tc.function?.name ?? "";
   const toolArgs = (() => {
     try {
-      return stripModelConfirmationFlags(JSON.parse(tc.function?.arguments ?? "{}"));
+      return JSON.parse(tc.function?.arguments ?? "{}");
     } catch {
       return {};
     }

@@ -3,7 +3,6 @@ import {
   convertResponsesToolsToChatCompletions,
 } from "./responsesHelpers";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
-import { applyFunctionToolReasoningCompatibility } from "./providerBodyCompatibility";
 
 /**
  * Normalize an inbound proxy body for a **chat.completions** upstream.
@@ -43,22 +42,21 @@ export function buildChatCompletionsRequestBody(
   const withTools = normalizedTools ? { tools: normalizedTools } : {};
 
   const hasMessages = Array.isArray(body.messages) && body.messages.length > 0;
-  const outboundBody =
-    hasMessages || !Array.isArray(body.input) || body.input.length === 0
-      ? { ...body, ...usageRequestOptions, ...withTools, model }
-      : {
-          ...body,
-          ...usageRequestOptions,
-          ...withTools,
-          model,
-          messages: convertResponsesInputToMessages(body.input),
-          input: undefined,
-          // Responses-only knobs have no completions equivalent.
-          max_output_tokens: undefined,
-          ...(typeof body.max_output_tokens === "number" && body.max_tokens === undefined
-            ? { max_tokens: body.max_output_tokens }
-            : {}),
-        };
+  if (hasMessages || !Array.isArray(body.input) || body.input.length === 0) {
+    return { ...body, ...usageRequestOptions, ...withTools, model };
+  }
 
-  return applyFunctionToolReasoningCompatibility(outboundBody, model);
+  return {
+    ...body,
+    ...usageRequestOptions,
+    ...withTools,
+    model,
+    messages: convertResponsesInputToMessages(body.input),
+    input: undefined,
+    // Responses-only knobs have no completions equivalent.
+    max_output_tokens: undefined,
+    ...(typeof body.max_output_tokens === "number" && body.max_tokens === undefined
+      ? { max_tokens: body.max_output_tokens }
+      : {}),
+  };
 }

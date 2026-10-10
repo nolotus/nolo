@@ -14,7 +14,6 @@
  * 「周额度耗尽」修复只落在 CLI 一侧，server 侧同一个 bug continued to ship。
  */
 import { parseResetsInMs } from "../tools/agent/quotaCircuitBreaker";
-import type { AgentQuota } from "./quotaSnapshot";
 
 /** 无法从上游响应解析出复位时刻时使用的保守冷却窗口。 */
 export const DEFAULT_PROVIDER_RETRY_MS = 5 * 60 * 1000;
@@ -46,29 +45,6 @@ function clampCooldownDeadline(at: number, now: number): number {
  * 判据：agent 记录的 nextAvailableAt 是有限数值且 > now，视为 429 限流冷却中，
  * 此刻不可用。nextAvailableAt 等于 now 视为已恢复。
  */
-export function shouldClearCooldownFromQuota(
-  entry: { nextAvailableAt?: number; markedAt?: number },
-  quota: AgentQuota | undefined,
-  now: number,
-): boolean {
-  if (!(typeof entry.nextAvailableAt === "number" && entry.nextAvailableAt > now)) return false;
-  if (typeof entry.markedAt !== "number" || !Number.isFinite(entry.markedAt)) return false;
-  if (!quota || !(quota.observedAt > entry.markedAt)) return false;
-  // 启发式恢复：仅在订阅额度窗口有余量且无其它窗口明确耗尽时提前解除。
-  // 429 来自并发/模型级等未上报维度时仍可能误清；代价是下次请求再撞 429 并重新 mark。
-  const subscriptionWindows = quota.windows.filter((window) => window.scope === "5h" || window.scope === "7d");
-  if (subscriptionWindows.length === 0) return false;
-  if (quota.windows.some((window) => window.scope !== "5h" && window.scope !== "7d" &&
-    (window.remaining === 0 || (typeof window.utilization === "number" && window.utilization >= 0.95)))) return false;
-  return subscriptionWindows.every((window) => {
-    const hasUtilization = typeof window.utilization === "number";
-    const hasRemaining = typeof window.remaining === "number";
-    if (!hasUtilization && !hasRemaining) return false;
-    return (!hasUtilization || window.utilization! < 0.95) &&
-      (!hasRemaining || window.remaining! > 0);
-  });
-}
-
 export function isAgentUnavailableNow(
   agent:
     | { nextAvailableAt?: number }

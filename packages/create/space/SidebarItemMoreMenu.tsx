@@ -1,55 +1,28 @@
-import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   LuDownload,
   LuPencil,
-  LuPlus,
+  LuPin,
+  LuPinOff,
   LuStar,
   LuTrash2,
 } from "react-icons/lu";
-import { nanoid } from "nanoid";
-import { useAppDispatch } from "app/store";
-import { useUserId } from "identity";
-import { addPendingFile, useCurrentDialogKey } from "chat/dialog/dialogSlice";
 import SidebarMoveToSubmenu from "./SidebarMoveToSubmenu";
 import { Menu, MenuItem } from "render/web/ui/Menu";
 import { useContentFavorite } from "app/favorite/useContentFavorite";
 import { toast } from "app/utils/toast";
-import { resolveRoutableContentKey } from "./contentKeyUtils";
-import {
-  resolvePendingAttachmentType,
-  type ItemType,
-} from "./sidebarItemShared";
 
 const ICON_SIZE = 16 as const;
-
-/**
- * Item types that can be attached to the current conversation ("加入对话").
- * Mirrors the visibility of the inline button this action replaced: app rows
- * are excluded.
- */
-const JOIN_CONVERSATION_TYPES = [
-  "page",
-  "dialog",
-  "table",
-  "agent",
-  "image",
-  "file",
-] as const;
-
-const canJoinConversation = (type: string): boolean =>
-  (JOIN_CONVERSATION_TYPES as readonly string[]).includes(type);
 
 export type SidebarItemMoreMenuProps = {
   contentKey: string;
   title: string;
   type: string;
   spaceId?: string | null;
-  /** Needed to resolve file → image pending attachments for "加入对话". */
-  fileCategory?: string | null;
   canEditInSpace: boolean;
   canMoveToSpace: boolean;
   showDownloadAction: boolean;
+  pinAction?: { pinned: boolean; onToggle: () => void };
   menuAnchorEl?: HTMLElement | null;
   sourceServerOrigin?: string;
   onEditTitle: () => void;
@@ -62,67 +35,29 @@ export type SidebarItemMoreMenuProps = {
  * Must be mounted outside ListBox/Virtualizer collection trees.
  * Nested SubmenuTrigger under ListBoxItem throws:
  * "Unsupported node type: submenutrigger".
- *
- * Note: 「置顶 / 取消置顶」lives inline on the row (see SidebarItemRow),
- * while 「加入对话」lives here.
  */
 export function SidebarItemMoreMenu({
   contentKey,
   title,
   type,
   spaceId,
-  fileCategory,
   canEditInSpace,
   canMoveToSpace,
   showDownloadAction,
+  pinAction,
   menuAnchorEl,
   onEditTitle,
   onClose,
   onDeleteApp,
 }: SidebarItemMoreMenuProps) {
   const { t } = useTranslation("space");
-  const dispatch = useAppDispatch();
-  const currentUserId = useUserId();
-  const currentDialogKey = useCurrentDialogKey();
   const { isFavorited, toggleFavorite } = useContentFavorite(contentKey);
-  const showJoinConversation = canJoinConversation(type);
-
-  // Same pending-attachment contract as the inline button this replaced:
-  // dialog items keep the source/target dialog semantics, files resolve by
-  // fileCategory (file + "image" → image attachment).
-  const handleAddToConversation = useCallback(() => {
-    const routeContentKey = resolveRoutableContentKey(
-      contentKey,
-      type,
-      currentUserId ?? undefined
-    );
-    const sourceDialogKey = type === "dialog" ? routeContentKey : undefined;
-    dispatch(addPendingFile({
-      id: nanoid(),
-      name: title || contentKey,
-      pageKey: routeContentKey,
-      dialogKey: sourceDialogKey,
-      sourceDialogKey,
-      targetDialogKey: currentDialogKey ?? undefined,
-      type: resolvePendingAttachmentType(type as ItemType, fileCategory),
-    }));
-    toast.success(t("addedToConversation"));
-  }, [
-    dispatch,
-    contentKey,
-    title,
-    type,
-    fileCategory,
-    currentUserId,
-    currentDialogKey,
-    t,
-  ]);
 
   return (
     <Menu
       onAction={(key) => {
-        if (key === "join-conversation" && showJoinConversation) {
-          handleAddToConversation();
+        if (key === "pin" && pinAction) {
+          pinAction.onToggle();
         } else if (key === "favorite" && type === "dialog") {
           toggleFavorite();
         } else if (key === "edit" && canEditInSpace) {
@@ -135,10 +70,14 @@ export function SidebarItemMoreMenu({
         onClose();
       }}
     >
-      {showJoinConversation && (
-        <MenuItem id="join-conversation" textValue={t("joinConversation")}>
-          <LuPlus size={ICON_SIZE} aria-hidden="true" />
-          <span slot="label">{t("joinConversation")}</span>
+      {pinAction && (
+        <MenuItem id="pin" textValue={pinAction.pinned ? t("unpin") : t("pin")}>
+          {pinAction.pinned ? (
+            <LuPinOff size={ICON_SIZE} aria-hidden="true" />
+          ) : (
+            <LuPin size={ICON_SIZE} aria-hidden="true" />
+          )}
+          <span slot="label">{pinAction.pinned ? t("unpin") : t("pin")}</span>
         </MenuItem>
       )}
       {type === "dialog" && (

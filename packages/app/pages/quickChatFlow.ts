@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 
 
 import type { PendingFile } from "chat/dialog/dialogSlice";
-import { pendingAttachmentsToMessageParts } from "chat/messages/pendingAttachmentParts";
 import { BUILTIN_FEEDBACK_AGENT_KEY } from "core/builtinAgents";
 import { asTrimmedString } from "core/trimmedString";
 import { QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY } from "app/settings/quickChatTierDefaults";
@@ -57,7 +56,17 @@ export type QuickChatPerfStage =
   | "navigate-started"
   | "navigated";
 
-export type QuickChatExtraPart = import("chat/messages/pendingAttachmentParts").PendingAttachmentMessagePart;
+export type QuickChatExtraPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: PendingFile["type"];
+      name: string;
+      pageKey?: string;
+      dialogKey?: string;
+    };
 
 export type QuickChatRouteState = {
   isNew: true;
@@ -78,11 +87,22 @@ export const buildQuickChatFirstMessageText = (
 
 export const buildQuickChatExtraParts = (
   pendingFiles: PendingFile[]
-): QuickChatExtraPart[] => pendingFiles.flatMap((file) => {
-  if (file.type === "ocr_text" && file.ocrText) return [{ type: "text", text: file.ocrText }];
-  if (file.type === "media_job") return pendingAttachmentsToMessageParts([file], { currentServer: null });
-  return [{ type: file.type, name: file.name, pageKey: file.pageKey, dialogKey: file.dialogKey }];
-});
+): QuickChatExtraPart[] =>
+  pendingFiles.map((pendingFile) => {
+    if (pendingFile.type === "ocr_text" && pendingFile.ocrText) {
+      return {
+        type: "text",
+        text: pendingFile.ocrText,
+      };
+    }
+
+    return {
+      type: pendingFile.type,
+      name: pendingFile.name,
+      pageKey: pendingFile.pageKey,
+      dialogKey: pendingFile.dialogKey,
+    };
+  });
 
 export const buildQuickChatRouteState = (
   text: string

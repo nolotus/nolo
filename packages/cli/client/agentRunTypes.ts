@@ -240,13 +240,6 @@ export type RunAgentTurnOptions = {
   taskEvidence?: TaskEvidenceInput;
   fetchImpl?: CliFetchImpl;
   currentMachineIdResolver?: (env: EnvLike) => Promise<string | undefined>;
-  /**
-   * TUI 已检测到的本机原件路径（图片 / 音视频）。只用来产出**给模型的安全附件卡**
-   * （name/mimeType/size/kind，走共享 `describeAttachmentForModel`）——
-   * **绝不把 path / machineId 上行**。本机原件 part 的落库需要先有 provider 边界的
-   * user-part 投影（见 packages/cli/tui/localAttachmentParts.ts 文件头与设计 §5）。
-   */
-  localAttachmentPaths?: readonly string[];
   actionGateHandler?: (
     gate: LocalAgentActionGate,
   ) => Promise<AgentRuntimeToolResult | void>;
@@ -297,11 +290,6 @@ export type RunAgentTurnOptions = {
 export type RunAgentTurnResult = {
   exitCode: number;
   dialogId?: string;
-  /**
-   * 本轮最终 assistant 正文（local 成功路径）。后台 run 结算据此把完整报告
-   * 落盘为 `<runId>.result.md`，编排者不必再解析带 ANSI 的 .log。
-   */
-  finalText?: string;
   /**
    * 本轮以空 assistant 兜底（诊断文案收尾、不抛错）收尾时的成因
    * （length_truncated / stream_truncated / empty_completion）。

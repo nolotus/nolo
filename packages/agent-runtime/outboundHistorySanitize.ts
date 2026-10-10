@@ -101,10 +101,9 @@ function jsonStringifyArguments(args: unknown): string {
  * intent after a structural downgrade. Always produces a string arguments
  * representation (object args would otherwise render as `[object Object]`).
  */
-function renderToolCallAsText(call: unknown): string {
-  const c = (call && typeof call === "object") ? (call as Record<string, any>) : {};
-  const name = isString(c.function?.name) && c.function.name.length > 0 ? c.function.name : "unknown";
-  const rawArgs = c.function?.arguments;
+function renderToolCallAsText(call: AgentRuntimeToolCall): string {
+  const name = call?.function?.name ?? "unknown";
+  const rawArgs = call?.function?.arguments;
   const args = jsonStringifyArguments(rawArgs);
   return `[tool_call: ${name}(${args})]`;
 }
@@ -117,7 +116,7 @@ function renderToolResultAsText(message: AgentRuntimeChatMessage): string {
 
 /**
  * Normalize a single tool_call: ensure id, string arguments, type=function.
- * Returns null if the call is too malformed to keep structurally.
+ * Returns null if the call is too malformed to keep.
  */
 function normalizeToolCall(
   call: unknown,
@@ -127,64 +126,16 @@ function normalizeToolCall(
   if (!call || typeof call !== "object") return null;
   const c = call as Record<string, any>;
   const fn = c.function;
-  if (!fn || typeof fn !== "object" || !isString(fn.name) || fn.name.length === 0) return null;
+  if (!fn || typeof fn !== "object" || !isString(fn.name)) return null;
   const id = isNonEmptyString(c.id) ? c.id : stableToolCallId(assistantIndex, callIndex);
   return {
     id,
     type: isString(c.type) && c.type ? (c.type as "function") : "function",
     function: { name: fn.name, arguments: jsonStringifyArguments(fn.arguments) },
-    ...(typeof c.extra_content?.google?.thought_signature === "string"
-      ? { extra_content: { google: { thought_signature: c.extra_content.google.thought_signature } } }
-      : {}),
     ...(typeof c.thought_signature === "string"
       ? { thought_signature: c.thought_signature }
       : {}),
   };
-}
-
-/**
- * Helper to classify tool_calls within a single assistant message:
- * detects unparsable arguments and duplicate IDs within the turn.
- * Shared between sanitizeOutboundHistory and downgradeUnparsableToolCalls to avoid drift (M2).
- */
-interface AssistantCallClassification {
-  /** Map of callIndex to resolved call ID */
-  callIds: string[];
-  /** Set of call IDs that appear more than once in this assistant */
-  duplicateIds: Set<string>;
-  /** Set of call indices whose arguments cannot be parsed as a JSON object */
-  unparsableIndices: Set<number>;
-  /** Set of call IDs that have at least one unparsable call */
-  unparsableIds: Set<string>;
-}
-
-function classifyAssistantCalls(
-  toolCalls: unknown[],
-  assistantIndex: number,
-): AssistantCallClassification {
-  const callIds: string[] = [];
-  const idCounts = new Map<string, number>();
-  const unparsableIndices = new Set<number>();
-  const unparsableIds = new Set<string>();
-
-  toolCalls.forEach((rawCall, callIndex) => {
-    const c = (rawCall && typeof rawCall === "object") ? (rawCall as Record<string, any>) : {};
-    const id = isNonEmptyString(c.id) ? c.id : stableToolCallId(assistantIndex, callIndex);
-    callIds.push(id);
-    idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
-
-    if (!hasParsableObjectArguments(c.function?.arguments)) {
-      unparsableIndices.add(callIndex);
-      unparsableIds.add(id);
-    }
-  });
-
-  const duplicateIds = new Set<string>();
-  for (const [id, count] of idCounts) {
-    if (count > 1) duplicateIds.add(id);
-  }
-
-  return { callIds, duplicateIds, unparsableIndices, unparsableIds };
 }
 
 /**
@@ -202,183 +153,123 @@ export function sanitizeOutboundHistory(
   // wire-specific concern (DeepSeek completions rejects string
   // reasoning_content on replay; Responses wire converts it to array content
   // parts). Each wire converter (toOpenAiCompatibleMessages /
-  // convertMessagesToResponsesInput) applies the right policy per
+  // convertMessagesToResponsesInput) already applies the right policy per
   // target. Sanitize only fixes cross-provider tool_call / tool-result shape
   // issues that gateways reject before the body even reaches the model.
   const declared = options?.declaredToolNames;
 
-  // Local block pairing: pair within each contiguous assistant-calls + tool-results
-  // block. IDs are not globally unique across turns/providers. Results separated
-  // by user/assistant cannot pair with prior assistant calls.
-  //
-  // Pass 1: scan messages and partition into contiguous blocks.
-  // For each assistant with tool_calls, detect duplicate IDs in the same turn.
-  // Duplicate call IDs in the same turn cannot safely pair (causes ambiguous matching
-  // and gateway 400 mismatch) — so duplicate IDs are marked for total downgrade.
-  const keptCallIndicesPerAssistant = new Map<number, Set<number>>();
-  const keptToolIndices = new Set<number>();
-
-  let i = 0;
-  while (i < messages.length) {
+  // First pass: collect the set of tool_call ids we MIGHT keep structurally
+  // (those whose name is declared, or all if no declaredToolNames filter).
+  const candidateCallIds = new Set<string>();
+  for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const asstIdx = i;
-      const { callIds, duplicateIds, unparsableIndices } = classifyAssistantCalls(m.tool_calls, asstIdx);
-
-      // Gather candidate call IDs (only those that appear exactly once, have function.name,
-      // are declared, and have parsable args)
-      const candidateCallMap = new Map<string, number>(); // id -> callIndex
-      m.tool_calls.forEach((call, callIndex) => {
-        const id = callIds[callIndex];
-        if (duplicateIds.has(id)) return;
-        if (unparsableIndices.has(callIndex)) return;
-        const name = (call as any)?.function?.name;
-        if (!isString(name) || name.length === 0) return; // L1: nameless call cannot be candidate
-        const declaredAllows = !declared || declared.has(name);
-        if (!declaredAllows) return;
-
-        candidateCallMap.set(id, callIndex);
-      });
-
-      // Scan subsequent contiguous tool messages
-      let j = i + 1;
-      const matchedCallIndices = new Set<number>();
-      const matchedToolIds = new Set<string>();
-
-      while (j < messages.length && messages[j].role === "tool") {
-        const toolMsg = messages[j];
-        const toolCallId = isNonEmptyString(toolMsg.tool_call_id) ? toolMsg.tool_call_id : "";
-        if (toolCallId && candidateCallMap.has(toolCallId) && !matchedToolIds.has(toolCallId)) {
-          matchedToolIds.add(toolCallId);
-          matchedCallIndices.add(candidateCallMap.get(toolCallId)!);
-          keptToolIndices.add(j);
-        }
-        j++;
+    if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
+    m.tool_calls.forEach((call, callIndex) => {
+      const name = call?.function?.name;
+      const declaredAllows = !declared || (isString(name) && declared.has(name));
+      if (!declaredAllows) return; // will be downgraded, don't pair its result
+      if (!hasParsableObjectArguments(call?.function?.arguments)) {
+        return; // truncated/unparsable JSON arguments → downgrade, don't pair result
       }
-
-      keptCallIndicesPerAssistant.set(asstIdx, matchedCallIndices);
-      i = j;
-    } else {
-      i++;
-    }
+      const id = isNonEmptyString(call?.id)
+        ? call.id
+        : stableToolCallId(i, callIndex);
+      candidateCallIds.add(id);
+    });
   }
 
-  // Pass 2: emit messages with structural keeps and deferred downgrades.
-  // Crucial invariant: never insert downgraded assistant text between an assistant
-  // that kept structural tool_calls and its following tool results.
-  // Instead, collect all downgraded tool_calls and duplicate/orphan tool results
-  // in that block, and emit them as a downgraded assistant message AFTER the
-  // contiguous tool block (before the next user/assistant message).
+  // Second pass: a candidate is only KEPT structurally if it has a matching
+  // tool result in the history. A structural tool_call with no result would
+  // leave a dangling call that gateways like ollama reject with
+  // "mismatch between tool calls and tool results" (400). Downgrade instead.
+  const resultIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === "tool" && isNonEmptyString(m.tool_call_id)) {
+      resultIds.add(m.tool_call_id);
+    }
+  }
+  const keepCallIds = new Set<string>();
+  for (const id of candidateCallIds) {
+    if (resultIds.has(id)) keepCallIds.add(id);
+  }
+  // Set relationship: keepCallIds = candidateCallIds ∩ resultIds.
+  // candidateCallIds = tool_calls that passed the declared-name filter.
+  // resultIds = tool messages with a non-empty tool_call_id.
+  // A tool_call is kept structurally only if it is both declared AND has a
+  // matching tool result; everything else (undeclared or dangling) is
+  // downgraded to text in the loop below.
+
   const out: AgentRuntimeChatMessage[] = [];
-  let k = 0;
-  while (k < messages.length) {
-    const m = messages[k];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
 
-    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const asstIdx = k;
-      const keptIndices = keptCallIndicesPerAssistant.get(asstIdx) ?? new Set<number>();
+    if (m.role === "assistant") {
+      let toolCalls: AgentRuntimeToolCall[] | undefined;
+      const downgradedLines: string[] = [];
 
-      const keptToolCalls: AgentRuntimeToolCall[] = [];
-      const downgradedCallLines: string[] = [];
-
-      m.tool_calls.forEach((call, callIndex) => {
-        const name = (call as any)?.function?.name;
-        const declaredAllows = !declared || (isString(name) && declared.has(name));
-        const keep = keptIndices.has(callIndex) && declaredAllows && hasParsableObjectArguments((call as any)?.function?.arguments);
-        if (keep) {
-          const normalized = normalizeToolCall(call, asstIdx, callIndex);
-          if (normalized) {
-            keptToolCalls.push(normalized);
+      if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        const kept: AgentRuntimeToolCall[] = [];
+        m.tool_calls.forEach((call, callIndex) => {
+          const name = call?.function?.name;
+          const declaredAllows =
+            !declared || (isString(name) && declared.has(name));
+          const id = isNonEmptyString(call?.id)
+            ? call.id
+            : stableToolCallId(i, callIndex);
+          // Keep structurally only if declared AND has a matching tool result
+          // (dangling calls without results get downgraded to text to avoid
+          // gateway "mismatch between tool calls and tool results" 400).
+          const keepStructural = declaredAllows && keepCallIds.has(id);
+          if (keepStructural) {
+            const normalized = normalizeToolCall(call, i, callIndex);
+            if (normalized) kept.push(normalized);
           } else {
-            // L1: normalize failed (e.g. malformed or missing name) -> downgrade to text, do NOT drop!
-            downgradedCallLines.push(renderToolCallAsText(call));
+            // Downgrade (undeclared name OR dangling with no result) to text.
+            downgradedLines.push(renderToolCallAsText(call as AgentRuntimeToolCall));
           }
-        } else {
-          downgradedCallLines.push(renderToolCallAsText(call));
-        }
-      });
+        });
+        toolCalls = kept.length > 0 ? kept : undefined;
+      }
 
-      // Case A: All calls were downgraded (none kept).
-      // The assistant carries the downgraded lines directly in its content.
-      if (keptToolCalls.length === 0) {
-        const downgradedText = joinLines(...downgradedCallLines);
-        const contentWithDowngrade = downgradedText.length > 0
+      const downgradedText = joinLines(...downgradedLines);
+      const contentWithDowngrade =
+        downgradedText.length > 0
           ? combineContentWithText(m.content, downgradedText)
           : m.content;
-        const sanitizedAssistant: AgentRuntimeChatMessage = {
-          ...m,
-          content: contentWithDowngrade,
-        };
-        delete sanitizedAssistant.tool_calls;
-        out.push(sanitizedAssistant);
 
-        // Process any following contiguous tool messages: all must be downgraded to text
-        let nextIdx = k + 1;
-        while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
-          out.push({
-            role: "assistant",
-            content: renderToolResultAsText(messages[nextIdx]),
-          });
-          nextIdx++;
-        }
-        k = nextIdx;
-        continue;
-      }
-
-      // Case B: Some (or all) calls survived structurally.
-      // Do NOT modify assistant.content with downgraded text!
-      // Keep assistant.content pristine so no gateway sees text splitting calls and results.
+      // Spread the source first so future-added neutral fields survive, then
+      // override content and tool_calls. tool_calls must be EXPLICITLY set
+      // (undefined when fully downgraded) — a conditional spread would leave
+      // the source's original tool_calls in place via the `...m` spread.
       const sanitizedAssistant: AgentRuntimeChatMessage = {
         ...m,
-        tool_calls: keptToolCalls,
+        content: contentWithDowngrade,
+        tool_calls: toolCalls,
       };
+      // Drop tool_calls entirely when none survived (undefined would still
+      // serialize as a present-but-undefined field on some transports).
+      if (!toolCalls) delete sanitizedAssistant.tool_calls;
       out.push(sanitizedAssistant);
-
-      // Process following contiguous tool messages
-      let nextIdx = k + 1;
-      const deferredResultLines: string[] = [];
-
-      while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
-        if (keptToolIndices.has(nextIdx)) {
-          const toolMsg = messages[nextIdx];
-          out.push({
-            ...toolMsg,
-            content: toolMsg.content ?? "",
-            tool_call_id: toolMsg.tool_call_id!,
-          });
-        } else {
-          deferredResultLines.push(renderToolResultAsText(messages[nextIdx]));
-        }
-        nextIdx++;
-      }
-
-      // If there were any downgraded calls or downgraded results in this block,
-      // emit them together as an assistant message deferred AFTER the tool results!
-      const deferredLines = [...downgradedCallLines, ...deferredResultLines];
-      if (deferredLines.length > 0) {
-        out.push({
-          role: "assistant",
-          content: joinLines(...deferredLines),
-        });
-      }
-
-      k = nextIdx;
       continue;
     }
 
     if (m.role === "tool") {
-      // An isolated tool message outside of any assistant tool block (e.g. orphan)
-      out.push({
-        role: "assistant",
-        content: renderToolResultAsText(m),
-      });
-      k++;
+      const id = isNonEmptyString(m.tool_call_id) ? m.tool_call_id : "";
+      // Keep the tool result structurally only if it pairs with a kept tool_call.
+      if (id && keepCallIds.has(id)) {
+        out.push({ ...m, content: m.content ?? "", tool_call_id: id });
+      } else {
+        // Orphan tool result (no matching kept tool_call) → downgrade to text.
+        out.push({
+          role: "assistant",
+          content: renderToolResultAsText(m),
+        });
+      }
       continue;
     }
 
-    // user / system / assistant without tool_calls: pass through
+    // user / system / other: pass through unchanged.
     out.push({ ...m });
-    k++;
   }
 
   return out;
@@ -592,154 +483,62 @@ export function downgradeUnparsableToolCalls(
     return { messages, downgraded: 0 };
   }
 
-  // Check if any assistant tool_call has unparsable arguments
-  let hasAnyPoison = false;
-  for (const m of messages) {
-    if (m.role === "assistant" && Array.isArray(m.tool_calls)) {
-      for (const call of m.tool_calls) {
-        if (!hasParsableObjectArguments((call as any)?.function?.arguments)) {
-          hasAnyPoison = true;
-          break;
-        }
-      }
-    }
-    if (hasAnyPoison) break;
-  }
-
-  if (!hasAnyPoison) return { messages, downgraded: 0 };
-
-  // Local block pairing: only pair bad call IDs within each contiguous assistant + tool block.
-  // Avoid global poisonIds to prevent cross-turn contamination.
-  // M1 fix: When an ID within the same assistant has mixed good/bad arguments, or duplicate
-  // instances where any is poisoned, downgrade ALL calls sharing that ID to avoid hanging good calls!
-  const poisonedCallsPerAssistant = new Map<number, Set<string>>();
-  const poisonedToolIndices = new Set<number>();
-
-  let i = 0;
-  while (i < messages.length) {
+  const poisonIds = new Set<string>();
+  for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const asstIdx = i;
-      const { unparsableIds } = classifyAssistantCalls(m.tool_calls, asstIdx);
-
-      let j = i + 1;
-      while (j < messages.length && messages[j].role === "tool") {
-        const toolMsg = messages[j];
-        const toolCallId = isNonEmptyString(toolMsg.tool_call_id) ? toolMsg.tool_call_id : "";
-        if (toolCallId && unparsableIds.has(toolCallId)) {
-          poisonedToolIndices.add(j);
-        }
-        j++;
+    if (m.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
+    m.tool_calls.forEach((call, callIndex) => {
+      if (!hasParsableObjectArguments(call?.function?.arguments)) {
+        // Derive the same stable id sanitizeOutboundHistory mints for ID-less
+        // calls, so an id-less poison still pairs (and downgrades) its result.
+        const id = isNonEmptyString(call?.id)
+          ? call.id
+          : stableToolCallId(i, callIndex);
+        poisonIds.add(id);
       }
-
-      if (unparsableIds.size > 0) {
-        poisonedCallsPerAssistant.set(asstIdx, unparsableIds);
-      }
-      i = j;
-    } else {
-      i++;
-    }
+    });
   }
+  if (poisonIds.size === 0) return { messages, downgraded: 0 };
 
   let downgraded = 0;
   const out: AgentRuntimeChatMessage[] = [];
-  let k = 0;
-  while (k < messages.length) {
-    const m = messages[k];
+  for (const m of messages) {
     if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const badIds = poisonedCallsPerAssistant.get(k);
-      if (!badIds || badIds.size === 0) {
-        out.push(m);
-        k++;
-        continue;
-      }
-
       const kept: AgentRuntimeToolCall[] = [];
       const lines: string[] = [];
-      const { callIds } = classifyAssistantCalls(m.tool_calls, k);
-
-      m.tool_calls.forEach((call, callIndex) => {
-        const id = callIds[callIndex];
-        // If this ID is poisoned (has unparsable args, or shares ID with an unparsable call), downgrade it!
-        if (badIds.has(id)) {
-          lines.push(renderToolCallAsText(call));
+      for (const call of m.tool_calls) {
+        if (!hasParsableObjectArguments(call?.function?.arguments)) {
+          lines.push(renderToolCallAsText(call as AgentRuntimeToolCall));
           downgraded++;
         } else {
-          kept.push(call as AgentRuntimeToolCall);
+          kept.push(call);
         }
-      });
-
-      // If nothing survived structurally:
-      if (kept.length === 0) {
-        const sanitized: AgentRuntimeChatMessage = {
-          ...m,
-          content: combineContentWithText(m.content, joinLines(...lines)),
-        };
-        delete sanitized.tool_calls;
-        out.push(sanitized);
-
-        // Process following contiguous tool messages: poisoned ones become assistant messages
-        let nextIdx = k + 1;
-        while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
-          if (poisonedToolIndices.has(nextIdx)) {
-            out.push({ role: "assistant", content: renderToolResultAsText(messages[nextIdx]) });
-          } else {
-            out.push(messages[nextIdx]);
-          }
-          nextIdx++;
-        }
-        k = nextIdx;
+      }
+      if (lines.length === 0) {
+        out.push(m);
         continue;
       }
-
-      // Some calls survived structurally:
-      // Keep assistant.content as-is or append lines, but tool_calls is kept.
-      // Crucial: do NOT emit downgraded tool result messages BEFORE the kept tool results!
       const sanitized: AgentRuntimeChatMessage = {
         ...m,
-        content: lines.length > 0 ? combineContentWithText(m.content, joinLines(...lines)) : m.content,
-        tool_calls: kept,
+        content: combineContentWithText(m.content, joinLines(...lines)),
+        tool_calls: kept.length > 0 ? kept : undefined,
       };
+      // Explicitly drop the field when nothing survived — same rationale as
+      // sanitizeOutboundHistory: undefined would still serialize as a
+      // present-but-undefined field on some transports.
+      if (kept.length === 0) delete sanitized.tool_calls;
       out.push(sanitized);
-
-      // Scan subsequent contiguous tool messages:
-      // Emit healthy tool messages first, defer poisoned tool results!
-      let nextIdx = k + 1;
-      const deferredResultLines: string[] = [];
-      while (nextIdx < messages.length && messages[nextIdx].role === "tool") {
-        if (poisonedToolIndices.has(nextIdx)) {
-          deferredResultLines.push(renderToolResultAsText(messages[nextIdx]));
-        } else {
-          out.push(messages[nextIdx]);
-        }
-        nextIdx++;
-      }
-
-      // Deferred poisoned tool results are emitted AFTER the healthy tool results
-      if (deferredResultLines.length > 0) {
-        out.push({
-          role: "assistant",
-          content: joinLines(...deferredResultLines),
-        });
-      }
-
-      k = nextIdx;
       continue;
     }
-
     if (m.role === "tool") {
-      if (poisonedToolIndices.has(k)) {
+      const id = isNonEmptyString(m.tool_call_id) ? m.tool_call_id : "";
+      if (id && poisonIds.has(id)) {
+        // The call this result pairs with was downgraded → orphan result.
         out.push({ role: "assistant", content: renderToolResultAsText(m) });
-      } else {
-        out.push(m);
+        continue;
       }
-      k++;
-      continue;
     }
-
     out.push(m);
-    k++;
   }
-
   return { messages: out, downgraded };
 }

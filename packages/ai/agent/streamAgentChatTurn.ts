@@ -52,7 +52,6 @@ import {
     getFullChatContextKeys,
     deduplicateContextKeys,
 } from "ai/agent/getFullChatContextKeys";
-import { resolveTurnToolContext } from "./turnToolContext";
 import type { Agent, DialogConfig } from "app/types";
 import { isResponseAPIModel } from "ai/llm/isResponseAPIModel";
 import { resolveAgentContextWindow } from "../../agent-runtime/devin/devinChannelWindows";
@@ -108,7 +107,6 @@ import { updateTotalUsage } from "../chat/updateTotalUsage";
 import { estimateMissingUsage } from "ai/token/missingUsageEstimate";
 import { createSSEParser } from "../chat/parseMultilineSSE";
 import { performServerProxyFetchWithRetry } from "../chat/serverProxyRetry";
-import { buildForegroundTurnAdmissionFetchInit } from "./foregroundTurnAdmissionFetch";
 import { normalizeServerOrigin } from "./serverOrigin";
 import { getIsDesktopApp } from "app/utils/env";
 import { runDesktopAgentRuntimeTurnStream } from "app/utils/desktopAgentRuntimeTurnClient";
@@ -1835,22 +1833,18 @@ export const streamAgentChatTurnHandler = async (
                     ...(currentDialog?.spaceId ? { spaceId: currentDialog.spaceId } : {}),
                 });
                 const remoteRunUrl = `${explicitServerBase.replace(/\/+$/, "")}/api/agent/run`;
-                const remoteRunInit = buildForegroundTurnAdmissionFetchInit({
-                    body: remoteRequestBody,
-                    headers: {
-                        "Content-Type": "application/json",
-                        Accept: "text/event-stream",
-                        ...(authHeader ? { Authorization: authHeader } : {}),
-                    },
-                    signal: loopController.signal,
-                });
                 const remoteResponse = await performServerProxyFetchWithRetry({
-                    execute: () => fetch(remoteRunUrl, remoteRunInit),
+                    execute: () => fetch(remoteRunUrl, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Accept: "text/event-stream",
+                            ...(authHeader ? { Authorization: authHeader } : {}),
+                        },
+                        body: remoteRequestBody,
+                        signal: loopController.signal,
+                    }),
                     signal: loopController.signal,
-                    // A keepalive POST may already have reached the server when
-                    // the connection error surfaces; /api/agent/run stream turns
-                    // are not idempotent, so never silently re-submit it.
-                    retryNetworkErrors: remoteRunInit.keepalive !== true,
                     logPrefix: "[streamAgentChatTurn.remoteRun]",
                 });
 
@@ -1984,56 +1978,97 @@ export const streamAgentChatTurnHandler = async (
             }
         }
 
-        // Shared turn tool context resolver: Single Source of Truth for mentions,
-        // references and context pages across both server-owned admission and legacy client paths.
-        const activeDialogConfig =
-            selectDialogConfigByKey(getState(), explicitDialogKey) ??
-            selectCurrentDialogConfig(getState()) ??
-            currentDialog;
+        // Extract Mentions from userInput if it's potentially Slate content
+        let extractedMentions: CategorizedMentions | undefined;
+        if (Array.isArray(userInput)) {
+            // Basic check if it looks like Slate nodes (has children) or just assume safe to traverse
+            // extractCategorizedMentions handles traversal safely.
+            extractedMentions = extractCategorizedMentions(userInput as any);
+        }
 
-        const turnToolContext = await resolveTurnToolContext({
-            agentConfig,
-            dialogConfig: activeDialogConfig,
-            userInput,
-            state,
-            dispatch,
-            runtimeOptions,
-        });
+        const mentionedTools = extractedMentions?.tools ?? [];
 
-        const mentionedTools = turnToolContext.mentionedToolNames;
-        const normalizedReferences = turnToolContext.resolvedReferences ?? [];
-        const referenceTools = turnToolContext.referencedTools ?? [];
-        const contextTools = turnToolContext.contextTools ?? [];
-        // 附件推导的工具子集（当前输入 + 已加载历史附件的 kind → 工具）。pendingFiles 只覆盖
-        // 「本轮待发」，消息落库后就被清空；附件工具必须从消息 content 现推，这样后续轮次
-        // （例如用户回「第二档」）照样看得见 mediaJobTool。
-        // inline-artifact agent 的短路在 mergeAgentToolsWithRuntime 内部（不是本调用点），
-        // 所以这里加附件工具不会绕过该策略。
-        const attachmentTools = turnToolContext.attachmentToolNames ?? [];
-        const mergedContentCache = turnToolContext.mergedContentCache ?? new Map();
-
+        // 2. 解析引用：包含 tools 的页面自动升级为 instruction
+        const {
+            references: normalizedReferences,
+            contentByKey: referenceContentCache,
+            referencedTools: referenceTools,
+            recommendedSkillTools: referenceRecommendedSkillTools,
+            recommendedSkillHints: referenceRecommendedSkillHints,
+            skillPromptPatches: referenceSkillPromptPatches,
+        } = await resolveReferenceAssets(
+            mergeReferences(agentConfig.references, (selectDialogConfigByKey(getState(), explicitDialogKey) ?? selectCurrentDialogConfig(getState()))?.extraReferences),
+            dispatch
+        );
         logQuickChatPerfStage(quickChatPerfStartedAt, "stream-agent-references-resolved", {
-            referenceCount: normalizedReferences.length,
-            referencedToolCount: referenceTools.length,
+            referenceCount: normalizedReferences?.length ?? 0,
+            referencedToolCount: referenceTools?.length ?? 0,
         });
 
         const agentConfigWithReferences: import("./buildSystemPrompt").AgentRuntimeConfig = {
             ...agentConfig,
             references: normalizedReferences,
             referencedTools: referenceTools,
-            recommendedSkillTools: turnToolContext.recommendedSkillTools,
-            recommendedSkillHints: turnToolContext.recommendedSkillHints,
-            skillPromptPatches: turnToolContext.skillPromptPatches,
+            recommendedSkillTools: referenceRecommendedSkillTools,
+            recommendedSkillHints: referenceRecommendedSkillHints,
+            skillPromptPatches: referenceSkillPromptPatches,
         };
 
         // --- [新增] 提取本次 Handler 启动前的稳定历史消息 ID 集合 ---
         const initialRawMsgs = selectAllMsgs(state, dialogId);
         const initialHistoryIds = new Set(initialRawMsgs.map((m: any) => m.id));
 
+        const keySets = await getFullChatContextKeys(
+            state,
+            dispatch,
+            agentConfigWithReferences,
+            userInput,
+            currentDialog ?? undefined,
+        );
+        const finalKeys = deduplicateContextKeys(keySets);
+        const allContextKeys = new Set<string>([
+            ...finalKeys.botInstructionsContext,
+            ...finalKeys.currentInputContext,
+            ...finalKeys.historyContext,
+            ...finalKeys.botKnowledgeContext,
+        ]);
+
+        // 4. 上下文页面里提取 tools 并缓存内容
+        const {
+            tools: contextTools,
+            contentByKey: contextContentCache,
+            recommendedSkillTools: contextRecommendedSkillTools = [],
+            recommendedSkillHints: contextRecommendedSkillHints = [],
+            skillPromptPatches: contextSkillPromptPatches = [],
+        } = await resolveToolsFromKeys(
+            Array.from(allContextKeys),
+            dispatch,
+            referenceContentCache,
+        );
+
+        const mergedContentCache = new Map<string, any>([
+            ...referenceContentCache,
+            ...contextContentCache,
+        ]);
+
         // 4. 合并工具 (Base + Default + Context + Mentioned + Runtime) + 图片配置
         const agentConfigWithTools = mergeAgentToolsWithRuntime(
-            agentConfigWithReferences,
-            [...contextTools, ...attachmentTools],
+            {
+                ...agentConfigWithReferences,
+                recommendedSkillTools: [
+                    ...(((agentConfigWithReferences as any).recommendedSkillTools ?? []) as string[]),
+                    ...contextRecommendedSkillTools,
+                ],
+                recommendedSkillHints: [
+                    ...(((agentConfigWithReferences as any).recommendedSkillHints ?? []) as string[]),
+                    ...contextRecommendedSkillHints,
+                ],
+                skillPromptPatches: [
+                    ...(((agentConfigWithReferences as any).skillPromptPatches ?? []) as string[]),
+                    ...contextSkillPromptPatches,
+                ],
+            },
+            contextTools,
             mentionedTools,
             runtimeOptions,
             state,

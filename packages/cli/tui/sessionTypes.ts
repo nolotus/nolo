@@ -29,15 +29,6 @@ export type TuiState = {
    */
   updateAvailable?: CliUpdateInfo;
   /**
-   * Whether the welcome screen should print the unauthenticated guidance block.
-   * Computed once at session start (createInitialTuiState) from the real auth
-   * sources — platform token resolvable AND no local credentials — so the pure
-   * renderWelcome path stays env-free and resize repaints don't re-probe the
-   * credential dir. True only when BOTH platform login and local creds are
-   * absent; a user with either already has a working path and isn't nagged.
-   */
-  showAuthGuidance?: boolean;
-  /**
    * 用于解析 paste 行里的相对路径。workspace 启动时从 process.cwd() 取。
    * 保留在 state 里是为了让 handleTuiInput 这种纯函数也能做路径解析。
    */
@@ -79,13 +70,6 @@ export type TuiState = {
    * /new 时清空,跟 attachedDocs 同语义。
    */
   attachedImages: AttachedImage[];
-  /**
-   * /transcribe 产出的 transcript 上下文块（formatTranscriptForModel 结果）。
-   * 语义与 pendingCwdNotice 类似：挂在 state 上，下一条 chat 提交时 prepend
-   * 进发给模型的 message 并清空。用户意图是「转写完我还要就着内容提问」，
-   * 立即自成一个 turn 会打断节奏。
-   */
-  pendingTranscripts?: string[];
   runtimeMode: AgentRuntimeRequestedMode;
   /**
    * 显示在状态栏里的模式标签,默认等于 runtimeMode。
@@ -171,21 +155,10 @@ export type TuiAction =
        * 图像同时在系统剪贴板里，读位图数据不受路径沙盒影响。
        */
       unreadableImagePaths?: string[];
-      /**
-       * 消息里检测到的可读音视频文件路径（m4a/mp4 等）。与 imagePaths 同思路：
-       * action 只带路径，turn 开始前由 router 跑 ffmpeg 预处理 + 转写，
-       * transcript 文本 prepend 进 message 发给模型；路径 token 已从 message
-       * 剥离。转写失败不阻塞消息发送（输出错误行 + 附说明）。
-       */
-      mediaPaths?: string[];
     }
   | {
       type: "compact";
       dialogId: string;
-    }
-  | {
-      type: "learn-history";
-      limit: number;
     }
   | {
       type: "self-update";
@@ -256,20 +229,6 @@ export type TuiAction =
     }
   | {
       type: "exit";
-    }
-  | {
-      /**
-       * `/transcribe <path> [--from T] [--to T] [--lang L] [--denoise L]`：
-       * 空闲路径下由 router 立即执行（ffmpeg 预处理 → /api/transcribe-media
-       * → 保存 txt/srt），产出的 transcript 块塞进 state.pendingTranscripts，
-       * 随下一条用户消息发给模型。
-       */
-      type: "transcribe";
-      path: string;
-      fromSec?: number;
-      toSec?: number;
-      lang?: string;
-      denoise?: "off" | "light" | "strong";
     };
 
 export type TuiInputResult = {

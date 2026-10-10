@@ -4,7 +4,6 @@ export { clipHeadAndTail };
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import { readActionGate } from "../../agent-runtime/actionGate";
 import { parseUiAskChoiceContent } from "../../ai/tools/uiAskChoiceTool";
-import { parseUiCard, uiCardFallback } from "../../ai/tools/uiCardSchema";
 import { formatAgentListCard } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
   formatListRunsCard,
@@ -207,103 +206,6 @@ function formatUiAskChoiceBlock(
   return `${lines.join("\n")}\n`;
 }
 
-function formatShowInteractionBlock(
-  event: LocalAgentToolEvent,
-  colorEnabled: boolean,
-): string {
-  const label = toolLabel(event.toolName || "show_interaction");
-  let parsedPayload: any;
-  if (typeof event.content === "string") {
-    try {
-      parsedPayload = JSON.parse(event.content);
-    } catch {
-      const metadata = (event.metadata ?? {}) as Record<string, unknown>;
-      const rawMetaError = metadata.error ?? metadata.errorMessage;
-      const rawMessage = event.message?.trim();
-      const rawContent = event.content.trim();
-      let reason = "";
-      if (typeof rawMetaError === "string" && rawMetaError.trim()) {
-        reason = rawMetaError.trim();
-      } else if (rawMessage) {
-        reason = rawMessage;
-      } else if (/^\[工具\s*"[^"]+"\s*执行失败:\s*[^\]]+\]$/.test(rawContent)) {
-        reason = rawContent;
-      }
-      const detail = reason ? clip(redactSecrets(cleanUserText(reason)), 96) : "invalid card payload";
-      return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
-    }
-  } else if (event.content && typeof event.content === "object") {
-    parsedPayload = event.content;
-  } else {
-    const metadata = (event.metadata ?? {}) as Record<string, unknown>;
-    const rawMetaError = metadata.error ?? metadata.errorMessage;
-    const reason = (typeof rawMetaError === "string" && rawMetaError.trim()) || event.message?.trim() || "";
-    const detail = reason ? clip(redactSecrets(cleanUserText(reason)), 96) : "invalid card payload";
-    return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
-  }
-
-  // Handle server/tool failure wrapper e.g. { error: "show_interaction", detail: "..." }
-  if (parsedPayload && typeof parsedPayload === "object" && parsedPayload.error) {
-    const detail = typeof parsedPayload.detail === "string" && parsedPayload.detail.trim()
-      ? clip(redactSecrets(cleanUserText(parsedPayload.detail)), 96)
-      : "card error";
-    return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
-  }
-
-  const rawCard =
-    parsedPayload && typeof parsedPayload === "object" && (parsedPayload.type === "show_interaction" || parsedPayload.card !== undefined)
-      ? parsedPayload.card
-      : parsedPayload;
-
-  const parsedCard = parseUiCard(rawCard);
-  if (!parsedCard.ok) {
-    const errorText = clip(redactSecrets(cleanUserText(parsedCard.error)), 96);
-    return formatToolTraceLine(`▸ ${label}  ✗ ${errorText}`, colorEnabled, "error");
-  }
-
-  const fallback = uiCardFallback(parsedCard.value);
-  const maxLines = 12;
-  const maxDisplayWidth = 400;
-
-  const rawLines = fallback.split("\n");
-  const clippedLines: string[] = [];
-  let currentWidth = 0;
-  let wasClipped = false;
-
-  for (let i = 0; i < rawLines.length; i++) {
-    if (clippedLines.length >= maxLines) {
-      wasClipped = true;
-      break;
-    }
-    const cleanLine = redactSecrets(cleanUserText(rawLines[i]));
-    const lineWidth = displayWidth(cleanLine);
-    const separatorWidth = clippedLines.length > 0 ? 1 : 0;
-    if (currentWidth + lineWidth + separatorWidth > maxDisplayWidth) {
-      const remainingWidth = maxDisplayWidth - currentWidth - separatorWidth;
-      if (remainingWidth > 0) {
-        clippedLines.push(truncateByDisplayWidth(cleanLine, remainingWidth));
-      }
-      wasClipped = true;
-      break;
-    }
-    clippedLines.push(cleanLine);
-    currentWidth += lineWidth + separatorWidth;
-  }
-
-  if (clippedLines.length === 0 && rawLines.length > 0 && maxDisplayWidth > 0) {
-    const cleanLine = redactSecrets(cleanUserText(rawLines[0]));
-    clippedLines.push(truncateByDisplayWidth(cleanLine, maxDisplayWidth));
-    wasClipped = true;
-  }
-
-  if (wasClipped) {
-    clippedLines.push("…");
-  }
-
-  const cleanLines = clippedLines.map((l) => (colorEnabled ? themeText(l, "muted", true) : l));
-  return `\n${cleanLines.join("\n")}\n\n`;
-}
-
 function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none" | "error" = "none") {
   if (!colorEnabled) return `${text}\n`;
   if (accent === "error") {
@@ -337,7 +239,6 @@ function renderRunCard(
         ...snapshot,
         agentName: snapshot.agentName ? cleanUserText(snapshot.agentName) : snapshot.agentName,
         taskPreview: snapshot.taskPreview ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview,
-        title: snapshot.title ? cleanUserText(snapshot.title) : snapshot.title,
         lastAssistantText: snapshot.lastAssistantText
           ? cleanUserText(snapshot.lastAssistantText)
           : snapshot.lastAssistantText,
@@ -358,7 +259,6 @@ function renderRunCard(
   const body = isAgentRunTerminalStatus(snapshot.status)
     ? formatFinishedRunCard(name, snapshot.status, {
         runId: snapshot.runId,
-        ...(snapshot.title ? { title: snapshot.title } : {}),
         toolCallCount: source.toolCallCount,
         lastToolNames: source.lastToolNames,
         lastAssistantText: source.lastAssistantText,
@@ -369,7 +269,6 @@ function renderRunCard(
       })
     : formatStatusRunCard(name, snapshot.status, {
         runId: snapshot.runId,
-        ...(snapshot.title ? { title: snapshot.title } : {}),
         toolCallCount: source.toolCallCount,
         lastToolNames: source.lastToolNames,
         lastAssistantText: source.lastAssistantText,
@@ -408,13 +307,7 @@ function recoverOrchestrationCard(
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
-      // The shared card body stays as-is (raw rows are never rewritten); only
-      // its header (`Agents (2)`) is a display label this process owns, so it
-      // is relabeled under the active locale.
-      const card = formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
-      const lines = card.split("\n");
-      lines[0] = t("agentsListLabel", String(agents.length));
-      return lines.join("\n");
+      return formatAgentListCard(agents as Parameters<typeof formatAgentListCard>[0]);
     } catch {
       return null;
     }
@@ -442,14 +335,12 @@ function recoverOrchestrationCard(
 
   if (kind === "start") {
     // safe（normal）投影：与 renderRunCard 同规则清洗 provider 可控文本
-    // （agentName/taskPreview/title 剥 ANSI/OSC、折叠换行）。
+    // （agentName/taskPreview 剥 ANSI/OSC、折叠换行）。
     const name = safe ? cleanUserText(snapshot.agentName ?? "agent") : (snapshot.agentName ?? "agent");
     const task = snapshot.taskPreview ? (safe ? cleanUserText(snapshot.taskPreview) : snapshot.taskPreview) : snapshot.taskPreview;
-    const title = snapshot.title ? (safe ? cleanUserText(snapshot.title) : snapshot.title) : snapshot.title;
     return formatStartRunCard(name, snapshot.status, {
       task,
       runId: snapshot.runId,
-      ...(title ? { title } : {}),
       labels,
     });
   }
@@ -845,48 +736,6 @@ function buildHighlightedEditLine(
  * 名词」；2026-09-02 owner 反转 Run 行——命令改全量安全投影（redactSecrets
  * 脱敏 + 终端宽度截断），其余工具 gist 维持最小可感知名词不变。
  */
-/**
- * 2026-09-26 memory 三工具的紧凑行统一形态：ASCII 记号标语义——
- * `+` 存入（rememberMemory）、`?` 查询（queryMemory）、`-` 删除
- * （deleteMemory）。记号各 1 列 + 1 空格，任何 locale / 终端列宽下都
- * 对齐；全角符号与中文短前缀占 2 列且随字体漂移，emoji 对齐更差，均弃用。
- * 正文取 executor 写入的 runtime metadata 投影：remember→content、
- * query→query、delete→reason 优先，其次 contentKeyword，最后按
- * idsCount 用 TUI i18n 报删除请求数量。正文沿用 normal 工具 gist 的 64 列
- * 预算（搜索 query 也是该预算；Read 的 52 列是路径专用预算）并经
- * redactSecrets 脱敏，出口仍有 withholdIfSecretLike 兜底。工具 label 也走
- * toolLabel 的本地化动作词。gist 不再叠加「已保存记忆」前缀，避免与 label
- * 重复语义并挤占正文。
- */
-const MEMORY_TOOL_GIST_MAX = 64;
-
-function memoryToolGist(
-  toolName: string,
-  metadata: Record<string, unknown>,
-): string {
-  const body = (value: unknown): string => {
-    if (typeof value !== "string" || !value) return "";
-    return clipCompactText(redactSecrets(value), MEMORY_TOOL_GIST_MAX, "…");
-  };
-  if (toolName === "rememberMemory") {
-    const content = body(metadata.content);
-    return content ? `+ ${content}` : "";
-  }
-  if (toolName === "queryMemory") {
-    const query = body(metadata.query);
-    return query ? `? ${query}` : "";
-  }
-  if (toolName === "deleteMemory") {
-    const reason = body(metadata.reason);
-    if (reason) return `- ${reason}`;
-    const keyword = body(metadata.contentKeyword);
-    if (keyword) return `- ${keyword}`;
-    const idsCount = typeof metadata.idsCount === "number" ? metadata.idsCount : 0;
-    if (idsCount > 0) return `- ${t("memoryDeleteRequestedCount", String(idsCount))}`;
-  }
-  return "";
-}
-
 function normalToolGistRaw(event: LocalAgentToolEvent): string {
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
   const toolName = event.toolName || "";
@@ -921,19 +770,16 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
     }
   }
 
-  // Memory 三工具（remember/query/delete）走统一记号 gist，必须排在通用
-  // query/path 回退之前：queryMemory 的 metadata.query 否则会被通用 query
-  // 分支吃掉（失去「?」记号），deleteMemory 的 reason/contentKeyword/
-  // idsCount 则完全落在回退链之外（2026-09-26）。
-  const memoryGist = memoryToolGist(toolName, metadata);
-  if (memoryGist) return memoryGist;
-
   const path = typeof metadata.path === "string" ? metadata.path : "";
   if (path) return pathBasenameGist(path);
   const command = typeof metadata.command === "string" ? metadata.command : "";
   if (command) return commandFullGist(command, normalRunGistMaxWidth());
   const query = typeof metadata.query === "string" ? metadata.query : "";
   if (query) return clipCompactText(query, 64, "…");
+  const remembered = event.toolName === "rememberMemory" && typeof metadata.content === "string"
+    ? metadata.content
+    : "";
+  if (remembered) return clipCompactText(redactSecrets(remembered), 64, "…");
   return "";
 }
 
@@ -985,8 +831,10 @@ function formatNormalToolLine(
   const toolName = event.toolName || pending?.toolName || "tool";
 
   // Interactive / product blocks keep their full rendering in normal mode:
-  // an ask_user menu is the headless reply surface, and run cards
+  // an ask_user menu is the headless reply surface, todo lists and run cards
   // are product status — none of them are shell plumbing (cwd/echo/pipeline).
+  const todoBlock = formatTodoListForCli(event, colorEnabled);
+  if (todoBlock) return todoBlock;
   if (event.type === "tool-result" && (event.toolName === "ask_user" || event.metadata?.uiAskChoice)) {
     const block = formatUiAskChoiceBlock(event, colorEnabled);
     if (block) return block;
@@ -1001,9 +849,6 @@ function formatNormalToolLine(
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
     return formatLoadSkillBlock(event, colorEnabled, { safe: true }) ?? "";
-  }
-  if (event.type === "tool-result" && toolName === "show_interaction") {
-    return formatShowInteractionBlock(event, colorEnabled);
   }
 
   const label = toolLabel(toolName);
@@ -1083,6 +928,50 @@ function resolveLoadSkillName(event: LocalAgentToolEvent): string {
   const match = content.match(/Skill "([^"]+)" loaded inline/);
   if (match?.[1]) return match[1];
   return argName || "skill";
+}
+
+function formatTodoListForCli(
+  event: LocalAgentToolEvent,
+  colorEnabled: boolean,
+): string | undefined {
+  if (event.type !== "tool-result" || event.toolName !== "setTodoList") {
+    return undefined;
+  }
+  let raw: unknown = event.metadata?.displayData;
+  let parsed = typeof raw === "object" && raw !== null;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+      parsed = true;
+    } catch {
+      raw = undefined;
+    }
+  }
+  if (!parsed && typeof event.content === "string") {
+    try {
+      raw = JSON.parse(event.content);
+      parsed = true;
+    } catch {
+      raw = undefined;
+    }
+  }
+  const todos = Array.isArray((raw as any)?.todos)
+    ? (raw as any).todos
+    : undefined;
+  // Do not turn malformed tool output into a false "cleared" Todo state.
+  if (!todos) return undefined;
+  if (todos.length === 0) return "☑ Todo\n  (empty)\n";
+  const lines = todos.map((todo: any) => {
+    const status = todo?.status === "done"
+      ? "✓"
+      : todo?.status === "in_progress"
+        ? "◐"
+        : "○";
+    const title = typeof todo?.title === "string" ? todo.title : "Untitled task";
+    return `  ${status} ${title}`;
+  });
+  const text = [`☑ Todo (${todos.length})`, ...lines].join("\n") + "\n";
+  return colorEnabled ? themeText(text, "chrome") : text;
 }
 
 /**

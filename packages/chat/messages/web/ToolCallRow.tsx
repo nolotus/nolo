@@ -6,11 +6,6 @@ import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
 import { isQuietDetailTool } from "./toolCallPresentation";
-import {
-  isMediaJobPendingConfirmation,
-  toolMessageNeedsDefaultExpansion,
-} from "../toolPresentation";
-import { extractToolCallArgs } from "./toolDisplayName";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
@@ -41,6 +36,7 @@ export interface ToolCallRowProps {
   /** Original tool message; feeds the groupDetail renderer when expanded. */
   message: any;
   t: (key: string, options?: any) => string;
+  conversationTodoEnabled?: boolean;
   /** Called only for explicit user disclosure changes, not status auto-open. */
   onUserDisclosureChange?: (expanded: boolean) => void;
 }
@@ -50,6 +46,7 @@ export const ToolCallRow = memo(
     presentation,
     message,
     t,
+    conversationTodoEnabled = true,
     onUserDisclosureChange,
   }: ToolCallRowProps) => {
     const detailId = `tool-call-row-detail-${useId()}`;
@@ -58,27 +55,16 @@ export const ToolCallRow = memo(
     // Quiet-detail tools (execShell/readFile) stay folded even while running
     // (TUI parity) — long terminal output / file contents must not flood the
     // chat; one click opens the body. Other rows keep running auto-open.
-    // 未决交互卡（报价待选档）必须默认展开：它需要用户操作，藏起来等于阻塞流程。
-    // 用户手动 toggle 之后（userExpanded !== null）一律以用户为准。
     const expanded =
       userExpanded ??
-      (toolMessageNeedsDefaultExpansion(message) ||
-        (presentation.status === "running" &&
-          !isQuietDetailTool(message?.toolName)));
+      (presentation.status === "running" &&
+        !isQuietDetailTool(message?.toolName));
 
     const rawData = safeParse(message?.content);
-    // 媒体任务 start 被确认闸门拦下是「待确认」，不是失败（旧载荷 content 里带
-    // { error: "*_requires_confirmation" }，不能据此判红）。
-    const isPendingConfirmation = isMediaJobPendingConfirmation({
-      toolName: message?.toolName ?? message?.toolPayload?.toolName,
-      rawData,
-      toolPayload: message?.toolPayload,
-    });
     const isError =
-      !isPendingConfirmation &&
-      (message?.toolPayload?.status === "failed" ||
-        !!message?.toolPayload?.error ||
-        !!rawData?.error);
+      message?.toolPayload?.status === "failed" ||
+      !!message?.toolPayload?.error ||
+      !!rawData?.error;
 
     return (
       <div
@@ -186,8 +172,7 @@ export const ToolCallRow = memo(
               openPreview={() => {}}
               navigateToPage={() => {}}
               presentation="groupDetail"
-              toolArgs={extractToolCallArgs(message?.toolPayload)}
-              toolRunId={message?.toolPayload?.toolRunId ?? message?.toolRunId}
+              conversationTodoEnabled={conversationTodoEnabled}
             />
           </div>
         )}

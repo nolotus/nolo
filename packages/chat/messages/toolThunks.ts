@@ -19,10 +19,6 @@ import type { Message, ToolPayload, ToolErrorPayload } from "./types";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
-import {
-  CONFIRMATION_INPUT_KEYS,
-  stripModelConfirmationFlags,
-} from "ai/tools/stripModelConfirmationFlags";
 
 const TOOL_ARGS_SENTINELS = [
   "<|tool_calls_section_end|>",
@@ -111,12 +107,11 @@ const processToolData = createAsyncThunk(
       isRecord(toolArgs) && isRecord(toolArgs._activity)
         ? toolArgs._activity
         : undefined;
-    const withoutActivity =
+    const executionToolArgs =
       isRecord(toolArgs) &&
       Object.prototype.hasOwnProperty.call(toolArgs, "_activity")
         ? (({ _activity: _ignored, ...rest }) => rest)(toolArgs)
         : toolArgs;
-    const executionToolArgs = stripModelConfirmationFlags(withoutActivity);
 
     const inputSummary = JSON.stringify(executionToolArgs).slice(0, 400);
 
@@ -272,14 +267,14 @@ const processToolData = createAsyncThunk(
     } catch (e: any) {
       const errorMessage = toErrorMessage(e);
       const structured = getToolResultErrorData(e);
-      const confirmationKey = structured?.code
-        ? CONFIRMATION_INPUT_KEYS[structured.code]
-        : undefined;
+      const requiresConfirmation =
+        structured?.code === "self_evolution_requires_confirmation" ||
+        structured?.code === "agent_update_requires_confirmation";
 
-      if (confirmationKey) {
+      if (requiresConfirmation) {
         const confirmedInput = {
           ...(executionToolArgs ?? {}),
-          [confirmationKey]: true,
+          __confirmedSelfEvolution: true,
         };
         const summary =
           (typeof structured?.displayData === "string" &&
@@ -312,9 +307,7 @@ const processToolData = createAsyncThunk(
           rawResult:
             structured?.rawData !== undefined
               ? structured.rawData
-              : // 按实际确认码回填（此分支内 code 必在 CONFIRMATION_INPUT_KEYS 中），
-                // 不再对所有工具写死 self_evolution 文案。
-                { error: structured?.code },
+              : { error: "self_evolution_requires_confirmation" },
           summary,
           toolName: canonicalName,
           toolRunId,

@@ -20,8 +20,6 @@ import {
   type ActivityTimelinePhase,
 } from "./toolDisplayName";
 import ToolCallRow from "./ToolCallRow";
-import { isMediaJobPendingConfirmation } from "../toolPresentation";
-import { extractToolCallArgs } from "./toolDisplayName";
 import {
   buildToolCallPresentation,
   formatToolGroupStatusSummary,
@@ -42,6 +40,10 @@ const TR_HEADER_BUTTON_STYLE: React.CSSProperties = {
 
 /** Placeholder phase titles from buildActivityTimeline — never show in UI. */
 const GENERIC_PHASE_TITLES = new Set(["执行工具步骤", "工具"]);
+
+function isVisibleTodoMessage(message: any, enabled: boolean): boolean {
+  return enabled || message?.toolName !== "setTodoList";
+}
 
 /** Stick to bottom while within this distance of the body scroller end. */
 const BODY_STICK_BOTTOM_PX = 56;
@@ -91,6 +93,7 @@ export interface ToolMessageGroupProps {
    */
   canCollapse?: boolean;
   readOnly?: boolean;
+  conversationTodoEnabled?: boolean;
 }
 
 export const ToolMessageGroup = memo(
@@ -98,6 +101,7 @@ export const ToolMessageGroup = memo(
     messages,
     activityMessages,
     canCollapse = false,
+    conversationTodoEnabled = true,
   }: ToolMessageGroupProps) => {
     const { t } = useTranslation("chat");
     const [expandedActions, setExpandedActions] = useState<Set<string>>(
@@ -133,7 +137,14 @@ export const ToolMessageGroup = memo(
       [t]
     );
 
-    const visibleMessages = messages;
+    // Single visibility pass (P0.5): every displayed state — header summary
+    // counts, card status (messageStatus/overallStatus), and the fallback
+    // body — MUST derive from this same filtered list, so a hidden setTodoList
+    // can never leak its status, count, failure, or body into the group.
+    const visibleMessages = useMemo(
+      () => messages.filter((msg) => isVisibleTodoMessage(msg, conversationTodoEnabled)),
+      [messages, conversationTodoEnabled]
+    );
 
     // Compact header summary: total / running / failed calls (i18n-aware).
     // This summary owns the ONLY count in the header — the old wrench count
@@ -151,7 +162,7 @@ export const ToolMessageGroup = memo(
       buildToolCallPresentation(msg, toolNameTranslator);
 
     /**
-     * Artifact-class tools (applyDiff/DiffViewer, image
+     * Artifact-class tools (setTodoList/TodoCard, applyDiff/DiffViewer, image
      * cards, appDeploy …) keep their dedicated ToolMessageContent renderer,
      * ALWAYS mounted — they must never degrade into a disabled flat row that
      * hides the card body after the call settles.
@@ -173,6 +184,7 @@ export const ToolMessageGroup = memo(
           openPreview={() => {}}
           navigateToPage={() => {}}
           presentation="groupDetail"
+          conversationTodoEnabled={conversationTodoEnabled}
         />
       </div>
     );
@@ -182,23 +194,24 @@ export const ToolMessageGroup = memo(
       resolveToolCallMode(msg?.toolName) === "row";
 
     const timeline = useMemo(() => {
-      return buildActivityTimeline(activityMessages ?? messages);
-    }, [activityMessages, messages]);
+      return buildActivityTimeline(
+        (activityMessages ?? messages).filter((message: any) =>
+          isVisibleTodoMessage(message, conversationTodoEnabled),
+        ),
+      );
+    }, [activityMessages, conversationTodoEnabled, messages]);
 
     const messageStatus = useMemo(() => {
       let hasRunning = false;
       let lastSettledStatus: "failed" | "success" | null = null;
+      // P0.5: derive from the SAME visible list as the summary/body — a
+      // hidden setTodoList failure must not fail the whole card.
       for (const msg of visibleMessages) {
         const rawData = safeParse(msg.content);
         const isError =
-          !isMediaJobPendingConfirmation({
-            toolName: msg.toolName,
-            rawData,
-            toolPayload: msg.toolPayload,
-          }) &&
-          (msg.toolPayload?.status === "failed" ||
-            !!msg.toolPayload?.error ||
-            !!rawData?.error);
+          msg.toolPayload?.status === "failed" ||
+          !!msg.toolPayload?.error ||
+          !!rawData?.error;
         if (msg.isStreaming && !canCollapse) hasRunning = true;
         else lastSettledStatus = isError ? "failed" : "success";
       }
@@ -403,14 +416,9 @@ export const ToolMessageGroup = memo(
         expandedActions.has(action.id) || action.status === "running";
       const rawData = safeParse((action.message as any)?.content);
       const isError =
-        !isMediaJobPendingConfirmation({
-          toolName: (action.message as any)?.toolName,
-          rawData,
-          toolPayload: (action.message as any)?.toolPayload,
-        }) &&
-        ((action.message as any)?.toolPayload?.status === "failed" ||
-          !!(action.message as any)?.toolPayload?.error ||
-          !!rawData?.error);
+        (action.message as any)?.toolPayload?.status === "failed" ||
+        !!(action.message as any)?.toolPayload?.error ||
+        !!rawData?.error;
       return (
         <div
           key={action.id}
@@ -446,8 +454,7 @@ export const ToolMessageGroup = memo(
                 openPreview={() => {}}
                 navigateToPage={() => {}}
                 presentation="groupDetail"
-                toolArgs={extractToolCallArgs((action.message as any)?.toolPayload)}
-                toolRunId={(action.message as any)?.toolPayload?.toolRunId}
+                conversationTodoEnabled={conversationTodoEnabled}
               />
             </div>
           )}
@@ -544,6 +551,7 @@ export const ToolMessageGroup = memo(
             presentation={toToolCallPresentation(visibleMessages[0])}
             message={visibleMessages[0]}
             t={t}
+            conversationTodoEnabled={conversationTodoEnabled}
             onUserDisclosureChange={handleUserRowDisclosure}
           />
         ) : null}
@@ -568,6 +576,7 @@ export const ToolMessageGroup = memo(
                         presentation={toToolCallPresentation(message)}
                         message={message}
                         t={t}
+                        conversationTodoEnabled={conversationTodoEnabled}
                         onUserDisclosureChange={handleUserRowDisclosure}
                       />
                     ) : (
@@ -585,6 +594,7 @@ export const ToolMessageGroup = memo(
                       presentation={toToolCallPresentation(msg)}
                       message={msg}
                       t={t}
+                      conversationTodoEnabled={conversationTodoEnabled}
                       onUserDisclosureChange={handleUserRowDisclosure}
                     />
                   ) : (

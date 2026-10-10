@@ -26,43 +26,12 @@ interface Props {
   onRetry?: () => void;
 }
 
-/** 待确认按钮的 DOM 锚点：卡片内联确认（data-pending-confirm）或通用确认栏。 */
-const PENDING_CONFIRM_SELECTOR =
-  '[data-pending-confirm="true"], [data-testid="tool-confirm-row"]';
-
-/** 「等待你确认」徽章点击 → 滚到页面上最后一个待确认入口；找不到则无操作。 */
-export function scrollToPendingConfirm(root: ParentNode | null | undefined = typeof document !== "undefined" ? document : null): boolean {
-  const nodes = root?.querySelectorAll?.(PENDING_CONFIRM_SELECTOR);
-  const target = nodes && nodes.length > 0 ? (nodes[nodes.length - 1] as HTMLElement) : null;
-  if (!target) return false;
-  target.scrollIntoView?.({ behavior: "smooth", block: "center" });
-  return true;
-}
-
 export const LoopStopBadge: React.FC<Props> = ({ reason, onRetry }) => {
   if (!reason || reason === "done") return null;
   const cfg = CONFIG[reason];
-  const isPending = reason === "pending";
 
   return (
-    <div
-      {...(isPending
-        ? {
-            role: "button",
-            tabIndex: 0,
-            title: "定位到待确认按钮",
-            "data-testid": "loop-stop-pending-badge",
-            onClick: () => scrollToPendingConfirm(),
-            onKeyDown: (e: React.KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                scrollToPendingConfirm();
-              }
-            },
-          }
-        : {})}
-      style={{
-      cursor: isPending ? "pointer" : undefined,
+    <div style={{
       display: "inline-flex",
       alignItems: "center",
       gap: 8,

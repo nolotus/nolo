@@ -3,7 +3,6 @@
 import { isRecord } from "core/isRecord";
 import { asTrimmedString } from "core/trimmedString";
 import { clipHeadAndTail } from "core/clipHeadAndTail";
-import { projectUserPartForModel } from "ai/attachments/projectUserPart";
 
 export type MessagePart =
   | { type: "text"; text: string }
@@ -71,14 +70,11 @@ const extractContent = (msg: InternalMessage): string | MessagePart[] | null => 
 
   if (typeof msg.content === "string") return msg.content;
   if (Array.isArray(msg.content)) {
-    const parts = msg.role === "user"
-      ? msg.content.flatMap((part) => projectUserPartForModel(part))
-      : msg.content.filter(isValidMessagePart);
+    const parts = msg.content.filter(isValidMessagePart);
     return parts.length > 0 ? parts : null;
   }
-  if (msg.content && typeof msg.content === "object") {
-    const projected = msg.role === "user" ? projectUserPartForModel(msg.content) : isValidMessagePart(msg.content) ? [msg.content as MessagePart] : [];
-    return projected.length ? projected : null;
+  if (msg.content && typeof msg.content === "object" && isValidMessagePart(msg.content)) {
+    return [msg.content as MessagePart];
   }
   return null;
 };

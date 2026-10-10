@@ -6,10 +6,9 @@ import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
-import { isCloudEdition, useIdentity } from "identity";
+import { useIdentity } from "identity";
 import i18n from "app/i18n/client";
 import { addHostToCurrentServer, getSettings } from "app/settings/settingSlice";
-import { isNonApiSiteHostname } from "app/settings/serverBootstrap";
 import {
   fetchUserSpaceMemberships,
 } from "create/space/member/memberThunks";
@@ -40,6 +39,8 @@ import {
 import { useFavoriteDeps } from "app/favorite/useFavoriteDeps";
 import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 
+const dateUrl = "date.nolo.chat";
+const crmUrl = "crm.nolo.chat";
 const RECENT_SHARE_FOREGROUND_SYNC_SKIP_MS = 4000;
 
 interface AppProps {
@@ -95,21 +96,13 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
 
   useEffect(() => {
     if (lng) i18n.changeLanguage(lng);
-    if (isNonApiSiteHostname(hostname)) return;
+    if (hostname === dateUrl || hostname === crmUrl) return;
 
     // 一次性初始化 Auth
     if (!initializedRef.current) {
       initializedRef.current = true;
       (async () => {
         try {
-          // 挂载后把 currentServer 纠正为运行时 origin（浏览器侧权威值）。
-          // - 正式站点（nolo.chat / us.nolo.chat）：SSR 注入值与 entry.tsx hydrate
-          //   前的覆盖值都是同一个运行时 origin，这里写入的是同一个字符串 →
-          //   immer 不产生新状态，依赖 currentServer 的 effect/selector 不会因此
-          //   重跑，也不会重新打开「先打另一台服务器」的窗口（本次优化的收益）。
-          // - 非白名单 host（localhost 开发 / 局域网 / 自建域名）：SSR 与 hydrate
-          //   首帧都保持默认（与改动前一致），由这里在挂载后纠正到运行时 origin，
-          //   避免新引入 hydration 属性不匹配与指向默认服务器的图片请求。
           if (!isDesktopApp) {
             dispatch(addHostToCurrentServer(runtimeOrigin));
           }
@@ -117,9 +110,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
           if (!accountSession) {
             throw new Error("account session service unavailable");
           }
-          // Keep cloud's pre-hydration UI restore usable while tokens refresh.
-          // Desktop/local retain the existing initialization transition.
-          await accountSession.initialize({ preserveInitialized: isCloudEdition });
+          await accountSession.initialize();
         } catch (e) {
           console.error("系统初始化失败:", e);
         }
@@ -201,7 +192,7 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
   }, [userId, favoritesInitialized, favoriteDeps]);
 
   useEffect(() => {
-    if (isNonApiSiteHostname(hostname)) return;
+    if (hostname === dateUrl || hostname === crmUrl) return;
     // Guest included: actor "local" so local Space can foreground-refresh without remote.
     const spaceActorId = resolveSpaceBootActorId(userId);
     if (readyForegroundSyncUserRef.current !== spaceActorId) return;

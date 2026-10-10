@@ -30,12 +30,6 @@ import type {
 } from "./hostAdapter";
 import { buildDialogSummaryLayer } from "./turnContext";
 import type { AgentRuntimeChatMessage } from "./types";
-import { normalizeUsage } from "../ai/token/normalizeUsage";
-import { composeProviderMessages } from "./providerMessageProjection";
-import { emitLoopEvent } from "./toolCallTransaction";
-import type { LocalLoopObservationBoundary } from "./observationStream";
-import type { AgentExecutionObservationEvent } from "./executionObservation";
-import type { AgentRuntimeMessageContent } from "./types";
 
 /** planCompression 实际读取的字段（见 packages/ai/context/planCompression.ts）。 */
 export type PlanCompressionBridgeMessage = {
@@ -204,80 +198,6 @@ export function isColdResume(
 }
 
 export type LocalAutoCompactionFailureReason = "timeout" | "aborted" | "provider-error";
-
-/**
- * 摘要 fallback 的形状（与 CLI `/compact` 的 `SummaryLlmCaller` 结构完全一致：
- * `(content: string) => Promise<string | null>`，失败/无额度返回 null）。
- *
- * 就地声明而不 `import` CLI 类型：agent-runtime 不能反向依赖 cli 包。CLI 侧
- * 直接把已有的 SummaryLlmCaller 实例按结构传进来即可，不需要适配层。
- */
-export type LocalCompactionSummaryFallback = (
-  content: string,
-) => Promise<string | null>;
-
-/**
- * 主通道失败后的一次性摘要 fallback 调用。
- *
- * 契约：整个压缩流程只调用 fallback 一次；任何异常/非字符串/空串都归为
- * 「没拿到摘要」，由调用方继续走既有 fail-open 路径（绝不静默丢历史）。
- */
-async function runSummaryFallback(
-  fallback: LocalCompactionSummaryFallback,
-  content: string,
-): Promise<string | null> {
-  try {
-    const text = await fallback(content);
-    if (typeof text !== "string") return null;
-    const trimmed = text.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  } catch (error) {
-    console.warn("[localLoop] auto-compaction summary fallback failed:", error);
-    return null;
-  }
-}
-
-// Bounded per-dialog retry suppression.
-//
-// After a summary request fails (timeout / provider error) the same dialog must
-// not re-pay the whole deadline on every following round: that is what produced a
-// repeated 60s stall with no progress. Module scope is deliberate — the compaction
-// controller is rebuilt per turn, while the pain being fixed is exactly the
-// cross-turn repeat. Entries expire on read and the map is capped, so it cannot
-// grow without bound.
-//
-// The clock is always the caller's injected `now`, never `Date.now()`: mixing the
-// two made an injected-clock round read a wall-clock deadline and stay suppressed
-// forever.
-const COMPACTION_RETRY_BACKOFF_MS = 60_000;
-const COMPACTION_RETRY_BACKOFF_MAX_ENTRIES = 256;
-const compactionRetryBackoff = new Map<string, number>();
-
-function isCompactionBackedOff(dialogId: string, now: number): boolean {
-  for (const [key, until] of compactionRetryBackoff) {
-    if (until <= now) compactionRetryBackoff.delete(key);
-  }
-  const until = compactionRetryBackoff.get(dialogId);
-  return until !== undefined && until > now;
-}
-
-function recordCompactionFailure(dialogId: string, now: number): void {
-  compactionRetryBackoff.delete(dialogId);
-  while (compactionRetryBackoff.size >= COMPACTION_RETRY_BACKOFF_MAX_ENTRIES) {
-    const oldest = compactionRetryBackoff.keys().next().value;
-    if (oldest === undefined) break;
-    compactionRetryBackoff.delete(oldest);
-  }
-  compactionRetryBackoff.set(dialogId, now + COMPACTION_RETRY_BACKOFF_MS);
-}
-
-/**
- * 测试专用：模块级退避状态必须能在用例之间归零。否则前一个用例的失败会静默压住
- * 后一个用例（实测：一次超时用例让无关的 5c 用例不再触发压缩）。
- */
-export function resetCompactionRetryBackoffForTests(): void {
-  compactionRetryBackoff.clear();
-}
 export type LocalAutoCompactionPhase =
   | { kind: "validating-context" }
   | { kind: "compaction-start" }
@@ -344,9 +264,7 @@ export type LocalCompactionSkipReason =
   /** 锚点之后没有待处理消息。 */
   | "no-pending"
   /** 触发且调用了摘要模型，但返回空摘要。 */
-  | "summary-empty"
-  /** 上一次摘要失败后的退避窗口内，本轮不再重试摘要（没有发起请求，不是新失败）。 */
-  | "retry-backoff";
+  | "summary-empty";
 
 export type LocalCompactionDecision =
   | {
@@ -394,12 +312,6 @@ export async function maybeAutoCompactLocalHistory(args: {
   /** Omitted preserves historical behavior for direct callers. */
   timeoutMs?: number;
   abortSignal?: AbortSignal;
-  /**
-   * 主通道（agent 自己的 provider）超时 / 失败时的摘要 fallback，最多调用一次。
-   * CLI 传平台摘要 caller（与 /compact 同一条通道，预算独立且有限）；desktop /
-   * 未注入 → 保持既有 fail-open 行为，不新建第二条摘要通道。
-   */
-  summaryFallback?: LocalCompactionSummaryFallback;
   /** Lifecycle only: no prompt, summary, or message content is exposed. */
   onPhase?: (phase: LocalAutoCompactionPhase) => void;
 }): Promise<LocalAutoCompactionResult> {
@@ -573,31 +485,6 @@ export async function maybeAutoCompactLocalHistory(args: {
   if (!plan.shouldCompress) {
     return projectExisting();
   }
-  const retryNow = args.now?.() ?? Date.now();
-  if (isCompactionBackedOff(dialogId, retryNow)) {
-    // 退避窗口内的一轮：历史仍按已持久化摘要投影，但**不**报新的失败——这一轮
-    // 没有发起任何请求，把它记成 provider 失败既是谎报，也让用户每轮都看到重复
-    // 的失败提示（退避要消除的正是这个噪音）。首次失败那一轮照旧如实上报。
-    const projected = projectExisting();
-    const diag = plan.diagnostics;
-    return {
-      ...projected,
-      decision: {
-        outcome: "skipped",
-        skipReason: "retry-backoff",
-        ...(diag
-          ? {
-              estimatedTokens: diag.totalUsed,
-              historyBudget: diag.historyBudget,
-              triggerRatio: diag.triggerRatio,
-              ...(diag.realUsageRatio !== undefined
-                ? { realUsageRatio: diag.realUsageRatio }
-                : {}),
-            }
-          : {}),
-      },
-    };
-  }
 
   emitPhase({ kind: "compaction-start" });
   try {
@@ -646,76 +533,30 @@ export async function maybeAutoCompactLocalHistory(args: {
     const outcome = guards.length ? await Promise.race([request, ...guards]) : await request;
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (abortListener) args.abortSignal?.removeEventListener("abort", abortListener);
-    // 主通道结论：done + 非空内容 = 拿到摘要；其余都是「主通道没拿到摘要」
-    // （timeout / provider-error / done 但返回空内容）。aborted 单独一档，
-    // 绝不 fallback。
-    const result = outcome.kind === "done" ? outcome.value : undefined;
-    let newSummary =
-      typeof result?.content === "string" ? result.content.trim() : "";
-    const primaryFailure: LocalAutoCompactionFailureReason | null =
-      outcome.kind === "aborted"
-        ? "aborted"
-        : newSummary
-          ? null
-          : outcome.kind === "done"
-            ? "provider-error"
-            : outcome.kind;
-    if (primaryFailure === "aborted") {
-      throw Object.assign(new Error("auto-compaction aborted"), {
-        compactionReason: "aborted" as const,
-      });
-    }
-
-    // 主通道没拿到摘要 → 平台摘要 fallback（CLI 复用 /compact 那条通道；
-    // desktop/未注入 = 完全不进这里，行为与今天一致）。上限严格 1 次：整个
-    // 函数只有这一处调用点，且只有两条通道都失败才记 per-dialog 退避，所以
-    // 不可能与退避叠加成多次请求。fallback 拿到的摘要走下面同一条持久化 /
-    // 内容寻址锚点 / schema 版本路径。
-    const summaryFallback = args.summaryFallback;
-    if (primaryFailure && summaryFallback) {
-      const fallbackSummary = await runSummaryFallback(
-        summaryFallback,
-        promptContent,
-      );
-      // 用户在 fallback 在途期间取消：既不能算 provider 失败（不该退避），
-      // 也绝不能落盘任何摘要。
-      if (args.abortSignal?.aborted) {
-        throw Object.assign(new Error("auto-compaction aborted"), {
-          compactionReason: "aborted" as const,
-        });
-      }
-      if (fallbackSummary) newSummary = fallbackSummary;
-    }
-
-    if (!newSummary) {
-      // 两条通道都没拿到摘要：这里才记一次退避（不与 fallback 叠加）。
-      recordCompactionFailure(dialogId, retryNow);
-      if (outcome.kind === "done") {
-        console.warn(
-          "[localLoop] auto-compaction produced empty summary; keeping prior projection",
-        );
-        const failureReason = "provider-error" as const;
-        emitPhase({ kind: "compaction-failed", reason: failureReason });
-        return {
-          ...projectExisting(),
-          failureMessage: "summary model returned empty content",
-          failureReason,
-          decision: {
-            outcome: "failed",
-            reason: failureReason,
-            detail: "summary model returned empty content",
-          },
-        };
-      }
-      const reason: LocalAutoCompactionFailureReason =
-        primaryFailure ?? "provider-error";
-      const detail =
-        outcome.kind === "provider-error"
-          ? outcome.error instanceof Error
-            ? outcome.error.message
-            : String(outcome.error)
-          : `auto-compaction timed out after ${timeoutMs}ms`;
+    if (outcome.kind !== "done") {
+      const reason: LocalAutoCompactionFailureReason = outcome.kind === "timeout" ? "timeout" : outcome.kind === "aborted" ? "aborted" : "provider-error";
+      const detail = outcome.kind === "provider-error" ? (outcome.error instanceof Error ? outcome.error.message : String(outcome.error)) : reason === "timeout" ? `auto-compaction timed out after ${timeoutMs}ms` : "auto-compaction aborted";
       throw Object.assign(new Error(detail), { compactionReason: reason });
+    }
+    const result = outcome.value;
+    const newSummary =
+      typeof result.content === "string" ? result.content.trim() : "";
+    if (!newSummary) {
+      console.warn(
+        "[localLoop] auto-compaction produced empty summary; keeping prior projection",
+      );
+      const failureReason = "provider-error" as const;
+      emitPhase({ kind: "compaction-failed", reason: failureReason });
+      return {
+        ...projectExisting(),
+        failureMessage: "summary model returned empty content",
+        failureReason,
+        decision: {
+          outcome: "failed",
+          reason: failureReason,
+          detail: "summary model returned empty content",
+        },
+      };
     }
 
     await adapter.saveDialogSummary({
@@ -746,7 +587,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       previousSummary: existingSummary,
       plan,
       newSummary,
-      summaryUsage: result?.usage as Record<string, unknown> | undefined,
+      summaryUsage: result.usage as Record<string, unknown> | undefined,
     });
     console.log(formatCompactionMetricsLog(metrics));
 
@@ -763,7 +604,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       beforeTokens:
         metrics.previousSummaryTokens + metrics.compressedTokens,
       afterTokens: metrics.newSummaryTokens + metrics.retainedTokens,
-      ...(result?.usage ? { usage: result.usage as Record<string, unknown> } : {}),
+      ...(result.usage ? { usage: result.usage as Record<string, unknown> } : {}),
       metrics,
       decision: {
         outcome: "compressed",
@@ -797,7 +638,6 @@ export async function maybeAutoCompactLocalHistory(args: {
       error instanceof Error && "compactionReason" in error
         ? (error as Error & { compactionReason: LocalAutoCompactionFailureReason }).compactionReason
         : "provider-error";
-    if (failureReason !== "aborted") recordCompactionFailure(dialogId, retryNow);
     emitPhase({ kind: "compaction-failed", reason: failureReason });
     return {
       ...projectExisting(),
@@ -806,295 +646,4 @@ export async function maybeAutoCompactLocalHistory(args: {
       decision: { outcome: "failed", reason: failureReason, detail: failureMessage },
     };
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Turn 级 compaction controller（localLoop 拆分第二批，从 localLoop.ts 迁入）。
-//
-// 封装一个 turn 的两处压缩入口：
-// - runInitial：轮开始检查（含 loadLastContextUsage 真实遥测读取）；
-// - maybeCompactInLoop：轮内主防线（廉价门控 + 首轮 ephemeral 摘要 adapter +
-//   发送视图投影替换）。
-// phase/observation 映射（emitCompactionPhase / emitCompactionObservation）与
-// 门控策略一并迁入，保持 fail-open、事件顺序与拆分前逐字节一致。
-// ─────────────────────────────────────────────────────────────────────────────
-
-type CompactionLoopEvent = AgentExecutionObservationEvent;
-
-function emitCompactionPhaseEvent(
-  boundary: LocalLoopObservationBoundary,
-  phase: LocalAutoCompactionPhase,
-  scope: "initial" | "in-loop",
-) {
-  const atMs = Date.now();
-  if (phase.kind === "validating-context") emitLoopEvent(boundary, { kind: "turn-phase", phase: "validating-context", atMs, compactionScope: scope } as CompactionLoopEvent);
-  else if (phase.kind === "compaction-start") {
-    emitLoopEvent(boundary, { kind: "turn-phase", phase: "compacting", atMs, compactionScope: scope } as CompactionLoopEvent);
-    emitLoopEvent(boundary, { kind: "compaction-start", atMs, scope } as CompactionLoopEvent);
-  } else if (phase.kind === "waiting-provider") emitLoopEvent(boundary, { kind: "turn-phase", phase: "waiting-provider", atMs, compactionScope: scope } as CompactionLoopEvent);
-  else if (phase.kind === "compaction-end") emitLoopEvent(boundary, { kind: "compaction-end", atMs, scope } as CompactionLoopEvent);
-  else emitLoopEvent(boundary, { kind: "compaction-failed", atMs, scope, reason: phase.reason } as CompactionLoopEvent);
-}
-
-function emitCompactionObservationEvent(
-  boundary: LocalLoopObservationBoundary,
-  compacted: LocalAutoCompactionResult,
-) {
-  const decision = compacted.decision;
-  if (decision?.outcome === "skipped") {
-    const isProtectionGap =
-      decision.skipReason === "adapter-missing-summary-methods" ||
-      decision.skipReason === "load-summary-failed";
-    const approachingBudget =
-      decision.skipReason === "below-trigger" &&
-      typeof decision.estimatedTokens === "number" &&
-      typeof decision.historyBudget === "number" &&
-      decision.historyBudget > 0 &&
-      decision.estimatedTokens >= decision.historyBudget * 0.5;
-    if (!isProtectionGap && !approachingBudget) return;
-  }
-  emitLoopEvent(boundary, {
-    kind: "compaction",
-    atMs: Date.now(),
-    ...(compacted.reason ? { reason: compacted.reason } : {}),
-    summaryGenerated: compacted.summaryGenerated,
-    compressed: compacted.compressed,
-    ...(compacted.failureMessage
-      ? { failed: true, detail: compacted.failureMessage }
-      : {}),
-    ...(decision?.outcome === "skipped"
-      ? { skipped: true, skipReason: decision.skipReason }
-      : {}),
-    ...(decision && "trigger" in decision && decision.trigger
-      ? { trigger: decision.trigger }
-      : {}),
-    ...(decision && "estimatedTokens" in decision && decision.estimatedTokens !== undefined
-      ? { estimatedTokens: decision.estimatedTokens }
-      : {}),
-    ...(decision && "historyBudget" in decision && decision.historyBudget !== undefined
-      ? { historyBudget: decision.historyBudget }
-      : {}),
-    ...(decision && "realUsageRatio" in decision && decision.realUsageRatio !== undefined
-      ? { realUsageRatio: decision.realUsageRatio }
-      : {}),
-    ...(decision && "triggerRatio" in decision && decision.triggerRatio !== undefined
-      ? { triggerRatio: decision.triggerRatio }
-      : {}),
-    ...(compacted.beforeTokens !== undefined
-      ? { beforeTokens: compacted.beforeTokens }
-      : {}),
-    ...(compacted.afterTokens !== undefined
-      ? { afterTokens: compacted.afterTokens }
-      : {}),
-    ...(compacted.savedTokens !== undefined
-      ? { savedTokens: compacted.savedTokens }
-      : {}),
-  } as CompactionLoopEvent);
-}
-
-export type TurnCompactionController = {
-  /**
-   * 轮开始压缩检查（initial scope）。返回（可能被压缩投影替换的）历史与
-   * 摘要调用用量；失败 fail-open，原样返回传入历史。
-   */
-  runInitial(
-    history: AgentRuntimeChatMessage[],
-  ): Promise<{ history: AgentRuntimeChatMessage[]; usage?: Record<string, unknown> }>;
-  /** 轮内压缩主防线（in-loop scope）：工具结果灌水后、下一轮 provider 调用前。 */
-  maybeCompactInLoop(): Promise<void>;
-};
-
-export function createTurnCompactionController(args: {
-  adapter: AgentRuntimeHostAdapter;
-  continueDialogId?: string;
-  model?: string;
-  resolveProvider: () => Promise<AgentRuntimeProvider>;
-  contextWindow: number;
-  compressionTriggerRatio: number;
-  abortSignal?: AbortSignal;
-  timeoutMs?: number;
-  /**
-   * 摘要 fallback（形状 = CLI 的 SummaryLlmCaller）：主通道超时/失败时最多
-   * 调用一次。CLI 本地 runtime 由已登录的平台摘要 caller 注入；不透传 =
-   * 既有 fail-open 行为。
-   */
-  summaryFallback?: LocalCompactionSummaryFallback;
-  boundary: LocalLoopObservationBoundary;
-  /** 最后一次 provider 调用的原始 usage（真实遥测；缺失时走估算兜底）。 */
-  getContextUsage: () => Record<string, unknown> | undefined;
-  /** canonical 坐标底稿：store 全量历史 + 本轮消息的持久化形态。 */
-  getCanonicalCompactionHistory: () => AgentRuntimeChatMessage[];
-  /** 当前发送视图的前缀（压缩重建时保留）。 */
-  getWorkingPrefix: () => AgentRuntimeChatMessage[];
-  /** 发送视图整体替换（只换视图，持久化原文不动）。 */
-  replaceWorkingView: (messages: AgentRuntimeChatMessage[]) => void;
-  contextReferenceResolver?: (reference: AgentRuntimeMessageContent) => boolean;
-  /** 摘要调用用量入账（带外，首次保留完整对象，之后合并）。 */
-  onUsage: (usage: Record<string, unknown>) => void;
-}): TurnCompactionController {
-  const emitPhase = (phase: LocalAutoCompactionPhase, scope: "initial" | "in-loop") =>
-    emitCompactionPhaseEvent(args.boundary, phase, scope);
-  const emitObservation = (compacted: LocalAutoCompactionResult) =>
-    emitCompactionObservationEvent(args.boundary, compacted);
-
-  // 断点修复 1（首轮零保护窗口）：新对话首轮 dialogId 尚未分配（saveTurn
-  // 在循环结束后才创建记录），旧实现 `if (!continueDialogId) return;` 让
-  // 整条压缩管线在最长、最容易灌水失控的首轮完全缺位。现在用 turn 级
-  // 内存摘要存储包装 adapter，跑同一条压缩管线：摘要只活在本轮内、不落盘，
-  // 本轮 prompt 有界；下一轮拿到真 dialogId 后由轮开始检查重新生成并持久化。
-  // 代价仅是首轮可能多一次摘要调用，远低于首轮上下文失控的代价。
-  let ephemeralSummary: Awaited<
-    ReturnType<NonNullable<AgentRuntimeHostAdapter["loadDialogSummary"]>>
-  > = null;
-  const ephemeralDialogId = `ephemeral-${crypto.randomUUID()}`;
-  const compactionAdapter: AgentRuntimeHostAdapter = args.continueDialogId
-    ? args.adapter
-    : {
-        ...args.adapter,
-        loadDialogSummary: async () => ephemeralSummary,
-        saveDialogSummary: async (summaryInput) => {
-          ephemeralSummary = summaryInput;
-        },
-      };
-  const compactionDialogId = args.continueDialogId ?? ephemeralDialogId;
-
-  const runInitial: TurnCompactionController["runInitial"] = async (history) => {
-    // 获取该 dialog 上一次 provider 调用的真实 input tokens（方案 a）。
-    // 来源实现说明：
-    // 轮开始兜底判定的真实遥测：saveTurn 时把最后一次 provider 调用的真实
-    // input tokens 持久化到本地 per-dialog 记录，turn 开始经
-    // adapter.loadLastContextUsage 读回（单 key O(1)，headless/CLI 均可靠）。
-    // 记录缺失（旧对话）安全落到估算兜底。取「最后一次调用」而非累加值，
-    // 精准反映真实上下文占用。主防线是轮内检查（maybeCompactInLoop）。
-    let realContextUsagePercent: number | undefined;
-    if (
-      args.continueDialogId &&
-      typeof (args.adapter as any).loadLastContextUsage === "function"
-    ) {
-      try {
-        const usage = await (args.adapter as any).loadLastContextUsage(
-          args.continueDialogId,
-        );
-        const inputTokens = usage?.inputTokens;
-        // 守卫：数值合理（>0 且 ≤合理上界）才使用；归一化 clamp 到 [0, 1] 比例
-        // 归一化陷阱防范：planCompression.normalizeContextUsageRatio 将 >1 视为百分数且要求结果 ≤1。
-        // 如果直接传入 >1 的比例（如超限 1.04），会被二次除以 100 变成 1.04% 导致误判；
-        // 因此此处强制 clamp 至 [0, 1] 闭区间。
-        if (
-          typeof inputTokens === "number" &&
-          Number.isFinite(inputTokens) &&
-          inputTokens > 0 &&
-          typeof args.contextWindow === "number" &&
-          Number.isFinite(args.contextWindow) &&
-          args.contextWindow > 0
-        ) {
-          realContextUsagePercent = Math.min(
-            1,
-            Math.max(0, inputTokens / args.contextWindow),
-          );
-        }
-      } catch (err) {
-        console.warn("[localLoop] loadLastContextUsage failed:", err);
-      }
-    }
-
-    // 自动上下文压缩：先于预算兜底。摘要持久化，压缩点之间前缀稳定以保住缓存。
-    // 失败只记日志，绝不阻断本轮对话。
-    // 摘要那次 LLM 调用是一次独立的计费调用，用量必须并入本轮 usage，
-    // 否则只出现在 provider 账单上、我们自己的 token 记账看不到。
-    try {
-      const compacted = await maybeAutoCompactLocalHistory({
-        adapter: args.adapter,
-        dialogId: args.continueDialogId,
-        history,
-        model: args.model,
-        resolveProvider: args.resolveProvider,
-        contextWindow: args.contextWindow,
-        realContextUsagePercent,
-        abortSignal: args.abortSignal,
-        timeoutMs: args.timeoutMs,
-        summaryFallback: args.summaryFallback,
-        onPhase: (phase) => emitPhase(phase, "initial"),
-      });
-      emitObservation(compacted);
-      return { history: compacted.history, usage: compacted.usage };
-    } catch (error) {
-      console.warn("[localLoop] auto-compaction unexpected error:", error);
-      return { history };
-    }
-  };
-
-  const maybeCompactInLoop = async (): Promise<void> => {
-    // 断点修复 2（遥测缺失即零保护）：旧实现 `if (!contextUsage) return;`
-    // 与 `if (ratio < trigger) return;` 让「provider 不报 usage」的会话在
-    // 轮内完全没有压缩检查——而估算兜底路径只在轮开始评估一次，轮内灌水
-    // （工具结果恰恰是大头）完全无界，直到 provider 400。现在每轮都让
-    // 决策层跑完整判定：真实占用在手时照旧按触发线强制；缺失时走估算兜底
-    // （与轮开始同一条路径、同一套阈值，语义不变）。
-    const contextUsage = args.getContextUsage();
-    const inputTokens = contextUsage
-      ? normalizeUsage(contextUsage as any).input_tokens
-      : 0;
-    const ratio =
-      inputTokens > 0 ? Math.min(1, inputTokens / args.contextWindow) : undefined;
-    // 廉价门控：真实占用在手且距触发线还有余量（单轮最大灌水 = 工具输出上限
-    // + 回合开销，见 toolOutputCap；0.85 余量保证过线那一轮必然落到评估分支）
-    // 时跳过本轮评估——真实遥测是最准信号，健康路径不为估算付 O(历史) 成本。
-    // 遥测缺失（ratio undefined）必须每轮评估：估算兜底是唯一防线。
-    if (ratio !== undefined && ratio < args.compressionTriggerRatio * 0.85) {
-      return;
-    }
-    try {
-      const compacted = await maybeAutoCompactLocalHistory({
-        adapter: compactionAdapter,
-        dialogId: compactionDialogId,
-        // canonical 坐标：store 全量历史 + 本轮消息的「持久化形态」
-        // （getCanonicalCompactionHistory 内部经 applyPersistedTurnInput 把
-        // 首条 user 消息换成 paste 展开形态）。
-        // 锚点与 sourceHash 都必须按持久化形态计算——否则下轮从 store
-        // 重载后重算 hash 必不匹配，摘要被判无效、白付一次摘要调用。
-        history: args.getCanonicalCompactionHistory(),
-        model: args.model,
-        resolveProvider: args.resolveProvider,
-        contextWindow: args.contextWindow,
-        ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
-        abortSignal: args.abortSignal,
-        timeoutMs: args.timeoutMs,
-        summaryFallback: args.summaryFallback,
-        onPhase: (phase) => emitPhase(phase, "in-loop"),
-      });
-      if (compacted.usage) {
-        args.onUsage(compacted.usage);
-      }
-      if (compacted.compressed) {
-        // 发送视图换投影：prompt 前缀保留，历史部分整体替换。
-        // compacted.compressed=false 时 history 是原样返回的 canonical
-        // 全量，不能换（会把完整历史塞回发送视图）。
-        // 投影从 canonical/raw 重建，与首轮 buildMessages 走同一条
-        // composeProviderMessages 管线：
-        // 1. prepareHistoryForNextTurn：规划用持久化形态（paste 全文），
-        //    发送视图必须恢复 context_reference 紧凑引用——否则 collapsed
-        //    paste 的全文会被重新发回 provider，违反 TUI paste 契约；
-        // 2. 毒丸 tool_calls 降级（幂等纯函数）。
-        // 图片剥离不用重跑，发送 seam 每次 provider 调用都会做
-        // filterImagePartsFromMessages。
-        const rebuilt = composeProviderMessages({
-          prefix: args.getWorkingPrefix(),
-          history: compacted.history,
-          contextReferenceResolver: args.contextReferenceResolver,
-        });
-        if (rebuilt.downgraded > 0) {
-          console.warn(
-            `[nolo] downgraded ${rebuilt.downgraded} tool_call(s) with unparsable JSON arguments from outbound history after compaction; persisted history untouched`,
-          );
-        }
-        args.replaceWorkingView(rebuilt.messages);
-      }
-      emitObservation(compacted);
-    } catch (error) {
-      console.warn("[localLoop] in-loop auto-compaction failed:", error);
-    }
-  };
-
-  return { runInitial, maybeCompactInLoop };
 }

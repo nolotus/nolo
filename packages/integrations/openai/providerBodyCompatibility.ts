@@ -45,67 +45,14 @@ const isOllamaProviderOrEndpoint = (provider: string, endpoint?: string): boolea
   return isOllamaEndpoint(endpoint);
 };
 
-/**
- * Luna Chat Completions supports function calling only with reasoning off.
- * Keep the selected model, endpoint and token/billing fields unchanged.
- */
-export const applyFunctionToolReasoningCompatibility = <T extends Record<string, any>>(
-  body: T,
-  model?: string,
-): T => {
-  const effectiveModel = model ?? body?.model;
-  const isLuna =
-    typeof effectiveModel === "string" &&
-    /(?:^|\/)gpt-6-luna(?:$|[-._].*)/i.test(asTrimmedLowercaseString(effectiveModel));
-  if (
-    isLuna &&
-    Array.isArray(body?.tools) &&
-    body.tools.some((tool: any) => tool?.type === "function")
-  ) {
-    return {
-      ...body,
-      reasoning_effort: "none",
-    };
-  }
-  return body;
-};
-
 export const normalizeChatCompletionsBodyForProvider = ({
   body,
   provider,
   model,
   endpoint,
 }: NormalizeChatCompletionsBodyArgs): Record<string, any> => {
-  let nextBody: Record<string, any> = { ...body, model };
+  const nextBody: Record<string, any> = { ...body, model };
   const normalizedProvider = asTrimmedLowercaseString(provider);
-
-  nextBody = applyFunctionToolReasoningCompatibility(nextBody, model);
-
-  if (Array.isArray(nextBody.messages)) {
-    const isGemini =
-      normalizedProvider === "google" ||
-      normalizedProvider === "google-antigravity" ||
-      normalizedProvider.startsWith("google-") ||
-      normalizedProvider.includes("gemini") ||
-      asTrimmedLowercaseString(model).includes("gemini") ||
-      (typeof endpoint === "string" && endpoint.includes("googleapis.com"));
-    if (!isGemini) {
-      nextBody.messages = nextBody.messages.map((msg: any) => {
-        if (msg?.role === "assistant" && Array.isArray(msg.tool_calls)) {
-          return {
-            ...msg,
-            tool_calls: msg.tool_calls.map((tc: any) => {
-              if (!tc || typeof tc !== "object") return tc;
-              const { id, type = "function", function: fn } = tc;
-              return { id, type, function: fn };
-            }),
-          };
-        }
-        return msg;
-      });
-    }
-  }
-
 
   if (normalizedProvider === "fireworks" && isFireworksKimiModel(model)) {
     delete nextBody.reasoning;

@@ -1,11 +1,6 @@
 import { isRecord } from "core/isRecord";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
-import {
-  parseUiCard,
-  uiCardFallback,
-  UI_CARD_ENVELOPE_MAX_BYTES,
-} from "ai/tools/uiCardSchema";
 
 /** Max chars kept in projected tool content for UI expand (full model path is separate). */
 export const DESKTOP_TOOL_UI_CONTENT_MAX_CHARS = 48_000;
@@ -117,39 +112,10 @@ export function projectDesktopToolUiContent(
           ? args.message
           : "";
 
-  if (toolName === "show_interaction") {
-    try {
-      const parsedContent: unknown = JSON.parse(rawContent);
-      const envelope = isRecord(parsedContent) && isRecord(parsedContent.rawData)
-        ? parsedContent.rawData
-        : parsedContent;
-      const candidate = isRecord(envelope) && envelope.type === "show_interaction"
-        ? envelope.card
-        : envelope;
-      const parsed = parseUiCard(candidate);
-      if (!parsed.ok) return `show_interaction failed: invalid card (${parsed.error})`;
-      const card = parsed.value;
-      // Reuse the schema's own budgets instead of a second combined-size limit:
-      // the card body was already validated against UI_CARD_MAX_BYTES, and the
-      // projection adds the "type"/"card" envelope on top of it, so the wrapped
-      // payload is measured against UI_CARD_ENVELOPE_MAX_BYTES. A schema-valid
-      // card must never fail just because its wrapper crosses the card-only
-      // limit; only redundant fallbackText is dropped when the envelope is over.
-      const cardOnly = JSON.stringify({ type: "show_interaction", card });
-      if (new TextEncoder().encode(cardOnly).byteLength > UI_CARD_ENVELOPE_MAX_BYTES) {
-        return "show_interaction failed: projected card too large";
-      }
-      const canonical = JSON.stringify({
-        type: "show_interaction",
-        card,
-        fallbackText: uiCardFallback(card),
-      });
-      return new TextEncoder().encode(canonical).byteLength <=
-        UI_CARD_ENVELOPE_MAX_BYTES
-        ? canonical
-        : cardOnly;
-    } catch {
-      return "show_interaction failed: invalid JSON card";
+  if (toolName === "setTodoList") {
+    const existing = tryParseJsonRecord(rawContent);
+    if (existing && Array.isArray(existing.todos)) {
+      return clipUiText(JSON.stringify({ todos: existing.todos }));
     }
   }
 

@@ -21,8 +21,7 @@ import {
   enqueueUserInput,
 } from "../dialog/dialogSlice";
 import { sendFirstMessage } from "chat/messages/sendFirstMessage";
-import { preparePendingAttachmentParts } from "chat/messages/preparePendingAttachmentParts";
-import { getMediaJob } from "./mediaJobs";
+import { resolvePendingAttachmentsToMessageParts } from "chat/messages/pendingAttachmentParts";
 import { resolveBrowserModelImageUrl } from "chat/messages/browserImageUrl";
 import { compactDialogAndForkAction } from "chat/dialog/actions/compactDialogAndForkAction";
 import { getPrimaryDialogAgentId, getActiveDialogAgentId } from "chat/dialog/dialogAgents";
@@ -74,67 +73,6 @@ export type TurnLease = {
  */
 export const STALE_LEASE_GRACE_MS = 4000;
 
-/** Legacy helper retained for backwards-compatible tests/callers; send path no longer injects tools here. */
-export const MEDIA_JOB_TOOL_NAME = "mediaJobTool";
-export const withMediaJobExtraTools = <
-  T extends { extraTools?: string[] } | undefined,
->(
-  runtimeOptions: T,
-  pendingFiles: ReadonlyArray<{ type?: string } | null | undefined>,
-): T => {
-  const hasMediaJob = pendingFiles.some(
-    (file) => String(file?.type ?? "").trim() === "media_job",
-  );
-  if (!hasMediaJob) return runtimeOptions;
-
-  const base = (runtimeOptions ?? {}) as { extraTools?: string[] };
-  const existing = base.extraTools ?? [];
-  if (existing.includes(MEDIA_JOB_TOOL_NAME)) return runtimeOptions;
-  return { ...base, extraTools: [...existing, MEDIA_JOB_TOOL_NAME] } as T;
-};
-
-/**
- * media_job pendingFile 只有 {id,name,type,trackingId}，时长要问服务端。
- * 逐项 hydrate；任一项取不到（网络/接口失败）就省略该项时长——绝不阻塞发送。
- */
-export const hydrateMediaJobDurations = async <
-  T extends { id?: string; type?: string; durationSec?: number },
->(
-  files: T[],
-): Promise<T[]> => {
-  const mediaJobs = files.filter(
-    (file) =>
-      String(file?.type ?? "").trim() === "media_job" &&
-      Boolean(file?.id) &&
-      !Number.isFinite(file?.durationSec),
-  );
-  if (mediaJobs.length === 0) return files;
-
-  const durations = new Map<string, number>();
-  await Promise.all(
-    mediaJobs.map(async (file) => {
-      const id = file.id as string;
-      try {
-        const { job } = await getMediaJob(id);
-        const durationSec = Number(job?.durationSec);
-        if (Number.isFinite(durationSec) && durationSec > 0) {
-          durations.set(id, durationSec);
-        }
-      } catch {
-        // 仅影响展示时长，失败不阻塞发送
-      }
-    }),
-  );
-  if (durations.size === 0) return files;
-
-  return files.map((file) => {
-    const durationSec = file.id ? durations.get(file.id) : undefined;
-    return durationSec === undefined
-      ? file
-      : ({ ...file, durationSec } as T);
-  });
-};
-
 export type UseMessageInputSendArgs = {
   text: string;
   textRef: MutableRefObject<string>;
@@ -152,7 +90,6 @@ export type UseMessageInputSendArgs = {
   currentDialogKey: string | null | undefined;
   currentDialogConfig: any;
   currentServer: string | null | undefined;
-  currentUserId?: string | null;
   token: string | null | undefined;
   runtimeOptions?: AgentRuntimeOptions;
   imageUiConfig?: ImageUiConfig | null;
@@ -184,7 +121,6 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
     currentDialogKey,
     currentDialogConfig,
     currentServer,
-    currentUserId,
     token,
     runtimeOptions,
     imageUiConfig,
@@ -529,8 +465,6 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
           }
         : base;
 
-    const effectiveRuntimeOptionsWithTools = effectiveRuntimeOptions;
-
     if (snap.canvasEditSelection) {
       markPendingCanvasEditSelection(snap.canvasEditSelection);
     }
@@ -558,7 +492,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
             messageId: snap.editingSession.messageId,
             originalContent: snap.editingSession.originalContent,
             nextText: trimmed,
-            runtimeOptions: effectiveRuntimeOptionsWithTools,
+            runtimeOptions: effectiveRuntimeOptions,
             targetAgentKey,
             quickChatPerfStartedAt: undefined,
           })
@@ -572,13 +506,14 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
         return;
       }
 
-      const attachmentParts = await preparePendingAttachmentParts(
+      const attachmentParts = await resolvePendingAttachmentsToMessageParts(
         livePendingFiles,
         {
           currentServer: snap.currentServer,
-          currentUserId,
           resolveImageUrl: (imageUrl) =>
-            resolveBrowserModelImageUrl(imageUrl, { authToken: snap.token }),
+            resolveBrowserModelImageUrl(imageUrl, {
+              authToken: snap.token,
+            }),
         }
       );
 
@@ -587,7 +522,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
           text: trimmed,
           imageFiles: currentImageFiles,
           extraParts: attachmentParts,
-          runtimeOptions: effectiveRuntimeOptionsWithTools as any,
+          runtimeOptions: effectiveRuntimeOptions as any,
           targetAgentKey,
         });
         if (snap.canvasEditSelection) {
@@ -602,7 +537,7 @@ export function useMessageInputSend(args: UseMessageInputSendArgs) {
           imageFiles: currentImageFiles,
           extraParts: attachmentParts,
           dialogKey: snap.currentDialogKey ?? undefined,
-          runtimeOptions: effectiveRuntimeOptionsWithTools as any,
+          runtimeOptions: effectiveRuntimeOptions as any,
           targetAgentKey,
         })
       );

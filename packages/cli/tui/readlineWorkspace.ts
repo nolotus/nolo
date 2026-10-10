@@ -42,12 +42,10 @@ import { checkStaleRun, listRunRecords, readRunRecord } from "../agentRunControl
 import { prefetchAgentCatalog } from "./agentCatalog";
 import {
   formatComposerAttachmentLine,
-  detectSubmittedImagePaths,
   mergeAttachedImages,
   popLastAttachedImage,
   summarizeAttachment,
 } from "./pasteImage";
-import { detectSubmittedMediaPaths } from "./mediaAttachment";
 import {
   ClipboardImageError,
   getDefaultClipboardTempDir,
@@ -73,6 +71,7 @@ import {
   formatElapsedSeconds,
   isBackspaceSequence,
   renderPrompt,
+  composeStatusLineWithQueue,
   renderStatusLine,
   renderWelcome,
   DEFAULT_TUI_AGENT_KEY,
@@ -207,11 +206,6 @@ import {
   hitTestHistory,
   type TuiSelectionState,
 } from "./tuiSelection";
-// Ctrl+左键打开正文 http(s) URL：命中判定走 selection 同一套布局行，
-// opener 只用 argv 数组 spawn，不拼 shell、不注入 OSC 8。
-import { openVisibleUrlAtScreen } from "./tuiLinkHit";
-import { openExternalUrl } from "./tuiUrlOpener";
-import { getDiagnostics } from "../diagnostics";
 // S4 迁移：渲染三件套（renderHistoryToOutput / paintSyncedFrame /
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
 // 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
@@ -1339,12 +1333,24 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // path still read the inner buffer, so input "worked" but was invisible).
     const baseFixedInput = createFixedInput(output, {
       getStatusLine: (maxWidth) => {
-        // 排队的消息已经由 composer 上方的队列 UI（getQueueLines）逐条呈现，
-        // 状态栏不再重复一个「N 排队」计数——那是同一件事的第二份、更差的展示。
-        return renderStatusLine(state, maxWidth);
+        // Show the queued-input count while a turn is running so the user can
+        // see their follow-ups are staged, not lost. Mirrors the Web/RN
+        // queue badge via the shared projectChatQueueStatus contract.
+        // composeStatusLineWithQueue treats the badge as optional chrome: it
+        // reserves the badge width only while the degraded status (auto
+        // confirm / running / dirty) still fits beside it, and drops the
+        // badge entirely when it alone would overflow the budget.
+        const queueSuffix =
+          chatQueueBinding && chatQueueBinding.queueLength() > 0
+            ? dimCliText(
+                ` · ${chatQueueBinding.queueLength()} ${t("queuedHint")}`,
+                resolveCliColorEnabled(),
+              )
+            : "";
+        return composeStatusLineWithQueue(state, queueSuffix, maxWidth);
       },
-      getActivityLines: (layout) =>
-        activityIndicator.getActivityLines(resolveCliColorEnabled(), layout),
+      getActivityLines: () =>
+        activityIndicator.getActivityLines(resolveCliColorEnabled()),
       getQueueLines: () => {
         if (!chatQueueBinding || chatQueueBinding.queueLength() === 0) return [];
         const colorEnabled = resolveCliColorEnabled();
@@ -1728,23 +1734,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 原内联于 handleInputToken 的 `if (sequence === "\u0003")` 整块，职责清晰
     // （防误退键盘语义），搬到这里保持纯搬移：不改逻辑、不改输出字节序列。
     // 依赖（busyLock 之外的闭包变量）在交互块作用域内全部可及。
-    // 选区复制/URL 打开的诊断计时：只在 diagnostics 已初始化时落日志
-    // （默认级别会滤掉 debug），绝不写 stderr、不改终端全局配置。
-    const reportTuiDiagnostic = (
-      component: string,
-      level: "debug" | "warn",
-      message: string,
-      fields: Record<string, unknown>,
-    ): void => {
-      try {
-        const logger = getDiagnostics()?.logger;
-        if (!logger) return;
-        logger.child({ component })[level](message, fields);
-      } catch {
-        /* 诊断路径永不抛出、永不影响交互 */
-      }
-    };
-
     // 非空鼠标选区判定（idle/busy 两条 Ctrl+C 分支共用）。
     const hasNonEmptySelection = () =>
       selectionState.anchor !== null &&
@@ -1759,22 +1748,16 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const tty = output as { rows?: number; columns?: number };
       const columns = tty.columns ?? 80;
       const contentWidth = Math.max(1, columns - 1);
-      // 诊断计时（选区复制卡顿定位用）：拆开「布局+提取」与「剪贴板写入」两段。
-      const extractStartedAt = Date.now();
       const textToCopy = extractSelectedText(
         history,
         selectionState.anchor!,
         selectionState.head!,
         contentWidth,
       );
-      const extractMs = Date.now() - extractStartedAt;
       clearSelection();
-      let writeMs = 0;
       if (textToCopy.length > 0) {
         try {
-          const writeStartedAt = Date.now();
           await writeClipboard(textToCopy);
-          writeMs = Date.now() - writeStartedAt;
           emitCommandOutput(t(feedbackKey));
         } catch (error) {
           emitCommandOutput(
@@ -1782,13 +1765,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           );
         }
       }
-      const totalMs = extractMs + writeMs;
-      reportTuiDiagnostic(
-        "tui-selection",
-        totalMs > 150 ? "warn" : "debug",
-        "selection copy timing",
-        { extractMs, writeMs, chars: textToCopy.length },
-      );
       paintFrame(buffer);
     };
 
@@ -1911,14 +1887,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         });
         if (outcome.status === "success") {
           env.AUTH_TOKEN = outcome.token;
-          state = { ...state, showAuthGuidance: false };
         }
-      } else if (res.action?.type === "transcribe") {
-        // /transcribe 要等当前回复结束再跑：转写产物挂在 pendingTranscripts
-        // 上、随下一条消息发出，busy 期间执行没有意义（等回复完再发）。
-        output.write(
-          `[nolo] ${t("transcribeBusyHint")}\n`,
-        );
       } else if (res.action) {
         // `/switch` with no target (interactive picker) and `/switch
         // list` need to take over the screen, which races the in-flight
@@ -2001,26 +1970,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           return;
         }
         const flushCount = chatQueueBinding.queueLength();
-        const flushed = chatQueueBinding.snapshotAndClearQueueWithImages();
-        if (!flushed) return;
-        const merged = flushed.text;
+        const merged = chatQueueBinding.snapshotAndClearQueue();
+        if (!merged) return;
         // Idle: fold the composer draft into the merge so "Ctrl+S = send
         // everything pending right now" holds even when the user is mid-type.
         // Busy keeps the draft (the turn owns the screen; the draft is
         // preserved and editable once the turn ends).
         const draftIncluded = !busy && buffer.trim() !== "";
         const fullText = draftIncluded ? `${buffer}\n${merged}` : merged;
-        const flushedMedia = flushed.mediaPaths ?? [];
-        chatQueueBinding.enqueue(
-          flushed.imagePaths.length > 0 || flushedMedia.length > 0
-            ? {
-                event: { kind: "user", text: fullText },
-                text: fullText,
-                ...(flushed.imagePaths.length > 0 ? { imagePaths: flushed.imagePaths } : {}),
-                ...(flushedMedia.length > 0 ? { mediaPaths: flushedMedia } : {}),
-              }
-            : fullText,
-        );
+        chatQueueBinding.enqueue(fullText);
         // Use a busy-aware message so the busy path does not contradict the
         // subsequent "Stopped this reply." line (review finding: two
         // contradictory toasts). The idle path is plain "flushed N as one".
@@ -2074,33 +2032,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           stopAutoScroll();
           // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
           scrollAnimator.cancel();
-          // Ctrl+左键：只有坐标精确落在这行**可见**的 http(s) URL 字符区间内才用
-          // 系统默认浏览器打开，并消费这次点击（不进入拖选）；未命中原样走下面的
-          // 选区逻辑，普通点击/拖选与 Ctrl+C 复制行为不变。
-          if (
-            mouseEvent.ctrl &&
-            screenRow < visibleHeight &&
-            screenCol < contentWidth &&
-            openVisibleUrlAtScreen(
-              history,
-              contentWidth,
-              history.scrollTop,
-              screenRow,
-              screenCol,
-              visibleHeight,
-              (url) =>
-                openExternalUrl(url, {
-                  onError: (message) =>
-                    reportTuiDiagnostic("tui-link", "warn", "ctrl-click open failed", {
-                      message,
-                    }),
-                }),
-            )
-          ) {
-            clearSelection();
-            paintFrame(buffer);
-            return;
-          }
           if (screenRow < visibleHeight && screenCol < contentWidth) {
             const hit = hitTestHistory(
               history,
@@ -2360,8 +2291,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/profile" ||
             busySlashCommand === "/paste" ||
             busySlashCommand === "/version" ||
-            busySlashCommand === "/links" ||
-            busySlashCommand === "/transcribe";
+            busySlashCommand === "/links";
           if (isBusyLocalSlash) {
             // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
             // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。
@@ -2371,41 +2301,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const { actionGateHandler, confirmDestructiveAction } =
             buildInteractiveTurnHandlers();
           const binding = ensureChatQueueBinding(turnCtx, actionGateHandler, confirmDestructiveAction);
-          // 附件诚实上报：文本内联的可读图片路径随队列携带（TurnRequest.imagePaths，
-          // drain 时才读成 dataURL）；剪贴板暂存图（state.attachedImages）队列带不了，
-          // 作为 attachmentCount 交给共享决议器 → queue-blocked（保留草稿 + 提示）。
-          const busyImages = detectSubmittedImagePaths(submittedText, state.cwd);
-          // 音视频路径同思路剥离：drain 时转写后并入消息体。
-          const busyMedia = detectSubmittedMediaPaths(busyImages.message, state.cwd);
           const decision = binding.resolveSubmit({
             text: submittedText,
             isRunning: true,
-            attachmentCount: state.attachedImages.length,
           });
           if (decision.kind === "queue-text") {
-            if (busyImages.imagePaths.length > 0 || busyMedia.mediaPaths.length > 0) {
-              const message = busyMedia.message.trim() || busyImages.message.trim();
-              binding.enqueue({
-                event: { kind: "user", text: message },
-                text: message,
-                ...(busyImages.imagePaths.length > 0 ? { imagePaths: busyImages.imagePaths } : {}),
-                ...(busyMedia.mediaPaths.length > 0 ? { mediaPaths: busyMedia.mediaPaths } : {}),
-              });
-            } else {
-              binding.enqueue(decision.text);
-            }
+            binding.enqueue(decision.text);
             buffer = "";
             cursorPos = 0;
             fixedInput.repaint(buffer, cursorPos);
           } else if (decision.kind === "queue-blocked") {
-            // 带剪贴板附件的草稿队列带不了；保留草稿（不销毁），并明确提示，
-            // 绝不静默丢图。
-            if (state.attachedImages.length > 0) {
-              emitCommandOutput(
-                `[nolo] ${t("busyAttachmentsBlocked", String(state.attachedImages.length))}`,
-              );
-              if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
-            }
+            // Attachments / mentions can't be queued yet; keep the draft so
+            // the user can resend after the turn. No destructive action.
           } else if (
             decision.kind === "noop" &&
             !submittedText.trim() &&
