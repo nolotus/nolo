@@ -19,6 +19,7 @@ import {
   startMediaJob,
   updateMediaQuote,
 } from "chat/web/mediaJobs";
+import LoadingSpinner from "render/web/ui/LoadingSpinner";
 import { isMediaJobPendingConfirmation } from "../toolPresentation";
 import type { ToolProps } from "./ToolMessageTypes";
 
@@ -127,6 +128,43 @@ const STAGES: Array<{ key: MediaJobStage; label: string }> = [
 const STAGE_LABELS: Record<string, string> = Object.fromEntries(
   STAGES.map((stage) => [stage.key, stage.label]),
 );
+
+/**
+ * 本 job 实际会跑的阶段。规则必须与服务端真值
+ * `packages/server/handlers/mediaJobs/quote.ts` 的 `stagesForDepth` 保持一致
+ * （chat 包不直接 import server 代码，这里镜像一份小纯函数）：
+ * 预处理/转写/标注恒有；outline|full 加总结；translate|full 且有译文语言才加翻译。
+ */
+export function stagesForJob(
+  depth: MediaJobDepth | undefined,
+  hasTarget: boolean,
+): Array<{ key: MediaJobStage; label: string }> {
+  const want = new Set<MediaJobStage>(["preprocess", "transcribe", "label"]);
+  if (depth === "outline" || depth === "full") want.add("summarize");
+  if ((depth === "translate" || depth === "full") && hasTarget) {
+    want.add("translate");
+  }
+  return STAGES.filter((stage) => want.has(stage.key));
+}
+
+/** 已用时间 m:ss（非有限/负数按 0 处理，绝不渲染 NaN）。 */
+function formatElapsed(ms: number): string {
+  const totalSec = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** 进度区「预计 a–b 分钟」；etaSec 非法（NaN/负/倒挂）时返回空串，调用方省略该段。 */
+function formatEtaMinutesRange(etaSec?: [number, number]): string {
+  if (!etaSec || !Array.isArray(etaSec) || etaSec.length < 2) return "";
+  const [min, max] = etaSec;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return "";
+  if (min < 0 || max < 0 || min > max) return "";
+  const a = Math.max(1, Math.round(min / 60));
+  const b = Math.max(a, Math.ceil(max / 60));
+  return a === b ? `预计 ${a} 分钟` : `预计 ${a}–${b} 分钟`;
+}
 
 const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 
@@ -383,6 +421,64 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   const isQuoted = currentStatus === "quoted" && !hasStarted;
   const isProgress = !isQuoted && (currentStatus !== undefined || hasStarted);
 
+  // ===== 挂载对账（事故 2026-10-10 R1/R2）=====
+  // 消息里的 job 只是报价时的历史快照（常为 quoted）；离开页面再回来组件重挂载，
+  // 内存态全丢。所以挂载即向服务端取一次真值，以服务端状态为准：quoted 才显示档位、
+  // running 由下方轮询接管、终态直接显示（done 有产物即「打开笔记」）。
+  // 只读取，绝不触发 start、不绕过确认闸门；失败静默保留快照。
+  // 跳过：待确认启动卡（由下方 pendingStart 挂载查询负责，避免重复请求）；
+  // 快照已是终态（终态不再变化，且守护「终态后不再调用 getMediaJob」）。
+  const reconcileTargetId = jobId || initialJob?.id;
+  const snapshotStatus = initialJob?.status;
+  useEffect(() => {
+    if (!reconcileTargetId || isPendingStart) return;
+    if (snapshotStatus && TERMINAL_STATUSES.has(snapshotStatus)) return;
+    let active = true;
+    getMediaJob(reconcileTargetId)
+      .then((res) => {
+        // 用户在请求返回前已点档位启动：以启动接口返回的 job 为准，不回退成旧状态。
+        if (
+          active &&
+          res?.job &&
+          !startingRef.current &&
+          startedAtRef.current === null
+        ) {
+          setJob(res.job);
+        }
+      })
+      .catch(() => {
+        // 对账失败静默保留快照，不打扰用户
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconcileTargetId, isPendingStart]);
+
+  // ===== 已用时间 =====
+  // MediaJob 上没有「启动时间」字段，按可信度降级：
+  // 1) 本卡内点档位启动的时刻；2) charges 里最早的扣费时刻 at（≈ 第一阶段开始）；
+  // 3) 本卡首次看到运行中的时刻（重挂载后会低估，但不会像 updatedAt 那样每次进度更新就归零）。
+  const startedAtRef = useRef<number | null>(null);
+  const firstSeenRunningRef = useRef<number | null>(null);
+  const isRunningNow = currentStatus === "running";
+  if (isRunningNow && firstSeenRunningRef.current === null) {
+    firstSeenRunningRef.current = Date.now();
+  }
+  const earliestChargeAt = (job?.charges ?? [])
+    .map((c) => c?.at)
+    .filter((at): at is number => typeof at === "number" && Number.isFinite(at))
+    .reduce<number | undefined>((min, at) => (min === undefined || at < min ? at : min), undefined);
+  const runStartedAt =
+    startedAtRef.current ?? earliestChargeAt ?? firstSeenRunningRef.current;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  // 运行中每秒刷新已用时间。用 setTimeout 链而不是 setInterval：不与轮询 interval 混淆。
+  useEffect(() => {
+    if (!isRunningNow) return;
+    const timer = setTimeout(() => setNowTick(Date.now()), 1000);
+    return () => clearTimeout(timer);
+  }, [isRunningNow, nowTick]);
+
   // 轮询运行中的任务（运行中每 3s，终态停）
   useEffect(() => {
     const targetId = jobId || job?.id;
@@ -481,6 +577,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
         job?.sourceLang,
         requiresLang ? effectiveTargetLang : job?.targetLang,
       );
+      startedAtRef.current = Date.now();
       setJob(res.job);
       setHasStarted(true);
     } catch (err: any) {
@@ -1036,6 +1133,57 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
           Object.values(job.stageArtifacts).some(Boolean))),
   );
 
+  // ===== 确认后冻结：只读摘要（从 job.depth/targetLang/quote 还原，刷新后也能还原）=====
+  const confirmedDepth: MediaJobDepth | undefined = isDepth(job?.depth)
+    ? job?.depth
+    : undefined;
+  const confirmedTier = confirmedDepth
+    ? tiers.find((tier) => tier.depth === confirmedDepth)
+    : undefined;
+  const confirmedLabel = confirmedDepth
+    ? (confirmedTier?.label ?? PENDING_TIER_LABELS[confirmedDepth])
+    : undefined;
+  const confirmedLangCode = job?.targetLang;
+  const confirmedLangName = confirmedLangCode
+    ? (TARGET_LANG_CHOICES.find((c) => c.code === confirmedLangCode)?.label ??
+      confirmedLangCode)
+    : undefined;
+  // 报价区间：服务端 job.quote 为准，其次同档位的报价快照；非法数字由 formatCredits 拦成空串。
+  const confirmedCreditsText = formatCredits(
+    job?.quote?.totalCredits ?? confirmedTier?.quote?.totalCredits,
+  );
+  const confirmedSummary = confirmedLabel
+    ? [
+        confirmedLabel,
+        // 只有本档会翻译时才显示译文语言（outline 不翻译，显示语言会误导）
+        confirmedDepth !== "outline" ? confirmedLangName : undefined,
+        confirmedCreditsText || undefined,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+
+  // ===== 进度区：只列本 job 实际会跑的阶段 =====
+  const jobStages = stagesForJob(job?.depth, Boolean(job?.targetLang));
+  const currentStageIdx = jobStages.findIndex((s) => s.key === job?.stage);
+  const etaRange: [number, number] | undefined = job?.quote?.etaSec;
+  const elapsedMs =
+    isRunningNow && runStartedAt !== null && runStartedAt !== undefined
+      ? Math.max(0, nowTick - runStartedAt)
+      : undefined;
+  const etaText = formatEtaMinutesRange(etaRange);
+  const overEta =
+    elapsedMs !== undefined &&
+    etaText !== "" &&
+    Array.isArray(etaRange) &&
+    elapsedMs / 1000 > etaRange[1];
+  const runningDetail = [
+    elapsedMs !== undefined ? `已用 ${formatElapsed(elapsedMs)}` : "",
+    overEta ? "比预计慢，仍在处理" : etaText,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div
       data-testid="media-job-tool-card"
@@ -1411,8 +1559,22 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       {/* 进度卡模式：非 quoted 或已启动 */}
       {isProgress && (
         <div data-testid="job-progress-section">
-          {/* 阶段指示器：预处理→转写→标注→翻译→总结 */}
+          {/* 确认后冻结：档位不再可点，只留一行只读摘要 */}
+          {confirmedSummary && (
+            <div
+              data-testid="job-confirmed-summary"
+              style={{
+                fontSize: "12px",
+                color: "var(--textMuted, #6b7280)",
+                marginBottom: 10,
+              }}
+            >
+              ✓ 已确认：{confirmedSummary}
+            </div>
+          )}
+          {/* 阶段指示器：只列本 job 实际会跑的阶段（同服务端 stagesForDepth） */}
           <div
+            data-testid="job-stage-list"
             style={{
               display: "flex",
               alignItems: "center",
@@ -1422,17 +1584,23 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
               flexWrap: "wrap",
             }}
           >
-            {STAGES.map((s, idx) => {
-              const stageIndex = STAGES.findIndex(
-                (item) => item.key === job?.stage,
-              );
+            {jobStages.map((s, idx) => {
               const isPast =
-                stageIndex > idx || job?.status === "done";
+                job?.status === "done" ||
+                (currentStageIdx >= 0 && currentStageIdx > idx) ||
+                Boolean(job?.stageArtifacts?.[s.key]);
               const isCurrent =
-                stageIndex === idx && job?.status !== "done";
+                !isPast &&
+                currentStageIdx === idx &&
+                job?.status !== "done";
+              const isActive = isCurrent && isRunningNow;
               return (
                 <div
                   key={s.key}
+                  data-testid={`job-stage-${s.key}`}
+                  data-stage-state={
+                    isPast ? "done" : isCurrent ? "current" : "pending"
+                  }
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -1446,8 +1614,17 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     fontWeight: isCurrent ? 600 : 400,
                   }}
                 >
+                  {isPast && <span aria-hidden="true">✓</span>}
+                  {isActive && (
+                    <span
+                      data-testid="job-stage-active-spinner"
+                      style={{ display: "inline-flex" }}
+                    >
+                      <LoadingSpinner size={11} thickness={2} />
+                    </span>
+                  )}
                   <span>{s.label}</span>
-                  {idx < STAGES.length - 1 && (
+                  {idx < jobStages.length - 1 && (
                     <span
                       style={{
                         color: "var(--borderMuted, #d1d5db)",
@@ -1484,16 +1661,11 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     ? "已取消"
                     : job?.status === "awaiting_confirmation"
                       ? "等待超额确认"
-                      : `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"}${
-                          // 进度数字只有在「分母 > 0 且分子 >= 0 且两者都有限」时才拼：
-                          // `?? 0` 盲兜会把「还没上报进度」渲染成「预处理 0/0」，
-                          // total 为 0 时还会拼出「转写 3/0」这种分母为 0 的读数。
-                          progressDone !== undefined &&
-                          progressTotal !== undefined &&
-                          progressTotal > 0 &&
-                          progressDone >= 0
-                            ? ` ${progressDone}/${progressTotal}`
-                            : ""
+                      : // 「<阶段>中 · 已用 m:ss · 预计 a–b 分钟」。不再拼裸「done/total」：
+                        // 那是内部分块计数，用户读成「4 步只走了 0 步」（事故现象 2）。
+                        // 百分比仍由右侧 progressPercent 给出（同一有限数守卫）。
+                        `${STAGE_LABELS[job?.stage ?? "preprocess"] ?? "预处理"}中${
+                          runningDetail ? ` · ${runningDetail}` : ""
                         }`}
             </span>
             {job?.status !== "done" &&

@@ -1,5 +1,8 @@
+import { buildLectureMediaUrl } from "./mediaLectureMediaUrl";
+import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "app/routing";
+import { mediaLectureStyles as styles } from "./MediaLecturePageStyles";
 import type { MediaJob, MediaJobDepth, MediaQuote } from "ai/lecture/types";
 import { LectureOverview } from "render/web/lecture/LectureOverview";
 import {
@@ -146,26 +149,29 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
 
   if (error) {
     return (
-      <main>
-        <p role="alert">{error}</p>
-        <button onClick={() => void load()}>重试</button>
+      <main {...stylex.props(styles.page)}>
+        <p role="alert" {...stylex.props(styles.statusAlert)}>{error}</p>
+        <div>
+          <button {...stylex.props(styles.btn)} onClick={() => void load()}>重试</button>
+        </div>
       </main>
     );
   }
   if (!result || !job) {
     return (
-      <main>
-        <p>正在加载课程笔记…</p>
+      <main {...stylex.props(styles.page)}>
+        <p {...stylex.props(styles.hint)}>正在加载课程笔记…</p>
       </main>
     );
   }
   const Player = result.source.kind === "video" ? "video" : "audio";
-  const mediaUrl = `/api/db/file/content/${encodeURIComponent(result.source.fileId)}`;
+  const mediaUrl = buildLectureMediaUrl(result.source.fileId);
   const running = job.status === "running";
   const canExtend = ["done", "cancelled", "failed"].includes(job.status) && !running;
   const excludedSegments = result.segments.filter((s) => s.excluded);
   const restoreBtn = (segId: string) => (
     <button
+      {...stylex.props(styles.btn)}
       disabled={busy || !canExtend}
       onClick={() => void askQuote({ segmentIds: [segId] }, "恢复为讲课并补翻译")}
     >
@@ -173,36 +179,55 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
     </button>
   );
   const timeBtn = (sec: number) => (
-    <button onClick={() => void seek(sec)}>{hms(sec)}</button>
+    <button {...stylex.props(styles.timeBtn)} onClick={() => void seek(sec)}>{hms(sec)}</button>
   );
+  const tabs: [Tab, string][] = [
+    ["overview", "概览"],
+    ["bilingual", "双语对照"],
+    ["translation", "译文全文"],
+    ["glossary", "术语表"],
+  ];
 
   return (
-    <main>
-      <h1>{result.source.name}</h1>
-      {job.status === "cancelled" && <p role="status">任务已取消，以下为已完成部分的笔记</p>}
-      {running && <p role="status">处理中…</p>}
+    <main {...stylex.props(styles.page)}>
+      <h1 {...stylex.props(styles.title)}>{result.source.name}</h1>
+      {job.status === "cancelled" && (
+        <p role="status" {...stylex.props(styles.statusNotice)}>任务已取消，以下为已完成部分的笔记</p>
+      )}
+      {running && <p role="status" {...stylex.props(styles.statusNotice)}>处理中…</p>}
       <Player
         ref={player as never}
         controls
         src={mediaUrl}
         data-testid="media-player"
         onTimeUpdate={onTimeUpdate}
-        style={{ width: "100%", maxHeight: 420 }}
+        {...stylex.props(styles.player)}
       />
-      {notice && <p role="status" data-testid="notice">{notice}</p>}
+      {notice && (
+        <p role="status" data-testid="notice" {...stylex.props(styles.statusNotice)}>{notice}</p>
+      )}
 
-      <nav aria-label="课程笔记标签">
-        <button onClick={() => setTab("overview")}>概览</button>
-        <button onClick={() => setTab("bilingual")}>双语对照</button>
-        <button onClick={() => setTab("translation")}>译文全文</button>
-        <button onClick={() => setTab("glossary")}>术语表</button>
+      <nav aria-label="课程笔记标签" {...stylex.props(styles.tabBar)}>
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={tab === key}
+            {...stylex.props(styles.tab, tab === key && styles.tabActive)}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
-      <details>
-        <summary>导出</summary>
-        <label>
+      <details {...stylex.props(styles.panel)}>
+        <summary {...stylex.props(styles.panelSummary)}>导出</summary>
+        <div {...stylex.props(styles.actions, styles.formRow)}>
+        <label {...stylex.props(styles.fieldLabel)}>
           字幕格式
           <select
+            {...stylex.props(styles.select)}
             aria-label="字幕格式"
             value={subFormat}
             onChange={(e) => setSubFormat(e.target.value as SubtitleFormat)}
@@ -211,9 +236,10 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
             <option value="vtt">VTT</option>
           </select>
         </label>
-        <label>
+        <label {...stylex.props(styles.fieldLabel)}>
           语言
           <select
+            {...stylex.props(styles.select)}
             aria-label="导出语言"
             value={exportLang}
             onChange={(e) => setExportLang(e.target.value as ExportLang)}
@@ -223,19 +249,22 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
             <option value="src">仅原文</option>
           </select>
         </label>
-        <button onClick={() => void exportFile(subFormat)}>导出字幕</button>
-        <button onClick={() => void exportFile("docx")}>DOCX</button>
-        <button onClick={() => void exportFile("md")}>Markdown</button>
-        <button onClick={() => void exportFile("txt", "src")}>TXT 原文</button>
-        {exportError && <p role="alert" data-testid="export-error">{exportError}</p>}
+        <button {...stylex.props(styles.btn)} onClick={() => void exportFile(subFormat)}>导出字幕</button>
+        <button {...stylex.props(styles.btn)} onClick={() => void exportFile("docx")}>DOCX</button>
+        <button {...stylex.props(styles.btn)} onClick={() => void exportFile("md")}>Markdown</button>
+        <button {...stylex.props(styles.btn)} onClick={() => void exportFile("txt", "src")}>TXT 原文</button>
+        {exportError && <p role="alert" data-testid="export-error" {...stylex.props(styles.statusAlert)}>{exportError}</p>}
+        </div>
       </details>
 
       {job.status === "done" && (
-        <details data-testid="extend-panel">
-          <summary>追加范围/深度</summary>
-          <label>
+        <details data-testid="extend-panel" {...stylex.props(styles.panel)}>
+          <summary {...stylex.props(styles.panelSummary)}>追加范围/深度</summary>
+          <div {...stylex.props(styles.actions, styles.formRow)}>
+          <label {...stylex.props(styles.fieldLabel)}>
             深度
             <select
+              {...stylex.props(styles.select)}
               aria-label="追加深度"
               value={extendDepth}
               onChange={(e) => setExtendDepth(e.target.value as MediaJobDepth)}
@@ -245,41 +274,57 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
               <option value="full">完整</option>
             </select>
           </label>
-          <label>
+          <label {...stylex.props(styles.fieldLabel)}>
             处理到（秒，留空=不变）
-            <input aria-label="追加结束秒数" ref={extendToRef} defaultValue="" inputMode="numeric" />
+            <input
+              {...stylex.props(styles.input)}
+              aria-label="追加结束秒数"
+              ref={extendToRef}
+              defaultValue=""
+              inputMode="numeric"
+            />
           </label>
-          <button disabled={busy} onClick={askScopeDepth}>获取报价</button>
+          <button {...stylex.props(styles.btn)} disabled={busy} onClick={askScopeDepth}>获取报价</button>
+          </div>
         </details>
       )}
 
       {pending && (
-        <section role="dialog" aria-label="确认扣费">
+        <section role="dialog" aria-label="确认扣费" {...stylex.props(styles.dialog)}>
           {pending.body.segmentIds && (
-            <p data-testid="restore-confirm">
+            <p data-testid="restore-confirm" {...stylex.props(styles.dialogText)}>
               恢复此段并补翻译预计需消耗 {creditRange(pending.quote.totalCredits)} 积分，确认继续？
             </p>
           )}
-          <p>
+          <p {...stylex.props(styles.dialogText)}>
             {pending.label}：<span data-testid="quote-text">{formatQuote(pending.quote)}</span>
           </p>
-          <button disabled={busy} onClick={() => void confirmExtend()}>确认并扣费</button>
-          <button onClick={() => setPending(null)}>取消</button>
+          <div {...stylex.props(styles.actions)}>
+            <button {...stylex.props(styles.btn, styles.btnPrimary)} disabled={busy} onClick={() => void confirmExtend()}>确认并扣费</button>
+            <button {...stylex.props(styles.btn)} onClick={() => setPending(null)}>取消</button>
+          </div>
         </section>
       )}
-      {actionError && <p role="alert" data-testid="action-error">{actionError}</p>}
+      {actionError && (
+        <p role="alert" data-testid="action-error" {...stylex.props(styles.statusAlert)}>{actionError}</p>
+      )}
 
-      <button onClick={() => window.location.assign(`/chat?mediaJobId=${encodeURIComponent(id)}`)}>
-        把笔记挂进对话
-      </button>
+      <div>
+        <button
+          {...stylex.props(styles.btn)}
+          onClick={() => window.location.assign(`/chat?mediaJobId=${encodeURIComponent(id)}`)}
+        >
+          把笔记挂进对话
+        </button>
+      </div>
 
       {excludedSegments.length > 0 && (
-        <details>
-          <summary>排除的片段</summary>
-          <p>灰色片段为排除内容。</p>
-          <ul>
+        <details {...stylex.props(styles.panel)}>
+          <summary {...stylex.props(styles.panelSummary)}>排除的片段</summary>
+          <p {...stylex.props(styles.hint)}>灰色片段为排除内容。</p>
+          <ul {...stylex.props(styles.list)}>
             {excludedSegments.map((s) => (
-              <li key={s.id} data-segment-id={s.id}>
+              <li key={s.id} data-segment-id={s.id} {...stylex.props(styles.glossaryItem)}>
                 <span>{s.text}</span> — 已排除 {restoreBtn(s.id)}
               </li>
             ))}
@@ -289,52 +334,54 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
 
       {tab === "overview" && <LectureOverview result={result} onSeek={(sec) => void seek(sec)} />}
       {tab === "bilingual" && (
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>原文</th>
-              <th>译文</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.segments.map((s) => {
-              const playing = activeSegId === s.id;
-              return (
-                <tr
-                  key={s.id}
-                  data-row-id={s.id}
-                  className={playing ? "seg-row is-active" : "seg-row"}
-                  data-active={playing ? "true" : undefined}
-                  aria-current={playing ? "true" : undefined}
-                  style={playing ? { background: "rgba(250, 204, 21, 0.25)" } : undefined}
-                >
-                  <td>{timeBtn(s.startSec)}</td>
-                  <td>{s.text}</td>
-                  <td>{s.translation}</td>
-                  <td>{s.excluded ? restoreBtn(s.id) : ""}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div {...stylex.props(styles.tableWrap)}>
+          <table {...stylex.props(styles.table)}>
+            <thead>
+              <tr>
+                <th {...stylex.props(styles.th)}>时间</th>
+                <th {...stylex.props(styles.th)}>原文</th>
+                <th {...stylex.props(styles.th)}>译文</th>
+                <th {...stylex.props(styles.th)}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.segments.map((s) => {
+                const playing = activeSegId === s.id;
+                const rowSx = stylex.props(playing && styles.rowActive);
+                return (
+                  <tr
+                    key={s.id}
+                    data-row-id={s.id}
+                    className={[rowSx.className, playing ? "seg-row is-active" : "seg-row"].filter(Boolean).join(" ")}
+                    data-active={playing ? "true" : undefined}
+                    aria-current={playing ? "true" : undefined}
+                  >
+                    <td {...stylex.props(styles.td)}>{timeBtn(s.startSec)}</td>
+                    <td {...stylex.props(styles.td)}>{s.text}</td>
+                    <td {...stylex.props(styles.td)}>{s.translation}</td>
+                    <td {...stylex.props(styles.td)}>{s.excluded ? restoreBtn(s.id) : ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       {tab === "translation" && (
-        <section>
+        <section {...stylex.props(styles.panel)}>
           {result.segments
             .filter((s) => !s.excluded)
             .map((s) => (
-              <p key={s.id}>
+              <p key={s.id} {...stylex.props(styles.translationItem)}>
                 {timeBtn(s.startSec)} {s.translation}
               </p>
             ))}
         </section>
       )}
       {tab === "glossary" && (
-        <ul>
+        <ul {...stylex.props(styles.list)}>
           {result.glossary.map((t, i) => (
-            <li key={i}>
+            <li key={i} {...stylex.props(styles.glossaryItem)}>
               {t.source} → {t.target}
               {t.note ? ` — ${t.note}` : ""}
             </li>

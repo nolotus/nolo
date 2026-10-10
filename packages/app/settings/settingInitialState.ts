@@ -24,10 +24,19 @@ import { resolveCloudBootstrapServer } from "./serverBootstrap";
  * matching the inline bootstrap script so GlobalThemeController never overwrites
  * the correct pre-paint theme with a stale hardcoded default.
  */
+const safeLocalStorage = (): Storage | undefined => {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : undefined;
+  } catch {
+    // sandbox iframe（opaque origin）访问 localStorage 会抛 SecurityError
+    return undefined;
+  }
+};
+
 const _preloadedTheme =
   typeof window !== "undefined"
     ? resolveThemeModePreload({
-        storage: typeof localStorage !== "undefined" ? localStorage : undefined,
+        storage: safeLocalStorage(),
         systemPrefersDark:
           typeof window.matchMedia === "function"
             ? window.matchMedia(SYSTEM_DARK_MEDIA_QUERY).matches

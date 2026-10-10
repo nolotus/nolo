@@ -147,7 +147,7 @@ function useArtifactData() {
 function ArtifactRuntimePage() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [Component, setComponent] = useState<React.ComponentType | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => sendHeight());
@@ -155,7 +155,7 @@ function ArtifactRuntimePage() {
     resizeObserver.observe(document.body);
 
     const handleError = (message: string) => {
-      setFailed(true);
+      setFailed(message || "runtime error");
       postToHost({ type: ARTIFACT_ERROR, message });
       sendHeight();
     };
@@ -185,7 +185,7 @@ function ArtifactRuntimePage() {
       }
 
       try {
-        setFailed(false);
+        setFailed(null);
         const runtimeScope = {
           React,
           ReactECharts,
@@ -251,7 +251,7 @@ function ArtifactRuntimePage() {
         data-nolo-artifact-root
       >
         {failed ? (
-          <div className="nolo-artifact-error">页面正在生成，请稍候重试。</div>
+          <div className="nolo-artifact-error" data-nolo-artifact-error-message={failed}>内容渲染失败</div>
         ) : Component ? (
           <React.Suspense fallback={<div className="nolo-artifact-loading">图表加载中…</div>}>
             <Component />

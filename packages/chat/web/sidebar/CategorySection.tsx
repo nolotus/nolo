@@ -54,7 +54,7 @@ interface CategorySectionProps {
   categoryName: string;
   items: SpaceContent[];
   /**
-   * 子对话按 parentDialogId 分组的 map（key = parentDialogId，即父对话的 id）。
+   * 子对话（parentDialogId 非空且 !== 自身 id）按 parentDialogId 分组的 map（key = parentDialogId，即父对话的 id）。
    * 侧边栏用它把子对话折叠到父对话下。父对话通过 extractCustomId(contentKey)
    * 提取 id 后在此 map 里查子对话。
    */

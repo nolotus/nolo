@@ -4,6 +4,7 @@ export { clipHeadAndTail };
 import type { LocalAgentToolEvent } from "../../agent-runtime/localLoop";
 import { readActionGate } from "../../agent-runtime/actionGate";
 import { parseUiAskChoiceContent } from "../../ai/tools/uiAskChoiceTool";
+import { parseUiCard, uiCardFallback } from "../../ai/tools/uiCardSchema";
 import { formatAgentListCard } from "../../ai/tools/agent/agentRunDisplayHelpers";
 import {
   formatListRunsCard,
@@ -204,6 +205,103 @@ function formatUiAskChoiceBlock(
     lines.push(`  ${hint}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatShowInteractionBlock(
+  event: LocalAgentToolEvent,
+  colorEnabled: boolean,
+): string {
+  const label = toolLabel(event.toolName || "show_interaction");
+  let parsedPayload: any;
+  if (typeof event.content === "string") {
+    try {
+      parsedPayload = JSON.parse(event.content);
+    } catch {
+      const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+      const rawMetaError = metadata.error ?? metadata.errorMessage;
+      const rawMessage = event.message?.trim();
+      const rawContent = event.content.trim();
+      let reason = "";
+      if (typeof rawMetaError === "string" && rawMetaError.trim()) {
+        reason = rawMetaError.trim();
+      } else if (rawMessage) {
+        reason = rawMessage;
+      } else if (/^\[工具\s*"[^"]+"\s*执行失败:\s*[^\]]+\]$/.test(rawContent)) {
+        reason = rawContent;
+      }
+      const detail = reason ? clip(redactSecrets(cleanUserText(reason)), 96) : "invalid card payload";
+      return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
+    }
+  } else if (event.content && typeof event.content === "object") {
+    parsedPayload = event.content;
+  } else {
+    const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+    const rawMetaError = metadata.error ?? metadata.errorMessage;
+    const reason = (typeof rawMetaError === "string" && rawMetaError.trim()) || event.message?.trim() || "";
+    const detail = reason ? clip(redactSecrets(cleanUserText(reason)), 96) : "invalid card payload";
+    return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
+  }
+
+  // Handle server/tool failure wrapper e.g. { error: "show_interaction", detail: "..." }
+  if (parsedPayload && typeof parsedPayload === "object" && parsedPayload.error) {
+    const detail = typeof parsedPayload.detail === "string" && parsedPayload.detail.trim()
+      ? clip(redactSecrets(cleanUserText(parsedPayload.detail)), 96)
+      : "card error";
+    return formatToolTraceLine(`▸ ${label}  ✗ ${detail}`, colorEnabled, "error");
+  }
+
+  const rawCard =
+    parsedPayload && typeof parsedPayload === "object" && (parsedPayload.type === "show_interaction" || parsedPayload.card !== undefined)
+      ? parsedPayload.card
+      : parsedPayload;
+
+  const parsedCard = parseUiCard(rawCard);
+  if (!parsedCard.ok) {
+    const errorText = clip(redactSecrets(cleanUserText(parsedCard.error)), 96);
+    return formatToolTraceLine(`▸ ${label}  ✗ ${errorText}`, colorEnabled, "error");
+  }
+
+  const fallback = uiCardFallback(parsedCard.value);
+  const maxLines = 12;
+  const maxDisplayWidth = 400;
+
+  const rawLines = fallback.split("\n");
+  const clippedLines: string[] = [];
+  let currentWidth = 0;
+  let wasClipped = false;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    if (clippedLines.length >= maxLines) {
+      wasClipped = true;
+      break;
+    }
+    const cleanLine = redactSecrets(cleanUserText(rawLines[i]));
+    const lineWidth = displayWidth(cleanLine);
+    const separatorWidth = clippedLines.length > 0 ? 1 : 0;
+    if (currentWidth + lineWidth + separatorWidth > maxDisplayWidth) {
+      const remainingWidth = maxDisplayWidth - currentWidth - separatorWidth;
+      if (remainingWidth > 0) {
+        clippedLines.push(truncateByDisplayWidth(cleanLine, remainingWidth));
+      }
+      wasClipped = true;
+      break;
+    }
+    clippedLines.push(cleanLine);
+    currentWidth += lineWidth + separatorWidth;
+  }
+
+  if (clippedLines.length === 0 && rawLines.length > 0 && maxDisplayWidth > 0) {
+    const cleanLine = redactSecrets(cleanUserText(rawLines[0]));
+    clippedLines.push(truncateByDisplayWidth(cleanLine, maxDisplayWidth));
+    wasClipped = true;
+  }
+
+  if (wasClipped) {
+    clippedLines.push("…");
+  }
+
+  const cleanLines = clippedLines.map((l) => (colorEnabled ? themeText(l, "muted", true) : l));
+  return `\n${cleanLines.join("\n")}\n\n`;
 }
 
 function formatToolTraceLine(text: string, colorEnabled: boolean, accent: "none" | "error" = "none") {
@@ -903,6 +1001,9 @@ function formatNormalToolLine(
   }
   if (event.type === "tool-result" && toolName === "loadSkill") {
     return formatLoadSkillBlock(event, colorEnabled, { safe: true }) ?? "";
+  }
+  if (event.type === "tool-result" && toolName === "show_interaction") {
+    return formatShowInteractionBlock(event, colorEnabled);
   }
 
   const label = toolLabel(toolName);
