@@ -120,6 +120,20 @@ const agentRuntimeBrowserCompatPlugin = {
     });
   },
 };
+// `app/i18n/runtime` 的 web slim 边界：浏览器端全部 namespace 由
+// /public/locales/*.json 提供（clientResources.ts 加载），runtime.ts 静态内联的
+// ai/chat/space locale 在 web 入口静态闭包里是纯重复（约 310 KB）。重定向到
+// runtime.web.ts（复用 app/i18n/client 的同一 i18n 单例，不新增初始化路径）。
+// 只影响 web esbuild 构建；headless/CLI/RN/server 不读本配置，仍解析真实 runtime.ts。
+const i18nRuntimeWebSlimPlugin = {
+  name: "i18n-runtime-web-slim",
+  setup(build) {
+    build.onResolve({ filter: /^app\/i18n\/runtime(\.ts)?$/ }, () => ({
+      path: join(configDir, "../../packages/app/i18n/runtime.web.ts"),
+    }));
+  },
+};
+
 const INPUT_ENTRY = "./packages/web/entry.tsx";
 const ARTIFACT_RUNTIME_ENTRY = "./packages/web/artifactRuntime.tsx";
 const ENABLE_WEB_SOURCEMAP = process.env.NOLO_WEB_SOURCEMAP === "1";
@@ -316,6 +330,7 @@ const baseConfig = {
 
   plugins: [
     agentRuntimeBrowserCompatPlugin,
+    i18nRuntimeWebSlimPlugin,
     // Desktop edition fail-closed gate（仅 NOLO_WEB_EDITION=desktop 时注入）。
     ...(desktopEditionFailClosedPlugin ? [desktopEditionFailClosedPlugin] : []),
     // StyleX（@stylexjs/unplugin 的 esbuild 适配器）：

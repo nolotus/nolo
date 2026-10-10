@@ -1,4 +1,25 @@
 
+## 0.98.0
+
+## 0.98.0 (2026-10-10)
+
+### Features
+
+* **agent:** add Mistral subscription provider preset ([ca24d8b](https://github.com/nolotus/bun-nolo/commit/ca24d8bb262228c6f7e56f78008ab1da2be18074))
+* **agent:** show the upstream plan badge for Mistral subscription agents ([9e471aa](https://github.com/nolotus/bun-nolo/commit/9e471aa3fb23925ed5dd7dda6eff8fae38a2a981))
+* **theme:** unify default app appearance with nature landing palette ([2ca75fb](https://github.com/nolotus/bun-nolo/commit/2ca75fb598b5507d8df3d4bc5b653859e66eb084))
+
+### Bug Fixes
+
+* **server:** clear the server typecheck errors alpha added over main ([128dfae](https://github.com/nolotus/bun-nolo/commit/128dfae41bb9fae02a201592302a5da31185c411))
+* **types:** 清理既有类型错误与 skillProjectionGuard 失败（零运行时行为变化） ([995e3dd](https://github.com/nolotus/bun-nolo/commit/995e3dd98b63a5b86f3e519d03da8506522f751a))
+
+### Performance Improvements
+
+* **auth:** restore cloud identity before hydration and preload entry modules ([b533b2e](https://github.com/nolotus/bun-nolo/commit/b533b2e8555b879c549f5c216c6651f780a63527))
+* **web:** defer route modules and load locale resources on demand ([c975fa8](https://github.com/nolotus/bun-nolo/commit/c975fa854f07cade1c192dce65c46f074ff358d7))
+
+
 ## 0.97.8
 
 ## 0.97.8 (2026-10-10)

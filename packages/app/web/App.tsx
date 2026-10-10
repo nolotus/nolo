@@ -6,7 +6,7 @@ import { useRoutes, useLocation } from "app/routing";
 import { MyToastRegion as Toaster } from "render/web/ui/Toast";
 
 import { useAccountSessionService, useAppDispatch, useAppSelector } from "app/store";
-import { useIdentity } from "identity";
+import { isCloudEdition, useIdentity } from "identity";
 import i18n from "app/i18n/client";
 import { addHostToCurrentServer, getSettings } from "app/settings/settingSlice";
 import {
@@ -110,7 +110,9 @@ export default function App({ hostname, lng = "en", initialRoutes }: AppProps) {
           if (!accountSession) {
             throw new Error("account session service unavailable");
           }
-          await accountSession.initialize();
+          // Keep cloud's pre-hydration UI restore usable while tokens refresh.
+          // Desktop/local retain the existing initialization transition.
+          await accountSession.initialize({ preserveInitialized: isCloudEdition });
         } catch (e) {
           console.error("系统初始化失败:", e);
         }

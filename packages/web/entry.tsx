@@ -2,7 +2,6 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 import React from "react";
-import type { RouteObject } from "app/routing";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import { RouterProvider } from "app/routing";
@@ -463,18 +462,30 @@ const browserStore = createAppStore({
   tokenManager: webTokenManager,
   preloadedState,
 });
+// Cloud web only: local/desktop bootstrap adapters return null. These tokens
+// restore UI identity, not trust/permissions; server validation is unchanged.
+// React hydration still reads Core.getServerSnapshot(), the logged-out SSR view.
+if (bootstrappedAuthState) {
+  browserStore.accountSessionRuntime?.core.initializeFromTokens(
+    bootstrappedAuthState.tokens
+  );
+}
 delete window.__PRELOADED_STATE__;
 
 const domNode = document.getElementById("root") as HTMLElement;
 
 (async () => {
-  const lng = await loadClientLanguage(i18n, requestedLng);
-
   // 与 SSR 保持一致：优先使用服务端注入的 siteId；没有则自行判定
   const siteId: SiteId = window.__SITE_ID__ || detectSite(hostname);
 
-  // hydrate 前预加载对应站点的路由，确保与 SSR 一致 -> 不闪烁
-  const initialRoutes: RouteObject[] = await loadRoutes(siteId, undefined);
+  // locale 与路由并行加载：两条线同时开始，且必须二者全部完成后才 hydrate
+  //（Promise.all 是完成屏障）。lng 取 loadClientLanguage 的最终返回值——请求语言
+  // 加载失败时它已回退到 zh-CN 并返回该语言；任一 promise reject 都会让整条
+  // 启动链 reject → 不 hydrate（错误传播，不用半完成状态渲染，避免 mismatch）。
+  const [lng, initialRoutes] = await Promise.all([
+    loadClientLanguage(i18n, requestedLng),
+    loadRoutes(siteId, undefined),
+  ]);
 
   const AppRoot = () => (
     <React.StrictMode>

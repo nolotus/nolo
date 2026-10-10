@@ -506,7 +506,7 @@ export async function runAuthProviderCommand(
         accessToken: accessToken ?? credential.accessToken,
         metadata: (credential.metadata as Record<string, unknown>) ?? null,
         openAiBody: { messages: [{ role: "user", content: "hi" }] },
-        fetchImpl: deps.fetchImpl ?? fetch,
+        fetchImpl: (deps.fetchImpl ?? fetch) as typeof fetch,
       });
     } catch (err) {
       // 区分本地结构错（缺 projectId 等，fetch 前就抛）和网络错（fetch 内抛）：

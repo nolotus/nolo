@@ -234,7 +234,7 @@ export async function listLocalCachedAgents(args: {
         privateRecords.set(key, { ...(value as Record<string, unknown>), dbKey: key });
         continue;
       }
-      if (key.startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
+      if ((key as string).startsWith(PUBLIC_AGENT_KEY_PREFIX)) {
         publicKeys.add(key);
       }
     }
