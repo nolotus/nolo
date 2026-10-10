@@ -17,8 +17,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeChatCompletionsBodyForProvider } from "./providerBodyCompatibility";
 import {
   preserveAgentStateFields,
-  REASONING_REPLAY_PLACEHOLDER,
-  shouldReplayReasoningContentForOutbound,
+  resolveReasoningReplayOptions,
 } from "../../agent-runtime/openAiCompatibleMessages";
 
 // model 理论上不应为空（schema 已强制必填），但防御性处理 undefined
@@ -159,13 +158,12 @@ const sanitizeChatCompletionsMessage = (
   // agent 走 server-proxy（packages/ai/chat/fetchUtils.ts 的 resolveAgentCallPlan），
   // body 由服务端 chatProxyRouting 逐字转发、不做 sanitize，所以 DeepSeek
   // thinking 要求的「历史工具轮必须回传 reasoning_content」只能在这一层补，
-  // 与服务端 loop / 本地直连保持同一份判据。
+  // 与服务端 loop / 本地直连保持同一份判据（resolveReasoningReplayOptions，
+  // 三个出站 seam 的唯一决策点）。
   return preserveAgentStateFields(message, sanitized, {
     targetProvider: options?.provider,
     targetModel: options?.model,
-    ...(shouldReplayReasoningContentForOutbound(options?.provider, options?.model)
-      ? { replayReasoningPlaceholder: REASONING_REPLAY_PLACEHOLDER }
-      : {}),
+    ...resolveReasoningReplayOptions(options?.provider, options?.model),
   });
 };
 

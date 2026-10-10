@@ -264,3 +264,35 @@ export function shouldReplayReasoningContentForOutbound(
   if (!p || !m) return false;
   return (p === "opencode-go" || p === "opencode") && m.includes("deepseek");
 }
+
+/**
+ * Single decision point for "should this outbound request replay a
+ * `reasoning_content` placeholder?".
+ *
+ * Every live outbound seam must spread this result into
+ * `preserveAgentStateFields` options instead of re-assembling the
+ * `stripReasoningContent` / `shouldReplayReasoningContentForOutbound()` /
+ * `REASONING_REPLAY_PLACEHOLDER` triple itself. The three current callers:
+ *  - `packages/agent-runtime/openAiCompatibleProvider.ts` (local/desktop chat-completions wire)
+ *  - `packages/server/handlers/agentRun/loopMessageSanitize.ts` (server agent loop)
+ *  - `packages/integrations/openai/generateOpenAIRequestBody.ts` (client body, forwarded verbatim by the server proxy)
+ *
+ * Why: the decision was previously assembled once per seam and one seam
+ * silently missed it, which cost a 400 from the OpenCode DeepSeek channel.
+ * **A new outbound seam must go through this function** — a seam that hand-rolls
+ * the check is a bug waiting to happen; `reasoningReplaySeamParity.test.ts`
+ * guards the seams that exist today.
+ *
+ * `stripReasoningContent` wins when both apply: a provider that rejects a
+ * string `reasoning_content` would reject the placeholder too.
+ */
+export function resolveReasoningReplayOptions(
+  provider?: string,
+  model?: string,
+  stripReasoningContent?: boolean,
+): { replayReasoningPlaceholder?: string } {
+  if (stripReasoningContent) return {};
+  return shouldReplayReasoningContentForOutbound(provider, model)
+    ? { replayReasoningPlaceholder: REASONING_REPLAY_PLACEHOLDER }
+    : {};
+}

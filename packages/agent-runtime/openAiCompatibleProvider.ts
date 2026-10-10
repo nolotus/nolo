@@ -32,8 +32,7 @@ import {
 } from "core/chat/bareImageUrlShape";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import {
-  REASONING_REPLAY_PLACEHOLDER,
-  shouldReplayReasoningContentForOutbound,
+  resolveReasoningReplayOptions,
   shouldStripReasoningContentForOutbound,
   toOpenAiCompatibleMessages,
 } from "./openAiCompatibleMessages";
@@ -115,13 +114,12 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // upstream accepts an empty string is unverified, and a non-empty value
   // matches the shape already observed to be accepted on this channel, so it
   // is the conservative choice.
-  // Mutually exclusive with shouldStripReasoning by construction (provider
-  // set disjoint); if both somehow matched, stripping wins — a provider that
-  // rejects string reasoning_content would reject the placeholder too.
-  const shouldReplayReasoning = shouldReplayReasoningContentForOutbound(
-    args.providerConfig.provider,
-    args.providerConfig.model,
-  );
+  // Whether to inject is decided in one place for every outbound seam —
+  // resolveReasoningReplayOptions() owns the strip-vs-replay precedence
+  // (a provider that rejects string reasoning_content would reject the
+  // placeholder too, so stripping wins there). Do not re-assemble the check
+  // here; a new seam must call the same helper.
+  //
   // Sanitize cross-wire history here so this builder is the single seam — any
   // caller (internal `send` or a future direct importer) is covered without
   // remembering to sanitize separately. Downgrades tool_calls not in the
@@ -134,9 +132,11 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
     stripReasoningContent: shouldStripReasoning,
-    ...(shouldReplayReasoning && !shouldStripReasoning
-      ? { replayReasoningPlaceholder: REASONING_REPLAY_PLACEHOLDER }
-      : {}),
+    ...resolveReasoningReplayOptions(
+      args.providerConfig.provider,
+      args.providerConfig.model,
+      shouldStripReasoning,
+    ),
   });
   const rawBody: Record<string, any> = {
     model: args.providerConfig.model,
