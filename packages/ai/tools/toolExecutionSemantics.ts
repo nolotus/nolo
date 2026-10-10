@@ -132,6 +132,17 @@ export const TOOL_EXECUTION_CONTRACT: Readonly<
   listTables: serverPureRead("read-only"),
   queryTableRows: serverPureRead("read-only"),
 
+  // Read-only presentation payload. Actions remain inert; this adds no submit or
+  // open-app authority to server-owned projection.
+  show_interaction: {
+    replay: "pure",
+    sideEffects: "none",
+    locality: "server",
+    interaction: "none",
+    concurrency: "safe",
+    durableWebForeground: "read-only",
+  },
+
   // Durable interactive boundary: the current execution ends and a later user
   // choice starts a new execution. It is intentionally not modeled as a read.
   ask_user: {

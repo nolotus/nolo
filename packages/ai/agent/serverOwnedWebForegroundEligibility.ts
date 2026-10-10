@@ -54,6 +54,8 @@ export const AUDITED_WEB_FOREGROUND_HOST_BASELINE_TOOL_NAMES = new Set([
   "search_workspace",
   "updateSelf",
   "ask_user",
+  // show_interaction: CORE 宿主注入；服务端纯函数展示（parse + fallback，无 I/O、无客户端通道），只读展示语义，不执行卡片动作
+  "show_interaction",
   "createAgentAutomation",
   "updateAgentAutomation",
   "deleteAgentAutomation",

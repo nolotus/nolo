@@ -110,14 +110,14 @@ export function createServerOwnedToolProjection(args: {
     const metadata = payload.metadata && typeof payload.metadata === "object" && !Array.isArray(payload.metadata)
       ? payload.metadata as Record<string, unknown>
       : undefined;
+    // Generic failure detection applies to every tool, show_interaction included:
+    // an {"error": ...} tool result must not be projected as succeeded. Read-only
+    // interaction rows keep their status via keepReadOnlyUntilCanonical below, so
+    // that semantic is unaffected by removing the forced failed=false.
     const failed = isToolResultFailure(payload.content, metadata);
     const content = toolName === "ask_user"
       ? (typeof payload.content === "string" ? payload.content : "")
-      : projectDesktopToolUiContent({
-          toolName,
-          content: payload.content,
-          metadata,
-        });
+      : projectDesktopToolUiContent({ toolName, content: payload.content, metadata });
 
     const base = existing ?? (() => {
       const { key, messageId } = createDialogMessageKeyAndId(args.dialogId);
@@ -140,7 +140,10 @@ export function createServerOwnedToolProjection(args: {
       };
     })();
 
-    const staysReadOnly = keepReadOnly.has(toolName);
+    // A failed result must still settle: otherwise an {"error": ...} row would be
+    // held running (isStreaming: true) forever by the read-only-until-canonical
+    // rule. Successful and in-progress read-only rows keep their original status.
+    const staysReadOnly = !failed && keepReadOnly.has(toolName);
     const toolPayload = {
       ...(base.toolPayload ?? {}),
       toolName,

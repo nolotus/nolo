@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ReactReduxContext } from "react-redux";
+import { useNavigate } from "app/routing";
 import type {
   MediaJob,
   MediaJobDepth,
@@ -12,7 +13,12 @@ import {
   getToolRunById,
   useToolRunById,
 } from "ai/tools/toolRunStore";
-import { getMediaJob, mediaJobAction, startMediaJob } from "chat/web/mediaJobs";
+import {
+  getMediaJob,
+  mediaJobAction,
+  startMediaJob,
+  updateMediaQuote,
+} from "chat/web/mediaJobs";
 import { isMediaJobPendingConfirmation } from "../toolPresentation";
 import type { ToolProps } from "./ToolMessageTypes";
 
@@ -22,6 +28,18 @@ const PENDING_TIER_LABELS: Record<MediaJobDepth, string> = {
   translate: "原文+译文对照",
   full: "全套（对照+大纲+重点+术语，可导出文档）",
 };
+
+/**
+ * 卡内译文语言可选项（点选才生效，不默认选中）。codes 必须是 server languages.ts 的 TARGET_LANGUAGES 子集，
+ * 由 MediaJobToolCard.test.tsx 守护；chat 包不直接 import server 代码。
+ */
+export const TARGET_LANG_CHOICES: Array<{ code: string; label: string }> = [
+  { code: "zh", label: "中文" },
+  { code: "en", label: "English" },
+  { code: "ru", label: "Русский" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+];
 
 const isDepth = (value: unknown): value is MediaJobDepth =>
   value === "outline" || value === "translate" || value === "full";
@@ -198,11 +216,53 @@ function userFacingError(raw?: string): string {
   return firstLine ?? "处理失败，请稍后重试";
 }
 
+const OPEN_NOTE_LINK_STYLE: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "6px 14px",
+  fontSize: "13px",
+  fontWeight: 500,
+  color: "#ffffff",
+  backgroundColor: "var(--primary, #2563eb)",
+  borderRadius: "var(--radius-md, 6px)",
+  textDecoration: "none",
+  cursor: "pointer",
+  border: "none",
+};
+
+/**
+ * 「打开笔记」链接。站内跳转由卡片自己的 router navigate 完成，不依赖外部 navigateToPage：
+ * 工具行（ToolCallRow / ToolMessageGroup）传的是空函数，依赖它会把点击吞掉。
+ * href 保留给中键 / 新标签页；修饰键点击不拦截，交还浏览器原生行为。
+ */
+const OpenNoteLink: React.FC<{ jobId?: string }> = ({ jobId }) => {
+  const navigate = useNavigate();
+  const href = `/media-jobs/${jobId}`;
+  return (
+    <a
+      data-testid="open-note-link"
+      href={href}
+      onClick={(e) => {
+        if (!jobId) return;
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+          return;
+        }
+        e.preventDefault();
+        navigate(href);
+      }}
+      style={OPEN_NOTE_LINK_STYLE}
+    >
+      打开笔记
+    </a>
+  );
+};
+
 export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   rawData,
   isError: isErrorProp,
   readOnly = false,
-  navigateToPage,
   toolArgs,
   toolRunId: toolRunIdProp,
 }) => {
@@ -274,6 +334,19 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   const actionBusyRef = useRef(false);
   // 「确认已失效」时点「回到报价卡」但页面里找不到报价卡 → 提示重新估价
   const [backToQuoteMissing, setBackToQuoteMissing] = useState(false);
+  // 卡内点选的译文语言（job 上尚无 targetLang 时）；选中后以它重新报价 translate/full。
+  const [chosenTargetLang, setChosenTargetLang] = useState<string | undefined>(
+    undefined,
+  );
+  // 以选中语言重新报价得到的 translate/full 报价，覆盖 tiers 里不含译文的旧报价。
+  const [requotes, setRequotes] = useState<
+    Partial<Record<MediaJobDepth, MediaQuote>>
+  >({});
+  const [requoting, setRequoting] = useState(false);
+  // hover/focus 时临时高亮的档位（可点击档位默认中性边框）。
+  const [emphasizedDepth, setEmphasizedDepth] = useState<MediaJobDepth | null>(
+    null,
+  );
 
   useEffect(() => {
     if (initialJob) {
@@ -284,6 +357,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   // translate 档必须有目标语言（请求已持久到 job 或 job 原有）。缺失时置灰该档并给出提示，
   // 避免展示一个「可启动」的廉价「原文+译文对照」价格（服务端 start 也会 400）。
   const knownTargetLang = job?.targetLang ?? initialJob?.targetLang;
+  // 实际生效的译文语言：job 已记录的优先，否则用卡内点选且已重新报价成功的语言。
+  const effectiveTargetLang = knownTargetLang ?? chosenTargetLang;
 
   // tiers 缺失时用单个 quote 渲染一档
   const tiers: MediaJobTier[] = useMemo(() => {
@@ -339,9 +414,50 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     };
   }, [jobId, job?.id, job?.status, hasStarted, isPendingStart]);
 
+  // 卡内选译文语言：以该语言对 translate/full 各重新报价（报价必须含翻译），全部成功后才解锁。
+  // 失败时不改 chosen/job/报价，档位保持置灰，避免展示与所选语言不一致的价格。
+  const handleChooseTargetLang = async (code: string) => {
+    if (readOnly || requoting || startingRef.current) return;
+    const targetId = jobId || job?.id;
+    if (!targetId) {
+      setStartError("缺少任务 ID");
+      return;
+    }
+    setRequoting(true);
+    setStartError(null);
+    try {
+      const scope: MediaScope = job?.scope || {
+        fromSec: 0,
+        toSec: job?.durationSec || 0,
+      };
+      const nextQuotes: Partial<Record<MediaJobDepth, MediaQuote>> = {};
+      let latestJob: MediaJob | undefined;
+      for (const depth of ["translate", "full"] as const) {
+        const res = await updateMediaQuote(
+          targetId,
+          scope,
+          depth,
+          job?.sourceLang,
+          code,
+        );
+        if (res?.quote) nextQuotes[depth] = res.quote;
+        if (res?.job) latestJob = res.job;
+      }
+      setRequotes(nextQuotes);
+      setChosenTargetLang(code);
+      if (latestJob) setJob(latestJob);
+    } catch (err: any) {
+      setStartError(err?.message || "重新报价失败，请稍后重试");
+    } finally {
+      setRequoting(false);
+    }
+  };
+
   const handleStartTier = async (tier: MediaJobTier) => {
     if (readOnly || startingRef.current) return;
-    if (tier.depth === "translate" && !knownTargetLang) {
+    // translate 与 full 都需要译文语言：无语言时 full 只会产出原文+大纲，不能以「全套（对照…）」启动。
+    const requiresLang = tier.depth === "translate" || tier.depth === "full";
+    if (requiresLang && !effectiveTargetLang) {
       setStartError("请先指定译文语言（如中文、英文）后再启动翻译");
       return;
     }
@@ -363,7 +479,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
         scope,
         tier.depth,
         job?.sourceLang,
-        job?.targetLang,
+        requiresLang ? effectiveTargetLang : job?.targetLang,
       );
       setJob(res.job);
       setHasStarted(true);
@@ -991,6 +1107,69 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
             </div>
           )}
 
+          {/* 已点选的译文语言：选择后收起选择器，只保留一行说明，便于用户确认所选语言 */}
+          {!readOnly && knownTargetLang && chosenTargetLang && (
+            <div
+              data-testid="target-lang-chosen"
+              style={{
+                marginBottom: 8,
+                fontSize: "12px",
+                color: "var(--textMuted, #6b7280)",
+              }}
+            >
+              译文语言：
+              {TARGET_LANG_CHOICES.find((c) => c.code === chosenTargetLang)?.label ??
+                chosenTargetLang}
+            </div>
+          )}
+
+          {/* 译文语言选择：job 未记录 targetLang 时才出现；不默认选中，点选即为显式选择 */}
+          {!readOnly && !knownTargetLang && (
+            <div
+              data-testid="target-lang-picker"
+              style={{
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+                fontSize: "12px",
+                color: "var(--textMuted, #6b7280)",
+              }}
+            >
+              <span>译文语言：</span>
+              {TARGET_LANG_CHOICES.map((choice) => {
+                const selected = chosenTargetLang === choice.code;
+                return (
+                  <button
+                    key={choice.code}
+                    type="button"
+                    data-testid={`target-lang-${choice.code}`}
+                    aria-pressed={selected}
+                    disabled={requoting || starting}
+                    onClick={() => void handleChooseTargetLang(choice.code)}
+                    style={{
+                      padding: "2px 10px",
+                      fontSize: "12px",
+                      borderRadius: "var(--radius-sm, 4px)",
+                      border: selected
+                        ? "1px solid var(--primary, #2563eb)"
+                        : "1px solid var(--borderMuted, var(--border, #e5e7eb))",
+                      backgroundColor: selected
+                        ? "var(--primary, #2563eb)"
+                        : "var(--surfaceDefault, var(--background, #ffffff))",
+                      color: selected ? "#ffffff" : "var(--text, #111827)",
+                      cursor: requoting || starting ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {choice.label}
+                  </button>
+                );
+              })}
+              {requoting && <span>正在按该语言重新报价…</span>}
+            </div>
+          )}
+
           {/* 档位列表 */}
           <div
             style={{
@@ -1000,8 +1179,20 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
             }}
           >
             {tiers.map((tier) => {
-              const quote = tier.quote;
-              const needsLang = tier.depth === "translate" && !knownTargetLang;
+              // 选语言后 translate/full 用该语言重新报价的结果，覆盖 tiers 里不含译文的旧价格。
+              // 注意：选语言后 job.targetLang 会随重新报价落库（knownTargetLang 变真），所以这里必须优先取 requotes，
+              // 不能用 knownTargetLang 判断，否则会回退到不含译文的旧报价。
+              const quote = requotes[tier.depth] ?? tier.quote;
+              // translate 与 full 都依赖译文语言：缺失时 full 会静默不含翻译，必须同样置灰。
+              const needsLang =
+                (tier.depth === "translate" || tier.depth === "full") &&
+                !effectiveTargetLang;
+              // AI 推荐档（工具入参 depth）才给主色边框 + 「推荐」标签；其余档位保持中性边框。
+              // 同一时刻只允许一个主色边框：悬停/聚焦的档位优先，无悬停时才回落到推荐档。
+              const isRecommended = pendingDepth === tier.depth;
+              const isEmphasized = emphasizedDepth
+                ? emphasizedDepth === tier.depth
+                : isRecommended;
               const affordableToSec = quote?.affordableToSec;
               const balance = quote?.balanceCredits;
               const minCredits = quote?.totalCredits?.[0] ?? 0;
@@ -1047,6 +1238,22 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                       }}
                     >
                       {tier.label}
+                      {isRecommended && (
+                        <span
+                          data-testid={`tier-recommended-${tier.depth}`}
+                          style={{
+                            marginLeft: 8,
+                            padding: "1px 6px",
+                            fontSize: "11px",
+                            fontWeight: 500,
+                            borderRadius: "var(--radius-sm, 4px)",
+                            color: "var(--primary, #2563eb)",
+                            border: "1px solid var(--primary, #2563eb)",
+                          }}
+                        >
+                          推荐
+                        </span>
+                      )}
                     </span>
                     <span
                       data-testid={`tier-credits-${tier.depth}`}
@@ -1058,7 +1265,11 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                           : "var(--primary, #2563eb)",
                       }}
                     >
-                      {creditsText || "费用待服务端报价"}
+                      {/* 可交互卡缺译文语言时，full/translate 的价格不可信（full 实为不含翻译）：不展示数字，等用户点选语言后重新报价。
+                          只读卡无选择器，保留原报价以反映当时的估价。 */}
+                      {needsLang && !readOnly
+                        ? "选择译文语言后显示报价"
+                        : creditsText || "费用待服务端报价"}
                     </span>
                   </div>
                   {etaText && (
@@ -1147,6 +1358,10 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                   data-testid={`tier-btn-${tier.depth}`}
                   disabled={isInsufficient || starting || needsLang}
                   onClick={() => handleStartTier(tier)}
+                  onMouseEnter={() => setEmphasizedDepth(tier.depth)}
+                  onMouseLeave={() => setEmphasizedDepth(null)}
+                  onFocus={() => setEmphasizedDepth(tier.depth)}
+                  onBlur={() => setEmphasizedDepth(null)}
                   aria-label={`开始处理：${tier.label}${creditsText ? `（${creditsText}）` : ""}`}
                   style={{
                     display: "flex",
@@ -1154,8 +1369,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     gap: 4,
                     padding: "10px 14px",
                     borderRadius: "var(--radius-md, 6px)",
+                    // 中性边框为默认；仅 hover/focus 或推荐档用主色，同一时刻不会多个档位同时主色。
                     border:
-                      isInsufficient || needsLang
+                      isInsufficient || needsLang || !isEmphasized
                         ? "1px solid var(--borderMuted, var(--border, #e5e7eb))"
                         : "1px solid var(--primary, #2563eb)",
                     backgroundColor:
@@ -1463,33 +1679,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 }}
               >
                 {hasArtifacts && (
-                  <a
-                    data-testid="open-note-link"
-                    href={`/media-jobs/${jobId || job?.id}`}
-                    onClick={(e) => {
-                      if (navigateToPage && (jobId || job?.id)) {
-                        e.preventDefault();
-                        navigateToPage(`media-jobs/${jobId || job?.id}`);
-                      }
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      padding: "6px 14px",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      color: "#ffffff",
-                      backgroundColor: "var(--primary, #2563eb)",
-                      borderRadius: "var(--radius-md, 6px)",
-                      textDecoration: "none",
-                      cursor: "pointer",
-                      border: "none",
-                    }}
-                  >
-                    打开笔记
-                  </a>
+                  <OpenNoteLink jobId={jobId || job?.id} />
                 )}
                 {!readOnly && (
                   <button
@@ -1543,33 +1733,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                 </span>
               ) : (
                 <>
-                  <a
-                    data-testid="open-note-link"
-                    href={`/media-jobs/${jobId || job?.id}`}
-                    onClick={(e) => {
-                      if (navigateToPage && (jobId || job?.id)) {
-                        e.preventDefault();
-                        navigateToPage(`media-jobs/${jobId || job?.id}`);
-                      }
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      padding: "6px 14px",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      color: "#ffffff",
-                      backgroundColor: "var(--primary, #2563eb)",
-                      borderRadius: "var(--radius-md, 6px)",
-                      textDecoration: "none",
-                      cursor: "pointer",
-                      border: "none",
-                    }}
-                  >
-                    打开笔记
-                  </a>
+                  <OpenNoteLink jobId={jobId || job?.id} />
                   {hasRemainingRange && (
                     <button
                       type="button"

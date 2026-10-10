@@ -16,6 +16,7 @@ import { toast } from "app/utils/toast";
 
 import DocxPreviewDialog from "render/web/ui/modal/DocxPreviewDialog";
 import ToolMessageContent from "./ToolMessageContent";
+import ConversationInteraction from "./ConversationInteraction";
 import AskChoicePanelWeb from "./AskChoicePanelWeb";
 import Editor from "create/editor/Editor";
 
@@ -31,6 +32,7 @@ import { buildDialogUrl } from "chat/dialog/dialogUrl";
 import { messagesStyles as styles } from "./messagesStyles";
 import { toolMessageStyles as toolStyles, toolMessageStatusStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
+import { buildUiInteractionPersistChanges } from "../uiInteractionPersistence";
 import {
   buildAskChoicePersistChanges,
   isAskChoiceResolved,
@@ -345,6 +347,31 @@ export const ToolMessageItem = memo(
         );
       }
     };
+
+    // Inline choices persist the full card payload before the shared panel sends.
+    if (toolName === "show_interaction" || rawData?.type === "show_interaction") {
+      const handleInteractionResolve = async (resolution: AskChoiceResolution) => {
+        const nextRawData = buildUiInteractionPersistChanges(rawData, resolution);
+        // Same terminal convergence shape as the ask_user branch: the row must not
+        // stay in its running appearance after a successful submit. Persist first
+        // (a failed write throws and keeps the panel retryable), then update memory.
+        const nextToolPayload = {
+          ...(toolPayload ?? {}),
+          toolName,
+          status: "succeeded",
+        };
+        const changes = {
+          content: JSON.stringify(nextRawData),
+          isStreaming: false,
+          toolName,
+          toolPayload: nextToolPayload,
+        };
+        if (!dbKey) throw new Error("show_interaction tool message is missing dbKey");
+        await dispatch(write({ data: { ...message, ...changes, type: DataType.MSG }, customKey: dbKey })).unwrap();
+        dispatch(updateToolMessage({ id: message.id, changes }));
+      };
+      return <ConversationInteraction rawData={rawData} interactive={!readOnly && !isStreaming && !!dbKey} onResolve={handleInteractionResolve} />;
+    }
 
     // --- ask_user ---
     if (toolName === "ask_user" || rawData?.type === "ask_user") {

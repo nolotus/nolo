@@ -144,6 +144,16 @@ const AGENT_COLLABORATION_MIN_INSTRUCTIONS = [
 // ============================================================================
 
 // ============================================================================
+// 对话内交互（有 show_interaction 工具时注入）
+// ============================================================================
+
+const CONVERSATION_INTERACTION_INSTRUCTIONS = `--- 对话内交互（show_interaction） ---
+“展示结构化内容 + 让用户选择”同时出现时（多方案对比要用户选一个、关键指标配合确认项），走 show_interaction，内容与选项在同一块呈现且提交后原位只读，比先给 Markdown 表格再追问更紧凑。
+- 用它：结构化对比/指标与选择同块展示；提交后用户选择原位只读。
+- 别用它：纯提问等待回答请用 ask_user；纯数据展示用 Markdown；持久工具或复杂流程交付 App。
+- 它非阻塞：不会暂停等待用户回复，也不会执行卡片动作；用户若操作，选择将作为新消息回传。不要用它代替 ask_user 等待回答。`;
+
+// ============================================================================
 // 网页访问（有 exa_search 工具时注入）
 // ============================================================================
 
@@ -309,6 +319,11 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
     },
     { id: "menuUsage", triggerTools: ["ask_user"], build: () => MENU_USAGE_INSTRUCTIONS },
     {
+        id: "showInteraction",
+        triggerTools: ["show_interaction"],
+        build: () => CONVERSATION_INTERACTION_INSTRUCTIONS,
+    },
+    {
         id: "webAccess",
         triggerTools: ["exa_search", "fetchWebpage", "browser_openSession", "read_x_post"],
         build: () => WEBPAGE_ACCESS_INSTRUCTIONS,
@@ -335,6 +350,7 @@ export const TOOL_GUIDED_SECTION_ORDER = [
     "agentCollaboration",
     "webAccess",
     "menuUsage",
+    "showInteraction",
     "knowledgeManagement",
     "memoryCapture",
     "agentConfigMaintenance",

@@ -83,7 +83,7 @@ const TIER_LABELS: Record<"outline" | "translate" | "full", string> = {
 export const mediaJobSchema = {
   name: "mediaJobTool",
   description:
-    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理）。translate 档必须指定目标语言 targetLang（用户明确表达要翻译成的语言时才传，不要擅自猜语言），缺目标语言的 translate start 会被服务端拒绝。启动流程：先 quote，对话里会显示档位卡，告诉用户在卡片上点选档位即可直接启动（点击即确认），你无需再调用 start。调用 start 前必须先 quote；即使用户直接说了档位，也先 quote，让卡片显示价格。只有用户用文字明确指定了档位时才调用 start；start 会被确认闸门拦下并在卡片上显示「确认启动」按钮——被拦一次后不要重试 start，也不要因用户回复「确认」「好的」等文字再次调用（文字不构成确认），而是提示用户点击卡片上的按钮。",
+    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理）。translate 档必须指定目标语言 targetLang（用户明确表达要翻译成的语言时才传，不要擅自猜语言），缺目标语言的 translate start 会被服务端拒绝。用户已在文字中表达目标语言（如「翻译为中文」）时，quote 也必须传 targetLang，使报价含翻译，不要等到 start 才传；未表达时不要猜，报价不带 targetLang，卡片会让用户自行选择译文语言。启动流程：先 quote，对话里会显示档位卡，告诉用户在卡片上点选档位即可直接启动（点击即确认），你无需再调用 start。调用 start 前必须先 quote；即使用户直接说了档位，也先 quote，让卡片显示价格。只有用户用文字明确指定了档位时才调用 start；start 会被确认闸门拦下并在卡片上显示「确认启动」按钮——被拦一次后不要重试 start，也不要因用户回复「确认」「好的」等文字再次调用（文字不构成确认），而是提示用户点击卡片上的按钮。",
   parameters: {
     type: "object",
     properties: {
@@ -119,7 +119,7 @@ export const mediaJobSchema = {
       targetLang: {
         type: "string",
         description:
-          "目标语言代码（如 zh、en、ja）。depth=translate 时必填、depth=full 时传了才会翻译；不要替用户猜语言，只有用户明确表达了要翻译成的语言时才传。",
+          "目标语言代码（如 zh、en、ja）。depth=translate 时必填、depth=full 时传了才会翻译；不要替用户猜语言，只有用户明确表达了要翻译成的语言时才传。用户已表达目标语言时，quote 也要传（否则报价不含翻译，与实际启动的费用不一致）。",
       },
     },
     required: ["action"],

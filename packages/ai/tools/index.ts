@@ -304,6 +304,7 @@ import {
   remotionRenderVideoFunc,
 } from "./remotionVideoTool";
 import { uiAskChoiceFunc, uiAskChoiceFunctionSchema } from "./uiAskChoiceTool";
+import { showInteractionFunc, showInteractionFunctionSchema } from "./uiCardTool";
 import {
   rememberMemoryFunc,
   rememberMemoryFunctionSchema,
@@ -631,6 +632,17 @@ const baseToolDefinitions: ToolDefinition[] = [
       name: "ask_user",
       description:
         "向用户提出带选项的问题，让界面展示按钮供选择。仅在选项真正互斥且无法从上下文推断用户偏好时使用；已有明确方向或用户已授权你决定时，直接执行并在文本中说明，不要为此调用本工具。",
+      category: "交互 / UI",
+    },
+    behavior: "answer",
+  },
+  {
+    id: "showInteraction",
+    schema: showInteractionFunctionSchema,
+    executor: showInteractionFunc,
+    description: {
+      name: "show_interaction",
+      description: "在对话中展示轻量交互：文本、指标、列表、表格、选项及声明式 action；不等待用户操作，也不执行 action。复杂交互使用 App。",
       category: "交互 / UI",
     },
     behavior: "answer",

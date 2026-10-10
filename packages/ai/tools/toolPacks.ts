@@ -19,6 +19,8 @@ export const TOOL_PACKS = {
   // ask_user：Web/TUI 默认启用（CORE 常驻，用户可显式 disabledTools 关闭）；
   // desktop 无交互通道，由 desktopAgentRuntimeTurnService.ts 经
   // INTERACTION_REQUIRED_TOOL_NAMES 剥离。
+  // show_interaction：Web/server 默认启用（CORE 常驻，轻量交互展示，非阻塞，
+  // 用户可显式 disabledTools 关闭）。
   // queryModelUsage / queryUserGrowthReport：server-only 工具（web/CLI executor
   // 直接返回 serverOnlyResult），不随 CORE 常驻——server 端由 agent 显式
   // tools 配置按需挂载（utilityServerTools 执行器），web 端不再挂死 schema。
@@ -29,6 +31,7 @@ export const TOOL_PACKS = {
     "search_workspace",
     "updateSelf",
     "ask_user",
+    "show_interaction",
     "createAgentAutomation",
     "updateAgentAutomation",
     "deleteAgentAutomation",

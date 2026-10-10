@@ -292,6 +292,7 @@ export const buildSystemPromptContext = (options: {
     { id: "agent-collaboration", owner: "platform", cacheScope: "session", content: toolSections.agentCollaboration },
     { id: "web-access", owner: "platform", cacheScope: "session", content: toolSections.webAccess },
     { id: "menu-usage", owner: "platform", cacheScope: "session", content: toolSections.menuUsage },
+    { id: "show-interaction", owner: "platform", cacheScope: "session", content: toolSections.showInteraction },
     { id: "clarification-mode", owner: "platform", cacheScope: "session", content: clarifyingSection },
     { id: "knowledge-management", owner: "platform", cacheScope: "session", content: toolSections.knowledgeManagement },
     { id: "memory-capture", owner: "platform", cacheScope: "session", content: toolSections.memoryCapture },

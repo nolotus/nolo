@@ -216,7 +216,7 @@ export async function runServerOwnedWebForegroundTurn(
       userId,
     },
     supportedToolNames: DURABLE_WEB_FOREGROUND_TOOL_NAMES,
-    keepReadOnlyUntilCanonical: ["ask_user"],
+    keepReadOnlyUntilCanonical: ["ask_user", "show_interaction"],
   });
 
   const projectAssistant = () => {

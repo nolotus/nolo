@@ -593,6 +593,7 @@ export function toolCallKey(message: ToolCallMessageInput | undefined | null): s
 
 export function resolveToolCallMode(toolName: string | undefined): ToolCallMode {
   const normalized = normalizeToolNameKey(toolName);
+  if (normalized === "show_interaction") return "artifact";
   if (INTERACTIVE_MODE_TOOLS.has(normalized)) return "interactive";
   if (HANDOFF_MODE_TOOLS.has(normalized)) return "handoff";
   if (ARTIFACT_MODE_TOOLS.has(normalized)) return "artifact";
