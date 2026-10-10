@@ -20,6 +20,7 @@ import type { IconType } from "react-icons";
 import NoloHeadMark from "render/web/ui/NoloHeadMark";
 import "./ClientDownloadsPage.css";
 import "render/layout/naturePalette.css";
+import "render/layout/noloSerifFont.css";
 
 type LinuxPackageLinks = {
   installer: string;
@@ -281,22 +282,14 @@ const ClientDownloadsPage: React.FC = () => {
   const versionFor = (platform: "windows" | "linux" | "macos") =>
     desktopReleaseManifest?.artifacts?.[platform]?.version ?? null;
 
-  // i18next 的 t 只在 defaultValue 是字面量时才匹配 (key, defaultValue) 重载；
-  // fallback 可能为 undefined 的调用点统一走这层包装。
-  const translate = React.useCallback(
-    (key: string, fallback?: string) =>
-      fallback ? t(key, { defaultValue: fallback }) : t(key),
-    [t],
-  );
-
   const downloadCards = React.useMemo(() => {
     return buildDownloadCards({
       detectedPlatform,
       downloadUrls,
       versionFor,
-      t: translate,
+      t,
     });
-  }, [detectedPlatform, downloadUrls, desktopReleaseManifest, translate]);
+  }, [detectedPlatform, downloadUrls, desktopReleaseManifest, t]);
 
   return (
     <main className="client-downloads-page">
@@ -335,7 +328,7 @@ const ClientDownloadsPage: React.FC = () => {
           }) => {
             const linuxLinks = typeof href === "object" ? (href as LinuxPackageLinks) : null;
             const actionText = actionTextKey
-              ? translate(actionTextKey, actionTextFallback)
+              ? t(actionTextKey, actionTextFallback)
               : t("clientDownloads.downloadNow");
             return (
               <article
@@ -355,9 +348,9 @@ const ClientDownloadsPage: React.FC = () => {
                 </div>
 
                 <div className="client-download-card__body">
-                  <h2 className="client-download-card__title">{translate(titleKey, titleFallback)}</h2>
+                  <h2 className="client-download-card__title">{t(titleKey, titleFallback)}</h2>
                   <p className="client-download-card__meta">{meta}</p>
-                  <p className="client-download-card__desc">{translate(descKey, descFallback)}</p>
+                  <p className="client-download-card__desc">{t(descKey, descFallback)}</p>
                 </div>
 
                 {linuxLinks ? (

@@ -174,10 +174,6 @@ const STRINGS = {
     en: "Esc to stop",
     zh: "Esc 停止回复",
   },
-  queuedHint: {
-    en: "queued",
-    zh: "排队",
-  },
   flushQueuedIdleHint: {
     en: "Flushed {0} queued messages as one.",
     zh: "已把 {0} 条排队消息合并发送。",
@@ -443,6 +439,65 @@ const STRINGS = {
     en: "Runs ({0})",
     zh: "运行 ({0})",
   },
+  // Tool-count fact on run rows/cards/panel (`12 tools` / `12 个工具`).
+  runToolsCount: {
+    en: "{0} tools",
+    zh: "{0} 个工具",
+  },
+  // Card-body status words / row labels. Display labels only: raw log lines,
+  // protocol params and tool ids stay untranslated.
+  runStatusNotFound: { en: "not_found", zh: "未找到" },
+  runRowAgent: { en: "agent", zh: "执行者" },
+  runRowStatus: { en: "status", zh: "状态" },
+  runRowTools: { en: "tools", zh: "工具" },
+  runRowNote: { en: "note", zh: "备注" },
+  runRowError: { en: "error", zh: "错误" },
+  runRowTask: { en: "task", zh: "任务" },
+  // listAgents card header (`Agents (3)` / `智能体 (3)`). The shared ai
+  // renderer keeps the English default; the CLI relabels the header line.
+  agentsListLabel: { en: "Agents ({0})", zh: "智能体 ({0})" },
+  // Fallback identity for auto-generated agent ids (run zone / dock / panel).
+  subAgentName: {
+    en: "Sub-agent",
+    zh: "子智能体",
+  },
+  // Status vocabulary the fixed run zone does not label (running shows only its
+  // elapsed time there). `en` must stay equal to the raw store status so a
+  // switch of locale never changes what an English reader already understood.
+  runZoneRunning: { en: "running", zh: "运行中" },
+  runZonePending: { en: "pending", zh: "等待中" },
+  runZoneCancelling: { en: "cancelling", zh: "正在取消" },
+  // controlAgentRun displayData: wait timeout and stop-not-confirmed outcomes.
+  agentRunWaitTimeout: {
+    en: "⏳ wait timed out after {0}s — the run is still running: wait again later, or use status/stop",
+    zh: "⏳ wait 超时（{0}s），run 仍在运行：可稍后再 wait，或改用 status/stop",
+  },
+  agentRunStopFailedAlive: {
+    en: "stop failed: process {0} still alive after SIGKILL",
+    zh: "停止失败：进程 {0} 在 SIGKILL 后仍然存活",
+  },
+  agentRunPendingReconcile: {
+    en: "{0} (pending reconcile)",
+    zh: "{0}（待对账）",
+  },
+  // --- Fixed run zone (top of composer, replaces the ⚙ running status chip) --
+  // Each active run renders as `⚙ <title> · <agent> · <elapsed> · N tools`.
+  // runZoneFor is the elapsed-time fact for a *running* run (`for 1m23s` /
+  // `已运行 1m23s`); terminal runs print `<status> <age>` instead and don't use it.
+  runZoneFor: {
+    en: "for {0}",
+    zh: "已运行 {0}",
+  },
+  // Terminal linger line: `✓ <run> · done · took 12m03s`.
+  runZoneDone: { en: "done", zh: "完成" },
+  runZoneFailed: { en: "failed", zh: "失败" },
+  runZoneCancelled: { en: "cancelled", zh: "已取消" },
+  runZoneTook: { en: "took {0}", zh: "用时 {0}" },
+  // Overflow marker when more runs are active than the zone shows at once.
+  runZoneMore: {
+    en: "+{0} more",
+    zh: "还有 {0} 个",
+  },
   // --- Dialog (picker / confirm) copy --------------------------------------
   // Key-hint wording is unified across select / multi-select / confirm so the
   // three dialogs read as one family: "<Label>  <↑↓ move · Enter choose ·
@@ -655,6 +710,81 @@ const STRINGS = {
     en: "file reference (path only, content not read): {0}",
     zh: "文件引用（仅路径，未读取内容）：{0}",
   },
+  mediaFoundHint: {
+    en: "🎧 found media (will transcribe): {0}",
+    zh: "🎧 识别到音视频（将转写）：{0}",
+  },
+  mediaPreprocessStart: {
+    en: "🎧 {0} preprocessing…",
+    zh: "🎧 {0} 预处理中…",
+  },
+  mediaTranscribeProgress: {
+    en: "🎧 {0} transcribing… {1}",
+    zh: "🎧 {0} 转写中… {1}",
+  },
+  mediaTranscribeDone: {
+    en: "🎧 {0} transcribed — saved: {1}",
+    zh: "🎧 {0} 转写完成——已保存：{1}",
+  },
+  mediaTranscribeDoneAttach: {
+    en: "🎧 {0} transcribed — txt: {1}\n   srt: {2}\n   transcript will be attached to your next message.",
+    zh: "🎧 {0} 转写完成——txt：{1}\n   srt：{2}\n   转写内容将随你下一条消息发送给模型。",
+  },
+  mediaTranscribeFailed: {
+    en: "{0} transcription failed: {1}",
+    zh: "{0} 转写失败：{1}",
+  },
+  mediaSilenceTrimScanning: {
+    en: "🎧 {0} checking for trailing silence…",
+    zh: "🎧 {0} 检查尾部静音…",
+  },
+  mediaSilenceTrimNotice: {    en: "🎧 {0}: about {1} min of trailing silence — suggesting cut to {2} (saves ~{1} min).",
+    zh: "🎧 {0}：尾部约 {1} 分钟基本无人声，建议截到 {2}（可省约 {1} 分钟）。",
+  },
+  mediaSilenceTrimTitle: {
+    en: "Transcribe range — trailing silence detected",
+    zh: "转写范围——检测到尾部静音",
+  },
+  mediaSilenceTrimDetail: {
+    en: "Suggestion: keep everything before {0} (saves ~{1} min of upload/transcription).",
+    zh: "建议：只处理 {0} 之前的内容（省约 {1} 分钟的预处理与转写）。",
+  },
+  mediaSilenceTrimOptionAll: {
+    en: "Transcribe everything",
+    zh: "全部（不裁剪）",
+  },
+  mediaSilenceTrimOptionTrim: {
+    en: "Follow the suggestion: cut to {0} (saves ~{1} min)",
+    zh: "按建议：截到 {0}（省约 {1} 分钟）",
+  },
+  mediaSilenceTrimApplied: {
+    en: "🎧 following the suggestion — transcribing up to {0}.",
+    zh: "🎧 已按建议裁剪——只转写 {0} 之前的内容。",
+  },
+  mediaSilenceTrimHintOnly: {
+    en: "🎧 keeping the full file (can't ask right now). To trim, rerun /transcribe with --to {0}.",
+    zh: "🎧 当前无法交互，按全片转写；如需裁剪，请用 --to {0} 重跑 /transcribe。",
+  },
+  transcribeUsage: {
+    en: "Usage: /transcribe <path> [--from ss|mm:ss|hh:mm:ss] [--to ss|mm:ss|hh:mm:ss] [--lang zh|en|...] [--denoise off|light|strong]",
+    zh: "用法：/transcribe <路径> [--from 秒|分:秒|时:分:秒] [--to 秒|分:秒|时:分:秒] [--lang zh|en|...] [--denoise off|light|strong]",
+  },
+  transcribeArgError: {
+    en: "Invalid /transcribe argument: {0}",
+    zh: "/transcribe 参数错误：{0}",
+  },
+  transcribeNotMedia: {
+    en: "Not a media file: {0}",
+    zh: "不是音视频文件：{0}",
+  },
+  transcribeBusyHint: {
+    en: "/transcribe is unavailable while a reply is running — it attaches to your next message. Wait for the reply to finish, then run it.",
+    zh: "回复进行中不能执行 /transcribe——转写产物要随下一条消息发送。等本轮回复结束后再执行。",
+  },
+  busyAttachmentsBlocked: {
+    en: "can't queue a message with {0} clipboard image(s) while a turn is running — draft kept. Send again after this turn ends, or press Backspace to drop the attachment and send text only.",
+    zh: "忙碌中无法排队带 {0} 张剪贴板图片的消息，草稿已保留；等本轮结束后再按 Enter 发送，或 Backspace 撤销附件后改发纯文字。",
+  },
   agentsTip: {
     en: "Tip: run /switch for the full picker, or /switch list for your private agents too.",
     zh: "提示：用 /switch 打开完整选择器，或 /switch list 连你的私有智能体一起列出。",
@@ -677,7 +807,8 @@ const STRINGS = {
       "  /lang <zh|en>         Switch interface language",
       "  /copy [all]           Copy the last reply (or the full conversation with \"all\") to the clipboard",
       "  /paste                Read the clipboard now (image → attachment, text → draft)",
-      "  Drag a file in        Drop an image file on the terminal to attach it; other files stay paths",
+      "  /transcribe <media>   Transcribe an audio/video file; transcript attaches to your next message",
+      "  Drag a file in        Drop an image file on the terminal to attach it; audio/video transcribes; other files stay paths",
       "  Shift+Enter / Ctrl+J  Insert a newline in the draft",
       "  /mouse <on|off>       Toggle mouse mode (off = drag to select text)",
       "  /auto <on|off>        Toggle permission auto-approve (skip destructive-shell, external-file & file-write confirms)",
@@ -698,6 +829,8 @@ const STRINGS = {
       "  /update               Update the nolo CLI install",
       "  /version              Show version/update hint",
       "  /logs                 Show recent diagnostics and the log file path",
+      "  /learn                Review this dialog for reusable tool/prompt improvements",
+      "  /learn <1-100>        Triage recent Evolution candidates and deep-review one",
       "  /exit                 Leave the workspace",
       "",
       "You can also type normally. nolo routes simple read/status requests to CLI commands and sends the rest to the current agent.",
@@ -719,7 +852,8 @@ const STRINGS = {
       "  /lang <zh|en>         切换界面语言",
       "  /copy [all]           复制最后一条回复到剪贴板（加 all 复制完整对话）",
       "  /paste                立即读剪贴板（图片→附件，文本→草稿）",
-      "  拖入文件              把图片文件拖进终端即成为附件；其他文件只留路径",
+      "  /transcribe <媒体>    转写音视频文件；转写文本随下一条消息发给模型",
+      "  拖入文件              把图片文件拖进终端即成为附件；音视频自动转写；其他文件只留路径",
       "  Shift+Enter / Ctrl+J  在草稿里换行",
       "  /mouse <on|off>       切换鼠标模式（off 后可直接拖选文本）",
       "  /auto <on|off>        切换权限自动化（自动放行破坏性 shell、外部文件与写文件确认）",
@@ -740,6 +874,8 @@ const STRINGS = {
       "  /update               更新 nolo CLI",
       "  /version              查看版本与更新提示",
       "  /logs                 查看最近诊断记录与日志文件位置",
+      "  /learn                从当前对话复盘可复用的工具/提示词改进",
+      "  /learn <1-100>        筛选近期 Evolution Candidate 并深度复盘一条",
       "  /exit                 退出工作区",
       "",
       "也可以直接输入自然语言。简单的读取/状态请求会走 CLI 命令，其余交给当前 agent。",
@@ -912,13 +1048,15 @@ const STRINGS = {
     en: "Tell nolo what to change, for example: /customize make my default agent more concise.",
     zh: "告诉 nolo 你想改什么，例如：/customize make my default agent more concise。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginHint: {
     en: "MVP login uses profile/env auth. Set AUTH_TOKEN, NOLO_SERVER, or NOLO_PROFILE before starting nolo.",
     zh: "MVP 登录走 profile/环境变量认证。启动 nolo 前请设置 AUTH_TOKEN、NOLO_SERVER 或 NOLO_PROFILE。",
   },
+  /** @deprecated No longer used by `/login` (now runs the in-TUI login flow). Kept to avoid structural churn. */
   loginTuiStart: {
-    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL).",
-    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接）。",
+    en: "Or run `/login --server <url>` to log in right here (opens a browser authorization URL), or exit and run `nolo login`.",
+    zh: "也可以执行 /login --server <url> 直接在这里登录（会给出浏览器授权链接），或退出后运行 `nolo login`。",
   },
   loginUsage: {
     en: "Usage: /login [--server <url>]. Unsupported flags: {0}",
@@ -955,6 +1093,10 @@ const STRINGS = {
   loginCancelled: {
     en: "Login cancelled.",
     zh: "已取消登录。",
+  },
+  welcomeAuthGuidance: {
+    en: "Not logged in to Nolo — three ways to get going:\n  · Run a task on local Codex: nolo run \"<task>\" (no login needed)\n  · Bind your own model subscription: nolo auth antigravity | claude | chatgpt | xai\n  · Use the Nolo platform: type /login (gives you a browser authorization link)",
+    zh: "未登录 Nolo —— 三条路都能用：\n  · 用本地 Codex 跑任务：nolo run \"<任务>\"（不需要登录）\n  · 绑定你自己的模型订阅：nolo auth antigravity | claude | chatgpt | xai\n  · 用 Nolo 平台：直接输入 /login（会给出浏览器授权链接）",
   },
   versionInfo: {
     en: "nolo {0}\nUpdate this install with: nolo update\nIf repo-local output differs, publish/install the latest npm package first.",
@@ -999,6 +1141,11 @@ const STRINGS = {
     en: "Complete it in the terminal, then nolo will continue.",
     zh: "在终端中完成操作后，nolo 将继续。",
   },
+  // Compact memory-tool trace
+  memoryDeleteRequestedCount: {
+    en: "requested deletion of {0}",
+    zh: "已请求删除 {0} 条",
+  },
   // Agent catalog sources
   agentSourcePlatform: {
     en: "Platform",
@@ -1011,6 +1158,402 @@ const STRINGS = {
   agentSourceApi: {
     en: "API",
     zh: "API",
+  },
+  // ── Non-TUI CLI output: shared command-group help ─────────────────────────
+  // `nolo <group> --help` renders from the command registry; the frame lines
+  // are localized here while per-command copy lives in cliCommandDescription().
+  "cli.groupCommandsTitle": {
+    en: "nolo {0} commands",
+    zh: "nolo {0} 命令",
+  },
+  "cli.usageLabel": {
+    en: "Usage:",
+    zh: "用法：",
+  },
+  // ── Non-TUI CLI output: nolo auth ─────────────────────────────────────────
+  // User-visible copy of `nolo auth <provider>`. Params follow each en string:
+  // {0}=provider, {1}=server origin / saved account / raw detail,
+  // {2}=zone or HTTP status, {3}=optional trailing fragment.
+  "auth.authorizationSaved": {
+    en: "[nolo] {0} authorization saved{1}.",
+    zh: "[nolo] 已保存 {0} 授权{1}。",
+  },
+  // Optional account suffix for authorizationSaved (empty when the provider
+  // reports no account label).
+  "auth.authorizationSavedForAccount": {
+    en: " for {0}",
+    zh: "（账号 {0}）",
+  },
+  "auth.noLocalCredential": {
+    en: "[nolo] No local {0} credential. Run: nolo auth {0}",
+    zh: "[nolo] 本地没有 {0} 凭据。请运行：nolo auth {0}",
+  },
+  "auth.credentialServerManaged": {
+    en:
+      "[nolo] The {0} credential is already server-managed by {1} (no local refresh token).\n" +
+      "To sync it again, run: nolo auth {0} --sync-to-server",
+    zh:
+      "[nolo] {0} 凭据已由 {1} 服务端托管（本地无 refreshToken）。\n" +
+      "如需重新同步，请运行: nolo auth {0} --sync-to-server",
+  },
+  "auth.verifyUnsupported": {
+    en: '[nolo] --verify is only supported for "nolo auth antigravity".',
+    zh: '[nolo] --verify 仅支持 "nolo auth antigravity"。',
+  },
+  "auth.checkingVerificationChallenge": {
+    en: "[nolo] Checking the current verification challenge (one lightweight request)...",
+    zh: "[nolo] 正在检查当前验证挑战（一次轻量请求）…",
+  },
+  "auth.refreshTokenInvalid": {
+    en:
+      "[nolo] The antigravity refresh token is no longer valid ({0}). " +
+      "Re-run `nolo auth antigravity` to re-authorize this account.",
+    zh:
+      "[nolo] antigravity 的 refresh token 已失效（{0}）。" +
+      "请重新运行 `nolo auth antigravity` 重新授权该账号。",
+  },
+  "auth.credentialIncomplete": {
+    en:
+      "[nolo] The stored antigravity credential is incomplete ({0}). " +
+      "Re-run `nolo auth antigravity` to re-authorize.",
+    zh:
+      "[nolo] 本地保存的 antigravity 凭据不完整（{0}）。" +
+      "请重新运行 `nolo auth antigravity` 重新授权。",
+  },
+  "auth.providerUnreachable": {
+    en: "[nolo] Could not reach the antigravity provider: {0}. Check your network and retry.",
+    zh: "[nolo] 无法访问 antigravity provider：{0}。请检查网络后重试。",
+  },
+  "auth.credentialWorking": {
+    en:
+      "[nolo] ✓ The credential is working — no verification is required right now. " +
+      "You can retry your agent.",
+    zh: "[nolo] ✓ 凭据可用——当前无需验证。可以重试你的 agent。",
+  },
+  "auth.googleVerificationRequired": {
+    en: "[nolo] Google requires a one-time account verification for {0}.",
+    zh: "[nolo] Google 需要对 {0} 做一次性账号验证。",
+  },
+  "auth.verificationOpened": {
+    en:
+      "[nolo] ✓ Opened it in your browser — complete the verification there " +
+      "(sign in with the same Google account), then retry your agent.",
+    zh:
+      "[nolo] ✓ 已在浏览器中打开——请在那里完成验证" +
+      "（用同一个 Google 账号登录），然后重试你的 agent。",
+  },
+  "auth.verificationCopyUrl": {
+    en:
+      "[nolo] Copy the URL above into a browser signed into {0}, " +
+      "complete the verification, then retry your agent.",
+    zh:
+      "[nolo] 请把上面的 URL 复制到已登录 {0} 的浏览器中，" +
+      "完成验证后重试你的 agent。",
+  },
+  "auth.httpWithoutVerificationLink": {
+    en:
+      "[nolo] The provider returned HTTP {0} without a verification link — " +
+      "this is not the one-time-verification case --verify handles.{1}" +
+      " Response detail: {2}",
+    zh:
+      "[nolo] provider 返回 HTTP {0}，但没有任何验证链接——" +
+      "这不属于 --verify 处理的一次性验证场景。{1}响应详情：{2}",
+  },
+  // Optional trailing fragment spliced into httpWithoutVerificationLink when a
+  // token refresh also failed earlier. English keeps the leading space.
+  "auth.httpWithoutVerificationLink.refreshSuffix": {
+    en: " (token refresh also failed earlier: {0})",
+    zh: "（此前 token 刷新也失败：{0}）",
+  },
+  "auth.localRefreshTokenDropped": {
+    en: "[nolo] No local refresh token is kept: {0} is refreshed by {1} (fetched on demand).",
+    zh: "[nolo] 本地不再保存 refresh token：{0} 由 {1} 统一刷新（用完即取）。",
+  },
+  "auth.localStateUpdateFailed": {
+    en: "[nolo] Warning: failed to update the local credential state ({0}).",
+    zh: "[nolo] Warning: 本地凭据状态更新失败（{0}）。",
+  },
+  "auth.syncMissingConfig": {
+    en:
+      "[nolo] Warning: server sync needs NOLO_SERVER and AUTH_TOKEN env vars, " +
+      "or a configured profile. Skipping server sync.",
+    zh:
+      "[nolo] 警告：服务端同步需要 NOLO_SERVER 和 AUTH_TOKEN 环境变量，" +
+      "或已配置的 profile。已跳过同步。",
+  },
+  "auth.syncedTo": {
+    en: "[nolo] Synced to {0}",
+    zh: "[nolo] 已同步到 {0}",
+  },
+  "auth.syncDoneWebUsable": {
+    en: "[nolo] The web app can now use this subscription.",
+    zh: "[nolo] 网页端现在可以使用该订阅了。",
+  },
+  "auth.syncFailed": {
+    en: "[nolo] Warning: server sync failed ({0}). Token saved locally.",
+    zh: "[nolo] 警告：服务端同步失败（{0}）。Token 已保存在本地。",
+  },
+  "auth.noServerConfigured": {
+    en:
+      "[nolo] No server configured. To use this on the web, run nolo login first, " +
+      "then nolo auth {0} --sync-only",
+    zh:
+      "[nolo] 未配置服务器。如需在网页端使用，请先运行 nolo login，" +
+      "再运行 nolo auth {0} --sync-only",
+  },
+  // {1} is the provider name again so the --no-sync-to-server hint names the
+  // exact command the user would run; keep [Y/n] as the literal answer hint.
+  "auth.syncPrompt": {
+    en:
+      "Sync to {0} so the web app can also use this {1} subscription? " +
+      "The credential is stored encrypted; run nolo auth {1} --no-sync-to-server " +
+      "to turn it off later. [Y/n] ",
+    zh:
+      "同步到 {0}，让网页端也能使用这个 {1} 订阅？" +
+      "凭证加密存储，可随时 nolo auth {1} --no-sync-to-server 关闭 [Y/n] ",
+  },
+  "auth.notSyncedToServer": {
+    en:
+      "[nolo] Not synced to the server. For web use, run: " +
+      "nolo auth {0} --sync-to-server (or --sync-only)",
+    zh:
+      "[nolo] 未同步凭据到服务器。如需网页端使用，请运行: " +
+      "nolo auth {0} --sync-to-server（或 --sync-only）",
+  },
+  "auth.markFailed": {
+    en:
+      "[nolo] The credential was uploaded to the server, but marking it " +
+      "server-managed locally failed. Re-authorize so both sides cannot race " +
+      "each other's refresh.",
+    zh:
+      "[nolo] 凭据已成功上传服务器，但本地打上托管标记失败。" +
+      "为防双方竞态刷新导致失效，请重新授权。",
+  },
+  "auth.commandFailed": {
+    en: "nolo auth {0} failed: {1}",
+    zh: "nolo auth {0} 失败：{1}",
+  },
+  "auth.cloudflareTokenGenerated": {
+    en:
+      "[nolo] Generated Cloudflare API token for zone {0} ({1}).\n" +
+      "Store it as CLOUDFLARE_EMAIL_ROUTING_API_TOKEN:\n  {2}\n",
+    zh:
+      "[nolo] 已为 zone {0}（{1}）生成 Cloudflare API token。\n" +
+      "请保存为 CLOUDFLARE_EMAIL_ROUTING_API_TOKEN：\n  {2}\n",
+  },
+  "auth.envUpdated": {
+    en: "[nolo] Updated {0} with CLOUDFLARE_EMAIL_ROUTING_API_TOKEN.",
+    zh: "[nolo] 已更新 {0} 里的 CLOUDFLARE_EMAIL_ROUTING_API_TOKEN。",
+  },
+  // ── Non-TUI CLI output: nolo app ──────────────────────────────────────────
+  "app.noApps": {
+    en: "No apps\n",
+    zh: "没有应用\n",
+  },
+  "app.listTitle": {
+    en: "App list ({0})\n\n",
+    zh: "应用列表 ({0})\n\n",
+  },
+  "app.unnamed": {
+    en: "(unnamed)",
+    zh: "(未命名)",
+  },
+  "app.detailsTitle": {
+    en: "App details\n\n",
+    zh: "应用详情\n\n",
+  },
+  "app.errorNameRequired": {
+    en: "\nError: provide one of --name / --app-id / --app-key\n",
+    zh: "\n错误: 必须提供 --name / --app-id / --app-key 之一\n",
+  },
+  "app.errorJobIdRequired": {
+    en: "\nError: --job-id is required\n",
+    zh: "\n错误: 必须提供 --job-id\n",
+  },
+  "app.errorNameOrAppId": {
+    en: "\nError: provide --name or --app-id\n",
+    zh: "\n错误: 必须提供 --name 或 --app-id\n",
+  },
+  "app.errorWithDetail": {
+    en: "\nError: {0}\n",
+    zh: "\n错误: {0}\n",
+  },
+  "app.deploySucceeded": {
+    en: "Deploy succeeded\n",
+    zh: "部署成功\n",
+  },
+  "app.deployStatusTitle": {
+    en: "Deploy status\n\n",
+    zh: "部署状态\n\n",
+  },
+  "app.deleteConfirm": {
+    en: "About to delete app ({0}) — this cannot be undone. Confirm? [y/N] ",
+    zh: "即将删除应用 ({0})，此操作不可撤销。确认？[y/N] ",
+  },
+  "app.deleteCancelled": {
+    en: "Cancelled\n",
+    zh: "已取消\n",
+  },
+  "app.deleteDone": {
+    en: "Deleted app ({0})\n",
+    zh: "已删除应用 ({0})\n",
+  },
+  "app.deploy.error.nameOrAppIdRequired": {
+    en: "provide --name or --app-id",
+    zh: "必须提供 --name 或 --app-id",
+  },
+  "app.deploy.error.codeFileUnreadable": {
+    en: "cannot read --code-file: {0}",
+    zh: "无法读取 --code-file: {0}",
+  },
+  "app.deploy.error.filesMustBeArray": {
+    en: "--files must be a JSON array",
+    zh: "--files 必须是 JSON 数组",
+  },
+  "app.deploy.error.filesParseFailed": {
+    en: "--files parse failed: {0}",
+    zh: "--files 解析失败: {0}",
+  },
+  "app.deploy.error.codeRequired": {
+    en: "provide one of --code / --code-file / --files",
+    zh: "必须提供 --code / --code-file / --files 之一",
+  },
+  // ── Non-TUI CLI output: nolo agent / nolo run ─────────────────────────────
+  "agent.unavailableHidden": {
+    en: "⛔ {0} agent(s) temporarily unavailable (429) hidden. Use --show-unavailable to list them.\n",
+    zh: "⛔ 已隐藏 {0} 个暂时不可用的 agent（429）。用 --show-unavailable 列出它们。\n",
+  },
+  "agent.rateLimitedRecovery": {
+    en: "   - [429 rate-limited] {0} (id: {1}) recovers in {2}s{3}\n",
+    zh: "   - [429 限流] {0} (id: {1}) 预计 {2} 秒后恢复{3}\n",
+  },
+  "agentRun.autoRouteOverrideFailed": {
+    en: "[nolo] auto-route: could not read the source agent, running the selected agent as-is.\n",
+    zh: "[nolo] auto-route: 覆盖源 agent 读取失败，按原样直跑所选 agent。\n",
+  },
+  "agentRun.autoRouteModelOverride": {
+    en: "[nolo] auto-route: model override is now {0}\n",
+    zh: "[nolo] auto-route: model 层覆盖为 {0}\n",
+  },
+  // ── Non-TUI CLI output: nolo agent delete ─────────────────────────────────
+  // Flag descriptions for `nolo agent delete --help`; the Chinese copy is the
+  // original wording, kept verbatim so existing users lose no information.
+  "agentDelete.description": {
+    en:
+      "Deletes an agent's private record (agent-{userId}-{id}) and public record (agent-pub-{id}).\n",
+    zh:
+      "删除一个 agent 的私有记录 (agent-{userId}-{id}) 与公开记录 (agent-pub-{id})。\n",
+  },
+  "agentDelete.tombstoneNote": {
+    en: "The server side is a tombstone soft delete: read after DELETE returns 404.\n",
+    zh: "服务器端为 tombstone 软删除，DELETE 后再次 read 会返回 404。\n",
+  },
+  "agentDelete.flagYes": {
+    en: "  --yes            Actually delete; without it only the dry-run target summary is printed.\n",
+    zh: "  --yes            真正执行删除；缺省时仅 dry-run 输出目标摘要。\n",
+  },
+  "agentDelete.flagJson": {
+    en: "  --json           Print the JSON result.\n",
+    zh: "  --json           输出 JSON 结果。\n",
+  },
+  "agentDelete.flagId": {
+    en: "  --id <agent>     Same as the positional argument: alias / dbKey / URL / 26-char id.\n",
+    zh: "  --id <agent>     与位置参数等价，传入 alias / dbKey / URL / 26-char id。\n",
+  },
+  "agentDelete.flagServer": {
+    en: "  --server / --server-url  Delete only on the given server (replicas outside the fan-out are kept).\n",
+    zh: "  --server / --server-url  仅删除指定服务器（仍保留集群 fan-out 之外的副本）。\n",
+  },
+  "agentDelete.flagUser": {
+    en: "  --user <userId>  Explicitly override userId (errors when it differs from AUTH_TOKEN).\n",
+    zh: "  --user <userId>  显式覆盖 userId（与 AUTH_TOKEN 不一致则报错）。\n",
+  },
+  "agentDelete.flagToken": {
+    en: "  --token / --machine-key  Temporarily override AUTH_TOKEN.\n",
+    zh: "  --token / --machine-key  临时覆盖 AUTH_TOKEN。\n",
+  },
+  // ── Non-TUI CLI output: shared API error printing ─────────────────────────
+  "api.requestFailed": {
+    en: "Request failed: {0}",
+    zh: "请求失败: {0}",
+  },
+  "api.requestFailedHttp": {
+    en: "Request failed (HTTP {0})",
+    zh: "请求失败 (HTTP {0})",
+  },
+  "api.nonJsonResponse": {
+    en: "Server returned a non-JSON response (HTTP {0})",
+    zh: "服务端返回非 JSON 响应 (HTTP {0})",
+  },
+  "api.errorWithCode": {
+    en: "Error [{0}]: {1}",
+    zh: "错误 [{0}]: {1}",
+  },
+  "api.error": {
+    en: "Error: {0}",
+    zh: "错误: {0}",
+  },
+  // ── Non-TUI CLI output: local ChatGPT web image job ───────────────────────
+  "chatgptWebImage.jobInProgress": {
+    en: "A ChatGPT web image job is already running, try again later (lock file held).",
+    zh: "ChatGPT 网页生图任务正在进行中，请稍后再试（锁文件占用）",
+  },
+  "chatgptWebImage.noOutputFile": {
+    en: "ChatGPT web image generation produced no file: {0}",
+    zh: "ChatGPT 网页生图未产出文件：{0}",
+  },
+  "chatgptWebImage.outputFileInvalid": {
+    en: "ChatGPT web image file is invalid or empty: {0}",
+    zh: "ChatGPT 网页生图文件无效或为空：{0}",
+  },
+  "chatgptWebImage.uploadFailed": {
+    en: "Uploading the generated image to Nolo FS failed: {0}",
+    zh: "上传生图结果到 Nolo FS 失败：{0}",
+  },
+  "chatgptWebImage.missingUploadFileId": {
+    en: "Upload succeeded but the response has no fileId",
+    zh: "上传生图结果成功但响应缺少 fileId",
+  },
+  "chatgptWebImage.missingPrompt": {
+    en: "Missing image prompt (payload.meta.prompt is required)",
+    zh: "缺少生图 prompt（payload.meta.prompt 必填）",
+  },
+  // ── Non-TUI CLI output: agent-run orchestration tool errors ───────────────
+  "agentRunTool.missingAgentKey": {
+    en: "startAgentRun: missing agentKey, and the current agent cannot be identified.",
+    zh: "startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。",
+  },
+  "agentRunTool.missingTask": {
+    en: "startAgentRun: missing a valid task description.",
+    zh: "startAgentRun: 缺少有效的 task 文本描述。",
+  },
+  "agentRunTool.noDialogToContinue": {
+    en: "This run has no linked dialog and cannot be continued.",
+    zh: "该 run 无关联 dialog，无法续跑。",
+  },
+  "agentRunTool.appendMissingRunId": {
+    en: 'controlAgentRun(action:"append"): missing runId.',
+    zh: 'controlAgentRun(action:"append"): 缺少 runId。',
+  },
+  "agentRunTool.appendMissingUserInput": {
+    en: 'controlAgentRun(action:"append"): missing a valid userInput text.',
+    zh: 'controlAgentRun(action:"append"): 缺少有效的 userInput 文本。',
+  },
+  "agentRunTool.appendQueueUnsupported": {
+    en: "This run did not start with a queue channel; append while running is not supported. Wait for a terminal state first.",
+    zh: "该 run 启动时不支持运行中入队（无队列通道），请等终态后再 append",
+  },
+  "agentRunTool.unknownAction": {
+    en: 'controlAgentRun: unknown action "{0}".',
+    zh: 'controlAgentRun: 未知 action "{0}"。',
+  },
+  "agentRunTool.missingRunId": {
+    en: 'controlAgentRun(action:"{0}"): missing runId.',
+    zh: 'controlAgentRun(action:"{0}"): 缺少 runId。',
+  },
+  "agentRunTool.waitAborted": {
+    en: "controlAgentRun(wait) was aborted.",
+    zh: "controlAgentRun(wait) 已被中止。",
   },
 } as const;
 
@@ -1046,6 +1589,10 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   execShell: { en: "Run", zh: "执行" },
   runCommand: { en: "Run", zh: "执行" },
   captureVisualState: { en: "Capture", zh: "截屏" },
+  // Memory tools
+  rememberMemory: { en: "Remember", zh: "记住" },
+  queryMemory: { en: "Recall", zh: "查记忆" },
+  deleteMemory: { en: "Forget", zh: "删记忆" },
   // Workspace / diagnostics
   searchWorkspace: { en: "Search workspace", zh: "搜索工作区" },
   // 同一工具在 web/server 工具面用 snake_case 命名（packages/ai/tools/index.ts）。
@@ -1083,11 +1630,61 @@ const TOOL_LABELS: Record<string, { en: string; zh: string }> = {
   exa_search: { en: "Web search", zh: "联网搜索" },
   // Skill loading
   loadSkill: { en: "Used Skill", zh: "使用技能" },
+  // Agent orchestration
+  listAgents: { en: "List agents", zh: "列出智能体" },
+  readAgent: { en: "Read agent", zh: "读取智能体" },
+  startAgentRun: { en: "Start agent", zh: "启动智能体" },
+  controlAgentRun: { en: "Control agent", zh: "控制智能体" },
 };
 
 /** Localized action label for a tool, falling back to the raw tool name. */
 export function toolLabel(name: string): string {
   return TOOL_LABELS[name]?.[currentLocale] ?? name;
+}
+
+/**
+ * Localized one-line description for a registered CLI subcommand, keyed by
+ * `path.join(" ")` (e.g. "auth chatgpt"). Returns null when no localized copy
+ * exists so `nolo <group> --help` falls back to the registry's English
+ * description instead of inventing one.
+ */
+export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
+  "auth cooldown": {
+    en: "List / clear credential availability cooldowns",
+    zh: "列出 / 清除凭证可用性冷却",
+  },
+  "auth cloudflare": {
+    en: "Authorize Cloudflare OAuth",
+    zh: "授权 Cloudflare OAuth",
+  },
+  "auth chatgpt": {
+    en: "Authorize ChatGPT / OpenAI Codex OAuth",
+    zh: "授权 ChatGPT / OpenAI Codex OAuth",
+  },
+  "auth xai": {
+    en: "Authorize xAI Grok OAuth (SuperGrok subscription)",
+    zh: "授权 xAI Grok OAuth（SuperGrok 订阅）",
+  },
+  "auth antigravity": {
+    en: "Authorize Google Antigravity OAuth",
+    zh: "授权 Google Antigravity OAuth",
+  },
+  "auth claude": {
+    en: "Authorize Claude Pro/Max OAuth",
+    zh: "授权 Claude Pro/Max OAuth",
+  },
+  "auth cursor": {
+    en: "Authorize Cursor Pro OAuth",
+    zh: "授权 Cursor Pro OAuth",
+  },
+  "auth devin": {
+    en: "Authorize Devin OAuth (Free SWE-2)",
+    zh: "授权 Devin OAuth（免费 SWE-2）",
+  },
+};
+
+export function cliCommandDescription(commandPath: string): string | null {
+  return COMMAND_DESCRIPTIONS[commandPath]?.[currentLocale] ?? null;
 }
 
 /**
@@ -1105,6 +1702,38 @@ export function toolLabelVariants(name: string): string[] {
   return [...new Set(Object.values(entry))];
 }
 
+/**
+ * Localized short status word for a run row (panel / dock).
+ *
+ * Terminal mapping mirrors the fixed run zone (`timeout`/`orphaned` read as
+ * failure, `killed`/`cancelled` read as cancelled) so every run surface says
+ * the same thing about the same state. Unknown future statuses fall through
+ * verbatim: an unfamiliar word beats a blank.
+ */
+export function agentRunStatusWord(status: string): string {
+  switch (status) {
+    case "running":
+      return t("runZoneRunning");
+    case "pending":
+      return t("runZonePending");
+    case "cancelling":
+      return t("runZoneCancelling");
+    case "done":
+      return t("runZoneDone");
+    case "killed":
+    case "cancelled":
+      return t("runZoneCancelled");
+    case "failed":
+    case "timeout":
+    case "orphaned":
+      return t("runZoneFailed");
+    case "not_found":
+      return t("runStatusNotFound");
+    default:
+      return status;
+  }
+}
+
 /** Labels injected into `packages/ai` agent-run card helpers (no cli→ai reverse dep). */
 export function agentRunCardLabels(): {
   runStatus: string;
@@ -1113,6 +1742,18 @@ export function agentRunCardLabels(): {
   runFinished: string;
   logTail: string;
   runs: (count: number) => string;
+  toolCount: (count: number) => string;
+  statusWord: (status: string) => string;
+  /** Placeholder shown when a run's only name is a machine key (agent-pub-…). */
+  unnamedAgent: string;
+  rows: {
+    agent: string;
+    status: string;
+    tools: string;
+    note: string;
+    error: string;
+    task: string;
+  };
 } {
   return {
     runStatus: t("runStatusLabel"),
@@ -1121,5 +1762,19 @@ export function agentRunCardLabels(): {
     runFinished: t("runFinishedLabel"),
     logTail: t("runLogTailLabel"),
     runs: (count: number) => t("runsListLabel", String(count)),
+    toolCount: (count: number) => t("runToolsCount", String(count)),
+    statusWord: agentRunStatusWord,
+    // Same folding rule as the run zone/panel: an unnamed run's machine key
+    // collapses to the kind-of-actor word, never the key itself.
+    unnamedAgent: t("subAgentName"),
+    // Padding rides on the value so the default English layout is unchanged.
+    rows: {
+      agent: `${t("runRowAgent")}   `,
+      status: `${t("runRowStatus")}  `,
+      tools: `${t("runRowTools")}   `,
+      note: `${t("runRowNote")}    `,
+      error: `${t("runRowError")}   `,
+      task: `${t("runRowTask")}    `,
+    },
   };
 }

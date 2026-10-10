@@ -19,8 +19,6 @@ import React, {
 import { NavLink } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useTranslation } from "react-i18next";
-import { toast } from "app/utils/toast"
-import { nanoid } from "nanoid";
 import {
   getSnapshot as getRecentlyCreatedSnapshot,
   isRecentlyCreated,
@@ -29,7 +27,6 @@ import {
 import {
   ICON_SIZE,
   ITEM_ICONS,
-  resolvePendingAttachmentType,
   type ItemType,
 } from "./sidebarItemShared";
 
@@ -40,8 +37,8 @@ import {
   LuEllipsis,
   LuSquare,
   LuSquareCheck,
-  LuPlus,
   LuPin,
+  LuPinOff,
   LuChevronRight,
   LuChevronDown,
 } from "react-icons/lu";
@@ -67,8 +64,6 @@ import {
 import { buildAppDetailPath } from "app/constants/appEditor";
 import { recordRecentVisit } from "app/hooks/useRecentlyOpened";
 import {
-  addPendingFile,
-  useCurrentDialogKey,
   useActiveControllers,
 } from "chat/dialog/dialogSlice";
 import { extractCustomId } from "core/prefix";
@@ -86,7 +81,6 @@ export interface SidebarItemRowProps {
   contentKey: string;
   type: string;
   title: string;
-  fileCategory?: string | null;
   categoryId?: string;
   spaceIdOverride?: string | null;
   sourceServerOrigin?: string;
@@ -111,6 +105,11 @@ export interface SidebarItemRowProps {
   /** When true, shows a small pin indicator next to the title. */
   pinned?: boolean;
 
+  /**
+   * 「置顶 / 取消置顶」行内动作（原在「更多」菜单里）。未提供时不渲染该按钮。
+   */
+  pinAction?: { pinned: boolean; onToggle: () => void };
+
   /** 子对话数：父对话折叠的子对话数量。非空时显示折叠箭头 + 数量。 */
   childCount?: number;
   /** 父对话的子列表是否折叠。默认 true（折叠）。 */
@@ -125,7 +124,6 @@ function SidebarItemRow({
   contentKey,
   type,
   title,
-  fileCategory,
   categoryId,
   spaceIdOverride,
   sourceServerOrigin,
@@ -140,6 +138,7 @@ function SidebarItemRow({
   onMenuAnchorChange,
   editSignal,
   pinned,
+  pinAction,
   childCount,
   isChildCollapsed = true,
   onToggleChildCollapse,
@@ -149,7 +148,6 @@ function SidebarItemRow({
   const dispatch = useAppDispatch();
   const currentUserId = useUserId();
   const currentSpaceId = useCurrentSpaceId();
-  const dialogKey = useCurrentDialogKey();
 
   useSyncExternalStore(
     subscribeRecentlyCreated,
@@ -286,36 +284,15 @@ function SidebarItemRow({
 
   const showContextMenu = type !== "app";
   const showMoreMenu = showContextMenu || type === "app";
-  const canJoinConversation =
-    type === "page" || type === "dialog" || type === "table" ||
-    type === "agent" || type === "image" || type === "file";
   const canEditInSpace = Boolean(effectiveSpaceId);
   const canMoveToSpace = type !== "app";
-  const showInlineActions = canJoinConversation || showContextMenu || type === "app";
+  // 「加入对话」已移入「更多」菜单；行内改为置顶按钮，可见性改由 pinAction 决定。
+  const showInlineActions = Boolean(pinAction) || showContextMenu || type === "app";
   const isFileOrImage = type === "file" || type === "image";
   const showDownloadAction = isFileOrImage;
   const showSeparatorBeforeDelete = canEditInSpace || canMoveToSpace || isFileOrImage;
 
   // handlers
-
-  const handleAddToConversation = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const isDialog = type === "dialog";
-      const sourceDialogKey = isDialog ? routeContentKey : undefined;
-      dispatch(addPendingFile({
-        id: nanoid(),
-        name: title || contentKey,
-        pageKey: routeContentKey,
-        dialogKey: sourceDialogKey,
-        sourceDialogKey,
-        targetDialogKey: dialogKey ?? undefined,
-        type: resolvePendingAttachmentType(type as ItemType, fileCategory),
-      }));
-      toast.success(t("addedToConversation"));
-    },
-    [dispatch, contentKey, title, type, routeContentKey, dialogKey, fileCategory, t]
-  );
 
   const startEditing = useCallback(() => {
     setIsEditing(true);
@@ -566,12 +543,16 @@ function SidebarItemRow({
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {canJoinConversation && (
+            {pinAction && (
               <IconButton
-                onClick={handleAddToConversation}
-                icon={LuPlus}
-                label={t("joinConversation")}
-                title={t("joinConversation")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  pinAction.onToggle();
+                }}
+                icon={pinAction.pinned ? LuPinOff : LuPin}
+                label={pinAction.pinned ? t("unpin") : t("pin")}
+                title={pinAction.pinned ? t("unpin") : t("pin")}
+                aria-pressed={pinAction.pinned}
               />
             )}
             {showContextMenu && (

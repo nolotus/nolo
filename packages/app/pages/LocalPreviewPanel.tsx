@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import {
   LuEraser,
+  LuExternalLink,
   LuMousePointerClick,
   LuPen,
   LuRefreshCw,
@@ -16,6 +17,7 @@ import {
   setSelectedNode,
   useAppInspecting,
   useAppSelectedNode,
+  useLocalPreviewTarget,
   useLocalPreviewUrl,
 } from "app/appInspector/appInspectorStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
@@ -36,9 +38,50 @@ export default function LocalPreviewPanel() {
 
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const storePreviewUrl = useLocalPreviewUrl();
+  const previewTarget = useLocalPreviewTarget();
   const previewUrl = storePreviewUrl ?? localPreviewUrl;
   const setPreviewUrl = setLocalPreviewUrl;
+  const isArtifact = previewTarget?.kind === "artifact";
+  const isExternalUrl = previewTarget?.kind === "url";
+
+  const [artifactHostedUrl, setArtifactHostedUrl] = useState<string | null>(null);
+  const [artifactRetry, setArtifactRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const targetHtml = isArtifact ? previewTarget?.html : null;
+
+  useEffect(() => {
+    if (!targetHtml) {
+      setArtifactHostedUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setError(null);
+    void fetch("/api/artifact-html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html: targetHtml }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`加载制品失败 (${res.status})`);
+        return res.json();
+      })
+      .then((data: { url?: string } | null) => {
+        if (!cancelled && data?.url) {
+          setArtifactHostedUrl(data.url);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetHtml, artifactRetry]);
+
   const [starting, setStarting] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [drawing, setDrawing] = useState(false);
@@ -133,11 +176,11 @@ export default function LocalPreviewPanel() {
   }, [boundFolder, spaceId]);
 
   useEffect(() => {
-    // If agent opened a preview via store (openPreview tool), don't auto-start
+    // If agent opened a preview via store (openPreview tool) or artifact, don't auto-start
     // the panel's own static-server — the iframe is already pointing elsewhere.
-    if (storePreviewUrl) return;
+    if (storePreviewUrl || isArtifact) return;
     void start();
-  }, [start, storePreviewUrl]);
+  }, [isArtifact, start, storePreviewUrl]);
 
   // 页面卸载时不停服务：用户通常会在预览和对话之间来回切，反复冷启动 vite 更难用。
   // 进程退出由 localPreviewRoutes 的 exit 钩子兜底。
@@ -148,7 +191,7 @@ export default function LocalPreviewPanel() {
   // store URL 模式（agent/点击打开的外部地址）不归这套自管服务管，跳过轮询，
   // 否则会误启静态服务、甚至用错误横幅顶掉正在显示的 iframe。
   useEffect(() => {
-    if (storePreviewUrl || !previewUrl || !spaceId) return;
+    if (storePreviewUrl || isArtifact || !previewUrl || !spaceId) return;
     let cancelled = false;
 
     const timer = setInterval(async () => {
@@ -236,7 +279,7 @@ export default function LocalPreviewPanel() {
             setDrawing((value) => !value);
             setInspecting(false);
           }}
-          disabled={!previewUrl}
+          disabled={!previewUrl && !(isArtifact && previewTarget?.html)}
           title="在预览上自由绘制"
         >
           {drawing ? "退出画笔" : "画笔"}
@@ -260,7 +303,8 @@ export default function LocalPreviewPanel() {
             setInspecting(!inspecting);
             setDrawing(false);
           }}
-          disabled={!previewUrl}
+          disabled={!previewUrl || isExternalUrl || isArtifact}
+          title={isExternalUrl ? "外部网页不支持标注" : isArtifact ? "HTML 制品不支持标注" : inspecting ? "退出标注" : "标注"}
         >
           {inspecting ? "退出标注" : "标注"}
         </Button>
@@ -269,18 +313,47 @@ export default function LocalPreviewPanel() {
           variant="ghost"
           icon={<LuRefreshCw size={14} />}
           onClick={() => setNonce((prev) => prev + 1)}
-          disabled={!previewUrl}
+          disabled={!previewUrl && !(isArtifact && previewTarget?.html)}
           title="刷新预览"
         >
           刷新
         </Button>
 
         <span
-          className="LocalPreview__path"
-          title={storePreviewUrl ?? boundFolder}
+          className="LocalPreview__badge"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "2px 6px",
+            borderRadius: "4px",
+            fontSize: "11px",
+            fontWeight: 500,
+            background: isArtifact ? "var(--accentGhost, #ede9fe)" : isExternalUrl ? "var(--neutralGhost, #f1f5f9)" : "var(--primaryGhost, #e0f2fe)",
+            color: isArtifact ? "var(--accent, #7c3aed)" : isExternalUrl ? "var(--textSecondary, #475569)" : "var(--primary, #0284c7)",
+          }}
         >
-          {storePreviewUrl ?? boundFolder}
+          {isArtifact ? "📄 制品" : isExternalUrl ? "🌐 网页" : "🔧 开发"}
         </span>
+
+        <span
+          className="LocalPreview__path"
+          title={isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? boundFolder)}
+        >
+          {isArtifact ? (previewTarget?.title ?? "单文件 HTML 制品") : (storePreviewUrl ?? boundFolder)}
+        </span>
+
+        {(previewUrl || artifactHostedUrl) ? (
+          <Button
+            size="small"
+            variant="ghost"
+            icon={<LuExternalLink size={14} />}
+            onClick={() => {
+              const targetUrl = previewUrl || artifactHostedUrl;
+              if (targetUrl) window.open(targetUrl, "_blank", "noopener,noreferrer");
+            }}
+            title="在新窗口打开"
+          />
+        ) : null}
 
         {selectedNode ? (
           <span className="LocalPreview__selected">
@@ -303,9 +376,40 @@ export default function LocalPreviewPanel() {
         {error ? (
           <div className="LocalPreview__message">
             <div className="LocalPreview__error">{error}</div>
-            <Button size="small" variant="secondary" onClick={() => void start()}>
+            <Button
+              size="small"
+              variant="secondary"
+              onClick={() => {
+                if (isArtifact) {
+                  setArtifactRetry((r) => r + 1);
+                } else {
+                  void start();
+                }
+              }}
+            >
               重试
             </Button>
+          </div>
+        ) : isArtifact && (artifactHostedUrl || previewTarget?.html) ? (
+          <div className="LocalPreview__canvasArea">
+            <iframe
+              key={`artifact#${nonce}#${artifactHostedUrl ?? "pending"}`}
+              ref={iframeRef}
+              src={artifactHostedUrl ?? undefined}
+              sandbox="allow-scripts"
+              title={previewTarget?.title ?? "HTML 制品"}
+              className="LocalPreview__frame"
+            />
+            <canvas
+              ref={canvasRef}
+              className="LocalPreview__brushCanvas"
+              onPointerDown={startDrawing}
+              onPointerMove={draw}
+              onPointerUp={stopDrawing}
+              onPointerCancel={stopDrawing}
+              aria-label="预览画布"
+              style={{ pointerEvents: drawing ? "auto" : "none", visibility: drawing ? "visible" : "hidden" }}
+            />
           </div>
         ) : previewUrl ? (
           <div className="LocalPreview__canvasArea">

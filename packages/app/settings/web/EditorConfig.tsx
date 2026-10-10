@@ -82,11 +82,7 @@ const EditorConfig: React.FC = () => {
     autoSaveInterval,
   } = useAppSelector(selectEditorConfig);
 
-  const shortcutItems: Array<{
-    key: keyof typeof shortcuts;
-    label: string;
-    icon: React.ReactNode;
-  }> = [
+  const shortcutItems = [
     {
       key: "heading",
       label: t("editor.shortcuts.heading", "标题"),

@@ -1,5 +1,9 @@
 // AttachmentsPreview.tsx
 import React, { useState, useCallback, useMemo, memo, MouseEvent } from "react";
+import { MediaJobAttachment } from "./MediaJobAttachment";
+import { useTranslation } from "react-i18next";
+import { formatFileSize } from "app/utils/fileUtils";
+import type { PendingMediaUploadState } from "./useMessageInputFiles";
 import { LuX, LuTrash2 } from "react-icons/lu";
 import { useAppDispatch } from "app/store";
 import ImagePreviewModal from "render/web/ui/modal/ImagePreviewModal";
@@ -13,7 +17,6 @@ import {
   runAttachmentViewTransition,
 } from "./attachmentViewTransitions";
 
-
 export interface PendingImagePreview {
   id: string;
   url: string;
@@ -21,7 +24,10 @@ export interface PendingImagePreview {
 
 interface AttachmentsPreviewProps {
   imagePreviews: PendingImagePreview[];
-  pendingFiles: (PendingFile & { error?: string })[];
+  pendingFiles: (PendingFile & {
+    error?: string;
+    mediaUpload?: PendingMediaUploadState;
+  })[];
   onRemoveImage: (id: string) => void;
   processingFiles?: Set<string>;
   isMobile?: boolean;
@@ -231,6 +237,61 @@ const ATTACHMENTS_PREVIEW_STYLES = `
     animation: attachment-thumb-pop-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  .media-upload-card {
+    position: relative;
+    flex: 1 1 240px;
+    max-width: 360px;
+    min-width: 200px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--backgroundSecondary, var(--background));
+    box-sizing: border-box;
+  }
+
+  .media-upload-card.error {
+    border-color: var(--error);
+  }
+
+  .media-upload-card__name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    padding-right: var(--space-4);
+  }
+
+  .media-upload-card__meta {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+    color: var(--textSecondary);
+    font-size: var(--fontSize-sm, 13px);
+  }
+
+  .media-upload-card__bar {
+    height: 4px;
+    margin-top: var(--space-1);
+    border-radius: 999px;
+    background: var(--border);
+    overflow: hidden;
+  }
+
+  .media-upload-card__bar-fill {
+    height: 100%;
+    background: var(--primary);
+    transition: width 0.2s linear;
+  }
+
+  .media-upload-card__error {
+    margin-top: var(--space-1);
+    color: var(--error);
+    font-size: var(--fontSize-sm, 13px);
+    word-break: break-word;
+  }
+
   @keyframes attachment-thumb-pop-in {
     0% {
       opacity: 0;
@@ -269,7 +330,7 @@ const ImageItem: React.FC<ImageItemProps> = memo(
           event.stopPropagation();
           onRemove(image.id);
         },
-        [image.id, onRemove]
+        [image.id, onRemove],
       );
 
     return (
@@ -301,14 +362,110 @@ const ImageItem: React.FC<ImageItemProps> = memo(
           aria-label={`删除图片 ${index + 1}`}
           title={`删除图片 ${index + 1}`}
         >
-          {isMobile ? <LuTrash2 size={16} aria-hidden="true" /> : <LuX size={14} aria-hidden="true" />}
+          {isMobile ? (
+            <LuTrash2 size={16} aria-hidden="true" />
+          ) : (
+            <LuX size={14} aria-hidden="true" />
+          )}
         </button>
       </div>
     );
-  }
+  },
 );
 
 ImageItem.displayName = "ImageItem";
+
+/**
+ * 媒体文件上传卡：拖入即出现，显示上传进度 → 创建任务中 → 失败可读错误。
+ * 拿到 job 后由 MediaJobAttachment 报价卡原位接替。
+ */
+const MediaUploadCard: React.FC<{
+  id: string;
+  name: string;
+  upload: PendingMediaUploadState;
+  error?: string;
+  isMobile: boolean;
+}> = ({ id, name, upload, error, isMobile }) => {
+  const { t } = useTranslation("chat");
+  const percent =
+    upload.total > 0
+      ? Math.min(100, Math.round((upload.loaded / upload.total) * 100))
+      : 0;
+  const isError = upload.phase === "error";
+  const statusText = isError
+    ? t("mediaUploadFailedShort", { defaultValue: "失败" })
+    : upload.phase === "creating"
+      ? t("mediaJobCreating", { defaultValue: "创建任务中…" })
+      : t("mediaUploadingPercent", {
+          defaultValue: "上传中 {{percent}}%",
+          percent,
+        });
+  const removeLabel = t("mediaUploadRemove", {
+    defaultValue: "移除 {{name}}",
+    name,
+  });
+  // 进度条自身无内容，可访问名需显式指向同卡的文件名元素。
+  const nameElementId = `media-upload-name-${id}`;
+
+  return (
+    <div
+      className={`attachment-item media-upload-card ${isError ? "error" : ""}`}
+      {...{ [ATTACHMENT_ITEM_KEY_ATTRIBUTE]: `file-${id}` }}
+      role="group"
+      aria-label={name}
+      aria-busy={!isError || undefined}
+      data-media-upload-phase={upload.phase}
+    >
+      <span id={nameElementId} className="media-upload-card__name" title={name}>
+        {name}
+      </span>
+      <div className="media-upload-card__meta">
+        <span>{formatFileSize(upload.size)}</span>
+        <span data-testid="media-upload-status">{statusText}</span>
+      </div>
+      {!isError && (
+        <div
+          className="media-upload-card__bar"
+          role="progressbar"
+          aria-labelledby={nameElementId}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={upload.phase === "creating" ? 100 : percent}
+        >
+          <div
+            className="media-upload-card__bar-fill"
+            style={{ width: `${upload.phase === "creating" ? 100 : percent}%` }}
+          />
+        </div>
+      )}
+      {isError && error && (
+        <div className="media-upload-card__error" role="alert">
+          {error}
+        </div>
+      )}
+      {/* 「创建任务中」不可移除：上传已完成、服务端正在建任务，
+          此时移除只会让服务端留下孤儿任务（hook 侧同样有守卫）。 */}
+      {upload.phase !== "creating" && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            upload.remove();
+          }}
+          className={`remove-button ${isMobile ? "mobile" : ""}`}
+          aria-label={removeLabel}
+          title={removeLabel}
+        >
+          {isMobile ? (
+            <LuTrash2 size={16} aria-hidden="true" />
+          ) : (
+            <LuX size={14} aria-hidden="true" />
+          )}
+        </button>
+      )}
+    </div>
+  );
+};
 
 const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
   imagePreviews,
@@ -323,7 +480,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
 
   const hasAttachments = useMemo(
     () => imagePreviews.length > 0 || pendingFiles.length > 0,
-    [imagePreviews.length, pendingFiles.length]
+    [imagePreviews.length, pendingFiles.length],
   );
 
   const handleRemoveFile = useCallback(
@@ -332,7 +489,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
         dispatch(removePendingFile(id));
       });
     },
-    [dispatch]
+    [dispatch],
   );
 
   const handlePreviewImage = useCallback((url: string) => {
@@ -394,6 +551,36 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
             .filter(Boolean)
             .join(" ");
 
+          if (file.mediaUpload) {
+            return (
+              <MediaUploadCard
+                key={file.id}
+                id={file.id}
+                name={file.name}
+                upload={file.mediaUpload}
+                error={file.error}
+                isMobile={isMobile}
+              />
+            );
+          }
+
+          if (file.type === "media_job") {
+            const dropCard = () => {
+              // 与点删除按钮同一条路径：store + localStorage 引用一起清掉。
+              dispatch(removePendingFile(file.id));
+            };
+            return (
+              <MediaJobAttachment
+                key={file.id}
+                jobId={file.id}
+                fileName={file.name}
+                onJobMissing={dropCard}
+                onJobDiscard={dropCard}
+                onRemove={dropCard}
+              />
+            );
+          }
+
           return (
             <div
               key={file.id}
@@ -412,7 +599,7 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
                   file.type === "dialog"
                     ? undefined
                     : () =>
-                      !isProcessing && !file.error && handlePreviewFile(file)
+                        !isProcessing && !file.error && handlePreviewFile(file)
                 }
               />
 
@@ -424,7 +611,11 @@ const AttachmentsPreview: React.FC<AttachmentsPreviewProps> = ({
                 aria-label={`删除文件 ${file.name}`}
                 title={`删除文件 ${file.name}`}
               >
-                {isMobile ? <LuTrash2 size={16} aria-hidden="true" /> : <LuX size={14} aria-hidden="true" />}
+                {isMobile ? (
+                  <LuTrash2 size={16} aria-hidden="true" />
+                ) : (
+                  <LuX size={14} aria-hidden="true" />
+                )}
               </button>
             </div>
           );

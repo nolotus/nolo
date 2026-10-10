@@ -173,10 +173,7 @@ import {
   convertMarxistsBookToOfflineHtmlFunctionSchema,
   convertMarxistsBookToOfflineHtmlFunc,
 } from "./convertMarxistsBookTool";
-import {
-  readXPostFunctionSchema,
-  readXPostFunc,
-} from "./readXPostTool";
+import { readXPostFunctionSchema, readXPostFunc } from "./readXPostTool";
 import {
   readXhsProfileFunctionSchema,
   readXhsProfileFunc,
@@ -187,10 +184,7 @@ export {
   applyDefaultWebToolPacks,
 } from "./toolPacks";
 import { TOOL_PACKS } from "./toolPacks";
-import {
-  surfWeatherFunctionSchema,
-  surfWeatherFunc,
-} from "./surfWeatherTool";
+import { surfWeatherFunctionSchema, surfWeatherFunc } from "./surfWeatherTool";
 import {
   wereadGatewayFunctionSchema,
   wereadGatewayFunc,
@@ -212,10 +206,7 @@ import {
   browser_selectOption_Schema,
   browser_selectOption_Func,
 } from "./browserTools/selectOption";
-import {
-  browser_click_Schema,
-  browser_click_Func,
-} from "./browserTools/click";
+import { browser_click_Schema, browser_click_Func } from "./browserTools/click";
 import {
   browser_typeText_Schema,
   browser_typeText_Func,
@@ -231,20 +222,14 @@ import {
   getChromeConnectorToolBehavior,
   getChromeConnectorToolDefaultConsent,
 } from "./chromeConnectorTools";
-import {
-  exaSearchSchema,
-  exaSearchFunc,
-} from "./exaSearchTool";
+import { exaSearchSchema, exaSearchFunc } from "./exaSearchTool";
 import {
   firecrawlScrapeSchema,
   firecrawlScrapeFunc,
   firecrawlSearchSchema,
   firecrawlSearchFunc,
 } from "./firecrawlTool";
-import {
-  olmOcrSchema,
-  olmOcrFunc,
-} from "./olmOcrTool";
+import { olmOcrSchema, olmOcrFunc } from "./olmOcrTool";
 import {
   whisperTurboSchema,
   whisperTurboFunc,
@@ -255,10 +240,7 @@ import {
   transcribeVideoSchema,
   transcribeVideoFunc,
 } from "./transcribeVideoTool";
-
-
-
-
+import { mediaJobSchema, mediaJobFunc } from "./mediaJobTool";
 
 // ✅ Google Search Scraper (Apify)
 import {
@@ -322,6 +304,7 @@ import {
   remotionRenderVideoFunc,
 } from "./remotionVideoTool";
 import { uiAskChoiceFunc, uiAskChoiceFunctionSchema } from "./uiAskChoiceTool";
+import { showInteractionFunc, showInteractionFunctionSchema } from "./uiCardTool";
 import {
   rememberMemoryFunc,
   rememberMemoryFunctionSchema,
@@ -330,10 +313,7 @@ import {
   deleteMemoryFunc,
   deleteMemoryFunctionSchema,
 } from "./deleteMemoryTool";
-import {
-  queryMemoryFunc,
-  queryMemoryFunctionSchema,
-} from "./queryMemoryTool";
+import { queryMemoryFunc, queryMemoryFunctionSchema } from "./queryMemoryTool";
 import { execShellFunctionSchema, execShellFunc } from "./execShellTool";
 import { checkEnvFunctionSchema, checkEnvFunc } from "./checkEnvTool";
 
@@ -393,19 +373,12 @@ import {
   searchDialogMessagesFunc,
   searchDialogMessagesFunctionSchema,
 } from "./searchDialogMessagesTool";
-import {
-  updateDocFunctionSchema,
-  updateDocFunc,
-} from "./updateDocTool";
+import { updateDocFunctionSchema, updateDocFunc } from "./updateDocTool";
 import {
   updateUserPreferenceProfileFunctionSchema,
   updateUserPreferenceProfileFunc,
 } from "./updateUserPreferenceProfileTool";
-import {
-  ziweiChartFunctionSchema,
-  ziweiChartFunc,
-} from "./ziweiChartTool";
-
+import { ziweiChartFunctionSchema, ziweiChartFunc } from "./ziweiChartTool";
 
 // ---------- 2. 定义工具规范接口 ----------
 
@@ -518,7 +491,7 @@ export interface ToolDefinition {
   executor: (
     args: any,
     thunkApi: any,
-    context?: ToolExecutorContext
+    context?: ToolExecutorContext,
   ) => Promise<any>;
 
   /**
@@ -529,7 +502,7 @@ export interface ToolDefinition {
   previewExecutor?: (
     args: any,
     thunkApi: any,
-    context?: ToolExecutorContext
+    context?: ToolExecutorContext,
   ) => Promise<any>;
 
   description: {
@@ -664,6 +637,17 @@ const baseToolDefinitions: ToolDefinition[] = [
     behavior: "answer",
   },
   {
+    id: "showInteraction",
+    schema: showInteractionFunctionSchema,
+    executor: showInteractionFunc,
+    description: {
+      name: "show_interaction",
+      description: "在对话中展示轻量交互：文本、指标、列表、表格、选项及声明式 action；不等待用户操作，也不执行 action。复杂交互使用 App。",
+      category: "交互 / UI",
+    },
+    behavior: "answer",
+  },
+  {
     id: "queryMemory",
     schema: queryMemoryFunctionSchema,
     executor: queryMemoryFunc,
@@ -680,7 +664,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: rememberMemoryFunc,
     description: {
       name: "rememberMemory",
-      description: "将值得长期保留的用户偏好或空间共识写入一条 episodic memory。",
+      description:
+        "将值得长期保留的用户偏好或空间共识写入一条 episodic memory。",
       category: "记忆 / 长期上下文",
     },
     behavior: "action",
@@ -731,8 +716,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: toolQueryFunc,
     description: {
       name: "toolquery",
-      description:
-        "根据任务描述列出可能有用的工具，帮助你选择合适的工具链。",
+      description: "根据任务描述列出可能有用的工具，帮助你选择合适的工具链。",
       category: "计划与编排",
     },
     behavior: "answer",
@@ -860,7 +844,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: createSkillDocFunc,
     description: {
       name: "createSkillDoc",
-      description: "创建带 skill-config / eval-config 协议块的本地 skill 文档。",
+      description:
+        "创建带 skill-config / eval-config 协议块的本地 skill 文档。",
       category: "内容管理",
     },
     behavior: "action",
@@ -937,7 +922,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: wereadGatewayFunc,
     description: {
       name: "wereadGateway",
-      description: "调用微信读书接口，支持书架、搜索、阅读统计、笔记划线、书评和推荐。",
+      description:
+        "调用微信读书接口，支持书架、搜索、阅读统计、笔记划线、书评和推荐。",
       category: "网络",
     },
     behavior: "data",
@@ -1028,7 +1014,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: searchAllSpacesFunc,
     description: {
       name: "search_all_spaces",
-      description: "在你可访问的全部空间中搜索页面、表格等内容，并返回所属空间。",
+      description:
+        "在你可访问的全部空间中搜索页面、表格等内容，并返回所属空间。",
       category: "内容管理",
     },
     behavior: "data",
@@ -1043,7 +1030,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: searchDialogMessagesFunc,
     description: {
       name: "searchDialogMessages",
-      description: "在指定对话的原始消息中搜索文本，并返回命中的 messageId、角色、原文片段和邻近上下文。",
+      description:
+        "在指定对话的原始消息中搜索文本，并返回命中的 messageId、角色、原文片段和邻近上下文。",
       category: "内容管理",
     },
     behavior: "data",
@@ -1467,7 +1455,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: readDialogFunc,
     description: {
       name: "readDialog",
-      description: "Read a Nolo dialog (prefer dialog dbKey or URL; bare id is current-user only).",
+      description:
+        "Read a Nolo dialog (prefer dialog dbKey or URL; bare id is current-user only).",
       category: "Nolo workspace",
     },
     behavior: "data",
@@ -1516,7 +1505,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: listAgentsFunc,
     description: {
       name: "listAgents",
-      description: "List the current user's Nolo agents as safe summaries containing each agent's runnable agentKey for delegation. Copy the agentKey verbatim; do not infer it from the display name.",
+      description:
+        "List the current user's Nolo agents as safe summaries containing each agent's runnable agentKey for delegation. Copy the agentKey verbatim; do not infer it from the display name.",
       category: "Nolo workspace",
     },
     behavior: "data",
@@ -1531,7 +1521,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: readAgentFunc,
     description: {
       name: "readAgent",
-      description: "Read a Nolo agent's full config and resolve its runnable agentKey.",
+      description:
+        "Read a Nolo agent's full config and resolve its runnable agentKey.",
       category: "Nolo workspace",
     },
     behavior: "data",
@@ -1716,7 +1707,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cloudflareCrawlStatusFunc,
     description: {
       name: "cloudflareCrawlStatus",
-      description: "查询 Cloudflare 爬取任务的当前状态和结果（配合 cloudflareCrawl wait=false 使用）。",
+      description:
+        "查询 Cloudflare 爬取任务的当前状态和结果（配合 cloudflareCrawl wait=false 使用）。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -1729,7 +1721,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: googleSearchScraperFunc,
     description: {
       name: "googleSearchScraper",
-      description: "抓取 Google 搜索结果（SERP），返回自然结果、广告、People Also Ask 等结构化数据。",
+      description:
+        "抓取 Google 搜索结果（SERP），返回自然结果、广告、People Also Ask 等结构化数据。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -1873,7 +1866,9 @@ const baseToolDefinitions: ToolDefinition[] = [
     behavior: "data",
   },
   ...chromeConnectorToolSchemas.map((schema): ToolDefinition => {
-    const name = schema.name as Parameters<typeof getChromeConnectorToolBehavior>[0];
+    const name = schema.name as Parameters<
+      typeof getChromeConnectorToolBehavior
+    >[0];
     return {
       id: schema.name,
       schema,
@@ -1886,7 +1881,9 @@ const baseToolDefinitions: ToolDefinition[] = [
       behavior: getChromeConnectorToolBehavior(name),
       capability: "browser_automation",
       riskLevel:
-        name === "browser_click_element" || name === "browser_type" ? "medium" : "low",
+        name === "browser_click_element" || name === "browser_type"
+          ? "medium"
+          : "low",
       costLevel: "low",
       defaultConsent: getChromeConnectorToolDefaultConsent(name),
       cancelable: true,
@@ -1898,7 +1895,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: exaSearchFunc,
     description: {
       name: "exa_search",
-      description: "使用 Exa 神经网络搜索引擎获取高质量、结构化的网络信息（包含正文）。",
+      description:
+        "使用 Exa 神经网络搜索引擎获取高质量、结构化的网络信息（包含正文）。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -1933,7 +1931,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: olmOcrFunc,
     description: {
       name: "olm_ocr",
-      description: "使用 olmOCR-2-7B-1025 进行图片文字识别，适合文档、论文等结构化文本的高质量识别。",
+      description:
+        "使用 olmOCR-2-7B-1025 进行图片文字识别，适合文档、论文等结构化文本的高质量识别。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -1944,7 +1943,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: whisperTurboFunc,
     description: {
       name: "whisper_turbo",
-      description: "使用 whisper-large-v3-turbo 快速转录音频为文字，支持多语言，速度快价格低。",
+      description:
+        "使用 whisper-large-v3-turbo 快速转录音频为文字，支持多语言，速度快价格低。",
       category: "音频与媒体",
     },
     behavior: "data",
@@ -1955,10 +1955,23 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: whisperV3Func,
     description: {
       name: "whisper_v3",
-      description: "使用 whisper-large-v3 高精度转录音频，中文/多语言准确率更高，适合对质量要求严格的场景。",
+      description:
+        "使用 whisper-large-v3 高精度转录音频，中文/多语言准确率更高，适合对质量要求严格的场景。",
       category: "音频与媒体",
     },
     behavior: "data",
+  },
+  {
+    id: "mediaJobTool",
+    schema: mediaJobSchema,
+    executor: mediaJobFunc,
+    description: {
+      name: "mediaJobTool",
+      description: "估价、启动和查询长音视频处理任务。",
+      category: "媒体处理",
+    },
+    behavior: "data",
+    uiGroup: "general",
   },
   {
     id: "transcribeVideo",
@@ -1966,7 +1979,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: transcribeVideoFunc,
     description: {
       name: "transcribeVideo",
-      description: "将视频链接转写为带标点文本与 SRT 字幕。支持 B 站分 P/合集（缺省处理全部，绝不静默丢分 P）、YouTube 等；抖音需在桌面端浏览器使用。",
+      description:
+        "将视频链接转写为带标点文本与 SRT 字幕。支持 B 站分 P/合集（缺省处理全部，绝不静默丢分 P）、YouTube 等；抖音需在桌面端浏览器使用。",
       category: "媒体处理",
     },
     behavior: "data",
@@ -1981,7 +1995,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cfScreenshotFunc,
     description: {
       name: "cfScreenshot",
-      description: "使用 Cloudflare Browser Rendering 对网页或 HTML 截图，支持全页截图和自定义视口。",
+      description:
+        "使用 Cloudflare Browser Rendering 对网页或 HTML 截图，支持全页截图和自定义视口。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -1993,7 +2008,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cfGetMarkdownFunc,
     description: {
       name: "cfGetMarkdown",
-      description: "使用 Cloudflare Browser Rendering 将网页转为 Markdown，支持 JS 渲染，速度快于多页爬取。",
+      description:
+        "使用 Cloudflare Browser Rendering 将网页转为 Markdown，支持 JS 渲染，速度快于多页爬取。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -2005,7 +2021,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cfGeneratePDFFunc,
     description: {
       name: "cfGeneratePDF",
-      description: "使用 Cloudflare Browser Rendering 将网页或 HTML 渲染为 PDF 文件，适合文档导出。",
+      description:
+        "使用 Cloudflare Browser Rendering 将网页或 HTML 渲染为 PDF 文件，适合文档导出。",
       category: "文档生成",
     },
     behavior: "action",
@@ -2017,7 +2034,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cfExtractJSONFunc,
     description: {
       name: "cfExtractJSON",
-      description: "使用 Cloudflare Browser Rendering + AI 从网页提取结构化 JSON 数据，用自然语言描述需要的字段。",
+      description:
+        "使用 Cloudflare Browser Rendering + AI 从网页提取结构化 JSON 数据，用自然语言描述需要的字段。",
       category: "网络与智能",
     },
     behavior: "data",
@@ -2090,7 +2108,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: appReadFunc,
     description: {
       name: "appRead",
-      description: "读取已部署应用的当前代码，修改应用前必须先调用此工具获取现有代码。",
+      description:
+        "读取已部署应用的当前代码，修改应用前必须先调用此工具获取现有代码。",
       category: "应用部署",
     },
     behavior: "data",
@@ -2175,7 +2194,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: appVersionRestoreFunc,
     description: {
       name: "appVersionRestore",
-      description: "将应用恢复到指定的历史版本，代码/源码/framework/SSR 产物全部回滚。",
+      description:
+        "将应用恢复到指定的历史版本，代码/源码/framework/SSR 产物全部回滚。",
       category: "应用部署",
     },
     behavior: "data",
@@ -2187,7 +2207,8 @@ const baseToolDefinitions: ToolDefinition[] = [
     executor: cfSpeechToTextFunc,
     description: {
       name: "cfSpeechToText",
-      description: "使用 Cloudflare Workers AI (@cf/openai/whisper) 将音频文件转换为文字，支持多语言自动识别。",
+      description:
+        "使用 Cloudflare Workers AI (@cf/openai/whisper) 将音频文件转换为文字，支持多语言自动识别。",
       category: "媒体处理",
     },
     behavior: "data",
@@ -2319,7 +2340,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     description: {
       name: "remotionRenderVideo",
       description:
-          "使用平台内 Remotion 模板渲染手机传播视频或产品介绍视频，并保存为 MP4。",
+        "使用平台内 Remotion 模板渲染手机传播视频或产品介绍视频，并保存为 MP4。",
       category: "多媒体生成",
     },
     behavior: "action",
@@ -2354,8 +2375,10 @@ const AGENT_AVAILABLE_TOOL_NAMES = ALL_TOOL_FUNCTION_NAMES.filter(
   (name) =>
     name !== "toolquery" &&
     (!name.startsWith("browser_") ||
-      (CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES as readonly string[]).includes(name)) &&
-    name !== "exa_search"
+      (CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES as readonly string[]).includes(
+        name,
+      )) &&
+    name !== "exa_search",
 );
 
 // 给 createAgent / updateAgent 的 tools 参数 items 动态挂 enum
@@ -2363,13 +2386,19 @@ export const patchAgentToolSchemas = () => {
   try {
     const createAgentToolsProp =
       createAgentToolFunctionSchema?.parameters?.properties?.tools;
-    if (createAgentToolsProp?.items && !(createAgentToolsProp.items as any).enum) {
+    if (
+      createAgentToolsProp?.items &&
+      !(createAgentToolsProp.items as any).enum
+    ) {
       (createAgentToolsProp.items as any).enum = AGENT_AVAILABLE_TOOL_NAMES;
     }
 
     const updateAgentToolsProp =
       updateAgentToolFunctionSchema?.parameters?.properties?.tools;
-    if (updateAgentToolsProp?.items && !(updateAgentToolsProp.items as any).enum) {
+    if (
+      updateAgentToolsProp?.items &&
+      !(updateAgentToolsProp.items as any).enum
+    ) {
       (updateAgentToolsProp.items as any).enum = AGENT_AVAILABLE_TOOL_NAMES;
     }
   } catch {
@@ -2388,7 +2417,7 @@ export const toolRegistry: Record<string, any> = toolDefinitions.reduce(
     acc[tool.schema.name] = { type: "function", function: tool.schema };
     return acc;
   },
-  {} as Record<string, any>
+  {} as Record<string, any>,
 );
 
 export const toolExecutors: Record<string, ToolDefinition["executor"]> =
@@ -2397,7 +2426,7 @@ export const toolExecutors: Record<string, ToolDefinition["executor"]> =
       acc[tool.schema.name] = tool.executor;
       return acc;
     },
-    {} as Record<string, ToolDefinition["executor"]>
+    {} as Record<string, ToolDefinition["executor"]>,
   );
 
 export const toolDescriptions: Record<string, ToolDefinition["description"]> =
@@ -2406,7 +2435,7 @@ export const toolDescriptions: Record<string, ToolDefinition["description"]> =
       acc[tool.schema.name] = tool.description;
       return acc;
     },
-    {} as Record<string, ToolDefinition["description"]>
+    {} as Record<string, ToolDefinition["description"]>,
   );
 
 export const toolDefinitionsByName: Record<string, ToolDefinition> =
@@ -2415,7 +2444,7 @@ export const toolDefinitionsByName: Record<string, ToolDefinition> =
       acc[tool.schema.name] = tool;
       return acc;
     },
-    {} as Record<string, ToolDefinition>
+    {} as Record<string, ToolDefinition>,
   );
 
 /* ==================================================================
@@ -2425,14 +2454,14 @@ const normalizeToolName = (name: string): string =>
   name.replace(/[-_]/g, "").toLowerCase();
 
 export const findToolExecutor = (
-  rawName: string
+  rawName: string,
 ): {
   executor: ToolDefinition["executor"];
   canonicalName: string;
 } => {
   const normalizedRawName = normalizeToolName(canonicalizeToolName(rawName));
   const canonicalName = Object.keys(toolExecutors).find(
-    (key) => normalizeToolName(key) === normalizedRawName
+    (key) => normalizeToolName(key) === normalizedRawName,
   );
 
   if (canonicalName && toolExecutors[canonicalName]) {

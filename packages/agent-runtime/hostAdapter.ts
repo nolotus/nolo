@@ -161,6 +161,8 @@ export type AgentRuntimeSaveTurnInput = {
     /** 本次请求稳定前缀指纹（contextCompiler 同一算法），用于 prefix churn 观测。 */
     stablePrefixHash?: string;
     stablePrefixEstimatedTokens?: number;
+    /** 每次调用的缓存/成本遥测（只含数字与哈希）。 */
+    telemetry?: import("./providerCallTelemetry").ProviderCallTelemetry;
   }>;
   /** Full token consumption across tool-loop and compaction provider calls. */
   accountingUsage?: Record<string, unknown>;
@@ -220,6 +222,8 @@ export type AgentRuntimeHostAdapter = {
     titlePatchPromise?: Promise<string | null>;
   }>;
   resolveProvider(agentConfig: AgentRuntimeAgentConfig): Promise<AgentRuntimeProvider>;
+  /** Optional local-first credential broker for JIT unwrap of opaque credentials. */
+  credentialBroker?: import("./credentialBroker").CredentialBroker;
   executeTool(
     call: AgentRuntimeToolCallInput,
     opts?: {

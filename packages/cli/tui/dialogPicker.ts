@@ -7,7 +7,7 @@ import {
 } from "../cliEnvHelpers";
 import { listUserRecordsFromServers } from "../globalRecordOperations";
 import {
-  isScheduledDialog,
+  isHiddenFromDialogList,
   normalizeDialogRecord,
   readDialogSnapshot,
   sortDialogs,
@@ -18,6 +18,7 @@ import { clipCompactText } from "core/clipCompactText";
 import { t } from "./i18n";
 import { runSelectDialog, type KeyReader, type SelectDialogItem } from "./selectDialog";
 import { MAX_TUI_HISTORY_TURNS } from "./tuiHistory";
+import { loadLocalRunChildDialogIds } from "./localRunChildDialogIds";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -31,6 +32,14 @@ const DEFAULT_PICKER_LIMIT = 20;
  * 正常对话"（在高 scheduled 占比下为优雅退化，非保证）。
  */
 const PICKER_OVERSAMPLE_FACTOR = 5;
+
+/**
+ * 子对话（triggerType=api/localhost、本机 run 记录命中、或有效 parentDialogId）同样在客户端过滤。
+ * 若最近 N 条里绝大多数是子对话，过滤后可能不足 pickerLimit；此时按倍数放大服务端 limit 继续拉取，
+ * 直到凑够、服务端已无更多记录、或到达本上限。上限刻意远低于服务端 QUERY_MAX_LIMIT(10000)，
+ * 避免一次性拉取大量记录；到达上限后优雅返回已有结果。
+ */
+const PICKER_MAX_FETCH_LIMIT = 1_000;
 
 /**
  * 恢复历史时最多显示 MAX_TUI_HISTORY_TURNS 条 user/assistant 消息。服务端
@@ -93,6 +102,8 @@ export async function fetchRecentDialogs(args: {
   fetchImpl?: CliFetchImpl;
   fallbackFetchImpl?: CliFetchImpl;
   limit?: number;
+  /** 本机 run 子对话 id 集合；缺省时读取真实 ~/.nolo/runs（测试应注入以免触碰真实目录）。 */
+  localChildDialogIds?: ReadonlySet<string>;
 }): Promise<{ dialogs: ListedDialog[] } | { error: string }> {
   const authToken = resolveAuthToken(args.env);
   if (!authToken) {
@@ -103,24 +114,41 @@ export async function fetchRecentDialogs(args: {
     return { error: t("historyBadToken") };
   }
   const serverUrls = resolveServerCandidates(args.env, resolveServerUrl(args.env));
+  const localChildIds = args.localChildDialogIds ?? loadLocalRunChildDialogIds({ env: args.env });
   const pickerLimit = Math.max(1, args.limit ?? DEFAULT_PICKER_LIMIT);
-  const result = await listUserRecordsFromServers({
-    authToken,
-    fetchImpl: args.fetchImpl ?? fetch,
-    fallbackFetchImpl: args.fallbackFetchImpl,
-    label: "dialog query",
-    limit: pickerLimit * PICKER_OVERSAMPLE_FACTOR,
-    serverUrls,
-    type: "dialog",
-    userId,
-  });
-  const dialogs = sortDialogs(
-    result.records
-      .map((record) => normalizeDialogRecord(record))
-      .filter((dialog): dialog is ListedDialog => dialog != null)
-      .filter((dialog) => !isScheduledDialog(dialog)),
-  ).slice(0, pickerLimit);
-  return { dialogs };
+  const initialFetchLimit = pickerLimit * PICKER_OVERSAMPLE_FACTOR;
+  // 不会把首次请求缩小到低于既有超采量；扩容上限取两者较大者。
+  const maxFetchLimit = Math.max(initialFetchLimit, PICKER_MAX_FETCH_LIMIT);
+  let fetchLimit = initialFetchLimit;
+  for (;;) {
+    const result = await listUserRecordsFromServers({
+      authToken,
+      fetchImpl: args.fetchImpl ?? fetch,
+      fallbackFetchImpl: args.fallbackFetchImpl,
+      label: "dialog query",
+      limit: fetchLimit,
+      serverUrls,
+      type: "dialog",
+      userId,
+    });
+    const visible = sortDialogs(
+      result.records
+        .map((record) => normalizeDialogRecord(record))
+        .filter((dialog): dialog is ListedDialog => dialog != null)
+        .filter((dialog) => !isHiddenFromDialogList(dialog, localChildIds)),
+    );
+    // 只要任一服务器返回满额 fetchLimit 条，合并后的总数必然 >= fetchLimit；
+    // 因此 total < fetchLimit 说明每台服务器都已返回不足额，即已拉完，不会误判提前停止。
+    const serverExhausted = result.records.length < fetchLimit;
+    if (
+      visible.length >= pickerLimit ||
+      serverExhausted ||
+      fetchLimit >= maxFetchLimit
+    ) {
+      return { dialogs: visible.slice(0, pickerLimit) };
+    }
+    fetchLimit = Math.min(fetchLimit * 2, maxFetchLimit);
+  }
 }
 
 export type DialogPickerResult =

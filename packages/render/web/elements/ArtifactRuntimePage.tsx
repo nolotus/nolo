@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toErrorMessage } from "core/errorMessage";
 
 const HOST_SOURCE = "nolo-artifact-host";
@@ -125,10 +125,29 @@ function markArtifactReady() {
   requestAnimationFrame(sendHeight);
 }
 
+let currentArtifactData: unknown;
+const artifactDataListeners = new Set<() => void>();
+
+function setCurrentArtifactData(value: unknown) {
+  currentArtifactData = value;
+  for (const listener of artifactDataListeners) listener();
+}
+
+function useArtifactData() {
+  return useSyncExternalStore(
+    (listener) => {
+      artifactDataListeners.add(listener);
+      return () => artifactDataListeners.delete(listener);
+    },
+    () => currentArtifactData,
+    () => undefined
+  );
+}
+
 function ArtifactRuntimePage() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [Component, setComponent] = useState<React.ComponentType | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => sendHeight());
@@ -136,7 +155,7 @@ function ArtifactRuntimePage() {
     resizeObserver.observe(document.body);
 
     const handleError = (message: string) => {
-      setFailed(true);
+      setFailed(message || "runtime error");
       postToHost({ type: ARTIFACT_ERROR, message });
       sendHeight();
     };
@@ -147,16 +166,38 @@ function ArtifactRuntimePage() {
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       handleError(String(event.reason || "runtime error"));
     };
+    let runtimeLoadedSent = false;
     const onMessage = (event: MessageEvent) => {
       if (event.data?.source !== HOST_SOURCE) return;
+      if (event.data?.type === "data") {
+        setCurrentArtifactData(event.data.data);
+        return;
+      }
+      if (event.data?.type === "ping") {
+        // 宿主晚于 iframe 挂上监听（SSR hydrate 前）时会 ping，补发握手。
+        postToHost({ type: "nolo-artifact-runtime-loaded" });
+        return;
+      }
       if (event.data?.type !== "render") return;
       if (typeof event.data?.code !== "string") return;
+      if (Object.prototype.hasOwnProperty.call(event.data, "data")) {
+        setCurrentArtifactData(event.data.data);
+      }
 
       try {
-        setFailed(false);
+        setFailed(null);
         const runtimeScope = {
           React,
           ReactECharts,
+          useArtifactData,
+          emitArtifactEvent: (eventType: string, payload: unknown) => {
+            const message = { source: RUNTIME_SOURCE, type: "nolo-artifact-event", eventType, payload };
+            try {
+              if (new Blob([JSON.stringify(message)]).size <= 1_000_000) {
+                window.parent.postMessage(message, "*");
+              }
+            } catch {}
+          },
           Icons,
           ...Icons,
           __noloArtifactPreloadIcons: preloadArtifactIcons,
@@ -184,7 +225,10 @@ function ArtifactRuntimePage() {
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onUnhandledRejection);
     window.addEventListener("message", onMessage);
-    postToHost({ type: "nolo-artifact-runtime-loaded" });
+    if (!runtimeLoadedSent) {
+      runtimeLoadedSent = true;
+      postToHost({ type: "nolo-artifact-runtime-loaded" });
+    }
     sendHeight();
 
     return () => {
@@ -207,7 +251,7 @@ function ArtifactRuntimePage() {
         data-nolo-artifact-root
       >
         {failed ? (
-          <div className="nolo-artifact-error">页面正在生成，请稍候重试。</div>
+          <div className="nolo-artifact-error" data-nolo-artifact-error-message={failed}>内容渲染失败</div>
         ) : Component ? (
           <React.Suspense fallback={<div className="nolo-artifact-loading">图表加载中…</div>}>
             <Component />

@@ -223,36 +223,35 @@ const ensureBlobRecord = async (
     mimeType: string
 ): Promise<BlobRecord> => {
     const sha256 = calculateSha256(buffer);
-    const key = blobKey(sha256);
+    return blobLock(sha256).runExclusive(async () => {
+        const key = blobKey(sha256);
+        const existing = await dbGetOrNull<BlobRecord>(key);
+        if (existing) {
+            const updated: BlobRecord = {
+                ...existing,
+                refCount: (existing.refCount || 0) + 1,
+            };
+            await serverDb.put(key, updated);
+            return updated;
+        }
 
-    const existing = await dbGetOrNull<BlobRecord>(key);
-    if (existing) {
-        const updated: BlobRecord = {
-            ...existing,
-            refCount: (existing.refCount || 0) + 1,
+        // 新建 Blob
+        await ensureUploadDirExists();
+        const blobFileName = sha256;
+        const blobPath = path.join(UPLOAD_DIR, blobFileName);
+        await Bun.write(blobPath, buffer);
+
+        const record: BlobRecord = {
+            sha256,
+            path: blobPath,
+            size: buffer.byteLength,
+            mimeType,
+            refCount: 1,
+            createdAt: new Date().toISOString(),
         };
-        await serverDb.put(key, updated);
-        return updated;
-    }
-
-    // 新建 Blob
-    await ensureUploadDirExists();
-    const blobFileName = sha256;
-    const blobPath = path.join(UPLOAD_DIR, blobFileName);
-
-    await Bun.write(blobPath, buffer);
-
-    const record: BlobRecord = {
-        sha256,
-        path: blobPath,
-        size: buffer.byteLength,
-        mimeType,
-        refCount: 1,
-        createdAt: new Date().toISOString(),
-    };
-
-    await serverDb.put(key, record);
-    return record;
+        await serverDb.put(key, record);
+        return record;
+    });
 };
 
 /**
@@ -260,23 +259,24 @@ const ensureBlobRecord = async (
  * （当前 demo 暂时未对外暴露 delete File 的 API，可留 TODO 使用）
  */
 export const decrementBlobRefCount = async (sha256: string): Promise<void> => {
-    const key = blobKey(sha256);
-    const existing = await dbGetOrNull<BlobRecord>(key);
-    if (!existing) return;
+    await blobLock(sha256).runExclusive(async () => {
+        const key = blobKey(sha256);
+        const existing = await dbGetOrNull<BlobRecord>(key);
+        if (!existing) return;
 
-    const nextCount = (existing.refCount || 0) - 1;
-    if (nextCount <= 0) {
-        try {
-            await Bun.write(existing.path, new Uint8Array());
-        } catch {
-            // 忽略物理删除失败
+        const nextCount = (existing.refCount || 0) - 1;
+        if (nextCount <= 0) {
+            try {
+                await Bun.write(existing.path, new Uint8Array());
+            } catch {
+                // 忽略物理删除失败
+            }
+            await serverDb.del(key);
+            return;
         }
-        await serverDb.del(key);
-        return;
-    }
-
-    const updated: BlobRecord = { ...existing, refCount: nextCount };
-    await serverDb.put(key, updated);
+        const updated: BlobRecord = { ...existing, refCount: nextCount };
+        await serverDb.put(key, updated);
+    });
 };
 
 /**
@@ -425,6 +425,18 @@ export const hasFileTombstoneById = async (fileId: string): Promise<boolean> => 
  * refCount 单调递减语义兜底（最坏多减，需人工修复 blob）。
  */
 const tombstoneLocks = new Map<string, Mutex>();
+// 锁顺序固定为 fileId → sha256：tombstone 先持有 fileId 锁再进入 blob 锁；
+// 不允许任何路径持有 blob 锁后再获取 fileId 锁，避免锁顺序反转死锁。
+// 与 tombstone 锁相同，进程内互斥依赖单实例部署；多实例仍依靠 refCount 语义兜底。
+const blobLocks = new Map<string, Mutex>();
+const blobLock = (sha256: string): Mutex => {
+    let lock = blobLocks.get(sha256);
+    if (!lock) {
+        lock = new Mutex();
+        blobLocks.set(sha256, lock);
+    }
+    return lock;
+};
 const tombstoneLock = (key: string): Mutex => {
     let lock = tombstoneLocks.get(key);
     if (!lock) {
@@ -470,6 +482,22 @@ export const tombstoneFileById = async (fileId: string): Promise<boolean> => {
     });
 };
 
+export const SHA256_HEX = /^[a-f0-9]{64}$/;
+
+/**
+ * 校验 sha256 格式
+ */
+export const assertValidSha256 = (sha256: unknown): asserts sha256 is string => {
+    if (typeof sha256 !== "string" || !SHA256_HEX.test(sha256)) {
+        throw new Error("Invalid sha256");
+    }
+};
+
+export const getBlobPathBySha256 = (sha256: string): string => {
+    assertValidSha256(sha256);
+    return path.join(UPLOAD_DIR, sha256);
+};
+
 /**
  * 通过 fileId 获取文件内容（二进制）+ Metadata
  */
@@ -481,7 +509,9 @@ export const getFileContentById = async (
         throw new Error(`File not found: ${fileId}`);
     }
 
-    const file = Bun.file(metadata.filePath);
+    assertValidSha256(metadata.sha256);
+    const blobPath = path.join(UPLOAD_DIR, metadata.sha256);
+    const file = Bun.file(blobPath);
     const exists = await file.exists();
     if (!exists) {
         throw new Error(`File content missing on disk: ${fileId}`);
@@ -491,4 +521,27 @@ export const getFileContentById = async (
     const buffer = Buffer.from(arrayBuffer);
 
     return { buffer, metadata };
+};
+
+/**
+ * 按 sha256 读取 blob 的前 maxBytes 字节（流式截断，不整包入内存）。
+ *
+ * 路径只由服务端常量 UPLOAD_DIR + 校验过的 64 位十六进制 sha256 推导，
+ * 不读取任何记录里的 filePath（filePath 曾可被客户端写入 → 任意文件读）。
+ * 调用方必须先经鉴权拿到 file 记录，再把记录里的 sha256 传进来。
+ */
+export const readBlobHeadBySha256 = async (
+    sha256: string,
+    maxBytes: number
+): Promise<{ bytes: Uint8Array; truncated: boolean; size: number }> => {
+    assertValidSha256(sha256);
+    const limit = Math.max(0, Math.floor(maxBytes));
+    const blobPath = path.join(UPLOAD_DIR, sha256);
+    const file = Bun.file(blobPath);
+    if (!(await file.exists())) {
+        throw new Error("File content missing on disk");
+    }
+    const size = file.size;
+    const head = await file.slice(0, limit).arrayBuffer();
+    return { bytes: new Uint8Array(head), truncated: size > limit, size };
 };

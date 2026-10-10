@@ -231,27 +231,31 @@ const LONG_CONTEXT_EVIDENCE: readonly ModelQualityEvidence[] = [
   { model: "muse-spark-1.3", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 83.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
   { model: "gemini-3.8-flash", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 81.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_LCR_URL },
   // long_context — GDP.pdf（长文档 all-pass，难度高得多，次级参考）。
-  { model: "gpt-6-astra", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 32.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
-  { model: "claude-opus-5-5", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 28.8, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gpt-6-astra", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 31, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GDP_PDF_URL },
+  { model: "claude-opus-5-5", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 26.2, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GDP_PDF_URL },
   { model: "gpt-5.6-sol", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 27.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "muse-spark-1.3", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 26.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "gpt-5.6-luna", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 24.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "kimi-k3", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 22.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "claude-opus-5", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 21.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "gemini-3.8-flash", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 21.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
-  { model: "gpt-6-luna", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 20.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+  { model: "gpt-6-luna", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 22.8, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GDP_PDF_URL },
   { model: "mimo-v2.6-pro", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 19.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
   { model: "grok-4.6", domain: "long_context", dimension: "task_success", benchmark: "gdp-pdf", score: 17.0, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GDP_PDF_URL },
+
+  // mistral 家族（2026-10-07 首读，AA-LCR v1.1；AA 当日无 "Vibe" 档）。
+  { model: "mistral-large-4-preview", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 81.3, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_LCR_URL },
+  { model: "mistral-medium-3.5", domain: "long_context", dimension: "task_success", benchmark: "aa-lcr-v1.1", benchmarkVersion: "1.1", score: 69.3, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_LCR_URL },
 ];
 
 const SCIENCE_EVIDENCE: readonly ModelQualityEvidence[] = [
   // science — GPQA Diamond（研究生级科学推理，主榜）。
-  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 96.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gpt-6-astra", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 96.1, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GPQA_URL },
   { model: "gemini-3.8-flash", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 95.3, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
   { model: "grok-4.6", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.9, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
-  { model: "gemini-3.7-flash", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "gemini-3.7-flash", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 92.1, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GPQA_URL },
   { model: "gpt-5.6-sol", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
-  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 94.1, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
+  { model: "muse-spark-1.3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 93.5, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_GPQA_URL },
   { model: "kimi-k3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 93.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
   { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 93.2, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
   { model: "glm-5.3", domain: "science", dimension: "task_success", benchmark: "gpqa-diamond", score: 91.7, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_GPQA_URL },
@@ -297,6 +301,10 @@ const SCIENCE_EVIDENCE: readonly ModelQualityEvidence[] = [
   { model: "grok-4.6", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.5, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
   { model: "claude-opus-5", domain: "science", dimension: "task_success", benchmark: "scicode", score: 56.4, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
   { model: "gpt-6-luna", domain: "science", dimension: "task_success", benchmark: "scicode", score: 54.6, direction: "higher_better", measuredAt: "2026-09-24", sourceUrl: AA_SCICODE_URL },
+
+  // mistral 家族（2026-10-07 首读，SciCode）。
+  { model: "mistral-large-4-preview", domain: "science", dimension: "task_success", benchmark: "scicode", score: 54.2, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_SCICODE_URL },
+  { model: "mistral-medium-3.5", domain: "science", dimension: "task_success", benchmark: "scicode", score: 40.2, direction: "higher_better", measuredAt: "2026-10-07", sourceUrl: AA_SCICODE_URL },
 ];
 
 export const MODEL_QUALITY_EVIDENCE: readonly ModelQualityEvidence[] = [

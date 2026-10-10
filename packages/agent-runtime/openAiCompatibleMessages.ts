@@ -49,7 +49,22 @@ export type PreserveAgentStateOptions = {
    * string reasoning_content would reject the placeholder too.
    */
   replayReasoningPlaceholder?: string;
+  targetProvider?: string;
+  targetModel?: string;
+  allowThoughtSignature?: boolean;
 };
+
+export function isGeminiCompatibleTarget(provider?: string, model?: string): boolean {
+  const p = (provider ?? "").trim().toLowerCase();
+  const m = (model ?? "").trim().toLowerCase();
+  return (
+    p === "google" ||
+    p === "google-antigravity" ||
+    p.startsWith("google-") ||
+    p.includes("gemini") ||
+    m.includes("gemini")
+  );
+}
 
 /**
  * Copy only provider-visible agent state. Keeping this in one seam prevents
@@ -70,7 +85,23 @@ export function preserveAgentStateFields<T extends Record<string, any>>(
       mutableTarget.reasoning_content = source.reasoning_content;
     }
     if (Array.isArray(source.tool_calls)) {
-      mutableTarget.tool_calls = source.tool_calls;
+      const isExplicitTarget = Boolean(options?.targetProvider || options?.targetModel);
+      const allowSignature =
+        options?.allowThoughtSignature ??
+        (isExplicitTarget ? isGeminiCompatibleTarget(options?.targetProvider, options?.targetModel) : true);
+      mutableTarget.tool_calls = source.tool_calls.map((call: any) => {
+        if (!call || typeof call !== "object") return call;
+        const cleaned: Record<string, any> = {
+          id: call.id,
+          type: call.type ?? "function",
+          function: call.function,
+        };
+        if (allowSignature) {
+          if (call.extra_content !== undefined) cleaned.extra_content = call.extra_content;
+          if (call.thought_signature !== undefined) cleaned.thought_signature = call.thought_signature;
+        }
+        return cleaned;
+      });
       const replayPlaceholder = options?.replayReasoningPlaceholder;
       if (
         typeof replayPlaceholder === "string" &&

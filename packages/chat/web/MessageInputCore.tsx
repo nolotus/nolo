@@ -25,6 +25,7 @@ import {
   useCurrentDialogKey,
   usePendingFiles,
   useActiveControllers,
+  useRecoveredForegroundTurn,
 } from "../dialog/dialogSlice";
 import { useCurrentDialogConfig } from "../dialog/useCurrentDialogConfig";
 import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
@@ -96,6 +97,7 @@ import {
   WEB_PASTE_THRESHOLD,
 } from "core/collapsedPaste";
 import { extractCustomId } from "core/prefix";
+import { stopForegroundTurnOnServer } from "./stopForegroundTurnOnServer";
 import { useAppSelectedNode } from "app/appInspector/appInspectorStore";
 import { MessageInputComposer } from "./MessageInputComposer";
 import { MessageInputControlsBar } from "./MessageInputControlsBar";
@@ -161,6 +163,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
       (currentDialogKey ? extractCustomId(currentDialogKey) : null),
     [currentDialogConfig?.id, currentDialogKey]
   );
+  const stopDialogId = currentDialogConfig?.dbKey
+    ? extractCustomId(currentDialogConfig.dbKey)
+    : null;
   const currentMessages = useAppSelector((state) =>
     currentDialogId && (state as any)?.message
       ? selectAllMsgs(state, currentDialogId)
@@ -684,6 +689,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     currentDialogKey,
     currentDialogConfig,
     currentServer,
+    currentUserId,
     token,
     runtimeOptions,
     imageUiConfig,
@@ -744,9 +750,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
     currentMessages,
   });
 
+  const recoveredForegroundTurn = useRecoveredForegroundTurn(currentDialogKey);
   const isGenerating = Boolean(
     hasStreamingMessage ||
     isLoopRunning ||
+    recoveredForegroundTurn === "running" ||
     (activeControllers && Object.keys(activeControllers).length > 0)
   );
 
@@ -882,6 +890,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
               event.preventDefault();
               event.stopPropagation();
               dispatch(abortAllMessages());
+              if (currentServer && token && stopDialogId) {
+                void stopForegroundTurnOnServer({
+                  server: currentServer,
+                  token,
+                  dialogId: stopDialogId,
+                });
+              }
               toast.success(t("allMessagesAborted", "已停止生成"), { duration: 3000 });
               return;
             }
@@ -901,6 +916,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         isGenerating,
         dispatch,
         t,
+        currentServer,
+        token,
+        stopDialogId,
       ]
     );
 

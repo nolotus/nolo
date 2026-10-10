@@ -24,6 +24,7 @@ import {
 } from "../client/localRuntimeAdapter";
 import { resolveSkillReference, buildSkillContextBlocks } from "../agentRunPrompts";
 import { buildSkillDiscoveryContextLayer } from "../../agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "../../agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 import { buildResponseGuidelines } from "../../agent-runtime/responseGuidelines";
 import {
@@ -77,6 +78,9 @@ import type { CollapsedPasteStore } from "../../core/collapsedPaste";
 import { toErrorMessage } from "core/errorMessage";
 import { t } from "./i18n";
 import { createChatQueueTuiBinding, type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
+import { resolveAttachmentImageUrls } from "./pasteImage";
+import { transcribeMediaFile, formatTranscriptForModel, describeMediaError } from "./mediaAttachment";
+import { createTrimRequester, resolveTranscribeTrim } from "./transcribePreflight";
 import { createTurnInjectionInbox, type TurnInjectionInbox } from "./turnInjectionInbox";
 import {
   buildProcessTerminalTurnMessage,
@@ -88,7 +92,6 @@ import {
   shouldEmitTerminalBell,
   TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
 } from "./terminalNotification";
-import { formatTurnSummaryLine } from "./turnSummary";
 import {
   createHistoryOutputStream,
   startTurn,
@@ -155,6 +158,11 @@ async function runAgentChat(
   agentRunner: typeof runAgentTurn = runAgentTurn,
   options: {
     imageUrls?: string[];
+    /**
+     * 本机原件路径（图片 / 音视频）→ 只产出给模型的安全附件卡（name/mime/size/kind），
+     * 绝不把 path / machineId 上行（见 packages/cli/tui/localAttachmentParts.ts）。
+     */
+    localAttachmentPaths?: readonly string[];
     actionGateHandler?: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>;
     confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>;
     requestUserChoice?: (request: UserChoiceRequest) => Promise<UserChoiceResult>;
@@ -197,6 +205,21 @@ async function runAgentChat(
   let effectiveMessage = message;
   let skillAllowedTools: string[] | undefined;
   let skillContextBlocks: string[] | undefined;
+  // 记忆召回只依赖此刻已固定的 agent 与用户输入（`effectiveMessage` 之后不再
+  // 改写），而 attached-skill 解析是与之相互独立的等待；因此在这里就发起召回，
+  // 让两条 I/O 重叠，再在首次模型请求前 await 同一个 promise。远端优先 /
+  // 本地 fallback / 5000ms 超时语义完全不变（仍走 resolveCliMemory）。
+  // 异常在此处立即收敛为 null：否则 skill 等待期间会产生未处理的 rejection。
+  const memoryPromptPromise =
+    state.cachedMemoryOverlay === undefined
+      ? resolveCliMemory({
+          serverUrl: state.serverUrl,
+          authToken: resolvePlatformAuthToken(env),
+          agentKey: effectiveAgentKey,
+          userInput: effectiveMessage,
+          env,
+        }).catch(() => null)
+      : null;
   if (state.attachedSkills.length > 0) {
     const authToken = resolvePlatformAuthToken(env);
     const resolvedSkills = [];
@@ -246,6 +269,8 @@ async function runAgentChat(
     // index layer so the model knows what skills exist and can readFile them
     // on-demand. Mirrors agentRunCommand.ts and desktopAgentRuntimeTurnService.
     buildSkillDiscoveryContextLayer(state.cwd),
+    // 宿主环境层（session-scope 稳定前缀）：快速注入当前系统发行版、架构与桌面环境
+    buildHostEnvironmentLayer(),
   ];
 
   // 响应展示指南（窄屏/TUI 版）：与 buildSystemPrompt 共享同一 builder
@@ -260,14 +285,9 @@ async function runAgentChat(
   // the current one (the model already has the context from the conversation).
   // /new or dialog switch clears cachedMemoryOverlay so the next dialog reloads.
   let memoryPromptBlock = state.cachedMemoryOverlay;
-  if (memoryPromptBlock === undefined) {
-    memoryPromptBlock = await resolveCliMemory({
-      serverUrl: state.serverUrl,
-      authToken: resolvePlatformAuthToken(env),
-      agentKey: effectiveAgentKey,
-      userInput: effectiveMessage,
-      env,
-    }).catch(() => null);
+  if (memoryPromptBlock === undefined && memoryPromptPromise) {
+    // 等待已提前启动的召回；首次模型请求仍须拿到这个结果。
+    memoryPromptBlock = await memoryPromptPromise;
     // Cache will be propagated to TUI state by the caller via runResult.cachedMemoryOverlay.
   }
   const memoryOverlayLayer = buildMemoryOverlayLayer({ promptBlock: memoryPromptBlock });
@@ -349,6 +369,9 @@ async function runAgentChat(
     ...(options.imageUrls && options.imageUrls.length > 0
       ? { imageUrls: options.imageUrls }
       : {}),
+    ...(options.localAttachmentPaths && options.localAttachmentPaths.length > 0
+      ? { localAttachmentPaths: options.localAttachmentPaths }
+      : {}),
     ...(options.actionGateHandler ? { actionGateHandler: options.actionGateHandler } : {}),
     ...(options.confirmDestructiveAction
       ? { confirmDestructiveAction: options.confirmDestructiveAction }
@@ -379,7 +402,7 @@ async function runAgentChat(
         ...(options.requestUserChoice
           ? { requestUserChoice: options.requestUserChoice }
           : {}),
-        ...(options.pastedTextStore
+        ...(options.pastedTextStore?.items.size
           ? { pastedTextStore: options.pastedTextStore }
           : {}),
         // Stamp spawned background runs with the current TUI dialog so the
@@ -922,6 +945,11 @@ export async function runOneAgentTurn(
   imageUrls: string[],
   actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /**
+   * 本机原件路径（图片 / 音视频）：client 侧转成安全附件卡（只含 name/mime/size/kind），
+   * 不把 path / machineId 发给 provider。缺省 = 无附件卡（行为不变）。
+   */
+  localAttachmentPaths?: readonly string[],
 ): Promise<{ ok: boolean; aborted: boolean }> {
   // LLM 总结标题是 fire-and-forget 后台 patch：saveTurn 返回的 title 是
   // fallback（不阻塞 turn），真正标题 patch 完成后把最终标题同步到
@@ -1101,6 +1129,9 @@ export async function runOneAgentTurn(
       ctx.options.agentRunner,
       {
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        ...(localAttachmentPaths && localAttachmentPaths.length > 0
+          ? { localAttachmentPaths }
+          : {}),
         actionGateHandler,
         ...(confirmDestructiveAction ? { confirmDestructiveAction } : {}),
         ...(requestUserChoice ? { requestUserChoice } : {}),
@@ -1203,20 +1234,6 @@ export async function runOneAgentTurn(
       ctx.flushPendingRender();
       ctx.renderHistoryToOutput();
       if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
-    }
-    if (
-      !wasAborted &&
-      !runResult.streamInterrupted &&
-      runResult.exitCode === 0 &&
-      isInteractiveInput(ctx.input)
-    ) {
-      const summary = formatTurnSummaryLine({
-        durationMs: Date.now() - turnStartedAtMs,
-        outputTokens: runResult.turnTokens?.output,
-        credits: runResult.turnCredits,
-        minDurationMs: TURN_COMPLETION_ATTENTION_THRESHOLD_MS,
-      });
-      if (summary) ctx.emitCommandOutput(summary);
     }
     if (wasAborted) {
       if (runResult.pendingToolName) {
@@ -1326,6 +1343,100 @@ export async function runOneAgentTurn(
 }
 
 /**
+ * drain 一条排队请求：若携带 imagePaths，在**此刻**才读成 dataURL（入队时不读：
+ * 排队期间文件可能变，且不让大 base64 挂在队列里）。读不到的路径只打一行
+ * `image skipped:`（与 direct 路径同语义）并继续执行该轮，绝不抛错。
+ */
+export async function runDrainedQueueTurn(
+  ctx: AgentTurnContext,
+  req: TurnRequest,
+  actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
+  confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
+  /** 测试注入点：缺省即 runOneAgentTurn。 */
+  runTurn: typeof runOneAgentTurn = runOneAgentTurn,
+): Promise<{ ok: boolean; aborted: boolean }> {
+  let imageUrls: string[] = [];
+  if (req.imagePaths && req.imagePaths.length > 0) {
+    try {
+      ({ imageUrls } = await resolveAttachmentImageUrls({
+        actionImagePaths: req.imagePaths,
+        attachedImages: [],
+        onFailure: (_path, err) =>
+          ctx.output.write(`[nolo] image skipped: ${err.message}\n`),
+      }));
+    } catch (err) {
+      ctx.output.write(
+        `[nolo] image skipped: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      imageUrls = [];
+    }
+  }
+  // 排队消息携带的音视频路径：drain 时才跑转写（与图片延迟读同思路，
+  // 排队期间文件可能变 + 转写产物不应常驻队列）。transcript 块并入
+  // req.text 发给模型；失败输出错误行，消息本体照发（模型拿不到内容
+  // 但有失败说明，路径文本已被剥离）。
+  const mediaPaths = req.mediaPaths ?? [];
+  if (mediaPaths.length > 0) {
+    const authToken = resolvePlatformAuthToken(ctx.effectiveEnv);
+    const blocks: string[] = [];
+    for (const mediaPath of mediaPaths) {
+      const base = mediaPath.split(/[/\\]/).pop() ?? mediaPath;
+      try {
+        // T5：排队消息 drain 时同样先检查尾部静音。ctx.dialogHost 为空
+        // （非交互/无宿主）时 requestChoice 为 null → 只提示不裁剪。
+        const trim = await resolveTranscribeTrim({
+          path: mediaPath,
+          onNotice: ctx.emitCommandOutput,
+          onScanStart: (p) =>
+            ctx.emitCommandOutput(t("mediaSilenceTrimScanning", p.split(/[/\\]/).pop() ?? p)),
+          requestChoice: createTrimRequester({
+            dialogHost: ctx.dialogHost,
+            input: ctx.input,
+            output: ctx.output,
+          }),
+        });
+        ctx.emitCommandOutput(t("mediaPreprocessStart", base));
+        const transcript = await transcribeMediaFile({
+          path: mediaPath,
+          serverUrl: ctx.state.serverUrl,
+          authToken,
+          dialogId: ctx.state.dialogId,
+          fromSec: trim.fromSec,
+          toSec: trim.toSec,
+          fetchImpl: ctx.options.fetchImpl,
+          onProgress: (info) => {
+            const label = info.message ?? info.stage ?? "";
+            if (label) ctx.emitCommandOutput(t("mediaTranscribeProgress", base, label));
+          },
+        });
+        ctx.emitCommandOutput(t("mediaTranscribeDone", base, transcript.txtPath));
+        blocks.push(formatTranscriptForModel(transcript, mediaPath));
+      } catch (err) {
+        const msg = describeMediaError(err).message;
+        ctx.emitCommandOutput(
+          `[nolo] ${t("mediaTranscribeFailed", base, msg)}`,
+        );
+        blocks.push(`[media transcription failed for ${mediaPath}: ${msg}]`);
+      }
+    }
+    if (blocks.length > 0) {
+      const mergedText = req.text
+        ? `${blocks.join("\n\n")}\n\n${req.text}`
+        : blocks.join("\n\n");
+      req = { ...req, text: mergedText, event: { kind: "user", text: mergedText } };
+    }
+  }
+  return runTurn(
+    ctx,
+    req,
+    imageUrls,
+    actionGateHandler,
+    confirmDestructiveAction,
+    [...(req.imagePaths ?? []), ...(req.mediaPaths ?? [])],
+  );
+}
+
+/**
  * S2: 文件级 ensureChatQueueBinding 函数
  *
  * 获取或延迟初始化 TUI chat 队列绑定，并把 drain 执行委托给 runOneAgentTurn。
@@ -1336,8 +1447,8 @@ export function ensureChatQueueBinding(
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
 ): ChatQueueTuiBinding {
   if (ctx.chatQueueBinding) return ctx.chatQueueBinding;
-  ctx.chatQueueBinding = createChatQueueTuiBinding(async (text) => {
-    return runOneAgentTurn(ctx, text, [], actionGateHandler, confirmDestructiveAction);
+  ctx.chatQueueBinding = createChatQueueTuiBinding(async (req) => {
+    return runDrainedQueueTurn(ctx, req, actionGateHandler, confirmDestructiveAction);
   });
   return ctx.chatQueueBinding;
 }

@@ -505,9 +505,48 @@ export async function recordLocalAvailabilityForAgent(args: {
   return effectiveNextAvailableAt;
 }
 
+/**
+ * 会话级自动压缩摘要 fallback。
+ *
+ * 自动上下文压缩（localLoop → createTurnCompactionController）的主通道是 agent
+ * 自己的 provider；它慢/失败时过去只报一次 failure 然后等下一轮（实测反复 60s
+ * 超时且无进展）。这里把**已有的**平台摘要通道（CLI 入口用
+ * createTuiSummaryLlmCaller 建的实例）以会话级单例形式交给本地 adapter，
+ * 由 localLoop 读走并作为「最多一次」的 fallback。
+ *
+ * 放模块级而不是 deps：deps 类型在 localRuntimeDiagnostics（本次改动范围外），
+ * 且一个 CLI 进程只有一条平台摘要通道，会话级单例正是需要的语义。未注入
+ * （desktop、未登录、headless）→ adapter 不带该字段 → 不 fallback，行为与今天
+ * 完全一致。
+ */
+let cliAutoCompactionSummaryFallback:
+  | ((content: string) => Promise<string | null>)
+  | undefined;
+
+/** CLI 入口在启动 TUI 时注入平台摘要 caller（与 /compact 复用同一条通道）。 */
+export function setCliAutoCompactionSummaryFallback(
+  caller: ((content: string) => Promise<string | null>) | undefined,
+): void {
+  cliAutoCompactionSummaryFallback = caller;
+}
+
+/** 当前会话注入的摘要 fallback（未注入 → undefined）。 */
+export function getCliAutoCompactionSummaryFallback():
+  | ((content: string) => Promise<string | null>)
+  | undefined {
+  return cliAutoCompactionSummaryFallback;
+}
+
 export function createCliLocalRuntimeAdapter(
   deps: CliLocalRuntimeAdapterDeps,
 ): AgentRuntimeHostAdapter & {
+  /**
+   * 自动上下文压缩的摘要 fallback（CLI 专有，非 AgentRuntimeHostAdapter 接口
+   * 成员）。localLoop 在主通道超时/失败时最多调用一次；形状与 CLI 的
+   * SummaryLlmCaller 一致。未注入 → undefined（见
+   * setCliAutoCompactionSummaryFallback）。
+   */
+  compactionSummaryFallback?: (content: string) => Promise<string | null>;
   /**
    * 启动期 429 冷却兜底落盘入口（CLI 本地 adapter 专有，非
    * AgentRuntimeHostAdapter 接口成员）。agentRun.ts 在 classifyLocalRunError
@@ -578,33 +617,40 @@ export function createCliLocalRuntimeAdapter(
   let runtimeToolExecutionLimits: ReturnType<
     typeof resolveLocalWorkspaceExecutorOptionsFromPolicy
   > = {};
-  let localToolExecutors: Record<
-    string,
-    (
-      call: any,
-    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
-  > = buildLocalToolExecutors({
-    workspaceRoot,
-    env: deps.env,
-    fetchImpl,
-    ...(deps.chromeConnectorClient
-      ? { chromeConnectorClient: deps.chromeConnectorClient }
-      : {}),
-    localToolExecutors: deps.localToolExecutors,
-    readXPost: deps.readXPost,
-    readXhsProfile: deps.readXhsProfile,
-    cliEntrypoint: CLI_ENTRYPOINT,
-    resolveAgentCredentialGroup,
-    ...(deps.confirmDestructiveAction
-      ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-      : {}),
-    ...(deps.requestUserChoice
-      ? { requestUserChoice: deps.requestUserChoice }
-      : {}),
-    ...(deps.pastedTextStore
-      ? { pastedTextStore: deps.pastedTextStore }
-      : {}),
-    ...runtimeToolExecutionLimits,
+  // Executor closures belong to this adapter; only prepared metadata is shared.
+  const buildCurrentToolExecutors = (agentKey?: string | null) =>
+    buildLocalToolExecutors({
+      workspaceRoot,
+      env: deps.env,
+      fetchImpl,
+      ...(deps.chromeConnectorClient
+        ? { chromeConnectorClient: deps.chromeConnectorClient }
+        : {}),
+      localToolExecutors: deps.localToolExecutors,
+      readXPost: deps.readXPost,
+      readXhsProfile: deps.readXhsProfile,
+      cliEntrypoint: CLI_ENTRYPOINT,
+      resolveAgentCredentialGroup,
+      ...(deps.confirmDestructiveAction
+        ? { confirmDestructiveAction: deps.confirmDestructiveAction }
+        : {}),
+      ...(deps.requestUserChoice
+        ? { requestUserChoice: deps.requestUserChoice }
+        : {}),
+      ...(deps.pastedTextStore
+        ? { pastedTextStore: deps.pastedTextStore }
+        : {}),
+      agentKey,
+      ...runtimeToolExecutionLimits,
+    });
+  let localToolExecutors = buildCurrentToolExecutors();
+
+  // 凭据保管库：同一个实例既供 provider 解析密钥，也暴露给 localLoop 做输入隔离
+  // 与执行边界解包（adapter.credentialBroker）。此前只有 provider 那条路建 broker，
+  // adapter 上没有这个字段 → 隔离路径恒不激活，用户粘贴的密钥只会被正则脱敏成
+  // 不可用的 [REDACTED:…] 标记，而不是模型能安全消费的引用。
+  const credentialBroker = createFileCredentialBroker({
+    migration: { enableLegacyMigration: true },
   });
 
   const adapterBase = {
@@ -615,6 +661,7 @@ export function createCliLocalRuntimeAdapter(
       "leveldb-persistence",
       "local-tools",
     ],
+    credentialBroker,
     loadAgentConfig: async (agentRef) => {
       // Read the global skill settings before checking the prepared-runtime cache.
       // Otherwise a setting change would keep reusing the old tool surface.
@@ -640,16 +687,15 @@ export function createCliLocalRuntimeAdapter(
         cwd: normalizeRuntimeCacheCwd(workspaceRoot),
         systemBuiltinSkills,
       });
-      // Paste executors close over the current TUI store. A prepared runtime
-      // cache hit would otherwise reuse an executor bound to an older paste
-      // store, so paste-aware runs are intentionally per-turn.
+      // Paste availability changes the prepared tool surface, so paste-aware
+      // runs remain isolated from the shared metadata cache.
       const cached = deps.pastedTextStore
         ? undefined
         : preparedAgentRuntimeCache.get(cacheKey);
       if (cached) {
         activeAgentToolNames = cached.activeAgentToolNames;
         runtimeToolExecutionLimits = cached.runtimeToolExecutionLimits;
-        localToolExecutors = cached.localToolExecutors;
+        localToolExecutors = buildCurrentToolExecutors(cached.agentConfig.key);
         return cached.agentConfig;
       }
 
@@ -696,30 +742,7 @@ export function createCliLocalRuntimeAdapter(
         resolveLocalWorkspaceExecutorOptionsFromPolicy(
           resolveCurrentRunRuntimeToolPolicy(agentConfig),
         );
-      localToolExecutors = buildLocalToolExecutors({
-        workspaceRoot,
-        env: deps.env,
-        fetchImpl,
-        ...(deps.chromeConnectorClient
-          ? { chromeConnectorClient: deps.chromeConnectorClient }
-          : {}),
-        localToolExecutors: deps.localToolExecutors,
-        readXPost: deps.readXPost,
-        readXhsProfile: deps.readXhsProfile,
-        cliEntrypoint: CLI_ENTRYPOINT,
-        resolveAgentCredentialGroup,
-        ...(deps.confirmDestructiveAction
-          ? { confirmDestructiveAction: deps.confirmDestructiveAction }
-          : {}),
-        ...(deps.requestUserChoice
-          ? { requestUserChoice: deps.requestUserChoice }
-          : {}),
-        ...(deps.pastedTextStore
-          ? { pastedTextStore: deps.pastedTextStore }
-          : {}),
-        agentKey: agentConfig?.key,
-        ...runtimeToolExecutionLimits,
-      });
+      localToolExecutors = buildCurrentToolExecutors(agentConfig?.key);
       // Report the post-filter tool list so runtime guidance describes what the
       // model can actually call. The CLI drops declared names it has no
       // executor for (read/createDoc/...), and prompt blocks keyed off the
@@ -745,7 +768,6 @@ export function createCliLocalRuntimeAdapter(
           agentConfig: exposedAgentConfig,
           activeAgentToolNames,
           runtimeToolExecutionLimits,
-          localToolExecutors,
         });
       }
       return exposedAgentConfig;
@@ -801,9 +823,7 @@ export function createCliLocalRuntimeAdapter(
           apiKeyRefResolver: createOAuthApiKeyRefResolver({
             migration: { enableLegacyMigration: true },
           }),
-          credentialBroker: createFileCredentialBroker({
-            migration: { enableLegacyMigration: true },
-          }),
+          credentialBroker,
           loopbackRequest,
         }),
       }),
@@ -891,9 +911,6 @@ export function createCliLocalRuntimeAdapter(
         enableLegacyMigration: true,
       } as const;
       const apiKeyRefResolver = createOAuthApiKeyRefResolver({
-        migration: legacyCredentialMigration,
-      });
-      const credentialBroker = createFileCredentialBroker({
         migration: legacyCredentialMigration,
       });
       const serverUrl = asOptionalTrimmedString(deps.env.NOLO_SERVER) ?? "https://us.nolo.chat";
@@ -1049,6 +1066,11 @@ export function createCliLocalRuntimeAdapter(
   // pre-admission zero-cost attempts protected by abort/sawToolEvent guards.
   return {
     ...adapterBase,
+    // 会话级摘要 fallback（未注入 → undefined）：getter 而非快照值，因为 adapter
+    // 可能被 prepared-runtime 缓存复用，而注入发生在 CLI 启动早期。
+    get compactionSummaryFallback() {
+      return cliAutoCompactionSummaryFallback;
+    },
     resolveProvider: async (agentConfig: AgentRuntimeAgentConfig) => {
       const provider = (await adapterBase.resolveProviderBase(
         agentConfig,

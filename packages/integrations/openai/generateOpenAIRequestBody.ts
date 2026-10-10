@@ -139,7 +139,10 @@ const normalizeChatCompletionsContent = (
   return JSON.stringify(content);
 };
 
-const sanitizeChatCompletionsMessage = (message: Message & Record<string, any>) => {
+const sanitizeChatCompletionsMessage = (
+  message: Message & Record<string, any>,
+  options?: { provider?: string; model?: string },
+) => {
   const sanitized: Record<string, any> = {
     role: message.role,
     content: normalizeChatCompletionsContent(message.content),
@@ -148,7 +151,10 @@ const sanitizeChatCompletionsMessage = (message: Message & Record<string, any>) 
   const name = asOptionalTrimmedString(message.name);
   if (name) sanitized.name = name;
 
-  return preserveAgentStateFields(message, sanitized);
+  return preserveAgentStateFields(message, sanitized, {
+    targetProvider: options?.provider,
+    targetModel: options?.model,
+  });
 };
 
 const buildRequestBody = (options: BuildRequestBodyOptions): any => {
@@ -167,7 +173,10 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
 
   // 只保留上游协议允许的字段，避免 UI/runtime 元数据泄漏到 chat-completions 请求体。
   const cleanedMessages = messages.map((message) =>
-    sanitizeChatCompletionsMessage(message as Message & Record<string, any>)
+    sanitizeChatCompletionsMessage(message as Message & Record<string, any>, {
+      provider: providerName,
+      model,
+    })
   );
 
   const bodyData: any = {

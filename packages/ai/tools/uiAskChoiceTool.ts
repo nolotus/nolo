@@ -2,7 +2,7 @@
 
 export const uiAskChoiceFunctionSchema = {
     name: "ask_user",
-    description: "让用户在 2～5 个互斥选项之间做选择的通用“出选项”工具（需求模糊、分支决策、问卷等）。调用前须先在普通回复文本里解释背景与权衡（先解释，再调用）。多问题传 questions，单问题传 question+choices。",
+    description: "让用户在 2～5 个互斥选项之间做选择的通用“出选项”工具（需求模糊、分支决策、问卷等）。本工具用于纯提问、必须停下等待回答的场景；若需要同时展示结构化对比/指标并让用户在同一块里选择，走 show_interaction。调用前须先在普通回复文本里解释背景与权衡（先解释，再调用）。多问题传 questions，单问题传 question+choices。界面自动附带“其他”自由输入行，用户输入的文字会随答案回传；不要自建“其他/自己写”之类的选项——点击普通选项只回传该选项文案，用户无处填写。",
     parameters: {
         type: "object",
         properties: {

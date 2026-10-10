@@ -24,3 +24,11 @@ export function resolveSessionKey(args: { dialogId?: string | null }): string | 
   const d = args.dialogId?.trim();
   return d ? `dialog:${d}` : undefined;
 }
+
+/** 服务端会话命名空间键：`${userId}:${dialogId}`，任一缺失返回 undefined。 */
+export function serverSessionKey(
+  userId: string | null | undefined,
+  dialogId: string | null | undefined,
+): string | undefined {
+  return userId && dialogId ? `${userId}:${dialogId}` : undefined;
+}

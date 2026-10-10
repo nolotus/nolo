@@ -9,6 +9,13 @@ import {
 } from "../../agent-runtime/modelLayerOverride";
 import type { AgentRuntimeHostAdapter } from "../agentRuntimeLocal";
 import {
+  appendAttachmentCard,
+  buildLocalAttachments,
+} from "../tui/localAttachmentParts";
+import type { AttachmentPart } from "../../ai/attachments/attachmentPart";
+import { ENABLE_REMOTE_ATTACHMENT_PART_WRITES } from "../../chat/messages/attachmentWriteRollout";
+import type { AgentRuntimeMessageContent } from "../../agent-runtime/types";
+import {
   createCliLocalRuntimeAdapter,
   isBuiltinNoloAgentRef,
 } from "./localRuntimeAdapter";
@@ -19,8 +26,6 @@ import { isTransientFetchError } from "./localRuntimeFetchRetry";
 import type {
   LocalAgentTurnInput,
 } from "../../agent-runtime/localLoop";
-import type { EmptyAssistantFallbackReason } from "../../agent-runtime/emptyAssistantRepair";
-import type { AgentRuntimeSaveTurnInput } from "../../agent-runtime/hostAdapter";
 import {
   buildTurnTokenUsage,
   formatUsage,
@@ -84,6 +89,7 @@ import {
 import {
   isQuotaLimited403Body,
   mergeAvailabilityDeadline,
+  PROBE_INTERVAL_MS,
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
@@ -117,10 +123,10 @@ const stripDebugNoise = (s: string) =>
  * 测试直接覆盖它。
  */
 const pickEmptyAssistantFlags = (result: {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: boolean;
 }): {
-  emptyAssistantFallbackReason?: EmptyAssistantFallbackReason;
+  emptyAssistantFallbackReason?: RunAgentTurnResult["emptyAssistantFallbackReason"];
   emptyAssistantOutputUsable?: true;
 } => ({
   ...(result.emptyAssistantFallbackReason
@@ -455,15 +461,29 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   return true;
 }
 
-function buildUserInputContent(message: string, imageUrls: string[] = []) {
-  if (imageUrls.length === 0) return message;
+/**
+ * 组装 user content：文本 + 图片像素 + durable 附件结构化 part。
+ *
+ * durable 消息（持久化 content）可以比 provider 发送视图多携带 `attachment`
+ * part —— TUI 本机原件 = `local-file` source，含 path / machineId / workspaceRoot。
+ * `AgentRuntimeMessageContent` 目前只声明 text / image_url，故此处窄化断言：运行时
+ * 由 provider 边界（`composeProviderMessages` → `projectUserPartForModel`）投影成
+ * 安全文本卡，定位信息永不进 provider 请求（见 providerMessageProjection.ts）。
+ */
+function buildUserInputContent(
+  message: string,
+  imageUrls: string[] = [],
+  attachmentParts: readonly AttachmentPart[] = [],
+): AgentRuntimeMessageContent {
+  if (imageUrls.length === 0 && attachmentParts.length === 0) return message;
   return [
     ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
     ...imageUrls.map((url) => ({
       type: "image_url" as const,
       image_url: { url },
     })),
-  ];
+    ...attachmentParts,
+  ] as unknown as AgentRuntimeMessageContent;
 }
 
 function buildSubjectRefs(options: RunAgentTurnOptions) {
@@ -797,9 +817,39 @@ function buildAuthFailure(ctx: FailureCtx): string {
   // used by the non-interactive no-token path below.
   const platformNoToken =
     ctx.where === "server chat proxy" && isAuthNoTokenBody(ctx.message);
-  const fix = platformNoToken
-    ? `This install is not logged in — run \`nolo login\`, or set AUTH_TOKEN / NOLO_SERVER`
-    : ctx.where === "server chat proxy"
+
+  // True no-token 401 on the platform transport: this install has neither a
+  // platform login nor a usable local model credential. Replace the single
+  // "run nolo login" nudge with the three working paths so a user who never
+  // intends to log in still sees `nolo run` / `nolo auth`.
+  //
+  // The raw provider echo (`raw="{...}"` / `headers=[...]`) is debug noise: by
+  // default it is stripped via stripDebugNoise, and the raw detail is only
+  // re-appended when `NOLO_DEBUG=1` — the same env switch localRuntime* files
+  // already use — or the more targeted `NOLO_CLI_DEBUG_DETAIL=1`.
+  if (platformNoToken) {
+    const guidance =
+      `\n  This turn did not run: you are not logged in to Nolo and no local model credential is available.` +
+      `\n    · Use the Nolo platform: /login (or run \`nolo login\` after exiting the TUI)` +
+      `\n    · Use your own subscription: nolo auth antigravity | claude | chatgpt | xai` +
+      `\n    · No login at all: nolo run "<task>" (runs on local Codex)`;
+    // 这一支专指 AUTH_NO_TOKEN：错误体是固定的平台 JSON（字段名用户看不懂，也没有
+    // 可行动信息），上面三行引导已经把该说的说完了。默认只留一行人类可读摘要，
+    // 不再把整块 JSON 喷给用户；排查时用 NOLO_DEBUG=1 / NOLO_CLI_DEBUG_DETAIL=1
+    // 看完整 Detail（与 stripDebugNoise 的既有开关一致）。
+    const detail =
+      process.env.NOLO_DEBUG === "1" || process.env.NOLO_CLI_DEBUG_DETAIL === "1"
+        ? `\n  Detail: ${ctx.message}`
+        : `\n  Detail: platform returned AUTH_NO_TOKEN (no authentication token provided)`;
+    return (
+      `${RUN_UNAVAILABLE_PREFIX} (${ctx.where} returned HTTP ${ctx.status}, no token was sent).` +
+      `${guidance}${detail} ` +
+      `${NO_FALLBACK} ${SERVER_FALLBACK_HINT}\n`
+    );
+  }
+
+  const fix =
+    ctx.where === "server chat proxy"
       ? `Check the agent's provider/api-key settings on nolo.chat`
       : `Fix the local credential/config and retry`;
 
@@ -905,10 +955,10 @@ function extractRateLimitResetHint(message: string): string | undefined {
 
 function buildRateLimitFailure(ctx: FailureCtx): string {
   // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
-  // 文案必须带上「已标记冷却至 <ISO>」：用户不再只看到一次限流报错，还能知道
-  // 该 agent 在冷却解除前会被派发门控拦住，不会继续白撞 429。
+  // 文案必须带上「已暂停该凭证的派发，最晚 <ISO> 自动解除」：不再让用户误以为
+  // 「要等到明天」，而要说明期间会自动试探、成功即恢复，并给出手动恢复命令。
   const cooldownNote = ctx.cooldownUntil
-    ? ` 已标记冷却至 ${ctx.cooldownUntil}，到期前派发会被冷却门控拦截（到期自动 probe 恢复）。`
+    ? ` 已暂停该凭证的派发，本地冷却最晚 ${ctx.cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。`
     : "";
   // 仅凭文本命中的限流（statusInferred）不能声称 "returned HTTP 429"——上游
   // 只是报文里说限流/配额；status 是语义等价码。
@@ -1184,7 +1234,7 @@ export function describeLocalRunFailure(
  * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
  *
  * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
- * 「已标记冷却至 <ISO>」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 「已暂停该凭证的派发，最晚 <ISO> 自动解除」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
  * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
  */
 async function markStartupRateLimitCooldown(
@@ -1416,6 +1466,10 @@ async function runHttpAgentTurn(
   } catch (error) {
     spinner.stop();
     if (options.abortSignal?.aborted) {
+      // 用户 Esc 中断（不是失败）：本分支不带 finalText，结算点也就不会写
+      // `.result.md`/resultFile——已生成的部分正文只留在 .log 与 dialog 里。
+      // 读端看到「无 resultFile + streamInterrupted」应读作「被中断」，不是
+      // 「工具坏了 / 结论丢了」。
       return { exitCode: 0, streamInterrupted: true };
     }
     options.output.write(buildTransportErrorHint(options.serverUrl, error));
@@ -1508,6 +1562,10 @@ async function runHttpAgentTurn(
     ...(typeof data?.dialogId === "string" && data.dialogId
       ? { dialogId: data.dialogId }
       : {}),
+    // 结论载体与 local 路径同契约（server 模式 / 本地配置缺失时的兜底通道）：
+    // 结算点只认 result.finalText，HTTP 派发不给就等于这批 run 没有结论载体，
+    // status 里既无 lastAssistantText 也无 resultFile。content 已在上面算好。
+    ...(content ? { finalText: content } : {}),
     turnTokens: buildTurnTokenUsage(
       data?.usage,
       typeof data?.model === "string" ? data.model : options.agentKey,
@@ -1606,22 +1664,47 @@ async function runLocalAgentTurnForCli(
   });
   turnOutput.spinner.start();
   try {
+    // TUI 本机原件路径 → 安全附件卡（共享 describeAttachmentForModel，永不含 path/machineId）。
+    // 机器 id 复用 currentMachineIdResolver / detectCurrentMachineId；取不到就不出卡（显式降级）。
+    // 模型本轮 input 始终是安全卡；durable 落库形态由唯一 rollout 门控（复用
+    // ENABLE_REMOTE_ATTACHMENT_PART_WRITES，默认关闭）：开启时改落结构化 local-file part
+    // （持久化 content 携带 path/machineId），由 provider 边界投影回同一张安全卡。
+    const { cardText: localAttachmentCard, parts: localAttachmentParts } = buildLocalAttachments({
+      paths: options.localAttachmentPaths ?? [],
+      machineId: await resolveCurrentMachineId(options),
+      ...(options.localRuntimeCwd ? { workspaceRoot: options.localRuntimeCwd } : {}),
+    });
+    const messageForLocal = appendAttachmentCard(options.message, localAttachmentCard);
+    // 唯一 rollout 门（不造第二开关）：关闭时 durable 形态逐字节保持旧行为（只带安全卡文本）。
+    const durableAttachmentParts = ENABLE_REMOTE_ATTACHMENT_PART_WRITES
+      ? localAttachmentParts
+      : [];
+    const hasDurableAttachments = durableAttachmentParts.length > 0;
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
     const result = await runLocalAgentTurn({
       adapter,
       agentRef: options.agentKey,
       userLanguage: options.userLanguage ?? options.env.NOLO_LANG ?? null,
-      input: buildUserInputContent(options.message, options.imageUrls),
-      ...(expandedMessage !== options.message
+      input: buildUserInputContent(messageForLocal, options.imageUrls),
+      ...(expandedMessage !== options.message || localAttachmentCard !== ""
         ? {
-            persistedInput: buildUserInputContent(
-              expandedMessage,
-              options.imageUrls,
-            ),
-            persistedInputReference: buildUserInputContent(
-              options.message,
-              options.imageUrls,
-            ),
+            persistedInput: hasDurableAttachments
+              ? buildUserInputContent(
+                  expandedMessage,
+                  options.imageUrls,
+                  durableAttachmentParts,
+                )
+              : buildUserInputContent(
+                  appendAttachmentCard(expandedMessage, localAttachmentCard),
+                  options.imageUrls,
+                ),
+            persistedInputReference: hasDurableAttachments
+              ? buildUserInputContent(
+                  options.message,
+                  options.imageUrls,
+                  durableAttachmentParts,
+                )
+              : buildUserInputContent(messageForLocal, options.imageUrls),
           }
         : {}),
       ...(options.pastedTextStore
@@ -1713,6 +1796,9 @@ async function runLocalAgentTurnForCli(
     return {
       exitCode: 0,
       dialogId: result.dialogId,
+      ...(typeof result.content === "string" && result.content.trim()
+        ? { finalText: result.content }
+        : {}),
       title: result.title,
       ...(result.titlePatchPromise ? { titlePatchPromise: result.titlePatchPromise } : {}),
       ...pickEmptyAssistantFlags(result),
@@ -1742,7 +1828,7 @@ async function runLocalAgentTurnForCli(
     // usageRecords 既存进 saveTurn 也挂到错误上）。不带出去的话，Esc 掉一轮
     // 长对话 = 状态行凭空少算一整轮，而余额是实实在在扣了的。
     const abortedUsageRecords = (
-      error as { usageRecords?: AgentRuntimeSaveTurnInput["usageRecords"] }
+      error as { usageRecords?: RunAgentTurnResult["usageRecords"] }
     )?.usageRecords;
     const abortedTurnCredits = sumPlatformCredits(abortedUsageRecords);
     if (
@@ -1753,6 +1839,12 @@ async function runLocalAgentTurnForCli(
       // If a tool was still running when the stop landed, localLoop attaches
       // its name (error.pendingToolName) so the caller can tell the user the
       // tool may still finish in the background.
+      //
+      // 载体约定（owner 2026-10-07 决定，保持现行为）：被 Esc 中断的 run 不把
+      // 「用户叫停」当正常结论——本分支不产出 finalText，结算点因此不写
+      // `.result.md`，已生成的部分正文只留在 .log / dialog 里。读端看到
+      // status 无 resultFile 且 streamInterrupted 时应读作「被中断」，而不是
+      // 「工具坏了 / 结论丢了」（同语义也写进 controlAgentRun 的 status 描述）。
       const pendingToolName = (error as { pendingToolName?: string })
         ?.pendingToolName;
       return {
@@ -1766,7 +1858,7 @@ async function runLocalAgentTurnForCli(
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
     // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
-    // 供 auto 路径 describeLocalRunFailure 渲染「已标记冷却至 <ISO>」。
+    // 供 auto 路径 describeLocalRunFailure 渲染「已暂停该凭证的派发，最晚 <ISO> 自动解除」。
     const cooldownUntil = await markStartupRateLimitCooldown(
       options,
       baseAdapter,
@@ -1788,7 +1880,7 @@ async function runLocalAgentTurnForCli(
       }
       if (cooldownUntil) {
         options.output.write(
-          `[nolo] 已标记冷却至 ${cooldownUntil}，到期前派发该 agent 会被冷却门控拦截。\n`,
+          `[nolo] 已暂停该凭证的派发，本地冷却最晚 ${cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。\n`,
         );
       }
     }
@@ -1817,7 +1909,7 @@ async function runLocalAgentTurnForCli(
  */
 async function checkLocalAvailabilityBeforeHttpDispatch(
   options: RunAgentTurnOptions,
-): Promise<{ exitCode: 1 } | { credentialKey?: string } | null> {
+): Promise<{ exitCode?: 1; credentialKey?: string } | null> {
   const adapter = resolveLocalRuntimeAdapter(options);
   if (!adapter || typeof adapter.loadAgentConfig !== "function") return null;
   let config: unknown;
@@ -1925,6 +2017,12 @@ export function foldLocalResultForTui(
     ...(localResult.pendingToolName
       ? { pendingToolName: localResult.pendingToolName }
       : {}),
+    // 结论正文必须随行：auto→local 是本函数的唯一出口（runAgentTurn 的两处
+    // 成功分支都 return foldLocalResultForTui(...)），漏掉它 = 默认派发路径
+    // 上 finalText 永远到不了结算点 → agentRunCommand 的 settleRunTerminal-
+    // Authoritatively 拿不到 lastAssistantText → `.result.md` 不写、status 无
+    // resultFile，编排者只能去啃带 ANSI 的 .log（同坑位历史：turnCredits）。
+    ...(localResult.finalText ? { finalText: localResult.finalText } : {}),
   };
 }
 
@@ -2002,7 +2100,7 @@ export async function runAgentTurn(options: RunAgentTurnOptions): Promise<RunAge
 
   // HTTP/server 派发前先查本地冷却（server guard 读不到本地 credential 冷却）。
   const localAvailability = await checkLocalAvailabilityBeforeHttpDispatch(options);
-  if (localAvailability && "exitCode" in localAvailability) {
+  if (localAvailability?.exitCode) {
     return { exitCode: localAvailability.exitCode };
   }
 
