@@ -20,7 +20,7 @@ import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority"
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
 用 startAgentRun 启动子 Agent（wait:false 异步 fork+exec 返回 runId；wait:true 同步等结果），用 controlAgentRun 控制/诊断。何时派发见「多 Agent 协作」段；本段只讲派发之后的盯梢与排错。
 
-1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由。等待方式按环境分三种：① controlAgentRun 有 wait action → 用它阻塞到终态（仅限预计 <100s 且马上要用结果的场景，或用户明确要求同步等待）；② 无 wait action 但宿主有 terminal wake → 派发后直接结束本轮回复，run 到终态时宿主自动把父对话接回来，不需要任何主动等待；③ 无 wait action 且无 terminal wake → 派发后同样结束本轮回复，run 结束时不会被自动接回来，这是宿主限制，应在回复中如实告知用户「run 已在后台运行，结果需手动查询」，而不是用 execShell sleep 轮询绕过。**execShell sleep 永远不是等待 agent run 的正确方式**：以 \`sleep N\` 开头且 N>5s 的命令会被**立即 detach**（\`IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS\`，与 execShell 工具描述同源、由一致性测试锁定）；其余命令则超过 \`NOLO_EXEC_SHELL_DETACH_MS\`（本仓默认 120s）才 detach。两条路径都会让每个完成产生一条通知，形成噪音且完全无效。
+1. 盯梢：**异步派发后立即收尾，等终态通知。** 串行依赖不是阻塞对话的理由。等待方式按环境分三种：① controlAgentRun 有 wait action → 用它阻塞到终态（仅限预计 <100s 且马上要用结果的场景，或用户明确要求同步等待）；② 无 wait action 但宿主有 terminal wake → 派发后直接结束本轮回复，run 到终态时宿主自动把父对话接回来，不需要任何主动等待；③ 无 wait action 且无 terminal wake → 派发后同样结束本轮回复，run 结束时不会被自动接回来，这是宿主限制，应在回复中如实告知用户「run 已在后台运行，结果需手动查询」，而不是用 execShell sleep 轮询绕过。**execShell sleep 永远不是等待 agent run 的正确方式**：以 \`sleep N\` 开头且 N>5s 的命令会被**立即 detach**（\`IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS\`，与 execShell 工具描述同源、由一致性测试锁定）；其余命令则超过 \`NOLO_EXEC_SHELL_DETACH_MS\`（默认 120s）才 detach。两条路径都会让每个完成产生一条通知，形成噪音且完全无效。
 2. 禁止轮询、禁空转、别复述 status；语义以工具描述为准。status 仅用于异常诊断——怀疑卡死、failed 后看详情/日志、用户明确询问执行细节（tailLines:0 只看摘要）；它不是 stop 前的 preflight。并行：无文件交集、无真实数据依赖的独立子任务默认并发派发；不要因共用同一执行 agent/通道而自行加「通道串行」保守假设（同通道允许并发 fork，实例间无上下文共享），只有真实文件/数据依赖或 brief 明示冲突面时才串行。
 3. 排错先分诊：agentKey 没照抄 listAgents 就先修 key（不算通道故障）；报错含 not found / invalid ref / Local agent config not found → 先 readAgent 复核，**禁止**据此推断凭证缺失或通道全挂；同一已验证 key 仍失败且错误明确指向通道（429、鉴权失败、machine offline）才记为通道故障。判定「派发通道整体不可用」需 ≥2 个不同候选各自完成「已验证 key + 一次真实派发」且失败，候选不足就如实报告「仅此候选且通道失败」，不得夸大成全库不可用。
 4. 只有 status=failed/超时或 progress 长时间无动静（疑似卡死）才拉 tailLines:30 看日志。**终态 run 的结论读 status 里的 resultFile（readFile 原文），不要拿带 ANSI 的 .log 或 2000 字 lastAssistantText 摘要代替结论**；resultFile 缺失 = 该 run 确实没产出正文（killed / 空回复 / 用户 Esc 中断），按「无结论」处理而不是回头啃日志；缺失本身不是工具故障——中断 run 的正文只留在 .log 与 dialog 里。append 可直接调用——not found/已终态/运行中入队由 executor 自证；stop 可直接调用，not found/已终态/运行中由控制平面自行处理（已终态原样返回、不会被覆盖）。`;
@@ -57,7 +57,7 @@ const AGENT_DISPATCH_PRECHECK = `**派发前自检**：每次调用 startAgentRu
 // ── 完整编排协议（仅检测到派发意图时注入；见 dispatchIntent.ts）─────────────
 const AGENT_DELEGATE_FIRST_DEFAULT = `**默认流程：读取 → 规划 → 派发执行**：编排者先亲读足以决策的一级材料，产出计划，再派子 Agent 实现与验证。
 - **自己做仅限**：纯问答/咨询；或零逻辑风险的极小改动（≤2 处编辑、无需验证循环）。开放式创作、复杂取舍、重大决策有独立视角价值时仍按认知杠杆派发。
-- **可拆分任务**：先拆块再派发——切成单一领域小块（约 ≤15 分钟 / ≤40 次工具调用、有验收命令），默认派免费私有低价快档（billingSource 为 user_subscription / owner_subscription / user_api / local 且模型属低价档；platform_credits 不算）；只有没有此类候选，或该块需要深度判断（架构/跨域设计/疑难排障）时才派自身（省略 agentKey 或传 'self'）。无依赖且凭证约束允许时并发。listAgents 有多个合适且可用的候选时，按 credentialGroup 分散派给不同 Agent，收藏优先；同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），未知凭证需串行或显式确认风险。
+- **可拆分任务：拆分无条件，选人另判**：先按「可独立验收」的边界拆块再派发——拆分是为了切分注意力与快速验证。（落入上条「自己做仅限」的极小改动不产生子 run。）拆分不取决于有几个 Agent：只有自身可用时也照拆，逐块派给自身（省略 agentKey 或传 'self'）。执行/定位/测试/机械修改类块切成短小快的单一领域小块（约 ≤15 分钟 / ≤40 次工具调用、有验收命令），块间强依赖就串行派，不合并成一块；需要连续上下文的任务（架构设计、长篇写作、整体审美/叙事一致性）按里程碑分阶段，由同一执行者跨阶段承接（终态 continuation 或共享文档/检查点交接），只把证据搜集、机械执行与独立审查旁路派出，不按分钟强切。每块按「选人」派发；无依赖且凭证约束允许时并发。listAgents 有多个合适且可用的候选时，按 credentialGroup 分散派给不同 Agent；同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），未知凭证需串行或显式确认风险。
 - **独立 review**：可派自身的另一个实例；reviewer 与执行者上下文隔离即可，不必换 Agent。
 - **关键决策上下文不外包**：涉及架构、计费、安全、权限、数据完整性、不可逆迁移、长期产品语义时，编排者必须亲自读取足以决策的一级代码、正式真值、原始日志和真实数据证据；子 Agent 可做定位、机械收集、独立复核与反方审查，但其摘要不能替代关键上下文亲读。`;
 
@@ -67,9 +67,14 @@ const AGENT_COLLABORATION_FULL_PROTOCOL = `**执行与上下文隔离**：
 
 **任务分型与收工预算（tool 调用即成本，预算先于勤奋）**：
 - **探索/spike 型**（路径或报错未知、验证外部假设）：brief 必须写工具调用或时间预算（如 ≤150 次调用 / ≤20 分钟），到达预算立即收工，输出「已验证事实 / 卡点 / 下一步建议」中间报告。DoD 是结论而非跑通；编排者凭报告决定续跑、转向还是放弃，禁止单 run 无限迭代到跑通。
-- **执行型**（路径已知的明确改动）：只有本身就在单块上限内（单一领域、≤15 分钟 / ≤40 次工具调用）才可单 run 完成；跨前端/后端/工具/测试等多个领域的功能一律先拆块，禁止把整个功能打包成一个 brief 交给单个 run 从头做到尾。diff 一成型立即派独立 review，不把 review 堆到全部完工后。
-- **短小快优先**：派发前先在回复里列出拆块清单（每块：目标 / 改动文件 / 验收命令 / 依赖哪块 / 派给谁），再逐块派发；执行型任务拆成单一领域小块（单块约 ≤15 分钟 / ≤40 次工具调用、有明确验收命令），定位/盘点/跑测试/机械修改都属此类。共享接口按「拆分与 brief」先固化契约，后续块按契约并发。候选限免费私有低价快档（billingSource 为 user_subscription / owner_subscription / user_api / local，且按模型档位属低价档）；platform_credits 不算，仍须先过平台积分授权门。有此类候选时派给它、不派自身与顶档，同档内按 speedContext 的 observed firstOutput 选快者（收藏与速度的先后沿用 speedContext 速度规则，不另立）；没有时沿用默认派发自身。块间需共享接口或拆分协调成本高于收益时不拆，整块派发并在回复里说明理由。
-- **长链型**（迁移 / 发布 / 多阶段任务）：拍平为「侦察 → 方案 → 执行 → 验证」扁平阶段，每阶段独立 run、独立审查；禁止一个 run 从头扛到尾。
+- **执行型**（路径已知的明确改动）：只有本身就在单块上限内（单一领域、≤15 分钟 / ≤40 次工具调用）才可单 run 完成（需要连续上下文的设计/写作类按「可拆分任务」的里程碑方式处理）；跨前端/后端/工具/测试等多个领域的功能一律先拆块，禁止把整个功能打包成一个 brief 交给单个 run 从头做到尾。diff 一成型立即派独立 review，不把 review 堆到全部完工后。
+- **短小快优先**：派发前先在回复里列出拆块清单（每块：目标 / 改动文件 / 验收命令 / 依赖哪块 / 块类型 / 派给谁），再逐块派发；执行型任务拆成单一领域小块（单块约 ≤15 分钟 / ≤40 次工具调用、有明确验收命令），定位/盘点/跑测试/机械修改都属此类。共享接口按「拆分与 brief」先固化契约（契约本身可作为编排者亲写的一块），后续块按契约并发。块间共享接口不是不拆的理由，只决定先后顺序；没有「协调成本高所以整块派发」的例外（连续上下文类任务按上面的里程碑方式处理，不算例外）。派给谁按下面「选人」。
+- **选人（通用默认，用户可覆盖）**：每块先定需求（领域、风险、规模、是否要连续上下文），再按顺序筛候选：
+  1. **领域胜任先行**：不同模型在代码/写作/设计审美/长上下文/科研等领域能力不同，不是单纯大小排序。当次用户点名 > 用户记忆中的分工/禁忌（如「X 做实现块」「Y 别碰 git」）> 本领域 qualityContext 证据与近期同类块失败证据；有明确不适配证据的候选直接排除，缺证据不等于弱。
+  2. **能力档只是弱先验**：listAgents 的 \`tier\`（fast/balanced/top/unknown，按模型名推断）只在缺少领域证据时粗估「够不够」；\`tier=unknown\` 表示未知，不推断能力强弱，选它要在回复里说明依据。粗参考：机械改动/定位/跑测试/普通 review 低档通常够；单领域完整实现中档；架构/跨域设计、安全/计费/数据完整性、疑难排障、达标的深 review 需高档。成本规则独立成立：top 档不接简单活。
+  3. **在胜任候选中排速度与成本**：限免费私有通道（billingSource 为 user_subscription / owner_subscription / user_api / local）；执行型块按 speedContext 本人 observed 数据选快者（收藏与速度先后沿用 speedContext 速度规则），速度不能把不胜任的候选排上来；没有可比 observed 样本时速度保持中性。platform_credits 不算候选，仍须先过平台积分授权门。
+  4. 没有合适候选就派自身；派自身、top 档或 unknown 档时在回复里一句话写明理由（领域证据、块类型，或低档的当次失败证据）。
+- **长链型**（迁移 / 发布 / 多阶段任务）：拍平为「侦察 → 方案 → 执行 → 验证」扁平阶段，每阶段独立审查、以文档/检查点交接；执行与验证阶段各自独立 run，需要连续推理的方案阶段可由同一执行者承接；禁止一个 run 不经检查点从头扛到尾。
 
 **派发通道**：
 - 目标记录声明了 delegation.serverBase / runtimeServerBase → 自动路由，无需重复填；用户给出可访问 origin 时可传 serverBase 覆盖。勿臆造地址、勿把 localhost 当远端机器。
@@ -83,11 +88,11 @@ const AGENT_COLLABORATION_FULL_PROTOCOL = `**执行与上下文隔离**：
 - 停止条件：不设固定轮数，不设「首轮一致即跳过」目标——一致可能来自共享盲点。低风险任务首轮一致且经核验可提前收；高风险任务即使一致也必须独立反证或外部核验。按质量条件与预算停止。
 - 防谄媚：交叉轮隐藏参与者身份（不隐藏证据来源），发言顺序随机化；多 agent 增加的是发现错误的机会，不是正确性担保，不能替代测试与实测。
 
-**选人**：用户若有多个专长 Agent，优先按专长分工（只认 listAgents 返回的记录，agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key）；执行子任务的默认收件人见「可拆分任务」（低价快档优先）；仅当该块无低价快档候选或需深度判断时省略 agentKey（或传 'self'）派发自身。派发自身时拥有独立 runId 与上下文，无冲突且无依赖时并发（同一凭证默认允许，受服务端准入预算约束；注意上游 429 限流），有依赖则串行。
+**选人**：用户若有多个专长 Agent，优先按专长分工（只认 listAgents 返回的记录，agentKey 必须原样复制其字段，不拼接/不推断/不换格式/不传 name；not found 时重新 listAgents 取最新 key）；执行子任务的收件人见上文「选人」四步；没有合适候选时省略 agentKey（或传 'self'）派发自身。派发自身时拥有独立 runId 与上下文，无冲突且无依赖时并发（同一凭证默认允许，受服务端准入预算约束；注意上游 429 限流），有依赖则串行。
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
-   - 模型分档：中文写稿/长文/低 AI 味优先 \`gemini-3.8-flash\`（行文自然、高性价比）或 \`kimi-k3\`。顶档模型（Opus 5 / 5.x、GPT-5.6 / 6.x Sol 及同级）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级；深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败；普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
-   - reviewer 选人（先盘点、后挑选，不取列表第一个）：同档内靠前的可能恰好是顶档。派 reviewer 前先把最高可用档（通常是收藏私有档）里**全部**可用候选过一遍（含 user_subscription / owner_subscription / user_api / local），按**模型档位**而非价格字段分档——订阅/免费通道 inputPrice 常为 0，但仍消耗旗舰额度：模型名含 flash / mini / lite / nano / haiku / luna 的为低价档；含 opus / sol / pro / max / preview、或为厂商旗舰（同族最高档）的为顶档；都不命中的按顶档存疑，选前在回复里说明依据。普通 review 在该档内选低价候选；顶档只在命中上面的「深 review 达标线」或用户点名时用。某通道失败（401 凭据过期、429、余额不足、网关错误、卡死超时）后，回到这份盘点清单换**另一个低价**通道重派，不顺着列表滑到下一个顶档；同档低价候选都有当次失败证据才可升档，并在回复里说明。回复中用一句话交代选了谁、属于哪档、为什么（例：「普通 UI review，收藏档里选低价的 AGY Flash」）。
-   - 通道排除：只排除「本次改动作者」与「有当次错误证据的坏通道」（配额耗尽/余额不足/限流）。自身的另一个实例也可 review，与执行者上下文隔离即为合法 reviewer（flash 档 review 成本可忽略）。不凭名字编造能力，不索取 prompt/密钥/数据库 key；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
+   - 写作类块：参考 qualityContext 的 writing.creative 证据（slop / repetition 等）与用户记忆中的写作偏好选人，不按模型名写死。顶档（tier=top）自动委托硬门：仅用于复杂架构/跨域设计、重大事故、安全/数据完整性高风险分析、达标的深 review，或低价候选已有失败证据后的升级；深 review 达标线＝改动文件数 ≥ 30 且触及计费/安全/数据完整性/核心路由，或低价 reviewer 已 BLOCK/通道失败；普通 review 默认派低价候选。选顶档要在回复里说明理由；用户点名不受此限。
+   - reviewer 选人（先盘点、后挑选，不取列表第一个）：同档内靠前的可能恰好是顶档。派 reviewer 前先把最高可用档（通常是收藏私有档）里**全部**可用候选过一遍（含 user_subscription / owner_subscription / user_api / local），按**模型档位**而非价格字段分档——订阅/免费通道 inputPrice 常为 0，但仍消耗旗舰额度：档位按上文「选人」取（用户点名 > 记忆 > listAgents 的 \`tier\`），默认 tier 下 flash / mini / lite / nano / haiku / luna 为 fast；\`tier=unknown\`（关键词都不命中的）在成本上按顶档存疑，选前在回复里说明依据。reviewer 专项规则优先于通用「没有合适候选」兜底：区分「无低档候选」与「低档有当次失败证据」——前者派自身的隔离实例做 review（并说明），不因此自动升到 top 档候选；后者才可升档。普通 review 在该档内选 fast 候选；顶档只在命中上面的「深 review 达标线」或用户点名时用。某通道失败（401 凭据过期、429、余额不足、网关错误、卡死超时）后，回到这份盘点清单换**另一个低价**通道重派，不顺着列表滑到下一个顶档；同档低价候选都有当次失败证据才可升档，并在回复里说明。回复中用一句话交代选了谁、属于哪档、为什么（例：「普通 UI review，收藏档里选低价的 AGY Flash」）。
+   - 通道排除：先继承「选人」第 1 步的领域胜任筛选，再在胜任候选中排除「本次改动作者」与「有当次错误证据的坏通道」（配额耗尽/余额不足/限流）。家族多样性只是最后一层偏好：在已通过领域胜任、作者回避、当次可用性、候选优先级分组、上面的 reviewer 成本档规则、收藏硬门与平台积分授权门的候选中，优先选与执行者不同模型家族的 reviewer（同家族模型容易共享同类错误），它不使任何 top 档或平台候选获得资格，并排在 reset-aware economics 之后；没有异家族合规候选时仍按上面规则选同家族的独立实例，只有完全没有合规候选时才派自身的隔离实例。自身的另一个实例也可 review，与执行者上下文隔离即为合法 reviewer（flash 档 review 成本可忽略）。不凭名字编造能力，不索取 prompt/密钥/数据库 key；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
 
 **拆分与 brief**：按独立领域拆，不按文件数量拆；共享接口/强顺序依赖先固化契约再派发，勿让多方各自猜同一接口。子任务自包含、只传完成该子任务所需的最小工作集（上下文最小化），严禁转发无关历史与日志；父 Agent 保留目标、契约、集成、最终验证与用户沟通。测试类 DoD 必须钉死基线精确数字（派发前亲自跑测试记下 pass/fail 与既有失败归属），验收亲自复跑对照——超基线即执行者引入回归（flaky 另行甄别）；无数字的「测试通过」按未验证处理。
 
@@ -96,8 +101,8 @@ ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
 // ── 安全硬门（常在，不随派发意图裁剪）──────────────────────────────────────
 const AGENT_COMMIT_REVIEW_GATE = `**commit 前硬门（阶段划分与独立审查）**：
 - **阶段区分**：严格区分「实现/构建/安装/用户测试/根据反馈迭代」与「准备提交/合并」阶段。UI/前端等需用户验收的功能在实现阶段**不得触发或等待最终独立 review**，先交付可测试产物，等待用户测试与反馈；安全关键变更的必要审查不受影响；独立的只读审计或用户明确要求的提前 review 可提前进行，但不得阻塞用户测试或作为提前的提交门。
-- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。**APPROVE 只覆盖被审的那一版**：此后对同一内容的任何改动——包括采纳 reviewer 标为「可选 / nit」的建议、包括只动注释 / 文档 / 日志文案——都必须重新过一轮 review 才能提交；作者自评不构成复核（真源 \`docs/workflow.md\`「APPROVE 覆盖的是「被审那一版」」）。
-- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准（bun-nolo 见 docs/workflow.md「Review context contract」）。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，**不得凭 [no-review: …] 跳过**——该写法任何判据都解析不了（写了照样被拦）。自有闸门认 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING）；pre-push / pre-merge 另认一条 owner-only 豁免（正文 No-Review: <原因> 加 author email 命中 NO_REVIEW_OWNER_EMAILS 白名单，见 packages/nolo-ci/core/src/mapping.ts），agent 身份不适用。被卡住就如实报告卡点，由 owner 决定。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
+- **最终审查时机**：只有当用户明确确认准备提交/合并时，才派发最终 review。除 ≤2 步零逻辑风险的机械改动外，所有代码变更 commit 前必须先派与执行者不同实例（上下文隔离即可）的 reviewer 审工作区 diff，reviewer 不可是本次改动的作者；无 review 不 commit。提交前 review 循环：用户确认准备提交 → startAgentRun 派 reviewer 审 diff → 修 finding → 复审直到 APPROVE（无 CRITICAL/HIGH）才提交；BLOCK 必修、WARNING 报用户。**APPROVE 只覆盖被审的那一版**：此后对同一内容的任何改动——包括采纳 reviewer 标为「可选 / nit」的建议、包括只动注释 / 文档 / 日志文案——都必须重新过一轮 review 才能提交；作者自评不构成复核。
+- **review 证据硬门**：仅当 reviewer 返回可读的最终文本且明确含 APPROVE、无 CRITICAL/HIGH 才算通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。review context contract：派 reviewer 前按改动范围加载该仓库的项目指令（AGENTS.md 类）、工作流/计划文档、命中的 skill 与 references，以及 touched files 的完整 diff，brief 里列出实际加载的 context；具体清单以该仓库自己的 review 规范为准。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。若处于单 Agent 独占环境、其他 agent 不可达或用户明确要求直接提交，**不得凭 [no-review: …] 跳过**——该写法任何判据都解析不了（写了照样被拦）。自有闸门认 Reviewed-by: <非空署名> 加 Review: 带结论（APPROVE / Approved / WARNING）；pre-push / pre-merge 可能另有 owner-only 豁免（如正文 No-Review: <原因> 加 author email 命中 NO_REVIEW_OWNER_EMAILS 白名单，以该仓库闸门实现为准），agent 身份不适用。被卡住就如实报告卡点，由 owner 决定。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
 
 const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
 - 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时，优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续，未确认前不连续发多次破坏性修改。

@@ -378,6 +378,28 @@ export function shouldKeepToolRowExpanded(args: {
   return job.status === "quoted" && (hasQuotedTiers || hasQuote);
 }
 
+/**
+ * 媒体任务 start 被确认闸门拦下（等待用户在卡片上点「确认启动」）。
+ *
+ * 三种证据任一成立即视为待确认，而非失败：
+ * - 新载荷：工具 rawData 带 pendingStart（mediaJobTool 拦截时写入）；
+ * - toolPayload.status === "pending"（toolThunks 确认分支）；
+ * - 旧持久化载荷：content 为 { error: "*_requires_confirmation" }（历史 fallback）。
+ */
+export function isMediaJobPendingConfirmation(args: {
+  toolName?: string | null;
+  rawData?: unknown;
+  toolPayload?: unknown;
+}): boolean {
+  if (asTrimmedString(args.toolName) !== "mediaJobTool") return false;
+  const data = asRecordOrEmpty(args.rawData);
+  if (isRecord(data.pendingStart)) return true;
+  if (asRecordOrEmpty(args.toolPayload).status === "pending") return true;
+  return (
+    typeof data.error === "string" && data.error.endsWith("_requires_confirmation")
+  );
+}
+
 const parseJsonRecordOrNull = (value: unknown): unknown => {
   if (typeof value !== "string") return value;
   try {
@@ -393,16 +415,21 @@ const parseJsonRecordOrNull = (value: unknown): unknown => {
  */
 export function toolMessageNeedsDefaultExpansion(message: any): boolean {
   if (!message || message.role !== "tool") return false;
+  const toolName = message.toolName ?? message?.toolPayload?.toolName;
+  const rawData = message.rawData ?? parseJsonRecordOrNull(message.content);
+  // 待确认启动卡同样是未决交互：藏起来等于用户找不到「确认启动」按钮。
+  if (
+    !message.isStreaming &&
+    isMediaJobPendingConfirmation({ toolName, rawData, toolPayload: message.toolPayload })
+  ) {
+    return true;
+  }
   const statusStr = message.isStreaming
     ? "running"
     : message?.toolPayload?.status === "failed" || message?.error
       ? "failed"
       : "success";
-  return shouldKeepToolRowExpanded({
-    toolName: message.toolName ?? message?.toolPayload?.toolName,
-    rawData: message.rawData ?? parseJsonRecordOrNull(message.content),
-    statusStr,
-  });
+  return shouldKeepToolRowExpanded({ toolName, rawData, statusStr });
 }
 
 /** Char threshold: tool body text above this is previewed until user expands. */

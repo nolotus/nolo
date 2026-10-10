@@ -13,6 +13,7 @@ import {
 } from "ai/agent/agentDiscovery";
 import { getReadableCliDb, type AgentCommandDeps, type OutputLike } from "./agentCommandSupport";
 import { refreshSubscriptionQuotas } from "./subscriptionQuotaRefresh";
+import { shouldClearCooldownFromQuota } from "ai/agent/agentAvailabilityShared";
 import {
   decorateAgentsWithPublicStatusAcrossServers,
   listFavoriteAgentIdsAcrossServers,
@@ -27,7 +28,10 @@ import {
 } from "./agentListHelpers";
 import {
   applyCredentialAvailability,
+  clearCredentialAvailabilityIfMarkedAt,
   readCredentialAvailability,
+  readCredentialEntry,
+  resolveCredentialKeyWithFallback,
 } from "./credentialAvailability";
 import {
   queryUserRecords,
@@ -187,6 +191,7 @@ export async function runAgentListCommand(
     // （chatgpt / claude / antigravity）的 agent 必须一起被判定为不可用，
     // 否则列表会把「凭证已耗尽但自己还没撞过」的 agent 显示成可用，用户选中
     // 后必然再撞一次。与 agent 自身的 nextAvailableAt 取更晚者。
+    const originalAgentDeadlines = new Map(agents.map((agent) => [agent.privateKey, agent.nextAvailableAt]));
     agents = applyCredentialAvailability(
       agents,
       await readCredentialAvailability(env).catch(() => ({})),
@@ -195,7 +200,7 @@ export async function runAgentListCommand(
     // 429 限流中（nextAvailableAt 在未来）的 agent 默认不列出，避免误选到
     // 打不了的 agent。--show-unavailable 可见全量（脚本/排障需要）。
     // 在 space/publicOnly 过滤之后计算总数，避免把无关排除的 agent 计入。
-    const unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
+    let unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
     let agentsForOutput = showUnavailable
       ? agents
       : agents.filter((agent) => !isAgentUnavailableNow(agent));
@@ -203,11 +208,17 @@ export async function runAgentListCommand(
       agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
     }
 
-    // 额度按需刷新：只在真要展示完整列表时探测（--ids 等脚本场景不付这个代价），
-    // 只探测订阅类 agent（有凭据的私有 agent）。失败静默，沿用缓存里的快照。
+    // 除本来要展示的 agent 外，冷却中的 probeable agent 也仅为额度刷新参与；
+    // 若未能证明恢复，仍维持原过滤结果。其他过滤条件（query/space/public）不变。
+    const refreshCandidates = !idsOnly
+      ? [...new Set([...agentsForOutput, ...agents.filter((agent) =>
+          !agentsForOutput.includes(agent) && isAgentUnavailableNow(agent) && agent.credentialConfigured === true &&
+          (!query || !String(query).trim() || matchesAgentQuery(agent as any, query))
+        )])]
+      : agentsForOutput;
     if (!idsOnly) {
       const fresh = await refreshSubscriptionQuotas({
-        entries: agentsForOutput.map((agent) => ({
+        entries: refreshCandidates.map((agent) => ({
           key: agent.privateKey,
           ...(agent.quota ? { quota: agent.quota } : {}),
           probeable: agent.credentialConfigured === true,
@@ -216,9 +227,37 @@ export async function runAgentListCommand(
         cliArgs: args,
         fetchImpl,
       });
-      for (const agent of agentsForOutput) {
+      const now = Date.now();
+      for (const agent of refreshCandidates) {
         const quota = fresh[agent.privateKey];
-        if (quota) agent.quota = quota;
+        if (!quota) continue;
+        agent.quota = quota;
+        try {
+          const key = resolveCredentialKeyWithFallback(agent);
+          if (!key) continue;
+          const entry = await readCredentialEntry(key, env);
+          if (entry && shouldClearCooldownFromQuota(entry, quota, now)) {
+            await clearCredentialAvailabilityIfMarkedAt(key, entry.markedAt!, env);
+            const remainingAvailability = await readCredentialAvailability(env).catch(() => ({}));
+            // 还原原始 agent deadline，再应用仍存在的凭证冷却，避免误删独立 agent 级冷却。
+            for (const sibling of agents) {
+              if (resolveCredentialKeyWithFallback(sibling) !== key) continue;
+              const originalDeadline = originalAgentDeadlines.get(sibling.privateKey);
+              if (typeof originalDeadline === "number") sibling.nextAvailableAt = originalDeadline;
+              else delete sibling.nextAvailableAt;
+              Object.assign(sibling, applyCredentialAvailability([sibling], remainingAvailability)[0]);
+            }
+          }
+        } catch {
+          // 可用性改善失败静默，不影响列表命令。
+        }
+      }
+      unavailableCount = agents.filter((agent) => isAgentUnavailableNow(agent)).length;
+      if (!showUnavailable) {
+        agentsForOutput = agents.filter((agent) => !isAgentUnavailableNow(agent));
+        if (query && typeof query === "string" && query.trim()) {
+          agentsForOutput = agentsForOutput.filter((agent) => matchesAgentQuery(agent as any, query));
+        }
       }
     }
 

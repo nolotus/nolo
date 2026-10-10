@@ -54,7 +54,10 @@ import {
   formatToolRowHeaderSummary,
 } from "./toolDisplayName";
 import { isQuietDetailTool } from "./toolCallPresentation";
-import { shouldKeepToolRowExpanded } from "../toolPresentation";
+import {
+  isMediaJobPendingConfirmation,
+  shouldKeepToolRowExpanded,
+} from "../toolPresentation";
 
 /** Agent-run family: dedicated localized summary/detail rows instead of the
  * generic JSON-blob body (results stay expandable in the row body). */
@@ -110,7 +113,8 @@ export const ToolMessageItem = memo(
       (toolPayload?.status === "failed" ||
         !!toolPayload?.error ||
         !!rawData?.error) &&
-      !isRepairableFailure;
+      !isRepairableFailure &&
+      !isMediaJobPendingConfirmation({ toolName, rawData, toolPayload });
     const statusStr = isStreaming
       ? "running"
       : isRepairableFailure
@@ -683,6 +687,7 @@ export const ToolMessageItem = memo(
                 openPreview={(id, name) => setPreview({ id, name })}
                 navigateToPage={(id) => navigate(`/${id}`)}
                 toolArgs={extractToolCallArgs(toolPayload)}
+                toolRunId={toolRunId}
               />
             </div>
           )}

@@ -312,7 +312,9 @@ const processToolData = createAsyncThunk(
           rawResult:
             structured?.rawData !== undefined
               ? structured.rawData
-              : { error: "self_evolution_requires_confirmation" },
+              : // 按实际确认码回填（此分支内 code 必在 CONFIRMATION_INPUT_KEYS 中），
+                // 不再对所有工具写死 self_evolution 文案。
+                { error: structured?.code },
           summary,
           toolName: canonicalName,
           toolRunId,

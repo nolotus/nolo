@@ -6,7 +6,11 @@ import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
 import { isQuietDetailTool } from "./toolCallPresentation";
-import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
+import {
+  isMediaJobPendingConfirmation,
+  toolMessageNeedsDefaultExpansion,
+} from "../toolPresentation";
+import { extractToolCallArgs } from "./toolDisplayName";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
@@ -63,10 +67,18 @@ export const ToolCallRow = memo(
           !isQuietDetailTool(message?.toolName)));
 
     const rawData = safeParse(message?.content);
+    // 媒体任务 start 被确认闸门拦下是「待确认」，不是失败（旧载荷 content 里带
+    // { error: "*_requires_confirmation" }，不能据此判红）。
+    const isPendingConfirmation = isMediaJobPendingConfirmation({
+      toolName: message?.toolName ?? message?.toolPayload?.toolName,
+      rawData,
+      toolPayload: message?.toolPayload,
+    });
     const isError =
-      message?.toolPayload?.status === "failed" ||
-      !!message?.toolPayload?.error ||
-      !!rawData?.error;
+      !isPendingConfirmation &&
+      (message?.toolPayload?.status === "failed" ||
+        !!message?.toolPayload?.error ||
+        !!rawData?.error);
 
     return (
       <div
@@ -174,6 +186,8 @@ export const ToolCallRow = memo(
               openPreview={() => {}}
               navigateToPage={() => {}}
               presentation="groupDetail"
+              toolArgs={extractToolCallArgs(message?.toolPayload)}
+              toolRunId={message?.toolPayload?.toolRunId ?? message?.toolRunId}
             />
           </div>
         )}

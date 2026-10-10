@@ -12,7 +12,7 @@ const TIER_LABELS: Record<"outline" | "translate" | "full", string> = {
 export const mediaJobSchema = {
   name: "mediaJobTool",
   description:
-    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理）。translate 档必须指定目标语言 targetLang（用户明确表达要翻译成的语言时才传，不要擅自猜语言），缺目标语言的 translate start 会被服务端拒绝。启动前建议先 quote。",
+    "管理长音频/视频处理任务。quote 预估费用，start 启动处理，status 查询任务进度和结果。需先提供已有媒体 fileId；可限定秒数范围、处理深度 outline（大纲）、translate（翻译）、full（完整处理）。translate 档必须指定目标语言 targetLang（用户明确表达要翻译成的语言时才传，不要擅自猜语言），缺目标语言的 translate start 会被服务端拒绝。启动流程：先 quote，对话里会显示档位卡，告诉用户在卡片上点选档位即可直接启动（点击即确认），你无需再调用 start。只有用户用文字明确指定了档位时才调用 start；start 会被确认闸门拦下并在卡片上显示「确认启动」按钮——被拦一次后不要重试 start，也不要因用户回复「确认」「好的」等文字再次调用（文字不构成确认），而是提示用户点击卡片上的按钮。",
   parameters: {
     type: "object",
     properties: {
@@ -65,9 +65,25 @@ export type MediaJobToolInput = {
   targetLang?: string;
 };
 
+/**
+ * 模型调 start 被确认闸门拦下时写入 rawData 的载荷：卡片据此渲染「待确认启动」
+ * 与「确认启动」按钮（不再是红色失败）。不含 error 字段，避免被通用 isError 判红。
+ */
+export type MediaJobPendingStart = {
+  jobId?: string;
+  fileId?: string;
+  depth: "outline" | "translate" | "full";
+  label: string;
+  targetLang?: string;
+  scope?: { fromSec?: number; toSec?: number };
+  /** 同一次 tool call 的 toolRunId：卡片优先走 executeToolRun 推进同一个 run。 */
+  toolRunId?: string;
+};
+
 export async function mediaJobFunc(
   input: MediaJobToolInput,
   thunkApi: any,
+  context?: { toolRunId?: string },
 ): Promise<any> {
   const { action, fileId, jobId, fromSec, toSec, depth, targetLang } =
     input ?? {};
@@ -75,15 +91,6 @@ export async function mediaJobFunc(
     throw new Error(
       "start 必须指定 depth（outline/translate/full），对应用户确认的档位",
     );
-  }
-  if (
-    action === "start" &&
-    (input as any)?.__confirmedMediaJobStart !== true
-  ) {
-    throw new ToolResultError("启动媒体任务前需要用户确认所选处理档位。", {
-      code: "media_job_start_requires_confirmation",
-      displayData: "请先向用户说明并确认处理档位后再启动。",
-    });
   }
   const body: Record<string, unknown> = {};
   if (fromSec !== undefined || toSec !== undefined) {
@@ -94,6 +101,28 @@ export async function mediaJobFunc(
   }
   if (depth !== undefined) body.depth = depth;
   if (targetLang !== undefined) body.targetLang = targetLang;
+  if (
+    action === "start" &&
+    depth &&
+    (input as any)?.__confirmedMediaJobStart !== true
+  ) {
+    // 闸门前不发任何网络请求（不建 job、不改报价）；积分/耗时由卡片按 job 现有报价展示。
+    const label = TIER_LABELS[depth];
+    const pendingStart: MediaJobPendingStart = {
+      ...(jobId ? { jobId } : {}),
+      ...(fileId ? { fileId } : {}),
+      depth,
+      label,
+      ...(targetLang ? { targetLang } : {}),
+      ...(body.scope ? { scope: body.scope as MediaJobPendingStart["scope"] } : {}),
+      ...(context?.toolRunId ? { toolRunId: context.toolRunId } : {}),
+    };
+    throw new ToolResultError("启动媒体任务前需要用户在卡片上确认所选处理档位。", {
+      code: "media_job_start_requires_confirmation",
+      rawData: { ...(jobId ? { jobId } : {}), pendingStart },
+      displayData: `等待用户点击卡片上的「确认启动」（${label}）；不要再次调用 start，用户文字「确认」不构成确认，请提示用户点按钮。`,
+    });
+  }
 
   let path: string;
   let data: any;
@@ -176,7 +205,7 @@ export async function mediaJobFunc(
         typeof balanceCredits === "number"
           ? `当前余额 ${balanceCredits} 积分（低于档位报价不可启动）`
           : "",
-        "等待用户选择档位后调用 action=start（带 depth）。",
+        "已显示档位卡：请告诉用户在卡片上点选档位即可直接启动（点击即确认），无需你再调用 start。",
       ]
         .filter(Boolean)
         .join("；");

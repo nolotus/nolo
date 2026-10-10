@@ -36,6 +36,8 @@ import {
 
 export type CredentialAvailabilityEntry = {
   nextAvailableAt: number;
+  /** 本次冷却标记时间；旧条目缺失时不允许凭额度快照自动清除。 */
+  markedAt?: number;
   /**
    * 最近一次「冷却期自动重试探测」发生的时间（epoch-ms），用于共享层的
    * `resolveCooldownGate` 判定是否到了再放行一次真实请求的间隔。
@@ -124,12 +126,17 @@ function normalizeEntry(entry: unknown): CredentialAvailabilityEntry | undefined
   // 区分「字段缺失」与「字段存在但非法」：缺失是合法的旧格式（视为从未探测），
   // 而 lastProbeAt 存在却不是有限数说明记录已损坏——此时连同 deadline 一起丢弃，
   // 否则会把损坏记录解释成「从未探测」而放行一次 probe，与字段校验约定不符。
+  // markedAt 是可选的辅助字段（凭额度快照自动解除冷却的依据），非法值只丢弃该字段、
+  // 保留冷却本身：丢掉它的唯一后果是这条冷却不能被额度快照提前解除，仍按原机制恢复。
+  const marked = (entry as { markedAt?: unknown }).markedAt;
+  const markedAt =
+    typeof marked === "number" && Number.isFinite(marked) ? { markedAt: marked } : {};
   if ("lastProbeAt" in entry) {
     const probe = (entry as { lastProbeAt?: unknown }).lastProbeAt;
     if (typeof probe !== "number" || !Number.isFinite(probe)) return undefined;
-    return { nextAvailableAt: at, lastProbeAt: probe };
+    return { nextAvailableAt: at, ...markedAt, lastProbeAt: probe };
   }
-  return { nextAvailableAt: at };
+  return { nextAvailableAt: at, ...markedAt };
 }
 
 /**
@@ -193,12 +200,28 @@ export async function markCredentialUnavailable(
   if (typeof merged !== "number" || !Number.isFinite(merged)) return;
   live[credentialKey] = {
     nextAvailableAt: merged,
+    markedAt: now,
     ...(existing?.lastProbeAt !== undefined ? { lastProbeAt: existing.lastProbeAt } : {}),
   };
   await writeCredentialAvailability(live, env);
 }
 
 /** 凭证恢复可用（收到 200）时清除冷却。无冷却时是空操作，不写盘。 */
+export async function clearCredentialAvailabilityIfMarkedAt(
+  credentialKey: string,
+  expectedMarkedAt: number,
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+): Promise<void> {
+  if (!credentialKey) return;
+  const live = await readCredentialEntries(env, now);
+  const existing = live[credentialKey];
+  if (!existing || existing.markedAt !== expectedMarkedAt) return;
+  // 条件重读缩小但未消除跨进程竞态：底层仍是整文件 read-modify-write、无锁，属既有问题，另行处理。
+  delete live[credentialKey];
+  await writeCredentialAvailability(live, env);
+}
+
 export async function clearCredentialAvailability(
   credentialKey: string,
   env: NodeJS.ProcessEnv = process.env,

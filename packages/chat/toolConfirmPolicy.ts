@@ -62,6 +62,12 @@ export const isComposerDeleteConfirmToolName = (
   typeof toolName === "string" &&
   (COMPOSER_DELETE_CONFIRM_TOOL_NAMES as readonly string[]).includes(toolName);
 
+/**
+ * 由工具卡片自己内联渲染确认按钮的工具（MediaJobToolCard「确认启动」）。
+ * 通用确认栏/横幅必须让位，保证同一处只有一个确认入口。
+ */
+export const CARD_MANAGED_CONFIRM_TOOL_NAMES = new Set<string>(["mediaJobTool"]);
+
 export const shouldShowToolMessageConfirmBanner = (
   toolName: unknown,
   activeRun: ToolMessageConfirmRunLike | undefined
@@ -69,6 +75,7 @@ export const shouldShowToolMessageConfirmBanner = (
   !!activeRun &&
   activeRun.interaction === "confirm" &&
   !isComposerDeleteConfirmToolName(toolName) &&
+  !(typeof toolName === "string" && CARD_MANAGED_CONFIRM_TOOL_NAMES.has(toolName)) &&
   (activeRun.status === "pending" ||
     activeRun.status === "running" ||
     activeRun.status === "failed");

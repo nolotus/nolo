@@ -89,6 +89,7 @@ import {
 import {
   isQuotaLimited403Body,
   mergeAvailabilityDeadline,
+  PROBE_INTERVAL_MS,
   resolveCooldownGate,
 } from "../../ai/agent/agentAvailabilityShared";
 import { QUOTA_ERROR_PATTERNS } from "../../ai/tools/agent/quotaCircuitBreaker";
@@ -954,10 +955,10 @@ function extractRateLimitResetHint(message: string): string | undefined {
 
 function buildRateLimitFailure(ctx: FailureCtx): string {
   // 启动期 429 已由 markStartupRateLimitCooldown 落冷却（与 run 中途同语义）。
-  // 文案必须带上「已标记冷却至 <ISO>」：用户不再只看到一次限流报错，还能知道
-  // 该 agent 在冷却解除前会被派发门控拦住，不会继续白撞 429。
+  // 文案必须带上「已暂停该凭证的派发，最晚 <ISO> 自动解除」：不再让用户误以为
+  // 「要等到明天」，而要说明期间会自动试探、成功即恢复，并给出手动恢复命令。
   const cooldownNote = ctx.cooldownUntil
-    ? ` 已标记冷却至 ${ctx.cooldownUntil}，到期前派发会被冷却门控拦截（到期自动 probe 恢复）。`
+    ? ` 已暂停该凭证的派发，本地冷却最晚 ${ctx.cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。`
     : "";
   // 仅凭文本命中的限流（statusInferred）不能声称 "returned HTTP 429"——上游
   // 只是报文里说限流/配额；status 是语义等价码。
@@ -1233,7 +1234,7 @@ export function describeLocalRunFailure(
  * 窗口（DEFAULT_PROVIDER_RETRY_MS），不新发明数值。
  *
  * 返回最终生效的冷却截止 ISO（agent 级与 credential 级取更晚者），供失败文案
- * 「已标记冷却至 <ISO>」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
+ * 「已暂停该凭证的派发，最晚 <ISO> 自动解除」；未命中 rate-limit / adapter 无扩展方法 / 落盘失败
  * 一律返回 undefined（文案退回原样，退出码与退出路径不变）。
  */
 async function markStartupRateLimitCooldown(
@@ -1857,7 +1858,7 @@ async function runLocalAgentTurnForCli(
     }
     // 启动期 429 兜底：分类命中 rate-limit 时与 run 中途同语义落冷却（幂等）。
     // 冷却截止沿用 localLoop 把 dialogId 挂错误上的既有模式挂在错误对象上，
-    // 供 auto 路径 describeLocalRunFailure 渲染「已标记冷却至 <ISO>」。
+    // 供 auto 路径 describeLocalRunFailure 渲染「已暂停该凭证的派发，最晚 <ISO> 自动解除」。
     const cooldownUntil = await markStartupRateLimitCooldown(
       options,
       baseAdapter,
@@ -1879,7 +1880,7 @@ async function runLocalAgentTurnForCli(
       }
       if (cooldownUntil) {
         options.output.write(
-          `[nolo] 已标记冷却至 ${cooldownUntil}，到期前派发该 agent 会被冷却门控拦截。\n`,
+          `[nolo] 已暂停该凭证的派发，本地冷却最晚 ${cooldownUntil} 到期（不代表上游额度届时一定恢复）；冷却期间再次派发时，约每 ${Math.round(PROBE_INTERVAL_MS / 60000)} 分钟放行一次试探请求，成功即恢复。若已充值或重置额度，可运行 \`nolo auth cooldown\` 查看被暂停的凭证名，再用 \`nolo auth cooldown --clear <凭证名>\` 立即恢复。\n`,
         );
       }
     }

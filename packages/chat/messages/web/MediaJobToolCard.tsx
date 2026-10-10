@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { ReactReduxContext } from "react-redux";
 import type {
   MediaJob,
   MediaJobDepth,
@@ -6,8 +7,29 @@ import type {
   MediaQuote,
   MediaScope,
 } from "ai/lecture/types";
+import {
+  executeToolRun,
+  getToolRunById,
+  useToolRunById,
+} from "ai/tools/toolRunStore";
 import { getMediaJob, mediaJobAction, startMediaJob } from "chat/web/mediaJobs";
+import { isMediaJobPendingConfirmation } from "../toolPresentation";
 import type { ToolProps } from "./ToolMessageTypes";
+
+/** 与 mediaJobTool TIER_LABELS 同措辞；仅用于旧载荷（无 pendingStart.label）回退。 */
+const PENDING_TIER_LABELS: Record<MediaJobDepth, string> = {
+  outline: "只要大纲重点",
+  translate: "原文+译文对照",
+  full: "全套（对照+大纲+重点+术语，可导出文档）",
+};
+
+const isDepth = (value: unknown): value is MediaJobDepth =>
+  value === "outline" || value === "translate" || value === "full";
+
+const asRecord = (value: unknown): Record<string, any> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : null;
 
 export interface MediaJobTier {
   depth: MediaJobDepth;
@@ -17,6 +39,8 @@ export interface MediaJobTier {
 
 export interface MediaJobToolCardProps extends Partial<ToolProps> {
   readOnly?: boolean;
+  /** 该 tool 消息的 toolRunId（待确认启动卡用它推进同一个 confirm run）。 */
+  toolRunId?: string;
 }
 
 const STAGES: Array<{ key: MediaJobStage; label: string }> = [
@@ -79,15 +103,62 @@ function userFacingError(raw?: string): string {
 
 export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   rawData,
-  isError,
+  isError: isErrorProp,
   readOnly = false,
   navigateToPage,
+  toolArgs,
+  toolRunId: toolRunIdProp,
 }) => {
   const data = typeof rawData === "object" && rawData !== null ? rawData : {};
   const innerData =
     typeof data.rawData === "object" && data.rawData !== null
       ? data.rawData
       : {};
+
+  // ===== 模型调 start 被确认闸门拦下：待确认启动态（不是失败） =====
+  const pendingStart =
+    asRecord(data.pendingStart) ?? asRecord(innerData.pendingStart);
+  const isPendingStart = isMediaJobPendingConfirmation({
+    toolName: "mediaJobTool",
+    rawData: pendingStart ? { pendingStart } : data,
+  });
+  // 待确认 ≠ 失败：即便调用方按旧载荷（error 字段）传了 isError，也不渲染红色失败。
+  const isError = Boolean(isErrorProp) && !isPendingStart;
+  const args = asRecord(toolArgs) ?? {};
+  const pendingDepth: MediaJobDepth | undefined = isDepth(pendingStart?.depth)
+    ? pendingStart.depth
+    : isDepth(args.depth)
+      ? args.depth
+      : undefined;
+  const pendingJobId: string | undefined =
+    pendingStart?.jobId ?? (typeof args.jobId === "string" ? args.jobId : undefined) ?? data.jobId;
+  const pendingTargetLang: string | undefined =
+    pendingStart?.targetLang ??
+    (typeof args.targetLang === "string" ? args.targetLang : undefined);
+  const pendingScope: Partial<MediaScope> | undefined =
+    asRecord(pendingStart?.scope) ??
+    (typeof args.fromSec === "number" || typeof args.toSec === "number"
+      ? {
+          ...(typeof args.fromSec === "number" ? { fromSec: args.fromSec } : {}),
+          ...(typeof args.toSec === "number" ? { toSec: args.toSec } : {}),
+        }
+      : undefined);
+  const pendingToolRunId: string | undefined =
+    toolRunIdProp ?? (typeof pendingStart?.toolRunId === "string" ? pendingStart.toolRunId : undefined);
+  const pendingRun = useToolRunById(pendingToolRunId ?? "");
+  // 待确认卡能否就地确认：run 仍在 store 且处于可确认态（confirm + pending/failed）。
+  // run 不在 store（页面刷新后）时确认已失效 —— 绝不回退直连 startMediaJob 计费，
+  // 改为引导用户回到上方报价卡重新选档位（点档位本身就是确认）。
+  const canConfirmInPlace =
+    !!pendingRun &&
+    pendingRun.interaction === "confirm" &&
+    (pendingRun.status === "pending" || pendingRun.status === "failed");
+  // Provider-less 安全（分享页/单测无 Redux store）：拿不到 dispatch 时不做就地确认推进。
+  const reduxContext = useContext(ReactReduxContext) as
+    | { store?: { dispatch?: (action: any) => any } }
+    | null
+    | undefined;
+  const storeDispatch = reduxContext?.store?.dispatch;
 
   const jobId: string | undefined =
     data.jobId || data.job?.id || innerData.job?.id || innerData.jobId;
@@ -104,6 +175,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const actionBusyRef = useRef(false);
+  // 「确认已失效」时点「回到报价卡」但页面里找不到报价卡 → 提示重新估价
+  const [backToQuoteMissing, setBackToQuoteMissing] = useState(false);
 
   useEffect(() => {
     if (initialJob) {
@@ -144,6 +217,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     if (!targetId) return;
     if (job?.status && TERMINAL_STATUSES.has(job.status)) return;
     if (job?.status === "quoted" && !hasStarted) return;
+    // 待确认启动态由挂载时的单次查询定态，不轮询（用户点击确认后 hasStarted 再开启）
+    if (isPendingStart && !hasStarted) return;
 
     let active = true;
     const interval = setInterval(async () => {
@@ -165,7 +240,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       active = false;
       clearInterval(interval);
     };
-  }, [jobId, job?.id, job?.status, hasStarted]);
+  }, [jobId, job?.id, job?.status, hasStarted, isPendingStart]);
 
   const handleStartTier = async (tier: MediaJobTier) => {
     if (readOnly || startingRef.current) return;
@@ -291,8 +366,294 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     }
   };
 
+  // 待确认卡挂载时查一次 job：刷新后若任务已被启动（或在别处启动），直接切进度态，
+  // 不再给出一个必然 409 的「确认启动」按钮。
+  useEffect(() => {
+    if (!isPendingStart || !pendingJobId || hasStarted) return;
+    let active = true;
+    getMediaJob(pendingJobId)
+      .then((res) => {
+        if (active && res?.job) setJob(res.job);
+      })
+      .catch(() => {
+        // 查询失败保持待确认态，用户点击时再由启动接口给出明确错误
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPendingStart, pendingJobId]);
+
+  // run 已确认成功：确认已生效，不该再渲染「确认启动」（点了只会刷新的按钮会误导用户），
+  // 改为自动刷新一次任务状态进入进度态（与下面分支 (b) 同一刷新路径）。
+  const pendingRunSucceeded = pendingRun?.status === "succeeded";
+  useEffect(() => {
+    if (!isPendingStart || !pendingRunSucceeded || !pendingJobId || hasStarted) return;
+    let active = true;
+    getMediaJob(pendingJobId)
+      .then((res) => {
+        if (active && res?.job) setJob(res.job);
+      })
+      .catch(() => {
+        // 刷新失败保持现状，不弹错误：确认已生效，进度以既有查询/轮询为准
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPendingStart, pendingRunSucceeded, pendingJobId]);
+
+  const handleConfirmPendingStart = async () => {
+    if (readOnly || startingRef.current || !pendingDepth) return;
+    startingRef.current = true;
+    setStarting(true);
+    setStartError(null);
+    try {
+      const run = pendingToolRunId ? getToolRunById(pendingToolRunId) : undefined;
+      if (
+        run &&
+        storeDispatch &&
+        run.interaction === "confirm" &&
+        (run.status === "pending" || run.status === "failed")
+      ) {
+        // (a) run 仍在待确认态：与 MessageToolConfirmBar 同一路径，推进同一个 confirm run
+        // （其 input 里的 __confirmedMediaJobStart 由 toolThunks 确认分支注入，绝不来自模型）。
+        const result = await storeDispatch(executeToolRun({ id: run.id })).unwrap();
+        const nextJob = result?.rawData?.job;
+        if (nextJob) setJob(nextJob);
+      } else if (run) {
+        // (b) run 仍在 store 但不处于可确认态（running / succeeded / 其他）：绝不直连启动
+        // （会触发 409、重复计费，或绕过 confirm run 用未经确认的参数启动），
+        // 仅刷新任务状态进入进度态后返回。直连回退只属于下面「run 已不在 store」一支。
+        if (pendingJobId) {
+          const res = await getMediaJob(pendingJobId);
+          if (res?.job) setJob(res.job);
+        }
+        return;
+      } else {
+        // (c) run 已不在内存 store（页面刷新后）：确认已失效，这里绝不回退直连 startMediaJob——
+        // 那等于用持久化（可能由模型给出）的 depth/scope/targetLang 绕过确认闸门直接计费。
+        // UI 此时不渲染「确认启动」，而是引导用户回到上方报价卡重新选档位（点档位即确认）。
+        return;
+      }
+      setHasStarted(true);
+    } catch (err: any) {
+      setStartError(userFacingError(err?.message) || "启动失败，请稍后重试");
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
+
+  /**
+   * 确认已失效（页面刷新后 run 丢失）→ 滚到报价卡并聚焦其第一个档位按钮。
+   * 同一对话可能有多个媒体任务，本卡只能定位自己那张报价卡：
+   * - pendingJobId 有值：只接受 data-job-id 的精确命中；匹配不到（旧 DOM / 缺 data-job-id /
+   *   选择器非法）直接提示 missing，绝不退回「最后一个」——否则会聚焦到别的媒体任务上。
+   * - pendingJobId 缺失（旧载荷）：没有可精确比对的目标，才退回「页面上最后一个报价卡」。
+   */
+  const handleBackToQuote = () => {
+    if (typeof document === "undefined") {
+      setBackToQuoteMissing(true);
+      return;
+    }
+    // CSS.escape 不可用时手工转义会破坏选择器字符串字面量的 \ 与 "
+    // （否则 querySelector 抛 SyntaxError，点击会静默失败，既无定位也无提示）。
+    const escapeId = (value: string): string => {
+      const cssApi = (globalThis as { CSS?: { escape?: (input: string) => string } })
+        .CSS;
+      if (typeof cssApi?.escape === "function") return cssApi.escape(value);
+      return value.replace(/["\\]/g, "\\$&");
+    };
+    let target: HTMLElement | null = null;
+    if (pendingJobId) {
+      // 有 jobId 时只认精确命中：匹配不到就提示 missing，绝不退回「最后一个报价卡」。
+      try {
+        target = document.querySelector(
+          `[data-testid="tier-selection-section"][data-job-id="${escapeId(pendingJobId)}"]`,
+        ) as HTMLElement | null;
+      } catch {
+        target = null; // 选择器非法（转义覆盖不到的字符）：按未命中处理，下方给提示
+      }
+    } else {
+      // 旧载荷没有 jobId，无从精确比对，此时才允许退回「最后一个报价卡」。
+      const nodes = document.querySelectorAll(
+        '[data-testid="tier-selection-section"]',
+      );
+      target = nodes.length > 0 ? (nodes[nodes.length - 1] as HTMLElement) : null;
+    }
+    if (!target) {
+      setBackToQuoteMissing(true);
+      return;
+    }
+    setBackToQuoteMissing(false);
+    target.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    const firstButton = target.querySelector("button") as HTMLButtonElement | null;
+    firstButton?.focus?.();
+  };
+
+  const showPendingStart =
+    isPendingStart && !hasStarted && (!job || job.status === "quoted");
+
+  if (showPendingStart) {
+    const label =
+      (typeof pendingStart?.label === "string" && pendingStart.label) ||
+      (pendingDepth ? PENDING_TIER_LABELS[pendingDepth] : "所选档位");
+    // 积分/耗时取自 job 现有报价，仅当其档位与待启动档位一致时展示（多档报价后
+    // job.quote 停在最后一次报价的档位，档位不一致时不展示错误数字）。
+    const pendingQuote: MediaQuote | undefined =
+      job?.quote && job.depth === pendingDepth ? job.quote : undefined;
+    const detail = [formatCredits(pendingQuote?.totalCredits), formatEta(pendingQuote?.etaSec)]
+      .filter(Boolean)
+      .join("，");
+    // 实际将发送的处理范围与译文语言：让用户在点按钮前看到 depth/scope/targetLang。
+    const scopeText =
+      pendingScope &&
+      (typeof pendingScope.fromSec === "number" || typeof pendingScope.toSec === "number")
+        ? `范围 ${fmtClock(pendingScope.fromSec ?? 0)}–${fmtClock(pendingScope.toSec ?? 0)}`
+        : "全片";
+    const langText = pendingTargetLang ? `译文：${pendingTargetLang}` : "";
+    const busy = starting || pendingRun?.status === "running";
+    // run 仍在 store（含 running/succeeded）：保留按钮（点击刷新进度或推进同一个 run）。
+    // run 已不在 store（页面刷新后）：确认已失效，不再渲染「确认启动」，改为引导回报价卡。
+    const runInStore = Boolean(pendingRun);
+    // succeeded：确认已生效，按钮点了只会刷新，标签误导 → 不渲染按钮，只提示正在载入。
+    const runSucceeded = pendingRun?.status === "succeeded";
+    return (
+      <div
+        data-testid="media-job-pending-start"
+        data-pending-confirm="true"
+        data-confirm-in-place={canConfirmInPlace ? "true" : "false"}
+        style={{
+          marginTop: 8,
+          marginBottom: 8,
+          border: "1px solid var(--borderWarning, rgba(234, 179, 8, 0.35))",
+          borderRadius: "var(--radius-md, 8px)",
+          backgroundColor: "var(--surfaceWarning, rgba(234, 179, 8, 0.08))",
+          padding: "12px 16px",
+          fontSize: "var(--fontSize-sm, 13px)",
+          color: "var(--text, #111827)",
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>
+          将启动：{label}
+          {detail ? `（${detail}）` : ""}
+        </div>
+        <div
+          data-testid="media-job-pending-start-params"
+          style={{
+            marginTop: 4,
+            fontSize: "12px",
+            color: "var(--textMuted, #6b7280)",
+          }}
+        >
+          {langText ? `${scopeText} · ${langText}` : scopeText}
+        </div>
+        {!pendingQuote && (
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: "12px",
+              color: "var(--textMuted, #6b7280)",
+            }}
+          >
+            费用以启动时服务端报价为准
+          </div>
+        )}
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: "12px",
+            color: "var(--textMuted, #6b7280)",
+          }}
+        >
+          {readOnly
+            ? "等待确认启动"
+            : runSucceeded
+              ? "已启动，正在载入进度…"
+              : runInStore
+                ? "确认后按该档位开始处理并计费"
+                : "确认已失效（页面刷新过），请在上方报价卡重新选择档位"}
+        </div>
+        {!readOnly && runInStore && !runSucceeded && (
+          <button
+            type="button"
+            data-testid="media-job-confirm-start"
+            disabled={busy || !pendingDepth}
+            onClick={() => void handleConfirmPendingStart()}
+            style={{
+              marginTop: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "6px 16px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "#ffffff",
+              backgroundColor: "var(--primary, #2563eb)",
+              border: "none",
+              borderRadius: "var(--radius-md, 6px)",
+              cursor: busy || !pendingDepth ? "not-allowed" : "pointer",
+              opacity: busy || !pendingDepth ? 0.6 : 1,
+            }}
+          >
+            {busy ? "启动中…" : "确认启动"}
+          </button>
+        )}
+        {!readOnly && !runInStore && (
+          <button
+            type="button"
+            data-testid="media-job-back-to-quote"
+            onClick={handleBackToQuote}
+            style={{
+              marginTop: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "6px 16px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "var(--text, #111827)",
+              backgroundColor: "transparent",
+              border: "1px solid var(--borderMuted, #d1d5db)",
+              borderRadius: "var(--radius-md, 6px)",
+              cursor: "pointer",
+            }}
+          >
+            回到报价卡
+          </button>
+        )}
+        {backToQuoteMissing && (
+          <div
+            data-testid="media-job-back-to-quote-missing"
+            style={{
+              marginTop: 4,
+              fontSize: "12px",
+              color: "var(--textMuted, #6b7280)",
+            }}
+          >
+            请重新让助手估价
+          </div>
+        )}
+        {startError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 8,
+              fontSize: "12px",
+              color: "var(--danger, #ef4444)",
+            }}
+          >
+            {startError}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // 既无 job 也无 quote：没有任何可渲染信息，返回空（不渲染空卡）
-  if (!isError && !initialJob && !initialQuote) {
+  // （待确认卡确认启动后 initialJob 为空，但本地 job 已有值，须继续渲染进度态）
+  if (!isError && !initialJob && !initialQuote && !job) {
     return null;
   }
 
@@ -354,7 +715,10 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     >
       {/* 档位卡模式：quoted 且未启动 */}
       {isQuoted && (
-        <div data-testid="tier-selection-section">
+        <div
+          data-testid="tier-selection-section"
+          data-job-id={jobId || job?.id}
+        >
           {/* 截取建议 */}
           {job?.trimSuggestions && job.trimSuggestions.length > 0 && (
             <div
@@ -384,6 +748,19 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {!readOnly && (
+            <div
+              data-testid="tier-selection-hint"
+              style={{
+                marginBottom: 8,
+                fontSize: "12px",
+                color: "var(--textMuted, #6b7280)",
+              }}
+            >
+              点选一个档位即开始处理（点击即确认，无需再回复）
             </div>
           )}
 
@@ -484,6 +861,20 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                       请先指定译文语言（如中文、英文）后再启动翻译
                     </div>
                   )}
+                  {!readOnly && !isInsufficient && !needsLang && (
+                    <div
+                      data-testid={`tier-cta-${tier.depth}`}
+                      style={{
+                        alignSelf: "flex-end",
+                        marginTop: 4,
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--primary, #2563eb)",
+                      }}
+                    >
+                      {starting ? "启动中…" : "开始处理 →"}
+                    </div>
+                  )}
                 </>
               );
 
@@ -519,6 +910,7 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                   data-testid={`tier-btn-${tier.depth}`}
                   disabled={isInsufficient || starting || needsLang}
                   onClick={() => handleStartTier(tier)}
+                  aria-label={`开始处理：${tier.label}${creditsText ? `（${creditsText}）` : ""}`}
                   style={{
                     display: "flex",
                     flexDirection: "column",
@@ -526,7 +918,9 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
                     padding: "10px 14px",
                     borderRadius: "var(--radius-md, 6px)",
                     border:
-                      "1px solid var(--borderMuted, var(--border, #e5e7eb))",
+                      isInsufficient || needsLang
+                        ? "1px solid var(--borderMuted, var(--border, #e5e7eb))"
+                        : "1px solid var(--primary, #2563eb)",
                     backgroundColor:
                       "var(--surfaceDefault, var(--background, #ffffff))",
                     cursor:
