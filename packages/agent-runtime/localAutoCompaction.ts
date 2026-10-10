@@ -33,6 +33,10 @@ import type { AgentRuntimeChatMessage } from "./types";
 import { normalizeUsage } from "../ai/token/normalizeUsage";
 import { composeProviderMessages } from "./providerMessageProjection";
 import { emitLoopEvent } from "./toolCallTransaction";
+import {
+  countUnparsableToolArgKinds,
+  describeUnparsableToolArgs,
+} from "./toolArgsTruncationPolicy";
 import type { LocalLoopObservationBoundary } from "./observationStream";
 import type { AgentExecutionObservationEvent } from "./executionObservation";
 import type { AgentRuntimeMessageContent } from "./types";
@@ -1084,8 +1088,10 @@ export function createTurnCompactionController(args: {
           contextReferenceResolver: args.contextReferenceResolver,
         });
         if (rebuilt.downgraded > 0) {
+          // 告警只改归因措辞：类别来自压缩后 canonical 历史的纯统计（与降级判定
+          // 同源口径）；计数仍用 rebuilt.downgraded，降级动作与持久化历史不动。
           console.warn(
-            `[nolo] downgraded ${rebuilt.downgraded} tool_call(s) with unparsable JSON arguments from outbound history after compaction; persisted history untouched`,
+            `[nolo] downgraded ${rebuilt.downgraded} tool_call(s) with unparsable JSON arguments from outbound history after compaction (${describeUnparsableToolArgs(countUnparsableToolArgKinds(compacted.history))}); persisted history untouched`,
           );
         }
         args.replaceWorkingView(rebuilt.messages);

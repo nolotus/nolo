@@ -27,6 +27,7 @@ import type { AgentRuntimeToolCall } from "./types";
 import { hasParsableObjectArguments, repairTruncatedToolArguments } from "./outboundHistorySanitize";
 import {
   buildToolArgsDiagnosticLine,
+  classifyUnparsableToolArgs,
   repairTruncatedToolArgumentsDroppingTail,
   type ToolArgsDiagnosticContext,
 } from "./toolArgsTruncationPolicy";
@@ -360,7 +361,12 @@ export async function executeToolCall(args: {
           }),
         );
         throw new Error(
-          `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`,
+          // 只按类别换文案（判定分支、错误类型、可重试性、落库内容、日志级别全部不变）：
+          // EOF 落在字符串内/括号不平衡 = 真截断；结构完整却语法非法（`"lines": 300-400`
+          // 未加引号、字符串内未转义控制字符）= 参数本身不合法，不该归因于上游传输层。
+          classifyUnparsableToolArgs(rawPoisonArguments) === "truncated"
+            ? `模型生成的 tool_call arguments 不是合法 JSON（疑似上游流式截断，原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保 arguments 是闭合的 JSON 对象；若因参数过长被截断，先精简参数（不要内嵌 diff/日志等大段文本，改传路径让对方自行读取）再重试。`
+            : `模型生成的 tool_call arguments 不是合法 JSON（语法非法但结构完整，非截断；原始长度 ${rawPoisonArguments.length}）。请重新完整调用 ${toolName}，确保每个字符串值都按 JSON 规则转义（换行等控制字符写成 \\n 等转义序列），区间/版本号等非 JSON 字面量写成字符串（如 "lines": "300-400"），arguments 是闭合的 JSON 对象。`,
         );
       }
     }

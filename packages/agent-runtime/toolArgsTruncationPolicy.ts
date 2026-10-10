@@ -8,6 +8,7 @@
 // 这是有损修补，因此只允许对白名单内的交互/只读工具启用。
 
 import { createHash } from "node:crypto";
+import { hasParsableObjectArguments } from "./outboundHistorySanitize";
 
 /**
  * 允许「丢弃未闭合尾部数组元素」降级的工具白名单（exact name）。
@@ -179,4 +180,112 @@ export function buildToolArgsDiagnosticLine(args: {
     parts.push(`tail=${JSON.stringify(raw.slice(-DEBUG_TAIL_MAX))}`);
   }
   return parts.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// 不可解析参数的类别判定（只判类 + 只改措辞，不参与任何容错分支）
+//
+// 历史证据（本地 LevelDB 只读扫描：444,662 keys / 127,325 条带 tool_calls 的
+// assistant 记录）：坏参数 29 条（0.023%），其中未转义控制字符（多为 ask_user
+// 多行参数）19 条、数值区间未加引号（`"lines": 300-400`）5 条——这两类尾部
+// 完整，是产出的 JSON 语法非法，不是传输层丢字节；真截断形态（`{`、
+// `{"endLine": 700`）只有 1–3 条。旧文案一律写「疑似上游流式截断」，把约
+// 24/29 的语法错误误归因成传输层故障，会污染后续排查与决策，故在此把判定与
+// 措辞按类别分开。以下函数全为纯函数：只读入参、不改消息、不参与任何
+// 修复/拒绝/重试判定。
+// ---------------------------------------------------------------------------
+
+export type UnparsableToolArgsKind = "truncated" | "malformed";
+
+/**
+ * 与 {@link scanTruncation} 同一套字符串/转义规则的轻量扫描：只回答
+ * 「容器是否全部正常闭合」（EOF 时仍有未闭合容器，或出现括号错配）。
+ * 独立成函数而不复用 scanTruncation 的返回值，是为了不动后者的既有语义与
+ * 字段（它是行为代码）。
+ */
+function hasUnclosedOrMismatchedContainers(input: string): boolean {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      if (stack.pop() !== (ch === "}" ? "{" : "[")) return true;
+    }
+  }
+  return stack.length > 0;
+}
+
+/**
+ * 纯判定：对「JSON.parse 失败的 raw 参数」归类。
+ * - `truncated`：EOF 落在字符串字面量内，或括号不平衡 —— 上游流式丢尾的形态
+ *   （`{"endLine": 700`、`{"command": "ls`、`{`、`{"a": [1, 2}`）；
+ * - `malformed`：结构完整闭合、却仍不是合法 JSON —— 语法非法但没丢字节
+ *   （`"lines": 300-400` 未加引号、字符串里未转义的控制字符）。
+ * 非字符串（undefined/null/数字）不属于截断形态 → `malformed`。
+ */
+export function classifyUnparsableToolArgs(
+  raw: unknown,
+): UnparsableToolArgsKind {
+  if (typeof raw !== "string") return "malformed";
+  // EOF 落在字符串内：复用既有扫描的字符串状态信号（语义与返回值不变）。
+  if (scanTruncation(raw).inString) return "truncated";
+  return hasUnclosedOrMismatchedContainers(raw) ? "truncated" : "malformed";
+}
+
+export type UnparsableToolArgsBreakdown = {
+  truncated: number;
+  malformed: number;
+};
+
+/**
+ * 纯诊断计数：统计一组出站消息里 arguments 不可解析的 tool_call 各归哪一类。
+ * 只读、不改消息内容；「不可解析」的口径与降级判定同源
+ * （{@link hasParsableObjectArguments}），因此健康调用不会被算进来。
+ */
+export function countUnparsableToolArgKinds(
+  messages: readonly unknown[],
+): UnparsableToolArgsBreakdown {
+  const breakdown: UnparsableToolArgsBreakdown = { truncated: 0, malformed: 0 };
+  if (!Array.isArray(messages)) return breakdown;
+  for (const message of messages) {
+    const entry = message as
+      | { role?: unknown; tool_calls?: unknown }
+      | null
+      | undefined;
+    if (entry?.role !== "assistant" || !Array.isArray(entry.tool_calls)) continue;
+    for (const call of entry.tool_calls) {
+      const raw = (
+        call as { function?: { arguments?: unknown } } | null | undefined
+      )?.function?.arguments;
+      if (typeof raw !== "string" || hasParsableObjectArguments(raw)) continue;
+      breakdown[classifyUnparsableToolArgs(raw)] += 1;
+    }
+  }
+  return breakdown;
+}
+
+/**
+ * 纯展示：把分类计数压成告警里的括注内容（不含括号本身）。
+ * 两类同时出现时都报；只有一类时报该类别；一条都没统计到（坏参数来自被降级
+ * 的 tool 结果等非 arguments 位置）时给中性措辞，不猜成因。
+ */
+export function describeUnparsableToolArgs(
+  breakdown: UnparsableToolArgsBreakdown,
+): string {
+  const { truncated, malformed } = breakdown;
+  if (truncated > 0 && malformed > 0) {
+    return `${truncated} suspected upstream stream truncation / ${malformed} malformed JSON arguments, not truncation`;
+  }
+  if (truncated > 0) return "suspected upstream stream truncation";
+  if (malformed > 0) return "malformed JSON arguments, not truncation";
+  return "cause unclassified";
 }
