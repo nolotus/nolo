@@ -231,8 +231,30 @@ export function shouldStripReasoningContentForOutbound(
  *
  * Mutually exclusive with `shouldStripReasoningContentForOutbound` by
  * construction: the strip predicate only fires for provider `deepseek`/`nolo`,
- * this one only for `opencode-go`.
+ * this one only for the OpenCode channel. `opencode` is an alias of
+ * `opencode-go`, not a different channel: `packages/ai/llm/providers.ts`
+ * (`MODEL_LOOKUP_MAP`) maps both ids to the same `opencodeGoModels` catalog,
+ * so both reach the same upstream and share this replay contract.
+ *
+ * Re-verification gate (added 2026-10-10 at review request): keep this only
+ * while the contract is unproven for the live channel. A probe the same day
+ * sent 16 real requests (8 history shapes × stream / non-stream) to
+ * `opencode.ai/zen/go/v1` and every one answered 200 — including tool calls
+ * with no reasoning at all — so the placeholder is defensive, not a locally
+ * reproducible necessity. Delete this predicate and
+ * `REASONING_REPLAY_PLACEHOLDER` once the channel is confirmed not to enforce
+ * the contract; if the same 400 comes back, widen the predicate (provider /
+ * model ids from `opencodeGoModels`) instead of downgrading tool_calls to
+ * text, which would break call/result pairing.
+ *
+ * The width is deliberate: matching the `deepseek` family on this channel
+ * covers custom ids such as `deepseek-v4.1-flash`, at the cost of a needless
+ * field if a non-thinking `deepseek*` id ever lands in `opencodeGoModels`
+ * (narrow it then). A different provider that starts requiring the contract
+ * needs its own entry here.
  */
+export const REASONING_REPLAY_PLACEHOLDER = "(reasoning not captured for this turn)";
+
 export function shouldReplayReasoningContentForOutbound(
   provider?: string,
   model?: string,
@@ -240,5 +262,5 @@ export function shouldReplayReasoningContentForOutbound(
   const p = provider?.trim().toLowerCase();
   const m = model?.trim().toLowerCase();
   if (!p || !m) return false;
-  return p === "opencode-go" && m.includes("deepseek");
+  return (p === "opencode-go" || p === "opencode") && m.includes("deepseek");
 }

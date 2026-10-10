@@ -32,6 +32,7 @@ import {
 } from "core/chat/bareImageUrlShape";
 import { providerHttpFailure } from "core/chat/providerFailureMessage";
 import {
+  REASONING_REPLAY_PLACEHOLDER,
   shouldReplayReasoningContentForOutbound,
   shouldStripReasoningContentForOutbound,
   toOpenAiCompatibleMessages,
@@ -81,17 +82,6 @@ export type OpenAiCompatibleProviderConfig = {
 };
 
 type OpenAiCompatibleTool = Record<string, unknown>;
-
-/**
- * Placeholder injected for the DeepSeek thinking-mode replay contract
- * (shouldReplayReasoningContentForOutbound). Non-empty on purpose: whether
- * the upstream validator accepts an empty string is unverified, while every
- * normally accepted response on this channel has been observed to carry
- * non-empty reasoning — so matching that shape is the conservative choice
- * (evidence in openAiCompatibleMessages.ts).
- */
-const REASONING_REPLAY_PLACEHOLDER =
-  "(reasoning not captured for this turn)";
 
 export function isOpenAiResponsesEndpoint(endpoint: string): boolean {
   return endpoint.includes("/responses");
