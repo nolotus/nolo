@@ -29,7 +29,10 @@ import { planContextUsage } from "../ai/context/retention";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
 import { stripImagePartsFromMessages } from "../ai/agent/imagePreprocessing";
-import { downgradeUnparsableToolCalls } from "./outboundHistorySanitize";
+import {
+  downgradeUnparsableToolCalls,
+  transferDowngradedToolTurnOrigin,
+} from "./outboundHistorySanitize";
 import type {
   DowngradeResult,
   ToolArgsProjectionStats,
@@ -461,10 +464,15 @@ export function prepareMessagesForProviderCall(
           : providerMessage.content;
 
     if (providerMessage.role !== "tool") {
-      return {
+      // 重建消息对象时必须**显式转移**整体降级来源标记：上面的 rest 解构与
+      // `{ ...providerMessage }` 都只复制可枚举属性，非枚举 Symbol 会在这里丢
+      // （2026-10-10 复核 P1）。本函数在 CLI 本地链路里紧随
+      // composeProviderMessages（已在其中完成降级并打标）运行，
+      // 若不转移，标记会在到达出站注入点之前就消失。
+      return transferDowngradedToolTurnOrigin(message, {
         ...providerMessage,
         content: sanitizedContent,
-      };
+      });
     }
     toolMessageCount += 1;
     rawToolContentChars += contentCharCount(sanitizedContent);
@@ -532,7 +540,12 @@ export function filterImagePartsFromMessages(
   supportsImages: boolean,
 ): AgentRuntimeChatMessage[] {
   if (supportsImages) return messages;
-  return stripImagePartsFromMessages(messages);
+  // stripImagePartsFromMessages 用 `{ ...msg }` 重建**每一条**消息，非枚举的整体降级
+  // 来源标记会在那里丢掉（2026-10-10 复核 P1 同类点）。这里逐条把标记转移到重建后的
+  // 对象上（index 对齐，因为 callee 是纯 map）；源消息无标记时是 no-op。
+  return stripImagePartsFromMessages(messages).map((stripped, index) =>
+    transferDowngradedToolTurnOrigin(messages[index], stripped),
+  );
 }
 
 /**

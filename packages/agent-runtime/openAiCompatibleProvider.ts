@@ -148,9 +148,16 @@ export function buildOpenAiCompatibleChatCompletionRequest(args: {
   // current `tools` array to text and pairs tool_calls with results, so strict
   // gateways (ollama) accept the replayed history instead of 400-ing.
   //
-  // Ordering note: sanitize runs BEFORE conversion, so the placeholder only
-  // fills turns that still carry tool_calls — turns already downgraded to
-  // plain text never get a spurious reasoning_content.
+  // Ordering note: sanitize runs BEFORE conversion. A turn whose calls were
+  // *partially* downgraded keeps its surviving tool_calls and is injected here
+  // as before; a turn whose calls were *fully* downgraded to plain text no
+  // longer keeps tool_calls, so it carries an internal non-enumerable
+  // downgraded-origin marker (outboundHistorySanitize) that the placeholder
+  // guard consults — hypothesis (unproven): the upstream may still validate
+  // that replayed round as a tool turn, so injecting the placeholder stays a
+  // defensive compatibility measure. The marker never reaches the wire (see
+  // the leak assertions in openAiCompatibleProvider.test.ts /
+  // openAiCompatibleMessages.test.ts).
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
   const messages = toOpenAiCompatibleMessages(sanitizedMessages, {
     stripReasoningContent: shouldStripReasoning,
