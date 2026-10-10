@@ -1,9 +1,29 @@
 /**
  * Phase 1 — Agent Call Plan resolver.
  *
- * Single source of truth for { authMethod, transport, upstreamWire, endpoint, headers }.
- * Both client and server derive their behavior from this descriptor so they can
- * never disagree.
+ * Shared source of truth for { authMethod, upstreamWire, endpoint, headers }:
+ * both client and server read these from the same descriptor, so they cannot
+ * disagree on credential shape, wire format or upstream URL.
+ *
+ * `transport` is NOT host-invariant. It is decided per host capability, in two
+ * places that must be changed together:
+ * - Web / React Native (browser or RN fetch — CORS-constrained, so most
+ *   provider APIs need the Nolo server as a hop) derive it from
+ *   `shouldUseServerProxy` (serverProxyPolicy.ts), which forces "server-proxy"
+ *   for custom agents with a remote endpoint. This file returns that value.
+ * - Desktop / CLI (native fetch, no CORS) derive it from
+ *   `resolveProviderTransportDecision` (providerResolution.ts). Its custom
+ *   branch only proxies when runtimeLocation === "server" && useServerProxy ===
+ *   true, so a custom agent stays "direct" there *even when this plan says
+ *   "server-proxy"* — i.e. `useServerProxy` is ignored for custom agents on
+ *   Desktop/CLI.
+ *
+ * Consequence (intentional, do not "unify" blindly): for a custom agent with a
+ * remote endpoint the two hosts disagree — Web/RN → proxy, Desktop/CLI →
+ * direct. Any change to either rule must be made with the guard tests on the
+ * other side open:
+ * Web/RN → agentCallPlan.test.ts + serverProxyPolicy.test.ts;
+ * Desktop/CLI → providerResolution.test.ts.
  *
  * See plan: docs/plans/2026-07-03-provider-auth-wireformat-decoupling.md §4.1
  */
