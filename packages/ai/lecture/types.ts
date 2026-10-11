@@ -99,6 +99,20 @@ export type MediaJobStage =
 /** outline=只要大纲重点；translate=转写+翻译；full=全套 */
 export type MediaJobDepth = "outline" | "translate" | "full";
 
+/**
+ * 显式 STT 供应商的**公共**枚举（API/JSON 层取值）：`nolo` = 自部署端点
+ * （服务端内部 id 为 `local`，返回值与计费 id 仍用内部值），其余与各商业端点同名。
+ * 显式给出时必须走 STT 兜底链并使用该供应商（兜底链门控关闭也一样）；
+ * 未指定（undefined）时维持既有门控/直连行为。
+ */
+export type SttProviderSelection =
+  | "nolo"
+  | "modal"
+  | "groq"
+  | "together"
+  | "deepinfra"
+  | "grok";
+
 export interface MediaScope {
   fromSec: number;
   toSec: number;
@@ -184,6 +198,11 @@ export interface MediaJob {
   topic?: string;
   /** 专有名词 / 关键词（Grok STT keyterm + 翻译、总结 prompt 上下文） */
   keyterms?: string[];
+  /**
+   * 显式 STT 供应商（见 SttProviderSelection）。给出时 transcribe 必须走兜底链并用该供应商；
+   * null / 未知值在运行期被拒绝，绝不静默回落旧直连路径。
+   */
+  sttProvider?: SttProviderSelection;
   status: MediaJobStatus;
   stage?: MediaJobStage;
   progress: { done: number; total: number };
