@@ -358,6 +358,11 @@ export const messageSlice = createSliceWithThunks({
         const { dialogId, ...message } = action.payload;
         const resolvedDialogId =
           dialogId ?? inferDialogIdFromMessage(action.payload);
+        // Streaming is an execution write, not a foreground UI action.
+        // Never allow an unscoped producer to borrow the active dialog.
+        if (!resolvedDialogId) {
+          throw new Error("messageStreaming requires an explicit dialogId or a valid message dbKey");
+        }
         const dialogState = ensureMessageDialogState(state, resolvedDialogId);
         const existing = dialogState.msgs.entities[message.id];
         upsertOneMessage(
