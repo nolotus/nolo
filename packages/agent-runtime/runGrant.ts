@@ -13,16 +13,20 @@ export type AgentRunGrantMachinePermissionPolicy = {
   allowFilesystemRead: boolean;
   allowFilesystemWrite: boolean;
   allowShell: boolean;
+  readableRoots: string[];
   writableRoots: string[];
 };
 
 export type AgentRunGrantWorkspaceScope = {
   mode?: AgentRuntimeWorkspaceMode;
   /**
-   * "runtime-workspace" means the concrete writable root is chosen by the
-   * execution provider (for example the connector cwd/worktree) and must not be
-   * widened beyond that provider-owned root.
+   * "runtime-workspace" means the concrete roots are chosen by the execution
+   * provider (for example connector cwd/worktree or a hosted lease).
+   * "legacy-unscoped" is explicit technical debt: read authority exists but the
+   * issuer could not express a bounded root. Sandboxed backends may reject it.
    */
+  readScope: "none" | "runtime-workspace" | "configured-roots" | "legacy-unscoped";
+  readableRoots: string[];
   writeScope: "none" | "runtime-workspace" | "configured-roots";
   writableRoots: string[];
   cwd?: string;
@@ -80,9 +84,9 @@ function normalizePermissionPolicy(value: unknown): AgentRunGrantMachinePermissi
     allowFilesystemRead: value.allowFilesystemRead,
     allowFilesystemWrite: mode === "full_access" && value.allowFilesystemWrite,
     allowShell: mode === "full_access" && value.allowShell,
+    readableRoots: value.allowFilesystemRead ? unique(asNonEmptyStringArray(value.readableRoots)) : [],
     writableRoots: mode === "full_access" && value.allowFilesystemWrite
-      ? unique(asNonEmptyStringArray(value.writableRoots))
-      : [],
+      ? unique(asNonEmptyStringArray(value.writableRoots)) : [],
   };
 }
 
@@ -142,13 +146,35 @@ export function normalizeAgentRunGrant(value: unknown): AgentRunGrant | undefine
     workspace.mode === "current" || workspace.mode === "lease" || workspace.mode === "none"
       ? workspace.mode
       : undefined;
+  const readableRoots = unique(asNonEmptyStringArray(workspace.readableRoots));
   const writableRoots = unique(asNonEmptyStringArray(workspace.writableRoots));
+  const explicitReadScope =
+    workspace.readScope === "runtime-workspace"
+      ? "runtime-workspace"
+      : workspace.readScope === "configured-roots" && readableRoots.length > 0
+        ? "configured-roots"
+        : workspace.readScope === "legacy-unscoped"
+          ? "legacy-unscoped"
+          : workspace.readScope === "none"
+            ? "none"
+            : undefined;
+  const readScope =
+    explicitReadScope ??
+    (permissionPolicy?.allowFilesystemRead
+      ? readableRoots.length > 0
+        ? "configured-roots"
+        : "legacy-unscoped"
+      : "none");
   const writeScope =
     workspace.writeScope === "runtime-workspace"
       ? "runtime-workspace"
       : workspace.writeScope === "configured-roots" && writableRoots.length > 0
         ? "configured-roots"
         : "none";
+  const effectiveReadableRoots =
+    readScope === "configured-roots" ? readableRoots : [];
+  const effectiveWritableRoots =
+    writeScope === "configured-roots" ? writableRoots : [];
   const cwd = asOptionalTrimmedString(workspace.cwd);
   const callerUserId = asOptionalTrimmedString(value.callerUserId);
 
@@ -176,8 +202,10 @@ export function normalizeAgentRunGrant(value: unknown): AgentRunGrant | undefine
     ...(rawPolicy ? { runtimeToolPolicy: rawPolicy } : {}),
     workspace: {
       ...(mode ? { mode } : {}),
+      readScope,
+      readableRoots: effectiveReadableRoots,
       writeScope,
-      writableRoots: writeScope === "configured-roots" ? writableRoots : [],
+      writableRoots: effectiveWritableRoots,
       ...(cwd ? { cwd } : {}),
     },
     ...(machine ? { machine } : {}),

@@ -243,6 +243,8 @@ export type AgentRuntimeToolPolicy = {
   runtimeTools?: string[];
   workspace?: {
     mode?: AgentRuntimeWorkspaceMode;
+    /** Explicit roots visible to this runtime. Empty means no configured read roots. */
+    readableRoots?: string[];
     writableRoots?: string[];
     cwd?: string;
   };
