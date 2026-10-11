@@ -899,6 +899,8 @@ export interface AgentTurnContext {
    * 计数只增不减（仍然有上限，只是更保守）。
    */
   noteUserTurn?: () => void;
+  /** 用户 turn 已准确建档；仅宿主可附加 TUI 展示元数据。 */
+  onUserTurnFinalized?: (turn: import("./tuiHistory").Turn, imageUrls: readonly string[]) => void;
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
@@ -1046,6 +1048,10 @@ export async function runOneAgentTurn(
       : transcriptText,
   );
   finalizeCurrentTurn(ctx.history);
+  const finalizedUserTurn = ctx.history.turns[ctx.history.turns.length - 1];
+  if (!isInternalEvent && finalizedUserTurn?.role === "user" && finalizedUserTurn.content === transcriptText) {
+    ctx.onUserTurnFinalized?.(finalizedUserTurn, imageUrls);
+  }
   ctx.renderHistoryToOutput();
   if (ctx.fixedInput.active) ctx.fixedInput.repaint(ctx.buffer, ctx.cursorPos);
 

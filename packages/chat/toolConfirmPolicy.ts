@@ -66,7 +66,11 @@ export const isComposerDeleteConfirmToolName = (
  * 由工具卡片自己内联渲染确认按钮的工具（MediaJobToolCard「确认启动」）。
  * 通用确认栏/横幅必须让位，保证同一处只有一个确认入口。
  */
-export const CARD_MANAGED_CONFIRM_TOOL_NAMES = new Set<string>(["mediaJobTool"]);
+export const CARD_MANAGED_CONFIRM_TOOL_NAMES = new Set<string>([
+  "mediaJobTool",
+  "transcribe",
+  "translate",
+]);
 
 export const shouldShowToolMessageConfirmBanner = (
   toolName: unknown,

@@ -8,6 +8,8 @@ export const PROVIDER_KEY_PRESET_IDS = new Set([
   "zai-coding-plan",
   "bigmodel-coding-plan",
   "mistral-plan",
+  // open-design.ai 聚合网关（一个 Key 聚合多家模型）。
+  "opendesign",
   "openai-api",
   "together-api",
   "anthropic-api",

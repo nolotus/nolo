@@ -14,7 +14,7 @@ export interface MediaJobStagePart {
   artifacts?: { stage: MediaJobStage; key: string }[];
 }
 
-const notificationStages = ["started", "transcribe", "done"] satisfies readonly MediaJobNotificationStage[];
+const notificationStages = ["started", "transcribe", "translate", "done", "awaiting_confirmation"] satisfies readonly MediaJobNotificationStage[];
 const artifactStages = ["preprocess", "transcribe", "label", "translate", "summarize"] satisfies readonly MediaJobStage[];
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

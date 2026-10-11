@@ -82,6 +82,13 @@ export type MediaJobStatus =
   | "failed"
   | "cancelled";
 
+export const MEDIA_STEP_STARTABLE_STATUSES = new Set<MediaJobStatus>([
+  "quoted",
+  "done",
+  "failed",
+  "cancelled",
+]);
+
 export type MediaJobStage =
   | "preprocess"
   | "transcribe"
@@ -132,8 +139,14 @@ export interface MediaJobCharge {
 }
 
 /** 通知阶段；transcribe 仅预留，当前只投递 started / done。 */
-export type MediaJobNotificationStage = "started" | "transcribe" | "done";
+export type MediaJobNotificationStage = "started" | "transcribe" | "translate" | "done" | "awaiting_confirmation";
 export type MediaJobNotificationKey = `${number}:${MediaJobNotificationStage}`;
+
+/** 原子步骤（preprocess 是 transcribe 的内部子步骤；label/summarize 不在原子步骤内）。 */
+export type MediaJobStepName = "transcribe" | "translate";
+export type MediaJobExecution =
+  | { mode: "pipeline" }
+  | { mode: "step"; step: MediaJobStepName; revision: number };
 
 /** start 时固化；后续重新报价/扩展范围不得改写此快照。 */
 export interface MediaJobConfirmation {
@@ -155,6 +168,11 @@ export interface MediaJob {
   id: string;
   userId: string;
   dialogId?: string;
+  /**
+   * 发起本任务的 agent key，由服务端可信工具执行上下文写入（模型/HTTP 入参无法指定）。
+   * 会随 job 原样返回给属主浏览器；它只是属主自己的 agent key（或公开平台 key），不敏感。
+   */
+  agentKey?: string;
   fileId: string;
   fileName: string;
   mimeType: string;
@@ -177,6 +195,11 @@ export interface MediaJob {
   executionRevision?: number;
   /** 按 revision:stage 保留通知义务与投递凭据，不跨 revision 去重。 */
   notifications?: Partial<Record<MediaJobNotificationKey, MediaJobNotification>>;
+  /**
+   * 执行模式。单步（agent 逐步调用）记录当前步骤与所属 revision；缺省或 revision 不匹配
+   * （start/extend/确认超额会推进 revision）一律视为旧的全量流水线。崩溃恢复据此派发。
+   */
+  execution?: MediaJobExecution;
   trimSuggestions: TrimSuggestion[];
   /** 报价上限 × 1.1；超过则进入 awaiting_confirmation */
   budgetCeiling: number;

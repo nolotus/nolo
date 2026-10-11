@@ -1555,6 +1555,59 @@ const STRINGS = {
     en: "controlAgentRun(wait) was aborted.",
     zh: "controlAgentRun(wait) 已被中止。",
   },
+  // ── Non-TUI CLI output: agent-run OAuth channel ownership + stream failures ──
+  // 用户在 TUI 选了别人的 sshare agent（跑在 agent owner 的 OAuth 订阅上），
+  // auto 模式自动转服务端执行——这不是报错，文案必须把「已自动交服务端」和
+  // 「想本机跑就加 --local（用本机自己的订阅）」说清。
+  "agentRun.oauthChannelOwnerSkip": {
+    en:
+      "[nolo] Info (not an error): {0} runs on its owner's OAuth subscription " +
+      "(owner {1}, this machine runs as {2}), so this run was sent to the server " +
+      "automatically. Add --local to run on this machine, which uses this " +
+      "machine's own subscription.",
+    zh:
+      "[nolo] 提示（不是报错）：{0} 运行在它主人的 OAuth 订阅上" +
+      "（主人 {1}，本机 {2}），本次已自动交给服务端执行。" +
+      "想在本机运行请加 --local，这会改用本机自己的订阅。",
+  },
+  // antigravity 502 MALFORMED_FUNCTION_CALL：裸 message 是整段 provider JSON
+  // dump，对用户零信息量。映射成单行可操作文案；原始 JSON 只在既有
+  // NOLO_DEBUG / NOLO_CLI_DEBUG_DETAIL 开关下附加。
+  "agentRunStream.malformedToolCallRejected": {
+    en:
+      "[nolo] The provider rejected the model's generated tool call, so this " +
+      "attempt will not retry automatically. It is usually intermittent: read " +
+      "dialog {0} to check progress, then resend.",
+    zh:
+      "[nolo] 模型生成的工具调用被上游拒绝，本次不会自动重试。" +
+      "这种情况通常是偶发的：可先读对话 {0} 看进度，然后直接重发。",
+  },
+  "agentRunStream.malformedToolCallRejectedNoDialog": {
+    en:
+      "[nolo] The provider rejected the model's generated tool call, so this " +
+      "attempt will not retry automatically. It is usually intermittent: just " +
+      "resend your message.",
+    zh:
+      "[nolo] 模型生成的工具调用被上游拒绝，本次不会自动重试。" +
+      "这种情况通常是偶发的：直接重发即可。",
+  },
+  "agentRunStream.interruptedAfterDialog": {
+    en:
+      "\n[nolo] Agent stream transport interrupted after dialog {0} was created: {1}\n",
+    zh: "\n[nolo] 对话 {0} 创建后，agent 流式输出中断：{1}\n",
+  },
+  "agentRunStream.mayStillFinishOnServer": {
+    en: "[nolo] The agent run may still finish on the server; read the dialog before retrying.\n",
+    zh: "[nolo] 这次 agent 运行可能仍在服务端继续，重试前请先读一下该对话。\n",
+  },
+  "agentRunStream.failed": {
+    en: "\n[nolo] Agent stream failed: {0}\n",
+    zh: "\n[nolo] Agent 流式运行失败：{0}\n",
+  },
+  "agentRunStream.rawErrorDetail": {
+    en: "[nolo] Raw error detail (NOLO_DEBUG=1): {0}\n",
+    zh: "[nolo] 原始错误详情（NOLO_DEBUG=1）：{0}\n",
+  },
 } as const;
 
 export type CliStringKey = keyof typeof STRINGS;

@@ -2,13 +2,14 @@ import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ReactReduxContext } from "react-redux";
 import { useNavigate } from "app/routing";
 import { downloadExport } from "app/pages/mediaLectureApi";
-import type {
-  ExportFormat,
-  MediaJob,
-  MediaJobDepth,
-  MediaJobStage,
-  MediaQuote,
-  MediaScope,
+import {
+  type ExportFormat,
+  type MediaJob,
+  type MediaJobDepth,
+  type MediaJobStage,
+  type MediaQuote,
+  type MediaScope,
+  MEDIA_STEP_STARTABLE_STATUSES,
 } from "ai/lecture/types";
 import {
   executeToolRun,
@@ -19,8 +20,13 @@ import {
   getMediaJob,
   mediaJobAction,
   startMediaJob,
+  authorizeMediaJob,
+  authorizeMediaStep,
   updateMediaQuote,
+  roundUpToFriendlyCredits,
 } from "chat/web/mediaJobs";
+import { useCurrentDialogKey } from "chat/dialog/dialogRuntimeStore";
+import { parseDialogKey } from "database/dialogKey";
 import LoadingSpinner from "render/web/ui/LoadingSpinner";
 import { isMediaJobPendingConfirmation } from "../toolPresentation";
 import type { ToolProps } from "./ToolMessageTypes";
@@ -444,6 +450,18 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       : undefined);
   const pendingToolRunId: string | undefined =
     toolRunIdProp ?? (typeof pendingStart?.toolRunId === "string" ? pendingStart.toolRunId : undefined);
+  const pendingStep =
+    asRecord(data.pendingStep) ??
+    asRecord(innerData.pendingStep) ??
+    (data.status === "requires_confirmation" && (data.step === "transcribe" || data.step === "translate")
+      ? {
+          step: data.step as "transcribe" | "translate",
+          targetLang: typeof data.targetLang === "string" ? data.targetLang : undefined,
+          upperCredits: typeof data.upperCredits === "number" ? data.upperCredits : undefined,
+          jobId: typeof data.jobId === "string" ? data.jobId : undefined,
+          reason: typeof data.reason === "string" ? data.reason : undefined,
+        }
+      : null);
   const pendingRun = useToolRunById(pendingToolRunId ?? "");
   // 待确认卡能否就地确认：run 仍在 store 且处于可确认态（confirm + pending/failed）。
   // run 不在 store（页面刷新后）时确认已失效 —— 绝不回退直连 startMediaJob 计费，
@@ -458,6 +476,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     | null
     | undefined;
   const storeDispatch = reduxContext?.store?.dispatch;
+  const currentDialogKey = useCurrentDialogKey();
+  const dialogId = currentDialogKey ? parseDialogKey(currentDialogKey)?.dialogId : undefined;
 
   const jobId: string | undefined =
     data.jobId || data.job?.id || innerData.job?.id || innerData.jobId;
@@ -674,12 +694,15 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
         fromSec: 0,
         toSec: job?.durationSec || 0,
       };
+      const authorization = await authorizeMediaJob(targetId, "start", { scope, depth: tier.depth, sourceLang: job?.sourceLang, targetLang: requiresLang ? effectiveTargetLang : job?.targetLang, dialogId });
       const res = await startMediaJob(
         targetId,
         scope,
         tier.depth,
         job?.sourceLang,
         requiresLang ? effectiveTargetLang : job?.targetLang,
+        dialogId,
+        authorization.confirmationToken,
       );
       startedAtRef.current = Date.now();
       setJob(res.job);
@@ -700,7 +723,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     setActionBusy(true);
     setActionError(null);
     try {
-      const res = await mediaJobAction(targetId, "confirm-overrun", { accept });
+      const authorization = accept ? await authorizeMediaJob(targetId, "confirm-overrun", { accept, dialogId }) : undefined;
+      const res = await mediaJobAction(targetId, "confirm-overrun", { accept, dialogId, confirmationToken: authorization?.confirmationToken });
       if (res?.job) {
         setJob(res.job);
       }
@@ -742,10 +766,12 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     try {
       const from = job.scope?.toSec ?? 0;
       const to = job.durationSec;
-      const res = await mediaJobAction(targetId, "extend", {
+      const payload = {
         scope: { fromSec: from, toSec: to },
         depth: job.depth,
-      });
+      };
+      const authorization = await authorizeMediaJob(targetId, "extend", payload);
+      const res = await mediaJobAction(targetId, "extend", { ...payload, confirmationToken: authorization.confirmationToken });
       if (res?.job) {
         setJob(res.job);
       }
@@ -765,10 +791,12 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     setActionBusy(true);
     setActionError(null);
     try {
-      const res = await mediaJobAction(targetId, "extend", {
+      const payload = {
         scope: job.scope,
         depth: job.depth,
-      });
+      };
+      const authorization = await authorizeMediaJob(targetId, "extend", payload);
+      const res = await mediaJobAction(targetId, "extend", { ...payload, confirmationToken: authorization.confirmationToken });
       if (res?.job) {
         setJob(res.job);
       }
@@ -832,7 +860,8 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       ) {
         // (a) run 仍在待确认态：与 MessageToolConfirmBar 同一路径，推进同一个 confirm run
         // （其 input 里的 __confirmedMediaJobStart 由 toolThunks 确认分支注入，绝不来自模型）。
-        const result = await storeDispatch(executeToolRun({ id: run.id })).unwrap();
+        const authorization = await authorizeMediaJob(pendingJobId!, "start", { ...run.input, scope: pendingScope, depth: pendingDepth, targetLang: pendingTargetLang, dialogId });
+        const result = await storeDispatch(executeToolRun({ id: run.id, inputOverride: { ...run.input, dialogId, confirmationToken: authorization.confirmationToken } })).unwrap();
         const nextJob = result?.rawData?.job;
         if (nextJob) setJob(nextJob);
       } else if (run) {
@@ -853,6 +882,56 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
       setHasStarted(true);
     } catch (err: any) {
       setStartError(userFacingError(err?.message) || "启动失败，请稍后重试");
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  };
+
+  const handleConfirmPendingStep = async (autoApproveCredits?: number) => {
+    if (readOnly || startingRef.current || !pendingStep?.step) return;
+    const stepName = pendingStep.step as "transcribe" | "translate";
+    const targetId = jobId || pendingJobId || pendingStep.jobId;
+    if (!targetId) {
+      setStartError("缺少任务 ID");
+      return;
+    }
+    startingRef.current = true;
+    setStarting(true);
+    setStartError(null);
+    try {
+      const authorization = await authorizeMediaStep(
+        targetId,
+        {
+          step: stepName,
+          targetLang: pendingStep.targetLang,
+        },
+        autoApproveCredits,
+      );
+      const run = pendingToolRunId ? getToolRunById(pendingToolRunId) : undefined;
+      if (
+        run &&
+        storeDispatch &&
+        run.interaction === "confirm" &&
+        (run.status === "pending" || run.status === "failed")
+      ) {
+        await storeDispatch(
+          executeToolRun({
+            id: run.id,
+            inputOverride: { ...run.input, confirmationToken: authorization.confirmationToken },
+          }),
+        ).unwrap();
+      } else {
+        const res = await mediaJobAction(targetId, "step", {
+          step: stepName,
+          targetLang: pendingStep.targetLang,
+          confirmationToken: authorization.confirmationToken,
+        });
+        if (res?.job) setJob(res.job);
+      }
+      setHasStarted(true);
+    } catch (err: any) {
+      setStartError(userFacingError(err?.message) || "确认步骤失败，请稍后重试");
     } finally {
       startingRef.current = false;
       setStarting(false);
@@ -908,6 +987,112 @@ export const MediaJobToolCard: React.FC<MediaJobToolCardProps> = ({
     const firstButton = target.querySelector("button") as HTMLButtonElement | null;
     firstButton?.focus?.();
   };
+
+  if (!isPendingStart && pendingStep && !hasStarted && (!job || MEDIA_STEP_STARTABLE_STATUSES.has(job.status))) {
+    const stepLabel = pendingStep.step === "transcribe" ? "转写" : "翻译";
+    const hasValidAmount = typeof pendingStep.upperCredits === "number" && Number.isFinite(pendingStep.upperCredits) && pendingStep.upperCredits >= 0;
+    const creditsLabel = hasValidAmount ? `${pendingStep.upperCredits} 积分` : "—";
+    // 金额为 0（或非法）时不给出免问阈值：roundUp(0)=1 会渲染成「0 积分」配「≤1 不用问」的错位。
+    const autoApproveN =
+      hasValidAmount && pendingStep.upperCredits > 0
+        ? roundUpToFriendlyCredits(pendingStep.upperCredits)
+        : null;
+    const confirmDisabled = starting || !hasValidAmount;
+    return (
+      <div
+        data-testid="media-job-pending-step"
+        data-pending-confirm="true"
+        style={{
+          marginTop: 8,
+          marginBottom: 8,
+          border: "1px solid var(--borderWarning, rgba(234, 179, 8, 0.35))",
+          borderRadius: "var(--radius-md, 8px)",
+          backgroundColor: "var(--surfaceWarning, rgba(234, 179, 8, 0.08))",
+          padding: "12px 16px",
+          fontSize: "var(--fontSize-sm, 13px)",
+          color: "var(--text, #111827)",
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>
+          待确认执行：{stepLabel}步骤
+          {pendingStep.targetLang ? `（目标语言：${pendingStep.targetLang}）` : ""}
+        </div>
+        <div style={{ marginTop: 4, fontSize: "12px", color: "var(--textMuted, #6b7280)" }}>
+          {pendingStep.reason === "budget_overrun"
+            ? `预算超额，预计需追加 ${creditsLabel}`
+            : `需授权后执行，预计消耗 ${creditsLabel}`}
+        </div>
+        {!readOnly && (
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              data-testid="media-job-confirm-step"
+              disabled={confirmDisabled}
+              onClick={() => void handleConfirmPendingStep()}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "6px 16px",
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "#ffffff",
+                backgroundColor: "var(--primary, #2563eb)",
+                border: "none",
+                borderRadius: "var(--radius-md, 6px)",
+                cursor: confirmDisabled ? "not-allowed" : "pointer",
+                opacity: confirmDisabled && !starting ? 0.6 : 1,
+              }}
+            >
+              {starting ? "执行中…" : `确认执行${stepLabel}`}
+            </button>
+            <button
+              type="button"
+              data-testid="media-job-auto-approve-step"
+              disabled={confirmDisabled || autoApproveN === null}
+              onClick={() => {
+                if (autoApproveN !== null) {
+                  void handleConfirmPendingStep(autoApproveN);
+                }
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "6px 14px",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "var(--text, #111827)",
+                backgroundColor: "var(--surface, #ffffff)",
+                border: "1px solid var(--border, #d1d5db)",
+                borderRadius: "var(--radius-md, 6px)",
+                cursor: confirmDisabled || autoApproveN === null ? "not-allowed" : "pointer",
+                opacity: confirmDisabled || autoApproveN === null ? 0.6 : 1,
+              }}
+            >
+              {starting
+                ? "执行中…"
+                : autoApproveN !== null
+                  ? `以后 ≤${autoApproveN} 不用问`
+                  : hasValidAmount
+                    ? "额度为 0，不可免问"
+                    : "额度未知，不可免问"}
+            </button>
+          </div>
+        )}
+        {!readOnly && (
+          <div style={{ marginTop: 8, fontSize: "11px", color: "var(--textMuted, #6b7280)" }}>
+            免问额度对以后所有媒体任务生效，可在设置页「媒体额度」中关闭或调整
+          </div>
+        )}
+        {startError && (
+          <div role="alert" style={{ marginTop: 8, fontSize: "12px", color: "var(--danger, #ef4444)" }}>
+            {startError}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const showPendingStart =
     isPendingStart && !hasStarted && (!job || job.status === "quoted");

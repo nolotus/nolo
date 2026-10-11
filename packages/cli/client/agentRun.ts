@@ -343,11 +343,20 @@ function wrapLoadAgentConfigWithModelOverride(
 }
 
 /**
- * 「走所有者通道」提示的去重：同一输出流只打印一次。TUI 的 output 流跨轮
- * 复用，而该 skip 是稳态路由而非异常——每轮重复打印成噪音（2026-09-05
- * 用户反馈）。WeakSet 持流引用不阻碍 GC；非对象输出流退回每轮打印。
+ * 「走所有者通道」提示的去重：**一个进程内同一个 agentKey 只打印一次**。
+ *
+ * 该 skip 是稳态路由而非异常，重复打印纯属噪音（2026-09-05 用户反馈）。
+ * 早先按 output 对象身份去重（WeakSet），但 TUI 每轮 run 都新建 output 对象，
+ * 去重永远命不中 → 用户每条消息都看一遍提示（2026-10-07 反馈）。去重键改成
+ * agentKey 后与输出流的生命周期无关；CLI 单发 run 每进程只跑一次，行为不变。
+ * 提示是纯 UI 通知，去重失败也不影响任何决策（调用处仍 return true）。
  */
-const oauthChannelSkipReportedOutputs = new WeakSet<object>();
+const oauthChannelSkipReportedAgentKeys = new Set<string>();
+
+/** 测试专用：清空「走所有者通道」提示的去重状态（跨用例会互相影响）。 */
+export function resetOAuthChannelSkipDedupForTests(): void {
+  oauthChannelSkipReportedAgentKeys.clear();
+}
 
 /**
  * 非本人所有的 OAuth 订阅 agent 不认领本地 runtime。
@@ -381,10 +390,16 @@ function resolveOAuthChannelOwnerSkip(
   if (!ownerUserId) return null;
   const localUserId = resolveLocalUserId(options.env);
   if (ownerUserId === localUserId) return null;
+  // 这不是报错：用户在 TUI 选了别人的 sshare agent（跑在 owner 的 OAuth 订阅
+  // 上），本机用户 ID 与 owner 不同，auto 模式自动转服务端执行。文案要说清
+  // 「不是报错 / 已自动交服务端 / 想本机跑加 --local（用本机自己的订阅）」。
   return (
-    `[nolo] auto runtime: skipping local runtime because ${options.agentKey} runs on its owner's ` +
-    `OAuth subscription channel (owner ${ownerUserId}, this machine runs as ${localUserId}). ` +
-    "Use --local explicitly to force this machine's own subscription.\n"
+    t(
+      "agentRun.oauthChannelOwnerSkip",
+      options.agentKey,
+      ownerUserId,
+      localUserId,
+    ) + "\n"
   );
 }
 
@@ -407,13 +422,16 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   // cwd 运行仍豁免本函数其余全部 gate（显式本地语义不变）。
   const oauthChannelOwnerSkip = resolveOAuthChannelOwnerSkip(agentConfig, options);
   if (oauthChannelOwnerSkip) {
+    // 去重只影响「是否再打印一次提示」，不影响控制流：无论是否命中缓存，
+    // 下面都 return true（跳过本地 runtime 的决策与该提示无关）。
+    // output 缺失/非对象时照旧直接 write（退回每轮打印，不静默吞掉）。
     if (
       !options.output ||
       typeof options.output !== "object" ||
-      !oauthChannelSkipReportedOutputs.has(options.output)
+      !oauthChannelSkipReportedAgentKeys.has(options.agentKey)
     ) {
       if (options.output && typeof options.output === "object") {
-        oauthChannelSkipReportedOutputs.add(options.output);
+        oauthChannelSkipReportedAgentKeys.add(options.agentKey);
       }
       options.output.write(oauthChannelOwnerSkip);
     }

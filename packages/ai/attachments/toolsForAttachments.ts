@@ -1,13 +1,13 @@
 // packages/ai/attachments/toolsForAttachments.ts
 //
-// 附件 → 工具面的唯一映射（设计 §6「工具面与压缩」：audio/video → mediaJobTool；其余暂无）。
-// 只负责「按 kind 推导工具名」：文件存在**不授予执行或计费权限**，付费仍走 mediaJobTool
-// 的报价确认门。新增 kind 的工具只需改下面这张表，不在调用点写 if/else。
+// 附件 → 工具面的唯一映射（设计 §6「工具面与压缩」：audio/video → 原子媒体工具；其余暂无）。
+// 只负责「按 kind 推导工具名」：文件存在**不授予执行或计费权限**，付费仍走原子媒体工具
+// 的授权确认门。新增 kind 的工具只需改下面这张表，不在调用点写 if/else。
 //
 // 读取纪律：kind 只从 `normalizeAttachmentPart` 的 valid 结果现推（坏 part / 未知 v 一律
 // 不推 kind，坏数据不得被断言成完整附件）。旧格式（`media_job` part / 已上线媒体文本）只做
-// **能力提示**：让模型知道「有音视频任务可用」，从而看得见 mediaJobTool；它不是授权、也不
-// 授予执行——真正的权限与计费判定留在 mediaJobTool 内部，模型拿到工具名只能发起报价。
+// **能力提示**：让模型知道「有音视频任务可用」，从而看得见原子媒体工具；它不是授权、也不
+// 授予执行——真正的权限与计费判定留在各原子工具与服务端内部。
 // **任何分支都不输出本地路径**：本地定位只进端内适配器，工具表里只有 kind → 工具名。
 
 import {
@@ -79,8 +79,8 @@ const hasLegacyMediaId = (fields: readonly LegacyMediaTextField[]): boolean =>
  *    key，所以含空格的文件名能被完整读出）；
  * 4. 缺 id 时回落到旧行为（严格整段 token 词表）—— 与升级前逐字一致，不因正文提过前缀就命中。
  *
- * 命中只是**能力提示**（让模型看得见 mediaJobTool），不是授权、也不授予执行：权限与计费
- * 判定仍在 mediaJobTool 内部。id 存在时「空格文件名 + 尾随散文」在文本层面不可区分，一律
+ * 命中只是**能力提示**（让模型看得见原子媒体工具），不是授权、也不授予执行：权限与计费
+ * 判定仍在各工具与服务端内部。id 存在时「空格文件名 + 尾随散文」在文本层面不可区分，一律
  * 按文件名读，不因此多给任何权限。
  */
 export const isLegacyMediaText = (text: string): boolean => {
@@ -105,10 +105,17 @@ export const isLegacyMediaJobText = (part: unknown): boolean => {
   return isLegacyMediaText(record.text.trim());
 };
 
+const MEDIA_ATOMIC_TOOLS = [
+  "transcribe",
+  "translate",
+  "exportDocument",
+  "readArtifact",
+] as const;
+
 /** 表驱动：kind → 该 kind 使用的工具名。 */
 const TOOLS_BY_KIND: Record<AttachmentKind, readonly string[]> = {
-  audio: ["mediaJobTool"],
-  video: ["mediaJobTool"],
+  audio: MEDIA_ATOMIC_TOOLS,
+  video: MEDIA_ATOMIC_TOOLS,
   image: [],
   document: [],
   text: [],

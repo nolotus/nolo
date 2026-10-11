@@ -14,6 +14,24 @@ import {
 import { Spinner } from "./agentRunSpinner";
 import { createCliTurnOutput } from "./agentRunOutput";
 import type { RunAgentTurnOptions, RunAgentTurnResult } from "./agentRunTypes";
+import { t } from "../tui/i18n";
+
+/**
+ * antigravity 上游拒绝模型生成的工具调用：finishReason 走
+ * MALFORMED_FUNCTION_CALL，经 provider 变成 `LLM API error (502): {...}` 抛到
+ * 这里（antigravityCloudCodeProvider.ts:295）。它不可重试也不该让用户去改凭证，
+ * 但裸 message 是整段 provider JSON dump，所以按语义映射成可操作文案。
+ */
+export function isMalformedFunctionCallFailure(message: string): boolean {
+  return message.includes("MALFORMED_FUNCTION_CALL");
+}
+
+/** 原始 JSON 细节只在既有 debug 开关下附加，与 agentRun.ts 的开关保持一致。 */
+function shouldAppendStreamRawErrorDetail(
+  env: RunAgentTurnOptions["env"],
+): boolean {
+  return env?.NOLO_DEBUG === "1" || env?.NOLO_CLI_DEBUG_DETAIL === "1";
+}
 
 /**
  * 读取 agent run 的 SSE 流并渲染到终端。Esc-to-stop 兜底：
@@ -170,13 +188,23 @@ export async function readStreamingAgentRun(
       };
     }
     const message = toErrorMessage(error);
+    // antigravity 502 MALFORMED_FUNCTION_CALL 的裸 message 是整段 provider
+    // JSON dump（`LLM API error (502): {"error":{...}}`），对用户零信息量。
+    // 先识别这类已知 provider failure，换成单行可操作文案；原始 JSON 只在既有
+    // NOLO_DEBUG / NOLO_CLI_DEBUG_DETAIL 开关下附加（与 agentRun.ts 同款开关）。
+    const malformedToolCall = isMalformedFunctionCallFailure(message);
+    const rawDetail = shouldAppendStreamRawErrorDetail(options.env)
+      ? t("agentRunStream.rawErrorDetail", message)
+      : null;
     if (dialogId) {
-      options.output.write(
-        `\n[nolo] Agent stream transport interrupted after dialog ${dialogId} was created: ${message}\n`,
-      );
-      options.output.write(
-        "[nolo] The agent run may still finish on the server; read the dialog before retrying.\n",
-      );
+      if (malformedToolCall) {
+        // 前导 \n 与其余 catch 文案一致：非 TTY 下不与上一段输出粘成一行。
+        options.output.write(`\n${t("agentRunStream.malformedToolCallRejected", dialogId)}\n`);
+        if (rawDetail) options.output.write(rawDetail);
+        return { exitCode: 0, dialogId, streamInterrupted: true };
+      }
+      options.output.write(t("agentRunStream.interruptedAfterDialog", dialogId, message));
+      options.output.write(t("agentRunStream.mayStillFinishOnServer"));
       return { exitCode: 0, dialogId, streamInterrupted: true };
     }
     if (isClientVersionTooOldFailure(message, error)) {
@@ -186,7 +214,13 @@ export async function readStreamingAgentRun(
       options.output.write(`\n${describeClientVersionTooOldFailure(message, error)}`);
       return { exitCode: 1 };
     }
-    options.output.write(`\n[nolo] Agent stream failed: ${message}\n`);
+    if (malformedToolCall) {
+      options.output.write(`\n${t("agentRunStream.malformedToolCallRejectedNoDialog")}\n`);
+      if (rawDetail) options.output.write(rawDetail);
+      return { exitCode: 1 };
+    }
+    // 未知错误：友好包裹 + 本地化，但保留原 message 便于排查。
+    options.output.write(t("agentRunStream.failed", message));
     return { exitCode: 1 };
   }
 

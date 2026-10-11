@@ -34,6 +34,12 @@ import {
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
 import { TUI_TREE_MARKER } from "../client/toolOutput";
 import { resolveHistoryViewportHeight } from "./tuiLayout";
+import {
+  layoutImageRows,
+  turnImagesSignature,
+  type TurnImage,
+  type TurnImageRowInfo,
+} from "./tuiImageLayout";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   applySelectionOverlay,
@@ -58,6 +64,8 @@ export type Turn = {
    * 渲染时省略 `› ` 前缀，只显示内容行。
    */
   command?: string;
+  /** 结构化图片元数据（不含字节）；占位行追加在该轮文字行之后。 */
+  images?: TurnImage[];
 };
 
 export type TurnLayoutRow = {
@@ -68,6 +76,8 @@ export type TurnLayoutRow = {
   sourceMapping?: number[];
   softWrapped?: boolean;
   softWrapJoiner?: string;
+  /** 仅图片占位行携带；文字行与分隔行没有该字段。 */
+  image?: TurnImageRowInfo;
 };
 
 export type TurnHistory = {
@@ -79,6 +89,14 @@ export type TurnHistory = {
   followBottom: boolean;
   hasMoreAbove?: boolean;
   hasMoreBelow?: boolean;
+  /** 每个 history 实例自有的图形开关；缺省为 false（文字附件提示）。 */
+  graphicsEnabled?: boolean;
+};
+
+/** 图片占位布局选项；缺省等价于无图片、图形关闭。 */
+export type TurnLayoutOptions = {
+  images?: readonly TurnImage[];
+  graphicsEnabled?: boolean;
 };
 
 export const MAX_TUI_HISTORY_TURNS = 500;
@@ -118,9 +136,29 @@ type TurnLineCacheEntry = {
    * previous theme's colors.
    */
   themeFingerprint: string;
+  /** 图形开关与图片元数据签名变化都会改变占位行数，必须参与失效判定。 */
+  graphicsEnabled: boolean;
+  imagesSignature: string;
   lines: string[];
   layoutRows: TurnLayoutRow[];
 };
+
+function isTurnLineCacheValid(
+  cached: TurnLineCacheEntry,
+  turn: Turn,
+  contentWidth: number,
+  colorEnabled: boolean,
+  themeFingerprint: string,
+  graphicsEnabled: boolean,
+): boolean {
+  return (
+    cached.width === contentWidth &&
+    cached.color === colorEnabled &&
+    cached.themeFingerprint === themeFingerprint &&
+    cached.graphicsEnabled === graphicsEnabled &&
+    cached.imagesSignature === turnImagesSignature(turn.images)
+  );
+}
 
 /** Finalized turns are immutable; cache entries GC when truncation drops them. */
 // Scenario D calibration (fresh child process per capacity; 500 turns, 90
@@ -192,7 +230,12 @@ function setCachedTurnLine(turn: Turn, entry: TurnLineCacheEntry): void {
  * background auto-follow poller invalidate the render cache: counts survive,
  * so only the visible window needs repainting instead of all 400 turns.
  */
-const turnLineCountCache = new WeakMap<Turn, Map<number, number>>();
+const turnLineCountCache = new WeakMap<Turn, Map<string, number>>();
+
+/** 行数缓存键：宽度 + 图形开关 + 图片签名；任一变化都不会复用旧计数。 */
+function lineCountCacheKey(contentWidth: number, graphicsEnabled: boolean, turn: Turn): string {
+  return `${contentWidth}|${graphicsEnabled ? 1 : 0}|${turnImagesSignature(turn.images)}`;
+}
 
 type HistoryFrameBuffer = {
   rows: number;
@@ -479,6 +522,24 @@ export function layoutTurnRows(
   contentWidth: number,
   colorEnabled: boolean,
   command?: string,
+  options?: TurnLayoutOptions,
+): TurnLayoutRow[] {
+  const textRows = layoutTextRows(role, content, contentWidth, colorEnabled, command);
+  const images = options?.images;
+  if (!images || images.length === 0) return textRows;
+  const bodyEnd = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").length;
+  return [
+    ...textRows,
+    ...layoutImageRows(images, contentWidth, options?.graphicsEnabled === true, bodyEnd),
+  ];
+}
+
+function layoutTextRows(
+  role: TurnRole,
+  content: string,
+  contentWidth: number,
+  colorEnabled: boolean,
+  command?: string,
 ): TurnLayoutRow[] {
   content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (role === "user") {
@@ -647,22 +708,26 @@ export function getTurnLayoutRows(
   contentWidth: number,
   colorEnabled: boolean,
   themeFingerprint: string,
+  graphicsEnabled = false,
 ): TurnLayoutRow[] {
   const cached = getCachedTurnLine(turn);
   if (
     cached &&
-    cached.width === contentWidth &&
-    cached.color === colorEnabled &&
-    cached.themeFingerprint === themeFingerprint
+    isTurnLineCacheValid(cached, turn, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
   ) {
     return cached.layoutRows;
   }
-  const layoutRows = layoutTurnRows(turn.role, turn.content, contentWidth, colorEnabled, turn.command);
+  const layoutRows = layoutTurnRows(turn.role, turn.content, contentWidth, colorEnabled, turn.command, {
+    images: turn.images,
+    graphicsEnabled,
+  });
   const lines = layoutRows.map((r) => r.rendered);
   setCachedTurnLine(turn, {
     width: contentWidth,
     color: colorEnabled,
     themeFingerprint,
+    graphicsEnabled,
+    imagesSignature: turnImagesSignature(turn.images),
     lines,
     layoutRows,
   });
@@ -1029,8 +1094,9 @@ export function countTurnLines(
   content: string,
   contentWidth: number,
   command?: string,
+  options?: TurnLayoutOptions,
 ): number {
-  return layoutTurnRows(role, content, contentWidth, false, command).length;
+  return layoutTurnRows(role, content, contentWidth, false, command, options).length;
 }
 
 export type TurnOffsetEntry = {
@@ -1079,6 +1145,7 @@ export function buildTurnOffsets(
 ): TurnOffsets {
   const entries: TurnOffsetEntry[] = [];
   let offset = 0;
+  const graphicsEnabled = history.graphicsEnabled === true;
   for (let i = 0; i < history.turns.length; i++) {
     const turn = history.turns[i]!;
     const separatorAbove = turnSeparatorRows(
@@ -1087,21 +1154,25 @@ export function buildTurnOffsets(
     );
     offset += separatorAbove;
     const cacheMap = turnLineCountCache.get(turn);
+    const key = lineCountCacheKey(contentWidth, graphicsEnabled, turn);
     let lineCount: number;
-    if (cacheMap && cacheMap.has(contentWidth)) {
-      lineCount = cacheMap.get(contentWidth)!;
+    if (cacheMap && cacheMap.has(key)) {
+      lineCount = cacheMap.get(key)!;
     } else {
-      lineCount = countTurnLines(turn.role, turn.content, contentWidth, turn.command);
+      lineCount = countTurnLines(turn.role, turn.content, contentWidth, turn.command, {
+        images: turn.images,
+        graphicsEnabled,
+      });
       if (!cacheMap) {
-        const nextMap = new Map<number, number>();
-        nextMap.set(contentWidth, lineCount);
+        const nextMap = new Map<string, number>();
+        nextMap.set(key, lineCount);
         turnLineCountCache.set(turn, nextMap);
       } else {
         if (cacheMap.size >= 8) {
           const oldestKey = cacheMap.keys().next().value;
           if (oldestKey !== undefined) cacheMap.delete(oldestKey);
         }
-        cacheMap.set(contentWidth, lineCount);
+        cacheMap.set(key, lineCount);
       }
     }
     entries.push({ startRow: offset, lineCount, separatorAbove });
@@ -1155,6 +1226,7 @@ function currentTurnSeparator(history: TurnHistory): number {
 export function buildHistoryLines(history: TurnHistory, contentWidth: number): string[] {
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
+  const graphicsEnabled = history.graphicsEnabled === true;
   const wrapped: string[] = [];
 
   for (let i = 0; i < history.turns.length; i++) {
@@ -1167,6 +1239,7 @@ export function buildHistoryLines(history: TurnHistory, contentWidth: number): s
       contentWidth,
       colorEnabled,
       themeFingerprint,
+      graphicsEnabled,
     );
     wrapped.push(...layoutRows.map((r) => r.rendered));
   }
@@ -1202,6 +1275,7 @@ export function buildHistoryLayoutRows(
 ): TurnLayoutRow[] {
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
+  const graphicsEnabled = history.graphicsEnabled === true;
   const rows: TurnLayoutRow[] = [];
   const separatorRow = (): TurnLayoutRow => ({
     rendered: "",
@@ -1220,6 +1294,7 @@ export function buildHistoryLayoutRows(
       contentWidth,
       colorEnabled,
       themeFingerprint,
+      graphicsEnabled,
     ));
   }
 
@@ -1249,15 +1324,76 @@ export function resetRenderCacheMissCount(): void {
   renderCacheMissCount = 0;
 }
 
+/** 本帧视口内完全可见的图片占位（首行坐标，0 基于视口）。 */
+export type HistoryVisibleImage = {
+  readonly occurrence: string;
+  readonly key: string;
+  /** 0 基，与 renderHistory 写入的视口行一致（终端行 = row + 1）。 */
+  readonly row: number;
+  /** 0 基视口列；内容区从第 0 列开始。 */
+  readonly column: number;
+  readonly columns: number;
+  readonly rows: number;
+};
+
+export type RenderHistoryOptions = {
+  /**
+   * 每帧文字写完后回调完全可见的图形占位（仅 graphicsEnabled 时非空）与本帧视口尺寸。
+   * 缺省时 renderHistory 行为与之前完全一致。
+   */
+  onVisibleImages?: (
+    images: HistoryVisibleImage[],
+    viewport: { readonly rows: number; readonly columns: number },
+  ) => void;
+};
+
+function collectVisibleImageRows(
+  layoutRows: readonly TurnLayoutRow[],
+  turnIndex: number,
+  turnStart: number,
+  winStart: number,
+  winEnd: number,
+  out: HistoryVisibleImage[],
+): void {
+  for (let k = 0; k < layoutRows.length; k++) {
+    const info = layoutRows[k]!.image;
+    if (!info || !info.graphics || info.index !== 0) continue;
+    const start = turnStart + k;
+    if (start < winStart || start + info.rows > winEnd) continue;
+    out.push({
+      // 轮次序号 + 图内序号：与宽度、滚动、视口高度无关，重绘与改宽度时保持稳定，
+      // 渲染器才能把同一处认成同一处（不重复传输、不乱删放置）。
+      occurrence: `${turnIndex}:${info.key}:${info.index}`,
+      key: info.key,
+      row: start - winStart,
+      column: 0,
+      columns: info.columns,
+      rows: info.rows,
+    });
+  }
+}
+
 export function renderHistory(
   output: NodeJS.WritableStream,
   history: TurnHistory,
   inputLines: number,
   selection?: TuiSelectionState,
   reservedRows = 0,
+  options?: RenderHistoryOptions,
 ): void {
   const tty = output as { isTTY?: boolean; rows?: number; columns?: number };
   if (!tty.isTTY) return;
+  // 欢迎 banner 与 transcript 共用屏幕顶部，但 banner 不走本双缓冲——它由
+  // readlineWorkspace 直接写出、按绝对行重绘（repaintBanner）。空 transcript
+  // 时若仍按「全空帧」绘制：① 会把 banner 从屏幕上擦掉（启动后的 git status
+  // 刷新、composer 长高、resize、Ctrl+L 都会触发）；② 更糟的是把帧缓冲预处理
+  // 成全空白，之后 banner 重绘（如 /update 提示行）落在缓冲认为是空白的行上，
+  // 首条真实 turn 的 diff 渲染跳过这些行 → 消息压在 banner 上方形成重合，
+  // 直到流式输出逐行覆盖才消失。空 transcript 时让出屏幕：banner 保持由
+  // repaintBanner 所有，首条 turn 到来时 prevFrame 为空 → 整屏重绘，banner
+  // 被干净替换。清空 transcript 的路径（/new、切对话）都会紧随一条 local
+  // turn，屏幕仍由那一次渲染清干净。
+  if (history.turns.length === 0 && history.currentRole === null) return;
   const rows = tty.rows ?? 24;
   const columns = tty.columns ?? 80;
   const visibleHeight = Math.max(
@@ -1267,6 +1403,7 @@ export function renderHistory(
   const contentWidth = Math.max(1, columns - 1);
   const colorEnabled = resolveCliColorEnabled();
   const themeFingerprint = tuiRenderThemeFingerprint(colorEnabled);
+  const graphicsEnabled = history.graphicsEnabled === true;
 
   const { entries, totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
 
@@ -1301,6 +1438,7 @@ export function renderHistory(
   const winStart = history.scrollTop;
   const winEnd = Math.min(totalLines, winStart + visibleHeight);
   let visibleLines: string[] = new Array(visibleHeight).fill("");
+  const visibleImages: HistoryVisibleImage[] = [];
 
   // Paint ONLY the turns overlapping the visible window.
   for (let i = 0; i < entries.length; i++) {
@@ -1320,9 +1458,7 @@ export function renderHistory(
     let layoutRows: TurnLayoutRow[];
     if (
       cached &&
-      cached.width === contentWidth &&
-      cached.color === colorEnabled &&
-      cached.themeFingerprint === themeFingerprint
+      isTurnLineCacheValid(cached, turn, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
     ) {
       layoutRows = cached.layoutRows;
     } else {
@@ -1332,6 +1468,7 @@ export function renderHistory(
         contentWidth,
         colorEnabled,
         themeFingerprint,
+        graphicsEnabled,
       );
     }
     const lines = layoutRows.map((r) => r.rendered);
@@ -1340,6 +1477,9 @@ export function renderHistory(
     const interEnd = Math.min(turnEnd, winEnd);
     for (let r = interStart; r < interEnd; r++) {
       visibleLines[r - winStart] = lines[r - turnStart] ?? "";
+    }
+    if (options?.onVisibleImages) {
+      collectVisibleImageRows(layoutRows, i, turnStart, winStart, winEnd, visibleImages);
     }
   }
   if (currentStart >= 0) {
@@ -1420,6 +1560,9 @@ export function renderHistory(
     frame += `\x1b[${mainBottom};1H`;
     output.write(frame);
   }
+
+  // 图片在文字帧之后放置；可选回调缺省时保持原行为。
+  options?.onVisibleImages?.(visibleImages, { rows: visibleHeight, columns: contentWidth });
 }
 
 export function createHistoryOutputStream(
@@ -1475,7 +1618,9 @@ export function computeScrollMetrics(
   if (history.currentRole !== null && history.currentContent) {
     totalLines +=
       currentTurnSeparator(history) +
-      countTurnLines(history.currentRole, history.currentContent, contentWidth);
+      countTurnLines(history.currentRole, history.currentContent, contentWidth, undefined, {
+        graphicsEnabled: history.graphicsEnabled === true,
+      });
   }
   const maxScrollTop = Math.max(0, totalLines - visibleHeight);
   return { visibleHeight, contentWidth, totalLines, maxScrollTop };

@@ -240,7 +240,10 @@ import {
   transcribeVideoSchema,
   transcribeVideoFunc,
 } from "./transcribeVideoTool";
-import { mediaJobSchema, mediaJobFunc } from "./mediaJobTool";
+import { transcribeSchema, transcribeFunc } from "./transcribeTool";
+import { translateSchema, translateFunc } from "./translateTool";
+import { exportDocumentSchema, exportDocumentFunc } from "./exportDocumentTool";
+import { readArtifactSchema, readArtifactFunc } from "./readArtifactTool";
 
 // ✅ Google Search Scraper (Apify)
 import {
@@ -1962,12 +1965,48 @@ const baseToolDefinitions: ToolDefinition[] = [
     behavior: "data",
   },
   {
-    id: "mediaJobTool",
-    schema: mediaJobSchema,
-    executor: mediaJobFunc,
+    id: "transcribe",
+    schema: transcribeSchema,
+    executor: transcribeFunc,
     description: {
-      name: "mediaJobTool",
-      description: "估价、启动和查询长音视频处理任务。",
+      name: "transcribe",
+      description: "长音频/视频分步转写。",
+      category: "媒体处理",
+    },
+    behavior: "action",
+    uiGroup: "general",
+  },
+  {
+    id: "translate",
+    schema: translateSchema,
+    executor: translateFunc,
+    description: {
+      name: "translate",
+      description: "媒体译文逐步翻译。",
+      category: "媒体处理",
+    },
+    behavior: "action",
+    uiGroup: "general",
+  },
+  {
+    id: "exportDocument",
+    schema: exportDocumentSchema,
+    executor: exportDocumentFunc,
+    description: {
+      name: "exportDocument",
+      description: "将媒体产物导出为可下载的文档文件（docx/md/txt/srt）。",
+      category: "媒体处理",
+    },
+    behavior: "action",
+    uiGroup: "general",
+  },
+  {
+    id: "readArtifact",
+    schema: readArtifactSchema,
+    executor: readArtifactFunc,
+    description: {
+      name: "readArtifact",
+      description: "分页读取媒体转写/译文产物片段。",
       category: "媒体处理",
     },
     behavior: "data",

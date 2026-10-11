@@ -2006,7 +2006,7 @@ export const streamAgentChatTurnHandler = async (
         const contextTools = turnToolContext.contextTools ?? [];
         // 附件推导的工具子集（当前输入 + 已加载历史附件的 kind → 工具）。pendingFiles 只覆盖
         // 「本轮待发」，消息落库后就被清空；附件工具必须从消息 content 现推，这样后续轮次
-        // （例如用户回「第二档」）照样看得见 mediaJobTool。
+        // （例如用户回「第二档」）照样看得见原子媒体工具。
         // inline-artifact agent 的短路在 mergeAgentToolsWithRuntime 内部（不是本调用点），
         // 所以这里加附件工具不会绕过该策略。
         const attachmentTools = turnToolContext.attachmentToolNames ?? [];

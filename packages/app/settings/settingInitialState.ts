@@ -69,6 +69,7 @@ export const initialState: SettingState = {
   preferredAnimationSet: 0,
   maxExecutionTime: 600_000,
   maxCost: 1,
+  autoApproveCredits: 0,
   themeName: DEFAULT_THEME_NAME,
   themeMode: _preloadedTheme.themeMode,
   isDark: _preloadedTheme.isDark,

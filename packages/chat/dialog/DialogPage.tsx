@@ -5,7 +5,10 @@ import { useLocation, useNavigate } from "app/routing";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { useFetchData } from "app/hooks";
 import { useHasMounted } from "app/hooks/useHasMounted";
-import { useIdentity } from "identity";
+import { useIdentity, useToken } from "identity";
+import { selectCurrentServer } from "app/settings/settingSlice";
+import { useActiveControllers, useRecoveredForegroundTurn } from "chat/dialog/dialogSlice";
+import { useDialogBackgroundWake } from "chat/web/useDialogBackgroundWake";
 import { useTranslation } from "react-i18next";
 import {
   markDialogRead,
@@ -196,6 +199,19 @@ const DialogPage = ({
   const messages = useAppSelector((state) =>
     dialogId ? selectAllMsgs(state, dialogId) : [],
   );
+  const wakeToken = useToken();
+  const wakeServer = useAppSelector(selectCurrentServer);
+  const wakeControllers = useActiveControllers(currentDialogConfig?.dbKey ?? null);
+  const wakeRecoveredTurn = useRecoveredForegroundTurn(currentDialogConfig?.dbKey ?? null);
+  const hasLocalForegroundOwner = Object.keys(wakeControllers).length > 0;
+  const backgroundFollowing = useDialogBackgroundWake({
+    dialogId: isLoggedIn ? dialogId : null,
+    server: wakeServer ? String(wakeServer) : null,
+    token: wakeToken ?? null,
+    foregroundActive:
+      hasStreamingMessage || hasLocalForegroundOwner || !!wakeRecoveredTurn,
+    reloadMessages: () => dispatch(initMsgs({ dialogId: dialogId! })).unwrap(),
+  });
   const latestAgentDraftState = useMemo(
     () => resolveLatestAgentDraftSidePanelState(messages),
     [messages],
@@ -960,6 +976,11 @@ const DialogPage = ({
               dialogPageStyles.rootWithSidePanel,
           )}
         >
+          {backgroundFollowing && (
+            <div role="status" aria-live="polite" {...stylex.props(dialogPageStyles.backgroundWakeHint)}>
+              {t("dialogBackgroundWake.following", { defaultValue: "AI 正在跟进…" })}
+            </div>
+          )}
           {renderContent()}
         </div>
         {shouldShowDraftPanel && latestAgentDraft && (

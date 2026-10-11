@@ -30,7 +30,7 @@ export type TurnToolContext = {
   /**
    * 附件推导出的工具名（当前输入 + 已加载历史附件的 kind → 工具），同样并入
    * `referencedToolNames`（server-owned 工具面按现有 referencedToolNames 保持一致）。
-   * 只是「能力提示」：不授予执行/计费，mediaJobTool 自己的报价确认门仍在。
+   * 只是「能力提示」：不授予执行/计费，原子媒体工具自己的授权确认门仍在。
    */
   attachmentToolNames?: string[];
   /** Canonical tool names derived from explicit mentions in userInput. */
@@ -211,7 +211,7 @@ export async function resolveTurnToolContext(
 
   // 附件能力提示（当前输入 + 已加载历史附件）：附件 kind 没有持久字段，只能从内存里的
   // 消息现推。刻意不读 pendingFiles —— 待发附件在消息落库后就是消息 content 的一部分，
-  // 后续轮次（例如用户选「第二档」）照样要看得见 mediaJobTool。
+  // 后续轮次（例如用户选「第二档」）照样要看得见原子媒体工具。
   let attachmentKinds: readonly string[] = attachmentKindsInContent(input.userInput);
   let attachmentKindsIncomplete = false;
 

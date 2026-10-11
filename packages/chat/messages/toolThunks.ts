@@ -21,7 +21,7 @@ import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
 import {
   CONFIRMATION_INPUT_KEYS,
-  stripModelConfirmationFlags,
+  stripModelToolArgs,
 } from "ai/tools/stripModelConfirmationFlags";
 
 const TOOL_ARGS_SENTINELS = [
@@ -116,7 +116,7 @@ const processToolData = createAsyncThunk(
       Object.prototype.hasOwnProperty.call(toolArgs, "_activity")
         ? (({ _activity: _ignored, ...rest }) => rest)(toolArgs)
         : toolArgs;
-    const executionToolArgs = stripModelConfirmationFlags(withoutActivity);
+    const executionToolArgs = stripModelToolArgs(canonicalName, withoutActivity);
 
     const inputSummary = JSON.stringify(executionToolArgs).slice(0, 400);
 

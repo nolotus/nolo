@@ -216,6 +216,10 @@ import { getDiagnostics } from "../diagnostics";
 // scheduleRender）与共享节流 flushPendingRender 已迁至 ./tuiRender。
 // 依赖方向单向：本文件 → tuiRender；后者禁止回指本文件。
 import { createTuiRender } from "./tuiRender";
+import { createTerminalGraphicsRuntime } from "./terminalGraphicsRuntime";
+import { createImageAttachmentCache } from "./tuiImageAttachments";
+import { createTuiImageRenderer } from "./tuiImageRenderer";
+import { randomInt } from "node:crypto";
 import { createScrollAnimator } from "./tuiScrollAnimation";
 import { resolveHistoryViewportHeight } from "./tuiLayout";
 // S5 迁移：runSubmittedLine 的 slash 命令 bus 分发（runSubmittedSlashLine /
@@ -770,6 +774,9 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     onRecordsPolled: (records) => runCompletionWatcher.observe(records),
   });
   const history = createTurnHistory();
+  const imageCache = createImageAttachmentCache();
+  let imageRenderer: ReturnType<typeof createTuiImageRenderer> | undefined;
+  const renderNamespace = randomInt(1, 0x10000);
   // 对话框把滚轮/翻页路由回转录区时的统一入口。平滑滚动推进器依赖渲染集群
   // （paintImmediate），要到 createTuiRender 之后才能创建，所以这里先用可变
   // 绑定：创建后替换为推进器版本；替换前的调用（理论上不会发生）回落瞬时滚动。
@@ -861,6 +868,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return cursorPos;
       },
       getReservedRows: () => dialogHost.getReservedRows(),
+      get imageRenderer() { return imageRenderer; },
     });
 
   // 平滑滚动推进器：滚轮报告只折算成目标位置，16ms/帧逼近（不再单帧瞬移）。
@@ -1216,6 +1224,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   let noteUserTurnHook: (() => void) | null = null;
 
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
+  let turnIdentity = 0;
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
     set state(v) { state = v; },
@@ -1234,6 +1243,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     get turnInjectionInbox() { return turnInjectionInbox; },
     set turnInjectionInbox(v) { turnInjectionInbox = v; },
     noteUserTurn: () => noteUserTurnHook?.(),
+    onUserTurnFinalized: (turn, imageUrls) => {
+      const preview = imageCache.preview(`turn-${turnIdentity++}`, imageUrls.map((dataUrl) => ({
+        dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(";")), filename: "image", sizeBytes: 0, sourcePath: "",
+      })));
+      turn.images = preview.images;
+      for (const fallback of preview.textFallbacks) turn.content += `\n[附件] ${fallback}`;
+    },
 
     get sessionEnded() { return sessionEnded; },
     get buffer() { return buffer; },
@@ -1328,6 +1344,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     let busy = false;
     let done = false;
     let resolveDone: (() => void) | null = null;
+    let graphicsRuntime: ReturnType<typeof createTerminalGraphicsRuntime> | undefined;
+    let onGraphicsData: ((chunk: Buffer | string) => void) | undefined;
     // NOTE: do NOT redeclare `buffer` here. The composer draft lives in the
     // outer scope (hoisted above) on purpose: runSubmittedLine's streaming
     // callback and the activity spinner timer repaint the composer from that
@@ -1409,6 +1427,15 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         return;
       }
       flushPendingRender();
+      // 欢迎页在位（transcript 为空，renderHistory 让出屏幕）时不能走
+      // paintFrame——那只会重 dock composer，banner 会留在旧宽度的排版里、
+      // 窄终端甚至 wrap 出残行。按新宽度重绘 banner（repaintBanner 实时读
+      // columns 决定 scene 去留），composer 单独重 dock。
+      if (history.turns.length === 0 && history.currentRole === null) {
+        repaintBanner();
+        fixedInput.repaint(buffer, cursorPos);
+        return;
+      }
       paintFrame(buffer);
     };
     const onResize = () => {
@@ -1452,7 +1479,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       resolveDone?.();
       clearCollapsedPasteStore(pasteStore);
       resizeTarget.off?.("resize", onResize);
-      input.off("data", onData);
+      if (onGraphicsData) input.off("data", onGraphicsData);
+      graphicsRuntime?.dispose();
+      imageRenderer?.dispose();
+      imageRenderer = undefined;
+      imageCache.clear();
       input.off("end", finish);
       input.off("close", finish);
       onData.destroy();
@@ -2505,9 +2536,26 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     const onData = createRawInputDecoder((token) => {
       void handleInputToken(token);
     });
+    graphicsRuntime = createTerminalGraphicsRuntime({
+      output,
+      env: effectiveEnv,
+      isTTY: isInteractiveInput(input) && Boolean((output as { isTTY?: boolean }).isTTY),
+      onForwardInput: (data) => onData(data),
+      onCapabilityChanged: (enabled) => {
+        if (sessionEnded || done) return;
+        history.graphicsEnabled = enabled;
+        if (enabled && !imageRenderer) imageRenderer = createTuiImageRenderer({ output, namespace: renderNamespace, graphicsEnabled: true, getPng: (key) => imageCache.getPng(key) });
+        scheduleRender();
+      },
+    });
     composerDecoderDrain = () => onData.destroy();
     try {
-      input.on("data", onData);
+      onGraphicsData = (chunk: Buffer | string) => {
+        const filtered = graphicsRuntime!.filterInput(chunk.toString());
+        if (filtered) onData(filtered);
+      };
+      input.on("data", onGraphicsData);
+      graphicsRuntime.start();
       // Input shutdown can race an unsettled dialog/gate. Route stream end
       // through the same idempotent teardown so terminal progress is cleared
       // even when the interaction promise never gets a chance to settle.

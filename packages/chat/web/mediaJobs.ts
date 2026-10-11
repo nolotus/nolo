@@ -61,10 +61,12 @@ export const startMediaJob = (
   depth: MediaJobDepth,
   sourceLang?: string,
   targetLang?: string,
+  dialogId?: string,
+  confirmationToken?: string,
 ) =>
   mediaJobRequest<{ job: MediaJob }>(`/${id}/start`, {
     method: "POST",
-    body: JSON.stringify({ scope, depth, sourceLang, targetLang }),
+    body: JSON.stringify({ scope, depth, sourceLang, targetLang, dialogId, confirmationToken }),
   });
 
 export const getMediaJob = (id: string) =>
@@ -75,3 +77,34 @@ export const mediaJobAction = (id: string, action: string, payload?: unknown) =>
     method: "POST",
     body: JSON.stringify(payload ?? {}),
   });
+
+/** Called only from confirmation-card event handlers, never from model tools. */
+export const authorizeMediaJob = (
+  id: string,
+  action: "start" | "extend" | "confirm-overrun" | "step",
+  payload: Record<string, unknown>,
+  autoApproveCredits?: number,
+) =>
+  mediaJobRequest<{ confirmationToken: string; upperCredits: number }>(`/${id}/authorize`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-Media-User-Confirmation": "1" },
+    body: JSON.stringify({ ...payload, action, ...(autoApproveCredits === undefined ? {} : { autoApproveCredits }) }),
+  });
+
+export const authorizeMediaStep = (
+  id: string,
+  payload: { step: "transcribe" | "translate"; targetLang?: string },
+  autoApproveCredits?: number,
+) =>
+  authorizeMediaJob(id, "step", payload, autoApproveCredits);
+
+export function roundUpToFriendlyCredits(credits: number): number {
+  if (!Number.isFinite(credits) || credits <= 0) return 1;
+  const friendlyTiers = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+  for (const tier of friendlyTiers) {
+    if (credits <= tier) return tier;
+  }
+  return Math.ceil(credits / 100) * 100;
+}
+

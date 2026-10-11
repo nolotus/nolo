@@ -391,8 +391,19 @@ export function isMediaJobPendingConfirmation(args: {
   rawData?: unknown;
   toolPayload?: unknown;
 }): boolean {
-  if (asTrimmedString(args.toolName) !== "mediaJobTool") return false;
+  const toolName = asTrimmedString(args.toolName);
   const data = asRecordOrEmpty(args.rawData);
+  if (toolName === "transcribe" || toolName === "translate") {
+    if (
+      data.status === "requires_confirmation" ||
+      data.status === "awaiting_confirmation" ||
+      data.reason === "unauthorized" ||
+      data.reason === "budget_overrun"
+    ) {
+      return true;
+    }
+  }
+  if (toolName !== "mediaJobTool") return false;
   if (isRecord(data.pendingStart)) return true;
   if (asRecordOrEmpty(args.toolPayload).status === "pending") return true;
   return (

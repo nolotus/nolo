@@ -5,7 +5,7 @@
 
 import { findToolExecutor } from "ai/tools";
 import { getToolResultErrorData } from "ai/tools/toolResultError";
-import { stripModelConfirmationFlags } from "ai/tools/stripModelConfirmationFlags";
+import { stripModelToolArgs } from "ai/tools/stripModelConfirmationFlags";
 
 interface ToolCall {
   id: string;
@@ -28,9 +28,9 @@ export async function executeToolCall(
   context?: { parentMessageId?: string; agentKey?: string }
 ): Promise<string> {
   const toolName: string = tc.function?.name ?? "";
-  const toolArgs = (() => {
+  const parsedToolArgs = (() => {
     try {
-      return stripModelConfirmationFlags(JSON.parse(tc.function?.arguments ?? "{}"));
+      return JSON.parse(tc.function?.arguments ?? "{}");
     } catch {
       return {};
     }
@@ -41,6 +41,7 @@ export async function executeToolCall(
     if (!toolDefinition) {
       return `[工具 "${toolName}" 未找到]`;
     }
+    const toolArgs = stripModelToolArgs(toolDefinition.canonicalName, parsedToolArgs);
     const result = await toolDefinition.executor(toolArgs, thunkApi, {
       parentMessageId: context?.parentMessageId ?? "",
       agentKey: context?.agentKey,

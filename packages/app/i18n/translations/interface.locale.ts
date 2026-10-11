@@ -1378,6 +1378,7 @@ export default {
       errors: {
         loadingMessages: "Error loading messages",
       },
+      dialogBackgroundWake: { following: "AI is following up…" },
       selectADialog: "Select a dialog",
       welcomeTitle: "Welcome! Please log in to view and send messages",
       welcomeHint: "Please log in or sign up to start chatting",
@@ -3667,6 +3668,7 @@ export default {
       errors: {
         loadingMessages: "加载消息失败",
       },
+      dialogBackgroundWake: { following: "AI 正在跟进…" },
       selectADialog: "请选择一个对话",
       welcomeTitle: "欢迎！请登录以查看和发送消息",
       welcomeHint: "请登录或注册以开始聊天",
@@ -5957,6 +5959,7 @@ quickChat: {
       errors: {
         loadingMessages: "加載消息失敗",
       },
+      dialogBackgroundWake: { following: "AI 正在跟進…" },
       selectADialog: "請選擇一個對話",
       welcomeTitle: "歡迎！請登入以查看和發送訊息",
       welcomeHint: "請登入或註冊以開始聊天",
@@ -8267,6 +8270,7 @@ quickChat: {
       errors: {
         loadingMessages: "メッセージの読み込みに失敗しました",
       },
+      dialogBackgroundWake: { following: "AI がフォローアップ中…" },
       selectADialog: "ダイアログを選択してください",
       welcomeTitle:
         "ようこそ！メッセージを表示および送信するにはログインしてください",

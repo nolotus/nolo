@@ -174,16 +174,18 @@ export class ToolApiError extends Error {
   status?: number;
   code?: string;
   details?: unknown;
+  upperCredits?: number;
 
   constructor(
     message: string,
-    options?: { status?: number; code?: string; details?: unknown },
+    options?: { status?: number; code?: string; details?: unknown; upperCredits?: number },
   ) {
     super(message);
     this.name = "ToolApiError";
     this.status = options?.status;
     this.code = options?.code;
     this.details = options?.details;
+    this.upperCredits = options?.upperCredits;
   }
 }
 
@@ -261,6 +263,7 @@ export async function callToolApi<T = any>(
     let errorMessage = `API 请求失败，状态码: ${response.status}`;
     let errorCode: string | undefined;
     let errorDetails: unknown;
+    let upperCredits: number | undefined;
     try {
       const errorData = JSON.parse(responseText) as Record<string, any>;
       const err = errorData?.error;
@@ -268,6 +271,9 @@ export async function callToolApi<T = any>(
         errorMessage += `: ${err.message ?? JSON.stringify(err)}`;
         errorCode = typeof err.code === "string" ? err.code : undefined;
         errorDetails = err.details;
+        if (typeof err.upperCredits === "number") {
+          upperCredits = err.upperCredits;
+        }
       }
     } catch {
       errorCode = looksLikeHtmlResponse(responseText, contentType)
@@ -288,6 +294,7 @@ export async function callToolApi<T = any>(
       status: response.status,
       code: errorCode,
       details: errorDetails,
+      upperCredits,
     });
   }
 

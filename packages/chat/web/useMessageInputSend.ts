@@ -74,8 +74,13 @@ export type TurnLease = {
  */
 export const STALE_LEASE_GRACE_MS = 4000;
 
-/** Legacy helper retained for backwards-compatible tests/callers; send path no longer injects tools here. */
-export const MEDIA_JOB_TOOL_NAME = "mediaJobTool";
+export const MEDIA_JOB_TOOL_NAMES = [
+  "transcribe",
+  "translate",
+  "exportDocument",
+  "readArtifact",
+] as const;
+
 export const withMediaJobExtraTools = <
   T extends { extraTools?: string[] } | undefined,
 >(
@@ -89,8 +94,9 @@ export const withMediaJobExtraTools = <
 
   const base = (runtimeOptions ?? {}) as { extraTools?: string[] };
   const existing = base.extraTools ?? [];
-  if (existing.includes(MEDIA_JOB_TOOL_NAME)) return runtimeOptions;
-  return { ...base, extraTools: [...existing, MEDIA_JOB_TOOL_NAME] } as T;
+  const missing = MEDIA_JOB_TOOL_NAMES.filter((t) => !existing.includes(t));
+  if (missing.length === 0) return runtimeOptions;
+  return { ...base, extraTools: [...existing, ...missing] } as T;
 };
 
 /**
