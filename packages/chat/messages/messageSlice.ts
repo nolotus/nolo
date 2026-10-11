@@ -484,10 +484,12 @@ export const messageSlice = createSliceWithThunks({
     ),
 
     addToolMessage: create.reducer<Message & { dialogId?: string }>((state, action) => {
-      const dialogState = ensureMessageDialogState(
-        state,
-        inferDialogIdFromMessage(action.payload)
-      );
+      const dialogId = inferDialogIdFromMessage(action.payload);
+      // A tool result belongs to its run's dialog, never the foreground UI.
+      if (!dialogId) {
+        throw new Error("addToolMessage requires an explicit dialogId or a valid message dbKey");
+      }
+      const dialogState = ensureMessageDialogState(state, dialogId);
       addOneMessage(dialogState, action.payload);
     }),
 
