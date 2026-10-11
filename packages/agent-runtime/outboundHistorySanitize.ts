@@ -61,8 +61,10 @@ import { classifyUnparsableToolArgs } from "./toolArgsShape";
  * 复核：本地探针全 200、缺失败 attempt 的逐轮形态证据）。此处打标的依据只是
  * 「本地投影把一次工具轮变成了纯文本轮」，占位是**防御性兼容**。
  *
- * 只由本模块「全部调用被降级」的两条路径写入；部分降级（仍有调用结构化保留）
- * 的轮继续走既有规则，不标记、也不会重复注入。
+ * 来源有两处：本模块「全部调用被降级」的两条路径，以及 `sanitizeToolCallPairing`
+ * （toolCallPairing.ts）的剥离分支（声明过非空 tool_calls、全部配对失败、剥离后保留正文）。
+ * pairing 这条路径**保留原正文、只移除调用结构**，不会把调用细节渲染进正文。
+ * 部分降级（仍有调用结构、保留）的轮继续走既有规则，不标记、也不会重复注入。
  */
 export const DOWNGRADED_TOOL_TURN_ORIGIN: unique symbol = Symbol(
   "nolo.downgradedToolTurnOrigin",
