@@ -39,6 +39,7 @@ import { shouldDeferEnterForIme } from "app/utils/ime";
 import * as stylex from "@stylexjs/stylex";
 import { chatInputCardStyles } from "chat/web/chatInputCardStyles";
 import "chat/web/chatStylexEscapeHatch.css";
+import "render/layout/noloSerifFont.css";
 import "./QuickChat.css";
 
 // 动态 import 必须包一层可重试加载器：React.lazy 会把第一个 rejected promise

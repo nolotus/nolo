@@ -26,7 +26,11 @@
         /* 登录首页主输入框居中时，展示自然居中的问候语 */
         .quick-chat-wrapper[data-surface="home-primary"] .quick-chat-greeting {
           margin-bottom: var(--space-4);
-          font-size: var(--type-h3);
+          font-size: var(--type-h2);
+          /* Same serif voice as the guest home headings, so login does not
+             switch the page to a different product. */
+          font-family: var(--nolo-serif, "Nolo Serif Latin"), "Noto Serif SC", "Source Han Serif SC", "Songti SC", "Noto Serif", Georgia, serif;
+          font-weight: 700;
         }
 
         .quick-chat-container {
@@ -50,7 +54,7 @@
           margin: 0;
         }
 
-        /* Home primary：输入框上限 760px，窄于上方内容列（widgets 880px），
+        /* Home primary：输入框上限 760px，与下方 widgets 列同宽（HomeStyles homeAuthedWidgetsSection），
            宽屏下不再拉成通栏；窗口缩放/侧栏开合时居中稳定。 */
         .quick-chat-container[data-surface="home-primary"] {
           max-width: min(760px, var(--home-content-max-width, 1040px));
@@ -78,20 +82,14 @@
           min-height: 66px;
           padding: var(--space-2) var(--space-4);
           border-radius: var(--radius-md);
-          /* Premium soft glow background with a hint of brand tint to solve white-on-white contrast issues */
-          background: linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--surfaceRaised, var(--background)) 95%, var(--primary) 3%),
-            color-mix(in srgb, var(--surfaceRaised, var(--background)) 98%, var(--primary) 1%)
-          );
-          -webkit-backdrop-filter: blur(16px);
-          backdrop-filter: blur(16px);
-          /* Elevated soft brand shadow to float elegantly above the pure white background */
-          box-shadow: 
-            0 8px 30px -4px color-mix(in srgb, var(--shadowMedium) 12%, transparent),
-            0 2px 6px color-mix(in srgb, var(--shadowLight) 70%, transparent),
-            0 4px 16px -2px color-mix(in srgb, var(--primary) 6%, transparent);
-          border-color: color-mix(in srgb, var(--primary) 16%, var(--borderLight));
+          /* A sheet of whiter paper on the page (2026-10-11): theme elevated surface,
+             neutral hairline, soft theme shadow. No brand tint, blur or glow, so the
+             box reads the same as the guest home cards. */
+          background: var(--backgroundElevated, var(--surfaceRaised, var(--background)));
+          box-shadow:
+            0 1px 2px var(--shadowLight),
+            0 10px 28px -18px var(--shadowMedium);
+          border-color: var(--border, var(--borderLight));
           /* Smooth physical state transition */
           transition: border-color 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), 
                       box-shadow 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), 
@@ -164,28 +162,19 @@
         /* Hover micro-interaction for premium affordance */
         .quick-chat-container[data-surface="home-primary"] .quick-chat-box:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-          background: linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--surfaceRaised, var(--background)) 93%, var(--primary) 5%),
-            color-mix(in srgb, var(--surfaceRaised, var(--background)) 97%, var(--primary) 2%)
-          );
-          border-color: color-mix(in srgb, var(--primary) 45%, var(--borderLight));
-          transform: translateY(-3px); /* Lift higher (3px) for noticeable desktop feedback */
-          box-shadow: 
-            0 20px 48px -12px color-mix(in srgb, var(--shadowMedium) 20%, transparent),
-            0 4px 12px color-mix(in srgb, var(--shadowLight) 80%, transparent),
-            0 8px 24px -4px color-mix(in srgb, var(--primary) 16%, transparent);
+          /* Hover only firms up the hairline; no lift, no glow. */
+          border-color: var(--borderHover, var(--border));
         }
 
         .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-          transform: translateY(-2px);
+          transform: none;
         }
 
         .quick-chat-container[data-surface="home-primary"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .quick-chat-container[data-surface="space-home-compact"] .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),
 .quick-chat-box:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
-          background: var(--surfaceRaised, var(--background));
-          transform: translateY(-1px);
+          background: var(--backgroundElevated, var(--surfaceRaised, var(--background)));
+          transform: none;
           /* 聚焦时物理描边提亮到 primary 70%，光环改为实色 2px + 浮起阴影，
              亮/暗主题下聚焦反馈都清晰可见（2026-10-03 视觉修复）。
 
