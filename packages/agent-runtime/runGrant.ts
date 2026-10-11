@@ -2,6 +2,7 @@ import { isRecord } from "core/isRecord";
 import { asNonEmptyStringArray } from "core/stringArray";
 import { asOptionalTrimmedString } from "core/optionalString";
 import type { AgentRunKind } from "./agentRunIsolation";
+import { withinRoot } from "./executionLeaseValidation";
 import { normalizeAgentRuntimeToolPolicy } from "./runtimeToolPolicy";
 import type { AgentRuntimeToolPolicy, AgentRuntimeWorkspaceMode } from "./types";
 
@@ -68,6 +69,18 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+/**
+ * Intersect two root sets as directory subtrees: a root survives when it lies
+ * inside some root of the other set. The result never reaches outside either
+ * set (lexical check only; backends must still enforce realpaths/mounts).
+ */
+function intersectRoots(requested: string[], ceiling: string[]): string[] {
+  return unique([
+    ...requested.filter((root) => ceiling.some((cap) => withinRoot(cap, root))),
+    ...ceiling.filter((cap) => requested.some((root) => withinRoot(root, cap))),
+  ]);
+}
+
 function normalizePermissionPolicy(value: unknown): AgentRunGrantMachinePermissionPolicy | undefined {
   if (!isRecord(value)) return undefined;
   if (value.mode !== "read_only" && value.mode !== "full_access") return undefined;
@@ -129,6 +142,29 @@ export function normalizeAgentRunGrant(value: unknown): AgentRunGrant | undefine
   if (!normalizedTarget) return undefined;
 
   const rawPolicy = normalizeAgentRuntimeToolPolicy(value.runtimeToolPolicy);
+  // Distinguish "machine authority not provided" from "provided but invalid".
+  // A present-but-malformed machine block / permissionPolicy (non-object,
+  // missing or non-boolean flags, unknown mode) must never fall through to
+  // the no-policy compatibility branch, which would re-open read/write.
+  // Rejecting the whole grant is the most conservative choice and is
+  // compatible with callers, which already treat undefined as "no grant".
+  // Server grants that omit `machine` entirely are unchanged.
+  if (value.machine !== undefined) {
+    if (!isRecord(value.machine)) return undefined;
+    if (!normalizePermissionPolicy(value.machine.permissionPolicy)) return undefined;
+  }
+  // A machine target must carry a valid machine permission block bound to the
+  // same machineId. A missing/undefined block or a mismatched/missing
+  // machine.machineId would otherwise fall through to the no-policy branch
+  // and keep workspace read/write authority on an unpoliced machine.
+  if (normalizedTarget.kind === "machine") {
+    if (
+      !isRecord(value.machine) ||
+      asOptionalTrimmedString(value.machine.machineId) !== normalizedTarget.machineId
+    ) {
+      return undefined;
+    }
+  }
   const rawMachine = isRecord(value.machine) ? value.machine : undefined;
   const permissionPolicy = normalizePermissionPolicy(rawMachine?.permissionPolicy);
   const rawMachineId = asOptionalTrimmedString(rawMachine?.machineId);
@@ -158,23 +194,63 @@ export function normalizeAgentRunGrant(value: unknown): AgentRunGrant | undefine
           : workspace.readScope === "none"
             ? "none"
             : undefined;
-  const readScope =
-    explicitReadScope ??
-    (permissionPolicy?.allowFilesystemRead
-      ? readableRoots.length > 0
-        ? "configured-roots"
-        : "legacy-unscoped"
-      : "none");
-  const writeScope =
+  const requestedWriteScope =
     workspace.writeScope === "runtime-workspace"
       ? "runtime-workspace"
       : workspace.writeScope === "configured-roots" && writableRoots.length > 0
         ? "configured-roots"
         : "none";
-  const effectiveReadableRoots =
-    readScope === "configured-roots" ? readableRoots : [];
-  const effectiveWritableRoots =
-    writeScope === "configured-roots" ? writableRoots : [];
+
+  // The machine permission policy (when present and bound to the target
+  // machine) is an upper bound on workspace authority, never a suggestion:
+  // - allowFilesystemRead/Write !== true forces the scope to "none", even if
+  //   the workspace names an explicit scope.
+  // - Non-empty policy roots keep the scope bounded ("configured-roots"):
+  //   explicit workspace roots are intersected with the policy roots, and
+  //   runtime-workspace / legacy-unscoped / derived scopes are replaced by the
+  //   policy roots themselves (the provider-chosen runtime workspace cannot be
+  //   proven to lie inside the policy, so the owner-declared ceiling is used).
+  //   An empty intersection fails closed to "none".
+  // - Empty policy roots carry no bound, so the workspace scope is kept.
+  const policy = permissionPolicy;
+  let readScope: AgentRunGrantWorkspaceScope["readScope"];
+  let effectiveReadableRoots: string[];
+  if (policy && policy.allowFilesystemRead !== true) {
+    readScope = "none";
+    effectiveReadableRoots = [];
+  } else if (policy && policy.readableRoots.length > 0 && explicitReadScope !== "none") {
+    effectiveReadableRoots =
+      readableRoots.length > 0 &&
+      (explicitReadScope === "configured-roots" || explicitReadScope === undefined)
+        ? intersectRoots(readableRoots, policy.readableRoots)
+        : [...policy.readableRoots];
+    readScope = effectiveReadableRoots.length > 0 ? "configured-roots" : "none";
+  } else {
+    readScope =
+      explicitReadScope ??
+      (policy?.allowFilesystemRead
+        ? readableRoots.length > 0
+          ? "configured-roots"
+          : "legacy-unscoped"
+        : "none");
+    effectiveReadableRoots = readScope === "configured-roots" ? readableRoots : [];
+  }
+
+  let writeScope: AgentRunGrantWorkspaceScope["writeScope"];
+  let effectiveWritableRoots: string[];
+  if (policy && policy.allowFilesystemWrite !== true) {
+    writeScope = "none";
+    effectiveWritableRoots = [];
+  } else if (policy && policy.writableRoots.length > 0 && requestedWriteScope !== "none") {
+    effectiveWritableRoots =
+      requestedWriteScope === "configured-roots"
+        ? intersectRoots(writableRoots, policy.writableRoots)
+        : [...policy.writableRoots];
+    writeScope = effectiveWritableRoots.length > 0 ? "configured-roots" : "none";
+  } else {
+    writeScope = requestedWriteScope;
+    effectiveWritableRoots = writeScope === "configured-roots" ? writableRoots : [];
+  }
   const cwd = asOptionalTrimmedString(workspace.cwd);
   const callerUserId = asOptionalTrimmedString(value.callerUserId);
 

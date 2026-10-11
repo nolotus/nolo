@@ -95,7 +95,11 @@ export function readMachineToolGrants(env: EnvLike): Record<string, unknown> | u
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    console.warn(
+    // L5：同一份畸形配置在同一进程里会被读两遍（connector 启动时读一次挂到握手
+    // URL 上，创建机器侧 handlers 时再读一次），两次都 warn 会打出一模一样的两条
+    // 告警 → 按「原始值 + 失败形态」去重，只告警一次。
+    warnMalformedMachineToolGrantsOnce(
+      `json:${raw}`,
       `[nolo] NOLO_MACHINE_TOOL_GRANTS is not valid JSON, ignoring it: ${
         error instanceof Error ? error.message : String(error)
       }`
@@ -104,11 +108,38 @@ export function readMachineToolGrants(env: EnvLike): Record<string, unknown> | u
   }
 
   if (!isRecord(parsed)) {
-    console.warn("[nolo] NOLO_MACHINE_TOOL_GRANTS must be a JSON object, ignoring it");
+    warnMalformedMachineToolGrantsOnce(
+      `shape:${raw}`,
+      "[nolo] NOLO_MACHINE_TOOL_GRANTS must be a JSON object, ignoring it"
+    );
     return undefined;
   }
 
   return parsed;
+}
+
+/**
+ * L5：畸形 grants 的告警在同一进程内只发一次。
+ *
+ * 去重键是「原始字符串 + 失败形态」：内容不同的畸形配置仍会各自告警（不是永久静默），
+ * 未配置 / 空白一如既往静默跳过。
+ */
+const warnedMalformedMachineToolGrants = new Set<string>();
+
+function warnMalformedMachineToolGrantsOnce(dedupeKey: string, message: string): void {
+  if (warnedMalformedMachineToolGrants.has(dedupeKey)) return;
+  warnedMalformedMachineToolGrants.add(dedupeKey);
+  console.warn(message);
+}
+
+/**
+ * 仅测试用：清空畸形 grants 的告警去重表（NIT3）。
+ *
+ * 去重状态是进程级模块状态：测试若不显式重置，就会隐式依赖「此前没有用例用过同一份
+ * 畸形值」——同一个原始值被两个用例复用时，后者的告警计数断言会被静默吞掉。
+ */
+export function __resetMalformedMachineToolGrantsWarningsForTests(): void {
+  warnedMalformedMachineToolGrants.clear();
 }
 
 // 把授权配置挂到 WS URL 上。未配置时原样返回入参（保证 URL 与旧行为逐字节

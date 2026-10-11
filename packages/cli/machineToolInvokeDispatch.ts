@@ -40,7 +40,7 @@
 // 并列，先于其尝试 tool.invoke，避免 agent.run 专属帧被误读。
 // daemon 进程 cwd（用户跑 `nolo connect` 的目录）即 workspaceRoot。
 
-import { appendFile, lstat, mkdir, readFile, realpath } from "node:fs/promises";
+import { appendFile, lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -61,6 +61,17 @@ import { readMachineToolGrants } from "./machineCommands";
 // machineToolGrants 为单一真源（服务端 parseHandshakeToolGrants 同源 import）。此处
 // re-export 类型，供 machineCommands 等既有 `from "./machineToolInvokeDispatch"` 导入保持可用。
 export type { MachineToolGrants } from "../agent-runtime/machineToolGrants";
+
+/**
+ * 只读工具集（对机器只产生读取，写入能力为零）：恒允许，不需要任何 grant，也不进审计。
+ *
+ * L2：授权分类必须是**显式**的两张表（本表 + GRANT_DIMENSION_BY_TOOL）。两者并集
+ * 逐字等于白名单、且互不相交 —— 由测试 `L2 invariant` 守着；isMachineToolGranted
+ * 对落在两张表之外的工具名一律失败关闭。
+ */
+export const MACHINE_TOOL_INVOKE_V1_READ_ONLY_TOOL_NAMES = ["readFile", "globFiles"] as const;
+
+const READ_ONLY_TOOL_NAME_SET = new Set<string>(MACHINE_TOOL_INVOKE_V1_READ_ONLY_TOOL_NAMES);
 
 /**
  * 白名单：两个读工具 + 两个写工具（写类另需本机 grants 复核）。
@@ -92,17 +103,42 @@ const TOOL_PAYLOAD_MALFORMED_MESSAGE =
 /** 单次工具调用参数（payload.args）畸形时的专用文案。 */
 const TOOL_ARGS_MALFORMED_MESSAGE = "malformed tool.invoke args (args object required)";
 
-/** 需要本机授权复核的工具 → grants 维度。readFile / globFiles 不在此表，不受影响。 */
+/**
+ * 写工具 → grants 维度（这张表同时是审计判定表）。readFile / globFiles 不在此表 ——
+ * 它们在只读集里。
+ *
+ * L2：本表是「授权 + 审计」的唯一登记处，未登记的工具既不授权也不审计，因此
+ * 未登记 = 拒绝（见 isMachineToolGranted），而不是改造前那样未登记 = 恒放行。
+ */
 const GRANT_DIMENSION_BY_TOOL: Record<string, "write"> = {
   writeFile: "write",
   editFile: "write",
 };
 
+/** 写维度工具名，与 GRANT_DIMENSION_BY_TOOL 同源（不手工维护第二份），供结构不变量测试。 */
+export const MACHINE_TOOL_INVOKE_V1_WRITE_TOOL_NAMES: readonly string[] =
+  Object.keys(GRANT_DIMENSION_BY_TOOL);
+
+/**
+ * 写表查找（NIT4）：必须走 Object.hasOwn，只认自有键。
+ * `GRANT_DIMENSION_BY_TOOL["constructor"]` 会命中 Object.prototype（返回 Object 函数，真值），
+ * `"constructor" in GRANT_DIMENSION_BY_TOOL` 同样为真 —— 于是原型链名字会被当成「已登记的
+ * 写工具」：authorization 靠偶然拒绝、`audited` 误判为真、拒绝文案里还会插进一个函数。
+ */
+function grantDimensionForTool(toolName: string): "write" | undefined {
+  return Object.hasOwn(GRANT_DIMENSION_BY_TOOL, toolName)
+    ? GRANT_DIMENSION_BY_TOOL[toolName]
+    : undefined;
+}
+
 /** 审计 target 截断上限。 */
 const AUDIT_TARGET_MAX_CHARS = 200;
 
 function machineToolNotGrantedMessage(toolName: string, agentKey: string | undefined) {
-  const dimension = GRANT_DIMENSION_BY_TOOL[toolName];
+  const dimension = grantDimensionForTool(toolName);
+  if (!dimension) {
+    return `tool not granted on this machine: ${toolName} is not a registered machine tool (no grant dimension) (NOLO_MACHINE_TOOL_GRANTS)`;
+  }
   return agentKey
     ? `tool not granted on this machine: ${toolName} requires ${dimension} grant for agent ${agentKey} (NOLO_MACHINE_TOOL_GRANTS)`
     : `tool not granted on this machine: ${toolName} requires an agentKey with ${dimension} grant (NOLO_MACHINE_TOOL_GRANTS)`;
@@ -112,14 +148,24 @@ function machineToolNotGrantedMessage(toolName: string, agentKey: string | undef
 // 真源（服务端 parseHandshakeToolGrants 同源 import），本文件从该模块 import，不再
 // 保有自己的一份实现——消除「服务端放行、机器侧拒绝」的跨端裁定分裂。
 
-/** 失败关闭：agentKey 非空且该 agent 对应维度严格为 true 才放行。 */
-function isMachineToolGranted(
+/**
+ * 失败关闭（L2 修正）：
+ * - 只读集内的工具 → 恒放行（无需 grant、无审计）；
+ * - 写表内的工具 → 要求 agentKey 非空且该 agent 对应维度严格为 true；
+ * - **其余工具名一律拒绝**。改造前这里 `if (!dimension) return true;` 是 fail-open：
+ *   将来往白名单加写工具却漏登记 GRANT_DIMENSION_BY_TOOL 时，会静默跳过授权复核与
+ *   审计。现在这类工具被拒绝（且 `L2 invariant` 测试会先失败，指出漏登记）。
+ *
+ * 导出供授权分类回归测试直接断言（该分支在白名单校验之后，属纵深防御）。
+ */
+export function isMachineToolGranted(
   grants: MachineToolGrants | undefined,
   toolName: string,
   agentKey: string | undefined
 ): boolean {
-  const dimension = GRANT_DIMENSION_BY_TOOL[toolName];
-  if (!dimension) return true;
+  if (READ_ONLY_TOOL_NAME_SET.has(toolName)) return true;
+  const dimension = grantDimensionForTool(toolName);
+  if (!dimension) return false;
   // M6：agentKey 同样 trim 后查找（服务端下发 payload 前已 trim，这里是对称
   // 规范化的纵深防御）。
   const normalizedAgentKey = typeof agentKey === "string" ? agentKey.trim() : "";
@@ -127,7 +173,7 @@ function isMachineToolGranted(
   if (!Object.prototype.hasOwnProperty.call(grants, normalizedAgentKey)) return false;
   const entry = grants[normalizedAgentKey];
   if (!isRecord(entry)) return false;
-  return entry[dimension] === true;
+  return Object.hasOwn(entry, dimension) && entry[dimension] === true;
 }
 
 function resolveMachineToolAuditLogPath(): string {
@@ -274,7 +320,7 @@ export function createMachineToolInvokeHandlers(
     const deleteGuardError = await machinePureDeleteGuard(toolName, executorArgs, workspaceRoot);
     if (deleteGuardError) return { error: deleteGuardError };
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const audited = toolName in GRANT_DIMENSION_BY_TOOL;
+    const audited = grantDimensionForTool(toolName) !== undefined;
     let auditOk = false;
     try {
       const outcome = await Promise.race([
@@ -509,6 +555,11 @@ const WRITEFILE_DELETE_GUARD_MESSAGE =
   "writeFile blocked: refusing to overwrite an existing non-empty file with empty content " +
   "(data-deletion guard). Use editFile with the exact oldText to remove specific text, or " +
   "write the intended content explicitly.";
+
+/** NIT5：目录目标的专属文案 —— 不复用「清空既有非空文件」的删除门文案。 */
+const WRITEFILE_DIRECTORY_TARGET_MESSAGE =
+  "writeFile blocked: target path is an existing directory, not a file " +
+  "(refusing to write; nothing was modified).";
 const EDITFILE_DELETE_GUARD_MESSAGE =
   "editFile blocked: refusing to replace matched text with an empty newText (data-deletion " +
   "guard). Provide the intended replacement text.";
@@ -539,6 +590,21 @@ function extractMachineToolStringField(
   return undefined;
 }
 
+/** W2：守卫无法 stat 目标（非 ENOENT）时的失败关闭文案。 */
+function writeFileUninspectableTargetMessage(code: string): string {
+  return (
+    `writeFile blocked: target cannot be inspected (${code}); refusing to write ` +
+    "(fail closed — only a missing target counts as a new file)."
+  );
+}
+
+/** fs 错误的 errno code（Node/Bun 都带字符串 code）；非 fs 错误返回 undefined。 */
+function fsErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
 /**
  * H3（收紧，失败关闭）：有写授权的 agent 不得在无确认、无待删清单的情况下删光文件
  * 内容。两类纯删除在执行前拦截（原文件逐字不动）：
@@ -552,6 +618,10 @@ function extractMachineToolStringField(
  *
  * 返回拒绝文案或 null（放行）。缺字段 / 非字符串 content|newText 一律放行，交由执行器
  * 给出既有参数校验错误（那不是删除语义）。
+ *
+ * 目标状态判定（W1/W2）：用 `stat`（**跟随 symlink**）—— writeFile 实际写入的是链接目标，
+ * 链接自身的 size 没有意义；目标不存在（ENOENT）视为新建、放行；其余 stat 失败
+ * （ENOTDIR / EACCES / ELOOP …）说明无法判定 → 守卫自身失败关闭。
  */
 async function machinePureDeleteGuard(
   toolName: string,
@@ -565,16 +635,28 @@ async function machinePureDeleteGuard(
     // 新内容为空串/纯空白：仅当目标文件已存在且当前非空才构成「删光既有数据」。
     const requestPath = extractMachineToolRequestPath(executorArgs);
     if (requestPath === null) return null; // 无路径 → 交由执行器报错
-    let current: string;
+    let stats: Awaited<ReturnType<typeof stat>>;
     try {
-      // 单一真源：读执行器将要读写的那个文件（`~` 前缀同样先展开），否则守卫
-      // 查 <ws>/~/x（ENOENT 放行）而执行器清空 <home>/x。
-      current = await readFile(resolveRequestedWorkspacePath(workspaceRoot, requestPath), "utf8");
-    } catch {
-      // 文件不存在或读不到 → 不是「已存在的非空文件被清空」，放行（执行器自负）。
-      return null;
+      // L1：判空只看元数据（size），不读文件内容 —— 旧实现 readFile 全文：判空被文件读
+      // 权限绑架（不可读 → 抛错被当成「不存在」静默 fail-open 放行），且一个判空动作付出
+      // 整文件 I/O 代价。
+      // W1：用 stat（**跟随 symlink**）而不是 lstat —— 守卫要判定的是执行器实际写入的那个
+      // 文件（writeFile 按路径打开、跟随链接到目标）。lstat 看链接本身，size 是目标路径字符串
+      // 长度（恒 > 0），会把「link → 空文件 + 空 content」误判成非空文件而误拦。
+      // 单一真源：解析执行器要用的那个路径（`~` 前缀同样先展开），否则守卫查 <ws>/~/x
+      // （ENOENT 放行）而执行器清空 <home>/x。
+      stats = await stat(resolveRequestedWorkspacePath(workspaceRoot, requestPath));
+    } catch (error) {
+      // W2：只放行「目标不存在」——ENOENT 表示这次是新建文件，不是删除既有数据。其余错误
+      // （ENOTDIR / EACCES / ELOOP …）说明守卫**无法判定**目标状态 → 守卫自身失败关闭，
+      // 而不是像旧实现那样 catch-all 放行、把裁定权交给下游执行器。
+      // （core 的 isFsNotFoundError 还匹配消息文本，比这里所需的宽，故不复用。）
+      if (fsErrorCode(error) === "ENOENT") return null;
+      return writeFileUninspectableTargetMessage(fsErrorCode(error) ?? "unknown");
     }
-    return current.length > 0 ? WRITEFILE_DELETE_GUARD_MESSAGE : null;
+    // 目录目标：writeFile 写不进去，用专属文案（NIT5），不与删除门文案混用。
+    if (stats.isDirectory()) return WRITEFILE_DIRECTORY_TARGET_MESSAGE;
+    return stats.size > 0 ? WRITEFILE_DELETE_GUARD_MESSAGE : null;
   }
   if (toolName === "editFile") {
     const newText = extractMachineToolStringField(executorArgs, NEW_TEXT_FIELD_ALIASES);

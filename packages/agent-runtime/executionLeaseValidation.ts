@@ -1,7 +1,8 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ExecutionLease, ExecutionTicket } from "./executionBackend";
 
-function withinRoot(root: string, child: string): boolean {
+/** Lexical (non-symlink-aware) containment; non-absolute paths never match. */
+export function withinRoot(root: string, child: string): boolean {
   if (!isAbsolute(root) || !isAbsolute(child)) return false;
   const canonicalRoot = resolve(root);
   const canonicalChild = resolve(child);

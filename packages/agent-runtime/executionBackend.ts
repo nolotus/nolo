@@ -232,13 +232,15 @@ export function executionBackendCanSatisfy(
   ) {
     return false;
   }
-  // Unbounded legacy reads must never be interpreted as a bounded sandbox
-  // mount. A distinct compatibility adapter must handle any explicit Full
-  // Host exception, and record the resulting downgrade.
+  // Unbounded legacy reads must never be interpreted as a bounded mount.
+  // Fail closed: only the explicit Full Host compatibility backend may
+  // accept legacy-unscoped authority (and the adapter must record the
+  // downgrade). Every other kind — local-sandbox, hosted-workspace,
+  // remote-executor, cloud, machine-connector, or any unknown future kind —
+  // is rejected until it has its own explicit unbounded-read contract.
   if (
     ticket.filesystem.readScope === "legacy-unscoped" &&
-    (backend.kind === "local-sandbox" ||
-      backend.kind === "hosted-workspace")
+    backend.kind !== "full-host"
   ) {
     return false;
   }
