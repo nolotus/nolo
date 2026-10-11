@@ -436,3 +436,7 @@ export type {
   AgentRunGrantTriggerOrigin,
   AgentRunGrantWorkspaceScope,
 } from "./runGrant";
+
+// Backend-neutral execution contract; no runtime route changes.
+export { buildExecutionTicket, executionBackendCanSatisfy } from "./executionBackend";
+export type { ExecutionBackend, ExecutionTicket, ExecutionLease, ExecutionRequest, ExecutionEvent, ExecutionResult, ExecutionBackendDescriptor, ExecutionBackendCapabilities, ExecutionCapabilityRealization, ExecutionClass, ExecutionReleaseReason } from "./executionBackend";
