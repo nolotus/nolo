@@ -446,7 +446,7 @@ function markEmptyCompletionAsError(
 function markStreamMessageAborted(
   ctx: FinalizeContext,
   errorMessage: string,
-  classification = classifyGenerationError(errorMessage),
+  classification: { category: string; message: string; retryable: boolean; actions: readonly string[]; diagnostic: Record<string, unknown> } = classifyGenerationError(errorMessage),
 ): void {
   const base = ctx.messageMetadata ?? {};
   const previousMetadata =

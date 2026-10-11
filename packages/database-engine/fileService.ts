@@ -487,11 +487,11 @@ export const SHA256_HEX = /^[a-f0-9]{64}$/;
 /**
  * 校验 sha256 格式
  */
-export const assertValidSha256 = (sha256: unknown): asserts sha256 is string => {
+export function assertValidSha256(sha256: unknown): asserts sha256 is string {
     if (typeof sha256 !== "string" || !SHA256_HEX.test(sha256)) {
         throw new Error("Invalid sha256");
     }
-};
+}
 
 export const getBlobPathBySha256 = (sha256: string): string => {
     assertValidSha256(sha256);
