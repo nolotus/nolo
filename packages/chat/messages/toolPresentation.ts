@@ -1,4 +1,5 @@
 import { clipCompactText } from "core/clipCompactText";
+import { isMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
 import { isRecord } from "core/isRecord";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -408,6 +409,37 @@ export function isMediaJobPendingConfirmation(args: {
   if (asRecordOrEmpty(args.toolPayload).status === "pending") return true;
   return (
     typeof data.error === "string" && data.error.endsWith("_requires_confirmation")
+  );
+}
+
+/**
+ * 工具结果是否为「等待用户确认」。
+ *
+ * 与 isMediaJobPendingConfirmation 的区别：这里直接吃**原始工具结果**（JSON 字符串
+ * 或对象），供「工具行/投影」判定 status 使用——isMediaJobPendingConfirmation 服务的是
+ * 已解析的 rawData + 卡片渲染。
+ *
+ * 工具白名单先行：只有 transcribe/translate 可能返回确认态，其他工具即使回显同样的
+ * status（甚至完整 typed 形状）也不算——与运行时的 isConfirmedHandoffToolResult 同口径，
+ * 否则任意工具都能让一行停在这里。
+ * typed 协议（ai/lecture/mediaToolConfirm）优先判定；随后兼容历史 status/reason 形态：
+ * 白名单内单有 status:"requires_confirmation" 仍按待确认处理（宁可显示等待，也不要显示完成）。
+ */
+export function toolResultNeedsUserConfirmation(
+  toolName: string | null | undefined,
+  result: unknown,
+): boolean {
+  const name = asTrimmedString(toolName);
+  if (name !== "transcribe" && name !== "translate") return false;
+  const record = parseJsonRecordOrNull(result);
+  const data = isRecord(record) ? record : null;
+  if (!data) return false;
+  if (isMediaToolConfirmation(data)) return true;
+  return (
+    data.status === "requires_confirmation" ||
+    data.status === "awaiting_confirmation" ||
+    data.reason === "unauthorized" ||
+    data.reason === "budget_overrun"
   );
 }
 

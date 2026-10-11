@@ -1,4 +1,5 @@
 import { callToolApi } from "./toolApiClient";
+import { buildMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
 
 export const transcribeSchema = {
   name: "transcribe",
@@ -82,14 +83,12 @@ export async function transcribeFunc(
   } catch (err: any) {
     if (err?.status === 409 && err?.code === "CONFIRMATION_REQUIRED") {
       const upperCredits = err?.upperCredits ?? (err?.details as any)?.upperCredits;
-      return {
-        status: "requires_confirmation",
+      return buildMediaToolConfirmation({
         reason: "unauthorized",
         jobId: resolvedJobId,
         step: "transcribe",
         upperCredits,
-        summary: "需要用户确认后才能执行，请用 ask_user 呈现计划与费用（推荐项在前）并等待确认，或提示用户先在设置中开额度",
-      };
+      });
     }
     throw err;
   }
@@ -99,15 +98,12 @@ export async function transcribeFunc(
 
   if (status === "awaiting_confirmation") {
     const upperCredits = stepResult?.overrunCredits ?? data?.error?.upperCredits;
-    return {
-      status: "requires_confirmation",
+    return buildMediaToolConfirmation({
       reason: "budget_overrun",
       jobId: resolvedJobId,
       step: "transcribe",
       upperCredits,
-      summary: `转写预算超额，需要用户确认追加预算（还需 ${upperCredits ?? "若干"} 积分）。请使用 ask_user 说明已花费与还需积分并等待确认。`,
-      rawData: data,
-    };
+    });
   }
 
   if (status === "running") {

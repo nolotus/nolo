@@ -16,6 +16,7 @@ import {
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 
 import type { Message, ToolPayload, ToolErrorPayload } from "./types";
+import { toolResultNeedsUserConfirmation } from "./toolPresentation";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
@@ -229,19 +230,26 @@ const processToolData = createAsyncThunk(
 
       const rawData = toolResult?.rawData ?? toolResult;
       const llmContext = asOptionalTrimmedString(toolResult?.llmContext);
+      // 「等待用户确认」不是成功也不是失败：标 succeeded 会让待确认行显示成已完成，
+      // 与卡片上的确认按钮自相矛盾。保持 pending 直到真人授权后服务端给出真实状态。
+      const awaitingUserConfirmation = toolResultNeedsUserConfirmation(canonicalName, rawData);
 
       const summary =
         asOptionalTrimmedString(toolResult?.displayData) ||
-        defaultSummary(canonicalName, "succeeded");
+        defaultSummary(canonicalName, awaitingUserConfirmation ? "pending" : "succeeded");
 
-      toolRunSucceeded({
-        id: toolRunId,
-        outputSummary: summary,
-      });
+      if (!awaitingUserConfirmation) {
+        toolRunSucceeded({
+          id: toolRunId,
+          outputSummary: summary,
+        });
+      } else {
+        toolRunSetPending({ id: toolRunId });
+      }
 
       const toolPayload: ToolPayload = {
         toolName: canonicalName,
-        status: "succeeded",
+        status: awaitingUserConfirmation ? "pending" : "succeeded",
         input: executionToolArgs,
         rawToolCall: toolCall,
         toolRunId,

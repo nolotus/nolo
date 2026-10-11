@@ -24,6 +24,12 @@ export type ToolExecutionLocality =
 export type ToolExecutionInteraction =
   | "none"
   | "blocking"
+  /** Explicit confirmed human hand-off: the tool returns a structured
+   * `{ status: "requires_confirmation" }` result and the current execution
+   * pauses for the user instead of continuing in the same turn. Distinct from
+   * `blocking` (ask_user's durable interactive plane) and from `confirm`
+   * (confirmation *before* execution). */
+  | "handoff"
   | "confirm"
   | "authorize"
   | "unknown";
@@ -101,6 +107,19 @@ const serverExternalRead = (
 });
 
 /**
+ * Confirmed human hand-off step: server-hosted, may spend provider quota, and
+ * finishes by asking the user to confirm instead of doing the work.
+ */
+const serverConfirmedHandoffStep = (): ToolExecutionContract => ({
+  replay: "unsafe",
+  sideEffects: "observable",
+  locality: "server",
+  interaction: "handoff",
+  concurrency: "exclusive",
+  durableWebForeground: false,
+});
+
+/**
  * Single execution-policy source for canonical tool names.
  *
  * Keep UI grouping, prompt metadata and capability packs elsewhere. This table
@@ -153,6 +172,18 @@ export const TOOL_EXECUTION_CONTRACT: Readonly<
     concurrency: "exclusive",
     durableWebForeground: "interactive",
   },
+
+  // Confirmed human hand-off boundary for the media step family. These tools
+  // do not start work needing authorization: they return
+  // `{ status: "requires_confirmation", ... }` and the run must stop and wait
+  // for the user. Registered explicitly (rather than inferred from any status)
+  // so a random tool echoing the same status never pauses the run, and kept out
+  // of the durable Web foreground plane on purpose (media ServerTool admission
+  // is owned elsewhere).
+  transcribe: serverConfirmedHandoffStep(),
+  translate: serverConfirmedHandoffStep(),
+  exportDocument: serverConfirmedHandoffStep(),
+  readArtifact: serverConfirmedHandoffStep(),
 
   // Representative explicitly non-durable execution classes. These entries
   // make the reason machine-readable; unlisted tools remain UNKNOWN.
@@ -256,6 +287,33 @@ export const DURABLE_WEB_FOREGROUND_TOOL_NAMES: ReadonlySet<string> = new Set([
 export function isDurableWebForegroundToolName(toolName: unknown): boolean {
   if (typeof toolName !== "string" || !toolName.trim()) return false;
   return DURABLE_WEB_FOREGROUND_TOOL_NAMES.has(canonicalizeToolName(toolName));
+}
+
+/**
+ * Structured tool-result status that marks an explicit confirmed hand-off.
+ *
+ * Shared with the runtime predicate (`isConfirmedHandoffToolResult`) and with
+ * the planned uniform protocol block, so the status string has one owner.
+ */
+export const TOOL_RESULT_REQUIRES_CONFIRMATION_STATUS = "requires_confirmation";
+
+/**
+ * Tools whose contract declares an explicit confirmed human hand-off. Derived
+ * from the contract table (single source) instead of another name list here.
+ */
+export const CONFIRMED_HANDOFF_TOOL_NAMES: ReadonlySet<string> = new Set(
+  Object.entries(TOOL_EXECUTION_CONTRACT)
+    .filter(([, contract]) => contract.interaction === "handoff")
+    .map(([name]) => name),
+);
+
+/**
+ * Whether this tool is *allowed* to pause a run via `requires_confirmation`.
+ * The allowlist is the point: a status string alone is never evidence.
+ */
+export function isConfirmedHandoffToolName(toolName: unknown): boolean {
+  if (typeof toolName !== "string" || !toolName.trim()) return false;
+  return CONFIRMED_HANDOFF_TOOL_NAMES.has(canonicalizeToolName(toolName));
 }
 
 export function isConcurrencySafeToolName(toolName: unknown): boolean {

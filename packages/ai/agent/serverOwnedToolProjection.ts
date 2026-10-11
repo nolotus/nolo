@@ -1,4 +1,5 @@
 import { canonicalizeToolName } from "ai/tools/toolNameAliases";
+import { toolResultNeedsUserConfirmation } from "chat/messages/toolPresentation";
 import { projectDesktopToolUiContent } from "./projectDesktopToolUiContent";
 import { createDialogMessageKeyAndId } from "database/keys";
 import {
@@ -143,15 +144,22 @@ export function createServerOwnedToolProjection(args: {
     // A failed result must still settle: otherwise an {"error": ...} row would be
     // held running (isStreaming: true) forever by the read-only-until-canonical
     // rule. Successful and in-progress read-only rows keep their original status.
+    // A result that only *asks* for the user's confirmation is neither a failure
+    // nor a success: projecting it as "succeeded" is what let the media flow read
+    // "转写已完成" while nothing had run. It settles as "pending" so the row keeps
+    // its confirmation affordance until the real human authorization lands.
     const staysReadOnly = !failed && keepReadOnly.has(toolName);
+    const awaitingUserConfirmation = toolResultNeedsUserConfirmation(toolName, payload.content);
     const toolPayload = {
       ...(base.toolPayload ?? {}),
       toolName,
       status: staysReadOnly
         ? "running" as const
-        : failed
-          ? "failed" as const
-          : "succeeded" as const,
+        : awaitingUserConfirmation
+          ? "pending" as const
+          : failed
+            ? "failed" as const
+            : "succeeded" as const,
     };
     const message = {
       ...base,
