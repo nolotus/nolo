@@ -4,15 +4,23 @@ import { EXECUTION_BACKEND_KINDS, type ExecutionBackendDescriptor, type Executio
 export const OWNER_ORIGIN_EXECUTION_VERSION = 1 as const;
 
 export type OwnerOriginIdentity = {
-  /** Existing device identity, or an explicitly ephemeral local-instance identity. */
+  /** Existing device identity, or an explicitly ephemeral local-instance identity.
+   * The only field server admission authenticates end-to-end: it must match a
+   * live connector record registered under the caller's account (block E). */
   machineId: Extract<ExecutionTicket["target"], { kind: "machine" }>["machineId"];
   /** local_instance is ephemeral, not a second durable machine identity. */
   identitySource: "machine" | "local_instance";
+  /** Client-declared session snapshot. Lexically validated only; the server
+   * has no session registry, so this is NOT server-verified identity. */
   sessionId: string;
+  /** Client-declared workspace snapshot, not server-verified. */
   workspaceId: string;
   /** Origin host must supply realpath-resolved absolute snapshots, never model
-   * arguments. Shared validation checks lexical shape only, not filesystem truth. */
+   * arguments. Shared validation checks lexical shape only, not filesystem truth.
+   * Client-declared, not server-verified: the origin host enforces realpath +
+   * containment under its own execution policy at tool time. */
   workspaceRoot: NonNullable<ExecutionLease["workspaceRoot"]>;
+  /** Client-declared cwd snapshot; same endorsement boundary as workspaceRoot. */
   cwd: string;
 };
 
