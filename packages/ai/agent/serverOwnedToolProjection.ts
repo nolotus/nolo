@@ -166,6 +166,9 @@ export function createServerOwnedToolProjection(args: {
       content,
       isStreaming: staysReadOnly,
       toolName,
+      // F1: surface server-projected metadata (incl. executionLocation) on the
+      // message so tool rows can render the actual execution host.
+      ...(metadata ? { metadata } : {}),
       toolPayload,
     };
     transientByCallId.set(callId, message);
@@ -187,6 +190,7 @@ export function createServerOwnedToolProjection(args: {
           isStreaming: false,
           toolName,
           toolPayload,
+          ...(metadata ? { metadata } : {}),
         },
       }),
     );

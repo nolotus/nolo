@@ -371,6 +371,13 @@ export default {
         list: "Task list",
         wait: "Wait for task",
       },
+      toolExecLocation: {
+        line: "Ran on {{device}} · {{root}}",
+        unknown: "Execution location unknown",
+      },
+      runtimeTarget: {
+        intentBadge: "Target: {{device}} (intent)",
+      },
       gemini: {
         title: "Image Generation",
         count: "{{count}} images generated",
@@ -899,6 +906,13 @@ export default {
         list: "任务列表",
         wait: "等待完成",
       },
+      toolExecLocation: {
+        line: "在 {{device}} · {{root}} 执行",
+        unknown: "执行位置未知",
+      },
+      runtimeTarget: {
+        intentBadge: "目标：{{device}}（意图）",
+      },
       gemini: {
         title: "图像生成",
         count: "生成了 {{count}} 张图片",
@@ -1422,6 +1436,13 @@ export default {
         todo: "待辦清單",
         list: "任務列表",
         wait: "等待完成",
+      },
+      toolExecLocation: {
+        line: "在 {{device}} · {{root}} 執行",
+        unknown: "執行位置未知",
+      },
+      runtimeTarget: {
+        intentBadge: "目標：{{device}}（意圖）",
       },
       gemini: {
         title: "圖像生成",
@@ -1973,6 +1994,13 @@ export default {
         todo: "ToDoリスト",
         list: "タスク一覧",
         wait: "タスク待機",
+      },
+      toolExecLocation: {
+        line: "{{device}} · {{root}} で実行",
+        unknown: "実行場所は不明です",
+      },
+      runtimeTarget: {
+        intentBadge: "ターゲット: {{device}}（意図）",
       },
       gemini: {
         title: "画像生成",

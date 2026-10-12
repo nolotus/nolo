@@ -78,6 +78,7 @@ const DIALOG_PAGE_MESSAGES_CLASS = `DialogPage__messages has-scroll-mask ${
 }`.trim();
 import { AgentDraftPanel } from "./AgentDraftPanel";
 import { ChildRunObserverPanel } from "./ChildRunObserverPanel";
+import { DialogRuntimeTargetBadge } from "./DialogRuntimeTargetBadge";
 import { resolveLatestAgentDraftSidePanelState } from "./agentDraftPanelState";
 
 type DialogBootstrapDispatchResult = {
@@ -981,6 +982,15 @@ const DialogPage = ({
               {t("dialogBackgroundWake.following", { defaultValue: "AI 正在跟进…" })}
             </div>
           )}
+          {/* F1: intended runtime target (runtimeBinding.target → /api/machines
+              name). Labeled "意图" — the actual per-tool/per-run host is shown
+              separately from server-projected executionLocation. */}
+          <DialogRuntimeTargetBadge
+            runtimeBinding={
+              (currentDialogConfig as { runtimeBinding?: Record<string, unknown> | null } | null)
+                ?.runtimeBinding
+            }
+          />
           {renderContent()}
         </div>
         {shouldShowDraftPanel && latestAgentDraft && (

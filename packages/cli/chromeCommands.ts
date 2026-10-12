@@ -13,6 +13,7 @@
  * *which* of the three is next — manifest missing, token missing, or connector offline are three
  * different fixes.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -73,6 +74,12 @@ export type ChromeCommandDeps = {
   installNativeHost?: (options?: InstallOptions) => InstallResult;
   /** Node executable the generated wrapper must exec (tests / unusual installs). */
   nodePath?: string;
+  /** Override for online build sha fetch (tests / offline). */
+  fetchOnlineBuildSha?: () => Promise<string | null>;
+  /** Override for local head sha resolution (tests). */
+  resolveLocalHeadSha?: () => string | null;
+  /** Override for sha comparison (tests). */
+  compareDeployShas?: (localSha: string | null, onlineSha: string | null) => DeploySyncStatus;
 };
 
 /**
@@ -124,6 +131,83 @@ function browserLabel(browser: ConnectorBrowser | null): string {
   return browser === "firefox" ? "Firefox" : browser === "chrome" ? "Chrome" : "browser";
 }
 
+export type DeploySyncStatus = "in sync" | "local ahead" | "online ahead" | "diverged" | "unknown";
+
+export type DeployStatusReport = {
+  localSha: string | null;
+  onlineSha: string | null;
+  sync: DeploySyncStatus;
+};
+
+export async function fetchOnlineBuildSha(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = 3000,
+): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetchImpl("https://us.nolo.chat/public/latest-assets.json", {
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = (await res.json()) as { buildSha?: unknown };
+    return typeof data?.buildSha === "string" ? data.buildSha : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveLocalHeadSha(): string | null {
+  try {
+    const result = spawnSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.status === 0 && typeof result.stdout === "string") {
+      const sha = result.stdout.trim();
+      return sha.length >= 7 ? sha : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function compareDeployShas(
+  localSha: string | null,
+  onlineSha: string | null,
+): DeploySyncStatus {
+  if (!localSha || !onlineSha) return "unknown";
+  if (localSha === onlineSha || localSha.slice(0, 7) === onlineSha.slice(0, 7)) {
+    return "in sync";
+  }
+  try {
+    const localAhead = spawnSync("git", ["merge-base", "--is-ancestor", onlineSha, localSha], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (localAhead.status === 0) return "local ahead";
+
+    const onlineAhead = spawnSync("git", ["merge-base", "--is-ancestor", localSha, onlineSha], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (onlineAhead.status === 0) return "online ahead";
+
+    const objCheck = spawnSync("git", ["cat-file", "-e", `${onlineSha}^{commit}`], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (objCheck.status === 0) {
+      return "diverged";
+    }
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export type ChromeConnectorStatusReport = {
   ok: boolean;
   connectorRoot: string | null;
@@ -157,6 +241,7 @@ export type ChromeConnectorStatusReport = {
     isDefault: boolean;
     error?: string;
   };
+  deploy: DeployStatusReport;
   rpc: {
     online: boolean;
     extensionId: string | null;
@@ -462,6 +547,11 @@ export async function buildChromeConnectorStatus(
     },
     token: { path: null, present: false },
     uploadRoots: { roots: [], isDefault: false },
+    deploy: {
+      localSha: null,
+      onlineSha: null,
+      sync: "unknown",
+    },
     rpc: {
       online: false,
       extensionId: null,
@@ -487,6 +577,34 @@ export async function buildChromeConnectorStatus(
       error: toErrorMessage(error),
     };
   }
+
+  let localHeadSha: string | null = null;
+  try {
+    localHeadSha = (args.resolveLocalHeadSha ?? resolveLocalHeadSha)();
+  } catch {
+    localHeadSha = null;
+  }
+
+  let onlineBuildSha: string | null = null;
+  try {
+    onlineBuildSha = await (args.fetchOnlineBuildSha ?? fetchOnlineBuildSha)();
+  } catch {
+    onlineBuildSha = null;
+  }
+
+  let sync: DeploySyncStatus = "unknown";
+  try {
+    const compareShas = args.compareDeployShas ?? compareDeployShas;
+    sync = compareShas(localHeadSha, onlineBuildSha);
+  } catch {
+    sync = "unknown";
+  }
+
+  report.deploy = {
+    localSha: localHeadSha,
+    onlineSha: onlineBuildSha,
+    sync,
+  };
 
   // Token + 127.0.0.1 only, so the live probe runs even when no checkout was found: an installed CLI
   // pointing at a desktop-installed native host is a healthy state and must not read as "offline".
@@ -643,6 +761,9 @@ export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport)
   } else {
     lines.push(`  upload roots     : (none)`);
   }
+  const localShort = report.deploy.localSha ? report.deploy.localSha.slice(0, 7) : "unknown";
+  const onlineShort = report.deploy.onlineSha ? report.deploy.onlineSha.slice(0, 7) : "unknown";
+  lines.push(`  deploy status    : local ${localShort}  online ${onlineShort} (${report.deploy.sync})`);
   const rpc = report.rpc;
   if (rpc.online) {
     lines.push(

@@ -319,6 +319,9 @@ function createRemoteToolEventHandlers(opts: {
                     isStreaming: false,
                     content: projectedContent,
                     toolName,
+                    // F1: keep server-projected metadata (incl. executionLocation)
+                    // on the message so tool rows can render the actual host.
+                    ...(mergedMeta ? { metadata: mergedMeta } : {}),
                     toolPayload: {
                         ...(existing.toolPayload ?? {}),
                         toolName,
@@ -340,6 +343,9 @@ function createRemoteToolEventHandlers(opts: {
                     isStreaming: false,
                     toolName,
                     toolCallId: callId,
+                    // F1: surface executionLocation (and any other server metadata)
+                    // even on the no-prior-call fallback path.
+                    ...(mergedMeta ? { metadata: mergedMeta } : {}),
                     toolPayload: {
                         toolName,
                         status: resultStatus,
@@ -1163,6 +1169,11 @@ export const streamAgentChatTurnHandler = async (
             // 兜底用 streamResult.reasoning_content（provider 在 SSE 流内累计）。
             let reasoningBuffer = "";
             const activeToolMessages = new Map<string, any>();
+            // F2: 桌面本地 runtime 本机实际执行位置（handler 在 turn 开始时
+            // 投一条 execution_location 帧）。只进 tool 卡片 metadata，渲染层
+            // toolCallPresentation 已按「实际位置」展示；dialog 级
+            // runtimeBinding.target 是「意图」，两者必须区分。
+            let desktopToolExecutionLocation: unknown = undefined;
             const ensureAssistantMessageKeys = () => {
                 if (!assistantMessageKeys) {
                     assistantMessageKeys = createDialogMessageKeyAndId(dialogId);
@@ -1296,6 +1307,22 @@ export const streamAgentChatTurnHandler = async (
                                 isStreaming: true,
                                 toolName: toolEvent.toolName,
                                 toolCallId: callId,
+                                // F2: 实际执行位置（服务端/runtime 投影）挂到 tool
+                                // 卡片 metadata。优先事件自带 metadata（runtime
+                                // 投影层直接注入的同名字段），兜底用 turn 级
+                                // execution_location 帧。缺失/不合法时渲染层
+                                // projectToolExecutionLocation 收敛为 unknown。
+                                metadata: {
+                                    ...(isRecord(toolEvent.metadata) ? toolEvent.metadata : {}),
+                                    ...(desktopToolExecutionLocation !== undefined &&
+                                        !(isRecord(toolEvent.metadata) &&
+                                          toolEvent.metadata.executionLocation !== undefined)
+                                        ? { executionLocation: desktopToolExecutionLocation }
+                                        : {}),
+                                    ...(toolEvent.argumentsPreview
+                                        ? { argumentsPreview: toolEvent.argumentsPreview }
+                                        : {}),
+                                },
                                 ...(toolEvent.argumentsPreview
                                     ? {
                                         toolPayload: {
@@ -1303,9 +1330,6 @@ export const streamAgentChatTurnHandler = async (
                                                 command: toolEvent.argumentsPreview,
                                                 cmd: toolEvent.argumentsPreview,
                                             },
-                                        },
-                                        metadata: {
-                                            argumentsPreview: toolEvent.argumentsPreview,
                                         },
                                     }
                                     : {}),
@@ -1324,6 +1348,17 @@ export const streamAgentChatTurnHandler = async (
                                     ...existingMeta,
                                     ...toolEvent.metadata,
                                     ...(isError ? { error: true, message: toolEvent.message } : {}),
+                                    // 服务端/runtime 已在事件 metadata 带
+                                    // executionLocation 时尊重之；tool-call 阶段
+                                    // 已写入的值由 existingMeta 保留；仅当两边都
+                                    // 没有且 turn 级 execution_location 帧存在时
+                                    // 兜底补上，绝不覆盖已有值。
+                                    ...(existingMeta.executionLocation === undefined &&
+                                        (!isRecord(toolEvent.metadata) ||
+                                         toolEvent.metadata.executionLocation === undefined) &&
+                                        desktopToolExecutionLocation !== undefined
+                                        ? { executionLocation: desktopToolExecutionLocation }
+                                        : {}),
                                 };
                                 const toolResultMsg = {
                                     ...existing,
@@ -1355,6 +1390,12 @@ export const streamAgentChatTurnHandler = async (
                         const phase =
                             event.phase === "validating-context" ? "validating" : event.phase;
                         setDialogTurnPhase({ phase, dialogKey, turnId: turnPhaseTurnId ?? undefined });
+                    } else if (event.type === "execution_location") {
+                        // F2: 本机实际执行位置（runtime 已收敛）。存下后在每个
+                        // tool 卡片 metadata.executionLocation 上落地；渲染层
+                        // projectToolExecutionLocation 再校验一次，非法形状
+                        // （字段不全/相对路径）一律显示「执行位置未知」。
+                        desktopToolExecutionLocation = event.location;
                     } else if (event.type === "done") {
                         streamResult = event.result;
                     } else if (event.type === "error") {

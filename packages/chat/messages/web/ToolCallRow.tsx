@@ -5,12 +5,15 @@ import { safeParse, StatusIcon, withLiteralClass } from "./toolMessageShared";
 import { toolMessageStyles as toolStyles } from "./toolMessageStyles";
 import "./messagesStylexEscapeHatch.css";
 import type { ToolCallPresentation } from "./toolCallPresentation";
-import { isQuietDetailTool } from "./toolCallPresentation";
+import {
+  formatToolExecutionLocationLine,
+  isQuietDetailTool,
+} from "./toolCallPresentation";
 import {
   isMediaJobPendingConfirmation,
   toolMessageNeedsDefaultExpansion,
 } from "../toolPresentation";
-import { extractToolCallArgs } from "./toolDisplayName";
+import { createToolNameTranslator, extractToolCallArgs } from "./toolDisplayName";
 
 /**
  * Flat, expandable row for one ordinary grouped tool call (Phase 1).
@@ -178,6 +181,21 @@ export const ToolCallRow = memo(
             id={detailId}
             {...withLiteralClass("tool-call-row__body", toolStyles.rowDetail)}
           >
+            {/* F1: actual execution host (server-projected). Always rendered —
+                unknown state shows "执行位置未知", never blank. Distinct from the
+                dialog's intended runtimeBinding.target. */}
+            <div
+              data-hook="messages-esc-tool-call-row-exec-location"
+              {...withLiteralClass(
+                "tool-call-row__exec-location",
+                toolStyles.execLocation
+              )}
+            >
+              {formatToolExecutionLocationLine(
+                presentation.executionLocation,
+                createToolNameTranslator(t)
+              )}
+            </div>
             <ToolMessageContent
               toolName={message?.toolName}
               rawData={rawData}

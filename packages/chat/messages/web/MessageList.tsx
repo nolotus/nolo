@@ -64,7 +64,11 @@ import {
   shouldAutoCollapseToolGroup,
 } from "./assistantReplyPendingState";
 import { extractCustomId } from "core/prefix";
-import { useAllToolRuns } from "ai/tools/toolRunStore";
+import {
+  useAllToolRuns,
+  hydrateToolRunsFromMessages,
+} from "ai/tools/toolRunStore";
+import { finalizeConfirmedToolMessages } from "../toolThunks";
 import { LuBrain } from "react-icons/lu";
 import { getSavedMemories } from "../savedMemories";
 import { AssistantReplyPending } from "./AssistantReplyPending";
@@ -237,6 +241,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
     loopStopReason === "pending" && !hasUnresolvedConfirmRun
       ? null
       : loopStopReason;
+
+  // 历史装载回灌：确认卡查的是内存 toolRun store，而 run 只在本次会话的流里
+  // 创建。消息装载（刷新页面 / 重进对话 / 跨轮次 / 后台合并）后必须把
+  // toolPayload.status === "pending" 的持久化工具消息写回 store，否则确认卡
+  // 再也渲染不出来，待确认的操作永远点不到（2026-10-12 缺陷）。
+  // 幂等：已存在的 run 由 store 跳过，不会覆盖本会话已确认/执行中的状态。
+  //
+  // 反方向的对账（M1）：确认栏/媒体卡片走 executeToolRun，只推进内存 run、
+  // 从不回写消息行，落盘会一直是 pending —— 于是「点确认 → 执行成功 → 刷新」
+  // 会把已执行的确认复活，再点一次即重复执行（email_send 不可逆）。所以装载时
+  // 也把「run 已 succeeded、消息行仍 pending」的行写回 succeeded。
+  useEffect(() => {
+    hydrateToolRunsFromMessages(messages);
+    void finalizeConfirmedToolMessages(dispatch, messages);
+  }, [messages, dispatch]);
+
   const navigate = useNavigate();
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);

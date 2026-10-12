@@ -12,6 +12,7 @@ import {
   toolRunFailed,
   createToolRunId,
   toolRunSetPending,
+  collectConfirmedExecutedMessages,
 } from "ai/tools/toolRunStore";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 
@@ -159,6 +160,7 @@ const processToolData = createAsyncThunk(
         const toolPayload: ToolPayload = {
           toolName: canonicalName,
           status: "pending",
+          interaction,
           input: executionToolArgs,
           rawToolCall: toolCall,
           toolRunId,
@@ -250,6 +252,7 @@ const processToolData = createAsyncThunk(
       const toolPayload: ToolPayload = {
         toolName: canonicalName,
         status: awaitingUserConfirmation ? "pending" : "succeeded",
+        interaction,
         input: executionToolArgs,
         rawToolCall: toolCall,
         toolRunId,
@@ -308,6 +311,7 @@ const processToolData = createAsyncThunk(
         const toolPayload: ToolPayload = {
           toolName: canonicalName,
           status: "pending",
+          interaction: "confirm",
           input: confirmedInput,
           rawToolCall: toolCall,
           toolRunId,
@@ -373,6 +377,54 @@ const processToolData = createAsyncThunk(
     }
   }
 );
+
+/**
+ * 确认执行成功后把工具消息行写回 succeeded（M1）。
+ *
+ * 确认栏 / 媒体卡片走的是 executeToolRun：它只推进内存 run，从不回写消息行，
+ * 落盘的 toolPayload.status 因此永远是 pending。刷新后
+ * hydrateToolRunsFromMessages 会照着这行 pending 把 run 复活，卡片再次显示
+ * 「需要确认」——对 email_send 这类不可逆操作，再点一次就是重复发送。
+ *
+ * 这里按「内存 run 已 succeeded、消息行仍 pending」对账，把消息行写回 succeeded
+ * （Redux + 同一条 durable 写路径），hydrate 之后便不会再回灌它。调用点放在
+ * 消息装载处（MessageList 的 effect），因此与 email_send 的异步签发分支无关：
+ * 只有 executeToolRun 真正成功、run 变 succeeded 之后才会写。
+ *
+ * 只认 succeeded：失败/取消的 run 保持 pending，刷新后仍可重试（与修复前一致）。
+ */
+export async function finalizeConfirmedToolMessages(
+  dispatch: any,
+  messages: unknown
+): Promise<number> {
+  const rows = (Array.isArray(messages) ? messages : []) as Message[];
+  const candidates = collectConfirmedExecutedMessages<Message>(rows);
+
+  let applied = 0;
+  for (const { message, outputSummary } of candidates) {
+    const id = asOptionalTrimmedString(message?.id);
+    if (!id) continue;
+
+    const changes = {
+      isStreaming: false,
+      toolPayload: {
+        ...(message.toolPayload ?? {}),
+        status: "succeeded" as const,
+        toolRunId: asOptionalTrimmedString(message.toolRunId),
+        ...(outputSummary ? { summary: outputSummary } : {}),
+      },
+    };
+
+    dispatch(updateToolMessage({ id, changes: changes as any }));
+    await persistToolMessage(
+      dispatch,
+      { ...message, ...changes },
+      { isStreaming: false, soft: true }
+    );
+    applied += 1;
+  }
+  return applied;
+}
 
 export const handleToolCalls = createAsyncThunk(
   "message/handleToolCalls",
