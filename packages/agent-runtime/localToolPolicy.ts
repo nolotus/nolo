@@ -58,52 +58,9 @@ function parseToolAllowlist(value: string | undefined) {
     });
 }
 
-/**
- * 把模型侧的写法收敛成派发器认识的工具名。
- *
- * 顺序要紧：**先去空白、再剥 `functions.` 前缀**。反过来（先剥后去空白）时
- * `" functions.launchProcess"` 会整体漏过剥离，归一化结果仍是带前缀的名字；
- * 大小写同理（`FUNCTIONS.`）。两种拼写都不会解析到执行器，但守卫若与派发器
- * 归一化不一致就会留下判断缝隙——统一到这里，二者不可能再分家。
- */
-export function normalizeLocalToolName(toolName: string) {
+function normalizeLocalToolName(toolName: string) {
   return canonicalizeToolName(
-    String(toolName ?? "").trim().replace(/^functions\./i, ""),
-  );
-}
-
-/**
- * 执行任意命令的工具（归一化后的规范名）。凭据引用永远不得在它们里面解包：
- * 间接提示注入只要能借自由命令行把 `$nolo_cred:` 展成明文，密钥就被外带走了。
- */
-export const COMMAND_EXECUTING_TOOL_NAMES = [
-  "execShell",
-  "launchProcess",
-  "execBash",
-] as const;
-
-const COMMAND_EXECUTING_TOOL_SET = new Set<string>(
-  COMMAND_EXECUTING_TOOL_NAMES.map((name) => name.toLowerCase()),
-);
-
-/**
- * 该工具（无论模型写成什么拼写）会不会执行任意命令。
- *
- * 刻意做成**保守超集**：先按派发器同一套规则归一化，比对具名清单，再用子串
- * 兜底覆盖别名与将来新增的命令类工具。多拦一个不碰凭据的工具只是拒绝一次
- * 解包（fail-closed，无副作用），漏掉一个命令行则是密钥外泄——两边代价不对称，
- * 所以这里宁可宽。
- */
-export function isCommandExecutingTool(toolName: string): boolean {
-  const normalized = normalizeLocalToolName(toolName).toLowerCase();
-  if (COMMAND_EXECUTING_TOOL_SET.has(normalized)) return true;
-  // 兜底：别名（bash / execute_command / terminalCommand …）与将来新增的命令类
-  // 工具。用原始写法再查一遍，覆盖归一化不到的自定义命名空间。
-  return (
-    /shell|bash|command|terminal|script|exec/.test(normalized) ||
-    /shell|bash|command|terminal|script|exec/.test(
-      String(toolName ?? "").toLowerCase(),
-    )
+    String(toolName ?? "").replace(/^functions\./, "").trim(),
   );
 }
 

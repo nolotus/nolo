@@ -18,7 +18,6 @@ import {
 } from "./agentAliases";
 import type { TaskEvidenceInput } from "./client/agentRun";
 import type { AgentRuntimeRequestedMode } from "./agentRuntimeLocal";
-import { HIGH_RISK_MUTATION_TOOL_NAMES } from "../agent-runtime/runtimeToolSurface";
 
 // Re-export the local-CLI key check so orchestration files can stay
 // decoupled from `./agentAliases` for the small set of helpers they need.
@@ -139,7 +138,6 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--debug": true,
   "--ephemeral": true,
   "--memory-only": true,
-  "--read-only": true,
 };
 
 function isValuelessFlag(arg: string): boolean {
@@ -233,7 +231,7 @@ export function writeUsage(
   }
   output.write(
     "Usage: nolo agent run <agent> <message> [--local|--server|--auto] [--ephemeral|--memory-only] [--continue <dialogId>] [--cwd <path>]\n" +
-      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--read-only] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
+      "       nolo agent run --agent <agent> (--msg <message>|--msg-file <path>) [--image <url-or-path>] [--space <spaceId>] [--category <name>] [--inherit-from-dialog <dialog>] [--parent-dialog <dialog>] [--subject-dialog <dialog>] [--subject-ref <kind:id[:role]>] [--task-row-dbkey <key>] [--fallback-agent <agent>] (suggestions for agent to decide on quota) [--allowed-tool <tool>] [--blocked-tool <tool>] [--dod <cmd>] [--bg] [--timeout-ms <n>] [--events jsonl] [--no-stream] [--skill <dbKey-or-md-path>]\n"
   );
 }
 
@@ -287,13 +285,9 @@ export function parseAgentRunArgs(
   const parentDialogRef = explicitParentDialog
     ? parseDialogReference(explicitParentDialog)
     : undefined;
-  const explicitReadOnly = args.includes("--read-only");
-  const blockedToolNames = [
-    ...readRepeatedFlagValues(args, "--blocked-tool")
-      .map((value) => value.trim())
-      .filter(Boolean),
-    ...(explicitReadOnly ? HIGH_RISK_MUTATION_TOOL_NAMES : []),
-  ];
+  const blockedToolNames = readRepeatedFlagValues(args, "--blocked-tool")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const imageUrls = [
     ...readRepeatedFlagValues(args, "--image"),
     ...readRepeatedFlagValues(args, "--image-url"),

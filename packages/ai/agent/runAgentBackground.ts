@@ -12,7 +12,6 @@
 //   }));
 
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { resolveReadOnlyToolConstraints } from "../../agent-runtime/runtimeToolSurface";
 import type { RootState } from "app/store";
 import { selectCurrentServer } from "app/settings/serverSelectors";
 import { resolveRetryAfterMs } from "app/utils/retryAfter";
@@ -70,8 +69,6 @@ export interface RunAgentBackgroundArgs {
      * tools. Omit to keep the legacy interactive behavior.
      */
     runKind?: "interactive" | "subtask";
-    /** Read-only run: strip mutation tools (same constraint as CLI `--read-only`). */
-    readOnly?: boolean;
     /**
      * 幂等键：同一次逻辑 run 的所有 POST 重试共用同一个 key。服务端识别后，
      * 若该 key 已创建过 run，直接返回已存在的 dialogId，不重复创建后台任务。
@@ -263,7 +260,7 @@ export const runAgentBackground = createAsyncThunk<
     RunAgentBackgroundArgs,
     { state: RootState }
 >("agent/runBackground", async (args, { getState, signal: thunkSignal }) => {
-    const { agentKey, userInput, serverBase, spaceId, parentDialogId, ephemeral, runKind, readOnly, onStatusChange, onDone, onFailed } = args;
+    const { agentKey, userInput, serverBase, spaceId, parentDialogId, ephemeral, runKind, onStatusChange, onDone, onFailed } = args;
 
     const state = getState();
     const currentServer = normalizeServerOrigin(serverBase) || selectCurrentServer(state);
@@ -314,7 +311,6 @@ export const runAgentBackground = createAsyncThunk<
                         runtime: "react",
                         entrypoint: "background-agent-run",
                         capabilities: ["background", "sse-events"],
-                        ...(readOnly ? resolveReadOnlyToolConstraints() : {}),
                         ...(parentDialogId
                             ? {
                                   parentThreadId: parentDialogId,

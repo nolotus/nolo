@@ -68,6 +68,12 @@ export type PreparedAgentRuntime = {
   agentConfig: AgentRuntimeAgentConfig;
   activeAgentToolNames: string[];
   runtimeToolExecutionLimits: Record<string, unknown>;
+  localToolExecutors: Record<
+    string,
+    (
+      call: any,
+    ) => Promise<{ content: string; metadata?: Record<string, unknown> }>
+  >;
 };
 
 export const preparedAgentRuntimeCache = new Map<string, PreparedAgentRuntime>();

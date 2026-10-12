@@ -18,7 +18,6 @@
 //   - Otherwise (web/RN/desktop/CLI --server): dispatches runAgentBackground
 //     with waitForCompletion:false, which posts to /api/agent/run {background:true}
 
-import { RUN_TITLE_MAX, normalizeRunTitle } from "./runTitle";
 import { runAgentBackground } from "ai/agent/runAgentBackground";
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -31,8 +30,6 @@ import {
 import { getActiveDialogKey } from "chat/dialog/dialogRuntimeStore";
 import { extractCustomId } from "core/prefix";
 import { checkCredentialFanout } from "./credentialFanoutGuard";
-import { asTrimmedNonEmptyStringArray } from "core/stringArray";
-import { selectById } from "database/dbSlice";
 
 // ── 并发扇出凭证隔离（web/server 路径的进程内批次注册表）─────────────────
 //
@@ -88,7 +85,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
     name: "startAgentRun",
     description:
         "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话，派发后直接收尾等终态通知，禁止轮询；controlAgentRun 用于控制（叫停/追加指令）与异常诊断。" +
-        "【派发纪律】通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），未知凭证需串行或显式确认风险；最强私有通道留给审查，执行优先使用低成本通道。" +
+        "【派发纪律】通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；严禁在同一凭证上并发扇出，仅跨不同 credentialGroup 扇出；最强私有通道留给审查，执行优先使用低成本通道。" +
         (supportsWait
             ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
               "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
@@ -100,9 +97,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
         properties: {
             agentKey: {
                 type: "string",
-                description:
-                    "要启动的 Agent 的可运行 dbKey，必须是 listAgents 返回的 agentKey 字段（owned: agent-<userId>-<id>；public: agent-pub-<id>）或 readAgent 返回的 agentKey。" +
-                    "只接受精确 dbKey，不接受 name/handle/bare id。可选；省略或传 'self' 时自动使用当前 AgentKey（派发自身执行细分子任务）。",
+                description: "要启动的 Agent 的可运行 dbKey，必须是 listAgents 返回的 agentKey 字段（owned: agent-<userId>-<id>；public: agent-pub-<id>）或 readAgent 返回的 agentKey。只接受精确 dbKey，不接受 name/handle/bare id。",
             },
             task: {
                 type: "string",
@@ -117,13 +112,6 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 type: "string",
                 description: "可选。由 listAgents/readAgent 得到的可读 Agent 名称，用于 TUI 运行卡片展示。",
             },
-            title: {
-                type: "string",
-                description:
-                    `可选。这次子任务的短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」「Opus 本地拉取设计」）。` +
-                    "本地 TUI 的运行区用它标识这个 run（服务端 Web 路径只在返回值里回显，不持久化）。同一个 agent 并发多个 run 时名字完全相同、" +
-                    "brief 开头又常是同样的套话，强烈建议填写；不填则不显示标题，不会自动从任务正文生成。",
-            },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
             // review findings 与子任务产出都必须可回读——把选项藏起来比写一条
@@ -134,7 +122,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 description:
                     "可选。批次 id，用于把多个并行 run 归为一组，便于后续 controlAgentRun(list, batchId=...) 按批查询。" +
                     "未传时自动生成一个并在返回值中带回，调用方无需先创建。" +
-                    "同一 batchId 内的并发派发会做凭证组隔离检查：同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）；未知凭证的并发 run 会被拒绝。",
+                    "同一 batchId 内的并发派发会做凭证组隔离检查：credentialGroup 相同或未知的并发 run 会被拒绝。",
             },
             credentialGroup: {
                 type: "string",
@@ -152,15 +140,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             allowCredentialConcurrency: {
                 type: "boolean",
                 description:
-                    "可选。同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），传 false 显式收紧为禁止同凭证并发。默认 true。",
-                default: true,
-            },
-            readOnly: {
-                type: "boolean",
-                description:
-                    "可选。为 true 时移除专用写/改/删工具（writeFile/editFile/deleteMemory 等），" +
-                    "保留读文件、搜索与 shell，适合 reviewer/审计/探测。注意：shell 仍可写文件，" +
-                    "这不是沙箱，brief 里仍需写明只读要求。默认 false；只由此参数显式声明，不从 task 文本推断。",
+                    "可选。显式允许同一凭证组并发派发。默认 false。在用户授权同一凭据多任务并发或确认上游支持并发时使用。",
                 default: false,
             },
             trackTodo: {
@@ -192,7 +172,7 @@ export function buildStartAgentRunFunctionSchema(opts?: {
                 description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
             },
         },
-        required: ["task"],
+        required: ["agentKey", "task"],
     },
     };
 }
@@ -201,40 +181,21 @@ export function buildStartAgentRunFunctionSchema(opts?: {
 export const startAgentRunFunctionSchema = buildStartAgentRunFunctionSchema();
 
 interface StartAgentRunArgs {
-    agentKey?: string;
+    agentKey: string;
     task: string;
     input?: any;
     agentName?: string;
-    /** 短标题（展示用，归一化后落进 run 记录）。 */
-    title?: string;
     batchId?: string;
     /** listAgents 返回的 credentialGroup；缺省视为未知（见 schema 描述）。 */
     credentialGroup?: string;
     /** 显式确认未知凭证并发风险后强制放行；默认 false。 */
     allowUnknownCredential?: boolean;
-    /** 显式禁止同一 credentialGroup 的并发（默认允许）。 */
+    /** 显式允许同一凭据组并发派发；默认 false。 */
     allowCredentialConcurrency?: boolean;
-    /** 只读子任务：移除写/改/删类工具，保留读与 shell；默认 false。 */
-    readOnly?: boolean;
     wait?: boolean;
     /** wait=true 时控制返回内容：full=完整输出；summary=头尾截断总结。默认 full。 */
     resultMode?: "full" | "summary";
     parentDialogId?: string;
-}
-
-export function resolveCurrentAgentKeyForStartRun(
-    thunkApi: any,
-): string | undefined {
-    try {
-        const state = thunkApi?.getState?.();
-        if (!state) return undefined;
-        const currentDialogKey = getActiveDialogKey();
-        if (!currentDialogKey) return undefined;
-        const dialogConfig = selectById(state, currentDialogKey) as any;
-        return asTrimmedNonEmptyStringArray(dialogConfig?.cybots)[0];
-    } catch {
-        return undefined;
-    }
 }
 
 /**
@@ -267,36 +228,25 @@ export async function startAgentRunFunc(
         explicitBatchId ??
         `batch-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
 
-    const rawAgentKey = typeof agentKey === "string" ? agentKey.trim() : "";
-    const currentAgentKey = resolveCurrentAgentKeyForStartRun(thunkApi);
-    const effectiveAgentKey =
-        (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
-            ? (currentAgentKey ?? rawAgentKey)
-            : rawAgentKey;
-
-    if (!effectiveAgentKey) {
-        throw new Error("startAgentRun: 缺少 agentKey 参数，且无法识别当前 Agent。");
+    if (!agentKey) {
+        throw new Error("startAgentRun: 缺少 agentKey 参数。");
     }
     if (!task || typeof task !== "string") {
         throw new Error("startAgentRun: 缺少有效的 task 文本描述。");
     }
 
-    const effectiveAllowCredentialConcurrency =
-        args.allowCredentialConcurrency ?? true;
-
     // 并发扇出凭证隔离：仅对**显式 batchId**（调用方在组织并发扇出）生效；
     // 未显式分批的派发各自持有新批次 id，互不干扰。credentialGroup 缺省视为
-    // 未知——未知与任何条目并发都拒绝，不静默放行；
-    // 相同已知 credentialGroup 默认允许并发，仅显式 allowCredentialConcurrency: false 收紧拒绝。
+    // 未知——未知与任何条目并发都拒绝，不静默放行。
     if (explicitBatchId) {
         const nowMs = Date.now();
         pruneBatchFanoutRegistry(nowMs);
         const active = batchFanoutRegistry.get(explicitBatchId) ?? [];
         const verdict = checkCredentialFanout({
             active,
-            candidate: { agentKey: effectiveAgentKey, credentialGroup: args.credentialGroup },
+            candidate: { agentKey, credentialGroup: args.credentialGroup },
             allowUnknownCredential: args.allowUnknownCredential === true,
-            allowCredentialConcurrency: effectiveAllowCredentialConcurrency,
+            allowCredentialConcurrency: args.allowCredentialConcurrency === true,
         });
         if (!verdict.allowed) throw new Error(verdict.message);
     }
@@ -319,14 +269,13 @@ export async function startAgentRunFunc(
     try {
         const bgResult = await dispatch(
             runAgentBackground({
-                agentKey: effectiveAgentKey,
+                agentKey,
                 userInput: content,
                 // wait 缺省必须归一为 false：runAgentBackground 只对
                 // waitForCompletion === false 走「拿到 dialogId 立即返回」快路径，
                 // undefined 会误入同步等待分支。
                 waitForCompletion: wait === true,
                 runKind: "subtask",
-                ...(args.readOnly === true ? { readOnly: true } : {}),
                 ...(parentDialogId ? { parentDialogId } : {}),
             })
         ).unwrap();
@@ -354,7 +303,7 @@ export async function startAgentRunFunc(
             const entries = batchFanoutRegistry.get(explicitBatchId) ?? [];
             entries.push({
                 runId,
-                agentKey: effectiveAgentKey,
+                agentKey,
                 ...(typeof args.credentialGroup === "string" && args.credentialGroup.trim()
                     ? { credentialGroup: args.credentialGroup.trim() }
                     : {}),
@@ -366,11 +315,7 @@ export async function startAgentRunFunc(
         // rawData carries only real identity fields; the display fallback chain
         // lives in resolveRunLabel so a key never masquerades as a name.
         const resolvedName = agentName?.trim() || bgResult.agentName || bgResult.name;
-        const title = normalizeRunTitle(args.title);
-        // The label is the NAME layer only — the title rides its own row on
-        // the card, so letting it win here would leave the identity row empty
-        // (and the same holds for any machine-side use of the same function).
-        const identity = { agentName: resolvedName, agentKey: effectiveAgentKey, runId };
+        const identity = { agentName: resolvedName, agentKey, runId };
         // A clipped copy of the task rides along so every renderer can say what
         // this run is *for*. Without it two concurrent runs are indistinguishable
         // on screen — same card, same status, different work. Clipped rather than
@@ -389,13 +334,11 @@ export async function startAgentRunFunc(
                 batchId: effectiveBatchId,
                 ...(resolvedName ? { agentName: resolvedName } : {}),
                 ...(taskPreview ? { taskPreview } : {}),
-                ...(title ? { title } : {}),
                 payloadMetrics,
             },
             displayData: formatStartRunCard(resolveRunLabel(identity), status, {
                 task: taskPreview,
                 runId,
-                ...(title ? { title } : {}),
             }),
             metadata: {
                 payloadMetrics,

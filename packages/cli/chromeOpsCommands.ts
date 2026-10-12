@@ -1,10 +1,10 @@
 /**
- * `nolo browser <op>` (legacy alias: `nolo chrome <op>`) — the operation half of the browser group:
- * read / click / type against the user's live browser (the machine-setup half — status / install / reload —
+ * `nolo chrome <op>` — the operation half of the nolo chrome group: read / click / type
+ * against the user's live Chrome (the machine-setup half — status / install / reload —
  * lives in chromeCommands.ts).
  *
- * A thin CLI surface over the connector RPC (Chrome: 127.0.0.1:38947, Firefox: 127.0.0.1:38948, token-authenticated):
- * the same bridge the desktop runtime exposes to agents as the browser_* tools, made
+ * A thin CLI surface over the connector RPC (127.0.0.1:38947, token-authenticated):
+ * the same bridge the desktop runtime exposes to agents as the chrome_* tools, made
  * usable from the TUI, scripts and plain terminal sessions.
  *
  * Design notes:
@@ -21,7 +21,6 @@ import { toErrorMessage } from "core/errorMessage";
 
 import {
   createChromeConnectorClient,
-  createVerifiedChromeConnectorClient,
   type ChromeConnectorClient,
   type ChromeConnectorRequestPayload,
 } from "../desktop-chrome-connector/chromeConnector";
@@ -34,10 +33,7 @@ type ChromeIo = {
 
 export type ChromeOpsCommandDeps = {
   client?: ChromeConnectorClient;
-  createClient?: (browser?: "chrome" | "firefox") => ChromeConnectorClient;
   io?: Partial<ChromeIo>;
-  env?: Record<string, string | undefined>;
-  probeBrowser?: (browser: "chrome" | "firefox") => Promise<boolean>;
 };
 
 type ChromeSubcommandSpec = {
@@ -54,19 +50,6 @@ function wantsHelp(args: string[]) {
 
 function readTrimmedOption(args: string[], flag: string): string {
   return (readOption(args, flag) ?? "").trim();
-}
-
-/** `--browser chrome|firefox`（`--browser=firefox` 亦可）；未给返回 undefined，非法值返回 null。 */
-function readBrowserFlag(args: string[]): "chrome" | "firefox" | null | undefined {
-  const equalsForm = args.find((arg) => arg.startsWith("--browser="));
-  const raw =
-    equalsForm !== undefined
-      ? equalsForm.slice("--browser=".length)
-      : readOption(args, "--browser");
-  if (raw === undefined) return undefined;
-  const value = raw.trim();
-  if (value === "chrome" || value === "firefox") return value;
-  return null;
 }
 
 function readAllOptions(args: string[], flag: string): string[] {
@@ -87,33 +70,6 @@ function readIntOption(args: string[], flag: string, usage: string): number | un
   if (raw === undefined) return undefined;
   const value = Number.parseInt(raw, 10);
   if (!Number.isFinite(value)) {
-    throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
-  }
-  return value;
-}
-
-function readNonNegativeIntOption(
-  args: string[],
-  flag: string,
-  usage: string,
-): number | undefined {
-  const equalsForm = args.find((arg) => arg.startsWith(`${flag}=`));
-  const raw =
-    equalsForm !== undefined
-      ? equalsForm.slice(`${flag}=`.length)
-      : readOption(args, flag);
-  if (raw === undefined) {
-    if (args.includes(flag)) {
-      throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
-    }
-    return undefined;
-  }
-  const trimmed = raw.trim();
-  if (!/^\d+$/.test(trimmed)) {
-    throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
-  }
-  const value = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(value) || value < 0) {
     throw new Error(`Invalid ${flag} <N>. Usage: ${usage}`);
   }
   return value;
@@ -144,12 +100,12 @@ function requireTarget(args: string[], usage: string): ChromeConnectorRequestPay
 export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   "list-tabs": {
     action: "list_tabs",
-    usage: "nolo browser list-tabs",
+    usage: "nolo chrome list-tabs",
     payload: () => ({}),
   },
   "open-tab": {
     action: "open_tab",
-    usage: "nolo browser open-tab --url <url> [--active]",
+    usage: "nolo chrome open-tab --url <url> [--active]",
     payload: (args, usage) => {
       const url = readTrimmedOption(args, "--url");
       if (!url) {
@@ -160,13 +116,13 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   "close-tab": {
     action: "close_tab",
-    usage: "nolo browser close-tab --tab <id>",
+    usage: "nolo chrome close-tab --tab <id>",
     payload: (args, usage) => ({ tabId: requireTabId(args, usage) }),
   },
   "read-page": {
     action: "read_page",
     usage:
-      "nolo browser read-page --tab <id> [--selector <css>] [--detail compact|full] [--max-elements N] [--offset N] [--viewport]",
+      "nolo chrome read-page --tab <id> [--selector <css>] [--detail compact|full] [--max-elements N]",
     payload: (args, usage) => {
       const payload: ChromeConnectorRequestPayload = { tabId: requireTabId(args, usage) };
       const selector = readTrimmedOption(args, "--selector");
@@ -175,15 +131,12 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
       if (detail) payload.detail = detail;
       const maxElements = readIntOption(args, "--max-elements", usage);
       if (maxElements !== undefined) payload.maxElements = maxElements;
-      const offset = readNonNegativeIntOption(args, "--offset", usage);
-      if (offset !== undefined) payload.offset = offset;
-      if (args.includes("--viewport")) payload.viewportOnly = true;
       return payload;
     },
   },
   click: {
     action: "click",
-    usage: "nolo browser click --tab <id> (--ref <elementRef> | --selector <css>)",
+    usage: "nolo chrome click --tab <id> (--ref <elementRef> | --selector <css>)",
     payload: (args, usage) => ({
       tabId: requireTabId(args, usage),
       ...requireTarget(args, usage),
@@ -192,7 +145,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   type: {
     action: "type",
     usage:
-      "nolo browser type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append]",
+      "nolo chrome type --tab <id> (--ref <elementRef> | --selector <css>) --text <text> [--append]",
     payload: (args, usage) => {
       const text = readOption(args, "--text");
       // A value that starts with "--" is a swallowed flag, not text: fail instead of
@@ -211,7 +164,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   upload: {
     action: "set_files",
     usage:
-      "nolo browser upload --tab <id> (--ref <elementRef> | --selector <css>) --file <path> [--file <path>...]",
+      "nolo chrome upload --tab <id> (--ref <elementRef> | --selector <css>) --file <path> [--file <path>...]",
     payload: (args, usage) => {
       const files = readAllOptions(args, "--file");
       if (files.length === 0) {
@@ -229,7 +182,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   press: {
     action: "press",
-    usage: "nolo browser press --tab <id> --key <key>",
+    usage: "nolo chrome press --tab <id> --key <key>",
     payload: (args, usage) => {
       const key = readTrimmedOption(args, "--key");
       if (!key) {
@@ -240,7 +193,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   scroll: {
     action: "scroll",
-    usage: "nolo browser scroll --tab <id> [--delta-x N] [--delta-y N]",
+    usage: "nolo chrome scroll --tab <id> [--delta-x N] [--delta-y N]",
     payload: (args, usage) => {
       const payload: ChromeConnectorRequestPayload = { tabId: requireTabId(args, usage) };
       const deltaX = readIntOption(args, "--delta-x", usage);
@@ -252,7 +205,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   screenshot: {
     action: "screenshot",
-    usage: "nolo browser screenshot --tab <id> [--out <path>] [--full-page]",
+    usage: "nolo chrome screenshot --tab <id> [--out <path>] [--full-page]",
     payload: (args, usage) => ({
       tabId: requireTabId(args, usage),
       ...(args.includes("--full-page") ? { fullPage: true } : {}),
@@ -260,7 +213,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   "read-console": {
     action: "read_console",
-    usage: "nolo browser read-console --tab <id> [--limit N]",
+    usage: "nolo chrome read-console --tab <id> [--limit N]",
     payload: (args, usage) => {
       const payload: ChromeConnectorRequestPayload = { tabId: requireTabId(args, usage) };
       const limit = readIntOption(args, "--limit", usage);
@@ -270,7 +223,7 @@ export const CHROME_OPS_SUBCOMMANDS: Record<string, ChromeSubcommandSpec> = {
   },
   "read-network": {
     action: "read_network",
-    usage: "nolo browser read-network --tab <id> [--limit N] [--include-assets]",
+    usage: "nolo chrome read-network --tab <id> [--limit N] [--include-assets]",
     payload: (args, usage) => {
       const payload: ChromeConnectorRequestPayload = { tabId: requireTabId(args, usage) };
       const limit = readIntOption(args, "--limit", usage);
@@ -287,63 +240,26 @@ export function renderChromeOpsHelp(): string {
     "(the desktop bridge; the same RPC the browser_* agent tools use — legacy `chrome_*` names still work).",
     "",
     "Usage:",
-    "  nolo browser <subcommand> [flags]",
-    "  nolo chrome <subcommand> [flags]  # compatibility alias",
+    "  nolo chrome <subcommand> [flags]",
     "",
     "Subcommands:",
     ...Object.values(CHROME_OPS_SUBCOMMANDS).map(
-      (spec) => `  ${spec.usage.replace(/^nolo browser /, "")}`,
+      (spec) => `  ${spec.usage.replace(/^nolo chrome /, "")}`,
     ),
     "",
     "Notes:",
-    "  --ref takes an elementRef copied from `nolo browser read-page` (revision-scoped,",
+    "  --ref takes an elementRef copied from `nolo chrome read-page` (revision-scoped,",
     "    preferred over --selector); --selector takes a CSS selector.",
     "  Actions the connector classifies as irreversible (Submit / Delete / Pay ...)",
     "    are refused with CONFIRMATION_REQUIRED — ask the user to perform them.",
     "  read-console / read-network / upload work on Chrome only (Firefox lacks chrome.debugger).",
-    "  --browser chrome|firefox selects which connector endpoint serves the call (default",
-    "    auto-detects single online browser: chrome = 127.0.0.1:38947, firefox = 127.0.0.1:38948);",
-    "    the wrong browser is refused.",
     "  Every subcommand prints the connector's raw JSON result; failures exit 1.",
-    "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or per-browser NOLO_CHROME_CONNECTOR_PORT /",
-    "    NOLO_FIREFOX_CONNECTOR_PORT (default http://127.0.0.1:38947/rpc).",
+    "  Endpoint: NOLO_CHROME_CONNECTOR_RPC_URL or http://127.0.0.1:38947/rpc.",
   ];
   return lines.join("\n");
 }
 
 export const CHROME_OPS_HELP_TEXT = renderChromeOpsHelp();
-
-// 探测读 process.env
-async function defaultProbeBrowser(
-  browser: "chrome" | "firefox",
-): Promise<boolean> {
-  try {
-    const client = createChromeConnectorClient({
-      browser,
-      fetchImpl: (input, init) => {
-        return fetch(input, {
-          ...init,
-          signal: AbortSignal.timeout(400),
-        });
-      },
-    });
-    const info = (await client.request("connector_info", {})) as
-      | { extensionId?: string }
-      | undefined;
-    return typeof info?.extensionId === "string";
-  } catch (error) {
-    if ((error as { code?: string })?.code === "CHROME_CONNECTOR_UNAVAILABLE") {
-      return false;
-    }
-    const handshakeError = new Error(
-      `探测到端点但握手失败：${toErrorMessage(error)}`,
-    ) as Error & { code?: string; details?: unknown };
-    handshakeError.code =
-      (error as { code?: string })?.code || "CHROME_CONNECTOR_HANDSHAKE_FAILED";
-    handshakeError.details = (error as { details?: unknown })?.details;
-    throw handshakeError;
-  }
-}
 
 export async function runChromeOpsCommand(
   subcommand: string,
@@ -358,20 +274,12 @@ export async function runChromeOpsCommand(
 
   const spec = CHROME_OPS_SUBCOMMANDS[subcommand];
   if (!spec) {
-    io.stderr(`Unknown browser subcommand "${subcommand}".\n\n${CHROME_OPS_HELP_TEXT}`);
+    io.stderr(`Unknown chrome subcommand: ${subcommand}\n\n${CHROME_OPS_HELP_TEXT}`);
     return 1;
   }
   if (wantsHelp(args)) {
     io.stdout(CHROME_OPS_HELP_TEXT);
     return 0;
-  }
-
-  const browserFlag = readBrowserFlag(args);
-  if (browserFlag === null) {
-    io.stderr(
-      `Invalid --browser value: expected "chrome" or "firefox". Usage: ${spec.usage}`,
-    );
-    return 1;
   }
 
   let payload: ChromeConnectorRequestPayload;
@@ -384,89 +292,7 @@ export async function runChromeOpsCommand(
 
   let result: unknown;
   try {
-    const env = deps.env ?? process.env;
-    let client: ChromeConnectorClient;
-
-    if (deps.client) {
-      client = deps.client;
-    } else {
-      let targetBrowser: "chrome" | "firefox" | undefined = browserFlag;
-
-      if (!targetBrowser && !env.NOLO_CHROME_CONNECTOR_RPC_URL) {
-        const probe = deps.probeBrowser ?? defaultProbeBrowser;
-        const [chromeResult, firefoxResult] = await Promise.allSettled([
-          probe("chrome"),
-          probe("firefox"),
-        ]);
-
-        const chromeOnline =
-          chromeResult.status === "fulfilled" && chromeResult.value === true;
-        const firefoxOnline =
-          firefoxResult.status === "fulfilled" && firefoxResult.value === true;
-
-        if (chromeOnline && firefoxOnline) {
-          const error = new Error(
-            "Both Chrome and Firefox connectors are online. Specify --browser chrome or --browser firefox.",
-          ) as Error & { code: string };
-          error.code = "MULTIPLE_BROWSERS_AVAILABLE";
-          throw error;
-        }
-
-        if (chromeOnline) {
-          targetBrowser = "chrome";
-        } else if (firefoxOnline) {
-          targetBrowser = "firefox";
-        } else {
-          if (chromeResult.status === "rejected") {
-            const reason = toErrorMessage(chromeResult.reason);
-            const err = new Error(
-              reason.startsWith("探测到端点但握手失败：")
-                ? reason
-                : `探测到端点但握手失败：${reason}`,
-            ) as Error & { code?: string; details?: unknown };
-            err.code =
-              (chromeResult.reason as { code?: string })?.code ||
-              "CHROME_CONNECTOR_HANDSHAKE_FAILED";
-            err.details = (chromeResult.reason as { details?: unknown })?.details;
-            throw err;
-          }
-          if (firefoxResult.status === "rejected") {
-            const reason = toErrorMessage(firefoxResult.reason);
-            const err = new Error(
-              reason.startsWith("探测到端点但握手失败：")
-                ? reason
-                : `探测到端点但握手失败：${reason}`,
-            ) as Error & { code?: string; details?: unknown };
-            err.code =
-              (firefoxResult.reason as { code?: string })?.code ||
-              "CHROME_CONNECTOR_HANDSHAKE_FAILED";
-            err.details = (firefoxResult.reason as { details?: unknown })?.details;
-            throw err;
-          }
-          const chromePort = env.NOLO_CHROME_CONNECTOR_PORT || 38947;
-          const firefoxPort = env.NOLO_FIREFOX_CONNECTOR_PORT || 38948;
-          const chromeEndpoint = `http://127.0.0.1:${chromePort}/rpc`;
-          const firefoxEndpoint = `http://127.0.0.1:${firefoxPort}/rpc`;
-          const error = new Error(
-            `Chrome connector RPC endpoint is unavailable at ${chromeEndpoint} or ${firefoxEndpoint}.`,
-          ) as Error & { code: string };
-          error.code = "CHROME_CONNECTOR_UNAVAILABLE";
-          throw error;
-        }
-      }
-
-      if (deps.createClient) {
-        client = deps.createClient(targetBrowser);
-      } else if (targetBrowser) {
-        client = createVerifiedChromeConnectorClient({
-          client: createChromeConnectorClient({ browser: targetBrowser }),
-          expectedBrowser: targetBrowser,
-        });
-      } else {
-        client = createChromeConnectorClient();
-      }
-    }
-
+    const client = deps.client ?? createChromeConnectorClient();
     result = await client.request(spec.action, payload);
   } catch (error) {
     const code =

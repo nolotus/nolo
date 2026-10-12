@@ -180,6 +180,7 @@ const TOOL_VERBS: Record<string, string> = {
   releasePreview: "释放预览",
   captureVisualState: "截图检查",
   appDeploy: "部署应用",
+  setTodoList: "更新计划",
   // Not ordinary rows, but the model classifies them without leaking raw names.
   ask_user: "提问",
   runStreamingAgent: "转交",
@@ -239,6 +240,7 @@ const ARTIFACT_MODE_TOOLS = new Set([
   "ziweiChart",
   "read_x_post",
   "createTable",
+  "setTodoList",
 ]);
 
 const INTERACTIVE_MODE_TOOLS = new Set(["ask_user"]);
@@ -593,7 +595,6 @@ export function toolCallKey(message: ToolCallMessageInput | undefined | null): s
 
 export function resolveToolCallMode(toolName: string | undefined): ToolCallMode {
   const normalized = normalizeToolNameKey(toolName);
-  if (normalized === "show_interaction") return "artifact";
   if (INTERACTIVE_MODE_TOOLS.has(normalized)) return "interactive";
   if (HANDOFF_MODE_TOOLS.has(normalized)) return "handoff";
   if (ARTIFACT_MODE_TOOLS.has(normalized)) return "artifact";
