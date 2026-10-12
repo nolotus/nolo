@@ -604,11 +604,18 @@ export const streamAgentChatTurnHandler = async (
             ? explicitTarget.kind === "machine" ? asTrimmedString(explicitTarget.machineId) : null
             : resolveRemoteBoundMachineId(configuredBoundMachineId);
 
+        // An explicit machine selection is user intent, not a legacy agent binding.
+        // Reject malformed selections before any local runtime/CLI fallback.
+        const hasExplicitMachineTarget = explicitTarget?.kind === "machine";
+        if (hasExplicitMachineTarget && !boundMachineId) {
+            return rejectWithValue("显式选择的电脑目标缺少 machineId，请重新选择执行电脑。");
+        }
+
         // ── Remote runtime route ─────────────────────────────────────────────
-        // runtimeBinding selects the bound machine. Without it, custom provider
-        // requests stay on the normal OpenAI-compatible path, where
-        // useServerProxy decides server proxy vs current-client direct fetch.
-        if ((agentConfig.apiSource === "cli" && !explicitTarget) || (boundMachineId && !getIsDesktopApp())) {
+        // Explicit machine targets route on every client, including desktop and
+        // the current machine. Keep the desktop stale-binding exclusion for
+        // legacy agent machineId defaults; never reinterpret them as user intent.
+        if (hasExplicitMachineTarget || (agentConfig.apiSource === "cli" && !explicitTarget) || (boundMachineId && !getIsDesktopApp())) {
             console.info("[streamAgentChatTurn] Triggered CLI/machine route. apiSource:", agentConfig.apiSource, "boundMachineId:", boundMachineId, "agentKey:", agentKey);
             const currentState = getState() as RootState;
             const w =
@@ -1131,7 +1138,7 @@ export const streamAgentChatTurnHandler = async (
             dialogId,
         });
 
-        if (shouldUseDesktopLocalRuntime(agentConfig)) {
+        if (shouldUseDesktopLocalRuntime(agentConfig, explicitTarget)) {
             const desktopMessageMetadata = buildMessageMetadata(agentConfig);
             const w =
                 typeof globalThis !== "undefined" && (globalThis as any).window
