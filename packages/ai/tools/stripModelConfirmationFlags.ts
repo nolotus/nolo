@@ -39,10 +39,27 @@ const MODEL_DIALOG_BINDING_STRIPPED_TOOLS = new Set([
  */
 export function stripModelToolArgs<T>(canonicalToolName: string, value: T): T {
   const base = stripModelConfirmationFlags(value);
-  if (!MODEL_DIALOG_BINDING_STRIPPED_TOOLS.has(canonicalToolName)) return base;
   if (!base || typeof base !== "object" || Array.isArray(base)) return base;
 
+  // `confirmationToken` 是「owner 当次确认」的一次性凭证，只能由受信任的 UI 确认路径
+  // （executeToolRun 的 inputOverride）注入：模型给出的任何 token 都必须剥掉，因此对
+  // 所有工具生效而不只限于下面的集合（新增工具自动受保护，不会漏加）。
+  const withoutToken = Object.fromEntries(
+    Object.entries(base as Record<string, unknown>).filter(
+      ([key]) => key !== "confirmationToken"
+    )
+  ) as T;
+
+  if (!MODEL_DIALOG_BINDING_STRIPPED_TOOLS.has(canonicalToolName)) {
+    return withoutToken;
+  }
+  if (!withoutToken || typeof withoutToken !== "object" || Array.isArray(withoutToken)) {
+    return withoutToken;
+  }
+
   return Object.fromEntries(
-    Object.entries(base as Record<string, unknown>).filter(([key]) => key !== "dialogId" && key !== "confirmationToken" && key !== "autoApproveCredits")
+    Object.entries(withoutToken as Record<string, unknown>).filter(
+      ([key]) => key !== "dialogId" && key !== "autoApproveCredits"
+    )
   ) as T;
 }

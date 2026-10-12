@@ -119,6 +119,7 @@ import {
   emailSearchFunctionSchema,
   emailSendFunc,
   emailSendFunctionSchema,
+  emailSendPreviewFunc,
   emailUpdateTagsFunc,
   emailUpdateTagsFunctionSchema,
   emailWaitForFunc,
@@ -1171,6 +1172,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     id: "email_send",
     schema: emailSendFunctionSchema,
     executor: emailSendFunc,
+    previewExecutor: emailSendPreviewFunc,
     description: {
       name: "email_send",
       description: "以 agent 已绑定邮箱身份发送邮件。",
@@ -1178,6 +1180,7 @@ const baseToolDefinitions: ToolDefinition[] = [
     },
     behavior: "action",
     uiGroup: "data",
+    interaction: "confirm",
     riskLevel: "medium",
     costLevel: "low",
     defaultConsent: "ask",

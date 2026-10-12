@@ -254,6 +254,66 @@ export function formatFileOperationsFromMessages(
 export const TOOL_RESULT_TRUNCATE_CHARS = 4000;
 
 /**
+ * 摘要输入的绝对 token 上限（Opus 5.5 B′ 裁决）：延迟只取决于摘要输入的绝对
+ * token 数，与窗口占比无关，因此不能随窗口放大。该值由单次真实 spike（约 5k
+ * 字符/s、目标 p50<30s）线性外推，**未用真实 1M 量级样本校准**，落地后需一次
+ * 真实复测（涉及订阅通道用量，需授权）再定稿。floor(0.5*window) 项只保证摘要
+ * 请求本身装得进窗口。
+ */
+export const SUMMARY_INPUT_MAX_TOKENS = 30_000;
+
+/** 摘要输入 token 预算 = min(绝对上限, floor(0.5*window))；非法窗口回落绝对上限。 */
+export function computeSummaryInputTokenCap(contextWindow: number): number {
+  const halfWindow =
+    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+      ? Math.floor(contextWindow * 0.5)
+      : SUMMARY_INPUT_MAX_TOKENS;
+  return Math.max(1, Math.min(SUMMARY_INPUT_MAX_TOKENS, halfWindow));
+}
+
+/** 按 token 二分把文本截到严格 ≤ maxTokens（CJK 用 estimateTokenCount，不按 4 char/token）。 */
+function capTextToTokenBudget(text: string, maxTokens: number): string {
+  const marker = `\n\n[... summary input capped to ${maxTokens} tokens ...]`;
+  const markerTokens = estimateTokenCount(marker);
+  const budget = Math.max(0, maxTokens - markerTokens);
+  if (estimateTokenCount(text) <= budget) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (estimateTokenCount(text.slice(0, mid)) <= budget) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${text.slice(0, lo)}${marker}`;
+}
+
+/**
+ * 把已按 `${role}: ${text}` 拼好的消息列表总量压到 ≤ maxTotalTokens。
+ * 从最新（数组尾）往旧累加：放得下的较新消息保留，放不下的较旧消息整条丢弃
+ * （越旧越狠 = 先丢最旧，绝不丢最新上下文）。每条只算一次 token，O(n)，
+ * 不做逐条折半 + 每轮整串重算（那会在 1M 长历史上同步阻塞数十秒）。纯函数。
+ */
+function capSummaryInputToTokenBudget(items: string[], maxTotalTokens: number): string {
+  if (items.length === 0) return "";
+  const sepTokens = estimateTokenCount("\n");
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const t = estimateTokenCount(items[i]);
+    const sep = kept.length > 0 ? sepTokens : 0;
+    if (kept.length > 0 && used + sep + t > maxTotalTokens) break;
+    used += sep + t;
+    kept.push(items[i]);
+  }
+  kept.reverse();
+  const result = kept.join("\n");
+  // 严格兜底：仅当最新单条本身就超预算时触发，对结果按 token 截到 ≤ 上限。
+  return estimateTokenCount(result) > maxTotalTokens
+    ? capTextToTokenBudget(result, maxTotalTokens)
+    : result;
+}
+
+/**
  * 疑似证据行的信号（纯正则，无依赖）。
  *
  * 2026-10-06 压缩评估复评（父方向）：**总上限保持 4000 不变**，只从被截区间里
@@ -463,19 +523,28 @@ export function formatMessagesForSummaryWithTruncation(
     tool_calls?: Array<{ function?: { name?: string } }>;
   }>,
   maxToolResultChars: number = TOOL_RESULT_TRUNCATE_CHARS,
+  maxTotalTokens?: number,
 ): string {
-  return msgs
-    .map((msg) => {
-      const rawContent = serializeMessageContent(msg.content) || "";
-      const truncated = truncateContentForSummary(
-        msg.role,
-        rawContent,
-        maxToolResultChars,
-      );
-      const text = truncated || formatMessageContentFallback(msg);
-      return `${msg.role}: ${text}`;
-    })
-    .join("\n");
+  const items = msgs.map((msg) => {
+    const rawContent = serializeMessageContent(msg.content) || "";
+    const truncated = truncateContentForSummary(
+      msg.role,
+      rawContent,
+      maxToolResultChars,
+    );
+    const text = truncated || formatMessageContentFallback(msg);
+    return `${msg.role}: ${text}`;
+  });
+  // Opus B′：摘要输入绝对 token 上限。tool 单条截断管不住 user/assistant 全量，
+  // 这里对总量封顶（越旧越狠），不传 maxTotalTokens 时保持旧行为逐字节不变。
+  if (
+    typeof maxTotalTokens === "number" &&
+    Number.isFinite(maxTotalTokens) &&
+    maxTotalTokens > 0
+  ) {
+    return capSummaryInputToTokenBudget(items, maxTotalTokens);
+  }
+  return items.join("\n");
 }
 // --- 压缩埋点 metrics (P1-8) ---
 

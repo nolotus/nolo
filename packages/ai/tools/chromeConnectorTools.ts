@@ -157,7 +157,7 @@ export const chromeCloseTabFunctionSchema = baseSchema(
 
 export const chromeReadPageFunctionSchema = baseSchema(
   "browser_read_page",
-  "Read a compact view of a browser tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for browser_click_element and browser_type instead of guessing selectors; use region to focus a big page. Does not read cookies or profile databases.",
+  "Read a compact view of a browser tab: visible text (hard cap 6000 chars) plus short-lived elementRefs (hard cap 35) and a pageRevision. Reuse those refs for browser_click_element and browser_type instead of guessing selectors; use region to focus a big page. When the element list exceeds one page, continue by passing the returned nextOffset as offset. Does not read cookies or profile databases.",
   {
     tabId,
     region: {
@@ -172,6 +172,15 @@ export const chromeReadPageFunctionSchema = baseSchema(
       type: "string",
       enum: ["compact", "full"],
       description: "compact (default) returns budgeted text; full raises the budget and adds capped HTML.",
+    },
+    offset: {
+      type: "integer",
+      minimum: 0,
+      description: "Optional element offset for paging. When an element list exceeds one page, continue by passing the returned nextOffset as offset.",
+    },
+    viewportOnly: {
+      type: "boolean",
+      description: "Optional. When true, only elements intersecting the current viewport are listed.",
     },
   },
   ["tabId"],

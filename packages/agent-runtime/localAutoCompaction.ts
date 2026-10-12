@@ -13,11 +13,14 @@ import { createHash } from "node:crypto";
 
 import { planCompression } from "../ai/context/planCompression";
 import { getModelContextWindow } from "../ai/llm/getModelContextWindow";
+import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { canonicalizeToolName } from "./toolNameAliases";
 import {
   COMPACTION_SUMMARY_SYSTEM_PROMPT,
   COMPACTION_SUMMARY_SCHEMA_VERSION,
   formatMessagesForSummaryWithTruncation,
+  TOOL_RESULT_TRUNCATE_CHARS,
+  computeSummaryInputTokenCap,
   formatFileOperationsFromMessages,
   buildCompactionUserContent,
   buildCompactionMetricsFromPlan,
@@ -613,7 +616,11 @@ export async function maybeAutoCompactLocalHistory(args: {
     const msgsToCompress =
       plan.msgsToCompress as PlanCompressionBridgeMessage[];
     // 用共享模块的截断版格式化，避免大工具结果撑爆摘要请求（P0-2）。
-    const messagesText = formatMessagesForSummaryWithTruncation(msgsToCompress);
+    const messagesText = formatMessagesForSummaryWithTruncation(
+      msgsToCompress,
+      TOOL_RESULT_TRUNCATE_CHARS,
+      computeSummaryInputTokenCap(contextWindow),
+    );
     const fileOpsText = formatFileOperationsFromMessages(
       msgsToCompress,
       canonicalizeToolName,
@@ -624,6 +631,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       fileOpsText,
     });
     emitPhase({ kind: "waiting-provider" });
+    const compactionT0 = Date.now();
     const timeoutMs = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0 ? args.timeoutMs : undefined;
     const requestController = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -749,6 +757,18 @@ export async function maybeAutoCompactLocalHistory(args: {
       summaryUsage: result?.usage as Record<string, unknown> | undefined,
     });
     console.log(formatCompactionMetricsLog(metrics));
+    // Opus B′ 诊断：只记数字与 model，不记内容——用于判断绝对上限是否合适、
+    // 瓶颈在输入(prefill)还是输出(generation)，自然触发收集后驱动 timeout/上限调整。
+    console.log(
+      `[compaction-timing] ${JSON.stringify({
+        model: result?.model ?? args.model ?? null,
+        inputTokens: estimateTokenCount(messagesText),
+        prevSummaryTokens: estimateTokenCount(existingSummary),
+        outputChars: newSummary.length,
+        elapsedMs: Date.now() - compactionT0,
+        outcome: "success",
+      })}`,
+    );
 
     emitPhase({ kind: "compaction-end" });
     return {

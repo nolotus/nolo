@@ -30,6 +30,13 @@ export const DEFAULT_CONTEXT_WINDOW = 256_000;
 // fuzzy 字符串勿删勿改名，否则该源码断言失败。注意：测试并未 import 这两个具名常量。
 const QWEN_3_6_CONTEXT_WINDOW = 262_144;
 const GLM_5_2_CONTEXT_WINDOW = 1_000_000;
+// GPT-6.1 Sol：Codex OAuth 通道实时 context_window = 500000（client 0.159.2 / 0.161.0 均返回 500k，
+// max_context_window 872000 仅为上限参考，不作默认值）。
+const GPT_6_1_SOL_CONTEXT_WINDOW = 500_000;
+// 边界匹配：允许 provider 前缀（如 openai/gpt-6.1-sol）、effort 后缀（如 -medium）与显示名
+// 空格分隔（"GPT-6.1 Sol" 小写后为 "gpt-6.1 sol"）；拒绝 gpt-6.1-solar 等无关前缀；
+// 不得改成裸 includes("gpt-6.1")，以免误伤 astra / luna。
+const GPT_6_1_SOL_PATTERN = /(^|\/)gpt-6\.1[- ]sol(?![a-z])/;
 
 const ANTIGRAVITY_EFFORT_SUFFIXES = [
   "-tiered",
@@ -114,6 +121,7 @@ function fuzzyContextWindow(normalizedName: string): number | undefined {
   if (normalizedName.includes("glm-5.3") || normalizedName.includes("glm5.3")) return 1_050_000;
   if (normalizedName.includes("glm-5.2") || normalizedName.includes("glm5.2")) return GLM_5_2_CONTEXT_WINDOW;
   if (normalizedName.includes("deepseek")) return 1_000_000;
+  if (GPT_6_1_SOL_PATTERN.test(normalizedName)) return GPT_6_1_SOL_CONTEXT_WINDOW;
   if (normalizedName.includes("gpt-5") || normalizedName.includes("gpt-4.1")) return 1_047_576;
   // Cursor OAuth 模型（providerRegistry cursor-oauth preset，id 以 Cursor GetUsableModels 为准）。
   // Grok 4.5 / Claude 4.6 / Gemini 3.1 Pro 在 Cursor 内均为 1M 级上下文；claude-4.6-* 必须先于

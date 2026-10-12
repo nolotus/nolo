@@ -56,10 +56,11 @@ export const CODEX_RESPONSES_URL =
  * Upstream gates the `/backend-api/codex/models` whitelist by this value
  * (verified live 2026-09-30): <0.155 hides gpt-6-sol/gpt-6-luna, <0.159 hides
  * gpt-6.1-sol — posting those models below the threshold fails with
- * "model is not supported when using Codex with a ChatGPT account". 0.159.2 is
- * the current codex-rs release, so bump this when upstream ships newer models.
+ * "model is not supported when using Codex with a ChatGPT account". 0.162.1 is
+ * the current stable codex-rs release (npm view, 2026-10-12), so bump this when
+ * upstream ships newer models.
  */
-export const CODEX_CLIENT_VERSION = "0.159.2";
+export const CODEX_CLIENT_VERSION = "0.162.1";
 
 /** Official Codex login/request originator (Nolo auth flow uses the same value). */
 export const CODEX_ORIGINATOR = "codex_cli_rs";
@@ -304,7 +305,50 @@ async function readSseEvents(response: Response): Promise<Record<string, unknown
   });
 }
 
-const defaultSleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason;
+}
+
+/**
+ * 退避等待，可被 signal 中断：abort 时立即以 signal.reason 拒绝并清理定时器，
+ * 不等满退避时长。注入的 sleep（测试用）迟到的 resolve/reject 会被吞掉，不产生未处理拒绝。
+ */
+function waitBackoff(
+  ms: number,
+  signal: AbortSignal | undefined,
+  injectedSleep?: (ms: number) => Promise<unknown>,
+): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      signal?.removeEventListener("abort", onAbort);
+      if (timer !== undefined) clearTimeout(timer);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (injectedSleep) {
+      injectedSleep(ms).then(
+        () => {
+          cleanup();
+          resolve();
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    } else {
+      timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+    }
+  });
+}
 
 /** 单次 Codex 请求：不含重试，失败以 { status, body.error } 形式返回。 */
 async function callCodexResponsesOnce(
@@ -419,7 +463,6 @@ export async function fetchCodexResponsesCompletion(
     };
   }
 
-  const sleep = args.sleep ?? defaultSleep;
   const requestedMaxAttempts = Number(args.maxAttempts);
   const maxAttempts = Number.isFinite(requestedMaxAttempts)
     ? Math.min(10, Math.max(1, Math.floor(requestedMaxAttempts)))
@@ -429,8 +472,15 @@ export async function fetchCodexResponsesCompletion(
   let result = await callCodexResponsesOnce(args, accountId, timingTracker);
   for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
     if (!RETRYABLE_CODEX_STREAM_STATUSES.has(result.status)) break;
-    if (args.signal?.aborted) break;
-    await sleep(CODEX_STREAM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+    // 取消不再当作 503 结果返回：抛出 signal.reason（与原生 fetch 取消语义一致），
+    // 调用方据此区分取消与真实上游失败，且取消后不再发起下一次 fetch。
+    throwIfAborted(args.signal);
+    await waitBackoff(
+      CODEX_STREAM_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+      args.signal,
+      args.sleep,
+    );
+    throwIfAborted(args.signal);
     result = await callCodexResponsesOnce(args, accountId, timingTracker);
   }
   return result;

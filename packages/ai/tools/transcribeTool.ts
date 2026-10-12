@@ -4,10 +4,11 @@ import { buildMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
 export const transcribeSchema = {
   name: "transcribe",
   description:
-    "长音频/视频转写工具。支持传入已有媒体文件 fileId 或已有媒体任务 jobId，按需转写指定时间范围（转写引擎由服务端默认策略决定）。长任务会在后台运行并在完成后唤醒 agent；调用前会校验费用授权，未授权需确认。",
+    "长音频/视频转写工具。使用 action=status 和已有 jobId 可只读查询进度；询问任务进度时使用此模式。默认启动/续办转写会校验费用授权，未授权需确认。",
   parameters: {
     type: "object",
     properties: {
+      action: { type: "string", enum: ["transcribe", "status"], description: "status 只读查询已有任务进度；用户询问进度时使用 status。" },
       fileId: {
         type: "string",
         description: "媒体文件 ID（与 jobId 二选一）。若无 jobId，需传 fileId 启动转写。",
@@ -33,20 +34,35 @@ export const transcribeSchema = {
 };
 
 export type TranscribeToolInput = {
+  action?: "transcribe" | "status";
   fileId?: string;
   jobId?: string;
   fromSec?: number;
   toSec?: number;
   sourceLang?: string;
+  confirmationToken?: string;
 };
 
 export async function transcribeFunc(
   input: TranscribeToolInput,
   thunkApi: any,
 ): Promise<any> {
-  const { fileId, jobId, fromSec, toSec, sourceLang } = input ?? {};
+  const { action = "transcribe", fileId, jobId, fromSec, toSec, sourceLang, confirmationToken } = input ?? {};
+  if (action === "status" && !jobId) throw new Error("status 模式必须提供已有 jobId");
+  if (action === "status" && (fileId || fromSec !== undefined || toSec !== undefined || sourceLang)) throw new Error("status 模式仅接受 jobId");
   let resolvedJobId = jobId;
-
+  if (resolvedJobId) {
+    const lookup = await callToolApi(thunkApi, `/api/media-jobs/${encodeURIComponent(resolvedJobId)}`, {}, { withAuth: true, method: "GET" });
+    const job = assertMediaJob(lookup?.job ?? lookup);
+    if (action === "status") return formatJobStatus(job, resolvedJobId);
+    if ((fromSec !== undefined && fromSec !== job.scope?.fromSec) || (toSec !== undefined && toSec !== job.scope?.toSec))
+      throw new Error("已有 jobId 的 scope 与请求不匹配；拒绝复用/执行");
+    if (sourceLang && sourceLang !== job.sourceLang)
+      throw new Error("已有 jobId 的 sourceLang 与请求不匹配；拒绝复用/执行");
+    if (job.stageArtifacts?.transcribe) return formatJobStatus(job, resolvedJobId);
+    if (job.status === "running") return formatJobStatus(job, resolvedJobId);
+  }
+  if (action === "status") throw new Error("status 模式必须提供已有 jobId");
   if (!resolvedJobId) {
     if (!fileId) {
       throw new Error("transcribe 工具必须提供 fileId 或 jobId");
@@ -70,6 +86,7 @@ export async function transcribeFunc(
   const stepBody: Record<string, unknown> = {
     step: "transcribe",
     waitMs: 60_000,
+    ...(confirmationToken ? { confirmationToken } : {}),
   };
 
   let data: any;
@@ -144,4 +161,36 @@ export async function transcribeFunc(
     jobId: resolvedJobId,
     rawData: data,
   };
+}
+
+function assertMediaJob(value: any): any {
+  if (!value || typeof value !== "object" || typeof value.status !== "string" || typeof value.id !== "string") {
+    throw new Error("媒体任务响应结构无效");
+  }
+  return value;
+}
+
+function formatJobStatus(job: any, jobId: string): any {
+  const hasTranscribeArtifact = Boolean(job.stageArtifacts?.transcribe);
+  const done = hasTranscribeArtifact;
+  const total = job.progress?.total;
+  const completed = job.progress?.done;
+  const progress = Number.isInteger(total) && total > 0 && Number.isInteger(completed) && completed >= 0 && completed <= total
+    ? { completed, total, scope: "job" as const } : undefined;
+  const result: any = {
+    status: done ? "done" : job.status,
+    jobId,
+    ...(job.stage ? { stage: job.stage } : {}),
+    ...(progress ? { progress } : {}),
+    ...(hasTranscribeArtifact ? { reused: true } : {}),
+    rawData: job,
+  };
+  if (hasTranscribeArtifact) {
+    result.summary = `转写产物已就绪（jobId=${jobId}）。请调用 readArtifact 读取内容。`;
+  } else if (job.status === "done") {
+    result.summary = `媒体任务已结束但没有转写产物（jobId=${jobId}），请核查任务状态。`;
+  } else {
+    result.summary = `媒体任务状态：${job.status}${job.stage ? `，当前阶段：${job.stage}` : ""}（jobId=${jobId}）。`;
+  }
+  return result;
 }
