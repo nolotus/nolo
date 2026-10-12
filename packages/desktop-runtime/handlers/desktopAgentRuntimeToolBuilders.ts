@@ -33,7 +33,7 @@ import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { NOLO_CLUSTER_SERVERS, API_ENDPOINTS } from "database/config";
 import { resolveDesktopRuntimeEntrypoint } from "agent-runtime/desktopRuntimeEntrypoint";
-import { createChromeConnectorClient, createVerifiedChromeConnectorClient, executeChromeConnectorTool, type ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
+import { createChromeConnectorClientResolver, createVerifiedChromeConnectorClient, executeChromeConnectorTool, type ChromeConnectorClient } from "../../desktop-chrome-connector/chromeConnector";
 import { PUBLIC_DEEPSEEK_V4_FLASH_AGENT_KEY } from "core/builtinAgents";
 
 export const DESKTOP_SERVER_TABLE_TOOL_NAMES = ["createTable", "addTableRow", "addTableRows", "updateTableRow", "updateTableRows"] as const;
@@ -427,16 +427,28 @@ export function buildDesktopChromeConnectorPolicyToolNames(args: {
 }
 
 export function buildDesktopChromeConnectorToolExecutors(args?: {
+  /**
+   * Single-client injection for target-less calls (tests). Wrapped in the verified client exactly
+   * like the production default; an explicit `target` in the call still routes to that browser's
+   * own endpoint — this client never swallows a routing request.
+   */
   client?: ChromeConnectorClient;
+  /** Per-target client overrides (tests); missing entries get real per-browser endpoints. */
+  clients?: Partial<Record<"chrome" | "firefox", ChromeConnectorClient>>;
 }) {
-  const client = createVerifiedChromeConnectorClient({
-    client: args?.client ?? createChromeConnectorClient(),
+  const clientForTarget = createChromeConnectorClientResolver({
+    clients: {
+      ...(args?.clients ?? {}),
+      ...(args?.client
+        ? { default: createVerifiedChromeConnectorClient({ client: args.client }) }
+        : {}),
+    },
   });
   return Object.fromEntries(
     CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.map((toolName) => [
       toolName,
       (call: AgentRuntimeToolCallInput) => executeChromeConnectorTool({
-        client,
+        clientForTarget,
         call,
       }),
     ]),

@@ -16,9 +16,14 @@ import {
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
 
 import type { Message, ToolPayload, ToolErrorPayload } from "./types";
+import { toolResultNeedsUserConfirmation } from "./toolPresentation";
 import { addToolMessage, updateToolMessage } from "./messageSlice";
 import { persistToolMessage } from "./persistToolMessage";
 import { dialogMessageKey } from "database/keys";
+import {
+  CONFIRMATION_INPUT_KEYS,
+  stripModelToolArgs,
+} from "ai/tools/stripModelConfirmationFlags";
 
 const TOOL_ARGS_SENTINELS = [
   "<|tool_calls_section_end|>",
@@ -107,11 +112,12 @@ const processToolData = createAsyncThunk(
       isRecord(toolArgs) && isRecord(toolArgs._activity)
         ? toolArgs._activity
         : undefined;
-    const executionToolArgs =
+    const withoutActivity =
       isRecord(toolArgs) &&
       Object.prototype.hasOwnProperty.call(toolArgs, "_activity")
         ? (({ _activity: _ignored, ...rest }) => rest)(toolArgs)
         : toolArgs;
+    const executionToolArgs = stripModelToolArgs(canonicalName, withoutActivity);
 
     const inputSummary = JSON.stringify(executionToolArgs).slice(0, 400);
 
@@ -224,19 +230,26 @@ const processToolData = createAsyncThunk(
 
       const rawData = toolResult?.rawData ?? toolResult;
       const llmContext = asOptionalTrimmedString(toolResult?.llmContext);
+      // 「等待用户确认」不是成功也不是失败：标 succeeded 会让待确认行显示成已完成，
+      // 与卡片上的确认按钮自相矛盾。保持 pending 直到真人授权后服务端给出真实状态。
+      const awaitingUserConfirmation = toolResultNeedsUserConfirmation(canonicalName, rawData);
 
       const summary =
         asOptionalTrimmedString(toolResult?.displayData) ||
-        defaultSummary(canonicalName, "succeeded");
+        defaultSummary(canonicalName, awaitingUserConfirmation ? "pending" : "succeeded");
 
-      toolRunSucceeded({
-        id: toolRunId,
-        outputSummary: summary,
-      });
+      if (!awaitingUserConfirmation) {
+        toolRunSucceeded({
+          id: toolRunId,
+          outputSummary: summary,
+        });
+      } else {
+        toolRunSetPending({ id: toolRunId });
+      }
 
       const toolPayload: ToolPayload = {
         toolName: canonicalName,
-        status: "succeeded",
+        status: awaitingUserConfirmation ? "pending" : "succeeded",
         input: executionToolArgs,
         rawToolCall: toolCall,
         toolRunId,
@@ -267,14 +280,14 @@ const processToolData = createAsyncThunk(
     } catch (e: any) {
       const errorMessage = toErrorMessage(e);
       const structured = getToolResultErrorData(e);
-      const requiresConfirmation =
-        structured?.code === "self_evolution_requires_confirmation" ||
-        structured?.code === "agent_update_requires_confirmation";
+      const confirmationKey = structured?.code
+        ? CONFIRMATION_INPUT_KEYS[structured.code]
+        : undefined;
 
-      if (requiresConfirmation) {
+      if (confirmationKey) {
         const confirmedInput = {
           ...(executionToolArgs ?? {}),
-          __confirmedSelfEvolution: true,
+          [confirmationKey]: true,
         };
         const summary =
           (typeof structured?.displayData === "string" &&
@@ -307,7 +320,9 @@ const processToolData = createAsyncThunk(
           rawResult:
             structured?.rawData !== undefined
               ? structured.rawData
-              : { error: "self_evolution_requires_confirmation" },
+              : // 按实际确认码回填（此分支内 code 必在 CONFIRMATION_INPUT_KEYS 中），
+                // 不再对所有工具写死 self_evolution 文案。
+                { error: structured?.code },
           summary,
           toolName: canonicalName,
           toolRunId,

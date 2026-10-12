@@ -56,6 +56,7 @@ import { AppRoutePaths } from "app/constants/routePaths";
 import { useLoopStopReason } from "./useLoopStopReason";
 import { LoopStopBadge } from "./LoopStopBadge";
 import { isHiddenOrchestratorToolMessage } from "../toolPresentation";
+import { toolMessageNeedsDefaultExpansion } from "../toolPresentation";
 import {
   hasVisibleAssistantContent,
   isAssistantToolStub,
@@ -73,9 +74,6 @@ import { messageRowSpacing } from "./messageRowSpacing";
 
 /** The pending indicator stands in for the assistant reply that is about to arrive. */
 const PENDING_ASSISTANT_ENTRY = { type: "single", message: { role: "assistant" } };
-import TodoCard from "./TodoCard";
-import { selectLatestConversationTodo } from "../todoState";
-import { selectSystemBuiltinSkills } from "app/settings/settingSlice";
 
 const LOAD_THRESHOLD = 50;
 const DEFAULT_SCROLL_CONTAINER_SELECTOR = ".MainLayout__main";
@@ -183,12 +181,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
   // 任一 user 消息）自动撤下，避免"先看到 AI，我的消息才补上"的错序闪烁。
   const quickChatFirstMessageText = getQuickChatFirstMessageText(
     location.state as QuickChatRouteState,
-  );
-  const systemBuiltinSkills = useAppSelector(selectSystemBuiltinSkills);
-  const conversationTodoEnabled = systemBuiltinSkills["conversation-todo"] !== false;
-  const currentTodo = useMemo(
-    () => selectLatestConversationTodo(messages),
-    [messages],
   );
   const displayMessages = useMemo(() => {
     if (!quickChatFirstMessageText) return messages;
@@ -551,13 +543,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
     scroller.scrollTo({ top: 0, behavior: "smooth" });
   }, [getScroller]);
 
-  // The pinned current snapshot replaces its source tool row. Older snapshots
-  // remain in history for replay, while the latest one is shown exactly once.
-  const renderMessages = useMemo(() => {
-    const sourceId = currentTodo?.sourceMessageId;
-    if (!conversationTodoEnabled || !sourceId) return displayMessages;
-    return displayMessages.filter((message: any) => message?.id !== sourceId);
-  }, [conversationTodoEnabled, currentTodo?.sourceMessageId, displayMessages]);
+  const renderMessages = displayMessages;
 
   // Memoize entry list so map work is skipped when only scroll chrome re-renders.
   // wakeEvents（dialog record 上的后台 run 终态事件）按 createdAt 归并进消息流；
@@ -606,12 +592,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
           </div>
         )}
 
-        {conversationTodoEnabled && currentTodo && (
-          <div className="chat-messages__todo-current" data-testid="current-conversation-todo">
-            <TodoCard rawData={{ todos: currentTodo.todos }} />
-          </div>
-        )}
-
         {renderEntries.map((entry, entryIndex) => {
           if (entry.type === "wake-event") {
             // 后台 run 终态系统行：紧凑单行，非用户气泡、非 assistant 消息。
@@ -632,17 +612,22 @@ const MessagesList: React.FC<MessagesListProps> = ({
             // Expand/collapse only — header status icons follow each group's tools.
             // Historical groups (user after) fold even while a later turn runs;
             // idle turns without a final reply also fold so chrome can settle.
+            // 未决交互卡（报价待选档）不能被 group 折叠吞掉：两路自动折叠都必须让位。
+            const hasPendingChoiceCard = entry.messages.some((message) =>
+              toolMessageNeedsDefaultExpansion(message),
+            );
             const canCollapse =
-              shouldAutoCollapseToolGroup({
+              !hasPendingChoiceCard &&
+              (shouldAutoCollapseToolGroup({
                 entries: renderEntries,
                 groupIndex: entryIndex,
                 isRunning,
                 hasStreamingMessage,
               }) ||
-              // A stale session-level running flag must not keep settled tool
-              // UI open. The row's own streaming flag is the reliable UI fact.
-              (!hasStreamingMessage &&
-                entry.messages.every((message) => !message?.isStreaming));
+                // A stale session-level running flag must not keep settled tool
+                // UI open. The row's own streaming flag is the reliable UI fact.
+                (!hasStreamingMessage &&
+                  entry.messages.every((message) => !message?.isStreaming)));
             const settledMessages =
               canCollapse && !hasStreamingMessage
                 ? entry.messages.map((message) =>
@@ -665,7 +650,6 @@ const MessagesList: React.FC<MessagesListProps> = ({
                       messages={settledMessages}
                       activityMessages={entry.activityMessages}
                       canCollapse={canCollapse}
-                      conversationTodoEnabled={conversationTodoEnabled}
                     />
                   </MessageRowErrorBoundary>
                 </div>
@@ -706,7 +690,7 @@ const MessagesList: React.FC<MessagesListProps> = ({
               >
                 <MessageRowErrorBoundary>
                   {isTool ? (
-                    <ToolMessageItem message={msg} conversationTodoEnabled={conversationTodoEnabled} />
+                    <ToolMessageItem message={msg} />
                   ) : isIntermediateNarration ? (
                     <IntermediateNarrationRow message={msg} />
                   ) : (

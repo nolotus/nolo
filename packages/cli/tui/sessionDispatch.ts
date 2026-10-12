@@ -14,7 +14,9 @@ import {
   resolveCatalogPlatformAgents,
 } from "./agentCatalog";
 import { resolveAgentSwitchTarget } from "./agentPicker";
-import { detectFileReferences, detectImagePaths, summarizeAttachment } from "./pasteImage";
+import { detectFileReferences, detectSubmittedImagePaths, summarizeAttachment, fileUriToPath, isWslEnvironment, mapWindowsPathToWsl, resolveImageSource } from "./pasteImage";
+import { detectSubmittedMediaPaths, parseTranscribeArgs } from "./mediaAttachment";
+import { classifyMediaPath } from "../../ai/transcription/mediaPreprocess";
 import { parseCliLocale, setCliLocale, t } from "./i18n";
 import { renderRecentDiagnostics } from "./recentDiagnostics";
 import {
@@ -34,6 +36,7 @@ import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
+import { resolveAuthGuidanceState } from "../client/authGuidance";
 import type { TuiState, TuiInputResult, ThinkingDisplayMode } from "./sessionTypes";
 
 export { DEFAULT_TUI_AGENT_KEY };
@@ -86,6 +89,7 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
     dialogOwnerId,
     dialogLabel: dialogEnvValue ?? "new",
     profileName: asOptionalTrimmedString(env.NOLO_PROFILE) ?? "local",
+    showAuthGuidance: resolveAuthGuidanceState(env).guidanceNeeded,
     serverUrl: (env.NOLO_SERVER || env.BASE_URL || DEFAULT_TUI_SERVER_URL).replace(
       /\/+$/,
       ""
@@ -183,15 +187,19 @@ export function handleTuiInput(
   }
 
   if (!isLikelySlashCommand(trimmed)) {
-    const hints = detectImagePaths(trimmed, state.cwd);
-    // 只 strip 可读路径：unreadable token（文件不存在 / 被沙盒拦）必须保留在
-    // 原文里——用户打字提到尚不存在的 .png 不应被静默删字，路径文本本身是
-    // 兜底失败时的唯一线索。
-    const readableHints = hints.filter((hint) => !hint.unreadable);
-    const unreadableHints = hints.filter((hint) => hint.unreadable);
-    const stripped = stripImageTokens(trimmed, readableHints);
-    const finalMessage = stripped.length > 0 ? stripped : trimmed;
-    const imagePaths = readableHints.map((hint) => hint.resolvedPath);
+    const detected = detectSubmittedImagePaths(trimmed, state.cwd);
+    const { hints, unreadableHints, imagePaths } = detected;
+    // 音视频路径：剥离可读 token（与图片同思路），路径走 action.mediaPaths
+    // 由 router 在 turn 前转写。unreadable 的音视频 token 保留在原文（路径
+    // 文本是兜底线索）。pendingTranscripts（/transcribe 产物）此刻 prepend
+    // 进发给模型的消息本体并消费掉——用户转写完通常就着内容提问。
+    const mediaDetected = detectSubmittedMediaPaths(detected.message, state.cwd);
+    const pendingTranscriptBlocks = state.pendingTranscripts ?? [];
+    const messageBody =
+      pendingTranscriptBlocks.length > 0
+        ? [...pendingTranscriptBlocks, mediaDetected.message].join("\n\n")
+        : mediaDetected.message;
+    const finalMessage = messageBody.trim().length > 0 ? messageBody : detected.message;
     // 轻量文件引用：只做本地存在性确认，**不读内容、不上传**。路径文本原样留在
     // message 里（模型看到的是路径字符串，不是文件内容），我们只回一行明确提示，
     // 避免用户误以为模型已经看过文件。图片已由上面单独处理，这里排除它们。
@@ -204,11 +212,21 @@ export function handleTuiInput(
           ? `image path unreadable: ${hint.resolvedPath}`
           : `found image: ${hint.resolvedPath}`,
       ),
+      ...mediaDetected.hints.map((hint) =>
+        hint.unreadable
+          ? `media path unreadable: ${hint.resolvedPath}`
+          : t("mediaFoundHint", hint.resolvedPath),
+      ),
       ...fileRefs.map((ref) => t("pasteFilePathHint", ref.resolvedPath)),
     ];
 
+    const nextState =
+      pendingTranscriptBlocks.length > 0
+        ? { ...state, pendingTranscripts: undefined }
+        : state;
+
     return {
-      nextState: state,
+      nextState,
       output: previewLines.join("\n"),
       action: {
         type: "chat",
@@ -217,6 +235,9 @@ export function handleTuiInput(
         runtimeMode: state.runtimeMode,
         ...(state.dialogId ? { continueDialogId: state.dialogId } : {}),
         ...(imagePaths.length > 0 ? { imagePaths } : {}),
+        ...(mediaDetected.mediaPaths.length > 0
+          ? { mediaPaths: mediaDetected.mediaPaths }
+          : {}),
         ...(unreadableHints.length > 0
           ? { unreadableImagePaths: unreadableHints.map((h) => h.resolvedPath) }
           : {}),
@@ -741,14 +762,11 @@ export function handleTuiInput(
         output: t("customizeHint"),
       };
     case "/login": {
-      // `/login` 无参数：仍输出 MVP 提示（老用户肌肉记忆），但补一句新能力；
-      // `/login --server <url>` 等带参形式直接发起 TUI 内登录流。
-      if (!argText) {
-        return {
-          nextState: state,
-          output: `${t("loginHint")}\n${t("loginTuiStart")}`,
-        };
-      }
+      // `/login` (with or without args) now always launches the in-TUI
+      // device-code browser flow. No-arg resolves to DEFAULT_NOLO_SERVER_URL
+      // inside runTuiLogin/parseTuiLoginArgs, so bare `/login` is the intended
+      // "just log me in" path — the old MVP "set AUTH_TOKEN" hint is retired
+      // (env auth still works, it's just documented in `nolo login --help`).
       return {
         nextState: state,
         output: "",
@@ -766,6 +784,50 @@ export function handleTuiInput(
         output: "Starting self-update...",
         action: { type: "self-update" },
       };
+    case "/transcribe": {
+      const parsed = parseTranscribeArgs(argText);
+      if (!parsed.ok) {
+        return {
+          nextState: state,
+          output:
+            parsed.error === "usage"
+              ? t("transcribeUsage")
+              : `${t("transcribeArgError", parsed.error)}\n${t("transcribeUsage")}`,
+        };
+      }
+      // 解析 path 为绝对路径（含 ~/相对路径、file://、WSL 映射），把 media
+      // 检测那套归一化借过来：路径在 router 执行时才触碰磁盘，这里先做
+      // 「看起来是媒体文件」的扩展名把关。
+      const resolved = (() => {
+        let c = parsed.args.path;
+        const u = fileUriToPath(c);
+        if (u !== null) c = u;
+        if (isWslEnvironment()) c = mapWindowsPathToWsl(c);
+        return resolveImageSource(c, state.cwd);
+      })();
+      if (!classifyMediaPath(resolved)) {
+        return {
+          nextState: state,
+          output: t("transcribeNotMedia", resolved),
+        };
+      }
+      return {
+        nextState: state,
+        output: "",
+        action: {
+          type: "transcribe",
+          path: resolved,
+          ...(parsed.args.fromSec !== undefined
+            ? { fromSec: parsed.args.fromSec }
+            : {}),
+          ...(parsed.args.toSec !== undefined
+            ? { toSec: parsed.args.toSec }
+            : {}),
+          ...(parsed.args.lang ? { lang: parsed.args.lang } : {}),
+          ...(parsed.args.denoise ? { denoise: parsed.args.denoise } : {}),
+        },
+      };
+    }
     case "/version":
       return {
         nextState: state,

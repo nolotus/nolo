@@ -42,6 +42,47 @@ export const NOLO_CONNECTOR_EXTENSION_IDS: readonly string[] = [
 ];
 export const NOLO_CHROME_CONNECTOR_PROTOCOL_VERSION = "2";
 
+/** Connector builds the RPC layer can route to independently. */
+export type ConnectorBrowserTarget = "chrome" | "firefox";
+
+/** Default RPC ports: Chrome keeps 38947 (the long-standing contract); Firefox gets its own. */
+export const NOLO_CHROME_CONNECTOR_DEFAULT_PORTS: Record<ConnectorBrowserTarget, number> = {
+  chrome: 38947,
+  firefox: 38948,
+};
+
+/** Extension id each build reports in `connector_info`; used to refuse a misrouted connection. */
+export const CONNECTOR_BROWSER_EXTENSION_IDS: Record<ConnectorBrowserTarget, string> = {
+  chrome: NOLO_CHROME_CONNECTOR_EXTENSION_ID,
+  firefox: NOLO_FIREFOX_CONNECTOR_EXTENSION_ID,
+};
+
+/**
+ * Which env var overrides which browser's endpoint.
+ *
+ * `NOLO_CHROME_CONNECTOR_RPC_URL` stays the single-endpoint override for both browsers (explicit
+ * opt-in: whoever sets it takes responsibility for routing, e.g. a proxy that already splits
+ * Chrome vs Firefox upstream).
+ *
+ * `NOLO_CHROME_CONNECTOR_PORT` is the Chrome override only and is never applied to the Firefox
+ * endpoint: setting it (e.g. for a Chrome dev host) must not silently reroute Firefox calls onto
+ * Chrome's port. The Firefox endpoint is `NOLO_FIREFOX_CONNECTOR_PORT`, falling back to the
+ * Firefox default. `connectorPortForBrowser` in `nativeHostInstall.mjs` resolves the *install-time*
+ * wrapper port with the same rule.
+ */
+function connectorEndpointForBrowser(
+  browser: ConnectorBrowserTarget,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const explicitUrl = env.NOLO_CHROME_CONNECTOR_RPC_URL;
+  if (explicitUrl) return explicitUrl;
+  const port =
+    browser === "firefox"
+      ? env.NOLO_FIREFOX_CONNECTOR_PORT
+      : env.NOLO_CHROME_CONNECTOR_PORT;
+  return `http://127.0.0.1:${port || NOLO_CHROME_CONNECTOR_DEFAULT_PORTS[browser]}/rpc`;
+}
+
 function defaultTokenPath() {
   return resolve(
     process.env.HOME || "",
@@ -247,6 +288,8 @@ export function validateChromeConnectorPayload(
 }
 
 export function createChromeConnectorClient(args?: {
+  /** Which browser's native host to reach; defaults to Chrome (legacy single-endpoint behavior). */
+  browser?: ConnectorBrowserTarget;
   endpoint?: string;
   fetchImpl?: (
     input: RequestInfo | URL,
@@ -257,11 +300,9 @@ export function createChromeConnectorClient(args?: {
   tokenPath?: string;
 }): ChromeConnectorClient {
   if (args?.request) return { request: args.request };
-  const defaultPort = process.env.NOLO_CHROME_CONNECTOR_PORT || "38947";
+  const browser = args?.browser ?? "chrome";
   const endpoint =
-    args?.endpoint ??
-    process.env.NOLO_CHROME_CONNECTOR_RPC_URL ??
-    `http://127.0.0.1:${defaultPort}/rpc`;
+    args?.endpoint ?? connectorEndpointForBrowser(browser);
   const fetchImpl = args?.fetchImpl ?? fetch;
   const token = args?.token ?? readConnectorToken(args?.tokenPath);
   return {
@@ -337,17 +378,98 @@ export type VerifiedChromeConnectorClient = ChromeConnectorClient & {
   features(): string[];
 };
 
+/**
+ * Which connector client a call's browser `target` must go through. `undefined` = follow the host's
+ * ambient default (no `target` arg — the historical single-endpoint behaviour); `"chrome"` /
+ * `"firefox"` = the call explicitly named a browser and must hit that build.
+ */
+export type ChromeConnectorClientSelector = ConnectorBrowserTarget | undefined;
+
+/**
+ * The per-call client contract between `executeChromeConnectorTool` and its hosts
+ * (`buildCliChromeConnectorToolExecutors`, `buildDesktopChromeConnectorToolExecutors`).
+ *
+ * The builders hold a *map* of per-browser verified clients (lazily created, one handshake per
+ * browser) and hand back the entry matching the call's `target`. This is the hook that makes
+ * `target` real routing in production: the builders can no longer pin every call to one
+ * pre-resolved Chrome client. Test doubles can return the same stub for every selector; production
+ * must return distinct endpoint-bound clients.
+ */
+export type ChromeConnectorClientResolver = (
+  selector: ChromeConnectorClientSelector,
+) => ChromeConnectorClient;
+
+/**
+ * Builds the resolver the CLI/desktop tool tables share: lazily creates one verified client per
+ * browser target (identity-pinned via `expectedBrowser`, so a host answering for the wrong browser
+ * is refused *before* the action runs) plus one verified default client for target-less calls —
+ * same handshake as the per-target clients but unpinned, accepting either known connector id
+ * because the ambient endpoint cannot be attributed to a single browser ahead of time. `clients`
+ * overrides entries individually — a test can inject a fake per browser without the other side
+ * reaching the network; per-target overrides are *still* wrapped in `expectedBrowser` verification
+ * so a misrouted injected stub cannot fake a match. `clients.default` is used as-is (callers wrap
+ * their injection in `createVerifiedChromeConnectorClient` when they want the gate).
+ */
+export function createChromeConnectorClientResolver(args?: {
+  clients?: Partial<Record<ConnectorBrowserTarget, ChromeConnectorClient>> & {
+    /**
+     * Default (no `target`) client; defaults to a verified client over the ambient endpoint.
+     * Overrides are used verbatim — wrap them in `createVerifiedChromeConnectorClient` to keep the
+     * handshake/feature gate, like the builders do.
+     */
+    default?: ChromeConnectorClient;
+  };
+}): ChromeConnectorClientResolver {
+  const cache = new Map<ChromeConnectorClientSelector, ChromeConnectorClient>();
+  const overrides = args?.clients;
+  const resolve = (selector: ChromeConnectorClientSelector): ChromeConnectorClient => {
+    const existing = cache.get(selector);
+    if (existing) return existing;
+    let client: ChromeConnectorClient;
+    if (selector === "chrome" || selector === "firefox") {
+      // The per-target client is always identity-pinned — whether it came from the endpoint factory
+      // or a test override — because the pin is what proves an explicit `target` reached its build.
+      const inner =
+        overrides?.[selector] ?? createChromeConnectorClient({ browser: selector });
+      client = createVerifiedChromeConnectorClient({
+        client: inner,
+        expectedBrowser: selector,
+      });
+    } else {
+      // Ambient default is verified too — unpinned (either known connector id fits) but still
+      // enforcing identity/protocol/features so a stale or foreign endpoint is refused before an
+      // irreversible action, exactly like the pre-routing single-endpoint client.
+      client =
+        overrides?.default ??
+        createVerifiedChromeConnectorClient({ client: createChromeConnectorClient() });
+    }
+    cache.set(selector, client);
+    return client;
+  };
+  return resolve;
+}
+
 export function createVerifiedChromeConnectorClient(args?: {
   client?: ChromeConnectorClient;
   /** Single-id override kept for older callers; prefer `expectedExtensionIds`. */
   expectedExtensionId?: string;
   /** Ids the handshake accepts; defaults to every known Nolo connector build (Chrome + Firefox). */
   expectedExtensionIds?: readonly string[];
+  /**
+   * When set, the handshake accepts only that browser's extension id — a host that answers with a
+   * different build (the classic "Firefox host listening on Chrome's port" failure) is rejected
+   * before the requested action runs.
+   */
+  expectedBrowser?: ConnectorBrowserTarget;
 }): VerifiedChromeConnectorClient {
   const client = args?.client ?? createChromeConnectorClient();
   const expectedExtensionIds = new Set(
     args?.expectedExtensionIds ??
-      (args?.expectedExtensionId ? [args.expectedExtensionId] : NOLO_CONNECTOR_EXTENSION_IDS),
+      (args?.expectedBrowser
+        ? [CONNECTOR_BROWSER_EXTENSION_IDS[args.expectedBrowser]]
+        : args?.expectedExtensionId
+          ? [args.expectedExtensionId]
+          : NOLO_CONNECTOR_EXTENSION_IDS),
   );
   let verified: Promise<void> | null = null;
   let negotiatedFeatures: string[] = [];
@@ -412,6 +534,19 @@ export function createVerifiedChromeConnectorClient(args?: {
 }
 
 export async function executeChromeConnectorTool(args: {
+  /**
+   * Per-call client factory keyed by the call's `target` (undefined = ambient default). This is the
+   * production path — hosts (`buildCliChromeConnectorToolExecutors`,
+   * `buildDesktopChromeConnectorToolExecutors`) must pass `createChromeConnectorClientResolver()` so
+   * an explicit `target` actually routes to that browser instead of being silently ignored.
+   */
+  clientForTarget?: ChromeConnectorClientResolver;
+  /**
+   * Single-client escape hatch for tests that stub one endpoint. When a call carries an explicit
+   * `target`, the target wins over this client — a fixed client must never silently swallow a
+   * routing request (the production bug this field prevents is "target: firefox lands on Chrome").
+   * To inject a fixed client *and* honour targets, pass `clientForTarget` returning it instead.
+   */
   client?: ChromeConnectorClient;
   call: AgentRuntimeToolCallInput;
 }): Promise<AgentRuntimeToolResult> {
@@ -434,11 +569,40 @@ export async function executeChromeConnectorTool(args: {
   }
 
   try {
-    // `target` is reserved for future multi-provider targeting; ignored today.
-    const { target: _ignoredTarget, ...payload } = parseArguments(args.call.arguments) as Record<string, unknown>;
-    void _ignoredTarget;
+    const { target: rawTarget, ...payload } = parseArguments(args.call.arguments) as Record<string, unknown>;
+    // `target` selects which browser's native host serves the call. Accepted values are the two
+    // connector builds; anything else (or a host answering for the wrong browser) is refused
+    // before the action executes — never silently route a "chrome" call to a Firefox session.
+    const target = typeof rawTarget === "string" && rawTarget.trim().length > 0
+      ? rawTarget.trim().toLowerCase()
+      : undefined;
+    if (target !== undefined && target !== "chrome" && target !== "firefox") {
+      throw createConnectorError(
+        "INVALID_BROWSER_TARGET",
+        `browser target must be "chrome" or "firefox", received "${rawTarget}".`,
+        { receivedTarget: rawTarget },
+      );
+    }
     validateChromeConnectorPayload(action, payload);
-    const result = await (args.client ?? createChromeConnectorClient()).request(action, payload);
+    // Routing precedence, in order:
+    //  1. `clientForTarget(target)` — the production path. The resolver owns per-browser clients, so
+    //     an explicit target always reaches its own host (identity-pinned before the action).
+    //  2. `client` — single-client test/injection escape hatch. An explicit target *still* wins:
+    //     routing through a real per-target client is what stops a fixed client from silently
+    //     swallowing "target: firefox" and hitting Chrome anyway.
+    //  3. Neither — build a one-off client for this call (explicit target gets a verified,
+    //     identity-pinned client; no target gets the verified ambient default — same gate the
+    //     resolver builds, never a raw unverified endpoint).
+    const client =
+      args.clientForTarget?.(target) ??
+      (target
+        ? createVerifiedChromeConnectorClient({
+            client: createChromeConnectorClient({ browser: target }),
+            expectedBrowser: target,
+          })
+        : args.client ??
+          createVerifiedChromeConnectorClient({ client: createChromeConnectorClient() }));
+    const result = await client.request(action, payload);
     return {
       content: JSON.stringify({ ok: true, result }),
       metadata: {

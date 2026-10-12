@@ -426,3 +426,17 @@ export { createDevinProvider } from "./devin/devinProvider";
 export { readDevinUpstreamFailure, type DevinUpstreamFailure } from "./devin/devinProvider";
 export { isDevinOAuthAgent } from "./devinOAuth";
 
+
+// Protocol-only RunGrant API. Runtime enforcement is intentionally not wired here.
+export { normalizeAgentRunGrant } from "./runGrant";
+export type {
+  AgentRunGrant,
+  AgentRunGrantMachinePermissionPolicy,
+  AgentRunGrantTargetSource,
+  AgentRunGrantTriggerOrigin,
+  AgentRunGrantWorkspaceScope,
+} from "./runGrant";
+
+// Backend-neutral execution contract; no runtime route changes.
+export { buildExecutionTicket, executionBackendCanSatisfy } from "./executionBackend";
+export type { ExecutionBackend, ExecutionTicket, ExecutionLease, ExecutionRequest, ExecutionEvent, ExecutionResult, ExecutionBackendDescriptor, ExecutionBackendCapabilities, ExecutionCapabilityRealization, ExecutionClass, ExecutionReleaseReason } from "./executionBackend";

@@ -15,20 +15,20 @@ export type GuestHomeTonePalette = {
   closing: readonly Stop[];
 };
 
-const DAY_PAPER = "#f7f3ec";
+const DAY_PAPER = "#faf8f4";
 const NIGHT_PAPER = "#1c1b20";
 
 export const GUEST_HOME_DAY: GuestHomeTonePalette = {
   sky: [
     [0, "#d3dfeb"],
-    [0.48, "#e9e4df"],
-    [0.82, "#f1d2b4"],
-    [1, "#eebf98"],
+    [0.48, "#ece9e5"],
+    [0.82, "#f4ddc6"],
+    [1, "#f1cdae"],
   ],
   paper: DAY_PAPER,
   closing: [
     [0, DAY_PAPER],
-    [1, "#f3e3d0"],
+    [1, "#f6ece0"],
   ],
 };
 

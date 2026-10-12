@@ -40,10 +40,6 @@ import {
     controlAgentRunFunctionSchema,
     controlAgentRunFunc,
 } from "./controlAgentRunTool";
-import {
-    setTodoListFunctionSchema,
-    setTodoListFunc,
-} from "./setTodoListTool";
 
 import type { ToolDefinition } from "../index";
 
@@ -179,7 +175,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
         description: {
             name: "startAgentRun",
             description:
-                "后台启动一个 Agent 执行子任务，立即返回 runId，不阻塞当前对话。适合长任务、并行子任务、需要观察或叫停的场景。通道可用性当次重读，严禁同凭证扇出（仅跨 credentialGroup 扇出）。",
+                "后台启动一个 Agent 执行子任务，立即返回 runId，不阻塞当前对话。适合长任务、并行子任务、需要观察或叫停的场景。通道可用性当次重读，同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）。",
             category: "计划与编排",
         },
         behavior: "orchestrator",
@@ -201,22 +197,6 @@ export const agentToolDefinitions: ToolDefinition[] = [
         behavior: "data",
         uiGroup: "agent",
         riskLevel: "medium",
-        costLevel: "low",
-        defaultConsent: "auto",
-    },
-    {
-        id: "setTodoList",
-        schema: setTodoListFunctionSchema,
-        executor: setTodoListFunc,
-        description: {
-            name: "setTodoList",
-            description:
-                "设置/整体更新当前对话的任务列表（Kimi 式 Todo 列表）。用于多步骤任务进度追踪与展示。",
-            category: "计划与编排",
-        },
-        behavior: "data",
-        uiGroup: "agent",
-        riskLevel: "low",
         costLevel: "low",
         defaultConsent: "auto",
     },

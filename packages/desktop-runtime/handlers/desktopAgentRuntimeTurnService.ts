@@ -96,6 +96,7 @@ import {
   spaceRecordKey,
 } from "agent-runtime/turnContext";
 import { discoverSkills } from "agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "agent-runtime/agentsMd";
 import {
   createChromeConnectorClient,
@@ -360,7 +361,12 @@ function buildDesktopStartAgentRunToolExecutor(args: {
 
   return async (call: AgentRuntimeToolCallInput) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
-    const agentKey = asTrimmedString(parsed.agentKey);
+    const rawAgentKey = asTrimmedString(parsed.agentKey);
+    const currentAgentKey = asTrimmedString(args.parentAgentRef);
+    const agentKey =
+      (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
+        ? (currentAgentKey || rawAgentKey)
+        : rawAgentKey;
     const task = asTrimmedString(parsed.task);
 
     if (!agentKey) {
@@ -1409,6 +1415,7 @@ export async function runDesktopAgentRuntimeTurn(
       spaceContextLayer,
       memoryUseGuidanceLayer,
       workspaceContextLayer,
+      buildHostEnvironmentLayer(),
       skillDiscoveryLayer,
       memoryOverlayLayer,
       dialogSummaryLayer,
