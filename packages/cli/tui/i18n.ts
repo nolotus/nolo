@@ -1556,19 +1556,58 @@ const STRINGS = {
     zh: "controlAgentRun(wait) 已被中止。",
   },
   // ── Non-TUI CLI output: agent-run OAuth channel ownership + stream failures ──
-  // 用户在 TUI 选了别人的 sshare agent（跑在 agent owner 的 OAuth 订阅上），
-  // auto 模式自动转服务端执行——这不是报错，文案必须把「已自动交服务端」和
-  // 「想本机跑就加 --local（用本机自己的订阅）」说清。
+  // 用户在 TUI 选了别人的 sshare agent（跑在 agent owner 的 OAuth 订阅上）：
+  // auto 模式下模型请求经服务端 owner-required 代理走分享者订阅、文件/shell
+  // 工具留在本机执行（不是转服务端跑整轮）。文案必须把「模型用分享者订阅 /
+  // 工具在本机 / 想完全本机（自己的订阅）就加 --local」说清。
   "agentRun.oauthChannelOwnerSkip": {
     en:
       "[nolo] Info (not an error): {0} runs on its owner's OAuth subscription " +
-      "(owner {1}, this machine runs as {2}), so this run was sent to the server " +
-      "automatically. Add --local to run on this machine, which uses this " +
-      "machine's own subscription.",
+      "(owner {1}, this machine runs as {2}). The model is billed to the " +
+      "sharer's subscription; file/shell tools still execute on this machine. " +
+      "Add --local to run fully on this machine, which uses this machine's " +
+      "own subscription.",
     zh:
       "[nolo] 提示（不是报错）：{0} 运行在它主人的 OAuth 订阅上" +
-      "（主人 {1}，本机 {2}），本次已自动交给服务端执行。" +
-      "想在本机运行请加 --local，这会改用本机自己的订阅。",
+      "（主人 {1}，本机 {2}）。模型走分享者订阅计费；文件/shell 工具仍在" +
+      "本机执行。想完全在本机运行请加 --local，这会改用本机自己的订阅。",
+  },
+  // 分享 OAuth agent 的 shell 会话授权确认（块 D）：首次 execShell/
+  // launchProcess 前弹。必须把三件事说清——这是谁的 agent / 命令在哪台
+  // 设备哪个工作区跑 / 任意 shell 可读写该用户可访问的资源。
+  "shellGrant.confirmTitle": {
+    en: "Allow shell commands for shared agent {0}?",
+    zh: "允许分享 agent {0} 执行 shell 命令吗？",
+  },
+  "shellGrant.confirmBody": {
+    en:
+      "Agent {0} (owner {1}) asked to run shell commands on this device.\n" +
+      "Device: {2} ({3})\nWorkspace: {4}\n\n" +
+      "Shell commands can read/write anything this user can access. " +
+      "Allowed for the rest of this session; revoke any time with /shell-revoke.",
+    zh:
+      "分享 agent {0}（主人 {1}）请求在本机执行 shell 命令。\n" +
+      "设备：{2}（{3}）\n工作区：{4}\n\n" +
+      "任意 shell 命令可读写本机该用户能访问的全部资源。" +
+      "允许后在本会话持续有效；随时可用 /shell-revoke 撤销。",
+  },
+  "shellGrant.revoked": {
+    en: "[nolo] Shell permission revoked for shared agents in this session.",
+    zh: "[nolo] 已撤销本会话中分享 agent 的 shell 执行权限。",
+  },
+  "shellGrant.revokeNone": {
+    en: "[nolo] No shell permission is currently granted in this session.",
+    zh: "[nolo] 本会话当前没有已授予的 shell 权限。",
+  },
+  // 运行位置展示（块 D）：owner-required 场景告诉用户工具实际在哪台设备
+  // 哪个工作区执行。unknown 不猜、不静默标 ready。
+  "toolLocation.line": {
+    en: "[nolo] Tools execute on {0} ({1}) · workspace {2} · status: {3}",
+    zh: "[nolo] 工具在 {0}（{1}）· 工作区 {2} · 状态：{3} 执行",
+  },
+  "toolLocation.unknown": {
+    en: "[nolo] Tool execution location: unknown",
+    zh: "[nolo] 工具执行位置：未知",
   },
   // antigravity 502 MALFORMED_FUNCTION_CALL：裸 message 是整段 provider JSON
   // dump，对用户零信息量。映射成单行可操作文案；原始 JSON 只在既有

@@ -260,6 +260,15 @@ function buildDefaultLocalRuntimeAdapter(options: RunAgentTurnOptions) {
     fetchImpl: options.fetchImpl,
     cwd: options.localRuntimeCwd,
     output: options.output,
+    // TUI 显式注入的真实会话身份；缺省时 adapter 内仍回退 parentDialogId。
+    ...(options.originSession ? { originSession: options.originSession } : {}),
+    // 分享 OAuth agent 的 shell 会话授权（块 D）：仅 owner-required 场景生效。
+    ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+    // 运行位置展示（块 D）：TUI 消费 projectToolExecutionLocation 渲染工具实际
+    // 执行设备/工作区；非 owner-required 场景 adapter 不回调。
+    ...(options.onToolExecutionLocation
+      ? { onToolExecutionLocation: options.onToolExecutionLocation }
+      : {}),
     ...(options.confirmDestructiveAction
       ? { confirmDestructiveAction: options.confirmDestructiveAction }
       : {}),
@@ -362,15 +371,17 @@ export function resetOAuthChannelSkipDedupForTests(): void {
  * 非本人所有的 OAuth 订阅 agent 不认领本地 runtime。
  *
  * 收藏 / 空间共享来的 OAuth agent（antigravity / chatgpt / claude / cursor /
- * xai）的模型调用走的是「agent 所有者」的订阅通道：服务端 loop 已按
- * resolveCredentialOwnerUserId 用所有者凭据解析。CLI 本地认领时读到的却是
- * 本机 OAuth store——那里面即使恰好有同名 provider 凭据，也是**收藏者自己**
- * 的订阅，静默代跑等于烧自己的个人配额（2026-09 实证：收藏他人 antigravity
- * agent 后本地跑，429 冷却还连带标记了收藏者自己的同凭据 agent）。
+ * xai）的模型调用走的是「agent 所有者」的订阅通道：CLI auto 模式下走服务端
+ * owner-required 代理（resolveOwnerOAuthProxyTransport），服务端 admission 按
+ * resolveCredentialOwnerUserId 用所有者凭据解析、烧分享者订阅。CLI 本地认领
+ * 时读到的却是本机 OAuth store——那里面即使恰好有同名 provider 凭据，也是
+ * **收藏者自己**的订阅，静默代跑等于烧自己的个人配额（2026-09 实证：收藏
+ * 他人 antigravity agent 后本地跑，429 冷却还连带标记了收藏者自己的同凭据
+ * agent）。
  *
  * 所有权信号与 withResolvedRuntimeToolSurface 同源：rawRecord.userId（兼读
  * ownerUserId）；历史本地记录缺 ownerId 时维持原行为（视为自己的 agent，
- * 避免误伤本地自建 agent）。显式 --local 仍可强制本机（用户自担）。
+ * 避免误伤本地自建 agent）。显式 --local 仍可强制完全本机（用户自担）。
  */
 function resolveOAuthChannelOwnerSkip(
   agentConfig: Awaited<ReturnType<AgentRuntimeHostAdapter["loadAgentConfig"]>>,
@@ -391,8 +402,9 @@ function resolveOAuthChannelOwnerSkip(
   const localUserId = resolveLocalUserId(options.env);
   if (ownerUserId === localUserId) return null;
   // 这不是报错：用户在 TUI 选了别人的 sshare agent（跑在 owner 的 OAuth 订阅
-  // 上），本机用户 ID 与 owner 不同，auto 模式自动转服务端执行。文案要说清
-  // 「不是报错 / 已自动交服务端 / 想本机跑加 --local（用本机自己的订阅）」。
+  // 上），本机用户 ID 与 owner 不同，auto 模式改走 owner-required 代理——模型
+  // 走分享者订阅、文件/shell 工具留在本机执行，不是整轮转服务端。文案要说清
+  // 「不是报错 / 模型用分享者订阅 / 工具仍在本机 / 想完全本机跑加 --local」。
   return (
     t(
       "agentRun.oauthChannelOwnerSkip",
@@ -1700,9 +1712,20 @@ async function runLocalAgentTurnForCli(
     // 模型本轮 input 始终是安全卡；durable 落库形态由唯一 rollout 门控（复用
     // ENABLE_REMOTE_ATTACHMENT_PART_WRITES，默认关闭）：开启时改落结构化 local-file part
     // （持久化 content 携带 path/machineId），由 provider 边界投影回同一张安全卡。
+    //
+    // machineId 惰性解析：detectCurrentMachineId 的默认实现 probeLaunchable:true
+    // 会真实枚举本机可启动 CLI（秒级）。无附件路径时根本不需要 machineId，
+    // 无条件探测会把这笔开销摊到每一轮 local turn（含 refresh 重试 → ×2），
+    // 2026-10-07 把 "auto mode refreshes missing local agent config" 拖过 5s 超时。
+    const localAttachmentPaths = (options.localAttachmentPaths ?? []).filter(
+      (p): p is string => typeof p === "string" && p.trim().length > 0,
+    );
     const { cardText: localAttachmentCard, parts: localAttachmentParts } = buildLocalAttachments({
-      paths: options.localAttachmentPaths ?? [],
-      machineId: await resolveCurrentMachineId(options),
+      paths: localAttachmentPaths,
+      machineId:
+        localAttachmentPaths.length > 0
+          ? await resolveCurrentMachineId(options)
+          : undefined,
       ...(options.localRuntimeCwd ? { workspaceRoot: options.localRuntimeCwd } : {}),
     });
     const messageForLocal = appendAttachmentCard(options.message, localAttachmentCard);

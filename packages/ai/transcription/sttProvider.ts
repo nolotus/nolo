@@ -5,7 +5,7 @@ import { formatSRT } from "./srt";
 
 export type SttResult = {
   text: string; words: Word[]; durationSec: number; language?: string;
-  provider: "grok"; model: "grok-voice-transcribe-2.0"; vadRetried?: boolean;
+  provider: "grok" | "deepgram"; model: "grok-voice-transcribe-2.0" | "nova-3"; vadRetried?: boolean;
 };
 
 export async function transcribeWithGrok(opts: {
@@ -35,6 +35,80 @@ export async function transcribeWithGrok(opts: {
   const result = await request(opts.vadThreshold);
   if (!result.text.trim() && result.durationSec >= 2 && opts.vadThreshold === undefined) return { ...await request(0.15), vadRetried: true };
   return result;
+}
+
+export function mapDeepgramLanguage(language?: string): string {
+  if (!language) return "multi";
+  const normalized = language.trim().toLowerCase();
+  if (normalized === "ru") return "ru";
+  if (normalized === "en") return "en";
+  if (normalized === "zh" || normalized === "zh-cn" || normalized === "zh-tw") return "zh";
+  return "multi";
+}
+
+/**
+ * Deepgram 原生 `/v1/listen`（Token 鉴权 + 原始 bytes）。
+ * 注意：**不收 keyterms**——本仓无核实证据表明该端点接受术语参数，宁可明确不支持，
+ * 也不留一个静默 no-op 的假能力（术语提示只有 grok 直连的 /v1/stt `keyterm` 字段支持）。
+ */
+export async function transcribeWithDeepgram(opts: {
+  apiKey: string; filePath: string; mimeType: string; language?: string;
+  fetchImpl?: (input: URL | RequestInfo, init?: BunFetchRequestInit | RequestInit) => Promise<Response>;
+}): Promise<SttResult> {
+  const data = await readFile(opts.filePath);
+  const lang = mapDeepgramLanguage(opts.language);
+  const url = `https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&language=${encodeURIComponent(lang)}`;
+
+  const response = await (opts.fetchImpl ?? fetch)(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${opts.apiKey}`,
+      "Content-Type": opts.mimeType,
+    },
+    body: data,
+  });
+
+  if (!response.ok) {
+    let errorText = "";
+    try {
+      errorText = (await response.text()).slice(0, 1000);
+    } catch {
+      // ignore read error
+    }
+    // 错误信息不得包含 apiKey
+    if (opts.apiKey && opts.apiKey.length >= 3) {
+      errorText = errorText.split(opts.apiKey).join("***");
+    }
+    throw new Error(`Deepgram STT HTTP ${response.status}: ${errorText}`);
+  }
+
+  const result: any = await response.json();
+  const alt = result?.results?.channels?.[0]?.alternatives?.[0];
+  const text = String(alt?.transcript ?? "");
+
+  // 空 text 一律抛错（让上层降级），实测 nova-3 遇到中文或集合外语言片段会返回 0 词
+  if (!text.trim()) {
+    throw new Error("Deepgram STT returned empty transcript");
+  }
+
+  // 实测样本确认：Deepgram nova-3 返回的 words[].start 与 words[].end 单位均为秒 (seconds)，直接使用无需换算
+  const rawWords = Array.isArray(alt?.words) ? alt.words : [];
+  const words: Word[] = rawWords.map((w: any) => ({
+    word: String(w?.punctuated_word ?? w?.word ?? ""),
+    start: Number(w?.start) || 0,
+    end: Number(w?.end) || 0,
+  }));
+
+  const durationSec = Number(result?.metadata?.duration) || 0;
+
+  return {
+    text,
+    words,
+    durationSec,
+    language: typeof opts.language === "string" ? opts.language : undefined,
+    provider: "deepgram",
+    model: "nova-3",
+  };
 }
 
 const CJK_RE = /[\u3400-\u9fff]/u;

@@ -33,6 +33,7 @@ import {
 } from "../client/tokenUsage";
 import { estimateDefaultCliContextTokens } from "../client/estimateCliContext";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
+import { ulid } from "ulid";
 import { formatElapsedSeconds, renderContextPanel, renderCreditsDebug, renderKnownAgents, renderTuiHelp } from "./sessionRender";
 import { isLikelySlashCommand, stripImageTokens } from "./sessionInput";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
@@ -81,6 +82,9 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
     agentKey,
     agentName,
     dialogId,
+    // TUI 会话身份：进程启动 mint 一次，跨轮稳定；owner-required 契约的
+    // origin.sessionId 权威来源（dialogId 会随 /new、续聊、picker 变化）。
+    sessionId: `session-${ulid()}`,
     dialogKey:
       explicitDialogKey ??
       (dialogId && dialogOwnerId

@@ -438,5 +438,28 @@ export type {
 } from "./runGrant";
 
 // Backend-neutral execution contract; no runtime route changes.
-export { buildExecutionTicket, executionBackendCanSatisfy } from "./executionBackend";
+export {
+  OWNER_ORIGIN_EXECUTION_VERSION,
+  validateOwnerOriginExecution,
+  validateOwnerOriginServerCapability,
+  validateOwnerOriginBinding,
+  projectOwnerModelChannelSummary,
+  projectToolExecutionLocation,
+  OWNER_ROUTE_VERSION_HEADER,
+  OWNER_ROUTE_REQUEST_ID_HEADER,
+  verifyOwnerRouteAck,
+} from "./ownerOriginExecution";
+export type {
+  OwnerOriginIdentity,
+  OwnerRequiredModelRoute,
+  OwnerOriginExecution,
+  OwnerOriginErrorCode,
+  OwnerOriginValidation,
+  OwnerOriginServerCapability,
+  ToolExecutionLocation,
+  OwnerModelChannelSummary,
+  OwnerOriginExecutionSummary,
+  OwnerRouteAck,
+} from "./ownerOriginExecution";
+export { EXECUTION_BACKEND_KINDS, buildExecutionTicket, executionBackendCanSatisfy } from "./executionBackend";
 export type { ExecutionBackend, ExecutionTicket, ExecutionLease, ExecutionRequest, ExecutionEvent, ExecutionResult, ExecutionBackendDescriptor, ExecutionBackendCapabilities, ExecutionCapabilityRealization, ExecutionClass, ExecutionReleaseReason } from "./executionBackend";

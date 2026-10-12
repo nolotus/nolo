@@ -45,6 +45,8 @@ import {
   type PermissionRequest,
 } from "../../agent-runtime/actionGate";
 import type { AgentRuntimeToolResult } from "../agentRuntimeLocal";
+import type { OriginShellGrant } from "../client/originShellGrant";
+import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecution";
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import { backfillRunRecordParentDialog } from "../agentRunControl";
@@ -187,6 +189,18 @@ async function runAgentChat(
      * 权威 turnCredits 经 accumulateSessionCredits 接管，不双计。
      */
     onLiveTurnCredits?: (credits: number) => void;
+    /**
+     * 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级 grant
+     * 对象；owner-required 场景 adapter 在首次命令执行类调用前弹确认。
+     * 非 owner 场景该字段存在也不会被触发。
+     */
+    shellGrant?: OriginShellGrant;
+    /**
+     * 工具执行位置消费者（块 D）：owner-required 场景 adapter 回调一次；
+     * 本模块渲染一行「工具在 <deviceName>(<deviceId>) · <workspaceRoot>
+     * 执行 · <status>」。非 owner 场景不回调。
+     */
+    onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
   } = {}
 ) {
   // 用户选中的 agent 就是要跑的 agent —— 不再做首轮自动改写，也不再按对话
@@ -345,6 +359,19 @@ async function runAgentChat(
     message: effectiveMessage,
     continueDialogId: state.dialogId,
     ...(state.dialogId ? { parentDialogId: state.dialogId } : {}),
+    // 显式注入 TUI 真实会话身份（createInitialTuiState mint、跨轮稳定），
+    // owner-required 契约不再从 parentDialogId/workspaceRoot 派生会话身份。
+    // 兜底 `session-ephemeral`：测试/外部构造的 partial TuiState 缺 sessionId
+    // 时给稳定占位（adapter 内仍按 originSession → parentDialogId → ephemeral
+    // 的顺序回退，不会把 undefined 写进契约）。
+    originSession: { sessionId: state.sessionId ?? "session-ephemeral" },
+    // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级 grant 透传；
+    // 非 owner 场景 adapter 不触发该路径。
+    ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+    // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次。
+    ...(options.onToolExecutionLocation
+      ? { onToolExecutionLocation: options.onToolExecutionLocation }
+      : {}),
     ...(state.agentKey === DEFAULT_TUI_AGENT_KEY && env.NOLO_AUTO_ROUTE !== "0"
       ? { dialogAgentMode: "auto" as const }
       : { dialogAgentMode: "fixed" as const }),
@@ -396,6 +423,17 @@ async function runAgentChat(
         env: factoryEnv,
         cwd: factoryOptions?.cwd ?? state.cwd,
         output,
+        // 与 RunAgentTurnOptions.originSession 同源：TUI 真实会话身份显式注入，
+        // owner-required 契约取它为 origin.sessionId 权威来源（同样兜底
+        // session-ephemeral，防 partial TuiState）。
+        originSession: { sessionId: state.sessionId ?? "session-ephemeral" },
+        // shell 会话授权同一对象透传给 adapter factory 路径——两个接线点共用
+        // 同一份 granted 状态，撤销对两条路径同时生效。
+        ...(options.shellGrant ? { shellGrant: options.shellGrant } : {}),
+        // 运行位置展示同一回调（块 D）：与 RunAgentTurnOptions 同源。
+        ...(options.onToolExecutionLocation
+          ? { onToolExecutionLocation: options.onToolExecutionLocation }
+          : {}),
         ...(options.confirmDestructiveAction
           ? { confirmDestructiveAction: options.confirmDestructiveAction }
           : {}),
@@ -904,6 +942,18 @@ export interface AgentTurnContext {
 
   // ── 外部只读 / 动态读取字段 ──
   readonly sessionEnded: boolean;
+  /**
+   * 分享 OAuth agent 的 shell 会话授权（块 D）：宿主在 runTuiWorkspace 启动时
+   * 装配；owner-required 场景 adapter 在首次 execShell/launchProcess 前弹确认。
+   * 会话级单例——dialogId 变化（/new、picker）不重置 granted；用户撤销经
+   * `shellGrant.revoke()` 立即生效。
+   */
+  readonly shellGrant?: OriginShellGrant;
+  /**
+   * 工具执行位置消费者（块 D）：宿主装配；owner-required 场景 adapter 回调
+   * 一次，宿主渲染运行位置行。Web/桌面/RN 按同一契约后续接。
+   */
+  readonly onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
   readonly buffer: string;
   readonly cursorPos: number;
 
@@ -1145,6 +1195,14 @@ export async function runOneAgentTurn(
         drainInjections: () => injectionInbox.drain(),
         pastedTextStore: ctx.pasteStore,
         activityReporter: ctx.activityReporter,
+        // 分享 OAuth agent 的 shell 会话授权（块 D）：宿主装配的会话级对象；
+        // 非 owner-required 场景 adapter 不触发。
+        ...(ctx.shellGrant ? { shellGrant: ctx.shellGrant } : {}),
+        // 运行位置展示（块 D）：宿主装配的渲染回调；adapter 只在
+        // owner-required 场景回调一次。
+        ...(ctx.onToolExecutionLocation
+          ? { onToolExecutionLocation: ctx.onToolExecutionLocation }
+          : {}),
         onAgentRunStatus: (snapshot) => {
           if (snapshot) {
             ctx.activityIndicator.updateAgentRun(snapshot);

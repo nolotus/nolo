@@ -100,6 +100,7 @@ import { collectConversationTurns } from "./conversationLinks";
 import { getCliLocale, initCliLocale, t } from "./i18n";
 import { type ChatQueueTuiBinding } from "./chatQueueTuiBinding";
 import { appendStreamSafeNotice } from "./turnInjectionInbox";
+import { createOriginShellGrant } from "../client/originShellGrant";
 import {
   buildProcessTaskCompletedTurnEvent,
   formatProcessTerminalNoticeLine,
@@ -1224,6 +1225,41 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   let noteUserTurnHook: (() => void) | null = null;
 
   // ── S2：turnCtx 装配（通过 getter/setter 严格保持可变引用语义） ──────────
+  // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例。确认走既有
+  // runConfirmDialog + dialogHost 通道；撤销经 shellGrant.revoke() 立即生效
+  // （isGranted 同步翻转）。非 owner-required 场景 adapter 不触发该路径。
+  const sessionShellGrant = createOriginShellGrant({
+    confirm: async (request) => {
+      return await runWithInputRequiredAttention({ output, env: effectiveEnv }, () =>
+        dialogHost.run((anchor) =>
+          runConfirmDialog({
+            request: {
+              id: `shell-grant-${request.agentKey}`,
+              tool: request.toolName,
+              action: "shell-session-grant",
+              title: t(
+                "shellGrant.confirmTitle",
+                request.agentName,
+                request.ownerUserId,
+              ),
+              body: t(
+                "shellGrant.confirmBody",
+                request.agentName,
+                request.ownerUserId,
+                request.deviceName ?? request.deviceId,
+                request.deviceId,
+                request.workspaceRoot,
+              ),
+              ...(request.command ? { command: request.command } : {}),
+            },
+            input: input as any,
+            output: output as any,
+            ...anchor,
+          }),
+        ),
+      );
+    },
+  });
   let turnIdentity = 0;
   const turnCtx: AgentTurnContext = {
     get state() { return state; },
@@ -1252,6 +1288,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     },
 
     get sessionEnded() { return sessionEnded; },
+    // 分享 OAuth agent 的 shell 会话授权（块 D）：会话级单例透传给 turn
+    // 执行路径；撤销经 /shell-revoke 或设置面板调 sessionShellGrant.revoke()。
+    shellGrant: sessionShellGrant,
+    // 运行位置展示（块 D）：owner-required 场景 adapter 回调一次；渲染一行
+    // 「工具在 <deviceName>(<deviceId>) · workspace <root> · status: <s>」。
+    // unknown 不猜——直接打印 unknown，不静默标 ready。
+    onToolExecutionLocation: (location) => {
+      if (location.status === "unknown") {
+        output.write(`${t("toolLocation.unknown")}\n`);
+        return;
+      }
+      output.write(
+        `${t(
+          "toolLocation.line",
+          location.deviceName,
+          location.deviceId,
+          location.workspace.root,
+          location.status,
+        )}\n`,
+      );
+    },
     get buffer() { return buffer; },
     get cursorPos() { return cursorPos; },
 
@@ -1335,8 +1392,21 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     line: string,
     actionGateHandler: (gate: LocalAgentActionGate) => Promise<AgentRuntimeToolResult | void>,
     confirmDestructiveAction?: (request: PermissionRequest) => Promise<boolean>,
-  ): Promise<boolean> =>
-    runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction);
+  ): Promise<boolean> => {
+    // /shell-revoke（块 D）：空闲路径直撤——即时翻转 granted 位，不走
+    // handleTuiInput（纯函数拿不到 grant）；下一次 shell 调用重新弹确认。
+    // 与 busy 分支同一份 grant 单例。
+    if (line.trim().split(/\s+/)[0]?.toLowerCase() === "/shell-revoke") {
+      const wasGranted = sessionShellGrant.isGranted();
+      sessionShellGrant.revoke();
+      emitCommandOutput(
+        wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
+        "/shell-revoke",
+      );
+      return false;
+    }
+    return runSubmittedSlashLine(line, slashHost, actionGateHandler, confirmDestructiveAction);
+  };
 
   if (isInteractiveInput(input)) {
     input.setRawMode(true);
@@ -1883,6 +1953,19 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       submittedText: string,
       busySlashCommand: string,
     ): Promise<void> => {
+      // /shell-revoke（块 D）：直接翻转会话授权，立即生效——不走 handleTuiInput
+      // （纯函数拿不到 grant），下一次 shell 调用即重新弹确认。busy 期间撤销
+      // 安全：grant 是同步状态位，不与 in-flight 调用竞争（已放行的那次执行
+      // 会跑完——撤销承诺的是「下一次」重新确认，不是中断已开始的命令）。
+      if (busySlashCommand === "/shell-revoke") {
+        const wasGranted = sessionShellGrant.isGranted();
+        sessionShellGrant.revoke();
+        emitCommandOutput(
+          wasGranted ? t("shellGrant.revoked") : t("shellGrant.revokeNone"),
+          "/shell-revoke",
+        );
+        return;
+      }
       releaseCollapsedPasteReferences(submittedText, pasteStore);
       // 草稿被清空（命令回显不占草稿）：作废在途的异步粘贴结果。
       bumpDraftEpoch();
@@ -2392,7 +2475,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             busySlashCommand === "/paste" ||
             busySlashCommand === "/version" ||
             busySlashCommand === "/links" ||
-            busySlashCommand === "/transcribe";
+            busySlashCommand === "/transcribe" ||
+            busySlashCommand === "/shell-revoke";
           if (isBusyLocalSlash) {
             // ── S1：busy 本地 slash 处理已抽为上方 handleBusyLocalSlash 具名
             // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。

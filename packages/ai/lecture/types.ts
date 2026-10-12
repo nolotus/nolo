@@ -110,8 +110,8 @@ export type SttProviderSelection =
   | "modal"
   | "groq"
   | "together"
-  | "deepinfra"
-  | "grok";
+  | "grok"
+  | "deepgram";
 
 export interface MediaScope {
   fromSec: number;
@@ -203,6 +203,11 @@ export interface MediaJob {
    * null / 未知值在运行期被拒绝，绝不静默回落旧直连路径。
    */
   sttProvider?: SttProviderSelection;
+  /**
+   * 显式 STT 供应商有序候选列表。多选按数组顺序尝试；
+   * 单个 sttProvider 保持兼容（等价于长度 1 的数组）。
+   */
+  sttProviders?: SttProviderSelection[];
   status: MediaJobStatus;
   stage?: MediaJobStage;
   progress: { done: number; total: number };

@@ -232,12 +232,6 @@ import {
 } from "./firecrawlTool";
 import { olmOcrSchema, olmOcrFunc } from "./olmOcrTool";
 import {
-  whisperTurboSchema,
-  whisperTurboFunc,
-  whisperV3Schema,
-  whisperV3Func,
-} from "./whisperTool";
-import {
   transcribeVideoSchema,
   transcribeVideoFunc,
 } from "./transcribeVideoTool";
@@ -1940,30 +1934,6 @@ const baseToolDefinitions: ToolDefinition[] = [
       description:
         "使用 olmOCR-2-7B-1025 进行图片文字识别，适合文档、论文等结构化文本的高质量识别。",
       category: "网络与智能",
-    },
-    behavior: "data",
-  },
-  {
-    id: "whisperTurbo",
-    schema: whisperTurboSchema,
-    executor: whisperTurboFunc,
-    description: {
-      name: "whisper_turbo",
-      description:
-        "使用 whisper-large-v3-turbo 快速转录音频为文字，支持多语言，速度快价格低。",
-      category: "音频与媒体",
-    },
-    behavior: "data",
-  },
-  {
-    id: "whisperV3",
-    schema: whisperV3Schema,
-    executor: whisperV3Func,
-    description: {
-      name: "whisper_v3",
-      description:
-        "使用 whisper-large-v3 高精度转录音频，中文/多语言准确率更高，适合对质量要求严格的场景。",
-      category: "音频与媒体",
     },
     behavior: "data",
   },

@@ -11,6 +11,14 @@ export type TuiState = {
   agentName: string;
   dialogId?: string;
   /**
+   * TUI 会话身份（与 dialogId 不同）：本 TUI 进程启动时 mint 一次、跨轮稳定，
+   * 通过 RunAgentTurnOptions.originSession 显式注入 owner-required 契约的
+   * origin.sessionId / workspaceId。dialogId 会变（/new、续聊、picker 切换），
+   * sessionId 始终代表「这个 TUI 会话」本身。缺省（测试构造的 partial state）
+   * 时上游接线兜底「session-ephemeral」，契约不会收到 undefined。
+   */
+  sessionId?: string;
+  /**
    * dialogLabel 是状态/窗口标题用的显示名（title 优先、回退 id）；
    * dialogTitle 只在服务端真的产出标题时才有值，供状态栏独立标题段使用
    * （无标题时该段不渲染）。

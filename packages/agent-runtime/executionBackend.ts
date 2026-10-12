@@ -61,15 +61,19 @@ export type ExecutionBackendCapabilities = {
   isolationModes: Array<NonNullable<AgentRuntimeIsolationPolicy["mode"]>>;
 };
 
+/** Runtime and type consumers share the same placement-kind vocabulary. */
+export const EXECUTION_BACKEND_KINDS = [
+  "full-host",
+  "hosted-workspace",
+  "machine-connector",
+  "local-sandbox",
+  "remote-executor",
+  "cloud",
+] as const;
+
 export type ExecutionBackendDescriptor = {
   id: string;
-  kind:
-    | "full-host"
-    | "hosted-workspace"
-    | "machine-connector"
-    | "local-sandbox"
-    | "remote-executor"
-    | "cloud";
+  kind: (typeof EXECUTION_BACKEND_KINDS)[number];
   capabilities: ExecutionBackendCapabilities;
 };
 
