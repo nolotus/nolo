@@ -1,7 +1,7 @@
 // 文件路径: database/server/fileService.ts
 
 import path from "path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { ulid } from "ulid";
 import { Mutex } from "async-mutex";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -227,8 +227,26 @@ const ensureBlobRecord = async (
         const key = blobKey(sha256);
         const existing = await dbGetOrNull<BlobRecord>(key);
         if (existing) {
+            // 自愈：blob 记录存在 ≠ 磁盘内容完好（历史实现会写空文件 / 写盘失败后仍留记录）。
+            // 磁盘缺失或大小与本次 buffer 不符 → 按本次 buffer 重写，并纠正记录 size。
+            const expectedSize = buffer.byteLength;
+            const blobPath = path.join(UPLOAD_DIR, sha256);
+            let diskOk = false;
+            try {
+                const diskFile = Bun.file(blobPath);
+                diskOk = (await diskFile.exists()) && diskFile.size === expectedSize;
+            } catch {
+                diskOk = false;
+            }
+            if (!diskOk) {
+                await ensureUploadDirExists();
+                await Bun.write(blobPath, buffer);
+            }
+
             const updated: BlobRecord = {
                 ...existing,
+                path: blobPath,
+                size: expectedSize,
                 refCount: (existing.refCount || 0) + 1,
             };
             await serverDb.put(key, updated);
@@ -267,9 +285,13 @@ export const decrementBlobRefCount = async (sha256: string): Promise<void> => {
         const nextCount = (existing.refCount || 0) - 1;
         if (nextCount <= 0) {
             try {
-                await Bun.write(existing.path, new Uint8Array());
-            } catch {
-                // 忽略物理删除失败
+                await rm(existing.path, { force: true });
+            } catch (err) {
+                // 保留「删除失败也继续删记录」的语义，但必须留痕（不再静默）
+                console.warn(
+                    `[fileService] failed to remove blob file: ${existing.path}`,
+                    err
+                );
             }
             await serverDb.del(key);
             return;
@@ -519,6 +541,13 @@ export const getFileContentById = async (
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+
+    // 完整性校验：磁盘实际字节数必须与记录一致，否则上层会静默返回空 body 的 200。
+    if (buffer.byteLength !== metadata.size) {
+        throw new Error(
+            `File content size mismatch for ${fileId}: metadata.size=${metadata.size}, diskBytes=${buffer.byteLength}`
+        );
+    }
 
     return { buffer, metadata };
 };

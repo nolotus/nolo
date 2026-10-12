@@ -24,6 +24,7 @@ import {
   NOLO_CONNECTOR_EXTENSION_IDS,
   NOLO_FIREFOX_CONNECTOR_EXTENSION_ID,
   REQUIRED_CHROME_CONNECTOR_FEATURES,
+  resolveUploadRoots,
   type ChromeConnectorClient,
 } from "../desktop-chrome-connector/chromeConnector";
 import {
@@ -150,6 +151,11 @@ export type ChromeConnectorStatusReport = {
   token: {
     path: string | null;
     present: boolean;
+  };
+  uploadRoots: {
+    roots: string[];
+    isDefault: boolean;
+    error?: string;
   };
   rpc: {
     online: boolean;
@@ -455,6 +461,7 @@ export async function buildChromeConnectorStatus(
       browser: null,
     },
     token: { path: null, present: false },
+    uploadRoots: { roots: [], isDefault: false },
     rpc: {
       online: false,
       extensionId: null,
@@ -466,6 +473,20 @@ export async function buildChromeConnectorStatus(
     },
     nextStep: "",
   };
+
+  try {
+    const rootsInfo = resolveUploadRoots({ ...env, ...(home ? { HOME: home } : {}) });
+    report.uploadRoots = {
+      roots: rootsInfo.roots,
+      isDefault: rootsInfo.isDefault,
+    };
+  } catch (error) {
+    report.uploadRoots = {
+      roots: [],
+      isDefault: false,
+      error: toErrorMessage(error),
+    };
+  }
 
   // Token + 127.0.0.1 only, so the live probe runs even when no checkout was found: an installed CLI
   // pointing at a desktop-installed native host is a healthy state and must not read as "offline".
@@ -614,6 +635,14 @@ export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport)
       report.token.path ? ` ${report.token.path}` : ""
     }`,
   );
+  if (report.uploadRoots.error) {
+    lines.push(`  upload roots     : error (${report.uploadRoots.error})`);
+  } else if (report.uploadRoots.roots.length > 0) {
+    const originLabel = report.uploadRoots.isDefault ? "default" : "configured";
+    lines.push(`  upload roots     : ${report.uploadRoots.roots.join(", ")} (${originLabel})`);
+  } else {
+    lines.push(`  upload roots     : (none)`);
+  }
   const rpc = report.rpc;
   if (rpc.online) {
     lines.push(

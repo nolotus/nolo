@@ -10,6 +10,7 @@ import { isRecord } from "core/isRecord";
 import {
   UploadSecurityError,
   logUploadAudit,
+  resolveUploadRoots,
   validateUploadFiles,
 } from "./uploadSecurity";
 
@@ -622,5 +623,7 @@ export async function executeChromeConnectorTool(args: {
     };
   }
 }
+
+export { resolveUploadRoots };
 
 export const CHROME_CONNECTOR_TOOL_ACTIONS = { ...CHROME_TOOL_ACTIONS };
