@@ -1233,6 +1233,13 @@ function resolveDesktopTurnDialogKey(input: {
  * segment，root/cwd 都经 realpath 解析；解析不出返回 null → 上层投影降级
  * unknown（absoluteSnapshotPath 拒绝相对/dot-segment 路径，投半成品形状
  * 会被契约层收敛为 unknown，这里直接不给 workspace）。
+ *
+ * 边界澄清（与服务端投影的分工）：服务端投影层（projectToolExecutionLocation
+ * → absoluteSnapshotPath）必须拒绝相对路径与 dot segment —— 非规范输入不在
+ * 投影层静默规范化。端侧（本函数）则对本地已知值做 realpath 解析，该解析与
+ * 工具 actions 的 canonicalize 同源，解析成功后显示其 canonical 路径即为
+ * 契约认可结果，不要求一律降级 unknown；只有解析失败/输入本身就非规范的
+ * 情况才不给 workspace（上层自然收敛 unknown）。
  */
 function resolveDesktopToolWorkspacePaths(
   workspaceRoot: string,
