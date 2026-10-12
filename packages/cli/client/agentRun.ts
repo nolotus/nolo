@@ -358,7 +358,8 @@ function wrapLoadAgentConfigWithModelOverride(
  * 早先按 output 对象身份去重（WeakSet），但 TUI 每轮 run 都新建 output 对象，
  * 去重永远命不中 → 用户每条消息都看一遍提示（2026-10-07 反馈）。去重键改成
  * agentKey 后与输出流的生命周期无关；CLI 单发 run 每进程只跑一次，行为不变。
- * 提示是纯 UI 通知，去重失败也不影响任何决策（调用处仍 return true）。
+ * 提示是纯 UI 通知，去重失败也不影响任何决策（调用处恒 return false，走
+ * 本地 owner-proxy 链路）。
  */
 const oauthChannelSkipReportedAgentKeys = new Set<string>();
 
@@ -368,16 +369,21 @@ export function resetOAuthChannelSkipDedupForTests(): void {
 }
 
 /**
- * 非本人所有的 OAuth 订阅 agent 不认领本地 runtime。
+ * 非本人所有的 OAuth 订阅 agent → 本地 owner-proxy 路由提示（纯信息）。
  *
  * 收藏 / 空间共享来的 OAuth agent（antigravity / chatgpt / claude / cursor /
- * xai）的模型调用走的是「agent 所有者」的订阅通道：CLI auto 模式下走服务端
- * owner-required 代理（resolveOwnerOAuthProxyTransport），服务端 admission 按
- * resolveCredentialOwnerUserId 用所有者凭据解析、烧分享者订阅。CLI 本地认领
- * 时读到的却是本机 OAuth store——那里面即使恰好有同名 provider 凭据，也是
- * **收藏者自己**的订阅，静默代跑等于烧自己的个人配额（2026-09 实证：收藏
- * 他人 antigravity agent 后本地跑，429 冷却还连带标记了收藏者自己的同凭据
- * agent）。
+ * xai）的模型调用走的是「agent 所有者」的订阅通道：CLI auto 模式下走本地
+ * origin-local 链路（localRuntimeAdapter 构造 ownerOriginExecution 契约 →
+ * resolveOwnerOAuthProxyTransport），模型经服务端 owner-required 准入烧分享
+ * 者订阅、工具留在本机执行。整轮转服务端 loop（/api/agent/run）是**错误**
+ * 路由：服务端代跑会用错执行位置、也违反 owner-origin 契约。
+ *
+ * 本函数只返回提示文案，不做控制流判定：命中时调用处照常进入本地 runtime
+ * （fail-closed 由 owner transport 的 verifyOwnerRouteAck / adapter 的
+ * origin_unavailable 保证，永不回退本机凭据、不改派其他机器、不回落服务端
+ * loop）。纯本机 OAuth 认领（读本机 store 代跑）曾是隐患（2026-09 实证：收藏
+ * 他人 antigravity agent 后本地跑，429 冷却连带标记收藏者自己的同凭据
+ * agent），现在由 owner-required 契约杜绝。
  *
  * 所有权信号与 withResolvedRuntimeToolSurface 同源：rawRecord.userId（兼读
  * ownerUserId）；历史本地记录缺 ownerId 时维持原行为（视为自己的 agent，
@@ -432,11 +438,22 @@ async function shouldSkipAutoLocalForServerPlatformTools(
   // 所有权 gate 必须在 localRuntimeCwd 早退之前：TUI 恒传环境性 cwd 且默认
   // auto 模式，gate 放在早退之后对 TUI 主场景永不生效（review HIGH, 2026-09-05）。
   // cwd 运行仍豁免本函数其余全部 gate（显式本地语义不变）。
+  // owner-required（分享者 OAuth agent）：auto 模式走本地 origin-local 链路
+  // —— adapter 构造 ownerOriginExecution 契约、owner transport 把模型请求
+  // 发服务端 owner-required 准入（烧分享者订阅）、工具留在本机。该路由
+  // 不是「跳过本地」的理由，必须 return false 让 runAgentTurn 进入
+  // runLocalAgentTurnForCli；fail-closed 由下游保证（旧服务器无 ack →
+  // owner_route_unsupported；origin 不可用 → origin_unavailable），本函数
+  // 不再做任何服务端 loop 回退。判定必须先于 localRuntimeCwd 早退与
+  // cliProvider / runtimeBinding / serverTools 等其余 gate：分享 agent 完全
+  // 可能同时命中它们（provider=agy、声明平台工具、绑了别的机器），那些 gate
+  // 会把它错误地转去服务端整轮 loop 或改派绑定机——owner 路由优先一切
+  // 其他 auto 决策。
   const oauthChannelOwnerSkip = resolveOAuthChannelOwnerSkip(agentConfig, options);
   if (oauthChannelOwnerSkip) {
-    // 去重只影响「是否再打印一次提示」，不影响控制流：无论是否命中缓存，
-    // 下面都 return true（跳过本地 runtime 的决策与该提示无关）。
-    // output 缺失/非对象时照旧直接 write（退回每轮打印，不静默吞掉）。
+    // 去重只影响「是否再打印一次提示」，与控制流无关：无论是否命中缓存，
+    // 下面都 return false（走本地 owner-proxy）。output 缺失/非对象时照旧
+    // 直接 write（退回每轮打印，不静默吞掉）。
     if (
       !options.output ||
       typeof options.output !== "object" ||
@@ -447,7 +464,7 @@ async function shouldSkipAutoLocalForServerPlatformTools(
       }
       options.output.write(oauthChannelOwnerSkip);
     }
-    return true;
+    return false;
   }
   if (options.localRuntimeCwd) {
     return false;
