@@ -1,4 +1,13 @@
 
+## 0.102.0
+
+## 0.102.0 (2026-10-13)
+
+### Features
+
+* **agent:** support Devin and Cursor subscription quota probing ([c3f4cce](https://github.com/nolotus/bun-nolo/commit/c3f4cce8f2a9f31577b39c83de56790418b11bc0))
+
+
 ## 0.101.0
 
 ## 0.101.0 (2026-10-13)
