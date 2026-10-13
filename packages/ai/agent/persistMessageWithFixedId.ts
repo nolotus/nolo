@@ -15,7 +15,8 @@ export async function persistMessageWithFixedId(
 ): Promise<void> {
   dispatch(addUserMessage(message));
 
-  const { controller, ...messageToWrite } = message;
+  // dialogId is an execution/UI routing hint, not part of the durable Message schema.
+  const { controller, dialogId: _dialogId, ...messageToWrite } = message;
 
   try {
     const writeRequest = dispatch(
