@@ -51,7 +51,9 @@ export async function persistToolMessage(
     throw err;
   }
 
-  const { controller: _controller, ...rest } = message as any;
+  // dialogId selects the local message bucket; DB ownership is already in dbKey.
+  // Keep it out of the durable Message payload (which does not declare it).
+  const { controller: _controller, dialogId: _dialogId, ...rest } = message as any;
   const isStreaming =
     options.isStreaming !== undefined
       ? options.isStreaming
