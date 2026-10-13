@@ -312,13 +312,13 @@ export function useAgentCreateSourceState({
       : selected === "api"
         ? apiPresetId
         : MANUAL_PROVIDER_PRESET_ID;
-  // ── Provider 动态模型发现 v1（best-effort）──────────────────────────
-  // 白名单 OpenAI-compatible preset + 非空 key 时，向服务端 discover 接口要 live 模型列表；
-  // 失败/不支持 → discoveryModels=null，下方 mergedFields 退化为纯静态 modelOptions。
+  // ── Provider 动态模型发现（best-effort）──────────────────────────
+  // 白名单 API preset + 有效 key / OAuth preset 无 key，向服务端发现模型；
+  // 失败/不支持/static 回退 → 保留静态 modelOptions，透出回退元数据。
   const discovery = useProviderModelDiscovery({
     serverOrigin: providerKeyServerBase,
     token: cliAuthToken,
-    presetId: selected === "subscription" ? subPresetId : apiPresetId,
+    presetId: activePresetId,
     apiKey: selected === "subscription" ? subApiKey : apiKey,
   });
   const activePresetFieldsRaw = useMemo(
@@ -328,6 +328,8 @@ export function useAgentCreateSourceState({
   const activePresetFields = useMemo(
     () => ({
       ...activePresetFieldsRaw,
+      discoverySource: discovery?.source,
+      discoveryFallbackReason: discovery?.fallbackReason,
       modelOptions: mergeModelOptionsWithDiscovery(
         activePresetFieldsRaw.modelOptions,
         discovery,
@@ -374,7 +376,7 @@ export function useAgentCreateSourceState({
       };
     }
     if (selected === "subscription") {
-      const fields = resolveProviderPresetFields(subPresetId);
+      const fields = activePresetFields;
       const modelId = subModel || fields.model;
       const modelLabel = resolveModelLabel(modelId, fields.modelOptions);
       const name = deriveAgentNameFromPrompt(prompt, modelLabel || defaultName);
@@ -426,7 +428,7 @@ export function useAgentCreateSourceState({
       };
     }
     // api
-    const fields = resolveProviderPresetFields(apiPresetId);
+    const fields = activePresetFields;
     const modelId = model || fields.model;
     const modelLabel = resolveModelLabel(modelId, fields.modelOptions);
     const name = deriveAgentNameFromPrompt(prompt, modelLabel || defaultName);
@@ -455,6 +457,7 @@ export function useAgentCreateSourceState({
     prompt,
     platformModel,
     platformModelOptions,
+    activePresetFields,
     apiPresetId,
     subPresetId,
     customProviderUrl,

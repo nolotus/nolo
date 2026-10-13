@@ -1,6 +1,6 @@
 import { toErrorMessage } from "core/errorMessage";
 import type { AgentCommandDeps } from "./agentCommandSupport";
-import { readOption } from "./cliEnvHelpers";
+import { readOption, resolveAuthToken, resolveServerUrl } from "./cliEnvHelpers";
 import type { CliFetchImpl } from "./cliFetch";
 
 type EnvVars = Record<string, string | undefined>;
@@ -35,6 +35,140 @@ function joinBase(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${path}`;
 }
 
+export const AGENT_MODELS_USAGE =
+  "Usage: nolo agent models --preset <presetId> [--api-key <key>] [--filter <str>] [--json]\n" +
+  "       nolo agent models --url <base> --api-key <key> [--filter <str>] [--json]\n" +
+  "  --preset  discover models via the server (POST /api/agents/providers/discover-models);\n" +
+  "            exit 0 = live, 1 = static fallback / error. OAuth presets (devin-oauth) take no --api-key.\n" +
+  "  --url     list models straight from an OpenAI-compatible provider's /models\n";
+
+type DiscoveredModel = {
+  id?: string;
+  label?: string;
+  recommended?: boolean;
+  hasVision?: boolean;
+};
+
+type DiscoverModelsResponse = {
+  ok?: boolean;
+  code?: string;
+  error?: string;
+  presetId?: string;
+  source?: "live" | "static";
+  models?: DiscoveredModel[];
+  observedAt?: number;
+  truncated?: boolean;
+  fallbackReason?: string;
+};
+
+/**
+ * `nolo agent models --preset <id>`: server-side discovery. Exit contract
+ * (frozen): live → 0; static fallback → 1 (not a real observation); 409 /
+ * network / other HTTP failure → 1. OAuth presets ignore any API key, so it is
+ * never read from args/env here; only an explicit --api-key is forwarded.
+ */
+async function runPresetModelsCommand(
+  presetId: string,
+  args: string[],
+  deps: AgentCommandDeps
+): Promise<number> {
+  const env = asEnvVars(deps.env ?? process.env);
+  const output = deps.output ?? process.stdout;
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const filter = (readOption(args, "--filter") ?? "").trim().toLowerCase();
+  const wantJson = args.includes("--json");
+
+  if (!presetId || presetId.startsWith("--")) {
+    output.write(`[nolo] agent models --preset requires a preset id.\n${AGENT_MODELS_USAGE}`);
+    return 1;
+  }
+  const authToken = resolveAuthToken(args, env as NodeJS.ProcessEnv);
+  if (!authToken) {
+    output.write(
+      "[nolo] agent models --preset requires login. Run `nolo login` or set AUTH_TOKEN.\n"
+    );
+    return 1;
+  }
+  const explicitKey =
+    readOption(args, "--api-key") ?? readOption(args, "--provider-api-key");
+  const apiKey = explicitKey?.trim() ? explicitKey.trim() : undefined;
+
+  try {
+    const url = joinBase(
+      resolveServerUrl(args, env as NodeJS.ProcessEnv),
+      "/api/agents/providers/discover-models"
+    );
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(apiKey ? { presetId, apiKey } : { presetId }),
+    });
+    const body = (await res.json().catch(() => null)) as DiscoverModelsResponse | null;
+
+    if (!res.ok || !body || body.ok === false) {
+      if (wantJson) {
+        output.write(
+          JSON.stringify(body ?? { ok: false, status: res.status }, null, 2) + "\n"
+        );
+      } else {
+        const code = body?.code ? ` ${body.code}` : "";
+        const detail = body?.error ? `: ${body.error}` : "";
+        output.write(
+          `[nolo] agent models --preset ${presetId} failed (HTTP ${res.status}${code})${detail}\n`
+        );
+      }
+      return 1;
+    }
+
+    const isLive = body.source === "live";
+    if (wantJson) {
+      output.write(JSON.stringify(body, null, 2) + "\n");
+      return isLive ? 0 : 1;
+    }
+
+    const models = Array.isArray(body.models) ? body.models : [];
+    const shown = filter
+      ? models.filter(
+          (m) =>
+            (m.id ?? "").toLowerCase().includes(filter) ||
+            (m.label ?? "").toLowerCase().includes(filter)
+        )
+      : models;
+
+    output.write(
+      isLive
+        ? `source: live${typeof body.observedAt === "number" ? ` (observedAt ${body.observedAt})` : ""}\n`
+        : `source: ${body.source ?? "unknown"}\n`
+    );
+    if (!isLive) {
+      output.write(`static fallback: ${body.fallbackReason ?? "unknown"}\n`);
+    }
+    if (body.truncated) output.write("(list truncated by server)\n");
+    if (!shown.length) {
+      output.write(
+        `[nolo] agent models: no models found${
+          filter ? ` matching "${filter}"` : ""
+        } for preset ${presetId}\n`
+      );
+      return 1;
+    }
+    for (const m of shown) {
+      const label = m.label && m.label !== m.id ? `  ${m.label}` : "";
+      const tags = [m.recommended ? "recommended" : "", m.hasVision ? "vision" : ""]
+        .filter(Boolean)
+        .join(",");
+      output.write(`${m.id ?? ""}${label}${tags ? `  [${tags}]` : ""}\n`);
+    }
+    return isLive ? 0 : 1;
+  } catch (error) {
+    output.write(`[nolo] agent models failed: ${toErrorMessage(error)}\n`);
+    return 1;
+  }
+}
+
 export async function runAgentModelsCommand(
   args: string[],
   deps: AgentCommandDeps = {}
@@ -42,6 +176,10 @@ export async function runAgentModelsCommand(
   const env = asEnvVars(deps.env ?? process.env);
   const output = deps.output ?? process.stdout;
   const fetchImpl = deps.fetchImpl ?? fetch;
+
+  if (args.includes("--preset")) {
+    return runPresetModelsCommand(readOption(args, "--preset") ?? "", args, deps);
+  }
 
   const base = resolveProviderUrl(args, env);
   const key = resolveProviderKey(args, env);

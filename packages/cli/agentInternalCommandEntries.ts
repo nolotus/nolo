@@ -28,7 +28,7 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runAgentCreateCommand } = await import("./agentRecordCommands");
       return runAgentCreateCommand(args, deps);
     }),
-    createEnvCommand(["agent", "models"], "List models available on an OpenAI-compatible provider", async (args, deps) => {
+    createEnvCommand(["agent", "models"], "List models: --preset <id> (server discovery, exit 1 on static fallback) or --url <base> --api-key <key> (OpenAI-compatible /models)", async (args, deps) => {
       const { runAgentModelsCommand } = await import("./agentProviderCommands");
       return runAgentModelsCommand(args, deps);
     }),

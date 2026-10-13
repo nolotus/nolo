@@ -384,6 +384,20 @@ const CredentialSyncCheckbox: React.FC<{
 };
 
 
+/** discovery 回落静态目录时的统一提示（API / 订阅面板共用）。 */
+const StaticCatalogHint: React.FC<{
+  t: TFunction;
+  source?: "live" | "static";
+  reason?: string;
+}> = ({ t, source, reason }) =>
+  source === "static" ? (
+    <span {...stylex.props(afs.createSourcePanelDesktopBody)}>
+      {reason
+        ? t("createAgent.quickCreate.staticCatalogReason", "静态目录（原因：{{reason}}）", { reason })
+        : t("createAgent.quickCreate.staticCatalog", "静态目录")}
+    </span>
+  ) : null;
+
 const AgentCreateApiPanel: React.FC<{
   prompt: string;
   setPrompt: (v: string) => void;
@@ -400,6 +414,8 @@ const AgentCreateApiPanel: React.FC<{
   model: string;
   setModel: (v: string) => void;
   activePresetFields: {
+    discoverySource?: "live" | "static";
+    discoveryFallbackReason?: string;
     lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
@@ -540,6 +556,11 @@ const AgentCreateApiPanel: React.FC<{
           />
         )}
       </label>
+      <StaticCatalogHint
+        t={t}
+        source={activePresetFields.discoverySource}
+        reason={activePresetFields.discoveryFallbackReason}
+      />
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
@@ -608,6 +629,8 @@ const AgentCreateSubscriptionPanel: React.FC<{
   subModel: string;
   setSubModel: (v: string) => void;
   activePresetFields: {
+    discoverySource?: "live" | "static";
+    discoveryFallbackReason?: string;
     lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
@@ -702,6 +725,12 @@ const AgentCreateSubscriptionPanel: React.FC<{
           ))}
         </Select>
       </div>
+
+      <StaticCatalogHint
+        t={t}
+        source={activePresetFields.discoverySource}
+        reason={activePresetFields.discoveryFallbackReason}
+      />
 
       {draftRequiresDesktopOAuth ? (
         <>

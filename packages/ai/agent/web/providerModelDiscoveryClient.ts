@@ -14,11 +14,14 @@ export type DiscoveredModelOption = {
 export type ProviderDiscoveryClientResult = {
   source: "live" | "static";
   models: DiscoveredModelOption[];
+  observedAt?: number;
   truncated?: boolean;
   fallbackReason?: string;
 };
 
-const DISCOVERABLE_PRESET_IDS = new Set([
+export const DISCOVERABLE_PRESET_IDS: ReadonlySet<string> = new Set([
+  "devin-oauth",
+  "deepseek-api",
   "zai-coding-plan",
   "bigmodel-coding-plan",
   "openai-api",
@@ -28,16 +31,21 @@ const DISCOVERABLE_PRESET_IDS = new Set([
   "minimax-api",
 ]);
 
-/** 客户端白名单（与服务端 PROVIDER_MODEL_ENDPOINTS 同集；双端各自维护，契约由测试锁定）。 */
+/** 客户端白名单（API endpoint presets + OAuth 通道；双端各自维护，契约由测试锁定）。 */
 export function isDiscoverablePreset(presetId: string | null | undefined): boolean {
   return !!presetId && DISCOVERABLE_PRESET_IDS.has(presetId);
+}
+
+/** OAuth discovery 使用服务端已保存的凭证，绝不发送表单 key。 */
+export function isOAuthDiscoveryPreset(presetId: string): boolean {
+  return presetId === "devin-oauth";
 }
 
 export type FetchDiscoveredModelsArgs = {
   serverOrigin: string;
   token: string;
   presetId: string;
-  apiKey: string;
+  apiKey?: string;
   fetchImpl?: typeof fetch;
 };
 
@@ -46,7 +54,7 @@ export type FetchDiscoveredModelsArgs = {
  * - 静态目录优先保序（用户熟悉的默认项在前），live 新模型按上游顺序追加在尾部；
  * - 同 id 时 live 条目覆盖静态（label/能力位以 live 为准）；
  * - recommended 只保留一个（defaultModel 优先），避免 UI 出现多个「（推荐）」。
- * discovery 为 null/空 → 原样返回静态选项（失败回退语义）。
+ * discovery 为 null/static/空 → 原样返回静态选项（失败回退语义）。
  */
 export type ModelOption = {
   id: string;
@@ -62,7 +70,7 @@ export function mergeModelOptionsWithDiscovery(
     models: ModelOption[];
   } | null,
 ): ModelOption[] {
-  if (!discovery || discovery.models.length === 0) return [...staticOptions];
+  if (!discovery || discovery.source !== "live" || discovery.models.length === 0) return [...staticOptions];
   const liveById = new Map(discovery.models.map((m) => [m.id, m]));
   const merged: ModelOption[] = [];
   const seen = new Set<string>();
@@ -87,14 +95,15 @@ export async function fetchDiscoveredModels(
 ): Promise<ProviderDiscoveryClientResult | null> {
   if (!isDiscoverablePreset(args.presetId)) return null;
   const apiKey = (args.apiKey ?? "").trim();
-  if (!apiKey) return null;
+  const oauth = isOAuthDiscoveryPreset(args.presetId);
+  if (!oauth && !apiKey) return null;
   const base = (args.serverOrigin ?? "").replace(/\/+$/, "");
   if (!base) return null;
 
   const fetchImpl = args.fetchImpl ?? fetch;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12_000);
+    const timer = setTimeout(() => controller.abort(), 20_000);
     let res: Response;
     try {
       res = await fetchImpl(`${base}/api/agents/providers/discover-models`, {
@@ -103,7 +112,7 @@ export async function fetchDiscoveredModels(
           "Content-Type": "application/json",
           ...(args.token ? { Authorization: `Bearer ${args.token}` } : {}),
         },
-        body: JSON.stringify({ presetId: args.presetId, apiKey }),
+        body: JSON.stringify({ presetId: args.presetId, ...(!oauth ? { apiKey } : {}) }),
         signal: controller.signal,
       });
     } finally {
@@ -117,10 +126,13 @@ export async function fetchDiscoveredModels(
           (m) => m && typeof m.id === "string" && m.id.length > 0,
         )
       : [];
-    if (models.length === 0) return null;
+    if (models.length === 0 && body.source !== "static") return null;
     return {
       source: body.source === "live" ? "live" : "static",
       models,
+      ...(body.source === "live" && typeof body.observedAt === "number"
+        ? { observedAt: body.observedAt }
+        : {}),
       ...(body.truncated === true ? { truncated: true } : {}),
       ...(typeof body.fallbackReason === "string"
         ? { fallbackReason: body.fallbackReason }
