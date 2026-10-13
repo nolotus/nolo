@@ -1,4 +1,6 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { detectMachineInfo } from "connector-experimental/machineInfo";
 import { toErrorMessage } from "core/errorMessage";
 import type {
   AgentRuntimeAgentConfig,
@@ -9,6 +11,10 @@ import type {
   LocalAgentTurnResult,
 } from "agent-runtime";
 import type { LocalAgentLoopEvent, LocalAgentToolEvent } from "agent-runtime/localLoop";
+import {
+  projectToolExecutionLocation,
+  type ToolExecutionLocation,
+} from "agent-runtime/ownerOriginExecution";
 import {
   CHROME_CONNECTOR_TOOL_NAMES,
   type ChromeConnectorToolName,
@@ -96,6 +102,7 @@ import {
   spaceRecordKey,
 } from "agent-runtime/turnContext";
 import { discoverSkills } from "agent-runtime/skillDiscovery";
+import { buildHostEnvironmentLayer } from "agent-runtime/hostEnvironment";
 import { readAgentsMdLayerFromDisk } from "agent-runtime/agentsMd";
 import {
   createChromeConnectorClient,
@@ -202,6 +209,20 @@ type DesktopAgentRuntimeBaseTurnInput = {
    * result.reasoning_content 以供客户端持久化为 thinkContent。
    */
   onReasoningDelta?: (chunk: string) => void;
+  /**
+   * F2 桌面本地执行位置回调（等价 TUI 的 onToolExecutionLocation）：本机
+   * detectMachineInfo + 本 turn 的 workspace root 经
+   * projectToolExecutionLocation 收敛后回调一次。宿主（handler）据此在 SSE
+   * tool 事件 metadata 里投 executionLocation；字段不全时收敛为
+   * {status:"unknown"}，绝不猜测。回调失败不影响 turn。
+   */
+  onToolExecutionLocation?: (location: ToolExecutionLocation) => void;
+  /**
+   * Test seam for detectMachineInfo (same shape as desktopLocalConnectorHandler).
+   * Defaults to the connector machine-id file + hostname; a fault/empty identity
+   * degrades the execution-location projection to {status:"unknown"}.
+   */
+  detectToolHostMachineInfo?: () => { machineId?: unknown; name?: unknown };
   /**
    * Runtime loop observation callback (turn-phase + compaction start/end).
    * Forwarded to runLocalAgentTurn; the handler maps these to SSE
@@ -360,7 +381,12 @@ function buildDesktopStartAgentRunToolExecutor(args: {
 
   return async (call: AgentRuntimeToolCallInput) => {
     const parsed = parseNoloWorkspaceToolArguments(call.arguments);
-    const agentKey = asTrimmedString(parsed.agentKey);
+    const rawAgentKey = asTrimmedString(parsed.agentKey);
+    const currentAgentKey = asTrimmedString(args.parentAgentRef);
+    const agentKey =
+      (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
+        ? (currentAgentKey || rawAgentKey)
+        : rawAgentKey;
     const task = asTrimmedString(parsed.task);
 
     if (!agentKey) {
@@ -1201,6 +1227,37 @@ function resolveDesktopTurnDialogKey(input: {
   return null;
 }
 
+/**
+ * F2：桌面本机 workspace 投影路径规整。与服务端
+ * resolveRealpathWorkspacePaths 同契约：root 必须绝对路径且不含 . / ..
+ * segment，root/cwd 都经 realpath 解析；解析不出返回 null → 上层投影降级
+ * unknown（absoluteSnapshotPath 拒绝相对/dot-segment 路径，投半成品形状
+ * 会被契约层收敛为 unknown，这里直接不给 workspace）。
+ *
+ * 边界澄清（与服务端投影的分工）：服务端投影层（projectToolExecutionLocation
+ * → absoluteSnapshotPath）必须拒绝相对路径与 dot segment —— 非规范输入不在
+ * 投影层静默规范化。端侧（本函数）则对本地已知值做 realpath 解析，该解析与
+ * 工具 actions 的 canonicalize 同源，解析成功后显示其 canonical 路径即为
+ * 契约认可结果，不要求一律降级 unknown；只有解析失败/输入本身就非规范的
+ * 情况才不给 workspace（上层自然收敛 unknown）。
+ */
+function resolveDesktopToolWorkspacePaths(
+  workspaceRoot: string,
+): { id: string; root: string; cwd: string } | null {
+  const raw = asOptionalTrimmedString(workspaceRoot);
+  if (!raw || !isAbsolute(raw)) return null;
+  if (raw.split(/[\\/]/).some((segment) => segment === "." || segment === "..")) {
+    return null;
+  }
+  try {
+    const root = realpathSync(raw);
+    if (!isAbsolute(root)) return null;
+    return { id: `ws-${root}`, root, cwd: root };
+  } catch {
+    return null;
+  }
+}
+
 export async function runDesktopAgentRuntimeTurn(
   input: DesktopAgentRuntimeTurnInput
 ): Promise<LocalAgentTurnResult> {
@@ -1409,6 +1466,7 @@ export async function runDesktopAgentRuntimeTurn(
       spaceContextLayer,
       memoryUseGuidanceLayer,
       workspaceContextLayer,
+      buildHostEnvironmentLayer(),
       skillDiscoveryLayer,
       memoryOverlayLayer,
       dialogSummaryLayer,
@@ -1461,6 +1519,53 @@ export async function runDesktopAgentRuntimeTurn(
     }
     input.onReasoningDelta?.(chunk);
   };
+
+  // F2：本机工具实际执行位置投影（TUI localRuntimeAdapter 同款语义，见
+  // ownerOriginExecution.ToolExecutionLocation 契约）。桌面本地 runtime 的工具
+  // 就跑在本进程所在设备，位置信息本地可知——detectMachineInfo 给 deviceId/
+  // deviceName，workspace 用本 turn 参数解析出的 root（cwd 变量，与
+  // createDesktopAgentRuntimeActions 的 workspaceRoot 同源）。workspace.id 与
+  // turn workspace 派生规则对齐：`ws-<root>`。任何一项不可信（探测抛错、
+  // machineId/hostname 为空、root 非绝对/含 dot segment/realpath 失败）→
+  // projectToolExecutionLocation 收敛为 {status:"unknown"}，不猜不补。本机
+  // 宿主类型按 EXECUTION_BACKEND_KINDS 取 "local-sandbox"（与 server
+  // "hosted-workspace" / connector "machine-connector" 区分：这是发起设备本机
+  // 的桌面宿主进程，不是经 connector 注册的另一台机器）。
+  const onToolEvent = input.onToolEvent;
+  if (onToolEvent) {
+    const workspaceRoot = cwd ?? process.cwd();
+    let toolExecutionLocation: ToolExecutionLocation;
+    try {
+      const machine = input.detectToolHostMachineInfo
+        ? input.detectToolHostMachineInfo()
+        : detectMachineInfo();
+      toolExecutionLocation = projectToolExecutionLocation({
+        status: "ready",
+        hostType: "local-sandbox",
+        deviceId: machine?.machineId,
+        deviceName: machine?.name,
+        workspace: resolveDesktopToolWorkspacePaths(workspaceRoot),
+      });
+    } catch {
+      // 探测/路径解析失败 → 显式 unknown（展示层渲染「执行位置未知」）。
+      toolExecutionLocation = { status: "unknown" };
+    }
+    try {
+      input.onToolExecutionLocation?.(toolExecutionLocation);
+    } catch {
+      // 展示回调失败不影响 turn；宿主拿不到位置时按 unknown 渲染。
+    }
+    const toolEventWithLocation = (event: LocalAgentToolEvent) => {
+      onToolEvent({
+        ...event,
+        metadata: {
+          ...(event.metadata ?? {}),
+          executionLocation: toolExecutionLocation,
+        },
+      });
+    };
+    input = { ...input, onToolEvent: toolEventWithLocation };
+  }
 
   const result = await runLocalAgentTurn({
     adapter,

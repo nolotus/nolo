@@ -71,6 +71,9 @@ export const { addHostToCurrentServer } = settingSlice.actions;
 // 常量 + 类型
 export { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 
+// 本地 state 写入 action（服务端独占字段保存成功后回写本地状态用）
+export { updateSettingsState } from "./settingActions";
+
 // server selectors
 export {
   selectSettings,
@@ -87,6 +90,7 @@ export {
   selectShowThinking,
   selectMaxCost,
   selectMaxExecutionTime,
+  selectAutoApproveCredits,
   selectIsDark,
   selectThemeMode,
   selectHeaderHeight,

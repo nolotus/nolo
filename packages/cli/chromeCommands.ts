@@ -13,6 +13,7 @@
  * *which* of the three is next — manifest missing, token missing, or connector offline are three
  * different fixes.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -24,6 +25,7 @@ import {
   NOLO_CONNECTOR_EXTENSION_IDS,
   NOLO_FIREFOX_CONNECTOR_EXTENSION_ID,
   REQUIRED_CHROME_CONNECTOR_FEATURES,
+  resolveUploadRoots,
   type ChromeConnectorClient,
 } from "../desktop-chrome-connector/chromeConnector";
 import {
@@ -72,6 +74,12 @@ export type ChromeCommandDeps = {
   installNativeHost?: (options?: InstallOptions) => InstallResult;
   /** Node executable the generated wrapper must exec (tests / unusual installs). */
   nodePath?: string;
+  /** Override for online build sha fetch (tests / offline). */
+  fetchOnlineBuildSha?: () => Promise<string | null>;
+  /** Override for local head sha resolution (tests). */
+  resolveLocalHeadSha?: () => string | null;
+  /** Override for sha comparison (tests). */
+  compareDeployShas?: (localSha: string | null, onlineSha: string | null) => DeploySyncStatus;
 };
 
 /**
@@ -123,6 +131,83 @@ function browserLabel(browser: ConnectorBrowser | null): string {
   return browser === "firefox" ? "Firefox" : browser === "chrome" ? "Chrome" : "browser";
 }
 
+export type DeploySyncStatus = "in sync" | "local ahead" | "online ahead" | "diverged" | "unknown";
+
+export type DeployStatusReport = {
+  localSha: string | null;
+  onlineSha: string | null;
+  sync: DeploySyncStatus;
+};
+
+export async function fetchOnlineBuildSha(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = 3000,
+): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetchImpl("https://us.nolo.chat/public/latest-assets.json", {
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = (await res.json()) as { buildSha?: unknown };
+    return typeof data?.buildSha === "string" ? data.buildSha : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveLocalHeadSha(): string | null {
+  try {
+    const result = spawnSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.status === 0 && typeof result.stdout === "string") {
+      const sha = result.stdout.trim();
+      return sha.length >= 7 ? sha : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function compareDeployShas(
+  localSha: string | null,
+  onlineSha: string | null,
+): DeploySyncStatus {
+  if (!localSha || !onlineSha) return "unknown";
+  if (localSha === onlineSha || localSha.slice(0, 7) === onlineSha.slice(0, 7)) {
+    return "in sync";
+  }
+  try {
+    const localAhead = spawnSync("git", ["merge-base", "--is-ancestor", onlineSha, localSha], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (localAhead.status === 0) return "local ahead";
+
+    const onlineAhead = spawnSync("git", ["merge-base", "--is-ancestor", localSha, onlineSha], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (onlineAhead.status === 0) return "online ahead";
+
+    const objCheck = spawnSync("git", ["cat-file", "-e", `${onlineSha}^{commit}`], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    if (objCheck.status === 0) {
+      return "diverged";
+    }
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export type ChromeConnectorStatusReport = {
   ok: boolean;
   connectorRoot: string | null;
@@ -151,6 +236,12 @@ export type ChromeConnectorStatusReport = {
     path: string | null;
     present: boolean;
   };
+  uploadRoots: {
+    roots: string[];
+    isDefault: boolean;
+    error?: string;
+  };
+  deploy: DeployStatusReport;
   rpc: {
     online: boolean;
     extensionId: string | null;
@@ -414,11 +505,12 @@ function resolveStatusNextStep(report: ChromeConnectorStatusReport) {
 }
 
 export async function buildChromeConnectorStatus(
-  args: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> = {},
+  args: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> & { browser?: ConnectorBrowser } = {},
 ): Promise<ChromeConnectorStatusReport> {
   const env = args.env ?? process.env;
   const home = args.home ?? env.HOME ?? "";
   const platform = args.platform ?? process.platform;
+  const browserTarget = args.browser;
 
   let connectorRoot: string | null = args.connectorRoot ?? null;
   let rootError: string | null = null;
@@ -454,6 +546,12 @@ export async function buildChromeConnectorStatus(
       browser: null,
     },
     token: { path: null, present: false },
+    uploadRoots: { roots: [], isDefault: false },
+    deploy: {
+      localSha: null,
+      onlineSha: null,
+      sync: "unknown",
+    },
     rpc: {
       online: false,
       extensionId: null,
@@ -466,9 +564,53 @@ export async function buildChromeConnectorStatus(
     nextStep: "",
   };
 
+  try {
+    const rootsInfo = resolveUploadRoots({ ...env, ...(home ? { HOME: home } : {}) });
+    report.uploadRoots = {
+      roots: rootsInfo.roots,
+      isDefault: rootsInfo.isDefault,
+    };
+  } catch (error) {
+    report.uploadRoots = {
+      roots: [],
+      isDefault: false,
+      error: toErrorMessage(error),
+    };
+  }
+
+  let localHeadSha: string | null = null;
+  try {
+    localHeadSha = (args.resolveLocalHeadSha ?? resolveLocalHeadSha)();
+  } catch {
+    localHeadSha = null;
+  }
+
+  let onlineBuildSha: string | null = null;
+  try {
+    onlineBuildSha = await (args.fetchOnlineBuildSha ?? fetchOnlineBuildSha)();
+  } catch {
+    onlineBuildSha = null;
+  }
+
+  let sync: DeploySyncStatus = "unknown";
+  try {
+    const compareShas = args.compareDeployShas ?? compareDeployShas;
+    sync = compareShas(localHeadSha, onlineBuildSha);
+  } catch {
+    sync = "unknown";
+  }
+
+  report.deploy = {
+    localSha: localHeadSha,
+    onlineSha: onlineBuildSha,
+    sync,
+  };
+
   // Token + 127.0.0.1 only, so the live probe runs even when no checkout was found: an installed CLI
   // pointing at a desktop-installed native host is a healthy state and must not read as "offline".
-  const requestChrome = args.requestChrome ?? createChromeConnectorClient().request;
+  // An explicit --browser routes the probe to that host's endpoint; default is the Chrome endpoint.
+  const requestChrome =
+    args.requestChrome ?? createChromeConnectorClient({ browser: browserTarget }).request;
   const probe = await probeConnectorRpc(requestChrome);
   report.rpc.online = probe.online;
   report.rpc.extensionId = probe.extensionId;
@@ -495,11 +637,12 @@ export async function buildChromeConnectorStatus(
     return report;
   }
 
-  // Follow the connected build: a live Firefox session is checked against the Mozilla manifest
-  // (its `allowed_extensions` gecko id). With nothing connected, prefer whichever manifest exists
-  // so a Firefox-only setup is not told to install a Chrome manifest it does not need.
+  // An explicit --browser pins which manifest to audit; otherwise follow the connected build (a
+  // live Firefox session is checked against the Mozilla manifest's `allowed_extensions` gecko id).
+  // With nothing connected, prefer whichever manifest exists so a Firefox-only setup is not told
+  // to install a Chrome manifest it does not need.
   let manifestBrowser: ConnectorBrowser =
-    report.rpc.browser === "firefox" ? "firefox" : "chrome";
+    browserTarget ?? (report.rpc.browser === "firefox" ? "firefox" : "chrome");
   if (!report.rpc.browser) {
     try {
       const chromeManifestPath = resolveNativeHostInstallPaths({
@@ -610,6 +753,17 @@ export function formatChromeConnectorStatus(report: ChromeConnectorStatusReport)
       report.token.path ? ` ${report.token.path}` : ""
     }`,
   );
+  if (report.uploadRoots.error) {
+    lines.push(`  upload roots     : error (${report.uploadRoots.error})`);
+  } else if (report.uploadRoots.roots.length > 0) {
+    const originLabel = report.uploadRoots.isDefault ? "default" : "configured";
+    lines.push(`  upload roots     : ${report.uploadRoots.roots.join(", ")} (${originLabel})`);
+  } else {
+    lines.push(`  upload roots     : (none)`);
+  }
+  const localShort = report.deploy.localSha ? report.deploy.localSha.slice(0, 7) : "unknown";
+  const onlineShort = report.deploy.onlineSha ? report.deploy.onlineSha.slice(0, 7) : "unknown";
+  lines.push(`  deploy status    : local ${localShort}  online ${onlineShort} (${report.deploy.sync})`);
   const rpc = report.rpc;
   if (rpc.online) {
     lines.push(
@@ -634,9 +788,14 @@ export async function runChromeStatusCommand(
   deps: Omit<ChromeCommandDeps, "installNativeHost" | "nodePath"> = {},
 ) {
   const output = deps.output ?? process.stdout;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write('[nolo] Chrome connector status failed: --browser must be "chrome" or "firefox".\n');
+    return 1;
+  }
   let report: ChromeConnectorStatusReport;
   try {
-    report = await buildChromeConnectorStatus(deps);
+    report = await buildChromeConnectorStatus({ ...deps, browser });
   } catch (error) {
     output.write(`[nolo] Chrome connector status failed: ${toErrorMessage(error)}\n`);
     return 1;
@@ -649,8 +808,8 @@ export async function runChromeStatusCommand(
   return report.ok ? 0 : 1;
 }
 
-/** `--browser chrome|firefox`（同时接受 `--browser=firefox` 写法）；默认 Chrome，非法值返回 null。 */
-function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
+/** `--browser chrome|firefox`（同时接受 `--browser=firefox` 写法）；未给返回 undefined，非法值返回 null。 */
+function readBrowserOption(args: string[]): "chrome" | "firefox" | null | undefined {
   const equalsForm = args.find((arg) => arg.startsWith("--browser="));
   const index = args.indexOf("--browser");
   const raw =
@@ -659,7 +818,7 @@ function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
       : index >= 0
         ? args[index + 1]
         : undefined;
-  if (raw === undefined) return "chrome";
+  if (raw === undefined) return undefined;
   const value = raw.trim();
   if (value === "chrome" || value === "firefox") return value;
   return null;
@@ -668,13 +827,14 @@ function readBrowserOption(args: string[]): "chrome" | "firefox" | null {
 export async function runChromeInstallCommand(args: string[], deps: ChromeCommandDeps = {}) {
   const env = deps.env ?? process.env;
   const output = deps.output ?? process.stdout;
-  const browser = readBrowserOption(args);
-  if (browser === null) {
+  const parsed = readBrowserOption(args);
+  if (parsed === null) {
     output.write(
       '[nolo] Chrome native host install failed: --browser must be "chrome" or "firefox".\n',
     );
     return 1;
   }
+  const browser = parsed ?? "chrome";
   const install = deps.installNativeHost ??
     (installNativeHostManifest as (options?: InstallOptions) => InstallResult);
 
@@ -740,11 +900,48 @@ export async function runChromeInstallCommand(args: string[], deps: ChromeComman
 
 export async function runChromeReloadCommand(args: string[], deps: ChromeCommandDeps = {}) {
   const output = deps.output ?? process.stdout;
-  // Deliberately the *unverified* client: reload is the recovery path when the running extension is
-  // stale (older protocol / missing features), so requiring a protocol handshake first would turn the
-  // one fix that exists into a dead end.
-  const requestChrome = deps.requestChrome ?? createChromeConnectorClient().request;
+  const browser = readBrowserOption(args);
+  if (browser === null) {
+    output.write('[nolo] Chrome connector reload failed: --browser must be "chrome" or "firefox".\n');
+    return 1;
+  }
+  // Deliberately *not* the full verified client: reload is the recovery path when the running
+  // extension is stale (older protocol / missing features), so a protocol/features handshake would
+  // turn the one fix that exists into a dead end. --browser selects which host's extension to
+  // reload.
+  const requestChrome =
+    deps.requestChrome ?? createChromeConnectorClient({ browser }).request;
   try {
+    // But an *explicit* --browser still gets an identity check first: a wrong endpoint override (or
+    // a stale shared-port install where Firefox grabbed Chrome's port) must not reload the other
+    // browser. Identity only — a stale build of the *correct* browser still reloads, which is the
+    // whole point of the recovery path. Skipped when no --browser was given (ambient endpoint, same
+    // as before) and when the host is unreachable (let reload itself report that failure).
+    if (browser) {
+      try {
+        const info = (await requestChrome("connector_info", {})) as
+          | { extensionId?: unknown }
+          | undefined;
+        const connectedBrowser = resolveConnectorBrowser(
+          typeof info?.extensionId === "string" ? info.extensionId : null,
+        );
+        if (connectedBrowser !== null && connectedBrowser !== browser) {
+          const mismatch = new Error(
+            `the connector on this endpoint answers as ${browserLabel(connectedBrowser)}, ` +
+              `not ${browserLabel(browser)} — refusing to reload the wrong browser. ` +
+              "Check NOLO_CHROME_CONNECTOR_RPC_URL / the per-browser port overrides.",
+          ) as Error & { code?: string };
+          mismatch.code = "CHROME_CONNECTOR_EXTENSION_MISMATCH";
+          throw mismatch;
+        }
+      } catch (error) {
+        // Propagate only the identity refusal; a plain RPC failure here must not mask reload's own
+        // (better) error reporting below.
+        if ((error as { code?: string })?.code === "CHROME_CONNECTOR_EXTENSION_MISMATCH") {
+          throw error;
+        }
+      }
+    }
     const result = await requestChrome("reload_extension", {});
     if (args.includes("--json")) {
       output.write(`${JSON.stringify({ ok: true, result }, null, 2)}\n`);

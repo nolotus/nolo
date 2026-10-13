@@ -9,8 +9,17 @@
  * 5. Cursor Connect。
  * 6. Gemini 3 + tools 的 native 路由 —— 必须先于 platform proxy，后者传不了
  *    thought_signature。
- * 7. 平台代理。
- * 8. 直连 OpenAI-compatible —— 兜底，永远命中，返回类型上不为 null。
+ * 7. owner-required（仅契约存在时；见下方短路说明）。
+ * 8. 平台代理。
+ * 9. 直连 OpenAI-compatible —— 兜底，永远命中，返回类型上不为 null。
+ *
+ * **owner-required 短路（安全关键）**：`ctx.ownerOriginExecution` 存在时，
+ * 上面的数组**根本不进入遍历**——Antigravity/Claude/Codex 等更早的 transport
+ * 不检查契约，会直接用 `apiKeyRefResolver` 读发起者本机凭据并以其身份执行
+ * （既不发 owner 扩展也不验证 owner ack）。契约存在 = adapter 已判定本机
+ * 用户 ≠ credential owner，模型必须走服务端 owner-required 代理；此时直接
+ * 调 owner resolver 且 fail-closed（返回 null 等价于契约损坏，抛错而不是
+ * 静默落到下一条本机通道）。契约缺省时数组逐字遍历，旧优先级不变。
  *
  * 拆分前这里是一个 940 行的闭包，分支靠缩进和上下文位置隐式排序；现在顺序被这
  * 个数组显式表达，增删一条通道只动一行 + 一个文件。
@@ -25,6 +34,7 @@ import { resolveCursorTransport } from "./cursorTransport";
 import { resolveDevinTransport } from "./devinTransport";
 import { resolveDirectOpenAiCompatibleTransport } from "./directOpenAiCompatibleTransport";
 import { resolveGeminiNativeToolTransport } from "./geminiNativeToolTransport";
+import { resolveOwnerOAuthProxyTransport } from "./ownerOAuthProxyTransport";
 import { resolvePlatformProxyTransport } from "./platformProxyTransport";
 import type { ProviderResolutionContext, ProviderResolver } from "./providerResolutionContext";
 
@@ -36,6 +46,10 @@ const TRANSPORTS: readonly ProviderResolver[] = [
   resolveCursorTransport,
   resolveDevinTransport,
   resolveGeminiNativeToolTransport,
+  // owner-required 是 platform-proxy 的语义超集（同一条 server wire + 额外
+  // 准入扩展）。必须排在它前面：ownerOriginExecution 存在时走 owner 通道，
+  // 缺省时落到 platform-proxy，旧行为不变。
+  resolveOwnerOAuthProxyTransport,
   resolvePlatformProxyTransport,
   // 兜底必须留在最后。
   resolveDirectOpenAiCompatibleTransport,
@@ -44,6 +58,18 @@ const TRANSPORTS: readonly ProviderResolver[] = [
 export async function resolveLocalProvider(
   ctx: ProviderResolutionContext,
 ): Promise<AgentRuntimeProvider> {
+  if (ctx.ownerOriginExecution) {
+    // owner-required：不遍历旧数组。任何更早的 transport（Antigravity /
+    // Claude / Codex OAuth）命中都会读发起者本机凭据，必须在这里短路。
+    // fail-closed：resolver 返回 null 视为契约损坏，抛错而非落回本机通道。
+    const provider = await resolveOwnerOAuthProxyTransport(ctx);
+    if (!provider) {
+      throw new Error(
+        "owner-required dispatch contract present but owner transport declined; refusing local credential fallback",
+      );
+    }
+    return provider;
+  }
   for (const transport of TRANSPORTS) {
     const provider = await transport(ctx);
     if (provider) return provider;

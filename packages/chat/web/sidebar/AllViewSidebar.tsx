@@ -240,7 +240,6 @@ const RecentVirtualList: React.FC<{
               contentKey={item.contentKey}
               type={normalizedType}
               title={item.title || t("unnamed")}
-              fileCategory={"fileCategory" in item ? item.fileCategory ?? null : null}
               spaceIdOverride={item.spaceId}
               sourceServerOrigin={item.serverOrigin}
               disableDrag
@@ -257,6 +256,29 @@ const RecentVirtualList: React.FC<{
               onMenuAnchorChange={handleMenuAnchorChange}
               editSignal={editSignal?.key === item.contentKey ? editSignal.nonce : undefined}
               pinned={Boolean(item.pinned)}
+              pinAction={{
+                pinned: Boolean(item.pinned),
+                onToggle: () => {
+                  runPinnedToggleWithTransition({
+                    pinned: !item.pinned,
+                    contentKey: item.contentKey,
+                    // 同步乐观落地放进转场 update：flushSync 提交时新快照已带
+                    // pinned 差异，FLIP 才有内容可动。
+                    runTransition: runSidebarViewTransition,
+                    // 异步服务端同步在转场 update 之外执行；失败时编排函数内部
+                    // 回滚本地乐观 pinned。
+                    syncRemote: () =>
+                      (dispatch as any)(
+                        (updateContentPinned as any)({
+                          spaceId: item.spaceId ?? null,
+                          contentKey: item.contentKey,
+                          pinned: !item.pinned,
+                          sourceServerOrigin: item.serverOrigin,
+                        })
+                      ),
+                  });
+                },
+              }}
             />
           );
         }}
@@ -282,29 +304,9 @@ const RecentVirtualList: React.FC<{
               normalizeSidebarItemType(activeItem.type) === "file" ||
               normalizeSidebarItemType(activeItem.type) === "image"
             }
-            pinAction={{
-              pinned: Boolean(activeItem.pinned),
-              onToggle: () => {
-                runPinnedToggleWithTransition({
-                  pinned: !activeItem.pinned,
-                  contentKey: activeItem.contentKey,
-                  // 同步乐观落地放进转场 update：flushSync 提交时新快照已带
-                  // pinned 差异，FLIP 才有内容可动。
-                  runTransition: runSidebarViewTransition,
-                  // 异步服务端同步在转场 update 之外执行；失败时编排函数内部
-                  // 回滚本地乐观 pinned。
-                  syncRemote: () =>
-                    (dispatch as any)(
-                      (updateContentPinned as any)({
-                        spaceId: activeItem.spaceId ?? null,
-                        contentKey: activeItem.contentKey,
-                        pinned: !activeItem.pinned,
-                        sourceServerOrigin: activeItem.serverOrigin,
-                      })
-                    ),
-                });
-              },
-            }}
+            fileCategory={
+              "fileCategory" in activeItem ? activeItem.fileCategory ?? null : null
+            }
             menuAnchorEl={menuAnchorEl}
             onEditTitle={() => {
               setEditSignal({ key: activeItem.contentKey, nonce: Date.now() });
