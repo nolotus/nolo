@@ -216,6 +216,7 @@ export const CODING_SKILL_SEEDS: readonly CodingSkillSeedDef[] = [
       "Verdict: APPROVE / WARNING / BLOCK",
       "```",
       "- APPROVE：无 CRITICAL 或 HIGH，含零 finding 干净 review；WARNING：仅 HIGH；BLOCK：有 CRITICAL。",
+      "- 结论只绑定被审的那份 diff：被审内容此后有任何改动（含只采纳 nit、含只动注释 / 文档）→ 本次结论失效，必须重审；作者自评不构成复核。",
       "不要为了显得严格而拒绝批准。diff 干净就 APPROVE。",
     ].join("\n"),
   },

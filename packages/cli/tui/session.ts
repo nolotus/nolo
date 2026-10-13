@@ -1,15 +1,14 @@
 /**
- * TUI session — barrel re-export.
+ * TUI session — stable public surface.
  *
- * The original monolithic session.ts was split into focused modules:
- *   - sessionTypes.ts    — shared type definitions
- *   - sessionRender.ts   — rendering (status line, welcome, help, context)
- *   - sessionInput.ts    — key handling, tab completion, input classification
- *   - sessionDispatch.ts — state initialization and slash-command dispatch
- *
- * This barrel keeps the public import path (`./session`) stable so existing
- * consumers (readlineWorkspace, tests) don't need to change.
+ * Most implementation lives in focused modules. This barrel also hosts the
+ * very small `/learn` wrapper so the command can reuse the existing chat
+ * action/current dialog without growing a second runtime or Evolution path.
  */
+
+import type { TuiInputResult, TuiState } from "./sessionTypes";
+import { handleTuiInput as handleBaseTuiInput } from "./sessionDispatch";
+import { TUI_LEARN_REVIEW_PROMPT } from "./learnPrompt";
 
 // Types
 export type {
@@ -24,7 +23,6 @@ export type {
 export {
   renderStatusLine,
   renderCreditsDebug,
-  composeStatusLineWithQueue,
   renderWelcome,
   renderPrompt,
   renderTuiHelp,
@@ -32,6 +30,8 @@ export {
   renderKnownAgents,
   formatElapsedSeconds,
 } from "./sessionRender";
+
+const LEARN_COMMAND = "/learn" as const;
 
 // Input handling
 export {
@@ -50,5 +50,48 @@ export {
   DEFAULT_TUI_AGENT_KEY,
   DEFAULT_TUI_SERVER_URL,
   createInitialTuiState,
-  handleTuiInput,
 } from "./sessionDispatch";
+
+/**
+ * `/learn` is deliberately just another chat turn in the same dialog.
+ * That keeps provider/context cache reuse possible and gives the current agent
+ * access to the work it just did. It never creates a new dialog and never
+ * mutates Evolution state by itself.
+ */
+export function handleTuiInput(
+  input: string,
+  state: TuiState,
+  historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+): TuiInputResult {
+  const trimmed = input.trim();
+
+  if (trimmed === LEARN_COMMAND) {
+    if (!state.dialogId) {
+      return {
+        nextState: state,
+        output: "Nothing to review yet. Finish at least one chat turn first.",
+      };
+    }
+    return {
+      nextState: state,
+      output: "",
+      action: {
+        type: "chat",
+        message: TUI_LEARN_REVIEW_PROMPT,
+        agentKey: state.agentKey,
+        runtimeMode: state.runtimeMode,
+        continueDialogId: state.dialogId,
+      },
+    };
+  }
+
+  if (trimmed.match(new RegExp(`^${LEARN_COMMAND}(?:\\s|$)`)) && trimmed !== LEARN_COMMAND) {
+    const value = trimmed.slice(LEARN_COMMAND.length).trim();
+    if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 100) {
+      return { nextState: state, output: "Usage: /learn or /learn <1-100>" };
+    }
+    return { nextState: state, output: "", action: { type: "learn-history", limit: Number(value) } };
+  }
+
+  return handleBaseTuiInput(input, state, historyTurns);
+}

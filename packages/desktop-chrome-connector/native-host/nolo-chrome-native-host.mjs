@@ -2,7 +2,20 @@
 import { createServer } from "node:http";
 import { logUploadAudit, validateUploadFiles } from "../uploadSecurity.mjs";
 
-const port = Number(process.env.NOLO_CHROME_CONNECTOR_PORT || 38947);
+// Which browser build launched this host. Chrome keeps the long-standing default port 38947;
+// Firefox gets an independent endpoint so both can run at the same time without fighting over
+// the port (previously the second host to start exited on EADDRINUSE, and RPC reports could
+// identify the wrong browser).
+const browser = process.env.NOLO_CHROME_CONNECTOR_BROWSER === "firefox" ? "firefox" : "chrome";
+const DEFAULT_PORT = browser === "firefox" ? 38948 : 38947;
+// Chrome honours only NOLO_CHROME_CONNECTOR_PORT; Firefox honours only NOLO_FIREFOX_CONNECTOR_PORT.
+// The Chrome var is deliberately *not* a Firefox fallback: a Chrome-only override must not make a
+// Firefox wrapper collide on Chrome's port. Same rule as connectorPortForBrowser / the RPC client.
+const port = Number(
+  browser === "firefox"
+    ? process.env.NOLO_FIREFOX_CONNECTOR_PORT || DEFAULT_PORT
+    : process.env.NOLO_CHROME_CONNECTOR_PORT || DEFAULT_PORT,
+);
 const connectorToken = process.env.NOLO_CHROME_CONNECTOR_TOKEN || "";
 const ignoreStdinCloseForTest = process.env.NOLO_CHROME_CONNECTOR_IGNORE_STDIN_CLOSE_FOR_TEST === "1";
 const pending = new Map();
@@ -172,9 +185,9 @@ server = createServer(async (req, res) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  process.stderr.write(`[nolo chrome connector] listening on 127.0.0.1:${port}\n`);
+  process.stderr.write(`[nolo ${browser} connector] listening on 127.0.0.1:${port}\n`);
 });
 server.on("error", (error) => {
-  process.stderr.write(`[nolo chrome connector] failed to listen: ${error.message}\n`);
+  process.stderr.write(`[nolo ${browser} connector] failed to listen: ${error.message}\n`);
   process.exit(1);
 });

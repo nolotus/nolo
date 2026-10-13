@@ -469,6 +469,18 @@ export const toolMessageStyles = stylex.create({
     paddingLeft: 0,
     color: "var(--textSecondary)",
   },
+  // F1: actual tool execution location line ("在 {device} · {root} 执行" /
+  // "执行位置未知") rendered at the top of the expanded ToolCallRow body.
+  // Muted quaternary mono so it reads as provenance, not as a primary action.
+  execLocation: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 11,
+    color: "var(--textQuaternary, var(--textTertiary))",
+    marginBottom: 4,
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
+    lineHeight: 1.4,
+  },
   actionDetail: {
     marginTop: 4,
     marginRight: 0,

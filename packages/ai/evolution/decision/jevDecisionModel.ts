@@ -15,6 +15,7 @@ export type JevDecisionModelOptions = {
   endpoint?: string;
   model?: string;
   fetchFn?: typeof fetch;
+  requestTimeoutMs?: number;
 };
 
 type JevChoiceAnswer = {
@@ -258,12 +259,14 @@ export class JevEvolutionDecisionModel implements EvolutionDecisionModel {
   private readonly endpoint: string;
   private readonly model: string;
   private readonly fetchFn: typeof fetch;
+  private readonly requestTimeoutMs: number;
 
   constructor(options: JevDecisionModelOptions) {
     this.apiKey = options.apiKey;
     this.endpoint = options.endpoint ?? DEFAULT_JEV_ENDPOINT;
     this.model = options.model ?? DEFAULT_JEV_MODEL;
     this.fetchFn = options.fetchFn ?? fetch;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 8_000;
   }
 
   async triage(input: EvolutionTriageInput): Promise<EvolutionTriageResult> {
@@ -273,6 +276,7 @@ export class JevEvolutionDecisionModel implements EvolutionDecisionModel {
 
     const response = await this.fetchFn(this.endpoint, {
       method: "POST",
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",

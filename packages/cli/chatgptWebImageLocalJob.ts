@@ -4,6 +4,7 @@
  * No OpenAI Images API — uses npx @steipete/oracle --generate-image, then uploads to Nolo FS.
  */
 
+import { t } from "./tui/i18n";
 import {
   mkdirSync,
   readFileSync,
@@ -99,7 +100,7 @@ export function acquireChatgptWebImageLock(lockPath: string): () => void {
         ? (error as { code?: string }).code
         : undefined;
     if (code === "EEXIST") {
-      throw new Error("ChatGPT 网页生图任务正在进行中，请稍后再试（锁文件占用）");
+      throw new Error(t("chatgptWebImage.jobInProgress"));
     }
     throw error;
   }
@@ -161,10 +162,10 @@ function assertOutputImage(outPath: string) {
   try {
     st = statSync(outPath);
   } catch {
-    throw new Error(`ChatGPT 网页生图未产出文件：${outPath}`);
+    throw new Error(t("chatgptWebImage.noOutputFile", outPath));
   }
   if (!st.isFile() || st.size <= 0) {
-    throw new Error(`ChatGPT 网页生图文件无效或为空：${outPath}`);
+    throw new Error(t("chatgptWebImage.outputFileInvalid", outPath));
   }
 }
 
@@ -222,12 +223,12 @@ async function uploadPngToNoloFs(args: {
       (isRecord(errField) && typeof errField.message === "string" && errField.message) ||
       (typeof body.details === "string" && body.details) ||
       `HTTP ${response.status}`;
-    throw new Error(`上传生图结果到 Nolo FS 失败：${message}`);
+    throw new Error(t("chatgptWebImage.uploadFailed", message));
   }
 
   const fileId = asTrimmedString(body.fileId);
   if (!fileId) {
-    throw new Error("上传生图结果成功但响应缺少 fileId");
+    throw new Error(t("chatgptWebImage.missingUploadFileId"));
   }
 
   // Bare fileId (ULID / id) — same shape as openaiImageHandler files[].fileId
@@ -242,7 +243,7 @@ export async function runChatgptWebImageLocalJob(
 ): Promise<ChatgptWebImageLocalJobResult> {
   const prompt = asTrimmedString(input.prompt);
   if (!prompt) {
-    throw new Error("缺少生图 prompt（payload.meta.prompt 必填）");
+    throw new Error(t("chatgptWebImage.missingPrompt"));
   }
 
   const home = (deps.homedir ?? homedir)();

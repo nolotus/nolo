@@ -1,4 +1,5 @@
 import { clipCompactText } from "core/clipCompactText";
+import { isMediaToolConfirmation } from "ai/lecture/mediaToolConfirm";
 import { isRecord } from "core/isRecord";
 import { asOptionalFiniteNumber } from "core/optionalNumber";
 import { asOptionalTrimmedString } from "core/optionalString";
@@ -346,6 +347,156 @@ export function shouldToolMessageStartCollapsed(toolName?: string | null): boole
   const normalized = asTrimmedString(toolName);
   if (!normalized) return true;
   return !DEFAULT_EXPANDED_TOOL_NAMES[normalized];
+}
+
+/**
+ * 「默认展开」的两类数据条件：有未决交互的卡，与带下载入口的产出卡。
+ *
+ * 1) 报价完成、等待用户选档的媒体工具卡必须默认可见——把「有未决用户交互」
+ *    表达成**数据条件**（job.status === "quoted" 且 rawData 带有效 quote/tiers），
+ *    而不是给 mediaJobTool 一刀切永远展开：任务一旦 start / done / failed，
+ *    条件不成立，行仍按既有策略折叠。
+ * 2) 产出卡带下载入口时同样必须展开：卡片的「下载」入口只挂在展开体里，
+ *    **折叠 = 没有入口**（用户看不到、点不到刚生成的文件）。所以按结果数据
+ *    判定（statusStr === "success"）：
+ *    - exportDocument：结果带非空 downloadUrl（服务端工具真值在顶层，客户端工具
+ *      另把原始 body 放进 rawData 一层，两条路径都兜底）；
+ *    - transcribe：结果已完成（job 形状 status === "done"，客户端工具持久化的是
+ *      job 对象、服务端工具返回 { status:"done", jobId, step }），卡上有「下载 TXT」。
+ *    运行中 / 失败 / 待确认不因此展开：失败由既有失败策略展开，运行中另有进度策略。
+ *
+ * 其余工具一律返回 false（普通完成行维持既有「完成即折叠」策略）。
+ */
+export function shouldKeepToolRowExpanded(args: {
+  toolName?: string | null;
+  rawData?: unknown;
+  statusStr?: string | null;
+}): boolean {
+  if (args.statusStr !== "success") return false;
+  const toolName = asTrimmedString(args.toolName);
+  const data = asRecordOrEmpty(args.rawData);
+  const inner = asRecordOrEmpty(data.rawData);
+
+  if (toolName === "exportDocument") {
+    return Boolean(
+      asOptionalTrimmedString(data.downloadUrl) ??
+        asOptionalTrimmedString(inner.downloadUrl),
+    );
+  }
+
+  if (toolName === "transcribe") {
+    return data.status === "done" || inner.status === "done";
+  }
+
+  if (toolName !== "mediaJobTool") return false;
+  const job = asRecordOrEmpty(data.job ?? inner.job);
+  const tiers = Array.isArray(data.tiers)
+    ? data.tiers
+    : Array.isArray(inner.tiers)
+      ? inner.tiers
+      : [];
+  const hasQuotedTiers =
+    tiers.length > 0 &&
+    tiers.every((tier) => isRecord(tier) && isRecord((tier as any).quote));
+  const hasQuote =
+    isRecord(data.quote) || isRecord(inner.quote) || isRecord(job.quote);
+  return job.status === "quoted" && (hasQuotedTiers || hasQuote);
+}
+
+/**
+ * 媒体任务 start 被确认闸门拦下（等待用户在卡片上点「确认启动」）。
+ *
+ * 三种证据任一成立即视为待确认，而非失败：
+ * - 新载荷：工具 rawData 带 pendingStart（mediaJobTool 拦截时写入）；
+ * - toolPayload.status === "pending"（toolThunks 确认分支）；
+ * - 旧持久化载荷：content 为 { error: "*_requires_confirmation" }（历史 fallback）。
+ */
+export function isMediaJobPendingConfirmation(args: {
+  toolName?: string | null;
+  rawData?: unknown;
+  toolPayload?: unknown;
+}): boolean {
+  const toolName = asTrimmedString(args.toolName);
+  const data = asRecordOrEmpty(args.rawData);
+  if (toolName === "transcribe" || toolName === "translate") {
+    if (
+      data.status === "requires_confirmation" ||
+      data.status === "awaiting_confirmation" ||
+      data.reason === "unauthorized" ||
+      data.reason === "budget_overrun"
+    ) {
+      return true;
+    }
+  }
+  if (toolName !== "mediaJobTool") return false;
+  if (isRecord(data.pendingStart)) return true;
+  if (asRecordOrEmpty(args.toolPayload).status === "pending") return true;
+  return (
+    typeof data.error === "string" && data.error.endsWith("_requires_confirmation")
+  );
+}
+
+/**
+ * 工具结果是否为「等待用户确认」。
+ *
+ * 与 isMediaJobPendingConfirmation 的区别：这里直接吃**原始工具结果**（JSON 字符串
+ * 或对象），供「工具行/投影」判定 status 使用——isMediaJobPendingConfirmation 服务的是
+ * 已解析的 rawData + 卡片渲染。
+ *
+ * 工具白名单先行：只有 transcribe/translate 可能返回确认态，其他工具即使回显同样的
+ * status（甚至完整 typed 形状）也不算——与运行时的 isConfirmedHandoffToolResult 同口径，
+ * 否则任意工具都能让一行停在这里。
+ * typed 协议（ai/lecture/mediaToolConfirm）优先判定；随后兼容历史 status/reason 形态：
+ * 白名单内单有 status:"requires_confirmation" 仍按待确认处理（宁可显示等待，也不要显示完成）。
+ */
+export function toolResultNeedsUserConfirmation(
+  toolName: string | null | undefined,
+  result: unknown,
+): boolean {
+  const name = asTrimmedString(toolName);
+  if (name !== "transcribe" && name !== "translate") return false;
+  const record = parseJsonRecordOrNull(result);
+  const data = isRecord(record) ? record : null;
+  if (!data) return false;
+  if (isMediaToolConfirmation(data)) return true;
+  return (
+    data.status === "requires_confirmation" ||
+    data.status === "awaiting_confirmation" ||
+    data.reason === "unauthorized" ||
+    data.reason === "budget_overrun"
+  );
+}
+
+const parseJsonRecordOrNull = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+/**
+ * 同一条数据条件作用在**整条 tool message** 上（content 可能是 JSON 字符串），
+ * 供 group 折叠策略、ToolCallRow 默认展开、ToolMessageItem 共用，避免媒体特判。
+ */
+export function toolMessageNeedsDefaultExpansion(message: any): boolean {
+  if (!message || message.role !== "tool") return false;
+  const toolName = message.toolName ?? message?.toolPayload?.toolName;
+  const rawData = message.rawData ?? parseJsonRecordOrNull(message.content);
+  // 待确认启动卡同样是未决交互：藏起来等于用户找不到「确认启动」按钮。
+  if (
+    !message.isStreaming &&
+    isMediaJobPendingConfirmation({ toolName, rawData, toolPayload: message.toolPayload })
+  ) {
+    return true;
+  }
+  const statusStr = message.isStreaming
+    ? "running"
+    : message?.toolPayload?.status === "failed" || message?.error
+      ? "failed"
+      : "success";
+  return shouldKeepToolRowExpanded({ toolName, rawData, statusStr });
 }
 
 /** Char threshold: tool body text above this is previewed until user expands. */

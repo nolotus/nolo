@@ -289,8 +289,8 @@ export function buildServerPlatformToolExecutors(args: {
       retryTransient: true,
     });
     // 2026-09-26: deleteMemory 原来只回 memoryDelete flag，TUI gist 无料可
-    // 显示；补 reason / contentKeyword / idsCount 三个投影（预留给 TUI 显示，
-    // 暂未接入——本次移植未带 TUI 侧消费方）。
+    // 显示；补 reason / contentKeyword / idsCount 三个投影（消费方见
+    // toolOutput.ts 的 memoryToolGist "-" 分支）。
     return {
       content: raw,
       metadata: {

@@ -9,6 +9,9 @@ import { refreshOpenAiCodexToken } from "./flows/openai-codex";
 import { anthropicRefresh, cursorRefresh, xaiRefresh } from "../../agent-runtime/oauthProviders";
 import type { OAuthProvider, OAuthRefreshFn } from "./types";
 import type { CredentialMigrationOptions } from "../../agent-runtime/credentialLocationMigration";
+import { createServerAccessTokenPuller } from "./serverAccessTokenPull";
+import { resolveServerSyncConfig } from "./serverSyncConfig";
+import { parseUserIdFromAuthToken } from "../cliEnvHelpers";
 
 const REFRESH_BY_PROVIDER: Partial<Record<OAuthProvider, OAuthRefreshFn>> = {
   chatgpt: refreshOpenAiCodexToken,
@@ -35,11 +38,25 @@ function isOAuthProvider(value: string): value is OAuthProvider {
 export type CreateOAuthApiKeyRefResolverOptions = {
   homeDir?: string;
   migration?: CredentialMigrationOptions;
+  /** 测试/DI：覆盖取 token 通道。 */
+  pullServerAccessToken?: ReturnType<typeof createServerAccessTokenPuller>;
+  /** 测试/DI：覆盖 fetch。 */
+  fetchImpl?: typeof fetch;
+  /** 本机当前登录的 userId；缺省从 profile 的 token 推。 */
+  localUserId?: string;
 };
 
 export function createOAuthApiKeyRefResolver(
   options: CreateOAuthApiKeyRefResolverOptions = {}
 ): ApiKeyRefResolver {
+  // 服务端托管凭据的取 token 通道：本地绝不自己刷新（见 serverAccessTokenPull）。
+  const pullServerAccessToken =
+    options.pullServerAccessToken ??
+    createServerAccessTokenPuller({
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      ...(options.localUserId ? { localUserId: options.localUserId } : {}),
+    });
+
   return async (ref, opts) => {
     const provider = ref.trim();
     if (!isOAuthProvider(provider)) return null;
@@ -50,6 +67,7 @@ export function createOAuthApiKeyRefResolver(
       ...(options.migration ? { migration: options.migration } : {}),
       ...(refresh ? { refresh } : {}),
       ...(opts?.force ? { force: true } : {}),
+      pullFromServer: pullServerAccessToken,
     });
     if (token) return token;
 

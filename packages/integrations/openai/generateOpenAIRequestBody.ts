@@ -15,7 +15,12 @@ import { detectDispatchIntentFromMessages } from "ai/agent/dispatchIntent";
 import { isLoopbackUrl } from "core/localOrigins";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeChatCompletionsBodyForProvider } from "./providerBodyCompatibility";
-import { preserveAgentStateFields } from "../../agent-runtime/openAiCompatibleMessages";
+import {
+  preserveAgentStateFields,
+  resolveReasoningReplayOptions,
+  shouldStripReasoningContentForOutbound,
+} from "../../agent-runtime/openAiCompatibleMessages";
+import type { RequestShapingCounts } from "../../agent-runtime/outboundRequestDiagnostics";
 
 // model 理论上不应为空（schema 已强制必填），但防御性处理 undefined
 const isClaudeModel = (model: string | undefined): boolean =>
@@ -94,6 +99,8 @@ interface BuildRequestBodyOptions {
   presence_penalty?: number;
   max_tokens?: number;
   reasoning_effort?: string;
+  /** 可选 shaping 计数出口（出站诊断）；缺省不统计，也不影响 body。 */
+  shapingCounts?: RequestShapingCounts;
 }
 
 const shouldInjectLlamaCppThinkingToggle = (agentConfig: Agent): boolean => {
@@ -139,7 +146,10 @@ const normalizeChatCompletionsContent = (
   return JSON.stringify(content);
 };
 
-const sanitizeChatCompletionsMessage = (message: Message & Record<string, any>) => {
+const sanitizeChatCompletionsMessage = (
+  message: Message & Record<string, any>,
+  options?: { provider?: string; model?: string; shapingCounts?: RequestShapingCounts },
+) => {
   const sanitized: Record<string, any> = {
     role: message.role,
     content: normalizeChatCompletionsContent(message.content),
@@ -148,7 +158,33 @@ const sanitizeChatCompletionsMessage = (message: Message & Record<string, any>) 
   const name = asOptionalTrimmedString(message.name);
   if (name) sanitized.name = name;
 
-  return preserveAgentStateFields(message, sanitized);
+  // 这里是 Web/RN 客户端 agent loop 的实际 body 构造器：apiSource=custom 的
+  // agent 走 server-proxy（packages/ai/chat/fetchUtils.ts 的 resolveAgentCallPlan），
+  // body 由服务端 chatProxyRouting 逐字转发、不做 sanitize，所以 DeepSeek
+  // thinking 要求的「历史工具轮必须回传 reasoning_content」只能在这一层补，
+  // 与服务端 loop / 本地直连保持同一份判据（resolveReasoningReplayOptions，
+  // 三个出站 seam 的唯一决策点）。
+  //
+  // strip 与 replay 两半都由这一层决定：body 逐字转发意味着服务端不会再
+  // 兜底丢弃 DeepSeek 系拒绝的字符串 `reasoning_content`（serde
+  // "expected a sequence"），所以这里也必须自己算 strip（与另两条 seam 同判据：
+  // shouldStripReasoningContentForOutbound + resolveReasoningReplayOptions 的
+  // 第三参，保证 strip 优先于注入）。
+  const shouldStripReasoning = shouldStripReasoningContentForOutbound(
+    options?.provider,
+    options?.model,
+  );
+  return preserveAgentStateFields(message, sanitized, {
+    targetProvider: options?.provider,
+    targetModel: options?.model,
+    stripReasoningContent: shouldStripReasoning,
+    ...(options?.shapingCounts ? { shapingCounts: options.shapingCounts } : {}),
+    ...resolveReasoningReplayOptions(
+      options?.provider,
+      options?.model,
+      shouldStripReasoning,
+    ),
+  });
 };
 
 const buildRequestBody = (options: BuildRequestBodyOptions): any => {
@@ -163,11 +199,16 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
     presence_penalty,
     max_tokens,
     reasoning_effort,
+    shapingCounts,
   } = options;
 
   // 只保留上游协议允许的字段，避免 UI/runtime 元数据泄漏到 chat-completions 请求体。
   const cleanedMessages = messages.map((message) =>
-    sanitizeChatCompletionsMessage(message as Message & Record<string, any>)
+    sanitizeChatCompletionsMessage(message as Message & Record<string, any>, {
+      provider: providerName,
+      model,
+      ...(shapingCounts ? { shapingCounts } : {}),
+    })
   );
 
   const bodyData: any = {
@@ -222,7 +263,13 @@ export const generateOpenAIRequestBody = (
   messages: Message[],
   contexts?: Contexts,
   stableMessages: Message[] = [],
-  prependSystemPrompt = true
+  prependSystemPrompt = true,
+  /**
+   * 可选 shaping 计数出口（出站诊断）：把「本次实际注入的占位 / 剥离的 reasoning /
+   * 工具轮缺 reasoning」写进调用方给的收集器。**不进入 request body**，缺省时
+   * 输出与不传时逐字节相同。
+   */
+  shapingCounts?: RequestShapingCounts,
 ) => {
   // 0. 解析最终 model 名：统一用 model 字段，不再有 customModelName
   //    model 在 platform 和 custom 模式下都是同一个字段
@@ -287,6 +334,7 @@ export const generateOpenAIRequestBody = (
     presence_penalty: agentConfig.presence_penalty,
     max_tokens: agentConfig.max_tokens,
     reasoning_effort: agentConfig.reasoning_effort,
+    ...(shapingCounts ? { shapingCounts } : {}),
   });
 
   if (shouldInjectLlamaCppThinkingToggle(agentConfig)) {

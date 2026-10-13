@@ -143,17 +143,57 @@ function buildRuntimeSubjectRefs(runtimeContext?: Record<string, any> | null): D
   return mergeSubjectRefs(runtimeContext?.subjectRefs);
 }
 
+/**
+ * 既有记录展开前剔除自引用血缘字段（历史脏数据：parentDialogId/rootDialogId
+ * 等于自身 id）。只剔除自引用值，真实父值原样保留；不修改存储中的旧记录，
+ * 仅保证本次写出的新版本不再携带自引用。
+ *
+ * 为什么「自引用归一」只做在这里（本文件的本地 runtime 写入路径）：
+ * 本地 runtime 写入是自引用脏数据的来源——CLI TUI 续聊等场景会把调用方的
+ * parentDialogId 设成该对话自身 id，直接落库。服务端
+ * packages/server/handlers/agentRun/saveDialog.ts 另有一份独立的 async
+ * buildDialogLineageFields，它不会产生自引用（create 路径只对新对话生效、
+ * 新对话尚无自身 id 可引用；update 路径保留既有值而不重新派生），因此本次
+ * 不对齐、不修改服务端文件（不在本次 diff 内，保持改动面收敛）。
+ * 若将来服务端也会写入自引用，需要在本文件与 saveDialog.ts 同步归一，
+ * 否则两端口径会分叉。
+ */
+function withoutSelfLineage(record: DialogRecord, dialogId: string): DialogRecord {
+  const next = { ...record };
+  for (const field of ["parentDialogId", "rootDialogId"] as const) {
+    if (asOptionalTrimmedString(next[field]) === dialogId) delete next[field];
+  }
+  return next;
+}
+
+/**
+ * 血缘字段（parentDialogId / rootDialogId）的写入口径。
+ *
+ * - 保存「某对话自己的 turn」时，调用方常把 parentDialogId 设成该对话自身 id
+ *   （CLI TUI 续聊：deps.parentDialogId = state.dialogId）。这不是父引用，写出去
+ *   就是 parentDialogId === 自身 id 的自引用脏数据，必须丢弃。
+ * - root 回退链同样不得回落到自身：existing 上残留的自引用值视为无效。
+ * - 自引用归一只在本地 runtime 写入路径（本文件）执行，理由与服务端对齐策略见
+ *   withoutSelfLineage 注释；服务端 saveDialog.ts 的 buildDialogLineageFields
+ *   不产生自引用，未同步此处逻辑。
+ */
 function buildDialogLineageFields(args: {
   input: AgentRuntimeSaveTurnInput;
   existingDialog?: DialogRecord | null;
+  dialogId: string;
 }) {
+  const selfDialogId = asOptionalTrimmedString(args.dialogId);
   const inheritedFromDialogKey = asOptionalTrimmedString(args.input.inheritedFromDialogKey);
-  const parentDialogId = asOptionalTrimmedString(args.input.parentDialogId);
+  const rawParentDialogId = asOptionalTrimmedString(args.input.parentDialogId);
+  const parentDialogId =
+    rawParentDialogId && rawParentDialogId !== selfDialogId ? rawParentDialogId : undefined;
   if (!inheritedFromDialogKey && !parentDialogId) return {};
+  const existingParentDialogId = asOptionalTrimmedString(args.existingDialog?.parentDialogId);
+  const existingRootDialogId = asOptionalTrimmedString(args.existingDialog?.rootDialogId);
   const rootDialogId =
-    asOptionalTrimmedString(args.existingDialog?.rootDialogId) ??
-    asOptionalTrimmedString(args.existingDialog?.parentDialogId) ??
-    parentDialogId;
+    [existingRootDialogId, existingParentDialogId, parentDialogId].find(
+      (id) => id && id !== selfDialogId,
+    ) ?? undefined;
   return {
     ...(inheritedFromDialogKey ? { inheritedFromDialogKey } : {}),
     ...(parentDialogId ? { parentDialogId } : {}),
@@ -342,7 +382,7 @@ export function buildAgentRuntimeDialogWritePlan(args: {
     args.existingDialog,
   );
   const dialogRecord = {
-    ...asRecordOrEmpty(args.existingDialog),
+    ...withoutSelfLineage(asRecordOrEmpty(args.existingDialog), dialogId),
     id: dialogId,
     dbKey: dialogKey,
     type: "dialog",
@@ -369,6 +409,7 @@ export function buildAgentRuntimeDialogWritePlan(args: {
     ...buildDialogLineageFields({
       input: args.input,
       existingDialog: args.existingDialog,
+      dialogId,
     }),
     ...(typeof args.input.result.toolCallCount === "number"
       ? { toolCallCount: args.input.result.toolCallCount }

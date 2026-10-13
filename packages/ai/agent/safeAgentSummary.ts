@@ -15,6 +15,10 @@ import {
 import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
 import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
 import type { AgentQuota } from "./quotaSnapshot";
+import {
+  resolveDefaultAgentTier,
+  type AgentTier,
+} from "./agentTier";
 
 export {
   resolveAgentSelectionPriority,
@@ -139,6 +143,12 @@ export interface SafeAgentSummary {
   handle: string | null;
   introduction: string | null;
   model: string | null;
+  /**
+   * 能力档弱先验（fast/balanced/top/unknown），由 model 名解析（见 ./agentTier）。
+   * 不代表领域能力；unknown = 模型名没给出信号。这是对所有用户的通用默认值；用户偏好（记忆/当次指令）的覆盖由编排提示词
+   * 处理，不在摘要层。
+   */
+  tier: AgentTier;
   provider: string | null;
   apiSource: string | null;
   cliProvider: string | null;
@@ -463,6 +473,9 @@ export function toSafeAgentSummary(
   const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
   const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
 
+  // 默认档位：纯函数按 model 名解析，不读用户偏好（覆盖由编排提示词负责）。
+  const { tier } = resolveDefaultAgentTier(record?.model);
+
   return {
     id,
     ...(agentKey !== undefined ? { agentKey } : {}),
@@ -471,6 +484,7 @@ export function toSafeAgentSummary(
     handle,
     introduction,
     model,
+    tier,
     provider,
     apiSource,
     cliProvider,
@@ -513,6 +527,8 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "agentKey",
   "name",
   "model",
+  // 能力档弱先验（unknown = 模型名没给出信号，不推断强弱）。
+  "tier",
   "provider",
   "apiSource",
   "billingSource",
