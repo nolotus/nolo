@@ -319,6 +319,54 @@ export async function writeAgentRecord(args: {
   }
 }
 
+/**
+ * 变更（delete / update）成功后，让本地缓存不再服务改动前的记录。
+ *
+ * 选择「失效」而非「回写」：delete 没有可回写的值；update 走 refreshAgentRecordCache。
+ * 这里只删除指定 key 的缓存条目，不碰其他 agent，也不写任何「永久失效」标记——
+ * 下次读取自然走远端并重新缓存；离线时缓存缺失的 key 本来就读不到，
+ * 而未改动的 agent 缓存条目保持原样（离线优先语义不变）。
+ * 尽力而为：缓存层故障不能让已经成功的远端变更报失败。
+ */
+export async function invalidateAgentRecordCache(args: {
+  db: CliKvDb;
+  keys: string[];
+}) {
+  const invalidated: string[] = [];
+  for (const key of new Set(args.keys.filter((k) => typeof k === "string" && k))) {
+    try {
+      await args.db.del(key);
+      invalidated.push(key);
+    } catch {
+      // 缓存 key 不存在 / 缓存不可用：忽略
+    }
+  }
+  return invalidated;
+}
+
+/**
+ * update 成功后用本次写入远端的记录原地更新缓存；写缓存失败则退化为失效，
+ * 保证不会残留改动前的旧字段。
+ */
+export async function refreshAgentRecordCache(args: {
+  db: CliKvDb;
+  agentKey: string;
+  record: Record<string, any>;
+  serverOrigin: string;
+}) {
+  try {
+    await args.db.put(args.agentKey, {
+      ...args.record,
+      dbKey: args.agentKey,
+      key: args.record?.key || args.agentKey,
+      serverOrigin: args.serverOrigin,
+      cachedAt: Date.now(),
+    });
+  } catch {
+    await invalidateAgentRecordCache({ db: args.db, keys: [args.agentKey] });
+  }
+}
+
 export async function resolveAgentRecordFromHybridStore(args: {
   agentInput: string;
   cliArgs?: string[];

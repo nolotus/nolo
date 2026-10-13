@@ -7,6 +7,7 @@ import {
   buildCreatedAgentRecord,
   normalizeAgentRecordForOutput,
   parseAgentUpdateArgs,
+  refreshAgentRecordCache,
   resolveAgentRecordFromHybridStore,
   sanitizeAgentRecordForCliOutput,
   writeAgentRecord,
@@ -170,10 +171,10 @@ export async function runAgentUpdateCommand(
       userId,
       record: built.nextRecord,
     });
-    await db.put(built.agentKey, {
-      ...built.nextRecord,
-      dbKey: built.agentKey,
-      key: built.nextRecord?.key || built.agentKey,
+    await refreshAgentRecordCache({
+      db,
+      agentKey: built.agentKey,
+      record: built.nextRecord,
       serverOrigin: built.serverUrl,
     });
     clearCliLocalRuntimePreparedAgentCache();
